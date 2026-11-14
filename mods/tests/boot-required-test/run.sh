@@ -44,22 +44,28 @@ install() {  # install <case> <role>
   python3 -I "$here/fixtures.py" make "$d" "$1" "$2" && cp "$F/BootRequiredFixture.dll" "$d/"
 }
 
-# kiln.json's boot.testRefuse: {"<mod id>": "<collector>", ...} for the installed cases that use it, or removed
+# kiln.json's boot.testRefuse and boot.testFault: {"<mod id>": "<collector>", ...} for the installed cases that use them, or removed
 refuse() {
   local map=""
   for c in "$@"; do
-    local r
+    local r f
     r=$(python3 -I "$here/fixtures.py" refuse "$c")
-    [[ -n $r ]] && map+="boot-req-$c=$r "
+    f=$(python3 -I "$here/fixtures.py" fault "$c")
+    [[ -n $r ]] && map+="testRefuse:boot-req-$c=$r "
+    [[ -n $f ]] && map+="testFault:boot-req-$c=$f "
   done
   python3 -I - "$L/kiln/kiln.json" $map <<'PY'
 import json, sys
 p = sys.argv[1]
 j = json.load(open(p))
 j.pop("boot", None)
-pairs = dict(a.split("=", 1) for a in sys.argv[2:])
-if pairs:
-    j["boot"] = {"testRefuse": pairs}
+boot = {}
+for a in sys.argv[2:]:
+    switch, pair = a.split(":", 1)
+    mod, collector = pair.split("=", 1)
+    boot.setdefault(switch, {})[mod] = collector
+if boot:
+    j["boot"] = boot
 json.dump(j, open(p, "w"), indent=2)
 PY
 }
@@ -103,8 +109,10 @@ verdict() {  # verdict <folder> <role> [<case>]
       [[ -n $stop && $stop != *"before the game's entry point"* ]] && echo "PASS $c stopped after the entry point, at the load that found it" ||
         echo "FAIL $c did not stop after the entry point"
       grep -q "boot-required-test: boot-req-$c loaded" "$log" && echo "INFO $c its OnLoad ran before the stop" || echo "PASS $c its OnLoad never ran"
-      grep -qiE "saveload: .*loaded|world .* loaded|player .* joined" "$log" && echo "FAIL $c a world or save finished loading" ||
-        echo "PASS $c no world or save finished loading"
+      # a stop at world load: the server world may have begun to tick (its registries load then), no player is in it yet
+      grep -q "tick: server world .* started" "$log" && echo "INFO $c the server world had begun to load (its first ticks) when it stopped"
+      grep -qiE "player .* (joined|connected)" "$log" && echo "FAIL $c a player was in the world before the stop" ||
+        echo "PASS $c no player was in the world"
     else
       grep -q "boot-required-test: boot-req-$c loaded" "$log" && echo "FAIL $c its OnLoad ran" || echo "PASS $c its OnLoad never ran"
       grep -q "boot: generation 1 published" "$log" && echo "FAIL $c generation 1 was published"
@@ -125,6 +133,9 @@ verdict() {  # verdict <folder> <role> [<case>]
     grep -q "resource patch boot-req-patches-comma/xp: .*experienceNeedPerLevel\[2\]\" = 2600" "$log" &&
       echo "PASS optional patches-comma its patch from a file with comments and trailing commas was applied" ||
       echo "FAIL optional patches-comma its patch was not applied"
+    grep -q "new content: item .* not registered in the server world: lab switch boot.testFault" "$log" &&
+      echo "PASS optional content-bind runs without its item (the world refused it at registration)" ||
+      echo "FAIL optional content-bind: no refused registration in kiln.log"
   fi
 }
 
