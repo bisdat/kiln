@@ -11,7 +11,12 @@ public sealed class SystemsTestPeerMod : Mod
     private ProgramWrap? _wrap;
     private bool _done;
 
-    public override void OnLoad() => Context.Tick.Post += OnPost;
+    public override void OnLoad()
+    {
+        // the boot after the restart (systems-test's native part wrote its mark before the stop): nothing to do
+        _done = File.Exists(Path.GetFullPath(Path.Combine(Context.DataDirectory, "..", "systems-test-mark.txt")));
+        Context.Tick.Post += OnPost;
+    }
 
     private void OnPost(in TickInfo tick)
     {
@@ -20,7 +25,6 @@ public sealed class SystemsTestPeerMod : Mod
         if (_t0 == 0)
         {
             if (tick.Step % 25 != 0 || !File.Exists(control)) return;
-            if (File.Exists(Path.GetFullPath(Path.Combine(Context.DataDirectory, "..", "systems-test-mark.txt")))) { _done = true; return; }
             _t0 = tick.Step;
             var r = Systems.Wrap("fuel_setup");
             var replaced = r.Wrap?.Replace((ref Slice s) => s.RunOriginal());

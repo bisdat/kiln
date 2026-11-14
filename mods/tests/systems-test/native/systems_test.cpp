@@ -27,7 +27,9 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "kiln_api.h"
@@ -384,8 +386,10 @@ EntitySum entity_sum() {
     return t;
 }
 
-// The mark: an After on fuel_setup writes one entity's Fuel (its current value to a third of its maximum) through its
-// write slot, marked; the next boot finds the entity by position and reads it back from the save.
+// The mark: an After on fuel_setup writes one entity's Fuel (a quarter of its maximum away from the current value at
+// least: three quarters of it, or one quarter) through its write slot, marked; the next boot finds the entity by
+// position and reads it back from the save. The entity is one whose Fuel the game left alone for 24 steps, with a
+// maximum of 10 charges or more, so what a well fills or a can drains until the save stays far below the gap.
 std::string state_path() {
     char dir[1024];
     size_t len = 0;
@@ -403,6 +407,9 @@ struct {
     std::atomic<int32_t> before{0}, value{0}, max{0};
     std::atomic<int> rc{-1};
     KilnHandle handle = 0;
+    std::mutex m;                                // the candidates: Fuel at first sight
+    std::unordered_map<uint32_t, int32_t> seen;
+    uint64_t first_step = 0;
 } g_mark;
 uint32_t KILN_CALL each_mark(uint64_t* iter, uint32_t, KilnEntity e, void* user) {
     auto* s = static_cast<KilnGameSlice*>(user);
@@ -415,8 +422,18 @@ uint32_t KILN_CALL each_mark(uint64_t* iter, uint32_t, KilnEntity e, void* user)
     int32_t cur = 0, max = 0;
     std::memcpy(&cur, fuel + 8, 4);
     std::memcpy(&max, fuel + 12, 4);
-    const int32_t value = max / 3;
-    if (max < 30 || (cur - value < 10 && value - cur < 10)) return 0;  // a well whose value moves visibly
+    if (max < 640) return 0;
+    const int32_t value = cur < max / 2 ? max / 4 * 3 : max / 4;
+    {
+        std::lock_guard<std::mutex> lock(g_mark.m);
+        if (g_mark.first_step == 0) g_mark.first_step = s->step;
+        if (s->step < g_mark.first_step + 24) {
+            if (g_mark.seen.size() < 512) g_mark.seen.emplace(e, cur);
+            return 0;
+        }
+        const auto it = g_mark.seen.find(e);
+        if (it == g_mark.seen.end() || it->second != cur) return 0;  // new, or the game changed it meanwhile
+    }
     int expected = 0;
     if (!g_mark.done.compare_exchange_strong(expected, 1)) return 1;
     g_mark.rc = W->game_slice_mark(s, iter, KILN_GAME_LIST_WRITE, 0);
@@ -493,7 +510,9 @@ void entity_phase(uint64_t n) {
             if (fuel && size >= 16) std::memcpy(&now, fuel + 8, 4);
             KilnVec3 pos{};
             const bool where = e && W->position(e, &pos) == KILN_OK;
-            const bool ok = g_mark.done && g_mark.rc == KILN_OK && where && now >= g_mark.value && now < g_mark.value + 400;
+            const int32_t value = g_mark.value.load(), before = g_mark.before.load();
+            const bool ok = g_mark.done && g_mark.rc == KILN_OK && where && std::abs(now - value) < 400 &&
+                            std::abs(now - value) < std::abs(now - before);
             row(ok, "mark: an After on fuel_setup wrote entity %u's Fuel %d -> %d (max %d), marked (%d); now %d",
                 e, g_mark.before.load(), g_mark.value.load(), g_mark.max.load(), g_mark.rc.load(), now);
             if (ok) {
@@ -535,8 +554,7 @@ void restart_phase(uint64_t n) {
     int32_t cur = -1;
     if (fuel && size >= 16) std::memcpy(&cur, fuel + 8, 4);
     const bool close = best_d < 0.5;
-    const bool kept = cur >= g_restart.written && cur < g_restart.seen + 800 &&
-                      (std::abs(cur - g_restart.before) > std::abs(cur - g_restart.seen));
+    const bool kept = cur >= 0 && std::abs(cur - g_restart.before) > std::abs(cur - g_restart.seen);
     row(close && kept, "mark: a marked Fuel write is in the save after restart: the well at %.1f/%.1f/%.1f (entity %u, "
         "%.2f m off) holds %d; written %d, %d at the last check before the stop, %d before the write", g_restart.x,
         g_restart.y, g_restart.z, best, best_d, cur, g_restart.written, g_restart.seen, g_restart.before);
