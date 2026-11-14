@@ -378,6 +378,14 @@ void nc_drops_table(const Entry& table);           // a drop table seen for the 
 bool nc_icon_alias(const uint8_t from[16], const uint8_t to[16]);  // false without the UI texture hook
 uint32_t nc_undefine_owner(KilnOwner owner);       // every definition of owner set aside (content sync: leave)
 uint32_t nc_forget_unbound(KilnOwner owner);       // a boot generation not published: owner's definitions taken out (no world yet)
+// A boot generation's definition ("boot:<mod>" owner) that did not register: {mod, name, why}. store_mutex held by the caller.
+struct BootFailed {
+    std::string mod, key, why;
+};
+void nc_boot_failed(std::vector<BootFailed>* out);
+// content.cpp: a required boot mod's definitions that did not register in a world stop the start (kiln.boot activation_fault),
+// each mod once. Called after a registration pass, with no lock of kiln.content held.
+void boot_late_check();
 std::string nc_info_json(const std::string& refs_json);  // v4 info(): languages, placeholders, distribution
 // kiln.assets (any side; client for icons), looked up lazily: it may register after kiln.content. nullptr = none yet.
 const KilnAssetsApi* assets_api();

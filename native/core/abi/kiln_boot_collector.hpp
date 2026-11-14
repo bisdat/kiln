@@ -144,6 +144,19 @@ inline bool entry_error(const Input* in, const std::string& mod, const std::stri
     return in ? entry_error(*in, mod, kind, key, why) : true;
 }
 
+// What a collector finds only after the entry point (a merge, a build, a registration at a world's load) of a required
+// participant: reported once per mod with activation_fault, which stops the start. The collector keeps the prepare's required
+// set (Input::required) and asks take() under its own lock; the call to activation_fault is made with no lock held.
+struct LateFaults {
+    std::set<std::string> required, said;
+    void reset(const std::set<std::string>& r = {}) {
+        required = r;
+        said.clear();
+    }
+    // true once for a required mod: report it now
+    bool take(const std::string& mod) { return required.count(mod) != 0 && said.insert(mod).second; }
+};
+
 template <size_t N>
 inline void put(char (&dst)[N], const std::string& s) {
     size_t n = std::min(s.size(), N - 1);

@@ -87,13 +87,13 @@ start) is not the mod's boot content and stays lenient. What each collector chec
 
 | Collector | Refuses a required participant for |
 |---|---|
-| assets | `assets/assets.json` (or a boot document) that cannot be read or is not JSON, any entry error (`entries[<i>]`: a bad GUID or type, a file that cannot be read or lies outside the mod, a patch blob, a refused put), a cooked file this game's cook did not make |
+| assets | `assets/assets.json` (or a boot document) that cannot be read or is not JSON, any entry error (`entries[<i>]`: a bad GUID or type, a file that cannot be read or lies outside the mod, a patch blob, a refused put), a cooked file this game's cook did not make; on a game client, after the entry point (activation fault): a texture override or a game item's icon queued until the game's resources come up that then fails |
 | worldtables | a `blocks/*.json` or `blocks.tables.json` that cannot be read or is not JSON, any world-table block error; after the entry point (activation fault): a block the merge cannot apply (an unknown material or item, no room), or kiln.worldtables going off |
-| content | every content document error (as for every participant: a refusal drops an optional mod whole) |
-| skills | a `skills/*.json` that cannot be read or is not JSON, `gameTree` that is not `{"nodes": [...]}`, a node that is refused (its GUID, its fields, a GUID another mod defines), a boot node without a GUID |
+| content | every content document error (as for every participant: a refusal drops an optional mod whole); after the entry point (activation fault): an item, recipe or clone of the mod that a world does not register when it loads its registries (the stop comes at world load) |
+| skills | a `skills/*.json` that cannot be read or is not JSON, `gameTree` that is not `{"nodes": [...]}`, a node that is refused (its GUID, its fields, a GUID another mod defines), a boot node without a GUID; after the entry point (activation fault): a node the first tree build leaves out (an unknown `like`, `from` or `to`, a GUID whose id is a game node's or another mod's) or a tree that does not build at all (the stop comes when a world loads its skill tree, before the game reads it) |
 | knowledge | a `blocks/*.json` or `quests/*.json` (and `quests/generated/`) that cannot be read or is not JSON, an `assets/cook.json` that is not JSON; after the entry point (activation fault): the mod's quests, knowledge or NPCs that the build leaves out, or a build that serves nothing |
-| vfx | a blocks file left out (a link, over a limit, cannot be opened, nested too deep), any VFX or material error of the cook, a mod refused by the budget or a manifest rule (a game client only: a server prepares an empty plan) |
-| patches | every patch error (as for every participant), and a blocks file that names `resourcePatches` and cannot be read or parsed |
+| vfx | a game client: a blocks file left out (a link, over a limit, cannot be opened, nested too deep), any VFX or material error of the cook, a mod refused by the budget or a manifest rule, and VFX or materials of the mod (its files or staged) while this start builds none of that kind (kiln.vfx off by `kiln/config/vfx.json`, a game build whose particle or material layouts changed, no kiln.assets, a failed build; staged ones while the client gate holds `mods.boot.vfx`). A dedicated server builds no VFX by design (each player's game builds them, with the same boot mod): its vfx collector prepares an empty plan and refuses nothing for this; kiln.log says so for a required mod with staged VFX |
+| patches | every patch error (as for every participant), and a blocks file that names `resourcePatches` and cannot be read or is not JSON. Blocks files are read as Kiln.Blocks reads them (comments and trailing commas: `kiln_blocks_json.hpp`) |
 
 The stop line names the entry: `boot: the start stops before the game's entry point (exit code 0x4B01): <mod>:
 <kind> <key>: collector <id>: <reason>; state/boot.json lists every boot mod's state and issue`.
@@ -114,7 +114,10 @@ contract stop the start instead.
 ## activation_fault
 A collector whose published content cannot be applied after the entry point (kiln.content's `patches`, when a
 resource patch cannot be written at `when_resources_ready`; kiln.worldtables, a required mod's block its merge cannot
-apply; kiln.knowledge, a required mod's quests its build leaves out) reports it:
+apply; kiln.knowledge, a required mod's quests its build leaves out; kiln.skills, a required mod's node the first tree
+build leaves out; kiln.content, a required mod's definition a world does not register; kiln.assets on a client, a
+required mod's texture that cannot be applied) reports it. The helper `kiln::boot::LateFaults` keeps the prepare's
+required set and says once per mod when to report:
 `kiln::boot::activation_fault(api, owner, mod, kind, key, reason)`. kiln.boot records an issue (code
 `ActivationFault`, phase `activation`), and the mod's state and the phase status become `ACTIVATION_FAULT`; nothing is
 undone. For a mod whose boot content is required the call does not return: the state files are written and the
@@ -161,8 +164,11 @@ code. kiln.log ends with `boot: the start stops before the game's entry point (e
 - Lab: `mods/tests/boot-definitions-test` (the five kinds on a first start, the same ids on the next start, and with the
   fault mods `boot-callback-fail` and `boot-dependent` their exclusion), `mods/tests/boot-patches-test` and
   `boot-patches-other` (resource patches), `mods/tests/boot-gamedata-test` (the snapshot against the live reader),
-  `mods/tests/boot-required-test` (fifteen fixture mods, one bad entry each for a collector: required, each start stops
-  with exit status 1 and a stop line naming the entry; optional, one start with all of them goes on and skips them).
+  `mods/tests/boot-required-test` (eighteen fixture mods, one bad entry each for a collector: required, each start stops
+  with exit status 1 and a stop line naming the entry, before the game's entry point or, for what only the game's data or
+  a world shows, when it loads; a resource patch in a file with comments and trailing commas goes on; optional, one start
+  with all of them goes on and skips them). Client only: the guided check `08-boot.required-client` with the fixtures
+  `run.sh client` makes (a texture override, VFX while kiln.vfx is off).
 
 ## Lab switches
 - **`boot.testRefuse`** (kiln.json, honoured only with `"policy": "any"`; a release never sets it):

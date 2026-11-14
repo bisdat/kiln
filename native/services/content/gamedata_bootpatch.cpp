@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "gamedata.h"
+#include "kiln_blocks_json.hpp"
 #include "kiln_boot_collector.hpp"
 #include "refs.h"
 #include "services/kiln_assets.h"
@@ -195,10 +196,11 @@ std::string index_of(const std::string& path) {  // its indices, in order
 }
 bool overlap(const std::string& a, const std::string& b) { return a == b || a.find('*') != std::string::npos || b.find('*') != std::string::npos; }
 
-// The "resourcePatches" sections of the mods' blocks files, as documents, in load order (files by name within a mod).
-// A file that is not JSON is another reader's to report (Kiln.Blocks reads the same files), except for a required participant
-// (kiln_boot_collector.hpp, entry_error): a blocks file of its own that cannot be read, or that names "resourcePatches" and is not
-// JSON, refuses it (Refusal, turned into a refusal by prepare_boot).
+// The "resourcePatches" sections of the mods' blocks files, as documents, in load order (files by name within a mod). The files are
+// read as every reader of blocks files reads them (kiln_blocks_json.hpp: comments, trailing commas). A file that is not such JSON is
+// another reader's to report (Kiln.Blocks reads the same files), except for a required participant (kiln_boot_collector.hpp,
+// entry_error): a blocks file of its own that cannot be read, or that names "resourcePatches" and is not JSON, refuses it (Refusal,
+// turned into a refusal by prepare_boot).
 std::vector<kiln::boot::Doc> file_docs(const kiln::boot::Input* boot) {
     namespace fs = std::filesystem;
     std::vector<kiln::boot::Doc> out;
@@ -221,8 +223,8 @@ std::vector<kiln::boot::Doc> file_docs(const kiln::boot::Input* boot) {
             }
             const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
             if (text.find("resourcePatches") == std::string::npos) continue;
-            const nlohmann::json j = nlohmann::json::parse(text, nullptr, false, true);
-            if (!j.is_object() && boot) kiln::boot::entry_error(*boot, id, kKind, label, "kiln.content: " + label + ": its resourcePatches cannot be read: not valid JSON for this reader (comments are allowed, a trailing comma is not)");
+            const nlohmann::json j = kiln::blocks_json::parse_relaxed(text);
+            if (!j.is_object() && boot) kiln::boot::entry_error(*boot, id, kKind, label, "kiln.content: " + label + ": not valid JSON (it names resourcePatches)");
             if (!j.is_object() || !j.contains(kKind)) continue;
             if (!j[kKind].is_object()) {
                 out.push_back({id, "", nlohmann::json()});  // refused by its shape, with the mod named

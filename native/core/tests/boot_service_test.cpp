@@ -1670,6 +1670,86 @@ void gamedata_cases() {
 }
 }  // namespace
 
+// The patches collector reads blocks files as Kiln.Blocks and worldtables do (kiln_blocks_json.hpp): comments and trailing commas.
+std::vector<fs::path> t_patch_mods;
+std::vector<std::filesystem::path> kc::mod_folder_list() { return t_patch_mods; }
+
+kiln::boot::Input input_of(const json& owners) {
+    const std::string s = json{{"schema", 1}, {"owners", owners}, {"excluded", json::array()}}.dump();
+    KilnBootPrepareInputV1 p{};
+    p.size = sizeof p;
+    p.canonical_ir_json = KilnStr{s.data(), s.size()};
+    return kiln::boot::parse(&p);
+}
+
+void patch_jsonc_cases() {
+    t_case = "patch-jsonc";
+    const int f0 = t_fail;
+    namespace bj = kiln::blocks_json;
+    CHECK(bj::parse_relaxed("{\"a\": [1, 2,], // two\n \"b\": {\"c\": 3,},}") == json::parse(R"({"a":[1,2],"b":{"c":3}})"));
+    CHECK(bj::parse_relaxed("/* x, */ {\"s\": \"a,]\",}") == json::parse(R"({"s":"a,]"})"));  // a comma inside a string stays
+    CHECK(bj::parse_relaxed("[,]").is_discarded() && bj::parse_relaxed("{\"a\": 1,,}").is_discarded());
+    CHECK(bj::parse_relaxed("{ /* unclosed").is_discarded() && bj::parse_relaxed("{ not json").is_discarded());
+    CHECK(bj::parse_relaxed(std::string(65, '[') + std::string(65, ']')).is_discarded());
+    // mods with a patches file in JSONC (comments, trailing commas): required and optional both read it
+    const fs::path root = t_root / "patch-jsonc";
+    const std::string jsonc = "{\n \"format\": 1, // the file\n \"resourcePatches\": {\n  \"xp\": {\"resource\": \"82706b40-61b1-4b8f-8b23-dcec6971bda1\", "
+                              "\"type\": \"keen::BalancingTable\", \"set\": {\"experienceNeedPerLevel[2]\": 2600,},},\n },\n}\n";
+    auto mod = [&](const std::string& id, const std::string& text) {
+        write_mod(root / id, {{"id", id}, {"boot", "required"}});
+        fs::create_directories(root / id / "blocks");
+        std::ofstream(root / id / "blocks" / "p.json") << text;
+        return root / id;
+    };
+    t_patch_mods = {mod("req-comma", jsonc), mod("opt-comma", jsonc)};
+    const auto in = input_of(json::array({{{"id", "req-comma"}, {"required", true}}, {{"id", "opt-comma"}, {"required", false}}}));
+    std::vector<kiln::boot::Doc> docs;
+    bool threw = false;
+    try {
+        docs = kc::file_docs(&in);
+    } catch (const kiln::boot::Refusal&) {
+        threw = true;
+    }
+    CHECK(!threw && docs.size() == 2);
+    for (const auto& d : docs) CHECK(d.key == "xp" && d.document["set"]["experienceNeedPerLevel[2]"] == 2600);
+    // a file that is not JSON even so: an optional mod's is skipped (another reader says it), a required mod is refused naming it
+    t_patch_mods = {mod("opt-broken", "{ \"resourcePatches\": { not json")};
+    const auto opt = input_of(json::array({{{"id", "opt-broken"}, {"required", false}}}));
+    threw = false;
+    try {
+        docs = kc::file_docs(&opt);
+    } catch (const kiln::boot::Refusal&) {
+        threw = true;
+    }
+    CHECK(!threw && docs.empty());
+    t_patch_mods = {mod("req-broken", "{ \"resourcePatches\": { not json")};
+    const auto req = input_of(json::array({{{"id", "req-broken"}, {"required", true}}}));
+    std::string refused;
+    try {
+        kc::file_docs(&req);
+    } catch (const kiln::boot::Refusal& r) {
+        refused = r.mod + " " + r.key + ": " + r.what();
+    }
+    CHECK(refused.rfind("req-broken blocks/p.json: ", 0) == 0 && refused.find("not valid JSON") != std::string::npos);
+    t_patch_mods.clear();
+    pass_line("BOOT-PATCH-JSONC resource patches read blocks files with comments and trailing commas (required and optional)", f0);
+}
+
+// LateFaults: what a collector finds after the entry point is reported once per required mod
+void late_faults_cases() {
+    t_case = "late-faults";
+    const int f0 = t_fail;
+    kiln::boot::LateFaults late;
+    CHECK(!late.take("req"));
+    late.reset({"req", "other"});
+    CHECK(late.take("req") && !late.take("req") && !late.take("opt") && late.take("other"));
+    late.reset({"req"});
+    CHECK(late.take("req"));
+    late.reset();
+    CHECK(!late.take("req"));
+    pass_line("BOOT-LATE-FAULTS each required mod's late fault is reported once, optional mods never", f0);
+}
+
 void patch_value_cases() {
     t_case = "patch-values";
     const int f0 = t_fail;
@@ -1708,6 +1788,8 @@ int main(int argc, char** argv) {
     activation_fault_cases();
     files_only_cases();
     strict_cases();
+    patch_jsonc_cases();
+    late_faults_cases();
     not_committed_cases();
     buffer_cases();
     gamedata_cases();
