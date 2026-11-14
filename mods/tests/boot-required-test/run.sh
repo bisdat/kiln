@@ -88,7 +88,7 @@ start_and_collect() {  # start_and_collect <folder> <expected loaded lines>
   echo "exit status: $(cat "$D/exit-code.txt" 2>/dev/null || echo none)"
 }
 
-verdict() {  # verdict <folder> <role> [<case>]
+verdict_lines() {  # verdict <folder> <role> [<case>]
   local D=$1 role=$2 c=${3:-} log=$1/kiln.log
   local exitc
   exitc=$(cat "$D/exit-code.txt" 2>/dev/null || echo none)
@@ -137,6 +137,14 @@ verdict() {  # verdict <folder> <role> [<case>]
       echo "PASS optional content-bind runs without its item (the world refused it at registration)" ||
       echo "FAIL optional content-bind: no refused registration in kiln.log"
   fi
+}
+
+# Preserve every diagnostic, and make any failed assertion fail the calling lab command.
+verdict() {
+  local lines
+  lines=$(verdict_lines "$@")
+  printf '%s\n' "$lines"
+  ! grep -q '^FAIL ' <<< "$lines"
 }
 
 case ${1:?build|case|optional|verdict} in

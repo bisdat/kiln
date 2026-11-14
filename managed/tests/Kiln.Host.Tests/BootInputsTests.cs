@@ -175,6 +175,21 @@ public sealed class BootInputsTests : ModsFixture
         finally { Reset(); }
     }
 
+    [Theory]
+    [InlineData("Kiln.settings.json")]
+    [InlineData("Kiln.custom.pdb")]
+    [InlineData("Kiln.tables/values.csv")]
+    public void Kiln_prefixed_mod_inputs_are_frozen(string relative)
+    {
+        var dir = Mod();
+        var path = Path.Combine(dir, relative);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, "1");
+        var before = BootInputs.Read(dir);
+        File.WriteAllText(path, "2");
+        Assert.Equal(new[] { relative + " changed" }, BootInputs.Read(dir).Differences(before));
+    }
+
     [Fact]
     public void A_second_reading_hashes_only_what_changed()
     {

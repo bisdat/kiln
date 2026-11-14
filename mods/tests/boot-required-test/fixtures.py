@@ -204,8 +204,27 @@ def make(dest, case, role):
     # content-entry, vfx-entry: no files; the lab switch hands the collector an unreadable document of the mod
 
 
+def test_verdict():
+    """Offline regression: a printed failure must fail the lab verdict command."""
+    import pathlib
+    import subprocess
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        folder = pathlib.Path(tmp) / "bad"
+        folder.mkdir()
+        (folder / "kiln.log").write_text("")
+        env = dict(os.environ, LAB="offline-unused", KILN_OUT=tmp, LOGS=tmp)
+        result = subprocess.run(["bash", str(pathlib.Path(__file__).with_name("run.sh")),
+                                 "verdict", "bad", "optional"], env=env, capture_output=True, text=True)
+        assert "FAIL " in result.stdout, result.stdout + result.stderr
+        assert result.returncode != 0, "FAIL verdict printed failures but returned success"
+    print("PASS verdict failures return nonzero")
+
+
 def main():
-    if len(sys.argv) >= 2 and sys.argv[1] == "list":
+    if sys.argv[1:] == ["test-verdict"]:
+        test_verdict()
+    elif len(sys.argv) >= 2 and sys.argv[1] == "list":
         for c, what in CASES.items():
             print(c + "\t" + what)
     elif len(sys.argv) == 5 and sys.argv[1] == "make":
