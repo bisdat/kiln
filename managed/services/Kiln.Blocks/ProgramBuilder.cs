@@ -65,6 +65,9 @@ internal sealed class ProgramBuilder(string key)
     /// <summary>A debug listing of what was emitted: one line per statement.</summary>
     public StringBuilder Listing { get; } = new();
 
+    /// <summary>The bytes emitted so far: data, code and shutdown code (a kind's plan counts them while it expands).</summary>
+    internal long Size => _data.Count + 4L * (_code.Count + _shutdown.Count);
+
     public void BeginCode() => _cur = _code;
     public void BeginShutdown() => _cur = _shutdown;
 
