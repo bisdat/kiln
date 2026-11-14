@@ -82,6 +82,7 @@ struct Input {
     std::set<std::string> excluded;          // mods whose definitions and files stay out
     std::map<std::string, KilnOwner> owner;  // participant -> its process owner "boot:<id>"
     std::set<std::string> required;          // participants whose boot content is required (prepared strictly)
+    std::map<std::string, std::string> test_fault;  // labs only (kiln.json boot.testFault, policy any): mod -> collector to fail it late
 
     bool out(const std::string& mod) const { return excluded.count(mod) != 0; }
     // A required participant: any entry error refuses it (entry_error).
@@ -122,6 +123,9 @@ inline Input parse(const KilnBootPrepareInputV1* in) {
                 r.owner[o["id"].get<std::string>()] = o.contains("owner") && o["owner"].is_number_unsigned() ? o["owner"].get<KilnOwner>() : 0;
                 if (o.contains("required") && o["required"].is_boolean() && o["required"].get<bool>()) r.required.insert(o["id"].get<std::string>());
             }
+    if (r.ir.contains("testFault") && r.ir["testFault"].is_object())
+        for (const auto& [mod, c] : r.ir["testFault"].items())
+            if (c.is_string()) r.test_fault[mod] = c.get<std::string>();
     r.ok = true;
     return r;
 }

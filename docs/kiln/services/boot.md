@@ -186,6 +186,13 @@ handles, which no runtime unload clears: `Blocks.Find` and a block's reference b
   mod is dropped (or the start stops, for a `"required"` mod); every collector prepared before it destroys its plan and
   prepares again. kiln.log says `boot: lab switch boot.testRefuse: collector <c> gets an unreadable document of <mod>`.
   It forces a collector's refusal in a lab start (the per-collector drop proof).
+- **`boot.testFault`** (kiln.json, the same rules: policy `"any"` only, never in a release):
+  `"boot": { "testFault": { "<mod id>": "content" } }`. kiln.boot names the mod in every prepare's IR (`"testFault"`;
+  `Input::test_fault`), and kiln.content makes every world refuse that mod's first boot item or recipe at registration.
+  It is the proof of a late fault that a typed definition cannot cause on a test server: a required mod stops the start
+  when the world loads its registries, an optional one runs without the definition. kiln.log says
+  `boot: lab switch boot.testFault: collector content fails a definition of <mod> after the publication`. Only
+  `content` has a late fault to force; another collector name is ignored with a warning.
 - **The fault start's exit status**: `tools/lab/lab.sh start` writes the server process's exit status to
   `<lab>/kiln/state/exit-code.txt`. A start stopped by a boot failure reads `1` there under Wine (the low byte of
   0x4B01); `boot.json` says `"exitCode": 19201`.
