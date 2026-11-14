@@ -113,6 +113,8 @@ internal static partial class KilnApis
         "M:Kiln.Build.WriteAsync(Kiln.CellBox,Kiln.Voxel[],Kiln.BuildOptions,System.Boolean[])", // Build.WriteAsync(CellBox, Voxel[], BuildOptions?, bool[]?): via Build.Load(CellBox, TimeSpan?)
         "M:Kiln.Build.get_Bases", // Build.Bases.get: via Build.Require(string)
         "M:Kiln.Build.get_Grid", // Build.Grid.get: via Build.Require(string)
+        "M:Kiln.Camera.Set(Kiln.EntityId,Kiln.CameraOverride)", // Camera.Set(EntityId, CameraOverride): Services.RequireTickThread
+        "M:Kiln.Camera.SetMode(Kiln.EntityId,Kiln.CameraMode,System.TimeSpan,Kiln.CameraTransitionOverride,System.Int32)", // Camera.SetMode(EntityId, CameraMode, TimeSpan, CameraTransitionOverride, int): Services.RequireTickThread
         "M:Kiln.CharacterData.Carried.Contains(Kiln.CharacterKey,System.String)", // CharacterData.Carried.Contains(CharacterKey, string): via CharacterStore.Contains(string, CharacterKey, string, string)
         "M:Kiln.CharacterData.Carried.Get``1(Kiln.CharacterKey,System.String)", // CharacterData.Carried.Get<T>(CharacterKey, string): via CharacterStore.Get<T>(string, CharacterKey, string, string)
         "M:Kiln.CharacterData.Carried.Get``1(Kiln.EntityId,System.String)", // CharacterData.Carried.Get<T>(EntityId, string): via CharacterData.Carried.Get<T>(CharacterKey, string)
@@ -800,6 +802,7 @@ internal static partial class KilnApis
         "Audio",
         "Blocks",
         "Build",
+        "Camera",
         "Chat",
         "Client",
         "Combat",

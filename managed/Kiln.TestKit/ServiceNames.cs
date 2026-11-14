@@ -14,6 +14,7 @@ internal static class ServiceNames
         "kiln.audio",
         "kiln.boot",
         "kiln.build",
+        "kiln.camera",
         "kiln.caps",
         "kiln.characters",
         "kiln.chat",

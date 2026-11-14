@@ -281,6 +281,17 @@ a held row reads `unavailable`, `policy`, `game test pending: <ids>` until then.
 | `queries.path` | sigdb | sigdb; kiln.queries lowers it (faulted, program refused) | client: `02-queries.path-hosted` | The game's path search: `Queries.RequestPath`, `FindPath`, `CancelPath` |
 | `queries.reachability` | managed | Kiln.Queries | client: `02-queries.path-hosted` | `Queries.CanReach`; needs `queries.path` |
 | `queries.overlap_origins` | managed | Kiln.Queries | client: `01-queries.voxel-ray-hosted` | `Queries.EntitiesInSphere`, `EntitiesInBox`: entity origins from `kiln.world` |
+| `camera.service` | service row | kiln.camera | - | kiln.camera's table is here (`Camera.Update`, `Camera.End`, `Camera.GetCapabilities`). Each camera request also needs the row of each of its parts, below |
+| `camera.server_mode` | service row | kiln.camera | client: `03-c10` | the server can lock a player's stock camera mode (`Camera.SetMode`); reaches vanilla clients. Needs `hooks.owner_cleanup`. Off in this build until the mode maintainer lands |
+| `camera.local_fov` | sigdb feature (client) | sigdb; kiln.camera lowers it (no `hooks.owner_cleanup`, no backend, a fault); on a dedicated server kiln.camera reports it `wrong-side` | client: `03-c11` | a render-only field of view for this client's own player (`Camera.SetLocal` with a `Lens`); needs no pose row |
+| `camera.local_pose` | sigdb feature (client) | as `camera.local_fov` | client: `03-c9`, `03-c11` | a render-only keyed camera path (`Camera.SetLocal` with a `Path`) |
+| `camera.local_profile` | sigdb feature (client) | as `camera.local_fov` | client: `03-c9`, `03-c11` | a render-only follow camera (`Camera.SetLocal` with a `Profile`) |
+| `camera.local_shake` | sigdb feature (client) | as `camera.local_fov` | client: `03-c9`, `03-c11` | a render-only camera shake (`Camera.SetLocal` with a `Shake`) |
+| `camera.rendered_snapshot` | sigdb feature (client) | as `camera.local_fov`, but it needs no `hooks.owner_cleanup` (a read) | client: `03-c11` | the camera a frame was drawn with (`Camera.GetVisual`) |
+| `camera.remote` | service row | kiln.camera | `03-c10` | the server can ask a render-only camera of a player whose client runs Kiln (`Camera.Set` with visual parts); needs Kiln.Camera's transport bridge. Off in this build until the bridge lands |
+| `camera.resource_profile` | service row | kiln.camera | - | reserved for the game's own camera resource profiles; always `unavailable`, `policy` in kiln.camera v1 |
+| `camera.local` | managed | Kiln.Camera | - | at least one `camera.local_*` part row is on (the mark on `Camera.SetLocal`); a request still needs the row of each part it carries |
+| `camera.server` | managed | Kiln.Camera | - | a camera request of a server can work here: `camera.server_mode`, `camera.remote` or, for a host's own player, a `camera.local_*` row is on (the mark on `Camera.Set`) |
 | `kiln.terrain` | managed | Kiln.Terrain | - | The library is loaded ([terrain.md](terrain.md)): `Terrain.Inspect` |
 | `terrain.overlays` | managed | Kiln.Terrain | client: `19f-overlay-client` | `Terrain.Apply`, `Forget`, `Applied`; needs `kiln.build`, `build.read`, `build.write`, `build.persist`, `kiln.saves` |
 | `terrain.baked` | managed | Kiln.Terrain | - | Always off in this version: baked terrain regions are not built |

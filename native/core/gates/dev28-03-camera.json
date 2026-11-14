@@ -1,0 +1,12 @@
+{ "gates": [
+    { "name": "camera.local_fov", "checks": ["03-c11"], "side": "client",
+      "note": "a request counts as applied only when the frame's camera reads back: the final snapshot (03-c11)" },
+    { "name": "camera.local_pose", "checks": ["03-c9", "03-c11"], "side": "client" },
+    { "name": "camera.local_profile", "checks": ["03-c9", "03-c11"], "side": "client" },
+    { "name": "camera.local_shake", "checks": ["03-c9", "03-c11"], "side": "client" },
+    { "name": "camera.rendered_snapshot", "checks": ["03-c11"], "side": "client" },
+    { "name": "camera.remote", "checks": ["03-c10"],
+      "note": "both sides: a dedicated server's remote camera is settled by a guest's client too" },
+    { "name": "camera.server_mode", "checks": ["03-c10"], "side": "client",
+      "note": "a mode lock in the server world a game client hosts; on a dedicated server it is not held" }
+] }

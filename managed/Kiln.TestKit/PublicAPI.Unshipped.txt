@@ -1,4 +1,75 @@
 #nullable enable
+Kiln.TestKit.FakeVoxelAnswer
+Kiln.TestKit.FakeVoxelAnswer.Equals(Kiln.TestKit.FakeVoxelAnswer other) -> bool
+Kiln.TestKit.FakeVoxelAnswer.FakeVoxelAnswer() -> void
+Kiln.TestKit.FakeVoxelRay
+Kiln.TestKit.FakeVoxelRay.Deconstruct(out Kiln.WorldPosition From, out Kiln.WorldPosition To, out byte Realm) -> void
+Kiln.TestKit.FakeVoxelRay.Equals(Kiln.TestKit.FakeVoxelRay other) -> bool
+Kiln.TestKit.FakeVoxelRay.FakeVoxelRay() -> void
+Kiln.TestKit.FakeVoxelRay.FakeVoxelRay(Kiln.WorldPosition From, Kiln.WorldPosition To, byte Realm) -> void
+Kiln.TestKit.FakeVoxelRay.From.get -> Kiln.WorldPosition
+Kiln.TestKit.FakeVoxelRay.From.init -> void
+Kiln.TestKit.FakeVoxelRay.Realm.get -> byte
+Kiln.TestKit.FakeVoxelRay.Realm.init -> void
+Kiln.TestKit.FakeVoxelRay.To.get -> Kiln.WorldPosition
+Kiln.TestKit.FakeVoxelRay.To.init -> void
+Kiln.TestKit.HarnessQueries
+Kiln.TestKit.HarnessQueries.MaxRaysPerStep.get -> int
+Kiln.TestKit.HarnessQueries.MaxRaysPerStep.set -> void
+Kiln.TestKit.HarnessQueries.Rays.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeVoxelRay>!
+Kiln.TestKit.HarnessQueries.Voxels.get -> System.Func<Kiln.TestKit.FakeVoxelRay, Kiln.TestKit.FakeVoxelAnswer>?
+Kiln.TestKit.HarnessQueries.Voxels.set -> void
+Kiln.TestKit.KilnHarness.Queries.get -> Kiln.TestKit.HarnessQueries!
+override Kiln.TestKit.FakeVoxelAnswer.GetHashCode() -> int
+override Kiln.TestKit.FakeVoxelRay.GetHashCode() -> int
+static Kiln.TestKit.FakeVoxelAnswer.Clear.get -> Kiln.TestKit.FakeVoxelAnswer
+static Kiln.TestKit.FakeVoxelAnswer.Hit(Kiln.WorldPosition at, uint material = 1, ushort voxel = 65281) -> Kiln.TestKit.FakeVoxelAnswer
+static Kiln.TestKit.FakeVoxelAnswer.Refused(string! reason) -> Kiln.TestKit.FakeVoxelAnswer
+static Kiln.TestKit.FakeVoxelAnswer.operator !=(Kiln.TestKit.FakeVoxelAnswer left, Kiln.TestKit.FakeVoxelAnswer right) -> bool
+static Kiln.TestKit.FakeVoxelAnswer.operator ==(Kiln.TestKit.FakeVoxelAnswer left, Kiln.TestKit.FakeVoxelAnswer right) -> bool
+static Kiln.TestKit.FakeVoxelRay.operator !=(Kiln.TestKit.FakeVoxelRay left, Kiln.TestKit.FakeVoxelRay right) -> bool
+static Kiln.TestKit.FakeVoxelRay.operator ==(Kiln.TestKit.FakeVoxelRay left, Kiln.TestKit.FakeVoxelRay right) -> bool
+~override Kiln.TestKit.FakeVoxelAnswer.Equals(object obj) -> bool
+~override Kiln.TestKit.FakeVoxelAnswer.ToString() -> string
+~override Kiln.TestKit.FakeVoxelRay.Equals(object obj) -> bool
+~override Kiln.TestKit.FakeVoxelRay.ToString() -> string
+Kiln.TestKit.FakeCameraCall
+Kiln.TestKit.FakeCameraCall.Deconstruct(out ulong Step, out Kiln.TestKit.FakeCameraCallKind Kind, out ulong Lease, out uint Endpoint, out Kiln.EntityId Player, out uint Parts, out uint DurationMs, out int Priority, out uint Refusal) -> void
+Kiln.TestKit.FakeCameraCall.DurationMs.get -> uint
+Kiln.TestKit.FakeCameraCall.DurationMs.init -> void
+Kiln.TestKit.FakeCameraCall.Endpoint.get -> uint
+Kiln.TestKit.FakeCameraCall.Endpoint.init -> void
+Kiln.TestKit.FakeCameraCall.Equals(Kiln.TestKit.FakeCameraCall other) -> bool
+Kiln.TestKit.FakeCameraCall.FakeCameraCall() -> void
+Kiln.TestKit.FakeCameraCall.FakeCameraCall(ulong Step, Kiln.TestKit.FakeCameraCallKind Kind, ulong Lease, uint Endpoint, Kiln.EntityId Player, uint Parts, uint DurationMs, int Priority, uint Refusal) -> void
+Kiln.TestKit.FakeCameraCall.Kind.get -> Kiln.TestKit.FakeCameraCallKind
+Kiln.TestKit.FakeCameraCall.Kind.init -> void
+Kiln.TestKit.FakeCameraCall.Lease.get -> ulong
+Kiln.TestKit.FakeCameraCall.Lease.init -> void
+Kiln.TestKit.FakeCameraCall.Parts.get -> uint
+Kiln.TestKit.FakeCameraCall.Parts.init -> void
+Kiln.TestKit.FakeCameraCall.Player.get -> Kiln.EntityId
+Kiln.TestKit.FakeCameraCall.Player.init -> void
+Kiln.TestKit.FakeCameraCall.Priority.get -> int
+Kiln.TestKit.FakeCameraCall.Priority.init -> void
+Kiln.TestKit.FakeCameraCall.Refusal.get -> uint
+Kiln.TestKit.FakeCameraCall.Refusal.init -> void
+Kiln.TestKit.FakeCameraCall.Step.get -> ulong
+Kiln.TestKit.FakeCameraCall.Step.init -> void
+Kiln.TestKit.FakeCameraCallKind
+Kiln.TestKit.FakeCameraCallKind.Apply = 0 -> Kiln.TestKit.FakeCameraCallKind
+Kiln.TestKit.FakeCameraCallKind.End = 2 -> Kiln.TestKit.FakeCameraCallKind
+Kiln.TestKit.FakeCameraCallKind.Update = 1 -> Kiln.TestKit.FakeCameraCallKind
+Kiln.TestKit.HarnessCamera
+Kiln.TestKit.HarnessCamera.Calls.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeCameraCall>!
+Kiln.TestKit.HarnessCamera.Expire(ulong lease) -> bool
+Kiln.TestKit.HarnessCamera.Leases.get -> System.Collections.Generic.IReadOnlyList<ulong>!
+Kiln.TestKit.KilnHarness.Camera.get -> Kiln.TestKit.HarnessCamera!
+override Kiln.TestKit.FakeCameraCall.GetHashCode() -> int
+static Kiln.TestKit.FakeCameraCall.operator !=(Kiln.TestKit.FakeCameraCall left, Kiln.TestKit.FakeCameraCall right) -> bool
+static Kiln.TestKit.FakeCameraCall.operator ==(Kiln.TestKit.FakeCameraCall left, Kiln.TestKit.FakeCameraCall right) -> bool
+~override Kiln.TestKit.FakeCameraCall.Equals(object obj) -> bool
+~override Kiln.TestKit.FakeCameraCall.ToString() -> string
 Kiln.TestKit.FakePathAnswer
 Kiln.TestKit.FakePathAnswer.FakePathAnswer() -> void
 Kiln.TestKit.FakePathRequest
@@ -20,39 +91,16 @@ Kiln.TestKit.FakePathRequest.To.get -> Kiln.WorldPosition
 Kiln.TestKit.FakePathRequest.To.init -> void
 Kiln.TestKit.FakePathRequest.VerticalSpace.get -> double
 Kiln.TestKit.FakePathRequest.VerticalSpace.init -> void
-Kiln.TestKit.FakeVoxelAnswer
-Kiln.TestKit.FakeVoxelAnswer.Equals(Kiln.TestKit.FakeVoxelAnswer other) -> bool
-Kiln.TestKit.FakeVoxelAnswer.FakeVoxelAnswer() -> void
-Kiln.TestKit.FakeVoxelRay
-Kiln.TestKit.FakeVoxelRay.Deconstruct(out Kiln.WorldPosition From, out Kiln.WorldPosition To, out byte Realm) -> void
-Kiln.TestKit.FakeVoxelRay.Equals(Kiln.TestKit.FakeVoxelRay other) -> bool
-Kiln.TestKit.FakeVoxelRay.FakeVoxelRay() -> void
-Kiln.TestKit.FakeVoxelRay.FakeVoxelRay(Kiln.WorldPosition From, Kiln.WorldPosition To, byte Realm) -> void
-Kiln.TestKit.FakeVoxelRay.From.get -> Kiln.WorldPosition
-Kiln.TestKit.FakeVoxelRay.From.init -> void
-Kiln.TestKit.FakeVoxelRay.Realm.get -> byte
-Kiln.TestKit.FakeVoxelRay.Realm.init -> void
-Kiln.TestKit.FakeVoxelRay.To.get -> Kiln.WorldPosition
-Kiln.TestKit.FakeVoxelRay.To.init -> void
-Kiln.TestKit.HarnessQueries
-Kiln.TestKit.HarnessQueries.MaxRaysPerStep.get -> int
-Kiln.TestKit.HarnessQueries.MaxRaysPerStep.set -> void
 Kiln.TestKit.HarnessQueries.OpenPaths.get -> int
 Kiln.TestKit.HarnessQueries.PathRequests.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakePathRequest!>!
 Kiln.TestKit.HarnessQueries.PathSteps.get -> int
 Kiln.TestKit.HarnessQueries.PathSteps.set -> void
 Kiln.TestKit.HarnessQueries.Paths.get -> System.Func<Kiln.TestKit.FakePathRequest!, Kiln.TestKit.FakePathAnswer!>?
 Kiln.TestKit.HarnessQueries.Paths.set -> void
-Kiln.TestKit.HarnessQueries.Rays.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeVoxelRay>!
-Kiln.TestKit.HarnessQueries.Voxels.get -> System.Func<Kiln.TestKit.FakeVoxelRay, Kiln.TestKit.FakeVoxelAnswer>?
-Kiln.TestKit.HarnessQueries.Voxels.set -> void
 Kiln.TestKit.HarnessQueries.WithoutSpawnTime(Kiln.EntityId entity) -> void
-Kiln.TestKit.KilnHarness.Queries.get -> Kiln.TestKit.HarnessQueries!
 override Kiln.TestKit.FakePathRequest.Equals(object? obj) -> bool
 override Kiln.TestKit.FakePathRequest.GetHashCode() -> int
 override Kiln.TestKit.FakePathRequest.ToString() -> string!
-override Kiln.TestKit.FakeVoxelAnswer.GetHashCode() -> int
-override Kiln.TestKit.FakeVoxelRay.GetHashCode() -> int
 static Kiln.TestKit.FakePathAnswer.IterationLimit.get -> Kiln.TestKit.FakePathAnswer!
 static Kiln.TestKit.FakePathAnswer.NoPath.get -> Kiln.TestKit.FakePathAnswer!
 static Kiln.TestKit.FakePathAnswer.NoStartNode.get -> Kiln.TestKit.FakePathAnswer!
@@ -63,17 +111,6 @@ static Kiln.TestKit.FakePathAnswer.RouteWithMove(byte move, params Kiln.WorldPos
 static Kiln.TestKit.FakePathAnswer.TimedOut.get -> Kiln.TestKit.FakePathAnswer!
 static Kiln.TestKit.FakePathRequest.operator !=(Kiln.TestKit.FakePathRequest? left, Kiln.TestKit.FakePathRequest? right) -> bool
 static Kiln.TestKit.FakePathRequest.operator ==(Kiln.TestKit.FakePathRequest? left, Kiln.TestKit.FakePathRequest? right) -> bool
-static Kiln.TestKit.FakeVoxelAnswer.Clear.get -> Kiln.TestKit.FakeVoxelAnswer
-static Kiln.TestKit.FakeVoxelAnswer.Hit(Kiln.WorldPosition at, uint material = 1, ushort voxel = 65281) -> Kiln.TestKit.FakeVoxelAnswer
-static Kiln.TestKit.FakeVoxelAnswer.Refused(string! reason) -> Kiln.TestKit.FakeVoxelAnswer
-static Kiln.TestKit.FakeVoxelAnswer.operator !=(Kiln.TestKit.FakeVoxelAnswer left, Kiln.TestKit.FakeVoxelAnswer right) -> bool
-static Kiln.TestKit.FakeVoxelAnswer.operator ==(Kiln.TestKit.FakeVoxelAnswer left, Kiln.TestKit.FakeVoxelAnswer right) -> bool
-static Kiln.TestKit.FakeVoxelRay.operator !=(Kiln.TestKit.FakeVoxelRay left, Kiln.TestKit.FakeVoxelRay right) -> bool
-static Kiln.TestKit.FakeVoxelRay.operator ==(Kiln.TestKit.FakeVoxelRay left, Kiln.TestKit.FakeVoxelRay right) -> bool
-~override Kiln.TestKit.FakeVoxelAnswer.Equals(object obj) -> bool
-~override Kiln.TestKit.FakeVoxelAnswer.ToString() -> string
-~override Kiln.TestKit.FakeVoxelRay.Equals(object obj) -> bool
-~override Kiln.TestKit.FakeVoxelRay.ToString() -> string
 Kiln.TestKit.FakeControlCall
 Kiln.TestKit.FakeControlCall.<Clone>$() -> Kiln.TestKit.FakeControlCall!
 Kiln.TestKit.FakeControlCall.Deconstruct(out ulong Step, out string! Function, out ulong Owner, out Kiln.EntityId Entity, out ulong Lease, out int Result, out string! Detail) -> void
