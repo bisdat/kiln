@@ -905,6 +905,41 @@ public sealed class FacadeTests
     }
 
     [Fact]
+    public void The_kits_world_puts_transient_cells_back_at_a_restart_and_keeps_cells_changed_since()
+    {
+        using var kiln = new Kiln.TestKit.KilnHarness();
+        kiln.Step(2);
+        var cells = new byte[Box.Count];
+        Array.Fill(cells, (byte)1);
+        var flash = new TerrainPatch("flash", 1, Box, new TerrainVoxelVolume(cells), [new TerrainPaletteEntry(12)], TerrainPersistence.Transient);
+        var kept = new TerrainPatch("kept", 1, new CellBox(64, 96, 96, 8, 8, 8), new TerrainVoxelVolume([.. Enumerable.Repeat((byte)1, 512)]), [new TerrainPaletteEntry(20)]);
+        Assert.Equal(TerrainState.Completed, Wait(kiln, () => Terrain.Apply(flash)).State);
+        Assert.Equal(TerrainState.Completed, Wait(kiln, () => Terrain.Apply(kept)).State);
+        var ground = new CellPos(66, 97, 66);      // stone below y 100
+        var air = new CellPos(70, 102, 66);        // air above
+        var dug = new CellPos(72, 98, 66);
+        Assert.Equal(Voxel.Of(12), kiln.Terrain.Get(ground));
+        Assert.Equal(Voxel.Of(12), kiln.Terrain.Get(air));
+        kiln.Terrain.Set(dug, Voxel.Air);          // a player digs a transient cell: that change stays
+
+        kiln.Terrain.Restart();
+        Assert.Equal(Voxel.Of(1), kiln.Terrain.Get(ground));
+        Assert.Equal(Voxel.Air, kiln.Terrain.Get(air));
+        Assert.Equal(Voxel.Air, kiln.Terrain.Get(dug));
+        Assert.Equal(Voxel.Of(20), kiln.Terrain.Get(new CellPos(66, 98, 98)));   // the kept plan stays
+        Assert.Equal(TerrainState.AlreadyApplied, Wait(kiln, () => Terrain.Apply(kept)).State);
+
+        // applied again after the restart, then a kept write over part of it: those cells are meant to stay
+        Assert.Equal(TerrainState.Completed, Wait(kiln, () => Terrain.Apply(flash)).State);
+        var over = new TerrainPatch("over", 1, new CellBox(64, 96, 64, 8, 8, 8), new TerrainVoxelVolume([.. Enumerable.Repeat((byte)1, 512)]), [new TerrainPaletteEntry(30)]);
+        Assert.Equal(TerrainState.Completed, Wait(kiln, () => Terrain.Apply(over)).State);
+        kiln.Terrain.Restart();
+        Assert.Equal(Voxel.Of(30), kiln.Terrain.Get(ground));          // under the kept write: stays
+        Assert.Equal(Voxel.Of(30), kiln.Terrain.Get(air));
+        Assert.Equal(Voxel.Air, kiln.Terrain.Get(new CellPos(74, 102, 66)));   // the rest of the transient patch: back
+    }
+
+    [Fact]
     public void An_edit_made_inside_the_write_on_the_kits_world_is_left_alone()
     {
         using var kiln = new Kiln.TestKit.KilnHarness();

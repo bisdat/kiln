@@ -22,6 +22,24 @@ internal sealed class TerrainFakeState
     /// <summary>Worlds whose Kiln data is lost (Kiln.Saves reports DataMatch.None there).</summary>
     public readonly HashSet<string> DataLost = new(StringComparer.Ordinal);
     public readonly List<Action<string, uint>> AfterSave = [];
+    /// <summary>kiln.build's transient journal: per cell a transient write changed, its value before the first such write
+    /// and after the newest. A kept write takes its cells out; HarnessTerrain.Restart puts the rest back.</summary>
+    public readonly Dictionary<(int, int, int), (Voxel Before, Voxel After)> Transient = new();
+
+    /// <summary>The next start: every journaled cell that still holds what the transient write left gets its earlier value
+    /// back; a cell changed since keeps the change. The journal empties.</summary>
+    public int PutBackTransient()
+    {
+        var n = 0;
+        foreach (var ((x, y, z), (before, after)) in Transient)
+        {
+            if (Get(x, y, z) != after) continue;
+            Cells[(x, y, z)] = before;
+            n++;
+        }
+        Transient.Clear();
+        return n;
+    }
     public readonly List<FakeTerrainWrite> Writes = [];
     /// <summary>Runs inside each write where kiln.build posts BuildEditingEvent: after the overlay read and decided, before
     /// the guard compares and the write commits (<see cref="HarnessTerrain.Editing"/>).</summary>
@@ -69,7 +87,7 @@ internal sealed class TerrainFake : IKitFake
             "world id, and Kiln's witness of the kept plans with the world file's revision (SaveWorld, LoseLedger: a lost ledger is refused, a first install " +
             "over matching ground is not). Inspect, Apply, Forget and Applied run as in the game: batches, the ledger's rules, conflicts, Terrain.Changed. " +
             "Not modelled: streaming (tiles are loaded unless the test says not), the game's save itself (the ledger lives in the harness, not in the fake " +
-            "kiln.saves), kiln.build's own events and its transient journal, " +
+            "kiln.saves), kiln.build's own events (its transient journal is modelled: Restart puts transient cells back), " +
             "and time: from code that is not a mod's, every batch runs in the same step. terrain.baked and terrain.biomes are off, as in the game."));
 
     private sealed class Backend(KilnHarness harness, TerrainFakeState s, ModContext? mod) : ITerrainBackend
@@ -129,8 +147,14 @@ internal sealed class TerrainFake : IKitFake
                     var i = box.Index(x, y, z);
                     if (!mask[i]) continue;
                     var at = (box.X + x, box.Y + y, box.Z + z);
-                    if (s.Get(at.Item1, at.Item2, at.Item3) != cells[i]) changed++;
+                    var old = s.Get(at.Item1, at.Item2, at.Item3);
+                    if (old != cells[i]) changed++;
                     s.Cells[at] = cells[i];
+                    // kiln.build's transient journal, as in the game (native/services/build/transient.cpp)
+                    if (!transient) s.Transient.Remove(at);
+                    else if (s.Transient.TryGetValue(at, out var j)) s.Transient[at] = (j.Before, cells[i]);
+                    else if (old != cells[i]) s.Transient[at] = (old, cells[i]);
+                    if (transient && s.Transient.TryGetValue(at, out var k) && k.Before == k.After) s.Transient.Remove(at);
                 }
                 s.Writes.Add(new FakeTerrainWrite(Mod, label, box, changed, transient, harness.CurrentStep));
                 return Task.FromResult(new BuildResult(changed, 0, true, !transient, box, 0));
