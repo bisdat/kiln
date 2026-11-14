@@ -10,7 +10,7 @@ One process has at most one boot generation. Every step runs on the boot thread,
 
 1. **Decide**, once, before the service DLLs load: the process has a boot generation ("deferred mode") when hooks and
    .NET are on, an enabled Kiln mod of this side has `"boot"` in its `kiln.mod.json`, `mods.boot` is available, and on
-   a game client `mods.boot.client` is available too (held in this build). Otherwise nothing below happens, every
+   a game client `mods.boot.client` is available too. Otherwise nothing below happens, every
    staging call answers `KILN_ERR_UNAVAILABLE`, and every collector keeps its `on_ready` path. An enabled mod with
    `"boot": "required"` still stops the start with 0x4B01 when that route is unavailable; its content cannot be omitted.
 2. **Bind:** each collector calls `collector()` once, from `kiln_plugin_main` or `on_ready`. `KILN_OK` means it will be

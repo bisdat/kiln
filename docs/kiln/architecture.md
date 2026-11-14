@@ -39,7 +39,7 @@ enshrouded_server.exe / enshrouded.exe
    **The boot phase** (since 0.2.0-dev.28; [modding/onboot.md](modding/onboot.md), [services/boot.md](services/boot.md))
    sits inside this step. kiln.boot decides once, before the service DLLs load, whether this process has a boot
    generation (hooks and .NET on, an enabled mod of this side with `"boot"`, `mods.boot` available; on a game client
-   also `mods.boot.client`, held in this build). If it does, the seven collectors (assets, worldtables, content,
+   also `mods.boot.client`). If it does, the seven collectors (assets, worldtables, content,
    skills, knowledge, vfx, patches) register in `kiln_plugin_main` or `on_ready` and keep their definitions back
    instead of loading them there; registration closes once every `on_ready` ran. Inside the .NET start, `Kiln.Host`
    runs each boot mod's `OnBoot` on a throwaway copy, lowers what it staged, and commits: kiln.boot prepares every

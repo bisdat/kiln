@@ -189,9 +189,10 @@ restart.
 ## Where it runs
 - **Dedicated servers.** The phase runs when hooks and .NET are on, an enabled mod of the server says `boot`, and
   `mods.boot` is available.
-- **Game clients** hold `mods.boot.client` in this build, until its guided client checks pass. On a game client a mod
-  with `boot` does not load (`RestartRequiredBoot: ... this process ran no boot phase`). `"preview": true` in
-  `kiln/kiln.json` lifts the hold, for testing.
+- **Game clients** (a world a player hosts, and a player's game that joins a server) run it the same way since
+  0.2.0-dev.29: the rows `mods.boot.client` and `mods.boot.resource_patches` are open. In 0.2.0-dev.28 they were held
+  and a boot mod did not load on a client without `"preview"` in `kiln/kiln.json`. Still held on a client:
+  `mods.boot.vfx` (VFX and materials of a boot mod are then built after the start, as for any other mod).
 - A server where the phase does not run (safe idle, .NET off) does not load boot mods either. The row `mods.boot.phase`
   says why.
 
