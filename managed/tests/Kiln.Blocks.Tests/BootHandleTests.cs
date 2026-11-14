@@ -29,6 +29,7 @@ public sealed class BootHandleTests : IDisposable
         Assert.True(d.Define("cold", new StatusBlock { Name = "Boot Cold", Seconds = 4 }).Ok);
         Assert.True(d.Define("cold-hit", new EffectBlock { Applies = new StatusApply { Status = "cold" } }).Ok);
         Assert.True(d.Define("wood-token", new ItemBlock { Name = "Boot Token", Stack = 20 }).Ok);
+        Assert.True(d.Define("cold-talent", new TalentBlock { Name = "Boot Cold Talent", Keeps = "cold", Game = new GameTreePlace { From = ["0x8efcc472"], Offset = [170, 0] } }).Ok);
         return f.Staged;
     }
 
@@ -46,6 +47,7 @@ public sealed class BootHandleTests : IDisposable
         Assert.Equal(lowered.Guid, cold.Guid);  // the id the generation published
         Assert.Equal($"{Mod}.cold", cold.GameName);
         Assert.NotNull(TheBlocks.Find("cold-hit", Mod));
+        Assert.NotNull(TheBlocks.Find("cold-talent", Mod));  // a talent asks "clients": "mod" of its mod: the map is built at that level
         Assert.Equal(Compiler.Lower(new ModBlocks(Mod, 1) { ManifestClients = "kiln" }, "wood-token", new ItemBlock { Name = "Boot Token", Stack = 20 }).Handle.Guid,
             TheBlocks.Find("wood-token", Mod)?.Guid);
 

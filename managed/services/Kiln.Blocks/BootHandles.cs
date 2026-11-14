@@ -69,7 +69,7 @@ internal static class BootHandles
     // handle and is logged; the others keep theirs.
     private static ModMap Build(string mod, IReadOnlyList<BootStaged> committed)
     {
-        var scratch = new ModBlocks(mod, 0) { ManifestClients = "kiln" };  // the boot phase checked the manifest's level already
+        var scratch = new ModBlocks(mod, 0) { ManifestClients = "mod" };  // the highest level: the boot phase checked the manifest's already
         var definitions = new Dictionary<string, BootStaged>(StringComparer.Ordinal);
         var previousSink = Lowered._sinkOverride;
         var previousBoot = Lowered._bootLowering;
