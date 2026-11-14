@@ -119,6 +119,13 @@ code. kiln.log ends with `boot: the start stops before the game's entry point (e
 | `issues` | every issue: `mod`, `kind`, `key`, `phase` (stage, callback, prepare, commit, activation), `code`, `reason`, `warning` |
 | `exitCode` | 19201 when the start stopped, else null |
 
+## After the commit (managed side)
+Kiln.Host freezes each boot mod's inputs at the commit (its manifest, top-level assemblies and its `blocks/`, `assets/`,
+`quests/`, `skills/` files; JSON by its parsed value) and refuses a later runtime load of a changed mod with
+`RestartRequiredBoot` ([../modding/onboot.md](../modding/onboot.md#after-a-change-restart)); the IR envelope's
+`owners[].fingerprint` is the hash of those inputs. Kiln.Blocks keeps a process-wide map of the committed definitions'
+handles, which no runtime unload clears: `Blocks.Find` and a block's reference by name fall back to it.
+
 ## Rows
 `mods.boot`, `mods.boot.phase`, `mods.boot.game_data`, `mods.boot.client`, `mods.boot.vfx` and
 `mods.boot.resource_patches`: [caps.md](caps.md#rows-added-in-dev28).
@@ -126,12 +133,14 @@ code. kiln.log ends with `boot: the start stops before the game's entry point (e
 ## Tests
 - Host: `native/core/tests/test-boot-service.sh` (kiln.boot with fake collectors: staging, every drop and abort,
   reverse destruction, the seven collectors, files-only participants, `activation_fault`, the game-data reader).
-- Offline: `managed/tests/Kiln.Blocks.Tests` (staging, lowering), `Kiln.Host.Tests` (`BootPhaseTests`, including the
-  pin of `KilnBootApiV1`'s member order).
+- Offline: `managed/tests/Kiln.Blocks.Tests` (staging, lowering, `BootHandleTests`: the handle map), `Kiln.Host.Tests`
+  (`BootPhaseTests`, including the pin of `KilnBootApiV1`'s member order; `BootInputsTests`: the frozen inputs).
 - Offline, the test kit: `Kiln.TestKit.Tests` (`BootFakeTests`: `KilnHarness.BootPhase`), `Kiln.Sdk.Tests`
   (`BootBakeTests`: the bake runs `OnBoot`).
 - Lab: `mods/tests/boot-definitions-test` (the five kinds on a first start, the same ids on the next start, and with the
-  fault mods `boot-callback-fail` and `boot-dependent` their exclusion), `mods/tests/boot-patches-test` and
+  fault mods `boot-callback-fail` and `boot-dependent` their exclusion; `Blocks.Find` and `Blocks.Define` of a boot block in
+  `OnLoad`), `mods/tests/boot-reload-driver` beside it (unload, load unchanged, a block file added: refused with
+  `RestartRequiredBoot`, removed: loads), `mods/tests/boot-patches-test` and
   `boot-patches-other` (resource patches), `mods/tests/boot-gamedata-test` (the snapshot against the live reader).
 
 ## Lab switches
