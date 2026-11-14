@@ -451,7 +451,7 @@ step "VS Code extension"
 vsix=$(ls -t "$KILN_OUT"/vscode/kiln-vscode-*.vsix | head -1)
 step "sample mods"
 rm -rf "$work/samples" && mkdir -p "$work/samples"
-skipped_samples=()
+skipped_samples=() not_mods=()
 # a sample on Kiln.Sdk packs itself (KilnPack); an older one builds its output folder (a deployable mod folder), which
 # is zipped the way KilnPack does: <id>-<version>.zip holding <id>/, without the shared Kiln.* assemblies, *.deps.json
 # and cooked game files
@@ -459,6 +459,7 @@ pack_folder() { # project
   local proj=$1 o=$work/samples-build/$(basename "$1" .csproj)
   rm -rf "$o"
   low dotnet build "$proj" -c Release --artifacts-path "$KILN_OUT/dotnet" -v q -nologo -o "$o" >>"$log" 2>&1 || return 1
+  [ -f "$o/kiln.mod.json" ] || return 2   # a library or test project of a sample (SampleLib.Api): no mod to zip
   python3 - "$o" "$work/samples" <<'PY'
 import json, os, re, sys, zipfile
 o, dest = sys.argv[1:]
@@ -480,10 +481,13 @@ for proj in "$src"/mods/samples/*/*.csproj; do
     low dotnet build "$proj" -c Release --artifacts-path "$KILN_OUT/dotnet" -v q -nologo -t:KilnPack \
       -p:KilnPackageOutputPath="$work/samples/" >>"$log" 2>&1 || skipped_samples+=("$name")
   else
-    pack_folder "$proj" || skipped_samples+=("$name")
+    rc=0; pack_folder "$proj" || rc=$?
+    ((rc == 2)) && not_mods+=("$name")
+    ((rc == 1)) && skipped_samples+=("$name")
   fi
 done
 note "sample mods: $(ls "$work"/samples/*.zip 2>/dev/null | wc -l) zips"
+((${#not_mods[@]})) && note "sample projects that are no mod (no kiln.mod.json, not zipped): ${not_mods[*]}"
 ((${#skipped_samples[@]})) && note "samples that did not build (left out): ${skipped_samples[*]}"
 
 # ---------------------------------------------------------------- 7. the folder
