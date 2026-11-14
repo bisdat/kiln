@@ -1,0 +1,10 @@
+{
+  "id": "decisions-api-test",
+  "name": "Decisions lab test",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "DecisionsApiTest.dll",
+  "side": "server",
+  "advanced": true,
+  "description": "Lab test of kiln.decisions and kiln.window_clock through Kiln.Api (07-cancelable-events): the services are on, an entity's identity is resolved in Pre and refused inside the simulation (asked from a world program's update, where the clock says phase 3), and a decision filed in Pre is delivered, answered and completed once (allowed, refused, released after its deadline). PASS and FAIL lines in kiln.log, then 'decisions-api-test done: N PASS, 0 FAIL'."
+}

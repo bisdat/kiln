@@ -207,6 +207,10 @@ public static class Events
     }
 
     /// <summary>Subscribes <paramref name="handler"/> to <typeparamref name="T"/> and every event derived from it.</summary>
+    /// <exception cref="KilnUnavailableException"><typeparamref name="T"/> is an event that needs a capability which
+    /// is off here (the cancelable decisions of 0.2.0-dev.28, such as a death that can be refused): the exception names
+    /// it, and nothing was subscribed. Check <see cref="Capabilities.Is"/> first. A handler for a base class
+    /// (<see cref="KilnEvent"/>, <see cref="CancelableEvent"/>) never throws this: it receives what is produced here.</exception>
     public static EventSubscription On<T>(Action<T> handler, EventPriority priority = EventPriority.Normal,
         bool receiveCanceled = false) where T : KilnEvent
     {
@@ -222,6 +226,8 @@ public static class Events
     /// <exception cref="ArgumentNullException"><paramref name="handler"/> or <paramref name="filter"/> is null.</exception>
     /// <exception cref="ArgumentException">An entity filter on events that do not say which entities they are about
     /// (<typeparamref name="T"/> is not an <see cref="IEntityEvent"/>), or an entity filter with no entity.</exception>
+    /// <exception cref="KilnUnavailableException"><typeparamref name="T"/> needs a capability that is off here; nothing
+    /// was subscribed.</exception>
     [AnyThread]
     public static EventSubscription On<T>(Action<T> handler, EventFilter filter, EventPriority priority = EventPriority.Normal,
         bool receiveCanceled = false) where T : KilnEvent
@@ -265,7 +271,8 @@ public static class Events
     /// <summary>Subscribes every <see cref="SubscribeAttribute"/> method of <paramref name="target"/> (instance and
     /// static methods of its type; pass a <see cref="Type"/> for its static methods only). Kiln calls this for each
     /// <see cref="Mod"/> before <c>OnLoad</c>, and then also registers the mod's <c>[Command]</c> methods (Kiln.Chat).
-    /// Nothing is subscribed when one method has the wrong shape.</summary>
+    /// Nothing is subscribed when one method has the wrong shape, or when one of the events needs a capability that is
+    /// off here (<see cref="KilnUnavailableException"/>).</summary>
     public static IReadOnlyList<EventSubscription> Register(object target)
     {
         ArgumentNullException.ThrowIfNull(target);
@@ -291,8 +298,16 @@ public static class Events
             }
         }
         var subs = new List<EventSubscription>(plan.Count);
-        foreach (var (evType, del, attr) in plan)
-            subs.Add(Add(evType, del, attr.Priority, attr.ReceiveCanceled, MakeInvoker(evType, del), target));
+        try
+        {
+            foreach (var (evType, del, attr) in plan)
+                subs.Add(Add(evType, del, attr.Priority, attr.ReceiveCanceled, MakeInvoker(evType, del), target));
+        }
+        catch
+        {
+            foreach (var made in subs) Remove(made);  // an event that is not produced here (KilnUnavailableException)
+            throw;
+        }
         if (target is Mod mod && mod.Context is { } context)
         {
             Watch(context);
@@ -557,6 +572,13 @@ public static class Events
             if (!mod.Alive) RemoveAll(mod);
         }
         StartProducers(type);
+        // A producer that registered for this event (EventProducers) and cannot produce it here: the subscription is
+        // refused by name, after the type's static constructors ran (they are what registers the producer).
+        if (EventProducers.Off(type) is { } off)
+        {
+            Remove(sub);
+            throw off;
+        }
         try
         {
             SubscriptionAdded?.Invoke();
@@ -664,4 +686,50 @@ public static class Events
         var a = (Action<T>)del;
         return e => a((T)e);
     }
+}
+
+/// <summary>Which capability an event type needs to be produced at all (since 0.2.0-dev.28). A service whose event is a
+/// decision (a death, a pickup, an equipment change a handler may refuse) registers the event's type here, from the
+/// type's static constructor or from the service's start. <c>Events.On</c> then refuses a subscription to that type
+/// while the capability is off, with a <see cref="KilnUnavailableException"/> that names it: a mod that asks for
+/// refusable deaths on a build without them is told so at once, instead of waiting for an event that never comes.
+/// Subscriptions to a base class (<see cref="KilnEvent"/>, <see cref="CancelableEvent"/>) are never refused.</summary>
+/// <remarks>Only Kiln's own event types belong here: the registry keeps the type for the life of the process.</remarks>
+internal static class EventProducers
+{
+    private static readonly ConcurrentDictionary<Type, string[]> Needs = new();
+
+    /// <summary>Says that <paramref name="eventType"/> is produced only while every one of
+    /// <paramref name="capabilities"/> is available; the first that is off is the one a refusal names. Any thread;
+    /// registering a type again replaces what it needed.</summary>
+    public static void Register(Type eventType, params string[] capabilities)
+    {
+        ArgumentNullException.ThrowIfNull(eventType);
+        ArgumentNullException.ThrowIfNull(capabilities);
+        if (!typeof(KilnEvent).IsAssignableFrom(eventType)) throw new ArgumentException($"{eventType} is not a KilnEvent", nameof(eventType));
+        if (capabilities.Length == 0 || capabilities.Any(string.IsNullOrEmpty))
+            throw new ArgumentException("an event's producer names at least one capability", nameof(capabilities));
+        Needs[eventType] = [.. capabilities];
+    }
+
+    /// <summary>The capabilities <paramref name="eventType"/> itself was registered with; null when none.</summary>
+    public static IReadOnlyList<string>? Of(Type eventType) => Needs.TryGetValue(eventType, out var needs) ? needs : null;
+
+    /// <summary>The refusal for a subscription to <paramref name="subscribed"/>: it, or a class it derives from, was
+    /// registered and one of its capabilities is not available now. Null: subscribe.</summary>
+    public static KilnUnavailableException? Off(Type subscribed)
+    {
+        if (Needs.IsEmpty) return null;
+        for (var t = subscribed; t != null && t != typeof(KilnEvent) && t != typeof(object); t = t.BaseType)
+        {
+            if (!Needs.TryGetValue(t, out var needs)) continue;
+            foreach (var name in needs)
+                if (!Capabilities.Is(name))
+                    return ServiceCaps.Unavailable(name, $"{t.Name} is not produced here");
+        }
+        return null;
+    }
+
+    /// <summary>Test hook: forget one type.</summary>
+    internal static void Forget(Type eventType) => Needs.TryRemove(eventType, out _);
 }

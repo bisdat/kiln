@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: MIT
+using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
+
 namespace Kiln;
 
 /// <summary>Names one decision (a held action a mod may allow or refuse) for as long as the process runs:
@@ -80,4 +83,54 @@ public sealed class DecisionCompletedEvent(DecisionResult result) : KilnEvent, I
 
     /// <inheritdoc/>
     public bool Involves(EntityId entity) => !entity.IsNone && (entity == Result.Subject || entity == Result.Actor);
+}
+
+/// <summary>Decisions: things the game is about to do that a mod may refuse (a death, a walk-over pickup, an equipment
+/// change). The events themselves are in the service that owns them (<c>EntityDyingEvent</c> in Kiln.Combat, ...); each
+/// carries a <see cref="DecisionId"/> and ends in one <see cref="DecisionCompletedEvent"/>. Since 0.2.0-dev.28.</summary>
+public static class Decisions
+{
+    private const string LabUrl = "https://github.com/frostdev-ops/kiln/blob/main/docs/kiln/modding/analyzers.md#kilnx001";
+
+    /// <summary>Lab: where the server world's step is right now. Returns the phase (1 Pre, 2 preparing, 3 the game's
+    /// simulation, 4 after the world's jobs, 5 Post, 6 stopping, 0 no world or no step yet), or -1 when this build has
+    /// no step clock. Any thread. For lab mods only (<c>KILNX001</c>).</summary>
+    /// <param name="worldEpoch">Counts the server worlds of this process, from 1.</param>
+    /// <param name="step">The step.</param>
+    [Experimental("KILNX001", UrlFormat = LabUrl)]
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    [AnyThread]
+    public static int LabWindow(out ulong worldEpoch, out ulong step)
+    {
+        worldEpoch = 0;
+        step = 0;
+        if (DecisionBroker.Window() is not { } now) return -1;
+        worldEpoch = now.WorldEpoch;
+        step = now.Step;
+        return (int)now.Phase;
+    }
+
+    /// <summary>Lab: asks kiln.decisions for the identity of <paramref name="entity"/> as its events would name it, and
+    /// returns the service's result code: 0 (found), 2 (no such entity, or none with a usable identity), 3 (no
+    /// kiln.decisions), 4 (not the world thread in a phase in which the world may be read: also the world thread
+    /// inside the simulation). Any thread, to show the refusal. For lab mods only (<c>KILNX001</c>).</summary>
+    [Experimental("KILNX001", UrlFormat = LabUrl)]
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    [AnyThread]
+    public static int LabResolveEntity(EntityId entity, out EventEntityKey key, out WorldPosition? position) =>
+        DecisionBroker.ResolveEntity(entity, out key, out position);
+
+    /// <summary>Lab, tick thread: files a decision about <paramref name="subject"/> that no game action hangs on, and
+    /// answers it as told when it is delivered at the next step: true allows, false refuses, null never answers (the
+    /// service releases it after its deadline). Its end comes as a <see cref="DecisionCompletedEvent"/> like any
+    /// other. Returns the decision's id, or the default id when kiln.decisions took nothing. For lab mods only
+    /// (<c>KILNX001</c>).</summary>
+    [Experimental("KILNX001", UrlFormat = LabUrl)]
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    [ServerOnly, TickThreadOnly]
+    public static DecisionId LabDecide(EntityId subject, bool? allow)
+    {
+        if (subject.IsNone) throw new ArgumentException("a decision is about an entity", nameof(subject));
+        return DecisionBroker.LabDecide(subject, allow, out _) ?? default;
+    }
 }

@@ -80,3 +80,7 @@ static Kiln.EventEntityKey.operator ==(Kiln.EventEntityKey left, Kiln.EventEntit
 ~override Kiln.DecisionId.ToString() -> string
 ~override Kiln.EventEntityKey.Equals(object obj) -> bool
 ~override Kiln.EventEntityKey.ToString() -> string
+Kiln.Decisions
+[KILNX001]static Kiln.Decisions.LabDecide(Kiln.EntityId subject, bool? allow) -> Kiln.DecisionId
+[KILNX001]static Kiln.Decisions.LabResolveEntity(Kiln.EntityId entity, out Kiln.EventEntityKey key, out Kiln.WorldPosition? position) -> int
+[KILNX001]static Kiln.Decisions.LabWindow(out ulong worldEpoch, out ulong step) -> int

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Unit tests of Kiln.Api's dispatcher of decisions (DecisionBroker) with no game: its own code on the test kit's
+       fakes of kiln.decisions and kiln.window_clock, and the fake's table against the header's batch protocol. -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <OutputType>Exe</OutputType>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- KILNX001: the lab members of Kiln.Decisions. -->
+    <NoWarn>$(NoWarn);CS1591;KILNX001</NoWarn>
+    <!-- not Kiln.Decisions.Tests: a namespace Kiln.Decisions would hide the class Kiln.Decisions -->
+    <RootNamespace>Kiln.DecisionsTests</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit.v3" Version="3.1.0" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../Kiln.TestKit/Kiln.TestKit.csproj" />
+  </ItemGroup>
+</Project>
