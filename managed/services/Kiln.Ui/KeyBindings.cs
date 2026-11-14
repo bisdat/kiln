@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Key bindings (Forge: KeyMapping + the Controls screen). Remappable in the Kiln menu and in <configDir>/keybinds.json (kiln/config, or the profile's configDir).
+using System.Globalization;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -16,7 +17,7 @@ public enum KeyMods
     Alt = 4,
 }
 
-/// <summary>A key with modifiers, written like "F8", "Ctrl+K", "Shift+Alt+F2", "Insert", "Numpad5", "Backquote", or a mouse
+/// <summary>A key with modifiers, written like "F8", "Ctrl+K", "Shift+Alt+F2", "Insert", "Numpad5", "Backquote", "Key223", or a mouse
 /// input (since 0.2.0-dev.27): "Mouse4", "Mouse5", "MouseMiddle" (the side and middle buttons), "WheelUp", "WheelDown",
 /// "WheelLeft", "WheelRight" (one press per notch of the wheel), with modifiers too: "Ctrl+WheelUp", "Shift+Mouse4". The
 /// left and right buttons cannot be bound: Kiln's screens need them. <see cref="VirtualKey"/> is the Windows virtual-key
@@ -173,7 +174,7 @@ internal static class KeyNames
     {
         if (ByName.TryGetValue(name, out vk)) return true;
         if (name.Length > 3 && name.StartsWith("Key", StringComparison.OrdinalIgnoreCase) &&
-            uint.TryParse(name.AsSpan(3), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var n) &&
+            uint.TryParse(name.AsSpan(3), NumberStyles.None, CultureInfo.InvariantCulture, out var n) &&
             n is >= 3 and <= 0xFF)
         {
             vk = n;
