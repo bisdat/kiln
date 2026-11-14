@@ -1542,6 +1542,46 @@
    ],
    "state": "open",
    "added": "fix round 00-integration.keys (GitHub issue 33, 14 Nov)"
+  },
+  {
+   "id": "rules.noclip-descent",
+   "title": "NoClip: sneak sinks every time, also in the game's sneak mode",
+   "chapter": "00",
+   "packages": [
+    "00-integration"
+   ],
+   "state": "open",
+   "added": "fix round 00-integration.noclip (GitHub issue 25, 14 Nov)"
+  },
+  {
+   "id": "rules.noclip-death",
+   "title": "NoClip: a death inside the ground ends it",
+   "chapter": "00",
+   "packages": [
+    "00-integration"
+   ],
+   "state": "open",
+   "added": "fix round 00-integration.noclip (GitHub issue 25, 14 Nov)"
+  },
+  {
+   "id": "rules.noclip-world",
+   "title": "NoClip: closing the world inside the ground",
+   "chapter": "00",
+   "packages": [
+    "00-integration"
+   ],
+   "state": "open",
+   "added": "fix round 00-integration.noclip (GitHub issue 25, 14 Nov)"
+  },
+  {
+   "id": "rules.noclip-disconnect",
+   "title": "NoClip: leaving a server inside the ground",
+   "chapter": "00",
+   "packages": [
+    "00-integration"
+   ],
+   "state": "open",
+   "added": "fix round 00-integration.noclip (GitHub issue 25, 14 Nov)"
   }
  ]
 }

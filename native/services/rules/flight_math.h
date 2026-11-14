@@ -77,4 +77,24 @@ inline float climb(bool jump, bool sneak, bool sprint) {
     return sprint ? v * kFast : v;
 }
 
+// The mover's spring-acceleration rows (Locomotion.springAccelerationConfig, after its `enabled` bool): velocityDefault,
+// velocityCrouched, strafingDefault, strafingCrouched, four floats each (walk, run, sprint acceleration, braking). The
+// mover takes row InSneakMode + 2 x Strafing. A player body's crouched and strafing rows hold -1 for sprint and braking,
+// and -1 means "do not steer": the velocity is left as it is. So in the game's sneak mode (the sneak key's own toggle) a
+// flight at speed did not answer the sneak key at all, and with no key held it drifted on instead of stopping.
+constexpr int kRows = 4, kRowBytes = 16;
+constexpr int kRowsMax = 0x40;  // the rows' offset in Locomotion is small (4 on 26430253); a larger one is not this layout
+constexpr int kPinnedBytes = kRowsMax + kRows * kRowBytes;
+
+// Fills `out` (kPinnedBytes) so that the mover, given `out` for the Locomotion slot, finds velocityDefault in every row:
+// `out` + rows_at + 16 x k is the default row for k = 0..3. The bytes before the rows are copied as they are. False
+// (nothing to pin) for a rows offset outside 0..kRowsMax.
+inline bool pin_rows(const uint8_t* locomotion, int64_t rows_at, uint8_t* out) {
+    if (!locomotion || rows_at < 0 || rows_at > kRowsMax) return false;
+    for (int64_t i = 0; i < rows_at; ++i) out[i] = locomotion[i];
+    for (int k = 0; k < kRows; ++k)
+        for (int b = 0; b < kRowBytes; ++b) out[rows_at + k * kRowBytes + b] = locomotion[rows_at + b];
+    return true;
+}
+
 }  // namespace flight_math

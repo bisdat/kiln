@@ -498,6 +498,40 @@ connection, where the game itself writes `isEnabled`, and what the stuck timer (
 "emergency ground collision") does for a real player over time. How a client's prediction world takes a teleport
 (the `teleport` program is host-only, descriptor flag 0x10, docs/re/player-state.md) was not traced either.
 
+### 8.1 The sneak key in Kiln's flight (GitHub issue #25) **[dis] [data]**
+A player on 0.2.0-dev.27 (hosted, Proton): "sneak/downward movement was intermittent: sometimes it descended, sometimes
+it did not". Two questions, both answered from the code of the two exes (26430253 / 26430625).
+
+**What reaches PlayerInput's held bits.** The client builds `ClientPlayerInput.data.digitalInput` (`+0x3a8`; on the
+server PlayerInput `+0x3b0`) in `0x2477d0` (client): for each of the 56 `PlayerInputType`s, the bit is set when its
+input action is held (`0xea2990`) and the type is not "consumed" (`0x473a40`, a mask only `0x473a10` sets: for
+MainhandAction, ContextualAction, SpecialAbility and their taps, CancelAction and Jump, never for Sneak). The sneak
+toggle setting (`isSneakInputToggle` in the user settings, on in the owner's settings) does not change that
+bit: it is evaluated next to it, in a per-input state machine (`0x479ce0` → `0xe84c50`: for a type configured as a
+toggle, a press asks for the opposite of the actor's current `InSneakMode`, read from `Actor.currentState` `+0xbf8`
+bit 21), and the toggle configuration travels to the server at login (`inputToggleConfig`, docs/re/characters.md 3;
+`PlayerInput.fromClientToggleConfig`). So bit 55 is the key as held, and Kiln's flight already read it as a level.
+
+**What the held bit did in the mover.** The BuildingFlying mover (`0x1d09d0` / C `0x431130`) reads the iterator's
+`Locomotion` (`+0x10`) once and takes a spring-acceleration row from it: `Locomotion + 4 + 16 x (InSneakMode + 2 x
+Strafing)` (`ActorStateTest` 0x15 and 0x35), i.e. `springAccelerationConfig.velocityDefault`, `velocityCrouched`,
+`strafingDefault`, `strafingCrouched` (sigdb types). `0x1d0470` picks one of the row's four floats from the speed and
+the input's length (walk, run or sprint acceleration, or braking when there is no input) against two speed
+attributes; a negative value returns code 6, and the mover then leaves `Velocity` as it is (only
+`velocitySpringAcceleration` is cleared). The player body (`1_Player`) has `velocityDefault` {20, 20, 25, 30} and
+`velocityCrouched` {15, 15, **-1, -1**}; both strafing rows have -1 for sprint and braking too. So in the game's sneak
+mode (which the same key switches when it is set to toggle) Kiln's flight did not steer at speed (holding sneak while
+flying fast did nothing) and did not brake (letting go drifted on), and outside it everything worked: intermittent,
+with no steady way to reproduce it unless one watches the sneak mode.
+
+**The fix (dev.28, `flight.cpp`).** For a character Kiln flies, the mover hook gives the mover a copy of the rows with
+`velocityDefault` in all four for the length of the call (the iterator's slot points at the copy, and is put back
+however the call ends); the game's own `Locomotion` is never written. Signatures `@rules/FlightMover.locomotion`
+(`rules/flight.locomotion` 0x10) and `@rules/FlightMover.rows` (`rules/flight.spring_rows` 4), part of
+`rules.flight`; `rules_sigdb_test.py` checks on both exes that the mover reads the slot once, uses it for the row only
+and hands the iterator to no callee. Whether the game's sneak mode actually turns on in Kiln's flight on a real client
+is what the guided check `rules.noclip-descent` records (it logs the steps of NoClip's flight with `InSneakMode` on).
+
 ## 9. Signatures
 `sigdb/symbols/server.d/rules.json`, unique on the server and the client; `client.d/rules.json` extends it with the
 client's two guards (docs/re/client.md):
@@ -521,6 +555,7 @@ client's two guards (docs/re/client.md):
 | `@rules/GlideSteer.ctx` (scoped to `rules/GlideSteer` + 2048; `rules/rot.ctx` 0x1670; the call's target captured as `rules/GlideSteerEntityId`, which must be `rules/CurrentEntityId`) | `0x82001` | `0x26ff01` | `rules.glide_steer` |
 | `rules/ApplyMaterials` | `0x22d480` | `0x495f20` | `rules.costs` (+ `items/tx.operator`, `world/programs.*`) |
 | `rules/TerrainDamage` | `0x22c970` | `0x495410` | `rules.dig` (+ `gameplay/TerraformImpact` and its argument constants) |
+| `@rules/FlightMover.locomotion` (`rules/flight.locomotion` 0x10, scoped to `rules/FlightMover` + 512) and `@rules/FlightMover.rows` (`rules/flight.spring_rows` 4, scoped + 640; the row is Locomotion + 4 + 16 x (InSneakMode + 2 x Strafing)) | `0x1d0b54`, `0x1d0b8f` | `0x4312b4`, `0x4312ef` | `rules.flight` (8.1) |
 | `rules/ResolveActorCollider` (`rules/resolve.collider` 0xc0, `rules/collider.enabled` 5; the frame bytes literal; the switch-off branch's target captured as `rules/ResolveActorColliderOff`) | `0x95890` | `0x283ba0` | `rules.noclip` (needs `rules.flight` at run time) |
 | `@rules/ResolveActorCollider.off` (scoped to `rules/ResolveActorColliderOff`, exactly its 59 bytes; `rules/collider.results_set` 0x50, 2 votes) | `0x97b19` | `0x285e29` | `rules.noclip` |
 | `@rules/ResolveActorCollider.dynloco` (scoped to the step + 640; `rules/resolve.dynloco` 0x90; `rules/loco.state` 0x59 from `rules.flight`) | `0x95ac3` | `0x283dd3` | `rules.noclip` |
