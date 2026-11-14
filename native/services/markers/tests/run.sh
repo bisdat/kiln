@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# kiln.markers' host tests: no game, no Wine. The v1 ABI (sizes and offsets; the header compiles as C11 and C++).
+# kiln.markers' host tests: no game, no Wine. The v1 ABI (sizes and offsets; the header compiles as C11 and C++), the store.
 #   KILN_OUT=<build dir> native/services/markers/tests/run.sh
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -15,3 +15,10 @@ echo "PASS kiln_markers.h compiles as C11"
 
 g++ -std=c++20 -O1 -g -Wall -Wextra -I"$abi" "$here/abi_test.cpp" -o "$out/abi_test"
 "$out/abi_test"
+
+# The logical store with a fake world clock (M01, M02, M14 logical half), its publishers, limits, error rule, world stop
+# and subscriptions; four writer threads against a dispatching one.
+src=$here/..
+g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined -fno-sanitize-recover=undefined -I"$src" -I"$abi" \
+  "$here/store_test.cpp" "$src/store.cpp" "$src/events.cpp" "$src/arena.cpp" "$src/text.cpp" "$src/guard.cpp" -o "$out/store_test"
+"$out/store_test"

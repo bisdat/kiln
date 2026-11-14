@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Unit tests of Kiln.Markers with no game: its own code (marshalling, the error rule, bindings, event dispatch, JSON,
+       the ABI mirror's sizes) on a fake kiln.markers table. The store's own rules are tested natively
+       (native/services/markers/tests). -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>MarkersTests</RootNamespace>
+    <IsTestProject>true</IsTestProject>
+    <OutputType>Exe</OutputType>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit.v3" Version="3.1.0" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../services/Kiln.Markers/Kiln.Markers.csproj" />
+    <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" />
+  </ItemGroup>
+</Project>

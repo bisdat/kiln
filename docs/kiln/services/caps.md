@@ -269,7 +269,7 @@ a held row reads `unavailable`, `policy`, `game test pending: <ids>` until then.
 | `queries.line_of_sight` | managed | Kiln.Queries | client: `01-queries.voxel-ray-hosted` | `Queries.VoxelLineOfSight`; needs `queries.voxel_ray` and `kiln.world` |
 | `queries.overlap_origins` | managed | Kiln.Queries | client: `01-queries.voxel-ray-hosted` | `Queries.EntitiesInSphere`, `EntitiesInBox`: entity origins from `kiln.world` |
 | `kiln.markers` | service | core | - | kiln.markers' table is here (kiln-markers.dll; `native/core/abi/services/kiln_markers.h`). `kiln.markers.bridge` is the internal table of the built-in receiver |
-| `markers.local` | service | kiln.markers | - | The local marker store on a client (`Markers.Set`, `Remove`, `Clear`); needs `world.lifecycle`; wrong side on a dedicated server. Off while it is not built |
+| `markers.local` | service | kiln.markers | - | The local marker store on a client (`Markers.Set`, `Remove`, `Clear`); needs `world.lifecycle`; wrong side on a dedicated server. A `Set` also needs the row of every surface it asks for |
 | `markers.catalog` | service | kiln.markers | - | The icon catalog (`Markers.Icons`); whether it has warmed up is `Markers.Icons.IsReady`, not this row. Off while it is not built |
 | `markers.map` | service | kiln.markers | client: `04-m15`, `04-markers.capacity_restore` | Markers as native icons on the game's map (needs `markers.client_map` and a verified icon catalog). Off while it is not built |
 | `markers.compass` | service | kiln.markers | client: `04-m07` | Markers on Kiln's drawn compass strip (kiln.render). Off while it is not built |

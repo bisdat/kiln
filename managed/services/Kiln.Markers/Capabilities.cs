@@ -11,7 +11,7 @@ internal static class MarkersCaps
 {
     /// <summary>kiln.markers' table is here (the core's row).</summary>
     public const string Service = "kiln.markers";
-    /// <summary>The local store (Markers.Set, Remove, Clear).</summary>
+    /// <summary>The local store (<see cref="Markers.Set"/>, <see cref="Markers.Remove"/>, <see cref="Markers.Clear"/>).</summary>
     public const string Local = "markers.local";
     /// <summary>The icon catalog (<c>Markers.Icons</c>); its warm-up is <c>Markers.Icons.IsReady</c>, not this row.</summary>
     public const string Catalog = "markers.catalog";

@@ -2,9 +2,10 @@
 // kiln.markers (services/kiln_markers.h): session-only markers on the game's map, Kiln's compass strip and world labels,
 // and the internal kiln.markers.bridge the managed built-in receiver uses. Dossier chapter 04; docs/kiln/services/markers.md.
 //
-// This file is the glue to the core: it publishes both tables and the capability rows. The parts behind them land slice by
-// slice; until a part is built its row reads unavailable (policy, "not built yet") and its members answer
-// KILN_ERR_UNAVAILABLE naming the row.
+// This file is the glue to the core: it publishes both tables and the capability rows, feeds the store (store.h) the world
+// lifecycle, and delivers the queued notifications at each client step (and on the stopping thread when a world stops).
+// The parts not built yet read unavailable (policy, "not built yet") and their members answer KILN_ERR_UNAVAILABLE naming
+// the row.
 #include <windows.h>
 
 #include <cstdarg>
@@ -15,6 +16,10 @@
 #include "kiln_api.h"
 #include "services/kiln_caps.h"
 #include "services/kiln_markers.h"
+
+#include "arena.h"
+#include "events.h"
+#include "store.h"
 
 namespace {
 
@@ -32,6 +37,19 @@ void logf(int32_t level, const char* fmt, ...) {
     va_end(v);
     if (n > 0) g_api->log(g_owner, level, KilnStr{text, static_cast<size_t>(n < static_cast<int>(sizeof text) ? n : static_cast<int>(sizeof text) - 1)});
 }
+
+void log_line(int level, const char* text) {
+    if (g_api) g_api->log(g_owner, level, KilnStr{text, std::strlen(text)});
+}
+
+kmk::Arena g_arena;
+kmk::Switches g_switches;
+kmk::Store g_store(g_arena, g_switches);
+kmk::Subscribers g_subs(&log_line);
+
+uint32_t g_side = KILN_SIDE_SERVER;
+bool g_lifecycle = false;    // world STARTED and STOPPING are seen
+bool g_client_post = false;  // the client world's Post is ours
 
 // ---- capability rows (chapter 04 §5) ------------------------------------------------------------------------------------
 
@@ -53,10 +71,18 @@ void report(const char* name, uint32_t state, uint32_t reason, const char* text)
 
 void report_rows() {
     static const char kNotBuilt[] = "not built yet in this kiln.markers (0.2.0-dev.28 in work)";
-    for (const char* name : {kLocal, kCatalog, kMap, kCompass, kWorld, kNameplates, kAnchorsClient, kAnchorsServer, kSend})
+    for (const char* name : {kCatalog, kMap, kCompass, kWorld, kNameplates, kAnchorsClient, kAnchorsServer, kSend})
         report(name, KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY, kNotBuilt);
     report(kMapText, KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY,
            "the native map tooltip is not part of v1: its game test (04-map-text) has not been answered");
+    if (g_side != KILN_SIDE_CLIENT)
+        report(kLocal, KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_WRONG_SIDE, "local markers are a game client's; a server sends them (markers.send)");
+    else if (!g_lifecycle)
+        report(kLocal, KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING, "needs world.lifecycle (a client's markers end with its world)");
+    else if (!g_client_post)
+        report(kLocal, KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_FAULTED, "the client world's step could not be subscribed");
+    else
+        report(kLocal, KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, "");
 }
 
 // ---- results ----------------------------------------------------------------------------------------------------------
@@ -78,10 +104,34 @@ KilnResult off(KilnMarkerResult* r, const char* capability) {
     return KILN_ERR_UNAVAILABLE;
 }
 
+// ---- delivery -----------------------------------------------------------------------------------------------------------
+
+void dispatch(uint32_t role) {
+    g_subs.dispatch([role] { return g_store.take(role); });
+}
+
+void KILN_CALL on_world(const KilnWorldEvent* e, void*) {
+    if (!e || (e->kind != KILN_WORLD_SERVER && e->kind != KILN_WORLD_CLIENT)) return;
+    const uint32_t role = e->kind == KILN_WORLD_CLIENT ? kmk::kRoleClient : kmk::kRoleServer;
+    if (e->event == KILN_WORLD_STARTED) {
+        g_store.world_started(e->kind);
+    } else if (e->event == KILN_WORLD_STOPPING) {
+        // records end with their world; their last notes go out before the stop returns, on this (stopping) thread
+        g_store.world_stopping(e->kind);
+        dispatch(role);
+    }
+}
+
+void KILN_CALL on_client_post(const KilnTickInfo*, void*) { dispatch(kmk::kRoleClient); }
+
 // ---- kiln.markers v1 ----------------------------------------------------------------------------------------------------
 
-KilnResult KILN_CALL t_bind_owner(KilnOwner, KilnStr) { return KILN_ERR_UNAVAILABLE; }
-KilnResult KILN_CALL t_release_owner(KilnOwner) { return KILN_OK; }
+KilnResult KILN_CALL t_bind_owner(KilnOwner owner, KilnStr ns) { return g_store.bind(owner, ns); }
+KilnResult KILN_CALL t_release_owner(KilnOwner owner) {
+    if (!owner) return KILN_ERR_INVALID_ARGUMENT;
+    g_subs.remove_owner(owner);  // its callbacks first: what follows is for the others
+    return g_store.release(owner);
+}
 KilnResult KILN_CALL t_catalog_count(uint32_t* count, uint64_t* generation) {
     if (!count || !generation) return KILN_ERR_INVALID_ARGUMENT;
     *count = 0;
@@ -90,24 +140,21 @@ KilnResult KILN_CALL t_catalog_count(uint32_t* count, uint64_t* generation) {
 }
 KilnResult KILN_CALL t_catalog_at(uint32_t, KilnMarkerIcon*) { return KILN_ERR_UNAVAILABLE; }
 KilnResult KILN_CALL t_catalog_resolve(KilnStr, KilnMarkerIcon*, KilnMarkerResult* r) { return off(r, kCatalog); }
-KilnResult KILN_CALL t_world_epoch(uint32_t, uint64_t* epoch) {
-    if (epoch) *epoch = 0;
-    return KILN_ERR_UNAVAILABLE;
-}
+KilnResult KILN_CALL t_world_epoch(uint32_t kind, uint64_t* epoch) { return g_store.world_epoch(kind, epoch); }
 KilnResult KILN_CALL t_capture_anchor(KilnOwner, uint32_t, uint64_t, KilnEntity, KilnMarkerAnchorResult*) { return KILN_ERR_UNAVAILABLE; }
 KilnResult KILN_CALL t_release_anchor(KilnOwner, KilnMarkerAnchor) { return KILN_ERR_UNAVAILABLE; }
-KilnResult KILN_CALL t_set_local(KilnOwner, const KilnMarkerSpec*, KilnMarkerResult* r) { return off(r, kLocal); }
-KilnResult KILN_CALL t_remove_local(KilnOwner, KilnStr, KilnMarkerResult* r) { return off(r, kLocal); }
-KilnResult KILN_CALL t_clear_local(KilnOwner, KilnMarkerResult* r) { return off(r, kLocal); }
+KilnResult KILN_CALL t_set_local(KilnOwner owner, const KilnMarkerSpec* spec, KilnMarkerResult* r) { return g_store.set_local(owner, spec, r); }
+KilnResult KILN_CALL t_remove_local(KilnOwner owner, KilnStr key, KilnMarkerResult* r) { return g_store.remove_local(owner, key, r); }
+KilnResult KILN_CALL t_clear_local(KilnOwner owner, KilnMarkerResult* r) { return g_store.clear_local(owner, r); }
 KilnResult KILN_CALL t_send(KilnOwner, KilnEntity, const KilnMarkerSpec*, KilnMarkerResult* r) { return off(r, kSend); }
 KilnResult KILN_CALL t_unsend(KilnOwner, KilnEntity, KilnStr, KilnMarkerResult* r) { return off(r, kSend); }
 KilnResult KILN_CALL t_clear_sent(KilnOwner, KilnEntity, KilnMarkerResult* r) { return off(r, kSend); }
 KilnResult KILN_CALL t_suppress_sent(KilnOwner, KilnEntity, KilnStr, KilnMarkerResult* r) { return off(r, kSend); }
-KilnResult KILN_CALL t_subscribe(KilnOwner, KilnMarkerChangedFn, KilnMarkerVisibilityFn, KilnMarkerCatalogFn, void*, KilnHandle* out) {
-    if (out) *out = 0;
-    return KILN_ERR_UNAVAILABLE;
+KilnResult KILN_CALL t_subscribe(KilnOwner owner, KilnMarkerChangedFn changed, KilnMarkerVisibilityFn visibility, KilnMarkerCatalogFn catalog,
+                                 void* user, KilnHandle* out) {
+    return g_subs.subscribe(owner, changed, visibility, catalog, user, out);
 }
-KilnResult KILN_CALL t_unsubscribe(KilnHandle) { return KILN_ERR_NOT_FOUND; }
+KilnResult KILN_CALL t_unsubscribe(KilnHandle handle) { return g_subs.unsubscribe(handle); }
 
 const KilnMarkersApi kTable = {{sizeof(KilnMarkersApi), KILN_MARKERS_VERSION},
                                &t_bind_owner, &t_release_owner, &t_catalog_count, &t_catalog_at, &t_catalog_resolve,
@@ -144,6 +191,17 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     info->id = KM_STR(KILN_MARKERS_SERVICE);
     info->version = KilnStr{"1", 1};
     info->on_ready = &on_ready;
+    g_side = api->side();
+    // Session only: every store is bound to a world, so without the lifecycle there is no store (chapter 04 §4.2).
+    KilnHandle h = 0;
+    g_lifecycle = api->feature && api->feature(KM_STR("world.lifecycle")) && api->subscribe_world(owner, &on_world, nullptr, &h) == KILN_OK;
+    if (!g_lifecycle) logf(KILN_LOG_WARN, "markers: the world lifecycle is unavailable on this build: markers.local and markers.send are off");
+    if (g_side == KILN_SIDE_CLIENT) {
+        KilnHandle p = 0;
+        g_client_post = api->subscribe_world_tick(owner, KILN_WORLD_CLIENT, KILN_TICK_POST, &on_client_post, nullptr, &p) == KILN_OK;
+        if (!g_client_post) logf(KILN_LOG_WARN, "markers: the client world's step could not be subscribed: markers.local is off");
+    }
+    g_switches.local = g_side == KILN_SIDE_CLIENT && g_lifecycle && g_client_post;
     KilnResult rc = api->register_service(owner, KM_STR(KILN_MARKERS_SERVICE), &kTable);
     if (rc != KILN_OK) return rc;
     rc = api->register_service(owner, KM_STR(KILN_MARKERS_BRIDGE_SERVICE), &kBridge);
