@@ -35,6 +35,7 @@ internal static class TransformScaleKeeper
     private static readonly Dictionary<uint, Waiting> ToApply = new();
     private static readonly HashSet<uint> Applied = new();  // entities whose kept scale this session wrote or set again
     private static bool _registered, _ticking, _recording;
+    private static int _notTheEntity;  // waiting scales dropped because their id named another entity (tests, diagnostics)
 
     internal static string Json(Saved s) => JsonSerializer.Serialize(s);
 
@@ -75,7 +76,7 @@ internal static class TransformScaleKeeper
         var store = ServiceEntityData.Ensure();
         if (store is null || _registered) return store;
         _registered = true;
-        ServiceEntityData.Register(Scope, new ServiceEntityData.Consumer { Loaded = OnLoaded, Staging = OnStaging });
+        ServiceEntityData.Register(Scope, new ServiceEntityData.Consumer { Loaded = OnLoaded, Staging = OnStaging, WorldChanged = OnWorldChanged });
         return store;
     }
 
@@ -119,15 +120,36 @@ internal static class TransformScaleKeeper
             Backend.Current.Log(0, LogLevel.Warn, $"kiln.world: the transform scale kept for entity {entity} does not read ({json}); left as the game loaded it");
             return;
         }
-        ToApply[entity.Value] = new Waiting { Saved = saved };
+        Queue(entity, saved);
         if (!_recording) ApplyWaiting();
     }
 
-    private static void ApplyWaiting()
+    internal static void Queue(EntityId entity, Saved saved) => ToApply[entity.Value] = new Waiting { Saved = saved };
+
+    /// <summary>Tests: kept scales waiting to be set again, and scales written this session.</summary>
+    internal static (int Waiting, int Applied, int NotTheEntity) Counts => (ToApply.Count, Applied.Count, _notTheEntity);
+
+    // kiln.saves let the world's data go (a hosted world closed, another world loads): ids from before name nothing now
+    internal static void OnWorldChanged()
+    {
+        ToApply.Clear();
+        Applied.Clear();
+    }
+
+    internal static void ApplyWaiting()
     {
         foreach (var (id, w) in ToApply.ToList())
         {
             var entity = new EntityId(id);
+            // the id may have been handed out again since the match: only the entity the kept record is on gets it
+            if (ServiceEntityData.Store is not { } store || !store.Holds(entity, Scope, Key))
+            {
+                ToApply.Remove(id);
+                _notTheEntity++;
+                Backend.Current.Log(0, LogLevel.Info, $"kiln.world: the transform scale {w.Saved.Scale} kept for entity {entity} is dropped: " +
+                                                      "the entity is no longer the one it was kept for");
+                continue;
+            }
             var mod = Mods.Get(w.Saved.Mod)?.Info is { } info ? ModContext.FindLive(info) : null;
             string? wait = null, stop = null;
             if (mod is null) stop = $"mod '{w.Saved.Mod}' is not loaded (the scale comes back with it)";

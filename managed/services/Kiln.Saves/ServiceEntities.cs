@@ -46,6 +46,14 @@ internal sealed class ServiceEntities : ServiceEntityData.IStore
             ? keys.Where(p => p.Value.Json is not null).ToDictionary(p => p.Key, p => p.Value.Json!, StringComparer.Ordinal)
             : new Dictionary<string, string>();
 
+    public bool Holds(EntityId entity, string scope, string key)
+    {
+        Check(scope, key);
+        if (entity.IsNone || entity.IsPlayer || !SavesRuntime.Ensure() || !SpawnLink.Available) return false;
+        return SavesRuntime.Store.Entities.Find(entity) is { } r && r.ByMod.TryGetValue(scope, out var keys) && keys.ContainsKey(key) &&
+               SpawnLink.Inspect(entity) is { } info && info.Template is { } t && t == r.Template;
+    }
+
     private static void Check(string scope, string key)
     {
         if (!ServiceEntityData.IsScope(scope)) throw new ArgumentException("a service scope is kiln:<service>", nameof(scope));

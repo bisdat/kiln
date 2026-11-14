@@ -13,6 +13,7 @@ public sealed class TransformScaleKeeperTests : IDisposable
     {
         public readonly Dictionary<(uint, string, string), string> Data = new();
         public readonly HashSet<uint> SessionOnly = [];
+        public readonly HashSet<uint> Reused = [];  // the id names another entity now
 
         public bool Set(EntityId entity, string scope, string key, string? json)
         {
@@ -24,6 +25,8 @@ public sealed class TransformScaleKeeperTests : IDisposable
 
         public string? Get(EntityId entity, string scope, string key) => Data.GetValueOrDefault((entity.Value, scope, key));
         public IReadOnlyList<EntityId> Entities(string scope) => [.. Data.Keys.Where(k => k.Item2 == scope).Select(k => new EntityId(k.Item1)).Distinct()];
+        public bool Holds(EntityId entity, string scope, string key) => !Reused.Contains(entity.Value) && Data.ContainsKey((entity.Value, scope, key));
+
         public IReadOnlyDictionary<string, string> Values(EntityId entity, string scope) =>
             Data.Where(p => p.Key.Item1 == entity.Value && p.Key.Item2 == scope).ToDictionary(p => p.Key.Item3, p => p.Value);
     }
@@ -31,9 +34,17 @@ public sealed class TransformScaleKeeperTests : IDisposable
     private readonly FakeStore _store = new();
     private readonly ServiceEntityData.IStore? _before = ServiceEntityData.Store;
 
-    public TransformScaleKeeperTests() => ServiceEntityData.Store = _store;
+    public TransformScaleKeeperTests()
+    {
+        ServiceEntityData.Store = _store;
+        TransformScaleKeeper.OnWorldChanged();
+    }
 
-    public void Dispose() => ServiceEntityData.Store = _before;
+    public void Dispose()
+    {
+        TransformScaleKeeper.OnWorldChanged();
+        ServiceEntityData.Store = _before;
+    }
 
     private TransformScaleKeeper.Saved? Kept(uint e) =>
         TransformScaleKeeper.Parse(_store.Get(new EntityId(e), TransformScaleKeeper.Scope, TransformScaleKeeper.Key));
@@ -74,5 +85,29 @@ public sealed class TransformScaleKeeperTests : IDisposable
         Assert.Null(TransformScaleKeeper.Parse("not json"));
         Assert.Null(TransformScaleKeeper.Parse("{\"scale\":{\"x\":1,\"y\":1,\"z\":1}}"));
         Assert.Null(TransformScaleKeeper.Parse(null));
+    }
+
+    [Fact]
+    public void A_waiting_scale_is_dropped_when_the_world_changes_and_never_lands_on_a_reused_id()
+    {
+        var asked = new Scale3(1.25f, 0.75f, 1.5f);
+        // a scale written this session (registers the keeper with the store) and one still waiting when the world goes
+        Assert.True(TransformScaleKeeper.Record(new EntityId(1500), Scale3.One, asked, "scale-mod"));
+        TransformScaleKeeper.Queue(new EntityId(1026), new TransformScaleKeeper.Saved("scale-mod", asked, Scale3.One));
+        Assert.Equal((1, 1), (TransformScaleKeeper.Counts.Waiting, TransformScaleKeeper.Counts.Applied));
+        ServiceEntityData.RaiseWorldChanged();  // what kiln.saves raises when it lets a world's data go
+        Assert.Equal((0, 0), (TransformScaleKeeper.Counts.Waiting, TransformScaleKeeper.Counts.Applied));
+        TransformScaleKeeper.ApplyWaiting();  // nothing left to land in the next world on whatever has id 1026 there
+
+        // the id names another entity by the time the waiting scale would be set: dropped, nothing written
+        var before = _store.Data.Count;
+        var dropped = TransformScaleKeeper.Counts.NotTheEntity;
+        _store.Set(new EntityId(1027), TransformScaleKeeper.Scope, TransformScaleKeeper.Key,
+            TransformScaleKeeper.Json(new TransformScaleKeeper.Saved("scale-mod", asked, Scale3.One)));
+        _store.Reused.Add(1027);
+        TransformScaleKeeper.Queue(new EntityId(1027), new TransformScaleKeeper.Saved("scale-mod", asked, Scale3.One));
+        TransformScaleKeeper.ApplyWaiting();
+        Assert.Equal((0, dropped + 1), (TransformScaleKeeper.Counts.Waiting, TransformScaleKeeper.Counts.NotTheEntity));
+        Assert.Equal(before + 1, _store.Data.Count);  // the kept record is left as it was; only the waiting entry went
     }
 }

@@ -56,7 +56,8 @@ public sealed class ServiceEntityValuesTests : IDisposable
         Assert.True(ServiceEntityData.IsScope("kiln:world"));
         Assert.False(ServiceEntityData.IsScope("kiln.world"));  // a mod id may be kiln.world; it can never hold a ':'
         var handed = new List<(EntityId Entity, IReadOnlyDictionary<string, string> Values)>();
-        ServiceEntityData.Register(Scope, new ServiceEntityData.Consumer { Loaded = (e, v) => handed.Add((e, v)) });
+        var worldChanges = 0;
+        ServiceEntityData.Register(Scope, new ServiceEntityData.Consumer { Loaded = (e, v) => handed.Add((e, v)), WorldChanged = () => worldChanges++ });
 
         var store = Store();
         var rec = store.Entities.Attach(Place(2001));
@@ -84,5 +85,11 @@ public sealed class ServiceEntityValuesTests : IDisposable
         loaded.Entities.HandOverServiceValues();
         Assert.Single(handed);  // once
         Assert.Equal("\"mod data\"", loaded.Entities.Find(now)!.ByMod["some-mod"]["note"].Json);  // the mod's data is its own
+
+        // the world closes: the service is told to let go of what it keeps per entity id (ids mean nothing in the next world)
+        var changes = worldChanges;
+        loaded.CloseWorld();
+        Assert.Equal(changes + 1, worldChanges);
+        Assert.Null(loaded.Entities.Find(now));
     }
 }

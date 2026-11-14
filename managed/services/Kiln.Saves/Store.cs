@@ -156,6 +156,7 @@ internal sealed unsafe class WorldStore
         _bundles.Clear();
         Entities.Clear();
         Instances.Clear();
+        ServiceEntityData.RaiseWorldChanged();  // services drop what they keep per entity id (Kiln.World's waiting scales)
     }
 
     /// <summary>Test kit (SavesRuntime.EndSession): after <see cref="CloseWorld"/>, the next world opens as in a fresh process.</summary>

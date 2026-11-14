@@ -26,6 +26,11 @@ internal static class ServiceEntityData
 
         /// <summary>The keys and values of <paramref name="scope"/> on a live entity (empty when none).</summary>
         IReadOnlyDictionary<string, string> Values(EntityId entity, string scope);
+
+        /// <summary>True when <paramref name="entity"/> is still the entity the value was matched to (its record is live,
+        /// holds the key, and the entity has the record's template): checked right before a value is used, because an
+        /// entity id can be handed out again to another entity.</summary>
+        bool Holds(EntityId entity, string scope, string key);
     }
 
     /// <summary>What a service is told for its scope.</summary>
@@ -36,6 +41,10 @@ internal static class ServiceEntityData
 
         /// <summary>Right before kiln.saves writes its data for a save (refresh what is recorded).</summary>
         public Action? Staging;
+
+        /// <summary>The world's data was let go (a world closed, or another one is loading): entity ids from before mean
+        /// nothing now; drop everything kept per entity id.</summary>
+        public Action? WorldChanged;
     }
 
     private static readonly Dictionary<string, Consumer> Consumers = new(StringComparer.Ordinal);
@@ -81,6 +90,12 @@ internal static class ServiceEntityData
     internal static void RaiseLoaded(string scope, EntityId entity, IReadOnlyDictionary<string, string> values)
     {
         if (Consumers.TryGetValue(scope, out var c) && c.Loaded is { } loaded) Run(scope, "loaded", () => loaded(entity, values));
+    }
+
+    internal static void RaiseWorldChanged()
+    {
+        foreach (var (scope, c) in Consumers.ToList())
+            if (c.WorldChanged is { } changed) Run(scope, "world changed", changed);
     }
 
     internal static void RaiseStaging()
