@@ -397,6 +397,15 @@ fn a_hand_copied_eml_mod_shroudforge_keeps_off_says_so_in_the_promised_words() {
     let m = one(&scan(&dirs, &g, &p), "mods/HoardersHelper").clone();
     assert_eq!((m.state, m.via, m.fix), (FoundState::Loads, Some(FoundVia::Kiln), None), "{m:?}");
     assert!(m.reason.contains("ShroudForge runs it"), "{}", m.reason);
+    // A client install may also contain the dedicated server executable. Its client-only
+    // package still loads; the selected install, not a neighbouring file, decides the side.
+    put(&g.path, crate::game::SERVER_EXE, b"MZ");
+    put(&g.path, "mods/HoardersHelper/extended.mod.json", br#"{"schemaVersion":1,"enabled":true,"targets":["client"],"launcher":"EML","settings":{}}"#);
+    let m = one(&scan(&dirs, &g, &p), "mods/HoardersHelper").clone();
+    assert_eq!(m.state, FoundState::Loads, "{m:?}");
+    let mut g = g;
+    g.kind = GameKind::Server;
+    g.exe = crate::game::SERVER_EXE.into();
     // a server has no in-game menu: the way out that is left
     put(&g.path, "mods/HoardersHelper/extended.mod.json", br#"{"schemaVersion":1,"enabled":false,"launcher":"EML"}"#);
     put(&g.path, crate::game::SERVER_EXE, b"MZ");

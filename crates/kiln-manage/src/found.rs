@@ -539,7 +539,7 @@ pub fn scan(dirs: &DataDirs, install: &GameInstall, profile: &Profile) -> FoundR
             .is_some_and(|l| l.engine == Engine::ShroudForge && l.via != crate::own_loaders::Via::HostedShroudForge))
     }).flatten();
     let cx = Ctx { dirs, game, profile, loaders: &loaders, kiln: kiln_installed, wine: install.platform != crate::game::Platform::Windows,
-        sf_eml, server: game.join(crate::game::SERVER_EXE).is_file() };
+        sf_eml, server: install.kind == crate::game::GameKind::Server };
     let mut rep = FoundReport {
         game_id: install.id.clone(),
         profile_id: profile.id.clone(),
