@@ -25,16 +25,9 @@ public sealed class ManifestBootTests
                   </Target>
                 </Project>
                 """);
-            var psi = new ProcessStartInfo("dotnet") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
-            foreach (var a in new[] { "msbuild", Path.Combine(dir, "stub.proj"), "-nologo", "-v:m", "-t:Manifest" }) psi.ArgumentList.Add(a);
-            if (boot != null) psi.ArgumentList.Add($"-p:KilnBoot={boot}");
-            foreach (var k in psi.Environment.Keys.Where(k => k.StartsWith("MSBuild", StringComparison.OrdinalIgnoreCase)).ToList()) psi.Environment.Remove(k);
-            using var p = Process.Start(psi)!;
-            var o = p.StandardOutput.ReadToEndAsync();
-            var e = p.StandardError.ReadToEndAsync();
-            p.WaitForExit(120_000);
+            var (code, text) = StubMsBuild.Run(Path.Combine(dir, "stub.proj"), boot != null ? ["-t:Manifest", $"-p:KilnBoot={boot}"] : ["-t:Manifest"]);
             var json = File.Exists(output) ? JsonNode.Parse(File.ReadAllText(output)) as JsonObject : null;
-            return (p.ExitCode, o.Result + e.Result, json);
+            return (code, text, json);
         }
         finally
         {
