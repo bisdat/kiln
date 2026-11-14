@@ -141,6 +141,8 @@ void regions_status(uint64_t* chunks, uint64_t* saves, uint64_t* boxes);
 std::string regions_world();        // the running world's GUID text from kiln.saves ("" while unknown); any thread
 bool regions_saves_written(uint64_t* written);  // kiln.saves' count of world files written this session
 bool regions_hooked();              // the save-region hook is in place (it calls transient_before_save)
+// a save was accepted and its file is not written yet (kiln.saves), or the game built a save-region list in the last 2 s
+bool regions_save_under_way();
 
 // ---- transient edits (transient.cpp): KILN_BUILD_F_TRANSIENT cells are put back at the next start ----
 // Before a transient write commits: room in the journal and a world it can be bound to (else the write is refused).

@@ -10,9 +10,10 @@
 //    write of this run of transient writes ("before") and after the newest ("after"). A kept write (any write without
 //    the flag) takes the cells it sets out of the journal: they are meant to stay.
 //  - The journal is kiln/data/kiln.build/transient/<world GUID>.bin, written atomically (temp file, then rename) when it
-//    changed: at the save-region hook, which the game calls right before its voxel serializer reads the store, so a
-//    save that can hold a transient cell finds it on record first; every 24 steps; and at once when the hook is not in
-//    place.
+//    changed: at the save-region hook, which the game calls right before its voxel serializer reads the store; before a
+//    transient write commits while a save is under way (so a serializer that reads the store later in the save still
+//    finds the cells on record: a transient write is journaled before its commit); every 24 steps; and at once when
+//    the hook is not in place.
 //  - At the next start (the world runs, its save is loaded into the store), every journaled cell that still holds its
 //    "after" value gets its "before" value back, block by block as the tiles load, through the same store commit as any
 //    edit (so a joined client sees it too). A cell that holds anything else was changed since (a player dug it, or the
@@ -20,7 +21,8 @@
 //  - Put-back cells stay on record until kiln.saves has seen two world files written after the put-back, so a crash
 //    before the next save does not lose them; then they leave the journal.
 // Cells a transient write sets again in the new session become that session's (an earlier copy is not put back over
-// them). A brand-new world has no GUID before its first save: its journal stays in memory until kiln.saves knows it.
+// them). A transient write needs the world's GUID (kiln.saves reads it from the game's memory at load, also for a new
+// world before its first save); without it the write is refused, so no save can hold an unjournaled transient cell.
 // Tick thread, except transient_before_save (the game's save thread); one mutex.
 #include <windows.h>
 
@@ -248,8 +250,15 @@ bool put_back(const VoxelWorld& v, const Key& k, const Entry& e, Bits* back, Bit
 KilnResult transient_admit(const int32_t wo[3], const uint32_t wd[3], const uint8_t* dirty_blocks) {
     std::lock_guard lock(g_mu);
     bind_locked();
-    if (regions_world().empty() && !g_api->service(kstr(KILN_SAVES_SERVICE), 1)) {
-        set_detail("transient edits need kiln.saves (the world's identity for their journal)");
+    // The journal must be on disk before any save can hold its cells, so it needs the world's identity now. kiln.saves
+    // reads it from the game's memory when the world loads, also for a brand-new world before its first save (lab:
+    // "world loaded: ..., <GUID>, revision 0 (memory ok, header missing rev 0)"); only without that (no kiln.saves, or
+    // a build where it can read the id from the world file's header only) is it unknown, and then the write is refused.
+    if (g_jworld.empty()) {
+        set_detail(g_api->service(kstr(KILN_SAVES_SERVICE), 1)
+                       ? "transient edits need the world's identity, which kiln.saves does not know yet (a new world whose "
+                         "id only its first save gives): refused so that the first save cannot keep them"
+                       : "transient edits need kiln.saves (the world's identity for their journal)");
         return KILN_ERR_UNAVAILABLE;
     }
     size_t fresh = 0;
@@ -315,7 +324,11 @@ void transient_note(const int32_t wo[3], const uint32_t wd[3], const KilnVoxel* 
             }
     if (!changed) return;
     g_dirty = true;
-    if (!regions_hooked()) save_locked();  // no save-region hook to flush before a save: now
+    // Normally the save-region hook writes the journal right before the game's serializer reads the store. A transient
+    // write is journaled before its commit; while a save is under way (accepted and not written, or its region list
+    // built in the last 2 s) the journal goes to disk here, before that commit, so a serializer that runs after the hook
+    // and reads the store later still finds every transient cell on record. Without the hook: always.
+    if (!regions_hooked() || (transient && regions_save_under_way())) save_locked();
 }
 
 void transient_pre(uint64_t step) {
