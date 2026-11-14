@@ -31,7 +31,7 @@ come with code fixes.
 | [KILN111](#kiln111) | warning (info for a game-style name the local catalog lacks) | a name that is no block, or the wrong kind of block | blocks.md |
 | [KILN112](#kiln112) | **error** | `clients` too low for the mod's blocks | blocks.md |
 | [KILN034](#kiln034) | **error** | an `OnBoot` that never runs (no `"boot"` in kiln.mod.json), or the run-time `Blocks.Define` in boot code | manifest.md, chapter 08 |
-| [KILN035](#kiln035) | warning | a tick, world or service API in boot code (`OnBoot`, `[BootThreadOnly]`) | the tick table and the service table (generated) |
+| [KILN035](#kiln035) | warning | a tick, world or service API in boot code (`OnBoot`, `[BootThreadOnly]`) | the tick, service and boot tables (generated) |
 
 Other KILN codes:
 - **KILN0xx** come from the SDK's MSBuild task (manifest checks, mdk.md), except KILN034 and KILN035 above: Roslyn rules
@@ -93,6 +93,10 @@ Kiln.Testing and every service, then reads their sources with Roslyn (`tools/Api
 - **Services:** the folders under `managed/services/` (22).
 - **Capability guards** (KILN121): the public static bool properties that answer what `Capabilities.Is("row")`
   answers, with their rows. See [KILN121](#kiln121), "Properties that ask the same question". 54 properties.
+- **Boot** (KILN035): `BootWorks`, the public members with a boot path of their own (`if (Game.InBoot) return …`:
+  `Config.Register`), which KILN035 leaves alone; `BootRefused`, the public members that reach
+  `if (Game.InBoot) throw …` (directly or through calls inside the same assembly, not through a member with a boot
+  path: a `ConfigFile.Changed` handler), which KILN035 reports.
 
 Run the script after changing Kiln.Api, Kiln.Testing or a service:
 `KILN_OUT=… managed/Kiln.Analyzers/tools/gen-apis.sh`.
@@ -658,8 +662,16 @@ No code fix: the manifest is not a source file, and a staged definition returns 
   `Chat`, `Spawn`, ... (the classes named after the services of the generated service table, in their own
   assemblies).
 
+- a member Kiln refuses on the boot thread although it allows any thread otherwise: the generated `BootRefused` table
+  (`if (Game.InBoot) throw`, directly or through a call: adding a `ConfigFile.Changed` handler).
+
 Not reported:
 - members marked `[BootThreadOnly]` (`BootDefinitions`, `boot.GameData.Read`);
+- members with a boot path of their own, the generated `BootWorks` table (`if (Game.InBoot) return ...`):
+  `Config.Register<T>()` reads the file and its defaults without writing in `OnBoot`, and reading its `Value` is a plain
+  property ([config.md](../config.md#in-modonboot)). Writing the config (`Set`, `TrySet`, `Save`, `Reload`), a `Changed`
+  handler and `Config.RegisterWorld` are still reported. KILN101 still counts `Config.Register` as a tick-thread member
+  outside boot code;
 - the capability guard properties (`Players.Available`, ...) and `Capabilities.Is`;
 - data helpers outside a service's own class (`Damage.Ice`, `Bodies`, block records);
 - Kiln.Api's `[AnyThread]` members such as `Mods.BootState`.
@@ -673,6 +685,8 @@ public override void OnBoot(BootContext boot)
     Chat.Broadcast("booting");                     // KILN035: must be called on the tick thread
     var n = Players.All.Count;                     // KILN035: a Kiln.Players service API
     var wood = boot.GameData.Read("item:Material_T1_Wood_Logs");   // fine: the offline view
+    var settings = Config.Register<Settings>();    // fine: reads the file, writes nothing
+    if (settings.Value.Enabled) settings.Save();   // KILN035: must be called on the tick thread
 }
 ```
 

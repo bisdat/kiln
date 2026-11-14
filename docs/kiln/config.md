@@ -79,6 +79,8 @@ public override void OnBoot(BootContext boot)
 - Refused in `OnBoot`, with "… is not available in OnBoot (it runs before the game's first tick); call it in OnLoad":
   `Set`/`TrySet`, `Save`, `Reload`, adding a `Changed` handler, and `RegisterWorld` (no world exists yet). The same message
   comes from every other tick-thread member called there.
+- The build says the same: [KILN035](modding/analyzers.md#kiln035) reports those members in `OnBoot`, and leaves
+  `Config.Register` and reading `Value` alone.
 
 ## Per world
 `Config.RegisterWorld<T>()` (or `Mod.WorldConfig<T>()`) keeps one file of the config for each world, in the world's folder beside

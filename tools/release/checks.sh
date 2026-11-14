@@ -218,8 +218,10 @@ check_template() (
   check_template_boot "$d"
 )
 
-# The boot case: a template mod with <KilnBoot>true</KilnBoot> and an OnBoot override, no kiln.mod.json of its own. It
-# builds only when the packed analyzers see KilnBoot (else KILN034, an error); its kiln.mod.json says "boot": true.
+# The boot case: a template mod with <KilnBoot>true</KilnBoot> and an OnBoot that reads its settings (Config.Register and
+# Value work there), no kiln.mod.json of its own. It builds only when the packed analyzers see KilnBoot (else KILN034,
+# an error) and allow the settings read in boot code (KILN035, a warning, made an error here); its kiln.mod.json says
+# "boot": true.
 check_template_boot() { # template dir (check_template's: its package cache and template hive)
   local d=$1 p=$1/BootCheck
   (cd "$d" && dotnet new kiln-mod -n BootCheck --feed "$out/sdk" --debug:custom-hive "$d/hive") || return
@@ -232,7 +234,7 @@ proj = p / "BootCheck.csproj"
 text = proj.read_text(encoding="utf-8")
 if text.count("</PropertyGroup>") < 1:
     sys.exit("BootCheck.csproj has no PropertyGroup")
-text = text.replace("</PropertyGroup>", "  <KilnBoot>true</KilnBoot>\n  </PropertyGroup>", 1)
+text = text.replace("</PropertyGroup>", "  <KilnBoot>true</KilnBoot>\n    <WarningsAsErrors>$(WarningsAsErrors);KILN035</WarningsAsErrors>\n  </PropertyGroup>", 1)
 proj.write_text(text, encoding="utf-8")
 mod = p / "BootCheckMod.cs"
 text = mod.read_text(encoding="utf-8")
@@ -240,7 +242,8 @@ anchor = "    public override void OnLoad()"
 if anchor not in text:
     sys.exit("BootCheckMod.cs has no OnLoad override to put OnBoot before")
 text = text.replace(anchor, "    public override void OnBoot(BootContext boot)\n    {\n"
-                    "        _ = boot.ModId;\n    }\n\n" + anchor, 1)
+                    "        if (!Config.Register<BootCheckSettings>().Value.Enabled) return;\n    }\n\n" + anchor, 1)
+text += "\npublic sealed class BootCheckSettings\n{\n    public bool Enabled { get; set; } = true;\n}\n"
 mod.write_text(text, encoding="utf-8")
 PY
   (cd "$p" && dotnet build -c Release -nologo -v q) || { echo "the boot mod (KilnBoot, OnBoot) did not build against the packed SDK"; return 1; }

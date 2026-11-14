@@ -1,7 +1,8 @@
 <Project>
   <!-- tk-boot-sdk: a boot mod built with Kiln.Sdk (repository mode) and no kiln.mod.json of its own: <KilnBoot> alone opts it into
        the boot phase, so the analyzers must see the property (Kiln.Analyzers.targets, CompilerVisibleProperty) or KILN034 stops
-       the build. BootFakeTests runs its OnBoot from the built folder, with the manifest the SDK wrote. -->
+       the build. Its OnBoot reads its settings (Config.Register, Value), and KILN035 is an error here. BootFakeTests runs its OnBoot
+       from the built folder, with the manifest the SDK wrote. -->
   <Import Project="../../../../Kiln.Sdk/Sdk/Sdk.props" />
   <PropertyGroup>
     <KilnModId>tk-boot-sdk</KilnModId>
@@ -11,6 +12,8 @@
     <KilnServices>Blocks</KilnServices>
     <KilnGameIds>None</KilnGameIds>
     <KilnBoot>true</KilnBoot>
+    <!-- KILN035 (a tick or service API in boot code) as an error: the settings read in OnBoot must stay allowed -->
+    <WarningsAsErrors>$(WarningsAsErrors);KILN035</WarningsAsErrors>
   </PropertyGroup>
   <Import Project="../../../../Kiln.Sdk/Sdk/Sdk.targets" />
   <!-- In repository mode the services' own project references land in the output; kiln/host has them (as TkWorld does). -->

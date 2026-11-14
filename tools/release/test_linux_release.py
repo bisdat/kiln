@@ -721,7 +721,10 @@ class TemplateCheckTests(unittest.TestCase):
         self.assertIn("built (KilnBoot): BootCheck/bin/Release/net10.0/kiln.mod.json", r.stdout)
         proj = (self.dir / "ck" / "template" / "BootCheck" / "BootCheck.csproj").read_text()
         self.assertIn("<KilnBoot>true</KilnBoot>", proj)
-        self.assertIn("override void OnBoot(BootContext boot)", (self.dir / "ck" / "template" / "BootCheck" / "BootCheckMod.cs").read_text())
+        self.assertIn("<WarningsAsErrors>$(WarningsAsErrors);KILN035</WarningsAsErrors>", proj)
+        src = (self.dir / "ck" / "template" / "BootCheck" / "BootCheckMod.cs").read_text()
+        self.assertIn("override void OnBoot(BootContext boot)", src)
+        self.assertIn("Config.Register<BootCheckSettings>().Value", src)
         # every dotnet call used the check's own cache; the caller's shell keeps its own
         self.assertEqual(log.count("NUGET_PACKAGES="), 5, log)
         self.assertNotIn("NUGET_PACKAGES=/caller/packages", log)

@@ -21,8 +21,11 @@ namespace Kiln.Analyzers;
 /// Boot code: the body of an <c>OnBoot</c> override, or of a method, accessor or type marked <c>[BootThreadOnly]</c>, with its local
 /// functions and the lambdas that run at once (LINQ). A lambda handed to Kiln, to another thread or kept by the mod is not boot code.
 /// Members marked <c>[BootThreadOnly]</c> (on themselves, their property or a type around them) and the capability guard properties
-/// (<c>X.Available</c>, the generated guard table) are fine in boot code. <c>[AnyThread]</c> is not enough: it says which threads may call a
-/// member, not that a world exists (<c>Players.All</c> is an empty snapshot before the game is entered).</summary>
+/// (<c>X.Available</c>, the generated guard table) are fine in boot code, and so are members with a boot path of their own (the generated
+/// BootWorks table: <c>Config.Register</c>, which reads the file without writing there; reading <c>ModConfig.Value</c> is a plain
+/// property). Members Kiln refuses on the boot thread (the generated BootRefused table: <c>ConfigFile.Changed</c>) are reported like the
+/// tick-thread ones (<c>ConfigFile.Set</c>, <c>Save</c>, <c>Reload</c>, <c>Config.RegisterWorld</c>). <c>[AnyThread]</c> is not enough: it
+/// says which threads may call a member, not that a world exists (<c>Players.All</c> is an empty snapshot before the game is entered).</summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class BootAnalyzer : DiagnosticAnalyzer
 {
@@ -116,7 +119,9 @@ public sealed class BootAnalyzer : DiagnosticAnalyzer
         if (Marked(m, BootThreadOnlyAttribute)) return null;
         var asProperty = m is IMethodSymbol { AssociatedSymbol: IPropertySymbol p } ? p : m as IPropertySymbol;
         if (asProperty is not null && KilnApis.GuardRows(asProperty).Count > 0) return null;  // answers what Capabilities.Is answers
+        if (cache.WorksInBoot(member)) return null;  // its own boot path (Config.Register)
         if (cache.RequiresTickThread(member)) return "must be called on the tick thread";
+        if (cache.RefusedInBoot(member)) return "is refused in boot code (it throws there)";
         if (ServiceClass(m) is { } service) return $"is a Kiln.{service} service API";
         return null;
     }
@@ -201,6 +206,7 @@ public sealed class BootAnalyzer : DiagnosticAnalyzer
     {
         InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax ma } => ma.Name.GetLocation(),
         MemberAccessExpressionSyntax ma => ma.Name.GetLocation(),
+        AssignmentExpressionSyntax { Left: MemberAccessExpressionSyntax ma } => ma.Name.GetLocation(),  // an event handler: its name
         _ => node.GetLocation(),
     };
 }
