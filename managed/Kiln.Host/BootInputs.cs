@@ -53,19 +53,30 @@ internal sealed class BootInputs
     /// later load matches it.</summary>
     public bool ChangedDuringBoot { get; }
 
-    /// <summary>The inputs of the mod in <paramref name="directory"/> as they are now.</summary>
+    /// <summary>Why the inputs could not be read (they then match no later reading), or null.</summary>
+    public string? Error { get; private init; }
+
+    /// <summary>The inputs of the mod in <paramref name="directory"/> as they are now. Never throws: a reading that fails has
+    /// <see cref="Error"/> set (the boot phase goes on; such a mod loads again only after a restart).</summary>
     public static BootInputs Read(string directory)
     {
         var files = new SortedDictionary<string, string>(StringComparer.Ordinal);
-        var root = new DirectoryInfo(directory);
-        if (root.Exists)
+        try
         {
-            foreach (var name in TopFiles)
-                Add(files, new FileInfo(Path.Combine(directory, name)), name);
-            foreach (var dll in Safe(() => root.EnumerateFiles("*.dll", SearchOption.TopDirectoryOnly)))
-                if (Counted(dll.Name)) Add(files, dll, dll.Name);
-            foreach (var tree in Trees)
-                Walk(files, new DirectoryInfo(Path.Combine(directory, tree)), tree, 0);
+            var root = new DirectoryInfo(directory);
+            if (root.Exists)
+            {
+                foreach (var name in TopFiles)
+                    Add(files, new FileInfo(Path.Combine(directory, name)), name);
+                foreach (var dll in Safe(() => root.EnumerateFiles("*.dll", SearchOption.TopDirectoryOnly)))
+                    if (Counted(dll.Name)) Add(files, dll, dll.Name);
+                foreach (var tree in Trees)
+                    Walk(files, new DirectoryInfo(Path.Combine(directory, tree)), tree, 0);
+            }
+        }
+        catch (Exception e)
+        {
+            return new BootInputs(files, "", false) { Error = $"{e.GetType().Name}: {e.Message}" };
         }
         return new BootInputs(files, Root(files), false);
     }
@@ -75,7 +86,7 @@ internal sealed class BootInputs
     public BootInputs Recheck(string directory)
     {
         var now = Read(directory);
-        return now.Hash == Hash ? this : new BootInputs(_files, Hash, true);
+        return Error == null && now.Error == null && now.Hash == Hash ? this : new BootInputs(_files, Hash, true) { Error = Error ?? now.Error };
     }
 
     /// <summary>What differs from <paramref name="frozen"/> in this reading, as "path changed", "path added", "path removed" (ordinal order).</summary>
@@ -151,9 +162,9 @@ internal sealed class BootInputs
             var node = JsonNode.Parse(span, documentOptions: new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
             return Encoding.UTF8.GetBytes("json:" + (node?.ToJsonString() ?? "null"));
         }
-        catch (JsonException)
+        catch (Exception e) when (e is JsonException or ArgumentException or InvalidOperationException)
         {
-            return bytes;
+            return bytes;  // not JSON (or a duplicate key, too deep): its bytes count
         }
     }
 

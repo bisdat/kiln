@@ -154,6 +154,23 @@ public sealed class BootInputsTests : ModsFixture
     }
 
     [Fact]
+    public void A_file_that_is_not_JSON_counts_by_its_bytes_and_the_reading_never_throws()
+    {
+        var dir = Mod();
+        var file = Path.Combine(dir, "blocks", "odd.json");
+        File.WriteAllText(file, """{ "statuses": {}, "statuses": {} }""");  // a duplicate key
+        var before = BootInputs.Read(dir);
+        Assert.Null(before.Error);
+        Assert.Equal(before.Hash, BootInputs.Read(dir).Hash);
+        File.WriteAllText(file, "not json");
+        var odd = BootInputs.Read(dir);
+        Assert.Null(odd.Error);
+        File.WriteAllText(file, "not  json");  // its bytes count: one space more is a change
+        Assert.Equal(["blocks/odd.json changed"], BootInputs.Read(dir).Differences(odd));
+        Assert.Empty(BootInputs.Read(Path.Combine(dir, "no-such-folder")).Files);
+    }
+
+    [Fact]
     public void BOOT_INPUTS_a_mod_that_changed_while_the_boot_phase_ran_needs_a_restart_whatever_it_looks_like_later()
     {
         var dir = Mod();

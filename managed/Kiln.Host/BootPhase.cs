@@ -411,8 +411,10 @@ internal static unsafe class BootPhase
                 if (defs.Count > 0) committed[id] = defs;
                 reports.Add(new BootModReport(id, gen, a.State, defs.Select(d => $"{d.Kind}/{d.Key}").ToList(), issues));
                 // frozen at the commit: what OnBoot and the collectors read; a change since OnBoot ran matches no later load
-                var frozen = a.Inputs.Recheck(a.Directory);
-                if (frozen.ChangedDuringBoot)
+                var frozen = a.State == BootModState.Committed ? a.Inputs.Recheck(a.Directory) : a.Inputs;
+                if (frozen.Error != null)
+                    log(LogLevel.Warn, $"boot: {id}: its files could not be read for the restart check ({frozen.Error}); it loads again only after a restart");
+                else if (frozen.ChangedDuringBoot)
                     log(LogLevel.Warn, $"boot: {id}: its files changed while the boot phase ran ({string.Join(", ", BootInputs.Read(a.Directory).Differences(a.Inputs).Take(3))}); it loads again only after a restart");
                 mods.SetBootInputs(id, frozen);
             }
@@ -595,7 +597,7 @@ internal sealed partial class ModManager
     }
 
     /// <summary>A boot mod's runtime load against this process's boot generation (chapter 08 §4.4): null when it may load (a committed mod
-    /// whose fingerprint is unchanged), else why not (<c>RestartRequiredBoot</c>; an absent author is recorded <c>MissedPhase</c>).</summary>
+    /// whose frozen inputs, BootInputs.cs, are unchanged), else why not (<c>RestartRequiredBoot</c>; an absent author is recorded <c>MissedPhase</c>).</summary>
     internal string? BootLoadRefusal(Manifest m, string directory)
     {
         if (m.Boot == ManifestBoot.None) return null;
@@ -605,10 +607,16 @@ internal sealed partial class ModManager
             BootInputs? frozen;
             lock (_bootInputs) frozen = _bootInputs.GetValueOrDefault(m.Id);
             if (frozen == null) return null;
+            if (frozen.Error != null)
+                return $"RestartRequiredBoot: mod {m.Id}'s files could not be read when this process's boot generation committed ({frozen.Error}); " +
+                       "restart the game (or the server) to load it";
             if (frozen.ChangedDuringBoot)
                 return $"RestartRequiredBoot: mod {m.Id}'s files changed while this process's boot phase ran, so its boot content matches no version " +
                        "of it; restart the game (or the server) to load it";
             var now = BootInputs.Read(directory);
+            if (now.Error != null)
+                return $"RestartRequiredBoot: mod {m.Id}'s files cannot be read to compare them with its boot content ({now.Error}); " +
+                       "restart the game (or the server) to load it";
             if (now.Hash == frozen.Hash) return null;
             var changes = now.Differences(frozen);
             return $"RestartRequiredBoot: mod {m.Id} changed since this process's boot generation committed its boot content " +
