@@ -112,6 +112,9 @@ public sealed partial class KilnHarness : IDisposable
             _tick.Invoke(() =>
             {
                 BootServiceTick();
+                // The registry binding outlives a harness: rows Kiln's services composed under the last one (a test's
+                // switch, its fakes' state) are decided again now, before this harness's first read, not at a refresh.
+                ServiceCapRows.RefreshStarted();
                 return 0;
             });
             _host.Log(LogLevel.Info, $"testkit: server folder {ServerDirectory}; Kiln {KitBackend.KilnVersion} (mod API {Mods.RuntimeApiVersion}), " +
