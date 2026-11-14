@@ -661,24 +661,11 @@ internal static unsafe class RulesRuntime
 
     private const string ReturnBookKey = "noclip-returns";
 
-    private sealed class ReturnStoreImpl : INoClipReturnStore
-    {
-        private NoClipReturnBook _memory = new();
-
-        public NoClipReturnBook? Book
-        {
-            get
-            {
-                if (!Capabilities.Is("kiln.saves")) return _memory;  // no world data here: the server's lifetime
-                if (!Saves.WorldDataReady) return null;               // a hosted world before its load: decide nothing
-                return RunAsData(() => WorldData.Get<NoClipReturnBook>(ReturnBookKey));
-            }
-        }
-
-        public void WorldClosing() => _memory = new();
-    }
-
-    private static readonly ReturnStoreImpl ReturnStore = new();
+    private static readonly NoClipReturnStore ReturnStore = new(
+        () => Capabilities.Is("kiln.saves"),      // no world data here: memory for the server's lifetime
+        () => Saves.WorldDataReady,               // a hosted world before its load: decide nothing
+        () => Saves.WorldId,
+        () => RunAsData(() => WorldData.Get<NoClipReturnBook>(ReturnBookKey)));
     private static readonly NoClipReturns Returns = new(ReturnStore);
     private static ModContext? _dataOwner;
 
