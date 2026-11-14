@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 // kiln.repl host tests (no game; built with clang-cl, run under plain Wine by tests/run.sh, so the guard's SEH is the
-// real thing): the ABI layout of kiln_repl.h, and the fault rule of guard.h, the one shape of every observer detour
-// (a forced access violation in an observer leaves the original's result intact, the original runs exactly once,
-// the hook is disabled and says so once).
+// real thing): the ABI layout of kiln_repl.h; the fault rule of guard.h, the one shape of every observer detour (a
+// forced access violation in an observer leaves the original's result intact, the original runs exactly once, the
+// hook is disabled and says so once); the record rings (rings.h: overflow counts `dropped`, the next record carries
+// gap = 1, wrap, the record limit, a second producer); what a send-callback batch counts for (wire.h).
 #include <windows.h>
 
 #include <cstddef>
@@ -13,6 +14,8 @@
 
 #include "../guard.h"
 #include "../layout.h"
+#include "../rings.h"
+#include "../wire.h"
 #include "services/kiln_repl.h"
 
 namespace {
@@ -54,6 +57,15 @@ void abi() {
     static_assert(sizeof(repl::Item12) == 12 && sizeof(repl::MsgEntry) == 32 && sizeof(repl::Batch) == 24 &&
                   sizeof(repl::Holder) == 48 && offsetof(repl::WriterOut, skipped) == 16);
     CHECK(sizeof(KilnReplApi) >= 64);
+    // dev.28's lab slots, then dev.31's at the end
+    static_assert(offsetof(KilnReplApi, lab_add_fakes) == 64 && offsetof(KilnReplApi, lab_decoded) == 96 &&
+                  offsetof(KilnReplApi, lab_payload) == 104 && offsetof(KilnReplApi, lab_hook_cost) == 112 &&
+                  sizeof(KilnReplApi) == 120);
+    static_assert(sizeof(KilnReplHookCost) == 8 + 17 * 8 && offsetof(KilnReplHookCost, callback_calls) == 48 &&
+                  offsetof(KilnReplHookCost, allocations) == 128);
+    static_assert(offsetof(KilnReplWatchEvent, reason) == 36);  // dev.28's pad2: same place
+    static_assert(KILN_REPL_KIND_CREATE == 2 && KILN_REPL_KIND_UPDATE == 3 && KILN_REPL_KIND_DESTROYED == 4 &&
+                  KILN_REPL_KIND_ENDED == 5 && KILN_REPL_PEER_LOCAL == 4);
 }
 
 // ---- the fault rule ----
@@ -154,11 +166,199 @@ void fault_rule() {
     CHECK(!repl::Guard{"fresh"}.disabled.load());
 }
 
+// ---- the record rings ----
+uint32_t drain_all(repl::Ring& r, std::vector<std::pair<uint32_t, uint8_t>>* got) {
+    return r.drain([&](const repl::RecordHeader& h, const uint8_t* p) {
+        uint32_t v = 0;
+        if (h.len >= 4) std::memcpy(&v, p, 4);
+        got->emplace_back(v, h.gap);
+    });
+}
+
+void rings() {
+    repl::Ring r;
+    CHECK(!r.ready() && r.reserve(1, 4) == nullptr);  // no buffer: nothing
+    CHECK(r.init(256, 1000) && r.capacity() == 256);
+    // 24-byte records (8 header + 16 payload): 10 fit in 256 bytes, the 11th is dropped and counted
+    uint8_t payload[16] = {};
+    uint32_t pushed = 0;
+    for (uint32_t i = 0; i < 12; ++i) {
+        std::memcpy(payload, &i, 4);
+        pushed += r.push(7, payload, sizeof payload);
+    }
+    CHECK(pushed == 10 && r.dropped() == 2 && r.written() == 10);
+    std::vector<std::pair<uint32_t, uint8_t>> got;
+    CHECK(drain_all(r, &got) == 10);
+    CHECK(got.size() == 10 && got[0].first == 0 && got[9].first == 9);
+    bool no_gap = true;
+    for (auto& g : got) no_gap = no_gap && g.second == 0;
+    CHECK(no_gap);  // records written before the drop carry no gap
+    // the next record that fits carries gap = 1, the one after it not
+    uint32_t v = 100;
+    std::memcpy(payload, &v, 4);
+    CHECK(r.push(7, payload, sizeof payload));
+    v = 101;
+    std::memcpy(payload, &v, 4);
+    CHECK(r.push(7, payload, sizeof payload));
+    got.clear();
+    CHECK(drain_all(r, &got) == 2 && got[0] == std::make_pair(100u, uint8_t{1}) && got[1] == std::make_pair(101u, uint8_t{0}));
+
+    // 30 records through the ring one at a time cross its end several times and come back in order
+    got.clear();
+    for (uint32_t i = 0; i < 30; ++i) {
+        std::memcpy(payload, &i, 4);
+        CHECK(r.push(7, payload, sizeof payload));
+        CHECK(drain_all(r, &got) == 1);
+    }
+    bool in_order = got.size() == 30;
+    for (uint32_t i = 0; i < got.size(); ++i) in_order = in_order && got[i].first == i && got[i].second == 0;
+    CHECK(in_order);
+
+    // a record that does not fit before the end leaves a wrap marker and starts at 0
+    repl::Ring w;
+    CHECK(w.init(64, 100));
+    uint8_t big[40] = {};
+    big[0] = 1;
+    CHECK(w.push(1, big, 32));       // 40 bytes at 0
+    got.clear();
+    CHECK(drain_all(w, &got) == 1);  // read: the space is free again, the write position is 40
+    big[0] = 2;
+    CHECK(w.push(1, big, 24));       // 32 bytes: 24 left before the end -> marker at 40, record at 0
+    got.clear();
+    CHECK(drain_all(w, &got) == 1 && got[0].first == 2 && w.dropped() == 0);
+
+    // the record limit: at most `records` unread records, whatever the bytes
+    repl::Ring n;
+    CHECK(n.init(4096, 3));
+    for (int i = 0; i < 5; ++i) n.push(1, payload, 4);
+    CHECK(n.written() == 3 && n.dropped() == 2);
+    got.clear();
+    CHECK(drain_all(n, &got) == 3 && got[0].second == 0);
+
+    // reserve / commit shorter / abort
+    repl::Ring c;
+    CHECK(c.init(256, 10));
+    uint8_t* p = c.reserve(3, 64);
+    CHECK(p != nullptr && c.reserved());
+    // a second producer while the reservation is open: dropped, never written into the open one
+    CHECK(c.reserve(3, 8) == nullptr && c.dropped() == 1);
+    v = 55;
+    std::memcpy(p, &v, 4);
+    c.commit(4);  // only 4 of the 64 bytes
+    CHECK(!c.reserved());
+    p = c.reserve(3, 16);
+    CHECK(p != nullptr);
+    c.abort();    // nothing published
+    got.clear();
+    CHECK(drain_all(c, &got) == 1 && got[0].first == 55 && got[0].second == 1);  // after the second producer's drop
+    // discard drops what is unread
+    c.push(3, payload, 4);
+    c.discard();
+    got.clear();
+    CHECK(drain_all(c, &got) == 0);
+    // a record larger than the ring is dropped
+    CHECK(c.reserve(1, 1000) == nullptr && c.dropped() == 2);
+    c.clear_counters();
+    CHECK(c.dropped() == 0);
+}
+
+// ---- what a batch counts for ----
+std::vector<uint8_t> entity_msg(uint32_t kind, uint32_t tick, uint32_t seq, uint32_t entity, uint16_t payload) {
+    std::vector<uint8_t> m(12);
+    const uint32_t w0 = (tick << 3) | kind;
+    std::memcpy(m.data(), &w0, 4);
+    std::memcpy(m.data() + 4, &seq, 4);
+    std::memcpy(m.data() + 8, &entity, 4);
+    if (kind == repl::kKindCreate) {
+        m.resize(12 + 4 + 16 + 1, 0);
+        m[16] = 0xAB;  // GUID's first byte
+    } else {
+        const uint32_t base = 0x80000000u | (tick - 4);
+        m.resize(16);
+        std::memcpy(m.data() + 12, &base, 4);
+    }
+    m.push_back(static_cast<uint8_t>(payload));
+    m.push_back(static_cast<uint8_t>(payload >> 8));
+    m.resize(m.size() + payload, 0x5A);
+    return m;
+}
+std::vector<uint8_t> destroy_msg(uint32_t tick, uint32_t seq, std::vector<uint32_t> a, std::vector<uint32_t> b) {
+    std::vector<uint8_t> m(10);
+    const uint32_t w0 = (tick << 3) | repl::kKindDestroyList;
+    std::memcpy(m.data(), &w0, 4);
+    std::memcpy(m.data() + 4, &seq, 4);
+    m[8] = static_cast<uint8_t>(a.size());
+    m[9] = static_cast<uint8_t>(b.size());
+    for (auto* l : {&a, &b})
+        for (uint32_t id : *l) {
+            m.resize(m.size() + 4);
+            std::memcpy(m.data() + m.size() - 4, &id, 4);
+        }
+    return m;
+}
+
+void batches() {
+    std::vector<std::vector<uint8_t>> bodies = {entity_msg(repl::kKindCreate, 100, 1, 2542, 9), entity_msg(repl::kKindUpdate, 101, 2, 2542, 5),
+                                               destroy_msg(102, 3, {2542}, {7, 8}), entity_msg(repl::kKindUpdate, 103, 4, 99, 3),
+                                               std::vector<uint8_t>(6, 0)};
+    repl::MsgEntry msgs[5] = {};
+    const uint8_t types[5] = {repl::kMsgEntity, repl::kMsgEntity, repl::kMsgList, repl::kMsgEntity, repl::kMsgHandshake};
+    uint64_t all = 0;
+    for (int i = 0; i < 5; ++i) {
+        msgs[i].type = types[i];
+        msgs[i].seq = static_cast<uint32_t>(i + 1);
+        msgs[i].data = bodies[i].data();
+        msgs[i].size = bodies[i].size();
+        all += msgs[i].size;
+    }
+    // everything accepted
+    repl::BatchCount n = repl::count_batch(msgs, 5, 5);
+    CHECK(n.messages == 5 && n.bytes == all && n.refused == 0);
+    CHECK(n.creates == 1 && n.updates == 2 && n.destroy_lists == 1 && n.destroyed_ids == 3);
+    // the session took the first 2: the rest is refused and not counted as sent
+    n = repl::count_batch(msgs, 5, 2);
+    CHECK(n.messages == 2 && n.refused == 3 && n.bytes == msgs[0].size + msgs[1].size && n.creates == 1 && n.updates == 1 &&
+          n.destroy_lists == 0);
+    // a sent count above the batch's (a stale field) never reads past it
+    n = repl::count_batch(msgs, 3, 9);
+    CHECK(n.messages == 3 && n.refused == 0);
+
+    // the destroy list's two lists; one cut short keeps only what it holds
+    repl::DestroyList l{};
+    CHECK(repl::parse_destroy(bodies[2].data(), bodies[2].size(), &l) && l.na == 1 && l.nb == 2 && repl::u32_at(l.ids) == 2542 &&
+          repl::u32_at(l.ids + 8) == 8 && l.tick == 102 && l.seq == 3);
+    CHECK(repl::parse_destroy(bodies[2].data(), bodies[2].size() - 4, &l) && l.na == 1 && l.nb == 1);
+    CHECK(!repl::parse_destroy(bodies[0].data(), bodies[0].size(), &l));  // an entity message is not a destroy list
+    // headers
+    repl::Header h{};
+    CHECK(repl::parse_header(bodies[0].data(), bodies[0].size(), &h) && h.kind == repl::kKindCreate && h.tick == 100 &&
+          h.entity == 2542 && h.has_guid && h.guid[0] == 0xAB && h.payload_len == 9);
+    CHECK(repl::parse_header(bodies[1].data(), bodies[1].size(), &h) && h.kind == repl::kKindUpdate && h.base == 97 && !h.has_guid &&
+          h.payload_len == 5);
+    CHECK(!repl::parse_header(bodies[1].data(), bodies[1].size() - 1, &h));  // cut short
+}
+
+// ---- observer depth: kiln-repl.dll counts heap allocations made inside observer code ----
+int g_depth_seen = -1;
+void depth_probe(void*) { g_depth_seen = repl::t_in_observer; }
+void observer_depth() {
+    repl::Guard g{"depth"};
+    CHECK(repl::t_in_observer == 0);
+    repl::observe(g, &depth_probe, nullptr);
+    CHECK(g_depth_seen == 1 && repl::t_in_observer == 0);
+    repl::Guard f{"depth-fault"};
+    repl::observe(f, [](void*) { fault_now(); }, nullptr);
+    CHECK(f.disabled.load() && repl::t_in_observer == 0);  // a fault leaves the depth right
+}
+
 }  // namespace
 
 int main() {
     abi();
     fault_rule();
+    rings();
+    batches();
+    observer_depth();
     std::printf("repl host tests: %d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;
 }

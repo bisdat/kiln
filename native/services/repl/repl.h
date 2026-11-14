@@ -78,11 +78,30 @@ void describe(uintptr_t where, char* out, size_t cap);
 // Calls the game's StateIndex into `index` (kIndexBytes, zeroed here first). False when it faulted.
 bool state_index(uint8_t* index, const uint8_t* state, uintptr_t registry_address);
 
-// A guard the tick thread's flush must look at.
+// A guard the tick thread's flush must look at (at the service's start: the list is fixed after it).
 void add_guard(Guard* g);
 
 // The peer of machine m as the last Pre saw it (kiln_repl.h "Machines and peers"); flags KILN_REPL_PEER_*.
 uint32_t peer_of(uint32_t machine, uint8_t* flags);
+
+uint32_t side();      // KILN_SIDE_* of this process
+bool observe_on();    // repl.observe resolved and the send step is hooked
+
+// The machine and channel (pred: 0 client, 1 prediction) of a replication context of `world`, or -1. Reads the world's
+// object table: call it inside a guard.
+int machine_of_ctx(uintptr_t world, uintptr_t ctx, uint8_t* pred);
+
+// ---- per-peer stats (stats.cpp) ----
+extern std::atomic<bool> g_measure;           // lab servers: time the hooks' own code (lab_hook_cost)
+extern std::atomic<uint64_t> g_observer_allocs; // allocations made inside observer code
+void stats_init();                            // kiln_plugin_main, after repl.observe resolved
+void stats_pre();                             // tick thread, every Pre: an owner that went off the tick thread
+void stats_peer_changed(uint32_t machine);    // tick thread: machine's slot has another peer
+void stats_world_stopping();
+void note_send_step(uint64_t start_tsc, uint64_t end_tsc);  // tick thread, lab: one send step
+KilnResult KILN_CALL t_stats_enable(KilnOwner owner, bool on);
+KilnResult KILN_CALL t_peer_stats(KilnReplPeerStats* out, uint32_t cap, uint32_t* count);
+KilnResult KILN_CALL lab_hook_cost(KilnReplHookCost* out, bool reset);
 
 // ---- the loopback harness (loopback.cpp) ----
 bool lab_init();                    // kiln_plugin_main, after the features resolved: what the harness needs
@@ -97,6 +116,8 @@ KilnResult KILN_CALL lab_force_relevant(uint32_t machine, KilnEntity entity);
 KilnResult KILN_CALL lab_remove_fakes();
 KilnResult KILN_CALL lab_stats(KilnReplLoopbackStats* out);
 KilnResult KILN_CALL lab_decoded(uint32_t machine, KilnEntity entity, uint32_t hash, uint8_t* out, uint32_t cap, uint32_t* len,
+                                 uint32_t* tick);
+KilnResult KILN_CALL lab_payload(uint32_t machine, KilnEntity entity, uint32_t kind, uint8_t* out, uint32_t cap, uint32_t* len,
                                  uint32_t* tick);
 
 }  // namespace repl

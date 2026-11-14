@@ -5,6 +5,8 @@
 // dev.28 replication notes) and the dossier's chapter 11.
 #include <windows.h>
 
+#include <intrin.h>
+
 #include <algorithm>
 #include <cstdarg>
 #include <cstdio>
@@ -79,9 +81,11 @@ uint32_t g_side = KILN_SIDE_SERVER;
 bool g_observe = false;   // repl.observe resolved and its send-step hook is in
 const KilnCapsApi* g_caps = nullptr;
 
-// ---- guards the tick thread flushes ----
+// ---- guards the tick thread flushes: a fixed list (added at the start), read in every Pre without a copy ----
+constexpr size_t kMaxGuards = 32;
 std::mutex g_guards_mu;
-std::vector<Guard*> g_guards;
+Guard* g_guards[kMaxGuards];
+std::atomic<size_t> g_guard_n{0};
 
 // ---- the send step: the GameServer of this frame ----
 Guard g_send_step_guard{"send-step"};
@@ -89,11 +93,13 @@ kiln::RawHook g_send_step;
 using SendStepFn = void (*)(uintptr_t gs);
 struct SendStepCall {
     uintptr_t gs;
+    uint64_t start;  // lab: rdtsc before the game's send step (lab_hook_cost's yardstick)
 };
 void send_step_before(void* p) { g_gs.store(static_cast<SendStepCall*>(p)->gs, std::memory_order_relaxed); }
+void send_step_after(void* p) { note_send_step(static_cast<SendStepCall*>(p)->start, __rdtsc()); }
 void d_send_step(uintptr_t gs) {
-    SendStepCall c{gs};
-    detour(g_send_step_guard, &c, &send_step_before, nullptr, g_send_step.original<SendStepFn>(), gs);
+    SendStepCall c{gs, g_measure.load(std::memory_order_relaxed) ? __rdtsc() : 0};
+    detour(g_send_step_guard, &c, &send_step_before, c.start ? &send_step_after : nullptr, g_send_step.original<SendStepFn>(), gs);
 }
 
 // ---- machine -> peer, snapshot each Pre ----
@@ -103,6 +109,7 @@ struct MachinePeer {
 };
 MachinePeer g_peers[KILN_REPL_MACHINES];  // tick thread
 
+// A machine whose slot has another peer than at the last Pre starts over (its counters, its rings, its watches).
 void snapshot_peers() {
     const uintptr_t gs = g_gs.load(std::memory_order_relaxed);
     const uint32_t fakes = lab_fake_mask();
@@ -112,7 +119,9 @@ void snapshot_peers() {
             p.peer = lab_peer_of(m, &p.flags);
         else if (gs && L.gs_machines >= 0)
             p.peer = read<uint32_t>(gs + static_cast<uintptr_t>(L.gs_machines) + m * kMachineSlotStride);
+        const bool changed = p.peer != g_peers[m].peer;
         g_peers[m] = p;
+        if (changed) stats_peer_changed(m);
     }
 }
 
@@ -219,13 +228,10 @@ void read_registry(uintptr_t world) {
          static_cast<unsigned long long>(world), reg->count, replicated, custom);
 }
 
+// Every Pre: no copy, no allocation (a line is formatted on the stack only when a guard faulted).
 void flush_guards() {
-    std::vector<Guard*> guards;
-    {
-        std::lock_guard lock(g_guards_mu);
-        guards = g_guards;
-    }
-    flush_faults(guards.data(), guards.size(), [](uintptr_t where, char* out, size_t cap) { describe(where, out, cap); },
+    flush_faults(g_guards, g_guard_n.load(std::memory_order_acquire),
+                 [](uintptr_t where, char* out, size_t cap) { describe(where, out, cap); },
                  [](const char* line) { logf(KILN_LOG_WARN, "%s", line); });
 }
 
@@ -234,6 +240,7 @@ void KILN_CALL on_pre(const KilnTickInfo*, void*) {
     const uintptr_t was = g_world.exchange(world, std::memory_order_relaxed);
     if (world && (world != was || world != g_registry_world)) read_registry(world);
     flush_guards();
+    stats_pre();
     if (world) {
         lab_pre(world);
         snapshot_peers();
@@ -243,6 +250,8 @@ void KILN_CALL on_pre(const KilnTickInfo*, void*) {
 void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
     if (!ev || ev->kind != KILN_WORLD_SERVER || ev->event != KILN_WORLD_STOPPING) return;
     lab_world_stopping();
+    stats_world_stopping();
+    for (MachinePeer& p : g_peers) p = MachinePeer{};
     g_world.store(0, std::memory_order_relaxed);
     g_gs.store(0, std::memory_order_relaxed);
 }
@@ -252,11 +261,6 @@ uint32_t KILN_CALL t_capabilities() {
     return (g_observe ? KILN_REPL_CAP_OBSERVE : 0u) | (lab_allowed() ? KILN_REPL_CAP_LOOPBACK : 0u);
 }
 
-KilnResult KILN_CALL t_stats_enable(KilnOwner, bool) { return KILN_ERR_UNAVAILABLE; }  // not built yet
-KilnResult KILN_CALL t_peer_stats(KilnReplPeerStats*, uint32_t, uint32_t* count) {
-    if (count) *count = 0;
-    return KILN_ERR_UNAVAILABLE;
-}
 KilnResult KILN_CALL t_watch(KilnOwner, KilnEntity, uint32_t, uint32_t, KilnReplWatchFn, void*, KilnHandle* out) {
     if (out) *out = 0;
     return KILN_ERR_UNAVAILABLE;
@@ -283,10 +287,13 @@ KilnResult KILN_CALL t_component_info(uint32_t hash, KilnReplComponentInfo* out)
 const KilnReplApi kTable = {{sizeof(KilnReplApi), KILN_REPL_VERSION}, &t_capabilities, &t_stats_enable, &t_peer_stats,
                             &t_watch, &t_remove, &t_component_info, &t_capture,
                             // lab (loopback.cpp)
-                            &lab_add_fakes, &lab_force_relevant, &lab_remove_fakes, &lab_stats, &lab_decoded};
+                            &lab_add_fakes, &lab_force_relevant, &lab_remove_fakes, &lab_stats, &lab_decoded,
+                            // lab, since 0.2.0-dev.31
+                            &lab_payload, &lab_hook_cost};
 
 void KILN_CALL on_ready(void*) {
     if (g_side == KILN_SIDE_SERVER) lab_ready(g_side);
+    g_measure.store(lab_allowed(), std::memory_order_relaxed);  // lab servers time the hooks' own code
     logf(KILN_LOG_INFO, "repl: capabilities() = 0x%x", t_capabilities());
 }
 
@@ -326,7 +333,30 @@ bool resolve_observe() {
 
 void add_guard(Guard* g) {
     std::lock_guard lock(g_guards_mu);
-    if (std::find(g_guards.begin(), g_guards.end(), g) == g_guards.end()) g_guards.push_back(g);
+    const size_t n = g_guard_n.load(std::memory_order_relaxed);
+    if (std::find(g_guards, g_guards + n, g) != g_guards + n) return;
+    if (n >= kMaxGuards) {
+        logf(KILN_LOG_WARN, "repl: guard %s not listed (%zu guards): its fault line will not be written", g->name, n);
+        return;
+    }
+    g_guards[n] = g;
+    g_guard_n.store(n + 1, std::memory_order_release);
+}
+
+uint32_t side() { return g_side; }
+bool observe_on() { return g_observe; }
+
+int machine_of_ctx(uintptr_t world, uintptr_t ctx, uint8_t* pred) {
+    if (!world || L.world_objects < 0 || L.obj_stride <= 0) return -1;
+    const uintptr_t base = *reinterpret_cast<const uintptr_t*>(world + static_cast<uintptr_t>(L.world_objects));
+    if (!base || ctx < base) return -1;
+    const uintptr_t d = ctx - base, stride = static_cast<uintptr_t>(L.obj_stride);
+    const uintptr_t m = d / stride, r = d % stride;
+    if (m >= KILN_REPL_MACHINES) return -1;
+    if (r == static_cast<uintptr_t>(L.obj_client_ctx)) *pred = 0;
+    else if (r == static_cast<uintptr_t>(L.obj_pred_ctx)) *pred = 1;
+    else return -1;
+    return static_cast<int>(m);
 }
 
 const Registry* registry() {
@@ -367,6 +397,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
         report_off("repl.observe", KILN_CAP_REASON_FAULTED, std::string("the send step could not be hooked: ") + g_send_step.error());
     } else {
         g_observe = true;
+        stats_init();
         logf(KILN_LOG_INFO, "repl: observe on (send step hooked; per-peer stats and watches install their hooks when asked)");
     }
     // repl.client: a Kiln client's receive side.

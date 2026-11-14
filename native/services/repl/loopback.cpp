@@ -41,6 +41,7 @@
 #include "services/kiln_caps.h"
 #include "services/kiln_net.h"
 #include "services/kiln_repl.h"
+#include "wire.h"
 
 namespace repl {
 namespace {
@@ -155,6 +156,25 @@ struct Mirror {
 };
 Mirror g_mirror[kMachines][2];
 
+// The newest create and update payload per entity on each fake's client channel (lab_payload): tick thread.
+struct Payloads {
+    struct Two {
+        uint32_t tick[2] = {0, 0};
+        bool have[2] = {false, false};
+        std::vector<uint8_t> bytes[2];  // [0] create, [1] update
+    };
+    std::unordered_map<uint32_t, Two> by_entity;
+    void put(uint32_t e, uint32_t kind, uint32_t tick, const uint8_t* p, uint32_t n) {
+        const int k = kind == kKindCreate ? 0 : 1;
+        Two& t = by_entity[e];
+        t.bytes[k].assign(p, p + n);
+        t.tick[k] = tick;
+        t.have[k] = true;
+    }
+    void clear() { by_entity.clear(); }
+};
+Payloads g_payloads[kMachines];
+
 struct Counters {
     uint64_t messages = 0, decoded = 0, equal = 0, differ = 0, custom_equal = 0, custom_differ = 0, decode_faults = 0,
              no_baseline = 0, acked = 0, dropped = 0, destroy_lists = 0;
@@ -185,19 +205,6 @@ using DecodeFn = StateRef* (*)(StateRef* out, Alloc* alloc, const Slice* payload
 using AckReceiveFn = void (*)(uintptr_t world, uint64_t machine, const Slice* msg, uint64_t pred);
 
 bool is_fake(uint32_t mask, uint32_t m) { return m < kMachines && ((mask >> m) & 1); }
-
-// The machine and channel of a replication context, or -1.
-int machine_of_ctx(uintptr_t world, uintptr_t ctx, uint8_t* pred) {
-    const uintptr_t base = *reinterpret_cast<const uintptr_t*>(world + static_cast<uintptr_t>(L.world_objects));
-    if (!base || ctx < base) return -1;
-    const uintptr_t d = ctx - base, stride = static_cast<uintptr_t>(L.obj_stride);
-    const uintptr_t m = d / stride, r = d % stride;
-    if (m >= kMachines) return -1;
-    if (r == static_cast<uintptr_t>(L.obj_client_ctx)) *pred = 0;
-    else if (r == static_cast<uintptr_t>(L.obj_pred_ctx)) *pred = 1;
-    else return -1;
-    return static_cast<int>(m);
-}
 
 uintptr_t object_of(uintptr_t world, uint32_t m) {
     const uintptr_t base = read<uintptr_t>(world + static_cast<uintptr_t>(L.world_objects));
@@ -406,57 +413,6 @@ uint64_t d_delta(void* bits, uintptr_t registry, const uint8_t* snap, const uint
 }
 
 // ---- the client side, on the tick thread ----
-struct Header {
-    uint32_t kind, tick, seq, entity, base;
-    bool has_guid;
-    uint8_t guid[16];
-    uint32_t payload_len;
-    const uint8_t* payload;
-};
-uint32_t u32_at(const uint8_t* p) {
-    uint32_t v;
-    std::memcpy(&v, p, 4);
-    return v;
-}
-// An entity message (§2.3): false when it is not a create or update, or is cut short.
-bool parse_header(const uint8_t* d, uint32_t n, Header* h) {
-    if (n < 12) return false;
-    const uint32_t w0 = u32_at(d);
-    h->kind = w0 & 7;
-    h->tick = w0 >> 3;
-    h->seq = u32_at(d + 4);
-    h->entity = u32_at(d + 8);
-    h->has_guid = false;
-    h->base = 0;
-    uint32_t o = 12;
-    if (h->kind == kKindCreate) {
-        if (n < o + 4 + 16 + 1 + 2) return false;
-        o += 4;  // parent
-        std::memcpy(h->guid, d + o, 16);
-        o += 16 + 1;
-        h->has_guid = true;
-    } else if (h->kind == kKindUpdate) {
-        if (n < o + 4 + 2) return false;
-        h->base = u32_at(d + o) & 0x7fffffffu;  // bit 31: the baseline is the acknowledged state A
-        o += 4;
-        if (h->base == 0) {
-            if (n < o + 16 + 2) return false;
-            std::memcpy(h->guid, d + o, 16);
-            o += 16;
-            h->has_guid = true;
-        }
-    } else {
-        return false;
-    }
-    uint16_t len;
-    std::memcpy(&len, d + o, 2);
-    o += 2;
-    if (o + len > n) return false;
-    h->payload_len = len;
-    h->payload = d + o;
-    return true;
-}
-
 // The template map by GUID (R + spawn/registry.template_map): the GUID's first u32 picks the bucket, linear probing,
 // full 16-byte compares.
 uintptr_t seh_template_by_guid(uintptr_t registry, const uint8_t guid[16]) {
@@ -527,34 +483,9 @@ bool seh_reset(uintptr_t world, uint32_t m) {
     }
 }
 
-// The components of a state that carry data (list 1): registry index and the data's offset in the blob.
-struct Part {
-    uint16_t index;
-    uint32_t off;
-    uint16_t size;
-};
-bool state_parts(const Registry& reg, const uint8_t* s, Part* out, uint32_t cap, uint32_t* n) {
-    *n = 0;
-    alignas(16) uint8_t index[kIndexBytes];
-    if (!state_index(index, s, reg.address)) return false;
-    uint16_t total, count;
-    std::memcpy(&total, s, 2);
-    std::memcpy(&count, s + 2, 2);
-    uint32_t o = kStateHeader;
-    for (uint32_t k = 0; k < count; ++k) {
-        if (o + 2 > total || *n >= cap) return false;
-        uint16_t i;
-        std::memcpy(&i, s + o, 2);
-        o += 2;
-        if (i >= reg.count) return false;
-        if (reg.at[i].flags & KILN_REPL_COMPONENT_VERSIONED) o += 1;
-        uint16_t off;
-        std::memcpy(&off, index + kIndexOffsets + i * 2, 2);
-        const uint32_t at = static_cast<uint32_t>(kStateHeader) + off;
-        if (at + reg.at[i].size > total) return false;
-        out[(*n)++] = Part{i, at, reg.at[i].size};
-    }
-    return true;
+// The components of a state that carry data (wire.h), offsets from the game's StateIndex.
+bool parts_of(const Registry& reg, const uint8_t* s, Part* out, uint32_t cap, uint32_t* n) {
+    return state_parts(reg, s, [&](uint8_t* index, const uint8_t* st) { return state_index(index, st, reg.address); }, out, cap, n);
 }
 
 void note(const char* fmt, ...) {
@@ -572,7 +503,7 @@ void note(const char* fmt, ...) {
 void compare(const Registry& reg, const uint8_t* decoded, const uint8_t* snapshot, uint32_t entity, uint32_t tick) {
     Part a[kMaxComponents / 4], b[kMaxComponents / 4];
     uint32_t na = 0, nb = 0;
-    if (!state_parts(reg, decoded, a, std::size(a), &na) || !state_parts(reg, snapshot, b, std::size(b), &nb) || na != nb) {
+    if (!parts_of(reg, decoded, a, std::size(a), &na) || !parts_of(reg, snapshot, b, std::size(b), &nb) || na != nb) {
         ++C.differ;
         note("the decoded component set of entity %u (tick %u) is not the server's (%u vs %u)", entity, tick, na, nb);
         return;
@@ -608,15 +539,15 @@ void drain_one(uintptr_t world, const Registry* reg, uint32_t m, uint8_t pred) {
         for (int k = 0; k < 4; ++k) ack.push_back(static_cast<uint8_t>(msg.seq >> (8 * k)));
         if (msg.type == kMsgList) {  // a destroy list: the client forgets these entities
             ++C.destroy_lists;
-            if (msg.len >= 10) {
-                const uint32_t ids = std::min<uint32_t>(d[8] + d[9], (msg.len - 10) / 4);
-                for (uint32_t k = 0; k < ids; ++k) mir.forget(u32_at(d + 10 + 4 * k));
-            }
+            DestroyList l;
+            if (parse_destroy(d, msg.len, &l))
+                for (uint32_t k = 0; k < l.na + l.nb; ++k) mir.forget(u32_at(l.ids + 4 * k));
             continue;
         }
         if (msg.type != kMsgEntity || !reg) continue;
         Header h{};
         if (!parse_header(d, msg.len, &h)) continue;
+        if (pred == 0) g_payloads[m].put(h.entity, h.kind, h.tick, h.payload, h.payload_len);
         // the baseline, as a client finds it
         uint8_t* tmpl = nullptr;
         const uint8_t* base = nullptr;
@@ -686,6 +617,7 @@ void free_buffers(uint32_t m) {
         g_snap[m][p] = Snaps{};
         g_mirror[m][p].clear();
     }
+    g_payloads[m].clear();
     g_forced_n[m].store(0, std::memory_order_release);
 }
 
@@ -988,7 +920,7 @@ KilnResult KILN_CALL lab_decoded(uint32_t machine, KilnEntity entity, uint32_t h
     if (!state) return KILN_ERR_NOT_FOUND;
     Part parts[kMaxComponents / 4];
     uint32_t n = 0;
-    if (!state_parts(*reg, state, parts, std::size(parts), &n)) return KILN_ERR_NOT_FOUND;
+    if (!parts_of(*reg, state, parts, std::size(parts), &n)) return KILN_ERR_NOT_FOUND;
     for (uint32_t k = 0; k < n; ++k) {
         if (reg->at[parts[k].index].hash != hash) continue;
         *len = parts[k].size;
@@ -999,6 +931,26 @@ KilnResult KILN_CALL lab_decoded(uint32_t machine, KilnEntity entity, uint32_t h
         return KILN_OK;
     }
     return KILN_ERR_NOT_FOUND;
+}
+
+KilnResult KILN_CALL lab_payload(uint32_t machine, KilnEntity entity, uint32_t kind, uint8_t* out, uint32_t cap, uint32_t* len,
+                                 uint32_t* tick) {
+    if (len) *len = 0;
+    if (tick) *tick = 0;
+    if (KilnResult rc = gate(); rc != KILN_OK) return rc;
+    if (machine >= kMachines || !entity || !len || (kind != KILN_REPL_KIND_CREATE && kind != KILN_REPL_KIND_UPDATE))
+        return KILN_ERR_INVALID_ARGUMENT;
+    drain(g_world.load());
+    const auto it = g_payloads[machine].by_entity.find(entity);
+    const int k = kind == KILN_REPL_KIND_CREATE ? 0 : 1;
+    if (it == g_payloads[machine].by_entity.end() || !it->second.have[k]) return KILN_ERR_NOT_FOUND;
+    const std::vector<uint8_t>& b = it->second.bytes[k];
+    *len = static_cast<uint32_t>(b.size());
+    if (tick) *tick = it->second.tick[k];
+    if (!out) return KILN_OK;
+    if (cap < b.size()) return KILN_ERR_BUFFER_TOO_SMALL;
+    if (!b.empty()) std::memcpy(out, b.data(), b.size());
+    return KILN_OK;
 }
 
 }  // namespace repl
