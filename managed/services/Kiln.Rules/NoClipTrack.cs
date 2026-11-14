@@ -374,7 +374,8 @@ internal sealed class NoClipTrack(INoClipWorld world)
         if (_move is not null) return new(Trip: trip);
         // Open space ends the hold: by the move, or by itself (the player flew out). After a teleport, so does any
         // place where the character is not in matter up to the waist or the head (see Leaving).
-        if (Free(at) || (_holdReason is NoClipEnd.Teleport or NoClipEnd.Left && world.Torso(at) != NoClipSpace.Inside))
+        if (Free(at) || ((_holdReason == NoClipEnd.Teleport && world.Torso(at) != NoClipSpace.Inside) ||
+                         (_holdReason == NoClipEnd.Left && world.Torso(at) == NoClipSpace.Free)))
         {
             Release(_holdReason, _holdReason is NoClipEnd.RuleEnded or NoClipEnd.Left && _landed is { } l && Distance(at, l) <= ArrivedWithin ? l : null);
             return new(Trip: trip, Released: true);
