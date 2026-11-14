@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
-// Frozen x64 slot map reviewed against EMF 0.6.8 sdk/include/emf/emf_api.h (v27: 728 bytes; v40: 1088 bytes).
+// Frozen x64 slot map reviewed against EMF 0.6.11 sdk/include/emf/emf_api.h (v27: 728 bytes; v40 to v42: 1088 bytes).
 #include "emf/emf_api.h"
 #include <cstddef>
 #define SLOT(name, offset) static_assert(offsetof(EmfApi, name) == offset)
-static_assert(sizeof(EmfApi)==1088 && alignof(EmfApi)==8);
+static_assert(sizeof(EmfApi)==1088 && alignof(EmfApi)==8 && EMF_API_VERSION==42);
 static_assert(offsetof(EmfApi,version)==0 && offsetof(EmfApi,size)==4);
 SLOT(log, 8);
 SLOT(server_world, 16);
@@ -95,7 +95,7 @@ SLOT(net_to_server, 696);
 SLOT(net_to_player, 704);
 SLOT(net_to_players, 712);
 SLOT(net_peer, 720);
-// v28-v40 (EMF 0.6.3 to 0.6.8)
+// v28-v40 (EMF 0.6.3 to 0.6.8); v41 and v42 (0.6.10, 0.6.11) added no slot
 SLOT(on_player, 728);
 SLOT(item_name, 736);
 SLOT(game_language, 744);
@@ -144,6 +144,9 @@ SLOT(enemy_moving, 1080);
 static_assert(sizeof(EmfNetFrom) == 24 && offsetof(EmfNetFrom, account) == 8);
 static_assert(sizeof(EmfNetChannel) == 56 && offsetof(EmfNetChannel, on_server) == 32);
 static_assert(sizeof(EmfPlayerEvent) == 96 && sizeof(EmfHit) == 80 && sizeof(EmfHitRule) == 36);
-static_assert(sizeof(EmfRemoveBuilding) == 144 && sizeof(EmfEnemyOrder) == 120 && sizeof(EmfMoveOrder) == 128);
+// v41 appended EmfMoveOrder.stuck_seconds and pad2 (128 -> 136), v42 EmfPathResult.doors (20 -> 32): fields at the end
+static_assert(sizeof(EmfRemoveBuilding) == 144 && sizeof(EmfEnemyOrder) == 120 && sizeof(EmfMoveOrder) == 136 &&
+              offsetof(EmfMoveOrder, stuck_seconds) == 128);
+static_assert(sizeof(EmfPathResult) == 32 && offsetof(EmfPathResult, length) == 16 && offsetof(EmfPathResult, doors) == 24);
 static_assert(sizeof(EmfPathQuery) == 52 && sizeof(EmfMarker) == 80 && sizeof(EmfCanvas) == 24 && sizeof(EmfCanvasCmd) == 64);
-int main() { return EMF_API_VERSION == 40 ? 0 : 1; }
+int main() { return EMF_API_VERSION == 42 ? 0 : 1; }

@@ -1,8 +1,13 @@
 // SPDX-License-Identifier: MIT
-// The EmfApi table, v28 to v40 (EMF 0.6.3 to 0.6.8): the 45 functions EMF appended after net_peer.
+// The EmfApi table, v28 to v42 (EMF 0.6.3 to 0.6.11): the 45 functions EMF appended after net_peer.
 //
-// kiln-emf serves the whole v40 table (1088 bytes) so that a mod built against any EMF header up to 0.6.8 starts:
-// emf::init in EMF's SDK refuses a host whose table is smaller than the mod's own, whatever the mod then calls.
+// kiln-emf serves the whole table (1088 bytes) so that a mod built against any EMF header up to 0.6.11 starts:
+// emf::init in EMF's SDK refuses a host whose table is smaller than the mod's own, whatever the mod then calls (since
+// 0.6.10 a mod may pass a lower min_version and check has_vNN(), but the default is the header's whole table).
+// v41 (0.6.10) and v42 (0.6.11) added no function, only fields at the end of two structs: EmfMoveOrder.stuck_seconds
+// (and the flag EMF_MOVE_PEACEFUL_ALL) and EmfPathResult.doors. kiln-emf serves version 42 so that a mod whose mod.json
+// says "emf": 41 or 42 loads; enemy_move and path_find, the functions those fields belong to, are not carried yet
+// (below): a move order of either size is refused with its `why`, and no path result is ever handed to a mod.
 //
 // Carried: chat_tell_ex and chat_broadcast_ex (api_game.cpp: kiln.chat's server lines are already lines without a
 // speaker) and world_to_screen (kiln.render's camera, below).
