@@ -1496,6 +1496,10 @@ export const cookPlan = (gameId: GameId) => call<CookJob[]>("cook_plan", { gameI
  *  Cancel stops the tool that runs. Refuses while the game runs ("Cook again" also right after a start). A mod's
  *  failed cook is in the result, never the task's error. */
 export const cookRun = (gameId: GameId, modId: string | null = null) => call<TaskId>("cook_run", { gameId, modId });
+/** Play once with another profile: a task (result BootSnapshot) that makes the boot game-data snapshot when an enabled
+ *  mod of that single start asks for the boot phase, as Play's cook_run does after the cook (`skipped` otherwise). Cooks
+ *  nothing. Refuses while the game runs; a producer that fails is in the result, never the task's error. */
+export const bootSnapshotRun = (gameId: GameId, profileId: ProfileId) => call<TaskId>("boot_snapshot_run", { gameId, profileId });
 
 // library.rs
 export const libraryList = (kind: ModKind | null = null) => call<LibraryEntry[]>("library_list", { kind });
@@ -1865,7 +1869,7 @@ export const COMMANDS = [
   "engine_settings_get", "engine_settings_set", "engine_status", "engine_own_folders", "engine_adopt_folder", "eml_backup", "eml_restore",
   "chain_view", "chain_set_late",
   "found_scan", "found_add",
-  "cook_plan", "cook_run",
+  "cook_plan", "cook_run", "boot_snapshot_run",
   "report_save", "report_summary",
   "data_folder_get", "data_folder_size", "data_folder_check", "data_folder_move", "data_folder_use", "data_folder_reset",
   "data_folder_notice_ack", "data_folder_restart",

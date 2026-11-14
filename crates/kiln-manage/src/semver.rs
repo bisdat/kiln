@@ -1,6 +1,7 @@
 //! A port of managed/Kiln.Host/SemVer.cs (SemVersion, VersionRange). Parity: schema/fixtures/semver.
 //!
-//! Numeric parts follow C#'s `int`: a part above 2147483647 does not parse. Build metadata is kept but never
+//! Numeric parts follow C#'s `int`: a part above 2147483647 does not parse. A numeric pre-release identifier has no
+//! such limit: it compares by its value at any length ([`compare_numeric`]). Build metadata is kept but never
 //! compared. The derived `PartialEq` compares every field (build included); semver equality is
 //! `compare(..) == Equal`.
 
@@ -24,6 +25,19 @@ fn parse_i32(s: &str) -> Option<u64> {
         return None;
     }
     s.parse::<u64>().ok().filter(|&v| v <= i32::MAX as u64)
+}
+
+/// A numeric pre-release identifier (semver.org §9): ASCII digits only, of any length.
+fn is_numeric(s: &str) -> bool {
+    !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Two numeric identifiers by value, whatever their length (no integer type to overflow): without leading zeros the
+/// shorter is the lower, and two of one length compare digit by digit. The parser refuses leading zeros; a value built
+/// in code with them still compares by its value.
+fn compare_numeric(a: &str, b: &str) -> Ordering {
+    let (a, b) = (a.trim_start_matches('0'), b.trim_start_matches('0'));
+    a.len().cmp(&b.len()).then_with(|| a.as_bytes().cmp(b.as_bytes()))
 }
 
 /// `char.IsAsciiLetterOrDigit(c) || c == '-'` for every char, non-empty.
@@ -135,11 +149,12 @@ impl SemVersion {
             return b.len().cmp(&a.len()); // release > pre-release
         }
         for (x, y) in a.iter().zip(b.iter()) {
-            let c = match (parse_i32(x), parse_i32(y)) {
-                (Some(xi), Some(yi)) => xi.cmp(&yi),
-                (Some(_), None) => Ordering::Less,
-                (None, Some(_)) => Ordering::Greater,
-                (None, None) => x.as_bytes().cmp(y.as_bytes()),
+            // §11.4: numeric identifiers by value, below every alphanumeric one; alphanumeric ones in ASCII order
+            let c = match (is_numeric(x), is_numeric(y)) {
+                (true, true) => compare_numeric(x, y),
+                (true, false) => Ordering::Less,
+                (false, true) => Ordering::Greater,
+                (false, false) => x.as_bytes().cmp(y.as_bytes()),
             };
             if c != Ordering::Equal {
                 return c;
@@ -487,6 +502,17 @@ mod tests {
         assert_eq!(v(" v1.2 ").to_string(), "1.2.0");
         assert!(SemVersion::try_parse("1.0.0-01").is_none());
         assert!(SemVersion::try_parse("1..2").is_none());
+    }
+
+    #[test]
+    fn numeric_prerelease_identifiers_compare_by_value_at_any_length() {
+        assert_eq!(v("1.0.0-dev.9999999999").compare(&v("1.0.0-dev.10000000000")), Ordering::Less);
+        assert_eq!(v("1.0.0-dev.2147483648").compare(&v("1.0.0-dev.2147483647")), Ordering::Greater);
+        assert_eq!(v("1.0.0-dev.18446744073709551616").compare(&v("1.0.0-dev.18446744073709551616+b")), Ordering::Equal);
+        // numeric below alphanumeric, also when the alphanumeric one sorts below digits in ASCII ('-' < '0')
+        assert_eq!(v("1.0.0-dev.99999999999").compare(&v("1.0.0-dev.-1")), Ordering::Less);
+        assert_eq!(compare_numeric("007", "7"), Ordering::Equal);
+        assert_eq!(compare_numeric("0", "00"), Ordering::Equal);
     }
 
     #[test]

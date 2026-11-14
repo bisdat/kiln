@@ -1,7 +1,7 @@
 # The boot game-data snapshot
 
 `Mod.OnBoot` runs before the game has loaded any of its data, so `BootContext.GameData.Read` cannot ask the running
-game. It reads a **snapshot** of the game's data instead: files made before the start, by the Kiln launcher at Play, by
+game. It reads a **snapshot** of the game's data instead: files made before the start, by the Kiln launcher at Play (and at a single start with another profile), by
 `tools/deploy-server.sh`, or by hand with `kiln boot-snapshot --game <dir>`. kiln.boot only reads it. Without a
 snapshot of exactly this game build the capability `mods.boot.game_data` is unavailable and says what to run.
 

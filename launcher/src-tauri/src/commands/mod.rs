@@ -183,6 +183,7 @@ pub const NAMES: &[&str] = &[
     "found_add",
     "cook_plan",
     "cook_run",
+    "boot_snapshot_run",
     "report_save",
     "report_summary",
     "data_folder_get",
