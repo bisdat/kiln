@@ -83,7 +83,9 @@ public:
     Journal(Store& store, Logger log) : store_(store), log_(std::move(log)) {}
 
     // Binds to world `world` (GUID text): the earlier world's journal is compacted, this one's loaded; every loaded cell
-    // is pending (checked once by the put-back). Then a compaction starts this session's log.
+    // is pending (checked once by the put-back). Then a compaction starts this session's log. An empty `world` (the
+    // game closed the world and the next one's identity is not known yet) compacts the earlier world's journal and
+    // leaves the journal unbound: transient writes are refused and nothing is recorded under the earlier world.
     void bind(const std::string& world);
     const std::string& world() const { return world_; }
     bool durable() const { return durable_; }

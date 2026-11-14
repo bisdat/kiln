@@ -345,6 +345,28 @@ void test_bad_snapshot_aside() {
     check(j.entries().count({0, 0, 0}) == 1, "and its log is still replayed");
 }
 
+// A game client hosts one world after another. When the game closes world A, kiln.saves has no identity until the next
+// world's is known, and a brand-new world's is known only after its first save: the journal must not go on recording
+// under A meanwhile (the new world's cells would go into A's journal, and A's next start would look for them in A).
+void test_a_world_without_identity_unbinds() {
+    MemStore s;
+    Journal j(s, logger());
+    j.bind(W);
+    check(transient(j, Write(0, 0, 0, 10, 20)), "world A: a transient write is recorded");
+    const size_t log_before = s.files[W + ".log"].size();
+    j.bind("");  // the game closed world A; the next world has no identity yet
+    check(j.world().empty() && j.entries().empty(), "a world without an identity unbinds the journal");
+    std::string why;
+    check(!transient(j, Write(64, 0, 0, 5, 30), &why) && why.find("identity") != std::string::npos,
+          "a transient write in a world without an identity is refused");
+    check(kept(j, Write(0, 0, 0, 10, 20)), "a kept write there goes through");
+    check(s.files[W + ".log"].size() == log_before, "neither wrote to world A's log");
+    uint32_t cells = 0;
+    bool pending = false;
+    check(!journaled(s, {64, 0, 0}) && journaled(s, {0, 0, 0}, &cells, &pending) && cells == 10 && pending,
+          "world A's journal holds its own cells only, pending when A is loaded again");
+}
+
 }  // namespace
 
 int main() {
@@ -361,6 +383,7 @@ int main() {
     test_ordinary_kept_writes_pay_nothing();
     test_faulted_kept_commit_restores_records();
     test_bad_snapshot_aside();
+    test_a_world_without_identity_unbinds();
     std::printf("transient journal: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }
