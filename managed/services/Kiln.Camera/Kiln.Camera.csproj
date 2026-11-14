@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- kiln.camera: the managed face of native/services/camera (camera write: Mode locks, render-only cinematics, the
+       rendered snapshot) and the owner of the remote camera transport (Transport/: channel kiln.camera v1).
+       Minimal file made by the S7 transport task; the S2 skeleton's version replaces it at the merge. -->
+  <PropertyGroup>
+    <RootNamespace>Kiln</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kiln.Camera.Tests" />
+    <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />
+  </ItemGroup>
+</Project>
