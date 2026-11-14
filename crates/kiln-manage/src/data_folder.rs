@@ -320,6 +320,14 @@ impl DataLock {
     }
 }
 
+impl Drop for DataLock {
+    /// Unlocked before the file closes, as [`crate::util::LockedFile`] does and for the same reason: a program started
+    /// meanwhile by another thread holds a copy of the file until its exec, and with it the lock.
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
+}
+
 /// The most a path the game opens without a `\\?\` prefix may have on Windows: MAX_PATH (260) less the closing NUL.
 pub const WINDOWS_MAX_PATH: usize = 259;
 
