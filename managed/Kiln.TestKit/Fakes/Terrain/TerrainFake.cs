@@ -15,6 +15,13 @@ internal sealed class TerrainFakeState
     public readonly Dictionary<(int, int, int), Voxel> Cells = new();
     public readonly List<CellBox> Bases = [];
     public readonly Dictionary<string, TerrainBook> Books = new(StringComparer.Ordinal);
+    /// <summary>The world file's revision: a save adds one (HarnessTerrain.SaveWorld).</summary>
+    public uint Revision = 1;
+    /// <summary>Kiln's witness files (kiln/data/kiln.terrain/&lt;world&gt;/&lt;mod&gt;.json), by "world|mod", as JSON.</summary>
+    public readonly Dictionary<string, string> Witnesses = new(StringComparer.Ordinal);
+    /// <summary>Worlds whose Kiln data is lost (Kiln.Saves reports DataMatch.None there).</summary>
+    public readonly HashSet<string> DataLost = new(StringComparer.Ordinal);
+    public readonly List<Action<string, uint>> AfterSave = [];
     public readonly List<FakeTerrainWrite> Writes = [];
     /// <summary>Runs inside each write where kiln.build posts BuildEditingEvent: after the overlay read and decided, before
     /// the guard compares and the write commits (<see cref="HarnessTerrain.Editing"/>).</summary>
@@ -58,9 +65,11 @@ internal sealed class TerrainFake : IKitFake
 
     public void AddCoverage(List<CoverageRow> rows) =>
         rows.Add(new CoverageRow("Terrain", CoverageKind.RecordingFake, ["kiln.terrain", "terrain.overlays", "terrain.baked", "terrain.biomes"],
-            "Kiln.Terrain's own code on an in-memory world (KilnHarness.Terrain): flat ground, the cells a test sets, base boxes, and one ledger per mod and " +
-            "world id. Inspect, Apply, Forget and Applied run as in the game: batches, the ledger's rules, conflicts, Terrain.Changed. Not modelled: streaming " +
-            "(tiles are loaded unless the test says not), the game's save (the ledger lives in the harness, not in the fake kiln.saves), kiln.build's own events, " +
+            "Kiln.Terrain's own code on an in-memory world (KilnHarness.Terrain): flat ground, the cells a test sets, base boxes, one ledger per mod and " +
+            "world id, and Kiln's witness of the kept plans with the world file's revision (SaveWorld, LoseLedger: a lost ledger is refused, a first install " +
+            "over matching ground is not). Inspect, Apply, Forget and Applied run as in the game: batches, the ledger's rules, conflicts, Terrain.Changed. " +
+            "Not modelled: streaming (tiles are loaded unless the test says not), the game's save itself (the ledger lives in the harness, not in the fake " +
+            "kiln.saves), kiln.build's own events and its transient journal, " +
             "and time: from code that is not a mod's, every batch runs in the same step. terrain.baked and terrain.biomes are off, as in the game."));
 
     private sealed class Backend(KilnHarness harness, TerrainFakeState s, ModContext? mod) : ITerrainBackend
@@ -139,5 +148,32 @@ internal sealed class TerrainFake : IKitFake
         }
 
         public void Save(TerrainBook book) { lock (s.Lock) s.Books[s.WorldId + "|" + Mod] = book; }
+
+        // Kiln's witness of the kept plans (TerrainLoss), as in the game: per world and mod, outside the ledger
+        public DataMatch LoadedData { get { lock (s.Lock) return s.DataLost.Contains(s.WorldId) ? DataMatch.None : DataMatch.Exact; } }
+        public (string? Id, uint Revision) SaveIdentity { get { lock (s.Lock) return (s.WorldId, s.Revision); } }
+        public string WitnessLocation(string saveId) => $"kiln/data/kiln.terrain/{saveId}/{Mod}.json";
+
+        public TerrainWitness? ReadWitness(string saveId)
+        {
+            string? json;
+            lock (s.Lock) s.Witnesses.TryGetValue(saveId + "|" + Mod, out json);
+            if (json is null) return null;
+            try
+            {
+                var w = System.Text.Json.JsonSerializer.Deserialize<TerrainWitness>(json) ?? throw new InvalidDataException("empty");
+                w.Validate();
+                return w;
+            }
+            catch (System.Text.Json.JsonException e) { throw new InvalidDataException(e.Message, e); }
+        }
+
+        public void WriteWitness(string saveId, TerrainWitness witness)
+        {
+            var json = System.Text.Json.JsonSerializer.Serialize(witness);
+            lock (s.Lock) s.Witnesses[saveId + "|" + Mod] = json;
+        }
+
+        public void AfterNextSave(Action<string, uint> action) { lock (s.Lock) s.AfterSave.Add(action); }
     }
 }

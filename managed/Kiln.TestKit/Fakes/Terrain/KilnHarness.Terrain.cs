@@ -24,8 +24,14 @@ public readonly record struct FakeTerrainWrite(string Mod, string Label, CellBox
 /// boxes an overlay must leave alone, one ledger per mod and <see cref="WorldId"/>, and the capability row
 /// <c>terrain.overlays</c>: after <c>Capabilities.Override("terrain.overlays", false)</c> the members throw
 /// <c>KilnUnavailableException</c> naming it (the row itself, which Kiln.Terrain reports, may still read available).</para>
-/// <para><b>Not modelled.</b> Streaming, the game's save (a new harness starts with an empty world and no ledger),
-/// kiln.build's own events and limits. From code that is not a mod's (<c>KilnHarness.Run</c>) every batch runs in the
+/// <para><b>The ledger and its loss.</b> Kiln keeps a witness of every mod's kept plans per world (as in the game,
+/// outside the ledger). <see cref="SaveWorld"/> is the game writing the world file; <see cref="LoseLedger"/> loses a
+/// mod's ledger while the cells and the witness stay. A plan whose record was saved and then lost is refused
+/// ("ownership lost"); a plan this world never had is a first install, also over ground that already holds its result;
+/// a record lost before any save is a first install too.</para>
+/// <para><b>Not modelled.</b> Streaming, the game's save itself (a new harness starts with an empty world and no
+/// ledger), kiln.build's own events and limits, and its transient journal (a transient overlay's cells stay in the fake
+/// world). From code that is not a mod's (<c>KilnHarness.Run</c>) every batch runs in the
 /// same step; as a mod (<c>KilnHarness.As</c>, a mod's own code) one batch a step.</para>
 /// </remarks>
 public sealed class HarnessTerrain
@@ -85,6 +91,52 @@ public sealed class HarnessTerrain
     {
         get { lock (State.Lock) return State.Editing; }
         set { lock (State.Lock) State.Editing = value; }
+    }
+
+    /// <summary>The world file's revision; <see cref="SaveWorld"/> adds one. Starts at 1. Since 0.2.0-dev.28.</summary>
+    public uint Revision { get { lock (State.Lock) return State.Revision; } }
+
+    /// <summary>The game writes the world file: the ledgers as they are now are in that save (a record made before it
+    /// and lost after it is a lost ledger). Since 0.2.0-dev.28.</summary>
+    public void SaveWorld()
+    {
+        List<Action<string, uint>> waiting;
+        string world;
+        uint revision;
+        lock (State.Lock)
+        {
+            revision = ++State.Revision;
+            world = State.WorldId;
+            waiting = [.. State.AfterSave];
+            State.AfterSave.Clear();
+        }
+        foreach (var a in waiting) a(world, revision);
+    }
+
+    /// <summary>Loses <paramref name="mod"/>'s terrain ledger in this world, as when the world's Kiln data or the
+    /// ledger key is lost; the cells and Kiln's witness stay. With <paramref name="wholeWorldData"/> the world has no Kiln
+    /// data at all (<c>WorldData.Loaded</c> would say <c>DataMatch.None</c>; the refusal says so). False when the mod
+    /// had no ledger here. Since 0.2.0-dev.28.</summary>
+    /// <exception cref="ArgumentException">An empty mod id.</exception>
+    public bool LoseLedger(string mod, bool wholeWorldData = false)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(mod);
+        lock (State.Lock)
+        {
+            if (wholeWorldData) State.DataLost.Add(State.WorldId);
+            return State.Books.Remove(State.WorldId + "|" + mod);
+        }
+    }
+
+    /// <summary>The plans Kiln's witness has for <paramref name="mod"/> in this world, sorted. Since 0.2.0-dev.28.</summary>
+    public IReadOnlyList<string> Witnessed(string mod)
+    {
+        lock (State.Lock)
+        {
+            if (!State.Witnesses.TryGetValue(State.WorldId + "|" + mod, out var json)) return [];
+            var w = System.Text.Json.JsonSerializer.Deserialize<TerrainWitness>(json);
+            return w?.Plans.Keys.OrderBy(k => k, StringComparer.Ordinal).ToList() ?? [];
+        }
     }
 
     /// <summary>Every write overlays made, in order.</summary>

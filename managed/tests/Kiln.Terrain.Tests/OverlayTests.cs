@@ -867,6 +867,44 @@ public sealed class FacadeTests
     }
 
     [Fact]
+    public void The_kits_world_refuses_a_lost_ledger_and_accepts_a_first_install_over_matching_ground()
+    {
+        using var kiln = new Kiln.TestKit.KilnHarness();
+        kiln.Step(2);
+        // never had it: ground that already holds the result (built by hand) is a first install
+        for (var z = 0; z < Box.SizeZ; z++)
+        for (var y = 0; y < Box.SizeY; y++)
+        for (var x = 0; x < Box.SizeX; x++)
+            kiln.Terrain.Set(new CellPos(Box.X + x, Box.Y + y, Box.Z + z), Voxel.Of(12));
+        var first = Wait(kiln, () => Terrain.Apply(Vein()));
+        Assert.Equal((true, TerrainState.Completed, 0L), (first.Ok, first.State, first.ChangedCells));
+        Assert.Equal(["vein"], kiln.Terrain.Witnessed("kiln"));
+
+        // lost before any save: the record never reached the world file, so a first install again
+        Assert.True(kiln.Terrain.LoseLedger("kiln"));
+        Assert.Equal(TerrainState.Completed, Wait(kiln, () => Terrain.Apply(Vein())).State);
+
+        // saved, then lost (the world's Kiln data gone): refused, nothing written, also where a player dug since
+        var revision = kiln.Terrain.Revision;
+        kiln.Terrain.SaveWorld();
+        Assert.Equal(revision + 1, kiln.Terrain.Revision);
+        kiln.Terrain.Set(new CellPos(66, 98, 66), Voxel.Air);
+        Assert.True(kiln.Terrain.LoseLedger("kiln", wholeWorldData: true));
+        var writes = kiln.Terrain.Writes.Count;
+        var lost = Wait(kiln, () => Terrain.Apply(Vein()));
+        Assert.Equal((false, TerrainState.Refused, 0L), (lost.Ok, lost.State, lost.ChangedCells));
+        Assert.StartsWith("ownership lost: this world had plan 'vein'", lost.Reason);
+        Assert.Contains("this world has no Kiln data that could be read", lost.Reason);
+        Assert.Equal(TerrainState.Refused, Wait(kiln, () => Terrain.Inspect(Vein())).Would);
+        Assert.Equal(writes, kiln.Terrain.Writes.Count);
+        Assert.Equal(Voxel.Air, kiln.Terrain.Get(new CellPos(66, 98, 66)));
+
+        // another world of the same harness never had it
+        kiln.Terrain.WorldId = "another-world";
+        Assert.Equal(TerrainState.Completed, Wait(kiln, () => Terrain.Apply(Vein())).State);
+    }
+
+    [Fact]
     public void An_edit_made_inside_the_write_on_the_kits_world_is_left_alone()
     {
         using var kiln = new Kiln.TestKit.KilnHarness();
