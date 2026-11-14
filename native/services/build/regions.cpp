@@ -41,7 +41,6 @@ size_t g_last_logged = ~size_t{0};
 std::filesystem::path g_file;
 const KilnSavesApi* g_saves = nullptr;
 std::atomic<uint64_t> g_saves_seen{0}, g_boxes_added{0};
-std::atomic<uint64_t> g_last_hook_ms{0};  // GetTickCount64 of the newest save-region list the game built
 
 std::string guid_text(const uint8_t g[16]) {
     char b[40];
@@ -235,8 +234,8 @@ bool seh_append(HookCtx* c) {
 uint8_t* __fastcall hk_save_regions(uint8_t* result, GameArray* list, uintptr_t zones) {
     uint8_t* r = g_hook.call<uint8_t*>(result, list, zones);
     g_saves_seen.fetch_add(1, std::memory_order_relaxed);
-    g_last_hook_ms.store(GetTickCount64(), std::memory_order_relaxed);
-    // the voxel serializer runs next, from this list: transient cells it may write are on record before it does
+    // the voxel serializer runs next, from this list; transient cells are on disk already (journaled before their
+    // commit): this only compacts the journal
     try {
         transient_before_save();
     } catch (...) {
@@ -345,16 +344,6 @@ bool regions_saves_written(uint64_t* written) {
     if (g_saves->status(&st) != KILN_OK) return false;
     *written = st.written;
     return true;
-}
-
-bool regions_hooked() { return F.persist; }
-
-bool regions_save_under_way() {
-    if (const uint64_t at = g_last_hook_ms.load(std::memory_order_relaxed); at && GetTickCount64() - at < 2000) return true;
-    if (!g_saves) return false;
-    KilnSavesStatus st{};
-    st.size = sizeof st;
-    return g_saves->status(&st) == KILN_OK && st.state == KILN_SAVES_STATE_SAVING;
 }
 
 void regions_status(uint64_t* chunks, uint64_t* saves, uint64_t* boxes) {

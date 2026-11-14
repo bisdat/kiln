@@ -32,15 +32,18 @@ result** and the game's save keeps it. Plus WorldEdit-style schematics (`.kschem
   next restart).
 - **Transient edits** (`BuildFlags.Transient`) add no region and are gone after the next restart, also where the game's
   save writes them anyway (inside a player base, or in a 32-cell chunk another edit keeps): every transient write
-  journals the cells it changed, their value before and after, before it commits them, in
-  `kiln/data/kiln.build/transient/<world GUID>.bin` (written right before the game's save serializes the voxels, before
-  the commit of a transient write made while a save is under way, and every second when it changed). At the next start,
+  journals the cells it changed, their value before and after, on disk before it commits them: appended to
+  `kiln/data/kiln.build/transient/<world GUID>.log`, which is compacted into `<world GUID>.bin` at each save, every
+  second and when it grows. If the journal cannot be written (a full disk), the transient write is refused and nothing
+  is committed, so no save ever holds a transient cell without its record. At the next start,
   once the world runs, each journaled cell that still holds what the transient write left gets its earlier value back,
   block by block as its tiles load, through the same store commit as any edit (players see it; no `BuildEditingEvent`
-  is raised for it). A cell changed since (a player dug it) is left as it is. A later edit without the flag takes its
+  is raised for it). A cell changed since (a player dug it) is left as it is; a block whose put-back commit fails stays
+  journaled for the next start. A later edit without the flag takes its
   cells out of the journal (they are meant to stay); a transient write again in the new session makes them that
   session's. Put-back cells stay on record until two world files were written after it. Limits: the journal holds
-  8,192 blocks (about 4 million cells); past that, and while the world's identity is unknown (no kiln.saves, or
+  8,192 blocks (about 4 million cells); past that, when the journal cannot be written, and while the world's identity is
+  unknown (no kiln.saves, or
   kiln.saves could not read the world's id from the game; it reads it at load, also for a new world before its first
   save), a transient write is refused (`BuildException`, "unavailable"). `Transient` with `Unloaded` is refused
   (`ArgumentException`): the put-back needs the real earlier cells.
