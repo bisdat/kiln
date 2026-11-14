@@ -215,6 +215,19 @@ void a_slot_that_went_comes_back() {
     check(at(F3) == 100, "its original is the game's");
 }
 
+void a_new_layer_dropped_before_rollback_is_still_verified() {
+    fresh();
+    uint64_t id = 0;
+    check(store_txn_begin(A, &id), "begin");
+    put(A, 1, F1, 9);
+    flush();
+    g_fail.insert(F1);
+    store_drop(A, F1);
+    flush();
+    check(at(F1) == 9, "reset failed, transaction bytes remain");
+    check(rollback(id) == TxnOutcome::Unverified, "dropped transaction field must be read back");
+}
+
 void the_settle_hook_runs_before_the_read_back() {
     fresh();
     uint64_t id = 0;
@@ -237,6 +250,7 @@ int main() {
         a_failed_restore_is_unverified();
         a_dropped_owner_cancels_the_transaction();
         a_slot_that_went_comes_back();
+        a_new_layer_dropped_before_rollback_is_still_verified();
         the_settle_hook_runs_before_the_read_back();
     } catch (const std::exception& e) {
         std::printf("txn-test: FAIL %s (after %d checks)\n", e.what(), checks);

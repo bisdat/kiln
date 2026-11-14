@@ -44,6 +44,7 @@ struct TxnSlot {
 struct Txn {
     KilnOwner owner = 0;
     std::map<uintptr_t, TxnSlot> slots;
+    std::map<uintptr_t, TxnSlot> touched;  // includes new layers later reset inside the transaction
 };
 std::map<uint64_t, Txn> g_txns;
 uint64_t g_txn_last = 0;
@@ -208,6 +209,13 @@ bool store_put(KilnOwner owner, uint64_t seq, uint32_t kind, uint32_t id, int32_
         std::memcpy(s.current, s.original, n);
     } else if (s.n != n) {
         return false;
+    }
+    for (auto& [tid, txn] : g_txns) {
+        if (txn.owner != owner) continue;
+        TxnSlot ts;
+        ts.n = s.n;
+        std::memcpy(ts.original, s.original, s.n);
+        txn.touched.try_emplace(addr, std::move(ts));
     }
     auto l = std::find_if(s.layers.begin(), s.layers.end(), [&](const Layer& x) { return x.owner == owner; });
     if (l == s.layers.end()) {
@@ -423,6 +431,11 @@ TxnOutcome store_txn_rollback(uint64_t id, const std::function<void()>& settle, 
                 std::memcpy(x.original, s.original, s.n);
                 break;
             }
+    for (auto& [addr, ts] : t.touched) {
+        Touched& x = touched[addr];
+        x.n = ts.n;
+        std::memcpy(x.original, ts.original, ts.n);
+    }
     for (auto& [addr, ts] : t.slots) {
         Touched& x = touched[addr];
         x.n = ts.n;
