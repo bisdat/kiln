@@ -83,6 +83,22 @@ public class NoClipTrackTests
     }
 
     [Fact]
+    public void RejoinRestoreWaitsWhenDestinationCellsAreUnknown()
+    {
+        var w = new FakeWorld { At = Deep, Kind = _ => NoClipSpace.Inside };
+        var t = new NoClipTrack(w);
+        Assert.Equal(NoClipRejoin.Held, t.Rejoined(Surface));
+        w.Land();
+        w.Kind = _ => NoClipSpace.Unknown;
+        Assert.False(t.Step().Released);
+        Assert.True(t.Restoring);
+        Assert.Empty(Ended(t));
+        w.Kind = _ => NoClipSpace.Free;
+        Assert.True(t.Step().Released);
+        Assert.Equal([(NoClipEnd.Left, (WorldPosition?)Surface)], Ended(t));
+    }
+
+    [Fact]
     public void ItStartsWhereTheCharacterStandsAndFollowsItThroughOpenSpace()
     {
         var (t, w) = Flying();
