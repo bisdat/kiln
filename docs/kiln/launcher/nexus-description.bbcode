@@ -73,7 +73,7 @@ Mods are written in C#, with JSON for data. Kiln also loads mods made for other 
 [size=3][color=#D4D4D8]Rented server with only FTP or a file manager, or your own Windows PC: download the optional file [b]Kiln server pack[/b] (kiln-server-<version>.zip) and unzip it into the server folder, the one with enshrouded_server.exe. It includes the server parts for EML, ShroudForge, EMF and the other frameworks. KILN-SERVER-README.txt inside has the steps. Own Linux server without a desktop: [b]kilnctl[/b] from [b]Kiln runtime (manual install)[/b] installs and runs it under Wine. Then check kiln/logs/kiln.log for "boot complete". Players need Kiln only for mods that say so. The full guide is in the [url=https://frostdev.io/kiln/wiki][color=#F9C74F]wiki[/color][/url]. Windows servers have been tested under Wine so far, not yet on a real Windows PC.[/color][/size]
 
 [size=4][b][color=#F9C74F]Uninstall[/color][/b][/size]
-[size=3][color=#D4D4D8]Use Uninstall on the Runtime page. It restores the original files and keeps your saves.[/color][/size]
+[size=3][color=#D4D4D8]Use Uninstall on the Runtime page. It restores the original files and keeps your saves. Then remove the launcher. On Linux, delete the AppImage (or remove the .deb package); to leave nothing of Kiln behind, also delete these folders: [b]~/.local/share/kiln[/b], [b]~/.config/kiln[/b], [b]~/.local/state/kiln[/b] and [b]~/.local/share/io.frostdev.kiln.launcher[/b].[/color][/size]
 [line]
 [size=5][b][color=#FF6A1A]Main features[/color][/b][/size]
 [size=4][b][color=#F9C74F]The launcher[/color][/b][/size]
