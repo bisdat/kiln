@@ -145,8 +145,8 @@ code. kiln.log ends with `boot: the start stops before the game's entry point (e
 | `exitCode` | 19201 when the start stopped, else null |
 
 ## After the commit (managed side)
-Kiln.Host freezes each boot mod's inputs at the commit (its manifest, top-level assemblies and its `blocks/`, `assets/`,
-`quests/`, `skills/` files; JSON by its parsed value) and refuses a later runtime load of a changed mod with
+Kiln.Host freezes each boot mod's inputs at the commit (every file of its folder but Kiln's own and the runtime's, JSON by
+its parsed value; and the effective values of each config its `OnBoot` registered) and refuses a later runtime load of a changed mod with
 `RestartRequiredBoot` ([../modding/onboot.md](../modding/onboot.md#after-a-change-restart)); the IR envelope's
 `owners[].fingerprint` is the hash of those inputs. Kiln.Blocks keeps a process-wide map of the committed definitions'
 handles, which no runtime unload clears: `Blocks.Find` and a block's reference by name fall back to it.

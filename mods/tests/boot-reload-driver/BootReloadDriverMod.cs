@@ -47,8 +47,9 @@ public sealed class DriverMod : Mod
             Check(unload.Ok && !Mods.IsLoaded(Target) && cold != null, "BOOT-FIND-AFTER-UNLOAD",
                 $"unload: {unload.Ok} {unload.Message}; Blocks.Find(cold) after it: {(cold == null ? "null" : $"{cold} {cold.Guid}")}");
 
+            var clock = System.Diagnostics.Stopwatch.StartNew();
             var same = await Mods.LoadAsync(Path.GetFileName(dir));
-            Check(same.Ok && Mods.IsLoaded(Target), "BOOT-LOAD-UNCHANGED", $"load unchanged: {same.Ok} {same.Message}");
+            Check(same.Ok && Mods.IsLoaded(Target), "BOOT-LOAD-UNCHANGED", $"load unchanged: {same.Ok} {same.Message} ({clock.ElapsedMilliseconds} ms with the check of its inputs)");
 
             await Mods.UnloadAsync(Target);
             Directory.CreateDirectory(Path.Combine(dir, "blocks"));

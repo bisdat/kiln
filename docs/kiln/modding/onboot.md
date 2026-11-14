@@ -145,30 +145,37 @@ state and definition count, every issue (mod, kind, key, phase, code, reason) an
   What is in the game cannot change before a restart: change it in `OnBoot` and restart.
 
 ## After a change: restart
-The boot generation keeps what the start read. When the generation commits, Kiln freezes each boot mod's inputs, the
-files the boot phase reads for it:
+The boot generation keeps what the start read. When the generation commits, Kiln freezes each boot mod's inputs:
 
-- `kiln.mod.json`;
-- every `.dll` at the top of the mod's folder (the entry assembly and its helpers), except `Kiln.Api.dll` and Kiln's
-  shared `Kiln.*.dll`, which every mod takes from Kiln (a deploy leaves them out);
-- everything under `blocks/` (with `blocks/generated/`), `assets/`, `quests/` and `skills/`, and `blocks.tables.json`.
+- **every file of the mod's folder**, at any depth: the manifest, the assemblies, `blocks/`, `assets/`, `quests/`,
+  `skills/`, and any other file your `OnBoot` may read itself;
+- **the settings your `OnBoot` read**: for each config it registered with `Config.Register`, the values it got (the
+  file's values, checked and clamped, or the defaults).
 
 A later load of the mod in the same process (after `Mods.UnloadAsync`, or the launcher's switch) compares them. Any
 difference is refused before the mod's code loads:
 `RestartRequiredBoot: mod frost-tokens changed since this process's boot generation committed its boot content
-(blocks/frost.json changed); restart the game (or the server) to load the new version`. Put the file back as it was, or
-restart. `Mods.ReloadAsync` of a loaded boot mod is refused the same way, whether anything changed or not.
+(blocks/frost.json changed); restart the game (or the server) to load the new version`, or for a setting
+`RestartRequiredBoot: mod frost-tokens's config frost-tokens changed since its OnBoot read it (altars: 4 -> 6); its boot
+content was made with the earlier values: restart the game (or the server) to load it with the new ones`. Put the file
+back as it was, or restart. `Mods.ReloadAsync` of a loaded boot mod is refused the same way, whether anything changed or
+not.
 
 What is not a change:
 - a JSON file written again with the same values (other spacing, comments, line endings, a byte-order mark): it counts
   by its parsed value; the order of its keys does count;
+- a config file written again with the same values: it counts by the values the mod reads from it, so Kiln's own
+  rewrite of it when the mod registers it in `OnLoad` (comments, missing entries, its canonical form) is no change. A
+  changed value of a config `OnBoot` registered is one, even for an entry `OnBoot` did not use;
 - files and folders whose name starts with `.` (the launcher's `.disabled` and `.kiln-source.json`), and `*.kiln-tmp`;
-- anything else in the mod's folder (`docs/`, `sigdb/`, a readme), the mod's data folder (`Context.DataDirectory`) and
-  `kiln/config`: what the mod and Kiln write while they run.
+- at the top of the folder: `*.deps.json`, `*.runtimeconfig.json` and Kiln's own `Kiln.*` files (`Kiln.Api.dll`, the
+  shared `Kiln.*.dll`, their `.pdb` and `.xml`), which no loader takes from a mod (a deploy leaves them out);
+- the mod's data folder (`Context.DataDirectory`) and `kiln/config` (besides the configs above), should they lie inside
+  the mod's folder: what the mod and Kiln write while they run. Do not write into your own mod folder while the game
+  runs: such a file counts, and the mod then loads again only after a restart.
 
-Configuration: `Config.Register` cannot run in `OnBoot` (above), so no configuration is in a boot generation and a
-config file is not an input. A file your `OnBoot` reads itself counts only if it is under one of the folders above: keep
-such files there (`blocks/`, for example), not in the data folder.
+Reading the files costs a little time at the start: Kiln hashes every file of each boot mod once, before its `OnBoot`.
+The check at the commit and later loads hash only the files whose size or write time changed since.
 
 If a mod's inputs change while the boot phase runs (between its `OnBoot` and the commit), its content matches no
 version of the files: kiln.log warns (`its files changed while the boot phase ran`), and the mod loads again only after a

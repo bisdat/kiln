@@ -829,8 +829,12 @@ public abstract class ConfigFile
         return false;
     }
 
+    /// <summary>A reading that only compares values (Kiln.Host's restart check of a boot mod's config): logs nothing.</summary>
+    internal bool Quiet;
+
     private void Log(LogLevel level, string text)
     {
+        if (Quiet) return;
         if (Owner is not null) Owner.Log.Write(level, text);
         else Backend.Current.Log(0, level, text);
     }
@@ -972,8 +976,39 @@ public static partial class Config
             if (BootReads.TryGetValue(id, out var earlier) && ReferenceEquals(earlier.Frame, frame))
                 throw new InvalidOperationException($"config '{id}' is already registered");
         var read = file.LoadForBoot();
-        lock (Lock) BootReads[id] = read;
+        lock (Lock)
+        {
+            BootReads[id] = read;
+            // the effective values the boot generation may depend on: Kiln.Host freezes them with the mod's files (BootInputs)
+            if (mod is not null)
+            {
+                if (!BootValueReads.TryGetValue(mod.Info.Id, out var list)) BootValueReads[mod.Info.Id] = list = [];
+                list.RemoveAll(v => string.Equals(v.Id, id, StringComparison.OrdinalIgnoreCase));
+                list.Add(new BootValues(id, kind, typeof(T).Assembly.GetName().Name ?? "", typeof(T).FullName ?? typeof(T).Name, file.ValuesJson()));
+            }
+        }
         return file;
+    }
+
+    /// <summary>A config a mod's OnBoot registered: its id and kind, the settings type (assembly simple name, full name) and the
+    /// effective values OnBoot read (<see cref="ConfigFile.ValuesJson"/>: the file's values, validated and clamped, else the defaults).</summary>
+    internal sealed record BootValues(string Id, ConfigKind Kind, string Assembly, string Type, string Values);
+
+    private static readonly Dictionary<string, List<BootValues>> BootValueReads = new(StringComparer.Ordinal);
+
+    /// <summary>The configs <paramref name="modId"/>'s OnBoot registered, taken (Kiln.Host, after the author ran).</summary>
+    internal static IReadOnlyList<BootValues> TakeBootValues(string modId)
+    {
+        lock (Lock) return BootValueReads.Remove(modId, out var list) ? list : [];
+    }
+
+    /// <summary>The effective values of config <paramref name="id"/> as its file gives them now (the values OnBoot would read), without
+    /// registering, writing or logging anything. <typeparamref name="T"/> is the settings type, from a throwaway load of the mod.</summary>
+    internal static string ValuesNow<T>(string id, ConfigKind kind) where T : class, new()
+    {
+        var file = new ModConfig<T>(null, id, kind) { Quiet = true };
+        file.LoadForBoot();
+        return file.ValuesJson();
     }
 
     /// <summary>The runtime registration of <paramref name="id"/> takes over what the same mod's OnBoot read (null: none).</summary>
@@ -1018,6 +1053,7 @@ public static partial class Config
         {
             Files.Clear();
             BootReads.Clear();
+            BootValueReads.Clear();
             _tick?.Dispose();
             _tick = null;
             _watcher?.Dispose();

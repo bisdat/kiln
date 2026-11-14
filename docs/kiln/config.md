@@ -74,6 +74,10 @@ public override void OnBoot(BootContext boot)
 - That runtime registration takes over what `OnBoot` read: the same text, not read again while the file is unchanged, so
   `OnBoot` and the running mod see the same values. A file edited in between is read again and kiln.log says so ("changed after
   the mod's OnBoot read it"); `OnBoot` used the earlier values.
+- The boot content was made with these values: they are frozen with the mod's files. A later load of the mod in the same
+  process (after an unload) whose config file now gives other values is refused with `RestartRequiredBoot`, naming the
+  changed entries; the same values written another way (Kiln's canonical rewrite included) load
+  ([modding/onboot.md](modding/onboot.md#after-a-change-restart)).
 - `OnBoot` runs on an instance of the mod that is unloaded when it returns, so `Register` again in `OnLoad`: the object from
   `OnBoot` is not the one the running mod keeps. The config is in `Config.All` from that registration on.
 - Refused in `OnBoot`, with "… is not available in OnBoot (it runs before the game's first tick); call it in OnLoad":
