@@ -1,7 +1,7 @@
-# EMF API parity (EmfApi v40)
+# EMF API parity (EmfApi v42)
 
 kiln-emf (`native/plugins/emf`) hands every EMF mod an `EmfApi` table built on Kiln's services. This page lists
-every function of EMF 0.6.8's C API (v40, 135 functions, `sdk/include/emf/emf_api.h`) and every function of its Lua
+every function of EMF 0.6.11's C API (v42, 135 functions, `sdk/include/emf/emf_api.h`; v41 and v42 added none) and every function of its Lua
 API (`docs/modding/lua.md`), with the Kiln service behind it, the nearest Kiln C# API, and the status.
 
 - **full**: behaves as EMF documents. **partial**: the difference is in the row. **not yet**: Kiln does not carry
@@ -27,18 +27,20 @@ a joined player's handshake, hidden chat, taming, portraits, UI or multiplayer b
 
 ## Version negotiation
 
-One table, `version = 40`, `size = sizeof(EmfApi) = 1088`. Slots are only appended (v22 at
+One table, `version = 42`, `size = sizeof(EmfApi) = 1088`. Slots are only appended (v22 at
 byte 592, v23 616, v24 624, v25 648, v26 672, v27 688, v28 728, v29 736, v30 752, v31 776, v32 808, v33 864, v34 920,
-v35 952, v36 992, v37 1000, v38 1016, v39 1040, v40 1064). Every earlier prefix is unchanged. A mod's `mod.json`
-`"emf": N` above 40 is refused ("needs EMF API vN"). Mods built with EMF's C++ SDK also check
+v35 952, v36 992, v37 1000, v38 1016, v39 1040, v40 1064; v41 and v42 appended nothing). Every earlier prefix is
+unchanged. A mod's `mod.json` `"emf": N` above 42 is refused ("needs EMF API vN"). Mods built with EMF's C++ SDK also check
 `api->size >= sizeof(EmfApi)` of their own header and do not start on a smaller table, whatever they then call: this
-is why Kiln serves the whole v40 table although it does not carry every function yet. A mod built for EMF 0.6.3 or
+is why Kiln serves the whole table although it does not carry every function yet. A mod built for EMF 0.6.3 or
 later, EMF's Lua host among them, did not start on Kiln's earlier 728-byte table. The table is a shared, immutable
 prefix-compatible view; it is not shrunk for an older mod.
 Structs passed in are read up to their `size` field (EMF's `api_sizes.h` rules): an `EmfUiWidget` array is walked by
 `widget_size` (44..4096 bytes, at most 256 widgets), and a v24/v25 mod's 56-byte widgets read `icon`, `fps` and
 `height` as 0. A v36 to v40 request (`EmfRemoveBuilding`, `EmfEnemyOrder`, `EmfMoveOrder`) whose `size` is smaller
-than EMF's minimum is refused untouched, as in EMF.
+than EMF's minimum is refused untouched, as in EMF. v41's `EmfMoveOrder.stuck_seconds` (136 bytes) and v42's
+`EmfPathResult.doors` (32 bytes) change nothing on Kiln: `enemy_move` refuses every order and `path_find` never answers
+(both not yet).
 
 ## C API
 
