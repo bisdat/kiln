@@ -5,7 +5,7 @@
 // cooked is named with the tools' own words, the other mods are cooked, and the game starts. "Cook again" in a mod's
 // menu cooks that one mod whenever the player asks.
 import * as api from "../api/commands";
-import type { CookJob, CookRun, GameId, ModCook } from "../api/commands";
+import type { BootSnapshot, CookJob, CookRun, GameId, ModCook, ProfileId } from "../api/commands";
 import { toKilnError } from "../api/commands";
 import { toast, waitTask } from "../ui";
 import { bootSnapshotLine } from "./bootSnapshot";
@@ -62,6 +62,24 @@ export async function cookBeforePlay(gameId: GameId, started?: (jobs: CookJob[])
     const k = toKilnError(e);
     // the game is running (it started outside the launcher), or the cook could not even be asked for: say it once, go on
     if (k.code !== "canceled" && k.code !== "game_running") toast.info("Mods were not cooked", `${k.message} The game starts all the same.`, { ms: 0 });
+    return null;
+  }
+}
+
+/** Play once with another profile: the boot game-data step Play runs after its cook, for the mods of that single start
+ *  (boot_snapshot_run; a single start cooks nothing). Resolves when it is done, whatever happened: like the cook it
+ *  never stops a start, and what went wrong is one line. */
+export async function bootSnapshotBeforeOnce(gameId: GameId, profileId: ProfileId): Promise<BootSnapshot | null> {
+  try {
+    const s = await waitTask<BootSnapshot>(await api.bootSnapshotRun(gameId, profileId));
+    const line = bootSnapshotLine(s);
+    if (line) toast.info("Game data for OnBoot mods", line, { ms: 0 });
+    return s;
+  } catch (e) {
+    const k = toKilnError(e);
+    // the game is running, or the step could not be asked for: the start goes on (and says what it refuses itself)
+    if (k.code !== "canceled" && k.code !== "game_running" && k.code !== "not_found")
+      toast.info("Game data for OnBoot mods was not made", `${k.message} The game starts all the same.`, { ms: 0 });
     return null;
   }
 }

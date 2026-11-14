@@ -6,8 +6,8 @@
 //! files, by `tools/bootsnap/bootsnap.py` (one of the Python tools this crate carries, run like the cook tools:
 //! [`crate::cooktools`]). It lands in `<game>/kiln/data/boot-gamedata/<key>/` (about 200 MB per game build), once per
 //! game build: a later start finds it by its key in well under a second. The launcher makes it at Play right after the
-//! cook and `tools/deploy-server.sh` at a deploy, both only when an enabled mod of the start asks for the boot phase
-//! ([`boot_mods`]; otherwise [`make_if_needed`] skips it and leaves a snapshot that is there alone);
+//! cook, before a single start with another profile ("play once": [`boot_mods_once`]), and `tools/deploy-server.sh` at
+//! a deploy, each only when an enabled mod of the start asks for the boot phase ([`boot_mods`]; otherwise [`make_if_needed`] skips it and leaves a snapshot that is there alone);
 //! `kiln boot-snapshot --game <dir>` makes it by hand whatever the mods say.
 //!
 //! Nothing here stops a start: a missing Python, a tool this build does not carry, a refusal of the tool, a run past
@@ -243,25 +243,46 @@ pub fn make(runner: &dyn Runner, game: &Path, force: bool, limit: Option<Duratio
 /// legacy layout). A dedicated server leaves out client-only mods. A mod of another loader (EML, SET, ShroudForge,
 /// Flame, ...) never needs the snapshot: only kiln entries are read.
 pub fn boot_mods(install: &GameInstall) -> Vec<String> {
+    match crate::profile::read_game_profile(&install.path) {
+        Ok(Some(file)) => {
+            let listed = file.mods.kiln.iter().map(|m| m.id.clone()).collect();
+            let folders = crate::launch::kiln_folders(install, &file).into_iter().map(|(m, folder)| (m.id.clone(), folder)).collect();
+            boot_mods_of(install, folders, listed, file.dropins.names(ModKind::Kiln))
+        }
+        Ok(None) => boot_mods_of(install, Vec::new(), Default::default(), true),
+        Err(_) => Vec::new(),  // a profile file this Kiln cannot read: kiln.boot does not run its mods either
+    }
+}
+
+/// [`boot_mods`] for a single start with another profile (launch mode `once`), before that start writes the profile's
+/// file (`kiln/profile.once.json`, which kiln.boot then reads in place of `kiln/profile.json`): the profile's enabled
+/// Kiln mods, read from their Library entries (the game loads that entry, or Kiln's copy of it, with the same
+/// kiln.mod.json), then the drop-in folders by the profile's own `dropins` rule. A Library entry that cannot be read
+/// is left out (the start itself then refuses that profile).
+pub fn boot_mods_once(dirs: &crate::paths::DataDirs, install: &GameInstall, profile_id: &str) -> crate::Result<Vec<String>> {
+    let profile = crate::profile::get(dirs, profile_id)?;
+    let listed = profile.mods.kiln.iter().map(|m| m.id.clone()).collect();
+    let folders = profile.mods.kiln.iter().filter(|m| m.enabled).filter_map(|m| {
+        let r = crate::library::LibraryRef { kind: ModKind::Kiln, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() };
+        crate::library::path_of(dirs, &r).ok().map(|folder| (m.id.clone(), folder))
+    }).collect();
+    Ok(boot_mods_of(install, folders, listed, profile.dropins_file().names(ModKind::Kiln)))
+}
+
+/// The rule both read: the listed mods' folders (`(id, folder)`, enabled ones only) that ask for the boot phase, then,
+/// with `dropins`, each drop-in folder whose mod asks for it and is not listed.
+fn boot_mods_of(install: &GameInstall, folders: Vec<(String, std::path::PathBuf)>, listed: std::collections::HashSet<String>,
+                dropins: bool) -> Vec<String> {
     let server = install.exe.eq_ignore_ascii_case("enshrouded_server.exe");
     let boot_id = |dir: &Path| {
         crate::manifest::read_kiln(dir).ok().filter(|m| m.boot && !(server && m.side == Side::Client)).map(|m| m.id)
     };
     let mut out: Vec<String> = Vec::new();
-    let mut listed = std::collections::HashSet::new();
-    let dropins = match crate::profile::read_game_profile(&install.path) {
-        Ok(Some(file)) => {
-            listed.extend(file.mods.kiln.iter().map(|m| m.id.clone()));
-            for (m, folder) in crate::launch::kiln_folders(install, &file) {
-                if boot_id(&folder).as_deref() == Some(m.id.as_str()) && !out.contains(&m.id) {
-                    out.push(m.id.clone());
-                }
-            }
-            file.dropins.names(ModKind::Kiln)
+    for (id, folder) in folders {
+        if boot_id(&folder).as_deref() == Some(id.as_str()) && !out.contains(&id) {
+            out.push(id);
         }
-        Ok(None) => true,
-        Err(_) => false,  // a profile file this Kiln cannot read: kiln.boot does not run its mods either
-    };
+    }
     if dropins {
         let mut dirs: Vec<std::path::PathBuf> = std::fs::read_dir(install.path.join(crate::paths::game::DROPIN_KILN)).into_iter().flatten().flatten()
             .map(|e| e.path()).filter(|p| p.is_dir() && !p.join(crate::paths::game::DISABLED_MARKER).exists()).collect();
