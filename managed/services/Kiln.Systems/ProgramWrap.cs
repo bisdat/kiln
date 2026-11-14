@@ -92,6 +92,8 @@ public sealed unsafe class ProgramWrap : IDisposable
 
     internal ModContext? Mod { get; }
     internal string ModId => Mod?.Info.Id ?? "kiln";
+    private string? _writer;
+    internal string Writer => _writer ??= $"{ModId}/wrap:{Program}";  // ComponentWrittenEvent.Writer
 
     /// <summary>Raised on the tick thread when one of the wrap's stages is turned off: a fault, its budget (1 ms per
     /// slice, 10 slices in a row over it), an exception, native SET.</summary>
@@ -107,11 +109,26 @@ public sealed unsafe class ProgramWrap : IDisposable
 
     /// <summary>Per entity before the game's update: <paramref name="handler"/> runs for every entity of each slice.</summary>
     [TickThreadOnly]
-    public ProgramWrap BeforeEach(EntityHandler handler, int? priority = null) => Add(WrapStage.Before, null, handler, priority);
+    public ProgramWrap BeforeEach(EntityHandler handler, int? priority = null) =>
+        Add(WrapStage.Before, null, handler ?? throw new ArgumentNullException(nameof(handler)), priority);
 
     /// <summary>Per entity after the game's update.</summary>
     [TickThreadOnly]
-    public ProgramWrap AfterEach(EntityHandler handler, int? priority = null) => Add(WrapStage.After, null, handler, priority);
+    public ProgramWrap AfterEach(EntityHandler handler, int? priority = null) =>
+        Add(WrapStage.After, null, handler ?? throw new ArgumentNullException(nameof(handler)), priority);
+
+    /// <summary>Per entity before the game's update, with the entity's components (<see cref="EntityView"/>): read what
+    /// the program reads, write what it writes. Writes are marked for the save and replication and raise
+    /// <see cref="ComponentWrittenEvent"/> (<c>Writer</c> <c>"&lt;modid&gt;/wrap:&lt;program&gt;"</c>) in the next step.</summary>
+    [TickThreadOnly]
+    public ProgramWrap BeforeEach(EntityViewHandler handler, int? priority = null) =>
+        Add(WrapStage.Before, null, handler ?? throw new ArgumentNullException(nameof(handler)), priority);
+
+    /// <summary>Per entity after the game's update, with the entity's components (see the other
+    /// <see cref="BeforeEach(EntityViewHandler, int?)"/>).</summary>
+    [TickThreadOnly]
+    public ProgramWrap AfterEach(EntityViewHandler handler, int? priority = null) =>
+        Add(WrapStage.After, null, handler ?? throw new ArgumentNullException(nameof(handler)), priority);
 
     /// <summary>Instead of the game's update; call <see cref="Slice.RunOriginal"/> to run it. One per program.</summary>
     /// <returns><c>Ok = false</c> when another mod replaces the program (named in the reason).</returns>
@@ -211,7 +228,7 @@ public sealed unsafe class ProgramWrap : IDisposable
 
     // ---- inside ----
 
-    private ProgramWrap Add(WrapStage kind, SliceHandler? slice, EntityHandler? each, int? priority)
+    private ProgramWrap Add(WrapStage kind, SliceHandler? slice, Delegate? each, int? priority)
     {
         if (slice is null && each is null) throw new ArgumentNullException(nameof(slice));
         Services.RequireTickThread($"ProgramWrap.{kind}");
@@ -220,7 +237,7 @@ public sealed unsafe class ProgramWrap : IDisposable
         return this;
     }
 
-    private ManagedStage Make(WrapStage kind, SliceHandler? slice, EntityHandler? each, int? priority)
+    private ManagedStage Make(WrapStage kind, SliceHandler? slice, Delegate? each, int? priority)
     {
         lock (_lock)
             if (_disposed) throw new ObjectDisposedException(nameof(ProgramWrap));
@@ -293,7 +310,7 @@ public sealed unsafe class ProgramWrap : IDisposable
 
     internal static IReadOnlyList<WrapInfo> InfosOf(string program, WorldKind world) =>
         [.. Systems.Live.Keys.Where(s => s.Wrap.Program == program && s.Wrap.World == world)
-            .Select(s => new WrapInfo(s.Wrap.ModId, program, world, s.Kind, s.Priority, s.State, s.Each is not null))];
+            .Select(s => new WrapInfo(s.Wrap.ModId, program, world, s.Kind, s.Priority, s.State, s.PerEntity))];
 
     // The mod unloads: every stage of its owner goes, and the unload waits until no call of one runs (a stage that runs
     // finishes; none starts). Tick thread (ModContext.Retire).
@@ -335,6 +352,7 @@ public sealed unsafe class ProgramWrap : IDisposable
             try { a(); } catch (Exception e) { Backend.Current.Log(0, LogLevel.Error, $"Kiln.Systems: posted work threw: {e.Message}"); }
         var t = SystemsNative.T;
         foreach (var s in Systems.Live.Keys) s.Poll(t);
+        WrapWrites.Flush();  // the wraps' writes of the step that ended: ComponentWrittenEvent, once per entity and component
     }
 }
 
@@ -345,6 +363,7 @@ internal sealed unsafe class ManagedStage
     internal readonly WrapStage Kind;
     internal readonly SliceHandler? SliceFn;
     internal readonly EntityHandler? Each;
+    internal readonly EntityViewHandler? View;
     internal readonly int Priority;
     internal ulong Handle;
     internal volatile bool Removing;
@@ -357,16 +376,22 @@ internal sealed unsafe class ManagedStage
 
     [ThreadStatic] internal static bool OriginalCalled;
     [ThreadStatic] private static EntityHandler? _each;
+    [ThreadStatic] private static EntityViewHandler? _view;
+    [ThreadStatic] private static ViewContext? _ctx;
+    [ThreadStatic] private static SystemsNative.Slice* _slice;
     [ThreadStatic] private static Exception? _eachError;
 
-    internal ManagedStage(ProgramWrap wrap, WrapStage kind, SliceHandler? slice, EntityHandler? each, int priority)
+    internal ManagedStage(ProgramWrap wrap, WrapStage kind, SliceHandler? slice, Delegate? each, int priority)
     {
         Wrap = wrap;
         Kind = kind;
         SliceFn = slice;
-        Each = each;
+        Each = each as EntityHandler;
+        View = each as EntityViewHandler;
         Priority = priority;
     }
+
+    internal bool PerEntity => Each is not null || View is not null;
 
     internal WrapState State => _state;
 
@@ -514,7 +539,7 @@ internal sealed unsafe class ManagedStage
         try
         {
             ModContext.CurrentMod = mod;
-            if (Each is not null) Iterate(s);
+            if (PerEntity) Iterate(s);
             else
             {
                 var slice = new Slice(s, this);
@@ -543,8 +568,14 @@ internal sealed unsafe class ManagedStage
     {
         var t = SystemsNative.T;
         if (t == null) return;
-        var outer = _each;
+        var outerEach = _each;
+        var outerView = _view;
+        var outerCtx = _ctx;
+        var outerSlice = _slice;
         _each = Each;
+        _view = View;
+        _ctx = View is null ? null : ViewContext.Begin(t, s, this);
+        _slice = s;
         _eachError = null;
         try
         {
@@ -552,7 +583,11 @@ internal sealed unsafe class ManagedStage
         }
         finally
         {
-            _each = outer;
+            _ctx?.End();  // the last entity's writes, even when a handler threw
+            _each = outerEach;
+            _view = outerView;
+            _ctx = outerCtx;
+            _slice = outerSlice;
         }
         if (_eachError is { } e)
         {
@@ -566,7 +601,12 @@ internal sealed unsafe class ManagedStage
     {
         try
         {
-            _each?.Invoke(new EntityId(entity));
+            if (_view is { } view)
+            {
+                var e = new EntityView(_slice, iter, entity, (int)row, _ctx!);
+                view(ref e);
+            }
+            else _each?.Invoke(new EntityId(entity));
             return 0;
         }
         catch (Exception e)

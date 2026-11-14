@@ -14,5 +14,6 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
     <ProjectReference Include="../../services/Kiln.Systems/Kiln.Systems.csproj" />
     <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" />
+    <ProjectReference Include="../../services/Kiln.World/Kiln.World.csproj" />
   </ItemGroup>
 </Project>

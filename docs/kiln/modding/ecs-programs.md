@@ -95,3 +95,31 @@ and receives the real program context. Missing symbols or a conflicting runtime 
 The dedicated-server probes cover scheduler registration, other-entity health readback, both input types, spawn-time
 components, hook/profiler counts and callback removal. A joined client is still needed to confirm replicated visual
 changes and client/prediction-world behaviour. Managed declarations currently target the server world only.
+
+## Wrapping the game's programs
+
+A world program of your own runs in a slot of its own, with the access you declared. To change what one of the
+game's own programs does, wrap it instead (`Kiln.Systems`, since 0.2.0-dev.29; the full page is
+[../services/systems.md](../services/systems.md)):
+
+```csharp
+var wrap = Systems.Wrap("fuel_setup").Wrap!;
+wrap.AfterEach((ref EntityView e) =>
+{
+    var fuel = e.Attribute("Fuel");
+    fuel[0] = fuel[1];   // full
+    fuel.Changed();      // the game's attribute formulas
+});
+```
+
+| | A world program (`EcsPrograms.Bind`) | `GameSystems.Hook` | A wrap (`Systems.Wrap`) |
+|---|---|---|---|
+| Runs | in its own scheduler slot | around a game update function, per slice | in the wrapped program's slot and thread: Before, After, Replace, per slice or per entity |
+| Access | what `kiln.programs.json` declares (needs a restart) | none of its own | the wrapped program's own components (`EntityView`), no declaration |
+| Several mods | each has its own | one per update function | any number of Befores and Afters, one Replace per program |
+| Writes | marked; `ComponentWrittenEvent` not raised | none | marked; `ComponentWrittenEvent` with `Writer = "<modid>/wrap:<program>"` |
+
+The same thread rules hold for all three: handlers run on the game's workers once a player is in the world, tick-thread
+APIs throw inside them, `Slice.Post` (or `Context.Scheduler.Post`) hands work to the tick thread. A wrap's fault or
+exception turns off that stage only. Wraps are refused while native SET is loaded, and target the server world (client
+world: held, `systems.wraps.client`).

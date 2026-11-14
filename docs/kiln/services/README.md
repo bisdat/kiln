@@ -60,6 +60,7 @@ row above and grows its own page.
 |---|---|
 | [queries.md](queries.md) | `Kiln.Queries`: voxel rays, ground below a point, voxel line of sight, entity origins in a sphere or box; the shared ray budget |
 | [creature-control.md](creature-control.md) | kiln.creature_control / CreatureControl: the one broker that owns a controlled creature body's AI-off layer and SteeringAgent; leases for pets, mounts, vehicles and NPC brains |
+| [systems.md](systems.md) | `Kiln.Systems` / kiln.world v4: Before, After and Replace on the game's own ECS programs, per slice or per entity; entity views, write events, attribute formulas |
 
 ## Native rules
 - `kiln_plugin_main(api, owner, info)`: check `api->abi_version == KILN_ABI_VERSION`, resolve symbols with

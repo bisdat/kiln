@@ -117,8 +117,8 @@ public static unsafe class Systems
     }
 
     /// <summary>A wrap on <paramref name="program"/>: add its stages with <see cref="ProgramWrap.Before"/>,
-    /// <see cref="ProgramWrap.After"/>, <see cref="ProgramWrap.Replace"/>, <see cref="ProgramWrap.BeforeEach"/> and
-    /// <see cref="ProgramWrap.AfterEach"/>. Stages apply in the target world's next step and again, by program name, in
+    /// <see cref="ProgramWrap.After"/>, <see cref="ProgramWrap.Replace"/>, <see cref="ProgramWrap.BeforeEach(EntityHandler, int?)"/>
+    /// and <see cref="ProgramWrap.AfterEach(EntityHandler, int?)"/> (per entity, also with an <see cref="EntityViewHandler"/>). Stages apply in the target world's next step and again, by program name, in
     /// later worlds of that kind; they go with <see cref="ProgramWrap.Dispose"/> or when the mod unloads.</summary>
     /// <returns><c>Ok = false</c>: the program is not in that world (a client program on a server), native SET is
     /// loaded.</returns>

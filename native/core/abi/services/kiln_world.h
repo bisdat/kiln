@@ -702,7 +702,7 @@ typedef struct KilnWorldApi {
      * For code that names programs by their update pointer. */
     uint64_t(KILN_CALL* wrap_original)(uintptr_t entry);
 
-    /* ---- per entity inside a stage (0.2.0-dev.28, still v4) ----
+    /* ---- per entity inside a stage (since 0.2.0-dev.29, still v4: check header.size) ----
      * The names of list `list` (KILN_GAME_LIST_*) of program `index`'s descriptor in that world's directory, in
      * descriptor order: returns how many (-1: no such program or list) and copies up to `capacity` into `names`
      * (valid for the life of the process). Any thread. */
@@ -730,6 +730,12 @@ typedef struct KilnWorldApi {
     /* Whether archetype `layout` (game_slice_archetype) has component `component_hash`: 1 yes, 0 no, -1 not known
      * (no such component in that world, no world). Any thread, while the world lives. */
     int32_t(KILN_CALL* game_archetype_has)(uint32_t world_kind, uintptr_t layout, uint32_t component_hash);
+    /* Inside game_slice_iterate's callback, after writing an attribute component (Fuel, Health, ...) through WRITE /
+     * WRITE_OPT slot `i` of `list`: runs the game's attribute formulas on it (AttrChanged: maxima, clamps, derived
+     * values), with the program's own impact::AttributeRegistry singleton. KILN_ERR_INVALID_ARGUMENT: not a write
+     * slot, not an attribute block with values, or the program does not declare impact::AttributeRegistry;
+     * KILN_ERR_UNAVAILABLE: not on this build; KILN_ERR_INTERNAL: the formulas faulted. */
+    KilnResult(KILN_CALL* game_slice_attr_changed)(KilnGameSlice* slice, const uint64_t* iter, int32_t list, int32_t i);
 } KilnWorldApi;
 
 enum {

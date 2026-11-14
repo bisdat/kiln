@@ -1,1 +1,3 @@
 #nullable enable
+Kiln.ComponentWrittenEvent.Writer.get -> string?
+Kiln.ComponentWrittenEvent.Writers.get -> System.Collections.Generic.IReadOnlyList<string!>!

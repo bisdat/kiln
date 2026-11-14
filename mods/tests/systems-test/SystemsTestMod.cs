@@ -3,8 +3,10 @@
 //  1. Kiln.Testing.LabSystems, the lab parallel switch, at world steps 60-64 (before the native part uses the switch).
 //  2. Kiln.Systems, once the native part (native/systems_test.cpp) is done (it creates kiln/control/systems-native.done):
 //     a second Replace (systems-test-peer holds one), a throw that disables only its stage, a tick-thread API inside a
-//     handler, per-entity stages, handlers on the game's workers with the switch on; then `reload-test systems-test 20`
-//     through the control folder (each reload makes wraps again; the old instance's must go with it).
+//     handler, per-entity stages, handlers on the game's workers with the switch on; with the switch on again, writes
+//     through entity views (one ComponentWrittenEvent per entity and component per step, on the tick thread) and
+//     Attribute32.Changed; then `reload-test systems-test 20` through the control folder (each reload makes wraps again;
+//     the old instance's must go with it).
 using System.Collections.Concurrent;
 using Kiln;
 using Kiln.Testing;
@@ -107,9 +109,21 @@ public sealed class SystemsTestMod : Mod
     private readonly ConcurrentDictionary<int, byte> _threads = new(), _forcedThreads = new();
     private volatile bool _counting;
     private WrapResult<ProgramWrap>? _second;
+    // writes through entity views (S6)
+    private ProgramWrap? _writer;
+    private EventSubscription? _writtenSub;
+    private volatile bool _writing, _attrWanted;
+    private int _tickThread, _attrDone;
+    private readonly ConcurrentDictionary<uint, byte> _targets = new();
+    private readonly ConcurrentDictionary<int, byte> _writeThreads = new();
+    private readonly ConcurrentDictionary<(uint, ulong), byte> _wrote = new();
+    private readonly ConcurrentDictionary<uint, int> _eventsPer = new();
+    private int _badEvents;
+    private string? _badEvent, _attrResult;
 
     private void WrapRows(in TickInfo tick)
     {
+        _tickThread = Environment.CurrentManagedThreadId;
         try
         {
             if (_t0 == 0)
@@ -177,11 +191,42 @@ public sealed class SystemsTestMod : Mod
                     var stats = _guard!.Stats;
                     Check("managed handlers ran on N>1 threads (forced)", _forcedThreads.Count > 1 && stats.Faults == 0,
                         $"{_forcedThreads.Count} threads, {stats.Slices} slices, {stats.Threads} threads by kiln.world's count");
+                    LabSystems.StopParallel();
                     break;
                 }
+                case 404:
+                    Check("LabSystems.ForceParallel(200) for the writes", LabSystems.ForceParallel(200));
+                    _writtenSub = Events.On<ComponentWrittenEvent>(OnWritten);
+                    _writer = Systems.Wrap("fuel_setup").Wrap!;
+                    _writer.BeforeEach(WriteBefore).AfterEach(WriteAfter);
+                    break;
+                case 410:
+                    _writing = true;  // three steps of writes
+                    break;
+                case 413:
+                    _writing = false;
+                    break;
+                case 420:
+                {
+                    var expected = _wrote.Keys.GroupBy(k => k.Item1).ToDictionary(g => g.Key, g => g.Count());
+                    var same = expected.Count > 0 && expected.Count == _eventsPer.Count &&
+                        expected.All(kv => _eventsPer.TryGetValue(kv.Key, out var n) && n == kv.Value);
+                    Check("write event: one ComponentWrittenEvent per entity and component per step, Writer \"systems-test/wrap:fuel_setup\", raised on the tick thread",
+                        same && _badEvents == 0,
+                        $"{_wrote.Count} (entity, step) pairs written by two stages each on {_writeThreads.Count} thread(s), " +
+                        $"{_eventsPer.Values.Sum()} events for {_eventsPer.Count} entities; {_badEvents} wrong: {_badEvent ?? "none"}");
+                    _attrWanted = true;
+                    break;
+                }
+                case 424:
+                    Check("Attribute32.Changed clamps to max", _attrResult?.StartsWith("clamped") == true, _attrResult ?? "no entity with a maximum seen");
+                    break;
                 case 430:
-                    foreach (var w in new[] { _throwing, _guard, _each, _replace }) w?.Dispose();
-                    Check("Dispose: every wrap removed", _throwing!.State == WrapState.Removed && _guard!.State == WrapState.Removed);
+                    foreach (var w in new[] { _throwing, _guard, _each, _replace, _writer }) w?.Dispose();
+                    _writtenSub?.Dispose();
+                    LabSystems.StopParallel();
+                    Check("Dispose: every wrap removed", _throwing!.State == WrapState.Removed && _guard!.State == WrapState.Removed &&
+                        _writer!.State == WrapState.Removed);
                     break;
                 case 440:
                     Log.Info($"systems-test (managed): {_pass} PASS, {_fail} FAIL");
@@ -196,6 +241,60 @@ public sealed class SystemsTestMod : Mod
             Log.Info($"systems-test (managed): {_pass} PASS, {_fail} FAIL");
             _done = true;
         }
+    }
+
+    // ---- writes through entity views: Before takes one unit off 20 containers, After gives it back ----
+    private void WriteBefore(ref EntityView e)
+    {
+        if (!_writing) return;
+        var id = e.Entity.Value;
+        if (!_targets.ContainsKey(id))
+        {
+            if (_targets.Count >= 20) return;
+            var probe = e.Attribute("Fuel");
+            if (!probe.HasValues || probe.Count < 2 || probe[0] <= 0) return;
+            _targets.TryAdd(id, 0);
+        }
+        var fuel = e.Attribute("Fuel");
+        if (!fuel.HasValues || fuel.Count < 2 || fuel[0] <= 0) return;
+        fuel[0] -= 1;
+        _wrote.TryAdd((id, e.Step), 0);
+        _writeThreads.TryAdd(Environment.CurrentManagedThreadId, 0);
+    }
+
+    private void WriteAfter(ref EntityView e)
+    {
+        var id = e.Entity.Value;
+        if (_wrote.ContainsKey((id, e.Step)))
+        {
+            e.Attribute("Fuel")[0] += 1;
+            return;
+        }
+        if (!_attrWanted || Volatile.Read(ref _attrDone) != 0 || !e.Has("Fuel")) return;
+        var a = e.Attribute("Fuel");  // Fuel: [0] current units, [1] the maximum
+        if (!a.HasValues || a.Count < 2 || a[1] <= 0 || Interlocked.Exchange(ref _attrDone, 1) != 0) return;
+        var (before, max) = (a[0], a[1]);
+        a[0] = max + 1000;
+        a.Changed();
+        var after = a[0];
+        a[0] = before;
+        a.Changed();
+        _attrResult = after == max ? $"clamped: {max + 1000} -> {after} (max {max}) on {e.Entity}, put back to {a[0]}"
+            : $"not clamped: {max + 1000} -> {after} (max {max}) on {e.Entity}";
+    }
+
+    private void OnWritten(ComponentWrittenEvent e)
+    {
+        if (e.Writer is null || !e.Writer.EndsWith("/wrap:fuel_setup", StringComparison.Ordinal) || !_targets.ContainsKey(e.Entity.Value)) return;
+        _eventsPer.AddOrUpdate(e.Entity.Value, 1, (_, n) => n + 1);
+        string? bad = null;
+        if (e.Writer != "systems-test/wrap:fuel_setup" || e.Writers.Count != 1) bad = $"writer {e.Writer} ({e.Writers.Count})";
+        else if (e.Component != "Fuel") bad = $"component {e.Component}";
+        else if (Environment.CurrentManagedThreadId != _tickThread) bad = $"thread {Environment.CurrentManagedThreadId}, tick {_tickThread}";
+        else if (!e.Result.Changed || e.Result.Before.Length < 16) bad = "no change";
+        if (bad is null) return;
+        _badEvents++;
+        _badEvent ??= bad;
     }
 
     private static bool Throws<T>(Action a) where T : Exception

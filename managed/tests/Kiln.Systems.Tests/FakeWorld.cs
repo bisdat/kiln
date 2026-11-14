@@ -29,6 +29,15 @@ internal sealed unsafe class FakeWorld : IDisposable
     internal nuint Layout = 0x5000;
     internal readonly HashSet<uint> LayoutHas = new();
     internal bool InRunOriginal;
+    // per-entity storage of fuel_setup's slots, row r: a Fuel attribute block {root, offset, flags, count, s32 current,
+    // s32 max} (16 bytes) and a CurrentTransform (8 bytes; row 2 has none: an optional slot that is absent)
+    internal readonly byte* Fuel = (byte*)NativeMemory.AllocZeroed(16 * 8);
+    internal readonly byte* Transform = (byte*)NativeMemory.AllocZeroed(8 * 8);
+    internal readonly byte* Registry = (byte*)NativeMemory.AllocZeroed(8);
+    internal readonly List<(ulong Row, int List, int Index)> Marks = new();
+    internal int AttrCalls;
+    internal bool NoRegistry;  // fuel_setup does not declare impact::AttributeRegistry
+    internal ulong StepNow = 77;  // the step a fake slice says
     private readonly SystemsNative.Table* _table;
     private readonly nint[] _names;
 
@@ -63,6 +72,19 @@ internal sealed unsafe class FakeWorld : IDisposable
         _table->GameSliceIterate = &Iterate;
         _table->GameSliceArchetype = &Archetype;
         _table->GameArchetypeHas = &Has;
+        _table->GameSliceSlot = &Slot;
+        _table->GameSliceMark = &Mark;
+        _table->GameSliceAttrChanged = &AttrChanged;
+        for (var r = 0; r < 8; r++)
+        {
+            var f = Fuel + 16 * r;
+            *(uint*)f = 0x05b0bf75;
+            f[6] = 1;
+            f[7] = 2;
+            *(int*)(f + 8) = 100 * (r + 1);
+            *(int*)(f + 12) = 1000;
+            *(long*)(Transform + 8 * r) = 7000 + r;
+        }
         _names = new nint[Names.Length];
         for (var k = 0; k < Names.Length; k++)
         {
@@ -81,6 +103,8 @@ internal sealed unsafe class FakeWorld : IDisposable
     public void Dispose()
     {
         foreach (var s in Systems.Live.Keys.ToList()) s.Forget(true);
+        ProgramLists.Reset();
+        WrapWrites.Reset();
         Kiln.Backend.Current = _old;
         Capabilities.Reset();
         SystemsNative.Reset();
@@ -98,7 +122,7 @@ internal sealed unsafe class FakeWorld : IDisposable
                 var s = new SystemsNative.Slice
                 {
                     Size = (uint)sizeof(SystemsNative.Slice), WorldKind = w.Kind, Count = (uint)EntityIds.Length,
-                    ThreadIsWorld = worldThread, EntityIds = ids, EntityStride = 4, ProgramIndex = w.Index, Step = 77,
+                    ThreadIsWorld = worldThread, EntityIds = ids, EntityStride = 4, ProgramIndex = w.Index, Step = StepNow,
                     Program = new NativeStr { Ptr = n, Len = (nuint)name.Length }, Stage = w.Stage,
                 };
                 if (!w.Gone) w.Fn(&s, w.User);
@@ -130,16 +154,75 @@ internal sealed unsafe class FakeWorld : IDisposable
         return SystemsNative.Ok;
     }
 
-    private static readonly byte[] FuelName = "Fuel"u8.ToArray();
-    private static readonly nint FuelPtr = Marshal.AllocHGlobal(4);
+    private static NativeStr Name(string s)
+    {
+        var b = System.Text.Encoding.UTF8.GetBytes(s);
+        var p = (byte*)NativeMemory.Alloc((nuint)b.Length);
+        b.CopyTo(new Span<byte>(p, b.Length));
+        return new NativeStr { Ptr = p, Len = (nuint)b.Length };
+    }
+
+    // fuel_setup's lists: write Fuel, read_opt CurrentTransform, sys_read impact::AttributeRegistry (unless NoRegistry)
+    private static readonly NativeStr FuelName = Name("Fuel"), TransformName = Name("CurrentTransform"),
+        RegistryName = Name("impact::AttributeRegistry");
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int List(uint kind, int index, int list, NativeStr* names, uint capacity)
     {
-        if (index != 0 || list != SystemsNative.ListWrite) return index is 0 or 1 ? 0 : -1;
-        Marshal.Copy(FuelName, 0, FuelPtr, 4);
-        if (capacity > 0) names[0] = new NativeStr { Ptr = (byte*)FuelPtr, Len = 4 };
+        if (index is not (0 or 1)) return -1;
+        if (index == 1) return 0;
+        NativeStr? one = list switch
+        {
+            SystemsNative.ListWrite => FuelName,
+            SystemsNative.ListReadOpt => TransformName,
+            SystemsNative.ListSysRead when !F.NoRegistry => RegistryName,
+            _ => null,
+        };
+        if (one is null) return 0;
+        if (capacity > 0) names[0] = one.Value;
         return 1;
+    }
+
+    // the iterator's first word is the row (Iterate sets it)
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static void* Slot(SystemsNative.Slice* s, ulong* iter, int list, int i, uint* size, byte* writable)
+    {
+        var row = (int)*iter;
+        *writable = (byte)(list is SystemsNative.ListWrite or SystemsNative.ListWriteOpt ? 1 : 0);
+        switch (list)
+        {
+            case SystemsNative.ListWrite when i == 0:
+                *size = 16;
+                return F.Fuel + 16 * row;
+            case SystemsNative.ListReadOpt when i == 0:
+                *size = 8;
+                return row == 2 ? null : F.Transform + 8 * row;
+            case SystemsNative.ListSysRead when i == 0 && !F.NoRegistry:
+                *size = 0;
+                return F.Registry;
+            default:
+                return null;
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int Mark(SystemsNative.Slice* s, ulong* iter, int list, int i)
+    {
+        if (list is not (SystemsNative.ListWrite or SystemsNative.ListWriteOpt)) return SystemsNative.InvalidArgument;
+        F.Marks.Add((*iter, list, i));
+        return SystemsNative.Ok;
+    }
+
+    // the game's formulas for Fuel: clamp the current value to the maximum
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int AttrChanged(SystemsNative.Slice* s, ulong* iter, int list, int i)
+    {
+        if (list is not (SystemsNative.ListWrite or SystemsNative.ListWriteOpt) || F.NoRegistry) return SystemsNative.InvalidArgument;
+        F.AttrCalls++;
+        var f = F.Fuel + 16 * (int)*iter;
+        if ((f[6] & 1) == 0) return SystemsNative.InvalidArgument;
+        if (*(int*)(f + 8) > *(int*)(f + 12)) *(int*)(f + 8) = *(int*)(f + 12);
+        return SystemsNative.Ok;
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
@@ -208,7 +291,10 @@ internal sealed unsafe class FakeWorld : IDisposable
     {
         ulong it = 0;
         for (uint r = 0; r < s->Count; r++)
+        {
+            it = r;
             if (each(&it, r, s->EntityIds[r], user) != 0) break;
+        }
         return SystemsNative.Ok;
     }
 

@@ -56,6 +56,7 @@ void* KILN_CALL game_slice_slot(KilnGameSlice* slice, const uint64_t* iter, int3
 KilnResult KILN_CALL game_slice_mark(KilnGameSlice* slice, const uint64_t* iter, int32_t list, int32_t i);
 KilnResult KILN_CALL game_slice_archetype(KilnGameSlice* slice, uintptr_t* out_layout);
 int32_t KILN_CALL game_archetype_has(uint32_t world_kind, uintptr_t layout, uint32_t component_hash);
+KilnResult KILN_CALL game_slice_attr_changed(KilnGameSlice* slice, const uint64_t* iter, int32_t list, int32_t i);
 int32_t KILN_CALL game_program_list(uint32_t world_kind, int32_t index, int32_t list, KilnStr* names, uint32_t capacity);
 
 // ---- seh.cpp ----

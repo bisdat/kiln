@@ -57,6 +57,15 @@ bool seh_cas_ptr(uintptr_t address, uintptr_t expected, uintptr_t desired, uintp
     *seen = expected;
     return true;
 }
+bool seh_attr_changed(void (*f)(void*, void*), void* component, void* registry, unsigned long* code) {
+    try {
+        f(component, registry);
+        return true;
+    } catch (int) {
+        *code = 0xC0000005u;
+        return false;
+    }
+}
 // kiln.types with only what kiln.world asks of it here: whether native SET owns the program runner.
 std::atomic<uint32_t> g_fake_external{0};
 // kiln.types: the external runner, and the reflected sizes of a few components (a type handle is its size).
@@ -179,6 +188,7 @@ void fake_api() {
         return g_hooks_on && std::string(name.ptr, name.len) == KILN_HOOKS_SERVICE ? &g_fake_hooks : nullptr;
     };
     g_fake.path = [](int32_t, char*, size_t, size_t*) -> KilnResult { return KILN_ERR_UNAVAILABLE; };
+    g_fake.symbol = [](KilnStr, uintptr_t*) -> KilnResult { return KILN_ERR_NOT_FOUND; };
     g_api = &g_fake;
 }
 
@@ -957,7 +967,10 @@ void release_under_load() {
 // (type indices FuelSetup 3, CurrentTransform 5, DynamicFuelSetup 10, Fuel 20: the WRITE group is NOT descriptor
 // order, which lists Fuel first). Each slot of row r points at base(slot) + 64 r; a write record's tracker is rec[5].
 constexpr uint32_t kRowStride = 64;
-uintptr_t slot_base(int slot) { return 0x7000000ull + 0x10000ull * static_cast<unsigned>(slot); }
+uintptr_t g_slot_override[32];  // a slot whose rows point into real memory (base + 64 r)
+uintptr_t slot_base(int slot) {
+    return g_slot_override[slot] ? g_slot_override[slot] : 0x7000000ull + 0x10000ull * static_cast<unsigned>(slot);
+}
 std::atomic<int> g_marks{0};
 std::atomic<uint64_t> g_mark_rec{0};
 void fake_iter_begin(void*, void* iter, uint32_t size) {
@@ -973,6 +986,7 @@ bool fake_iter_next(void* raw, void* iter, uint32_t size) {
     for (uint32_t k = 1; k < size / 8; ++k) it[k] = slot_base(static_cast<int>(k)) + uint64_t{kRowStride} * r;
     it[3 + 5] = 0xAA00 + 3;  // trackers of the two write records
     it[9 + 5] = 0xAA00 + 9;
+    if (g_slot_override[15]) it[15] = g_slot_override[15];  // the singleton: one object, not per row
     ctx->index = r + 1;
     return true;
 }
@@ -988,7 +1002,37 @@ void fake_mark(void* tracker, void*, void*, void*, uint16_t, uint8_t) {
     g_mark_rec = reinterpret_cast<uintptr_t>(tracker);
 }
 
+// The game's attribute formulas: a Fuel block {u32 root; u16 offset; u8 flags; u8 count; s32 current; s32 max} is clamped.
+std::atomic<int> g_attr_calls{0};
+uintptr_t g_attr_registry = 0;
+void fake_attr_changed(void* component, void* registry) {
+    g_attr_calls.fetch_add(1);
+    g_attr_registry = reinterpret_cast<uintptr_t>(registry);
+    auto* c = static_cast<uint8_t*>(component);
+    int32_t cur = 0, max = 0;
+    std::memcpy(&cur, c + 8, 4);
+    std::memcpy(&max, c + 12, 4);
+    if (cur > max) std::memcpy(c + 8, &max, 4);
+}
+std::vector<KilnResult> g_attr_rcs;
+uint32_t KILN_CALL each_attr(uint64_t* iter, uint32_t row, KilnEntity, void* user) {
+    auto* sl = static_cast<KilnGameSlice*>(user);
+    if (row != 0) return 1;
+    auto* fuel = static_cast<uint8_t*>(game_slice_slot(sl, iter, KILN_GAME_LIST_WRITE, 0, nullptr, nullptr));
+    if (!fuel) {
+        g_attr_rcs.push_back(-1);
+        return 1;
+    }
+    const int32_t over = 5000;
+    std::memcpy(fuel + 8, &over, 4);
+    g_attr_rcs.push_back(game_slice_attr_changed(sl, iter, KILN_GAME_LIST_WRITE, 0));
+    g_attr_rcs.push_back(game_slice_attr_changed(sl, iter, KILN_GAME_LIST_READ_OPT, 0));
+    return 1;
+}
+void KILN_CALL st_attr(KilnGameSlice* s, void*) { game_slice_iterate(s, &each_attr, s); }
+
 // fuel_setup's descriptor lists (names as the engine stores them)
+NameRef g_fs_sread[] = {{"impact::AttributeRegistry", 25}};
 NameRef g_fs_tpl[] = {{"FuelSetup", 9}}, g_fs_ropt[] = {{"CurrentTransform", 16}},
         g_fs_write[] = {{"Fuel", 4}, {"DynamicFuelSetup", 16}}, g_unser[] = {{"Health", 6}};
 void counts(Job& j, uint8_t t, uint16_t r, uint16_t w) {
@@ -1169,6 +1213,43 @@ void per_entity() {
     check(g_seen4.ids.size() == 5 && g_seen4.fuel == 0, "a NO_VIEW program: iteration works, no slot");
     game_program_unwrap(nv);
     wpre();
+    // Attribute formulas: the program declares impact::AttributeRegistry; the Fuel block is clamped by them
+    world_event(KILN_WORLD_STOPPING, KILN_WORLD_SERVER);
+    g_wdesc[0].sys_read = {g_fs_sread, 1};
+    g_type_index[fnv1a("impact::AttributeRegistry")] = 1;
+    F.singletons = true;
+    world_event(KILN_WORLD_STARTED, KILN_WORLD_SERVER);
+    wpre();
+    alignas(16) static uint8_t fuel_block[64 * 8]{};
+    fuel_block[6] = 1;  // the block's "has values" flag
+    const int32_t max = 1280;
+    std::memcpy(fuel_block + 12, &max, 4);
+    alignas(16) static uint8_t registry_obj[16]{};
+    alignas(16) static uint8_t singletons[0x401]{};
+    singletons[0x400] = 1;
+    g_slot_override[9] = reinterpret_cast<uintptr_t>(fuel_block);
+    g_slot_override[15] = reinterpret_cast<uintptr_t>(registry_obj);
+    Job attr_job(2);
+    counts(attr_job, 1, 1, 2);
+    uint8_t* sp = singletons;
+    std::memcpy(attr_job.bytes + 0xC0, &sp, 8);
+    const KilnHandle at = wrap(90, "fuel_setup", KILN_WRAP_BEFORE, 0, &st_attr, nullptr);
+    wpre();
+    check(game_slice_attr_changed(nullptr, nullptr, KILN_GAME_LIST_WRITE, 0) == KILN_ERR_WRONG_THREAD,
+          "attribute formulas outside a stage are refused");
+    fn.iter_begin = &fake_iter_begin;
+    g_attr_changed_fn = &fake_attr_changed;
+    run_slice(wentry(0), attr_job);
+    int32_t cur = 0;
+    std::memcpy(&cur, fuel_block + 8, 4);
+    check(g_attr_rcs.size() == 2 && g_attr_rcs[0] == KILN_OK && g_attr_rcs[1] == KILN_ERR_INVALID_ARGUMENT &&
+              g_attr_calls.load() == 1 && cur == 1280 && g_attr_registry == reinterpret_cast<uintptr_t>(registry_obj),
+          "attribute formulas: run with the program's AttributeRegistry, clamp the written Fuel to its max; refused "
+          "for a read list");
+    game_program_unwrap(at);
+    wpre();
+    g_slot_override[9] = g_slot_override[15] = 0;
+    g_wdesc[0].sys_read = NameListE{};
     g_wdesc[0].tpl = g_wdesc[0].read_opt = g_wdesc[0].write = g_wdesc[4].other_write_unser = NameListE{};
 }
 
@@ -1307,7 +1388,7 @@ void abi(const char* path) {
         F(KilnWorldApi, game_wrap_info); F(KilnWorldApi, game_wraps_release); F(KilnWorldApi, game_slice_run_original);
         F(KilnWorldApi, wrap_original); F(KilnWorldApi, game_program_list); F(KilnWorldApi, game_slice_iterate);
         F(KilnWorldApi, game_slice_slot); F(KilnWorldApi, game_slice_mark); F(KilnWorldApi, game_slice_archetype);
-        F(KilnWorldApi, game_archetype_has);
+        F(KilnWorldApi, game_archetype_has); F(KilnWorldApi, game_slice_attr_changed);
     }
     {
         auto& l = list("KilnGameSlice", sizeof(KilnGameSlice));

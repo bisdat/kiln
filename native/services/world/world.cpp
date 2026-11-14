@@ -348,6 +348,7 @@ const KilnWorldApi kTable = {
     &game_slice_mark,
     &game_slice_archetype,
     &game_archetype_has,
+    &game_slice_attr_changed,
 };
 
 void KILN_CALL on_client_pre(const KilnTickInfo* tick, void*) { game_programs_pre(KILN_WORLD_CLIENT, tick); }

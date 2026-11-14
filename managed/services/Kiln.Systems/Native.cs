@@ -11,7 +11,8 @@ internal static unsafe class SystemsNative
     public const uint Version = 4;
 
     // KilnResult
-    public const int Ok = 0, InvalidArgument = 1, NotFound = 2, Unavailable = 3, WrongThread = 4, BufferTooSmall = 5;
+    public const int Ok = 0, InvalidArgument = 1, NotFound = 2, Unavailable = 3, WrongThread = 4, BufferTooSmall = 5,
+        Internal = 7;
 
     // KILN_WRAP_* stages, states and reasons
     public const int Before = 0, Replace = 1, After = 2;
@@ -21,7 +22,8 @@ internal static unsafe class SystemsNative
 
     // KILN_GAME_PROGRAM_* and KILN_GAME_LIST_*
     public const uint ProgramGame = 1, ProgramNoUpdate = 2, ProgramNoView = 4;
-    public const int ListWrite = 4, ListWriteOpt = 5;
+    public const int ListTpl = 0, ListTplOpt = 1, ListRead = 2, ListReadOpt = 3, ListWrite = 4, ListWriteOpt = 5,
+        ListSysRead = 6, ListSysWrite = 7, Lists = 16;
 
     [StructLayout(LayoutKind.Sequential)]
     public struct ProgramInfo
@@ -81,7 +83,7 @@ internal static unsafe class SystemsNative
         public fixed byte Detail[128];
     }
 
-    // KilnWorldApi up to game_archetype_has: the v3 table (header + 34 entries) and v4.
+    // KilnWorldApi up to game_slice_attr_changed: the v3 table (header + 34 entries) and v4.
     [StructLayout(LayoutKind.Sequential)]
     public struct Table
     {
@@ -103,6 +105,7 @@ internal static unsafe class SystemsNative
         public delegate* unmanaged[Cdecl]<Slice*, ulong*, int, int, int> GameSliceMark;
         public delegate* unmanaged[Cdecl]<Slice*, nuint*, int> GameSliceArchetype;
         public delegate* unmanaged[Cdecl]<uint, nuint, uint, int> GameArchetypeHas;
+        public delegate* unmanaged[Cdecl]<Slice*, ulong*, int, int, int> GameSliceAttrChanged;
     }
 
     private static Table* _table;

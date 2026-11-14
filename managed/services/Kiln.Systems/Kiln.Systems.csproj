@@ -11,6 +11,8 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />
+    <!-- a wrap's writes through an entity view raise Kiln.World's ComponentWrittenEvent -->
+    <ProjectReference Include="../Kiln.World/Kiln.World.csproj" Private="false" />
     <InternalsVisibleTo Include="Kiln.Systems.Tests" />
   </ItemGroup>
 </Project>

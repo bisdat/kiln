@@ -1,10 +1,31 @@
 #nullable enable
+Kiln.Attribute32
+Kiln.Attribute32.Attribute32() -> void
+Kiln.Attribute32.Changed() -> void
+Kiln.Attribute32.Component.get -> string!
+Kiln.Attribute32.Count.get -> int
+Kiln.Attribute32.HasValues.get -> bool
+Kiln.Attribute32.RootId.get -> uint
+Kiln.Attribute32.Values.get -> System.Span<int>
+Kiln.Attribute32.this[int slot].get -> int
 Kiln.EntityHandler
+Kiln.EntityView
+Kiln.EntityView.Attribute(string! component) -> Kiln.Attribute32
+Kiln.EntityView.Entity.get -> Kiln.EntityId
+Kiln.EntityView.EntityView() -> void
+Kiln.EntityView.Has(string! component) -> bool
+Kiln.EntityView.Read<T>(string! component) -> T
+Kiln.EntityView.Row.get -> int
+Kiln.EntityView.Step.get -> ulong
+Kiln.EntityView.Write<T>(string! component) -> T
+Kiln.EntityViewHandler
 Kiln.ProgramWrap
 Kiln.ProgramWrap.After(Kiln.SliceHandler! handler, int? priority = null) -> Kiln.ProgramWrap!
 Kiln.ProgramWrap.AfterEach(Kiln.EntityHandler! handler, int? priority = null) -> Kiln.ProgramWrap!
+Kiln.ProgramWrap.AfterEach(Kiln.EntityViewHandler! handler, int? priority = null) -> Kiln.ProgramWrap!
 Kiln.ProgramWrap.Before(Kiln.SliceHandler! handler, int? priority = null) -> Kiln.ProgramWrap!
 Kiln.ProgramWrap.BeforeEach(Kiln.EntityHandler! handler, int? priority = null) -> Kiln.ProgramWrap!
+Kiln.ProgramWrap.BeforeEach(Kiln.EntityViewHandler! handler, int? priority = null) -> Kiln.ProgramWrap!
 Kiln.ProgramWrap.Disabled -> System.Action<Kiln.WrapDisabledEvent!>?
 Kiln.ProgramWrap.Dispose() -> void
 Kiln.ProgramWrap.Program.get -> string!
@@ -174,6 +195,7 @@ static Kiln.WrapOptions.operator ==(Kiln.WrapOptions? left, Kiln.WrapOptions? ri
 static Kiln.WrapStats.operator !=(Kiln.WrapStats? left, Kiln.WrapStats? right) -> bool
 static Kiln.WrapStats.operator ==(Kiln.WrapStats? left, Kiln.WrapStats? right) -> bool
 virtual Kiln.EntityHandler.Invoke(Kiln.EntityId entity) -> void
+virtual Kiln.EntityViewHandler.Invoke(ref Kiln.EntityView entity) -> void
 virtual Kiln.SliceHandler.Invoke(ref Kiln.Slice slice) -> void
 ~Kiln.WrapResult<TWrap>.<Clone>$() -> Kiln.WrapResult<TWrap>!
 ~Kiln.WrapResult<TWrap>.Equals(Kiln.WrapResult<TWrap>? other) -> bool

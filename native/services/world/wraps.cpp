@@ -134,6 +134,8 @@ KilnHandle g_next = 1;
 uint64_t g_seq = 0;
 bool g_ok = false;                    // the layout wraps need resolved
 bool g_counts_ok = false;             // the job's group counts resolved (per-entity iteration and slots)
+using AttrChangedFn = void (*)(void* component, void* registry);
+AttrChangedFn g_attr_changed_fn = nullptr;  // the game's attribute formulas (items/AttrChanged)
 std::atomic<uint32_t> g_external{0};  // kiln.types' external runner, as last seen
 uint32_t g_external_pre = 0;          // as the last Pre saw it (g_mu): what the capability row says
 const KilnCapsApi* g_wrap_caps = nullptr;
@@ -661,6 +663,10 @@ void wraps_init() {
            L.job_entity_count >= 0 && L.job_entity_list >= 0 && L.ctx_index == offsetof(ProgramCtx, index) &&
            g_api->feature(kstr("world.programs"));
     g_wrap_caps = static_cast<const KilnCapsApi*>(g_api->service(kstr(KILN_CAPS_SERVICE), 1));
+    {
+        uintptr_t address = 0;
+        if (g_api->symbol(kstr("items/AttrChanged"), &address) == KILN_OK) g_attr_changed_fn = reinterpret_cast<AttrChangedFn>(address);
+    }
     const auto* hooks = static_cast<const KilnHooksApi*>(g_api->service(kstr(KILN_HOOKS_SERVICE), KILN_HOOKS_VERSION));
     KilnHandle retiring = 0;
     g_retiring_subscribed = hooks && hooks->header.size >= offsetof(KilnHooksApi, unsubscribe_owner_retiring) + sizeof(void*) &&
@@ -1131,6 +1137,30 @@ int32_t KILN_CALL game_archetype_has(uint32_t kind, uintptr_t layout, uint32_t h
     uint64_t word = 0;
     if (!seh_copy(&word, reinterpret_cast<const void*>(layout + (type >> 6) * 8), 8)) return -1;
     return static_cast<int32_t>((word >> (type & 63)) & 1);
+}
+
+KilnResult KILN_CALL game_slice_attr_changed(KilnGameSlice* slice, const uint64_t* iter, int32_t list, int32_t i) {
+    Frame* f = frame_of(slice);
+    if (!f || !iter || iter != f->iter) return KILN_ERR_WRONG_THREAD;
+    if (list != L_WRITE && list != L_WRITE_OPT) return KILN_ERR_INVALID_ARGUMENT;
+    if (!g_attr_changed_fn) return KILN_ERR_UNAVAILABLE;
+    const View* v = nullptr;
+    const int32_t slot = view_slot(*f, list, i, &v);
+    if (slot < 0) return KILN_ERR_INVALID_ARGUMENT;
+    auto* component = reinterpret_cast<uint8_t*>(iter[slot]);
+    if (!component) return KILN_ERR_INVALID_ARGUMENT;
+    void* registry = nullptr;
+    for (int id : {L_SREAD, L_SWRITE}) {
+        const auto& names = v->layout.lists[id].names;
+        for (size_t k = 0; k < names.size(); ++k)
+            if (names[k] == "impact::AttributeRegistry" && v->layout.lists[id].slot[k] >= 0)
+                registry = reinterpret_cast<void*>(iter[v->layout.lists[id].slot[k]]);
+    }
+    uint8_t flags = 0;
+    if (!registry || !seh_copy(&flags, component + 6, 1) || !(flags & 1)) return KILN_ERR_INVALID_ARGUMENT;
+    unsigned long code = 0;
+    return seh_attr_changed(reinterpret_cast<void (*)(void*, void*)>(g_attr_changed_fn), component, registry, &code)
+               ? KILN_OK : KILN_ERR_INTERNAL;
 }
 
 // ---- platform ----

@@ -219,6 +219,165 @@ public sealed unsafe class SystemsTests
         Assert.True(w.Wraps[1].Gone);
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FuelBlock
+    {
+        public uint Root;
+        public ushort Offset;
+        public byte Flags, Count;
+        public int Current, Max;
+    }
+
+    [Fact]
+    public void Entity_views_read_and_write_the_program_s_slots_mark_once_and_raise_one_event_per_entity_and_step()
+    {
+        using var w = new FakeWorld();
+        var mod = NewMod("writer");
+        var events = new List<ComponentWrittenEvent>();
+        using var sub = Events.On<ComponentWrittenEvent>(events.Add);
+        var wrap = InMod(mod, () => Systems.Wrap("fuel_setup").Wrap!);
+        var has = new List<bool>();
+        long transform = 0;
+        wrap.BeforeEach((ref EntityView e) =>
+        {
+            has.Add(e.Has("CurrentTransform"));
+            if (e.Has("CurrentTransform")) transform += e.Read<long>("CurrentTransform");
+            Assert.Equal(77ul, e.Step);
+            e.Write<FuelBlock>("Fuel").Current += 1;
+            e.Write<FuelBlock>("keen::ecs::Fuel").Current += 1;  // the same slot: marked once
+        });
+        wrap.AfterEach((ref EntityView e) =>
+        {
+            var a = e.Attribute("Fuel");
+            Assert.Equal(2, a.Count);
+            Assert.True(a.HasValues);
+            Assert.Equal(0x05b0bf75u, a.RootId);
+            a[0] += 5;
+        });
+        w.Call(w.Wraps[0]);
+        w.Call(w.Wraps[1]);
+        Assert.Equal([true, true, false], has);
+        Assert.Equal(7000 + 7001, transform);
+        // one mark per entity and component per stage
+        Assert.Equal(new (ulong, int, int)[] { (0, 4, 0), (1, 4, 0), (2, 4, 0), (0, 4, 0), (1, 4, 0), (2, 4, 0) }, w.Marks);
+        Assert.Empty(events);  // raised on the tick thread's next poll
+        ProgramWrap.Poll();
+        Assert.Equal(3, events.Count);
+        for (var r = 0; r < 3; r++)
+        {
+            var e = events[r];
+            Assert.Equal(new EntityId(101 + (uint)r), e.Entity);
+            Assert.Equal("Fuel", e.Component);
+            Assert.Equal("writer/wrap:fuel_setup", e.Writer);
+            Assert.Equal(["writer/wrap:fuel_setup"], e.Writers);
+            Assert.Equal("writer", e.ModId);
+            Assert.True(e.Result.Changed);
+            Assert.Equal(100 * (r + 1), BitConverter.ToInt32(e.Result.Before.Span[8..]));
+            Assert.Equal(100 * (r + 1) + 7, BitConverter.ToInt32(e.Result.After.Span[8..]));
+        }
+        ProgramWrap.Poll();
+        Assert.Equal(3, events.Count);
+    }
+
+    [Fact]
+    public void Two_mods_writing_one_component_in_a_step_raise_one_event_naming_both_and_a_new_step_raises_again()
+    {
+        using var w = new FakeWorld();
+        var events = new List<ComponentWrittenEvent>();
+        using var sub = Events.On<ComponentWrittenEvent>(events.Add);
+        var a = InMod(NewMod("first"), () => Systems.Wrap("fuel_setup").Wrap!);
+        var b = InMod(NewMod("second-mod"), () => Systems.Wrap("fuel_setup").Wrap!);
+        a.BeforeEach((ref EntityView e) => e.Write<int>("Fuel"));             // touched, not changed: no event of its own
+        b.BeforeEach((ref EntityView e) => e.Attribute("Fuel")[0] -= 10);
+        a.AfterEach((ref EntityView e) => e.Attribute("Fuel")[0] += 1);
+        foreach (var x in w.Wraps) w.Call(x);
+        w.StepNow = 78;
+        foreach (var x in w.Wraps) w.Call(x);
+        ProgramWrap.Poll();
+        Assert.Equal(6, events.Count);  // 3 entities x 2 steps
+        var e0 = events[0];
+        Assert.Equal("second-mod/wrap:fuel_setup", e0.Writer);
+        Assert.Equal(["second-mod/wrap:fuel_setup", "first/wrap:fuel_setup"], e0.Writers);
+        Assert.Equal(100, BitConverter.ToInt32(e0.Result.Before.Span[8..]));
+        Assert.Equal(91, BitConverter.ToInt32(e0.Result.After.Span[8..]));
+        Assert.Equal(91, BitConverter.ToInt32(events[3].Result.Before.Span[8..]));
+        Assert.Equal(82, BitConverter.ToInt32(events[3].Result.After.Span[8..]));
+    }
+
+    [Fact]
+    public void Entity_views_refuse_what_the_program_does_not_list_and_copy_nothing_without_listeners()
+    {
+        using var w = new FakeWorld();
+        var errors = new List<string>();
+        var wrap = Systems.Wrap("fuel_setup").Wrap!;
+        wrap.BeforeEach((ref EntityView e) =>
+        {
+            errors.Add(Try(ref e, static (ref EntityView v) => v.Read<int>("Health")));
+            errors.Add(Try(ref e, static (ref EntityView v) => v.Write<long>("CurrentTransform")));
+            errors.Add(Try(ref e, static (ref EntityView v) => v.Read<Big>("CurrentTransform")));
+            errors.Add(Try(ref e, static (ref EntityView v) => v.Write<Big>("Fuel")));
+            Assert.False(e.Has("Health"));
+            Assert.False(e.Has(""));
+            if (e.Row == 2) errors.Add(Try(ref e, static (ref EntityView v) => v.Read<long>("CurrentTransform")));
+            e.Write<FuelBlock>("Fuel").Current = 5;
+        });
+        w.Call(w.Wraps[0]);
+        Assert.Equal(0, WrapWrites.Waiting);  // nobody listens: nothing copied, compared or queued
+        Assert.Contains("fuel_setup does not list Health", errors[0]);
+        Assert.Contains("fuel_setup does not write CurrentTransform (its write lists: Fuel)", errors[1]);
+        Assert.Contains("CurrentTransform is 8 bytes on this build", errors[2]);
+        Assert.Contains("Fuel is 16 bytes on this build", errors[3]);
+        Assert.Contains("has no CurrentTransform (an optional component of fuel_setup)", errors[^1]);
+    }
+
+    [Fact]
+    public void Attribute32_Changed_runs_the_formulas_and_throws_without_the_registry()
+    {
+        using var w = new FakeWorld();
+        var results = new List<int>();
+        string? error = null;
+        var wrap = Systems.Wrap("fuel_setup").Wrap!;
+        wrap.AfterEach((ref EntityView e) =>
+        {
+            var a = e.Attribute("Fuel");
+            a[0] = a[1] + 500;
+            try
+            {
+                a.Changed();
+                results.Add(a.Values[0]);
+            }
+            catch (InvalidOperationException x)
+            {
+                error = x.Message;
+            }
+            var outOfRange = false;
+            try { _ = a[2]; }
+            catch (ArgumentOutOfRangeException) { outOfRange = true; }
+            Assert.True(outOfRange);
+        });
+        w.Call(w.Wraps[0]);
+        Assert.Equal([1000, 1000, 1000], results);
+        Assert.Equal(3, w.AttrCalls);
+        Assert.Null(error);
+        w.NoRegistry = true;
+        w.Call(w.Wraps[0]);
+        Assert.Contains("impact::AttributeRegistry", error);
+    }
+
+    private delegate void ViewUse(ref EntityView v);
+
+    private static string Try(ref EntityView e, ViewUse use)
+    {
+        try { use(ref e); return "no throw"; }
+        catch (InvalidOperationException x) { return x.Message; }
+    }
+
+    [StructLayout(LayoutKind.Sequential, Size = 64)]
+    private struct Big
+    {
+        public long A;
+    }
+
     [Fact]
     public void WhenArchetype_decides_once_per_archetype()
     {
@@ -308,6 +467,9 @@ public sealed unsafe class SystemsTests
         Assert.Equal(v4["game_slice_run_original"], (int)Marshal.OffsetOf(t, "GameSliceRunOriginal"));
         Assert.Equal(v4["game_program_list"], (int)Marshal.OffsetOf(t, "GameProgramList"));
         Assert.Equal(v4["game_archetype_has"], (int)Marshal.OffsetOf(t, "GameArchetypeHas"));
+        Assert.Equal(v4["game_slice_slot"], (int)Marshal.OffsetOf(t, "GameSliceSlot"));
+        Assert.Equal(v4["game_slice_mark"], (int)Marshal.OffsetOf(t, "GameSliceMark"));
+        Assert.Equal(v4["game_slice_attr_changed"], (int)Marshal.OffsetOf(t, "GameSliceAttrChanged"));
         Assert.Equal((int)abi["KilnWorldApiV4"]!["size"]!, Marshal.SizeOf(t));
     }
 }
