@@ -29,9 +29,10 @@ public readonly record struct FakeTerrainWrite(string Mod, string Label, CellBox
 /// mod's ledger while the cells and the witness stay. A plan whose record was saved and then lost is refused
 /// ("ownership lost"); a plan this world never had is a first install, also over ground that already holds its result;
 /// a record lost before any save is a first install too.</para>
+/// <para><b>Transient overlays.</b> kiln.build's transient journal is modelled: <see cref="Restart"/> puts every cell
+/// a transient write changed back to its earlier value unless it was changed since (as the game's next start does).</para>
 /// <para><b>Not modelled.</b> Streaming, the game's save itself (a new harness starts with an empty world and no
-/// ledger), kiln.build's own events and limits, and its transient journal (a transient overlay's cells stay in the fake
-/// world). From code that is not a mod's (<c>KilnHarness.Run</c>) every batch runs in the
+/// ledger), kiln.build's own events and limits. From code that is not a mod's (<c>KilnHarness.Run</c>) every batch runs in the
 /// same step; as a mod (<c>KilnHarness.As</c>, a mod's own code) one batch a step.</para>
 /// </remarks>
 public sealed class HarnessTerrain
@@ -111,6 +112,16 @@ public sealed class HarnessTerrain
             State.AfterSave.Clear();
         }
         foreach (var a in waiting) a(world, revision);
+    }
+
+    /// <summary>The server saves the world and starts again (<see cref="SaveWorld"/>, then the next start). As in the
+    /// game, every cell a transient write changed (<c>TerrainPersistence.Transient</c>, <c>BuildFlags.Transient</c>) and
+    /// that still holds what that write left gets its earlier value back; a cell changed since (<see cref="Set"/>, a kept
+    /// write) keeps the change. Kept cells and the ledgers stay. Since 0.2.0-dev.28.</summary>
+    public void Restart()
+    {
+        SaveWorld();
+        lock (State.Lock) State.PutBackTransient();
     }
 
     /// <summary>Loses <paramref name="mod"/>'s terrain ledger in this world, as when the world's Kiln data or the
