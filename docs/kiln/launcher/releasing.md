@@ -389,6 +389,17 @@ Each release:
    uploads the Nexus build (nexus/), never the direct one. When an upload fails half way (a storage error), run it
    again with `--only` naming the kinds that are still missing: a kind that went up must not be uploaded twice.
 
+**Trial runs and the NuGet cache.** NuGet keeps a package by id and version for good and never looks at its source
+again. release.sh therefore restores into a private package cache, `<work>/nuget-packages` (or
+`KILN_RELEASE_NUGET_PACKAGES`), never `~/.nuget/packages`, and removes the `kiln.*` packages of the version it builds
+from that cache when it starts; its template check uses a scratch cache of its own. Anything else you build against a
+release folder's packages, such as a mod tried against a trial's `sdk/` feed, needs the same care: a trial of
+`0.2.0-dev.N` that reaches `~/.nuget/packages` leaves `kiln.*` `0.2.0-dev.N` there, and every later local build that
+names that version (a mod on `Kiln.Sdk/0.2.0-dev.N`) restores the trial's packages instead of the published ones. Build
+such a mod with a private cache (`NUGET_PACKAGES=$PWD/.nuget-trial dotnet build`), or give the trial another version
+(`tools/release/version.sh dev 9999`). To clear a cache that already holds a trial's packages:
+`rm -rf ~/.nuget/packages/kiln.*/0.2.0-dev.N` (`dotnet nuget locals global-packages --list` prints the folder).
+
 github-draft.sh stages only linux/ and windows/ (the direct build) of the launchers, plus the runtime files: the server
 pack as `kiln-server-<v>.zip`, and the systemd units as one `kiln-systemd-units-<v>.tar.gz` (GitHub replaces the `@`
 in asset names, which template units need); publish.sh uploads the folder to frostdev.io

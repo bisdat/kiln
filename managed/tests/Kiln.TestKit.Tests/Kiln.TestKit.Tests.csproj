@@ -92,6 +92,9 @@
     <ProjectReference Include="../../services/Kiln.World/Kiln.World.csproj" />
     <!-- Built mod folders (LoadFolder), never referenced. -->
     <TkFolderMod Include="mods/TkLocale/TkLocale.csproj" />
+    <!-- A Kiln.Sdk boot mod with <KilnBoot> and no kiln.mod.json of its own (BootFakeTests): its build is the check that the
+         analyzers see KilnBoot (KILN034 would stop it). -->
+    <TkFolderMod Include="mods/TkBootSdk/TkBootSdk.csproj" />
     <ProjectReference Include="@(TkFolderMod)" ReferenceOutputAssembly="false" />
   </ItemGroup>
   <ItemGroup>

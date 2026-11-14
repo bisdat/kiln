@@ -51,6 +51,8 @@
 # KILN_API_BASELINE: the last release's Kiln.Api .nupkg (or it unzipped) for pack.sh's API compat gate; unset: a loud
 #   warning, at the start and in the closing text, and the release goes on.
 # Builds run one at a time (they share Cargo's build directory); KILN_RELEASE_NICE=1 runs them at the lowest priority.
+# NuGet: the builds restore into a private package cache, $work/nuget-packages (KILN_RELEASE_NUGET_PACKAGES), never
+#   ~/.nuget/packages: a trial run of a version leaves no kiln.* packages of it behind for later local builds.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
@@ -209,6 +211,14 @@ export KILN_OUT=$work/out CARGO_TARGET_DIR=$work/cargo
 # the SDK packages carry the release's version (managed/Kiln.Sdk/pack.sh), and kiln (the CLI) is built knowing it
 export KILN_SDK_VERSION=$version
 rm -rf "$KILN_OUT" && mkdir -p "$KILN_OUT"
+# A private NuGet package cache for every build of the release: pack.sh's Kiln.TestKit restores this version's Kiln.Api
+# from its local feed, and NuGet keeps a package by id and version for good, so in ~/.nuget/packages a trial run would
+# shadow the published packages of the same version in every later local build. Third-party packages stay for the next
+# run; this version's kiln.* packages in it go first (a trial's packages of the same version are not this build's).
+# KILN_RELEASE_NUGET_PACKAGES: another folder.
+export NUGET_PACKAGES=${KILN_RELEASE_NUGET_PACKAGES:-$work/nuget-packages}
+mkdir -p "$NUGET_PACKAGES" && rm -rf -- "$NUGET_PACKAGES"/kiln.*/"${version,,}"
+note "NuGet package cache: $NUGET_PACKAGES (private: ~/.nuget/packages gets none of this release's kiln.* $version packages)"
 # no build paths in the binaries: the home folder and the export become neutral prefixes; KILN_RELEASE_BUILD drops
 # the "tree this was built from" defaults of kilnctl and kiln
 unset RUSTFLAGS
