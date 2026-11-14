@@ -26,6 +26,30 @@ fn login() -> Login {
     Login { config: cfg, verifier: "verifier-secret".into(), state: "state-secret".into(), listener }
 }
 
+/// Tells later whether `listener` was closed. Its port cannot tell: once closed, the ephemeral port is free, and a
+/// parallel test, another build on the PC or the probe's own connect (a self-connect) may hold it then (the check
+/// failed that way under load). On Linux the socket itself is followed: closed when its descriptor no longer names the
+/// same socket. Elsewhere the port is asked, a few times.
+fn closed_probe(listener: &TcpListener) -> Box<dyn Fn() -> bool> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::fd::AsRawFd;
+        let link = format!("/proc/self/fd/{}", listener.as_raw_fd());
+        let socket = std::fs::read_link(&link).unwrap();
+        assert!(socket.to_string_lossy().starts_with("socket:["), "{}", socket.display());
+        Box::new(move || std::fs::read_link(&link).ok().as_ref() != Some(&socket))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let address = listener.local_addr().unwrap();
+        Box::new(move || (0..20).any(|_| {
+            let free = TcpListener::bind(address).is_ok() || std::net::TcpStream::connect(address).is_err();
+            if !free { std::thread::sleep(Duration::from_millis(50)); }
+            free
+        }))
+    }
+}
+
 #[test]
 fn pkce_matches_rfc7636_and_no_secret_is_required() {
     assert_eq!(challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"), "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
@@ -56,25 +80,26 @@ fn config_never_accepts_remote_or_ambiguous_callback_uris() {
 
 #[test]
 fn canceled_listener_closes_without_exchange() {
-    let l = login(); let address = l.listener.local_addr().unwrap();
+    let l = login(); let closed = closed_probe(&l.listener);
+    assert!(!closed(), "the probe sees the open listener");
     let reply = Reply { calls: AtomicUsize::new(0), status: 200 };
     assert_eq!(l.wait(&reply, || true).unwrap_err().code, ErrorCode::Canceled);
     assert_eq!(reply.calls.load(Ordering::Relaxed), 0);
-    assert!(TcpListener::bind(address).is_ok());
+    assert!(closed());
 }
 
 #[test]
 fn timed_out_listener_closes_without_exchange() {
-    let l = login(); let address = l.listener.local_addr().unwrap();
+    let l = login(); let closed = closed_probe(&l.listener);
     let reply = Reply { calls: AtomicUsize::new(0), status: 200 };
     assert_eq!(l.wait_timeout(&reply, || false, Duration::ZERO).unwrap_err().code, ErrorCode::Timeout);
     assert_eq!(reply.calls.load(Ordering::Relaxed), 0);
-    assert!(TcpListener::bind(address).is_ok());
+    assert!(closed());
 }
 
 #[test]
 fn bound_callback_exchanges_once_and_closes_after_replay() {
-    let l = login(); let address = l.listener.local_addr().unwrap();
+    let l = login(); let address = l.listener.local_addr().unwrap(); let closed = closed_probe(&l.listener);
     let reply = Reply { calls: AtomicUsize::new(0), status: 200 };
     std::thread::scope(|scope| {
         let task = scope.spawn(|| l.wait(&reply, || false).unwrap());
@@ -91,7 +116,7 @@ fn bound_callback_exchanges_once_and_closes_after_replay() {
         assert_eq!(task.join().unwrap().access_token, "new-access");
     });
     assert_eq!(reply.calls.load(Ordering::Relaxed), 1);
-    assert!(std::net::TcpStream::connect(address).is_err());
+    assert!(closed());
 }
 
 #[test]

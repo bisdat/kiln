@@ -211,3 +211,34 @@ test.describe("in the Deck view", () => {
     expect((await calls(page)).filter((c) => c === "cook_run").length).toBe(2);
   });
 });
+
+// Play once with another profile (launch mode once): no cook, but the boot game-data step Play runs after its cook, for
+// the mods of that single start (boot_snapshot_run), then the start. Vanilla and without mods run neither step.
+test("a single start with another profile makes the game data for its OnBoot mods first, and never cooks", async ({ page }) => {
+  await desktop(page);
+  type Once = { __kilnMock: { setOnceBootSnapshot: (id: string, s: unknown) => void } };
+  const start = (req: unknown) => page.evaluate(async (r) => {
+    const play = (await import("/src/shell/play.ts")) as unknown as { beforeStart: (g: string, r: unknown) => Promise<void> };
+    const api = (await import("/src/api/commands.ts")) as unknown as { launchPlay: (g: string, r: unknown) => Promise<unknown> };
+    await play.beforeStart("client-steam", r);
+    await api.launchPlay("client-steam", r);
+  }, req);
+  const steps = async () => (await calls(page)).filter((c) => ["cook_run", "boot_snapshot_run", "launch_play"].includes(c));
+  await start({ mode: "once", profileId: "vanilla-plus" });
+  expect(await steps()).toEqual(["boot_snapshot_run", "launch_play"]);
+  // no OnBoot mod in that profile: the step is skipped, and says nothing
+  await expect(page.locator(".k-toast", { hasText: "Game data for OnBoot mods" })).toHaveCount(0);
+  await page.evaluate(() => (window as unknown as Mock).__kilnMock.stopGame());
+  // the producer failed: one line says so, and the game starts all the same
+  await page.evaluate(() => (window as unknown as Once).__kilnMock.setOnceBootSnapshot("vanilla-plus",
+    { status: "unavailable", emptyKinds: [], reason: "no python3 was found" }));
+  await start({ mode: "once", profileId: "vanilla-plus" });
+  expect(await steps()).toEqual(["boot_snapshot_run", "launch_play", "boot_snapshot_run", "launch_play"]);
+  await expect(page.locator(".k-toast", { hasText: "Game data for OnBoot mods" })).toContainText("was not made (no python3 was found)");
+  await page.evaluate(() => (window as unknown as Mock).__kilnMock.stopGame());
+  // vanilla and without mods: neither step
+  await start({ mode: "vanilla" });
+  await page.evaluate(() => (window as unknown as Mock).__kilnMock.stopGame());
+  await start({ mode: "no-mods" });
+  expect((await steps()).slice(4)).toEqual(["launch_play", "launch_play"]);
+});
