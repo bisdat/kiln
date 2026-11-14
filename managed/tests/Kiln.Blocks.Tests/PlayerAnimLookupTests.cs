@@ -142,7 +142,7 @@ public sealed class PlayerAnimLookupTests : IDisposable
     }
 
     [Fact]
-    public void Both_rows_are_reported_once_by_name()
+    public void The_rows_are_reported_once_by_name()
     {
         var real = BlockCapabilities.Report;
         var got = new System.Collections.Concurrent.ConcurrentBag<string>();
@@ -152,7 +152,8 @@ public sealed class PlayerAnimLookupTests : IDisposable
             BlockCapabilities.Rearm();
             BlockCapabilities.Ensure();
             BlockCapabilities.Ensure();
-            Assert.Equal(["blocks.animated_held", "blocks.weapon_moves"], got.Order());
+            // the two of item blocks, and the two names villager routines reserve (routines.decisions is the core's row: only lowered)
+            Assert.Equal(["blocks.animated_held", "blocks.weapon_moves", "routines.anchors", "routines.jobs"], got.Order());
         }
         finally
         {

@@ -15,6 +15,8 @@ internal static class BlocksRows
     private static void Report()
     {
         if (!ServiceCaps.Probe("kiln.npcai")) ServiceCaps.NoteMissing("kiln.npcai");  // Factions needs it: its row says whether it is here
+        // routines.decisions is sigdb's row; without kiln.routines nothing serves it
+        ServiceCaps.LowerFeatures(BlockCapabilities.RoutinesService, BlockCapabilities.RoutineDecisions);
         BlockCapabilities.Ensure();
         KindCapabilities.Ensure();
         AffixRuntime.RefreshCapabilities();
