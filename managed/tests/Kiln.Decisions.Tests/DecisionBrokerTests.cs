@@ -388,6 +388,26 @@ public sealed unsafe class DecisionBrokerTests : IDisposable
         Assert.Throws<ArgumentException>(() => kiln.Run(() => Decisions.LabDecide(EntityId.None, true)));
     }
 
+    // A server whose mods use no decision event has no producer: the lab's decisions alone keep the dispatcher going,
+    // until the last of them ended (the lab server of decisions-api-test is such a server).
+    [Fact]
+    public void Without_any_producer_the_lab_decisions_still_end()
+    {
+        DecisionBroker.Unregister(_death);
+        DecisionBroker.Unregister(_input);
+        using var kiln = Started();
+        var e = kiln.Entities.Create();
+        kiln.Step();
+        Assert.False(kiln.Decisions.Model.Attached);  // nothing to dispatch: the consumer's place stays free
+        var (yes, never) = kiln.Run(() => (Decisions.LabDecide(e, true), Decisions.LabDecide(e, null)));
+        Assert.True(kiln.Decisions.Model.Attached);
+        kiln.Step();
+        Assert.Equal(DecisionTerminal.Allowed, Single(yes).Status);
+        kiln.Step(4);
+        Assert.Equal(DecisionTerminal.TimeoutReleased, Single(never).Status);
+        Assert.Equal(2, _completed.Count);
+    }
+
     [Fact]
     public void A_producer_that_throws_lets_the_game_go_on()
     {

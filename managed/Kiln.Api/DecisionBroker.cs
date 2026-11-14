@@ -337,6 +337,7 @@ internal static unsafe class DecisionBroker
     private static readonly HashSet<DecisionId> Terminal = [];
     private static readonly Queue<DecisionId> TerminalOrder = new();
     private static readonly Dictionary<DecisionId, bool?> Lab = [];
+    private static readonly HashSet<DecisionId> LabOpen = [];  // filed by the lab and not ended yet: they keep the pump running
     private static readonly InterestState?[] Pushed = new InterestState?[64];
     private static byte[] _buffer = [];
     private static int _readFaults, _producerFaults;
@@ -525,6 +526,7 @@ internal static unsafe class DecisionBroker
             Terminal.Clear();
             TerminalOrder.Clear();
             Lab.Clear();
+        LabOpen.Clear();
             Array.Clear(Pushed);
         }
         if (_attached) return true;
@@ -560,7 +562,7 @@ internal static unsafe class DecisionBroker
         if (_pumping) return;
         _step = step;
         // nobody produces a decision's events here: the service keeps its consumer's place free and nothing is asked
-        if (Lab.Count == 0 && !Array.Exists(Volatile.Read(ref _producers), p => p is not null)) return;
+        if (LabOpen.Count == 0 && !Array.Exists(Volatile.Read(ref _producers), p => p is not null)) return;
         _pumping = true;
         try
         {
@@ -768,6 +770,7 @@ internal static unsafe class DecisionBroker
         TerminalOrder.Enqueue(id);
         while (TerminalOrder.Count > TerminalMemory) Terminal.Remove(TerminalOrder.Dequeue());
         Lab.Remove(id);
+        LabOpen.Remove(id);
         if (o.Status is < 1 or > 11) return;  // a status of a later service: nothing this Kiln.Api can name
         var result = ResultOf(id, ref o);
         if (ProducerOf(o.Kind) is { } producer)
@@ -874,7 +877,11 @@ internal static unsafe class DecisionBroker
         payload.Clear();
         Start();
         var id = Enqueue(DecisionsNative.KindEquipSet, new EventEntityKey(subject.Value, false, 0, 0, 0, 0), default, payload, 0, out result);
-        if (id is { } made && result == DecisionsNative.Ok) Lab[made] = allow;
+        if (id is { } made && result == DecisionsNative.Ok)
+        {
+            Lab[made] = allow;
+            LabOpen.Add(made);
+        }
         return id;
     }
 
@@ -897,6 +904,7 @@ internal static unsafe class DecisionBroker
         Terminal.Clear();
         TerminalOrder.Clear();
         Lab.Clear();
+        LabOpen.Clear();
         Array.Clear(Pushed);
     }
 }

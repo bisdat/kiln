@@ -263,6 +263,7 @@ internal static partial class KilnApis
         "M:Kiln.Creatures.Near(Kiln.WorldPosition,System.Double,System.Nullable{Kiln.CreatureKind})", // Creatures.Near(WorldPosition, double, CreatureKind?): Services.RequireTickThread
         "M:Kiln.Creatures.RefreshCopies(Kiln.EntityId)", // Creatures.RefreshCopies(EntityId): via Creatures.Tick(string)
         "M:Kiln.Creatures.Spawn(System.String,Kiln.WorldPosition,System.Single,Kiln.CreatureSpawnOptions)", // Creatures.Spawn(string, WorldPosition, float, CreatureSpawnOptions?): Services.RequireTickThread
+        "M:Kiln.Decisions.LabDecide(Kiln.EntityId,System.Nullable{System.Boolean})", // Decisions.LabDecide(EntityId, bool?): via DecisionBroker.LabDecide(EntityId, bool?, out int)
         "M:Kiln.Dialogues.ApplyOption(Kiln.EntityId,Kiln.EntityId,System.String,System.String,System.Int32)", // Dialogues.ApplyOption(EntityId, EntityId, string, string, int): Game.AssertTickThread
         "M:Kiln.Dialogues.Choose(Kiln.QuestHolder,System.Int64,System.Int32)", // Dialogues.Choose(QuestHolder, long, int): Game.AssertTickThread
         "M:Kiln.Dialogues.Close(Kiln.QuestHolder)", // Dialogues.Close(QuestHolder): Game.AssertTickThread

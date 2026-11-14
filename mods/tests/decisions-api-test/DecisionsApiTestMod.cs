@@ -84,20 +84,29 @@ public sealed class DecisionsApiTestMod : Mod
             Log.Info($"decisions-api-test: clock in Pre: phase {phase} epoch {epoch} step {step} thread {Environment.CurrentManagedThreadId} (tick thread: {Game.IsTickThread})");
             Check(phase == 1 && epoch >= 1 && step > 0 && Game.IsTickThread, $"the clock says Pre on the tick thread (phase {phase}, epoch {epoch}, step {step})");
 
+            // an entity the service can tell from the next user of its id: one with a SpawnTime (and a position to report)
             EntityId entity = default;
-            foreach (var e in World.Find("Health"))
+            foreach (var e in World.Find("SpawnTime"))
             {
                 if (World.Position(e) is null) continue;
                 entity = e;
                 break;
             }
-            if (entity.IsNone) throw new InvalidOperationException("the world has no entity with Health and a position");
+            if (entity.IsNone) throw new InvalidOperationException("the world has no entity with SpawnTime and a position");
             var rc = Decisions.LabResolveEntity(entity, out var key, out var at);
             Check(rc == 0 && key.Entity == entity.Value && key.LifeSerial != 0 && (key.HasSpawnTime || key.PlayerHandle != 0) && at is not null,
                 $"resolve_entity answers in Pre: rc {rc}, entity {key.Entity}, spawn time {(key.HasSpawnTime ? key.SpawnTime.ToString() : "none")}, life {key.LifeSerial}, at {at}");
             await Wait(3);
             var rc2 = Decisions.LabResolveEntity(entity, out var key2, out _);
             Check(rc2 == 0 && key2 == key, $"the same life has the same key three steps later (life {key2.LifeSerial})");
+            // an entity without SpawnTime that is no player has no usable identity: never a made-up one
+            var bare = World.Find("Health").FirstOrDefault(e => e.Value > 1023 && World.ReadBytes(e, "SpawnTime") is null);
+            if (!bare.IsNone)
+            {
+                var rcBare = Decisions.LabResolveEntity(bare, out _, out _);
+                Check(rcBare == 2, $"an entity without SpawnTime is refused, not given an identity (entity {bare.Value}, rc {rcBare})");
+            }
+            else Log.Info("decisions-api-test: every entity with Health has a SpawnTime here; the no-identity refusal was not exercised");
             var none = Decisions.LabResolveEntity(new EntityId(0x7ffffff0), out _, out _);
             Check(none == 2, $"an entity that is not there is not found (rc {none})");
 
@@ -118,6 +127,22 @@ public sealed class DecisionsApiTestMod : Mod
                 Check(simPhase == 3, $"the clock says phase 3 inside a world program's update (phase {simPhase})");
                 Check(Volatile.Read(ref _simResult) == 4,
                     $"resolve_entity is refused in phase 3 (rc {Volatile.Read(ref _simResult)}, on the tick thread: {Volatile.Read(ref _simTickThread) == 1})");
+                // once more with the game's entity programs forced onto its workers (the lab parallel switch)
+                if (Kiln.Testing.LabSystems.Enabled)
+                {
+                    Kiln.Testing.LabSystems.ForceParallel(60);
+                    await Wait(2);
+                    Volatile.Write(ref _simPhase, -9);
+                    for (var n = 0; n < 50 && Volatile.Read(ref _simPhase) == -9; n++) await Context.Scheduler.NextTick();
+                    var onTick = Volatile.Read(ref _simTickThread) == 1;
+                    Log.Info($"decisions-api-test: clock in a world program's update, parallel forced (mask 0x{Kiln.Testing.LabSystems.PlayersMask:x4}): phase {Volatile.Read(ref _simPhase)} " +
+                             $"step {Volatile.Read(ref _simStep)} thread {Volatile.Read(ref _simThread)} (tick thread: {onTick})");
+                    Check(Volatile.Read(ref _simPhase) == 3 && Volatile.Read(ref _simResult) == 4,
+                        $"with parallel forced: phase {Volatile.Read(ref _simPhase)}, resolve_entity rc {Volatile.Read(ref _simResult)}, {(onTick ? "still on the tick thread" : "on a worker thread")}");
+                    Kiln.Testing.LabSystems.StopParallel();
+                    await Wait(2);
+                }
+                else Log.Info("decisions-api-test: the lab parallel switch is off (no kiln/control/systems.parallel): the worker-thread run was skipped");
             }
 
             // decisions through the real table: filed in Pre, delivered at the next Pre, each completed once
