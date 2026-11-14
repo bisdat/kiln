@@ -91,6 +91,19 @@ public sealed class NoClipTestMod : Mod
         await Until(() => Y(f) > ground + 25, 120);
         Hold(f, false, false);
         await Steps(10);
+        // Does holding the sneak key itself put the flying character into the game's sneak mode? (This lab's
+        // PlayerInput has no toggle configuration: sneak is "hold".)
+        var y = Y(f);
+        var seen = 0;
+        for (var i = 0; i < 30; i++)
+        {
+            Hold(f, false, true);
+            await Steps(1);
+            if (PlayerStates.Is(f, PlayerStateId.InSneakMode)) seen++;
+        }
+        Hold(f, false, false);
+        Info($"holding sneak in NoClip's flight for 30 steps: {y - Y(f):0.00} m down, the game's sneak mode on in {seen} of them");
+        await Steps(20);
         ForceSneakMode(f);
         await Steps(1);
         if (!PlayerStates.Is(f, PlayerStateId.InSneakMode))
