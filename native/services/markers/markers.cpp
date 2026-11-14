@@ -8,16 +8,23 @@
 // the row.
 #include <windows.h>
 
+#include <atomic>
+#include <chrono>
+#include <cstddef>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
 #include <initializer_list>
+#include <string>
+#include <vector>
 
 #include "kiln_api.h"
+#include "services/kiln_assets.h"
 #include "services/kiln_caps.h"
 #include "services/kiln_markers.h"
 
 #include "arena.h"
+#include "catalog.h"
 #include "events.h"
 #include "store.h"
 
@@ -46,6 +53,9 @@ kmk::Arena g_arena;
 kmk::Switches g_switches;
 kmk::Store g_store(g_arena, g_switches);
 kmk::Subscribers g_subs(&log_line);
+kmk::CatalogHolder g_catalog;
+const KilnAssetsApi* g_assets = nullptr;
+std::string g_exe;  // this process's exe sha256 (lower-case hex)
 
 uint32_t g_side = KILN_SIDE_SERVER;
 bool g_lifecycle = false;    // world STARTED and STOPPING are seen
@@ -69,10 +79,20 @@ void report(const char* name, uint32_t state, uint32_t reason, const char* text)
     g_caps->report(g_owner, KilnStr{name, std::strlen(name)}, state, reason, KilnStr{text, std::strlen(text)});
 }
 
+// markers.catalog: a client reads the game's resources through kiln.assets; a dedicated server has none and takes the
+// catalog from a verified client over the marker link (not built yet).
+std::atomic<bool> g_catalog_reader{false};
+const char* g_catalog_off = "";
+uint32_t g_catalog_off_reason = KILN_CAP_REASON_POLICY;
+
 void report_rows() {
     static const char kNotBuilt[] = "not built yet in this kiln.markers (0.2.0-dev.28 in work)";
-    for (const char* name : {kCatalog, kMap, kCompass, kWorld, kNameplates, kAnchorsClient, kAnchorsServer, kSend})
+    for (const char* name : {kMap, kCompass, kWorld, kNameplates, kAnchorsClient, kAnchorsServer, kSend})
         report(name, KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY, kNotBuilt);
+    if (g_catalog_reader)
+        report(kCatalog, KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, "");
+    else
+        report(kCatalog, KILN_CAP_UNAVAILABLE, g_catalog_off_reason, g_catalog_off);
     report(kMapText, KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY,
            "the native map tooltip is not part of v1: its game test (04-map-text) has not been answered");
     if (g_side != KILN_SIDE_CLIENT)
@@ -122,7 +142,82 @@ void KILN_CALL on_world(const KilnWorldEvent* e, void*) {
     }
 }
 
-void KILN_CALL on_client_post(const KilnTickInfo*, void*) { dispatch(kmk::kRoleClient); }
+// ---- the icon catalog (client) ------------------------------------------------------------------------------------------
+
+bool read_asset(const uint8_t guid[16], uint32_t type, size_t limit, std::vector<uint8_t>* out, void*) {
+    KilnAssetKey key{};
+    std::memcpy(key.guid, guid, 16);
+    key.type = type;
+    key.part = 0;
+    size_t len = 0;
+    KilnResult rc = g_assets->resource_read(&key, nullptr, 0, &len);
+    if (rc != KILN_ERR_BUFFER_TOO_SMALL && rc != KILN_OK) return false;
+    if (len > limit) return false;
+    out->resize(len);
+    if (!len) return true;
+    rc = g_assets->resource_read(&key, out->data(), out->size(), &len);
+    return rc == KILN_OK && len == out->size();
+}
+
+void post_catalog(uint32_t ready, uint32_t count, uint64_t generation, const std::string& reason) {
+    KilnMarkerCatalogChange c{};
+    c.size = sizeof c;
+    c.ready = ready;
+    c.count = count;
+    c.generation = generation;
+    std::snprintf(c.reason, sizeof c.reason, "%s", reason.c_str());
+    g_store.post_catalog(kmk::kRoleClient, c);
+}
+
+// when_resources_ready: on the game's thread, once its resource service is up (before the game read anything).
+void KILN_CALL on_resources_ready(void*) {
+    std::string why;
+    auto c = kmk::read_catalog(&read_asset, nullptr, &why);
+    if (!c) {
+        logf(KILN_LOG_WARN, "markers: the icon catalog could not be read: %s; markers.catalog is off", why.c_str());
+        g_catalog_reader = false;
+        g_catalog_off_reason = KILN_CAP_REASON_FAULTED;
+        report(kCatalog, KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_FAULTED, ("the game's marker types could not be read: " + why).c_str());
+        post_catalog(0, 0, 0, why);
+        return;
+    }
+    const kmk::BuildPair* pair = kmk::pair_of_client(g_exe);
+    const bool verified = pair && c->digest_hex() == pair->catalog_sha256;
+    std::string reason;
+    if (!verified)
+        reason = pair ? "native map icons stay off: the game's marker types differ from the verified catalog of this build"
+                      : "native map icons stay off: no verified catalog for this game build (a game update needs a new build pair)";
+    const uint32_t count = static_cast<uint32_t>(c->rows.size()), map = c->map_rows();
+    const std::string digest = c->digest_hex();
+    g_catalog.publish(std::move(c), verified, reason);
+    logf(KILN_LOG_INFO, "markers: icon catalog: %u marker types with an icon, %u for the map, sha256 %s (%s)", count, map, digest.c_str(),
+         verified ? "the verified pair of this build" : reason.c_str());
+    post_catalog(1, count, g_catalog.generation(), reason);
+}
+
+// Once a second the client's marker metadata is read again: when it differs from the published catalog (another mod
+// replaced the registry, a hot reload), native map icons stay off until the game restarts (chapter 04 §4.3).
+std::chrono::steady_clock::time_point g_next_check{};
+
+void recheck_catalog() {
+    const auto now = std::chrono::steady_clock::now();
+    if (now < g_next_check) return;
+    g_next_check = now + std::chrono::seconds(1);
+    const auto c = g_catalog.get();
+    if (!c || g_catalog.changed()) return;
+    std::string why;
+    const auto fresh = kmk::read_catalog(&read_asset, nullptr, &why);
+    if (fresh && fresh->digest == c->digest) return;
+    const std::string reason = fresh ? "native map icons are off until the game restarts: the game's marker types changed (sha256 " + fresh->digest_hex() + ")"
+                                     : "native map icons are off until the game restarts: the game's marker types can no longer be read (" + why + ")";
+    g_catalog.latch_changed(reason);
+    logf(KILN_LOG_WARN, "markers: %s", reason.c_str());
+}
+
+void KILN_CALL on_client_post(const KilnTickInfo*, void*) {
+    recheck_catalog();
+    dispatch(kmk::kRoleClient);
+}
 
 // ---- kiln.markers v1 ----------------------------------------------------------------------------------------------------
 
@@ -136,10 +231,60 @@ KilnResult KILN_CALL t_catalog_count(uint32_t* count, uint64_t* generation) {
     if (!count || !generation) return KILN_ERR_INVALID_ARGUMENT;
     *count = 0;
     *generation = 0;
-    return KILN_ERR_UNAVAILABLE;
+    if (!g_catalog_reader) return KILN_ERR_UNAVAILABLE;
+    if (const auto c = g_catalog.get()) {
+        *count = static_cast<uint32_t>(c->rows.size());
+        *generation = g_catalog.generation();
+    }
+    return KILN_OK;
 }
-KilnResult KILN_CALL t_catalog_at(uint32_t, KilnMarkerIcon*) { return KILN_ERR_UNAVAILABLE; }
-KilnResult KILN_CALL t_catalog_resolve(KilnStr, KilnMarkerIcon*, KilnMarkerResult* r) { return off(r, kCatalog); }
+KilnResult KILN_CALL t_catalog_at(uint32_t index, KilnMarkerIcon* out) {
+    if (!out || out->size < sizeof(KilnMarkerIcon)) return KILN_ERR_INVALID_ARGUMENT;
+    if (!g_catalog_reader) return KILN_ERR_UNAVAILABLE;
+    const auto c = g_catalog.get();
+    if (!c || index >= c->rows.size()) return KILN_ERR_NOT_FOUND;
+    kmk::fill_icon(c->rows[index], out);
+    return KILN_OK;
+}
+KilnResult KILN_CALL t_catalog_resolve(KilnStr name, KilnMarkerIcon* out, KilnMarkerResult* r) {
+    if (!result_ok(r) || !out || out->size < sizeof(KilnMarkerIcon)) return KILN_ERR_INVALID_ARGUMENT;
+    clear_result(r);
+    if (!g_catalog_reader) return off(r, kCatalog);
+    if (!name.ptr && name.len) return KILN_ERR_INVALID_ARGUMENT;
+    const std::string_view n = name.len ? std::string_view(name.ptr, name.len) : std::string_view();
+    const auto c = g_catalog.get();
+    const kmk::IconRow* row = nullptr;
+    uint32_t matches = 0;
+    if (!c) {
+        // the syntax is checked first, also while warming up
+        kmk::Catalog empty;
+        if (kmk::resolve(empty, n, &row, &matches) == kmk::Resolved::BadSyntax) {
+            std::snprintf(r->reason, sizeof r->reason, "an icon name is 1 to 128 printable ASCII characters: a canonical key (type: and eight hex digits) or an alias");
+            return KILN_ERR_INVALID_ARGUMENT;
+        }
+        r->status = KILN_MARKER_CATALOG_NOT_READY;
+        std::snprintf(r->reason, sizeof r->reason, "CatalogNotReady: the icon catalog is still warming up");
+        return KILN_OK;
+    }
+    switch (kmk::resolve(*c, n, &row, &matches)) {
+        case kmk::Resolved::Ok:
+            kmk::fill_icon(*row, out);
+            r->status = KILN_MARKER_ACCEPTED;
+            return KILN_OK;
+        case kmk::Resolved::NotFound:
+            r->status = KILN_MARKER_NOT_FOUND;
+            std::snprintf(r->reason, sizeof r->reason, "NotFound: no icon named '%.*s'", static_cast<int>(n.size()), n.data());
+            return KILN_OK;
+        case kmk::Resolved::Ambiguous:
+            r->status = KILN_MARKER_AMBIGUOUS;
+            std::snprintf(r->reason, sizeof r->reason, "Ambiguous: '%.*s' is the alias of %u icons; use a canonical key (type:...)",
+                          static_cast<int>(n.size()), n.data(), matches);
+            return KILN_OK;
+        case kmk::Resolved::BadSyntax: break;
+    }
+    std::snprintf(r->reason, sizeof r->reason, "an icon name is 1 to 128 printable ASCII characters: a canonical key (type: and eight hex digits) or an alias");
+    return KILN_ERR_INVALID_ARGUMENT;
+}
 KilnResult KILN_CALL t_world_epoch(uint32_t kind, uint64_t* epoch) { return g_store.world_epoch(kind, epoch); }
 KilnResult KILN_CALL t_capture_anchor(KilnOwner, uint32_t, uint64_t, KilnEntity, KilnMarkerAnchorResult*) { return KILN_ERR_UNAVAILABLE; }
 KilnResult KILN_CALL t_release_anchor(KilnOwner, KilnMarkerAnchor) { return KILN_ERR_UNAVAILABLE; }
@@ -179,7 +324,28 @@ const KilnMarkersBridgeApi kBridge = {{sizeof(KilnMarkersBridgeApi), KILN_MARKER
 void KILN_CALL on_ready(void*) {
     g_caps = static_cast<const KilnCapsApi*>(g_api->service(KM_STR(KILN_CAPS_SERVICE), KILN_CAPS_VERSION));
     if (g_caps && g_caps->header.size < sizeof(KilnCapsApi)) g_caps = nullptr;
+    g_store.set_icon_check(&kmk::CatalogHolder::check, &g_catalog);
+    if (g_side != KILN_SIDE_CLIENT) {
+        g_catalog_off = "a dedicated server has no marker resources: it takes the catalog from a verified client over the marker link (not built yet)";
+        g_catalog_off_reason = KILN_CAP_REASON_POLICY;
+    } else {
+        // kiln.assets v1 with resource_read and the appended when_resources_ready (header.size covers it)
+        g_assets = static_cast<const KilnAssetsApi*>(g_api->service(KM_STR(KILN_ASSETS_SERVICE), KILN_ASSETS_VERSION));
+        constexpr size_t need = offsetof(KilnAssetsApi, when_resources_ready) + sizeof(g_assets->when_resources_ready);
+        if (!g_assets || g_assets->header.size < need || !g_assets->resource_read || !g_assets->when_resources_ready) {
+            g_assets = nullptr;
+            g_catalog_off = "needs kiln.assets (resource_read and when_resources_ready)";
+            g_catalog_off_reason = KILN_CAP_REASON_SERVICE_MISSING;
+        } else {
+            g_catalog_reader = true;
+        }
+    }
     report_rows();
+    if (g_catalog_reader && g_assets->when_resources_ready(&on_resources_ready, nullptr) != KILN_OK) {
+        g_catalog_reader = false;
+        logf(KILN_LOG_WARN, "markers: kiln.assets' resources are off on this build: markers.catalog is off");
+        report(kCatalog, KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_MISSING, "kiln.assets' resources are off on this build");
+    }
 }
 
 }  // namespace
@@ -192,6 +358,9 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     info->version = KilnStr{"1", 1};
     info->on_ready = &on_ready;
     g_side = api->side();
+    KilnBuildInfo build{};
+    build.size = sizeof build;
+    if (api->build_info(&build) == KILN_OK) g_exe.assign(build.exe_sha256, strnlen(build.exe_sha256, sizeof build.exe_sha256));
     // Session only: every store is bound to a world, so without the lifecycle there is no store (chapter 04 §4.2).
     KilnHandle h = 0;
     g_lifecycle = api->feature && api->feature(KM_STR("world.lifecycle")) && api->subscribe_world(owner, &on_world, nullptr, &h) == KILN_OK;

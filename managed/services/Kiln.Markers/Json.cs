@@ -179,11 +179,23 @@ public sealed partial record MarkerSpec
         return FollowLease(a.GetString()!);
     }
 
-    // An icon name through the catalog (the icon slice); until it is built the catalog's row is off.
+    // An icon name through the icon catalog (Markers.Icons.Resolve): a refusal while it warms up is an invalid operation
+    // (wait for Markers.CatalogChanged), an unknown or ambiguous name a bad argument.
     private static MarkerIcon ResolveIcon(string name)
     {
-        MarkersCaps.Require(MarkersCaps.Catalog);
-        throw new InvalidOperationException($"marker JSON: the icon '{name}' cannot be resolved: the icon catalog is not ready");
+        MarkerIconResult r;
+        try
+        {
+            r = Markers.Icons.Resolve(name);
+        }
+        catch (ArgumentException e)
+        {
+            throw Bad("icon", $"'{name}' is not an icon name: {e.Message}");
+        }
+        if (r.Ok) return r.Icon!.Icon;
+        if (r.Reason is { } why && why.StartsWith("CatalogNotReady", StringComparison.Ordinal))
+            throw new InvalidOperationException($"marker JSON: the icon '{name}' cannot be resolved yet: {why} (wait for Markers.CatalogChanged)");
+        throw Bad("icon", $"'{name}': {r.Reason}");
     }
 
     // A capture lease named in runtime JSON (the anchor slice keeps the registry of live leases); until it is built the

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# kiln.markers' host tests: no game, no Wine. The v1 ABI (sizes and offsets; the header compiles as C11 and C++), the store.
+# kiln.markers' host tests: no game, no Wine. The v1 ABI (sizes and offsets; the header compiles as C11 and C++), the store, the icon catalog.
 #   KILN_OUT=<build dir> native/services/markers/tests/run.sh
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -22,3 +22,11 @@ src=$here/..
 g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined -fno-sanitize-recover=undefined -I"$src" -I"$abi" \
   "$here/store_test.cpp" "$src/store.cpp" "$src/events.cpp" "$src/arena.cpp" "$src/text.cpp" "$src/guard.cpp" -o "$out/store_test"
 "$out/store_test"
+
+# The icon catalog on synthetic resources (M13 client half): readers and bounds, keys and aliases, the digest, resolve,
+# warm-up, the fast-travel refusal, the build pair. (tests/catalog_offline.cpp reads a client's dumped resources; it is
+# not run here: it needs the game's files.)
+g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined -fno-sanitize-recover=undefined -I"$src" -I"$abi" \
+  "$here/catalog_test.cpp" "$src/catalog.cpp" "$src/store.cpp" "$src/events.cpp" "$src/arena.cpp" "$src/text.cpp" "$src/guard.cpp" \
+  -o "$out/catalog_test"
+"$out/catalog_test"

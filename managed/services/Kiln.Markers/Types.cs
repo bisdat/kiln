@@ -51,7 +51,7 @@ public enum MarkerChangeKind
     Cleared,
 }
 
-/// <summary>A marker type of the game's icon catalog (<c>Markers.Icons</c>), by its id. Icons are drawn on the map
+/// <summary>A marker type of the game's icon catalog (<see cref="Markers.Icons"/>), by its id. Icons are drawn on the map
 /// only.</summary>
 /// <param name="Id">The game's marker type id; 0 is <see cref="None"/>.</param>
 public readonly record struct MarkerIcon(uint Id)
@@ -68,7 +68,7 @@ public readonly record struct MarkerIcon(uint Id)
 /// <paramref name="Follow"/> is set.</param>
 /// <param name="Text">The text drawn on the compass and world surfaces: at most 128 bytes of UTF-8 on one line, no control
 /// characters; may be empty.</param>
-/// <param name="Icon">The map icon, from <c>Markers.Icons</c>: required with <see cref="MarkerSurface.Map"/>, and
+/// <param name="Icon">The map icon, from <see cref="Markers.Icons"/>: required with <see cref="MarkerSurface.Map"/>, and
 /// <see cref="MarkerIcon.None"/> without it.</param>
 /// <param name="Surfaces">Where it is shown (default map and compass).</param>
 /// <param name="Follow">An entity to follow instead of a fixed position (a lease from <c>CaptureAnchorAsync</c>); null

@@ -103,7 +103,7 @@ public static unsafe partial class Markers
             var owner = Backend.Current.OwnerCreate("kiln.markers");
             if (owner == 0) return;  // no core in this process
             ulong h = 0;
-            if (t->Subscribe(owner, &OnChange, null, null, null, &h) != MarkersNative.Ok) return;
+            if (t->Subscribe(owner, &OnChange, null, &OnCatalog, null, &h) != MarkersNative.Ok) return;
             _subscription = h;
             _subscribedEpoch = epoch;
         }
