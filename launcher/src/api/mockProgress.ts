@@ -18,6 +18,9 @@ export interface StartScript {
   /** Real time per scripted millisecond (0.1: the 147 s start in 14.7 s). */
   scale: number;
   cook: { key: string; name: string; ms: number }[];
+  /** The boot game-data tool builds a snapshot for this long after the cook (start_progress `boot-snapshot`, once per
+   *  game update); none: the snapshot is there, or no mod needs one. */
+  bootSnapshotMs?: number;
   profileMs: number;
   steamMs: number;
   runtime: RStep[];
@@ -74,8 +77,15 @@ export function ownerScript(o: Partial<StartScript> = {}): StartScript {
 }
 
 const LABELS: Record<string, string> = {
-  cook: "Cooking mods", profile: "Checking the profile", steam: "Starting the game through Steam",
+  cook: "Cooking mods", "boot-snapshot": "Making the game data for OnBoot mods (once per game update)", profile: "Checking the profile",
+  steam: "Starting the game through Steam",
 };
+/** start_progress LAUNCHER_STEPS. */
+const LAUNCHER = ["cook", "boot-snapshot", "profile", "steam"];
+/** start_progress BOOT_SNAPSHOT_USUAL_MS: the step's usual time with no earlier start that had it. */
+const BOOT_SNAPSHOT_USUAL_MS = 60_000;
+/** The boot game-data tool's lines while it builds, one after the other. */
+const SNAPSHOT_LINES = ["items 1200/4100", "items 4100/4100", "templates 9000/52000", "templates 31000/52000", "templates 52000/52000", "skills 300/300", "materials 120/120"];
 
 // ---------------------------------------------------------------- the estimate (port)
 
@@ -103,7 +113,8 @@ function usual(h: KeptStart[], id: string, total: number | null | undefined, key
   if (same.length) return { ms: median(same)!, starts: same.length, same: true };
   const any = rev.map((r) => r.steps.find((s) => s.id === id)).filter((s): s is KeptStep => !!s).slice(0, 5)
     .map((s) => (total && s.total ? Math.floor((s.ms * total) / s.total) : s.ms));
-  return any.length ? { ms: median(any)!, starts: any.length, same: false } : null;
+  if (any.length) return { ms: median(any)!, starts: any.length, same: false };
+  return id === "boot-snapshot" ? { ms: BOOT_SNAPSHOT_USUAL_MS, starts: 0, same: false } : null;
 }
 
 export function estimate(plan: string[], steps: StepNow[], now: number, h: KeptStart[], kiln: string, fp: string, ready: boolean): StartEstimate {
@@ -159,7 +170,7 @@ export function setStartScript(s: StartScript | null) { script = s; }
 export function clearStartHistory(gameId = "client-steam") { delete history[gameId]; }
 
 const total = (s: StartScript) => s.cook.reduce((a, c) => a + c.ms, 0);
-export const processAt = (s: StartScript) => total(s) + s.profileMs + s.steamMs;
+export const processAt = (s: StartScript) => total(s) + (s.bootSnapshotMs ?? 0) + s.profileMs + s.steamMs;
 const bootAt = (s: StartScript) => processAt(s) + 100;
 const durOf = (s: StartScript, r: RStep) => r.ms * (s.slow?.id === r.id ? s.slow.factor : 1);
 const itemsOf = (s: StartScript, r: RStep) => (r.items ?? []).map((x) => x * (s.slow?.id === r.id ? s.slow.factor : 1));
@@ -221,6 +232,18 @@ export function mockProgress(gameId: string, nowMs = Date.now()): StartTimeline 
       detail: cooking && t - partMs > 1000 ? "kiln: cooking assets/cook.json (modelcook)" : null, done: i, total: n, ms: 0, tookMs: took, state: "done", launcher: true });
     if (cooking) return finish();
   }
+  if (s.bootSnapshotMs) {
+    // the boot game-data tool builds a snapshot: its own step, right after the cook, with the tool's line
+    plan.splice(plan.indexOf("profile"), 0, "boot-snapshot");
+    const ms = s.bootSnapshotMs;
+    const took = at + ms <= t ? ms : null;
+    const into = Math.max(0, t - at);
+    steps.push({ id: "boot-snapshot", ms: at, tookMs: took, keys: [], parts: [], partMs: at });
+    shown.push({ id: "boot-snapshot", label: LABELS["boot-snapshot"], detail: took === null ? SNAPSHOT_LINES[Math.min(SNAPSHOT_LINES.length - 1, Math.floor((into / ms) * SNAPSHOT_LINES.length))] : null,
+      ms: at, tookMs: took, state: "done", launcher: true });
+    if (took === null) return finish();
+    at += ms;
+  }
   for (const [id, ms] of [["profile", s.profileMs], ["steam", s.steamMs]] as const) {
     const took = at + ms <= t && !(id === "steam" && s.noProcess) ? ms : null;
     // Steam was asked a while ago and no game exists yet (start_progress STEAM_SLOW_MS): no number, the start goes on
@@ -257,11 +280,11 @@ export function mockProgress(gameId: string, nowMs = Date.now()): StartTimeline 
     const ready = state === "ready";
     const est = estimate(plan, steps, Math.round(t), h, KILN, s.fingerprint, ready);
     const slowSteam = () => { if (steamSlow) { est.leftMs = null; est.byTime = false; est.slow = null; est.fraction = Math.min(0.99, est.stepsDone / Math.max(1, est.stepsPlanned)); } };
-    if (plan.every((p) => ["cook", "profile", "steam"].includes(p))) {
+    if (plan.every((p) => LAUNCHER.includes(p))) {
       // before the runtime speaks: its plan is the last start's, else unknown (the contract's 11 steps counted, no number)
       const last = h[h.length - 1];
       if (last) {
-        plan.push(...last.steps.map((x) => x.id).filter((id) => !["cook", "profile", "steam"].includes(id)));
+        plan.push(...last.steps.map((x) => x.id).filter((id) => !LAUNCHER.includes(id)));
         Object.assign(est, estimate(plan, steps, Math.round(t), h, KILN, s.fingerprint, false));
       } else {
         plan.push(...s.runtime.map((r) => r.id));

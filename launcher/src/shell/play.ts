@@ -28,6 +28,11 @@ interface LaunchMemo {
 }
 export const useLaunchMemo = create<LaunchMemo>(() => ({ at: {}, mode: {}, since: {}, process: {} }));
 
+/** A start this launcher asked Steam for (Play, a modpack offer's Launch): the window follows it until the game runs. */
+export function rememberLaunch(gameId: string, mode: LaunchMode) {
+  useLaunchMemo.setState((m) => ({ at: { ...m.at, [gameId]: playNow() }, mode: { ...m.mode, [gameId]: mode } }));
+}
+
 export interface PlayControl {
   game: GameInstall | null;
   view: GameStateView;
@@ -113,7 +118,7 @@ export function usePlayControl(): PlayControl {
       return api.launchPlay(gameId, req);
     },
     onSuccess: (r, { gameId }) => {
-      useLaunchMemo.setState((m) => ({ at: { ...m.at, [gameId]: playNow() }, mode: { ...m.mode, [gameId]: r.mode } }));
+      rememberLaunch(gameId, r.mode);
       invalidateGame(qc, gameId);
       toast.ok(r.mode === "vanilla" ? "Starting vanilla" : r.mode === "no-mods" ? "Starting without mods" : "Starting", r.backup ? "Saves backed up first." : "Through Steam.");
       notifyActivation(r.activation);

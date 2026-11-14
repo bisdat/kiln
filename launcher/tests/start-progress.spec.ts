@@ -401,3 +401,24 @@ test("Kiln speaking late overrides No Kiln: a chained DLL held the boot back for
   await page.evaluate(() => (window as unknown as Calls).__kilnMock.setNoProxy(false));
   await mock(page).stop();
 });
+
+test("Play with an OnBoot mod and no game data yet: the start shows the game data step with the tool's lines, then goes on", async ({ page }) => {
+  test.setTimeout(90_000);
+  await open(page);
+  // nothing to cook; the boot game-data tool builds the snapshot for 40 s (4 s here), saying what it reads
+  await mock(page).script({ scale: 0.1, cook: [], bootSnapshotMs: 40_000 });
+  await mouth(page).click();
+  const line = page.locator(".k-start-line[role=status]");
+  await expect(line.filter({ hasText: /^Making the game data for OnBoot mods \(once per game update\): (items|templates|skills|materials) \d+\/\d+$/ })).toBeVisible({ timeout: 10_000 });
+  const steps = page.getByRole("list", { name: "Steps of the start" });
+  await expect(steps.locator('[aria-current="step"]')).toContainText("Making the game data for OnBoot mods");
+  // the bar says it too (before, the line was "Starting" with no step running)
+  await expect(bar(page)).toHaveAttribute("aria-valuetext", /Making the game data for OnBoot mods/);
+  // then the start goes on: the step is done with its time, and another step runs
+  await expect(steps.locator(".is-done").filter({ hasText: "Making the game data for OnBoot mods" })).toHaveCount(1, { timeout: 15_000 });
+  await expect(steps.locator('[aria-current="step"]')).not.toContainText("Making the game data");
+  await expect(line).not.toHaveText(/^Making the game data/);
+  await expect(page.locator(".k-head-state")).toHaveText(/^Running/, { timeout: 30_000 });
+  await mock(page).stop();
+  await expect(page.locator(".k-head-state")).toHaveText("Stopped");
+});

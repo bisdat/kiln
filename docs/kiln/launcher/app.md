@@ -260,8 +260,13 @@ From Play to the game's main menu the launcher shows one bar for the whole start
 still takes (0.2.0-dev.27; `kiln_manage::start_progress`, commands `launch_begin` and `launch_progress`).
 
 - **The steps.** First the launcher's own: `cook` (the mods that need a cook, one after the other: the mod's name and
-  the tool's current line), `profile` (the active profile checked or written again, the save backup), `steam` (Steam
-  asked to start the game, until the game's process exists). Then the steps Kiln itself reports from inside the game
+  the tool's current line), `boot-snapshot` ("Making the game data for OnBoot mods (once per game update)": only on a
+  start where the boot game-data tool builds a snapshot, from its line that a build begins to its end, with the
+  tool's current line; a start whose snapshot is there, or that needs none, never shows it; with no earlier start
+  that had it, its usual time is its known cost, 60 s), `profile` (the active profile checked or written again, the
+  save backup), `steam` (Steam asked to start the game, until the game's process exists). Play, a single start with
+  another profile and Launch in a server's modpack offer go through these the same way. While the tool checks for a
+  snapshot after the cook, the start is not taken for one that stalled. Then the steps Kiln itself reports from inside the game
   in `<game>/kiln/state/progress.json` (written by kiln-core: Kiln's settings, native mods, the early plugins such as
   ShroudForge, finding the game's functions, Kiln's services, plugins, native mods, .NET, the mods, their content,
   and the game's own loading), up to the main menu. A progress.json is shown only when it belongs to the running

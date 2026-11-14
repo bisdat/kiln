@@ -184,6 +184,10 @@ def open_source(exe, extract=None):
         raise
 
 
+# The line that says a build begins (kiln_manage::start_progress::BOOT_SNAPSHOT_MAKING reads it).
+MAKING = "making the game data snapshot"
+
+
 def cmd_make(a):
     def progress(kind, done, total):
         print(f"boot-snapshot: {kind} {done}/{total}", file=sys.stderr, flush=True)
@@ -197,7 +201,14 @@ def cmd_make(a):
             return 0
         print(f"boot-snapshot: needed by {', '.join(mods)}", file=sys.stderr, flush=True)
     print("boot-snapshot: checking the game data snapshot", file=sys.stderr, flush=True)
-    r = snapshot.make(a.game, open_source, exe=a.exe, force=a.force, root=a.root, progress=progress)
+
+    def building(exe):
+        # none of this game build yet: a build begins (the launcher shows its own step of the start from this line:
+        # kiln_manage::start_progress::BOOT_SNAPSHOT_MAKING); a current snapshot never gets here
+        print(f"boot-snapshot: {MAKING} (about 200 MB, once per game build)", file=sys.stderr, flush=True)
+        return open_source(exe)
+
+    r = snapshot.make(a.game, building, exe=a.exe, force=a.force, root=a.root, progress=progress)
     for kind in r.get("emptyKinds", []):  # a snapshot without this kind: every read of it in OnBoot answers "not found"
         print(f"boot-snapshot: warning: the game's {kind} could not be read: the snapshot holds none, and an OnBoot "
               f"read of {kind[:-1]}: finds nothing", file=sys.stderr, flush=True)
