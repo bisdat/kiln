@@ -779,6 +779,9 @@ void read_dll_list(const wchar_t* file, List* first, Section* sections, size_t n
     }
     List* current = first;
     wchar_t section[128];
+    uint32_t skipped = 0;
+    wchar_t shown_file[512];
+    if (shared) lstrcpynW(shown_file, file, 512);
     each_line(text, [&](wchar_t* line) {
         if (!*line || is_comment(line)) return;
         if (section_of(line, section, 128)) {
@@ -788,9 +791,21 @@ void read_dll_list(const wchar_t* file, List* first, Section* sections, size_t n
             return;
         }
         if (!current) return;  // other sections belong to other tools
+        // Keep the line as written: shared_chain_value removes comments and quotes in place.
+        wchar_t shown[257];
+        if (shared && skipped < kMaxPerList) lstrcpynW(shown, line, 257);
         wchar_t* v = shared ? shared_chain_value(line) : value_of(line);
-        if (*v && ends_with_i(v, L".dll")) current->push(v);
+        if (*v && ends_with_i(v, L".dll")) {
+            current->push(v);
+        } else if (shared && *v && value_of(line) == line) {
+            // The shared spec: a line naming anything but a .dll "is skipped and reported". A "key = value" line whose
+            // value is no .dll is a setting of the tool that wrote it and is ignored, as it always was.
+            if (skipped++ < kMaxPerList)
+                plog(L"chain: %s: %s skipped: does not name a .dll", shown_file, shown);
+        }
     });
+    if (skipped > kMaxPerList)
+        plog(L"chain: %s: and %u more lines skipped (do not name a .dll)", shown_file, skipped - kMaxPerList);
 }
 
 void load_list(uint32_t source, const wchar_t* base, const List& list, bool emf_rules, bool skip) {
