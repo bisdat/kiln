@@ -11,4 +11,10 @@ gcc -std=c11 -Wall -Wextra -Werror -pedantic -I"$abi" "$here/abi_test.c" -o "$ou
 "$out/abi-test"
 g++ -std=c++20 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -pthread \
     -I"$abi" "$here/state_test.cpp" "$here/../state.cpp" -o "$out/state-test"
+g++ -std=c++20 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -pthread \
+    -I"$abi" "$here/mode_test.cpp" "$here/../mode.cpp" "$here/../state.cpp" -o "$out/mode-test"
+"$out/mode-test"
 "$out/state-test"
+g++ -std=c++20 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -pthread \
+    -I"$abi" "$here/mode_test.cpp" "$here/../mode.cpp" "$here/../state.cpp" -o "$out/mode-test"
+"$out/mode-test"
