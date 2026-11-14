@@ -161,14 +161,22 @@ void Journal::load() {
 }
 
 void Journal::bind(const std::string& world) {
-    if (world.empty() || world == world_) return;
+    if (world == world_) return;
     if (!world_.empty()) maintain();
     j_.clear();
     world_ = world;
     gen_ = 0;
     log_bytes_ = 0;
     durable_ = dirty_ = false;
+    pending_blocks_ = 0;
     cursor_ = {INT32_MIN, INT32_MIN, INT32_MIN};
+    if (world.empty()) {
+        // The game closed the world and the next one has no identity yet (a game client hosts one world after
+        // another; a brand-new world gets its id with its first save). Staying bound would record the next world's
+        // cells under the earlier world, whose next start would then look for them in the wrong world.
+        log_(0, "transient edits: the world's identity is unknown now; transient edits are refused until it is known");
+        return;
+    }
     load();
     count_pending();
     size_t cells = 0;

@@ -239,6 +239,7 @@ Kiln.BootRoles.DedicatedServer = 1 -> Kiln.BootRoles
 Kiln.BootRoles.HostedServer = 2 -> Kiln.BootRoles
 Kiln.BootThreadOnlyAttribute
 Kiln.BootThreadOnlyAttribute.BootThreadOnlyAttribute() -> void
+Kiln.ConfigFile.LastWriteError.get -> string?
 Kiln.IReadOnlyGameData
 Kiln.IReadOnlyGameData.Read(string! key) -> Kiln.BootDataResult!
 override Kiln.BootDataResult.Equals(object? obj) -> bool

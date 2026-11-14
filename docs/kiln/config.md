@@ -97,7 +97,14 @@ The file is a server-kind config (`<modid>-world`); `ConfigFile.PerWorld`, `Worl
   max, options, requiresRestart, synced), `Get(path)`, `TrySet(path, value, out error)` / `Set` (validates, refuses
   out-of-range, writes the file, raises the change; values may be CLR values, `JsonElement`/`JsonNode` or text such as
   "12", "on", "Hard", "5m", "[1, 2]"), `Save()` (after changing `Value` in code), `Reload()`, `Schema()`/`SchemaJson()`,
-  `ValuesJson()`, `SyncedValuesJson()`, `PendingRestart`, `Warnings`, `LastError`, `LoadedAt`.
+  `ValuesJson()`, `SyncedValuesJson()`, `PendingRestart`, `Warnings`, `LastError`, `LastWriteError`, `LoadedAt`.
+- A file that cannot be written (a read-only folder, a full disk) is never reported as saved. `TrySet` is all or
+  nothing: it returns false with "cannot write" and the reason in `error`, the entry keeps its running value and its
+  file value, and no change is raised. `Set` and `Save` do not throw for it, as before 0.2.0-dev.28: the value applies
+  for this session and the failure is logged. `LastWriteError` (since 0.2.0-dev.28) says why the last write failed
+  and is null after one that succeeded: read it after `Set` or `Save` before you tell a player "saved". A value `Set`
+  could not save is written by the next write that succeeds; until then `TrySet` of that same value answers false.
+  Reading a config never fails for this: a file Kiln cannot rewrite at registration is only logged.
 - Threads: `Register`, `Set`, `Save`, `Reload` on the tick thread (`Register` also in `Mod.OnBoot`, see above); reads anywhere
   (values are plain objects).
 - A mod's configs leave the registry when it unloads; the file stays.
