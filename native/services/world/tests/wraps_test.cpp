@@ -120,6 +120,22 @@ uint16_t mask() {
 }
 void set_mask(uint16_t m) { std::memcpy(g_world_mem + kStorage + kMask, &m, 2); }
 
+// kiln.hooks with only its owner cleanup: the test calls the observer as the core would when it revokes an owner.
+bool g_hooks_on = true;
+KilnOwnerRetiringFn g_retiring_fn = nullptr;
+void* g_retiring_user = nullptr;
+KilnOwner g_retiring_observer = 0;
+KilnHooksApi g_fake_hooks = [] {
+    KilnHooksApi h{};
+    h.header = {sizeof(KilnHooksApi), KILN_HOOKS_VERSION};
+    h.subscribe_owner_retiring = [](KilnOwner observer, KilnOwnerRetiringFn fn, void* user, KilnHandle* out) -> KilnResult {
+        g_retiring_observer = observer, g_retiring_fn = fn, g_retiring_user = user;
+        if (out) *out = 1;
+        return KILN_OK;
+    };
+    h.unsubscribe_owner_retiring = [](KilnHandle) -> KilnResult { return KILN_OK; };
+    return h;
+}();
 KilnApi g_fake{};
 void fake_api() {
     g_fake.size = sizeof(KilnApi);
@@ -135,7 +151,9 @@ void fake_api() {
     g_fake.world = [](uint32_t kind) { return kind < KILN_WORLD_KINDS ? g_live_world[kind] : uintptr_t{0}; };
     g_fake.server_world = [] { return g_live_world[0]; };
     g_fake.side = [] { return g_side; };
-    g_fake.service = [](KilnStr, uint32_t) -> const void* { return nullptr; };
+    g_fake.service = [](KilnStr name, uint32_t) -> const void* {
+        return g_hooks_on && std::string(name.ptr, name.len) == KILN_HOOKS_SERVICE ? &g_fake_hooks : nullptr;
+    };
     g_fake.path = [](int32_t, char*, size_t, size_t*) -> KilnResult { return KILN_ERR_UNAVAILABLE; };
     g_api = &g_fake;
 }
@@ -799,15 +817,39 @@ void wraps_owners() {
     check(game_wraps_release(40, &pending) == KILN_OK && pending == 0 && winfo(a).state == KILN_WRAP_REMOVED &&
               winfo(b).state == KILN_WRAP_REMOVED && update_of(wentry(0)) == reinterpret_cast<uintptr_t>(kWUpdates[0]),
           "after the Pre nothing of the owner can run");
-    // a revoked owner's wraps go in a Pre (at most once a second)
-    g_fake.post = [](KilnOwner owner, KilnTaskFn, void*) -> KilnResult { return owner == 41 ? KILN_ERR_REVOKED : KILN_OK; };
+    // a revoked owner, told by kiln.hooks' owner cleanup: its stages are gone at once (no Pre, no probe), out of the
+    // chain in the next Pre; a pending one is removed at once
+    check(g_retiring_subscribed && g_retiring_fn && g_retiring_observer == g_owner, "kiln.world subscribes to owner cleanup");
     const KilnHandle d = wrap(41, "fuel_setup", KILN_WRAP_BEFORE, 0, &st_trace, nullptr);
     wpre();
-    g_next_reap = {};
+    const KilnHandle e = wrap(41, "fuel_network", KILN_WRAP_AFTER, 0, &st_trace, nullptr);
+    g_retiring_fn(41, g_retiring_user);
+    {
+        Job job(10);
+        g_trace.clear();
+        g_tracing = true;
+        run_slice(wentry(0), job);
+        g_tracing = false;
+        check(winfo(d).gone == 1 && winfo(e).state == KILN_WRAP_REMOVED && winfo(e).reason == KILN_WRAP_OWNER_GONE &&
+                  g_trace == std::vector<std::string>({"orig"}),
+              "a retiring owner's stages are gone at once: not called before the Pre, its pending wrap removed");
+    }
+    wpre();
+    check(winfo(d).state == KILN_WRAP_REMOVED && winfo(d).reason == KILN_WRAP_OWNER_GONE, "and out of the chain in the Pre");
+    // without kiln.hooks' owner cleanup (an older core): the probe, once a second
+    g_hooks_on = false;
+    wraps_init();
+    check(!g_retiring_subscribed, "no owner cleanup: kiln.world falls back to the probe");
+    g_fake.post = [](KilnOwner owner, KilnTaskFn, void*) -> KilnResult { return owner == 42 ? KILN_ERR_REVOKED : KILN_OK; };
+    const KilnHandle f = wrap(42, "fuel_setup", KILN_WRAP_BEFORE, 0, &st_trace, nullptr);
     wpre();
     g_next_reap = {};
     wpre();
-    check(winfo(d).state == KILN_WRAP_REMOVED && winfo(d).reason == KILN_WRAP_OWNER_GONE, "a revoked owner's wraps are removed");
+    g_next_reap = {};
+    wpre();
+    check(winfo(f).state == KILN_WRAP_REMOVED && winfo(f).reason == KILN_WRAP_OWNER_GONE, "the probe finds a revoked owner's wraps");
+    g_hooks_on = true;
+    wraps_init();
 }
 
 // No call starts into a released owner's stages, also while its world keeps stepping (no Pre in between); a call that

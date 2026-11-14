@@ -27,6 +27,7 @@
 #include <utility>
 
 #include "services/kiln_caps.h"
+#include "services/kiln_hooks.h"
 #include "wraps.h"
 
 namespace kw {
@@ -547,15 +548,31 @@ void log_disabled(Stage& st) {
          st.program->c_str(), st.kind, static_cast<unsigned long long>(st.owner), st.detail);
 }
 
-// The core has no owner-liveness query: a post to a revoked owner fails. Probed at most once a second, so a revoked
-// owner's stages can run up to a second longer. To be replaced by kiln.hooks' subscribe_owner_retiring (03-camera S1,
-// row hooks.owner_cleanup) once that is on integration: then the stages go before the owner's code does.
+// A revoked owner's stages go at once through kiln.hooks' owner cleanup (subscribe_owner_retiring, row
+// hooks.owner_cleanup). Only where kiln.hooks lacks it (an older core) is the old probe used: the core has no
+// owner-liveness query, a post to a revoked owner fails; probed at most once a second, so there a revoked owner's
+// stages can run up to a second longer.
+bool g_retiring_subscribed = false;
 bool owner_revoked(KilnOwner owner) { return g_api->post(owner, [](void*) {}, nullptr) == KILN_ERR_REVOKED; }
 
 // Takes a stage out (g_mu): no call of it starts from here on; the next Pre removes it from its chain.
 void retire_stage(Stage& st, uint32_t reason) {
     if (!st.remove) st.remove = true, st.remove_reason = reason;
     st.gone.store(true, std::memory_order_seq_cst);
+}
+
+// kiln.hooks' owner cleanup: on the thread that revoked the owner, no core lock held. Nothing here waits for a stage
+// or calls game code: the stages are marked gone (a running one finishes, none starts) and their chains drop them in
+// the next Pre of their world.
+void KILN_CALL on_owner_retiring(KilnOwner retiring, void*) {
+    std::lock_guard lock(g_mu);
+    for (auto& [h, st] : g_stages) {
+        if (st->owner != retiring) continue;
+        const uint32_t s = st->state.load();
+        if (s == KILN_WRAP_PENDING) finish(*st, KILN_WRAP_REMOVED, KILN_WRAP_OWNER_GONE);
+        else if (s == KILN_WRAP_ACTIVE) retire_stage(*st, KILN_WRAP_OWNER_GONE);
+    }
+    count_states();
 }
 
 // Every stage of a pool back to PENDING (re-applied by name in the next world) or finished; slots restored (the world
@@ -593,6 +610,13 @@ void wraps_init() {
            L.job_entity_count >= 0 && L.job_entity_list >= 0 && L.ctx_index == offsetof(ProgramCtx, index) &&
            g_api->feature(kstr("world.programs"));
     g_wrap_caps = static_cast<const KilnCapsApi*>(g_api->service(kstr(KILN_CAPS_SERVICE), 1));
+    const auto* hooks = static_cast<const KilnHooksApi*>(g_api->service(kstr(KILN_HOOKS_SERVICE), KILN_HOOKS_VERSION));
+    KilnHandle retiring = 0;
+    g_retiring_subscribed = hooks && hooks->header.size >= offsetof(KilnHooksApi, unsubscribe_owner_retiring) + sizeof(void*) &&
+                            hooks->subscribe_owner_retiring &&
+                            hooks->subscribe_owner_retiring(g_owner, &on_owner_retiring, nullptr, &retiring) == KILN_OK;
+    if (!g_retiring_subscribed)
+        KW_W("wraps: kiln.hooks has no owner cleanup here; a revoked owner's wraps are found once a second");
     if (g_ok)
         report_row("systems.wraps", KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, "Before, After and Replace on the game's programs");
     else
@@ -626,7 +650,7 @@ void wraps_pre(uint32_t kind, uintptr_t) {
     {
         std::lock_guard lock(g_mu);
         const auto now = std::chrono::steady_clock::now();
-        if (now >= g_next_reap) {
+        if (!g_retiring_subscribed && now >= g_next_reap) {
             g_next_reap = now + std::chrono::seconds(1);
             for (auto& [h, st] : g_stages)
                 if ((st->state.load() == KILN_WRAP_PENDING || st->state.load() == KILN_WRAP_ACTIVE) && !st->remove &&
