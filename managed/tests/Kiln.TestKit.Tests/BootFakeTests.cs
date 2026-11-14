@@ -47,6 +47,50 @@ public sealed class BootFakeTests
     }
 
     [Fact]
+    public void ASettingOnBootReadIsFrozenByItsValue()
+    {
+        using var kiln = new KilnHarness();
+        kiln.BootPhase.SetRecord("item:Material_T1_Wood_Logs", """{"maxStackSize": 120}""");
+        var file = Path.Combine(kiln.ConfigDirectory, "tk-boot.json");
+        Directory.CreateDirectory(kiln.ConfigDirectory);
+        File.WriteAllText(file, """{ "coldSeconds": 4 }""");  // not Kiln's canonical form: OnLoad writes that
+        var run = kiln.BootPhase.Run(Folder);
+        Assert.True(run.Ok, run.Reason);
+        Assert.Contains("\"seconds\":4", Assert.Single(run.Staged, d => d.Kind == "statuses").Json);
+        var mod = kiln.LoadFolder(Folder);
+        kiln.Boot();
+        kiln.Step(3);
+        Assert.True(mod.IsLoaded, mod.Error);
+        var canonical = File.ReadAllText(file);
+        Assert.NotEqual("""{ "coldSeconds": 4 }""", canonical);  // the runtime registration rewrote it canonically
+
+        // the canonical rewrite, and the same value written another way, load again (unload, then Mods.LoadAsync of its folder)
+        ModOperationResult LoadAgain()
+        {
+            var task = Mods.LoadAsync("tk-boot");
+            kiln.Step(2);
+            return task.Result;
+        }
+        kiln.Unload(mod);
+        var again = LoadAgain();
+        Assert.True(again.Ok, again.Message);
+        kiln.Unload(mod);
+        File.WriteAllText(file, "// my settings\n{\n  \"coldSeconds\": 4,\n}\n");
+        again = LoadAgain();
+        Assert.True(again.Ok, again.Message);
+
+        // another value: the boot content was made with 4
+        kiln.Unload(mod);
+        File.WriteAllText(file, """{ "coldSeconds": 5 }""");
+        again = LoadAgain();
+        Assert.False(again.Ok);
+        Assert.StartsWith("RestartRequiredBoot:", again.Message);
+        Assert.Contains("config tk-boot", again.Message);
+        Assert.Contains("coldSeconds: 4 -> 5", again.Message);
+        Assert.Contains("restart the game", again.Message);
+    }
+
+    [Fact]
     public void TheRowsSwitchedOffRefuseAsInAGame()
     {
         using var kiln = new KilnHarness();

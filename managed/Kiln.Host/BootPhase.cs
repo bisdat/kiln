@@ -217,7 +217,7 @@ internal static unsafe class BootPhase
                 var roles = mods.BootRoles(m);
                 if (roles == 0) continue;
                 if (_authors.ContainsKey(m.Id)) continue;  // the resolver keeps the first folder for an id, as runtime loading does
-                var a = new Author { Manifest = m, Directory = dir, Roles = validRoles.GetValueOrDefault(dir, roles), Inputs = BootInputs.Read(dir) };
+                var a = new Author { Manifest = m, Directory = dir, Roles = validRoles.GetValueOrDefault(dir, roles), Inputs = mods.ReadBootInputs(dir) };
                 _authors[m.Id] = a;
                 if (!validRoles.ContainsKey(dir))
                     Exclude(a, BootModState.ExcludedDependency, "Dependency", rejected.GetValueOrDefault(dir, "no valid role in the boot graph"));
@@ -411,11 +411,15 @@ internal static unsafe class BootPhase
                 if (defs.Count > 0) committed[id] = defs;
                 reports.Add(new BootModReport(id, gen, a.State, defs.Select(d => $"{d.Kind}/{d.Key}").ToList(), issues));
                 // frozen at the commit: what OnBoot and the collectors read; a change since OnBoot ran matches no later load
-                var frozen = a.State == BootModState.Committed ? a.Inputs.Recheck(a.Directory) : a.Inputs;
+                var again = a.State == BootModState.Committed ? mods.ReadBootInputs(a.Directory) : null;
+                var frozen = again is null ? a.Inputs : a.Inputs.Recheck(again);
                 if (frozen.Error != null)
                     log(LogLevel.Warn, $"boot: {id}: its files could not be read for the restart check ({frozen.Error}); it loads again only after a restart");
                 else if (frozen.ChangedDuringBoot)
-                    log(LogLevel.Warn, $"boot: {id}: its files changed while the boot phase ran ({string.Join(", ", BootInputs.Read(a.Directory).Differences(a.Inputs).Take(3))}); it loads again only after a restart");
+                    log(LogLevel.Warn, $"boot: {id}: its files changed while the boot phase ran ({string.Join(", ", again!.Differences(a.Inputs).Take(3))}); it loads again only after a restart");
+                else if (again is not null)
+                    log(LogLevel.Info, $"boot: {id}: inputs frozen: {a.Inputs.Cost.Files} file(s), {a.Inputs.Cost.Bytes / 1048576.0:F1} MiB; read before OnBoot in " +
+                                       $"{a.Inputs.Cost.Milliseconds} ms ({a.Inputs.Cost.Hashed} hashed), again at the commit in {again.Cost.Milliseconds} ms ({again.Cost.Hashed} hashed)");
                 mods.SetBootInputs(id, frozen);
             }
             BootGeneration.Record(gen, reports, committed);
@@ -545,10 +549,76 @@ internal sealed partial class ModManager
         return roles;
     }
 
-    /// <summary>A boot mod's frozen inputs (BootInputs.cs): what a later runtime load of it compares, set when its generation commits.</summary>
+    /// <summary>The configs each boot author's OnBoot registered (Config.TakeBootValues after it ran), by mod id.</summary>
+    private readonly Dictionary<string, IReadOnlyList<Kiln.Config.BootValues>> _bootConfigs = new(StringComparer.Ordinal);
+
+    /// <summary>A boot mod's inputs as they are now: its folder without the folders written while the game runs.</summary>
+    internal BootInputs ReadBootInputs(string directory) => BootInputs.Read(directory, _dataDirectory, KilnPaths.Config);
+
+    /// <summary>A boot mod's frozen inputs (BootInputs.cs): what a later runtime load of it compares, set when its generation commits;
+    /// with the configs its OnBoot read.</summary>
     internal void SetBootInputs(string id, BootInputs inputs)
     {
+        IReadOnlyList<Kiln.Config.BootValues>? configs;
+        lock (_bootConfigs) configs = _bootConfigs.GetValueOrDefault(id);
+        if (configs is { Count: > 0 }) inputs = inputs.WithConfigs(configs);
         lock (_bootInputs) _bootInputs[id] = inputs;
+    }
+
+    /// <summary>The configs a boot mod's OnBoot read, against the values their files give now (null: all the same). The settings types
+    /// come from a throwaway load of the mod's assemblies (its files are unchanged: the caller compared them first), so the values are
+    /// read, validated and clamped exactly as OnBoot read them; nothing is registered, written or logged.</summary>
+    private static string? BootConfigRefusal(Manifest m, string directory, IReadOnlyList<Kiln.Config.BootValues> configs)
+    {
+        if (configs.Count == 0) return null;
+        var alc = new ModLoadContext(m.Id + ":boot-config", directory);
+        try
+        {
+            var now = typeof(Kiln.Config).GetMethod(nameof(Kiln.Config.ValuesNow), BindingFlags.Static | BindingFlags.NonPublic)!;
+            foreach (var c in configs)
+            {
+                string values;
+                try
+                {
+                    var type = alc.LoadFromAssemblyName(new AssemblyName(c.Assembly)).GetType(c.Type, throwOnError: true)!;
+                    values = (string)now.MakeGenericMethod(type).Invoke(null, [c.Id, c.Kind])!;
+                }
+                catch (Exception e)
+                {
+                    var inner = e is TargetInvocationException { InnerException: { } i } ? i : e;
+                    return $"RestartRequiredBoot: mod {m.Id}'s config {c.Id}, which its OnBoot read, cannot be read again ({inner.GetType().Name}: {inner.Message}); " +
+                           "restart the game (or the server) to load it";
+                }
+                var keys = ChangedKeys(c.Values, values);
+                if (keys.Count > 0)
+                    return $"RestartRequiredBoot: mod {m.Id}'s config {c.Id} changed since its OnBoot read it ({string.Join(", ", keys.Take(5))}" +
+                           $"{(keys.Count > 5 ? $", {keys.Count - 5} more" : "")}); its boot content was made with the earlier values: restart the game " +
+                           "(or the server) to load it with the new ones";
+            }
+            return null;
+        }
+        finally
+        {
+            alc.Unload();
+        }
+    }
+
+    /// <summary>The entries whose value differs between two <c>ConfigFile.ValuesJson</c> texts, as "path: before -> now".</summary>
+    internal static List<string> ChangedKeys(string before, string now)
+    {
+        static void Flatten(JsonNode? node, string path, Dictionary<string, string> into)
+        {
+            if (node is JsonObject o)
+                foreach (var (k, v) in o) Flatten(v, path.Length == 0 ? k : $"{path}.{k}", into);
+            else into[path] = node?.ToJsonString() ?? "null";
+        }
+        var a = new Dictionary<string, string>(StringComparer.Ordinal);
+        var b = new Dictionary<string, string>(StringComparer.Ordinal);
+        Flatten(JsonNode.Parse(before), "", a);
+        Flatten(JsonNode.Parse(now), "", b);
+        static string Short(string? v) => v is null ? "none" : v.Length > 40 ? v[..40] + "..." : v;
+        return a.Keys.Union(b.Keys).Where(k => a.GetValueOrDefault(k) != b.GetValueOrDefault(k)).Order(StringComparer.Ordinal)
+            .Select(k => $"{k}: {Short(a.GetValueOrDefault(k))} -> {Short(b.GetValueOrDefault(k))}").ToList();
     }
 
     /// <summary>The transient boot-author instance: its own collectible load context, a context of its own owner, OnBoot once under the frame,
@@ -580,6 +650,8 @@ internal sealed partial class ModManager
                 boot.Open = false;
                 BootFrame.Current = null;
                 ModContext.CurrentMod = previous;
+                var configs = Kiln.Config.TakeBootValues(manifest.Id);
+                lock (_bootConfigs) _bootConfigs[manifest.Id] = configs;
             }
             _host.Log(LogLevel.Info, $"boot: {manifest.Id}: OnBoot staged {boot.Staged.Count} definition(s)");
             return true;
@@ -613,11 +685,11 @@ internal sealed partial class ModManager
             if (frozen.ChangedDuringBoot)
                 return $"RestartRequiredBoot: mod {m.Id}'s files changed while this process's boot phase ran, so its boot content matches no version " +
                        "of it; restart the game (or the server) to load it";
-            var now = BootInputs.Read(directory);
+            var now = ReadBootInputs(directory);
             if (now.Error != null)
                 return $"RestartRequiredBoot: mod {m.Id}'s files cannot be read to compare them with its boot content ({now.Error}); " +
                        "restart the game (or the server) to load it";
-            if (now.Hash == frozen.Hash) return null;
+            if (now.Hash == frozen.Hash) return BootConfigRefusal(m, directory, frozen.Configs);
             var changes = now.Differences(frozen);
             return $"RestartRequiredBoot: mod {m.Id} changed since this process's boot generation committed its boot content " +
                    $"({string.Join(", ", changes.Take(3))}{(changes.Count > 3 ? $", {changes.Count - 3} more" : "")}); " +
