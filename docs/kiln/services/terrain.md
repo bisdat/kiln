@@ -215,7 +215,8 @@ record again, and its next `Apply` would be a first install that writes over eve
 
 So Kiln keeps a **witness** in a second place: `kiln/data/kiln.terrain/<world id>/<mod id>.json` lists the kept plans
 the mod has a ledger record of in that world, each with the world file's revision when the record was made ("since").
-`Apply` writes it before a new plan's first cell, and fills in any plan its ledger has that the witness lacks; a new
+`Apply` writes it before a new plan's first cell, and fills in any plan its ledger has that the witness lacks;
+if that write fails, Apply refuses before changing cells (fix the storage error and retry); a new
 world, which has no id before its first save, gets it once that save is written. The witness is not in the world's
 Kiln data folder, so it outlives the loss of that folder or of the ledger key. A record goes into the Kiln data of
 every save after it was made, so for a kept plan with no record:

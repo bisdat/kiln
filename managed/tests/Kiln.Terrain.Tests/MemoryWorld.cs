@@ -28,6 +28,7 @@ internal sealed class MemoryWorld
     public int Stale;
     public Action? OnLoad;
     public Exception? BookError;
+    public Exception? WitnessWriteError;
     public DataMatch Match = DataMatch.Exact;
     /// <summary>The world save's id (null: a new world before its first save) and its file's revision.</summary>
     public string? SaveId = "6f1c2a3b-0000-4000-8000-00000000000a";
@@ -146,8 +147,11 @@ internal sealed class MemoryWorld
             catch (System.Text.Json.JsonException e) { throw new InvalidDataException(e.Message, e); }
         }
 
-        public void WriteWitness(string saveId, TerrainWitness witness) =>
+        public void WriteWitness(string saveId, TerrainWitness witness)
+        {
+            if (w.WitnessWriteError is { } error) throw error;
             w.Witnesses[saveId + "|" + mod] = System.Text.Json.JsonSerializer.Serialize(witness);
+        }
 
         public void AfterNextSave(Action<string, uint> action) => w._afterSave.Add(action);
     }

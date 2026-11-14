@@ -76,14 +76,15 @@ internal static class TerrainLoss
     /// <summary>Puts every plan of <paramref name="book"/> into the witness (Apply: when it starts, and once it made a new
     /// record, before the first write). Entries of plans the book does not have are left: they are the evidence. A new
     /// world has no id before its first save: then the witness is written once that save is.</summary>
-    public static void Witness(ITerrainBackend backend, TerrainBook book)
+    public static bool Witness(ITerrainBackend backend, TerrainBook book)
     {
         var plans = book.Plans.Keys.ToList();
-        if (plans.Count == 0) return;
+        if (plans.Count == 0) return true;
         var (id, revision) = backend.SaveIdentity;
-        if (id is not null) { Write(backend, id, revision, plans); return; }
+        if (id is not null) return Write(backend, id, revision, plans);
         // the save that gives the world its id carries these records: "since" is the revision before it
         backend.AfterNextSave((saveId, written) => Write(backend, saveId, written == 0 ? 0 : written - 1, plans));
+        return true;
     }
 
     /// <summary>Terrain.Forget: the plan's entry goes, so its next apply is a first install.</summary>
@@ -101,7 +102,7 @@ internal static class TerrainLoss
         }
     }
 
-    private static void Write(ITerrainBackend backend, string id, uint since, IReadOnlyList<string> plans)
+    private static bool Write(ITerrainBackend backend, string id, uint since, IReadOnlyList<string> plans)
     {
         try
         {
@@ -115,6 +116,7 @@ internal static class TerrainLoss
                 changed = true;
             }
             if (changed) backend.WriteWitness(id, w);
+            return true;
         }
         catch (InvalidDataException e)
         {
@@ -125,5 +127,6 @@ internal static class TerrainLoss
         {
             Kiln.Backend.Current.Log(0, LogLevel.Warn, $"terrain: {backend.Mod}: {backend.WitnessLocation(id)} could not be written ({e.Message}); a lost ledger of this world cannot be told from a first install until it is");
         }
+        return false;
     }
 }
