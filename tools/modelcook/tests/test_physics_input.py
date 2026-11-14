@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Physics format 1 input (cook/physics.py) and the cook's feature rows (cook/features.py), without game files: the banner sidecar
-(tests/fixtures/banner, synthetic: chapter 16e's reference banner) parses, each refusal names its field, the mesh rules of chapter
-16e 5.1 hold on small hand-made primitives, and the feature rows that wait for a game test are the client gate's entries too.
+(tests/fixtures/banner, synthetic: the research's reference banner) parses, each refusal names its field, the mesh rules of
+docs/kiln/modding/models.md#physics hold on small hand-made primitives, and the feature rows that wait for a game test are the client gate's entries too.
 
     python3 -m unittest discover -s tools/modelcook/tests -p test_physics_input.py
 """

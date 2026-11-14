@@ -112,7 +112,7 @@ def _check_morphs(d, blob, checks, report):
 
 
 def _check_cloth(d, checks, problems, report):
-    """The cloth read back: the relations every one of the game's 320 cloth meshes keeps (chapter 16e, 2.1), its selectors and its colliders."""
+    """The cloth read back: the relations every one of the game's 320 cloth meshes keeps (docs/re/models.md section 9), its selectors and its colliders."""
     cl = d["cloth"]
     meshes = cl["meshes"]
     n = len(meshes)
@@ -154,7 +154,7 @@ def _check_cloth(d, checks, problems, report):
 
 
 def _check_chains(d, checks, problems, report):
-    """The bone chains read back (chapter 16e 2.2): the lists the game's setup reads agree, every swinging joint has a reserved slot, and the packed
+    """The bone chains read back (docs/re/models.md section 9): the lists the game's setup reads agree, every swinging joint has a reserved slot, and the packed
     rest shape is the stored matrices' canonical frame within one code step."""
     c = d["chain"]
     smap = d["skinningMap"]

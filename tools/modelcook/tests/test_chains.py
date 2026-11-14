@@ -2,7 +2,7 @@
 """Bone chains (cook/chains.py) without game files: skinned rigs with a pendant are cooked through steps.model and cook.json against the
 made-up game of tests/fakegame.py and decoded with tools/kfc. 2- and 8-joint chains round-trip, 9 is refused, the packing's signed codes, the
 palette (sorted ordinary joints and anchors, then reserved slots in chain order, never slot 0), the GUID rule, extents, fixed tuning, every
-refusal of chapter 16e 2.2 and 5.3, and the canonical frame checked against a port of the research's evidence/chain_semantics.py.
+refusal (docs/kiln/modding/models.md#physics, docs/re/models.md section 9), and the canonical frame checked against a port of the research's evidence/chain_semantics.py.
 
     python3 -m unittest discover -s tools/modelcook/tests -p test_chains.py
 """
@@ -38,7 +38,7 @@ def quat(axis, deg):
     return [axis[0] / n * s, axis[1] / n * s, axis[2] / n * s, math.cos(math.radians(deg) / 2)]
 
 
-def rig(path, links=3, extra=(), scale=None, side_child=False, second=None, morph=False, link=None):
+def rig(path, links=3, extra=(), scale=None, side_child=False, second=None, morph=False, link=None, cape=False):
     """A skinned glTF: root -> spine (y 1.5) -> p0 .. p<links-1> hanging down and turning, plus `extra` joints under spine (name list), and with
     second=n a second pendant q0..q<n-1> under spine declared before the first in the file (its joints get lower skeleton indices). Every joint
     carries the vertices of a small quad at its place; vertices of spine and root too. -> (joint names in skin order)."""
@@ -101,7 +101,13 @@ def rig(path, links=3, extra=(), scale=None, side_child=False, second=None, morp
     prim = {"positions": pos, "indices": idx, "joints": js, "weights": ws}
     if morph:
         prim["morphs"] = {"Female": [(0, 0.001, 0)] * len(pos)}
-    write_gltf(path, [[prim]], nodes, skins=[{"joints": joints, "ibm": ibm}])
+    prims = [prim]
+    if cape:  # a second primitive: a 2 x 1 cape on the spine, its top row on the spine, its bottom on root
+        sp = world[1]
+        cpos = [(sp[0][3] + x * 0.2, sp[1][3] - y * 0.3, sp[2][3] - 0.1) for y in range(2) for x in range(3)]
+        prims.append({"positions": cpos, "indices": [0, 3, 1, 1, 3, 4, 1, 4, 2, 2, 4, 5], "joints": [(1, 0, 0, 0)] * 3 + [(0, 0, 0, 0)] * 3,
+                      "weights": [(1.0, 0, 0, 0)] * 6})
+    write_gltf(path, [prims], nodes, skins=[{"joints": joints, "ibm": ibm}])
     return names
 
 
@@ -376,6 +382,24 @@ class Refusals(Game, unittest.TestCase):
             steps.model(self.k, self.types, [str(flat)], None, guid=NEW, mode="new", material=fakegame.MATERIAL, physics=phys, features=CHAINS_ON, mod="m")
         with self.assertRaisesRegex(steps.StepError, "mod's id"):
             self.cook(path, phys, mod=None)
+
+    def test_cloth_does_not_follow_a_swinging_joint(self):
+        """Cloth and chains on one model: a cloth vertex weighted to a swinging joint is refused (its simulation skin would follow the joint's
+        animated pose); cloth weighted elsewhere cooks with the chains."""
+        path = self.dir / "both.gltf"
+        rig(path, links=3, cape=True)
+        both = PH.parse({"format": 1, "models": {"both.gltf": {
+            "cloth": [{"mesh": 0, "primitive": 0, "pin": [1.0] * 24}],
+            "chains": [{"rootJoint": "p0", "tipJoint": "p2"}]}}}).get("both.gltf")
+        self.refused(r'models\["both.gltf"\]\.cloth\[0\]: vertex 8 is weighted to joint \'p0\', which swings in .*chains\[0\]', path, both,
+                     features=frozenset({"modelcook.cloth", "modelcook.chains2"}))
+        fine = PH.parse({"format": 1, "models": {"both.gltf": {
+            "cloth": [{"mesh": 0, "primitive": 1, "pin": [1, 1, 1, 0, 0, 0]}],
+            "chains": [{"rootJoint": "p0", "tipJoint": "p2"}]}}}).get("both.gltf")
+        d, _, _, r, _ = self.cook(path, fine, features=frozenset({"modelcook.cloth", "modelcook.chains2"}))
+        self.assertTrue(r["ok"], json.dumps({k: v for k, v in r["checks"].items() if not v}))
+        self.assertEqual([m["clothMeshIndex"] for m in d["meshes"]], [0, 1])
+        self.assertEqual(len(d["chain"]["chains2"]), 1)
 
     def test_layout_guard(self):
         import copy

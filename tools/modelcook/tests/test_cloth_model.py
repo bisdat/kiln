@@ -382,13 +382,16 @@ class Skinned(Game, unittest.TestCase):
         target = S.Target.from_skeleton(K.from_gltf(Doc(path)), SKELETON)
         pos, idx, uvs = grid(2, 2, size=0.3)
         flat = write_gltf(self.dir / "flag.gltf", [[{"positions": pos, "indices": idx, "uvs": uvs}]], [{"mesh": 0}])
-        d, _, _, r = self.cook(flat, physics("flag.gltf", [{"mesh": 0, "primitive": 0, "pin": top_pinned(2, 2)}]), target=target, attach="j2")
+        sphere = {"type": "sphere", "x": 0.1, "y": 0.2, "z": 0.3, "radius": 0.05, "joint": "j2"}
+        d, _, _, r = self.cook(flat, physics("flag.gltf", [{"mesh": 0, "primitive": 0, "pin": top_pinned(2, 2), "colliders": [sphere]}]), target=target, attach="j2")
         self.assertTrue(r["ok"])
         q = d["cloth"]["meshes"][0]["data"]
         self.assertEqual({tuple(s["jointIndices"]) for s in q["simulationSkinningData"]}, {(2, 0, 0, 0)})
         self.assertEqual(d["skinningMap"], [2])
-        # moved to the joint's bind position, as the rendered vertices are
+        # moved to the joint's bind position, as the rendered vertices are, and the collider with them (the file's origin is the joint)
         self.assertEqual(q["simulationPositions"][0], {"x": -0.0, "y": f32(0.6 + 1.0), "z": 0.0})
+        self.assertEqual(d["collider"]["spheres"][0]["center"], {"x": f32(-0.1), "y": f32(0.2 + 1.0), "z": f32(0.3)})
+        self.assertEqual(d["collider"]["spheres"][0]["skinningData"]["jointIndices"], [2, 0, 0, 0])
 
     def test_global_scale(self):
         path = self.dir / "gs.gltf"

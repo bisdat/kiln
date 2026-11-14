@@ -174,9 +174,11 @@ def _collider_skin(target, joint, where):
     return {"jointIndices": [j, 0, 0, 0], "jointWeights": [255, 0, 0, 0]}
 
 
-def _colliders(physics, target):
+def _colliders(physics, target, offset=(0.0, 0.0, 0.0)):
     """The model's keen::RenderModelClothColliderData: every cloth entry's colliders once (bind pose, the game's axes), and per cloth mesh an
-    instance naming its own (as the game's models have one per cloth mesh)."""
+    instance naming its own (as the game's models have one per cloth mesh). offset: what the model's vertices moved by (glTF space): a model
+    attached to one joint has its file's origin at the joint, and its colliders go with its vertices."""
+    ox, oy, oz = offset
     spheres, capsules, where = [], [], {}
     for ci, c in enumerate(physics.cloth):
         for i, x in enumerate(c.colliders):
@@ -184,10 +186,10 @@ def _colliders(physics, target):
     for x in physics.colliders():
         w = where[x]
         if isinstance(x, PH.Sphere):
-            spheres.append((x, {"center": FB._v3(FB.to_game((x.x, x.y, x.z))), "radius": x.radius, "skinningData": _collider_skin(target, x.joint, w)}))
+            spheres.append((x, {"center": FB._v3(FB.to_game((x.x + ox, x.y + oy, x.z + oz))), "radius": x.radius, "skinningData": _collider_skin(target, x.joint, w)}))
         else:
-            capsules.append((x, {"center0": FB._v3(FB.to_game((x.a.x, x.a.y, x.a.z))), "radius0": x.a.radius,
-                                 "center1": FB._v3(FB.to_game((x.b.x, x.b.y, x.b.z))), "radius1": x.b.radius,
+            capsules.append((x, {"center0": FB._v3(FB.to_game((x.a.x + ox, x.a.y + oy, x.a.z + oz))), "radius0": x.a.radius,
+                                 "center1": FB._v3(FB.to_game((x.b.x + ox, x.b.y + oy, x.b.z + oz))), "radius1": x.b.radius,
                                  "skinningData": _collider_skin(target, x.joint, w + ".a")}))
     if not spheres and not capsules:
         return dict(RM.NO_COLLIDER)
@@ -198,9 +200,10 @@ def _colliders(physics, target):
             "instances": instances}
 
 
-def _cloth(t, doc, lod0, physics, target, features, global_scale):
+def _cloth(t, doc, lod0, physics, target, features, global_scale, swinging=None, offset=(0.0, 0.0, 0.0)):
     """The cloth of a model step: its RenderClothMesh per entry, its colliders, which primitives they are (rendermodel.cloth_block). doc: LOD 0's glTF,
-    bound; lod0: its prepared primitives (game space)."""
+    bound; lod0: its prepared primitives (game space). swinging: {skeleton joint: the chain that swings it} of the same model: a cloth vertex may
+    not be weighted to one (the cloth's simulation skin follows the joint's animated pose, not the swing)."""
     where = physics.where
     try:
         FT.require(PH.CLOTH, features, f"{where}.cloth")
@@ -223,6 +226,11 @@ def _cloth(t, doc, lod0, physics, target, features, global_scale):
         prim = doc["primitives"][pi]
         if prim.get("morphs"):
             raise StepError(f"{c.where}: the primitive has morph targets ({', '.join(sorted(prim['morphs']))}): cloth with morph targets is not written in this version")
+        for v, inf in enumerate((prim.get("influences") or []) if swinging else []):
+            for j, _ in inf:
+                if j in swinging:
+                    raise StepError(f"{c.where}: vertex {v} is weighted to joint {target.names[j]!r}, which swings in {swinging[j]}: the cloth's simulation skin "
+                                    "would follow the joint's animated pose, not the swing. Weight the cloth to joints that do not swing")
         try:
             mesh = PH.physical_mesh(c, prim["positions"], prim["indices"], prim.get("influences") if target is not None else None)
             result = FB.cook(mesh.positions, mesh.triangles, mesh.pin, c.mass_kg)
@@ -233,7 +241,7 @@ def _cloth(t, doc, lod0, physics, target, features, global_scale):
             raise StepError(f"{c.where}: {e}") from e
         meshes.append(FB.cloth_mesh(c, res))
         primitives[pi] = ci + 1
-    return RM.cloth_block(meshes, primitives, _colliders(physics, target), target is not None)
+    return RM.cloth_block(meshes, primitives, _colliders(physics, target, offset), target is not None)
 
 
 def _chains(t, physics, target, attach, lods, features, global_scale, mod, animated):
@@ -266,7 +274,8 @@ def _chains(t, physics, target, attach, lods, features, global_scale, mod, anima
     except CH.ChainError as e:
         raise StepError(str(e)) from e
     ordinary = smap[:len(smap) - len(plan.simulated)]
-    return {"data": data, "smap": smap, "model_index": index, "report": report, "palette": ordinary + plan.simulated}
+    swinging = {j: c.where for c, path, _ in plan.chains for j in path}
+    return {"data": data, "smap": smap, "model_index": index, "report": report, "palette": ordinary + plan.simulated, "swinging": swinging}
 
 
 def model(k, t, gltf_files, base, guid=None, mode=None, name=None, material=None, material_map=None,
@@ -346,8 +355,10 @@ def model(k, t, gltf_files, base, guid=None, mode=None, name=None, material=None
         if global_scale is None:
             global_scale = base_desc["globalScale"] if base_desc.get("hierarchy") == target.guid else global_scale_of(k, t, target.guid) if k.by_guid(target.guid) else 1.0
         skin = {"hierarchy": target.guid, "hierarchyJointCount": len(target), "globalScale": global_scale}
-    cloth = _cloth(t, docs[0], lods[0], physics, target, features, global_scale) if physics is not None and physics.cloth else None
     chains = _chains(t, physics, target, attach, lods, features, global_scale, mod, animated) if physics is not None and physics.chains else None
+    attach_offset = (-target.bind[joint][0][3], target.bind[joint][1][3], target.bind[joint][2][3]) if joint is not None else (0.0, 0.0, 0.0)  # as skin.attach
+    cloth = _cloth(t, docs[0], lods[0], physics, target, features, global_scale, chains["swinging"] if chains else None, attach_offset) \
+        if physics is not None and physics.cloth else None
     desc, blob = RM.build(lods, materials, base_desc, name, pixel_sizes, skin=skin, morphs=morphs, cloth=cloth, chains=chains)
     data = RM.encode(t, desc)
     stem = stem or name

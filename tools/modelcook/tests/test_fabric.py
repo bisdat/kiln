@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
-"""The cloth fabric (cook/fabric.py) without game files: the banner (tests/fixtures/banner: chapter 16e's synthetic reference, its
-expected-fabric.json written by the research probe fabric_v1.py) comes out as its golden, the array relations of chapter 16e 2.1 hold
+"""The cloth fabric (cook/fabric.py) without game files: the banner (tests/fixtures/banner: the research's synthetic reference, its
+expected-fabric.json written by the research probe fabric_v1.py) comes out as its golden, the array relations of docs/re/models.md section 9 hold
 on a seamed and a two-piece cloth, the same input gives the same bytes in two interpreters, and the reference contract tests of the
 fabric (evidence/test_selected_contracts.py: banner masses and tethers, fractional pins, bad input) pass on the port.
 
@@ -54,7 +54,7 @@ def strip(cols, rows, x0=0.0):
 
 
 def relations(test, result, res=None):
-    """Chapter 16e 2.1's relations of the cooked arrays (what all 320 of the game's cloth meshes satisfy)."""
+    """The relations of the cooked arrays (docs/re/models.md section 9) (what all 320 of the game's cloth meshes satisfy)."""
     f = result["fabric"]
     n = f["numParticles"]
     test.assertEqual(len(result["inverseMasses"]), n)

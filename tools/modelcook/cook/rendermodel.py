@@ -31,7 +31,7 @@ class CookError(Exception):
     pass
 
 
-# The layouts the cloth and chain writers are written for (chapter 16e, 2.1 and 2.2: client 26430625's reflection, the same
+# The layouts the cloth and chain writers are written for (docs/re/models.md section 9: client 26430625's reflection, the same
 # as tests/fixtures/types-rendermodel.json): size, and offset and type of each field they write. A game whose types differ
 # gets no physics from this cook (layout_problems); its rigid and skinned models cook as before.
 PHYSICS_LAYOUTS = {

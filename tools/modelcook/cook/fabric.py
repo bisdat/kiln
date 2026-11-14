@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Kiln's cloth fabric, format 1: a deterministic distance-constraint fabric for the game's cloth solver (chapter 16e, 5.2).
+"""Kiln's cloth fabric, format 1: a deterministic distance-constraint fabric for the game's cloth solver (docs/kiln/modding/models.md#physics, "The fabric").
 
 Kiln's own algorithm, not the game's cooker: no NVIDIA cooker and no GPL code. Its reference is the research probe
 fabric_v1.py; tests/test_fabric.py holds its banner output as the golden. The output maps one to one onto the reflected
@@ -26,7 +26,7 @@ import struct
 
 from . import physics as P
 
-# Every other cloth scalar of the game's RenderClothMesh, fixed in v1 (chapter 16e, 5.3: the values of a fully decoded
+# Every other cloth scalar of the game's RenderClothMesh, fixed in v1 (docs/kiln/modding/models.md#physics: the values of a fully decoded
 # vanilla axe, the same on the game's cloth meshes generally). Gravity, damping and phase stiffness come from the request.
 FIXED_TUNING = {
     "windStrength": 2.0, "dragCoefficient": 0.6, "liftCoefficient": 0.3, "linearInertia": 0.6, "angularInertia": 0.3,

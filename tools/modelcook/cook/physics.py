@@ -27,7 +27,7 @@ reads a single vertex, and a model that both name is refused rather than one of 
 - A chain runs from `rootJoint` (the first joint that swings: its parent stays animated) to `tipJoint` along the
   skeleton, 2 to 8 joints, no branches.
 
-Everything else of the game's cloth and chain tuning is fixed in v1 (chapter 16e, 5.3). What this format cannot say
+Everything else of the game's cloth and chain tuning is fixed in v1 (models.md#physics lists it). What this format cannot say
 (sleeves, simulated morph targets, per-vertex stiffness, a second cloth LOD) is refused where it would be asked for.
 Each refusal starts with the field path, so an author finds the value: `assets/physics.json: models["x.gltf"].cloth[0].pin[3]: ...`.
 """
@@ -41,7 +41,7 @@ from pathlib import PurePosixPath
 FORMAT = 1
 FILE = "assets/physics.json"
 
-# Ranges (chapter 16e, 5.3: the v1 tuning surface). Closed intervals unless the name says open.
+# Ranges (docs/kiln/modding/models.md#physics: the v1 tuning surface). Closed intervals unless the name says open.
 MASS_KG = (0.001, 100.0)
 GRAVITY = (0.0, 50.0)
 CLOTH_DAMPING = (0.0, 0.99)
@@ -55,7 +55,7 @@ CHAIN_RADIUS = (0.0, 1.0)
 CLOTH_DEFAULTS = {"massKg": 1.0, "gravity": 9.81, "damping": 0.4, "stiffness": 0.8}
 CHAIN_DEFAULTS = {"particleMassKg": 1.0, "damping": 0.01, "stiffness": 10000.0, "bendStiffness": 5.0, "particleRadius": 0.0}
 
-# Hard writer bounds: field widths of the cooked containers (chapter 16e, 2.1 and 5.3), not what the game's own models reach.
+# Hard writer bounds: field widths of the cooked containers (docs/re/models.md section 9), not what the game's own models reach.
 MAX_CLOTH_MESHES = 255  # RenderModelMesh.clothMeshIndex is a u8, 0 meaning "not cloth"
 MAX_PARTICLES = 65535  # skinnedVertexIndices and renderSimulationVertexIndices are u16
 MAX_RENDER_VERTICES = 65535
@@ -474,7 +474,7 @@ class PhysicalMesh:
 def physical_mesh(cloth, positions, indices, influences=None, where=None):
     """Applies `cloth` to a primitive's bind-pose `positions` (one per POSITION element) and triangle `indices`, with
     its quantized skin `influences` per vertex ([(joint, u8 weight)], or None for an unskinned primitive). Every rule of
-    chapter 16e 5.1 that needs the mesh is checked here: ids, welds, pins, faces, isolated particles, pinned pieces."""
+    docs/kiln/modding/models.md#physics that needs the mesh is checked here: ids, welds, pins, faces, isolated particles, pinned pieces."""
     where = where or cloth.where
     nv = len(positions)
     if not 1 <= nv <= MAX_RENDER_VERTICES:

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// A body's cloth and chains (Npc/NpcPhysics.cs, chapter 16e): the typed and the JSON form are one request, byte for byte the cook's
+// A body's cloth and chains (Npc/NpcPhysics.cs, docs/kiln/modding/npc-blocks.md#model-physics): the typed and the JSON form are one request, byte for byte the cook's
 // (tools/modelcook/tests/test_physics_input.py SpecHash holds the same hashes), their checks name the field, a body asks for what its build
 // cooked, and a mod hears once that its cloth waits for a game test.
 using System.Text.Json;

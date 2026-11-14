@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Cloth and bone chains on a body's model (docs/kiln/modding/npc-blocks.md#model-physics, chapter 16e): the records, the checks a body's are given
+// Cloth and bone chains on a body's model (docs/kiln/modding/npc-blocks.md#model-physics): the records, the checks a body's are given
 // at Define, the spec hash the cook writes into <stem>.model.json (tools/modelcook/cook/physics.py spec_bytes, byte for byte), and the warning a
 // mod gets while the cook features that write them wait for their game test. Nothing here cooks: a body asks for what its build cooked.
 using System.Globalization;

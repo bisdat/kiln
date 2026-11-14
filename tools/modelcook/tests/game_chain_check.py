@@ -5,7 +5,7 @@
     python3 tools/modelcook/tests/game_chain_check.py [--game DIR]
 
 For every chains2 chain of every RenderModel: the writer's canonical frame of the chain's stored anchor pose and local matrices, quantized
-against the chain's stored extent, against the game's packed rest positions (chapter 16e 2.2: within one saturated code step for all 139 of
+against the chain's stored extent, against the game's packed rest positions (docs/re/models.md section 9: within one saturated code step for all 139 of
 the research build). Also the palette rule the writer follows (every chain joint's skinningMap entry is a placeholder 0) and the list
 relations the writer keeps. Exit 0 when every chain agrees, 1 otherwise, 2 without a game.
 """

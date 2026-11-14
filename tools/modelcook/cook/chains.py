@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
-"""Bone chains (the game's chains2) in a cooked RenderModel (chapter 16e: 2.2 frame and packing, 4.3, 5.3 tuning).
+"""Bone chains (the game's chains2) in a cooked RenderModel (docs/re/models.md section 9: the containers, frame and packing;
+docs/kiln/modding/models.md#physics: what an author asks for).
 
 A chain is 2 to 8 joints of the model's own skeleton, from a root whose parent stays animated (the anchor) down one branch to a tip. The game
 simulates them on a player's machine; the cook writes what its setup reads:
@@ -25,7 +26,7 @@ DIVISOR = 511000.0  # a packed component is code * extentRestPosition / 511000 (
 MAX_PALETTE = 256  # the render skin's indices and ChainData.joints are u8
 RIGID_TOLERANCE = 1e-4  # a bind matrix's rotation part is orthonormal to this, its determinant +1
 MAX_REACH = 32.7675  # metres: ceil(2000 L) has to fit the u16 extentMaxAllowedDist
-# Fixed v1 tuning (chapter 16e 5.3, from the game's own chains); stiffness, bend, damping, mass and radius come from the request.
+# Fixed v1 tuning (docs/kiln/modding/models.md#physics, from the game's own chains); stiffness, bend, damping, mass and radius come from the request.
 CONFIG = {"stretchLimit": 1.0, "friction": 0.1, "linearInertiaHorizontal": round(0.2 * 65535 / 2), "linearInertiaVertical": round(0.2 * 65535 / 2),
           "angularInertia": 0.2, "centrifugalInertia": 0.2, "dragCoefficient": 0.0, "restCurvatureScale": 0.0, "compressionLimit": 0.7,
           "motionRadius": [1.0, 2.0, 3.0, 3.0, 3.0, 3.0, 3.0], "bendStiffnessTipScale": 255, "gravityScale": 100, "angleLimitCos": [0] * 7}
