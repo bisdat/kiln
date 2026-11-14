@@ -33,6 +33,25 @@ std::unordered_map<KilnOwner, std::string> g_labels;
 std::atomic<uint64_t> g_code_seq{0};
 bool g_guard = false;
 
+// Open content transactions (store_txn_*): every layer one owner had when it began, and the slot it was in.
+struct TxnSlot {
+    uint32_t kind = 0, id = 0;
+    int32_t field = -1, sub = -1;
+    uint8_t n = 0;
+    uint8_t original[kSlotBytes] = {};
+    Layer layer{};
+};
+struct Txn {
+    KilnOwner owner = 0;
+    std::map<uintptr_t, TxnSlot> slots;
+};
+std::map<uint64_t, Txn> g_txns;
+uint64_t g_txn_last = 0;
+constexpr size_t kMaxTxns = 64;
+void txns_forget(KilnOwner owner) {
+    std::erase_if(g_txns, [&](const auto& t) { return t.second.owner == owner; });
+}
+
 // ---- timing ----
 int64_t now_us() {
     return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -218,6 +237,7 @@ bool store_drop(KilnOwner owner, uintptr_t addr) {
 
 uint32_t store_drop_owner(KilnOwner owner) {
     std::lock_guard lock(g_mu);
+    txns_forget(owner);  // what an open transaction would put back went with the owner: its rollback restores nothing
     uint32_t n = 0;
     for (auto& [addr, s] : g_slots) {
         const size_t before = s.layers.size();
@@ -257,6 +277,7 @@ uint32_t store_reset(bool revert, std::string* error) {
     if (revert) store_flush(error);
     g_slots.clear();
     g_dirty.clear();
+    g_txns.clear();
     return n;
 }
 
@@ -345,6 +366,149 @@ void store_for_each(const std::function<void(uintptr_t, const Slot&)>& fn) {
     PhaseTimer pt(PH_STORE_SCAN);
     std::lock_guard lock(g_mu);
     for (auto& [addr, s] : g_slots) fn(addr, s);
+}
+
+// ============================================================================================= transactions ===
+// A content transaction: every layer of one owner set aside at its start, so that what the owner writes in it can be
+// taken back whole. Rollback puts back exactly the layers of the start (bytes, order, source), takes off every layer
+// written since, writes the slots, then reads each of them back from memory: a slot whose bytes are not what its
+// layers say, or a layer that is not the start's, makes the rollback unverified. Under g_mu (recursive) throughout.
+
+bool store_txn_begin(KilnOwner owner, uint64_t* id) {
+    std::lock_guard lock(g_mu);
+    if (owner == 0 || g_txns.size() >= kMaxTxns) return false;
+    for (auto& [tid, t] : g_txns)
+        if (t.owner == owner) return false;
+    Txn t;
+    t.owner = owner;
+    for (auto& [addr, s] : g_slots)
+        for (const Layer& l : s.layers) {
+            if (l.owner != owner) continue;
+            TxnSlot ts;
+            ts.kind = s.kind, ts.id = s.id, ts.field = s.field, ts.sub = s.sub, ts.n = s.n;
+            std::memcpy(ts.original, s.original, s.n);
+            ts.layer = l;
+            t.slots.emplace(addr, std::move(ts));
+            break;
+        }
+    *id = ++g_txn_last;
+    g_txns.emplace(*id, std::move(t));
+    return true;
+}
+
+bool store_txn_commit(uint64_t id) {
+    std::lock_guard lock(g_mu);
+    return g_txns.erase(id) != 0;
+}
+
+TxnOutcome store_txn_rollback(uint64_t id, const std::function<void()>& settle, KilnOwner* owner_out, uint32_t* fields, std::string* why) {
+    std::lock_guard lock(g_mu);
+    auto it = g_txns.find(id);
+    if (it == g_txns.end()) return TxnOutcome::Cancelled;
+    const Txn t = std::move(it->second);
+    g_txns.erase(it);
+    const KilnOwner owner = t.owner;
+    if (owner_out) *owner_out = owner;
+    // every slot either side has a layer of the owner in, with the bytes it has when no layer is left
+    struct Touched {
+        uint8_t n = 0;
+        uint8_t original[kSlotBytes] = {};
+    };
+    std::map<uintptr_t, Touched> touched;
+    for (auto& [addr, s] : g_slots)
+        for (const Layer& l : s.layers)
+            if (l.owner == owner) {
+                Touched& x = touched[addr];
+                x.n = s.n;
+                std::memcpy(x.original, s.original, s.n);
+                break;
+            }
+    for (auto& [addr, ts] : t.slots) {
+        Touched& x = touched[addr];
+        x.n = ts.n;
+        std::memcpy(x.original, ts.original, ts.n);
+    }
+    std::string problem;
+    uint32_t wrong = 0;
+    uintptr_t first = 0;
+    auto bad = [&](uintptr_t addr, const char* what) {
+        if (wrong++ == 0) {
+            first = addr;
+            problem = what;
+        }
+    };
+    // take off what was written since the start, put back what was there
+    for (auto& [addr, x] : touched) {
+        auto st = t.slots.find(addr);
+        auto sl = g_slots.find(addr);
+        if (st == t.slots.end()) {
+            if (sl == g_slots.end()) continue;
+            std::erase_if(sl->second.layers, [&](const Layer& l) { return l.owner == owner; });
+            mark(addr, sl->second);
+            continue;
+        }
+        const TxnSlot& ts = st->second;
+        if (sl == g_slots.end()) {  // the slot went (the owner's layer was dropped, nothing else held it): as it was first made
+            Slot s;
+            s.kind = ts.kind, s.id = ts.id, s.field = ts.field, s.sub = ts.sub, s.n = ts.n;
+            std::memcpy(s.original, ts.original, ts.n);
+            if (!rd(addr, s.current, ts.n)) {
+                bad(addr, "not readable");
+                continue;
+            }
+            sl = g_slots.emplace(addr, std::move(s)).first;
+        } else if (sl->second.n != ts.n) {
+            bad(addr, "a slot of another size");
+            continue;
+        }
+        Slot& s = sl->second;
+        std::erase_if(s.layers, [&](const Layer& l) { return l.owner == owner; });
+        s.layers.push_back(ts.layer);
+        std::stable_sort(s.layers.begin(), s.layers.end(), [](const Layer& a, const Layer& b) { return a.seq < b.seq; });
+        mark(addr, s);
+    }
+    std::string werr;
+    store_flush(&werr);
+    if (settle) settle();
+    // read back: the owner's layers are the start's, and memory holds what the layers say
+    for (auto& [addr, x] : touched) {
+        auto st = t.slots.find(addr);
+        auto sl = g_slots.find(addr);
+        const Layer* mine = nullptr;
+        if (sl != g_slots.end())
+            for (const Layer& l : sl->second.layers)
+                if (l.owner == owner) mine = &l;
+        if (st != t.slots.end()) {
+            if (!mine || mine->seq != st->second.layer.seq || std::memcmp(mine->bytes, st->second.layer.bytes, x.n) != 0) {
+                bad(addr, "the owner's layer is not the one it had");
+                continue;
+            }
+        } else if (mine) {
+            bad(addr, "a layer written in the transaction is still there");
+            continue;
+        }
+        const uint8_t* want = sl == g_slots.end() ? x.original : sl->second.layers.empty() ? sl->second.original : sl->second.layers.back().bytes;
+        uint8_t now[kSlotBytes] = {};
+        if (!rd(addr, now, x.n)) bad(addr, "not readable");
+        else if (std::memcmp(now, want, x.n) != 0) bad(addr, "memory does not hold what its layers say");
+    }
+    if (fields) *fields = static_cast<uint32_t>(touched.size());
+    if (wrong == 0) return TxnOutcome::Restored;
+    if (why) {
+        char b[160];
+        std::snprintf(b, sizeof b, "%u of %zu field(s) did not read back after the rollback (first at %p: %s)", wrong, touched.size(),
+                      reinterpret_cast<void*>(first), problem.c_str());
+        *why = b;
+        if (!werr.empty()) *why += "; writing: " + werr;
+    }
+    return TxnOutcome::Unverified;
+}
+
+bool store_txn_open(KilnOwner owner) {
+    std::lock_guard lock(g_mu);
+    for (auto& [tid, t] : g_txns)
+        if (t.owner == owner) return true;
+    return false;
 }
 
 namespace {
