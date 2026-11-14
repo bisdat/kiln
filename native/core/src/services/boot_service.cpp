@@ -635,6 +635,7 @@ std::string build_ir_locked() {
             const std::string id = o["id"].get<std::string>();
             if (out.count(id)) continue;
             o["owner"] = g_owners[id].process;
+            o["required"] = g_owners[id].required;  // the collectors prepare a required participant strictly
             owners.push_back(o);
         }
     // participants the envelope does not list (files only): the collectors still get their process owner
@@ -642,7 +643,8 @@ std::string build_ir_locked() {
         std::set<std::string> listed;
         for (const auto& o : owners) listed.insert(o["id"].get<std::string>());
         for (const auto& [id, o] : g_owners)
-            if (!excluded(o) && !listed.count(id)) owners.push_back({{"id", id}, {"owner", o.process}, {"filesOnly", true}});
+            if (!excluded(o) && !listed.count(id))
+                owners.push_back({{"id", id}, {"owner", o.process}, {"filesOnly", true}, {"required", o.required}});
     }
     ir["owners"] = owners;
     if (!ir.contains("reservations")) ir["reservations"] = json::object();
@@ -788,12 +790,12 @@ KilnResult KILN_CALL b_commit(KilnOwner host, uint64_t generation, KilnBootCommi
             }
         // A boot mod that neither ran OnBoot nor is named by the envelope (a mod of blocks files only; a build whose host
         // stages no envelope) takes part with its files: a collector may refuse it by name, and "required" holds for it.
-        for (const BootMod& m : g_scanned)
-            if (!g_owners.count(m.id)) {
-                Owner& o = g_owners[m.id];
-                o.id = m.id;
-                o.required = m.required;
-            }
+        // Its manifest says whether its boot content is required, also for a participant the envelope names that ran no OnBoot.
+        for (const BootMod& m : g_scanned) {
+            Owner& o = g_owners[m.id];
+            if (o.id.empty()) o.id = m.id;
+            o.required = o.required || m.required;
+        }
         propagate_locked("callback");
         for (auto& [id, o] : g_owners)
             if (!excluded(o)) o.process = reg::owner_create("boot:" + id);
@@ -995,8 +997,10 @@ KilnResult KILN_CALL b_activation_fault(KilnOwner collector, KilnStr mod_id, Kil
             g_exit_code = KILN_BOOT_EXIT_CODE;
             char line[96];
             std::snprintf(line, sizeof line, "boot: the start stops (exit code 0x%04X)", KILN_BOOT_EXIT_CODE);
+            const std::string k(sv(kind)), ky(sv(key));
+            const std::string entry = k.empty() && ky.empty() ? std::string() : k + (k.empty() || ky.empty() ? "" : " ") + ky + ": ";
             last = std::string(line) + ": " + required + "'s boot content is required and could not be applied: " +
-                   (required == id ? std::string() : "dependency " + id + ": ") + std::string(sv(reason)) +
+                   (required == id ? std::string() : "dependency " + id + ": ") + entry + std::string(sv(reason)) +
                    "; state/boot.json lists every boot mod's state and issue";
         }
     }
@@ -1198,7 +1202,10 @@ bool after_clr(bool clr_started, void (*write_state)(void* user, const std::stri
                 if ((it->code & KILN_BOOT_ISSUE_WARNING) || it->code == KILN_BOOT_ISSUE_GENERATION_ABORTED) continue;
                 const auto o = g_owners.find(it->mod);
                 if (required_only && (o == g_owners.end() || !o->second.required)) continue;
-                why = (it->mod.empty() ? std::string() : it->mod + ": ") + it->reason;
+                // the mod, then the entry (kind and file or key), then why: "mod: kind key: reason"
+                const std::string entry = it->kind.empty() && it->key.empty() ? std::string()
+                                          : it->kind + (it->kind.empty() || it->key.empty() ? "" : " ") + it->key + ": ";
+                why = (it->mod.empty() ? std::string() : it->mod + ": ") + entry + it->reason;
             }
         g_exit_code = KILN_BOOT_EXIT_CODE;
     }

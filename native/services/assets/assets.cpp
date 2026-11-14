@@ -236,8 +236,10 @@ bool base64_decode(const std::string& in, std::vector<uint8_t>* out) {
 }
 
 // `doc_in`: a manifest that is not the file (a boot generation's document, chapter 08), its files still the mod's own.
+// `errors`: each entry error, "entries[<i>] (<kind> <file>): <what>" (a boot generation's prepare refuses a required mod for
+// the first one), a cooked file this game's cook did not make and that is therefore not loaded included.
 KilnResult load_manifest(KilnOwner owner, const std::string& mod_dir, std::string* report, const CookTrust* trust_in = nullptr,
-                         const CookedIds* cooked_ids_in = nullptr, const json* doc_in = nullptr) {
+                         const CookedIds* cooked_ids_in = nullptr, const json* doc_in = nullptr, std::vector<std::string>* errors = nullptr) {
     OriginScope origin(KILN_BLOB_ORIGIN_MANIFEST);  // every blob this registers (icons and textures too): catalog provenance
     const fs::path base = fs::path(widen(mod_dir)) / L"assets";
     const fs::path mf = base / L"assets.json";
@@ -253,7 +255,7 @@ KilnResult load_manifest(KilnOwner owner, const std::string& mod_dir, std::strin
         }
         std::vector<uint8_t> text;
         if (!read_file(mf.wstring(), &text, &why)) {
-            *report = why;
+            *report = "assets/assets.json cannot be read: " + why;
             return KILN_ERR_INTERNAL;
         }
         doc = json::parse(text.begin(), text.end(), nullptr, false, true);
@@ -264,6 +266,11 @@ KilnResult load_manifest(KilnOwner owner, const std::string& mod_dir, std::strin
     }
     int icons = 0, res = 0, blobs = 0, tex = 0, errs = 0, icons_server = 0, marked_models = 0, not_here = 0, unmade = 0;
     std::string problems, not_here_names, unmade_names;
+    size_t at = 0;  // the entry being read: entry errors name it
+    std::string at_kind, at_file;
+    auto entry_label = [&] {
+        return "entries[" + std::to_string(at) + "]" + (at_kind.empty() && at_file.empty() ? std::string() : " (" + at_kind + (at_file.empty() ? "" : " " + at_file) + ")");
+    };
     std::optional<CookTrust> own_trust;
     auto trust = [&]() -> const CookTrust& {
         if (trust_in) return *trust_in;
@@ -280,6 +287,8 @@ KilnResult load_manifest(KilnOwner owner, const std::string& mod_dir, std::strin
         int& n = v == CookedVerdict::Refuse ? not_here : unmade;
         std::string& names = v == CookedVerdict::Refuse ? not_here_names : unmade_names;
         if (++n <= 3) names += (names.empty() ? "" : ", ") + name;
+        if (v == CookedVerdict::Refuse && errors)
+            errors->push_back(entry_label() + ": cooked file " + name + " was not cooked by this game's cook, so it is not loaded (cook the mod here)");
         return v == CookedVerdict::LoadUnmade;
     };
     // every file is read from the mod's own assets folder: a link or junction there (to another mod's assets/cooked,
@@ -314,7 +323,13 @@ KilnResult load_manifest(KilnOwner owner, const std::string& mod_dir, std::strin
         ++errs;
         problems += (problems.empty() ? "" : "; ") + m;
         LOGW("assets: %s: %s", mod_dir.c_str(), m.c_str());
+        if (errors) errors->push_back(entry_label() + ": " + m);
     };
+    if (doc.contains("entries") && !doc["entries"].is_array()) {
+        *report = "assets.json: \"entries\" is not an array";
+        if (errors) errors->push_back(*report);
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
     const json entries = doc.value("entries", json::array());
     // What only a game client uses, by what the entry is (a model and its render data): a dedicated server skips it. The manifest is
     // the same file on a server and in a player's game; a server's cook made no model, and one copied from a PC is not served either.
@@ -324,7 +339,7 @@ KilnResult load_manifest(KilnOwner owner, const std::string& mod_dir, std::strin
         for (const json& e : entries) {
             ManifestItem it;
             bool ok;
-            if (e.is_object()) {
+            if (e.is_object()) try {
                 it.kind = e.value("kind", "");
                 it.file = e.value("file", "");
                 it.fixed_hash = it.kind == "blob" && e.contains("hash");
@@ -333,6 +348,8 @@ KilnResult load_manifest(KilnOwner owner, const std::string& mod_dir, std::strin
                     for (const json& p : e.value("patch", json::array()))
                         if (p.is_object()) it.patch_blobs.push_back(p.value("blob", ""));
                 }
+            } catch (const json::exception&) {
+                it = ManifestItem{};  // a malformed entry: the loop below says what is wrong with it
             }
             items.push_back(std::move(it));
         }
@@ -341,8 +358,18 @@ KilnResult load_manifest(KilnOwner owner, const std::string& mod_dir, std::strin
     size_t index = 0;
     for (const json& e : entries) {
         const size_t i = index++;
+        at = i;
+        at_kind.clear();
+        at_file.clear();
+        if (!e.is_object()) {
+            fail("not an object");
+            continue;
+        }
+        try {
         const std::string kind = e.value("kind", "");
         const std::string file = e.value("file", "");
+        at_kind = kind;
+        at_file = file;
         // "side": "client" (soundcook's sounds and cues): a dedicated server has no sound system: not an error
         if (!g_client && e.value("side", "") == "client") {
             ++icons_server;
@@ -452,6 +479,9 @@ KilnResult load_manifest(KilnOwner owner, const std::string& mod_dir, std::strin
             }
         } else {
             fail("unknown kind '" + kind + "'");
+        }
+        } catch (const json::exception& x) {  // a field of the wrong type (e.value on a string where a number belongs)
+            fail(std::string("malformed: ") + x.what());
         }
     }
     char b[256];
@@ -638,12 +668,23 @@ void load_profile_manifests(const kiln::boot::Input* boot = nullptr, BootPlan* p
             LOGI("assets: %s is out of the boot generation: its assets.json is not loaded", id.c_str());
             continue;
         }
+        // a required participant's entry errors refuse it (kiln_boot_collector.hpp, entry_error); another mod's are logged and skipped
+        auto strict = [&](KilnResult rc, const std::string& key, const std::string& rep, const std::vector<std::string>& errs) {
+            if (!boot || id.empty() || (rc == KILN_OK && errs.empty())) return;
+            const std::string first = !errs.empty() ? errs.front() : rep;
+            const std::string more = errs.size() > 1 ? " (and " + std::to_string(errs.size() - 1) + " more entry error(s), kiln.log)" : "";
+            kiln::boot::entry_error(boot, id, "assets", key, "kiln.assets: " + key + ": " + first + more);
+        };
         if (fs::exists(fs::path(widen(dir)) / L"assets" / L"assets.json", ec)) {
             KilnOwner o = g_api->owner_create(KilnStr{dir.c_str(), dir.size()});
             if (plan) plan->owners.push_back(o);
             std::string rep;
-            if (load_manifest(o, dir, &rep, &trust, &cooked_ids) == KILN_OK) ++loaded;
+            std::vector<std::string> errs;
+            const KilnResult rc = load_manifest(o, dir, &rep, &trust, &cooked_ids, nullptr, &errs);
+            if (rc == KILN_OK) ++loaded;
+            else LOGW("assets: %s: assets/assets.json is not loaded: %s", dir.c_str(), rep.c_str());
             if (plan) ++plan->manifests;
+            strict(rc, "assets/assets.json", rep, errs);
         }
         if (!boot || id.empty()) continue;
         for (const auto& d : boot->docs("assets", id)) {  // the mod's OnBoot code: after its own file
@@ -653,9 +694,11 @@ void load_profile_manifests(const kiln::boot::Input* boot = nullptr, BootPlan* p
             const KilnOwner o = it != boot->owner.end() && it->second ? it->second : g_api->owner_create(KilnStr{dir.c_str(), dir.size()});
             if (std::find(plan->owners.begin(), plan->owners.end(), o) == plan->owners.end()) plan->owners.push_back(o);
             std::string rep;
-            if (load_manifest(o, dir, &rep, &trust, &cooked_ids, &d.document) != KILN_OK)
-                LOGW("assets: %s: boot document %s: %s", id.c_str(), d.key.c_str(), rep.c_str());
+            std::vector<std::string> errs;
+            const KilnResult rc = load_manifest(o, dir, &rep, &trust, &cooked_ids, &d.document, &errs);
+            if (rc != KILN_OK) LOGW("assets: %s: boot document %s: %s", id.c_str(), d.key.c_str(), rep.c_str());
             ++plan->documents;
+            strict(rc, d.key, rep, errs);
         }
     }
     if (loaded) LOGI("assets: loaded assets.json for %d mod(s)", loaded);
