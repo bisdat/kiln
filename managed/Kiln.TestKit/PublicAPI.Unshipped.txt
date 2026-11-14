@@ -140,3 +140,37 @@ override Kiln.TestKit.FakeControlCall.GetHashCode() -> int
 override Kiln.TestKit.FakeControlCall.ToString() -> string!
 static Kiln.TestKit.FakeControlCall.operator !=(Kiln.TestKit.FakeControlCall? left, Kiln.TestKit.FakeControlCall? right) -> bool
 static Kiln.TestKit.FakeControlCall.operator ==(Kiln.TestKit.FakeControlCall? left, Kiln.TestKit.FakeControlCall? right) -> bool
+Kiln.TestKit.FakeTerrainWrite
+Kiln.TestKit.FakeTerrainWrite.Box.get -> Kiln.CellBox
+Kiln.TestKit.FakeTerrainWrite.Box.init -> void
+Kiln.TestKit.FakeTerrainWrite.CellsChanged.get -> long
+Kiln.TestKit.FakeTerrainWrite.CellsChanged.init -> void
+Kiln.TestKit.FakeTerrainWrite.Deconstruct(out string! Mod, out string! Label, out Kiln.CellBox Box, out long CellsChanged, out bool Transient, out ulong Step) -> void
+Kiln.TestKit.FakeTerrainWrite.Equals(Kiln.TestKit.FakeTerrainWrite other) -> bool
+Kiln.TestKit.FakeTerrainWrite.FakeTerrainWrite() -> void
+Kiln.TestKit.FakeTerrainWrite.FakeTerrainWrite(string! Mod, string! Label, Kiln.CellBox Box, long CellsChanged, bool Transient, ulong Step) -> void
+Kiln.TestKit.FakeTerrainWrite.Label.get -> string!
+Kiln.TestKit.FakeTerrainWrite.Label.init -> void
+Kiln.TestKit.FakeTerrainWrite.Mod.get -> string!
+Kiln.TestKit.FakeTerrainWrite.Mod.init -> void
+Kiln.TestKit.FakeTerrainWrite.Step.get -> ulong
+Kiln.TestKit.FakeTerrainWrite.Step.init -> void
+Kiln.TestKit.FakeTerrainWrite.Transient.get -> bool
+Kiln.TestKit.FakeTerrainWrite.Transient.init -> void
+Kiln.TestKit.HarnessTerrain
+Kiln.TestKit.HarnessTerrain.AddBase(Kiln.CellBox box) -> void
+Kiln.TestKit.HarnessTerrain.Get(Kiln.CellPos at) -> Kiln.Voxel
+Kiln.TestKit.HarnessTerrain.GroundY.get -> int
+Kiln.TestKit.HarnessTerrain.GroundY.set -> void
+Kiln.TestKit.HarnessTerrain.Loaded.get -> bool
+Kiln.TestKit.HarnessTerrain.Loaded.set -> void
+Kiln.TestKit.HarnessTerrain.Set(Kiln.CellPos at, Kiln.Voxel cell) -> void
+Kiln.TestKit.HarnessTerrain.WorldId.get -> string!
+Kiln.TestKit.HarnessTerrain.WorldId.set -> void
+Kiln.TestKit.HarnessTerrain.Writes.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeTerrainWrite>!
+Kiln.TestKit.KilnHarness.Terrain.get -> Kiln.TestKit.HarnessTerrain!
+override Kiln.TestKit.FakeTerrainWrite.GetHashCode() -> int
+static Kiln.TestKit.FakeTerrainWrite.operator !=(Kiln.TestKit.FakeTerrainWrite left, Kiln.TestKit.FakeTerrainWrite right) -> bool
+static Kiln.TestKit.FakeTerrainWrite.operator ==(Kiln.TestKit.FakeTerrainWrite left, Kiln.TestKit.FakeTerrainWrite right) -> bool
+~override Kiln.TestKit.FakeTerrainWrite.Equals(object obj) -> bool
+~override Kiln.TestKit.FakeTerrainWrite.ToString() -> string
