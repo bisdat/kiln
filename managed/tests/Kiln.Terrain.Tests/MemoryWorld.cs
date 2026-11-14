@@ -29,6 +29,25 @@ internal sealed class MemoryWorld
     public Action? OnLoad;
     public Exception? BookError;
     public DataMatch Match = DataMatch.Exact;
+    /// <summary>The world save's id (null: a new world before its first save) and its file's revision.</summary>
+    public string? SaveId = "6f1c2a3b-0000-4000-8000-00000000000a";
+    public uint Revision = 7;
+    /// <summary>The witness files, by "save id|mod", as JSON (a test may damage one).</summary>
+    public readonly Dictionary<string, string> Witnesses = new();
+    private readonly List<Action<string, uint>> _afterSave = [];
+
+    /// <summary>The game writes the world file: a new revision (a new world gets its id), then what waited for it.</summary>
+    public void SaveWorld(string newWorldId = "6f1c2a3b-0000-4000-8000-00000000000b")
+    {
+        SaveId ??= newWorldId;
+        Revision++;
+        var waiting = _afterSave.ToList();
+        _afterSave.Clear();
+        foreach (var a in waiting) a(SaveId, Revision);
+    }
+
+    public TerrainWitness? Witness(string mod) =>
+        SaveId is not null && Witnesses.TryGetValue(SaveId + "|" + mod, out var json) ? System.Text.Json.JsonSerializer.Deserialize<TerrainWitness>(json) : null;
 
     public Voxel Get(int x, int y, int z) => Edits.TryGetValue((x, y, z), out var v) ? v : y < GroundY ? Voxel.Of(1) : Voxel.Air;
     public void Set(int x, int y, int z, Voxel v) => Edits[(x, y, z)] = v;
@@ -111,5 +130,25 @@ internal sealed class MemoryWorld
         }
 
         public void Save(TerrainBook book) => w.Books[w.WorldId + "|" + mod] = book;
+
+        public (string? Id, uint Revision) SaveIdentity => (w.SaveId, w.Revision);
+        public string WitnessLocation(string saveId) => $"witness {saveId}/{mod}.json";
+
+        public TerrainWitness? ReadWitness(string saveId)
+        {
+            if (!w.Witnesses.TryGetValue(saveId + "|" + mod, out var json)) return null;
+            try
+            {
+                var t = System.Text.Json.JsonSerializer.Deserialize<TerrainWitness>(json) ?? throw new InvalidDataException("empty");
+                t.Validate();
+                return t;
+            }
+            catch (System.Text.Json.JsonException e) { throw new InvalidDataException(e.Message, e); }
+        }
+
+        public void WriteWitness(string saveId, TerrainWitness witness) =>
+            w.Witnesses[saveId + "|" + mod] = System.Text.Json.JsonSerializer.Serialize(witness);
+
+        public void AfterNextSave(Action<string, uint> action) => w._afterSave.Add(action);
     }
 }
