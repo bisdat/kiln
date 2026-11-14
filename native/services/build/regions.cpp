@@ -234,6 +234,11 @@ bool seh_append(HookCtx* c) {
 uint8_t* __fastcall hk_save_regions(uint8_t* result, GameArray* list, uintptr_t zones) {
     uint8_t* r = g_hook.call<uint8_t*>(result, list, zones);
     g_saves_seen.fetch_add(1, std::memory_order_relaxed);
+    // the voxel serializer runs next, from this list: transient cells it may write are on record before it does
+    try {
+        transient_before_save();
+    } catch (...) {
+    }
     if (!r || r[0] != 0 || !list) return r;  // the game failed itself: leave it alone
     std::vector<Box> boxes;
     try {
@@ -328,6 +333,19 @@ void regions_flush() {
     load_locked();
     if (g_dirty) save_locked();
 }
+
+std::string regions_world() { return current_world(); }
+
+bool regions_saves_written(uint64_t* written) {
+    if (!g_saves) return false;
+    KilnSavesStatus st{};
+    st.size = sizeof st;
+    if (g_saves->status(&st) != KILN_OK) return false;
+    *written = st.written;
+    return true;
+}
+
+bool regions_hooked() { return F.persist; }
 
 void regions_status(uint64_t* chunks, uint64_t* saves, uint64_t* boxes) {
     std::lock_guard lock(g_mu);
