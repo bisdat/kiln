@@ -494,7 +494,15 @@ It never lands, because without collision there is no ground. Water does not end
   after: docs/re/creatures.md 1.4, docs/re/rules.md 8); Kiln's flight goes with the character, so a teleport or Kiln's
   own move back ends the flight like the switch does. (The first test build of 0.2.0-dev.27 lost the flight there:
   collision came back after a teleport, but the character kept the flight's state and could not walk or animate.)
-- The player leaving, the world closing, the mod that applied the rule set unloading: rule sets end as always.
+- The player leaving, the world closing, the mod that applied the rule set unloading: rule sets end as always. Kiln
+  cannot move a character that is leaving, so it keeps every NoClip player's last free position in the world's Kiln
+  data (`kiln-rules`, key `noclip-returns`, by the player's character; saved with every world save) for as long as
+  NoClip is on. When such a player is next in the world (a rejoin, a server restart, a hosted world's next load) with
+  their waist or head inside matter, collision waits and the character is moved there, as at a switch-off inside
+  something; back in open space nothing is moved. Either way `PlayerNoClipEndedEvent` comes then, once, with `Reason`
+  `Left` (since 0.2.0-dev.28) and `RestoredTo` when Kiln moved it, and the entry goes. A player who is still joining and
+  whose game has not confirmed the collision hook yet is moved without holding collision off (the move takes two or
+  three steps). Without Kiln.Saves the positions are kept in memory for the server's lifetime only.
 - Opening the glider, a ladder or a wall climb end the flight, and collision with it, while the rule stays on: when the
   character is free of them it lifts off again.
 - A fault in Kiln's own hook body: that step runs with the game's collision (counted in `KilnRulesNoClip.faults`).
@@ -540,8 +548,9 @@ that leaves) is in `managed/tests/Kiln.Rules.Tests/NoClipTrackTests.cs`, with a 
 Not proven yet (the guided client pass, checks `rules.noclip`, `rules.noclip-teleport`, `rules.noclip-descent`,
 `rules.noclip-death`, `rules.noclip-world` and `rules.noclip-disconnect`): everything a real game shows. The same decision in the
 player's prediction on a real connection (hosted single-player under Proton first, then a dedicated server); what the
-camera does inside terrain; what other players see; that a player who disconnects inside the ground is placed safely
-by the game at the next login (the game's own Unstuck in the menu frees a character in any case).
+camera does inside terrain; what other players see; that a player who disconnects or closes the world inside the ground is put back at the next
+login or load (checks `rules.noclip-disconnect`, `rules.noclip-world`; the game's own Unstuck in the menu frees a
+character in any case).
 
 ## The flight
 The game's fly mode puts the player's input into a flying spark and leaves the character sitting where it was
