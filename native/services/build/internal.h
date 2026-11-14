@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // kiln.build internals. Engine facts come from sigdb/symbols/server.d/build.json; docs/re/build.md has the evidence.
 #pragma once
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -146,7 +147,11 @@ bool regions_saves_written(uint64_t* written);  // kiln.saves' count of world fi
 // `addressed` the cells it sets. KILN_OK when the change is on disk; otherwise the write must not commit (detail set).
 KilnResult transient_note_before(const int32_t wo[3], const uint32_t wd[3], const KilnVoxel* old, const KilnVoxel* cur,
                                  const uint8_t* addressed);
-void transient_note_kept(const int32_t wo[3], const uint32_t wd[3], const uint8_t* addressed);  // after a kept commit
+// A kept write (any write without the flag) of the box, BEFORE it commits: the journaled cells it sets leave the journal,
+// on disk first. KILN_OK when done (or nothing journaled is touched); otherwise the write must not commit (detail set).
+KilnResult transient_kept_before(const int32_t wo[3], const uint32_t wd[3], const uint8_t* addressed);
+// That kept write's commit faulted: these block origins (dirty, not committed) get their journal records back.
+void transient_kept_failed(const std::vector<std::array<int32_t, 3>>& uncommitted);
 void transient_pre(uint64_t step);  // Pre: bind to the world, put back an earlier session's cells, compact
 void transient_before_save();       // the game builds its save-region list: compact the journal
 // Commits one 8x8x8 block (cells x fastest) through the engine's store commit; false when the writer faulted.

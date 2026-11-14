@@ -292,8 +292,9 @@ KilnResult vox_write(const KilnBuildWrite* w, KilnBuildResult* result, uint32_t 
         // nothing to commit, but the cells were asked for: a kept write takes them out of the transient journal, a
         // transient one makes them this session's (an earlier session's copy is not put back over them)
         if (!(w->flags & KILN_BUILD_F_DRY_RUN)) {
-            if (!transient) transient_note_kept(wo, wd, addressed.data());
-            else if (KilnResult rc = transient_note_before(wo, wd, old.data(), cur.data(), addressed.data()); rc != KILN_OK)
+            if (!transient) {
+                if (KilnResult rc = transient_kept_before(wo, wd, addressed.data()); rc != KILN_OK) return done(rc);
+            } else if (KilnResult rc = transient_note_before(wo, wd, old.data(), cur.data(), addressed.data()); rc != KILN_OK)
                 return done(rc);
         }
         return done(KILN_OK);
@@ -327,6 +328,10 @@ KilnResult vox_write(const KilnBuildWrite* w, KilnBuildResult* result, uint32_t 
         // the commit then does not write still holds its old value and is not put back.
         if (KilnResult rc = transient_note_before(wo, wd, old.data(), cur.data(), addressed.data()); rc != KILN_OK)
             return done(rc);
+    } else {
+        // a kept write takes journaled cells out of the transient journal, on disk BEFORE it commits, or no commit: a
+        // kept edit of the very value a transient write left must never be put back by the next start
+        if (KilnResult rc = transient_kept_before(wo, wd, addressed.data()); rc != KILN_OK) return done(rc);
     }
 
     // commit the changed blocks only (unchanged blocks would turn generated terrain into stored edits)
@@ -350,6 +355,19 @@ KilnResult vox_write(const KilnBuildWrite* w, KilnBuildResult* result, uint32_t 
                     KB_E("voxel write faulted at block %d,%d,%d after %u block(s); voxel writes are off", borg[0],
                          borg[1], borg[2], blocks);
                     r.blocks_written = blocks;
+                    if (!transient) {
+                        // the blocks not committed still hold their transient cells: their records come back
+                        std::vector<std::array<int32_t, 3>> rest;
+                        size_t seen = 0;
+                        for (uint32_t z2 = 0; z2 < bz; ++z2)
+                            for (uint32_t y2 = 0; y2 < by; ++y2)
+                                for (uint32_t x2 = 0; x2 < bx; ++x2)
+                                    if (dirty[(static_cast<size_t>(z2) * by + y2) * bx + x2] && seen++ >= blocks)
+                                        rest.push_back({wo[0] + static_cast<int32_t>(x2 * kBlock),
+                                                        wo[1] + static_cast<int32_t>(y2 * kBlock),
+                                                        wo[2] + static_cast<int32_t>(z2 * kBlock)});
+                        transient_kept_failed(rest);
+                    }
                     return done(KILN_ERR_INTERNAL);
                 }
                 ++blocks;
@@ -358,7 +376,6 @@ KilnResult vox_write(const KilnBuildWrite* w, KilnBuildResult* result, uint32_t 
     r.blocks_written = blocks;
     r.flags |= KILN_BUILD_R_CHANGED;
     if (!transient) {
-        transient_note_kept(wo, wd, addressed.data());  // kept now: out of the journal
         regions_keep(wo, wd);
         r.flags |= KILN_BUILD_R_KEPT;
     }

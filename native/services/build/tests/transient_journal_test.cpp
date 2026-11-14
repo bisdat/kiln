@@ -253,21 +253,82 @@ void test_decide_rule() {
           "put back only what still holds the transient value; a player's change is kept");
 }
 
-void test_kept_write_and_dirty() {
+bool kept(Journal& j, const Write& w, std::vector<std::pair<Key, Entry>>* undo = nullptr) {
+    std::vector<std::pair<Key, Entry>> tmp;
+    std::string why;
+    return j.note_kept_before(w.wo, w.wd, w.addressed.data(), undo ? undo : &tmp, &why);
+}
+
+// The next start after a crash (no compaction): which cells of block 0 the put-back changes, the store holding `cur`.
+Bits put_back_after_crash(MemStore& s, const std::vector<Cell>& cur) {
+    Journal r(s, logger());
+    r.bind(W);
+    Bits back, gone;
+    for (auto& [k, e] : r.pending_work(32)) {
+        if (k != Key{0, 0, 0}) continue;
+        std::vector<Cell> c = cur;
+        decide(e, c.data(), &back, &gone);
+    }
+    return back;
+}
+
+void test_kept_write_of_the_transient_value_survives_a_crash() {
     MemStore s;
     Journal j(s, logger());
     j.bind(W);
-    check(transient(j, Write(0, 0, 0, 10, 20)), "a transient write");
-    Write kept(0, 0, 0, 4, 30);
+    check(transient(j, Write(0, 0, 0, 10, 20)), "a transient write: cells 0..9 become 20");
+    std::vector<Cell> store(kCells, 1);
+    for (uint32_t i = 0; i < 10; ++i) store[i] = 20;
+
+    // a kept write of exactly the transient value on cells 0..3 while the disk refuses the journal's append
     s.fail_append = true;
-    j.note_kept(kept.wo, kept.wd, kept.addressed.data());
+    const bool accepted = kept(j, Write(0, 0, 0, 4, 20));
     s.fail_append = false;
+    check(!accepted, "a kept write over journaled cells is refused when their removal cannot be on disk first");
+    Bits back = put_back_after_crash(s, store);  // the process dies before any compaction
+    bool kept_cells_reverted = false;
+    for (uint32_t i = 0; i < 4; ++i) kept_cells_reverted |= accepted && back.get(i);
+    check(!kept_cells_reverted, "so a kept edit of the transient value is never put back by the next start");
+
+    // the disk works again: the kept write goes through, the process dies before a compaction
+    Journal j2(s, logger());
+    j2.bind(W);
+    check(kept(j2, Write(0, 0, 0, 4, 20)), "with a working disk the kept write's removal is appended before its commit");
+    back = put_back_after_crash(s, store);
+    check(!back.get(0) && !back.get(3) && back.get(4) && back.get(9),
+          "after a crash the put-back keeps the kept cells (0..3) and puts back the transient rest (4..9)");
+}
+
+void test_ordinary_kept_writes_pay_nothing() {
+    MemStore s;
+    Journal j(s, logger());
+    j.bind(W);
+    check(transient(j, Write(0, 0, 0, 4, 20)), "a transient block");
+    const size_t log_before = s.files[W + ".log"].size();
+    s.fail_append = true;
+    check(kept(j, Write(64, 0, 0, 8, 30)), "a kept write elsewhere goes through even while the disk refuses (nothing journaled there)");
+    Write miss(0, 0, 0, 0, 30);
+    miss.addressed[100] = 1;  // the transient block, but a cell it never wrote
+    check(kept(j, miss), "and so does one in a journaled block that sets no journaled cell");
+    s.fail_append = false;
+    check(s.files[W + ".log"].size() == log_before, "neither wrote anything");
+}
+
+void test_faulted_kept_commit_restores_records() {
+    MemStore s;
+    Journal j(s, logger());
+    j.bind(W);
+    check(transient(j, Write(0, 0, 0, 6, 20)) && transient(j, Write(8, 0, 0, 6, 20)), "two transient blocks");
+    Write both(0, 0, 0, 0, 30);
+    both.wd[0] = 16;
+    both.old.assign(16 * 64, 1), both.cur.assign(16 * 64, 1), both.addressed.assign(16 * 64, 0);
+    for (uint32_t i = 0; i < 16 * 64; ++i) both.addressed[i] = 1;
+    std::vector<std::pair<Key, Entry>> undo;
+    check(kept(j, both, &undo) && undo.size() == 2 && j.entries().empty(), "a kept write over both takes them out (on disk first)");
+    j.undo_kept(undo, {Key{8, 0, 0}});  // its commit faulted after block 0: block 8 still holds its transient cells
     uint32_t cells = 0;
-    journaled(s, {0, 0, 0}, &cells);
-    check(cells == 10, "a kept write whose record failed: the disk says more (a superset, harmless)");
-    check(j.maintain(), "the next compaction writes the truth");
-    journaled(s, {0, 0, 0}, &cells);
-    check(cells == 6, "the kept cells left the journal on disk");
+    check(!journaled(s, {0, 0, 0}) && journaled(s, {8, 0, 0}, &cells) && cells == 6,
+          "the uncommitted block's records come back on disk; the committed block's stay out");
 }
 
 void test_bad_snapshot_aside() {
@@ -296,7 +357,9 @@ int main() {
     test_torn_append();
     test_failed_put_back_commit_stays_pending();
     test_decide_rule();
-    test_kept_write_and_dirty();
+    test_kept_write_of_the_transient_value_survives_a_crash();
+    test_ordinary_kept_writes_pay_nothing();
+    test_faulted_kept_commit_restores_records();
     test_bad_snapshot_aside();
     std::printf("transient journal: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

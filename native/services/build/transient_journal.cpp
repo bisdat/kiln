@@ -296,9 +296,12 @@ bool Journal::note_transient(const int32_t wo[3], const uint32_t wd[3], const Ce
     return true;
 }
 
-void Journal::note_kept(const int32_t wo[3], const uint32_t wd[3], const uint8_t* addressed) {
-    if (j_.empty()) return;
+bool Journal::note_kept_before(const int32_t wo[3], const uint32_t wd[3], const uint8_t* addressed,
+                               std::vector<std::pair<Key, Entry>>* undo, std::string* why) {
+    undo->clear();
+    if (j_.empty()) return true;
     const uint32_t bx = wd[0] / kBlock, by = wd[1] / kBlock, bz = wd[2] / kBlock;
+    std::map<Key, Entry> next;
     std::vector<Key> keys;
     for (uint32_t gz = 0; gz < bz; ++gz)
         for (uint32_t gy = 0; gy < by; ++gy)
@@ -306,8 +309,8 @@ void Journal::note_kept(const int32_t wo[3], const uint32_t wd[3], const uint8_t
                 const Key k{wo[0] + static_cast<int32_t>(gx * kBlock), wo[1] + static_cast<int32_t>(gy * kBlock),
                             wo[2] + static_cast<int32_t>(gz * kBlock)};
                 auto it = j_.find(k);
-                if (it == j_.end()) continue;
-                Entry& e = it->second;
+                if (it == j_.end()) continue;  // the ordinary kept write: nothing journaled here
+                Entry e = it->second;
                 bool changed = false;
                 for (uint32_t z = 0; z < kBlock; ++z)
                     for (uint32_t y = 0; y < kBlock; ++y)
@@ -319,12 +322,46 @@ void Journal::note_kept(const int32_t wo[3], const uint32_t wd[3], const uint8_t
                             e.mask.clear(i), e.pending.clear(i), e.restored.clear(i);
                             changed = true;
                         }
-                if (changed) keys.push_back(k);
+                if (!changed) continue;
+                next[k] = e;
+                keys.push_back(k);
             }
-    if (keys.empty()) return;
-    if (!append_states(keys, j_)) dirty_ = true;
-    for (const Key& k : keys)
-        if (auto it = j_.find(k); it != j_.end() && !it->second.mask.any()) j_.erase(it);
+    if (keys.empty()) return true;
+    if (!durable_ && !compact()) {
+        *why = "the transient journal cannot be written (see the error above), and this edit sets journaled cells";
+        return false;
+    }
+    if (!append_states(keys, next)) {
+        *why = "the transient journal could not be written (is the disk full?), and this edit sets journaled cells";
+        return false;
+    }
+    for (const Key& k : keys) {
+        undo->emplace_back(k, j_.at(k));
+        if (next[k].mask.any()) j_[k] = next[k];
+        else j_.erase(k);
+    }
+    count_pending();
+    return true;
+}
+
+void Journal::undo_kept(const std::vector<std::pair<Key, Entry>>& undo, const std::vector<Key>& keys) {
+    std::vector<Key> back;
+    std::map<Key, Entry> from;
+    for (const auto& [k, e] : undo) {
+        bool want = false;
+        for (const Key& w : keys) want |= w == k;
+        if (!want) continue;
+        j_[k] = e;
+        from[k] = e;
+        back.push_back(k);
+    }
+    if (back.empty()) return;
+    if (!append_states(back, from)) {
+        // memory has the records again and the next compaction writes them; until then those cells (still transient,
+        // since their commit never happened) have no record on disk, and appends stay off until that compaction
+        dirty_ = true;
+        log_(2, "transient edits: a faulted kept write's blocks could not be put back on record; the next compaction writes them");
+    }
     count_pending();
 }
 
