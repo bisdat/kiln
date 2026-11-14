@@ -136,7 +136,7 @@ public sealed class BootInputsTests : ModsFixture
             // the same values, written again by a tool: other white space, a comment, CRLF, a byte-order mark
             File.WriteAllText(Path.Combine(dir, "blocks", "cold.json"), "﻿{\r\n  // the cold\r\n  \"statuses\": {\r\n    \"cold\": { \"name\": \"Cold\", \"seconds\": 4 },\r\n  }\r\n}\r\n");
             File.WriteAllText(Path.Combine(dir, Manifest.FileName), Boot.Replace(", ", ",\n  "));
-            // the launcher's markers, a temporary file, the mod's data folder, a folder the boot phase does not read
+            // the launcher's markers, a temporary file, the mod's data folder, files the deploy leaves out
             File.WriteAllText(Path.Combine(dir, ".kiln-source.json"), "{}");
             File.WriteAllText(Path.Combine(dir, "blocks", ".cold.json.swp"), "x");
             File.WriteAllText(Path.Combine(dir, "blocks", "cold.json.kiln-tmp"), "x");
@@ -145,8 +145,8 @@ public sealed class BootInputsTests : ModsFixture
             // Kiln's shared assemblies beside the mod (the loader takes them from the host; a deploy leaves them out)
             File.WriteAllBytes(Path.Combine(dir, "Kiln.Api.dll"), [7]);
             File.WriteAllBytes(Path.Combine(dir, "Kiln.Host.dll"), [7]);
-            Directory.CreateDirectory(Path.Combine(dir, "docs"));
-            File.WriteAllText(Path.Combine(dir, "docs", "readme.txt"), "x");
+            File.WriteAllText(Path.Combine(dir, "Kiln.Host.pdb"), "x");
+            File.WriteAllText(Path.Combine(dir, "Helper.deps.json"), "{}");
             Assert.Null(mods.BootLoadRefusal(Manifest.Read(dir), dir));
 
             // a value that changed in the manifest is a change (its key order too: kept, to fail closed)
@@ -154,6 +154,45 @@ public sealed class BootInputsTests : ModsFixture
             Assert.Contains("kiln.mod.json", mods.BootLoadRefusal(Manifest.Read(dir), dir));
         }
         finally { Reset(); }
+    }
+
+    [Fact]
+    public void BOOT_INPUTS_any_other_file_of_the_mod_folder_counts_too_as_OnBoot_may_read_it()
+    {
+        var dir = Mod();
+        try
+        {
+            using var mods = Start(new FakeHost());
+            Directory.CreateDirectory(Path.Combine(dir, "tables"));
+            File.WriteAllText(Path.Combine(dir, "tables", "odds.csv"), "a,1");
+            Assert.Contains("tables/odds.csv added", mods.BootLoadRefusal(Manifest.Read(dir), dir));
+            File.Delete(Path.Combine(dir, "tables", "odds.csv"));
+            File.WriteAllText(Path.Combine(dir, "readme.txt"), "x");
+            Assert.Contains("readme.txt added", mods.BootLoadRefusal(Manifest.Read(dir), dir));
+            File.Delete(Path.Combine(dir, "readme.txt"));
+            Assert.Null(mods.BootLoadRefusal(Manifest.Read(dir), dir));
+        }
+        finally { Reset(); }
+    }
+
+    [Fact]
+    public void A_second_reading_hashes_only_what_changed()
+    {
+        var dir = Mod();
+        var old = DateTime.UtcNow.AddMinutes(-5);
+        foreach (var f in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories)) File.SetLastWriteTimeUtc(f, old);
+        BootInputs.ForgetDigests();
+        var first = BootInputs.Read(dir);
+        Assert.Equal(first.Cost.Files, first.Cost.Hashed);
+        var second = BootInputs.Read(dir);
+        Assert.Equal((first.Hash, 0), (second.Hash, second.Cost.Hashed));
+        // an edit (a new write time) is hashed again; a file written just now is never taken from the cache
+        File.WriteAllText(Path.Combine(dir, "blocks", "cold.json"), """{ "statuses": { "cold": { "name": "Cold", "seconds": 7 } } }""");
+        var third = BootInputs.Read(dir);
+        Assert.Equal(1, third.Cost.Hashed);
+        Assert.Equal(["blocks/cold.json changed"], third.Differences(first));
+        File.WriteAllText(Path.Combine(dir, "blocks", "cold.json"), """{ "statuses": { "cold": { "name": "Cold", "seconds": 8 } } }""");
+        Assert.Equal(["blocks/cold.json changed"], BootInputs.Read(dir).Differences(third));  // same size, within the time stamp's grain
     }
 
     [Fact]
