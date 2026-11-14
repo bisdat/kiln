@@ -159,6 +159,7 @@ internal static class TransformScale
 
     internal static readonly ServiceCapRows Rows = new("kiln.world transform scale", Report);
     private static Layout? _layout;
+    private static IDisposable? _waiting;  // while the row is Pending: reported again every 25 steps until it is decided
 
     internal static bool Start()
     {
@@ -171,17 +172,30 @@ internal static class TransformScale
     internal static Layout? CurrentLayout => _layout;
 
     // The row: decided once kiln.types has the type table (static for the process: a build's layout does not change).
-    private static void Report()
+    private static unsafe void Report()
     {
         // no side check: the write runs where the tracked writes run (a server world: a dedicated server or a hosting game;
         // world.tracked_writes says when there is none)
         _layout = null;
-        if (!GameTypes.Available)
+        if (GameTypes.Table == null)
         {
+            Interlocked.Exchange(ref _waiting, null)?.Dispose();
             ServiceCaps.Report(Capability, CapabilityState.Unavailable, CapabilityReason.ServiceMissing,
                 "needs kiln.types: the scale's place is read from the game's type table");
             return;
         }
+        if (!GameTypes.Available)
+        {
+            // kiln.types is there, the game has not filled its type table yet: decided as soon as it has
+            ServiceCaps.Report(Capability, CapabilityState.Pending, CapabilityReason.Session,
+                "waits for the game's type table (kiln.types has no types yet): the scale's place is read from it");
+            _waiting ??= ServiceTick.Add("kiln.world transform scale (waiting for the type table)", static (in TickInfo t) =>
+            {
+                if (t.Step % 25 == 0) Rows.Refresh();
+            });
+            return;
+        }
+        Interlocked.Exchange(ref _waiting, null)?.Dispose();
         var (layout, why) = Resolve(GameTypes.Find(QualifiedComponent) is { } t ? NodeOf(t) : null);
         _layout = layout;
         if (layout is null) ServiceCaps.Report(Capability, CapabilityState.Unavailable, CapabilityReason.SymbolMissing, why);
