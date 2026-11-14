@@ -18,6 +18,7 @@ public sealed partial class ClientPassMod
     // PlayerInput: the digital input's held bits (rules/input.mask + 8 on 26430253); Sneak 55
     private const int NoClipHeldBits = 0x3b0;
     private const int NoClipSneakBit = 55;
+    private const string InSneakModeNote = ", in the game's sneak mode";
 
     [ClientCheck("rules.noclip-descent", "NoClip: sneak sinks every time, also in the game's sneak mode", Area = "Creative mode",
         Since = Dev28, Needs = ClientCheckNeeds.Any, Order = 152)]
@@ -59,7 +60,7 @@ public sealed partial class ClientPassMod
         c.Expect(windows.Count >= 4, $"you held sneak at least four times for a quarter second or more ({windows.Count} times)");
         var sank = windows.Count(w => w.Drop > 0.5);
         c.Expect(windows.Count > 0 && sank == windows.Count, $"every hold of sneak sank the server's character ({sank} of {windows.Count})",
-            string.Join("; ", windows.Select(w => $"{w.Steps} steps: {w.Drop:0.0} m down{(w.SneakMode ? ", in the game's sneak mode" : "")}")));
+            string.Join("; ", windows.Select(w => $"{w.Steps} steps: {w.Drop:0.0} m down" + (w.SneakMode ? InSneakModeNote : ""))));
         // Whether the game's sneak mode turns on in Kiln's flight at all: the cause the fix answers (the crouched rows).
         c.Expect(true, sneakModeSteps > 0
             ? $"the game's sneak mode was on during NoClip's flight for {sneakModeSteps} steps (the case of issue #25)"
