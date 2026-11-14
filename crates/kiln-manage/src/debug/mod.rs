@@ -7,6 +7,8 @@
 //! | [`identity`] | the core's descriptor, the checked tuple `DebugIdentity`, `DebugTarget`, `DebugSessionState` |
 //! | [`resolver`] | descriptors + the Windows side + the host side -> one target; the check before an adapter starts |
 //! | [`windows`] | native Windows: the Windows side in this process (`NativeSource`), the adapter's console and job handling |
+//! | [`proton`] | a client under Proton: the runner every game process of the prefix agrees on (`/proc`, runner context only) |
+//! | [`runner_env`] | the allowlisted Wine/Proton environment taken from a runner context (never `LD_PRELOAD`) |
 //!
 //! The session file (`<install>/kiln/state/debug/session.json`) says that a proxy is attached; `kiln reload` refuses
 //! while it does (a reload under an attached debugger leaves breakpoints on a dead copy, and such sessions have
@@ -16,6 +18,8 @@ pub mod errors;
 pub mod identity;
 pub mod resolver;
 pub mod windows;
+pub mod proton;
+pub mod runner_env;
 
 pub use errors::{DebugCode, DebugError};
 pub use identity::{

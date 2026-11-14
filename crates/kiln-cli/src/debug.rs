@@ -51,20 +51,35 @@ const WATCH_EVERY: Duration = Duration::from_secs(2);
 /// `--max-pause-ms` bounds (chapter 12a §4 step 8) and the default where a watchdog is on by default (clients).
 const PAUSE_MIN_MS: u64 = 100;
 const PAUSE_MAX_MS: u64 = 60_000;
-#[allow(dead_code)] // the client default (12a S4)
 const PAUSE_DEFAULT_MS: u64 = 5000;
 
-#[derive(clap::Args)]
+#[derive(clap::Args, Default)]
 pub struct DebugArgs {
     /// Server folder, lab name or server instance id (default: $KILN_SERVER, else the current project's KilnServer).
-    #[arg(long)]
+    #[arg(long, conflicts_with = "client")]
     pub server: Option<String>,
+    /// A game client: its install id (as the launcher and kilnctl list it) or its folder. Started with developer
+    /// debugging on; attaching needs --allow-client-pause, --observe needs nothing.
+    #[arg(long, value_name = "INSTALL")]
+    pub client: Option<String>,
+    /// Consent to a debugger that stops the game client at every breakpoint (it can freeze or drop its connection).
+    #[arg(long, requires = "client")]
+    pub allow_client_pause: bool,
+    /// The client's Kiln log and counters as they come, without a debugger: nothing pauses the game.
+    #[arg(long, requires = "client", conflicts_with_all = ["dap", "allow_client_pause", "max_pause_ms"])]
+    pub observe: bool,
     /// Speak the Debug Adapter Protocol on stdin/stdout (for editors); forces terminateDebuggee=false.
     #[arg(long)]
     pub dap: bool,
-    /// Continue a stopped debuggee after this many milliseconds (100 to 60000; best effort). Servers: off unless given.
+    /// Continue a stopped debuggee after this many milliseconds (100 to 60000; best effort). Clients: 5000 unless
+    /// given; servers: off unless given.
     #[arg(long, value_name = "MS")]
     pub max_pause_ms: Option<u64>,
+}
+
+thread_local! {
+    /// Adapters started by [`launch`] on this thread (the only place one starts): what the tests count.
+    static ADAPTER_STARTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 fn cli_error(e: DebugError) -> anyhow::Error {
@@ -99,6 +114,10 @@ struct Target {
     netcoredbg: PathBuf,
     resolved: Resolved,
     max_pause_ms: Option<u64>,
+    /// The consent given (`--allow-client-pause`); checked again by every permit.
+    allow_client_pause: bool,
+    /// A client's runner environment (the allowlist taken from the game's own runner context); None: the server's.
+    runner_env: Option<Vec<(String, String)>>,
 }
 
 impl Target {
@@ -106,7 +125,14 @@ impl Target {
         let mut e = BTreeMap::new();
         // netcoredbg's bundled runtime looks for ICU and aborts: "Cannot get symbol u_charsToUChars from libicuuc"
         e.insert("DOTNET_SYSTEM_GLOBALIZATION_INVARIANT", "1".to_string());
-        if let Some(p) = &self.prefix {
+        if let Some(env) = &self.runner_env {
+            for (k, v) in env {
+                let names = kiln_manage::debug::runner_env::ALLOWED.iter().copied().chain(["WINEDEBUG"]);
+                if let Some(name) = names.into_iter().find(|a| *a == k.as_str()) {
+                    e.insert(name, v.clone());
+                }
+            }
+        } else if let Some(p) = &self.prefix {
             e.insert("WINEPREFIX", p.display().to_string());
             e.insert("WINEDEBUG", "-all".to_string());
             e.insert("WINEDLLOVERRIDES", kiln_manage::wine::DLL_OVERRIDES.to_string());
@@ -309,6 +335,7 @@ fn launch<A>(
 ) -> std::result::Result<(AttachPermit, A), DebugError> {
     gc();
     let permit = resolver::permit(r, allow_client_pause, host, source, challenge)?;
+    ADAPTER_STARTS.with(|n| n.set(n.get() + 1));
     let adapter = spawn(&permit).map_err(|e| DebugError::new(DebugCode::ToolMissing, format!("cannot start the debugger: {e}")))?;
     Ok((permit, adapter))
 }
@@ -326,8 +353,16 @@ fn max_pause(a: &DebugArgs, kind: TargetKind) -> Result<Option<u64>> {
     }
 }
 
-/// `--server`: the guard, the server lookup, the prefix and the runner, then the proven target.
+/// `--client` or `--server`.
 fn plan(a: &DebugArgs) -> Result<Planned> {
+    match &a.client {
+        Some(c) => plan_client(a, c),
+        None => plan_server(a),
+    }
+}
+
+/// `--server`: the guard, the server lookup, the prefix and the runner, then the proven target.
+fn plan_server(a: &DebugArgs) -> Result<Planned> {
     // before anything looks at the folder or lists instances
     if let Some(raw) = a.server.as_deref().map(str::to_string).or_else(|| std::env::var("KILN_SERVER").ok()).filter(|v| !v.is_empty()) {
         resolver::server_steam_guard(&kiln_manage::util::expand(&raw, &kiln_manage::util::home())).map_err(cli_error)?;
@@ -383,11 +418,196 @@ fn plan(a: &DebugArgs) -> Result<Planned> {
             return Err(cli_error(e));
         }
     };
-    let target = Target { kind, install: s.dir.clone(), via: s.via, lab: s.lab.clone(), wine, prefix, netcoredbg, resolved, max_pause_ms };
+    let target = Target {
+        kind,
+        install: s.dir.clone(),
+        via: s.via,
+        lab: s.lab.clone(),
+        wine,
+        prefix,
+        netcoredbg,
+        resolved,
+        max_pause_ms,
+        allow_client_pause: false,
+        runner_env: None,
+    };
     Ok(Planned { target, host: Box::new(host), source })
 }
 
+/// The host side of a game client: its install, and under Proton the runner every game process of its prefix agrees
+/// on (kiln_manage::debug::proton), read again at every check. The Linux PID is display only.
+struct ClientHost {
+    spec: HostSpec,
+    proc_root: PathBuf,
+    install_dir: PathBuf,
+    exe: String,
+}
+
+impl HostSide for ClientHost {
+    fn spec(&self) -> &HostSpec {
+        &self.spec
+    }
+    fn facts(&mut self) -> std::result::Result<HostFacts, DebugError> {
+        let Some(prefix) = self.spec.prefix.clone() else { return Ok(HostFacts::default()) };
+        let r = kiln_manage::debug::proton::find_runner(&self.proc_root, &self.install_dir, &self.exe, &prefix)?;
+        let first = &r.contexts[0];
+        Ok(HostFacts { prefix_identity: Some(r.prefix.clone()), runner_sha256: Some(r.runner_sha256.clone()), runner_context: Some(first.birth.clone()), host_pid: Some(first.pid) })
+    }
+}
+
+/// The client install `sel` names: a folder, else an install id the launcher records or Steam's libraries show.
+fn find_client(sel: &str) -> Result<kiln_manage::game::GameInstall> {
+    let p = kiln_manage::util::expand(sel, &kiln_manage::util::home());
+    let found = if p.is_dir() {
+        Some(kiln_manage::game::inspect(&p)?)
+    } else {
+        let mut all = kiln_manage::paths::DataDirs::locate().ok().and_then(|d| kiln_manage::game::known(&d).ok()).unwrap_or_default();
+        all.extend(kiln_manage::game::detect().unwrap_or_default());
+        all.into_iter().find(|g| g.id == sel)
+    };
+    match found {
+        Some(g) if g.kind == kiln_manage::game::GameKind::Client => Ok(g),
+        Some(g) => Err(CliError::new("unsupported", format!("{} is a server install: use --server", g.path.display())).into()),
+        None => Err(CliError::new("not_found", format!("no game install '{sel}' (an install id from the launcher or kilnctl, or a game folder)")).into()),
+    }
+}
+
+/// A client's host side and how its Windows side is reached (native Windows: in-process; Proton: its runner).
+fn client_sides(g: &kiln_manage::game::GameInstall, proc_root: &Path) -> std::result::Result<(ClientHost, Option<RunnerLaunch>), DebugError> {
+    let prefix = match g.platform {
+        kiln_manage::game::Platform::Windows => None,
+        _ => Some(g.prefix.clone().ok_or_else(|| DebugError::new(DebugCode::NotFound, format!("{} has no Wine/Proton prefix on record", g.path.display())))?),
+    };
+    let launch = match &prefix {
+        Some(p) => {
+            let r = kiln_manage::debug::proton::find_runner(proc_root, &g.path, &g.exe, p)?;
+            Some(RunnerLaunch { wine: r.runner, env: kiln_manage::debug::runner_env::launch_env(&r.env), cwd: r.prefix.path })
+        }
+        None => None,
+    };
+    let spec = HostSpec {
+        kind: TargetKind::Client,
+        install_id: g.id.clone(),
+        state_dir: g.path.join("kiln/state"),
+        install_exe: g.path.join(&g.exe),
+        prefix,
+    };
+    Ok((ClientHost { spec, proc_root: proc_root.to_path_buf(), install_dir: g.path.clone(), exe: g.exe.clone() }, launch))
+}
+
+/// `--client`: consent first (nothing is looked at without it), then the install, its runner and the proven target.
+/// The server's Steam guard does not apply: a client is chosen explicitly, and attached only with consent.
+fn plan_client(a: &DebugArgs, sel: &str) -> Result<Planned> {
+    resolver::consent_gate(TargetKind::Client, a.allow_client_pause).map_err(cli_error)?;
+    let kind = TargetKind::Client;
+    let max_pause_ms = max_pause(a, kind)?;
+    let g = find_client(sel)?;
+    let netcoredbg = netcoredbg()?;
+    let (mut host, launch) = client_sides(&g, Path::new("/proc")).map_err(cli_error)?;
+    let mut source = open_source(launch.as_ref()).map_err(cli_error)?;
+    let resolved = match prepare(kind, a.allow_client_pause, &mut host, source.as_mut(), &mut resolver::new_challenge) {
+        Ok(r) => r,
+        Err(e) => {
+            source.close();
+            return Err(cli_error(e));
+        }
+    };
+    let target = Target {
+        kind,
+        install: g.path.clone(),
+        via: "install",
+        lab: None,
+        wine: launch.as_ref().map(|l| l.wine.clone()),
+        prefix: host.spec.prefix.clone(),
+        netcoredbg,
+        resolved,
+        max_pause_ms,
+        allow_client_pause: a.allow_client_pause,
+        runner_env: launch.map(|l| l.env),
+    };
+    Ok(Planned { target, host: Box::new(host), source })
+}
+
+/// `--client <install> --observe`: the client's Kiln log (its counters are log lines) and its session mode, read
+/// through the helper when the descriptor can be proven. No consent is needed because nothing can pause: no adapter
+/// is started on this path, and none can be (it never reaches [`launch`]).
+fn observe(a: &DebugArgs, json: bool) -> Result<i32> {
+    let g = find_client(a.client.as_deref().unwrap_or_default())?;
+    let sides = client_sides(&g, Path::new("/proc"));
+    let mut watch = observe_target(sides, json);
+    crate::logs::observe(&g.path.join("kiln/logs/kiln.log"), 20, json, &mut std::io::stdout(), &mut watch, None)?;
+    Ok(0)
+}
+
+/// The observed target (best effort: logs are shown whether or not it can be proven), and a poll that reports its
+/// session mode when it changes.
+fn observe_target(
+    sides: std::result::Result<(ClientHost, Option<RunnerLaunch>), DebugError>,
+    json: bool,
+) -> Box<dyn FnMut() -> Option<String>> {
+    let header = move |text: String, v: Value| if json { v.to_string() } else { format!("[kiln debug] {text}") };
+    let proven = sides.and_then(|(mut host, launch)| {
+        let mut source = open_source(launch.as_ref())?;
+        let r = resolver::resolve(&mut host, source.as_mut(), &mut resolver::new_challenge)?;
+        Ok((r, source))
+    });
+    observe_poll(proven, header)
+}
+
+fn observe_poll(
+    proven: std::result::Result<(Resolved, Box<dyn ProcessSource + Send>), DebugError>,
+    header: impl Fn(String, Value) -> String + 'static,
+) -> Box<dyn FnMut() -> Option<String>> {
+    let mut first = Some(match &proven {
+        Ok((r, _)) => header(
+            format!(
+                "observing PID {} (created {}), session mode {}, .NET {}: no debugger, nothing pauses the game",
+                r.target.identity.windows_pid,
+                r.target.identity.creation_time_100ns,
+                json!(r.target.session_mode).as_str().unwrap_or("unknown"),
+                if r.target.managed_ready { "running" } else { "not running" }
+            ),
+            json!({ "event": "target", "target": r.target }),
+        ),
+        Err(e) => header(format!("observing the log only: {} ({})", e.message, e.code), json!({ "event": "target", "error": e })),
+    });
+    let mut state = proven.ok();
+    let mut mode = state.as_ref().map(|(r, _)| r.target.session_mode);
+    let mut last = std::time::Instant::now();
+    Box::new(move || {
+        if let Some(f) = first.take() {
+            return Some(f);
+        }
+        let (r, source) = state.as_mut()?;
+        if last.elapsed() < WATCH_EVERY {
+            return None;
+        }
+        last = std::time::Instant::now();
+        match resolver::watch(r, source.as_mut(), &mut resolver::new_challenge) {
+            WatchOutcome::Same(m) if Some(m) != mode => {
+                mode = Some(m);
+                let name = json!(m).as_str().unwrap_or("unknown").to_string();
+                Some(header(format!("session mode: {name}"), json!({ "event": "sessionMode", "sessionMode": name })))
+            }
+            WatchOutcome::Same(_) => None,
+            WatchOutcome::Gone => {
+                source.close();
+                state = None;
+                Some(header("the game has exited".into(), json!({ "event": "exited" })))
+            }
+            WatchOutcome::Changed(why) => {
+                source.close();
+                state = None;
+                Some(header(format!("the game no longer answers as the observed process ({why})"), json!({ "event": "identityChanged", "reason": why })))
+            }
+        }
+    })
+}
+
 pub fn run(a: DebugArgs, json: bool) -> Result<i32> {
+    if a.observe {
+        return observe(&a, json);
+    }
     if a.dap {
         return match plan(&a) {
             Ok(p) => proxy(p),
@@ -402,7 +622,7 @@ pub fn run(a: DebugArgs, json: bool) -> Result<i32> {
     let r = &t.resolved;
     if json {
         out::print_json(&json!({
-            "ok": true, "kind": t.kind, "server": t.install, "install": t.install, "via": t.via, "lab": t.lab,
+            "ok": true, "kind": t.kind, "server": (t.kind == TargetKind::Server).then_some(&t.install), "install": t.install, "via": t.via, "lab": t.lab,
             "target": r.target, "pid": t.windows_pid(), "hostPid": r.target.host_pid,
             "wine": t.wine, "prefix": t.prefix, "netcoredbg": t.netcoredbg, "env": env, "command": argv,
             "maxPauseMs": t.max_pause_ms, "descriptor": r.descriptor_path, "notes": r.notes,
@@ -420,8 +640,19 @@ pub fn run(a: DebugArgs, json: bool) -> Result<i32> {
         println!("prefix    {}", p.display());
     }
     println!("debugger  {}", argv.join(" "));
-    println!("\nEditors: run `kiln debug --server <server> --dap` as the debug adapter. Use only the DAP interpreter:");
-    println!("a console session that ends while the server is paused can take the server down.");
+    if let Some(ms) = t.max_pause_ms {
+        println!("pauses    continued by kiln debug after {ms} ms (best effort)");
+    }
+    match t.kind {
+        TargetKind::Server => {
+            println!("\nEditors: run `kiln debug --server <server> --dap` as the debug adapter. Use only the DAP interpreter:");
+            println!("a console session that ends while the server is paused can take the server down.");
+        }
+        TargetKind::Client => {
+            println!("\nEditors: run `kiln debug --client <install> --allow-client-pause --dap` as the debug adapter. Every breakpoint");
+            println!("stops the game; a stopped game can freeze or lose its connection. `--observe` shows logs without a debugger.");
+        }
+    }
     Ok(0)
 }
 
@@ -798,7 +1029,7 @@ fn proxy(p: Planned) -> Result<i32> {
     let launched = {
         let mut h = host.lock().unwrap();
         let mut s = source.lock().unwrap();
-        launch(&t.resolved, false, h.as_mut(), s.as_mut(), &mut resolver::new_challenge, gc, spawn)
+        launch(&t.resolved, t.allow_client_pause, h.as_mut(), s.as_mut(), &mut resolver::new_challenge, gc, spawn)
     };
     let (permit, mut child) = match launched {
         Ok(x) => x,
@@ -1153,7 +1384,7 @@ fn refuse_all(e: &anyhow::Error) -> Result<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kiln_manage::debug::Descriptor;
+    use kiln_manage::debug::{Descriptor, PrefixIdentity};
     use kiln_manage::debug::resolver::fake::{FakeHost, FakeProc, FakeSource, counter};
 
     fn req(command: &str, arguments: Value) -> Value {
@@ -1288,7 +1519,7 @@ mod tests {
 
     #[test]
     fn max_pause_bounds() {
-        let a = |ms: Option<u64>| DebugArgs { server: None, dap: false, max_pause_ms: ms };
+        let a = |ms: Option<u64>| DebugArgs { max_pause_ms: ms, ..Default::default() };
         assert_eq!(max_pause(&a(None), TargetKind::Server).unwrap(), None);
         assert_eq!(max_pause(&a(None), TargetKind::Client).unwrap(), Some(5000));
         assert_eq!(max_pause(&a(Some(100)), TargetKind::Server).unwrap(), Some(100));
@@ -1474,7 +1705,7 @@ mod tests {
             }
         }
         // the Steam guard refuses before any lookup (nothing exists at that path, and nothing is looked at)
-        let steam = DebugArgs { server: Some("/nowhere/SteamLibrary/steamapps/common/EnshroudedServer".into()), dap: false, max_pause_ms: None };
+        let steam = DebugArgs { server: Some("/nowhere/SteamLibrary/steamapps/common/EnshroudedServer".into()), ..Default::default() };
         let e = plan(&steam).err().expect("a Steam server is refused");
         assert_eq!(code_of(&e).0, "refused");
         assert_eq!(code_of(&e).1.as_deref(), Some("steam_library"));
@@ -1491,6 +1722,117 @@ mod tests {
         attempt(TargetKind::Client, true, &mut w.host("a", TargetKind::Client), &mut FakeSource::new(vec![pc]), &mut starts).unwrap();
         assert_eq!(starts, 2);
         println!("PASS debug.identity ({} refusal cases and the Steam server guard: 0 adapter starts; 2 control cases: 2 starts)", cases.len());
+    }
+
+    #[test]
+    fn a_client_without_consent_starts_nothing() {
+        let before = ADAPTER_STARTS.with(|n| n.get());
+        for dap in [true, false] {
+            let a = DebugArgs { client: Some("no-such-install-id".into()), dap, ..Default::default() };
+            let e = plan(&a).err().expect("refused");
+            assert_eq!(code_of(&e).0, "pause_consent_required", "dap={dap}: {}", code_of(&e).2);
+        }
+        assert_eq!(ADAPTER_STARTS.with(|n| n.get()), before);
+    }
+
+    #[test]
+    fn client_flags_and_their_conflicts() {
+        use clap::Parser;
+        #[derive(clap::Parser)]
+        struct T {
+            #[command(flatten)]
+            a: DebugArgs,
+        }
+        let ok = |v: &[&str]| T::try_parse_from(std::iter::once("t").chain(v.iter().copied())).is_ok();
+        assert!(ok(&["--client", "x", "--observe"]));
+        assert!(ok(&["--client", "x", "--allow-client-pause", "--dap"]));
+        assert!(ok(&["--client", "x", "--allow-client-pause", "--dap", "--max-pause-ms", "2000"]));
+        assert!(!ok(&["--client", "x", "--observe", "--dap"]), "observe and DAP are exclusive");
+        assert!(!ok(&["--client", "x", "--observe", "--allow-client-pause"]));
+        assert!(!ok(&["--client", "x", "--observe", "--max-pause-ms", "200"]));
+        assert!(!ok(&["--allow-client-pause"]), "consent belongs to a client");
+        assert!(!ok(&["--observe"]));
+        assert!(!ok(&["--client", "x", "--server", "y"]));
+    }
+
+    #[test]
+    fn two_prefixes_with_the_same_windows_pid_never_mix() {
+        let w = World::new("prefixes");
+        let client = TargetKind::Client;
+        let (pa, da) = w.kiln("a", 32, 100, N1, client);
+        let (pb, db) = w.kiln("b", 32, 900, N2, client);
+        w.put("a", &da);
+        w.put("b", &db);
+        let pfx = |p: &str, inode: u64| Some(PrefixIdentity { path: p.into(), device: 1, inode });
+        let mut ha = w.host("a", client);
+        ha.facts.prefix_identity = pfx("/c/a/pfx", 1);
+        let mut hb = w.host("b", client);
+        hb.facts.prefix_identity = pfx("/c/b/pfx", 2);
+        let (mut sa, mut sb) = (FakeSource::new(vec![pa]), FakeSource::new(vec![pb]));
+        let ra = prepare(client, true, &mut ha, &mut sa, &mut counter()).unwrap();
+        let rb = prepare(client, true, &mut hb, &mut sb, &mut counter()).unwrap();
+        let (ia, ib) = (&ra.target.identity, &rb.target.identity);
+        assert_eq!((ia.windows_pid, ib.windows_pid), (32, 32));
+        assert_eq!(ia.first_difference(ib), Some("installId"));
+        assert_ne!(ia.prefix_identity, ib.prefix_identity);
+        // a's target against b's namespace and host: refused, nothing started
+        let mut starts = 0;
+        let e = launch(&ra, true, &mut hb, &mut sb, &mut counter(), || {}, |_: &AttachPermit| {
+            starts += 1;
+            Ok(())
+        })
+        .unwrap_err();
+        assert_eq!(e.code, DebugCode::IdentityChanged);
+        assert_eq!(starts, 0);
+        // a's own namespace: started once
+        launch(&ra, true, &mut ha, &mut sa, &mut counter(), || {}, |p: &AttachPermit| {
+            assert_eq!(p.identity().prefix_identity, pfx("/c/a/pfx", 1));
+            starts += 1;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(starts, 1);
+    }
+
+    #[test]
+    fn observe_shows_the_log_and_starts_no_adapter() {
+        let before = ADAPTER_STARTS.with(|n| n.get());
+        let w = World::new("observe");
+        let (p, d) = w.kiln("a", 32, 100, N1, TargetKind::Client);
+        w.put("a", &d);
+        let log = w.root.join("a/kiln/logs/kiln.log");
+        std::fs::create_dir_all(log.parent().unwrap()).unwrap();
+        std::fs::write(&log, "[I 12:00:00.000] [mod:counter] counter 1\n").unwrap();
+        // no consent asked: observing resolves, it never permits or launches
+        let mut host = w.host("a", TargetKind::Client);
+        let mut src = FakeSource::new(vec![p]);
+        let r = resolver::resolve(&mut host, &mut src, &mut counter()).unwrap();
+        src.procs.clear(); // the game exits while it is observed
+        let mut poll = observe_poll(Ok((r, Box::new(src))), |t, _| format!("[kiln debug] {t}"));
+        let appender = {
+            let log = log.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(600));
+                use std::io::Write;
+                let mut f = std::fs::OpenOptions::new().append(true).open(&log).unwrap();
+                writeln!(f, "[I 12:00:01.000] [mod:counter] counter 2").unwrap();
+            })
+        };
+        let mut out = Vec::new();
+        crate::logs::observe(&log, 20, false, &mut out, &mut poll, Some(14)).unwrap();
+        appender.join().unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.starts_with("[kiln debug] observing PID 32 (created 100), session mode hosted"), "{text}");
+        assert!(text.contains("counter 1") && text.contains("counter 2"), "{text}");
+        assert!(text.contains("[kiln debug] the game has exited"), "{text}");
+        // a target that cannot be proven: the log alone
+        let mut poll = observe_poll(Err(DebugError::refused("no debug descriptor", "developer_debugging_off")), |t, _| t);
+        let mut out = Vec::new();
+        crate::logs::observe(&log, 1, true, &mut out, &mut poll, Some(1)).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.starts_with("observing the log only: no debug descriptor (refused)"), "{text}");
+        assert!(text.contains(r#""text":"counter 2""#), "{text}");
+        assert_eq!(ADAPTER_STARTS.with(|n| n.get()), before, "observing started an adapter");
     }
 
     #[test]

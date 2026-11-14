@@ -71,7 +71,7 @@ pub(crate) fn send(dir: &std::path::Path, command: &str, timeout: u64) -> Result
 /// A reload under an attached debugger leaves its breakpoints on the old copy of the mod, and sessions in that state
 /// have ended the server (docs/kiln/modding/debugging.md): while `kiln debug --dap` holds a session on this server
 /// (kiln/state/debug/session.json, written by a proxy that still runs), reloading is refused.
-fn refuse_while_attached(dir: &std::path::Path) -> Result<()> {
+pub(crate) fn refuse_while_attached(dir: &std::path::Path) -> Result<()> {
     if let Some(s) = kiln_manage::debug::attached_session(dir) {
         return Err(CliError::new(
             "refused",
