@@ -181,7 +181,7 @@ public sealed class BootPhaseTests : ModsFixture
         BootGeneration.Record(1, [new BootModReport("boot-gallery", 1, BootModState.Committed, ["statuses/cold"], [])],
             new Dictionary<string, IReadOnlyList<BootStaged>> { ["boot-gallery"] = [new BootStaged("statuses", "cold", "{}")] });
         using var mods = NewManager(new FakeHost());
-        mods.SetBootFingerprint("boot-gallery", ModManager.BootFingerprint(m, dir));
+        mods.SetBootInputs("boot-gallery", BootInputs.Read(dir));
         Assert.Null(mods.BootLoadRefusal(m, dir));  // load
         Assert.Null(mods.BootLoadRefusal(m, dir));  // and after a runtime unload, again: no OnBoot, the same generation
         Assert.Equal(1ul, Mods.BootState("boot-gallery").Generation);

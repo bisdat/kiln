@@ -6,6 +6,7 @@ using Xunit;
 
 namespace Kiln.Blocks.Tests;
 
+[Collection("boot generation")]  // BootGeneration is process-wide
 public sealed class BootLoweringTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "kiln-boot-lowering-" + Guid.NewGuid().ToString("N"));

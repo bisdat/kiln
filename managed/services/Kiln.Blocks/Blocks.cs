@@ -47,6 +47,9 @@ public static partial class Blocks
         if (BootFrame.Current is { } boot)
             throw new InvalidOperationException($"PhaseClosed: Blocks.Define is refused inside {boot.ModId}'s OnBoot; stage the block with BootDefinitions.For(boot).Define");
         var mod = CallerMod();
+        // a name of the mod's committed boot definitions (chapter 08 §4.2): the same block is a reference to it, another one is refused
+        if (BootHandles.SameAsCommitted(mod.Id, name, block) is { } committed)
+            return mod.Handles.TryGetValue(name, out var active) && active is BlockHandle<T> live ? live : (BlockHandle<T>)committed;
         // a block of a kind a mod registered (by its own type, not by T): compiled by its provider, applied by Kiln
         if (!KindRegistry.IsBuiltIn(block.GetType())) return KindDefine.Define(mod, name, block);
         return Compiler.Define(mod, name, block);
@@ -92,11 +95,14 @@ public static partial class Blocks
     /// data files, or another loaded mod's. The handle rolls: <see cref="AffixPoolHandle.Roll"/>.</summary>
     public static AffixPoolHandle Define(string name, AffixPoolBlock block) => (AffixPoolHandle)Define<AffixPoolBlock>(name, block);
 
-    /// <summary>A block a mod defined (its id, or null: the calling mod), or null.</summary>
+    /// <summary>A block a mod defined (its id, or null: the calling mod), or null. A block the mod staged in <see cref="Mod.OnBoot"/>
+    /// and its boot generation committed is found from the commit on, also in <c>OnLoad</c> before its runtime activation and after the
+    /// mod's runtime unload: the boot content stays in the game until the process ends.</summary>
     public static BlockHandle? Find(string name, string? mod = null)
     {
         var id = mod ?? BlocksBridge.CallerModId;
-        return id != null && Mods_.TryGetValue(id, out var m) && m.Handles.TryGetValue(name, out var h) ? h : null;
+        if (id == null) return null;
+        return Mods_.TryGetValue(id, out var m) && m.Handles.TryGetValue(name, out var h) ? h : BootHandles.Find(id, name);
     }
 
     /// <summary>What a block became, as JSON: the items, recipes, templates, buffs and programs, with the values given to them.

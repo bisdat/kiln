@@ -30,6 +30,27 @@ public sealed class TestMod : Mod
     public override void OnLoad()
     {
         Events.On<BootDefinitionsCommittedEvent>(e => { if (e.ModId == Id) _committed = e; });
+        // the boot handle map (fix round 08-onboot.handles): in OnLoad, before this instance's runtime activation (Kiln.Blocks' next step)
+        var cold = Blocks.Find("cold");
+        Check(cold != null && _committed == null, "BOOT-FIND-ONLOAD", $"Blocks.Find(\"cold\") in OnLoad, before the activation: {(cold == null ? "null" : $"{cold} {cold.Guid}")}");
+        try
+        {
+            var same = Blocks.Define("cold", new StatusBlock { Name = "Boot Cold", Seconds = 4 });
+            Check(same.Guid == cold?.Guid, "BOOT-DEFINE-SAME", $"Blocks.Define of the committed cold again: {same} {same.Guid}");
+        }
+        catch (Exception e) { Check(false, "BOOT-DEFINE-SAME", $"Blocks.Define of the committed cold again threw {e.GetType().Name}: {e.Message}"); }
+        try
+        {
+            Blocks.Define("cold", new StatusBlock { Name = "Boot Cold", Seconds = 5 });
+            Check(false, "BOOT-DEFINE-OTHER", "Blocks.Define of another cold was taken");
+        }
+        catch (BlockError e) { Check(e.Problem.StartsWith("RestartRequiredBoot:", StringComparison.Ordinal), "BOOT-DEFINE-OTHER", $"another cold: {e.Message}"); }
+        try
+        {
+            var hit = Blocks.Define("onload-hit", new EffectBlock { Applies = new StatusApply { Status = "cold" } });
+            Check(true, "BOOT-REFERENCE-ONLOAD", $"an OnLoad effect names the boot status cold: {hit}");
+        }
+        catch (Exception e) { Check(false, "BOOT-REFERENCE-ONLOAD", $"an OnLoad effect naming cold threw {e.GetType().Name}: {e.Message}"); }
         Content.OnReady(e => { _ = Check(); });
     }
 
@@ -109,5 +130,8 @@ public sealed class TestMod : Mod
                 (leftovers.Count == 0 ? "none of their staged or file definitions is there" : $"still there: {string.Join(", ", leftovers)}"));
         }
         Context.Log.Info($"{Id}: done: {_pass} PASS, {_fail} FAIL");
+        // boot-reload-driver (if it is in the start) unloads and loads this mod once this line is written
+        Directory.CreateDirectory(Context.DataDirectory);
+        File.WriteAllText(Path.Combine(Context.DataDirectory, "checked.txt"), $"{Environment.ProcessId}");
     }
 }

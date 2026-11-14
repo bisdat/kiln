@@ -104,6 +104,8 @@ internal sealed class BlockContext(ModBlocks mod, string block)
             try { return pending(); }
             finally { authored.Compiling.Remove(name); }
         }
+        // a committed boot definition of the mod: in the game since the boot generation, before (and after) its runtime activation
+        if (BootHandles.Find(authored.Id, name) is { } boot) return boot;
         throw new BlockError(Block, path, $"no block \"{name}\" in this mod; define it first, or say \"other-mod:{name}\"; there are: {string.Join(", ", Mod.Handles.Keys.Order())}");
     }
 }

@@ -164,7 +164,7 @@ internal sealed unsafe class BootFake : IKitFake
                 BootGeneration.Record(1, state.Reports.Values, state.Committed);
             }
         }
-        if (commit && ok) mods.SetBootFingerprint(m.Id, ModManager.BootFingerprint(m, directory));
+        if (commit && ok) mods.SetBootInputs(m.Id, BootInputs.Read(directory));
         return run;
     }
 

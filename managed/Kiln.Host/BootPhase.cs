@@ -12,7 +12,6 @@
 //   3. The IR envelope (owners, their documents per collector) is staged as the host's and committed; the reports go to Mods.BootState.
 using System.Reflection;
 using System.Runtime.InteropServices;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -205,7 +204,7 @@ internal static unsafe class BootPhase
             public BootModState State = BootModState.NotParticipating;
             public List<BootIssue> Issues = [];
             public List<BootStaged> Committed = [];
-            public string Fingerprint = "";
+            public required BootInputs Inputs;
         }
 
         public void RunAuthors()
@@ -218,7 +217,7 @@ internal static unsafe class BootPhase
                 var roles = mods.BootRoles(m);
                 if (roles == 0) continue;
                 if (_authors.ContainsKey(m.Id)) continue;  // the resolver keeps the first folder for an id, as runtime loading does
-                var a = new Author { Manifest = m, Directory = dir, Roles = validRoles.GetValueOrDefault(dir, roles), Fingerprint = ModManager.BootFingerprint(m, dir) };
+                var a = new Author { Manifest = m, Directory = dir, Roles = validRoles.GetValueOrDefault(dir, roles), Inputs = BootInputs.Read(dir) };
                 _authors[m.Id] = a;
                 if (!validRoles.ContainsKey(dir))
                     Exclude(a, BootModState.ExcludedDependency, "Dependency", rejected.GetValueOrDefault(dir, "no valid role in the boot graph"));
@@ -364,7 +363,7 @@ internal static unsafe class BootPhase
                 if (a.State != BootModState.Staged) continue;
                 owners.Add(new JsonObject
                 {
-                    ["id"] = id, ["roles"] = (int)a.Roles, ["fingerprint"] = a.Fingerprint,
+                    ["id"] = id, ["roles"] = (int)a.Roles, ["fingerprint"] = a.Inputs.Hash,
                     ["requires"] = new JsonArray(a.Requires.Select(r => (JsonNode)JsonValue.Create(r)!).ToArray()),
                 });
             }
@@ -411,7 +410,13 @@ internal static unsafe class BootPhase
                 var defs = a.State == BootModState.Committed ? a.Committed : [];
                 if (defs.Count > 0) committed[id] = defs;
                 reports.Add(new BootModReport(id, gen, a.State, defs.Select(d => $"{d.Kind}/{d.Key}").ToList(), issues));
-                mods.SetBootFingerprint(id, a.Fingerprint);
+                // frozen at the commit: what OnBoot and the collectors read; a change since OnBoot ran matches no later load
+                var frozen = a.State == BootModState.Committed ? a.Inputs.Recheck(a.Directory) : a.Inputs;
+                if (frozen.Error != null)
+                    log(LogLevel.Warn, $"boot: {id}: its files could not be read for the restart check ({frozen.Error}); it loads again only after a restart");
+                else if (frozen.ChangedDuringBoot)
+                    log(LogLevel.Warn, $"boot: {id}: its files changed while the boot phase ran ({string.Join(", ", BootInputs.Read(a.Directory).Differences(a.Inputs).Take(3))}); it loads again only after a restart");
+                mods.SetBootInputs(id, frozen);
             }
             BootGeneration.Record(gen, reports, committed);
             BootGeneration.ReadState = CurrentReport;
@@ -467,7 +472,7 @@ internal static unsafe class BootPhase
 
 internal sealed partial class ModManager
 {
-    private readonly Dictionary<string, string> _bootFingerprints = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, BootInputs> _bootInputs = new(StringComparer.Ordinal);
 
     /// <summary>A committed boot mod's runtime instance loaded: Kiln.Blocks runs its definitions' runtime parts and posts
     /// BootDefinitionsCommittedEvent, also for a mod that staged nothing (then Kiln.Blocks lowered nothing in this process and
@@ -540,19 +545,11 @@ internal sealed partial class ModManager
         return roles;
     }
 
-    /// <summary>What a later runtime load compares: the manifest and the entry assembly, hashed.</summary>
-    internal static string BootFingerprint(Manifest m, string dir)
+    /// <summary>A boot mod's frozen inputs (BootInputs.cs): what a later runtime load of it compares, set when its generation commits.</summary>
+    internal void SetBootInputs(string id, BootInputs inputs)
     {
-        using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        foreach (var f in new[] { Manifest.FileName, m.EntryAssembly })
-        {
-            var path = System.IO.Path.Combine(dir, f);
-            if (f.Length > 0 && File.Exists(path)) sha.AppendData(File.ReadAllBytes(path));
-        }
-        return Convert.ToHexString(sha.GetHashAndReset()).ToLowerInvariant();
+        lock (_bootInputs) _bootInputs[id] = inputs;
     }
-
-    internal void SetBootFingerprint(string id, string fingerprint) => _bootFingerprints[id] = fingerprint;
 
     /// <summary>The transient boot-author instance: its own collectible load context, a context of its own owner, OnBoot once under the frame,
     /// then unloaded. False: it did not load or OnBoot threw (<paramref name="why"/>).</summary>
@@ -600,15 +597,32 @@ internal sealed partial class ModManager
     }
 
     /// <summary>A boot mod's runtime load against this process's boot generation (chapter 08 §4.4): null when it may load (a committed mod
-    /// whose fingerprint is unchanged), else why not (<c>RestartRequiredBoot</c>; an absent author is recorded <c>MissedPhase</c>).</summary>
+    /// whose frozen inputs, BootInputs.cs, are unchanged), else why not (<c>RestartRequiredBoot</c>; an absent author is recorded <c>MissedPhase</c>).</summary>
     internal string? BootLoadRefusal(Manifest m, string directory)
     {
         if (m.Boot == ManifestBoot.None) return null;
         var report = BootGeneration.Report(m.Id);
         if (report is { State: BootModState.Committed })
-            return _bootFingerprints.TryGetValue(m.Id, out var fp) && fp != BootFingerprint(m, directory)
-                ? $"RestartRequiredBoot: mod {m.Id} changed since the boot generation committed its boot content; restart to load it"
-                : null;
+        {
+            BootInputs? frozen;
+            lock (_bootInputs) frozen = _bootInputs.GetValueOrDefault(m.Id);
+            if (frozen == null) return null;
+            if (frozen.Error != null)
+                return $"RestartRequiredBoot: mod {m.Id}'s files could not be read when this process's boot generation committed ({frozen.Error}); " +
+                       "restart the game (or the server) to load it";
+            if (frozen.ChangedDuringBoot)
+                return $"RestartRequiredBoot: mod {m.Id}'s files changed while this process's boot phase ran, so its boot content matches no version " +
+                       "of it; restart the game (or the server) to load it";
+            var now = BootInputs.Read(directory);
+            if (now.Error != null)
+                return $"RestartRequiredBoot: mod {m.Id}'s files cannot be read to compare them with its boot content ({now.Error}); " +
+                       "restart the game (or the server) to load it";
+            if (now.Hash == frozen.Hash) return null;
+            var changes = now.Differences(frozen);
+            return $"RestartRequiredBoot: mod {m.Id} changed since this process's boot generation committed its boot content " +
+                   $"({string.Join(", ", changes.Take(3))}{(changes.Count > 3 ? $", {changes.Count - 3} more" : "")}); " +
+                   "restart the game (or the server) to load the new version";
+        }
         if (report == null || report.State == BootModState.NotParticipating)
         {
             BootGeneration.Set(new BootModReport(m.Id, BootGeneration.Number, BootModState.MissedPhase, [],
