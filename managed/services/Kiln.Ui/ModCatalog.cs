@@ -435,8 +435,20 @@ internal static class ModCatalog
     }
 
     /// <summary>A folder path as compared between a profile entry and an engine's row: one separator, no trailing one
-    /// (the plugin writes the path it resolved, `Z:/home/...`; the profile has `Z:\home\...`). Callers compare without regard to case.</summary>
-    internal static string NormPath(string p) => p.Replace('\\', '/').TrimEnd('/');
+    /// (the plugin writes the path it resolved, `Z:/home/...`; the profile has `Z:\home\...`), and no verbatim prefix
+    /// (ShroudForge writes its mods folder from a canonical path on Windows, `\\?\C:\...\mods`, Kiln's game folder has
+    /// none): `\\?\C:\x` is `C:\x`, `\\?\UNC\server\share` is `\\server\share`. Callers compare without regard to case,
+    /// as Windows does (<see cref="SamePath"/>): the game runs on Windows or under Wine or Proton, with Windows paths.</summary>
+    internal static string NormPath(string p)
+    {
+        var s = p.Replace('\\', '/');
+        if (s.StartsWith("//?/UNC/", StringComparison.OrdinalIgnoreCase)) s = "//" + s[8..];
+        else if (s.StartsWith("//?/", StringComparison.Ordinal)) s = s[4..];
+        return s.TrimEnd('/');
+    }
+
+    /// <summary>Whether two paths name one folder as Windows compares them (<see cref="NormPath"/>, case ignored).</summary>
+    internal static bool SamePath(string a, string b) => string.Equals(NormPath(a), NormPath(b), StringComparison.OrdinalIgnoreCase);
 
     private static bool DirExists(string? p)
     {
@@ -515,8 +527,7 @@ internal static class ModCatalog
         /// when it is placed there (XHL companions, EML mods a DLL reads there), Kiln's copy for Enshwick's loader.</summary>
         private string? KeptInGameMods(string kind, ProfileEntry e, string id)
         {
-            var mods = NormPath(Path.Combine(Src.GameDir, "mods"));
-            if (ParentOf(e.Path) is { } parent && string.Equals(NormPath(parent), mods, StringComparison.OrdinalIgnoreCase))
+            if (ParentOf(e.Path) is { } parent && SamePath(parent, Path.Combine(Src.GameDir, "mods")))
                 return DirExists(e.Path) ? e.Path : null;
             if (kind != "enshwick") return null;
             string copy;
@@ -1031,8 +1042,9 @@ internal static class ModCatalog
                 Engine = "shroudforge", Id = sid ?? name, Name = sname ?? name, Version = sversion ?? "",
                 Folder = sub, Source = "folder", State = on ? state : ModRunState.Disabled, Word = on ? runs ? "unconfirmed" : mode ?? "" : "disabled",
                 // an EML package without ShroudForge's file was never switched on there: say so, it is not a choice the
-                // player made
-                Reason = on ? why : SfFacts(sub) is null ? HandEmlOff : "Switched off in ShroudForge's settings.", Help = on ? help : null,
+                // player made; the player's own folder says the promised words, a copy Kiln's launcher placed does not
+                Reason = on ? why : SfFacts(sub) is not null ? "Switched off in ShroudForge's settings." : KilnsEml(sub) ? NoSwitchFile : HandEmlOff,
+                Help = on ? help : null,
             });
         }
         // kiln-eml reported its handoff before ShroudForge prepared. A later failure supersedes that prediction.
@@ -1096,6 +1108,15 @@ internal static class ModCatalog
     internal const string OffInShroudForgeHelp =
         "ShroudForge runs it only once its switch is on: the reason above says where to switch it on. Then start the game again.";
 
+    /// <summary>A package in ShroudForge's folder that has no extended.mod.json and is not the player's own folder (a
+    /// copy Kiln's launcher placed there, <see cref="KilnsEml"/>): <see cref="HandEmlOff"/> would tell the player they
+    /// put it there.</summary>
+    internal const string NoSwitchFile =
+        "ShroudForge has not switched it on: it has no extended.mod.json, the file that holds ShroudForge's switch, so ShroudForge does not run it.";
+
+    /// <summary>The folder is a copy of an EML mod Kiln's launcher placed (its marker says eml), not the player's own.</summary>
+    private static bool KilnsEml(string folder) => string.Equals(PlacedKind(folder), "eml", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>An EML row while ShroudForge runs the EML mods: a package in ShroudForge's mods folder runs only while its
     /// extended.mod.json says enabled: true, on the sides its targets name (ShroudForgePackages.Read reads both as
     /// ShroudForge does), and a package with a startup part is applied when ShroudForge's record of this start's pass lists
@@ -1103,7 +1124,7 @@ internal static class ModCatalog
     private static CatalogMod EmlUnderSf(CatalogMod m, string sfMods, SfAssetState? assets, string side)
     {
         if (m.Folder is not { } folder || m.Word is not ("own-loader" or OffInShroudForge or "other-side") ||
-            ParentOf(folder) is not { } parent || !string.Equals(NormPath(parent), NormPath(sfMods), StringComparison.OrdinalIgnoreCase)) return m;
+            ParentOf(folder) is not { } parent || !SamePath(parent, sfMods)) return m;
         SfPackage p;
         try { p = ShroudForgePackages.Read(folder); }
         catch (Exception e)
@@ -1272,8 +1293,9 @@ internal static class ModCatalog
         try { p = ShroudForgePackages.Read(folder); }
         catch (Exception) { return m with { State = m.State == ModRunState.Disabled ? m.State : ModRunState.Waiting, Word = "unconfirmed", Reason = "Its package settings cannot be read; ShroudForge's per-mod activation is not confirmed." }; }
         var repair = ShroudForgeUi.RepairNote(p);
-        // a legacy EML package the player put into ShroudForge's folder: the promised words (the switch below writes the file)
-        if (!p.Enabled && !p.Extended && m.Source == "folder")
+        // a legacy EML package the player put into ShroudForge's folder: the promised words (the switch below writes the
+        // file); a copy Kiln's launcher placed there is not theirs, and says what is missing
+        if (!p.Enabled && !p.Extended && m.Source == "folder" && !KilnsEml(folder))
             return m with
             {
                 State = ModRunState.Disabled, Word = "disabled", Reason = HandEmlOff,
@@ -1283,8 +1305,7 @@ internal static class ModCatalog
             return m with
             {
                 // a legacy EML package: ShroudForge's own Modloader writes the file at the first change of its switch
-                State = ModRunState.Disabled, Word = "disabled",
-                Reason = "ShroudForge has not switched it on: it has no extended.mod.json, the file that holds ShroudForge's switch, so ShroudForge does not run it.",
+                State = ModRunState.Disabled, Word = "disabled", Reason = NoSwitchFile,
                 Help = "Switch it on below: Kiln writes the extended.mod.json ShroudForge's own Modloader writes. " +
                        (p.SwitchLive ? "ShroudForge starts it while you play." : "It applies at the next game start."),
             };

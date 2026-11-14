@@ -558,6 +558,87 @@ public sealed class ModCatalogTests : IDisposable
             Assert.DoesNotContain("extended.mod.json", (m.Reason ?? "") + (m.Help ?? ""));
     }
 
+    /// <summary>On Windows ShroudForge rewrites its mods folder at every start from a canonical path, <c>\\?\C:\…\mods</c>,
+    /// and Kiln's game folder has no <c>\\?\</c> (Nexus, 14 Nov 2026: Auto Loot Plus and Endless Chests stayed off). The
+    /// same folder in another spelling is the same folder, as Windows compares them: no verbatim prefix, one separator,
+    /// no trailing one, case ignored (the callers compare without regard to case).</summary>
+    [Theory]
+    [InlineData(@"\\?\C:\Game\mods", @"C:\Game\mods")]
+    [InlineData(@"c:\game\MODS\", @"C:\Game\mods")]
+    [InlineData(@"\\?\c:\game\MODS\", @"C:/Game/mods")]
+    [InlineData(@"//?/C:/Game/mods/", @"C:\Game\mods")]
+    [InlineData(@"\\?\UNC\server\share\Game\mods", @"\\server\share\Game\mods")]
+    [InlineData(@"\\?\unc\SERVER\share\game\mods\", @"//server/share/Game/mods")]
+    [InlineData(@"\\?\C:\", @"C:\")]
+    public void Folders_compare_as_windows_compares_them(string a, string b)
+    {
+        Assert.Equal(ModCatalog.NormPath(b), ModCatalog.NormPath(a), ignoreCase: true);
+        Assert.True(ModCatalog.SamePath(a, b));
+        Assert.True(ModCatalog.SamePath(b, a));
+    }
+
+    [Theory]
+    [InlineData(@"\\?\C:\Game\mods", @"C:\Game\mods2")]
+    [InlineData(@"\\?\C:\Game", @"C:\Game\mods")]
+    [InlineData(@"\\?\UNC\server\share\mods", @"C:\server\share\mods")]
+    [InlineData(@"\\?\UNC\server\share\mods", @"\\?\server\share\mods")]
+    public void Other_folders_stay_other_folders(string a, string b)
+    {
+        Assert.NotEqual(ModCatalog.NormPath(b), ModCatalog.NormPath(a), StringComparer.OrdinalIgnoreCase);
+        Assert.False(ModCatalog.SamePath(a, b));
+    }
+
+    /// <summary>The same report from Kiln's menu: ShroudForge's folder is <c>\\?\</c> and upper case with a trailing
+    /// separator, Kiln's copy of a profile EML mod is in it without: the row still says ShroudForge has Kiln's copy off
+    /// (no extended.mod.json), not that it runs, and the copy is no hand-installed ShroudForge row.</summary>
+    [Fact]
+    public void An_eml_copy_is_in_shroudforges_folder_whatever_its_spelling()
+    {
+        var mods = Dir("mods");
+        var copy = Dir("mods", "auto-loot-plus");
+        File.WriteAllText(Path.Combine(copy, "mod.json"), """{"id":"auto-loot-plus","name":"Auto Loot Plus","version":"1.0.0","capabilities":["patch"]}""");
+        File.WriteAllText(Path.Combine(Dir("mods", "auto-loot-plus", "src"), "mod.lua"), "return {}");
+        File.WriteAllText(Path.Combine(copy, ".kiln-library.json"), """{"format":1,"kind":"eml","id":"auto-loot-plus","version":"1.0.0","hash":"h"}""");
+        Profile(new() { ["eml"] = [new { id = "auto-loot-plus", version = "1.0.0", path = Path.Combine(_root, "library", "eml", "auto-loot-plus") }] });
+        Write("eml.json", new
+        {
+            format = 1, pid = Pid, phase = "aside", aside = "ShroudForge owns startup asset patching and runs EML packages in its mods folder",
+            mods = new[] { new { id = "auto-loot-plus", source = "profile", path = copy, state = "own-loader", reason = $"runs under ShroudForge (hosted by Kiln) (Kiln's copy at {copy})" } },
+        });
+        Write("shroudforge.json", new { pid = Pid, mode = "hosted", menu = "kiln", runtime = "running", modsDir = @"\\?\" + mods.ToUpperInvariant() + @"\", startupPrepared = true });
+        var s = Read();
+        var m = Mod(s, "eml", "auto-loot-plus");
+        Assert.Equal((ModRunState.Disabled, ModCatalog.OffInShroudForge), (m.State, m.Word));
+        Assert.Contains("no extended.mod.json", m.Reason);
+        Assert.Contains("Kiln launcher", m.Help);
+        Assert.DoesNotContain(s.Mods, x => x.Engine == "shroudforge");
+    }
+
+    /// <summary>A copy Kiln's launcher placed in ShroudForge's folder (its marker says eml) that no EML row of this
+    /// start names (kiln-eml did not report, or the profile no longer lists the mod) is listed under ShroudForge with
+    /// its switch, but not as a folder the player put there: that is only the player's own folder.</summary>
+    [Fact]
+    public void A_copy_kiln_placed_in_shroudforges_folder_is_not_called_the_players_own()
+    {
+        var mods = Dir("mods");
+        foreach (var (folder, kilns) in new[] { ("kiln-copy", true), ("own-folder", false) })
+        {
+            var dir = Dir("mods", folder);
+            File.WriteAllText(Path.Combine(dir, "mod.json"), $$"""{"id":"{{folder}}","name":"Name {{folder}}","version":"1.0.0","capabilities":["patch"]}""");
+            File.WriteAllText(Path.Combine(Dir("mods", folder, "src"), "mod.lua"), "return {}");
+            if (kilns) File.WriteAllText(Path.Combine(dir, ".kiln-library.json"), $$"""{"format":1,"kind":"eml","id":"{{folder}}","version":"1.0.0","hash":"h"}""");
+        }
+        Profile(new() { ["eml"] = [new { id = "kiln-copy", version = "1.0.0", path = Path.Combine(_root, "library", "eml", "kiln-copy") }] });
+        Write("shroudforge.json", new { pid = Pid, mode = "hosted", menu = "kiln", runtime = "running", modsDir = mods, startupPrepared = true });
+        var s = Read();
+        var copy = Mod(s, "shroudforge", "kiln-copy");
+        Assert.Equal((ModRunState.Disabled, "folder"), (copy.State, copy.Source));
+        Assert.DoesNotContain("yourself", copy.Reason);
+        Assert.Contains("has not switched it on", copy.Reason);
+        Assert.StartsWith("Switch it on below", copy.Help);
+        Assert.Equal(ModCatalog.HandEmlOff, Mod(s, "shroudforge", "own-folder").Reason);  // the player's own folder: the promised words
+    }
+
     [Fact]
     public void A_failed_shroudforge_preparation_does_not_leave_eml_rows_loaded()
     {
