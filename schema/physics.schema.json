@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "physics.schema.json",
+  "title": "Kiln model physics (assets/physics.json), format 1",
+  "description": "The cloth and bone chains a mod asks the cook to write into its models (tools/modelcook/cook/physics.py; docs/kiln/modding/models.md#physics). A body block's cloth and chains (Kiln.Blocks ModelClothBlock, ModelChainBlock) become the same tree; a model both name is refused. The game simulates them with its own cloth and chain code on a player's machine; a dedicated server only serves the cooked files. Writing them needs the cook features modelcook.cloth and modelcook.chains2, off until their guided client check passes: a recipe turns them on for one mod with \"experimental\": [\"modelcook.cloth\", \"modelcook.chains2\"] in assets/cook.json. Strict JSON: no comments, no trailing commas, a key twice, NaN and an unknown key are errors. Every refusal of the cook starts with the field path.",
+  "type": "object",
+  "required": ["format", "models"],
+  "additionalProperties": false,
+  "properties": {
+    "format": { "const": 1 },
+    "comment": {},
+    "models": {
+      "type": "object",
+      "description": "Model file -> its cloth and chains. The key is the glTF file's path in the mod (forward slashes, no leading /, no . or .. parts), as a body block's or a recipe step's model names it. One model once (also not in another case: one file on Windows).",
+      "propertyNames": {
+        "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!(.*/)?\\.{1,2}(/|$))(?!.*//)[^\\s][\\s\\S]*\\.(gltf|glb|GLTF|GLB)$",
+        "x-kiln-message": "a glTF file's path in the mod, as models/banner.gltf"
+      },
+      "additionalProperties": { "$ref": "#/$defs/model" }
+    }
+  },
+  "$defs": {
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "anyOf": [
+        { "required": ["cloth"], "properties": { "cloth": { "minItems": 1 } } },
+        { "required": ["chains"], "properties": { "chains": { "minItems": 1 } } }
+      ],
+      "properties": {
+        "cloth": { "type": "array", "maxItems": 255, "items": { "$ref": "#/$defs/cloth" }, "description": "Cloth meshes, each a glTF primitive. At most 255 per model; a primitive once." },
+        "chains": { "type": "array", "items": { "$ref": "#/$defs/chain" }, "description": "Bone chains (needs a skinned model)." }
+      }
+    },
+    "cloth": {
+      "type": "object",
+      "required": ["mesh", "primitive", "pin"],
+      "additionalProperties": false,
+      "properties": {
+        "mesh": { "type": "integer", "minimum": 0, "description": "The glTF mesh, by its index in the file." },
+        "primitive": { "type": "integer", "minimum": 0, "description": "The primitive of that mesh, by its index." },
+        "particleIds": {
+          "type": "array", "minItems": 1, "maxItems": 65535,
+          "items": { "type": "integer", "minimum": 0, "maximum": 2147483647 },
+          "description": "One id per POSITION element of the primitive. Equal ids weld the copies a UV or normal seam made: they sit within 1e-6 m and carry the same skin. Particles are numbered in the order their id first appears. Absent: every vertex is its own particle."
+        },
+        "pin": {
+          "type": "array", "minItems": 1, "maxItems": 65535,
+          "items": { "type": "number", "minimum": 0, "maximum": 1 },
+          "description": "One value per particle (in particle order): 1 holds it on the model, 0 lets it hang, between makes it heavier and limits its motion. Every connected piece of cloth needs a particle with 1."
+        },
+        "massKg": { "type": "number", "minimum": 0.001, "maximum": 100, "default": 1, "description": "The whole cloth's mass, spread over its particles by the area around each." },
+        "gravity": { "type": "number", "minimum": 0, "maximum": 50, "default": 9.81, "description": "m/s², downwards." },
+        "damping": { "type": "number", "minimum": 0, "maximum": 0.99, "default": 0.4 },
+        "stiffness": { "type": "number", "exclusiveMinimum": 0, "maximum": 1, "default": 0.8, "description": "One stiffness for stretch and bend." },
+        "colliders": {
+          "type": "array", "items": { "$ref": "#/$defs/collider" },
+          "description": "Spheres and capsules the cloth does not pass through, in bind pose (metres, glTF axes). The colliders of all cloth entries of a model are its one list, each once: at most 32 spheres, a capsule counting as two."
+        }
+      }
+    },
+    "sphere": {
+      "type": "object",
+      "required": ["x", "y", "z", "radius"],
+      "properties": {
+        "x": { "type": "number" }, "y": { "type": "number" }, "z": { "type": "number" },
+        "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 8, "description": "Metres." },
+        "joint": { "type": ["string", "null"], "minLength": 1, "description": "The skeleton joint it follows (all its weight), or null: rigid on the model." }
+      }
+    },
+    "collider": {
+      "type": "object",
+      "required": ["type"],
+      "properties": { "type": { "enum": ["sphere", "capsule"] } },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "sphere" } } },
+          "then": { "$ref": "#/$defs/sphere", "properties": { "type": {}, "x": {}, "y": {}, "z": {}, "radius": {}, "joint": {} }, "additionalProperties": false }
+        },
+        {
+          "if": { "properties": { "type": { "const": "capsule" } } },
+          "then": {
+            "required": ["a", "b"],
+            "additionalProperties": false,
+            "properties": {
+              "type": {},
+              "a": { "$ref": "#/$defs/end" },
+              "b": { "$ref": "#/$defs/end", "description": "Not at a's centre; the same joint as a (the format has one skin record per capsule)." }
+            }
+          }
+        }
+      ]
+    },
+    "end": {
+      "$ref": "#/$defs/sphere",
+      "properties": { "type": { "const": "sphere" }, "x": {}, "y": {}, "z": {}, "radius": {}, "joint": {} },
+      "additionalProperties": false
+    },
+    "chain": {
+      "type": "object",
+      "required": ["rootJoint", "tipJoint"],
+      "additionalProperties": false,
+      "properties": {
+        "rootJoint": { "type": "string", "minLength": 1, "description": "The first joint that swings; its parent stays animated. A name of the glTF's skeleton." },
+        "tipJoint": { "type": "string", "minLength": 1, "description": "The last joint, below the root along one branch: 2 to 8 joints from root to tip." },
+        "particleMassKg": { "type": "number", "minimum": 0.001, "maximum": 100, "default": 1, "description": "The mass of one moving joint, not of the chain." },
+        "damping": { "type": "number", "minimum": 0, "maximum": 0.99, "default": 0.01 },
+        "stiffness": { "type": "number", "minimum": 1, "maximum": 1000000, "default": 10000, "description": "The game's own coefficient (no unit claimed)." },
+        "bendStiffness": { "type": "number", "minimum": 0, "maximum": 1000000, "default": 5, "description": "The game's own coefficient (no unit claimed)." },
+        "particleRadius": { "type": "number", "minimum": 0, "maximum": 1, "default": 0, "description": "Metres, stored in millimetres." }
+      }
+    }
+  }
+}
