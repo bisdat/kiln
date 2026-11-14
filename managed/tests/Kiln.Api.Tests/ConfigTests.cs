@@ -214,46 +214,59 @@ public sealed class ConfigTests : KilnTest
     }
 
     [Fact]
-    public void A_file_that_cannot_be_written_refuses_the_change()
+    public void A_file_that_cannot_be_written_is_never_reported_as_saved()
     {
         var cfg = Register(NewMod("unwritable"));
         Assert.True(cfg.TrySet("maxHomes", 5, out _));
-        ConfigChangedEvent? ev = null;
-        cfg.Changed += e => ev = e;
+        Assert.Null(cfg.LastWriteError);
+        var raised = 0;
+        cfg.Changed += _ => raised++;
         var file = File("unwritable");
         System.IO.File.Delete(file);
         System.IO.Directory.CreateDirectory(file);  // the file's place is taken: every write fails
         try
         {
+            // TrySet is all or nothing: false, and the entry is as it was, in the game and in the file's values
             Assert.False(cfg.TrySet("maxHomes", 20, out var err));
             Assert.Contains("cannot write", err);
-            Assert.Equal(5, cfg.Value.MaxHomes);  // all or nothing: the running value is as it was
-            Assert.Equal(5, cfg.Entries.Single(e => e.Path == "maxHomes").FileValue);  // and so is the file value
-            Assert.Null(ev);  // nothing changed, nothing raised
+            Assert.Equal(5, cfg.Value.MaxHomes);
+            Assert.Equal(5, cfg.Entries.Single(e => e.Path == "maxHomes").FileValue);
+            Assert.Equal(0, raised);
+            Assert.Contains("cannot write", cfg.LastWriteError);
             Assert.False(cfg.TrySet("port", 1, out err));  // requires a restart: only the file would have changed
             Assert.Contains("cannot write", err);
             Assert.Empty(cfg.PendingRestart);
-            var io = Assert.Throws<IOException>(() => cfg.Set("maxHomes", 20));
-            Assert.Contains("cannot write", io.Message);
-            Assert.Equal(5, cfg.Value.MaxHomes);
-            Assert.Throws<ArgumentException>(() => cfg.Set("maxHomes", 500));  // a refused value stays an argument error
+
+            // Set and Save do what they did before 0.2.0-dev.28: they do not throw, the value applies for this session,
+            // the failure is logged; LastWriteError is how a mod learns of it
+            cfg.Set("maxHomes", 20);
+            Assert.Equal(20, cfg.Value.MaxHomes);
+            Assert.Equal(1, raised);
+            Assert.Contains("cannot write", cfg.LastWriteError);
+            Assert.Throws<ArgumentException>(() => cfg.Set("maxHomes", 500));  // a refused value is still an argument error
             cfg.Value.Greeting = "changed in code";
-            io = Assert.Throws<IOException>(() => cfg.Save());
-            Assert.Contains("cannot write", io.Message);
+            cfg.Save();
+            Assert.Contains("cannot write", cfg.LastWriteError);
+
+            // the value Set left unsaved is not reported as saved by a later TrySet of the same value
+            Assert.False(cfg.TrySet("maxHomes", 20, out err));
+            Assert.Contains("not saved", err);
+            Assert.Contains("cannot write", err);
+            Assert.Equal(20, cfg.Value.MaxHomes);
             Assert.False(System.IO.File.Exists(file + ".tmp"));  // no half-written file is left beside it
         }
         finally
         {
             System.IO.Directory.Delete(file, true);
         }
-        // writable again: the same calls go through, and Save writes what the failed one could not
+        // writable again: the next write carries everything the failed ones could not
         Assert.True(cfg.TrySet("maxHomes", 20, out _));
-        Assert.Equal(20, cfg.Value.MaxHomes);
-        Assert.Equal(ConfigChangeSource.Api, ev!.Source);
-        cfg.Save();
+        Assert.Null(cfg.LastWriteError);
         var text = System.IO.File.ReadAllText(file);
         Assert.Contains("\"maxHomes\": 20", text);
         Assert.Contains("changed in code", text);
+        cfg.Save();
+        Assert.Null(cfg.LastWriteError);
     }
 
     [Fact]

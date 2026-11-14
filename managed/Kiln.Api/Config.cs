@@ -149,6 +149,15 @@ public abstract class ConfigFile
     /// <summary>Why the last read of the file was refused (bad JSON), or null.</summary>
     public string? LastError { get; private set; }
 
+    /// <summary>Why the last write of the file failed ("cannot write", the file and the reason: a read-only folder, a
+    /// full disk), or null when the last write succeeded or nothing was written yet. <see cref="Set"/> and
+    /// <see cref="Save"/> do not throw for it: look here after them when you tell a player "saved".
+    /// <see cref="TrySet"/> answers false instead. Since 0.2.0-dev.28.</summary>
+    public string? LastWriteError { get; private set; }
+
+    // Set or Save changed the file's values and the write failed: the file on disk is behind them until a write succeeds.
+    private bool _unsaved;
+
     /// <summary>Corrections made at the last read (out-of-range values clamped, bad values replaced).</summary>
     public IReadOnlyList<string> Warnings { get; private set; } = [];
 
@@ -202,36 +211,35 @@ public abstract class ConfigFile
         return node.Get(Holder(chain));
     }
 
-    /// <summary>Like <see cref="TrySet"/>; throws <see cref="ArgumentException"/> when the value is refused, and
-    /// <see cref="IOException"/> when the file cannot be written (the entry then keeps its value, as with
-    /// <see cref="TrySet"/>).</summary>
+    /// <summary>Like <see cref="TrySet"/>, but throws <see cref="ArgumentException"/> when the value is refused. A
+    /// file that cannot be written does not stop it, as before 0.2.0-dev.28: the value applies for this session, the
+    /// failure is logged, and <see cref="LastWriteError"/> says why the file does not hold it. Use
+    /// <see cref="TrySet"/> where the caller must know the value was saved.</summary>
     public void Set(string path, object? value)
     {
         if (Game.InBoot) throw new InvalidOperationException(Game.NotInBoot("ConfigFile.Set"));
         Game.AssertTickThread();
-        if (TrySetCore(path, value, out var error, out var notWritten)) return;
-        if (notWritten) throw new IOException(error);
-        throw new ArgumentException(error, nameof(value));
+        if (!TrySetCore(path, value, strict: false, out var error)) throw new ArgumentException(error, nameof(value));
     }
 
     /// <summary>Changes one entry: validates it (out of range is refused, not clamped), applies it (unless it
     /// requires a restart: then only the file changes), writes the file and raises <see cref="Changed"/>.
     /// <paramref name="value"/>: a CLR value, a <see cref="JsonElement"/>/<see cref="JsonNode"/> or text ("12",
-    /// "on", "Hard", "5m", "[1, 2]"). All or nothing: when it returns false nothing has changed. That includes a
-    /// file that cannot be written (<paramref name="error"/> then says "cannot write" and why): the entry keeps its
-    /// running value and its file value, and <see cref="Changed"/> is not raised. Tick thread; not in
-    /// <see cref="Mod.OnBoot"/>.</summary>
+    /// "on", "Hard", "5m", "[1, 2]"). True means the value is set and the file holds it. All or nothing: when it
+    /// returns false it has changed nothing. That includes a file that cannot be written
+    /// (<paramref name="error"/> then says "cannot write" and why): the entry keeps its running value and its file
+    /// value, and <see cref="Changed"/> is not raised. Tick thread; not in <see cref="Mod.OnBoot"/>.</summary>
     public bool TrySet(string path, object? value, out string error)
     {
         if (Game.InBoot) throw new InvalidOperationException(Game.NotInBoot("ConfigFile.Set"));
         Game.AssertTickThread();
-        return TrySetCore(path, value, out error, out _);
+        return TrySetCore(path, value, strict: true, out error);
     }
 
-    // notWritten: the value was fine, the file could not be written (Set tells the two apart).
-    private bool TrySetCore(string path, object? value, out string error, out bool notWritten)
+    // strict (TrySet): a write that fails takes the change back and answers false. Not strict (Set): the change stays
+    // for this session, as it always did, and the answer is true.
+    private bool TrySetCore(string path, object? value, bool strict, out string error)
     {
-        notWritten = false;
         if (!_byPath.TryGetValue(path ?? "", out var entry))
         {
             error = $"{Id} has no entry '{path}'";
@@ -247,7 +255,14 @@ public abstract class ConfigFile
         var holder = Holder(chain);
         var running = node.Get(holder);
         var inFile = _file.TryGetValue(node.Path, out var before);
-        if (ConfigSchema.ValueEquals(before, v) && (node.RequiresRestart || ConfigSchema.ValueEquals(running, v))) return true;
+        if (ConfigSchema.ValueEquals(before, v) && (node.RequiresRestart || ConfigSchema.ValueEquals(running, v)))
+        {
+            // nothing to change; but a value an earlier Set or Save could not write is not in the file, and TrySet
+            // does not say it is
+            if (!strict || !_unsaved || TryWrite(out var again)) return true;
+            error = $"{Id}: '{node.Path}' holds that value for this session, but it is not saved: {again}";
+            return false;
+        }
         _file[node.Path] = ConfigSchema.Copy(node, v);
         IReadOnlyList<string> changed = [], pending = [];
         if (node.RequiresRestart && !ConfigSchema.ValueEquals(running, v)) pending = [node.Path];
@@ -258,14 +273,17 @@ public abstract class ConfigFile
         }
         if (!TryWrite(out var failure))
         {
-            // all or nothing: a value the file does not hold would be gone at the next start, while the caller was
-            // told it is set. The entry goes back to what it was, in the game and in the file's values.
-            if (changed.Count > 0) node.Set(holder, running);
-            if (inFile) _file[node.Path] = before;
-            else _file.Remove(node.Path);
-            error = $"{Id}: '{node.Path}' was not changed: {failure}";
-            notWritten = true;
-            return false;
+            if (strict)
+            {
+                // all or nothing: a value the file does not hold would be gone at the next start, while the caller
+                // was told it is set. The entry goes back to what it was, in the game and in the file's values.
+                if (changed.Count > 0) node.Set(holder, running);
+                if (inFile) _file[node.Path] = before;
+                else _file.Remove(node.Path);
+                error = $"{Id}: '{node.Path}' was not changed: {failure}";
+                return false;
+            }
+            _unsaved = true;  // Set: the value applies for this session; LastWriteError says why the file lacks it
         }
         Log(LogLevel.Info, $"config {Id}: {node.Path} = {ConfigSchema.Format(node, v)}{(pending.Count > 0 ? " (applies after a restart)" : "")}");
         Raise(changed, pending, ConfigChangeSource.Api);
@@ -273,14 +291,13 @@ public abstract class ConfigFile
     }
 
     /// <summary>Writes the running values into the file (after the mod changed its <c>Value</c> in code). Entries
-    /// waiting for a restart keep their file value. Throws <see cref="IOException"/> when the file cannot be written:
-    /// the running values stay as they are, the file keeps what it had, and a later <c>Save</c> writes them. Tick
-    /// thread; not in <see cref="Mod.OnBoot"/>.</summary>
+    /// waiting for a restart keep their file value. A file that cannot be written does not make it throw: the failure
+    /// is logged, <see cref="LastWriteError"/> says why (it is null after a write that succeeded), the running values
+    /// stay and a later <c>Save</c> writes them. Tick thread; not in <see cref="Mod.OnBoot"/>.</summary>
     public void Save()
     {
         if (Game.InBoot) throw new InvalidOperationException(Game.NotInBoot("ConfigFile.Save"));
         Game.AssertTickThread();
-        var before = new Dictionary<string, object?>(_file, StringComparer.OrdinalIgnoreCase);
         foreach (var (node, chain) in _values)
         {
             if (_server.ContainsKey(node.Path)) continue;  // the server's value: the file keeps this game's own
@@ -288,11 +305,7 @@ public abstract class ConfigFile
             var pending = node.RequiresRestart && _file.TryGetValue(node.Path, out var fv) && !ConfigSchema.ValueEquals(fv, running);
             if (!pending) _file[node.Path] = ConfigSchema.Copy(node, running);
         }
-        if (TryWrite(out var failure)) return;
-        // the file's values stay what the file holds, so nothing reads as saved that is not
-        _file.Clear();
-        foreach (var (k, v) in before) _file[k] = v;
-        throw new IOException($"config {Id}: {failure}");
+        if (!TryWrite(out _)) _unsaved = true;
     }
 
     /// <summary>Reads the file now (Kiln also does this by itself when the file changes). Tick thread; not in
@@ -665,8 +678,9 @@ public abstract class ConfigFile
     // Reading a config never fails because its file cannot be rewritten: the load paths log and go on.
     private void Write(string? text = null) => TryWrite(out _, text);
 
-    // False (logged, `error` = "cannot write <file>: <why>") when the file could not be written; its earlier content
-    // is then still there. True also for a per-world config while no world is open: its values live in memory.
+    // False (logged, `error` = "cannot write <file>: <why>", also in LastWriteError) when the file could not be written;
+    // its earlier content is then still there. True also for a per-world config while no world is open: its values
+    // live in memory.
     private bool TryWrite(out string error, string? text = null)
     {
         error = "";
@@ -680,11 +694,14 @@ public abstract class ConfigFile
             File.Move(tmp, FilePath, overwrite: true);
             _lastText = text;
             UpdateStamp();
+            LastWriteError = null;
+            _unsaved = false;  // the file holds every value now
             return true;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             error = $"cannot write {FilePath}: {e.Message}";
+            LastWriteError = error;
             Log(LogLevel.Error, $"config {Id}: {error}");
             try
             {
@@ -745,6 +762,8 @@ public abstract class ConfigFile
         _lastText = _lastBadText = null;
         Stamp = default;
         LastError = null;
+        LastWriteError = null;  // the other world's file
+        _unsaved = false;
         Warnings = [];
         if (worldDirectory is not null) Load(initial: true);  // reads the file, or writes it from the running values
         var changed = new List<string>();
