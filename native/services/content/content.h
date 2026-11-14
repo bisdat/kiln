@@ -392,6 +392,8 @@ struct BootFailed {
     std::string mod, key, why;
 };
 void nc_boot_failed(std::vector<BootFailed>* out);
+// Labs only (kiln.json boot.testFault, policy any): every world refuses the definition `guid` at registration with `why`.
+bool nc_lab_refuse(const std::string& guid, const std::string& why);
 // content.cpp: a required boot mod's definitions that did not register in a world stop the start (kiln.boot activation_fault),
 // each mod once. Called after a registration pass, with no lock of kiln.content held.
 void boot_late_check();

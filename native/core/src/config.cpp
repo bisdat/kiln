@@ -48,14 +48,20 @@ void read_preview(const nlohmann::json& sec, const char* where) {
         KLOG_W("config: %s \"preview\" is not true, false or a list of capability names; ignored", where);
     }
 }
-// "boot": {"testRefuse": {"<mod>": "<collector>"}}: kiln.boot honours it only with policy any (labs).
+// "boot": {"testRefuse" | "testFault": {"<mod>": "<collector>"}}: kiln.boot honours them only with policy any (labs).
 void read_boot(const nlohmann::json& doc) {
-    if (!doc.contains("boot") || !doc["boot"].is_object() || !doc["boot"].contains("testRefuse")) return;
-    const auto& t = doc["boot"]["testRefuse"];
-    if (!t.is_object()) return KLOG_W("config: kiln.json boot.testRefuse is not an object of mod id -> collector; ignored");
-    for (const auto& [mod, collector] : t.items())
-        if (collector.is_string()) g_config.boot_test_refuse[mod] = collector.get<std::string>();
-        else KLOG_W("config: kiln.json boot.testRefuse.%s is not a collector name; ignored", mod.c_str());
+    if (!doc.contains("boot") || !doc["boot"].is_object()) return;
+    for (const auto& [key, into] : {std::pair{"testRefuse", &g_config.boot_test_refuse}, std::pair{"testFault", &g_config.boot_test_fault}}) {
+        if (!doc["boot"].contains(key)) continue;
+        const auto& t = doc["boot"][key];
+        if (!t.is_object()) {
+            KLOG_W("config: kiln.json boot.%s is not an object of mod id -> collector; ignored", key);
+            continue;
+        }
+        for (const auto& [mod, collector] : t.items())
+            if (collector.is_string()) (*into)[mod] = collector.get<std::string>();
+            else KLOG_W("config: kiln.json boot.%s.%s is not a collector name; ignored", key, mod.c_str());
+    }
 }
 }  // namespace
 

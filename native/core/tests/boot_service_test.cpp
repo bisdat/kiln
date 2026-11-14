@@ -785,6 +785,43 @@ void test_refuse_case() {
     pass_line("BOOT-TEST-REFUSE the lab switch hands one collector an unreadable document of the mod (policy any only)", f0);
 }
 
+// the lab switch kiln.json "boot.testFault": with policy any every prepare's IR names the mods whose content the collector fails after
+// the publication (content only; an excluded mod is left out); without policy any, or for another collector, nothing
+void test_fault_case() {
+    t_case = "test-fault";
+    const int f0 = t_fail;
+    auto fault_of = [](const json& ir) {
+        KilnBootPrepareInputV1 p{};
+        p.size = sizeof p;
+        const std::string s = ir.dump();
+        p.canonical_ir_json = KilnStr{s.data(), s.size()};
+        return kiln::boot::parse(&p).test_fault;
+    };
+    t_config.boot_test_fault = {{"opt", "content"}, {"keep", "skills"}};
+    t_config.policy_any = false;
+    deferred_with({"opt", "keep"});
+    run_authors({"opt", "keep"});
+    CHECK(commit_with(envelope({"opt", "keep"})).status == KILN_BOOT_STATUS_PUBLISHED);
+    CHECK(!t_fake[2].seen.back().contains("testFault") && fault_of(t_fake[2].seen.back()).empty());  // not a lab: ignored
+    t_config.policy_any = true;
+    deferred_with({"opt", "keep"});
+    run_authors({"opt", "keep"});
+    CHECK(commit_with(envelope({"opt", "keep"})).status == KILN_BOOT_STATUS_PUBLISHED);
+    const auto f = fault_of(t_fake[2].seen.back());
+    CHECK(f.size() == 1 && f.count("opt") && f.at("opt") == "content");  // "skills" has no late fault to force: ignored
+    // a mod that is out of the generation is not named
+    deferred_with({"opt", "keep"});
+    run_authors({"opt", "keep"});
+    t_fake[0].act = Do::Refuse;
+    t_fake[0].act_round = 1;
+    t_fake[0].blame = "opt";
+    CHECK(commit_with(envelope({"opt", "keep"})).status == KILN_BOOT_STATUS_PUBLISHED);
+    CHECK(fault_of(t_fake[2].seen.back()).empty());
+    t_config.boot_test_fault.clear();
+    t_config.policy_any = false;
+    pass_line("BOOT-TEST-FAULT the lab switch names a mod whose content fails after the publication (policy any, content only)", f0);
+}
+
 void dependent_required_case() {
     t_case = "drop-required-dependent";
     const int f0 = t_fail;
@@ -1780,6 +1817,7 @@ int main(int argc, char** argv) {
     for (int i = 0; i < 7; ++i) atomic_unattributed_case(i);
     for (int i = 0; i < 7; ++i) drop_case(i);
     test_refuse_case();
+    test_fault_case();
     dependent_required_case();
     callback_cases();
     contract_cases();

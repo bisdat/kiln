@@ -656,6 +656,7 @@ struct Def {
     bool pack = false, seen = true, orphan = false;
     bool placeholder = false;  // "[Missing: mod:item]": keeps saved stacks of an item whose mod is gone (A4)
     bool internal = false;     // Kiln's own "[Unknown item]" template: client world only, in no list a mod or the sync sees
+    std::string lab_refuse;    // labs only (kiln.json boot.testFault): every world refuses it at registration, with this reason
     uint64_t version = 0;
     uint8_t tag_guid[kTextSlots][16] = {};
     uint32_t tags[kTextSlots] = {};
@@ -1566,6 +1567,10 @@ bool sync_world_pass(uint32_t kind, uintptr_t world) {
     for (const DefPtr& dp : defs) {
         Def& d = *dp;
         if (d.kind != KILN_CONTENT_ITEMS || (d.internal && kind != g_early_kind)) continue;
+        if (!d.lab_refuse.empty()) {
+            fail_once(ws, kind, d, d.lab_refuse);
+            continue;
+        }
         uintptr_t clone = 0;
         {
             std::lock_guard lock(store_mutex());
@@ -1641,6 +1646,10 @@ bool sync_world_pass(uint32_t kind, uintptr_t world) {
         for (const DefPtr& dp : defs) {
             Def& d = *dp;
             if (d.kind != KILN_CONTENT_RECIPES) continue;
+            if (!d.lab_refuse.empty()) {
+                fail_once(ws, kind, d, d.lab_refuse);
+                continue;
+            }
             uintptr_t info = 0;
             {
                 std::lock_guard lock(store_mutex());
@@ -4213,6 +4222,16 @@ bool nc_icon_alias(const uint8_t from[16], const uint8_t to[16]) {
 
 // A boot generation's prepared definitions that are not published (chapter 08): taken out whole while no world has bound (before the
 // game's entry point nothing has); once one has, they are only set aside as nc_undefine_owner does.
+bool nc_lab_refuse(const std::string& guid, const std::string& why) {
+    std::lock_guard lock(store_mutex());
+    for (const DefPtr& dp : g_defs)
+        if (dp && lower(dp->guid_s) == lower(guid)) {
+            dp->lab_refuse = why;
+            return true;
+        }
+    return false;
+}
+
 void nc_boot_failed(std::vector<BootFailed>* out) {
     for (const DefPtr& dp : g_defs)
         if (dp && !dp->error.empty() && dp->owner_label.rfind("boot:", 0) == 0)
