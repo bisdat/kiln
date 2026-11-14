@@ -535,6 +535,15 @@
    "state": "open"
   },
   {
+   "id": "08-boot.required-client",
+   "title": "A required boot mod's client-only content stops the start",
+   "chapter": "08",
+   "packages": [
+    "08-onboot"
+   ],
+   "state": "open"
+  },
+  {
    "id": "08-loader-order",
    "title": "Other-loader consumer ordering",
    "chapter": "08",
