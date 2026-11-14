@@ -234,15 +234,65 @@ fn player_states_reader_agrees() {
     assert!(bad.is_empty(), "{}", bad.join("\n"));
 }
 
+/// The version of `name` the launcher's lockfile pins (`"name": ["name@1.2.3", ...` in launcher/bun.lock).
+fn locked_version(lock: &str, name: &str) -> Option<String> {
+    let key = format!("\"{name}\": [\"{name}@");
+    let rest = &lock[lock.find(&key)? + key.len()..];
+    Some(rest[..rest.find('"')?].to_string())
+}
+
+/// The node_modules `ajv_agrees` runs ajv from: the launcher's when it is installed; else `KILN_AJV_MODULES`; else ajv,
+/// ajv-formats and jsonc-parser at the launcher's locked versions, installed once from bun's cache (offline, no
+/// scripts) under the build's tmp folder. `None` only with `KILN_LINT_NO_AJV=1`. Otherwise, no node, no bun or a failed
+/// install fails the test: the cross-check must not pass by skipping. It did that in every gate without
+/// launcher/node_modules, and hid schema patterns kiln lint could not run.
+fn ajv_modules(root: &Path) -> Option<PathBuf> {
+    if std::env::var("KILN_LINT_NO_AJV").is_ok_and(|v| v == "1") {
+        eprintln!("ajv_agrees: skipped (KILN_LINT_NO_AJV=1)");
+        return None;
+    }
+    assert!(has_tool("node", "--version"), "ajv_agrees needs node (set KILN_LINT_NO_AJV=1 to skip this cross-check knowingly)");
+    let launcher = root.join("launcher/node_modules");
+    let need = ["ajv", "ajv-formats", "jsonc-parser"];
+    if need.iter().all(|n| launcher.join(n).join("package.json").is_file()) {
+        return Some(launcher);
+    }
+    if let Ok(m) = std::env::var("KILN_AJV_MODULES") {
+        return Some(PathBuf::from(m));
+    }
+    let lock = std::fs::read_to_string(root.join("launcher/bun.lock")).unwrap();
+    let deps: Vec<(&str, String)> = need.iter().map(|n| (*n, locked_version(&lock, n).unwrap_or_else(|| panic!("{n} is not in launcher/bun.lock")))).collect();
+    let tag = deps.iter().map(|(n, v)| format!("{n}-{v}")).collect::<Vec<_>>().join("_");
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("kiln-lint-ajv").join(&tag);
+    if need.iter().all(|n| dir.join("node_modules").join(n).join("package.json").is_file()) {
+        return Some(dir.join("node_modules"));
+    }
+    // installed beside, then moved in place: two test runs at once never see a half-installed folder
+    let work = dir.with_file_name(format!("{tag}.tmp{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work).unwrap();
+    let pkg = serde_json::json!({ "name": "kiln-lint-ajv", "private": true,
+        "dependencies": deps.iter().map(|(n, v)| (n.to_string(), Value::String(v.clone()))).collect::<serde_json::Map<_, _>>() });
+    std::fs::write(work.join("package.json"), pkg.to_string()).unwrap();
+    let out = std::process::Command::new("bun").args(["install", "--offline", "--ignore-scripts", "--no-progress"]).current_dir(&work).output();
+    let ok = out.as_ref().is_ok_and(|o| o.status.success()) && need.iter().all(|n| work.join("node_modules").join(n).join("package.json").is_file());
+    if !ok {
+        let _ = std::fs::remove_dir_all(&work);
+    }
+    assert!(ok, "ajv_agrees: could not provide ajv: install the launcher's packages (cd launcher && bun install), set KILN_AJV_MODULES \
+        to a node_modules with ajv, ajv-formats and jsonc-parser, or set KILN_LINT_NO_AJV=1 to skip knowingly. bun said: {}",
+        out.map(|o| String::from_utf8_lossy(&o.stderr).into_owned()).unwrap_or_else(|e| e.to_string()));
+    if std::fs::rename(&work, &dir).is_err() {
+        let _ = std::fs::remove_dir_all(&work); // another run put it in place first
+    }
+    Some(dir.join("node_modules"))
+}
+
 /// kiln lint's schema validator agrees with ajv (draft 2020-12) on every fixture and every mod file of the repo.
 #[test]
 fn ajv_agrees() {
     let root = repo();
-    let modules = root.join("launcher/node_modules");
-    if !has_tool("node", "--version") || !modules.join("ajv").exists() {
-        eprintln!("skipped: no node or launcher/node_modules/ajv");
-        return;
-    }
+    let Some(modules) = ajv_modules(&root) else { return };
     let mut files = Vec::new();
     json_files(&fixtures().join("cases"), &mut files);
     json_files(&root.join("mods"), &mut files);
