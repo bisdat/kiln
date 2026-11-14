@@ -667,7 +667,7 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
         var mod = Find(id);
         // a committed boot mod's boot content stays as committed until the process ends: reloading it needs a restart (before OnUnload)
         if (mod is { Manifest.Boot: not ManifestBoot.None } && BootGeneration.Report(id) is { State: BootModState.Committed })
-            return new ModOperationResult(false, $"RestartRequiredBoot: mod {id} has boot content in this process's boot generation; restart to load a new version", [id]);
+            return new ModOperationResult(false, $"RestartRequiredBoot: mod {id} has boot content in this process's boot generation; restart the game (or the server) to load a new version", [id]);
         if (record is null && mod is null)
         {
             // first deploy (KilnDeploy -p:KilnReload=true): nothing to reload, but the profile or kiln/mods/<id> may

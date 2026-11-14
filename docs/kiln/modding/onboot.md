@@ -122,8 +122,8 @@ the running mod see the same values. Writes, `Reload`, a `Changed` handler and `
   guid; state/boot.json lists every boot mod's state and issue`. `kiln/state/boot.json` has the same. What can only fail
   once the game's data comes up stops the start the same way, before a world loads: a resource patch that cannot be
   written, a world-table block the merge cannot apply, quests or NPCs of the mod that the quest build leaves out.
-- A mod with `boot` that was enabled after the start (`MissedPhase`), or whose manifest or assembly changed since, does
-  not load until the next start.
+- A mod with `boot` that was enabled after the start (`MissedPhase`), or whose files changed since (below), does not
+  load until the next start.
 
 `kiln/state/boot.json`, section `boot`: whether the phase ran (`deferred`), the boot mods, the collectors, each mod's
 state and definition count, every issue (mod, kind, key, phase, code, reason) and the exit code when the start stopped.
@@ -135,6 +135,43 @@ state and definition count, every issue (mod, kind, key, phase, code, reason) an
   after `OnLoad`, when its committed definitions are active (their run-time parts: rules, icons). Subscribe in
   `OnLoad`. A mod whose `OnBoot` staged nothing gets the event too, with no definitions.
 - The staged blocks keep their names: `mod:name` from another mod, as for a block defined in `OnLoad`.
+- `Blocks.Find(name)` finds a committed boot block from the commit on: in `OnLoad` already (before the event), and after
+  the mod's run-time unload, because the content stays in the game until the process ends. A block defined in `OnLoad`
+  can name it (`Applies = new StatusApply { Status = "chill" }`). The handle has the ids the generation published.
+- `Blocks.Define` in `OnLoad` under the name of a committed boot block: the same block (the same kind, the same values)
+  gives the committed handle and registers nothing again; another one throws `BlockError`
+  (`RestartRequiredBoot: chill differs from the statuses definition this process's boot generation committed ...`).
+  What is in the game cannot change before a restart: change it in `OnBoot` and restart.
+
+## After a change: restart
+The boot generation keeps what the start read. When the generation commits, Kiln freezes each boot mod's inputs, the
+files the boot phase reads for it:
+
+- `kiln.mod.json`;
+- every `.dll` at the top of the mod's folder (the entry assembly and its helpers), except `Kiln.Api.dll` and Kiln's
+  shared `Kiln.*.dll`, which every mod takes from Kiln (a deploy leaves them out);
+- everything under `blocks/` (with `blocks/generated/`), `assets/`, `quests/` and `skills/`, and `blocks.tables.json`.
+
+A later load of the mod in the same process (after `Mods.UnloadAsync`, or the launcher's switch) compares them. Any
+difference is refused before the mod's code loads:
+`RestartRequiredBoot: mod frost-tokens changed since this process's boot generation committed its boot content
+(blocks/frost.json changed); restart the game (or the server) to load the new version`. Put the file back as it was, or
+restart. `Mods.ReloadAsync` of a loaded boot mod is refused the same way, whether anything changed or not.
+
+What is not a change:
+- a JSON file written again with the same values (other spacing, comments, line endings, a byte-order mark): it counts
+  by its parsed value; the order of its keys does count;
+- files and folders whose name starts with `.` (the launcher's `.disabled` and `.kiln-source.json`), and `*.kiln-tmp`;
+- anything else in the mod's folder (`docs/`, `sigdb/`, a readme), the mod's data folder (`Context.DataDirectory`) and
+  `kiln/config`: what the mod and Kiln write while they run.
+
+Configuration: `Config.Register` cannot run in `OnBoot` (above), so no configuration is in a boot generation and a
+config file is not an input. A file your `OnBoot` reads itself counts only if it is under one of the folders above: keep
+such files there (`blocks/`, for example), not in the data folder.
+
+If a mod's inputs change while the boot phase runs (between its `OnBoot` and the commit), its content matches no
+version of the files: kiln.log warns (`its files changed while the boot phase ran`), and the mod loads again only after a
+restart.
 
 ## Where it runs
 - **Dedicated servers.** The phase runs when hooks and .NET are on, an enabled mod of the server says `boot`, and
