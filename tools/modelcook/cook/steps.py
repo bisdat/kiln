@@ -334,6 +334,8 @@ def model(k, t, gltf_files, base, guid=None, mode=None, name=None, material=None
                 "materials": [m["material"] for m in materials], "boundingBox": desc["boundingBox"], "globalScale": desc["globalScale"], "morphs": morphs}
         if attach is not None:
             side["attach"] = str(attach)
+        if physics is not None:  # what Kiln.Blocks checks a body's cloth and chains against (physics.spec_hash): a body asks for what was cooked, or is refused
+            side["physics"] = {"spec": PH.spec_hash(physics), "cloth": len(physics.cloth), "chains": len(physics.chains)}
         files[f"{subdir}/{stem}.model.json"] = json.dumps(side, indent=1).encode() + b"\n"
     return files, entries, report
 

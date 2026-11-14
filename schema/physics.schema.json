@@ -93,7 +93,8 @@
     },
     "end": {
       "$ref": "#/$defs/sphere",
-      "properties": { "type": { "const": "sphere" }, "x": {}, "y": {}, "z": {}, "radius": {}, "joint": {} },
+      "description": "An end of a capsule: a sphere without \"type\".",
+      "properties": { "x": {}, "y": {}, "z": {}, "radius": {}, "joint": {} },
       "additionalProperties": false
     },
     "chain": {

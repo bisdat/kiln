@@ -19,10 +19,11 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 TOOLS = HERE.parent.parent
-sys.path[:0] = [str(HERE), str(HERE.parent), str(HERE.parent / "samples"), str(TOOLS / "kfc"), str(TOOLS / "kfc" / "tests"), str(TOOLS / "animcook"),
+sys.path[:0] = [str(HERE), str(HERE.parent), str(HERE.parent / "samples"), str(HERE.parent / "blender"), str(TOOLS / "kfc"), str(TOOLS / "kfc" / "tests"), str(TOOLS / "animcook"),
                 str(TOOLS / "animcook" / "samples")]
 
 import cube_sword  # noqa: E402
+import kiln_physics_export as KX  # noqa: E402
 import fakegame  # noqa: E402
 import rigged_figure  # noqa: E402
 from anicook import skeleton as K  # noqa: E402
@@ -66,6 +67,8 @@ def write_gltf(path, meshes, nodes, skins=(), materials=("cloth",)):
                                   min=[min(v[k] for v in pos) for k in range(3)], max=[max(v[k] for v in pos) for k in range(3)])}
             if pr.get("uvs"):
                 at["TEXCOORD_0"] = add(b"".join(struct.pack("<2f", *v) for v in pr["uvs"]), 5126, "VEC2", len(pos))
+            for name, vals in (pr.get("attributes") or {}).items():  # a scalar float attribute per vertex (_KILN_PIN)
+                at[name] = add(struct.pack(f"<{len(vals)}f", *vals), 5126, "SCALAR", len(pos))
             if pr.get("joints"):
                 at["JOINTS_0"] = add(b"".join(struct.pack("<4B", *v) for v in pr["joints"]), 5121, "VEC4", len(pos))
                 at["WEIGHTS_0"] = add(b"".join(struct.pack("<4f", *v) for v in pr["weights"]), 5126, "VEC4", len(pos))
@@ -453,6 +456,50 @@ class Refusals(Game, unittest.TestCase):
         self.assertIn("keen::RenderClothFabricResource has 72 bytes, the cook writes 68", RM.layout_problems(TypeDb(dump2), "cloth"))
 
 
+class BlenderHelper(Game, unittest.TestCase):
+    """tools/modelcook/blender/kiln_physics_export.py without Blender: a glTF whose primitive carries _KILN_PIN (what its Blender path exports)."""
+
+    def seamed(self):
+        pos, idx, uvs = grid(2, 2)
+        tris = [tuple(idx[t:t + 3]) for t in range(0, len(idx), 3)]
+        col = [1, 4, 7]
+        extra = {v: 9 + i for i, v in enumerate(col)}
+        idx2 = [extra[v] if v in extra and all(pos[u][0] >= 1 for u in t) else v for t in tris for v in t]
+        pos2, uvs2 = pos + [pos[v] for v in col], uvs + [(0.7, uvs[v][1]) for v in col]
+        pin = top_pinned(2, 2) + [1.0, 0.0, 0.0]
+        rigid = {"positions": [(5, 0, 0), (6, 0, 0), (5, 1, 0)], "indices": [0, 1, 2]}
+        return write_gltf(self.dir / "seamed.gltf", [[rigid], [{"positions": pos2, "indices": idx2, "uvs": uvs2, "attributes": {KX.ATTRIBUTE: pin}}]],
+                          [{"mesh": 0}, {"mesh": 1}])
+
+    def test_it_writes_what_the_cook_takes(self):
+        path = self.seamed()
+        out = self.dir / "physics.json"
+        out.write_text(json.dumps({"format": 1, "models": {"models/other.gltf": {"chains": [{"rootJoint": "a", "tipJoint": "b"}]}}}))
+        self.assertEqual(KX.main(["--gltf", str(path), "--key", "seamed.gltf", "--mass", "0.7", "--chain", "upper:lower", "--out", str(out)]), 0)
+        ph = PH.load(out)
+        self.assertEqual(sorted(ph.models), ["models/other.gltf", "seamed.gltf"])
+        mp = ph.get("seamed.gltf")
+        c = mp.cloth[0]
+        self.assertEqual((c.mesh, c.primitive, c.mass_kg), (1, 0, 0.7))
+        self.assertEqual(c.particle_ids, tuple(range(9)) + (1, 4, 7))  # the seam copies weld back
+        self.assertEqual(c.pin, (1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
+        self.assertEqual((mp.chains[0].root_joint, mp.chains[0].tip_joint), ("upper", "lower"))
+        d, _, _, r = self.cook(path, PH.Physics({"seamed.gltf": PH.ModelPhysics("seamed.gltf", mp.cloth, (), "x", 'x["seamed.gltf"]')}).get("seamed.gltf"))
+        self.assertTrue(r["ok"])
+        self.assertEqual([m["clothMeshIndex"] for m in d["meshes"]], [0, 1])
+        self.assertEqual(d["cloth"]["meshes"][0]["data"]["fabric"]["numParticles"], 9)
+
+    def test_it_refuses_what_it_cannot_read(self):
+        sword = self.dir / "plain.gltf"
+        cube_sword.write(sword)
+        with self.assertRaisesRegex(KX.ExportError, "no primitive carries the attribute _KILN_PIN"):
+            KX.cloth_entries(sword)
+        out = self.dir / "bad.json"
+        self.assertEqual(KX.main(["--gltf", str(self.seamed()), "--key", "../x.gltf", "--out", str(out)]), 2)
+        self.assertFalse(out.exists())
+        self.assertEqual(KX.main(["--gltf", str(self.seamed()), "--key", "x.gltf", "--chain", "lonely", "--out", str(out)]), 2)
+
+
 # What the models without physics cooked to on the tree before cloth was added (base bd9d1073), recorded with the code below.
 NONPHYSICS = {
     "rigid-cubes": ["e08068f0c442a6f976b8f867ec1a7e109f5b23824bf4f6d8eb84d36db5564458", "a10a3aa7d298745b26e379b2e30feada58be5d81dc1483b553c964d51af75128"],
@@ -564,6 +611,18 @@ class Recipes(unittest.TestCase):
         (rp.parent / "physics.json").write_text(json.dumps({"format": 1, "models": {"assets/src/banner.gltf": {"cloth": [{"mesh": 0, "primitive": 0, "pin": [1, 1, 0, 0], "massKg": 0.4}]}}}))
         self.assertTrue(recipe.needs_cook(rp), "a changed physics.json means a new cook")
 
+    def test_materials_made_from_the_gltf_keep_the_cloth(self):
+        """A step with "materials": "gltf" (what a body's and a look's steps do) once lost its model's physics.json entry (16e S4: a loop
+        variable of the material blocks took the model's key)."""
+        rp = self.mod("gltf-materials", self.BANNER_PHYSICS, steps_=[{"op": "model", "gltf": "src/banner.gltf", "materials": "gltf", "guid": NEW, "mode": "new", "stem": "banner"}])
+        doc = json.loads((rp.parent / "src" / "banner.gltf").read_text())
+        doc["materials"] = [{"name": "flag"}]
+        doc["meshes"][0]["primitives"][0]["material"] = 0
+        (rp.parent / "src" / "banner.gltf").write_text(json.dumps(doc))
+        r = recipe.run(rp, self.client, self.types, update_manifest=True)
+        self.assertTrue(r["ok"], json.dumps(r["steps"])[:2000])
+        self.assertEqual(r["steps"][0]["cloth"]["meshes"][0]["particles"], 4)
+
     def test_without_the_key_the_build_is_refused_on_both_sides(self):
         for side, k in (("client", self.client), ("server", self.server)):
             with self.subTest(side=side):
@@ -594,6 +653,64 @@ class Recipes(unittest.TestCase):
         rp = self.mod("bad", {"format": 1, "models": {"assets/src/banner.gltf": {"cloth": [{"mesh": 0, "primitive": 0, "pin": [1, 1, 2, 0]}]}}})
         with self.assertRaisesRegex(recipe.RecipeError, r'^assets/physics.json: models\["assets/src/banner.gltf"\]\.cloth\[0\]\.pin\[2\]: 2.0 is outside \[0, 1\]'):
             recipe.run(rp, self.client, self.types, update_manifest=True)
+
+    def body_mod(self, name, blocks, experimental=("modelcook.cloth",), physics_doc=None):
+        """A mod whose blocks/npc.json has bodies on the skinned cape (assets/src/cape.gltf, and cloak.gltf, the same file)."""
+        rp = self.mod(name, physics_doc, experimental=experimental, steps_=[])
+        skinned_cape(rp.parent / "src" / "cape.gltf")
+        skinned_cape(rp.parent / "src" / "cloak.gltf")
+        (rp.parent.parent / "blocks").mkdir(exist_ok=True)
+        (rp.parent.parent / "blocks" / "npc.json").write_text(json.dumps(blocks))
+        return rp
+
+    CAPE_CLOTH = [{"mesh": 0, "primitive": 0, "pin": [1, 1, 1, 0, 0, 0, 0, 0, 0], "massKg": 0.5}]
+
+    def test_a_body_blocks_cloth_is_cooked_into_its_model(self):
+        rp = self.body_mod("body", {"bodies": {"caped": {"model": "assets/src/cape.gltf", "cloth": self.CAPE_CLOTH}}})
+        r = recipe.run(rp, self.client, self.types, update_manifest=True)
+        self.assertTrue(r["ok"], json.dumps(r["steps"])[:2000])
+        cooked = rp.parent / "cooked"
+        side = json.loads((cooked / "assets_src_cape.model.json").read_text())
+        want = PH.spec_hash(PH.parse_model("assets/src/cape.gltf", {"cloth": self.CAPE_CLOTH}, "blocks/npc.json"))
+        self.assertEqual(side["physics"], {"spec": want, "cloth": 1, "chains": 0})
+        d = Decoder(self.types).decode("keen::RenderModel", (cooked / "assets_src_cape.bin").read_bytes())
+        self.assertEqual(d["cloth"]["meshes"][0]["data"]["fabric"]["numParticles"], 9)
+        self.assertTrue(d["cloth"]["hasSkinning"])
+        self.assertIn("../blocks/npc.json", r["sources"])
+        # a body without cloth: its model's side file says nothing of physics (as before)
+        rp2 = self.body_mod("body-plain", {"bodies": {"plain": {"model": "assets/src/cape.gltf"}}}, experimental=None)
+        self.assertTrue(recipe.run(rp2, self.client, self.types, update_manifest=True)["ok"])
+        self.assertNotIn("physics", json.loads((rp2.parent / "cooked" / "assets_src_cape.model.json").read_text()))
+
+    def test_a_body_blocks_cloth_needs_the_key(self):
+        rp = self.body_mod("body-off", {"bodies": {"caped": {"model": "assets/src/cape.gltf", "cloth": self.CAPE_CLOTH}}}, experimental=None)
+        with self.assertRaisesRegex(recipe.RecipeError, r"^blocks/npc.json: body caped\.cloth: needs cook feature modelcook.cloth"):
+            recipe.run(rp, self.client, self.types, update_manifest=True)
+
+    def test_one_model_physics_from_one_place(self):
+        both = {"format": 1, "models": {"assets/src/cape.gltf": {"cloth": self.CAPE_CLOTH}}}
+        rp = self.body_mod("body-twice", {"bodies": {"caped": {"model": "assets/src/cape.gltf", "cloth": self.CAPE_CLOTH}}}, physics_doc=both)
+        with self.assertRaisesRegex(recipe.RecipeError, r"^blocks/npc.json: body caped: 'assets/src/cape.gltf' already has physics from assets/physics.json"):
+            recipe.run(rp, self.client, self.types, update_manifest=True)
+        rp = self.body_mod("body-two-bodies", {"bodies": {"a": {"model": "assets/src/cape.gltf", "cloth": self.CAPE_CLOTH},
+                                                          "b": {"model": "assets/src/cape.gltf", "chains": [{"rootJoint": "upper", "tipJoint": "lower"}]}}})
+        with self.assertRaisesRegex(recipe.RecipeError, r"body b: its model assets/src/cape.gltf has cloth and chains from blocks/npc.json: body a already"):
+            recipe.load(rp)
+
+    def test_a_bad_body_cloth_is_refused_by_its_block_path(self):
+        rp = self.body_mod("body-bad", {"creatures": {"golem": {"body": {"model": "assets/src/cape.gltf", "cloth": [{"mesh": 0, "primitive": 0, "pin": [1, 2]}]}}}})
+        with self.assertRaisesRegex(recipe.RecipeError, r"^blocks/npc.json: body golem.body\.cloth\[0\]\.pin\[1\]: 2.0 is outside \[0, 1\]"):
+            recipe.run(rp, self.client, self.types, update_manifest=True)
+
+    def test_a_recipe_step_for_the_body_model_keeps_its_cloth(self):
+        rp = self.body_mod("body-step", {"bodies": {"caped": {"model": "assets/src/cape.gltf", "cloth": self.CAPE_CLOTH}}})
+        doc = json.loads(rp.read_text())
+        doc["steps"] = [{"tool": "animcook", "op": "skeleton", "name": "cape", "gltf": "src/cape.gltf"},
+                        {"op": "model", "gltf": "src/cape.gltf", "skeleton": "cape", "material": fakegame.MATERIAL, "name": "assets/src/cape", "stem": "mine"}]
+        rp.write_text(json.dumps(doc))
+        r = recipe.run(rp, self.client, self.types, update_manifest=True)
+        self.assertTrue(r["ok"], json.dumps(r["steps"])[:2000])
+        self.assertEqual(json.loads((rp.parent / "cooked" / "mine.model.json").read_text())["physics"]["cloth"], 1)
 
     def test_worn_path_carries_cloth(self):
         """G2: a worn look's model step reads physics.json by the look's model path, through the same model step."""

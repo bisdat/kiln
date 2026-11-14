@@ -31,8 +31,10 @@ Everything else of the game's cloth and chain tuning is fixed in v1 (chapter 16e
 (sleeves, simulated morph targets, per-vertex stiffness, a second cloth LOD) is refused where it would be asked for.
 Each refusal starts with the field path, so an author finds the value: `assets/physics.json: models["x.gltf"].cloth[0].pin[3]: ...`.
 """
+import hashlib
 import json
 import math
+import struct
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
@@ -272,10 +274,9 @@ def model_key(key, where):
 
 
 def parse_sphere(v, where, typed=True):
-    allowed = ("type", "x", "y", "z", "radius", "joint") if typed else ("x", "y", "z", "radius", "joint", "type")
+    """A sphere collider ({"type": "sphere", ...}), or an end of a capsule (typed=False: no "type", as Kiln.Blocks' ClothCapsuleBlock.A and B)."""
+    allowed = ("type", "x", "y", "z", "radius", "joint") if typed else ("x", "y", "z", "radius", "joint")
     _keys(v, where, allowed, ("x", "y", "z", "radius"))
-    if "type" in v and v["type"] != "sphere":
-        raise PhysicsError(f"{_at(where, 'type')}: {v['type']!r}: an end of a capsule is a sphere")
     return Sphere(_coord(v["x"], _at(where, "x")), _coord(v["y"], _at(where, "y")), _coord(v["z"], _at(where, "z")),
                   _num(v["radius"], _at(where, "radius"), COLLIDER_RADIUS_OPEN_LOW, open_low=True), _name(v.get("joint"), _at(where, "joint"), optional=True))
 
@@ -403,6 +404,57 @@ def merge(*parts):
             folded[key.lower()] = mp
             out[key] = mp
     return Physics(out)
+
+
+# ------------------------------------------------------------------------------------------------ spec hash ----
+#
+# What a model's physics asks for, as bytes both the cook and Kiln.Blocks write the same way (Npc/NpcPhysics.cs SpecHash): the cook stores the
+# hash in <stem>.model.json, and a body block that carries cloth or chains is checked against it when it is defined (a request the build did not
+# cook is refused, never cooked at run time). Every value with its kind: i<int>; d<IEEE-754 bits of the double, 16 hex digits>; s<UTF-8 byte
+# count>:<bytes>; n; null, l<count>[<items>]. A model is l2[cloth, chains]; a cloth entry l9[mesh, primitive, particleIds|n, pin, massKg,
+# gravity, damping, stiffness, colliders]; a sphere l6[s"sphere", x, y, z, radius, joint|n]; a capsule l3[s"capsule", end a, end b], an end
+# l5[x, y, z, radius, joint|n]; a chain l7[rootJoint, tipJoint, particleMassKg, damping, stiffness, bendStiffness, particleRadius].
+
+SPEC = "kiln-physics-1;"
+
+
+def _spec(v, out):
+    if v is None:
+        out += b"n;"
+    elif isinstance(v, bool):
+        raise TypeError("a bool has no spec form")
+    elif isinstance(v, int):
+        out += f"i{v};".encode()
+    elif isinstance(v, float):
+        out += f"d{struct.unpack('>Q', struct.pack('>d', v))[0]:016x};".encode()
+    elif isinstance(v, str):
+        b = v.encode("utf-8")
+        out += f"s{len(b)}:".encode() + b + b";"
+    else:
+        out += f"l{len(v)}[".encode()
+        for x in v:
+            _spec(x, out)
+        out += b"]"
+
+
+def _sphere_spec(s):
+    return [s.x, s.y, s.z, s.radius, s.joint]
+
+
+def spec_bytes(mp):
+    """The spec form of one model's physics (see above)."""
+    cloth = [[c.mesh, c.primitive, list(c.particle_ids) if c.particle_ids is not None else None, list(c.pin), c.mass_kg, c.gravity, c.damping, c.stiffness,
+              [["sphere"] + _sphere_spec(x) if isinstance(x, Sphere) else ["capsule", _sphere_spec(x.a), _sphere_spec(x.b)] for x in c.colliders]]
+             for c in mp.cloth]
+    chains = [[c.root_joint, c.tip_joint, c.particle_mass_kg, c.damping, c.stiffness, c.bend_stiffness, c.particle_radius] for c in mp.chains]
+    out = bytearray(SPEC.encode())
+    _spec([cloth, chains], out)
+    return bytes(out)
+
+
+def spec_hash(mp):
+    """sha256 of spec_bytes, lower-case hex: what <stem>.model.json's "physics"."spec" holds."""
+    return hashlib.sha256(spec_bytes(mp)).hexdigest()
 
 
 # --------------------------------------------------------------------------------------------- the mesh rules ----

@@ -123,7 +123,7 @@ class Sidecar(unittest.TestCase):
             (full({cloth_path("colliders", 0, "z"): ...}), c + ".colliders[0].z", "missing"),
             (full({cloth_path("colliders", 1, "b", "joint"): "spine"}), c + ".colliders[1].b.joint", "one joint"),
             (full({cloth_path("colliders", 1, "b", "y"): 0}), c + ".colliders[1]", "one point"),
-            (full({cloth_path("colliders", 1, "a", "type"): "capsule"}), c + ".colliders[1].a.type", "a sphere"),
+            (full({cloth_path("colliders", 1, "a", "type"): "sphere"}), c + ".colliders[1].a.type", "not a field here"),
             (full({("models", "models/cape.glb", "chains", 0, "rootJoint"): ""}), CAPE + ".chains[0].rootJoint", "not a joint name"),
             (full({("models", "models/cape.glb", "chains", 0, "tipJoint"): "tail_0"}), CAPE + ".chains[0].tipJoint", "the root too"),
             (full({("models", "models/cape.glb", "chains", 0, "particleMassKg"): 0.0001}), CAPE + ".chains[0].particleMassKg", "outside"),
@@ -197,6 +197,34 @@ class Sidecar(unittest.TestCase):
             P.loads(json.dumps({"format": 1, "models": {"a.gltf": entry, "A.gltf": entry}}))
         other = P.Physics({"models/other.glb": P.parse_model("models/other.glb", entry, "blocks/npc.json")})
         self.assertEqual(sorted(P.merge(a, other).models), ["models/cape.glb", "models/other.glb"])
+
+
+class SpecHash(unittest.TestCase):
+    """The spec form Kiln.Blocks checks a body against (Npc/NpcPhysics.cs SpecBytes): managed/tests/Kiln.Blocks.Tests/ModelPhysicsTests.cs holds the
+    same two hashes for the same requests, typed and as blocks/*.json."""
+    ENTRY = {"cloth": [{"mesh": 0, "primitive": 1, "particleIds": [7, 3, 3, 9], "pin": [1, 0, 0.25], "massKg": 0.3,
+                        "colliders": [{"type": "sphere", "x": 0, "y": 1.5, "z": -0.1, "radius": 0.15, "joint": "spine"},
+                                      {"type": "capsule", "a": {"x": 0.1, "y": 1, "z": 0, "radius": 0.1, "joint": "j2"},
+                                       "b": {"x": 0.1, "y": 0.4, "z": 0, "radius": 0.08, "joint": "j2"}}]}],
+             "chains": [{"rootJoint": "z\u00f6pf_0", "tipJoint": "z\u00f6pf_2", "particleRadius": 0.02}]}
+    FULL = "e5c0cae78d515c24b5e5ec5301716a18b3de6f0278709821363d6c6c2b11b5f1"
+    MINIMAL = "48447f8115000ff8fb08bf190e914f9ebd9e8367f9ddea662c3aa179cea5b2f4"
+
+    def test_the_hashes_kiln_blocks_writes_too(self):
+        self.assertEqual(P.spec_hash(P.parse_model("models/cape.gltf", self.ENTRY, "blocks/npc.json")), self.FULL)
+        self.assertEqual(P.spec_hash(P.parse_model("m.gltf", {"cloth": [{"mesh": 0, "primitive": 0, "pin": [1]}]}, "x")), self.MINIMAL)
+
+    def test_the_form(self):
+        b = P.spec_bytes(P.parse_model("m.gltf", {"cloth": [{"mesh": 0, "primitive": 0, "pin": [1]}]}, "x"))
+        self.assertEqual(b, b"kiln-physics-1;l2[l1[l9[i0;i0;n;l1[d3ff0000000000000;]d3ff0000000000000;d40239eb851eb851f;d3fd999999999999a;d3fe999999999999a;l0[]]]l0[]]")
+        # the model's path is not in it, every value is
+        e = json.loads(json.dumps(self.ENTRY))
+        self.assertEqual(P.spec_hash(P.parse_model("other.gltf", e, "x")), self.FULL)
+        e["chains"][0]["particleRadius"] = 0.03
+        self.assertNotEqual(P.spec_hash(P.parse_model("other.gltf", e, "x")), self.FULL)
+        # defaults written out: the short form is the long one
+        long = {"cloth": [{"mesh": 0, "primitive": 0, "pin": [1], "massKg": 1, "gravity": 9.81, "damping": 0.4, "stiffness": 0.8, "colliders": []}]}
+        self.assertEqual(P.spec_hash(P.parse_model("m.gltf", long, "x")), self.MINIMAL)
 
 
 # a 2 x 1 strip of quads in the x/y plane, top row pinned: vertices 0..5, 0-1-2 on top

@@ -39,8 +39,8 @@ says what to draw with; without `guid` such a model's GUID follows from <mod>:mo
 A mod with no assets/cook.json of modelcook's still has those: looks_recipe() is the recipe they make on their own (`modelcook.py looks MODDIR`, which `kiln cook` runs), with its report in
 cook-report.looks.json.
 
-Cloth and bone chains (cook/physics.py, docs/kiln/modding/models.md#physics): the mod's assets/physics.json names them per model file, and the
-model step of that file writes them. They need cook features that are off until the game has been seen to show them right (cook/features.py):
+Cloth and bone chains (cook/physics.py, docs/kiln/modding/models.md#physics): the mod's assets/physics.json names them per model file (and a
+body block's "cloth" and "chains" its model's), and the model step of that file writes them. They need cook features that are off until the game has been seen to show them right (cook/features.py):
 `"experimental": ["modelcook.cloth", "modelcook.chains2"]` turns them on for this mod, with one warning line. A model with physics whose
 feature is off, and physics for a model no step cooks, are refused by name.
 
@@ -320,13 +320,17 @@ def _mod_dir(path):
 PHYSICS = ("assets", "physics.json")  # the mod's physics, from its folder
 
 
-def physics_of(path):
-    """The physics of the mod a recipe belongs to: its assets/physics.json as one tree (cook/physics.py), empty when it has none."""
+def physics_of(path, doc=None):
+    """The physics of the mod a recipe belongs to as one tree (cook/physics.py): its assets/physics.json and the cloth and chains of its body
+    blocks (the recipe's "blocksPhysics", tools/animcook/anicook/blocks.py). A model both name is refused."""
+    parts = []
     f = _mod_dir(path).joinpath(*PHYSICS)
-    if not f.is_file():
-        return PH.Physics()
     try:
-        return PH.load(f, "/".join(PHYSICS))
+        if f.is_file():
+            parts.append(PH.load(f, "/".join(PHYSICS)))
+        for x in (doc or {}).get("blocksPhysics", []):
+            parts.append(PH.Physics({x["model"]: PH.parse_model(x["model"], x["physics"], x["from"].split(":")[0], x["from"])}))
+        return PH.merge(*parts)
     except PH.PhysicsError as e:
         raise RecipeError(str(e)) from e
 
@@ -435,7 +439,7 @@ def run(path, k, t, exe_sha256=None, update_manifest=False, given=None):
     files, entries, reports = {}, [], []
     mod_dir = _mod_dir(p)
     turned_on = FT.experimental(doc, str(p))
-    physics = physics_of(p)
+    physics = physics_of(p, doc)
     for key, mp in sorted(physics.models.items()):  # refused here, before any step: a server's cook refuses what a client's would
         for feature in mp.features():
             try:
@@ -457,9 +461,9 @@ def run(path, k, t, exe_sha256=None, update_manifest=False, given=None):
             raise RecipeError(f"step {i} ({op}): base {base_id} is a {inputs[base_id]['type']}, needs {want}")
         if op == "model":
             gl = [str(base_dir / st["gltf"])] + [str(base_dir / x) for x in st.get("lods", [])]
-            key = model_key(base_dir, st["gltf"], mod_dir)
-            if physics.get(key) is not None:
-                with_physics.add(key)
+            model_file = model_key(base_dir, st["gltf"], mod_dir)  # the step's own name for it (a loop below takes "key")
+            if physics.get(model_file) is not None:
+                with_physics.add(model_file)
             mm = {n: _resolve(g, inputs) for n, g in st.get("materialMap", {}).items()}
             material = _resolve(st.get("material"), inputs)
             from_gltf = []
@@ -490,7 +494,7 @@ def run(path, k, t, exe_sha256=None, update_manifest=False, given=None):
                               mode=st.get("mode"), name=st.get("name"), material=material,
                               material_map=mm, pixel_sizes=st.get("pixelSizes"), stem=st.get("stem"), subdir=out,
                               target=_target(doc, st, inputs, k, t, base_dir, p), global_scale=st.get("globalScale"), own_materials=own, attach=st.get("attach"),
-                              physics=physics.get(key), features=turned_on)
+                              physics=physics.get(model_file), features=turned_on)
             r["warnings"] = r.get("warnings", []) + from_gltf
         else:
             f, e, r = S.visual(k, t, inputs[base_id]["guid"], _resolve(st["model"], inputs), _resolve(st["guid"], inputs),
