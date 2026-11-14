@@ -4,6 +4,7 @@
 // order, one Replace, index repair after faults, in-flight balance, the prediction forward, foreign swaps, world stop,
 // budgets, owners, two stress rows on 8 threads), and the v4 ABI layout (tests/abi.json).
 #include "../game_programs.cpp"
+#include "../layout.cpp"
 #include "../wraps.cpp"
 #include <barrier>
 
@@ -58,14 +59,37 @@ bool seh_cas_ptr(uintptr_t address, uintptr_t expected, uintptr_t desired, uintp
 }
 // kiln.types with only what kiln.world asks of it here: whether native SET owns the program runner.
 std::atomic<uint32_t> g_fake_external{0};
+// kiln.types: the external runner, and the reflected sizes of a few components (a type handle is its size).
 const KilnTypesApi* program_types() {
     static KilnTypesApi t = [] {
         KilnTypesApi v{};
         v.header = {sizeof(KilnTypesApi), KILN_TYPES_VERSION};
         v.external_runner = [] { return g_fake_external.load(); };
+        v.type_by_name = [](KilnStr n) -> const KilnType* {
+            const std::string s(n.ptr, n.len);
+            const uintptr_t size = s == "keen::ecs::Fuel" ? 16 : s == "keen::ecs::DynamicFuelSetup" ? 24 :
+                                   s == "keen::ecs::CurrentTransform" ? 48 : 0;
+            return reinterpret_cast<const KilnType*>(size);
+        };
+        v.type_info = [](const KilnType* type, KilnTypeInfo* out) -> KilnResult {
+            out->type_size = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(type));
+            return KILN_OK;
+        };
         return v;
     }();
     return &t;
+}
+uint32_t fnv1a(std::string_view value, uint32_t hash) {
+    for (unsigned char c : value) hash = (hash ^ c) * 16777619u;
+    return hash;
+}
+// The world's component/template/event maps: one hash -> type index map for all of them.
+std::map<uint32_t, uint16_t> g_type_index;
+bool map_find_u16(uintptr_t, uint32_t key, uint16_t* value) {
+    const auto it = g_type_index.find(key);
+    if (it == g_type_index.end()) return false;
+    if (value) *value = it->second;
+    return true;
 }
 }  // namespace kw
 
@@ -169,6 +193,22 @@ void layout() {
     L.entry_id = 8;
     L.job_entity_count = 0x838;
     L.job_entity_list = 0x830;
+    // the job's group counts (chapter 06a 2.3) and the maps per-entity work reads
+    L.job_tpl_count = 0x4B0;
+    L.job_read_count = 0x4B8;
+    L.job_write_count = 0x4BA;
+    L.job_singletons = 0xC0;
+    L.singletons_count = 0x400;
+    L.job_other_tpl_count = 0x7F8;
+    L.job_other_count = 0x7A8;
+    L.job_events_in_count = 0x1A8;
+    L.job_events_out_count = 0x1B0;
+    L.reg_components = 0x10;
+    L.reg_templates = 0x20;
+    L.storage_entities = 0x40;
+    L.entity_layout = 0x18;
+    L.map = MapFields{0x08, 0x10, 0x28, 0x40, 0x54};
+    F.write = true;
 }
 
 KilnTickInfo tick(uint64_t step) {
@@ -912,6 +952,226 @@ void release_under_load() {
           "in-flight 0 and the update back after the Pre");
 }
 
+// ---- per entity (S4) ----
+// The fake engine's iterator for fuel_setup: [ctx][T FuelSetup][R CurrentTransform][W DynamicFuelSetup x6][W Fuel x6]
+// (type indices FuelSetup 3, CurrentTransform 5, DynamicFuelSetup 10, Fuel 20: the WRITE group is NOT descriptor
+// order, which lists Fuel first). Each slot of row r points at base(slot) + 64 r; a write record's tracker is rec[5].
+constexpr uint32_t kRowStride = 64;
+uintptr_t slot_base(int slot) { return 0x7000000ull + 0x10000ull * static_cast<unsigned>(slot); }
+std::atomic<int> g_marks{0};
+std::atomic<uint64_t> g_mark_rec{0};
+void fake_iter_begin(void*, void* iter, uint32_t size) {
+    std::memset(iter, 0, size);
+}
+bool fake_iter_next(void* raw, void* iter, uint32_t size) {
+    auto* ctx = static_cast<ProgramCtx*>(raw);
+    uint64_t count = 0;
+    std::memcpy(&count, ctx->job + 0x838, 8);
+    if (ctx->index >= count) return false;
+    auto* it = static_cast<uint64_t*>(iter);
+    const uint32_t r = ctx->index;
+    for (uint32_t k = 1; k < size / 8; ++k) it[k] = slot_base(static_cast<int>(k)) + uint64_t{kRowStride} * r;
+    it[3 + 5] = 0xAA00 + 3;  // trackers of the two write records
+    it[9 + 5] = 0xAA00 + 9;
+    ctx->index = r + 1;
+    return true;
+}
+uint32_t* fake_current_entity(void* raw, uint32_t* out) {
+    auto* ctx = static_cast<ProgramCtx*>(raw);
+    const uint32_t* ids = nullptr;
+    std::memcpy(&ids, ctx->job + 0x830, sizeof ids);
+    *out = ctx->index ? ids[(ctx->index - 1) * 4] : 0;
+    return out;
+}
+void fake_mark(void* tracker, void*, void*, void*, uint16_t, uint8_t) {
+    g_marks.fetch_add(1);
+    g_mark_rec = reinterpret_cast<uintptr_t>(tracker);
+}
+
+// fuel_setup's descriptor lists (names as the engine stores them)
+NameRef g_fs_tpl[] = {{"FuelSetup", 9}}, g_fs_ropt[] = {{"CurrentTransform", 16}},
+        g_fs_write[] = {{"Fuel", 4}, {"DynamicFuelSetup", 16}}, g_unser[] = {{"Health", 6}};
+void counts(Job& j, uint8_t t, uint16_t r, uint16_t w) {
+    j.bytes[0x4B0] = t;
+    std::memcpy(j.bytes + 0x4B8, &r, 2);
+    std::memcpy(j.bytes + 0x4BA, &w, 2);
+}
+
+struct Seen {
+    std::vector<uint32_t> ids;
+    std::vector<uint32_t> rows;
+    uint32_t count = 0;
+    std::vector<KilnResult> rcs;
+    uintptr_t fuel = 0, dfs = 0, ct = 0, tpl = 0, archetype = 0;
+    uint32_t fuel_size = 0, ct_size = 0;
+    uint8_t fuel_writable = 9, ct_writable = 9;
+    bool slot_outside = true;
+    uint32_t index_after = 99;
+};
+Seen g_seen4;
+uint32_t KILN_CALL each_record(uint64_t* iter, uint32_t row, KilnEntity e, void* user) {
+    auto* sl = static_cast<KilnGameSlice*>(user);
+    g_seen4.ids.push_back(e);
+    g_seen4.rows.push_back(row);
+    if (row == 1) {
+        uint32_t size = 0;
+        uint8_t w = 0;
+        g_seen4.fuel = reinterpret_cast<uintptr_t>(game_slice_slot(sl, iter, KILN_GAME_LIST_WRITE, 0, &size, &w));
+        g_seen4.fuel_size = size, g_seen4.fuel_writable = w;
+        g_seen4.dfs = reinterpret_cast<uintptr_t>(game_slice_slot(sl, iter, KILN_GAME_LIST_WRITE, 1, nullptr, nullptr));
+        g_seen4.ct = reinterpret_cast<uintptr_t>(game_slice_slot(sl, iter, KILN_GAME_LIST_READ_OPT, 0, &size, &w));
+        g_seen4.ct_size = size, g_seen4.ct_writable = w;
+        g_seen4.tpl = reinterpret_cast<uintptr_t>(game_slice_slot(sl, iter, KILN_GAME_LIST_TPL, 0, nullptr, nullptr));
+        g_seen4.rcs.push_back(game_slice_mark(sl, iter, KILN_GAME_LIST_WRITE, 0));
+        g_seen4.rcs.push_back(game_slice_mark(sl, iter, KILN_GAME_LIST_WRITE, 0));  // once per entity and component
+        g_seen4.rcs.push_back(game_slice_mark(sl, iter, KILN_GAME_LIST_READ_OPT, 0));
+        g_seen4.rcs.push_back(game_slice_mark(sl, iter, KILN_GAME_LIST_WRITE, 5));
+        g_seen4.rcs.push_back(game_slice_iterate(sl, &each_record, sl));  // no iteration inside an iteration
+    }
+    if (row == 2) g_seen4.rcs.push_back(game_slice_mark(sl, iter, KILN_GAME_LIST_WRITE, 0));  // the next entity
+    return 0;
+}
+void KILN_CALL st_iterate(KilnGameSlice* s, void*) {
+    g_seen4.count = s->count;
+    uint64_t dummy[4] = {};
+    g_seen4.slot_outside = game_slice_slot(s, dummy, KILN_GAME_LIST_WRITE, 0, nullptr, nullptr) == nullptr &&
+                           game_slice_mark(s, dummy, KILN_GAME_LIST_WRITE, 0) == KILN_ERR_WRONG_THREAD;
+    g_seen4.rcs.push_back(game_slice_iterate(s, &each_record, s));
+    g_seen4.index_after = reinterpret_cast<ProgramCtx*>(s->program_ctx)->index;
+    game_slice_archetype(s, &g_seen4.archetype);
+}
+uint32_t KILN_CALL each_stop(uint64_t*, uint32_t row, KilnEntity, void*) { return row == 2; }
+void KILN_CALL st_iterate_after(KilnGameSlice* s, void*) {
+    g_seen4.rcs.push_back(game_slice_iterate(s, &each_stop, nullptr));
+    g_seen4.index_after = reinterpret_cast<ProgramCtx*>(s->program_ctx)->index;
+}
+
+void per_entity() {
+    fn.iter_begin = &fake_iter_begin;
+    fn.iter_next = &fake_iter_next;
+    fn.current_entity = &fake_current_entity;
+    fn.mark_written = &fake_mark;
+    g_type_index = {{fnv1a("FuelSetup", fnv1a("keen::ecs::")), 3}, {fnv1a("CurrentTransform", fnv1a("keen::ecs::")), 5},
+                    {fnv1a("DynamicFuelSetup", fnv1a("keen::ecs::")), 10}, {fnv1a("Fuel", fnv1a("keen::ecs::")), 20},
+                    {fnv1a("Health", fnv1a("keen::ecs::")), 30}};
+    // the next world: fuel_setup with its lists, despawn_link with other_write_unser (no view)
+    world_event(KILN_WORLD_STOPPING, KILN_WORLD_SERVER);
+    wworld(0);
+    g_wdesc[0].tpl = {g_fs_tpl, 1};
+    g_wdesc[0].read_opt = {g_fs_ropt, 1};
+    g_wdesc[0].write = {g_fs_write, 2};
+    g_wdesc[4].other_write_unser = {g_unser, 1};
+    static uintptr_t registry[8]{};
+    std::memcpy(g_wworld + kStorage, &registry, 0);
+    const auto reg = reinterpret_cast<uintptr_t>(registry);
+    std::memcpy(g_wworld + kStorage, &reg, 8);
+    world_event(KILN_WORLD_STARTED, KILN_WORLD_SERVER);
+    wpre();
+    KilnStr names[4];
+    check(game_program_list(KILN_WORLD_SERVER, 0, KILN_GAME_LIST_WRITE, names, 4) == 2 && sv(names[0]) == "Fuel" &&
+              sv(names[1]) == "DynamicFuelSetup" && game_program_list(KILN_WORLD_SERVER, 0, KILN_GAME_LIST_READ, names, 4) == 0 &&
+              game_program_list(KILN_WORLD_SERVER, 0, 16, names, 4) == -1 && game_program_list(KILN_WORLD_SERVER, 99, 0, names, 4) == -1,
+          "program list: the descriptor's names in descriptor order");
+    KilnGameProgramInfo pi{};
+    pi.size = sizeof pi;
+    game_program_info(KILN_WORLD_SERVER, 4, &pi);
+    check((pi.flags & KILN_GAME_PROGRAM_NO_VIEW) != 0, "a program with other_write_unser has no view (flag)");
+
+    // the slice's archetype: the entity map holds entity 100 -> a record whose layout has bits 5 and 20
+    alignas(16) static uint64_t layout_bits[2] = {(1ull << 5) | (1ull << 20), 0};
+    alignas(16) static uint8_t record[0x20]{};
+    const auto lb = reinterpret_cast<uintptr_t>(layout_bits);
+    std::memcpy(record + 0x18, &lb, 8);
+    static uint64_t bits[1] = {0};
+    static uint32_t keys[8]{};
+    static uint64_t values[8]{};
+    keys[100 & 7] = 100;
+    values[100 & 7] = reinterpret_cast<uintptr_t>(record);
+    bits[0] = 1ull << (100 & 7);
+    alignas(16) static uint8_t storage[0x200]{};
+    storage[8] = KILN_WORLD_SERVER;
+    uint8_t* map = storage + 0x40;
+    const uint64_t cap = 8;
+    const uint32_t mcount = 1;
+    const auto pb = reinterpret_cast<uintptr_t>(bits), pk = reinterpret_cast<uintptr_t>(keys), pv = reinterpret_cast<uintptr_t>(values);
+    std::memcpy(map + 0x08, &pb, 8);
+    std::memcpy(map + 0x10, &cap, 8);
+    std::memcpy(map + 0x28, &pk, 8);
+    std::memcpy(map + 0x40, &pv, 8);
+    std::memcpy(map + 0x54, &mcount, 4);
+
+    Job job(5);
+    counts(job, 1, 1, 2);
+    uint8_t* st = storage;
+    std::memcpy(job.bytes, &st, 8);
+    const KilnHandle it = wrap(90, "fuel_setup", KILN_WRAP_BEFORE, 0, &st_iterate, nullptr);
+    wpre();
+    const uint64_t runs = g_original_runs[0].load(), mid = g_mid_start.load(), bad = g_bad_index.load();
+    run_slice(wentry(0), job);
+    check(g_seen4.rcs.size() == 7 && g_seen4.rcs[6] == KILN_OK && g_seen4.count == 5 && g_seen4.ids.size() == 5,
+          "iterate: every entity of the slice, once");
+    bool same = true;
+    for (uint32_t r = 0; r < g_seen4.ids.size(); ++r) same &= g_seen4.ids[r] == job.ids[r * 4] && g_seen4.rows[r] == r;
+    check(same, "iterate: per-entity ids equal the job's id list, in row order");
+    check(g_seen4.index_after == 0 && g_original_runs[0].load() == runs + 1 && g_mid_start.load() == mid &&
+              g_bad_index.load() == bad,
+          "iterate in a Before: the index is 0 again, the update runs over the whole slice");
+    check(g_seen4.fuel == slot_base(9) + kRowStride && g_seen4.dfs == slot_base(3) + kRowStride &&
+              g_seen4.ct == slot_base(2) + kRowStride && g_seen4.tpl == slot_base(1) + kRowStride,
+          "slots: by type index, not descriptor order (Fuel is write[0] and the second write record)");
+    check(g_seen4.fuel_size == 16 && g_seen4.fuel_writable == 1 && g_seen4.ct_size == 48 && g_seen4.ct_writable == 0,
+          "slots: reflected sizes, writable only for the write lists");
+    check(g_seen4.rcs[0] == KILN_OK && g_seen4.rcs[1] == KILN_OK && g_seen4.rcs[2] == KILN_ERR_INVALID_ARGUMENT &&
+              g_seen4.rcs[3] == KILN_ERR_INVALID_ARGUMENT && g_seen4.rcs[4] == KILN_ERR_WRONG_THREAD &&
+              g_seen4.rcs[5] == KILN_OK && g_marks.load() == 2 && g_mark_rec.load() == 0xAA00 + 9,
+          "mark: once per entity and component (the Fuel record's tracker), refused for a read list, a name past the "
+          "list, and a nested iteration");
+    check(g_seen4.slot_outside, "slot and mark outside an iteration are refused");
+    check(g_seen4.archetype == lb && game_archetype_has(KILN_WORLD_SERVER, lb, fnv1a("Fuel", fnv1a("keen::ecs::"))) == 1 &&
+              game_archetype_has(KILN_WORLD_SERVER, lb, fnv1a("DynamicFuelSetup", fnv1a("keen::ecs::"))) == 0 &&
+              game_archetype_has(KILN_WORLD_SERVER, lb, 0x12345678) == -1,
+          "archetype: the first entity's layout; membership by the layout's type bits");
+    KilnGameSlice outside{};
+    outside.size = sizeof outside;
+    uintptr_t lay = 0;
+    check(game_slice_iterate(&outside, &each_record, nullptr) == KILN_ERR_WRONG_THREAD &&
+              game_slice_archetype(&outside, &lay) == KILN_ERR_WRONG_THREAD,
+          "iterate and archetype outside a stage are refused");
+    game_program_unwrap(it);
+    // an After that stops early leaves the index as the update left it
+    const KilnHandle after = wrap(90, "fuel_setup", KILN_WRAP_AFTER, 0, &st_iterate_after, nullptr);
+    wpre();
+    g_seen4.rcs.clear();
+    run_slice(wentry(0), job);
+    check(g_seen4.rcs.size() == 1 && g_seen4.rcs[0] == KILN_OK && g_seen4.index_after == 5 && g_bad_index.load() == bad,
+          "iterate in an After, stopped at row 2: the index is the update's (the count) again");
+    // a job whose counts differ from the view: no slot (and kiln.log once)
+    game_program_unwrap(after);
+    wpre();
+    world_event(KILN_WORLD_STOPPING, KILN_WORLD_SERVER);
+    world_event(KILN_WORLD_STARTED, KILN_WORLD_SERVER);
+    wpre();
+    g_seen4 = Seen{};
+    const KilnHandle it2 = wrap(90, "fuel_setup", KILN_WRAP_BEFORE, 0, &st_iterate, nullptr);
+    wpre();
+    Job other(5);
+    counts(other, 1, 1, 3);  // three write records in the engine's job: the view has two
+    run_slice(wentry(0), other);
+    check(g_seen4.ids.size() == 5 && g_seen4.fuel == 0 && g_seen4.ct == 0, "counts that differ from the view: iteration "
+          "works, no slot");
+    game_program_unwrap(it2);
+    wpre();
+    // a program with no view: iterate works, no slot
+    g_seen4 = Seen{};
+    const KilnHandle nv = wrap(90, "despawn_link", KILN_WRAP_BEFORE, 0, &st_iterate, nullptr);
+    wpre();
+    run_slice(wentry(4), job);
+    check(g_seen4.ids.size() == 5 && g_seen4.fuel == 0, "a NO_VIEW program: iteration works, no slot");
+    game_program_unwrap(nv);
+    wpre();
+    g_wdesc[0].tpl = g_wdesc[0].read_opt = g_wdesc[0].write = g_wdesc[4].other_write_unser = NameListE{};
+}
+
 // Stress, as the engine runs it: Pre on the main thread (4 wraps on entity programs come and go every 50 steps), then
 // the step: 8 workers run every program's slices at once (two slices of one program concurrently), 2,000 steps.
 std::atomic<uint64_t> g_before[8], g_after[8];
@@ -1045,7 +1305,9 @@ void abi(const char* path) {
         F(KilnWorldApi, game_program_find); F(KilnWorldApi, game_program_info); F(KilnWorldApi, game_programs_status);
         F(KilnWorldApi, lab_parallel); F(KilnWorldApi, game_program_wrap); F(KilnWorldApi, game_program_unwrap);
         F(KilnWorldApi, game_wrap_info); F(KilnWorldApi, game_wraps_release); F(KilnWorldApi, game_slice_run_original);
-        F(KilnWorldApi, wrap_original);
+        F(KilnWorldApi, wrap_original); F(KilnWorldApi, game_program_list); F(KilnWorldApi, game_slice_iterate);
+        F(KilnWorldApi, game_slice_slot); F(KilnWorldApi, game_slice_mark); F(KilnWorldApi, game_slice_archetype);
+        F(KilnWorldApi, game_archetype_has);
     }
     {
         auto& l = list("KilnGameSlice", sizeof(KilnGameSlice));
@@ -1107,6 +1369,7 @@ int main(int argc, char** argv) {
     wraps_native_set();
     wraps_owners();
     release_under_load();
+    per_entity();
     stress_steps();
     stress_overlap();
     if (argc > 1) abi(argv[1]);
