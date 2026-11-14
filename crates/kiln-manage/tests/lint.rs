@@ -644,3 +644,32 @@ fn every_rule_is_documented() {
     let missing: Vec<&str> = lint::rules().iter().filter(|r| !doc.contains(&format!("### {} {}\n", r.code, r.name))).map(|r| r.code).collect();
     assert!(missing.is_empty(), "lint.md lacks: {missing:?}");
 }
+
+/// A very long value is checked whole: the shipped kiln-publish tag pattern on 100,000 characters once aborted the
+/// process (a stack overflow). Such a tag cannot have the form (at most 137 characters), so it is KL106, said once.
+#[test]
+fn a_very_long_value_is_checked_whole() {
+    let dir = tmp("very-long");
+    let tag = format!("{}cb", "a".repeat(100_000));
+    let text = format!(r#"{{ "format": 1, "provider": "github", "github": {{ "repository": "example/hello", "tag": "{tag}", "commit": "0000000000000000000000000000000000000000" }} }}"#);
+    let r = lint_as(&dir, "kiln.publish.json", &text);
+    let at_tag: Vec<&str> = r.diagnostics.iter().filter(|d| d.pointer.as_deref() == Some("/github/tag")).map(|d| d.code.as_str()).collect();
+    assert_eq!(at_tag, ["KL106"]);
+    // an ordinary tag is checked as before
+    let ok = lint_as(&dir, "kiln.publish.json", &text.replace(&tag, "v{version}"));
+    assert!(!ok.diagnostics.iter().any(|d| d.pointer.as_deref() == Some("/github/tag")), "{:?}", ok.diagnostics);
+    let bad = lint_as(&dir, "kiln.publish.json", &text.replace(&tag, "v{version}/"));
+    assert!(bad.diagnostics.iter().any(|d| d.pointer.as_deref() == Some("/github/tag") && d.code == "KL106"), "{:?}", bad.diagnostics);
+}
+
+/// A value over its maxLength is said once (KL108), and is not matched against the pattern too.
+#[test]
+fn a_value_over_its_max_length_is_not_matched_as_well() {
+    let dir = tmp("max-length");
+    // kiln-release.schema.json: an artifact name is at most 200 characters of a pattern this one breaks too
+    let name = format!("{}..x", "a".repeat(200));
+    let text = format!(r#"{{ "format": 1, "mods": [ {{ "artifact": {{ "name": "{name}" }} }} ] }}"#);
+    let r = lint_as(&dir, "kiln-release.json", &text);
+    let at: Vec<&str> = r.diagnostics.iter().filter(|d| d.pointer.as_deref() == Some("/mods/0/artifact/name")).map(|d| d.code.as_str()).collect();
+    assert_eq!(at, ["KL108"], "{:?}", r.diagnostics);
+}

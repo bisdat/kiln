@@ -7,6 +7,7 @@ import { Suspense, useEffect, useLayoutEffect, useRef, useState, type ReactNode 
 import { NavLink, useLocation, useNavigate, useOutlet } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAppInfo, useBackendEvents, useNexusEnabled, useSettings } from "../api/hooks";
+import { isTauri } from "../api/commands";
 import { mockFallbackActive, useMockFallback } from "../api/fallback";
 import { Lockup, Skeleton, Splash, TaskTray, Toaster, useRowContextMenu, useTaskFeed } from "../ui";
 import { GameArtAuto } from "../components/GameArt";
@@ -158,6 +159,14 @@ export function AppShell() {
   useRowContextMenu();
   const addMods = useAddMods();
   const ctl = usePlayControl();
+  // browser-mock mode only (never in the app): tests start the game through this control's own start path, the one
+  // Play uses (Play once with another profile has no button of its own yet)
+  useEffect(() => {
+    if (isTauri()) return;
+    const w = window as unknown as { __kilnPlay?: PlayControl["play"] };
+    w.__kilnPlay = ctl.play;
+    return () => { delete w.__kilnPlay; };
+  }, [ctl.play]);
   const [minShown, setMinShown] = useState(false);
   useEffect(() => { const t = setTimeout(() => setMinShown(true), 650); return () => clearTimeout(t); }, []);
   const ready = minShown && (info.isSuccess || info.isError);
