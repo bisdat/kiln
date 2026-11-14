@@ -243,3 +243,20 @@ static Kiln.DefinitionRegistrationResult.operator ==(Kiln.DefinitionRegistration
 Kiln.GameType.ImpactName.get -> string?
 static Kiln.GameTypes.ByImpactName(string! impactName) -> Kiln.GameType?
 static Kiln.GameTypes.FindAllByImpactName(string! impactName) -> System.Collections.Generic.IReadOnlyList<Kiln.GameType!>!
+Kiln.PickupReevaluationResult
+Kiln.PickupReevaluationResult.<Clone>$() -> Kiln.PickupReevaluationResult!
+Kiln.PickupReevaluationResult.Deconstruct(out bool Ok, out string? Reason, out int ExposuresReset) -> void
+Kiln.PickupReevaluationResult.Equals(Kiln.PickupReevaluationResult? other) -> bool
+Kiln.PickupReevaluationResult.ExposuresReset.get -> int
+Kiln.PickupReevaluationResult.ExposuresReset.init -> void
+Kiln.PickupReevaluationResult.Ok.get -> bool
+Kiln.PickupReevaluationResult.Ok.init -> void
+Kiln.PickupReevaluationResult.PickupReevaluationResult(bool Ok, string? Reason, int ExposuresReset) -> void
+Kiln.PickupReevaluationResult.Reason.get -> string?
+Kiln.PickupReevaluationResult.Reason.init -> void
+override Kiln.PickupReevaluationResult.Equals(object? obj) -> bool
+override Kiln.PickupReevaluationResult.GetHashCode() -> int
+override Kiln.PickupReevaluationResult.ToString() -> string!
+static Kiln.PickupReevaluationResult.operator !=(Kiln.PickupReevaluationResult? left, Kiln.PickupReevaluationResult? right) -> bool
+static Kiln.PickupReevaluationResult.operator ==(Kiln.PickupReevaluationResult? left, Kiln.PickupReevaluationResult? right) -> bool
+static Kiln.Decisions.ReevaluatePickup(Kiln.EntityId drop, Kiln.EntityId receiver) -> Kiln.PickupReevaluationResult!

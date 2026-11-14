@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Lab test of kiln.decisions and kiln.window_clock through Kiln.Api (07-cancelable-events, S3, S4): see kiln.mod.json.
 // Player-free: it reads an entity the world already has, files decisions no game action hangs on, and kills spawned
-// 1_Player templates to hold, refuse and allow their deaths (S4, events.death: the lab needs "preview" in kiln.json).
+// 1_Player templates to hold, refuse and allow their deaths (S4, events.death), and holds, refuses and allows walk-over
+// pickups of spawned drops on the research's range-only fixture (S5, events.pickup). The lab needs "preview" in kiln.json.
 using Kiln;
 
 namespace DecisionsApiTest;
@@ -46,6 +47,9 @@ public sealed class DecisionsApiTestMod : Mod
 
     public override void OnUnload()
     {
+        _guard?.Dispose();
+        _rangeTag?.Dispose();
+        _interactionTag?.Dispose();
         _completed?.Dispose();
         _program?.Dispose();
     }
@@ -54,6 +58,7 @@ public sealed class DecisionsApiTestMod : Mod
     private void InSimulation(EcsProgramContext context)
     {
         Interlocked.Increment(ref _updates);
+        PrepareFixtures(context);
         var target = (uint)Volatile.Read(ref _target);
         if (target == 0 || Volatile.Read(ref _simPhase) != -9) return;
         var phase = Decisions.LabWindow(out var epoch, out var step);
@@ -187,6 +192,22 @@ public sealed class DecisionsApiTestMod : Mod
                 }
             }
             else Log.Info("decisions-api-test: the lab parallel switch is off (no kiln/control/systems.parallel): the death suite ran once");
+            // S5: cancelable walk-over pickup on the range-only fixture, plain and parallel forced
+            await PickupSuite("plain");
+            if (Kiln.Testing.LabSystems.Enabled)
+            {
+                Kiln.Testing.LabSystems.ForceParallel(2400);
+                await Wait(2);
+                try
+                {
+                    await PickupSuite("parallel");
+                }
+                finally
+                {
+                    Kiln.Testing.LabSystems.StopParallel();
+                    await Wait(2);
+                }
+            }
             Check(_ends.Values.All(l => l.Count == 1), $"no decision completed twice over the whole run ({_ends.Count} decisions)");
         }
         catch (Exception e)
@@ -302,6 +323,226 @@ public sealed class DecisionsApiTestMod : Mod
         {
             foreach (var sub in subs) sub.Dispose();
             foreach (var e in who)
+                if (Spawn.Exists(e)) Spawn.Destroy(e);
+            await Wait(3);
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------ pickups ----
+    // The range-only fixture of the research (chapter 07 §6, lab-tagged-kiln.log): a spawned drop loses its
+    // InteractionOfferRuntime and gets PickupItemZone and DynamicIsPlayerInRange (queued from the world program), and a
+    // lab-only mid hook in the game's walk-over program writes the receiver into the drop's DynamicIsPlayerInRange and
+    // steps over the program's reserved-player-id check (a spawned character's id is above 1023). Server primitive test
+    // only: no physical walking, no client. Tags: two counting hooks at the two helpers' entries (range, interaction).
+
+    private const uint PickupItem = 0x2b0cf1d5;
+    private readonly Dictionary<uint, uint> _inject = [];  // drop -> receiver to write (0: write 0 and let the check skip)
+    private readonly HashSet<uint> _prepare = [];          // drops to make range-only in the next world-program update
+    private readonly object _fixtureLock = new();
+    private long _rangeHits, _interactionHits;
+    private HookHandle? _guard, _rangeTag, _interactionTag;
+    private nuint _guardJump;
+    private unsafe delegate* unmanaged<void*, uint*, uint*> _currentEntity;
+
+    // the world program's update: the fixture's component changes are queued from inside the simulation
+    private void PrepareFixtures(EcsProgramContext context)
+    {
+        uint[] drops;
+        lock (_fixtureLock)
+        {
+            if (_prepare.Count == 0) return;
+            drops = [.. _prepare];
+            _prepare.Clear();
+        }
+        foreach (var d in drops)
+        {
+            var e = new EntityId(d);
+            context.QueueRemove(e, "InteractionOfferRuntime");
+            context.QueueAdd(e, "PickupItemZone", new byte[8]);
+            context.QueueAdd(e, "DynamicIsPlayerInRange", new byte[16]);
+        }
+    }
+
+    private static readonly byte?[] GuardBytes =
+        [0x48, 0x8B, 0x44, 0x24, 0x48, 0x8B, 0x40, 0x04, 0x85, 0xC0, 0x0F, 0x84, null, null, null, null, 0xFF, 0xC8, 0x3D, 0xFE, 0x03, 0x00, 0x00, 0x0F, 0x87];
+
+    private unsafe bool InstallFixture()
+    {
+        var program = Symbols.Get("events/LootRangeProgram");
+        var at = program + 0x70;  // the reserved-player-id check of the build the research read (bytes checked below)
+        var code = (byte*)at;
+        for (var i = 0; i < GuardBytes.Length; i++)
+            if (GuardBytes[i] is { } b && code[i] != b)
+            {
+                Log.Warn($"decisions-api-test: the walk-over program's receiver check is not where the fixture expects it (byte {i}); the pickup suite cannot run on this build");
+                return false;
+            }
+        _guardJump = at + 0x1d;  // past the check: mov rcx,[rbp-0x50]
+        _currentEntity = (delegate* unmanaged<void*, uint*, uint*>)Symbols.Get("world/CurrentEntityId");
+        _guard = Hooks.Mid(at, (ref Registers r) =>
+        {
+            uint out_ = 0;
+            var drop = *_currentEntity((void*)r.Rdi, &out_);
+            uint receiver;
+            lock (_fixtureLock)
+                if (!_inject.TryGetValue(drop, out receiver)) return;
+            var range = *(byte**)(r.Rsp + 0x48);
+            *(uint*)(range + 4) = receiver;
+            if (receiver != 0) r.Rip = _guardJump;
+        }, priority: 300);
+        _rangeTag = Hooks.Mid("events/PickupInRange", (ref Registers r) =>
+        {
+            if (Watched(*(uint*)(r.Rsp + 0x38))) Interlocked.Increment(ref _rangeHits);
+        }, priority: 300);
+        _interactionTag = Hooks.Mid("events/PickupToInventory", (ref Registers r) =>
+        {
+            if (Watched(*(uint*)(r.Rsp + 0x38))) Interlocked.Increment(ref _interactionHits);
+        }, priority: 300);
+        return true;
+    }
+
+    private uint _receiver;
+    private bool Watched(uint receiver) => receiver != 0 && receiver == Volatile.Read(ref _receiver);
+
+    private static long Count(EntityId who) => Items.Read(who)?.Slots.Where(s => s.Item.Value == PickupItem).Sum(s => (long)s.Count) ?? -1;
+
+    private async Task<EntityId> RangeDrop(WorldPosition at)
+    {
+        var d = await Spawn.Item(PickupItem, 3, at, options: new SpawnOptions { Tag = "decisions-api-test", Flags = SpawnFlags.Transient });
+        lock (_fixtureLock) _prepare.Add(d.Value);
+        await Wait(4);
+        return d;
+    }
+
+    private void Inject(EntityId drop, EntityId receiver)
+    {
+        lock (_fixtureLock) _inject[drop.Value] = receiver.Value;
+    }
+
+    private void StopInject(EntityId drop)
+    {
+        lock (_fixtureLock) _inject.Remove(drop.Value);
+    }
+
+    // PICKUP-RANGE-ONLY, PICKUP-KEYS, PICKUP-EXPOSURE.
+    private async Task PickupSuite(string run)
+    {
+        var made = new List<EntityId>();
+        var subs = new List<IDisposable>();
+        try
+        {
+            Check(Capabilities.Is("events.pickup"), $"[{run}] events.pickup is on ({Capabilities.Why("events.pickup")})");
+            if (!Capabilities.Is("events.pickup")) return;
+            if (_guard is null && !InstallFixture())
+            {
+                Check(false, $"[{run}] the range-only fixture could not be installed");
+                return;
+            }
+            var p = await Spawn.Entity("1_Player", new WorldPosition(3845, 835, 1480), options: new SpawnOptions { Tag = "decisions-api-test", Flags = SpawnFlags.Transient });
+            made.Add(p);
+            Volatile.Write(ref _receiver, p.Value);
+            for (var n = 0; n < 200 && Items.Read(p) is not { Initialized: true }; n++) await Wait(1);
+            await Wait(10);
+            Check(Items.Read(p) is { Initialized: true }, $"[{run}] receiver {p.Value} has an inventory");
+
+            var seen = new List<ItemPickingUpEvent>();
+            Func<ItemPickingUpEvent, bool> cancel = _ => true;
+            subs.Add(Events.On<ItemPickingUpEvent>(e =>
+            {
+                seen.Add(e);
+                if (cancel(e)) e.Cancel();
+            }, EventFilter.ForEntity(p)));
+
+            // PICKUP-RANGE-ONLY: the range helper is reached (tag), the interaction helper is not, a cancel leaves
+            // inventory and drop as they were; ReevaluatePickup and an allow then grant it once
+            var d1 = await RangeDrop(new WorldPosition(3846, 835, 1480));
+            made.Add(d1);
+            var have = Count(p);
+            var (range0, inter0) = (Interlocked.Read(ref _rangeHits), Interlocked.Read(ref _interactionHits));
+            Inject(d1, p);
+            await Wait(8);
+            var first = seen.FirstOrDefault(e => e.GroundEntity == d1);
+            var firstEnd = first is null ? null : EndOf(x => x.Id == first.Id);
+            var (range1, inter1) = (Interlocked.Read(ref _rangeHits), Interlocked.Read(ref _interactionHits));
+            Check(first is { Receiver: var rr, Item.Value: PickupItem, Amount: 3, ExposureEpoch: > 0, Position: not null } && rr == p &&
+                  firstEnd is { Status: DecisionTerminal.Prevented, Ok: true } && firstEnd.Subject == d1 && firstEnd.Actor == p &&
+                  range1 > range0 && inter1 == inter0 && Spawn.Exists(d1) && Count(p) == have,
+                $"[{run}] PICKUP-RANGE-ONLY refused: event {(first is null ? "none" : $"drop {first.GroundEntity.Value} by {first.Receiver.Value}, item {first.Item.Value:x8} x{first.Amount}, exposure {first.ExposureEpoch}, at {first.Position}")}, " +
+                $"outcome {firstEnd?.Status} subject {firstEnd?.Subject.Value} actor {firstEnd?.Actor.Value}, range tag {range0}->{range1}, interaction tag {inter0}->{inter1}, " +
+                $"drop there {Spawn.Exists(d1)}, inventory {have}->{Count(p)}");
+            var events = seen.Count;
+            await Wait(5);
+            Check(seen.Count == events && Spawn.Exists(d1) && Count(p) == have && Interlocked.Read(ref _rangeHits) > range1,
+                $"[{run}] PICKUP-RANGE-ONLY the canceled exposure is refused again without asking ({seen.Count - events} new events, range tag {range1}->{Interlocked.Read(ref _rangeHits)})");
+            cancel = _ => false;
+            var re = Decisions.ReevaluatePickup(d1, p);
+            await Wait(8);
+            var second = seen.LastOrDefault(e => e.GroundEntity == d1);
+            Check(re is { Ok: true, ExposuresReset: 1 } && second is not null && second.ExposureEpoch > first!.ExposureEpoch && EndOf(x => x.Id == second.Id) is { Status: DecisionTerminal.Allowed } &&
+                  !Spawn.Exists(d1) && Count(p) == have + 3 && Interlocked.Read(ref _interactionHits) == inter0,
+                $"[{run}] PICKUP-RANGE-ONLY allowed after ReevaluatePickup: reset {re.ExposuresReset} ({re.Reason}), exposure {first?.ExposureEpoch}->{second?.ExposureEpoch}, " +
+                $"outcome {(second is null ? "none" : EndOf(x => x.Id == second.Id)?.Status.ToString())}, drop there {Spawn.Exists(d1)}, inventory {have}->{Count(p)} (once: +3), interaction tag {Interlocked.Read(ref _interactionHits) - inter0}");
+            StopInject(d1);
+
+            // PICKUP-KEYS: two drops of the same item spawned together; allowing one never allows the other
+            var t2 = Spawn.Item(PickupItem, 3, new WorldPosition(3846, 835, 1481), options: new SpawnOptions { Tag = "decisions-api-test", Flags = SpawnFlags.Transient });
+            var t3 = Spawn.Item(PickupItem, 3, new WorldPosition(3846, 835, 1479), options: new SpawnOptions { Tag = "decisions-api-test", Flags = SpawnFlags.Transient });
+            var d2 = await t2;
+            var d3 = await t3;
+            made.Add(d2);
+            made.Add(d3);
+            lock (_fixtureLock)
+            {
+                _prepare.Add(d2.Value);
+                _prepare.Add(d3.Value);
+            }
+            await Wait(4);
+            cancel = e => e.GroundEntity == d3;
+            have = Count(p);
+            Inject(d2, p);
+            Inject(d3, p);
+            await Wait(10);
+            var e2 = seen.LastOrDefault(e => e.GroundEntity == d2);
+            var e3 = seen.LastOrDefault(e => e.GroundEntity == d3);
+            Check(e2 is not null && e3 is not null && e2.GroundKey != e3.GroundKey && e2.GroundKey.LifeSerial != e3.GroundKey.LifeSerial && e2.ExposureEpoch != e3.ExposureEpoch &&
+                  EndOf(x => x.Id == e2.Id) is { Status: DecisionTerminal.Allowed } && EndOf(x => x.Id == e3.Id) is { Status: DecisionTerminal.Prevented } &&
+                  !Spawn.Exists(d2) && Spawn.Exists(d3) && Count(p) == have + 3,
+                $"[{run}] PICKUP-KEYS: spawn times {e2?.GroundKey.SpawnTime} / {e3?.GroundKey.SpawnTime}, lives {e2?.GroundKey.LifeSerial} / {e3?.GroundKey.LifeSerial}, " +
+                $"exposures {e2?.ExposureEpoch} / {e3?.ExposureEpoch}, allowed drop there {Spawn.Exists(d2)}, refused drop there {Spawn.Exists(d3)}, inventory {have}->{Count(p)}");
+            StopInject(d2);
+
+            // PICKUP-EXPOSURE: receiver 0 at a sample closes d3's exposure; the next contact is a new epoch the old cancel
+            // does not suppress; ReevaluatePickup then resets exactly one active exposure
+            var old = e3!.ExposureEpoch;
+            lock (_fixtureLock) _inject[d3.Value] = 0;
+            await Wait(4);
+            var quiet = seen.Count;
+            Inject(d3, p);
+            await Wait(8);
+            var e4 = seen.LastOrDefault(e => e.GroundEntity == d3);
+            Check(seen.Count == quiet + 1 && e4 is not null && e4.ExposureEpoch > old && EndOf(x => x.Id == e4.Id) is { Status: DecisionTerminal.Prevented } && Spawn.Exists(d3),
+                $"[{run}] PICKUP-EXPOSURE: receiver 0 then back: exposure {old}->{e4?.ExposureEpoch}, {seen.Count - quiet} new event(s), outcome {(e4 is null ? "none" : EndOf(x => x.Id == e4.Id)?.Status.ToString())}");
+            var none = Decisions.ReevaluatePickup(d2, p);
+            var one = Decisions.ReevaluatePickup(EntityId.None, p);
+            Check(none is { Ok: false, Reason: "NoActiveExposure", ExposuresReset: 0 } && one is { Ok: true, ExposuresReset: 1 },
+                $"[{run}] PICKUP-EXPOSURE ReevaluatePickup: a gone drop {none.Ok}/{none.Reason}, any drop of the receiver reset {one.ExposuresReset}");
+            cancel = _ => false;
+            await Wait(8);
+            var e5 = seen.LastOrDefault(e => e.GroundEntity == d3);
+            Check(e5 is not null && e5.ExposureEpoch > e4!.ExposureEpoch && !Spawn.Exists(d3),
+                $"[{run}] PICKUP-EXPOSURE the reopened exposure asks again and is allowed: exposure {e4?.ExposureEpoch}->{e5?.ExposureEpoch}, drop there {Spawn.Exists(d3)}");
+            StopInject(d3);
+        }
+        catch (Exception e)
+        {
+            Check(false, $"[{run}] the pickup suite threw: {e}");
+        }
+        finally
+        {
+            Volatile.Write(ref _receiver, 0u);
+            lock (_fixtureLock) _inject.Clear();
+            foreach (var sub in subs) sub.Dispose();
+            foreach (var e in made)
                 if (Spawn.Exists(e)) Spawn.Destroy(e);
             await Wait(3);
         }

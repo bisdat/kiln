@@ -54,8 +54,10 @@ internal sealed unsafe class DecisionsFake : IKitFake
         "held action, the same step for a client's input, 4096 open requests, 8192 kept outcomes), one DecisionCompletedEvent per " +
         "decision, and a world that ends (KilnHarness.Decisions.RestartWorld: what is open ends WorldEnded, the next world has the next " +
         "epoch). KilnHarness.Decisions.Outcomes records every decision's end. An entity's identity comes from the harness's fake world " +
-        "(a life serial per world and entity; no player sessions). Offline: the game's side of every decision (no death, pickup or " +
-        "equipment change is held here: the events that need one are faked with their services), walk-over reevaluation"));
+        "(a life serial per world and entity; no player sessions). Decisions.ReevaluatePickup forgets the walk-over pickups a handler " +
+        "canceled (drop and receiver; once the harness says the build holds walk-over pickups). Offline: the game's side of every " +
+        "decision (no death, pickup or equipment change is held here: the events that need one are faked with their services), the " +
+        "sampled exposures of walk-over pickups (a receiver leaving and coming back, a changed amount)"));
 
     public static DecisionsModel ModelOf(KilnHarness harness) => KitFakes.State<DecisionsModel>(harness);
 
@@ -140,12 +142,20 @@ internal sealed unsafe class DecisionsFake : IKitFake
         try { return Model?.AckOutcomes(owner, batch) ?? FakeTables.Unavailable; } catch { return FakeTables.Internal; }
     }
 
-    // The walk-over producer is not modelled.
+    // The walk-over producer's suppressed exposures, as far as the fake knows them (a canceled kind-2 decision).
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int ReevaluatePickup(uint drop, uint receiver, uint* reset)
     {
-        if (reset != null) *reset = 0;
-        return FakeTables.Unavailable;
+        try
+        {
+            if (Model is { } m) return m.ReevaluatePickup(drop, receiver, reset);
+            if (reset != null) *reset = 0;
+            return FakeTables.Unavailable;
+        }
+        catch
+        {
+            return FakeTables.Internal;
+        }
     }
 
     // The core's window calls: the harness's steps run them (DecisionsModel.BeforeStep), nobody calls the table's.

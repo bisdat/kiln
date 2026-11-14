@@ -54,6 +54,7 @@ internal sealed unsafe class DecisionsModel
     private readonly Dictionary<ulong, (ulong Epoch, uint Kind, uint Status)> _terminal = [];
     private readonly Queue<ulong> _terminalOrder = new();
     private readonly Dictionary<uint, (bool All, uint[] Ids)> _interest = [];
+    private readonly HashSet<(uint Drop, uint Receiver)> _suppressed = [];  // walk-over exposures a cancel suppressed
     private readonly Dictionary<(ulong Epoch, uint Entity), ulong> _lives = [];
     private ulong _nextLife;
     private ulong _filed, _dropped, _timeouts, _outcomeCount, _gap, _misses;
@@ -109,6 +110,7 @@ internal sealed unsafe class DecisionsModel
             _arrivals.Clear();
             _requests.Open = false;
             _requests.Items.Clear();
+            _suppressed.Clear();
             _epoch++;
         }
     }
@@ -458,6 +460,7 @@ internal sealed unsafe class DecisionsModel
             if (!_active.Remove(a->RequestId)) return FakeTables.NotFound;
             _answers.Add(said);
             var status = finish is { } f ? (uint)f.Status : a->Allow != 0 ? 1u : 2u;
+            if (r.Kind == N.KindWalkover && status == 2) _suppressed.Add((r.Subject.Entity, r.Actor.Entity));
             PushOutcome(ref r, status, finish?.Reason, _step, finish, a->SurvivalHealth);
             if (receipt != null)
             {
@@ -465,6 +468,22 @@ internal sealed unsafe class DecisionsModel
                 receipt->TerminalStatus = status;
                 WriteText(receipt->Reason, 192, finish?.Reason);
             }
+            return FakeTables.Ok;
+        }
+    }
+
+    /// <summary>kiln.decisions' reevaluate_pickup: forgets the suppressed walk-over exposures of (drop, receiver), 0 for
+    /// any, as the native producer reopens them. Unavailable without a walk-over producer (<see cref="SupportedHookKinds"/>
+    /// bit 2).</summary>
+    public int ReevaluatePickup(uint drop, uint receiver, uint* reset)
+    {
+        lock (_lock)
+        {
+            if (reset != null) *reset = 0;
+            if ((SupportedHookKinds & (1ul << (int)N.KindWalkover)) == 0) return FakeTables.Unavailable;
+            if (!WorldSafe) return FakeTables.WrongThread;
+            var n = _suppressed.RemoveWhere(x => (drop == 0 || x.Drop == drop) && (receiver == 0 || x.Receiver == receiver));
+            if (reset != null) *reset = (uint)n;
             return FakeTables.Ok;
         }
     }

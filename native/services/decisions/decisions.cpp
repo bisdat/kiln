@@ -226,9 +226,11 @@ KilnResult KILN_CALL d_ack_outcomes(KilnOwner d, uint64_t batch) {
     return g_broker->ack_outcomes(batch, s.step);
 }
 
-KilnResult KILN_CALL d_reevaluate_pickup(uint32_t, uint32_t, uint32_t* exposures_reset) {
+KilnResult KILN_CALL d_reevaluate_pickup(uint32_t drop, uint32_t receiver, uint32_t* exposures_reset) {
     if (exposures_reset) *exposures_reset = 0;
-    return KILN_ERR_UNAVAILABLE;  // the walk-over producer is not part of this build yet
+    if (!g_on.load() || !pickup_producer::installed()) return KILN_ERR_UNAVAILABLE;
+    if (!world_safe(nullptr)) return KILN_ERR_WRONG_THREAD;
+    return pickup_producer::reevaluate(drop, receiver, exposures_reset);
 }
 
 // ---- step windows (core only) ----
@@ -245,6 +247,7 @@ void KILN_CALL d_window_begin(uint64_t epoch, uint64_t step) {
         for (const auto& i : g_interest) wanted.insert(wanted.end(), i.ids.begin(), i.ids.end());
     }
     death_producer::discover(wanted);
+    pickup_producer::discover(wanted);
     uint32_t misses = 0;
     const bool ok = g_metadata.rebuild(epoch, step, wanted, &misses);
     for (uint32_t i = 0; i < misses; ++i) g_broker->count_metadata_miss();
@@ -257,10 +260,12 @@ void KILN_CALL d_window_begin(uint64_t epoch, uint64_t step) {
     g_budget_exceeded = !ok;
     g_broker->window_begin(epoch, step);
     death_producer::window_begin(epoch, step);
+    pickup_producer::window_begin(epoch, step);
 }
 
 void KILN_CALL d_window_end(uint64_t epoch, uint64_t step) {
     if (!g_on.load(std::memory_order_relaxed)) return;
+    pickup_producer::window_end(epoch, step);
     g_broker->window_end(epoch, step);
 }
 
@@ -294,6 +299,7 @@ void KILN_CALL on_world(const KilnWorldEvent* e, void*) {
     g_broker->world_ended(s.step);
     g_metadata.clear();
     death_producer::world_stopped();
+    pickup_producer::world_stopped();
     const Counters c = g_broker->counters();
     logf(KILN_LOG_INFO, "decisions: world stopped (filed %llu, dropped %llu, timeouts %llu, outcome gap %llu, metadata misses %llu)",
          static_cast<unsigned long long>(c.filed), static_cast<unsigned long long>(c.queue_dropped),
@@ -326,6 +332,7 @@ void KILN_CALL on_ready(void*) {
     // Producers. The death hook decides decisions.native_guards (19d-pets' guard needs the hook) and, when the hook
     // could not go in although events.death is not held and resolved, lowers events.death with the reason.
     death_producer::ready();
+    pickup_producer::ready();
     if (g_caps) {
         if (death_producer::installed()) {
             g_caps->report(g_owner, ks("decisions.native_guards"), KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, ks("the death boundary's guard (set_death_guard)"));

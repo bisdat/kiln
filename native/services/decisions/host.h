@@ -62,3 +62,21 @@ const char* why_not();
 uint32_t why_not_reason();
 
 }  // namespace kiln::decisions::death_producer
+
+// The walk-over pickup producer (pickup.cpp).
+namespace kiln::decisions::pickup_producer {
+
+// The service is on (on_ready): installs the hook unless events.pickup is held, unresolved or the hook fails.
+void ready();
+bool installed();
+const char* why_not();
+// window_begin, before the metadata is rebuilt: drops (PickupItemZone) and live players while anyone listens.
+void discover(std::vector<uint32_t>& wanted);
+// Both window calls: the exposure samples (window_begin also checks the keyed lives).
+void window_begin(uint64_t epoch, uint64_t step);
+void window_end(uint64_t epoch, uint64_t step);
+void world_stopped();
+// KilnDecisionsApiV1.reevaluate_pickup (the caller checked thread and phase).
+KilnResult reevaluate(uint32_t drop, uint32_t receiver, uint32_t* reset);
+
+}  // namespace kiln::decisions::pickup_producer

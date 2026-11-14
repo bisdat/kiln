@@ -9,6 +9,8 @@
     <GenerateRuntimeConfigurationFiles>false</GenerateRuntimeConfigurationFiles>
     <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
     <AssemblyName>DecisionsApiTest</AssemblyName>
+    <!-- the range-only pickup fixture: a lab-only mid hook in the game's walk-over program (Kiln.Hooks) -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- Calls Kiln's lab members ([Experimental("KILNX001")]: Decisions.LabWindow, LabResolveEntity, LabDecide). -->
     <NoWarn>$(NoWarn);KILNX001</NoWarn>
   </PropertyGroup>
@@ -17,6 +19,9 @@
     <ProjectReference Include="../../../managed/services/Kiln.World/Kiln.World.csproj" Private="false" ExcludeAssets="runtime" />
     <ProjectReference Include="../../../managed/services/Kiln.Spawn/Kiln.Spawn.csproj" Private="false" ExcludeAssets="runtime" />
     <ProjectReference Include="../../../managed/services/Kiln.Combat/Kiln.Combat.csproj" Private="false" ExcludeAssets="runtime" />
+    <ProjectReference Include="../../../managed/services/Kiln.Gameplay/Kiln.Gameplay.csproj" Private="false" ExcludeAssets="runtime" />
+    <ProjectReference Include="../../../managed/services/Kiln.Items/Kiln.Items.csproj" Private="false" ExcludeAssets="runtime" />
+    <ProjectReference Include="../../../managed/services/Kiln.Hooks/Kiln.Hooks.csproj" Private="false" ExcludeAssets="runtime" />
     <ProjectReference Include="../../../managed/Kiln.Testing/Kiln.Testing.csproj" Private="false" ExcludeAssets="runtime" />
     <None Include="kiln.mod.json;kiln.programs.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

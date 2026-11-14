@@ -508,6 +508,18 @@ internal static unsafe class DecisionBroker
         return rc;
     }
 
+    /// <summary>kiln.decisions' reevaluate_pickup (world thread, world-safe phase). Returns the KilnResult.</summary>
+    internal static int ReevaluatePickup(EntityId drop, EntityId receiver, out int reset)
+    {
+        reset = 0;
+        var t = Table();
+        if (t == null) return DecisionsNative.Unavailable;
+        uint n = 0;
+        var rc = t->ReevaluatePickup(drop.Value, receiver.Value, &n);
+        reset = (int)n;
+        return rc;
+    }
+
     // Tick thread: the table, this session's attach. False: nothing can be asked now.
     private static bool Bind(ulong step)
     {

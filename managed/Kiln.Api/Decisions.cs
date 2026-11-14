@@ -85,12 +85,46 @@ public sealed class DecisionCompletedEvent(DecisionResult result) : KilnEvent, I
     public bool Involves(EntityId entity) => !entity.IsNone && (entity == Result.Subject || entity == Result.Actor);
 }
 
+/// <summary>What <see cref="Decisions.ReevaluatePickup"/> did. Since 0.2.0-dev.28.</summary>
+/// <param name="Ok">True when at least one exposure was reopened.</param>
+/// <param name="Reason"><c>NoActiveExposure</c> when the pair had none (no pickup was held for it, or the receiver
+/// left the item's range, or its decision is still open); null when <see cref="Ok"/>.</param>
+/// <param name="ExposuresReset">How many exposures were reopened.</param>
+public sealed record PickupReevaluationResult(bool Ok, string? Reason, int ExposuresReset) : IKilnResult;
+
 /// <summary>Decisions: things the game is about to do that a mod may refuse (a death, a walk-over pickup, an equipment
 /// change). The events themselves are in the service that owns them (<c>EntityDyingEvent</c> in Kiln.Combat, ...); each
 /// carries a <see cref="DecisionId"/> and ends in one <see cref="DecisionCompletedEvent"/>. Since 0.2.0-dev.28.</summary>
 public static class Decisions
 {
     private const string LabUrl = "https://github.com/frostdev-ops/kiln/blob/main/docs/kiln/modding/analyzers.md#kilnx001";
+
+    /// <summary>The capability row of a cancelable walk-over pickup.</summary>
+    internal const string PickupRow = "events.pickup";
+
+    /// <summary>Asks again about walk-over pickups that were refused (or allowed) for their current exposure: each
+    /// exposure of <paramref name="drop"/> by <paramref name="receiver"/> that is still there gets a new exposure epoch,
+    /// so the game's next attempt posts a new <c>ItemPickingUpEvent</c>. <see cref="EntityId.None"/> for either means
+    /// any. Use it when what made a handler refuse has changed (the receiver earned the right to the item). An
+    /// exposure whose decision is still open is left alone. Tick thread, Pre or Post.</summary>
+    /// <returns><c>Ok</c> with the count of exposures reopened; <c>Ok = false</c>, reason <c>NoActiveExposure</c>,
+    /// when there was none.</returns>
+    /// <exception cref="KilnUnavailableException"><c>events.pickup</c> is off (held until its game test, or not on this
+    /// game build).</exception>
+    [ServerOnly, TickThreadOnly, RequiresCapability(PickupRow)]
+    public static PickupReevaluationResult ReevaluatePickup(EntityId drop, EntityId receiver)
+    {
+        Services.RequireTickThread("Decisions.ReevaluatePickup");
+        if (!Capabilities.Is(PickupRow)) throw ServiceCaps.Unavailable(PickupRow, "walk-over pickups are not held here");
+        var rc = DecisionBroker.ReevaluatePickup(drop, receiver, out var reset);
+        return rc switch
+        {
+            DecisionsNative.Ok when reset > 0 => new PickupReevaluationResult(true, null, reset),
+            DecisionsNative.Ok => new PickupReevaluationResult(false, "NoActiveExposure", 0),
+            DecisionsNative.WrongThread => throw new InvalidOperationException("Decisions.ReevaluatePickup: not in Pre or Post of the server world"),
+            _ => throw new KilnUnavailableException(PickupRow, "kiln.decisions has no walk-over producer here"),
+        };
+    }
 
     /// <summary>Lab: where the server world's step is right now. Returns the phase (1 Pre, 2 preparing, 3 the game's
     /// simulation, 4 after the world's jobs, 5 Post, 6 stopping, 0 no world or no step yet), or -1 when this build has
