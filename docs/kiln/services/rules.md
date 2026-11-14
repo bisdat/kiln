@@ -391,7 +391,8 @@ it is held back until the game confirms its flight hooks on Kiln's v4 rules chan
 
 How it plays: jump (or walk off a ledge) and the character takes off; hold **jump** to climb, **sneak** to sink,
 **sprint** for speed (8 m/s up or down, x2.5 with sprint; across, the game's own movement speed). It hovers with no
-input. Sinking onto the ground lands it; touching the ground otherwise keeps flying (low hover). Opening the glider,
+input. Sneak sinks while the key is held, whether the game's sneak key is set to toggle or to hold, and the game's own
+sneak mode (which that key switches) changes nothing in the flight (since 0.2.0-dev.28; GitHub issue #25). Sinking onto the ground lands it; touching the ground otherwise keeps flying (low hover). Opening the glider,
 water, climbing, death, the rule ending, or leaving the building zone in `BuildingArea` mode ends it in the air and the
 character falls (creative mode's invulnerability covers the landing). A teleport in flight (fast travel, a bed) does
 not end it: the flight goes with the character (see "NoClip", what ends it), and it still lands and ends as above.
@@ -405,7 +406,11 @@ How it works (kiln.rules `flight.cpp`, feature `rules.flight`, hook bit `KILN_RU
 Part 4): the character flies in the game's `BuildingFlying` locomotion state, the building spark's. A mid hook right after
 the locomotion state decision takes off, keeps, lands or ends the flight; a mid hook in the gravity step zeroes gravity
 for a player who may fly (its own site, after the glider's); a hook before the BuildingFlying mover sets the vertical
-input velocity from the held jump and sneak bits. All three run in the server world and in the player's prediction
+input velocity from the held jump and sneak bits, and for the length of that call gives the mover the body's default
+spring-acceleration row in all four of its rows. The mover picks the row from the actor's sneak mode and strafing
+flags, and the crouched and strafing rows of a player's body say "do not steer" at speed and when braking: in the
+game's sneak mode a flight at speed ignored the sneak key and drifted on after letting go (0.2.0-dev.27, issue #25;
+docs/re/rules.md 8.1). The game's own rows are never written. All three run in the server world and in the player's prediction
 with the same rules and the same replicated input. The building spark (no rules) keeps its own state. Counters:
 `KilnRulesCreative.flight_takeoffs`, `flight_landings`, `flight_ends`.
 
@@ -445,7 +450,8 @@ using var set = Rules.Apply(player, new PlayerRules { NoClip = true });   // or 
 
 **How it plays.** The moment it is on, the character lifts off, also from the ground and from water, and flies as in
 character flight: the movement keys steer, **jump** climbs, **sneak** sinks, **sprint** is faster (8 m/s up or down,
-x2.5 with sprint), and it hovers with no input. Nothing stops it: it goes through the ground, walls, blocks and props.
+x2.5 with sprint), and it hovers with no input; sneak sinks while held, also in the game's own sneak mode (see
+"Character flight"). Nothing stops it: it goes through the ground, walls, blocks and props.
 It never lands, because without collision there is no ground. Water does not end it.
 
 **What ends it, and what then.**
@@ -531,7 +537,8 @@ then `death ends it` and `the body ... is out of the flight: state 0`. Without t
 fails, NoClip asked again during a move, a teleport out of a rule's area before the rules are resolved, a character
 that leaves) is in `managed/tests/Kiln.Rules.Tests/NoClipTrackTests.cs`, with a world the test controls.
 
-Not proven yet (the guided client pass, check `rules.noclip`): everything a real game shows. The same decision in the
+Not proven yet (the guided client pass, checks `rules.noclip`, `rules.noclip-teleport`, `rules.noclip-descent`,
+`rules.noclip-death`, `rules.noclip-world` and `rules.noclip-disconnect`): everything a real game shows. The same decision in the
 player's prediction on a real connection (hosted single-player under Proton first, then a dedicated server); what the
 camera does inside terrain; what other players see; that a player who disconnects inside the ground is placed safely
 by the game at the next login (the game's own Unstuck in the menu frees a character in any case).

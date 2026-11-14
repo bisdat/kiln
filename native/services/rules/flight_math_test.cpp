@@ -3,6 +3,7 @@
 #include "flight_math.h"
 
 #include <cstdio>
+#include <cstring>
 #include <cstdlib>
 
 namespace {
@@ -85,6 +86,17 @@ int main() {
     check(climb(true, false, false) == kClimb && climb(false, true, false) == -kClimb && climb(true, true, false) == 0,
           "jump climbs, sneak sinks, both hold");
     check(climb(true, false, true) == kClimb * kFast && climb(false, false, true) == 0, "sprint is faster, alone it adds nothing");
+    // the mover's rows (issue #25): every row the game may pick is the body's default row
+    uint8_t loco[4 + kRows * kRowBytes]{1};
+    const float def[4] = {20, 20, 25, 30}, crouched[4] = {15, 15, -1, -1};
+    std::memcpy(loco + 4, def, sizeof def);
+    std::memcpy(loco + 4 + kRowBytes, crouched, sizeof crouched);
+    uint8_t pinned[kPinnedBytes]{};
+    bool all = pin_rows(loco, 4, pinned) && pinned[0] == 1;
+    for (int k = 0; k < kRows; ++k) all = all && std::memcmp(pinned + 4 + k * kRowBytes, def, sizeof def) == 0;
+    check(all, "pinned rows: velocityDefault in all four, the bytes before them copied");
+    check(!pin_rows(loco, -1, pinned) && !pin_rows(loco, kRowsMax + 1, pinned) && !pin_rows(nullptr, 4, pinned),
+          "pinned rows: a rows offset outside the layout or no Locomotion pins nothing");
     std::printf("flight math: %d failure(s)\n", failures);
     return failures ? EXIT_FAILURE : EXIT_SUCCESS;
 }
