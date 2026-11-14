@@ -1,0 +1,133 @@
+{
+  "format": 1,
+  "side": "client",
+  "extends": "server.d/dev28-04-markers.json",
+  "comment": "kiln.markers on the game client (dossier chapter 04 §2.3/§3, docs/re/map.md; client 26430625). markers.client_map: the guards of the native map list kiln.markers appends to in a completed client step, never calling the game's append: the clear program's three count offsets (markers/Clear), the entry layout (two independent strategies of @markers/Entry), the four list capacities of 1024 at their offsets (@markers/ListCapacity) and the 0xa0 entry stride (@markers/EntryStride: index*5<<5). The fixed constants must equal their captures: a layout change turns the feature off, it is not followed. markers.anchors.client: the server-world anchor names plus the network create site and its entity/parent stack fields, reused from net.json (net/CreateTemplateCall, @net.create_fields) and not declared again (chapter 04 §4.2). Research-only symbols of the proposal (waypoint, boss, compass, canvas, fog) are not shipped.",
+  "symbols": {
+    "markers/Clear": {
+      "comment": "clear_map_markers_for_ui (client 0x304470): only its count stores are used, as a guard",
+      "find": [
+        {
+          "pattern": "48 83 EC 38 41 B8 10 00 00 00 48 8D 54 24 20 E8 ?? ?? ?? ?? 48 8B 44 24 28 33 C9 48 89 88 {markers/main.count:d32} 48 89 88 {markers/special.count:d32} 48 89 88 {markers/labels.count:d32} 48 83 C4 38 C3"
+        }
+      ]
+    },
+    "@markers/Entry": {
+      "comment": "replicate_map_markers_for_ui's entry writes (client 0x316534 and 0x31684d)",
+      "find": [
+        {
+          "pattern": "89 46 {markers/entry.tag:d8} 0F 10 07 0F 11 46 {markers/entry.position:d8} F2 0F 10 4F 10 F2 0F 11 4E {markers/entry.z:d8} C6 46 {markers/entry.visibility:d8} 02 4C 8B 54 24"
+        },
+        {
+          "pattern": "0F 11 4E {markers/entry.label:d8} F2 0F 11 46 {markers/entry.label_hash:d8} 48 8B 44 24"
+        }
+      ]
+    },
+    "@markers/ListCapacity": {
+      "comment": "the list constructor (client 0x83761d): each of the four inline lists gets capacity 1024",
+      "find": [
+        {
+          "pattern": "48 C7 83 {markers/main.capacity_offset:d32} {markers/list.capacity:d32} 48 89 8B 18 EA 36 00 48 89 BB 48 6A 39 00 48 89 BB 30 6A 39 00 48 C7 83 {markers/custom.capacity_offset:d32} {markers/list.capacity:d32} 48 89 8B 40 6A 39 00 48 89 BB 70 EA 3B 00 48 89 BB 58 EA 3B 00 48 C7 83 {markers/labels.capacity_offset:d32} {markers/list.capacity:d32} 48 89 8B 68 EA 3B 00 48 89 BB 98 6A 3E 00 48 89 BB 80 6A 3E 00 48 C7 83 {markers/special.capacity_offset:d32} {markers/list.capacity:d32}"
+        }
+      ]
+    },
+    "@markers/EntryStride": {
+      "comment": "the append's index*5<<5 (client 0x3029a9): entries are 0xa0 bytes",
+      "find": [
+        {
+          "pattern": "48 8D 0C 80 48 8B 03 48 C1 E1 05 48 03 C1 33 C9 48 89 50 10 48 89 50 18 48 89 50 20"
+        }
+      ]
+    }
+  },
+  "constants": {
+    "markers/list.capacity": {
+      "value": 1024,
+      "min_votes": 4
+    },
+    "markers/main.capacity_offset": {
+      "value": 3598864
+    },
+    "markers/custom.capacity_offset": {
+      "value": 3762744
+    },
+    "markers/labels.capacity_offset": {
+      "value": 3926624
+    },
+    "markers/special.capacity_offset": {
+      "value": 4090504
+    },
+    "markers/entry.size": {
+      "value": 160,
+      "comment": "the stride, guarded by @markers/EntryStride (not an immediate)"
+    },
+    "markers/main.count": {
+      "value": 3598856
+    },
+    "markers/special.count": {
+      "value": 4090496
+    },
+    "markers/labels.count": {
+      "value": 3926616
+    },
+    "markers/entry.tag": {
+      "value": 8
+    },
+    "markers/entry.position": {
+      "value": 16
+    },
+    "markers/entry.z": {
+      "value": 32
+    },
+    "markers/entry.visibility": {
+      "value": 52
+    },
+    "markers/entry.label": {
+      "value": 80
+    },
+    "markers/entry.label_hash": {
+      "value": 96
+    }
+  },
+  "features": {
+    "markers.client_map": {
+      "symbols": [
+        "markers/Clear",
+        "@markers/Entry",
+        "@markers/ListCapacity",
+        "@markers/EntryStride"
+      ],
+      "constants": [
+        "markers/list.capacity",
+        "markers/main.capacity_offset",
+        "markers/custom.capacity_offset",
+        "markers/labels.capacity_offset",
+        "markers/special.capacity_offset",
+        "markers/entry.size",
+        "markers/main.count",
+        "markers/special.count",
+        "markers/labels.count",
+        "markers/entry.tag",
+        "markers/entry.position",
+        "markers/entry.z",
+        "markers/entry.visibility",
+        "markers/entry.label",
+        "markers/entry.label_hash"
+      ]
+    },
+    "markers.anchors.client": {
+      "symbols": [
+        "GetComponent",
+        "spawn/CreateEntity",
+        "spawn/DestroyEntity",
+        "net/CreateTemplateCall",
+        "@net.create_fields"
+      ],
+      "constants": [
+        "world.storage",
+        "net/create.entity",
+        "net/create.parent"
+      ]
+    }
+  }
+}

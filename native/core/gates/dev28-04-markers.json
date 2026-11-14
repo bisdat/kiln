@@ -1,0 +1,7 @@
+{ "gates": [
+    { "name": "markers.map", "checks": ["04-m15", "04-markers.capacity_restore"], "side": "client" },
+    { "name": "markers.compass", "checks": ["04-m07"], "side": "client" },
+    { "name": "markers.world", "checks": ["04-m07"], "side": "client" },
+    { "name": "markers.nameplates", "checks": ["04-m05", "04-m06"], "side": "client" },
+    { "name": "markers.anchors.client", "checks": ["04-m05", "04-m06"], "side": "client" }
+] }

@@ -9,9 +9,9 @@
   "verified": true,
   "note": "runtime-verified through Steam (GE-Proton11-11), policy any, core + every service + kiln-emf + probe + ui-test + menubuttons: side client, sigdb 306/306 symbols, 434/434 constants (client.d composed), SimStep + WorldDestroy hooked, boot complete, 0 errors; main menu entries Kiln / ui-test / Mods (the Kiln sample screen opened); hosted a LOCAL world offline (saves: world loaded: slot 0x0002 (world1.ksd)): server world 60 steps/s on the GameServer thread, client and prediction worlds on the main thread, local player 1; ui-test all checks PASS (screens MainMenu/Loading/InGame/PauseMenu/Map/Crafting, menu entries chosen, crafting state), Kiln crafting tabs and subcategories shown, Insert overlay; tick cost as on ce6fdba6 (server step p50 2.5 ms, Kiln Pre 0.037 ms; client 1.2 ms); back to the menu (worlds stopping, shutdown save), clean quit (Shutdown 'Steam'). Not covered: joining a remote server, service write paths on the client. Added in dev.22 from static analysis only (resolved offline with sigdb_check.py, not yet seen running): ui.menu_page, ui.menu_page_sound, ui.error_popup (ui/PreGameCredits, ui/PreGameCreditsRet, ui/UiPlaySound and their constants). Levels (record 2, refreshed offline on 2026-11-11, no client run): lab = the names the boot above resolved, as its record listed them (199 named symbols, 434 constants, 106 features), each resolving to the same value today; every service loaded in that boot, but only ui-test ran, so lab here means loaded with Kiln's checks passing, not that the service test mods ran on the client. static = everything else, resolved offline only: the 186 @ probes (the boot's record did not list probes), the dev.22 ui names above, and every name declared since (the services audio, characters, emf-net, npcai, pacing, progression, quests, render, rules, skills, types and vfx, and new names of combat, creatures, gamedata, items, net, players, time and ui): 158 symbols, 210 constants and 70 features. sigdb now declares 543 symbols (441 defined, 102 captured), 644 constants (595 defined, 49 captured) and 176 features; all of them resolve offline on this exe.",
   "declared": {
-    "symbols": 596,
-    "constants": 678,
-    "features": 187
+    "symbols": 600,
+    "constants": 693,
+    "features": 190
   },
   "features": {
     "abilities.attributes": true,
@@ -96,6 +96,9 @@
     "items.volume": true,
     "log.mirror": true,
     "log.write": true,
+    "markers.anchors.client": true,
+    "markers.anchors.server": true,
+    "markers.client_map": true,
     "net.client": true,
     "net.client_guard": true,
     "net.client_ready": true,
@@ -381,6 +384,7 @@
     "items/SlotTransfer": "0x4149b0",
     "items/UnequipItem": "0x419740",
     "items/WriteOther": "0x9b2900",
+    "markers/Clear": "0x304470",
     "net/ClientGameplayReady": "0x86d9f0",
     "net/ClientReceive": "0x874ed0",
     "net/CreateTemplateCall": "0x961d07",
@@ -874,6 +878,21 @@
     "items/tx.touched_inline": "0x7168",
     "items/world.program_count": "0xe16f50",
     "items/world.program_stride": "0x1f28",
+    "markers/custom.capacity_offset": "0x396a38",
+    "markers/entry.label": "0x50",
+    "markers/entry.label_hash": "0x60",
+    "markers/entry.position": "0x10",
+    "markers/entry.size": "0xa0",
+    "markers/entry.tag": "0x8",
+    "markers/entry.visibility": "0x34",
+    "markers/entry.z": "0x20",
+    "markers/labels.capacity_offset": "0x3bea60",
+    "markers/labels.count": "0x3bea58",
+    "markers/list.capacity": "0x400",
+    "markers/main.capacity_offset": "0x36ea10",
+    "markers/main.count": "0x36ea08",
+    "markers/special.capacity_offset": "0x3e6a88",
+    "markers/special.count": "0x3e6a80",
     "net/after_sync.gs_register": "0xf",
     "net/channel": "0xc",
     "net/channel.mode": "0x3",
@@ -1855,6 +1874,39 @@
       },
       "features": {
         "queries.voxel_ray": "static"
+      }
+    },
+    "dev28-04-markers": {
+      "level": "static",
+      "date": "2026-11-13",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "@markers/Entry": "static",
+        "@markers/EntryStride": "static",
+        "@markers/ListCapacity": "static",
+        "markers/Clear": "static"
+      },
+      "constants": {
+        "markers/custom.capacity_offset": "static",
+        "markers/entry.label": "static",
+        "markers/entry.label_hash": "static",
+        "markers/entry.position": "static",
+        "markers/entry.size": "static",
+        "markers/entry.tag": "static",
+        "markers/entry.visibility": "static",
+        "markers/entry.z": "static",
+        "markers/labels.capacity_offset": "static",
+        "markers/labels.count": "static",
+        "markers/list.capacity": "static",
+        "markers/main.capacity_offset": "static",
+        "markers/main.count": "static",
+        "markers/special.capacity_offset": "static",
+        "markers/special.count": "static"
+      },
+      "features": {
+        "markers.anchors.client": "static",
+        "markers.anchors.server": "static",
+        "markers.client_map": "static"
       }
     },
     "dev28-06b-typed-hooks": {

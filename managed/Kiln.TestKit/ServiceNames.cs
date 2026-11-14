@@ -29,6 +29,8 @@ internal static class ServiceNames
         "kiln.hooks",
         "kiln.items",
         "kiln.knowledge",
+        "kiln.markers",
+        "kiln.markers.bridge",
         "kiln.net",
         "kiln.npcai",
         "kiln.pacing",

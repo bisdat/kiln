@@ -1,0 +1,19 @@
+{
+  "format": 1,
+  "side": "server",
+  "comment": "kiln.markers (dossier chapter 04, docs/re/map.md). markers.anchors.server: what the server-world anchors need, all existing entries reused, none declared again (chapter 04 §2.6/§4.2: GetComponent called with an explicit world, world.storage, and the create/destroy primitives kiln.spawn already resolves). Every name matches the dedicated server and the game client once, so a hosting client uses this feature unchanged; client.d/dev28-04-markers.json extends this file.",
+  "symbols": {},
+  "constants": {},
+  "features": {
+    "markers.anchors.server": {
+      "symbols": [
+        "GetComponent",
+        "spawn/CreateEntity",
+        "spawn/DestroyEntity"
+      ],
+      "constants": [
+        "world.storage"
+      ]
+    }
+  }
+}

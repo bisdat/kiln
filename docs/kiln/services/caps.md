@@ -268,3 +268,15 @@ a held row reads `unavailable`, `policy`, `game test pending: <ids>` until then.
 | `queries.ground` | managed | Kiln.Queries | client: `01-queries.voxel-ray-hosted` | `Queries.GroundBelow`; needs `queries.voxel_ray` |
 | `queries.line_of_sight` | managed | Kiln.Queries | client: `01-queries.voxel-ray-hosted` | `Queries.VoxelLineOfSight`; needs `queries.voxel_ray` and `kiln.world` |
 | `queries.overlap_origins` | managed | Kiln.Queries | client: `01-queries.voxel-ray-hosted` | `Queries.EntitiesInSphere`, `EntitiesInBox`: entity origins from `kiln.world` |
+| `kiln.markers` | service | core | - | kiln.markers' table is here (kiln-markers.dll; `native/core/abi/services/kiln_markers.h`). `kiln.markers.bridge` is the internal table of the built-in receiver |
+| `markers.local` | service | kiln.markers | - | The local marker store on a client (`Markers.Set`, `Remove`, `Clear`); needs `world.lifecycle`; wrong side on a dedicated server. Off while it is not built |
+| `markers.catalog` | service | kiln.markers | - | The icon catalog (`Markers.Icons`); whether it has warmed up is `Markers.Icons.IsReady`, not this row. Off while it is not built |
+| `markers.map` | service | kiln.markers | client: `04-m15`, `04-markers.capacity_restore` | Markers as native icons on the game's map (needs `markers.client_map` and a verified icon catalog). Off while it is not built |
+| `markers.compass` | service | kiln.markers | client: `04-m07` | Markers on Kiln's drawn compass strip (kiln.render). Off while it is not built |
+| `markers.world` | service | kiln.markers | client: `04-m07` | Markers as drawn world labels (kiln.render). Off while it is not built |
+| `markers.nameplates` | service | kiln.markers | client: `04-m05`, `04-m06` | A world label that follows an entity (`Markers.SetNameplate`); needs `markers.world` and `markers.anchors.client`. Off while it is not built |
+| `markers.anchors.client` | sigdb feature | sigdb; kiln.markers lowers it | client: `04-m05`, `04-m06` | Following an entity of a client's world: the server-world anchor names plus the network create site and its fields (`net/CreateTemplateCall`, `@net.create_fields`). Off while it is not built |
+| `markers.anchors.server` | sigdb feature | sigdb; kiln.markers lowers it | - | Following an entity of the server world: `GetComponent` with an explicit world, `world.storage`, `spawn/CreateEntity`, `spawn/DestroyEntity`. Off while it is not built |
+| `markers.client_map` | sigdb feature | sigdb | - | The guards of the native map list resolved on this client build: the clear program's three counts, the entry layout, the four capacities of 1024, the 0xa0 stride |
+| `markers.send` | service | kiln.markers | - | Server marker layers and the built-in receiver's link (`Markers.Send`, `Unsend`, `SuppressSent`, `ClearSent`). Off while it is not built |
+| `markers.map_text` | service | kiln.markers | - | The game's own map tooltip for a marker's text. Off in v1: its question (check `04-map-text`) is open |

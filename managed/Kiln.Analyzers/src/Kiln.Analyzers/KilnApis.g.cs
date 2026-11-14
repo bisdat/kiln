@@ -792,6 +792,7 @@ internal static partial class KilnApis
         "Gameplay",
         "Hooks",
         "Items",
+        "Markers",
         "Network",
         "Permissions",
         "PlayerAnim",

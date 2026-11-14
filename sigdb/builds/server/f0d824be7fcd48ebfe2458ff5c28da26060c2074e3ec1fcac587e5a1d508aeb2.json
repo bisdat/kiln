@@ -11,7 +11,7 @@
   "declared": {
     "symbols": 473,
     "constants": 571,
-    "features": 155
+    "features": 156
   },
   "features": {
     "abilities.attributes": true,
@@ -85,6 +85,7 @@
     "items.volume": true,
     "log.mirror": true,
     "log.write": true,
+    "markers.anchors.server": true,
     "net.client_guard": true,
     "net.gate": true,
     "net.kick": true,
@@ -1550,6 +1551,16 @@
       },
       "features": {
         "queries.voxel_ray": "static"
+      }
+    },
+    "dev28-04-markers": {
+      "level": "static",
+      "date": "2026-11-13",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {},
+      "constants": {},
+      "features": {
+        "markers.anchors.server": "static"
       }
     },
     "dev28-06b-typed-hooks": {
