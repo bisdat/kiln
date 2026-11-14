@@ -1,9 +1,10 @@
 # EMF mods on Kiln (kiln-emf)
 
-Kiln loads unmodified mods for **EMF** (Enshrouded Modding Framework, MIT; API versions through EMF 0.6.8 / v40)
-through the plugin `kiln/plugins/kiln-emf.dll`. It supplies an `EmfApi` v40 table built on Kiln's services:
+Kiln loads unmodified mods for **EMF** (Enshrouded Modding Framework, MIT; API versions through EMF 0.6.11 / v42)
+through the plugin `kiln/plugins/kiln-emf.dll`. It supplies an `EmfApi` v42 table built on Kiln's services:
 of 135 C slots, 76 are full, 17 partial, and 42 (functions EMF added between 0.6.3 and 0.6.8) answer "not available on
-Kiln yet" ([what that means for a mod](#mods-built-for-emf-063-to-068)). API coverage is not a guarantee for every mod
+Kiln yet" ([what that means for a mod](#mods-built-for-emf-063-to-0611)). v41 and v42 (EMF 0.6.10 and 0.6.11) added
+no function. API coverage is not a guarantee for every mod
 pairing or player-facing feature. Every function and its evidence: [emf-parity.md](emf-parity.md). You keep your EMF
 DLL mods and EMF's Lua mods; you do not need EMF's own `dinput8.dll` or `emf_core.dll`.
 
@@ -57,11 +58,18 @@ Evidence, design and the mapping of each function: [docs/re/emf-compat.md](../re
 - **Faults:** a mod whose `emf_mod_load` returns false or faults is marked `failed`. Its DLL stays loaded: Kiln never
   unloads an EMF mod.
 
-### Mods built for EMF 0.6.3 to 0.6.8
+### Mods built for EMF 0.6.3 to 0.6.11
 A mod built with EMF's SDK does not start on a host whose table is smaller than the one it was built with. Kiln
 served EMF 0.6.0's table until 0.2.0-dev.26, so every EMF DLL built since 0.6.3 stayed off ("this mod was built for
 EMF API v40; the core is v27"), and with EMF's `lua` mod every Lua mod of a current EMF. Since 0.2.0-dev.27 the table
 is EMF 0.6.8's and they start.
+
+EMF 0.6.10 (API v41) and 0.6.11 (v42) only raised the version: v41 gave move orders `stuck_seconds` and the flag
+`EMF_MOVE_PEACEFUL_ALL`, v42 gave path results the door each point goes through (`EmfPathResult.doors`); the table
+stayed 1088 bytes. Since 0.2.0-dev.28 kiln-emf says version 42, so a mod whose `mod.json` says `"emf": 41` or `42`
+loads instead of being refused ("needs EMF API v42; kiln-emf provides v40"), and `emf::has_v41()` and `has_v42()`
+answer true. The functions those fields belong to, `enemy_move` and `path_find`, are still among the ones Kiln does not
+carry: a move order of either size (128 or 136 bytes) is refused with its reason, and no path result reaches a mod.
 
 Kiln does not carry every function EMF added since. Carried: chat lines without a speaker (`chat_tell_ex`,
 `chat_broadcast_ex`; on Kiln every line a mod sends shows without a name, also a plain one) and `world_to_screen`. Not yet: player join/leave/death events, item names and the game's
@@ -161,7 +169,7 @@ plain detour and the log says `outside the game exe`. `kiln-emf`'s own hooks (Ch
 v27 client chat bridge) are links too, `ChatLogAdd` after `kiln.chat`'s.
 
 ## Compatibility by function
-The full table for EmfApi v40 (135 functions, and EMF's Lua API) is [emf-parity.md](emf-parity.md); v28 to v40 are
+The full table for EmfApi v42 (135 functions, and EMF's Lua API) is [emf-parity.md](emf-parity.md); v28 to v40 are
 in [its own table there](emf-parity.md#v28-to-v40-emf-063-to-068). v22-v27 in short:
 player level and XP through `kiln.progression`; `change_component` and E-prompt offers through kiln-emf's own
 `kiln.world` program; mod windows and pictures through `kiln.ui` in the game client (refused on a dedicated server, as
@@ -211,7 +219,7 @@ listed. **No** means it logs `emf: <mod> called <fn>, not supported` once and re
 | `wheel_open` | full | radial wheel through `kiln.ui`; host checks pass, client drawing/input still need a player |
 
 ## Client checklist (needs a joined player)
-- A mod of a current EMF runs with no EMF installed: put EMF 0.6.8's `lua` mod and a Lua mod (Kill Counter) in
+- A mod of a current EMF runs with no EMF installed: put EMF 0.6.11's `lua` mod (1.35.0) and a Lua mod (Kill Counter) in
   `emf/mods`, start through Kiln, and kill something: the counter's line shows. `kiln.log` has
   `[emf:lua] ... loaded` and no `built for EMF API` line.
 - The mod check on join: join a server that runs EMF 0.6.8 with `[net] mods_check=refuse` and a mod with a channel,
