@@ -192,7 +192,10 @@ restart.
 - **Game clients** (a world a player hosts, and a player's game that joins a server) run it the same way since
   0.2.0-dev.29: the rows `mods.boot.client` and `mods.boot.resource_patches` are open. In 0.2.0-dev.28 they were held
   and a boot mod did not load on a client without `"preview"` in `kiln/kiln.json`. Still held on a client:
-  `mods.boot.vfx` (VFX and materials of a boot mod are then built after the start, as for any other mod).
+  `mods.boot.vfx`. While it is held, a boot mod's VFX and material files are built as every mod's are (before the
+  game's entry point, outside the boot generation), and an error in one of them is logged and that file left out even
+  for a `"required"` mod; VFX or materials staged into a boot generation are left out with a warning (no public API
+  stages them in this release).
 - A server where the phase does not run (safe idle, .NET off) does not load boot mods either. The row `mods.boot.phase`
   says why.
 
