@@ -85,6 +85,8 @@ Kiln.NetPeer.BytesIn -> long
 Kiln.NetPeer.BytesOut -> long
 Kiln.NetPeer.ConnectedAt.get -> System.DateTime
 Kiln.NetPeer.Dropped -> long
+Kiln.NetPeer.FramesIn.get -> long
+Kiln.NetPeer.FramesOut.get -> long
 Kiln.NetPeer.HasChannel(string! name) -> bool
 Kiln.NetPeer.Id.get -> uint
 Kiln.NetPeer.IsLab.get -> bool

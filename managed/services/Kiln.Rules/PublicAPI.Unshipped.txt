@@ -1,2 +1,1 @@
 #nullable enable
-Kiln.NoClipEnd.Left = 3 -> Kiln.NoClipEnd

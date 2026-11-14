@@ -1,3 +1,1 @@
 #nullable enable
-Kiln.NetPeer.FramesIn.get -> long
-Kiln.NetPeer.FramesOut.get -> long
