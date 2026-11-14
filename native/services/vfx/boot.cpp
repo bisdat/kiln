@@ -713,14 +713,51 @@ bool serve(const kvb::CookResult& r) {
 
 }  // namespace
 
+// The first required participant of a boot generation whose own blocks or OnBoot documents hold a "vfx" (vfx) or "materials"
+// (materials) section: {mod, file}, or empty. A Refusal of read_mod (a file of its left out) goes up as it is.
+std::pair<std::string, std::string> required_vfx_content(const KilnApi* api, const kiln::boot::Input& boot, bool vfx, bool materials) {
+    if (!g_api) g_api = api;
+    if (boot.required.empty()) return {};
+    const fs::path pending = to_path(api_path(KILN_PATH_DATA)) / L"vfx" / L"pending";
+    for (const std::string& dir : mod_folders()) {
+        kvb::ModInput m;
+        if (!read_mod(dir, pending, &m, &boot) || !boot.strict(m.id)) continue;
+        for (const auto& [file, text] : m.documents) {
+            if (file.rfind("pending/", 0) == 0) continue;  // Kiln's own cache of its code
+            const ojson doc = kvb::parse_relaxed(text);
+            if (!doc.is_object()) continue;
+            for (const auto& [key, want] : {std::pair{"vfx", vfx}, std::pair{"materials", materials}})
+                if (want && doc.contains(key) && doc[key].is_object() && !doc[key].empty()) return {m.id, file};
+        }
+    }
+    return {};
+}
+
 void build_on_ready(const KilnApi* api, KilnOwner self, const kiln::boot::Input* boot) {
     g_api = api;
     g_self = self;
+    // a boot generation: a required participant whose VFX or materials this start cannot build at all is refused (kiln.boot stops the
+    // start); another mod's are off with the lines below, as they always were
+    const auto refuse_required = [&](bool vfx, bool materials, const std::string& why) {
+        if (!boot) return;
+        std::pair<std::string, std::string> hit;
+        try {
+            hit = required_vfx_content(api, *boot, vfx, materials);
+        } catch (const kiln::boot::Refusal&) {
+            throw;
+        } catch (const std::exception&) {
+            return;  // what cannot even be read is said by the lines of the build
+        }
+        if (!hit.first.empty())
+            throw kiln::boot::Refusal(hit.first, "vfx", hit.second, "kiln.vfx: " + hit.second + ": its " + (vfx && materials ? "VFX and materials" : vfx ? "VFX" : "materials") +
+                                                                       " cannot be built in this start: " + why);
+    };
     try {
         g_assets = static_cast<const KilnAssetsApi*>(api->service(KilnStr{KILN_ASSETS_SERVICE, sizeof(KILN_ASSETS_SERVICE) - 1}, 1));
         if (!g_assets || g_assets->header.size < sizeof(KilnAssetsApi)) {
             KV_W("vfx: kiln.assets is not there: no Kiln VFX this session");
             set_status("not checked", "no kiln.assets", nullptr);
+            refuse_required(true, true, "kiln.assets is not there, so no Kiln VFX or material is built");
             return;
         }
         const std::string diff = check_layouts();
@@ -737,8 +774,11 @@ void build_on_ready(const KilnApi* api, KilnOwner self, const kiln::boot::Input*
         }
         if (!diff.empty() && !material_diff.empty()) {
             set_status("changed", diff + "; " + material_diff, nullptr);
+            refuse_required(true, true, "this game build changed what Kiln's particle modules and materials are written for (kiln.log says what)");
             return;
         }
+        if (!diff.empty()) refuse_required(true, false, "this game build changed what Kiln's particle modules are written for (kiln.log says what)");
+        if (!material_diff.empty()) refuse_required(false, true, "this game build changed what Kiln's materials are written for (kiln.log says what)");
         g_game = counts_from_game();
         if (!read_game_materials(to_path(api_path(KILN_PATH_GAME)) / L"enshrouded.kfc", &g_game_materials))
             KV_W("vfx: original material keys could not be read: material replacements are refused this session");
@@ -928,6 +968,7 @@ void build_on_ready(const KilnApi* api, KilnOwner self, const kiln::boot::Input*
     } catch (const std::exception& e) {
         KV_E("vfx: building mods' VFX failed (%s): no Kiln VFX this session", e.what());
         set_status("not checked", e.what(), nullptr);
+        refuse_required(true, true, std::string("building mods' VFX failed (") + e.what() + ")");
     }
 }
 

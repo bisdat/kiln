@@ -4,6 +4,8 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
+#include <string>
+#include <utility>
 
 #include "kiln_api.h"
 
@@ -17,6 +19,9 @@ namespace kvx {
 // a block, a mod or all Kiln VFX off with a log line.
 // `boot`: a boot generation's prepare input (chapter 08; kiln_boot_collector.hpp): excluded mods are left out, its vfx documents read.
 void build_on_ready(const KilnApi* api, KilnOwner self, const kiln::boot::Input* boot = nullptr);
+// A boot generation's first required participant with VFX ("vfx") or materials ("materials") in its own blocks or OnBoot documents:
+// {mod, file}, or empty (kiln.vfx's empty-plan prepare refuses it where no VFX are built at all on a client).
+std::pair<std::string, std::string> required_vfx_content(const KilnApi* api, const kiln::boot::Input& boot, bool vfx, bool materials);
 // Takes back what a boot generation's prepare built and served (the generation was not published).
 void build_forget();
 

@@ -1757,4 +1757,12 @@ bool gd_template_defined(const uint8_t guid[16]) {
 
 uint64_t gd_template_generation() { return gd::g_template_gen.load(std::memory_order_relaxed); }
 
+void gd::clones_boot_failed(std::vector<BootFailed>* out) {
+    std::lock_guard lock(gd::g_mu);
+    for (const gd::Def& d : gd::g_defs)
+        if (d.state == "error" && !d.orphan && owner_label(d.owner).rfind("boot:", 0) == 0)
+            out->push_back({d.mod, d.name, std::string(gd::section_name(d.section)) + " clone " + d.name + " (" + guid_text(d.guid) +
+                                               ") was not registered when a world loaded: " + d.problem});
+}
+
 }  // namespace kc

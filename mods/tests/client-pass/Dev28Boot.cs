@@ -118,6 +118,42 @@ public sealed partial class ClientPassMod
         await c.Skip("part 1 is incomplete: rehosting, joining and the required-failure start remain");
     }
 
+    // A required boot mod's content that only a game client builds (FIX-required, 08 fix round): a texture override applied when the
+    // game's resources come up (kiln.assets), and VFX or materials while kiln.vfx is off. Fixtures: boot-required-test's client cases
+    // (mods/tests/boot-required-test/run.sh client <folder>). Each stops the start; this check reads the stopped start's kiln.prev.log.
+    [ClientCheck("08-boot.required-client", "A required boot mod's client-only content stops the start", Area = BootArea, Since = Dev28,
+        Needs = ClientCheckNeeds.Hosted, Order = 3002)]
+    public async Task BootRequiredClient(CheckContext c)
+    {
+        if (!await NeedOpen(c, "mods.boot.client")) return;
+        string[] fixtures = ["boot-req-client-texture", "boot-req-client-vfx"];
+        var prev = BootLog(c, "kiln.prev.log");
+        if (prev is null) return;
+        var stop = prev.LastOrDefault(l => l.Contains("boot: the start stops", StringComparison.Ordinal));
+        var which = fixtures.FirstOrDefault(f => stop?.Contains(f, StringComparison.Ordinal) == true);
+        if (which is null)
+        {
+            await BootCannotJudge(c, "the start before this one was not stopped by a boot-required-test client fixture",
+                "Make two starts, each followed by a start that runs this check. (A) Put boot-req-client-texture (boot-required-test: " +
+                "run.sh client <kiln mods folder>; a required boot mod whose assets.json overrides a texture the game does not have) in the " +
+                "profile and start: the game must close when its data comes up, before any world or save loads. (B) Put " +
+                "boot-req-client-vfx (a required boot mod with a VFX block) in the profile, set kiln/config/vfx.json to {\"enabled\": false} " +
+                "and start: the game must close before its window shows a menu. After each, take the fixture out (and vfx.json back), start " +
+                "again and run this check.");
+            return;
+        }
+        c.Expect(stop!.Contains("exit code 0x4B01", StringComparison.Ordinal), $"the previous start stopped with 0x4B01 naming {which}", stop);
+        c.Expect(which != "boot-req-client-texture" || stop.Contains("assets", StringComparison.Ordinal) && stop.Contains("texture", StringComparison.Ordinal),
+            "the stop line names the texture entry", stop);
+        c.Expect(which != "boot-req-client-vfx" || stop.Contains("vfx", StringComparison.Ordinal), "the stop line names the vfx block file", stop);
+        var handed = prev.FirstOrDefault(l => l.Contains("world loaded", StringComparison.OrdinalIgnoreCase));
+        c.Expect(handed is null, "no world loaded in the stopped start", handed);
+        c.Instruct($"The start with {which} stopped: {stop}. Did the game close on its own without showing a world (for boot-req-client-vfx: " +
+                   "without a main menu), and did the launcher show the stop (exit code 0x4B01 on Windows, 1 under a Unix wrapper)? Pass only " +
+                   "if so; run the check once after each of the two fixtures.");
+        await c.Verdict();
+    }
+
     [ClientCheck("08-loader-order", "Other-loader consumer ordering", Area = BootArea, Since = Dev28,
         Tags = [Frameworks, Visual], Needs = ClientCheckNeeds.Hosted, Order = 3001)]
     public async Task BootLoaderOrder(CheckContext c)

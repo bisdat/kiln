@@ -8,6 +8,8 @@ the bad entry as it does without OnBoot (or drops the mod whole where it always 
     fixtures.py list
     fixtures.py make <dest folder> <case> required|optional   (the entry assembly is copied in by run.sh)
     fixtures.py refuse <case>      the collector kiln.json's boot.testRefuse names for the case, or nothing
+    fixtures.py kind <case>        stops | late | starts: what a required fixture does to the start
+    fixtures.py client             the fixtures only a game client can show (guided check 08-boot.required-client)
 """
 import json
 import os
@@ -29,8 +31,19 @@ CASES = {
     "content-entry": "an unreadable content document (lab switch boot.testRefuse)",
     "vfx-entry": "an unreadable vfx document (lab switch boot.testRefuse)",
     "patches-entry": "a resource patch of an unknown type",
+    "skills-tree": "a game-tree node whose \"from\" names no node (refused by the tree build when a world loads)",
+    "worldtables-merge": "a material tweak of a material the game does not have (refused by the merge when the game's data comes up)",
+    "patches-comma": "a resource patch in a blocks file with comments and trailing commas (read like every blocks file: the start goes on)",
 }
 REFUSE = {"content-entry": "content", "vfx-entry": "vfx"}
+# what a required fixture does: "stops" before the game's entry point, "late" after it (a world or the game's data loading), "starts"
+LATE = {"knowledge-entry", "skills-tree", "worldtables-merge"}
+STARTS = {"patches-comma"}
+# fixtures only a game client can show (guided check 08-boot.required-client): run.sh client <folder>
+CLIENT = {
+    "client-texture": "a texture override of a texture the game does not have (applied when the game's resources come up)",
+    "client-vfx": "a VFX block, for a start with kiln/config/vfx.json {\"enabled\": false}",
+}
 
 
 def mod_id(case):
@@ -80,24 +93,67 @@ def good_knowledge(case):
     return {"format": 1, "knowledge": {"bootreq-" + case + "-flag": {"type": "bool", "scope": "player"}}}
 
 
+def png_1x1():
+    import struct, zlib
+    def chunk(t, d):
+        return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 6, 0, 0, 0)) + \
+        chunk(b"IDAT", zlib.compress(b"\x00\xff\x00\xff\xff")) + chunk(b"IEND", b"")
+
+
+def make_special(dest, case):
+    p = lambda *parts: os.path.join(dest, *parts)
+    if case == "skills-tree":
+        bad = good_node(case + "x")
+        bad["name"] = "bootreq_dangling"
+        bad["from"] = ["0xdeadbeef"]
+        write_json(p("skills", "nodes.json"), {"format": 1, "gameTree": {"nodes": [good_node(case), bad]}})
+    elif case == "worldtables-merge":
+        write_json(p("blocks", "tweaks.json"), {"format": 1, "materialTweaks": {
+            "bootreq-good": good_tweak(case),
+            "bootreq-nowhere": {"material": "NoSuchMaterialAnywhere", "strength": {"health": 4321}}}})
+    elif case == "patches-comma":
+        write(p("blocks", "patches.json"), """{
+  "format": 1, // comments and trailing commas, as Kiln.Blocks and every other reader of blocks files take them
+  "resourcePatches": {
+    "xp": {
+      "resource": "82706b40-61b1-4b8f-8b23-dcec6971bda1",
+      "type": "keen::BalancingTable",
+      "set": { "experienceNeedPerLevel[2]": 2600, },
+    },
+  },
+}
+""")
+    elif case == "client-texture":
+        os.makedirs(p("assets"), exist_ok=True)
+        with open(p("assets", "tint.png"), "wb") as f:
+            f.write(png_1x1())
+        write_json(p("assets", "assets.json"), {"format": 1, "entries": [
+            {"kind": "texture", "guid": "b0071e57-0000-4000-8000-00000000c11e", "type": "keen::UiTextureResource", "file": "tint.png"}]})
+    elif case == "client-vfx":
+        write_json(p("blocks", "vfx.json"), {"format": 1, "vfx": {"bootreq-puff": {"particles": [{"count": 4, "life": 0.5}]}}})
+
+
 def make(dest, case, role):
-    if case not in CASES:
+    if case not in CASES and case not in CLIENT:
         sys.exit("unknown case " + case)
     os.makedirs(dest, exist_ok=True)
     write_json(os.path.join(dest, "kiln.mod.json"), {
         "id": mod_id(case),
-        "name": "boot-required-test fixture: " + CASES[case],
+        "name": "boot-required-test fixture: " + CASES.get(case, CLIENT.get(case, "")),
         "version": "0.1.0",
         "apiVersion": "0.2",
         "entryAssembly": "BootRequiredFixture.dll",
-        "side": "server",
+        "side": "both" if case in CLIENT else "server",
         "clients": "mod",
         "boot": "required" if role == "required" else True,
         "advanced": True,
     })
     p = lambda *parts: os.path.join(dest, *parts)
     blob = {"kind": "blob", "file": "good.bin"}
-    if case.startswith("assets-"):
+    if case in ("skills-tree", "worldtables-merge", "patches-comma") or case in CLIENT:
+        make_special(dest, case)
+    elif case.startswith("assets-"):
         write(p("assets", "good.bin"), "boot-required-test: a good blob of " + case + "\n")
         if case == "assets-file":
             write(p("assets", "assets.json"), '{ "format": 1, "entries": [ { "kind": "blob", "file": "good.bin" }, not json\n')
@@ -153,6 +209,11 @@ def main():
         make(sys.argv[2], sys.argv[3], sys.argv[4])
     elif len(sys.argv) == 3 and sys.argv[1] == "refuse":
         print(REFUSE.get(sys.argv[2], ""))
+    elif len(sys.argv) == 3 and sys.argv[1] == "kind":
+        print("late" if sys.argv[2] in LATE else "starts" if sys.argv[2] in STARTS else "stops")
+    elif len(sys.argv) == 2 and sys.argv[1] == "client":
+        for c in CLIENT:
+            print(c)
     else:
         sys.exit(__doc__)
 

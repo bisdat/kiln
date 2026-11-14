@@ -191,6 +191,13 @@ Built g_last;                       // the last build's numbers
 uint8_t g_key_guid[16] = {};
 bool g_have_key = false, g_served = false, g_dirty = true;
 uint64_t g_builds = 0, g_worlds = 0;
+// A boot generation's required participants (prepare): their nodes the first tree build leaves out stop the start (kiln.boot
+// activation_fault), reported from hk_tree_load with no lock held.
+kiln::boot::LateFaults g_late;
+struct LateFault {
+    std::string mod, key, why;
+};
+std::vector<LateFault> g_late_pending;  // g_mu
 struct LiveTree {
     uintptr_t tree;
     uint32_t kind;  // KILN_WORLD_*, 99 = not known
@@ -490,6 +497,16 @@ void rebuild_locked(const char* why) {
     for (auto& d : g_defs)
         if (d->state == kError) SW("node %s (%s, %s) is not in the tree: %s", d->node.name.c_str(), guid_str(d->node.guid).c_str(),
                                    d->source.c_str(), d->error.c_str());
+    const auto late = [] {  // a required boot mod's own node (not Kiln's cache of its code) that is not in the tree
+        for (auto& d : g_defs)
+            if (d->state == kError && d->source.rfind("cache:", 0) != 0 && g_late.take(d->owner_id))
+                g_late_pending.push_back({d->owner_id, d->node.name, "node " + d->node.name + " (" + guid_str(d->node.guid) + ", " +
+                                                                         d->source + ") is not in the tree: " + d->error});
+    };
+    struct Late {
+        decltype(late)& f;
+        ~Late() { f(); }  // after the resource is served or refused below
+    } late_at_end{late};
     KilnAssetKey key{};
     std::memcpy(key.guid, g_key_guid, 16);
     key.type = 0xe4b6994fu;  // keen::SkillTreeResource
@@ -533,6 +550,24 @@ uint32_t kind_of_tree(uintptr_t tree) {
 
 kiln::RawHook g_load_hook, g_login_hook;
 
+// The whole tree is the game's (g_mu held): every required boot mod with a node of its own is reported.
+void late_whole(const std::string& why) {
+    for (auto& d : g_defs)
+        if (d->source.rfind("cache:", 0) != 0 && g_late.take(d->owner_id)) g_late_pending.push_back({d->owner_id, "", why});
+}
+
+// No lock held: what the tree build left out of a required boot mod stops the start (the call does not return then).
+void report_late() {
+    std::vector<LateFault> faults;
+    {
+        std::lock_guard lock(g_mu);
+        faults.swap(g_late_pending);
+    }
+    for (const LateFault& f : faults)
+        kiln::boot::activation_fault(g_api, g_owner, f.mod, "skills", f.key,
+                                     "kiln.skills, while a world loaded its skill tree (the stop comes at world load): " + f.why);
+}
+
 // Runs before the game's loader when the tree's data is 0. Never throws.
 void before_load(void* T) {
     try {
@@ -559,6 +594,7 @@ void before_load(void* T) {
             if (r != KILN_OK) {
                 g_vanilla.clear();
                 SW("the game's SkillTreeResource %s did not read (%d): the tree stays the game's", guid_str(guid).c_str(), r);
+                late_whole("the game's skill tree resource did not read (" + std::to_string(r) + "): no Kiln node is in the tree");
                 return;
             }
             const json s = summary(g_vanilla.data(), g_vanilla.size());
@@ -583,6 +619,11 @@ void before_load(void* T) {
         ++g_worlds;
     } catch (...) {
         SW("building the skill tree failed (exception): the tree stays the game's");
+        try {
+            std::lock_guard lock(g_mu);
+            late_whole("building the skill tree failed: no Kiln node is in the tree");
+        } catch (...) {
+        }
     }
 }
 
@@ -624,6 +665,7 @@ void hk_tree_load(void* T) {
     uint64_t data = 1;
     if (T && g_load_on.load(std::memory_order_relaxed) && rd(reinterpret_cast<uintptr_t>(T) + L.data, &data) && data == 0) {
         before_load(T);
+        report_late();  // before the game reads the tree
         g_load_hook.call<void>(T);
         after_load(T);
         return;
@@ -1357,6 +1399,7 @@ void KILN_CALL destroy_boot(const void* p) {
         std::erase_if(g_mod_owner, [&](const auto& kv) { return mine.count(kv.second) != 0; });
         g_code_json.clear();
         g_dirty = true;
+        g_late.reset();
     }
     for (const KilnOwner o : plan->owners)
         if (A) A->revert_owner(o);  // the nodes' icons
@@ -1367,6 +1410,10 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
     const kiln::boot::Input input = kiln::boot::parse(in);
     if (!input.ok) return kiln::boot::refuse(out, issue, "", "", "", "kiln.skills: the boot envelope is not JSON");
     auto* plan = new BootPlan;
+    {
+        std::lock_guard lock(g_mu);
+        g_late.reset(input.required);
+    }
     try {
         load_boot_definitions(&input, &plan->owners);
     } catch (const kiln::boot::Refusal& r) {

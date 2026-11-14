@@ -39,6 +39,9 @@ struct PendingIcon {
 };
 std::vector<PendingIcon> g_pending_icons;
 std::mutex g_pending_mu;
+// A boot generation's owners of required participants (g_pending_mu): a texture or icon of theirs queued until S appears that then
+// fails stops the start (kiln.boot activation_fault; a game client only, a dedicated server queues none).
+std::map<KilnOwner, std::string> g_boot_required_owner;
 }  // namespace
 
 namespace {
@@ -591,26 +594,42 @@ KilnResult dump(const std::string& spec, std::string* report) {
 void flush_pending_textures() {
     std::vector<PendingTexture> pend;
     std::vector<PendingIcon> icons;
+    std::map<KilnOwner, std::string> required;
     {
         std::lock_guard lock(g_pending_mu);
         pend.swap(g_pending_tex);
         icons.swap(g_pending_icons);
+        required = g_boot_required_owner;
     }
+    struct Late {
+        std::string mod, key, why;
+    };
+    std::vector<Late> late;
+    std::set<std::string> said;
+    auto failed = [&](KilnOwner owner, const std::string& label, const std::string& why) {
+        const auto it = required.find(owner);
+        if (it != required.end() && said.insert(it->second).second) late.push_back({it->second, label, label + ": " + why});
+    };
     for (auto& p : icons) {
         OriginScope origin(p.origin);
         if (is_game_icon(p.guid)) {  // registered as new at boot: the game has this key, so it is a game item's icon
             op_icon_remove(p.owner, p.guid);
-            retexture_game_icon(p.owner, p.guid, p.img, p.label);
+            if (retexture_game_icon(p.owner, p.guid, p.img, p.label) != KILN_OK) failed(p.owner, p.label, "the game item's icon was not retextured");
         }
     }
     for (auto& p : pend) {
         OriginScope origin(KILN_BLOB_ORIGIN_MANIFEST);  // only load_manifest queues texture overrides
         std::string why;
-        if (texture_override(p.owner, &p.key, p.png.data(), p.png.size(), &why) == KILN_OK)
+        if (texture_override(p.owner, &p.key, p.png.data(), p.png.size(), &why) == KILN_OK) {
             LOGI("assets: %s applied", p.label.c_str());
-        else
+        } else {
             LOGW("assets: %s failed: %s", p.label.c_str(), why.c_str());
+            failed(p.owner, p.label, why);
+        }
     }
+    // a required boot mod's texture that could not be applied: kiln.boot stops the start (the call does not return then)
+    for (const Late& l : late)
+        kiln::boot::activation_fault(g_api, g_self, l.mod, "assets", l.key, "kiln.assets, when the game's resources came up: " + l.why);
 }
 
 namespace {
@@ -675,9 +694,15 @@ void load_profile_manifests(const kiln::boot::Input* boot = nullptr, BootPlan* p
             const std::string more = errs.size() > 1 ? " (and " + std::to_string(errs.size() - 1) + " more entry error(s), kiln.log)" : "";
             kiln::boot::entry_error(boot, id, "assets", key, "kiln.assets: " + key + ": " + first + more);
         };
+        auto mark = [&](KilnOwner o) {  // a required participant's owner: its textures applied later are checked (flush_pending_textures)
+            if (!boot || id.empty() || !boot->strict(id)) return;
+            std::lock_guard lock(g_pending_mu);
+            g_boot_required_owner[o] = id;
+        };
         if (fs::exists(fs::path(widen(dir)) / L"assets" / L"assets.json", ec)) {
             KilnOwner o = g_api->owner_create(KilnStr{dir.c_str(), dir.size()});
             if (plan) plan->owners.push_back(o);
+            mark(o);
             std::string rep;
             std::vector<std::string> errs;
             const KilnResult rc = load_manifest(o, dir, &rep, &trust, &cooked_ids, nullptr, &errs);
@@ -693,6 +718,7 @@ void load_profile_manifests(const kiln::boot::Input* boot = nullptr, BootPlan* p
             const auto it = boot->owner.find(id);
             const KilnOwner o = it != boot->owner.end() && it->second ? it->second : g_api->owner_create(KilnStr{dir.c_str(), dir.size()});
             if (std::find(plan->owners.begin(), plan->owners.end(), o) == plan->owners.end()) plan->owners.push_back(o);
+            mark(o);
             std::string rep;
             std::vector<std::string> errs;
             const KilnResult rc = load_manifest(o, dir, &rep, &trust, &cooked_ids, &d.document, &errs);
@@ -713,6 +739,7 @@ void KILN_CALL destroy_boot(const void* p) {
         std::lock_guard lock(g_pending_mu);
         std::erase_if(g_pending_tex, [&](const PendingTexture& t) { return t.owner == o; });
         std::erase_if(g_pending_icons, [&](const PendingIcon& i) { return i.owner == o; });
+        g_boot_required_owner.erase(o);
     }
     {
         std::lock_guard lock(g_loaded_mu);
