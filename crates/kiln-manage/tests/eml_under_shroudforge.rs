@@ -500,6 +500,12 @@ fn the_launcher_says_when_shroudforge_has_an_eml_mod_off_and_never_writes_a_play
     assert!(ext_of(&hand).is_none() && engine_mods::marker(&hand).is_none(), "a player's folder is never written to");
     let note = rep.own_notes.iter().find(|n| n.starts_with("eml:aldrich-bare-body")).expect("a note for the player's folder");
     assert!(note.contains("ShroudForge has it switched off") && !note.contains("the game uses your own folder"), "{note}");
+    // the words promised to a player on Nexus (14 Nov 2026): what happened and the two ways out, nothing about
+    // ShroudForge's files (it read as "Kiln wants a ShroudForge file from an EML mod")
+    assert!(note.starts_with("eml:aldrich-bare-body: You put this mod into ShroudForge's folder yourself, and ShroudForge has it switched \
+        off. Switch it on in Kiln's in-game menu (Mods > ShroudForge), or remove the folder and press Play: the mod is in your profile, so \
+        Kiln then places its own copy, switched on."), "{note}");
+    assert!(note.contains(&hand.display().to_string()) && !note.contains("extended.mod.json"), "{note}");
     // a copy whose switch is off (turned off in the game, or a write that failed) is not said to run
     shroudforge::set_enabled(&s.game.join("mods/more-gliders"), false).unwrap();
     let view = own_loaders::ProfileView::of_profile(&p);

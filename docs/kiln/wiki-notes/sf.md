@@ -41,3 +41,12 @@ Suggested guide text (section "Other mod loaders → ShroudForge", after the par
 > the setting you change. Kiln says once that the game uses your own folder for that mod; **Notes** above your mods
 > shows that note again, and Settings → "Show notes about mod folders" turns such notes off. Changing a setting in
 > ShroudForge's own in-game menu no longer makes Kiln treat its copy as yours.
+
+Suggested guide text (section "Other mod loaders → ShroudForge", 2026-11-14, dev.28; promised to a player on Nexus):
+
+> **An EML mod you copied into ShroudForge's folder yourself.** While your profile has a ShroudForge mod on, ShroudForge
+> runs the EML mods in its folder, but only those switched on there, and it keeps a mod you copied in by hand switched
+> off. Kiln says so in these words: "You put this mod into ShroudForge's folder yourself, and ShroudForge has it
+> switched off. Switch it on in Kiln's in-game menu (Mods > ShroudForge), or remove the folder and add the mod with Add
+> mods." Kiln never writes into a folder it did not put there; a mod you add with Add mods runs from Kiln's own copy, which
+> Kiln switches on for ShroudForge.

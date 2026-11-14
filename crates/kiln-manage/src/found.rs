@@ -364,6 +364,11 @@ struct Ctx<'a> {
     kiln: bool,
     /// Wine or Proton: a loader under a proxy name next to the game runs only with a DLL override for that name.
     wine: bool,
+    /// ShroudForge runs the EML mods of its mods folder this start ([`crate::own_loaders::sf_eml_folder`]): Some(its own
+    /// loader does; false: Kiln hosts it for the profile).
+    sf_eml: Option<bool>,
+    /// A dedicated server's folder.
+    server: bool,
 }
 
 fn found(name: String, path: String, state: FoundState, reason: String) -> FoundMod {
@@ -405,6 +410,13 @@ fn entry(cx: &Ctx, root: &Root, abs: &Path, file_name: &str, is_zip: bool) -> Fo
         m.state = FoundState::CannotRun;
         m.reason = "Kiln finds Ember mods but cannot run them yet: Ember has not published its mod ABI.".into();
         return m;
+    }
+    // ShroudForge runs the EML mods of its own folder this start (its own loader, or Kiln hosting it for the profile's
+    // ShroudForge mods), each only while its switch is on: neither EML's drop-ins nor kiln-eml decide it
+    if kind == ModKind::Eml && cx.kiln && cx.sf_eml.is_some() && root.kinds.contains(&ModKind::ShroudForge) && abs.is_dir()
+        && profile_entry(cx.dirs, cx.profile, kind, d.id.as_deref(), abs).is_none()
+    {
+        return sf_eml_entry(cx, m, abs);
     }
     if !root.kinds.contains(&kind) {
         m.reason = format!("Nothing loads {} mods from {}: Kiln looks for them in {}.", short(kind), root.rel, folders_of(kind));
@@ -467,6 +479,27 @@ fn entry(cx: &Ctx, root: &Root, abs: &Path, file_name: &str, is_zip: bool) -> Fo
     m
 }
 
+/// [`entry`] for an EML folder in ShroudForge's mods folder while ShroudForge runs the EML mods ([`Ctx::sf_eml`]): its
+/// switch decides. One the player copied there by hand that ShroudForge keeps off gets the words promised on Nexus
+/// ([`crate::shroudforge::hand_eml_off`]); "Add it" is no fix for it (activation never places a copy beside the
+/// player's folder), so the words name the ways out.
+fn sf_eml_entry(cx: &Ctx, mut m: FoundMod, abs: &Path) -> FoundMod {
+    use crate::shroudforge::SfOff;
+    let own = cx.sf_eml == Some(true);
+    match crate::shroudforge::switched_off(abs, cx.server) {
+        None => {
+            m.state = FoundState::Loads;
+            m.via = Some(if own { FoundVia::OwnLoader } else { FoundVia::Kiln });
+            m.reason = "ShroudForge runs it: its ShroudForge switch is on.".into();
+        }
+        Some(SfOff::Switch(_)) => m.reason = crate::shroudforge::hand_eml_off(cx.server, false),
+        Some(SfOff::Side(_)) => m.reason = format!("ShroudForge runs it on the {} only, not {}.",
+            if cx.server { "client" } else { "server" }, if cx.server { "on this server" } else { "in this game" }),
+        Some(SfOff::Unreadable(why)) => m.reason = format!("ShroudForge cannot read it ({why}), so it does not run, and no switch changes that."),
+    }
+    m
+}
+
 fn short_engine(l: &OwnLoader) -> &'static str {
     match l.engine {
         Engine::Eml => "EML",
@@ -498,7 +531,15 @@ pub fn scan(dirs: &DataDirs, install: &GameInstall, profile: &Profile) -> FoundR
     let kiln_installed = kiln_proxy || receipt.is_some();
     // Kiln's own files in kiln/plugins (kiln-*.dll, and anything its receipt lists)
     let shipped: Vec<String> = receipt.iter().flat_map(|r| r.files.iter().map(|f| f.path.replace('\\', "/").to_ascii_lowercase())).collect();
-    let cx = Ctx { dirs, game, profile, loaders: &loaders, kiln: kiln_installed, wine: install.platform != crate::game::Platform::Windows };
+    // who runs the EML mods of ShroudForge's folder, as activation decides it (own_loaders), only when that folder is there
+    let sf_eml = crate::shroudforge::mods_dir(game).is_dir().then(|| {
+        let view = crate::own_loaders::ProfileView::of_profile(profile);
+        let mine = crate::own_loaders::find(game, Some(&view));
+        crate::own_loaders::sf_eml_folder(game, &mine).map(|_| crate::own_loaders::of_kind(&mine, ModKind::Eml)
+            .is_some_and(|l| l.engine == Engine::ShroudForge && l.via != crate::own_loaders::Via::HostedShroudForge))
+    }).flatten();
+    let cx = Ctx { dirs, game, profile, loaders: &loaders, kiln: kiln_installed, wine: install.platform != crate::game::Platform::Windows,
+        sf_eml, server: game.join(crate::game::SERVER_EXE).is_file() };
     let mut rep = FoundReport {
         game_id: install.id.clone(),
         profile_id: profile.id.clone(),

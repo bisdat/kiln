@@ -364,3 +364,44 @@ fn an_added_shroudforge_folder_stays_the_players_own_at_every_activation() {
         assert!(!g.path.join("mods/HoardersHelper").join(crate::engine_mods::MARKER).exists(), "never adopted");
     }
 }
+
+/// Player report (Nexus, 14 Nov 2026): an EML mod copied by hand into ShroudForge's mods folder while the profile has a
+/// ShroudForge mod on (Kiln hosts ShroudForge, which runs the EML mods of its folder) stays off: it has no
+/// extended.mod.json, so ShroudForge keeps it switched off. The list said it loads (EML drop-ins on) or offered EML's
+/// drop-in switch, and Kiln's other texts read as "Kiln wants a ShroudForge file from an EML mod". The promised words:
+/// what happened and the two ways out, nothing about ShroudForge's files.
+#[test]
+fn a_hand_copied_eml_mod_shroudforge_keeps_off_says_so_in_the_promised_words() {
+    let t = tmp("eml-in-sf");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let g = game(&t.0, true);
+    put(&g.path, "kiln/plugins/kiln-shroudforge.dll", b"x");
+    put(&g.path, "kiln/plugins/shroudforge/shroudforge-runtime.dll", b"x");
+    eml_mod(&g.path, "HoardersHelper");
+    let mut p = profile(&[ModKind::Eml], true);
+    p.mods.shroudforge.push(pm("sf-unlimited-flight"));
+    let m = one(&scan(&dirs, &g, &p), "mods/HoardersHelper").clone();
+    assert_eq!((m.kind, m.state, m.fix), (Some(ModKind::Eml), FoundState::Off, None), "{m:?}");
+    assert_eq!(m.reason, "You put this mod into ShroudForge's folder yourself, and ShroudForge has it switched off. Switch it on in \
+        Kiln's in-game menu (Mods > ShroudForge), or remove the folder and add the mod with Add mods.");
+    // EML's drop-ins do not change it while ShroudForge runs that folder; without a ShroudForge mod they decide, as before
+    let mut q = profile(&[], true);
+    let m = one(&scan(&dirs, &g, &q), "mods/HoardersHelper").clone();
+    assert_eq!((m.state, m.fix), (FoundState::Off, Some(FoundFix::Dropins)), "{m:?}");
+    q.mods.shroudforge.push(pm("sf-unlimited-flight"));
+    let m = one(&scan(&dirs, &g, &q), "mods/HoardersHelper").clone();
+    assert_eq!((m.state, m.fix), (FoundState::Off, None), "{m:?}");
+    assert!(m.reason.starts_with("You put this mod into ShroudForge's folder yourself"), "{}", m.reason);
+    // switched on in the game's Mods > ShroudForge page (it writes ShroudForge's file): ShroudForge runs it
+    put(&g.path, "mods/HoardersHelper/extended.mod.json", br#"{"schemaVersion":1,"enabled":true,"targets":["client","server"],"launcher":"EML","settings":{}}"#);
+    let m = one(&scan(&dirs, &g, &p), "mods/HoardersHelper").clone();
+    assert_eq!((m.state, m.via, m.fix), (FoundState::Loads, Some(FoundVia::Kiln), None), "{m:?}");
+    assert!(m.reason.contains("ShroudForge runs it"), "{}", m.reason);
+    // a server has no in-game menu: the way out that is left
+    put(&g.path, "mods/HoardersHelper/extended.mod.json", br#"{"schemaVersion":1,"enabled":false,"launcher":"EML"}"#);
+    put(&g.path, crate::game::SERVER_EXE, b"MZ");
+    let m = one(&scan(&dirs, &g, &p), "mods/HoardersHelper").clone();
+    assert_eq!((m.state, m.fix), (FoundState::Off, None), "{m:?}");
+    assert_eq!(m.reason, "You put this mod into ShroudForge's folder yourself, and ShroudForge has it switched off. A server has no \
+        in-game menu: remove the folder and add the mod with Add mods, and Kiln places its own copy, switched on.");
+}
