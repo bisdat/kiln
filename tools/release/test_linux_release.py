@@ -739,5 +739,27 @@ class TemplateCheckTests(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn('kiln.mod.json of the KilnBoot mod has no "boot": true', r.stdout + r.stderr)
 
+
+class SourceArchiveTests(unittest.TestCase):
+    """lib/sf-source.sh: the ShroudForge source archive is world-readable (0644) like the release's other downloads."""
+
+    def test_the_archive_is_0644_whatever_the_umask(self):
+        with tempfile.TemporaryDirectory(prefix="kiln-sf-source-") as tmp:
+            repo = Path(tmp) / "fork"
+            repo.mkdir()
+            git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"]
+            subprocess.run(git + ["init", "-q"], check=True)
+            (repo / "a.txt").write_text("a\n")
+            subprocess.run(git + ["add", "a.txt"], check=True)
+            subprocess.run(git + ["commit", "-qm", "a"], check=True)
+            commit = subprocess.run(git + ["rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+            out = Path(tmp) / "source" / f"shroudforge-kiln-{commit[:12]}-src.tar.gz"
+            r = subprocess.run(["bash", "-c", 'umask 077; exec "$@"', "sf", str(HERE / "lib" / "sf-source.sh"), str(repo), commit, str(out)],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertEqual(out.stat().st_mode & 0o777, 0o644)
+            with tarfile.open(out) as t:
+                self.assertIn(f"shroudforge-kiln-{commit[:12]}/a.txt", t.getnames())
+
 if __name__ == "__main__":
     unittest.main()
