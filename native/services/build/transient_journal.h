@@ -8,9 +8,14 @@
 //    with a new generation and starts a new log of that generation. Loading replays only the log of the snapshot's
 //    generation. A failed compaction leaves the earlier snapshot and log valid; a failed append (a torn record) stops
 //    all further appends until a compaction succeeds, so nothing is appended after a record the loader would stop at.
-//  - Other changes (a kept write taking cells out, the put-back, retiring put-back cells) are recorded the same way but
-//    best effort: if that fails the journal on disk says more than memory (a superset), which the put-back's per-cell
-//    rule makes harmless, and the next compaction writes the truth.
+//  - A kept write that sets journaled cells takes them out on disk BEFORE it commits (`note_kept_before`); if that cannot
+//    be done the kept write is refused. Otherwise a kept write of exactly the transient value, followed by a crash before
+//    the next compaction, would leave a record that the next start's put-back reads as "still transient" and undoes. A
+//    kept write that touches no journaled cell costs one map lookup per block. If its commit then faults, the blocks it
+//    did not commit get their records back (`undo_kept`).
+//  - Other changes (the put-back's settling, retiring put-back cells) are recorded the same way but best effort: if that
+//    fails the journal on disk says more than memory (a superset of cells that hold their earlier value again), which the
+//    put-back's per-cell rule makes harmless, and the next compaction writes the truth.
 // Not thread-safe: the adapter holds one mutex around every call.
 #pragma once
 #include <array>
@@ -88,8 +93,13 @@ public:
     // not be (no world, the journal is full, the disk refused): the write must then not commit. `why` says why.
     bool note_transient(const int32_t wo[3], const uint32_t wd[3], const Cell* old, const Cell* cur, const uint8_t* addressed,
                         std::string* why);
-    // A kept write, AFTER it committed: its cells leave the journal. Best effort on disk.
-    void note_kept(const int32_t wo[3], const uint32_t wd[3], const uint8_t* addressed);
+    // A kept write, BEFORE it commits: the journaled cells it sets leave the journal, on disk first. True when that is
+    // done (or no journaled cell is touched: nothing is written); false when it could not be on disk: the kept write must
+    // then not commit (`why`). `undo` gets the blocks' earlier states, for undo_kept.
+    bool note_kept_before(const int32_t wo[3], const uint32_t wd[3], const uint8_t* addressed,
+                          std::vector<std::pair<Key, Entry>>* undo, std::string* why);
+    // The kept write's commit faulted: the blocks of `undo` in `keys` (dirty, not committed) get their states back.
+    void undo_kept(const std::vector<std::pair<Key, Entry>>& undo, const std::vector<Key>& keys);
 
     // Up to `max` blocks with pending cells, round robin, as copies (the put-back reads and commits without the lock).
     std::vector<std::pair<Key, Entry>> pending_work(size_t max);

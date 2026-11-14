@@ -12,7 +12,10 @@
 //    identity, the journal full) the write is refused and nothing is committed. So no transient cell is ever in the
 //    store, or in any save, without a record on disk. The bookkeeping is transient_journal.cpp (host-tested with a
 //    store that fails writes, renames and appends: tests/transient_journal_test.cpp).
-//  - A kept write (any write without the flag) takes the cells it sets out of the journal: they are meant to stay.
+//  - A kept write (any write without the flag) takes the journaled cells it sets out of the journal, on disk BEFORE it
+//    commits: they are meant to stay, and a record left behind would make the next start put back a kept edit of the
+//    very value the transient write left. If that cannot be written the kept write is refused; a kept write that sets
+//    no journaled cell costs a map lookup per block. A faulted commit gives its uncommitted blocks their records back.
 //  - The log is compacted into <world GUID>.bin (a snapshot with a generation) at the save-region hook, every 24 steps
 //    and when it grows; a failed compaction leaves the earlier files valid.
 //  - At the next start (the world runs, its save is loaded into the store), every journaled cell that still holds its
@@ -159,11 +162,29 @@ KilnResult transient_note_before(const int32_t wo[3], const uint32_t wd[3], cons
     return KILN_ERR_UNAVAILABLE;
 }
 
-void transient_note_kept(const int32_t wo[3], const uint32_t wd[3], const uint8_t* addressed) {
+namespace {
+std::vector<std::pair<tj::Key, tj::Entry>> g_kept_undo;  // the kept write in flight (tick thread, one at a time)
+}
+
+KilnResult transient_kept_before(const int32_t wo[3], const uint32_t wd[3], const uint8_t* addressed) {
     std::lock_guard lock(g_mu);
-    if (g_j.entries().empty() && !g_j.world().empty()) return;
+    g_kept_undo.clear();
+    if (g_j.entries().empty() && !g_j.world().empty()) return KILN_OK;  // the ordinary kept write: nothing journaled
     bind_locked();
-    g_j.note_kept(wo, wd, addressed);
+    std::string why;
+    if (g_j.note_kept_before(wo, wd, addressed, &g_kept_undo, &why)) return KILN_OK;
+    // refused rather than committed: a kept edit the next start's put-back could undo must not exist
+    set_detail("edit refused: %s", why.c_str());
+    KB_E("kiln.build: an edit of journaled transient cells was refused: %s", why.c_str());
+    return KILN_ERR_UNAVAILABLE;
+}
+
+void transient_kept_failed(const std::vector<std::array<int32_t, 3>>& uncommitted) {
+    std::lock_guard lock(g_mu);
+    if (g_kept_undo.empty()) return;
+    std::vector<tj::Key> keys(uncommitted.begin(), uncommitted.end());
+    g_j.undo_kept(g_kept_undo, keys);
+    g_kept_undo.clear();
 }
 
 void transient_pre(uint64_t step) {

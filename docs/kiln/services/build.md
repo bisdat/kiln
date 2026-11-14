@@ -40,7 +40,9 @@ result** and the game's save keeps it. Plus WorldEdit-style schematics (`.kschem
   block by block as its tiles load, through the same store commit as any edit (players see it; no `BuildEditingEvent`
   is raised for it). A cell changed since (a player dug it) is left as it is; a block whose put-back commit fails stays
   journaled for the next start. A later edit without the flag takes its
-  cells out of the journal (they are meant to stay); a transient write again in the new session makes them that
+  cells out of the journal (they are meant to stay), on disk before it commits; if that cannot be written, an edit
+  that sets journaled transient cells is refused (`BuildException`, "unavailable") rather than risk the next start
+  putting it back (edits elsewhere are not affected); a transient write again in the new session makes them that
   session's. Put-back cells stay on record until two world files were written after it. Limits: the journal holds
   8,192 blocks (about 4 million cells); past that, when the journal cannot be written, and while the world's identity is
   unknown (no kiln.saves, or
