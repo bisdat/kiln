@@ -43,6 +43,10 @@ internal sealed record CatalogMod
     /// enshwick, shroudlink, ember.</summary>
     public required string Engine { get; init; }
     public required string Id { get; init; }
+    /// <summary>What tells this row apart from its engine's other rows where <see cref="Id"/> repeats (every proxy DLL
+    /// mod is a dinput8.dll): its path. Null: the id. The mod manager makes its ImGui ids and its selection from it
+    /// (<see cref="ModManagerLogic.KeyOf"/>); a player never sees it.</summary>
+    public string? Key { get; init; }
     public required string Name { get; init; }
     public string Version { get; init; } = "";
     public ModRunState State { get; init; }
@@ -622,6 +626,7 @@ internal static class ModCatalog
             });
             all.AddRange(mods);
         }
+        UniqueKeys(all);
         string? profileLine = profile.Mode switch
         {
             "no-mods" => "Play once without mods: no mod loads this start.",
@@ -639,6 +644,29 @@ internal static class ModCatalog
     }
 
     private static long _version;
+
+    /// <summary>Gives each row its own <see cref="ModManagerLogic.KeyOf"/>: the mod manager's ImGui ids and its selection
+    /// are made from it, and two rows with one ImGui id raise ImGui's "conflicting ID" popup and cannot be chosen apart.
+    /// Rows keyed by their path cover the DLLs of one name; what is left (a DLL chained twice, two native mods of one id,
+    /// an engine that reports a mod twice) gets "#2", "#3" after the key in the list's order, which every read repeats.
+    /// The first row keeps its plain key.</summary>
+    internal static void UniqueKeys(List<CatalogMod> mods)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);  // ImGui hashes ids as they are spelled
+        for (var i = 0; i < mods.Count; i++)
+        {
+            var m = mods[i];
+            if (seen.Add(ModManagerLogic.KeyOf(m))) continue;
+            var key = m.Key ?? m.Id;
+            for (var n = 2; ; n++)
+            {
+                var next = m with { Key = $"{key}#{n}" };
+                if (!seen.Add(ModManagerLogic.KeyOf(next))) continue;
+                mods[i] = next;
+                break;
+            }
+        }
+    }
 
     /// <summary>A client's <c>side: "server"</c> Kiln mod before the player's own world starts (the launcher says the same:
     /// kiln_manage::profile::WITH_WORLD).</summary>
@@ -749,7 +777,8 @@ internal static class ModCatalog
                 var state = StateOf(word);
                 b.Add(new CatalogMod
                 {
-                    Engine = "plugin", Id = id, Name = id, Version = Str(p, "version") ?? "", State = state, Word = word,
+                    // a plugin that failed before it named itself is named by its file, which another folder may also hold
+                    Engine = "plugin", Id = id, Key = path, Name = id, Version = Str(p, "version") ?? "", State = state, Word = word,
                     Reason = Str(p, "error"), Folder = path, Source = "plugins",
                     Help = state == ModRunState.Failed ? "Update or remove the plugin in the Kiln launcher, then start the game again." : null,
                 });
@@ -784,7 +813,8 @@ internal static class ModCatalog
             var name = LeafName(path);
             b.Add(new CatalogMod
             {
-                Engine = "chain", Id = name, Name = name, State = state, Word = word, Reason = reason, Folder = path,
+                // keyed by the path: every proxy DLL mod (Spawn the World, Auto Loot Plus) is a dinput8.dll
+                Engine = "chain", Id = name, Key = path, Name = name, State = state, Word = word, Reason = reason, Folder = path,
                 Source = Str(c, "source") ?? "chain", Missing = word == "missing",
                 Help = state == ModRunState.Failed ? "Check the DLL in chain.ini (or the Kiln launcher), then start the game again." : null,
             });

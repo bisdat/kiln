@@ -778,6 +778,74 @@ public sealed class ModCatalogTests : IDisposable
         Assert.Contains("bad image", g.Note);
     }
 
+    /// <summary>Every proxy DLL mod is a dinput8.dll: with two of them chained (Spawn the World and Auto Loot Plus) both
+    /// rows had the ImGui id "##mod.chain/dinput8.dll", and ImGui's "conflicting ID" popup stood under each (Nexus,
+    /// 2026-11-14); a click on the second chose the first. A DLL chained twice (chain.ini and the profile) is the
+    /// proxy's duplicate of the same path. Plugins that failed before they named themselves are named by their file.</summary>
+    [Fact]
+    public void Chain_dlls_and_plugins_with_one_file_name_get_their_own_row_ids_and_keys()
+    {
+        var file = Path.Combine(Kiln, "profile.json");
+        File.WriteAllText(file, """{"format":1,"id":"p","generation":1,"mods":{}}""");
+        Write("boot.json", new
+        {
+            format = 1, pid = Pid, profile = new { mode = "active", id = "p", file },
+            chain = new[]
+            {
+                new { path = @"C:\g\mods\spawn-the-world\dinput8.dll", source = "profile", status = "loaded" },
+                new { path = @"C:\g\mods\auto-loot-plus\dinput8.dll", source = "profile", status = "loaded" },
+                new { path = @"C:\g\mods\auto-loot-plus\dinput8.dll", source = "chain", status = "duplicate" },
+            },
+            plugins = new[]
+            {
+                new { file = "helper.dll", path = @"C:\g\kiln\plugins\helper.dll", status = "failed", error = "bad image" },
+                new { file = "helper.dll", path = @"C:\lib\plugin\helper\1.0.0+aaaaaaaa\helper.dll", status = "failed", error = "bad image" },
+            },
+        });
+        var s = Read();
+        var chain = s.Mods.Where(m => m.Engine == "chain").ToArray();
+        Assert.Equal(3, chain.Length);
+        Assert.All(chain, m => Assert.Equal(("dinput8.dll", "dinput8.dll"), (m.Id, m.Name)));  // what a player sees stays
+        Assert.Equal(2, s.Mods.Count(m => m.Engine == "plugin" && m.Id == "helper.dll"));
+        var rows = ModManagerLogic.Rows(s, EngineFilter.All, "");
+        Assert.Equal(5, rows.Count);
+        Assert.Equal(5, rows.Select(r => r.Id).Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(5, rows.Select(r => r.Key).Distinct(StringComparer.Ordinal).Count());
+        // the same keys under the engine's own filter and at the next read: a refresh keeps the selection
+        Assert.Equal(rows.Where(r => r.Mod.Engine == "chain").Select(r => r.Key), ModManagerLogic.Rows(Read(), new EngineFilter("chain"), "").Select(r => r.Key));
+        // the second one stays chosen, and the details show that one
+        var second = rows.Where(r => r.Mod.Engine == "chain").ElementAt(1);
+        var page = new ModManagerPage { Filter = new EngineFilter("chain"), Selected = second.Key };
+        page.Update(s, false);
+        Assert.Equal(second.Key, page.Selected);
+        Assert.Equal((@"C:\g\mods\auto-loot-plus\dinput8.dll", "loaded"), (page.Rows.Single(r => r.Key == page.Selected).Mod.Folder, page.Rows.Single(r => r.Key == page.Selected).Mod.Word));
+    }
+
+    /// <summary>Two rows of one engine with one id and nothing else to tell them apart (two native mods of one id: the
+    /// second is the duplicate that does not load; an engine that reports a mod twice) still get their own keys, the
+    /// first keeps the plain one.</summary>
+    [Fact]
+    public void Rows_that_share_an_id_still_get_their_own_keys()
+    {
+        Write("native.json", new
+        {
+            format = 1, pid = Pid,
+            mods = new object[]
+            {
+                new { id = "creative", folder = @"C:\g\kiln\mods\creative", state = "loaded" },
+                new { id = "creative", folder = @"C:\g\kiln\mods\creative-copy", state = "failed", reason = "duplicate native mod id 'creative'; only the first loads" },
+            },
+        });
+        Write("emf.json", new { format = 1, updatedUnixMs = StartMs + 1, mods = new[] { new { id = "a", status = "loaded" }, new { id = "a", status = "duplicate" } } });
+        var s = Read();
+        var rows = ModManagerLogic.Rows(s, EngineFilter.All, "");
+        Assert.Equal(4, rows.Count);
+        Assert.Equal(4, rows.Select(r => r.Id).Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(4, rows.Select(r => r.Key).Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(["native/creative", "emf/a"], rows.Where(r => r.Mod.State == ModRunState.Loaded).Select(r => r.Key));
+        Assert.Equal(rows.Select(r => r.Key), ModManagerLogic.Rows(Read(), EngineFilter.All, "").Select(r => r.Key));  // the same at every read
+    }
+
     // ---- engine mods whose manifest id is no Kiln id: the profile has the Library's id, the plugin reports the manifest's ----
 
     [Fact]
