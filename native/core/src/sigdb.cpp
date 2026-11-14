@@ -1061,8 +1061,9 @@ private:
             // live operand names a stub or relay outside the image, so the vote disagrees with the pattern (or
             // with a clean capture) and fails a symbol another engine merely hooked. Skip it; the pattern value
             // or an unredirected capture stands. No file view, no redirect, or no E8 before the hole: record
-            // exactly as before, so clean stacks resolve byte-identically.
-            if (h.kind == Hole::Rel32 && g_code.file_text && h.offset > 0) {
+            // exactly as before, so clean stacks resolve byte-identically. Only on the live scan: the file scan
+            // reads the file's operand, the function itself, and a symbol named only by captures needs that vote.
+            if (h.kind == Hole::Rel32 && !cv.disk && g_code.file_text && h.offset > 0) {
                 const size_t start = static_cast<size_t>(match - cv.scan) + h.offset - 1;
                 const auto* live = reinterpret_cast<const uint8_t*>(cv.live);
                 if (pe::redirected_call_at(g_code.file_text, live, cv.size, start, cv.live, image().base,

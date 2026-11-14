@@ -760,6 +760,44 @@ static void relay_layouts() {
     kiln::test_verified = true;
 }
 
+// On the file scan a rel32 capture reads the file's operand: the function the game's code calls. A call another
+// engine sent to a relay in the live code is no reason to drop that vote; a symbol named only by captures (no
+// pattern of its own) would go unresolved on every hooked stack.
+static void redirected_capture_on_file_scan(const char* dir) {
+    Loaded x(false, 0x4000);
+    const uintptr_t base = kiln::test_image.base;
+    uint8_t* m = x.live.data();
+    test_module_lo = base + 0x3800;
+    test_module_hi = base + 0x3900;
+    m[0x3100] = 0xFF, m[0x3101] = 0x25, m[0x3102] = 0x0A;  // greeneye's relay into relay-mod.dll
+    const uintptr_t to = base + 0x3800;
+    std::memcpy(m + 0x3110, &to, 8);
+    const size_t e8 = TestPe::kFunc + 10;
+    const int32_t rel = static_cast<int32_t>(0x3100 - (e8 + 5));
+    std::memcpy(m + e8 + 1, &rel, 4);
+    test_query = true;
+    test_mbi = {m, x.live.size(), MEM_COMMIT, 4};
+    kiln::test_verified = false;
+    sigdb::init_code();
+    CHECK(sigdb::g_code.view.disk, "capture on file: the call sent to a relay is a hook, the file scan stands");
+    const auto file = std::filesystem::path(dir) / "redirected-file.json";
+    {
+        std::ofstream out(file);
+        out << R"({"format":1,"symbols":{
+          "root":{"find":[{"pattern":"48 B8 ?? ?? ?? ?? ?? ?? ?? ?? E8 {helper:rel32}"}]}
+        }})";
+    }
+    sigdb::Resolver r;
+    CHECK(r.load(file, ""), "capture on file: a capture-only definition loads");
+    r.resolve();
+    uintptr_t a = 0;
+    CHECK(r.symbol("helper", &a) && a == base + TestPe::kHelper,
+          "capture on file: a capture through a call hooked in the live code reads the file's callee");
+    std::filesystem::remove(file);
+    test_module_lo = test_module_hi = 0;
+    test_query = false;
+    kiln::test_verified = true;
+}
 
 // sigdb_runtime_test <scratch folder> [--client <enshrouded.exe>] [--sigdb <sigdb/symbols>]
 int main(int argc, char** argv) {
@@ -773,6 +811,7 @@ int main(int argc, char** argv) {
     diff_budget();
     redirected_captures_skipped(argv[1]);
     relay_layouts();
+    redirected_capture_on_file_scan(argv[1]);
     std::filesystem::path sigdb_dir = std::filesystem::path(__FILE__).parent_path() / "../../../sigdb/symbols";
     for (int i = 2; i + 1 < argc; i += 2) {
         const std::string opt = argv[i];
