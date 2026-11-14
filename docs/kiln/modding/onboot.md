@@ -139,7 +139,8 @@ The boot generation keeps what the start read. When the generation commits, Kiln
 files the boot phase reads for it:
 
 - `kiln.mod.json`;
-- every `.dll` at the top of the mod's folder (the entry assembly and its helpers);
+- every `.dll` at the top of the mod's folder (the entry assembly and its helpers), except `Kiln.Api.dll` and Kiln's
+  shared `Kiln.*.dll`, which every mod takes from Kiln (a deploy leaves them out);
 - everything under `blocks/` (with `blocks/generated/`), `assets/`, `quests/` and `skills/`, and `blocks.tables.json`.
 
 A later load of the mod in the same process (after `Mods.UnloadAsync`, or the launcher's switch) compares them. Any

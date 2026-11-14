@@ -142,6 +142,9 @@ public sealed class BootInputsTests : ModsFixture
             File.WriteAllText(Path.Combine(dir, "blocks", "cold.json.kiln-tmp"), "x");
             Directory.CreateDirectory(Path.Combine(DataDir, "boot-inputs"));
             File.WriteAllText(Path.Combine(DataDir, "boot-inputs", "from-boot.txt"), "x");
+            // Kiln's shared assemblies beside the mod (the loader takes them from the host; a deploy leaves them out)
+            File.WriteAllBytes(Path.Combine(dir, "Kiln.Api.dll"), [7]);
+            File.WriteAllBytes(Path.Combine(dir, "Kiln.Host.dll"), [7]);
             Directory.CreateDirectory(Path.Combine(dir, "docs"));
             File.WriteAllText(Path.Combine(dir, "docs", "readme.txt"), "x");
             Assert.Null(mods.BootLoadRefusal(Manifest.Read(dir), dir));

@@ -3,7 +3,10 @@
 // that holds its content. The set is what the boot phase reads for the mod, by name, and nothing else:
 //
 //   kiln.mod.json                     the manifest (the boot graph, the roles, "clients", "boot")
-//   *.dll at the top of the folder    the entry assembly and its helper assemblies (the author's load context loads them from there)
+//   *.dll at the top of the folder    the entry assembly and its helper assemblies (the author's load context loads them from there);
+//                                     not Kiln.Api.dll and not a Kiln.*.dll that Kiln.Host has beside it (the loader takes those from
+//                                     the host, never from the mod: a deploy leaves them out), unless the manifest names it as its
+//                                     entry assembly or an export
 //   blocks/, blocks.tables.json       the data files: the boot lowering's shadow check, kiln.worldtables, kiln.content's patches, kiln.vfx,
 //                                     kiln.quests (blocks/generated/ is a baked file and part of it)
 //   assets/                           kiln.assets' assets.json and every file it names, cooked/ and cook.json (kiln.quests reads the latter)
@@ -68,8 +71,9 @@ internal sealed class BootInputs
             {
                 foreach (var name in TopFiles)
                     Add(files, new FileInfo(Path.Combine(directory, name)), name);
+                var own = OwnAssemblies(Path.Combine(directory, Manifest.FileName));
                 foreach (var dll in Safe(() => root.EnumerateFiles("*.dll", SearchOption.TopDirectoryOnly)))
-                    if (Counted(dll.Name)) Add(files, dll, dll.Name);
+                    if (Counted(dll.Name) && (own.Contains(dll.Name) || !Shared(dll.Name))) Add(files, dll, dll.Name);
                 foreach (var tree in Trees)
                     Walk(files, new DirectoryInfo(Path.Combine(directory, tree)), tree, 0);
             }
@@ -100,6 +104,31 @@ internal sealed class BootInputs
             if (!frozen.Files.ContainsKey(path)) list.Add($"{path} added");
         list.Sort(StringComparer.Ordinal);
         return list;
+    }
+
+    private static readonly string HostDirectory = Path.GetDirectoryName(typeof(BootInputs).Assembly.Location) ?? "";
+
+    /// <summary>An assembly every mod takes from Kiln.Host, not from its folder (ModLoadContext): Kiln.Api, and Kiln's shared Kiln.*.</summary>
+    private static bool Shared(string file) =>
+        file.Equals("Kiln.Api.dll", StringComparison.OrdinalIgnoreCase) ||
+        (file.StartsWith("Kiln.", StringComparison.Ordinal) && HostDirectory.Length > 0 && File.Exists(Path.Combine(HostDirectory, file)));
+
+    /// <summary>The assemblies the manifest names (entryAssembly, exports): loaded from the mod's folder whatever their name.</summary>
+    private static HashSet<string> OwnAssemblies(string manifest)
+    {
+        var own = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            if (JsonNode.Parse(File.ReadAllText(manifest), documentOptions: new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true }) is JsonObject m)
+            {
+                if (m["entryAssembly"] is JsonValue e && e.TryGetValue<string>(out var entry)) own.Add(entry);
+                if (m["exports"] is JsonArray exports)
+                    foreach (var x in exports)
+                        if (x is JsonValue v && v.TryGetValue<string>(out var name)) own.Add(name);
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or ArgumentException or InvalidOperationException) { }
+        return own;
     }
 
     private static bool Counted(string name) => !name.StartsWith('.') && !name.EndsWith(".kiln-tmp", StringComparison.OrdinalIgnoreCase);
