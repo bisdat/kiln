@@ -23,7 +23,8 @@ public sealed record BlockKindDescriptor
     public required string JsonSection { get; init; }
     /// <summary>The format of the kind's blocks. Only 1.</summary>
     public int Format { get; init; } = 1;
-    /// <summary>JSON Schema (2020-12) of one block's payload, without <c>format</c>. At most 64 KiB; only local <c>#</c> references.</summary>
+    /// <summary>JSON Schema (2020-12) of one block's payload, without <c>format</c>. At most 64 KiB; only local <c>#</c> references. Kept for
+    /// editors and tools: Kiln does not check a block against it (a block is read strictly into the record type instead).</summary>
     public required string SchemaJson { get; init; }
     /// <summary>Capability names a plan of this kind needs when it is applied.</summary>
     public IReadOnlyList<string> Requires { get; init; } = [];
@@ -146,10 +147,13 @@ public enum BlockApplyState
     /// answer about its definitions (a few seconds after content is ready). Nothing of it is published while it waits:
     /// <see cref="Blocks.Find"/> does not give the block yet.</summary>
     PendingContent,
-    /// <summary>Every block of the plan is registered and its parts at content ready are done; <see cref="Blocks.Find"/> gives the block.</summary>
+    /// <summary>Every block of the plan is registered and its parts at content ready are done; <see cref="Blocks.Find"/> gives the block.
+    /// In a later content generation the plan is lowered again and replayed: it stays Applied, with a new <see cref="BlockApplyResult.Generation"/>
+    /// once that is done, or becomes <see cref="Refused"/>.</summary>
     Applied,
-    /// <summary>Not applied, and nothing of the plan is registered: a part at content ready that failed (<c>ContentReadyFailed</c>) takes
-    /// back what the plan had registered. Only when that cannot be done does <see cref="BlockApplyResult.Reason"/> end by saying what stays
+    /// <summary>Not applied, and nothing of the plan is registered: a part at content ready that failed (<c>ContentReadyFailed</c>), also
+    /// in a later content generation, or a frozen product that no longer lowers then (<c>RelowerFailed</c>), takes back what the plan had
+    /// registered and unpublishes the block. Only when that cannot be done does <see cref="BlockApplyResult.Reason"/> end by saying what stays
     /// until the mod unloads. <see cref="BlockApplyResult.Reason"/> says why.</summary>
     Refused,
     /// <summary>It was there and went with its mod, or the plan was never submitted.</summary>
@@ -159,9 +163,10 @@ public enum BlockApplyState
 /// <summary>A snapshot of where a plan stands. <see cref="Ok"/> only when <see cref="State"/> is
 /// <see cref="BlockApplyState.Applied"/>; otherwise <see cref="Reason"/> starts with one word for the cause
 /// (<c>PendingContent</c>, <c>ProviderRetired</c>, <c>NameAlreadyApplied</c>, <c>NameTaken</c>, <c>StaleRequest</c>, <c>DependencyRefused</c>,
-/// <c>RequiresOff</c>, <c>ClientsTooLow</c>, <c>Refused</c>, <c>ContentReadyFailed</c>, <c>Removed</c>). <c>ContentReadyFailed</c>: the plan was
+/// <c>RequiresOff</c>, <c>ClientsTooLow</c>, <c>Refused</c>, <c>ContentReadyFailed</c>, <c>RelowerFailed</c>, <c>Removed</c>). <c>ContentReadyFailed</c>: the plan was
 /// registered, and a part at content ready failed (a program names a game value the game does not have, a rule the game refused, a
-/// definition kiln.content could not take); the reason gives the first problem, kiln.log every one.</summary>
+/// definition kiln.content could not take), at its first content ready or in a later content generation; the reason gives the first
+/// problem, kiln.log every one. <c>RelowerFailed</c>: in a later content generation the plan's frozen products no longer lower.</summary>
 public sealed record BlockApplyResult : IKilnResult
 {
     public bool Ok { get; init; }
@@ -169,9 +174,10 @@ public sealed record BlockApplyResult : IKilnResult
     public BlockApplyState State { get; init; }
     /// <summary>The compile this answers for.</summary>
     public ulong RequestId { get; init; }
-    /// <summary>Counts applications in this process: the same for a plan applied again, 0 before it is applied.</summary>
+    /// <summary>Counts applications in this process: the same for a plan applied again, 0 before it is applied, a new one when the plan was
+    /// replayed for a later content generation.</summary>
     public ulong Generation { get; init; }
-    /// <summary>The game's content generation the plan was applied against.</summary>
+    /// <summary>The game's content generation the plan was applied (or last replayed) against.</summary>
     public ulong ContentGeneration { get; init; }
     /// <summary>The GUID, id and game name of the plan's primary block: known as soon as the plan is submitted.</summary>
     public Guid Guid { get; init; }
