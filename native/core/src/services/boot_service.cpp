@@ -292,6 +292,10 @@ struct BootMod {
 std::vector<BootMod> g_scanned;  // decide()'s manifest scan: every boot mod of the profile takes part, with its files at least
 // labs only (kiln.json "boot.testRefuse" with policy any): mod -> the collector that gets an unreadable document of it each round
 std::map<std::string, std::string> g_test_refuse;
+// labs only (kiln.json "boot.testFault" with policy any): mod -> the collector told to fail that mod's content after the publication
+// (the IR's "testFault"; kiln.content: the world refuses the mod's first boot item or recipe at registration)
+std::map<std::string, std::string> g_test_fault;
+constexpr const char* kTestFaultCollectors[] = {"content"};
 
 // kiln.mod.json's "boot" of one folder: 0 none, 1 true, 2 "required". `id` gets the manifest's id.
 int manifest_boot(const std::filesystem::path& dir, uint32_t side, std::string* id) {
@@ -662,6 +666,15 @@ std::string build_ir_locked() {
         for (auto& d : list)
             if (!out.count(d["owner"].get<std::string>())) kept.push_back(d);
         list = kept;
+    }
+    // the lab switch boot.testFault: the collector fails the mod's content after the publication (an activation fault)
+    if (!g_test_fault.empty()) {
+        json f = json::object();
+        for (const auto& [mod, c] : g_test_fault) {
+            const auto it = g_owners.find(mod);
+            if (it != g_owners.end() && !excluded(it->second)) f[mod] = c;
+        }
+        ir["testFault"] = f;
     }
     // the lab switch: an unreadable document of the mod, which the collector refuses as it refuses any such document
     for (const auto& [mod, c] : g_test_refuse) {
@@ -1107,6 +1120,22 @@ void decide(bool hooks, const std::string& safe_idle) {
         g_boot_mods = names;
         g_scanned = mods;
         g_test_refuse.clear();
+        g_test_fault.clear();
+        if (deferred && !config().boot_test_fault.empty()) {
+            if (!config().policy_any) {
+                KLOG_W("boot: kiln.json boot.testFault is ignored: it is a lab switch and needs policy \"any\"");
+            } else {
+                for (const auto& [mod, c] : config().boot_test_fault) {
+                    if (std::find_if(std::begin(kTestFaultCollectors), std::end(kTestFaultCollectors), [&](const char* k) { return c == k; }) ==
+                        std::end(kTestFaultCollectors)) {
+                        KLOG_W("boot: kiln.json boot.testFault.%s: \"%s\" has no late fault to force (content); ignored", mod.c_str(), c.c_str());
+                        continue;
+                    }
+                    g_test_fault[mod] = c;
+                    KLOG_W("boot: lab switch boot.testFault: collector %s fails a definition of %s after the publication", c.c_str(), mod.c_str());
+                }
+            }
+        }
         if (deferred && !config().boot_test_refuse.empty()) {
             if (!config().policy_any) {
                 KLOG_W("boot: kiln.json boot.testRefuse is ignored: it is a lab switch and needs policy \"any\"");

@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- The entry assembly of every fixture mod of boot-required-test (run.sh copies it into each fixture folder): a boot mod whose OnBoot
-       stages nothing, so all of its boot content is its files. OnLoad says which fixture loaded and its boot state. -->
+       stages nothing (but for boot-req-content-bind's item), so its boot content is its files. OnLoad says which fixture loaded and its boot state. -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
@@ -12,5 +12,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../../managed/Kiln.Api/Kiln.Api.csproj" Private="false" ExcludeAssets="runtime" />
+    <ProjectReference Include="../../../managed/services/Kiln.Blocks/Kiln.Blocks.csproj" Private="false" ExcludeAssets="runtime" />
   </ItemGroup>
 </Project>

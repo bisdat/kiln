@@ -1163,6 +1163,7 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
         std::lock_guard l(g_late_mu);
         g_late.reset(input.required);
     }
+    std::set<std::string> lab_faulted;
     for (const auto& d : input.docs("content")) {
         const auto o = input.owner.find(d.owner);
         const KilnOwner owner = o != input.owner.end() ? o->second : 0;
@@ -1187,6 +1188,15 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
             if (kind != KILN_CONTENT_ITEMS && kind != KILN_CONTENT_RECIPES) return refused("\"kind\": items or recipes");
             if (nc_define(owner, kind, text, false, source, &report) != KILN_OK) return refused("kiln.content refused it: " + report);
             ++plan->defined;
+            // the lab switch boot.testFault (policy any): the mod's first boot item or recipe is refused by every world at registration
+            const auto fault = input.test_fault.find(d.owner);
+            if (fault != input.test_fault.end() && fault->second == "content" && !lab_faulted.count(d.owner) &&
+                doc["definition"].contains("guid") && doc["definition"]["guid"].is_string() &&
+                nc_lab_refuse(doc["definition"]["guid"].get<std::string>(), "lab switch boot.testFault: the world refuses this definition at registration")) {
+                lab_faulted.insert(d.owner);
+                LOGW("boot: lab switch boot.testFault: %s's %s %s is refused by every world at registration", d.owner.c_str(),
+                     kind == KILN_CONTENT_ITEMS ? "item" : "recipe", d.key.c_str());
+            }
         } else if (op == "clone") {
 #if KC_GAMEDATA
             const uint32_t section = section_of_name(doc.value("section", nlohmann::json()));

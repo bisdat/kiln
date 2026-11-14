@@ -8,6 +8,7 @@ the bad entry as it does without OnBoot (or drops the mod whole where it always 
     fixtures.py list
     fixtures.py make <dest folder> <case> required|optional   (the entry assembly is copied in by run.sh)
     fixtures.py refuse <case>      the collector kiln.json's boot.testRefuse names for the case, or nothing
+    fixtures.py fault <case>       the collector kiln.json's boot.testFault names for the case, or nothing
     fixtures.py kind <case>        stops | late | starts: what a required fixture does to the start
     fixtures.py client             the fixtures only a game client can show (guided check 08-boot.required-client)
 """
@@ -34,10 +35,12 @@ CASES = {
     "skills-tree": "a game-tree node whose \"from\" names no node (refused by the tree build when a world loads)",
     "worldtables-merge": "a material tweak of a material the game does not have (refused by the merge when the game's data comes up)",
     "patches-comma": "a resource patch in a blocks file with comments and trailing commas (read like every blocks file: the start goes on)",
+    "content-bind": "an item OnBoot stages that the world refuses at registration (lab switch boot.testFault)",
 }
 REFUSE = {"content-entry": "content", "vfx-entry": "vfx"}
+FAULT = {"content-bind": "content"}  # kiln.json boot.testFault: the collector fails the mod's content after the publication
 # what a required fixture does: "stops" before the game's entry point, "late" after it (a world or the game's data loading), "starts"
-LATE = {"knowledge-entry", "skills-tree", "worldtables-merge"}
+LATE = {"knowledge-entry", "skills-tree", "worldtables-merge", "content-bind"}
 STARTS = {"patches-comma"}
 # fixtures only a game client can show (guided check 08-boot.required-client): run.sh client <folder>
 CLIENT = {
@@ -209,6 +212,8 @@ def main():
         make(sys.argv[2], sys.argv[3], sys.argv[4])
     elif len(sys.argv) == 3 and sys.argv[1] == "refuse":
         print(REFUSE.get(sys.argv[2], ""))
+    elif len(sys.argv) == 3 and sys.argv[1] == "fault":
+        print(FAULT.get(sys.argv[2], ""))
     elif len(sys.argv) == 3 and sys.argv[1] == "kind":
         print("late" if sys.argv[2] in LATE else "starts" if sys.argv[2] in STARTS else "stops")
     elif len(sys.argv) == 2 and sys.argv[1] == "client":
