@@ -44,7 +44,9 @@
  * Revisions count the changes of all assignments of the running world, from 1; an assignment's revision is that of its
  * last change.
  *
- * Events (subscribe_events) are JSON documents, called on the tick thread on Post, one per change, never dropped:
+ * Events (subscribe_events) are JSON documents, called on the tick thread on Post, one per change. Assignment events
+ * are never dropped. Task events are buffered per villager, 16 a step: when one villager's task changes more often in
+ * one step, the newest change is kept and the ones in between are dropped (counted, and logged once per new count):
  *   {"type":"assignment","before":<snapshot or null>,"after":<snapshot>,"reason":"Assigned","teardown":false}
  *   {"type":"task","npcId":1,"key":"mod:day","planVersion":1,"revision":1,"invocation":7,"windowIndex":0,
  *    "task":"sit","from":"Chosen","to":"Started","reason":null,"teardown":false}

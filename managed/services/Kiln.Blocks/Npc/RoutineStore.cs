@@ -112,15 +112,17 @@ internal static class RoutineStore
         // a key of another mod under this owner cannot be bound: the service refuses it, so it is as if not defined
         if (current == null || RoutineIdentity.ModOf(current.Key) != saved.Owner || current.Key != saved.Key)
             return new(RoutineRestore.Remove, RoutineAssignmentState.Removed, null, true, ReasonDefinitionMissing);
-        if (current.Version > saved.PlanVersion) return new(RoutineRestore.Migrate, Pending(saved), current, true, ReasonMigrated);
+        if (current.Version > saved.PlanVersion) return new(RoutineRestore.Migrate, AfterRestart, current, true, ReasonMigrated);
         if (current.Version < saved.PlanVersion) return new(RoutineRestore.Downgrade, RoutineAssignmentState.VersionMismatch, null, false, ReasonDowngrade);
         if (!string.Equals(current.ContentHash, saved.ContentHash, StringComparison.Ordinal))
             return new(RoutineRestore.VersionNotBumped, RoutineAssignmentState.VersionMismatch, null, false, ReasonVersionNotBumped);
-        return new(RoutineRestore.Rebind, Pending(saved), current, false, null);
+        return new(RoutineRestore.Rebind, AfterRestart, current, false, null);
     }
 
-    // bound again, the villager not found yet; a manual suspension is kept through the restart
-    private static RoutineAssignmentState Pending(SavedRoutine saved) => RoutineAssignmentState.PendingSpawn;
+    // Bound again, the villager not found yet: every rebound or migrated row starts PendingSpawn, also a suspended one.
+    // The manual suspension is not lost by that: it is the saved row's own flag (SavedRoutine.ManualSuspended), which
+    // Restore never clears, and the assignment made from the row at world-ready (S5) carries it back to ManualSuspended.
+    private const RoutineAssignmentState AfterRestart = RoutineAssignmentState.PendingSpawn;
 
     /// <summary>Decides every assignment of a book against the definitions of now and applies it to the book: removed rows
     /// go, migrated rows take the new version, hash and revision. Returns each row (as it was saved) with its decision, in

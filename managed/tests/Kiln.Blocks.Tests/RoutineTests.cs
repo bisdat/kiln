@@ -19,7 +19,7 @@ public sealed class RoutineTests : IDisposable
     internal const string GoldenWire =
         """{"format":1,"key":"routine-test:day","planVersion":2,"contentHash":"02dcb72ca219f3a72202cede3638112dda4aa5a71948b89543c43f667c4d3ebb","windows":[{"startMinute":360,"endMinute":720,"allDay":false,"priority":0,"task":{"kind":"inspect"}},{"startMinute":1320,"endMinute":360,"allDay":false,"priority":5,"task":{"kind":"sleep"}},{"startMinute":0,"endMinute":0,"allDay":true,"priority":-1,"task":{"kind":"sit"}}],"fallback":{"kind":"roam"}}""";
 
-    private static readonly RoutineBlock Day = new()
+    internal static readonly RoutineBlock Day = new()
     {
         Version = 2,
         Windows =
@@ -300,6 +300,25 @@ public sealed class RoutineTests : IDisposable
         Define(mod, "evening", new RoutineBlock { Was = "sunset" });
         Assert.Null(RoutineRegistry.Find("routine-test:dusk"));
         Compiler.Lower(mod, "dusk", new RoutineBlock());
+    }
+
+    [Fact]
+    public void Two_plans_staged_in_one_kind_plan_cannot_share_an_identity()
+    {
+        // a kind's plan lowers its blocks first and commits them together: none is in the registry while the next lowers
+        var mod = Ledger();
+        using (var staging = KindTransaction.Begin(mod))
+        {
+            staging.Define(mod, "evening", new RoutineBlock { Was = "dusk" });
+            var e = Assert.Throws<BlockError>(() => staging.Define(mod, "night", new RoutineBlock { Was = "dusk" }));
+            Assert.Equal("was", e.Field);
+            Assert.Contains("\"evening\"", e.Problem);
+            Assert.Throws<BlockError>(() => staging.Define(mod, "dusk", new RoutineBlock()));
+            staging.Define(mod, "morning", new RoutineBlock { Was = "dawn" });  // another identity is fine
+        }
+        Assert.Null(RoutineRegistry.Find("routine-test:dusk"));                   // nothing was committed
+        // the plan is gone with its transaction: the identity is free again
+        Compiler.Lower(mod, "night", new RoutineBlock { Was = "dusk" });
     }
 
     [Fact]

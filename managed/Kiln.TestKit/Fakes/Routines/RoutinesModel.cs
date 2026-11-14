@@ -8,8 +8,9 @@
 // with the fields the chooser and the sleep check read, the plans seen per key (key -> version and hash), and a log of
 // the records the keep-awake prefix marks as written, in order.
 //
-// The table over it (native/core/abi/services/kiln_routines.h) and the harness's surface come with the header; until
-// then this is internal and has no IKitFake.
+// The table over it is RoutinesTable.cs (native/core/abi/services/kiln_routines.h), the harness's surface
+// KilnHarness.Routines.cs. What the model answers must stay what the native service of this build answers
+// (native/services/routines/tests).
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -63,7 +64,7 @@ internal sealed record FakeRoutineCompletion(ulong Ticket, bool Ok, string? Reas
 internal sealed record FakeRoutineAssignmentEvent(FakeRoutineSnapshot? Before, FakeRoutineSnapshot After, string Reason, bool Teardown);
 
 internal sealed record FakeRoutineTaskEvent(uint NpcId, string Key, uint PlanVersion, ulong Revision, ulong Invocation, FakeRoutineKind? Task,
-    FakeTaskState From, FakeTaskState To, string? Reason, bool Teardown);
+    FakeTaskState From, FakeTaskState To, string? Reason, bool Teardown, int WindowIndex = -1);
 
 /// <summary>A villager as the hooks see it: the fields of its records the chooser and the sleep check read or write.</summary>
 internal sealed class FakeRoutineVillager(uint npcId)
@@ -89,16 +90,20 @@ internal sealed class RoutinesModel
 {
     public const int MaxQueued = 256;
     public const string OwnedBy = "OwnedBy:", NotAssigned = "NotAssigned", WorldStoppedReason = "WorldStopped", Revoked = "Revoked",
-        SleepNotAllowed = "NativeSleepNotCurrentlyAllowed", OwnerUnloaded = "OwnerUnloaded";
+        SleepNotAllowed = "NativeSleepNotCurrentlyAllowed", OwnerUnloaded = "OwnerUnloaded", TaskFailed = "TaskFailed", Interrupted = "Interrupted",
+        RemovedReason = "Removed";
     private const long NsPerMinute = 60_000_000_000;
 
     private enum Op { Assign, Remove, Resume }
 
-    private sealed record Change(ulong Ticket, Op Op, string Owner, uint NpcId, FakeRoutinePlan? Plan);
+    // Owner: who asked (the native service's KilnOwner); Mod: the mod it is bound to (the plan key's prefix). A mod's
+    // reload brings a new owner of the same mod, which the old owner's revoke must not touch.
+    private sealed record Change(ulong Ticket, Op Op, string Owner, uint NpcId, FakeRoutinePlan? Plan, string? Mod = null);
 
     private sealed class Assignment
     {
         public required string Owner;
+        public required string Mod;
         public required FakeRoutinePlan Plan;
         public ulong Revision;
         public bool Suspended;
@@ -108,6 +113,8 @@ internal sealed class RoutinesModel
         public FakeRoutineKind? Task;
         public FakeTaskState TaskState;
         public string? LastReason;
+        // the window whose task the game refused last: the next decision in it takes the fallback once
+        public int SkipWindow = int.MinValue;
     }
 
     private readonly List<Change> _queue = [];
@@ -169,7 +176,9 @@ internal sealed class RoutinesModel
     /// <summary>Starts the revisions after what a world saved.</summary>
     public void StartRevisionsAfter(ulong last) => _revision = Math.Max(_revision, last);
 
-    public FakeRoutineCall Assign(string owner, uint npcId, string planJson, out ulong ticket, out string? problem)
+    /// <summary>Queues an assignment. <paramref name="mod"/>: the mod the owner is bound to (the native service binds it
+    /// at the owner's first assign); null: the owner's name is its mod.</summary>
+    public FakeRoutineCall Assign(string owner, uint npcId, string planJson, out ulong ticket, out string? problem, string? mod = null)
     {
         ticket = 0;
         problem = null;
@@ -180,19 +189,20 @@ internal sealed class RoutinesModel
         }
         if (!TryParse(planJson, out var plan, out problem)) return FakeRoutineCall.InvalidArgument;
         // the owner comes from the caller, never from the JSON: a key of another mod is a bad argument
-        if (!plan!.Key.StartsWith(owner + ":", StringComparison.Ordinal))
+        mod ??= owner;
+        if (!plan!.Key.StartsWith(mod + ":", StringComparison.Ordinal))
         {
-            problem = $"the plan {plan.Key} is not a plan of {owner}";
+            problem = $"the plan {plan.Key} is not a plan of {mod}";
             return FakeRoutineCall.InvalidArgument;
         }
-        return Enqueue(Op.Assign, owner, npcId, plan, out ticket, out problem);
+        return Enqueue(Op.Assign, owner, npcId, plan, out ticket, out problem, mod);
     }
 
     public FakeRoutineCall Remove(string owner, uint npcId, out ulong ticket) => Enqueue(Op.Remove, owner, npcId, null, out ticket, out _);
 
     public FakeRoutineCall Resume(string owner, uint npcId, out ulong ticket) => Enqueue(Op.Resume, owner, npcId, null, out ticket, out _);
 
-    private FakeRoutineCall Enqueue(Op op, string owner, uint npcId, FakeRoutinePlan? plan, out ulong ticket, out string? problem)
+    private FakeRoutineCall Enqueue(Op op, string owner, uint npcId, FakeRoutinePlan? plan, out ulong ticket, out string? problem, string? mod = null)
     {
         ticket = 0;
         problem = null;
@@ -208,7 +218,7 @@ internal sealed class RoutinesModel
             return FakeRoutineCall.QueueFull;
         }
         ticket = ++_tickets;
-        _queue.Add(new Change(ticket, op, owner, npcId, plan));
+        _queue.Add(new Change(ticket, op, owner, npcId, plan, mod));
         return FakeRoutineCall.Ok;
     }
 
@@ -228,24 +238,23 @@ internal sealed class RoutinesModel
         _assignmentEvents.Add(new(before, Snapshot(npcId, a), "ManualSuspended:" + reason, false));
     }
 
-    /// <summary>The owner unloads: its queued changes complete now with Revoked, its assignments go at the next Pre.</summary>
-    public void RevokeOwner(string owner)
-    {
-        foreach (var c in _queue.Where(c => c.Owner == owner).ToList())
-        {
-            _queue.Remove(c);
-            Complete(c, false, Revoked, _assignments.TryGetValue(c.NpcId, out var a) ? a.Revision : 0);
-        }
-        _revoked.Add(owner);
-    }
+    /// <summary>The owner unloads: at the next Pre its queued changes complete with Revoked and its assignments go.</summary>
+    public void RevokeOwner(string owner) => _revoked.Add(owner);
 
     /// <summary>The step's Pre: an unloaded owner's assignments go, then every queued change commits in order.</summary>
     public void Pre()
     {
         if (_stopped) return;
         foreach (var owner in _revoked)
+        {
+            foreach (var c in _queue.Where(c => c.Owner == owner).ToList())
+            {
+                _queue.Remove(c);
+                _done.Add(new(c.Ticket, false, Revoked, c.NpcId, _assignments.TryGetValue(c.NpcId, out var held) ? held.Revision : 0));
+            }
             foreach (var (npcId, a) in _assignments.Where(x => x.Value.Owner == owner).ToList())
                 Drop(npcId, a, OwnerUnloaded);
+        }
         _revoked.Clear();
         foreach (var c in _queue)
         {
@@ -253,20 +262,20 @@ internal sealed class RoutinesModel
             if (a != null && a.Owner != c.Owner)
             {
                 // another mod's routine is on this villager: refused, nothing written, no event
-                _done.Add(new(c.Ticket, false, OwnedBy + a.Owner, c.NpcId, a.Revision));
+                _done.Add(new(c.Ticket, false, OwnedBy + a.Mod, c.NpcId, a.Revision));
                 continue;
             }
             switch (c.Op)
             {
                 case Op.Assign:
                     var before = a == null ? null : Snapshot(c.NpcId, a);
-                    if (a == null) _assignments[c.NpcId] = a = new Assignment { Owner = c.Owner, Plan = c.Plan! };
+                    if (a == null) _assignments[c.NpcId] = a = new Assignment { Owner = c.Owner, Mod = c.Mod ?? c.Owner, Plan = c.Plan! };
                     else
                     {
                         // the same owner replaces its plan; a manual suspension stays until an explicit resume
                         if (a.TaskState is FakeTaskState.Chosen or FakeTaskState.Started) Move(c.NpcId, a, FakeTaskState.Suspended, "Replaced", false);
                         a.Plan = c.Plan!;
-                        (a.Window, a.Task, a.TaskState) = (-1, null, FakeTaskState.None);
+                        (a.Window, a.Task, a.TaskState, a.SkipWindow) = (-1, null, FakeTaskState.None, int.MinValue);
                     }
                     a.Revision = ++_revision;
                     Plans[a.Plan.Key] = (a.Plan.Version, a.Plan.ContentHash);
@@ -341,7 +350,13 @@ internal sealed class RoutinesModel
             return null;
         }
         if (phase == 3) return null;
+        // what the last decision started and nothing closed: the game's own choice ends with the next decision; a task
+        // of the plan that was still running was taken over by something else
+        if (a.TaskState is FakeTaskState.Chosen or FakeTaskState.Started)
+            Move(npcId, a, a.Task == FakeRoutineKind.Vanilla ? FakeTaskState.Completed : FakeTaskState.Suspended, a.Task == FakeRoutineKind.Vanilla ? null : Interrupted, false);
         var window = a.Plan.Select(Minute);
+        if (window >= 0 && window == a.SkipWindow) window = -1;   // refused last time: the fallback once
+        a.SkipWindow = int.MinValue;
         var kind = a.Plan.TaskAt(window);
         Begin(npcId, a, window, kind);
         if (kind == FakeRoutineKind.Sleep)
@@ -394,7 +409,8 @@ internal sealed class RoutinesModel
         if (!ok && v.TaskFailures < byte.MaxValue) v.TaskFailures++;
         v.State = FakeVillagerState.DecideTask;
         if (!_assignments.TryGetValue(npcId, out var a) || a.TaskState is not (FakeTaskState.Chosen or FakeTaskState.Started)) return;
-        Move(npcId, a, ok ? FakeTaskState.Completed : FakeTaskState.Refused, ok ? null : reason ?? "Failed", false);
+        Move(npcId, a, ok ? FakeTaskState.Completed : FakeTaskState.Refused, ok ? null : reason ?? TaskFailed, false);
+        if (!ok) a.SkipWindow = a.Window;
     }
 
     /// <summary>The game's sleep check runs for the villager (from the chooser or the interrupt pass). The game's own runs
@@ -447,7 +463,7 @@ internal sealed class RoutinesModel
 
     private void Move(uint npcId, Assignment a, FakeTaskState to, string? reason, bool teardown)
     {
-        _taskEvents.Add(new(npcId, a.Plan.Key, a.Plan.Version, a.Revision, a.Invocation, a.Task, a.TaskState, to, reason, teardown));
+        _taskEvents.Add(new(npcId, a.Plan.Key, a.Plan.Version, a.Revision, a.Invocation, a.Task, a.TaskState, to, reason, teardown, a.Window));
         a.TaskState = to;
         if (reason != null) a.LastReason = reason;
     }
@@ -455,7 +471,7 @@ internal sealed class RoutinesModel
     private ulong Drop(uint npcId, Assignment a, string reason)
     {
         var before = Snapshot(npcId, a);
-        if (a.TaskState is FakeTaskState.Chosen or FakeTaskState.Started) Move(npcId, a, FakeTaskState.Suspended, reason, false);
+        if (a.TaskState is FakeTaskState.Chosen or FakeTaskState.Started) Move(npcId, a, FakeTaskState.Suspended, RemovedReason, false);
         _assignments.Remove(npcId);
         a.Revision = ++_revision;
         a.State = FakeAssignmentState.Removed;
@@ -466,7 +482,7 @@ internal sealed class RoutinesModel
     private void Complete(Change c, bool ok, string? reason, ulong revision) => Completions.Add(new(c.Ticket, ok, reason, c.NpcId, revision));
 
     private FakeRoutineSnapshot Snapshot(uint npcId, Assignment a) =>
-        new(npcId, a.Owner, a.Plan.Key, a.Plan.Version, a.Revision, a.State, a.Window, a.Invocation, a.Task, a.TaskState, Villager(npcId).State, a.LastReason);
+        new(npcId, a.Mod, a.Plan.Key, a.Plan.Version, a.Revision, a.State, a.Window, a.Invocation, a.Task, a.TaskState, Villager(npcId).State, a.LastReason);
 
     // ---- the wire document, read as the service reads it ------------------------------------------------------------
 

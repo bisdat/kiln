@@ -340,3 +340,26 @@ virtual Kiln.RoutineTask.Equals(Kiln.RoutineTask? other) -> bool
 virtual Kiln.RoutineTask.PrintMembers(System.Text.StringBuilder! builder) -> bool
 Kiln.NpcBlock.Routine.get -> Kiln.PartRef<Kiln.RoutineBlock!>?
 Kiln.NpcBlock.Routine.init -> void
+Kiln.RoutineAssignmentChangedEvent
+Kiln.RoutineAssignmentChangedEvent.After.get -> Kiln.RoutineSnapshot!
+Kiln.RoutineAssignmentChangedEvent.Before.get -> Kiln.RoutineSnapshot?
+Kiln.RoutineAssignmentChangedEvent.Reason.get -> string!
+Kiln.RoutineAssignmentChangedEvent.Teardown.get -> bool
+Kiln.RoutineTaskChangedEvent
+Kiln.RoutineTaskChangedEvent.From.get -> Kiln.RoutineTaskState
+Kiln.RoutineTaskChangedEvent.Invocation.get -> ulong
+Kiln.RoutineTaskChangedEvent.Key.get -> string!
+Kiln.RoutineTaskChangedEvent.NpcId.get -> uint
+Kiln.RoutineTaskChangedEvent.PlanVersion.get -> uint
+Kiln.RoutineTaskChangedEvent.Reason.get -> string?
+Kiln.RoutineTaskChangedEvent.Revision.get -> ulong
+Kiln.RoutineTaskChangedEvent.Task.get -> Kiln.RoutineTask?
+Kiln.RoutineTaskChangedEvent.Teardown.get -> bool
+Kiln.RoutineTaskChangedEvent.To.get -> Kiln.RoutineTaskState
+Kiln.Routines
+override Kiln.RoutineAssignmentChangedEvent.ToString() -> string!
+override Kiln.RoutineTaskChangedEvent.ToString() -> string!
+static Kiln.Routines.Assign(Kiln.Villager! npc, Kiln.BlockHandle<Kiln.RoutineBlock!>! plan) -> System.Threading.Tasks.Task<Kiln.RoutineResult!>!
+static Kiln.Routines.Inspect(Kiln.Villager! npc) -> Kiln.RoutineSnapshot?
+static Kiln.Routines.Remove(Kiln.Villager! npc) -> System.Threading.Tasks.Task<Kiln.RoutineResult!>!
+static Kiln.Routines.Resume(Kiln.Villager! npc) -> System.Threading.Tasks.Task<Kiln.RoutineResult!>!

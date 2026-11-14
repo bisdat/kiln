@@ -271,11 +271,12 @@ public sealed class RoutinesModelTests
         var queued = Assign(m, A, 9, GoldenWire);
         var others = Assign(m, B, 10, Wire("other-mod:day"));
         m.RevokeOwner(A);
-        Assert.Equal(new FakeRoutineCompletion(queued, false, "Revoked", 9, 0), m.Completions[^1]);
-        Assert.NotNull(m.Inspect(7));                           // until the next Pre
+        Assert.Equal(2, m.Completions.Count);                   // nothing until the next Pre
+        Assert.NotNull(m.Inspect(7));
         Step(m);
         Assert.Null(m.Inspect(7));
         Assert.Null(m.Inspect(9));
+        Assert.Equal(new FakeRoutineCompletion(queued, false, "Revoked", 9, 0), m.Completions[^2]);
         Assert.Equal(new FakeRoutineCompletion(others, true, null, 10, 4), m.Completions[^1]);
         var removed = m.AssignmentEvents.Single(e => e.Reason == "OwnerUnloaded");
         Assert.Equal((7u, FakeAssignmentState.Removed, 3ul), (removed.After.NpcId, removed.After.Assignment, removed.After.Revision));
@@ -284,6 +285,24 @@ public sealed class RoutinesModelTests
         Assign(m, B, 7, Wire("other-mod:day"));
         Step(m);
         Assert.Equal(B, m.Inspect(7)!.Owner);
+    }
+
+    [Fact]
+    public void A_revoke_takes_only_the_old_owners_changes_when_the_mod_comes_back_with_a_new_owner()
+    {
+        var m = new RoutinesModel();
+        Assert.Equal(FakeRoutineCall.Ok, m.Assign("owner 1", 7, GoldenWire, out _, out _, mod: A));
+        Step(m);
+        m.RevokeOwner("owner 1");                               // the mod reloads: its old owner goes
+        Assert.Equal(FakeRoutineCall.Ok, m.Assign("owner 2", 8, GoldenWire, out var again, out _, mod: A));
+        Step(m);
+        Assert.Null(m.Inspect(7));                              // the old owner's assignment went
+        Assert.Equal(new FakeRoutineCompletion(again, true, null, 8, 3), m.Completions[^1]);
+        Assert.Equal(A, m.Inspect(8)!.Owner);                   // a snapshot names the mod, not the owner
+        // another owner of the villager is refused with the mod's name
+        Assert.Equal(FakeRoutineCall.Ok, m.Remove("owner 3", 8, out var foreign));
+        Step(m);
+        Assert.Equal(new FakeRoutineCompletion(foreign, false, "OwnedBy:" + A, 8, 3), m.Completions[^1]);
     }
 
     [Fact]

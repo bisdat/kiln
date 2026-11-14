@@ -48,10 +48,19 @@ internal static class RoutineRegistry
     // (mod, npc key) -> the routine an NPC block names: bound when that NPC is in the world
     private static readonly Dictionary<(string Mod, string Npc), string> NpcRoutines = new();
 
-    /// <summary>The block name that holds <paramref name="key"/> for another block of the same mod, or null: an alias collision.</summary>
+    /// <summary>The block name that holds <paramref name="key"/> for another block of the same mod, or null: an alias
+    /// collision. Asks the committed definitions and the blocks staged in the kind plan that is open on this thread (they
+    /// commit together at its end, so none of them is in the registry while the others lower).</summary>
     public static string? HeldBy(string key, string blockName)
     {
-        lock (Gate) return ByKey.TryGetValue(key, out var d) && d.BlockName != blockName ? d.BlockName : null;
+        lock (Gate)
+            if (ByKey.TryGetValue(key, out var d) && d.BlockName != blockName)
+                return d.BlockName;
+        if (KindTransaction.Current is { } staging)
+            foreach (var s in staging.Staged)
+                if (s.Handle is BlockHandle<RoutineBlock> h && h.GameName == key && s.Name != blockName)
+                    return s.Name;
+        return null;
     }
 
     /// <summary>Adds or replaces (the same block defined again) a definition.</summary>
