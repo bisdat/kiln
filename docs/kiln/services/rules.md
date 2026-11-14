@@ -496,8 +496,10 @@ It never lands, because without collision there is no ground. Water does not end
   collision came back after a teleport, but the character kept the flight's state and could not walk or animate.)
 - The player leaving, the world closing, the mod that applied the rule set unloading: rule sets end as always. Kiln
   cannot move a character that is leaving, so it keeps every NoClip player's last free position in the world's Kiln
-  data (`kiln-rules`, key `noclip-returns`, by the player's character; saved with every world save) for as long as
-  NoClip is on. When such a player is next in the world (a rejoin, a server restart, a hosted world's next load) with
+  data (`kiln-rules`, key `noclip-returns`, by the player's character) for as long as NoClip is on. It reaches the
+  disk with a world save that succeeds; Kiln also keeps a copy per world for the running process, so a hosted game that
+  closes a world and loads it again restores the player even when the last save failed. A server that stops after a
+  failed save knows only what an earlier save carried (as the game's own save of the character's position). When such a player is next in the world (a rejoin, a server restart, a hosted world's next load) with
   their waist or head inside matter, collision waits and the character is moved there, as at a switch-off inside
   something; back in open space nothing is moved. Either way `PlayerNoClipEndedEvent` comes then, once, with `Reason`
   `Left` (since 0.2.0-dev.28) and `RestoredTo` when Kiln moved it, and the entry goes. A player who is still joining and

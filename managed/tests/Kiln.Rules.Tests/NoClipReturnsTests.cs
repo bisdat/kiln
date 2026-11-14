@@ -11,6 +11,26 @@ public class NoClipReturnsTests
     {
         public NoClipReturnBook? Current = new();
         public NoClipReturnBook? Book => Current;
+        public void Wrote(string key, NoClipReturnEntry? entry) { }
+    }
+
+    // Kiln.Saves as the store sees it: whether it is there, whether the world's data is loaded, the world, its book.
+    private sealed class World
+    {
+        public bool Saves = true, Ready = true;
+        public string? Id = "world-a";
+        public NoClipReturnBook Data = new();  // the world's live data; a load replaces it with what the sidecar held
+
+        public NoClipReturnStore Store() => new(() => Saves, () => Ready, () => Id, () => Data);
+
+        /// <summary>The world closes and loads again; its sidecar holds what the last successful save wrote.</summary>
+        public void Reload(NoClipReturnBook sidecar, NoClipReturnStore store)
+        {
+            Ready = false;
+            store.WorldClosing();
+            Data = sidecar;
+            Ready = true;
+        }
     }
 
     private static readonly DateTime Now = new(2026, 11, 14, 12, 0, 0, DateTimeKind.Utc);
@@ -76,5 +96,70 @@ public class NoClipReturnsTests
         var back = System.Text.Json.JsonSerializer.Deserialize<NoClipReturnBook>(json)!;
         Assert.Equal(new WorldPosition(1.5, -2, 3), back.Players["character/a"].Position);
         Assert.DoesNotContain("Position", json);
+    }
+
+    [Fact]
+    public void ASaveThatFailsDoesNotLoseTheEntryWithinTheRun()
+    {
+        var w = new World();
+        var store = w.Store();
+        var r = new NoClipReturns(store);
+        r.Note("character/a", new WorldPosition(1, 2, 3), "Bis", Now);
+        // the world's last save failed: its sidecar does not have the entry; the same game loads the world again
+        w.Reload(new NoClipReturnBook(), store);
+        Assert.Equal(new WorldPosition(1, 2, 3), r.Of("character/a")?.Position);
+        Assert.True(w.Data.Players.ContainsKey("character/a"));  // back in the world's data: the next save carries it
+    }
+
+    [Fact]
+    public void WithoutASaveThatCarriedItARestartHasNoEntry()
+    {
+        // a new process (a server restart) after a failed save: only the sidecar is left, and it never had the entry
+        var w = new World();
+        var r = new NoClipReturns(w.Store());
+        r.Note("character/a", new WorldPosition(1, 2, 3), "Bis", Now);
+        var restarted = new World { Data = new NoClipReturnBook() };
+        Assert.Null(new NoClipReturns(restarted.Store()).Of("character/a"));
+    }
+
+    [Fact]
+    public void AForgottenEntryDoesNotComeBackFromTheCopy()
+    {
+        var w = new World();
+        var store = w.Store();
+        var r = new NoClipReturns(store);
+        r.Note("character/a", new WorldPosition(1, 2, 3), "Bis", Now);
+        r.Forget("character/a");
+        w.Reload(new NoClipReturnBook(), store);
+        Assert.Null(r.Of("character/a"));
+    }
+
+    [Fact]
+    public void TheCopyBelongsToItsWorld()
+    {
+        var w = new World();
+        var store = w.Store();
+        var r = new NoClipReturns(store);
+        r.Note("character/a", new WorldPosition(1, 2, 3), "Bis", Now);
+        w.Id = "world-b";
+        w.Reload(new NoClipReturnBook(), store);
+        Assert.Null(r.Of("character/a"));  // another world: its coordinates mean nothing here
+        w.Id = "world-a";
+        w.Reload(new NoClipReturnBook(), store);
+        Assert.NotNull(r.Of("character/a"));
+    }
+
+    [Fact]
+    public void BeforeTheWorldLoadsTheStoreDecidesNothingAndWithoutSavesItKeepsMemoryUntilTheWorldCloses()
+    {
+        var w = new World { Ready = false };
+        var store = w.Store();
+        var r = new NoClipReturns(store);
+        Assert.False(r.Note("character/a", new WorldPosition(1, 2, 3), "", Now));
+        w.Saves = false;  // no Kiln.Saves: memory
+        Assert.True(r.Note("character/a", new WorldPosition(1, 2, 3), "", Now));
+        Assert.NotNull(r.Of("character/a"));
+        store.WorldClosing();
+        Assert.Null(r.Of("character/a"));
     }
 }
