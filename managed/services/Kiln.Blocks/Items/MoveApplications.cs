@@ -347,9 +347,25 @@ internal static class MoveApplications
             lock (other)
             {
                 if (other.Removed || other.Active is not { } gen) continue;
-                other.Retry = true;
+                RetrySoon(other);
                 Lost(other, gen, other.Current.RequestedGeneration, Host.ContentGeneration, $"every layer of the mod was taken off ({why}).", problem);
             }
+    }
+
+    /// <summary>Plans the weapon again at the mod's next ready pass (one is asked for), on the same content.</summary>
+    private static void RetrySoon(Entry e)
+    {
+        e.Retry = true;
+        Host.Later(e.Mod, problem =>
+        {
+            bool again;
+            lock (e)
+            {
+                again = e.Retry && !e.Removed && e.Current.State == MoveApplicationState.Refused;
+                e.Retry = false;
+            }
+            if (again) Run(e, problem);
+        });
     }
 
     // ---- the write ----
@@ -481,7 +497,7 @@ internal static class MoveApplications
                     default:
                         // taken back (or never written): what plays is what played before the replay. A generation that still holds keeps its
                         // number in the refusal; one that does not is gone
-                        e.Retry = true;
+                        RetrySoon(e);
                         if (Holds(gen) is { } gone) Lost(e, gen, request, content, $"{reason} {char.ToUpperInvariant(gone[0])}{gone[1..]}.", problem);
                         else Refuse(e, request, content, $"block {e.Plan.Block}, moves: {reason} The generation still plays (what the replay wrote was taken back).", problem);
                         break;

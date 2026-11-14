@@ -724,17 +724,20 @@ public sealed class MoveFollowUpTests : IDisposable
         _game.SwitchTakesOnlyFirst = true;
         _game.FailRestore = true;
         MoveApplications.Start(mod, pb!, b);
-        _game.Pump();
+        _game.Pending.Dequeue()(_ => { });      // planned and staged
+        _game.Pending.Dequeue()(_ => { });      // written, refused, not taken back
         Assert.Contains("every layer of the mod was taken off", Status("keeper").Reason);
         var warden = Status();
         Assert.Equal((MoveApplicationState.Refused, 0ul), (warden.State, warden.AppliedGeneration));
         Assert.Contains("every layer of the mod was taken off (", warden.Reason);
         Assert.Contains("keeper's moves could not be taken back", warden.Reason);
         Assert.True(mod.RulesDirty);            // the mod's other rules are applied again at the next pass
-        // the next ready pass plans the innocent weapon again; the one that failed waits for other content
+        // the ready pass asked for plans the innocent weapon again; the one that failed waits for other content
         (_game.SwitchTakesOnlyFirst, _game.FailRestore) = (false, false);
-        MoveApplications.Ready(mod, _ => { });
+        Assert.Single(_game.Pending);
         _game.Pump();
+        MoveApplications.Ready(mod, _ => { });
+        Assert.Empty(_game.Pending);
         Assert.Equal(MoveApplicationState.Applied, Status().State);
         Assert.Equal(MoveApplicationState.Refused, Status("keeper").State);
     }
@@ -811,9 +814,9 @@ public sealed class MoveFollowUpTests : IDisposable
         Assert.Empty(_game.SlotsNow);
         Assert.Empty(_game.LinksNow);
         Assert.Equal(MoveApplicationState.Refused, _events[^1].After.State);
-        // the next ready pass plans the weapon again, on the same content, and it applies
+        // a ready pass was asked for: it plans the weapon again, on the same content, and it applies
         (_game.SwitchTakesOnlyFirst, _game.LateError) = (false, null);
-        MoveApplications.Ready(mod, problems.Add);
+        Assert.NotEmpty(_game.Pending);
         Assert.Empty(_game.Pump());
         Assert.Equal((MoveApplicationState.Applied, 2ul), (Status().State, Status().AppliedGeneration));
     }
@@ -833,9 +836,9 @@ public sealed class MoveFollowUpTests : IDisposable
         Assert.Contains("still plays", now.Reason);
         Assert.Equal(first.LiveClones, now.LiveClones);
         Assert.Equal(slots, _game.SlotsNow);
-        // the next ready pass finds the same plan playing: Applied again, nothing written
+        // the ready pass it asked for finds the same plan playing: Applied again, nothing written
         var applied = _game.Applied.Count;
-        MoveApplications.Ready(mod, problems.Add);
+        _game.Pump();
         Assert.Equal((MoveApplicationState.Applied, 1ul), (Status().State, Status().AppliedGeneration));
         Assert.Equal(applied, _game.Applied.Count);
     }
