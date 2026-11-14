@@ -353,7 +353,7 @@ internal static unsafe class DecisionBroker
 
     /// <summary>Makes <paramref name="producer"/> the producer of its kind and starts the broker's tick. Its event types
     /// are registered with <see cref="EventProducers"/>: a subscription to one of them needs the producer's capability
-    /// and <c>kiln.decisions</c>. Any thread.</summary>
+    /// and a service that produces the kind. Any thread.</summary>
     /// <exception cref="ArgumentException">A kind outside 1..63 or without a payload the service knows, or a second
     /// producer of a kind.</exception>
     public static void Register(DecisionProducer producer)
@@ -371,7 +371,10 @@ internal static unsafe class DecisionBroker
             next[kind] = producer;
             Volatile.Write(ref _producers, next);
         }
-        foreach (var type in producer.EventTypes) EventProducers.Register(type, producer.Capability, DecisionsNative.Service);
+        // the row can read on where the service is not (an older runtime, a service that took another consumer): ask it
+        foreach (var type in producer.EventTypes)
+            EventProducers.Register(type, producer.Capability, () => (SupportedKinds >> (int)kind & 1) != 0 ? null
+                : Available ? $"kiln.decisions has no producer of kind {kind} in this build" : "kiln.decisions is not here");
         Start();
     }
 

@@ -296,10 +296,10 @@ public sealed unsafe class DecisionBrokerTests : IDisposable
     public void A_new_world_has_a_new_epoch_and_a_new_process_starts_over()
     {
         var calls = new List<DecisionId>();
-        On<TestDyingEvent>(d => calls.Add(d.Id));
         DecisionId first, old, next;
         using (var kiln = Started())
         {
+            On<TestDyingEvent>(d => calls.Add(d.Id));
             var e = kiln.Entities.Create();
             first = Capture(kiln, e);
             kiln.Step();
@@ -319,7 +319,7 @@ public sealed unsafe class DecisionBrokerTests : IDisposable
         calls.Clear();
         using (var kiln = Started())
         {
-            Assert.True(kiln.Decisions.Model.Attached || kiln.Decisions.Active == 0);
+            On<TestDyingEvent>(d => calls.Add(d.Id));  // a harness takes the subscriptions made in it with it
             var e = kiln.Entities.Create();
             var again = Capture(kiln, e);
             Assert.Equal(first, again);  // the same numbers as in the last process
@@ -421,8 +421,14 @@ public sealed unsafe class DecisionBrokerTests : IDisposable
         // the service itself is the second thing the events need
         kiln.Capabilities.Override(N.Service, false);
         var none = Assert.Throws<KilnUnavailableException>(() => Events.On<TestDyingEvent>(_ => { }));
-        Assert.Equal(N.Service, none.Capability);
+        Assert.Equal(DeathRow, none.Capability);  // the event's own row is the name, the reason says what is missing
+        Assert.Contains("kiln.decisions", none.Message);
         kiln.Capabilities.ClearOverride(N.Service);
+        // and a service without a producer of the kind (an older runtime): asked at the call, not remembered
+        kiln.Decisions.Model.SupportedHookKinds = 0;
+        Assert.Throws<KilnUnavailableException>(() => Events.On<TestDyingEvent>(_ => { }));
+        kiln.Decisions.Model.SupportedHookKinds = 1ul << (int)N.KindDeath;
+        On<TestDyingEvent>(_ => { });
     }
 
     private sealed class Handlers

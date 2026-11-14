@@ -697,35 +697,34 @@ public static class Events
 /// <remarks>Only Kiln's own event types belong here: the registry keeps the type for the life of the process.</remarks>
 internal static class EventProducers
 {
-    private static readonly ConcurrentDictionary<Type, string[]> Needs = new();
+    private static readonly ConcurrentDictionary<Type, (string Capability, Func<string?>? Off)> Needs = new();
 
-    /// <summary>Says that <paramref name="eventType"/> is produced only while every one of
-    /// <paramref name="capabilities"/> is available; the first that is off is the one a refusal names. Any thread;
-    /// registering a type again replaces what it needed.</summary>
-    public static void Register(Type eventType, params string[] capabilities)
+    /// <summary>Says that <paramref name="eventType"/> is produced only while <paramref name="capability"/> is
+    /// available. <paramref name="off"/>, when given, is asked at every subscription as well: it returns why the event
+    /// cannot be produced right now although the row reads available (the service behind it is not there), or null.
+    /// A refusal always names <paramref name="capability"/>. Any thread; registering a type again replaces its entry.</summary>
+    public static void Register(Type eventType, string capability, Func<string?>? off = null)
     {
         ArgumentNullException.ThrowIfNull(eventType);
-        ArgumentNullException.ThrowIfNull(capabilities);
+        ArgumentException.ThrowIfNullOrEmpty(capability);
         if (!typeof(KilnEvent).IsAssignableFrom(eventType)) throw new ArgumentException($"{eventType} is not a KilnEvent", nameof(eventType));
-        if (capabilities.Length == 0 || capabilities.Any(string.IsNullOrEmpty))
-            throw new ArgumentException("an event's producer names at least one capability", nameof(capabilities));
-        Needs[eventType] = [.. capabilities];
+        Needs[eventType] = (capability, off);
     }
 
-    /// <summary>The capabilities <paramref name="eventType"/> itself was registered with; null when none.</summary>
-    public static IReadOnlyList<string>? Of(Type eventType) => Needs.TryGetValue(eventType, out var needs) ? needs : null;
+    /// <summary>The capability <paramref name="eventType"/> itself was registered with; null when none.</summary>
+    public static string? Of(Type eventType) => Needs.TryGetValue(eventType, out var need) ? need.Capability : null;
 
     /// <summary>The refusal for a subscription to <paramref name="subscribed"/>: it, or a class it derives from, was
-    /// registered and one of its capabilities is not available now. Null: subscribe.</summary>
+    /// registered and cannot be produced now. Decided from what is true at this call (the row as it reads now, then the
+    /// producer's own check), never from an answer kept from an earlier one. Null: subscribe.</summary>
     public static KilnUnavailableException? Off(Type subscribed)
     {
         if (Needs.IsEmpty) return null;
         for (var t = subscribed; t != null && t != typeof(KilnEvent) && t != typeof(object); t = t.BaseType)
         {
-            if (!Needs.TryGetValue(t, out var needs)) continue;
-            foreach (var name in needs)
-                if (!Capabilities.Is(name))
-                    return ServiceCaps.Unavailable(name, $"{t.Name} is not produced here");
+            if (!Needs.TryGetValue(t, out var need)) continue;
+            if (!Capabilities.Is(need.Capability)) return ServiceCaps.Unavailable(need.Capability, $"{t.Name} is not produced here");
+            if (need.Off?.Invoke() is { } why) return new KilnUnavailableException(need.Capability, $"{t.Name} is not produced here: {why}");
         }
         return null;
     }
