@@ -21,6 +21,8 @@ Kiln.EntityScaleResult.Kept.init -> void
 Kiln.EntityScaleResult.Now.get -> Kiln.Scale3?
 Kiln.EntityScaleResult.Now.init -> void
 Kiln.EntityScaleResult.Ok.get -> bool
+Kiln.EntityScaleResult.Persisted.get -> bool?
+Kiln.EntityScaleResult.Persisted.init -> void
 Kiln.EntityScaleResult.Reason.get -> string?
 Kiln.EntityScaleResult.Reason.init -> void
 Kiln.EntityScaleResult.ReplicationTracked.get -> bool?
