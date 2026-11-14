@@ -221,15 +221,23 @@ bool reparse_on_the_way(const fs::path& mod, const fs::path& p) {
 // Under Wine (the Linux server and Proton): Wine resolves no link in a handle's final path, and marks a link to a folder as a
 // reparse point but a link to a file as a plain file (lab, GE-Proton). So there a link to a folder is refused (on blocks
 // itself too), a link to a file is not told from a file: it is read, within the same size, count and depth limits.
+// `refused`: each file or folder left out, "<prefix>/<file>: <why>" (a boot generation's required mod is refused for the first).
 void add_limited(const fs::path& mod, const std::wstring& root, const fs::path& folder, const char* prefix,
-                 const kvx_generated::Limits& lim, kvb::ModInput* m) {
+                 const kvx_generated::Limits& lim, kvb::ModInput* m, std::vector<std::string>* refused = nullptr) {
+    const auto left_out = [&](const std::string& what, const std::string& why) {
+        if (refused) refused->push_back(what + ": not read: " + why);
+    };
     std::error_code ec;
     if (!fs::is_directory(folder, ec)) return;
     {
         OwnedHandle dh(open_for_read(folder, true));
-        if (!dh.ok()) return;
+        if (!dh.ok()) {
+            left_out(std::string(prefix) + "/", "it cannot be opened");
+            return;
+        }
         if (!kvx_generated::path_inside(root, final_path(dh.h)) || reparse_on_the_way(mod, folder)) {
             KV_W("vfx: %s: %s/ is a link or reparse point, or leads outside the mod's folder: not read", m->id.c_str(), prefix);
+            left_out(std::string(prefix) + "/", "a link or reparse point, or it leads outside the mod's folder");
             return;
         }
     }
@@ -251,6 +259,7 @@ void add_limited(const fs::path& mod, const std::wstring& root, const fs::path& 
     if (over) {
         KV_W("vfx: %s: %s/ has more than %zu JSON files (or more than %zu entries): none of it is read", m->id.c_str(), prefix,
              lim.files, lim.entries);
+        left_out(std::string(prefix) + "/", "more than " + std::to_string(lim.files) + " JSON files or " + std::to_string(lim.entries) + " entries");
         return;
     }
     std::sort(files.begin(), files.end());
@@ -258,19 +267,29 @@ void add_limited(const fs::path& mod, const std::wstring& root, const fs::path& 
     uint64_t total = 0;
     for (const fs::path& f : files) {
         const std::string name = to_utf8(f.filename());
+        const std::string what = std::string(prefix) + "/" + name;
         OwnedHandle fh(open_for_read(f, false));
-        if (!fh.ok()) continue;
+        if (!fh.ok()) {
+            KV_W("vfx: %s: %s: not read: it cannot be opened", m->id.c_str(), what.c_str());
+            left_out(what, "it cannot be opened");
+            continue;
+        }
         if (!kvx_generated::path_inside(root, final_path(fh.h)) || reparse_on_the_way(mod, f)) {
             KV_W("vfx: %s: %s/%s: not read: a link or reparse point, or it leads outside the mod's folder", m->id.c_str(), prefix, name.c_str());
+            left_out(what, "a link or reparse point, or it leads outside the mod's folder");
             continue;
         }
         LARGE_INTEGER size{};
-        if (!GetFileSizeEx(fh.h, &size) || size.QuadPart < 0) continue;
+        if (!GetFileSizeEx(fh.h, &size) || size.QuadPart < 0) {
+            left_out(what, "its size cannot be read");
+            continue;
+        }
         const uint64_t bytes = static_cast<uint64_t>(size.QuadPart);
         if (const char* why = kvx_generated::refusal(lim, n, bytes, total)) {
             KV_W("vfx: %s: %s/%s: not read: %s (%llu bytes; limits: %zu files, %llu bytes each, %llu in all)", m->id.c_str(), prefix,
                  name.c_str(), why, static_cast<unsigned long long>(bytes), lim.files, static_cast<unsigned long long>(lim.file_bytes),
                  static_cast<unsigned long long>(lim.total_bytes));
+            left_out(what, why);
             continue;
         }
         std::string text(static_cast<size_t>(bytes), '\0');
@@ -285,10 +304,12 @@ void add_limited(const fs::path& mod, const std::wstring& root, const fs::path& 
         DWORD more = 0;
         if (got != bytes || (ReadFile(fh.h, &extra, 1, &more, nullptr) && more != 0)) {
             KV_W("vfx: %s: %s/%s: not read: it changed while it was read", m->id.c_str(), prefix, name.c_str());
+            left_out(what, "it changed while it was read");
             continue;
         }
         if (!kvx_generated::depth_ok(text, lim.depth)) {
             KV_W("vfx: %s: %s/%s: not read: nested deeper than %d", m->id.c_str(), prefix, name.c_str(), lim.depth);
+            left_out(what, "nested deeper than " + std::to_string(lim.depth));
             continue;
         }
         ++n;
@@ -335,11 +356,18 @@ bool read_mod(const std::string& dir, const fs::path& pending_root, kvb::ModInpu
         OwnedHandle rh(open_for_read(d, true));
         if (rh.ok()) root = final_path(rh.h);
     }
+    // a required participant prepares strictly (kiln_boot_collector.hpp, entry_error): a file of its own left out refuses it
+    std::vector<std::string> refused;
     if (root.empty()) {
         KV_W("vfx: %s: the mod's folder cannot be opened to check where its files are: its blocks are not read", m->id.c_str());
+        kiln::boot::entry_error(boot, m->id, "vfx", "blocks", "kiln.vfx: the mod's folder cannot be opened: its blocks are not read");
     } else {
-        add_limited(d, root, d / L"blocks", "blocks", kvx_generated::kBlocks, m);
-        add_limited(d, root, d / L"blocks" / L"generated", "blocks/generated", kvx_generated::kGenerated, m);
+        add_limited(d, root, d / L"blocks", "blocks", kvx_generated::kBlocks, m, &refused);
+        add_limited(d, root, d / L"blocks" / L"generated", "blocks/generated", kvx_generated::kGenerated, m, &refused);
+    }
+    if (!refused.empty()) {
+        const std::string what = refused.front();
+        kiln::boot::entry_error(boot, m->id, "vfx", what.substr(0, what.find(": not read")), "kiln.vfx: " + what);
     }
     if (boot)
         for (const auto& b : boot->docs("vfx", m->id)) {
@@ -811,6 +839,17 @@ void build_on_ready(const KilnApi* api, KilnOwner self, const kiln::boot::Input*
         }
         const uint64_t t0 = GetTickCount64();
         const kvb::CookResult r = kvb::cook_mods(mods, opt);
+        // a required participant whose VFX or materials did not all build is refused before anything is served (the prepare's
+        // catch takes back what this build did); another mod's errors are logged below as they always were
+        if (boot)
+            for (const auto& [id, errs] : r.mod_errors)
+                if (!errs.empty() && boot->strict(id)) {
+                    const std::string& e = errs.front();
+                    const size_t a = e.find(": "), b = a == std::string::npos ? a : e.find(": ", a + 2);  // "<mod>: <file>: ..."
+                    const std::string key = b == std::string::npos ? std::string() : e.substr(a + 2, b - a - 2);
+                    throw kiln::boot::Refusal(id, "vfx", key.find('/') != std::string::npos ? key : std::string(),
+                                              "kiln.vfx: " + e + (errs.size() > 1 ? " (and " + std::to_string(errs.size() - 1) + " more, kiln.log)" : ""));
+                }
         if (r.materials_carried || r.materials_built) {
             KV_I("vfx: %u material(s) taken as the last start built them, %u built from their textures, in %llu ms", r.materials_carried, r.materials_built,
                  static_cast<unsigned long long>(GetTickCount64() - t0));

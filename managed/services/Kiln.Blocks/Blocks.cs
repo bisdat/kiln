@@ -208,6 +208,11 @@ internal sealed class ModBlocks(string id, ulong owner)
     /// <summary>A plan's ledger whose plan waits for its parts at content ready (KindApply): told once, after the first whole pass
     /// and its check of the plan's definitions, with every error the ledger holds then (none: the plan is applied).</summary>
     public Action<IReadOnlyList<string>>? Settle;
+    /// <summary>Passes at content ready that started on this ledger.</summary>
+    public int Passes;
+    /// <summary>The first pass whose check may call <see cref="Settle"/>: a plan's replay in a later content generation waits for a pass that
+    /// starts after it was armed (KindApply), not one the game began before.</summary>
+    public int SettleFrom;
     /// <summary>The names of the definitions a plan's blocks registered: the only ones its pass checks (null on a mod's own ledger).</summary>
     public HashSet<string>? PlanDefinitions;
     /// <summary>The ledger whose data files and cycle check a lookup uses: this one, or the one it stages for.</summary>

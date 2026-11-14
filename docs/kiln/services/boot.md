@@ -74,6 +74,30 @@ KilnBootIssueV1* issue)`, on the boot thread, with no lock of kiln.boot held.
 - Any other result code, `ok = 1` with a null plan or an error code, or a fault is a broken collector and stops the
   start.
 
+**Required participants are prepared strictly.** Each participant in the input carries `"required"` (its
+`kiln.mod.json` says `"boot": "required"`); `Input::strict(mod)` reads it. For such a participant every entry error the
+collector would log and skip for another mod refuses the participant instead: a file of the mod that cannot be read or
+is not JSON, a malformed entry or node, a file the cook trust refuses, a cooker failure. Call
+`kiln::boot::entry_error(input, mod, kind, key, why)` where the error is found: for a required participant it throws
+`Refusal` (the prepare takes back what it read and answers with `refuse()`), otherwise it returns `true` and the
+collector logs and skips the entry as it always did. `key` names the file or the entry (`assets/assets.json`,
+`skills/nodes.json`, `blocks/tweaks.json`), `why` says what is wrong in words that name the entry
+(`entries[1] (resource good.bin): resource: bad guid`). Kiln's own data (what it kept from a mod's code at an earlier
+start) is not the mod's boot content and stays lenient. What each collector checks:
+
+| Collector | Refuses a required participant for |
+|---|---|
+| assets | `assets/assets.json` (or a boot document) that cannot be read or is not JSON, any entry error (`entries[<i>]`: a bad GUID or type, a file that cannot be read or lies outside the mod, a patch blob, a refused put), a cooked file this game's cook did not make |
+| worldtables | a `blocks/*.json` or `blocks.tables.json` that cannot be read or is not JSON, any world-table block error; after the entry point (activation fault): a block the merge cannot apply (an unknown material or item, no room), or kiln.worldtables going off |
+| content | every content document error (as for every participant: a refusal drops an optional mod whole) |
+| skills | a `skills/*.json` that cannot be read or is not JSON, `gameTree` that is not `{"nodes": [...]}`, a node that is refused (its GUID, its fields, a GUID another mod defines), a boot node without a GUID |
+| knowledge | a `blocks/*.json` or `quests/*.json` (and `quests/generated/`) that cannot be read or is not JSON, an `assets/cook.json` that is not JSON; after the entry point (activation fault): the mod's quests, knowledge or NPCs that the build leaves out, or a build that serves nothing |
+| vfx | a blocks file left out (a link, over a limit, cannot be opened, nested too deep), any VFX or material error of the cook, a mod refused by the budget or a manifest rule (a game client only: a server prepares an empty plan) |
+| patches | every patch error (as for every participant), and a blocks file that names `resourcePatches` and cannot be read or parsed |
+
+The stop line names the entry: `boot: the start stops before the game's entry point (exit code 0x4B01): <mod>:
+<kind> <key>: collector <id>: <reason>; state/boot.json lists every boot mod's state and issue`.
+
 **Destroy.** An unpublished plan goes to `destroy`; a published one lives until the process exits. Most collectors
 prepare into their service's own state and undo it in `destroy`: kiln.boot calls it on every failed round, in reverse
 order, before it prepares again.
@@ -89,7 +113,8 @@ contract stop the start instead.
 
 ## activation_fault
 A collector whose published content cannot be applied after the entry point (kiln.content's `patches`, when a
-resource patch cannot be written at `when_resources_ready`) reports it:
+resource patch cannot be written at `when_resources_ready`; kiln.worldtables, a required mod's block its merge cannot
+apply; kiln.knowledge, a required mod's quests its build leaves out) reports it:
 `kiln::boot::activation_fault(api, owner, mod, kind, key, reason)`. kiln.boot records an issue (code
 `ActivationFault`, phase `activation`), and the mod's state and the phase status become `ACTIVATION_FAULT`; nothing is
 undone. For a mod whose boot content is required the call does not return: the state files are written and the
@@ -132,7 +157,10 @@ handles, which no runtime unload clears: `Blocks.Find` and a block's reference b
 
 ## Tests
 - Host: `native/core/tests/test-boot-service.sh` (kiln.boot with fake collectors: staging, every drop and abort,
-  reverse destruction, the seven collectors, files-only participants, `activation_fault`, the game-data reader).
+  reverse destruction, the seven collectors, files-only participants, `activation_fault`, the game-data reader;
+  `BOOT-STRICT-*`: the `required` flag in every prepare's input, and per collector slot a collector built on
+  `entry_error` with a malformed file, a malformed entry and an unreadable file, required (the start stops naming the
+  entry, nothing published) and optional (the entry skipped, the rest published)).
 - Offline: `managed/tests/Kiln.Blocks.Tests` (staging, lowering, `BootHandleTests`: the handle map), `Kiln.Host.Tests`
   (`BootPhaseTests`, including the pin of `KilnBootApiV1`'s member order; `BootInputsTests`: the frozen inputs).
 - Offline, the test kit: `Kiln.TestKit.Tests` (`BootFakeTests`: `KilnHarness.BootPhase`), `Kiln.Sdk.Tests`
@@ -141,7 +169,9 @@ handles, which no runtime unload clears: `Blocks.Find` and a block's reference b
   fault mods `boot-callback-fail` and `boot-dependent` their exclusion; `Blocks.Find` and `Blocks.Define` of a boot block in
   `OnLoad`), `mods/tests/boot-reload-driver` beside it (unload, load unchanged, a block file added: refused with
   `RestartRequiredBoot`, removed: loads), `mods/tests/boot-patches-test` and
-  `boot-patches-other` (resource patches), `mods/tests/boot-gamedata-test` (the snapshot against the live reader).
+  `boot-patches-other` (resource patches), `mods/tests/boot-gamedata-test` (the snapshot against the live reader),
+  `mods/tests/boot-required-test` (fifteen fixture mods, one bad entry each for a collector: required, each start stops
+  with exit status 1 and a stop line naming the entry; optional, one start with all of them goes on and skips them).
 
 ## Lab switches
 - **`boot.testRefuse`** (kiln.json, honoured only with `"policy": "any"`; a release never sets it):

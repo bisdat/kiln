@@ -12,7 +12,7 @@
  * Only the authoritative server world of this process is acted on (a dedicated server, or the server half of a hosted
  * game): a prediction or client world's debit is forwarded untouched.
  *
- * Threads: define, remove and changes on the tick thread; status on any thread.
+ * Threads: define, remove and changes on the tick thread; status and rule_changes on any thread.
  * Capability: items.tool_wear_debit (sigdb; lowered by the service when its guards do not pass; held on the client
  * side by the client gate until check 16b-g).
  */
@@ -82,6 +82,30 @@ typedef struct KilnToolWearState {
     uint64_t spawn_seen, spawn_applied; /* the projectile spawn's debit: calls looked at, debits a rule changed */
 } KilnToolWearState;
 
+/* KilnToolWearRuleChange.cause: what made the change */
+enum {
+    KILN_TOOLWEAR_RULE_DEFINED = 1, /* define: a new rule on top, or the owner's rule replaced */
+    KILN_TOOLWEAR_RULE_REMOVED = 2, /* remove: the rule in effect taken away (the one before it, or the game's 1, is back) */
+    KILN_TOOLWEAR_RULE_RETIRED = 3, /* the owner of the rule in effect was revoked (a mod unloaded, a plugin's owner_revoke) */
+};
+
+/* Since 0.2.0-dev.28 (rule_changes): one change of one item's rule in effect, its cost or whose rule it is. Every
+ * change of the generation is one record: the record of generation n is the n-th change since the process started,
+ * whoever made it (a managed mod, a native plugin through this table, an owner's retirement). Values only. */
+typedef struct KilnToolWearRuleChange {
+    uint32_t size; /* sizeof(KilnToolWearRuleChange) as the service wrote it */
+    uint32_t item;
+    uint64_t generation; /* KilnToolWearState.generation right after this change */
+    uint32_t cause;      /* KILN_TOOLWEAR_RULE_* */
+    int32_t before_cost; /* what a debit cost before: 0..32767, or -1: no rule (the game's own 1) */
+    int32_t after_cost;  /* what it costs now, as before_cost */
+    uint32_t reserved;
+    KilnOwner before_owner, after_owner; /* the owners of the two rules (meaningful only where the cost is not -1) */
+    KilnHandle before_rule, after_rule;  /* their handles; 0: no rule */
+    char before_mod_id[128];             /* the mod each rule is reported under; "" without a rule */
+    char after_mod_id[128];
+} KilnToolWearRuleChange;
+
 typedef struct KilnToolWearApi {
     KilnServiceHeader header;
     /* A rule of `owner` for `item`: every qualifying debit costs `per_debit` (0..32767). `defining_mod_id` is the mod
@@ -92,10 +116,20 @@ typedef struct KilnToolWearApi {
     KilnResult(KILN_CALL* remove)(KilnOwner caller, KilnHandle rule);
     /* Drains up to `capacity` change records of `stride` bytes each into `out` (the smaller of stride and the
      * service's record size is written per record), oldest first; *count = how many. Records of a world that ended,
-     * or of an item entity that is gone, are dropped, never delivered late. */
+     * or of an item entity that is gone, are dropped, never delivered late. Records are taken away: Kiln.Items drains
+     * them every tick for its managed events (rule_changes, below, is the one to read alongside it). */
     KilnResult(KILN_CALL* changes)(KilnToolWearChange* out, uint32_t capacity, uint32_t stride, uint32_t* count);
     /* The state for `item` (0: only the capability's and the counters). A copy; any thread. */
     KilnResult(KILN_CALL* status)(uint32_t item, KilnToolWearState* out);
+    /* ---- appended in 0.2.0-dev.28 (check header.size before calling) ---- */
+    /* The rule changes after generation `after`, oldest first: up to `capacity` records of `stride` bytes each (at
+     * least 64: the record up to the mod ids; the smaller of stride and the service's record size is written per
+     * record); *count = how many. Nothing is taken away: every reader keeps its own `after`, the generation of the last
+     * record it read (0 at first), so a native plugin reading them takes nothing from Kiln's managed events. The
+     * service holds the last 1024 changes: *lost (may be NULL) = how many changes after `after` it no longer holds;
+     * the first record is then generation after + 1 + *lost. Any thread. */
+    KilnResult(KILN_CALL* rule_changes)(uint64_t after, KilnToolWearRuleChange* out, uint32_t capacity, uint32_t stride, uint32_t* count,
+                                        uint64_t* lost);
 } KilnToolWearApi;
 
 #ifdef __cplusplus
@@ -106,6 +140,9 @@ typedef struct KilnToolWearApi {
 static_assert(sizeof(KilnToolWearChange) == 88, "KilnToolWearChange is 88 bytes");
 static_assert(sizeof(KilnToolWearState) == 400, "KilnToolWearState is 400 bytes (360 in its first form)");
 static_assert(offsetof(KilnToolWearState, hook_threads) == 360, "the lab counters follow the first form");
+static_assert(sizeof(KilnToolWearRuleChange) == 320, "KilnToolWearRuleChange is 320 bytes");
+static_assert(offsetof(KilnToolWearRuleChange, before_mod_id) == 64, "the mod ids follow 64 bytes of values");
+static_assert(offsetof(KilnToolWearApi, rule_changes) == sizeof(KilnServiceHeader) + 4 * sizeof(void*), "rule_changes follows the first form");
 #endif
 
 #endif /* KILN_TOOLWEAR_H */

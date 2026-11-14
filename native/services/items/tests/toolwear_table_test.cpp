@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <string>
 #include <vector>
 
 #include "../toolwear.h"
@@ -112,6 +113,36 @@ static KilnResult KILN_CALL register_service(KilnOwner, KilnStr name, const void
 }
 
 static KilnStr S(const char* s) { return KilnStr{s, std::strlen(s)}; }
+
+// Every rule change after `after`, read in batches of 7 (a reader's cursor is the last record's generation).
+static std::vector<KilnToolWearRuleChange> rule_changes(const KilnToolWearApi* t, uint64_t after, uint64_t* lost_out = nullptr) {
+    std::vector<KilnToolWearRuleChange> all;
+    if (t->header.size < offsetof(KilnToolWearApi, rule_changes) + sizeof(void*) || !t->rule_changes) {
+        CHECK(!"kiln.toolwear has rule_changes");
+        return all;
+    }
+    KilnToolWearRuleChange buf[7];
+    uint64_t first_lost = 0;
+    for (bool first = true;; first = false) {
+        uint32_t n = 0;
+        uint64_t lost = 0;
+        CHECK(t->rule_changes(after, buf, 7, sizeof buf[0], &n, &lost) == KILN_OK);
+        if (first) first_lost = lost;
+        else CHECK(lost == 0);
+        for (uint32_t i = 0; i < n; ++i) {
+            all.push_back(buf[i]);
+            after = buf[i].generation;
+        }
+        if (n < 7) break;
+    }
+    if (lost_out) *lost_out = first_lost;
+    return all;
+}
+
+static bool is(const KilnToolWearRuleChange& r, uint32_t item, uint32_t cause, int32_t before, int32_t after, const char* before_mod, const char* after_mod) {
+    return r.size == sizeof r && r.item == item && r.cause == cause && r.before_cost == before && r.after_cost == after &&
+           !std::strcmp(r.before_mod_id, before_mod) && !std::strcmp(r.after_mod_id, after_mod);
+}
 
 static KilnToolWearState state(uint32_t item) {
     KilnToolWearState s{};
@@ -284,6 +315,89 @@ int main() {
     s = state(fake::kPickaxe);
     CHECK(s.per_debit == 7 && !std::strcmp(s.owner_mod_id, "mod-a"));
     CHECK(t->define(B, S("mod-b"), fake::kPickaxe, 3, &x) == KILN_ERR_REVOKED && x == 0);
+
+    // ---- rule changes (since 0.2.0-dev.28): every change of the generation is one record, in order, whoever made it ----
+    {
+        const uint64_t g = state(0).generation;
+        uint64_t lost = 1;
+        auto all = rule_changes(t, 0, &lost);
+        CHECK(lost == 0 && all.size() == g);
+        for (size_t i = 0; i < all.size(); ++i) CHECK(all[i].generation == i + 1);
+        if (all.size() == g && g >= 9) {
+            // the first steps above: A's 7, replaced by 9 (same handle), B's 2 on top, B's removal reveals A's 9
+            CHECK(is(all[0], fake::kPickaxe, KILN_TOOLWEAR_RULE_DEFINED, -1, 7, "", "mod-a") && all[0].before_rule == 0 && all[0].after_rule == a2 &&
+                  all[0].after_owner == A);
+            CHECK(is(all[1], fake::kPickaxe, KILN_TOOLWEAR_RULE_DEFINED, 7, 9, "mod-a", "mod-a") && all[1].before_rule == all[1].after_rule);
+            CHECK(is(all[2], fake::kPickaxe, KILN_TOOLWEAR_RULE_DEFINED, 9, 2, "mod-a", "mod-b") && all[2].before_owner == A && all[2].after_owner == B);
+            CHECK(is(all[3], fake::kPickaxe, KILN_TOOLWEAR_RULE_REMOVED, 2, 9, "mod-b", "mod-a"));
+            CHECK(is(all[4], fake::kPickaxe, KILN_TOOLWEAR_RULE_DEFINED, 9, 9, "mod-a", "mod-b"));  // equal cost, another owner
+            CHECK(is(all[5], fake::kPickaxe, KILN_TOOLWEAR_RULE_REMOVED, 9, -1, "mod-b", "") && all[5].after_rule == 0);
+            // the last one: B's retirement revealed A's 7
+            CHECK(is(all.back(), fake::kPickaxe, KILN_TOOLWEAR_RULE_RETIRED, 3, 7, "mod-b", "mod-a") && all.back().before_owner == B && all.back().after_owner == A);
+        }
+        // nothing after the newest; a cursor past it reads nothing
+        CHECK(rule_changes(t, g).empty() && rule_changes(t, g + 50).empty());
+
+        // A native owner's whole life in one tick ends where it began: a reader of the final state sees nothing, the
+        // records say all five changes
+        const KilnOwner C = 30, D = 40;
+        KilnHandle c1 = 0, c2 = 0, d = 0;
+        const auto start = state(fake::kAxe);
+        CHECK(start.has_rule == 0);
+        CHECK(t->define(C, S("native-c"), fake::kAxe, 5, &c1) == KILN_OK);
+        CHECK(t->define(C, S("native-c"), fake::kAxe, 6, &c2) == KILN_OK && c2 == c1);
+        CHECK(t->define(D, S("native-d"), fake::kAxe, 6, &d) == KILN_OK);
+        CHECK(t->remove(D, d) == KILN_OK);
+        CHECK(t->remove(C, 424242) == KILN_ERR_NOT_FOUND && t->remove(D, c1) == KILN_TOOLWEAR_NOT_OWNER);  // refusals: no record
+        if (fake::retiring) fake::retiring(C, fake::retiring_user);
+        const auto end = state(fake::kAxe);
+        CHECK(end.has_rule == 0 && end.generation == g + 5);
+        auto life = rule_changes(t, g);
+        CHECK(life.size() == 5);
+        if (life.size() == 5) {
+            CHECK(is(life[0], fake::kAxe, KILN_TOOLWEAR_RULE_DEFINED, -1, 5, "", "native-c") && life[0].after_owner == C && life[0].after_rule == c1);
+            CHECK(is(life[1], fake::kAxe, KILN_TOOLWEAR_RULE_DEFINED, 5, 6, "native-c", "native-c") && life[1].before_rule == c1 && life[1].after_rule == c1);
+            CHECK(is(life[2], fake::kAxe, KILN_TOOLWEAR_RULE_DEFINED, 6, 6, "native-c", "native-d") && life[2].after_owner == D && life[2].after_rule == d);
+            CHECK(is(life[3], fake::kAxe, KILN_TOOLWEAR_RULE_REMOVED, 6, 6, "native-d", "native-c") && life[3].after_owner == C);
+            CHECK(is(life[4], fake::kAxe, KILN_TOOLWEAR_RULE_RETIRED, 6, -1, "native-c", "") && life[4].before_owner == C && life[4].after_rule == 0);
+            for (size_t i = 0; i < life.size(); ++i) CHECK(life[i].generation == g + 1 + i);
+        }
+        // a retired owner that is not in effect anywhere: no record
+        if (fake::retiring) fake::retiring(D, fake::retiring_user);
+        CHECK(state(0).generation == g + 5);
+
+        // any thread; a reader of an older, shorter record gets its part and nothing past its stride
+        fake::tick = false;
+        uint8_t narrow[2 * 64 + 1];
+        std::memset(narrow, 0xEE, sizeof narrow);
+        uint32_t m = 0;
+        uint64_t lost2 = 7;
+        CHECK(t->rule_changes(g, reinterpret_cast<KilnToolWearRuleChange*>(narrow), 2, 64, &m, &lost2) == KILN_OK && m == 2 && lost2 == 0);
+        KilnToolWearRuleChange head{};
+        std::memcpy(&head, narrow + 64, 64);
+        CHECK(head.size == 64 && head.generation == g + 2 && head.before_cost == 5 && head.after_cost == 6 && narrow[128] == 0xEE);
+        fake::tick = true;
+        // refused arguments; capacity 0 only says what is lost
+        KilnToolWearRuleChange one{};
+        CHECK(t->rule_changes(g, &one, 1, 63, &m, nullptr) == KILN_ERR_INVALID_ARGUMENT && t->rule_changes(g, nullptr, 1, sizeof one, &m, nullptr) == KILN_ERR_INVALID_ARGUMENT &&
+              t->rule_changes(g, &one, 1, sizeof one, nullptr, nullptr) == KILN_ERR_INVALID_ARGUMENT);
+        CHECK(t->rule_changes(g, nullptr, 0, 0, &m, nullptr) == KILN_OK && m == 0);
+
+        // the history holds the last 1024: a reader that fell behind is told how many it missed, then reads on in order
+        const uint64_t g2 = state(0).generation;
+        const KilnOwner E = 50;
+        KilnHandle e = 0;
+        for (int i = 0; i < 1100; ++i) CHECK(t->define(E, S("native-e"), fake::kAxe, static_cast<uint32_t>(i % 2), &e) == KILN_OK);
+        CHECK(state(0).generation == g2 + 1100);
+        uint64_t behind = 0;
+        auto rest = rule_changes(t, g2, &behind);
+        CHECK(behind == 1100 - 1024 && rest.size() == 1024);
+        if (rest.size() == 1024) CHECK(rest.front().generation == g2 + 1 + behind && rest.back().generation == g2 + 1100 && rest.back().after_cost == 1);
+        uint32_t k = 0;
+        uint64_t lost3 = 0;
+        CHECK(t->rule_changes(g2, nullptr, 0, 0, &k, &lost3) == KILN_OK && k == 0 && lost3 == behind);
+        CHECK(t->rule_changes(0, &one, 1, sizeof one, &k, &lost3) == KILN_OK && k == 1 && lost3 == g2 + 76 && one.generation == g2 + 77);
+    }
 
     std::printf("items-toolwear-table-test: %s\n", g_fail ? "FAILED" : "ok");
     return g_fail ? 1 : 0;

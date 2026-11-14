@@ -98,21 +98,30 @@ one is dropped, with a warning (`ShadowedByFile`) in kiln.log and `state/boot.js
 - The format and the producer are in [boot-gamedata.md](boot-gamedata.md).
 
 ## Reading your mod's settings
-In this build `Config.Register<T>()` cannot be called in `OnBoot`: it needs the tick thread and throws
-`InvalidOperationException` ("This must run on the tick thread"), and the mod is then left out. Keep values `OnBoot`
-needs in code or in a data file of the mod for now.
+`Config.Register<T>().Value` works in `OnBoot`: it reads the mod's config file and its defaults as `OnLoad` does,
+and writes nothing. Register the same config again in `OnLoad`; that registration takes over the read, so `OnBoot` and
+the running mod see the same values. Writes, `Reload`, a `Changed` handler and `RegisterWorld` are refused in `OnBoot`
+("… is not available in OnBoot (it runs before the game's first tick); call it in OnLoad"). Details and an example:
+[config.md](../config.md#in-modonboot).
 
 ## When a mod fails
 - **`OnBoot` throws**, or a staged definition does not compile: the mod is out. None of its definitions and none of its
   files are in the generation, and every mod that requires it is out too. The server starts without them.
 - **A collector refuses a definition** (a resource patch on a field another mod sets, for example): the same.
+- **A bad entry in the mod's own files** (an `assets/assets.json` entry with a bad GUID or a missing file, a
+  `blocks/*.json`, `skills/*.json` or `quests/*.json` that is not JSON or cannot be read, a block or game-tree node with
+  an error): Kiln logs it and leaves that entry out; the rest of the mod loads, as without `OnBoot`.
 - An excluded mod does not load later in this process either: kiln.log says `RestartRequiredBoot: ... restart after
   fixing it`. Fix it and restart the server.
-- **A mod with `"boot": "required"`** that fails stops the start. The game is never entered: no world or save is loaded.
-  The process ends with exit code `0x4B01`; on Linux, under Wine, the exit status is its low byte, 1. kiln.log says
-  `boot: the start stops before the game's entry point (exit code 0x4B01)`, and `kiln/state/boot.json` names the mod,
-  the definition and the reason. A required mod's resource patch that cannot be written when the game's data comes up
-  stops the start the same way.
+- **A mod with `"boot": "required"`** gets all of its boot content or the start stops: a failed `OnBoot`, a refused
+  definition, and also any bad entry in its own files (the list above) that would be left out of another mod. The game
+  is never entered: no world or save is loaded. The process ends with exit code `0x4B01`; on Linux, under Wine, the
+  exit status is its low byte, 1. kiln.log ends with the stop line, which names the mod, the file or entry and the
+  reason, for example `boot: the start stops before the game's entry point (exit code 0x4B01): my-mod: assets
+  assets/assets.json: collector assets: kiln.assets: assets/assets.json: entries[1] (resource good.bin): resource: bad
+  guid; state/boot.json lists every boot mod's state and issue`. `kiln/state/boot.json` has the same. What can only fail
+  once the game's data comes up stops the start the same way, before a world loads: a resource patch that cannot be
+  written, a world-table block the merge cannot apply, quests or NPCs of the mod that the quest build leaves out.
 - A mod with `boot` that was enabled after the start (`MissedPhase`), or whose files changed since (below), does not
   load until the next start.
 

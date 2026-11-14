@@ -22,43 +22,27 @@ public enum KeyMods
 /// left and right buttons cannot be bound: Kiln's screens need them. <see cref="VirtualKey"/> is the Windows virtual-key
 /// code; the mouse buttons have theirs (0x04 middle, 0x05 Mouse4, 0x06 Mouse5), and the wheel, which has none, uses 0x100
 /// (up), 0x101 (down), 0x102 (left), 0x103 (right), above every key. keybinds.json stores the names, not the codes. A
-/// Kiln older than 0.2.0-dev.27 does not know the mouse names (<see cref="TryParse"/> says false there).</summary>
+/// Kiln older than 0.2.0-dev.27 does not know the mouse names (<see cref="TryParse"/> says false there).
+/// <para>Since 0.2.0-dev.28 every key has a name that parses back: the OEM keys have names ("Oem8", "IntlBackslash"), a key
+/// with no name is "Key" and its decimal code ("Key223"), and a modifier key by itself is the last word ("Ctrl",
+/// "Shift+Alt"). The punctuation names ("Backquote", "Minus", "Equals", "LeftBracket", "RightBracket", "Backslash",
+/// "Semicolon", "Quote", "Comma", "Period", "Slash", "IntlBackslash", "IntlRo", "NumpadComma") name the key at that place
+/// of a US keyboard on every layout: "Backquote" is the key left of 1 also where a UK, German or French layout gives it
+/// another virtual key. <see cref="VirtualKey"/> holds the US layout's code of that place.</para></summary>
 public readonly record struct KeyChord(uint VirtualKey, KeyMods Mods)
 {
     public static readonly KeyChord None = default;
     public bool IsNone => VirtualKey == 0;
 
-    private static readonly Dictionary<string, uint> Names = BuildNames();
-
     // Names of the left and right mouse buttons: known, so that the refusal can say why.
     private static readonly HashSet<string> Clicks = new(StringComparer.OrdinalIgnoreCase)
     {
         "Mouse1", "Mouse2", "LeftClick", "RightClick", "MouseLeft", "MouseRight", "LeftMouse", "RightMouse", "LButton", "RButton",
+        "Key1", "Key2",
     };
 
-    private static Dictionary<string, uint> BuildNames()
-    {
-        var d = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["Insert"] = 0x2D, ["Ins"] = 0x2D, ["Delete"] = 0x2E, ["Del"] = 0x2E, ["Home"] = 0x24, ["End"] = 0x23,
-            ["PageUp"] = 0x21, ["PageDown"] = 0x22, ["Left"] = 0x25, ["Right"] = 0x27, ["Up"] = 0x26, ["Down"] = 0x28,
-            ["Enter"] = 0x0D, ["Return"] = 0x0D, ["Escape"] = 0x1B, ["Esc"] = 0x1B, ["Tab"] = 0x09, ["Backspace"] = 0x08,
-            ["Space"] = 0x20, ["Pause"] = 0x13, ["ScrollLock"] = 0x91, ["CapsLock"] = 0x14, ["NumLock"] = 0x90,
-            ["Backquote"] = 0xC0, ["Grave"] = 0xC0, ["Minus"] = 0xBD, ["Equals"] = 0xBB, ["LeftBracket"] = 0xDB,
-            ["RightBracket"] = 0xDD, ["Backslash"] = 0xDC, ["Semicolon"] = 0xBA, ["Quote"] = 0xDE, ["Comma"] = 0xBC,
-            ["Period"] = 0xBE, ["Slash"] = 0xBF, ["NumpadMultiply"] = 0x6A, ["NumpadAdd"] = 0x6B,
-            ["NumpadSubtract"] = 0x6D, ["NumpadDecimal"] = 0x6E, ["NumpadDivide"] = 0x6F,
-        };
-        for (uint i = 1; i <= 24; i++) d[$"F{i}"] = 0x70 + i - 1;
-        for (var c = 'A'; c <= 'Z'; c++) d[c.ToString()] = c;
-        for (var c = '0'; c <= '9'; c++) d[c.ToString()] = c;
-        for (uint i = 0; i <= 9; i++) d[$"Numpad{i}"] = 0x60 + i;
-        foreach (var (name, vk) in MouseKeys.Names) d[name] = vk;
-        d["Mouse3"] = MouseKeys.Middle;
-        return d;
-    }
-
-    /// <summary>Parses "Ctrl+Shift+F8"; false for an unknown key name.</summary>
+    /// <summary>Parses "Ctrl+Shift+F8"; false for an unknown key name. Every name <see cref="ToString"/> writes parses
+    /// back, "Key223" (a key with no name, by its decimal code) included.</summary>
     public static bool TryParse(string? text, out KeyChord chord)
     {
         chord = None;
@@ -66,15 +50,26 @@ public readonly record struct KeyChord(uint VirtualKey, KeyMods Mods)
         if (text.Trim().Equals("none", StringComparison.OrdinalIgnoreCase)) return true;
         var mods = KeyMods.None;
         uint vk = 0;
-        foreach (var part in text.Split('+', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        var parts = text.Split('+', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        var open = text.TrimEnd().EndsWith('+');  // "Ctrl+": a key is missing
+        for (var i = 0; i < parts.Length; i++)
         {
-            switch (part.ToLowerInvariant())
+            var part = parts[i];
+            var (mod, key) = part.ToLowerInvariant() switch
             {
-                case "ctrl" or "control": mods |= KeyMods.Ctrl; continue;
-                case "shift": mods |= KeyMods.Shift; continue;
-                case "alt": mods |= KeyMods.Alt; continue;
+                "ctrl" or "control" => (KeyMods.Ctrl, 0x11u),
+                "shift" => (KeyMods.Shift, 0x10u),
+                "alt" => (KeyMods.Alt, 0x12u),
+                _ => (KeyMods.None, 0u),
+            };
+            if (mod != KeyMods.None)
+            {
+                // a modifier key by itself is the last word ("Ctrl", "Shift+Ctrl"), as ToString writes it
+                if (i == parts.Length - 1 && vk == 0 && !open) vk = key;
+                else mods |= mod;
+                continue;
             }
-            if (vk != 0 || !Names.TryGetValue(part, out vk)) return false;
+            if (vk != 0 || !KeyNames.TryCode(part, out vk)) return false;
         }
         if (vk == 0) return false;
         chord = new KeyChord(vk, mods);
@@ -99,29 +94,128 @@ public readonly record struct KeyChord(uint VirtualKey, KeyMods Mods)
         if ((Mods & KeyMods.Ctrl) != 0) s += "Ctrl+";
         if ((Mods & KeyMods.Shift) != 0) s += "Shift+";
         if ((Mods & KeyMods.Alt) != 0) s += "Alt+";
-        return s + (MouseKeys.Name(VirtualKey) ?? UiNative.KeyName(VirtualKey));
+        return s + KeyNames.Name(VirtualKey);
     }
 }
 
-/// <summary>The mouse inputs a <see cref="KeyChord"/> can name, and their codes (kiln_ui.h: KILN_UI_VK_WHEEL_*). Named here,
-/// not by kiln.ui, so that keybinds.json gets the same names whatever native table answers.</summary>
+/// <summary>The names of keys and which key a binding means: the same table as kiln.ui's
+/// (native/services/ui/key_names.h, held together by Kiln.Ui.Tests' KeyNameTests). A punctuation binding is the key at its
+/// place on a US keyboard, found by its scan code on any layout; every other binding is its virtual key.</summary>
+internal static class KeyNames
+{
+    /// <summary>key_names.h kNames: codes the ranges in <see cref="Name"/> do not cover.</summary>
+    internal static readonly (uint Vk, string Name)[] Table =
+    [
+        (0x03, "Break"), (0x04, "MouseMiddle"), (0x05, "Mouse4"), (0x06, "Mouse5"), (0x08, "Backspace"), (0x09, "Tab"),
+        (0x0C, "Clear"), (0x0D, "Enter"), (0x10, "Shift"), (0x11, "Ctrl"), (0x12, "Alt"), (0x13, "Pause"), (0x14, "CapsLock"),
+        (0x15, "Kana"), (0x16, "ImeOn"), (0x17, "Junja"), (0x18, "Final"), (0x19, "Kanji"), (0x1A, "ImeOff"),
+        (0x1B, "Escape"), (0x1C, "Convert"), (0x1D, "NonConvert"), (0x1E, "Accept"), (0x1F, "ModeChange"), (0x20, "Space"),
+        (0x21, "PageUp"), (0x22, "PageDown"), (0x23, "End"), (0x24, "Home"), (0x25, "Left"), (0x26, "Up"), (0x27, "Right"),
+        (0x28, "Down"), (0x2C, "PrintScreen"), (0x2D, "Insert"), (0x2E, "Delete"), (0x5B, "LeftWin"), (0x5C, "RightWin"),
+        (0x5D, "ContextMenu"), (0x6A, "NumpadMultiply"), (0x6B, "NumpadAdd"), (0x6C, "NumpadSeparator"),
+        (0x6D, "NumpadSubtract"), (0x6E, "NumpadDecimal"), (0x6F, "NumpadDivide"), (0x90, "NumLock"), (0x91, "ScrollLock"),
+        (0x92, "OemNecEqual"), (0x93, "OemFjMasshou"), (0x94, "OemFjTouroku"), (0x95, "OemFjLoya"), (0x96, "OemFjRoya"),
+        (0xA0, "LeftShift"), (0xA1, "RightShift"), (0xA2, "LeftCtrl"), (0xA3, "RightCtrl"), (0xA4, "LeftAlt"),
+        (0xA5, "RightAlt"), (0xA6, "BrowserBack"), (0xA7, "BrowserForward"), (0xA8, "BrowserRefresh"), (0xA9, "BrowserStop"),
+        (0xAA, "BrowserSearch"), (0xAB, "BrowserFavorites"), (0xAC, "BrowserHome"), (0xAD, "VolumeMute"),
+        (0xAE, "VolumeDown"), (0xAF, "VolumeUp"), (0xB0, "MediaNext"), (0xB1, "MediaPrevious"), (0xB2, "MediaStop"),
+        (0xB3, "MediaPlayPause"), (0xB4, "LaunchMail"), (0xB5, "LaunchMedia"), (0xB6, "LaunchApp1"), (0xB7, "LaunchApp2"),
+        (0xBA, "Semicolon"), (0xBB, "Equals"), (0xBC, "Comma"), (0xBD, "Minus"), (0xBE, "Period"), (0xBF, "Slash"),
+        (0xC0, "Backquote"), (0xC1, "IntlRo"), (0xC2, "NumpadComma"), (0xDB, "LeftBracket"), (0xDC, "Backslash"),
+        (0xDD, "RightBracket"), (0xDE, "Quote"), (0xDF, "Oem8"), (0xE1, "OemAx"), (0xE2, "IntlBackslash"),
+        (0xE3, "IcoHelp"), (0xE4, "Ico00"), (0xE6, "IcoClear"), (0xE9, "OemReset"), (0xEA, "OemJump"), (0xEB, "OemPa1"),
+        (0xEC, "OemPa2"), (0xED, "OemPa3"), (0xEE, "OemWsCtrl"), (0xEF, "OemCuSel"), (0xF0, "OemAttn"),
+        (0xF1, "OemFinish"), (0xF2, "OemCopy"), (0xF3, "OemAuto"), (0xF4, "OemEnlw"), (0xF5, "OemBackTab"),
+        (0xFE, "OemClear"), (0x100, "WheelUp"), (0x101, "WheelDown"), (0x102, "WheelLeft"), (0x103, "WheelRight"),
+    ];
+
+    /// <summary>key_names.h kPlaces: the punctuation keys by scan code, and the US layout's code there.</summary>
+    internal static readonly (uint Scan, uint Vk)[] Places =
+    [
+        (0x29, 0xC0), (0x0C, 0xBD), (0x0D, 0xBB), (0x1A, 0xDB), (0x1B, 0xDD), (0x2B, 0xDC), (0x27, 0xBA),
+        (0x28, 0xDE), (0x33, 0xBC), (0x34, 0xBE), (0x35, 0xBF), (0x56, 0xE2), (0x73, 0xC1), (0x7E, 0xC2),
+    ];
+
+    private static readonly Dictionary<uint, string> ByCode = Table.ToDictionary(x => x.Vk, x => x.Name);
+    private static readonly Dictionary<string, uint> ByName = BuildByName();
+
+    private static Dictionary<string, uint> BuildByName()
+    {
+        var d = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (vk, name) in Table) d[name] = vk;
+        for (uint i = 1; i <= 24; i++) d[$"F{i}"] = 0x70 + i - 1;
+        for (var c = 'A'; c <= 'Z'; c++) d[c.ToString()] = c;
+        for (var c = '0'; c <= '9'; c++) d[c.ToString()] = c;
+        for (uint i = 0; i <= 9; i++) d[$"Numpad{i}"] = 0x60 + i;
+        // other spellings that parse (never written)
+        d["Ins"] = 0x2D;
+        d["Del"] = 0x2E;
+        d["Return"] = 0x0D;
+        d["Esc"] = 0x1B;
+        d["Grave"] = 0xC0;
+        d["Mouse3"] = MouseKeys.Middle;
+        return d;
+    }
+
+    /// <summary>The name of <paramref name="vk"/>: the table, F1..F24, 0..9, A..Z, Numpad0..9, else "Key" and the decimal
+    /// code (key_names.h name()).</summary>
+    public static string Name(uint vk)
+    {
+        if (ByCode.TryGetValue(vk, out var n)) return n;
+        if (vk is >= 0x70 and <= 0x87) return $"F{vk - 0x70 + 1}";
+        if (vk is >= '0' and <= '9' or >= 'A' and <= 'Z') return ((char)vk).ToString();
+        if (vk is >= 0x60 and <= 0x69) return $"Numpad{vk - 0x60}";
+        return $"Key{vk}";
+    }
+
+    /// <summary>The code of a key name, "Key&lt;3..255&gt;" included (1 and 2 are the left and right buttons: never).</summary>
+    public static bool TryCode(string name, out uint vk)
+    {
+        if (ByName.TryGetValue(name, out vk)) return true;
+        if (name.Length > 3 && name.StartsWith("Key", StringComparison.OrdinalIgnoreCase) &&
+            uint.TryParse(name.AsSpan(3), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var n) &&
+            n is >= 3 and <= 0xFF)
+        {
+            vk = n;
+            return true;
+        }
+        vk = 0;
+        return false;
+    }
+
+    /// <summary>A punctuation (OEM) virtual key (key_names.h oem()).</summary>
+    public static bool Oem(uint vk) =>
+        vk is >= 0xBA and <= 0xC2 or >= 0xDB and <= 0xE4 or 0xE6 or >= 0xE9 and <= 0xF5 or >= 0x92 and <= 0x96 or 0xFE;
+
+    /// <summary>A binding on this code means a place (a punctuation name), not a virtual key.</summary>
+    public static bool IsPlace(uint vk)
+    {
+        foreach (var p in Places)
+            if (p.Vk == vk) return true;
+        return false;
+    }
+
+    /// <summary>The binding code of a press: a punctuation key at a known place is that place's code, any other press its
+    /// virtual key (also a press without a scan code). The Keys page stores this.</summary>
+    public static uint PressCode(uint vk, uint scan)
+    {
+        if (scan == 0 || !Oem(vk)) return vk;
+        foreach (var p in Places)
+            if (p.Scan == scan) return p.Vk;
+        return vk;
+    }
+
+    /// <summary>Does a binding on <paramref name="bound"/> take this press: its place's key, or (for a code that names no
+    /// place, such as "Key223" a dev.27 Keys page saved) the virtual key itself.</summary>
+    public static bool Matches(uint bound, uint vk, uint scan) => bound == PressCode(vk, scan) || (!IsPlace(bound) && bound == vk);
+}
+
+/// <summary>The codes of the mouse inputs a <see cref="KeyChord"/> can hold (kiln_ui.h: KILN_UI_VK_WHEEL_*); their names are
+/// in <see cref="KeyNames"/>.</summary>
 internal static class MouseKeys
 {
     public const uint Middle = 0x04, Mouse4 = 0x05, Mouse5 = 0x06;
     public const uint WheelUp = 0x100, WheelDown = 0x101, WheelLeft = 0x102, WheelRight = 0x103;
-
-    public static readonly (string Name, uint Vk)[] Names =
-    [
-        ("MouseMiddle", Middle), ("Mouse4", Mouse4), ("Mouse5", Mouse5),
-        ("WheelUp", WheelUp), ("WheelDown", WheelDown), ("WheelLeft", WheelLeft), ("WheelRight", WheelRight),
-    ];
-
-    public static string? Name(uint vk)
-    {
-        foreach (var (name, code) in Names)
-            if (code == vk) return name;
-        return null;
-    }
 
     public static bool IsWheel(uint vk) => vk is >= WheelUp and <= WheelRight;
 
