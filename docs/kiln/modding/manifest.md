@@ -138,15 +138,16 @@ for a mod without boot content.
 
 - `true`: a failure of the mod's boot content leaves this mod (and the mods that require it) out; the server starts
   without them.
-- `"required"`: such a failure stops the start before the game's entry point (exit code `0x4B01`, `kiln/state/boot.json`
-  says why).
+- `"required"`: such a failure stops the start (exit code `0x4B01`, `kiln/state/boot.json` and the last kiln.log line say
+  why): before the game's entry point, or, for what only a loading world shows, while that world loads, before a player
+  is in it. A bad entry in the mod's own files counts as such a failure.
 - **Restarts.** A boot mod loads only with its boot content in this process. Enabled after the start, left out by a
-  failure, or changed since (Kiln compares a hash of `kiln.mod.json` and the entry assembly with the one the boot phase
-  took): it does not load, and kiln.log says `RestartRequiredBoot: ...`. Restart the server.
+  failure, or changed since (any file in its folder but what Kiln writes there, or a setting read in `OnBoot`; see
+  [onboot.md](onboot.md)): it does not load, and kiln.log says `RestartRequiredBoot: ...`. Restart the server.
 - Dedicated servers only in this build: on a game client a mod with `boot` does not load while `mods.boot.client` is
   held. A server without the boot phase (safe idle, .NET off) does not load it either.
-- A Kiln.Sdk project has no property for it: keep a `kiln.mod.json` of your own beside the project with the key; the
-  build checks that file and ships it.
+- In a Kiln.Sdk project, `<KilnBoot>true</KilnBoot>` (or `required`) writes the key into the generated `kiln.mod.json`;
+  a `kiln.mod.json` of your own beside the project with the key works too.
 
 ## Clients
 `clients` tells servers and the launcher what a player's game needs to join a server that runs the mod:
