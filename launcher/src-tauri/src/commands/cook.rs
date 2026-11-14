@@ -90,14 +90,23 @@ pub async fn cook_run(app: AppHandle, game_id: String, mod_id: Option<String>) -
 /// The boot game-data step of a start (kiln_manage::boot_snapshot): made, or found, when one of `mods` (the start's
 /// enabled mods that ask for the boot phase) needs it; skipped without running anything otherwise. Its lines are the
 /// task's progress, and the task's Cancel stops the tool. Never an error, never longer than its limit.
+/// The start's own timeline follows it too (kiln_manage::start_progress, when Play began one: `launch_begin`): while the
+/// tool checks, the time after the cook is not a stalled start; once it builds a snapshot, the start shows its
+/// `boot-snapshot` step with the tool's lines, ended when the tool ends. A snapshot no mod needs, or one found current,
+/// shows no step.
 fn boot_snapshot_step(g: &kiln_manage::game::GameInstall, mods: &[String], locate: &Locate,
                       p: &std::cell::RefCell<&mut dyn kiln_manage::task::Progress>) -> kiln_manage::boot_snapshot::BootSnapshot {
     use kiln_manage::boot_snapshot as bs;
+    use super::launch::{now_ms, track};
     let s = bs::make_if_needed(mods, || {
+        track(&g.id, |t| t.boot_snapshot_check());
         let tools = kiln_manage::cooktools::locate(locate).map_err(|e| e.message);
-        bs::make_with(tools, &g.path, false, Some(bs::LAUNCHER_LIMIT), &mut |l| {
+        let s = bs::make_with(tools, &g.path, false, Some(bs::LAUNCHER_LIMIT), &mut |l| {
+            track(&g.id, |t| t.boot_snapshot_line(now_ms(), l));
             p.borrow_mut().report(None, &format!("Game data for OnBoot mods ({}, once per game build): {l}", bs::SIZE_TEXT));
-        }, &|| p.borrow().canceled())
+        }, &|| p.borrow().canceled());
+        track(&g.id, |t| t.boot_snapshot_done(now_ms()));
+        s
     });
     p.borrow_mut().report(Some(1.0), &s.summary());
     s

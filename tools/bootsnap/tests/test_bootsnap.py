@@ -8,6 +8,7 @@ gamedata_walk.cpp node_json / leaf_json / leaf_of, depth 12), not produced by th
 """
 import hashlib
 import json
+import re
 import os
 import shutil
 import signal
@@ -935,6 +936,20 @@ class CliTests(unittest.TestCase):
         self.assertEqual(values[1]["value"], {"id": 0x8efcc472, "cost": 3})
         rc, out, _ = self.run_cli("show", "--game", str(self.game), "item:Nope")
         self.assertEqual((rc, json.loads(out)), (1, {"query": "item:Nope", "found": False}))
+
+    def test_a_build_says_it_begins_and_a_reuse_does_not(self):
+        # the launcher shows its own step of a start from this line (kiln_manage::start_progress::BOOT_SNAPSHOT_MAKING)
+        rc, _, err = self.run_cli("make", "--game", str(self.game), "--json")
+        self.assertEqual(rc, 0)
+        lines = err.splitlines()
+        build = [i for i, l in enumerate(lines) if l.startswith(f"boot-snapshot: {cli.MAKING}")]
+        self.assertEqual(len(build), 1, err)
+        # after the check, before any count of a kind (the synthetic game is too small to print counts)
+        self.assertEqual(lines[build[0] - 1], "boot-snapshot: checking the game data snapshot")
+        self.assertFalse([l for l in lines[:build[0]] if re.fullmatch(r"boot-snapshot: [a-z]+ \d+/\d+", l)], err)
+        rc, out, err = self.run_cli("make", "--game", str(self.game), "--json")
+        self.assertEqual((rc, json.loads(out)["status"]), (0, "reused"))
+        self.assertNotIn(cli.MAKING, err)
 
     def test_if_needed_skips_without_a_boot_mod_and_makes_with_one(self):
         mods = self.game / "kiln" / "mods"
