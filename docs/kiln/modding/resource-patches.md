@@ -10,6 +10,8 @@ starts, and writes it at the moment the game's resource service is up and nothin
 Needs a mod with `"boot": true` in `kiln.mod.json` (see [OnBoot](onboot.md)) and the capability
 `mods.boot.resource_patches`.
 
+A start in which the game's resource service was already up before the boot generation refuses mods with resource patches (an optional mod is left out; a required mod stops the start).
+
 ## In a blocks file
 
 ```json

@@ -19,6 +19,7 @@
 //     fault after the publication: kiln.boot activation_fault (recorded; a required mod stops the start).
 // Nothing here waits, and no lock is held across a call into kiln.boot or kiln.assets.
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -56,6 +57,12 @@ struct BootPlan {
     std::vector<ResPatch> resources;
     size_t sets = 0;
 };
+
+// Process-lifetime latch: readiness is one-shot; a later write would miss the game's first read.
+std::atomic<bool> g_ready_before_publication{false};
+constexpr char kMissedDeadline[] =
+    "the game's resource service was already up before the boot generation was published; "
+    "the patch cannot be written before the game reads its resources in this start";
 
 bool g_bound = false;       // the collector is registered (a boot profile)
 bool g_ready_asked = false; // when_resources_ready is registered
@@ -239,6 +246,9 @@ std::vector<kiln::boot::Doc> file_docs(const kiln::boot::Input* boot) {
 void KILN_CALL destroy_plan(const void* p) { delete static_cast<const BootPlan*>(p); }
 
 KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnBootPreparedV1* out, KilnBootIssueV1* issue) {
+    // The game's entry point is held until publication (boot_service.cpp b_commit / after_clr).
+    // Read once for this prepare; apply may also run on the resource-initialization thread.
+    const bool missed_deadline = g_ready_before_publication.load();
     const kiln::boot::Input input = kiln::boot::parse(in);
     if (!input.ok) return kiln::boot::refuse(out, issue, "", "", "", "kiln.content: the boot envelope is not JSON");
     auto plan = std::make_unique<BootPlan>();
@@ -283,6 +293,11 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
         if (!doc.is_object() || !doc.contains("resource") || !doc["resource"].is_string() || !doc.contains("type") || !doc["type"].is_string() ||
             !doc.contains("set") || !doc["set"].is_object() || doc["set"].empty())
             return refused("", "a resource patch is {\"resource\": \"<GUID>\", \"type\": \"<type name>\", \"set\": {\"<path>\": <value>}}");
+        if (missed_deadline) {
+            row(KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, std::string("resource patch writes were not applied: ") + kMissedDeadline);
+            // kiln.boot drops this optional participant and prepares again, or stops for a required one.
+            return refused("", kMissedDeadline);
+        }
         ResPatch rp;
         rp.guid = doc["resource"].get<std::string>();
         rp.type = doc["type"].get<std::string>();
@@ -329,7 +344,11 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
 // kiln.assets when_resources_ready: the game's resource service is up, nothing has read through it yet.
 void KILN_CALL apply(void*) {
     const auto* plan = static_cast<const BootPlan*>(kiln::boot::published(g_api, "patches"));
-    if (!plan || plan->resources.empty()) return;
+    if (!plan) {
+        g_ready_before_publication.store(true);
+        return;
+    }
+    if (plan->resources.empty()) return;
     LOGI("boot: the game's resource service is up: resource patches of %zu resource(s) are written into copies of the bytes kiln.assets serves now", plan->resources.size());
     const KilnAssetsApi* A = assets();
     size_t written = 0, failed = 0;
