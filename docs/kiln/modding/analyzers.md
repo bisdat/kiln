@@ -49,8 +49,10 @@ Other KILN codes:
   `OutputItemType="Analyzer"` references.
 - The analyzers read these build properties: `KilnServicesList` and `KilnFeaturesList` (the SDK writes `KilnServices`
   and `KilnFeatures` comma-separated there, because `.editorconfig` cuts values at `;`), `KilnAdvanced`, `KilnSide`,
-  `KilnModId`, `KilnApiVersion`. KILN034 also reads `KilnBoot` when the compiler sees it; Kiln.Sdk does not pass it
-  yet, nor write `"boot"` from a property, so a boot mod says `"boot"` in its own kiln.mod.json.
+  `KilnClients`, `KilnModId`, `KilnApiVersion` and `KilnBoot` (KILN034: `true` or `required` writes `"boot"` into the
+  generated kiln.mod.json). `Sdk/Kiln.Analyzers.targets` passes each of them to the compiler
+  (`CompilerVisibleProperty`); a property it does not pass reads as unset, and a test of Kiln.Analyzers checks that
+  every property a rule reads is passed.
 - They also read the project's own `kiln.mod.json`, which the SDK passes as an AdditionalFile.
 - Projects that do not use Kiln.Sdk get no analyzers and no diagnostics.
 - Turn them off with `<KilnAnalyzers>false</KilnAnalyzers>`.
@@ -618,8 +620,10 @@ names the mod's own file, cue or VFX, needs `mod`. A game VFX by name asks for n
 ## KILN034: OnBoot that never runs, or Blocks.Define in boot code
 **What.** Two mistakes of the boot phase ([manifest.md](manifest.md), `"boot"`):
 - A `Mod` subclass overrides `OnBoot` while the project's `kiln.mod.json` has no `"boot": true` (or `"required"`).
-  Reported at the override. A Kiln.Sdk project without its own kiln.mod.json gets one written without `"boot"`, so it
-  is reported too. A project that says nothing at all (no kiln.mod.json, not built with Kiln.Sdk) is not.
+  Reported at the override. A Kiln.Sdk project without its own kiln.mod.json gets one written from its properties: with
+  `<KilnBoot>true</KilnBoot>` (or `required`) it says `"boot"` and is not reported; without it, it is. A project's own
+  kiln.mod.json wins over `KilnBoot`, as in the manifest task. A project that says nothing at all (no kiln.mod.json,
+  not built with Kiln.Sdk) is not reported.
 - The run-time `Blocks.Define` (any overload) called from boot code. Boot code is the body of an `OnBoot` override or of
   a method, accessor or type marked `[BootThreadOnly]`, with its local functions and the lambdas that run at once
   (LINQ, `List.ForEach`). A lambda handed to Kiln (`Context.Scheduler.Post`), to another thread, or kept by the mod is
@@ -639,8 +643,8 @@ before the boot generation is checked. The mod's `OnBoot` then fails, its boot c
 `"boot": "required"` the start stops.
 
 **Fix.**
-- Add `"boot": true` to kiln.mod.json (`"required"`: a failure of its boot content stops the start), or move the code
-  to `OnLoad`.
+- Add `"boot": true` to kiln.mod.json (`"required"`: a failure of its boot content stops the start), or, in a Kiln.Sdk
+  project that has no kiln.mod.json of its own, `<KilnBoot>true</KilnBoot>`; or move the code to `OnLoad`.
 - Stage the block instead: `BootDefinitions.For(boot).Define("cold", new StatusBlock { ... })`. A block that names it
   uses its `Reference` (or the name).
 

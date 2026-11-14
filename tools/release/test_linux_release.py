@@ -655,5 +655,89 @@ runuser() { echo 'kilnctl 1.0'; return 19; }
         self.assertNotEqual(r.returncode, 0)
 
 
+
+# A stand-in for dotnet in check_template's tests: `new install`, `new kiln-mod -n NAME` (the template's files: a csproj
+# naming Kiln.Sdk/$FAKE_SDK_VERSION, NAMEMod.cs with OnLoad) and `build` (kiln.mod.json with "boot": true when the csproj
+# has <KilnBoot>true</KilnBoot> and the source an OnBoot). FAKE_BOOT_BUILD=fail: a KilnBoot build fails (KILN034);
+# FAKE_BOOT_BUILD=drop: it leaves "boot" out. Every call logs NUGET_PACKAGES.
+FAKE_DOTNET = r"""#!/usr/bin/env python3
+import os, pathlib, sys
+a = sys.argv[1:]
+with open(os.environ["FAKE_LOG"], "a") as log:
+    log.write(" ".join(a[:2]) + " NUGET_PACKAGES=" + os.environ.get("NUGET_PACKAGES", "") + "\n")
+if a[:2] == ["new", "install"]:
+    sys.exit(0)
+if a[:2] == ["new", "kiln-mod"]:
+    name = a[a.index("-n") + 1]
+    d = pathlib.Path(name)
+    d.mkdir()
+    (d / f"{name}.csproj").write_text(f'<Project Sdk="Kiln.Sdk/{os.environ["FAKE_SDK_VERSION"]}">\n  <PropertyGroup>\n'
+                                      f'    <KilnModId>{name.lower()}</KilnModId>\n  </PropertyGroup>\n</Project>\n')
+    (d / f"{name}Mod.cs").write_text("public sealed class M : Mod\n{\n    public override void OnLoad()\n    {\n    }\n}\n")
+    sys.exit(0)
+if a[:1] == ["build"]:
+    proj = next(pathlib.Path(".").glob("*.csproj")).read_text()
+    src = "".join(p.read_text() for p in pathlib.Path(".").glob("*.cs"))
+    boot = "<KilnBoot>true</KilnBoot>" in proj and "override void OnBoot(BootContext boot)" in src
+    mode = os.environ.get("FAKE_BOOT_BUILD", "")
+    if boot and mode == "fail":
+        print("error KILN034: 'M.OnBoot' never runs")
+        sys.exit(1)
+    out = pathlib.Path("bin/Release/net10.0")
+    out.mkdir(parents=True)
+    (out / "kiln.mod.json").write_text('{"id": "m"' + (', "boot": true' if boot and mode != "drop" else "") + "}")
+    sys.exit(0)
+sys.exit("fake dotnet: unexpected " + " ".join(a))
+"""
+
+
+class TemplateCheckTests(unittest.TestCase):
+    """check_template (checks.sh): the packed templates' mod and a KilnBoot mod with an OnBoot build; its package cache stays
+    its own."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix="kiln-template-check-")
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+        (self.dir / "bin").mkdir()
+        fake = self.dir / "bin" / "dotnet"
+        fake.write_text(FAKE_DOTNET)
+        fake.chmod(0o755)
+        (self.dir / "out" / "sdk").mkdir(parents=True)
+
+    def run_check(self, mode=""):
+        env = dict(os.environ, PATH=f"{self.dir / 'bin'}:{os.environ['PATH']}", FAKE_LOG=str(self.dir / "dotnet.log"),
+                   FAKE_SDK_VERSION="9.9.9-test", FAKE_BOOT_BUILD=mode, NUGET_PACKAGES="/caller/packages")
+        script = ('set -euo pipefail; source "$1"; ck=$2; out=$3; sdk_version=9.9.9-test; '
+                  'if check_template; then rc=0; else rc=1; fi; echo "after NUGET_PACKAGES=$NUGET_PACKAGES DOTNET_CLI_HOME=${DOTNET_CLI_HOME:-}"; exit $rc')
+        r = subprocess.run(["bash", "-c", script, "test", str(HERE / "checks.sh"), str(self.dir / "ck"), str(self.dir / "out")],
+                           env=env, capture_output=True, text=True)
+        log = (self.dir / "dotnet.log").read_text() if (self.dir / "dotnet.log").exists() else ""
+        return r, log
+
+    def test_the_boot_mod_is_built_with_KilnBoot_and_an_OnBoot(self):
+        r, log = self.run_check()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("built (KilnBoot): BootCheck/bin/Release/net10.0/kiln.mod.json", r.stdout)
+        proj = (self.dir / "ck" / "template" / "BootCheck" / "BootCheck.csproj").read_text()
+        self.assertIn("<KilnBoot>true</KilnBoot>", proj)
+        self.assertIn("override void OnBoot(BootContext boot)", (self.dir / "ck" / "template" / "BootCheck" / "BootCheckMod.cs").read_text())
+        # every dotnet call used the check's own cache; the caller's shell keeps its own
+        self.assertEqual(log.count("NUGET_PACKAGES="), 5, log)
+        self.assertNotIn("NUGET_PACKAGES=/caller/packages", log)
+        self.assertEqual(log.count(f"NUGET_PACKAGES={self.dir / 'ck' / 'template' / 'packages'}"), 5, log)
+        self.assertIn("after NUGET_PACKAGES=/caller/packages DOTNET_CLI_HOME=\n", r.stdout)
+
+    def test_a_KilnBoot_build_that_fails_fails_the_check_and_leaks_no_cache(self):
+        r, _ = self.run_check("fail")
+        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("the boot mod (KilnBoot, OnBoot) did not build against the packed SDK", r.stdout)
+        self.assertIn("after NUGET_PACKAGES=/caller/packages DOTNET_CLI_HOME=\n", r.stdout)
+
+    def test_a_manifest_without_boot_fails_the_check(self):
+        r, _ = self.run_check("drop")
+        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn('kiln.mod.json of the KilnBoot mod has no "boot": true', r.stdout + r.stderr)
+
 if __name__ == "__main__":
     unittest.main()

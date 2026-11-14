@@ -201,20 +201,54 @@ check_disabled_nexus_tests() {
   (cd "$src" && linux "$src/tools/test-nexus-disabled.sh")
 }
 
-check_template() {
+# A subshell: its package cache and dotnet home never reach the release's own shell, also when a step fails half-way.
+check_template() (
   local d=$ck/template
-  rm -rf "$d" && mkdir -p "$d"
+  rm -rf "$d" && mkdir -p "$d" || return
   # a scratch package cache: the user's ~/.nuget/packages never sees these test packages
   export NUGET_PACKAGES=$d/packages DOTNET_CLI_HOME=$d/home
-  dotnet new install "$out/sdk/Kiln.Templates.$sdk_version.nupkg" --debug:custom-hive "$d/hive"
-  (cd "$d" && dotnet new kiln-mod -n CheckMod --feed "$out/sdk" --debug:custom-hive "$d/hive")
+  dotnet new install "$out/sdk/Kiln.Templates.$sdk_version.nupkg" --debug:custom-hive "$d/hive" || return
+  (cd "$d" && dotnet new kiln-mod -n CheckMod --feed "$out/sdk" --debug:custom-hive "$d/hive") || return
   # the new project names this release's Kiln.Sdk, so it restores this release's packages and no cached older ones
   grep -q "Sdk=\"Kiln.Sdk/$sdk_version\"" "$d/CheckMod/CheckMod.csproj" || { echo "CheckMod.csproj does not name Kiln.Sdk/$sdk_version"; return 1; }
-  (cd "$d/CheckMod" && dotnet build -c Release -nologo -v q)
+  (cd "$d/CheckMod" && dotnet build -c Release -nologo -v q) || return
   local m; m=$(find "$d/CheckMod" -path '*/bin/*' -name kiln.mod.json | head -1)
-  unset NUGET_PACKAGES DOTNET_CLI_HOME
   [[ -n $m ]] || { echo "no kiln.mod.json in the build output"; return 1; }
   echo "built: ${m#"$d"/}"; cat "$m"
+  check_template_boot "$d"
+)
+
+# The boot case: a template mod with <KilnBoot>true</KilnBoot> and an OnBoot override, no kiln.mod.json of its own. It
+# builds only when the packed analyzers see KilnBoot (else KILN034, an error); its kiln.mod.json says "boot": true.
+check_template_boot() { # template dir (check_template's: its package cache and template hive)
+  local d=$1 p=$1/BootCheck
+  (cd "$d" && dotnet new kiln-mod -n BootCheck --feed "$out/sdk" --debug:custom-hive "$d/hive") || return
+  [[ -f $p/BootCheck.csproj && -f $p/BootCheckMod.cs && ! -e $p/kiln.mod.json ]] \
+    || { echo "dotnet new kiln-mod -n BootCheck: not the expected project (BootCheck.csproj, BootCheckMod.cs, no kiln.mod.json)"; return 1; }
+  python3 - "$p" <<'PY' || return
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+proj = p / "BootCheck.csproj"
+text = proj.read_text(encoding="utf-8")
+if text.count("</PropertyGroup>") < 1:
+    sys.exit("BootCheck.csproj has no PropertyGroup")
+text = text.replace("</PropertyGroup>", "  <KilnBoot>true</KilnBoot>\n  </PropertyGroup>", 1)
+proj.write_text(text, encoding="utf-8")
+mod = p / "BootCheckMod.cs"
+text = mod.read_text(encoding="utf-8")
+anchor = "    public override void OnLoad()"
+if anchor not in text:
+    sys.exit("BootCheckMod.cs has no OnLoad override to put OnBoot before")
+text = text.replace(anchor, "    public override void OnBoot(BootContext boot)\n    {\n"
+                    "        _ = boot.ModId;\n    }\n\n" + anchor, 1)
+mod.write_text(text, encoding="utf-8")
+PY
+  (cd "$p" && dotnet build -c Release -nologo -v q) || { echo "the boot mod (KilnBoot, OnBoot) did not build against the packed SDK"; return 1; }
+  local m; m=$(find "$p" -path '*/bin/*' -name kiln.mod.json | head -1)
+  [[ -n $m ]] || { echo "no kiln.mod.json in the boot mod's build output"; return 1; }
+  python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); sys.exit(0 if m.get("boot") is True else "kiln.mod.json of the KilnBoot mod has no \"boot\": true")' "$m" \
+    || { cat "$m"; return 1; }
+  echo "built (KilnBoot): ${m#"$d"/}"
 }
 
 check_vsix() {

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 // The kit's boot phase (Fakes/Boot/): a boot mod's OnBoot as a start runs it, then the mod loads with its boot content committed.
+using System.Text.Json.Nodes;
 using Xunit;
 
 namespace Kiln.TestKit.Tests;
@@ -59,5 +60,20 @@ public sealed class BootFakeTests
         run = kiln.BootPhase.Run(Folder, commit: false);
         Assert.Contains(run.Issues, i => i.Code == "BootCapOff");
         Assert.Empty(run.Staged);  // its OnBoot did not run
+    }
+
+    [Fact]
+    public void AKilnSdkModOptsInWithKilnBootAlone()
+    {
+        // tk-boot-sdk has no kiln.mod.json of its own: <KilnBoot>true</KilnBoot> wrote "boot", and its build passed KILN034
+        var folder = TestMods.Folder("TkBootSdk");
+        var manifest = JsonNode.Parse(File.ReadAllText(Path.Combine(folder, "kiln.mod.json")))!.AsObject();
+        Assert.Equal("tk-boot-sdk", (string?)manifest["id"]);
+        Assert.True((bool?)manifest["boot"]);
+        using var kiln = new KilnHarness();
+        var run = kiln.BootPhase.Run(folder);
+        Assert.True(run.Ok, run.Reason);
+        Assert.Equal(BootModState.Committed, run.State);
+        Assert.Equal(["statuses/tk-sdk-cold"], run.Definitions);
     }
 }

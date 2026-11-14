@@ -26,8 +26,9 @@ Add `boot` to `kiln.mod.json` ([manifest.md](manifest.md#boot-content-boot-since
 - `"required"`: the same, but a failure stops the start (below). Use it when a server without your content would be
   worse than no server: a world that already holds your items, for example.
 
-A Kiln.Sdk project generates its manifest. To add `boot`, keep your own `kiln.mod.json` beside the project file: the
-build checks it and ships it.
+A Kiln.Sdk project generates its manifest: add `<KilnBoot>true</KilnBoot>` (or `required`) to the project file and the
+generated `kiln.mod.json` says `"boot"` ([mdk.md](mdk.md)). A project that keeps its own `kiln.mod.json` beside the
+project file says `"boot"` there; the build checks it and ships it, and the file wins over `KilnBoot`.
 
 ## What OnBoot is
 ```csharp
@@ -150,14 +151,8 @@ key and the JSON Kiln lowers), what lowered (`run.Definitions`), and why it fail
 same way and fails the build when it fails ([baked.md](baked.md)).
 
 ## A complete example
-`kiln.mod.json` beside the project, with `"boot": true`:
-
-```jsonc
-{ "id": "frost-tokens", "name": "Frost Tokens", "version": "1.0.0", "apiVersion": "0.2",
-  "side": "both", "clients": "kiln", "entryAssembly": "FrostTokens.dll", "boot": true }
-```
-
-`FrostTokens.csproj` with `<KilnServices>Blocks</KilnServices>`, and:
+`FrostTokens.csproj` with `<KilnServices>Blocks</KilnServices>` and `<KilnBoot>true</KilnBoot>` (or, instead of
+`KilnBoot`, a `kiln.mod.json` of your own beside the project with `"boot": true`), and:
 
 ```csharp
 using Kiln;
