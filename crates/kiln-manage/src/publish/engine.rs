@@ -81,7 +81,7 @@ pub struct Engine<'a> {
 }
 
 /// The exclusive lock of a transaction: one apply or resume at a time. Released when dropped.
-pub struct TxLock(#[allow(dead_code)] std::fs::File);
+pub struct TxLock(#[allow(dead_code)] crate::util::LockedFile);
 
 /// How often [`lock`] tries a lock that is held, and how long it waits between tries (about a second in all).
 const LOCK_TRIES: u32 = 20;
@@ -103,7 +103,7 @@ fn lock_waiting(dir: &std::path::Path, tries: u32, pause: std::time::Duration) -
     let f = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&path).map_err(crate::util::io_at(&path, "locking"))?;
     for attempt in 1..=tries.max(1) {
         match f.try_lock() {
-            Ok(()) => return Ok(TxLock(f)),
+            Ok(()) => return Ok(TxLock(crate::util::LockedFile(f))),
             Err(std::fs::TryLockError::WouldBlock) if attempt < tries => std::thread::sleep(pause),
             Err(_) => break,
         }

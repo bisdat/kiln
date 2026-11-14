@@ -36,7 +36,7 @@ impl TokenStore {
         Self { file: root.join("oauth.json"), lock: root.join("oauth.lock"), keyring }
     }
     pub fn file_path(&self) -> &Path { &self.file }
-    pub(crate) fn lock(&self) -> Result<std::fs::File> {
+    pub(crate) fn lock(&self) -> Result<crate::util::LockedFile> {
         super::require_enabled()?;
         std::fs::create_dir_all(self.lock.parent().ok_or_else(|| Error::invalid("No OAuth lock folder."))?)?;
         let mut options = std::fs::OpenOptions::new();
@@ -50,7 +50,7 @@ impl TokenStore {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         loop {
             match file.try_lock() {
-                Ok(()) => return Ok(file),
+                Ok(()) => return Ok(crate::util::LockedFile(file)),
                 Err(std::fs::TryLockError::WouldBlock) if std::time::Instant::now() < deadline => std::thread::sleep(std::time::Duration::from_millis(25)),
                 Err(std::fs::TryLockError::WouldBlock) => return Err(Error::new(ErrorCode::Busy, "Another launcher is updating Nexus Mods authorization. Try again.")),
                 Err(std::fs::TryLockError::Error(e)) => return Err(crate::util::io_at(&self.lock, "locking")(e)),

@@ -283,24 +283,33 @@ fn one_engine_at_a_time_and_a_foreign_journal_is_refused() {
     assert_eq!(run(&f, &p, &no_faults, &mut Vec::new()).unwrap_err().code, ErrorCode::HashMismatch);
 }
 
-/// The case the wait is for: a copy of the lock's descriptor (as a child forked by another thread holds until it
-/// execs) keeps the lock a little after its owner let go. The next run waits for it instead of answering Busy, and
-/// with no wait it would have been Busy.
+/// A copy of the lock's descriptor (as a child forked by another thread holds until it execs) does not keep the lock
+/// after its owner let go: dropping the lock unlocks it for every copy (`util::LockedFile`).
 #[test]
-fn a_lock_still_held_by_an_inherited_descriptor_is_waited_for() {
+fn a_lock_dropped_while_an_inherited_descriptor_is_open_is_free() {
     let f = fx();
     let held = lock(&f.loaded.dir).unwrap();
-    let inherited = held.0.try_clone().unwrap(); // the same open file, as after fork
+    let inherited = held.0.0.try_clone().unwrap(); // the same open file, as after fork
     drop(held);
-    assert_eq!(lock_waiting(&f.loaded.dir, 1, std::time::Duration::ZERO).err().map(|e| e.code), Some(ErrorCode::Busy), "the copy did not hold the lock");
-    let child = std::thread::spawn(move || {
+    assert!(lock_waiting(&f.loaded.dir, 1, std::time::Duration::ZERO).is_ok(), "the copy still held the lock");
+    drop(inherited);
+}
+
+/// Another holder that lets go a little later is waited for instead of answering Busy; with no wait it would have been
+/// Busy.
+#[test]
+fn a_lock_held_a_little_longer_is_waited_for() {
+    let f = fx();
+    let other = lock(&f.loaded.dir).unwrap();
+    assert_eq!(lock_waiting(&f.loaded.dir, 1, std::time::Duration::ZERO).err().map(|e| e.code), Some(ErrorCode::Busy), "the lock was not held");
+    let holder = std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(150));
-        drop(inherited); // the child execs: its close-on-exec copy goes away
+        drop(other);
     });
     let p = FakeProvider::new();
     let o = run(&f, &p, &no_faults, &mut Vec::new()).unwrap();
     assert_eq!(o.state, OutcomeState::DraftReady);
-    child.join().unwrap();
+    holder.join().unwrap();
 }
 
 #[test]

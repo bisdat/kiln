@@ -261,6 +261,66 @@ fn the_lock_is_shared_by_launchers_and_exclusive_for_a_move() {
     assert!(!root.join(df::JOURNAL).exists());
 }
 
+/// A program another thread starts holds a copy of every open file of this process from its fork until its exec, and on
+/// Unix a lock belongs to the open file: closing alone would leave the move's locks held for that moment, and the next
+/// move would be refused as if another launcher ran (the `locked` refusal the parallel tests hit now and then). Here a
+/// child is forked while the move holds its locks and kept before its exec until the move is over: every lock the move
+/// took is free again at once.
+#[test]
+#[cfg(unix)] // fork and exec
+fn a_finished_moves_locks_are_free_while_a_program_is_starting() {
+    use std::io::Read;
+    use std::os::fd::AsRawFd;
+    use std::os::unix::process::CommandExt;
+    /// At "switching to the new place" (every lock held): a child forked on another thread, held before its exec until
+    /// `release` closes.
+    struct ForkAtSwitch {
+        release: Option<std::io::PipeWriter>,
+        child: Option<std::thread::JoinHandle<std::io::Result<std::process::ExitStatus>>>,
+    }
+    impl Progress for ForkAtSwitch {
+        fn report(&mut self, _: Option<f32>, m: &str) {
+            if m != "switching to the new place" || self.child.is_some() {
+                return;
+            }
+            let (hold_r, hold_w) = std::io::pipe().unwrap();
+            let (mut ready_r, ready_w) = std::io::pipe().unwrap();
+            let (hr, hw, rw) = (hold_r.as_raw_fd(), hold_w.as_raw_fd(), ready_w.as_raw_fd());
+            let mut cmd = std::process::Command::new("true");
+            // SAFETY: only async-signal-safe calls (close, write, read) between fork and exec
+            unsafe {
+                cmd.pre_exec(move || {
+                    libc::close(hw);
+                    libc::write(rw, b"f".as_ptr().cast(), 1);
+                    let mut b = 0u8;
+                    libc::read(hr, (&raw mut b).cast(), 1);
+                    Ok(())
+                });
+            }
+            self.child = Some(std::thread::spawn(move || {
+                let _keep = (hold_r, ready_w);
+                cmd.status()
+            }));
+            let mut b = [0u8; 1];
+            ready_r.read_exact(&mut b).unwrap();
+            self.release = Some(hold_w);
+        }
+    }
+    let fx = Fixture::build("lock-fork");
+    let to = fx.base.join("moved");
+    let mut p = ForkAtSwitch { release: None, child: None };
+    let r = dfm::move_to(&located(&fx.env), &fx.env, &to, &linking(), None, &MoveOptions::default(), &mut p);
+    let free = (
+        DataLock::exclusive(&fx.dirs.root).unwrap().is_some(),
+        DataLock::exclusive(&to).unwrap().is_some(),
+        [&fx.dirs.root, &to].iter().filter_map(|d| std::fs::OpenOptions::new().read(true).write(true).open(d.join("quick.lock")).ok()).all(|q| q.try_lock().is_ok()),
+    );
+    drop(p.release.take().expect("the child was forked during the move"));
+    assert!(p.child.take().unwrap().join().unwrap().unwrap().success());
+    r.unwrap();
+    assert_eq!(free, (true, true, true), "the old folder's lock, the new folder's lock, the quick flow's: free while the child had not run yet");
+}
+
 // ------------------------------------------------------------------------------------------------ moves
 
 /// A Progress that cancels once the switch is under way (the move's own removal of the old copy is then interrupted),
@@ -1656,7 +1716,7 @@ fn crashed_after_copy(tag: &str, facts: &Facts) -> (Fixture, BTreeMap<String, St
     let before = tree(&fx.dirs.root);
     let to = fx.base.join("target");
     let e = mv(&fx, &to, facts, &inject(Inject::StopAfter(Step::Copy))).unwrap_err();
-    assert_eq!(e.code, ErrorCode::Internal);
+    assert_eq!(e.code, ErrorCode::Internal, "{e:?}");
     let Pending::Uncommitted { journal } = dfm::pending(&fx.env).unwrap() else { panic!("{:?}", dfm::pending(&fx.env)) };
     assert!(journal.entries.iter().any(|e| e.name == "backups"), "{:?}", journal.entries);
     assert!(to.join(df::MOVE_MARKER).is_file());
