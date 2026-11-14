@@ -1,6 +1,6 @@
 //! A small backtracking matcher for the ECMA-262 `pattern`s in schema/*.schema.json (JSON Schema patterns are
 //! unanchored searches). It covers what Kiln's schemas use: classes, \d \w \s and their negations, groups
-//! (capturing, `(?:`, lookahead `(?=` / `(?!`), alternation, `* + ? {n} {n,} {n,m}` (lazy forms parse as greedy:
+//! (capturing, `(?:`, lookahead `(?=` / `(?!`, lookbehind `(?<=` / `(?<!` of any length), alternation, `* + ? {n} {n,} {n,m}` (lazy forms parse as greedy:
 //! the same strings match), `^ $ .`. Unsupported syntax is an error, so a schema cannot silently mean something else.
 
 #[derive(Debug, Clone)]
@@ -11,6 +11,8 @@ enum Re {
     Start,
     End,
     Look(Box<Re>, bool),
+    /// `(?<=x)` / `(?<!x)` (true = negative): some `x` ends exactly here.
+    Behind(Box<Re>, bool),
     Concat(Vec<Re>),
     Alt(Vec<Re>),
     Repeat(Box<Re>, u32, Option<u32>),
@@ -106,7 +108,7 @@ impl P<'_> {
         if self.peek() == Some('?') {
             self.i += 1; // lazy: same set of matching strings
         }
-        if matches!(atom, Re::Start | Re::End | Re::Look(..)) {
+        if matches!(atom, Re::Start | Re::End | Re::Look(..) | Re::Behind(..)) {
             return Err("quantifier after an assertion".into());
         }
         Ok(Re::Repeat(Box::new(atom), min, max))
@@ -127,16 +129,23 @@ impl P<'_> {
             '.' => Re::Any,
             '(' => {
                 let mut look = None;
+                let mut behind = false;
                 if self.peek() == Some('?') {
-                    match self.c.get(self.i + 1) {
-                        Some(':') => self.i += 2,
-                        Some('=') => {
+                    match (self.c.get(self.i + 1), self.c.get(self.i + 2)) {
+                        (Some(':'), _) => self.i += 2,
+                        (Some('='), _) => {
                             self.i += 2;
                             look = Some(false)
                         }
-                        Some('!') => {
+                        (Some('!'), _) => {
                             self.i += 2;
                             look = Some(true)
+                        }
+                        // `(?<=` / `(?<!`; `(?<name>` (a named group) stays unsupported
+                        (Some('<'), Some(c @ ('=' | '!'))) => {
+                            look = Some(*c == '!');
+                            behind = true;
+                            self.i += 3;
                         }
                         _ => return Err("unsupported group".into()),
                     }
@@ -147,6 +156,7 @@ impl P<'_> {
                 }
                 self.i += 1;
                 match look {
+                    Some(neg) if behind => Re::Behind(Box::new(inner), neg),
                     Some(neg) => Re::Look(Box::new(inner), neg),
                     None => inner,
                 }
@@ -268,6 +278,12 @@ fn mat(re: &Re, s: &[char], i: usize, k: &mut dyn FnMut(usize) -> bool) -> bool 
             let found = mat(inner, s, i, &mut |_| true);
             found != *neg && k(i)
         }
+        // ECMA-262 matches a lookbehind backwards; for whether it holds, that is: some start j <= i where the inner
+        // pattern matches exactly s[j..i]
+        Re::Behind(inner, neg) => {
+            let found = (0..=i).rev().any(|j| mat(inner, s, j, &mut |end| end == i));
+            found != *neg && k(i)
+        }
         Re::Concat(items) => seq(items, s, i, k),
         Re::Alt(alts) => alts.iter().any(|a| mat(a, s, i, k)),
         Re::Repeat(inner, min, max) => rep(inner, *min, *max, 0, s, i, k),
@@ -329,6 +345,55 @@ mod tests {
         assert!(!m(file, "a\\..\\b"));
         assert!(m("^(?!kiln\\.)", "mymod.Ping"));
         assert!(!m("^(?!kiln\\.)", "kiln.Log"));
+    }
+
+    #[test]
+    fn lookbehind() {
+        // kiln-publish.schema.json /github/tag: no '/' at the end
+        let tag = "^(?!/)(?!.*//)(?!.*\\.\\.)[A-Za-z0-9._/-]{0,64}\\{version\\}[A-Za-z0-9._/-]{0,64}(?<!/)$";
+        assert!(m(tag, "v{version}"));
+        assert!(m(tag, "mods/hello/v{version}"));
+        assert!(!m(tag, "v{version}/"));
+        assert!(!m(tag, "/v{version}"));
+        assert!(!m(tag, "a//v{version}"));
+        assert!(m("(?<=a)b", "ab") && !m("(?<=a)b", "cb"));
+        assert!(m("(?<!a)b", "cb") && !m("(?<!a)b", "ab"));
+        assert!(m("^x(?<=^x)$", "x"));
+        // a lookbehind of any length, with alternatives
+        assert!(m("(?<=foo|ba)r", "bar") && m("(?<=foo|ba)r", "foor") && !m("(?<=foo|ba)r", "xr"));
+        assert!(m("(?<![0-9]{2})z", "1z") && !m("(?<![0-9]{2})z", "12z"));
+        assert!(Regex::new("(?<=a)+").is_err());
+    }
+
+    /// Every `pattern` (and `patternProperties` key) of schema/*.schema.json is one kiln lint can run: an unsupported
+    /// one would make lint refuse every value of that field (KL109) while ajv and the launcher accept it.
+    #[test]
+    fn every_schema_pattern_is_supported() {
+        fn walk(v: &serde_json::Value, out: &mut Vec<String>) {
+            match v {
+                serde_json::Value::Object(o) => {
+                    for (k, x) in o {
+                        if k == "pattern" && let Some(p) = x.as_str() { out.push(p.to_string()); }
+                        if k == "patternProperties" && let Some(pp) = x.as_object() { out.extend(pp.keys().cloned()); }
+                        walk(x, out);
+                    }
+                }
+                serde_json::Value::Array(a) => a.iter().for_each(|x| walk(x, out)),
+                _ => {}
+            }
+        }
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schema");
+        let mut patterns = Vec::new();
+        for e in std::fs::read_dir(&dir).unwrap().flatten() {
+            let p = e.path();
+            if p.to_string_lossy().ends_with(".schema.json") {
+                let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+                walk(&v, &mut patterns);
+            }
+        }
+        assert!(patterns.len() > 50, "{}", patterns.len());
+        let bad: Vec<String> = patterns.iter().filter_map(|p| Regex::new(p).err().map(|e| format!("{p}: {e}"))).collect();
+        assert!(bad.is_empty(), "{}", bad.join("\n"));
     }
 
     #[test]
