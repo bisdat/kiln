@@ -220,6 +220,7 @@ internal static class BlockRuntime
         var clones = Host.GameDataDefinitions().Where(d => d.Name.StartsWith(prefix, StringComparison.Ordinal)).ToList();
         if (clones.Any(d => d.State is "pending" or "waiting")) return false;
         mod.RulesDirty = false;
+        var pass = ++mod.Passes;
         Host.CheckBalancing();
         void Problem(string text)
         {
@@ -322,7 +323,7 @@ internal static class BlockRuntime
                 foreach (var w in d.Warnings) Warn($"{d.Name}: {w}");
             }
             if (plan == null) WarnRenames(mod, prefix);
-            if (Interlocked.Exchange(ref mod.Settle, null) is { } settle)
+            if (pass >= mod.SettleFrom && Interlocked.Exchange(ref mod.Settle, null) is { } settle)
             {
                 List<string> errors;
                 lock (mod.Errors) errors = [.. mod.Errors];

@@ -2,7 +2,9 @@
 // Items.SetToolWearPerDebit / ToolWearStatus offline, over a made-up kiln.toolwear table that keeps the owners' layers as
 // the native one does (native/services/items/tests/toolwear_table_test.cpp tests that one): the one error rule, one rule
 // event per change of what is in effect and none for a replay, whose rule a dispose may take, and durability events
-// built from the captured item entity and stamp. What the game does is the lab test mods/tests/toolwear-test.
+// built from the captured item entity and stamp. The fake keeps the rule-change history (rule_changes) as the native
+// table does, so a native plugin's changes are raised by the drain in order with the managed ones; an older table
+// without it still gets the managed events. What the game does is the lab test mods/tests/toolwear-test.
 using Kiln;
 using Xunit;
 
@@ -15,11 +17,12 @@ public sealed unsafe class ToolWearTests : IDisposable
     private sealed class Backend : IKilnBackend
     {
         public bool Tick = true;
+        public readonly List<string> Logged = new();
         public string Version => "test";
         public bool IsTickThread => Tick;
         public bool HasFeature(string name) => false;
         public nint Service(string name, uint minVersion) => 0;
-        public void Log(ulong owner, LogLevel level, string text) { }
+        public void Log(ulong owner, LogLevel level, string text) => Logged.Add(text);
     }
 
     private sealed class NoTick : IDisposable
@@ -34,14 +37,54 @@ public sealed unsafe class ToolWearTests : IDisposable
         public ulong Generation, NextHandle = 1;
         public bool World = true, Catalog = true, Off;
         public int Defines, Removes;
+        /// <summary>Keeps the rule-change history (a kiln.toolwear with rule_changes); false: an older table.</summary>
+        public bool Records = true;
+        public int HistoryCap = 1024;
+        public readonly List<ToolWearNative.RuleChange> History = new();
 
         private (ulong Handle, ulong Owner, string Mod, uint Item, uint Cost)? Winner(uint item) =>
             Layers.FindLastIndex(l => l.Item == item) is >= 0 and var i ? Layers[i] : null;
 
-        private void Note((ulong Handle, ulong Owner, string Mod, uint Item, uint Cost)? before, uint item)
+        private void Note((ulong Handle, ulong Owner, string Mod, uint Item, uint Cost)? before, uint item, uint cause)
         {
             var now = Winner(item);
-            if (before?.Handle != now?.Handle || before?.Cost != now?.Cost) Generation++;
+            if (before?.Handle == now?.Handle && before?.Cost == now?.Cost) return;
+            Generation++;
+            var r = new ToolWearNative.RuleChange
+            {
+                Size = (uint)sizeof(ToolWearNative.RuleChange), Item = item, Generation = Generation, Cause = cause,
+                BeforeCost = before is { } b ? (int)b.Cost : -1, AfterCost = now is { } n ? (int)n.Cost : -1,
+                BeforeOwner = before?.Owner ?? 0, AfterOwner = now?.Owner ?? 0, BeforeRule = before?.Handle ?? 0, AfterRule = now?.Handle ?? 0,
+            };
+            Put(r.BeforeModId, 128, before?.Mod ?? "");
+            Put(r.AfterModId, 128, now?.Mod ?? "");
+            History.Add(r);
+            if (History.Count > HistoryCap) History.RemoveAt(0);
+        }
+
+        public bool HasRuleChanges => Records;
+
+        public int RuleChanges(ulong after, Span<ToolWearNative.RuleChange> into, out ulong lost)
+        {
+            lost = 0;
+            var oldest = History.Count > 0 ? History[0].Generation : Generation + 1;
+            if (after + 1 < oldest && after < Generation) lost = oldest - (after + 1);
+            var n = 0;
+            foreach (var r in History)
+                if (r.Generation > after && n < into.Length)
+                    into[n++] = r;
+            return n;
+        }
+
+        /// <summary>A native owner going (kiln.hooks' owner-retiring observer): its layers go, each item revealing the one before.</summary>
+        public void Retire(ulong owner)
+        {
+            foreach (var item in Layers.Where(l => l.Owner == owner).Select(l => l.Item).Distinct().ToList())
+            {
+                var before = Winner(item);
+                Layers.RemoveAll(l => l.Owner == owner && l.Item == item);
+                Note(before, item, ToolWearNative.RuleRetired);
+            }
         }
 
         public int Define(ulong owner, string modId, uint item, uint perDebit, out ulong handle)
@@ -58,7 +101,7 @@ public sealed unsafe class ToolWearTests : IDisposable
             handle = at >= 0 ? Layers[at].Handle : NextHandle++;
             if (at >= 0) Layers.RemoveAt(at);
             Layers.Add((handle, owner, modId, item, perDebit));
-            Note(before, item);
+            Note(before, item, ToolWearNative.RuleDefined);
             return ToolWearNative.Ok;
         }
 
@@ -71,7 +114,7 @@ public sealed unsafe class ToolWearTests : IDisposable
             var item = Layers[at].Item;
             var before = Winner(item);
             Layers.RemoveAt(at);
-            Note(before, item);
+            Note(before, item, ToolWearNative.RuleRemoved);
             return ToolWearNative.Ok;
         }
 
@@ -316,6 +359,89 @@ public sealed unsafe class ToolWearTests : IDisposable
         Assert.Equal(88, sizeof(ToolWearNative.Change));
         Assert.Equal(400, sizeof(ToolWearNative.State));
         Assert.Equal(360, (int)System.Runtime.InteropServices.Marshal.OffsetOf<ToolWearNative.State>(nameof(ToolWearNative.State.HookThreads)));
-        Assert.Equal(8 + 4 * 8, sizeof(ToolWearNative.Table));
+        Assert.Equal(8 + 5 * 8, sizeof(ToolWearNative.Table));
+        Assert.Equal(8u + 4 * 8, ToolWearNative.FirstTableSize);
+        Assert.Equal(320, sizeof(ToolWearNative.RuleChange));
+        Assert.Equal(64, (int)System.Runtime.InteropServices.Marshal.OffsetOf<ToolWearNative.RuleChange>(nameof(ToolWearNative.RuleChange.BeforeModId)));
+    }
+
+    // ---- a native plugin's rules (kiln.toolwear's rule_changes, since 0.2.0-dev.28) ----------------------------------------
+
+    private const ulong NativeC = 300, NativeD = 400;
+
+    private static string Show(ToolWearRuleChangedEvent e) => $"{e.Before?.ToString() ?? "-"}@{e.BeforeModId ?? "-"}>{e.After?.ToString() ?? "-"}@{e.AfterModId ?? "-"}#{e.Generation}";
+
+    [Fact]
+    public void A_native_plugins_rule_changes_are_one_event_each_in_order_on_the_next_tick()
+    {
+        Items.ToolWear.WatchRules();
+        Assert.Equal(1, _ticks);                             // the drain runs from the start, with no managed rule
+        // a native owner defines, replaces, is topped by a second one with the same cost, which removes its rule; then the
+        // first owner retires: five changes within one tick, ending where they began (a status read would see nothing)
+        Assert.Equal(ToolWearNative.Ok, _table.Define(NativeC, "native-c", Pickaxe, 5, out var c));
+        Assert.Equal(ToolWearNative.Ok, _table.Define(NativeC, "native-c", Pickaxe, 6, out _));
+        Assert.Equal(ToolWearNative.Ok, _table.Define(NativeD, "native-d", Pickaxe, 6, out var d));
+        Assert.Equal(ToolWearNative.Ok, _table.Remove(NativeD, d));
+        _table.Retire(NativeC);
+        Assert.Null(Items.ToolWearStatus(new ItemId(Pickaxe)).PerDebit);
+        Assert.Empty(RuleEvents);                            // native changes wait for the tick
+        Items.ToolWear.Drain(10);
+        Assert.Equal(["-@->5@native-c#1", "5@native-c>6@native-c#2", "6@native-c>6@native-d#3", "6@native-d>6@native-c#4", "6@native-c>-@-#5"],
+            RuleEvents.Select(Show).ToArray());
+        Assert.All(RuleEvents, e => Assert.Equal(new ItemId(Pickaxe), e.Item));
+        // nothing twice
+        Items.ToolWear.Drain(11);
+        Assert.Equal(5, RuleEvents.Length);
+        Assert.NotEqual(0ul, c);
+    }
+
+    [Fact]
+    public void Managed_and_native_changes_are_raised_in_the_order_they_were_made_and_once()
+    {
+        Set(_a, Pickaxe, 7);                                 // raised before the call returns
+        Assert.Equal(["-@->7@mod-a#1"], RuleEvents.Select(Show).ToArray());
+        _table.Define(NativeC, "native-c", Pickaxe, 4, out _);
+        Assert.Single(RuleEvents);
+        // the mod's next call raises the native change first, then its own
+        Set(_a, Pickaxe, 9);
+        Assert.Equal(["-@->7@mod-a#1", "7@mod-a>4@native-c#2", "4@native-c>9@mod-a#3"], RuleEvents.Select(Show).ToArray());
+        // the native owner retires while it is not in effect: no change; the mod disposes: back to nobody's
+        _table.Retire(NativeC);
+        HostAccess.Current = _a;
+        Set(_a, Pickaxe, 9).Rule!.Dispose();
+        Items.ToolWear.Drain(12);
+        Assert.Equal(["-@->7@mod-a#1", "7@mod-a>4@native-c#2", "4@native-c>9@mod-a#3", "9@mod-a>-@-#4"], RuleEvents.Select(Show).ToArray());
+    }
+
+    [Fact]
+    public void Changes_the_table_no_longer_holds_are_logged_and_the_rest_raised_in_order()
+    {
+        _table.HistoryCap = 4;
+        for (var i = 0; i < 10; i++) _table.Define(NativeC, "native-c", Pickaxe, (uint)(i % 3), out _);
+        Items.ToolWear.Drain(10);
+        Assert.Equal([7ul, 8ul, 9ul, 10ul], RuleEvents.Select(e => e.Generation).ToArray());
+        Assert.Equal(6ul, Items.ToolWear.LostRuleChanges);
+        Assert.Contains(_backend.Logged, l => l.Contains("6 tool wear rule changes", StringComparison.Ordinal));
+        // more than one batch (8) drains whole
+        _table.HistoryCap = 1024;
+        for (var i = 0; i < 20; i++) _table.Define(NativeC, "native-c", Pickaxe, (uint)(i % 2 + 10), out _);
+        Items.ToolWear.Drain(11);
+        Assert.Equal(24, RuleEvents.Length);
+        Assert.Equal(Enumerable.Range(7, 24).Select(i => (ulong)i), RuleEvents.Select(e => e.Generation));
+    }
+
+    [Fact]
+    public void An_older_table_without_rule_changes_still_raises_the_managed_ones()
+    {
+        _table.Records = false;
+        Items.ToolWear.WatchRules();
+        Assert.Equal(0, _ticks);                             // nothing to watch: the drain starts with the first rule, as before
+        Set(_a, Pickaxe, 7);
+        Set(_a, Pickaxe, 7);
+        Set(_b, Pickaxe, 7);
+        HostAccess.Current = _b;
+        Set(_b, Pickaxe, 7).Rule!.Dispose();
+        Assert.Equal(["-@->7@mod-a#1", "7@mod-a>7@mod-b#2", "7@mod-b>7@mod-a#3"], RuleEvents.Select(Show).ToArray());
+        Assert.False(Items.ToolWear.DrainRules(_table));
     }
 }

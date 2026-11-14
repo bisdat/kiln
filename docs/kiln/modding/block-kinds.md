@@ -80,7 +80,11 @@ var camp = Blocks.Define("camp", new LanternBlock { Name = "Camp lantern", Secon
   } }
 ```
 
-Every block of an external kind says `"format": 1`. Both ways give the same plan.
+Every block of an external kind says `"format": 1`. Both ways give the same plan. The rest of the block is read
+strictly into the provider's record type when the block compiles: a member the record does not have, or a value of the
+wrong type, is an error. The descriptor's `SchemaJson` is kept for editors and tools; Kiln does not check a block
+against it. A block's name in the section takes 1 to 64 letters, digits, `.`, `_` and `-`
+(`schema/kiln-blocks.schema.json` says the same).
 
 `Blocks.Define` compiles the block (what is wrong throws `BlockError` there) and returns a handle at once. The handle
 is **provisional** until the plan is applied: its `Guid`, `Id` and `GameName` are final, but `Blocks.Find` gives the
@@ -108,8 +112,18 @@ stay until the mod unloads`; the unload revokes again. Warnings of its definitio
 back before the mod unloads, as for a plan refused while it registered. `BlockApplicationChangedEvent` is posted once per
 change.
 
-What is not covered yet: a content application later in the process (the game reloads its content) replays an applied
-plan's rules, and an error then is only logged; the plan stays `Applied`.
+**A later content generation.** When the game applies its content again (a pack reload, a mod reloading, a new world),
+Kiln lowers every applied plan's frozen products again against the new content, with its own compilers: the provider is
+not asked. A lowering that registers the same keeps its registrations, and the plan's parts at content ready run again;
+one that differs (a program finished with another of the game's values) has its registrations taken back and registered
+again under a new owner of the plan's own. Until that is done the plan answers as before (`Applied`, the old
+`Generation` and `ContentGeneration`); then it is `Applied` with a new `Generation` and the new `ContentGeneration`, and
+`BlockApplicationChangedEvent` is posted. When something fails it is `Refused`, its owner is revoked as for any refused
+plan, and `Blocks.Find` no longer gives it: `RelowerFailed` (a frozen product no longer lowers, for one a block of the
+consumer's data files now has a product's generated name), `ContentReadyFailed` (a program names a status or template the
+new content does not have, a rule the game refused), or `DependencyRefused` (a block it resolved was refused). A check
+of a pass that began before the plan was lowered again, or of a generation a newer one overtook, is discarded. A
+refused plan stays refused: apply it again (or reload the mod) to try once more.
 
 `Blocks.Compile(name, block)` and `Blocks.Apply(plan)` are the two halves of `Define`, for a mod that wants the plan
 (`plan.Products`, `plan.InputHash`) before it is applied. A plan belongs to the mod instance that compiled it: another
@@ -124,6 +138,7 @@ change a block.
 | Products per plan | 1 primary and at most 32 effects |
 | One product | 64 KiB of JSON, nested at most 32 deep |
 | One plan | 4096 objects and lists, 1 MiB of JSON, 16 MiB of generated programs and definitions |
+| Expansion | a named effect is emitted again wherever it is used: at most 4096 effects expanded per plan (each use counts), named effects nested at most 32 deep (the block being lowered is the first), 16 MiB of programs; counted while the effects expand, so an over-large plan is refused before it grows |
 | One consumer mod | 64 MiB of generated programs and definitions |
 | Kinds per process | 128 |
 | Names | block name 1 to 64, product key 1 to 32 characters of letters, digits, `.`, `_`, `-` |

@@ -9,7 +9,7 @@ namespace Kiln.TestKit;
 /// between), never removed by the kit. It sits under
 /// Kiln's services: a service asks it for its native table and gets the fake the kit registered for that name, or 0, so
 /// every line of managed service code runs unchanged and an unfaked service reports itself unavailable by its own code.</summary>
-internal sealed class KitBackend : IKilnBackend
+internal sealed class KitBackend : IKilnBackend, ICapabilityOverrides
 {
     /// <summary><see cref="Game.KilnVersion"/> while no harness runs.</summary>
     public const string IdleVersion = "testkit";
@@ -47,6 +47,10 @@ internal sealed class KitBackend : IKilnBackend
         Capabilities = new OfflineCapabilities();
         foreach (var name in ServiceNames.All)
             Capabilities.Report(CapabilityOwner, name, CapState.Unavailable, CapReason.Offline, NoFakeText, CapabilityOwner);
+        // A row of the kit changed (a test's switch, a fake's row such as a scripted voxel ray): the rows Kiln's services
+        // compose from it are decided again now, so a raw Kiln.Capabilities read follows at once, not at the services'
+        // refresh 25 steps later.
+        Capabilities.Changed += static (_, _) => ServiceCapRows.RefreshStarted();
     }
 
     /// <summary>The reason text of a Kiln service the kit does not fake.</summary>
@@ -69,6 +73,21 @@ internal sealed class KitBackend : IKilnBackend
         var plus = v.IndexOf('+');
         return plus >= 0 ? v[..plus] : v;
     }
+
+    // ---- ICapabilityOverrides: a test's switch stands over Kiln's managed rows (Kiln.Capabilities) ----
+
+    public bool TryGetOverride(string name, out Capability row)
+    {
+        if (!Capabilities.TryGetReport(HarnessCapabilities.TestOwner, name, out var r))
+        {
+            row = default;
+            return false;
+        }
+        row = new Capability(name, (CapabilityState)(int)r.State, (CapabilityReason)(int)r.Reason, r.ReasonText, r.Source) { SessionDependent = r.SessionDependent };
+        return true;
+    }
+
+    public bool HasOverrides => Capabilities.HasReports(HarnessCapabilities.TestOwner);
 
     public KilnHarness? Harness => _harness;
 
