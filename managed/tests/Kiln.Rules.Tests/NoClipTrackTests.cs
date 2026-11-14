@@ -1226,4 +1226,24 @@ public class NoClipTrackTests
         Assert.False(t.Restoring);
         Assert.Empty(w.Moves);
     }
+
+    [Fact]
+    public void BackWhileTheDestinationIsNotLoadedTheMoveIsNotRepeatedAndCollisionWaits()
+    {
+        var (t, w) = Back(Deep);
+        Assert.Equal(NoClipRejoin.Held, t.Rejoined(Left));
+        w.Land();                                    // it arrives where the cells are not loaded yet
+        w.Kind = _ => NoClipSpace.Unknown;
+        for (var i = 0; i < 5; i++)
+        {
+            w.Clock = w.Clock.AddSeconds(2);
+            Assert.False(t.Step().Released);
+        }
+        Assert.True(t.Restoring);                    // no collision on unknown ground
+        Assert.Single(w.Moves);                      // the same move would change nothing
+        Assert.Empty(Ended(t));
+        w.Kind = Rock;                               // loaded: open space there
+        Assert.True(t.Step().Released);
+        Assert.Equal([(NoClipEnd.Left, (WorldPosition?)Left)], Ended(t));
+    }
 }
