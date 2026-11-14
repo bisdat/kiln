@@ -320,6 +320,10 @@ KilnResult vox_write(const KilnBuildWrite* w, KilnBuildResult* result, uint32_t 
     }
     if (transient) {
         if (KilnResult rc = transient_admit(wo, wd, dirty.data()); rc != KILN_OK) return done(rc);
+        // on record BEFORE the commit (and on disk first while a save is under way): a save's serializer that reads the
+        // store after the commit finds the cells journaled. A cell the commit then does not write still holds its old
+        // value and is not put back.
+        transient_note(wo, wd, old.data(), cur.data(), addressed.data(), true);
     }
 
     // commit the changed blocks only (unchanged blocks would turn generated terrain into stored edits)
@@ -343,8 +347,6 @@ KilnResult vox_write(const KilnBuildWrite* w, KilnBuildResult* result, uint32_t 
                     KB_E("voxel write faulted at block %d,%d,%d after %u block(s); voxel writes are off", borg[0],
                          borg[1], borg[2], blocks);
                     r.blocks_written = blocks;
-                    // what did commit is journaled (a cell that did not still holds its old value and is not put back)
-                    if (transient) transient_note(wo, wd, old.data(), cur.data(), addressed.data(), true);
                     return done(KILN_ERR_INTERNAL);
                 }
                 ++blocks;
@@ -352,8 +354,8 @@ KilnResult vox_write(const KilnBuildWrite* w, KilnBuildResult* result, uint32_t 
     r.milliseconds = now_ms() - t0;
     r.blocks_written = blocks;
     r.flags |= KILN_BUILD_R_CHANGED;
-    transient_note(wo, wd, old.data(), cur.data(), addressed.data(), transient);
     if (!transient) {
+        transient_note(wo, wd, old.data(), cur.data(), addressed.data(), false);  // kept now: out of the journal
         regions_keep(wo, wd);
         r.flags |= KILN_BUILD_R_KEPT;
     }
