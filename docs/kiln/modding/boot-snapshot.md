@@ -9,7 +9,7 @@ lies, what it costs, and what a mod sees when it is not there.
 
 | Who | When | What you see |
 |---|---|---|
-| The Kiln launcher | at Play (and Launch in a server's modpack offer), right after the cook, and before a single start with another profile ("play once", which cooks nothing), when an enabled Kiln mod of the start has `"boot": true` or `"required"` in its kiln.mod.json | a progress line ("Game data for OnBoot mods (about 200 MB, once per game build): …"); a notice in one line only when something went wrong. Without such a mod: "no mod needs the boot snapshot", and nothing runs |
+| The Kiln launcher | at Play (and Launch in a server's modpack offer), right after the cook, and before a single start with another profile ("play once", which cooks nothing), when an enabled Kiln mod of the start has `"boot": true` or `"required"` in its kiln.mod.json | a progress line ("Game data for OnBoot mods (about 200 MB, once per game build): …"); while it builds one, the start's own bar shows the step "Making the game data for OnBoot mods (once per game update)" with the tool's line (none when the snapshot is there); a notice in one line only when something went wrong. Without such a mod: "no mod needs the boot snapshot", and nothing runs |
 | `kiln boot-snapshot --game <dir> [--force] [--json]` | by hand, whatever the mods say: a server you start yourself, or to make it again | progress on stderr, then one line (or the JSON result) |
 | `tools/deploy-server.sh` | at each deploy into a server folder, when an enabled Kiln mod in its profile or allowed drop-in folders has `"boot": true` or `"required"` (`KILN_NO_BOOT_SNAPSHOT=1` skips the step) | the tool's lines; "no mod needs the boot snapshot" without such a mod; a warning when it was not made |
 
