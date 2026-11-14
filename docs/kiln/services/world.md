@@ -179,7 +179,12 @@ Events.On<EntityScaleChangedEvent>(e => Log.Info(e.ToString()));
   and what a vanilla player sees, is check `13-world.transform-scale` of the guided game test; until it has run the docs
   claim the tracked write and its readback only. `world.transform_scale` stays held on both sides until that check
   confirms what a player sees; the client-pass profile's `"preview": true` opens it for testing.
-- **The place of the scale** is read from the game's type table when Kiln.World starts (its first use): `transform`, then
+- **When the row is decided.** Kiln.World starts right before the mods load, so a mod's `OnLoad` reads
+  `world.transform_scale` (and `world.tracked_writes`) already decided: available, held by the gate, or off with its
+  reason. While kiln.types is there but the game has not filled its type table yet, the row is `Pending` ("waits for the
+  game's type table") and is decided within 25 steps of the table filling; on a dedicated server the table is filled
+  before the mods load.
+- **The place of the scale** is read from the game's type table when Kiln.World starts: `transform`, then
   `scale`, of one of two shapes (a struct of three float32 at 0, 4, 8, or a static array of three float32), 12 bytes,
   inside the component, 4-aligned. Any other shape turns `world.transform_scale` off with what was found; nothing is
   written at an assumed offset. kiln.types must be running.
