@@ -45,6 +45,9 @@ internal interface INoClipWorld
 /// collision is off again.</param>
 /// <param name="Before">Where the character was at the step before this one, with NoClip on: what a <paramref name="Trip"/>
 /// is spent against (a hold that ends in the same step has forgotten it by the time the runtime asks).</param>
+/// <summary>What <see cref="NoClipTrack.Rejoined"/> found.</summary>
+internal enum NoClipRejoin { Waiting, Free, Held }
+
 internal readonly record struct NoClipStepResult(NoClipEnd? Trip = null, bool Released = false, string? Problem = null, bool Held = false,
     WorldPosition? Before = null);
 
@@ -268,6 +271,29 @@ internal sealed class NoClipTrack(INoClipWorld world)
         return default;
     }
 
+    /// <summary>The player left (or the world closed) while NoClip was on, and is back: <paramref name="lastFree"/> is where
+    /// they last were in open space then (kept in the world's data, <see cref="NoClipReturns"/>). Call it before anything
+    /// else of this tracker, with NoClip off, as soon as the character is in the world. Waiting: the cells at the
+    /// character are not known yet (not loaded), ask again. Free: its waist and head are in open space; nothing is done
+    /// (standing on a slope is not being inside something). Held: it is inside matter; collision waits, the character
+    /// is moved to <paramref name="lastFree"/> (when Kiln may move it there), and the hold ends as a switch-off's does,
+    /// reported with <see cref="NoClipEnd.Left"/>.</summary>
+    public NoClipRejoin Rejoined(WorldPosition? lastFree)
+    {
+        if (On || Restoring) return NoClipRejoin.Free;  // NoClip is on again, or a hold already runs: nothing to restore
+        if (world.Position is not { } at) return NoClipRejoin.Waiting;
+        var torso = world.Torso(at);
+        if (torso == NoClipSpace.Unknown) return NoClipRejoin.Waiting;
+        if (torso == NoClipSpace.Free) return NoClipRejoin.Free;
+        if (_move is null)
+        {
+            _teleports = world.Teleports;  // a new session: the counter starts here
+            _told = false;
+        }
+        Hold(NoClipEnd.Left, lastFree is { } free && world.InWorld(free) ? free : null);
+        return NoClipRejoin.Held;
+    }
+
     /// <summary>The next "NoClip ended" to report, oldest first; false when there is none.</summary>
     public bool TakeEnded(out NoClipEnd reason, out WorldPosition? restoredTo)
     {
@@ -348,9 +374,9 @@ internal sealed class NoClipTrack(INoClipWorld world)
         if (_move is not null) return new(Trip: trip);
         // Open space ends the hold: by the move, or by itself (the player flew out). After a teleport, so does any
         // place where the character is not in matter up to the waist or the head (see Leaving).
-        if (Free(at) || (_holdReason == NoClipEnd.Teleport && world.Torso(at) != NoClipSpace.Inside))
+        if (Free(at) || (_holdReason is NoClipEnd.Teleport or NoClipEnd.Left && world.Torso(at) != NoClipSpace.Inside))
         {
-            Release(_holdReason, _holdReason == NoClipEnd.RuleEnded && _landed is { } l && Distance(at, l) <= ArrivedWithin ? l : null);
+            Release(_holdReason, _holdReason is NoClipEnd.RuleEnded or NoClipEnd.Left && _landed is { } l && Distance(at, l) <= ArrivedWithin ? l : null);
             return new(Trip: trip, Released: true);
         }
         // Still inside something: collision stays off. A move that landed where it was sent and left the character
