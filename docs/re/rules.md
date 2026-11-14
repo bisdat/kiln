@@ -506,7 +506,7 @@ it did not". Two questions, both answered from the code of the two exes (2643025
 server PlayerInput `+0x3b0`) in `0x2477d0` (client): for each of the 56 `PlayerInputType`s, the bit is set when its
 input action is held (`0xea2990`) and the type is not "consumed" (`0x473a40`, a mask only `0x473a10` sets: for
 MainhandAction, ContextualAction, SpecialAbility and their taps, CancelAction and Jump, never for Sneak). The sneak
-toggle setting (`isSneakInputToggle` in the user settings, on by default on the owner's machine) does not change that
+toggle setting (`isSneakInputToggle` in the user settings, on in the owner's settings) does not change that
 bit: it is evaluated next to it, in a per-input state machine (`0x479ce0` → `0xe84c50`: for a type configured as a
 toggle, a press asks for the opposite of the actor's current `InSneakMode`, read from `Actor.currentState` `+0xbf8`
 bit 21), and the toggle configuration travels to the server at login (`inputToggleConfig`, docs/re/characters.md 3;
