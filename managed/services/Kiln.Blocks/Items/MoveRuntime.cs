@@ -85,7 +85,9 @@ internal static class MoveRuntime
 
         public void Define(JsonObject definition, ulong owner) => BlocksBridge.DefineClone(Content.Sequences, definition, owner);
 
-        public IReadOnlyList<string> Apply(ulong owner, JsonObject document, string source) => BlocksBridge.ApplyAs(owner, document.ToJsonString(), source).Errors;
+        public IMoveTransaction Begin(ulong owner) => new GameTransaction(BlocksBridge.BeginTransaction(owner));
+
+        public void Revoke(ulong owner) => BlocksBridge.RevertOwner(owner);
 
         public Guid? Link(string clone, int sub, int k)
         {
@@ -100,8 +102,23 @@ internal static class MoveRuntime
         }
 
         public void Later(ModBlocks mod, Action<Action<string>> next) => BlockRuntime.AddReady(mod, next);
-        public void Keep(ModBlocks mod, IReadOnlyList<(string Section, string Entry, JsonObject Rules)> rules) => BlockRuntime.KeepRules(mod, rules);
-        public void Drop(ModBlocks mod, IReadOnlyList<(string Section, string Entry, JsonObject Rules)> rules) => BlockRuntime.DropRules(mod, rules);
+    }
+
+    /// <summary>kiln.content's transaction of one owner (ContentTransaction): its change event is posted at the commit.</summary>
+    private sealed class GameTransaction(ContentTransaction txn) : IMoveTransaction
+    {
+        public IReadOnlyList<string> Apply(JsonObject document, string source) => txn.Apply(document.ToJsonString(), source).Errors;
+        public bool Commit() => txn.Commit().Outcome == ContentTransactionOutcome.Committed;
+        public (MoveRestore Outcome, string? Error) Rollback()
+        {
+            var r = txn.Rollback();
+            return (r.Outcome switch
+            {
+                ContentTransactionOutcome.Restored => MoveRestore.Restored,
+                ContentTransactionOutcome.Revoked => MoveRestore.Revoked,
+                _ => MoveRestore.Cancelled,
+            }, r.Error);
+        }
     }
 
     // ---- reading the game's data ------------------------------------------------------------------------------------------------------------------

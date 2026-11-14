@@ -79,19 +79,6 @@ internal static class BlockRuntime
         Hook(mod);
     }
 
-    /// <summary>Rules that are in the game already (a routed weapon's applied generation): kept with the mod's, so a later content application puts
-    /// them back with the rest. Nothing is applied now.</summary>
-    public static void KeepRules(ModBlocks mod, IReadOnlyList<(string Section, string Entry, JsonObject Rules)> rules)
-    {
-        lock (Gate) mod.ReadyRules.AddRange(rules);
-    }
-
-    /// <summary>Takes rules given to <see cref="KeepRules"/> out again (the same objects).</summary>
-    public static void DropRules(ModBlocks mod, IReadOnlyList<(string Section, string Entry, JsonObject Rules)> rules)
-    {
-        lock (Gate) mod.ReadyRules.RemoveAll(r => rules.Any(x => ReferenceEquals(x.Rules, r.Item3)));
-    }
-
     /// <summary>A program with values only the running game knows: finished and registered when content is ready.</summary>
     public static void AddLate(ModBlocks mod, Guid program)
     {
@@ -298,8 +285,9 @@ internal static class BlockRuntime
         {
             foreach (var e in Host.ApplyRules(mod.Owner, part.ToJsonString(), $"blocks of {mod.Id}")) Problem(e);
         }
-        // the kept rules of routed weapons were in that document: a weapon whose applied generation did not come back says so in its status
-        MoveApplications.Replayed(mod, Problem);
+        // routed weapons: each applied generation is written again in a content transaction of its own and read back; one that does not hold
+        // is taken back and says so in its status
+        MoveApplications.Replay(mod, Problem);
         // what kiln.content and kiln.gamedata could not take of a definition: a block's author reads it here, by name. An item's reference
         // to a clone is retried every 2 s: look when that has passed.
         // A kind's plan looks at its own definitions only (its ledger shares the mod's id), takes their warnings as warnings, and is told

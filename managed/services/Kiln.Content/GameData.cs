@@ -911,7 +911,8 @@ internal static unsafe class GameDataMissing
         if (_handle != 0) return;
         // the tables directly: touching Content here would run its static constructor (and its subscription) first
         if (Services.Get<GameDataNative.Table>(GameDataNative.Service, GameDataNative.Version) == null) return;
-        var t = Services.Get<ContentNative.Table>(ContentNative.Service, ContentNative.Version);
+        // FromService: a table without the slots appended since (dev.28's transactions) still serves this
+        var t = ContentNative.FromService((nint)Backend.Current.Service(ContentNative.Service, ContentNative.Version));
         if (t == null) return;
         ulong h = 0;
         if (t->SubscribeReady(0, &OnNativeReady, null, &h) == ContentNative.Ok) _handle = h;

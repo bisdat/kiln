@@ -121,7 +121,19 @@ internal static unsafe class ContentNative
 
         // ---- appended to v4 (check Header.Size): a UI texture key shown as another until kiln.assets serves it ----
         public delegate* unmanaged[Cdecl]<byte*, byte*, int> IconAlias;
+
+        // ---- appended to v4 since 0.2.0-dev.28 (check Header.Size, HasTransactions): content transactions (ContentTransaction.cs) ----
+        public delegate* unmanaged[Cdecl]<ulong, ulong*, int> TxnBegin;
+        public delegate* unmanaged[Cdecl]<ulong, uint, byte*, nuint, nuint*, int> TxnEnd;
     }
+
+    /// <summary>The table has the IconAlias slot (appended to v4).</summary>
+    internal static bool HasIconAlias(Table* t) =>
+        t != null && t->Header.Size >= (uint)Marshal.OffsetOf<Table>(nameof(Table.IconAlias)) + (uint)sizeof(nint) && t->IconAlias != null;
+
+    /// <summary>The table has the content transaction slots (appended to v4 in 0.2.0-dev.28).</summary>
+    internal static bool HasTransactions(Table* t) =>
+        t != null && t->Header.Size >= (uint)Marshal.OffsetOf<Table>(nameof(Table.TxnEnd)) + (uint)sizeof(nint) && t->TxnBegin != null && t->TxnEnd != null;
 
     // v4 before IconAlias is still a complete content service. Check the appended slot separately at its call site.
     internal static Table* FromService(nint address)
@@ -140,7 +152,7 @@ internal static unsafe class ContentNative
     internal static string ReadText(delegate* unmanaged[Cdecl]<byte*, nuint, nuint*, int> call) => NativeText.Read((b, cap, len) => call(b, cap, len), out _);
 
     public const int Ok = 0, InvalidArgument = 1, NotFound = 2, Unavailable = 3, WrongThread = 4, BufferTooSmall = 5,
-        Internal = 7;
+        Revoked = 6, Internal = 7;
 
     public static string Text(byte* p, int max)
     {

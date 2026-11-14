@@ -76,7 +76,7 @@ internal static unsafe class BlocksBridge
     public static bool IconAlias(Guid from, Guid to)
     {
         var t = Content.T;
-        if (t == null || t->Header.Size < (uint)sizeof(ContentNative.Table) || t->IconAlias == null) return false;
+        if (!ContentNative.HasIconAlias(t)) return false;
         var f = from.ToByteArray();
         var g = to.ToByteArray();
         fixed (byte* pf = f, pg = g) return t->IconAlias(pf, pg) == 0;
@@ -91,6 +91,18 @@ internal static unsafe class BlocksBridge
     public static void Register(RecipeDefinition d, ulong owner) => NewContent.Register(d, owner);
     public static void DefineClone(GameDataRegistry r, JsonObject d, ulong owner) => r.Define(d, owner);
     public static ContentReport ApplyAs(ulong owner, string json, string source) => Content.ApplyAs(owner, json, source);
+
+    /// <summary>Opens a content transaction for <paramref name="owner"/> (ContentTransaction.cs): its applications can be taken back whole.</summary>
+    public static ContentTransaction BeginTransaction(ulong owner) => ContentTransaction.Begin(owner);
+
+    /// <summary>Takes every layer of <paramref name="owner"/> off (fail closed). Returns how many fields were put back.</summary>
+    public static int RevertOwner(ulong owner)
+    {
+        var t = Content.Require("Content.RevertOwner");
+        var n = (int)t->RevertOwner(owner);
+        if (n > 0) Content.Changed(ContentChange.Reverted, null, "");
+        return n;
+    }
 
     /// <summary>Where a mod's blocks report goes (kiln/data/blocks/&lt;mod&gt;.json): <c>kiln blocks</c> reads it.</summary>
     public static string BlockReportFile(string mod)

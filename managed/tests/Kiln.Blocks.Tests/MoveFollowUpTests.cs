@@ -103,13 +103,79 @@ public sealed class MoveFollowUpTests : IDisposable
         public readonly Dictionary<string, Guid> ByName = new();
         public readonly List<JsonObject> Applied = new();
         public readonly Queue<Action<Action<string>>> Pending = new();
-        public readonly List<(string Section, string Entry, JsonObject Rules)> Kept = new();
         public int RefuseDefineAt = -1, Defines;
-        public Func<JsonObject, string?>? ApplyError;
+        public Func<JsonObject, string?>? ApplyError;       // before the document changes anything
+        public Func<JsonObject, string?>? LateError;        // after it changed what it could (a partial write)
         public Action<JsonObject>? AfterApply;
+        public Action? AfterCommit;                         // where the game raises ContentChangedEvent
         public bool SwitchTakesOnlyFirst;
-        public bool FailPutBack;   // a put-back document is refused whole
+        public bool FailRestore;   // a rollback that does not read back: kiln.content takes every layer of the owner off
+        public bool CancelOnApply; // the owner's layers are taken off while a transaction is open
+        public bool NoTransactions;
         public bool ThrowLinkRead, ThrowSlotRead;
+        public int Begins, Commits, Rollbacks, Revokes;
+        public FakeTxn? Open;
+
+        /// <summary>A made-up content transaction: the slots and links as they were at its start, put back on rollback.</summary>
+        public sealed class FakeTxn(FakeGame game) : IMoveTransaction
+        {
+            private readonly Dictionary<int, Guid> _slots = new(game.SlotsNow);
+            private readonly Dictionary<(string, int, int), Guid> _links = new(game.LinksNow);
+            public bool Ended, Cancelled;
+
+            public IReadOnlyList<string> Apply(JsonObject document, string source)
+            {
+                Assert.False(Ended, "an application in an ended transaction");
+                return game.Apply(document, source);
+            }
+
+            public bool Commit()
+            {
+                Assert.False(Ended);
+                Ended = true;
+                game.Open = null;
+                if (Cancelled) return false;
+                game.Commits++;
+                game.AfterCommit?.Invoke();
+                return true;
+            }
+
+            public (MoveRestore Outcome, string? Error) Rollback()
+            {
+                Assert.False(Ended);
+                Ended = true;
+                game.Open = null;
+                game.Rollbacks++;
+                if (Cancelled) return (MoveRestore.Cancelled, null);
+                if (game.FailRestore)
+                {
+                    game.Revoke(0);
+                    return (MoveRestore.Revoked, "1 of 4 field(s) did not read back after the rollback");
+                }
+                game.SlotsNow.Clear();
+                foreach (var (k, v) in _slots) game.SlotsNow[k] = v;
+                game.LinksNow.Clear();
+                foreach (var (k, v) in _links) game.LinksNow[k] = v;
+                return (MoveRestore.Restored, null);
+            }
+        }
+
+        public IMoveTransaction Begin(ulong owner)
+        {
+            if (NoTransactions) throw new KilnUnavailableException("kiln.content", "this kiln.content has no content transactions");
+            Assert.Null(Open);      // one open transaction per owner, as kiln.content
+            Begins++;
+            return Open = new FakeTxn(this);
+        }
+
+        // every layer of the owner off: the class's slots, the clones' own links
+        public void Revoke(ulong owner)
+        {
+            Revokes++;
+            SlotsNow.Clear();
+            LinksNow.Clear();
+            if (Open != null) Open.Cancelled = true;
+        }
 
         // as the game: once a slot was switched it names the clone that plays there
         public IReadOnlyList<SlotRow>? Slots(string item) => SlotRows?.Select((r, i) => SlotsNow.TryGetValue(i, out var g) ? r with { Sequence = g } : r).ToList();
@@ -126,11 +192,11 @@ public sealed class MoveFollowUpTests : IDisposable
             DefinedNames.Add((string)d["name"]!);
         }
 
-        public IReadOnlyList<string> Apply(ulong owner, JsonObject doc, string source)
+        public IReadOnlyList<string> Apply(JsonObject doc, string source)
         {
+            Assert.NotNull(Open);   // every write of a routed weapon is inside a transaction
             Applied.Add(doc.DeepClone().AsObject());
             if (ApplyError?.Invoke(doc) is { } error) return [error];
-            if (FailPutBack && source.EndsWith("(put back)", StringComparison.Ordinal)) return ["the store is busy"];
             if (doc["sequences"] is JsonObject seqs)
                 foreach (var (entry, rules) in seqs)
                 {
@@ -156,16 +222,19 @@ public sealed class MoveFollowUpTests : IDisposable
                         else SlotsNow[i] = ByName[(string)v!];
                     }
                 }
+            if (CancelOnApply)
+            {
+                CancelOnApply = false;
+                Revoke(0);
+            }
             AfterApply?.Invoke(doc);
-            return [];
+            return LateError?.Invoke(doc) is { } late ? [late] : [];
         }
 
         public Guid? Link(string clone, int sub, int k) => ThrowLinkRead ? throw new InvalidOperationException("link read unavailable") : LinksNow.TryGetValue((clone, sub, k), out var g) ? g : null;
         public Guid? Slot(string item, int index) => ThrowSlotRead ? throw new InvalidOperationException("slot read unavailable") : SlotsNow.TryGetValue(index, out var g) ? g
             : SlotRows is { } rows && index < rows.Count ? rows[index].Sequence : null;   // not switched: the class's sequence, as the game reads it
         public void Later(ModBlocks mod, Action<Action<string>> next) => Pending.Enqueue(next);
-        public void Keep(ModBlocks mod, IReadOnlyList<(string Section, string Entry, JsonObject Rules)> rules) => Kept.AddRange(rules);
-        public void Drop(ModBlocks mod, IReadOnlyList<(string Section, string Entry, JsonObject Rules)> rules) => Kept.RemoveAll(r => rules.Any(x => ReferenceEquals(x.Rules, r.Rules)));
 
         /// <summary>Ready passes until nothing is waiting.</summary>
         public List<string> Pump()
@@ -408,9 +477,8 @@ public sealed class MoveFollowUpTests : IDisposable
         var ev = Assert.Single(_events);
         Assert.Equal((Mod, "warden", MoveApplicationState.PendingContent, MoveApplicationState.Applied), (ev.ModId, ev.BlockName, ev.Before.State, ev.After.State));
         Assert.Same(now, ev.After);
-        // kept for later content applications: the clones' rules and the slots
-        Assert.Contains(_game.Kept, r => r.Section == "itemdata");
-        Assert.Equal(_game.Applied[0]["sequences"]!.AsObject().Count + 1, _game.Kept.Count);
+        // both documents in one content transaction, committed once everything read back
+        Assert.Equal((1, 1, 0), (_game.Begins, _game.Commits, _game.Rollbacks));
     }
 
     [Theory]
@@ -430,7 +498,7 @@ public sealed class MoveFollowUpTests : IDisposable
         Assert.Empty(now.LiveClones);
         Assert.Empty(_game.Applied);            // no rule and no slot was written
         Assert.Empty(_game.SlotsNow);
-        Assert.Empty(_game.Kept);
+        Assert.Equal(0, _game.Begins);
         Assert.Equal(MoveApplicationState.Refused, Assert.Single(_events).After.State);
         // on the same content nothing is tried again by itself
         MoveApplications.Ready(started, _ => { });
@@ -474,6 +542,7 @@ public sealed class MoveFollowUpTests : IDisposable
         Assert.Single(_game.Applied);           // the slots' document was never sent
         Assert.Empty(_game.SlotsNow);
         Assert.Equal(0ul, Status().AppliedGeneration);
+        Assert.Equal((1, 0, 1), (_game.Begins, _game.Commits, _game.Rollbacks));
     }
 
     [Theory]
@@ -524,7 +593,7 @@ public sealed class MoveFollowUpTests : IDisposable
     }
 
     [Fact]
-    public void A_switch_that_does_not_take_whole_is_put_back_in_the_same_pass()
+    public void A_switch_that_does_not_take_whole_is_taken_back_in_the_same_pass()
     {
         // first a generation that applies
         Start(Warden());
@@ -542,11 +611,11 @@ public sealed class MoveFollowUpTests : IDisposable
         var now = Status();
         Assert.Equal((MoveApplicationState.Refused, 2ul, 1ul), (now.State, now.RequestedGeneration, now.AppliedGeneration));
         Assert.Contains("were not switched", now.Reason);
+        Assert.Contains("taken back and read back", now.Reason);
         Assert.Equal(first.LiveClones, now.LiveClones);
-        // the put-back document went out after the switch: the same slots, the previous generation's clones (the fake takes only its first path too,
-        // which is the one the failed switch had written)
-        Assert.Contains("itemdata", _game.Applied[^1].Select(p => p.Key));
+        // the transaction was rolled back: the slots are the first generation's and the new clones' links are gone again
         Assert.Equal(slots, _game.SlotsNow);
+        Assert.Equal((2, 1, 1), (_game.Begins, _game.Commits, _game.Rollbacks));
     }
 
     // a second plan for a weapon that is applied: the entry is the same, its plan is not (tests only: the product gets a new plan from a new definition)
@@ -558,105 +627,252 @@ public sealed class MoveFollowUpTests : IDisposable
         Assert.True(MoveApplications.Retry(Mod, "warden", _ => { }));
     }
 
-    [Fact]
-    public void A_put_back_that_fails_leaves_mixed_slots_and_the_status_says_so_instead_of_naming_a_generation()
+    // ---- fault injection: at each write, at each restore ----
+
+    [Theory]
+    [InlineData("sequences")]
+    [InlineData("itemdata")]
+    public void A_write_refused_after_it_changed_part_of_the_game_is_taken_back_whole(string section)
     {
         Start(Warden());
         _game.Pump();
         var first = Status();
-        Assert.Equal(1ul, first.AppliedGeneration);
+        var (slots, links) = (new Dictionary<int, Guid>(_game.SlotsNow), new Dictionary<(string, int, int), Guid>(_game.LinksNow));
         Assert.True(Compiler.Plans.TryGetValue(Lower(Warden(Route(MoveFollowUpTrigger.Parried, WeaponMoveSlot.Parry))), out var other));
         Replan(other!);
-        // the switch takes one slot of four and reports nothing; the put-back is refused whole
-        _game.SwitchTakesOnlyFirst = true;
-        _game.FailPutBack = true;
+        // the document of that section changes everything it names (the switch: one slot only), then reports a refused rule
+        _game.SwitchTakesOnlyFirst = section == "itemdata";
+        _game.LateError = doc => doc[section] != null ? $"{section}: a rule was refused" : null;
         var problems = _game.Pump();
         var now = Status();
-        Assert.Equal((false, MoveApplicationState.Refused, 2ul, 0ul), (now.Ok, now.State, now.RequestedGeneration, now.AppliedGeneration));
-        Assert.Contains("the item's slots are mixed: 1 of 4 play the moves that were refused", now.Reason);
-        Assert.Contains("putting the previous slots back failed: the store is busy", now.Reason);
-        Assert.Contains(problems, p => p.Contains("slots are mixed"));
-        // what the slots play, as read: one clone of the refused generation, three of the first
+        Assert.Equal((false, MoveApplicationState.Refused, 2ul, 1ul), (now.Ok, now.State, now.RequestedGeneration, now.AppliedGeneration));
+        Assert.Contains("a rule was refused", now.Reason);
+        Assert.Contains("taken back and read back", now.Reason);
+        Assert.Contains(problems, p => p.Contains("a rule was refused"));
+        // exactly the previous state: the first generation's slots and links, nothing of the second's
+        Assert.Equal(slots, _game.SlotsNow);
+        Assert.Equal(links, _game.LinksNow);
+        Assert.Equal(first.LiveClones, now.LiveClones);
+        Assert.Equal((2, 1, 1, 0), (_game.Begins, _game.Commits, _game.Rollbacks, _game.Revokes));
+    }
+
+    [Fact]
+    public void The_lab_switch_fails_a_write_after_it_applied_and_the_transaction_takes_it_back()
+    {
+        MoveApplications.FailWrites = 1;
+        Start(Warden());
+        _game.Pump();
+        Assert.Equal((MoveApplicationState.Refused, 0ul), (Status().State, Status().AppliedGeneration));
+        Assert.Contains("refused by the test switch", Status().Reason);
+        Assert.Single(_game.Applied);            // the clones' rules went in, then were refused; the slots' document never went
+        Assert.Empty(_game.LinksNow);
+        Assert.Empty(_game.SlotsNow);
+        Assert.Equal(0, MoveApplications.FailWrites);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_rollback_that_does_not_read_back_revokes_the_owner_and_the_status_says_so(bool applied)
+    {
+        // with a generation applied before, and as the first attempt
+        Start(Warden());
+        if (applied) _game.Pump();
+        else _game.Pending.Dequeue()(_ => { });
+        if (applied)
+        {
+            Assert.True(Compiler.Plans.TryGetValue(Lower(Warden(Route(MoveFollowUpTrigger.Parried, WeaponMoveSlot.Parry))), out var other));
+            Replan(other!);
+        }
+        _game.SwitchTakesOnlyFirst = true;      // the switch does not take whole, and taking it back does not read back
+        _game.FailRestore = true;
+        var problems = _game.Pump();
+        var now = Status();
+        Assert.Equal((false, MoveApplicationState.Refused, 0ul), (now.Ok, now.State, now.AppliedGeneration));
+        Assert.Contains("were not switched", now.Reason);
+        Assert.Contains("could not be verified", now.Reason);
+        Assert.Contains("every layer of the mod was taken off", now.Reason);
+        Assert.Contains(problems, p => p.Contains("every layer of the mod was taken off"));
+        // fail closed: the owner's layers are off, the slots play the class's sequences, and the status says what they play
+        Assert.Empty(_game.SlotsNow);
+        Assert.Empty(_game.LinksNow);
         Assert.Equal(4, now.LiveClones.Count);
-        Assert.All(now.LiveClones.Keys, k => Assert.StartsWith("slot/", k));
-        Assert.Equal(3, now.LiveClones.Values.Count(g => first.LiveClones.Values.Contains(g)));
-        Assert.Equal(_game.SlotsNow.Values.Order(), now.LiveClones.Values.Order());
-        // nothing of the old generation is kept for a later content application
-        Assert.Empty(_game.Kept);
-        var ev = _events[^1];
-        Assert.Equal((MoveApplicationState.Applied, MoveApplicationState.Refused, 1ul, 0ul), (ev.Before.State, ev.After.State, ev.Before.AppliedGeneration, ev.After.AppliedGeneration));
-        // the next attempt plans from the class's sequences (the clones in the slots are read as what they were made from) and applies whole
-        (_game.SwitchTakesOnlyFirst, _game.FailPutBack) = (false, false);
+        Assert.All(now.LiveClones, c => Assert.StartsWith("slot/", c.Key));
+        Assert.DoesNotContain(now.LiveClones.Values, g => Slots.All(r => r.Sequence != g));
+        // not tried again by itself on the same content; a retry plans from the class's sequences and applies whole
+        (_game.SwitchTakesOnlyFirst, _game.FailRestore) = (false, false);
+        MoveApplications.Ready(new ModBlocks("other", 1), _ => { });
+        Assert.Empty(_game.Pending);
         Assert.True(MoveApplications.Retry(Mod, "warden", _ => { }));
         Assert.Empty(_game.Pump());
-        Assert.Equal((MoveApplicationState.Applied, 3ul), (Status().State, Status().AppliedGeneration));
+        Assert.Equal(MoveApplicationState.Applied, Status().State);
         Assert.Equal(4, Status().LiveClones.Keys.Count(k => !k.StartsWith("slot/")));
     }
 
     [Fact]
-    public void A_switch_that_throws_after_changing_slots_is_settled_the_same_way()
+    public void A_revoked_owner_takes_its_other_weapons_off_and_they_say_so_and_are_planned_again()
     {
-        Start(Warden());
-        _game.Pending.Dequeue()(_ => { });
-        // the slots' document is taken, then the read-back throws; the put-back is refused
-        _game.ThrowSlotRead = true;
-        _game.FailPutBack = true;
+        var mod = NewMod();
+        var a = Compiler.Lower(mod, "warden", Warden()).Low.Json;
+        var b = Compiler.Lower(mod, "keeper", Warden(Route(MoveFollowUpTrigger.Parried, WeaponMoveSlot.Parry))).Low.Json;
+        Assert.True(Compiler.Plans.TryGetValue(a, out var pa));
+        Assert.True(Compiler.Plans.TryGetValue(b, out var pb));
+        MoveApplications.Start(mod, pa!, a);
         _game.Pump();
-        _game.ThrowSlotRead = false;
-        var now = Status();
-        Assert.Equal((MoveApplicationState.Refused, 0ul), (now.State, now.AppliedGeneration));
-        Assert.Contains("slots are mixed", now.Reason);
-        Assert.Contains("could not be read", now.Reason);   // the read still threw when the status was made: it says so rather than guess
+        Assert.Equal(MoveApplicationState.Applied, Status().State);
+        // the second weapon of the same mod (the same owner) fails and its rollback does not read back
+        _game.SwitchTakesOnlyFirst = true;
+        _game.FailRestore = true;
+        MoveApplications.Start(mod, pb!, b);
+        _game.Pump();
+        Assert.Contains("every layer of the mod was taken off", Status("keeper").Reason);
+        var warden = Status();
+        Assert.Equal((MoveApplicationState.Refused, 0ul), (warden.State, warden.AppliedGeneration));
+        Assert.Contains("every layer of the mod was taken off (", warden.Reason);
+        Assert.Contains("keeper's moves could not be taken back", warden.Reason);
+        Assert.True(mod.RulesDirty);            // the mod's other rules are applied again at the next pass
+        // the next ready pass plans the innocent weapon again; the one that failed waits for other content
+        (_game.SwitchTakesOnlyFirst, _game.FailRestore) = (false, false);
+        MoveApplications.Ready(mod, _ => { });
+        _game.Pump();
+        Assert.Equal(MoveApplicationState.Applied, Status().State);
+        Assert.Equal(MoveApplicationState.Refused, Status("keeper").State);
     }
 
     [Fact]
-    public void A_replay_after_a_content_reload_that_does_not_bring_the_generation_back_updates_the_status()
+    public void Owner_layers_taken_off_while_the_transaction_is_open_are_said_so()
+    {
+        Start(Warden());
+        _game.Pending.Dequeue()(_ => { });
+        _game.CancelOnApply = true;             // the first document's application takes the owner's layers off (as revert_owner)
+        _game.Pump();
+        Assert.Equal((MoveApplicationState.Refused, 0ul), (Status().State, Status().AppliedGeneration));
+        Assert.Contains("the mod's layers were taken off", Status().Reason);
+        Assert.Empty(_game.SlotsNow);
+    }
+
+    [Fact]
+    public void Without_content_transactions_nothing_is_written_and_the_attempt_is_refused()
+    {
+        _game.NoTransactions = true;
+        Start(Warden());
+        _game.Pump();
+        Assert.Equal((MoveApplicationState.Refused, 0ul), (Status().State, Status().AppliedGeneration));
+        Assert.Contains("the content transaction could not be opened", Status().Reason);
+        Assert.Empty(_game.Applied);
+    }
+
+    // ---- a content application later in the process ----
+
+    [Fact]
+    public void A_replay_writes_the_generation_again_in_a_transaction_and_holds_without_an_event()
     {
         var (mod, _) = Start(Warden());
         _game.Pump();
         var first = Status();
+        var (slots, links) = (new Dictionary<int, Guid>(_game.SlotsNow), new Dictionary<(string, int, int), Guid>(_game.LinksNow));
         var problems = new List<string>();
-        // every replay that finds the generation in place changes nothing
-        MoveApplications.Replayed(mod, problems.Add);
+        MoveApplications.Replay(mod, problems.Add);
         Assert.Same(first, Status());
         Assert.Empty(problems);
         Assert.Single(_events);
-        // the game loaded its content again and one slot did not take the weapon's rule
+        Assert.Equal((2, 2), (_game.Begins, _game.Commits));
+        // the world was loaded again: every layer went; the replay brings the generation back whole
+        _game.SlotsNow.Clear();
+        _game.LinksNow.Clear();
         _game.ContentGeneration = 9;
-        _game.SlotsNow.Remove(0);
-        MoveApplications.Replayed(mod, problems.Add);
-        var now = Status();
-        Assert.Equal((false, MoveApplicationState.Refused, 0ul, 9ul), (now.Ok, now.State, now.AppliedGeneration, now.ContentGeneration));
-        Assert.Contains("After the game's content was applied again", now.Reason);
-        Assert.Contains("slots are mixed", now.Reason);
-        Assert.Single(problems);
-        Assert.Equal(MoveApplicationState.Refused, _events[^1].After.State);
-        Assert.Empty(_game.Kept);
-        // a link that does not come back is seen too
-        // (the next ready pass plans the weapon again, on the same content, and it applies)
-        MoveApplications.Ready(mod, problems.Add);
-        Assert.Empty(_game.Pump());
-        Assert.Equal((MoveApplicationState.Applied, 2ul), (Status().State, Status().AppliedGeneration));
-        var applied = Status();
-        _game.LinksNow.Remove(_game.LinksNow.Keys.First());
-        MoveApplications.Replayed(mod, problems.Add);
-        Assert.Equal(MoveApplicationState.Refused, Status().State);
-        Assert.Contains("does not read back", Status().Reason);
-        Assert.Equal(0ul, Status().AppliedGeneration);
-        Assert.NotSame(applied, Status());
+        MoveApplications.Replay(mod, problems.Add);
+        Assert.Same(first, Status());
+        Assert.Empty(problems);
+        Assert.Equal(slots, _game.SlotsNow);
+        Assert.Equal(links, _game.LinksNow);
     }
 
     [Fact]
-    public void A_first_switch_that_fails_puts_the_classs_slots_back()
+    public void A_replay_that_fails_after_a_reload_is_taken_back_and_the_status_says_what_plays()
+    {
+        var (mod, _) = Start(Warden());
+        _game.Pump();
+        var problems = new List<string>();
+        // the world was loaded again (every layer went) and the replay's slot document is refused after it switched one slot
+        _game.SlotsNow.Clear();
+        _game.LinksNow.Clear();
+        _game.ContentGeneration = 9;
+        _game.SwitchTakesOnlyFirst = true;
+        _game.LateError = doc => doc["itemdata"] != null ? "sequences[0].sequence: not writable" : null;
+        MoveApplications.Replay(mod, problems.Add);
+        var now = Status();
+        Assert.Equal((false, MoveApplicationState.Refused, 0ul, 9ul), (now.Ok, now.State, now.AppliedGeneration, now.ContentGeneration));
+        Assert.Contains("After the game's content was applied again", now.Reason);
+        Assert.Contains("not writable", now.Reason);
+        Assert.Contains("no generation is applied", now.Reason);
+        Assert.Single(problems);
+        // taken back to what the reload left: the class's slots, no link
+        Assert.Empty(_game.SlotsNow);
+        Assert.Empty(_game.LinksNow);
+        Assert.Equal(MoveApplicationState.Refused, _events[^1].After.State);
+        // the next ready pass plans the weapon again, on the same content, and it applies
+        (_game.SwitchTakesOnlyFirst, _game.LateError) = (false, null);
+        MoveApplications.Ready(mod, problems.Add);
+        Assert.Empty(_game.Pump());
+        Assert.Equal((MoveApplicationState.Applied, 2ul), (Status().State, Status().AppliedGeneration));
+    }
+
+    [Fact]
+    public void A_replay_that_fails_while_the_generation_still_plays_is_a_refusal_that_keeps_it()
+    {
+        var (mod, _) = Start(Warden());
+        _game.Pump();
+        var first = Status();
+        var slots = new Dictionary<int, Guid>(_game.SlotsNow);
+        MoveApplications.FailWrites = 1;
+        var problems = new List<string>();
+        MoveApplications.Replay(mod, problems.Add);
+        var now = Status();
+        Assert.Equal((false, MoveApplicationState.Refused, 1ul), (now.Ok, now.State, now.AppliedGeneration));
+        Assert.Contains("still plays", now.Reason);
+        Assert.Equal(first.LiveClones, now.LiveClones);
+        Assert.Equal(slots, _game.SlotsNow);
+        // the next ready pass finds the same plan playing: Applied again, nothing written
+        var applied = _game.Applied.Count;
+        MoveApplications.Ready(mod, problems.Add);
+        Assert.Equal((MoveApplicationState.Applied, 1ul), (Status().State, Status().AppliedGeneration));
+        Assert.Equal(applied, _game.Applied.Count);
+    }
+
+    [Fact]
+    public void A_replay_whose_rollback_does_not_read_back_revokes_and_is_not_retried_on_the_same_content()
+    {
+        var (mod, _) = Start(Warden());
+        _game.Pump();
+        _game.ContentGeneration = 9;
+        _game.LateError = doc => doc["sequences"] != null ? "events[SetActionOportunity#1].followUp: not writable" : null;
+        _game.FailRestore = true;
+        MoveApplications.Replay(mod, _ => { });
+        var now = Status();
+        Assert.Equal((MoveApplicationState.Refused, 0ul), (now.State, now.AppliedGeneration));
+        Assert.Contains("could not be verified", now.Reason);
+        Assert.Empty(_game.SlotsNow);
+        (_game.LateError, _game.FailRestore) = (null, false);
+        MoveApplications.Ready(mod, _ => { });
+        Assert.Empty(_game.Pending);            // fail closed: not by itself on the same content
+        _game.ContentGeneration = 10;
+        MoveApplications.Ready(mod, _ => { });
+        _game.Pump();
+        Assert.Equal(MoveApplicationState.Applied, Status().State);
+    }
+
+    [Fact]
+    public void A_first_switch_that_fails_leaves_the_classs_slots_and_no_rule_of_the_clones()
     {
         _game.ApplyError = doc => doc["itemdata"] is JsonObject items && items.First().Value!.AsObject().First().Value is not JsonObject ? "sequences[0].sequence: not a reference" : null;
         Start(Warden());
         _game.Pump();
         Assert.Equal((MoveApplicationState.Refused, 0ul), (Status().State, Status().AppliedGeneration));
-        var back = _game.Applied[^1]["itemdata"]!.AsObject().First().Value!.AsObject();
-        Assert.All(back, p => Assert.True((bool)p.Value!["reset"]!));
-        Assert.Equal(4, back.Count);
-        Assert.Empty(_game.Kept);
+        // all or nothing: the clones' rules were taken back with the switch
+        Assert.Empty(_game.SlotsNow);
+        Assert.Empty(_game.LinksNow);
+        Assert.Equal((1, 0, 1), (_game.Begins, _game.Commits, _game.Rollbacks));
     }
 
     [Fact]
@@ -721,16 +937,17 @@ public sealed class MoveFollowUpTests : IDisposable
     }
 
     [Fact]
-    public void A_mod_that_goes_reports_removed_with_the_generation_it_had_and_drops_its_kept_rules()
+    public void A_mod_that_goes_reports_removed_with_the_generation_it_had_and_is_not_written_again()
     {
-        Start(Warden());
+        var (mod, _) = Start(Warden());
         _game.Pump();
-        Assert.NotEmpty(_game.Kept);
         MoveApplications.Forget(Mod);
         var now = Status();
         Assert.Equal((false, MoveApplicationState.Removed, "Removed", 1ul), (now.Ok, now.State, now.Reason, now.AppliedGeneration));
         Assert.Empty(now.LiveClones);
-        Assert.Empty(_game.Kept);
+        var applied = _game.Applied.Count;
+        MoveApplications.Replay(mod, _ => { });
+        Assert.Equal(applied, _game.Applied.Count);
         Assert.Equal([MoveApplicationState.Applied, MoveApplicationState.Removed], _events.Select(e => e.After.State));
         // once: a second Forget and a late pass change nothing
         MoveApplications.Forget(Mod);
@@ -757,6 +974,27 @@ public sealed class MoveFollowUpTests : IDisposable
         Assert.NotEmpty(drops);
         Assert.All(drops.SelectMany(d => d.Where(p => p.Key != "format").SelectMany(p => p.Value!.AsObject()).SelectMany(p => p.Value!.AsObject())),
             p => Assert.True((bool)p.Value!["reset"]!));
+        Assert.Equal(0, _game.Revokes);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_removal_that_does_not_take_revokes_the_owner_instead_of_leaving_routed_slots(bool refused)
+    {
+        Start(Warden());
+        _game.Pump();
+        // the reset document is refused, or it takes only its first slot and the others still play the weapon's clones
+        if (refused) _game.ApplyError = doc => doc["itemdata"] != null ? "the store is busy" : null;
+        else _game.SwitchTakesOnlyFirst = true;
+        MoveApplications.Forget(Mod);
+        var now = Status();
+        Assert.Equal(MoveApplicationState.Removed, now.State);
+        Assert.Contains("every layer of the mod was taken off instead", now.Reason);
+        Assert.Contains(refused ? "the store is busy" : "still plays a clone of the weapon", now.Reason);
+        Assert.Equal(1, _game.Revokes);
+        Assert.Empty(_game.SlotsNow);
+        Assert.Empty(_game.LinksNow);
     }
 
     [Theory]
@@ -775,8 +1013,26 @@ public sealed class MoveFollowUpTests : IDisposable
         Assert.Equal(MoveApplicationState.Removed, Status().State);
         Assert.Empty(_game.SlotsNow);
         Assert.Empty(_game.LinksNow);
-        Assert.Empty(_game.Kept);
         Assert.DoesNotContain(_events, e => e.After.Ok);
+    }
+
+    [Fact]
+    public void A_handler_of_the_commits_change_event_can_remove_the_weapon_without_it_being_applied()
+    {
+        var (mod, _) = Start(Warden());
+        _game.AfterCommit = () =>
+        {
+            _game.AfterCommit = null;
+            MoveApplications.Forget(Mod);
+        };
+        _game.Pump();
+        Assert.Equal(MoveApplicationState.Removed, Status().State);
+        Assert.Empty(_game.SlotsNow);
+        Assert.Empty(_game.LinksNow);
+        Assert.DoesNotContain(_events, e => e.After.Ok);
+        var applied = _game.Applied.Count;
+        MoveApplications.Replay(mod, _ => { });
+        Assert.Equal(applied, _game.Applied.Count);
     }
 
     // ---- the query ----
