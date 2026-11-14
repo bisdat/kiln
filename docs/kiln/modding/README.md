@@ -40,9 +40,11 @@ generated [../status.generated.md](../status.generated.md); what has no API yet 
 | [texts.md](texts.md) | The game's English texts by loca tag (`Texts.Get`, `GetPlain`), also on a dedicated server from a local catalog |
 | [lint.md](lint.md) | `kiln lint`: usage, output, JSON dialects, every rule with an example and the fix; [schemas/](schemas/) is the field reference of each format |
 | [vscode.md](vscode.md) | The VS Code extension (tools/vscode): schemas, lint, game ids, build/deploy/reload, Testing view, kiln.log, KAP/1 console, Impact assembly |
-| [cli.md](cli.md) | The `kiln` command: new, build, cook, deploy, run, reload, test, debug, lint, pack, logs, blocks, catalog, vfx, skeleton |
+| [cli.md](cli.md) | The `kiln` command: new, build, cook, deploy, run, reload, test, debug, lint, pack, publish, logs, blocks, catalog, vfx, skeleton |
+| [publishing.md](publishing.md) | `kiln publish`: releasing a packed mod at GitHub (plan, apply, publish), the token, what a published zip may hold |
 | [analyzers.md](analyzers.md) | KILN1xx: compiler warnings about threads, hot reload and the manifest, with code fixes |
 | [catalogs.md](catalogs.md) | The local game-data catalog and the game-id constants |
+| [../services/queries.md](../services/queries.md) | `Kiln.Queries`: what is on a line through the terrain, the ground below a point, voxel line of sight, the entities in a sphere or a box; the ray budget all mods share |
 | [../typegen.md](../typegen.md) | Typed reads of the game's ECS components: `Kiln.Ecs` (`TryGet`, `Get`, `Has`, `All`, `Supports`), generated per game build; example in §4.3 |
 | [typed-fields.md](typed-fields.md) | The game's data as typed C# structures, for what blocks don't cover: `GameFields`, `GameEnums`, checked string paths |
 | [player-states.md](player-states.md) | Every state and action a player can be in: `player.Is(...)`, `PlayerStateChangedEvent`, `PlayerActionEvent`, and what is left out |
@@ -128,6 +130,8 @@ first). `mods/samples/build.sh` builds the loader samples (`SampleLib`, `SampleC
 | `UiSample` | Kiln.Ui from code: an FPS line on the HUD, a window (F8) with widgets, toasts |
 | `MenuButtons` | Kiln.Ui game UI: entries in the main and pause menus opening a screen, a crafting info panel, a subcategory and tab in the crafting menu |
 | `RenderSample` | render events: an FPS counter, a compass and waypoint markers in the world |
+| `BlobCatalog` | `Assets.OpenBlobCatalog`: `/blobs` counts the content blobs the game serves by where they come from, lists the ones mods registered, and writes the first entries as JSON |
+| `TransformScale` | `World.SetTransformScale`: `/tscale <entity> <x> <y> <z>` draws an entity larger or smaller on each axis (the drawn size only, not collision) |
 
 Templates: `kiln new --list` shows all 31 with their options. Block templates: `kiln-spell`, `kiln-item-blocks`,
 `kiln-ability-blocks`, `kiln-creature-blocks`, `kiln-world-blocks`, `kiln-npc`, `kiln-quest`, `kiln-body`, `kiln-vfx`,
