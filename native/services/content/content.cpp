@@ -773,9 +773,7 @@ KilnResult KILN_CALL t_apply_json(KilnOwner owner, KilnStr text, KilnStr source,
     return KILN_OK;
 }
 
-uint32_t KILN_CALL t_revert_owner(KilnOwner owner) {
-    if (!tick() || owner == 0) return 0;
-    std::lock_guard lock(store_mutex());
+uint32_t revert_owner_locked(KilnOwner owner) {
     const uint32_t n = store_drop_owner(owner);
     drops_drop_owner(owner);
 #if KC_GAMEDATA
@@ -784,8 +782,64 @@ uint32_t KILN_CALL t_revert_owner(KilnOwner owner) {
     std::string err;
     store_flush(&err);
     g_modified_stale = true;
+    return n;
+}
+
+uint32_t KILN_CALL t_revert_owner(KilnOwner owner) {
+    if (!tick() || owner == 0) return 0;
+    std::lock_guard lock(store_mutex());
+    const uint32_t n = revert_owner_locked(owner);
     if (n) LOGI("%s reverted: %u field(s) put back", owner_label(owner).c_str(), n);
     return n;
+}
+
+KilnResult KILN_CALL t_txn_begin(KilnOwner owner, uint64_t* out) {
+    if (!out) return KILN_ERR_INVALID_ARGUMENT;
+    *out = 0;
+    if (!tick()) return KILN_ERR_WRONG_THREAD;
+    if (!g_ready.load()) return KILN_ERR_UNAVAILABLE;
+    std::lock_guard lock(store_mutex());
+    return store_txn_begin(owner, out) ? KILN_OK : KILN_ERR_INVALID_ARGUMENT;
+}
+
+KilnResult KILN_CALL t_txn_end(uint64_t txn, uint32_t rollback, char* report, size_t cap, size_t* len) {
+    if (!tick()) return KILN_ERR_WRONG_THREAD;
+    nlohmann::ordered_json r;
+    KilnResult rc = KILN_OK;
+    {
+        std::lock_guard lock(store_mutex());
+        if (!rollback) {
+            const bool known = store_txn_commit(txn);
+            r["outcome"] = known ? "committed" : "cancelled";
+            rc = known ? KILN_OK : KILN_ERR_NOT_FOUND;
+        } else {
+            uint32_t fields = 0;
+            KilnOwner owner = 0;
+            std::string why;
+            const TxnOutcome o = store_txn_rollback(txn, [] {
+#if KC_GAMEDATA
+                gd::after_changes();
+#endif
+            }, &owner, &fields, &why);
+            g_modified_stale = true;
+            r["fields"] = fields;
+            if (o == TxnOutcome::Restored) {
+                r["outcome"] = "restored";
+            } else if (o == TxnOutcome::Cancelled) {
+                r["outcome"] = "cancelled";
+                rc = KILN_ERR_NOT_FOUND;
+            } else {
+                // fail closed: what the owner's layers hold cannot be told, so none of them stays
+                const uint32_t n = revert_owner_locked(owner);
+                r["outcome"] = "revoked";
+                r["error"] = why + "; every layer of " + owner_label(owner) + " was taken off (" + std::to_string(n) + " field(s))";
+                rc = KILN_ERR_REVOKED;
+            }
+        }
+    }
+    if (rc == KILN_ERR_REVOKED) LOGW("content transaction %llu: %s", (unsigned long long)txn, r["error"].get<std::string>().c_str());
+    copy_out(r.dump(), report, cap, len);
+    return rc;
 }
 
 KilnResult KILN_CALL t_dump(KilnStr path, char* written, size_t cap, size_t* len) {
@@ -961,6 +1015,7 @@ const KilnContentApi kTable = {
     /* v3 */ &t_define, &t_definitions,
     /* v4 */ &t_set_ref, &t_undefine_owner, &t_info,
     /* appended to v4 */ &t_icon_alias,
+    /* appended to v4, since 0.2.0-dev.28 */ &t_txn_begin, &t_txn_end,
 };
 
 // ============================================================================================= boot ============
