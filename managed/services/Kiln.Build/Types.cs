@@ -91,7 +91,8 @@ public enum BuildFlags
     /// <summary>Gone after the next restart: no save region of Kiln's, and where the game's save writes the cells anyway
     /// (inside a base, or in a chunk another edit keeps) Kiln puts back the earlier cells at the next start; a cell changed
     /// since keeps that change. Not with <see cref="Unloaded"/> (<see cref="ArgumentException"/>); refused
-    /// (<see cref="BuildException"/>) when the transient journal is full or kiln.saves is missing.</summary>
+    /// (<see cref="BuildException"/>) when the transient journal is full or cannot be written (a full disk), or
+    /// the world's identity is unknown (no kiln.saves).</summary>
     Transient = 1 << 5,
 }
 
