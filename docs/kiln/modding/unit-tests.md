@@ -180,7 +180,12 @@ own. `Unload` right after a mod's auto-run `[KilnTest]` run started (manifest `t
 **Capabilities.** `kiln.Capabilities.Is(name)` answers what `Game.HasFeature` answers, `Why(name)` gives the sentence
 a mod could log, `All` lists the rows. `Override(name, available)` switches a game feature on or off, or a faked
 service off, for the test; it cannot switch on a service the kit has no fake for, and an override changes the
-answer only: nothing behind a feature is faked. `ClearOverride(name)` drops it.
+answer only: nothing behind a feature is faked. `ClearOverride(name)` drops it. A row a Kiln service composes from
+others (`queries.ground`, `queries.reachability`) can be switched off as well: `Kiln.Capabilities` and the service's
+members read it off at once. Switching such a row on cannot lift it while the service reports it off (the worse of
+the two is shown, as in the game). Whenever a row of the kit changes (an override, a fake's own row such as
+`kiln.Queries.Voxels` turning the ray on) and when a harness starts, the services' composed rows are decided again,
+so a raw `Kiln.Capabilities.Is` read follows at once instead of at the services' refresh every 25 steps.
 
 ## Recording fakes (since 0.2.0-dev.27)
 A recording fake is a native table of the kit's under the service's real managed code: what a mod asks is answered
@@ -313,7 +318,10 @@ Ordinary harness calls, including `Step`, `Unload` and `Reload`, have a 30 s wat
 (`KilnHarnessOptions.StopTimeout`). A blocked mod callback is stopped and the harness abandoned, as for a stopped
 test; the exception reports the mod id and the stack where the stop reached it. Disposal still retires the remaining
 mods without running their callbacks and releases the harness for the next test. In an xunit suite a shutdown failure
-is a fixture-cleanup failure, not just a diagnostic, so a blocked `OnUnload` cannot leave the suite green.
+is a fixture-cleanup failure, not just a diagnostic, so a blocked `OnUnload` cannot leave the suite green. A fake of
+the kit whose end throws does not cut `Dispose` short either: every fake ends, the harness lets go of Kiln's state and
+the next harness can start, and then `Dispose` throws what was thrown (an `AggregateException` when several parts
+failed).
 
 A `[KilnTest]` that blocks the tick thread (a loop, `Thread.Sleep`, `.Result`, a lock) past its timeout and a grace
 of 2 s (`KilnTestSuite.WatchdogGrace`) is stopped: an interrupt for a wait, a lock or a sleep, an abort for a loop. It

@@ -128,4 +128,60 @@ public sealed class HarnessTests
     }
 
     private static void Thrower() => throw new FormatException("from the tick thread");
+
+    // ---- a fake's End that throws (dev.28 fix round: 00-integration SOL "a throwing fake's End interrupts harness cleanup") ----
+
+    /// <summary>A fake added to one harness's end: it records that it ended, and throws when it has an exception.</summary>
+    private sealed class EndProbe(string service, Exception? throws, List<string> ended) : IKitFake
+    {
+        public string Service => service;
+        public void Register() { }
+        public void Start(KilnHarness harness) { }
+        public void BeforeStep(KilnHarness harness, ulong step) { }
+        public void End(KilnHarness harness)
+        {
+            ended.Add(service);
+            if (throws is not null) throw throws;
+        }
+        public void AddCoverage(List<CoverageRow> rows) { }
+    }
+
+    [Fact]
+    public void AFakeWhoseEndThrowsStillLetsEveryFakeEndAndTheHarnessLetGo()
+    {
+        var ended = new List<string>();
+        var fault = new FormatException("end-fault");
+        string server;
+        var kiln = new KilnHarness();
+        server = kiln.ServerDirectory;
+        kiln.Step();
+        kiln.ExtraFakesForTests.Add(new EndProbe("probe.first", null, ended));
+        kiln.ExtraFakesForTests.Add(new EndProbe("probe.throws", fault, ended));
+        var thrown = Assert.Throws<FormatException>(kiln.Dispose);
+        Assert.Same(fault, thrown);
+        Assert.Equal(["probe.throws", "probe.first"], ended);   // the later ones first, and the one before it still ended
+        Assert.Null(KitBackend.Instance.Harness);                // the backend let go of the harness
+        Assert.Equal(ServerPhase.Booting, Lifecycle.Phase);
+        Assert.False(Directory.Exists(server));                  // the rest of Dispose ran: the temp folder is gone
+        using var next = new KilnHarness(new KilnHarnessOptions { WaitForOtherHarness = TimeSpan.FromSeconds(5) });
+        next.Step();                                             // and the next harness starts and steps
+        Assert.Same(next, KitBackend.Instance.Harness);
+    }
+
+    [Fact]
+    public void SeveralFakesWhoseEndThrowsComeBackAsOneAggregateException()
+    {
+        var ended = new List<string>();
+        var first = new FormatException("first");
+        var second = new InvalidDataException("second");
+        var kiln = new KilnHarness();
+        kiln.ExtraFakesForTests.Add(new EndProbe("probe.a", first, ended));
+        kiln.ExtraFakesForTests.Add(new EndProbe("probe.b", second, ended));
+        kiln.ExtraFakesForTests.Add(new EndProbe("probe.c", null, ended));
+        var thrown = Assert.Throws<AggregateException>(kiln.Dispose);
+        Assert.Equal<Exception>([second, first], thrown.InnerExceptions);   // in the order they ended
+        Assert.Equal(["probe.c", "probe.b", "probe.a"], ended);
+        Assert.Null(KitBackend.Instance.Harness);
+        kiln.Dispose();                                                        // a second Dispose does nothing
+    }
 }

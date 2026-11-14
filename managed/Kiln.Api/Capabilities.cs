@@ -133,6 +133,17 @@ public sealed class RequiresCapabilityAttribute(string name) : Attribute
     public string Name { get; } = name;
 }
 
+/// <summary>A backend without kiln.caps whose own switches stand over Kiln's managed rows (the test kit: a test's
+/// <c>Capabilities.Override</c>). Read by <see cref="Capabilities"/> only while no kiln.caps table is bound.</summary>
+internal interface ICapabilityOverrides
+{
+    /// <summary>Whether a switch of <paramref name="name"/> is set; <paramref name="row"/> is the row it says.</summary>
+    bool TryGetOverride(string name, out Capability row);
+
+    /// <summary>Whether any switch is set now (a cheap test before <see cref="Capabilities.All"/> merges them).</summary>
+    bool HasOverrides { get; }
+}
+
 /// <summary>
 /// What works in this process, on this game build and side, and why something does not: one row per capability name,
 /// filled by the Kiln core (every sigdb feature, every service), by native services and plugins, and by Kiln's managed
@@ -202,7 +213,7 @@ public static unsafe class Capabilities
     {
         ArgumentNullException.ThrowIfNull(name);
         var s = Current();
-        if (s.Rows.TryGetValue(name, out var row)) return row.State == CapabilityState.Available;
+        if (s.Rows.TryGetValue(name, out var row)) return Overridden(s, row).State == CapabilityState.Available;
         return s.Binding.Table == null && s.Binding.Backend.HasFeature(name) && ServiceCaps.LoweredClaim(name) is null;
     }
 
@@ -214,7 +225,7 @@ public static unsafe class Capabilities
     {
         ArgumentNullException.ThrowIfNull(name);
         var s = Current();
-        if (s.Rows.TryGetValue(name, out var row)) return row;
+        if (s.Rows.TryGetValue(name, out var row)) return Overridden(s, row);
         if (s.Binding.Table == null && s.Binding.Backend.HasFeature(name))
             return ServiceCaps.LoweredClaim(name) ?? new Capability(name, CapabilityState.Available, CapabilityReason.None, "", "backend");
         return NoRow(name);
@@ -228,7 +239,8 @@ public static unsafe class Capabilities
     public static bool IsHeld(string name)
     {
         ArgumentNullException.ThrowIfNull(name);
-        return Current().Rows.TryGetValue(name, out var row) && row.IsHeld;
+        var s = Current();
+        return s.Rows.TryGetValue(name, out var row) && Overridden(s, row).IsHeld;
     }
 
     /// <summary>One sentence about <paramref name="name"/> a mod can log: the name, the state, the reason in words, the
@@ -240,7 +252,33 @@ public static unsafe class Capabilities
 
     /// <summary>Every row, sorted by name (ordinal). A snapshot: it does not change after it was read. Any thread.</summary>
     [AnyThread]
-    public static IReadOnlyList<Capability> All => Current().Sorted;
+    public static IReadOnlyList<Capability> All
+    {
+        get
+        {
+            var s = Current();
+            if (s.Binding.Table != null || s.Binding.Backend is not ICapabilityOverrides { HasOverrides: true }) return s.Sorted;
+            return Array.AsReadOnly(s.Sorted.Select(r => Overridden(s, r)).ToArray());
+        }
+    }
+
+    // With no kiln.caps (a test kit), a backend's switch of a row stands over Kiln's managed row of that name: the worse
+    // of the two is shown (unavailable beats pending beats available), as the core shows the worst report. A switch that
+    // turns a row off wins at once; one that turns it on cannot lift a row Kiln's own code holds off. The managed row
+    // wins a tie, so its own reason stays.
+    private static Capability Overridden(Snapshot s, Capability row)
+    {
+        if (s.Binding.Table != null || s.Binding.Backend is not ICapabilityOverrides overrides ||
+            !overrides.TryGetOverride(row.Name, out var over)) return row;
+        return Rank(over.State) < Rank(row.State) ? over with { SessionDependent = row.SessionDependent } : row;
+
+        static int Rank(CapabilityState state) => state switch
+        {
+            CapabilityState.Unavailable => 0,
+            CapabilityState.Pending => 1,
+            _ => 2,
+        };
+    }
 
     /// <summary>A managed service's row (Kiln's own assemblies), held by Kiln's managed owner rather than the calling
     /// mod's, so it stays when that mod unloads. With the native registry the row a reader sees is the worst report for

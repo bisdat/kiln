@@ -249,6 +249,28 @@ public sealed class PathTests
     }
 
     [Fact]
+    public void A_composed_row_an_earlier_harness_left_off_is_decided_again_when_the_next_one_starts()
+    {
+        // Why A_row_that_is_off_throws_by_its_name failed now and then: a test before it in the same process
+        // (A_cached_reachability_answer_still_checks_arguments_thread_and_capability) switched queries.path off and
+        // CanReach's refusal reported queries.reachability off. The registry binding outlives the harness, so the next
+        // harness read that row until a member decided it again or the service's refresh came (every 25 steps). Whether
+        // one did in between depended on which test of the other collection (QueriesTests) took the harness first.
+        using (var before = new KilnHarness())
+        {
+            before.Step(2);
+            var anchor = before.Entities.Create(From);
+            before.Capabilities.Override("queries.path", false, "switched off by the test");
+            Assert.Throws<KilnUnavailableException>(() => { before.Run(() => (object)Queries.CanReach(new QueryPathRequest(anchor, From, To))); });
+            Assert.False(before.Run(() => Capabilities.Is("queries.reachability")));
+        }
+        var (kiln, _) = Started();
+        using var __ = kiln;
+        Assert.True(kiln.Run(() => Capabilities.Is("queries.path") && Capabilities.Is("queries.reachability") && Capabilities.Is("queries.overlap_origins")),
+            kiln.Run(() => Capabilities.Why("queries.reachability")));
+    }
+
+    [Fact]
     public void The_reachability_mapping_knows_only_three_answers()
     {
         static QueryPathResult R(QueryPathStatus s, string? reason = null) => new(reason == null, reason, 1, 1, s, null, s == QueryPathStatus.Found, [], 0, 1);
