@@ -224,6 +224,44 @@ public sealed class BootThreadApiTests
         Assert.StartsWith("'Example.Log' is a Kiln.Example service API", d[1].GetMessage());  // [AnyThread]: any thread, still no world
         Assert.StartsWith("'Steps.Step' must be called on the tick thread", d[2].GetMessage());
     }
+
+    [Fact]
+    public async Task Settings_in_OnBoot()
+    {
+        // Config.Register and reading Value work in OnBoot (the file is read without writing); writes, Changed and the per-world
+        // config are refused there
+        var d = await Run(A, """
+            public sealed class Settings { public bool Enabled { get; set; } = true; public int Stack { get; set; } = 20; }
+
+            public sealed class M : Mod
+            {
+                public override void OnBoot(BootContext boot)
+                {
+                    var config = Config.Register<Settings>();
+                    var named = Config.Register<Settings>(ConfigKind.Server, "extra");
+                    if (!config.Value.Enabled || named.Value.Stack < 0) return;
+                    config.Set("stack", 30);
+                    config.TrySet("stack", 30, out _);
+                    config.Save();
+                    config.Reload();
+                    config.Changed += e => { };
+                    var world = Config.RegisterWorld<Settings>();
+                }
+
+                public override void OnLoad()
+                {
+                    var config = Config.Register<Settings>();
+                    config.Changed += e => { };
+                    config.Save();
+                }
+            }
+            """, manifest: Boot);
+        Ids(d, "KILN035", "KILN035", "KILN035", "KILN035", "KILN035", "KILN035");
+        Assert.Equal(["Set", "TrySet", "Save", "Reload", "Changed", "RegisterWorld<Settings>"], d.Select(x => x.At()));
+        Assert.StartsWith("'ConfigFile.Set' must be called on the tick thread, but OnBoot runs on the boot thread", d[0].GetMessage());
+        Assert.StartsWith("'ConfigFile.Changed' is refused in boot code (it throws there), but OnBoot runs on the boot thread", d[4].GetMessage());
+        Assert.StartsWith("'Config.RegisterWorld' must be called on the tick thread", d[5].GetMessage());
+    }
 }
 
 /// <summary>KILN121 in boot code: OnBoot runs only while mods.boot is on (Mod.OnBoot is marked with it), so an override passes the row on;
