@@ -123,9 +123,17 @@ public static unsafe class Hooks
     {
         public readonly MidHandler Handler = handler;
     }
+    // A typed link (dev.28, TypedHooks.cs): the generated class's handler and the descriptor it was installed with.
+    internal sealed class TypedReg(SigHandler handler, SigDescriptor sig, ModContext mod, StrongBox<long> inFlight, long cookie,
+        long install) : Reg(mod, inFlight, cookie, install)
+    {
+        public readonly SigHandler Handler = handler;
+        public readonly SigDescriptor Sig = sig;
+    }
 
     internal static readonly ConcurrentDictionary<long, DetourReg> Detours = new();
     internal static readonly ConcurrentDictionary<long, MidReg> Mids = new();
+    internal static readonly ConcurrentDictionary<long, TypedReg> Typed = new();
     private static long _nextInstall;
 
     /// <summary>True when kiln.hooks is loaded on this build.</summary>
@@ -190,6 +198,15 @@ public static unsafe class Hooks
     private static HookHandle Install(string api, string where, ModContext mod, byte kind, nuint address,
         Func<long, StrongBox<long>, long, Reg> make, NativeInstall install)
     {
+        var (handle, rc) = TryInstall(api, mod, kind, address, make, install);
+        return handle ?? throw new InvalidOperationException($"{api}({where}): {HooksNative.Describe(rc)}");
+    }
+
+    // Install without the throw on a refused native install: the handle, or null and the native result code (typed
+    // links turn a refusal into a HookResult). A retired context still throws.
+    internal static (HookHandle? Handle, int Rc) TryInstall(string api, ModContext mod, byte kind, nuint address,
+        Func<long, StrongBox<long>, long, Reg> make, NativeInstall install)
+    {
         lock (HooksGate.Lifecycle)
         {
             if (!mod.Alive) throw HooksGate.Retired(api, mod);
@@ -205,7 +222,7 @@ public static unsafe class Hooks
             {
                 Drop(reg);
                 HookCookies.Return(cookie);  // nothing native carries it
-                throw new InvalidOperationException($"{api}({where}): {HooksNative.Describe(rc)}");
+                return (null, rc);
             }
             reg.Native = native;
             if (!mod.Alive)
@@ -216,19 +233,21 @@ public static unsafe class Hooks
                 HooksGate.Untrack(mod);
                 throw HooksGate.Retired(api, mod);
             }
-            return new HookHandle(cookie, native, reg.Install);
+            return (new HookHandle(cookie, native, reg.Install), HooksNative.Ok);
         }
     }
 
     private static void Add(Reg reg)
     {
         if (reg is DetourReg d) Detours[reg.Cookie] = d;
+        else if (reg is TypedReg t) Typed[reg.Cookie] = t;
         else Mids[reg.Cookie] = (MidReg)reg;
     }
 
     private static void Drop(Reg reg)
     {
         if (reg is DetourReg d) Detours.TryRemove(KeyValuePair.Create(reg.Cookie, d));
+        else if (reg is TypedReg t) Typed.TryRemove(KeyValuePair.Create(reg.Cookie, t));
         else Mids.TryRemove(KeyValuePair.Create(reg.Cookie, (MidReg)reg));
     }
 
@@ -294,7 +313,7 @@ public static unsafe class Hooks
     // A throwing handler used to vanish without a trace (the dispatcher must swallow it). Log the first few faults of
     // each install to its mod's log, from whatever thread the hook runs on (the logger is thread-safe). Counted on the
     // registration the faulting call ran, so a later install under the same cookie starts at 0.
-    private static void ReportFault(Reg? reg, string kind, Exception e)
+    internal static void ReportFault(Reg? reg, string kind, Exception e)
     {
         try
         {
@@ -322,6 +341,7 @@ public static unsafe class Hooks
         {
             if (Detours.TryGetValue(c, out var d) && d.Install == handle.Install && Detours.TryRemove(KeyValuePair.Create(c, d))) reg = d;
             else if (Mids.TryGetValue(c, out var m) && m.Install == handle.Install && Mids.TryRemove(KeyValuePair.Create(c, m))) reg = m;
+            else if (Typed.TryGetValue(c, out var t) && t.Install == handle.Install && Typed.TryRemove(KeyValuePair.Create(c, t))) reg = t;
         }
         // A stale handle's native id is refused by the registry once its link was revived under a new one.
         if (native != 0 && HooksNative.T != null) HooksNative.T->Revoke(native);
@@ -344,6 +364,8 @@ public static unsafe class Hooks
             if (kv.Value.Mod == mod && Detours.TryRemove(kv)) gone.Add(kv.Value);
         foreach (var kv in Mids)
             if (kv.Value.Mod == mod && Mids.TryRemove(kv)) gone.Add(kv.Value);
+        foreach (var kv in Typed)
+            if (kv.Value.Mod == mod && Typed.TryRemove(kv)) gone.Add(kv.Value);
         var t = HooksNative.T;
         foreach (var r in gone)
             if (t != null && r.Native != 0) t->Revoke(r.Native);
