@@ -980,6 +980,7 @@ A friendly NPC on a game NPC's body: talk, wares, a place in the roster.
 | `names` | object |  |  |
 | `place` | object |  |  |
 | `roster` | object |  |  |
+| `routine` | [ref](#ref) or [routine](#routine) |  | Its day plan: a routines block of this mod by name, or a plan written here (it becomes the block <this block's name>.routine). Only the server follows it. |
 | `talk` | string |  | A dialogue block or quests/*.json dialogue of this mod. Another mod's dialogue is not supported by the startup build. |
 | `vendor` | object |  |  |
 | `was` | string |  |  |

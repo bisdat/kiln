@@ -600,4 +600,7 @@ public sealed record NpcBlock : INpcBlock
     public NpcPlace? Place { get; init; }
     /// <summary>Its names in other languages: <c>{ ["de"] = "Tobin der Wanderer" }</c>.</summary>
     public IDictionary<string, string>? Names { get; init; }
+    /// <summary>Its day plan: a routine of this mod (a handle from <c>Blocks.Define</c>, or its name), or a plan written here, which
+    /// becomes the block <c>&lt;this block's name&gt;.routine</c>. Only the server follows it: it asks nothing more of players' games.</summary>
+    public PartRef<RoutineBlock>? Routine { get; init; }
 }

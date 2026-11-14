@@ -282,3 +282,5 @@ static Kiln.VanillaTask.operator ==(Kiln.VanillaTask? left, Kiln.VanillaTask? ri
 virtual Kiln.RoutineTask.EqualityContract.get -> System.Type!
 virtual Kiln.RoutineTask.Equals(Kiln.RoutineTask? other) -> bool
 virtual Kiln.RoutineTask.PrintMembers(System.Text.StringBuilder! builder) -> bool
+Kiln.NpcBlock.Routine.get -> Kiln.PartRef<Kiln.RoutineBlock!>?
+Kiln.NpcBlock.Routine.init -> void

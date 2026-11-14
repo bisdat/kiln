@@ -331,6 +331,68 @@ public sealed class RoutineTests : IDisposable
         Assert.Null(RoutineRegistry.Find("routine-test:day"));
     }
 
+    // ---- an NPC block's routine --------------------------------------------------------------------------------------------
+
+    private static ModBlocks NpcLedger() => new(Mod, 1) { ManifestClients = "mod" };
+
+    [Fact]
+    public void An_npcs_inline_routine_is_the_block_named_after_it_and_keeps_its_identity_through_a_rename()
+    {
+        var mod = NpcLedger();
+        var (_, low, _) = Compiler.Lower(mod, "tobin", new NpcBlock { Name = "Tobin", Body = Bodies.Fisher, Routine = Day });
+        Assert.Equal(GoldenWire.Replace("routine-test:day", "routine-test:tobin.routine"), low.Json["npcRoutine"]!.ToJsonString());
+        Assert.NotNull(low.Json["npc"]);
+        Assert.Null(RoutineRegistry.Find("routine-test:tobin.routine"));                 // nothing before the commit
+        // a renamed NPC keeps the plan's identity; the block is named after the NPC's name of now
+        var renamed = Compiler.Lower(mod, "tobin-the-fisher", new NpcBlock { Name = "Tobin", Was = "tobin", Body = Bodies.Fisher, Routine = Day }).Low.Json["npcRoutine"]!;
+        Assert.Equal("routine-test:tobin.routine", (string?)renamed["key"]);
+        // a Was of the plan's own wins
+        var own = Compiler.Lower(mod, "tobin", new NpcBlock { Name = "Tobin", Body = Bodies.Fisher, Routine = Day with { Was = "tobins-day" } }).Low.Json["npcRoutine"]!;
+        Assert.Equal("routine-test:tobins-day", (string?)own["key"]);
+        // what is wrong with the inline plan names the NPC's field
+        var e = Assert.Throws<BlockError>(() => Compiler.Lower(mod, "tobin", new NpcBlock { Name = "Tobin", Body = Bodies.Fisher, Routine = new RoutineBlock { Fallback = new SleepTask() } }));
+        Assert.Equal(("npc tobin", "routine.fallback"), (e.Block, e.Field));
+        // an NPC without a routine lowers as before
+        Assert.Null(Compiler.Lower(mod, "tobin", new NpcBlock { Name = "Tobin", Body = Bodies.Fisher }).Low.Json["npcRoutine"]);
+    }
+
+    [Fact]
+    public void An_npc_names_a_routine_of_its_own_mod_by_name_or_handle()
+    {
+        var mod = NpcLedger();
+        var day = Define(mod, "workday", Day with { Was = "day" });
+        foreach (var routine in new PartRef<RoutineBlock>[] { "workday", "routine-test:workday", day })
+            Assert.Equal("routine-test:day", (string?)Compiler.Lower(mod, "tobin", new NpcBlock { Name = "Tobin", Body = Bodies.Fisher, Routine = routine }).Low.Json["npcRoutine"]);
+        var e = Assert.Throws<BlockError>(() => Compiler.Lower(mod, "tobin", new NpcBlock { Name = "Tobin", Body = Bodies.Fisher, Routine = "other-mod:day" }));
+        Assert.Equal("routine", e.Field);
+        Assert.Contains("belongs to the mod that assigns it", e.Problem);
+        e = Assert.Throws<BlockError>(() => Compiler.Lower(mod, "tobin", new NpcBlock { Name = "Tobin", Body = Bodies.Fisher, Routine = "nights" }));
+        Assert.Contains("no routine \"nights\"", e.Problem);
+        Assert.Contains("workday", e.Problem);
+        mod.Handles["ilse"] = Compiler.Lower(mod, "ilse", new NpcBlock { Name = "Ilse", Body = Bodies.Villager }).Handle;
+        e = Assert.Throws<BlockError>(() => Compiler.Lower(mod, "tobin", new NpcBlock { Name = "Tobin", Body = Bodies.Fisher, Routine = "ilse" }));
+        Assert.Contains("is a npc, not a routine", e.Problem);
+        // in a data file: a name, or the plan written there
+        var named = BlockJson.Parse<NpcBlock>("""{ "name": "Tobin", "body": "fisher", "routine": "workday" }""");
+        Assert.Equal("workday", named.Routine!.Name);
+        var inline = BlockJson.Parse<NpcBlock>("""{ "name": "Tobin", "body": "fisher", "routine": { "windows": [ { "allDay": true, "task": { "kind": "sit" } } ] } }""");
+        Assert.IsType<SitTask>(inline.Routine!.Inline!.Windows[0].Task);
+    }
+
+    [Fact]
+    public void An_npcs_commit_publishes_its_inline_plan_and_sets_or_clears_its_link()
+    {
+        var mod = NpcLedger();
+        var made = RoutineCompiler.Define(new BlockContext(mod, "npc tobin"), new Lowered(mod), "tobin.routine", Day, "tobin.routine", "routine");
+        RoutineNpc.Bind(mod, "tobin", made, made.GameName);
+        Assert.Same(made, mod.Handles["tobin.routine"]);
+        Assert.Equal("routine-test:tobin.routine", RoutineRegistry.OfNpc(Mod, "tobin"));
+        RoutineNpc.Bind(mod, "tobin", null, "routine-test:day");
+        Assert.Equal("routine-test:day", RoutineRegistry.OfNpc(Mod, "tobin"));
+        RoutineNpc.Bind(mod, "tobin", null, null);
+        Assert.Null(RoutineRegistry.OfNpc(Mod, "tobin"));
+    }
+
     // ---- what a world keeps -------------------------------------------------------------------------------------------------
 
     [Fact]
