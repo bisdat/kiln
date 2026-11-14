@@ -1,0 +1,372 @@
+{
+  "format": 1,
+  "side": "server",
+  "comment": "kiln.routines (16g, villager routines): the villager worker, its task chooser and the setters it calls, found by their prologues; the context offsets and the mark-written function are captured from SetDecision. Server: lab runs of the research probe on this build. A game update that changes register allocation breaks a prologue: the feature goes off and the game chooses alone.",
+  "symbols": {
+    "routines/DecideTask": {
+      "comment": "RVA 0x1fb8c0 on this build",
+      "find": [
+        {
+          "pattern": "80 FA 02 0F 84 ?? ?? ?? ?? 53 48 83 EC 50 48 8B D9 E8 ?? ?? ?? ?? 84 C0"
+        }
+      ]
+    },
+    "routines/SetDecision": {
+      "comment": "RVA 0x1f65b0 on this build",
+      "find": [
+        {
+          "pattern": "48 89 5C 24 08 57 48 83 EC 30 48 8B D9 0F B6 FA 48 8B 89 28 03 00 00 48 85 C9"
+        }
+      ]
+    },
+    "routines/SleepCheck": {
+      "comment": "RVA 0x1f0490 on this build",
+      "find": [
+        {
+          "pattern": "40 56 48 83 EC 30 48 8B F1 48 8B 89 D8 01 00 00 48 85 C9 74 ?? 0F B6 86 D2 01 00 00"
+        }
+      ]
+    },
+    "routines/VillagerWorker": {
+      "comment": "RVA 0x1f7850 on this build",
+      "find": [
+        {
+          "pattern": "40 53 48 83 EC 60 48 83 B9 60 01 00 00 00 48 8B D9 74 ?? 48 83 B9 78 01 00 00 00"
+        }
+      ]
+    },
+    "routines/SetState": {
+      "comment": "RVA 0x1f6da0 on this build",
+      "find": [
+        {
+          "pattern": "48 89 5C 24 10 48 89 6C 24 18 57 48 83 EC 30 48 8D B9 B0 01 00 00 48 8B D9"
+        }
+      ]
+    },
+    "routines/ProcessCommands": {
+      "comment": "RVA 0x1f3320 on this build",
+      "find": [
+        {
+          "pattern": "48 89 5C 24 20 57 48 83 EC 70 4C 8B 81 D8 04 00 00 48 8B F9 41 0F B7 40 40"
+        }
+      ]
+    },
+    "routines/UpdateImportantLocations": {
+      "comment": "RVA 0x1fa3b0 on this build",
+      "find": [
+        {
+          "pattern": "40 55 41 54 48 8D AC 24 E8 FD FF FF 48 81 EC 18 03 00 00 41 B8 58 00 00 00"
+        }
+      ]
+    },
+    "routines/FSM": {
+      "comment": "RVA 0x1fe460 on this build",
+      "find": [
+        {
+          "pattern": "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 48 83 EC 60 0F B6 EA 48 8B F9"
+        }
+      ]
+    },
+    "routines/StateDispatch": {
+      "comment": "RVA 0x1ef600 on this build",
+      "find": [
+        {
+          "pattern": "48 89 5C 24 10 57 48 83 EC 30 48 8B F9 0F B6 DA 48 8B 89 D8 01 00 00 48 85 C9"
+        }
+      ]
+    },
+    "routines/FinishState": {
+      "comment": "RVA 0x1f7750 on this build",
+      "find": [
+        {
+          "pattern": "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 30 48 8B D9 0F B6 F2 48 8B 89 D8 01 00 00"
+        }
+      ]
+    },
+    "@routines/Context": {
+      "comment": "Capture per-worker writable-record offsets from SetDecision, not a global ECS component address.",
+      "find": [
+        {
+          "scope": {
+            "symbol": "routines/SetDecision",
+            "size": 174
+          },
+          "pattern": "48 8B 83 {routines/ctx.common:d32} C6 80 {routines/common.failures:d32} 00"
+        },
+        {
+          "scope": {
+            "symbol": "routines/SetDecision",
+            "size": 174
+          },
+          "pattern": "48 8B 83 {routines/ctx.dynamic:d32} 48 8B 5C 24 ?? 40 88 78 {routines/dynamic.decision:d8}"
+        }
+      ]
+    },
+    "@routines/DirtyRecord": {
+      "comment": "Mark-written ABI is six opaque bookkeeping arguments from SetDecision; tracker pointers are objects, not callbacks.",
+      "find": [
+        {
+          "scope": {
+            "symbol": "routines/SetDecision",
+            "size": 174
+          },
+          "pattern": "48 8B 89 {routines/ctx.commonTracker:d32} 48 85 C9"
+        },
+        {
+          "scope": {
+            "symbol": "routines/SetDecision",
+            "size": 174
+          },
+          "pattern": "48 8B 8B {routines/ctx.dynamicTracker:d32} 48 85 C9"
+        },
+        {
+          "scope": {
+            "symbol": "routines/SetDecision",
+            "size": 174
+          },
+          "pattern": "E8 {routines/MarkWritten:rel32} 48 8B 83 {routines/ctx.common:d32} C6 80 {routines/common.failures:d32} 00"
+        }
+      ]
+    }
+  },
+  "constants": {
+    "routines/ctx.common": {
+      "min_votes": 1
+    },
+    "routines/common.failures": {
+      "min_votes": 1
+    },
+    "routines/ctx.dynamic": {
+      "min_votes": 1
+    },
+    "routines/dynamic.decision": {
+      "min_votes": 1
+    },
+    "routines/ctx.template": {
+      "value": 1104
+    },
+    "routines/dynamic.state": {
+      "value": 0
+    },
+    "routines/dynamic.previous": {
+      "value": 1
+    },
+    "routines/state.count": {
+      "value": 18
+    },
+    "routines/phase.exit": {
+      "value": 2
+    },
+    "routines/common.targetPosition": {
+      "value": 100
+    },
+    "routines/ctx.commonTracker": {
+      "min_votes": 1
+    },
+    "routines/ctx.dynamicTracker": {
+      "min_votes": 1
+    },
+    "routines/ctx.time": {
+      "value": 328
+    },
+    "routines/time.now": {
+      "value": 72
+    },
+    "routines/common.flags": {
+      "value": 0
+    },
+    "routines/common.sleep": {
+      "value": 80
+    },
+    "routines/common.wake": {
+      "value": 84
+    },
+    "routines/common.sleepOverrideBit": {
+      "value": 16
+    }
+  },
+  "features": {
+    "routines.decisions": {
+      "symbols": [
+        "routines/DecideTask",
+        "routines/SetDecision",
+        "routines/SetState",
+        "routines/FinishState",
+        "@routines/Context",
+        "routines/SleepCheck",
+        "@routines/DirtyRecord",
+        "routines/MarkWritten",
+        "routines/ProcessCommands",
+        "routines/VillagerWorker"
+      ],
+      "constants": [
+        "routines/ctx.common",
+        "routines/common.failures",
+        "routines/ctx.dynamic",
+        "routines/dynamic.decision",
+        "routines/ctx.template",
+        "routines/dynamic.state",
+        "routines/dynamic.previous",
+        "routines/state.count",
+        "routines/phase.exit",
+        "routines/common.targetPosition",
+        "routines/ctx.commonTracker",
+        "routines/ctx.dynamicTracker",
+        "routines/ctx.time",
+        "routines/time.now",
+        "routines/common.flags",
+        "routines/common.sleep",
+        "routines/common.wake",
+        "routines/common.sleepOverrideBit"
+      ]
+    }
+  },
+  "sigs": {
+    "routines/VillagerWorker": {
+      "conv": "win64",
+      "ret": "void",
+      "args": [
+        {
+          "name": "ctx",
+          "type": "ptr"
+        }
+      ],
+      "invoke": "none",
+      "abi": {
+        "reads": [
+          "rcx"
+        ],
+        "stack": [],
+        "ret": "rax|callee"
+      }
+    },
+    "routines/DecideTask": {
+      "conv": "win64",
+      "ret": "void",
+      "args": [
+        {
+          "name": "ctx",
+          "type": "ptr"
+        },
+        {
+          "name": "phase",
+          "type": "u8"
+        }
+      ],
+      "invoke": "none",
+      "abi": {
+        "reads": [
+          "rcx",
+          "rdx"
+        ],
+        "stack": [],
+        "ret": "none|callee"
+      }
+    },
+    "routines/SetDecision": {
+      "conv": "win64",
+      "ret": "void",
+      "args": [
+        {
+          "name": "ctx",
+          "type": "ptr"
+        },
+        {
+          "name": "decision",
+          "type": "u8"
+        }
+      ],
+      "invoke": "none",
+      "abi": {
+        "reads": [
+          "rcx",
+          "rdx"
+        ],
+        "stack": [],
+        "ret": "rax"
+      }
+    },
+    "routines/SetState": {
+      "conv": "win64",
+      "ret": "void",
+      "args": [
+        {
+          "name": "ctx",
+          "type": "ptr"
+        },
+        {
+          "name": "state",
+          "type": "u8"
+        }
+      ],
+      "invoke": "none",
+      "abi": {
+        "reads": [
+          "rcx",
+          "rdx"
+        ],
+        "stack": [],
+        "ret": "callee"
+      }
+    },
+    "routines/FinishState": {
+      "conv": "win64",
+      "ret": "bool",
+      "args": [
+        {
+          "name": "ctx",
+          "type": "ptr"
+        },
+        {
+          "name": "condition",
+          "type": "u8"
+        }
+      ],
+      "invoke": "none",
+      "abi": {
+        "reads": [
+          "rcx",
+          "rdx"
+        ],
+        "stack": [],
+        "ret": "rax"
+      }
+    },
+    "routines/SleepCheck": {
+      "conv": "win64",
+      "ret": "bool",
+      "args": [
+        {
+          "name": "ctx",
+          "type": "ptr"
+        }
+      ],
+      "invoke": "none",
+      "abi": {
+        "reads": [
+          "rcx"
+        ],
+        "stack": [],
+        "ret": "rax"
+      }
+    },
+    "routines/ProcessCommands": {
+      "conv": "win64",
+      "ret": "void",
+      "args": [
+        {
+          "name": "ctx",
+          "type": "ptr"
+        }
+      ],
+      "invoke": "none",
+      "abi": {
+        "reads": [
+          "rcx"
+        ],
+        "stack": [],
+        "ret": "rax|callee"
+      }
+    }
+  }
+}
