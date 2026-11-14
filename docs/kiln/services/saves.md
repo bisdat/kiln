@@ -100,6 +100,9 @@ data (objects are serialized when the mod unloads and read into the new instance
   template with `CurrentTransform`. DoNotSave templates (most enemies, loot pickups), inventory item entities,
   and unknown templates: session only. An inventory item's default position is not a persistent identity;
   old item attachments are never matched to a different sword after a restart.
+- Kiln's own services keep values on saved entities the same way, under a scope of their own that no mod id can take
+  (`kiln:<service>`, bundle `entity/kiln:<service>`): Kiln.World's transform scales (`entity/kiln:world`,
+  [world.md](world.md#transform-scale)). A mod's `EntityData` never sees them.
 
 ## Instance data: values that stay with one item
 

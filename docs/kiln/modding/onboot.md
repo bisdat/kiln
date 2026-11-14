@@ -26,8 +26,9 @@ Add `boot` to `kiln.mod.json` ([manifest.md](manifest.md#boot-content-boot-since
 - `"required"`: the same, but a failure stops the start (below). Use it when a server without your content would be
   worse than no server: a world that already holds your items, for example.
 
-A Kiln.Sdk project generates its manifest. To add `boot`, keep your own `kiln.mod.json` beside the project file: the
-build checks it and ships it.
+A Kiln.Sdk project generates its manifest: add `<KilnBoot>true</KilnBoot>` (or `required`) to the project file and the
+generated `kiln.mod.json` says `"boot"` ([mdk.md](mdk.md)). A project that keeps its own `kiln.mod.json` beside the
+project file says `"boot"` there; the build checks it and ships it, and the file wins over `KilnBoot`.
 
 ## What OnBoot is
 ```csharp
@@ -98,23 +99,37 @@ one is dropped, with a warning (`ShadowedByFile`) in kiln.log and `state/boot.js
 - The format and the producer are in [boot-gamedata.md](boot-gamedata.md).
 
 ## Reading your mod's settings
-In this build `Config.Register<T>()` cannot be called in `OnBoot`: it needs the tick thread and throws
-`InvalidOperationException` ("This must run on the tick thread"), and the mod is then left out. Keep values `OnBoot`
-needs in code or in a data file of the mod for now.
+`Config.Register<T>().Value` works in `OnBoot`: it reads the mod's config file and its defaults as `OnLoad` does,
+and writes nothing. Register the same config again in `OnLoad`; that registration takes over the read, so `OnBoot` and
+the running mod see the same values. Writes, `Reload`, a `Changed` handler and `RegisterWorld` are refused in `OnBoot`
+("… is not available in OnBoot (it runs before the game's first tick); call it in OnLoad"). Details and an example:
+[config.md](../config.md#in-modonboot).
 
 ## When a mod fails
 - **`OnBoot` throws**, or a staged definition does not compile: the mod is out. None of its definitions and none of its
   files are in the generation, and every mod that requires it is out too. The server starts without them.
 - **A collector refuses a definition** (a resource patch on a field another mod sets, for example): the same.
+- **A bad entry in the mod's own files** (an `assets/assets.json` entry with a bad GUID or a missing file, a
+  `blocks/*.json`, `skills/*.json` or `quests/*.json` that is not JSON or cannot be read, a block or game-tree node with
+  an error): Kiln logs it and leaves that entry out; the rest of the mod loads, as without `OnBoot`.
 - An excluded mod does not load later in this process either: kiln.log says `RestartRequiredBoot: ... restart after
   fixing it`. Fix it and restart the server.
-- **A mod with `"boot": "required"`** that fails stops the start. The game is never entered: no world or save is loaded.
-  The process ends with exit code `0x4B01`; on Linux, under Wine, the exit status is its low byte, 1. kiln.log says
-  `boot: the start stops before the game's entry point (exit code 0x4B01)`, and `kiln/state/boot.json` names the mod,
-  the definition and the reason. A required mod's resource patch that cannot be written when the game's data comes up
-  stops the start the same way.
-- A mod with `boot` that was enabled after the start (`MissedPhase`), or whose manifest or assembly changed since, does
-  not load until the next start.
+- **A mod with `"boot": "required"`** gets all of its boot content or the start stops: a failed `OnBoot`, a refused
+  definition, and also any bad entry in its own files (the list above) that would be left out of another mod. The game
+  is never entered: no world or save is loaded. The process ends with exit code `0x4B01`; on Linux, under Wine, the
+  exit status is its low byte, 1. kiln.log ends with the stop line, which names the mod, the file or entry and the
+  reason, for example `boot: the start stops before the game's entry point (exit code 0x4B01): my-mod: assets
+  assets/assets.json: collector assets: kiln.assets: assets/assets.json: entries[1] (resource good.bin): resource: bad
+  guid; state/boot.json lists every boot mod's state and issue`. `kiln/state/boot.json` has the same. What can only fail
+  once the game's data comes up stops the start the same way, before a world loads: a resource patch that cannot be
+  written, a world-table block the merge cannot apply, quests or NPCs of the mod that the quest build leaves out, and on
+  a game client a texture override that cannot be applied. What only a loading world shows stops it while that world
+  loads, before a player is in it: a game-tree node the tree build leaves out (an unknown `like` or `from`), an item,
+  recipe or clone the world does not register. On a game client a required mod with VFX or materials stops the start
+  when this start builds none (kiln.vfx turned off in `kiln/config/vfx.json`, a game update Kiln's VFX are not made
+  for yet); a dedicated server builds no VFX at all (each player's game does), so that never stops a server.
+- A mod with `boot` that was enabled after the start (`MissedPhase`), or whose files changed since (below), does not
+  load until the next start.
 
 `kiln/state/boot.json`, section `boot`: whether the phase ran (`deferred`), the boot mods, the collectors, each mod's
 state and definition count, every issue (mod, kind, key, phase, code, reason) and the exit code when the start stopped.
@@ -126,6 +141,50 @@ state and definition count, every issue (mod, kind, key, phase, code, reason) an
   after `OnLoad`, when its committed definitions are active (their run-time parts: rules, icons). Subscribe in
   `OnLoad`. A mod whose `OnBoot` staged nothing gets the event too, with no definitions.
 - The staged blocks keep their names: `mod:name` from another mod, as for a block defined in `OnLoad`.
+- `Blocks.Find(name)` finds a committed boot block from the commit on: in `OnLoad` already (before the event), and after
+  the mod's run-time unload, because the content stays in the game until the process ends. A block defined in `OnLoad`
+  can name it (`Applies = new StatusApply { Status = "chill" }`). The handle has the ids the generation published.
+- `Blocks.Define` in `OnLoad` under the name of a committed boot block: the same block (the same kind, the same values)
+  gives the committed handle and registers nothing again; another one throws `BlockError`
+  (`RestartRequiredBoot: chill differs from the statuses definition this process's boot generation committed ...`).
+  What is in the game cannot change before a restart: change it in `OnBoot` and restart.
+
+## After a change: restart
+The boot generation keeps what the start read. When the generation commits, Kiln freezes each boot mod's inputs:
+
+- **every file of the mod's folder**, at any depth: the manifest, the assemblies, `blocks/`, `assets/`, `quests/`,
+  `skills/`, and any other file your `OnBoot` may read itself;
+- **the settings your `OnBoot` read**: for each config it registered with `Config.Register`, the values it got (the
+  file's values, checked and clamped, or the defaults).
+
+A later load of the mod in the same process (after `Mods.UnloadAsync`, or the launcher's switch) compares them. Any
+difference is refused before the mod's code loads:
+`RestartRequiredBoot: mod frost-tokens changed since this process's boot generation committed its boot content
+(blocks/frost.json changed); restart the game (or the server) to load the new version`, or for a setting
+`RestartRequiredBoot: mod frost-tokens's config frost-tokens changed since its OnBoot read it (altars: 4 -> 6); its boot
+content was made with the earlier values: restart the game (or the server) to load it with the new ones`. Put the file
+back as it was, or restart. `Mods.ReloadAsync` of a loaded boot mod is refused the same way, whether anything changed or
+not.
+
+What is not a change:
+- a JSON file written again with the same values (other spacing, comments, line endings, a byte-order mark): it counts
+  by its parsed value; the order of its keys does count;
+- a config file written again with the same values: it counts by the values the mod reads from it, so Kiln's own
+  rewrite of it when the mod registers it in `OnLoad` (comments, missing entries, its canonical form) is no change. A
+  changed value of a config `OnBoot` registered is one, even for an entry `OnBoot` did not use;
+- files and folders whose name starts with `.` (the launcher's `.disabled` and `.kiln-source.json`), and `*.kiln-tmp`;
+- at the top of the folder: `*.deps.json`, `*.runtimeconfig.json` and Kiln's own `Kiln.*` files (`Kiln.Api.dll`, the
+  shared `Kiln.*.dll`, their `.pdb` and `.xml`), which no loader takes from a mod (a deploy leaves them out);
+- the mod's data folder (`Context.DataDirectory`) and `kiln/config` (besides the configs above), should they lie inside
+  the mod's folder: what the mod and Kiln write while they run. Do not write into your own mod folder while the game
+  runs: such a file counts, and the mod then loads again only after a restart.
+
+Reading the files costs a little time at the start: Kiln hashes every file of each boot mod once, before its `OnBoot`.
+The check at the commit and later loads hash only the files whose size or write time changed since.
+
+If a mod's inputs change while the boot phase runs (between its `OnBoot` and the commit), its content matches no
+version of the files: kiln.log warns (`its files changed while the boot phase ran`), and the mod loads again only after a
+restart.
 
 ## Where it runs
 - **Dedicated servers.** The phase runs when hooks and .NET are on, an enabled mod of the server says `boot`, and
@@ -148,14 +207,8 @@ key and the JSON Kiln lowers), what lowered (`run.Definitions`), and why it fail
 same way and fails the build when it fails ([baked.md](baked.md)).
 
 ## A complete example
-`kiln.mod.json` beside the project, with `"boot": true`:
-
-```jsonc
-{ "id": "frost-tokens", "name": "Frost Tokens", "version": "1.0.0", "apiVersion": "0.2",
-  "side": "both", "clients": "kiln", "entryAssembly": "FrostTokens.dll", "boot": true }
-```
-
-`FrostTokens.csproj` with `<KilnServices>Blocks</KilnServices>`, and:
+`FrostTokens.csproj` with `<KilnServices>Blocks</KilnServices>` and `<KilnBoot>true</KilnBoot>` (or, instead of
+`KilnBoot`, a `kiln.mod.json` of your own beside the project with `"boot": true`), and:
 
 ```csharp
 using Kiln;

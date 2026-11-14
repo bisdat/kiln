@@ -42,6 +42,7 @@ internal sealed class TerrainEngine(ITerrainBackend backend, TerrainSession sess
         {
             if (!TryBook(out book, out var error)) return Result(TerrainState.Refused, error);
             session.Learn(world, backend.Mod, book!);
+            TerrainLoss.Witness(backend, book!);   // the witness knows every plan the ledger has (TerrainLoss)
             book!.Plans.TryGetValue(patch.Id, out rec);
             if (rec is not null)
             {
@@ -68,8 +69,8 @@ internal sealed class TerrainEngine(ITerrainBackend backend, TerrainSession sess
                     foreign.Add(new TerrainConflict(TerrainConflictKind.OtherPlan, TerrainPlan.WholeBlock(b), owner));
             if (foreign.Count > 0)
                 return Result(TerrainState.Refused, $"{foreign.Count} block(s) belong to {foreign[0].Owner}", conflicts: foreign);
-            // no record, but the ground may hold this plan already: its ledger was lost (TerrainLoss, "When the ledger is gone")
-            if (rec is null && !book.Unforget(patch.Id) && await TerrainLoss.Check(backend, plan, book, options.LoadTimeout) is { } lost) return Result(lost.State, lost.Reason);
+            // no record, but the witness says this world had one: its ledger was lost (TerrainLoss, "When the ledger is gone")
+            if (rec is null && !book.Unforget(patch.Id) && TerrainLoss.Check(backend, plan, book) is { } lost) return Result(lost.State, lost.Reason);
 
             if (rec is null)
             {
@@ -101,6 +102,8 @@ internal sealed class TerrainEngine(ITerrainBackend backend, TerrainSession sess
             rec.Complete = false;
             rec.KilnVersion = backend.KilnVersion;
             backend.Save(book);
+            if (!TerrainLoss.Witness(backend, book))
+                return Result(TerrainState.Refused, "the terrain ownership witness could not be written; nothing was changed");
             session.Claim(world, backend.Mod, patch.Id, plan.Blocks().Select(TerrainPlan.BlockKey));
         }
 
@@ -354,7 +357,7 @@ internal sealed class TerrainEngine(ITerrainBackend backend, TerrainSession sess
                 if (session.OwnerOf(world, backend.Mod, TerrainPlan.BlockKey(b)) is { } owner)
                     foreign.Add(new TerrainConflict(TerrainConflictKind.OtherPlan, TerrainPlan.WholeBlock(b), owner));
             if (foreign.Count > 0) return Report(true, null, TerrainState.Refused, foreign);
-            if (rec is null && !book.WasForgotten(patch.Id) && await TerrainLoss.Check(backend, plan, book, options.LoadTimeout) is { } lost) return Report(lost.State == TerrainState.Refused, lost.Reason, lost.State);
+            if (rec is null && !book.WasForgotten(patch.Id) && TerrainLoss.Check(backend, plan, book) is { } lost) return Report(true, lost.Reason, lost.State);
         }
         if (session.Running(world, backend.Mod, patch.Id)) return Report(true, "the plan is being applied already", TerrainState.Refused);
         if (patch.Persistence == TerrainPersistence.Transient)
@@ -419,6 +422,7 @@ internal sealed class TerrainEngine(ITerrainBackend backend, TerrainSession sess
         if (!TryBook(out var book, out _)) return false;
         if (!book!.Forget(id)) return false;
         backend.Save(book);
+        TerrainLoss.Unwitness(backend, id);
         session.Learn(backend.WorldId ?? "", backend.Mod, book);
         return true;
     }

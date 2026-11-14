@@ -34,6 +34,17 @@ public static partial class Blocks
         MoveApplications.RefuseDefines = count;
     }
 
+    /// <summary>For Kiln's own lab: the next <paramref name="count"/> documents a routed weapon writes (a new generation's, or an applied one's written
+    /// again after a content application) are applied and then reported refused, as if kiln.content had refused a rule in them; the content
+    /// transaction takes back what they wrote.</summary>
+    [Experimental("KILNX001", UrlFormat = "https://github.com/frostdev-ops/kiln/blob/main/docs/kiln/modding/analyzers.md#kilnx001")]
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public static void LabFailMoveWrites(int count)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
+        MoveApplications.FailWrites = count;
+    }
+
     /// <summary>For Kiln's own lab: plans and applies a routed weapon's moves again now, as a content application would. False: the weapon has no follow-ups.</summary>
     [Experimental("KILNX001", UrlFormat = "https://github.com/frostdev-ops/kiln/blob/main/docs/kiln/modding/analyzers.md#kilnx001")]
     [EditorBrowsable(EditorBrowsableState.Never)]

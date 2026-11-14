@@ -703,6 +703,7 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
         _lastAllocated = GC.GetTotalAllocatedBytes();
         (_gc0, _gc1, _gc2, _gcPause) = (GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2), GC.GetTotalPauseDuration());
         Lifecycle.Phase = ServerPhase.Booting;
+        ServiceTick.StartEarlyServices();  // rows a mod reads in OnLoad (world.transform_scale), decided before it does
         _mods.LoadAll();
         Lifecycle.ModsLoaded = true;
         var all = Kiln.Mods.All;

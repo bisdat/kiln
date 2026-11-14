@@ -78,21 +78,56 @@ pub async fn cook_run(app: AppHandle, game_id: String, mod_id: Option<String>) -
         // second when it is there), only when an enabled mod of this start asks for the boot phase ("no mod needs the boot
         // snapshot" otherwise: nothing runs). Never an error and never longer than its limit: without it the game starts
         // all the same and kiln.boot says why (`bootSnapshot` in the result: shell/cook.ts says it in one line).
-        let snapshot = play.then(|| {
-            use kiln_manage::boot_snapshot as bs;
-            let s = bs::make_if_needed(&bs::boot_mods(&g), || {
-                let tools = kiln_manage::cooktools::locate(&locate).map_err(|e| e.message);
-                bs::make_with(tools, &g.path, false, Some(bs::LAUNCHER_LIMIT), &mut |l| {
-                    p.borrow_mut().report(None, &format!("Game data for OnBoot mods ({}, once per game build): {l}", bs::SIZE_TEXT));
-                }, &|| p.borrow().canceled())
-            });
-            p.borrow_mut().report(Some(1.0), &s.summary());
-            s
-        });
+        let snapshot = play.then(|| boot_snapshot_step(&g, &kiln_manage::boot_snapshot::boot_mods(&g), &locate, &p));
         let mut v = to_value(run)?;
         if let (Some(s), Some(o)) = (snapshot, v.as_object_mut()) {
             o.insert("bootSnapshot".into(), to_value(s)?);
         }
         Ok(v)
+    }))
+}
+
+/// The boot game-data step of a start (kiln_manage::boot_snapshot): made, or found, when one of `mods` (the start's
+/// enabled mods that ask for the boot phase) needs it; skipped without running anything otherwise. Its lines are the
+/// task's progress, and the task's Cancel stops the tool. Never an error, never longer than its limit.
+/// The start's own timeline follows it too (kiln_manage::start_progress, when Play began one: `launch_begin`): while the
+/// tool checks, the time after the cook is not a stalled start; once it builds a snapshot, the start shows its
+/// `boot-snapshot` step with the tool's lines, ended when the tool ends. A snapshot no mod needs, or one found current,
+/// shows no step.
+fn boot_snapshot_step(g: &kiln_manage::game::GameInstall, mods: &[String], locate: &Locate,
+                      p: &std::cell::RefCell<&mut dyn kiln_manage::task::Progress>) -> kiln_manage::boot_snapshot::BootSnapshot {
+    use kiln_manage::boot_snapshot as bs;
+    use super::launch::{now_ms, track};
+    let s = bs::make_if_needed(mods, || {
+        track(&g.id, |t| t.boot_snapshot_check());
+        let tools = kiln_manage::cooktools::locate(locate).map_err(|e| e.message);
+        let s = bs::make_with(tools, &g.path, false, Some(bs::LAUNCHER_LIMIT), &mut |l| {
+            track(&g.id, |t| t.boot_snapshot_line(now_ms(), l));
+            p.borrow_mut().report(None, &format!("Game data for OnBoot mods ({}, once per game build): {l}", bs::SIZE_TEXT));
+        }, &|| p.borrow().canceled());
+        track(&g.id, |t| t.boot_snapshot_done(now_ms()));
+        s
+    });
+    p.borrow_mut().report(Some(1.0), &s.summary());
+    s
+}
+
+/// Play once with another profile (launch mode `once`): the same boot game-data step Play runs after its cook, for the
+/// mods that single start loads (kiln_manage::boot_snapshot::boot_mods_once: the profile's enabled Kiln mods and, by
+/// its rule, the Kiln drop-ins), before `launch_play` writes that profile's file. A task whose result is the
+/// BootSnapshot (`skipped` when no mod of that start needs it). A single start cooks nothing. Refused while the game
+/// runs; `not_found` for an unknown profile. A failed or missing producer is in the result, never the task's error:
+/// the start goes on and kiln.boot says why the game data is unavailable.
+#[tauri::command]
+pub async fn boot_snapshot_run(app: AppHandle, game_id: String, profile_id: String) -> Result<TaskId, Error> {
+    let g = blocking({ let id = game_id.clone(); move || crate::state::game(&id) }).await?;
+    let python = bundled_python(&app);
+    Ok(spawn_task(&app, "boot_snapshot_run", "Game data for OnBoot mods".to_string(), move |p| {
+        cook::refuse_running(super::engines::game_running(&g)?)?;
+        let dirs = dirs()?;
+        let mods = kiln_manage::boot_snapshot::boot_mods_once(&dirs, &g, &profile_id)?;
+        let locate = Locate::from_process(None, Some(dirs.root.join("cooktools")), python);
+        let p = std::cell::RefCell::new(p);
+        to_value(boot_snapshot_step(&g, &mods, &locate, &p))
     }))
 }

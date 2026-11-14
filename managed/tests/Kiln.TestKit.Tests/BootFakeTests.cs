@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 // The kit's boot phase (Fakes/Boot/): a boot mod's OnBoot as a start runs it, then the mod loads with its boot content committed.
+using System.Text.Json.Nodes;
 using Xunit;
 
 namespace Kiln.TestKit.Tests;
@@ -46,6 +47,50 @@ public sealed class BootFakeTests
     }
 
     [Fact]
+    public void ASettingOnBootReadIsFrozenByItsValue()
+    {
+        using var kiln = new KilnHarness();
+        kiln.BootPhase.SetRecord("item:Material_T1_Wood_Logs", """{"maxStackSize": 120}""");
+        var file = Path.Combine(kiln.ConfigDirectory, "tk-boot.json");
+        Directory.CreateDirectory(kiln.ConfigDirectory);
+        File.WriteAllText(file, """{ "coldSeconds": 4 }""");  // not Kiln's canonical form: OnLoad writes that
+        var run = kiln.BootPhase.Run(Folder);
+        Assert.True(run.Ok, run.Reason);
+        Assert.Contains("\"seconds\":4", Assert.Single(run.Staged, d => d.Kind == "statuses").Json);
+        var mod = kiln.LoadFolder(Folder);
+        kiln.Boot();
+        kiln.Step(3);
+        Assert.True(mod.IsLoaded, mod.Error);
+        var canonical = File.ReadAllText(file);
+        Assert.NotEqual("""{ "coldSeconds": 4 }""", canonical);  // the runtime registration rewrote it canonically
+
+        // the canonical rewrite, and the same value written another way, load again (unload, then Mods.LoadAsync of its folder)
+        ModOperationResult LoadAgain()
+        {
+            var task = Mods.LoadAsync("tk-boot");
+            kiln.Step(2);
+            return task.Result;
+        }
+        kiln.Unload(mod);
+        var again = LoadAgain();
+        Assert.True(again.Ok, again.Message);
+        kiln.Unload(mod);
+        File.WriteAllText(file, "// my settings\n{\n  \"coldSeconds\": 4,\n}\n");
+        again = LoadAgain();
+        Assert.True(again.Ok, again.Message);
+
+        // another value: the boot content was made with 4
+        kiln.Unload(mod);
+        File.WriteAllText(file, """{ "coldSeconds": 5 }""");
+        again = LoadAgain();
+        Assert.False(again.Ok);
+        Assert.StartsWith("RestartRequiredBoot:", again.Message);
+        Assert.Contains("config tk-boot", again.Message);
+        Assert.Contains("coldSeconds: 4 -> 5", again.Message);
+        Assert.Contains("restart the game", again.Message);
+    }
+
+    [Fact]
     public void TheRowsSwitchedOffRefuseAsInAGame()
     {
         using var kiln = new KilnHarness();
@@ -59,5 +104,20 @@ public sealed class BootFakeTests
         run = kiln.BootPhase.Run(Folder, commit: false);
         Assert.Contains(run.Issues, i => i.Code == "BootCapOff");
         Assert.Empty(run.Staged);  // its OnBoot did not run
+    }
+
+    [Fact]
+    public void AKilnSdkModOptsInWithKilnBootAlone()
+    {
+        // tk-boot-sdk has no kiln.mod.json of its own: <KilnBoot>true</KilnBoot> wrote "boot", and its build passed KILN034
+        var folder = TestMods.Folder("TkBootSdk");
+        var manifest = JsonNode.Parse(File.ReadAllText(Path.Combine(folder, "kiln.mod.json")))!.AsObject();
+        Assert.Equal("tk-boot-sdk", (string?)manifest["id"]);
+        Assert.True((bool?)manifest["boot"]);
+        using var kiln = new KilnHarness();
+        var run = kiln.BootPhase.Run(folder);
+        Assert.True(run.Ok, run.Reason);
+        Assert.Equal(BootModState.Committed, run.State);
+        Assert.Equal(["statuses/tk-sdk-cold"], run.Definitions);
     }
 }

@@ -149,6 +149,15 @@ public abstract class ConfigFile
     /// <summary>Why the last read of the file was refused (bad JSON), or null.</summary>
     public string? LastError { get; private set; }
 
+    /// <summary>Why the last write of the file failed ("cannot write", the file and the reason: a read-only folder, a
+    /// full disk), or null when the last write succeeded or nothing was written yet. <see cref="Set"/> and
+    /// <see cref="Save"/> do not throw for it: look here after them when you tell a player "saved".
+    /// <see cref="TrySet"/> answers false instead. Since 0.2.0-dev.28.</summary>
+    public string? LastWriteError { get; private set; }
+
+    // Set or Save changed the file's values and the write failed: the file on disk is behind them until a write succeeds.
+    private bool _unsaved;
+
     /// <summary>Corrections made at the last read (out-of-range values clamped, bad values replaced).</summary>
     public IReadOnlyList<string> Warnings { get; private set; } = [];
 
@@ -202,20 +211,35 @@ public abstract class ConfigFile
         return node.Get(Holder(chain));
     }
 
-    /// <summary>Like <see cref="TrySet"/>; throws <see cref="ArgumentException"/> when the value is refused.</summary>
+    /// <summary>Like <see cref="TrySet"/>, but throws <see cref="ArgumentException"/> when the value is refused. A
+    /// file that cannot be written does not stop it, as before 0.2.0-dev.28: the value applies for this session, the
+    /// failure is logged, and <see cref="LastWriteError"/> says why the file does not hold it. Use
+    /// <see cref="TrySet"/> where the caller must know the value was saved.</summary>
     public void Set(string path, object? value)
     {
-        if (!TrySet(path, value, out var error)) throw new ArgumentException(error, nameof(value));
+        if (Game.InBoot) throw new InvalidOperationException(Game.NotInBoot("ConfigFile.Set"));
+        Game.AssertTickThread();
+        if (!TrySetCore(path, value, strict: false, out var error)) throw new ArgumentException(error, nameof(value));
     }
 
     /// <summary>Changes one entry: validates it (out of range is refused, not clamped), applies it (unless it
     /// requires a restart: then only the file changes), writes the file and raises <see cref="Changed"/>.
     /// <paramref name="value"/>: a CLR value, a <see cref="JsonElement"/>/<see cref="JsonNode"/> or text ("12",
-    /// "on", "Hard", "5m", "[1, 2]"). Tick thread; not in <see cref="Mod.OnBoot"/>.</summary>
+    /// "on", "Hard", "5m", "[1, 2]"). True means the value is set and the file holds it. All or nothing: when it
+    /// returns false it has changed nothing. That includes a file that cannot be written
+    /// (<paramref name="error"/> then says "cannot write" and why): the entry keeps its running value and its file
+    /// value, and <see cref="Changed"/> is not raised. Tick thread; not in <see cref="Mod.OnBoot"/>.</summary>
     public bool TrySet(string path, object? value, out string error)
     {
         if (Game.InBoot) throw new InvalidOperationException(Game.NotInBoot("ConfigFile.Set"));
         Game.AssertTickThread();
+        return TrySetCore(path, value, strict: true, out error);
+    }
+
+    // strict (TrySet): a write that fails takes the change back and answers false. Not strict (Set): the change stays
+    // for this session, as it always did, and the answer is true.
+    private bool TrySetCore(string path, object? value, bool strict, out string error)
+    {
         if (!_byPath.TryGetValue(path ?? "", out var entry))
         {
             error = $"{Id} has no entry '{path}'";
@@ -230,8 +254,15 @@ public abstract class ConfigFile
         if (!ConfigSchema.FromObject(node, value, out var v, out error)) return false;
         var holder = Holder(chain);
         var running = node.Get(holder);
-        var before = _file.GetValueOrDefault(node.Path);
-        if (ConfigSchema.ValueEquals(before, v) && (node.RequiresRestart || ConfigSchema.ValueEquals(running, v))) return true;
+        var inFile = _file.TryGetValue(node.Path, out var before);
+        if (ConfigSchema.ValueEquals(before, v) && (node.RequiresRestart || ConfigSchema.ValueEquals(running, v)))
+        {
+            // nothing to change; but a value an earlier Set or Save could not write is not in the file, and TrySet
+            // does not say it is
+            if (!strict || !_unsaved || TryWrite(out var again)) return true;
+            error = $"{Id}: '{node.Path}' holds that value for this session, but it is not saved: {again}";
+            return false;
+        }
         _file[node.Path] = ConfigSchema.Copy(node, v);
         IReadOnlyList<string> changed = [], pending = [];
         if (node.RequiresRestart && !ConfigSchema.ValueEquals(running, v)) pending = [node.Path];
@@ -240,14 +271,29 @@ public abstract class ConfigFile
             node.Set(holder, v);
             changed = [node.Path];
         }
-        Write();
+        if (!TryWrite(out var failure))
+        {
+            if (strict)
+            {
+                // all or nothing: a value the file does not hold would be gone at the next start, while the caller
+                // was told it is set. The entry goes back to what it was, in the game and in the file's values.
+                if (changed.Count > 0) node.Set(holder, running);
+                if (inFile) _file[node.Path] = before;
+                else _file.Remove(node.Path);
+                error = $"{Id}: '{node.Path}' was not changed: {failure}";
+                return false;
+            }
+            _unsaved = true;  // Set: the value applies for this session; LastWriteError says why the file lacks it
+        }
         Log(LogLevel.Info, $"config {Id}: {node.Path} = {ConfigSchema.Format(node, v)}{(pending.Count > 0 ? " (applies after a restart)" : "")}");
         Raise(changed, pending, ConfigChangeSource.Api);
         return true;
     }
 
     /// <summary>Writes the running values into the file (after the mod changed its <c>Value</c> in code). Entries
-    /// waiting for a restart keep their file value. Tick thread; not in <see cref="Mod.OnBoot"/>.</summary>
+    /// waiting for a restart keep their file value. A file that cannot be written does not make it throw: the failure
+    /// is logged, <see cref="LastWriteError"/> says why (it is null after a write that succeeded), the running values
+    /// stay and a later <c>Save</c> writes them. Tick thread; not in <see cref="Mod.OnBoot"/>.</summary>
     public void Save()
     {
         if (Game.InBoot) throw new InvalidOperationException(Game.NotInBoot("ConfigFile.Save"));
@@ -259,7 +305,7 @@ public abstract class ConfigFile
             var pending = node.RequiresRestart && _file.TryGetValue(node.Path, out var fv) && !ConfigSchema.ValueEquals(fv, running);
             if (!pending) _file[node.Path] = ConfigSchema.Copy(node, running);
         }
-        Write();
+        if (!TryWrite(out _)) _unsaved = true;
     }
 
     /// <summary>Reads the file now (Kiln also does this by itself when the file changes). Tick thread; not in
@@ -629,22 +675,42 @@ public abstract class ConfigFile
         return sb.ToString();
     }
 
-    private void Write(string? text = null)
+    // Reading a config never fails because its file cannot be rewritten: the load paths log and go on.
+    private void Write(string? text = null) => TryWrite(out _, text);
+
+    // False (logged, `error` = "cannot write <file>: <why>", also in LastWriteError) when the file could not be written;
+    // its earlier content is then still there. True also for a per-world config while no world is open: its values
+    // live in memory.
+    private bool TryWrite(out string error, string? text = null)
     {
-        if (FilePath.Length == 0) return;  // per-world, no world open
+        error = "";
+        if (FilePath.Length == 0) return true;  // per-world, no world open
         text ??= Generate();
+        var tmp = FilePath + ".tmp";
         try
         {
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(FilePath)!);
-            var tmp = FilePath + ".tmp";
             File.WriteAllText(tmp, text, new UTF8Encoding(false));
             File.Move(tmp, FilePath, overwrite: true);
             _lastText = text;
             UpdateStamp();
+            LastWriteError = null;
+            _unsaved = false;  // the file holds every value now
+            return true;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            Log(LogLevel.Error, $"config {Id}: cannot write {FilePath}: {e.Message}");
+            error = $"cannot write {FilePath}: {e.Message}";
+            LastWriteError = error;
+            Log(LogLevel.Error, $"config {Id}: {error}");
+            try
+            {
+                File.Delete(tmp);  // nothing half-written stays beside the file
+            }
+            catch (Exception x) when (x is IOException or UnauthorizedAccessException)
+            {
+            }
+            return false;
         }
     }
 
@@ -696,6 +762,8 @@ public abstract class ConfigFile
         _lastText = _lastBadText = null;
         Stamp = default;
         LastError = null;
+        LastWriteError = null;  // the other world's file
+        _unsaved = false;
         Warnings = [];
         if (worldDirectory is not null) Load(initial: true);  // reads the file, or writes it from the running values
         var changed = new List<string>();
@@ -829,8 +897,12 @@ public abstract class ConfigFile
         return false;
     }
 
+    /// <summary>A reading that only compares values (Kiln.Host's restart check of a boot mod's config): logs nothing.</summary>
+    internal bool Quiet;
+
     private void Log(LogLevel level, string text)
     {
+        if (Quiet) return;
         if (Owner is not null) Owner.Log.Write(level, text);
         else Backend.Current.Log(0, level, text);
     }
@@ -972,8 +1044,39 @@ public static partial class Config
             if (BootReads.TryGetValue(id, out var earlier) && ReferenceEquals(earlier.Frame, frame))
                 throw new InvalidOperationException($"config '{id}' is already registered");
         var read = file.LoadForBoot();
-        lock (Lock) BootReads[id] = read;
+        lock (Lock)
+        {
+            BootReads[id] = read;
+            // the effective values the boot generation may depend on: Kiln.Host freezes them with the mod's files (BootInputs)
+            if (mod is not null)
+            {
+                if (!BootValueReads.TryGetValue(mod.Info.Id, out var list)) BootValueReads[mod.Info.Id] = list = [];
+                list.RemoveAll(v => string.Equals(v.Id, id, StringComparison.OrdinalIgnoreCase));
+                list.Add(new BootValues(id, kind, typeof(T).Assembly.GetName().Name ?? "", typeof(T).FullName ?? typeof(T).Name, file.ValuesJson()));
+            }
+        }
         return file;
+    }
+
+    /// <summary>A config a mod's OnBoot registered: its id and kind, the settings type (assembly simple name, full name) and the
+    /// effective values OnBoot read (<see cref="ConfigFile.ValuesJson"/>: the file's values, validated and clamped, else the defaults).</summary>
+    internal sealed record BootValues(string Id, ConfigKind Kind, string Assembly, string Type, string Values);
+
+    private static readonly Dictionary<string, List<BootValues>> BootValueReads = new(StringComparer.Ordinal);
+
+    /// <summary>The configs <paramref name="modId"/>'s OnBoot registered, taken (Kiln.Host, after the author ran).</summary>
+    internal static IReadOnlyList<BootValues> TakeBootValues(string modId)
+    {
+        lock (Lock) return BootValueReads.Remove(modId, out var list) ? list : [];
+    }
+
+    /// <summary>The effective values of config <paramref name="id"/> as its file gives them now (the values OnBoot would read), without
+    /// registering, writing or logging anything. <typeparamref name="T"/> is the settings type, from a throwaway load of the mod.</summary>
+    internal static string ValuesNow<T>(string id, ConfigKind kind) where T : class, new()
+    {
+        var file = new ModConfig<T>(null, id, kind) { Quiet = true };
+        file.LoadForBoot();
+        return file.ValuesJson();
     }
 
     /// <summary>The runtime registration of <paramref name="id"/> takes over what the same mod's OnBoot read (null: none).</summary>
@@ -1018,6 +1121,7 @@ public static partial class Config
         {
             Files.Clear();
             BootReads.Clear();
+            BootValueReads.Clear();
             _tick?.Dispose();
             _tick = null;
             _watcher?.Dispose();

@@ -47,6 +47,9 @@ public static partial class Blocks
         if (BootFrame.Current is { } boot)
             throw new InvalidOperationException($"PhaseClosed: Blocks.Define is refused inside {boot.ModId}'s OnBoot; stage the block with BootDefinitions.For(boot).Define");
         var mod = CallerMod();
+        // a name of the mod's committed boot definitions (chapter 08 §4.2): the same block is a reference to it, another one is refused
+        if (BootHandles.SameAsCommitted(mod.Id, name, block) is { } committed)
+            return mod.Handles.TryGetValue(name, out var active) && active is BlockHandle<T> live ? live : (BlockHandle<T>)committed;
         // a block of a kind a mod registered (by its own type, not by T): compiled by its provider, applied by Kiln
         if (!KindRegistry.IsBuiltIn(block.GetType())) return KindDefine.Define(mod, name, block);
         return Compiler.Define(mod, name, block);
@@ -92,11 +95,14 @@ public static partial class Blocks
     /// data files, or another loaded mod's. The handle rolls: <see cref="AffixPoolHandle.Roll"/>.</summary>
     public static AffixPoolHandle Define(string name, AffixPoolBlock block) => (AffixPoolHandle)Define<AffixPoolBlock>(name, block);
 
-    /// <summary>A block a mod defined (its id, or null: the calling mod), or null.</summary>
+    /// <summary>A block a mod defined (its id, or null: the calling mod), or null. A block the mod staged in <see cref="Mod.OnBoot"/>
+    /// and its boot generation committed is found from the commit on, also in <c>OnLoad</c> before its runtime activation and after the
+    /// mod's runtime unload: the boot content stays in the game until the process ends.</summary>
     public static BlockHandle? Find(string name, string? mod = null)
     {
         var id = mod ?? BlocksBridge.CallerModId;
-        return id != null && Mods_.TryGetValue(id, out var m) && m.Handles.TryGetValue(name, out var h) ? h : null;
+        if (id == null) return null;
+        return Mods_.TryGetValue(id, out var m) && m.Handles.TryGetValue(name, out var h) ? h : BootHandles.Find(id, name);
     }
 
     /// <summary>What a block became, as JSON: the items, recipes, templates, buffs and programs, with the values given to them.
@@ -202,6 +208,11 @@ internal sealed class ModBlocks(string id, ulong owner)
     /// <summary>A plan's ledger whose plan waits for its parts at content ready (KindApply): told once, after the first whole pass
     /// and its check of the plan's definitions, with every error the ledger holds then (none: the plan is applied).</summary>
     public Action<IReadOnlyList<string>>? Settle;
+    /// <summary>Passes at content ready that started on this ledger.</summary>
+    public int Passes;
+    /// <summary>The first pass whose check may call <see cref="Settle"/>: a plan's replay in a later content generation waits for a pass that
+    /// starts after it was armed (KindApply), not one the game began before.</summary>
+    public int SettleFrom;
     /// <summary>The names of the definitions a plan's blocks registered: the only ones its pass checks (null on a mod's own ledger).</summary>
     public HashSet<string>? PlanDefinitions;
     /// <summary>The ledger whose data files and cycle check a lookup uses: this one, or the one it stages for.</summary>

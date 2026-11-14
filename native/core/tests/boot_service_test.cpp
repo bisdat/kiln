@@ -785,6 +785,43 @@ void test_refuse_case() {
     pass_line("BOOT-TEST-REFUSE the lab switch hands one collector an unreadable document of the mod (policy any only)", f0);
 }
 
+// the lab switch kiln.json "boot.testFault": with policy any every prepare's IR names the mods whose content the collector fails after
+// the publication (content only; an excluded mod is left out); without policy any, or for another collector, nothing
+void test_fault_case() {
+    t_case = "test-fault";
+    const int f0 = t_fail;
+    auto fault_of = [](const json& ir) {
+        KilnBootPrepareInputV1 p{};
+        p.size = sizeof p;
+        const std::string s = ir.dump();
+        p.canonical_ir_json = KilnStr{s.data(), s.size()};
+        return kiln::boot::parse(&p).test_fault;
+    };
+    t_config.boot_test_fault = {{"opt", "content"}, {"keep", "skills"}};
+    t_config.policy_any = false;
+    deferred_with({"opt", "keep"});
+    run_authors({"opt", "keep"});
+    CHECK(commit_with(envelope({"opt", "keep"})).status == KILN_BOOT_STATUS_PUBLISHED);
+    CHECK(!t_fake[2].seen.back().contains("testFault") && fault_of(t_fake[2].seen.back()).empty());  // not a lab: ignored
+    t_config.policy_any = true;
+    deferred_with({"opt", "keep"});
+    run_authors({"opt", "keep"});
+    CHECK(commit_with(envelope({"opt", "keep"})).status == KILN_BOOT_STATUS_PUBLISHED);
+    const auto f = fault_of(t_fake[2].seen.back());
+    CHECK(f.size() == 1 && f.count("opt") && f.at("opt") == "content");  // "skills" has no late fault to force: ignored
+    // a mod that is out of the generation is not named
+    deferred_with({"opt", "keep"});
+    run_authors({"opt", "keep"});
+    t_fake[0].act = Do::Refuse;
+    t_fake[0].act_round = 1;
+    t_fake[0].blame = "opt";
+    CHECK(commit_with(envelope({"opt", "keep"})).status == KILN_BOOT_STATUS_PUBLISHED);
+    CHECK(fault_of(t_fake[2].seen.back()).empty());
+    t_config.boot_test_fault.clear();
+    t_config.policy_any = false;
+    pass_line("BOOT-TEST-FAULT the lab switch names a mod whose content fails after the publication (policy any, content only)", f0);
+}
+
 void dependent_required_case() {
     t_case = "drop-required-dependent";
     const int f0 = t_fail;
@@ -1026,6 +1063,129 @@ void files_only_cases() {
     CHECK(B.activation_fault(56, ks("need"), ks("resourcePatches"), ks("xp"), ks("no such resource")) == KILN_OK);
     CHECK(t_late_exits == std::vector<uint32_t>{0x4B01u} && t_held.size() == 1);  // required by its manifest alone
     pass_line("BOOT-FILES-ONLY (a boot mod of files takes part: dropped by name, owner given, required holds)", f0);
+}
+
+// ---- strict prepare for required participants (08 fix round, item 1) ----
+// A collector shaped as the real ones (kiln_boot_collector.hpp): it reads each participant's entries (a document whose "bad" key
+// says how it is broken: "file", "entry" or "load") and, through kiln::boot::entry_error, refuses a required participant at
+// its first bad entry and skips the entry of an optional one (today's behaviour), keeping the rest.
+std::map<std::string, std::vector<std::string>> t_kept;  // participant -> entry keys the strict fake kept (last prepare)
+std::vector<kiln::boot::Input> t_strict_seen;
+KilnResult KILN_CALL strict_prepare(void* user, const KilnBootPrepareInputV1* in, KilnBootPreparedV1* out, KilnBootIssueV1* issue) {
+    auto& f = *static_cast<Fake*>(user);
+    ++f.calls;
+    t_events.push_back("prepare:" + std::string(kiln::boot_svc::kCollectors[f.index]));
+    const kiln::boot::Input input = kiln::boot::parse(in);
+    t_strict_seen.push_back(input);
+    t_kept.clear();
+    const char* coll = kiln::boot_svc::kCollectors[f.index];
+    try {
+        for (const auto& d : input.docs(coll)) {
+            const std::string bad = d.document.is_object() ? d.document.value("bad", std::string()) : std::string();
+            const std::string file = std::string(coll) + "/" + d.key + ".json";
+            if (bad == "file" && kiln::boot::entry_error(input, d.owner, coll, file, file + ": not valid JSON")) continue;
+            if (bad == "entry" && kiln::boot::entry_error(input, d.owner, coll, file, file + ": entries[1]: a bad GUID")) continue;
+            if (bad == "load" && kiln::boot::entry_error(input, d.owner, coll, file, file + ": cannot be read (access denied)")) continue;
+            t_kept[d.owner].push_back(d.key);
+        }
+    } catch (const kiln::boot::Refusal& r) {
+        t_kept.clear();  // what was read before the refusal goes with it (the collector's own rollback)
+        return kiln::boot::refuse(out, issue, r.mod, r.kind, r.key, r.what());
+    }
+    return kiln::boot::prepared(out, new Plan{f.index, f.calls}, &destroy_plan);
+}
+
+std::string strict_envelope(const std::vector<std::string>& ids, const char* coll, const std::string& bad_of, const std::string& bad) {
+    json e = {{"schema", 1}, {"owners", json::array()}, {"collectors", json::object()}};
+    for (auto id : ids) {
+        if (id.back() == '!') id.pop_back();
+        e["owners"].push_back({{"id", id}, {"roles", 1}, {"fingerprint", "00"}});
+        e["collectors"][coll].push_back({{"owner", id}, {"key", "good"}, {"document", {{"x", 1}}}});
+        if (id == bad_of) e["collectors"][coll].push_back({{"owner", id}, {"key", "broken"}, {"document", {{"bad", bad}}}});
+    }
+    return e.dump();
+}
+
+void strict_cases() {
+    // the IR each prepare sees marks the required participants: authors by their role, files-only ones by their manifest
+    {
+        t_case = "strict-flag";
+        const int f0 = t_fail;
+        deferred_with({"req!", "opt", "data!"});  // "data" runs no OnBoot and is not in the envelope: files only, required
+        run_authors({"req!", "opt"});
+        const auto c = commit_with(envelope({"req!", "opt"}));
+        CHECK(c.status == KILN_BOOT_STATUS_PUBLISHED);
+        const json& ir = t_fake[0].seen.back();
+        std::map<std::string, json> req;
+        for (const auto& o : ir["owners"]) req[o["id"].get<std::string>()] = o.value("required", json());
+        CHECK(req["req"] == true && req["opt"] == false && req["data"] == true);
+        const kiln::boot::Input in = [&] {
+            const std::string s = ir.dump();
+            KilnBootPrepareInputV1 p{};
+            p.size = sizeof p;
+            p.canonical_ir_json = KilnStr{s.data(), s.size()};
+            return kiln::boot::parse(&p);
+        }();
+        CHECK(in.strict("req") && in.strict("data") && !in.strict("opt") && !in.strict("nobody"));
+        // an optional participant's entry error is not thrown: the collector logs and skips it
+        CHECK(kiln::boot::entry_error(in, "opt", "assets", "assets/assets.json", "why") == true);
+        bool threw = false;
+        try {
+            kiln::boot::entry_error(in, "req", "assets", "assets/assets.json", "assets/assets.json: entries[2]: bad guid");
+        } catch (const kiln::boot::Refusal& r) {
+            threw = r.mod == "req" && r.kind == "assets" && r.key == "assets/assets.json" && std::string(r.what()).find("entries[2]") != std::string::npos;
+        }
+        CHECK(threw);
+        // a participant named in the envelope that runs no OnBoot: "required" comes from its manifest
+        deferred_with({"req!", "named!"});
+        run_authors({"req!"});
+        CHECK(commit_with(envelope({"req!", "named!"})).status == KILN_BOOT_STATUS_PUBLISHED);
+        bool named = false;
+        for (const auto& o : t_fake[0].seen.back()["owners"]) named |= o["id"] == "named" && o.value("required", false);
+        CHECK(named);
+        pass_line("BOOT-STRICT-FLAG required participants are marked in every prepare's IR (authors, envelope-only, files-only)", f0);
+    }
+    // per collector and per shape of bad entry: required stops the start naming the entry, optional publishes without it
+    for (int at = 0; at < 7; ++at)
+        for (const char* bad : {"file", "entry", "load"}) {
+            const char* coll = kiln::boot_svc::kCollectors[at];
+            t_case = std::string("strict-") + coll + "-" + bad;
+            int f0 = t_fail;
+            deferred_with({"req!", "keep"});
+            t_fake[at] = Fake{};
+            t_fake[at].index = at;
+            kiln::boot_svc::g_collectors[at] = {true, static_cast<KilnOwner>(50 + at), &strict_prepare, &t_fake[at]};  // the real-shaped collector in this slot
+            run_authors({"req!", "keep"});
+            auto c = commit_with(strict_envelope({"req!", "keep"}, coll, "req", bad));
+            CHECK(c.status == KILN_BOOT_STATUS_ABORTED && no_plan_published());
+            CHECK(state_of("req") == KILN_BOOT_STATE_REJECTED_PREPARE && state_of("keep") == KILN_BOOT_STATE_GENERATION_ABORTED);
+            CHECK(t_kept.empty());  // the refusing prepare rolled back what it had read
+            std::vector<std::string> expect;  // every collector that prepared before it is destroyed, last first
+            for (int i = at - 1; i >= 0; --i) expect.push_back("destroy:" + std::string(kiln::boot_svc::kCollectors[i]) + ":1");
+            CHECK(events_with("destroy:") == expect);
+            CHECK(!kiln::boot_svc::after_clr(true, &fake_write_state, nullptr) && t_exits == std::vector<uint32_t>{0x4B01u});
+            const std::string file = std::string(coll) + "/broken.json";
+            CHECK(t_held.size() == 1 && t_held[0].find("req: " + std::string(coll) + " " + file + ": collector " + coll + ": " + file) !=
+                                            std::string::npos);
+            CHECK(t_held.size() == 1 && t_held[0].find(std::string(bad) == "file" ? "not valid JSON" : std::string(bad) == "entry" ? "entries[1]" : "cannot be read") !=
+                                            std::string::npos);
+            if (t_fail != f0 && !t_held.empty()) std::printf("  stop line: %s\n", t_held[0].c_str());
+            pass_line(std::string("BOOT-STRICT-REQUIRED ") + coll + " " + bad + ": the start stops naming the entry, nothing published", f0);
+
+            t_case = std::string("lenient-") + coll + "-" + bad;
+            f0 = t_fail;
+            deferred_with({"opt", "keep"});
+            kiln::boot_svc::g_collectors[at] = {true, static_cast<KilnOwner>(50 + at), &strict_prepare, &t_fake[at]};
+            t_fake[at] = Fake{};
+            t_fake[at].index = at;
+            run_authors({"opt", "keep"});
+            c = commit_with(strict_envelope({"opt", "keep"}, coll, "opt", bad));
+            CHECK(c.status == KILN_BOOT_STATUS_PUBLISHED && all_plans_published());
+            CHECK(state_of("opt") == KILN_BOOT_STATE_COMMITTED && state_of("keep") == KILN_BOOT_STATE_COMMITTED);
+            CHECK(t_kept["opt"] == std::vector<std::string>{"good"} && t_kept["keep"] == std::vector<std::string>{"good"});
+            CHECK(kiln::boot_svc::after_clr(true, &fake_write_state, nullptr) && t_exits.empty());
+            pass_line(std::string("BOOT-STRICT-OPTIONAL ") + coll + " " + bad + ": the entry is skipped, the rest published", f0);
+        }
 }
 
 void not_committed_cases() {
@@ -1547,6 +1707,86 @@ void gamedata_cases() {
 }
 }  // namespace
 
+// The patches collector reads blocks files as Kiln.Blocks and worldtables do (kiln_blocks_json.hpp): comments and trailing commas.
+std::vector<fs::path> t_patch_mods;
+std::vector<std::filesystem::path> kc::mod_folder_list() { return t_patch_mods; }
+
+kiln::boot::Input input_of(const json& owners) {
+    const std::string s = json{{"schema", 1}, {"owners", owners}, {"excluded", json::array()}}.dump();
+    KilnBootPrepareInputV1 p{};
+    p.size = sizeof p;
+    p.canonical_ir_json = KilnStr{s.data(), s.size()};
+    return kiln::boot::parse(&p);
+}
+
+void patch_jsonc_cases() {
+    t_case = "patch-jsonc";
+    const int f0 = t_fail;
+    namespace bj = kiln::blocks_json;
+    CHECK(bj::parse_relaxed("{\"a\": [1, 2,], // two\n \"b\": {\"c\": 3,},}") == json::parse(R"({"a":[1,2],"b":{"c":3}})"));
+    CHECK(bj::parse_relaxed("/* x, */ {\"s\": \"a,]\",}") == json::parse(R"({"s":"a,]"})"));  // a comma inside a string stays
+    CHECK(bj::parse_relaxed("[,]").is_discarded() && bj::parse_relaxed("{\"a\": 1,,}").is_discarded());
+    CHECK(bj::parse_relaxed("{ /* unclosed").is_discarded() && bj::parse_relaxed("{ not json").is_discarded());
+    CHECK(bj::parse_relaxed(std::string(65, '[') + std::string(65, ']')).is_discarded());
+    // mods with a patches file in JSONC (comments, trailing commas): required and optional both read it
+    const fs::path root = t_root / "patch-jsonc";
+    const std::string jsonc = "{\n \"format\": 1, // the file\n \"resourcePatches\": {\n  \"xp\": {\"resource\": \"82706b40-61b1-4b8f-8b23-dcec6971bda1\", "
+                              "\"type\": \"keen::BalancingTable\", \"set\": {\"experienceNeedPerLevel[2]\": 2600,},},\n },\n}\n";
+    auto mod = [&](const std::string& id, const std::string& text) {
+        write_mod(root / id, {{"id", id}, {"boot", "required"}});
+        fs::create_directories(root / id / "blocks");
+        std::ofstream(root / id / "blocks" / "p.json") << text;
+        return root / id;
+    };
+    t_patch_mods = {mod("req-comma", jsonc), mod("opt-comma", jsonc)};
+    const auto in = input_of(json::array({{{"id", "req-comma"}, {"required", true}}, {{"id", "opt-comma"}, {"required", false}}}));
+    std::vector<kiln::boot::Doc> docs;
+    bool threw = false;
+    try {
+        docs = kc::file_docs(&in);
+    } catch (const kiln::boot::Refusal&) {
+        threw = true;
+    }
+    CHECK(!threw && docs.size() == 2);
+    for (const auto& d : docs) CHECK(d.key == "xp" && d.document["set"]["experienceNeedPerLevel[2]"] == 2600);
+    // a file that is not JSON even so: an optional mod's is skipped (another reader says it), a required mod is refused naming it
+    t_patch_mods = {mod("opt-broken", "{ \"resourcePatches\": { not json")};
+    const auto opt = input_of(json::array({{{"id", "opt-broken"}, {"required", false}}}));
+    threw = false;
+    try {
+        docs = kc::file_docs(&opt);
+    } catch (const kiln::boot::Refusal&) {
+        threw = true;
+    }
+    CHECK(!threw && docs.empty());
+    t_patch_mods = {mod("req-broken", "{ \"resourcePatches\": { not json")};
+    const auto req = input_of(json::array({{{"id", "req-broken"}, {"required", true}}}));
+    std::string refused;
+    try {
+        kc::file_docs(&req);
+    } catch (const kiln::boot::Refusal& r) {
+        refused = r.mod + " " + r.key + ": " + r.what();
+    }
+    CHECK(refused.rfind("req-broken blocks/p.json: ", 0) == 0 && refused.find("not valid JSON") != std::string::npos);
+    t_patch_mods.clear();
+    pass_line("BOOT-PATCH-JSONC resource patches read blocks files with comments and trailing commas (required and optional)", f0);
+}
+
+// LateFaults: what a collector finds after the entry point is reported once per required mod
+void late_faults_cases() {
+    t_case = "late-faults";
+    const int f0 = t_fail;
+    kiln::boot::LateFaults late;
+    CHECK(!late.take("req"));
+    late.reset({"req", "other"});
+    CHECK(late.take("req") && !late.take("req") && !late.take("opt") && late.take("other"));
+    late.reset({"req"});
+    CHECK(late.take("req"));
+    late.reset();
+    CHECK(!late.take("req"));
+    pass_line("BOOT-LATE-FAULTS each required mod's late fault is reported once, optional mods never", f0);
+}
+
 void patch_value_cases() {
     t_case = "patch-values";
     const int f0 = t_fail;
@@ -1577,6 +1817,7 @@ int main(int argc, char** argv) {
     for (int i = 0; i < 7; ++i) atomic_unattributed_case(i);
     for (int i = 0; i < 7; ++i) drop_case(i);
     test_refuse_case();
+    test_fault_case();
     dependent_required_case();
     callback_cases();
     contract_cases();
@@ -1584,6 +1825,9 @@ int main(int argc, char** argv) {
     missing_collector_cases();
     activation_fault_cases();
     files_only_cases();
+    strict_cases();
+    patch_jsonc_cases();
+    late_faults_cases();
     not_committed_cases();
     buffer_cases();
     gamedata_cases();

@@ -44,7 +44,8 @@
  *                     "content": [...], "skills": [...], "knowledge": [...], "vfx": [...] } }
  * Each document is the JSON the corresponding service already takes from Kiln.Blocks. The core writes three things
  * into the copy each prepare sees: "generation", "excluded" (ids whose definitions and files must be left out) and,
- * per owner, "owner" (the KilnOwner of the process owner "boot:<mod id>", which lives until the process exits). With
+ * per owner, "owner" (the KilnOwner of the process owner "boot:<mod id>", which lives until the process exits) and
+ * "required" (true: its kiln.mod.json says "boot": "required"; since the 0.2.0-dev.28 fix round). With
  * no envelope staged, collectors see { "schema": 1, "generation", "owners": [], "excluded", "reservations": {},
  * "collectors": {} } and prepare from their own files.
  *
@@ -56,6 +57,15 @@
  * is about; empty when it is about none). A warning travels with ok = 1 in *issue with bit 31 of code set. Any other
  * result code, ok = 1 with a null plan, ok = 1 with an error code in *issue, or a fault is a broken collector and stops
  * the start. A plan lives until the process exits once published; an unpublished one goes to its destroy function.
+ *
+ * Required participants are prepared strictly. For an owner with "required": true every entry error a collector would
+ * log and skip for another mod (a file of the mod that cannot be read or is not JSON, a malformed entry or node, a
+ * refused file, a cooker failure) refuses that participant: ok = 0, mod_id the participant, kind the collector's kind,
+ * key the file or entry, reason what is wrong (kiln_boot_collector.hpp: Input::strict, entry_error). The collector
+ * takes back what it prepared before it answers. kiln.boot then stops the start and its stop line reads
+ * "<mod>: <kind> <key>: <reason>". What a collector can only find out after the entry point (kiln.knowledge's build,
+ * kiln.worldtables' merge, a resource patch) is reported with activation_fault, which stops the start too. Another
+ * participant's entry errors are logged and skipped as without a boot phase.
  *
  * Threads and buffers. status, begin_owner, stage, finish_owner, read_resource, commit and collector are boot-thread
  * calls (serialized); owner_state, issues and active_plan may be called from any thread at any time. Every string in

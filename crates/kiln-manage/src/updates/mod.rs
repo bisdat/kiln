@@ -45,11 +45,11 @@ pub fn root_of(dirs: &DataDirs) -> PathBuf {
 }
 
 /// Serializes a read-modify-write of this folder's files across threads and processes (the launcher and the CLI).
-pub(crate) fn lock(dirs: &DataDirs) -> Result<std::fs::File> {
+pub(crate) fn lock(dirs: &DataDirs) -> Result<crate::util::LockedFile> {
     let root = root_of(dirs);
     std::fs::create_dir_all(&root).map_err(crate::util::io_at(&root, "creating"))?;
     let path = root.join(".lock");
     let f = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&path).map_err(crate::util::io_at(&path, "opening"))?;
     f.lock().map_err(crate::util::io_at(&path, "locking"))?;
-    Ok(f)
+    Ok(crate::util::LockedFile(f))
 }

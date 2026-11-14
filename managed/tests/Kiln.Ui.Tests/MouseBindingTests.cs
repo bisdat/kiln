@@ -159,11 +159,13 @@ public sealed class MouseBindingTests : IDisposable
 
     // ---- unfamiliar Windows virtual keys (GitHub issue #33) ----
 
+    // Since 0.2.0-dev.28 VK 223 (VK_OEM_8) has a name of its own, Oem8 (key_names.h, issue 33's item 11): Key223 still
+    // parses to it, and prints as Oem8, which parses back to the same chord.
     [Theory]
-    [InlineData("Key223", 223u, KeyMods.None, "Key223")]
-    [InlineData("key223", 223u, KeyMods.None, "Key223")]
-    [InlineData("Ctrl+Key223", 223u, KeyMods.Ctrl, "Ctrl+Key223")]
-    [InlineData("shift+alt+key223", 223u, KeyMods.Shift | KeyMods.Alt, "Shift+Alt+Key223")]
+    [InlineData("Key223", 223u, KeyMods.None, "Oem8")]
+    [InlineData("key223", 223u, KeyMods.None, "Oem8")]
+    [InlineData("Ctrl+Key223", 223u, KeyMods.Ctrl, "Ctrl+Oem8")]
+    [InlineData("shift+alt+key223", 223u, KeyMods.Shift | KeyMods.Alt, "Shift+Alt+Oem8")]
     [InlineData("Key255", 255u, KeyMods.None, "Key255")]
     public void Unnamed_windows_virtual_keys_parse_and_print(string text, uint vk, KeyMods mods, string printed)
     {
@@ -200,8 +202,10 @@ public sealed class MouseBindingTests : IDisposable
         Remapping.SetValue(null, original.Id);
         Assert.True(Send(223, captured: true));  // Windows layout: grave/backtick gives VK_OEM_8
         FakeUiTable.MenuOpen = false;
-        Assert.Equal("Key223", original.Key.ToString());
-        Assert.Equal("Key223", (string?)SavedBindings()[original.Id]);
+        // dev.28 names VK_OEM_8 Oem8 (it was Key223). This press carries no scan code; a real UK backquote key (scan 0x29)
+        // is saved as Backquote instead (KeyNameTests.The_Keys_page_saves_the_physical_name_of_a_punctuation_key).
+        Assert.Equal("Oem8", original.Key.ToString());
+        Assert.Equal("Oem8", (string?)SavedBindings()[original.Id]);
         Assert.True(Send(223));
         Assert.Equal(1, presses);
         Assert.False(Send(0xC0));  // Backquote's US-layout VK is not the remapped key

@@ -9,6 +9,10 @@
 //                memory), AbilitiesGate.RequireAdvanced/Require/NotAdvanced (Kiln.Abilities: program blobs, raw call
 //                bytes) or CreaturesGate.RequireAdvanced (Kiln.Creatures: job-thread rule handlers).
 //   guards:      public static bool properties whose getter always asks a capability row (CapabilityGuards.cs, KILN121).
+//   boot:        Mod.OnBoot's code (KILN035). Works there: a member with its own boot path, `if (Game.InBoot) return ...`
+//                (Config.Register: it reads the file without writing on the boot thread), even when it needs the tick
+//                thread otherwise. Refused there: a member that (directly, or through same-assembly calls made outside
+//                lambdas, not through a member with a boot path) reaches `if (Game.InBoot) throw ...` (ConfigFile.Changed).
 // Usage: ApiScan --repo <kiln repo> --stage <dir with the built Kiln dlls> --refs <Microsoft.NETCore.App.Ref ref dir>
 //                --out <KilnApis.g.cs>
 using System.Text;
@@ -49,6 +53,8 @@ const string implicitUsings = "global using System; global using System.Collecti
 var tick = new SortedDictionary<string, string>(StringComparer.Ordinal);
 var advanced = new SortedDictionary<string, string>(StringComparer.Ordinal);
 var completed = new SortedDictionary<string, string>(StringComparer.Ordinal);
+var bootWorks = new SortedDictionary<string, string>(StringComparer.Ordinal);
+var bootRefused = new SortedDictionary<string, string>(StringComparer.Ordinal);
 var guardFacts = new Dictionary<string, ApiScanGuards.Guard>(StringComparer.Ordinal);
 var publicGuards = new HashSet<string>(StringComparer.Ordinal);
 var errors = 0;
@@ -153,6 +159,12 @@ foreach (var (name, dir) in projects)
                     f.AdvancedWhy = $"via {Short(callee)}";
                     changed = true;
                 }
+                if (!f.BootRefused && !f.BootPath && cf.BootRefused)
+                {
+                    f.BootRefused = true;
+                    f.BootWhy = $"via {Short(callee)}";
+                    changed = true;
+                }
             }
         }
     } while (changed);
@@ -184,6 +196,8 @@ foreach (var (name, dir) in projects)
         if (id is null || id == "M:Kiln.Game.AssertTickThread") continue;  // the check itself: meant to be called anywhere
         if (f.Tick) tick[id] = $"{Short(m)}: {f.TickWhy}";
         if (f.Advanced) advanced[id] = $"{Short(m)}: {f.AdvancedWhy}";
+        if (f.BootPath) bootWorks[id] = $"{Short(m)}: if (Game.InBoot) return";
+        else if (f.BootRefused) bootRefused[id] = $"{Short(m)}: {f.BootWhy}";
         if (f.Completed)
         {
             completed[id] = Short(m);
@@ -233,6 +247,20 @@ sb.AppendLine("    internal static readonly string[] Services =");
 sb.AppendLine("    {");
 foreach (var s in services) sb.AppendLine($"        \"{s}\",");
 sb.AppendLine("    };");
+sb.AppendLine();
+sb.AppendLine("    /// <summary>Documentation ids of public members with a boot path of their own (`if (Game.InBoot) return ...`): they work");
+sb.AppendLine("    /// in Mod.OnBoot even when they need the tick thread otherwise, so KILN035 leaves them alone (KILN101 does not).</summary>");
+sb.AppendLine("    internal static readonly string[] BootWorks =");
+sb.AppendLine("    {");
+foreach (var (id, why) in bootWorks) sb.AppendLine($"        \"{id}\", // {why}");
+sb.AppendLine("    };");
+sb.AppendLine();
+sb.AppendLine("    /// <summary>Documentation ids of public members Kiln refuses in Mod.OnBoot (`if (Game.InBoot) throw ...`, directly or");
+sb.AppendLine("    /// through a call): KILN035 in boot code, whichever thread they otherwise allow.</summary>");
+sb.AppendLine("    internal static readonly string[] BootRefused =");
+sb.AppendLine("    {");
+foreach (var (id, why) in bootRefused) sb.AppendLine($"        \"{id}\", // {why}");
+sb.AppendLine("    };");
 sb.AppendLine("}");
 if (errors > 0)
 {
@@ -240,7 +268,7 @@ if (errors > 0)
     return 1;
 }
 File.WriteAllText(outFile, sb.ToString().Replace("\r\n", "\n"));
-Console.WriteLine($"apiscan: {tick.Count} tick-thread, {advanced.Count} advanced, {completed.Count} completed-task members, {guards.Count} capability guards, {services.Count} services -> {outFile}" +
+Console.WriteLine($"apiscan: {tick.Count} tick-thread, {advanced.Count} advanced, {completed.Count} completed-task members, {guards.Count} capability guards, {services.Count} services, {bootWorks.Count} boot-path and {bootRefused.Count} boot-refused members -> {outFile}" +
                   (errors > 0 ? $" ({errors} compile errors while scanning)" : ""));
 return 0;
 
@@ -279,6 +307,14 @@ static void Scan(SemanticModel model, SyntaxNode body, Facts f, Compilation comp
             case IfStatementSyntax ifs when IsTickGuard(ifs):
                 f.Tick = true;
                 f.TickWhy = "if (!IsTickThread) throw";
+                break;
+            case IfStatementSyntax bifs when BootBranch(model, bifs) is { } boot:
+                if (boot) f.BootPath = true;
+                else
+                {
+                    f.BootRefused = true;
+                    f.BootWhy = "if (Game.InBoot) throw";
+                }
                 break;
             case IdentifierNameSyntax { Identifier.ValueText: "IsTickThread" } id when !InsideTickGuard(id):
                 f.ThreadAware = true;
@@ -384,12 +420,33 @@ static bool IsTickGuard(IfStatementSyntax ifs)
            ifs.Statement is BlockSyntax { Statements: [ThrowStatementSyntax] };
 }
 
+// `if (Game.InBoot) return ...;` (true: the member's own boot path) or `if (Game.InBoot) throw ...;` (false: refused in boot code),
+// without an else; null for any other statement.
+static bool? BootBranch(SemanticModel model, IfStatementSyntax ifs)
+{
+    if (ifs.Else is not null) return null;
+    var cond = ifs.Condition is ParenthesizedExpressionSyntax par ? par.Expression : ifs.Condition;
+    if (cond is not (MemberAccessExpressionSyntax { Name.Identifier.ValueText: "InBoot" } or IdentifierNameSyntax { Identifier.ValueText: "InBoot" })) return null;
+    if (model.GetSymbolInfo(cond).Symbol is not IPropertySymbol { Name: "InBoot" } p || p.ContainingType?.ToDisplayString() != "Kiln.Game") return null;
+    var statement = ifs.Statement is BlockSyntax { Statements: [var only] } ? only : ifs.Statement;
+    return statement switch
+    {
+        ReturnStatementSyntax => true,
+        ThrowStatementSyntax => false,
+        _ => null,
+    };
+}
+
 static bool InsideTickGuard(SyntaxNode n) =>
     n.Ancestors().OfType<IfStatementSyntax>().FirstOrDefault() is { } ifs && IsTickGuard(ifs) && ifs.Condition.Span.Contains(n.Span);
 
 sealed class Facts
 {
     public bool Tick, ThreadAware, Advanced, Completed, ReturnsTask, Async;
+    // Mod.OnBoot (KILN035): BootPath, the member returns early on the boot thread (`if (Game.InBoot) return`); BootRefused,
+    // it throws there.
+    public bool BootPath, BootRefused;
+    public string BootWhy = "";
     // Return values: null = Task.FromResult/FromException/FromCanceled/CompletedTask; a method = whatever it returns;
     // Other = anything else.
     public readonly List<IMethodSymbol?> Returns = new();

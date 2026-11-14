@@ -17,6 +17,8 @@ internal static partial class KilnApis
         public static readonly HashSet<string> Advanced = new(KilnApis.Advanced, StringComparer.Ordinal);
         public static readonly HashSet<string> Services = new(KilnApis.Services, StringComparer.OrdinalIgnoreCase);
         public static readonly HashSet<string> Completed = new(CompletedTasks, StringComparer.Ordinal);
+        public static readonly HashSet<string> BootWorks = new(KilnApis.BootWorks, StringComparer.Ordinal);
+        public static readonly HashSet<string> BootRefused = new(KilnApis.BootRefused, StringComparer.Ordinal);
         public static readonly Dictionary<string, string[]> Guards = ParseGuards();
 
         private static Dictionary<string, string[]> ParseGuards()
@@ -78,12 +80,22 @@ internal static partial class KilnApis
         private readonly ConcurrentDictionary<ISymbol, bool> _tick = new(SymbolEqualityComparer.Default);
         private readonly ConcurrentDictionary<ISymbol, bool> _advanced = new(SymbolEqualityComparer.Default);
         private readonly ConcurrentDictionary<ISymbol, bool> _completed = new(SymbolEqualityComparer.Default);
+        private readonly ConcurrentDictionary<ISymbol, bool> _bootWorks = new(SymbolEqualityComparer.Default);
+        private readonly ConcurrentDictionary<ISymbol, bool> _bootRefused = new(SymbolEqualityComparer.Default);
 
         public bool RequiresTickThread(ISymbol member) =>
             _tick.GetOrAdd(member, m => Lookup(m, Sets.Tick, TickThreadOnlyAttribute));
 
         public bool RequiresAdvanced(ISymbol member) =>
             _advanced.GetOrAdd(member, m => Lookup(m, Sets.Advanced, AdvancedApiAttribute));
+
+        /// <summary>A Kiln API with a boot path of its own (the generated BootWorks table): it works in Mod.OnBoot.</summary>
+        public bool WorksInBoot(ISymbol member) =>
+            _bootWorks.GetOrAdd(member, m => Lookup(m, Sets.BootWorks, "\0"));
+
+        /// <summary>A Kiln API that Kiln refuses in Mod.OnBoot (the generated BootRefused table).</summary>
+        public bool RefusedInBoot(ISymbol member) =>
+            _bootRefused.GetOrAdd(member, m => Lookup(m, Sets.BootRefused, "\0"));
 
         /// <summary>A Kiln API whose returned task is always complete (Task.FromResult): its Result never blocks.</summary>
         public bool ReturnsCompletedTask(ISymbol member) =>

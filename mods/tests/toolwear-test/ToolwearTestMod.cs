@@ -294,6 +294,44 @@ public sealed class ToolwearTestMod : Mod
                     $"ruleEvents={string.Join(",", events.Select(r => $"{r.Before}->{r.After}"))} replayEvents={replayEvents} spentAfter={spentAfter}");
             }
 
+            // ---- a native rule owner (native/, kiln-toolwear-test.dll in kiln/plugins): its define, its replacement, a second native
+            // owner's define and remove, all in one tick, then its retirement. Every change is one ToolWearRuleChangedEvent, in order,
+            // with consecutive generations (a status read would have seen only the last state) ----
+            {
+                var dir = Context.DataDirectory;
+                Directory.CreateDirectory(dir);
+                var ack = Path.Combine(dir, "native-ack.txt");
+                string? Ack() => File.Exists(ack) ? File.ReadAllText(ack) : null;
+                File.Delete(ack);
+                await Steps(3);
+                _rules.Clear();
+                var g0 = Items.ToolWearStatus(pickaxe.Id).Generation;
+                File.WriteAllText(Path.Combine(dir, "native-go.txt"), pickaxe.Id.Value.ToString("x8"));
+                for (var i = 0; i < 120 && Ack() is null; i++) await Steps(1);
+                var ack1 = Ack() ?? "no answer (is kiln-toolwear-test.dll in kiln/plugins?)";
+                await Steps(3);
+                var under = Items.ToolWearStatus(pickaxe.Id);
+                _changes.Clear();
+                var before = Durability(pide);
+                await Hits(0, 1);
+                var spent = before - Durability(pide);
+                var hitEvents = _changes.Count(c => c.Item.Entity.Id == pide && c.RequestedDelta == -6 && c.Before - c.After == 6);
+                File.Delete(ack);
+                File.WriteAllText(Path.Combine(dir, "native-retire.txt"), "retire");
+                for (var i = 0; i < 120 && Ack() is null; i++) await Steps(1);
+                var ack2 = Ack() ?? "no answer";
+                await Steps(3);
+                var back = Items.ToolWearStatus(pickaxe.Id);
+                var got = _rules.Where(r => r.Item == pickaxe.Id).Select(r => $"{r.Before}@{r.BeforeModId}>{r.After}@{r.AfterModId}#{r.Generation - g0}").ToArray();
+                string[] want = ["7@toolwear-test>5@toolwear-native-c#1", "5@toolwear-native-c>6@toolwear-native-c#2", "6@toolwear-native-c>6@toolwear-native-d#3",
+                                 "6@toolwear-native-d>6@toolwear-native-c#4", "6@toolwear-native-c>7@toolwear-test#5"];
+                Check(ack1.StartsWith("phase1 ok=1", StringComparison.Ordinal) && ack2.StartsWith("retired", StringComparison.Ordinal) && got.SequenceEqual(want) &&
+                      under.PerDebit == 6 && under.OwnerModId == "toolwear-native-c" && spent == 6 && hitEvents == 1 && back.PerDebit == 7 && back.OwnerModId == "toolwear-test",
+                    "toolwear-native-owner",
+                    $"native: [{ack1}] [{ack2}] events={string.Join(",", got)} under={under.PerDebit}@{under.OwnerModId} spent={spent} hitEvents={hitEvents} " +
+                    $"back={back.PerDebit}@{back.OwnerModId}");
+            }
+
             // ---- forced parallel mode: the debits stay exact; the hooks' threads as the programs' flags make them ----
             {
                 var forced = LabSystems.ForceParallel(600);

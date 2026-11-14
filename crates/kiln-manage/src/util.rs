@@ -238,6 +238,21 @@ pub fn run_status(cmd: &mut Command, what: &str) -> Result<()> {
     Ok(())
 }
 
+/// A file this process holds locked ([`std::fs::File::lock`] and its kin), unlocked explicitly when it is dropped.
+///
+/// Closing the file is not enough: a program another thread starts holds a copy of every descriptor from its fork
+/// until its exec (close-on-exec closes them only then), and on Unix the lock belongs to the open file, so it outlives
+/// this process's close for that moment. A lock taken again right after (the next move, the next quick operation)
+/// would then be refused as if another launcher held it. Unlocking releases it for every copy at once.
+#[derive(Debug)]
+pub(crate) struct LockedFile(pub(crate) std::fs::File);
+
+impl Drop for LockedFile {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
+
 /// An io error with the path in its message (the code follows the io error kind).
 pub fn io_at(path: &Path, what: &str) -> impl FnOnce(std::io::Error) -> Error {
     let p = path.display().to_string();

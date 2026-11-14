@@ -60,6 +60,13 @@ public sealed record EntityScaleResult(EntityId Entity, Scale3? Before, Scale3 R
 
     /// <summary>True when the scale changed (<see cref="WorldWriteStatus.Written"/> and another value than before).</summary>
     public bool Changed => WorldWriteStatus == WorldWriteStatus.Written && Before is { } b && Now is { } n && b != n;
+
+    /// <summary>Whether the entity has this scale again after a save and restart. The game's save does not keep a
+    /// transform scale, so Kiln keeps it beside the save (kiln.saves' entity attachments) and sets it again, in the
+    /// setting mod's name, when the loaded entity is matched. True: kept (or the game's own scale, which the game brings
+    /// back itself); false: this session only (an entity the save does not keep, such as most enemies, or kiln.saves is
+    /// off); null when nothing was set (<see cref="Ok"/> false). Since 0.2.0-dev.28.</summary>
+    public bool? Persisted { get; init; }
 }
 
 /// <summary>An entity's transform scale changed through <see cref="World.SetTransformScale"/>: posted for a write that
@@ -152,25 +159,43 @@ internal static class TransformScale
 
     internal static readonly ServiceCapRows Rows = new("kiln.world transform scale", Report);
     private static Layout? _layout;
+    private static IDisposable? _waiting;  // while the row is Pending: reported again every 25 steps until it is decided
 
     internal static bool Start()
     {
         Rows.Ensure();
+        TransformScaleKeeper.Start();
         return true;
     }
 
+    /// <summary>The layout found for this build; null while the row is off or not decided.</summary>
+    internal static Layout? CurrentLayout => _layout;
+
     // The row: decided once kiln.types has the type table (static for the process: a build's layout does not change).
-    private static void Report()
+    private static unsafe void Report()
     {
         // no side check: the write runs where the tracked writes run (a server world: a dedicated server or a hosting game;
         // world.tracked_writes says when there is none)
         _layout = null;
-        if (!GameTypes.Available)
+        if (GameTypes.Table == null)
         {
+            Interlocked.Exchange(ref _waiting, null)?.Dispose();
             ServiceCaps.Report(Capability, CapabilityState.Unavailable, CapabilityReason.ServiceMissing,
                 "needs kiln.types: the scale's place is read from the game's type table");
             return;
         }
+        if (!GameTypes.Available)
+        {
+            // kiln.types is there, the game has not filled its type table yet: decided as soon as it has
+            ServiceCaps.Report(Capability, CapabilityState.Pending, CapabilityReason.Session,
+                "waits for the game's type table (kiln.types has no types yet): the scale's place is read from it");
+            _waiting ??= ServiceTick.Add("kiln.world transform scale (waiting for the type table)", static (in TickInfo t) =>
+            {
+                if (t.Step % 25 == 0) Rows.Refresh();
+            });
+            return;
+        }
+        Interlocked.Exchange(ref _waiting, null)?.Dispose();
         var (layout, why) = Resolve(GameTypes.Find(QualifiedComponent) is { } t ? NodeOf(t) : null);
         _layout = layout;
         if (layout is null) ServiceCaps.Report(Capability, CapabilityState.Unavailable, CapabilityReason.SymbolMissing, why);
@@ -255,6 +280,8 @@ internal static class TransformScale
         // tracked write's does and the event is queued from there
         var r = await write;
         var result = Of(entity, requested, r);
+        // kept beside the save (the game's save does not keep the scale): the answer says whether it comes back
+        if (result.Ok && result.Now is { } now) result = result with { Persisted = TransformScaleKeeper.Record(entity, result.Before, now, modId) };
         if (result.Changed && Events.HasSubscribers<EntityScaleChangedEvent>()) Events.Enqueue(new EntityScaleChangedEvent(result, modId));
         return result;
     }

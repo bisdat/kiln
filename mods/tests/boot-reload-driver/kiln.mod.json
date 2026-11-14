@@ -1,0 +1,9 @@
+{
+  "id": "boot-reload-driver",
+  "name": "Mod.OnBoot lab test (unload, edit, load)",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "BootReloadDriver.dll",
+  "side": "server",
+  "clients": "none"
+}

@@ -165,12 +165,12 @@ equivalent of ShroudForge's scale setter. Sample: `mods/samples/TransformScale` 
 if (!Capabilities.Is(World.TransformScaleCapability)) return;       // "world.transform_scale"
 EntityScaleResult r = await World.SetTransformScale(prop, new Scale3(1.25f, 0.75f, 1.5f));
 if (!r.Ok) Log.Warn(r.Reason);                                       // NotDeclared, NoComponent, Dropped, ...
-Log.Info($"{r.Before} -> {r.Now}, kept {r.Kept}, save {r.SaveTracked}");
+Log.Info($"{r.Before} -> {r.Now}, kept {r.Kept}, after a restart too: {r.Persisted}");
 Events.On<EntityScaleChangedEvent>(e => Log.Info(e.ToString()));
 ```
 | Member | Side, threads | Answers |
 |---|---|---|
-| `World.SetTransformScale(entity, scale)` | server world; tick thread | `Task<EntityScaleResult>`: `Entity`, `Before`, `Requested`, `Now`, `Kept`, `WorldWriteStatus`, `Reason`, `SaveTracked`, `ReplicationTracked`, `Ok`, `Changed` |
+| `World.SetTransformScale(entity, scale)` | server world; tick thread | `Task<EntityScaleResult>`: `Entity`, `Before`, `Requested`, `Now`, `Kept`, `WorldWriteStatus`, `Reason`, `SaveTracked`, `ReplicationTracked`, `Persisted`, `Ok`, `Changed` |
 | `Scale3(X, Y, Z)` | any | three sequential float32 (12 bytes); `One`, `Uniform(f)`, `IsValid`; JSON `{"x":…,"y":…,"z":…}` ([schema](../../../schema/scale3.schema.json)) |
 | `EntityScaleChangedEvent` | tick thread | a committed write that changed the vector: `Entity`, `Before`, `Now`, `ModId`, `Result` |
 
@@ -179,7 +179,12 @@ Events.On<EntityScaleChangedEvent>(e => Log.Info(e.ToString()));
   and what a vanilla player sees, is check `13-world.transform-scale` of the guided game test; until it has run the docs
   claim the tracked write and its readback only. `world.transform_scale` stays held on both sides until that check
   confirms what a player sees; the client-pass profile's `"preview": true` opens it for testing.
-- **The place of the scale** is read from the game's type table when Kiln.World starts (its first use): `transform`, then
+- **When the row is decided.** Kiln.World starts right before the mods load, so a mod's `OnLoad` reads
+  `world.transform_scale` (and `world.tracked_writes`) already decided: available, held by the gate, or off with its
+  reason. While kiln.types is there but the game has not filled its type table yet, the row is `Pending` ("waits for the
+  game's type table") and is decided within 25 steps of the table filling; on a dedicated server the table is filled
+  before the mods load.
+- **The place of the scale** is read from the game's type table when Kiln.World starts: `transform`, then
   `scale`, of one of two shapes (a struct of three float32 at 0, 4, 8, or a static array of three float32), 12 bytes,
   inside the component, 4-aligned. Any other shape turns `world.transform_scale` off with what was found; nothing is
   written at an assumed offset. kiln.types must be running.
@@ -189,10 +194,22 @@ Events.On<EntityScaleChangedEvent>(e => Log.Info(e.ToString()));
   nothing. ShroudForge's own Lua setter, hosted unchanged, keeps its broader rule.
 - **The answer** is the tracked write's: `Before` and `Now` are the 12 bytes the write read and left in the step it ran
   (null on a refusal), `Kept` is the readback one step later where the game writes the type too, `SaveTracked` and
-  `ReplicationTracked` are the game's own per-type bits from the same answer. A save and restart did **not** bring the
-  scale back on the test server (build f0d824be, a placed chest, 2026-11-13: the write was `Written`, kept one step
-  later and marked for the save, and after the restart the chest stood at scale 1, 1, 1 again). Treat the scale as a
-  session value and set it again after a world loads; the lab's `world-writes-test` logs it at each run (boot 2).
+  `ReplicationTracked` are the game's own per-type bits from the same answer, and `Persisted` says whether the entity has
+  this scale again after a save and restart (below).
+- **Across a save and restart** (since the dev.28 fix round). The game's save does not keep a transform scale: a placed
+  chest scaled with a tracked write, marked for the save, came back at 1, 1, 1 (lab, build f0d824be; the save's record of
+  a placed prop has no scale, [docs/re/world.md](../../re/world.md#transform-scale-and-the-save)). So Kiln keeps it beside
+  the save, in kiln.saves' entity attachments (the bundle `entity/kiln:world`; the entity is known again by its template
+  and its position at the save, as [`EntityData`](saves.md) is), and sets it again through the same tracked write when
+  kiln.saves matches the loaded entity: on the test server about one second after the game loaded the world (what a
+  player who joins sees is check `13-world.transform-scale`); an entity that loads later gets it within about 5 s. `Persisted == true`: kept (or set back to the game's
+  own scale, which the game brings back itself: setting the scale the entity had before Kiln's first write forgets the
+  record). `false`: this session only: an entity the save does not keep (most enemies, loot pickups), a write made outside
+  a mod, or kiln.saves is off. The scale is set again in the name of the mod that set it last, only while that mod is
+  loaded and lists `CurrentTransform` under `"writes"`: remove the mod and its props keep the game's size (the record
+  stays, so they get it back with the mod); kiln.log says why one was not set again. Setting it again is a normal
+  `SetTransformScale`, so an `EntityScaleChangedEvent` is posted for it. A scale the game or another tool changed after
+  Kiln's write is kept as the entity has it at the save.
 - **Capabilities:** `world.transform_scale` (Kiln.World's row: the layout) and `world.tracked_writes`; either off throws
   `KilnUnavailableException` naming it.
 

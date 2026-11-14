@@ -225,8 +225,9 @@
   },
   "patternProperties": {
     "^[a-z0-9][a-z0-9._-]{0,63}:[A-Za-z0-9-]{1,64}$": {
-      "description": "Blocks of a kind another mod registered (Blocks.RegisterKind): \"provider-mod:plural\". The provider mod must be a dependency of this mod. Every block says \"format\": 1; the rest is the kind's own record, checked by the provider's schema when the mod loads. docs/kiln/modding/block-kinds.md",
+      "description": "Blocks of a kind another mod registered (Blocks.RegisterKind): \"provider-mod:plural\". List the provider mod in this mod's dependencies: the kind must be registered before this mod's blocks compile. A block's name takes 1 to 64 letters, digits, '.', '_' and '-'. Every block says \"format\": 1; the rest is the kind's record, read strictly into the provider's record type when the block compiles (a member the record does not have, or a value of the wrong type, is an error). The provider's SchemaJson is kept for editors and tools; it is not checked by Kiln. docs/kiln/modding/block-kinds.md",
       "type": "object",
+      "propertyNames": { "pattern": "^[A-Za-z0-9._-]{1,64}$" },
       "additionalProperties": {
         "type": "object",
         "required": ["format"],

@@ -31,7 +31,7 @@ come with code fixes.
 | [KILN111](#kiln111) | warning (info for a game-style name the local catalog lacks) | a name that is no block, or the wrong kind of block | blocks.md |
 | [KILN112](#kiln112) | **error** | `clients` too low for the mod's blocks | blocks.md |
 | [KILN034](#kiln034) | **error** | an `OnBoot` that never runs (no `"boot"` in kiln.mod.json), or the run-time `Blocks.Define` in boot code | manifest.md, chapter 08 |
-| [KILN035](#kiln035) | warning | a tick, world or service API in boot code (`OnBoot`, `[BootThreadOnly]`) | the tick table and the service table (generated) |
+| [KILN035](#kiln035) | warning | a tick, world or service API in boot code (`OnBoot`, `[BootThreadOnly]`) | the tick, service and boot tables (generated) |
 
 Other KILN codes:
 - **KILN0xx** come from the SDK's MSBuild task (manifest checks, mdk.md), except KILN034 and KILN035 above: Roslyn rules
@@ -49,8 +49,10 @@ Other KILN codes:
   `OutputItemType="Analyzer"` references.
 - The analyzers read these build properties: `KilnServicesList` and `KilnFeaturesList` (the SDK writes `KilnServices`
   and `KilnFeatures` comma-separated there, because `.editorconfig` cuts values at `;`), `KilnAdvanced`, `KilnSide`,
-  `KilnModId`, `KilnApiVersion`. KILN034 also reads `KilnBoot` when the compiler sees it; Kiln.Sdk does not pass it
-  yet, nor write `"boot"` from a property, so a boot mod says `"boot"` in its own kiln.mod.json.
+  `KilnClients`, `KilnModId`, `KilnApiVersion` and `KilnBoot` (KILN034: `true` or `required` writes `"boot"` into the
+  generated kiln.mod.json). `Sdk/Kiln.Analyzers.targets` passes each of them to the compiler
+  (`CompilerVisibleProperty`); a property it does not pass reads as unset, and a test of Kiln.Analyzers checks that
+  every property a rule reads is passed.
 - They also read the project's own `kiln.mod.json`, which the SDK passes as an AdditionalFile.
 - Projects that do not use Kiln.Sdk get no analyzers and no diagnostics.
 - Turn them off with `<KilnAnalyzers>false</KilnAnalyzers>`.
@@ -91,6 +93,10 @@ Kiln.Testing and every service, then reads their sources with Roslyn (`tools/Api
 - **Services:** the folders under `managed/services/` (22).
 - **Capability guards** (KILN121): the public static bool properties that answer what `Capabilities.Is("row")`
   answers, with their rows. See [KILN121](#kiln121), "Properties that ask the same question". 54 properties.
+- **Boot** (KILN035): `BootWorks`, the public members with a boot path of their own (`if (Game.InBoot) return …`:
+  `Config.Register`), which KILN035 leaves alone; `BootRefused`, the public members that reach
+  `if (Game.InBoot) throw …` (directly or through calls inside the same assembly, not through a member with a boot
+  path: a `ConfigFile.Changed` handler), which KILN035 reports.
 
 Run the script after changing Kiln.Api, Kiln.Testing or a service:
 `KILN_OUT=… managed/Kiln.Analyzers/tools/gen-apis.sh`.
@@ -618,8 +624,10 @@ names the mod's own file, cue or VFX, needs `mod`. A game VFX by name asks for n
 ## KILN034: OnBoot that never runs, or Blocks.Define in boot code
 **What.** Two mistakes of the boot phase ([manifest.md](manifest.md), `"boot"`):
 - A `Mod` subclass overrides `OnBoot` while the project's `kiln.mod.json` has no `"boot": true` (or `"required"`).
-  Reported at the override. A Kiln.Sdk project without its own kiln.mod.json gets one written without `"boot"`, so it
-  is reported too. A project that says nothing at all (no kiln.mod.json, not built with Kiln.Sdk) is not.
+  Reported at the override. A Kiln.Sdk project without its own kiln.mod.json gets one written from its properties: with
+  `<KilnBoot>true</KilnBoot>` (or `required`) it says `"boot"` and is not reported; without it, it is. A project's own
+  kiln.mod.json wins over `KilnBoot`, as in the manifest task. A project that says nothing at all (no kiln.mod.json,
+  not built with Kiln.Sdk) is not reported.
 - The run-time `Blocks.Define` (any overload) called from boot code. Boot code is the body of an `OnBoot` override or of
   a method, accessor or type marked `[BootThreadOnly]`, with its local functions and the lambdas that run at once
   (LINQ, `List.ForEach`). A lambda handed to Kiln (`Context.Scheduler.Post`), to another thread, or kept by the mod is
@@ -639,8 +647,8 @@ before the boot generation is checked. The mod's `OnBoot` then fails, its boot c
 `"boot": "required"` the start stops.
 
 **Fix.**
-- Add `"boot": true` to kiln.mod.json (`"required"`: a failure of its boot content stops the start), or move the code
-  to `OnLoad`.
+- Add `"boot": true` to kiln.mod.json (`"required"`: a failure of its boot content stops the start), or, in a Kiln.Sdk
+  project that has no kiln.mod.json of its own, `<KilnBoot>true</KilnBoot>`; or move the code to `OnLoad`.
 - Stage the block instead: `BootDefinitions.For(boot).Define("cold", new StatusBlock { ... })`. A block that names it
   uses its `Reference` (or the name).
 
@@ -654,8 +662,16 @@ No code fix: the manifest is not a source file, and a staged definition returns 
   `Chat`, `Spawn`, ... (the classes named after the services of the generated service table, in their own
   assemblies).
 
+- a member Kiln refuses on the boot thread although it allows any thread otherwise: the generated `BootRefused` table
+  (`if (Game.InBoot) throw`, directly or through a call: adding a `ConfigFile.Changed` handler).
+
 Not reported:
 - members marked `[BootThreadOnly]` (`BootDefinitions`, `boot.GameData.Read`);
+- members with a boot path of their own, the generated `BootWorks` table (`if (Game.InBoot) return ...`):
+  `Config.Register<T>()` reads the file and its defaults without writing in `OnBoot`, and reading its `Value` is a plain
+  property ([config.md](../config.md#in-modonboot)). Writing the config (`Set`, `TrySet`, `Save`, `Reload`), a `Changed`
+  handler and `Config.RegisterWorld` are still reported. KILN101 still counts `Config.Register` as a tick-thread member
+  outside boot code;
 - the capability guard properties (`Players.Available`, ...) and `Capabilities.Is`;
 - data helpers outside a service's own class (`Damage.Ice`, `Bodies`, block records);
 - Kiln.Api's `[AnyThread]` members such as `Mods.BootState`.
@@ -669,6 +685,8 @@ public override void OnBoot(BootContext boot)
     Chat.Broadcast("booting");                     // KILN035: must be called on the tick thread
     var n = Players.All.Count;                     // KILN035: a Kiln.Players service API
     var wood = boot.GameData.Read("item:Material_T1_Wood_Logs");   // fine: the offline view
+    var settings = Config.Register<Settings>();    // fine: reads the file, writes nothing
+    if (settings.Value.Enabled) settings.Save();   // KILN035: must be called on the tick thread
 }
 ```
 

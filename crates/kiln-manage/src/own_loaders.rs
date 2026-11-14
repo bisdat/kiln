@@ -290,7 +290,8 @@ pub struct OwnLoaderNote {
     pub own: Vec<String>,
     /// Ids of [`OwnLoaderNote::own`] that ShroudForge has switched off (their folder has no `extended.mod.json`, or its
     /// `enabled` is not true): ShroudForge does not run them, and activating the profile does not change that; the
-    /// player switches them on in Kiln's menu (Mods, ShroudForge) or in ShroudForge's own Modloader.
+    /// player switches them on in Kiln's in-game menu (Mods > ShroudForge), or removes the folder so that activation
+    /// places Kiln's copy, switched on (the text says it in the words of [`crate::shroudforge::HAND_EML_OFF`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub own_off: Vec<String>,
     /// EML ids that a folder of the player's stands for, which EML's own loader does not take as a mod (its mod.json is
@@ -431,11 +432,8 @@ pub fn notes(game_dir: &Path, loaders: &[OwnLoader], profile: Option<&ProfileVie
         // run the EML mods (its own loader, or Kiln hosting it, beside EML's proxy file too) from the folder they are in
         let server = game_dir.join(crate::game::SERVER_EXE).is_file();
         let hosted = loaders.iter().find(|o| o.kind == kind && o.via == Via::HostedShroudForge);
-        // EML's own loader, when it is the note's, runs instead of ShroudForge whenever it is loaded: always on Windows
-        // and through a chain line, under Wine or Proton a proxy file only with a DLL override (the sentence below)
-        let unloaded = cfg!(not(windows)) && l.via == Via::Proxy && !l.file.eq_ignore_ascii_case("dinput8.dll");
-        let sf_reads = kind == ModKind::Eml && root == crate::shroudforge::mods_dir(game_dir)
-            && (l.engine == Engine::ShroudForge || (hosted.is_some() && unloaded));
+        let unloaded = proxy_unloaded(l);
+        let sf_reads = kind == ModKind::Eml && sf_eml_folder(game_dir, loaders).is_some();
         let (mut off, mut other_side, mut unreadable, mut refused) = (Vec::new(), Vec::new(), Vec::new(), None);
         for id in copied.iter().filter(|_| sf_reads) {
             match copy_of(&root, kind, id).and_then(|dir| crate::shroudforge::switched_off(&dir, server)) {
@@ -524,11 +522,22 @@ pub fn notes(game_dir: &Path, loaders: &[OwnLoader], profile: Option<&ProfileVie
                 ". ShroudForge has {} of them switched off in ShroudForge's settings and does not run them ({}): activate the profile again to switch them on",
                 off.len(), names(&off)));
         }
+        // the words promised on Nexus (shroudforge::HAND_EML_OFF), for one folder or several; Kiln never writes into them
         if !own_off.is_empty() {
-            text.push_str(&format!(
-                ". ShroudForge has your own folder(s) of {} of them switched off and does not run them ({}): activating the profile does not change \
-                that, because Kiln never writes into your own folder. Switch them on in Kiln's in-game menu (Mods, ShroudForge) or in ShroudForge's \
-                own Modloader, then start the game again", own_off.len(), names(&own_off)));
+            let (one, ids) = (own_off.len() == 1, names(&own_off));
+            text.push_str(&match (one, server) {
+                (true, false) => format!(". You put this mod ({ids}) into ShroudForge's folder yourself, and ShroudForge has it switched off. \
+                    Switch it on in Kiln's in-game menu (Mods > ShroudForge), or remove the folder and press Play: the mod is in your profile, \
+                    so Kiln then places its own copy, switched on"),
+                (false, false) => format!(". You put these mods ({ids}) into ShroudForge's folder yourself, and ShroudForge has them switched \
+                    off. Switch them on in Kiln's in-game menu (Mods > ShroudForge), or remove their folders and press Play: the mods are in \
+                    your profile, so Kiln then places its own copies, switched on"),
+                (true, true) => format!(". You put this mod ({ids}) into ShroudForge's folder yourself, and ShroudForge has it switched off. \
+                    A server has no in-game menu: remove the folder and activate the profile again, and Kiln places its own copy, switched on"),
+                (false, true) => format!(". You put these mods ({ids}) into ShroudForge's folder yourself, and ShroudForge has them switched \
+                    off. A server has no in-game menu: remove their folders and activate the profile again, and Kiln places its own copies, \
+                    switched on"),
+            });
         }
         if !own_refused.is_empty() {
             text.push_str(&format!(
@@ -548,6 +557,24 @@ pub fn notes(game_dir: &Path, loaders: &[OwnLoader], profile: Option<&ProfileVie
         out.push(OwnLoaderNote { loader: l.clone(), enabled: n as u32, copied, not_copied, own, own_off, own_refused, off, other_side, unreadable, text });
     }
     out
+}
+
+/// EML's own loader, when it is EML's first loader ([`of_kind`]), runs instead of ShroudForge whenever it is loaded:
+/// always on Windows and through a chain line; under Wine or Proton a proxy file (not `dinput8.dll`) only with a DLL
+/// override, which the launcher cannot see.
+fn proxy_unloaded(l: &OwnLoader) -> bool {
+    cfg!(not(windows)) && l.via == Via::Proxy && !l.file.eq_ignore_ascii_case("dinput8.dll")
+}
+
+/// ShroudForge's mods folder when ShroudForge may run the EML mods this start, from the folder they are in, each only
+/// while its switch is on for this side ([`crate::shroudforge::switched_off`]): EML's first loader is ShroudForge (its
+/// own loader, or Kiln hosting it for the profile), or EML's own proxy file that may not load beside a ShroudForge Kiln
+/// hosts ([`proxy_unloaded`]). None when EML's own loader runs them, or nothing but kiln-eml does.
+pub fn sf_eml_folder(game_dir: &Path, loaders: &[OwnLoader]) -> Option<PathBuf> {
+    let l = of_kind(loaders, ModKind::Eml)?;
+    let hosted = loaders.iter().any(|o| o.kind == ModKind::Eml && o.via == Via::HostedShroudForge);
+    let root = l.root(game_dir);
+    (root == crate::shroudforge::mods_dir(game_dir) && (l.engine == Engine::ShroudForge || (hosted && proxy_unloaded(l)))).then_some(root)
 }
 
 /// "EML's own loader", "ShroudForge's loader (it runs EML mods too)".
@@ -723,7 +750,31 @@ mod tests {
         assert!(e.off.is_empty(), "{e:?}");
         assert!(e.text.contains("1 of this profile's 3 EML mod(s) are not in mods/ and do not load while it runs (missing)"), "{}", e.text);
         assert!(e.text.contains("1 of this profile's 3 EML mod(s) are in your own folder(s) in mods/ (auto-loot-plus)"), "{}", e.text);
-        assert!(e.text.contains("Switch them on in Kiln's in-game menu (Mods, ShroudForge) or in ShroudForge's own Modloader"), "{}", e.text);
+        // the words promised to a player on Nexus (14 Nov 2026), and nothing about ShroudForge's files
+        assert!(e.text.contains("You put this mod (auto-loot-plus) into ShroudForge's folder yourself, and ShroudForge has it switched off. \
+            Switch it on in Kiln's in-game menu (Mods > ShroudForge), or remove the folder and press Play: the mod is in your profile, so Kiln \
+            then places its own copy, switched on"), "{}", e.text);
+        assert!(!e.text.contains("extended.mod.json"), "{}", e.text);
+        // two of them: the same words for both
+        let more = g.join("mods/More Gliders");
+        std::fs::create_dir_all(more.join("src")).unwrap();
+        std::fs::write(more.join("mod.json"), br#"{"id":"more-gliders","name":"More Gliders","version":"0.2.2","capabilities":["patch"]}"#).unwrap();
+        std::fs::write(more.join("src/mod.lua"), b"return {}").unwrap();
+        let mut two = view.clone();
+        two.mods.push((ModKind::Eml, "more-gliders".into(), true));
+        let n2 = notes(&g, &find(&g, Some(&two)), Some(&two));
+        let e2 = n2.iter().find(|n| n.loader.kind == ModKind::Eml).unwrap();
+        assert!(e2.text.contains("You put these mods (auto-loot-plus, more-gliders) into ShroudForge's folder yourself, and ShroudForge has \
+            them switched off. Switch them on in Kiln's in-game menu (Mods > ShroudForge), or remove their folders and press Play: the mods \
+            are in your profile, so Kiln then places its own copies, switched on"), "{}", e2.text);
+        std::fs::remove_dir_all(&more).unwrap();
+        // a dedicated server has no in-game menu
+        std::fs::write(g.join(crate::game::SERVER_EXE), b"MZ").unwrap();
+        let ns = notes(&g, &l, Some(&view));
+        let es = ns.iter().find(|n| n.loader.kind == ModKind::Eml).unwrap();
+        assert!(es.text.contains("You put this mod (auto-loot-plus) into ShroudForge's folder yourself, and ShroudForge has it switched off. \
+            A server has no in-game menu: remove the folder and activate the profile again, and Kiln places its own copy, switched on"), "{}", es.text);
+        std::fs::remove_file(g.join(crate::game::SERVER_EXE)).unwrap();
         // switched on there (ShroudForge's Modloader writes the file): it runs, and nothing asks for a switch
         std::fs::write(own.join("extended.mod.json"), br#"{"schemaVersion":1,"enabled":true,"targets":["client","server"],"launcher":"EML","settings":{}}"#).unwrap();
         let n = notes(&g, &l, Some(&view));

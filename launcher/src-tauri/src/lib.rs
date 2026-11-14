@@ -211,6 +211,7 @@ pub fn run() {
             commands::found::found_add,
             commands::cook::cook_plan,
             commands::cook::cook_run,
+            commands::cook::boot_snapshot_run,
             commands::logs::report_save,
             commands::logs::report_summary,
             commands::data_folder::data_folder_get,

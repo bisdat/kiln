@@ -94,6 +94,11 @@
   "19f-derived-companions": "0.2.0-dev.32",
   "19f-base-exposure": "0.2.0-dev.32",
   "19f-outer-tile": "0.2.0-dev.32",
-  "00-sigdb.in-place-patches": "0.2.0-dev.28"
+  "00-sigdb.in-place-patches": "0.2.0-dev.28",
+  "00-keys.physical-backquote": "0.2.0-dev.28",
+  "rules.noclip-descent": "0.2.0-dev.28",
+  "rules.noclip-death": "0.2.0-dev.28",
+  "rules.noclip-world": "0.2.0-dev.28",
+  "rules.noclip-disconnect": "0.2.0-dev.28"
  }
 }

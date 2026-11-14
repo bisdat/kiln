@@ -61,6 +61,7 @@ internal sealed class BlockContext(ModBlocks mod, string block)
     public (Guid Guid, byte[] Blob) Build(ProgramBuilder b)
     {
         var built = b.Build(Mod.Id);
+        KindBudget.Current?.Built(built.Blob.Length);
         if (b.IsLate) Mod.LateBuilders[built.Guid] = b;
         return built;
     }
@@ -103,6 +104,8 @@ internal sealed class BlockContext(ModBlocks mod, string block)
             try { return pending(); }
             finally { authored.Compiling.Remove(name); }
         }
+        // a committed boot definition of the mod: in the game since the boot generation, before (and after) its runtime activation
+        if (BootHandles.Find(authored.Id, name) is { } boot) return boot;
         throw new BlockError(Block, path, $"no block \"{name}\" in this mod; define it first, or say \"other-mod:{name}\"; there are: {string.Join(", ", Mod.Handles.Keys.Order())}");
     }
 }
@@ -573,6 +576,28 @@ internal sealed class Lowered(ModBlocks mod)
             BlockRuntime.AddRules(mod, section, entry, rules);
             BlockRuntime.AddVfxLate(mod, late);
         }
+    }
+
+    /// <summary>What this block registers and runs, into a hash: two lowerings that add the same register the same (a kind's plan in a
+    /// later content generation, Kinds/KindApply.cs). Items and recipes are in <see cref="Json"/>, which the caller adds.</summary>
+    internal void Digest(System.Security.Cryptography.IncrementalHash h)
+    {
+        void Text(string s)
+        {
+            h.AppendData(System.Text.Encoding.UTF8.GetBytes(s));
+            h.AppendData([0]);
+        }
+        foreach (var (guid, blob) in _programs)
+        {
+            Text(guid.ToString());
+            h.AppendData(blob);
+            h.AppendData([0]);
+        }
+        foreach (var (section, def) in _clones) Text($"{section}|{KindJson.Canonical(def)}");
+        foreach (var (section, entry, rules) in _rules) Text($"{section}|{entry}|{KindJson.Canonical(rules)}");
+        foreach (var (section, entry, path, program) in _lateRules) Text($"{section}|{entry}|{path}|{program}");
+        foreach (var (section, entry, _, late) in _vfxLates) Text($"{section}|{entry}|{late.Vfx.GameName}");
+        Text(_after.Count.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 
     /// <summary>The names of the game-data clones and new items this block registers (a kind's plan checks them at content ready).</summary>

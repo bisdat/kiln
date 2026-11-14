@@ -73,6 +73,9 @@ std::map<std::string, std::string> g_boot_definitions;  // "<mod>/<kind>/<block>
 std::set<std::string> g_from_code;                       // "<mod>/<block>": read from what code kept in an earlier run
 std::map<std::string, fs::path> g_pending_dirs;          // mod id -> its folder of blocks kept from code
 std::set<std::string> g_defined;                         // "<mod>/<block>": defined by code this session
+// A boot generation's required participants that have world-table blocks (prepare): what the merge cannot apply of theirs is an
+// activation fault, which stops the start (kiln.boot activation_fault)
+std::set<std::string> g_boot_required;
 
 // What came of it.
 std::vector<Placed> g_placed;             // building materials, then terrain ones (cell < 128): live first in each
@@ -277,7 +280,21 @@ void read_mod(const std::string& dir, const fs::path& pending_root, const kiln::
         if (d.contains("surfaces") && d["surfaces"].is_object())
             for (auto it = d["surfaces"].begin(); it != d["surfaces"].end(); ++it) surfaces.emplace(it.key(), it.value());
     };
-    for (const auto& [label, path] : files) add(label, parse_relaxed(read_text(path)));
+    // a required participant prepares strictly (kiln_boot_collector.hpp): a file of its own that cannot be read or is not JSON, or a
+    // block with an error, refuses it; another mod's are logged and skipped as they always were. What Kiln kept from code at an
+    // earlier start is Kiln's own data, not the mod's boot content: read as before.
+    const auto strict = [&](const std::string& key, const std::string& why) {
+        kiln::boot::entry_error(boot, man.id, "worldtables", key, "kiln.worldtables: " + why);
+    };
+    for (const auto& [label, path] : files) {
+        std::ifstream probe(path, std::ios::binary);
+        if (!probe) {
+            g_errors.push_back(man.id + ": " + label + ": cannot be read");
+            strict(label, label + ": cannot be read");
+            continue;
+        }
+        add(label, parse_relaxed(read_text(path)));
+    }
     if (boot)
         for (const auto& b : boot->docs("worldtables", man.id)) {
             if (!b.document.is_object())
@@ -302,8 +319,10 @@ void read_mod(const std::string& dir, const fs::path& pending_root, const kiln::
         mf.clients = man.clients;
         mf.strengths = strengths;
         mf.surfaces = surfaces;
+        const bool own = label.rfind("kept from code: ", 0) != 0;
         if (doc.is_discarded()) {
             g_errors.push_back(mf.file + ": not valid JSON");
+            if (own) strict(label, label + ": not valid JSON");
             continue;
         }
         if (!doc.is_object() ||
@@ -312,6 +331,8 @@ void read_mod(const std::string& dir, const fs::path& pending_root, const kiln::
             continue;
         read_blocks(doc, &mf);
         g_errors.insert(g_errors.end(), mf.errors.begin(), mf.errors.end());
+        if (own && !mf.errors.empty())
+            strict(label, mf.errors.front() + (mf.errors.size() > 1 ? " (and " + std::to_string(mf.errors.size() - 1) + " more, kiln.log)" : ""));
         for (Tweak& t : mf.tweaks) {
             if (!seen.insert("t/" + t.block).second) continue;
             g_boot_definitions[man.id + "/t/" + t.block] = normal_tweak(t);
@@ -979,8 +1000,20 @@ void merge_locked() {
 
 const KilnWorldTablesApi* table();
 
+// The mod a merge error or refusal names: "... (mod <id>)..." or "... (<block>, mod <id>): ...".
+std::string mod_named(const std::string& text) {
+    for (const char* tag : {"(mod ", ", mod "}) {
+        const size_t at = text.find(tag);
+        if (at == std::string::npos) continue;
+        const size_t from = at + std::strlen(tag), end = text.find_first_of("):", from);
+        return text.substr(from, end == std::string::npos ? std::string::npos : end - from);
+    }
+    return {};
+}
+
 void KILN_CALL on_resources_ready(void*) {
     std::vector<Writer> writers;
+    std::vector<std::pair<std::string, std::string>> faults;  // a required boot mod, what the merge could not apply of it
     {
         std::lock_guard lock(g_mu);
         if (g_merge_started) return;
@@ -994,7 +1027,21 @@ void KILN_CALL on_resources_ready(void*) {
         for (const std::string& e : g_errors) WT_E("worldtables: %s", e.c_str());
         write_status();
         if (g_state.load() != KILN_WT_OFF) writers = g_writers;
+        std::set<std::string> said;
+        if (g_state.load() == KILN_WT_OFF) {
+            for (const std::string& m : g_boot_required)
+                if (said.insert(m).second) faults.emplace_back(m, "kiln.worldtables is off this session (" + g_off_reason + "): its world-table blocks are not applied");
+        } else {
+            for (const auto* list : {&g_errors, &g_refused})
+                for (const std::string& e : *list) {
+                    if (e.rfind("kept ", 0) == 0) continue;  // what a world remembers, not the mod's blocks of this start
+                    const std::string m = mod_named(e);
+                    if (g_boot_required.count(m) && said.insert(m).second) faults.emplace_back(m, e);
+                }
+        }
     }
+    // a required boot mod's blocks that could not be applied: kiln.boot stops the start (the call does not return then)
+    for (const auto& [mod, why] : faults) kiln::boot::activation_fault(g_api, g_self, mod, "worldtables", "", "kiln.worldtables: " + why);
     for (const Writer& w : writers) w.fn(table(), w.user);
 }
 
@@ -1482,7 +1529,18 @@ Config read_config() {
 void read_all(const kiln::boot::Input* boot) {
     try {
         const fs::path pending = data_dir() / L"pending";
-        for (const std::string& dir : mod_folders()) read_mod(dir, pending, boot);
+        for (const std::string& dir : mod_folders()) {
+            try {
+                read_mod(dir, pending, boot);
+            } catch (const kiln::boot::Refusal&) {
+                throw;
+            } catch (const std::exception& e) {  // a required participant's read that failed refuses it; anything else ends the read as before
+                const std::string id = boot ? kiln::boot::mod_id_of(to_path(dir)) : std::string();
+                if (boot && boot->strict(id))
+                    throw kiln::boot::Refusal(id, "worldtables", "blocks", std::string("kiln.worldtables: reading its blocks failed: ") + e.what());
+                throw;
+            }
+        }
         read_kept();
     } catch (const kiln::boot::Refusal&) {
         throw;  // a boot document: its prepare refuses the mod
@@ -1509,6 +1567,7 @@ void forget_locked() {
     g_from_code.clear();
     g_pending_dirs.clear();
     g_errors.clear();
+    g_boot_required.clear();
 }
 void KILN_CALL destroy_boot(const void* p) {
     {
@@ -1532,6 +1591,11 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
             return kiln::boot::refuse(out, issue, r.mod, r.kind, r.key, r.what());
         }
         *plan = BootPlan{g_tweaks.size(), g_live.size(), g_shapes.size(), g_craft_read.size()};
+        g_boot_required.clear();
+        for (const auto& [key, def] : g_boot_definitions) {
+            const std::string mod = key.substr(0, key.find('/'));
+            if (input.strict(mod)) g_boot_required.insert(mod);
+        }
     }
     WT_I("worldtables: boot generation %llu prepared: %zu tweak(s), %zu material(s), %zu shape(s), %zu crafting prop(s)",
          static_cast<unsigned long long>(input.generation), plan->tweaks, plan->materials, plan->shapes, plan->props);

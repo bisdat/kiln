@@ -28,8 +28,27 @@ result** and the game's save keeps it. Plus WorldEdit-style schematics (`.kschem
 - **Saving.** The game saves terrain **only inside player-base build zones**; everything else regrows at the next
   restart. Kiln remembers the 16 m chunks its own writes touch and adds them to the region list the game's save
   writes, so Kiln's edits are saved like a base (`kiln/data/kiln.build/regions/<world GUID>.json`). Inside a Kiln
-  region the players' own digging is kept too. `BuildFlags.Transient` skips that; `Build.Release(box)` forgets regions
-  (the terrain there reverts at the next restart).
+  region the players' own digging is kept too. `Build.Release(box)` forgets regions (the terrain there reverts at the
+  next restart).
+- **Transient edits** (`BuildFlags.Transient`) add no region and are gone after the next restart, also where the game's
+  save writes them anyway (inside a player base, or in a 32-cell chunk another edit keeps): every transient write
+  journals the cells it changed, their value before and after, on disk before it commits them: appended to
+  `kiln/data/kiln.build/transient/<world GUID>.log`, which is compacted into `<world GUID>.bin` at each save, every
+  second and when it grows. If the journal cannot be written (a full disk), the transient write is refused and nothing
+  is committed, so no save ever holds a transient cell without its record. At the next start,
+  once the world runs, each journaled cell that still holds what the transient write left gets its earlier value back,
+  block by block as its tiles load, through the same store commit as any edit (players see it; no `BuildEditingEvent`
+  is raised for it). A cell changed since (a player dug it) is left as it is; a block whose put-back commit fails stays
+  journaled for the next start. A later edit without the flag takes its
+  cells out of the journal (they are meant to stay), on disk before it commits; if that cannot be written, an edit
+  that sets journaled transient cells is refused (`BuildException`, "unavailable") rather than risk the next start
+  putting it back (edits elsewhere are not affected); a transient write again in the new session makes them that
+  session's. Put-back cells stay on record until two world files were written after it. Limits: the journal holds
+  8,192 blocks (about 4 million cells); past that, when the journal cannot be written, and while the world's identity is
+  unknown (no kiln.saves, or
+  kiln.saves could not read the world's id from the game; it reads it at load, also for a new world before its first
+  save), a transient write is refused (`BuildException`, "unavailable"). `Transient` with `Unloaded` is refused
+  (`ArgumentException`): the put-back needs the real earlier cells.
 - **Crash behaviour.** The game writes the world when it saves (every 30 s, on a player leaving, on shutdown, on
   `Saves.Request()`). An edit followed by a save survives `kill -9`; an edit after the last save is lost by `kill -9`
   like any player edit. Kiln's region list is written within a second of an edit and is harmless when the edit was lost.

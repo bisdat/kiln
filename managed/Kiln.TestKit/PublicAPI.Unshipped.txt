@@ -158,9 +158,14 @@ Kiln.TestKit.HarnessTerrain.GroundY.get -> int
 Kiln.TestKit.HarnessTerrain.GroundY.set -> void
 Kiln.TestKit.HarnessTerrain.Loaded.get -> bool
 Kiln.TestKit.HarnessTerrain.Loaded.set -> void
+Kiln.TestKit.HarnessTerrain.LoseLedger(string! mod, bool wholeWorldData = false) -> bool
+Kiln.TestKit.HarnessTerrain.Revision.get -> uint
+Kiln.TestKit.HarnessTerrain.Restart() -> void
+Kiln.TestKit.HarnessTerrain.SaveWorld() -> void
 Kiln.TestKit.HarnessTerrain.Set(Kiln.CellPos at, Kiln.Voxel cell) -> void
 Kiln.TestKit.HarnessTerrain.WorldId.get -> string!
 Kiln.TestKit.HarnessTerrain.WorldId.set -> void
+Kiln.TestKit.HarnessTerrain.Witnessed(string! mod) -> System.Collections.Generic.IReadOnlyList<string!>!
 Kiln.TestKit.HarnessTerrain.Writes.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeTerrainWrite>!
 Kiln.TestKit.KilnHarness.Terrain.get -> Kiln.TestKit.HarnessTerrain!
 override Kiln.TestKit.FakeTerrainWrite.GetHashCode() -> int

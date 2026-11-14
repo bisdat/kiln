@@ -6,6 +6,7 @@
 import { Navigate, Outlet, Route, Routes, useParams } from "react-router-dom";
 import { AdminProvider } from "../api/admin";
 import { startHistory } from "./history";
+import { ADMIN_MERGED } from "../shell/serverNav";
 import AdminPlayersPage from "./pages/AdminPlayersPage";
 import AdminMapPage from "./pages/AdminMapPage";
 import AdminZonesPage from "./pages/AdminZonesPage";
@@ -53,8 +54,9 @@ function AdminLayout() {
   return <Outlet />;
 }
 
-/** Old admin routes that are merged into the server's own pages. */
-const MERGED: [string, string][] = [["configs", "configs"], ["mods", "mods"], ["console", "overview"]];
+/** Old admin routes that are merged into the server's own pages (App.tsx redirects them before this bundle loads;
+ *  these routes serve an AdminRoutes mounted elsewhere). */
+const MERGED = ADMIN_MERGED;
 
 /** Every admin page of the server in the URL (`/servers/:id/admin/*`). */
 export function AdminRoutes({ serverId }: { serverId?: string }) {

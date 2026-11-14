@@ -74,11 +74,17 @@ public override void OnBoot(BootContext boot)
 - That runtime registration takes over what `OnBoot` read: the same text, not read again while the file is unchanged, so
   `OnBoot` and the running mod see the same values. A file edited in between is read again and kiln.log says so ("changed after
   the mod's OnBoot read it"); `OnBoot` used the earlier values.
+- The boot content was made with these values: they are frozen with the mod's files. A later load of the mod in the same
+  process (after an unload) whose config file now gives other values is refused with `RestartRequiredBoot`, naming the
+  changed entries; the same values written another way (Kiln's canonical rewrite included) load
+  ([modding/onboot.md](modding/onboot.md#after-a-change-restart)).
 - `OnBoot` runs on an instance of the mod that is unloaded when it returns, so `Register` again in `OnLoad`: the object from
   `OnBoot` is not the one the running mod keeps. The config is in `Config.All` from that registration on.
 - Refused in `OnBoot`, with "… is not available in OnBoot (it runs before the game's first tick); call it in OnLoad":
   `Set`/`TrySet`, `Save`, `Reload`, adding a `Changed` handler, and `RegisterWorld` (no world exists yet). The same message
   comes from every other tick-thread member called there.
+- The build says the same: [KILN035](modding/analyzers.md#kiln035) reports those members in `OnBoot`, and leaves
+  `Config.Register` and reading `Value` alone.
 
 ## Per world
 `Config.RegisterWorld<T>()` (or `Mod.WorldConfig<T>()`) keeps one file of the config for each world, in the world's folder beside
@@ -91,7 +97,14 @@ The file is a server-kind config (`<modid>-world`); `ConfigFile.PerWorld`, `Worl
   max, options, requiresRestart, synced), `Get(path)`, `TrySet(path, value, out error)` / `Set` (validates, refuses
   out-of-range, writes the file, raises the change; values may be CLR values, `JsonElement`/`JsonNode` or text such as
   "12", "on", "Hard", "5m", "[1, 2]"), `Save()` (after changing `Value` in code), `Reload()`, `Schema()`/`SchemaJson()`,
-  `ValuesJson()`, `SyncedValuesJson()`, `PendingRestart`, `Warnings`, `LastError`, `LoadedAt`.
+  `ValuesJson()`, `SyncedValuesJson()`, `PendingRestart`, `Warnings`, `LastError`, `LastWriteError`, `LoadedAt`.
+- A file that cannot be written (a read-only folder, a full disk) is never reported as saved. `TrySet` is all or
+  nothing: it returns false with "cannot write" and the reason in `error`, the entry keeps its running value and its
+  file value, and no change is raised. `Set` and `Save` do not throw for it, as before 0.2.0-dev.28: the value applies
+  for this session and the failure is logged. `LastWriteError` (since 0.2.0-dev.28) says why the last write failed
+  and is null after one that succeeded: read it after `Set` or `Save` before you tell a player "saved". A value `Set`
+  could not save is written by the next write that succeeds; until then `TrySet` of that same value answers false.
+  Reading a config never fails for this: a file Kiln cannot rewrite at registration is only logged.
 - Threads: `Register`, `Set`, `Save`, `Reload` on the tick thread (`Register` also in `Mod.OnBoot`, see above); reads anywhere
   (values are plain objects).
 - A mod's configs leave the registry when it unloads; the file stays.

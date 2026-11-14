@@ -488,11 +488,14 @@ internal static class ItemRefs
 
 /// <summary>Kiln.Items' start (ServiceTick.AutoStart runs this static constructor at the first service tick): puts the
 /// item entity source into <see cref="IdentitySources"/>' order when kiln.items has item instances; otherwise logs once
-/// why item entities have no stamps (kiln.spawn's source then answers for them, with weaker serials).</summary>
+/// why item entities have no stamps (kiln.spawn's source then answers for them, with weaker serials). It also starts the
+/// tool wear drain where kiln.toolwear reports rule changes (<see cref="Items.ToolWear.WatchRules"/>).</summary>
 internal static class ItemsStartup
 {
     static ItemsStartup()
     {
+        // tool wear (dev.28): rule changes are raised from the first tick, also those of native plugins where no mod set a rule
+        Items.ToolWear.WatchRules();
         if (Environment.GetEnvironmentVariable("KILN_LAB_NO_ENTITY_SOURCES") == "1")
         {
             Backend.Current.Log(0, LogLevel.Warn, "kiln.items: KILN_LAB_NO_ENTITY_SOURCES=1: no item entity source (lab switch)");

@@ -292,6 +292,10 @@ struct BootMod {
 std::vector<BootMod> g_scanned;  // decide()'s manifest scan: every boot mod of the profile takes part, with its files at least
 // labs only (kiln.json "boot.testRefuse" with policy any): mod -> the collector that gets an unreadable document of it each round
 std::map<std::string, std::string> g_test_refuse;
+// labs only (kiln.json "boot.testFault" with policy any): mod -> the collector told to fail that mod's content after the publication
+// (the IR's "testFault"; kiln.content: the world refuses the mod's first boot item or recipe at registration)
+std::map<std::string, std::string> g_test_fault;
+constexpr const char* kTestFaultCollectors[] = {"content"};
 
 // kiln.mod.json's "boot" of one folder: 0 none, 1 true, 2 "required". `id` gets the manifest's id.
 int manifest_boot(const std::filesystem::path& dir, uint32_t side, std::string* id) {
@@ -635,6 +639,7 @@ std::string build_ir_locked() {
             const std::string id = o["id"].get<std::string>();
             if (out.count(id)) continue;
             o["owner"] = g_owners[id].process;
+            o["required"] = g_owners[id].required;  // the collectors prepare a required participant strictly
             owners.push_back(o);
         }
     // participants the envelope does not list (files only): the collectors still get their process owner
@@ -642,7 +647,8 @@ std::string build_ir_locked() {
         std::set<std::string> listed;
         for (const auto& o : owners) listed.insert(o["id"].get<std::string>());
         for (const auto& [id, o] : g_owners)
-            if (!excluded(o) && !listed.count(id)) owners.push_back({{"id", id}, {"owner", o.process}, {"filesOnly", true}});
+            if (!excluded(o) && !listed.count(id))
+                owners.push_back({{"id", id}, {"owner", o.process}, {"filesOnly", true}, {"required", o.required}});
     }
     ir["owners"] = owners;
     if (!ir.contains("reservations")) ir["reservations"] = json::object();
@@ -660,6 +666,15 @@ std::string build_ir_locked() {
         for (auto& d : list)
             if (!out.count(d["owner"].get<std::string>())) kept.push_back(d);
         list = kept;
+    }
+    // the lab switch boot.testFault: the collector fails the mod's content after the publication (an activation fault)
+    if (!g_test_fault.empty()) {
+        json f = json::object();
+        for (const auto& [mod, c] : g_test_fault) {
+            const auto it = g_owners.find(mod);
+            if (it != g_owners.end() && !excluded(it->second)) f[mod] = c;
+        }
+        ir["testFault"] = f;
     }
     // the lab switch: an unreadable document of the mod, which the collector refuses as it refuses any such document
     for (const auto& [mod, c] : g_test_refuse) {
@@ -788,12 +803,12 @@ KilnResult KILN_CALL b_commit(KilnOwner host, uint64_t generation, KilnBootCommi
             }
         // A boot mod that neither ran OnBoot nor is named by the envelope (a mod of blocks files only; a build whose host
         // stages no envelope) takes part with its files: a collector may refuse it by name, and "required" holds for it.
-        for (const BootMod& m : g_scanned)
-            if (!g_owners.count(m.id)) {
-                Owner& o = g_owners[m.id];
-                o.id = m.id;
-                o.required = m.required;
-            }
+        // Its manifest says whether its boot content is required, also for a participant the envelope names that ran no OnBoot.
+        for (const BootMod& m : g_scanned) {
+            Owner& o = g_owners[m.id];
+            if (o.id.empty()) o.id = m.id;
+            o.required = o.required || m.required;
+        }
         propagate_locked("callback");
         for (auto& [id, o] : g_owners)
             if (!excluded(o)) o.process = reg::owner_create("boot:" + id);
@@ -995,8 +1010,10 @@ KilnResult KILN_CALL b_activation_fault(KilnOwner collector, KilnStr mod_id, Kil
             g_exit_code = KILN_BOOT_EXIT_CODE;
             char line[96];
             std::snprintf(line, sizeof line, "boot: the start stops (exit code 0x%04X)", KILN_BOOT_EXIT_CODE);
+            const std::string k(sv(kind)), ky(sv(key));
+            const std::string entry = k.empty() && ky.empty() ? std::string() : k + (k.empty() || ky.empty() ? "" : " ") + ky + ": ";
             last = std::string(line) + ": " + required + "'s boot content is required and could not be applied: " +
-                   (required == id ? std::string() : "dependency " + id + ": ") + std::string(sv(reason)) +
+                   (required == id ? std::string() : "dependency " + id + ": ") + entry + std::string(sv(reason)) +
                    "; state/boot.json lists every boot mod's state and issue";
         }
     }
@@ -1103,6 +1120,22 @@ void decide(bool hooks, const std::string& safe_idle) {
         g_boot_mods = names;
         g_scanned = mods;
         g_test_refuse.clear();
+        g_test_fault.clear();
+        if (deferred && !config().boot_test_fault.empty()) {
+            if (!config().policy_any) {
+                KLOG_W("boot: kiln.json boot.testFault is ignored: it is a lab switch and needs policy \"any\"");
+            } else {
+                for (const auto& [mod, c] : config().boot_test_fault) {
+                    if (std::find_if(std::begin(kTestFaultCollectors), std::end(kTestFaultCollectors), [&](const char* k) { return c == k; }) ==
+                        std::end(kTestFaultCollectors)) {
+                        KLOG_W("boot: kiln.json boot.testFault.%s: \"%s\" has no late fault to force (content); ignored", mod.c_str(), c.c_str());
+                        continue;
+                    }
+                    g_test_fault[mod] = c;
+                    KLOG_W("boot: lab switch boot.testFault: collector %s fails a definition of %s after the publication", c.c_str(), mod.c_str());
+                }
+            }
+        }
         if (deferred && !config().boot_test_refuse.empty()) {
             if (!config().policy_any) {
                 KLOG_W("boot: kiln.json boot.testRefuse is ignored: it is a lab switch and needs policy \"any\"");
@@ -1198,7 +1231,10 @@ bool after_clr(bool clr_started, void (*write_state)(void* user, const std::stri
                 if ((it->code & KILN_BOOT_ISSUE_WARNING) || it->code == KILN_BOOT_ISSUE_GENERATION_ABORTED) continue;
                 const auto o = g_owners.find(it->mod);
                 if (required_only && (o == g_owners.end() || !o->second.required)) continue;
-                why = (it->mod.empty() ? std::string() : it->mod + ": ") + it->reason;
+                // the mod, then the entry (kind and file or key), then why: "mod: kind key: reason"
+                const std::string entry = it->kind.empty() && it->key.empty() ? std::string()
+                                          : it->kind + (it->kind.empty() || it->key.empty() ? "" : " ") + it->key + ": ";
+                why = (it->mod.empty() ? std::string() : it->mod + ": ") + entry + it->reason;
             }
         g_exit_code = KILN_BOOT_EXIT_CODE;
     }

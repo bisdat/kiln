@@ -171,8 +171,9 @@ public sealed partial class ClientPassMod
         await c.Ticks(1);
         c.Expect(back.Ok && (World.ReadBytes(prop, "CurrentTransform") ?? []).AsSpan().SequenceEqual(before), "restored: every byte as before", back.ToString());
         c.Instruct("The chest is back at its size. Is it drawn as before? Then set it once more with the transform-scale sample " +
-                   "(/tscale <id> 1.25 0.75 1.5; the id is in kiln.log), save, quit to the menu, load the world again and say whether " +
-                   $"the chest came back scaled (chest {prop}). A player without Kiln, if one is joined: what does that player see?");
+                   "(/tscale <id> 1.25 0.75 1.5; the id is in kiln.log), save, quit to the menu, load the world again: Kiln sets the " +
+                   "kept scale again as the world loads, so the chest should come back scaled, with no moment at its old size. Say what " +
+                   $"you saw (chest {prop}). A player without Kiln, if one is joined: what does that player see?");
         await c.Verdict();
     }
 }

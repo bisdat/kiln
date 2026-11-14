@@ -311,6 +311,27 @@ var b = KeyBindings.Register("mymod.toggle", "F8", () => w.Toggle(), "Toggle my 
 b.OnRelease = …;  b.IsDown;  b.TakePresses();  b.Consume = false;  b.WhileCapturing = true;
 ```
 - Keys are written like `F8`, `Ctrl+K`, `Shift+Alt+F2`, `Insert`, `Numpad5`, `Backquote`, `None`.
+- **Every key has a name** (0.2.0-dev.28): what the Keys page shows and keybinds.json stores always reads back at the next
+  start. Besides the names above: `PrintScreen`, `LeftWin`, `ContextMenu`, `LeftShift` … `RightAlt`, the media and browser
+  keys (`VolumeUp`, `MediaPlayPause`, …), the OEM keys (`Oem8`, `IntlBackslash`, `IntlRo`, `NumpadComma`, `OemClear`, …),
+  and a modifier key by itself as the last word (`Ctrl`, `Shift+Alt`). A key with no name is `Key` and its decimal
+  virtual-key code: `Key223`. `Key3` to `Key255` parse (`Key1` and `Key2` are the left and right buttons: refused). The
+  whole table is `native/services/ui/key_names.h`; Kiln.Ui uses the same one. In 0.2.0-dev.27 a key with no name was saved
+  as `Key223` and lost at the next start (GitHub issue 33); such a line now loads and fires on that key again.
+- **Punctuation names are physical keys** (0.2.0-dev.28): `Backquote`, `Minus`, `Equals`, `LeftBracket`, `RightBracket`,
+  `Backslash`, `Semicolon`, `Quote`, `Comma`, `Period`, `Slash`, `IntlBackslash` (the ISO key left of Z), `IntlRo` and
+  `NumpadComma` name the key at that place of a US keyboard, on every layout. `Backquote` is the key left of 1 also on a
+  UK layout (which gives it `VK_OEM_8`), a German one (`VK_OEM_5`) or a French one (`VK_OEM_7`); it no longer fires on
+  the UK `'` key, which sends the US backquote's code. Kiln tells the place by the key's scan code (raw input and the
+  window's key messages carry it, under Wine and Proton too); a key sent without one (an injected key) counts as the US
+  virtual key. `KeyChord.VirtualKey` holds the US layout's code of the place (`0xC0` for `Backquote`).
+  - Letters, digits and every other key stay virtual keys: `K` is the key that types K, wherever the layout puts it.
+  - A punctuation key a layout puts somewhere else (AZERTY's `,` where US has M; Dvorak's punctuation on letter places;
+    the Japanese Yen key) has no place of its own: it counts as its virtual key's US place too. The Keys page saves
+    what it can find again: for such a key that is the US place of its code.
+  - The Keys page saves a punctuation key by its place: pressing the key left of 1 on any layout saves `Backquote`.
+  - The Kiln menu's key follows the same rule. `UiWheelOptions.HoldKey` and kiln.ui's `take_pressed_key` (C ABI) stay
+    plain virtual-key codes.
 - **The mouse** (0.2.0-dev.27): `Mouse4`, `Mouse5` (the side buttons), `MouseMiddle` (also `Mouse3`), `WheelUp`,
   `WheelDown`, `WheelLeft`, `WheelRight`, with Ctrl, Shift and Alt as for keys: `Ctrl+WheelUp`, `Shift+Mouse4`.
   - The wheel gives one press per notch (a high-resolution wheel's smaller steps add up to a notch; turning the other
@@ -424,11 +445,14 @@ without the adapter's flag, the other target, a pass still `preparing`, the mod 
 another version) proves nothing either way, and the mod shows Waiting with the word `startup`. While ShroudForge
 runs, the EML rows of packages in its mods folder are read the same way (ShroudForge runs a package there only while
 its `extended.mod.json` says `enabled: true`, on the sides its `targets` name): switched off there they show Off,
-word `off-in-shroudforge`, with where to switch it on (Play in the launcher for Kiln's copy; the ShroudForge group or
-ShroudForge's own Modloader for the player's own folder), and the EML engine line counts them as a problem; on, a mod
+word `off-in-shroudforge`, with where to switch it on (Play in the launcher for Kiln's copy; for the player's own
+folder the words promised on Nexus, 2026-11-14: "You put this mod into ShroudForge's folder yourself, and ShroudForge
+has it switched off.", then Mods > ShroudForge or removing the folder and pressing Play), and the EML engine line
+counts them as a problem; on, a mod
 with a startup part shows `applied` when the record lists it, else Waiting `unconfirmed`. Kiln's EML copies are not
 repeated in the ShroudForge group; a player's own legacy EML folder there (no `extended.mod.json`) is listed in it,
-switched off, with the switch that writes ShroudForge's file. Enshwick's mods
+switched off, with the switch that writes ShroudForge's file, and the same words ("Switch it on below, or remove the
+folder and add the mod with Add mods in the Kiln launcher."; `ModCatalog.HandEmlOff`). Enshwick's mods
 come from the profile and mods folder, with loader state from `enshwick.json`; a folder there that another kind owns
 (a profile entry of another kind, a `native-plugin.ini`, a `mod.json`, or Kiln's placement marker of another kind) is
 not listed as Enshwick's. XHL companions (the profile's `mods.xhl`, and folders with XHL-Core's `native-plugin.ini` in

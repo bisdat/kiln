@@ -9,7 +9,7 @@ lies, what it costs, and what a mod sees when it is not there.
 
 | Who | When | What you see |
 |---|---|---|
-| The Kiln launcher | at Play (and Launch in a server's modpack offer), right after the cook, when an enabled Kiln mod of the start has `"boot": true` or `"required"` in its kiln.mod.json | a progress line ("Game data for OnBoot mods (about 200 MB, once per game build): …"); a notice in one line only when something went wrong. Without such a mod: "no mod needs the boot snapshot", and nothing runs |
+| The Kiln launcher | at Play (and Launch in a server's modpack offer), right after the cook, and before a single start with another profile ("play once", which cooks nothing), when an enabled Kiln mod of the start has `"boot": true` or `"required"` in its kiln.mod.json | a progress line ("Game data for OnBoot mods (about 200 MB, once per game build): …"); while it builds one, the start's own bar shows the step "Making the game data for OnBoot mods (once per game update)" with the tool's line (none when the snapshot is there); a notice in one line only when something went wrong. Without such a mod: "no mod needs the boot snapshot", and nothing runs |
 | `kiln boot-snapshot --game <dir> [--force] [--json]` | by hand, whatever the mods say: a server you start yourself, or to make it again | progress on stderr, then one line (or the JSON result) |
 | `tools/deploy-server.sh` | at each deploy into a server folder, when an enabled Kiln mod in its profile or allowed drop-in folders has `"boot": true` or `"required"` (`KILN_NO_BOOT_SNAPSHOT=1` skips the step) | the tool's lines; "no mod needs the boot snapshot" without such a mod; a warning when it was not made |
 
@@ -23,10 +23,12 @@ longer than 10 minutes (the launcher stops it then), the launcher continues with
 An OnBoot mod must still handle unavailable game data: an exception in its callback is subject to the boot phase's
 startup failure policy.
 
-The main Play action runs this step for the active profile, after refreshing that profile and cooking it. **Play once
-with another profile and Launch in the modpack-offer dialog currently bypass this step.** Before either path, run
-`kiln boot-snapshot --game <dir>` once for that game build. Launching through Steam also uses only a snapshot already
-made; it does not run the producer.
+The main Play action runs this step for the active profile, after refreshing that profile and cooking it; Launch in a
+server's modpack offer does the same for the modpack's profile its install made active. A single start with another
+profile ("play once", launch mode `once`) cooks nothing, but runs the same step for the mods of that start before the
+start writes its profile file (`kiln_manage::boot_snapshot::boot_mods_once`: the profile's enabled Kiln mods, and the
+Kiln drop-ins when that profile loads them). Launching through Steam uses only a snapshot already made; it does not run
+the producer (run `kiln boot-snapshot --game <dir>` once for that game build, or start the game through the launcher once).
 
 ## What it costs
 
@@ -97,7 +99,7 @@ after world load.
 ## When there is no snapshot
 
 On a start without a snapshot of the running game build (the tool could not run, it failed, or the game was started
-from Steam, or with the launcher's "play once" with another profile, which makes none, before a Play made one),
+from Steam before a start through the launcher made one),
 `OnBoot` still runs, and:
 
 - the capability row `mods.boot.game_data` is **unavailable**, with the reason "no game-data snapshot for this game

@@ -9,7 +9,11 @@
 //  - gravity: a mid hook in gravity_apply_velocity_actor after the step's time is read (xmm6 = the strength; a site of
 //    its own, the glider's is earlier) zeroes it for an actor that may fly.
 //  - the vertical input: an inline hook on the BuildingFlying mover sets DynamicLocomotion.inputVelocity.y from the
-//    held Jump (climb) and Sneak (sink) bits of PlayerInput, faster with Sprint, before the mover steers toward it.
+//    held Jump (climb) and Sneak (sink) bits of PlayerInput, faster with Sprint, before the mover steers toward it. For
+//    the length of that call the mover sees the body's default spring-acceleration row in all four of its rows: the
+//    game picks the row from the actor's InSneakMode and Strafing flags, and the crouched and strafing rows say "do not
+//    steer" at speed and when braking, so in the game's own sneak mode (the sneak key toggles it) the flight ignored
+//    the sneak key and drifted on (GitHub issue #25; flight_math.h pin_rows).
 //
 // KILN_RULES_NOCLIP flies with the same three hooks (flight_math.h says where it differs); noclip.cpp adds the
 // collision step and asks noclip_flight() here whose it may skip.
@@ -75,6 +79,8 @@ struct Layout {
     int64_t mover_actor = 0;    // the iterator's Actor
     int64_t player_input = 0;   // the iterator's PlayerInput
     int64_t input_mask = 0;     // PlayerInput's digital input (the held bits follow at +8)
+    int64_t mover_locomotion = 0;  // the iterator's Locomotion (the mover's spring-acceleration rows)
+    int64_t spring_rows = 0;       // the rows' offset in Locomotion (velocityDefault)
 } L;
 
 // keen::actor::StateFlag and PlayerInputType bits
@@ -114,6 +120,9 @@ std::atomic<uint32_t> g_local_player{0};  // refreshed once per client tick, nev
 std::atomic<uint64_t> g_moves{0};
 std::atomic<uint32_t> g_move_entity{0};
 std::atomic<uintptr_t> g_move_from{0}, g_move_to{0};
+
+std::atomic<uint64_t> g_pinned{0};    // mover calls that ran with the body's default row pinned (hk_mover)
+std::atomic<bool> g_pinned_told{false};
 
 uint64_t stamp() { return g_seen.fetch_add(1, std::memory_order_relaxed) + 1; }
 
@@ -297,17 +306,21 @@ void grav_body(safetyhook::Context& c) {
 }
 
 // ---- the vertical input, before the BuildingFlying mover ----
-void mover_pre(uint8_t* it) {
-    if (kiln_rules_creative::idle() || !(kiln_rules_bridge::flags_seen() & kFlies)) return;
+// True when Kiln steers this character's flight: the mover then runs with the default row pinned (hk_mover).
+bool mover_pre(uint8_t* it) {
+    if (kiln_rules_creative::idle() || !(kiln_rules_bridge::flags_seen() & kFlies)) return false;
     void* ctx = *reinterpret_cast<void**>(it);
     auto* dyn = *reinterpret_cast<float* const*>(it + L.mover_dynloco);
     const auto* input = *reinterpret_cast<const uint8_t* const*>(it + L.player_input);
-    if (!ctx || !dyn || !input) return;  // players only (the spark has no PlayerInput)
+    if (!ctx || !dyn || !input) return false;  // players only (the spark has no PlayerInput)
     uint32_t e = 0;
     KilnRulesPlayer r{};
-    if (!rules_for(ctx, &e, &r) || !armed(r)) return;
+    if (!rules_for(ctx, &e, &r) || !armed(r)) return false;
+    // PlayerInput's held bits are the keys as held (the client's digital input, before the game's own toggle logic for
+    // sneak and walk; docs/re/rules.md 8.1): sneak sinks while it is held, whatever the sneak toggle setting.
     const uint64_t held = *reinterpret_cast<const uint64_t*>(input + L.input_mask + 8);
     dyn[1] = flight_math::climb((held >> kJump) & 1, (held >> kSneak) & 1, (held >> kSprint) & 1);
+    return true;
 }
 
 template <void (*Body)(safetyhook::Context&)>
@@ -321,17 +334,53 @@ void mid_guarded(safetyhook::Context& c) {
 void hk_state(safetyhook::Context& c) { mid_guarded<state_body>(c); }
 void hk_grav(safetyhook::Context& c) { mid_guarded<grav_body>(c); }
 
-void mover_guarded(uint8_t* it) {
+bool mover_guarded(uint8_t* it) {
     __try {
-        mover_pre(it);
+        return mover_pre(it);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         S.faults.fetch_add(1, std::memory_order_relaxed);
     }
+    return false;
+}
+
+// The rows the mover is to see: false leaves the game's own (an unreadable Locomotion counts as a fault).
+bool pin_guarded(uint8_t* it, uint8_t* rows, uint8_t** real) {
+    __try {
+        *real = *reinterpret_cast<uint8_t**>(it + L.mover_locomotion);
+        return flight_math::pin_rows(*real, L.spring_rows, rows);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        S.faults.fetch_add(1, std::memory_order_relaxed);
+    }
+    return false;
 }
 
 void __fastcall hk_mover(uint8_t* it) {
-    if (it) mover_guarded(it);
-    h_mover.call<void>(it);
+    alignas(16) uint8_t rows[flight_math::kPinnedBytes];
+    uint8_t* real = nullptr;
+    if (!it || !mover_guarded(it) || !pin_guarded(it, rows, &real)) {
+        h_mover.call<void>(it);
+        return;
+    }
+    // The iterator is locomotion_execution's own (on its stack, one per thread): the slot is put back however the call
+    // ends, and the mover reads it once, for the row only (rules_sigdb_test.py checks both exes).
+    auto** slot = reinterpret_cast<uint8_t**>(it + L.mover_locomotion);
+    *slot = rows;
+    g_pinned.fetch_add(1, std::memory_order_relaxed);
+#ifdef KILN_RULES_HOST_TEST
+    try {
+        h_mover.call<void>(it);
+    } catch (...) {
+        *slot = real;
+        throw;
+    }
+    *slot = real;
+#else
+    __try {
+        h_mover.call<void>(it);
+    } __finally {
+        *slot = real;
+    }
+#endif
 }
 
 }  // namespace
@@ -392,6 +441,9 @@ void reset() {
 void refresh() {
     if (!g_api) return;
     report_moves();
+    if (g_pinned.load(std::memory_order_relaxed) && !g_pinned_told.exchange(true))
+        logf(KILN_LOG_INFO, "character flight: the mover steers with the body's default row (the game's sneak and strafing rows "
+             "are not used while Kiln flies a character)");
     (void)kiln_rules_creative::flame_creative();
     KilnClientState st{};
     st.size = sizeof st;
@@ -423,12 +475,23 @@ uint32_t install(const KilnApi* api, KilnOwner owner, std::string& off) {
           cst("rules/loco.actor", &L.loco_actor) && cst("rules/loco.dynloco", &L.loco_dynloco) && cst("rules/loco.state", &L.loco_state) &&
           cst("rules/flight.grav_actor", &L.grav_actor) && cst("rules/flight.dynloco", &L.mover_dynloco) &&
           cst("rules/flight.actor", &L.mover_actor) && cst("rules/loco.player_input", &L.player_input) &&
-          cst("rules/input.mask", &L.input_mask))) {
+          cst("rules/input.mask", &L.input_mask) && cst("rules/flight.locomotion", &L.mover_locomotion) &&
+          cst("rules/flight.spring_rows", &L.spring_rows))) {
         off += off.empty() ? "character flight (rules.flight)" : ", character flight (rules.flight)";
         return 0;
     }
     if (kiln_rules_creative::flame_creative()) {
         off += off.empty() ? "character flight (Creative Mode runs)" : ", character flight (Creative Mode runs)";
+        return 0;
+    }
+    // The rows are pinned through a slot of the mover's iterator: anything but a small pointer slot and rows near the
+    // start of Locomotion is not the layout this was written for, and flight stays off (a flight that cannot hold its
+    // speed in the game's sneak mode is the bug of issue #25).
+    if (L.mover_locomotion < 0 || L.mover_locomotion > 0x400 || L.mover_locomotion % 8 != 0 || L.mover_locomotion == L.mover_dynloco ||
+        L.spring_rows < 0 || L.spring_rows > flight_math::kRowsMax) {
+        logf(KILN_LOG_ERROR, "character flight: unexpected mover layout (Locomotion slot %lld, rows at %lld); it stays off",
+             (long long)L.mover_locomotion, (long long)L.spring_rows);
+        off += off.empty() ? "character flight (unexpected layout)" : ", character flight (unexpected layout)";
         return 0;
     }
     // all three or none: a state without its gravity or input would leave a player stuck in the air

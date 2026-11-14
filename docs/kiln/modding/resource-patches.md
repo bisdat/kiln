@@ -32,6 +32,7 @@ Needs a mod with `"boot": true` in `kiln.mod.json` (see [OnBoot](onboot.md)) and
 - `resource`: the resource's GUID. `type`: its qualified type name. `part`: the part index, 0 when left out.
   [Typed fields](typed-fields.md), "Any resource", shows how to list a type's resources and their members.
 - `set`: member path to value.
+- The file is read as every blocks file is: comments (`//`, `/* */`) and trailing commas are fine.
 
 ## Paths
 

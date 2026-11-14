@@ -11,6 +11,13 @@
 //             refusal (refuse()). It may not wait for any readiness (when_resources_ready, a world): the game is held.
 //   consumer  the hooks the game reaches after the entry point use what was prepared (published() says it is there).
 //
+// Required participants (08 fix round). A participant whose kiln.mod.json says "boot": "required" is marked in the input
+// ("required": true on its owners entry; Input::strict). Its boot content is all or nothing: every entry error the collector
+// would log and skip for another mod (a file that is not JSON, a malformed entry or node, a file that cannot be read, a cooker
+// failure) refuses the participant instead (entry_error throws Refusal; the prepare rolls back what it read and refuse()s),
+// and kiln.boot stops the start naming the mod, the file or entry (key) and the reason. An optional participant keeps the
+// old behaviour: the entry is logged and skipped, the rest of the mod is prepared.
+//
 // Documents. The envelope's collectors.<id> entries are {owner, key, document}; each collector reads `document` in the
 // JSON its own files (or the cache of code definitions) already use, as its file says. Precedence for one identity:
 // the mod's data file > its baked/generated file > its OnBoot code (these documents) > the pending cache of earlier
@@ -74,8 +81,12 @@ struct Input {
     nlohmann::json ir;
     std::set<std::string> excluded;          // mods whose definitions and files stay out
     std::map<std::string, KilnOwner> owner;  // participant -> its process owner "boot:<id>"
+    std::set<std::string> required;          // participants whose boot content is required (prepared strictly)
+    std::map<std::string, std::string> test_fault;  // labs only (kiln.json boot.testFault, policy any): mod -> collector to fail it late
 
     bool out(const std::string& mod) const { return excluded.count(mod) != 0; }
+    // A required participant: any entry error refuses it (entry_error).
+    bool strict(const std::string& mod) const { return required.count(mod) != 0; }
     std::vector<Doc> docs(const char* collector) const {
         std::vector<Doc> v;
         if (!ir.is_object() || !ir.contains("collectors") || !ir["collectors"].is_object() || !ir["collectors"].contains(collector))
@@ -108,8 +119,13 @@ inline Input parse(const KilnBootPrepareInputV1* in) {
             if (e.is_string()) r.excluded.insert(e.get<std::string>());
     if (r.ir.contains("owners") && r.ir["owners"].is_array())
         for (const auto& o : r.ir["owners"])
-            if (o.is_object() && o.contains("id") && o["id"].is_string())
+            if (o.is_object() && o.contains("id") && o["id"].is_string()) {
                 r.owner[o["id"].get<std::string>()] = o.contains("owner") && o["owner"].is_number_unsigned() ? o["owner"].get<KilnOwner>() : 0;
+                if (o.contains("required") && o["required"].is_boolean() && o["required"].get<bool>()) r.required.insert(o["id"].get<std::string>());
+            }
+    if (r.ir.contains("testFault") && r.ir["testFault"].is_object())
+        for (const auto& [mod, c] : r.ir["testFault"].items())
+            if (c.is_string()) r.test_fault[mod] = c.get<std::string>();
     r.ok = true;
     return r;
 }
@@ -119,6 +135,30 @@ struct Refusal : std::runtime_error {
     std::string mod, kind, key;
     Refusal(std::string m, std::string k, std::string ky, const std::string& why)
         : std::runtime_error(why), mod(std::move(m)), kind(std::move(k)), key(std::move(ky)) {}
+};
+
+// One entry error of `mod` in a prepare (a file that is not JSON, a malformed entry or node, a file that cannot be read, a
+// cooker failure). A required participant: throws Refusal (kind: the collector's kind, key: the file or entry, why: what is
+// wrong, naming the entry). Otherwise returns true: the caller logs and skips the entry as it always did.
+inline bool entry_error(const Input& in, const std::string& mod, const std::string& kind, const std::string& key, const std::string& why) {
+    if (in.strict(mod)) throw Refusal(mod, kind, key, why);
+    return true;
+}
+inline bool entry_error(const Input* in, const std::string& mod, const std::string& kind, const std::string& key, const std::string& why) {
+    return in ? entry_error(*in, mod, kind, key, why) : true;
+}
+
+// What a collector finds only after the entry point (a merge, a build, a registration at a world's load) of a required
+// participant: reported once per mod with activation_fault, which stops the start. The collector keeps the prepare's required
+// set (Input::required) and asks take() under its own lock; the call to activation_fault is made with no lock held.
+struct LateFaults {
+    std::set<std::string> required, said;
+    void reset(const std::set<std::string>& r = {}) {
+        required = r;
+        said.clear();
+    }
+    // true once for a required mod: report it now
+    bool take(const std::string& mod) { return required.count(mod) != 0 && said.insert(mod).second; }
 };
 
 template <size_t N>

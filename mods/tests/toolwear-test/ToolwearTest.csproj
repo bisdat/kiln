@@ -6,7 +6,8 @@
        (-o $KILN_OUT/mods/toolwear-test, -o $KILN_OUT/mods/toolwear-test-b); tools/lab/lab.sh new <lab> <port>;
        tools/deploy-server.sh <lab dir> with the policy "any"; touch <lab dir>/kiln/control/systems.parallel (the lab parallel
        switch, for toolwear-workers-pinned) and <lab dir>/kiln/data/skills/lab-ops (the hotbar selection the projectile
-       case uses); start the lab with KILN_PLAYERSTATE_LAB=1 in the environment (the lab use-item helper). -->
+       case uses); copy the native rule owner (native/build.sh prints the path of kiln-toolwear-test.dll) to <lab dir>/kiln/plugins/
+       (for toolwear-native-owner); start the lab with KILN_PLAYERSTATE_LAB=1 in the environment (the lab use-item helper). -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>

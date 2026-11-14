@@ -197,17 +197,19 @@ them (dev.27, `shell/cook.ts`, `cook_plan` / `cook_run`, `kiln_manage::cook`):
   identity changed), when the game was updated (cooked files are made from the game's data; Steam's build id tells,
   else the game's data file), when its last cook failed, or when a file its last cook made is gone or is not the bytes
   that cook made (its receipt in `kiln/state/cook-receipts` says). That rule is one function, `cook::needs_cook`; the
-  record it reads is the game's `kiln/state/cooked.json`. A vanilla start and "play once" do not cook, and "play once"
-  with another profile makes no game data for OnBoot mods either (below): its OnBoot mods read the snapshot a Play
-  already made for this game build, or are told the game data is unavailable.
+  record it reads is the game's `kiln/state/cooked.json`. A vanilla start and "play once" do not cook; "play once" with
+  another profile still makes the game data for its OnBoot mods (below).
 - **The game data for OnBoot mods** (dev.28, `kiln_manage::boot_snapshot`, `shell/bootSnapshot.ts`): Play's
   `cook_run` then makes the snapshot of the game's data that `Mod.OnBoot` reads, when an enabled Kiln mod of the start
   has `"boot": true` or `"required"` in its kiln.mod.json (a server leaves out client-only mods). Once per game build:
   about half a minute and about 200 MB the first time, with a progress line; later starts verify file checksums.
   Without such a mod the line says "no mod needs the boot snapshot" and nothing runs (a snapshot that is there stays).
   A producer failure does not refuse the start: one notice says why and the launcher continues without it. An OnBoot callback
-  must handle unavailable data under the boot failure policy. Play-once and modpack-offer Launch bypass this step
-  ([../modding/boot-snapshot.md](../modding/boot-snapshot.md)).
+  must handle unavailable data under the boot failure policy. Launch in a modpack offer runs it through the same
+  `cook_run`. A single start with another profile ("play once", launch mode `once`; `beforeStart` in `shell/play.ts`)
+  cooks nothing but runs the same step first, as the task `boot_snapshot_run`, for the mods of that start
+  (`boot_snapshot::boot_mods_once`: that profile's enabled Kiln mods and, by its rule, the Kiln drop-ins), with the same
+  progress line and notice ([../modding/boot-snapshot.md](../modding/boot-snapshot.md)).
 - **From nothing, and nothing lost.** A mod that needs a cook gets its `assets/cooked` moved aside (to
   `assets/.kiln-cooked-prev-<hex>/cooked`) and every recipe run, also one whose own check calls it up to date (that check
   reads the mod's files, never the game). The same cook puts it back, with the receipts and the mod's own files it
@@ -258,8 +260,13 @@ From Play to the game's main menu the launcher shows one bar for the whole start
 still takes (0.2.0-dev.27; `kiln_manage::start_progress`, commands `launch_begin` and `launch_progress`).
 
 - **The steps.** First the launcher's own: `cook` (the mods that need a cook, one after the other: the mod's name and
-  the tool's current line), `profile` (the active profile checked or written again, the save backup), `steam` (Steam
-  asked to start the game, until the game's process exists). Then the steps Kiln itself reports from inside the game
+  the tool's current line), `boot-snapshot` ("Making the game data for OnBoot mods (once per game update)": only on a
+  start where the boot game-data tool builds a snapshot, from its line that a build begins to its end, with the
+  tool's current line; a start whose snapshot is there, or that needs none, never shows it; with no earlier start
+  that had it, its usual time is its known cost, 60 s), `profile` (the active profile checked or written again, the
+  save backup), `steam` (Steam asked to start the game, until the game's process exists). Play, a single start with
+  another profile and Launch in a server's modpack offer go through these the same way. While the tool checks for a
+  snapshot after the cook, the start is not taken for one that stalled. Then the steps Kiln itself reports from inside the game
   in `<game>/kiln/state/progress.json` (written by kiln-core: Kiln's settings, native mods, the early plugins such as
   ShroudForge, finding the game's functions, Kiln's services, plugins, native mods, .NET, the mods, their content,
   and the game's own loading), up to the main menu. A progress.json is shown only when it belongs to the running

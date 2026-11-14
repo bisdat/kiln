@@ -1795,9 +1795,8 @@ fn own_eml_folder(rep: &mut PlaceReport, tag: String, path: &Path, sf: bool, ser
     let Some(off) = sf.then(|| crate::shroudforge::switched_off(path, server)).flatten() else { return own_folder(rep, tag, path, true) };
     let folder = path.display();
     rep.own_notes.push(match off {
-        SfOff::Switch(why) => format!("{tag}: your own folder {folder} is in ShroudForge's mods folder, but ShroudForge has it switched off \
-            ({why}), so it does not run while ShroudForge runs the EML mods. Kiln never writes into your own folder: switch it on in Kiln's \
-            menu (Mods, ShroudForge) or in ShroudForge's own Modloader, then start the game again."),
+        // the words promised on Nexus (shroudforge::HAND_EML_OFF), then the folder; Kiln never writes into it
+        SfOff::Switch(_) => format!("{tag}: {} Your folder: {folder}", crate::shroudforge::hand_eml_off(server, true)),
         SfOff::Side(why) => format!("{tag}: your own folder {folder} is in ShroudForge's mods folder, and {why}: ShroudForge runs it on \
             that side, not {}. Kiln leaves it as it is.", if server { "on this server" } else { "in this game" }),
         SfOff::Unreadable(why) => format!("{tag}: your own folder {folder} is in ShroudForge's mods folder, but ShroudForge cannot read it \

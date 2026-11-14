@@ -56,7 +56,11 @@ enum {
     KILN_BUILD_F_ALLOW_ALTARS = 1u << 2,  /* props: allow templates with BaseIdComponent (they found a base) */
     KILN_BUILD_F_UNLOADED = 1u << 3,      /* write even where the voxel tiles are not streamed in (not recommended) */
     KILN_BUILD_F_DRY_RUN = 1u << 4,       /* compute and report, write nothing */
-    KILN_BUILD_F_TRANSIENT = 1u << 5,     /* do not keep the edit across restarts (the game's own rule outside bases) */
+    KILN_BUILD_F_TRANSIENT = 1u << 5,     /* gone after the next restart: no Kiln save region, and where the game's save
+                                             writes the cells anyway (a base, a chunk another edit keeps) Kiln puts the
+                                             earlier cells back at the next start (journal: kiln/data/kiln.build/transient).
+                                             Not with KILN_BUILD_F_UNLOADED (INVALID_ARGUMENT); UNAVAILABLE when the
+                                             journal is full or cannot be written, or the world's id is unknown */
 };
 
 /* KilnBuildResult.flags */

@@ -51,6 +51,8 @@
 # KILN_API_BASELINE: the last release's Kiln.Api .nupkg (or it unzipped) for pack.sh's API compat gate; unset: a loud
 #   warning, at the start and in the closing text, and the release goes on.
 # Builds run one at a time (they share Cargo's build directory); KILN_RELEASE_NICE=1 runs them at the lowest priority.
+# NuGet: the builds restore into a private package cache, $work/nuget-packages (KILN_RELEASE_NUGET_PACKAGES), never
+#   ~/.nuget/packages: a trial run of a version leaves no kiln.* packages of it behind for later local builds.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
@@ -209,6 +211,14 @@ export KILN_OUT=$work/out CARGO_TARGET_DIR=$work/cargo
 # the SDK packages carry the release's version (managed/Kiln.Sdk/pack.sh), and kiln (the CLI) is built knowing it
 export KILN_SDK_VERSION=$version
 rm -rf "$KILN_OUT" && mkdir -p "$KILN_OUT"
+# A private NuGet package cache for every build of the release: pack.sh's Kiln.TestKit restores this version's Kiln.Api
+# from its local feed, and NuGet keeps a package by id and version for good, so in ~/.nuget/packages a trial run would
+# shadow the published packages of the same version in every later local build. Third-party packages stay for the next
+# run; this version's kiln.* packages in it go first (a trial's packages of the same version are not this build's).
+# KILN_RELEASE_NUGET_PACKAGES: another folder.
+export NUGET_PACKAGES=${KILN_RELEASE_NUGET_PACKAGES:-$work/nuget-packages}
+mkdir -p "$NUGET_PACKAGES" && rm -rf -- "$NUGET_PACKAGES"/kiln.*/"${version,,}"
+note "NuGet package cache: $NUGET_PACKAGES (private: ~/.nuget/packages gets none of this release's kiln.* $version packages)"
 # no build paths in the binaries: the home folder and the export become neutral prefixes; KILN_RELEASE_BUILD drops
 # the "tree this was built from" defaults of kilnctl and kiln
 unset RUSTFLAGS
@@ -451,7 +461,7 @@ step "VS Code extension"
 vsix=$(ls -t "$KILN_OUT"/vscode/kiln-vscode-*.vsix | head -1)
 step "sample mods"
 rm -rf "$work/samples" && mkdir -p "$work/samples"
-skipped_samples=()
+skipped_samples=() not_mods=()
 # a sample on Kiln.Sdk packs itself (KilnPack); an older one builds its output folder (a deployable mod folder), which
 # is zipped the way KilnPack does: <id>-<version>.zip holding <id>/, without the shared Kiln.* assemblies, *.deps.json
 # and cooked game files
@@ -459,6 +469,7 @@ pack_folder() { # project
   local proj=$1 o=$work/samples-build/$(basename "$1" .csproj)
   rm -rf "$o"
   low dotnet build "$proj" -c Release --artifacts-path "$KILN_OUT/dotnet" -v q -nologo -o "$o" >>"$log" 2>&1 || return 1
+  [ -f "$o/kiln.mod.json" ] || return 2   # a library or test project of a sample (SampleLib.Api): no mod to zip
   python3 - "$o" "$work/samples" <<'PY'
 import json, os, re, sys, zipfile
 o, dest = sys.argv[1:]
@@ -480,10 +491,13 @@ for proj in "$src"/mods/samples/*/*.csproj; do
     low dotnet build "$proj" -c Release --artifacts-path "$KILN_OUT/dotnet" -v q -nologo -t:KilnPack \
       -p:KilnPackageOutputPath="$work/samples/" >>"$log" 2>&1 || skipped_samples+=("$name")
   else
-    pack_folder "$proj" || skipped_samples+=("$name")
+    rc=0; pack_folder "$proj" || rc=$?
+    ((rc == 2)) && not_mods+=("$name")
+    ((rc == 1)) && skipped_samples+=("$name")
   fi
 done
 note "sample mods: $(ls "$work"/samples/*.zip 2>/dev/null | wc -l) zips"
+((${#not_mods[@]})) && note "sample projects that are no mod (no kiln.mod.json, not zipped): ${not_mods[*]}"
 ((${#skipped_samples[@]})) && note "samples that did not build (left out): ${skipped_samples[*]}"
 
 # ---------------------------------------------------------------- 7. the folder

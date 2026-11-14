@@ -156,6 +156,7 @@ internal sealed unsafe class WorldStore
         _bundles.Clear();
         Entities.Clear();
         Instances.Clear();
+        ServiceEntityData.RaiseWorldChanged();  // services drop what they keep per entity id (Kiln.World's waiting scales)
     }
 
     /// <summary>Test kit (SavesRuntime.EndSession): after <see cref="CloseWorld"/>, the next world opens as in a fresh process.</summary>
@@ -405,6 +406,7 @@ internal sealed unsafe class WorldStore
             var data = Serialize(b, opts);
             Put(b.Scope, data, entries, ref fresh, ref bytes);
         }
+        ServiceEntityData.RaiseStaging();  // Kiln services refresh their values on entities (Kiln.World's transform scale)
         foreach (var (mod, data) in Entities.Stage(_json))
             Put("entity/" + mod, data, entries, ref fresh, ref bytes);
         // Settled: nothing simulates between this read and the game's snapshot (the snapshot staging, a shutdown save).
