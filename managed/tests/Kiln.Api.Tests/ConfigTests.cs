@@ -214,6 +214,49 @@ public sealed class ConfigTests : KilnTest
     }
 
     [Fact]
+    public void A_file_that_cannot_be_written_refuses_the_change()
+    {
+        var cfg = Register(NewMod("unwritable"));
+        Assert.True(cfg.TrySet("maxHomes", 5, out _));
+        ConfigChangedEvent? ev = null;
+        cfg.Changed += e => ev = e;
+        var file = File("unwritable");
+        System.IO.File.Delete(file);
+        System.IO.Directory.CreateDirectory(file);  // the file's place is taken: every write fails
+        try
+        {
+            Assert.False(cfg.TrySet("maxHomes", 20, out var err));
+            Assert.Contains("cannot write", err);
+            Assert.Equal(5, cfg.Value.MaxHomes);  // all or nothing: the running value is as it was
+            Assert.Equal(5, cfg.Entries.Single(e => e.Path == "maxHomes").FileValue);  // and so is the file value
+            Assert.Null(ev);  // nothing changed, nothing raised
+            Assert.False(cfg.TrySet("port", 1, out err));  // requires a restart: only the file would have changed
+            Assert.Contains("cannot write", err);
+            Assert.Empty(cfg.PendingRestart);
+            var io = Assert.Throws<IOException>(() => cfg.Set("maxHomes", 20));
+            Assert.Contains("cannot write", io.Message);
+            Assert.Equal(5, cfg.Value.MaxHomes);
+            Assert.Throws<ArgumentException>(() => cfg.Set("maxHomes", 500));  // a refused value stays an argument error
+            cfg.Value.Greeting = "changed in code";
+            io = Assert.Throws<IOException>(() => cfg.Save());
+            Assert.Contains("cannot write", io.Message);
+            Assert.False(System.IO.File.Exists(file + ".tmp"));  // no half-written file is left beside it
+        }
+        finally
+        {
+            System.IO.Directory.Delete(file, true);
+        }
+        // writable again: the same calls go through, and Save writes what the failed one could not
+        Assert.True(cfg.TrySet("maxHomes", 20, out _));
+        Assert.Equal(20, cfg.Value.MaxHomes);
+        Assert.Equal(ConfigChangeSource.Api, ev!.Source);
+        cfg.Save();
+        var text = System.IO.File.ReadAllText(file);
+        Assert.Contains("\"maxHomes\": 20", text);
+        Assert.Contains("changed in code", text);
+    }
+
+    [Fact]
     public void Code_changes_are_saved_and_survive_a_reregistration()
     {
         var mod = NewMod("saver");

@@ -98,6 +98,11 @@ The file is a server-kind config (`<modid>-world`); `ConfigFile.PerWorld`, `Worl
   out-of-range, writes the file, raises the change; values may be CLR values, `JsonElement`/`JsonNode` or text such as
   "12", "on", "Hard", "5m", "[1, 2]"), `Save()` (after changing `Value` in code), `Reload()`, `Schema()`/`SchemaJson()`,
   `ValuesJson()`, `SyncedValuesJson()`, `PendingRestart`, `Warnings`, `LastError`, `LoadedAt`.
+- A file that cannot be written (a read-only folder, a full disk) is never reported as saved. `TrySet` is all or
+  nothing: it returns false with "cannot write" and the reason in `error`, the entry keeps its running value and its
+  file value, and no change is raised. `Set` and `Save` throw `IOException` (`Set` still throws `ArgumentException`
+  for a refused value); after a failed `Save` the running values stay and a later `Save` writes them. kiln.log has
+  the error too. Reading a config never fails for that: a file Kiln cannot rewrite at registration is only logged.
 - Threads: `Register`, `Set`, `Save`, `Reload` on the tick thread (`Register` also in `Mod.OnBoot`, see above); reads anywhere
   (values are plain objects).
 - A mod's configs leave the registry when it unloads; the file stays.
