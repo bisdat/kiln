@@ -119,8 +119,9 @@ public sealed partial class WeaponMovesTestMod
         Content.ReloadPacks();
         for (var i = 0; i < 400 && (Content.Status()?.Generation ?? 0) == gen0; i++) await Context.Scheduler.NextTick();
         await Steps(80);
-        Check((Content.Status()?.Generation ?? 0) != gen0 && _routeEvents.Count == n && Routed() && Blocks.MovesStatus(sword) is { State: MoveApplicationState.Applied, AppliedGeneration: 2 },
-            $"route-reload-replay-holds: content generation {gen0} -> {Content.Status()?.Generation}, {_routeEvents.Count - n} event(s), still routed {Routed()}: {Show(Blocks.MovesStatus(sword))}");
+        // (MovesStatus answers only the weapon's own mod: the status is the last event's)
+        Check((Content.Status()?.Generation ?? 0) != gen0 && _routeEvents.Count == n && Routed() && _routeEvents[^1].After is { State: MoveApplicationState.Applied, AppliedGeneration: 2 },
+            $"route-reload-replay-holds: content generation {gen0} -> {Content.Status()?.Generation}, {_routeEvents.Count - n} event(s), still routed {Routed()}: {Show(_routeEvents[^1].After)}");
         // a reload whose replayed document is refused after kiln.content applied it: the transaction takes it back
         Blocks.LabFailMoveWrites(1);
         gen0 = Content.Status()?.Generation ?? 0;
