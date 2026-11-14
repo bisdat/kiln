@@ -203,9 +203,17 @@ pub fn aside_entries(profile_json: &str, kiln_dir: &Utf8Path, roots: &[Utf8PathB
                 Some(Err(Off::Refused(why))) => ("off-in-shroudforge", format!("{who} runs this start, but ShroudForge does not run the \
                     {what} at {c}: {why}. Nothing applies it this start, and no switch changes that: a version of the mod whose file \
                     ShroudForge reads does, or a start without ShroudForge mods in the profile (Kiln then runs it itself)")),
-                Some(Err(Off::Switch(why))) => ("off-in-shroudforge", format!("{who} runs this start, but ShroudForge has your own \
-                    folder {c} switched off: {why}. Nothing applies it this start. Kiln never writes into your own folder: switch it on in \
-                    Kiln's menu (Mods, ShroudForge) or in ShroudForge's own Modloader, then start the game again")),
+                // the player's own folder: the words promised to a player on Nexus (2026-11-14), not ShroudForge's file
+                // (that read as "Kiln wants a ShroudForge file from an EML mod"); a server has no in-game menu
+                Some(Err(Off::Switch(_))) => ("off-in-shroudforge", format!("{who} runs this start. You put this mod into \
+                    ShroudForge's folder yourself, and ShroudForge has it switched off. {} Your folder: {c}",
+                    if shroudforge == Some(true) {
+                        "A server has no in-game menu: remove the folder and activate the profile again, and Kiln places its own \
+                        copy, switched on."
+                    } else {
+                        "Switch it on in Kiln's in-game menu (Mods > ShroudForge), or remove the folder and press Play in the Kiln \
+                        launcher: the mod is in your profile, so Kiln then places its own copy, switched on."
+                    })),
             }
         } else {
             ("not-loaded", format!("{who} runs this start and reads only {folder}; this mod is in Kiln's Library, so it does \
@@ -792,12 +800,19 @@ mod tests {
         }
         assert!(state("bare").1.contains("no extended.mod.json") && state("bare").1.contains("Kiln launcher"), "{}", state("bare").1);
         assert!(state("off").1.contains("enabled: true"), "{}", state("off").1);
-        assert!(state("hand").1.contains("never writes into your own folder") && state("hand").1.contains("Mods, ShroudForge"), "{}", state("hand").1);
+        // the player's own folder: the words promised to a player on Nexus (14 Nov 2026), nothing about ShroudForge's files
+        assert!(state("hand").1.contains("You put this mod into ShroudForge's folder yourself, and ShroudForge has it switched off. Switch \
+            it on in Kiln's in-game menu (Mods > ShroudForge), or remove the folder and press Play in the Kiln launcher: the mod is in your \
+            profile, so Kiln then places its own copy, switched on."), "{}", state("hand").1);
+        assert!(!state("hand").1.contains("extended.mod.json") && state("hand").1.contains("Hand Made"), "{}", state("hand").1);
         assert_eq!((state("lib").0, state("dis").0), ("not-loaded", "disabled"));
         // a dedicated server: the client-only package runs on the client only
         let server = states(Some(true));
         let on_server = |id: &str| server.iter().find(|x| x.0 == id).map(|x| x.1.clone()).unwrap();
         assert_eq!((on_server("on"), on_server("client"), on_server("bare")), ("own-loader".into(), "other-side".into(), "off-in-shroudforge".into()));
+        let hand_on_server = server.iter().find(|x| x.0 == "hand").map(|x| x.2.clone()).unwrap();
+        assert!(hand_on_server.contains("You put this mod into ShroudForge's folder yourself, and ShroudForge has it switched off. A server \
+            has no in-game menu: remove the folder and activate the profile again, and Kiln places its own copy, switched on."), "{hand_on_server}");
         // EML's own loader has no switch: it runs every package of its folder
         let eml = aside_entries(j, &d.join("kiln"), &[d.join("mods")], "EML's own loader", None);
         assert!(eml.iter().filter(|e| e.id.as_deref() != Some("lib") && e.id.as_deref() != Some("dis")).all(|e| e.state == "own-loader"), "{eml:?}");
