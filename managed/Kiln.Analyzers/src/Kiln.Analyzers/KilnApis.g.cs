@@ -152,7 +152,7 @@ internal static partial class KilnApis
         "M:Kiln.Config.Register``1(Kiln.ConfigKind,System.String)", // Config.Register<T>(ConfigKind, string?): Game.AssertTickThread
         "M:Kiln.ConfigFile.Reload", // ConfigFile.Reload(): Game.AssertTickThread
         "M:Kiln.ConfigFile.Save", // ConfigFile.Save(): Game.AssertTickThread
-        "M:Kiln.ConfigFile.Set(System.String,System.Object)", // ConfigFile.Set(string, object?): via ConfigFile.TrySet(string, object?, out string)
+        "M:Kiln.ConfigFile.Set(System.String,System.Object)", // ConfigFile.Set(string, object?): Game.AssertTickThread
         "M:Kiln.ConfigFile.TrySet(System.String,System.Object,System.String@)", // ConfigFile.TrySet(string, object?, out string): Game.AssertTickThread
         "M:Kiln.ConfigSync.CheckRoundTrip(Kiln.ConfigFile)", // ConfigSync.CheckRoundTrip(ConfigFile): Game.AssertTickThread
         "M:Kiln.Content.Apply(System.String,System.String)", // Content.Apply(string, string?): via Content.ApplyAs(ulong, string, string)
@@ -848,7 +848,7 @@ internal static partial class KilnApis
     {
         "M:Kiln.ConfigFile.Reload", // ConfigFile.Reload(): if (Game.InBoot) throw
         "M:Kiln.ConfigFile.Save", // ConfigFile.Save(): if (Game.InBoot) throw
-        "M:Kiln.ConfigFile.Set(System.String,System.Object)", // ConfigFile.Set(string, object?): via ConfigFile.TrySet(string, object?, out string)
+        "M:Kiln.ConfigFile.Set(System.String,System.Object)", // ConfigFile.Set(string, object?): if (Game.InBoot) throw
         "M:Kiln.ConfigFile.TrySet(System.String,System.Object,System.String@)", // ConfigFile.TrySet(string, object?, out string): if (Game.InBoot) throw
         "M:Kiln.ConfigFile.add_Changed(System.Action{Kiln.ConfigChangedEvent})", // ConfigFile.Changed.add: if (Game.InBoot) throw
     };
