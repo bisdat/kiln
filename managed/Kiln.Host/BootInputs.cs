@@ -154,8 +154,15 @@ internal sealed class BootInputs
             if (name.StartsWith('.') || name.EndsWith(".kiln-tmp", StringComparison.OrdinalIgnoreCase)) return false;
             if (depth > 0) return true;
             if (name.EndsWith(".deps.json", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".runtimeconfig.json", StringComparison.OrdinalIgnoreCase)) return false;
-            if (name.StartsWith("Kiln.", StringComparison.Ordinal))  // Kiln's own files beside the mod (its assemblies, their .pdb and .xml)
-                return Own.Contains(Path.GetFileNameWithoutExtension(name) + ".dll") || (name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) && !Shared(name));
+            if (name.StartsWith("Kiln.", StringComparison.Ordinal))
+            {
+                var extension = Path.GetExtension(name);
+                var assembly = Path.GetFileNameWithoutExtension(name) + ".dll";
+                if ((extension.Equals(".dll", StringComparison.OrdinalIgnoreCase) ||
+                     extension.Equals(".pdb", StringComparison.OrdinalIgnoreCase) ||
+                     extension.Equals(".xml", StringComparison.OrdinalIgnoreCase)) &&
+                    Shared(assembly) && !Own.Contains(assembly)) return false;
+            }
             return true;
         }
 
