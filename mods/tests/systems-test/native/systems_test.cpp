@@ -193,6 +193,15 @@ struct {
     bool forced_flag = false;
 } g_switch;
 
+// The managed part (and its peer) wait for this file before they use wraps: the native rows count every wrap there is.
+FILE* open_utf8(const std::string& path, const wchar_t* mode);
+void announce_done() {
+    char dir[1024];
+    size_t len = 0;
+    if (g_api->path(KILN_PATH_CONTROL, dir, sizeof dir - 1, &len) != KILN_OK) return;
+    if (FILE* f = open_utf8(std::string(dir, len) + "\\systems-native.done", L"w")) std::fclose(f);
+}
+
 // ---- S2: wraps ----
 std::atomic<uint64_t> g_bad_before{0}, g_bad_after{0};
 
@@ -500,6 +509,7 @@ void entity_phase(uint64_t n) {
         case 4800:
             g_done = true;
             say("done, %d PASS, %d FAIL", g_pass, g_fail);
+            announce_done();
             break;
         default: break;
     }
@@ -535,6 +545,7 @@ void restart_phase(uint64_t n) {
     if (MultiByteToWideChar(CP_UTF8, 0, p.c_str(), -1, w, 1100) > 0) DeleteFileW(w);
     g_done = true;
     say("done, %d PASS, %d FAIL", g_pass, g_fail);
+    announce_done();
 }
 
 // ---- S3: kiln.types under wraps ----
@@ -832,6 +843,14 @@ extern "C" __declspec(dllexport) KilnResult KILN_CALL kiln_plugin_main(const Kil
             }
             if (!T || T->header.size < offsetof(KilnTypesApi, system_unhook) + sizeof(void*)) T = nullptr;
             say("kiln.world v4 found (table %u bytes); kiln.types %s", W->header.size, T ? "found" : "missing");
+            {  // a done file of an earlier boot must not start the managed part early
+                char dir[1024];
+                size_t len = 0;
+                wchar_t w[1100];
+                if (g_api->path(KILN_PATH_CONTROL, dir, sizeof dir - 1, &len) == KILN_OK &&
+                    MultiByteToWideChar(CP_UTF8, 0, (std::string(dir, len) + "\\systems-native.done").c_str(), -1, w, 1100) > 0)
+                    DeleteFileW(w);
+            }
             if (FILE* f = open_utf8(state_path(), L"r")) {
                 g_restart.after_restart = std::fscanf(f, "%lf %lf %lf %d %d %d", &g_restart.x, &g_restart.y, &g_restart.z,
                                                       &g_restart.written, &g_restart.seen, &g_restart.before) == 6;
