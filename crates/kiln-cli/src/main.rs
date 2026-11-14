@@ -12,6 +12,7 @@
 mod build;
 mod control;
 mod debug;
+mod debug_inspect;
 mod blocks;
 mod logs;
 mod new;
@@ -64,6 +65,9 @@ enum Cmd {
     Test(control::TestArgs),
     /// Attach a debugger to a running local server's mods (--dap: a debug adapter for editors; never ends the server).
     Debug(debug::DebugArgs),
+    /// The Windows side of `kiln debug` (helper protocol on stdin/stdout; run by kiln debug under a target's runner).
+    #[command(hide = true)]
+    DebugInspect(debug_inspect::InspectArgs),
     /// Show or follow kiln/logs/kiln.log (filter by mod or level).
     Logs(logs::LogsArgs),
     /// Lint mod files (manifests, data packs, recipes) with the Kiln linter.
@@ -171,6 +175,7 @@ fn main() {
         Cmd::Reload(a) => control::reload(a, json),
         Cmd::Test(a) => control::test(a, json),
         Cmd::Debug(a) => debug::run(a, json),
+        Cmd::DebugInspect(a) => debug_inspect::run(a, json),
         Cmd::Logs(a) => logs::run(a, json),
         Cmd::Lint(a) => lint_cmd(a, json),
         Cmd::Blocks(a) => blocks::run(a, json),

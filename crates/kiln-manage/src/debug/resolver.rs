@@ -14,13 +14,16 @@
 
 use super::errors::{DebugCode, DebugError};
 use super::identity::*;
+use serde::{Deserialize, Serialize};
 use std::path::{Component, Path, PathBuf};
 
 /// What the Windows side is asked to look at: the descriptor's identity and a fresh challenge.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Probe {
     pub windows_pid: u32,
     pub image: String,
+    #[serde(rename = "creationTime100ns")]
     pub creation_time_100ns: String,
     pub image_sha256: String,
     pub session_nonce: String,
@@ -43,12 +46,14 @@ impl Probe {
 }
 
 /// The control pipe's answer (the process's own view of itself).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PipeAnswer {
     pub session_nonce: String,
     /// The caller's challenge, echoed.
     pub challenge: String,
     pub windows_pid: u32,
+    #[serde(rename = "creationTime100ns")]
     pub creation_time_100ns: String,
     pub image: String,
     pub image_sha256: String,
@@ -58,14 +63,52 @@ pub struct PipeAnswer {
 }
 
 /// What the Windows side saw: the held process (OS view) and its pipe's answer.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Seen {
     pub windows_pid: u32,
     pub image: String,
+    #[serde(rename = "creationTime100ns")]
     pub creation_time_100ns: String,
     /// SHA-256 of the image file, hashed by the Windows side.
     pub image_sha256: String,
     pub pipe: PipeAnswer,
+}
+
+/// The control pipe's request line (native/core/src/debug_descriptor.h), without its newline.
+pub fn pipe_request(nonce: &str, challenge: &str) -> String {
+    serde_json::json!({ "v": 1, "op": "identify", "nonce": nonce, "challenge": challenge }).to_string()
+}
+
+/// The control pipe's answer line. Its refusal of the nonce is identity_changed (`nonce`); an answer that is not the
+/// protocol is identity_changed (`pipe_answer`): whatever serves that pipe is not a Kiln core of this protocol.
+pub fn parse_pipe_answer(line: &str) -> Result<PipeAnswer, DebugError> {
+    let bad = |why: &str| DebugError::identity_changed(format!("the control pipe's answer is not Kiln's ({why})"), "pipe_answer");
+    let v: serde_json::Value = serde_json::from_str(line).map_err(|e| bad(&e.to_string()))?;
+    if v["v"] != 1 {
+        return Err(bad("protocol version"));
+    }
+    if v["ok"] != true {
+        let code = v["code"].as_str().unwrap_or("?");
+        let message = v["message"].as_str().unwrap_or("");
+        return Err(match code {
+            "identity_changed" => DebugError::identity_changed("the control pipe has another session nonce", "nonce"),
+            _ => DebugError::new(DebugCode::UnsupportedIdentity, format!("the control pipe refused the request ({code}: {message})")).because("pipe_refused"),
+        });
+    }
+    let id = &v["identity"];
+    let text = |x: &serde_json::Value, what: &str| x.as_str().map(str::to_string).ok_or_else(|| bad(what));
+    Ok(PipeAnswer {
+        session_nonce: text(&id["sessionNonce"], "sessionNonce")?,
+        challenge: text(&v["challenge"], "challenge")?,
+        windows_pid: id["windowsPid"].as_u64().and_then(|p| u32::try_from(p).ok()).ok_or_else(|| bad("windowsPid"))?,
+        creation_time_100ns: text(&id["creationTime100ns"], "creationTime100ns")?,
+        image: text(&id["image"], "image")?,
+        image_sha256: text(&id["imageSha256"], "imageSha256")?,
+        managed_ready: v["managedReady"].as_bool().ok_or_else(|| bad("managedReady"))?,
+        session_mode: SessionMode::parse(v["sessionMode"].as_str().unwrap_or("unknown")),
+        runtime_version: v["runtimeVersion"].as_str().unwrap_or_default().to_string(),
+    })
 }
 
 /// A watch poll: the held process ended, or it is still there (and answered again).
@@ -1041,6 +1084,27 @@ mod tests {
         src.procs.clear();
         assert_eq!(watch(&r, &mut src, &mut counter()), WatchOutcome::Gone);
         assert!(!src.calls.iter().any(|c| c.contains("kill") || c.contains("terminate")));
+    }
+
+    /// The answer lines exactly as native/core/src/debug_descriptor.cpp writes them.
+    #[test]
+    fn the_cores_pipe_answers() {
+        let ok = r#"{"v":1,"ok":true,"challenge":"challenge-0001","identity":{"windowsPid":252,"creationTime100ns":"134390977514834040","image":"Z:\\srv\\enshrouded_server.exe","imageSha256":"f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2","sessionNonce":"dbfc61b7726e7dd1b89ebe665c73f4d7"},"managedReady":true,"sessionMode":"hosted","runtimeVersion":"10.0.14","side":"server","kiln":"0.2.0-dev"}"#;
+        let a = parse_pipe_answer(ok).unwrap();
+        assert_eq!((a.windows_pid, a.creation_time_100ns.as_str(), a.challenge.as_str()), (252, "134390977514834040", "challenge-0001"));
+        assert_eq!((a.image.as_str(), a.session_mode, a.managed_ready), (r"Z:\srv\enshrouded_server.exe", SessionMode::Hosted, true));
+        let wrong = r#"{"v":1,"ok":false,"code":"identity_changed","message":"this process has another session nonce"}"#;
+        assert_eq!(parse_pipe_answer(wrong).unwrap_err().reason.as_deref(), Some("nonce"));
+        let big = r#"{"v":1,"ok":false,"code":"frame_too_large","message":"a request line is at most 16384 bytes"}"#;
+        assert_eq!(parse_pipe_answer(big).unwrap_err().code, DebugCode::UnsupportedIdentity);
+        for junk in ["", "hello", r#"{"v":2,"ok":true}"#, r#"{"v":1,"ok":true,"identity":{"windowsPid":252}}"#] {
+            assert_eq!(parse_pipe_answer(junk).unwrap_err().reason.as_deref(), Some("pipe_answer"), "{junk}");
+        }
+        // a number where the core writes a decimal string is not the protocol
+        let num = ok.replace(r#""creationTime100ns":"134390977514834040""#, r#""creationTime100ns":134390977514834040"#);
+        assert_eq!(parse_pipe_answer(&num).unwrap_err().reason.as_deref(), Some("pipe_answer"));
+        let req: serde_json::Value = serde_json::from_str(&pipe_request("n", "c")).unwrap();
+        assert_eq!(req, serde_json::json!({ "v": 1, "op": "identify", "nonce": "n", "challenge": "c" }));
     }
 
     #[test]

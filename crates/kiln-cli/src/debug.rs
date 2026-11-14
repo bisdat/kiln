@@ -228,15 +228,53 @@ impl HostSide for ServerHost {
     }
 }
 
-/// The Windows side for a target: in-process on native Windows, the `kiln debug-inspect` helper under the target's
-/// runner on Linux. Neither exists before 12a S3, so every resolve stops here with tool_missing until then; there is
-/// no fallback to a guessed PID.
-fn open_source(_host: &ServerHost) -> std::result::Result<Box<dyn ProcessSource + Send>, DebugError> {
-    Err(DebugError::new(
-        DebugCode::ToolMissing,
-        "this kiln has no Windows-side inspector (kiln debug-inspect) to prove the target's identity; attach with a kiln that ships it",
-    )
-    .because("no_inspector"))
+/// How the Windows side of a Wine/Proton target is reached: its runner (the wine of the running process), the
+/// environment that runner needs for that prefix (an allowlist, never inherited Wine variables), and a working folder.
+pub(crate) struct RunnerLaunch {
+    pub wine: PathBuf,
+    pub env: Vec<(String, String)>,
+    pub cwd: PathBuf,
+}
+
+impl RunnerLaunch {
+    /// A dedicated server's runner: its wine, its own prefix.
+    fn server(wine: &Path, prefix: &Path) -> RunnerLaunch {
+        RunnerLaunch {
+            wine: wine.to_path_buf(),
+            env: vec![
+                ("WINEPREFIX".into(), prefix.display().to_string()),
+                ("WINEDEBUG".into(), "-all".into()),
+                ("WINEDLLOVERRIDES".into(), format!("{};winedbg.exe=d", kiln_manage::wine::DLL_OVERRIDES)),
+            ],
+            cwd: prefix.to_path_buf(),
+        }
+    }
+
+    /// `wine "<helper>" debug-inspect`, headless: the helper is an argument of wine, never a command of its own.
+    fn helper_command(&self, helper: &Path) -> Command {
+        let mut c = Command::new(&self.wine);
+        c.arg(helper).arg("debug-inspect");
+        scrub(&mut c);
+        for (k, v) in &self.env {
+            c.env(k, v);
+        }
+        c.current_dir(&self.cwd);
+        c
+    }
+}
+
+/// The Windows side for a target: in-process on native Windows (`NativeSource`), the hash-checked `kiln debug-inspect`
+/// helper under the target's own runner otherwise. There is no fallback to a guessed PID: no helper is tool_missing.
+pub(crate) fn open_source(runner: Option<&RunnerLaunch>) -> std::result::Result<Box<dyn ProcessSource + Send>, DebugError> {
+    #[cfg(windows)]
+    if runner.is_none() {
+        return Ok(Box::new(kiln_manage::debug::windows::NativeSource::default()));
+    }
+    let Some(runner) = runner else {
+        return Err(DebugError::new(DebugCode::Unsupported, "this target runs under Windows, but this kiln is not the Windows build").because("no_runner"));
+    };
+    let helper = crate::debug_inspect::find_helper()?;
+    Ok(Box::new(crate::debug_inspect::HelperSource::spawn(runner.helper_command(&helper))?))
 }
 
 /// A resolved target with its host and Windows sides, ready for the proxy or for `--json`.
@@ -332,8 +370,12 @@ fn plan(a: &DebugArgs) -> Result<Planned> {
         install_exe: s.dir.join(SERVER_EXE),
         prefix: prefix.clone(),
     };
+    let runner = match (&wine, &prefix) {
+        (Some(w), Some(p)) => Some(RunnerLaunch::server(w, p)),
+        _ => None,
+    };
     let mut host = ServerHost { spec, dir: s.dir.clone(), wine: wine.clone() };
-    let mut source = open_source(&host).map_err(cli_error)?;
+    let mut source = open_source(runner.as_ref()).map_err(cli_error)?;
     let resolved = match prepare(kind, false, &mut host, source.as_mut(), &mut resolver::new_challenge) {
         Ok(r) => r,
         Err(e) => {
@@ -635,18 +677,50 @@ fn watch_signals(tx: mpsc::Sender<Ev>) {
     }
 }
 
-#[cfg(not(unix))]
+/// Windows: Ctrl-C, Ctrl-Break, closing the console, logoff and shutdown become the same event; on the last three
+/// Windows ends this process soon after, so the handler holds it (about 4.5 s) for the safe detach.
+#[cfg(windows)]
+fn watch_signals(tx: mpsc::Sender<Ev>) {
+    let tx = Mutex::new(tx);
+    let ok = kiln_manage::debug::windows::watch_console(Box::new(move |what| {
+        let _ = tx.lock().unwrap_or_else(|e| e.into_inner()).send(Ev::ClientGone(what));
+    }));
+    if !ok {
+        eprintln!("kiln debug: console events cannot be watched; closing the console while attached may end the debugger");
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
 fn watch_signals(_tx: mpsc::Sender<Ev>) {}
 
 /// netcoredbg in its own process group: a Ctrl-C at the editor's terminal must not reach it while it is attached.
 #[cfg(unix)]
-fn own_group(c: &mut Command) {
+fn own_group(c: &mut Command) -> Option<String> {
     use std::os::unix::process::CommandExt;
     c.process_group(0);
+    None
 }
 
-#[cfg(not(unix))]
-fn own_group(_c: &mut Command) {}
+/// Windows: no console (console events never reach it), its own process group, and out of a job that would end it
+/// with the editor when the job allows that (kiln_manage::debug::windows::adapter_flags). Never a job of ours.
+#[cfg(windows)]
+fn own_group(c: &mut Command) -> Option<String> {
+    use std::os::windows::process::CommandExt;
+    let (flags, warning) = kiln_manage::debug::windows::adapter_flags(kiln_manage::debug::windows::job_facts());
+    c.creation_flags(flags);
+    warning
+}
+
+#[cfg(not(any(unix, windows)))]
+fn own_group(_c: &mut Command) -> Option<String> {
+    None
+}
+
+/// Windows: a console handler waiting for the safe detach may let the process end now.
+fn detach_finished() {
+    #[cfg(windows)]
+    kiln_manage::debug::windows::detach_finished();
+}
 
 /// `gc` answers "<n> unloaded mod context(s) still alive": a mod that leaks its old copy keeps a stale module loaded, the
 /// state in which breakpoints miss and disconnects have taken the server down (docs/kiln/modding/debugging.md).
@@ -708,6 +782,7 @@ fn proxy(p: Planned) -> Result<i32> {
     // dead copy. Attaching after a reload stopped in 1 of 5 rounds without this, and the server died in both test loops;
     // with it, 6 of 6 twice and no deaths.
     let mut warning = None;
+    let mut group_warning = None;
     let gc = || match crate::control::send(&t.install, "gc", GC_WAIT) {
         Err(e) => eprintln!("kiln debug: no collection before attaching ({e}); after a reload, breakpoints may not stop"),
         Ok(r) => warning = stale_contexts_warning(&r),
@@ -717,7 +792,7 @@ fn proxy(p: Planned) -> Result<i32> {
         debug_assert_eq!(permit.windows_pid(), t.windows_pid());
         let mut cmd = t.command();
         cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit());
-        own_group(&mut cmd);
+        group_warning = own_group(&mut cmd);
         cmd.spawn()
     };
     let launched = {
@@ -750,7 +825,7 @@ fn proxy(p: Planned) -> Result<i32> {
         warned: false,
     };
     states.publish();
-    if let Some(w) = warning {
+    for w in [warning, group_warning].into_iter().flatten() {
         eprintln!("kiln debug: {w}");
         let _ = write_json(&mut *client_out.lock().unwrap(), &output_event(&w, "important"));
     }
@@ -1026,6 +1101,7 @@ fn proxy(p: Planned) -> Result<i32> {
     }
     states.set(end.0, end.1.as_deref(), None);
     source.lock().unwrap().close();
+    detach_finished();
     Ok(code)
 }
 

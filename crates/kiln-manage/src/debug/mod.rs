@@ -6,6 +6,7 @@
 //! | [`errors`] | the stable error codes (`identity_changed`, `pause_consent_required`, ...) |
 //! | [`identity`] | the core's descriptor, the checked tuple `DebugIdentity`, `DebugTarget`, `DebugSessionState` |
 //! | [`resolver`] | descriptors + the Windows side + the host side -> one target; the check before an adapter starts |
+//! | [`windows`] | native Windows: the Windows side in this process (`NativeSource`), the adapter's console and job handling |
 //!
 //! The session file (`<install>/kiln/state/debug/session.json`) says that a proxy is attached; `kiln reload` refuses
 //! while it does (a reload under an attached debugger leaves breakpoints on a dead copy, and such sessions have
@@ -14,6 +15,7 @@
 pub mod errors;
 pub mod identity;
 pub mod resolver;
+pub mod windows;
 
 pub use errors::{DebugCode, DebugError};
 pub use identity::{
