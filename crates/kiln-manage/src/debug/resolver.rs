@@ -1,0 +1,962 @@
+//! `DebugTargetResolver` (chapter 12a §4 steps 2, 5, 6, 8): from an install's descriptors to one proven target, and
+//! the check that runs again right before an adapter may start.
+//!
+//! Two views are compared, never trusted alone:
+//! - the **host side** ([`HostSide`]): the install, its prefix (canonical path, device, inode), the runner's digest,
+//!   and for display the runner's Linux process;
+//! - the **Windows side** ([`ProcessSource`]): the process the descriptor names, opened and held in its own namespace
+//!   (native Windows: in this process; Wine/Proton: the `kiln debug-inspect` helper under the target's runner), its
+//!   creation time, image path and digest, and the control pipe's answer to a fresh challenge.
+//!
+//! A target is the one live descriptor whose every field agrees with both views. [`permit`] repeats the check (and
+//! the consent rule) right before the adapter starts; an adapter can only be started with the [`AttachPermit`] it
+//! returns. Nothing here kills or terminates a process.
+
+use super::errors::{DebugCode, DebugError};
+use super::identity::*;
+use std::path::{Component, Path, PathBuf};
+
+/// What the Windows side is asked to look at: the descriptor's identity and a fresh challenge.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Probe {
+    pub windows_pid: u32,
+    pub image: String,
+    pub creation_time_100ns: String,
+    pub image_sha256: String,
+    pub session_nonce: String,
+    pub pipe: String,
+    pub challenge: String,
+}
+
+impl Probe {
+    pub fn of(d: &Descriptor, challenge: String) -> Probe {
+        Probe {
+            windows_pid: d.windows_pid,
+            image: d.image.clone(),
+            creation_time_100ns: d.creation_time_100ns.clone(),
+            image_sha256: d.image_sha256.clone(),
+            session_nonce: d.session_nonce.clone(),
+            pipe: d.pipe.clone(),
+            challenge,
+        }
+    }
+}
+
+/// The control pipe's answer (the process's own view of itself).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PipeAnswer {
+    pub session_nonce: String,
+    /// The caller's challenge, echoed.
+    pub challenge: String,
+    pub windows_pid: u32,
+    pub creation_time_100ns: String,
+    pub image: String,
+    pub image_sha256: String,
+    pub managed_ready: bool,
+    pub session_mode: SessionMode,
+    pub runtime_version: String,
+}
+
+/// What the Windows side saw: the held process (OS view) and its pipe's answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Seen {
+    pub windows_pid: u32,
+    pub image: String,
+    pub creation_time_100ns: String,
+    /// SHA-256 of the image file, hashed by the Windows side.
+    pub image_sha256: String,
+    pub pipe: PipeAnswer,
+}
+
+/// A watch poll: the held process ended, or it is still there (and answered again).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Watch {
+    Exited,
+    Alive(Seen),
+}
+
+/// The Windows side of one namespace (helper protocol v1: `inspect`, `prepare_attach`, `watch_exit`, `close`).
+/// Implementations hold the inspected process's handle (query + synchronize) until `close` or the next `inspect`, and
+/// never terminate anything.
+pub trait ProcessSource {
+    /// Whether this side runs elevated (native Windows token); None when it cannot tell (Wine).
+    fn elevated(&mut self) -> Option<bool>;
+    /// Opens and holds the probe's process, reads its identity and challenges its pipe.
+    fn inspect(&mut self, probe: &Probe) -> Result<Seen, DebugError>;
+    /// The same on the held process, right before the adapter starts.
+    fn prepare_attach(&mut self, probe: &Probe) -> Result<Seen, DebugError>;
+    /// Whether the held process ended; if not, its pipe answers the probe's challenge again.
+    fn watch(&mut self, probe: &Probe) -> Result<Watch, DebugError>;
+    /// Releases the handle (and ends a helper). Never a terminate call.
+    fn close(&mut self);
+}
+
+/// Every Windows-side fact against the probe (the descriptor): the OS view and the pipe's answer must both be that
+/// process. Used by the resolver and by the helper (which refuses before answering).
+pub fn check_seen(p: &Probe, s: &Seen) -> Result<(), DebugError> {
+    let pid = p.windows_pid;
+    if s.windows_pid != pid {
+        return Err(DebugError::identity_changed(format!("the Windows side opened PID {} for PID {pid}", s.windows_pid), "pid"));
+    }
+    if s.creation_time_100ns != p.creation_time_100ns {
+        return Err(DebugError::identity_changed(
+            format!("PID {pid} is another process now (created {}, the descriptor's was created {}): the game was restarted or the PID reused", s.creation_time_100ns, p.creation_time_100ns),
+            "creation_time",
+        ));
+    }
+    if !same_windows_path(&s.image, &p.image) {
+        return Err(DebugError::identity_changed(format!("PID {pid} runs {}, the descriptor names {}", s.image, p.image), "image_path"));
+    }
+    if !s.image_sha256.eq_ignore_ascii_case(&p.image_sha256) {
+        return Err(DebugError::identity_changed(format!("the image of PID {pid} is not the file the descriptor hashed (another build?)"), "image_digest"));
+    }
+    let a = &s.pipe;
+    if a.session_nonce != p.session_nonce {
+        return Err(DebugError::identity_changed(format!("the control pipe of PID {pid} answered another session nonce"), "nonce"));
+    }
+    if a.challenge != p.challenge {
+        return Err(DebugError::identity_changed(format!("the control pipe of PID {pid} did not echo the challenge"), "challenge"));
+    }
+    if a.windows_pid != pid || a.creation_time_100ns != p.creation_time_100ns || !same_windows_path(&a.image, &p.image) || !a.image_sha256.eq_ignore_ascii_case(&p.image_sha256) {
+        return Err(DebugError::identity_changed(format!("the control pipe named in the descriptor of PID {pid} is served by another process"), "pipe_identity"));
+    }
+    Ok(())
+}
+
+/// The host-side facts of a target. `facts` is read again at every check: the prefix and runner are part of the tuple.
+pub trait HostSide {
+    fn spec(&self) -> &HostSpec;
+    fn facts(&mut self) -> Result<HostFacts, DebugError>;
+}
+
+/// What does not change while a target is resolved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostSpec {
+    pub kind: TargetKind,
+    /// `kiln_manage::game::install_id_for(<install>)`.
+    pub install_id: String,
+    /// `<install>/kiln/state` (descriptors are in its `debug/`).
+    pub state_dir: PathBuf,
+    /// The host path of the install's executable (a descriptor of another folder's exe is not this install's).
+    pub install_exe: PathBuf,
+    /// The Wine/Proton prefix the target runs in; None on native Windows.
+    pub prefix: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct HostFacts {
+    pub prefix_identity: Option<PrefixIdentity>,
+    pub runner_sha256: Option<String>,
+    pub runner_context: Option<RunnerContext>,
+    /// Display only.
+    pub host_pid: Option<u32>,
+}
+
+/// One proven target.
+#[derive(Debug, Clone)]
+pub struct Resolved {
+    pub kind: TargetKind,
+    pub target: DebugTarget,
+    pub descriptor: Descriptor,
+    pub descriptor_path: PathBuf,
+    /// Descriptors that were not used, and why (stale, another install, unreadable).
+    pub notes: Vec<String>,
+}
+
+/// A fresh 128-bit challenge, 32 hex digits.
+pub fn new_challenge() -> Result<String, DebugError> {
+    crate::util::random_bytes::<16>()
+        .map(|b| crate::hash::hex(&b))
+        .map_err(|e| DebugError::new(DebugCode::UnsupportedIdentity, format!("no random challenge: {}", e.message)))
+}
+
+fn what(kind: TargetKind) -> &'static str {
+    match kind {
+        TargetKind::Server => "server",
+        TargetKind::Client => "game",
+    }
+}
+
+fn identity_from(spec: &HostSpec, facts: &HostFacts, seen: &Seen) -> DebugIdentity {
+    DebugIdentity {
+        install_id: spec.install_id.clone(),
+        prefix_identity: facts.prefix_identity.clone(),
+        runner_sha256: facts.runner_sha256.clone(),
+        windows_pid: seen.windows_pid,
+        creation_time_100ns: seen.creation_time_100ns.clone(),
+        image_sha256: seen.image_sha256.to_ascii_lowercase(),
+        session_nonce: seen.pipe.session_nonce.clone(),
+    }
+}
+
+fn inspect_checked(source: &mut dyn ProcessSource, probe: &Probe) -> Result<Seen, DebugError> {
+    let seen = source.inspect(probe)?;
+    check_seen(probe, &seen)?;
+    Ok(seen)
+}
+
+/// The install's one live, matching descriptor as a target. The source holds that process afterwards.
+pub fn resolve(
+    host: &mut dyn HostSide,
+    source: &mut dyn ProcessSource,
+    challenge: &mut dyn FnMut() -> Result<String, DebugError>,
+) -> Result<Resolved, DebugError> {
+    let spec = host.spec().clone();
+    let kind = spec.kind;
+    let dir = spec.state_dir.join(DESCRIPTOR_DIR);
+    let files = read_descriptors(&spec.state_dir);
+    if files.is_empty() {
+        return Err(DebugError::refused(
+            format!(
+                "no debug descriptor in {}: start the {} with developer debugging on (kiln.json \"developer_debugging\": true, or the launcher's Developer debugging switch)",
+                dir.display(),
+                what(kind)
+            ),
+            "developer_debugging_off",
+        ));
+    }
+    let mut notes = Vec::new();
+    let mut candidates = Vec::new();
+    for f in files {
+        match f.read {
+            Err(why) => notes.push(format!("{}: {why}", f.path.display())),
+            Ok(d) if d.side != kind => notes.push(format!("{}: a {} descriptor", f.path.display(), d.side.as_str())),
+            Ok(d) if !image_in_install(&d.image, &spec.install_exe, spec.prefix.as_deref()) => {
+                notes.push(format!("{}: names {}, not this install's {}", f.path.display(), d.image, spec.install_exe.display()))
+            }
+            Ok(d) => candidates.push((f.path, d)),
+        }
+    }
+    if candidates.is_empty() {
+        return Err(DebugError::refused(format!("no usable debug descriptor in {} ({})", dir.display(), notes.join("; ")), "descriptor_invalid"));
+    }
+    let me_elevated = source.elevated();
+    let mut live: Vec<(PathBuf, Descriptor, Seen)> = Vec::new();
+    let mut stale = Vec::new();
+    let mut last = None;
+    for (i, (path, d)) in candidates.iter().enumerate() {
+        if d.elevated && me_elevated == Some(false) {
+            return Err(DebugError::new(
+                DebugCode::PrivilegeMismatch,
+                format!("the {} (PID {}) runs elevated and this kiln does not; a debugger could not attach to it", what(kind), d.windows_pid),
+            )
+            .because("elevated_target"));
+        }
+        let probe = Probe::of(d, challenge()?);
+        last = Some(i);
+        match inspect_checked(source, &probe) {
+            Ok(seen) => live.push((path.clone(), d.clone(), seen)),
+            Err(e) if matches!(e.code, DebugCode::NotRunning | DebugCode::IdentityChanged) => stale.push(format!("{}: {}", path.display(), e.message)),
+            Err(e) => return Err(e),
+        }
+    }
+    notes.extend(stale.iter().cloned());
+    let (path, d, mut seen) = match live.len() {
+        0 => {
+            return Err(DebugError::new(
+                DebugCode::NotRunning,
+                format!("the {} is not running: the debug descriptors in {} belong to processes that ended or whose PID is another process now ({})", what(kind), dir.display(), stale.join("; ")),
+            )
+            .because("stale_descriptor"));
+        }
+        1 => live.pop().expect("one"),
+        n => {
+            let pids: Vec<u32> = live.iter().map(|(_, d, _)| d.windows_pid).collect();
+            return Err(DebugError::refused(format!("{n} running processes of this install have a debug descriptor (Windows PIDs {pids:?}); stop the extra ones"), "several_descriptors"));
+        }
+    };
+    // the source holds the process it inspected last: make that the chosen one
+    let chosen = candidates.iter().position(|(p, _)| *p == path);
+    if chosen != last {
+        seen = inspect_checked(source, &Probe::of(&d, challenge()?))?;
+    }
+    if !seen.pipe.managed_ready {
+        return Err(DebugError::new(
+            DebugCode::RuntimeNotReady,
+            format!("the .NET host of the {} (PID {}) is not running (kiln.log, [clr] lines; kiln.json \"clr\"): there are no managed mods to debug", what(kind), d.windows_pid),
+        ));
+    }
+    let facts = host.facts()?;
+    let identity = identity_from(&spec, &facts, &seen);
+    let target = DebugTarget {
+        identity,
+        image: seen.image.clone(),
+        runtime_version: seen.pipe.runtime_version.clone(),
+        managed_ready: seen.pipe.managed_ready,
+        session_mode: seen.pipe.session_mode,
+        runner_context: facts.runner_context,
+        host_pid: facts.host_pid,
+    };
+    Ok(Resolved { kind, target, descriptor: d, descriptor_path: path, notes })
+}
+
+/// The whole tuple again, from fresh host facts and a fresh `prepare_attach`: what was resolved must still be what
+/// runs. Returns what the Windows side saw (its session mode is the current one).
+pub fn revalidate(
+    r: &Resolved,
+    host: &mut dyn HostSide,
+    source: &mut dyn ProcessSource,
+    challenge: &mut dyn FnMut() -> Result<String, DebugError>,
+) -> Result<Seen, DebugError> {
+    let probe = Probe::of(&r.descriptor, challenge()?);
+    let seen = source.prepare_attach(&probe)?;
+    check_seen(&probe, &seen)?;
+    let facts = host.facts()?;
+    let now = identity_from(host.spec(), &facts, &seen);
+    if let Some(field) = r.target.identity.first_difference(&now) {
+        return Err(DebugError::identity_changed(format!("the {} is no longer the process that was resolved ({field} differs); resolve it again", what(r.kind)), field));
+    }
+    if !seen.pipe.managed_ready {
+        return Err(DebugError::new(DebugCode::RuntimeNotReady, format!("the .NET host of the {} stopped answering as ready", what(r.kind))));
+    }
+    Ok(seen)
+}
+
+/// What a watch poll means for an attached session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WatchOutcome {
+    /// Still the resolved process; its current session mode.
+    Same(SessionMode),
+    /// It ended.
+    Gone,
+    /// Something answers that is not the resolved process (reason).
+    Changed(String),
+}
+
+/// One watch poll of the held process (helper `watch_exit`).
+pub fn watch(r: &Resolved, source: &mut dyn ProcessSource, challenge: &mut dyn FnMut() -> Result<String, DebugError>) -> WatchOutcome {
+    let probe = match challenge() {
+        Ok(c) => Probe::of(&r.descriptor, c),
+        Err(e) => return WatchOutcome::Changed(e.message),
+    };
+    match source.watch(&probe) {
+        Ok(Watch::Exited) => WatchOutcome::Gone,
+        Ok(Watch::Alive(seen)) => match check_seen(&probe, &seen) {
+            Ok(()) => WatchOutcome::Same(seen.pipe.session_mode),
+            Err(e) => WatchOutcome::Changed(e.reason.unwrap_or(e.message)),
+        },
+        Err(e) if e.code == DebugCode::NotRunning => WatchOutcome::Gone,
+        Err(e) => WatchOutcome::Changed(e.reason.unwrap_or(e.message)),
+    }
+}
+
+/// The consent rule (chapter 12a §4 step 7, §5): every managed attach can stop the process, so a client is attached
+/// only with explicit consent. Servers keep their own pause warning.
+pub fn consent_gate(kind: TargetKind, allow_client_pause: bool) -> Result<(), DebugError> {
+    if kind == TargetKind::Client && !allow_client_pause {
+        return Err(DebugError::new(
+            DebugCode::PauseConsentRequired,
+            "a debugger stops the game at every breakpoint, and a stopped game can freeze or lose its connection: attach to a client only with --allow-client-pause (allowClientPause: true in the editor), or use --observe for logs and counters without a debugger",
+        ));
+    }
+    Ok(())
+}
+
+/// Proof that consent and the whole tuple were checked right now. The only way to start an adapter.
+#[derive(Debug)]
+pub struct AttachPermit {
+    identity: DebugIdentity,
+    kind: TargetKind,
+    session_mode: SessionMode,
+}
+
+impl AttachPermit {
+    /// The PID the adapter attaches to (Windows numbering, in the target's namespace).
+    pub fn windows_pid(&self) -> u32 {
+        self.identity.windows_pid
+    }
+    pub fn identity(&self) -> &DebugIdentity {
+        &self.identity
+    }
+    pub fn kind(&self) -> TargetKind {
+        self.kind
+    }
+    pub fn session_mode(&self) -> SessionMode {
+        self.session_mode
+    }
+}
+
+/// Consent, then the tuple again ([`revalidate`]). Every path that starts netcoredbg goes through here.
+pub fn permit(
+    r: &Resolved,
+    allow_client_pause: bool,
+    host: &mut dyn HostSide,
+    source: &mut dyn ProcessSource,
+    challenge: &mut dyn FnMut() -> Result<String, DebugError>,
+) -> Result<AttachPermit, DebugError> {
+    consent_gate(r.kind, allow_client_pause)?;
+    if host.spec().kind != r.kind {
+        return Err(DebugError::refused("the target was resolved for another kind of process", "kind"));
+    }
+    let seen = revalidate(r, host, source, challenge)?;
+    Ok(AttachPermit { identity: r.target.identity.clone(), kind: r.kind, session_mode: seen.pipe.session_mode })
+}
+
+// ---- server lookup (moved from kiln-cli's debug.rs, unchanged in behaviour) ----
+
+/// A path inside a Steam library: `.../steamapps/common/<app>`, `.../steamapps/compatdata/...`.
+pub fn in_steam_library(p: &Path) -> bool {
+    p.components().any(|c| matches!(c, Component::Normal(n) if n.to_str().is_some_and(|s| s.eq_ignore_ascii_case("steamapps"))))
+}
+
+fn canon(p: &Path) -> PathBuf {
+    p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
+}
+
+/// The server guard (chapter 12a §4 step 6): a server inside a Steam library (where the user's live server lives) is
+/// always refused, by the path as given and as it resolves. A client is never checked here.
+pub fn server_steam_guard(p: &Path) -> Result<(), DebugError> {
+    if in_steam_library(p) || in_steam_library(&canon(p)) {
+        return Err(DebugError::refused(
+            format!("{} is inside a Steam library; kiln debug pauses the server for everyone on it, so it refuses", p.display()),
+            "steam_library",
+        ));
+    }
+    Ok(())
+}
+
+/// The Linux PID of the server started from `dir` in its own `prefix`: the runner context of a Wine server, display
+/// only. No wine runs until this found one, so a stopped server gets no stray wineserver.
+pub fn server_host_pid(dir: &Path, prefix: &Path) -> Result<u32, DebugError> {
+    let pids = crate::server::procs::find_servers(prefix);
+    let want = canon(dir);
+    let in_dir: Vec<u32> = pids.iter().copied().filter(|p| std::fs::read_link(format!("/proc/{p}/cwd")).is_ok_and(|c| canon(&c) == want)).collect();
+    match in_dir.as_slice() {
+        [one] => Ok(*one),
+        [] if pids.is_empty() => Err(DebugError::new(DebugCode::NotRunning, format!("{} is not running; start it first (kiln run)", dir.display()))),
+        [] => Err(DebugError::refused(format!("the server running in {} (pid {pids:?}) was not started from {}", prefix.display(), dir.display()), "other_folder")),
+        more => Err(DebugError::refused(format!("{} server processes run in {} ({more:?}); stop the extra ones", more.len(), prefix.display()), "several_servers")),
+    }
+}
+
+/// The running process's own wine: `/proc/<pid>/exe` is its preloader (`<GE>/files/lib/wine/i386-unix/wine64-preloader`,
+/// `/usr/lib/wine/wine64-preloader`), below the `bin/wine` of that build. A different wine build could not talk to the
+/// prefix's wineserver at all.
+#[cfg(target_os = "linux")]
+pub fn wine_of(pid: u32) -> Option<PathBuf> {
+    let exe = std::fs::read_link(format!("/proc/{pid}/exe")).ok()?;
+    wine_above(&exe)
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn wine_of(_pid: u32) -> Option<PathBuf> {
+    None
+}
+
+pub fn wine_above(exe: &Path) -> Option<PathBuf> {
+    let usable = |w: &PathBuf| w.is_file() && crate::util::is_executable(w);
+    // `bin/wine` first: GE-Proton also has a `lib/wine/i386-unix/wine` next to the preloader, which is not what started it
+    exe.ancestors().skip(1).map(|a| a.join("bin/wine")).find(usable).or_else(|| exe.parent().map(|d| d.join("wine")).filter(usable))
+}
+
+/// SHA-256 of a runner's executable (the `runnerSha256` of the tuple).
+pub fn runner_sha256(runner: &Path) -> Result<String, DebugError> {
+    crate::hash::sha256_file(runner)
+        .map(|(h, _)| h)
+        .map_err(|e| DebugError::new(DebugCode::ToolMissing, format!("cannot hash the runner {}: {}", runner.display(), e.message)))
+}
+
+/// A fake Windows side and host side for tests (here and in kiln-cli): a process table the test edits between steps.
+pub mod fake {
+    use super::*;
+
+    #[derive(Debug, Clone)]
+    pub struct FakePipe {
+        pub name: String,
+        pub session_nonce: String,
+        pub managed_ready: bool,
+        pub session_mode: SessionMode,
+        pub runtime_version: String,
+        /// false: answers with another challenge (a replayed answer).
+        pub echo: bool,
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct FakeProc {
+        pub windows_pid: u32,
+        pub image: String,
+        pub creation_time_100ns: String,
+        pub image_sha256: String,
+        pub pipe: Option<FakePipe>,
+        /// OpenProcess is refused (another user, elevated).
+        pub denied: bool,
+    }
+
+    impl FakeProc {
+        /// A Kiln process with developer debugging on, and its descriptor.
+        pub fn kiln(windows_pid: u32, image: &str, creation: u64, sha: &str, nonce: &str, side: TargetKind) -> (FakeProc, Descriptor) {
+            let pipe = pipe_name(windows_pid, nonce);
+            let p = FakeProc {
+                windows_pid,
+                image: image.to_string(),
+                creation_time_100ns: creation.to_string(),
+                image_sha256: sha.to_string(),
+                pipe: Some(FakePipe { name: pipe.clone(), session_nonce: nonce.into(), managed_ready: true, session_mode: SessionMode::Hosted, runtime_version: "8.0.11".into(), echo: true }),
+                denied: false,
+            };
+            let d = Descriptor {
+                format: DESCRIPTOR_FORMAT,
+                kiln: "0.2.0-dev".into(),
+                side,
+                session_nonce: nonce.into(),
+                windows_pid,
+                creation_time_100ns: creation.to_string(),
+                image: image.to_string(),
+                image_sha256: sha.to_string(),
+                runtime_version: "8.0.11".into(),
+                pipe,
+                elevated: false,
+                managed_ready: true,
+                written: "2026-11-13T20:00:00Z".into(),
+            };
+            (p, d)
+        }
+    }
+
+    type Hook = Box<dyn FnMut(&mut Vec<FakeProc>) + Send>;
+
+    /// The Windows side of one namespace, from a table. Records every call; never kills anything (it cannot).
+    #[derive(Default)]
+    pub struct FakeSource {
+        pub procs: Vec<FakeProc>,
+        pub elevated: Option<bool>,
+        /// Every call answers this error (a source that cannot work: unsupported_identity, tool_missing).
+        pub fail: Option<DebugError>,
+        /// Runs before every `prepare_attach`: the table changes between resolve and attach.
+        pub before_prepare: Option<Hook>,
+        pub calls: Vec<String>,
+        pub held: Option<u32>,
+    }
+
+    impl FakeSource {
+        pub fn new(procs: Vec<FakeProc>) -> FakeSource {
+            FakeSource { procs, ..Default::default() }
+        }
+
+        fn look(&mut self, probe: &Probe) -> Result<Seen, DebugError> {
+            if let Some(e) = &self.fail {
+                return Err(e.clone());
+            }
+            let pid = probe.windows_pid;
+            let Some(p) = self.procs.iter().find(|p| p.windows_pid == pid) else {
+                self.held = None;
+                return Err(DebugError::new(DebugCode::NotRunning, format!("no process {pid}")));
+            };
+            if p.denied {
+                return Err(DebugError::new(DebugCode::PrivilegeMismatch, format!("OpenProcess({pid}): access denied")).because("open_denied"));
+            }
+            self.held = Some(pid);
+            let pipe = p.pipe.as_ref().filter(|x| x.name == probe.pipe).ok_or_else(|| {
+                DebugError::identity_changed(format!("PID {pid} serves no pipe {}", probe.pipe), "pipe_missing")
+            })?;
+            Ok(Seen {
+                windows_pid: p.windows_pid,
+                image: p.image.clone(),
+                creation_time_100ns: p.creation_time_100ns.clone(),
+                image_sha256: p.image_sha256.clone(),
+                pipe: PipeAnswer {
+                    session_nonce: pipe.session_nonce.clone(),
+                    challenge: if pipe.echo { probe.challenge.clone() } else { "0".repeat(32) },
+                    windows_pid: p.windows_pid,
+                    creation_time_100ns: p.creation_time_100ns.clone(),
+                    image: p.image.clone(),
+                    image_sha256: p.image_sha256.clone(),
+                    managed_ready: pipe.managed_ready,
+                    session_mode: pipe.session_mode,
+                    runtime_version: pipe.runtime_version.clone(),
+                },
+            })
+        }
+    }
+
+    impl ProcessSource for FakeSource {
+        fn elevated(&mut self) -> Option<bool> {
+            self.elevated
+        }
+        fn inspect(&mut self, probe: &Probe) -> Result<Seen, DebugError> {
+            self.calls.push(format!("inspect {}", probe.windows_pid));
+            self.look(probe)
+        }
+        fn prepare_attach(&mut self, probe: &Probe) -> Result<Seen, DebugError> {
+            self.calls.push(format!("prepare_attach {}", probe.windows_pid));
+            if let Some(h) = self.before_prepare.as_mut() {
+                h(&mut self.procs);
+            }
+            if self.held != Some(probe.windows_pid) {
+                return Err(DebugError::identity_changed(format!("PID {} is not the held process", probe.windows_pid), "not_held"));
+            }
+            self.look(probe)
+        }
+        fn watch(&mut self, probe: &Probe) -> Result<Watch, DebugError> {
+            self.calls.push(format!("watch {}", probe.windows_pid));
+            if !self.procs.iter().any(|p| p.windows_pid == probe.windows_pid && Some(p.windows_pid) == self.held) {
+                return Ok(Watch::Exited);
+            }
+            self.look(probe).map(Watch::Alive)
+        }
+        fn close(&mut self) {
+            self.calls.push("close".into());
+            self.held = None;
+        }
+    }
+
+    /// A host side whose facts a test can change between resolve and attach.
+    pub struct FakeHost {
+        pub spec: HostSpec,
+        pub facts: HostFacts,
+        pub calls: usize,
+        /// Facts from the second call on (the prefix replaced, another runner).
+        pub later: Option<HostFacts>,
+    }
+
+    impl HostSide for FakeHost {
+        fn spec(&self) -> &HostSpec {
+            &self.spec
+        }
+        fn facts(&mut self) -> Result<HostFacts, DebugError> {
+            self.calls += 1;
+            Ok(match (&self.later, self.calls) {
+                (Some(l), n) if n > 1 => l.clone(),
+                _ => self.facts.clone(),
+            })
+        }
+    }
+
+    /// Challenges `c-1`, `c-2`, ... (distinct, predictable for tests).
+    pub fn counter() -> impl FnMut() -> Result<String, DebugError> {
+        let mut n = 0;
+        move || {
+            n += 1;
+            Ok(format!("c-{n}"))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fake::*;
+    use super::*;
+
+    const SHA_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const N1: &str = "11111111111111111111111111111111";
+    const N2: &str = "22222222222222222222222222222222";
+
+    /// Two installs `a` and `b` with the same exe name, each with its kiln/state.
+    struct World {
+        root: PathBuf,
+    }
+
+    impl World {
+        fn new(tag: &str) -> World {
+            let root = std::env::temp_dir().join(format!("kiln-debug-res-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&root);
+            for d in ["a", "b"] {
+                std::fs::create_dir_all(root.join(d).join("kiln/state/debug")).unwrap();
+                std::fs::write(root.join(d).join("enshrouded_server.exe"), b"MZ").unwrap();
+            }
+            World { root }
+        }
+        fn image(&self, d: &str) -> String {
+            crate::winpath::unix_to_z(&self.root.join(d).join("enshrouded_server.exe")).unwrap()
+        }
+        fn put(&self, d: &str, desc: &Descriptor) {
+            let f = self.root.join(d).join("kiln/state/debug").join(format!("{}.json", desc.windows_pid));
+            std::fs::write(f, serde_json::to_vec(desc).unwrap()).unwrap();
+        }
+        fn host(&self, d: &str, kind: TargetKind) -> FakeHost {
+            FakeHost {
+                spec: HostSpec {
+                    kind,
+                    install_id: format!("install-{d}"),
+                    state_dir: self.root.join(d).join("kiln/state"),
+                    install_exe: self.root.join(d).join("enshrouded_server.exe"),
+                    prefix: None,
+                },
+                facts: HostFacts {
+                    prefix_identity: Some(PrefixIdentity { path: format!("/pfx/{d}").into(), device: 1, inode: 10 }),
+                    runner_sha256: Some("r".repeat(64)),
+                    runner_context: Some(RunnerContext { linux_boot_id: "boot".into(), pid: 4000, start_ticks: 7 }),
+                    host_pid: Some(4001),
+                },
+                calls: 0,
+                later: None,
+            }
+        }
+        fn kiln(&self, d: &str, pid: u32, creation: u64, nonce: &str) -> (FakeProc, Descriptor) {
+            FakeProc::kiln(pid, &self.image(d), creation, SHA_A, nonce, TargetKind::Server)
+        }
+    }
+
+    impl Drop for World {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn run(host: &mut FakeHost, src: &mut FakeSource) -> Result<Resolved, DebugError> {
+        resolve(host, src, &mut counter())
+    }
+
+    #[test]
+    fn the_one_live_descriptor_is_the_target() {
+        let w = World::new("one");
+        let (p, d) = w.kiln("a", 32, 134_000, N1);
+        w.put("a", &d);
+        let mut src = FakeSource::new(vec![p]);
+        let mut host = w.host("a", TargetKind::Server);
+        let r = run(&mut host, &mut src).unwrap();
+        let id = &r.target.identity;
+        assert_eq!((id.windows_pid, id.creation_time_100ns.as_str(), id.session_nonce.as_str(), id.install_id.as_str()), (32, "134000", N1, "install-a"));
+        assert_eq!(r.target.host_pid, Some(4001));
+        assert_eq!(r.target.session_mode, SessionMode::Hosted);
+        assert_eq!(src.held, Some(32));
+        let p = permit(&r, false, &mut host, &mut src, &mut counter()).unwrap();
+        assert_eq!(p.windows_pid(), 32);
+        assert_eq!(src.calls, vec!["inspect 32", "prepare_attach 32"]);
+    }
+
+    #[test]
+    fn two_same_name_processes_in_different_folders() {
+        let w = World::new("two");
+        let (pa, da) = w.kiln("a", 32, 100, N1);
+        let (pb, db) = w.kiln("b", 64, 200, N2);
+        w.put("a", &da);
+        w.put("b", &db);
+        let mut src = FakeSource::new(vec![pa, pb]);
+        assert_eq!(run(&mut w.host("a", TargetKind::Server), &mut src).unwrap().target.identity.windows_pid, 32);
+        assert_eq!(run(&mut w.host("b", TargetKind::Server), &mut src).unwrap().target.identity.windows_pid, 64);
+        // b's descriptor copied into a's state folder names b's exe: not a's process, never attached as a's
+        let w2 = World::new("two-copy");
+        let (pb, db) = w2.kiln("b", 64, 200, N2);
+        w2.put("a", &db);
+        let mut src = FakeSource::new(vec![pb]);
+        let e = run(&mut w2.host("a", TargetKind::Server), &mut src).unwrap_err();
+        assert_eq!((e.code, e.reason.as_deref()), (DebugCode::Refused, Some("descriptor_invalid")));
+        assert!(src.calls.is_empty(), "b's process was not even inspected: {:?}", src.calls);
+    }
+
+    #[test]
+    fn pid_reuse_is_a_stale_descriptor() {
+        let w = World::new("reuse");
+        let (_, d) = w.kiln("a", 32, 100, N1);
+        w.put("a", &d);
+        // PID 32 is another process now: another creation time, no pipe of that name
+        let (mut other, _) = w.kiln("a", 32, 999, N2);
+        other.pipe = None;
+        let e = run(&mut w.host("a", TargetKind::Server), &mut FakeSource::new(vec![other.clone()])).unwrap_err();
+        assert_eq!((e.code, e.reason.as_deref()), (DebugCode::NotRunning, Some("stale_descriptor")));
+        // even when the new process is a Kiln with the same image: its creation time differs
+        let (k, _) = w.kiln("a", 32, 999, N1);
+        let e = run(&mut w.host("a", TargetKind::Server), &mut FakeSource::new(vec![k])).unwrap_err();
+        assert_eq!(e.code, DebugCode::NotRunning);
+        assert!(e.message.contains("created 999"), "{}", e.message);
+    }
+
+    #[test]
+    fn exit_between_resolve_and_attach() {
+        let w = World::new("exit");
+        let (p, d) = w.kiln("a", 32, 100, N1);
+        w.put("a", &d);
+        let mut src = FakeSource::new(vec![p]);
+        let mut host = w.host("a", TargetKind::Server);
+        let r = run(&mut host, &mut src).unwrap();
+        src.before_prepare = Some(Box::new(|t| t.clear()));
+        let e = permit(&r, false, &mut host, &mut src, &mut counter()).unwrap_err();
+        assert_eq!(e.code, DebugCode::NotRunning);
+        // and a restart with the same PID before attach
+        let (p, _) = w.kiln("a", 32, 100, N1);
+        let mut src = FakeSource::new(vec![p]);
+        let r = run(&mut host, &mut src).unwrap();
+        src.before_prepare = Some(Box::new(|t| t[0].creation_time_100ns = "101".into()));
+        let e = permit(&r, false, &mut host, &mut src, &mut counter()).unwrap_err();
+        assert_eq!((e.code, e.reason.as_deref()), (DebugCode::IdentityChanged, Some("creation_time")));
+    }
+
+    #[test]
+    fn stale_descriptor_and_switch_off() {
+        let w = World::new("stale");
+        let e = run(&mut w.host("a", TargetKind::Server), &mut FakeSource::default()).unwrap_err();
+        assert_eq!((e.code, e.reason.as_deref()), (DebugCode::Refused, Some("developer_debugging_off")));
+        let (_, d) = w.kiln("a", 32, 100, N1);
+        w.put("a", &d);
+        let e = run(&mut w.host("a", TargetKind::Server), &mut FakeSource::default()).unwrap_err();
+        assert_eq!((e.code, e.reason.as_deref()), (DebugCode::NotRunning, Some("stale_descriptor")));
+    }
+
+    #[test]
+    fn elevation_mismatch() {
+        let w = World::new("elev");
+        let (p, mut d) = w.kiln("a", 32, 100, N1);
+        d.elevated = true;
+        w.put("a", &d);
+        let mut src = FakeSource::new(vec![p.clone()]);
+        src.elevated = Some(false);
+        let e = run(&mut w.host("a", TargetKind::Server), &mut src).unwrap_err();
+        assert_eq!(e.code, DebugCode::PrivilegeMismatch);
+        assert!(src.calls.is_empty());
+        // a process this user cannot open
+        let (mut p, d) = w.kiln("a", 32, 100, N1);
+        w.put("a", &d);
+        p.denied = true;
+        let e = run(&mut w.host("a", TargetKind::Server), &mut FakeSource::new(vec![p])).unwrap_err();
+        assert_eq!(e.code, DebugCode::PrivilegeMismatch);
+    }
+
+    #[test]
+    fn several_live_descriptors_are_refused() {
+        let w = World::new("several");
+        let (p1, d1) = w.kiln("a", 32, 100, N1);
+        let (p2, d2) = w.kiln("a", 48, 300, N2);
+        w.put("a", &d1);
+        w.put("a", &d2);
+        let e = run(&mut w.host("a", TargetKind::Server), &mut FakeSource::new(vec![p1.clone(), p2])).unwrap_err();
+        assert_eq!((e.code, e.reason.as_deref()), (DebugCode::Refused, Some("several_descriptors")));
+        // with one of them stale the other is the target, and it is the held one even though it was inspected first
+        let mut src = FakeSource::new(vec![p1]);
+        let r = run(&mut w.host("a", TargetKind::Server), &mut src).unwrap();
+        assert_eq!(r.target.identity.windows_pid, 32);
+        assert_eq!(src.held, Some(32));
+        assert_eq!(r.notes.len(), 1, "{:?}", r.notes);
+    }
+
+    #[test]
+    fn every_windows_fact_is_checked() {
+        let w = World::new("facts");
+        type Change = Box<dyn Fn(&mut FakeProc) + Send + Sync>;
+        let cases: Vec<(&str, Change)> = vec![
+            ("nonce", Box::new(|p| p.pipe.as_mut().unwrap().session_nonce = N2.into())),
+            ("challenge", Box::new(|p| p.pipe.as_mut().unwrap().echo = false)),
+            ("pipe_missing", Box::new(|p| p.pipe.as_mut().unwrap().name.push('x'))),
+            ("image_digest", Box::new(|p| p.image_sha256 = "b".repeat(64))),
+            ("image_path", Box::new(|p| p.image = r"Z:\elsewhere\enshrouded_server.exe".into())),
+        ];
+        for (reason, change) in cases {
+            let (p, d) = w.kiln("a", 32, 100, N1);
+            w.put("a", &d);
+            // at resolve: the descriptor is stale (nothing attaches)
+            let mut bad = p.clone();
+            change(&mut bad);
+            let e = run(&mut w.host("a", TargetKind::Server), &mut FakeSource::new(vec![bad])).unwrap_err();
+            assert_eq!(e.code, DebugCode::NotRunning, "{reason}");
+            // between resolve and attach: identity_changed with the reason
+            let mut src = FakeSource::new(vec![p]);
+            let mut host = w.host("a", TargetKind::Server);
+            let r = run(&mut host, &mut src).unwrap();
+            let change = std::sync::Arc::new(change);
+            let c2 = change.clone();
+            let mut once = Some(());
+            src.before_prepare = Some(Box::new(move |t| {
+                if once.take().is_some() {
+                    c2(&mut t[0]);
+                }
+            }));
+            let e = permit(&r, false, &mut host, &mut src, &mut counter()).unwrap_err();
+            assert_eq!((e.code, e.reason.as_deref()), (DebugCode::IdentityChanged, Some(reason)));
+        }
+    }
+
+    #[test]
+    fn host_facts_are_part_of_the_tuple() {
+        let w = World::new("hostfacts");
+        let (p, d) = w.kiln("a", 32, 100, N1);
+        w.put("a", &d);
+        for (field, later) in [
+            ("prefixIdentity", HostFacts { prefix_identity: Some(PrefixIdentity { path: "/pfx/a".into(), device: 1, inode: 11 }), ..w.host("a", TargetKind::Server).facts }),
+            ("runnerSha256", HostFacts { runner_sha256: Some("s".repeat(64)), ..w.host("a", TargetKind::Server).facts }),
+        ] {
+            let mut host = w.host("a", TargetKind::Server);
+            host.later = Some(later);
+            let mut src = FakeSource::new(vec![p.clone()]);
+            let r = run(&mut host, &mut src).unwrap();
+            let e = permit(&r, false, &mut host, &mut src, &mut counter()).unwrap_err();
+            assert_eq!((e.code, e.reason.as_deref()), (DebugCode::IdentityChanged, Some(field)));
+        }
+        // the display-only host PID changing is not a reason to refuse
+        let mut host = w.host("a", TargetKind::Server);
+        host.later = Some(HostFacts { host_pid: Some(9999), runner_context: None, ..host.facts.clone() });
+        let mut src = FakeSource::new(vec![p]);
+        let r = run(&mut host, &mut src).unwrap();
+        assert!(permit(&r, false, &mut host, &mut src, &mut counter()).is_ok());
+    }
+
+    #[test]
+    fn runtime_not_ready_and_unsupported() {
+        let w = World::new("rt");
+        let (mut p, d) = w.kiln("a", 32, 100, N1);
+        w.put("a", &d);
+        p.pipe.as_mut().unwrap().managed_ready = false;
+        let e = run(&mut w.host("a", TargetKind::Server), &mut FakeSource::new(vec![p.clone()])).unwrap_err();
+        assert_eq!(e.code, DebugCode::RuntimeNotReady);
+        let mut src = FakeSource::new(vec![p]);
+        src.fail = Some(DebugError::new(DebugCode::UnsupportedIdentity, "GetProcessTimes is missing").because("GetProcessTimes"));
+        let e = run(&mut w.host("a", TargetKind::Server), &mut src).unwrap_err();
+        assert_eq!(e.code, DebugCode::UnsupportedIdentity);
+    }
+
+    #[test]
+    fn a_client_needs_consent_before_anything_is_asked() {
+        assert_eq!(consent_gate(TargetKind::Client, false).unwrap_err().code, DebugCode::PauseConsentRequired);
+        assert!(consent_gate(TargetKind::Client, true).is_ok());
+        assert!(consent_gate(TargetKind::Server, false).is_ok());
+        let w = World::new("consent");
+        let (p, mut d) = w.kiln("a", 32, 100, N1);
+        d.side = TargetKind::Client;
+        w.put("a", &d);
+        let mut src = FakeSource::new(vec![p]);
+        let mut host = w.host("a", TargetKind::Client);
+        let r = run(&mut host, &mut src).unwrap();
+        let before = src.calls.len();
+        let e = permit(&r, false, &mut host, &mut src, &mut counter()).unwrap_err();
+        assert_eq!(e.code, DebugCode::PauseConsentRequired);
+        assert_eq!(src.calls.len(), before, "no prepare_attach without consent");
+        assert!(permit(&r, true, &mut host, &mut src, &mut counter()).is_ok());
+        // a server descriptor is not a client target and the other way round
+        let e = run(&mut w.host("a", TargetKind::Server), &mut FakeSource::default()).unwrap_err();
+        assert_eq!(e.reason.as_deref(), Some("descriptor_invalid"));
+    }
+
+    #[test]
+    fn watch_outcomes() {
+        let w = World::new("watch");
+        let (p, d) = w.kiln("a", 32, 100, N1);
+        w.put("a", &d);
+        let mut src = FakeSource::new(vec![p]);
+        let r = run(&mut w.host("a", TargetKind::Server), &mut src).unwrap();
+        assert_eq!(watch(&r, &mut src, &mut counter()), WatchOutcome::Same(SessionMode::Hosted));
+        src.procs[0].pipe.as_mut().unwrap().session_mode = SessionMode::Menu;
+        assert_eq!(watch(&r, &mut src, &mut counter()), WatchOutcome::Same(SessionMode::Menu));
+        src.procs[0].pipe.as_mut().unwrap().session_nonce = N2.into();
+        assert_eq!(watch(&r, &mut src, &mut counter()), WatchOutcome::Changed("nonce".into()));
+        src.procs.clear();
+        assert_eq!(watch(&r, &mut src, &mut counter()), WatchOutcome::Gone);
+        assert!(!src.calls.iter().any(|c| c.contains("kill") || c.contains("terminate")));
+    }
+
+    #[test]
+    fn steam_paths() {
+        assert!(in_steam_library(Path::new("/home/u/.local/share/Steam/steamapps/common/EnshroudedServer")));
+        assert!(in_steam_library(Path::new("/mnt/games/SteamLibrary/steamapps/compatdata/2278520/pfx")));
+        assert!(!in_steam_library(Path::new("/home/u/srv/enshrouded/labs/mylab")));
+        assert!(!in_steam_library(Path::new("/home/u/steamapps-backup/server")));
+        let e = server_steam_guard(Path::new("/home/u/.local/share/Steam/steamapps/common/EnshroudedServer")).unwrap_err();
+        assert_eq!((e.code, e.reason.as_deref()), (DebugCode::Refused, Some("steam_library")));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn wine_is_found_above_the_preloader() {
+        let t = std::env::temp_dir().join(format!("kiln-debug-wine-{}", std::process::id()));
+        let lib = t.join("files/lib/wine/i386-unix");
+        std::fs::create_dir_all(&lib).unwrap();
+        std::fs::create_dir_all(t.join("files/bin")).unwrap();
+        let wine = t.join("files/bin/wine");
+        let decoy = lib.join("wine");
+        for w in [&wine, &decoy] {
+            std::fs::write(w, "").unwrap();
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(w, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        assert_eq!(wine_above(&lib.join("wine64-preloader")), Some(wine));
+        std::fs::remove_dir_all(&t).unwrap();
+    }
+}

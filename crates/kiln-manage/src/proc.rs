@@ -181,9 +181,15 @@ pub fn start_rfc3339(pid: u32) -> Option<String> {
     start_time(pid).map(|t| crate::util::rfc3339(crate::util::unix(t)))
 }
 
+/// Linux: field 22 of `/proc/<pid>/stat` (starttime, clock ticks after boot), read after the last `)` so a name with
+/// spaces or parentheses in it cannot shift the fields. With the boot id and the PID it names one process's lifetime.
+pub fn parse_start_ticks(stat: &str) -> Option<u64> {
+    stat.rsplit_once(')')?.1.split_whitespace().nth(19)?.parse().ok()
+}
+
 /// Linux: the start from `/proc/<pid>/stat` (field 22, starttime, in clock ticks after boot) and `/proc/stat`'s btime.
 pub fn parse_start(stat: &str, proc_stat: &str, ticks_per_s: u64) -> Option<std::time::SystemTime> {
-    let ticks: u64 = stat.rsplit_once(')')?.1.split_whitespace().nth(19)?.parse().ok()?;
+    let ticks = parse_start_ticks(stat)?;
     let btime: u64 = proc_stat.lines().find_map(|l| l.strip_prefix("btime ")?.trim().parse().ok())?;
     let hz = ticks_per_s.max(1);
     let since_boot = std::time::Duration::from_secs(ticks / hz) + std::time::Duration::from_nanos((ticks % hz) * 1_000_000_000 / hz);

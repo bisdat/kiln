@@ -1,29 +1,37 @@
 // SPDX-License-Identifier: MIT
 //! `kiln debug`: attach a .NET debugger (netcoredbg, not bundled) to a local server's mods. Plain: says how
-//! (`--json`: pid, wine, prefix, netcoredbg, env, command). `--dap`: a Debug Adapter Protocol proxy on stdin/stdout
-//! around netcoredbg for editors (docs/kiln/modding/debugging.md).
+//! (`--json`: the proven target, wine, prefix, netcoredbg, env, command). `--dap`: a Debug Adapter Protocol proxy on
+//! stdin/stdout around netcoredbg for editors (docs/kiln/modding/debugging.md).
 //!
 //! The rules that keep this from hurting a server:
-//! - **Only the named server.** Windows pids are per wineserver, so the debugger runs with the server's own WINEPREFIX
-//!   and the wine of the running process; the proxy attaches to the pid resolved there and refuses any other. A folder
-//!   whose prefix is unknown is refused, and a server of a Steam library (where the user's live server lives) is always
-//!   refused. Refusals happen before anything runs in a prefix.
+//! - **Only the proven process.** The target is the one process whose Windows identity (PID, creation time, image and
+//!   its digest, the session nonce its core wrote into `kiln/state/debug/<pid>.json` and answers on its control pipe)
+//!   agrees with the install, its prefix and the runner (kiln_manage::debug). A PID is never compared alone, a Linux
+//!   PID never decides anything, and the whole tuple is checked again right before netcoredbg starts and before the
+//!   editor's attach is forwarded. A folder whose prefix is unknown is refused, and a server of a Steam library (where
+//!   the user's live server lives) is always refused. Refusals happen before anything runs in a prefix.
 //! - **The debuggee never ends with the session.** Every `disconnect` goes out with `terminateDebuggee: false`;
 //!   `launch`, `terminate` and `restart` are refused and not advertised.
 //! - **Stale modules go first.** Before attaching, the proxy asks the server to collect unloaded mod contexts; breakpoints
-//!   otherwise can bind to the old copy of a reloaded mod (and sessions in that state have ended the server).
+//!   otherwise can bind to the old copy of a reloaded mod (and sessions in that state have ended the server). While a
+//!   session is attached, `kiln reload` refuses (kiln/state/debug/session.json).
 //! - **The debugger is never killed.** A debugger dying while attached kills the server (measured), so
 //!   when the client goes away (stdin EOF, SIGINT, SIGTERM, SIGHUP) the proxy disconnects cleanly and waits; if the
 //!   adapter does not answer, the proxy closes its stdin, which also makes it detach, and leaves it alone.
+//! - **A pause can be bounded.** `--max-pause-ms`: a stopped debuggee is continued by the proxy after that long (best
+//!   effort: a pending evaluation can delay it). Every change of the session is written to the session file and sent
+//!   to the editor as a `kiln/debugState` event.
 
 use crate::out::{self, CliError};
 use crate::project::Project;
 use crate::server::{self, Server};
 use anyhow::Result;
+use kiln_manage::debug::resolver::{self, HostFacts, HostSide, HostSpec, ProcessSource, Resolved, WatchOutcome};
+use kiln_manage::debug::{AttachPermit, DebugCode, DebugError, DebugSessionState, PrefixIdentity, RunnerContext, SessionMode, SessionState, TargetKind};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
-use std::io::{BufRead, BufReader, Read, Write};
-use std::path::{Component, Path, PathBuf};
+use std::io::{BufRead, BufReader, Write};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -38,6 +46,13 @@ const DISCONNECT_WAIT: Duration = Duration::from_secs(30);
 const EXIT_WAIT: Duration = Duration::from_secs(15);
 /// Seconds to wait for the control command `gc` before attaching.
 const GC_WAIT: u64 = 15;
+/// How often an attached session asks the Windows side whether the debuggee still runs and is still itself.
+const WATCH_EVERY: Duration = Duration::from_secs(2);
+/// `--max-pause-ms` bounds (chapter 12a §4 step 8) and the default where a watchdog is on by default (clients).
+const PAUSE_MIN_MS: u64 = 100;
+const PAUSE_MAX_MS: u64 = 60_000;
+#[allow(dead_code)] // the client default (12a S4)
+const PAUSE_DEFAULT_MS: u64 = 5000;
 
 #[derive(clap::Args)]
 pub struct DebugArgs {
@@ -47,21 +62,43 @@ pub struct DebugArgs {
     /// Speak the Debug Adapter Protocol on stdin/stdout (for editors); forces terminateDebuggee=false.
     #[arg(long)]
     pub dap: bool,
+    /// Continue a stopped debuggee after this many milliseconds (100 to 60000; best effort). Servers: off unless given.
+    #[arg(long, value_name = "MS")]
+    pub max_pause_ms: Option<u64>,
+}
+
+fn cli_error(e: DebugError) -> anyhow::Error {
+    let mut c = CliError::new(e.code.as_str(), e.message.clone());
+    if let Some(d) = e.detail() {
+        c = c.with_detail(d);
+    }
+    c.into()
+}
+
+/// The code and reason of an error, whichever type it is (for DAP error bodies and state events).
+fn code_of(e: &anyhow::Error) -> (String, Option<String>, String) {
+    if let Some(d) = e.downcast_ref::<DebugError>() {
+        return (d.code.as_str().into(), d.reason.clone(), d.message.clone());
+    }
+    if let Some(c) = e.downcast_ref::<CliError>() {
+        let reason = c.detail.as_ref().and_then(|d| d["reason"].as_str()).map(str::to_string);
+        return (c.code.clone(), reason, c.message.clone());
+    }
+    ("error".into(), None, format!("{e:#}"))
 }
 
 /// What the debugger attaches to, and how to run it there.
-#[derive(Debug)]
 struct Target {
-    server: PathBuf,
+    kind: TargetKind,
+    /// The server (or game) folder.
+    install: PathBuf,
     via: &'static str,
     lab: Option<String>,
-    /// The pid the debugger attaches to (Wine's own numbering under Wine).
-    pid: u32,
-    /// The Linux pid of the wine process; on Windows the same as `pid`.
-    host_pid: u32,
     wine: Option<PathBuf>,
     prefix: Option<PathBuf>,
     netcoredbg: PathBuf,
+    resolved: Resolved,
+    max_pause_ms: Option<u64>,
 }
 
 impl Target {
@@ -98,6 +135,17 @@ impl Target {
         }
         c
     }
+
+    fn windows_pid(&self) -> u32 {
+        self.resolved.target.identity.windows_pid
+    }
+
+    fn what(&self) -> &'static str {
+        match self.kind {
+            TargetKind::Server => "server",
+            TargetKind::Client => "game",
+        }
+    }
 }
 
 /// Inherited variables that would point a Wine call at another runner, prefix or display.
@@ -108,25 +156,8 @@ fn scrub(c: &mut Command) {
     kiln_manage::server::run::headless(c);
 }
 
-/// A path inside a Steam library: `.../steamapps/common/<app>`, `.../steamapps/compatdata/...`.
-pub fn in_steam_library(p: &Path) -> bool {
-    p.components().any(|c| matches!(c, Component::Normal(n) if n.to_str().is_some_and(|s| s.eq_ignore_ascii_case("steamapps"))))
-}
-
 fn canon(p: &Path) -> PathBuf {
     p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
-}
-
-fn refuse_steam(what: &Path) -> anyhow::Error {
-    CliError::new(
-        "refused",
-        format!("{} is inside a Steam library; kiln debug pauses the server for everyone on it, so it refuses", what.display()),
-    )
-    .into()
-}
-
-fn not_running(dir: &Path) -> anyhow::Error {
-    CliError::new("not_running", format!("{} is not running; start it first (kiln run)", dir.display())).into()
 }
 
 /// $KILN_NETCOREDBG, else <data>/tools/netcoredbg/netcoredbg.exe. Not bundled (docs/kiln/modding/debugging.md).
@@ -143,92 +174,6 @@ fn netcoredbg() -> Result<PathBuf> {
         .into());
     }
     Ok(canon(&p))
-}
-
-/// The running server's own wine: `/proc/<pid>/exe` is its preloader (`<GE>/files/lib/wine/i386-unix/wine64-preloader`,
-/// `/usr/lib/wine/wine64-preloader`), below the `bin/wine` of that build. A different wine build could not talk to the
-/// prefix's wineserver at all.
-#[cfg(target_os = "linux")]
-fn wine_of(pid: u32) -> Option<PathBuf> {
-    let exe = std::fs::read_link(format!("/proc/{pid}/exe")).ok()?;
-    wine_above(&exe)
-}
-
-#[cfg(target_os = "linux")]
-fn wine_above(exe: &Path) -> Option<PathBuf> {
-    let usable = |w: &PathBuf| w.is_file() && kiln_manage::util::is_executable(w);
-    // `bin/wine` first: GE-Proton also has a `lib/wine/i386-unix/wine` next to the preloader, which is not what started it
-    exe.ancestors().skip(1).map(|a| a.join("bin/wine")).find(usable).or_else(|| exe.parent().map(|d| d.join("wine")).filter(usable))
-}
-
-#[cfg(not(target_os = "linux"))]
-fn wine_of(_pid: u32) -> Option<PathBuf> {
-    None
-}
-
-/// Wine's pid of the server: `tasklist` in the prefix only ever lists that prefix's processes.
-fn wine_pid(wine: &Path, prefix: &Path) -> Result<u32> {
-    let mut c = Command::new(wine);
-    c.args(["tasklist.exe", "/fo", "csv", "/nh"]);
-    scrub(&mut c);
-    c.env("WINEPREFIX", prefix).env("WINEDEBUG", "-all").current_dir(prefix);
-    c.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
-    let mut child = c.spawn().map_err(|e| CliError::new("tool_missing", format!("cannot run {}: {e}", wine.display())))?;
-    let mut stdout = child.stdout.take().expect("piped");
-    let reader = std::thread::spawn(move || {
-        let mut s = String::new();
-        let _ = stdout.read_to_string(&mut s);
-        s
-    });
-    let t0 = Instant::now();
-    loop {
-        if child.try_wait()?.is_some() {
-            break;
-        }
-        if t0.elapsed() > Duration::from_secs(60) {
-            let _ = child.kill(); // tasklist, not the debugger
-            let _ = child.wait();
-            return Err(CliError::new("timeout", "wine tasklist.exe did not answer in 60 s").into());
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    let list = reader.join().unwrap_or_default();
-    let pids = parse_tasklist(&list, SERVER_EXE);
-    match pids.as_slice() {
-        [one] => Ok(*one),
-        [] => Err(CliError::new("not_running", format!("wine tasklist.exe in {} shows no {SERVER_EXE}", prefix.display())).into()),
-        more => Err(CliError::new("refused", format!("{} runs {} {SERVER_EXE} processes ({more:?}); stop the extra ones", prefix.display(), more.len())).into()),
-    }
-}
-
-/// `"name.exe","32","Console","1","1,234 K"` per line.
-fn parse_tasklist(list: &str, exe: &str) -> Vec<u32> {
-    list.lines()
-        .filter_map(|l| {
-            let mut f = l.trim().trim_matches('"').split("\",\"");
-            let name = f.next()?;
-            let pid = f.next()?.parse().ok()?;
-            name.eq_ignore_ascii_case(exe).then_some(pid)
-        })
-        .collect()
-}
-
-/// The server's process in its own prefix, nothing else. No wine runs until this has found one, so a stopped server
-/// gets no stray wineserver and another server's prefix is never entered.
-fn host_pid_in_prefix(s: &Server, prefix: &Path) -> Result<u32> {
-    let pids = kiln_manage::server::procs::find_servers(prefix);
-    let dir = canon(&s.dir);
-    let in_dir: Vec<u32> = pids
-        .iter()
-        .copied()
-        .filter(|p| std::fs::read_link(format!("/proc/{p}/cwd")).is_ok_and(|c| canon(&c) == dir))
-        .collect();
-    match in_dir.as_slice() {
-        [one] => Ok(*one),
-        [] if pids.is_empty() => Err(not_running(&s.dir)),
-        [] => Err(CliError::new("refused", format!("the server running in {} (pid {pids:?}) was not started from {}", prefix.display(), s.dir.display())).into()),
-        more => Err(CliError::new("refused", format!("{} server processes run in {} ({more:?}); stop the extra ones", more.len(), prefix.display())).into()),
-    }
 }
 
 /// The server's Wine prefix: labs `<labs>/<name>.pfx`, instances their record. None on Windows.
@@ -258,67 +203,177 @@ fn with_pfx(dir: &Path) -> PathBuf {
     PathBuf::from(p)
 }
 
-fn resolve(a: &DebugArgs) -> Result<Target> {
+/// The host side of a local server: its folder, its prefix and the wine that runs it (Linux), read again at every
+/// check. The Linux PID is display only.
+struct ServerHost {
+    spec: HostSpec,
+    dir: PathBuf,
+    wine: Option<PathBuf>,
+}
+
+impl HostSide for ServerHost {
+    fn spec(&self) -> &HostSpec {
+        &self.spec
+    }
+    fn facts(&mut self) -> std::result::Result<HostFacts, DebugError> {
+        let Some(prefix) = self.spec.prefix.clone() else { return Ok(HostFacts::default()) };
+        let host_pid = resolver::server_host_pid(&self.dir, &prefix)?;
+        let runner = self.wine.as_deref().ok_or_else(|| DebugError::new(DebugCode::NotFound, format!("cannot tell which wine runs pid {host_pid}")))?;
+        Ok(HostFacts {
+            prefix_identity: Some(PrefixIdentity::of(&prefix)?),
+            runner_sha256: Some(resolver::runner_sha256(runner)?),
+            runner_context: RunnerContext::read(Path::new("/proc"), host_pid),
+            host_pid: Some(host_pid),
+        })
+    }
+}
+
+/// The Windows side for a target: in-process on native Windows, the `kiln debug-inspect` helper under the target's
+/// runner on Linux. Neither exists before 12a S3, so every resolve stops here with tool_missing until then; there is
+/// no fallback to a guessed PID.
+fn open_source(_host: &ServerHost) -> std::result::Result<Box<dyn ProcessSource + Send>, DebugError> {
+    Err(DebugError::new(
+        DebugCode::ToolMissing,
+        "this kiln has no Windows-side inspector (kiln debug-inspect) to prove the target's identity; attach with a kiln that ships it",
+    )
+    .because("no_inspector"))
+}
+
+/// A resolved target with its host and Windows sides, ready for the proxy or for `--json`.
+struct Planned {
+    target: Target,
+    host: Box<dyn HostSide + Send>,
+    source: Box<dyn ProcessSource + Send>,
+}
+
+/// Consent first (nothing touches a process before it), then the install's one live descriptor, proven.
+fn prepare(
+    kind: TargetKind,
+    allow_client_pause: bool,
+    host: &mut dyn HostSide,
+    source: &mut dyn ProcessSource,
+    challenge: &mut dyn FnMut() -> std::result::Result<String, DebugError>,
+) -> std::result::Result<Resolved, DebugError> {
+    resolver::consent_gate(kind, allow_client_pause)?;
+    resolver::resolve(host, source, challenge)
+}
+
+/// The order of every adapter start: the pre-attach collection, then consent and the whole tuple again
+/// ([`resolver::permit`]), then the spawn, which only ever sees a permit.
+fn launch<A>(
+    r: &Resolved,
+    allow_client_pause: bool,
+    host: &mut dyn HostSide,
+    source: &mut dyn ProcessSource,
+    challenge: &mut dyn FnMut() -> std::result::Result<String, DebugError>,
+    gc: impl FnOnce(),
+    spawn: impl FnOnce(&AttachPermit) -> std::io::Result<A>,
+) -> std::result::Result<(AttachPermit, A), DebugError> {
+    gc();
+    let permit = resolver::permit(r, allow_client_pause, host, source, challenge)?;
+    let adapter = spawn(&permit).map_err(|e| DebugError::new(DebugCode::ToolMissing, format!("cannot start the debugger: {e}")))?;
+    Ok((permit, adapter))
+}
+
+fn max_pause(a: &DebugArgs, kind: TargetKind) -> Result<Option<u64>> {
+    match a.max_pause_ms {
+        Some(ms) if !(PAUSE_MIN_MS..=PAUSE_MAX_MS).contains(&ms) => {
+            Err(CliError::usage(format!("--max-pause-ms is {PAUSE_MIN_MS} to {PAUSE_MAX_MS} (got {ms})")).into())
+        }
+        Some(ms) => Ok(Some(ms)),
+        None => Ok(match kind {
+            TargetKind::Server => None,
+            TargetKind::Client => Some(PAUSE_DEFAULT_MS),
+        }),
+    }
+}
+
+/// `--server`: the guard, the server lookup, the prefix and the runner, then the proven target.
+fn plan(a: &DebugArgs) -> Result<Planned> {
     // before anything looks at the folder or lists instances
     if let Some(raw) = a.server.as_deref().map(str::to_string).or_else(|| std::env::var("KILN_SERVER").ok()).filter(|v| !v.is_empty()) {
-        let p = kiln_manage::util::expand(&raw, &kiln_manage::util::home());
-        if in_steam_library(&p) || in_steam_library(&canon(&p)) {
-            return Err(refuse_steam(&p));
-        }
+        resolver::server_steam_guard(&kiln_manage::util::expand(&raw, &kiln_manage::util::home())).map_err(cli_error)?;
     }
+    let kind = TargetKind::Server;
+    let max_pause_ms = max_pause(a, kind)?;
     let project = if a.server.is_none() { Project::find(None).ok() } else { None };
     let s = server::resolve(a.server.as_deref(), project.as_ref())?;
     // an instance id, a project's KilnServer or a symlink can still end up there
     let steam_runner = s.instance.as_ref().is_some_and(|i| matches!(i.runner, kiln_manage::server::instance::ServerRunner::Steam));
-    if steam_runner || in_steam_library(&canon(&s.dir)) {
-        return Err(refuse_steam(&s.dir));
+    if steam_runner {
+        return Err(cli_error(DebugError::refused(
+            format!("{} is inside a Steam library; kiln debug pauses the server for everyone on it, so it refuses", s.dir.display()),
+            "steam_library",
+        )));
     }
+    resolver::server_steam_guard(&s.dir).map_err(cli_error)?;
     if s.instance.as_ref().is_some_and(|i| i.dir.is_none()) {
         return Err(CliError::new("unsupported", "that server is remote; kiln debug attaches to local servers").into());
     }
     let prefix = prefix_of(&s)?;
     if let Some(p) = &prefix {
-        if in_steam_library(&canon(p)) {
-            return Err(refuse_steam(p));
-        }
+        resolver::server_steam_guard(p).map_err(cli_error)?;
         if !p.is_dir() {
             return Err(CliError::new("not_found", format!("the server's Wine prefix {} does not exist", p.display())).into());
         }
     }
     let netcoredbg = netcoredbg()?;
-    let (pid, host_pid, wine) = match &prefix {
+    let wine = match &prefix {
         Some(p) => {
-            let host = host_pid_in_prefix(&s, p)?;
-            let wine = wine_of(host).ok_or_else(|| CliError::new("not_found", format!("cannot tell which wine runs pid {host}")))?;
-            (wine_pid(&wine, p)?, host, Some(wine))
+            let host = resolver::server_host_pid(&s.dir, p).map_err(cli_error)?;
+            Some(resolver::wine_of(host).ok_or_else(|| CliError::new("not_found", format!("cannot tell which wine runs pid {host}")))?)
         }
-        None => {
-            let p = kiln_manage::proc::find_exe(&s.dir, SERVER_EXE)?.ok_or_else(|| not_running(&s.dir))?;
-            (p.pid, p.pid, None)
+        None => None,
+    };
+    let spec = HostSpec {
+        kind,
+        install_id: kiln_manage::game::install_id_for(&s.dir),
+        state_dir: s.dir.join("kiln/state"),
+        install_exe: s.dir.join(SERVER_EXE),
+        prefix: prefix.clone(),
+    };
+    let mut host = ServerHost { spec, dir: s.dir.clone(), wine: wine.clone() };
+    let mut source = open_source(&host).map_err(cli_error)?;
+    let resolved = match prepare(kind, false, &mut host, source.as_mut(), &mut resolver::new_challenge) {
+        Ok(r) => r,
+        Err(e) => {
+            source.close();
+            return Err(cli_error(e));
         }
     };
-    Ok(Target { server: s.dir.clone(), via: s.via, lab: s.lab.clone(), pid, host_pid, wine, prefix, netcoredbg })
+    let target = Target { kind, install: s.dir.clone(), via: s.via, lab: s.lab.clone(), wine, prefix, netcoredbg, resolved, max_pause_ms };
+    Ok(Planned { target, host: Box::new(host), source })
 }
 
 pub fn run(a: DebugArgs, json: bool) -> Result<i32> {
     if a.dap {
-        return match resolve(&a) {
-            Ok(t) => proxy(&t),
+        return match plan(&a) {
+            Ok(p) => proxy(p),
             Err(e) => refuse_all(&e),
         };
     }
-    let t = resolve(&a)?;
+    let mut p = plan(&a)?;
+    p.source.close();
+    let t = &p.target;
     let argv = t.argv();
     let env = t.env();
+    let r = &t.resolved;
     if json {
         out::print_json(&json!({
-            "ok": true, "server": t.server, "via": t.via, "lab": t.lab, "pid": t.pid, "hostPid": t.host_pid,
+            "ok": true, "kind": t.kind, "server": t.install, "install": t.install, "via": t.via, "lab": t.lab,
+            "target": r.target, "pid": t.windows_pid(), "hostPid": r.target.host_pid,
             "wine": t.wine, "prefix": t.prefix, "netcoredbg": t.netcoredbg, "env": env, "command": argv,
+            "maxPauseMs": t.max_pause_ms, "descriptor": r.descriptor_path, "notes": r.notes,
         }));
         return Ok(0);
     }
-    println!("server    {}", t.server.display());
-    println!("pid       {} (host pid {})", t.pid, t.host_pid);
+    let id = &r.target.identity;
+    println!("{:<9} {}", t.what(), t.install.display());
+    match r.target.host_pid {
+        Some(h) => println!("pid       {} (Windows; created {}; host pid {h}, display only)", id.windows_pid, id.creation_time_100ns),
+        None => println!("pid       {} (created {})", id.windows_pid, id.creation_time_100ns),
+    }
+    println!("session   {} (mode {:?}, .NET {})", id.session_nonce, r.target.session_mode, r.target.runtime_version);
     if let Some(p) = &t.prefix {
         println!("prefix    {}", p.display());
     }
@@ -467,14 +522,90 @@ fn reload_notice(module: &str) -> Value {
     json!({ "seq": OWN_SEQ, "type": "event", "event": "output", "body": { "category": "important", "output": text } })
 }
 
+/// Requests after which the debuggee runs again (the pause ends).
+fn resumes(m: &Value) -> bool {
+    m["type"] == "request" && matches!(m["command"].as_str(), Some("continue" | "next" | "stepIn" | "stepOut" | "stepBack" | "reverseContinue" | "goto"))
+}
+
+/// The pause watchdog (chapter 12a §4 step 8): a `stopped` event starts the clock, anything that resumes stops it, and
+/// when the limit passes the proxy continues the debuggee itself. Best effort: a pending evaluation or a native lock
+/// can delay the continue, and nothing here promises that a remote peer stays connected.
+#[derive(Debug, Default)]
+struct PauseWatch {
+    max: Option<Duration>,
+    since: Option<Instant>,
+    since_utc: Option<String>,
+    thread: Option<i64>,
+}
+
+#[derive(Debug, PartialEq)]
+enum PauseChange {
+    Paused,
+    Resumed,
+}
+
+impl PauseWatch {
+    fn new(max_ms: Option<u64>) -> PauseWatch {
+        PauseWatch { max: max_ms.map(Duration::from_millis), ..Default::default() }
+    }
+
+    /// A message from the adapter.
+    fn adapter(&mut self, m: &Value, now: Instant) -> Option<PauseChange> {
+        if m["type"] != "event" {
+            return None;
+        }
+        match m["event"].as_str() {
+            Some("stopped") => {
+                let first = self.since.is_none();
+                self.thread = m["body"]["threadId"].as_i64().or(self.thread);
+                if first {
+                    self.since = Some(now);
+                    self.since_utc = Some(kiln_manage::util::now_rfc3339());
+                }
+                Some(PauseChange::Paused)
+            }
+            Some("continued" | "terminated" | "exited") => self.resume(),
+            _ => None,
+        }
+    }
+
+    fn resume(&mut self) -> Option<PauseChange> {
+        self.since_utc = None;
+        self.since.take().map(|_| PauseChange::Resumed)
+    }
+
+    fn deadline(&self) -> Option<Instant> {
+        Some(self.since? + self.max?)
+    }
+
+    /// The thread to continue when the limit has passed (the pause ends here).
+    fn due(&mut self, now: Instant) -> Option<i64> {
+        if self.deadline().is_some_and(|d| now >= d) {
+            self.resume();
+            return Some(self.thread.unwrap_or(0));
+        }
+        None
+    }
+}
+
 enum Ev {
     /// the client is gone (stdin EOF or a signal)
     ClientGone(&'static str),
     /// the client asked to disconnect (request seq, as forwarded)
     ClientDisconnect,
+    /// the client asked the debuggee to run on
+    ClientResumed,
     /// the adapter answered this request
     AdapterResponse(i64),
+    /// the adapter answered the client's attach
+    Attached(bool),
+    /// the adapter's stopped / continued / terminated events
+    Pause(Value),
     AdapterEof,
+    /// a watch poll of the Windows side
+    Watch(WatchOutcome),
+    /// the attach was not forwarded: the tuple no longer holds
+    AttachRefused(String),
 }
 
 /// Blocks the signals that mean "the client is going away" and turns them into events. The mask is inherited, so this
@@ -525,25 +656,103 @@ fn stale_contexts_warning(gc: &Value) -> Option<String> {
     (n > 0).then(|| format!("{message}: old copies of a reloaded mod are still loaded. Breakpoints may not stop, and a session in this state can take the server down. Restart the server before debugging."))
 }
 
-fn proxy(t: &Target) -> Result<i32> {
+type ClientOut = Arc<Mutex<std::io::Stdout>>;
+
+fn output_event(text: &str, category: &str) -> Value {
+    json!({ "seq": OWN_SEQ, "type": "event", "event": "output", "body": { "category": category, "output": format!("{text}\n") } })
+}
+
+/// The session's state: the session file (so `kiln reload` and the editor know it is attached), a `kiln/debugState`
+/// event to the client, and a line on stderr, at every change.
+struct States {
+    install: PathBuf,
+    now: DebugSessionState,
+    out: ClientOut,
+    warned: bool,
+}
+
+impl States {
+    fn set(&mut self, state: SessionState, reason: Option<&str>, paused_since: Option<String>) {
+        self.now.state = state;
+        self.now.reason = reason.map(str::to_string);
+        self.now.paused_since = paused_since;
+        self.publish();
+    }
+
+    fn mode(&mut self, mode: SessionMode) {
+        if mode != self.now.session_mode {
+            self.now.session_mode = mode;
+            self.now.reason = Some("session_mode_changed".into());
+            self.publish();
+        }
+    }
+
+    fn publish(&mut self) {
+        if let Err(e) = kiln_manage::debug::write_session(&self.install, &self.now)
+            && !std::mem::replace(&mut self.warned, true)
+        {
+            eprintln!("kiln debug: cannot write the session file ({}); kiln reload will not know a debugger is attached", e.message);
+        }
+        let n = &self.now;
+        eprintln!("kiln debug: state {} ({}{})", json!(n.state).as_str().unwrap_or("?"), json!(n.session_mode).as_str().unwrap_or("?"), n.reason.as_deref().map(|r| format!(", {r}")).unwrap_or_default());
+        let ev = json!({ "seq": OWN_SEQ, "type": "event", "event": "kiln/debugState", "body": self.now });
+        let _ = write_json(&mut *self.out.lock().unwrap(), &ev);
+    }
+}
+
+fn proxy(p: Planned) -> Result<i32> {
+    let Planned { target: t, host, source } = p;
+    let host = Arc::new(Mutex::new(host));
+    let source = Arc::new(Mutex::new(source));
     // A reload leaves the old mod's module loaded until the next collection, and netcoredbg can bind a breakpoint to that
     // dead copy. Attaching after a reload stopped in 1 of 5 rounds without this, and the server died in both test loops;
     // with it, 6 of 6 twice and no deaths.
     let mut warning = None;
-    match crate::control::send(&t.server, "gc", GC_WAIT) {
+    let gc = || match crate::control::send(&t.install, "gc", GC_WAIT) {
         Err(e) => eprintln!("kiln debug: no collection before attaching ({e}); after a reload, breakpoints may not stop"),
         Ok(r) => warning = stale_contexts_warning(&r),
-    }
-    let mut cmd = t.command();
-    cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit());
-    own_group(&mut cmd);
-    let mut child = cmd.spawn().map_err(|e| CliError::new("tool_missing", format!("cannot run {}: {e}", t.argv().join(" "))))?;
+    };
+    let spawn = |permit: &AttachPermit| {
+        // the tuple was checked an instant ago; netcoredbg gets nothing else to attach to than this PID
+        debug_assert_eq!(permit.windows_pid(), t.windows_pid());
+        let mut cmd = t.command();
+        cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit());
+        own_group(&mut cmd);
+        cmd.spawn()
+    };
+    let launched = {
+        let mut h = host.lock().unwrap();
+        let mut s = source.lock().unwrap();
+        launch(&t.resolved, false, h.as_mut(), s.as_mut(), &mut resolver::new_challenge, gc, spawn)
+    };
+    let (permit, mut child) = match launched {
+        Ok(x) => x,
+        Err(e) => {
+            source.lock().unwrap().close();
+            return refuse_all(&cli_error(e));
+        }
+    };
+    let pid = permit.windows_pid();
     let adapter_in = Arc::new(Mutex::new(Some(child.stdin.take().expect("piped"))));
     let adapter_out = child.stdout.take().expect("piped");
-    let client_out = Arc::new(Mutex::new(std::io::stdout()));
+    let client_out: ClientOut = Arc::new(Mutex::new(std::io::stdout()));
+    let mut states = States {
+        install: t.install.clone(),
+        now: DebugSessionState {
+            identity: permit.identity().clone(),
+            state: SessionState::Attaching,
+            session_mode: permit.session_mode(),
+            reason: None,
+            paused_since: None,
+            max_pause_ms: t.max_pause_ms,
+        },
+        out: client_out.clone(),
+        warned: false,
+    };
+    states.publish();
     if let Some(w) = warning {
         eprintln!("kiln debug: {w}");
-        let _ = write_json(&mut *client_out.lock().unwrap(), &json!({ "seq": OWN_SEQ, "type": "event", "event": "output", "body": { "category": "important", "output": format!("{w}\n") } }));
+        let _ = write_json(&mut *client_out.lock().unwrap(), &output_event(&w, "important"));
     }
     let (tx, rx) = mpsc::channel::<Ev>();
     watch_signals(tx.clone());
@@ -564,13 +773,18 @@ fn proxy(t: &Target) -> Result<i32> {
                             let _ = write_json(&mut *out, &reload_notice(&name));
                         }
                         let request_seq = m["request_seq"].as_i64();
-                        // the response to the proxy's own disconnect stays here
+                        // the response to the proxy's own disconnect (and own continue) stays here
                         if request_seq.is_none_or(|s| s < OWN_SEQ) {
                             let _ = write_json(&mut *out, &m);
                         }
                         drop(out);
                         if m["type"] == "response" {
+                            if m["command"] == "attach" && request_seq.is_some_and(|s| s < OWN_SEQ) {
+                                let _ = tx.send(Ev::Attached(m["success"] == true));
+                            }
                             let _ = tx.send(Ev::AdapterResponse(request_seq.unwrap_or(-1)));
+                        } else if m["type"] == "event" && matches!(m["event"].as_str(), Some("stopped" | "continued" | "terminated" | "exited")) {
+                            let _ = tx.send(Ev::Pause(m));
                         }
                     }
                     Err(_) => {
@@ -589,10 +803,10 @@ fn proxy(t: &Target) -> Result<i32> {
         let adapter_in = adapter_in.clone();
         let client_out = client_out.clone();
         let client_disconnect_seq = client_disconnect_seq.clone();
-        let pid = t.pid;
+        let (host, source, resolved) = (host.clone(), source.clone(), t.resolved.clone());
         std::thread::spawn(move || {
             let mut r = BufReader::new(std::io::stdin());
-            let mut own_seq = OWN_SEQ;
+            let mut own_seq = OWN_SEQ + 1_000_000;
             loop {
                 let body = match read_frame(&mut r) {
                     Ok(Some(b)) => b,
@@ -602,12 +816,28 @@ fn proxy(t: &Target) -> Result<i32> {
                     eprintln!("kiln debug: dropped a client message that is not JSON");
                     continue;
                 };
-                match apply_policy(&mut m, pid) {
+                let mut policy = apply_policy(&mut m, pid);
+                // the whole tuple again, immediately before the attach goes to netcoredbg (chapter 12a §4 step 2)
+                if policy == Policy::Forward && m["type"] == "request" && m["command"] == "attach" {
+                    let checked = {
+                        let mut h = host.lock().unwrap();
+                        let mut s = source.lock().unwrap();
+                        resolver::revalidate(&resolved, h.as_mut(), s.as_mut(), &mut resolver::new_challenge)
+                    };
+                    if let Err(e) = checked {
+                        let _ = tx.send(Ev::AttachRefused(e.reason.clone().unwrap_or_else(|| e.code.as_str().into())));
+                        policy = Policy::Refuse(format!("{}: {}", e.code, e.message));
+                    }
+                }
+                match policy {
                     Policy::Refuse(why) => {
                         own_seq += 1;
                         let _ = write_json(&mut *client_out.lock().unwrap(), &error_response(&m, own_seq, &why));
                     }
                     Policy::Forward => {
+                        if resumes(&m) {
+                            let _ = tx.send(Ev::ClientResumed);
+                        }
                         if let Some(w) = adapter_in.lock().unwrap().as_mut() {
                             let _ = write_json(w, &m);
                         }
@@ -625,19 +855,66 @@ fn proxy(t: &Target) -> Result<i32> {
         });
     }
 
+    // the Windows side: has the debuggee ended, is it still itself, which world mode
+    {
+        let tx = tx.clone();
+        let (source, resolved) = (source.clone(), t.resolved.clone());
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(WATCH_EVERY);
+                let w = resolver::watch(&resolved, source.lock().unwrap().as_mut(), &mut resolver::new_challenge);
+                let last = !matches!(w, WatchOutcome::Same(_));
+                if tx.send(Ev::Watch(w)).is_err() || last {
+                    break;
+                }
+            }
+        });
+    }
+
     // Until the session ends: a disconnect is sent exactly once, and its response awaited.
+    let mut pause = PauseWatch::new(t.max_pause_ms);
     let mut disconnect_sent = false;
     let mut awaiting: Option<i64> = None;
     let mut deadline = None;
+    let mut own = OWN_SEQ + 1;
     let mut code = 0;
+    let mut end: (SessionState, Option<String>) = (SessionState::Detached, None);
+    let send_disconnect = |adapter_in: &Mutex<Option<std::process::ChildStdin>>| {
+        let m = json!({ "seq": OWN_SEQ, "type": "request", "command": "disconnect", "arguments": { "terminateDebuggee": false, "suspendDebuggee": false } });
+        if let Some(w) = adapter_in.lock().unwrap().as_mut() {
+            let _ = write_json(w, &m);
+        }
+    };
     loop {
-        let ev = match deadline {
-            Some(d) => match rx.recv_timeout(d - Instant::now().min(d)) {
+        let wake = [deadline, pause.deadline()].into_iter().flatten().min();
+        let ev = match wake {
+            Some(d) => match rx.recv_timeout(d.saturating_duration_since(Instant::now())) {
                 Ok(e) => e,
-                Err(_) => {
-                    eprintln!("kiln debug: netcoredbg has not finished after a disconnect; leaving it to detach (its stdin is closed)");
-                    break;
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if let Some(thread) = pause.due(Instant::now()) {
+                        own += 1;
+                        let c = json!({ "seq": own, "type": "request", "command": "continue", "arguments": { "threadId": thread } });
+                        if let Some(w) = adapter_in.lock().unwrap().as_mut() {
+                            let _ = write_json(w, &c);
+                        }
+                        let ms = t.max_pause_ms.unwrap_or_default();
+                        let text = format!("kiln debug: the {} was paused for {ms} ms (maxPauseMs) and was continued. A pending evaluation can delay this; a peer may still have timed out.", t.what());
+                        eprintln!("{text}");
+                        {
+                            let mut out = client_out.lock().unwrap();
+                            let _ = write_json(&mut *out, &json!({ "seq": OWN_SEQ, "type": "event", "event": "continued", "body": { "threadId": thread, "allThreadsContinued": true } }));
+                            let _ = write_json(&mut *out, &output_event(&text, "important"));
+                        }
+                        states.set(SessionState::Running, Some("timeout_continue"), None);
+                        continue;
+                    }
+                    if deadline.is_some_and(|d| Instant::now() >= d) {
+                        eprintln!("kiln debug: netcoredbg has not finished after a disconnect; leaving it to detach (its stdin is closed)");
+                        break;
+                    }
+                    continue;
                 }
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
             },
             None => match rx.recv() {
                 Ok(e) => e,
@@ -647,21 +924,79 @@ fn proxy(t: &Target) -> Result<i32> {
         match ev {
             Ev::ClientGone(why) => {
                 if !disconnect_sent {
-                    eprintln!("kiln debug: {why}; detaching from the server");
+                    eprintln!("kiln debug: {why}; detaching from the {}", t.what());
                     disconnect_sent = true;
                     awaiting = Some(OWN_SEQ);
-                    let m = json!({ "seq": OWN_SEQ, "type": "request", "command": "disconnect", "arguments": { "terminateDebuggee": false, "suspendDebuggee": false } });
-                    if let Some(w) = adapter_in.lock().unwrap().as_mut() {
-                        let _ = write_json(w, &m);
-                    }
+                    send_disconnect(&adapter_in);
                     deadline = Some(Instant::now() + DISCONNECT_WAIT);
+                    end.1.get_or_insert_with(|| "client_gone".into());
+                    states.set(SessionState::Detaching, Some("client_gone"), None);
                 }
             }
             Ev::ClientDisconnect => {
                 disconnect_sent = true;
                 awaiting = *client_disconnect_seq.lock().unwrap();
                 deadline = Some(Instant::now() + DISCONNECT_WAIT);
+                end.1.get_or_insert_with(|| "client_disconnect".into());
+                states.set(SessionState::Detaching, Some("client_disconnect"), None);
             }
+            Ev::ClientResumed => {
+                if pause.resume() == Some(PauseChange::Resumed) {
+                    states.set(SessionState::Running, None, None);
+                }
+            }
+            Ev::Attached(ok) => {
+                if ok {
+                    states.set(SessionState::Running, None, None);
+                } else {
+                    end = (SessionState::Ended, Some("attach_failed".into()));
+                    states.set(SessionState::Ended, Some("attach_failed"), None);
+                }
+            }
+            Ev::AttachRefused(reason) => {
+                end = (SessionState::Ended, Some(reason.clone()));
+                states.set(SessionState::Ended, Some(&reason), None);
+            }
+            Ev::Pause(m) => match pause.adapter(&m, Instant::now()) {
+                Some(PauseChange::Paused) => {
+                    let mode = json!(states.now.session_mode);
+                    let mode = mode.as_str().unwrap_or("unknown");
+                    let text = match (t.kind, t.max_pause_ms) {
+                        (TargetKind::Server, None) => format!("[kiln] the server is paused for everyone on it (session mode {mode})"),
+                        (_, Some(ms)) => format!("[kiln] the {} is paused (session mode {mode}); it continues by itself after {ms} ms", t.what()),
+                        (TargetKind::Client, None) => format!("[kiln] the game is paused (session mode {mode})"),
+                    };
+                    let _ = write_json(&mut *client_out.lock().unwrap(), &output_event(&text, "console"));
+                    states.set(SessionState::Paused, None, pause.since_utc.clone());
+                }
+                Some(PauseChange::Resumed) if !disconnect_sent => states.set(SessionState::Running, None, None),
+                _ => {}
+            },
+            Ev::Watch(w) => match w {
+                WatchOutcome::Same(mode) => states.mode(mode),
+                WatchOutcome::Gone | WatchOutcome::Changed(_) => {
+                    let (reason, text) = match &w {
+                        WatchOutcome::Gone => ("debuggee_exited".to_string(), format!("kiln debug: the {} (PID {pid}) has exited; the session ends.", t.what())),
+                        WatchOutcome::Changed(r) => (
+                            "identity_changed".to_string(),
+                            format!("kiln debug: the {} answering for PID {pid} is no longer the attached process ({r}); detaching.", t.what()),
+                        ),
+                        WatchOutcome::Same(_) => unreachable!(),
+                    };
+                    eprintln!("{text}");
+                    let _ = write_json(&mut *client_out.lock().unwrap(), &output_event(&text, "important"));
+                    end = (SessionState::Ended, Some(reason.clone()));
+                    if !disconnect_sent {
+                        // a safe detach, never a kill: the adapter detaches (or finds nothing left to detach from)
+                        disconnect_sent = true;
+                        awaiting = Some(OWN_SEQ);
+                        send_disconnect(&adapter_in);
+                        deadline = Some(Instant::now() + DISCONNECT_WAIT);
+                        let _ = write_json(&mut *client_out.lock().unwrap(), &json!({ "seq": OWN_SEQ + 1, "type": "event", "event": "terminated", "body": {} }));
+                    }
+                    states.set(SessionState::Detaching, Some(&reason), None);
+                }
+            },
             Ev::AdapterResponse(seq) => {
                 if awaiting == Some(seq) {
                     awaiting = None;
@@ -673,7 +1008,8 @@ fn proxy(t: &Target) -> Result<i32> {
             Ev::AdapterEof => {
                 if !disconnect_sent {
                     code = 1;
-                    tell_client_adapter_died(t, &client_out);
+                    let gone = tell_client_adapter_died(&t, source.lock().unwrap().as_mut(), &client_out);
+                    end = (SessionState::Ended, Some(if gone { "debuggee_exited" } else { "adapter_exited" }.into()));
                 }
                 break;
             }
@@ -688,27 +1024,34 @@ fn proxy(t: &Target) -> Result<i32> {
             Ok(None) => std::thread::sleep(Duration::from_millis(50)),
         }
     }
+    states.set(end.0, end.1.as_deref(), None);
+    source.lock().unwrap().close();
     Ok(code)
 }
 
-fn tell_client_adapter_died(t: &Target, client_out: &Mutex<std::io::Stdout>) {
-    let alive = kiln_manage::proc::alive(t.host_pid);
-    let text = if alive {
-        "netcoredbg exited while attached; the server is still running. Check that it still responds before trusting it.\n".to_string()
-    } else {
-        "netcoredbg exited while attached and the server is gone with it; see kiln/logs/kiln.log and restart it.\n".to_string()
+/// netcoredbg ended while attached. Whether the debuggee went with it is the Windows side's answer (the held process),
+/// never a Linux PID's. True when it is gone.
+fn tell_client_adapter_died(t: &Target, source: &mut dyn ProcessSource, client_out: &Mutex<std::io::Stdout>) -> bool {
+    let w = resolver::watch(&t.resolved, source, &mut resolver::new_challenge);
+    let what = t.what();
+    let (gone, text) = match w {
+        WatchOutcome::Same(_) => (false, format!("netcoredbg exited while attached; the {what} is still running. Check that it still responds before trusting it.\n")),
+        WatchOutcome::Gone => (true, format!("netcoredbg exited while attached and the {what} is gone with it; see kiln/logs/kiln.log and restart it.\n")),
+        WatchOutcome::Changed(r) => (true, format!("netcoredbg exited while attached, and the {what} no longer answers as the attached process ({r}); see kiln/logs/kiln.log.\n")),
     };
     eprintln!("kiln debug: {}", text.trim_end());
     let mut out = client_out.lock().unwrap();
     let _ = write_json(&mut *out, &json!({ "seq": OWN_SEQ, "type": "event", "event": "output", "body": { "category": "important", "output": text } }));
     let _ = write_json(&mut *out, &json!({ "seq": OWN_SEQ + 1, "type": "event", "event": "terminated", "body": {} }));
+    gone
 }
 
 /// `--dap` when there is nothing to attach to: an editor shows a response's message, but only "the adapter exited" for
-/// a process that just quits. Every request fails with the reason until the client disconnects; that one succeeds and
-/// exits 0, because nothing is attached and a failure there would only stack a second error on the refusal.
+/// a process that just quits. Every request fails with the reason (and the stable code in `body.error.kilnCode`) until
+/// the client disconnects; that one succeeds and exits 0, because nothing is attached and a failure there would only
+/// stack a second error on the refusal.
 fn refuse_all(e: &anyhow::Error) -> Result<i32> {
-    let why = e.downcast_ref::<CliError>().map_or_else(|| format!("{e:#}"), |c| c.message.clone());
+    let (code, reason, why) = code_of(e);
     eprintln!("kiln debug: {why}");
     let mut r = BufReader::new(std::io::stdin());
     let mut w = std::io::stdout();
@@ -723,7 +1066,10 @@ fn refuse_all(e: &anyhow::Error) -> Result<i32> {
             let _ = write_json(&mut w, &json!({ "seq": seq, "type": "response", "request_seq": m["seq"], "command": "disconnect", "success": true }));
             return Ok(0);
         }
-        let _ = write_json(&mut w, &error_response(&m, seq, &why));
+        let mut resp = error_response(&m, seq, &why);
+        resp["body"]["error"]["kilnCode"] = json!(code);
+        resp["body"]["error"]["kilnReason"] = json!(reason);
+        let _ = write_json(&mut w, &resp);
     }
     Ok(1)
 }
@@ -731,6 +1077,8 @@ fn refuse_all(e: &anyhow::Error) -> Result<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kiln_manage::debug::Descriptor;
+    use kiln_manage::debug::resolver::fake::{FakeHost, FakeProc, FakeSource, counter};
 
     fn req(command: &str, arguments: Value) -> Value {
         json!({ "seq": 7, "type": "request", "command": command, "arguments": arguments })
@@ -813,21 +1161,6 @@ mod tests {
     }
 
     #[test]
-    fn steam_paths() {
-        assert!(in_steam_library(Path::new("/home/u/.local/share/Steam/steamapps/common/EnshroudedServer")));
-        assert!(in_steam_library(Path::new("/mnt/games/SteamLibrary/steamapps/compatdata/2278520/pfx")));
-        assert!(!in_steam_library(Path::new("/home/u/srv/enshrouded/labs/mylab")));
-        assert!(!in_steam_library(Path::new("/home/u/steamapps-backup/server")));
-    }
-
-    #[test]
-    fn tasklist_lines() {
-        let l = "\"System Idle Process\",\"0\",\"Services\",\"0\",\"8 K\"\r\n\"Enshrouded_Server.exe\",\"32\",\"Console\",\"1\",\"1,234 K\"\r\n\"tasklist.exe\",\"64\",\"Console\",\"1\",\"9 K\"\r\n";
-        assert_eq!(parse_tasklist(l, SERVER_EXE), vec![32]);
-        assert!(parse_tasklist("INFO: No tasks are running\n", SERVER_EXE).is_empty());
-    }
-
-    #[test]
     fn frames_round_trip() {
         let mut b = Vec::new();
         write_frame(&mut b, b"{\"a\":1}").unwrap();
@@ -840,26 +1173,256 @@ mod tests {
         assert_eq!(read_frame(&mut r).unwrap().unwrap(), b"{}");
     }
 
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn wine_is_found_above_the_preloader() {
-        let t = std::env::temp_dir().join(format!("kiln-debug-wine-{}", std::process::id()));
-        let lib = t.join("files/lib/wine/i386-unix");
-        std::fs::create_dir_all(&lib).unwrap();
-        std::fs::create_dir_all(t.join("files/bin")).unwrap();
-        let wine = t.join("files/bin/wine");
-        let decoy = lib.join("wine");
-        for w in [&wine, &decoy] {
-            std::fs::write(w, "").unwrap();
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(w, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
-        assert_eq!(wine_above(&lib.join("wine64-preloader")), Some(wine));
-        std::fs::remove_dir_all(&t).unwrap();
-    }
-
     #[test]
     fn lab_prefix_is_a_sibling() {
         assert_eq!(with_pfx(Path::new("/srv/labs/mylab")), PathBuf::from("/srv/labs/mylab.pfx"));
+    }
+
+    #[test]
+    fn pause_watch_continues_after_the_limit_only() {
+        let t0 = Instant::now();
+        let stopped = |tid: i64| json!({ "type": "event", "event": "stopped", "body": { "reason": "breakpoint", "threadId": tid } });
+        let mut w = PauseWatch::new(Some(5000));
+        assert_eq!(w.deadline(), None);
+        assert_eq!(w.adapter(&stopped(7), t0), Some(PauseChange::Paused));
+        assert!(w.since_utc.is_some());
+        // a second stop (another thread) does not restart the clock
+        assert_eq!(w.adapter(&stopped(9), t0 + Duration::from_millis(3000)), Some(PauseChange::Paused));
+        assert_eq!(w.deadline(), Some(t0 + Duration::from_millis(5000)));
+        assert_eq!(w.due(t0 + Duration::from_millis(4999)), None);
+        assert_eq!(w.due(t0 + Duration::from_millis(5000)), Some(9));
+        assert_eq!(w.deadline(), None, "the pause ended with the continue");
+        assert_eq!(w.due(t0 + Duration::from_millis(9000)), None, "continued once");
+        // the client resumes in time: no continue from the proxy
+        assert_eq!(w.adapter(&stopped(7), t0), Some(PauseChange::Paused));
+        assert!(resumes(&req("next", json!({ "threadId": 7 }))));
+        assert!(!resumes(&req("evaluate", json!({ "expression": "x" }))));
+        assert_eq!(w.resume(), Some(PauseChange::Resumed));
+        assert_eq!(w.due(t0 + Duration::from_secs(60)), None);
+        // the adapter says it runs again
+        assert_eq!(w.adapter(&stopped(7), t0), Some(PauseChange::Paused));
+        assert_eq!(w.adapter(&json!({ "type": "event", "event": "continued", "body": { "threadId": 7 } }), t0), Some(PauseChange::Resumed));
+        assert_eq!(w.adapter(&json!({ "type": "event", "event": "output", "body": {} }), t0), None);
+        // no limit (a server without --max-pause-ms): never continued by the proxy
+        let mut off = PauseWatch::new(None);
+        off.adapter(&stopped(1), t0);
+        assert_eq!(off.deadline(), None);
+        assert_eq!(off.due(t0 + Duration::from_secs(3600)), None);
+    }
+
+    #[test]
+    fn max_pause_bounds() {
+        let a = |ms: Option<u64>| DebugArgs { server: None, dap: false, max_pause_ms: ms };
+        assert_eq!(max_pause(&a(None), TargetKind::Server).unwrap(), None);
+        assert_eq!(max_pause(&a(None), TargetKind::Client).unwrap(), Some(5000));
+        assert_eq!(max_pause(&a(Some(100)), TargetKind::Server).unwrap(), Some(100));
+        assert_eq!(max_pause(&a(Some(60_000)), TargetKind::Client).unwrap(), Some(60_000));
+        for bad in [0, 99, 60_001] {
+            let e = max_pause(&a(Some(bad)), TargetKind::Server).unwrap_err();
+            assert_eq!(e.downcast_ref::<CliError>().unwrap().code, "usage");
+        }
+    }
+
+    // ---- PASS debug.identity: every refusal starts no adapter ----
+
+    const SHA: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const N1: &str = "11111111111111111111111111111111";
+    const N2: &str = "22222222222222222222222222222222";
+
+    struct World {
+        root: PathBuf,
+    }
+
+    impl World {
+        fn new(tag: &str) -> World {
+            let root = std::env::temp_dir().join(format!("kiln-cli-debug-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&root);
+            for d in ["a", "b"] {
+                std::fs::create_dir_all(root.join(d).join("kiln/state/debug")).unwrap();
+                std::fs::write(root.join(d).join(SERVER_EXE), b"MZ").unwrap();
+            }
+            World { root }
+        }
+        fn kiln(&self, d: &str, pid: u32, creation: u64, nonce: &str, kind: TargetKind) -> (FakeProc, Descriptor) {
+            let image = kiln_manage::winpath::unix_to_z(&self.root.join(d).join(SERVER_EXE)).unwrap();
+            FakeProc::kiln(pid, &image, creation, SHA, nonce, kind)
+        }
+        fn put(&self, d: &str, desc: &Descriptor) {
+            let f = self.root.join(d).join("kiln/state/debug").join(format!("{}.json", desc.windows_pid));
+            std::fs::write(f, serde_json::to_vec(desc).unwrap()).unwrap();
+        }
+        fn host(&self, d: &str, kind: TargetKind) -> FakeHost {
+            FakeHost {
+                spec: HostSpec {
+                    kind,
+                    install_id: format!("install-{d}"),
+                    state_dir: self.root.join(d).join("kiln/state"),
+                    install_exe: self.root.join(d).join(SERVER_EXE),
+                    prefix: None,
+                },
+                facts: HostFacts { prefix_identity: None, runner_sha256: Some("r".repeat(64)), runner_context: None, host_pid: Some(4001) },
+                calls: 0,
+                later: None,
+            }
+        }
+    }
+
+    impl Drop for World {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    /// One attempt through the real order (consent, resolve, gc, permit, spawn), counting adapter starts.
+    fn attempt(kind: TargetKind, allow: bool, host: &mut FakeHost, src: &mut FakeSource, starts: &mut u32) -> std::result::Result<u32, DebugError> {
+        let mut ch = counter();
+        let r = prepare(kind, allow, host, src, &mut ch)?;
+        let (p, ()) = launch(&r, allow, host, src, &mut ch, || {}, |p: &AttachPermit| {
+            assert_eq!(p.windows_pid(), r.target.identity.windows_pid);
+            *starts += 1;
+            Ok(())
+        })?;
+        Ok(p.windows_pid())
+    }
+
+    #[test]
+    fn identity_refusals_start_no_adapter() {
+        let w = World::new("identity");
+        type Case = (&'static str, DebugCode, Box<dyn Fn(&World) -> (TargetKind, bool, FakeHost, FakeSource)>);
+        let server = TargetKind::Server;
+        let cases: Vec<Case> = vec![
+            ("two same-name processes in different folders (b's descriptor in a)", DebugCode::Refused, Box::new(move |w| {
+                let (pb, db) = w.kiln("b", 64, 200, N2, server);
+                w.put("a", &db);
+                (server, false, w.host("a", server), FakeSource::new(vec![pb]))
+            })),
+            ("PID reuse", DebugCode::NotRunning, Box::new(move |w| {
+                let (_, d) = w.kiln("a", 32, 100, N1, server);
+                w.put("a", &d);
+                let (other, _) = w.kiln("a", 32, 999, N1, server);
+                (server, false, w.host("a", server), FakeSource::new(vec![other]))
+            })),
+            ("exit between resolve and attach", DebugCode::NotRunning, Box::new(move |w| {
+                let (p, d) = w.kiln("a", 32, 100, N1, server);
+                w.put("a", &d);
+                let mut s = FakeSource::new(vec![p]);
+                s.before_prepare = Some(Box::new(|t| t.clear()));
+                (server, false, w.host("a", server), s)
+            })),
+            ("PID reused between resolve and attach", DebugCode::IdentityChanged, Box::new(move |w| {
+                let (p, d) = w.kiln("a", 32, 100, N1, server);
+                w.put("a", &d);
+                let mut s = FakeSource::new(vec![p]);
+                s.before_prepare = Some(Box::new(|t| t[0].creation_time_100ns = "101".into()));
+                (server, false, w.host("a", server), s)
+            })),
+            ("stale descriptor", DebugCode::NotRunning, Box::new(move |w| {
+                let (_, d) = w.kiln("a", 32, 100, N1, server);
+                w.put("a", &d);
+                (server, false, w.host("a", server), FakeSource::default())
+            })),
+            ("elevation mismatch", DebugCode::PrivilegeMismatch, Box::new(move |w| {
+                let (p, mut d) = w.kiln("a", 32, 100, N1, server);
+                d.elevated = true;
+                w.put("a", &d);
+                let mut s = FakeSource::new(vec![p]);
+                s.elevated = Some(false);
+                (server, false, w.host("a", server), s)
+            })),
+            ("another user's process", DebugCode::PrivilegeMismatch, Box::new(move |w| {
+                let (mut p, d) = w.kiln("a", 32, 100, N1, server);
+                p.denied = true;
+                w.put("a", &d);
+                (server, false, w.host("a", server), FakeSource::new(vec![p]))
+            })),
+            ("wrong nonce on the pipe", DebugCode::NotRunning, Box::new(move |w| {
+                let (mut p, d) = w.kiln("a", 32, 100, N1, server);
+                p.pipe.as_mut().unwrap().session_nonce = N2.into();
+                w.put("a", &d);
+                (server, false, w.host("a", server), FakeSource::new(vec![p]))
+            })),
+            ("challenge not echoed", DebugCode::NotRunning, Box::new(move |w| {
+                let (mut p, d) = w.kiln("a", 32, 100, N1, server);
+                p.pipe.as_mut().unwrap().echo = false;
+                w.put("a", &d);
+                (server, false, w.host("a", server), FakeSource::new(vec![p]))
+            })),
+            ("prefix replaced between resolve and attach", DebugCode::IdentityChanged, Box::new(move |w| {
+                let (p, d) = w.kiln("a", 32, 100, N1, server);
+                w.put("a", &d);
+                let mut h = w.host("a", server);
+                h.later = Some(HostFacts { runner_sha256: Some("s".repeat(64)), ..h.facts.clone() });
+                (server, false, h, FakeSource::new(vec![p]))
+            })),
+            ("several processes with a descriptor", DebugCode::Refused, Box::new(move |w| {
+                let (p1, d1) = w.kiln("a", 32, 100, N1, server);
+                let (p2, d2) = w.kiln("a", 48, 300, N2, server);
+                w.put("a", &d1);
+                w.put("a", &d2);
+                (server, false, w.host("a", server), FakeSource::new(vec![p1, p2]))
+            })),
+            ("developer debugging off", DebugCode::Refused, Box::new(move |w| (server, false, w.host("a", server), FakeSource::default()))),
+            (".NET not running", DebugCode::RuntimeNotReady, Box::new(move |w| {
+                let (mut p, d) = w.kiln("a", 32, 100, N1, server);
+                p.pipe.as_mut().unwrap().managed_ready = false;
+                w.put("a", &d);
+                (server, false, w.host("a", server), FakeSource::new(vec![p]))
+            })),
+            ("identity not provable (Wine lacks a query)", DebugCode::UnsupportedIdentity, Box::new(move |w| {
+                let (p, d) = w.kiln("a", 32, 100, N1, server);
+                w.put("a", &d);
+                let mut s = FakeSource::new(vec![p]);
+                s.fail = Some(DebugError::new(DebugCode::UnsupportedIdentity, "no GetProcessTimes"));
+                (server, false, w.host("a", server), s)
+            })),
+            ("client without consent", DebugCode::PauseConsentRequired, Box::new(move |w| {
+                let (p, d) = w.kiln("a", 32, 100, N1, TargetKind::Client);
+                w.put("a", &d);
+                (TargetKind::Client, false, w.host("a", TargetKind::Client), FakeSource::new(vec![p]))
+            })),
+        ];
+        let mut starts = 0;
+        for (name, want, setup) in &cases {
+            for d in ["a", "b"] {
+                for e in std::fs::read_dir(w.root.join(d).join("kiln/state/debug")).unwrap().flatten() {
+                    std::fs::remove_file(e.path()).unwrap();
+                }
+            }
+            let (kind, allow, mut host, mut src) = setup(&w);
+            let before = starts;
+            let e = attempt(kind, allow, &mut host, &mut src, &mut starts).expect_err(name);
+            assert_eq!(e.code, *want, "{name}: {}", e.message);
+            assert_eq!(starts, before, "{name}: an adapter was started");
+            if *want == DebugCode::PauseConsentRequired {
+                assert!(src.calls.is_empty(), "{name}: the Windows side was asked before consent: {:?}", src.calls);
+            }
+        }
+        // the Steam guard refuses before any lookup (nothing exists at that path, and nothing is looked at)
+        let steam = DebugArgs { server: Some("/nowhere/SteamLibrary/steamapps/common/EnshroudedServer".into()), dap: false, max_pause_ms: None };
+        let e = plan(&steam).err().expect("a Steam server is refused");
+        assert_eq!(code_of(&e).0, "refused");
+        assert_eq!(code_of(&e).1.as_deref(), Some("steam_library"));
+        // the control: the same path does start an adapter when everything agrees (the counter can count)
+        let (p, d) = w.kiln("a", 32, 100, N1, server);
+        w.put("a", &d);
+        let pid = attempt(server, false, &mut w.host("a", server), &mut FakeSource::new(vec![p.clone()]), &mut starts).unwrap();
+        assert_eq!((pid, starts), (32, 1));
+        // and a client with consent
+        let (pc, mut dc) = (p, d);
+        dc.side = TargetKind::Client;
+        std::fs::remove_file(w.root.join("a/kiln/state/debug/32.json")).unwrap();
+        w.put("a", &dc);
+        attempt(TargetKind::Client, true, &mut w.host("a", TargetKind::Client), &mut FakeSource::new(vec![pc]), &mut starts).unwrap();
+        assert_eq!(starts, 2);
+        println!("PASS debug.identity ({} refusal cases and the Steam server guard: 0 adapter starts; 2 control cases: 2 starts)", cases.len());
+    }
+
+    #[test]
+    fn refusal_bodies_carry_the_code() {
+        let e = cli_error(DebugError::identity_changed("gone", "creation_time"));
+        let (code, reason, msg) = code_of(&e);
+        assert_eq!((code.as_str(), reason.as_deref(), msg.as_str()), ("identity_changed", Some("creation_time"), "gone"));
+        let c = e.downcast_ref::<CliError>().unwrap();
+        assert_eq!(c.detail.as_ref().unwrap()["reason"], "creation_time");
     }
 }
