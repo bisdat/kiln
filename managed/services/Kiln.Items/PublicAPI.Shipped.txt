@@ -547,6 +547,57 @@ Kiln.SlotId.SlotId() -> void
 Kiln.SlotId.SlotId(ulong Value) -> void
 Kiln.SlotId.Value.get -> ulong
 Kiln.SlotId.Value.init -> void
+Kiln.ToolDurabilityChangedEvent
+Kiln.ToolDurabilityChangedEvent.Actor.get -> Kiln.EntityId
+Kiln.ToolDurabilityChangedEvent.After.get -> int
+Kiln.ToolDurabilityChangedEvent.Before.get -> int
+Kiln.ToolDurabilityChangedEvent.Item.get -> Kiln.ItemInstanceRef
+Kiln.ToolDurabilityChangedEvent.Maximum.get -> int
+Kiln.ToolDurabilityChangedEvent.OriginalDelta.get -> int
+Kiln.ToolDurabilityChangedEvent.RequestedDelta.get -> int
+Kiln.ToolDurabilityChangedEvent.Source.get -> Kiln.ToolWearSource
+Kiln.ToolDurabilityChangedEvent.Step.get -> ulong
+Kiln.ToolWearResult
+Kiln.ToolWearResult.<Clone>$() -> Kiln.ToolWearResult!
+Kiln.ToolWearResult.Equals(Kiln.ToolWearResult? other) -> bool
+Kiln.ToolWearResult.Ok.get -> bool
+Kiln.ToolWearResult.Ok.init -> void
+Kiln.ToolWearResult.Reason.get -> string!
+Kiln.ToolWearResult.Reason.init -> void
+Kiln.ToolWearResult.Rule.get -> Kiln.ToolWearRule?
+Kiln.ToolWearResult.Rule.init -> void
+Kiln.ToolWearResult.ToolWearResult() -> void
+Kiln.ToolWearRule
+Kiln.ToolWearRule.Dispose() -> void
+Kiln.ToolWearRule.Item.get -> Kiln.ItemId
+Kiln.ToolWearRuleChangedEvent
+Kiln.ToolWearRuleChangedEvent.After.get -> int?
+Kiln.ToolWearRuleChangedEvent.AfterModId.get -> string?
+Kiln.ToolWearRuleChangedEvent.Before.get -> int?
+Kiln.ToolWearRuleChangedEvent.BeforeModId.get -> string?
+Kiln.ToolWearRuleChangedEvent.Generation.get -> ulong
+Kiln.ToolWearRuleChangedEvent.Item.get -> Kiln.ItemId
+Kiln.ToolWearSource
+Kiln.ToolWearSource.ProjectileSpawn = 2 -> Kiln.ToolWearSource
+Kiln.ToolWearSource.WeaponHit = 1 -> Kiln.ToolWearSource
+Kiln.ToolWearState
+Kiln.ToolWearState.<Clone>$() -> Kiln.ToolWearState!
+Kiln.ToolWearState.DroppedEvents.get -> ulong
+Kiln.ToolWearState.DroppedEvents.init -> void
+Kiln.ToolWearState.Equals(Kiln.ToolWearState? other) -> bool
+Kiln.ToolWearState.Generation.get -> ulong
+Kiln.ToolWearState.Generation.init -> void
+Kiln.ToolWearState.Ok.get -> bool
+Kiln.ToolWearState.Ok.init -> void
+Kiln.ToolWearState.OwnerModId.get -> string?
+Kiln.ToolWearState.OwnerModId.init -> void
+Kiln.ToolWearState.Pending.get -> bool
+Kiln.ToolWearState.Pending.init -> void
+Kiln.ToolWearState.PerDebit.get -> int?
+Kiln.ToolWearState.PerDebit.init -> void
+Kiln.ToolWearState.Reason.get -> string!
+Kiln.ToolWearState.Reason.init -> void
+Kiln.ToolWearState.ToolWearState() -> void
 Kiln.TransferKind
 Kiln.TransferKind.MoveAll = 2 -> Kiln.TransferKind
 Kiln.TransferKind.QuickStack = 1 -> Kiln.TransferKind
@@ -567,6 +618,7 @@ Kiln.WaterRefilledEvent.Units.get -> long
 [KILNX001]static Kiln.Items.LabFollow(Kiln.ItemInstanceRef item, System.Action<Kiln.ItemLocation, ulong>? gone = null) -> System.IDisposable!
 [KILNX001]static Kiln.Items.LabInstancesStatus.get -> string!
 [KILNX001]static Kiln.Items.LabMoveUnseen(Kiln.EntityId from, Kiln.SlotId slot, Kiln.EntityId to) -> System.Threading.Tasks.Task<Kiln.MoveResult!>!
+[KILNX001]static Kiln.Items.LabToolWearCounters() -> (uint HookThreads, ulong HitSeen, ulong HitApplied, ulong SpawnSeen, ulong SpawnApplied)
 [KILNX001]static Kiln.Items.LabTrackerReadsPerStep.get -> int
 [KILNX001]static Kiln.Items.LabTrackerReadsPerStep.set -> void
 const Kiln.Items.Fuel.UnitsPerCharge = 64 -> int
@@ -618,6 +670,12 @@ override Kiln.MoveResult.GetHashCode() -> int
 override Kiln.MoveResult.ToString() -> string!
 override Kiln.SlotId.GetHashCode() -> int
 override Kiln.SlotId.ToString() -> string!
+override Kiln.ToolWearResult.Equals(object? obj) -> bool
+override Kiln.ToolWearResult.GetHashCode() -> int
+override Kiln.ToolWearResult.ToString() -> string!
+override Kiln.ToolWearState.Equals(object? obj) -> bool
+override Kiln.ToolWearState.GetHashCode() -> int
+override Kiln.ToolWearState.ToString() -> string!
 override Kiln.TransferRule.ToString() -> string!
 override Kiln.WaterRefilledEvent.ToString() -> string!
 static Kiln.ClientTransfer.operator !=(Kiln.ClientTransfer left, Kiln.ClientTransfer right) -> bool
@@ -682,10 +740,12 @@ static Kiln.Items.QuickStack(Kiln.EntityId from, Kiln.EntityId to, Kiln.MoveOpti
 static Kiln.Items.Read(Kiln.EntityId entity) -> Kiln.InventoryContents?
 static Kiln.Items.ResultPeekAvailable.get -> bool
 static Kiln.Items.Search(string! text, int max = 25) -> System.Collections.Generic.IReadOnlyList<Kiln.ItemInfo!>!
+static Kiln.Items.SetToolWearPerDebit(Kiln.ItemId tool, int perDebit) -> Kiln.ToolWearResult!
 static Kiln.Items.Status() -> Kiln.ItemsServiceStatus?
 static Kiln.Items.Status3() -> Kiln.ItemsV3Status?
 static Kiln.Items.Take(Kiln.EntityId target, Kiln.ItemId item, int count = 1, Kiln.SlotId? from = null, bool exactSlot = false, Kiln.EntityId? itemEntity = null, bool dryRun = false) -> System.Threading.Tasks.Task<Kiln.ItemsResult!>!
 static Kiln.Items.TakeSlot(Kiln.EntityId target, Kiln.InventorySlot! slot, bool dryRun = false) -> System.Threading.Tasks.Task<Kiln.ItemsResult!>!
+static Kiln.Items.ToolWearStatus(Kiln.ItemId tool) -> Kiln.ToolWearState!
 static Kiln.Items.Transfers.Available.get -> bool
 static Kiln.Items.Transfers.Deny(Kiln.EntityId container, Kiln.TransferKinds kinds = Kiln.TransferKinds.Any) -> Kiln.TransferRule!
 static Kiln.Items.Transfers.Keep(Kiln.SlotId slot, Kiln.TransferKinds kinds = Kiln.TransferKinds.Any) -> Kiln.TransferRule!
@@ -707,6 +767,10 @@ static Kiln.MoveResult.operator ==(Kiln.MoveResult? left, Kiln.MoveResult? right
 static Kiln.SlotId.Of(Kiln.EntityId inventory, int index) -> Kiln.SlotId
 static Kiln.SlotId.operator !=(Kiln.SlotId left, Kiln.SlotId right) -> bool
 static Kiln.SlotId.operator ==(Kiln.SlotId left, Kiln.SlotId right) -> bool
+static Kiln.ToolWearResult.operator !=(Kiln.ToolWearResult? left, Kiln.ToolWearResult? right) -> bool
+static Kiln.ToolWearResult.operator ==(Kiln.ToolWearResult? left, Kiln.ToolWearResult? right) -> bool
+static Kiln.ToolWearState.operator !=(Kiln.ToolWearState? left, Kiln.ToolWearState? right) -> bool
+static Kiln.ToolWearState.operator ==(Kiln.ToolWearState? left, Kiln.ToolWearState? right) -> bool
 static readonly Kiln.ItemId.None -> Kiln.ItemId (forwarded, contained in Kiln.Api)
 ~override Kiln.ClientTransfer.Equals(object obj) -> bool
 ~override Kiln.ClientTransfer.ToString() -> string
