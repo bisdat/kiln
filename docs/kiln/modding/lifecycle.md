@@ -65,8 +65,8 @@ gone. What `OnBoot` staged with `BootDefinitions` is in the game by then, and `M
 
 - A **hot reload** of a boot mod runs `OnLoad` only. Its boot content stays as the start committed it. `Mods.ReloadAsync`
   of a loaded boot mod is refused (`RestartRequiredBoot`); unloading it and loading it again works while its files are
-  as the start read them. A changed file the boot phase reads (the manifest, an assembly, `blocks/`, `assets/`,
-  `quests/`, `skills/`) is refused with `RestartRequiredBoot` and the changed files named, until the game is restarted
+  as the start read them. A changed file of the mod's folder, or a changed value of a config its `OnBoot` read, is
+  refused with `RestartRequiredBoot` and the changes named, until the game is restarted
   ([onboot.md](onboot.md#after-a-change-restart)).
 - `Blocks.Find` sees the mod's committed boot blocks from the commit on: in `OnLoad`, and after an unload.
 - `BootDefinitionsCommittedEvent` comes after each such load, at Kiln.Blocks' next step; also for a mod whose `OnBoot`
