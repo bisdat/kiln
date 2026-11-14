@@ -86,6 +86,20 @@
       "docs": "docs/kiln/modding/models.md#cookjson-format-1"
     },
     {
+      "schema": "physics.schema.json",
+      "name": "Kiln model physics",
+      "kind": "physics",
+      "fileMatch": [
+        "**/assets/physics.json"
+      ],
+      "dialect": {
+        "comments": false,
+        "trailingCommas": false
+      },
+      "reader": "tools/modelcook/cook/physics.py (Python json, duplicate keys and NaN refused)",
+      "docs": "docs/kiln/modding/models.md#physics"
+    },
+    {
       "schema": "player-states.schema.json",
       "name": "Kiln player states",
       "kind": "playerstates",
