@@ -4,7 +4,10 @@
 //   - a rule is a layer of one owner for one item. The latest defined live layer is in effect; removing it (or its
 //     owner going) reveals the one before, or the game's own debit;
 //   - the effective cost is written to the hooks' table whenever it changes, and the generation grows by one;
-//   - status() answers from a copy under a mutex, for any thread.
+//   - every change of the generation is one rule-change record (whose rule, what cost, before and after, and what
+//     made it), kept in a history of the last 1024 that readers read with a cursor of their own (rule_changes): a
+//     native plugin's define/remove and an owner's retirement reach Kiln's managed events as a managed mod's do;
+//   - status() and rule_changes() answer from a copy under a mutex, for any thread.
 #include "toolwear.h"
 
 #include <windows.h>
@@ -41,13 +44,25 @@ struct Layer {
     uint64_t order;  // the latest defined wins
 };
 
+// The rule in effect for one item, as a value (a Layer can go while a change is made).
+struct Effective {
+    int32_t cost = -1;  // -1: no rule
+    KilnHandle handle = 0;
+    KilnOwner owner = 0;
+    std::string mod;
+};
+
+constexpr size_t kRuleHistory = 1024;
+
 const KilnApi* g_api = nullptr;
-std::mutex g_mu;  // the layers and the generation: tick thread writes, status() reads
+std::mutex g_mu;  // the layers, the generation and the rule history: tick thread (and retirement) writes, status() reads
 std::vector<Layer> g_layers;
 std::unordered_map<KilnOwner, std::string> g_mod_ids;  // bound for the owner lifetime, even with no live layers
 std::unordered_set<KilnOwner> g_retired;
 uint64_t g_generation = 0, g_next_order = 1;
 KilnHandle g_next_handle = 1;
+// the record of generation n is at (n - 1) % kRuleHistory; generations newer than g_generation - kRuleHistory are held
+KilnToolWearRuleChange g_history[kRuleHistory];
 
 constexpr uint8_t kCategoryTools = 3, kCategoryBuildTools = 6;  // the game files its pickaxes under build tools (with an item entity)
 constexpr uint32_t kFlagHasPide = 0x2;
@@ -59,12 +74,31 @@ const Layer* winner_locked(uint32_t item) {
     return best;
 }
 
-// After a change of `item`'s layers: the hooks' number follows the winner. False: the hooks' table is full.
-bool publish_locked(uint32_t item, int32_t before) {
+Effective effective_locked(uint32_t item) {
     const Layer* w = winner_locked(item);
-    const int32_t now = w ? w->cost : -1;
-    if (!set_rule(item, now)) return false;
-    if (now != before) ++g_generation;
+    return w ? Effective{w->cost, w->handle, w->owner, w->mod} : Effective{};
+}
+
+// After a change of `item`'s layers: the hooks' number follows the winner. False: the hooks' table is full (nothing
+// changed). A change of the cost in effect, or of whose rule it is, is one generation and one record.
+bool publish_locked(uint32_t item, const Effective& before, uint32_t cause) {
+    Effective now = effective_locked(item);
+    if (!set_rule(item, now.cost)) return false;
+    if (now.cost == before.cost && now.handle == before.handle) return true;
+    KilnToolWearRuleChange& r = g_history[g_generation % kRuleHistory];
+    r = KilnToolWearRuleChange{};
+    r.size = sizeof r;
+    r.item = item;
+    r.generation = ++g_generation;
+    r.cause = cause;
+    r.before_cost = before.cost;
+    r.after_cost = now.cost;
+    r.before_owner = before.cost >= 0 ? before.owner : 0;
+    r.after_owner = now.cost >= 0 ? now.owner : 0;
+    r.before_rule = before.handle;
+    r.after_rule = now.handle;
+    std::snprintf(r.before_mod_id, sizeof r.before_mod_id, "%s", before.mod.c_str());
+    std::snprintf(r.after_mod_id, sizeof r.after_mod_id, "%s", now.mod.c_str());
     return true;
 }
 
@@ -110,8 +144,8 @@ KilnResult KILN_CALL t_define(KilnOwner owner, KilnStr mod, uint32_t item, uint3
     if (g_retired.count(owner)) return KILN_ERR_REVOKED;
     if (const auto id = g_mod_ids.find(owner); id != g_mod_ids.end() && id->second != std::string(mod.ptr, mod.len))
         return KILN_ERR_INVALID_ARGUMENT;
-    const Layer* was = winner_locked(item);
-    const int32_t before = was ? was->cost : -1;
+    // an equal cost under another owner's rule is a change too (publish_locked compares the handle as well)
+    const Effective before = effective_locked(item);
     for (Layer& l : g_layers)
         if (l.owner == owner && l.item == item) {
             // the same owner again: its layer, updated in place and moved to the top (its handle stays)
@@ -119,41 +153,33 @@ KilnResult KILN_CALL t_define(KilnOwner owner, KilnStr mod, uint32_t item, uint3
             l.cost = static_cast<int32_t>(per_debit);
             l.mod.assign(mod.ptr, mod.len);
             l.order = g_next_order++;
-            if (!publish_locked(item, before)) {
+            if (!publish_locked(item, before, KILN_TOOLWEAR_RULE_DEFINED)) {
                 l = old;
                 return KILN_TOOLWEAR_TOO_MANY_RULES;
             }
-            if (before == l.cost && was && was->handle != l.handle) ++g_generation;  // the same cost, another mod's now
             *out = l.handle;
             return KILN_OK;
         }
     g_layers.push_back(Layer{g_next_handle, owner, std::string(mod.ptr, mod.len), item, static_cast<int32_t>(per_debit), g_next_order++});
-    if (!publish_locked(item, before)) {
+    if (!publish_locked(item, before, KILN_TOOLWEAR_RULE_DEFINED)) {
         g_layers.pop_back();
         return KILN_TOOLWEAR_TOO_MANY_RULES;
     }
-    if (before == static_cast<int32_t>(per_debit)) ++g_generation;  // an equal cost, but another owner's rule is in effect now
     g_mod_ids.emplace(owner, std::string(mod.ptr, mod.len));
     *out = g_next_handle++;
     return KILN_OK;
 }
 
-// Takes layers out by a predicate and publishes each item they touched.
+// Takes layers out by a predicate and publishes each item they touched (in the order of their first layer).
 template <typename Pred>
-size_t remove_locked(Pred&& gone) {
-    std::vector<std::pair<uint32_t, std::pair<int32_t, KilnHandle>>> touched;  // item -> (effective cost, winner) before
+size_t remove_locked(Pred&& gone, uint32_t cause) {
+    std::vector<std::pair<uint32_t, Effective>> touched;  // item -> the rule in effect before
     for (const Layer& l : g_layers)
-        if (gone(l) && std::none_of(touched.begin(), touched.end(), [&](const auto& t) { return t.first == l.item; })) {
-            const Layer* w = winner_locked(l.item);
-            touched.push_back({l.item, {w ? w->cost : -1, w ? w->handle : 0}});
-        }
+        if (gone(l) && std::none_of(touched.begin(), touched.end(), [&](const auto& t) { return t.first == l.item; }))
+            touched.emplace_back(l.item, effective_locked(l.item));
     const size_t before = g_layers.size();
     g_layers.erase(std::remove_if(g_layers.begin(), g_layers.end(), gone), g_layers.end());
-    for (const auto& [item, was] : touched) {
-        publish_locked(item, was.first);  // taking a rule away always fits the hooks' table
-        const Layer* w = winner_locked(item);
-        if (w && w->cost == was.first && w->handle != was.second) ++g_generation;  // the same cost, another mod's now
-    }
+    for (const auto& [item, was] : touched) publish_locked(item, was, cause);  // taking a rule away always fits the hooks' table
     return before - g_layers.size();
 }
 
@@ -164,7 +190,7 @@ KilnResult KILN_CALL t_remove(KilnOwner caller, KilnHandle rule) {
     for (const Layer& l : g_layers)
         if (l.handle == rule) {
             if (l.owner != caller) return KILN_TOOLWEAR_NOT_OWNER;
-            remove_locked([rule](const Layer& x) { return x.handle == rule; });
+            remove_locked([rule](const Layer& x) { return x.handle == rule; }, KILN_TOOLWEAR_RULE_REMOVED);
             return KILN_OK;
         }
     return KILN_ERR_NOT_FOUND;
@@ -245,15 +271,40 @@ KilnResult KILN_CALL t_status(uint32_t item, KilnToolWearState* out) {
     return KILN_OK;
 }
 
+KilnResult KILN_CALL t_rule_changes(uint64_t after, KilnToolWearRuleChange* out, uint32_t capacity, uint32_t stride, uint32_t* count,
+                                    uint64_t* lost) {
+    constexpr size_t kMinStride = offsetof(KilnToolWearRuleChange, before_mod_id);
+    if (!count || (capacity && (!out || stride < kMinStride))) return KILN_ERR_INVALID_ARGUMENT;
+    *count = 0;
+    if (lost) *lost = 0;
+    const size_t record = std::min<size_t>(stride, sizeof(KilnToolWearRuleChange));
+    std::lock_guard lock(g_mu);
+    const uint64_t newest = g_generation;
+    const uint64_t oldest = newest > kRuleHistory ? newest - kRuleHistory + 1 : 1;  // the oldest generation held
+    uint64_t next = after + 1;
+    if (after >= newest) return KILN_OK;
+    if (next < oldest) {
+        if (lost) *lost = oldest - next;
+        next = oldest;
+    }
+    for (; next <= newest && *count < capacity; ++next) {
+        KilnToolWearRuleChange r = g_history[(next - 1) % kRuleHistory];
+        r.size = static_cast<uint32_t>(record);
+        std::memcpy(reinterpret_cast<uint8_t*>(out) + static_cast<size_t>(*count) * stride, &r, record);
+        ++*count;
+    }
+    return KILN_OK;
+}
+
 // An owner went (a mod unloaded): its rules go with it, each item falling back to the rule before or the game's own.
 void KILN_CALL on_owner_retiring(KilnOwner retiring, void*) {
     std::lock_guard lock(g_mu);
     g_retired.insert(retiring);
     g_mod_ids.erase(retiring);
-    remove_locked([retiring](const Layer& l) { return l.owner == retiring; });
+    remove_locked([retiring](const Layer& l) { return l.owner == retiring; }, KILN_TOOLWEAR_RULE_RETIRED);
 }
 
-const KilnToolWearApi kTable = {{sizeof(KilnToolWearApi), KILN_TOOLWEAR_VERSION}, &t_define, &t_remove, &t_changes, &t_status};
+const KilnToolWearApi kTable = {{sizeof(KilnToolWearApi), KILN_TOOLWEAR_VERSION}, &t_define, &t_remove, &t_changes, &t_status, &t_rule_changes};
 
 }  // namespace
 

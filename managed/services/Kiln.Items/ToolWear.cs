@@ -77,7 +77,10 @@ public sealed record ToolWearState : IKilnResult
     public ulong DroppedEvents { get; init; }
 }
 
-/// <summary>The rule in effect for a tool changed: set, replaced, taken away, or another mod's rule revealed. Raised on the server tick.</summary>
+/// <summary>The rule in effect for a tool changed: set, replaced, taken away, or another mod's rule revealed. One event per change, in the order
+/// the changes were made, whoever made them: a mod through <see cref="Items.SetToolWearPerDebit"/> or a block, a native plugin through
+/// kiln.toolwear, or a mod or plugin going away. Raised on the server tick: a mod's own change is raised before its call returns, a native
+/// plugin's on the next tick. <see cref="Generation"/> grows by one per change.</summary>
 [ServerOnly]
 public sealed class ToolWearRuleChangedEvent : KilnEvent
 {
@@ -101,7 +104,8 @@ public sealed class ToolWearRuleChangedEvent : KilnEvent
     public string? BeforeModId { get; }
     /// <summary>The mod whose rule is in effect now.</summary>
     public string? AfterModId { get; }
-    /// <summary><see cref="ToolWearState.Generation"/> after the change.</summary>
+    /// <summary><see cref="ToolWearState.Generation"/> after the change: one more than the change before it, unless more than 1024 changes came
+    /// within one tick (kiln.toolwear keeps the last 1024; Kiln.Items then logs how many it could not report).</summary>
     public ulong Generation { get; }
 }
 
@@ -190,6 +194,15 @@ public static unsafe partial class Items
         /// <summary>Drains change records into <paramref name="into"/>; how many.</summary>
         int Changes(Span<ToolWearNative.Change> into);
         bool Status(uint item, out ToolWearNative.State state);
+        /// <summary>The table has rule_changes (kiln.toolwear since 0.2.0-dev.28's second form).</summary>
+        bool HasRuleChanges => false;
+        /// <summary>The rule changes after generation <paramref name="after"/>, oldest first, into <paramref name="into"/>; how many.
+        /// <paramref name="lost"/>: the changes after <paramref name="after"/> the table no longer holds.</summary>
+        int RuleChanges(ulong after, Span<ToolWearNative.RuleChange> into, out ulong lost)
+        {
+            lost = 0;
+            return 0;
+        }
     }
 
     internal static class ToolWear
@@ -207,6 +220,11 @@ public static unsafe partial class Items
 
         private static readonly ConcurrentDictionary<(ulong Owner, uint Item), ToolWearRule> Rules = new();
         private static IDisposable? _tick;
+        // the generation of the last rule change raised (kiln.toolwear's rule_changes cursor); under RuleGate
+        private static readonly object RuleGate = new();
+        private static ulong _ruleCursor;
+        /// <summary>Rule changes kiln.toolwear no longer held when they were to be raised, since the start (tests read it).</summary>
+        internal static ulong LostRuleChanges;
 
         internal static IToolWearTable? Current
         {
@@ -215,7 +233,7 @@ public static unsafe partial class Items
                 if (Table != null || _looked) return Table;
                 _looked = true;
                 var t = Services.Get<ToolWearNative.Table>(ToolWearNative.Service, ToolWearNative.Version);
-                if (t != null && t->Header.Size >= (uint)sizeof(ToolWearNative.Table)) Table = new NativeTable(t);
+                if (t != null && t->Header.Size >= ToolWearNative.FirstTableSize) Table = new NativeTable(t);
                 return Table;
             }
         }
@@ -228,6 +246,18 @@ public static unsafe partial class Items
             Rules.Clear();
             _tick?.Dispose();
             _tick = null;
+            lock (RuleGate)
+            {
+                _ruleCursor = 0;
+                LostRuleChanges = 0;
+            }
+        }
+
+        /// <summary>At the service's start (ItemsStartup): with a table that reports rule changes, the drain runs from the first tick, so a
+        /// native plugin's rules raise their events (and their durability changes) also where no mod set a rule.</summary>
+        internal static void WatchRules()
+        {
+            if (Current is { HasRuleChanges: true }) Start();
         }
 
         internal static IToolWearTable Require(string api)
@@ -292,7 +322,7 @@ public static unsafe partial class Items
                 return Track(new ToolWearRule(tool, handle, mod, owner, modId));
             });
             Start();
-            Changed(tool, before, Read(t, tool));
+            if (!DrainRules(t)) Changed(tool, before, Read(t, tool));
             return new ToolWearResult { Ok = true, Rule = rule };
         }
 
@@ -324,7 +354,7 @@ public static unsafe partial class Items
             if (Current is not { } t) return;
             var before = Read(t, rule.Item);
             t.Remove(rule.Owner, rule.Handle);   // not found: the native side took it when the owner went
-            Changed(rule.Item, before, Read(t, rule.Item));
+            if (!DrainRules(t)) Changed(rule.Item, before, Read(t, rule.Item));
         }
 
         /// <summary>How the drain gets its tick (tests set it).</summary>
@@ -337,6 +367,7 @@ public static unsafe partial class Items
         internal static void Drain(ulong step)
         {
             if (Current is not { } t) return;
+            DrainRules(t);
             Span<ToolWearNative.Change> batch = stackalloc ToolWearNative.Change[64];
             for (var rounds = 0; rounds < 64; rounds++)
             {
@@ -352,8 +383,53 @@ public static unsafe partial class Items
             }
         }
 
+        /// <summary>Raises every rule change kiln.toolwear made since the last one raised, in order: the managed API's own (right after its
+        /// call), a native plugin's define and remove, an owner's retirement. False: the table has no rule changes (an older kiln.toolwear);
+        /// then the managed calls compare the state before and after themselves.</summary>
+        internal static bool DrainRules(IToolWearTable t)
+        {
+            if (!t.HasRuleChanges) return false;
+            Span<ToolWearNative.RuleChange> batch = stackalloc ToolWearNative.RuleChange[8];
+            lock (RuleGate)
+            {
+                for (var rounds = 0; rounds < 256; rounds++)
+                {
+                    var n = t.RuleChanges(_ruleCursor, batch, out var lost);
+                    if (lost > 0)
+                    {
+                        LostRuleChanges += lost;
+                        Kiln.Backend.Current.Log(0, LogLevel.Warn, $"kiln.items: {lost} tool wear rule changes after generation {_ruleCursor} came " +
+                            "faster than one tick could raise them (kiln.toolwear keeps 1024); their ToolWearRuleChangedEvents are not raised");
+                    }
+                    for (var i = 0; i < n; i++)
+                    {
+                        ref readonly var r = ref batch[i];
+                        if (r.Generation <= _ruleCursor) continue;  // never twice
+                        _ruleCursor = r.Generation;
+                        Sink(new ToolWearRuleChangedEvent(new ItemId(r.Item), r.BeforeCost < 0 ? null : r.BeforeCost, r.AfterCost < 0 ? null : r.AfterCost,
+                            r.BeforeCost < 0 ? null : r.BeforeModText, r.AfterCost < 0 ? null : r.AfterModText, r.Generation));
+                    }
+                    if (n < batch.Length) break;
+                }
+            }
+            return true;
+        }
+
         private sealed class NativeTable(ToolWearNative.Table* table) : IToolWearTable
         {
+            public bool HasRuleChanges { get; } = table->Header.Size >= (uint)sizeof(ToolWearNative.Table) && table->RuleChanges != null;
+
+            public int RuleChanges(ulong after, Span<ToolWearNative.RuleChange> into, out ulong lost)
+            {
+                uint n = 0;
+                ulong l = 0;
+                int rc;
+                fixed (ToolWearNative.RuleChange* p = into)
+                    rc = table->RuleChanges(after, p, (uint)into.Length, (uint)sizeof(ToolWearNative.RuleChange), &n, &l);
+                lost = rc == ToolWearNative.Ok ? l : 0;
+                return rc == ToolWearNative.Ok ? (int)n : 0;
+            }
+
             public int Define(ulong owner, string modId, uint item, uint perDebit, out ulong handle)
             {
                 var bytes = System.Text.Encoding.UTF8.GetBytes(modId);
@@ -424,13 +500,42 @@ internal static unsafe class ToolWearNative
             get { fixed (byte* p = Reason) return Text(p, 192); }
         }
 
-        private static string Text(byte* p, int cap)
+        internal static string Text(byte* p, int cap)
         {
             var n = 0;
             while (n < cap && p[n] != 0) n++;
             return System.Text.Encoding.UTF8.GetString(p, n);
         }
     }
+
+    /// <summary>KilnToolWearRuleChange.cause.</summary>
+    public const uint RuleDefined = 1, RuleRemoved = 2, RuleRetired = 3;
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    public struct RuleChange  // 320 bytes (since 0.2.0-dev.28's rule_changes)
+    {
+        public uint Size, Item;
+        public ulong Generation;
+        public uint Cause;
+        public int BeforeCost, AfterCost;
+        public uint Reserved;
+        public ulong BeforeOwner, AfterOwner, BeforeRule, AfterRule;
+        public fixed byte BeforeModId[128];
+        public fixed byte AfterModId[128];
+
+        public readonly string BeforeModText
+        {
+            get { fixed (byte* p = BeforeModId) return State.Text(p, 128); }
+        }
+
+        public readonly string AfterModText
+        {
+            get { fixed (byte* p = AfterModId) return State.Text(p, 128); }
+        }
+    }
+
+    /// <summary>The table's first form (four functions): what Kiln.Items needs at all; rule_changes is checked by itself.</summary>
+    public static readonly uint FirstTableSize = (uint)sizeof(ServiceHeader) + 4 * (uint)sizeof(nint);
 
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
     public struct Table
@@ -440,5 +545,7 @@ internal static unsafe class ToolWearNative
         public delegate* unmanaged[Cdecl]<ulong, ulong, int> Remove;
         public delegate* unmanaged[Cdecl]<Change*, uint, uint, uint*, int> Changes;
         public delegate* unmanaged[Cdecl]<uint, State*, int> Status;
+        // ---- appended in 0.2.0-dev.28 (check Header.Size) ----
+        public delegate* unmanaged[Cdecl]<ulong, RuleChange*, uint, uint, uint*, ulong*, int> RuleChanges;
     }
 }
