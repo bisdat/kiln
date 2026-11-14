@@ -1,0 +1,578 @@
+// SPDX-License-Identifier: MIT
+// A wrap on one program of one world, its managed stages (each a native kiln.world wrap), and what a stage sees.
+using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
+using System.Runtime.InteropServices;
+
+namespace Kiln;
+
+/// <summary>What a slice stage gets: the slice (one archetype group's range of the program's entities), valid during
+/// the call only. On the slice's thread.</summary>
+public unsafe ref struct Slice
+{
+    private readonly SystemsNative.Slice* _native;
+    private readonly ManagedStage _stage;
+
+    internal Slice(SystemsNative.Slice* native, ManagedStage stage)
+    {
+        _native = native;
+        _stage = stage;
+    }
+
+    /// <summary>Entities in the slice (0 for a SYSTEM program).</summary>
+    public readonly int Count => (int)_native->Count;
+
+    /// <summary>The world's step.</summary>
+    public readonly ulong Step => _native->Step;
+
+    /// <summary>True on the world's own thread, false on a game task worker.</summary>
+    public readonly bool IsWorldThread => _native->ThreadIsWorld != 0;
+
+    /// <summary>The wrap's world.</summary>
+    public readonly WorldKind World => (WorldKind)_native->WorldKind;
+
+    /// <summary>The program's name.</summary>
+    public readonly string Program => _stage.Wrap.Program;
+
+    /// <summary>The id of the slice's entity at <paramref name="row"/> (from 0).</summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="row"/> is not within the slice.</exception>
+    public readonly EntityId EntityAt(int row)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(row);
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(row, Count);
+        return new EntityId(_native->EntityIds[(long)row * (_native->EntityStride / 4)]);
+    }
+
+    /// <summary>Inside a Replace: runs the game's update for this slice, once.</summary>
+    /// <exception cref="InvalidOperationException">Not a Replace, or it ran already.</exception>
+    public readonly void RunOriginal()
+    {
+        var t = SystemsNative.T;
+        var rc = t == null ? SystemsNative.Unavailable : t->GameSliceRunOriginal(_native);
+        if (rc != SystemsNative.Ok)
+            throw new InvalidOperationException("RunOriginal runs the game's update once, inside a Replace stage");
+        ManagedStage.OriginalCalled = true;
+    }
+
+    /// <summary>Runs <paramref name="action"/> on the tick thread before the next step, in your mod (the only way to use a
+    /// tick-thread API from a stage).</summary>
+    public readonly void Post(Action action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        if (_stage.Wrap.Mod is { } mod) mod.Scheduler.Post(action);
+        else ProgramWrap.PostToTick(action);
+    }
+}
+
+/// <summary>A wrap on one program of one world (<see cref="Systems.Wrap"/>): its stages, their state and counters.
+/// Dispose removes every stage.</summary>
+public sealed unsafe class ProgramWrap : IDisposable
+{
+    private readonly WrapOptions _options;
+    private readonly List<ManagedStage> _stages = new();
+    private readonly object _lock = new();
+    private Func<SliceInfo, bool>? _when;
+    private uint[]? _has, _lacks;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<nint, bool> _archetypes = new();
+    private bool _disposed;
+
+    internal ProgramWrap(string program, WrapOptions options, ModContext? mod)
+    {
+        Program = program;
+        _options = options;
+        Mod = mod;
+        if (mod is not null) mod.Retiring += Retire;
+    }
+
+    /// <summary>The program's name.</summary>
+    public string Program { get; }
+
+    /// <summary>The wrap's world.</summary>
+    public WorldKind World => _options.World;
+
+    internal ModContext? Mod { get; }
+    internal string ModId => Mod?.Info.Id ?? "kiln";
+
+    /// <summary>Raised on the tick thread when one of the wrap's stages is turned off: a fault, its budget (1 ms per
+    /// slice, 10 slices in a row over it), an exception, native SET.</summary>
+    public event Action<WrapDisabledEvent>? Disabled;
+
+    /// <summary>A stage before the game's update (priorities high to low; ties in the order made).</summary>
+    [TickThreadOnly]
+    public ProgramWrap Before(SliceHandler handler, int? priority = null) => Add(WrapStage.Before, handler, null, priority);
+
+    /// <summary>A stage after the game's update (the exact reverse of the Before order).</summary>
+    [TickThreadOnly]
+    public ProgramWrap After(SliceHandler handler, int? priority = null) => Add(WrapStage.After, handler, null, priority);
+
+    /// <summary>Per entity before the game's update: <paramref name="handler"/> runs for every entity of each slice.</summary>
+    [TickThreadOnly]
+    public ProgramWrap BeforeEach(EntityHandler handler, int? priority = null) => Add(WrapStage.Before, null, handler, priority);
+
+    /// <summary>Per entity after the game's update.</summary>
+    [TickThreadOnly]
+    public ProgramWrap AfterEach(EntityHandler handler, int? priority = null) => Add(WrapStage.After, null, handler, priority);
+
+    /// <summary>Instead of the game's update; call <see cref="Slice.RunOriginal"/> to run it. One per program.</summary>
+    /// <returns><c>Ok = false</c> when another mod replaces the program (named in the reason).</returns>
+    [TickThreadOnly]
+    public WrapResult<ProgramWrap> Replace(SliceHandler handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        Services.RequireTickThread("ProgramWrap.Replace");
+        foreach (var other in Systems.Live.Keys)
+            if (other.Kind == WrapStage.Replace && other.Wrap.Program == Program && other.Wrap.World == World &&
+                other.State is WrapState.Pending or WrapState.Active && !other.Removing)
+                return new WrapResult<ProgramWrap>(false, $"{Program} is replaced by mod {other.Wrap.ModId} already", null);
+        var stage = Make(WrapStage.Replace, handler, null, null);
+        if (stage.State == WrapState.Refused)
+            return new WrapResult<ProgramWrap>(false, stage.Detail ?? $"{Program}: the Replace was refused", null);
+        return new WrapResult<ProgramWrap>(true, null, this);
+    }
+
+    /// <summary>Runs the stages only on slices <paramref name="filter"/> accepts (called per slice, on its thread).</summary>
+    public ProgramWrap When(Func<SliceInfo, bool> filter)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+        _when = filter;
+        return this;
+    }
+
+    /// <summary>Runs the stages only on slices whose archetype has every component of <paramref name="has"/> and none of
+    /// <paramref name="lacks"/>; decided once per archetype and world.</summary>
+    /// <exception cref="ArgumentException">A name is null or empty.</exception>
+    public ProgramWrap WhenArchetype(IEnumerable<string> has, IEnumerable<string>? lacks = null)
+    {
+        ArgumentNullException.ThrowIfNull(has);
+        _has = Hashes(has);
+        _lacks = lacks is null ? [] : Hashes(lacks);
+        _archetypes.Clear();
+        return this;
+    }
+
+    /// <summary>The wrap's state: <see cref="WrapState.Active"/> while a stage is in the chain, Pending until then,
+    /// Removed after Dispose, Refused when every stage was refused.</summary>
+    [AnyThread]
+    public WrapState State
+    {
+        get
+        {
+            lock (_lock)
+            {
+                if (_disposed) return WrapState.Removed;
+                if (_stages.Count == 0) return WrapState.Pending;
+                if (_stages.Any(s => s.State == WrapState.Active)) return WrapState.Active;
+                if (_stages.Any(s => s.State == WrapState.Pending)) return WrapState.Pending;
+                return _stages.All(s => s.State == WrapState.Refused) ? WrapState.Refused : WrapState.Removed;
+            }
+        }
+    }
+
+    /// <summary>What the wrap's stages did so far.</summary>
+    [AnyThread]
+    public WrapStats Stats
+    {
+        get
+        {
+            long slices = 0, entities = 0, faults = 0, overruns = 0;
+            double us = 0;
+            var threads = 0;
+            var t = SystemsNative.T;
+            lock (_lock)
+                foreach (var s in _stages)
+                {
+                    var i = s.Info(t);
+                    slices += (long)i.Calls;
+                    entities += (long)i.Entities;
+                    faults += (long)i.Faults + s.ManagedFaults;
+                    overruns += (long)i.Overruns;
+                    us += i.TotalNs / 1000.0;
+                    threads = Math.Max(threads, (int)i.Threads);
+                }
+            return new WrapStats(slices, entities, us, faults, overruns, threads);
+        }
+    }
+
+    /// <summary>Removes every stage: no stage call starts after this returns.</summary>
+    [TickThreadOnly]
+    public void Dispose()
+    {
+        Services.RequireTickThread("ProgramWrap.Dispose");
+        List<ManagedStage> stages;
+        lock (_lock)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            stages = [.. _stages];
+        }
+        foreach (var s in stages) s.Unwrap();
+        if (Mod is not null) Mod.Retiring -= Retire;
+    }
+
+    // ---- inside ----
+
+    private ProgramWrap Add(WrapStage kind, SliceHandler? slice, EntityHandler? each, int? priority)
+    {
+        if (slice is null && each is null) throw new ArgumentNullException(nameof(slice));
+        Services.RequireTickThread($"ProgramWrap.{kind}");
+        var stage = Make(kind, slice, each, priority);
+        if (stage.State == WrapState.Refused) stage.RaiseDisabled(stage.Detail ?? "refused");
+        return this;
+    }
+
+    private ManagedStage Make(WrapStage kind, SliceHandler? slice, EntityHandler? each, int? priority)
+    {
+        lock (_lock)
+            if (_disposed) throw new ObjectDisposedException(nameof(ProgramWrap));
+        if (Mod is { Alive: false }) throw new InvalidOperationException("the mod is unloading");
+        var off = Systems.WhyOff(World);
+        var stage = new ManagedStage(this, kind, slice, each, priority ?? _options.Priority);
+        if (off.Refuse is { } refuse)
+        {
+            stage.Refuse(refuse);
+            lock (_lock) _stages.Add(stage);
+            return stage;
+        }
+        stage.Install(Owner);
+        lock (_lock) _stages.Add(stage);
+        return stage;
+    }
+
+    private ulong Owner => Mod is { } m && m.Owner != 0 ? m.Owner : ProcessOwner;
+
+    private static ulong _processOwner;
+    private static ulong ProcessOwner => _processOwner != 0 ? _processOwner : _processOwner = Backend.Current.OwnerCreate("Kiln.Systems");
+
+    private static uint[] Hashes(IEnumerable<string> names)
+    {
+        var list = new List<uint>();
+        foreach (var n in names)
+        {
+            ArgumentException.ThrowIfNullOrEmpty(n);
+            var q = n.Contains("::", StringComparison.Ordinal) ? n : "keen::ecs::" + n;
+            var h = 0x811C9DC5u;
+            foreach (var b in System.Text.Encoding.UTF8.GetBytes(q)) h = (h ^ b) * 0x01000193u;
+            list.Add(h);
+        }
+        return [.. list];
+    }
+
+    // The filters, per slice: When on every call, WhenArchetype cached per archetype.
+    internal bool Accepts(SystemsNative.Slice* s)
+    {
+        if (_has is null && _when is null) return true;
+        nint layout = 0;
+        var t = SystemsNative.T;
+        if (t != null && (_has is not null || _when is not null))
+        {
+            nuint l = 0;
+            if (t->GameSliceArchetype(s, &l) == SystemsNative.Ok) layout = (nint)l;
+        }
+        if (_has is not null)
+        {
+            if (layout == 0 || t == null) return false;
+            if (!_archetypes.TryGetValue(layout, out var ok))
+            {
+                ok = true;
+                foreach (var h in _has) ok &= t->GameArchetypeHas((uint)World, (nuint)layout, h) == 1;
+                foreach (var h in _lacks!) ok &= t->GameArchetypeHas((uint)World, (nuint)layout, h) == 0;
+                _archetypes.TryAdd(layout, ok);
+            }
+            if (!ok) return false;
+        }
+        return _when is null || _when(new SliceInfo(Program, World, (int)s->Count, s->Step, s->ThreadIsWorld != 0, layout));
+    }
+
+    internal void ForgetArchetypes() => _archetypes.Clear();
+
+    internal void OnDisabled(WrapDisabledEvent e)
+    {
+        try { Disabled?.Invoke(e); }
+        catch (Exception x) { Mod?.Log.Error($"a WrapDisabled handler threw: {x.Message}"); }
+    }
+
+    internal static IReadOnlyList<WrapInfo> InfosOf(string program, WorldKind world) =>
+        [.. Systems.Live.Keys.Where(s => s.Wrap.Program == program && s.Wrap.World == world)
+            .Select(s => new WrapInfo(s.Wrap.ModId, program, world, s.Kind, s.Priority, s.State, s.Each is not null))];
+
+    // The mod unloads: every stage of its owner goes, and the unload waits until no call of one runs (a stage that runs
+    // finishes; none starts). Tick thread (ModContext.Retire).
+    private void Retire()
+    {
+        lock (_lock) _disposed = true;
+        var t = SystemsNative.T;
+        if (t == null) return;
+        uint pending = 0;
+        t->GameWrapsRelease(Owner, &pending);
+        var until = Environment.TickCount64 + 2000;
+        while (pending != 0 && Environment.TickCount64 < until)
+        {
+            Thread.Yield();
+            t->GameWrapsRelease(Owner, &pending);
+        }
+        if (pending != 0)
+            Backend.Current.Log(0, LogLevel.Error, $"Kiln.Systems: {ModId}'s wrap stages still ran 2 s after its unload began");
+        List<ManagedStage> stages;
+        lock (_lock) stages = [.. _stages];
+        foreach (var s in stages) s.Forget(pending == 0);
+    }
+
+    // ---- the tick: states, disabled stages, freed handles ----
+    private static IDisposable? _tick;
+    private static readonly System.Collections.Concurrent.ConcurrentQueue<Action> TickWork = new();
+
+    internal static void PostToTick(Action a) => TickWork.Enqueue(a);
+
+    internal static void EnsureTick()
+    {
+        if (_tick is not null) return;
+        _tick = ServiceTick.Add("kiln.systems wraps", static (in TickInfo t) => Poll());
+    }
+
+    internal static void Poll()
+    {
+        while (TickWork.TryDequeue(out var a))
+            try { a(); } catch (Exception e) { Backend.Current.Log(0, LogLevel.Error, $"Kiln.Systems: posted work threw: {e.Message}"); }
+        var t = SystemsNative.T;
+        foreach (var s in Systems.Live.Keys) s.Poll(t);
+    }
+}
+
+/// <summary>One stage of a wrap: a native kiln.world wrap whose user data is this object.</summary>
+internal sealed unsafe class ManagedStage
+{
+    internal readonly ProgramWrap Wrap;
+    internal readonly WrapStage Kind;
+    internal readonly SliceHandler? SliceFn;
+    internal readonly EntityHandler? Each;
+    internal readonly int Priority;
+    internal ulong Handle;
+    internal volatile bool Removing;
+    internal string? Detail;
+    internal long ManagedFaults;
+    private GCHandle _self;
+    private volatile int _disabled;   // 1: an exception turned it off here
+    private volatile bool _raised;
+    private WrapState _state = WrapState.Pending;
+
+    [ThreadStatic] internal static bool OriginalCalled;
+    [ThreadStatic] private static EntityHandler? _each;
+    [ThreadStatic] private static Exception? _eachError;
+
+    internal ManagedStage(ProgramWrap wrap, WrapStage kind, SliceHandler? slice, EntityHandler? each, int priority)
+    {
+        Wrap = wrap;
+        Kind = kind;
+        SliceFn = slice;
+        Each = each;
+        Priority = priority;
+    }
+
+    internal WrapState State => _state;
+
+    internal void Refuse(string why)
+    {
+        Detail = why;
+        _state = WrapState.Refused;
+    }
+
+    internal void Install(ulong owner)
+    {
+        var t = SystemsNative.T;
+        if (t == null) throw new KilnUnavailableException("systems.wraps", "kiln.world v4 is not here");
+        var index = Systems.FindIndex(t, Wrap.Program, Wrap.World);
+        if (index < 0)
+        {
+            Refuse($"{Wrap.Program}: no such program in the {Systems.Lower(Wrap.World)} world");
+            return;
+        }
+        _self = GCHandle.Alloc(this);
+        ulong handle = 0;
+        var rc = t->GameProgramWrap(owner, (uint)Wrap.World, index, (int)Kind, Priority, &OnStage,
+            (void*)GCHandle.ToIntPtr(_self), &handle);
+        if (rc != SystemsNative.Ok)
+        {
+            _self.Free();
+            Refuse(rc switch
+            {
+                SystemsNative.Unavailable => "wraps are off (native SET loaded, or the client gate)",
+                SystemsNative.NotFound => $"{Wrap.Program}: no such program now",
+                _ => $"refused ({rc})",
+            });
+            return;
+        }
+        Handle = handle;
+        var info = Info(t);
+        if (info.State == SystemsNative.Refused)
+        {
+            Detail = NativeDetail(info);
+            if (info.Reason == SystemsNative.ReasonReplaceTaken) Detail = $"{Wrap.Program} is replaced by another wrap ({Detail})";
+            _state = WrapState.Refused;
+            _self.Free();
+            return;
+        }
+        Systems.Live.TryAdd(this, 0);
+        ProgramWrap.EnsureTick();
+    }
+
+    internal SystemsNative.WrapInfo Info(SystemsNative.Table* t)
+    {
+        var i = new SystemsNative.WrapInfo { Size = (uint)sizeof(SystemsNative.WrapInfo) };
+        if (t != null && Handle != 0) t->GameWrapInfo(Handle, &i);
+        return i;
+    }
+
+    private static string NativeDetail(SystemsNative.WrapInfo i) => SystemsNative.Text(i.Detail, 128);
+
+    internal void Unwrap()
+    {
+        Removing = true;
+        var t = SystemsNative.T;
+        if (t != null && Handle != 0) t->GameProgramUnwrap(Handle);
+    }
+
+    internal void Forget(bool idle)
+    {
+        Removing = true;
+        _state = WrapState.Removed;
+        Systems.Live.TryRemove(this, out _);
+        if (idle && _self.IsAllocated) _self.Free();
+    }
+
+    // Tick thread: the native state, a stage kiln.world turned off, a handle no call can use any more.
+    internal void Poll(SystemsNative.Table* t)
+    {
+        if (t == null || Handle == 0) return;
+        var i = Info(t);
+        var state = i.State switch
+        {
+            SystemsNative.Active => WrapState.Active,
+            SystemsNative.Removed => WrapState.Removed,
+            SystemsNative.Refused => WrapState.Refused,
+            _ => WrapState.Pending,
+        };
+        if (_state == WrapState.Active && state == WrapState.Pending) Wrap.ForgetArchetypes();  // a new world
+        _state = state;
+        if (!_raised && (i.Disabled != 0 || (state == WrapState.Removed && i.Reason == SystemsNative.ReasonNativeSet)))
+        {
+            var why = i.Disabled == SystemsNative.ReasonFault ? $"a fault (0x{i.FaultCode:x8})" :
+                i.Disabled == SystemsNative.ReasonBudget ? "budget" : "native SET loaded";
+            RaiseDisabled(why);
+        }
+        if ((state is WrapState.Removed or WrapState.Refused) && i.Running == 0)
+        {
+            Systems.Live.TryRemove(this, out _);
+            if (_self.IsAllocated) _self.Free();
+        }
+    }
+
+    internal void RaiseDisabled(string reason)
+    {
+        if (_raised) return;
+        _raised = true;
+        var e = new WrapDisabledEvent(Wrap.Program, Wrap.ModId, Kind, reason);
+        if (Backend.Current.IsTickThread) Wrap.OnDisabled(e);
+        else ProgramWrap.PostToTick(() => Wrap.OnDisabled(e));
+    }
+
+    private void Fail(Exception e)
+    {
+        Interlocked.Increment(ref ManagedFaults);
+        if (Interlocked.Exchange(ref _disabled, 1) != 0) return;
+        Unwrap();  // the stage is off from now on; kiln.world takes it out in the next step
+        RaiseDisabled($"it threw {e.GetType().Name}: {e.Message}");
+        // the host's mod policy counts it (5 in 60 s disable the mod): rethrown as scheduled work of the mod
+        var info = ExceptionDispatchInfo.Capture(e);
+        if (Wrap.Mod is { } mod) mod.Scheduler.Post(() => info.Throw());
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static void OnStage(SystemsNative.Slice* s, void* user)
+    {
+        try
+        {
+            if (GCHandle.FromIntPtr((nint)user).Target is ManagedStage stage) stage.Run(s);
+        }
+        catch
+        {
+            // never unwind through the game
+        }
+    }
+
+    private void Run(SystemsNative.Slice* s)
+    {
+        var replace = Kind == WrapStage.Replace;
+        var mod = Wrap.Mod;
+        if (_disabled != 0 || Removing || mod is { Alive: false } || !Wrap.Accepts(s))
+        {
+            if (replace) RunOriginalQuietly(s);  // this slice is the game's
+            return;
+        }
+        var previous = ModContext.CurrentMod;
+        SliceGuard.Depth++;
+        OriginalCalled = false;
+        try
+        {
+            ModContext.CurrentMod = mod;
+            if (Each is not null) Iterate(s);
+            else
+            {
+                var slice = new Slice(s, this);
+                SliceFn!(ref slice);
+            }
+        }
+        catch (Exception e)
+        {
+            Fail(e);
+            if (replace && !OriginalCalled) RunOriginalQuietly(s);
+        }
+        finally
+        {
+            ModContext.CurrentMod = previous;
+            SliceGuard.Depth--;
+        }
+    }
+
+    private static void RunOriginalQuietly(SystemsNative.Slice* s)
+    {
+        var t = SystemsNative.T;
+        if (t != null) t->GameSliceRunOriginal(s);
+    }
+
+    private void Iterate(SystemsNative.Slice* s)
+    {
+        var t = SystemsNative.T;
+        if (t == null) return;
+        var outer = _each;
+        _each = Each;
+        _eachError = null;
+        try
+        {
+            t->GameSliceIterate(s, &OnEntity, null);
+        }
+        finally
+        {
+            _each = outer;
+        }
+        if (_eachError is { } e)
+        {
+            _eachError = null;
+            ExceptionDispatchInfo.Capture(e).Throw();
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static uint OnEntity(ulong* iter, uint row, uint entity, void* user)
+    {
+        try
+        {
+            _each?.Invoke(new EntityId(entity));
+            return 0;
+        }
+        catch (Exception e)
+        {
+            _eachError = e;
+            return 1;
+        }
+    }
+}

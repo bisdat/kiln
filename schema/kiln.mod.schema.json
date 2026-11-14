@@ -82,6 +82,19 @@
     "entryType": { "type": "string", "description": "Full name of the Kiln.Mod subclass (default: the only public one)." },
     "exports": { "type": "array", "items": { "$ref": "#/$defs/dll" }, "description": "Assemblies dependents compile against; at run time they get these copies (shared types and state)." },
     "advanced": { "type": "boolean", "default": false, "description": "Opt into the advanced tier (raw hooks, symbols, coremod-style patches); exposed as ModInfo.Advanced." },
+    "systems": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "replaces": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "type": "string", "pattern": "^[A-Za-z0-9_]{1,64}$" },
+          "description": "The game's ECS programs (names such as fuel_setup) the mod replaces with Kiln.Systems' ProgramWrap.Replace. One mod per program can replace it (a second Replace is refused at run time, naming the holder). A declaration for tools that look for two mods replacing one program before play; the launcher and kiln lint do not read it yet, and listing or not listing a program changes nothing at run time."
+        }
+      },
+      "description": "What the mod does to the game's own ECS programs (Kiln.Systems, docs/kiln/services/systems.md)."
+    },
     "writes": {
       "type": "array",
       "maxItems": 64,

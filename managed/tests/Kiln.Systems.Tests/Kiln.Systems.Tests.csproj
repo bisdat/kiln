@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Kiln.Systems over a fake kiln.world v4 table (FakeWorld.cs): wrap results and refusals, stage dispatch, the
+       slice guard, per-entity stages, filters, exceptions, Dispose and the mod's unload, and the mirrors' layout
+       against native/services/world/tests/abi.json. No game. -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable><IsTestProject>true</IsTestProject><OutputType>Exe</OutputType>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks><NoWarn>$(NoWarn);CS1591</NoWarn>
+    <!-- not Kiln.Systems.Tests: a namespace Kiln.Systems would hide the class Kiln.Systems -->
+    <RootNamespace>Kiln.SystemsTests</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit.v3" Version="3.1.0" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <ProjectReference Include="../../services/Kiln.Systems/Kiln.Systems.csproj" />
+    <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" />
+  </ItemGroup>
+</Project>

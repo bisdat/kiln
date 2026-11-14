@@ -32,6 +32,7 @@ Validated by Kiln.Host at load time and by Kiln.Sdk at build time (managed/Kiln.
 | `loadBefore` | array of [id](#id) |  | Load before these mods when they are present (no requirement). |
 | `name` | string |  | Display name (default: the id). |
 | `side` | `"server"` \| `"client"` \| `"both"` |  | Where the mod loads; mods for the other side are skipped. Default `"server"`. |
+| `systems` | object |  | What the mod does to the game's own ECS programs (Kiln.Systems, docs/kiln/services/systems.md). |
 | `tests` | boolean or object |  | Kiln.Testing: true = autoRun. |
 | `url` | string |  |  |
 | `version` | string | yes | Semantic version (MAJOR.MINOR.PATCH[-pre][+build]); 1 and 1.2 are read as 1.0.0 and 1.2.0. |

@@ -104,6 +104,8 @@ public static class Game
 
     public static void AssertTickThread()
     {
+        if (SliceGuard.Depth > 0)
+            throw new InvalidOperationException("This cannot run in a program wrap's handler (it runs inside the world's step); use slice.Post.");
         if (!IsTickThread) throw new InvalidOperationException("This must run on the tick thread; use Scheduler.Post.");
     }
 }

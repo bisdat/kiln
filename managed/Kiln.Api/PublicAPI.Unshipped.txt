@@ -157,3 +157,7 @@ static Kiln.DefinitionRegistrationResult.operator !=(Kiln.DefinitionRegistration
 static Kiln.DefinitionRegistrationResult.operator ==(Kiln.DefinitionRegistrationResult? left, Kiln.DefinitionRegistrationResult? right) -> bool
 ~override Kiln.CapacityWorldToken.Equals(object obj) -> bool
 ~override Kiln.CapacityWorldToken.ToString() -> string
+Kiln.WorldKind
+Kiln.WorldKind.Client = 2 -> Kiln.WorldKind
+Kiln.WorldKind.Prediction = 1 -> Kiln.WorldKind
+Kiln.WorldKind.Server = 0 -> Kiln.WorldKind

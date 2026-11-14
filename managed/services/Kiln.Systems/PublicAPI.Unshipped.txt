@@ -1,0 +1,183 @@
+#nullable enable
+Kiln.EntityHandler
+Kiln.ProgramWrap
+Kiln.ProgramWrap.After(Kiln.SliceHandler! handler, int? priority = null) -> Kiln.ProgramWrap!
+Kiln.ProgramWrap.AfterEach(Kiln.EntityHandler! handler, int? priority = null) -> Kiln.ProgramWrap!
+Kiln.ProgramWrap.Before(Kiln.SliceHandler! handler, int? priority = null) -> Kiln.ProgramWrap!
+Kiln.ProgramWrap.BeforeEach(Kiln.EntityHandler! handler, int? priority = null) -> Kiln.ProgramWrap!
+Kiln.ProgramWrap.Disabled -> System.Action<Kiln.WrapDisabledEvent!>?
+Kiln.ProgramWrap.Dispose() -> void
+Kiln.ProgramWrap.Program.get -> string!
+Kiln.ProgramWrap.Replace(Kiln.SliceHandler! handler) -> Kiln.WrapResult<Kiln.ProgramWrap!>!
+Kiln.ProgramWrap.State.get -> Kiln.WrapState
+Kiln.ProgramWrap.Stats.get -> Kiln.WrapStats!
+Kiln.ProgramWrap.When(System.Func<Kiln.SliceInfo, bool>! filter) -> Kiln.ProgramWrap!
+Kiln.ProgramWrap.WhenArchetype(System.Collections.Generic.IEnumerable<string!>! has, System.Collections.Generic.IEnumerable<string!>? lacks = null) -> Kiln.ProgramWrap!
+Kiln.ProgramWrap.World.get -> Kiln.WorldKind
+Kiln.Slice
+Kiln.Slice.Count.get -> int
+Kiln.Slice.EntityAt(int row) -> Kiln.EntityId
+Kiln.Slice.IsWorldThread.get -> bool
+Kiln.Slice.Post(System.Action! action) -> void
+Kiln.Slice.Program.get -> string!
+Kiln.Slice.RunOriginal() -> void
+Kiln.Slice.Slice() -> void
+Kiln.Slice.Step.get -> ulong
+Kiln.Slice.World.get -> Kiln.WorldKind
+Kiln.SliceHandler
+Kiln.SliceInfo
+Kiln.SliceInfo.Count.get -> int
+Kiln.SliceInfo.Count.init -> void
+Kiln.SliceInfo.Deconstruct(out string! Program, out Kiln.WorldKind World, out int Count, out ulong Step, out bool OnWorldThread, out nint Layout) -> void
+Kiln.SliceInfo.Equals(Kiln.SliceInfo other) -> bool
+Kiln.SliceInfo.Layout.get -> nint
+Kiln.SliceInfo.Layout.init -> void
+Kiln.SliceInfo.OnWorldThread.get -> bool
+Kiln.SliceInfo.OnWorldThread.init -> void
+Kiln.SliceInfo.Program.get -> string!
+Kiln.SliceInfo.Program.init -> void
+Kiln.SliceInfo.SliceInfo() -> void
+Kiln.SliceInfo.SliceInfo(string! Program, Kiln.WorldKind World, int Count, ulong Step, bool OnWorldThread, nint Layout) -> void
+Kiln.SliceInfo.Step.get -> ulong
+Kiln.SliceInfo.Step.init -> void
+Kiln.SliceInfo.World.get -> Kiln.WorldKind
+Kiln.SliceInfo.World.init -> void
+Kiln.SystemInfo
+Kiln.SystemInfo.<Clone>$() -> Kiln.SystemInfo!
+Kiln.SystemInfo.Deconstruct(out string! Name, out int Index, out Kiln.WorldKind World, out uint Flags, out ulong UpdateRva, out bool Runs, out System.Collections.Generic.IReadOnlyList<string!>! Writes, out System.Collections.Generic.IReadOnlyList<Kiln.WrapInfo!>! Wraps) -> void
+Kiln.SystemInfo.Equals(Kiln.SystemInfo? other) -> bool
+Kiln.SystemInfo.Flags.get -> uint
+Kiln.SystemInfo.Flags.init -> void
+Kiln.SystemInfo.Index.get -> int
+Kiln.SystemInfo.Index.init -> void
+Kiln.SystemInfo.Name.get -> string!
+Kiln.SystemInfo.Name.init -> void
+Kiln.SystemInfo.Runs.get -> bool
+Kiln.SystemInfo.Runs.init -> void
+Kiln.SystemInfo.SystemInfo(string! Name, int Index, Kiln.WorldKind World, uint Flags, ulong UpdateRva, bool Runs, System.Collections.Generic.IReadOnlyList<string!>! Writes, System.Collections.Generic.IReadOnlyList<Kiln.WrapInfo!>! Wraps) -> void
+Kiln.SystemInfo.UpdateRva.get -> ulong
+Kiln.SystemInfo.UpdateRva.init -> void
+Kiln.SystemInfo.World.get -> Kiln.WorldKind
+Kiln.SystemInfo.World.init -> void
+Kiln.SystemInfo.Wraps.get -> System.Collections.Generic.IReadOnlyList<Kiln.WrapInfo!>!
+Kiln.SystemInfo.Wraps.init -> void
+Kiln.SystemInfo.Writes.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.SystemInfo.Writes.init -> void
+Kiln.Systems
+Kiln.WrapDisabledEvent
+Kiln.WrapDisabledEvent.<Clone>$() -> Kiln.WrapDisabledEvent!
+Kiln.WrapDisabledEvent.Deconstruct(out string! Program, out string! Mod, out Kiln.WrapStage Stage, out string! Reason) -> void
+Kiln.WrapDisabledEvent.Equals(Kiln.WrapDisabledEvent? other) -> bool
+Kiln.WrapDisabledEvent.Mod.get -> string!
+Kiln.WrapDisabledEvent.Mod.init -> void
+Kiln.WrapDisabledEvent.Program.get -> string!
+Kiln.WrapDisabledEvent.Program.init -> void
+Kiln.WrapDisabledEvent.Reason.get -> string!
+Kiln.WrapDisabledEvent.Reason.init -> void
+Kiln.WrapDisabledEvent.Stage.get -> Kiln.WrapStage
+Kiln.WrapDisabledEvent.Stage.init -> void
+Kiln.WrapDisabledEvent.WrapDisabledEvent(string! Program, string! Mod, Kiln.WrapStage Stage, string! Reason) -> void
+Kiln.WrapInfo
+Kiln.WrapInfo.<Clone>$() -> Kiln.WrapInfo!
+Kiln.WrapInfo.Deconstruct(out string! Mod, out string! Program, out Kiln.WorldKind World, out Kiln.WrapStage Stage, out int Priority, out Kiln.WrapState State, out bool PerEntity) -> void
+Kiln.WrapInfo.Equals(Kiln.WrapInfo? other) -> bool
+Kiln.WrapInfo.Mod.get -> string!
+Kiln.WrapInfo.Mod.init -> void
+Kiln.WrapInfo.PerEntity.get -> bool
+Kiln.WrapInfo.PerEntity.init -> void
+Kiln.WrapInfo.Priority.get -> int
+Kiln.WrapInfo.Priority.init -> void
+Kiln.WrapInfo.Program.get -> string!
+Kiln.WrapInfo.Program.init -> void
+Kiln.WrapInfo.Stage.get -> Kiln.WrapStage
+Kiln.WrapInfo.Stage.init -> void
+Kiln.WrapInfo.State.get -> Kiln.WrapState
+Kiln.WrapInfo.State.init -> void
+Kiln.WrapInfo.World.get -> Kiln.WorldKind
+Kiln.WrapInfo.World.init -> void
+Kiln.WrapInfo.WrapInfo(string! Mod, string! Program, Kiln.WorldKind World, Kiln.WrapStage Stage, int Priority, Kiln.WrapState State, bool PerEntity) -> void
+Kiln.WrapOptions
+Kiln.WrapOptions.<Clone>$() -> Kiln.WrapOptions!
+Kiln.WrapOptions.Equals(Kiln.WrapOptions? other) -> bool
+Kiln.WrapOptions.Priority.get -> int
+Kiln.WrapOptions.Priority.init -> void
+Kiln.WrapOptions.World.get -> Kiln.WorldKind
+Kiln.WrapOptions.World.init -> void
+Kiln.WrapOptions.WrapOptions() -> void
+Kiln.WrapResult<TWrap>
+Kiln.WrapResult<TWrap>.Deconstruct(out bool Ok, out string? Reason, out TWrap? Wrap) -> void
+Kiln.WrapResult<TWrap>.Ok.get -> bool
+Kiln.WrapResult<TWrap>.Ok.init -> void
+Kiln.WrapResult<TWrap>.Reason.get -> string?
+Kiln.WrapResult<TWrap>.Reason.init -> void
+Kiln.WrapResult<TWrap>.Wrap.get -> TWrap?
+Kiln.WrapResult<TWrap>.Wrap.init -> void
+Kiln.WrapResult<TWrap>.WrapResult(bool Ok, string? Reason, TWrap? Wrap) -> void
+Kiln.WrapStage
+Kiln.WrapStage.After = 2 -> Kiln.WrapStage
+Kiln.WrapStage.Before = 0 -> Kiln.WrapStage
+Kiln.WrapStage.Replace = 1 -> Kiln.WrapStage
+Kiln.WrapState
+Kiln.WrapState.Active = 1 -> Kiln.WrapState
+Kiln.WrapState.Pending = 0 -> Kiln.WrapState
+Kiln.WrapState.Refused = 3 -> Kiln.WrapState
+Kiln.WrapState.Removed = 2 -> Kiln.WrapState
+Kiln.WrapStats
+Kiln.WrapStats.<Clone>$() -> Kiln.WrapStats!
+Kiln.WrapStats.Deconstruct(out long Slices, out long Entities, out double Microseconds, out long Faults, out long Overruns, out int Threads) -> void
+Kiln.WrapStats.Entities.get -> long
+Kiln.WrapStats.Entities.init -> void
+Kiln.WrapStats.Equals(Kiln.WrapStats? other) -> bool
+Kiln.WrapStats.Faults.get -> long
+Kiln.WrapStats.Faults.init -> void
+Kiln.WrapStats.Microseconds.get -> double
+Kiln.WrapStats.Microseconds.init -> void
+Kiln.WrapStats.Overruns.get -> long
+Kiln.WrapStats.Overruns.init -> void
+Kiln.WrapStats.Slices.get -> long
+Kiln.WrapStats.Slices.init -> void
+Kiln.WrapStats.Threads.get -> int
+Kiln.WrapStats.Threads.init -> void
+Kiln.WrapStats.WrapStats(long Slices, long Entities, double Microseconds, long Faults, long Overruns, int Threads) -> void
+override Kiln.SliceInfo.GetHashCode() -> int
+override Kiln.SystemInfo.Equals(object? obj) -> bool
+override Kiln.SystemInfo.GetHashCode() -> int
+override Kiln.SystemInfo.ToString() -> string!
+override Kiln.WrapDisabledEvent.Equals(object? obj) -> bool
+override Kiln.WrapDisabledEvent.GetHashCode() -> int
+override Kiln.WrapDisabledEvent.ToString() -> string!
+override Kiln.WrapInfo.Equals(object? obj) -> bool
+override Kiln.WrapInfo.GetHashCode() -> int
+override Kiln.WrapInfo.ToString() -> string!
+override Kiln.WrapOptions.Equals(object? obj) -> bool
+override Kiln.WrapOptions.GetHashCode() -> int
+override Kiln.WrapOptions.ToString() -> string!
+override Kiln.WrapResult<TWrap>.Equals(object? obj) -> bool
+override Kiln.WrapResult<TWrap>.GetHashCode() -> int
+override Kiln.WrapResult<TWrap>.ToString() -> string!
+override Kiln.WrapStats.Equals(object? obj) -> bool
+override Kiln.WrapStats.GetHashCode() -> int
+override Kiln.WrapStats.ToString() -> string!
+static Kiln.SliceInfo.operator !=(Kiln.SliceInfo left, Kiln.SliceInfo right) -> bool
+static Kiln.SliceInfo.operator ==(Kiln.SliceInfo left, Kiln.SliceInfo right) -> bool
+static Kiln.SystemInfo.operator !=(Kiln.SystemInfo? left, Kiln.SystemInfo? right) -> bool
+static Kiln.SystemInfo.operator ==(Kiln.SystemInfo? left, Kiln.SystemInfo? right) -> bool
+static Kiln.Systems.All(Kiln.WorldKind world = Kiln.WorldKind.Server) -> System.Collections.Generic.IReadOnlyList<Kiln.SystemInfo!>!
+static Kiln.Systems.Find(string! program, Kiln.WorldKind world = Kiln.WorldKind.Server) -> Kiln.SystemInfo?
+static Kiln.Systems.Wrap(string! program, Kiln.WrapOptions? options = null) -> Kiln.WrapResult<Kiln.ProgramWrap!>!
+static Kiln.WrapDisabledEvent.operator !=(Kiln.WrapDisabledEvent? left, Kiln.WrapDisabledEvent? right) -> bool
+static Kiln.WrapDisabledEvent.operator ==(Kiln.WrapDisabledEvent? left, Kiln.WrapDisabledEvent? right) -> bool
+static Kiln.WrapInfo.operator !=(Kiln.WrapInfo? left, Kiln.WrapInfo? right) -> bool
+static Kiln.WrapInfo.operator ==(Kiln.WrapInfo? left, Kiln.WrapInfo? right) -> bool
+static Kiln.WrapOptions.operator !=(Kiln.WrapOptions? left, Kiln.WrapOptions? right) -> bool
+static Kiln.WrapOptions.operator ==(Kiln.WrapOptions? left, Kiln.WrapOptions? right) -> bool
+static Kiln.WrapStats.operator !=(Kiln.WrapStats? left, Kiln.WrapStats? right) -> bool
+static Kiln.WrapStats.operator ==(Kiln.WrapStats? left, Kiln.WrapStats? right) -> bool
+virtual Kiln.EntityHandler.Invoke(Kiln.EntityId entity) -> void
+virtual Kiln.SliceHandler.Invoke(ref Kiln.Slice slice) -> void
+~Kiln.WrapResult<TWrap>.<Clone>$() -> Kiln.WrapResult<TWrap>!
+~Kiln.WrapResult<TWrap>.Equals(Kiln.WrapResult<TWrap>? other) -> bool
+~override Kiln.SliceInfo.Equals(object obj) -> bool
+~override Kiln.SliceInfo.ToString() -> string
+~static Kiln.WrapResult<TWrap>.operator !=(Kiln.WrapResult<TWrap>? left, Kiln.WrapResult<TWrap>? right) -> bool
+~static Kiln.WrapResult<TWrap>.operator ==(Kiln.WrapResult<TWrap>? left, Kiln.WrapResult<TWrap>? right) -> bool
