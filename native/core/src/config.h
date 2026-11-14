@@ -12,6 +12,7 @@
 // (only on a verified build), never.
 // preview: lifts the client gate (gates.h): true (or "all") for every capability that is held until its game test, or
 // a list of their names. A side section's "preview" replaces the top-level one.
+// developer_debugging: true writes kiln/state/debug/<pid>.json and serves the debugger's control pipe (debug_descriptor.h); default false, a side section's value replaces the top-level one.
 #pragma once
 #include <string>
 #include <vector>
@@ -30,6 +31,7 @@ struct Config {
     NativePolicy native_policy = NativePolicy::Always;
     bool preview_all = false;           // "preview": true
     std::vector<std::string> preview;   // "preview": [names]
+    bool developer_debugging = false;   // "developer_debugging": true
 };
 
 const char* native_policy_name(NativePolicy p);  // "always" | "verified-only" | "never"

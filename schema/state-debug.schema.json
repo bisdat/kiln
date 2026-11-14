@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "state-debug.schema.json",
+  "title": "Debug descriptor (<game>/kiln/state/debug/<windowsPid>.json), format 1",
+  "description": "Written atomically by the native core (native/core/src/debug_descriptor.cpp) right after the .NET host started, only when kiln.json \"developer_debugging\" is true; one file per process, removed at a clean exit. It names the process and its control pipe; it proves nothing by itself: kiln debug (kiln_manage::debug) compares every field with what the process's own Windows side and its pipe answer before a debugger may attach. A file left by a process that ended is stale: its creation time no longer matches a running process.",
+  "type": "object",
+  "required": ["format", "kiln", "side", "sessionNonce", "windowsPid", "creationTime100ns", "image", "imageSha256", "runtimeVersion", "pipe", "elevated", "managedReady", "written"],
+  "properties": {
+    "format": { "const": 1 },
+    "kiln": { "type": "string", "description": "Kiln's version in that process." },
+    "side": { "enum": ["server", "client"] },
+    "sessionNonce": { "type": "string", "pattern": "^[0-9a-f]{32}$", "description": "128 random bits, new at every start." },
+    "windowsPid": { "type": "integer", "minimum": 1, "maximum": 4294967295, "description": "The process id in its own Windows namespace (Wine's numbering under Wine and Proton)." },
+    "creationTime100ns": { "type": "string", "pattern": "^[1-9][0-9]{0,19}$", "description": "GetProcessTimes' creation FILETIME (100 ns since 1601-01-01 UTC) as an unsigned decimal string, so no reader rounds it." },
+    "image": { "type": "string", "minLength": 1, "description": "The process's image as QueryFullProcessImageNameW names it (a Windows path)." },
+    "imageSha256": { "$ref": "common.schema.json#/$defs/sha256" },
+    "runtimeVersion": { "type": "string", "description": "The .NET runtime the core loaded (the folder of its coreclr.dll), empty without one." },
+    "pipe": { "type": "string", "pattern": "^\\\\\\\\\\.\\\\pipe\\\\kiln-debug-[1-9][0-9]*-[0-9a-f]{32}$", "description": "The control pipe: \\\\.\\pipe\\kiln-debug-<windowsPid>-<sessionNonce>; same-user DACL, local clients only." },
+    "elevated": { "type": "boolean", "description": "The process runs elevated (native Windows; false under Wine)." },
+    "managedReady": { "type": "boolean", "description": "The .NET host had started when this was written; the pipe answers the current value." },
+    "written": { "$ref": "common.schema.json#/$defs/time" }
+  },
+  "additionalProperties": false
+}

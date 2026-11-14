@@ -85,6 +85,7 @@ A `"server"` or `"client"` section overrides the top-level keys on that side (`c
 `"preview"`: lifts the client gate ([services/caps.md](services/caps.md#the-client-gate-dev28)) for capabilities that
 ship switched off until their game test: `true` for all of them, or a list of capability names. In a side section it
 replaces the top-level value.
+`"developer_debugging"`: `true` writes `kiln/state/debug/<pid>.json` and serves a local control pipe, so `kiln debug` can prove which process it attaches to ([modding/debugging.md](modding/debugging.md)); default `false`, and a side section's value replaces the top-level one.
 `"cooked"`: what kiln.assets does with a mod's cooked file no cook of this game made (no receipt lists it,
 [modding/cooking.md](modding/cooking.md)): `"warn"` (the default, `kCookedDefault` in `native/services/assets/cooktrust.h`)
 loads it with one warning per mod, `"local"` does not load it, `"any"` loads it (development servers); read by

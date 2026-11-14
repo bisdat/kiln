@@ -14,6 +14,7 @@
 #include "clr.h"
 #include "compat.h"
 #include "config.h"
+#include "debug_descriptor.h"
 #include "image.h"
 #include "log.h"
 #include "native_mods.h"
@@ -526,6 +527,7 @@ void boot() {
         f.clr_started = clr::boot(api());
         if (!f.clr_started) f.clr_error = "the .NET host did not start (kiln.log, [clr] lines)";
     }
+    debug_descriptor::start(f.clr_started);  // kiln.json "developer_debugging": the descriptor and the control pipe
     native_mods::run_late();  // chain DLLs named in kiln/chain.ini [late]: after everything Kiln hosts hooked
     check_entry_patch(f);
     write_boot_json(f);
