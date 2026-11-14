@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
-// Lab test of kiln.decisions and kiln.window_clock through Kiln.Api (07-cancelable-events, S3): see kiln.mod.json.
-// Player-free: it reads an entity the world already has and files decisions no game action hangs on.
+// Lab test of kiln.decisions and kiln.window_clock through Kiln.Api (07-cancelable-events, S3, S4): see kiln.mod.json.
+// Player-free: it reads an entity the world already has, files decisions no game action hangs on, and kills spawned
+// 1_Player templates to hold, refuse and allow their deaths (S4, events.death: the lab needs "preview" in kiln.json).
 using Kiln;
 
 namespace DecisionsApiTest;
@@ -166,12 +167,144 @@ public sealed class DecisionsApiTestMod : Mod
                 Check(late[0].Step == filedAt + 4, $"the release is told four steps after the filing: at the window of capture + 3 (filed {filedAt}, told {late[0].Step})");
             await Wait(4);
             Check(_ends.Count == 3 && _ends.Values.All(l => l.Count == 1), $"no decision completed twice ({_ends.Count} decisions, {_ends.Values.Sum(l => l.Count)} events)");
+
+            // S4: cancelable death, once plain and once with the game's entity programs forced onto its workers
+            await DeathSuite("plain");
+            if (Kiln.Testing.LabSystems.Enabled)
+            {
+                Kiln.Testing.LabSystems.ForceParallel(2400);
+                await Wait(2);
+                Log.Info($"decisions-api-test: parallel forced for the death suite (mask 0x{Kiln.Testing.LabSystems.PlayersMask:x4})");
+                try
+                {
+                    await DeathSuite("parallel");
+                }
+                finally
+                {
+                    Kiln.Testing.LabSystems.StopParallel();
+                    await Wait(2);
+                    Log.Info($"decisions-api-test: parallel stopped (mask 0x{Kiln.Testing.LabSystems.PlayersMask:x4})");
+                }
+            }
+            else Log.Info("decisions-api-test: the lab parallel switch is off (no kiln/control/systems.parallel): the death suite ran once");
+            Check(_ends.Values.All(l => l.Count == 1), $"no decision completed twice over the whole run ({_ends.Count} decisions)");
         }
         catch (Exception e)
         {
             Check(false, $"the run threw: {e}");
         }
         Log.Info($"decisions-api-test done: {_passes} PASS, {_failures} FAIL");
+    }
+
+    // ------------------------------------------------------------------------------------------------- deaths ----
+
+    private static bool DeadMark(EntityId e) => World.ReadBytes(e, "Actor") is { Length: > 0xbf8 + 8 } b && (BitConverter.ToUInt64(b, 0xbf8) & 0x80) != 0;
+    private static int DeathPending(EntityId e) => World.ReadBytes(e, "Actor") is { Length: > 0xeaa } b ? b[0xeaa] : -1;
+    private static int Hp(EntityId e) => Combat.GetHealth(e)?.Current ?? int.MinValue;
+
+    private DecisionResult? EndOf(Func<DecisionResult, bool> match) =>
+        _ends.Values.SelectMany(l => l).Select(x => x.Result).LastOrDefault(match);
+
+    // DEATH-VETO, DEATH-ALREADY-ALIVE, DEATH-FILTER (with the catch-all's widening and its disposal), the allowed
+    // control. Spawned 1_Player templates (transient), no connected player.
+    private async Task DeathSuite(string run)
+    {
+        var who = new List<EntityId>();
+        var subs = new List<IDisposable>();
+        try
+        {
+            Check(Capabilities.Is("events.death"), $"[{run}] events.death is on ({Capabilities.Why("events.death")}; the lab needs \"preview\" in kiln.json)");
+            if (!Capabilities.Is("events.death")) return;
+            var at = new WorldPosition(3845, 835, 1480);
+            for (var i = 0; i < 4; i++)
+                who.Add(await Spawn.Entity("1_Player", new WorldPosition(at.X + 2 * i, at.Y, at.Z),
+                    options: new SpawnOptions { Tag = "decisions-api-test", Flags = SpawnFlags.Transient }));
+            await Wait(45);
+            EntityId p = who[0], q = who[1], r = who[2], s = who[3];
+            var max = Combat.GetHealth(p)?.Max ?? 0;
+            Check(max > 0 && who.All(e => Hp(e) > 0 && !DeadMark(e)), $"[{run}] four characters alive ({string.Join(", ", who.Select(e => $"{e.Value}: {Hp(e)}"))}, max {max})");
+
+            // DEATH-VETO: a filtered handler cancels; one event, one Prevented outcome, health 1, no raw dead or pending death
+            var mode = "cancel";
+            var dying = new List<EntityDyingEvent>();
+            subs.Add(Events.On<EntityDyingEvent>(d =>
+            {
+                dying.Add(d);
+                if (mode == "heal") Combat.SetHealth(d.Entity, d.MaximumHealth);
+                if (mode != "allow")
+                {
+                    d.SurvivalHealth = 1;
+                    d.Cancel();
+                }
+            }, EventFilter.ForEntity(p)));
+            await Wait(1);
+            Combat.SetHealth(p, 0);
+            await Wait(5);
+            var veto = dying.Count == 1 ? EndOf(x => x.Id == dying[0].Id) : null;
+            Check(dying.Count == 1 && dying[0].Entity == p && dying[0].Health <= 0 && dying[0].MaximumHealth == max && dying[0].Key.LifeSerial != 0 &&
+                  veto is { Status: DecisionTerminal.Prevented, Ok: true, RequestedHealth: 1, AppliedHealth: 1 } && Hp(p) == 1 && !DeadMark(p) && DeathPending(p) == 0,
+                $"[{run}] DEATH-VETO: {dying.Count} event(s), outcome {veto?.Status} requested {veto?.RequestedHealth} before {veto?.HealthBefore} applied {veto?.AppliedHealth}, " +
+                $"hp {Hp(p)}, raw dead {DeadMark(p)}, pending death {DeathPending(p)}");
+
+            // DEATH-ALREADY-ALIVE: the handler heals to the maximum before the answer; nothing overwrites the heal
+            mode = "heal";
+            dying.Clear();
+            Combat.SetHealth(p, 0);
+            await Wait(5);
+            var alive = dying.Count == 1 ? EndOf(x => x.Id == dying[0].Id) : null;
+            Check(dying.Count == 1 && alive is { Status: DecisionTerminal.AlreadyAlive, Ok: true } && Hp(p) == max && !DeadMark(p),
+                $"[{run}] DEATH-ALREADY-ALIVE: {dying.Count} event(s), outcome {alive?.Status} applied {alive?.AppliedHealth}: {alive?.Reason}, hp {Hp(p)} of {max}");
+
+            // DEATH-FILTER: P and Q lethal, only P watched: Q is never held (no request, no outcome) and dies at once
+            mode = "cancel";
+            dying.Clear();
+            var before = _ends.Count;
+            Combat.SetHealth(p, 0);
+            Combat.SetHealth(q, 0);
+            await Wait(5);
+            var aboutQ = EndOf(x => x.Subject == q);
+            Check(dying.Count == 1 && dying[0].Entity == p && aboutQ is null && DeadMark(q) && Hp(p) == 1 && !DeadMark(p),
+                $"[{run}] DEATH-FILTER: events {string.Join(",", dying.Select(d => d.Entity.Value))}, outcome about Q {aboutQ?.Status.ToString() ?? "none"}, " +
+                $"Q raw dead {DeadMark(q)}, P hp {Hp(p)}, {_ends.Count - before} new outcome(s)");
+
+            // a catch-all widens the interest to every death: R is held (and allowed); disposed, S is not held again
+            var catchAll = Events.On<EntityDyingEvent>(_ => { });
+            await Wait(1);
+            Combat.SetHealth(r, 0);
+            await Wait(5);
+            var aboutR = EndOf(x => x.Subject == r);
+            Check(aboutR is { Status: DecisionTerminal.Allowed, Ok: true } && DeadMark(r),
+                $"[{run}] DEATH-FILTER widened by an unfiltered handler: R outcome {aboutR?.Status.ToString() ?? "none"}, R raw dead {DeadMark(r)}");
+            catchAll.Dispose();
+            await Wait(2);
+            Combat.SetHealth(s, 0);
+            await Wait(5);
+            var aboutS = EndOf(x => x.Subject == s);
+            Check(aboutS is null && DeadMark(s), $"[{run}] DEATH-FILTER narrowed again after the dispose: S outcome {aboutS?.Status.ToString() ?? "none"}, S raw dead {DeadMark(s)}");
+
+            // the allowed control: nobody cancels, the game lets P die
+            mode = "allow";
+            dying.Clear();
+            Combat.SetHealth(p, 0);
+            await Wait(5);
+            var allowed = dying.Count == 1 ? EndOf(x => x.Id == dying[0].Id) : null;
+            Check(dying.Count == 1 && allowed is { Status: DecisionTerminal.Allowed, Ok: true } && DeadMark(p),
+                $"[{run}] the allowed control: outcome {allowed?.Status}, P raw dead {DeadMark(p)}, hp {Hp(p)}");
+            await Wait(3);
+            Check(EndOf(x => x.Subject == p && x.Id != allowed?.Id && x.Id.Request > (allowed?.Id.Request ?? 0)) is null,
+                $"[{run}] a corpse is not asked about again");
+        }
+        catch (Exception e)
+        {
+            Check(false, $"[{run}] the death suite threw: {e}");
+        }
+        finally
+        {
+            foreach (var sub in subs) sub.Dispose();
+            foreach (var e in who)
+                if (Spawn.Exists(e)) Spawn.Destroy(e);
+            await Wait(3);
+        }
     }
 
     private List<(DecisionResult Result, ulong Step)>? Ended(DecisionId id) => _ends.TryGetValue(id, out var list) ? list : null;

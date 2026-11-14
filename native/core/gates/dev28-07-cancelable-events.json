@@ -1,0 +1,3 @@
+{ "gates": [
+    { "name": "events.death", "checks": ["07-events.decision-rollback"] }
+] }

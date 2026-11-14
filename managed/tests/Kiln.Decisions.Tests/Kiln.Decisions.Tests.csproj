@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- Unit tests of Kiln.Api's dispatcher of decisions (DecisionBroker) with no game: its own code on the test kit's
-       fakes of kiln.decisions and kiln.window_clock, and the fake's table against the header's batch protocol. -->
+       fakes of kiln.decisions and kiln.window_clock, and the fake's table against the header's batch protocol; the
+       services' producers (Kiln.Combat: deaths) on the same fakes. -->
   <PropertyGroup>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
@@ -18,5 +19,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../Kiln.TestKit/Kiln.TestKit.csproj" />
+    <!-- Kiln.Combat's producer of cancelable deaths (DeathDecisionsTests) on the kit's kiln.combat -->
+    <ProjectReference Include="../../services/Kiln.Combat/Kiln.Combat.csproj" />
   </ItemGroup>
 </Project>

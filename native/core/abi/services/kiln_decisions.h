@@ -38,7 +38,7 @@
  *
  * Threads. attach, detach, interest, enqueue_prepared, the batch calls, answer, resolve_entity, reevaluate_pickup:
  * the world thread in a world-safe phase (kiln_window_clock.h), KILN_ERR_WRONG_THREAD otherwise. supported_kinds:
- * any thread. window_begin and window_end are called by the core only.
+ * any thread. window_begin and window_end are called by the core only. set_death_guard (since 0.2.0-dev.28): any thread.
  */
 #pragma once
 #include <stddef.h>
@@ -161,6 +161,11 @@ typedef struct KilnDecisionOutcomeV1 {
     char reason[192];
 } KilnDecisionOutcomeV1;
 
+/* The native death guard (since 0.2.0-dev.28, set_death_guard below). */
+#define KILN_DEATH_GUARD_PASS 0u
+#define KILN_DEATH_GUARD_SKIP 1u
+typedef uint32_t(KILN_CALL* KilnDeathGuardFn)(uint64_t world_epoch, uint32_t entity, int32_t health);
+
 typedef struct KilnDecisionsApiV1 {
     KilnServiceHeader header;
     /* Bit n is set when kind n has a producer that is installed and on. Kind 33 is never set in v1. */
@@ -197,6 +202,19 @@ typedef struct KilnDecisionsApiV1 {
     /* Core only: after all Pre subscribers / after WaitWorldJobs, before the Post subscribers. */
     void(KILN_CALL* window_begin)(uint64_t world_epoch, uint64_t step);
     void(KILN_CALL* window_end)(uint64_t world_epoch, uint64_t step);
+
+    /* ======== since 0.2.0-dev.28: the native guard seam (19d-pets). Check header.size covers it before calling. ========
+     * set_death_guard: `guard` is asked at the death boundary for every entity whose health is 0 or less, BEFORE the
+     * producer looks at any interest (so it runs also while no mod listens for a death), on the thread the game's death
+     * program runs on: the world thread or a worker, inside the simulation. It returns KILN_DEATH_GUARD_PASS (0: not
+     * guarded, the death goes on as without it, or into an EntityDyingEvent decision when a mod listens) or
+     * KILN_DEATH_GUARD_SKIP (1: skip this entity's death visit in this step; nothing is filed, nothing is written).
+     * A guard is native code of a pinned module: it calls no managed code and no tick-only service, keeps no game
+     * pointer, and must be cheap (it also runs for every corpse of the world, once a step). One guard at a time: a
+     * second owner gets KILN_ERR_UNAVAILABLE; `guard` NULL removes the owner's. Keep the module loaded while a guard
+     * is set. KILN_ERR_UNAVAILABLE as well while the death hook is not installed (capability decisions.native_guards
+     * says why). Any thread. */
+    KilnResult(KILN_CALL* set_death_guard)(KilnOwner owner, KilnDeathGuardFn guard);
 } KilnDecisionsApiV1;
 
 #ifdef __cplusplus

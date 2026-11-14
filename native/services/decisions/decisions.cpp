@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 // kiln.decisions v1 (abi/services/kiln_decisions.h): the service around the broker (queue.h) and the metadata table
 // (metadata.h). This file holds what touches the process: the table's thread and phase checks, the world reads of
-// the metadata sampler, the world events. Producers (death, pickup, ...) are files of their own beside it.
+// the metadata sampler, the world events. Producers (death.cpp, ...) are files of their own beside it; host.h is
+// what they get from here.
 //
 // Rules of this module:
 //  - No hook calls managed code or a tick-only service. A hook copies a request and reads a verdict.
@@ -15,6 +16,7 @@
 #include <mutex>
 #include <vector>
 
+#include "host.h"
 #include "kiln_api.h"
 #include "metadata.h"
 #include "queue.h"
@@ -46,7 +48,10 @@ struct Interest {
 };
 std::mutex g_interest_mutex;
 Interest g_interest[64];
-bool g_budget_exceeded = false;  // world thread only
+std::atomic<uint32_t> g_interest_state[64];  // 0 none, 1 a list, 2 all: what a hook asks first, without the lock
+std::atomic<bool> g_budget_exceeded{false};   // written at window_begin
+std::atomic<uint64_t> g_epoch{0}, g_step{0};  // the window the step is in
+std::atomic<uint32_t> g_world_thread{0};      // the thread window_begin ran on
 
 // Decision kinds that need no native producer: a Pre adapter files them with enqueue_prepared.
 constexpr uint64_t kPreparedKinds =
@@ -122,6 +127,7 @@ KilnResult KILN_CALL d_detach(KilnOwner dispatcher) {
     if (rc == KILN_OK) {
         std::lock_guard lock(g_interest_mutex);
         for (auto& i : g_interest) i = Interest{};
+        for (auto& i : g_interest_state) i.store(0);
     }
     return rc;
 }
@@ -155,8 +161,10 @@ KilnResult KILN_CALL d_interest(KilnOwner dispatcher, const KilnDecisionInterest
     next.ids.assign(in->entities, in->entities + in->entity_count);
     std::sort(next.ids.begin(), next.ids.end());
     next.ids.erase(std::unique(next.ids.begin(), next.ids.end()), next.ids.end());
+    const uint32_t state = next.all ? 2u : next.ids.empty() ? 0u : 1u;
     std::lock_guard lock(g_interest_mutex);
     g_interest[in->kind] = std::move(next);
+    g_interest_state[in->kind].store(state);
     return KILN_OK;
 }
 
@@ -226,13 +234,17 @@ KilnResult KILN_CALL d_reevaluate_pickup(uint32_t, uint32_t, uint32_t* exposures
 // ---- step windows (core only) ----
 void KILN_CALL d_window_begin(uint64_t epoch, uint64_t step) {
     if (!g_on.load(std::memory_order_relaxed)) return;
-    // The metadata of this step: every entity an interest names. Producers add their discovery here.
+    g_epoch.store(epoch);
+    g_step.store(step);
+    g_world_thread.store(GetCurrentThreadId());
+    // The metadata of this step: every entity an interest names, and what the producers discover.
     static std::vector<uint32_t> wanted;  // world thread only; kept to avoid an allocation per step
     wanted.clear();
     {
         std::lock_guard lock(g_interest_mutex);
         for (const auto& i : g_interest) wanted.insert(wanted.end(), i.ids.begin(), i.ids.end());
     }
+    death_producer::discover(wanted);
     uint32_t misses = 0;
     const bool ok = g_metadata.rebuild(epoch, step, wanted, &misses);
     for (uint32_t i = 0; i < misses; ++i) g_broker->count_metadata_miss();
@@ -244,12 +256,15 @@ void KILN_CALL d_window_begin(uint64_t epoch, uint64_t step) {
     }
     g_budget_exceeded = !ok;
     g_broker->window_begin(epoch, step);
+    death_producer::window_begin(epoch, step);
 }
 
 void KILN_CALL d_window_end(uint64_t epoch, uint64_t step) {
     if (!g_on.load(std::memory_order_relaxed)) return;
     g_broker->window_end(epoch, step);
 }
+
+KilnResult KILN_CALL d_set_death_guard(KilnOwner owner, KilnDeathGuardFn guard) { return death_producer::set_guard(owner, guard); }
 
 const KilnDecisionsApiV1 kTable = {
     {sizeof(KilnDecisionsApiV1), KILN_DECISIONS_VERSION},
@@ -269,6 +284,7 @@ const KilnDecisionsApiV1 kTable = {
     &d_detach,
     &d_window_begin,
     &d_window_end,
+    &d_set_death_guard,
 };
 
 void KILN_CALL on_world(const KilnWorldEvent* e, void*) {
@@ -277,6 +293,7 @@ void KILN_CALL on_world(const KilnWorldEvent* e, void*) {
     g_clock->get(&s);
     g_broker->world_ended(s.step);
     g_metadata.clear();
+    death_producer::world_stopped();
     const Counters c = g_broker->counters();
     logf(KILN_LOG_INFO, "decisions: world stopped (filed %llu, dropped %llu, timeouts %llu, outcome gap %llu, metadata misses %llu)",
          static_cast<unsigned long long>(c.filed), static_cast<unsigned long long>(c.queue_dropped),
@@ -306,9 +323,62 @@ void KILN_CALL on_ready(void*) {
     g_on.store(true);
     logf(KILN_LOG_INFO, "decisions: on (requests %u, outcomes %u, metadata rows %u; players %s)", KILN_DECISIONS_MAX_ACTIVE,
          KILN_DECISIONS_MAX_OUTCOMES, KILN_DECISIONS_MAX_METADATA, g_players ? "from kiln.players" : "unknown: no kiln.players");
+    // Producers. The death hook decides decisions.native_guards (19d-pets' guard needs the hook) and, when the hook
+    // could not go in although events.death is not held and resolved, lowers events.death with the reason.
+    death_producer::ready();
+    if (g_caps) {
+        if (death_producer::installed()) {
+            g_caps->report(g_owner, ks("decisions.native_guards"), KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, ks("the death boundary's guard (set_death_guard)"));
+        } else {
+            g_caps->report(g_owner, ks("decisions.native_guards"), KILN_CAP_UNAVAILABLE, death_producer::why_not_reason(),
+                           ks(death_producer::why_not()));
+            if (death_producer::why_not_reason() == KILN_CAP_REASON_FAULTED || death_producer::why_not_reason() == KILN_CAP_REASON_SERVICE_MISSING)
+                g_caps->report(g_owner, ks("events.death"), KILN_CAP_UNAVAILABLE, death_producer::why_not_reason(), ks(death_producer::why_not()));
+        }
+    }
 }
 
 }  // namespace
+
+namespace host {
+const KilnApi* api() { return g_api; }
+KilnOwner owner() { return g_owner; }
+const KilnWorldApi* world() { return g_world; }
+const KilnCapsApi* caps() { return g_caps; }
+Broker& broker() { return *g_broker; }
+uint64_t epoch() { return g_epoch.load(std::memory_order_relaxed); }
+uint64_t step() { return g_step.load(std::memory_order_relaxed); }
+uint32_t world_thread() { return g_world_thread.load(std::memory_order_relaxed); }
+uint32_t interest_state(uint32_t kind) { return kind < 64 ? g_interest_state[kind].load(std::memory_order_relaxed) : 0; }
+bool interested(uint32_t kind, uint32_t entity) {
+    const uint32_t state = interest_state(kind);
+    if (state != 1) return state == 2;
+    std::lock_guard lock(g_interest_mutex);
+    const auto& ids = g_interest[kind].ids;
+    return std::binary_search(ids.begin(), ids.end(), entity);
+}
+bool holding() { return !g_budget_exceeded.load(std::memory_order_relaxed) && !g_broker->saturated(); }
+std::shared_ptr<const Table> table() { return g_metadata.table(); }
+bool resolve(uint32_t entity, Row* out) {
+    KilnWindowStateV1 s{};
+    if (!world_safe(&s)) return false;
+    bool miss = false;
+    if (g_metadata.resolve(s.world_epoch, s.step, entity, out, &miss)) return true;
+    if (miss) g_broker->count_metadata_miss();
+    return false;
+}
+void hook_kind(uint32_t kind) {
+    if (kind < 64) g_hook_kinds.fetch_or(1ull << kind);
+}
+void logf(int level, const char* fmt, ...) {
+    char b[512];
+    va_list ap;
+    va_start(ap, fmt);
+    const int n = std::vsnprintf(b, sizeof b, fmt, ap);
+    va_end(ap);
+    if (n > 0) g_api->log(g_owner, level, KilnStr{b, static_cast<size_t>(n < static_cast<int>(sizeof b) ? n : sizeof b - 1)});
+}
+}  // namespace host
 }  // namespace kiln::decisions
 
 extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api, KilnOwner owner, KilnPluginInfo* info) {

@@ -39,8 +39,10 @@ int main() {
     CHECK(offsetof(KilnDecisionOutcomeV1, subject) == 40);
     CHECK(offsetof(KilnDecisionOutcomeV1, requested_health) == 120);
     CHECK(offsetof(KilnDecisionOutcomeV1, reason) == 136);
-    CHECK(sizeof(KilnDecisionsApiV1) == 8 + 16 * sizeof(void*));
+    CHECK(sizeof(KilnDecisionsApiV1) == 8 + 17 * sizeof(void*));
     CHECK(offsetof(KilnDecisionsApiV1, window_begin) == 8 + 14 * sizeof(void*));
+    // appended in dev.28 after window_end: readers of the first table (136 bytes) stop before it
+    CHECK(offsetof(KilnDecisionsApiV1, set_death_guard) == 8 + 16 * sizeof(void*));
     CHECK(sizeof(KilnComponentChangeV1) <= 2048);
     CHECK(sizeof(KilnComponentWatchStatusV1) == 224);
     CHECK(sizeof(KilnComponentChangesApiV1) == 8 + 13 * sizeof(void*));
