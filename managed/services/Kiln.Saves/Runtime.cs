@@ -37,6 +37,8 @@ internal static unsafe class SavesRuntime
         {
             // per-world configs (Kiln.Api's WorldConfig) keep their files in this world's sidecar folder, and follow it
             WorldConfigs.DirectoryProvider = OpenWorldDirectory;
+            // Kiln services' own values on saved entities (Kiln.World's transform scale) live in the entity attachments
+            ServiceEntityData.Store ??= new ServiceEntities();
             Ensure();
             SavesCaps.Rows.Ensure();
         }
@@ -338,6 +340,7 @@ internal static unsafe class SavesRuntime
         {
             DrainEvents();
             Store.Entities.Tick();
+            Store.Entities.HandOverServiceValues();
             Store.Instances.Tick();
             InstanceCapabilities.Refresh();
         }

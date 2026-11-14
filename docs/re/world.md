@@ -254,6 +254,24 @@ the entity on the tracker's list **[dis]**; the type only decides whether the ma
   `ServerToggleState.lastChange`, written tracked together with `state`, read 0 after the restart while `state` was
   kept. Which fields a type's save record holds is the game's; kiln.world does not know it.
 
+### Transform scale and the save
+Lab **[rt]**, dev.28 fix round, server 26430253.
+- A tracked write of `CurrentTransform.transform.scale` (+40, three float32) on a placed chest
+  (`Prop_Decoration_T1_Storage_24_Magic`, a player base's prop) answered `Written`, kept one step later, `SaveTracked`
+  true; after the shutdown save and a restart the chest stood at 1, 1, 1 again (dev.28 13b labs, and the fix round's
+  boot 2 below, where Kiln's own log shows the game's value before Kiln sets it again: `(1, 1, 1) -> (1.25, 0.75, 1.5)`).
+- The save file says why: `world0.ksd` (SV2C container, zstd blocks) before and after that write holds the three floats
+  nowhere, neither as float32 nor as float16, in any block. The `base00` block (the player base) is byte-identical
+  before and after; `entity_chunk00` changed only where the run's other writes (Fuel) went. The entity records seen in
+  `entity_chunk00` are template + float32 position + a packed rotation, with no scale field. So the save's record of a
+  placed prop has no transform scale, whatever the write tracking marks: the loaded prop takes its template's.
+- Kiln keeps the scale beside the save instead (kiln.saves' entity attachments, bundle `entity/kiln:world`) and sets it
+  again through the same tracked write when the loaded entity is matched: world loaded 12:28:35.510 (step 260),
+  matched 12:28:36.378, set again 12:28:36.576 (`world-writes-test`: `PASS world.scale-persist`, then `PASS
+  world.scale-forgotten` after a restore and a third start). Putting the scale into the game's own record would need a
+  hook in the base/entity serializer and its loader plus a format the game does not know: large, and broken by any
+  change of the format.
+
 ### Lab results (lab `dev27-world`, the standard save with a base, no player; server 26430253) **[rt]**
 `mods/tests/world-writes-test`, built with Kiln.Sdk (its manifest lists `NetworkFuel`, `UsedItem`,
 `ServerToggleState` and the made-up `NoSuchComponentKiln`; the build added `Fuel` and `ScaleComponent` from the
