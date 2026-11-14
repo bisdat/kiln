@@ -424,11 +424,14 @@ without the adapter's flag, the other target, a pass still `preparing`, the mod 
 another version) proves nothing either way, and the mod shows Waiting with the word `startup`. While ShroudForge
 runs, the EML rows of packages in its mods folder are read the same way (ShroudForge runs a package there only while
 its `extended.mod.json` says `enabled: true`, on the sides its `targets` name): switched off there they show Off,
-word `off-in-shroudforge`, with where to switch it on (Play in the launcher for Kiln's copy; the ShroudForge group or
-ShroudForge's own Modloader for the player's own folder), and the EML engine line counts them as a problem; on, a mod
+word `off-in-shroudforge`, with where to switch it on (Play in the launcher for Kiln's copy; for the player's own
+folder the words promised on Nexus, 2026-11-14: "You put this mod into ShroudForge's folder yourself, and ShroudForge
+has it switched off.", then Mods > ShroudForge or removing the folder and pressing Play), and the EML engine line
+counts them as a problem; on, a mod
 with a startup part shows `applied` when the record lists it, else Waiting `unconfirmed`. Kiln's EML copies are not
 repeated in the ShroudForge group; a player's own legacy EML folder there (no `extended.mod.json`) is listed in it,
-switched off, with the switch that writes ShroudForge's file. Enshwick's mods
+switched off, with the switch that writes ShroudForge's file, and the same words ("Switch it on below, or remove the
+folder and add the mod with Add mods in the Kiln launcher."; `ModCatalog.HandEmlOff`). Enshwick's mods
 come from the profile and mods folder, with loader state from `enshwick.json`; a folder there that another kind owns
 (a profile entry of another kind, a `native-plugin.ini`, a `mod.json`, or Kiln's placement marker of another kind) is
 not listed as Enshwick's. XHL companions (the profile's `mods.xhl`, and folders with XHL-Core's `native-plugin.ini` in

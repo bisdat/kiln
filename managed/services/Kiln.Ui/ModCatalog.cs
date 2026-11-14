@@ -1002,8 +1002,7 @@ internal static class ModCatalog
                 Folder = sub, Source = "folder", State = on ? state : ModRunState.Disabled, Word = on ? runs ? "unconfirmed" : mode ?? "" : "disabled",
                 // an EML package without ShroudForge's file was never switched on there: say so, it is not a choice the
                 // player made
-                Reason = on ? why : SfFacts(sub) is null ? "An EML mod in ShroudForge's mods folder. ShroudForge keeps it off until its switch is turned on."
-                    : "Switched off in ShroudForge's settings.", Help = on ? help : null,
+                Reason = on ? why : SfFacts(sub) is null ? HandEmlOff : "Switched off in ShroudForge's settings.", Help = on ? help : null,
             });
         }
         // kiln-eml reported its handoff before ShroudForge prepared. A later failure supersedes that prediction.
@@ -1050,6 +1049,20 @@ internal static class ModCatalog
     /// <summary>The word of an EML row whose package ShroudForge has switched off (kiln-eml's state too).</summary>
     internal const string OffInShroudForge = "off-in-shroudforge";
 
+    /// <summary>An EML mod the player put into ShroudForge's mods folder by hand, which ShroudForge keeps switched off (a
+    /// legacy EML package has no extended.mod.json until its switch is first turned on). The words promised to a player on
+    /// Nexus (2026-11-14): what happened, nothing about ShroudForge's files (that read as "Kiln wants a ShroudForge file
+    /// from an EML mod"). kiln-manage (the launcher) and kiln-eml (kiln.log) say the same.</summary>
+    internal const string HandEmlOff = "You put this mod into ShroudForge's folder yourself, and ShroudForge has it switched off.";
+
+    /// <summary>What helps <see cref="HandEmlOff"/> on its own row in Mods &gt; ShroudForge (the switch is drawn below it).</summary>
+    internal const string HandEmlOffHelp = "Switch it on below, or remove the folder and add the mod with Add mods in the Kiln launcher.";
+
+    /// <summary>What helps <see cref="HandEmlOff"/> on the EML row of a profile mod whose folder is the player's.</summary>
+    internal const string HandEmlOffProfileHelp =
+        "Switch it on in Mods > ShroudForge (its own row there), or remove the folder and press Play in the Kiln launcher: the mod is in " +
+        "your profile, so Kiln then places its own copy, switched on.";
+
     internal const string OffInShroudForgeHelp =
         "ShroudForge runs it only once its switch is on: the reason above says where to switch it on. Then start the game again.";
 
@@ -1077,13 +1090,14 @@ internal static class ModCatalog
             return m with
             {
                 State = ModRunState.Disabled, Word = OffInShroudForge,
-                Reason = (p.Extended
+                // Kiln's copy: the launcher switches it on; the player's own folder: the promised words
+                Reason = !kilns ? HandEmlOff : (p.Extended
                     ? "In ShroudForge's mods folder, but its extended.mod.json (the file that holds ShroudForge's switch) says enabled: false"
                     : "In ShroudForge's mods folder, but it has no extended.mod.json, the file that holds ShroudForge's switch, and ShroudForge keeps a package off until its switch is on") +
                     ", so nothing applies it this start.",
                 Help = kilns
                     ? "Press Play in the Kiln launcher (or activate the profile again): Kiln switches it on in ShroudForge's settings. Then start the game again."
-                    : "Kiln never writes into your own folder: switch it on in the ShroudForge group of this page (its own row) or in ShroudForge's own Modloader, then start the game again.",
+                    : HandEmlOffProfileHelp,
             };
         if (side.Length > 0 && p.Targets.Count > 0 && !(side == "server" ? p.Targets.Contains("server") : p.Targets.Contains("client") || !p.Targets.Contains("server")))
             return m with { State = ModRunState.NotLoaded, Word = "other side", Reason = $"ShroudForge runs it on the {string.Join(" and ", p.Targets)} only.", Help = null };
@@ -1228,6 +1242,13 @@ internal static class ModCatalog
         try { p = ShroudForgePackages.Read(folder); }
         catch (Exception) { return m with { State = m.State == ModRunState.Disabled ? m.State : ModRunState.Waiting, Word = "unconfirmed", Reason = "Its package settings cannot be read; ShroudForge's per-mod activation is not confirmed." }; }
         var repair = ShroudForgeUi.RepairNote(p);
+        // a legacy EML package the player put into ShroudForge's folder: the promised words (the switch below writes the file)
+        if (!p.Enabled && !p.Extended && m.Source == "folder")
+            return m with
+            {
+                State = ModRunState.Disabled, Word = "disabled", Reason = HandEmlOff,
+                Help = HandEmlOffHelp + " " + (p.SwitchLive ? "ShroudForge starts it while you play." : "It applies at the next game start."),
+            };
         if (!p.Enabled && !p.Extended)
             return m with
             {

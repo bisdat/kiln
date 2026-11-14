@@ -508,8 +508,8 @@ public sealed class ModCatalogTests : IDisposable
         Assert.DoesNotContain(s.Mods, m => m.Engine == "shroudforge" && ids.Contains(m.Id));
         var hand = Mod(s, "shroudforge", "hand-made");
         Assert.Equal((ModRunState.Disabled, "folder"), (hand.State, hand.Source));
-        Assert.Contains("no extended.mod.json", hand.Reason);
-        Assert.Contains("Switch it on below", hand.Help);
+        Assert.Equal("You put this mod into ShroudForge's folder yourself, and ShroudForge has it switched off.", hand.Reason);
+        Assert.StartsWith("Switch it on below, or remove the folder and add the mod with Add mods in the Kiln launcher.", hand.Help);
 
         // with ShroudForge's report of this start gone, kiln-eml's own word still says it does not run
         File.Delete(Path.Combine(State, "shroudforge.json"));
@@ -521,6 +521,41 @@ public sealed class ModCatalogTests : IDisposable
         var off = Mod(Read(), "eml", "more-gliders");
         Assert.Equal(ModRunState.Disabled, off.State);
         Assert.DoesNotContain("Turn it on in the Kiln launcher (Profiles)", off.Help ?? "");
+    }
+
+    /// <summary>Player report (Nexus, 14 Nov 2026): an EML mod copied by hand into ShroudForge's mods folder, while Kiln
+    /// hosts ShroudForge, stays off (no extended.mod.json), and the page's words read as "Kiln wants a ShroudForge file
+    /// from an EML mod". Its row says the promised words, on the ShroudForge row (with the switch) and on the EML row of a
+    /// profile mod that folder serves, and nothing about ShroudForge's files.</summary>
+    [Fact]
+    public void A_hand_copied_eml_mod_shroudforge_keeps_off_says_the_promised_words()
+    {
+        var mods = Dir("mods");
+        foreach (var id in new[] { "hand-copied", "hand-profile" })
+        {
+            File.WriteAllText(Path.Combine(Dir("mods", id), "mod.json"), $$"""{"id":"{{id}}","name":"Name {{id}}","version":"1.0.0","capabilities":["patch"]}""");
+            File.WriteAllText(Path.Combine(Dir("mods", id, "src"), "mod.lua"), "return {}");
+        }
+        Profile(new() { ["eml"] = [new { id = "hand-profile", version = "1.0.0", path = Path.Combine(_root, "library", "eml", "hand-profile") }] });
+        Write("eml.json", new
+        {
+            format = 1, pid = Pid, phase = "aside", aside = "ShroudForge owns startup asset patching and runs EML packages in its mods folder",
+            mods = new[] { new { id = "hand-profile", source = "profile", path = Path.Combine(mods, "hand-profile"), state = "off-in-shroudforge", reason = "ShroudForge (hosted by Kiln) runs this start." } },
+        });
+        Write("shroudforge.json", new { pid = Pid, mode = "hosted", menu = "kiln", runtime = "running", modsDir = mods, startupPrepared = true });
+        var s = Read();
+
+        const string Promised = "You put this mod into ShroudForge's folder yourself, and ShroudForge has it switched off.";
+        var copied = Mod(s, "shroudforge", "hand-copied");
+        Assert.Equal((ModRunState.Disabled, Promised), (copied.State, copied.Reason));
+        Assert.StartsWith("Switch it on below, or remove the folder and add the mod with Add mods in the Kiln launcher.", copied.Help);
+        var row = Mod(s, "eml", "hand-profile");
+        Assert.Equal((ModRunState.Disabled, Promised), (row.State, row.Reason));
+        Assert.Equal("Switch it on in Mods > ShroudForge (its own row there), or remove the folder and press Play in the Kiln launcher: the mod is in your profile, so Kiln then places its own copy, switched on.", row.Help);
+        // its own row in Mods > ShroudForge carries the switch
+        Assert.Equal(Promised, Mod(s, "shroudforge", "hand-profile").Reason);
+        foreach (var m in new[] { copied, row })
+            Assert.DoesNotContain("extended.mod.json", (m.Reason ?? "") + (m.Help ?? ""));
     }
 
     [Fact]
