@@ -291,7 +291,11 @@ KilnResult vox_write(const KilnBuildWrite* w, KilnBuildResult* result, uint32_t 
         r.flags |= KILN_BUILD_R_VERIFIED;
         // nothing to commit, but the cells were asked for: a kept write takes them out of the transient journal, a
         // transient one makes them this session's (an earlier session's copy is not put back over them)
-        if (!(w->flags & KILN_BUILD_F_DRY_RUN)) transient_note(wo, wd, old.data(), cur.data(), addressed.data(), transient);
+        if (!(w->flags & KILN_BUILD_F_DRY_RUN)) {
+            if (!transient) transient_note_kept(wo, wd, addressed.data());
+            else if (KilnResult rc = transient_note_before(wo, wd, old.data(), cur.data(), addressed.data()); rc != KILN_OK)
+                return done(rc);
+        }
         return done(KILN_OK);
     }
     // policy, on the box actually changed (metres)
@@ -319,11 +323,10 @@ KilnResult vox_write(const KilnBuildWrite* w, KilnBuildResult* result, uint32_t 
         return done(KILN_OK);
     }
     if (transient) {
-        if (KilnResult rc = transient_admit(wo, wd, dirty.data()); rc != KILN_OK) return done(rc);
-        // on record BEFORE the commit (and on disk first while a save is under way): a save's serializer that reads the
-        // store after the commit finds the cells journaled. A cell the commit then does not write still holds its old
-        // value and is not put back.
-        transient_note(wo, wd, old.data(), cur.data(), addressed.data(), true);
+        // on disk BEFORE the commit, or no commit: no save can hold a transient cell the journal does not have. A cell
+        // the commit then does not write still holds its old value and is not put back.
+        if (KilnResult rc = transient_note_before(wo, wd, old.data(), cur.data(), addressed.data()); rc != KILN_OK)
+            return done(rc);
     }
 
     // commit the changed blocks only (unchanged blocks would turn generated terrain into stored edits)
@@ -355,7 +358,7 @@ KilnResult vox_write(const KilnBuildWrite* w, KilnBuildResult* result, uint32_t 
     r.blocks_written = blocks;
     r.flags |= KILN_BUILD_R_CHANGED;
     if (!transient) {
-        transient_note(wo, wd, old.data(), cur.data(), addressed.data(), false);  // kept now: out of the journal
+        transient_note_kept(wo, wd, addressed.data());  // kept now: out of the journal
         regions_keep(wo, wd);
         r.flags |= KILN_BUILD_R_KEPT;
     }

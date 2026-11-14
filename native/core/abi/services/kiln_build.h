@@ -60,7 +60,7 @@ enum {
                                              writes the cells anyway (a base, a chunk another edit keeps) Kiln puts the
                                              earlier cells back at the next start (journal: kiln/data/kiln.build/transient).
                                              Not with KILN_BUILD_F_UNLOADED (INVALID_ARGUMENT); UNAVAILABLE when the
-                                             journal is full or kiln.saves is missing */
+                                             journal is full or cannot be written, or the world's id is unknown */
 };
 
 /* KilnBuildResult.flags */
