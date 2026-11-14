@@ -33,14 +33,14 @@ static LOCK: Mutex<()> = Mutex::new(());
 /// drops what the earlier one added. The lock is a file of its own next to the memory, `<game id>.notices-seen.lock`,
 /// held for the read and the write; the operating system releases it when the process ends, however it ends. Where it
 /// cannot be taken (a folder that refuses locks) the take goes on without it: a notice shown once more at worst.
-fn lock_across_processes(path: &std::path::Path) -> Option<std::fs::File> {
+fn lock_across_processes(path: &std::path::Path) -> Option<crate::util::LockedFile> {
     let lock = path.with_extension("lock");
     if let Some(dir) = lock.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
     let file = std::fs::OpenOptions::new().create(true).truncate(false).read(true).write(true).open(&lock).ok()?;
     file.lock().ok()?;
-    Some(file)
+    Some(crate::util::LockedFile(file))
 }
 
 fn file(dirs: &DataDirs, game_id: &str) -> Result<PathBuf> {
