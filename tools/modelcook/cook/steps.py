@@ -13,7 +13,7 @@ from kfc.blob import Decoder
 from kfc.blobwrite import Encoder
 from kfc.util import guid_bytes, guid_text
 
-from . import gltf, material as MB, rendermodel as RM, skin as SK
+from . import fabric as FB, features as FT, gltf, material as MB, physics as PH, rendermodel as RM, skin as SK
 from .validate import validate
 
 
@@ -151,12 +151,104 @@ def model_identity(guid, base_guid, mode):
     return out_guid, mode or ("override" if base_guid and out_guid == _norm_guid(base_guid) else "new")
 
 
+def joint_index(target, name):
+    """A skeleton joint by name: as the skeleton names it, or j<index> (j17, j17_Head), as tools/kfc and `kiln skeleton player` write them. None when it has none."""
+    j = target.index.get(name)
+    if j is None and (m := re.fullmatch(r"j(\d+)(_.*)?", name)):
+        j = int(m[1])
+    return j if j is not None and 0 <= j < len(target) else None
+
+
+def _collider_skin(target, joint, where):
+    if target is None:
+        if joint is not None:
+            raise StepError(f"{where}.joint: {joint!r}: the model has no skeleton, so a collider follows no joint: leave \"joint\" out (or null)")
+        return {"jointIndices": [0, 0, 0, 0], "jointWeights": [0, 0, 0, 0]}
+    if joint is None:
+        raise StepError(f"{where}.joint: the model is skinned: name the joint the collider follows")
+    j = joint_index(target, joint)
+    if j is None:
+        raise StepError(f"{where}.joint: {joint!r} is not a joint of skeleton {target.guid} ({target.source}, {len(target)} joints)")
+    if j > 255:
+        raise StepError(f"{where}.joint: {joint!r} is joint {j}: a collider's skin holds joints below 256")
+    return {"jointIndices": [j, 0, 0, 0], "jointWeights": [255, 0, 0, 0]}
+
+
+def _colliders(physics, target):
+    """The model's keen::RenderModelClothColliderData: every cloth entry's colliders once (bind pose, the game's axes), and per cloth mesh an
+    instance naming its own (as the game's models have one per cloth mesh)."""
+    spheres, capsules, where = [], [], {}
+    for ci, c in enumerate(physics.cloth):
+        for i, x in enumerate(c.colliders):
+            where.setdefault(x, f"{c.where}.colliders[{i}]")
+    for x in physics.colliders():
+        w = where[x]
+        if isinstance(x, PH.Sphere):
+            spheres.append((x, {"center": FB._v3(FB.to_game((x.x, x.y, x.z))), "radius": x.radius, "skinningData": _collider_skin(target, x.joint, w)}))
+        else:
+            capsules.append((x, {"center0": FB._v3(FB.to_game((x.a.x, x.a.y, x.a.z))), "radius0": x.a.radius,
+                                 "center1": FB._v3(FB.to_game((x.b.x, x.b.y, x.b.z))), "radius1": x.b.radius,
+                                 "skinningData": _collider_skin(target, x.joint, w + ".a")}))
+    if not spheres and not capsules:
+        return dict(RM.NO_COLLIDER)
+    s_at = {x: i for i, (x, _) in enumerate(spheres)}
+    c_at = {x: i for i, (x, _) in enumerate(capsules)}
+    instances = [{"sphereIndices": [s_at[x] for x in c.colliders if x in s_at], "capsuleIndices": [c_at[x] for x in c.colliders if x in c_at]} for c in physics.cloth]
+    return {"hasSkinning": target is not None, "ignoreClothCollider": False, "spheres": [r for _, r in spheres], "capsules": [r for _, r in capsules],
+            "instances": instances}
+
+
+def _cloth(t, doc, lod0, physics, target, features, global_scale):
+    """The cloth of a model step: its RenderClothMesh per entry, its colliders, which primitives they are (rendermodel.cloth_block). doc: LOD 0's glTF,
+    bound; lod0: its prepared primitives (game space)."""
+    where = physics.where
+    try:
+        FT.require(PH.CLOTH, features, f"{where}.cloth")
+    except FT.FeatureOff as e:
+        raise StepError(str(e)) from e
+    problems = RM.layout_problems(t, "cloth")
+    if problems:
+        raise StepError(f"{where}.cloth: this game's cloth types differ from the ones this cook writes ({problems[0]}{f'; {len(problems) - 1} more' if len(problems) > 1 else ''}): "
+                        "it writes no cloth for this build. The mod's other models cook as before")
+    if global_scale not in (None, 1.0):
+        raise StepError(f"{where}.cloth: the model's globalScale is {global_scale:g}: cloth needs 1 in this version (the game scales its colliders by it)")
+    meshes, primitives = [], {}
+    for ci, c in enumerate(physics.cloth):
+        at = [pi for pi, p in enumerate(doc["primitives"]) if p.get("mesh") == c.mesh and p.get("primitive") == c.primitive]
+        if not at:
+            raise StepError(f"{c.where}: {doc['file']} has no mesh {c.mesh} with a primitive {c.primitive} in its scene (reference_* nodes are left out)")
+        if len(at) > 1:
+            raise StepError(f"{c.where}: mesh {c.mesh} of {doc['file']} is used by {len(at)} nodes: cloth is one primitive in one place, make the copies meshes of their own")
+        pi = at[0]
+        prim = doc["primitives"][pi]
+        if prim.get("morphs"):
+            raise StepError(f"{c.where}: the primitive has morph targets ({', '.join(sorted(prim['morphs']))}): cloth with morph targets is not written in this version")
+        try:
+            mesh = PH.physical_mesh(c, prim["positions"], prim["indices"], prim.get("influences") if target is not None else None)
+            result = FB.cook(mesh.positions, mesh.triangles, mesh.pin, c.mass_kg)
+            res = FB.mesh_resource(mesh, result, prim["positions"], lod0[pi]["uvs"], prim["indices"], skin=mesh.influences if target is not None else None)
+        except PH.PhysicsError as e:
+            raise StepError(str(e)) from e
+        except FB.FabricError as e:
+            raise StepError(f"{c.where}: {e}") from e
+        meshes.append(FB.cloth_mesh(c, res))
+        primitives[pi] = ci + 1
+    return RM.cloth_block(meshes, primitives, _colliders(physics, target), target is not None)
+
+
 def model(k, t, gltf_files, base, guid=None, mode=None, name=None, material=None, material_map=None,
-          pixel_sizes=None, stem=None, subdir="cooked", target=None, global_scale=None, own_materials=None, attach=None):
+          pixel_sizes=None, stem=None, subdir="cooked", target=None, global_scale=None, own_materials=None, attach=None,
+          physics=None, features=frozenset()):
     """glTF (one file per LOD, LOD 0 first) -> RenderModel .bin + renderData .blob. `base` is a game model whose materials are the defaults, or None. With `target`
     (a skin.Target) the model is skinned on that skeleton, and with `attach` too (a slot's name or j<index>) rigid on one of its joints. Morph targets named as keen::BlendShapeFlags
     become blend shapes. own_materials {"blocks", "mod"}: the mod's MaterialBlocks, which material and material_map may name.
+    physics: the model's physics.ModelPhysics (cloth: one LOD, unit globalScale, no morph target on a cloth primitive); features: the cook
+    features the recipe turns on (cook/features.py), which have to include the ones the physics needs.
     Returns (files {relative name: bytes}, entries, report)."""
+    if physics is not None and physics.chains:
+        raise StepError(f"{physics.where}.chains: this cook does not write bone chains yet")
+    if physics is not None and physics.cloth and len(gltf_files) > 1:
+        raise StepError(f"{physics.where}.cloth: the model has {len(gltf_files) - 1} more LOD file(s): a model with cloth has one LOD in this version")
     th = t.get("keen::RenderModel")["hash"]
     base_desc, base_key = {"materials": []}, None
     if base is not None:
@@ -221,7 +313,8 @@ def model(k, t, gltf_files, base, guid=None, mode=None, name=None, material=None
         if global_scale is None:
             global_scale = base_desc["globalScale"] if base_desc.get("hierarchy") == target.guid else global_scale_of(k, t, target.guid) if k.by_guid(target.guid) else 1.0
         skin = {"hierarchy": target.guid, "hierarchyJointCount": len(target), "globalScale": global_scale}
-    desc, blob = RM.build(lods, materials, base_desc, name, pixel_sizes, skin=skin, morphs=morphs)
+    cloth = _cloth(t, docs[0], lods[0], physics, target, features, global_scale) if physics is not None and physics.cloth else None
+    desc, blob = RM.build(lods, materials, base_desc, name, pixel_sizes, skin=skin, morphs=morphs, cloth=cloth)
     data = RM.encode(t, desc)
     stem = stem or name
     fb, fo = f"{subdir}/{stem}.bin", f"{subdir}/{stem}.blob"
@@ -230,6 +323,10 @@ def model(k, t, gltf_files, base, guid=None, mode=None, name=None, material=None
     report.update({"op": "model", "guid": out_guid, "mode": mode, "base": base_key.guid if base_key else None, "bin": fb, "blob": fo,
                    "bin_size": len(data), "blob_size": len(blob), "content_hash": desc["renderData"]["hash"],
                    "materials": materials, "warnings": warnings})
+    if cloth:
+        report["cloth"] = {"meshes": [{"particles": m["data"]["fabric"]["numParticles"], "renderVertices": len(m["data"]["renderPositions"]),
+                                       "phases": len(m["data"]["fabric"]["sets"]), "pinned": len(m["data"]["skinnedVertexIndices"])} for m in cloth["data"]["meshes"]],
+                           "spheres": len(cloth["collider"]["spheres"]), "capsules": len(cloth["collider"]["capsules"]), "skinned": cloth["data"]["hasSkinning"]}
     entries = model_entries(out_guid, mode, fb, fo)
     files = {fb: data, fo: blob}
     if target is not None:

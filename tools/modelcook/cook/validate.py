@@ -10,7 +10,8 @@ from kfc.blobwrite import Encoder
 from . import rendermodel as RM, skin as S
 
 
-LEFT_EMPTY = ("cloth.", "chain.", "collider.", "sdf.", "skinnedTree.", "blendShapes.", "sleeves.", "foliageAnimationShaderData.")  # optional data a cooked model doesn't carry
+# optional data a cooked model may not carry, where its vanilla base does: a model with physics carries cloth (and its collider), read by _check_cloth
+LEFT_EMPTY = ("cloth.", "chain.", "collider.", "sdf.", "skinnedTree.", "blendShapes.", "sleeves.", "foliageAnimationShaderData.")
 
 
 def _keys(v, prefix=""):
@@ -104,6 +105,48 @@ def _check_morphs(d, blob, checks, report):
         checks["blend_needs_a_skin"] = False
 
 
+def _check_cloth(d, checks, problems, report):
+    """The cloth read back: the relations every one of the game's 320 cloth meshes keeps (chapter 16e, 2.1), its selectors and its colliders."""
+    cl = d["cloth"]
+    meshes = cl["meshes"]
+    n = len(meshes)
+    sel = [ms["clothMeshIndex"] for ms in d["meshes"]]
+    checks["cloth_selectors_one_based"] = 1 <= n <= 255 and sorted(x for x in sel if x) == list(range(1, n + 1))
+    relations = True
+    lod0 = d["lods"][0]
+    for ms in d["meshes"][lod0["meshOffset"]:lod0["meshOffset"] + lod0["meshCount"]]:
+        if ms["clothMeshIndex"]:
+            relations = relations and ms["vertexCount"] == len(meshes[ms["clothMeshIndex"] - 1]["data"]["renderPositions"])
+    for i, m in enumerate(meshes):
+        q, f = m["data"], m["data"]["fabric"]
+        np_ = f["numParticles"]
+        nr = len(q["renderPositions"])
+        tri = [x for t in q["simulationTriangles"] for x in (t["x"], t["y"], t["z"])]
+        ok = (len(q["simulationPositions"]) == np_ and len(q["simulationInvMasses"]) == np_ and len(q["simulationVertexWeights"]) == np_
+              and len(q["simulationSkinningData"]) in (0, np_) and len(q["simulationStiffnesses"]) in (0, np_) and not q["simulationBlendshapeDeltas"]
+              and len(q["renderUvs"]) == nr and len(q["renderSimulationVertexIndices"]) == nr and all(x < np_ for x in q["renderSimulationVertexIndices"])
+              and all(t[k] < nr for t in q["renderTriangles"] for k in "xyz")
+              and len(f["indices"]) == 2 * len(f["restValues"]) and bool(f["sets"]) and f["sets"][-1] == len(f["restValues"]) and f["sets"] == sorted(f["sets"])
+              and f["phaseIndices"] == list(range(len(f["sets"]))) and len(f["anchors"]) == np_ and len(f["tetherLengths"]) == np_
+              and all(x < np_ for x in f["indices"] + f["anchors"] + f["triangles"]) and tri == f["triangles"]
+              and q["skinnedVertexIndices"] == [v for v, x in enumerate(q["simulationInvMasses"]) if x == 0]
+              and all(j < d["hierarchyJointCount"] for s in q["simulationSkinningData"] for j, w in zip(s["jointIndices"], s["jointWeights"]) if w))
+        if not ok:
+            problems.append(f"cloth mesh {i}: its arrays do not agree")
+        relations = relations and ok
+    checks["cloth_arrays_agree"] = relations
+    checks["cloth_totals"] = (cl["totalSimulationTriangleCount"] == sum(len(m["data"]["simulationTriangles"]) for m in meshes)
+                              and cl["totalRenderVertexCount"] == sum(len(m["data"]["renderPositions"]) for m in meshes))
+    co = d["collider"]
+    expanded = len(co["spheres"]) + 2 * len(co["capsules"])
+    checks["cloth_colliders_within_32"] = expanded <= 32 and all(
+        all(x < len(co["spheres"]) for x in inst["sphereIndices"]) and all(x < len(co["capsules"]) for x in inst["capsuleIndices"]) for inst in co["instances"]) and (
+        not co["instances"] or len(co["instances"]) == n)
+    checks["no_sleeves"] = not d["sleeves"]
+    report["cloth"] = {"meshes": n, "particles": [m["data"]["fabric"]["numParticles"] for m in meshes], "spheres": len(co["spheres"]),
+                       "capsules": len(co["capsules"]), "skinned": cl["hasSkinning"]}
+
+
 def validate(kfc, types, data, blob, against=None, gltf_docs=None, target=None, own_materials=()):
     """kfc may be None (no game files): the game-dependent checks (materials, vanilla comparison) are skipped.
     target: the skin.Target a skinned model was bound to, for the checks against its skeleton. own_materials: GUIDs the mod's MaterialBlocks make."""
@@ -144,6 +187,10 @@ def validate(kfc, types, data, blob, against=None, gltf_docs=None, target=None, 
         _check_skin(d, blob, target, checks, problems, report)
     if d["blendShapes"]:
         _check_morphs(d, blob, checks, report)
+    if d["cloth"]:
+        _check_cloth(d, checks, problems, report)
+    elif any(ms["clothMeshIndex"] for ms in d["meshes"]):
+        checks["cloth_selectors_without_cloth"] = False
     if against and kfc is not None:
         vk = ResourceKey(against, th, 0)
         vd = dec.decode(th, kfc.read(vk))

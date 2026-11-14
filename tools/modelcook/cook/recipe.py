@@ -39,6 +39,11 @@ says what to draw with; without `guid` such a model's GUID follows from <mod>:mo
 A mod with no assets/cook.json of modelcook's still has those: looks_recipe() is the recipe they make on their own (`modelcook.py looks MODDIR`, which `kiln cook` runs), with its report in
 cook-report.looks.json.
 
+Cloth and bone chains (cook/physics.py, docs/kiln/modding/models.md#physics): the mod's assets/physics.json names them per model file, and the
+model step of that file writes them. They need cook features that are off until the game has been seen to show them right (cook/features.py):
+`"experimental": ["modelcook.cloth", "modelcook.chains2"]` turns them on for this mod, with one warning line. A model with physics whose
+feature is off, and physics for a model no step cooks, are refused by name.
+
 A step may name its own cooker with `"tool"` (default: the file's `tool`), so one recipe can cook models and sounds:
 `{ "tool": "soundcook", "op": "sound", ... }` is run by tools/soundcook. modelcook runs only its own steps (a step's
 index stays its position in `steps`) and leaves the others to their tool (`modelcook.py recipe` starts them unless
@@ -73,7 +78,7 @@ from pathlib import Path
 
 from kfc.archive import ResourceKey
 
-from . import cookpaths as CP, material as MB, steps as S, worn as W
+from . import cookpaths as CP, features as FT, material as MB, physics as PH, steps as S, worn as W
 
 OPS = ("model", "visual", "worn")
 TOOL = "modelcook"
@@ -153,6 +158,10 @@ def load(path, given=None):
         raise RecipeError(f"{p}: format {doc.get('format')!r}, expected 1")
     if doc.get("tool", TOOL) not in KNOWN_TOOLS:
         raise RecipeError(f"{p}: tool {doc.get('tool')!r} (known: {', '.join(KNOWN_TOOLS)})")
+    try:
+        FT.experimental(doc, str(p))
+    except FT.FeatureError as e:
+        raise RecipeError(str(e)) from e
     for i, st in enumerate(doc.get("steps", [])):
         tool = tool_of(doc, st)
         if tool not in KNOWN_TOOLS:
@@ -308,6 +317,25 @@ def _mod_dir(path):
     return p.parent.parent
 
 
+PHYSICS = ("assets", "physics.json")  # the mod's physics, from its folder
+
+
+def physics_of(path):
+    """The physics of the mod a recipe belongs to: its assets/physics.json as one tree (cook/physics.py), empty when it has none."""
+    f = _mod_dir(path).joinpath(*PHYSICS)
+    if not f.is_file():
+        return PH.Physics()
+    try:
+        return PH.load(f, "/".join(PHYSICS))
+    except PH.PhysicsError as e:
+        raise RecipeError(str(e)) from e
+
+
+def model_key(base_dir, gltf, mod_dir):
+    """A model step's glTF as physics.json names it: its path in the mod's folder."""
+    return Path(os.path.relpath((Path(base_dir) / gltf).resolve(), Path(mod_dir).resolve())).as_posix()
+
+
 def own_material_guids(path):
     """The GUIDs of the MaterialBlocks of the mod a cooked file belongs to."""
     mod_dir = _mod_dir(path)
@@ -347,6 +375,10 @@ def sources_of(doc, path=None):
         sk = _skeleton_step(doc, st.get("skeleton"))
         if sk:
             out.add(sk["gltf"])
+    if path is not None and own_steps(doc):
+        ph = _mod_dir(path).joinpath(*PHYSICS)
+        if ph.is_file():
+            out.add(os.path.relpath(ph, Path(path).resolve().parent))
     return sorted(out)
 
 
@@ -402,6 +434,15 @@ def run(path, k, t, exe_sha256=None, update_manifest=False, given=None):
 
     files, entries, reports = {}, [], []
     mod_dir = _mod_dir(p)
+    turned_on = FT.experimental(doc, str(p))
+    physics = physics_of(p)
+    for key, mp in sorted(physics.models.items()):  # refused here, before any step: a server's cook refuses what a client's would
+        for feature in mp.features():
+            try:
+                FT.require(feature, turned_on, f"{mp.where}.{'cloth' if feature == PH.CLOTH else 'chains'}")
+            except FT.FeatureOff as e:
+                raise RecipeError(str(e)) from e
+    with_physics = set()
     own = None
     mod_files = {}  # what goes in the mod's folder rather than beside the recipe: blocks made from a glTF, and PNGs that were embedded in it
     for i, st in own_steps(doc):
@@ -416,6 +457,9 @@ def run(path, k, t, exe_sha256=None, update_manifest=False, given=None):
             raise RecipeError(f"step {i} ({op}): base {base_id} is a {inputs[base_id]['type']}, needs {want}")
         if op == "model":
             gl = [str(base_dir / st["gltf"])] + [str(base_dir / x) for x in st.get("lods", [])]
+            key = model_key(base_dir, st["gltf"], mod_dir)
+            if physics.get(key) is not None:
+                with_physics.add(key)
             mm = {n: _resolve(g, inputs) for n, g in st.get("materialMap", {}).items()}
             material = _resolve(st.get("material"), inputs)
             from_gltf = []
@@ -445,7 +489,8 @@ def run(path, k, t, exe_sha256=None, update_manifest=False, given=None):
             f, e, r = S.model(k, t, gl, inputs[base_id]["guid"] if base_id else None, guid=_model_guid(doc, st, inputs, p),
                               mode=st.get("mode"), name=st.get("name"), material=material,
                               material_map=mm, pixel_sizes=st.get("pixelSizes"), stem=st.get("stem"), subdir=out,
-                              target=_target(doc, st, inputs, k, t, base_dir, p), global_scale=st.get("globalScale"), own_materials=own, attach=st.get("attach"))
+                              target=_target(doc, st, inputs, k, t, base_dir, p), global_scale=st.get("globalScale"), own_materials=own, attach=st.get("attach"),
+                              physics=physics.get(key), features=turned_on)
             r["warnings"] = r.get("warnings", []) + from_gltf
         else:
             f, e, r = S.visual(k, t, inputs[base_id]["guid"], _resolve(st["model"], inputs), _resolve(st["guid"], inputs),
@@ -454,6 +499,12 @@ def run(path, k, t, exe_sha256=None, update_manifest=False, given=None):
         files.update(f)
         entries.extend(e)
         reports.append(r)
+
+    unused = sorted(set(physics.models) - with_physics)
+    if unused:
+        mp = physics.models[unused[0]]
+        raise RecipeError(f"{mp.where}: no model step of this mod cooks {unused[0]} (a step's glTF, a worn look's or a body's model, by its path in the mod): "
+                          "its cloth and chains would be lost")
 
     # Every file this cook writes is checked before the first one is written: a step's stem or name with ".." or a "/" in it, or a link in
     # the mod's folders, would lead out of assets/cooked. The blocks made from a glTF go to blocks/<stem>.materials.json and nowhere else.
@@ -515,6 +566,11 @@ def run(path, k, t, exe_sha256=None, update_manifest=False, given=None):
                          **({"legacyMarks": True} if legacy and marked else {})),
         "steps": reports,
     }
+    if turned_on:
+        report["features"] = sorted(turned_on)
+        warning = FT.warning(turned_on)
+        if warning:
+            report["warnings"] = [warning]
     report_bytes = (json.dumps(report, indent=2) + "\n").encode()
     _checked(report_file, CP.write, report_bytes)
     # what this cook wrote into assets/cooked, recorded in the game it read: what that game's kiln.assets loads (cookpaths.receipt)
