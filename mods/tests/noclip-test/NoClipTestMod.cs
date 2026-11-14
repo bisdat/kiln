@@ -155,6 +155,12 @@ public sealed class NoClipTestMod : Mod
 
     // NoClip on, down into the rock, then the player leaves there (and, with closeWorld, the world closes and loads again
     // in between); back, Kiln holds collision off and moves the character to its last free position.
+    // NoClipReturns.NoteEvery: the kept position follows the last free one in steps of half a metre
+    private const double NoClipReturnsNoteEvery = 0.6;
+
+    private static double Distance(WorldPosition a, WorldPosition b) =>
+        Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y) + (a.Z - b.Z) * (a.Z - b.Z));
+
     private async Task LeaveInside(EntityId f, WorldPosition home, bool closeWorld)
     {
         var what = closeWorld ? "a world close" : "a leave";
@@ -195,7 +201,7 @@ public sealed class NoClipTestMod : Mod
         var back = await Until(() => ended.Count > 0, 200);
         await Steps(10);
         var at = World.Position(f)!.Value;
-        Check(back && ended[0] is { Reason: NoClipEnd.Left, RestoredTo: { } r } && free is { } p1 && Math.Abs(r.Y - p1.Y) < 0.01 &&
+        Check(back && ended[0] is { Reason: NoClipEnd.Left, RestoredTo: { } r } && free is { } p1 && Distance(r, p1) < NoClipReturnsNoteEvery &&
               Math.Abs(at.Y - r.Y) < 1.5,
             $"{what}: back inside the rock, the character is put at its last free position: {(ended.Count > 0 ? ended[0].ToString() : "no event")}; {Line(f, ground)}");
         var stands = await Until(() => PlayerStates.Is(f, PlayerStateId.Grounded) && Loco(f) != 11, 200);

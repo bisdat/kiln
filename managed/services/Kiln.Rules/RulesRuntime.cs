@@ -190,7 +190,19 @@ internal static unsafe class RulesRuntime
         {
             PlayerState? st;
             lock (Gate) PlayersByEntity.TryGetValue(e, out st);
-            if (st != null) Leave(st);
+            if (st == null) return;
+            // as Kiln, as when Resolve sees a player go: what Kiln holds for the player in other services (a landing
+            // grace's invulnerability) is Kiln's to release, whichever mod's call led here
+            var outer = ModContext.CurrentMod;
+            ModContext.CurrentMod = null;
+            try
+            {
+                Leave(st);
+            }
+            finally
+            {
+                ModContext.CurrentMod = outer;
+            }
         }
     }
 
