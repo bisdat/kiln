@@ -287,6 +287,12 @@ public sealed record BodyBlock : INpcBlock, IPremade
     public string? Workshop { get; init; }
     /// <summary>The item that summons a roster NPC of this body, which a <see cref="RosterBlock"/>'s tool starts from.</summary>
     public string? Tool { get; init; }
+    /// <summary>Primitives of <see cref="Model"/> the game simulates as cloth, cooked into the model when the mod builds (a body in blocks/*.json;
+    /// one written in C# asks for what that build cooked). Needs the cook feature <c>modelcook.cloth</c> and scale 1.</summary>
+    public IReadOnlyList<ModelClothBlock>? Cloth { get; init; }
+    /// <summary>Joint chains of <see cref="Model"/>'s skeleton the game swings, cooked into the model when the mod builds. Needs the cook feature
+    /// <c>modelcook.chains2</c> and scale 1.</summary>
+    public IReadOnlyList<ModelChainBlock>? Chains { get; init; }
 
     // the premades JSON names by key (ItemParts.Part reads this field)
     internal static readonly BodyBlock[] All = Bodies.All;

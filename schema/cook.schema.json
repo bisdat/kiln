@@ -66,6 +66,7 @@
         "guidNamespace": { "$ref": "#/$defs/guid", "description": "soundcook: GUIDs of new sounds are UUIDv5(namespace, \"<op>:<name>\"); pick it once, never change it." },
         "blockSounds": { "type": "array", "items": { "type": "string" }, "description": "soundcook: the steps `soundcook.py blocks` wrote from the sound blocks of blocks/*.json; it replaces them on its next run. Leave it to the tool." },
         "voiceoverFallback": { "anyOf": [{ "$ref": "#/$defs/voLang" }, { "type": "null" }], "description": "soundcook: the mod-wide default for empty voice slots (null / absent: silence, as the game)." },
+        "experimental": { "type": "array", "uniqueItems": true, "items": { "enum": ["modelcook.cloth", "modelcook.chains2"] }, "description": "modelcook: cook features that wait for their game test, turned on for this mod (the cook prints one warning line): modelcook.cloth (cloth), modelcook.chains2 (bone chains). A model that asks for one that is off is refused." },
         "inputs": {
           "type": "object",
           "description": "Vanilla inputs read from the installed game: id -> {guid, type, part}.",

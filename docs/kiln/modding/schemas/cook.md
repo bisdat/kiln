@@ -97,6 +97,7 @@ assets/cook.json: model, sound and animation steps.
 | Key | Type | Required | Notes |
 |---|---|---|---|
 | `blockSounds` | array of string |  | soundcook: the steps `soundcook.py blocks` wrote from the sound blocks of blocks/*.json; it replaces them on its next run. Leave it to the tool. |
+| `experimental` | array of `"modelcook.cloth"` \| `"modelcook.chains2"` |  | modelcook: cook features that wait for their game test, turned on for this mod (the cook prints one warning line): modelcook.cloth (cloth), modelcook.chains2 (bone chains). A model that asks for one that is off is refused. |
 | `game` | [game](#game) |  |  |
 | `guidNamespace` | [guid](#guid) |  | soundcook: GUIDs of new sounds are UUIDv5(namespace, "<op>:<name>"); pick it once, never change it. |
 | `inputs` | object |  | Vanilla inputs read from the installed game: id -> {guid, type, part}. |
