@@ -20,10 +20,30 @@ internal sealed class FakeReadyHost : IReadyHost
     public Func<ulong, Exception?> RuleThrows = _ => null;
     public readonly List<ContentDefinition> Items = [];
 
+    /// <summary>Every pass the runtime hooked, as BlocksBridge.OnReady keeps it: it runs again at each content application, and on a
+    /// tick when its ledger asks again.</summary>
+    public readonly List<(Func<bool> Run, Func<bool> Again)> Hooked = [];
+    /// <summary>What a late reference to the game's data resolves to.</summary>
+    public Guid Resolved = new("0b0b0b0b-0000-4000-8000-00000000beef");
+
     public void OnReady(Func<bool> run, Func<bool> again)
     {
+        Hooked.Add((run, again));
         if (Deferred) Passes.Add(run);
         else Run(run);
+    }
+
+    /// <summary>A content application (the game reloads its content, or a new world): every hooked pass runs again.</summary>
+    public void Apply()
+    {
+        foreach (var (run, _) in Hooked.ToList()) Run(run);
+    }
+
+    /// <summary>The next ready tick: a pass whose ledger asks again runs.</summary>
+    public void Tick()
+    {
+        foreach (var (run, again) in Hooked.ToList())
+            if (again()) Run(run);
     }
 
     public readonly List<Exception> Thrown = [];
@@ -61,7 +81,7 @@ internal sealed class FakeReadyHost : IReadyHost
     public IReadOnlyList<GameDataDefinition> GameDataDefinitions() => [];
     public IReadOnlyList<ContentDefinition> ContentDefinitions() => Items;
     public IReadOnlyList<ContentDefinition> Placeholders() => [];
-    public Guid? ResolveLate(LateRef r) => Missing.Contains(r.Value) ? null : new Guid("0b0b0b0b-0000-4000-8000-00000000beef");
+    public Guid? ResolveLate(LateRef r) => Missing.Contains(r.Value) ? null : Resolved;
     public void RegisterProgram(ulong owner, Guid guid, byte[] blob) => Programs.Add((owner, guid));
     public void ProgramsChanged() { }
     public IReadOnlyList<string> ApplyRules(ulong owner, string json, string source)

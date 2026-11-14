@@ -415,10 +415,20 @@ kiln-items.dll; capability `items.tool_wear_debit`.
   `UnknownItem`, `PendingContent` or `TooManyRules`; `Reason` is `""` (not null) when `Ok`. A cost outside 0..32767 or
   no item throws `ArgumentException`; the capability off throws `KilnUnavailableException` naming
   `items.tool_wear_debit`. `Items.ToolWearStatus(tool)` says the cost in effect, whose rule it is, and why not.
-- **Events** on the server tick: `ToolWearRuleChangedEvent` when the cost in effect or the mod whose rule it is changes
-  (an identical replay raises none); `ToolDurabilityChangedEvent` once per debit that changed the value (a cost of 0 or
-  a debit the skill saved raises none), with the item instance as it was at the debit. The durability events are raised
-  only while a rule was set through the managed API (`Items.SetToolWearPerDebit` or a block) in this process.
+- **Events** on the server tick: `ToolWearRuleChangedEvent` once per change of the cost in effect or of whose rule it
+  is (an identical replay raises none), in the order the changes were made, whoever made them: a mod (raised before its
+  call returns), a native plugin through `kiln.toolwear` or a plugin's owner going away (raised on the next tick). Its
+  `Generation` grows by one per change, so five changes within one tick are five events even when the last state equals
+  the first. `ToolDurabilityChangedEvent` once per debit that changed the value (a cost of 0 or a debit the skill saved
+  raises none), with the item instance as it was at the debit, also under a native plugin's rule.
+- **Native plugins:** `define`, `remove`, `changes` and `status` as `kiln_toolwear.h` says; `rule_changes` (appended in
+  0.2.0-dev.28: check `header.size`) reads the rule changes after a generation, oldest first, as
+  `KilnToolWearRuleChange` records (item, cause `DEFINED`, `REMOVED` or `RETIRED`, cost, owner, rule handle and mod id
+  before and after, generation). Reading takes nothing away: each reader keeps its own cursor, so a plugin's reads do
+  not cost Kiln's managed events. The service holds the last 1024 changes and says how many a reader that fell behind
+  missed (`*lost`); Kiln.Items logs such a gap as a warning. `changes` (durability) is different: it takes the records
+  away, and Kiln.Items drains it every tick from the first one, so a plugin that drains it too takes records from the
+  managed `ToolDurabilityChangedEvent`s.
 
 ### Lab test
 `mods/tests/toolwear-test` (with its second rule owner `toolwear-test-b`; how to run it is in its project file) drives
@@ -426,7 +436,11 @@ the game's own debits of a real pickaxe in a lab: HitEvents through a declared p
 26430253 (lab `dev28-16b-tool-durability`, 2026-11-14), 11 of 11 PASS: a torch refused; one hit at cost 7 spends 7, two
 hits 14, a hit over the game's cap 0; the armor a hit debits loses the game's 1 while the weapon loses 7; a projectile
 spawn spends 7 at cost 7 and 0 at cost 0; another mod's rule on top (3) and its removal (back to 7, no event for an
-identical replay); forced parallel mode (the lab switch) with exact debits; the clamp at 0.
+identical replay); forced parallel mode (the lab switch) with exact debits; the clamp at 0. Since the fix round
+(lab `dev28-16b-tool-durability-events`, 2026-11-14, 12 of 12 PASS) a native rule owner as well (`native/`,
+kiln-toolwear-test.dll in `kiln/plugins`): its define, its replacement, a second native owner's define and remove, all
+in one tick, then its retirement: five `ToolWearRuleChangedEvent`s in order with consecutive generations, a hit under
+its rule spends 6 with its durability event, and the mod's rule is back after the retirement.
 
 **Limits (not run):** worker threads: the two programs whose debits a rule changes (`durability_loss`,
 `actor_spawn_entity`) run on the world thread also in parallel mode, by their flags, so the hooks ran on one thread;

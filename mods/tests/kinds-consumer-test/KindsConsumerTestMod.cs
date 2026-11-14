@@ -220,6 +220,32 @@ public sealed class KindsConsumerTestMod : Mod
         Mods.Reload(Context.Info.Id, r => { });
     }
 
+    /// <summary>replay-new-generation (16d review R2): the game applies its content again; the applied lanterns are lowered again from
+    /// their frozen products (the provider is not asked), replayed, and published in a new generation for the new content.</summary>
+    private async Task ReplayInNewGeneration()
+    {
+        var before = Blocks.Application(_camp!);
+        var content = Content.Status().Generation;
+        var (compiles, items, changes) = (LanternProbe.Compiles, OwnItems, _changes);
+        Info($"replay: camp generation {before.Generation}, content generation {before.ContentGeneration} (now {content}); reloading the packs");
+        Content.ReloadPacks();
+        await Until(() => Content.Status().Generation != content, 600);
+        var now = Content.Status().Generation;
+        await Until(() => Blocks.Application(_camp!) is var r && (r.ContentGeneration == now || r.State != BlockApplyState.Applied), 1200);
+        await Steps(3);   // its change event arrives on a later tick
+        var after = Blocks.Application(_camp!);
+        Info($"replay: camp {after.State} generation {after.Generation}, content generation {after.ContentGeneration} (now {Content.Status().Generation}) {after.Reason}");
+        Check(now != content, $"replay-new-generation: reloading the packs made a new content generation ({content} -> {now})");
+        Check(after.Ok && after.State == BlockApplyState.Applied && after.ContentGeneration == now && after.Generation > before.Generation,
+            $"replay-new-generation: the camp lantern is applied for the new content in a new generation ({before.Generation} -> {after.Generation}, content {before.ContentGeneration} -> {after.ContentGeneration})");
+        Check(after.Guid == before.Guid && Blocks.Find("camp") != null && Content.Items.Get(after.GameName) != null && OwnItems == items,
+            $"replay-new-generation: the same block and item, no new item ({items} -> {OwnItems})");
+        Check(LanternProbe.Compiles == compiles, $"replay-new-generation: the provider was not asked ({LanternProbe.Compiles - compiles} call(s))");
+        var night = Blocks.Find("long-night") is { } h ? Blocks.Application(h) : null;
+        Check(night is { Ok: true } && night.ContentGeneration == now, $"replay-new-generation: the JSON lantern is replayed too ({night?.State} content generation {night?.ContentGeneration})");
+        Check(_changes > changes, $"replay-new-generation: a change event for the new generation ({_changes - changes})");
+    }
+
     private void Resume(string[] phase)
     {
         _pass = int.Parse(phase[4]);
@@ -264,6 +290,7 @@ public sealed class KindsConsumerTestMod : Mod
         Check(camp.Guid.ToString() == phase[1] && night.Guid.ToString() == phase[2], "provider-reload: the lanterns have the identities they had before the reload");
         Check(OwnItems == int.Parse(phase[6]), $"provider-reload: as many items as before it ({phase[6]} -> {OwnItems}): each owner's products went and came once");
         Check(LanternProbe.Compiles == 2, $"provider-reload: the new provider compiled this load's two lanterns and nothing else ({LanternProbe.Compiles})");
+        await ReplayInNewGeneration();
         File.Delete(PhaseFile);
         await Steps(1);
         Log.Info($"kinds-consumer-test: DONE pass={_pass} fail={_fail}");

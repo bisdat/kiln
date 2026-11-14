@@ -98,9 +98,11 @@ one is dropped, with a warning (`ShadowedByFile`) in kiln.log and `state/boot.js
 - The format and the producer are in [boot-gamedata.md](boot-gamedata.md).
 
 ## Reading your mod's settings
-In this build `Config.Register<T>()` cannot be called in `OnBoot`: it needs the tick thread and throws
-`InvalidOperationException` ("This must run on the tick thread"), and the mod is then left out. Keep values `OnBoot`
-needs in code or in a data file of the mod for now.
+`Config.Register<T>().Value` works in `OnBoot`: it reads the mod's config file and its defaults as `OnLoad` does,
+and writes nothing. Register the same config again in `OnLoad`; that registration takes over the read, so `OnBoot` and
+the running mod see the same values. Writes, `Reload`, a `Changed` handler and `RegisterWorld` are refused in `OnBoot`
+("… is not available in OnBoot (it runs before the game's first tick); call it in OnLoad"). Details and an example:
+[config.md](../config.md#in-modonboot).
 
 ## When a mod fails
 - **`OnBoot` throws**, or a staged definition does not compile: the mod is out. None of its definitions and none of its

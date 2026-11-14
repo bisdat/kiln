@@ -21,6 +21,11 @@ internal sealed class KindApplication
     public bool Settling;
     /// <summary>Refused, and its owner could not be revoked: what it registered stays until the mod unloads (said in the reason).</summary>
     public bool LeftOver;
+    /// <summary>Applied, and being replayed for this later content generation (lowered again, its parts at content ready run again):
+    /// its new generation is published when that is done. Null while no replay waits.</summary>
+    public ulong? Replay;
+    /// <summary>The programs it put in the consumer's ledger when it was published.</summary>
+    public Guid[] Published = [];
 
     public BlockApplyResult Result => new()
     {
@@ -100,6 +105,8 @@ internal static class KindApply
         KindCompiler.RefuseInsideCompile("Blocks.Apply");
         using var tx = KindTransaction.Begin(target);
         var label = $"{plan.KindId} {plan.Name}";
+        // what the products expand to is counted while Kiln's compilers emit it (R3): a refusal comes before the work, not after
+        using var budget = KindBudget.Open(label);
         try
         {
             // each product waits under its staged name: one that names another (ProductName) stages it first
@@ -225,12 +232,19 @@ internal static class KindApply
         return app;
     }
 
-    /// <summary>The tick: plans that wait for content are tried again.</summary>
+    /// <summary>The tick: plans that wait for content are tried again, and applied plans are replayed in a later content generation.</summary>
     internal static void PumpAll()
     {
-        KindApplication[] waiting;
-        lock (Gate) waiting = [.. Apps.Values.Where(a => a.State == BlockApplyState.PendingContent && !a.Settling)];
+        KindApplication[] waiting, stale = [];
+        var now = ContentGeneration();
+        lock (Gate)
+        {
+            waiting = [.. Apps.Values.Where(a => a.State == BlockApplyState.PendingContent && !a.Settling)];
+            if (now is { } g) stale = [.. Apps.Values.Where(a => a.State == BlockApplyState.Applied && a.ContentGeneration != g && a.Replay != g)];
+        }
         foreach (var app in waiting) TryCommit(app);
+        if (now is { } generation)
+            foreach (var app in stale) Relower(app, generation);
     }
 
     private static void Set(KindApplication app, BlockApplyState state, string reason)
@@ -324,7 +338,7 @@ internal static class KindApply
             return;
         }
         BlockRuntime.Promote(ledger);
-        Publish(app);
+        Publish(app, generation);
     }
 
     /// <summary>The plan's parts at content ready are done (<paramref name="problems"/>: what went wrong, none when nothing did). Applied, or
@@ -344,7 +358,7 @@ internal static class KindApply
         {
             if (!app.Target.Handles.TryGetValue(plan.Name, out var other) || ReferenceEquals(other, app.Handle))
             {
-                Publish(app);
+                Publish(app, app.ContentGeneration);
                 return;
             }
             cause = "NameTaken";
@@ -376,26 +390,233 @@ internal static class KindApply
         catch (Exception x) when (x is not OutOfMemoryException) { BlocksBridge.Log(LogLevel.Error, $"blocks: {app.Target.Id}: block {app.Plan.Name}: its owner could not be revoked: {x.Message}"); }
     }
 
-    /// <summary>Every registration was taken and every part is done: the block exists from here on.</summary>
-    private static void Publish(KindApplication app)
+    /// <summary>Every registration was taken and every part is done: the block exists from here on, in a new application generation
+    /// (the first, or one for a later content generation after its replay).</summary>
+    private static void Publish(KindApplication app, ulong contentGeneration)
     {
         var plan = app.Plan;
         var label = $"{plan.KindId} {plan.Name}";
         var ledger = app.Stage.Ledger;
+        var replay = app.State == BlockApplyState.Applied;
         var json = new JsonObject { ["kind"] = plan.KindId, ["primary"] = app.Stage.Primary.Name, ["inputHash"] = plan.InputHash };
         var products = new JsonObject();
         foreach (var staged in app.Stage.Blocks) products[staged.Name] = staged.Low.Json.DeepClone();
         json["products"] = products;
+        foreach (var guid in app.Published.Where(g => !ledger.Programs.ContainsKey(g))) app.Target.Programs.TryRemove(guid, out _);
         foreach (var (guid, program) in ledger.Programs) app.Target.Programs[guid] = program;
+        app.Published = [.. ledger.Programs.Keys];
         app.Target.Handles[plan.Name] = app.Handle;
         app.Target.Lowered[plan.Name] = json;
         app.Target.ReportDirty = true;
         var before = app.Result;
         lock (Gate) app.Generation = ++_generation;
+        app.ContentGeneration = contentGeneration;
         app.State = BlockApplyState.Applied;
         app.Reason = "";
-        BlocksBridge.Log(LogLevel.Info, $"blocks: {app.Target.Id}: {label} -> {app.Stage.Blocks.Count} block(s) of Kiln's own ({string.Join(", ", app.Stage.Blocks.Select(b => b.Label))})");
+        BlocksBridge.Log(LogLevel.Info, replay
+            ? $"blocks: {app.Target.Id}: {label} replayed for content generation {contentGeneration} (application generation {app.Generation})"
+            : $"blocks: {app.Target.Id}: {label} -> {app.Stage.Blocks.Count} block(s) of Kiln's own ({string.Join(", ", app.Stage.Blocks.Select(b => b.Label))})");
         Changed(app, before);
+    }
+
+    // ---- a later content generation (16d review R2) ---------------------------------------------------------------------
+
+    /// <summary>An applied plan in a later content generation (the game reloaded its content, or a new world): its frozen products are
+    /// lowered again by Kiln's compilers against this content, never by the provider. A lowering that registers the same keeps its
+    /// registrations and replays its parts at content ready; another one is registered again under a new owner. The plan's new
+    /// generation is published only when that is done; a failure refuses it and revokes its owner (<see cref="Withdraw"/>).</summary>
+    private static void Relower(KindApplication app, ulong generation)
+    {
+        var plan = app.Plan;
+        if (!plan.Consumer.Alive() || app.State != BlockApplyState.Applied) return;   // its retirement takes it away
+        var dependencies = plan.Dependencies.Select(d => d.Application?.Invoke() ?? BlockApplyState.Applied).ToArray();
+        if (dependencies.Any(s => s is BlockApplyState.Refused or BlockApplyState.Removed))
+        {
+            Withdraw(app, generation, "DependencyRefused", "a block resolved during Compile was refused, replaced or unloaded");
+            return;
+        }
+        if (dependencies.Any(s => s == BlockApplyState.PendingContent)) return;   // tried again on the tick
+        KindStage stage;
+        try { stage = Stage(app.Target, plan); }
+        catch (KindDependencyPending) { return; }
+        catch (BlockError e)
+        {
+            Withdraw(app, generation, "RelowerFailed", e.Message);
+            return;
+        }
+        if (stage.Primary.Guid != app.Handle.Guid || stage.Primary.GameName != app.Handle.GameName)
+        {
+            Withdraw(app, generation, "RelowerFailed", $"its primary lowers to {stage.Primary.GameName} ({stage.Primary.Guid}), not {app.Handle.GameName} ({app.Handle.Guid})");
+            return;
+        }
+        // programs that name the game's values, finished against this content (the copy is the new lowering's own)
+        var late = new Dictionary<Guid, byte[]>();
+        foreach (var (guid, builder) in stage.Ledger.LateBuilders)
+        {
+            if (builder.Finish(guid, BlockRuntime.Host.ResolveLate, out var failed) is not { } blob)
+            {
+                Withdraw(app, generation, "ContentReadyFailed", $"block {failed!.Block}, {failed.Path}: the game has no {failed.Kind} \"{failed.Value}\"");
+                return;
+            }
+            late[guid] = blob;
+        }
+        var had = app.Stage.Ledger;
+        var hadLate = had.LateBuilders.Keys.ToDictionary(g => g, g => had.Programs.TryGetValue(g, out var p) ? p.Blob : []);
+        if (Digest(stage, late) == Digest(app.Stage, hadLate))
+        {
+            Arm(app, had, generation);
+            return;
+        }
+        Reapply(app, stage, generation);
+    }
+
+    /// <summary>What a lowering registers and runs, as one hash: two lowerings with the same digest register the same.</summary>
+    private static string Digest(KindStage stage, IReadOnlyDictionary<Guid, byte[]> late)
+    {
+        using var h = System.Security.Cryptography.IncrementalHash.CreateHash(System.Security.Cryptography.HashAlgorithmName.SHA256);
+        void Text(string s)
+        {
+            h.AppendData(System.Text.Encoding.UTF8.GetBytes(s));
+            h.AppendData([0]);
+        }
+        foreach (var b in stage.Blocks)
+        {
+            Text(b.Name);
+            Text(KindJson.Canonical(b.Low.Json));
+            b.Low.Digest(h);
+        }
+        foreach (var (guid, blob) in late.OrderBy(x => x.Key))
+        {
+            Text(guid.ToString());
+            h.AppendData(blob);
+            h.AppendData([0]);
+        }
+        return Convert.ToHexString(h.GetHashAndReset());
+    }
+
+    /// <summary>The same registrations stay: the plan's parts at content ready run again for <paramref name="generation"/>, and only a pass
+    /// that starts from now on is that replay (one the game began before is not). A newer generation arms again, and this one's
+    /// callback is discarded.</summary>
+    private static void Arm(KindApplication app, ModBlocks ledger, ulong generation)
+    {
+        lock (Gate) app.Replay = generation;
+        if (!ledger.HookWanted)
+        {
+            Replayed(app, ledger, generation, []);   // nothing of it runs at content ready
+            return;
+        }
+        ledger.SettleFrom = ledger.Passes + 1;
+        ledger.Settle = problems => Replayed(app, ledger, generation, problems);
+        ledger.RulesDirty = true;   // the pass runs at the next ready tick, whether the game's own replay of this content ran already or not
+    }
+
+    /// <summary>The plan lowers differently against this content: its registrations come off (kiln.content adopts the same GUIDs registered
+    /// again), and the new lowering registers under a new owner of its own, then replays as at its first content ready.</summary>
+    private static void Reapply(KindApplication app, KindStage stage, ulong generation)
+    {
+        var plan = app.Plan;
+        var label = $"{plan.KindId} {plan.Name}";
+        var had = app.Stage.Ledger;
+        had.Revoked = true;
+        had.Settle = null;
+        if (RevokeOwner is not { } revoke)
+        {
+            Withdraw(app, generation, "RelowerFailed", "it lowers differently against this content, and this build cannot take its registrations back");
+            return;
+        }
+        try { revoke(app.Owner); }
+        catch (Exception x) when (x is not OutOfMemoryException)
+        {
+            Withdraw(app, generation, "RelowerFailed", $"it lowers differently against this content, and its registrations could not be taken back ({x.Message})");
+            return;
+        }
+        BlocksBridge.Log(LogLevel.Info, $"blocks: {app.Target.Id}: block {label} lowers differently against content generation {generation}: registered again");
+        ulong owner = 0;
+        var ledger = stage.Ledger;
+        var tx = KindTransaction.Resume(app.Target, ledger);
+        try
+        {
+            owner = CreateOwner($"blocks:{app.Target.Id}:kind:{plan.Name}");
+            if (owner == 0) throw new InvalidOperationException("no owner could be made for the plan");
+            ledger.Owner = owner;
+            tx.BeginCommit();
+            foreach (var staged in stage.Blocks) staged.Low.CommitRegistrations();
+            foreach (var staged in stage.Blocks) staged.Low.CommitAfter();
+        }
+        catch (Exception e) when (e is not OutOfMemoryException)
+        {
+            tx.Dispose();
+            ledger.Revoked = true;
+            if (owner != 0)
+            {
+                try { revoke(owner); }
+                catch (Exception x) when (x is not OutOfMemoryException) { BlocksBridge.Log(LogLevel.Error, $"blocks: {app.Target.Id}: block {label}: its owner could not be revoked: {x.Message}"); }
+            }
+            Withdraw(app, generation, "Refused", e.Message, revokeOwner: false);   // the old owner is revoked already
+            return;
+        }
+        tx.Dispose();
+        app.Stage = stage;
+        app.Owner = owner;
+        lock (Gate) app.Replay = generation;
+        if (ledger.HookWanted)
+        {
+            ledger.PlanDefinitions = [.. stage.Blocks.SelectMany(b => b.Low.DefinitionNames)];
+            ledger.Settle = problems => Replayed(app, ledger, generation, problems);
+            BlockRuntime.Promote(ledger);
+            return;
+        }
+        BlockRuntime.Promote(ledger);
+        Replayed(app, ledger, generation, []);
+    }
+
+    /// <summary>The replay for <paramref name="generation"/> is done. A callback of an overtaken generation, or of a ledger that is no longer
+    /// the plan's, is discarded.</summary>
+    private static void Replayed(KindApplication app, ModBlocks ledger, ulong generation, IReadOnlyList<string> problems)
+    {
+        lock (Gate)
+        {
+            if (app.Replay != generation || !ReferenceEquals(app.Stage.Ledger, ledger)) return;
+            app.Replay = null;
+        }
+        if (!app.Plan.Consumer.Alive() || app.State != BlockApplyState.Applied) return;
+        problems = [.. problems.Distinct(StringComparer.Ordinal)];   // the game's own replay and this one may both have found it
+        if (problems.Count == 0)
+        {
+            Publish(app, generation);
+            return;
+        }
+        var more = problems.Count > 1 ? $" (and {problems.Count - 1} more: kiln.log, or kiln blocks)" : "";
+        Withdraw(app, generation, "ContentReadyFailed", $"{problems[0]}{more}");
+    }
+
+    /// <summary>An applied plan failed in a later content generation: refused with the cause, its owner revoked as for any refused plan,
+    /// and its block no longer published (<see cref="Blocks.Find"/> does not give it, the export and reports leave it out). When the
+    /// revoke fails, the reason says what stays.</summary>
+    private static void Withdraw(KindApplication app, ulong generation, string cause, string problem, bool revokeOwner = true)
+    {
+        var plan = app.Plan;
+        var label = $"{plan.KindId} {plan.Name}";
+        var ledger = app.Stage.Ledger;
+        lock (Gate) app.Replay = null;
+        ledger.Revoked = true;   // nothing of it runs again
+        ledger.Settle = null;
+        var left = "";
+        if (revokeOwner)
+        {
+            if (RevokeOwner is not { } revoke) left = "; this build cannot take its registrations back: they stay until the mod unloads";
+            else
+                try { revoke(app.Owner); }
+                catch (Exception x) when (x is not OutOfMemoryException) { left = $"; its registrations could not be taken back ({x.Message}): they stay until the mod unloads"; }
+        }
+        app.LeftOver = left.Length > 0;
+        if (app.Target.Handles.TryGetValue(plan.Name, out var h) && ReferenceEquals(h, app.Handle)) app.Target.Handles.TryRemove(plan.Name, out _);
+        app.Target.Lowered.TryRemove(plan.Name, out _);
+        foreach (var guid in app.Published) app.Target.Programs.TryRemove(guid, out _);
+        app.Published = [];
+        app.Target.ReportDirty = true;
+        BlocksBridge.Log(LogLevel.Error, $"blocks: {app.Target.Id}: block {label} was refused in content generation {generation}{(left.Length > 0 ? "" : ", and nothing of it stays")}: {problem}{left}");
+        Set(app, BlockApplyState.Refused, $"{cause}: {problem}{left}");
     }
 
     private sealed class KindStale : Exception;
@@ -413,6 +634,7 @@ internal static class KindApply
         foreach (var app in gone)
         {
             TakeBack(app);   // registered and waiting for its parts at content ready
+            lock (Gate) app.Replay = null;   // a replay that waits is discarded
             app.Stage.Ledger.Revoked = true;
             if (app.State == BlockApplyState.Applied || app.LeftOver)
             {
