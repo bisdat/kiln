@@ -103,3 +103,28 @@ override Kiln.TestKit.FakeControlCall.GetHashCode() -> int
 override Kiln.TestKit.FakeControlCall.ToString() -> string!
 static Kiln.TestKit.FakeControlCall.operator !=(Kiln.TestKit.FakeControlCall? left, Kiln.TestKit.FakeControlCall? right) -> bool
 static Kiln.TestKit.FakeControlCall.operator ==(Kiln.TestKit.FakeControlCall? left, Kiln.TestKit.FakeControlCall? right) -> bool
+const Kiln.TestKit.FakePhysicsCookHost.PendingReason = "game test pending: 16e-cc16e" -> string!
+Kiln.TestKit.FakePhysicsCookHost
+Kiln.TestKit.FakePhysicsCookHost.Cook(string! model, System.Collections.Generic.IEnumerable<string!>! needs, System.Collections.Generic.IReadOnlyDictionary<string!, byte[]!>! outputs, string? refusal = null) -> Kiln.TestKit.PhysicsCookResult!
+Kiln.TestKit.FakePhysicsCookHost.FakePhysicsCookHost(params string![]! experimental) -> void
+Kiln.TestKit.FakePhysicsCookHost.Files.get -> System.Collections.Generic.IReadOnlyDictionary<string!, byte[]!>!
+Kiln.TestKit.FakePhysicsCookHost.IsOn(string! feature) -> bool
+Kiln.TestKit.FakePhysicsCookHost.Registrations.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.PhysicsCookResult
+Kiln.TestKit.PhysicsCookResult.<Clone>$() -> Kiln.TestKit.PhysicsCookResult!
+Kiln.TestKit.PhysicsCookResult.Deconstruct(out bool Ok, out string? Reason, out System.Collections.Generic.IReadOnlyList<string!>! Files) -> void
+Kiln.TestKit.PhysicsCookResult.Equals(Kiln.TestKit.PhysicsCookResult? other) -> bool
+Kiln.TestKit.PhysicsCookResult.Files.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.PhysicsCookResult.Files.init -> void
+Kiln.TestKit.PhysicsCookResult.Ok.get -> bool
+Kiln.TestKit.PhysicsCookResult.Ok.init -> void
+Kiln.TestKit.PhysicsCookResult.PhysicsCookResult(bool Ok, string? Reason, System.Collections.Generic.IReadOnlyList<string!>! Files) -> void
+Kiln.TestKit.PhysicsCookResult.Reason.get -> string?
+Kiln.TestKit.PhysicsCookResult.Reason.init -> void
+override Kiln.TestKit.PhysicsCookResult.Equals(object? obj) -> bool
+override Kiln.TestKit.PhysicsCookResult.GetHashCode() -> int
+override Kiln.TestKit.PhysicsCookResult.ToString() -> string!
+static Kiln.TestKit.FakePhysicsCookHost.ContentHashOf(byte[]! bytes) -> string!
+static Kiln.TestKit.FakePhysicsCookHost.Features.get -> System.Collections.Generic.IReadOnlyList<string!>!
+static Kiln.TestKit.PhysicsCookResult.operator !=(Kiln.TestKit.PhysicsCookResult? left, Kiln.TestKit.PhysicsCookResult? right) -> bool
+static Kiln.TestKit.PhysicsCookResult.operator ==(Kiln.TestKit.PhysicsCookResult? left, Kiln.TestKit.PhysicsCookResult? right) -> bool

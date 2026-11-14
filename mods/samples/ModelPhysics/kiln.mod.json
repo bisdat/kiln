@@ -1,0 +1,10 @@
+{
+  "id": "modelphysics",
+  "name": "Model Physics Sample",
+  "version": "0.1.0",
+  "apiVersion": "0.1",
+  "entryAssembly": "ModelPhysics.dll",
+  "side": "both",
+  "clients": "mod",
+  "description": "Sample for cloth and bone chains in the model cook (docs/kiln/modding/models.md#physics): a banner with cloth from assets/physics.json, and a three-link pendant whose chain a body block declares (blocks/pendant.json). The cook writes them only with the recipe's \"experimental\" key while their game test is pending. Build the assets first: build-assets.sh (reads the installed game, writes assets/cooked)."
+}

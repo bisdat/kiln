@@ -1,0 +1,28 @@
+{
+  "format": 1,
+  "comment": "ModelPhysics's cook recipe: the banner's model step; the pendant's steps come from blocks/pendant.json by themselves. \"experimental\" turns on the two cook features that wait for their game test (16e-cc16e): the cook prints one warning line.",
+  "tool": "modelcook",
+  "out": "cooked",
+  "experimental": [
+    "modelcook.cloth",
+    "modelcook.chains2"
+  ],
+  "inputs": {
+    "bronze_model": {
+      "guid": "9c38c7f0-fd0a-41a6-b91e-9a16287b8f59",
+      "type": "keen::RenderModel",
+      "comment": "the Bronze Sword: its material"
+    }
+  },
+  "steps": [
+    {
+      "op": "model",
+      "gltf": "../models/banner.gltf",
+      "base": "bronze_model",
+      "guid": "4a3b8f0e-6c2d-4f6e-9b1a-0d7c5e2f8a61",
+      "mode": "new",
+      "name": "kiln_banner",
+      "stem": "banner"
+    }
+  ]
+}

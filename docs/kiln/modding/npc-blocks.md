@@ -86,6 +86,42 @@ travel is scaled by the rigs' hip heights (`scale` sets it). What each field doe
 ### Body
 `Model`, `Skeleton`, `Scale`, `Slots` (the game's attachment slots on your joints: where gear hangs and where hits come from), `Size` (radius and height,
 for paths) and `Colliders` (a capsule or sphere for hits and one for what it bumps into; one shape is both). Its bounds for culling are the model's.
+`Cloth` and `Chains` give its model cloth and swinging joints: [Model physics](#model-physics).
+
+### Model physics
+Since 0.2.0-dev.30 a body of your own can carry **cloth** (`ModelClothBlock`: a primitive of its model the game simulates as cloth) and **bone
+chains** (`ModelChainBlock`: 2 to 8 joints of its skeleton that swing). They are cooked into the model when the mod builds; the game simulates them
+on players' machines. The fields, ranges and rules are those of `assets/physics.json` ([models.md](models.md#physics)). Like every body with files,
+it is written in blocks/*.json:
+```json
+"bodies": { "caped": { "model": "models/caped.glb",
+  "cloth": [ { "mesh": 0, "primitive": 1, "pin": [1, 1, 1, 0, 0, 0], "massKg": 0.8,
+               "colliders": [ { "type": "capsule", "a": { "x": 0, "y": 1.2, "z": 0.1, "radius": 0.15, "joint": "spine" },
+                                                   "b": { "x": 0, "y": 0.7, "z": 0.1, "radius": 0.12, "joint": "spine" } } ] } ],
+  "chains": [ { "rootJoint": "tail_0", "tipJoint": "tail_3", "particleMassKg": 0.5 } ] } }
+```
+The same body as C# records (a unit test, or C# that repeats a data file's body):
+```csharp
+new BodyBlock
+{
+    Model = "models/caped.glb",
+    Cloth = [new ModelClothBlock { Mesh = 0, Primitive = 1, Pin = [1, 1, 1, 0, 0, 0], MassKg = 0.8,
+                                   Colliders = [new ClothCapsuleBlock(new(0, 1.2, 0.1, 0.15, "spine"), new(0, 0.7, 0.1, 0.12, "spine"))] }],
+    Chains = [new ModelChainBlock { RootJoint = "tail_0", TipJoint = "tail_3", ParticleMassKg = 0.5 }],
+}
+```
+- **Cooked, never at run time.** The cook reads the body in blocks/*.json and writes a spec hash of its cloth and chains into the model's
+  `.model.json`. A creature whose body carries cloth or chains is refused at `Define` unless the body's model was cooked with exactly these
+  ("cooked without cloth or chains" / "with other cloth or chains"): build the mod again. The body's own fields are checked when it is defined. A body written in C# is not seen by the cook; it can name a model whose cloth comes
+  from blocks/*.json or `assets/physics.json`, with the same values. A body without `Cloth` and `Chains` asks nothing (its model may have cloth from
+  physics.json).
+- **One place per model.** A model's physics come from one body or from physics.json, never both.
+- **Scale 1.** A body with cloth or chains keeps `Scale` unset or 1 (the game scales the cloth's colliders by the model's own size).
+- **Held.** The cook writes them only with `"experimental": ["modelcook.cloth"]` (and `"modelcook.chains2"`) in `assets/cook.json` until the game
+  test `16e-cc16e` passes. While a game reports the row held, a mod with such a body logs one warning (`Blocks.Warnings`); `"preview"` in kiln.json
+  lifts the row and the warning.
+- **Chains need the body's own skeleton**, and no clip of it may animate a swinging joint; a cloth vertex may not be weighted to one.
+- An NPC's body is a game NPC's for now, so `Cloth` and `Chains` are refused there ("a game body has its own").
 
 ## What Kiln checks, and why
 The game checks none of this; a mistake shows as a creature frozen in a pose, or a blow that never lands. So `Define` refuses, naming block and field:
