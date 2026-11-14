@@ -64,6 +64,12 @@ internal static class ServiceTick
          ("Kiln.SlotUi", "Kiln.SlotUiStartup"),
          ("Kiln.World", "Kiln.WorldStartup")];
 
+    /// <summary>Of <see cref="AutoStart"/>, the services the host starts right before the mods load (their OnLoad runs
+    /// before the first service tick): rows a mod reads in OnLoad and that depend on no mod. Kiln.World's
+    /// <c>world.transform_scale</c> and <c>world.tracked_writes</c> (0.2.0-dev.28 fix round). Started again at the first tick
+    /// with the rest, which does nothing for a type whose start already ran.</summary>
+    internal static readonly (string Assembly, string Type)[] EarlyStart = [("Kiln.World", "Kiln.WorldStartup")];
+
     private static readonly object Lock = new();
     private static Entry[] _entries = [];
     private static readonly List<ModContext> Candidates = new();
@@ -251,12 +257,31 @@ internal static class ServiceTick
         }
     }
 
-    private static void StartAutoServices()
+    /// <summary>The host, right before it loads the mods (tick thread): starts <see cref="EarlyStart"/>, so their rows are
+    /// decided when a mod's OnLoad asks. Nothing with autostart off (tests that keep the registry to themselves).</summary>
+    internal static void StartEarlyServices()
+    {
+        if (!AutoStartEnabled) return;
+        var previousMod = ModContext.CurrentMod;
+        ModContext.CurrentMod = null;
+        try
+        {
+            Start(EarlyStart);
+        }
+        finally
+        {
+            ModContext.CurrentMod = previousMod;
+        }
+    }
+
+    private static void StartAutoServices() => Start(AutoStart);
+
+    private static void Start((string Assembly, string Type)[] list)
     {
         var self = typeof(ServiceTick).Assembly;
         var alc = AssemblyLoadContext.GetLoadContext(self) ?? AssemblyLoadContext.Default;
         var dir = Path.GetDirectoryName(self.Location) ?? "";
-        foreach (var (name, typeName) in AutoStart)
+        foreach (var (name, typeName) in list)
         {
             try
             {
