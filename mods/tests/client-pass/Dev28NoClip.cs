@@ -11,7 +11,8 @@ namespace ClientPass;
 // - rules.noclip-descent: sneak sinks every time it is held, also in the game's own sneak mode, and letting go stops
 //   the sink (the mover's crouched rows said "do not steer"; kiln.rules flight.cpp now steers with the default row).
 // - rules.noclip-death: a death inside the ground ends NoClip, and the respawned character stands with collision.
-// - rules.noclip-world: closing the world with NoClip on inside the ground, and loading it again.
+// - rules.noclip-world: closing the world with NoClip on inside the ground, and loading it again: Kiln puts the
+//   character back at its last free position (kept in the world's data).
 // - rules.noclip-disconnect: the same for a joined player who leaves a server and joins again.
 public sealed partial class ClientPassMod
 {
@@ -113,6 +114,9 @@ public sealed partial class ClientPassMod
     public async Task RulesNoClipWorld(CheckContext c)
     {
         if (!await NeedPlayer(c) || !await NeedNoClip(c)) return;
+        var back = new List<PlayerNoClipEndedEvent>();
+        var sub = Events.On<PlayerNoClipEndedEvent>(e => { if (e.Reason == NoClipEnd.Left) back.Add(e); });
+        c.OnEnd(() => sub.Dispose());
         var on = NoClip.Set(c.Player, true);
         if (!c.Expect(on.Ok, "NoClip turned on for you", on.Message))
         {
@@ -120,15 +124,16 @@ public sealed partial class ClientPassMod
             await c.Verdict();
             return;
         }
-        c.Instruct("Use a disposable world. NoClip is on. Sink well into the ground (hold sneak) and stay there. Then, while " +
-                   "you are inside the ground, quit to the main menu and load the same world again. NoClip does not come back " +
-                   "on its own (Kiln's switch ends with the world), and Kiln cannot move you out on the way out: the game " +
-                   "places a character that was saved inside the ground. Once you are in the world again, type /noclip " +
-                   "status in the chat.");
-        c.Instruct("Was it so: after loading you are not inside the ground and not falling under the world (standing on the " +
-                   "ground, or put somewhere safe by the game), /noclip status says 'on for nobody', and you cannot walk " +
-                   "through a wall? If you are stuck inside the ground, say so in the note and free yourself with the game's " +
-                   "Unstuck (in the menu).");
+        c.Instruct("Use a disposable world. NoClip is on. Fly a little in open air first (Kiln keeps that place as your last " +
+                   "free position), then sink well into the ground (hold sneak) and stay there. While you are inside the " +
+                   "ground, quit to the main menu and load the same world again. Kiln keeps your last free position in the " +
+                   "world's data: when the world is back, it moves you there before collision can drop you through the ground.");
+        var restored = await c.Until(() => back.Count > 0, TimeSpan.FromMinutes(10), "you are back in the world and Kiln put you back");
+        c.Expect(restored && back[0].RestoredTo is not null, "after the load, Kiln moved your character from inside the ground to its last free position",
+            restored ? back[0].ToString() : "no event");
+        c.Instruct("Was it so: after loading you were put back in open space near where you went in (the chat said so), you " +
+                   "stand on the ground, /noclip status says 'on for nobody', and you cannot walk through a wall? If you were " +
+                   "inside the ground or fell under the world, say so in the note.");
         await c.Verdict();
     }
 
@@ -136,14 +141,14 @@ public sealed partial class ClientPassMod
         Needs = ClientCheckNeeds.Joined, Order = 155)]
     public async Task RulesNoClipDisconnect(CheckContext c)
     {
-        c.Instruct("Join a server that runs Kiln with \"allowNoClip\": true in its kiln/config/rules.json, as a player with " +
-                   "admin rights (or ask its admin to type /noclip on <you>). Type /noclip to turn NoClip on. Sink well into " +
-                   "the ground (hold sneak) and stay there. Then leave the server (quit to the main menu) while you are inside " +
-                   "the ground, and join it again.");
-        c.Instruct("Was it so: when you came back you were not inside the ground and not falling under the world, NoClip was " +
-                   "off (you cannot walk through a wall, /noclip status on the server says 'on for nobody'), and while NoClip " +
-                   "was on, sinking and flying looked smooth on your screen, not pulled back? If you were stuck, say where in " +
-                   "the note and use the game's Unstuck.");
+        c.Instruct("Join a server that runs this Kiln with \"allowNoClip\": true in its kiln/config/rules.json, as a player with " +
+                   "admin rights (or ask its admin to type /noclip on <you>). Type /noclip to turn NoClip on. Fly a little in " +
+                   "open air, then sink well into the ground (hold sneak) and stay there. Leave the server (quit to the main " +
+                   "menu) while you are inside the ground, and join it again (also try once with a server restart in between).");
+        c.Instruct("Was it so: when you came back, Kiln put you back in open space near where you went in (the chat said so), " +
+                   "you stand on the ground, NoClip is off (you cannot walk through a wall), and while NoClip was on, sinking " +
+                   "and flying looked smooth on your screen, not pulled back? The server's kiln.log says 'left in NoClip and " +
+                   "came back inside something'. If you were stuck or fell, say where in the note and use the game's Unstuck.");
         await c.Verdict();
     }
 }

@@ -1099,4 +1099,115 @@ public class NoClipTrackTests
         Assert.Empty(Ended(t));
         Assert.Empty(w.Moves);
     }
+
+    // ---- NoClip across a leave (GitHub issue #25): a fresh tracker for the session of a player who left in NoClip
+
+    private static readonly WorldPosition Left = new(104, 60, 100);
+
+    private static (NoClipTrack, FakeWorld) Back(WorldPosition at)
+    {
+        var w = new FakeWorld { Kind = Rock, At = at };
+        return (new NoClipTrack(w), w);
+    }
+
+    [Fact]
+    public void BackInsideTheGroundItIsHeldAndMovedToTheLastFreePlace()
+    {
+        var (t, w) = Back(Deep);
+        Assert.Equal(NoClipRejoin.Held, t.Rejoined(Left));
+        Assert.False(t.On);
+        Assert.True(t.Restoring);                    // the hooks keep collision off for it
+        Assert.Equal(Left, Assert.Single(w.Moves).To);
+        Assert.False(t.Step().Released);             // the move is on its way
+        w.Land();
+        var r = t.Step();
+        Assert.True(r.Released);
+        Assert.Null(r.Trip);                         // Kiln's own move is no teleport that ends anything
+        Assert.False(t.Restoring);
+        Assert.Equal([(NoClipEnd.Left, (WorldPosition?)Left)], Ended(t));
+    }
+
+    [Fact]
+    public void BackInOpenSpaceNothingIsDone()
+    {
+        var (t, w) = Back(Surface);
+        Assert.Equal(NoClipRejoin.Free, t.Rejoined(Left));
+        Assert.False(t.Restoring);
+        Assert.Empty(w.Moves);
+        Assert.Empty(Ended(t));                      // the runtime reports this one itself
+    }
+
+    [Fact]
+    public void BackOnASlopeWithMatterAtTheKneesIsNotInside()
+    {
+        var (t, w) = Back(Surface);
+        w.Kind = _ => NoClipSpace.Inside;            // the knee cell holds matter
+        w.Upper = _ => NoClipSpace.Free;             // the waist and the head are free: standing on a slope
+        Assert.Equal(NoClipRejoin.Free, t.Rejoined(Left));
+        Assert.Empty(w.Moves);
+    }
+
+    [Fact]
+    public void BackBeforeTheCellsAreLoadedItWaits()
+    {
+        var (t, w) = Back(Deep);
+        w.Kind = _ => NoClipSpace.Unknown;
+        Assert.Equal(NoClipRejoin.Waiting, t.Rejoined(Left));
+        w.At = null;
+        Assert.Equal(NoClipRejoin.Waiting, t.Rejoined(Left));  // no position yet either
+        Assert.Empty(w.Moves);
+        w.Kind = Rock;
+        w.At = Deep;
+        Assert.Equal(NoClipRejoin.Held, t.Rejoined(Left));
+    }
+
+    [Fact]
+    public void BackWithNowhereToGoItWaitsUntilThePlayerFliesOut()
+    {
+        var (t, w) = Back(Deep);
+        Assert.Equal(NoClipRejoin.Held, t.Rejoined(new WorldPosition(100, -600, 100)));  // outside the world: never moved there
+        Assert.Empty(w.Moves);
+        Assert.False(t.Step().Released);
+        w.At = new WorldPosition(100, 52, 100);
+        Assert.True(t.Step().Released);
+        Assert.Equal([(NoClipEnd.Left, (WorldPosition?)null)], Ended(t));
+    }
+
+    [Fact]
+    public void AFastTravelDuringTheReturnIsNeverUndone()
+    {
+        var (t, w) = Back(Deep);
+        t.Rejoined(Left);
+        w.Refuse("not now");                         // Kiln's move fails ...
+        t.Step();
+        w.At = new WorldPosition(500, 80, 500);      // ... and the player fast-travels meanwhile
+        w.Count = (byte)(w.Count!.Value + 1);
+        w.Clock = w.Clock.AddSeconds(5);
+        var r = t.Step();
+        Assert.True(r.Released);
+        Assert.Single(w.Moves);                      // not moved back from there
+        Assert.Equal(NoClipEnd.Teleport, Assert.Single(Ended(t)).Item1);
+    }
+
+    [Fact]
+    public void ADeathDuringTheReturnEndsIt()
+    {
+        var (t, w) = Back(Deep);
+        t.Rejoined(Left);
+        w.Refuse("not now");
+        t.Step();
+        w.IsDead = true;
+        Assert.True(t.Step().Released);
+        Assert.Equal(NoClipEnd.Death, Assert.Single(Ended(t)).Item1);
+    }
+
+    [Fact]
+    public void NoClipOnAgainBeforeTheReturnIsAskedChangesNothing()
+    {
+        var (t, w) = Back(Deep);
+        t.Entering();
+        Assert.Equal(NoClipRejoin.Free, t.Rejoined(Left));  // flying already: nothing to restore
+        Assert.False(t.Restoring);
+        Assert.Empty(w.Moves);
+    }
 }

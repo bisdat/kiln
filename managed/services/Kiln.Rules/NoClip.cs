@@ -16,7 +16,8 @@ namespace Kiln;
 /// travel, a bed, a command, a mod); the player leaving; the world closing. After a death or a teleport it has to be
 /// asked for again. When it ends while the character is inside something, Kiln first moves the character back to the
 /// last place where it was in open space, and only then lets collision return: the game does not push a character out
-/// of solid ground.</para>
+/// of solid ground. A player who left (or whose world closed) with NoClip on is moved there when they come back inside
+/// something: the place is kept in the world's data (<see cref="NoClipEnd.Left"/>).</para>
 /// </remarks>
 public static class NoClip
 {
@@ -171,6 +172,8 @@ public static class NoClip
         RulesRuntime.Log(LogLevel.Info, $"player {player}: NoClip ended ({reason})" + (restoredTo is { } p ? $", back at {p}" : ""));
         if (reason == NoClipEnd.Death) Tell(player, "NoClip ended because you died. Turn it on again to go on.");
         else if (reason == NoClipEnd.Teleport) Tell(player, "NoClip ended because you were teleported. Turn it on again to go on.");
+        else if (reason == NoClipEnd.Left && restoredTo is not null)
+            Tell(player, "NoClip ended when you left. You came back inside something, so you are back at the last place where you were free.");
         else if (restoredTo is not null) Tell(player, "NoClip is off. You were inside something, so you are back at the last place where you were free.");
         if (Events.HasSubscribers<PlayerNoClipEndedEvent>()) Events.Post(new PlayerNoClipEndedEvent(player, reason, restoredTo));
     }
@@ -294,6 +297,12 @@ public enum NoClipEnd
 
     /// <summary>The player was teleported (fast travel, a bed, a command, a mod).</summary>
     Teleport = 2,
+
+    /// <summary>The player left the world, or the world closed (a server restart, a hosted game quit), while NoClip was
+    /// on. Posted when the player is next in the world, once: with <see cref="PlayerNoClipEndedEvent.RestoredTo"/> when
+    /// the character came back inside something and Kiln moved it to its last free position first, null when it came
+    /// back in open space. (Since 0.2.0-dev.28.)</summary>
+    Left = 3,
 }
 
 /// <summary>NoClip ended for a player and collision is back. Posted on the tick thread; not cancelable. (That NoClip
