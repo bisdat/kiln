@@ -88,7 +88,10 @@ public enum BuildFlags
     Unloaded = 1 << 3,
     /// <summary>Compute and report; change nothing.</summary>
     DryRun = 1 << 4,
-    /// <summary>Do not keep the edit across restarts (the game's own rule for terrain outside bases).</summary>
+    /// <summary>Gone after the next restart: no save region of Kiln's, and where the game's save writes the cells anyway
+    /// (inside a base, or in a chunk another edit keeps) Kiln puts back the earlier cells at the next start; a cell changed
+    /// since keeps that change. Not with <see cref="Unloaded"/> (<see cref="ArgumentException"/>); refused
+    /// (<see cref="BuildException"/>) when the transient journal is full or kiln.saves is missing.</summary>
     Transient = 1 << 5,
 }
 

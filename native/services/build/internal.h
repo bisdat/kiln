@@ -138,6 +138,21 @@ void regions_keep(const int32_t origin[3], const uint32_t dims[3]);      // tick
 size_t regions_release(const int32_t origin[3], const uint32_t dims[3]);  // chunks inside the box, forgotten
 void regions_flush();    // Pre: write regions.json when it changed
 void regions_status(uint64_t* chunks, uint64_t* saves, uint64_t* boxes);
+std::string regions_world();        // the running world's GUID text from kiln.saves ("" while unknown); any thread
+bool regions_saves_written(uint64_t* written);  // kiln.saves' count of world files written this session
+bool regions_hooked();              // the save-region hook is in place (it calls transient_before_save)
+
+// ---- transient edits (transient.cpp): KILN_BUILD_F_TRANSIENT cells are put back at the next start ----
+// Before a transient write commits: room in the journal and a world it can be bound to (else the write is refused).
+KilnResult transient_admit(const int32_t wo[3], const uint32_t wd[3], const uint8_t* dirty_blocks);
+// After any committed write of the block-aligned box wo/wd: `old` and `cur` are its cells before and after, `addressed`
+// the cells the write set (masked in). Transient writes journal what they changed; other writes take their cells out.
+void transient_note(const int32_t wo[3], const uint32_t wd[3], const KilnVoxel* old, const KilnVoxel* cur,
+                    const uint8_t* addressed, bool transient);
+void transient_pre(uint64_t step);  // Pre: bind to the world, put back an earlier session's cells, flush
+void transient_before_save();       // the game builds its save-region list: the journal goes to disk first
+// Commits one 8x8x8 block (cells x fastest) through the engine's store commit; false when the writer faulted.
+bool vox_commit_block(const VoxelWorld& v, const int32_t borg[3], KilnVoxel* cells);
 
 // ---- self-test (selftest.cpp; labs: <kiln>/data/kiln.build/selftest) ----
 void selftest_init();

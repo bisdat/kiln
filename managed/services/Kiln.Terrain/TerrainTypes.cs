@@ -7,8 +7,10 @@ public enum TerrainPersistence
 {
     /// <summary>Saved with the world and recorded in the ledger: applied once per world.</summary>
     Kept = 0,
-    /// <summary>Does not add a save region or ledger record; may be applied again whenever the mod asks. Cells can
-    /// still be saved inside a base or a chunk kept by another edit. This does not guarantee a reset on restart.</summary>
+    /// <summary>Does not add a save region or ledger record; may be applied again whenever the mod asks. Gone after the
+    /// next restart: where the game's save writes the cells anyway (inside a base, or in a chunk another edit keeps),
+    /// kiln.build puts back what was there at the next start (<see cref="BuildFlags.Transient"/>). A cell someone changed
+    /// since keeps that change.</summary>
     Transient = 1,
 }
 

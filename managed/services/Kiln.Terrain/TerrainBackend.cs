@@ -28,6 +28,20 @@ internal interface ITerrainBackend
     /// plan was added or removed.</summary>
     TerrainBook Book();
     void Save(TerrainBook book);
+
+    /// <summary>The world save's lasting id (its GUID text) and the world file's newest revision (loaded or written).
+    /// Id null: a new world before its first save.</summary>
+    (string? Id, uint Revision) SaveIdentity => (null, 0);
+    /// <summary>The mod's ownership witness for world save <paramref name="saveId"/> (TerrainLoss), kept outside the
+    /// world's Kiln data; null when there is none.</summary>
+    /// <exception cref="InvalidDataException">It exists and cannot be read.</exception>
+    TerrainWitness? ReadWitness(string saveId) => null;
+    void WriteWitness(string saveId, TerrainWitness witness) { }
+    /// <summary>Where the witness is, for messages.</summary>
+    string WitnessLocation(string saveId) => "the terrain witness";
+    /// <summary>Runs <paramref name="action"/> once, with the world's id and the new revision, after the next world file
+    /// was written.</summary>
+    void AfterNextSave(Action<string, uint> action) { }
 }
 
 internal sealed class BuildTerrainBackend(ModContext mod) : ITerrainBackend
@@ -68,4 +82,60 @@ internal sealed class BuildTerrainBackend(ModContext mod) : ITerrainBackend
         return book;
     }
     public void Save(TerrainBook book) => WorldData.Set(TerrainBook.Key, book);
+
+    public (string? Id, uint Revision) SaveIdentity => (Saves.WorldId, Saves.Status?.Revision ?? 0);
+
+    // kiln/data/kiln.terrain/<world GUID>/<mod>.json: beside kiln/data/worlds/<GUID>/ (where the ledger is), not in it
+    private string WitnessPath(string saveId)
+    {
+        if (!Guid.TryParse(saveId, out var guid)) throw new InvalidDataException($"'{saveId}' is not a world id");
+        var data = Path.GetDirectoryName(Path.GetFullPath(mod.DataDirectory)) ?? throw new IOException("no Kiln data folder");
+        return Path.Combine(data, "kiln.terrain", guid.ToString("D"), mod.Info.Id + ".json");
+    }
+
+    public string WitnessLocation(string saveId)
+    {
+        try { return WitnessPath(saveId); }
+        catch (Exception e) when (e is IOException or InvalidDataException) { return "the terrain witness"; }
+    }
+
+    public TerrainWitness? ReadWitness(string saveId)
+    {
+        var path = WitnessPath(saveId);
+        if (!File.Exists(path)) return null;
+        try
+        {
+            var w = System.Text.Json.JsonSerializer.Deserialize<TerrainWitness>(File.ReadAllBytes(path)) ?? throw new InvalidDataException("empty");
+            w.Validate();
+            return w;
+        }
+        catch (Exception e) when (e is System.Text.Json.JsonException or IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            throw new InvalidDataException(e.Message, e);
+        }
+    }
+
+    public void WriteWitness(string saveId, TerrainWitness witness)
+    {
+        var path = WitnessPath(saveId);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var tmp = path + ".tmp";
+        using (var f = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
+        {
+            System.Text.Json.JsonSerializer.Serialize(f, witness, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+            f.Flush(true);
+        }
+        File.Move(tmp, path, overwrite: true);
+    }
+
+    public void AfterNextSave(Action<string, uint> action)
+    {
+        EventSubscription? sub = null;
+        sub = Events.On<WorldSavedEvent>(e =>
+        {
+            if (!e.Success || e.WorldId is null || _session != Lifecycle.ServerSession) return;
+            sub?.Dispose();
+            action(e.WorldId, e.Revision);
+        });
+    }
 }
