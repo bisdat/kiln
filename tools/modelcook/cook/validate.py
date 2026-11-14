@@ -7,7 +7,7 @@ from kfc.archive import ResourceKey
 from kfc.blob import Decoder
 from kfc.blobwrite import Encoder
 
-from . import rendermodel as RM, skin as S
+from . import chains as CH, rendermodel as RM, skin as S
 
 
 # optional data a cooked model may not carry, where its vanilla base does: a model with physics carries cloth (and its collider), read by _check_cloth
@@ -26,8 +26,9 @@ def _keys(v, prefix=""):
     return out
 
 
-def _check_skin(d, blob, target, checks, problems, report):
-    """The skin stream read back: the format's rules, and the bind pose the game would draw."""
+def _check_skin(d, blob, target, checks, problems, report, palette=None):
+    """The skin stream read back: the format's rules, and the bind pose the game would draw. A model with bone chains has its swinging joints'
+    reserved slots after the sorted ones (skinningMap 0 there, cook/chains.py); palette: the skeleton joint of every slot, when the cook knows it."""
     groups = {}
     for ms in d["meshes"]:
         groups.setdefault(ms["vertexDataByteOffset"], ms)
@@ -41,7 +42,12 @@ def _check_skin(d, blob, target, checks, problems, report):
         n += groups[off]["vertexCount"]
     checks["skin_offsets_cumulative"] = offs
     smap = d["skinningMap"]
-    checks["joint_map_consistent"] = len(smap) == d["jointCount"] and bool(smap) and smap == sorted(set(smap)) and smap[-1] < d["hierarchyJointCount"]
+    nphys = len(CH.u8_list(d["chain"]["joints"])) if d["chain"] else 0
+    ordinary = smap[:len(smap) - nphys]
+    anchors = set(CH.u8_list(d["chain"]["anchorHierarchyJoints"])) if d["chain"] else set()
+    checks["joint_map_consistent"] = (len(smap) == d["jointCount"] and bool(ordinary) and ordinary == sorted(set(ordinary)) and ordinary[-1] < d["hierarchyJointCount"]
+                                      and all(x == 0 for x in smap[len(ordinary):]))
+    pal = palette or smap
     stream = blob[sd["start"]:sd["start"] + sd["count"]]
     sums = descending = indexed = True
     used = set()
@@ -60,7 +66,7 @@ def _check_skin(d, blob, target, checks, problems, report):
     checks["weights_descending"] = descending
     checks["joint_indices_in_map"] = indexed
     checks["unused_slots_zero"] = empty_clean
-    checks["every_map_entry_carries_weight"] = len(used) == len(smap)
+    checks["every_map_entry_carries_weight"] = {i for i, j in enumerate(ordinary) if j not in anchors} <= used  # an anchor and a swinging joint may carry none
     report["skin"] = {"joints": len(smap), "skeleton_joints": d["hierarchyJointCount"], "skeleton": d["hierarchy"], "vertices": total, "stream_bytes": sd["count"],
                       "globalScale": d["globalScale"]}
     if target is None:
@@ -75,7 +81,7 @@ def _check_skin(d, blob, target, checks, problems, report):
         ms = groups[off]
         g = kmesh.decode_group(m, ms)
         for i, q in enumerate(g["positions"]):
-            j = smap[influences[ms["skinVertexOffset"] + i][0][0]]
+            j = pal[influences[ms["skinVertexOffset"] + i][0][0]]
             b = target.bind[j]
             dist.append(math.dist(q, (b[0][3], b[1][3], b[2][3])))
     dist.sort()
@@ -147,9 +153,46 @@ def _check_cloth(d, checks, problems, report):
                        "capsules": len(co["capsules"]), "skinned": cl["hasSkinning"]}
 
 
-def validate(kfc, types, data, blob, against=None, gltf_docs=None, target=None, own_materials=()):
+def _check_chains(d, checks, problems, report):
+    """The bone chains read back (chapter 16e 2.2): the lists the game's setup reads agree, every swinging joint has a reserved slot, and the packed
+    rest shape is the stored matrices' canonical frame within one code step."""
+    c = d["chain"]
+    smap = d["skinningMap"]
+    n = len(c["chains2"])
+    joints = CH.u8_list(c["joints"])
+    anchors = CH.u8_list(c["anchorHierarchyJoints"])
+    nphys = len(joints)
+    first_phys = len(smap) - nphys
+    ok = (n >= 1 and not c["chains"] and not c["configs"] and not c["constraintJoints"] and not c["constraints"] and not c["restPosition"] and not c["anchorRestPosition"]
+          and len(anchors) == n and len(c["anchorDefaultPose"]) == n
+          and len(c["modelMatrices"]) == nphys and len(c["skinToJointMatrix"]) == nphys
+          and sorted(joints) == list(range(first_phys, len(smap))) and first_phys >= 1 and all(smap[j] == 0 for j in joints))
+    at, worst = 0, 0.0
+    for i, ch in enumerate(c["chains2"]):
+        cfg = ch["config"]
+        ok = ok and ch["jointBeginIndex"] == at and ch["jointEndIndex"] - ch["jointBeginIndex"] == cfg["count"] and 2 <= cfg["count"] <= 8 \
+            and len(cfg["restPosition"]) == cfg["count"] - 1 and cfg["extentRestPosition"] >= 1 and cfg["extentMaxAllowedDist"] >= 1 \
+            and ch["colliderIndex"] < len(c["chainColliders"]) and anchors[i] < d["hierarchyJointCount"]
+        at = ch["jointEndIndex"]
+        try:
+            got, want = CH.decoded_rest(c, i)
+        except CH.ChainError:
+            ok = False
+            continue
+        step = cfg["extentRestPosition"] / CH.DIVISOR
+        worst = max([worst] + [abs(a - b) / step for g, w in zip(got, want) for a, b in zip(g, w)])
+    ok = ok and at == nphys
+    checks["chain_lists_agree"] = ok
+    checks["chain_rest_within_a_code_step"] = worst <= 0.5 + 1e-3
+    if not ok:
+        problems.append("the chain lists do not agree")
+    report["chains"] = {"chains": n, "joints": nphys, "worst_rest_error_codes": worst}
+
+
+def validate(kfc, types, data, blob, against=None, gltf_docs=None, target=None, own_materials=(), palette=None):
     """kfc may be None (no game files): the game-dependent checks (materials, vanilla comparison) are skipped.
-    target: the skin.Target a skinned model was bound to, for the checks against its skeleton. own_materials: GUIDs the mod's MaterialBlocks make."""
+    target: the skin.Target a skinned model was bound to, for the checks against its skeleton. own_materials: GUIDs the mod's MaterialBlocks make.
+    palette: the skeleton joint of each skin slot of a model with bone chains (cook/chains.py)."""
     checks = {}
     problems = []
     th = types.get("keen::RenderModel")["hash"]
@@ -184,7 +227,9 @@ def validate(kfc, types, data, blob, against=None, gltf_docs=None, target=None, 
               "vertices_lod0": tri0.vertex_count, "triangles_lod0": tri0.triangle_count,
               "ccw_agree_game_space": w, "bounding_box": d["boundingBox"]}
     if d["skinningData"]["count"]:
-        _check_skin(d, blob, target, checks, problems, report)
+        _check_skin(d, blob, target, checks, problems, report, palette)
+    if d["chain"]:
+        _check_chains(d, checks, problems, report)
     if d["blendShapes"]:
         _check_morphs(d, blob, checks, report)
     if d["cloth"]:
@@ -241,8 +286,8 @@ def validate(kfc, types, data, blob, against=None, gltf_docs=None, target=None, 
                         # a 16-bit float keeps about 1 part in 2048, and steps of 2^-24 near 0
                         worst_m = max(worst_m, max(abs(a[i] - b[i]) - abs(a[i]) / 1024 for i in range(3)))
                 if "influences" in src:
-                    smap = d["skinningMap"]
-                    if [[(j, w) for j, w in inf] for inf in src["influences"]] != [[(smap[j], w) for j, w in zip(js, ws) if w] for js, ws in zip(got["raw_joints"], got["raw_weights"])]:
+                    pal = palette or d["skinningMap"]
+                    if [[(j, w) for j, w in inf] for inf in src["influences"]] != [[(pal[j], w) for j, w in zip(js, ws) if w] for js, ws in zip(got["raw_joints"], got["raw_weights"])]:
                         problems.append("the skin stream differs from the bound influences")
         checks["positions_within_quantization"] = worst_p <= 1.01 * step
         checks["normals_match"] = worst_n > 0.995

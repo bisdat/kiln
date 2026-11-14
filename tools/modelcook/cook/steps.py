@@ -13,7 +13,7 @@ from kfc.blob import Decoder
 from kfc.blobwrite import Encoder
 from kfc.util import guid_bytes, guid_text
 
-from . import fabric as FB, features as FT, gltf, material as MB, physics as PH, rendermodel as RM, skin as SK
+from . import chains as CH, fabric as FB, features as FT, gltf, material as MB, physics as PH, rendermodel as RM, skin as SK
 from .validate import validate
 
 
@@ -236,17 +236,50 @@ def _cloth(t, doc, lod0, physics, target, features, global_scale):
     return RM.cloth_block(meshes, primitives, _colliders(physics, target), target is not None)
 
 
+def _chains(t, physics, target, attach, lods, features, global_scale, mod, animated):
+    """The bone chains of a model step (cook/chains.py): its palette and ChainData, for rendermodel.build."""
+    where = physics.where
+    try:
+        FT.require(PH.CHAINS, features, f"{where}.chains")
+    except FT.FeatureOff as e:
+        raise StepError(str(e)) from e
+    problems = RM.layout_problems(t, "chains2")
+    if problems:
+        raise StepError(f"{where}.chains: this game's chain types differ from the ones this cook writes ({problems[0]}{f'; {len(problems) - 1} more' if len(problems) > 1 else ''}): "
+                        "it writes no chains for this build. The mod's other models cook as before")
+    if target is None:
+        raise StepError(f"{where}.chains: bone chains swing joints of the model's skeleton: the model is not skinned (name its \"skeleton\")")
+    if attach is not None:
+        raise StepError(f"{where}.chains: the model is attached to one joint (\"attach\"), so no vertex follows a chain's joints")
+    if global_scale not in (None, 1.0):
+        raise StepError(f"{where}.chains: the model's globalScale is {global_scale:g}: chains need 1 in this version")
+    try:
+        plan = CH.plan(physics, target, where)
+        for j in plan.simulated:
+            name = target.names[j]
+            if name in (animated or {}):
+                c = next(c for c, path, _ in plan.chains if j in path)
+                raise StepError(f"{c.where}: joint {name!r} swings in this chain and {animated[name][0]} animates it: a swinging joint carries no "
+                                "animation in this version (the game simulates it); take its channels out of the clip")
+        smap, index = CH.palette(lods, plan)
+        data, report = CH.chain_data(plan, target, index, mod, physics.model)
+    except CH.ChainError as e:
+        raise StepError(str(e)) from e
+    ordinary = smap[:len(smap) - len(plan.simulated)]
+    return {"data": data, "smap": smap, "model_index": index, "report": report, "palette": ordinary + plan.simulated}
+
+
 def model(k, t, gltf_files, base, guid=None, mode=None, name=None, material=None, material_map=None,
           pixel_sizes=None, stem=None, subdir="cooked", target=None, global_scale=None, own_materials=None, attach=None,
-          physics=None, features=frozenset()):
+          physics=None, features=frozenset(), mod=None, animated=None):
     """glTF (one file per LOD, LOD 0 first) -> RenderModel .bin + renderData .blob. `base` is a game model whose materials are the defaults, or None. With `target`
     (a skin.Target) the model is skinned on that skeleton, and with `attach` too (a slot's name or j<index>) rigid on one of its joints. Morph targets named as keen::BlendShapeFlags
     become blend shapes. own_materials {"blocks", "mod"}: the mod's MaterialBlocks, which material and material_map may name.
-    physics: the model's physics.ModelPhysics (cloth: one LOD, unit globalScale, no morph target on a cloth primitive); features: the cook
-    features the recipe turns on (cook/features.py), which have to include the ones the physics needs.
+    physics: the model's physics.ModelPhysics (cloth: one LOD, unit globalScale, no morph target on a cloth primitive; chains: a skeleton of the
+    mod's own); features: the cook features the recipe turns on (cook/features.py), which have to include the ones the physics needs. mod: the
+    mod's id (a chain's GUID follows from it); animated: {joint name: [clip, ...]} of the clips cooked for this skeleton, which no swinging
+    joint may be in.
     Returns (files {relative name: bytes}, entries, report)."""
-    if physics is not None and physics.chains:
-        raise StepError(f"{physics.where}.chains: this cook does not write bone chains yet")
     if physics is not None and physics.cloth and len(gltf_files) > 1:
         raise StepError(f"{physics.where}.cloth: the model has {len(gltf_files) - 1} more LOD file(s): a model with cloth has one LOD in this version")
     th = t.get("keen::RenderModel")["hash"]
@@ -314,12 +347,14 @@ def model(k, t, gltf_files, base, guid=None, mode=None, name=None, material=None
             global_scale = base_desc["globalScale"] if base_desc.get("hierarchy") == target.guid else global_scale_of(k, t, target.guid) if k.by_guid(target.guid) else 1.0
         skin = {"hierarchy": target.guid, "hierarchyJointCount": len(target), "globalScale": global_scale}
     cloth = _cloth(t, docs[0], lods[0], physics, target, features, global_scale) if physics is not None and physics.cloth else None
-    desc, blob = RM.build(lods, materials, base_desc, name, pixel_sizes, skin=skin, morphs=morphs, cloth=cloth)
+    chains = _chains(t, physics, target, attach, lods, features, global_scale, mod, animated) if physics is not None and physics.chains else None
+    desc, blob = RM.build(lods, materials, base_desc, name, pixel_sizes, skin=skin, morphs=morphs, cloth=cloth, chains=chains)
     data = RM.encode(t, desc)
     stem = stem or name
     fb, fo = f"{subdir}/{stem}.bin", f"{subdir}/{stem}.blob"
     own_guids = {m["material"] for m in materials if not k.has(ResourceKey(m["material"], t.get("keen::RenderMaterialResource")["hash"], 0))} if own_materials else ()
-    report = validate(k, t, data, blob, against=base_key.guid if base_key else None, gltf_docs=docs, target=target, own_materials=own_guids)
+    report = validate(k, t, data, blob, against=base_key.guid if base_key else None, gltf_docs=docs, target=target, own_materials=own_guids,
+                      palette=chains["palette"] if chains else None)
     report.update({"op": "model", "guid": out_guid, "mode": mode, "base": base_key.guid if base_key else None, "bin": fb, "blob": fo,
                    "bin_size": len(data), "blob_size": len(blob), "content_hash": desc["renderData"]["hash"],
                    "materials": materials, "warnings": warnings})
@@ -327,6 +362,8 @@ def model(k, t, gltf_files, base, guid=None, mode=None, name=None, material=None
         report["cloth"] = {"meshes": [{"particles": m["data"]["fabric"]["numParticles"], "renderVertices": len(m["data"]["renderPositions"]),
                                        "phases": len(m["data"]["fabric"]["sets"]), "pinned": len(m["data"]["skinnedVertexIndices"])} for m in cloth["data"]["meshes"]],
                            "spheres": len(cloth["collider"]["spheres"]), "capsules": len(cloth["collider"]["capsules"]), "skinned": cloth["data"]["hasSkinning"]}
+    if chains:
+        report["chains"] = chains["report"]
     entries = model_entries(out_guid, mode, fb, fo)
     files = {fb: data, fo: blob}
     if target is not None:

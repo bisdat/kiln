@@ -335,6 +335,38 @@ def physics_of(path, doc=None):
         raise RecipeError(str(e)) from e
 
 
+def _animated(doc, st, base_dir):
+    """{joint name: [where]} of what the recipe's clips (its own and its blocks') animate on a model step's skeleton: no bone chain may swing them."""
+    try:
+        from anicook import clips as AC
+    except ImportError:
+        return {}
+    out = {}
+    for cst in doc.get("steps", []):
+        if tool_of(doc, cst) != "animcook" or cst.get("op") != "clips" or cst.get("skeleton") != st.get("skeleton") or not cst.get("gltf"):
+            continue
+        names = [e.get("animation") for e in (cst.get("clips") or {}).values() if isinstance(e, dict) and e.get("animation")]
+        rt = cst.get("retarget")
+        try:
+            moved = AC.animated_joints(Path(base_dir) / cst["gltf"], names or None, rt.get("map") if isinstance(rt, dict) else None)
+        except (OSError, ValueError) as e:
+            raise RecipeError(f"clips {cst['gltf']}: {e}") from e
+        for joint, anims in moved.items():
+            out.setdefault(joint, []).extend(f"clip {a!r} of {cst['gltf']}" for a in anims)
+    return out
+
+
+def _chain_mod(doc, path, mp):
+    """The mod id a model's chain GUIDs follow from (as the animation tools' ids do), for a model with chains."""
+    if mp is None or not mp.chains:
+        return None
+    from anicook import recipe as anim_recipe
+    try:
+        return anim_recipe.mod_id(doc, path)
+    except anim_recipe.RecipeError as e:
+        raise RecipeError(f"{mp.where}.chains: {e}") from e
+
+
 def model_key(base_dir, gltf, mod_dir):
     """A model step's glTF as physics.json names it: its path in the mod's folder."""
     return Path(os.path.relpath((Path(base_dir) / gltf).resolve(), Path(mod_dir).resolve())).as_posix()
@@ -494,7 +526,8 @@ def run(path, k, t, exe_sha256=None, update_manifest=False, given=None):
                               mode=st.get("mode"), name=st.get("name"), material=material,
                               material_map=mm, pixel_sizes=st.get("pixelSizes"), stem=st.get("stem"), subdir=out,
                               target=_target(doc, st, inputs, k, t, base_dir, p), global_scale=st.get("globalScale"), own_materials=own, attach=st.get("attach"),
-                              physics=physics.get(model_file), features=turned_on)
+                              physics=physics.get(model_file), features=turned_on, mod=_chain_mod(doc, p, physics.get(model_file)),
+                              animated=_animated(doc, st, base_dir) if physics.get(model_file) is not None and physics.get(model_file).chains else None)
             r["warnings"] = r.get("warnings", []) + from_gltf
         else:
             f, e, r = S.visual(k, t, inputs[base_id]["guid"], _resolve(st["model"], inputs), _resolve(st["guid"], inputs),

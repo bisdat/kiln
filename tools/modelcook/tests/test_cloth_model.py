@@ -431,8 +431,8 @@ class Refusals(Game, unittest.TestCase):
         with self.assertRaisesRegex(steps.StepError, r'^assets/physics.json: models\["banner.gltf"\]\.cloth\[0\]\.pin: the piece of cloth'):
             self.cook(BANNER / "banner.gltf", physics("banner.gltf", [{"mesh": 0, "primitive": 0, "pin": [0.5, 0, 0, 0]}]))
 
-    def test_chains_wait_for_their_writer(self):
-        with self.assertRaisesRegex(steps.StepError, r"\.chains: this cook does not write bone chains yet"):
+    def test_chains_need_a_skinned_model(self):
+        with self.assertRaisesRegex(steps.StepError, r"\.chains: bone chains swing joints of the model's skeleton: the model is not skinned"):
             self.cook(BANNER / "banner.gltf", physics("banner.gltf", chains=[{"rootJoint": "a", "tipJoint": "b"}]), features=frozenset({"modelcook.cloth", "modelcook.chains2"}))
 
     def test_layout_guard(self):

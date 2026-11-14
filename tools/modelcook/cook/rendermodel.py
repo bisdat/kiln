@@ -217,23 +217,26 @@ def cloth_block(meshes, primitives, collider, skinned):
 NO_COLLIDER = {"hasSkinning": False, "ignoreClothCollider": False, "spheres": [], "capsules": [], "instances": []}
 
 
-def build(lods, materials, base, name, pixel_sizes=None, skin=None, morphs=None, cloth=None):
+def build(lods, materials, base, name, pixel_sizes=None, skin=None, morphs=None, cloth=None, chains=None):
     """lods: [[prepared primitive (game space), ...] per LOD]; materials: [{material guid, renderEffectId,
     materialFlags}] indexed by primitive["material_slot"]; base: a decoded vanilla RenderModel (dict) whose other
     fields are kept (empty cloth/sdf are forced). skin: {"hierarchy": skeleton GUID, "hierarchyJointCount", "globalScale"} for a skinned model,
     whose primitives carry "influences" (cook/skin.py). morphs: the blend shapes it has, by their keen::BlendShapeFlags name (skin.morph_names), whose deltas the
     primitives carry in "morphs". cloth: cloth_block()'s, for a model with cloth (one LOD): its primitives get their clothMeshIndex and a vertex
-    group of their own. Returns (desc dict, renderData bytes)."""
+    group of their own. chains: {"data": keen::RenderModelChainData, "smap": skinningMap, "model_index": {skeleton joint: palette slot}}
+    (cook/chains.py) for a model with bone chains: its palette replaces the plain sorted one. Returns (desc dict, renderData bytes)."""
     morphs = list(morphs or [])
     cloth_of = cloth["primitives"] if cloth else {}
     if cloth and len(lods) != 1:
         raise CookError(f"a model with cloth has one LOD ({len(lods)} given): the cloth's render-to-simulation map is for LOD 0")
     allp = [q for lod in lods for p in lod for q in p["positions"]]
     off, sc, mn, mx = quantization(allp)
-    smap = S.joint_map(lods) if skin else []
+    if chains and not skin:
+        raise CookError("bone chains need a skinned model")
+    smap = chains["smap"] if chains else S.joint_map(lods) if skin else []
     if len(smap) > S.MAX_MODEL_JOINTS:
         raise CookError(f"{len(smap)} joints carry weight: a model's skin stream addresses {S.MAX_MODEL_JOINTS} (u8)")
-    model_index = {j: i for i, j in enumerate(smap)}
+    model_index = chains["model_index"] if chains else {j: i for i, j in enumerate(smap)}
     groups = bytearray()
     skin_stream = bytearray()
     morph_stream = bytearray()
@@ -299,7 +302,7 @@ def build(lods, materials, base, name, pixel_sizes=None, skin=None, morphs=None,
         "sdf": {"parts": []},
         "skinnedTree": {"jointMatrix": [], "jointParent": [], "jointSpringData": [], "leafJoints": [],
                         "inverseTransformTree": []},
-        "skinningMap": smap, "cloth": cloth["data"] if cloth else None, "chain": None,
+        "skinningMap": smap, "cloth": cloth["data"] if cloth else None, "chain": chains["data"] if chains else None,
         "collider": cloth["collider"] if cloth else dict(NO_COLLIDER),
         "sleeves": [], "jointCount": len(smap), "hierarchyJointCount": skin["hierarchyJointCount"] if skin else 0,
         "renderData": {"hash": {"size": h[0], "hash0": h[1], "hash1": h[2], "hash2": h[3]},
