@@ -102,7 +102,8 @@ internal sealed class TerrainEngine(ITerrainBackend backend, TerrainSession sess
             rec.Complete = false;
             rec.KilnVersion = backend.KilnVersion;
             backend.Save(book);
-            TerrainLoss.Witness(backend, book);   // before the first write: a save from here on carries the record
+            if (!TerrainLoss.Witness(backend, book))
+                return Result(TerrainState.Refused, "the terrain ownership witness could not be written; nothing was changed");
             session.Claim(world, backend.Mod, patch.Id, plan.Blocks().Select(TerrainPlan.BlockKey));
         }
 

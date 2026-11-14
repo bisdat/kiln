@@ -71,6 +71,20 @@ public sealed class OwnershipLossTests
             world.Set(Two.X + x, Two.Y + y, Two.Z + z, Voxel.Of(Ore));
     }
 
+    [Fact]
+    public void A_failed_witness_write_refuses_the_plan_before_changing_ground()
+    {
+        var world = new MemoryWorld { WitnessWriteError = new IOException("disk full") };
+        var run = new Checked(world);
+        var result = run.Apply(Box());
+        Assert.Equal(TerrainState.Refused, result.State);
+        Assert.Empty(world.Writes);
+        Assert.Empty(world.Edits);
+        world.WitnessWriteError = null;
+        Assert.Equal(TerrainState.Completed, run.Apply(Box()).State);
+        Assert.NotNull(world.Witness(Mod));
+    }
+
     // ---- the ledger was saved, then lost: refused ----
 
     [Theory]
