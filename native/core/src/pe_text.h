@@ -316,11 +316,15 @@ inline OtherDiffs other_differences(const uint8_t* file, const uint8_t* live, si
     return out;
 }
 
-// True when every difference is a hook (other_differences finds nothing else).
+// True when every difference is a hook (other_differences finds nothing else). When one is not, `first_uncovered`
+// (when given) takes the offset of the first difference no form covered, so the caller can say which patch tripped
+// the check instead of clearing the evidence.
 inline bool only_hook_differences(const uint8_t* file, const uint8_t* live, size_t size,
                                   uintptr_t live_text, uintptr_t image_base, size_t image_size,
-                                  bool (*call_lands)(uintptr_t) = nullptr) {
-    return other_differences(file, live, size, live_text, image_base, image_size, call_lands, 0, true).sites == 0;
+                                  bool (*call_lands)(uintptr_t) = nullptr, size_t* first_uncovered = nullptr) {
+    const OtherDiffs d = other_differences(file, live, size, live_text, image_base, image_size, call_lands, 1, true);
+    if (d.sites && first_uncovered) *first_uncovered = d.first.front();
+    return d.sites == 0;
 }
 
 // Live-vs-file differences in .text: [rva, rva + len) runs, sorted. Who patched the code (hooks) shows up here.
