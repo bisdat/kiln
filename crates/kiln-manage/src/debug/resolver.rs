@@ -195,11 +195,45 @@ fn inspect_checked(source: &mut dyn ProcessSource, probe: &Probe) -> Result<Seen
     Ok(seen)
 }
 
-/// The install's one live, matching descriptor as a target. The source holds that process afterwards.
+/// Whether a refusal proves the descriptor stale: the Windows side found no running process of that PID, or the
+/// process of that PID was created at another time. Nothing else is proof (a pipe that did not answer, a transport
+/// error, another nonce, rights, an unsupported query).
+fn proves_stale(e: &DebugError) -> bool {
+    e.code == DebugCode::NotRunning || (e.code == DebugCode::IdentityChanged && e.reason.as_deref() == Some("creation_time"))
+}
+
+/// Removes a descriptor proven stale, if the file still holds that descriptor (a process that got the same PID since
+/// writes its own file under the same name). Best effort.
+fn remove_stale(path: &Path, d: &Descriptor) -> bool {
+    let same = std::fs::read(path).ok().and_then(|b| serde_json::from_slice::<Descriptor>(&b).ok()).is_some_and(|now| now == *d);
+    same && std::fs::remove_file(path).is_ok()
+}
+
+/// The install's one live, matching descriptor as a target. The source holds that process afterwards. Descriptors
+/// this call proved stale (a crashed start leaves its file behind) are removed afterwards, whatever the outcome, and
+/// named in `notes`; no other descriptor is ever removed.
 pub fn resolve(
     host: &mut dyn HostSide,
     source: &mut dyn ProcessSource,
     challenge: &mut dyn FnMut() -> Result<String, DebugError>,
+) -> Result<Resolved, DebugError> {
+    let mut proven = Vec::new();
+    let mut r = resolve_inner(host, source, challenge, &mut proven);
+    for (path, d) in &proven {
+        if remove_stale(path, d)
+            && let Ok(r) = r.as_mut()
+        {
+            r.notes.push(format!("{}: removed (its process ended)", path.display()));
+        }
+    }
+    r
+}
+
+fn resolve_inner(
+    host: &mut dyn HostSide,
+    source: &mut dyn ProcessSource,
+    challenge: &mut dyn FnMut() -> Result<String, DebugError>,
+    proven: &mut Vec<(PathBuf, Descriptor)>,
 ) -> Result<Resolved, DebugError> {
     let spec = host.spec().clone();
     let kind = spec.kind;
@@ -246,7 +280,12 @@ pub fn resolve(
         last = Some(i);
         match inspect_checked(source, &probe) {
             Ok(seen) => live.push((path.clone(), d.clone(), seen)),
-            Err(e) if matches!(e.code, DebugCode::NotRunning | DebugCode::IdentityChanged) => stale.push(format!("{}: {}", path.display(), e.message)),
+            Err(e) if matches!(e.code, DebugCode::NotRunning | DebugCode::IdentityChanged) => {
+                if proves_stale(&e) {
+                    proven.push((path.clone(), d.clone()));
+                }
+                stale.push(format!("{}: {}", path.display(), e.message))
+            }
             Err(e) => return Err(e),
         }
     }
@@ -784,6 +823,77 @@ mod tests {
     }
 
     #[test]
+    fn proven_stale_descriptors_are_removed_and_nothing_else() {
+        let w = World::new("prune");
+        let file = |pid: u32| w.root.join("a/kiln/state/debug").join(format!("{pid}.json"));
+        // 32 crashed (no process), 40's PID is another process now (other creation time), 48 is live
+        let (_, d32) = w.kiln("a", 32, 100, N1);
+        let (mut p40, d40) = w.kiln("a", 40, 200, N1);
+        p40.creation_time_100ns = "201".into();
+        let (p48, d48) = w.kiln("a", 48, 300, N2);
+        for d in [&d32, &d40, &d48] {
+            w.put("a", d);
+        }
+        let r = run(&mut w.host("a", TargetKind::Server), &mut FakeSource::new(vec![p40, p48.clone()])).unwrap();
+        assert_eq!(r.target.identity.windows_pid, 48);
+        assert!(!file(32).exists() && !file(40).exists(), "the proven-stale descriptors are gone");
+        assert!(file(48).exists(), "the live one stays");
+        assert_eq!(r.notes.iter().filter(|n| n.contains("removed")).count(), 2, "{:?}", r.notes);
+        // also when the resolve itself fails: all stale
+        std::fs::remove_file(file(48)).unwrap();
+        w.put("a", &d32);
+        let e = run(&mut w.host("a", TargetKind::Server), &mut FakeSource::default()).unwrap_err();
+        assert_eq!(e.code, DebugCode::NotRunning);
+        assert!(!file(32).exists());
+        // unproven failures keep their files: no pipe answer, another nonce, rights, unsupported, another install
+        type Change = Box<dyn Fn(&mut FakeProc, &mut FakeSource)>;
+        let unproven: Vec<(&str, Change)> = vec![
+            ("pipe_missing", Box::new(|p, _| p.pipe = None)),
+            ("nonce", Box::new(|p, _| p.pipe.as_mut().unwrap().session_nonce = N2.into())),
+            ("challenge", Box::new(|p, _| p.pipe.as_mut().unwrap().echo = false)),
+            ("image_digest", Box::new(|p, _| p.image_sha256 = "b".repeat(64))),
+            ("denied", Box::new(|p, _| p.denied = true)),
+            ("unsupported", Box::new(|_, s| s.fail = Some(DebugError::new(DebugCode::UnsupportedIdentity, "no query")))),
+            ("transport", Box::new(|_, s| s.fail = Some(DebugError::new(DebugCode::Timeout, "the helper did not answer")))),
+        ];
+        for (what, change) in unproven {
+            let (mut p, d) = w.kiln("a", 32, 100, N1);
+            w.put("a", &d);
+            let mut src = FakeSource::default();
+            change(&mut p, &mut src);
+            src.procs = vec![p];
+            assert!(run(&mut w.host("a", TargetKind::Server), &mut src).is_err(), "{what}");
+            assert!(file(32).exists(), "{what}: not proof, the file stays");
+        }
+        // another install's descriptor is never touched
+        std::fs::remove_file(file(32)).unwrap();
+        let (_, db) = w.kiln("b", 64, 100, N1);
+        w.put("a", &db);
+        let _ = run(&mut w.host("a", TargetKind::Server), &mut FakeSource::default());
+        assert!(file(64).exists());
+        // a file rewritten by a new process under the same PID after the probe is not removed
+        std::fs::remove_file(file(64)).unwrap();
+        let (_, old) = w.kiln("a", 32, 100, N1);
+        w.put("a", &old);
+        let (_, newer) = w.kiln("a", 32, 500, N2);
+        let mut src = FakeSource::default();
+        let root = w.root.clone();
+        let rewrite = newer.clone();
+        src.fail = None;
+        let mut host = w.host("a", TargetKind::Server);
+        let mut ch = counter();
+        let mut first = true;
+        let mut rewrite_then = move || {
+            if std::mem::take(&mut first) {
+                std::fs::write(root.join("a/kiln/state/debug/32.json"), serde_json::to_vec(&rewrite).unwrap()).unwrap();
+            }
+            ch()
+        };
+        let _ = resolve(&mut host, &mut src, &mut rewrite_then);
+        assert!(file(32).exists(), "the newer process's descriptor stays");
+    }
+
+    #[test]
     fn elevation_mismatch() {
         let w = World::new("elev");
         let (p, mut d) = w.kiln("a", 32, 100, N1);
@@ -816,7 +926,8 @@ mod tests {
         let r = run(&mut w.host("a", TargetKind::Server), &mut src).unwrap();
         assert_eq!(r.target.identity.windows_pid, 32);
         assert_eq!(src.held, Some(32));
-        assert_eq!(r.notes.len(), 1, "{:?}", r.notes);
+        assert_eq!(r.notes.len(), 2, "{:?}", r.notes);
+        assert!(r.notes[0].contains("no process 48") && r.notes[1].contains("48.json: removed"), "{:?}", r.notes);
     }
 
     #[test]
