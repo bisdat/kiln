@@ -122,7 +122,12 @@ the running mod see the same values. Writes, `Reload`, a `Changed` handler and `
   assets/assets.json: collector assets: kiln.assets: assets/assets.json: entries[1] (resource good.bin): resource: bad
   guid; state/boot.json lists every boot mod's state and issue`. `kiln/state/boot.json` has the same. What can only fail
   once the game's data comes up stops the start the same way, before a world loads: a resource patch that cannot be
-  written, a world-table block the merge cannot apply, quests or NPCs of the mod that the quest build leaves out.
+  written, a world-table block the merge cannot apply, quests or NPCs of the mod that the quest build leaves out, and on
+  a game client a texture override that cannot be applied. What only a loading world shows stops it while that world
+  loads, before a player is in it: a game-tree node the tree build leaves out (an unknown `like` or `from`), an item,
+  recipe or clone the world does not register. On a game client a required mod with VFX or materials stops the start
+  when this start builds none (kiln.vfx turned off in `kiln/config/vfx.json`, a game update Kiln's VFX are not made
+  for yet); a dedicated server builds no VFX at all (each player's game does), so that never stops a server.
 - A mod with `boot` that was enabled after the start (`MissedPhase`), or whose files changed since (below), does not
   load until the next start.
 

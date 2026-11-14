@@ -77,12 +77,47 @@ void KILN_CALL destroy_boot(const void* p) {
     if (plan->built) build_forget();
     delete plan;
 }
-KilnResult KILN_CALL prepare_empty(void* why, const KilnBootPrepareInputV1* in, KilnBootPreparedV1* out, KilnBootIssueV1* issue) {
+// Why a process builds no VFX in its boot generation. A dedicated server renders none: a mod's VFX and materials are built by each
+// player's game (with the same boot mod), so nothing of a required mod is missing here. On a game client the user turned kiln.vfx off
+// (then a required mod's VFX and materials, files or staged, cannot be applied: refused) or the client gate holds mods.boot.vfx
+// (on_ready builds the files as before, so only a required mod's staged VFX and materials are missing: refused).
+struct EmptyWhy {
+    const char* why;
+    bool server, all_off;
+};
+EmptyWhy g_empty_off{"kiln.vfx is off by kiln/config/vfx.json", false, true};
+EmptyWhy g_empty_server{"a dedicated server renders no VFX", true, false};
+EmptyWhy g_empty_held{"mods.boot.vfx is held until the client checks pass (08-boot.first-start-definitions)", false, false};
+
+KilnResult KILN_CALL prepare_empty(void* user, const KilnBootPrepareInputV1* in, KilnBootPreparedV1* out, KilnBootIssueV1* issue) {
+    const EmptyWhy& e = *static_cast<const EmptyWhy*>(user);
+    const char* why = e.why;
     const kiln::boot::Input input = kiln::boot::parse(in);
     const auto docs = input.docs("vfx");
     for (const auto& d : docs)  // read or not, a document that is no blocks file refuses its mod, as everywhere
         if (!d.document.is_object())
             return kiln::boot::refuse(out, issue, d.owner, "vfx", d.key, "kiln.vfx: a boot document is not a blocks file (a JSON object)");
+    if (!e.server) {
+        for (const auto& d : docs)
+            if (input.strict(d.owner))
+                return kiln::boot::refuse(out, issue, d.owner, "vfx", d.key,
+                                          std::string("kiln.vfx: its staged VFX or materials cannot be built in this start: ") + why);
+        if (e.all_off) try {
+            const auto hit = required_vfx_content(g_api, input, true, true);
+            if (!hit.first.empty())
+                return kiln::boot::refuse(out, issue, hit.first, "vfx", hit.second,
+                                          "kiln.vfx: " + hit.second + ": its VFX or materials cannot be built in this start: " + why);
+        } catch (const kiln::boot::Refusal& r) {
+            return kiln::boot::refuse(out, issue, r.mod, r.kind, r.key, r.what());
+        } catch (const std::exception&) {
+        }
+    } else {
+        std::set<std::string> said;
+        for (const auto& d : docs)
+            if (input.strict(d.owner) && said.insert(d.owner).second)
+                KV_I("vfx: %s's boot content is required: its staged VFX and materials are built by each player's game, not by this "
+                     "dedicated server (it renders none), so nothing of it is missing here", d.owner.c_str());
+    }
     if (!docs.empty()) {
         issue->code = KILN_BOOT_ISSUE_WARNING | 0x10001u;
         kiln::boot::put(issue->mod_id, docs.front().owner);
@@ -163,7 +198,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     if (!cfg.enabled) {
         KV_I("vfx: off by kiln/config/vfx.json: nothing hooked, mods play nothing");
         // the empty plan as on a dedicated server (the module stays mapped; see there)
-        kiln::boot::collect(api, owner, "vfx", &prepare_empty, const_cast<char*>("kiln.vfx is off by kiln/config/vfx.json"));
+        kiln::boot::collect(api, owner, "vfx", &prepare_empty, &g_empty_off);
         return KILN_ERR_UNAVAILABLE;
     }
     KilnHandle h = 0;
@@ -178,7 +213,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
             // missing collector on a server. Registered although this function answers UNAVAILABLE: kiln-core keeps a plugin that answers so
             // mapped for the process (api.cpp load_one: no FreeLibrary) and only revokes its owner, which kiln.boot uses for log names alone;
             // prepare_empty reads nothing but its input.
-            kiln::boot::collect(api, owner, "vfx", &prepare_empty, const_cast<char*>("a dedicated server renders no VFX"));
+            kiln::boot::collect(api, owner, "vfx", &prepare_empty, &g_empty_server);
             return KILN_ERR_UNAVAILABLE;
         }
         real_game_trace(cfg.trace);
@@ -194,8 +229,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
         // a boot profile: the build moves into the boot generation's prepare, unless the client gate holds mods.boot.vfx (then on_ready builds
         // the mods' files as before and staged VFX are left out with a warning)
         if (vfx_held(api))
-            kiln::boot::collect(api, owner, "vfx", &prepare_empty,
-                                const_cast<char*>("mods.boot.vfx is held until the client checks pass (08-boot.first-start-definitions)"));
+            kiln::boot::collect(api, owner, "vfx", &prepare_empty, &g_empty_held);
         else
             g_boot_build = kiln::boot::collect(api, owner, "vfx", &prepare_build, nullptr);
         if (g_boot_build) KV_I("vfx: boot profile: mods' VFX and materials are built with the boot generation");

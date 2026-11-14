@@ -1517,8 +1517,16 @@ void wr_add(WorldState& ws, uint32_t kind, uintptr_t world, uint32_t wid, const 
          d.station.c_str() + 9, wname(kind), m.count + 1, static_cast<unsigned long long>(m.cap), named.c_str());
 }
 
-// Inserts every definition into `world`'s registries (its thread). Returns true when everything is settled.
+bool sync_world_pass(uint32_t kind, uintptr_t world);
+// Inserts every definition into `world`'s registries (its thread). Returns true when everything is settled. A required boot mod's
+// definition that did not register stops the start afterwards (boot_late_check).
 bool sync_world(uint32_t kind, uintptr_t world) {
+    const bool settled = sync_world_pass(kind, world);
+    boot_late_check();
+    return settled;
+}
+
+bool sync_world_pass(uint32_t kind, uintptr_t world) {
     if (!N.on || !world || kind >= KILN_WORLD_KINDS || kind == KILN_WORLD_PREDICTION) return false;
     PhaseTimer pt(PH_SYNC);
     KilnSessionInfo si{};
@@ -4205,6 +4213,13 @@ bool nc_icon_alias(const uint8_t from[16], const uint8_t to[16]) {
 
 // A boot generation's prepared definitions that are not published (chapter 08): taken out whole while no world has bound (before the
 // game's entry point nothing has); once one has, they are only set aside as nc_undefine_owner does.
+void nc_boot_failed(std::vector<BootFailed>* out) {
+    for (const DefPtr& dp : g_defs)
+        if (dp && !dp->error.empty() && dp->owner_label.rfind("boot:", 0) == 0)
+            out->push_back({dp->mod, dp->name, std::string(dp->kind == KILN_CONTENT_ITEMS ? "item " : "recipe ") + dp->name + " (" + dp->guid_s +
+                                                   ") was not registered when a world loaded its registries: " + dp->error});
+}
+
 uint32_t nc_forget_unbound(KilnOwner owner) {
     uint32_t n = 0;
     {

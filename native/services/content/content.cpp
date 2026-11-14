@@ -17,6 +17,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 #include <unordered_set>
 
 #include "content.h"
@@ -1099,8 +1100,43 @@ struct BootPlan {
     std::vector<KilnOwner> owners;
     size_t defined = 0, cloned = 0;
 };
+// The generation's required participants (prepare): a definition of theirs that a world does not register stops the start.
+std::mutex g_late_mu;
+kiln::boot::LateFaults g_late;  // g_late_mu
+}  // namespace
+
+// After a registration pass (newcontent's sync_world, gamedata's world-ready pass), with no lock of kiln.content held. Definitions
+// register when a world loads its registries, after the game's entry point, so this is kiln.boot's activation_fault (not a refusal).
+void kc::boot_late_check() {
+    {
+        std::lock_guard l(g_late_mu);
+        if (g_late.required.empty()) return;
+    }
+    std::vector<BootFailed> failed;
+    {
+        std::lock_guard lock(store_mutex());
+        nc_boot_failed(&failed);
+#if KC_GAMEDATA
+        gd::clones_boot_failed(&failed);
+#endif
+    }
+    std::vector<BootFailed> report;
+    {
+        std::lock_guard l(g_late_mu);
+        for (BootFailed& f : failed)
+            if (g_late.take(f.mod)) report.push_back(std::move(f));
+    }
+    for (const BootFailed& f : report)  // a required mod: the call does not return (the start stops, at a world's load)
+        kiln::boot::activation_fault(g_api, g_owner, f.mod, "content", f.key, "kiln.content, while a world loaded (the stop comes at world load): " + f.why);
+}
+
+namespace {
 void KILN_CALL destroy_boot(const void* p) {
     const auto* plan = static_cast<const BootPlan*>(p);
+    {
+        std::lock_guard l(g_late_mu);
+        g_late.reset();
+    }
     for (const KilnOwner o : plan->owners) {
         nc_forget_unbound(o);
 #if KC_GAMEDATA
@@ -1123,6 +1159,10 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
     const kiln::boot::Input input = kiln::boot::parse(in);
     if (!input.ok) return kiln::boot::refuse(out, issue, "", "", "", "kiln.content: the boot envelope is not JSON");
     auto* plan = new BootPlan;
+    {
+        std::lock_guard l(g_late_mu);
+        g_late.reset(input.required);
+    }
     for (const auto& d : input.docs("content")) {
         const auto o = input.owner.find(d.owner);
         const KilnOwner owner = o != input.owner.end() ? o->second : 0;

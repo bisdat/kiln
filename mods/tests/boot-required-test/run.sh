@@ -17,6 +17,10 @@
 #   run.sh case <case> required|optional [<name>]   one start with that fixture only; its folder is $LOGS/<name>
 #   run.sh optional [<name>]         one start with every case's fixture, all with "boot": true
 #   run.sh verdict <name> required|optional [<case>]  PASS or FAIL lines for one start's folder
+#   run.sh client <folder>           the fixtures only a game client can show, required, into <folder> (guided check
+#                                    08-boot.required-client; needs KILN_OUT for the fixture assembly only)
+# A required fixture's kind (fixtures.py kind): "stops" before the game's entry point, "late" after it (when the game's data or a
+# world loads; generation 1 is published first), "starts" (nothing of it is bad: the start goes on).
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 : "${LAB:?}" "${KILN_OUT:?}" "${LOGS:?}"
@@ -82,13 +86,29 @@ verdict() {  # verdict <folder> <role> [<case>]
   local D=$1 role=$2 c=${3:-} log=$1/kiln.log
   local exitc
   exitc=$(cat "$D/exit-code.txt" 2>/dev/null || echo none)
-  if [[ $role == required ]]; then
+  local kind
+  kind=$(python3 -I "$here/fixtures.py" kind "$c")
+  if [[ $role == required && $kind == starts ]]; then
+    [[ $exitc == 0 || $exitc == none ]] && echo "PASS $c the start went on (exit status $exitc)" || echo "FAIL $c exit status $exitc"
+    grep -q "the start stops" "$log" && echo "FAIL $c the start stopped: $(grep -m1 'the start stops' "$log" | cut -c1-300)"
+    grep -q "boot-required-test: boot-req-$c loaded: boot state Committed" "$log" && echo "PASS $c loaded (Committed)" || echo "FAIL $c did not load as Committed"
+    [[ $c == patches-comma ]] && { grep -q "resource patch boot-req-patches-comma/xp: .*experienceNeedPerLevel\[2\]\" = 2600" "$log" &&
+      echo "PASS $c its patch from a file with comments and trailing commas was applied" || echo "FAIL $c its patch was not applied"; }
+  elif [[ $role == required ]]; then
     local stop
     stop=$(grep -m1 "the start stops" "$log" | cut -c1-600)
     [[ $exitc == 1 ]] && echo "PASS $c exit status 1 (0x4B01)" || echo "FAIL $c exit status $exitc"
     [[ $stop == *"boot-req-$c"* ]] && echo "PASS $c stop line: ${stop#*kiln\] }" || echo "FAIL $c no stop line naming boot-req-$c: $stop"
-    grep -q "boot-required-test: boot-req-$c loaded" "$log" && echo "FAIL $c its OnLoad ran" || echo "PASS $c its OnLoad never ran"
-    grep -q "boot: generation 1 published" "$log" && [[ $c != knowledge-entry ]] && echo "FAIL $c generation 1 was published"
+    if [[ $kind == late ]]; then  # found after the entry point: OnLoad may have run before (a world's load comes after it)
+      [[ -n $stop && $stop != *"before the game's entry point"* ]] && echo "PASS $c stopped after the entry point, at the load that found it" ||
+        echo "FAIL $c did not stop after the entry point"
+      grep -q "boot-required-test: boot-req-$c loaded" "$log" && echo "INFO $c its OnLoad ran before the stop" || echo "PASS $c its OnLoad never ran"
+      grep -qiE "saveload: .*loaded|world .* loaded|player .* joined" "$log" && echo "FAIL $c a world or save finished loading" ||
+        echo "PASS $c no world or save finished loading"
+    else
+      grep -q "boot-required-test: boot-req-$c loaded" "$log" && echo "FAIL $c its OnLoad ran" || echo "PASS $c its OnLoad never ran"
+      grep -q "boot: generation 1 published" "$log" && echo "FAIL $c generation 1 was published"
+    fi
   else
     [[ $exitc == 0 || $exitc == none ]] && echo "PASS optional start ended normally (exit status $exitc)" || echo "FAIL optional exit status $exitc"
     grep -q "the start stops" "$log" && echo "FAIL optional the start stopped: $(grep -m1 'the start stops' "$log" | cut -c1-300)"
@@ -102,6 +122,9 @@ verdict() {  # verdict <folder> <role> [<case>]
             echo "FAIL optional $c did not load as Committed" ;;
       esac
     done
+    grep -q "resource patch boot-req-patches-comma/xp: .*experienceNeedPerLevel\[2\]\" = 2600" "$log" &&
+      echo "PASS optional patches-comma its patch from a file with comments and trailing commas was applied" ||
+      echo "FAIL optional patches-comma its patch was not applied"
   fi
 }
 
@@ -130,7 +153,7 @@ case ${1:?build|case|optional|verdict} in
     all=$(cases)
     for c in $all; do install "$c" optional || exit 1; done
     refuse $all
-    start_and_collect "$LOGS/$name" 12
+    start_and_collect "$LOGS/$name" $(($(echo $all | wc -w) - 3))
     refuse
     clean
     grep -E "boot-req-|boot-required-test: " "$LOGS/$name/kiln.log" | cut -c1-400 | head -n 80
@@ -138,5 +161,11 @@ case ${1:?build|case|optional|verdict} in
     ;;
   verdict)
     verdict "$LOGS/${2:?}" "${3:?}" "${4:-}"
+    ;;
+  client)
+    dest=${2:?folder}
+    for c in $(python3 -I "$here/fixtures.py" client); do
+      python3 -I "$here/fixtures.py" make "$dest/boot-req-$c" "$c" required && cp "$F/BootRequiredFixture.dll" "$dest/boot-req-$c/" && echo "made $dest/boot-req-$c"
+    done
     ;;
 esac
