@@ -30,7 +30,8 @@ struct Loaded {
     TestPe pe;
     std::vector<uint8_t> live;
     pe::FileText ft;
-    Loaded(bool tail = false) : live(0x3040, 0) {
+    // `live_size` past SizeOfImage (0x3000) is room for relays and a module next to the image.
+    Loaded(bool tail = false, size_t live_size = 0x3040) : live(live_size, 0) {
         if (tail) put<uint32_t>(pe.file, 0x148 + 8, TestPe::kTextSize + 32);
         std::string err;
         if (!pe::parse_file_text(pe.file.data(), pe.file.size(), ft, err)) std::abort();
@@ -690,6 +691,76 @@ static void redirected_captures_skipped(const char* dir) {
     test_query = false;    kiln::test_verified = true;
 }
 
+// The relay layouts of PR 31's stack, as hooks that land in a loaded module: greeneye's indirect jump through a
+// pointer 16 bytes in (FF 25 0A000000), XHL's through a slot of a pointer table elsewhere on the page, and a jump to
+// such a relay. A relay whose chain lands in no module and has no relay shape stays refused.
+static void relay_layouts() {
+    Loaded x(false, 0x4000);
+    const uintptr_t base = kiln::test_image.base;
+    uint8_t* m = x.live.data();
+    test_module_lo = base + 0x3800;  // relay-mod.dll, as module_at sees it
+    test_module_hi = base + 0x3900;
+    auto ff25 = [&](size_t at, size_t slot, uintptr_t to) {
+        const int32_t disp = static_cast<int32_t>(slot - (at + 6));
+        m[at] = 0xFF, m[at + 1] = 0x25;
+        std::memcpy(m + at + 2, &disp, 4);
+        std::memcpy(m + slot, &to, 8);
+    };
+    ff25(0x3100, 0x3110, base + 0x3800);  // greeneye: jmp [rip+0xA], 10 bytes padding, the pointer
+    ff25(0x3200, 0x3318, base + 0x3840);  // XHL: jmp [rip+disp32] into the page's table of 8-byte slots
+    m[0x3400] = 0xE9;                     // a near jump to greeneye's relay
+    const int32_t jmp_rel = 0x3100 - 0x3405;
+    std::memcpy(m + 0x3401, &jmp_rel, 4);
+    ff25(0x3500, 0x3510, base + 0x3600);  // greeneye's form, but the pointer names memory no module holds
+    std::memset(m + 0x3600, 0xCC, 16);
+    test_query = true;
+    test_mbi = {m, x.live.size(), MEM_COMMIT, 4};
+    CHECK(sigdb::call_lands(base + 0x3100), "relays: greeneye's relay (pointer 16 bytes in) lands in a module");
+    CHECK(sigdb::call_lands(base + 0x3200), "relays: XHL's relay (a pointer table slot) lands in a module");
+    CHECK(sigdb::call_lands(base + 0x3400), "relays: a jump to a relay lands in a module");
+    CHECK(!sigdb::call_lands(base + 0x3500), "relays: a relay that lands in no module is no hook");
+
+    // The call in root's pattern (E8 at RVA kFunc + 10), sent to a relay in the live code only.
+    const size_t e8 = TestPe::kFunc + 10;
+    const std::array<uint8_t, 4> was{m[e8 + 1], m[e8 + 2], m[e8 + 3], m[e8 + 4]};
+    auto redirect = [&](size_t relay) {
+        const int32_t rel = static_cast<int32_t>(relay - (e8 + 5));
+        std::memcpy(m + e8 + 1, &rel, 4);
+    };
+    auto start = [&](bool verified) {
+        sigdb::g_code = {};
+        kiln::test_verified = verified;
+        sigdb::init_code();
+        return sigdb::g_code.view.disk;
+    };
+    const std::string first = "first unrecognised difference at RVA ";
+    redirect(0x3100);
+    CHECK(start(false) && sigdb::g_code.in_place.sites == 0,
+          "relays: a call sent to greeneye's relay is a hook, the file scan stands without a verified build");
+    redirect(0x3200);
+    CHECK(start(false) && sigdb::g_code.in_place.sites == 0,
+          "relays: a call sent to XHL's relay is a hook, the file scan stands without a verified build");
+    // dev.28's rule beside them: an in-place byte keeps the file scan only on a verified build. A recognised relay
+    // counts as a hook, never as a pass for the byte.
+    m[0x1000 + 200] ^= 1;
+    CHECK(!start(false) && sigdb::g_code.note.find(first + "0x10c8") != std::string::npos,
+          "relays: a relay beside an in-place byte on an unverified build: the live scan, the byte named");
+    CHECK(start(true) && sigdb::g_code.in_place.sites == 1,
+          "relays: a relay beside an in-place byte on a verified build: the file scan, one in-place place");
+    m[0x1000 + 200] ^= 1;
+    // A call sent to a relay that lands nowhere is no hook: an in-place difference like any other.
+    redirect(0x3500);
+    CHECK(!start(false) && sigdb::g_code.note.find(first + "0x101b") != std::string::npos,
+          "relays: a call to a relay that lands in no module is refused on an unverified build, the call named");
+    CHECK(start(true) && sigdb::g_code.in_place.sites == 1,
+          "relays: the same call on a verified build keeps the file scan as an in-place place");
+    std::memcpy(m + e8 + 1, was.data(), 4);
+    test_module_lo = test_module_hi = 0;
+    test_query = false;
+    kiln::test_verified = true;
+}
+
+
 // sigdb_runtime_test <scratch folder> [--client <enshrouded.exe>] [--sigdb <sigdb/symbols>]
 int main(int argc, char** argv) {
     if (argc < 2) return 2;
@@ -701,6 +772,7 @@ int main(int argc, char** argv) {
     hook_guard();
     diff_budget();
     redirected_captures_skipped(argv[1]);
+    relay_layouts();
     std::filesystem::path sigdb_dir = std::filesystem::path(__FILE__).parent_path() / "../../../sigdb/symbols";
     for (int i = 2; i + 1 < argc; i += 2) {
         const std::string opt = argv[i];
