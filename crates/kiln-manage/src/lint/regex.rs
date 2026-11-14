@@ -2,6 +2,14 @@
 //! unanchored searches). It covers what Kiln's schemas use: classes, \d \w \s and their negations, groups
 //! (capturing, `(?:`, lookahead `(?=` / `(?!`, lookbehind `(?<=` / `(?<!` of any length), alternation, `* + ? {n} {n,} {n,m}` (lazy forms parse as greedy:
 //! the same strings match), `^ $ .`. Unsupported syntax is an error, so a schema cannot silently mean something else.
+//!
+//! A repetition of one character (`.*`, `[a-z]+`, `\s{0,64}`) runs as a loop: no recursion per character, so a long
+//! value is checked whole. A repetition of a group still recurses once per round, and some patterns take exponential
+//! time (a nested quantifier, in a lookbehind too). Each match therefore runs under a budget of [`MAX_STEPS`] steps and
+//! of stack, measured below where the match began (so it holds for any frame size, debug build or not): first
+//! [`MAX_STACK`] on the caller's thread (a thread with 1 MiB of stack has room to spare); a match that needs more runs
+//! once more on a thread of its own with [`DEEP_STACK`] (a repeated group over a long value). A match that exceeds its
+//! budget is [`TooCostly`]: the caller says the value was not checked, never that it does not match.
 
 #[derive(Debug, Clone)]
 enum Re {
@@ -23,6 +31,48 @@ pub struct Regex {
     re: Re,
 }
 
+/// How much stack one match may use below where it began on the caller's thread (a repeated group recurses once per
+/// round).
+pub const MAX_STACK: usize = 256 * 1024;
+/// The stack of the thread a match that needs more runs on; it may use all but 2 MiB of it.
+pub const DEEP_STACK: usize = 64 * 1024 * 1024;
+/// How many steps one match may take in all.
+pub const MAX_STEPS: u32 = 1_000_000;
+
+/// The match was given up: it would take more than [`MAX_STEPS`] steps, or more stack than [`DEEP_STACK`] allows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TooCostly;
+
+/// How one run of a match ended.
+enum Run {
+    Done(bool),
+    /// Out of steps.
+    Spent,
+    /// Out of stack.
+    Deep,
+}
+
+impl Run {
+    fn result(self) -> Result<bool, TooCostly> {
+        match self {
+            Run::Done(found) => Ok(found),
+            _ => Err(TooCostly),
+        }
+    }
+}
+
+/// The budget of one match.
+struct Budget {
+    /// The stack address where the match began (the stack grows down on every platform Kiln builds for).
+    base: usize,
+    /// How far below `base` it may go.
+    stack: usize,
+    /// It went that far (and may fit on [`DEEP_STACK`]).
+    deep: std::cell::Cell<bool>,
+    steps: std::cell::Cell<u32>,
+    spent: std::cell::Cell<bool>,
+}
+
 impl Regex {
     pub fn new(pattern: &str) -> Result<Regex, String> {
         let chars: Vec<char> = pattern.chars().collect();
@@ -34,10 +84,32 @@ impl Regex {
         Ok(Regex { re })
     }
 
-    /// True when the pattern matches anywhere in `s` (JSON Schema `pattern` semantics).
-    pub fn is_match(&self, s: &str) -> bool {
+    /// Whether the pattern matches anywhere in `s` (JSON Schema `pattern` semantics), or [`TooCostly`] when the
+    /// match ran out of its budget (then nothing is known about `s`).
+    pub fn is_match(&self, s: &str) -> Result<bool, TooCostly> {
         let chars: Vec<char> = s.chars().collect();
-        (0..=chars.len()).any(|i| mat(&self.re, &chars, i, &mut |_| true))
+        match self.run(&chars, MAX_STACK) {
+            Run::Deep => std::thread::scope(|scope| {
+                std::thread::Builder::new()
+                    .name("kiln-lint-regex".into())
+                    .stack_size(DEEP_STACK)
+                    .spawn_scoped(scope, || self.run(&chars, DEEP_STACK - 2 * 1024 * 1024))
+                    .ok()
+                    .and_then(|t| t.join().ok())
+            })
+            .map_or(Err(TooCostly), Run::result),
+            r => r.result(),
+        }
+    }
+
+    fn run(&self, chars: &[char], stack: usize) -> Run {
+        let b = Budget { base: stack_address(), stack, deep: false.into(), steps: 0.into(), spent: false.into() };
+        let found = (0..=chars.len()).any(|i| !b.spent.get() && mat(&self.re, chars, i, &b, &mut |_| true));
+        match (b.spent.get(), b.deep.get()) {
+            (false, _) => Run::Done(found),
+            (true, true) => Run::Deep,
+            (true, false) => Run::Spent,
+        }
     }
 }
 
@@ -267,7 +339,33 @@ fn in_class(ranges: &[(char, char)], c: char) -> bool {
     ranges.iter().any(|(a, b)| *a <= c && c <= *b)
 }
 
-fn mat(re: &Re, s: &[char], i: usize, k: &mut dyn FnMut(usize) -> bool) -> bool {
+/// One step under the budget: false (and the budget marked spent) once it is exceeded; every caller then unwinds.
+fn mat(re: &Re, s: &[char], i: usize, b: &Budget, k: &mut dyn FnMut(usize) -> bool) -> bool {
+    if b.spent.get() {
+        return false;
+    }
+    let steps = b.steps.get() + 1;
+    if steps > MAX_STEPS {
+        b.spent.set(true);
+        return false;
+    }
+    if b.base.saturating_sub(stack_address()) > b.stack {
+        b.deep.set(true);
+        b.spent.set(true);
+        return false;
+    }
+    b.steps.set(steps);
+    step(re, s, i, b, k)
+}
+
+/// An address in the caller's stack frame.
+#[inline(never)]
+fn stack_address() -> usize {
+    let here = 0u8;
+    std::hint::black_box(&here) as *const u8 as usize
+}
+
+fn step(re: &Re, s: &[char], i: usize, b: &Budget, k: &mut dyn FnMut(usize) -> bool) -> bool {
     match re {
         Re::Char(c) => i < s.len() && s[i] == *c && k(i + 1),
         Re::Any => i < s.len() && !matches!(s[i], '\n' | '\r' | '\u{2028}' | '\u{2029}') && k(i + 1),
@@ -275,33 +373,63 @@ fn mat(re: &Re, s: &[char], i: usize, k: &mut dyn FnMut(usize) -> bool) -> bool 
         Re::Start => i == 0 && k(i),
         Re::End => i == s.len() && k(i),
         Re::Look(inner, neg) => {
-            let found = mat(inner, s, i, &mut |_| true);
+            let found = mat(inner, s, i, b, &mut |_| true);
             found != *neg && k(i)
         }
         // ECMA-262 matches a lookbehind backwards; for whether it holds, that is: some start j <= i where the inner
         // pattern matches exactly s[j..i]
         Re::Behind(inner, neg) => {
-            let found = (0..=i).rev().any(|j| mat(inner, s, j, &mut |end| end == i));
+            let found = (0..=i).rev().any(|j| !b.spent.get() && mat(inner, s, j, b, &mut |end| end == i));
             found != *neg && k(i)
         }
-        Re::Concat(items) => seq(items, s, i, k),
-        Re::Alt(alts) => alts.iter().any(|a| mat(a, s, i, k)),
-        Re::Repeat(inner, min, max) => rep(inner, *min, *max, 0, s, i, k),
+        Re::Concat(items) => seq(items, s, i, b, k),
+        Re::Alt(alts) => alts.iter().any(|a| mat(a, s, i, b, k)),
+        Re::Repeat(inner, min, max) if one_char(inner) => {
+            // greedy, as the recursive form tries it (longest first), as a loop
+            let limit = max.map_or(usize::MAX, |m| m as usize);
+            let mut run = 0;
+            // each character looked at is a step of the budget: an unanchored `.*x` over a long value is quadratic
+            while run < limit && i + run < s.len() && charge(b) && step(inner, s, i + run, b, &mut |_| true) {
+                run += 1;
+            }
+            if b.spent.get() || run < *min as usize {
+                return false;
+            }
+            (*min as usize..=run).rev().take_while(|_| charge(b)).any(|n| k(i + n)) && !b.spent.get()
+        }
+        Re::Repeat(inner, min, max) => rep(inner, *min, *max, 0, s, i, b, k),
     }
 }
 
-fn seq(items: &[Re], s: &[char], i: usize, k: &mut dyn FnMut(usize) -> bool) -> bool {
+/// A pattern that takes exactly one character and calls nothing else: its repetition can run as a loop.
+fn one_char(re: &Re) -> bool {
+    matches!(re, Re::Char(_) | Re::Any | Re::Class(..))
+}
+
+/// One step of a loop under the budget (false once it is spent).
+fn charge(b: &Budget) -> bool {
+    let steps = b.steps.get() + 1;
+    if b.spent.get() || steps > MAX_STEPS {
+        b.spent.set(true);
+        return false;
+    }
+    b.steps.set(steps);
+    true
+}
+
+fn seq(items: &[Re], s: &[char], i: usize, b: &Budget, k: &mut dyn FnMut(usize) -> bool) -> bool {
     match items.split_first() {
         None => k(i),
-        Some((first, rest)) => mat(first, s, i, &mut |j| seq(rest, s, j, k)),
+        Some((first, rest)) => mat(first, s, i, b, &mut |j| seq(rest, s, j, b, k)),
     }
 }
 
-fn rep(inner: &Re, min: u32, max: Option<u32>, n: u32, s: &[char], i: usize, k: &mut dyn FnMut(usize) -> bool) -> bool {
-    if max.is_none_or(|m| n < m) && mat(inner, s, i, &mut |j| (j != i || n < min) && rep(inner, min, max, n + 1, s, j, k)) {
+#[allow(clippy::too_many_arguments)]
+fn rep(inner: &Re, min: u32, max: Option<u32>, n: u32, s: &[char], i: usize, b: &Budget, k: &mut dyn FnMut(usize) -> bool) -> bool {
+    if max.is_none_or(|m| n < m) && mat(inner, s, i, b, &mut |j| (j != i || n < min) && rep(inner, min, max, n + 1, s, j, b, k)) {
         return true;
     }
-    n >= min && k(i)
+    !b.spent.get() && n >= min && k(i)
 }
 
 #[cfg(test)]
@@ -309,7 +437,7 @@ mod tests {
     use super::Regex;
 
     fn m(p: &str, s: &str) -> bool {
-        Regex::new(p).unwrap().is_match(s)
+        Regex::new(p).unwrap().is_match(s).unwrap()
     }
 
     #[test]
@@ -394,6 +522,65 @@ mod tests {
         assert!(patterns.len() > 50, "{}", patterns.len());
         let bad: Vec<String> = patterns.iter().filter_map(|p| Regex::new(p).err().map(|e| format!("{p}: {e}"))).collect();
         assert!(bad.is_empty(), "{}", bad.join("\n"));
+    }
+
+    /// The cases that once aborted the process (a stack overflow) or ran for seconds. Each runs in a child process
+    /// (this test binary, this test, `KILN_REGEX_CHILD=<case>`) on a test thread's 2 MiB stack, so an abort shows as the
+    /// child's exit status, not as a crash of this run.
+    #[test]
+    fn long_and_costly_matches_end_in_a_subprocess() {
+        const TAG: &str = "^(?!/)(?!.*//)(?!.*\\.\\.)[A-Za-z0-9._/-]{0,64}\\{version\\}[A-Za-z0-9._/-]{0,64}(?<!/)$";
+        if let Ok(case) = std::env::var("KILN_REGEX_CHILD") {
+            let (pattern, text, want) = match case.as_str() {
+                // the shipped kiln-publish tag pattern on 100,000 'a' + "cb": it recursed once per character and
+                // overflowed the stack; now its one-character repetitions loop, and the value is checked whole
+                "long-input" => (TAG, format!("{}cb", "a".repeat(100_000)), Ok(false)),
+                // a repeated group still recurses once per round: the stack bound ends it, the process lives
+                "deep-group" => ("^(ab)*$", "ab".repeat(400_000), Err(super::TooCostly)),
+                // a nested quantifier in a lookbehind: exponential backtracking, ended by the step budget
+                "exponential-lookbehind" => ("(?<=(a+)+)b", format!("{}cb", "a".repeat(24)), Err(super::TooCostly)),
+                _ => panic!("unknown case {case}"),
+            };
+            let started = std::time::Instant::now();
+            let r = Regex::new(pattern).unwrap().is_match(&text);
+            println!("regex-child: {case} {r:?} in {} ms", started.elapsed().as_millis());
+            assert_eq!(r, want, "{case}");
+            return;
+        }
+        for (case, want) in [("long-input", "Ok(false)"), ("deep-group", "Err(TooCostly)"), ("exponential-lookbehind", "Err(TooCostly)")] {
+            let out = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "lint::regex::tests::long_and_costly_matches_end_in_a_subprocess", "--nocapture", "--test-threads=1"])
+                .env("KILN_REGEX_CHILD", case)
+                .output()
+                .unwrap();
+            let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+            assert!(out.status.success(), "{case}: the child ended with {:?}\n{stdout}\n{stderr}", out.status);
+            assert!(stdout.contains(&format!("regex-child: {case} {want}")), "{case}: {stdout}");
+        }
+        // the same pattern on a value of an ordinary size is checked, either way
+        assert!(m(TAG, "mods/hello/v{version}"));
+        assert!(!m(TAG, &format!("{}v{{version}}", "a".repeat(65))));
+        assert!(!m("(?<=(a+)+)b", "cb"));
+    }
+
+    #[test]
+    fn the_budget_is_deterministic_and_reset_per_match() {
+        let re = Regex::new("(?<=(a+)+)b").unwrap();
+        let long = format!("{}cb", "a".repeat(24));
+        for _ in 0..3 {
+            assert_eq!(re.is_match(&long), Err(super::TooCostly));
+        }
+        // a spent budget belongs to that match only
+        assert_eq!(re.is_match("aab"), Ok(true));
+        // one-character repetitions loop: a long value is checked whole, with no depth
+        assert_eq!(Regex::new("^[a-z]+$").unwrap().is_match(&"a".repeat(100_000)), Ok(true));
+        assert_eq!(Regex::new("^[a-z]{0,64}$").unwrap().is_match(&"a".repeat(65)), Ok(false));
+        assert_eq!(Regex::new("^a*ab$").unwrap().is_match(&format!("{}b", "a".repeat(10_000))), Ok(true));
+        // a repeated group within the bound is checked; past it, it is too costly (never a guess)
+        assert_eq!(Regex::new("^(ab)*$").unwrap().is_match(&"ab".repeat(100)), Ok(true));
+        assert_eq!(Regex::new("^(ab)*$").unwrap().is_match(&"ab".repeat(400_000)), Err(super::TooCostly));
+        // past the caller's stack bound, within the deep thread's: checked there
+        assert_eq!(Regex::new("^(ab)*$").unwrap().is_match(&"ab".repeat(5_000)), Ok(true));
     }
 
     #[test]
