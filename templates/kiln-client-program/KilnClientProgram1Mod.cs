@@ -6,7 +6,8 @@ namespace KilnClientProgram1;
 // draws (the local player, the camera, what you see), every client step, for every entity you ask for. It runs in this
 // player's game only. Nobody else sees what it does, so it is for what you see (presentation), never for gameplay that
 // others must share (that belongs in a server program: the kiln-world-program template).
-// It has two halves:
+// Its writes (context.TryWrite) are not marked for the save or replication: local presentation, which is all a client
+// program may change. It has two halves:
 //   kiln.programs.json      what the program may touch, with "world": "client". The game fixes that when Kiln starts,
 //                           so after a change to the file restart the game (a reload of the mod is not enough).
 //   EcsPrograms.TryBind     the code, given in OnLoad under the name the file uses. A client mod's OnLoad runs on the
@@ -48,8 +49,10 @@ public sealed class KilnClientProgram1Mod : Mod
         if (++_steps % 3600 == 0) Log.Info($"{_lastStep} drawn entities in the last client step");
     }
 
-    // Kiln unbinds a mod's programs when it unloads and lets a callback that is running finish first. Saying it here is
-    // for the reader; the declaration stays reserved, so the same file binds again after a reload.
+    // Dispose stops new calls once kiln.world has closed the program. A call that is still running then (rare: a host
+    // unloading the mod from its server thread while a client step runs it) finishes later, and Kiln keeps the callback
+    // alive for it, so free nothing here that the callback still uses (this one touches only its own counter). The mod's
+    // unload disposes it too; the declaration stays reserved, so the same file binds again after a reload.
     public override void OnUnload()
     {
         Client.Tick -= AfterStep;

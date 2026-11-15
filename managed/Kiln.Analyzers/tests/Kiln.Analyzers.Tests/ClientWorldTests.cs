@@ -28,6 +28,24 @@ public sealed class ClientWorldTests
     }
 
     [Fact]
+    public async Task KILN101_leaves_a_client_world_bind_to_KILN109_and_keeps_the_server_one()
+    {
+        var d = await Run(new TickThreadAnalyzer(), """
+            public sealed class M : Mod
+            {
+                public override void OnLoad()
+                {
+                    Task.Run(() => EcsPrograms.TryBind("pin", c => { }, WorldKind.Client));
+                    Task.Run(() => EcsPrograms.TryBind("srv", c => { }, WorldKind.Server));
+                }
+            }
+            """);
+        var only = Assert.Single(d);  // the server bind: the tick thread's; the client bind: KILN109's alone
+        Assert.Equal("KILN101", only.Id);
+        Assert.Contains("Scheduler.Post", only.GetMessage());
+    }
+
+    [Fact]
     public async Task OnLoad_the_server_world_and_a_world_not_known_at_build_time_are_not()
     {
         var d = await Run(A, """

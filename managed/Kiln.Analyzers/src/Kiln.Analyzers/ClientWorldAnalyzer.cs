@@ -16,22 +16,29 @@ public sealed class ClientWorldAnalyzer : DiagnosticAnalyzer
 {
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics => ImmutableArray.Create(Descriptors.ClientWorldOffMainThread);
 
+    /// <summary>A call of <c>Kiln.EcsPrograms.TryBind</c> whose world is the constant <c>WorldKind.Client</c> or
+    /// <c>WorldKind.Prediction</c>: the main thread's (KILN109), not the tick thread's (KILN101 leaves it to this rule).</summary>
+    internal static bool IsClientWorldBind(IOperation op)
+    {
+        if (op is not IInvocationOperation call || call.TargetMethod.Name != "TryBind" ||
+            call.TargetMethod.ContainingType?.ToDisplayString() != "Kiln.EcsPrograms")
+            return false;
+        var world = call.Arguments.FirstOrDefault(a => a.Parameter?.Name == "world")?.Value;
+        return world?.ConstantValue is { HasValue: true, Value: int kind } && kind is 1 or 2;  // Prediction, Client
+    }
+
     public override void Initialize(AnalysisContext context)
     {
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
         context.RegisterCompilationStartAction(start =>
         {
-            var programs = start.Compilation.GetTypeByMetadataName("Kiln.EcsPrograms");
-            if (programs is null) return;
+            if (start.Compilation.GetTypeByMetadataName("Kiln.EcsPrograms") is null) return;
             var classifier = new ThreadClassifier(start.Compilation);
             start.RegisterOperationAction(ctx =>
             {
                 var call = (IInvocationOperation)ctx.Operation;
-                if (call.TargetMethod.Name != "TryBind" || !SymbolEqualityComparer.Default.Equals(call.TargetMethod.ContainingType, programs))
-                    return;
-                var world = call.Arguments.FirstOrDefault(a => a.Parameter?.Name == "world")?.Value;
-                if (world?.ConstantValue is not { HasValue: true, Value: int kind } || kind is not (1 or 2)) return;  // Prediction, Client
+                if (!IsClientWorldBind(call)) return;
                 var where = classifier.Classify(call.Syntax, call.SemanticModel!, ctx.CancellationToken);
                 if (where.Kind != ThreadKind.Off) return;
                 var at = call.Syntax is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax ma } ? ma.Name.GetLocation() : call.Syntax.GetLocation();

@@ -26,7 +26,10 @@ namespace kemf {
 
 namespace {
 
-bool g_ready_done = false;  // after on_ready nothing more can be registered (the world will finalize)
+// After on_ready nothing more can be registered (the world will finalize). Set under both registration locks and checked
+// again under the lock each registration takes, so a registration racing the ready transition is either in the lists
+// on_ready reads or refused, never lost between them.
+std::atomic<bool> g_ready_done{false};
 
 // ============================================================================================= on_event ======
 struct EventReg {
@@ -167,6 +170,7 @@ bool api_on_event(uint8_t kind, const char* name, uint32_t expected_size, EmfWor
     if (g_ready_done) return refuse(m, "on_event", "the worlds are set up: call it from emf_mod_load"), false;
     if (!S.world) return unsupported(m, "on_event", "kiln.world is not available"), false;
     std::lock_guard lock(g_ev_mutex);
+    if (g_ready_done) return refuse(m, "on_event", "the worlds are set up: call it from emf_mod_load"), false;
     auto& events = events_of(kind);
     auto& t = events[name];
     if (!t) {
@@ -190,6 +194,7 @@ bool api_on_event(uint8_t kind, const char* name, uint32_t expected_size, EmfWor
 bool add_internal_event(const char* name, uint32_t expected_size, EmfWorldEventCallback cb, void* user) {
     if (g_ready_done || !S.world || !name || !cb) return false;
     std::lock_guard lock(g_ev_mutex);
+    if (g_ready_done) return false;
     auto& t = g_events[name];
     if (!t) {
         t = std::make_unique<EventType>();
@@ -270,6 +275,7 @@ bool add_program(Mod* m, const char* name, uint8_t kind, EmfProgramCallback fn, 
     if (g_ready_done) return refuse(m, fnname, "the worlds are set up: call it from emf_mod_load"), false;
     if (!S.world) return unsupported(m, fnname, "kiln.world is not available"), false;
     std::lock_guard lock(g_prog_mutex);
+    if (g_ready_done) return refuse(m, fnname, "the worlds are set up: call it from emf_mod_load"), false;
     if (g_progs.size() >= 16) return refuse(m, fnname, "16 mod programs exist"), false;
     for (const auto& p : g_progs)
         if (p->name == name) return refuse(m, fnname, "the name is taken"), false;
@@ -458,7 +464,10 @@ bool events_add_internal(const char* name, uint32_t expected_size, EmfWorldEvent
 }
 
 void events_on_ready() {
-    g_ready_done = true;
+    {
+        std::scoped_lock both(g_ev_mutex, g_prog_mutex);
+        g_ready_done = true;
+    }
     auto sym = [](const char* n) {
         uintptr_t v = 0;
         return g_api->symbol(kstr(n), &v) == KILN_OK ? v : uintptr_t{0};
