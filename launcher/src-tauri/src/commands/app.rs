@@ -83,6 +83,10 @@ pub struct LauncherSettings {
     /// (commands/updates.rs). Off by default: a check runs only when the player asks for one.
     #[serde(default)]
     pub mod_updates_daily: bool,
+    /// (dev.29) "Earlier versions to keep" (Settings, Launcher): how many of a mod's earlier versions an update keeps
+    /// for a roll back, with their settings (kiln_manage::kept); 0 keeps none, at most kiln_manage::kept::KEEP_MAX.
+    #[serde(default = "one")]
+    pub keep_versions: u32,
 }
 
 impl Default for LauncherSettings {
@@ -99,12 +103,17 @@ impl Default for LauncherSettings {
             ui_mode: None,
             mod_folder_notes: true,
             mod_updates_daily: false,
+            keep_versions: kiln_manage::kept::KEEP_DEFAULT,
         }
     }
 }
 
 fn ten() -> u32 {
     10
+}
+
+fn one() -> u32 {
+    kiln_manage::kept::KEEP_DEFAULT
 }
 
 fn yes() -> bool {
@@ -353,9 +362,16 @@ pub async fn app_settings_set(settings: LauncherSettings) -> Result<LauncherSett
     if settings.saves_keep == 0 || settings.saves_keep > 100 {
         return Err(Error::invalid("Keep between 1 and 100 save backups."));
     }
+    if settings.keep_versions > kiln_manage::kept::KEEP_MAX {
+        return Err(Error::invalid(format!("Keep between 0 and {} earlier versions of a mod.", kiln_manage::kept::KEEP_MAX)));
+    }
     crate::state::blocking(move || {
         let dirs = crate::state::dirs()?;
         kiln_manage::util::write_json_atomic(&dirs.settings(), &settings)?;
+        // a lower count: every mod keeps at most that many from now on
+        if let Err(e) = kiln_manage::kept::apply_count(&dirs) {
+            crate::commands::app::launcher_log("library", &format!("the kept versions could not follow the new count: {}", e.message));
+        }
         Ok(settings)
     })
     .await

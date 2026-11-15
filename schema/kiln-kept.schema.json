@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kiln-kept.schema.json",
+  "title": "Kiln's kept versions (<data>/library/kiln-kept.json), format 1",
+  "description": "Written by the launcher and kilnctl (kiln_manage::kept, since 0.2.0-dev.29). Which earlier Library entries an update kept for a roll back, per mod, with the settings their game-folder copies held at that moment (copied under <data>/library/kiln-kept/<kind>/<id>/<version>+<hash8>/, each file at its path relative to the game folder), and the settings a roll back put back into a profile wait here until that version's next placement. A kept entry is an ordinary Library entry (<data>/library/<kind>/<id>/<version>+<hash8>/ with its record); an entry that is gone is forgotten. A launcher before dev.29 does not read this file. A file of another format is left as it is.",
+  "type": "object",
+  "required": ["format", "mods"],
+  "additionalProperties": false,
+  "properties": {
+    "format": { "const": 1 },
+    "mods": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/mod" },
+      "description": "One per mod that has a kept version or a restore waiting."
+    }
+  },
+  "$defs": {
+    "mod": {
+      "type": "object",
+      "required": ["kind", "id", "kept"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "type": "string", "description": "The Library kind (kiln, native, plugin, emf, eml, shroudforge, set, greeneye, flame, ...)." },
+        "id": { "type": "string", "description": "The Library id." },
+        "kept": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/version" },
+          "description": "Newest kept first; at most keepVersions (settings.json, default 1, at most 5)."
+        },
+        "restore": {
+          "$ref": "#/$defs/restore",
+          "description": "A roll back put this version into a profile: its settings go back into its game-folder copy at its next placement, once."
+        }
+      }
+    },
+    "versionRef": {
+      "type": "object",
+      "required": ["version", "hash"],
+      "additionalProperties": false,
+      "properties": {
+        "version": { "type": "string" },
+        "hash": { "type": "string", "description": "kdh1 (sha256 for a plugin DLL), as in the Library." }
+      }
+    },
+    "version": {
+      "type": "object",
+      "required": ["version", "hash", "kept", "settings"],
+      "additionalProperties": false,
+      "properties": {
+        "version": { "type": "string" },
+        "hash": { "type": "string" },
+        "kept": { "type": "string", "format": "date-time", "description": "When it was kept (RFC 3339 UTC)." },
+        "replacedBy": { "$ref": "#/$defs/versionRef", "description": "The version that took its place then." },
+        "settings": { "$ref": "#/$defs/settings" }
+      }
+    },
+    "restore": {
+      "type": "object",
+      "required": ["version", "hash", "profile", "settings"],
+      "additionalProperties": false,
+      "properties": {
+        "version": { "type": "string" },
+        "hash": { "type": "string" },
+        "profile": { "type": "string", "description": "The profile that rolled back: only its placement puts the settings back." },
+        "settings": { "$ref": "#/$defs/settings" }
+      }
+    },
+    "settings": {
+      "type": "object",
+      "required": ["size"],
+      "additionalProperties": false,
+      "description": "What was copied from the mod's game-folder copies: every file not as Kiln placed it (changed or added since) that is no code and no manifest, at most 16 MiB a file and 64 MiB in all.",
+      "properties": {
+        "files": { "type": "array", "items": { "type": "string" }, "description": "Paths relative to the game folder, '/' separated." },
+        "size": { "type": "integer", "minimum": 0, "description": "Their bytes." },
+        "values": {
+          "type": "object",
+          "additionalProperties": { "type": "object" },
+          "description": "ShroudForge setting values (extended.mod.json settings.<key>.value) by copy (its path relative to the game folder): put back with ShroudForge's own setter."
+        },
+        "game": { "type": "string", "description": "The game folder they were read in." },
+        "leftOut": { "type": "array", "items": { "type": "string" }, "description": "What was not copied (too large, unreadable), one sentence each." }
+      }
+    }
+  }
+}

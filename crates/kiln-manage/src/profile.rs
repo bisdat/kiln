@@ -1617,7 +1617,9 @@ pub fn activate(dirs: &DataDirs, profile_id: &str, install: &GameInstall) -> Res
     // chain.ini first: its [chain] lines (a compat rule may switch a chained loader off) decide which own loaders run
     write_chain_plan(dirs, &profile, install, &file)?;
     // ShroudForge and SET read their mods from their own folder in the game; the other engines' own loaders too.
-    let placed = crate::engine_mods::place(dirs, &profile, &install.path)?;
+    let mut placed = crate::engine_mods::place(dirs, &profile, &install.path)?;
+    // a version a roll back put into the profile: the settings it had before the update go back into its copy
+    placed.kept_files.extend(crate::kept::restore_after_place(dirs, &profile, &install.path));
     // Greeneye and Flame mods run from the copies place() just made in <game>/greeneye/ and <game>/mods/
     // (engine_mods::game_path_of)
     file.mods = render(dirs, &profile, install, mode)?.mods;
@@ -1672,7 +1674,8 @@ pub fn refresh_active(dirs: &DataDirs, install: &GameInstall) -> Result<Option<A
         // A play-once profile also changes SF/SET's fixed folders. Reconcile those copies before the next normal
         // launch even though profile.json itself still describes the active profile. Never change them mid-game.
         if running_process(install)?.is_none() {
-            let placed = crate::engine_mods::place(dirs, &profile, &install.path)?;
+            let mut placed = crate::engine_mods::place(dirs, &profile, &install.path)?;
+            placed.kept_files.extend(crate::kept::restore_after_place(dirs, &profile, &install.path));
             // a copy placed only now (an older Kiln's file names the Library entry): the file must name the copy
             if !render(dirs, &profile, install, mode).is_ok_and(|fresh| same(&fresh, &file)) {
                 let mut a = activate(dirs, &profile.id, install)?;

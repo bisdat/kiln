@@ -96,6 +96,7 @@ pub mod prestart;
 pub mod profile;
 pub mod notices;
 pub mod quick;
+pub mod kept;
 pub mod engine_mods;
 pub mod found;
 pub mod own_loaders;

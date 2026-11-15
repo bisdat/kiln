@@ -51,6 +51,10 @@ pub struct LibraryVersion {
     /// ([`changed_on_disk`]).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub changed: bool,
+    /// (dev.29) An earlier version an update replaced, kept for a roll back ([`crate::kept`]): when, by which version,
+    /// and the settings kept with it. Kept versions come after the others in [`LibraryEntry::versions`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kept: Option<crate::kept::KeptInfo>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1917,6 +1921,8 @@ pub fn list(dirs: &DataDirs, kind: Option<ModKind>) -> Result<Vec<LibraryEntry>>
         None => ModKind::ALL.to_vec(),
     };
     let mut out: Vec<LibraryEntry> = Vec::new();
+    // the earlier versions kept for a roll back (crate::kept): listed after the others, so nothing picks one by default
+    let kept = crate::kept::info(dirs);
     for k in kinds {
         let mut by_id: std::collections::BTreeMap<String, Vec<(PathBuf, ImportRecord)>> = Default::default();
         for (folder, rec) in records(dirs, k) {
@@ -1928,29 +1934,29 @@ pub fn list(dirs: &DataDirs, kind: Option<ModKind>) -> Result<Vec<LibraryEntry>>
             by_id.entry(rec.id.clone()).or_default().push((folder, rec));
         }
         for (id, mut versions) in by_id {
-            versions.sort_by(|a, b| crate::bundle::compare_versions(&b.1.version, &a.1.version).then_with(|| b.1.imported.cmp(&a.1.imported)));
+            let is_kept = |rec: &ImportRecord| kept.contains_key(&crate::kept::info_key(k, &id, &rec.hash));
+            versions.sort_by(|a, b| is_kept(&a.1).cmp(&is_kept(&b.1))
+                .then_with(|| crate::bundle::compare_versions(&b.1.version, &a.1.version)).then_with(|| b.1.imported.cmp(&a.1.imported)));
             let name = versions.first().and_then(|v| v.1.name.clone()).unwrap_or_else(|| id.clone());
-            out.push(LibraryEntry {
-                kind: k,
-                id,
-                name,
-                versions: versions
-                    .into_iter()
-                    .map(|(folder, r)| LibraryVersion {
-                        changed: changed_on_disk(&folder, &r),
-                        manifest: read_manifest_json(k, &folder),
-                        manifest_id: r.manifest_id,
-                        version: r.version,
-                        hash: r.hash,
-                        folder,
-                        imported: r.imported,
-                        side: r.side,
-                        clients: r.clients,
-                        size: r.size,
-                        source: r.source,
-                    })
-                    .collect(),
-            });
+            let kept_of = |hash: &str| kept.get(&crate::kept::info_key(k, &id, hash)).cloned();
+            let versions = versions
+                .into_iter()
+                .map(|(folder, r)| LibraryVersion {
+                    kept: kept_of(&r.hash),
+                    changed: changed_on_disk(&folder, &r),
+                    manifest: read_manifest_json(k, &folder),
+                    manifest_id: r.manifest_id,
+                    version: r.version,
+                    hash: r.hash,
+                    folder,
+                    imported: r.imported,
+                    side: r.side,
+                    clients: r.clients,
+                    size: r.size,
+                    source: r.source,
+                })
+                .collect();
+            out.push(LibraryEntry { kind: k, id, name, versions });
         }
     }
     Ok(out)
@@ -2079,11 +2085,12 @@ pub fn users(dirs: &DataDirs, r: &LibraryRef) -> Vec<String> {
 }
 
 /// Every version of the library that no profile and no known game's profile file lists: what "Clean up" may remove.
+/// An earlier version kept for a roll back ([`crate::kept`]) is not: it is removed on its own (the Library's kept list).
 pub fn unused(dirs: &DataDirs) -> Result<Vec<LibraryRef>> {
     let usage = Usage::read(dirs);
     let mut out = Vec::new();
     for e in list(dirs, None)? {
-        for v in e.versions {
+        for v in e.versions.into_iter().filter(|v| v.kept.is_none()) {
             let r = LibraryRef { kind: e.kind, id: e.id.clone(), version: v.version, hash: v.hash };
             if usage.users(dirs, &r).is_empty() {
                 out.push(r);
@@ -2243,6 +2250,8 @@ impl Guard {
             return Err(io(folder, "removing the record of")(e));
         }
         let _ = std::fs::remove_file(taken_over_path(folder));
+        // no longer kept for a roll back: its settings copy goes too
+        crate::kept::forget(dirs, r);
         let rest = std::fs::remove_dir_all(&aside).err().map(|_| aside);
         if let Some(parent) = folder.parent() {
             let _ = std::fs::remove_dir(parent);

@@ -70,6 +70,7 @@ pub const NAMES: &[&str] = &[
     "library_users",
     "library_lint",
     "library_take_over",
+    "library_rollback",
     "config_list",
     "config_read",
     "config_set",

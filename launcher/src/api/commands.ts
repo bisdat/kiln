@@ -130,7 +130,12 @@ export interface LauncherSettings {
   modFolderNotes?: boolean;
   /** "Check for mod updates once a day" (default off; api/updates.ts). */
   modUpdatesDaily?: boolean;
+  /** (dev.29) "Earlier versions to keep": how many earlier versions of a mod an update keeps for a roll back, with
+   *  their settings (0 to KEEP_MAX; default 1; absent from an older backend). */
+  keepVersions?: number;
 }
+/** The most `keepVersions` may be (kiln_manage::kept::KEEP_MAX). */
+export const KEEP_MAX = 5;
 export type TaskState = "queued" | "running" | "done" | "failed" | "canceled";
 export interface Task<R = unknown> {
   id: TaskId;
@@ -449,6 +454,36 @@ export interface LibraryVersion {
   /** Its files were changed in its folder since Kiln imported them (a player edited its mod.json): Play refuses it as
    *  it is until libraryTakeOver makes the changed files the mod's entry. Absent: not changed. */
   changed?: boolean;
+  /** (dev.29) An earlier version an update replaced, kept for a roll back (kiln_manage::kept::KeptInfo). Kept versions
+   *  come after the others in `versions`, so `versions[0]` is never one unless nothing else is left. */
+  kept?: KeptInfo | null;
+}
+export interface KeptInfo {
+  /** When it was kept (RFC 3339 UTC). */
+  kept: string;
+  /** The version that took its place then. */
+  replacedBy?: string | null;
+  /** The settings files kept with it (relative to the game folder) and their bytes. */
+  settings: string[];
+  settingsSize: number;
+}
+/** A version of one mod (kiln_manage::kept::VersionRef). */
+export interface VersionRef { version: string; hash: string }
+/** library_rollback (kiln_manage::kept::RollbackReport): what the roll back changed in the profile (`changes`: what
+ *  profile_revert puts back), whether the version rolled away from is kept now, the settings files that go back into
+ *  the mod's game-folder copy at its next placement, and sentences for the player. */
+export interface RollbackReport {
+  profileId: string;
+  profileName: string;
+  kind: ModKind;
+  id: string;
+  name: string;
+  from: VersionRef;
+  to: VersionRef;
+  changes: ProfileChange[];
+  kept: boolean;
+  settings: string[];
+  notices: string[];
 }
 /** library_take_over (kiln_manage::library::TakenOver): the entry as it was, the entry its changed files are now
  *  (`from` again when nothing was changed), the mod's name as its manifest gives it now, and a note when the folder
@@ -1529,6 +1564,9 @@ export const libraryUsers = (entry: LibraryRef) => call<string[]>("library_users
  *  that listed it lists that one, and the games where such a profile is active get it written again. Rejects with
  *  game_running while a game, or a server that may read the entry, runs. */
 export const libraryTakeOver = (entry: LibraryRef) => call<TakenOver>("library_take_over", { entry });
+/** "Roll back to <version>": the kept version `to` (null: the newest kept one) replaces the mod's entry in the profile. */
+export const libraryRollback = (gameId: GameId | null, profileId: string, kind: ModKind, id: string, to: VersionRef | null) =>
+  call<RollbackReport>("library_rollback", { gameId, profileId, kind, id, to });
 /** One entry (with profileId: checked against the profile's other mods), or a whole profile (entry null). */
 export const libraryLint = (entry: LibraryRef | null, profileId: ProfileId | null = null) => call<LintReport>("library_lint", { entry, profileId });
 
@@ -1845,7 +1883,7 @@ export const COMMANDS = [
   "runtime_list", "runtime_import", "runtime_status", "runtime_install", "runtime_uninstall", "runtime_rollback", "runtime_classify",
   "profile_list", "profile_get", "profile_create", "profile_save", "profile_delete", "profile_resolve", "profile_activate",
   "profile_deactivate", "profile_active", "activation_notices", "notices_unseen", "notices_shown",
-  "library_list", "library_detect", "library_import", "library_remove", "library_remove_many", "library_unused", "library_users", "library_lint", "library_take_over",
+  "library_list", "library_detect", "library_import", "library_remove", "library_remove_many", "library_unused", "library_users", "library_lint", "library_take_over", "library_rollback",
   "config_list", "config_read", "config_set", "config_write", "config_reset", "config_native_state", "config_native_set",
   "launch_play", "launch_state", "launch_prestart", "launch_begin", "launch_progress", "launch_end",
   "logs_list", "logs_read", "logs_follow", "logs_unfollow", "logs_crash_reports",
