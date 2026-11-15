@@ -31,6 +31,11 @@ public sealed class DeathDecisionsTests : IDisposable
         foreach (var s in _subs) s.Dispose();
         DeathDecisions.ResetForTests();
         FakeTables.Features([DeathDecisions.Row]);
+        // A row that was once Pending stays session-dependent for the process (Capabilities.Report), and a subscription to
+        // a session-dependent row that is off is accepted, not refused. One test here reports events.death Pending: without
+        // this, the two tests that expect a refusal failed whenever the runner's order put that one before them (the order
+        // follows the test assembly's path: two packages' check runs failed on it, the gate's folder happened not to).
+        Capabilities.Reset();
     }
 
     private KilnHarness Started(out EntityId entity, int health = 0, int max = 100)

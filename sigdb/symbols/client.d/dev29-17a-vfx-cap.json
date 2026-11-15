@@ -1,0 +1,145 @@
+{
+  "format": 1,
+  "side": "client",
+  "comment": "kiln.vfx's VFX resource table at 4,096 (package 17a; docs/re/vfx.md 4.3.2, docs/kiln/services/vfx.md). VfxSystemCreate (caps/VfxCreateSystem) sizes the resource registry with five immediates: the GUID map's reserve request, which is also its count limit (caps/VfxMapReserveSite: lea rcx,[sys+caps/vfx.map]; mov r8d,caps/vfx.map_limit_request; call caps/VfxMapAllocate, which stores the request at map+caps/vfx.map_limit_relative), the record table's bytes, its initialisation count and its capacity field (caps/VfxTableAllocationSite: mov edx,caps/vfx.table_bytes; call alloc; mov [sys+caps/vfx.table],rax; mov ecx,caps/vfx.table_init_count; mov qword [sys+caps/vfx.table_capacity_offset],caps/vfx.table_capacity), and the pending-activation bit count (caps/VfxPendingResizeSite: mov r8d,caps/vfx.pending_bits; lea rcx,[sys+caps/vfx.pending]; call caps/VfxPendingResize; bit count at sys+caps/vfx.pending_count). caps/VfxTableInitLoop checks the record stride (caps/vfx.table_stride) of the initialisation loop; caps/VfxTableAliasCopy checks that the constructor copies the new table and its capacity to the alias at sys+caps/vfx.alias / +caps/vfx.alias_capacity; @caps/VfxInitResources.state reads the initialisation state byte (0 enlist, 1 waiting, 2 ready). The feature caps.vfx.expansion_sites says the sites resolve; it is not permission to patch: kiln.vfx compares every window byte for byte in memory before it writes (native/services/vfx/expand.cpp).",
+  "constants": {
+    "caps/vfx.map": { "min_votes": 1 },
+    "caps/vfx.map_limit_request": { "min_votes": 1 },
+    "caps/vfx.map_limit_relative": { "min_votes": 1 },
+    "caps/vfx.table": { "min_votes": 2 },
+    "caps/vfx.table_bytes": { "min_votes": 1 },
+    "caps/vfx.table_init_count": { "min_votes": 1 },
+    "caps/vfx.table_capacity_offset": { "min_votes": 2 },
+    "caps/vfx.table_capacity": { "min_votes": 1 },
+    "caps/vfx.table_stride": { "min_votes": 1 },
+    "caps/vfx.alias": { "min_votes": 1 },
+    "caps/vfx.alias_capacity": { "min_votes": 1 },
+    "caps/vfx.pending": { "min_votes": 1 },
+    "caps/vfx.pending_bits": { "min_votes": 1 },
+    "caps/vfx.pending_count": { "min_votes": 1 },
+    "caps/vfx.init_state": { "min_votes": 1 }
+  },
+  "symbols": {
+    "caps/VfxCreateSystem": {
+      "find": [
+        {
+          "pattern": "48 89 5C 24 18 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 B0 F7 FF FF 48 81 EC 50 09 00 00 48 8B 01 4C 8B E2 41 B1 08 C6 44 24 20 00 BA C0 21 00 00"
+        }
+      ]
+    },
+    "caps/VfxInitResources": {
+      "find": [
+        {
+          "pattern": "48 89 5C 24 20 55 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 D9 48 81 EC C0 00 00 00 48 8B F1 45 33 E4 48 8D 1D ?? ?? ?? ?? 0F 1F 80 00 00 00 00"
+        }
+      ]
+    },
+    "caps/VfxRegisterGuid": {
+      "find": [
+        {
+          "pattern": "48 89 74 24 20 57 48 83 EC 60 48 8B 42 08 48 8B FA 48 0B 02 48 8B F1 0F 84 ?? ?? ?? ?? 48 89 5C 24 70 48 8D 99 D8 1B 00 00 48 89 AC 24 80 00 00 00"
+        }
+      ]
+    },
+    "caps/VfxMapReserveSite": {
+      "find": [
+        {
+          "scope": { "symbol": "caps/VfxCreateSystem", "size": 6000 },
+          "pattern": "48 8D 8B {caps/vfx.map:d32} 44 89 AB 68 1B 00 00 45 33 C9 41 B8 {caps/vfx.map_limit_request:d32} 48 8B D6 E8 {caps/VfxMapAllocate:rel32}"
+        }
+      ]
+    },
+    "@caps/VfxMapCountLimit": {
+      "find": [
+        {
+          "scope": { "symbol": "caps/VfxMapAllocate", "size": 512 },
+          "pattern": "44 89 77 {caps/vfx.map_limit_relative:d8}"
+        }
+      ]
+    },
+    "caps/VfxTableAllocationSite": {
+      "find": [
+        {
+          "scope": { "symbol": "caps/VfxCreateSystem", "size": 6000 },
+          "pattern": "BA {caps/vfx.table_bytes:d32} 44 88 AD 90 08 00 00 41 B8 08 00 00 00 48 8B CE E8 ?? ?? ?? ?? 48 89 83 {caps/vfx.table:d32} B9 {caps/vfx.table_init_count:d32} 48 C7 83 {caps/vfx.table_capacity_offset:d32} {caps/vfx.table_capacity:d32}"
+        }
+      ]
+    },
+    "caps/VfxTableInitLoop": {
+      "find": [
+        {
+          "scope": { "symbol": "caps/VfxCreateSystem", "size": 6000 },
+          "pattern": "4C 89 68 F2 33 D2 44 88 28 4C 89 68 02 48 89 50 0A 4C 89 68 12"
+        }
+      ]
+    },
+    "@caps/VfxTableInitLoop.stride": {
+      "find": [
+        {
+          "scope": { "symbol": "caps/VfxTableInitLoop", "size": 160 },
+          "pattern": "48 8D 80 {caps/vfx.table_stride:d32} 48 83 E9 01 75"
+        }
+      ]
+    },
+    "caps/VfxPendingResizeSite": {
+      "find": [
+        {
+          "scope": { "symbol": "caps/VfxCreateSystem", "size": 6000 },
+          "pattern": "45 33 C9 44 88 6C 24 20 41 B8 {caps/vfx.pending_bits:d32} 48 8D 8B {caps/vfx.pending:d32} 48 8B D6 E8 {caps/VfxPendingResize:rel32} 4C 8B 83 {caps/vfx.pending_count:d32}"
+        }
+      ]
+    },
+    "caps/VfxTableAliasCopy": {
+      "find": [
+        {
+          "scope": { "symbol": "caps/VfxCreateSystem", "size": 6000 },
+          "pattern": "48 8B 8B {caps/vfx.table_capacity_offset:d32} 48 8B D6 48 8B 83 {caps/vfx.table:d32} 48 89 83 {caps/vfx.alias:d32} 48 89 8B {caps/vfx.alias_capacity:d32}"
+        }
+      ]
+    },
+    "@caps/VfxInitResources.state": {
+      "find": [
+        {
+          "scope": { "symbol": "caps/VfxInitResources", "size": 128 },
+          "pattern": "0F B6 8E {caps/vfx.init_state:d32} 85 C9 74"
+        }
+      ]
+    }
+  },
+  "features": {
+    "caps.vfx.expansion_sites": {
+      "symbols": [
+        "caps/VfxCreateSystem",
+        "caps/VfxInitResources",
+        "caps/VfxRegisterGuid",
+        "caps/VfxMapReserveSite",
+        "caps/VfxMapAllocate",
+        "@caps/VfxMapCountLimit",
+        "caps/VfxTableAllocationSite",
+        "caps/VfxTableInitLoop",
+        "@caps/VfxTableInitLoop.stride",
+        "caps/VfxPendingResizeSite",
+        "caps/VfxPendingResize",
+        "caps/VfxTableAliasCopy",
+        "@caps/VfxInitResources.state"
+      ],
+      "constants": [
+        "caps/vfx.map",
+        "caps/vfx.map_limit_request",
+        "caps/vfx.map_limit_relative",
+        "caps/vfx.table",
+        "caps/vfx.table_bytes",
+        "caps/vfx.table_init_count",
+        "caps/vfx.table_capacity_offset",
+        "caps/vfx.table_capacity",
+        "caps/vfx.table_stride",
+        "caps/vfx.alias",
+        "caps/vfx.alias_capacity",
+        "caps/vfx.pending",
+        "caps/vfx.pending_bits",
+        "caps/vfx.pending_count",
+        "caps/vfx.init_state"
+      ]
+    }
+  }
+}

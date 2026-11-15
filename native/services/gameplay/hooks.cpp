@@ -9,9 +9,12 @@
 //  - CraftRecipe: observed only (result code and recipe).
 //  - QueueSpawn: called by random_spawner (identified by the call site, kiln.hooks caller()); a zone makes it report "no entity"
 //    (*out = 0), which the spawner handles as it does the engine refusing a template.
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 #include "internal.h"
+#include "services/kiln_caps.h"
 #include "kiln_hook.hpp"
 #include "services/kiln_spawn.h"
 
@@ -62,14 +65,17 @@ inline KilnEntity op_player(const uint8_t* op) {
     return e;
 }
 
+std::atomic<bool> g_build_installed{false};
+
 inline bool want_build() {
-    return has_subscribers(KILN_GAMEPLAY_BUILD);
+    return g_build_installed.load(std::memory_order_acquire) && has_subscribers(KILN_GAMEPLAY_BUILD);
 }
 
 // ---- building ----
 // All five return the success flag (al) that the caller passes on to BuildFinish.
 uint8_t build_common(kiln::RawHook& h, uint32_t op_kind, uint32_t action, uint8_t* op, void* arg, uint32_t item,
                      double x, double y, double z, KilnEntity target) {
+    if (!g_build_installed.load(std::memory_order_acquire)) return h.call<uint8_t>(op, arg, item);
     const KilnEntity player = op_player(op);
     const uint32_t zone = zone_check(player, x, y, z, action);
     if (zone) {
@@ -96,11 +102,13 @@ uint8_t build_common(kiln::RawHook& h, uint32_t op_kind, uint32_t action, uint8_
 }
 
 uint8_t __fastcall hk_place_block(uint8_t* op, const float* xf, uint32_t item) {
+    if (!g_build_installed.load(std::memory_order_acquire)) return h_block.call<uint8_t>(op, const_cast<float*>(xf), item);
     return build_common(h_block, KILN_GAMEPLAY_BUILD_PLACE_BLOCK, KILN_GAMEPLAY_DENY_BUILD, op, const_cast<float*>(xf),
                         item, xf[0], xf[1], xf[2], 0);
 }
 
 uint8_t __fastcall hk_place_prop(uint8_t* op, const uint8_t* desc, uint32_t item) {
+    if (!g_build_installed.load(std::memory_order_acquire)) return h_prop.call<uint8_t>(op, const_cast<uint8_t*>(desc), item);
     float p[3];
     std::memcpy(p, desc + 0x10, sizeof p);  // desc: +0 template GUID, +0x10 position (float metres), +0x1c rotation
     return build_common(h_prop, KILN_GAMEPLAY_BUILD_PLACE_PROP, KILN_GAMEPLAY_DENY_BUILD, op, const_cast<uint8_t*>(desc),
@@ -108,16 +116,19 @@ uint8_t __fastcall hk_place_prop(uint8_t* op, const uint8_t* desc, uint32_t item
 }
 
 uint8_t __fastcall hk_dismantle(uint8_t* op, const float* xf, uint32_t item) {
+    if (!g_build_installed.load(std::memory_order_acquire)) return h_dis.call<uint8_t>(op, const_cast<float*>(xf), item);
     return build_common(h_dis, KILN_GAMEPLAY_BUILD_DISMANTLE, KILN_GAMEPLAY_DENY_BREAK, op, const_cast<float*>(xf),
                         item, xf[0], xf[1], xf[2], 0);
 }
 
 uint8_t __fastcall hk_dismantle2(uint8_t* op, const float* xf, uint32_t item) {
+    if (!g_build_installed.load(std::memory_order_acquire)) return h_dis2.call<uint8_t>(op, const_cast<float*>(xf), item);
     return build_common(h_dis2, KILN_GAMEPLAY_BUILD_DISMANTLE, KILN_GAMEPLAY_DENY_BREAK, op, const_cast<float*>(xf),
                         item, xf[0], xf[1], xf[2], 0);
 }
 
 uint8_t __fastcall hk_pick_up(uint8_t* op, const uint32_t* what, uint32_t item) {
+    if (!g_build_installed.load(std::memory_order_acquire)) return h_pick.call<uint8_t>(op, const_cast<uint32_t*>(what), item);
     const KilnEntity prop = what[0];
     KilnVec3 p{};
     entity_position(prop, &p);  // a placed prop: static; read-only from a worker (guarded)
@@ -337,19 +348,102 @@ uint32_t hooks_spawn_replace_clear(KilnOwner owner) {
     return static_cast<uint32_t>(n);
 }
 
-bool hooks_install() {
-    if (F.craft) F.craft = hook(h_craft, fn.craft, reinterpret_cast<void*>(&hk_craft), "CraftRecipe");
-    if (F.build) {
-        const bool ok = hook(h_block, fn.place_block, reinterpret_cast<void*>(&hk_place_block), "PlaceBlueprint") &&
-                        hook(h_prop, fn.place_prop, reinterpret_cast<void*>(&hk_place_prop), "PlaceProp") &&
-                        hook(h_dis, fn.dismantle, reinterpret_cast<void*>(&hk_dismantle), "DismantleBlock") &&
-                        hook(h_dis2, fn.dismantle2, reinterpret_cast<void*>(&hk_dismantle2), "DismantleBlock2") &&
-                        hook(h_pick, fn.pick_up, reinterpret_cast<void*>(&hk_pick_up), "PickUpProp");
-        if (!ok) {
-            h_block = {}, h_prop = {}, h_dis = {}, h_dis2 = {}, h_pick = {};
-            F.build = false;
+namespace {
+std::recursive_mutex g_build_mu;
+uint32_t g_build_state = 0, g_build_mask = 0; // idle, installed, waiting, refused
+KilnOwner g_build_requester = 0;
+bool g_build_requested = false, g_build_lifecycle = false;
+std::string g_build_reason = "resolved, not installed: no mod asked";
+const char* build_names[] = {"gameplay/PlaceBlueprint", "gameplay/PlaceProp", "gameplay/DismantleBlock",
+                            "gameplay/DismantleBlock2", "gameplay/PickUpProp"};
+
+// Single installation-policy seam: replace waiting for the stop with checked raw installation at server Pre
+// once kiln.hooks provides it. session() is an AnyThread snapshot. A STOPPING callback excludes only the world
+// whose jobs the core has drained; every other world (including a hosting client's prediction world) must be gone.
+bool build_may_install(uint32_t stopping) {
+    KilnSessionInfo session{}; session.size = sizeof session;
+    if (!g_api->session || g_api->session(&session) != KILN_OK) return false;
+    if (stopping == KILN_WORLD_SERVER && !g_api->feature(kstr("tick.wait_jobs"))) return false;
+    for (uint32_t k = 0; k < KILN_WORLD_KINDS; ++k)
+        if (k != stopping && session.worlds[k]) return false;
+    return true;
+}
+void build_publish() {
+    const auto* caps = static_cast<const KilnCapsApi*>(g_api->service(kstr(KILN_CAPS_SERVICE), 1));
+    if (caps && caps->report)
+        caps->report(g_owner, kstr("gameplay.build_hooks"),
+            g_build_state == 1 ? KILN_CAP_AVAILABLE : g_build_state == 3 ? KILN_CAP_UNAVAILABLE : KILN_CAP_PENDING,
+            g_build_state == 1 ? KILN_CAP_REASON_NONE : g_build_state == 3 ? KILN_CAP_REASON_FAULTED : KILN_CAP_REASON_SESSION,
+            kstr(g_build_reason));
+}
+}
+void build_lifecycle(bool available) { std::lock_guard lock(g_build_mu); g_build_lifecycle = available; }
+bool build_installed() { return g_build_installed.load(std::memory_order_acquire); }
+uint32_t build_state() { std::lock_guard lock(g_build_mu); return g_build_state; }
+uint32_t build_mask() { std::lock_guard lock(g_build_mu); return g_build_mask; }
+std::string build_reason() { std::lock_guard lock(g_build_mu); return g_build_reason; }
+void build_poll(uint32_t stopping) {
+    std::lock_guard lock(g_build_mu);
+    if (!g_build_requested || g_build_state == 1 || g_build_state == 3 || !build_may_install(stopping)) return;
+    const uintptr_t targets[] = {fn.place_block, fn.place_prop, fn.dismantle, fn.dismantle2, fn.pick_up};
+    kiln::RawHook* hooks[] = {&h_block, &h_prop, &h_dis, &h_dis2, &h_pick};
+    void* detours[] = {reinterpret_cast<void*>(&hk_place_block), reinterpret_cast<void*>(&hk_place_prop),
+        reinterpret_cast<void*>(&hk_dismantle), reinterpret_cast<void*>(&hk_dismantle2), reinterpret_cast<void*>(&hk_pick_up)};
+    auto refuse = [&](const std::string& why) {
+        g_build_state = 3;
+        g_build_reason = "refused: " + why + "; installed target mask " + std::to_string(g_build_mask) +
+                         " (all installed detours pass through; no build events or build/break denies)";
+        for (unsigned i=0; i<5; ++i) if (g_build_mask & (1u << i)) g_build_reason += std::string("; ") + build_names[i];
+        KG_W("kiln.gameplay: build hooks %s", g_build_reason.c_str()); build_publish();
+    };
+    if (!F.build) { refuse("gameplay.build symbols/layouts did not resolve"); return; }
+    // Revalidate every resolved symbol and readable executable entry before the first write. The existing hook()
+    // helper adds no byte validation of its own; sigdb resolution supplies the signature validation.
+    for (unsigned i = 0; i < 5; ++i) {
+        uintptr_t resolved = 0;
+        if (!targets[i] || !g_api->symbol || g_api->symbol(kstr(build_names[i]), &resolved) != KILN_OK ||
+            resolved != targets[i] || !seh_build_target(targets[i])) { refuse(std::string(build_names[i]) + " failed pre-check"); return; }
+    }
+    for (unsigned i = 0; i < 5; ++i) {
+        if (!hook(*hooks[i], targets[i], detours[i], build_names[i] + 9)) {
+            refuse(std::string(build_names[i]) + ": " + (hooks[i]->error() ? hooks[i]->error() : "install failed")); return;
+        }
+        g_build_mask |= 1u << i;
+    }
+    g_build_state = 1; g_build_reason = "installed";
+    g_build_installed.store(true, std::memory_order_release);
+    KG_I("kiln.gameplay: build hooks installed at first use by %llu", static_cast<unsigned long long>(g_build_requester));
+    build_publish();
+}
+bool build_request(KilnOwner owner) {
+    std::lock_guard lock(g_build_mu);
+    if (g_build_state == 3) {
+        if (!g_build_requested) KG_W("kiln.gameplay: build hooks %s (owner %llu)", g_build_reason.c_str(),
+                                   static_cast<unsigned long long>(owner));
+        g_build_requested = true;
+        return false;
+    }
+    if (!g_build_requested) {
+        g_build_requested = true; g_build_requester = owner;
+        if (!build_may_install(KILN_WORLD_KINDS)) {
+            KilnSessionInfo session{}; session.size = sizeof session;
+            const bool observed = g_build_lifecycle && g_api->session && g_api->session(&session) == KILN_OK && session.lifecycle;
+            g_build_state = observed ? 2 : 3;
+            g_build_reason = "build hooks wait for the world to stop: asked while a world ran; build events begin with the next world";
+            if (!observed) g_build_reason = "refused: cannot observe world stop; build events unavailable in this process";
+            KG_W("kiln.gameplay: %s (owner %llu)", g_build_reason.c_str(), static_cast<unsigned long long>(owner));
+            build_publish();
         }
     }
+    build_poll();
+    return g_build_state != 3;
+}
+
+bool hooks_install() {
+    { std::lock_guard lock(g_build_mu);
+      if (!F.build) { g_build_state=3; g_build_reason="refused: gameplay.build symbols/layouts did not resolve"; }
+      build_publish(); }
+    if (F.craft) F.craft = hook(h_craft, fn.craft, reinterpret_cast<void*>(&hk_craft), "CraftRecipe");
     if (F.terraform) F.terraform = hook(h_terra, fn.terraform, reinterpret_cast<void*>(&hk_terraform), "TerraformImpact");
     if (F.spawn) F.spawn = hook(h_spawn, fn.queue_spawn, reinterpret_cast<void*>(&hk_spawn), "QueueSpawn");
     return F.craft || F.build || F.terraform || F.spawn;
@@ -365,6 +459,7 @@ void hooks_post() {
     if (recs.empty()) return;
     S.hook_records += recs.size();
     for (auto& r : recs) {
+        if (r.kind == KILN_GAMEPLAY_BUILD && !build_installed()) continue;
         KilnGameplayEvent ev;
         std::memset(&ev, 0, sizeof ev);
         ev.size = sizeof ev;

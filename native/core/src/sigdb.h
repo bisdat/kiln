@@ -20,6 +20,7 @@
 // .text is not the loaded one) the live .text is scanned, as before. A symbol whose live bytes differ from the file's
 // is reported (kiln.log, sigdb-report.json "live"): someone hooked or patched it.
 #pragma once
+#include "services/hooks_fingerprint.h"
 #include <string>
 #include <string_view>
 #include <vector>
@@ -100,6 +101,7 @@ enum class SigStatus : uint8_t {
     Bad,         // the descriptor itself is malformed
 };
 struct SigInfo {
+    hooks::fp::Sig descriptor;  // parsed descriptor of this resolver load
     std::string symbol;
     SigStatus status = SigStatus::Unresolved;
     std::string text;         // the comparison in words, or why there is none
@@ -108,6 +110,9 @@ struct SigInfo {
     uintptr_t address = 0;    // live address (0 = unresolved)
 };
 bool sig(std::string_view symbol, SigInfo* out);   // core first, then the fragment named by the prefix
+// Status only: no descriptor, JSON or fingerprint copies. Text is empty on Match.
+bool sig_status(std::string_view symbol, uintptr_t* address, SigStatus* status, std::string* text);
+uint64_t sig_revision(); // process-local revision of the immutable executable / loaded descriptor set
 bool sig_at(uintptr_t live_addr, SigInfo* out);    // the described symbol resolved to exactly this address
 std::vector<std::string> sig_symbols();            // core symbols with a descriptor
 std::string structs_json();                        // the core's "structs" sections, merged

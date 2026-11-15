@@ -12,7 +12,7 @@ namespace Kiln;
 /// here holds an unloaded mod.</summary>
 internal static class HookCookies
 {
-    public const byte Detour = 0, Mid = 1;
+    public const byte Detour = 0, Mid = 1, Typed = 2;
 
     private readonly record struct Key(string ModId, byte Kind, nuint Address);
 

@@ -43,6 +43,14 @@ internal static class TestMods
 
     public static void As(ModContext? mod, Action f) => As<object?>(mod, () => { f(); return null; });
 
+    public static void DrainPending(ModContext mod)
+    {
+        var field = typeof(ModContext).GetField("Pending", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var queue = (Queue<Action>)field.GetValue(mod)!;
+        var pending = queue.ToArray(); queue.Clear();
+        As(mod, () => { foreach (var action in pending) action(); });
+    }
+
     static readonly PropertyInfo AliveProperty = typeof(ModContext).GetProperty("Alive", BindingFlags.NonPublic | BindingFlags.Instance)!;
 
     public static bool IsAlive(ModContext mod) => (bool)AliveProperty.GetValue(mod)!;

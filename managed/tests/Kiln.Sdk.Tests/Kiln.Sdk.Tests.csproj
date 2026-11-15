@@ -17,6 +17,9 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit.v3" Version="3.1.0" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <!-- ProgramsTaskTests runs the KilnPrograms task in-process, as Kiln.World.Tests runs KilnWrites -->
+    <PackageReference Include="Microsoft.Build.Utilities.Core" Version="17.14.28" />
+    <PackageReference Include="Microsoft.Build.Framework" Version="17.14.28" />
   </ItemGroup>
   <ItemGroup>
     <!-- the bake and, through it, Kiln.TestKit, Kiln.Host and every service beside them (as in kiln/host) -->

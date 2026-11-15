@@ -2,6 +2,8 @@
 // Materials that replace a game material ("replaces") belong to their mod. kiln.vfx takes the override off when the owner it was given with the
 // definition is revoked; a mod whose blocks compile under one of Kiln's owners (data files only, or code that never defines a block) keeps
 // that owner across an unload, so Kiln.Blocks tells kiln.vfx itself when such a mod is no longer loaded. docs/kiln/modding/materials.md.
+// The same message tells kiln.vfx's resource budget that the mod's VFX stay in the game's table without their mod (reserved, not in
+// use) until a block of the mod compiles again (since 0.2.0-dev.29).
 using System.Text.Json;
 
 namespace Kiln;
@@ -11,7 +13,7 @@ internal static class Reskins
     private static readonly HashSet<string> Released = new();
     private static readonly object Gate = new();
 
-    /// <summary>A replacement of this mod's is registered with kiln.vfx.</summary>
+    /// <summary>A replacement or a VFX of this mod's is registered with kiln.vfx: the mod's next unload is told again.</summary>
     public static void Registered(string mod)
     {
         lock (Gate) Released.Remove(mod);

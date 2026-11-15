@@ -24,6 +24,7 @@ Rules (docs/re/impact.md section 6 has the evidence for each):
   E_UNCONNECTED [rt] an argument the native reads with no check is unconnected: it dereferences null and the process
                 dies. hasAttackCategory's matchAll took a dedicated server down this way (natives.json: "unchecked")
   W_ARGTYPE     an argument's variable type differs from every type vanilla passes there
+  E_ARGTYPE     the same against a typed Kiln native ("sync": true in natives.json): kiln.abilities refuses the program
   W_UNCONNECTED an argument every vanilla call connects is unconnected: the native returns an error and the program stops
   W_TYPESIZE    a variable's size differs from its type's size
   W_ALIGN       a variable is not aligned to its type
@@ -319,7 +320,10 @@ def _check_args(p, insns, k, n, cat, rep, sec):
                 continue  # E_HANDLE already
             v = p.variables[idx]
             tn = cat.type_name(v.type)
-            if par and par.types and tn and tn not in par.types and "any" not in par.types:
+            if par and par.types and tn and tn not in par.types and "any" not in par.types and n.extra.get("sync"):
+                rep.add("error", "E_ARGTYPE", f"{n.name} args[{ai}] ({par.name}): ${v.dbg} is {tn}, the native takes "
+                        f"{'/'.join(par.types[:4])}: kiln.abilities refuses the program", sec, a.pc)
+            elif par and par.types and tn and tn not in par.types and "any" not in par.types:
                 rep.add("warning", "W_ARGTYPE", f"{n.name} args[{ai}] ({par.name}): ${v.dbg} is {tn}, vanilla passes "
                         f"{'/'.join(par.types[:4])}", sec, a.pc)
 

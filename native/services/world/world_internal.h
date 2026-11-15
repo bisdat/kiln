@@ -130,6 +130,7 @@ struct Layout {
     int64_t reg_components = -1, reg_templates = -1, reg_singletons = -1, reg_events = -1;  // map bases in the registry
     MapFields map;
     int64_t storage_entities = -1, entity_layout = -1;
+    int64_t entity_id = -1;  // u32 entity id in an entity record (spawn/record.id): a record names the entity it is of
     int64_t tp_applied = -1, tp_find_ground = -1, tp_target_entity = -1, tp_add_size = -1, tp_remove_size = -1;
     int64_t actor_state = -1;
 };
@@ -199,6 +200,7 @@ void* write_other(KilnProgramCtx* ctx, uint64_t accessor, KilnEntity entity, uin
 KilnResult unregister_program(KilnHandle program);
 void programs_reap_owners();
 void boot_programs_init();
+KilnResult KILN_CALL program_reservation(KilnStr mod, KilnStr key, char* text, uint32_t capacity, uint32_t* out_size);
 KilnResult reserve_program(const std::string& mod, const std::string& key, const KilnProgramDesc* desc);
 KilnResult KILN_CALL bind_program(KilnOwner owner, KilnStr mod, KilnStr key, KilnProgramEachFn each, void* user, KilnHandle* out);
 uint32_t KILN_CALL program_capabilities();
@@ -268,6 +270,8 @@ int32_t KILN_CALL game_program_find(uint32_t kind, KilnStr name);
 KilnResult KILN_CALL game_program_info(uint32_t kind, int32_t index, KilnGameProgramInfo* out);
 KilnResult KILN_CALL game_programs_status(KilnGameProgramsStatus* out);
 KilnResult KILN_CALL lab_parallel(uint32_t on, uint32_t steps);
+void game_programs_test_hold_directory_lock(bool hold);  // tests: hold the lock a directory read takes
+uint64_t game_programs_test_directory_bypasses();
 void game_programs_test_setup(uintptr_t image_lo, uintptr_t image_hi, bool table_ok, int64_t players_mask,
                               bool switch_enabled);  // host tests only
 

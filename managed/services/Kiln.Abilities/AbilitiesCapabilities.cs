@@ -25,6 +25,16 @@ internal static class AbilitiesCaps
     /// reflection reads (<c>players.reflection</c>).</summary>
     public const string BuffList = "abilities.buff_list";
 
+    /// <summary>Managed, static (since 0.2.0-dev.29): synchronous natives (<see cref="Abilities.Natives.RegisterSync"/>).
+    /// Needs a dev.29 kiln.abilities whose RegisterNative hook is in (sigdb feature <c>abilities.natives</c>: the
+    /// dedicated server's; a game client has no signatures for it).</summary>
+    public const string NativesSync = "abilities.natives.sync";
+
+    /// <summary>Managed, static (since 0.2.0-dev.29): handlers attached to a vanilla native's calls in one program at one
+    /// call site, filtered before managed code runs (<see cref="Abilities.Natives.Attach"/>). Needs what
+    /// <see cref="NativesSync"/> needs.</summary>
+    public const string NativesAttach = "abilities.natives.attach";
+
     // Reported at the service's start, again under a new registry binding (the test kit's), and every 25 steps (about
     // once a second): abilities.buffs follows the server world (its registries come with it; a client hosts after its
     // mods loaded). ServiceCaps writes a row only when it changed.
@@ -45,6 +55,7 @@ internal static class AbilitiesCaps
             ModLog.Warn($"kiln.abilities: its sigdb features were not lowered: {e.Message}");
         }
         RefreshBuffs();
+        ReportNatives();
         try
         {
             var (state, reason, text) = DecideList(PlayerStates.Status is { } st ? st.Reflection : null, Row("kiln.playerstate"), Row("players.reflection"));
@@ -70,6 +81,43 @@ internal static class AbilitiesCaps
         {
             ModLog.Warn($"kiln.abilities: {Buffs} was not reported: {e.Message}");
         }
+    }
+
+    private static unsafe void ReportNatives()
+    {
+        try
+        {
+            var t = AbilitiesNative.T;
+            var counters = AbilitiesNative.Counters();
+            var sync = DecideNatives(t != null, counters is { } c ? (c.Flags & AbilitiesNative.CountersNatives) != 0 : null,
+                AbilitiesNative.Has(t, nameof(AbilitiesNative.TableV2.NativeRegisterSync)), Row("abilities.natives"), "synchronous natives");
+            ServiceCaps.Report(NativesSync, sync.State, sync.Reason, sync.Text);
+            var attach = DecideNatives(t != null, counters is { } k ? (k.Flags & AbilitiesNative.CountersNatives) != 0 : null,
+                AbilitiesNative.Has(t, nameof(AbilitiesNative.TableV2.NativeDetach)), Row("abilities.natives"), "attachments");
+            ServiceCaps.Report(NativesAttach, attach.State, attach.Reason, attach.Text);
+        }
+        catch (Exception e) when (e is ArgumentException or InvalidOperationException or TypeInitializationException
+                                      or FileNotFoundException or FileLoadException)
+        {
+            ModLog.Warn($"kiln.abilities: {NativesSync} / {NativesAttach} were not reported: {e.Message}");
+        }
+    }
+
+    /// <summary>A native-thunk row (<c>abilities.natives.sync</c>, later <c>.attach</c>): kiln.abilities is here
+    /// (<paramref name="table"/>), its RegisterNative hook is in (<paramref name="hookIn"/>; null: the table has no
+    /// counters), the table has the member (<paramref name="member"/>), and the sigdb row <c>abilities.natives</c> is
+    /// not off. Static: none of it changes in a process. Pure.</summary>
+    internal static (CapabilityState State, CapabilityReason Reason, string Text) DecideNatives(bool table, bool? hookIn,
+        bool member, Capability? natives, string what)
+    {
+        if (!table) return (CapabilityState.Unavailable, CapabilityReason.ServiceMissing, "kiln.abilities is not loaded");
+        if (natives is { State: CapabilityState.Unavailable } row)
+            return (CapabilityState.Unavailable, row.Reason, $"needs abilities.natives: {row.ReasonText}");
+        if (!member || hookIn is null)
+            return (CapabilityState.Unavailable, CapabilityReason.ServiceOlder, $"kiln.abilities has no {what} (older than 0.2.0-dev.29)");
+        if (hookIn == false)
+            return (CapabilityState.Unavailable, CapabilityReason.Faulted, "kiln.abilities' RegisterNative hook is not in (see kiln.log)");
+        return (CapabilityState.Available, CapabilityReason.None, "");
     }
 
     /// <summary>Throws <see cref="KilnUnavailableException"/> naming <paramref name="name"/> when its row is not available

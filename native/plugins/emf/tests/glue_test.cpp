@@ -157,6 +157,10 @@ static KilnHandle wheel_closed = 0;
 static std::vector<std::string> wheel_items;
 static std::string wheel_title;
 static uint32_t wheel_hold = 0, wheel_count = 0;
+static int size_calls = 0, constraint_calls = 0;
+static float min_w, min_h, max_w, max_h, size_w, size_h;
+static uint32_t window_flags, size_cond, pos_cond;
+static std::vector<std::string> window_calls;
 static void init_ui(KilnUiApi &ui) {
     ui.header.size = sizeof ui;
     ui.header.version = KILN_UI_VERSION;
@@ -170,9 +174,13 @@ static void init_ui(KilnUiApi &ui) {
         *h = 2;
         return KILN_OK;
     };
-    ui.set_next_window_pos = [](float, float, uint32_t, float, float) {};
-    ui.set_next_window_size = [](float, float, uint32_t) {};
-    ui.begin = [](KilnStr, bool *open, uint32_t) {
+    ui.set_next_window_pos = [](float, float, uint32_t c, float, float) { pos_cond = c; window_calls.push_back("pos"); };
+    ui.set_next_window_size = [](float w, float h, uint32_t c) { ++size_calls; size_w = w; size_h = h; size_cond = c; window_calls.push_back("size"); };
+    ui.set_next_window_size_constraints = [](float a, float b, float c, float d) {
+        ++constraint_calls; min_w = a; min_h = b; max_w = c; max_h = d; window_calls.push_back("constraints");
+    };
+    ui.begin = [](KilnStr, bool *open, uint32_t flags) {
+        window_flags = flags; window_calls.push_back("begin");
         *open = !close_frame;
         return !close_frame;
     };
@@ -210,6 +218,53 @@ static void init_ui(KilnUiApi &ui) {
     ui.end = []() {};
     ui.unsubscribe = [](KilnHandle) -> KilnResult { return KILN_OK; };
     ui.set_capture = [](uint32_t c) { captured = c; };
+}
+static void test_window_sizing(KilnUiApi &ui) {
+    auto d = window_def();
+    d.width = 20;
+    CHECK(table.window_open(&d));
+    KilnUiFrame fr{};
+    fr.width = 1920; fr.height = 1080; fr.dpi_scale = 1.5f;
+    const bool saved_close = close_frame;
+    const int saved_closed = closed;
+    close_frame = false;
+    for (int i = 0; i < 2; ++i) {
+        // The second frame represents content arriving after opening.
+        if (i) {
+            EmfUiWidget row{}; row.type = EMF_UI_TEXT; row.text = "creature";
+            d.widgets = &row; d.count = 1;
+            CHECK(table.window_update(&d));
+        }
+        window_calls.clear(); size_calls = constraint_calls = 0;
+        frame_fn(&fr, nullptr);
+        CHECK(constraint_calls == 1 && size_calls == 0);
+        CHECK(min_w == 540 && max_w == 540 && min_h == 0 && max_h == 918);
+        CHECK(window_flags == (KILN_UI_WINDOW_NO_COLLAPSE | KILN_UI_WINDOW_ALWAYS_AUTO_RESIZE));
+        CHECK(pos_cond == KILN_UI_COND_APPEARING);
+        CHECK((window_calls == std::vector<std::string>{"pos", "constraints", "begin"}));
+    }
+    d.widgets = nullptr; d.count = 0;
+    CHECK(table.window_update(&d));
+    const auto full = ui.header.size;
+    for (auto short_size : {offsetof(KilnUiApi, set_next_window_size_constraints), sizeof(KilnUiApi) - 1}) {
+        ui.header.size = short_size;
+        window_calls.clear(); size_calls = constraint_calls = 0;
+        frame_fn(&fr, nullptr);
+        CHECK(constraint_calls == 0 && size_calls == 1);
+        CHECK(size_w == 540 && size_h == 0 && size_cond == KILN_UI_COND_APPEARING);
+        CHECK(window_flags == KILN_UI_WINDOW_NO_COLLAPSE);
+        CHECK((window_calls == std::vector<std::string>{"pos", "size", "begin"}));
+    }
+    ui.header.size = full;
+    auto constraints = ui.set_next_window_size_constraints;
+    ui.set_next_window_size_constraints = nullptr;
+    size_calls = constraint_calls = 0;
+    frame_fn(&fr, nullptr);
+    CHECK(size_calls == 1 && constraint_calls == 0 && window_flags == KILN_UI_WINDOW_NO_COLLAPSE);
+    ui.set_next_window_size_constraints = constraints;
+    CHECK(table.window_close(d.id));
+    windows_after_step(reinterpret_cast<EmfWorld *>(worlds[0]), EMF_WORLD_SERVER);
+    closed = saved_closed; close_frame = saved_close;
 }
 static std::vector<KilnProgressionRequest> submitted;
 static bool curve_available = true;
@@ -975,6 +1030,7 @@ int main(int argc, char **argv) {
     S.world = &world;
     test_components(world);
     test_level(prog);
+    test_window_sizing(ui);
     auto d = window_def();
     CHECK(table.window_open(&d));
     active_mod = &other_mod;

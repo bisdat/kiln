@@ -9,9 +9,9 @@
   "verified": true,
   "note": "runtime-verified through Steam (GE-Proton11-11), policy any, core + every service + kiln-emf + probe + ui-test + menubuttons: side client, sigdb 306/306 symbols, 434/434 constants (client.d composed), SimStep + WorldDestroy hooked, boot complete, 0 errors; main menu entries Kiln / ui-test / Mods (the Kiln sample screen opened); hosted a LOCAL world offline (saves: world loaded: slot 0x0002 (world1.ksd)): server world 60 steps/s on the GameServer thread, client and prediction worlds on the main thread, local player 1; ui-test all checks PASS (screens MainMenu/Loading/InGame/PauseMenu/Map/Crafting, menu entries chosen, crafting state), Kiln crafting tabs and subcategories shown, Insert overlay; tick cost as on ce6fdba6 (server step p50 2.5 ms, Kiln Pre 0.037 ms; client 1.2 ms); back to the menu (worlds stopping, shutdown save), clean quit (Shutdown 'Steam'). Not covered: joining a remote server, service write paths on the client. Added in dev.22 from static analysis only (resolved offline with sigdb_check.py, not yet seen running): ui.menu_page, ui.menu_page_sound, ui.error_popup (ui/PreGameCredits, ui/PreGameCreditsRet, ui/UiPlaySound and their constants). Levels (record 2, refreshed offline on 2026-11-11, no client run): lab = the names the boot above resolved, as its record listed them (199 named symbols, 434 constants, 106 features), each resolving to the same value today; every service loaded in that boot, but only ui-test ran, so lab here means loaded with Kiln's checks passing, not that the service test mods ran on the client. static = everything else, resolved offline only: the 186 @ probes (the boot's record did not list probes), the dev.22 ui names above, and every name declared since (the services audio, characters, emf-net, npcai, pacing, progression, quests, render, rules, skills, types and vfx, and new names of combat, creatures, gamedata, items, net, players, time and ui): 158 symbols, 210 constants and 70 features. sigdb now declares 543 symbols (441 defined, 102 captured), 644 constants (595 defined, 49 captured) and 176 features; all of them resolve offline on this exe.",
   "declared": {
-    "symbols": 678,
-    "constants": 761,
-    "features": 209
+    "symbols": 692,
+    "constants": 779,
+    "features": 211
   },
   "features": {
     "abilities.attributes": true,
@@ -30,6 +30,7 @@
     "build.read": true,
     "build.write": true,
     "build.zones": true,
+    "caps.vfx.expansion_sites": true,
     "characters.id": true,
     "chat.players": true,
     "chat.receive": true,
@@ -90,6 +91,7 @@
     "hooks.typed": true,
     "items.catalog": true,
     "items.equip": true,
+    "items.equip_sets": true,
     "items.fuel": true,
     "items.instances": true,
     "items.move": true,
@@ -278,6 +280,16 @@
     "build/VoxelTileReady": "0x10bc130",
     "build/VoxelWrite": "0x10bb030",
     "build/voxel.base_size": "0x13d47a0",
+    "caps/VfxCreateSystem": "0x198590",
+    "caps/VfxInitResources": "0x1b0ed0",
+    "caps/VfxMapAllocate": "0x196ab0",
+    "caps/VfxMapReserveSite": "0x199563",
+    "caps/VfxPendingResize": "0x437b0",
+    "caps/VfxPendingResizeSite": "0x1996e2",
+    "caps/VfxRegisterGuid": "0x1981d0",
+    "caps/VfxTableAliasCopy": "0x199729",
+    "caps/VfxTableAllocationSite": "0x19959c",
+    "caps/VfxTableInitLoop": "0x1995d1",
     "chat/ChatLogAdd": "0xe6e1c0",
     "chat/MarkSent": "0xea7b40",
     "chat/ReceiveAddLine": "0xe620ca",
@@ -738,6 +750,21 @@
     "build/zone.abandoned": "0x46",
     "build/zone.entity": "0x40",
     "build/zone.stride": "0x48",
+    "caps/vfx.alias": "0x2118",
+    "caps/vfx.alias_capacity": "0x2120",
+    "caps/vfx.init_state": "0x2138",
+    "caps/vfx.map": "0x1bd8",
+    "caps/vfx.map_limit_relative": "0x50",
+    "caps/vfx.map_limit_request": "0x800",
+    "caps/vfx.pending": "0x20f8",
+    "caps/vfx.pending_bits": "0x800",
+    "caps/vfx.pending_count": "0x2100",
+    "caps/vfx.table": "0x1c38",
+    "caps/vfx.table_bytes": "0x60000",
+    "caps/vfx.table_capacity": "0x800",
+    "caps/vfx.table_capacity_offset": "0x1c40",
+    "caps/vfx.table_init_count": "0x800",
+    "caps/vfx.table_stride": "0xc0",
     "characters/rec.character": "0x50",
     "chat/gs.chat": "0x60",
     "chat/gs.player_stride": "0x148",
@@ -947,7 +974,9 @@
     "items/strings.count": "0x1e4",
     "items/strings.keys": "0x1b8",
     "items/strings.values": "0x1d0",
+    "items/tx.empty_state": "0xa0",
     "items/tx.flags": "0xb0",
+    "items/tx.guard_flags": "0xb0",
     "items/tx.operator": "0xe0",
     "items/tx.ops": "0xf0",
     "items/tx.ops_inline": "0x118",
@@ -956,6 +985,7 @@
     "items/tx.result": "0x71a8",
     "items/tx.touched": "0x7140",
     "items/tx.touched_capacity": "0x10",
+    "items/tx.touched_count": "0x7148",
     "items/tx.touched_inline": "0x7168",
     "items/world.program_count": "0xe16f50",
     "items/world.program_stride": "0x1f28",
@@ -2302,6 +2332,62 @@
       },
       "features": {
         "items.tool_wear_debit": "static"
+      }
+    },
+    "dev29-10-equipment-sets": {
+      "level": "static",
+      "date": "2026-11-15",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "@items/CommitGuards": "static"
+      },
+      "constants": {
+        "items/tx.empty_state": "static",
+        "items/tx.guard_flags": "static",
+        "items/tx.touched_count": "static"
+      },
+      "features": {
+        "items.equip_sets": "static"
+      }
+    },
+    "dev29-17a-vfx-cap": {
+      "level": "static",
+      "date": "2026-11-15",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "@caps/VfxInitResources.state": "static",
+        "@caps/VfxMapCountLimit": "static",
+        "@caps/VfxTableInitLoop.stride": "static",
+        "caps/VfxCreateSystem": "static",
+        "caps/VfxInitResources": "static",
+        "caps/VfxMapAllocate": "static",
+        "caps/VfxMapReserveSite": "static",
+        "caps/VfxPendingResize": "static",
+        "caps/VfxPendingResizeSite": "static",
+        "caps/VfxRegisterGuid": "static",
+        "caps/VfxTableAliasCopy": "static",
+        "caps/VfxTableAllocationSite": "static",
+        "caps/VfxTableInitLoop": "static"
+      },
+      "constants": {
+        "caps/vfx.alias": "static",
+        "caps/vfx.alias_capacity": "static",
+        "caps/vfx.init_state": "static",
+        "caps/vfx.map": "static",
+        "caps/vfx.map_limit_relative": "static",
+        "caps/vfx.map_limit_request": "static",
+        "caps/vfx.pending": "static",
+        "caps/vfx.pending_bits": "static",
+        "caps/vfx.pending_count": "static",
+        "caps/vfx.table": "static",
+        "caps/vfx.table_bytes": "static",
+        "caps/vfx.table_capacity": "static",
+        "caps/vfx.table_capacity_offset": "static",
+        "caps/vfx.table_init_count": "static",
+        "caps/vfx.table_stride": "static"
+      },
+      "features": {
+        "caps.vfx.expansion_sites": "static"
       }
     },
     "dev29-17c-roster-cap": {

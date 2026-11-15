@@ -24,6 +24,8 @@
     <!-- the typed program views (Ecs.Programs.FuelSetup) and Ecs.Get -->
     <ProjectReference Include="../../../managed/Kiln.Game/Kiln.Game.csproj" Private="false" ExcludeAssets="runtime" />
     <None Include="kiln.mod.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Systems.Define's boot reservation (FuelQuery; what Kiln.Sdk's KilnPrograms task writes for it) -->
+    <None Include="kiln.programs.json" CopyToOutputDirectory="PreserveNewest" />
     <Compile Remove="native/**;Peer/**" />
   </ItemGroup>
 </Project>

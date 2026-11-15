@@ -18,6 +18,7 @@ namespace kiln::tick {
 bool install();  // needs feature "tick"; "tick.wait_jobs" for a safe Post; "world.lifecycle" for stops
 bool installed();
 bool lifecycle();         // world stops are seen
+bool typed_install_pre(); // current thread is in authoritative (or joined client) Pre
 bool on_tick_thread();    // the server world's thread
 bool on_world_thread(uint32_t kind);
 KilnResult last(KilnTickInfo* out);  // last server-world step

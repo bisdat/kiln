@@ -1,0 +1,16 @@
+{
+  "format": 1,
+  "side": "server",
+  "comment": "hooks-typed-test's own fragment (prefix 'hooks-typed-test/'): the core's GetItemVolume under the mod's own name, with its own descriptor, so the Kiln.Sigs generator makes Kiln.Sigs.HooksTypedTest.ItemVolume and the fragment's report decides its status. OptS32 is the core's struct (Kiln.Sigs).",
+  "symbols": {
+    "hooks-typed-test/ItemVolume": {
+      "find": [{"pattern": "40 53 48 83 EC 20 48 8B D9 48 85 D2 75 ?? C7 01 12 00 00 00"}],
+      "sig": {
+        "conv": "win64", "sret": "OptS32",
+        "args": [{"name": "item", "type": "keen::ItemInfo*"}],
+        "abi": {"reads": ["rcx", "rdx"], "stack": [], "ret": "rax"},
+        "invoke": "any"
+      }
+    }
+  }
+}

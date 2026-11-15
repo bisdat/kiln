@@ -13,7 +13,7 @@ internal static unsafe class FakeRegistry
 {
     public sealed class Link
     {
-        public byte Kind;  // HookCookies.Detour / Mid
+        public byte Kind;  // HookCookies.Detour / Mid / Typed
         public nint Fn, User;
         public ulong Owner;
         public nuint Address;
@@ -25,35 +25,42 @@ internal static unsafe class FakeRegistry
     static readonly object Gate = new();
     static readonly List<Link> Slots = [];
     static ulong _handles;
-    static HooksNative.Table* _table;
+    static HooksNative.TypedTable* _table;
     static readonly HashSet<string> Symbols = [];
     public static Action? DuringRevokeOwner;
 
     public static bool HasSymbols(string id) { lock (Gate) return Symbols.Contains(id); }
 
-    /// <summary>Puts a fresh fake in place of the core's table.</summary>
-    public static void Install()
+    /// <summary>Puts a fresh fake in place of the core's table. <paramref name="typed"/>: a dev.28 core's table, whose
+    /// header.size covers the typed members (<see cref="FakeTyped"/>); else an older one's.</summary>
+    public static void Install(bool typed = false)
     {
         lock (Gate) { Slots.Clear(); Symbols.Clear(); }
         if (_table == null)
         {
-            _table = (HooksNative.Table*)NativeMemory.AllocZeroed((nuint)sizeof(HooksNative.Table));
-            _table->Detour = &Detour;
-            _table->Mid = &Mid;
-            _table->Revoke = &Revoke;
-            _table->RevokeOwner = &RevokeOwner;
-            _table->CallOriginal = &CallOriginal;
+            _table = (HooksNative.TypedTable*)NativeMemory.AllocZeroed((nuint)sizeof(HooksNative.CheckedTable));
+            var v1 = &_table->V1;
+            v1->Detour = &Detour;
+            v1->Mid = &Mid;
+            v1->Revoke = &Revoke;
+            v1->RevokeOwner = &RevokeOwner;
+            v1->CallOriginal = &CallOriginal;
             // NativeStr is internal to Kiln.Api; NativeText mirrors its ABI here.
-            *(nint*)&_table->LoadSymbols = (nint)(delegate* unmanaged[Cdecl]<ulong, NativeText, NativeText, HooksNative.SigSummary*, int>)&LoadSymbols;
-            *(nint*)&_table->UnloadSymbols = (nint)(delegate* unmanaged[Cdecl]<NativeText, int>)&UnloadSymbols;
+            *(nint*)&v1->LoadSymbols = (nint)(delegate* unmanaged[Cdecl]<ulong, NativeText, NativeText, HooksNative.SigSummary*, int>)&LoadSymbols;
+            *(nint*)&v1->UnloadSymbols = (nint)(delegate* unmanaged[Cdecl]<NativeText, int>)&UnloadSymbols;
+            FakeTyped.Fill(_table);
         }
-        HooksNative.UseForTests(_table);
+        // header.size (the table's first field) says how far the table goes: an older core's stops before the typed members
+        *(uint*)_table = typed ? (uint)sizeof(HooksNative.CheckedTable) : 0;
+        FakeTyped.Reset();
+        HooksNative.UseForTests(&_table->V1);
     }
 
     public static void Uninstall()
     {
         DuringInstall = null;
         DuringRevokeOwner = null;
+        FakeTyped.Reset();
         HooksNative.UseForTests(null);
     }
 
@@ -80,7 +87,7 @@ internal static unsafe class FakeRegistry
     /// <summary>Runs inside the native install, before the link is made (tests use it to race a retire).</summary>
     public static Action? DuringInstall;
 
-    static int Add(byte kind, ulong owner, nuint address, nint fn, nint user, ulong* handle)
+    internal static int Add(byte kind, ulong owner, nuint address, nint fn, nint user, ulong* handle)
     {
         DuringInstall?.Invoke();
         lock (Gate)
@@ -127,7 +134,7 @@ internal static unsafe class FakeRegistry
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    struct NativeText
+    internal struct NativeText
     {
         public byte* Ptr;
         public nuint Len;

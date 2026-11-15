@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "programs": {
+    "systems_test_fuel": {
+      "tpl": [
+        "FuelSetup"
+      ],
+      "read": [
+        "Fuel"
+      ],
+      "flags": []
+    }
+  }
+}

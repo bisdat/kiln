@@ -35,8 +35,11 @@ come with code fixes.
 
 Other KILN codes:
 - **KILN0xx** come from the SDK's MSBuild task (manifest checks, mdk.md), except KILN034 and KILN035 above: Roslyn rules
-  of Mod.OnBoot, numbered as the design of the boot phase names them (the MSBuild codes stop at KILN032).
+  of Mod.OnBoot, numbered as the design of the boot phase names them (the MSBuild codes are KILN001 to KILN032, and
+  KILN036 since 0.2.0-dev.29: a `[Query]` struct kiln.world cannot reserve, from the `KilnPrograms` step,
+  [services/systems.md](../services/systems.md#programs-of-your-own-systemsdefine)).
 - **KILN190** to **KILN193**, **KILN198** are the game-id generator's notes (catalogs.md).
+- **KILN180** to **KILN182** are the typed-hook generator's warnings (Kiln.Sigs, [../services/hooks.md](../services/hooks.md#typed-hooks-and-calls-detour_typed-kilnsigs-since-020-dev29)): a descriptor of the mod's sigdb fragment it cannot use (KILN180, with the reason: an unknown type, a struct return over 8 bytes without `sret`, more than 20 positions, two descriptions of one symbol that differ, two symbols with one class name), descriptors in a project without Kiln.Hooks (KILN181), a sigdb file that is not JSON (KILN182). A descriptor it reports is not generated.
 - **KL** codes are the data-file linter's (`kiln lint`).
 
 ## How it ships
@@ -522,6 +525,10 @@ pass settles it). `[Experimental("KILNX002")]`; today the achievement guard (`St
 ---
 
 <a id="kiln194"></a>
+## KILN180, KILN181, KILN182: Typed-hook descriptors
+<a id="kiln180"></a><a id="kiln181"></a><a id="kiln182"></a>
+The Kiln.Sigs generator turns each `sig` descriptor of a mod's `sigdb/server.json` and `sigdb/client.json` into a class (services/hooks.md). It warns and leaves a descriptor out when kiln.hooks would refuse it as malformed (KILN180), when the project describes functions but does not reference Kiln.Hooks (KILN181: add `Hooks` to `KilnServices`), and when a sigdb file does not parse (KILN182). Fix the descriptor; `tools/sigport/sigdb_check.py --fptool` checks it against the exe.
+
 ## KILN194: No such field in the game
 **What.** A constant path string given to `GameDataEntry` or `ContentEntry` (`Get`, `Original`, `GetNumber`, `GetJson`, `GetRef`, `Set`,
 `SetJson`, `Reset`, `Fields`), or a key of a definition's `Fields`, that the game doesn't have:

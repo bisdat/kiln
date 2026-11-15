@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "programs": {
+    "client_pass_fuel": {
+      "tpl": [
+        "FuelSetup"
+      ],
+      "read": [
+        "Fuel"
+      ],
+      "flags": []
+    }
+  }
+}

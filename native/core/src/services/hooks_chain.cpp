@@ -22,6 +22,7 @@
 // taking a new slot; see revive() for why a call still in flight through the old incarnation stays correct.
 #include "hooks_chain.h"
 #include "hooks_patch_policy.h"
+#include "hooks_typed_result.h"
 
 #include <windows.h>
 
@@ -89,6 +90,7 @@ struct Link {
     uint32_t slot = 0;
     void* fn = nullptr;
     void* user = nullptr;
+    uint32_t sret_size = 0;                  // immutable across this link incarnation
     uint32_t arg_count = 0;                  // typed: the stack arguments forwarded (positions beyond the fourth)
     uint8_t* entry = nullptr;                // what the previous link / head cell jumps to
     uint8_t* cont = nullptr;                 // continuation stub (raw, structured, v1); null for mid
@@ -865,6 +867,7 @@ void write_with_threads_stopped(std::vector<Stopped>& th, uintptr_t addr, const 
         *unchecked = static_cast<uint32_t>(rep.unopened + rep.unstopped + rep.no_context + in_bytes);
         // Strict callers refuse BEFORE changing bytes or any thread context.
         if (!checked_patch_allowed(rep.unopened + rep.unstopped + rep.no_context, in_bytes)) {
+            rep.in_range = in_bytes;  // for the refusal's log line (nothing was moved)
             for (auto& s : th) if (s.suspended) ResumeThread(s.h);
             return;
         }
@@ -1049,6 +1052,13 @@ Target* target_for(uintptr_t addr, bool* refused_quietly, uint32_t* unchecked = 
                        rep.no_context, rep.exited, static_cast<unsigned long>(rep.why[0].tid),
                        static_cast<unsigned long>(rep.why[0].error), static_cast<unsigned long>(rep.why[0].exit_code),
                        rep.why[0].no_id ? " (its id could not be read)" : "");
+            else if (rep.in_range || rep.no_context || rep.unopened)
+                KLOG_W("hooks: rva %s: checked installation refused, nothing written: %zu thread(s) paused inside the bytes "
+                       "to replace, %zu stopped one(s) without a context, %zu not opened",
+                       hex(rva_of(addr)).c_str(), rep.in_range, rep.no_context, rep.unopened);
+            else
+                KLOG_W("hooks: rva %s: checked installation refused, nothing written: %s", hex(rva_of(addr)).c_str(),
+                       *unchecked ? "the process's threads could not be listed" : "the detour's bytes could not be prepared");
             return fail(false);
         }
         // No thread list, or a trampoline of a shape we don't know: safetyhook's own way (page trap, no thread stops).
@@ -1113,7 +1123,8 @@ void note_slot_use() {
 //    place: no recursion, no second run. If the old and new links are otherwise equal, the old one is simply kept
 //    (revived in place).
 KilnResult install(Kind kind, KilnOwner owner, uintptr_t addr, const Order& order, void* fn, void* user,
-                   uint32_t arg_count, void** original, KilnHandle* out, uint32_t* unchecked = nullptr) {
+                   uint32_t arg_count, void** original, KilnHandle* out, uint32_t* unchecked = nullptr,
+                   uint32_t sret_size = 0) {
     State& s = S();
     if (!fn || !addr) return KILN_ERR_INVALID_ARGUMENT;
     if (!s.ready) return KILN_ERR_UNAVAILABLE;
@@ -1132,7 +1143,7 @@ KilnResult install(Kind kind, KilnOwner owner, uintptr_t addr, const Order& orde
         label = sym.empty() ? owner_name + "@" + hex(rva_of(addr)) : sym;
     }
     auto same = [&](const Link* x) {
-        return x->kind == kind && x->fn == fn && x->user == user && x->arg_count == arg_count && x->owner == owner &&
+        return x->kind == kind && x->fn == fn && x->user == user && x->arg_count == arg_count && x->sret_size == sret_size && x->owner == owner &&
                x->label == label;
     };
     Link* replaced = nullptr;
@@ -1177,6 +1188,7 @@ KilnResult install(Kind kind, KilnOwner owner, uintptr_t addr, const Order& orde
         made->fn = fn;
         made->user = user;
         made->arg_count = arg_count;
+        made->sret_size = sret_size;
         index = s.next_link;
     }
     // ---- from here nothing fails before the publish ----
@@ -1337,9 +1349,11 @@ KilnResult install_mid(KilnOwner owner, uintptr_t target, const Order& order, Ki
 }
 
 KilnResult install_typed(KilnOwner owner, uintptr_t target, const Order& order, uint32_t nstack, KilnTypedFn fn,
-                         void* user, KilnHandle* out) {
+                         void* user, KilnHandle* out, uint32_t sret_size, uint32_t* unchecked) {
+    if (unchecked) *unchecked = 0;
     if (nstack + 4 > KILN_SIG_MAX_ARGS) return KILN_ERR_INVALID_ARGUMENT;
-    return install(Kind::Typed, owner, target, order, reinterpret_cast<void*>(fn), user, nstack, nullptr, out);
+    return install(Kind::Typed, owner, target, order, reinterpret_cast<void*>(fn), user, nstack, nullptr, out, unchecked,
+                   sret_size);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -1426,22 +1440,19 @@ extern "C" uintptr_t kiln_hk_structured_dispatch(const uintptr_t* regs, const ui
 namespace kiln::hooks::chain {
 namespace {
 
-struct TypedState {
+struct TypedState : TypedResult {
     uint32_t magic = kTypedMagic;
     Link* link = nullptr;
-    bool in_original = false;  // read by the SEH filter: a fault in the rest of the chain is not this handler's
-    bool called = false;       // the once-only latch of call_original_frame
-    uint64_t rax = 0;          // the original's result, as it returned (what a handler that faults afterwards yields)
-    uint8_t xmm0[16] = {};
+    bool in_original = false;
+
 };
 
 void typed_rest(KilnCallFrame* frame, TypedState* st) {
-    st->called = true;
-    st->in_original = true;
-    kiln_hk_call_frame(st->link->cont, frame, st->link->arg_count);
-    st->in_original = false;
-    st->rax = frame->rax;
-    std::memcpy(st->xmm0, frame->xmm0r, 16);
+    st->original(*frame, [&] {
+        st->in_original = true;
+        kiln_hk_call_frame(st->link->cont, frame, st->link->arg_count);
+        st->in_original = false;
+    });
 }
 
 }  // namespace
@@ -1461,6 +1472,12 @@ extern "C" void kiln_hk_typed_dispatch(KilnCallFrame* frame, void* lp) {
     auto* link = static_cast<Link*>(lp);
     TypedState st;
     st.link = link;
+    try {
+        st.prepare(link->sret_size ? reinterpret_cast<void*>(frame->gpr[0]) : nullptr, link->sret_size);
+    } catch (...) { // allocation failed before any handler ran: pass straight through, with no snapshot needed
+        kiln_hk_call_frame(link->cont, frame, link->arg_count);
+        return;
+    }
     if (!link->live.load(std::memory_order_acquire)) {  // revoked or disabled: just forward
         typed_rest(frame, &st);
         return;
@@ -1481,8 +1498,7 @@ extern "C" void kiln_hk_typed_dispatch(KilnCallFrame* frame, void* lp) {
                link->label.c_str(), static_cast<unsigned long long>(link->h()), link->owner_name.c_str(), code);
         if (S().env.changed) S().env.changed();
         if (st.called) {  // the original ran once: the caller gets what it returned, whatever the handler wrote since
-            frame->rax = st.rax;
-            std::memcpy(frame->xmm0r, st.xmm0, 16);
+            st.restore(*frame);
             return;
         }
         verdict = KILN_TYPED_CONTINUE;  // a handler that faulted decides nothing: the original runs

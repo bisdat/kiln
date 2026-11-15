@@ -1,0 +1,10 @@
+{
+  "id": "equipment-sets",
+  "name": "Equipment sets sample",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "license": "MIT",
+  "entryAssembly": "SessionSets.dll",
+  "side": "server",
+  "description": "/set remember <name> keeps what you wear in your 20 equipment slots for this session, /set apply <name> puts it all on again in one transaction (every slot or none), /set check <name> is a dry run. Shows Items.CaptureSet, PlanSet and EquipSet, and why a set is never saved."
+}

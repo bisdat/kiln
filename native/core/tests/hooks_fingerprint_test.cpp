@@ -7,9 +7,13 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
+#include <iterator>
+#include <map>
 #include <string>
 #include <vector>
 
+#include "nlohmann/json.hpp"
 #include "services/hooks_fingerprint.h"
 
 namespace fp = kiln::hooks::fp;
@@ -420,7 +424,92 @@ void test_pdata() {
 
 }  // namespace
 
-int main() {
+// ---- the vector file shared with the Python twin (tools/sigport/tests/fingerprint-vectors.json) ----
+// Snippets are bytes at a base address with no exception table; each has the fingerprint the core's pass gives it, and
+// descriptor cases the verdict and text of check_sig. tools/sigport/tests/test_abifp.py checks the same file with
+// abifp.py (and the exe entries, by RVA, with both passes).
+struct Blob {
+    uint64_t base = 0;
+    std::vector<uint8_t> code;
+};
+size_t blob_bytes(void* ctx, uint64_t addr, uint8_t* out, size_t n) {
+    const Blob& b = *static_cast<const Blob*>(ctx);
+    if (addr < b.base || addr >= b.base + b.code.size()) return 0;
+    n = static_cast<size_t>(std::min<uint64_t>(n, b.base + b.code.size() - addr));
+    std::memcpy(out, b.code.data() + (addr - b.base), n);
+    return n;
+}
+Blob blob_of(const nlohmann::json& v) {
+    Blob b;
+    b.base = std::strtoull(v.at("base").get<std::string>().c_str(), nullptr, 0);
+    const std::string hex = v.at("hex").get<std::string>();
+    for (size_t i = 0; i + 1 < hex.size(); i += 2) b.code.push_back(static_cast<uint8_t>(std::strtoul(hex.substr(i, 2).c_str(), nullptr, 16)));
+    return b;
+}
+fp::Fingerprint blob_fp(const Blob& b, const nlohmann::json& v) {
+    fp::Reader r;
+    r.ctx = const_cast<Blob*>(&b);
+    r.bytes = &blob_bytes;
+    const uint64_t entry = v.contains("entry") ? std::strtoull(v["entry"].get<std::string>().c_str(), nullptr, 0) : b.base;
+    return fp::compute(r, entry);
+}
+
+// print: the core's answers as JSON (tools/sigport/tests/make_vectors.py records them); else: compare with them
+int test_vectors(const char* path, bool print) {
+    nlohmann::ordered_json doc;
+    try {
+        std::ifstream in(path);
+        doc = nlohmann::ordered_json::parse(in);
+    } catch (const std::exception& e) {
+        check(false, "the shared vector file", std::string(path) + ": " + e.what());
+        return 1;
+    }
+    nlohmann::ordered_json out = {{"snippets", nlohmann::ordered_json::object()}, {"sigs", nlohmann::ordered_json::object()}};
+    std::map<std::string, Blob> blobs;
+    if (!print) std::printf("-- the shared vector file (%zu snippets, %zu descriptor cases)\n", doc["snippets"].size(), doc["sigs"].size());
+    for (const auto& v : doc["snippets"]) {
+        const std::string name = v.at("name");
+        blobs[name] = blob_of(v);
+        const auto got = nlohmann::ordered_json::parse(fp::to_json(blob_fp(blobs[name], v)));
+        if (print) out["snippets"][name] = got;
+        else check(got == v.at("expect"), ("vector " + name).c_str(), got == v.at("expect") ? "" : got.dump() + " expected " + v.at("expect").dump());
+    }
+    fp::Structs structs;
+    std::string err;
+    if (doc.contains("structs") && !fp::parse_structs(doc["structs"].dump(), &structs, &err)) {
+        check(false, "the shared vector file's structs", err);
+        return 1;
+    }
+    if (!print) check(doc["snippets"].size() >= 30 && doc["sigs"].size() >= 10, "the shared vector file has its cases");
+    for (const auto& v : doc["sigs"]) {
+        const std::string name = v.at("name");
+        const auto& snip = doc["snippets"];
+        auto it = std::find_if(snip.begin(), snip.end(), [&](const auto& x) { return x.at("name") == v.at("snippet"); });
+        if (it == snip.end()) {
+            check(false, ("vector sig " + name).c_str(), "no snippet " + v.at("snippet").get<std::string>());
+            continue;
+        }
+        fp::Sig sig;
+        nlohmann::ordered_json got;
+        if (!fp::parse_sig(v.at("sig").dump(), structs, v.value("trust_allowed", false), &sig, &err)) {
+            got = {{"verdict", "bad"}, {"text", err}};
+        } else {
+            std::string text;
+            const fp::Verdict verdict = fp::check_sig(sig, blob_fp(blobs[it->at("name")], *it), &text);
+            got = {{"verdict", fp::verdict_name(verdict)}, {"text", text}};
+        }
+        if (print) out["sigs"][name] = got;
+        else check(got == v.at("expect"), ("vector sig " + name).c_str(), got == v.at("expect") ? "" : got.dump() + " expected " + v.at("expect").dump());
+    }
+    if (print) std::printf("%s\n", out.dump(2).c_str());
+    return 0;
+}
+
+int main(int argc, char** argv) {
+    // hooks_fingerprint_test [--print-vectors] [<vector file>]
+    const bool print = argc > 1 && std::strcmp(argv[1], "--print-vectors") == 0;
+    const char* vectors = argc > (print ? 2 : 1) ? argv[print ? 2 : 1] : nullptr;
+    if (print) return vectors ? test_vectors(vectors, true) : 2;
     g_starts = {reinterpret_cast<uint64_t>(fp_time),    reinterpret_cast<uint64_t>(fp_through), reinterpret_cast<uint64_t>(fp_thunk),
                 reinterpret_cast<uint64_t>(fp_indirect), reinterpret_cast<uint64_t>(fp_stack),   reinterpret_cast<uint64_t>(fp_idioms),
                 reinterpret_cast<uint64_t>(fp_call),     reinterpret_cast<uint64_t>(fp_branches), reinterpret_cast<uint64_t>(fp_cmov),
@@ -430,9 +519,42 @@ int main() {
     test_pass(false);
     test_pass(true);
     test_window();
+    {
+        fp::Sig loaded;
+        loaded.ret_kind = KILN_SIG_F32; loaded.ret_size = 4;
+        loaded.args.push_back({"x", "f32", KILN_SIG_F32, 4});
+        KilnSigArg arg{{nullptr, 0}, KILN_SIG_F32, 4};
+        KilnSig c{}; c.size = sizeof c; c.argc = 1; c.args = &arg;
+        c.ret_kind = KILN_SIG_F32; c.ret_size = 4;
+        std::string reason;
+        check(fp::compiled_matches(c, loaded, &reason), "compiled descriptor equals resolver descriptor");
+        arg.kind = KILN_SIG_S32;
+        check(!fp::compiled_matches(c, loaded, &reason), "compiled integer against shipped float refused");
+        arg.kind = KILN_SIG_F32; c.argc = 0;
+        check(!fp::compiled_matches(c, loaded, &reason), "compiled stack/argument count differs");
+        c.argc = 1; c.ret_kind = KILN_SIG_S32;
+        check(!fp::compiled_matches(c, loaded, &reason), "compiled return class differs");
+        // kiln_hooks.h: a scalar's size is "the kind's own size or 0", so 0 is the same descriptor
+        c.ret_kind = KILN_SIG_F32; c.ret_size = 0; arg.size = 0;
+        check(fp::compiled_matches(c, loaded, &reason), "a scalar argument and return of size 0 equal their kind's size", reason);
+        arg.size = 8;
+        check(!fp::compiled_matches(c, loaded, &reason), "a scalar argument of another non-zero size is refused");
+        arg.size = 4; c.ret_size = 2;
+        check(!fp::compiled_matches(c, loaded, &reason), "a scalar return of another non-zero size is refused");
+        // a by-value struct's size is the struct's: never implied
+        fp::Sig byval;
+        byval.args.push_back({"v", "Vec3", KILN_SIG_BYVAL, 12});
+        KilnSigArg bv{{nullptr, 0}, KILN_SIG_BYVAL, 12};
+        KilnSig cb{}; cb.size = sizeof cb; cb.argc = 1; cb.args = &bv;
+        check(fp::compiled_matches(cb, byval, &reason), "a by-value struct of the loaded size matches");
+        bv.size = 16;
+        check(!fp::compiled_matches(cb, byval, &reason), "a by-value struct of another size is refused");
+    }
     test_check();
     test_parse();
     test_pdata();
+    if (vectors) test_vectors(vectors, false);
+    else check(false, "the shared vector file", "not given (test-hooks-fingerprint.sh passes it)");
     std::printf("%d passed, %d failed\n", g_pass, g_fail);
     std::puts(g_fail ? "FAILED" : "all passed");
     return g_fail ? 1 : 0;

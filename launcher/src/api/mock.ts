@@ -1175,6 +1175,16 @@ const handlers: Record<string, Handler> = {
         reason: "not loaded: Ember has not published its mod ABI yet" }] }),
     ];
   },
+  eml_data_latest: () => null,
+  eml_data_plan: () => {
+    if (!new URLSearchParams(location.search).has("restoreData")) return reject("refused", "No unproven recovery state.");
+    return { fingerprint: "mock-restore", files: ["enshrouded_055.dat", "enshrouded.kfc.bak", "enshrouded.kfc_resources.bak"].map(from => ({ from, size: 4096, sha256: "mock" })) };
+  },
+  eml_data_apply: (a) => {
+    if (!a.verified) return reject("refused", "Verify the game files in Steam first.");
+    return { folder: "kiln/eml/displaced/restore-mock", files: ["enshrouded_055.dat", "enshrouded.kfc.bak", "enshrouded.kfc_resources.bak"].map(from => ({ from, size: 4096, sha256: "mock" })) };
+  },
+  eml_data_undo: () => ({ folder: "kiln/eml/displaced/restore-mock", files: [] }),
   eml_backup: (a) => {
     const g = gameOf(S(a.gameId));
     return FRESH ? [] : [{ file: `${g.path}/enshrouded.kfc`, backup: `${g.path}/enshrouded.kfc.bak`, patched: emlPatched }];

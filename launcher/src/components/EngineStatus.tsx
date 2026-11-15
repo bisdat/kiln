@@ -6,6 +6,7 @@ import type { EngineStatus, GameId, Json, ModKind } from "../api/commands";
 import { useActiveProfile, usePoll, useProfile } from "../api/hooks";
 import { KIND_NAME, KIND_SHORT, KIND_TONE, MOD_KINDS } from "../api/kinds";
 import { Badge, Banner, EmptyState, Skeleton, errorText, type Tone } from "../ui";
+import { RestoreDataOffer } from "./RestoreDataOffer";
 
 type Obj = Record<string, Json>;
 const isObj = (v: unknown): v is Obj => !!v && typeof v === "object" && !Array.isArray(v);
@@ -141,6 +142,10 @@ export function EngineRow({ s }: { s: EngineStatus }) {
  *    game folder (unproven data, extra containers, recovery files with their sizes, containers moved to
  *    kiln/eml/displaced/). Shown as written, whatever the backup comparison says and whether or not an EML mod is on. */
 export function RestoreVanillaOffer({ gameId }: { gameId: GameId }) {
+  return <><RestoreDataOffer key={gameId} gameId={gameId} /><VanillaOffer gameId={gameId} /></>;
+}
+
+function VanillaOffer({ gameId }: { gameId: GameId }) {
   const backup = useQuery({ queryKey: ["eml_backup", gameId], queryFn: () => api.emlBackup(gameId) });
   const engines = useQuery({ queryKey: engineStatusKey(gameId), queryFn: () => api.engineStatus(gameId) });
   const active = useActiveProfile(gameId);

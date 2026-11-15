@@ -129,6 +129,10 @@ void KILN_CALL t_set_next_window_pos(float x, float y, uint32_t cond, float px, 
     ImGui::SetNextWindowPos(ImVec2(x, y), static_cast<ImGuiCond>(cond), ImVec2(px, py));
 }
 void KILN_CALL t_set_next_window_size(float w, float h, uint32_t cond) { IN_FRAME(); ImGui::SetNextWindowSize(ImVec2(w, h), static_cast<ImGuiCond>(cond)); }
+void KILN_CALL t_set_next_window_size_constraints(float min_w, float min_h, float max_w, float max_h) {
+    IN_FRAME();
+    ImGui::SetNextWindowSizeConstraints(ImVec2(min_w, min_h), ImVec2(max_w, max_h));
+}
 void KILN_CALL t_set_next_window_bg_alpha(float a) { IN_FRAME(); ImGui::SetNextWindowBgAlpha(a); }
 void KILN_CALL t_progress_bar(float f, float w, float h, KilnStr overlay) {
     IN_FRAME();

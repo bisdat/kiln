@@ -731,6 +731,17 @@ void wraps_init() {
                "the program table or job layout did not resolve on this build (world.programs)");
 }
 
+// systems.define (Kiln.Systems' Systems.Define): a mod's [Query] program, reserved at boot from its kiln.programs.json and
+// bound by name. It is kiln.world's own program path (programs v2), so it follows whether that path hooked this build.
+void wraps_define_row(bool programs) {
+    if (programs)
+        report_row("systems.define", KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE,
+                   "a mod's own [Query] programs, reserved at boot (kiln.programs.json) and bound by Systems.Define");
+    else
+        report_row("systems.define", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING,
+                   "kiln.world's programs did not resolve or hook on this build (world.programs)");
+}
+
 void wraps_client_ready(bool tick, bool events) {
     if (g_api->side() != KILN_SIDE_CLIENT || !g_ok || !g_api->feature(kstr("world.lifecycle"))) return;
     g_client_ready = tick && events;
@@ -1111,7 +1122,10 @@ int32_t view_slot(Frame& f, int id, int32_t i, const View** out_view) {
 }
 
 // The entity map's own hash of an id (docs/re/spawn.md: the game's entity map find, server 0x650c50): it probes from
-// this, not from the id (the component maps' keys are hashes already and probe from them as they are).
+// this, not from the id (the component maps' keys are hashes already and probe from them as they are). The client build's
+// find (0x9b4dc0), insert, grow and removal are the server's instruction for instruction (out/06a-program-wraps/
+// client-static, 2026-11-15): removal is a backward shift with no tombstone (an emptied slot's bit is clear, its stale
+// key and record stay behind), so a probe that stops at a clear bit misses no entity, as the game's own find does.
 uint32_t entity_hash(uint32_t k) {
     uint32_t x = ((k >> 16) ^ k) * 0x45d9f3bu;
     x = ((x >> 16) ^ x) * 0x45d9f3bu;
@@ -1209,9 +1223,16 @@ KilnResult KILN_CALL game_slice_archetype(KilnGameSlice* slice, uintptr_t* out_l
     if (!out_layout) return KILN_ERR_INVALID_ARGUMENT;
     if (L.storage_entities < 0 || L.entity_layout < 0 || !L.map.ok()) return KILN_ERR_UNAVAILABLE;
     if (!slice->count || !slice->entity_ids) return KILN_ERR_NOT_FOUND;
+    if (L.entity_id < 0) return KILN_ERR_UNAVAILABLE;  // a record cannot be told from a reused one
     uintptr_t storage = 0, rec = 0, layout = 0;
+    uint32_t named = 0;
+    const uint32_t id = slice->entity_ids[0];
     std::memcpy(&storage, f->ctx->job, sizeof storage);
-    if (!storage || !map_find_ptr(storage + static_cast<uintptr_t>(L.storage_entities), slice->entity_ids[0], &rec) || !rec ||
+    // The map has no lock and its records come from a pool that DestroyEntity frees at once (the erase, server 0x685650 /
+    // client 0x9e96b0): a record is trusted only when it still names the entity asked for (CreateEntity writes the id at
+    // record+0x10 on both builds); a record the pool gave to another entity is a miss, not that entity's archetype.
+    if (!storage || !map_find_ptr(storage + static_cast<uintptr_t>(L.storage_entities), id, &rec) || !rec ||
+        !seh_copy(&named, reinterpret_cast<const void*>(rec + static_cast<uintptr_t>(L.entity_id)), 4) || named != id ||
         !seh_copy(&layout, reinterpret_cast<const void*>(rec + static_cast<uintptr_t>(L.entity_layout)), 8) || !layout)
         return KILN_ERR_UNAVAILABLE;  // nonempty slice: cannot decide, rather than silently rejecting every slice
     *out_layout = layout;
