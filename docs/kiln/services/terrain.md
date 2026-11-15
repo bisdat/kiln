@@ -132,7 +132,7 @@ A single call, source lowering, storage I/O, or user callback can exceed it. The
 42 ms for 32,768 cells motivated the much smaller 512-cell units; a host frame-time guarantee still requires the
 real-game checks. No client benchmark is claimed.
 
-Batches run in a fixed order (z, then y, then x), one per tick. The same patch gives the same batches and the same
+Batches run in a fixed order (z, then y, then x). With the shared host allowance a batch is one work unit (at most 512 cells), and as many run in a server step as the allowance and your own `CellsPerTick` admit (a 32,768-cell patch alone on the host takes about eight steps; in 0.2.0-dev.28 it was one batch in one tick). The same patch gives the same batches and the same
 cells on every machine (`AddOnTop` depends on the ground it finds).
 
 ### Apply
