@@ -53,5 +53,25 @@ int main() {
     check(!boot_mod_id("../escape") && !boot_mod_id("a/b") && !boot_mod_id("UPPER"));
     check(boot_mod_id("my-mod.1") && boot_name("Health"));
     check(select_boot_candidates({{"writer",true,false,true,1},{"writer",false,false,true,2}},true)==std::vector<size_t>({1}));
-    std::printf("world boot declarations: PASS %d checks (bounds, duplicate keys, profile precedence, sides)\n",checks);
+    // "world" (0.2.0-dev.29, chapter 14): an older file without it means the server world, as it always did
+    check(value[0].worlds==kBootWorldServer);
+    auto world = [&](const char* w, const char* extra = "") {
+        return parse_boot_programs(std::string(R"({"format":1,"programs":{"a":{"world":")") + w + "\"" + extra + "}}}")[0];
+    };
+    check(world("server").worlds==kBootWorldServer && world("server").flags==0x14);
+    check(world("client").worlds==kBootWorldClient && world("client").flags==0x4);   // no "flags": SYSTEM (no hostOnly)
+    check(world("both").worlds==(kBootWorldServer|kBootWorldClient) && world("both").flags==0x14);
+    check(world("prediction").worlds==kBootWorldPrediction && world("prediction").flags==0x4);
+    check(world("both",R"(,"flags":["system","hostOnly"])").flags==0x14);             // both: hostOnly is its server side's
+    check(world("client",R"(,"flags":["system","chunked"])").flags==0x204);
+    check(bad(R"({"format":1,"programs":{"a":{"world":"client","flags":["system","hostOnly"]}}})"));
+    check(bad(R"({"format":1,"programs":{"a":{"world":"prediction","flags":["hostOnly"],"read":["Health"]}}})"));
+    check(bad(R"({"format":1,"programs":{"a":{"world":"mars"}}})"));
+    check(bad(R"({"format":1,"programs":{"a":{"world":2}}})"));
+    check(bad(R"({"format":1,"programs":{"a":{"world":"client","world":"both"}}})"));
+    check(world("client",R"(,"flags":[],"read":["RenderTransform"])").lists[2][0]=="RenderTransform");
+    // client and both mods are candidates (their client declarations count on a game client)
+    check(select_boot_candidates({{"cl",true,false,false,1,true},{"srv",true,false,true,2,false},{"none",true,false,false,3,false}},true)==
+          std::vector<size_t>({1,2}));
+    std::printf("world boot declarations: PASS %d checks (bounds, duplicate keys, profile precedence, sides, worlds)\n",checks);
 }

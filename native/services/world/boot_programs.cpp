@@ -9,6 +9,9 @@
 namespace kw {
 namespace {
 namespace fs = std::filesystem;
+bool client_process() { return g_api->size >= offsetof(KilnApi, session) + sizeof(void*) && g_api->side() == KILN_SIDE_CLIENT; }
+static_assert(kBootWorldServer == kWorldBitServer && kBootWorldClient == kWorldBitClient && kBootWorldPrediction == kWorldBitPrediction,
+              "boot_programs.h's world bits are kiln.world's");
 fs::path utf8_path(std::string_view text) { return fs::path(std::u8string_view(reinterpret_cast<const char8_t*>(text.data()),text.size())); }
 std::string bounded_file(const fs::path& file) {
     std::error_code error;
@@ -77,8 +80,27 @@ void reserve(const Candidate& candidate) {
             &desc.singletons_read,&desc.singletons_write,&desc.other_tpl,&desc.other_read,&desc.other_write,
             &desc.with,&desc.without,&desc.any_of,&desc.events_in,&desc.events_out};
         for (size_t i = 0; i < names.size(); ++i) *dest[i] = lists[i];
-        const auto result = reserve_program(candidate.policy.id, program.key, &desc);
-        if (result == KILN_OK) KW_I("managed program %s/%s reserved as %s", candidate.policy.id.c_str(), program.key.c_str(), name);
+        // The worlds it is for, as far as this process and the mod's side have them (chapter 14): a client mod has no
+        // server program, a server mod no client one, and a dedicated server no client world.
+        uint32_t worlds = program.worlds;
+        const char* dropped = nullptr;
+        if (!candidate.policy.server && (worlds & kWorldBitServer)) worlds &= ~kWorldBitServer, dropped = "a client mod has no server-world program";
+        if (worlds & (kWorldBitClient | kWorldBitPrediction)) {
+            const char* why = !candidate.policy.client ? "a server mod has no client-world program"
+                              : !client_process() ? nullptr  // a dedicated server: no client world, nothing to say
+                              : !programs_client_on() ? "world.programs.client is not available (kiln.log says why)" : "";
+            if (!why || *why) {
+                worlds &= ~(kWorldBitClient | kWorldBitPrediction);
+                if (why) dropped = why;
+            }
+        }
+        if (dropped) KW_W("managed program %s/%s: %s; %s", candidate.policy.id.c_str(), program.key.c_str(), dropped,
+                          worlds ? "reserved for its other world only" : "not reserved");
+        if (!worlds) continue;
+        const auto result = reserve_program_world(candidate.policy.id, program.key, &desc, worlds);
+        if (result == KILN_OK) KW_I("managed program %s/%s reserved as %s%s", candidate.policy.id.c_str(), program.key.c_str(), name,
+                                    worlds == kWorldBitServer ? "" : worlds == kWorldBitClient ? " (client world)"
+                                    : worlds == kWorldBitPrediction ? " (prediction storage)" : " (server and client worlds)");
         else KW_W("managed program %s/%s could not reserve (%d)", candidate.policy.id.c_str(), program.key.c_str(), result);
     }
 }
@@ -124,6 +146,7 @@ void boot_programs_init() {
             if (!item.policy.profile) item.policy.id = id;
             else if (item.policy.id != id) item.policy.enabled = false;
             item.policy.server = side == "server" || side == "both";
+            item.policy.client = side == "client" || side == "both";
             // A bad "writes" costs the mod its tracked writes, not its programs and not its loading: each of its writes
             // then answers with what is wrong with the list.
             try { item.writes = parse_boot_writes(manifest); }
@@ -138,6 +161,7 @@ void boot_programs_init() {
         try { reserve(candidates[token]); }
         catch (const std::exception& error) { KW_W("managed programs for %s refused: %s",candidates[token].policy.id.c_str(),error.what()); }
         const auto& item = candidates[token];
+        if (!item.policy.server) continue;  // a client mod: no server world, no tracked writes (as before 0.2.0-dev.29)
         if (!item.writes_error.empty()) writes_refuse_list(item.policy.id, item.writes_error);
         if (item.writes.empty()) continue;
         // The write program itself is made when the first server world registers its programs (writes.cpp).

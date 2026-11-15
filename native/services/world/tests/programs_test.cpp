@@ -27,6 +27,8 @@ bool map_find_u16(uintptr_t,uint32_t key,uint16_t* value) {
     return true;
 }
 void teleport_in_program(KilnProgramCtx*) {}
+bool game_in_slice() { return false; }  // wraps.cpp's: no wrap stage in this fixture
+uint32_t current_thread_id() { return 1; }
 void writes_world_changing() {}  // tracked-write lifecycle belongs to writes_test; this fixture tests programs
 void writes_before_world(uintptr_t) {}
 void writes_after_world() {}

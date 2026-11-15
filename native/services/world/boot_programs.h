@@ -15,9 +15,14 @@ constexpr size_t kBootProgramBytes = 65536;
 constexpr size_t kBootProgramsPerFile = 32;
 constexpr std::array<const char*, 16> kBootLists = {"tpl", "tplOptional", "read", "readOptional", "write", "writeOptional",
     "singletonsRead", "singletonsWrite", "otherTpl", "otherRead", "otherWrite", "with", "without", "anyOf", "eventsIn", "eventsOut"};
+// A declaration's "world" (since 0.2.0-dev.29): the worlds it is for, bit (1 << KILN_WORLD_*): "server" (the default,
+// what a file without the key means), "client" (a game client's client world), "both" (server and client) and
+// "prediction" (the client world's table, run by the prediction storage).
+constexpr uint32_t kBootWorldServer = 1, kBootWorldPrediction = 2, kBootWorldClient = 4;
 struct BootProgram {
     std::string key;
-    uint32_t flags = 0x14; // SYSTEM | HOST_ONLY
+    uint32_t flags = 0x14; // SYSTEM | HOST_ONLY; a client or prediction declaration without "flags": SYSTEM
+    uint32_t worlds = kBootWorldServer;
     std::array<std::vector<std::string>, 16> lists;
 };
 inline bool boot_name(std::string_view name, bool scoped = false) {
@@ -50,8 +55,17 @@ inline std::vector<BootProgram> parse_boot_programs(std::string_view text) {
     for (auto& [key, value] : json["programs"].items()) {
         if (!boot_name(key) || key.size() > 63 || !value.is_object()) throw std::runtime_error("bad program key or descriptor");
         BootProgram program; program.key = key;
+        bool flags_given = false;
         for (auto& [field, list] : value.items()) {
+            if (field == "world") {
+                const std::string w = list.is_string() ? list.get<std::string>() : std::string();
+                program.worlds = w == "server" ? kBootWorldServer : w == "client" ? kBootWorldClient
+                               : w == "both" ? kBootWorldServer | kBootWorldClient : w == "prediction" ? kBootWorldPrediction : 0;
+                if (!program.worlds) throw std::runtime_error("\"world\" must be \"server\", \"client\", \"both\" or \"prediction\"");
+                continue;
+            }
             if (field == "flags") {
+                flags_given = true;
                 if (!list.is_array()) throw std::runtime_error("flags must be an array");
                 program.flags = 0;
                 const std::map<std::string, uint32_t> flags = {{"system",4},{"init",8},{"hostOnly",16},{"exclusive",128},{"chunked",512},{"pinned",1024},{"barrier",2048}};
@@ -71,6 +85,11 @@ inline std::vector<BootProgram> parse_boot_programs(std::string_view text) {
                     throw std::runtime_error("invalid or repeated access name");
                 program.lists[index].push_back(name.get<std::string>());
             }
+        }
+        if (!(program.worlds & kBootWorldServer)) {
+            // HOST_ONLY means "not in a client's prediction storage": a server program's flag, never a client one's
+            if (!flags_given) program.flags = 0x4;
+            else if (program.flags & 0x10) throw std::runtime_error("hostOnly is for server programs, not a \"client\" or \"prediction\" one");
         }
         auto count = [&](std::initializer_list<size_t> ids) { size_t total=0; for (auto id : ids) total+=program.lists[id].size(); return total; };
         if (count({0,1})>8 || count({2,3,4,5})>42 || count({6})>64 || count({7})>64 || count({8})>9 ||
@@ -105,7 +124,9 @@ inline std::vector<std::string> parse_boot_writes(const nlohmann::json& manifest
     return out;
 }
 // Profile entries win even when disabled; duplicate drop-in IDs are ambiguous and reserve nothing.
-struct BootCandidate { std::string id; bool enabled = true, profile = false, server = true; size_t token = 0; };
+// server: the mod's side is server or both (its server declarations count); client: client or both (its client and
+// prediction declarations count, on a game client).
+struct BootCandidate { std::string id; bool enabled = true, profile = false, server = true; size_t token = 0; bool client = false; };
 inline std::vector<size_t> select_boot_candidates(const std::vector<BootCandidate>& input, bool dropins) {
     std::set<std::string> listed;
     std::map<std::string, size_t> profiles, drops;
@@ -115,7 +136,7 @@ inline std::vector<size_t> select_boot_candidates(const std::vector<BootCandidat
     }
     std::vector<size_t> result;
     for (const auto& item : input) {
-        if (!item.enabled || !item.server || !boot_mod_id(item.id)) continue;
+        if (!item.enabled || !(item.server || item.client) || !boot_mod_id(item.id)) continue;
         if (item.profile ? profiles[item.id] == 1 : dropins && !listed.count(item.id) && drops[item.id] == 1) result.push_back(item.token);
     }
     return result;

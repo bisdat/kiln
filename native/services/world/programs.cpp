@@ -7,13 +7,17 @@
 #include <algorithm>
 #include <chrono>
 #include <array>
+#include <cstdio>
 #include <utility>
 #include <set>
 #include <shared_mutex>
+#include <thread>
 
 #include "kiln_hook.hpp"
 #include "layout.h"
 #include "world_internal.h"
+#include "wraps.h"
+#include "services/kiln_caps.h"
 #include "services/kiln_types.h"
 
 namespace kw {
@@ -31,8 +35,38 @@ constexpr uint32_t kAllowedFlags = KILN_PROGRAM_SYSTEM | KILN_PROGRAM_INIT | KIL
                                    KILN_PROGRAM_EXCLUSIVE | KILN_PROGRAM_CHUNKED | KILN_PROGRAM_PINNED |
                                    KILN_PROGRAM_BARRIER;
 constexpr uint32_t kEngineSkipped = 0x20;  // entry flag set at finalize: a required singleton is missing
+constexpr uint32_t kClientFlag = 0x1;      // descriptor flag: a client-world program (the client world runs only these)
+constexpr uint32_t kEngineBit = 0x40;      // an engine bit the prediction storage's rule names (chapter 14 section 1)
+
+// A program's place in the client world's table (chapter 14 section 9, since 0.2.0-dev.29): as a client-world program
+// (side[KILN_WORLD_CLIENT]: flag 0x1, the client world runs it) or as a prediction program (side[KILN_WORLD_PREDICTION]:
+// no 0x1, 0x10 or 0x40, so the client world skips it and the prediction storage runs it), with that registration's own
+// descriptor, state, counters and callback. The server world keeps Program's own fields, unchanged. A slice reaches a
+// side's callback only through its gate (calls_in up, then `open` read, both sequentially consistent): once a closer
+// that cleared `open` reads calls_in 0, no call of the side runs or can start, also while the client world steps on
+// another thread (a host unloading a mod from its server thread).
+struct Side {
+    bool enabled = false;
+    EngineDesc desc{};  // what that table's entry points to (never freed: the engine keeps it)
+    std::atomic<int> state{KILN_PROGRAM_PENDING};
+    std::atomic<uintptr_t> entry{0};
+    std::atomic<uint32_t> engine_id{0};
+    std::atomic<const std::string*> reason{nullptr};  // interned or static: valid for the life of the process
+    std::atomic<uint64_t> updates{0}, entities{0};
+    std::atomic<bool> fault_logged{false};
+    std::atomic<KilnOwner> owner{0};
+    std::atomic<KilnProgramEachFn> each{nullptr};
+    std::atomic<KilnProgramUpdateFn> update{nullptr};
+    std::atomic<void*> user{nullptr};
+    std::atomic<bool> open{false};       // a callback is bound and calls may start
+    std::atomic<uint32_t> calls_in{0};   // calls past the gate and not yet returned
+    uint64_t generation = 0;             // g_mutex: bumped by every bind (a binding handle carries it)
+    bool closing = false;                // g_mutex: unbound while a call ran; forgotten once calls_in reads 0
+};
 
 struct Program : ProgramLayout {  // name, lists, singleton masks, group counts: layout.h
+    uint32_t worlds = kWorldBitServer;  // the worlds it is for (kWorldBit*); fixed before it is published
+    Side side[KILN_WORLD_KINDS];        // [KILN_WORLD_CLIENT] and [KILN_WORLD_PREDICTION]; [0] unused: the fields below
     KilnOwner owner = 0;
     std::shared_mutex callback_mutex;
     uint32_t flags = 0;
@@ -61,7 +95,24 @@ thread_local ProgramCtx* t_context = nullptr;
 thread_local uint64_t* t_iterator = nullptr;
 thread_local Program* t_prog = nullptr;  // the Kiln program whose update runs on this thread
 
+// ---- the client world's table (chapter 14): nothing of it runs while g_side_programs is 0 ----
+std::atomic<bool> g_client_on{false};       // world.programs.client is available (programs_client_init)
+std::atomic<uint32_t> g_side_programs{0};   // programs with a client or prediction side
+std::atomic<bool> g_table_stopping{false};  // the client world stops: no call of a side starts
+std::atomic<bool> g_table_live{false};      // a client world registered Kiln's programs and has not stopped
+std::atomic<bool> g_skip_check{false};      // the client world's first Pre looks for programs the engine skips
+std::atomic<uint32_t> g_closing{0};         // sides unbound while a call ran
+std::atomic<uint32_t> g_table_stop_wait_ms{2000};
+uint32_t g_main_tid = 0;                    // the game's main thread: kiln_plugin_main runs there
+std::set<std::string> g_reasons;            // g_mutex: interned reasons (a small set of texts)
+const std::string kReasonWaiting = "waiting for a client world";
+const std::string kReasonNextWorld = "registered from the next client world";
+const std::string kReasonFaulted = "its callback faulted in this world (kiln.log says where); bind it again to run it";
+const std::string kReasonLayout = "the engine's iterator layout differs from kiln.world's (kiln.log has the counts)";
+const std::string kReasonSkipped = "the engine skips it in this world (a required singleton is missing)";
+
 void internal_update(ProgramCtx* ctx);
+void dispatch_side(Program* p, uint32_t kind, ProgramCtx* ctx);
 
 void fault(Program* p, const char* what, unsigned long code) {
     p->state.store(KILN_PROGRAM_FAULTED);
@@ -134,10 +185,22 @@ void run_each(Program* p, ProgramCtx* ctx) {
     }
 }
 
+// The kind of the storage a slice runs in (J+0: the slice's storage; storage + storage.kind: its u8 kind).
+uint32_t slice_kind(const ProgramCtx* ctx) {
+    const uint8_t* storage = nullptr;
+    std::memcpy(&storage, ctx->job, sizeof storage);
+    return storage ? storage[L.storage_kind] : 0xFFu;
+}
+
 void dispatch(int i, void* raw) {
     Program* p = g_by_slot[i];
     auto* ctx = static_cast<ProgramCtx*>(raw);
     if (!p) return;
+    if (p->worlds != kWorldBitServer) {  // in the client world's table too (chapter 14): its slices go by storage kind
+        const uint32_t kind = slice_kind(ctx);
+        if (kind != KILN_WORLD_SERVER) return dispatch_side(p, kind, ctx);
+        if (!(p->worlds & kWorldBitServer)) return;  // never: a server table has no entry of it
+    }
     std::shared_lock callback_lock(p->callback_mutex);
     if (p->state.load(std::memory_order_relaxed) != KILN_PROGRAM_ACTIVE) return;  // iterate none: allowed
     p->updates.fetch_add(1, std::memory_order_relaxed);
@@ -160,6 +223,104 @@ void dispatch(int i, void* raw) {
     t_iterator = nullptr;
     t_prog = nullptr;
     t_in_program = false;
+}
+
+const char* world_name(uint32_t kind) {
+    return kind == KILN_WORLD_CLIENT ? "client world" : kind == KILN_WORLD_PREDICTION ? "prediction storage" : "server world";
+}
+
+void fault_side(Program* p, Side& s, uint32_t kind, const char* what, unsigned long code) {
+    s.state.store(KILN_PROGRAM_FAULTED);
+    s.reason.store(&kReasonFaulted);
+    if (!s.fault_logged.exchange(true))
+        KW_E("program %s (%s): %s (0x%08lx); the program is disabled in this world", p->name.c_str(), world_name(kind), what, code);
+}
+
+// The counts the engine computed for this slice's iterator against the program's layout (the same in every world: it is
+// laid out by name, and each world's registration checked that its type order agrees).
+bool side_counts_match(Program* p, Side& s, uint32_t kind, ProgramCtx* ctx) {
+    const JobCounts c = job_counts(ctx->job);
+    if (same_counts(*p, c)) return true;
+    s.state.store(KILN_PROGRAM_FAULTED);
+    s.reason.store(&kReasonLayout);
+    if (!s.fault_logged.exchange(true))
+        KW_E("program %s (%s): the engine's iterator layout differs from kiln.world's (engine T%u R%u W%u S%u OT%u O%u EI%u "
+             "EO%u, kiln T%u R%u W%u S%u OT%u O%u EI%u EO%u); disabled in this world",
+             p->name.c_str(), world_name(kind), c.T, c.R, c.W, c.S, c.OT, c.O, c.EI, c.EO, p->T, p->R, p->W, p->S, p->OT,
+             p->O, p->EI, p->EO);
+    return false;
+}
+
+// run_each for a side: its own callback, counters and fault state (the server world's are Program's).
+void run_each_side(Program* p, Side& s, uint32_t kind, KilnProgramEachFn each, void* user, ProgramCtx* ctx) {
+    alignas(16) uint64_t it[kMaxIterBytes / 8 + 2];
+    auto* kctx = reinterpret_cast<KilnProgramCtx*>(ctx);
+    unsigned long code = 0;
+    if (!seh_iter_begin(ctx, it, p->iter_size, &code)) {
+        fault_side(p, s, kind, "iter_begin faulted", code);
+        return;
+    }
+    t_iterator = it;
+    if (p->flags & KILN_PROGRAM_SYSTEM) {
+        if (!seh_each(each, kctx, it, 0, user, &code)) fault_side(p, s, kind, "update faulted", code);
+        return;
+    }
+    bool faulted = false;
+    for (;;) {
+        bool more = false;
+        if (!seh_iter_next(ctx, it, p->iter_size, &more, &code)) {
+            fault_side(p, s, kind, "iter_next faulted", code);
+            repair(ctx);
+            return;
+        }
+        if (!more) break;
+        s.entities.fetch_add(1, std::memory_order_relaxed);
+        if (faulted) continue;
+        uint32_t e = 0;
+        fn.current_entity(ctx, &e);
+        if (!seh_each(each, kctx, it, e, user, &code)) {
+            faulted = true;
+            fault_side(p, s, kind, "update faulted", code);
+        }
+    }
+}
+
+// A slice of the client world's table: kind 2 (the client world) for a client side, kind 1 (the prediction storage)
+// for a prediction side. Anything else iterates none (allowed: the engine accepts an index of 0): the prediction storage
+// never runs a client program (0x1) and the client world never runs a prediction one, so those never come.
+void dispatch_side(Program* p, uint32_t kind, ProgramCtx* ctx) {
+    if (kind != KILN_WORLD_CLIENT && kind != KILN_WORLD_PREDICTION) return;
+    Side& s = p->side[kind];
+    if (!s.enabled) return;
+    s.calls_in.fetch_add(1, std::memory_order_seq_cst);
+    if (!s.open.load(std::memory_order_seq_cst) || g_table_stopping.load(std::memory_order_seq_cst) ||
+        s.state.load(std::memory_order_acquire) != KILN_PROGRAM_ACTIVE) {
+        s.calls_in.fetch_sub(1, std::memory_order_release);
+        return;
+    }
+    const KilnProgramEachFn each = s.each.load(std::memory_order_acquire);
+    const KilnProgramUpdateFn update = s.update.load(std::memory_order_acquire);
+    void* const user = s.user.load(std::memory_order_acquire);
+    s.updates.fetch_add(1, std::memory_order_relaxed);
+    if ((each || update) && side_counts_match(p, s, kind, ctx)) {
+        t_in_program = true;
+        t_prog = p;
+        t_context = ctx;
+        if (each) {
+            run_each_side(p, s, kind, each, user, ctx);
+        } else {
+            unsigned long code = 0;
+            if (!seh_update(update, reinterpret_cast<KilnProgramCtx*>(ctx), user, &code)) {
+                fault_side(p, s, kind, "update faulted", code);
+                repair(ctx);
+            }
+        }
+        t_context = nullptr;
+        t_iterator = nullptr;
+        t_prog = nullptr;
+        t_in_program = false;
+    }
+    s.calls_in.fetch_sub(1, std::memory_order_release);
 }
 
 template <int I>
@@ -221,9 +382,14 @@ void register_into(uintptr_t world) {
     for (Program* p : g_programs) {
         const int st = p->state.load();
         if (st == KILN_PROGRAM_REFUSED || st == KILN_PROGRAM_FAULTED) continue;
+        if (!(p->worlds & kWorldBitServer)) continue;  // a client or prediction program only (chapter 14)
         if (p->pruned) prune_unknown(*p, world);
         std::string why;
-        if (!validate(*p, world, why)) {
+        // A program in the client world's table too: validated on a copy, because on a host its client slices may read
+        // its layout while this world sets up (validate() lays it out again by type index for the comparison).
+        ProgramLayout copy;
+        if (p->worlds != kWorldBitServer) copy = static_cast<const ProgramLayout&>(*p);
+        if (!validate(p->worlds != kWorldBitServer ? copy : *p, world, why)) {
             p->state.store(KILN_PROGRAM_REFUSED);
             KW_E("program %s refused: %s", p->name.c_str(), why.c_str());
             continue;
@@ -280,10 +446,94 @@ void register_into(uintptr_t world) {
          static_cast<unsigned>(g_programs.size()), kMaxPrograms, services, mods, ledger.c_str());
 }
 
+const std::string* intern_reason(const std::string& text) {  // g_mutex held
+    return &*g_reasons.insert(text).first;
+}
+
+void refuse_side(Program* p, Side& s, uint32_t kind, const std::string& why) {  // g_mutex held
+    s.state.store(KILN_PROGRAM_REFUSED);
+    s.reason.store(intern_reason(why));
+    KW_E("program %s refused for the %s: %s", p->name.c_str(), world_name(kind), why.c_str());
+}
+
+// The client world's RegisterAllPrograms (the main thread, inside its setup; each client world anew, hosted or joined):
+// every client and prediction program into its table after the game's own, each validated against THIS world's maps
+// (on a copy of its layout: on a host a "both" program's server slices may read it meanwhile), with the table's live
+// count checked before and after each registration as for the server world (the engine's 896).
+void register_into_client(uintptr_t world) {
+    std::lock_guard lock(g_mutex);
+    const auto count_at = reinterpret_cast<const uint16_t*>(world + L.programs_count);
+    uint32_t registered = 0, refused = 0;
+    for (Program* p : g_programs) {
+        for (const uint32_t kind : {uint32_t{KILN_WORLD_CLIENT}, uint32_t{KILN_WORLD_PREDICTION}}) {
+            Side& s = p->side[kind];
+            if (!s.enabled) continue;
+            s.entry.store(0);
+            s.engine_id.store(0);
+            const bool faulted = s.state.load() == KILN_PROGRAM_FAULTED;  // stays so until a new bind
+            if (!faulted) s.reason.store(nullptr);
+            ProgramLayout copy = static_cast<const ProgramLayout&>(*p);
+            std::string why;
+            if (!validate(copy, world, why)) {
+                refuse_side(p, s, kind, why);
+                ++refused;
+                continue;
+            }
+            const uint16_t before = *count_at;
+            if (before >= L.programs_max) {
+                refuse_side(p, s, kind, "the client world's program table is full (" + std::to_string(before) + "/" +
+                                            std::to_string(L.programs_max) + ")");
+                ++refused;
+                continue;
+            }
+            bool ok = false;
+            unsigned long code = 0;
+            if (!seh_register_program(fn.register_program, world, &s.desc, &ok, &code)) {
+                char text[64];
+                std::snprintf(text, sizeof text, "RegisterProgram faulted (0x%08lx)", code);
+                refuse_side(p, s, kind, text);
+                ++refused;
+                continue;
+            }
+            const uint16_t after = *count_at;
+            const uintptr_t entry = world + L.programs_table + static_cast<uintptr_t>(after - 1) * L.programs_stride;
+            if (!ok || after != before + 1 || *reinterpret_cast<const EngineDesc* const*>(entry) != &s.desc) {
+                refuse_side(p, s, kind, "the engine refused it (duplicate name?) (ok=" + std::to_string(ok) + ", count " +
+                                            std::to_string(before) + " -> " + std::to_string(after) + ")");
+                ++refused;
+                continue;
+            }
+            s.entry.store(entry);
+            s.engine_id.store(*reinterpret_cast<const uint16_t*>(entry + L.entry_id));
+            if (!faulted) s.state.store(KILN_PROGRAM_ACTIVE);
+            ++registered;
+            KW_I("program %s registered into the %s as #%u (T%u R%u W%u S%u OT%u O%u EI%u EO%u, flags 0x%x)%s",
+                 p->name.c_str(), kind == KILN_WORLD_CLIENT ? "client world" : "client world's table for the prediction storage",
+                 s.engine_id.load(), p->T, p->R, p->W, p->S, p->OT, p->O, p->EI, p->EO, s.desc.flags,
+                 faulted ? "; it faulted in an earlier client world and stays off until it is bound again" : "");
+        }
+    }
+    g_skip_check.store(true);
+    g_table_live.store(true);
+    g_table_stopping.store(false, std::memory_order_seq_cst);
+    KW_I("client world 0x%llx: %u Kiln program(s) registered into its table, %u refused; the table holds %u of %lld",
+         static_cast<unsigned long long>(world), registered, refused, *count_at, static_cast<long long>(L.programs_max));
+}
+
 void on_world(uintptr_t world) {
     const uintptr_t storage = storage_of(world);
     const uint8_t kind = *reinterpret_cast<const uint8_t*>(storage + L.storage_kind);
-    if (kind != 0) {  // the client and prediction worlds of a client: expected, Kiln's programs run in the server world
+    if (kind != 0) {  // the client world of a client: only while a mod declares a program for it (chapter 14)
+        if (kind == KILN_WORLD_CLIENT && g_side_programs.load() && g_client_on.load()) {
+            if (*reinterpret_cast<const uint8_t*>(world) != 0 ||
+                (L.may_finalize >= 0 && *reinterpret_cast<const uint8_t*>(world + L.may_finalize) != 0)) {
+                KW_E("client world 0x%llx is already finalizing its programs; no Kiln programs registered",
+                     static_cast<unsigned long long>(world));
+                return;
+            }
+            register_into_client(world);
+            return;
+        }
         KW_I("RegisterAllPrograms for a world of kind %u: not the server world; no Kiln programs there", kind);
         return;
     }
@@ -354,7 +604,10 @@ void programs_after_first_step(uintptr_t world) {
     }
 }
 
-KilnResult register_program(KilnOwner owner, const KilnProgramDesc* d, KilnHandle* out, bool internal) {
+namespace {
+// register_program for the worlds in `worlds` (kWorldBit*): the server world (as ever), the client world, the
+// prediction storage. One Program, one slot and one trampoline whatever the worlds; a descriptor per table side.
+KilnResult register_program_in(KilnOwner owner, const KilnProgramDesc* d, KilnHandle* out, bool internal, uint32_t worlds) {
     if (out) *out = 0;
     if (!F.programs) return KILN_ERR_UNAVAILABLE;
     if (!d || d->size < sizeof(KilnProgramDesc)) return KILN_ERR_INVALID_ARGUMENT;
@@ -363,7 +616,7 @@ KilnResult register_program(KilnOwner owner, const KilnProgramDesc* d, KilnHandl
         KW_E("program '%s' refused: %s", name.c_str(), why);
         return KILN_ERR_INVALID_ARGUMENT;
     };
-    if (g_registered_once.load()) {
+    if ((worlds & kWorldBitServer) && g_registered_once.load()) {
         KW_E("program '%s' refused: the server world has registered its programs already (register from "
              "kiln_plugin_main or on_ready)", name.c_str());
         return KILN_ERR_UNAVAILABLE;
@@ -492,12 +745,34 @@ KilnResult register_program(KilnOwner owner, const KilnProgramDesc* d, KilnHandl
         }
     p->slot = static_cast<int>(g_programs.size());
     e.update = kTrampolines[p->slot];
+    // The client world's table gets a descriptor of its own (the engine keeps a pointer to it): the client flag 0x1 for a
+    // client-world program, none of 0x1, 0x10 and 0x40 for a prediction one; HOST_ONLY, which only a server program can
+    // mean, is dropped (register_program_world refuses it; a "both" reservation keeps it on its server side).
+    p->worlds = worlds;
+    for (const uint32_t kind : {uint32_t{KILN_WORLD_CLIENT}, uint32_t{KILN_WORLD_PREDICTION}}) {
+        if (!(worlds & (1u << kind))) continue;
+        Side& side = p->side[kind];
+        side.enabled = true;
+        side.desc = e;
+        side.desc.flags = kind == KILN_WORLD_CLIENT ? (p->flags & ~uint32_t{KILN_PROGRAM_HOST_ONLY}) | kClientFlag
+                                                    : p->flags & ~(kClientFlag | uint32_t{KILN_PROGRAM_HOST_ONLY} | kEngineBit);
+    }
+    if (worlds != kWorldBitServer) g_side_programs.fetch_add(1);
     g_by_slot[p->slot] = p;
     g_programs.push_back(p);
     if (out) *out = static_cast<KilnHandle>(g_programs.size());
-    KW_I("program %s accepted (%s, flags 0x%x, iterator %u bytes)", name.c_str(),
-         internal ? "internal" : (p->each ? "each" : "raw"), p->flags, p->iter_size);
+    KW_I("program %s accepted (%s, flags 0x%x, iterator %u bytes%s)", name.c_str(),
+         internal ? "internal" : (p->each ? "each" : "raw"), p->flags, p->iter_size,
+         worlds == kWorldBitServer ? ""
+         : worlds == kWorldBitClient ? ", client world"
+         : worlds == kWorldBitPrediction ? ", prediction storage"
+         : worlds == (kWorldBitServer | kWorldBitClient) ? ", server and client worlds" : ", several worlds");
     return KILN_OK;
+}
+}  // namespace
+
+KilnResult register_program(KilnOwner owner, const KilnProgramDesc* d, KilnHandle* out, bool internal) {
+    return register_program_in(owner, d, out, internal, kWorldBitServer);
 }
 
 int32_t program_slot(KilnHandle h, int32_t kind, KilnStr name) {
@@ -561,7 +836,16 @@ ProgramLedger program_ledger() {
         out.descs.push_back(reinterpret_cast<uintptr_t>(&p->desc));
         const int st = p->state.load();
         const bool bound = p->reserved_mod.empty() || p->owner != g_owner;
-        if ((st == KILN_PROGRAM_ACTIVE || st == KILN_PROGRAM_PENDING) && bound && (p->internal || p->each || p->update)) ++out.active;
+        bool in_use = (p->worlds & kWorldBitServer) && (st == KILN_PROGRAM_ACTIVE || st == KILN_PROGRAM_PENDING) && bound &&
+                      (p->internal || p->each || p->update);
+        // its client-table descriptors are Kiln's entries in a client world's table; a bound side in use holds the slot too
+        for (const Side& side : p->side) {
+            if (!side.enabled) continue;
+            out.descs.push_back(reinterpret_cast<uintptr_t>(&side.desc));
+            const int ss = side.state.load();
+            in_use = in_use || ((ss == KILN_PROGRAM_ACTIVE || ss == KILN_PROGRAM_PENDING) && side.open.load());
+        }
+        if (in_use) ++out.active;
     }
     std::sort(out.descs.begin(), out.descs.end());
     return out;
@@ -752,6 +1036,7 @@ KilnResult KILN_CALL bind_program(KilnOwner owner, KilnStr mod, KilnStr key, Kil
     std::lock_guard lock(g_mutex);
     for (Program* p : g_programs) {
         if (p->reserved_mod != sv(mod) || p->reserved_key != sv(key)) continue;
+        if (!(p->worlds & kWorldBitServer)) return KILN_ERR_NOT_FOUND;  // a client-world reservation (bind_program_world)
         std::unique_lock callback_lock(p->callback_mutex);
         if (p->owner != g_owner) return KILN_ERR_INVALID_ARGUMENT;
         if (p->state.load() != KILN_PROGRAM_ACTIVE && p->state.load() != KILN_PROGRAM_PENDING) return KILN_ERR_UNAVAILABLE;
@@ -835,6 +1120,340 @@ KilnResult KILN_CALL program_emit(KilnProgramCtx* c, KilnStr name, const void* d
     std::memcpy(out,copy,size);
     if (stamp) fn.program_time(ctx,static_cast<int64_t*>(out));
     return KILN_OK;
+}
+
+
+// ======================================================================= the client world's table (chapter 14) =====
+
+namespace {
+
+bool on_client_thread() {
+    return g_api->on_world_thread(KILN_WORLD_CLIENT) || (g_main_tid && current_thread_id() == g_main_tid);
+}
+
+// A binding handle: (generation << 12) | (kind << 8) | (slot + 1). A program handle is slot + 1 (kind 0, generation 0).
+KilnHandle binding_handle(int slot, uint32_t kind, uint64_t generation) {
+    return (generation << 12) | (static_cast<uint64_t>(kind) << 8) | static_cast<uint64_t>(slot + 1);
+}
+
+Program* program_at(KilnHandle h) {  // g_mutex held
+    const uint64_t slot = (h & 0xFFu);
+    return slot >= 1 && slot <= g_programs.size() ? g_programs[slot - 1] : nullptr;
+}
+
+void forget_binding(Side& s) {  // g_mutex held; no call of it runs any more
+    s.each.store(nullptr);
+    s.update.store(nullptr);
+    s.user.store(nullptr);
+    s.owner.store(0);
+    if (s.closing) {
+        s.closing = false;
+        g_closing.fetch_sub(1);
+    }
+}
+
+// Closes a side's gate and waits for its running calls at most `wait`: true when none runs any more (forgotten).
+bool close_side(Side& s, std::chrono::microseconds wait) {  // g_mutex held
+    s.open.store(false, std::memory_order_seq_cst);
+    const auto until = std::chrono::steady_clock::now() + wait;
+    while (s.calls_in.load(std::memory_order_seq_cst) != 0) {
+        if (std::chrono::steady_clock::now() >= until) {
+            if (!s.closing) {
+                s.closing = true;
+                g_closing.fetch_add(1);
+            }
+            return false;
+        }
+        std::this_thread::yield();
+    }
+    forget_binding(s);
+    return true;
+}
+
+void report_client_row(uint32_t state, uint32_t reason, const char* text) {
+    const auto* caps = static_cast<const KilnCapsApi*>(g_api->service(kstr(KILN_CAPS_SERVICE), 1));
+    if (caps && caps->header.size >= offsetof(KilnCapsApi, report) + sizeof(void*) && caps->report)
+        caps->report(g_owner, kstr("world.programs.client"), state, reason, KilnStr{text, std::strlen(text)});
+}
+
+constexpr const char* kRowMenu = "Kiln programs in the client world and the prediction storage: waiting for a world";
+constexpr const char* kRowWorld = "Kiln programs in the client world and the prediction storage: a client world runs";
+
+}  // namespace
+
+// Boot (kiln_plugin_main, the main thread): what world.programs.client needs, and its row. Off on a dedicated server
+// (wrong side), without the RegisterAllPrograms hook or the program table's layout (world.programs), without the name
+// maps (a name could not be checked against the client world), without world.lifecycle (a client world's stop would not
+// be seen, so its programs could not be closed), or when the client world's tick or the world events cannot be had.
+void programs_client_init(bool client_tick, bool world_events) {
+    g_main_tid = current_thread_id();
+    const bool client = g_api->size >= offsetof(KilnApi, session) + sizeof(void*) && g_api->side() == KILN_SIDE_CLIENT;
+    const char* why = nullptr;
+    uint32_t reason = KILN_CAP_REASON_SYMBOL_MISSING;
+    if (!client) why = "a client world runs only in the game client", reason = KILN_CAP_REASON_WRONG_SIDE;
+    else if (!F.programs || !g_hook || L.programs_count < 0 || L.programs_max <= 0 || L.programs_table < 0 || L.storage_kind < 0)
+        why = "kiln.world's program registration did not resolve or hook on this build (world.programs)";
+    else if (!F.names)
+        why = "the world's name maps did not resolve on this build (world.names): a client world's names could not be checked";
+    else if (!g_api->feature(kstr("world.lifecycle")))
+        why = "client-world programs need world.lifecycle to close them when a client world stops";
+    else if (!client_tick || !world_events)
+        why = "the client world's tick or the world events could not be subscribed", reason = KILN_CAP_REASON_FAULTED;
+    g_client_on.store(why == nullptr);
+    if (why) {
+        report_client_row(KILN_CAP_UNAVAILABLE, reason, why);
+        if (client) KW_W("client-world programs are off: %s", why);
+        return;
+    }
+    report_client_row(KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, kRowMenu);
+    if (!F.events) KW_W("client-world programs: event names cannot be checked on this build; a program with events is refused");
+}
+
+bool programs_client_on() { return g_client_on.load(); }
+
+KilnResult reserve_program_world(const std::string& mod, const std::string& key, const KilnProgramDesc* desc, uint32_t worlds) {
+    if (worlds == kWorldBitServer) return reserve_program(mod, key, desc);
+    if (!worlds || (worlds & ~(kWorldBitServer | kWorldBitClient | kWorldBitPrediction))) return KILN_ERR_INVALID_ARGUMENT;
+    if (!g_client_on.load()) return KILN_ERR_UNAVAILABLE;
+    if (programs_registered() + kBuiltinHeadroom >= static_cast<uint32_t>(kMaxPrograms)) {
+        KW_E("managed program %s/%s refused: the last %d of kiln.world's %d program slots stay for Kiln's own services", mod.c_str(),
+             key.c_str(), kBuiltinHeadroom, kMaxPrograms);
+        return KILN_ERR_UNAVAILABLE;
+    }
+    KilnHandle handle = 0;
+    const auto result = register_program_in(g_owner, desc, &handle, false, worlds);
+    if (result != KILN_OK) return result;
+    std::lock_guard lock(g_mutex);
+    Program* p = g_programs[handle - 1];
+    p->reserved_mod = mod;
+    p->reserved_key = key;
+    return KILN_OK;
+}
+
+KilnResult KILN_CALL register_program_world(KilnOwner owner, uint32_t kind, const KilnProgramDesc* d, KilnHandle* out) {
+    if (out) *out = 0;
+    if (kind == KILN_WORLD_SERVER) {
+        if (t_in_program || game_in_slice()) return KILN_ERR_WRONG_THREAD;
+        return register_program(owner, d, out, false);
+    }
+    if (kind != KILN_WORLD_CLIENT && kind != KILN_WORLD_PREDICTION) return KILN_ERR_INVALID_ARGUMENT;
+    if (t_in_program || game_in_slice()) return KILN_ERR_WRONG_THREAD;
+    if (!F.programs || !g_client_on.load()) return KILN_ERR_UNAVAILABLE;
+    if (!d || d->size < sizeof(KilnProgramDesc) || !owner) return KILN_ERR_INVALID_ARGUMENT;
+    if (d->flags & KILN_PROGRAM_HOST_ONLY) {
+        KW_E("program '%.*s' refused: HOST_ONLY is for server programs (a %s program never runs in the server world)",
+             static_cast<int>(d->name.len), d->name.ptr ? d->name.ptr : "", world_name(kind));
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
+    KilnHandle h = 0;
+    const KilnResult rc = register_program_in(owner, d, &h, false, 1u << kind);
+    if (rc != KILN_OK) return rc;
+    {
+        std::lock_guard lock(g_mutex);
+        Side& s = g_programs[h - 1]->side[kind];
+        s.owner.store(owner);
+        s.each.store(d->each);
+        s.update.store(d->update);
+        s.user.store(d->user);
+        s.generation = 1;
+        if (g_table_live.load()) s.reason.store(&kReasonNextWorld);
+        s.open.store(true, std::memory_order_seq_cst);
+    }
+    if (out) *out = h;
+    return KILN_OK;
+}
+
+KilnResult KILN_CALL program_world_state(KilnHandle h, uint32_t kind, int32_t* state, KilnStr* reason) {
+    if (reason) *reason = KilnStr{"", 0};
+    if (!state || kind >= KILN_WORLD_KINDS) return KILN_ERR_INVALID_ARGUMENT;
+    *state = KILN_PROGRAM_PENDING;
+    Program* p = nullptr;
+    {
+        std::lock_guard lock(g_mutex);  // only to find the program: its states are atomics
+        p = program_at(h);
+    }
+    if (!p || !(p->worlds & (1u << kind))) return KILN_ERR_NOT_FOUND;
+    if (kind == KILN_WORLD_SERVER) {
+        *state = p->state.load();
+        return KILN_OK;
+    }
+    const Side& s = p->side[kind];
+    *state = s.state.load();
+    const std::string* why = s.reason.load();
+    if (!why && *state == KILN_PROGRAM_PENDING) why = g_table_live.load() ? &kReasonNextWorld : &kReasonWaiting;
+    if (reason && why) *reason = kstr(*why);
+    return KILN_OK;
+}
+
+KilnResult KILN_CALL bind_program_world(KilnOwner owner, KilnStr mod, KilnStr key, uint32_t kind, KilnProgramEachFn each,
+                                        KilnProgramUpdateFn update, void* user, KilnHandle* out) {
+    if (out) *out = 0;
+    if (kind == KILN_WORLD_SERVER) {
+        if (update || game_in_slice()) return update ? KILN_ERR_INVALID_ARGUMENT : KILN_ERR_WRONG_THREAD;
+        return bind_program(owner, mod, key, each, user, out);
+    }
+    if (kind != KILN_WORLD_CLIENT && kind != KILN_WORLD_PREDICTION) return KILN_ERR_INVALID_ARGUMENT;
+    if (!F.programs || !g_client_on.load()) return KILN_ERR_UNAVAILABLE;
+    if (t_in_program || game_in_slice() || !on_client_thread()) return KILN_ERR_WRONG_THREAD;
+    if (!owner || !out || (!each) == (!update)) return KILN_ERR_INVALID_ARGUMENT;
+    if (g_api->post_world(owner, KILN_WORLD_CLIENT, &program_noop, nullptr) == KILN_ERR_REVOKED) return KILN_ERR_REVOKED;
+    std::lock_guard lock(g_mutex);
+    for (Program* p : g_programs) {
+        if (p->reserved_mod.empty() || p->reserved_mod != sv(mod) || p->reserved_key != sv(key)) continue;
+        Side& s = p->side[kind];
+        if (!s.enabled) return KILN_ERR_NOT_FOUND;
+        if (s.open.load()) return KILN_ERR_INVALID_ARGUMENT;  // another binding holds it
+        if (s.closing) {
+            if (s.calls_in.load(std::memory_order_seq_cst) != 0) return KILN_ERR_UNAVAILABLE;  // the last calls still finish
+            forget_binding(s);
+        }
+        if (s.state.load() == KILN_PROGRAM_FAULTED) {
+            s.state.store(s.entry.load() ? KILN_PROGRAM_ACTIVE : KILN_PROGRAM_PENDING);
+            s.fault_logged.store(false);
+            s.reason.store(nullptr);
+        }
+        s.owner.store(owner);
+        s.each.store(each);
+        s.update.store(update);
+        s.user.store(user);
+        ++s.generation;
+        s.open.store(true, std::memory_order_seq_cst);
+        *out = binding_handle(p->slot, kind, s.generation);
+        return KILN_OK;
+    }
+    return KILN_ERR_NOT_FOUND;
+}
+
+KilnResult KILN_CALL unbind_program_world(KilnHandle h) {
+    if (t_in_program || game_in_slice()) return KILN_ERR_WRONG_THREAD;
+    const uint32_t kind = static_cast<uint32_t>(h >> 8) & 0xFu;
+    const uint64_t generation = h >> 12;
+    std::unique_lock lock(g_mutex);
+    Program* p = program_at(h);
+    if (!p) return KILN_ERR_NOT_FOUND;
+    uint32_t k = kind;
+    if (kind == KILN_WORLD_SERVER) {
+        if (generation != 0) return KILN_ERR_NOT_FOUND;
+        if (p->worlds & kWorldBitServer) {  // a server program's handle: unregister_program (tick thread)
+            lock.unlock();
+            return unregister_program(h);
+        }
+        k = (p->worlds & kWorldBitClient) ? KILN_WORLD_CLIENT : KILN_WORLD_PREDICTION;  // register_program_world's handle
+    }
+    if (k != KILN_WORLD_CLIENT && k != KILN_WORLD_PREDICTION) return KILN_ERR_NOT_FOUND;
+    Side& s = p->side[k];
+    if (!s.enabled) return KILN_ERR_NOT_FOUND;
+    const uint64_t want = kind == KILN_WORLD_SERVER ? s.generation : generation;
+    if (want > s.generation || want == 0) return KILN_ERR_NOT_FOUND;
+    if (want < s.generation) return KILN_OK;  // an earlier binding: it had finished before the next one was made
+    if (!s.open.load() && !s.closing) return KILN_OK;
+    return close_side(s, std::chrono::microseconds(2000)) ? KILN_OK : KILN_ERR_WRONG_THREAD;
+}
+
+// The client world's Pre (main thread). Nothing for a player whose mods declare no client program (one atomic load).
+void programs_client_pre(const KilnTickInfo*) {
+    if (!g_side_programs.load(std::memory_order_relaxed)) return;
+    if (g_skip_check.exchange(false)) {  // the first Pre after the world finalized: programs the engine skips
+        std::lock_guard lock(g_mutex);
+        for (Program* p : g_programs)
+            for (uint32_t kind = 1; kind < KILN_WORLD_KINDS; ++kind) {
+                Side& s = p->side[kind];
+                const uintptr_t entry = s.entry.load();
+                if (!s.enabled || !entry || s.state.load() != KILN_PROGRAM_ACTIVE) continue;
+                uint32_t flags = 0;
+                if (!seh_copy(&flags, reinterpret_cast<const void*>(entry + L.entry_flags), 4) || !(flags & kEngineSkipped)) continue;
+                s.state.store(KILN_PROGRAM_SKIPPED);
+                s.reason.store(&kReasonSkipped);
+                KW_E("program %s: the engine skips it in the %s (a required singleton is missing; engine flags 0x%x)",
+                     p->name.c_str(), world_name(kind), flags);
+            }
+    }
+    if (g_closing.load(std::memory_order_relaxed)) {  // unbound while a call ran: forgotten once it has finished
+        std::lock_guard lock(g_mutex);
+        for (Program* p : g_programs)
+            for (Side& s : p->side)
+                if (s.closing && s.calls_in.load(std::memory_order_seq_cst) == 0) forget_binding(s);
+    }
+    // Revoked owners, at most once a second (a post to a revoked owner fails; a live owner's no-op runs before the next
+    // Pre). Probed outside g_mutex.
+    static std::chrono::steady_clock::time_point next{};
+    const auto now = std::chrono::steady_clock::now();
+    if (now < next) return;
+    next = now + std::chrono::seconds(1);
+    std::vector<std::pair<Side*, KilnOwner>> open;
+    {
+        std::lock_guard lock(g_mutex);
+        for (Program* p : g_programs)
+            for (Side& s : p->side)
+                if (s.enabled && s.open.load() && s.owner.load() && s.owner.load() != g_owner) open.emplace_back(&s, s.owner.load());
+    }
+    std::vector<KilnOwner> revoked, live;
+    for (const auto& [side, owner] : open) {
+        if (std::find(revoked.begin(), revoked.end(), owner) != revoked.end() || std::find(live.begin(), live.end(), owner) != live.end())
+            continue;
+        (g_api->post_world(owner, KILN_WORLD_CLIENT, &program_noop, nullptr) == KILN_ERR_REVOKED ? revoked : live).push_back(owner);
+    }
+    if (revoked.empty()) return;
+    std::lock_guard lock(g_mutex);
+    for (const auto& [side, owner] : open)
+        if (std::find(revoked.begin(), revoked.end(), owner) != revoked.end() && side->owner.load() == owner)
+            close_side(*side, std::chrono::microseconds(0));
+}
+
+// A world starts or stops. The client world's stop (on the destroying thread, the world intact): no call of a client-
+// table program starts; the running ones are waited for (bounded); every registration goes back to PENDING for the
+// next client world (a FAULTED one stays so until it is bound again); bindings stay. The row says whether a world runs.
+void programs_world_event(const KilnWorldEvent* e) {
+    if (!e || e->kind != KILN_WORLD_CLIENT || !g_client_on.load()) return;
+    if (e->event == KILN_WORLD_STARTED) {
+        report_client_row(KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, kRowWorld);
+        return;
+    }
+    if (e->event != KILN_WORLD_STOPPING) return;
+    if (g_side_programs.load()) {
+        g_table_stopping.store(true, std::memory_order_seq_cst);
+        g_table_live.store(false);
+        std::vector<Program*> snapshot;
+        {
+            std::lock_guard lock(g_mutex);
+            snapshot = g_programs;
+        }
+        auto running = [&] {
+            uint32_t n = 0;
+            for (Program* p : snapshot)
+                for (const Side& s : p->side) n += s.calls_in.load(std::memory_order_seq_cst);
+            return n;
+        };
+        const auto t0 = std::chrono::steady_clock::now();
+        const uint32_t first = running();
+        uint32_t left = first;
+        while (left && std::chrono::steady_clock::now() < t0 + std::chrono::milliseconds(g_table_stop_wait_ms.load())) {
+            std::this_thread::yield();
+            left = running();
+        }
+        const auto waited = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
+        uint32_t closed = 0;
+        {
+            std::lock_guard lock(g_mutex);
+            for (Program* p : g_programs)
+                for (Side& s : p->side) {
+                    if (!s.enabled) continue;
+                    ++closed;
+                    s.entry.store(0);
+                    s.engine_id.store(0);
+                    if (s.state.load() != KILN_PROGRAM_FAULTED) {
+                        s.state.store(KILN_PROGRAM_PENDING);
+                        s.reason.store(nullptr);
+                    }
+                    if (s.closing && s.calls_in.load(std::memory_order_seq_cst) == 0) forget_binding(s);
+                }
+        }
+        if (left) KW_E("client world stops: %u call(s) of Kiln programs still running after %lld us; their bindings are kept", left,
+                       static_cast<long long>(waited));
+        KW_I("client world stops: %u Kiln client-table registration(s) closed for the next client world (%u call(s) running at the "
+             "stop, %u after %lld us)", closed, first, left, static_cast<long long>(waited));
+    }
+    report_client_row(KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, kRowMenu);
 }
 
 }  // namespace kw
