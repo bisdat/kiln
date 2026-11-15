@@ -2575,6 +2575,7 @@ fn world_tables(out: &mut Out, m: &LMod, files: &[&LFile], cat: Option<&Catalog>
             out.push(Diagnostic::new(file, codes::MATERIAL_BUDGET, *at, &format!("{what} {total} terrain materials, and the game has ids for {TERRAIN_ROOM}: kiln.worldtables refuses those past that by name, starting from the last in sorted GUID order (\"{name}\" is one of this mod's)")));
         }
     }
+    material_pools(out, m, files, &clients);
     // A catalog older than the section has no word on it.
     let Some(section) = cat.and_then(|c| c.section("materials")).filter(|s| !s.names.is_empty()) else { return };
     let known: Vec<&str> = section.names_list.iter().map(String::as_str).collect();
@@ -2595,6 +2596,22 @@ fn world_tables(out: &mut Out, m: &LMod, files: &[&LFile], cat: Option<&Catalog>
                 out.push(d);
             }
         }
+        // a pool's gameMaterial: a game building material by the name of the item that places it
+        for b in of(f, "buildingMaterialPools") {
+            for e in b.value.get("materials").and_then(Node::as_array).into_iter().flatten() {
+                let Some(v) = e.get("gameMaterial") else { continue };
+                let Some(text) = v.as_str() else { continue };
+                if section.names.contains(text) || text.starts_with("Terrain") {
+                    continue;
+                }
+                let mut d = Diagnostic::new(&f.display, codes::MATERIAL_REF, v.span, &format!("\"{text}\" is not a game building material the catalog knows; a pool that names one is refused at boot"));
+                if let Some(best) = suggest::best(text, &known) {
+                    d.message.push_str(&format!("; did you mean \"{best}\"?"));
+                    d.fixes.push(Fix::new(&format!("Replace with \"{best}\""), vec![TextEdit::new(&f.display, v.span, &quote(best))]));
+                }
+                out.push(d);
+            }
+        }
         for b in of(f, "materialTweaks") {
             let Some(v) = b.value.get("material") else { continue };
             let Some(text) = v.as_str() else { continue };
@@ -2608,6 +2625,89 @@ fn world_tables(out: &mut Out, m: &LMod, files: &[&LFile], cat: Option<&Catalog>
                 d.fixes.push(Fix::new(&format!("Replace with \"{best}\""), vec![TextEdit::new(&f.display, v.span, &quote(best))]));
             }
             out.push(d);
+        }
+    }
+}
+
+/// KL201 and KL334 over one mod's building-material pools and the blueprints that name them, as kiln.worldtables refuses
+/// them at boot (native/services/worldtables/merge.cpp, resolve_pools and bind_shape_pools). The 1 to 64 entries are the
+/// schema's; a gameMaterial name is checked against the catalog with the material tweaks' (KL332).
+fn material_pools(out: &mut Out, m: &LMod, files: &[&LFile], clients: &str) {
+    let of = |f: &LFile, key: &str| f.root.as_ref().and_then(|r| r.get(key)).and_then(Node::as_object).map(<[_]>::to_vec).unwrap_or_default();
+    let id = m.id.clone().unwrap_or_default();
+    // the dependencies kiln.worldtables reads: the manifest's "dependencies", not loadAfter
+    let declared: HashSet<String> = manifest_root(m)
+        .and_then(|r| r.get("dependencies"))
+        .map(|d| {
+            let mut s: HashSet<String> = d.as_object().into_iter().flatten().map(|x| x.key.clone()).collect();
+            s.extend(d.as_array().into_iter().flatten().filter_map(|e| e.str_of("id")).map(str::to_string));
+            s
+        })
+        .unwrap_or_default();
+    let roof_of = |v: &Node| v.get("roof").and_then(Node::as_bool).unwrap_or(false);
+    let materials: HashMap<String, bool> = files.iter().flat_map(|f| of(f, "buildingMaterials")).map(|b| (b.key.clone(), roof_of(&b.value))).collect();
+    let pools: HashMap<String, bool> = files.iter().flat_map(|f| of(f, "buildingMaterialPools")).map(|b| (b.key.clone(), roof_of(&b.value))).collect();
+    let split = |text: &str| match text.split_once(':') {
+        Some((owner, key)) => (owner.to_string(), key.to_string()),
+        None => (id.clone(), text.to_string()),
+    };
+    let mut said_clients = false;
+    for f in files {
+        for b in of(f, "buildingMaterialPools") {
+            if clients != "mod" && !said_clients {
+                said_clients = true;
+                out.push(Diagnostic::new(&f.display, codes::CLIENTS_DEFINITIONS, b.key_span, &format!("building material pool \"{}\" needs \"clients\": \"mod\", and this mod says \"{clients}\": every player's game must list the same pool, so kiln.worldtables refuses it", b.key)));
+            }
+            let roof = roof_of(&b.value);
+            let mut seen: HashMap<String, usize> = HashMap::new();
+            for (i, e) in b.value.get("materials").and_then(Node::as_array).into_iter().flatten().enumerate() {
+                let entry = |text: &str| format!("pool \"{}\", materials[{i}] ({text})", b.key);
+                let mut same = |key: String, span: Span, text: &str, out: &mut Out| {
+                    if let Some(first) = seen.get(&key) {
+                        out.push(Diagnostic::new(&f.display, codes::MATERIAL_POOL, span, &format!("{} names the same material as materials[{first}]: a pool lists each block once", entry(text))));
+                    } else {
+                        seen.insert(key, i);
+                    }
+                };
+                if let Some(v) = e.get("material") {
+                    let Some(text) = v.as_str() else { continue };
+                    let (owner, key) = split(text);
+                    let label = format!("material {text}");
+                    if owner == id {
+                        match materials.get(&key) {
+                            None => out.push(Diagnostic::new(&f.display, codes::MATERIAL_POOL, v.span, &format!("{}: this mod has no building material \"{key}\"", entry(&label)))),
+                            Some(&r) if r != roof => out.push(Diagnostic::new(&f.display, codes::MATERIAL_POOL, v.span, &format!("{}: {}", entry(&label), if r { "a roof material in a wall pool; roof must agree" } else { "a wall material in a roof pool; roof must agree" }))),
+                            _ => {}
+                        }
+                    } else if !declared.contains(&owner) {
+                        out.push(Diagnostic::new(&f.display, codes::MATERIAL_POOL, v.span, &format!("{}: the material is mod {owner}'s, which this mod does not declare in \"dependencies\"", entry(&label))));
+                    }
+                    same(format!("m:{owner}:{key}"), v.span, &label, out);
+                } else if let Some(v) = e.get("gameMaterial") {
+                    let Some(text) = v.as_str() else { continue };
+                    let label = format!("gameMaterial {text}");
+                    if text.starts_with("Terrain") {
+                        out.push(Diagnostic::new(&f.display, codes::MATERIAL_POOL, v.span, &format!("{}: a terrain material; a pool lists building materials", entry(&label))));
+                    } else if text.starts_with("Roof") != roof {
+                        out.push(Diagnostic::new(&f.display, codes::MATERIAL_POOL, v.span, &format!("{}: {}", entry(&label), if roof { "the game's roof blocks are named Roof..., and this pool is a roof pool; roof must agree" } else { "a game roof block in a wall pool; roof must agree" })));
+                    }
+                    same(format!("g:{text}"), v.span, &label, out);
+                }
+            }
+        }
+        for b in of(f, "blueprints") {
+            let Some(v) = b.value.get("materialPool") else { continue };
+            let Some(text) = v.as_str() else { continue };
+            let (owner, key) = split(text);
+            if owner == id {
+                match pools.get(&key) {
+                    None => out.push(Diagnostic::new(&f.display, codes::MATERIAL_POOL, v.span, &format!("blueprint \"{}\": materialPool \"{text}\" names no pool of this mod's blocks files (a pool another mod defines is \"<mod>:<key>\", with that mod in \"dependencies\")", b.key))),
+                    Some(&r) if r != roof_of(&b.value) => out.push(Diagnostic::new(&f.display, codes::MATERIAL_POOL, v.span, &format!("blueprint \"{}\" is a {} shape and materialPool \"{text}\" a {} pool; roof must agree", b.key, if r { "wall" } else { "roof" }, if r { "roof" } else { "wall" }))),
+                    _ => {}
+                }
+            } else if !declared.contains(&owner) {
+                out.push(Diagnostic::new(&f.display, codes::MATERIAL_POOL, v.span, &format!("blueprint \"{}\": materialPool \"{text}\" is mod {owner}'s, which this mod does not declare in \"dependencies\"", b.key)));
+            }
         }
     }
 }
