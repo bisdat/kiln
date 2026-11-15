@@ -371,6 +371,69 @@ void late_limit_cases() {
           "disable of a mod whose DLL the proxy had loaded: not applied, no \"switched off\": " + oc.note);
 }
 
+// dev.29 `before` (a DLL that must load before another): read like every rule, and reported on the rows' order. The case
+// of a player's report: Auto Loot Plus (a dllmain native, [profile]) must patch the game's imports before Ultimate ASI
+// Loader ([chain], `..\xinput9_1_0.dll`) redirects them; the launcher loads UAL late and keeps ALP early.
+void before_cases() {
+    const json alp = {{"mod", "native:auto-loot-plus"}}, ual = {{"engine", "ultimate-asi-loader"}};
+    const json doc = {{"format", 1}, {"rules", json::array({{{"id", "alp-first"}, {"when", json::array({alp, ual})}, {"action", "before"},
+                                                            {"subject", alp}, {"target", ual}, {"message", "UAL loads after Kiln."}}})}};
+    const ParseResult pr = parse_rules(doc.dump(), "shipped");
+    check(pr.ok && pr.rules.size() == 1 && pr.problems.empty() && pr.dropped == 0, "before: read without a problem");
+    if (pr.rules.size() != 1) return;
+    const Rule& r = pr.rules[0];
+    check(r.action == "before" && r.has_subject && r.has_target && r.target.kind == Matcher::Kind::Engine &&
+              r.target.value == "ultimate-asi-loader" && r.subject.kind == Matcher::Kind::Mod, "before: its subject and target");
+    Facts facts;
+    facts.mods = {"kiln:auto-loot-plus"};
+    facts.engines = {"kiln", "ultimate-asi-loader"};
+    check(evaluate(pr.rules, facts).size() == 1, "before: fires on its when");
+
+    ChainRow ual_row = row("xinput9_1_0.dll", "loaded");
+    ual_row.path = "Z:\\game\\xinput9_1_0.dll";
+    ual_row.engine = "ultimate-asi-loader";
+    ChainRow alp_row = row("dinput8.dll", "loaded", false, "profile");
+    alp_row.mod = "kiln:auto-loot-plus";
+    ChainRow ual_late = ual_row, alp_late = alp_row;
+    ual_late.late = alp_late.late = true;
+    RuleContext ctx;
+    // the launcher's plan: UAL late, ALP early
+    Outcome oc = outcome_of(r, {ual_late, alp_row}, facts, ctx);
+    check(oc.applied && oc.note == "dinput8.dll loaded before xinput9_1_0.dll", "before: UAL late, ALP early: applied: " + oc.note);
+    // dev.28's starts: both early ([chain] first), both late (the same order), ALP late
+    for (const auto& [rows, what] : {std::make_pair(std::vector<ChainRow>{ual_row, alp_row}, "both early"),
+                                     std::make_pair(std::vector<ChainRow>{ual_late, alp_late}, "both late"),
+                                     std::make_pair(std::vector<ChainRow>{ual_row, alp_late}, "ALP late")}) {
+        oc = outcome_of(r, rows, facts, ctx);
+        check(!oc.applied && oc.note.find("asks dinput8.dll to load before xinput9_1_0.dll") != std::string::npos &&
+                  oc.note.find("activate the profile again") != std::string::npos, std::string("before: ") + what + ": not applied: " + oc.note);
+    }
+    // a late UAL that another loader had started first loaded early after all
+    ChainRow ual_ignored = ual_late;
+    ual_ignored.late_ignored = true;
+    oc = outcome_of(r, {ual_ignored, alp_row}, facts, ctx);
+    check(!oc.applied, "before: a [late] that had no effect does not count as late");
+    // UAL is not a chain entry (Windows loaded it next to the game): nothing to check, said so
+    oc = outcome_of(r, {alp_row}, facts, ctx);
+    check(!oc.applied && oc.note.find("no chain entry of this start is engine ultimate-asi-loader") != std::string::npos,
+          "before: no target row: " + oc.note);
+    // a failed row is not loaded at all
+    ChainRow alp_failed = alp_row;
+    alp_failed.status = "failed";
+    oc = outcome_of(r, {ual_late, alp_failed}, facts, ctx);
+    check(!oc.applied && oc.note.find("mod native:auto-loot-plus") != std::string::npos, "before: a failed subject is no row: " + oc.note);
+    // module matchers, within one phase: list order
+    const Rule by_name = one_rule({{"id", "b2"}, {"action", "before"}, {"subject", {{"module", "first.dll"}}}, {"target", {{"module", "second*.dll"}}}});
+    check(by_name.has_target, "before with module matchers: read");
+    oc = outcome_of(by_name, {row("first.dll", "loaded"), row("second-a.dll", "loaded")}, facts, ctx);
+    check(oc.applied && oc.note == "first.dll loaded before second-a.dll", "before: list order in one phase: " + oc.note);
+    oc = outcome_of(by_name, {row("second-a.dll", "loaded"), row("first.dll", "loaded")}, facts, ctx);
+    check(!oc.applied, "before: the wrong list order in one phase");
+    // the same rule's report line in hooks.json would carry its target: an older core drops the whole rule instead
+    const Rule late_with_target = one_rule({{"id", "x"}, {"action", "late"}, {"subject", {{"module", "a.dll"}}}, {"target", ual}});
+    check(late_with_target.id.empty(), "a target belongs to before only");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -380,6 +443,7 @@ int main(int argc, char** argv) {
     null_tolerance_cases();
     chain_status_cases();
     late_limit_cases();
+    before_cases();
     std::printf("compat_test: %d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;
 }

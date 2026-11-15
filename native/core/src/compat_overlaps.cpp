@@ -266,11 +266,61 @@ bool subject_rows(const Rule& r, const std::vector<ChainRow>& rows, std::vector<
     return any;
 }
 
+// The rows (that are on) a matcher names, for `before`: a module by file name, an engine or a mod by what the row knows of
+// its DLL. A symbol names no row.
+std::vector<size_t> rows_of(const Matcher& m, const std::vector<ChainRow>& rows) {
+    std::vector<size_t> out;
+    for (size_t i = 0; i < rows.size(); ++i) {
+        const ChainRow& row = rows[i];
+        if (!row.on()) continue;
+        // the row as the facts of one DLL: matched as the rules match a start (kiln:, native: and plugin: name one mod)
+        Facts one;
+        one.modules.push_back(row.file);
+        if (!row.engine.empty()) one.engines.push_back(row.engine);
+        if (!row.mod.empty()) one.mods.push_back(row.mod);
+        if (m.kind != Matcher::Kind::Symbol && present(m, one)) out.push_back(i);
+    }
+    return out;
+}
+
+std::string files_of(const std::vector<size_t>& at, const std::vector<ChainRow>& rows) {
+    std::string out;
+    for (size_t i : at) out += (out.empty() ? "" : ", ") + rows[i].file;
+    return out;
+}
+
+// dev.29: did every subject row load before every target row? A late row (that the late phase loaded) comes after every
+// early one; within a phase the rows load in list order.
+Outcome before_outcome(const Rule& r, const std::vector<ChainRow>& rows) {
+    Outcome o;
+    const std::vector<size_t> first = rows_of(r.subject, rows), last = rows_of(r.target, rows);
+    if (first.empty() || last.empty()) {
+        o.applied = false;
+        o.note = "rule " + r.id + ": no chain entry of this start is " + matcher_text(first.empty() ? r.subject : r.target) +
+                 ", so the order cannot be checked";
+        return o;
+    }
+    auto when = [&](size_t i) { return std::make_pair(rows[i].late && !rows[i].late_ignored ? 1 : 0, i); };
+    bool held = true;
+    for (size_t a : first)
+        for (size_t b : last)
+            if (!(when(a) < when(b))) held = false;
+    if (held) {
+        o.note = files_of(first, rows) + " loaded before " + files_of(last, rows);
+    } else {
+        o.applied = false;
+        o.note = "rule " + r.id + " asks " + files_of(first, rows) + " to load before " + files_of(last, rows) +
+                 ", but it did not this start; activate the profile again in the launcher (it writes chain.ini [late])";
+    }
+    return o;
+}
+
 }  // namespace
 
 Outcome outcome_of(const Rule& r, const std::vector<ChainRow>& rows, const Facts& facts, const RuleContext& ctx) {
     Outcome o;
     if (r.action == "warn") return o;
+    if (r.action == "before") return before_outcome(r, rows);
     const std::string what = matcher_text(r.subject);
     if (r.action == "late") {
         if (r.subject.kind != Matcher::Kind::Module) {
