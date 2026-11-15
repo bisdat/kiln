@@ -48,13 +48,19 @@ public sealed partial class ClientPassMod
         c.Log.Info($"client-pass: 06c-natives.joined sync native: steps from start to answer {string.Join(", ", delays)}; {Abilities.Natives.All.FirstOrDefault(n => n.Name == "natives-fixture.Count")}");
         c.Expect(delays.Length == 3 && delays.All(d => d == 0), "the synchronous native answered in each program's start step with you in the world",
             string.Join(", ", delays));
+        // the answer is the fixture's call count: three runs, three consecutive values (the native ran once each, in order)
+        var values = ran.Select(e => signals.FirstOrDefault(s => s.Impact.Self == e && s.Tag == 0x06C1)?.AsInt ?? -1).ToArray();
+        c.Expect(values.Length == 3 && values[0] > 0 && values[1] == values[0] + 1 && values[2] == values[1] + 1,
+            "each run's answer is the native's own count, one call per run", string.Join(", ", values));
 
         // 2. a Before on the vanilla Fireball explosion's one getTransform call
         long calls = 0, offTick = 0;
         var threads = new ConcurrentDictionary<int, byte>();
+        var selves = new ConcurrentQueue<EntityId>();  // which explosion each call came from
         var a = Abilities.Natives.Attach(0x7a120ee8, "getTransform", NativeStage.Before, (ref NativeCall n) =>
         {
             Interlocked.Increment(ref calls);
+            selves.Enqueue(n.Self);
             if (Environment.CurrentManagedThreadId != tick) Interlocked.Increment(ref offTick);
             threads.TryAdd(Environment.CurrentManagedThreadId, 0);
         }, site: 0xfcce4e0a);
@@ -68,16 +74,20 @@ public sealed partial class ClientPassMod
                    "an open spot). Kiln only counts them. Do they look and sound like the game's own fireball, with nothing " +
                    "missing or added? Answer at the end.");
         await c.Delay(TimeSpan.FromSeconds(3));
+        var booms = new List<EntityId>();
         for (var i = 0; i < 3; i++)
         {
             if (Ahead(c, 12) is not { } at) break;
-            await Abilities.RunImpact("Explosion_Player_Spell_Fireball_1", at);
+            booms.Add(await Abilities.RunImpact("Explosion_Player_Spell_Fireball_1", at));
             await c.Delay(TimeSpan.FromSeconds(3));
         }
         a.Handle!.Dispose();
         c.Log.Info($"client-pass: 06c-natives.joined attachment: {Interlocked.Read(ref calls)} call(s), {Interlocked.Read(ref offTick)} off the tick thread, " +
                    $"{threads.Count} thread(s)");
-        c.Expect(Interlocked.Read(ref calls) == 3, "one attached call per explosion", $"{Interlocked.Read(ref calls)} call(s)");
+        var seen = selves.ToArray();
+        c.Expect(booms.Count == 3 && seen.Length == 3 && booms.All(b => seen.Count(s => s == b) == 1),
+            "one attached call per explosion, each from that explosion",
+            $"explosions {string.Join(", ", booms)}; calls from {string.Join(", ", seen)}");
         await c.Verdict();
     }
 }

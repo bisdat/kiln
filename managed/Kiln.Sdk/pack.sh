@@ -4,7 +4,7 @@
 #                   Kiln.Game (the generated game types, from the newest dump; needs python3)
 #   Kiln.Sdk        MSBuild SDK: <Project Sdk="Kiln.Sdk/<version>">, kiln.mod.json, KilnDeploy, KilnPack, and the
 #                   Roslyn analyzers (Kiln.Analyzers, KILN1xx) + game-id generator (Kiln.GameIds) + typed-hook generator
-#                   (Kiln.Sigs.Generator) in analyzers/dotnet/cs,
+#                   (Kiln.Sigs.Generator) + [ImpactNative] generator (Kiln.ImpactNatives) in analyzers/dotnet/cs,
 #                   and the native SDK in native/ (KilnPlugin.cmake, the ABI headers, the Linux toolchain), and the
 #                   bake in bake/ (KilnBake: definitions baked at build, docs/kiln/modding/baked.md)
 #   Kiln.Templates  dotnet new kiln-mod, kiln-items, kiln-native, ... (templates/kiln-*)
@@ -71,6 +71,10 @@ fi
 sigsgen=$repo/managed/Kiln.Analyzers/src/Kiln.Sigs.Generator/Kiln.Sigs.Generator.csproj
 if [[ -f $sigsgen ]]; then
   build_an "$sigsgen" || echo "pack: WARNING: Kiln.Sigs.Generator failed to build; not in Kiln.Sdk" >&2
+fi
+impactgen=$repo/managed/Kiln.Analyzers/src/Kiln.ImpactNatives/Kiln.ImpactNatives.csproj
+if [[ -f $impactgen ]]; then
+  build_an "$impactgen" || echo "pack: WARNING: Kiln.ImpactNatives failed to build; not in Kiln.Sdk" >&2
 fi
 pack() { dotnet pack "$1" -c Release -o "$feed" --artifacts-path "$out/dotnet" -v q -nologo -p:KilnSdkVersion="$version" "${@:2}" >/dev/null; }
 pack "$repo/managed/Kiln.Sdk/packages/Kiln.Api.Ref.csproj" -p:KilnStage="$stage"

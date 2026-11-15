@@ -395,7 +395,10 @@ A dry run into the item's own slot cannot name the slot (`Slot` null): the game 
 What a player sees is the guided checks `items.equip` and `items.unequip` (mods/tests/client-pass, session 1).
 
 ## Equipment sets (v6, since 0.2.0-dev.29)
-A player's 20 equipment slots changed in **one inventory transaction**: every slot a set names changes, or none does.
+A player's 20 equipment slots changed in **one inventory transaction**: every slot a set names changes, or none does,
+with one exception, `InvariantFailure`: the game's transaction left the inventory neither as asked nor as before, or the
+game faulted inside it (then the inventory may be in an unknown state, and sets and single equips go off until the server
+restarts; "The transaction" below).
 `Items.CaptureSet` reads what a player wears as an `EquipmentSet`, a mod builds a subset (or keeps the capture),
 `Items.PlanSet` checks it against a snapshot taken now, and `Items.EquipSet` applies it: one request, one
 `PlayerEquippingEvent` for the whole set, one transaction inside `kiln_items_equip`, one result. Capability
@@ -420,7 +423,7 @@ using var plan = Items.PlanSet(player, rings).Plan;              // the steps, w
 | `Items.EquipSet(plan, options)` → `Task<EquipmentSetResult>` | `[ServerOnly][TickThreadOnly]` | the plan's set against the plan's snapshot (used up: a plan applies once) |
 | `EquipmentSetResult` (`IKilnResult`) | value | `Status`, `Reason` (it starts with its code: `NoRoom: ...`), `Player`, `Ticket`, `Decision`, `DryRun`, `Committed`, `MayHaveMutated`, `FailedOperation`, `GameError`, `Changes` (one `EquipmentSlotChange` per slot a commit changed) |
 | `EquipmentSetChangedEvent` (`Player`, `Ticket`, `Outcome`, `Changes`) | `[ServerOnly][TickThreadOnly]` | once per committed set, when its result arrives, also when the asking mod unloaded first; not for a dry run, a refusal or a cancel |
-| `EquipmentSetFaultedEvent` (`Result`) | `[ServerOnly][TickThreadOnly]` | an invariant failure: the inventory is neither as asked nor as before, sets are off until the server restarts |
+| `EquipmentSetFaultedEvent` (`Result`) | `[ServerOnly][TickThreadOnly]` | an invariant failure: the inventory is neither as asked nor as before, or the game faulted (`MayHaveMutated`: it may be in an unknown state); sets and single equips are off until the server restarts. Posted after an `EquipmentSetChangedEvent` of the same ticket when the changes could still be read: the two are not exclusive (chapter 10 §4.4 asks for both) |
 | `EquipmentSetJson.Serialize(set)` / `Deserialize(json)` | any | the session JSON (schema 1): a round trip for this session and for logs, never a saved loadout |
 
 | `EquipmentSetStatus` | `Ok` | Means |
@@ -482,16 +485,34 @@ The rules (chapter 10 §4.2-4.5):
   request and the snapshot: a refusal rolls back once and compares, a dry run rolls back once and compares (never
   commits), the commit's own rollback conditions (flags bit 0x40, no InventoryEmptyState accessor with touched
   inventories) refuse before the commit, the commit is called once and never followed by a rollback, the arrays are freed
-  once. A mismatch or a fault: `InvariantFailure`, sets (and equip) go off; nothing is repaired.
-- **Order.** FIFO with the player's single `Equip`/`Unequip` requests: a single request queued after a set of the same
-  player waits for it. At most one set per player and step; 256 sets queued at most (`Refused`, try again).
+  once. "As it was" after a refusal, a dry run or a commit that rolled back by itself is two comparisons in the same
+  program update: the canonical snapshot, and every byte of the seven components the program declares (Fuel,
+  Inventory, InventoryEmptyState, InventorySetup, ItemState, OwnerRelationship, SlotSelection) of the player, every
+  setup node, every inventory and every item entity, read before the transaction opened; a difference in either (an
+  item's fuel, its level or rarity byte, an empty-state flag) is `InvariantFailure`. After a commit: every named slot as
+  asked, every slot left out as it was, and every stack, item entity, stamp, owner, the tree and the action bars
+  conserved (an item may move). A mismatch or a fault: `InvariantFailure`, sets (and equip) go off; nothing is repaired.
+- **A fault inside the transaction is not rolled back.** The game's rollback replays the operations its transaction
+  recorded; a structured exception inside its equip, unequip or commit may have left that record half written, so asking
+  for a rollback could undo a write that never happened or miss one that did. No lab probe has shown the rollback safe
+  after a fault (the dev.28 dossier proved commit and rollback for staged equips only), so kiln.items stops: no further
+  engine call, no read, no free. The result is `InvariantFailure` with `MayHaveMutated` and a reason that says the
+  inventory may be in an unknown state; `EquipmentSetFaultedEvent` carries it; kiln.log has an error line with the
+  player, the server step and the set's step; the capability row `items.equip_sets` keeps that reason until the server
+  restarts, and single equips are off too.
+- **Order.** FIFO by request with the player's single `Equip`/`Unequip` requests (setorder.h, host test
+  `setorder_test.cpp`): at most one set per player and step, and only the player's oldest set (a later set that is ready
+  waits for an earlier one still being decided); a single request waits for every set of the player asked before it; a
+  set waits for every single request asked before it. 256 sets queued at most (`Refused`, try again).
 - **Ownership.** Kiln.Items submits under Kiln's own owner and names the asking mod as the snapshot's owner, so a
   committed set is reported (`EquipmentSetChangedEvent`) even when the mod unloads first; a mod's sets that did not start
   end `Dropped` at its unload; its tasks are left alone. A result kiln.items never sends within 400 steps ends the task
   `Dropped` and switches sets off (a lost result must not hang a mod).
 - **What runs for a server whose mods use no set:** `kiln_items_equip` is equip's program (registered when equip is on);
-  sets add an atomic check to it and to equip's Pre, and nothing else: no hook, no snapshot, no decision. The first set
-  call looks up kiln.window_clock, kiln.decisions and kiln.types.
+  sets add an atomic check to it and to equip's Pre, and nothing else: no hook, no snapshot, no decision.
+  kiln.window_clock, kiln.decisions and the component layouts (kiln.types) are looked up once, at the first status
+  query of `items.equip_sets` (Kiln.Items' capability refresh asks at boot and on its heartbeat) or the first set call,
+  whichever comes first; this happens on every server, also when no mod uses a set.
 
 C (v6, header size >= the member's end): `set_capture(owner, player, KilnSetSnapshotV1*)` (world thread, Pre or Post),
 `set_release_snapshot(owner, token)`, `set_status(KilnSetStatusV1*)`, `set_plan(owner, token, entries, count,
@@ -501,7 +522,9 @@ world), with a `KilnSetResultV1` valid during the call. A native caller other th
 snapshot's owner; `cancel_owner` drops its queued sets.
 
 Lab: see "Lab results: equipment sets" below. What a player sees (one decision, both rings and the helmet at once, no
-in-between state for a second observer) is the guided check `10-items.equip-set` (mods/tests/client-pass).
+in-between state on the player's own screen) is the guided check `10-items.equip-set`, and what a second player sees
+`10-items.equip-set.observer` (mods/tests/client-pass; it needs a second player in a hosted world). Both prepare a
+supported set (the three target slots emptied first) and put the player's own gear back with fresh plans, asserted.
 
 ### Lab results: equipment sets (lab `dev29-10`, server 26430253 `f0d824be…`, the standard lab save, no player)
 `mods/tests/equipment-sets-test` on a spawned `1_Player` character: a stand-in for a player, so these rows show Kiln's
@@ -529,9 +552,34 @@ real runs.
   arrows after a swap and the cycle were exact; arrows are equipped where they lie). Second run, with the order above
   and `UnsupportedSwaps`: 15 of 15 forms as expected (the three forms that failed are reordered and exact, two swaps are
   refused before mutation; a removal then a swap, two equips into empty slots then a swap then arrows, the cycle: exact).
+- After the review (merged tree, 2026-11-15; logs `out/10/lab-r3-series-kiln.log` .. `lab-r6-matrix-kiln.log` of the dev.29
+  wave): full run 29 PASS, 0 FAIL (the rows above and SET-FIFO: a set's dry run, the same set and a single equip asked in
+  one step: Simulated, Done, Done); the matrix again 15 of 15 forms as expected, now with the commit's conservation check.
+- **The rollback series** (`kiln/data/equipment-sets-test/series`, `mods/tests/equipment-sets-test/Series.cs`): one
+  stand-in with items that carry their own data (two shields with a level, a rarity and unlocked perks, a sword with a
+  level and a perk, a grappling hook and a pickaxe with lowered durability, a watering can with its fuel set). For each
+  form a plan can take on this build (empty targets: a shield, a hook, a ring and a helmet; removals; the one swap; plain
+  stacks; arrows in place; the cycle through a free slot; a form mixing a removal, an empty target, the swap and arrows) a
+  failure at every operation (the game's equip refused at step k), after the last one (the commit's rollback bit), at the
+  commit (the game's commit rolling back by itself) and a dry run: 38 rollbacks, each Refused, CommitRolledBack or
+  Simulated with kiln.items' full comparison equal (every byte of the program's seven components of every entity of the
+  tree, in the same program update) and the test's own read of every byte of those components and of Durability, Level,
+  PerkContainer, PerkContainerNew, NetworkDurability, NetworkFuel, NetworkLevel and ItemEquippedLifetime equal. Each form
+  then committed: Done, as asked, and every item's own bytes as before. Equipping changes two fields of an item on
+  purpose: ItemState's equipped bit (0x08 of `itemState`) and OwnerRelationship, which names **the inventory that holds
+  the item** (the backpack's or an equipment page's), not the player. The first version of the commit's conservation check
+  (the review's) read the owner as identity and failed every set that moved an item between the backpack and an
+  equipment page; it now requires the owner to follow the item's inventory (or stay what it was when it named anything
+  else). 48 PASS, 0 FAIL. Every form a plan can take stays on.
+- **A save and a restart cannot be shown in a lab:** the game does not load a spawned `1_Player` from a dedicated server's
+  world save (a character is its client's own), so SERIES-RESTART found no character. After a rollback the program's
+  components are byte for byte what they were, so a later save writes what it would have written without the set; what a
+  committed set leaves after a save and a reload of a real character is the guided checks `10-items.equip-set.persist` and
+  `10-items.equip-set.persist.after`.
 - Not run: a backpack change (refused), a set while a player is in the world (the lab has no client), a set whose server
   world stops while it waits, the 250-step timeout, a set from a native caller, derived stats and set bonuses read per
-  program boundary (chapter 10 §8: no attribute snapshot was taken), the save after a set.
+  program boundary (chapter 10 §8: no attribute snapshot was taken), a fault of the game inside the transaction (only the
+  host test injects one).
 
 ## Tool wear per debit (since 0.2.0-dev.28)
 `Items.SetToolWearPerDebit(tool, n)` (or `ToolBlock.WearPerDebit` in a block) sets what one of the game's wear debits

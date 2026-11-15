@@ -3,8 +3,11 @@
 // (tests/natives_test.cpp) run them with made-up calls. Since 0.2.0-dev.29: synchronous natives.
 #pragma once
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <memory>
+#include <unordered_map>
 #include <string_view>
 #include <vector>
 
@@ -79,6 +82,8 @@ struct Attachment {
     void* user = nullptr;
     KilnOwner owner = 0;
     bool active = true;                       // false: its program or site was not found when the world's programs loaded
+    bool checked = false;                     // its program and site were checked against the world's programs
+    struct OwnerGate* gate = nullptr;         // its owner's admission (every call enters it first)
 };
 
 struct AttachSet {
@@ -189,5 +194,138 @@ inline bool code_calls(const uint32_t* code, size_t n, uint32_t hash, uint32_t s
     }
     return false;
 }
+
+
+// ------------------------------------------------------------------------------------------ owner admission ----
+// since 0.2.0-dev.29 (review P1): every call into a mod's sync native or attachment enters its owner's gate first.
+// Retiring an owner closes the gate (no new entry), then waits a bounded time for the calls inside to leave; a call
+// still inside when the bound expires keeps the owner's bindings alive (a deferred retirement, finished in a later
+// Pre when the gate is quiet). Nothing a running handler can still read is freed before its gate is quiet.
+struct OwnerGate {
+    KilnOwner owner = 0;
+    std::atomic<uint32_t> inflight{0};
+    std::atomic<bool> closed{false};
+};
+
+// A call enters (true) or the owner is retired (false: answer as a removed native). The increment comes before the
+// check, so a closer that sees no call inside can trust that a late caller sees the gate closed (both seq_cst).
+inline bool gate_enter(OwnerGate& g) {
+    g.inflight.fetch_add(1, std::memory_order_seq_cst);
+    if (!g.closed.load(std::memory_order_seq_cst)) return true;
+    g.inflight.fetch_sub(1, std::memory_order_seq_cst);
+    return false;
+}
+inline void gate_leave(OwnerGate& g) { g.inflight.fetch_sub(1, std::memory_order_seq_cst); }
+
+// Closes the gate and waits until no call is inside or `budget` is spent; yield() between looks (never a lock).
+// True: quiet. now() and yield() are the caller's clock and yield (tests pass fakes).
+template <class Now, class Yield>
+bool gate_close_and_wait(OwnerGate& g, int64_t budget, Now&& now, Yield&& yield) {
+    g.closed.store(true, std::memory_order_seq_cst);
+    if (g.inflight.load(std::memory_order_seq_cst) == 0) return true;
+    const int64_t end = now() + budget;
+    while (now() < end) {
+        yield();
+        if (g.inflight.load(std::memory_order_seq_cst) == 0) return true;
+    }
+    return g.inflight.load(std::memory_order_seq_cst) == 0;
+}
+
+// What a retirement keeps alive until its gate is quiet (bindings, attachment sets: freed by `release`).
+template <class Payload>
+struct Deferred {
+    OwnerGate* gate = nullptr;
+    Payload payload{};
+    uint64_t since = 0;  // the step it was deferred in
+};
+
+// The retirements whose gate is quiet now: released (`release(payload)`, `done(gate, steps)`) and removed.
+template <class Payload, class Release, class Done>
+size_t finish_quiet(std::vector<Deferred<Payload>>& list, uint64_t step, Release&& release, Done&& done) {
+    size_t n = 0;
+    for (auto it = list.begin(); it != list.end();) {
+        if (it->gate && it->gate->inflight.load(std::memory_order_seq_cst) != 0) {
+            ++it;
+            continue;
+        }
+        release(it->payload);
+        done(it->gate, step - it->since);
+        it = list.erase(it);
+        ++n;
+    }
+    return n;
+}
+
+// ---------------------------------------------------------------------------------------------- watchdog -------
+// A handler that has been inside longer than the watchdog's limit is named once per call (a hung server says why).
+// Records are claimed by CAS at entry and released at exit; the watchdog thread only reads them.
+struct InsideRecord {
+    std::atomic<int64_t> since{0};       // 0 = free; else the entry time (the caller's clock)
+    std::atomic<const char*> what{nullptr};
+    std::atomic<KilnOwner> owner{0};
+    std::atomic<bool> reported{false};
+};
+template <size_t N>
+struct InsideTable {
+    InsideRecord rec[N];
+    // A free record for this call, or -1 when all are taken (the call is then not watched).
+    int claim(int64_t now, const char* what, KilnOwner owner) {
+        for (size_t i = 0; i < N; ++i) {
+            int64_t free = 0;
+            if (rec[i].since.compare_exchange_strong(free, -1, std::memory_order_acq_rel)) {
+                rec[i].what.store(what, std::memory_order_relaxed);
+                rec[i].owner.store(owner, std::memory_order_relaxed);
+                rec[i].reported.store(false, std::memory_order_relaxed);
+                rec[i].since.store(now, std::memory_order_release);
+                return static_cast<int>(i);
+            }
+        }
+        return -1;
+    }
+    void release(int i) {
+        if (i >= 0) rec[i].since.store(0, std::memory_order_release);
+    }
+    // Calls inside for longer than `limit`, each once: report(what, owner, elapsed).
+    template <class Report>
+    size_t scan(int64_t now, int64_t limit, Report&& report) {
+        size_t n = 0;
+        for (size_t i = 0; i < N; ++i) {
+            const int64_t s = rec[i].since.load(std::memory_order_acquire);
+            if (s <= 0 || now - s < limit || rec[i].reported.exchange(true, std::memory_order_acq_rel)) continue;
+            report(rec[i].what.load(std::memory_order_relaxed), rec[i].owner.load(std::memory_order_relaxed), now - s);
+            ++n;
+        }
+        return n;
+    }
+};
+
+// The immutable callback of a sync native: published as one unit (a reader never sees one field of another
+// registration), retired only when its owner's gate is quiet.
+struct SyncBinding {
+    KilnNativeWrapFn fn = nullptr;
+    void* user = nullptr;
+    OwnerGate* gate = nullptr;
+};
+
+// One gate per owner, made on its first registration and never freed (an owner id is never reused: a mod's reload
+// is a new owner). Under the caller's lock.
+class OwnerGates {
+public:
+    OwnerGate* of(KilnOwner owner) {
+        auto& g = map_[owner];
+        if (!g) {
+            g = std::make_unique<OwnerGate>();
+            g->owner = owner;
+        }
+        return g.get();
+    }
+    OwnerGate* find(KilnOwner owner) const {
+        auto it = map_.find(owner);
+        return it == map_.end() ? nullptr : it->second.get();
+    }
+
+private:
+    std::unordered_map<KilnOwner, std::unique_ptr<OwnerGate>> map_;
+};
 
 }  // namespace kab

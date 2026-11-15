@@ -227,6 +227,21 @@ typedef struct KilnNativeArg {
 } KilnNativeArg;
 enum { KILN_NATIVE_ARG_IN = 0, KILN_NATIVE_ARG_OUT = 1, KILN_NATIVE_ARG_INOUT = 2 };
 enum { KILN_NATIVE_ARG_OPTIONAL = 1u << 0, KILN_NATIVE_ARG_RAW = 1u << 1 };
+/* native_state() */
+enum {
+    KILN_NATIVE_STATE_NONE = 0,    /* no Kiln native of this hash */
+    KILN_NATIVE_STATE_WAITING = 1, /* registered with Kiln; no server world registry yet */
+    KILN_NATIVE_STATE_LIVE = 2,    /* in the server world's native registry */
+    KILN_NATIVE_STATE_REFUSED = 3, /* the server world's registry had no room for it (the world's setup refused it) */
+    KILN_NATIVE_STATE_DEAD = 4,    /* taken off (its hash answers 0x1F) */
+};
+/* native_attach_state() */
+enum {
+    KILN_NATIVE_ATTACH_GONE = 0,    /* no such attachment (detached, or its owner released) */
+    KILN_NATIVE_ATTACH_PENDING = 1, /* its program and site are checked when the world's programs are in */
+    KILN_NATIVE_ATTACH_ACTIVE = 2,
+    KILN_NATIVE_ATTACH_OFF = 3,     /* its program is not loaded or does not call the native (at that site) */
+};
 
 /* since 0.2.0-dev.29 (native_counters). Reads every field the caller's size covers. */
 typedef struct KilnNativeCounters {
@@ -242,6 +257,12 @@ typedef struct KilnNativeCounters {
     uint64_t attach_skipped;  /* attachment filters that did not match a call: no callback, no managed code */
     uint64_t typed_refused;   /* calls a typed declaration refused with 0x2C (type, size, a raw value, bounds) */
     uint64_t typed_unconnected; /* calls it refused with 0x18 (a required argument not connected) */
+    uint64_t retire_deferred; /* owner retirements that found calls still inside and finished in a later Pre */
+    uint64_t watchdog_reports; /* handlers named by the watchdog: inside for more than a second */
+    uint32_t retire_pending;  /* owner retirements waiting for their calls to leave right now */
+    uint32_t attach_pending;  /* attachments now (KILN_NATIVE_ATTACH_*): program and site not checked yet, */
+    uint32_t attach_active;   /* checked and taking calls, */
+    uint32_t attach_off;      /* off: program not loaded or not calling the native there (checked again on new programs) */
 } KilnNativeCounters;
 enum {
     KILN_NATIVE_COUNTERS_NATIVES = 1u << 0, /* the RegisterNative hook is in: Kiln natives can be registered */
@@ -367,6 +388,14 @@ typedef struct KilnAbilitiesApi {
      * type or size, a raw value or an index out of bounds, 0x18 for a required argument not connected.
      * INVALID_ARGUMENT: argc over 31, args NULL with argc > 0, or a vanilla native's hash. */
     KilnResult(KILN_CALL* native_declare_typed)(uint32_t hash, uint32_t argc, const KilnNativeArg* args);
+
+    /* ---- since 0.2.0-dev.29: states (check header.size before use) ----
+     * any thread. Where a Kiln native stands (KILN_NATIVE_STATE_*): one registered before the world exists waits for its
+     * registry, and the world's setup may still refuse it for room (REFUSED). An attachment (KILN_NATIVE_ATTACH_*):
+     * PENDING until its program and site were checked against the world's programs (also for a program registered
+     * later: checked in the Pre after it goes in), then ACTIVE or OFF. */
+    KilnResult(KILN_CALL* native_state)(uint32_t hash, uint32_t* out_state);
+    KilnResult(KILN_CALL* native_attach_state)(KilnHandle attachment, uint32_t* out_state);
 } KilnAbilitiesApi;
 
 /* sequence_play() trigger (keen::actor::ActionSequenceTrigger) */
