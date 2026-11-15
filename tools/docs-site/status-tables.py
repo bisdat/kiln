@@ -287,9 +287,17 @@ def render(server: dict, server_rows: dict, client: dict | None, client_rows: di
                 notes = [cell(e["note"])] if e.get("note") else []
                 assertions = e.get("assertions", [])
                 failed = sum(a["ok"] is not True for a in assertions)
+                count = e.get("assertionFailureCount")
+                if type(count) is int and count > failed:
+                    failed = count  # more failed than the entry keeps rows for
                 if failed:
-                    notes.append(f"{failed} of {len(assertions)} assertions failed")
-                w(f"| {mod} | {code(str(c['id']))} | {title} | {e['verdict']} | {cell(e['time'][:10])} | "
+                    notes.append(f"{failed} of {max(len(assertions), failed)} assertions failed")
+                verdict = e["verdict"]
+                if verdict == "pass" and failed:
+                    # an entry from before 0.2.0-dev.29: a pass next to failed assertions never confirms a check
+                    verdict = "fail"
+                    notes.append("recorded as a pass: not a pass")
+                w(f"| {mod} | {code(str(c['id']))} | {title} | {verdict} | {cell(e['time'][:10])} | "
                   f"{cell(e['session'])} | {code(str(e['kiln']))} | {build} | {'; '.join(notes)} |")
         w("")
     return "\n".join(out).rstrip("\n") + "\n"

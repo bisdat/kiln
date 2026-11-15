@@ -98,7 +98,7 @@ public sealed class MyMod : Mod
   `Confirm` is a sentence shown before the body runs (see below). A method of the wrong shape is listed with its problem
   and refused.
 - `CheckContext`: `Instruct(text)` sets the current instruction (on the HUD line and in the list); `Expect(condition,
-  what, detail)` records an assertion beside the verdict, without throwing and without changing the verdict;
+  what, detail)` records an assertion beside the verdict, without throwing; failed assertions prevent a pass;
   `Verdict()` waits for the player (the first verdict is the check's; a body that returns without asking is asked by
   the runner); `OnEnd(cleanup)` runs last-first when the check ends, however it ends; `Ticks(n)`, `Until(condition,
   timeout, what)` (a timeout records a failed assertion and returns false), `Delay(time)`; `Mod`, `Log`, `Player` (the
@@ -106,8 +106,14 @@ public sealed class MyMod : Mod
   the player stops the run, gives a verdict before the body asked, or the mod unloads).
 - The body runs on the tick thread like a `[KilnTest]`; every `await` comes back there. The context does not teleport,
   give, spawn or set the time: call the services your mod already references.
-- A verdict is the player's. A failed assertion is written next to a pass; it does not turn it into a fail. The one
-  exception is the `guard-proof` check (below).
+- Every `Expect` is a requirement. When one failed, a Pass is recorded as a Fail, and the check's instruction says why:
+  "this check cannot pass: N assertion(s) failed: …" (the first three by name). Fail and Skip stay as chosen. The body
+  and the clean-ups can still fail an assertion after the answer, so a Pass is final only when the entry is written.
+  The entry keeps the player's own answer (`playerAnswer`), the failed rows, their count (`assertionFailureCount`) and
+  the reason in its note. To show a value without requiring it, pass `true` as the condition and put the value in the
+  detail. The `guard-proof` check (below) has a stricter rule of its own.
+- An entry written before dev.29 can say Pass next to failed assertions. It never confirms a check: the list in the game
+  and `tools/client-checks/report.py` both count it as failed ("passed with failed assertions: not a pass").
 
 ### Tags
 `ClientCheckTags`: `visual` and `audio` (the player judges what they see or hear), `two-players` (needs a second
