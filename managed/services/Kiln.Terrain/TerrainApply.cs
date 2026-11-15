@@ -181,6 +181,12 @@ internal sealed class TerrainEngine(ITerrainBackend backend, TerrainSession sess
         long changed = 0;
         var written = 0;
         string? stop = null;
+        // Pacing. Without the host budget (test adapters) one batch a tick, as 0.2.0-dev.28. With it a batch is one unit
+        // of at most 8 x 8 x 8 cells and the budget's admission decides when the step is full (Acquire waits for the next
+        // tick): the loop itself yields only where the mod's own CellsPerTick is used up for this tick. Lab, dev29-terrain2:
+        // a tick after every unit made one 32,768-cell patch take 64 ticks (3.6 s on an idle server; 38 ms in dev.28).
+        long ceiling = Math.Max(1, (long)options.CellsPerTick), sinceYield = 0;
+        var paced = backend.BudgetStep;
         for (var i = 0; i < batches.Count && stop is null; i++)
         {
             if (options.Cancel.IsCancellationRequested) { stop = "canceled"; break; }
@@ -198,9 +204,9 @@ internal sealed class TerrainEngine(ITerrainBackend backend, TerrainSession sess
                 break;
             }
             if (!await session.Budget.Acquire(backend, 0, 0) || !SameWorld(world)) { stop = "the world stopped or changed"; break; }
-            var started = backend.BudgetMilliseconds;
+            // The batch's reads and writes charge their own time (Read, Write). Charging the whole batch here as well
+            // counted them twice, and counted a wait for the next tick inside them as work, which closed that tick.
             var (stopped, cells, wrote) = await Batch(plan, box, now, rec, options, conflicts, world);
-            session.Budget.Charge(backend, started);
             if (stopped is not null) { stop = stopped; }
             if (wrote)
             {
@@ -209,7 +215,14 @@ internal sealed class TerrainEngine(ITerrainBackend backend, TerrainSession sess
                 raise?.Invoke(new TerrainChangedEvent(backend.Mod, patch.Id, patch.Version, box, cells, i + 1, batches.Count, i == batches.Count - 1));
                 options.Progress?.Report(new TerrainProgress(i + 1, batches.Count, changed));
             }
-            if (stop is null && i < batches.Count - 1) await backend.NextTick();
+            if (backend.BudgetStep != paced) { paced = backend.BudgetStep; sinceYield = 0; }  // a tick passed inside the batch
+            sinceYield += box.Count;
+            if (stop is null && i < batches.Count - 1 && (backend.BudgetStep is null || sinceYield + batches[i + 1].Count > ceiling))
+            {
+                await backend.NextTick();
+                paced = backend.BudgetStep;
+                sinceYield = 0;
+            }
         }
 
         if (stop is null && !SameWorld(world)) stop = "the world stopped or changed";

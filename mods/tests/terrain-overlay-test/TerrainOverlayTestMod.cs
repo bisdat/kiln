@@ -128,8 +128,9 @@ public sealed class TerrainOverlayTestMod : Mod
         Check(r is { Ok: true, State: TerrainState.Completed, Batches: 3 } && all && events.Count == 3 && events[^1].Last,
             "overlay.applied", $"{r.ChangedCells} {r.Batches} (state {r.State}, events {events.Count}, cells read back {(all ? "equal" : "DIFFERENT")}) {r.Reason}");
 
-        // the default budget: a transient cube of 32 x 32 x 32 cells above the ground next to it, on the 32-cell grid, so
-        // it is exactly one batch of 32,768 cells; then the same cube as air again (two batches timed, nothing kept)
+        // the host's budget: a transient cube of 32 x 32 x 32 cells above the ground next to it, on the 32-cell grid: 64
+        // units of 8 x 8 x 8 cells, at most 4,096 cells a step (0.2.0-dev.28 wrote it as one batch in one tick); then the
+        // same cube as air again (both timed, nothing kept)
         var cube = new CellBox((region.X + 64) / 32 * 32, (y0 + 48) / 32 * 32, region.Z / 32 * 32, 32, 32, 32);
         var full = new byte[cube.Count];
         Array.Fill(full, (byte)1);
@@ -139,8 +140,8 @@ public sealed class TerrainOverlayTestMod : Mod
         clock.Restart();
         var d = await Terrain.Apply(new TerrainPatch("cube", 1, cube, new TerrainVoxelVolume(full), [new TerrainPaletteEntry(0)], TerrainPersistence.Transient));
         Info($"overlay.budget transient cube {cube}: fill {m.State} {m.ChangedCells} cells in {m.Batches} batch(es), {up} ms; clear {d.State} {d.ChangedCells} cells in {d.Batches} batch(es), {clock.ElapsedMilliseconds} ms {m.Reason}{d.Reason}");
-        Check(m is { State: TerrainState.Completed, Batches: 1, ChangedCells: 32768 } && d is { State: TerrainState.Completed, ChangedCells: 32768 }
-              && Terrain.Applied.All(p => p.Plan != "cube"), "overlay.transient-not-recorded", $"{m.State} {m.ChangedCells}, {d.State} {d.ChangedCells}");
+        Check(m is { State: TerrainState.Completed, Batches: 64, ChangedCells: 32768 } && d is { State: TerrainState.Completed, Batches: 64, ChangedCells: 32768 }
+              && Terrain.Applied.All(p => p.Plan != "cube"), "overlay.transient-not-recorded", $"{m.State} {m.ChangedCells} in {m.Batches}, {d.State} {d.ChangedCells} in {d.Batches}");
 
         // a patch inside the save's base
         var bases = Build.Bases;

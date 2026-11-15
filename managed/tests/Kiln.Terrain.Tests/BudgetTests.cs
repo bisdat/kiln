@@ -69,6 +69,32 @@ public sealed class BudgetTests
         Assert.All(d.Reads.Values,n=>Assert.InRange(n,0,32768));
         Assert.All(Enumerable.Range(0,count),i=>Assert.Contains(w.Writes,x=>x.Mod=="m"+i));
     }
+    // Lab (dev29-terrain2, boot 1): one 32,768-cell patch took 64 ticks, a tick after every 512-cell unit, where the
+    // step's allowance is 4,096 cells. A plan alone on the host uses the step's allowance.
+    [Fact]
+    public async Task One_plan_alone_uses_the_steps_allowance_and_not_one_unit_a_tick()
+    {
+        var w=new MemoryWorld(); var d=new Driver(); var session=new TerrainSession();
+        var t=new TerrainEngine(new Scheduled(w.For("m"),d),session,null).Apply(Plan("p",64),new(),32);  // 16,384 cells, default CellsPerTick
+        d.Finish(t);
+        Assert.Equal(TerrainState.Completed,(await t).State);
+        Assert.All(d.Writes.Values,n=>Assert.InRange(n,0,4096));
+        Assert.Contains(d.Writes.Values,n=>n==4096);
+        Assert.InRange(d.Writes.Count(p=>p.Value>0),4,6);  // 16,384 / 4,096 = 4 steps (32 with a tick after every unit)
+    }
+
+    // The mod's own CellsPerTick still lowers its share: one unit a tick when it asks for 512.
+    [Fact]
+    public async Task A_mods_own_cells_per_tick_is_a_ceiling_below_the_hosts()
+    {
+        var w=new MemoryWorld(); var d=new Driver(); var session=new TerrainSession();
+        var t=new TerrainEngine(new Scheduled(w.For("m"),d),session,null).Apply(Plan("p",64),new(){CellsPerTick=1024},32);
+        d.Finish(t);
+        Assert.Equal(TerrainState.Completed,(await t).State);
+        Assert.All(d.Writes.Values,n=>Assert.InRange(n,0,1024));
+        Assert.Contains(d.Writes.Values,n=>n==1024);
+    }
+
     [Fact]
     public async Task Native_recovery_and_managed_plans_cannot_spend_the_same_allowance()
     {
