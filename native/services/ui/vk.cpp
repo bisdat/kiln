@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+#include "overlay_guard_runtime.h"
 // kiln.ui: the game's Vulkan presents (docs/re/client-render.md).
 //
 // Interception
@@ -601,6 +602,7 @@ VkResult VKAPI_CALL hk_create_instance(const VkInstanceCreateInfo* ci, const VkA
     const VkResult r = R.create_instance.load()(ci, a, out);
     if (r == VK_SUCCESS && out) {
         std::lock_guard<std::mutex> lk(g_mu);
+        overlay_guard_stage(overlay_guard::Stage::instance);
         g_instance = *out;
         if (ci && ci->pApplicationInfo && ci->pApplicationInfo->apiVersion) g_instance_api = ci->pApplicationInfo->apiVersion;
         logf(KILN_LOG_INFO, "ui: game Vulkan instance %p (api %u.%u)", reinterpret_cast<void*>(*out),
@@ -633,6 +635,7 @@ VkResult VKAPI_CALL hk_create_device(VkPhysicalDevice phys, const VkDeviceCreate
     load_device_fns(*d);
     g_unseen_queues.erase(*out);  // of an older device that had this handle
     g_devices[*out] = d;
+    overlay_guard_stage(overlay_guard::Stage::device);
     g_has_device = true;
     logf(KILN_LOG_INFO, "ui: game Vulkan device %p (%u queue families requested, functions %s; %zu live)", reinterpret_cast<void*>(*out),
          ci ? ci->queueCreateInfoCount : 0, device_fns_ok(*d) ? "ok" : "MISSING", g_devices.size());
@@ -755,6 +758,7 @@ void adopt_device(VkDevice dev) {
         if (device_fns_ok(*d)) {
             g_unseen_queues.erase(queues);
             g_devices[dev] = d;
+            overlay_guard_stage(overlay_guard::Stage::device);
             g_has_device = true;
             logf(KILN_LOG_WARN, "ui: game Vulkan device %p taken over at its swapchain: Kiln did not see it being created "
                  "(vkCreateDevice is patched by %s). %zu queue(s) known; %zu live", reinterpret_cast<void*>(dev), who,
@@ -784,6 +788,7 @@ VkResult VKAPI_CALL hk_create_swapchain(VkDevice dev, const VkSwapchainCreateInf
         usage = ci->imageUsage;
     }
     if (r != VK_SUCCESS) return r;
+    overlay_guard_stage(overlay_guard::Stage::swapchain);
     g_swapchain_count.fetch_add(1);
     std::lock_guard<std::mutex> lk(g_mu);
     if (g_devices.find(dev) == g_devices.end()) adopt_device(dev);
@@ -901,7 +906,9 @@ VkResult VKAPI_CALL hk_present(VkQueue queue, const VkPresentInfoKHR* info) {
     VkPresentInfoKHR p = *info;
     p.waitSemaphoreCount = 1;
     p.pWaitSemaphores = &wait;
-    return R.present.load()(queue, &p);
+    const VkResult result = R.present.load()(queue, &p);
+    if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR) overlay_guard_stage(overlay_guard::Stage::frame);
+    return result;
 }
 
 // Windows (Khronos loader): hand out Kiln's functions for the names it needs.
@@ -1213,6 +1220,7 @@ bool vk_install() {
     g_vulkan = vulkan.module;
     const bool wine = GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "wine_get_version") != nullptr;
     g_wine = wine;
+    overlay_guard_stage(overlay_guard::Stage::begun);
     watch_unloads();
     if (!g_input_installed) {
         g_input_installed = true;
@@ -1250,6 +1258,7 @@ bool vk_install() {
         const bool enabled = enable_hook(p);
         if (p.required) ok &= enabled;
     }
+    overlay_guard_stage(overlay_guard::Stage::hooks);
     g_installed = ok;
     if (attempted) {
         ++g_installs;

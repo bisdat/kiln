@@ -24,6 +24,7 @@
 #include "ui.h"
 #include "load_hook.h"
 #include "slider.h"
+#include "overlay_guard_runtime.h"
 #include "draw_slots.h"
 
 namespace kui {
@@ -542,6 +543,9 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
         logf(KILN_LOG_INFO, "ui: disabled by KILN_UI_DISABLE=1");
         return KILN_ERR_UNAVAILABLE;
     }
+    // Keep the guard owner alive so its unavailable capability reason survives;
+    // publish no UI tables and install no hooks, as in the environment-disable path.
+    if (overlay_guard_start()) return KILN_OK;
     try {
         const std::string data = api_path(KILN_PATH_DATA);
         if (!data.empty()) {

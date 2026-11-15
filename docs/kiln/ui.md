@@ -612,3 +612,30 @@ Kiln.Ui follows [the API contract](modding/contract.md) as far as it applies. It
   `[AnyThread]`, as their docs said.
 - **Events.** `Ui.Screens.Changed` (the game's UI thread, at once) and `ScreenChangedEvent` (the bus, tick thread, one
   step later) are two deliveries of one native callback, not two sources; both stay.
+
+## Overlay startup crash guard
+
+Before Vulkan hooks are installed, Kiln flushes a versioned record to
+`kiln/state/overlay-start.guard`. It records hooks installed, instance seen, device seen,
+swapchain created, and completes after the first successful present with the overlay drawn.
+A game that ends before that frame, however it ends, counts as an interrupted attempt (closing
+the game while it is still loading does too: the cost is one start without the overlay).
+
+On the next start the whole kiln.ui service takes the same unavailable path as
+`KILN_UI_DISABLE=1`, installing no Vulkan hooks. The `kiln.ui` capability in
+`kiln/state/capabilities.json` carries the reason. The log says:
+
+> ui: the game closed during the last start while Kiln's overlay was starting (stage: instance seen); the overlay stays off for this start
+
+The stage varies. When detected it adds:
+“NVIDIA Streamline (a frame generation mod) is installed; it wraps the same graphics calls”.
+This is a likely conflict, not proof of the crash's cause.
+
+Once a guarded start has run for a minute, the next start tries the overlay again once
+(the log says so). A second interrupted attempt at the same stage keeps it off. To re-enable it, close the
+game and delete `kiln/state/overlay-start.guard`. Removing a detected graphics wrapper
+also permits a new attempt: the guard compares presence of `sl.interposer.dll`,
+`nvngx_dlss.dll`, `dxgi.dll`, `ReShade64.dll`, `opengl32.dll`, and `powrprof.dll`, loaded
+or directly in the game folder or its `Streamline/` folder. It does not scan arbitrary
+subfolders. Unknown/unreadable records permit normal startup. File errors are logged once
+and do not prevent startup. This guard does not make Streamline and the overlay compatible.

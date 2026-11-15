@@ -11,6 +11,8 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/render_m
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/wheel_math_test.cpp" -o "$out/wheel_math_test"
 "$out/wheel_math_test"
 "$out/render_math_test"
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/overlay_guard_test.cpp" -o "$out/overlay_guard_test"
+"$out/overlay_guard_test"
 # which renderer call is the main menu's Settings entry (another module wrapping the game's call): plain logic
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/menu_site_test.cpp" -o "$out/menu_site_test"
 "$out/menu_site_test"
