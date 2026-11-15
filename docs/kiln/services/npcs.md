@@ -22,6 +22,8 @@ engine's, [docs/kiln/modding/quests.md](../modding/quests.md).
 - **Lab and offline: verified on the dedicated server** (svn 1287369): see "Verification".
 - **Seen in a real client** (joined to a lab): Tobin's topics in the game's NPC menu, his greeting's voice-over, his quest in the game's journal.
 - **Not seen yet**: map markers, notifications, the tracked-quest HUD, step counters, the NPC directory, the summon tool and beds. See "Manual test".
+- **A roster over 64 entries** (since 0.2.0-dev.29): lab-tested on the dedicated server; on a game client not seen yet
+  (guided check `17-roster-client`). See [The roster's size](#the-rosters-size-since-020-dev29).
 
 ## What needs what
 
@@ -238,13 +240,71 @@ The numbers:
 
 | Limit | Why | What happens |
 |---|---|---|
-| 64 roster NPCs in all, 35 are the game's | the unlock state is one u64 (`0xa2ef90`) | build error for the mod group |
+| 128 roster NPCs in all, 35 are the game's (64 where Kiln's second unlock page cannot be installed) | the game keeps the unlock states in one u64 per world and takes an entry's index modulo 64; Kiln keeps a second page beside it ([The roster's size](#the-rosters-size-since-020-dev29)) | build error for the mod group, with the reason |
 | 32 texts per line | the client stops the game above it (`0x460b40`) | Kiln writes one per line |
 | 8 knowledge operations per line | the server pushes at most 9, with "heard" | build error |
 | 6,050 world and 11,000 player objects (5,825 and 10,744 are the game's) | what the game reserves its run-time maps for (`0x99ead0`) | build warning; beyond it is untested. Those numbers bound entries set at run time, so this is likely softer than it looks. A quest costs 4 player objects + 3 to 5 per step + 1 per line; 256 are left before the warning. quests-sample (4 quests, 11 lines) takes 50, NpcSample 17 |
 | new Extern (named) queries | not built: step and line requirements are single objects | – |
 | template table 13,000 (12,269 used) | inline in ecs storage (`docs/re/gamedata.md`) | shared with kiln.gamedata clones; one per step with a place |
 | water | the voxel surface does not say where water is | a site can be a lake bed: name a place, or check the map |
+
+## The roster's size (since 0.2.0-dev.29)
+
+The game keeps every roster entry's unlock state in one 64-bit value per world (`NpcRegistry`): its evaluator sets bit
+`index & 63` and its query reads it the same way, so a 65th entry would share the first entry's state. Kiln keeps a
+**second page of 64** beside each world's registry: the game's own evaluator runs once per page of at most 64 entries,
+page 0 goes into the game's value as before, page 1 into Kiln's page, attached in the setter of that registry on the
+thread that evaluated it, and the game's query answers an entry at index 64 or more from that page. The audit of every
+reader of the value, on the dedicated server and the client: [docs/re/npc-roster.md](../../re/npc-roster.md).
+
+| Your mods' roster (the game's 35 included) | What runs | Capacity |
+|---|---|---|
+| no roster NPC, or 64 entries at most | nothing is hooked. Two callbacks after each world's step return at once until a mod reads the roster (below); from then on each world reads its registry's value after its step | 64 |
+| 65 to 128 entries | at the start, before any world, the three hooks go in (`quests/NpcEvalUnlocks`, `NpcRegistrySetUnlocks`, `NpcIsUnlocked`, through kiln.hooks' checked installation, which writes no byte while a thread cannot be shown to be outside them) | 128 |
+| 129 or more | refused at the start: "the roster holds at most 128 NPCs (two 64-bit unlock pages): 35 of the game's + 94 new"; none of the mods' native quests and NPCs are built (as for every build error) | 128 |
+| 65 or more where the second page is not available (feature `quests.npc_pages` did not resolve, a hook could not go in) | refused at the start with the 64 text and the reason: "… (the second unlock page is not available here: …)" | 64 |
+
+`npcs.expanded_roster` says which: available "installed" once the page is in, available "ready" while it could go in
+and nothing needs it, unavailable with the reason otherwise. An entry at index 64 or more whose page does not match
+the game's value (not computed yet, a setter that no paged evaluation came before) is never answered from the game's
+value: the game's query then gives its own "cache invalid" answer, which its only caller (`unique_npc_spawns`, the
+one-per-world rule) treats like an unlocked NPC: it is kept, not destroyed. The Survivors directory never reads the
+value: it evaluates each entry's own requirement.
+
+**Saves and other versions.** Nothing of the pages is saved: the game saves knowledge (the mods' unlock objects among
+it) and the NPC entities; the value and the pages are computed again from knowledge after every start. A world saved
+with 128 entries and loaded:
+
+- with Kiln and the same mods: as before the restart (lab: an entry on page 2 unlocked before a restart is unlocked
+  after it).
+- with an older Kiln (0.2.0-dev.28 and before: 64 at most): the build refuses the roster at the start, so none of the
+  mods' native quests and NPCs are built; their NPCs and their knowledge stay in the save as data that world cannot use,
+  as for any mod NPC without its mod.
+- without Kiln, or without the mods: the game has only its own 35 entries; the same as for any mod NPC at any roster
+  size. Not run in a game: what the vanilla game does with the unknown knowledge ids and templates in such a save.
+
+A player joining with a client that cannot install the second page (its `npcs.expanded_roster` unavailable) builds
+none of the mods' native quests and NPCs, so the mods' requirement of their clients (`clients: "mod"`) and the
+templates refuse it as for a client without the mods.
+
+**Reading the roster** (any thread, from snapshots each world publishes after its step; never a game call on your
+thread; one completed step old at most):
+
+```csharp
+RosterWorldResult w = NativeQuests.GetServerRosterWorld();      // Ok with a token, or NoWorld / NotReady
+if (w.Ok)
+{
+    NpcUnlockResult u = NativeQuests.GetUnlock(npcId, w.World!.Value);  // Ok: Unlocked, KnowledgeVersion; else WorldEnded, NotReady, UnknownNpc
+    CapacityQueryResult b = NativeQuests.GetRosterBudget(w.World!.Value); // Capacity 64 or 128, GameUsed 35, KilnUsed the mods' entries
+}
+RosterWorldResult c = NativeQuests.GetClientRosterWorld();      // a game client: its own client world's registry
+[Subscribe] void OnRoster(RosterUnlockChangedEvent e) { /* e.World, e.NpcId, e.Before, e.After, e.KnowledgeVersion */ }
+```
+
+A token is the world's kind and the core session's counter of that kind: a read with the token of a world that stopped
+answers `WorldEnded`, never the next world's state; never save or send one. Rows: `npcs.roster_read` (server world),
+`npcs.client_roster_read` (a game client), `npcs.roster_budget`, `npcs.expanded_roster`. C:
+`kiln.knowledge.roster_world`, `roster_budget`, `npc_unlock_at` ([knowledge.md](knowledge.md#c)).
 
 ## API
 

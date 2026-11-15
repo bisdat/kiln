@@ -60,7 +60,10 @@ std::mutex g_install_mu;
 std::string g_install_why;    // a failed installation
 bool g_install_failed = false;
 
+kiln::RawHook g_eval_hook, g_set_hook, g_query_hook;
+FindFn g_find = nullptr;
 Sidecars g_sidecars;
+thread_local PendingStack t_pending;
 
 Snapshots g_snaps;
 Owners g_owners;              // written once by the boot build (before any world), read on world threads
@@ -94,6 +97,95 @@ bool read_live(uintptr_t reg, LiveCache* live) {
            read_span(reg, &live->span_ptr, &live->count);
 }
 
+const uint8_t* find_guarded(uintptr_t reg, uint32_t id, bool* fault) {
+    __try {
+        return g_find(reg, id);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        *fault = true;
+        return nullptr;
+    }
+}
+
+// ---- the hooks (worker threads: a dedicated server evaluates the roster on workers once a player is in)
+Result16* hk_eval(Result16* out, void* ctx, uint16_t* seen, const Span* span) {
+    Span s{};
+    if (!span || !seen || !out || !copy_guarded(&s, span, sizeof s) || s.count <= kPage || s.count > kExpanded)
+        return g_eval_hook.call<Result16*>(out, ctx, seen, span);  // the game's own call, unchanged
+    const auto original = g_eval_hook.original<EvalFn>();
+    const PageOutcome o = eval_pages(out, ctx, seen, s, static_cast<uint64_t>(R.stride), static_cast<uint8_t>(R.eval_error),
+                                     [original](Result16* r, void* c, uint16_t* v, const Span* sp) { original(r, c, v, sp); });
+    c_paged.fetch_add(1, std::memory_order_relaxed);
+    if (o.complete) {
+        Pending p;
+        p.span_ptr = s.ptr;
+        p.count = s.count;
+        p.pages = o.pages;
+        for (uint32_t i = 0; i < kPages; ++i) p.masks[i] = o.masks[i];
+        p.version = o.version;
+        t_pending.push(p);
+    }
+    return out;
+}
+
+void hk_set(uintptr_t reg, uint64_t mask, uint16_t version) {
+    g_set_hook.call<void>(reg, mask, version);  // the game's write first, always once
+    uintptr_t ptr = 0;
+    uint64_t count = 0;
+    Pending p;
+    if (read_span(reg, &ptr, &count) && count > kPage && t_pending.take(ptr, count, mask, version, &p) && p.pages > 1) {
+        if (g_sidecars.attach(reg, p)) c_attached.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+    c_unpaired.fetch_add(count > kPage, std::memory_order_relaxed);
+    g_sidecars.invalidate(reg);  // whatever page this registry had no longer belongs to its cache
+}
+
+uint8_t* hk_query(uint8_t* out, uintptr_t reg, uint32_t id) {
+    LiveCache live;
+    bool fault = false;
+    const uint8_t* res = out && reg && g_find ? find_guarded(reg, id, &fault) : nullptr;
+    if (fault) c_faults.fetch_add(1, std::memory_order_relaxed);
+    if (!res || !read_live(reg, &live) || !live.span_ptr || reinterpret_cast<uintptr_t>(res) < live.span_ptr)
+        return g_query_hook.call<uint8_t*>(out, reg, id);  // unknown id, unreadable registry: the game's own answer
+    const uint64_t index = (reinterpret_cast<uintptr_t>(res) - live.span_ptr) / static_cast<uint64_t>(R.stride);
+    if (index < kPage || live.status != 0) return g_query_hook.call<uint8_t*>(out, reg, id);
+    const Sidecars::Bit b = g_sidecars.bit(reg, live, index);
+    uint8_t status = static_cast<uint8_t>(R.query_invalid), value = 0;
+    if (b == Sidecars::Bit::Unlocked || b == Sidecars::Bit::Locked) {
+        status = 0;
+        value = b == Sidecars::Bit::Unlocked;
+        c_answered.fetch_add(1, std::memory_order_relaxed);
+    } else {
+        c_closed.fetch_add(1, std::memory_order_relaxed);
+    }
+    // the game's ResultBool: status byte +0, dword +4 = 0, bool byte +8
+    out[0] = status;
+    std::memset(out + 4, 0, 4);
+    out[8] = value;
+    return out;
+}
+
+void place_noop(KilnRegisters&) {}
+
+// The checked installation (kiln.hooks' mid2_checked) places the physical detour, refusing before any byte is written
+// while a thread cannot be shown to be outside the replaced bytes; the raw link then joins that target, which writes no
+// game byte. A refusal is retried twice, then reported.
+bool install_one(kiln::RawHook& hook, uintptr_t target, void* fn, const char* label, std::string* why) {
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        kiln::MidHook2 placer;
+        if (placer.install_checked(g_api, g_owner, target, &place_noop, label)) {
+            const bool ok = hook.install(g_api, g_owner, target, fn, label);
+            placer.revoke();
+            if (ok) return true;
+            *why = std::string(label) + ": " + (hook.error() ? hook.error() : "the hook was refused");
+            return false;
+        }
+        *why = std::string(label) + ": " + (placer.error() ? placer.error() : "the checked installation was refused");
+        Sleep(5);
+    }
+    return false;
+}
+
 bool lab_switch_set() {
     char b[1024];
     size_t n = 0;
@@ -112,7 +204,8 @@ void report_expanded() {
     else if (g_install_failed)
         row("npcs.expanded_roster", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_FAULTED, "the roster keeps 64 entries: " + g_install_why);
     else if (g_pages_ok)
-        row("npcs.expanded_roster", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_MISSING, "the roster keeps 64 entries: the second unlock page is not in this build");
+        row("npcs.expanded_roster", KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE,
+            "ready: the second page installs when a mod's roster needs more than 64 entries (no hook before)");
     else
         row("npcs.expanded_roster", KILN_CAP_UNAVAILABLE, g_pages_reason, "the roster keeps 64 entries: " + g_pages_why);
 }
@@ -225,6 +318,7 @@ void roster_main() {
         g_pages_reason = KILN_CAP_REASON_POLICY;
     } else {
         g_pages_ok = true;
+        g_find = reinterpret_cast<FindFn>(R.find);
     }
     KilnHandle h = 0;
     g_api->subscribe_world_tick(g_owner, KILN_WORLD_SERVER, KILN_TICK_POST, &on_server_post, nullptr, &h);
@@ -252,9 +346,34 @@ void roster_ready() {
     report_expanded();
 }
 
-uint32_t roster_max(uint32_t, std::string* why) {
-    if (why) *why = g_pages_ok ? "the second unlock page is not in this build" : g_pages_why;
-    return kPage;
+uint32_t roster_max(uint32_t needed, std::string* why) {
+    std::lock_guard lock(g_install_mu);
+    if (g_limit.expanded()) return kExpanded;
+    if (!g_pages_ok || g_install_failed) {
+        if (why) *why = g_install_failed ? g_install_why : g_pages_why;
+        return kPage;
+    }
+    if (needed > kExpanded) return kExpanded;  // refused at 128 by the build: nothing to install for it
+    std::string err;
+    bool ok = install_one(g_query_hook, R.query, reinterpret_cast<void*>(&hk_query), "quests/NpcIsUnlocked", &err);
+    ok = ok && install_one(g_set_hook, R.set, reinterpret_cast<void*>(&hk_set), "quests/NpcRegistrySetUnlocks", &err);
+    ok = ok && install_one(g_eval_hook, R.eval, reinterpret_cast<void*>(&hk_eval), "quests/NpcEvalUnlocks", &err);
+    if (!ok) {
+        g_eval_hook.revoke();
+        g_set_hook.revoke();
+        g_query_hook.revoke();
+        g_install_failed = true;
+        g_install_why = "the hooks could not be installed (" + err + ")";
+        KW("roster: the second unlock page is not installed: %s; the roster keeps 64 entries", g_install_why.c_str());
+        if (why) *why = g_install_why;
+        report_expanded();
+        return kPage;
+    }
+    g_limit.expand();
+    KI("roster: a mod's roster needs %u entries: the second unlock page is installed (quests/NpcEvalUnlocks, NpcRegistrySetUnlocks, "
+       "NpcIsUnlocked); the roster holds 128", needed);
+    report_expanded();
+    return kExpanded;
 }
 
 void roster_built(std::vector<uint32_t> boot_ids, std::vector<uint32_t> kiln_ids) {
