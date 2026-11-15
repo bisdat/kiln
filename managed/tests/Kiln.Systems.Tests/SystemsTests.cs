@@ -122,6 +122,110 @@ public sealed unsafe class SystemsTests
     }
 
     [Fact]
+    public void Filters_run_under_the_slice_guard_and_mod_context()
+    {
+        using var w = new FakeWorld();
+        var mod = NewMod("filter-owner");
+        var guarded = false;
+        ModContext? caller = null;
+        var wrap = InMod(mod, () => Systems.Wrap("fuel_setup").Wrap!);
+        wrap.When(_ =>
+        {
+            caller = ModContext.CurrentMod;
+            try { Services.RequireTickThread("filter"); }
+            catch (InvalidOperationException) { guarded = true; }
+            return true;
+        }).Before((ref Slice s) => { });
+        w.Call(w.Wraps[0]);
+        Assert.True(guarded);
+        Assert.Same(mod, caller);
+        Services.RequireTickThread("after filter");
+    }
+
+    [Fact]
+    public void A_throwing_Replace_filter_disables_the_stage_and_runs_the_original()
+    {
+        using var w = new FakeWorld();
+        var wrap = Systems.Wrap("fuel_setup").Wrap!.When(_ => throw new FormatException("filter"));
+        WrapDisabledEvent? disabled = null;
+        wrap.Disabled += e => disabled = e;
+        wrap.Replace((ref Slice s) => { });
+        w.Call(w.Wraps[0]);
+        Assert.Equal(1, w.OriginalRuns);
+        Assert.True(w.Wraps[0].Gone);
+        Assert.NotNull(disabled);
+        Assert.Equal(1, wrap.Stats.Faults);
+    }
+
+    [Theory]
+    [InlineData(SystemsNative.Unavailable)]
+    [InlineData(SystemsNative.Internal)]
+    public void A_failed_mark_refuses_the_write(int result)
+    {
+        using var w = new FakeWorld();
+        w.MarkResult = result;
+        var wrap = Systems.Wrap("fuel_setup").Wrap!;
+        wrap.BeforeEach((ref EntityView e) => e.Write<FuelBlock>("Fuel").Current = 7);
+        w.Call(w.Wraps[0]);
+        Assert.Equal(100, *(int*)(w.Fuel + 8));
+        Assert.True(w.Wraps[0].Gone);
+        Assert.Equal(1, wrap.Stats.Faults);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void An_unknown_component_size_refuses_access(bool write)
+    {
+        using var w = new FakeWorld();
+        w.FuelSize = 0;
+        var returned = false;
+        var wrap = Systems.Wrap("fuel_setup").Wrap!;
+        wrap.BeforeEach((ref EntityView e) =>
+        {
+            if (write) e.Write<Big>("Fuel");
+            else e.Read<Big>("Fuel");
+            returned = true;
+        });
+        w.Call(w.Wraps[0]);
+        Assert.False(returned);
+        Assert.True(w.Wraps[0].Gone);
+    }
+
+    [Fact]
+    public void A_faulted_stage_retries_unwrap_on_tick_when_native_refuses_it_inside_the_slice()
+    {
+        using var w = new FakeWorld();
+        w.RefuseUnwrapInSlice = true;  // production game_program_unwrap checks t_in_slice
+        var calls = 0;
+        var wrap = Systems.Wrap("fuel_setup").Wrap!;
+        wrap.Before((ref Slice s) => { calls++; throw new FormatException("stage"); });
+        w.Call(w.Wraps[0]);
+        w.Call(w.Wraps[0]);
+        Assert.Equal(1, calls);  // managed admission closes immediately
+        Assert.False(w.Wraps[0].Gone);
+        ProgramWrap.Poll();
+        Assert.True(w.Wraps[0].Gone);  // native chain can now release its handle and Replace reservation
+        Assert.Equal(WrapState.Removed, wrap.State);
+    }
+
+    [Fact]
+    public void A_timed_out_retirement_keeps_polling_until_native_removal()
+    {
+        using var w = new FakeWorld();
+        var wrap = Systems.Wrap("fuel_setup").Wrap!.Before((ref Slice s) => { });
+        var stage = Assert.Single(Systems.Live.Keys);
+        stage.Forget(false);  // unload's two-second drain timed out
+        Assert.Contains(stage, Systems.Live.Keys);
+        w.Wraps[0].State = SystemsNative.Removed;  // the next native Pre removes the retired stage
+        ProgramWrap.Poll();
+        Assert.DoesNotContain(stage, Systems.Live.Keys);
+        var self = (GCHandle)typeof(ManagedStage).GetField("_self", System.Reflection.BindingFlags.NonPublic |
+            System.Reflection.BindingFlags.Instance)!.GetValue(stage)!;
+        Assert.False(self.IsAllocated);
+    }
+
+    [Fact]
     public void A_second_Replace_is_refused_naming_the_mod_that_holds_it()
     {
         using var w = new FakeWorld();
@@ -427,6 +531,26 @@ public sealed unsafe class SystemsTests
         Systems.Wrap("fuel_setup").Wrap!.When(i => { info = i; return true; }).After((ref Slice s) => { });
         w.Call(w.Wraps[^1], worldThread: 0);
         Assert.Equal(new SliceInfo("fuel_setup", WorldKind.Server, 3, 77, false, 0x7000), info);
+    }
+
+    [Fact]
+    public void WhenArchetype_publishes_both_lists_and_its_cache_together()
+    {
+        using var w = new FakeWorld();
+        var ran = 0;
+        var wrap = Systems.Wrap("fuel_setup").Wrap!.Before((ref Slice s) => ran++);
+        w.LayoutHas.Add(Hash("Fuel"));
+        IEnumerable<string> Lacks()
+        {
+            // A slice can enter while the tick thread enumerates the new filter's second list.
+            w.Call(w.Wraps[0]);
+            yield return "Health";
+        }
+        wrap.WhenArchetype(["Fuel"], Lacks());
+        Assert.Equal(1, ran);  // sees the old (unfiltered) configuration until publication
+        Assert.False(w.Wraps[0].Gone);
+        w.Call(w.Wraps[0]);
+        Assert.Equal(2, ran);
     }
 
     private static uint Hash(string name)

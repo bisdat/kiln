@@ -72,8 +72,12 @@ public sealed unsafe class ProgramWrap : IDisposable
     private readonly List<ManagedStage> _stages = new();
     private readonly object _lock = new();
     private Func<SliceInfo, bool>? _when;
-    private uint[]? _has, _lacks;
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<nint, bool> _archetypes = new();
+    private sealed class ArchetypeFilter(uint[] has, uint[] lacks)
+    {
+        internal readonly uint[] Has = has, Lacks = lacks;
+        internal readonly System.Collections.Concurrent.ConcurrentDictionary<nint, bool> Cache = new();
+    }
+    private ArchetypeFilter? _archetype;
     private bool _disposed;
 
     internal ProgramWrap(string program, WrapOptions options, ModContext? mod)
@@ -151,7 +155,7 @@ public sealed unsafe class ProgramWrap : IDisposable
     public ProgramWrap When(Func<SliceInfo, bool> filter)
     {
         ArgumentNullException.ThrowIfNull(filter);
-        _when = filter;
+        Volatile.Write(ref _when, filter);
         return this;
     }
 
@@ -161,9 +165,8 @@ public sealed unsafe class ProgramWrap : IDisposable
     public ProgramWrap WhenArchetype(IEnumerable<string> has, IEnumerable<string>? lacks = null)
     {
         ArgumentNullException.ThrowIfNull(has);
-        _has = Hashes(has);
-        _lacks = lacks is null ? [] : Hashes(lacks);
-        _archetypes.Clear();
+        var filter = new ArchetypeFilter(Hashes(has), lacks is null ? [] : Hashes(lacks));
+        Volatile.Write(ref _archetype, filter);
         return this;
     }
 
@@ -277,30 +280,37 @@ public sealed unsafe class ProgramWrap : IDisposable
     // The filters, per slice: When on every call, WhenArchetype cached per archetype.
     internal bool Accepts(SystemsNative.Slice* s)
     {
-        if (_has is null && _when is null) return true;
+        var archetype = Volatile.Read(ref _archetype);
+        var when = Volatile.Read(ref _when);
+        if (archetype is null && when is null) return true;
         nint layout = 0;
         var t = SystemsNative.T;
-        if (t != null && (_has is not null || _when is not null))
+        if (t != null && (archetype is not null || when is not null))
         {
             nuint l = 0;
             if (t->GameSliceArchetype(s, &l) == SystemsNative.Ok) layout = (nint)l;
         }
-        if (_has is not null)
+        if (archetype is not null)
         {
             if (layout == 0 || t == null) return false;
-            if (!_archetypes.TryGetValue(layout, out var ok))
+            if (!archetype.Cache.TryGetValue(layout, out var ok))
             {
                 ok = true;
-                foreach (var h in _has) ok &= t->GameArchetypeHas((uint)World, (nuint)layout, h) == 1;
-                foreach (var h in _lacks!) ok &= t->GameArchetypeHas((uint)World, (nuint)layout, h) == 0;
-                _archetypes.TryAdd(layout, ok);
+                foreach (var h in archetype.Has) ok &= t->GameArchetypeHas((uint)World, (nuint)layout, h) == 1;
+                foreach (var h in archetype.Lacks) ok &= t->GameArchetypeHas((uint)World, (nuint)layout, h) == 0;
+                archetype.Cache.TryAdd(layout, ok);
             }
             if (!ok) return false;
         }
-        return _when is null || _when(new SliceInfo(Program, World, (int)s->Count, s->Step, s->ThreadIsWorld != 0, layout));
+        return when is null || when(new SliceInfo(Program, World, (int)s->Count, s->Step, s->ThreadIsWorld != 0, layout));
     }
 
-    internal void ForgetArchetypes() => _archetypes.Clear();
+    internal void ForgetArchetypes()
+    {
+        var filter = Volatile.Read(ref _archetype);
+        if (filter is not null)
+            Interlocked.CompareExchange(ref _archetype, new ArchetypeFilter(filter.Has, filter.Lacks), filter);
+    }
 
     internal void OnDisabled(WrapDisabledEvent e)
     {
@@ -453,15 +463,20 @@ internal sealed unsafe class ManagedStage
     {
         Removing = true;
         var t = SystemsNative.T;
-        if (t != null && Handle != 0) t->GameProgramUnwrap(Handle);
+        if (t != null && Handle != 0 && t->GameProgramUnwrap(Handle) == SystemsNative.WrongThread)
+            ProgramWrap.PostToTick(Unwrap);  // native forbids removal inside a slice; Removing already closes managed admission
     }
 
     internal void Forget(bool idle)
     {
         Removing = true;
         _state = WrapState.Removed;
-        Systems.Live.TryRemove(this, out _);
-        if (idle && _self.IsAllocated) _self.Free();
+        if (idle)
+        {
+            Systems.Live.TryRemove(this, out _);
+            if (_self.IsAllocated) _self.Free();
+        }
+        // A timed-out unload retains the handle and stays polled until native removal and running == 0.
     }
 
     // Tick thread: the native state, a stage kiln.world turned off, a handle no call can use any more.
@@ -536,17 +551,17 @@ internal sealed unsafe class ManagedStage
     {
         var replace = Kind == WrapStage.Replace;
         var mod = Wrap.Mod;
-        if (_disabled != 0 || Removing || mod is { Alive: false } || !Wrap.Accepts(s))
-        {
-            if (replace) RunOriginalQuietly(s);  // this slice is the game's
-            return;
-        }
         var previous = ModContext.CurrentMod;
         SliceGuard.Depth++;
         OriginalCalled = false;
         try
         {
             ModContext.CurrentMod = mod;
+            if (_disabled != 0 || Removing || mod is { Alive: false } || !Wrap.Accepts(s))
+            {
+                if (replace) RunOriginalQuietly(s);  // this slice is the game's
+                return;
+            }
             if (PerEntity) Iterate(s);
             else
             {

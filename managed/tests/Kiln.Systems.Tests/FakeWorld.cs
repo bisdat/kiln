@@ -36,6 +36,9 @@ internal sealed unsafe class FakeWorld : IDisposable
     internal readonly byte* Registry = (byte*)NativeMemory.AllocZeroed(8);
     internal readonly List<(ulong Row, int List, int Index)> Marks = new();
     internal int AttrCalls;
+    internal bool RefuseUnwrapInSlice;
+    internal int MarkResult = SystemsNative.Ok;
+    internal uint FuelSize = 16;
     internal bool NoRegistry;  // fuel_setup does not declare impact::AttributeRegistry
     internal ulong StepNow = 77;  // the step a fake slice says
     internal int IterateResult = SystemsNative.Ok;  // what game_slice_iterate answers (Unavailable: a build that cannot iterate)
@@ -193,7 +196,7 @@ internal sealed unsafe class FakeWorld : IDisposable
         switch (list)
         {
             case SystemsNative.ListWrite when i == 0:
-                *size = 16;
+                *size = F.FuelSize;
                 return F.Fuel + 16 * row;
             case SystemsNative.ListReadOpt when i == 0:
                 *size = 8;
@@ -210,6 +213,7 @@ internal sealed unsafe class FakeWorld : IDisposable
     private static int Mark(SystemsNative.Slice* s, ulong* iter, int list, int i)
     {
         if (list is not (SystemsNative.ListWrite or SystemsNative.ListWriteOpt)) return SystemsNative.InvalidArgument;
+        if (F.MarkResult != SystemsNative.Ok) return F.MarkResult;
         F.Marks.Add((*iter, list, i));
         return SystemsNative.Ok;
     }
@@ -246,6 +250,7 @@ internal sealed unsafe class FakeWorld : IDisposable
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int Unwrap(ulong h)
     {
+        if (F.RefuseUnwrapInSlice && SliceGuard.Depth > 0) return SystemsNative.WrongThread;
         var w = F.Wraps.FirstOrDefault(x => x.Handle == h);
         if (w is null) return SystemsNative.NotFound;
         w.Gone = true;

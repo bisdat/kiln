@@ -101,7 +101,9 @@ public unsafe ref struct EntityView
             throw new InvalidOperationException(list is SystemsNative.ListTplOpt or SystemsNative.ListReadOpt or SystemsNative.ListWriteOpt
                 ? $"{Entity} has no {component} (an optional component of {_ctx.Program}): ask Has first"
                 : $"{_ctx.Program}: kiln.world has no slot for {component} on this build (kiln.log says why)");
-        if (reflected != 0 && want > reflected)
+        if (reflected == 0)
+            throw new InvalidOperationException($"{component}: its size is not known on this build; access is unsafe");
+        if (want > reflected)
             throw new InvalidOperationException($"{component} is {reflected} bytes on this build; the layout asked is {want}");
         size = reflected != 0 ? (int)reflected : want;
         if (write) _ctx.Touch(t, _slice, _iter, _entity, list, index, p, size, component);
@@ -313,6 +315,8 @@ internal sealed unsafe class ViewContext
         var rc = t->GameSliceMark(s, iter, list, index);
         if (rc == SystemsNative.InvalidArgument)
             throw new InvalidOperationException($"{Program}: {component} is not one of its write slots");
+        if (rc != SystemsNative.Ok)
+            throw new InvalidOperationException($"{Program}: {component} could not be marked for save and replication (result {rc})");
         if (_count == _recs.Length) Array.Resize(ref _recs, _count * 2);
         var at = _used;
         if (_track)
