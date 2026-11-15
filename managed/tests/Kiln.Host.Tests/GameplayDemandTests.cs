@@ -107,16 +107,31 @@ public sealed unsafe class GameplayDemandTests : ModsFixture
         finally { NativeMemory.Free(table); _host=null; }
     }
 
-    [Fact]
-    public void Data_only_blocks_prearm_their_declarative_gameplay_consumers()
+    [Theory]
+    [InlineData("blocks",15u)]
+    [InlineData("quests",7u)]
+    public void Data_only_folders_prearm_their_declarative_gameplay_consumers(string folder,uint expected)
     {
         var host=new FakeHost(); _host=host; _groups=0;
         var dir=WriteManifest("data", """{"id":"data","version":"1.0.0","apiVersion":"0.2"}""");
-        Directory.CreateDirectory(Path.Combine(dir,"blocks"));
+        Directory.CreateDirectory(Path.Combine(dir,folder));
         var table=(byte*)NativeMemory.AllocZeroed(144); *(uint*)table=144; *(uint*)(table+4)=1;
         *(nint*)(table+136)=(nint)(delegate* unmanaged[Cdecl]<ulong,uint,int>)&RequestGroups;
         host.Services["kiln.gameplay"]=(nint)table;
-        try { using var mods=NewManager(host); mods.PrepareGameplayHooks(); Assert.Equal(15u,_groups); }
+        try { using var mods=NewManager(host); mods.PrepareGameplayHooks(); Assert.Equal(expected,_groups); }
+        finally { NativeMemory.Free(table); _host=null; }
+    }
+
+    [Fact]
+    public void Unreadable_helper_conservatively_prearms_all_groups_without_aborting_start()
+    {
+        var host=new FakeHost(); _host=host; _groups=0;
+        InstallHello();
+        File.WriteAllBytes(Path.Combine(ModsDir,"hello","BrokenHelper.dll"), [1,2,3]);
+        var table=(byte*)NativeMemory.AllocZeroed(144); *(uint*)table=144; *(uint*)(table+4)=1;
+        *(nint*)(table+136)=(nint)(delegate* unmanaged[Cdecl]<ulong,uint,int>)&RequestGroups;
+        host.Services["kiln.gameplay"]=(nint)table;
+        try { using var mods=NewManager(host); mods.PrepareGameplayHooks(); Assert.Equal(31u,_groups); }
         finally { NativeMemory.Free(table); _host=null; }
     }
 

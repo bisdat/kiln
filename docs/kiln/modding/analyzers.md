@@ -379,7 +379,9 @@ thread) or in `Client.Post` work. Elsewhere it throws `InvalidOperationException
 runs off the game's threads (`Task.Run`, threads, timers, thread-pool callbacks, after `await ...ConfigureAwait(false)`),
 when the world is a constant. Not reported: the tick thread (in `OnLoad` it is the main thread), though on a host the
 server's tick thread (`Scheduler.Post`, a reload's `OnLoad`) is not the main thread: there, too, post it with
-`Client.Post`. [services/world.md](../services/world.md#client-world-programs-since-020-dev29).
+`Client.Post`. A world argument that is not a constant (a variable, a field, a parameter) is not seen: the rule cannot
+tell a client bind from a server one there and does not report it; off the game's threads KILN101 reports such a call
+as it does a server bind (whose thread is the tick thread), and at run time the call throws off its world's thread. [services/world.md](../services/world.md#client-world-programs-since-020-dev29).
 
 <a id="kiln108"></a>
 ## KILN108: Kiln service not listed in KilnServices

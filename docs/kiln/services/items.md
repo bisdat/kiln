@@ -397,15 +397,15 @@ What a player sees is the guided checks `items.equip` and `items.unequip` (mods/
 ## Equipment sets (v6, since 0.2.0-dev.29)
 A player's 20 equipment slots changed in **one inventory transaction**: every slot a set names changes, or none does,
 with one exception, `InvariantFailure`: the game's transaction left the inventory neither as asked nor as before, or the
-game faulted inside it (then the inventory may be in an unknown state, and sets and single equips go off until the server
-restarts; "The transaction" below).
+game faulted inside it (then the inventory may be in an unknown state, and sets and single equips go off until the server,
+or the hosting player's game, restarts; "The transaction" below).
 `Items.CaptureSet` reads what a player wears as an `EquipmentSet`, a mod builds a subset (or keeps the capture),
 `Items.PlanSet` checks it against a snapshot taken now, and `Items.EquipSet` applies it: one request, one
 `PlayerEquippingEvent` for the whole set, one transaction inside `kiln_items_equip`, one result. Capability
 `items.equip_sets` (sigdb feature of the same name over the game's equip functions and the commit's own rollback
 guards; Kiln.Items lowers it when the table is older than v6, `items.equip` or `items.instances` is off, kiln.decisions or
 kiln.window_clock is not here, this build's component layouts are not the ones the snapshot reads, or kiln.items switched
-sets off after an invariant failure, until the server restarts). Chapter 10 of the dev.28 dossier is the contract.
+sets off after an invariant failure, until the server, or the hosting player's game, restarts). Chapter 10 of the dev.28 dossier is the contract.
 
 ```csharp
 EquipmentSetCaptureResult day = Items.CaptureSet(player);         // all 20 slots, empty ones as EmptyEquipment
@@ -423,7 +423,7 @@ using var plan = Items.PlanSet(player, rings).Plan;              // the steps, w
 | `Items.EquipSet(plan, options)` → `Task<EquipmentSetResult>` | `[ServerOnly][TickThreadOnly]` | the plan's set against the plan's snapshot (used up: a plan applies once) |
 | `EquipmentSetResult` (`IKilnResult`) | value | `Status`, `Reason` (it starts with its code: `NoRoom: ...`), `Player`, `Ticket`, `Decision`, `DryRun`, `Committed`, `MayHaveMutated`, `FailedOperation`, `GameError`, `Changes` (one `EquipmentSlotChange` per slot a commit changed) |
 | `EquipmentSetChangedEvent` (`Player`, `Ticket`, `Outcome`, `Changes`) | `[ServerOnly][TickThreadOnly]` | once per committed set, when its result arrives, also when the asking mod unloaded first; not for a dry run, a refusal or a cancel |
-| `EquipmentSetFaultedEvent` (`Result`) | `[ServerOnly][TickThreadOnly]` | an invariant failure: the inventory is neither as asked nor as before, or the game faulted (`MayHaveMutated`: it may be in an unknown state); sets and single equips are off until the server restarts. Posted after an `EquipmentSetChangedEvent` of the same ticket when the changes could still be read: the two are not exclusive (chapter 10 §4.4 asks for both) |
+| `EquipmentSetFaultedEvent` (`Result`) | `[ServerOnly][TickThreadOnly]` | an invariant failure: the inventory is neither as asked nor as before, or the game faulted (`MayHaveMutated`: it may be in an unknown state; without it, a fault in a read before the transaction, nothing was changed); sets and single equips are off until the server, or the hosting player's game, restarts, other item calls still run. Posted after an `EquipmentSetChangedEvent` of the same ticket when the changes could still be read: the two are not exclusive (chapter 10 §4.4 asks for both) |
 | `EquipmentSetJson.Serialize(set)` / `Deserialize(json)` | any | the session JSON (schema 1): a round trip for this session and for logs, never a saved loadout |
 
 | `EquipmentSetStatus` | `Ok` | Means |
@@ -436,7 +436,7 @@ using var plan = Items.PlanSet(player, rings).Plan;              // the steps, w
 | `Refused` | no | refused before or during the transaction (`NoRoom`, `UnsupportedCycle`, `UnsupportedBackpack`, `OmittedSlotWouldChange`, `StackMerge`, `SlotType`, `NotHere`, `SnapshotBudgetExceeded`, the game refused a step: `FailedOperation`, `GameError`); after a transaction it was rolled back and compared equal |
 | `CommitRolledBack` | no | the game's commit rolled the transaction back by itself; compared equal to the snapshot |
 | `Dropped` | no | never ran: the world stopped, the asking mod unloaded before it ran, it waited 250 steps |
-| `InvariantFailure` | no | neither as asked nor as before, or the game faulted inside it: `MayHaveMutated`; sets go off until the server restarts |
+| `InvariantFailure` | no | neither as asked nor as before, or the game faulted inside it (`MayHaveMutated`) or in a read before it (nothing changed); sets and equips go off until the server, or the hosting player's game, restarts |
 | `Unavailable` | no | sets went off after the call was accepted |
 
 The one error rule: a bad argument (`ArgumentException`): a null or zero scope, a null entry or selection, a slot named
@@ -489,17 +489,28 @@ The rules (chapter 10 §4.2-4.5):
   program update: the canonical snapshot, and every byte of the seven components the program declares (Fuel,
   Inventory, InventoryEmptyState, InventorySetup, ItemState, OwnerRelationship, SlotSelection) of the player, every
   setup node, every inventory and every item entity, read before the transaction opened; a difference in either (an
-  item's fuel, its level or rarity byte, an empty-state flag) is `InvariantFailure`. After a commit: every named slot as
-  asked, every slot left out as it was, and every stack, item entity, stamp, owner, the tree and the action bars
-  conserved (an item may move). A mismatch or a fault: `InvariantFailure`, sets (and equip) go off; nothing is repaired.
+  item's fuel, its level or rarity byte, an empty-state flag) is `InvariantFailure`. A part this build's program does not
+  declare is not compared (it cannot write it either): kiln.log says which once, at the first set, and the capability
+  row's text carries it; a component that cannot be read whole before the transaction refuses the set before anything
+  changes, and one readable before and not after the rollback is `InvariantFailure`. Durability, level and perks are
+  other components (Durability, Level, PerkContainer), which the program cannot write; Kiln does not compare them (the
+  lab's rollback series did). After a set that succeeded: every named slot as asked, every slot left out as it was, and
+  every stack, item entity, stamp and owner, the tree and the action bars conserved (an item may move); nothing else is
+  compared after a commit. A mismatch or a fault: `InvariantFailure`, sets (and equip) go off; nothing is repaired.
 - **A fault inside the transaction is not rolled back.** The game's rollback replays the operations its transaction
   recorded; a structured exception inside its equip, unequip or commit may have left that record half written, so asking
   for a rollback could undo a write that never happened or miss one that did. No lab probe has shown the rollback safe
   after a fault (the dev.28 dossier proved commit and rollback for staged equips only), so kiln.items stops: no further
   engine call, no read, no free. The result is `InvariantFailure` with `MayHaveMutated` and a reason that says the
   inventory may be in an unknown state; `EquipmentSetFaultedEvent` carries it; kiln.log has an error line with the
-  player, the server step and the set's step; the capability row `items.equip_sets` keeps that reason until the server
-  restarts, and single equips are off too.
+  player, the server step and the set's step; the capability row `items.equip_sets` keeps that reason until the server,
+  or the hosting player's game, restarts (on a hosted world the process is the game), and single equips are off too. A
+  fault in one of the set's reads before the transaction opened is reported the same way (the event, the log line, sets
+  and equips off), without `MayHaveMutated`: nothing was changed.
+- **What stays on after a fault.** Moves, gives, takes and fuel writes (`Items.Move`, `Give`, `Take`, `Items.Fuel`) keep
+  running after an "unknown state" fault: the player can still move their own items by hand, and Kiln's own jobs are no
+  riskier than that (owner's decision, 2026-11-15). The reason text says so ("sets and equips are off ...; other item
+  calls still run").
 - **Order.** FIFO by request with the player's single `Equip`/`Unequip` requests (setorder.h, host test
   `setorder_test.cpp`): at most one set per player and step, and only the player's oldest set (a later set that is ready
   waits for an earlier one still being decided); a single request waits for every set of the player asked before it; a

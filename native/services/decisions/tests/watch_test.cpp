@@ -687,6 +687,34 @@ static void test_world_stop() {
 
 // A watch that ends takes its undelivered records with it: a later watch (the same mod loaded again) is never told of a
 // change from before it existed, for a watch that is gone.
+// A batch the consumer froze and did not acknowledge when the world stops: dropped with the world (its id is not
+// readable or ackable after), and nothing of it reaches the next world's watch.
+static void test_world_stop_frozen() {
+    Run r;
+    r.w.entity(2000);
+    r.w.put(2000, KILN_WATCH_HEALTH, bytes40(1));
+    r.watch({2000}, 1);
+    r.tick();
+    r.tick([&] { r.w.set_byte(2000, 1, 0, 2); });
+    uint64_t batch = 0;
+    uint32_t n = 0;
+    CHECK(r.c.begin_events(r.host, &batch, &n) == KILN_OK && batch != 0 && n == 1);  // frozen, neither read nor acked
+    const auto gone = r.c.world_stopped("the server world stopped");
+    CHECK(gone.frames == 1 && gone.records == 1);
+    std::vector<KilnComponentChangeV1> buf(1);
+    uint32_t req = 0;
+    CHECK(r.c.read_events(r.host, batch, buf.data(), 1, sizeof(KilnComponentChangeV1), &req) == KILN_ERR_NOT_FOUND);
+    CHECK(r.c.ack_events(r.host, batch) == KILN_ERR_NOT_FOUND);
+    r.epoch = 2;
+    r.w.sess = 8;
+    const uint64_t next = r.watch({2000}, 1);
+    r.tick();
+    r.tick([&] { r.w.set_byte(2000, 1, 0, 3); });
+    const auto ch = r.drain();
+    CHECK(ch.size() == 1 && ch[0].watch_count == 1 && ch[0].watches[0] == next && ch[0].before[0] == 2 && ch[0].after[0] == 3 &&
+          ch[0].world_epoch == 2);
+}
+
 static void test_ended_watch_records() {
     Run r;
     r.w.entity(2000);
@@ -1036,6 +1064,107 @@ static void test_writer_filter() {
     CHECK(r.c.watched(2000) == 0);
 }
 
+static void test_closing_roots_and_frozen() {
+    for (uint32_t scope : {KILN_WATCH_SCOPE_ENTITIES, KILN_WATCH_SCOPE_PLAYERS}) {
+        Run r;
+        r.w.entity(2000); r.w.in_game = {2000};
+        r.w.link(2000, {{3000, 4}}); r.w.stacks(3000, {});
+        const auto id = r.watch(scope == KILN_WATCH_SCOPE_ENTITIES ? std::vector<uint32_t>{2000} : std::vector<uint32_t>{},
+                                bit(KILN_WATCH_INVENTORY), 1, nullptr, scope);
+        r.tick();
+        r.tick([&] { r.w.entity(2000, 9999); r.w.stacks(3000, {{7, 1, 0}}); });
+        CHECK(status_of(r, id) == KILN_WATCH_SUSPENDED_METADATA);
+        CHECK(r.drain().empty());
+    }
+    Run r;
+    r.w.entity(2000); r.w.put(2000, 1, bytes40(1));
+    auto a = r.watch({2000}, 1), b = r.watch({2000}, 1);
+    r.tick(); r.tick([&] { r.w.put(2000, 1, bytes40(2)); });
+    uint64_t batch = 0; uint32_t count = 0, required = 0;
+    CHECK(r.c.begin_events(r.host, &batch, &count) == KILN_OK && count == 1);
+    r.c.remove(r.mod, a);
+    KilnComponentChangeV1 record{};
+    CHECK(r.c.read_events(r.host, batch, &record, 1, sizeof record, &required) == KILN_OK &&
+          required == 1 && record.watch_count == 1 && record.watches[0] == b);
+    r.c.remove(r.mod, b);
+    CHECK(r.c.read_events(r.host, batch, &record, 1, sizeof record, &required) == KILN_OK && required == 0);
+    KilnComponentChangesCountersV1 counters{}; counters.size = sizeof counters; r.c.counters(&counters);
+    CHECK(counters.queued_records == 0 && counters.queued_frames == 0);
+    CHECK(r.c.ack_events(r.host, batch) == KILN_OK);
+}
+
+static void test_filter_lifecycle_and_growth_order() {
+    Run r;
+    r.w.entity(2000); r.w.link(2000, {{2100, 5}}); r.w.link(2100, {{2200, 4}});
+    r.w.stacks(2200, {});
+    auto id = r.watch({2000}, bit(4) | bit(5), 1);
+    r.tick();
+    CHECK((r.c.watched(2200) & bit(5)) != 0);
+    r.w.put(2300, 4, bytes40(1));
+    r.tick([&] { r.w.stacks(2200, {{7, 1, 2300}}); });
+    r.drain(); // item first enters the plan and gets its baseline at the following begin
+    r.tick([&] {
+        CHECK((r.c.watched(2300) & bit(4)) != 0);
+        r.write(2300, 4, bytes40(1), bytes40(2), "writer"); r.w.put(2300, 4, bytes40(2));
+    });
+    auto changes = r.drain();
+    CHECK(changes.size() == 1 && changes[0].origin == KILN_CHANGE_ORIGIN_KILN);
+    r.w.link(2100, {{2000, 5}}); r.tick();
+    CHECK(status_of(r, id) == KILN_WATCH_SUSPENDED_METADATA);
+    r.w.link(2100, {{2200, 4}});
+    KilnComponentWatchStatusV1 st{};
+    CHECK(r.c.resume(r.mod, id, r.step, &st) == KILN_OK && st.status == KILN_WATCH_READY);
+    r.tick([&] { CHECK((r.c.watched(2200) & bit(5)) && (r.c.watched(2300) & bit(4))); });
+
+    // Force a hash collision with different component bits; dropping one watch
+    // must not clear the other entity's bit in the shared slot.
+    Run collision;
+    const uint32_t first = 2000;
+    auto slot = [](uint32_t e) { return (e * 0x9E3779B1u) >> 16; };
+    uint32_t second = first + 1;
+    while (slot(second) != slot(first)) ++second;
+    collision.w.entity(first); collision.w.entity(second);
+    collision.w.put(first, 1, bytes40(1)); collision.w.put(second, 4, bytes40(1));
+    auto ca = collision.watch({first}, bit(1));
+    collision.watch({second}, bit(4)); collision.tick();
+    CHECK((collision.c.watched(first) & (bit(1) | bit(4))) == (bit(1) | bit(4)));
+    CHECK((collision.c.watched(second) & bit(4)) != 0);
+    collision.c.remove(collision.mod, ca); collision.tick();
+    CHECK((collision.c.watched(second) & bit(4)) != 0);
+    collision.w.entity(first, 9999);
+    collision.watch({first}, bit(2)); collision.tick();
+    CHECK((collision.c.watched(first) & bit(2)) != 0 && (collision.c.watched(second) & bit(4)) != 0);
+
+    Run g;
+    for (uint32_t at = 0; at < 1023; at += 128) {
+        std::vector<uint32_t> roots;
+        for (uint32_t k = at; k < std::min(1023u, at + 128); ++k) {
+            auto e = 10000 + k; roots.push_back(e); g.w.entity(e);
+            for (uint32_t c = 1; c <= 4; ++c) g.w.put(e, c, bytes40(1));
+        }
+        CHECK(g.watch(roots, 15) != 0);
+    }
+    g.w.entity(2000); g.w.put(2000, 1, bytes40(1));
+    g.w.entity(3000); g.w.put(3000, 1, bytes40(1));
+    auto bad = g.watch({2000}, 1), later = g.watch({3000}, 15);
+    g.tick();
+    g.tick([&] {
+        g.w.entity(2000, 9999); g.w.put(2000, 1, bytes40(9));
+        for (uint32_t c = 2; c <= 4; ++c) {
+            CHECK((g.c.watched(3000) & bit(c)) != 0); // absent pairs also need tokens on appearance
+            g.w.put(3000, c, bytes40(2));
+        }
+    });
+    CHECK(status_of(g, bad) == KILN_WATCH_SUSPENDED_METADATA && status_of(g, later) == KILN_WATCH_READY);
+    auto result = g.drain(); CHECK(result.size() == 3);
+    g.tick(); CHECK(status_of(g, later) == KILN_WATCH_READY && g.drain().empty());
+    g.w.entity(4000);
+    auto exchange = g.watch({4000}, bit(3)); // absent and therefore free at admission
+    g.tick([&] { g.w.comps.erase({10000, 4}); g.w.put(4000, 3, bytes40(2)); });
+    CHECK(status_of(g, exchange) == KILN_WATCH_READY && status_of(g, later) == KILN_WATCH_READY);
+    result = g.drain(); CHECK(result.size() == 2); // one disappearance, one appearance, still exactly 4096 present
+}
+
 static void test_typed() {
     Run r;
     r.w.entity(2000);
@@ -1111,6 +1240,7 @@ int main() {
     test_world_stop();
     test_owners();
     test_ended_watch_records();
+    test_world_stop_frozen();
     test_players();
     test_links();
     test_dynamic_budget();
@@ -1119,6 +1249,8 @@ int main() {
     test_end_reads_once();
     test_writer_filter();
     test_steady();
+    test_closing_roots_and_frozen();
+    test_filter_lifecycle_and_growth_order();
     test_typed();
     test_stop();
     test_origin_rule();

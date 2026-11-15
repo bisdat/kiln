@@ -718,11 +718,12 @@ void KILN_CALL on_ready(void*) {
     const bool use_installed = prefer_installed(kiln_dir);
     set_status("useInstalled", use_installed);
     if (const std::string other = sf_in_process(); !other.empty()) {
-        logf(KILN_LOG_INFO, "ShroudForge already runs in this process (%s, started by its own dbghelp.dll): it hosts "
-                            "its mods itself next to Kiln; kiln-shroudforge stays out of the way",
+        static std::atomic<bool> reported{false};
+        if (!reported.exchange(true)) logf(KILN_LOG_INFO, "shroudforge: its own loader (%s) runs it; Kiln's profile does not decide ShroudForge mods this start",
              other.c_str());
+        set_status("loaderFile", other);
         set_status("source", "installed");
-        return finish("self-hosted", "ShroudForge's own bootstrap runs (" + other + ")");
+        return finish("self-hosted", "ShroudForge's own loader (" + other + ") runs it; Kiln's profile does not decide ShroudForge mods this start");
     }
     if (!bundled.present && !installed.present) {
         logf(KILN_LOG_INFO, "no ShroudForge runtime: neither Kiln's bundled one (kiln/plugins/shroudforge/) nor an "

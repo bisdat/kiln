@@ -48,6 +48,8 @@ KilnOwner t_next_owner = 100;
 kiln::Config t_config;
 kiln::ImageInfo t_image;
 kiln::Paths t_paths;
+uintptr_t t_worlds[KILN_WORLD_KINDS]{};
+uint32_t t_sessions[KILN_WORLD_KINDS]{};  // tick::session's worlds per kind since boot
 kiln::profile::State t_profile;
 uint32_t t_dropins = 1u << KILN_PROFILE_KIND_KILN;
 
@@ -128,6 +130,15 @@ std::string owner_name(KilnOwner owner) {
     return it == t_owners.end() ? "(revoked)" : it->second;
 }
 }  // namespace reg
+namespace worldinfo {
+uintptr_t world(uint32_t kind) { return kind < KILN_WORLD_KINDS ? t_worlds[kind] : 0; }
+}
+namespace tick {
+KilnResult session(KilnSessionInfo* out) {
+    for (uint32_t k = 0; k < KILN_WORLD_KINDS; ++k) out->sessions[k] = t_sessions[k];
+    return KILN_OK;
+}
+}
 namespace profile {
 const State& state() { return t_profile; }
 bool dropins(uint32_t kind) { return (t_dropins & (1u << kind)) != 0; }
@@ -167,7 +178,7 @@ std::vector<std::string> t_held;  // write_state's last lines
 void fake_write_state(void*, const std::string& last) { t_held.push_back(last); }
 std::vector<std::string> t_events;  // "prepare:<c>", "destroy:<c>:<round>", the stop's steps
 std::vector<std::string> t_stops;  // the stop writer's (last line, why), and the order of the stop's steps
-void fake_stop_state(void*, const std::string& last, const std::string& why) {
+void fake_stop_state(void*, const std::string& last, const std::string& why, uint32_t) {
     t_stops.push_back(last + " | " + why);
     t_events.push_back("stop-state");
 }
@@ -273,6 +284,9 @@ void reset_boot() {
     g_late_hold = nullptr;
     g_stop = Stop{};
     g_stopping = false;
+    g_stop_timeout = std::chrono::milliseconds(65000);
+    for (auto& w : t_worlds) w = 0;
+    for (auto& n : t_sessions) n = 0;
     g_stop_state = nullptr;
     t_stops.clear();
     g_exit = &fake_exit;
@@ -1067,6 +1081,72 @@ void activation_fault_cases() {
 // kiln.boot stop_start (0.2.0-dev.29): a service stops the start the same way with a boot generation or without one,
 // inside a collector's prepare or after the publication: one issue per mod, the stop line, the launcher's files, the
 // caller's last word, then the late exit with the caller's code (never 0x4B01 for it, never "the start goes on").
+void stop_start_safety_cases() {
+    using namespace kiln::boot_svc;
+    CHECK(sizeof(KilnBootApiV1) == 104);
+    CHECK(offsetof(KilnBootApiV1, stop_start) == 96);
+    t_case = "stop-start-live-world";
+    reset_boot();
+    for (uint32_t kind = 0; kind < KILN_WORLD_KINDS; ++kind) {
+        t_worlds[kind] = 0x1000;
+        CHECK(B.stop_start(5, ks("a"), ks("must preserve unsaved play"), 0x4B02u, nullptr, nullptr) == KILN_ERR_UNAVAILABLE);
+        CHECK(!g_stopping && t_late_exits.empty() && g_issues.empty());
+        t_worlds[kind] = 0;
+    }
+    // review round 3: once a world has run in this process (none present now: a client back at its main menu), the
+    // start phase is over: refused too
+    for (uint32_t kind = 0; kind < KILN_WORLD_KINDS; ++kind) {
+        t_sessions[kind] = 1;
+        CHECK(B.stop_start(5, ks("a"), ks("the start phase is over"), 0x4B02u, nullptr, nullptr) == KILN_ERR_UNAVAILABLE);
+        CHECK(!g_stopping && t_late_exits.empty() && g_issues.empty());
+        t_sessions[kind] = 0;
+    }
+    reset_boot();
+    t_case = "stop-start-callback-fault";
+    bool escaped = false;
+    try {
+        B.stop_start(5, ks("a"), ks("callback fault must not cancel stop"), 0x4B02u,
+                     [](void*) { throw std::runtime_error("callback failed"); }, nullptr);
+    } catch (...) { escaped = true; }
+    CHECK(!escaped);
+    CHECK(t_late_exits == std::vector<uint32_t>{0x4B02u});
+    reset_boot();
+    t_case = "stop-start-two-callers";
+    std::atomic<bool> writing{false}, second_done{false};
+    struct Race { std::atomic<bool>* writing; std::atomic<bool>* second_done; } race{&writing, &second_done};
+    stop_writer([](void* user, const std::string&, const std::string&, uint32_t) {
+        auto& r = *static_cast<Race*>(user);
+        *r.writing = true;
+        while (!r.second_done->load()) std::this_thread::yield();
+    }, &race);
+    KilnResult loser = KILN_OK;
+    std::thread second([&] {
+        while (!writing.load()) std::this_thread::yield();
+        loser = B.stop_start(6, ks("b"), ks("second caller"), 0x4B03u, nullptr, nullptr);
+        second_done = true;
+    });
+    CHECK(B.stop_start(5, ks("a"), ks("first caller"), 0x4B02u,
+                      [](void* user) { *static_cast<KilnResult*>(user) = B.stop_start(5, ks("a"), ks("reentrant"), 0x4B04u, nullptr, nullptr); },
+                      &loser) == KILN_OK);
+    second.join();
+    CHECK(loser == KILN_ERR_UNAVAILABLE);
+    CHECK(t_late_exits == std::vector<uint32_t>{0x4B02u});
+    reset_boot();
+    t_case = "stop-start-callback-block";
+    g_stop_timeout = std::chrono::milliseconds(10);
+    static std::atomic<bool> timed_out{false};
+    timed_out = false;
+    g_exit_late = [](uint32_t) { timed_out = true; };
+    CHECK(B.stop_start(5, ks("a"), ks("blocked callback must not cancel stop"), 0x4B02u,
+                      [](void*) { while (!timed_out.load()) std::this_thread::yield(); }, nullptr) == KILN_OK);
+    CHECK(timed_out);
+    reset_boot();
+    t_case = "stop-start-writer-fault";
+    stop_writer([](void*, const std::string&, const std::string&, uint32_t) { throw std::runtime_error("disk"); }, nullptr);
+    CHECK(B.stop_start(5, ks("a"), ks("disk failed"), 0x4B02u, nullptr, nullptr) == KILN_OK);
+    CHECK(t_late_exits == std::vector<uint32_t>{0x4B02u});
+}
+
 void stop_start_cases() {
     using namespace kiln::boot_svc;
     t_case = "stop-start-plain";
@@ -1951,6 +2031,7 @@ int main(int argc, char** argv) {
     warning_case();
     missing_collector_cases();
     activation_fault_cases();
+    stop_start_safety_cases();
     stop_start_cases();
     files_only_cases();
     strict_cases();

@@ -139,7 +139,7 @@ void set_detail(const char* s) {
 
 void broken(const char* why) {
     if (g_program.exchange(KILN_ITEMS_PROGRAM_BROKEN) != KILN_ITEMS_PROGRAM_BROKEN)
-        LOGE("give/take are off until the server restarts: %s", why);
+        LOGE("give/take are off until the server, or the hosting player's game, restarts: %s", why);
     set_detail(why);
 }
 

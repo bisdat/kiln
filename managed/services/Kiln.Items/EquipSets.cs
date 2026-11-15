@@ -26,8 +26,8 @@ public enum LabSetFault
     GuardBit = 2,
     /// <summary>The bit is set and the commit is called anyway: the game's commit rolls back by itself.</summary>
     CommitAnyway = 3,
-    /// <summary>After the commit the request is read as unmet: InvariantFailure (equipment sets go off until the server
-    /// restarts).</summary>
+    /// <summary>After the commit the request is read as unmet: InvariantFailure (sets and equips go off until the server,
+    /// or the hosting player's game, restarts).</summary>
     FakeMismatch = 4,
     /// <summary>The set is canceled right after it was queued (set_cancel, as when the asking mod unloads).</summary>
     CancelAtOnce = 5,
@@ -179,11 +179,15 @@ public static unsafe partial class Items
     /// unless the rollback does not give everything back or the game faults (InvariantFailure, below).</param>
     /// <returns>Completes on the tick thread with the result, once. <see cref="EquipmentSetResult.Ok"/> for Done, NoChange
     /// and Simulated; anything else changed nothing, except <see cref="EquipmentSetStatus.InvariantFailure"/>
-    /// (<see cref="EquipmentSetResult.MayHaveMutated"/>, and equipment sets and single equips go off until the server
-    /// restarts): after a refusal, a dry run or the commit, the inventory was neither as asked nor as before (every byte of
-    /// the components the game's equip program writes is compared after a rollback, the slots and the conservation of
-    /// every item after a commit), or the game faulted inside the transaction. A fault is not rolled back: the inventory
-    /// may then be in an unknown state, and the reason says so. Such a result can come with an
+    /// (equipment sets and single equips go off until the server, or the hosting player's game, restarts; Move, Give, Take
+    /// and fuel writes still run): after a refusal, a dry run or a commit that rolled back by itself, every byte of the seven
+    /// components the game's equip program declares (Fuel, Inventory, InventoryEmptyState, InventorySetup, ItemState,
+    /// OwnerRelationship, SlotSelection) of the player's inventory tree is compared with its state before the transaction;
+    /// after a set that succeeded only the slots, the items' identities, stamps and owners and the tree are checked.
+    /// Durability, level and perks live in components that program cannot write and are not compared by Kiln. Or the game
+    /// faulted: inside the transaction a fault is not rolled back, so <see cref="EquipmentSetResult.MayHaveMutated"/> is
+    /// set and the inventory may be in an unknown state (the reason says so); in a read before the transaction nothing was
+    /// changed (MayHaveMutated not set). Such a result can come with an
     /// <see cref="EquipmentSetChangedEvent"/> (the changes that could still be read) and always comes with an
     /// <see cref="EquipmentSetFaultedEvent"/>. A stale scope or snapshot, a full budget or queue and a refusal of the
     /// planner or the game are results, not exceptions.</returns>

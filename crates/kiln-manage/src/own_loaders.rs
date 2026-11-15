@@ -629,6 +629,31 @@ mod tests {
     }
 
     #[test]
+    fn sf_self_hosting_detection_and_state_are_separate() {
+        let g = tmp("sf-self-state");
+        let row = || crate::engine_mods::status(&g).into_iter().find(|s| s.kind == ModKind::ShroudForge).unwrap();
+        assert!(row().own_loader.is_none());
+        std::fs::create_dir_all(g.join("kiln/state")).unwrap();
+        std::fs::write(g.join("kiln/state/shroudforge.json"), r#"{"mode":"hosted"}"#).unwrap();
+        assert_eq!(row().state.unwrap()["mode"], "hosted");
+        std::fs::create_dir_all(g.join("kiln/plugins/shroudforge")).unwrap();
+        std::fs::write(g.join("kiln/plugins/kiln-shroudforge.dll"), b"adapter").unwrap();
+        std::fs::write(g.join("kiln/plugins/shroudforge/shroudforge-runtime.dll"), b"runtime").unwrap();
+        assert!(row().own_loader.is_none(), "Kiln's adapter is not an own loader");
+        std::fs::write(g.join("dbghelp.dll"), dll(b"EML_LOG_FILE_PATH shroudforge")).unwrap();
+        assert_eq!(row().own_loader.unwrap().loader.file, "dbghelp.dll", "before first standalone start, also with Kiln's files");
+        std::fs::write(g.join("kiln/state/shroudforge.json"), r#"{"mode":"self-hosted","loaderFile":"dbghelp.dll"}"#).unwrap();
+        let r = row();
+        assert_eq!(r.state.unwrap()["loaderFile"], "dbghelp.dll");
+        assert!(r.own_loader.is_some());
+        std::fs::remove_file(g.join("dbghelp.dll")).unwrap();
+        let r = row();
+        assert!(r.own_loader.is_none(), "removed file wins for next start");
+        assert_eq!(r.state.unwrap()["mode"], "self-hosted", "last start remains historical");
+        std::fs::remove_dir_all(g).unwrap();
+    }
+
+    #[test]
     fn finds_proxies_chain_lines_and_emf_lists() {
         let g = tmp("find");
         assert!(find(&g, None).is_empty());

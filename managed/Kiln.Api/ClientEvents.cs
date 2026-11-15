@@ -38,6 +38,7 @@ internal static unsafe class ClientEvents
     private static readonly object Lock = new();
     private static int _subscribed;  // 0 not yet, 1 subscribed, -1 no kiln.client here
     private static long _dropped, _delivered;
+    private static int _queued;  // entries in Queue: taken before an enqueue, given back at each dequeue (the real bound)
     private static int _droppedLogged;
 
     /// <summary>Run first in each client Pre (EcsPrograms' refusal poll), on the main thread.</summary>
@@ -63,9 +64,15 @@ internal static unsafe class ClientEvents
     internal static bool Enqueue(KilnEvent ev)
     {
         var session = Session;
-        if (session == 0 || !EnsureSubscribed() || Queue.Count >= MaxQueued)
+        if (session == 0 || !EnsureSubscribed())
         {
-            Dropped("the client's event queue is full or there is no client world");
+            Dropped("there is no client world");
+            return false;
+        }
+        if (Interlocked.Increment(ref _queued) > MaxQueued)  // a place is taken before the enqueue: never more than MaxQueued
+        {
+            Interlocked.Decrement(ref _queued);
+            Dropped($"the client's event queue is full ({MaxQueued} waiting)");
             return false;
         }
         Queue.Enqueue((ev, session));
@@ -100,6 +107,7 @@ internal static unsafe class ClientEvents
         var session = Session;
         for (var n = Queue.Count; n > 0 && Queue.TryDequeue(out var item); n--)
         {
+            Interlocked.Decrement(ref _queued);
             if (item.Session != session)
             {
                 Dropped($"its client world (session {item.Session}) has ended");
@@ -155,12 +163,15 @@ internal static unsafe class ClientEvents
     }
 
     internal static long DroppedCount => Interlocked.Read(ref _dropped);
+    internal static int QueuedCount => Volatile.Read(ref _queued);
+    internal static int Capacity => MaxQueued;
 
     /// <summary>Tests: forget the subscription and the queue (a test's fake kiln.client is gone after it).</summary>
     internal static void ResetForTests()
     {
         lock (Lock) _subscribed = 0;
         while (Queue.TryDequeue(out _)) { }
+        Interlocked.Exchange(ref _queued, 0);
         BeforeEvents = null;
         Interlocked.Exchange(ref _droppedLogged, 0);
     }

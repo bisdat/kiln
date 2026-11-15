@@ -29,7 +29,7 @@ std::mutex t_mutex;  // the stubs' state below
 std::map<KilnOwner, std::string> t_owners;
 KilnOwner t_next_owner = 1;
 std::atomic<uint64_t> t_version{1};
-std::atomic<bool> t_tick{true}, t_lifecycle{true};
+std::atomic<bool> t_tick{true}, t_lifecycle{true}, t_wait{true};
 std::vector<std::string> t_errors;  // KLOG_E lines
 std::vector<std::string> t_writes;  // texts write_file_atomic wrote (successful writes only)
 std::vector<double> t_attempts;     // the fake clock at every call of write_file_atomic, failed ones too
@@ -119,6 +119,8 @@ uint64_t version() { return t_version.load(); }
 namespace tick {
 bool installed() { return t_tick; }
 bool lifecycle() { return t_lifecycle; }
+bool waits_jobs() { return t_wait; }
+StopDrain stop_drain(uint32_t kind) { return stop_drain_of(kind, image().side, t_tick, t_lifecycle, t_wait); }
 }  // namespace tick
 namespace crash {
 int filter(EXCEPTION_POINTERS*, Capture*, unsigned long*) { return 1; }
@@ -216,6 +218,12 @@ struct Seen {
     size_t size() {
         std::lock_guard l(m);
         return events.size();
+    }
+    std::set<std::string> names() {
+        std::lock_guard l(m);
+        std::set<std::string> out;
+        for (const auto& e : events) out.insert(std::get<0>(e));
+        return out;
     }
 };
 void KILN_CALL record_change(const KilnCapRow* row, uint32_t change, void* user) {
@@ -579,14 +587,59 @@ void core_rows(const std::filesystem::path& dir) {
     KilnHandle h = 0;
     T->subscribe(owner("host"), &record_change, &seen, &h);
     t_tick = false;  // the hook faults at run time
-    CHECK(is("tick", U, KILN_CAP_REASON_FAULTED) && is("tick.wait_jobs", U, KILN_CAP_REASON_FAULTED) && seen.size() == 2,
-          "features: a tick hook that faults later shows at the next read, with a change each");
+    CHECK(is("tick", U, KILN_CAP_REASON_FAULTED) && is("tick.wait_jobs", U, KILN_CAP_REASON_FAULTED) && seen.size() == 3 &&
+              (seen.names() == std::set<std::string>{"tick", "tick.wait_jobs", "world.stop_drain.server"}),
+          "features: a tick hook that faults later shows at the next read, with a change each (the server's stop_drain row "
+          "follows)");
     t_lifecycle = false;
     caps::feature_off("world.lifecycle");  // KilnApi.feature answered false
     CHECK(caps::g_names.find("world.lifecycle")->second.last.reason == KILN_CAP_REASON_FAULTED,
           "features: KilnApi.feature() answering false corrects the row");
     T->unsubscribe(h);
     t_tick = t_lifecycle = true;
+
+    // world.stop_drain.<kind> (since 0.2.0-dev.29): what the core guarantees about a world kind's jobs when it dispatches
+    // the world's STOPPING (tick_drain.h): drained by the engine, a bounded wait only, no stop at all, or no such world.
+    {
+        const uint32_t side = test_image.side;
+        test_image.side = KILN_SIDE_SERVER;
+        reset();
+        resolve_with(dir, "48 B8 ?? ?? ?? ?? ?? ?? ?? ?? E8 {helper:rel32}");
+        t_tick = t_lifecycle = t_wait = true;
+        caps::core_rows(true, true, "");
+        CHECK(is("world.stop_drain.server", A, 0) && get("world.stop_drain.server").text.find("WaitWorldJobs") != std::string::npos &&
+                  is("world.stop_drain.client", U, KILN_CAP_REASON_WRONG_SIDE) &&
+                  is("world.stop_drain.prediction", U, KILN_CAP_REASON_WRONG_SIDE),
+              "stop_drain: a dedicated server's world is drained by the engine; no client or prediction world there");
+        test_image.side = KILN_SIDE_CLIENT;
+        reset();
+        caps::core_rows(true, true, "");
+        CHECK(is("world.stop_drain.server", A, 0) && is("world.stop_drain.client", A, 0) &&
+                  is("world.stop_drain.prediction", A, 0) &&
+                  get("world.stop_drain.client").text.find("WaitWorldJobs") != std::string::npos &&
+                  get("world.stop_drain.prediction").text.find("stops with the client world") != std::string::npos,
+              "stop_drain: in a client every kind is drained by the engine (the prediction world with the client world)");
+        t_wait = false;
+        reset();
+        caps::core_rows(true, true, "");
+        CHECK(is("world.stop_drain.server", U, KILN_CAP_REASON_SYMBOL_MISSING) &&
+                  is("world.stop_drain.client", U, KILN_CAP_REASON_SYMBOL_MISSING) &&
+                  get("world.stop_drain.client").text.rfind("bounded wait only", 0) == 0,
+              "stop_drain: without WaitWorldJobs every kind has a bounded wait only, and says so");
+        t_wait = true;
+        reset();
+        caps::core_rows(true, true, "");
+        t_lifecycle = false;  // the destroy hook faults at run time: no STOPPING at all from now on
+        CHECK(is("world.stop_drain.client", U, KILN_CAP_REASON_FAULTED) &&
+                  get("world.stop_drain.client").text.rfind("no world stop is seen", 0) == 0 &&
+                  is("world.stop_drain.server", U, KILN_CAP_REASON_FAULTED),
+              "stop_drain: a hook that faults later turns every kind's row to faulted at the next read");
+        t_lifecycle = true;
+        reset();
+        caps::core_rows(false, false, "idle for the test");
+        CHECK(is("world.stop_drain.server", U, KILN_CAP_REASON_POLICY), "stop_drain: in safe idle the row says policy");
+        test_image.side = side;
+    }
 
     // safe idle: every feature says policy, with boot's sentence
     reset();
@@ -888,25 +941,27 @@ void idle_tick_fault(const std::filesystem::path& dir) {
     }
     t_tick = t_lifecycle = false;
     const auto deadline = start + std::chrono::milliseconds(1250);
-    while ((seen.size() < 3 || writes() == before) && std::chrono::steady_clock::now() < deadline)
+    // the three tick rows and, derived from the same hooks, the server world's stop_drain row (dev.29)
+    while ((seen.size() < 4 || writes() == before) && std::chrono::steady_clock::now() < deadline)
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     bool rows = true;
     {
         std::lock_guard l(caps::g_mutex);
-        for (const char* name : {"tick", "tick.wait_jobs", "world.lifecycle"}) {
+        for (const char* name : {"tick", "tick.wait_jobs", "world.lifecycle", "world.stop_drain.server"}) {
             const auto& row = caps::g_names.at(name).last;
             rows = rows && row.state == U && row.reason == KILN_CAP_REASON_FAULTED;
         }
     }
-    CHECK(rows && seen.size() == 3 && writes() > before,
+    CHECK(rows && seen.size() == 4 && writes() > before,
           "idle fault: rows, subscriber snapshot and file follow within 1250 ms without a registry call (rows %d, events %zu, writes %zu -> %zu)",
           rows, seen.size(), before, writes());
     const auto doc = nlohmann::json::parse(last_write());
     unsigned faulted = 0;
     for (const auto& row : doc["capabilities"])
-        if ((row["name"] == "tick" || row["name"] == "tick.wait_jobs" || row["name"] == "world.lifecycle") &&
+        if ((row["name"] == "tick" || row["name"] == "tick.wait_jobs" || row["name"] == "world.lifecycle" ||
+             row["name"] == "world.stop_drain.server") &&
             row["state"] == "unavailable" && row["reason"] == "faulted") ++faulted;
-    CHECK(faulted == 3, "idle fault: capabilities.json holds all three faulted rows");
+    CHECK(faulted == 4, "idle fault: capabilities.json holds all four faulted rows");
     T->unsubscribe(h);
     reset();
     sigdb::g_core = sigdb::Resolver();

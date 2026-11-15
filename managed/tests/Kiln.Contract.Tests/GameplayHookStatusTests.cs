@@ -167,4 +167,22 @@ public sealed unsafe class GameplayHookStatusTests : FakeTableTest
         Assert.Null(Gameplay.PrepareBuildEvents()); Assert.Equal(4u,_groups); Assert.Equal(1,_requests);
     }
 
+    [Fact]
+    public void Entity_availability_probe_requests_the_group_before_deciding_to_subscribe()
+    {
+        var t=(GameplayNative.Table*)NativeMemory.AllocZeroed(144); t->Header=new ServiceHeader { Size=144,Version=1 };
+        t->Status=&IdleEntityStatus;
+        *(nint*)((byte*)t+96)=(nint)(delegate* unmanaged[Cdecl]<uint,int>)&Filter;
+        *(nint*)((byte*)t+136)=(nint)(delegate* unmanaged[Cdecl]<ulong,uint,int>)&RequestGroups;
+        Serve("kiln.gameplay",t,typeof(GameplayNative),"_table"); Swap(typeof(Gameplay),"_listening",1);
+        _groups=0; _requestResult=0;
+        Assert.True(Gameplay.EntityEventsAvailable); Assert.Equal(16u,_groups);
+        _requestResult=3; Assert.False(Gameplay.EntityEventsAvailable);
+    }
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int Filter(uint categories) => 0;
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int IdleEntityStatus(GameplayNative.Status* status) { status->EntityHooks=0; return 0; }
+
 }

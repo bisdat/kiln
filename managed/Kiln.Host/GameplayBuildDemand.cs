@@ -62,9 +62,8 @@ internal static class GameplayBuildDemand
             if (!seen.Add(path)) continue;
             using var stream = File.OpenRead(path);
             using var pe = new PEReader(stream);
-            MetadataReader metadata;
-            try { if (!pe.HasMetadata) continue; metadata = pe.GetMetadataReader(); }
-            catch (BadImageFormatException) when (path != entry) { continue; } // native helper, not an assembly
+            if (!pe.HasMetadata) continue; // Valid native PE helper, not an assembly.
+            var metadata = pe.GetMetadataReader(); // Malformed metadata must take the conservative fallback.
 
             foreach (var handle in metadata.AssemblyReferences)
             {
@@ -104,6 +103,7 @@ internal sealed partial class ModManager
                 }
                 AddDependencies(manifest);
                 uint demand=Directory.Exists(Path.Combine(directory,"blocks")) ? 15u : 0u;
+                if (Directory.Exists(Path.Combine(directory,"quests"))) demand |= 7u;
                 if(manifest.HasCode) demand |= GameplayBuildDemand.GroupsFor(Path.Combine(directory, manifest.EntryAssembly),
                         admitted.Where(c => dependencies.Contains(c.Manifest.Id))
                             .SelectMany(c => c.Manifest.Exports.Select(f => Path.Combine(c.Directory, f))));
@@ -114,7 +114,11 @@ internal sealed partial class ModManager
             }
             catch (Exception e) when (e is IOException or BadImageFormatException or UnauthorizedAccessException)
             {
-                _host.Log(LogLevel.Warn, $"mod {manifest.Id}: gameplay preflight could not read assembly references: {e.Message}; checked again at load");
+                _host.Log(LogLevel.Warn, $"mod {manifest.Id}: gameplay preflight could not read assembly references: {e.Message}; conservatively requesting all hook groups before the world");
+                // Unknown metadata must not discard demand or defer building protection until the next world.
+                var owner = _host.OwnerCreate("mod:" + manifest.Id);
+                try { GameplayBuildDemand.Request(_host, owner); }
+                finally { _host.OwnerRevoke(owner); }
             }
         }
     }

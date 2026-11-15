@@ -11,7 +11,11 @@
 //     the entity found at it 1 m higher: cpf_entities finds it by its RenderTransform and keeps its bytes, cpf_visual
 //     writes them back with y + 1 m (no MarkWritten: this player's game only), and ClientComponentWrittenEvent is
 //     counted with its thread and its bytes;
+//   - while the pass armed a delay (Mods.Send "delay", an int of milliseconds; 0 disarms; a new client world disarms it),
+//     one cpf_entities call per client step sleeps that long on its worker and then returns without touching anything:
+//     the deliberately delayed callback of the review's step 5, so that a client world's stop catches a call inside;
 //   - at unload, says whether every binding drained.
+// A new client world session clears the visual target too (a reloaded world must show the barrel where the game has it).
 // On a dedicated server only the both program's server side is bound (world.programs.client is wrong-side there).
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
@@ -68,6 +72,9 @@ public sealed class ClientProgramsFixtureMod : Mod
     private uint _targetEntity;
     private RenderTransformBytes _targetBytes;
     private bool _haveBytes;
+    // the delayed callback: milliseconds (0: off), the client step it last slept in, how many times it slept
+    private int _delayMs;
+    private long _delayedStep = -1, _delays, _step;
 
     public override void OnLoad()
     {
@@ -108,6 +115,12 @@ public sealed class ClientProgramsFixtureMod : Mod
                     _firstWrite = $"{e.Component} of entity {e.Entity} ({e.World}): y {before / (double)OneMetre:F2} -> {after / (double)OneMetre:F2} m";
             }
         });
+        Context.Messages.On("delay", m =>
+        {
+            var ms = m.Payload is int v ? Math.Clamp(v, 0, 10_000) : 0;
+            Volatile.Write(ref _delayMs, ms);
+            Log.Info($"{Me}: delay {(ms > 0 ? $"armed: one cpf_entities call per client step sleeps {ms} ms on its worker" : "off")}");
+        });
         Client.Tick += OnClientTick;
     }
 
@@ -144,6 +157,17 @@ public sealed class ClientProgramsFixtureMod : Mod
     private void Entities(EcsProgramContext c)
     {
         _entities.Add(c, _main);
+        var delay = Volatile.Read(ref _delayMs);
+        if (delay > 0)
+        {
+            var step = Interlocked.Read(ref _step);
+            if (Interlocked.Exchange(ref _delayedStep, step) != step)
+            {
+                Interlocked.Increment(ref _delays);
+                Thread.Sleep(delay);
+                return;  // nothing of the context after the sleep: its world may be gone
+            }
+        }
         long[]? target;
         lock (_visualLock) target = _target;
         if (target is null || !c.TryRead("RenderTransform", out RenderTransformBytes t)) return;
@@ -174,9 +198,17 @@ public sealed class ClientProgramsFixtureMod : Mod
     private void OnClientTick(in TickInfo tick)
     {
         var session = Client.ClientWorldSession;
+        Interlocked.Increment(ref _step);
         if (session != _session)
         {
             if (_session != 0) Summary("ended");
+            if (Interlocked.Exchange(ref _delayMs, 0) > 0) Log.Info($"{Me}: delay off (a new client world)");
+            lock (_visualLock)
+            {
+                _target = null;
+                _targetEntity = 0;
+                _haveBytes = false;
+            }
             _session = session;
             _steps = 0;
             (_system, _entities, _bothClient, _bothServer, _prediction, _visual) = (new(), new(), new(), new(), new(), new());
@@ -193,7 +225,7 @@ public sealed class ClientProgramsFixtureMod : Mod
                  $"system {_system.Text()}; entities {_entities.Text()}; both client {_bothClient.Text()}; both server " +
                  $"{_bothServer.Text()}; prediction {_prediction.Text()}; visual {_visual.Text()}; writes {Interlocked.Read(ref _writeEvents)} " +
                  $"events ({Interlocked.Read(ref _writeEventsOffMain)} off the main thread, {Interlocked.Read(ref _writeEventBytesOk)} with y + 1 m), " +
-                 $"first: {_firstWrite}; refused: {_refused}");
+                 $"first: {_firstWrite}; refused: {_refused}; delayed calls {Interlocked.Read(ref _delays)}");
 
     public override void OnUnload()
     {

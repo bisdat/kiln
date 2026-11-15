@@ -60,8 +60,11 @@ public sealed partial class ComponentWatchTestMod : Mod
         _ = Run();
     }
 
+    private volatile bool _unloading;
+
     public override void OnUnload()
     {
+        _unloading = true;
         foreach (var s in _subs) s.Dispose();
         _program?.Dispose();
     }
@@ -315,6 +318,7 @@ public sealed partial class ComponentWatchTestMod : Mod
             if (_mode == "release")
             {
                 await Release("plain");
+                await Frozen("plain", load: false);
                 if (Kiln.Testing.LabSystems.Enabled)
                 {
                     Kiln.Testing.LabSystems.ForceParallel(3000);
@@ -323,6 +327,7 @@ public sealed partial class ComponentWatchTestMod : Mod
                     try
                     {
                         await Release("parallel");
+                        await Frozen("parallel", load: true);
                     }
                     finally
                     {
@@ -377,6 +382,7 @@ public sealed partial class ComponentWatchTestMod : Mod
                     if (Spawn.Exists(e)) Spawn.Destroy(e);
             Log.Info($"{Id}: counters at the end: {Counters()}");
             Log.Info($"{Id} done: {_passes} PASS, {_failures} FAIL");
+            if (_mode == "release") _ = FrozenAtStop();
         }
     }
 

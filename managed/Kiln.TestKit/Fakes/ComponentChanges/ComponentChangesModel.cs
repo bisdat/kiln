@@ -24,7 +24,7 @@ internal sealed unsafe class ComponentChangesModel
         public ulong Id, Owner, LastComplete, Epoch;
         public uint Scope, Components, Expansion, Status, Pairs;
         public uint[] Roots = [];
-        public DecisionsNative.EntityKey[] RootKeys = [];
+        public DecisionsNative.EntityKey[] RootKeys = [], SampledRoots = [];
         public string Reason = "";
         public bool Fresh = true;
         public List<(ulong Id, bool Present, List<uint> Roots)> Reserved = [];
@@ -477,6 +477,7 @@ internal sealed unsafe class ComponentChangesModel
         else
             foreach (var p in Players())
                 if (Key(p, out var k, out _)) roots.Add((p, k));
+        w.SampledRoots = roots.Select(r => r.Key).ToArray();
         var rootMask = w.Expansion == 1 ? w.Components & ~(Bit(5) | Bit(4)) : w.Components;
         foreach (var (root, key) in roots)
         {
@@ -754,6 +755,14 @@ internal sealed unsafe class ComponentChangesModel
     // window_end: compare every pair
     private void End(ulong step)
     {
+        foreach (var root in _watches.Where(w => w.Status == 0)
+            .SelectMany(w => w.SampledRoots.Select(key => (Watch: w, Key: key))).GroupBy(x => x.Key.Entity))
+        {
+            var known = Key(root.Key, out var key, out var exists);
+            if (!exists || (known && SameLife(key, root.First().Key))) continue;
+            foreach (var entry in root)
+                Suspend(entry.Watch, 2, $"entity {root.Key} is another entity now (or has no identity)");
+        }
         var live = _pairs.Where(x => Read(x.Value.Key.Entity, x.Value.Component, out _)).Select(x => x.Key).ToHashSet();
         if (live.Count > MaxPairs)
         {
@@ -765,15 +774,6 @@ internal sealed unsafe class ComponentChangesModel
                 if (accepted.Count + added.Length > MaxPairs) Suspend(w, 1, "it would take the watched pairs past 4096");
                 else accepted.UnionWith(added);
             }
-        }
-        foreach (var pr in _pairs.Values)
-        {
-            if ((pr.Key.LifeSerial & (1UL << 63)) != 0) continue;
-            var known = Key(pr.Key.Entity, out var key, out var exists);
-            if (!exists || (known && SameLife(key, pr.Key))) continue;
-            foreach (var wid in pr.Watches)
-                if (_watches.Find(w => w.Id == wid) is { Status: 0 } w)
-                    Suspend(w, 2, $"entity {pr.Key.Entity} is another entity now (or has no identity)");
         }
         bool Inactive(ulong wid) => !_watches.Any(w => w.Id == wid && w.Status == 0);
         foreach (var pr in _pairs.Values) pr.Watches.RemoveAll(Inactive);
@@ -873,12 +873,13 @@ internal sealed unsafe class ComponentChangesModel
         if (_graves.Count > Graveyard) _graves.RemoveFirst();
         _watches.Remove(w);
         // its unread records go with it (as the service): a record names only watches that are still there
-        foreach (var f in _frames.Concat([_pending]))
+        foreach (var f in _frames.Concat([_pending, _batch]))
         {
             foreach (var c in f) c.Watches.Remove(w.Id);
             f.RemoveAll(c => c.Watches.Count == 0);
         }
         FramesDropped += (ulong)_frames.RemoveAll(f => f.Count == 0);
+        if (_batch.Count == 0) _batchFrames = 0;
         if (_watches.Count == 0)  // nothing watched: nothing kept (as the service)
         {
             _pairs = [];

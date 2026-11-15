@@ -1182,7 +1182,7 @@ const handlers: Record<string, Handler> = {
       // XHL-Core is external: only whether it is on the game's proxy/chain paths (engine_mods::xhl_host)
       { kind: "xhl", plugin: "", state: null, file: "", prerequisite: { available: false, text: XHL_NO_HOST } },
       // ShroudForge's own runtime report (shroudforge::effects): current while the fake game runs, stopped after
-      { ...st("shroudforge", "shroudforge.json", { mode: "hosted", reason: null, version: "0.9.2", side: "client" }), effects: running[g.id]
+      { ...st("shroudforge", "shroudforge.json", sfSelfScript === "started" || sfSelfScript === "removed" ? { mode: "self-hosted", loaderFile: "dbghelp.dll" } : sfSelfScript === "before" ? null : { mode: "hosted", reason: null, version: "0.9.2", side: "client" }), ownLoader: sfSelfLoader ? { ...sfSelfLoader, kind: "shroudforge", via: "proxy", folder: "mods", delivery: "placed", enabled: 1, copied: [], notCopied: [], text: "ShroudForge runs itself" } : null, effects: running[g.id]
         ? { file: `${g.path}/shroudforge/state.json`, state: "current", updatedAt: Math.floor(Date.now() / 1000), reason: null,
           mods: [{ id: "better-chests", state: "no-change", detail: "autoSort is off" }] }
         : { file: `${g.path}/shroudforge/state.json`, state: "stopped", updatedAt: 1793793660, reason: "ShroudForge runtime is stopped; previous mod effects are not current", mods: [] } },
@@ -1569,7 +1569,7 @@ function foundScan(gameId: string, p: Profile): FoundReport {
     const withIt: Profile = { ...p, dropins: [...new Set([...dropinKinds(p), g.kind])], dropinsEngines: true };
     return { ...base, state: "off", reason: st.reason, fix: foundState(withIt, g.kind).loads ? "dropins" : "add" };
   });
-  return { gameId, profileId: p.id, kilnInstalled: kiln, mods, loaders: [], unreadable: [], truncated: false };
+  return { gameId, profileId: p.id, kilnInstalled: kiln, mods, loaders: sfSelfLoader ? [sfSelfLoader] : [], unreadable: [], truncated: false };
 }
 
 /** found_add: the folder into the Library (an id as the Library makes it) and into the profile, enabled. */
@@ -1716,6 +1716,11 @@ if (PERSIST) {
     library.splice(0, library.length, ...st.library);
   } else saveState();
 }
+
+const sfSelfScript = typeof location === "undefined" ? null : new URLSearchParams(location.search).get("sfSelf");
+const sfSelfLoader = sfSelfScript === "before" || sfSelfScript === "started" || sfSelfScript === "empty" || sfSelfScript === "takeover"
+  ? { engine: "shroudforge" as const, name: "ShroudForge", kinds: ["shroudforge" as const], file: sfSelfScript === "takeover" ? "dinput8.dll" : "dbghelp.dll" } : null;
+if (sfSelfScript === "empty") for (const p of profiles.values()) p.mods.shroudforge = [];
 
 export async function mockInvoke<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
   commandCalls.push(cmd);

@@ -3,6 +3,7 @@
 // that has something to cook again ("Cook again", shell/cook.ts), and a mod found in the game folder says its state, A
 // doing its one fix. The count covers every kind. Saves right away; the game's profile.json follows (applies at the
 // next start while the game runs). Profiles are in the desktop UI's Settings.
+import { SfSelfHostedNotice } from "../../components/SfSelfHostedNotice";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
@@ -137,6 +138,7 @@ export default function Mods() {
 
   return (
     <Screen name="mods" title="Mods" say={say} actions={actions}>
+      <SfSelfHostedNotice profile={mods.profile} found={mods.found.data} />
       {params.has("filter") && <DeckButton id="clear-filter" onClick={() => nav("/deck/mods")}>Show all mods</DeckButton>}
       {!game ? (
         <DeckButton id="go-home" onClick={() => nav("/deck")}>Home</DeckButton>

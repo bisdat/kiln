@@ -159,8 +159,9 @@ internal static unsafe class SpawnTable
     private static SpawnFake? Fake => FakeTables.Active(SpawnAbi.Service)?.SpawnFake;
 
     // The tick functions: off the tick thread WRONG_THREAD, with no harness (or switched off) UNAVAILABLE. `structural`
-    // (create, destroy, cleanup): also WRONG_THREAD inside the world's step (a wrap stage or a Kiln program of the kit's
-    // systems fake), as kiln.spawn refuses them while kiln.world's in_program answers 1 (since 0.2.0-dev.29).
+    // (create, destroy, cleanup): also WRONG_THREAD inside a wrap stage of the kit's systems fake, as kiln.spawn refuses
+    // them inside a wrap stage or a Kiln program (since 0.2.0-dev.29). The kit runs no Kiln ECS program and no kiln.types
+    // system hook (GameSystems.Hook is unavailable in it), so those cases do not arise here.
     private static int Tick(out SpawnFake fake, bool structural = false)
     {
         fake = null!;
