@@ -83,6 +83,10 @@ a game client while it hosts a world).
   compiles as it did in dev.26); `Spawn.TryItem` takes an `ItemId`.
 - **Threads.** The world calls are `[TickThreadOnly]`; `Lookup`, `Template`, `Templates`, `Tracked`, `WorldKey`,
   `WorldRunning`, `SupportsComponents` and `Available` are `[AnyThread]` (the native functions are thread-safe).
+  Creating and destroying (`Entity`, `Item`, `TryEntity`, `TryItem`, `Destroy`, `CleanupTracked`) also refuse inside
+  the world's step, where the entity map must not change: a program wrap's stage, a Kiln program, a system callback
+  (`InvalidOperationException` naming `Slice.Post`; since 0.2.0-dev.29 also when such code runs on the world's own
+  thread). Post the call (`Slice.Post`, `Scheduler.Post`) and it runs before the next step.
 - **Events.** Every write already posts one: `EntitySpawnedEvent`, `EntityDestroyedEvent`.
 
 Tested offline in `managed/tests/Kiln.Contract.Tests/SpawnContractTests.cs` (rows, exceptions, attributes); not run
@@ -140,6 +144,9 @@ Every spawn without `NoTrack` is recorded in `kiln/data/spawn/<world GUID>.json`
 `template_get`, `template_count`, `template_at`, `tracked_count`, `tracked_at`, `cleanup(tag, origin, &result)`,
 `refresh(&live)`, `world_key`, `world_state`. Game-state functions return `KILN_ERR_WRONG_THREAD` off the tick
 thread and `KILN_ERR_UNAVAILABLE` before the world runs; the catalog and tracked-list reads work from any thread.
+`spawn`, `spawn_item`, `destroy` and `cleanup` also return `KILN_ERR_WRONG_THREAD` on the tick thread while kiln.world's
+`in_program` answers 1 (a wrap stage, a Kiln program or a kiln.types system callback: the world is mid-step), and
+kiln.log says to post the call (since 0.2.0-dev.29; `native/services/spawn/midstep.h`).
 Native plugins look it up in `on_ready`: `api->service({"kiln.spawn", 10}, 1)`.
 
 ## Failure modes
