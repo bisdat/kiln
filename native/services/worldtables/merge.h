@@ -43,6 +43,9 @@ struct Layouts {
     uint32_t world_guids = 0, world_size = 0;
     uint32_t pools = 0, pool_stride = 0, pool_materials = 0, pool_name = 0;
     uint32_t blueprints = 0, bp_stride = 0, bp_item = 0, bp_data = 0, bp_size = 4, bp_compressed = 24;
+    uint32_t item_pool_ref = UINT32_MAX;
+    std::string pool_reason;
+    uint32_t pool_id = UINT32_MAX, pool_slot = UINT32_MAX;  // custom pools only; unresolved refuses the writer
     std::vector<std::string> hardness_names, class_names;  // value = index
 };
 
@@ -102,6 +105,9 @@ struct Shape {
     uint32_t x = 0, y = 0, z = 0;
     Bytes bits;                          // bit i = cell x + X * (y + Y * z), y up, lowest bit first
     bool roof = false;
+    std::string material_pool;
+    Guid pool;
+    std::set<std::string> dependencies;
 };
 
 // A crafting prop of a mod (PropBlock.Provides): a place in the game's table of props a recipe can ask to stand near (WorkshopRegistryResource.craftingProps), kiln.worldtables'
@@ -116,8 +122,19 @@ struct CraftingProp {
     int index = -1;                 // its place in the game's mask of props, once allocated
 };
 
+struct PoolEntry { std::string material, game_material; };
+struct PoolDefinition {
+    std::string mod, block, definition;
+    Guid guid;
+    bool roof = false, valid = true;
+    std::vector<PoolEntry> entries;
+    std::set<std::string> dependencies;
+};
+struct PoolGameMaterial { uint32_t item = 0; bool roof = false; };
 struct ModFile {
     std::string mod, dir, file, clients;
+    std::vector<PoolDefinition> pools;
+    std::set<std::string> dependencies;
     std::vector<CraftingProp> craft_props;
     std::vector<Shape> shapes;
     std::map<std::string, ojson> strengths;  // the mod's "strengths" section: what "strength": "<name>" means
@@ -160,6 +177,8 @@ inline const char* const kRoofPool = "BuildingRoofMaterials";
 
 // The pool a material's item goes in; "" when it has no item, so it takes no room in any.
 std::string pool_of(const Material& m);
+// Actual vanilla selector ownership, also used by late-definition admission.
+std::string pool_of(const Material& m,const std::set<Guid>& grouped);
 // Every pool's name and how many items it lists. false + *why: the pools don't read as their layout says.
 bool pool_counts(const Bytes& pools, const Layouts& L, std::map<std::string, uint32_t>* out, std::string* why);
 // "the game's build menu lists at most 64 wall materials and has 61 of its own: 3 new ones fit across all mods"
@@ -169,6 +188,9 @@ std::string pool_room_text(const std::string& pool, uint32_t game_count);
 // without its item: kept like an absent mod's material, so that world's cells of it stay.
 void fit_pools(std::vector<Material>* live, const std::map<std::string, uint32_t>& game_counts, const std::set<Guid>& remembered, std::vector<Material>* held,
                std::vector<std::string>* refused);
+// Custom-pool admission supplies even members of refused groups: those stay usable for scripted Build.
+void fit_pools(std::vector<Material>* live, const std::map<std::string, uint32_t>& game_counts, const std::set<Guid>& remembered,
+               std::vector<Material>* held, std::vector<std::string>* refused, const std::set<Guid>& grouped);
 
 // ---- reading the game's resources ------------------------------------------------------------------------------
 struct ArrayView {
@@ -203,6 +225,31 @@ bool merge_registry(const Bytes& game, const Layouts& L, const std::vector<Tweak
 bool merge_world(const Bytes& game, const Layouts& L, const std::vector<Placed>& placed, Bytes* out, std::string* why);
 // Live block items after their pool's own. A pool that would list more than kPoolCapacity items is false + *why, never served.
 bool merge_pools(const Bytes& game, const Layouts& L, const std::vector<Placed>& placed, Bytes* out, std::string* why);
+// Resolved boot rows. Admission resolves references/roof/dependencies before constructing these.
+struct MaterialPool {
+    Guid guid;
+    std::string name;  // canonical mod:key, never the localized display name
+    bool roof = false;
+    std::vector<uint32_t> items;  // declared UI order, 1..64 distinct nonzero building item ids
+};
+std::string handshake_hash(const std::vector<Placed>& placed, const std::vector<CraftingProp>& props,
+                           const std::vector<MaterialPool>& pools, const std::vector<Shape>& shapes);
+
+struct PoolResolution {
+    bool arguments_invalid = false;
+    std::vector<MaterialPool> pools;
+    std::set<Guid> grouped;
+    std::vector<std::string> errors;
+};
+PoolResolution resolve_pools(const std::vector<PoolDefinition>& definitions, const std::vector<Material>& materials,
+                             const std::map<std::string, PoolGameMaterial>& game);
+void bind_shape_pools(std::vector<Shape>* shapes, const std::vector<PoolDefinition>& definitions,
+                      const std::vector<MaterialPool>& pools, std::vector<std::string>* errors);
+// Transactional custom-row writer: failure leaves *out unchanged. Grouped mod materials are
+// excluded from vanilla auto-append even when their group failed admission.
+bool merge_pools(const Bytes& game, const Layouts& L, const std::vector<Placed>& placed,
+                 const std::vector<MaterialPool>& groups, Bytes* out, std::string* why,
+                 const std::set<Guid>& grouped = {});
 bool merge_blueprints(const Bytes& game, const Layouts& L, const std::vector<Placed>& placed, uint32_t template_item, Bytes* out, std::string* why);
 // The first item of the pool a block item joins: what a new block item's blueprint entry is copied from.
 uint32_t first_pool_item(const Bytes& pools, const Layouts& L);

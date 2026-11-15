@@ -75,9 +75,11 @@ internal static class Baker
         NativeExport.Baking = true;
         GameTree.Baking = true;
         VfxNative.Baking = true;
+        WorldTablesNative.Baking = true;
+        WorldTablesNative.ForgetBaked(id);
         GameTree.ForgetBaked(id);
         VfxNative.ForgetBaked(id);
-        JsonObject? quests, skills, vfx;
+        JsonObject? quests, skills, vfx, tables;
         try
         {
             using var harness = new KilnHarness(new KilnHarnessOptions
@@ -126,14 +128,17 @@ internal static class Baker
             quests = QuestsDocument(id);
             skills = SkillsDocument(id, result);
             vfx = VfxDocument(id, folder);
+            tables = TablesDocument(id);
         }
         finally
         {
             NativeExport.Baking = false;
             GameTree.Baking = false;
             VfxNative.Baking = false;
+            WorldTablesNative.Baking = false;
         }
         Write(folder, id, quests, skills, vfx, result, options);
+        Put(folder, "blocks.tables.json", tables, "world tables", result, options);
         RemoveOtherIds(folder, id, result, options);
         return result;
     }
@@ -143,6 +148,7 @@ internal static class Baker
     internal static void Clean(string folder, string id, BakeResult result, BakeOptions options)
     {
         Write(folder, id, null, null, null, result, options);
+        Put(folder, "blocks.tables.json", null, "world tables", result, options);
         RemoveOtherIds(folder, id, result, options);
     }
 
@@ -231,6 +237,13 @@ internal static class Baker
                     foreach (var (name, _) in s) names.Add($"{section}/{name}");
         }
         return names;
+    }
+
+    internal static JsonObject? TablesDocument(string mod)
+    {
+        var doc=WorldTablesNative.BakedDocument(mod);
+        if(doc is not null) doc["comment"]=Comment;
+        return doc;
     }
 
     private static void Write(string folder, string mod, JsonObject? quests, JsonObject? skills, JsonObject? vfx, BakeResult result, BakeOptions options)

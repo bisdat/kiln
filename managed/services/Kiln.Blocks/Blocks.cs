@@ -71,6 +71,19 @@ public static partial class Blocks
     /// see <see cref="TableBlockHandle{T}.Status"/>. One in a data file's "buildingMaterials" section is there at once.</summary>
     public static TableBlockHandle<BuildingMaterialBlock> Define(string name, BuildingMaterialBlock block) => (TableBlockHandle<BuildingMaterialBlock>)Define<BuildingMaterialBlock>(name, block);
 
+    /// <summary>Returns whether a pool is in the served boot table, durably accepted for the next start, or refused.
+    /// RequireRegistered never writes pending storage. AcceptedNextStart consumes zero current entries and is rechecked at boot.</summary>
+    [TickThreadOnly,RequiresCapability("worldtables.material_pools")]
+#pragma warning disable KILNX028
+    public static DefinitionRegistrationResult Define(string name,BuildingMaterialPoolBlock block,DefinitionRegistrationOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(block);ArgumentNullException.ThrowIfNull(options);
+        if(BootFrame.Current is {} boot)throw new InvalidOperationException($"PhaseClosed: Blocks.Define is refused inside {boot.ModId}'s OnBoot; stage the block instead");
+        Game.AssertTickThread();
+        return Compiler.DefinePoolResult(CallerMod(),name,block,options);
+    }
+#pragma warning restore KILNX028
+
     /// <summary>Defines a new terrain material as the calling mod's. The game reads its material tables once at start, so one new to this game is there from the next start;
     /// see <see cref="TableBlockHandle{T}.Status"/>. One in a data file's "terrainMaterials" section is there at once.</summary>
     public static TableBlockHandle<TerrainMaterialBlock> Define(string name, TerrainMaterialBlock block) => (TableBlockHandle<TerrainMaterialBlock>)Define<TerrainMaterialBlock>(name, block);

@@ -1,0 +1,16 @@
+{
+  "$schema": "../../kiln-blocks.schema.json",
+  "format": 1,
+  "buildingMaterials": {
+    "ice": {"name": "Ice Block"},
+    "frost_stone": {"name": "Frost Stone Block"}
+  },
+  "buildingMaterialPools": {
+    "cold_walls": {"name": "Cold Walls", "roof": false,
+      "materials": [{"material": "ice"}, {"material": "frost_stone"}]}
+  },
+  "blueprints": {
+    "cold_wall": {"name": "Cold Wall", "roof": false,
+      "cells": [["########"]], "materialPool": "cold_walls"}
+  }
+}
