@@ -544,9 +544,10 @@ public sealed unsafe class GameDataRegistry : IReadOnlyList<GameDataEntry>
     /// <see cref="Content.Buffs"/> only: defines a buff clone and says what became of it (chapter 17's result-bearing
     /// definition). <see cref="DefinitionTiming.RequireRegistered"/>: registered now (its record in Kiln's collection and the
     /// world's buff registry reading it; where the game's own lookup resolves on this build, it is asked to find it), or
-    /// refused without taking room: <c>NoWorld</c> / <c>NotReady</c> before a world can take it, <c>CapacityExceeded</c>,
+    /// refused: <c>NoWorld</c> / <c>NotReady</c> before a world can take it, <c>CapacityExceeded</c>,
     /// <c>IdCollision</c> (its GUID's buff id is a game buff's or another clone's), <c>NameTaken</c>, <c>UnknownBase</c>,
-    /// <c>OwnerInactive</c>. <see cref="DefinitionTiming.AllowNextStart"/>: the same when it can register now; when only
+    /// <c>OwnerInactive</c>. A failure after allocation retains its record and reports the occupied slot.
+    /// <see cref="DefinitionTiming.AllowNextStart"/>: the same when it can register now; when only
     /// the moment is wrong (no world yet) the definition is stored and registers at the next process start
     /// (<see cref="DefinitionRegistrationState.AcceptedNextStart"/>, no room taken now; not registered in this process).
     /// The same definition again answers the same, with <see cref="DefinitionRegistrationResult.SlotsConsumed"/> 1 once.

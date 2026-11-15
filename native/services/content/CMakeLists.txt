@@ -10,3 +10,7 @@ endif()
 # timing: native/services/content/tests/run.sh. Output: bin/content-tests/. (tests/near_test.cpp is the host test.)
 add_executable(near-win-test tests/near_win_test.cpp nearmem.cpp)
 set_target_properties(near-win-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/content-tests")
+
+# Pending store Windows handles, filesystem replacement and optional symlink checks; no game.
+add_executable(pending-win-test tests/pending_win_test.cpp)
+set_target_properties(pending-win-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/content-tests")

@@ -49,7 +49,16 @@ wrap.Dispose();   // or let the mod's unload remove it
 - **Filters.** `When(info => ...)` runs on every slice (`SliceInfo`: count, step, thread, archetype key);
   `WhenArchetype(has, lacks)` decides once per archetype and world (component names as in kiln.world). One that cannot
   decide (the build gives no archetype key, a name the world has no component of) turns its stage off with the reason
-  (`Disabled`) instead of skipping every slice; an empty slice is skipped.
+  (`Disabled`) instead of skipping every slice; an empty slice is skipped. The archetype comes from the slice's first
+  entity in the game's entity map. That read is narrowed, not proven: kiln.world compares the map's size and the
+  entity's record before and after it, which catches most changes under the read but not an erase and an insert in
+  between, nor a record reused for the same id. On a server world the map does not change while programs run; on a
+  client world the network can create and destroy entities on another thread. When kiln.world sees a change, the filter
+  reads again (three reads in all), then leaves that one slice to the game: the stage stays on, `Stats.ArchetypeSkips`
+  counts it and kiln.log says so once per stage (since 0.2.0-dev.29).
+- **Creating and destroying entities.** Not from a handler: `Kiln.Spawn` refuses there (managed and native, since
+  0.2.0-dev.29 also on the world's own thread) with a message that names `Slice.Post`; post the call and it runs before
+  the next step.
 - **Lifetime.** `Wrap` is tick thread and returns at once; the stages apply in the target world's next step
   (`State` Pending → Active), again by program name in every later world of that kind, and go with `Dispose` (applied in
   the next step: no call starts after it) or when the mod unloads (the unload waits until no call of the mod's stages

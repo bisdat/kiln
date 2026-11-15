@@ -54,6 +54,15 @@ KilnResult KILN_CALL game_slice_run_original(KilnGameSlice* slice);
 uint64_t KILN_CALL game_world_session(uint32_t kind);
 KilnResult KILN_CALL game_program_contract(uint32_t kind, int32_t index, uint32_t* out_contract, char* text, uint32_t capacity,
                                            uint32_t* out_size);
+// ---- foreign.cpp (since 0.2.0-dev.29, chapter 06c 9.1) ----
+KilnResult KILN_CALL foreign_layout(uint32_t world_kind, KilnStr name, KilnForeignLayout* out);
+int32_t KILN_CALL foreign_slot(const KilnForeignLayout* layout, int32_t list, KilnStr name);
+KilnResult KILN_CALL foreign_check(const KilnForeignLayout* layout, const uint64_t* iter, uint32_t* out_counts);
+const void* KILN_CALL foreign_read(const KilnForeignLayout* layout, const uint64_t* iter, KilnStr component, uint32_t entity,
+                                   uint32_t* size, KilnResult* rc);
+void* KILN_CALL foreign_write(const KilnForeignLayout* layout, const uint64_t* iter, KilnStr component, uint32_t entity,
+                              uint32_t* size, KilnResult* rc);
+KilnResult KILN_CALL foreign_attr_changed(const KilnForeignLayout* layout, const uint64_t* iter, void* component);
 uint64_t KILN_CALL wrap_original(uintptr_t entry);
 uint32_t KILN_CALL in_program();  // the table's in_program: a Kiln program's update, a wrap stage or a kiln.types
                                   // system_hook callback on this thread

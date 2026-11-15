@@ -35,6 +35,12 @@ internal static class AbilitiesCaps
     /// <see cref="NativesSync"/> needs.</summary>
     public const string NativesAttach = "abilities.natives.attach";
 
+    /// <summary>Managed, session (since 0.2.0-dev.29): a native's call reads and writes other entities through
+    /// impact_simulation's own accessors (<see cref="NativeContext.TryRead{T}"/>, <see cref="NativeContext.TryWrite{T}"/>,
+    /// <see cref="NativeContext.Root"/>). Pending until the first Kiln native call of a server world checked its
+    /// iterator against kiln.world's view; off in a world where that check failed (the natives still run).</summary>
+    public const string NativesEcs = "abilities.natives.ecs";
+
     // Reported at the service's start, again under a new registry binding (the test kit's), and every 25 steps (about
     // once a second): abilities.buffs follows the server world (its registries come with it; a client hosts after its
     // mods loaded). ServiceCaps writes a row only when it changed.
@@ -95,6 +101,9 @@ internal static class AbilitiesCaps
             var attach = DecideNatives(t != null, counters is { } k ? (k.Flags & AbilitiesNative.CountersNatives) != 0 : null,
                 AbilitiesNative.Has(t, nameof(AbilitiesNative.TableV2.NativeDetach)), Row("abilities.natives"), "attachments");
             ServiceCaps.Report(NativesAttach, attach.State, attach.Reason, attach.Text);
+            var ecs = DecideEcs(t != null, AbilitiesNative.Has(t, nameof(AbilitiesNative.TableV2.NativeEcsWrite)), counters is { } e ? e.EcsState : null,
+                counters is { } r ? r.EcsReason : 0, sync.State);
+            ServiceCaps.Report(NativesEcs, ecs.State, ecs.Reason, ecs.Text);
         }
         catch (Exception e) when (e is ArgumentException or InvalidOperationException or TypeInitializationException
                                       or FileNotFoundException or FileLoadException)
@@ -118,6 +127,34 @@ internal static class AbilitiesCaps
         if (hookIn == false)
             return (CapabilityState.Unavailable, CapabilityReason.Faulted, "kiln.abilities' RegisterNative hook is not in (see kiln.log)");
         return (CapabilityState.Available, CapabilityReason.None, "");
+    }
+
+    /// <summary>The ECS bridge's row (<c>abilities.natives.ecs</c>): it needs synchronous natives, a table with the
+    /// bridge, and the live world's self-check (<paramref name="state"/>, <paramref name="reason"/>: KILN_NATIVE_ECS_*).
+    /// Pure.</summary>
+    internal static (CapabilityState State, CapabilityReason Reason, string Text) DecideEcs(bool table, bool member, uint? state,
+        uint reason, CapabilityState sync)
+    {
+        if (!table) return (CapabilityState.Unavailable, CapabilityReason.ServiceMissing, "kiln.abilities is not loaded");
+        if (sync != CapabilityState.Available) return (CapabilityState.Unavailable, CapabilityReason.ServiceMissing, "needs abilities.natives.sync");
+        if (!member || state is null)
+            return (CapabilityState.Unavailable, CapabilityReason.ServiceOlder, "kiln.abilities has no ECS bridge (older than 0.2.0-dev.29)");
+        return state switch
+        {
+            AbilitiesNative.EcsOn => (CapabilityState.Available, CapabilityReason.None, ""),
+            AbilitiesNative.EcsOff => reason switch
+            {
+                AbilitiesNative.EcsReasonNoWorldApi => (CapabilityState.Unavailable, CapabilityReason.ServiceOlder,
+                    "needs a kiln.world with foreign views (0.2.0-dev.29)"),
+                AbilitiesNative.EcsReasonLayout => (CapabilityState.Unavailable, CapabilityReason.Faulted,
+                    "kiln.world could not compute impact_simulation's view in this world (see kiln.log)"),
+                AbilitiesNative.EcsReasonCounts => (CapabilityState.Unavailable, CapabilityReason.Faulted,
+                    "the first native call's job counts are not kiln.world's view of impact_simulation in this world"),
+                _ => (CapabilityState.Unavailable, CapabilityReason.Faulted,
+                    "the first native call's iterator does not hold the native registry at impact::ImpactSystem's slot in this world"),
+            },
+            _ => (CapabilityState.Pending, CapabilityReason.Session, "waits for the first Kiln native call of a server world"),
+        };
     }
 
     /// <summary>Throws <see cref="KilnUnavailableException"/> naming <paramref name="name"/> when its row is not available

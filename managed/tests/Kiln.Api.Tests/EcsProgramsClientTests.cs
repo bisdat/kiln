@@ -28,14 +28,15 @@ public sealed unsafe class EcsProgramsClientTests : KilnTest
     }
 
     [Fact]
-    public void The_client_table_mirror_puts_the_four_members_at_448_to_472()
+    public void The_client_table_mirror_puts_the_four_members_at_496_to_520()
     {
-        Assert.Equal(480, sizeof(EcsClientTable));
+        Assert.Equal(528, sizeof(EcsClientTable));  // header.size must reach UnbindProgramWorld: Services.Get checks it
         Assert.Equal(432, (int)Marshal.OffsetOf<EcsClientTable>(nameof(EcsClientTable.GameWorldSession)));
-        Assert.Equal(448, (int)Marshal.OffsetOf<EcsClientTable>(nameof(EcsClientTable.RegisterProgramWorld)));
-        Assert.Equal(456, (int)Marshal.OffsetOf<EcsClientTable>(nameof(EcsClientTable.ProgramWorldState)));
-        Assert.Equal(464, (int)Marshal.OffsetOf<EcsClientTable>(nameof(EcsClientTable.BindProgramWorld)));
-        Assert.Equal(472, (int)Marshal.OffsetOf<EcsClientTable>(nameof(EcsClientTable.UnbindProgramWorld)));
+        Assert.Equal(496, (int)Marshal.OffsetOf<EcsClientTable>(nameof(EcsClientTable.RegisterProgramWorld)));
+        Assert.Equal(504, (int)Marshal.OffsetOf<EcsClientTable>(nameof(EcsClientTable.ProgramWorldState)));
+        Assert.Equal(512, (int)Marshal.OffsetOf<EcsClientTable>(nameof(EcsClientTable.BindProgramWorld)));
+        Assert.Equal(520, (int)Marshal.OffsetOf<EcsClientTable>(nameof(EcsClientTable.UnbindProgramWorld)));
+        Assert.Equal(sizeof(EcsClientTable), (int)Marshal.OffsetOf<EcsClientTable>(nameof(EcsClientTable.UnbindProgramWorld)) + sizeof(nint));
         Assert.Equal(240, sizeof(EcsWorldTable));  // Bind's own (v2) mirror is unchanged: it binds on an older kiln.world
     }
 
@@ -189,6 +190,8 @@ public sealed unsafe class EcsProgramsClientTests : KilnTest
         Capabilities.Report(EcsPrograms.ClientWorldCapability, CapabilityState.Available);
         _native.Table->V2.Prefix.Header.Size = 448;  // a dev.28 kiln.world: no client-world members
         Assert.Throws<KilnUnavailableException>(() => As(NewMod("pinner2"), () => EcsPrograms.TryBind("pin", _ => { }, WorldKind.Client)));
+        _native.Table->V2.Prefix.Header.Size = 496;  // the foreign views and not the client-world members after them
+        Assert.Throws<KilnUnavailableException>(() => As(NewMod("pinner3"), () => EcsPrograms.TryBind("pin", _ => { }, WorldKind.Client)));
         Assert.True(EcsPrograms.Available);  // server binds still work on it
     }
 
@@ -424,7 +427,7 @@ public sealed unsafe class EcsProgramsClientTests : KilnTest
         }
     }
 
-    // ---- the fake kiln.world (480 bytes: v2, padding, the four client-world members) ----
+    // ---- the fake kiln.world (528 bytes: v2, padding, the foreign views unset, the four client-world members) ----
     private sealed class FakeClientWorld : IDisposable
     {
         private static FakeClientWorld? Current;

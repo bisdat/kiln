@@ -275,16 +275,38 @@ check_authenticode() {
   "$here/authenticode.sh" verify "${files[@]}" "${inner[@]}" "${rt[@]}"
 }
 
+# A test build's folder (release.sh --beta N): no nexus/, only the beta channel's manifests, each naming the build id
+check_beta_folder() {
+  [[ ! -e $out/nexus ]] || { echo "a test build has a nexus/ folder"; return 1; }
+  local f
+  for f in "$out"/updates/frostdev.io/*/latest.json; do
+    [[ $f == "$out/updates/frostdev.io/beta/latest.json" ]] || { echo "a test build must not write $f"; return 1; }
+  done
+  python3 - "$out/updates/frostdev.io/beta/latest.json" "$out/updates/github/latest.json" "$build_id" "$beta" <<'PY'
+import json, sys
+for p in sys.argv[1:3]:
+    m = json.load(open(p))
+    k = m.get("kiln", {})
+    assert m["version"] == sys.argv[3], (p, m["version"])
+    assert k.get("channel") == "beta" and k.get("beta") == int(sys.argv[4]), (p, k)
+print("beta manifests:", sys.argv[3])
+PY
+}
+
 run_checks() {
   ck=$work/checks
   rm -rf "$ck" && mkdir -p "$ck"
   check "SHA256SUMS matches the folder" python3 "$lib/release.py" sums "$out" --check
   python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["plugins"]["updater"]["pubkey"])' \
     "$src/launcher/src-tauri/tauri.conf.json" >"$ck/embedded.pub"
-  check "updater signatures verify against the launcher's built-in key, signed for $version" \
-    python3 "$lib/release.py" verify --pubkey "$ck/embedded.pub" --version "$version" "${updater_files[@]}"
+  # a test build's files are signed for its build id (X.Y.Z-dev.N+beta.B), a release's for its version
+  check "updater signatures verify against the launcher's built-in key, signed for ${build_id:-$version}" \
+    python3 "$lib/release.py" verify --pubkey "$ck/embedded.pub" --version "${build_id:-$version}" "${updater_files[@]}"
   check "AppImage --selftest on a private display (distribution direct)" check_appimage
-  check "Nexus AppImage --selftest on a private display (distribution nexus)" check_appimage "$out/nexus/linux/$A" appimage-nexus nexus
+  # a test build has no Nexus Mods build (release.sh nexus_build)
+  if ((${nexus_build:-1})); then
+    check "Nexus AppImage --selftest on a private display (distribution nexus)" check_appimage "$out/nexus/linux/$A" appimage-nexus nexus
+  fi
   if [[ -n $setup ]]; then
     check "NSIS setup installs silently under Wine and passes --selftest (distribution direct)" check_nsis
     check "kilnctl.exe and kiln.exe --version under Wine" check_wine_cli
@@ -294,9 +316,13 @@ run_checks() {
       check_nsis "$out/nexus/windows/$S" wine-pfx-nexus nexus
   fi
   check "deb control and files (dpkg-deb -I/-c equivalent)" python3 "$lib/release.py" deb "$out/linux/$D" --version "$version" --need usr/bin/kiln-launcher
-  check "Nexus deb control and files" python3 "$lib/release.py" deb "$out/nexus/linux/$D" --version "$version" --need usr/bin/kiln-launcher
-  check "the Nexus builds hold none of the self-update (update feeds, updater key, updater plugin; no .sig): AppImage, deb, setup, installed exe" \
-    check_nexus_updater
+  if ((${nexus_build:-1})); then
+    check "Nexus deb control and files" python3 "$lib/release.py" deb "$out/nexus/linux/$D" --version "$version" --need usr/bin/kiln-launcher
+    check "the Nexus builds hold none of the self-update (update feeds, updater key, updater plugin; no .sig): AppImage, deb, setup, installed exe" \
+      check_nexus_updater
+  else
+    check "a test build has no Nexus Mods build and no dev or stable manifest" check_beta_folder
+  fi
   check "the direct builds still hold their self-update (feeds, updater key, plugin)" check_direct_updater
   [[ -n $rpm ]] && check "rpm contains usr/bin/kiln-launcher" check_rpm
   check "kilnctl bundle verify on the runtime zip" "$out/runtime/kilnctl" bundle verify "$out/runtime/kiln-runtime-$version.zip"
@@ -312,8 +338,10 @@ run_checks() {
     python3 "$lib/release.py" glibc "$out" --max "${glibc_max:-2.35}" --tmp "$ck"
   check "kilnctl, kiln and the AppImage start on a clean Ubuntu 22.04 (--selftest, the launcher's window; screenshot in checks/start-ubuntu22)" \
     check_start_ubuntu
-  check "Nexus AppImage starts on a clean Ubuntu 22.04 (distribution nexus; screenshot in checks/start-ubuntu22-nexus)" \
-    check_start_ubuntu nexus
+  if ((${nexus_build:-1})); then
+    check "Nexus AppImage starts on a clean Ubuntu 22.04 (distribution nexus; screenshot in checks/start-ubuntu22-nexus)" \
+      check_start_ubuntu nexus
+  fi
   check "the disabled-Nexus tripwire tests run with KILN_NEXUS_ENABLED=0 and pass (skipped when the release has Nexus on)" \
     check_disabled_nexus_tests
   check "dotnet new kiln-mod from the packed templates builds against the packed SDK (local feed)" check_template

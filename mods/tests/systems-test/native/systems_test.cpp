@@ -519,8 +519,8 @@ struct {
 // The stop row (dev.29): a Before on fuel_network made when the rows are done stays applied until the world stops. At
 // KILN_WORLD_STOPPING kiln.world closes admission, restores the entry and waits for the pool's calls in flight (up to
 // 2 s); the wrap goes back to PENDING (for the next world). Checked when the process exits (on_unload): the wrap is
-// PENDING with no call running, after slices ran in it. kiln.world's own "world 0 stops" line says how long the drain
-// took; a "wrap drain timed out" line would be the failure.
+// PENDING with no call running, after slices ran in it, and its detail carries the drain's own numbers ("world stop: N in
+// flight at the stop, M after the wait (T us)"): M must be 0. A "wrap drain timed out" line in kiln.log is the failure.
 struct {
     KilnHandle handle = 0;
     Seen seen;
@@ -535,10 +535,16 @@ void KILN_CALL on_unload(void*) {
     const KilnGameWrapInfo i = winfo(g_stop.handle);
     const uint64_t slices = g_stop.seen.slices.load(), worker = g_stop.seen.worker.load();
     const int threads = g_stop.seen.threads.count();
-    row(i.state == KILN_WRAP_PENDING && i.running == 0 && !i.gone && slices > 0 && i.faults == 0,
+    unsigned at_stop = 0, after = 1;
+    long long us = -1;
+    const bool numbers = std::sscanf(i.detail, "world stop: %u in flight at the stop, %u after the wait (%lld us)", &at_stop,
+                                     &after, &us) == 3;
+    row(i.state == KILN_WRAP_PENDING && i.running == 0 && !i.gone && slices > 0 && i.faults == 0 && numbers && after == 0,
         "stop: a wrap applied when the world stopped went back to PENDING with 0 calls running, every in-flight stage drained "
-        "(state %u, running %u, %llu slices ran in it before the stop on %d thread(s), %llu off the tick thread)",
-        i.state, i.running, static_cast<unsigned long long>(slices), threads, static_cast<unsigned long long>(worker));
+        "(state %u, running %u, %llu slices ran in it before the stop on %d thread(s), %llu off the tick thread; the drain: "
+        "%u in flight at the stop, %u after the wait, %lld us; detail \"%s\")",
+        i.state, i.running, static_cast<unsigned long long>(slices), threads, static_cast<unsigned long long>(worker), at_stop,
+        after, us, i.detail);
     say("stop row done, %d PASS, %d FAIL in all", g_pass, g_fail);
 }
 

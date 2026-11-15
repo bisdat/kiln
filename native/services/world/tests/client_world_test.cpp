@@ -15,9 +15,9 @@
 #include "nlohmann/json.hpp"
 
 // The four members appended in 0.2.0-dev.29, after game_program_contract (440): tests/abi.json says the same.
-static_assert(offsetof(KilnWorldApi, register_program_world) == 448 && offsetof(KilnWorldApi, program_world_state) == 456 &&
-              offsetof(KilnWorldApi, bind_program_world) == 464 && offsetof(KilnWorldApi, unbind_program_world) == 472 &&
-              sizeof(KilnWorldApi) == 480);
+static_assert(offsetof(KilnWorldApi, register_program_world) == 496 && offsetof(KilnWorldApi, program_world_state) == 504 &&
+              offsetof(KilnWorldApi, bind_program_world) == 512 && offsetof(KilnWorldApi, unbind_program_world) == 520 &&
+              sizeof(KilnWorldApi) == 528);
 
 namespace kw {
 const KilnApi* g_api;
@@ -315,9 +315,9 @@ int main(int argc, char** argv) {
         nlohmann::json want = nlohmann::json::object();
         want["size"] = sizeof(KilnWorldApi);
         want["fields"] = fields;
-        check(fx == want, "abi.json: KilnWorldApiClientPrograms field for field (448, 456, 464, 472; 480 bytes)");
-        check(fx.at("fields")[0][1] == offsetof(KilnWorldApi, game_program_contract) + sizeof(void*),
-              "the first appended member follows game_program_contract");
+        check(fx == want, "abi.json: KilnWorldApiClientPrograms field for field (496, 504, 512, 520; 528 bytes)");
+        check(fx.at("fields")[0][1] == offsetof(KilnWorldApi, foreign_attr_changed) + sizeof(void*),
+              "the first appended member follows the foreign views (06c), the table's previous end");
     }
     KilnApi api{};
     api.size = sizeof api;

@@ -354,15 +354,22 @@ const KilnWorldApi kTable = {
     &game_slice_attr_validate,
     &game_world_session,
     &game_program_contract,
-    // since 0.2.0-dev.29: Kiln programs in a client's client world and prediction storage (chapter 14), at 448..472
+    &foreign_layout,
+    &foreign_slot,
+    &foreign_check,
+    &foreign_read,
+    &foreign_write,
+    &foreign_attr_changed,
+    // since 0.2.0-dev.29: Kiln programs in a client's client world and prediction storage (chapter 14), at 496..520
+    // (after 06c's foreign views)
     &register_program_world,
     &program_world_state,
     &bind_program_world,
     &unbind_program_world,
 };
-static_assert(sizeof(KilnWorldApi) == 480 && offsetof(KilnWorldApi, register_program_world) == 448 &&
-                  offsetof(KilnWorldApi, unbind_program_world) == 472,
-              "kiln.world's table: the client-world members append at 448");
+static_assert(sizeof(KilnWorldApi) == 528 && offsetof(KilnWorldApi, foreign_attr_changed) == 488 &&
+                  offsetof(KilnWorldApi, register_program_world) == 496 && offsetof(KilnWorldApi, unbind_program_world) == 520,
+              "kiln.world's table: the client-world members append at 496, after the foreign views");
 
 void KILN_CALL on_client_pre(const KilnTickInfo* tick, void*) {
     game_programs_pre(KILN_WORLD_CLIENT, tick);

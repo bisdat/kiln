@@ -172,6 +172,50 @@ pub struct InstallState {
     /// reinstall adds: defaults not turned off and requirements of the resulting selection.
     #[serde(default)]
     pub missing_parts: Vec<String>,
+    /// (dev.29) The game's Kiln came with a test build of the launcher and the launcher that asks ships an older one:
+    /// after a switch back to the release, its next Play puts its own in ([`switch_back`]). Filled by the launcher
+    /// (it knows the runtime it ships); [`status`] leaves it None.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub switch_back: Option<SwitchBack>,
+}
+
+/// (dev.29) Kiln from a test build in a game whose launcher went back to the release: `from` the game has, `to` the
+/// launcher's own runtime (older), which its next Play installs. Install, receipts and refusals are those of any install.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwitchBack {
+    pub from: String,
+    pub to: String,
+}
+
+/// The receipt's installer is a test build of the launcher: `kiln-launcher <version> beta <n>` (the launcher writes it
+/// so since dev.29). Any other installer (a release launcher, kilnctl, `kiln-manage <v>`, none) is not.
+pub fn installed_by_test_build(r: &InstallReceipt) -> bool {
+    let Some(rest) = r.installer.as_deref().and_then(|i| i.strip_prefix("kiln-launcher ")) else { return false };
+    let mut words = rest.split_whitespace();
+    let _version = words.next();
+    matches!((words.next(), words.next(), words.next()), (Some("beta"), Some(n), None) if !n.is_empty() && n.bytes().all(|c| c.is_ascii_digit()))
+}
+
+/// The switch back a launcher offers for a game: its Kiln came with a test build of the launcher
+/// ([`installed_by_test_build`]), this launcher is not one, and the runtime it ships (`shipped`, a bundle in
+/// `<data>/runtime/` for the game's side) is older than the game's. A newer shipped runtime is the ordinary update
+/// ([`InstallState::upgrade_available`]); the same one is nothing to do; a test build of the launcher keeps whatever
+/// the game has, as before (the player tests). Without a receipt (Kiln is not in the game, or the folder is not Kiln's)
+/// there is nothing to switch back.
+pub fn switch_back(receipt: Option<&InstallReceipt>, side: RunSide, shipped: Option<&str>, launcher_is_test_build: bool,
+                   bundles: &[crate::bundle::RuntimeBundle]) -> Option<SwitchBack> {
+    let r = receipt?;
+    let shipped = shipped?;
+    if launcher_is_test_build || !installed_by_test_build(r) || r.runtime.version == shipped {
+        return None;
+    }
+    let to = bundles.iter().find(|b| b.version == shipped && b.sides.contains(&side))?;
+    let older = match bundles.iter().find(|b| b.version == r.runtime.version) {
+        Some(installed) => crate::bundle::compare(to, installed) == std::cmp::Ordering::Less,
+        None => crate::bundle::compare_versions(&to.version, &r.runtime.version) == std::cmp::Ordering::Less,
+    };
+    older.then(|| SwitchBack { from: r.runtime.version.clone(), to: to.version.clone() })
 }
 
 use crate::bundle::RuntimeFile;
@@ -277,7 +321,7 @@ pub fn status(dirs: &DataDirs, install: &GameInstall) -> Result<InstallState> {
             .map(|b| b.version)
     });
     crate::filecache::flush();
-    Ok(InstallState { installed: receipt.is_some(), receipt, proxy, modified, upgrade_available, missing_parts })
+    Ok(InstallState { installed: receipt.is_some(), receipt, proxy, modified, upgrade_available, missing_parts, switch_back: None })
 }
 
 /// The components `requested` (None: defaults) for `side`, with everything they require.

@@ -120,6 +120,7 @@ impl Folder {
 
     /// The data folder for everyone but the move: refused while held (see the module docs).
     pub fn dirs(&self) -> Result<DataDirs, Error> {
+        if let Some(e) = crate::snapshot::startup::refusal() { return Err(e); }
         if let Some(e) = self.held_error() {
             return Err(e);
         }
@@ -133,7 +134,7 @@ impl Folder {
             OPEN_WHEN_BROKEN
         } else {
             match self.hold() {
-                Hold::Free => return None,
+                Hold::Free => return crate::snapshot::startup::command_refusal(cmd),
                 Hold::Elsewhere => OPEN_WHEN_ELSEWHERE,
                 Hold::Moving | Hold::Moved | Hold::Leaving | Hold::Undoing => OPEN_WHEN_MOVING,
             }

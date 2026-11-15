@@ -670,7 +670,8 @@ public readonly unsafe ref struct EcsProgramContext
     }
 }
 
-/// <summary>kiln.world's table up to its client-world members (0.2.0-dev.29: 480 bytes). Asked for on its own, so that
+/// <summary>kiln.world's table up to its client-world members (0.2.0-dev.29: 528 bytes, the last member at 520; a kiln.world
+/// whose header.size does not reach it has no client-world programs). Asked for on its own, so that
 /// <see cref="EcsWorldTable"/> (v2, 240 bytes) still binds server programs on an older kiln.world.</summary>
 [StructLayout(LayoutKind.Sequential)]
 internal unsafe struct EcsClientTable
@@ -679,11 +680,12 @@ internal unsafe struct EcsClientTable
     private fixed byte _v3v4[192];                    // 240..432: tracked writes and the game's programs
     public delegate* unmanaged[Cdecl]<uint, ulong> GameWorldSession;  // 432
     public nint GameProgramContract;                  // 440
-    public delegate* unmanaged[Cdecl]<ulong, uint, void*, ulong*, int> RegisterProgramWorld;  // 448
-    public delegate* unmanaged[Cdecl]<ulong, uint, int*, NativeStr*, int> ProgramWorldState;  // 456
+    private fixed byte _foreign[48];                  // 448..496: the foreign views (06c S5)
+    public delegate* unmanaged[Cdecl]<ulong, uint, void*, ulong*, int> RegisterProgramWorld;  // 496
+    public delegate* unmanaged[Cdecl]<ulong, uint, int*, NativeStr*, int> ProgramWorldState;  // 504
     public delegate* unmanaged[Cdecl]<ulong, NativeStr, NativeStr, uint, delegate* unmanaged[Cdecl]<void*, ulong*, uint, void*, void>,
-        void*, void*, ulong*, int> BindProgramWorld;  // 464
-    public delegate* unmanaged[Cdecl]<ulong, int> UnbindProgramWorld;  // 472
+        void*, void*, ulong*, int> BindProgramWorld;  // 512
+    public delegate* unmanaged[Cdecl]<ulong, int> UnbindProgramWorld;  // 520
 }
 
 [StructLayout(LayoutKind.Sequential)]

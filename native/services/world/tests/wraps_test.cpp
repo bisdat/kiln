@@ -7,6 +7,7 @@
 #include "../game_programs.cpp"
 #include "../layout.cpp"
 #include "../wraps.cpp"
+#include "../foreign.cpp"
 #include <barrier>
 
 #include <cstdarg>
@@ -30,14 +31,26 @@ std::atomic<uint64_t> g_internal_runs{0};
 std::atomic<bool> g_world_live{false};
 thread_local bool t_in_program = false;
 std::atomic<int> g_stop_timeout_logs{0};
+std::mutex g_log_mu;
+std::vector<std::string> g_log_lines;  // every kiln.log line the service wrote, formatted
 void logf(int, const char* fmt, ...) {
     if (std::strstr(fmt, "wrap drain timed out")) ++g_stop_timeout_logs;
-    if (!std::getenv("KILN_TEST_LOG")) return;
+    char buf[1024];
     va_list ap;
     va_start(ap, fmt);
-    std::vfprintf(stderr, fmt, ap);
+    std::vsnprintf(buf, sizeof buf, fmt, ap);
     va_end(ap);
-    std::fputc('\n', stderr);
+    {
+        std::lock_guard lock(g_log_mu);
+        g_log_lines.emplace_back(buf);
+    }
+    if (std::getenv("KILN_TEST_LOG")) std::fprintf(stderr, "%s\n", buf);
+}
+int logs_with(const char* text) {
+    std::lock_guard lock(g_log_mu);
+    int n = 0;
+    for (const auto& l : g_log_lines) n += l.find(text) != std::string::npos;
+    return n;
 }
 bool seh_copy(void* to, const void* from, size_t size) {
     if (!from || !to) return false;
@@ -103,6 +116,20 @@ bool map_find_u16(uintptr_t, uint32_t key, uint16_t* value) {
     const auto it = g_type_index.find(key);
     if (it == g_type_index.end()) return false;
     if (value) *value = it->second;
+    return true;
+}
+// the engine's ReadOther / WriteOther over a fake store: entity -> component bytes, per accessor
+std::map<std::pair<uintptr_t, uint32_t>, std::vector<uint8_t>> g_fstore;
+int g_fwrites = 0;
+bool seh_read_other(Slice* out, void*, void* accessor, uint32_t entity, unsigned long*) {
+    const auto at = g_fstore.find({reinterpret_cast<uintptr_t>(accessor), entity});
+    *out = at == g_fstore.end() ? Slice{} : Slice{at->second.data(), at->second.size()};
+    return true;
+}
+bool seh_write_other(Slice* out, void*, ProgramCtx*, uint64_t accessor, uint32_t entity, unsigned long*) {
+    ++g_fwrites;  // the tracker marks it
+    const auto at = g_fstore.find({static_cast<uintptr_t>(accessor), entity});
+    *out = at == g_fstore.end() ? Slice{} : Slice{at->second.data(), at->second.size()};
     return true;
 }
 }  // namespace kw
@@ -1127,7 +1154,10 @@ void stopping_under_load() {
     stopper.join();
     check(stopped.load() && wraps_test_in_flight(0) == 0 && winfo(b.h).state == KILN_WRAP_PENDING,
           "blocked stage finishes normally; stop drains and returns it to pending");
+    check(std::string(winfo(b.h).detail).rfind("world stop: 1 in flight at the stop, 0 after the wait (", 0) == 0,
+          "a stage back in PENDING says what the stop's drain found (1 call in flight at the stop, none after the wait)");
     game_program_unwrap(b.h);
+    check(std::string(winfo(b.h).detail) == "unwrapped", "once removed its detail is the removal's again");
     world_event(KILN_WORLD_STARTED, KILN_WORLD_SERVER);
     wpre();
 }
@@ -1147,6 +1177,8 @@ void stopping_timeout() {
     world_event(KILN_WORLD_STOPPING, KILN_WORLD_SERVER);
     check(g_stop_timeout_logs.load() == logs + 1 && winfo(h).running == 1 && !g_retired.empty(),
           "bounded stop logs once and retains the chain while a callback still runs");
+    check(std::string(winfo(h).detail).rfind("world stop: 1 in flight at the stop, 1 after the wait (", 0) == 0,
+          "a timed-out drain says so in the waiting stage's detail (1 call still in flight after the wait)");
     b.release = true;
     worker.join();
     game_program_unwrap(h);
@@ -1154,6 +1186,39 @@ void stopping_timeout() {
     world_event(KILN_WORLD_STARTED, KILN_WORLD_SERVER);
     wpre();
     check(g_retired.empty(), "timed-out stop's chain is reclaimed only after its callback exits");
+}
+
+// The core's tick faulted (tick.cpp disable(): every world pointer cleared, no STOPPING will come): a slice that finds no
+// world of its kind closes the pool's admission, logs it once, and the game's update runs untouched from then on.
+std::atomic<int> g_fault_calls{0};
+void tick_fault_closes_admission() {
+    wworld(0);
+    world_event(KILN_WORLD_STARTED, KILN_WORLD_SERVER);
+    wpre();
+    const auto h = wrap(97, "fuel_network", KILN_WRAP_BEFORE, 0, [](KilnGameSlice*, void*) { ++g_fault_calls; }, nullptr);
+    wpre();
+    Job j(3);
+    run_slice(wentry(1), j);
+    check(g_fault_calls.load() == 1 && winfo(h).state == KILN_WRAP_ACTIVE, "tick fault: the stage runs while the tick works");
+    const auto runs = g_original_runs[1].load();
+    const auto bad = g_bad_index.load();
+    const int logged = logs_with("wrap admission is closed");
+    const uintptr_t live = g_live_world[0];
+    g_live_world[0] = 0;  // disable(): Kiln no longer knows the world, and no STOPPING follows
+    run_slice(wentry(1), j);
+    run_slice(wentry(1), j);
+    check(g_fault_calls.load() == 1 && g_original_runs[1].load() == runs + 2 && g_bad_index.load() == bad,
+          "tick fault: no stage starts once the world is unknown; the game's update runs untouched");
+    check(logs_with("wrap admission is closed") == logged + 1 && logs_with("its tick hook faulted") >= 1,
+          "tick fault: the closed admission is logged once for the world kind");
+    g_live_world[0] = live;
+    run_slice(wentry(1), j);
+    check(g_fault_calls.load() == 1, "tick fault: admission stays closed (a faulted tick sends no STARTED)");
+    world_event(KILN_WORLD_STOPPING, KILN_WORLD_SERVER);
+    game_program_unwrap(h);
+    world_event(KILN_WORLD_STARTED, KILN_WORLD_SERVER);
+    wpre();
+    check(update_of(wentry(1)) == reinterpret_cast<uintptr_t>(kWUpdates[1]), "tick fault row: the entry is the game's again");
 }
 
 void retirement_under_load() {
@@ -1486,8 +1551,8 @@ void per_entity() {
         bits[0] &= ~(1ull << at);
         g_seen4 = Seen{};
         run_slice(wentry(0), j2);
-        check(g_seen4.archetype == 0 && g_seen4.archetype_rc == KILN_ERR_UNAVAILABLE,
-              "a nonempty slice with no entity-map entry reports an undecidable archetype, not an empty slice");
+        check(g_seen4.archetype == 0 && g_seen4.archetype_rc == KILN_WORLD_ERR_CHANGED,
+              "a nonempty slice with no entity-map entry is a change under the read (transient), not an empty slice");
         bits[0] |= 1ull << at;
         Job empty(0);
         counts(empty, 1, 1, 2);
@@ -1587,18 +1652,18 @@ void per_entity() {
         check(archetype_of(ids[2], &rc) == reinterpret_cast<uintptr_t>(lay[2]) && rc == KILN_OK &&
                   archetype_of(ids[1], &rc) == reinterpret_cast<uintptr_t>(lay[1]) && rc == KILN_OK,
               "archetype: after an earlier entity of its probe chain was removed, a later one is still found");
-        check(archetype_of(ids[0], &rc) == 0 && rc == KILN_ERR_UNAVAILABLE,
-              "archetype: a removed entity is a miss (its emptied slot stops the probe; a stale key there is not read)");
+        check(archetype_of(ids[0], &rc) == 0 && rc == KILN_WORLD_ERR_CHANGED,
+              "archetype: a removed entity is a transient miss (its emptied slot stops the probe; a stale key there is not read)");
         // a record the pool gave to another entity: the map's slot still names the id, the record names another one
         const uint32_t other = ids[0] + 77777;
         std::memcpy(recs[1] + 0x10, &other, 4);
-        check(archetype_of(ids[1], &rc) == 0 && rc == KILN_ERR_UNAVAILABLE,
-              "archetype: a record that names another entity is a miss, not that entity's archetype");
+        check(archetype_of(ids[1], &rc) == 0 && rc == KILN_WORLD_ERR_CHANGED,
+              "archetype: a record that names another entity is a transient miss, not that entity's archetype");
         std::memcpy(recs[1] + 0x10, &ids[1], 4);
         const int64_t saved = L.entity_id;
         L.entity_id = -1;
         check(archetype_of(ids[1], &rc) == 0 && rc == KILN_ERR_UNAVAILABLE,
-              "archetype: without the record's id offset the layout is not trusted");
+              "archetype: without the record's id offset the layout is not trusted (this build cannot read archetypes)");
         L.entity_id = saved;
         // A concurrent map mutation during the archetype read (a grow, or an insert/erase) is detected: the test seam
         // changes the map between the layout read and the coherence re-check, and the read turns undecidable instead of
@@ -1610,12 +1675,12 @@ void per_entity() {
         check(archetype_of(ids[2], &rc) == reinterpret_cast<uintptr_t>(lay[2]) && rc == KILN_OK,
               "archetype: decides when the map does not change under the read");
         wraps_test_archetype_gap(+[] { uint32_t c = g_m2count + 1; std::memcpy(reinterpret_cast<void*>(g_m2 + 0x54), &c, 4); });
-        check(archetype_of(ids[2], &rc) == 0 && rc == KILN_ERR_UNAVAILABLE,
-              "archetype: a count change under the read (a concurrent insert or erase) turns the filter off, not a wrong archetype");
+        check(archetype_of(ids[2], &rc) == 0 && rc == KILN_WORLD_ERR_CHANGED,
+              "archetype: a count change under the read (a concurrent insert or erase) is transient, not a wrong archetype");
         std::memcpy(m2 + 0x54, &mcount, 4);
         wraps_test_archetype_gap(+[] { uint64_t c = 16; std::memcpy(reinterpret_cast<void*>(g_m2 + 0x10), &c, 8); });
-        check(archetype_of(ids[2], &rc) == 0 && rc == KILN_ERR_UNAVAILABLE,
-              "archetype: a capacity change under the read (a grow that moved the arrays) turns the filter off");
+        check(archetype_of(ids[2], &rc) == 0 && rc == KILN_WORLD_ERR_CHANGED,
+              "archetype: a capacity change under the read (a grow that moved the arrays) is transient");
         std::memcpy(m2 + 0x10, &cap, 8);
         wraps_test_archetype_gap(nullptr);
         check(archetype_of(ids[2], &rc) == reinterpret_cast<uintptr_t>(lay[2]) && rc == KILN_OK,
@@ -1843,6 +1908,82 @@ void stress_overlap() {
           "overlap stress: 2,000 chain changes under 8 threads' slices, every chain freed, in-flight 0");
 }
 
+// ---- foreign views (chapter 06c 9.1): another service's code inside a game program's update, with its iterator ----
+NameRef g_fo_read[] = {{"Health", 6}, {"CurrentTransform", 16}}, g_fo_write[] = {{"Fuel", 4}};
+void foreign_views() {
+    // program 1 of the live world (per_entity's): other_read Health and CurrentTransform, other_write Fuel
+    g_wdesc[1].other_read = {g_fo_read, 2};
+    g_wdesc[1].other_write = {g_fo_write, 1};
+    KilnForeignLayout l{};
+    l.size = sizeof l;
+    check(foreign_layout(KILN_WORLD_SERVER, kstr("no_such_program"), &l) == KILN_ERR_NOT_FOUND, "foreign: no such program");
+    check(foreign_layout(KILN_WORLD_SERVER, kstr(kWNames[1]), &l) == KILN_OK && l.program == idx(kWNames[1]) &&
+              l.session == game_world_session(KILN_WORLD_SERVER) && l.counts[5] == 3 && l.iter_size == 4 * 8 && l.handle,
+          "foreign: the view of a program: its other lists (3 accessors after ctx), the session and index");
+    // other_read by type index (CurrentTransform 5, Health 30), then other_write (Fuel)
+    check(foreign_slot(&l, KILN_GAME_LIST_OTHER_READ, kstr("CurrentTransform")) == 1 &&
+              foreign_slot(&l, KILN_GAME_LIST_OTHER_READ, kstr("Health")) == 2 &&
+              foreign_slot(&l, KILN_GAME_LIST_OTHER_WRITE, kstr("Fuel")) == 3 &&
+              foreign_slot(&l, KILN_GAME_LIST_OTHER_WRITE, kstr("Health")) == -1,
+          "foreign: slots by the view algorithm (sorted by type index within a list)");
+    Job j(1);
+    counts(j, 0, 0, 0);
+    j.bytes[0x7A8] = 3;  // the job's other count
+    L.job_storage = 0x20;  // the job's storage (JobStorage) for ReadOther / WriteOther
+    static uint8_t job_storage[16];
+    const auto js = reinterpret_cast<uintptr_t>(job_storage);
+    std::memcpy(j.bytes + 0x20, &js, 8);
+    ProgramCtx ctx{j.bytes, 0, 0};
+    uint16_t health_type = 30, fuel_type = 20, wrong_type = 21, ct_type = 5;
+    uint64_t iter[4] = {reinterpret_cast<uint64_t>(&ctx), reinterpret_cast<uint64_t>(&ct_type),
+                        reinterpret_cast<uint64_t>(&health_type), reinterpret_cast<uint64_t>(&fuel_type)};
+    uint32_t jc[8] = {};
+    check(foreign_check(&l, iter, jc) == KILN_OK && jc[5] == 3, "foreign: the job's group counts are the view's");
+    j.bytes[0x7A8] = 2;
+    check(foreign_check(&l, iter, jc) == KILN_ERR_UNAVAILABLE && jc[5] == 2, "foreign: other counts differ: refused");
+    j.bytes[0x7A8] = 3;
+    F.read_other = true;
+    fn.read_other = [](Slice*, void*, void*, uint32_t) {};
+    F.write_other = true;
+    g_fstore[{iter[2], 7}] = {1, 2, 3, 4};
+    g_fstore[{iter[3], 7}] = {9, 9};
+    uint32_t size = 0;
+    KilnResult rc = KILN_ERR_INTERNAL;
+    const void* h = foreign_read(&l, iter, kstr("Health"), 7, &size, &rc);
+    check(h && rc == KILN_OK && size == 4 && static_cast<const uint8_t*>(h)[2] == 3, "foreign: read another entity's component");
+    check(!foreign_read(&l, iter, kstr("Health"), 8, &size, &rc) && rc == KILN_OK && size == 0,
+          "foreign: an entity without it: null, no error");
+    check(!foreign_read(&l, iter, kstr("Mana"), 7, &size, &rc) && rc == KILN_ERR_NOT_FOUND,
+          "foreign: a component the program does not declare: refused, no access");
+    const int writes = g_fwrites;
+    auto* f = static_cast<uint8_t*>(foreign_write(&l, iter, kstr("Fuel"), 7, &size, &rc));
+    check(f && rc == KILN_OK && size == 2 && g_fwrites == writes + 1, "foreign: write through other_write, marked by the tracker");
+    check(!foreign_write(&l, iter, kstr("Health"), 7, &size, &rc) && rc == KILN_ERR_NOT_FOUND && g_fwrites == writes + 1,
+          "foreign: a read-only component is not written");
+    check(foreign_read(&l, iter, kstr("Fuel"), 7, &size, &rc) && rc == KILN_OK, "foreign: other_write is readable too");
+    // an accessor that is not the component map's type: refused, and stays refused for that view
+    KilnForeignLayout l2{};
+    l2.size = sizeof l2;
+    check(foreign_layout(KILN_WORLD_SERVER, kstr(kWNames[1]), &l2) == KILN_OK, "foreign: a second view");
+    uint64_t bad[4] = {iter[0], iter[1], reinterpret_cast<uint64_t>(&wrong_type), iter[3]};
+    g_fstore[{bad[2], 7}] = {1};
+    check(!foreign_read(&l2, bad, kstr("Health"), 7, &size, &rc) && rc == KILN_ERR_UNAVAILABLE &&
+              !foreign_read(&l2, iter, kstr("Health"), 7, &size, &rc) && rc == KILN_ERR_UNAVAILABLE,
+          "foreign: an accessor of another type is refused once and for the view");
+    check(foreign_attr_changed(&l, iter, f) == KILN_ERR_UNAVAILABLE, "foreign: attribute formulas not known here: unavailable");
+    // the world goes: the view is void
+    world_event(KILN_WORLD_STOPPING, KILN_WORLD_SERVER);
+    check(!foreign_read(&l, iter, kstr("Health"), 7, &size, &rc) && rc == KILN_ERR_UNAVAILABLE &&
+              foreign_check(&l, iter, nullptr) == KILN_ERR_UNAVAILABLE && foreign_slot(&l, KILN_GAME_LIST_OTHER_READ, kstr("Health")) == -1,
+          "foreign: a view of a world that stopped answers nothing");
+    world_event(KILN_WORLD_STARTED, KILN_WORLD_SERVER);
+    wpre();
+    g_wdesc[1].other_read = {};
+    g_wdesc[1].other_write = {};
+    F.read_other = F.write_other = false;
+    L.job_storage = -1;
+}
+
 // ---- tests/abi.json: the v4 table and its structs, field for field ----
 void abi(const char* path) {
     std::ifstream in(path);
@@ -1855,8 +1996,8 @@ void abi(const char* path) {
     };
 #define F(S, f) l.push_back(nlohmann::json::array({#f, offsetof(S, f)}))
     {
-        // the v4 table up to game_program_contract (0.2.0-dev.29's client-world members after it: client_world_test.cpp)
-        auto& l = list("KilnWorldApiV4", offsetof(KilnWorldApi, game_program_contract) + sizeof(void*));
+        // the v4 table up to the foreign views (0.2.0-dev.29's client-world members after them: client_world_test.cpp)
+        auto& l = list("KilnWorldApiV4", offsetof(KilnWorldApi, foreign_attr_changed) + sizeof(void*));
         F(KilnWorldApi, header); F(KilnWorldApi, register_program); F(KilnWorldApi, program_slot); F(KilnWorldApi, program_info);
         F(KilnWorldApi, iter_begin); F(KilnWorldApi, iter_next); F(KilnWorldApi, current_entity); F(KilnWorldApi, command_buffer);
         F(KilnWorldApi, queue_push); F(KilnWorldApi, queue_add); F(KilnWorldApi, queue_remove); F(KilnWorldApi, mark_written);
@@ -1873,6 +2014,14 @@ void abi(const char* path) {
         F(KilnWorldApi, game_slice_iterate); F(KilnWorldApi, game_slice_slot); F(KilnWorldApi, game_slice_mark);
         F(KilnWorldApi, game_slice_archetype); F(KilnWorldApi, game_archetype_has); F(KilnWorldApi, game_slice_attr_changed); F(KilnWorldApi, game_slice_attr_validate); F(KilnWorldApi, game_world_session);
         F(KilnWorldApi, game_program_contract);
+        F(KilnWorldApi, foreign_layout); F(KilnWorldApi, foreign_slot); F(KilnWorldApi, foreign_check);
+        F(KilnWorldApi, foreign_read); F(KilnWorldApi, foreign_write); F(KilnWorldApi, foreign_attr_changed);
+    }
+    {
+        auto& l = list("KilnForeignLayout", sizeof(KilnForeignLayout));
+        F(KilnForeignLayout, size); F(KilnForeignLayout, world_kind); F(KilnForeignLayout, session);
+        F(KilnForeignLayout, program); F(KilnForeignLayout, iter_size); F(KilnForeignLayout, counts);
+        F(KilnForeignLayout, handle); F(KilnForeignLayout, why);
     }
     {
         auto& l = list("KilnGameSlice", sizeof(KilnGameSlice));
@@ -1978,8 +2127,10 @@ int main(int argc, char** argv) {
     wpre();
     stopping_under_load();
     stopping_timeout();
+    tick_fault_closes_admission();
     retirement_under_load();
     per_entity();
+    foreign_views();
     directory_read_in_stage();
     stress_steps();
     stress_overlap();

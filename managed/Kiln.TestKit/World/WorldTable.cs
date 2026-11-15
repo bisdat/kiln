@@ -186,7 +186,10 @@ internal static unsafe class WorldAbi
         public delegate* unmanaged[Cdecl]<SystemsNative.Slice*, ulong*, int, int, int> GameSliceAttrValidate;
         public delegate* unmanaged[Cdecl]<uint, ulong> GameWorldSession;
         public delegate* unmanaged[Cdecl]<uint, int, uint*, byte*, uint, uint*, int> GameProgramContract;
-        // since 0.2.0-dev.29 (448..472): Kiln programs in a client's worlds. The kit fakes a server world only: no.
+        // since 0.2.0-dev.29 (06c S5): foreign views, for native services (kiln.abilities' natives); no managed caller
+        public nint ForeignLayout, ForeignSlot, ForeignCheck, ForeignRead, ForeignWrite, ForeignAttrChanged;
+        // since 0.2.0-dev.29 (496..520, after the foreign views): Kiln programs in a client's worlds. The kit fakes a
+        // server world only: no.
         public delegate* unmanaged[Cdecl]<ulong, uint, void*, ulong*, int> RegisterProgramWorld;
         public delegate* unmanaged[Cdecl]<ulong, uint, int*, NativeStr*, int> ProgramWorldState;
         public delegate* unmanaged[Cdecl]<ulong, NativeStr, NativeStr, uint, void*, void*, void*, ulong*, int> BindProgramWorld;

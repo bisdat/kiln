@@ -14,6 +14,7 @@
     <NoWarn>$(NoWarn);KILNX001</NoWarn>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../client-pass/VfxBudgetProof.cs" Link="VfxBudgetProof.cs" />
     <ProjectReference Include="../../../managed/Kiln.Api/Kiln.Api.csproj" Private="false" ExcludeAssets="runtime" />
     <ProjectReference Include="../../../managed/services/Kiln.Vfx/Kiln.Vfx.csproj" Private="false" ExcludeAssets="runtime" />
     <!-- Budget.cs: the guided check 17-vfx-budget's VFX, defined with an answer (Blocks.Define(name, VfxBlock, options)). -->

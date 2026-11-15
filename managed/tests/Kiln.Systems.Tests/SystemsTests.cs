@@ -655,6 +655,40 @@ public sealed unsafe class SystemsTests
         Assert.Equal(1, ran);
     }
 
+    // kiln.world says the entity map changed under its read (KILN_WORLD_ERR_CHANGED, 100): a transient answer. The filter
+    // reads again (3 reads in all); still changed, it leaves that one slice to the game, counts it and says so once in
+    // kiln.log. It never turns the stage off for that: only "cannot be read on this build" (UNAVAILABLE) does.
+    [Fact]
+    public void A_changed_archetype_read_is_read_again_then_skips_only_that_slice_and_is_counted()
+    {
+        using var w = new FakeWorld();
+        var ran = 0;
+        var disabled = new List<WrapDisabledEvent>();
+        var wrap = Systems.Wrap("fuel_setup").Wrap!.WhenArchetype(["Fuel"]).Before((ref Slice s) => ran++);
+        wrap.Disabled += disabled.Add;
+        w.LayoutHas.Add(Hash("Fuel"));
+        const int changed = 100;
+        w.ArchetypeResults.Enqueue(changed);
+        w.ArchetypeResults.Enqueue(changed);
+        w.Call(w.Wraps[0]);
+        Assert.Equal(1, ran);                      // the third read decided
+        Assert.Equal(3, w.ArchetypeCalls);
+        w.ArchetypeCalls = 0;
+        w.ArchetypeResult = changed;
+        w.Call(w.Wraps[0]);
+        w.Call(w.Wraps[0]);
+        Assert.Equal(1, ran);                      // both slices left to the game
+        Assert.Equal(6, w.ArchetypeCalls);         // bounded: 3 reads per slice
+        Assert.Empty(disabled);
+        Assert.False(w.Wraps[0].Gone);
+        Assert.Equal(2, wrap.Stats.ArchetypeSkips);
+        Assert.Equal(1, FakeWorld.Logs.Count(l => l.Contains("WhenArchetype") && l.Contains("left to the game")));
+        w.ArchetypeResult = SystemsNative.Ok;
+        w.Call(w.Wraps[0]);
+        Assert.Equal(2, ran);                      // the stage was never off
+        Assert.Equal(0, wrap.Stats.Faults);
+    }
+
     [Fact]
     public void WhenArchetype_publishes_both_lists_and_its_cache_together()
     {

@@ -32,6 +32,12 @@ pub fn build_marker() -> &'static str {
     std::hint::black_box(MARKER)
 }
 
+/// (dev.29) This launcher's beta number when it is a test build (build.rs bakes `KILN_LAUNCHER_BETA`; only with the beta
+/// channel), else None. In every build: a Nexus build is never a test build (they go to frostdev.io and GitHub only).
+pub fn beta() -> Option<u32> {
+    env!("KILN_LAUNCHER_BUILD_BETA").parse().ok().filter(|n| *n > 0)
+}
+
 /// The Kiln page on Nexus Mods: where a Nexus build's new versions are (opened in the browser; nothing is fetched).
 pub const NEXUS_PAGE: &str = "https://www.nexusmods.com/enshrouded/mods/301";
 
@@ -67,5 +73,7 @@ mod tests {
         assert_eq!(serde_json::to_value(Distribution::Nexus).unwrap(), "nexus");
         assert_eq!(serde_json::to_value(Distribution::Direct).unwrap(), "direct");
         assert!(NEXUS_PAGE.starts_with("https://www.nexusmods.com/"));
+        // the tests are built without a beta number
+        assert_eq!(beta(), None);
     }
 }

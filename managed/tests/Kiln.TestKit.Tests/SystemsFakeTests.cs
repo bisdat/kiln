@@ -241,4 +241,45 @@ public sealed class SystemsFakeTests
         Assert.Equal([5, 5], values);
         Assert.Equal(0, kiln.Run(() => made.Wrap!.Stats).Faults);
     }
+
+    // kiln.spawn refuses to create or destroy inside the world's step (a wrap stage, a Kiln program): the kit's table does
+    // as the game's service does (WRONG_THREAD, for a native caller), Kiln.Spawn's message says how to defer the call,
+    // and posted, the call runs after the step.
+    [Fact]
+    public unsafe void Spawn_inside_a_wrap_stage_is_refused_and_the_message_names_slice_Post()
+    {
+        using var kiln = new KilnHarness();
+        kiln.Spawned.AddTemplate("Enemy_Vukah_Melee", TemplateKind.Creature, "Vukah");
+        var mod = kiln.Load<WrapMod>(new ModManifest("spawn-mid-step")); kiln.Step(1);
+        kiln.Programs.Add("fuel_setup", FuelLists); Containers(kiln);
+        string? created = null, destroyed = null;
+        var posted = 0;
+        var tableInside = new List<int>();
+        var victim = kiln.Entities.Create(new WorldPosition(9, 9, 9));
+        var table = (SpawnAbi.Table*)KitBackend.Instance.Service("kiln.spawn", 1);
+        kiln.As(mod, () => Systems.Wrap("fuel_setup").Wrap!.Before((ref Slice s) =>
+        {
+            uint id = 0;
+            var request = new SpawnAbi.Request { Size = (uint)sizeof(SpawnAbi.Request) };
+            tableInside.Add(table->Destroy(victim.Value));
+            tableInside.Add(table->Spawn(&request, &id));
+            try { Spawn.TryEntity("Enemy_Vukah_Melee", new WorldPosition(1, 2, 3)); }
+            catch (InvalidOperationException e) { created ??= e.Message; }
+            try { Spawn.Destroy(victim); }
+            catch (InvalidOperationException e) { destroyed ??= e.Message; }
+            if (posted == 0) s.Post(() => { if (Spawn.TryEntity("Enemy_Vukah_Melee", new WorldPosition(1, 2, 3)).Ok) posted++; });
+        }));
+        kiln.Step(3);
+        Assert.NotNull(created);
+        Assert.Contains("inside the world's step", created);
+        Assert.Contains("slice.Post", created);
+        Assert.NotNull(destroyed);
+        Assert.Contains("slice.Post", destroyed);
+        Assert.True(kiln.Entities.Exists(victim));
+        Assert.Equal(1, posted);
+        Assert.Single(kiln.Spawned.All);
+        Assert.True(tableInside.Count >= 2 && tableInside.All(rc => rc == FakeTables.WrongThread),
+            $"a native caller inside a stage gets WRONG_THREAD from the kit's kiln.spawn ({string.Join(",", tableInside)})");
+        Assert.Equal(FakeTables.Ok, kiln.Run(() => table->Destroy(victim.Value)));  // after the step: allowed again
+    }
 }

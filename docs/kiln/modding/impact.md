@@ -260,11 +260,13 @@ kiln.abilities states the same contract from the runtime side in docs/kiln/servi
   ```
   Parameters, `args[0]` first: `int` (sint32), `uint` (uint32), `float` (float32), `bool`, `TimeSpan` (Time),
   `EntityId` (ecs.EntityId), `Vector3` (float3), `DamageSetup` (impact.DamageSetup, 52 bytes); `ref` = in and out (a
-  live view of the variable; a `ref TimeSpan` is copied back after the method), `out` = out; `Optional<T>` for one the
+  live view of the variable; a `TimeSpan` is copied in and, when changed, copied back after the method, also when it
+  throws, and two `ref TimeSpan` arguments naming one variable share one copy), `out` = out; `Optional<T>` for one the
   program may leave not connected; `[Raw] uint` for one it may pass as a literal. An optional first `NativeContext`
   (`in` or by value) gives the call's `Self`, `Program`, `Site`, `ImpactId`. The return type is `bool`, `byte` or
   `void` (pushes 1). A shape the generator cannot make is a build error: KILN170 (not static, generic, a bad name),
-  KILN171 (a parameter type no native takes), KILN172 (the return type), KILN173 (a name used twice); KILN174 warns
+  KILN171 (a parameter type no native takes), KILN172 (the return type), KILN173 (a name used twice); the build task refuses a full name ("<modid>.<Name>") over 90 bytes of UTF-8, the
+  runtime's limit (KILN036); KILN174 warns
   when the project does not reference a Kiln.Abilities that has `ImpactNativeAccess`. The KilnImpactNatives build task
   reads the compiled assembly without loading it; KILN036 is an error when it cannot read or write. The cook then
   checks your programs against the generated types (`impact.py asm … --natives <output>/impact/natives.json`). The
