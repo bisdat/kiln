@@ -1,3 +1,5 @@
 #nullable enable
+Kiln.EffectBlock.Run.get -> Kiln.NativeRef?
+Kiln.EffectBlock.Run.init -> void
 static Kiln.Blocks.Define(string! name, Kiln.VfxBlock! block, Kiln.DefinitionRegistrationOptions! options) -> Kiln.DefinitionRegistrationResult!
 static Kiln.Blocks.GetVfxRegistration(System.Guid registrationId) -> Kiln.DefinitionRegistrationResult!

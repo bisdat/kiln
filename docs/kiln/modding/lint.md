@@ -657,6 +657,18 @@ blocks/s.json:6:84: warning KL333: tex/normal_grey.png is greyscale: a normal ma
 ```
 Fix: resize or re-save the image: colour maps (albedo, emissive) in sRGB, data maps (roughness, metallic, reflectance, height, AO) as greyscale, normal maps as RGB.
 
+### KL340 run-binding
+An effect's `"run": "<modid>.<Name>"` (since 0.2.0-dev.29) whose native, as this mod's `impact/natives.json` declares it, has a
+parameter Kiln.Blocks cannot bind: its parameters are bound by name (`self`, `target`, `attacker`, `caster`, `position`, `attackMod`,
+`damage`), and a required `attackMod` or `damage` needs an effect that deals damage (`damage` or `knockback`). Kiln.Blocks refuses
+the same at build time. Another mod's native, and a native this mod's files do not declare yet (the build writes the
+`[ImpactNative]` entries into the output's `impact/natives.json`: lint the built mod), are not checked.
+```text
+blocks/run.json:5:26: error KL340: run fixture-blocks-run.OnHit: parameter 'attackMod' has nothing to bind to: this effect deals no damage (give it damage, or make the parameter Optional)
+blocks/run.json:6:25: error KL340: run fixture-blocks-run.Odd: parameter 'victim' names nothing a run native gets; its parameters are named self, target, attacker, caster, position, attackMod, damage
+```
+Fix: rename the method's parameter to a binding, make it `Optional<T>`, or give the effect what it binds.
+
 ### KL401 unknown-reference
 Warning by default; an error where the reader refuses the file or the node (game-tree links, a talent node's `requires`).
 A name, id or GUID that neither the game nor the mods have. References to the game need the catalog.

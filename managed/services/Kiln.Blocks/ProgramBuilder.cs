@@ -226,10 +226,21 @@ internal sealed class ProgramBuilder(string key)
     private static uint Handle(int v) => 0xFFFF0000u | (uint)v;
 
     /// <summary>Calls a native; pushes its result byte (pop it, or branch on it). Arguments in args[] order; null = unconnected.</summary>
+    /// <summary>A Kiln native's call (an effect's <see cref="EffectBlock.Run"/>): its hash and argc are the caller's.</summary>
+    public void CallNative(string name, uint hash, string? site, params int?[] args) => Emit(name, hash, site, args);
+
+    /// <summary>A variable's type.</summary>
+    public ImpactType TypeOf(int v) => _vars[v].Type;
+
     public void Call(string native, string? site, params int?[] args)
     {
         var (hash, argc) = Natives[native];
         if (args.Length != argc) throw new InvalidOperationException($"{native}: {args.Length} arguments, needs {argc}");
+        Emit(native, hash, site, args);
+    }
+
+    private void Emit(string native, uint hash, string? site, int?[] args)
+    {
         for (var i = args.Length - 1; i >= 0; i--)
         {
             if (args[i] is { } v)
