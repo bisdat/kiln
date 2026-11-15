@@ -273,7 +273,8 @@ presentation; a program that must change what others see belongs in the server w
   world's first step kiln.log lists its event types (`client world 0x… event map (question 4): …`; a host's server world's
   too) while such a program exists.
 - **Threads.** The callback runs on the game's workers or the main thread, several slices at once: no tick-thread API in
-  it, UI work through `Client.Post`; `EcsProgramContext.World` says which world it is in. A client world's entity ids are
+  it, UI work through `Client.Post`; `EcsProgramContext.World` says which world it is in. kiln.spawn's create and
+  destroy (spawn, spawn_item, destroy, cleanup) refuse inside it, as inside any Kiln program or wrap stage: post them. A client world's entity ids are
   its own: the same number can name another entity in the server world.
 - **Stop and unload.** When the client world stops (leaving to the menu, joining elsewhere) no call starts, a slice
   already running stops before its next entity (your callback is not called for the rest of it), and inside a callback
