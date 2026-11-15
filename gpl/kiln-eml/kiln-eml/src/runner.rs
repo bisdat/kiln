@@ -93,6 +93,8 @@ pub struct Outcome {
     /// it was not compared with it and nothing was claimed or restored.
     #[serde(rename = "staleBackup", skip_serializing_if = "std::ops::Not::not")]
     pub stale_backup: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recovery: Option<serde_json::Value>,
     /// kiln-eml: EML loaders (`dbghelp.dll`, `dinput8.dll` and renamed builds) found in this process when it stood aside
     /// (phase `aside`). More than one: each patches the game files; `reason` says to keep one.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -124,6 +126,7 @@ impl Outcome {
             sf_displaced: Vec::new(),
             loaders: Vec::new(),
             stale_backup: false,
+            recovery: None,
             mods,
             progress: None,
         }
@@ -350,6 +353,12 @@ pub fn run(cfg: &RunConfig, mut mods: Vec<Utf8PathBuf>, entries: Vec<Entry>) -> 
     let mut out = Outcome::new(Phase::Done, entries);
     let finish = |mut o: Outcome| {
         if cfg.patch && !o.start_blocked && let Some(file) = o.file.as_deref() {
+            // Recovery is offered only for the receipt-less failed/idle case. Do not add full ownership
+            // hashing to successful or already-owned starts just to prepare a launcher offer.
+            if matches!(o.phase, Phase::Failed | Phase::Idle)
+                && cfg.game_dir.join(format!("kiln/eml/ownership/{file}.json")).try_exists().is_ok_and(|exists| !exists) {
+                o.recovery = lua::recovery_inventory(cfg.game_dir.as_std_path(), file).ok();
+            }
             match lua::retained_containers(cfg.game_dir.as_std_path(), file, o.phase == Phase::Done) {
                 Ok(files) if !files.is_empty() => {
                     let retained = format!("Extra archive containers retained: {}. They may belong to another loader or an earlier EML run; inspect them before manual cleanup. Steam verification may leave extra files", files.join(", "));

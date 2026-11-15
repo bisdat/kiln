@@ -377,3 +377,43 @@ from falling back to data-only if their adapter fails; new aside reporting recog
 records its reason in `emlRuntimeBlocked`; kiln-eml reports `skipped`. Without a hosted or own ShroudForge runtime,
 kiln-eml independently refuses the entire runtime package. A server-only/client-only package remains subject to
 ShroudForge's existing targets check (`other-side`); patch/export-only EML packages are unchanged.
+
+### Restore the game's data
+
+For a game folder another mod loader changed before Kiln. kiln-eml then finds game data it cannot prove it wrote
+("Game data is not output Kiln's EML writer can prove it published"), leaves it and the shared backups alone, and every
+EML mod fails. The launcher's Engines view (Logs, Engines) then offers **Restore the game's data**:
+
+1. Verify the game files in Steam (the game's Properties, Installed Files, "Verify integrity of game files"). Steam
+   puts the game's own files back; it does not remove the extra ones.
+2. If Steam repaired files, start the game through Kiln once more. kiln-eml reads the game's index at a start and
+   writes what it found into `kiln/state/eml.json` (`recovery`: the index's SHA-256, the number of archive containers
+   the index refers to, and that the data is unproven); the launcher takes the list of leftover files from that and
+   refuses to plan while the index on disk is not the one that was read. EML mods may fail once more in that start.
+3. The dialog lists every file with its size. Tick "I verified the game files in Steam" and choose **Move files
+   aside**.
+
+What moves, by rename and never by copy: the containers `enshrouded_NNN.dat` numbered at or past the count the game's
+own index refers to, the shared backup pair `enshrouded.kfc.bak` and `enshrouded.kfc_resources.bak`, the backup's seal
+and Kiln's own change cache (`kiln/eml/cache/files.json`, `files.partial.json`). They go to
+`kiln/eml/displaced/restore-<time>/` under their own names, beside a `manifest.json` that records each file's path,
+size and SHA-256, the time and how far the move got. Nothing is deleted and nothing is overwritten: a name that already
+exists stops the move. The next start through Kiln makes a fresh backup from the game data as it then is. Kiln never
+copies a backup over the game's data here.
+
+**Undo move** moves the files back and stays available after the launcher was closed. It is refused when one of the
+names exists again or a moved file's content changed. A move or an undo that was interrupted (a crash, a power cut) is
+finished the next time the launcher looks at this (the Engines view, or the move itself), with the game closed; when the
+game's index changed in between, an unfinished move is undone instead.
+
+Refused, each with its sentence: the game or its server is running; kiln-eml is writing; ShroudForge is the archive
+writer of the loaded profile (its own loader is installed, or Kiln hosts it for the profile's mods: the files may then
+be ShroudForge's own; a `shroudforge/` folder left from earlier does not count); Kiln has its own record of the data it
+wrote (`kiln/eml/ownership/`: then **Restore vanilla game data** above is the way); a link anywhere on a path; nothing
+left over. A game folder whose last start reported nothing unproven is not touched at all.
+
+Not covered: a game whose data changed after Kiln had written it (Kiln's record exists but no longer matches: another
+loader ran later). That case is as before: verify in Steam, then move the files by hand.
+
+Never run on Windows or against a real game folder; the moves are tested on Linux with an interruption at every step
+(`cargo test -p kiln-manage --features full restore_data`), the dialog with `launcher/tests/restore-data.spec.ts`.

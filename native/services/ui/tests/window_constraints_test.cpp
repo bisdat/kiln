@@ -1,0 +1,33 @@
+// The production drawing slot and its append-only x64 ABI, without a renderer or game.
+#include "../draw_slots.h"
+#include <cassert>
+#include <cstdio>
+namespace kui {
+bool drawing = false;
+bool in_frame() { return drawing; }
+void style_push(uint32_t) {}
+void style_pop() {}
+bool style_push_font(uint32_t) { return false; }
+void image_draw(KilnHandle, float, float) {}
+bool image_button(const char*, KilnHandle, float, float) { return false; }
+}
+static_assert(offsetof(KilnUiApi, set_next_window_size_constraints) == offsetof(KilnUiApi, subscribe_key_ex) + sizeof(void*));
+static_assert(offsetof(KilnUiApi, subscribe_key_ex) == 880);
+static_assert(offsetof(KilnUiApi, set_next_window_size_constraints) == 888);
+static_assert(sizeof(KilnUiApi) == offsetof(KilnUiApi, set_next_window_size_constraints) + sizeof(void*));
+int main() {
+    // Drawing off: no frame/context, just as KILN_UI_OVERLAY=0. Must not enter ImGui.
+    kui_draw::t_set_next_window_size_constraints(300, 0, 300, 918);
+    auto* ctx = ImGui::CreateContext();
+    kui::drawing = true;
+    kui_draw::t_set_next_window_size_constraints(300, 0, 300, 918);
+    assert(ctx->NextWindowData.HasFlags & ImGuiNextWindowDataFlags_HasSizeConstraint);
+    auto r = ctx->NextWindowData.SizeConstraintRect;
+    assert(r.Min.x == 300 && r.Min.y == 0 && r.Max.x == 300 && r.Max.y == 918);
+    kui::drawing = false;
+    kui_draw::t_set_next_window_size_constraints(100, 0, 100, 100);
+    assert(ctx->NextWindowData.SizeConstraintRect.Max.y == 918);
+    ImGui::DestroyContext();
+    std::printf("window_constraints: 4 checks passed; offset=%zu size=%zu\n",
+                offsetof(KilnUiApi, set_next_window_size_constraints), sizeof(KilnUiApi));
+}
