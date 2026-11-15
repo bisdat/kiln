@@ -57,5 +57,9 @@ public sealed class NoClipPolicyStartupTests : IDisposable
         kiln.Run(file.Reload);
         Assert.Equal("client", kiln.Run(() => NoClip.Set(ada.Entity, true)).Reason);
         Assert.Contains("rules.json allows it", Said(kiln.RunCommand("noclip status")));
+
+        // Reading the policy starts no more of the rules runtime: no listener for building events, which can make
+        // kiln.gameplay hook five of the game's building functions.
+        Assert.False(Events.HasSubscribers<BuildEvent>());
     }
 }
