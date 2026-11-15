@@ -20,7 +20,13 @@ internal sealed class FakeHost : IHostServices, IKilnBackend
     private ulong _next = 1;
     public ulong OwnerCreate(string id) => _next++;
     public void OwnerRevoke(ulong owner) => Revoked.Add(owner);
-    public void Log(LogLevel level, string text) { lock (Lines) Lines.Add($"{level}: {text}"); }
+    public void Log(LogLevel level, string text)
+    {
+        lock (Lines) Lines.Add($"{level}: {text}");
+        OnLine?.Invoke(text);
+    }
+    /// <summary>Called with each line as it is logged, on the logging thread (a mod's OnUnload line, for example).</summary>
+    public Action<string>? OnLine;
     public bool Has(string fragment) { lock (Lines) return Lines.Exists(l => l.Contains(fragment, StringComparison.Ordinal)); }
     public string Dump() { lock (Lines) return string.Join("\n", Lines); }
 }

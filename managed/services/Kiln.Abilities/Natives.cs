@@ -98,6 +98,9 @@ public unsafe ref struct NativeCall
         _sync = sync;
     }
 
+    internal AbilitiesNative.NativeCall* Record => _c;
+    internal ModContext? Owner => _owner;
+
     public uint Native => _c->Hash;
     public int ArgCount => (int)_c->Argc;
     public uint ImpactId => _c->ImpactId;
@@ -513,11 +516,19 @@ public static unsafe partial class Abilities
         public static (ulong Deferred, uint PendingCore, int PendingManaged, ulong Watchdog)? LabRetire =>
             AbilitiesNative.Counters() is { } c ? (c.RetireDeferred, c.RetirePending, AbilitiesDispatch.DeferredCount, c.WatchdogReports) : null;
 
+        /// <summary>Lab use: hook visits that gave up on kiln.abilities' lock after its bound (createImpactInstance,
+        /// runImpact, managed calls, events), or null without the counter.</summary>
+        [System.Diagnostics.CodeAnalysis.Experimental("KILNX001")]
+        [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+        public static ulong? LabLockBypass => AbilitiesNative.Counters() is { } c ? c.LockBypass : null;
+
         // natives_core.h valid_native_name: "<modid>.<Name>", Name [A-Za-z0-9_], 90 bytes at most
         internal static bool ValidName(string full)
         {
-            var dot = full.IndexOf('.');
+            var dot = full.LastIndexOf('.');
             if (dot <= 0 || dot + 1 >= full.Length || Encoding.UTF8.GetByteCount(full) > 90) return false;
+            for (var i = 0; i < dot; i++)
+                if (!char.IsAsciiLetterLower(full[i]) && !char.IsAsciiDigit(full[i]) && full[i] is not ('.' or '_' or '-')) return false;
             for (var i = dot + 1; i < full.Length; i++)
                 if (!char.IsAsciiLetterOrDigit(full[i]) && full[i] != '_') return false;
             return true;

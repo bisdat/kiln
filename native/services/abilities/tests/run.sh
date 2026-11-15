@@ -30,6 +30,9 @@ source = Path(sys.argv[1]).read_text()
 start = source.index("int add_kiln_native(")
 end = source.index("\nKilnResult KILN_CALL t_native_register(", start)
 registration = source[start:end]
+start = source.index("void free_retired()")
+end = source.index("\n// The program `id`", start)
+registration += "\n" + source[start:end]
 start = source.index("void dispatch_managed(")
 end = source.index("\nstd::atomic<uint32_t> g_slow_logged", start)
 registration += "\n" + source[start:end]
@@ -45,3 +48,12 @@ Path(sys.argv[3]).write_text(source[start:end])
 PYCODE
 g++ "${flags[@]}" -I"$out" "$here/registration_test.cpp" -o "$out/registration_test"
 "$out/registration_test"
+
+python3 - "$here/../abilities.cpp" "$out/watchdog_under_test.h" <<'PYCODE'
+from pathlib import Path
+import sys
+s = Path(sys.argv[1]).read_text()
+Path(sys.argv[2]).write_text(s[s.index("void watchdog_loop()"):s.index("void start_watchdog()")])
+PYCODE
+g++ "${flags[@]}" -I"$out" "$here/watchdog_test.cpp" -o "$out/watchdog_test"
+"$out/watchdog_test"

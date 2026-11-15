@@ -186,6 +186,8 @@ internal static unsafe class WorldAbi
         public delegate* unmanaged[Cdecl]<SystemsNative.Slice*, ulong*, int, int, int> GameSliceAttrValidate;
         public delegate* unmanaged[Cdecl]<uint, ulong> GameWorldSession;
         public delegate* unmanaged[Cdecl]<uint, int, uint*, byte*, uint, uint*, int> GameProgramContract;
+        // since 0.2.0-dev.29 (06c S5): foreign views, for native services (kiln.abilities' natives); no managed caller
+        public nint ForeignLayout, ForeignSlot, ForeignCheck, ForeignRead, ForeignWrite, ForeignAttrChanged;
     }
 
     /// <summary>FNV-1a-32 of "keen::ecs::" + name (the name as given when it contains "::"): the engine's component hash.</summary>
