@@ -1,10 +1,8 @@
 {
   "id": "natives-helper",
-  "name": "kiln.abilities lab helper and guided-check fixture: a synchronous native and a program that calls it",
+  "name": "kiln.abilities lab helper: a synchronous native that abilities-test unloads during a running cast",
   "version": "0.1.0",
   "apiVersion": "0.1",
   "entryAssembly": "NativesHelper.dll",
-  "side": "server",
-  "advanced": true,
-  "description": "abilities-test unloads it during a running cast (NativesV2.cs); the guided check 06c-natives.joined runs its program next to a joined player."
+  "side": "server"
 }
