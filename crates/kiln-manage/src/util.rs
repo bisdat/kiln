@@ -335,6 +335,22 @@ pub fn write_atomic_durable(path: &Path, data: &[u8]) -> Result<()> {
     })
 }
 
+/// Durable replacement using an unpredictable, exclusively created temporary file.
+pub fn write_atomic_durable_exclusive(path: &Path, data: &[u8]) -> Result<()> {
+    use std::io::Write;
+    let dir = path.parent().ok_or_else(|| Error::invalid(format!("{}: no parent folder", path.display())))?;
+    let name = path.file_name().ok_or_else(|| Error::invalid(format!("{}: no file name", path.display())))?;
+    let mut tmp_name = name.to_os_string();
+    tmp_name.push(format!(".{}.kiln-tmp", crate::hash::hex(&random_bytes::<16>()?)));
+    let tmp = dir.join(tmp_name);
+    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp).map_err(io_at(&tmp, "writing"))?;
+    let written = f.write_all(data).map_err(io_at(&tmp, "writing")).and_then(|_| f.sync_all().map_err(io_at(&tmp, "flushing")));
+    drop(f);
+    written.and_then(|_| replace_durable(&tmp, path)).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
+}
+
 /// Unix: the rename is made durable by flushing the folder that holds both names.
 #[cfg(unix)]
 fn replace_durable(from: &Path, to: &Path) -> Result<()> {

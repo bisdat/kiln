@@ -15,7 +15,7 @@
     "programs": {
       "type": "object",
       "minProperties": 1,
-      "maxProperties": 8,
+      "maxProperties": 32,
       "propertyNames": {
         "pattern": "^[A-Za-z0-9_]{1,63}$"
       },

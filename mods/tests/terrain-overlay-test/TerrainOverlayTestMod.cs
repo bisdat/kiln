@@ -128,8 +128,9 @@ public sealed class TerrainOverlayTestMod : Mod
         Check(r is { Ok: true, State: TerrainState.Completed, Batches: 3 } && all && events.Count == 3 && events[^1].Last,
             "overlay.applied", $"{r.ChangedCells} {r.Batches} (state {r.State}, events {events.Count}, cells read back {(all ? "equal" : "DIFFERENT")}) {r.Reason}");
 
-        // the default budget: a transient cube of 32 x 32 x 32 cells above the ground next to it, on the 32-cell grid, so
-        // it is exactly one batch of 32,768 cells; then the same cube as air again (two batches timed, nothing kept)
+        // the host's budget: a transient cube of 32 x 32 x 32 cells above the ground next to it, on the 32-cell grid: 64
+        // units of 8 x 8 x 8 cells, at most 4,096 cells a step (0.2.0-dev.28 wrote it as one batch in one tick); then the
+        // same cube as air again (both timed, nothing kept)
         var cube = new CellBox((region.X + 64) / 32 * 32, (y0 + 48) / 32 * 32, region.Z / 32 * 32, 32, 32, 32);
         var full = new byte[cube.Count];
         Array.Fill(full, (byte)1);
@@ -139,8 +140,8 @@ public sealed class TerrainOverlayTestMod : Mod
         clock.Restart();
         var d = await Terrain.Apply(new TerrainPatch("cube", 1, cube, new TerrainVoxelVolume(full), [new TerrainPaletteEntry(0)], TerrainPersistence.Transient));
         Info($"overlay.budget transient cube {cube}: fill {m.State} {m.ChangedCells} cells in {m.Batches} batch(es), {up} ms; clear {d.State} {d.ChangedCells} cells in {d.Batches} batch(es), {clock.ElapsedMilliseconds} ms {m.Reason}{d.Reason}");
-        Check(m is { State: TerrainState.Completed, Batches: 1, ChangedCells: 32768 } && d is { State: TerrainState.Completed, ChangedCells: 32768 }
-              && Terrain.Applied.All(p => p.Plan != "cube"), "overlay.transient-not-recorded", $"{m.State} {m.ChangedCells}, {d.State} {d.ChangedCells}");
+        Check(m is { State: TerrainState.Completed, Batches: 64, ChangedCells: 32768 } && d is { State: TerrainState.Completed, Batches: 64, ChangedCells: 32768 }
+              && Terrain.Applied.All(p => p.Plan != "cube"), "overlay.transient-not-recorded", $"{m.State} {m.ChangedCells} in {m.Batches}, {d.State} {d.ChangedCells} in {d.Batches}");
 
         // a patch inside the save's base
         var bases = Build.Bases;
@@ -349,15 +350,20 @@ public sealed class TerrainOverlayTestMod : Mod
             "overlay.world-b-clean", $"world {world} (a was {_s.WorldA}), records {(none ? "none" : "SOME")}, {overlay} of {cells.Length} cells look like the overlay, apply there: {r.State} {r.Reason}");
 
         // ground that already holds a plan's result, built by hand (an ordinary kept edit): this world never had the plan,
-        // so it is a first install, not a lost ledger
+        // so it is not a lost ledger. In a world that is provably new the plan is a first install that finds nothing to
+        // change (Completed); in one that is not (0.2.0-dev.29: the game had given this world its id before the first
+        // save, so Kiln cannot prove it new) the plan is found fully present and is recorded without a write (Adopted,
+        // share 1). Either way no cell is written and the plan is recorded.
         var echo = region with { Z = region.Z + 64 };
         var built = Build.Write(echo, [.. Enumerable.Repeat(Voxel.Of(_s.One), (int)echo.Count)], new BuildOptions { Journal = false, Label = "built by hand" });
         var patch = new TerrainPatch("echo", 1, echo, new TerrainVoxelVolume([.. Enumerable.Repeat((byte)1, (int)echo.Count)]), [new TerrainPaletteEntry(_s.One)]);
         var seen = await Terrain.Inspect(patch, Slow);
         var e = await Terrain.Apply(patch, Slow);
-        Check(built.Changed && seen.Would == TerrainState.Completed && e is { Ok: true, State: TerrainState.Completed, ChangedCells: 0 }
+        var fresh = seen.Would == TerrainState.Completed && e.State == TerrainState.Completed;
+        var present = seen.Would == TerrainState.Adopted && e is { State: TerrainState.Adopted, PresenceShare: 1.0 };
+        Check(built.Changed && (fresh || present) && e is { Ok: true, ChangedCells: 0 }
               && Terrain.Applied.Any(p => p.Plan == "echo"),
-            "overlay.first-install-over-matching-ground", $"built {built.CellsChanged} cells, inspect {seen.Would} {seen.Reason}, apply {e.State} {e.ChangedCells} cells {e.Reason}");
+            "overlay.first-install-over-matching-ground", $"built {built.CellsChanged} cells, inspect {seen.Would} {seen.Reason}, apply {e.State} {e.ChangedCells} cells, share {e.PresenceShare}, {e.Reason}");
         var save = await Saves.Request();
         Info($"save: {save}");
         _s.Phase = 4;

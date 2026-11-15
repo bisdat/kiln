@@ -36,11 +36,14 @@ See [WorldPrograms](../../../mods/samples/WorldPrograms/) for an event round tri
 fails explicitly. The declaration remains inert until its mod binds it. Disabled mods and client-only mods do not
 reserve server programs; profile entries take precedence over drop-ins, including disabled profile entries.
 
-A mod may declare eight programs in one file of at most 64 KiB. The file uses strict JSON: duplicate keys, unknown
+A mod may declare 32 programs in one file of at most 64 KiB (eight before 0.2.0-dev.29). The file uses strict JSON: duplicate keys, unknown
 fields and repeated access names are refused. The schema is [kiln-programs.schema.json](../../../schema/kiln-programs.schema.json).
 `kiln lint` discovers it alongside the manifest. The native service also checks engine limits (template slots 8,
 read/write slots 42, other-template slots 9, other accessors 92, total event inputs/outputs 24). Programs share the
-world service's 32-slot limit and the game's remaining scheduler capacity; refusals appear in `kiln.log`.
+world service's 64 slots (32 before 0.2.0-dev.29) with Kiln's own services, and the game's remaining scheduler capacity
+(its table of 896, which kiln.world checks live before each registration); mods' declarations leave the last 8 slots to
+Kiln's services, and refusals appear in `kiln.log`. kiln.log "kiln.world program slots: 21 of 64 taken, … by Kiln's
+services and loaders, … by mods' declarations: kiln_world, …, writer x1" names who holds each slot.
 
 Access lists are `tpl`, `tplOptional`, `read`, `readOptional`, `write`, `writeOptional`, `singletonsRead`,
 `singletonsWrite`, `otherTpl`, `otherRead`, `otherWrite`, `with`, `without`, `anyOf`, `eventsIn`, `eventsOut`. Names
@@ -97,3 +100,31 @@ and receives the real program context. Missing symbols or a conflicting runtime 
 The dedicated-server probes cover scheduler registration, other-entity health readback, both input types, spawn-time
 components, hook/profiler counts and callback removal. A joined client is still needed to confirm replicated visual
 changes and client/prediction-world behaviour. Managed declarations currently target the server world only.
+
+## Wrapping the game's programs
+
+A world program of your own runs in a slot of its own, with the access you declared. To change what one of the
+game's own programs does, wrap it instead (`Kiln.Systems`, since 0.2.0-dev.29; the full page is
+[../services/systems.md](../services/systems.md)):
+
+```csharp
+var wrap = Systems.Wrap("fuel_setup").Wrap!;
+wrap.AfterEach((ref EntityView e) =>
+{
+    var fuel = e.Attribute("Fuel");
+    fuel[0] = fuel[1];   // full
+    fuel.Changed();      // the game's attribute formulas
+});
+```
+
+| | A world program (`EcsPrograms.Bind`) | `GameSystems.Hook` | A wrap (`Systems.Wrap`) |
+|---|---|---|---|
+| Runs | in its own scheduler slot | around a game update function, per slice | in the wrapped program's slot and thread: Before, After, Replace, per slice or per entity |
+| Access | what `kiln.programs.json` declares (needs a restart) | none of its own | the wrapped program's own components (`EntityView`), no declaration |
+| Several mods | each has its own | one per update function | any number of Befores and Afters, one Replace per program |
+| Writes | marked; `ComponentWrittenEvent` not raised | none | marked; `ComponentWrittenEvent` with `Writer = "<modid>/wrap:<program>"` |
+
+The same thread rules hold for all three: handlers run on the game's workers once a player is in the world, tick-thread
+APIs throw inside them, `Slice.Post` (or `Context.Scheduler.Post`) hands work to the tick thread. A wrap's fault or
+exception turns off that stage only. Wraps are refused while native SET is loaded, and target the server world by
+default; a game client's own world takes `WrapOptions.World = WorldKind.Client` (`systems.wraps.client`).

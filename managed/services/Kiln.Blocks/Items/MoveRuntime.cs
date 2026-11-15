@@ -83,6 +83,10 @@ internal static class MoveRuntime
         public IReadOnlyDictionary<Guid, (string State, string? Error)> Clones() =>
             Content.GameDataDefinitions().Where(d => d.Section == GameDataSection.Sequences).GroupBy(d => d.Guid).ToDictionary(g => g.Key, g => (g.First().State, g.First().Error));
 
+        public IReadOnlyDictionary<string, (string State, string? Error)> Worlds(Guid guid) => Content.SequenceRegistrationReader()(guid);
+
+        public Func<Guid, IReadOnlyDictionary<string, (string State, string? Error)>> WorldReader() => Content.SequenceRegistrationReader();
+
         public void Define(JsonObject definition, ulong owner) => BlocksBridge.DefineClone(Content.Sequences, definition, owner);
 
         public IMoveTransaction Begin(ulong owner) => new GameTransaction(BlocksBridge.BeginTransaction(owner));

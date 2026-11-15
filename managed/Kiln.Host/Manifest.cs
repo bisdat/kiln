@@ -72,6 +72,7 @@ internal sealed class Manifest
         "$schema", "id", "name", "version", "authors", "author", "description", "license", "url", "apiVersion", "side",
         "clients", "dependencies", "loadBefore", "loadAfter", "incompatible", "features", "entryAssembly", "entryType", "exports",
         "advanced", "tests", "kilnBuild", "writes", "boot", "updates",
+        "systems",  // dev.29 06a: {"replaces": [program names]}, a declaration for tools (Kiln.Systems); the host only accepts it
     ];
 
     /// <summary>A component's short name, as kiln.world takes it in <c>"writes"</c>.</summary>

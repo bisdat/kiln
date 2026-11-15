@@ -456,7 +456,7 @@ with tempfile.TemporaryDirectory(prefix='kiln-sf-fixtures-', dir=build.parent) a
               extra_env=dict(stopped, KILN_SF_STOP_IN_SUBSCRIBE='1', KILN_SF_FAULT_AFTER_SUBSCRIBE='1'), verify=stop_during)
 
     # ---- dev.22: drop-ins for ShroudForge with an active profile that lists no ShroudForge mods ----
-    def profile_case(name, dropins, package, state=None):
+    def profile_case(name, dropins, package, state=None, requirements=None, override=None):
         game = root / name
         (game / 'kiln').mkdir(parents=True)
         for kind in ('shroudforge', 'kiln/plugins/shroudforge'):
@@ -472,6 +472,8 @@ with tempfile.TemporaryDirectory(prefix='kiln-sf-fixtures-', dir=build.parent) a
         if state:  # ShroudForge's own state file: <game>/shroudforge/state.json (its default paths.state folder)
             (game / 'shroudforge/state.json').write_text(json.dumps(state))
         profile = {'format': 1, 'id': 'p', 'generation': 1, 'mods': {}}
+        if requirements is not None:
+            profile['emlRuntime'] = requirements
         if dropins is not None:
             profile['dropins'] = dropins
         (game / 'kiln/profile.json').write_text(json.dumps(profile))
@@ -479,6 +481,8 @@ with tempfile.TemporaryDirectory(prefix='kiln-sf-fixtures-', dir=build.parent) a
         call_env = dict(env, KILN_SF_TEST_LOG='Z:' + str(log).replace('/', '\\'),
                         KILN_SF_PROFILE='Z:' + str(game / 'kiln/profile.json').replace('/', '\\'))
         call_env.pop('KILN_SHROUDFORGE', None)
+        if override is not None:
+            call_env['KILN_SHROUDFORGE'] = override
         result = subprocess.run(['wine', str(build / 'sfhost.exe'), str(game), str(adapter)], env=call_env,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=40)
         if result.returncode:
@@ -497,3 +501,11 @@ with tempfile.TemporaryDirectory(prefix='kiln-sf-fixtures-', dir=build.parent) a
         status, log, out = profile_case(name, dropins, package)
         assert status['mode'] == 'off' and not log.exists(), (name, status, out)
         print('PASS', name)
+
+    status, log, out = profile_case('profile-runtime-eml', False, False, requirements=['ammo-slots'])
+    assert status['mode'] != 'off' and log.exists() and 'prepare' in log.read_text().splitlines(), (status, out)
+    assert status['hostingReason'] == "the EML package ammo-slots needs ShroudForge's runtime", status
+    print('PASS profile-runtime-eml')
+    status, log, out = profile_case('profile-runtime-eml-off', False, False, requirements=['ammo-slots'], override='0')
+    assert status['mode'] == 'off' and status['reason'] == 'KILN_SHROUDFORGE=0' and not log.exists(), (status, out)
+    print('PASS profile-runtime-eml-off')

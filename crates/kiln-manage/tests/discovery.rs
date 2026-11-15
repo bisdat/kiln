@@ -275,6 +275,42 @@ fn records_status_and_launch_options_info() {
     let _ = fs::remove_dir_all(&f.home);
 }
 
+#[test]
+fn chained_loader_launch_advice() {
+    let f = fake_steam("chained-advice");
+    let roots = [root_of(&f)];
+    let install = game::inspect_with(&f.client, &roots, &f.home.join("data")).unwrap();
+    let info = game::launch_options_info(&install, &roots).unwrap();
+    assert!(info.has_dll_override && info.advice.is_none());
+    write(&f.client.join("xinput9_1_0.dll"), b"fixture");
+    assert!(game::launch_options_info(&install, &roots).unwrap().advice.is_none());
+    // A file alone isn't chained; neither is a profile entry.
+    write(&f.client.join("kiln/chain.ini"), "[profile]\n..\\xinput9_1_0.dll\n");
+    assert!(game::launch_options_info(&install, &roots).unwrap().advice.is_none());
+    write(&f.client.join("kiln/chain.ini"), "[chain]\n..\\XINPUT9_1_0.DLL\n");
+    let info = game::launch_options_info(&install, &roots).unwrap();
+    assert!(info.has_dll_override);
+    assert_eq!(info.advice.as_deref(), Some("WINEDLLOVERRIDES=\"dinput8,xinput9_1_0=n,b\" %command%"));
+    let config = f.root.join("userdata/111/config/localconfig.vdf");
+    write(&config, fixture("localconfig-override.vdf").replace("dinput8=n,b", "dinput8=n,b;xinput9_1_0=b"));
+    assert!(game::launch_options_info(&install, &roots).unwrap().chained_override_missing);
+    let json = serde_json::to_value(&info).unwrap();
+    assert_eq!(json["chainedOverrideMissing"], true);
+    write(&config, fixture("localconfig-override.vdf").replace("dinput8=n,b", "dinput8,xinput9_1_0=n,b"));
+    let info = game::launch_options_info(&install, &roots).unwrap();
+    assert!(info.has_dll_override && info.advice.is_none());
+    assert_eq!(serde_json::to_value(info).unwrap()["chainedOverrideMissing"], false);
+    write(&config, fixture("localconfig-override.vdf"));
+    let prefix = install.prefix.as_ref().unwrap();
+    write(&prefix.join("user.reg"), "[Software\\\\Wine\\\\DllOverrides]\n\"xinput9_1_0\"=\"native,builtin\"\n");
+    assert!(game::launch_options_info(&install, &roots).unwrap().advice.is_none());
+    fs::remove_file(prefix.join("user.reg")).unwrap();
+    fs::remove_file(f.client.join("xinput9_1_0.dll")).unwrap();
+    write(&config, fixture("localconfig-override.vdf"));
+    assert!(game::launch_options_info(&install, &roots).unwrap().advice.is_none());
+    fs::remove_dir_all(f.home).unwrap();
+}
+
 fn install_at(dir: &Path, prefix: Option<PathBuf>, mode: PathMode) -> GameInstall {
     GameInstall {
         id: "g-000000000000".into(),

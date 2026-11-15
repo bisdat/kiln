@@ -12,42 +12,29 @@
 #include <shared_mutex>
 
 #include "kiln_hook.hpp"
+#include "layout.h"
 #include "world_internal.h"
 #include "services/kiln_types.h"
 
 namespace kw {
 namespace {
 
-constexpr int kMaxPrograms = 32;
+// Kiln's own quota (chapter 17.4; 32 until 0.2.0-dev.29): programs registered through kiln.world in this process, its own
+// services' and compat loaders' and the mods' together; one typed trampoline each. Not the game's limit: the world's
+// program table holds 896 (world/programs.max, read live), and every registration checks its live count first.
+constexpr int kMaxPrograms = 64;
+// Kept for Kiln's own services while mods' boot declarations reserve: the services that register later than the
+// declarations (in their on_ready, or at the first world: the tracked-write program) still find room.
+constexpr int kBuiltinHeadroom = 8;
 constexpr uint32_t kMaxIterBytes = 4096;
 constexpr uint32_t kAllowedFlags = KILN_PROGRAM_SYSTEM | KILN_PROGRAM_INIT | KILN_PROGRAM_HOST_ONLY |
                                    KILN_PROGRAM_EXCLUSIVE | KILN_PROGRAM_CHUNKED | KILN_PROGRAM_PINNED |
                                    KILN_PROGRAM_BARRIER;
 constexpr uint32_t kEngineSkipped = 0x20;  // entry flag set at finalize: a required singleton is missing
 
-enum ListId {
-    L_TPL, L_TPL_OPT, L_READ, L_READ_OPT, L_WRITE, L_WRITE_OPT, L_SREAD, L_SWRITE,
-    L_OTPL, L_OREAD, L_OWRITE, L_WITH, L_WITHOUT, L_ANY, L_EIN, L_EOUT, L_COUNT
-};
-enum MapKind { M_DYN, M_TPL, M_SINGLETON, M_EVENT };
-constexpr MapKind kListMap[L_COUNT] = {M_TPL, M_TPL, M_DYN, M_DYN, M_DYN, M_DYN, M_SINGLETON, M_SINGLETON,
-                                       M_TPL, M_DYN, M_DYN, M_TPL, M_TPL, M_TPL, M_EVENT, M_EVENT};
-constexpr const char* kListName[L_COUNT] = {"tpl", "tpl_optional", "read", "read_optional", "write",
-                                            "write_optional", "singletons_read", "singletons_write", "other_tpl",
-                                            "other_read", "other_write", "with", "without", "any_of", "events_in",
-                                            "events_out"};
-
-struct List {
-    std::vector<std::string> names;
-    std::vector<NameRef> refs;
-    std::vector<int32_t> slot;   // qword index into the iterator per name (-1 = none)
-    std::vector<uint16_t> index; // engine type index (dyn/tpl lists) after validation
-};
-
-struct Program {
+struct Program : ProgramLayout {  // name, lists, singleton masks, group counts: layout.h
     KilnOwner owner = 0;
     std::shared_mutex callback_mutex;
-    std::string name;
     uint32_t flags = 0;
     KilnProgramEachFn each = nullptr;
     KilnProgramUpdateFn update = nullptr;
@@ -55,10 +42,7 @@ struct Program {
     bool internal = false;
     ProgramPrunedFn pruned = nullptr;  // set: unknown other-write names are dropped, not fatal (the write program)
     std::string reserved_mod, reserved_key;
-    List lists[L_COUNT];
-    uint64_t sread_opt = 0, swrite_opt = 0;
     EngineDesc desc{};
-    uint32_t T = 0, R = 0, W = 0, S = 0, OT = 0, O = 0, EI = 0, EO = 0, iter_size = 0;
     int slot = -1;  // trampoline index
     std::atomic<int> state{KILN_PROGRAM_PENDING};
     std::atomic<uint64_t> updates{0}, entities{0};
@@ -188,60 +172,7 @@ constexpr std::array<void (*)(void*), sizeof...(I)> make_trampolines(std::intege
 }
 constexpr auto kTrampolines = make_trampolines(std::make_integer_sequence<int, kMaxPrograms>{});
 
-// ---- layout ----
-
-std::string qualified(const std::string& n) { return "keen::ecs::" + n; }
-
-// Assigns slots to a group of lists: sorted by key across the lists (ties: list order), consecutive from `base`.
-template <class Key>
-uint32_t assign(Program& p, std::initializer_list<int> ids, uint32_t base, uint32_t stride, bool sort, Key key) {
-    struct Item {
-        int list;
-        size_t i;
-    };
-    std::vector<Item> items;
-    for (int id : ids)
-        for (size_t i = 0; i < p.lists[id].names.size(); ++i) items.push_back({id, i});
-    if (sort) std::stable_sort(items.begin(), items.end(), [&](const Item& a, const Item& b) {
-        return key(a.list, a.i) < key(b.list, b.i);
-    });
-    for (size_t k = 0; k < items.size(); ++k) p.lists[items[k].list].slot[items[k].i] = static_cast<int32_t>(base + k * stride);
-    return static_cast<uint32_t>(items.size());
-}
-
-// Slot layout of the engine iterator (re_custom_programs.md §6.1; checked on 1285601 against the game's teleport
-// program, which iterates [ctx][R:NpcCommon][W x8 by name][S x3][O:PlayerSpawnPoint] in 0x1B0 bytes).
-template <class Key>
-void layout(Program& p, Key key) {
-    for (auto& l : p.lists) l.slot.assign(l.names.size(), -1);
-    uint32_t at = 1;
-    p.T = assign(p, {L_TPL, L_TPL_OPT}, at, 1, true, key);
-    at += p.T;
-    p.R = assign(p, {L_READ, L_READ_OPT}, at, 1, true, key);
-    at += p.R;
-    p.W = assign(p, {L_WRITE, L_WRITE_OPT}, at, 6, true, key);
-    at += 6 * p.W;
-    p.S = assign(p, {L_SREAD, L_SWRITE}, at, 1, false, key);
-    at += p.S;
-    p.OT = assign(p, {L_OTPL}, at, 1, true, key);
-    at += p.OT;
-    const uint32_t oread = assign(p, {L_OREAD}, at, 1, true, key);
-    at += oread;
-    const uint32_t owrite = assign(p, {L_OWRITE}, at, 1, true, key);
-    at += owrite;
-    p.O = oread + owrite;
-    p.EI = assign(p, {L_EIN}, at, 1, true, key);
-    at += p.EI;
-    p.EO = assign(p, {L_EOUT}, at, 1, false, key);
-    at += p.EO;
-    p.iter_size = at * 8;
-}
-
-std::vector<std::vector<int32_t>> slots_of(const Program& p) {
-    std::vector<std::vector<int32_t>> v;
-    for (auto& l : p.lists) v.push_back(l.slot);
-    return v;
-}
+// ---- names ----
 
 bool valid_name(std::string_view n, bool allow_scope) {
     if (n.empty() || n.size() > 120) return false;
@@ -260,60 +191,6 @@ Program* by_handle(KilnHandle h) {
 }
 
 // ---- validation and registration (server thread, inside the world setup) ----
-
-uintptr_t map_base(uintptr_t registry, MapKind k) {
-    switch (k) {
-        case M_DYN: return L.reg_components >= 0 ? registry + L.reg_components : 0;
-        case M_TPL: return L.reg_templates >= 0 ? registry + L.reg_templates : 0;
-        case M_SINGLETON: return F.singletons ? registry + L.reg_singletons : 0;
-        case M_EVENT: return F.events ? registry + L.reg_events : 0;
-    }
-    return 0;
-}
-
-bool validate(Program& p, uintptr_t world, std::string& why) {
-    const uintptr_t registry = registry_of(world);
-    for (int id = 0; id < L_COUNT; ++id) {
-        List& l = p.lists[id];
-        l.index.assign(l.names.size(), 0);
-        if (l.names.empty()) continue;
-        const MapKind mk = kListMap[id];
-        const uintptr_t map = map_base(registry, mk);
-        if (!map) {
-            why = std::string(kListName[id]) + ": cannot check these names on this build";
-            return false;
-        }
-        for (size_t i = 0; i < l.names.size(); ++i) {
-            const std::string& n = l.names[i];
-            const uint32_t key = mk == M_SINGLETON ? fnv1a(n) : fnv1a(n, fnv1a("keen::ecs::"));
-            uint16_t v = 0;
-            if (map_find_u16(map, key, &v)) {
-                l.index[i] = v;
-                continue;
-            }
-            if (mk == M_SINGLETON) {
-                const uint64_t opt = id == L_SREAD ? p.sread_opt : p.swrite_opt;
-                if (!(opt >> i & 1))
-                    KW_W("program %s: singleton '%s' is not registered yet; if it is still missing when the world "
-                         "starts, the engine skips the program",
-                         p.name.c_str(), n.c_str());
-                continue;
-            }
-            why = std::string(kListName[id]) + ": unknown " +
-                  (mk == M_EVENT ? "event" : mk == M_TPL ? "template component" : "component") + " '" + n + "'";
-            return false;
-        }
-    }
-    // The engine orders TPL/READ/WRITE/OTHER slots by type index; we laid them out by name. They must agree.
-    const auto provisional = slots_of(p);
-    layout(p, [&](int list, size_t i) { return static_cast<uint32_t>(p.lists[list].index[i]); });
-    if (slots_of(p) != provisional) {
-        why = "the engine's type order differs from name order for these components";
-        layout(p, [&](int list, size_t i) { return qualified(p.lists[list].names[i]); });
-        return false;
-    }
-    return true;
-}
 
 // Drops the other-write names the world has no component type for, so one wrong name in one mod's list does not cost
 // every mod the program. The engine has not seen the descriptor's lists yet (it resolves names at finalize).
@@ -383,6 +260,24 @@ void register_into(uintptr_t world) {
     KW_I("world 0x%llx: %u Kiln programs; the program table holds %u of %lld",
          static_cast<unsigned long long>(world), static_cast<unsigned>(g_programs.size()), *count_at,
          static_cast<long long>(L.programs_max));
+    // the slot ledger: who holds Kiln's slots, in slot order (a service's or loader's program by its name, a mod's
+    // declarations by its mod id and how many)
+    std::string ledger;
+    uint32_t mods = 0, services = 0;
+    for (size_t i = 0; i < g_programs.size(); ++i) {
+        const Program* p = g_programs[i];
+        const bool mod = !p->reserved_mod.empty();
+        (mod ? mods : services) += 1;
+        if (mod && i > 0 && g_programs[i - 1]->reserved_mod == p->reserved_mod) continue;
+        uint32_t n = 1;
+        while (mod && i + n < g_programs.size() && g_programs[i + n]->reserved_mod == p->reserved_mod) ++n;
+        if (ledger.size() < 1500) {
+            ledger += ledger.empty() ? "" : ", ";
+            ledger += mod ? p->reserved_mod + " x" + std::to_string(n) : p->name;
+        }
+    }
+    KW_I("kiln.world program slots: %u of %d taken, %u by Kiln's services and loaders, %u by mods' declarations: %s",
+         static_cast<unsigned>(g_programs.size()), kMaxPrograms, services, mods, ledger.c_str());
 }
 
 void on_world(uintptr_t world) {
@@ -585,7 +480,8 @@ KilnResult register_program(KilnOwner owner, const KilnProgramDesc* d, KilnHandl
     std::lock_guard lock(g_mutex);
     if (g_programs.size() >= kMaxPrograms) {
         delete p;
-        KW_E("program '%s' refused: kiln.world holds %d programs at most", name.c_str(), kMaxPrograms);
+        KW_E("program '%s' refused: kiln.world holds %d programs at most (all of Kiln's services and mods together)", name.c_str(),
+             kMaxPrograms);
         return KILN_ERR_UNAVAILABLE;
     }
     for (Program* q : g_programs)
@@ -650,6 +546,25 @@ void program_set_prune(KilnHandle h, ProgramPrunedFn removed) {
 uint32_t programs_registered() {
     std::lock_guard lock(g_mutex);
     return static_cast<uint32_t>(g_programs.size());
+}
+
+uint32_t program_quota() { return kMaxPrograms; }
+
+// The slot ledger for kiln.world.budget (any thread): a slot is in active use while its program is registered or waits
+// for a world with a callback that can run (a declaration counts once a mod bound it); a refused, faulted or skipped
+// program, and a declaration no loaded mod bound, still holds its slot (the engine keeps every descriptor).
+ProgramLedger program_ledger() {
+    std::lock_guard lock(g_mutex);
+    ProgramLedger out;
+    out.taken = static_cast<uint32_t>(g_programs.size());
+    for (const Program* p : g_programs) {
+        out.descs.push_back(reinterpret_cast<uintptr_t>(&p->desc));
+        const int st = p->state.load();
+        const bool bound = p->reserved_mod.empty() || p->owner != g_owner;
+        if ((st == KILN_PROGRAM_ACTIVE || st == KILN_PROGRAM_PENDING) && bound && (p->internal || p->each || p->update)) ++out.active;
+    }
+    std::sort(out.descs.begin(), out.descs.end());
+    return out;
 }
 
 uint32_t engine_program_count(uintptr_t world) {
@@ -815,6 +730,11 @@ void programs_reap_owners() {
 }
 
 KilnResult reserve_program(const std::string& mod, const std::string& key, const KilnProgramDesc* desc) {
+    if (programs_registered() + kBuiltinHeadroom >= static_cast<uint32_t>(kMaxPrograms)) {
+        KW_E("managed program %s/%s refused: the last %d of kiln.world's %d program slots stay for Kiln's own services", mod.c_str(),
+             key.c_str(), kBuiltinHeadroom, kMaxPrograms);
+        return KILN_ERR_UNAVAILABLE;
+    }
     KilnHandle handle = 0;
     const auto result = register_program(g_owner, desc, &handle, false);
     if (result != KILN_OK) return result;

@@ -343,6 +343,16 @@ const KilnWorldApi kTable = {
     &game_slice_run_original,
     &wrap_original,
     &in_program,
+    &game_program_list,
+    &game_slice_iterate,
+    &game_slice_slot,
+    &game_slice_mark,
+    &game_slice_archetype,
+    &game_archetype_has,
+    &game_slice_attr_changed,
+    &game_slice_attr_validate,
+    &game_world_session,
+    &game_program_contract,
 };
 
 void KILN_CALL on_client_pre(const KilnTickInfo* tick, void*) { game_programs_pre(KILN_WORLD_CLIENT, tick); }
@@ -397,5 +407,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
          F.singletons ? "on" : "off", F.events ? "on" : "off", F.queue ? "on" : "off", F.write ? "on" : "off",
          F.read_other ? "on" : "off", F.teleport ? "on" : "off", F.dead ? "on" : "off", writes_available() ? "on" : "off");
     if (!F.entities && !F.programs) return KILN_ERR_UNAVAILABLE;  // nothing works on this build
-    return api->register_service(owner, KilnStr{KILN_WORLD_SERVICE, sizeof(KILN_WORLD_SERVICE) - 1}, &kTable);
+    const KilnResult rc = api->register_service(owner, KilnStr{KILN_WORLD_SERVICE, sizeof(KILN_WORLD_SERVICE) - 1}, &kTable);
+    if (rc == KILN_OK) program_budget_register();  // kiln.world.budget: a table of its own (since 0.2.0-dev.29)
+    return rc;
 }

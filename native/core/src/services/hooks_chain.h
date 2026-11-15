@@ -75,7 +75,7 @@ KilnResult install_structured(KilnOwner owner, uintptr_t target, const Order& or
 KilnResult install_v1(KilnOwner owner, uintptr_t target, int32_t priority, KilnDetourFn fn, void* user,
                       KilnHandle* out);
 KilnResult install_mid(KilnOwner owner, uintptr_t target, const Order& order, KilnMidFn fn, void* user,
-                       KilnHandle* out);
+                       KilnHandle* out, uint32_t* unchecked = nullptr);
 
 // A typed link (dev.28): `fn` gets the call as a KilnCallFrame; `nstack` stack arguments are forwarded to the rest of
 // the chain (the caller derived it from the KilnSig and checked the fingerprint).

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# kiln.content: content transactions (txn_test.cpp, host: store.cpp over a made-up memory with failing writes); a sequence clone's names in a later world of the process (seqnames_test.cpp, host); near memory
+# kiln.content: content transactions (txn_test.cpp, host: store.cpp over a made-up memory with failing writes); a sequence clone's names in a later world of the process (seqnames_test.cpp, host); the buff room (buffroom_test.cpp, host: the 4,096 reservation, its fallback, checked sizes, the map the game reads); near memory
 # (nearmem.cpp): the policy against simulated address spaces on the host (near_test.cpp: the layout of GitHub issue 14,
 # the Wine layout, no free hole, budget, top and bottom of the address space), then the Windows side (nearwin.h) on a
 # real fragmented address space under Wine, no game, with the walk's timing (near_win_test.cpp).
@@ -18,6 +18,8 @@ echo "== txn-test (host)"
 bash "$here/txn_test.sh"
 echo "== seqnames-test (host)"
 bash "$here/seqnames_test.sh"
+bash "$here/seqworld_test.sh"
+bash "$here/buffroom_test.sh"
 echo "== near-test (host)"
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/near_test.cpp" "$here/../nearmem.cpp" -o "$out/near-test"
 "$out/near-test"

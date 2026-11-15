@@ -218,6 +218,67 @@ Files: `<data>/updates/receipts.json` and `cache.json` ([contracts.md](contracts
 Tests: `cargo test -p kiln-manage --features full updates` (fake transport; no request leaves the PC),
 `launcher/tests/updates.spec.ts` (browser mock: `src/api/mockUpdates.ts`), `launcher/unit/updates.test.ts`.
 
+## Rolling back an update (since 0.2.0-dev.29)
+When you update a mod (drop its new version on the launcher, add it from the Catalog, or pick another version with
+"Use <version>" in its menu), Kiln keeps the version you had in your Library, together with a copy of the settings
+files that mod had written into its folder in the game at that moment (an `.ini`, `config.txt`, `settings.json`, a log,
+ShroudForge's setting values). This works for every kind of mod Kiln holds: Kiln, native and EMF mods, plugins, EML,
+ShroudForge, SET, Greeneye, Flame, XHL and the other loaders' mods.
+
+- **Roll back.** A mod with a kept version has **Roll back to <version>** in its menu on Play. It puts that version
+  back into your profile in place of the one you have now, switched on or off as it was. It is a profile change like
+  any other: the toast has **Undo**, and nothing is downloaded. When Kiln next writes your profile into the game (at
+  once when the game is closed, else at the next Play), the old version goes into the game folder with the settings it
+  had before the update, subject to the later-change rule below. Settings can also stay as they are when the mod's copy in
+  the game folder is not Kiln's to replace any more (you changed its code there: Kiln leaves that folder alone and says
+  so), or the game folder moved since the update (the roll back says so; the settings wait for the folder they were
+  kept in).
+- **If Kiln stops half-way**, recovery is tested before and after the profile save, while replacing an owned mod
+  copy, and during settings restoration. Each restore records hashes of the current files and ShroudForge values
+  before writing any settings. On every attempt, a value already equal to the snapshot stays; a value still equal
+  to its recorded preimage is restored; any other value stays as the player's later change, with a note naming it.
+  The done mark is then written and dropped separately, so a failed acknowledgement does not reset later edits.
+  A deletion stays deleted when the preimage was a file. If the preimage was already absent, absence still means
+  “not restored yet” and a retry can recreate the snapshot file. Legacy pending restores without preimages never
+  overwrite differing content: current content stays, the restore settles, and a note explains why.
+  Changed code, an unreadable publication journal, or a missing replacement with a parked old copy requires
+  attention; Kiln preserves those folders. A first placement stopped before its receipt remains an unowned folder.
+  Library import files, settings snapshots, placed-copy files, receipt publication, profile/activation records and
+  replacement park/publish/put-back renames now use the ordered durability seam. This checks software ordering,
+  not real power cuts or Windows hardware. Copy-mode fallback/config delivery, chain.ini, explicit adoption and
+  removal use their existing protocols: a cut can leave a partial fallback/config or stale chain; verification may
+  retain/refuse a damaged copy or create another fallback, and manual repair can be needed. They are not covered
+  by the replacement journal's automatic-retry guarantee. Two simultaneous full activations are not proven atomic.
+- **Roll back twice.** The version you rolled back from is kept now, so its menu offers **Roll back to** it again,
+  with the settings it had when you left it.
+- **How many are kept.** Settings, Launcher, **Earlier versions to keep**: 1 by default (the last one), up to 5 per mod,
+  0 keeps none (the earlier version then stays in your Library as an ordinary version, as before dev.29, and
+  **Clean up** removes it). Kiln does not keep a version when your disk would then have less free than it keeps for
+  moving the data folder (256 MiB and 5 % on top of the version's size); the update's message says so, and the update
+  goes on.
+- **Seeing and removing them.** Settings, **Library** lists every kept version with its size and the settings kept with
+  it; **Remove** takes one out (you can no longer roll back to it). **Clean up** never removes a kept version.
+- **What is kept.** The mod's own files are the Library entry as you imported it. The settings are the files of its
+  copy in the game folder that were not as Kiln put them there (changed or added since) and are settings files (`txt`,
+  `ini`, `cfg`, `json`, `toml`, `yaml`, `yml`: the same list Kiln uses when it carries a mod's settings to its new
+  version) or logs (`log`: some mods keep data in them), up to 16 MiB a file and 64 MiB per version. Never its code,
+  its manifest, a script or a DLL; files of any other kind stay as the newer version left them. A Kiln mod's configs
+  live in your profile and are not tied to a version: a roll back leaves them as they are. The same holds for mods that run from their Library folder and keep no files in the game folder.
+- **Update notices.** Kiln checks the newest version you have in your Library, kept ones included, so after a roll back
+  the version you rolled back from is not offered to you again as an update; a newer upload still is. A notice can't
+  be dismissed or pinned (there is no such switch yet).
+- **Another profile** never uses a kept version unless you pick it: switching the mod on there takes the newest version
+  that is not a kept one. A kept version belongs to the profile it was kept in: only that profile offers **Roll back
+  to** it, another profile's update or roll back of the same mod never takes it, and the settings a roll back brings
+  back go into that profile's copy in the game they came from (with the profile loaded in another game they wait).
+- **Older launchers** (before dev.29) see a kept version as one more version of the mod ("Use <version>"), and their
+  Clean up may remove it; dev.29 then forgets it.
+
+The same from the command line: `kilnctl library rollback <profile> kind:id[@version]` ([../kilnctl.md](../kilnctl.md)).
+Files: `<data>/library/kiln-kept.json` and `<data>/library/kiln-kept/` ([contracts.md](contracts.md), section 3).
+Tests: `cargo test -p kiln-manage --features full --test kept_versions`, `launcher/tests/rollback.spec.ts`,
+`launcher/unit/rollback.test.ts`.
+
 ## Mod Manager Download links (nxm://)
 This is opt-in: Settings > Nexus Mods > "Mod Manager Download links". It never turns on at install or start.
 

@@ -6,7 +6,7 @@
 import type {
   Activation, AddReport, BootSnapshot, BundlePart, RunSide, AddedMod, AdminEndpoint, AppInfo, BootJson, BootState, ConfigDocument, CookJob, CookReason, CookedMod, ConfigFileInfo, ConfigTarget, CrashReport, ReportFinding, ReportSaved, Detected, Distribution,
   FoundMod, FoundReport, GameInstall, GameStatus, ImportReport, InstallReceipt, InstallResult, InstallState, Json, KilnError, LastServer, LaunchRequest, NewerKilnMod,
-  LaunchResult, LauncherSettings, RenderInfo, LibraryEntry, LibraryRef, TakenOver, LogFile, LogTarget, ModKind, ModpackInstallRequest, ModpackInstallResult, ModsJson,
+  LaunchResult, LauncherSettings, RenderInfo, LibraryEntry, LibraryRef, LibraryVersion, RollbackReport, VersionRef, TakenOver, LogFile, LogTarget, ModKind, ModpackInstallRequest, ModpackInstallResult, ModsJson,
   NativeJson, NativePlanEntry, NativeUserState, PreStart, Profile, ProfileChange, ProfileMod, ProfileSummary, ProxyClass, Rejection, RemoveReport, ResolvePreview, RuntimeBundle, SaveBackup, SaveSlot,
   SchemaSnapshot, ServerInstance, ServerStatus, Task, TaskState,
 } from "./commands";
@@ -167,6 +167,57 @@ const seedMods: Record<ModKind, MockManifest[]> = {
 
 const library: LibraryEntry[] = FRESH ? [] : MOD_KINDS.flatMap((kind) => [...seedMods[kind]].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
   .map((m) => entryFor(kind, m, "2026-11-0" + (2 + (m.id.length % 3)) + "T09:00:00Z")));
+
+/** `?kept=1`: Zoom Out's earlier version 0.1.0 is kept for a roll back (kiln_manage::kept), with a settings file. */
+const KEPT_SEED = typeof location !== "undefined" && new URLSearchParams(location.search).has("kept");
+if (KEPT_SEED) {
+  const e = library.find((l) => l.kind === "greeneye" && l.id === "zoom-out");
+  if (e) {
+    const hash = kdh("greeneye" + e.id + "0.1.0");
+    e.versions.push({ ...e.versions[0], version: "0.1.0", hash, folder: `library/greeneye/zoom-out/0.1.0+${hash.slice(5, 13)}`, imported: "2026-10-30T09:00:00Z",
+      manifest: { ...(e.versions[0].manifest as object), version: "0.1.0" } as unknown as Json,
+      kept: { kept: "2026-11-02T10:00:00Z", replacedBy: e.versions[0].version, settings: ["greeneye/zoom-out/zoom.ini"], settingsSize: 120 } });
+  }
+}
+
+/** library_rollback and an Undo of one (profile_revert): the version left is kept, a kept one that comes back is not;
+ *  kept versions after the others (kiln_manage::kept::follow). */
+function followKept(profileId: string, kind: ModKind, id: string, from: VersionRef, to: VersionRef) {
+  const e = library.find((l) => l.kind === kind && l.id === id);
+  if (!e) return;
+  const keep = settings.keepVersions ?? 1;
+  const at = (r: VersionRef) => e.versions.find((v) => v.version === r.version && v.hash === r.hash);
+  const back = at(to);
+  const settingsOf = back?.kept?.settings ?? [];
+  if (back) back.kept = null;
+  const left = at(from);
+  if (left && keep > 0) left.kept = { kept: now(), replacedBy: to.version, settings: settingsOf.length ? settingsOf : [], settingsSize: 0, profiles: [profileId] };
+  const kept = e.versions.filter((v) => v.kept).sort((a, b) => b.kept!.kept.localeCompare(a.kept!.kept));
+  kept.slice(keep).forEach((v) => { v.kept = null; });
+  e.versions.sort((a, b) => Number(!!a.kept) - Number(!!b.kept) || b.version.localeCompare(a.version));
+}
+
+function mockRollback(a: Record<string, unknown>): RollbackReport {
+  const pid = S(a.profileId), kind = a.kind as ModKind, id = S(a.id), to = a.to as VersionRef | null;
+  const p = clone(profiles.get(pid) ?? reject("not_found", `No profile '${pid}'.`));
+  const list = p.mods[kind] ?? [];
+  const i = list.findIndex((m) => m.id === id);
+  if (i < 0) reject("not_found", `${id} is not in the profile ${p.name}: add it there first`);
+  const e = library.find((l) => l.kind === kind && l.id === id);
+  const kept: LibraryVersion[] = (e?.versions ?? []).filter((v) => v.kept && !(v.version === list[i].version && v.hash === list[i].hash));
+  const pick = to ? kept.find((v) => v.version === to.version && v.hash === to.hash) : kept[0];
+  if (!pick) reject("not_found", `No earlier version of ${e?.name ?? id} is kept for a roll back.`);
+  const before = list[i];
+  const after = { ...before, version: pick!.version, hash: pick!.hash };
+  const files = pick!.kept?.settings ?? [];
+  list[i] = after;
+  const next = { ...p, generation: p.generation + 1, updated: now() };
+  profiles.set(pid, next);
+  followKept(pid, kind, id, before, after);
+  reapplyWhereActive(pid);
+  return { profileId: pid, profileName: p.name, kind, id, name: e?.name ?? id, from: { version: before.version, hash: before.hash },
+    to: { version: after.version, hash: after.hash }, changes: [{ kind, before, after }], kept: (settings.keepVersions ?? 1) > 0, settings: files, notices: [] };
+}
 
 function entryFor(kind: ModKind, m: MockManifest, imported: string, from?: string): LibraryEntry {
   const hash = kdh(kind + m.id + m.version);
@@ -490,8 +541,9 @@ function status(gameId: string): GameStatus {
     id: g.id, running: !!r, pid: r?.pid ?? null, started: r ? new Date(r.at - (noProxy ? 31_000 : 0)).toISOString() : null, steamUpdating: false, runtime: withMissing(runtime[gameId] ?? { installed: false, receipt: null, proxy: null, modified: [], upgradeAvailable: null }, g.kind),
     activeProfile: otherFolder[gameId] ? null : activations[gameId]?.profileId ?? null,
     ...(otherFolder[gameId] ? { otherFolderProfile: otherFolder[gameId]! } : {}), playOncePending: !!r && r.mode !== "profile" && (noProxy || Date.now() - r.at < 2500),
-    boot: bootFor(gameId), launchOptions: noProxy ? { value: null, hasDllOverride: false, advice: 'WINEDLLOVERRIDES="dinput8=n,b" %command%' }
-      : { value: 'WINEDLLOVERRIDES="dinput8=n,b" %command%', hasDllOverride: true, advice: null },
+    boot: bootFor(gameId), launchOptions: noProxy ? { value: null, hasDllOverride: false, chainedOverrideMissing: false, advice: 'WINEDLLOVERRIDES="dinput8=n,b" %command%' }
+      : { value: 'WINEDLLOVERRIDES="dinput8=n,b" %command%', hasDllOverride: true, chainedOverrideMissing: MODE === "chained-override",
+          advice: MODE === "chained-override" ? 'WINEDLLOVERRIDES="dinput8,xinput9_1_0=n,b" %command%' : null },
     newerMods: newerMods[gameId] ?? [],
   };
 }
@@ -721,7 +773,7 @@ const crashes: CrashReport[] = [{ name: "2026-11-03T22-10-04Z-night-sky.txt", cr
 
 const assets = { root: "/home/player/.local/share/kiln", editor: { present: true, bytes: 0 }, admin: { map: false, catalog: false, bytes: 0 } };
 let settings: LauncherSettings = { steamRoots: [], defaultGameId: FRESH ? null : "client-steam", allowHttpModpacks: false, savesKeep: 10, updateCheck: true, animatedFire: true,
-  addToActiveProfile: true, modFolderNotes: true };
+  addToActiveProfile: true, modFolderNotes: true, keepVersions: 1 };
 // how the (Linux) launcher draws its window; `?render=software` as after the fallback
 let render: RenderInfo = typeof location !== "undefined" && new URLSearchParams(location.search).get("render") === "software"
   ? { mode: "software", why: "restart", marker: true, markerWhy: "The launcher turned this on by itself: the page did not start within 15 s of the window with the GPU (2026-11-11T21:04:10Z)" }
@@ -919,6 +971,7 @@ const handlers: Record<string, Handler> = {
       const i = list.findIndex((m) => m.id === c.after.id);
       if (i < 0 || list[i].version !== c.after.version || list[i].hash !== c.after.hash || list[i].enabled !== c.after.enabled) continue;
       if (c.before) list[i] = c.before; else list.splice(i, 1);
+      if (c.before && (c.before.version !== c.after.version || c.before.hash !== c.after.hash)) followKept(id, c.kind, c.after.id, c.after, c.before);
       changed = true;
     }
     if (!changed) return p;
@@ -998,6 +1051,7 @@ const handlers: Record<string, Handler> = {
     .filter((r) => !mockLibraryUsers(r).length)),
   library_users: (a) => mockLibraryUsers(a.entry as LibraryRef),
   library_take_over: (a) => mockTakeOver(a.entry as LibraryRef),
+  library_rollback: (a) => mockRollback(a),
   library_remove: (a) => {
     if (Object.values(running).some(Boolean)) reject("game_running", "Close Enshrouded first: the game may be reading this mod.");
     mockLibraryRemove(a.entry as LibraryRef, Array.isArray(a.shown) ? (a.shown as string[]) : !!a.force);

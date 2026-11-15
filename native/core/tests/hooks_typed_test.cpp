@@ -1134,10 +1134,11 @@ int main(int, char**) {
     check(A->header.size == sizeof(KilnHooksApi) && A->detour_typed && A->call_original_frame && A->call_with_frame &&
               A->fingerprint && A->typed_refusal,
           "the service table carries the five typed entries", "size " + std::to_string(A->header.size));
-    check(offsetof(KilnHooksApi, validate_typed) == 264 && offsetof(KilnHooksApi, sig_status) == 272 &&
-        offsetof(KilnHooksApi, typed_install_ready) == 280 && sizeof(KilnHooksApi) == 288 &&
-        A->validate_typed && A->sig_status && A->typed_install_ready,
-        "the typed safety extension preserves package 07's reserved slot and all older prefixes");
+    check(offsetof(KilnHooksApi, mid2_checked) == 256 && offsetof(KilnHooksApi, validate_typed) == 264 &&
+              offsetof(KilnHooksApi, sig_status) == 272 && offsetof(KilnHooksApi, typed_install_ready) == 280 &&
+              sizeof(KilnHooksApi) == 288 && A->mid2_checked && A->validate_typed && A->sig_status &&
+              A->typed_install_ready,
+          "package 07's mid2_checked holds 256 and the typed safety extension follows it");
 
     test_call_with_frame();
     test_mixed_through_thunk();

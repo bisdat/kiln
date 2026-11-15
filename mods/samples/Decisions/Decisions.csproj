@@ -1,0 +1,16 @@
+<Project>
+  <!-- Sample: cancelable decisions (docs/kiln/services/decisions.md). /survive turns on "you cannot die" for yourself: a
+       lethal loss leaves you at 1 health; /nopickup <item> refuses walk-over pickups of an item for you; /noring refuses
+       equipping a ring. Every decision's end is logged. Server side: events.death and events.pickup are on since
+       0.2.0-dev.29 and not yet confirmed in a real game. -->
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.props" />
+  <PropertyGroup>
+    <KilnModId>decisions-sample</KilnModId>
+    <KilnModName>Decisions (cancelable events sample)</KilnModName>
+    <Version>0.1.0</Version>
+    <Description>Refuse your own death, a walk-over pickup of an item, or equipping a ring; every decision's end is logged.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <KilnServices>Chat;Combat;Gameplay;Items</KilnServices>
+  </PropertyGroup>
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.targets" />
+</Project>

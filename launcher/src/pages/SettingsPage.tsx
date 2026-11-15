@@ -5,7 +5,7 @@ import { FolderPlus, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import * as api from "../api/commands";
-import type { ConfigDocument, Json, LauncherSettings, RenderInfo } from "../api/commands";
+import { KEEP_MAX, type ConfigDocument, type Json, type LauncherSettings, type RenderInfo } from "../api/commands";
 import { qk, useAppInfo, useGame, useGameStatus, useNexusEnabled, useSettings } from "../api/hooks";
 import { fallbackEnabled } from "../api/fallback";
 import { useAssetsStatus, useExtractTask } from "../components/GameArt";
@@ -66,6 +66,9 @@ function LauncherCard() {
       </Field>
       <Field label="Save backups to keep" hint="Per game." htmlFor="st-keep">
         <NumberInput id="st-keep" integer min={1} max={100} value={v.savesKeep} onCommit={(n) => set({ savesKeep: n })} style={{ width: 120 }} />
+      </Field>
+      <Field label="Earlier versions to keep" hint="Per mod, at an update: its earlier version and the settings it had, for Roll back in its menu. 0 keeps none." htmlFor="st-keep-versions">
+        <NumberInput id="st-keep-versions" integer min={0} max={KEEP_MAX} value={v.keepVersions ?? 1} onCommit={(n) => set({ keepVersions: n })} style={{ width: 120 }} />
       </Field>
       <Toggle checked={v.addToActiveProfile !== false} onChange={(on) => set({ addToActiveProfile: on })} label="Switch new mods on"
         hint="A dropped mod is on at the next Play. Off: it joins the list switched off." />

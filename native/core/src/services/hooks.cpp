@@ -250,6 +250,13 @@ KilnResult KILN_CALL h_mid2(KilnOwner owner, uintptr_t target, const KilnHookOrd
     KILN_GUARD("mid2", KILN_ERR_INTERNAL, return chain::install_mid(owner, target, order_of(order), fn, user, out););
 }
 
+KilnResult KILN_CALL h_mid2_checked(KilnOwner owner, uintptr_t target, const KilnHookOrder* order, KilnMidFn fn, void* user,
+                                  KilnHandle* out, uint32_t* unchecked) {
+    if (!fn || !unchecked || !valid_target(target)) return KILN_ERR_INVALID_ARGUMENT;
+    *unchecked = 0;
+    KILN_GUARD("mid2_checked", KILN_ERR_INTERNAL, return chain::install_mid(owner, target, order_of(order), fn, user, out, unchecked););
+}
+
 // ---- typed links (dev.28) ----
 // The positions a KilnSig describes (the sret buffer included), or -1 when it is malformed.
 int sig_positions(const KilnSig* sig) {
@@ -571,7 +578,9 @@ const KilnHooksApi kTable = {
     // owner cleanup (dev.28)
     &h_subscribe_owner_retiring,
     &h_unsubscribe_owner_retiring,
-    nullptr, // package 07 mid2_checked slot; coordinator: retain its implementation at offset 256
+    // checked mid installation (dev.29, package 07)
+    &h_mid2_checked,
+    // typed safety extension (dev.29)
     &h_validate_typed,
     &h_sig_status,
     &h_typed_install_ready,

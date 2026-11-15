@@ -259,6 +259,12 @@ typedef struct KilnBuildApi {
      * too); release() forgets the chunks inside a box (they revert at the next restart unless a base covers them). */
     KilnResult(KILN_CALL* keep)(const int32_t origin[3], const uint32_t dims[3]);
     KilnResult(KILN_CALL* release)(const int32_t origin[3], const uint32_t dims[3], uint64_t* released);
+    /* Appended dev.29, v1: shared Terrain/recovery allowance on the tick thread. Inspect header.size before use.
+     * reserve: OK admits conservative read/write cell costs in this server step (32768/4096); otherwise try next step.
+     * charge: elapsed synchronous work in milliseconds; stop admission after 2 ms. Calls are not preemptible.
+     * These are used by Kiln.Terrain and native transient recovery; keep/release metadata has no voxel cell cost. */
+    KilnResult(KILN_CALL* terrain_budget_reserve)(uint32_t read_cells, uint32_t write_cells);
+    void(KILN_CALL* terrain_budget_charge)(double milliseconds);
 } KilnBuildApi;
 
 #ifdef __cplusplus

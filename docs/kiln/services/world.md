@@ -194,12 +194,31 @@ Events.On<EntityScaleChangedEvent>(e => Log.Info(e.ToString()));
   nothing. ShroudForge's own Lua setter, hosted unchanged, keeps its broader rule.
 - **The answer** is the tracked write's: `Before` and `Now` are the 12 bytes the write read and left in the step it ran
   (null on a refusal), `Kept` is the readback one step later where the game writes the type too, `SaveTracked` and
-  `ReplicationTracked` are the game's own per-type bits from the same answer, and `Persisted` says whether replay was recorded (or the original scale restored); it does not guarantee the identity or size of the entity after a restart.
-- **Across a save and restart.** The tested placed chest reloaded at 1, 1, 1 without Kiln replay despite being marked for saving ([lab evidence](../../re/world.md#transform-scale-and-the-save)); this does not establish how players, NPCs, mounts or other entity families save scale. Kiln records scale beside the save in kiln.saves' `entity/kiln:world` attachments and reapplies it through a tracked write when a loaded entity matches by template and saved position. Replay is asynchronous, with no promise that it finishes before players arrive. It runs in the last setting mod's name while that mod is loaded and declares `CurrentTransform` under `"writes"`. Restoring the original scale removes the record; removing a mod skips future replay but keeps the record for reinstall. A later save refreshes the recorded scale from the live component.
+  `ReplicationTracked` are the game's own per-type bits from the same answer, and `Persisted` says whether replay was recorded (or the original scale restored): recorded, not replayed. `World.GetWaitingTransformScales()` (tick thread) lists your kept scales that are not on an entity now, each with mod, template, position, scale and the reason.
+- **Across a save and restart.** The tested placed chest reloaded at 1, 1, 1 without Kiln replay despite being marked for saving ([lab evidence](../../re/world.md#transform-scale-and-the-save)); this does not establish how players, NPCs, mounts or other entity families save scale. Kiln records scale beside the save in kiln.saves' `entity/kiln:world` attachments and reapplies it through a tracked write when exactly one loaded entity of the template is at the saved position (lab, 0.2.0-dev.29: a placed chest's scale came back after a restart and was forgotten after its restore). Replay is asynchronous, with no promise that it finishes before players arrive. It runs in the last setting mod's name while that mod is loaded and declares `CurrentTransform` under `"writes"`. Restoring the original scale removes the record; removing a mod skips future replay but keeps the record for reinstall. A later save refreshes the recorded scale from the live component while the entity is still the one the record is on.
 - **Limits: size and entity type.** Every finite positive factor is accepted, from subnormal values through `float.MaxValue`, on any entity with writable `CurrentTransform`, including players, occupied mounts and physics bodies. There is no safe size range or entity-family allowlist. Extreme scales can overflow or degenerate downstream calculations; safety for those entities has not been established. Colliders, interaction components, attachments, `ScaleComponent` and building voxels are not resized. Dirty tracking does not prove that a vanilla viewer receives or renders the scale.
-- **Limits: replay identity and removal.** A kept scale is reapplied by template and position, not a durable entity identity: the first matching static entity within 0.5 m or mobile entity within 16 m can receive it. Nearby identical entities can receive each other's scales; same-id/template replacement can also be mistaken for the earlier entity. Removing a mod from a running world does not restore its live scales; restore them explicitly before unloading if needed. Removing the mod before the next load prevents replay, but does not prove every entity family returns to its original size in a vanilla game.
+- **Limits: replay identity and removal.** A kept scale is reapplied by template and position, not a durable entity identity. Since 0.2.0-dev.29 it is reapplied only when Kiln can tell the entity: after a restart exactly one entity of the template may be within 0.5 m (static) or 16 m (mobile) of the saved position. With two or more (two identical chests side by side, two NPCs of one kind in a camp) nothing is scaled: the record waits with the reason, kiln.log names it once, and it keeps waiting, also after a neighbour leaves, until your mod calls `SetTransformScale` on the entity it means (find it with the record's template and position) or three sessions pass without that, after which the record is dropped. While the game runs, an entity made again under the same id is told apart by its `SpawnTime` (an entity loaded from a save has none, one spawned in the session has one); where both have none, the entity must still be the only candidate at the recorded place when the scale is set. A destroyed entity's record is dropped. This is still positional identity: one entity alone at the place of another of the same template is taken for it. Removing a mod from a running world does not restore its live scales; restore them explicitly before unloading if needed. Removing the mod before the next load prevents replay, but does not prove every entity family returns to its original size in a vanilla game.
 - **Capabilities:** `world.transform_scale` (Kiln.World's row: the layout) and `world.tracked_writes`; either off throws
   `KilnUnavailableException` naming it.
+
+### Program budget
+`World.GetProgramBudget(kind = CapacityWorldKind.Server)` (since 0.2.0-dev.29; any thread; both sides) answers how much
+room is left for world programs, as a `ProgramBudgetResult`: `KilnSlots` (process-wide: Kiln's own 64 slots for its
+services, compat loaders and mods together; `KilnUsed` the programs that run or wait for a world, `Reserved` the slots of
+programs that cannot run: refused, faulted, a declaration no loaded mod bound; a slot is never freed in a process) and
+`EngineSlots` (the world's own table of 896: `GameUsed` the game's programs, `KilnUsed` those Kiln registered there,
+`Reserved` another loader's direct registrations), one revision for both; `PerFileMax` (32 declarations in a
+`kiln.programs.json`) and `AccessLimits` (8, 42, 64, 64, 9, 92, 24 and 4,096 iterator bytes) are always filled. It is
+counted from what kiln.world keeps (its slot ledger, and its directory of the world's table read in the world's own
+step once the table is final), never from game memory, and nothing runs for it while nobody asks. `Ok` is false with
+`NoWorld` when there is no world of that kind (the client world on a dedicated server), with `NotReady` while a world's
+table is not read yet (its `World` token is set then) or on a build where programs are off; then both budgets are 0. A
+budget read before the world starts is not a promise: registration still checks the live table at the world's start.
+The prediction world is not a kind of its own here (`ArgumentException`). Without kiln.world.budget (an older kiln.world)
+it throws `KilnUnavailableException("world.program_budget")`. A change posts `CapacityChangedEvent` (`Quota`
+`world.program_budget`) at the next step, measured every 25 steps while something listens. Native code: the table
+`kiln.world.budget` (`native/core/abi/services/kiln_world_budget.h`), a table of its own next to kiln.world.
+`World.Status` stays what it was (a legacy diagnostic).
 
 ### Entity sets
 `World.Query(with…)` and `World.Query(with, without)` give an `EntitySet`: the entities that have every component of
@@ -260,8 +279,12 @@ if (W->register_program(owner, &d, &g_prog) == KILN_OK)
 ```
 
 - **When**: `kiln_plugin_main` or `on_ready` only. kiln.world registers everything right after the game's
-  `RegisterAllPrograms` (before the world finalizes; ~79 free slots of 896; kiln.world holds 32 at most). Later calls
-  return `KILN_ERR_UNAVAILABLE`.
+  `RegisterAllPrograms` (before the world finalizes; ~79 free slots of 896; kiln.world holds 64 at most since 0.2.0-dev.29, 32 before: its own
+  quota, for every service and mod together). Every registration checks the world table's live count against its 896
+  first and refuses the program before calling the game when the table is full, and checks that the count rose after
+  the game's `RegisterProgram` returned (a descriptor the engine answers "true" for without registering it is refused).
+  Mods' declarations (`kiln.programs.json`, at most 32 per file) leave the last 8 of the 64 to Kiln's services. Later
+  calls return `KILN_ERR_UNAVAILABLE`.
 - **Names** are checked against the world's maps at that moment; one unknown component/event → the program is
   `KILN_PROGRAM_REFUSED` (logged: `program X refused: read: unknown component 'Y'`). A singleton that is not registered
   yet only warns; if it is still missing when the world starts, the engine skips the program (`KILN_PROGRAM_SKIPPED`).

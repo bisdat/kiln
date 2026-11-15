@@ -22,6 +22,7 @@ import { bulkPlan, filterRows, kindsOf, type ModRow } from "../../shell/mods";
 import { notifyAdd } from "../../shell/notices";
 import { checkNow, noticeable, statusOf, UpdateBadge, UpdateSourceModal, useModUpdates } from "../../shell/modUpdates";
 import { NOT_REMOVABLE, removable, removeMany, removeMod, useRemoveCheck, useRemoveMany, withoutRows, type RemoveTarget } from "../../shell/removeMod";
+import { otherVersions, rollBack, rollbackTargets } from "../../shell/rollback";
 import { NONE, all as selectAll, ownerOf, pick as pickSelected, pruneSelection, range as selectRange, setSelection, toggle as toggleSelected, useOwnedSelection } from "../../shell/selection";
 import type { useMods } from "../../shell/useMods";
 import { withDropin } from "../profiles/dropins";
@@ -192,7 +193,10 @@ export function MainList({ game, mods, running }: { game: GameInstall; mods: Mod
       ...(withConfig.has(r.id) ? [{ label: "Configs", onSelect: () => setConfigs(r.id) }] : []),
       ...(r.kind === "kiln" && r.on && cookable.has(r.id) ? [{ label: "Cook again", disabled: running,
         onSelect: () => void cookAgain(game.id, r.id, r.name).then(() => qc.invalidateQueries({ queryKey: ["cook_plan"] })) }] : []),
-      ...versions.filter((v) => v.version !== cur).map((v) => ({ label: `Use ${v.version}`, disabled: !loaded, onSelect: () => mods.setVersion(r, v.version, v.hash) })),
+      ...otherVersions(r.lib, cur).map((v) => ({ label: `Use ${v.version}`, disabled: !loaded, onSelect: () => mods.setVersion(r, v.version, v.hash) })),
+      // an earlier version an update kept, with its settings (shell/rollback.ts)
+      ...(r.kind && r.entry && pid ? rollbackTargets(r.lib, r.entry, pid).map((v) => ({ label: `Roll back to ${v.version}`, disabled: !!busy,
+        onSelect: () => void rollBack(qc, game.id, pid, r.kind!, r.id, r.name, v, mods.edit.flush) })) : []),
       ...(folder ? [{ label: "Open folder", onSelect: () => api.appOpenPath(folder).catch((e) => toast.error(e)) }] : []),
       ...(r.kind && r.lib ? [{ label: "Updates…", onSelect: () => setSource({ kind: r.kind!, id: r.id, name: r.name }) }] : []),
       ...(versions.length > 1 ? versions.filter((v) => v.version !== r.entry?.version).map((v) => ({ label: `Remove ${v.version}`, danger: true, disabled: running, onSelect: () => setRm({ row: r, version: v.version }) })) : []),

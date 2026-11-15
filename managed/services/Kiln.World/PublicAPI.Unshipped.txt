@@ -1,1 +1,75 @@
 #nullable enable
+Kiln.ComponentWrittenEvent.Writer.get -> string?
+Kiln.ComponentWrittenEvent.Writers.get -> System.Collections.Generic.IReadOnlyList<string!>!
+static Kiln.World.GetWaitingTransformScales() -> System.Collections.Generic.IReadOnlyList<Kiln.WaitingTransformScale!>!
+Kiln.WaitingTransformScale
+Kiln.WaitingTransformScale.WaitingTransformScale(string! Mod, System.Guid? Template, Kiln.WorldPosition Position, Kiln.Scale3 Scale, string! Reason) -> void
+Kiln.WaitingTransformScale.<Clone>$() -> Kiln.WaitingTransformScale!
+Kiln.WaitingTransformScale.Deconstruct(out string! Mod, out System.Guid? Template, out Kiln.WorldPosition Position, out Kiln.Scale3 Scale, out string! Reason) -> void
+Kiln.WaitingTransformScale.Equals(Kiln.WaitingTransformScale? other) -> bool
+Kiln.WaitingTransformScale.Mod.get -> string!
+Kiln.WaitingTransformScale.Mod.init -> void
+Kiln.WaitingTransformScale.Template.get -> System.Guid?
+Kiln.WaitingTransformScale.Template.init -> void
+Kiln.WaitingTransformScale.Position.get -> Kiln.WorldPosition
+Kiln.WaitingTransformScale.Position.init -> void
+Kiln.WaitingTransformScale.Scale.get -> Kiln.Scale3
+Kiln.WaitingTransformScale.Scale.init -> void
+Kiln.WaitingTransformScale.Reason.get -> string!
+Kiln.WaitingTransformScale.Reason.init -> void
+override Kiln.WaitingTransformScale.Equals(object? obj) -> bool
+override Kiln.WaitingTransformScale.GetHashCode() -> int
+override Kiln.WaitingTransformScale.ToString() -> string!
+static Kiln.WaitingTransformScale.operator !=(Kiln.WaitingTransformScale? left, Kiln.WaitingTransformScale? right) -> bool
+static Kiln.WaitingTransformScale.operator ==(Kiln.WaitingTransformScale? left, Kiln.WaitingTransformScale? right) -> bool
+Kiln.ProgramAccessLimits
+Kiln.ProgramAccessLimits.<Clone>$() -> Kiln.ProgramAccessLimits!
+Kiln.ProgramAccessLimits.Deconstruct(out uint Templates, out uint ReadWrite, out uint SingletonReads, out uint SingletonWrites, out uint OtherTemplates, out uint OtherAccessors, out uint EventsInOut, out uint IteratorBytes) -> void
+Kiln.ProgramAccessLimits.Equals(Kiln.ProgramAccessLimits? other) -> bool
+Kiln.ProgramAccessLimits.EventsInOut.get -> uint
+Kiln.ProgramAccessLimits.EventsInOut.init -> void
+Kiln.ProgramAccessLimits.IteratorBytes.get -> uint
+Kiln.ProgramAccessLimits.IteratorBytes.init -> void
+Kiln.ProgramAccessLimits.OtherAccessors.get -> uint
+Kiln.ProgramAccessLimits.OtherAccessors.init -> void
+Kiln.ProgramAccessLimits.OtherTemplates.get -> uint
+Kiln.ProgramAccessLimits.OtherTemplates.init -> void
+Kiln.ProgramAccessLimits.ProgramAccessLimits(uint Templates, uint ReadWrite, uint SingletonReads, uint SingletonWrites, uint OtherTemplates, uint OtherAccessors, uint EventsInOut, uint IteratorBytes) -> void
+Kiln.ProgramAccessLimits.ReadWrite.get -> uint
+Kiln.ProgramAccessLimits.ReadWrite.init -> void
+Kiln.ProgramAccessLimits.SingletonReads.get -> uint
+Kiln.ProgramAccessLimits.SingletonReads.init -> void
+Kiln.ProgramAccessLimits.SingletonWrites.get -> uint
+Kiln.ProgramAccessLimits.SingletonWrites.init -> void
+Kiln.ProgramAccessLimits.Templates.get -> uint
+Kiln.ProgramAccessLimits.Templates.init -> void
+Kiln.ProgramBudgetResult
+Kiln.ProgramBudgetResult.<Clone>$() -> Kiln.ProgramBudgetResult!
+Kiln.ProgramBudgetResult.AccessLimits.get -> Kiln.ProgramAccessLimits!
+Kiln.ProgramBudgetResult.AccessLimits.init -> void
+Kiln.ProgramBudgetResult.Deconstruct(out bool Ok, out string? Reason, out Kiln.CapacityWorldToken? World, out Kiln.CapacityInfo! KilnSlots, out Kiln.CapacityInfo! EngineSlots, out uint PerFileMax, out Kiln.ProgramAccessLimits! AccessLimits) -> void
+Kiln.ProgramBudgetResult.EngineSlots.get -> Kiln.CapacityInfo!
+Kiln.ProgramBudgetResult.EngineSlots.init -> void
+Kiln.ProgramBudgetResult.Equals(Kiln.ProgramBudgetResult? other) -> bool
+Kiln.ProgramBudgetResult.KilnSlots.get -> Kiln.CapacityInfo!
+Kiln.ProgramBudgetResult.KilnSlots.init -> void
+Kiln.ProgramBudgetResult.Ok.get -> bool
+Kiln.ProgramBudgetResult.Ok.init -> void
+Kiln.ProgramBudgetResult.PerFileMax.get -> uint
+Kiln.ProgramBudgetResult.PerFileMax.init -> void
+Kiln.ProgramBudgetResult.ProgramBudgetResult(bool Ok, string? Reason, Kiln.CapacityWorldToken? World, Kiln.CapacityInfo! KilnSlots, Kiln.CapacityInfo! EngineSlots, uint PerFileMax, Kiln.ProgramAccessLimits! AccessLimits) -> void
+Kiln.ProgramBudgetResult.Reason.get -> string?
+Kiln.ProgramBudgetResult.Reason.init -> void
+Kiln.ProgramBudgetResult.World.get -> Kiln.CapacityWorldToken?
+Kiln.ProgramBudgetResult.World.init -> void
+override Kiln.ProgramAccessLimits.Equals(object? obj) -> bool
+override Kiln.ProgramAccessLimits.GetHashCode() -> int
+override Kiln.ProgramAccessLimits.ToString() -> string!
+override Kiln.ProgramBudgetResult.Equals(object? obj) -> bool
+override Kiln.ProgramBudgetResult.GetHashCode() -> int
+override Kiln.ProgramBudgetResult.ToString() -> string!
+static Kiln.ProgramAccessLimits.operator !=(Kiln.ProgramAccessLimits? left, Kiln.ProgramAccessLimits? right) -> bool
+static Kiln.ProgramAccessLimits.operator ==(Kiln.ProgramAccessLimits? left, Kiln.ProgramAccessLimits? right) -> bool
+static Kiln.ProgramBudgetResult.operator !=(Kiln.ProgramBudgetResult? left, Kiln.ProgramBudgetResult? right) -> bool
+static Kiln.ProgramBudgetResult.operator ==(Kiln.ProgramBudgetResult? left, Kiln.ProgramBudgetResult? right) -> bool
+static Kiln.World.GetProgramBudget(Kiln.CapacityWorldKind kind = Kiln.CapacityWorldKind.Server) -> Kiln.ProgramBudgetResult!

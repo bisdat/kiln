@@ -3,7 +3,7 @@
 // folder that the launcher did not place (kiln_manage::found). A row is on when its mod is in the loaded profile and
 // enabled; a game-folder row has no switch (only its state and fix). One short note per row, only when there is
 // something to say. Pure: shell/useMods.ts reads the queries and the edits.
-import type { BootState, FoundMod, LibraryEntry, LibraryRef, ModKind, Profile, ProfileMod, ResolvePreview, RetainedPlacement } from "../api/commands";
+import type { BootState, FoundMod, LibraryEntry, LibraryRef, LibraryVersion, ModKind, Profile, ProfileMod, ResolvePreview, RetainedPlacement } from "../api/commands";
 import { MOD_KINDS, NOT_RUNNING_KINDS } from "../api/kinds";
 
 export type NoteTone = "info" | "warn" | "err" | "idle";
@@ -54,6 +54,13 @@ export interface ModInputs {
 }
 
 const lower = (s: string) => s.toLowerCase();
+
+/** The version the launcher picks by itself for a mod (the row's version when the profile lacks it, a switch, All on,
+ *  the server's sync dialog): the Library's newest that is not kept for a roll back. A kept version is only ever
+ *  picked by hand (Roll back to, Use). None when only kept versions are left. */
+export function defaultVersion(lib: LibraryEntry | null | undefined): LibraryVersion | undefined {
+  return lib?.versions.find((v) => !v.kept);
+}
 const byName = (a: ModRow, b: ModRow) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || a.key.localeCompare(b.key);
 
 /** "missing dependency ui-lib ^1.0" → "Needs ui-lib ^1.0". */
@@ -93,7 +100,7 @@ export function buildRows(x: ModInputs): ModRow[] {
     seen.add(key);
     const on = !!entry?.enabled;
     const row: ModRow = {
-      key, kind, id, name: lib?.name ?? id, version: entry?.version ?? lib?.versions[0]?.version ?? null, on, entry, lib, found: null,
+      key, kind, id, name: lib?.name ?? id, version: entry?.version ?? defaultVersion(lib)?.version ?? null, on, entry, lib, found: null,
       note: null, wontRun: null, withWorld: false, staysOff: false, changed: null,
     };
     if (on) {
@@ -131,7 +138,7 @@ export function buildRows(x: ModInputs): ModRow[] {
       if (kept) row.note = { text: "Left in the game folder", tone: "warn", title: kept.r.reason };
     }
     // its files were changed in its Library folder (a mod.json edited by hand): what Play would refuse, so it comes first
-    const used = entry ? lib?.versions.find((v) => v.hash === entry.hash) : lib?.versions[0];
+    const used = entry ? lib?.versions.find((v) => v.hash === entry.hash) : defaultVersion(lib);
     if (used?.changed) {
       row.changed = { kind, id, version: used.version, hash: used.hash };
       row.note = { text: "Changed on disk", tone: "warn",
@@ -221,8 +228,8 @@ export function bulkPlan(rows: ModRow[], on: boolean): BulkPlan {
     if (r.found || !r.kind) { plan.left.push({ name: r.name, why: "in the game folder, it has no switch" }); continue; }
     if (r.on === on) continue;
     if (r.entry) { plan.change.push({ kind: r.kind, before: r.entry, after: { ...r.entry, enabled: on } }); continue; }
-    const v = r.lib?.versions[0];
-    if (!v) { plan.left.push({ name: r.name, why: "no version of it is in the Library" }); continue; }
+    const v = defaultVersion(r.lib);
+    if (!v) { plan.left.push({ name: r.name, why: r.lib?.versions.length ? "only kept versions are in the Library; pick a version explicitly" : "no version of it is in the Library" }); continue; }
     plan.change.push({ kind: r.kind, before: null, after: { id: r.id, version: v.version, hash: v.hash, enabled: true } });
   }
   return plan;

@@ -334,6 +334,7 @@ void probe_owners() {
             drops_drop_owner(o);
 #if KC_GAMEDATA
             gd_owner_gone(o);
+            gd_owner_revoked(o);
 #endif
             std::string err;
             store_flush(&err);

@@ -9,6 +9,7 @@
 #include <mutex>
 
 #include "kiln_api.h"
+#include "overlay_mode.h"
 #include "services/kiln_ui.h"
 
 namespace kui {
@@ -64,13 +65,13 @@ extern std::atomic<bool> g_wheel_active;     // a radial wheel is open (wheel.cp
 extern std::atomic<bool> g_page_capture;     // the Kiln page in the game's main menu is opening or shown (menu_page.cpp)
 inline bool wheel_active() { return g_wheel_active.load(std::memory_order_relaxed); }
 inline bool capturing() {
-    return g_menu_open.load(std::memory_order_relaxed) || g_page_capture.load(std::memory_order_relaxed) ||
-           g_interactive.load(std::memory_order_relaxed) > 0 || wheel_active();
+    return overlay_drawing_on() && (g_menu_open.load(std::memory_order_relaxed) || g_page_capture.load(std::memory_order_relaxed) ||
+           g_interactive.load(std::memory_order_relaxed) > 0 || wheel_active());
 }
 // Something to draw this frame. The native fallback menu counts too.
 extern std::atomic<uint32_t> g_render_demand;  // kiln.render acquire_frames handles (render.cpp)
 inline bool want_draw() {
-    return capturing() || g_demand.load(std::memory_order_relaxed) > 0 || g_render_demand.load(std::memory_order_relaxed) > 0;
+    return overlay_drawing_on() && (capturing() || g_demand.load(std::memory_order_relaxed) > 0 || g_render_demand.load(std::memory_order_relaxed) > 0);
 }
 bool in_frame();  // the calling thread is inside the overlay frame's callbacks (drawing calls work)
 
@@ -81,6 +82,7 @@ extern std::atomic<uint32_t> g_hover_panels; // Kiln panels that take the mouse 
 // ---- input.cpp ----
 void input_install_iat();       // SetCursorPos / ClipCursor slots of the game exe (plugin main)
 void input_hook_xinput();      // after XInput loads: idle pad for the game while Kiln has the input
+void input_poll_window();       // drawing off: discover this process's game window without Vulkan
 void input_attach(HWND hwnd);   // subclasses the window (idempotent; re-subclasses when the game replaced its WndProc)
 bool input_attached();
 void input_replay();            // render thread, before ImGui::NewFrame: feeds queued window messages to ImGui

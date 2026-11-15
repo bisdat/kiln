@@ -1,1 +1,6 @@
 #nullable enable
+Kiln.TestKit.HarnessDecisions
+Kiln.TestKit.HarnessDecisions.Active.get -> int
+Kiln.TestKit.HarnessDecisions.Outcomes.get -> System.Collections.Generic.IReadOnlyList<Kiln.DecisionResult!>!
+Kiln.TestKit.HarnessDecisions.RestartWorld() -> void
+Kiln.TestKit.KilnHarness.Decisions.get -> Kiln.TestKit.HarnessDecisions!

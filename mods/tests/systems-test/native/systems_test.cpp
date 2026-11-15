@@ -23,10 +23,14 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "kiln_api.h"
@@ -136,6 +140,55 @@ Census census(bool reset) {
 }
 
 // ---- S1: the directory ----
+// The committed program catalog of this exe (sigdb/programs/server/<sha>.json; the lab's deploy copies it to
+// kiln/data/systems-test-catalog.json): every program's live contract (game_program_contract, chapter 06a 9.7) must be
+// the catalog's, which is what Kiln.Game's typed views carry. A missing file is a FAIL.
+std::string data_file(const char* leaf) {
+    char dir[1024];
+    size_t len = 0;
+    if (g_api->path(KILN_PATH_DATA, dir, sizeof dir - 1, &len) != KILN_OK) return {};
+    return std::string(dir, len) + "\\" + leaf;
+}
+FILE* open_utf8(const std::string& path, const wchar_t* mode);
+void catalog_row() {
+    std::string text;
+    if (FILE* f = open_utf8(data_file("systems-test-catalog.json"), L"rb")) {
+        char buf[65536];
+        for (size_t n; (n = std::fread(buf, 1, sizeof buf, f)) > 0;) text.append(buf, n);
+        std::fclose(f);
+    }
+    if (W->header.size < offsetof(KilnWorldApi, game_program_contract) + sizeof(void*)) {
+        row(false, "contract: kiln.world has no game_program_contract (table %u bytes)", W->header.size);
+        return;
+    }
+    int programs = 0, found = 0, equal = 0;
+    std::string first_bad;
+    for (size_t at = text.find("\"name\": \""); at != std::string::npos; at = text.find("\"name\": \"", at + 1)) {
+        const size_t from = at + 9, to = text.find('"', from);
+        const size_t c = text.find("\"contract\": \"0x", to);
+        if (to == std::string::npos || c == std::string::npos) break;
+        const std::string name = text.substr(from, to - from);
+        const uint32_t want = static_cast<uint32_t>(std::strtoul(text.substr(c + 15, 8).c_str(), nullptr, 16));
+        ++programs;
+        const int32_t i = W->game_program_find(KILN_WORLD_SERVER, KilnStr{name.data(), name.size()});
+        if (i < 0) {
+            if (first_bad.empty()) first_bad = name + " not found";
+            continue;
+        }
+        ++found;
+        uint32_t live = 0;
+        if (W->game_program_contract(KILN_WORLD_SERVER, i, &live, nullptr, 0, nullptr) == KILN_OK && live == want) ++equal;
+        else if (first_bad.empty()) {
+            char b[160];
+            std::snprintf(b, sizeof b, "%s: live 0x%08x, catalog 0x%08x", name.c_str(), live, want);
+            first_bad = b;
+        }
+    }
+    row(programs == 817 && found == programs && equal == programs,
+        "contract: %d of %d programs of the committed catalog have its contract live (%d found; first difference: %s)", equal,
+        programs, found, first_bad.empty() ? "none" : first_bad.c_str());
+}
+
 void find_rows() {
     const auto s = status();
     int round_trip = 0, bad = 0, game = 0, no_update = 0, rva_bad = 0;
@@ -168,6 +221,7 @@ void find_rows() {
             W->game_program_find(KILN_WORLD_PREDICTION, ks("fuel_setup")) == -1 &&
             W->game_program_find(KILN_WORLD_CLIENT, ks("fuel_setup")) == -1,
         "find: unknown names and the world kinds a dedicated server has no table for answer -1");
+    catalog_row();
 }
 
 void hook_programs() {
@@ -191,6 +245,20 @@ struct {
     uint16_t mask_before = 0xFFFF, mask_forced = 0xFFFF, mask_after = 0xFFFF;
     bool forced_flag = false;
 } g_switch;
+
+// The managed part (and its peer) wait for this file before they use wraps: the native rows count every wrap there is.
+FILE* open_utf8(const std::string& path, const wchar_t* mode);
+uint32_t g_mark_entity();
+void announce_done() {
+    char dir[1024];
+    size_t len = 0;
+    if (g_api->path(KILN_PATH_CONTROL, dir, sizeof dir - 1, &len) != KILN_OK) return;
+    // the managed part leaves the mark row's entity alone (its Fuel must reach the save as written)
+    if (FILE* f = open_utf8(std::string(dir, len) + "\\systems-native.done", L"w")) {
+        std::fprintf(f, "mark %u\n", g_mark_entity());
+        std::fclose(f);
+    }
+}
 
 // ---- S2: wraps ----
 std::atomic<uint64_t> g_bad_before{0}, g_bad_after{0};
@@ -294,6 +362,306 @@ struct {
     uint64_t stress_faults = 0;
 } g_w;
 
+// ---- S4: per entity ----
+// A Before on 5 programs iterates each slice: the entity ids must equal the job's list, and every read/write slot of
+// the program must be the component the game's GetComponent returns for that entity (kiln.world's self-test rule).
+struct GameSlice {
+    const void* ptr;
+    uint64_t size;
+};
+using GetComponentFn = void (*)(GameSlice* out, uintptr_t world, uint32_t hash, uint32_t entity);
+GetComponentFn g_get_component = nullptr;
+std::atomic<uintptr_t> g_server_world{0};
+
+struct EntityCheck {
+    const char* name;
+    KilnHandle handle = 0;
+    std::vector<uint32_t> hashes[KILN_GAME_LISTS];  // the descriptor's component hashes (read/write lists)
+    std::atomic<uint64_t> slices{0}, rows{0}, id_bad{0}, count_bad{0}, slot_ok{0}, slot_bad{0}, slot_null{0}, worker{0};
+    Threads threads;
+    void reset() {
+        slices = rows = id_bad = count_bad = slot_ok = slot_bad = slot_null = worker = 0;
+        threads.reset();
+    }
+};
+EntityCheck g_ec[] = {{"fuel_setup"}, {"fuel_network"}, {"is_actor_in_shape"}, {"move_colliders"}, {"despawn_link"}};
+constexpr int kSlotLists[] = {KILN_GAME_LIST_READ, KILN_GAME_LIST_READ_OPT, KILN_GAME_LIST_WRITE, KILN_GAME_LIST_WRITE_OPT};
+
+struct RowCtx {
+    KilnGameSlice* slice;
+    EntityCheck* ec;
+    uint32_t rows;
+};
+uint32_t KILN_CALL each_check(uint64_t* iter, uint32_t row, KilnEntity e, void* user) {
+    auto* rc = static_cast<RowCtx*>(user);
+    rc->rows++;
+    if (row >= rc->slice->count || e != rc->slice->entity_ids[row * (rc->slice->entity_stride / 4)]) rc->ec->id_bad++;
+    const uintptr_t world = g_server_world.load(std::memory_order_relaxed);
+    if (!g_get_component || !world) return 0;
+    for (int list : kSlotLists)
+        for (int32_t i = 0; i < static_cast<int32_t>(rc->ec->hashes[list].size()); ++i) {
+            uint32_t size = 0;
+            uint8_t writable = 0;
+            const void* slot = W->game_slice_slot(rc->slice, iter, list, i, &size, &writable);
+            GameSlice got{};
+            g_get_component(&got, world, rc->ec->hashes[list][i], e);
+            const bool optional = list == KILN_GAME_LIST_READ_OPT || list == KILN_GAME_LIST_WRITE_OPT;
+            if (!slot && !(optional && !got.ptr)) rc->ec->slot_null++;
+            else if (slot == got.ptr && (!slot || size == got.size)) rc->ec->slot_ok++;
+            else rc->ec->slot_bad++;
+        }
+    return 0;
+}
+void KILN_CALL st_entity_check(KilnGameSlice* s, void* user) {
+    auto* ec = static_cast<EntityCheck*>(user);
+    ec->slices++;
+    if (!s->thread_is_world) ec->worker++;
+    ec->threads.add(GetCurrentThreadId());
+    RowCtx rc{s, ec, 0};
+    if (W->game_slice_iterate(s, &each_check, &rc) != KILN_OK || rc.rows != s->count) ec->count_bad++;
+    ec->rows += rc.rows;
+    if (ctx_index(s) != 0) g_bad_before.fetch_add(1);
+}
+
+struct EntitySum {
+    uint64_t slices = 0, rows = 0, id_bad = 0, count_bad = 0, slot_ok = 0, slot_bad = 0, slot_null = 0, worker = 0;
+    int programs = 0, threads = 0;
+};
+EntitySum entity_sum() {
+    EntitySum t;
+    std::vector<uint32_t> all;
+    for (auto& ec : g_ec) {
+        if (!ec.handle) continue;
+        t.slices += ec.slices, t.rows += ec.rows, t.id_bad += ec.id_bad, t.count_bad += ec.count_bad;
+        t.slot_ok += ec.slot_ok, t.slot_bad += ec.slot_bad, t.slot_null += ec.slot_null, t.worker += ec.worker;
+        t.programs += ec.slices > 0;
+        for (auto& tid : ec.threads.tids)
+            if (const uint32_t id = tid.load(); id && std::find(all.begin(), all.end(), id) == all.end()) all.push_back(id);
+    }
+    t.threads = static_cast<int>(all.size());
+    return t;
+}
+
+// The mark: an After on fuel_setup writes one entity's Fuel (a quarter of its maximum away from the current value at
+// least: three quarters of it, or one quarter) through its write slot, marked; the next boot finds the entity by
+// position and reads it back from the save. The entity is one whose Fuel the game left alone for 24 steps, with a
+// maximum of 10 charges or more, so what a well fills or a can drains until the save stays far below the gap.
+std::string state_path() {
+    char dir[1024];
+    size_t len = 0;
+    if (g_api->path(KILN_PATH_DATA, dir, sizeof dir - 1, &len) != KILN_OK) return {};
+    return std::string(dir, len) + "\\systems-test-mark.txt";
+}
+FILE* open_utf8(const std::string& path, const wchar_t* mode) {
+    wchar_t w[1100];
+    if (MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, w, 1100) <= 0) return nullptr;
+    return _wfopen(w, mode);
+}
+struct {
+    std::atomic<int> done{0};      // 1: written
+    std::atomic<uint32_t> entity{0};
+    std::atomic<int32_t> before{0}, value{0}, max{0};
+    std::atomic<int> rc{-1};
+    // dev.29: kiln.world validates an attribute before the game's formulas (game_slice_attr_validate): Fuel (write 0)
+    // is one, DynamicFuelSetup (write 1, not an AttributeComponent) is refused by both calls
+    std::atomic<int> val_fuel{-1}, val_dyn{-1}, chg_dyn{-1};
+    KilnHandle handle = 0;
+    std::mutex m;                                // the candidates: Fuel at first sight
+    std::unordered_map<uint32_t, int32_t> seen;
+    uint64_t first_step = 0;
+} g_mark;
+uint32_t g_mark_entity() { return g_mark.entity.load(); }
+uint32_t KILN_CALL each_mark(uint64_t* iter, uint32_t, KilnEntity e, void* user) {
+    auto* s = static_cast<KilnGameSlice*>(user);
+    uint32_t size = 0;
+    uint8_t writable = 0;
+    auto* fuel = static_cast<uint8_t*>(W->game_slice_slot(s, iter, KILN_GAME_LIST_WRITE, 0, &size, &writable));  // Fuel
+    if (!fuel || size < 16 || !writable) return 0;
+    // a well with a transform (read_opt CurrentTransform): the next boot finds it by position
+    if (!W->game_slice_slot(s, iter, KILN_GAME_LIST_READ_OPT, 0, nullptr, nullptr)) return 0;
+    int32_t cur = 0, max = 0;
+    std::memcpy(&cur, fuel + 8, 4);
+    std::memcpy(&max, fuel + 12, 4);
+    if (max < 640) return 0;
+    const int32_t value = cur < max / 2 ? max / 4 * 3 : max / 4;
+    {
+        std::lock_guard<std::mutex> lock(g_mark.m);
+        if (g_mark.first_step == 0) g_mark.first_step = s->step;
+        if (s->step < g_mark.first_step + 24) {
+            if (g_mark.seen.size() < 512) g_mark.seen.emplace(e, cur);
+            return 0;
+        }
+        const auto it = g_mark.seen.find(e);
+        if (it == g_mark.seen.end() || it->second != cur) return 0;  // new, or the game changed it meanwhile
+    }
+    int expected = 0;
+    if (!g_mark.done.compare_exchange_strong(expected, 1)) return 1;
+    if (W->header.size >= offsetof(KilnWorldApi, game_slice_attr_validate) + sizeof(void*)) {
+        g_mark.val_fuel = W->game_slice_attr_validate(s, iter, KILN_GAME_LIST_WRITE, 0);
+        g_mark.val_dyn = W->game_slice_attr_validate(s, iter, KILN_GAME_LIST_WRITE, 1);
+        g_mark.chg_dyn = W->game_slice_attr_changed(s, iter, KILN_GAME_LIST_WRITE, 1);
+    }
+    g_mark.rc = W->game_slice_mark(s, iter, KILN_GAME_LIST_WRITE, 0);
+    std::memcpy(fuel + 8, &value, 4);
+    g_mark.entity = e, g_mark.before = cur, g_mark.value = value, g_mark.max = max;
+    return 1;
+}
+void KILN_CALL st_mark(KilnGameSlice* s, void*) {
+    if (g_mark.done.load()) return;
+    W->game_slice_iterate(s, &each_mark, s);
+}
+struct {
+    bool after_restart = false;
+    double x = 0, y = 0, z = 0;
+    int32_t written = 0, seen = 0, before = 0;
+} g_restart;
+
+// The stop row (dev.29): a Before on fuel_network made when the rows are done stays applied until the world stops. At
+// KILN_WORLD_STOPPING kiln.world closes admission, restores the entry and waits for the pool's calls in flight (up to
+// 2 s); the wrap goes back to PENDING (for the next world). Checked when the process exits (on_unload): the wrap is
+// PENDING with no call running, after slices ran in it. kiln.world's own "world 0 stops" line says how long the drain
+// took; a "wrap drain timed out" line would be the failure.
+struct {
+    KilnHandle handle = 0;
+    Seen seen;
+} g_stop;
+void stop_wrap_make() {
+    g_stop.handle = wrap("fuel_network", KILN_WRAP_BEFORE, &st_before, &g_stop.seen);
+    say("stop row: a Before on fuel_network (wrap %llu) stays applied until the world stops",
+        static_cast<unsigned long long>(g_stop.handle));
+}
+void KILN_CALL on_unload(void*) {
+    if (!W || !g_stop.handle) return;
+    const KilnGameWrapInfo i = winfo(g_stop.handle);
+    const uint64_t slices = g_stop.seen.slices.load();
+    row(i.state == KILN_WRAP_PENDING && i.running == 0 && !i.gone && slices > 0 && i.faults == 0,
+        "stop: a wrap applied when the world stopped went back to PENDING with 0 calls running (state %u, running %u, "
+        "%llu slices ran in it before the stop)", i.state, i.running, static_cast<unsigned long long>(slices));
+    say("stop row done, %d PASS, %d FAIL in all", g_pass, g_fail);
+}
+
+void entity_phase(uint64_t n) {
+    switch (n) {
+        case 4040: {
+            uintptr_t gc = 0;
+            g_api->symbol(ks("GetComponent"), &gc);
+            g_get_component = reinterpret_cast<GetComponentFn>(gc);
+            g_server_world = g_api->world(KILN_WORLD_SERVER);
+            g_bad_before = 0;
+            for (auto& ec : g_ec) {
+                const int32_t idx = prog(ec.name);
+                for (int list : kSlotLists) {
+                    KilnStr names[48];
+                    const int32_t c = W->game_program_list(KILN_WORLD_SERVER, idx, list, names, 48);
+                    for (int32_t i = 0; i < c && i < 48; ++i) ec.hashes[list].push_back(W->component_hash(names[i]));
+                }
+                ec.handle = wrap(ec.name, KILN_WRAP_BEFORE, &st_entity_check, &ec);
+            }
+            break;
+        }
+        case 4042:
+            for (auto& ec : g_ec) ec.reset();
+            break;
+        case 4340: {
+            const EntitySum t = entity_sum();
+            row(t.programs == 5 && t.rows > 0 && t.id_bad == 0 && t.count_bad == 0,
+                "iterate: per-entity ids equal J's id list for %d programs (%llu slices, %llu entities)", t.programs,
+                static_cast<unsigned long long>(t.slices), static_cast<unsigned long long>(t.rows));
+            row(t.slot_ok > 0 && t.slot_bad == 0 && t.slot_null == 0,
+                "slots: %llu of %llu slots equal GetComponent (5 programs, read and write lists)",
+                static_cast<unsigned long long>(t.slot_ok), static_cast<unsigned long long>(t.slot_ok + t.slot_bad + t.slot_null));
+            row(W->lab_parallel(1, 400) == KILN_OK, "parallel switch on for 400 steps (per entity, forced)");
+            break;
+        }
+        case 4342:
+            for (auto& ec : g_ec) ec.reset();
+            g_bad_before = 0;
+            break;
+        case 4740: {
+            const EntitySum t = entity_sum();
+            row(status().parallel_forced && t.programs == 5 && t.id_bad == 0 && t.count_bad == 0 && t.slot_bad == 0 &&
+                    t.slot_null == 0 && t.slot_ok > 0 && t.worker > 0 && t.threads > 1 && g_bad_before == 0,
+                "iterate and slots (forced): %llu entities on %d threads (%llu of %llu slices on workers), ids equal J's, "
+                "%llu slots equal GetComponent, 0 bad index", static_cast<unsigned long long>(t.rows), t.threads,
+                static_cast<unsigned long long>(t.worker), static_cast<unsigned long long>(t.slices),
+                static_cast<unsigned long long>(t.slot_ok));
+            for (auto& ec : g_ec) W->game_program_unwrap(ec.handle), ec.handle = 0;
+            W->lab_parallel(0, 0);
+            g_mark.handle = wrap("fuel_setup", KILN_WRAP_AFTER, &st_mark, nullptr);
+            break;
+        }
+        case 4790: {
+            W->game_program_unwrap(g_mark.handle);
+            const uint32_t e = g_mark.entity.load();
+            uint32_t size = 0;
+            const auto* fuel = static_cast<const uint8_t*>(e ? W->component(e, W->component_hash(ks("Fuel")), &size) : nullptr);
+            int32_t now = -1;
+            if (fuel && size >= 16) std::memcpy(&now, fuel + 8, 4);
+            KilnVec3 pos{};
+            const bool where = e && W->position(e, &pos) == KILN_OK;
+            const int32_t value = g_mark.value.load(), before = g_mark.before.load();
+            const bool ok = g_mark.done && g_mark.rc == KILN_OK && where && std::abs(now - value) < 400 &&
+                            std::abs(now - value) < std::abs(now - before);
+            row(ok, "mark: an After on fuel_setup wrote entity %u's Fuel %d -> %d (max %d), marked (%d); now %d",
+                e, g_mark.before.load(), g_mark.value.load(), g_mark.max.load(), g_mark.rc.load(), now);
+            row(g_mark.val_fuel == KILN_OK && g_mark.val_dyn == KILN_ERR_INVALID_ARGUMENT &&
+                    g_mark.chg_dyn == KILN_ERR_INVALID_ARGUMENT,
+                "attribute validation: fuel_setup's Fuel is an attribute (validate %d); its DynamicFuelSetup write slot "
+                "is refused before the game's formulas (validate %d, changed %d)", g_mark.val_fuel.load(),
+                g_mark.val_dyn.load(), g_mark.chg_dyn.load());
+            if (ok) {
+                if (FILE* f = open_utf8(state_path(), L"w")) {
+                    std::fprintf(f, "%.3f %.3f %.3f %d %d %d\n", pos.x, pos.y, pos.z, g_mark.value.load(), now,
+                                 g_mark.before.load());
+                    std::fclose(f);
+                    say("READY restart: stop and start the lab; the next boot reads entity %u's Fuel back from the save", e);
+                }
+            }
+            break;
+        }
+        case 4800:
+            stop_wrap_make();
+            g_done = true;
+            say("done, %d PASS, %d FAIL", g_pass, g_fail);
+            announce_done();
+            break;
+        default: break;
+    }
+}
+
+// The boot after the restart: the written well, found by its position, holds the written value (plus what it filled).
+void restart_phase(uint64_t n) {
+    if (n != 10) return;
+    stop_wrap_make();
+    const uint32_t hash = W->component_hash(ks("Fuel"));
+    uint32_t count = 0;
+    std::vector<KilnEntity> ents(8192);
+    W->find(hash, ents.data(), static_cast<uint32_t>(ents.size()), &count);
+    KilnEntity best = 0;
+    double best_d = 1e9;
+    for (uint32_t i = 0; i < count && i < ents.size(); ++i) {
+        KilnVec3 p{};
+        if (W->position(ents[i], &p) != KILN_OK) continue;
+        const double d = std::abs(p.x - g_restart.x) + std::abs(p.y - g_restart.y) + std::abs(p.z - g_restart.z);
+        if (d < best_d) best_d = d, best = ents[i];
+    }
+    uint32_t size = 0;
+    const auto* fuel = static_cast<const uint8_t*>(best ? W->component(best, hash, &size) : nullptr);
+    int32_t cur = -1;
+    if (fuel && size >= 16) std::memcpy(&cur, fuel + 8, 4);
+    const bool close = best_d < 0.5;
+    const bool kept = cur >= 0 && std::abs(cur - g_restart.before) > std::abs(cur - g_restart.seen);
+    row(close && kept, "mark: a marked Fuel write is in the save after restart: the well at %.1f/%.1f/%.1f (entity %u, "
+        "%.2f m off) holds %d; written %d, %d at the last check before the stop, %d before the write", g_restart.x,
+        g_restart.y, g_restart.z, best, best_d, cur, g_restart.written, g_restart.seen, g_restart.before);
+    std::string p = state_path();
+    wchar_t w[1100];
+    if (MultiByteToWideChar(CP_UTF8, 0, p.c_str(), -1, w, 1100) > 0) DeleteFileW(w);
+    g_done = true;
+    say("done, %d PASS, %d FAIL", g_pass, g_fail);
+    announce_done();
+}
+
 // ---- S3: kiln.types under wraps ----
 struct {
     Seen setup, net_before;
@@ -345,11 +713,9 @@ void identity_phase(uint64_t n) {
             break;
         }
         case 4022: restore_row("the end"); break;
-        case 4030:
-            g_done = true;
-            say("done, %d PASS, %d FAIL", g_pass, g_fail);
+        default:
+            if (n >= 4040) entity_phase(n);
             break;
-        default: break;
     }
 }
 
@@ -503,7 +869,7 @@ void wraps_phase(uint64_t n) {
 void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
     if (g_done || !W) return;
     g_tick_tid = GetCurrentThreadId();
-    if (!g_w.init.handle && status().directory[KILN_WORLD_SERVER]) {
+    if (!g_restart.after_restart && !g_w.init.handle && status().directory[KILN_WORLD_SERVER]) {
         // INIT programs run for archetype groups that gain entities: wrap one while the world loads its entities
         g_w.init.handle = wrap("init_spawn_time", KILN_WRAP_AFTER, &st_after, &g_w.init);
         say("INIT wrap on init_spawn_time made at world step %llu", static_cast<unsigned long long>(tick->step));
@@ -519,6 +885,10 @@ void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
         say("start at step %llu (%u entities with Health)", static_cast<unsigned long long>(g_start), health);
     }
     const uint64_t n = tick->step - g_start;
+    if (g_restart.after_restart) {
+        restart_phase(n);
+        return;
+    }
     switch (n) {
         case 10: find_rows(); break;
         case 20:
@@ -575,11 +945,12 @@ extern "C" __declspec(dllexport) KilnResult KILN_CALL kiln_plugin_main(const Kil
     g_owner = owner;
     info->id = ks("systems-test");
     info->version = ks("0.1.0");
+    if (info->size >= offsetof(KilnPluginInfo, on_unload) + sizeof(info->on_unload)) info->on_unload = &on_unload;
     if (info->size >= offsetof(KilnPluginInfo, on_ready) + sizeof(info->on_ready))
         info->on_ready = [](void*) {
             W = static_cast<const KilnWorldApi*>(g_api->service(ks(KILN_WORLD_SERVICE), 4));
             T = static_cast<const KilnTypesApi*>(g_api->service(ks(KILN_TYPES_SERVICE), 1));
-            if (!W || W->header.size < offsetof(KilnWorldApi, wrap_original) + sizeof(void*)) {
+            if (!W || W->header.size < offsetof(KilnWorldApi, game_archetype_has) + sizeof(void*)) {
                 W = nullptr;
                 say("FAIL kiln.world v4 is not here");
                 say("done, 0 PASS, 1 FAIL");
@@ -587,6 +958,20 @@ extern "C" __declspec(dllexport) KilnResult KILN_CALL kiln_plugin_main(const Kil
             }
             if (!T || T->header.size < offsetof(KilnTypesApi, system_unhook) + sizeof(void*)) T = nullptr;
             say("kiln.world v4 found (table %u bytes); kiln.types %s", W->header.size, T ? "found" : "missing");
+            {  // a done file of an earlier boot must not start the managed part early
+                char dir[1024];
+                size_t len = 0;
+                wchar_t w[1100];
+                if (g_api->path(KILN_PATH_CONTROL, dir, sizeof dir - 1, &len) == KILN_OK &&
+                    MultiByteToWideChar(CP_UTF8, 0, (std::string(dir, len) + "\\systems-native.done").c_str(), -1, w, 1100) > 0)
+                    DeleteFileW(w);
+            }
+            if (FILE* f = open_utf8(state_path(), L"r")) {
+                g_restart.after_restart = std::fscanf(f, "%lf %lf %lf %d %d %d", &g_restart.x, &g_restart.y, &g_restart.z,
+                                                      &g_restart.written, &g_restart.seen, &g_restart.before) == 6;
+                std::fclose(f);
+                if (g_restart.after_restart) say("the boot after the restart: only the mark row runs");
+            }
         };
     KilnHandle h = 0;
     api->subscribe_tick(owner, KILN_TICK_PRE, &on_pre, nullptr, &h);

@@ -11,6 +11,7 @@ internal sealed class TerrainFakeState
     public int GroundY = 100;
     public byte GroundMaterial = 1;
     public string WorldId = "fake-world";
+    public readonly HashSet<string> RestartedWorlds = new(StringComparer.Ordinal);
     public bool Loaded = true;
     public readonly Dictionary<(int, int, int), Voxel> Cells = new();
     public readonly List<CellBox> Bases = [];
@@ -98,6 +99,7 @@ internal sealed class TerrainFake : IKitFake
         public string? WorldId { get { lock (s.Lock) return s.WorldId; } }
         public (int X, int Z)? GridCells => (20480, 20480);
         public string KilnVersion => "testkit";
+        public bool NewWorldSession { get { lock (s.Lock) return !s.RestartedWorlds.Contains(s.WorldId); } }
 
         public async Task NextTick()
         {
@@ -166,7 +168,7 @@ internal sealed class TerrainFake : IKitFake
             lock (s.Lock)
             {
                 var key = s.WorldId + "|" + Mod;
-                if (!s.Books.TryGetValue(key, out var b)) s.Books[key] = b = new TerrainBook();
+                if (!s.Books.TryGetValue(key, out var b)) s.Books[key] = b = TerrainBook.Create(NewWorldSession);
                 return b;
             }
         }

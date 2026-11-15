@@ -160,6 +160,7 @@ KilnResult KILN_CALL t_status(KilnRenderStatus* out) {
 }
 
 KilnResult KILN_CALL t_acquire(KilnOwner owner, KilnHandle* out) {
+    if (!overlay_drawing_on()) return KILN_ERR_UNAVAILABLE;
     if (!out) return KILN_ERR_INVALID_ARGUMENT;
     std::lock_guard lk(g_mu);
     const KilnHandle h = next_handle();

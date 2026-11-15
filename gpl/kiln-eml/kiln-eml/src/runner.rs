@@ -326,6 +326,23 @@ fn files_differ(a: &Utf8Path, b: &Utf8Path, progress: &Progress) -> bool {
     compare().unwrap_or(true)
 }
 
+pub(crate) fn runtime_unavailable(cfg: &RunConfig) -> String {
+    if std::env::var("KILN_SHROUDFORGE").as_deref() == Ok("0") {
+        return "KILN_SHROUDFORGE=0; remove that override and start again".into();
+    }
+    let state = cfg.game_dir.join("kiln/state/shroudforge.json");
+    if let Ok(bytes) = std::fs::read(state) {
+        if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+            if v.get("pid").and_then(|v| v.as_u64()) == Some(std::process::id() as u64) {
+                if let Some(why) = v.get("reason").and_then(|v| v.as_str()) {
+                    return format!("{why}. Enable/install the ShroudForge component and activate the profile again");
+                }
+            }
+        }
+    }
+    "ShroudForge did not reserve this start (component missing, off, incompatible, or an older adapter); install/update the ShroudForge component and activate the profile again".into()
+}
+
 /// Runs EML over `mods` (the paths `discover::resolve` chose; `entries` are its entries, updated in place).
 pub fn run(cfg: &RunConfig, mut mods: Vec<Utf8PathBuf>, entries: Vec<Entry>) -> Outcome {
     let _serial = RUN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -355,6 +372,18 @@ pub fn run(cfg: &RunConfig, mut mods: Vec<Utf8PathBuf>, entries: Vec<Entry>) -> 
         o.ms = started.elapsed().as_secs_f64() * 1000.0;
         o
     };
+    // Reaching this runner means no ShroudForge writer reserved the run. Never run just the data half.
+    let why = runtime_unavailable(cfg);
+    mods.retain(|path| {
+        let needs = crate::discover::classify(path).is_ok_and(|m| m.capabilities.iter()
+            .any(|c| matches!(c, Capability::Runtime | Capability::RuntimeRegisterDll)));
+        if needs {
+            let reason = format!("needs ShroudForge's runtime, which is not running: {why}; its data was not applied, so the game is as without the mod");
+            tracing::warn!(%path, %reason, "EML package skipped whole");
+            set_state(&mut out.mods, path, "skipped", Some(reason));
+        }
+        !needs
+    });
     let selected = match cfg.file_name.as_deref() {
         Some(name @ ("enshrouded" | "enshrouded_server")) => Some(name.to_owned()),
         Some(_) => None,
@@ -493,9 +522,11 @@ pub fn run(cfg: &RunConfig, mut mods: Vec<Utf8PathBuf>, entries: Vec<Entry>) -> 
         }
     }
     if out.phase == Phase::Failed {
+        let reason = format!("the EML run failed: {}", out.error.as_deref().unwrap_or("unknown cause"));
+        out.reason = Some(reason.clone());
         for e in out.mods.iter_mut().filter(|e| e.state == "pending") {
             e.state = "failed".into();
-            e.reason = Some("the EML run failed (see error)".into());
+            e.reason = Some(reason.clone());
         }
         // never start on a half-applied state: back to vanilla data, and forget the cache so the next start re-runs
         if backup.exists() && cfg.patch && owned(cfg, &file).is_ok() {
@@ -581,7 +612,7 @@ fn unproven_sentence(why: &str) -> String {
         was left as it is. If ShroudForge asset mods or another loader wrote it, nothing needs doing. If it still carries \
         EML mods you switched off: enable any EML mod for one start and disable it again; Kiln preserves unproven \
         destination containers in kiln/eml/displaced rather than deleting them. Or use Steam's \"Verify integrity of \
-        game files\" (which may leave extra containers)")
+        game files\" (which may leave extra containers): verify the game files in Steam, then start through Kiln again")
 }
 
 /// `224.4 MiB`
@@ -905,6 +936,31 @@ mod tests {
         std::fs::write(&b, b"short").unwrap();
         assert!(files_differ(&a, &b, &progress), "another length");
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn preparation_cause_reaches_status_reasons() {
+        let (d, paths) = mods_fixture("prepare-cause", &["a", "b"]);
+        // Enough to select the archive; a missing reflection executable fails preparation before backup creation.
+        std::fs::write(d.join("enshrouded.kfc"), b"KFC").unwrap();
+        let candidates = paths.iter().map(|path| crate::discover::Candidate {
+            path: path.clone(), source: "test".into(), enabled: true,
+        }).collect::<Vec<_>>();
+        let (mods, entries) = crate::discover::resolve(&candidates);
+        let cfg = RunConfig { game_dir: d.clone(), cache_dir: d.join("cache"), patch: true, ..Default::default() };
+        let out = run(&cfg, mods, entries);
+        assert_eq!(out.phase, Phase::Failed);
+        let error = out.error.as_deref().unwrap();
+        assert!(error.contains("could not prepare the game data: load_type_registry:") && error.contains("enshrouded.exe") && error.contains("os error"), "{error}");
+        assert!(out.reason.as_deref().unwrap().contains(error));
+        for entry in &out.mods {
+            assert_eq!(entry.state, "failed");
+            assert!(entry.reason.as_deref().unwrap().contains(error));
+        }
+        let json = serde_json::to_value(&out).unwrap();
+        assert!(json["reason"].as_str().unwrap().contains(error));
+        assert!(json["mods"][0]["reason"].as_str().unwrap().contains(error));
+        std::fs::remove_dir_all(d).unwrap();
     }
 
     #[test]
