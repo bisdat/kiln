@@ -9,7 +9,7 @@ import type { FoundReport, GameId, ModKind, ProfileId } from "../../api/commands
 export const foundKey = (gameId: GameId, profileId: ProfileId) => ["found_scan", gameId, profileId] as const;
 
 export function useFound(gameId: GameId | null | undefined, profileId: ProfileId | null | undefined) {
-  return useQuery({ queryKey: foundKey(gameId ?? "", profileId ?? ""), queryFn: () => api.foundScan(gameId!, profileId!), enabled: !!gameId && !!profileId });
+  return useQuery({ queryKey: foundKey(gameId ?? "", profileId ?? ""), queryFn: () => api.foundScan(gameId!, profileId!), enabled: !!gameId && !!profileId, refetchInterval: 10_000 });
 }
 
 /** The loaders line: "EML's own loader (dbghelp.dll) is in the game folder and loads its mods itself." */

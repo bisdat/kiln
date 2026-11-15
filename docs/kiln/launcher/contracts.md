@@ -1554,3 +1554,8 @@ kilnctl is built on the crate; it also has `bundle`, `client`, `admin` and `depl
   content,saves,crashes}` (`admin/configs`, `admin/mods` and `admin/console` redirect to the merged server pages).
 
 Beta startup gate commands: `snapshot_status` returns `{ phase: "preparing" | "blocked" | "ready", reasons: string[], canContinue: boolean }`; `snapshot_continue` takes no arguments and records an explicit decision to continue without a complete pre-beta copy. Neither bypasses an unfinished restore journal. `UpdateStatus.restoreRequested` records the accepted restore choice, and `beforeBetaWarning` carries persisted opt-out reasons.
+
+ShroudForge hosting: the existing `kiln/state/shroudforge.json` carries `mode: "self-hosted"` and additive
+`loaderFile` (the module path observed by the adapter; bootstrap preferred, runtime fallback). Older records may lack
+`loaderFile`. `engine_status.state` preserves this last-start evidence. Current `ownLoader.file` / `found_scan.loaders`
+come from disk detection and decide the next-start warning; historical state never resurrects a removed loader.
