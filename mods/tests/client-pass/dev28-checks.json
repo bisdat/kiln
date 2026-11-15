@@ -490,6 +490,16 @@
    "state": "settled"
   },
   {
+   "id": "06c-natives.joined",
+   "title": "Same-step natives and an attachment with a player in the world",
+   "chapter": "06c",
+   "packages": [
+    "06c-impact-natives"
+   ],
+   "state": "open",
+   "added": "06c-impact-natives"
+  },
+  {
    "id": "06c-impact-damage",
    "title": "Synchronous perk damage on a weapon",
    "chapter": "06c",
