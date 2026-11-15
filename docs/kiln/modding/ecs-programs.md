@@ -121,5 +121,5 @@ wrap.AfterEach((ref EntityView e) =>
 
 The same thread rules hold for all three: handlers run on the game's workers once a player is in the world, tick-thread
 APIs throw inside them, `Slice.Post` (or `Context.Scheduler.Post`) hands work to the tick thread. A wrap's fault or
-exception turns off that stage only. Wraps are refused while native SET is loaded, and target the server world (client
-world: held, `systems.wraps.client`).
+exception turns off that stage only. Wraps are refused while native SET is loaded, and target the server world by
+default; a game client's own world takes `WrapOptions.World = WorldKind.Client` (`systems.wraps.client`).

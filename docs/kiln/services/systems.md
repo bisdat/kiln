@@ -8,7 +8,7 @@ world. Since 0.2.0-dev.29.
 | Capability | What it says |
 |---|---|
 | `systems.wraps` | wraps work on this build; unavailable while native SET is loaded (reason `policy`) |
-| `systems.wraps.client` | wraps on the client world's programs; held until the guided client check `06a-wraps.client` ([caps.md](caps.md#the-client-gate-dev28)) |
+| `systems.wraps.client` | wraps on the client world's programs (`WrapOptions.World = WorldKind.Client`), in a game client; `wrong-side` on a dedicated server. On since 0.2.0-dev.29 (held in dev.28), not yet confirmed in a real game: guided check `06a-wraps.client` |
 | `systems.threads` | the server world's players mask can be read (what puts program slices on the game's workers) |
 | `world.systems` | the sigdb feature behind them: the program scheduler and the players mask |
 
@@ -127,9 +127,13 @@ that stage off; `KilnWrapStageFn` runs on the slice's thread.
 ## Limits
 
 - One Replace per program; no per-entity Replace.
-- The server world. Client-world wraps (`WrapOptions.World = WorldKind.Client`) compile and stay refused until
-  `systems.wraps.client` opens; the prediction world has no table.
+- The server world by default. In a game client, `WrapOptions.World = WorldKind.Client` wraps the client world's
+  programs (on since 0.2.0-dev.29); the client world always runs its programs as tasks on the game's workers. The
+  prediction world has no table of its own: it runs the client world's, and its slices reach the game's update untouched.
+  A wrap belongs to one world: it is applied in that world's own step, taken out when that world stops, and applied again
+  by name in the next world of that kind.
 - Refused while native SET is loaded.
 - Per-entity views name components by string; generated typed views per program are the next step (planned).
-- Proven on a dedicated server with no player, serial and with the lab parallel switch; a real player's worker split and
-  what a player sees of a wrap's writes have not run in a real game (guided check `06a-wraps.waterworks`).
+- Proven on a dedicated server with no player, serial and with the lab parallel switch; a real player's worker split,
+  client-world wraps and what a player sees of a wrap's writes have not run in a real game (guided checks
+  `06a-wraps.client`, `06a-wraps.waterworks`).
