@@ -873,7 +873,16 @@ void wraps_world_event(const KilnWorldEvent* event) {
     bool live_slots = false;
     for (int i = 0; i < kWrapSlots && !live_slots; ++i) live_slots = g_pools[pool].slots[i].state == S_LIVE;
     if (event->event == KILN_WORLD_STOPPING) {
-        // Close stage admission before restoring entries. A runner may already have fetched a trampoline.
+        // Close stage admission before anything else: call()'s gate (and dispatch) refuse once `stopping` is set, so no new
+        // stage starts after STOPPING is seen; only a stage already in flight is waited for, up to the bound. The bound
+        // keeps Kiln's own callback state alive on timeout; it cannot keep the game's world memory alive. What the game
+        // guarantees here (native/core/src/tick.cpp hk_world_destroy, STOPPING dispatched while the world is intact, before
+        // the original destructor): the SERVER world's jobs are drained first (WaitWorldJobs, kind 0), so no server-world
+        // slice runs when STOPPING arrives and this drain finds 0 in flight. The CLIENT and PREDICTION worlds get no such
+        // engine wait, so on a hosting client a client-world slice can still be finishing on a worker here; the bounded
+        // drain is the only protection, and a timeout there (a stage that outlived storage destruction) is the client-gated
+        // risk systems.wraps.client carries. A real client must show, over repeated host/leave/join, that finishing workers
+        // are quiescent at STOPPING.
         g_pools[pool].stopping.store(true, std::memory_order_seq_cst);
         for (int i = 0; i < kWrapSlots; ++i)
             if (g_pools[pool].slots[i].state == S_LIVE) restore(pool, i, true);
