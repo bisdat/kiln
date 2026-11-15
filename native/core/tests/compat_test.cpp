@@ -429,6 +429,15 @@ void before_cases() {
     check(oc.applied && oc.note == "first.dll loaded before second-a.dll", "before: list order in one phase: " + oc.note);
     oc = outcome_of(by_name, {row("second-a.dll", "loaded"), row("first.dll", "loaded")}, facts, ctx);
     check(!oc.applied, "before: the wrong list order in one phase");
+    // A requested late load is not evidence it happened; every matched DLL must have loaded.
+    oc = outcome_of(by_name, {row("first.dll", "loaded"), row("second-a.dll", "late", true)}, facts, ctx);
+    check(!oc.applied, "before: pending target is not loaded");
+    oc = outcome_of(by_name, {row("first.dll", "loaded"), row("second-a.dll", "loaded"),
+                              row("second-b.dll", "failed")}, facts, ctx);
+    check(!oc.applied, "before: a failed wildcard target must not disappear");
+    ChainRow duplicate = row("second-a.dll", "duplicate");
+    oc = outcome_of(by_name, {row("first.dll", "loaded"), duplicate}, facts, ctx);
+    check(!oc.applied, "before: a duplicate row does not establish its original load order");
     // the same rule's report line in hooks.json would carry its target: an older core drops the whole rule instead
     const Rule late_with_target = one_rule({{"id", "x"}, {"action", "late"}, {"subject", {{"module", "a.dll"}}}, {"target", ual}});
     check(late_with_target.id.empty(), "a target belongs to before only");

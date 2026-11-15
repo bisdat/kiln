@@ -266,13 +266,12 @@ bool subject_rows(const Rule& r, const std::vector<ChainRow>& rows, std::vector<
     return any;
 }
 
-// The rows (that are on) a matcher names, for `before`: a module by file name, an engine or a mod by what the row knows of
-// its DLL. A symbol names no row.
+// The rows a matcher names, for `before` (including unsuccessful loads): a module by file name,
+// an engine or a mod by what the row knows of its DLL. A symbol names no row.
 std::vector<size_t> rows_of(const Matcher& m, const std::vector<ChainRow>& rows) {
     std::vector<size_t> out;
     for (size_t i = 0; i < rows.size(); ++i) {
         const ChainRow& row = rows[i];
-        if (!row.on()) continue;
         // the row as the facts of one DLL: matched as the rules match a start (kiln:, native: and plugin: name one mod)
         Facts one;
         one.modules.push_back(row.file);
@@ -299,6 +298,18 @@ Outcome before_outcome(const Rule& r, const std::vector<ChainRow>& rows) {
         o.note = "rule " + r.id + ": no chain entry of this start is " + matcher_text(first.empty() ? r.subject : r.target) +
                  ", so the order cannot be checked";
         return o;
+    }
+    for (const auto& side : {first, last}) {
+        for (size_t i : side) {
+            const ChainRow& row = rows[i];
+            if (row.status != "loaded" || row.late_ignored) {
+                o.applied = false;
+                o.note = "rule " + r.id + ": cannot establish load order for " + row.file +
+                         " (" + row.status + "); subject " + matcher_text(r.subject) +
+                         ", target " + matcher_text(r.target);
+                return o;
+            }
+        }
     }
     auto when = [&](size_t i) { return std::make_pair(rows[i].late && !rows[i].late_ignored ? 1 : 0, i); };
     bool held = true;

@@ -531,6 +531,19 @@ fn order_conflicts(results: &mut [RuleResult]) {
     let eq = |a: &String, b: &String| a.eq_ignore_ascii_case(b);
     let off: Vec<(String, String)> = results.iter().filter(|r| r.applied && r.action == RuleAction::Disable)
         .flat_map(|r| r.targets.iter().map(|t| (r.id.clone(), t.clone()))).collect();
+    // Disabled sides must be removed before they can contribute phase conflicts.
+    for r in results.iter_mut().filter(|r| r.applied && r.action == RuleAction::Before) {
+        let by = |p: &String| off.iter().find(|(_, t)| eq(t, p)).map(|(id, _)| id.clone());
+        let gone: Vec<(String, String)> = r.early.iter().chain(&r.targets).filter_map(|p| by(p).map(|id| (id, p.clone()))).collect();
+        r.early.retain(|p| by(p).is_none());
+        r.targets.retain(|p| by(p).is_none());
+        if r.early.is_empty() || r.targets.is_empty() {
+            r.applied = false;
+            r.early.clear();
+            r.targets.clear();
+            r.note = gone.first().map(|(id, p)| format!("{} is switched off by rule {id}: nothing to order", file_name(p)));
+        }
+    }
     let moved: Vec<(usize, String)> = results.iter().enumerate().filter(|(_, r)| r.applied && matches!(r.action, RuleAction::Late | RuleAction::Before))
         .flat_map(|(i, r)| r.targets.iter().map(move |t| (i, t.clone()))).collect();
     let mut clash: Vec<(usize, String)> = Vec::new();
@@ -556,18 +569,7 @@ fn order_conflicts(results: &mut [RuleResult]) {
             r.warning = Some(format!("{why} Nothing was moved."));
         }
     }
-    for r in results.iter_mut().filter(|r| r.applied && r.action == RuleAction::Before) {
-        let by = |p: &String| off.iter().find(|(_, t)| eq(t, p)).map(|(id, _)| id.clone());
-        let gone: Vec<(String, String)> = r.early.iter().chain(&r.targets).filter_map(|p| by(p).map(|id| (id, p.clone()))).collect();
-        r.early.retain(|p| by(p).is_none());
-        r.targets.retain(|p| by(p).is_none());
-        if r.early.is_empty() || r.targets.is_empty() {
-            r.applied = false;
-            r.early.clear();
-            r.targets.clear();
-            r.note = gone.first().map(|(id, p)| format!("{} is switched off by rule {id}: nothing to order", file_name(p)));
-        }
-    }
+
 }
 
 /// The chain.ini lines for a profile's [profile] entries (`profile_late`: their paths that the profile loads late),
@@ -883,7 +885,15 @@ fn entry_host_path(install: &GameInstall, path: &str) -> Option<PathBuf> {
 
 fn engine_word_of(path: &Path) -> Option<String> {
     let class = crate::pe::classify_proxy(path).ok()?;
-    crate::engines::Engine::of_proxy(class.kind).map(|e| crate::engines::info(e).word.to_string())
+    let engine = crate::engines::Engine::of_proxy(class.kind)?;
+    // Ordering changes when a DLL runs. A text reference to UAL (e.g. a client
+    // looking up its identity) is not its identity export, which the core checks.
+    if engine == crate::engines::Engine::UltimateAsiLoader
+        && !crate::pe::exports(path).ok()?.iter().any(|e| e == "IsUltimateASILoader")
+    {
+        return None;
+    }
+    Some(crate::engines::info(engine).word.to_string())
 }
 
 /// The engine word of a mod kind (Kiln's own kinds are "kiln").
@@ -964,7 +974,11 @@ pub fn plan(dirs: &DataDirs, profile: &Profile, install: &GameInstall, profile_d
     for slot in crate::engines::scan_proxies(&install.path) {
         facts.add_module(&slot.name);
         if let Some(e) = crate::engines::Engine::of_proxy(slot.class.kind) {
-            facts.add_engine(crate::engines::info(e).word);
+            if e != crate::engines::Engine::UltimateAsiLoader
+                || engine_word_of(&install.path.join(&slot.name)).is_some()
+            {
+                facts.add_engine(crate::engines::info(e).word);
+            }
         }
     }
     for k in ModKind::ALL {
@@ -1879,6 +1893,38 @@ mod tests {
     }
 
     #[test]
+    fn an_inactive_shipped_rule_has_the_same_chain_bytes_as_no_rule_file() {
+        for (ual, alp) in [(false, false), (true, false), (false, true)] {
+            let (_t, dirs, install) = alp_game(&format!("inactive-{ual}-{alp}"), ual, alp, ual, alp);
+            let p = alp_profile(&dirs, alp, alp);
+            let start = chain::read_raw(&install.path).unwrap();
+            let (pl, with) = activate_plan(&dirs, &p, &install, alp);
+            assert!(pl.order_notes().is_empty());
+            assert!(pl.rule_errors.is_empty());
+            for _ in 0..3 {
+                let again = plan(&dirs, &p, &install, &alp_dlls(alp));
+                assert!(chain::plan_is_current(&with, &again.chain));
+                assert!(!chain::write_profile_plan(&install.path, &again.chain).unwrap());
+            }
+            std::fs::remove_file(install.path.join(SHIPPED_RULES)).unwrap();
+            std::fs::write(install.path.join("kiln/chain.ini"), start).unwrap();
+            let (_, without) = activate_plan(&dirs, &p, &install, alp);
+            assert_eq!(with, without);
+        }
+    }
+
+    #[test]
+    fn a_text_reference_to_ual_does_not_move_another_dll_late() {
+        let (_t, dirs, install) = alp_game("ual-text-only", true, true, false, false);
+        std::fs::write(install.path.join("xinput9_1_0.dll"),
+            crate::pe::build_test_dll(&["DirectInput8Create"], b"looks up IsUltimateASILoader")).unwrap();
+        let p = alp_profile(&dirs, true, false);
+        let (pl, text) = activate_plan(&dirs, &p, &install, true);
+        assert!(pl.chain.rule_late.is_empty(), "{text}");
+        assert!(pl.order_notes().is_empty());
+    }
+
+    #[test]
     fn only_ual_or_only_alp_changes_nothing() {
         // UAL without ALP: the rule does not fire, UAL loads where the player put it
         for ual_late in [false, true] {
@@ -2004,6 +2050,26 @@ mod tests {
         let res = evaluate_with(&before_rules(r#"{"id":"off","action":"disable","subject":{"module":"other.dll"}},
             {"id":"b","action":"before","subject":{"mod":"native:first"},"target":{"module":"other.dll"}}"#), &none, &entries, &gated);
         assert!(!res[1].applied && res[1].warning.is_none() && res[1].note.as_deref().is_some_and(|n| n.contains("switched off by rule off")), "{res:?}");
+    }
+
+    #[test]
+    fn a_disabled_order_side_does_not_block_an_independent_order() {
+        let entries = vec![
+            entry("chain\\a.dll", Section::Chain, None, None),
+            entry("chain\\b.dll", Section::Chain, None, None),
+            entry("chain\\c.dll", Section::Chain, None, None),
+        ];
+        let rules = before_rules(r#"
+            {"id":"off-a","action":"disable","subject":{"module":"a.dll"}},
+            {"id":"ab","action":"before","subject":{"module":"a.dll"},"target":{"module":"b.dll"}},
+            {"id":"bc","action":"before","subject":{"module":"b.dll"},"target":{"module":"c.dll"}}
+        "#);
+        let res = evaluate(&rules, &Facts::default(), &entries);
+        assert!(!res[1].applied && res[1].warning.is_none(), "{res:?}");
+        assert!(res[2].applied, "{res:?}");
+        let plan = apply(&entries, &[], &res);
+        assert_eq!(plan.rule_early, [("bc".into(), "chain\\b.dll".into())]);
+        assert_eq!(plan.rule_late, [("bc".into(), "chain\\c.dll".into())]);
     }
 
     /// The same order with the earlier DLL in [chain] and late by the player's own line: the line is switched off by the
