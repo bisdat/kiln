@@ -25,6 +25,7 @@
 #include "services/kiln_players.h"
 #include "services/kiln_window_clock.h"
 #include "services/kiln_world.h"
+#include "world_gate.h"
 
 namespace kiln::decisions {
 namespace {
@@ -40,6 +41,7 @@ uint32_t g_spawn_time_hash = 0;
 
 Broker* g_broker = nullptr;  // made in kiln_plugin_main, never freed (4096 request slots: too big for a static)
 Metadata g_metadata;
+WorldGate g_gate;  // set in on_ready from the core constants world.storage and storage.kind
 
 // The consumer's interest per kind: all entities, or a list.
 struct Interest {
@@ -343,6 +345,13 @@ void KILN_CALL on_ready(void*) {
     if (!g_clock) return off("kiln.window_clock is not there");
     if (!g_world) return off("kiln.world is not there");
     g_spawn_time_hash = g_world->component_hash(ks("SpawnTime"));
+    {
+        // The hooks tell the server world's program invocations from a hosting client's other worlds by these.
+        int64_t world_storage = -1, storage_kind = -1;
+        if (g_api->constant(ks("world.storage"), &world_storage) != KILN_OK) world_storage = -1;
+        if (g_api->constant(ks("storage.kind"), &storage_kind) != KILN_OK) storage_kind = -1;
+        g_gate.set_layout(world_storage, storage_kind);
+    }
     g_metadata.set_sampler(&sample, nullptr);
     KilnHandle h = 0;
     if (g_api->subscribe_world(g_owner, &on_world, nullptr, &h) != KILN_OK) return off("no world events");
@@ -391,6 +400,8 @@ KilnOwner owner() { return g_owner; }
 const KilnWorldApi* world() { return g_world; }
 const KilnCapsApi* caps() { return g_caps; }
 Broker& broker() { return *g_broker; }
+bool in_server_world(const void* ctx) { return g_gate.owns(ctx, g_api->server_world()); }
+bool world_layout_known() { return g_gate.layout_known(); }
 uint64_t epoch() { return g_epoch.load(std::memory_order_relaxed); }
 uint64_t step() { return g_step.load(std::memory_order_relaxed); }
 uint32_t world_thread() { return g_world_thread.load(std::memory_order_relaxed); }

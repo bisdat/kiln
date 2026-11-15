@@ -5,7 +5,8 @@
 //
 // The hook sits at the entry of the helper the game's walk-over program (loot_pickup_in_range) calls for a drop whose
 // DynamicIsPlayerInRange names a receiver (chapter 07 §1 "Walk-over pickup", §2). It never touches the interaction
-// helper (LootEvent covers interaction loot). A visit ends one of two ways:
+// helper (LootEvent covers interaction loot). Only the server world's own invocations are looked at (world_gate.h):
+// a hosting client's client and prediction worlds, and a joined client, pass untouched. A visit ends one of two ways:
 //   Pass    the helper runs as without Kiln;
 //   Refuse  the helper returns its own ordinary "nothing added" result ({error 0x15, zero}, 8 bytes) without running:
 //           inventory and drop stay as they are, and the game tries again at its next attempt.
@@ -47,17 +48,24 @@ struct Exposure {
 
 struct Stats {
     std::atomic<uint64_t> visits{0}, filed{0}, refused{0}, permitted{0}, released{0}, misses{0}, dropped{0}, closed{0}, reopened{0};
+    std::atomic<uint64_t> foreign{0};  // visits of another world (client, prediction) or with no server world: passed
 };
 
 class Exposures {
 public:
     // One visit of the range helper. P gives, lazily and in this order of need:
-    //   bool armed(); uint32_t receiver(); bool any_interest(); uint32_t entity();
+    //   bool armed(); bool server_world(); uint32_t receiver(); bool any_interest(); uint32_t entity();
     //   bool interested(uint32_t entity); bool item(uint32_t* item, uint32_t* amount); uint32_t feedback();
     //   uint64_t epoch(); uint64_t step(); bool holding(); bool row(uint32_t entity, uint64_t epoch, Row* out);
     template <class P>
     Visit visit(P& p, Broker& broker) {
         if (!p.armed()) return Visit::Pass;
+        // Not the server world's own invocation (a hosting client's client or prediction world, ids overlapping the
+        // server world's; a joined client without a server world): the game's own pickup, nothing read (world_gate.h).
+        if (!p.server_world()) {
+            stats.foreign.fetch_add(1, std::memory_order_relaxed);
+            return Visit::Pass;
+        }
         const uint32_t r = p.receiver();
         if (r == 0 || !p.any_interest()) return Visit::Pass;  // the zero-interest exit
         const uint32_t d = p.entity();

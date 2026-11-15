@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# Host tests of kiln.decisions (wire layout, broker, metadata cache), with ASan/UBSan:
+# Host tests of kiln.decisions (wire layout, world gate, broker, metadata cache, death and pickup rules), with ASan/UBSan:
 #   KILN_OUT=<build dir> native/services/decisions/tests/run.sh
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -9,6 +9,8 @@ mkdir -p "$out"
 flags=(-std=c++20 -O1 -g -pthread -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=undefined -I"$here/../../../core/abi")
 g++ "${flags[@]}" "$here/contract_test.cpp" -o "$out/contract_test"
 "$out/contract_test"
+g++ "${flags[@]}" "$here/world_gate_test.cpp" -o "$out/world_gate_test"
+"$out/world_gate_test"
 g++ "${flags[@]}" "$here/queue_test.cpp" -o "$out/queue_test"
 "$out/queue_test"
 g++ "${flags[@]}" "$here/death_test.cpp" -o "$out/death_test"

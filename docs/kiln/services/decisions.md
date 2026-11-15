@@ -34,6 +34,10 @@ the next Pre on the tick thread. So:
   is posted in the next Pre, answered there, and the game runs (or skips) the input in that step.
 - **Which ones are held:** those a handler's `EventFilter.ForEntity` names; a handler without a filter (also one for
   a base class such as `KilnEvent`) holds every one of its kind. Nothing is held while nobody listens.
+- **Only the server world's.** A game client that hosts runs the death and pickup programs in its own client and
+  prediction worlds too, with entity ids that overlap the server world's; a joined client has no server world. The
+  hooks tell the worlds apart by the storage the program's job names (as kiln.world's program wraps do) and pass every
+  other world's visit straight to the game, counted in the world's summary line in kiln.log.
 
 ## How a decision ends (`DecisionTerminal`)
 

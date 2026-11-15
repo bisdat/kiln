@@ -12,7 +12,8 @@
 // const Accessors* other, const Singletons*, const EventSenders*, uint32 receiver, uint8 feedback); out, ctx, source
 // in RCX, RDX, R8; receiver at entry [RSP+0x38], feedback at [RSP+0x40]. source+8 is the drop's PickupItem (item +0,
 // raw amount u16 +0x1a). Result8 is {uint8 error; pad[3]; uint32 zero}: a refusal writes those 8 bytes, never 12.
-// CHUNKED on a dedicated server (the world thread), but nothing here assumes it.
+// CHUNKED on a dedicated server (the world thread), but nothing here assumes it. A hosting client's client and
+// prediction worlds run the range program too: a visit whose context (RDX) is not the server world's passes untouched.
 #include <windows.h>
 
 #include <algorithm>
@@ -56,6 +57,7 @@ struct HookPorts {
     uint32_t e = UINT32_MAX;
 
     bool armed() const { return g_armed.load(std::memory_order_relaxed); }
+    bool server_world() const { return host::in_server_world(reinterpret_cast<const void*>(r.rdx)); }  // RDX: the context
     uint32_t receiver() const { return *reinterpret_cast<const uint32_t*>(r.rsp + kReceiverArg); }
     bool any_interest() const { return host::interest_state(KILN_DECISION_WALKOVER) != 0; }
     uint32_t entity() {
@@ -148,6 +150,10 @@ void ready() {
         return not_in("events.pickup is held by the core's gate list (\"preview\" in kiln.json lifts it)", KILN_CAP_REASON_POLICY,
                       KILN_LOG_INFO);
     if (!api->feature(ks("events.pickup"))) return not_in("feature events.pickup did not resolve on this game build", KILN_CAP_REASON_SYMBOL_MISSING, KILN_LOG_WARN);
+    if (!host::world_layout_known())
+        return not_in("the world layout constants world.storage and storage.kind did not resolve: the hook could not tell the server world "
+                      "from a hosting client's client and prediction worlds",
+                      KILN_CAP_REASON_SYMBOL_MISSING, KILN_LOG_WARN);
     if (api->symbol(ks("events/PickupInRange"), &helper) != KILN_OK || api->symbol(ks("world/CurrentEntityId"), &current) != KILN_OK || !helper ||
         !current)
         return not_in("a symbol of the pickup hook did not resolve (events/PickupInRange, world/CurrentEntityId)", KILN_CAP_REASON_SYMBOL_MISSING,
@@ -218,12 +224,12 @@ void world_stopped() {
     if (g_armed.load())
         host::logf(KILN_LOG_INFO,
                    "decisions: walk-over pickups this world: filed %llu (%llu on a worker thread), refused visits %llu, permitted %llu, released %llu, "
-                   "exposures closed %llu, reopened %llu, metadata misses %llu, dropped %llu",
+                   "exposures closed %llu, reopened %llu, metadata misses %llu, dropped %llu, other worlds' visits passed %llu",
                    static_cast<unsigned long long>(s.filed.load()), static_cast<unsigned long long>(g_off_world.load()),
                    static_cast<unsigned long long>(s.refused.load()), static_cast<unsigned long long>(s.permitted.load()),
                    static_cast<unsigned long long>(s.released.load()), static_cast<unsigned long long>(s.closed.load()),
                    static_cast<unsigned long long>(s.reopened.load()), static_cast<unsigned long long>(s.misses.load()),
-                   static_cast<unsigned long long>(s.dropped.load()));
+                   static_cast<unsigned long long>(s.dropped.load()), static_cast<unsigned long long>(s.foreign.load()));
 }
 
 KilnResult reevaluate(uint32_t drop, uint32_t receiver, uint32_t* reset) {

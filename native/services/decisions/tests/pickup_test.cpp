@@ -8,6 +8,7 @@
 #include <set>
 
 #include "../pickup_core.h"
+#include "fake_worlds.h"
 
 using namespace kiln::decisions;
 
@@ -40,8 +41,14 @@ struct Visitor {
     uint32_t drop = 0;
     uint64_t ep = 1, st = 10;
     bool on = true, hold_ok = true;
+    // The world the visit runs in (world_gate.h); without a gate every visit is the server world's (the older tests).
+    const WorldGate* gate = nullptr;
+    const void* ctx = nullptr;
+    uintptr_t server = 0;
+    mutable int receiver_reads = 0;
     bool armed() const { return on; }
-    uint32_t receiver() const { return w.drops.count(drop) ? w.drops.at(drop).receiver : 0; }
+    bool server_world() const { return !gate || gate->owns(ctx, server); }
+    uint32_t receiver() const { return ++receiver_reads, w.drops.count(drop) ? w.drops.at(drop).receiver : 0; }
     bool any_interest() const { return true; }
     uint32_t entity() const { return drop; }
     bool interested(uint32_t e) const { return w.listened.empty() || w.listened.count(e); }
@@ -282,12 +289,45 @@ static void test_reset_after_answer_before_next_visit() {
     CHECK(again.size() == 1 && again[0].exposure_epoch > r.exposure_epoch);
 }
 
+// A hosting game client: drop 3000 and receiver 2022 exist with the same ids in the server, client and prediction
+// worlds; a joined client has no server world. Only the server world's own visits reach the exposures and the broker.
+static void test_other_worlds_pass() {
+    FakeWorlds fw;
+    World w;
+    Broker b;
+    pickup::Exposures x;
+    b.attach(9);
+    w.drops[3000] = {2022, 0x2b0cf1d5, 3};
+    w.rows[3000] = row_of(3000, 50);
+    w.rows[2022] = row_of(2022, 51);
+    Visitor v{w, 3000};
+    v.gate = &fw.gate;
+    v.server = fw.server_world();
+    v.ctx = fw.ctx_server;
+    CHECK(x.visit(v, b) == pickup::Visit::Refuse && b.counters().filed == 1);  // pending in the server world
+    const int reads = v.receiver_reads;
+    for (const void* other : {static_cast<const void*>(fw.ctx_client), static_cast<const void*>(fw.ctx_prediction)}) {
+        v.ctx = other;
+        CHECK(x.visit(v, b) == pickup::Visit::Pass);  // the client's own pickup runs as without Kiln
+    }
+    CHECK(v.receiver_reads == reads && b.counters().filed == 1 && x.stats.refused.load() == 1 && x.stats.foreign.load() == 2);
+    // a joined client: no server world
+    v.server = 0;
+    v.ctx = fw.ctx_client;
+    CHECK(x.visit(v, b) == pickup::Visit::Pass && b.counters().filed == 1);
+    // the server world's exposure is still pending, refused there
+    v.server = fw.server_world();
+    v.ctx = fw.ctx_server;
+    CHECK(x.visit(v, b) == pickup::Visit::Refuse && b.counters().filed == 1);
+}
+
 int main() {
     test_reset_after_answer_before_next_visit();
     test_request_and_states();
     test_keys_never_cross();
     test_samples_close_exposures();
     test_fail_open();
+    test_other_worlds_pass();
     std::printf("pickup_test: %d PASS, %d FAIL\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

@@ -9,7 +9,9 @@
 //
 // Engine facts (chapter 07 §2, VERIFY.md §B): at the boundary EAX is the entity's current health (signed), RBX the
 // Health component, RSI the program context, [RSP+0x48] the Actor component of the declared slot. The program runs
-// on workers when the world schedules entity programs in parallel: nothing here reads the world beyond those.
+// on workers when the world schedules entity programs in parallel: nothing here reads the world beyond those. A
+// hosting client runs the death program in its client and prediction worlds as well: a visit whose context is not
+// the server world's (world_gate.h) passes before the guard and anything else is asked.
 #include <windows.h>
 
 #include <atomic>
@@ -65,6 +67,7 @@ struct HookPorts {
 
     int32_t health() const { return static_cast<int32_t>(static_cast<uint32_t>(r.rax)); }
     bool armed() const { return g_armed.load(std::memory_order_relaxed); }
+    bool server_world() const { return host::in_server_world(reinterpret_cast<const void*>(r.rsi)); }  // RSI: the context
     uint32_t entity() {
         if (e == UINT32_MAX) {
             uint32_t out = 0;
@@ -150,6 +153,10 @@ void ready() {
         return not_in("events.death is held by the core's gate list (\"preview\" in kiln.json lifts it)", KILN_CAP_REASON_POLICY,
                       KILN_LOG_INFO);
     if (!api->feature(ks("events.death"))) return not_in("feature events.death did not resolve on this game build", KILN_CAP_REASON_SYMBOL_MISSING, KILN_LOG_WARN);
+    if (!host::world_layout_known())
+        return not_in("the world layout constants world.storage and storage.kind did not resolve: the hook could not tell the server world "
+                      "from a hosting client's client and prediction worlds",
+                      KILN_CAP_REASON_SYMBOL_MISSING, KILN_LOG_WARN);
     if (api->symbol(ks("events/DeathBoundary"), &boundary) != KILN_OK || api->symbol(ks("events/DeathNextEntity"), &next) != KILN_OK ||
         api->symbol(ks("world/CurrentEntityId"), &current) != KILN_OK || api->symbol(ks("combat/ActorStateTest"), &state) != KILN_OK ||
         !boundary || !next || !current || !state)
@@ -214,10 +221,11 @@ void world_stopped() {
     g_holds.clear();
     const auto& s = g_holds.stats;
     if (g_armed.load())
-        host::logf(KILN_LOG_INFO, "decisions: deaths this world: filed %llu (%llu on a worker thread), held visits %llu, released %llu, guarded %llu, metadata misses %llu, dropped %llu",
+        host::logf(KILN_LOG_INFO, "decisions: deaths this world: filed %llu (%llu on a worker thread), held visits %llu, released %llu, guarded %llu, metadata misses %llu, dropped %llu, other worlds' visits passed %llu",
                    static_cast<unsigned long long>(s.filed.load()), static_cast<unsigned long long>(g_off_world.load()), static_cast<unsigned long long>(s.held.load()),
                    static_cast<unsigned long long>(s.released.load()), static_cast<unsigned long long>(s.guarded.load()),
-                   static_cast<unsigned long long>(s.misses.load()), static_cast<unsigned long long>(s.dropped.load()));
+                   static_cast<unsigned long long>(s.misses.load()), static_cast<unsigned long long>(s.dropped.load()),
+                   static_cast<unsigned long long>(s.foreign.load()));
 }
 
 KilnResult set_guard(KilnOwner owner, KilnDeathGuardFn guard) {

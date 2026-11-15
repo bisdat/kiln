@@ -9,6 +9,7 @@
 #include <set>
 
 #include "../death_core.h"
+#include "fake_worlds.h"
 
 using namespace kiln::decisions;
 
@@ -28,9 +29,14 @@ struct Ports {
     bool blocked = false, hold_ok = true;
     std::map<uint32_t, Row> rows;
     std::vector<std::pair<uint32_t, uint64_t>> filed_log;
+    // The world the visit runs in (world_gate.h); without a gate every visit is the server world's (the older tests).
+    const WorldGate* gate = nullptr;
+    const void* ctx = nullptr;
+    uintptr_t server = 0;
 
     int32_t health() const { return hp; }
     bool armed() const { return on; }
+    bool server_world() const { return !gate || gate->owns(ctx, server); }
     uint32_t entity() { return ++entity_calls, e; }
     uint64_t epoch() const { return ep; }
     uint64_t step() const { return st; }
@@ -353,6 +359,45 @@ static void test_answers() {
     }
 }
 
+// A hosting game client: the same entity id in the server, client and prediction worlds; a joined client has no
+// server world. Only the server world's own visits reach the guard, the holds and the broker (review P1, 2026-11-14).
+static void test_other_worlds_pass() {
+    FakeWorlds w;
+    Broker b;
+    death::Holds h;
+    Ports p;
+    b.attach(9);
+    p.gate = &w.gate;
+    p.server = w.server_world();
+    p.rows[2000] = row_of(2000, 77);
+    p.hp = 0;
+    p.ctx = w.ctx_server;
+    CHECK(h.visit(p, b) == death::Visit::Skip && b.counters().filed == 1 && h.size() == 1);  // held in the server world
+    const int guard_calls = p.guard_calls, entity_calls = p.entity_calls;
+    // the client world and the prediction world visit an entity with the same id at 0 health
+    p.guard_answer = KILN_DEATH_GUARD_SKIP;  // a guard that would skip it if it were asked
+    for (const void* other : {static_cast<const void*>(w.ctx_client), static_cast<const void*>(w.ctx_prediction)}) {
+        p.ctx = other;
+        CHECK(h.visit(p, b) == death::Visit::Pass);
+    }
+    CHECK(p.guard_calls == guard_calls && p.entity_calls == entity_calls);  // nothing asked: no guard, no entity, no lookup
+    CHECK(b.counters().filed == 1 && h.size() == 1 && h.stats.held.load() == 0 && h.stats.foreign.load() == 2);
+    // a joined client: no server world at all
+    p.server = 0;
+    p.ctx = w.ctx_client;
+    CHECK(h.visit(p, b) == death::Visit::Pass && p.guard_calls == guard_calls);
+    p.ctx = w.ctx_server;  // even the server world's own context, while the core says there is none
+    CHECK(h.visit(p, b) == death::Visit::Pass && b.counters().filed == 1);
+    // the server world again: its hold is still there, untouched
+    p.server = w.server_world();
+    p.guard_answer = KILN_DEATH_GUARD_PASS;
+    CHECK(h.visit(p, b) == death::Visit::Skip && h.stats.held.load() == 1 && p.guard_calls == guard_calls + 1);
+    // no layout (the constants did not resolve): no visit is the server world's
+    WorldGate unknown;
+    p.gate = &unknown;
+    CHECK(h.visit(p, b) == death::Visit::Pass && p.guard_calls == guard_calls + 1);
+}
+
 int main() {
     test_visit_order();
     test_file_hold_and_release();
@@ -360,6 +405,7 @@ int main() {
     test_timeout_and_housekeeping();
     test_queue_full_fails_open();
     test_answers();
+    test_other_worlds_pass();
     std::printf("death_test: %d PASS, %d FAIL\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

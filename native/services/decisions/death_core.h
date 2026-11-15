@@ -12,6 +12,9 @@
 //         program's next-entity code, never return from the whole program).
 //
 // Order of a visit with health 0 or less (§4.1, ruling for 07 in PLAN.md):
+//   0. not the server world's own invocation of the program (a hosting client's client or prediction world, whose ids
+//      overlap the server world's; a joined client, which has no server world): Pass, counted, before anything else
+//      is read (world_gate.h);
 //   1. the native guard (19d-pets): SKIP skips at once. Asked BEFORE any interest, so a guarded entity is safe while
 //      no mod listens;
 //   2. nobody listens for any death: Pass (the zero-interest exit; no lock, no lookup);
@@ -46,6 +49,7 @@ enum class Visit { Pass, Skip };
 
 struct Stats {
     std::atomic<uint64_t> guarded{0}, filed{0}, held{0}, released{0}, misses{0}, dropped{0}, blocked{0};
+    std::atomic<uint64_t> foreign{0};  // visits of another world (client, prediction) or with no server world: passed
 };
 
 // What one live read of the entity gives the answer.
@@ -63,7 +67,7 @@ struct Hold {
 class Holds {
 public:
     // One visit of the death boundary. P (the ports) gives, lazily and in this order of need:
-    //   int32_t health(); bool armed(); uint32_t entity(); uint64_t epoch(); uint64_t step();
+    //   int32_t health(); bool armed(); bool server_world(); uint32_t entity(); uint64_t epoch(); uint64_t step();
     //   uint32_t guard(uint64_t epoch, uint32_t entity, int32_t health);
     //   bool any_interest(); bool interested(uint32_t entity); bool actor_blocked(); bool holding();
     //   bool row(uint32_t entity, uint64_t epoch, Row* out); void filed(uint32_t entity, uint64_t request_id);
@@ -71,6 +75,10 @@ public:
     Visit visit(P& p, Broker& broker) {
         const int32_t hp = p.health();
         if (hp > 0 || !p.armed()) return Visit::Pass;
+        if (!p.server_world()) {
+            stats.foreign.fetch_add(1, std::memory_order_relaxed);
+            return Visit::Pass;
+        }
         const uint32_t e = p.entity();
         if (e == 0) return Visit::Pass;
         const uint64_t epoch = p.epoch();

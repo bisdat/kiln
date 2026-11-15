@@ -20,6 +20,12 @@ const KilnWorldApi* world();
 const KilnCapsApi* caps();
 Broker& broker();
 
+// Whether `ctx` (a hooked program's ProgramContext) is an invocation of the core's server world (world_gate.h). Any
+// thread; false for a hosting client's client and prediction worlds and wherever there is no server world.
+bool in_server_world(const void* ctx);
+// Whether the world layout constants are known (else no hook can tell the server world from another).
+bool world_layout_known();
+
 // The window the step is in: set at window_begin (any thread may read them).
 uint64_t epoch();
 uint64_t step();
