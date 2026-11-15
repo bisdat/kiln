@@ -118,8 +118,9 @@ public sealed partial class ClientPassMod
         "Scroll with the wheel, then press an arrow key: the view stays where the wheel put it until the highlight moves, " +
         "then follows it. 6) The same as 4) with a gamepad (d-pad, then the stick), down to Quit and back. 7) Return to " +
         "Main Menu and back into the world: does it still work? 8) Set menu-many-test's Entries to 0 and, in Kiln " +
-        "settings, menus-client modEntries to Never (only the game's entries and Kiln's Mods: they fit), Apply, and open " +
-        "the pause menu: is it exactly as the game draws it (no scroll view, the same spacing as without Kiln, no gap " +
+        "settings, menus-client modEntries to Never (only the game's entries and Kiln's Mods), Apply, and open the pause " +
+        "menu in a world you did not host (in a hosted world Your Server Permissions makes it one row too many and it " +
+        "scrolls): is it exactly as the game draws it (no scroll view, the same spacing as without Kiln, no gap " +
         "above the first entry or below Quit), and kiln.log say \"ui: the pause menu's entries fit its space (... of " +
         "... UI units): drawn as the game draws it\"? Set modEntries back to Auto. Send screenshots of 1), 4) at Quit " +
         "and 8), and every kiln.log line starting with \"ui: the pause menu\" or \"ui: the scrolling pause menu\". Did " +
