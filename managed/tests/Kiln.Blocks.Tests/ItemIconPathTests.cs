@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 // An item's PNG icon (a look's, a worn look's, a prop's, a material's block item's) reaches kiln.content as the file in the mod's folder, whichever way the
 // block came. A data file's blocks compile on a tick of Kiln's own, with no mod code running: kiln.content's managed side then had no mod to read a relative
-// path against, and kiln.assets opened it against <game>/kiln. The fake kiln.content table below keeps what Kiln.Content hands the native side.
+// path against, and kiln.assets opened it against <game>/kiln. A boot mod's OnBoot definitions lower before any loaded mod lists the mod: they read against
+// the folder the boot phase gives. The fake kiln.content table below keeps what Kiln.Content hands the native side.
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -351,5 +352,120 @@ public sealed unsafe class ItemIconPathTests : IDisposable
         Assert.Contains("\"../../outside.png\": a file in the mod's folder", Error("worn-up"));
         Assert.All(mod.Errors, error => Assert.Contains("the base icon stays", error));
         Assert.Equal(5, mod.Errors.Count);
+    }
+
+    // ---- a boot mod's OnBoot definitions (BootLowering.LowerOwner): they lower before any loaded mod lists the mod, against the folder the boot
+    // phase gives ("dir"); a file they name is the same file, refused for the same reasons, as when the loaded mod defines the same block
+
+    private const string Boot = "icon-path-boot";
+
+    private (string Dir, List<BootStaged> Staged) BootMod(Action<BootDefinitions> stage, string? folder = null)
+    {
+        var dir = folder ?? Path.Combine(_root, "mods", Boot);
+        Directory.CreateDirectory(Path.Combine(dir, "icons"));
+        File.WriteAllBytes(Path.Combine(dir, "icons", "token.png"), Png);
+        var frame = new BootContext(Boot, 1, BootRoles.DedicatedServer, new UnavailableGameData());
+        stage(BootDefinitions.For(frame));
+        return (dir, frame.Staged);
+    }
+
+    private static JsonObject LowerBoot(string dir, IEnumerable<BootStaged> staged)
+    {
+        var r = JsonNode.Parse(BootLowering.LowerOwner(new JsonObject
+        {
+            ["id"] = Boot, ["clients"] = "mod", ["dir"] = dir,
+            ["staged"] = new JsonArray(staged.Select(s => (JsonNode)new JsonObject { ["kind"] = s.Kind, ["key"] = s.Key, ["json"] = s.Json }).ToArray()),
+        }.ToJsonString()))!.AsObject();
+        Assert.True(r["ok"]!.GetValue<bool>(), (string?)r["reason"]);
+        return r;
+    }
+
+    private static string? CommittedIcon(JsonObject lowered, string item) =>
+        (string?)lowered["docs"]!["content"]!.AsArray().Single(d => (string?)d!["document"]!["definition"]!["name"] == $"{Boot}.{item}")!["document"]!["definition"]!["icon"];
+
+    // the boot mod loaded, as at its runtime activation
+    private static void Loaded(string dir) =>
+        ModsBackend.Current = new FakeMods(new ModEntry(Boot, Boot, "1.0.0", dir, ModSide.Both, ModState.Loaded, null, [], 0, null));
+
+    [Fact]
+    public void A_boot_staged_items_png_icon_is_committed_as_the_file_a_run_time_define_names()
+    {
+        var block = new ItemBlock { Name = "Boot Token", Visual = new VisualBlock { Icon = "icons/token.png" } };
+        var (dir, staged) = BootMod(d => Assert.True(d.Define("wood-token", block).Ok));
+        var committed = CommittedIcon(LowerBoot(dir, staged), "wood-token");   // the boot phase: no loaded mod lists it yet
+        Loaded(dir);
+        Compiler.Define(NewMod(Boot), "wood-token", block);
+        var runtime = IconSent($"{Boot}.wood-token");
+        Assert.Equal(Path.GetFullPath(Path.Combine(dir, "icons/token.png")), runtime);
+        Assert.Equal(runtime, committed);
+    }
+
+    [Fact]
+    public void A_boot_mods_folder_behind_a_link_and_icons_that_leave_it_or_are_missing_resolve_as_at_run_time()
+    {
+        var library = Path.Combine(_root, "library");
+        var real = Path.Combine(library, Boot);
+        string[] names = ["linked", "up", "missing", "escape"];
+        string[] icons = ["icons/token.png", "../../outside.png", "icons/missing.png", "icons/link.png"];
+        ItemBlock Block(int i) => new() { Name = names[i], Visual = new VisualBlock { Icon = icons[i] } };
+        var (_, staged) = BootMod(d =>
+        {
+            for (var i = 0; i < names.Length; i++) Assert.True(d.Define(names[i], Block(i)).Ok);
+        }, real);
+        File.CreateSymbolicLink(Path.Combine(real, "icons", "link.png"), Path.Combine(_root, "outside.png"));
+        var mods = Path.Combine(_root, "linked-mods");
+        Directory.CreateSymbolicLink(mods, library);
+        var dir = Path.Combine(mods, Boot);   // the folder as the boot phase names it: through the link
+        var lowered = LowerBoot(dir, staged);
+        Assert.Equal(names.Select(n => $"items/{n}"), lowered["definitions"]!.AsArray().Select(x => (string)x!));   // an icon never keeps the item out
+        Assert.Equal(Path.Combine(real, "icons", "token.png"), CommittedIcon(lowered, "linked"));                     // link-resolved, as BlockFiles.InMod names it
+        Loaded(dir);
+        var mod = NewMod(Boot);
+        for (var i = 0; i < names.Length; i++)
+        {
+            Compiler.Define(mod, names[i], Block(i));
+            Assert.Equal(IconSent($"{Boot}.{names[i]}"), CommittedIcon(lowered, names[i]));
+        }
+        Assert.Null(CommittedIcon(lowered, "up"));
+        Assert.Null(CommittedIcon(lowered, "missing"));
+        Assert.Null(CommittedIcon(lowered, "escape"));
+        Assert.Equal(3, mod.Errors.Count);   // the run-time define says why, once (the boot lowering's scratch ledger says nothing: its activation does)
+    }
+
+    [Fact]
+    public void A_boot_staged_game_tree_talents_png_is_the_file_in_the_mods_folder_as_at_run_time()
+    {
+        const string json = """{ "name": "Boot Talent", "icon": "icons/token.png", "modifies": { "max-health": 10 }, "game": { "from": ["0x8efcc472"], "offset": [170, 0] } }""";
+        var (dir, staged) = BootMod(d => Assert.True(d.DefineJson("talents", "boot-talent", json).Ok));
+        var node = Assert.Single(LowerBoot(dir, staged)["docs"]!["skills"]!.AsArray())!["document"]!["nodes"]![0]!;
+        Loaded(dir);
+        var runtime = (string?)Compiler.Lower(NewMod(Boot), "boot-talent", BlockJson.Parse<TalentBlock>(json)).Low.Json["node"]!["iconFile"];
+        Assert.Equal(Path.Combine(dir, "icons/token.png"), runtime);
+        Assert.Equal(runtime, (string?)node["iconFile"]);
+    }
+
+    [Fact]
+    public void A_boot_staged_statuss_png_is_not_in_the_generation_and_its_runtime_activation_sets_it_up_from_the_mods_folder()
+    {
+        var (dir, staged) = BootMod(d => Assert.True(d.Define("warm", new StatusBlock { Name = "Warm", Seconds = 5, Icon = "icons/token.png" }).Ok));
+        var lowered = LowerBoot(dir, staged);
+        Assert.DoesNotContain("token.png", lowered["docs"]!.ToJsonString(), StringComparison.Ordinal);   // the buff's clone names no icon: its rule does, at content ready
+        BootGeneration.Record(1, [new BootModReport(Boot, 1, BootModState.Committed, ["statuses/warm"], [])],
+            new Dictionary<string, IReadOnlyList<BootStaged>> { [Boot] = staged });
+        try
+        {
+            Loaded(dir);
+            BootLowering.ActivateNow(Boot);
+            var registry = typeof(ModBlocks).Assembly.GetType("Kiln.Blocks", throwOnError: true)!.GetMethod("ModFor", BindingFlags.Static | BindingFlags.NonPublic)!;
+            var mod = (ModBlocks)registry.Invoke(null, [Boot, (Func<ulong>)(() => 9)])!;
+            Assert.Empty(mod.Errors);
+            var icon = Assert.Single(mod.OwnIcons);
+            Assert.Equal(("buffs", $"{Boot}.warm"), (icon.Section, icon.Entry));
+            Assert.Equal(Path.GetFullPath(Path.Combine(dir, "icons/token.png")), icon.File);
+        }
+        finally
+        {
+            BootGeneration.Record(0, [], new Dictionary<string, IReadOnlyList<BootStaged>>());
+        }
     }
 }

@@ -22,7 +22,7 @@ internal static class BlockIcons
     public static string CheckPng(BlockContext ctx, string icon, string path, string? directory = null)
     {
         var file = BlockFiles.InMod(ctx, icon, path, directory);
-        var dir = directory ?? BlocksBridge.ModDirectory(ctx.Mod.Id);
+        var dir = directory ?? ctx.Mod.DirectoryOf(ctx.Mod.Id);
         if (dir.Length == 0) return icon;   // a mod the loader doesn't list (a unit test): nothing to look at
         if (PngSize(file) is not var (w, h))
             throw new BlockError(ctx.Block, path, $"\"{icon}\" is not a PNG");
@@ -33,12 +33,12 @@ internal static class BlockIcons
 
     /// <summary>An item's icon as kiln.content takes it (a look's, a worn look's, a prop's, a material's block item's). A PNG is the file in the folder of the mod
     /// <paramref name="owner"/> (the block's by default), as its full path: kiln.content makes a relative path full only while that mod's code runs, a data file's
-    /// blocks compile on a tick of Kiln's own, and kiln.assets reads a relative path against &lt;game&gt;/kiln. A full path, as a mod's code may give one, is taken
-    /// when it names a file in that folder. Anything else (<c>item:&lt;name&gt;</c>, a GUID) is as written.</summary>
+    /// blocks compile on a tick of Kiln's own, a boot definition lowers before the mod is loaded (against <see cref="ModBlocks.BootDirectory"/>), and kiln.assets
+    /// reads a relative path against &lt;game&gt;/kiln. A full path, as a mod's code may give one, is taken when it names a file in that folder. Anything else (<c>item:&lt;name&gt;</c>, a GUID) is as written.</summary>
     public static string? ItemIcon(BlockContext ctx, string icon, string path, string? owner = null)
     {
         if (!icon.EndsWith(".png", StringComparison.OrdinalIgnoreCase)) return icon;
-        var dir = BlocksBridge.ModDirectory(owner ?? ctx.Mod.Id);
+        var dir = ctx.Mod.DirectoryOf(owner ?? ctx.Mod.Id);
         var file = Path.Combine(dir, icon.Replace('\\', '/'));
         try
         {
@@ -58,6 +58,9 @@ internal static class BlockIcons
 
     private static void Refused(BlockContext ctx, string path, string file, string problem)
     {
+        // A boot definition's lowering refuses it on a scratch ledger: the mod's runtime activation defines the same block again
+        // (BootLowering.ActivateNow), which says why, into the mod's ledger, once.
+        if (Lowered._bootLowering) return;
         var text = $"block {ctx.Block}, {path}: {file}: {problem}; the base icon stays";
         lock (ctx.Mod.Errors) ctx.Mod.Errors.Add(text);
         ctx.Mod.ReportDirty = true;
@@ -144,7 +147,7 @@ internal static class BlockIcons
         try { file = CheckPng(ctx, icon, path); }
         catch (BlockError e)
         {
-            file = Path.Combine(BlocksBridge.ModDirectory(ctx.Mod.Id), icon.Replace('\\', '/'));
+            file = Path.Combine(ctx.Mod.DirectoryOf(ctx.Mod.Id), icon.Replace('\\', '/'));
             try { file = Path.GetFullPath(file); }
             catch (Exception invalid) when (invalid is ArgumentException or NotSupportedException or IOException) { }
             Refused(ctx, path, file, e.Problem);

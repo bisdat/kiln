@@ -46,6 +46,31 @@ public sealed class BootFakeTests
         Assert.False(mod.IsLoaded);
     }
 
+    [Theory]
+    [InlineData("icons/missing.png", "\"icons/missing.png\" is not in the mod's folder ({0}). The build copies the mod's folders (KilnModFolders); the base icon stays")]
+    [InlineData("../outside.png", "\"../outside.png\": a file in the mod's folder, with a relative path; the base icon stays")]
+    public void ABootItemsUnusableIconIsOneErrorOnceTheModLoadsAsForARunTimeDefine(string icon, string why)
+    {
+        // what the SDK's bake reads (Kiln.Sdk.Bake: BootPhase.Run, LoadFolder, the steps, then the error lines): the boot lowering refuses the
+        // icon against the mod's folder and keeps the item, silently; its runtime activation, a run-time define of the same block, says why once
+        using var kiln = new KilnHarness();
+        kiln.BootPhase.SetRecord("item:Material_T1_Wood_Logs", """{"maxStackSize": 120}""");
+        Directory.CreateDirectory(kiln.ConfigDirectory);
+        File.WriteAllText(Path.Combine(kiln.ConfigDirectory, "tk-boot.json"), $$"""{ "tokenIcon": "{{icon}}" }""");
+        var run = kiln.BootPhase.Run(Folder);
+        Assert.True(run.Ok, run.Reason);
+        Assert.Equal(["statuses/tk-cold", "items/tk-token"], run.Definitions);
+        Assert.Contains($"\"icon\":\"{icon}\"", Assert.Single(run.Staged, d => d.Kind == "items").Json);
+        var mod = kiln.LoadFolder(Folder);
+        kiln.Boot();
+        kiln.Step(3);
+        Assert.True(mod.IsLoaded, mod.Error);
+        var line = Assert.Single(kiln.Logs, l => l.Text.Contains("visual.icon", StringComparison.Ordinal));
+        Assert.Equal(LogLevel.Error, line.Level);
+        var file = Path.GetFullPath(Path.Combine(mod.Folder, icon));
+        Assert.Equal($"blocks: tk-boot: block item tk-token, visual.icon: {file}: {string.Format(why, file)}", line.Text);
+    }
+
     [Fact]
     public void ASettingOnBootReadIsFrozenByItsValue()
     {

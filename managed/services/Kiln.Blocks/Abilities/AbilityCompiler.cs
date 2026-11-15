@@ -413,7 +413,7 @@ internal static partial class Compiler
         if (place.Position is { } position) node["position"] = new JsonArray(position[0], position[1]);
         if (t.Icon is { } icon)
         {
-            var dir = BlocksBridge.ModDirectory(mod);
+            var dir = ctx.Mod.DirectoryOf(mod);
             node["iconFile"] = dir.Length > 0 ? Path.Combine(dir, icon) : icon;
         }
         var perLevel = t.MaxLevel > 1 && t.Modifies.Count > 0 ? StatsText(t.Modifies) : null;
