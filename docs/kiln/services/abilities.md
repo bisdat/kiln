@@ -299,7 +299,8 @@ destroyed before the first run). Keys: a variable alias or debug name of the pro
   `Health`, `Mana`, `Stamina`, `Inventory`, `CurrentTransform`, ...), `TryWrite<T>(entity, in value)` for other_write;
   an attribute (`Health`, `Mana`, ...) then runs the game's formulas (read it, change its values, write it back). Any
   other type, an entity without it, or the bridge off: `false`, with no access. `Root` is the instance's
-  `ImpactHierarchy` root; `Post(action)` queues work to the tick thread as the native's mod. A change raises one
+  `ImpactHierarchy` root, the entity `ImpactOptions.Root` or the game's cast gave it (none for an instance without a
+  hierarchy, such as `Abilities.RunProgram` without a root); `Post(action)` queues work to the tick thread as the native's mod. A change raises one
   `ComponentWrittenEvent` per entity and component per step in the next Pre (first before, last after), `Writer`
   `"<modid>/native:<name>"`. The first Kiln native call of each server world checks its iterator against kiln.world's
   view of impact_simulation: kiln.log `impact_simulation's view (kiln.world, session N): ctx + tpl 1, read 6, write 1,
@@ -308,9 +309,11 @@ destroyed before the first run). Keys: a variable alias or debug name of the pro
   calls' data expires when the call returns. Lab (`mods/tests/natives-gen-test`): `PASS the self-check of the first
   native call`, `PASS TryWrite<Health> inside the native's call is seen by World.TryRead`, `PASS TryRead of a type
   impact_simulation does not declare for other entities returns false with no access`, `PASS one ComponentWrittenEvent
-  per entity and component per step, on the tick thread`. That the write is in the save is not shown in the lab: the
-  Vukah it writes is not saved, and the lab's save has no saved entity with Health that the row finds (the row writes one,
-  and checks it after a restart, when there is one).
+  per entity and component per step, on the tick thread`, `PASS NativeContext.Root is the instance's hierarchy root, as
+  ImpactRef.Root reads it`, and across a restart (a wall torch of the base, CurrentTransform 1/16 m up through a native)
+  `PASS after a restart, the CurrentTransform a native wrote through impact_simulation is in the save`. What the save
+  keeps is the game's choice per component (`World.WriteInfo<T>().SaveTracked`: `CurrentTransform`, `Level`, `Fuel` yes;
+  `Health`, `Comfort` no on a dedicated server): a write of an untracked component lasts until the world reloads.
 - **Built-ins**: `kiln.Log(value)` (one kiln.log line) and `kiln.Signal(value, tag)` → `ImpactSignalEvent`
   (`Tag`, `Value`, `AsInt/AsFloat/AsEntity`, `Impact`, `Site`). Neither suspends.
 - **Programs**: ship them as kiln.assets resources (`assets/assets.json`, kind `resource`, type
