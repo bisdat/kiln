@@ -1,23 +1,27 @@
 // SPDX-License-Identifier: MIT
 // ClientComponentWrittenEvent (chapter 14 section 9.3, since 0.2.0-dev.29): a write a client or prediction program of a
-// mod made through EcsProgramContext.TryWrite / TryWriteOther (Kiln.Api's EcsPrograms.TryBind) in a client's world. Kiln.Api
-// cannot name this assembly's types, so this assembly hands it two delegates when it loads: one says (lock-free) whether
-// anything listens, the other queues the event from the worker that made the write to the tick thread's next step.
+// mod made through EcsProgramContext.TryWrite (Kiln.Api's EcsPrograms.TryBind) in a client's world. Kiln.Api cannot name
+// this assembly's types, so this assembly hands it two delegates when it loads: one says (lock-free) whether anything
+// listens, the other queues the event from the worker that made the write for the client world's next Pre on the main
+// thread (Kiln.Api's ClientEvents).
 using System.Runtime.CompilerServices;
 
 namespace Kiln;
 
 /// <summary>A mod's client or prediction program (<see cref="EcsPrograms.TryBind(string, EcsProgramCallback, WorldKind)"/>)
 /// changed a component of an entity of this player's client world (or prediction storage) through
-/// <see cref="EcsProgramContext.TryWrite{T}(string, T)"/> or <see cref="EcsProgramContext.TryWriteOther{T}(EntityId, string, T)"/>.
-/// The client world is this player's process only: the write is local presentation state, never saved or sent to anyone,
-/// and the server world's <see cref="ComponentWrittenEvent"/> is not raised for it. Queued by the program's thread (a game
-/// worker or the main thread) and raised at the start of the next step on the tick thread (a joined client's: the main
-/// thread; a host's: its server thread): act on the client world from a handler through <c>Client.Post</c>. Built only
-/// while the event has subscribers; one event per write. Since 0.2.0-dev.29.</summary>
+/// <see cref="EcsProgramContext.TryWrite{T}(string, T)"/>. Such a write is not marked for the game's save or replication
+/// (TryWrite marks only in the server world; TryWriteOther is not available there): it is this player's local
+/// presentation state, and the server world's <see cref="ComponentWrittenEvent"/> is not raised for it. Queued by the
+/// program's thread (a game worker or the main thread) and raised on the game's main thread in the client world's next
+/// Pre (on a host too, never on the server's tick), where a handler may touch the client world; an event of a client
+/// world that ended before that Pre is not raised. Built only while the event has subscribers; one event per write.
+/// Only Kiln raises it. Since 0.2.0-dev.29.</summary>
 [ClientOnly]
 public sealed class ClientComponentWrittenEvent : KilnEvent, IEntityEvent
 {
+    internal override bool TickDispatchAllowed => false;
+
     internal ClientComponentWrittenEvent(EntityId entity, string component, byte[] before, byte[] after, string writer, WorldKind world)
     {
         Entity = entity;
@@ -52,26 +56,15 @@ public sealed class ClientComponentWrittenEvent : KilnEvent, IEntityEvent
 
 internal static class ClientWrites
 {
-    private static long _dropped;
-
 #pragma warning disable CA2255  // a service assembly: the hook must be there as soon as anything of this assembly loads
     [ModuleInitializer]
 #pragma warning restore CA2255
     internal static void Install()
     {
         EcsPrograms.ClientWriteWanted = static () => Events.HasSubscribers<ClientComponentWrittenEvent>();
+        // the main thread's queue of the client world's events: full (65536 waiting) or no client world session drops it
+        // (counted by ClientEvents, logged once); the write stands
         EcsPrograms.ClientWritten = static (entity, component, before, after, writer, world) =>
-        {
-            try
-            {
-                Events.Enqueue(new ClientComponentWrittenEvent(entity, component, before, after, writer, world));
-            }
-            catch (InvalidOperationException)
-            {
-                // the tick thread's queue is full (65536 events waiting): this write's event is dropped, the write stands
-                if (Interlocked.Increment(ref _dropped) == 1)
-                    KilnLog.Warn("ClientComponentWrittenEvent: the event queue is full; events of client-world writes are dropped");
-            }
-        };
+            ClientEvents.Enqueue(new ClientComponentWrittenEvent(entity, component, before, after, writer, world));
     }
 }

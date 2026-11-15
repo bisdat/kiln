@@ -12,16 +12,19 @@ namespace Kiln.Api.Tests;
 public sealed unsafe class EcsProgramsClientTests : KilnTest
 {
     private readonly FakeClientWorld _native;
+    private readonly FakeClient _client;
 
     public EcsProgramsClientTests()
     {
+        ClientEvents.ResetForTests();
         _native = new FakeClientWorld(Backend);
+        _client = new FakeClient(Backend);
         Capabilities.Report(EcsPrograms.ClientWorldCapability, CapabilityState.Available);
     }
 
     public override void Dispose()
     {
-        try { base.Dispose(); } finally { _native.Dispose(); }
+        try { base.Dispose(); } finally { _native.Dispose(); _client.Dispose(); ClientEvents.ResetForTests(); }
     }
 
     [Fact]
@@ -111,18 +114,28 @@ public sealed unsafe class EcsProgramsClientTests : KilnTest
         Events.On<EcsProgramRefusedEvent>(seen.Add);
         var r = As(mod, () => EcsPrograms.TryBind("pin", _ => { }, WorldKind.Client));
         Assert.True(r.Ok);
-        Step(3);
+        _client.RunPre();
         Assert.Empty(seen);  // the world takes it: nothing to say
         _native.Session = 4;
         _native.States["pin"] = (2, "read: unknown component 'RenderTransform'");
         Step(3);
+        Assert.Empty(seen);  // not on the service tick (a host's server tick): only in the client world's Pre
+        int? thread = null;
+        Events.On<EcsProgramRefusedEvent>(_ => thread = Environment.CurrentManagedThreadId);
+        var pre = new Thread(_client.RunPre);  // the client world's Pre, on the game's main thread
+        pre.Start();
+        pre.Join();
         var e = Assert.Single(seen);
         Assert.Equal(("pinner", "pin", WorldKind.Client), (e.ModId, e.Key, e.World));
         Assert.Contains("RenderTransform", e.Reason);
+        Assert.Equal(pre.ManagedThreadId, thread);
         Assert.True(Backend.Logged("refused in this Client world"));
+        _client.RunPre();
+        Assert.Single(seen);  // once per client world session
         _native.Session = 6;  // the next client world refuses again: once more
-        Step(2);
+        _client.RunPre();
         Assert.Equal(2, seen.Count);
+        Assert.Throws<InvalidOperationException>(() => Events.Post(e));  // only Kiln raises it
     }
 
     [Fact]
@@ -179,8 +192,13 @@ public sealed unsafe class EcsProgramsClientTests : KilnTest
         Assert.True(EcsPrograms.Available);  // server binds still work on it
     }
 
+    // The entry a callback's TryWrite would resolve through kiln.types (absent here): slot 1, a 4-byte component.
+    private static void Sized(IDisposable handle, string component) =>
+        typeof(EcsPrograms.Binding).GetField("_entries", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .SetValue(handle, new[] { new EcsPrograms.Binding.Entry(2, component, System.Text.Encoding.UTF8.GetBytes(component), 1, 4) });
+
     [Fact]
-    public void A_client_programs_write_is_queued_as_one_event_with_the_bytes_before_and_after()
+    public void A_client_programs_write_is_not_marked_and_is_one_event_with_the_bytes_before_and_after()
     {
         var events = new List<(EntityId, string, byte[], byte[], string, WorldKind)>();
         EcsPrograms.ClientWriteWanted = () => true;
@@ -188,11 +206,21 @@ public sealed unsafe class EcsProgramsClientTests : KilnTest
         try
         {
             var mod = NewMod("pinner");
-            var r = As(mod, () => EcsPrograms.TryBind("pin", c => Assert.True(c.TryWriteOther(new EntityId(7), "Health", 19)), WorldKind.Client));
+            bool? other = null;
+            var r = As(mod, () => EcsPrograms.TryBind("pin", c =>
+            {
+                Assert.True(c.TryWrite("Health", 19));
+                other = c.TryWriteOther(new EntityId(7), "Health", 23);
+            }, WorldKind.Client));
+            Sized(r.Handle!, "Health");
             *_native.Component = 12;
+            FakeClientWorld.Marks = 0;
             _native.Run("pin");
+            Assert.Equal(0, FakeClientWorld.Marks);  // no MarkWritten in a client world: nothing for the save or replication
+            Assert.False(other);                      // no other-entity write there (the game's would mark it)
+            Assert.Equal(19, *_native.Component);
             var (entity, component, before, after, writer, world) = Assert.Single(events);
-            Assert.Equal((7u, "Health", 12, 19, "pinner/program:pin", WorldKind.Client),
+            Assert.Equal((0u, "Health", 12, 19, "pinner/program:pin", WorldKind.Client),
                 (entity.Value, component, BitConverter.ToInt32(before), BitConverter.ToInt32(after), writer, world));
             EcsPrograms.ClientWriteWanted = () => false;  // no listener: nothing is built
             _native.Run("pin");
@@ -204,6 +232,49 @@ public sealed unsafe class EcsProgramsClientTests : KilnTest
             EcsPrograms.ClientWriteWanted = null;
             EcsPrograms.ClientWritten = null;
         }
+    }
+
+    [Fact]
+    public void A_server_programs_write_is_marked_as_before()
+    {
+        var r = As(NewMod("pinner"), () => EcsPrograms.TryBind("server_only", c => Assert.True(c.TryWrite("Health", 5)), WorldKind.Server));
+        Sized(r.Handle!, "Health");
+        FakeClientWorld.Marks = 0;
+        _native.Run("server_only");
+        Assert.Equal(1, FakeClientWorld.Marks);
+        r.Handle!.Dispose();
+    }
+
+    [Fact]
+    public void A_managed_callback_that_throws_raises_the_refusal_in_the_next_client_Pre()
+    {
+        var seen = new List<EcsProgramRefusedEvent>();
+        Events.On<EcsProgramRefusedEvent>(seen.Add);
+        var r = As(NewMod("pinner"), () => EcsPrograms.TryBind("pin", _ => throw new InvalidOperationException("boom"), WorldKind.Client));
+        Assert.True(r.Ok);
+        _native.Run("pin");  // on a game worker
+        _native.Run("pin");  // off after the first throw
+        Assert.Empty(seen);
+        _client.RunPre();
+        var e = Assert.Single(seen);
+        Assert.Contains("its callback threw InvalidOperationException: boom", e.Reason);
+        r.Handle!.Dispose();
+    }
+
+    [Fact]
+    public void Events_of_a_client_world_that_ended_are_not_delivered()
+    {
+        var seen = new List<EcsProgramRefusedEvent>();
+        Events.On<EcsProgramRefusedEvent>(seen.Add);
+        Assert.True(ClientEvents.Enqueue(new EcsProgramRefusedEvent("m", "k", WorldKind.Client, "queued in session 2")));
+        _client.Session = 3;  // that client world ended before its next Pre
+        var dropped = ClientEvents.DroppedCount;
+        _client.RunPre();
+        Assert.Empty(seen);
+        Assert.Equal(dropped + 1, ClientEvents.DroppedCount);
+        Assert.True(ClientEvents.Enqueue(new EcsProgramRefusedEvent("m", "k", WorldKind.Client, "queued in session 3")));
+        _client.RunPre();
+        Assert.Equal("queued in session 3", Assert.Single(seen).Reason);
     }
 
     [Fact]
@@ -305,6 +376,54 @@ public sealed unsafe class EcsProgramsClientTests : KilnTest
         }
     }
 
+    // ---- the fake kiln.client: its state's client_session and the client world's Pre, which the test runs ----
+    private sealed class FakeClient : IDisposable
+    {
+        private static FakeClient? Current;
+        private readonly FakeServiceRegistration _service;
+        private readonly ClientEvents.Table* _table;
+        private delegate* unmanaged[Cdecl]<void*, void*, void> _pre;
+        internal uint Session = 2;
+
+        internal FakeClient(FakeBackend backend)
+        {
+            Current = this;
+            _table = (ClientEvents.Table*)NativeMemory.AllocZeroed((nuint)sizeof(ClientEvents.Table));
+            _table->Header = new ServiceHeader { Size = (uint)sizeof(ClientEvents.Table), Version = 1 };
+            _table->State = &State;
+            _table->SubscribeTick = &Subscribe;
+            _service = new(backend.Tables, "kiln.client", (nint)_table);
+        }
+
+        internal void RunPre()
+        {
+            if (_pre != null) _pre(null, null);
+        }
+
+        public void Dispose()
+        {
+            _service.Dispose();
+            if (ReferenceEquals(Current, this)) Current = null;
+            NativeMemory.Free(_table);
+        }
+
+        [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+        private static int State(ClientEvents.NativeState* s)
+        {
+            s->Side = 1;
+            s->ClientSession = Current!.Session;
+            return 0;
+        }
+
+        [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+        private static int Subscribe(ulong owner, int phase, delegate* unmanaged[Cdecl]<void*, void*, void> fn, void* user, ulong* handle)
+        {
+            Current!._pre = fn;
+            *handle = 1;
+            return 0;
+        }
+    }
+
     // ---- the fake kiln.world (480 bytes: v2, padding, the four client-world members) ----
     private sealed class FakeClientWorld : IDisposable
     {
@@ -333,6 +452,7 @@ public sealed unsafe class EcsProgramsClientTests : KilnTest
             Component = (int*)NativeMemory.AllocZeroed(4);
             Table->V2.Prefix.Header = new ServiceHeader { Size = (uint)sizeof(EcsClientTable), Version = 4 };
             Table->V2.Prefix.ProgramSlot = (void*)(delegate* unmanaged[Cdecl]<ulong, int, NativeStr, int>)&Slot;
+            Table->V2.Prefix.MarkWritten = (void*)(delegate* unmanaged[Cdecl]<void*, ulong*, void>)&Mark;
             Table->V2.WriteOther = &WriteOther;
             Table->V2.Bind = &BindServer;
             Table->V2.Unregister = &UnregisterServer;
@@ -349,7 +469,7 @@ public sealed unsafe class EcsProgramsClientTests : KilnTest
             if (!Bound.TryGetValue(key, out var b)) return;
             ulong* iterator = stackalloc ulong[4];
             iterator[0] = 11;
-            iterator[1] = 22;
+            iterator[1] = (ulong)Component;  // slot 1: a declared component's data (TryWrite) or an accessor (WriteOther)
             ((delegate* unmanaged[Cdecl]<void*, ulong*, uint, void*, void>)b.Callback)((void*)1234, iterator, 0, (void*)b.User);
         }
 
@@ -361,6 +481,11 @@ public sealed unsafe class EcsProgramsClientTests : KilnTest
             NativeMemory.Free(Component);
             NativeMemory.Free(Table);
         }
+
+        internal static int Marks;
+
+        [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+        private static void Mark(void* ctx, ulong* record) => Marks++;
 
         [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
         private static uint Caps() => 7;

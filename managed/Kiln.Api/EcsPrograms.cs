@@ -20,11 +20,15 @@ public delegate void EcsProgramCallback(EcsProgramContext context);
 public sealed record EcsProgramBinding(bool Ok, string? Reason, WorldKind World, IDisposable? Handle) : IKilnResult;
 
 /// <summary>A client world refused one of the calling mod's bound programs (a name that world's maps lack, a full program
-/// table, a fault of its callback there): raised once per client world and program, at the next step on the tick thread
-/// (a joined client's: the main thread; a host's: its server thread), for the bound mod. The binding stays and runs in a
-/// later client world that takes the program. Since 0.2.0-dev.29.</summary>
+/// table, a fault of its callback there, its managed callback threw): raised once per client world and program on the
+/// game's main thread, in that client world's next Pre (on a host too: never on the server's tick). An event of a
+/// client world that ended before that Pre is not raised. The binding stays and runs in a later client world that
+/// takes the program (a callback that threw stays off until it is bound again). Only Kiln raises it
+/// (<see cref="Events.Post{T}"/> refuses it). Since 0.2.0-dev.29.</summary>
 public sealed class EcsProgramRefusedEvent : KilnEvent
 {
+    internal override bool TickDispatchAllowed => false;
+
     internal EcsProgramRefusedEvent(string modId, string key, WorldKind world, string reason)
     {
         ModId = modId;
@@ -432,8 +436,11 @@ public static unsafe class EcsPrograms
             lock (Lock)
             {
                 _live = [.. _live, b];
-                _tick ??= ServiceTick.Add("ecs-programs: client-world refusals", (in TickInfo _) => Poll());
+                _tick ??= ServiceTick.Add("ecs-programs: client-world unbinds", (in TickInfo _) => RetryDisposals());
             }
+            // the refusals are the client world's: polled in its Pre, on the main thread
+            ClientEvents.BeforeEvents = PollRefusals;
+            ClientEvents.EnsureSubscribed();
         }
 
         internal static void Forget(Binding b)
@@ -447,11 +454,25 @@ public static unsafe class EcsPrograms
             }
         }
 
+        // a disposal that a running call deferred: retried until kiln.world says no call of it runs (any thread)
+        internal static void RetryDisposals()
+        {
+            foreach (var b in Volatile.Read(ref _live))
+                if (b.DisposeRequested) b.Dispose();
+        }
+
         internal static void Poll()
+        {
+            RetryDisposals();
+            PollRefusals();
+        }
+
+        // the client world's Pre (main thread): a world that refused a bound program, once per client world session
+        internal static void PollRefusals()
         {
             foreach (var b in Volatile.Read(ref _live))
             {
-                if (b.DisposeRequested) { b.Dispose(); continue; }
+                if (b.DisposeRequested) continue;
                 var t = (EcsClientTable*)b.Native;
                 var session = t->GameWorldSession((uint)WorldKind.Client);
                 if (session == 0 || session == b.ReportedSession) continue;
@@ -460,7 +481,7 @@ public static unsafe class EcsPrograms
                 b.ReportedSession = session;
                 b.Mod.Log.Warn($"ECS program '{b.Key}' is refused in this {b.World} world: {why}");
                 if (Events.HasSubscribers<EcsProgramRefusedEvent>())
-                    Events.Post(new EcsProgramRefusedEvent(b.Mod.Info.Id, b.Key, b.World, why));
+                    ClientEvents.Dispatch(new EcsProgramRefusedEvent(b.Mod.Info.Id, b.Key, b.World, why));
             }
         }
     }
@@ -484,6 +505,10 @@ public static unsafe class EcsPrograms
             {
                 binding.Failed = true;
                 binding.Mod.Log.Error($"ECS program disabled: {error}");
+                // a client or prediction program: the same notification as a native fault, in the client world's next Pre
+                if (binding.World != WorldKind.Server && Events.HasSubscribers<EcsProgramRefusedEvent>())
+                    ClientEvents.Enqueue(new EcsProgramRefusedEvent(binding.Mod.Info.Id, binding.Key, binding.World,
+                        $"its callback threw {error.GetType().Name}: {error.Message}; it stays off until it is bound again"));
             }
             finally { ModContext.CurrentMod = previous; }
         }
@@ -533,15 +558,22 @@ public readonly unsafe ref struct EcsProgramContext
         value = *(T*)data;
         return true;
     }
-    /// <summary>Writes a declared write component of the current entity and marks its replication/save dirtiness.
-    /// False on builds without kiln.types (logged once per program).</summary>
+    /// <summary>Writes a declared write component of the current entity. In the server world it marks the write for the
+    /// game's save and replication. In a client world or the prediction storage (<see cref="World"/> not
+    /// <see cref="WorldKind.Server"/>, since 0.2.0-dev.29) it does not: the write is this player's local presentation
+    /// state, never saved or sent, as the game's own client programs write what they draw; it raises
+    /// <c>ClientComponentWrittenEvent</c> (Kiln.World) while that has listeners. False on builds without kiln.types
+    /// (logged once per program).</summary>
     public bool TryWrite<T>(string component, T value) where T : unmanaged
     {
         var entry = Declared(2, component);
         var data = (void*)_iterator[entry.Slot];
         if (data == null || entry.Size != sizeof(T)) return false;
-        var mark = (delegate* unmanaged[Cdecl]<void*, ulong*, void>)_binding.Native->Prefix.MarkWritten;
-        mark(_context, _iterator + entry.Slot);
+        if (_binding.World == WorldKind.Server)
+        {
+            var mark = (delegate* unmanaged[Cdecl]<void*, ulong*, void>)_binding.Native->Prefix.MarkWritten;
+            mark(_context, _iterator + entry.Slot);
+        }
         var before = *(T*)data;
         *(T*)data = value;
         if (_binding.World != WorldKind.Server) ClientWrote(Entity.Value, component, before, value);
@@ -558,15 +590,17 @@ public readonly unsafe ref struct EcsProgramContext
         return true;
     }
     /// <summary>Writes another entity through an otherWrite declaration, marking replication/save dirtiness with
-    /// the game's job tracker. False when absent, unavailable, or the layout size differs.</summary>
+    /// the game's job tracker. False when absent, unavailable, or the layout size differs; always false in a client
+    /// world or the prediction storage (since 0.2.0-dev.29: the game's other-entity write marks the change for the save
+    /// and replication, which a client program's write must not; kiln.world refuses it there too).</summary>
     public bool TryWriteOther<T>(EntityId entity, string component, T value) where T : unmanaged
     {
         uint size = 0;
-        void* data = _binding.Native->WriteOther(_context, _iterator[Slot(6, component)], entity.Value, &size);
+        var slot = Slot(6, component);
+        if (_binding.World != WorldKind.Server) return false;
+        void* data = _binding.Native->WriteOther(_context, _iterator[slot], entity.Value, &size);
         if (data == null || size != sizeof(T)) return false;
-        var before = *(T*)data;
         *(T*)data = value;
-        if (_binding.World != WorldKind.Server) ClientWrote(entity.Value, component, before, value);
         return true;
     }
     /// <summary><see cref="TryRead{T}(string, out T, bool)"/> for a generated component type (<c>Kiln.Ecs.Health</c>): the
