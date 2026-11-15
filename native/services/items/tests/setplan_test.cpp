@@ -219,6 +219,20 @@ int main() {
               "a swap and a stack: the stack last, allowed");
     }
 
+    // One physical item cannot fill two targets via different selection discriminators.
+    {
+        Model x;
+        x.put(slot(G1, 2), RingB, 1, 5002);
+        PlanOptions cycles;
+        cycles.cycles = true;
+        for (bool reverse : {false, true}) {
+            std::vector<KilnSetOpV1> entries = {inst(kRing0, 5002, RingB), stack(kRing1, RingB, slot(G1, 2), 1)};
+            if (reverse) std::reverse(entries.begin(), entries.end());
+            check(refused(plan(x, entries, cycles), KILN_SET_REFUSAL_SHAPE),
+                  "one item selected as both instance and stack: refused before any transaction");
+        }
+    }
+
     // ---- cycles ----
     {
         Model x = base();
