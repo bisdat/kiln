@@ -338,7 +338,14 @@ typedef struct KilnKnowledgeStatus {
  * 64-bit value per NpcRegistry (entry 64 would share entry 0's bit); Kiln keeps a second page of 64 beside each
  * registry when a mod's roster needs more than 64 entries (docs/re/npc-roster.md), so the roster holds 64 entries, or
  * 128 where that page is installed. These reads answer from an immutable snapshot that each world publishes after its
- * step (Post): any thread, never a game call on the caller's thread, one completed step old at most.
+ * step (Post): any thread, never a game call on the caller's thread. The snapshot is that of the world's last completed
+ * step; a step whose registry could not be read publishes NOT_READY, never an older answer.
+ *
+ * A roster the boot build cannot hold (more than 128 entries, or more than 64 where the second page cannot be
+ * installed on this side) stops the start before any world loads, with KILN_KNOW_ROSTER_EXIT_CODE, an error line in
+ * kiln.log and kiln/state/roster-refused.json ({"refused", "why", "mods", "side", "exitCode", "pid", "utc"}; the next
+ * start moves it to roster-refused.last.json); a required boot mod's start is stopped by kiln.boot instead
+ * (KILN_BOOT_EXIT_CODE).
  *
  * world_kind: KILN_WORLD_SERVER (0, this process's server world, a hosting client's included) or KILN_WORLD_CLIENT
  * (2, this process's client world). Prediction (1) and any other value: KILN_ERR_INVALID_ARGUMENT. A generation is
@@ -359,6 +366,7 @@ typedef struct KilnKnowledgeStatus {
  * KILN_ERR_UNAVAILABLE: the reads are off for that kind on this side (client world on a dedicated server; the NPC
  *   registry's layout did not resolve, feature quests.npc). out->size smaller than the struct: INVALID_ARGUMENT. */
 #define KILN_NPC_UNKNOWN_ID 7u /* npc_unlock_at's readiness for an id the snapshot does not have (not a capacity readiness) */
+#define KILN_KNOW_ROSTER_EXIT_CODE 0x4B02u /* the start stopped: the mods' roster cannot be held (a Unix wrapper sees 2) */
 
 typedef struct KilnNpcUnlockReply {
     uint32_t size;              /* set by the caller: sizeof(KilnNpcUnlockReply) */

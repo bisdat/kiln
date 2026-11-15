@@ -6,6 +6,7 @@
 // runs inside kiln_items_equip, on a worker once a player is in the world.
 #include <windows.h>
 
+#include <algorithm>
 #include <cstring>
 #include <vector>
 
@@ -119,6 +120,34 @@ bool g_tx(uint8_t* tx, int which) {
     }
 }
 
+// SetEngine::full: every byte of the program's seven components of the entities in `ents`, as records (setexec.h). Two
+// passes, both guarded: the sizes, then the copy into a buffer the caller sized from the first (no allocation in here).
+static_assert(A_COUNT == 7 && A_FUEL == 0 && A_INVENTORY == 1 && A_EMPTY == 2 && A_SETUP == 3 && A_ITEMSTATE == 4 && A_OWNER == 5 && A_SLOTSEL == 6,
+              "kFullParts (setexec.h) names the parts in Acc order");
+bool g_full(const Access* a, const uint32_t* ents, uint32_t n, uint8_t* buf, uint64_t cap, uint64_t* used) {
+    __try {
+        uint64_t at = 0;
+        for (uint32_t i = 0; i < n; ++i)
+            for (int k = 0; k < A_COUNT; ++k) {
+                PtrSize ps{};
+                if (a->acc[k]) E.read_other(&ps, a->storage, a->acc[k], ents[i]);
+                const uint32_t size = ps.ptr && ps.size <= 0x10000 ? static_cast<uint32_t>(ps.size) : 0;
+                if (buf) {
+                    if (at + 9 + size > cap) return *used = UINT64_MAX, true;  // changed between the passes: not the same
+                    std::memcpy(buf + at, &ents[i], 4);
+                    buf[at + 4] = static_cast<uint8_t>(k);
+                    std::memcpy(buf + at + 5, &size, 4);
+                    if (size) std::memcpy(buf + at + 9, ps.ptr, size);
+                }
+                at += 9 + size;
+            }
+        *used = at;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 class GameEngine final : public SetEngine {
 public:
     GameEngine(const Access& a, KilnEntity player, uint8_t* tx, const SetLayout& l, PageSet* pages)
@@ -144,6 +173,22 @@ public:
     bool commit() override { return g_tx(tx_, 0); }
     bool rollback() override { return g_tx(tx_, 1); }
     bool free_arrays() override { return g_tx(tx_, 2); }
+    bool full(const SetModel& m, std::vector<uint8_t>* out) override {
+        std::vector<uint32_t> ents;
+        ents.reserve(1 + m.nodes.size() + m.leaves.size() + m.items.size());
+        ents.push_back(m.player);
+        for (const NodeRec& r : m.nodes) ents.push_back(r.entity);
+        for (const LeafRec& r : m.leaves) ents.push_back(r.entity);
+        for (const ItemRec& r : m.items) ents.push_back(r.pide);
+        std::sort(ents.begin(), ents.end());
+        ents.erase(std::unique(ents.begin(), ents.end()), ents.end());
+        uint64_t need = 0, used = 0;
+        if (!g_full(&a_, ents.data(), static_cast<uint32_t>(ents.size()), nullptr, 0, &need)) return false;
+        out->assign(need, 0);
+        if (!g_full(&a_, ents.data(), static_cast<uint32_t>(ents.size()), out->data(), need, &used)) return false;
+        if (used != need) out->push_back(0xFF);  // a size changed between the passes: never equal to a clean read
+        return true;
+    }
 
 private:
     const Access& a_;

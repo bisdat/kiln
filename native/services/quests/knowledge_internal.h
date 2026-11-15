@@ -19,6 +19,7 @@ extern KilnOwner g_owner;
 void logf(int level, const char* fmt, ...);
 #define KI(...) ::kiln::knowledge::logf(KILN_LOG_INFO, "knowledge: " __VA_ARGS__)
 #define KW(...) ::kiln::knowledge::logf(KILN_LOG_WARN, "knowledge: " __VA_ARGS__)
+#define KE(...) ::kiln::knowledge::logf(KILN_LOG_ERROR, "knowledge: " __VA_ARGS__)
 
 inline KilnStr kstr(const char* s) { return KilnStr{s, std::strlen(s)}; }
 
@@ -85,6 +86,9 @@ void flame_ready();
 // or not computed yet. *count: the registry's entries.
 bool npc_unlock_pages_server(uint64_t pages[2], uint32_t* npages, uint16_t* version, uint32_t* count);
 
+// A reason for KilnKnowledgeStatus.reason (the first one stays), from outside knowledge.cpp. Logs nothing.
+void knowledge_reason(const std::string& text);
+
 // The roster (roster.cpp; roster_core.h; docs/re/npc-roster.md).
 void roster_main();   // kiln_plugin_main: what this side has for the second page; the two worlds' Post callbacks
 void roster_ready();  // on_ready: the capability rows npcs.*
@@ -94,6 +98,11 @@ uint32_t roster_max(uint32_t needed, std::string* why);
 void roster_built(std::vector<uint32_t> boot_ids, std::vector<uint32_t> kiln_ids);
 uint32_t roster_limit();  // 64 or 128
 void roster_world_event(const KilnWorldEvent* e);
+// The boot build could not hold the mods' roster (more than 128 entries, or more than 64 where the second page cannot be
+// installed): the start stops here, before any world loads (the error line, kiln/state/roster-refused.json, kiln.boot's
+// activation fault for each mod, on a client a message box; then the process ends with KILN_KNOW_ROSTER_EXIT_CODE).
+// Call with no lock held. Does not return.
+[[noreturn]] void roster_refuse_start(const std::string& why, const std::vector<std::string>& mods);
 // One registry's pages (as npc_unlock_pages_server, for any registry).
 bool npc_unlock_pages(uintptr_t registry, uint64_t pages[2], uint32_t* npages, uint16_t* version, uint32_t* count);
 KilnResult KILN_CALL roster_world(uint32_t kind, uint32_t* out_generation, uint32_t* out_readiness);

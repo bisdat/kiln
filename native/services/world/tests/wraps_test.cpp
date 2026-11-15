@@ -1615,6 +1615,26 @@ void per_entity() {
         check(archetype_of(ids[1], &rc) == 0 && rc == KILN_ERR_UNAVAILABLE,
               "archetype: without the record's id offset the layout is not trusted");
         L.entity_id = saved;
+        // A concurrent map mutation during the archetype read (a grow, or an insert/erase) is detected: the test seam
+        // changes the map between the layout read and the coherence re-check, and the read turns undecidable instead of
+        // trusting a torn result. The decision is correct again once nothing changes under it.
+        static uintptr_t g_m2;
+        static uint32_t g_m2count;
+        g_m2 = reinterpret_cast<uintptr_t>(m2);
+        g_m2count = mcount;
+        check(archetype_of(ids[2], &rc) == reinterpret_cast<uintptr_t>(lay[2]) && rc == KILN_OK,
+              "archetype: decides when the map does not change under the read");
+        wraps_test_archetype_gap(+[] { uint32_t c = g_m2count + 1; std::memcpy(reinterpret_cast<void*>(g_m2 + 0x54), &c, 4); });
+        check(archetype_of(ids[2], &rc) == 0 && rc == KILN_ERR_UNAVAILABLE,
+              "archetype: a count change under the read (a concurrent insert or erase) turns the filter off, not a wrong archetype");
+        std::memcpy(m2 + 0x54, &mcount, 4);
+        wraps_test_archetype_gap(+[] { uint64_t c = 16; std::memcpy(reinterpret_cast<void*>(g_m2 + 0x10), &c, 8); });
+        check(archetype_of(ids[2], &rc) == 0 && rc == KILN_ERR_UNAVAILABLE,
+              "archetype: a capacity change under the read (a grow that moved the arrays) turns the filter off");
+        std::memcpy(m2 + 0x10, &cap, 8);
+        wraps_test_archetype_gap(nullptr);
+        check(archetype_of(ids[2], &rc) == reinterpret_cast<uintptr_t>(lay[2]) && rc == KILN_OK,
+              "archetype: decides again once the map is steady under the read");
     }
     KilnGameSlice outside{};
     outside.size = sizeof outside;

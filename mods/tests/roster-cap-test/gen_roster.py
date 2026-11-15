@@ -4,9 +4,10 @@
 
     python3 gen_roster.py <phase> <mod dir>
 
-phase: 64 (29 new entries, 64 with the game's 35), 65 (30), 129 (94: refused), 65-off (30, with the lab switch
-kiln/data/kiln.knowledge/roster-64: refused), 128 (93), 128-restart (93, after a restart). Each entry: a clone of one
-game villager with its own world bool knowledge "rc_<i>" as its unlock; GUIDs fixed (uuid5 of the entry's number).
+phase: 64 (29 new entries, 64 with the game's 35), 65 (30), 129 (94: the start stops), 65-refused (30, with
+kiln/control/roster.fail-install: the start stops), 128 (93), 128-restart (93, after a restart), 128-control (93, with
+the negative control kiln/control/roster.no-pages). Each entry: a clone of one game villager with its own world bool
+knowledge "rc_<i>" as its unlock; GUIDs fixed (uuid5 of the entry's number).
 
     python3 gen_roster.py fixture <mods/tests/roster-cap-fixture>
 
@@ -19,7 +20,7 @@ import os
 import sys
 import uuid
 
-NEW = {"64": 29, "65": 30, "129": 94, "65-off": 30, "128": 93, "128-restart": 93, "fixture": 93}
+NEW = {"64": 29, "65": 30, "129": 94, "65-refused": 30, "128": 93, "128-restart": 93, "128-control": 93, "fixture": 93}
 NS = uuid.UUID("3b1c2a4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d")
 
 

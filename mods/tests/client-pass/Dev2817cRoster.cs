@@ -6,7 +6,10 @@
 // the hosting game (the page installed; each world's roster budget; entry 64 set against entry 0 and each world's own
 // snapshot following it, entry 0 unmoved) and asks the player what only a player sees: entries 0 and 64 apart in the
 // Survivors directory, entries 63 and 65 summoned and in beds, all of it again after a rejoin, and a second world in
-// which none of it carried over.
+// which none of it carried over. Each world must have bound its own registry and had a page attached by the game's own
+// evaluation (kiln.log's context line per world). 17-roster.refused-start: a start whose roster this game cannot
+// hold (kiln/control/roster.fail-install) stopped before any world, with Kiln's message.
+using System.Text.Json;
 using Kiln;
 using Kiln.Testing;
 
@@ -69,6 +72,12 @@ public sealed partial class ClientPassMod
         await c.Until(() => On(cw, Entry(64)!.NpcId) == want64 && On(cw, Entry(63)!.NpcId) == true && On(cw, Entry(65)!.NpcId) == true,
             TimeSpan.FromSeconds(30), "the client world's own snapshot follows (its own registry and page)");
         c.Expect(On(sw, e0.NpcId) == s0 && On(cw, e0.NpcId) == s0, "entry 0 did not move in either world", $"server {On(sw, e0.NpcId)}, client {On(cw, e0.NpcId)}");
+        // each world bound its own registry and the game's own evaluation of it attached a page (once per process and world)
+        var log = ReadKilnLog();
+        foreach (var w in new[] { "server", "client" })
+            c.Expect(log.Contains($"roster: the {w} world's evaluator context is", StringComparison.Ordinal),
+                $"the {w} world bound its registry and got its page from the game's own evaluation (kiln.log)",
+                log.Contains($"roster: the {w} world's evaluator context is NOT", StringComparison.Ordinal) ? "the context is not its G38Knowledge singleton" : "no such line");
         foreach (var e in new[] { Entry(63)!, Entry(65)! })
         {
             var tool = $"Kiln_RosterFix_{e.Id["rc_npc_".Length..]}_Tool";
@@ -82,6 +91,49 @@ public sealed partial class ClientPassMod
                    "send the NPC there. Leave the world and host it again: the directory shows the same, both NPCs are at their " +
                    "beds. Then host a second world with the same mods: there entries 63, 64 and 65 are locked (nothing of this " +
                    "world's roster came along). Pass when each step looked so.");
+        await c.Verdict();
+    }
+
+    private static string ReadKilnLog()
+    {
+        try
+        {
+            using var f = new FileStream(Path.Combine(KilnFolder(), "logs", "kiln.log"), FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var r = new StreamReader(f);
+            return r.ReadToEnd();
+        }
+        catch (IOException) { return ""; }
+    }
+
+    [ClientCheck("17-roster.refused-start", "A roster this game cannot hold stops its start before any world, with Kiln's message",
+        Area = "Limits", Since = Dev29, Needs = ClientCheckNeeds.Hosted, Order = RosterOrder + 1)]
+    public async Task RosterRefusedClient(CheckContext c)
+    {
+        var state = Path.Combine(KilnFolder(), "state");
+        var last = Path.Combine(state, "roster-refused.last.json");
+        if (!File.Exists(last))
+        {
+            c.Instruct("Do this first: quit the game; in the game's folder create an empty file kiln/control/roster.fail-install; " +
+                       "start the game with the fixture mod roster-cap-fixture enabled. The game must stop at its start, before the " +
+                       "main menu's worlds, with a Kiln message 'the NPC roster is too long' naming roster-cap-fixture. Then delete " +
+                       "kiln/control/roster.fail-install, start again, host a world and run this check once more. Skip for now.");
+            await c.Verdict();
+            return;
+        }
+        using var doc = JsonDocument.Parse(File.ReadAllText(last));
+        var root = doc.RootElement;
+        var mods = root.TryGetProperty("mods", out var m) ? m.EnumerateArray().Select(x => x.GetString()).ToList() : new List<string?>();
+        c.Expect(root.GetProperty("refused").GetBoolean() && root.GetProperty("side").GetString() == "client" && mods.Contains(RosterFixture) &&
+                 root.GetProperty("exitCode").GetUInt32() == 0x4B02,
+            "the earlier start stopped on this game client, naming the fixture (kiln/state/roster-refused.last.json)", root.GetRawText());
+        c.Expect((root.GetProperty("why").GetString() ?? "").Contains("roster.fail-install", StringComparison.Ordinal),
+            "it stopped because the second page was not installed (the switch)", root.GetProperty("why").GetString() ?? "");
+        c.Expect(!File.Exists(Path.Combine(KilnFolder(), "control", "roster.fail-install")), "kiln/control/roster.fail-install is deleted again");
+        var prev = Path.Combine(KilnFolder(), "logs", "kiln.prev.log");
+        c.Expect(File.Exists(prev) && File.ReadAllText(prev).Contains("roster: the start is stopped (pid", StringComparison.Ordinal),
+            "the stopped start's kiln.log (now kiln.prev.log) has the refusal line", File.Exists(prev) ? "no such line" : "no kiln.prev.log");
+        c.Instruct("Pass when the stopped start showed Kiln's message 'the NPC roster is too long' naming roster-cap-fixture, the game " +
+                   "closed after it without loading a world, and this world (hosted after deleting the switch) has its NPCs as before.");
         await c.Verdict();
     }
 }

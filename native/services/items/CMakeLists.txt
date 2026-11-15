@@ -41,3 +41,5 @@ set_target_properties(items-setplan-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${
 add_executable(items-setexec-test tests/setexec_test.cpp setsnap.cpp)
 target_include_directories(items-setexec-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi")
 set_target_properties(items-setexec-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")
+add_executable(items-setorder-test tests/setorder_test.cpp)
+set_target_properties(items-setorder-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")

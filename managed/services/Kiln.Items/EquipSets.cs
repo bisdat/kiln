@@ -165,7 +165,9 @@ public static unsafe partial class Items
 
     /// <summary>
     /// Changes <paramref name="player"/>'s equipment to <paramref name="set"/> in one inventory transaction: every slot
-    /// the set names changes, or none does. Slots the set leaves out stay as they are; <see cref="EmptyEquipment"/> takes
+    /// the set names changes, or none does, with one exception: <see cref="EquipmentSetStatus.InvariantFailure"/>, when the
+    /// game's transaction left the inventory neither as asked nor as before, or the game faulted inside it (see the
+    /// returns). Slots the set leaves out stay as they are; <see cref="EmptyEquipment"/> takes
     /// off what a slot holds (into a free backpack slot). Takes a snapshot now and plans from it (as
     /// <see cref="PlanSet"/>); the transaction runs a step or two later inside the server's own equip program, after one
     /// <see cref="PlayerEquippingEvent"/> for the whole set (<see cref="SetEquipmentChange"/>): a handler that cancels it
@@ -173,13 +175,21 @@ public static unsafe partial class Items
     /// </summary>
     /// <param name="player">The player character (the set's own player).</param>
     /// <param name="set">The set (from <see cref="CaptureSet"/>, a subset of one, or one built with its scope).</param>
-    /// <param name="options"><see cref="EquipOptions.DryRun"/>: run the transaction and roll it back; nothing changes.</param>
+    /// <param name="options"><see cref="EquipOptions.DryRun"/>: run the transaction and roll it back; nothing changes,
+    /// unless the rollback does not give everything back or the game faults (InvariantFailure, below).</param>
     /// <returns>Completes on the tick thread with the result, once. <see cref="EquipmentSetResult.Ok"/> for Done, NoChange
     /// and Simulated; anything else changed nothing, except <see cref="EquipmentSetStatus.InvariantFailure"/>
-    /// (<see cref="EquipmentSetResult.MayHaveMutated"/>, and equipment sets go off until the server restarts). A stale
-    /// scope or snapshot, a full budget or queue and a refusal of the planner or the game are results, not exceptions.</returns>
-    /// <remarks>Order: FIFO with the player's single <see cref="Equip"/> and <see cref="Unequip"/> requests, at most one set
-    /// per player and step. A set that did not run within 250 steps ends <see cref="EquipmentSetStatus.Dropped"/>, as does
+    /// (<see cref="EquipmentSetResult.MayHaveMutated"/>, and equipment sets and single equips go off until the server
+    /// restarts): after a refusal, a dry run or the commit, the inventory was neither as asked nor as before (every byte of
+    /// the components the game's equip program writes is compared after a rollback, the slots and the conservation of
+    /// every item after a commit), or the game faulted inside the transaction. A fault is not rolled back: the inventory
+    /// may then be in an unknown state, and the reason says so. Such a result can come with an
+    /// <see cref="EquipmentSetChangedEvent"/> (the changes that could still be read) and always comes with an
+    /// <see cref="EquipmentSetFaultedEvent"/>. A stale scope or snapshot, a full budget or queue and a refusal of the
+    /// planner or the game are results, not exceptions.</returns>
+    /// <remarks>Order: FIFO by request with the player's single <see cref="Equip"/> and <see cref="Unequip"/> requests: at
+    /// most one set per player and step, only the player's oldest set runs (a later one waits for an earlier one still
+    /// being decided), and a single equip waits for every set requested before it. A set that did not run within 250 steps ends <see cref="EquipmentSetStatus.Dropped"/>, as does
     /// a set whose server world stops, or whose mod unloads before it ran (a set that already ran is still reported).
     /// The player's hotbar, main hand and building materials are never part of a set. Sets are for the current session
     /// only: nothing is saved, and a set of another session is refused.</remarks>
