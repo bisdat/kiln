@@ -44,6 +44,7 @@ kiln::MidHook2 g_hook;
 pickup::Exposures g_exposures;
 std::atomic<bool> g_armed{false};
 std::string g_why = "the pickup producer did not start";
+uint32_t g_why_reason = KILN_CAP_REASON_SERVICE_MISSING;
 std::atomic<uint32_t> g_logged{0};
 std::atomic<uint64_t> g_off_world{0};
 
@@ -131,8 +132,9 @@ struct SamplePorts {
     bool interested(uint32_t entity) const { return host::interested(KILN_DECISION_WALKOVER, entity); }
 };
 
-void not_in(const char* why, uint32_t, int level) {
+void not_in(const char* why, uint32_t reason, int level) {
     g_why = why;
+    g_why_reason = reason;
     host::logf(level, "decisions: walk-over pickups are not held: %s", why);
 }
 
@@ -158,6 +160,7 @@ void ready() {
     if (!g_hook.install(api, host::owner(), helper, &pickup_mid, "kiln.decisions/walk-over-pickup", 100))
         return not_in(g_hook.error() ? g_hook.error() : "the pickup hook could not be installed", KILN_CAP_REASON_FAULTED, KILN_LOG_WARN);
     g_why.clear();
+    g_why_reason = KILN_CAP_REASON_NONE;
     g_armed.store(true);
     host::hook_kind(KILN_DECISION_WALKOVER);
     host::logf(KILN_LOG_INFO, "decisions: walk-over pickups can be held (entry hook at events/PickupInRange; the interaction helper is untouched)");
@@ -165,6 +168,7 @@ void ready() {
 
 bool installed() { return g_armed.load(); }
 const char* why_not() { return g_why.c_str(); }
+uint32_t why_not_reason() { return g_why_reason; }
 
 void discover(std::vector<uint32_t>& wanted) {
     if (!g_armed.load(std::memory_order_relaxed) || host::interest_state(KILN_DECISION_WALKOVER) == 0) return;

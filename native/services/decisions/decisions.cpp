@@ -342,6 +342,11 @@ void KILN_CALL on_ready(void*) {
             if (death_producer::why_not_reason() == KILN_CAP_REASON_FAULTED || death_producer::why_not_reason() == KILN_CAP_REASON_SERVICE_MISSING)
                 g_caps->report(g_owner, ks("events.death"), KILN_CAP_UNAVAILABLE, death_producer::why_not_reason(), ks(death_producer::why_not()));
         }
+        // The same for events.pickup: a feature that resolved but whose hook could not go in reads unavailable with why
+        // (held and unresolved rows already say so themselves).
+        if (!pickup_producer::installed() &&
+            (pickup_producer::why_not_reason() == KILN_CAP_REASON_FAULTED || pickup_producer::why_not_reason() == KILN_CAP_REASON_SERVICE_MISSING))
+            g_caps->report(g_owner, ks("events.pickup"), KILN_CAP_UNAVAILABLE, pickup_producer::why_not_reason(), ks(pickup_producer::why_not()));
     }
 }
 

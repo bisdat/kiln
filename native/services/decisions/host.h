@@ -69,7 +69,9 @@ namespace kiln::decisions::pickup_producer {
 // The service is on (on_ready): installs the hook unless events.pickup is held, unresolved or the hook fails.
 void ready();
 bool installed();
+// The words and reason for events.pickup when the hook is not in (empty / KILN_CAP_REASON_NONE when it is).
 const char* why_not();
+uint32_t why_not_reason();
 // window_begin, before the metadata is rebuilt: drops (PickupItemZone) and live players while anyone listens.
 void discover(std::vector<uint32_t>& wanted);
 // Both window calls: the exposure samples (window_begin also checks the keyed lives).

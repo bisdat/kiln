@@ -453,6 +453,24 @@ public sealed class DecisionsApiTestMod : Mod
                 if (cancel(e)) e.Cancel();
             }, EventFilter.ForEntity(p)));
 
+            // the control: a second character nobody listens for picks up the same kind of drop unheld. What it gains is
+            // what one pickup gives on this server (the helper scales the drop by resourceDropStackAmountFactor), and
+            // no event is posted for it: a pickup outside every filter passes Kiln's hook untouched
+            var q = await Spawn.Entity("1_Player", new WorldPosition(3845, 835, 1478), options: new SpawnOptions { Tag = "decisions-api-test", Flags = SpawnFlags.Transient });
+            made.Add(q);
+            for (var n = 0; n < 200 && Items.Read(q) is not { Initialized: true }; n++) await Wait(1);
+            await Wait(10);
+            var d0 = await RangeDrop(new WorldPosition(3846, 835, 1478));
+            made.Add(d0);
+            var q0 = Count(q);
+            Inject(d0, q);
+            await Wait(8);
+            StopInject(d0);
+            var grant = Count(q) - q0;
+            Check(grant > 0 && grant % 3 == 0 && !Spawn.Exists(d0) && !seen.Any(e => e.GroundEntity == d0),
+                $"[{run}] the unheld control: a pickup by a character no handler names passes (drop there {Spawn.Exists(d0)}, inventory {q0}->{Count(q)}, " +
+                $"{seen.Count(e => e.GroundEntity == d0)} event(s)): one pickup of 3 gives {grant} here");
+
             // PICKUP-RANGE-ONLY: the range helper is reached (tag), the interaction helper is not, a cancel leaves
             // inventory and drop as they were; ReevaluatePickup and an allow then grant it once
             var d1 = await RangeDrop(new WorldPosition(3846, 835, 1480));
@@ -479,9 +497,9 @@ public sealed class DecisionsApiTestMod : Mod
             await Wait(8);
             var second = seen.LastOrDefault(e => e.GroundEntity == d1);
             Check(re is { Ok: true, ExposuresReset: 1 } && second is not null && second.ExposureEpoch > first!.ExposureEpoch && EndOf(x => x.Id == second.Id) is { Status: DecisionTerminal.Allowed } &&
-                  !Spawn.Exists(d1) && Count(p) == have + 3 && Interlocked.Read(ref _interactionHits) == inter0,
+                  !Spawn.Exists(d1) && Count(p) == have + grant && Interlocked.Read(ref _interactionHits) == inter0,
                 $"[{run}] PICKUP-RANGE-ONLY allowed after ReevaluatePickup: reset {re.ExposuresReset} ({re.Reason}), exposure {first?.ExposureEpoch}->{second?.ExposureEpoch}, " +
-                $"outcome {(second is null ? "none" : EndOf(x => x.Id == second.Id)?.Status.ToString())}, drop there {Spawn.Exists(d1)}, inventory {have}->{Count(p)} (once: +3), interaction tag {Interlocked.Read(ref _interactionHits) - inter0}");
+                $"outcome {(second is null ? "none" : EndOf(x => x.Id == second.Id)?.Status.ToString())}, drop there {Spawn.Exists(d1)}, inventory {have}->{Count(p)} (once: +{grant}), interaction tag {Interlocked.Read(ref _interactionHits) - inter0}");
             StopInject(d1);
 
             // PICKUP-KEYS: two drops of the same item spawned together; allowing one never allows the other
@@ -506,9 +524,9 @@ public sealed class DecisionsApiTestMod : Mod
             var e3 = seen.LastOrDefault(e => e.GroundEntity == d3);
             Check(e2 is not null && e3 is not null && e2.GroundKey != e3.GroundKey && e2.GroundKey.LifeSerial != e3.GroundKey.LifeSerial && e2.ExposureEpoch != e3.ExposureEpoch &&
                   EndOf(x => x.Id == e2.Id) is { Status: DecisionTerminal.Allowed } && EndOf(x => x.Id == e3.Id) is { Status: DecisionTerminal.Prevented } &&
-                  !Spawn.Exists(d2) && Spawn.Exists(d3) && Count(p) == have + 3,
+                  !Spawn.Exists(d2) && Spawn.Exists(d3) && Count(p) == have + grant,
                 $"[{run}] PICKUP-KEYS: spawn times {e2?.GroundKey.SpawnTime} / {e3?.GroundKey.SpawnTime}, lives {e2?.GroundKey.LifeSerial} / {e3?.GroundKey.LifeSerial}, " +
-                $"exposures {e2?.ExposureEpoch} / {e3?.ExposureEpoch}, allowed drop there {Spawn.Exists(d2)}, refused drop there {Spawn.Exists(d3)}, inventory {have}->{Count(p)}");
+                $"exposures {e2?.ExposureEpoch} / {e3?.ExposureEpoch}, allowed drop there {Spawn.Exists(d2)}, refused drop there {Spawn.Exists(d3)}, inventory {have}->{Count(p)} (one grant: +{grant})");
             StopInject(d2);
 
             // PICKUP-EXPOSURE: receiver 0 at a sample closes d3's exposure; the next contact is a new epoch the old cancel
