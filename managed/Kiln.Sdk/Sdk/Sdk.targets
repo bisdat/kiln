@@ -9,6 +9,8 @@
   <Import Project="$(MSBuildThisFileDirectory)Kiln.GameIds.targets" Condition="Exists('$(MSBuildThisFileDirectory)Kiln.GameIds.targets')" />
   <!-- Typed hooks and calls of the mod's own game functions, from the descriptors of its sigdb fragment (docs/kiln/services/hooks.md). -->
   <Import Project="$(MSBuildThisFileDirectory)Kiln.Sigs.targets" Condition="Exists('$(MSBuildThisFileDirectory)Kiln.Sigs.targets')" />
+  <!-- [ImpactNative] methods as synchronous Impact natives, with their impact/natives.json entries (docs/kiln/modding/impact.md). -->
+  <Import Project="$(MSBuildThisFileDirectory)Kiln.ImpactNatives.targets" Condition="Exists('$(MSBuildThisFileDirectory)Kiln.ImpactNatives.targets')" />
   <!-- The layout stamp (kiln.gametypes.json) of a mod that compiles against Kiln.Game (docs/kiln/typegen.md). -->
   <Import Project="$(MSBuildThisFileDirectory)Kiln.GameTypes.targets" Condition="Exists('$(MSBuildThisFileDirectory)Kiln.GameTypes.targets')" />
 </Project>

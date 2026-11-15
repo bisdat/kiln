@@ -1,0 +1,20 @@
+<Project>
+  <!-- Lab test of [ImpactNative] (package 06c S4, PASS/FAIL lines in kiln.log, player-free), built the way a mod author
+       builds one: Kiln.Sdk in repository mode, so the generator Kiln.ImpactNatives writes the natives' thunks and
+       registration and the KilnImpactNatives task writes their typed declarations into the output's impact/natives.json.
+       The program impact/twice.kimp is cooked by tools/impact into assets/twice.bin (kiln.assets serves it):
+         python3 tools/impact/impact.py asm mods/tests/natives-gen-test/impact/twice.kimp -o mods/tests/natives-gen-test/assets/twice.bin \
+           -\-natives <the built mod folder>/impact/natives.json
+       Build: dotnet build mods/tests/natives-gen-test/NativesGenTest.csproj -t:KilnDeploy -p:KilnModsDir=<folder> -->
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.props" />
+  <PropertyGroup>
+    <KilnModId>natives-gen-test</KilnModId>
+    <KilnModName>kiln.abilities [ImpactNative] lab test</KilnModName>
+    <Version>0.1.0</Version>
+    <KilnServices>Abilities;Spawn;Client</KilnServices>
+    <KilnSide>server</KilnSide>
+    <KilnAdvanced>true</KilnAdvanced>
+    <NoWarn>$(NoWarn);KILNX001</NoWarn>
+  </PropertyGroup>
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.targets" />
+</Project>

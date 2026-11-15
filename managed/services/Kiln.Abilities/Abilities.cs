@@ -29,6 +29,9 @@ public enum ImpactNativeKind
     Builtin = 2,
     /// <summary>Registered by a mod through <see cref="Abilities.Natives.Register"/>.</summary>
     Managed = 3,
+    /// <summary>Registered by a mod through <see cref="Abilities.Natives.RegisterSync"/> or an <see cref="ImpactNativeAttribute">[ImpactNative]</see>
+    /// method: answered inside the call (since 0.2.0-dev.29).</summary>
+    Sync = 4,
 }
 
 /// <summary>A resource attribute an ability can cost or change.</summary>
