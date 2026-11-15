@@ -4,6 +4,13 @@
 // waits for the step the handler holds) asks for the mod's unload or reload through kiln/control while the handler is
 // inside, checks that nothing was retired yet, and only then opens the gate. With kiln/control/impact.unpin (lab) and
 // the forced-parallel window, impact_simulation runs on the game's workers: the probe row shows where handlers ran.
+// Those rows need a server start of their own: a cleared pin (or a call off the world's thread) switches the ECS bridge
+// (abilities.natives.ecs) off for the rest of that world, so the bridge's rows (natives-gen-test, blocks-abilities-test's
+// Run rows, FrostMark) run in another start, with the pin as the game sets it (docs/kiln/services/abilities.md).
+// The probe's count of calls off the tick thread is the game's split of impact_simulation's slice over its threads, which
+// depends on what else the world holds: with abilities-test and natives-helper alone, two starts on the merged dev.29 tree
+// put all 12 probe calls on the world thread (while a Hold handler ran on a worker in the same window); with
+// blocks-abilities-test also loaded (its scenarios not started) 12 of 12 ran on workers, as in round 3. Run A loads it.
 // The world-stop row hands off to the shell that runs the lab (data/stop-request): its lines are read from kiln.log.
 using Kiln;
 using Kiln.Testing;

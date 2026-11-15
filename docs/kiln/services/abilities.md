@@ -331,8 +331,8 @@ destroyed before the first run). Keys: a variable alias or debug name of the pro
   ImpactRef.Root reads it`, `PASS NativeContext.Post runs on the owning mod's tick`, `PASS TryWrite of an attribute keeps
   its header ... and the game's formulas run: Health set to <max + 100> reads <max>`, `PASS with the world's pin set (the
   game's default) every bridged call ran on the world's thread`; in abilities-test with `impact.unpin`: `PASS with the
-  pin cleared, the ECS bridge is off for this world: 0 of 12 TryRead(s) answered ..., 1 kiln.log line(s) saying so`; and across a restart (a wall torch of the base, CurrentTransform 1/16 m up through a native)
-  `PASS after a restart, the CurrentTransform a native wrote through impact_simulation is in the save`. What the save
+  pin cleared, the ECS bridge is off for this world: 0 of 12 TryRead(s) answered ..., 1 kiln.log line(s) saying so`; and across a restart (a wall torch of the base, CurrentTransform 1/16 m up through a native; the
+  first start writes it, a second start of the same lab checks it) `PASS after a restart, the CurrentTransform a native wrote through impact_simulation is in the save`. What the save
   keeps is the game's choice per component (`World.WriteInfo<T>().SaveTracked`: `CurrentTransform`, `Level`, `Fuel` yes;
   `Health`, `Comfort` no on a dedicated server): a write of an untracked component lasts until the world reloads.
 - **Built-ins**: `kiln.Log(value)` (one kiln.log line) and `kiln.Signal(value, tag)` → `ImpactSignalEvent`
@@ -508,7 +508,14 @@ It spawns Vukahs and explosions 40+ m from the copied world's flame altar and re
 retirement rows need `mods/tests/natives-helper` deployed (built like abilities-test). Lab-only
 `kiln/control/impact.unpin` (present at start, server build f0d824be only) clears the world's pin byte each Pre, so in
 the parallel path `impact_simulation` runs on the game's workers (`LAB (kiln/control/impact.unpin)` in kiln.log); on
-every observed dedicated server, host and client the byte is 1 and it runs on the world thread. With
+every observed dedicated server, host and client the byte is 1 and it runs on the world thread. The unpin rows need a
+world of their own (a lab start of their own): a cleared pin, or a call off the world's thread, switches
+`abilities.natives.ecs` off for the rest of that world (the serial condition), so the ECS bridge rows
+(`mods/tests/natives-gen-test`, `blocks-abilities-test`'s Run rows, FrostMark) run in another start, with the pin as
+the game sets it. The full player-free pass is two starts: natives-only with `systems.parallel`, `impact.unpin`,
+`impact.lockhold` and `world-stop-row` (abilities-test, natives-helper, and blocks-abilities-test loaded without its
+scenarios: the probe row's count of calls on the game's workers is the game's split of impact_simulation's slice, which
+depends on what the world holds; without it two starts put all 12 probe calls on the world thread), then the rest. With
 `kiln/data/abilities-test/world-stop-row` the last row holds a handler and writes
 `kiln/data/natives-helper/stop-request`: the shell running the lab then stops the server and reads the order of
 `Hold let go` and `the server world stops with no Kiln native call inside` in kiln.log.
