@@ -115,18 +115,34 @@ use kiln_manage::install::InstallState;
 pub fn install_state(install: &GameInstall, _fresh: bool) -> Result<InstallState, Error> {
     let d = dirs()?;
     let mut st = kiln_manage::install::status(&d, install)?;
-    // only a receipt a test build wrote needs the bundle list (status runs every few seconds)
-    if let Some(r) = st.receipt.as_ref().filter(|r| kiln_manage::install::installed_by_test_build(r))
-        && let Some(shipped) = crate::commands::runtime::shipped_version()
-    {
-        let side = match install.kind {
-            kiln_manage::game::GameKind::Server => kiln_manage::manifest::RunSide::Server,
-            kiln_manage::game::GameKind::Client => kiln_manage::manifest::RunSide::Client,
-        };
-        let bundles = kiln_manage::bundle::list(&d).unwrap_or_default();
-        st.switch_back = kiln_manage::install::switch_back(Some(r), side, Some(&shipped), crate::distribution::beta().is_some(), &bundles);
-    }
+    let shipped = crate::commands::runtime::shipped_version();
+    let beta = crate::distribution::beta().is_some();
+    let side = match install.kind {
+        kiln_manage::game::GameKind::Server => kiln_manage::manifest::RunSide::Server,
+        kiln_manage::game::GameKind::Client => kiln_manage::manifest::RunSide::Client,
+    };
+    let bundles = if shipped.is_some() { kiln_manage::bundle::list(&d).unwrap_or_default() } else { vec![] };
+    runtime_policy(&mut st, side, shipped.as_deref(), beta, &bundles);
     Ok(st)
+}
+
+fn runtime_policy(st: &mut InstallState, side: kiln_manage::manifest::RunSide, shipped: Option<&str>, beta: bool,
+                  bundles: &[kiln_manage::bundle::RuntimeBundle]) {
+    // Only the shipped runtime is an automatic release update. Other cached
+    // bundles remain explicitly selectable on Runtime, including in unbundled builds.
+    if !beta {
+        st.upgrade_available = st.receipt.as_ref().and_then(|r| {
+            let shipped = shipped?;
+            let to = bundles.iter().find(|b| b.version == shipped && b.sides.contains(&side))?;
+            if to.version == r.runtime.version { return None; }
+            let newer = match bundles.iter().find(|b| b.version == r.runtime.version) {
+                Some(installed) => kiln_manage::bundle::compare(to, installed).is_gt(),
+                None => kiln_manage::bundle::compare_versions(&to.version, &r.runtime.version).is_gt(),
+            };
+            newer.then(|| to.version.clone())
+        });
+    }
+    st.switch_back = kiln_manage::install::switch_back(st.receipt.as_ref(), side, shipped, beta, bundles);
 }
 
 /// Kept for callers after install/uninstall (nothing cached here any more).
@@ -239,6 +255,60 @@ mod tests {
 
     fn localconfig(opts: &str) -> String {
         format!("\"UserLocalConfigStore\"\n{{\n\"Software\"\n{{\n\"Valve\"\n{{\n\"Steam\"\n{{\n\"apps\"\n{{\n\"{}\"\n{{\n\"LaunchOptions\" \"{opts}\"\n}}\n}}\n}}\n}}\n}}\n}}\n", kiln_manage::CLIENT_APP_ID)
+    }
+
+    #[test]
+    fn release_runtime_offers_do_not_reinstall_a_cached_test_runtime() {
+        use kiln_manage::{bundle, install, manifest::RunSide, paths::DataDirs, task::NoProgress};
+        struct Tmp(std::path::PathBuf);
+        impl Drop for Tmp { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); } }
+        let t = Tmp(std::env::temp_dir().join(format!("kiln-runtime-offers-{}", std::process::id())));
+        let _ = std::fs::remove_dir_all(&t.0);
+        std::fs::create_dir_all(&t.0).unwrap();
+        let dirs = DataDirs::at(t.0.join("data"));
+        let make = |tag: &str, epoch| {
+            let stage = t.0.join(tag);
+            put(&stage.join("kiln-runtime.json"), r#"{"format":1,"kiln":"0.2.0-dev","abi":2,"api":"0.2.0","dotnet":"10.0.14",
+                "components":{"core":{"sides":["client","server"],"default":true,"requires":[]}}}"#);
+            put(&stage.join("core/kiln/kiln-core.dll"), tag);
+            std::fs::create_dir_all(stage.join("core")).unwrap();
+            std::fs::write(stage.join("core/dinput8.dll"), kiln_manage::pe::build_test_dll(
+                &["DirectInput8Create", "GetdfDIJoystick", "KilnProxyInfo"], b"KilnProxy/2 test\0")).unwrap();
+            let zip = bundle::create(&stage, &t.0.join("out"), &bundle::CreateOptions { source_date_epoch: epoch, git: tag.into() }).unwrap();
+            bundle::import(&dirs, &zip).unwrap()
+        };
+        let old = make("aaaaaaa", 1_793_620_800);
+        let release = make("bbbbbbb", 1_793_707_200);
+        let beta = make("ccccccc", 1_793_793_600);
+        let g = GameInstall { id: "runtime-test".into(), kind: GameKind::Client, path: t.0.join("game"), exe: "enshrouded.exe".into(),
+            app_id: kiln_manage::CLIENT_APP_ID, library: None, platform: Platform::Proton, prefix: None, build_id: None,
+            exe_sha256: None, steam_flavor: None, path_mode: PathMode::Copy, source: "manual".into() };
+        put(&g.path.join("enshrouded.exe"), "MZ");
+        let by = |beta: bool| install::InstallOptions { installer: Some(if beta { "kiln-launcher 0.2.0-dev beta 1" } else { "kiln-launcher 0.2.0-dev" }.into()), ..Default::default() };
+        install::install(&dirs, &g, &beta.file, &by(true), &mut NoProgress).unwrap();
+        let bundles = bundle::list(&dirs).unwrap();
+        let policy = |st: &mut InstallState, shipped, is_beta| runtime_policy(st, RunSide::Client, shipped, is_beta, &bundles);
+        let mut st = install::status(&dirs, &g).unwrap();
+        policy(&mut st, Some(release.version.as_str()), false);
+        assert_eq!(st.switch_back.as_ref().unwrap().to, release.version);
+        install::install(&dirs, &g, &release.file, &by(false), &mut NoProgress).unwrap();
+        let mut st = install::status(&dirs, &g).unwrap();
+        assert_eq!(st.upgrade_available.as_deref(), Some(beta.version.as_str()), "reproduces the raw cache offer");
+        assert!(!install::installed_by_test_build(st.receipt.as_ref().unwrap()));
+        policy(&mut st, Some(release.version.as_str()), false);
+        assert_eq!(st.upgrade_available, None, "release Play and Update game must not take the cached beta");
+        assert_eq!(st.switch_back, None);
+        install::install(&dirs, &g, &old.file, &by(false), &mut NoProgress).unwrap();
+        let mut st = install::status(&dirs, &g).unwrap();
+        policy(&mut st, Some(release.version.as_str()), false);
+        assert_eq!(st.upgrade_available.as_deref(), Some(release.version.as_str()), "still offers the shipped update when beta is newer");
+        let mut st = install::status(&dirs, &g).unwrap();
+        policy(&mut st, None, false);
+        assert_eq!(st.upgrade_available, None, "an unbundled release cannot identify an automatic update");
+        let mut st = install::status(&dirs, &g).unwrap();
+        policy(&mut st, Some(beta.version.as_str()), true);
+        assert_eq!(st.upgrade_available.as_deref(), Some(beta.version.as_str()));
+        assert!(bundles.iter().any(|b| b.version == beta.version && b.file.is_file()), "explicit Runtime selection remains available");
     }
 
     #[test]

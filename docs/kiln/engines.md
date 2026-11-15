@@ -199,12 +199,12 @@ Library import rules; a runtime plugin may already run an engine's mods placed i
 
 ### ShroudForge self-hosting
 
-ShroudForge can also host itself: its own proxy in the game folder starts it, and Kiln's adapter stands aside
-before consulting the profile. ShroudForge scans its own mods folder; the profile's ShroudForge switches do not
-decide that start. Kiln still writes managed packages' switches during activation; self-hosting does not undo those writes.
+ShroudForge can also host itself. If its own proxy loads, Kiln's adapter steps aside and ShroudForge reads its own
+mods folder. Profile switches still update copies Kiln manages. Folders you installed yourself keep their own switches.
 
-Engines shows **runs itself: <file>**, and Mods (desktop and Deck) names the detected loader when the loaded profile
-contains ShroudForge mods, including switched-off entries. Remove that file to let Kiln's adapter host ShroudForge.
+Engines shows **own loader installed: <file>** when disk detection finds a loader. Mods on desktop and Deck names the
+detected loader when the loaded profile contains ShroudForge mods, including switched off entries. This says the file
+is installed. It does not prove it loaded. Remove that file to let Kiln's adapter host ShroudForge.
 For ShroudForge's `dinput8.dll`, **Let Kiln manage ShroudForge** opens Runtime's existing **Switch from ShroudForge**
 confirmation. That operation backs up only `dinput8.dll`: other SF proxies must be removed separately.
 Under Proton a proxy still needs its DLL override to actually load; disk detection is a warning before Play, not proof

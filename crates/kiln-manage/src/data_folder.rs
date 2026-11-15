@@ -284,8 +284,12 @@ impl DataLock {
     }
 
     /// Shared to exclusive (this process's own shared lock, for its move). Ok(false): another launcher holds it too;
-    /// the lock is shared again then.
+    /// the lock is shared again then. Err: callers must stop writing until the lock is known to be held again.
     pub fn upgrade(&mut self) -> Result<bool> {
+        self.upgrade_after_failure(|| {})
+    }
+
+    fn upgrade_after_failure(&mut self, after_failure: impl FnOnce()) -> Result<bool> {
         if self.exclusive {
             return Ok(true);
         }
@@ -296,7 +300,13 @@ impl DataLock {
                 Ok(true)
             }
             Err(e) => {
-                let _ = self.file.try_lock_shared();
+                after_failure();
+                match self.file.try_lock_shared() {
+                    Ok(()) => {},
+                    Err(std::fs::TryLockError::WouldBlock) => return Err(Error::new(ErrorCode::Busy,
+                        "Another launcher took the data-folder lock. Restart this launcher before writing data.")),
+                    Err(std::fs::TryLockError::Error(e)) => return Err(io_at(&self.path, "reacquiring shared lock")(e)),
+                }
                 match e {
                     std::fs::TryLockError::WouldBlock => Ok(false),
                     std::fs::TryLockError::Error(e) => Err(io_at(&self.path, "locking")(e)),
@@ -1846,6 +1856,22 @@ pub fn check_here(located: &Located, env: &DataEnv, picked: &Path, locked: bool)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_upgrade_reports_when_another_upgrader_prevents_shared_reacquisition() {
+        let root = std::env::temp_dir().join(format!("kiln-upgrade-reacquire-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let mut first = DataLock::shared(&root).unwrap().unwrap();
+        let mut other = DataLock::shared(&root).unwrap().unwrap();
+        // The first upgrade cannot win while the other shared handle exists.
+        // Before the first reacquires shared access, the other launcher upgrades.
+        let result = first.upgrade_after_failure(|| assert!(other.upgrade().unwrap()));
+        assert!(other.is_exclusive());
+        assert!(result.is_err(), "must not report a safe shared refusal after losing the shared lock");
+        drop((first, other));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     fn win(s: &str) -> PathParts {
         PathParts::parse(s, PathStyle::Windows)

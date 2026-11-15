@@ -840,7 +840,7 @@ All written atomically; a file whose `pid` is not a live process is stale.
   missing, invalid and unknown-format evidence produces no notice (invalid files are logged). It never changes
   Kiln's files and does not read `.last.json` as a new stop. The command `launch_state.stoppedStart` returns the
   kind, reason, mod ids and available Library display names, advice, UTC, exit code and runtime pid.
-  The watcher and command retain the process start observed after this launcher's Steam request, inspect the
+  The watcher and command retain the observed process start, including external Steam starts, and inspect the
   evidence while it runs (including progress `failed`) and after exit. The embedded time must lie between that
   process start (rounded down to its timestamp's whole second) and the observation of exit; the file mtime must
   also be at least the process start. Windows requires the process pid; Proton uses the process time because
@@ -849,7 +849,7 @@ All written atomically; a file whose `pid` is not a live process is stale.
   For a process that stops between polls, format-1 failed `progress.json` may supply the runtime pid and start
   time instead, but only if both its embedded start time and mtime are after this launcher's request. The stop
   must then match that runtime pid and time window.
-  Desktop Play and Deck Home keep the notice until Dismiss or another start. The launcher stores the notice
+  Desktop Play and Deck Home keep the notice until Dismiss, launcher Play or a running process whose timestamp proves it started after the refusal. Missing, invalid or indistinguishable timestamps keep the notice. Host and runtime pids are not compared to retire it under Proton. The launcher stores the notice
   and dismissed `(game, pid, UTC, exitCode)` in its own browser storage, so reload/restart cannot resurrect a
   dismissed stop. Review these mods opens the existing mod list's exact-id filter. Ordinary quits produce none.
   `kilnctl run` uses the same bounded reader within its foreground-run time interval and prints the reason and
@@ -1552,6 +1552,27 @@ kilnctl is built on the crate; it also has `bundle`, `client`, `admin` and `depl
   `/logs`, `/saves`, `/editor`, `/settings`, `/about`; Servers `/servers/:id/{overview,logs,ticks,settings,configs,mods,
   backups,modpack}`; Admin `/servers/:id/admin/{players,map,zones,items,spawn,world,combat,creatures,gamedata,permissions,
   content,saves,crashes}` (`admin/configs`, `admin/mods` and `admin/console` redirect to the merged server pages).
+
+Library usage includes saved profiles under `snapshots/before-beta/profiles/`, named `<id> (before beta)`. Clean up
+and ordinary removal protect their packages until the snapshot is replaced, including disabled entries. Saved
+profiles and metadata files are never read through symlinks. Explicit forced removal still honors its existing
+confirmation. Restore preflights saved profile references against present Library records and paths before any
+replacement, also when recovering a staged restore. A legacy launcher can still remove these packages; restore then
+refuses and names what to reimport.
+
+The beta copy includes launcher settings and profile metadata. It excludes `library/kiln-kept.json` and its
+settings folders. Restore and recovery skip that journal even in older copies and restore stages, leaving its live
+payload and ownership together.
+
+A release launcher selects only its shipped runtime for automatic game updates, comparing bundle version and
+creation time. Cached test runtimes remain available for explicit selection on Runtime. Without a shipped runtime a
+release offers no automatic game update. Test launchers keep the existing cached-bundle update behavior.
+
+Capture, startup recovery and restore upgrade the existing data-folder lock to exclusive access. Another launcher
+using that folder causes a clear refusal. A blocked restore retains exclusivity; a completed startup or a return to
+the original session downgrades to shared access. Restart handoff keeps exclusivity until the process releases the
+lock. An identical startup with no beta work may share the folder. An upgrade refusal returns to the session only
+after shared access is reacquired. A lock error holds local writers behind the recovery gate until restart.
 
 Beta startup gate commands: `snapshot_status` returns `{ phase: "preparing" | "blocked" | "ready", reasons: string[], canContinue: boolean }`; `snapshot_continue` takes no arguments and records an explicit decision to continue without a complete pre-beta copy. Neither bypasses an unfinished restore journal. `UpdateStatus.restoreRequested` records the accepted restore choice, and `beforeBetaWarning` carries persisted opt-out reasons.
 

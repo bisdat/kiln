@@ -361,18 +361,24 @@ struct StopRun {
 }
 static STOPS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, StopRun>>> = std::sync::LazyLock::new(Default::default);
 
+fn adopt_stop_process(run: &mut StopRun, pid: u32, at: i64, began: Option<i64>) {
+    if began.is_none_or(|b| at >= b - 1000)
+        && run.identity.as_ref().is_none_or(|i| i.began_ms != at)
+    {
+        *run = StopRun { identity: Some(kiln_manage::stopped_start::StartIdentity {
+            pid: cfg!(windows).then_some(pid), began_ms: at, ended_ms: None,
+        }), result: None };
+    }
+}
+
 pub(crate) fn observe_stop(g: &kiln_manage::game::GameInstall, pid: Option<u32>) {
     use kiln_manage::{stopped_start as ss, start_progress as sp};
     let began = STARTS.lock().unwrap_or_else(|e| e.into_inner()).get(&g.id).filter(|s| s.asked).map(|s| s.began + s.steps.iter().find(|step| step.id == "steam").map_or(0, |step| step.ms as i64));
     let mut all = STOPS.lock().unwrap_or_else(|e| e.into_inner());
     let run = all.entry(g.id.clone()).or_default();
     if let Some(pid) = pid {
-        if let Some(at) = kiln_manage::proc::start_time(pid).map(sp::unix_ms)
-            && began.is_some_and(|b| at >= b - 1000)
-        {
-            if run.identity.as_ref().is_none_or(|i| i.began_ms != at) {
-                *run = StopRun { identity: Some(ss::StartIdentity { pid: cfg!(windows).then_some(pid), began_ms: at, ended_ms: None }), result: None };
-            }
+        if let Some(at) = kiln_manage::proc::start_time(pid).map(sp::unix_ms) {
+            adopt_stop_process(run, pid, at, began);
         }
     } else if let Some(i) = &mut run.identity {
         i.ended_ms.get_or_insert_with(now_ms);
@@ -395,5 +401,29 @@ pub(crate) fn observe_stop(g: &kiln_manage::game::GameInstall, pid: Option<u32>)
         identity.pid = Some(stop.pid);
         crate::commands::app::launcher_log("stopped start", &format!("{}: {}", g.id, stop.reason));
         run.result = Some(stop);
+    }
+}
+
+#[cfg(test)]
+mod stop_process_tests {
+    use super::*;
+    #[test]
+    fn a_later_external_process_replaces_the_refused_run_without_a_launcher_request() {
+        let stop = kiln_manage::stopped_start::StoppedStart {
+            kind: kiln_manage::stopped_start::StopKind::Roster, reason: "full".into(), mods: vec![], names: vec![], advice: "switch one off".into(),
+            utc: "2026-11-15T12:00:00Z".into(), exit_code: 19202, pid: 42,
+        };
+        let mut run = StopRun { identity: Some(kiln_manage::stopped_start::StartIdentity {
+            pid: Some(42), began_ms: 1000, ended_ms: Some(1500),
+        }), result: Some(stop.clone()) };
+        adopt_stop_process(&mut run, 9000, 2000, None);
+        assert_eq!(run.identity.as_ref().unwrap().began_ms, 2000);
+        assert!(run.result.is_none(), "old refusal must not be returned for the later Steam process");
+        run.result = Some(stop.clone());
+        adopt_stop_process(&mut run, 42, 2000, None);
+        assert_eq!(run.result, Some(stop), "the refused process with its message box still open keeps its notice");
+        let mut fresh = StopRun::default();
+        adopt_stop_process(&mut fresh, 9000, 3000, None);
+        assert_eq!(fresh.identity.unwrap().began_ms, 3000, "reopening during a Steam start adopts its identity");
     }
 }

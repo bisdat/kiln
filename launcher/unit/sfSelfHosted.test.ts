@@ -1,7 +1,13 @@
 import { expect, test } from "bun:test";
 import { sfSelfHostedFile, sfSelfHostedText } from "../src/shell/sfSelfHosted";
 test("self hosting notice names the file and explains profile switches", () => {
-  expect(sfSelfHostedText("dbghelp.dll")).toBe("ShroudForge's own loader is installed in the game folder (dbghelp.dll), so ShroudForge runs its mods itself. Your profile's ShroudForge switches do not apply. Remove that file, or let Kiln manage ShroudForge, to have the profile decide.");
+  const text = sfSelfHostedText("dbghelp.dll");
+  expect(text).toContain("own loader is installed (dbghelp.dll).");
+  expect(text).toContain("If it loads");
+  expect(text).toContain("Profile switches still update copies Kiln manages.");
+  expect(text).toContain("Folders you installed yourself keep their own switches.");
+  expect(text).not.toContain("switches do not apply");
+  expect(text).not.toMatch(/[—–;]/);
   expect(sfSelfHostedText("winmm.dll")).toContain("(winmm.dll)");
 });
 
@@ -14,4 +20,11 @@ test("only the loaded profile with SF entries and current disk detection gets a 
   expect(sfSelfHostedFile({ mods: {} } as Profile, disk)).toBeNull();
   expect(sfSelfHostedFile(profile, { loaders: [] } as unknown as FoundReport)).toBeNull();
   expect(sfSelfHostedFile(profile, undefined)).toBeNull();
+});
+
+import { readFileSync } from "node:fs";
+test("observed native self hosting describes the adapter boundary and keeps managed switches", () => {
+  const native = readFileSync(new URL("../../native/plugins/shroudforge/src/plugin.cpp", import.meta.url), "utf8");
+  expect(native).not.toContain("Kiln's profile does not decide ShroudForge mods this start");
+  expect(native.match(/Managed package switches still apply\./g)).toHaveLength(2);
 });

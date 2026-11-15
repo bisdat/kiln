@@ -7,7 +7,7 @@ for (const deck of [false, true]) {
       test(`Mods notice: ${mode}`, async ({ page }) => {
         await page.goto(`/?sfSelf=${mode}${deck ? "&deck=steamdeck" : ""}#/${deck ? "deck/mods" : ""}`);
         await page.locator(".k-splash").waitFor({ state: "detached" });
-        const notice = page.getByRole("status").filter({ hasText: "ShroudForge runs itself" });
+        const notice = page.getByRole("status").filter({ hasText: "ShroudForge's own loader is installed" });
         if (mode === "before" || mode === "started" || mode === "takeover") {
           await expect(notice).toHaveCount(1);
           await expect(notice).toContainText(mode === "takeover" ? "(dinput8.dll)" : "(dbghelp.dll)");
@@ -17,7 +17,10 @@ for (const deck of [false, true]) {
             await link.focus();
             await expect(link).toBeFocused();
           }
-          await expect(notice).toContainText("Your profile's ShroudForge switches do not apply.");
+          await expect(notice).toContainText("Profile switches still update copies Kiln manages.");
+          await expect(notice).toContainText("If it loads");
+          await expect(notice).toContainText("Folders you installed yourself keep their own switches.");
+          await expect(notice).not.toContainText("switches do not apply");
           await expect(notice).toBeVisible();
           const box = await notice.boundingBox();
           expect(box!.x).toBeGreaterThanOrEqual(0);
@@ -35,7 +38,7 @@ for (const mode of ["before", "started", "removed", "hosted"]) {
     await page.goto(`/?sfSelf=${mode}#/mods/engines`);
     const row = page.locator('[data-engine="shroudforge"]');
     await expect(row).toBeVisible();
-    if (mode === "before" || mode === "started") await expect(row).toContainText("runs itself: dbghelp.dll");
+    if (mode === "before" || mode === "started") await expect(row).toContainText("own loader installed: dbghelp.dll");
     else if (mode === "removed") {
       await expect(row).toContainText("Last start: self-hosted (loader no longer detected)");
       await expect(row).not.toContainText("runs itself:");

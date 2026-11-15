@@ -6,7 +6,7 @@ import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-quer
 import { useEffect, useState } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { stopKey } from "./stoppedStart";
+import { stopForProcess, stopKey } from "./stoppedStart";
 
 const useStops = create(persist<{ notices: Record<string, api.StoppedStart>; dismissed: Record<string, string> }>(() => ({ notices: {}, dismissed: {} }), { name: "kiln-stopped-starts" }));
 function clearStop(id: string) {
@@ -87,7 +87,11 @@ export function usePlayControl(): PlayControl {
       && (!stops.notices[id] || stopKey(stops.notices[id]) !== stopKey(evidence)))
       useStops.setState((m) => ({ notices: { ...m.notices, [id]: evidence } }));
   }, [id, evidence, stops.dismissed, stops.notices]);
-  const stoppedStart = stops.notices[id] ?? null;
+  const savedStop = stops.notices[id] ?? null;
+  const stoppedStart = stopForProcess(savedStop, status.data);
+  useEffect(() => {
+    if (savedStop && !stoppedStart) clearStop(id);
+  }, [id, savedStop, stoppedStart]);
   const s = status.data;
   const running = !!s?.running;
   const at = memo.at[id];
