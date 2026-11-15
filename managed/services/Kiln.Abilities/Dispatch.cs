@@ -40,15 +40,15 @@ internal static unsafe class AbilitiesDispatch
         mod.Retiring += () => Retire(mod);                // after it
     }
 
-    // The start of the mod's unload, before its OnUnload: no new call enters its sync natives or attachments, and the
-    // unload waits the bounded RetireWaitMs for the calls inside. One still inside then is said here; its retirement
-    // is deferred in Retire as before.
-    private static void CloseAdmission(ModContext mod)
+    // The start of the mod's unload, before its OnUnload: no new call enters its sync natives or attachments; the first
+    // time the unload waits the bounded RetireWaitMs for the calls inside, later asks only look. Null when none is
+    // inside, else what the host's deferred OnUnload waits for.
+    internal static string? CloseAdmission(ModContext mod)
     {
         var gate = GateOf(mod);
-        Interlocked.Exchange(ref gate.Closed, 1);
-        if (!WaitQuiet(gate))
-            mod.Log.Warn($"abilities: {gate.Id}'s OnUnload runs with {Volatile.Read(ref gate.Inflight)} call(s) still inside its native handlers: they take no new call");
+        var first = Interlocked.Exchange(ref gate.Closed, 1) == 0;
+        if (first ? WaitQuiet(gate) : Volatile.Read(ref gate.Inflight) == 0) return null;
+        return $"{Volatile.Read(ref gate.Inflight)} call(s) still inside its native handlers (kiln.abilities)";
     }
 
     private static void Retire(ModContext mod)
