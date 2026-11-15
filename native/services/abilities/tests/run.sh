@@ -35,6 +35,9 @@ end = source.index("\nstd::atomic<uint32_t> g_slow_logged", start)
 registration += "\n" + source[start:end]
 start = source.index("void check_programs_ready()")
 end = source.index("\nvoid expire()", start)
+registration += "\n" + source[start:end]
+start = source.index("KilnResult KILN_CALL t_native_state(")
+end = source.index("\nKilnResult KILN_CALL t_native_attach_state(", start)
 Path(sys.argv[2]).write_text(registration + "\n" + source[start:end])
 start = source.index("enum SlotKind")
 end = source.index("\nstd::unordered_map<uint32_t, int> g_slot_of", start)

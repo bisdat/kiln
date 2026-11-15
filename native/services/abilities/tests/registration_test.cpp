@@ -59,8 +59,30 @@ int main() {
     int next = add_kiln_native(2, "test.Native", 2, SLOT_MANAGED, &hash, why);
     assert(next == i);
     assert(engine_argc == 2); // VM must pop the same count as the verifier and new handler expect
+    // the same argc again: the engine's entry stays, nothing is registered (the map may be full by then)
+    g_slots[i].kind = SLOT_DEAD;
+    engine_argc = 0;
+    assert(add_kiln_native(3, "test.Native", 2, SLOT_MANAGED, &hash, why) == i && engine_argc == 0);
     check_programs_ready();
     assert(attachment_active); // boot attachment must see the cooked program inserted by refresh
+    // review P1 item 4: registered before a world (no setup registry) it waits; the world's setup puts it in or not
+    {
+        const uintptr_t world = g_setup_registry;
+        g_setup_registry = 0;
+        uint32_t h1 = 0, h2 = 0, st = 99;
+        const int a = add_kiln_native(4, "test.EarlyIn", 0, SLOT_MANAGED_SYNC, &h1, why);
+        const int b = add_kiln_native(4, "test.EarlyOut", 0, SLOT_MANAGED_SYNC, &h2, why);
+        assert(a >= 0 && b >= 0 && g_slots[a].registered_in == 0 && g_slots[b].registered_in == 0);
+        assert(t_native_state(h1, &st) == KILN_OK && st == KILN_NATIVE_STATE_WAITING);
+        g_setup_registry = world;
+        assert(register_slot_in(a, world));  // the setup had room for the first only
+        assert(t_native_state(h1, &st) == KILN_OK && st == KILN_NATIVE_STATE_LIVE);
+        assert(t_native_state(h2, &st) == KILN_OK && st == KILN_NATIVE_STATE_REFUSED);
+        g_slots[a].kind = SLOT_DEAD;
+        assert(t_native_state(h1, &st) == KILN_OK && st == KILN_NATIVE_STATE_DEAD);
+        assert(t_native_state(0x12345678u, &st) == KILN_OK && st == KILN_NATIVE_STATE_NONE);
+        assert(t_native_state(h1, nullptr) == KILN_ERR_INVALID_ARGUMENT);
+    }
     NativeResult result{};
     ArgSlice args{};
     NativeCtx ctx{};
@@ -76,5 +98,5 @@ int main() {
     call.value = 9;
     dispatch_managed(i, &result, &args, &ctx);
     assert(result.error == 0 && result.value == 9 && g_calls.empty());
-    puts("registration_test: reload argc, deferred attachment and dropped-call retry passed");
+    puts("registration_test: reload argc, deferred attachment, dropped-call retry and native states passed");
 }

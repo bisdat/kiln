@@ -2,7 +2,10 @@
 // Host tests of natives_core.h: the decisions kiln.abilities' native thunks make (since 0.2.0-dev.29).
 #include <cstdio>
 #include <cstdlib>
+#include <atomic>
+#include <chrono>
 #include <cstring>
+#include <thread>
 #include <string>
 #include <vector>
 
@@ -342,8 +345,95 @@ static void verifier() {
     CHECK(r.ok);
 }
 
+// review P1: the owner gate under real threads: a handler inside while its owner retires
+static int64_t steady_ns() {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+static void gates() {
+    OwnerGate g;
+    CHECK(gate_enter(g));
+    gate_leave(g);
+    // a handler that stays inside: the retirement's bounded wait expires, reports not quiet, and admission is closed
+    std::atomic<bool> release{false}, inside{false}, touched{false};
+    int resource = 41;  // what the handler uses after the gate opens (its mod's state)
+    std::thread handler([&] {
+        if (!gate_enter(g)) return;
+        inside = true;
+        while (!release) std::this_thread::yield();
+        touched = ++resource == 42;  // still intact: nothing was freed under it
+        gate_leave(g);
+    });
+    while (!inside) std::this_thread::yield();
+    const int64_t t0 = steady_ns();
+    const bool quiet = gate_close_and_wait(g, 2'000'000, steady_ns, [] { std::this_thread::yield(); });
+    const int64_t waited = steady_ns() - t0;
+    CHECK(!quiet && g.closed && g.inflight == 1);
+    CHECK(waited >= 2'000'000 && waited < 500'000'000);  // bounded: about 2 ms, never for ever
+    CHECK(!gate_enter(g));                              // no new entry once closed
+    CHECK(g.inflight == 1);
+    // the deferred retirement keeps its payload until the gate is quiet
+    std::vector<Deferred<int>> deferred{{&g, 7, 10}};
+    int released = 0;
+    uint64_t late = 0;
+    CHECK(finish_quiet(deferred, 11, [&](int p) { released = p; }, [&](OwnerGate*, uint64_t s) { late = s; }) == 0);
+    CHECK(released == 0 && deferred.size() == 1);
+    release = true;
+    handler.join();
+    CHECK(touched && g.inflight == 0);
+    CHECK(finish_quiet(deferred, 13, [&](int p) { released = p; }, [&](OwnerGate*, uint64_t s) { late = s; }) == 1);
+    CHECK(released == 7 && late == 3 && deferred.empty());
+    // a gate that is quiet: the wait ends at once
+    OwnerGate q;
+    CHECK(gate_close_and_wait(q, 2'000'000, steady_ns, [] {}));
+    // many entries racing a close: every entry either got in before the close (and is counted) or was refused
+    for (int round = 0; round < 50; ++round) {
+        OwnerGate r;
+        std::atomic<int> in{0}, refused{0};
+        std::atomic<bool> go{false};
+        std::vector<std::thread> ts;
+        for (int k = 0; k < 4; ++k)
+            ts.emplace_back([&] {
+                while (!go) std::this_thread::yield();
+                for (int i = 0; i < 200; ++i) {
+                    if (gate_enter(r)) {
+                        ++in;
+                        gate_leave(r);
+                    } else {
+                        ++refused;
+                    }
+                }
+            });
+        go = true;
+        gate_close_and_wait(r, 50'000'000, steady_ns, [] { std::this_thread::yield(); });
+        const int after_close = in.load();
+        for (auto& t : ts) t.join();
+        CHECK(r.inflight == 0);
+        CHECK(in.load() + refused.load() == 800);
+        CHECK(in.load() == after_close);  // nothing entered after the close returned quiet
+    }
+}
+
+static void watchdog() {
+    InsideTable<4> t;
+    const int a = t.claim(100, "mod.Hang", 9);
+    const int b = t.claim(150, "mod.Quick", 9);
+    CHECK(a >= 0 && b >= 0 && a != b);
+    t.release(b);
+    std::vector<std::string> said;
+    auto report = [&](const char* what, KilnOwner owner, int64_t inside) { said.push_back(std::string(what) + "/" + std::to_string(owner) + "/" + std::to_string(inside)); };
+    CHECK(t.scan(1000, 1000, report) == 0);  // inside for 900 < 1000
+    CHECK(t.scan(1200, 1000, report) == 1 && said.back() == "mod.Hang/9/1100");
+    CHECK(t.scan(5000, 1000, report) == 0);  // once per call
+    t.release(a);
+    for (int i = 0; i < 4; ++i) CHECK(t.claim(1, "x", 1) >= 0);
+    CHECK(t.claim(1, "full", 1) == -1);      // a full table watches no more calls (they still run)
+}
+
 int main() {
     names();
+    gates();
+    watchdog();
     typed();
     natives_json();
     verifier();
