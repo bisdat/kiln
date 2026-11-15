@@ -7,7 +7,13 @@ for (const deck of [false, true]) {
       await page.goto(`/${deck ? "?deck=steamdeck" : ""}#${deck ? "/deck" : "/"}`);
       await page.locator(".k-splash").waitFor({ state: "detached" });
     });
-    for (const kind of ["roster", "boot-mod"]) test(`${kind}: named notice, filter, dismiss and reload`, async ({ page }) => {
+    const says: Record<string, string[]> = {
+      roster: ["Survivors roster", "The roster holds at most 128 NPCs.", "Switch one of these mods off"],
+      "boot-mod": ["A required boot mod could not prepare its content.", "Switch one of these mods off"],
+      content: ["Kiln could not build the NPCs and quests of these mods", "kiln.assets refused the built GameKnowledgeResource",
+        "Remove or update these mods"],
+    };
+    for (const kind of ["roster", "boot-mod", "content"]) test(`${kind}: named notice, filter, dismiss and reload`, async ({ page }) => {
       await page.evaluate((s) => (window as unknown as Mock).__kilnMock.scriptStoppedStart(s), kind);
       const play = page.locator(deck ? ".deck-mouth" : ".k-door");
       await expect(play).toBeEnabled();
@@ -16,7 +22,7 @@ for (const deck of [false, true]) {
       await expect(notice).toBeVisible({ timeout: 30_000 });
       await expect(notice).toContainText("New Items");
       await expect(notice).toContainText("Big Stacks");
-      await expect(notice).toContainText("Switch one of these mods off");
+      for (const text of says[kind]) await expect(notice).toContainText(text);
       await notice.getByRole("button", { name: "Review these mods" }).click();
       await expect(page).toHaveURL(/filter=/);
       if (deck) await expect(page.getByRole("list", { name: "Mods", exact: true }).getByRole("button")).toHaveCount(2);

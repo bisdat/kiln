@@ -225,6 +225,21 @@ fn healthy_install_finds_nothing() {
     }
 }
 
+// The state files of Kiln's deliberate stops (roster, the mods' NPCs and quests not built) go into the zip whole, the
+// next start's .last copies too: a support thread can tell which stop it was (dev.29).
+#[test]
+fn stop_state_files_are_in_the_report() {
+    let f = Fx::healthy("stops");
+    let names = ["roster-refused.json", "content-refused.json", "content-refused.last.json"];
+    for n in names {
+        f.w(&format!("kiln/state/{n}"), br#"{"format":1,"refused":true,"exitCode":19203,"unixExitStatus":3,"mods":["cs-good"]}"#);
+    }
+    let r = build(&f.input());
+    for n in names {
+        assert!(file(&r, &format!("game/kiln/state/{n}")).is_some_and(|t| t.contains("cs-good")), "{n} missing");
+    }
+}
+
 #[test]
 fn a_test_build_names_its_channel_and_beta_number() {
     let f = Fx::healthy("channel");
