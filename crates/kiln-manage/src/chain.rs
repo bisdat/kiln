@@ -10,7 +10,8 @@
 //! entry and the core loads it later. Lines come from three places: the player ([`set_late`], game-wide), the active
 //! profile (its `late` native mods, rewritten on every activation) and compat rules (preceded by a
 //! `; kiln rule <id>` comment, rewritten on every activation). A rule that switches a [chain] line off writes it as
-//! `; kiln rule <id> off: <line>`; the next activation puts it back when the rule no longer applies.
+//! `; kiln rule <id> off: <line>`; the next activation puts it back when the rule no longer applies. A rule that keeps
+//! an entry early (dev.29 `before`) switches the player's [late] line for it off the same way, in [late].
 
 use crate::Result;
 use serde::{Deserialize, Serialize};
@@ -412,6 +413,10 @@ pub struct ProfilePlan {
     pub rule_late: Vec<(String, String)>,
     /// (rule id, [chain] entry): [chain] lines a compat rule switches off.
     pub rule_off: Vec<(String, String)>,
+    /// (rule id, entry): entries a compat rule keeps early (dev.29 `before`: they must load before another DLL). A
+    /// [profile] entry's late switch is not written (`profile_late` leaves it out); an active [late] line naming one
+    /// (the player's) is written as `; kiln rule <id> off: <line>` and comes back at the next activation without the rule.
+    pub rule_early: Vec<(String, String)>,
 }
 
 const RULE_MARK: &str = "; kiln rule ";
@@ -513,8 +518,9 @@ fn render_plan(text: &str, plan: &ProfilePlan, rules: bool) -> String {
                     out.push(dll_line(d));
                 }
             }
-            // a [late] line of a [chain] entry a rule switches off is switched off with it (back when the rule goes)
-            Some(if rules { mark_off(out, &plan.rule_off) } else { out })
+            // a [late] line of a [chain] entry a rule switches off is switched off with it (back when the rule goes); so is
+            // one of an entry a rule keeps early
+            Some(if rules { mark_off(mark_off(out, &plan.rule_off), &plan.rule_early) } else { out })
         }
         _ => None,
     })
@@ -840,6 +846,7 @@ mod tests {
             profile_late: vec!["Z:\\a\\a1.dll".into()],
             rule_late: vec![("rule-a".into(), "chain\\old-b.dll".into())],
             rule_off: vec![("off-a".into(), "chain\\old-a.dll".into())],
+            rule_early: vec![],
         };
         assert!(write_profile_plan(&d, &a).unwrap());
         let before = std::fs::read_to_string(&f).unwrap();
@@ -850,6 +857,7 @@ mod tests {
             profile_late: vec!["Z:\\p\\p2.dll".into()],
             rule_late: vec![("rule-p".into(), "chain\\old-a.dll".into())],
             rule_off: vec![("off-p".into(), "chain\\old-b.dll".into())],
+            rule_early: vec![],
         };
         write_once(&d, &p).unwrap();
         let once = parse_once(&std::fs::read(d.join("kiln/chain/once.ini")).unwrap());
@@ -914,6 +922,7 @@ mod tests {
             profile_late: vec![],
             rule_late: vec![("xhl.after-sf".into(), "chain\\emf-dinput8.dll".into())],
             rule_off: vec![("old".into(), "chain\\old-tool-dinput8.dll".into())],
+            rule_early: vec![],
         };
         assert!(!plan_is_current(&out, &plan2));
         let out2 = render_plan(&out, &plan2, true);
@@ -1069,9 +1078,11 @@ mod tests {
                             }
                         }
                         for p in &all {
-                            match rng.below(4) {
+                            match rng.below(5) {
                                 0 => plan.rule_off.push((format!("r{}", rng.below(3)), p.clone())),
                                 1 => plan.rule_late.push((format!("r{}", rng.below(3)), p.clone())),
+                                // dev.29 `before`: an entry kept early has the player's [late] line switched off
+                                2 => plan.rule_early.push((format!("r{}", rng.below(3)), p.clone())),
                                 _ => {}
                             }
                         }
