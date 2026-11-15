@@ -34,7 +34,24 @@ uint32_t writes_capability() { return KILN_WORLD_CAP_TRACKED_WRITES; }
 std::vector<std::string> pruned_names;
 bool seh_each(KilnProgramEachFn f,KilnProgramCtx* ctx,uint64_t* iter,KilnEntity e,void* user,unsigned long*) { f(ctx,iter,e,user);return true; }
 bool seh_update(KilnProgramUpdateFn f,KilnProgramCtx* ctx,void* user,unsigned long*) { f(ctx,user);return true; }
-bool seh_register_program(RegisterProgramFn,uintptr_t,const EngineDesc*,bool*,unsigned long*) { return false; }
+// A fake engine table for register_into: count u16 at world + L.programs_count, entries from L.programs_table (the
+// descriptor pointer at +0, the 1-based id at +L.entry_id), RegisterProgram refusing a full table as the engine does.
+// `engine_skip` names a program the "engine" answers true for without registering it (descriptor flag 0x2 does that).
+bool engine_on=false;
+int engine_calls=0;
+std::string engine_skip;
+bool seh_register_program(RegisterProgramFn,uintptr_t world,const EngineDesc* d,bool* ok,unsigned long*) {
+    if (!engine_on) return false;
+    ++engine_calls;
+    auto* count=reinterpret_cast<uint16_t*>(world+L.programs_count);
+    if (std::string_view(d->name.s,d->name.n)==engine_skip) { *ok=true;return true; }
+    if (*count>=L.programs_max) { *ok=false;return true; }
+    const uintptr_t entry=world+L.programs_table+static_cast<uintptr_t>(*count)*L.programs_stride;
+    std::memcpy(reinterpret_cast<void*>(entry),&d,8);
+    const uint16_t id=static_cast<uint16_t>(*count+1);
+    std::memcpy(reinterpret_cast<void*>(entry+L.entry_id),&id,2);
+    ++*count;*ok=true;return true;
+}
 bool seh_iter_begin(void* ctx,void* iter,uint32_t size,unsigned long*) { fn.iter_begin(ctx,iter,size);return true; }
 bool seh_iter_next(void* ctx,void* iter,uint32_t size,bool* more,unsigned long*) { *more=fn.iter_next(ctx,iter,size);return true; }
 bool seh_read_u64(uintptr_t address,uint64_t* value) { std::memcpy(value,reinterpret_cast<void*>(address),8);return true; }
@@ -143,6 +160,75 @@ int main() {
     check(pruned_names.empty() && made->desc.other_write.n==2,"a second world prunes nothing more");
     g_programs.clear();g_by_slot[0]=nullptr;
     delete made;  // the service never frees a program (the engine keeps its descriptor); the test has no engine
+
+    // Kiln's quota (0.2.0-dev.29): 64 programs, Kiln's own services and the mods' together; the 65th is refused by name
+    g_registered_once=false;
+    std::vector<KilnHandle> handles;
+    auto sys=[](const std::string& name) {
+        static std::vector<std::string> names;
+        names.push_back(name);
+        KilnProgramDesc d{};
+        d.size=sizeof d;d.flags=KILN_PROGRAM_SYSTEM|KILN_PROGRAM_HOST_ONLY;d.name=kstr(names.back());
+        d.each=[](KilnProgramCtx*,uint64_t*,KilnEntity,void*) {};
+        return d;
+    };
+    int accepted=0;
+    for (int i=0;i<64;++i) {
+        KilnProgramDesc d=sys("quota_"+std::to_string(i));
+        KilnHandle h=0;
+        if (register_program(g_owner,&d,&h,false)==KILN_OK && h==static_cast<KilnHandle>(i+1)) ++accepted,handles.push_back(h);
+    }
+    check(accepted==64,"64 programs are accepted");
+    KilnProgramDesc over=sys("quota_64");
+    KilnHandle oh=0;
+    check(register_program(g_owner,&over,&oh,false)==KILN_ERR_UNAVAILABLE && oh==0,"the 65th is refused (KILN_ERR_UNAVAILABLE), no handle");
+    check(programs_registered()==64 && program_quota()==64,"the ledger holds 64 of 64");
+    check(g_by_slot[63]==g_programs[63] && g_programs[63]->desc.update==kTrampolines[63],"slot 63 has its own trampoline");
+    KilnProgramInfo info{};
+    info.size=sizeof info;
+    check(program_info(handles[63],&info)==KILN_OK && info.state==KILN_PROGRAM_PENDING,"the 64th is pending until a world registers it");
+
+    // Mods' boot declarations keep the last 8 slots for Kiln's own services, which may register after them
+    for (Program* p : g_programs) delete p;
+    g_programs.clear();
+    std::fill(std::begin(g_by_slot),std::end(g_by_slot),nullptr);
+    for (int i=0;i<55;++i) { KilnProgramDesc d=sys("svc_"+std::to_string(i)); KilnHandle h=0; register_program(g_owner,&d,&h,false); }
+    KilnProgramDesc m1=sys("mod_a"),m2=sys("mod_b");
+    check(reserve_program("writer","a",&m1)==KILN_OK && programs_registered()==56,"a mod's declaration takes slot 56");
+    check(reserve_program("writer","b",&m2)==KILN_ERR_UNAVAILABLE && programs_registered()==56,"the next waits on the 8 kept for services: refused");
+    int late=0;
+    for (int i=0;i<8;++i) { KilnProgramDesc d=sys("late_"+std::to_string(i)); KilnHandle h=0; late+=register_program(g_owner,&d,&h,false)==KILN_OK; }
+    check(late==8 && programs_registered()==64,"a service that registers later still finds its 8");
+
+    // A live engine table: 894 of 896 taken (the game's and another loader's). Kiln registers until the engine is full and
+    // refuses the rest before calling the game; a program the engine "takes" without counting it is refused.
+    for (Program* p : g_programs) delete p;
+    g_programs.clear();
+    std::fill(std::begin(g_by_slot),std::end(g_by_slot),nullptr);
+    static std::vector<uint8_t> engine(0x40+896*0x30);
+    std::fill(engine.begin(),engine.end(),0);
+    const uintptr_t world=reinterpret_cast<uintptr_t>(engine.data());
+    L.programs_count=0;L.programs_table=0x40;L.programs_stride=0x30;L.programs_max=896;
+    *reinterpret_cast<uint16_t*>(world)=894;
+    engine_on=true;engine_calls=0;engine_skip="quota_b";
+    for (const char* n : {"quota_a","quota_b","quota_c","quota_d"}) {
+        KilnProgramDesc d=sys(n);
+        KilnHandle h=0;
+        register_program(g_owner,&d,&h,false);
+    }
+    known_components.clear();
+    fake_world[0]=reinterpret_cast<uintptr_t>(fake_registry);
+    register_into(world);
+    auto state=[&](int i) { KilnProgramInfo x{};x.size=sizeof x;program_info(static_cast<KilnHandle>(i+1),&x);return x; };
+    check(state(0).state==KILN_PROGRAM_ACTIVE && state(0).engine_id==895,"895 of 896: registered as #895");
+    check(state(1).state==KILN_PROGRAM_REFUSED,"an engine that answers true without counting it: refused");
+    check(state(2).state==KILN_PROGRAM_ACTIVE && state(2).engine_id==896,"896 of 896: registered as #896");
+    check(state(3).state==KILN_PROGRAM_REFUSED && engine_calls==3,"the 897th is refused before the game is called");
+    check(*reinterpret_cast<uint16_t*>(world)==896,"the engine table holds 896, no more");
+    engine_on=false;
+    for (Program* p : g_programs) delete p;
+    g_programs.clear();
+    std::fill(std::begin(g_by_slot),std::end(g_by_slot),nullptr);
     std::printf("world program boundaries: %s %d checks, %d failures\n",failures?"FAIL":"PASS",checks,failures);
     return failures?1:0;
 }

@@ -260,8 +260,12 @@ if (W->register_program(owner, &d, &g_prog) == KILN_OK)
 ```
 
 - **When**: `kiln_plugin_main` or `on_ready` only. kiln.world registers everything right after the game's
-  `RegisterAllPrograms` (before the world finalizes; ~79 free slots of 896; kiln.world holds 32 at most). Later calls
-  return `KILN_ERR_UNAVAILABLE`.
+  `RegisterAllPrograms` (before the world finalizes; ~79 free slots of 896; kiln.world holds 64 at most since 0.2.0-dev.29, 32 before: its own
+  quota, for every service and mod together). Every registration checks the world table's live count against its 896
+  first and refuses the program before calling the game when the table is full, and checks that the count rose after
+  the game's `RegisterProgram` returned (a descriptor the engine answers "true" for without registering it is refused).
+  Mods' declarations (`kiln.programs.json`, at most 32 per file) leave the last 8 of the 64 to Kiln's services. Later
+  calls return `KILN_ERR_UNAVAILABLE`.
 - **Names** are checked against the world's maps at that moment; one unknown component/event → the program is
   `KILN_PROGRAM_REFUSED` (logged: `program X refused: read: unknown component 'Y'`). A singleton that is not registered
   yet only warns; if it is still missing when the world starts, the engine skips the program (`KILN_PROGRAM_SKIPPED`).

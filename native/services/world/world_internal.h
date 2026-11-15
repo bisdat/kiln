@@ -177,6 +177,7 @@ KilnResult register_program(KilnOwner owner, const KilnProgramDesc* desc, KilnHa
 int32_t program_slot(KilnHandle h, int32_t kind, KilnStr name);
 KilnResult program_info(KilnHandle h, KilnProgramInfo* out);
 uint32_t programs_registered();
+uint32_t program_quota();  // kiln.world's own quota of programs (64 since 0.2.0-dev.29)
 uint32_t engine_program_count(uintptr_t world);
 KilnResult iter_begin(KilnProgramCtx* ctx, uint64_t* iter, uint32_t size);
 bool iter_next(KilnProgramCtx* ctx, uint64_t* iter, uint32_t size);
