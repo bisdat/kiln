@@ -513,9 +513,10 @@ world of their own (a lab start of their own): a cleared pin, or a call off the 
 `abilities.natives.ecs` off for the rest of that world (the serial condition), so the ECS bridge rows
 (`mods/tests/natives-gen-test`, `blocks-abilities-test`'s Run rows, FrostMark) run in another start, with the pin as
 the game sets it. The full player-free pass is two starts: natives-only with `systems.parallel`, `impact.unpin`,
-`impact.lockhold` and `world-stop-row` (abilities-test, natives-helper, and blocks-abilities-test loaded without its
-scenarios: the probe row's count of calls on the game's workers is the game's split of impact_simulation's slice, which
-depends on what the world holds; without it two starts put all 12 probe calls on the world thread), then the rest. With
+`impact.lockhold` and `world-stop-row` (abilities-test, natives-helper, and blocks-abilities-test running beside them:
+the probe row's count of calls on the game's workers is the game's split of impact_simulation's slice, which depends on
+how much Impact work the world holds; blocks-abilities-test's scenarios spawn characters, enemies and hits, and without
+them two starts put all 12 probe calls on the world thread; the row's line names the mods loaded), then the rest. With
 `kiln/data/abilities-test/world-stop-row` the last row holds a handler and writes
 `kiln/data/natives-helper/stop-request`: the shell running the lab then stops the server and reads the order of
 `Hold let go` and `the server world stops with no Kiln native call inside` in kiln.log.

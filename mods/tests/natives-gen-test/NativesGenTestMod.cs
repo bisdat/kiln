@@ -420,7 +420,8 @@ public sealed class NativesGenTestMod : Mod
         var threads = GenNatives.BridgeThreads.Distinct().ToList();
         Check(threads.Count > 0 && threads.All(t => t == _tickThread) && Capabilities.Get("abilities.natives.ecs").State == CapabilityState.Available,
             $"with the world's pin set (the game's default) every bridged call ran on the world's thread: {GenNatives.BridgeThreads.Count} call(s) on thread(s) " +
-            $"{string.Join(",", threads)} (the world's: {_tickThread}); abilities.natives.ecs {Capabilities.Get("abilities.natives.ecs").State}");
+            $"{string.Join(",", threads)} (the world's: {_tickThread}); abilities.natives.ecs {Capabilities.Get("abilities.natives.ecs").State}; " +
+            $"mods loaded: {string.Join(", ", Kiln.Mods.All.Where(m => m.IsLoaded).Select(m => m.Id))}");
     }
 
     private void Info(string what) => Log.Info($"natives-gen-test: INFO {what}");
