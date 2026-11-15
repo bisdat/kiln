@@ -105,7 +105,7 @@ export default function CatalogPage() {
           { value: "endorsements", label: "Most endorsed" }, { value: "updated", label: "Recently updated" }, { value: "new", label: "Newest" },
           { value: "downloads", label: "Most downloaded" }, { value: "name", label: "Name" },
         ]} />
-        <WellInput label="Search" compact value={typed} onChange={(e) => setTyped(e.target.value)} wellStyle={{ flex: "1 1 180px", marginLeft: "auto" }} />
+        <WellInput label="Search" compact value={typed} onChange={(e) => setTyped(e.target.value)} onClear={() => setTyped("")} wellStyle={{ flex: "1 1 180px", marginLeft: "auto" }} />
       </div>
 
       {list.isLoading ? <Skeleton lines={6} /> : list.error ? <EmptyState title="Nexus Mods did not answer" hint={errorText(list.error)} action={<Button onClick={() => list.refetch()}>Try again</Button>} />

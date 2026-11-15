@@ -155,7 +155,7 @@ test("a filter that hides selected rows lets go of them and says how many", asyn
   await kind(page, "Kiln");
   await box(page, "Big Stacks").click();
   await box(page, "New Items").click();
-  await page.locator(".k-hero").getByLabel("Filter").fill("stacks");
+  await page.locator(".k-hero").getByLabel("Filter", { exact: true }).fill("stacks");
   await expect.poll(() => checked(page)).toEqual(["Big Stacks"]);
   await expect(selbar(page)).toContainText("1 selected");
   await expect(selbar(page)).toContainText("1 not shown any more left the selection");
@@ -288,7 +288,7 @@ test("Escape and Ctrl+A in an open row menu, the filter or a dialog leave the se
   await page.keyboard.press("Escape");
   await expect(menu).toHaveCount(0);
   // the filter: Ctrl+A selects its text, Space types, Escape is the field's
-  const filter = page.locator(".k-hero").getByLabel("Filter");
+  const filter = page.locator(".k-hero").getByLabel("Filter", { exact: true });
   await filter.focus();
   await page.keyboard.press("Control+a");
   await page.keyboard.press("Space");

@@ -9,7 +9,8 @@
 #   Without it both stay out of the upload and of the SHA256SUMS that goes up: publishing them is the owner's decision.
 # --no-dev-channel: a stable release normally also becomes the dev channel's newest build; skip that for a hotfix
 #   release when a newer dev build is out.
-# 1. Checks the folder (SHA256SUMS, the updater signatures against the launcher's built-in key in tauri.conf.json).
+# 1. Checks the folder: built from a commit (README.txt says so; a test build of the working tree is refused before
+#    anything else), SHA256SUMS, the updater signatures against the launcher's built-in key in tauri.conf.json.
 # 2. frostdev.io: uploads the folder to <host>:/opt/frostdev-downloads/kiln/downloads/<version>/, then the manifests
 #    (updates/frostdev.io/<channel>/latest.json) to /opt/frostdev-downloads/kiln/updates/<channel>/, each through a
 #    temporary name, so a manifest never points at files that are not there yet. Then reads them back over https.
@@ -35,6 +36,10 @@ while (($#)); do
   esac
 done
 [[ -d $dir && -n $host ]] || { echo "usage: $0 RELEASE_DIR --host SSH_HOST [--repo OWNER/NAME] [--no-dev-channel] [--sdk-site] [--yes]" >&2; exit 2; }
+# a test build of a working tree (release.sh --worktree) never goes up: README.txt names the commit, as github-draft.sh
+# reads it, or nothing is done
+grep -Eq 'from commit [0-9a-f]{7,40}' "$dir/README.txt" 2>/dev/null ||
+  { echo "$dir was not built from a commit (a test build of a working tree?): never published" >&2; exit 1; }
 ask() { ((yes)) && return 0; read -r -p "$1 [y/N] " a; [[ $a == y || $a == Y ]]; }
 # what stays out of downloads/<version>/: sums_skip (a grep -E alternative of SHA256SUMS paths) and rsync_skip
 publish_filter() {

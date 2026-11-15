@@ -6,7 +6,7 @@ import { X } from "lucide-react";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Button, IconButton } from "./Button";
-import { TextInput } from "./Form";
+import { TextInput, escClearsFilter } from "./Form";
 
 export interface ModalProps {
   open: boolean;
@@ -61,7 +61,8 @@ export function Modal({ open, onClose, title, children, footer, width, locked, a
     const first = box.current?.querySelector<HTMLElement>("[data-autofocus]") ?? box.current?.querySelector<HTMLElement>(FOCUSABLE);
     first?.focus();
     const key = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !locked) { e.stopPropagation(); close.current(); }
+      // a filter box with text in the dialog empties itself first (ui/Form.tsx WellInput onClear)
+      if (e.key === "Escape" && !locked && !escClearsFilter(e)) { e.stopPropagation(); close.current(); }
       if (e.key === "Tab" && box.current) {
         const items = [...box.current.querySelectorAll<HTMLElement>(FOCUSABLE)];
         if (!items.length) return;
