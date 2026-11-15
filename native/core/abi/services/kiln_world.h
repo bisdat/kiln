@@ -122,7 +122,7 @@ enum {
     KILN_SLOT_EVENT_OUT = 8,   /* iter[slot] = event sender */
 };
 
-/* KilnProgramInfo.state */
+/* KilnWorldProgramInfo.state */
 enum {
     KILN_PROGRAM_PENDING = 0,  /* accepted; waits for the server world's program registration */
     KILN_PROGRAM_ACTIVE = 1,   /* registered into the server world (runs once the world ticks) */
@@ -131,14 +131,22 @@ enum {
     KILN_PROGRAM_SKIPPED = 4,  /* registered, but the engine skips it (a required singleton is missing) */
 };
 
-typedef struct KilnProgramInfo {
-    uint32_t size;        /* set to sizeof(KilnProgramInfo) before calling */
+/* A Kiln ECS program's state (program_info). Named KilnWorldProgramInfo since 0.2.0-dev.29: kiln_abilities.h had a
+ * struct of the same name (an Impact program, KilnImpactProgramInfo), so no plugin could include both headers. The old
+ * name stays as an alias of the struct of the header included first (KILN_PROGRAM_INFO_ALIAS): write the new names
+ * in code that includes both. Layout unchanged. */
+typedef struct KilnWorldProgramInfo {
+    uint32_t size;        /* set to sizeof(KilnWorldProgramInfo) before calling */
     uint32_t state;       /* KILN_PROGRAM_* state */
     uint32_t engine_id;   /* the program's id in the world (1-based; 0 before registration) */
     uint32_t iter_size;   /* bytes of the iterator (kiln.world passes one at least this big to `each`) */
     uint64_t updates;     /* update calls so far (slices; one per step for SYSTEM programs) */
     uint64_t entities;    /* entities iterated so far (each-mode only) */
-} KilnProgramInfo;
+} KilnWorldProgramInfo;
+#ifndef KILN_PROGRAM_INFO_ALIAS
+#define KILN_PROGRAM_INFO_ALIAS 1 /* 1: KilnProgramInfo is kiln_world.h's, 2: kiln_abilities.h's */
+typedef KilnWorldProgramInfo KilnProgramInfo;
+#endif
 
 /* ======================================================================================= entities ============== */
 
@@ -560,7 +568,7 @@ typedef struct KilnWorldApi {
     /* Qword index into the iterator of `name` in list `kind` (KILN_SLOT_*), or -1 when it is not declared there. The
      * layout is computed from the descriptor at registration and is the same for every update. Any thread. */
     int32_t(KILN_CALL* program_slot)(KilnHandle program, int32_t kind, KilnStr name);
-    KilnResult(KILN_CALL* program_info)(KilnHandle program, KilnProgramInfo* out);
+    KilnResult(KILN_CALL* program_info)(KilnHandle program, KilnWorldProgramInfo* out);
 
     /* ---- inside a program update (ctx = the argument your update got) ---- */
     /* Raw mode only: fills `iter` (size bytes; see program_info.iter_size). KILN_ERR_BUFFER_TOO_SMALL if size is less. */

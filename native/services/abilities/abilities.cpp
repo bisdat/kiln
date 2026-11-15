@@ -35,16 +35,13 @@
 #include "services/kiln_assets.h"
 #include "services/kiln_profile.h"
 #include "services/kiln_spawn.h"
-// kiln_world.h and kiln_abilities.h both name a struct KilnProgramInfo: kiln.world's is another name in this file
-#define KilnProgramInfo KilnWorldProgramInfo
 #include "services/kiln_world.h"
-#undef KilnProgramInfo
 #include "verify.h"
 
 using namespace kab;
 
 static_assert(sizeof(KilnAbilityEvent) == 640 && sizeof(KilnImpactVar) == 88 && sizeof(KilnConfigOverride) == 80 &&
-              sizeof(KilnNativeInfo) == 88 && sizeof(KilnProgramInfo) == 44 && sizeof(KilnNativeCall) == 104 &&
+              sizeof(KilnNativeInfo) == 88 && sizeof(KilnImpactProgramInfo) == 44 && sizeof(KilnNativeCall) == 104 &&
               sizeof(KilnAbilitiesStatus) == 160);
 // since 0.2.0-dev.29: the table's tail (append only) and the counters
 static_assert(offsetof(KilnAbilitiesApi, sequence_play) == 232 && offsetof(KilnAbilitiesApi, native_register_sync) == 240 &&
@@ -2066,8 +2063,8 @@ uint32_t KILN_CALL t_program_count() {
     return n;
 }
 
-KilnResult KILN_CALL t_program_info(uint32_t id, KilnProgramInfo* out) {
-    if (!out || out->size < sizeof(KilnProgramInfo)) return KILN_ERR_INVALID_ARGUMENT;
+KilnResult KILN_CALL t_program_info(uint32_t id, KilnImpactProgramInfo* out) {
+    if (!out || out->size < sizeof(KilnImpactProgramInfo)) return KILN_ERR_INVALID_ARGUMENT;
     const uint8_t* prog = get_program(g_prog_registry.load(), id);
     ProgramHeader h{};
     if (!prog || !read_bytes(prog, &h, sizeof h)) return KILN_ERR_NOT_FOUND;

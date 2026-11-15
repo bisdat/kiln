@@ -528,10 +528,10 @@ int32_t program_slot(KilnHandle h, int32_t kind, KilnStr name) {
     return -1;
 }
 
-KilnResult program_info(KilnHandle h, KilnProgramInfo* out) {
+KilnResult program_info(KilnHandle h, KilnWorldProgramInfo* out) {
     Program* p = by_handle(h);
     if (!p) return KILN_ERR_NOT_FOUND;
-    if (!out || out->size < sizeof(KilnProgramInfo)) return KILN_ERR_INVALID_ARGUMENT;
+    if (!out || out->size < sizeof(KilnWorldProgramInfo)) return KILN_ERR_INVALID_ARGUMENT;
     out->state = static_cast<uint32_t>(p->state.load());
     out->engine_id = p->engine_id.load();
     out->iter_size = p->iter_size;
