@@ -132,6 +132,10 @@ bool resolve() {
     L.tp_add_size = cst("world/record.teleport_size");
     L.tp_remove_size = cst("world/record.remove_size");
     L.actor_state = cst("world/actor.state");
+    L.slice_entry = cst("world/slice.entry");
+    L.slice_layout = cst("world/slice.layout");
+    L.slice_first = cst("world/slice.first");
+    L.slice_end = cst("world/slice.end");
 
     // The descriptor layout kiln.world builds must be the one RegisterProgram reads.
     if (F.programs && (cst("world/desc.flags") != offsetof(EngineDesc, flags) ||

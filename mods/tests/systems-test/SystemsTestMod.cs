@@ -373,7 +373,10 @@ public sealed class SystemsTestMod : Mod
                     same &= values.Length > 0 && values[0] == fuel.dataStorage[0];
                     _typedSeen[v.Entity.Value] = (Bytes(in typed), same);
                 });
-                // WhenArchetype on the real entity map: every fuel_setup slice has Fuel (a write list), none lacks it
+                // WhenArchetype on the game's slices: every fuel_setup slice has Fuel (a write list), none lacks it. The first
+                // read comes from the entity map; it puts kiln.world's slice-record link on the program runner, and the later
+                // ones read the engine's slice record (kiln.log: "WhenArchetype reads each slice's archetype from the
+                // engine's slice record", and the counts at the world's stop)
                 _all = Systems.Wrap("fuel_setup").Wrap!.Before((ref Slice s) => Interlocked.Increment(ref _allSlices));
                 _withFuel = Systems.Wrap("fuel_setup").Wrap!.WhenArchetype(["Fuel"]).Before((ref Slice s) => Interlocked.Increment(ref _withSlices));
                 _noFuel = Systems.Wrap("fuel_setup").Wrap!.WhenArchetype([], ["Fuel"]).Before((ref Slice s) => Interlocked.Increment(ref _withoutSlices));
@@ -405,7 +408,7 @@ public sealed class SystemsTestMod : Mod
                     checkedN > 0 && bad == 0 && _typed!.Stats.Faults == 0,
                     $"{checkedN} entities with a transform, {bad} differ ({_typedBad ?? "none"})");
                 long all = Interlocked.Read(ref _allSlices), with = Interlocked.Read(ref _withSlices), without = Interlocked.Read(ref _withoutSlices);
-                Check("WhenArchetype on the game's entity map: has Fuel takes every fuel_setup slice, lacks Fuel none",
+                Check("WhenArchetype on the game's slices: has Fuel takes every fuel_setup slice, lacks Fuel none",
                     all > 0 && with == all && without == 0 && _archetypeOff is null,
                     $"{all} slices, {with} with Fuel, {without} without; {_archetypeOff ?? "no stage off"}");
                 foreach (var x in new[] { _all, _withFuel, _noFuel }) x?.Dispose();

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Kiln.Gameplay in the capability registry (Kiln.Capabilities; docs/kiln/services/caps.md). Reported at the service's
-// start (the first service tick, GameplayStartup). The native session row gameplay.build_hooks changes at first use;
+// start (the first service tick, GameplayStartup). The native hook-group session rows change at first use;
 // the sigdb row gameplay.build continues to describe resolved symbols/layouts.
 namespace Kiln;
 
@@ -41,6 +41,7 @@ public static unsafe partial class Gameplay
         {
             ServiceCaps.LowerFeatures(Caps.Service, Caps.Features);
         }
+        if (GameplayNative.RequestHooks(t) != null) return; // Native owns the live group rows and legacy aliases.
         ServiceCaps.Static(Caps.EntityEvents, EntityEventsAvailable, CapabilityReason.Faulted,
             "the entity hooks are off on this build (see kiln.log), or this kiln.gameplay has no entity events", Caps.Service, "gameplay.entities");
         // the entry point alone is not enough: native refuses every replacement while the random spawners' hook is off

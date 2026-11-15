@@ -1,3 +1,4 @@
+import { StoppedStartNotice } from "../shell/StoppedStartNotice";
 // / Play: in front of the stage. The game's name, one live sentence (how many mods are on, over every kind, and only the
 // exceptions a player must know), "Just once" (vanilla, without mods), the list of every mod with a switch
 // (pages/mods/MainList.tsx), the boot stages while the game starts, four facts, and the game folder. The mouth
@@ -171,6 +172,7 @@ function PlayFor({ game, ctl }: { game: GameInstall; ctl: PlayControl }) {
             <Link className="k-link k-hero-profile" to="/settings#profiles">No profile loaded</Link>
           )}
         </div>
+        <StoppedStartNotice ctl={ctl} />
         <Banners game={game} ctl={ctl} pending={pending.data ?? null} onOffer={() => setOfferOpen(true)} boot={fresh ? boot : null} />
         <h1 className="k-hero-name"><span className="k-title static">Enshrouded</span></h1>
         {ctl.timeline ? (

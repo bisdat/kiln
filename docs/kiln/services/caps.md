@@ -88,6 +88,14 @@ Opening the remaining 20 is an owner decision, not a real-game confirmation; the
 - Every sigdb feature, source `sigdb`. An unavailable one says `symbol-missing` with the symbol, `policy` in safe idle,
   or `faulted` for the `tick*` features and `world.lifecycle` when their hook is not installed or faulted.
 - Every in-core service and every published service, `kiln.<service>`, with `v<n>` as text.
+- `world.stop_drain.server`, `world.stop_drain.client`, `world.stop_drain.prediction` (since 0.2.0-dev.29): what the core
+  guarantees about a world kind's jobs when it dispatches that world's `KILN_WORLD_STOPPING`. Available: drained by the
+  engine (the core runs the game's WaitWorldJobs on the server and the client world before their STOPPING; the
+  prediction world stops with the client world, after that wait). Unavailable: `symbol-missing` "bounded wait only"
+  (WaitWorldJobs did not resolve: a subscriber's own bounded wait is all there is), `faulted` or `symbol-missing` "no
+  world stop is seen" (the tick or world-destroy hook is not there), `wrong-side` for the client kinds in a dedicated
+  server, `policy` in safe idle. They follow a hook that faults later, as the `tick*` rows do. kiln.world names the row
+  in its wrap capability texts and at each stop.
 - Every service DLL that did not load, as `kiln.<stem>`, with `service-missing` or `faulted`.
 - Kiln's managed layer adds `identity.entities` and `identity.players` ([modding/contract.md](../modding/contract.md)):
   pending until a service registers a source, then available. The sources (Kiln.Players, Kiln.Items, Kiln.Spawn)
@@ -332,9 +340,10 @@ names the guided check a real game has not passed yet for a row that is on.
 | `decisions.native_guards` | service row | kiln.decisions at its start; lowered with `events.death` when the death hook could not go in | - (follows `events.death`'s hook, which goes in with the first guard) | `set_death_guard`: a native plugin can keep an entity's death from running (19d pets) |
 | `events.build.pieces` | service row | kiln.decisions at its start | - | always `unavailable` in 0.2.0-dev.29: player build pieces are not cancelable yet (07 S0/S9) |
 | `events.build.terraform` | service row | kiln.decisions at its start | - | always `unavailable`: managed terraform cancel is not part of V1 |
-| `events.component_net` | sigdb feature, lowered | core (sigdb); kiln.decisions lowers it (`service-missing`) | - | always `unavailable` in 0.2.0-dev.29: named component watches (kiln.component_changes, 07 S7) are not built yet |
+| `events.component_net` | sigdb feature (both executables: `GetComponent`, `WaitWorldJobs`), static | core (sigdb); kiln-decisions.dll reports it at its start: `service-missing` without kiln.decisions, kiln.window_clock or kiln.world, `symbol-missing` when the feature did not resolve on this executable, `faulted` when a window call of kiln.component_changes faulted (for the process) | `07-watch.hosted` | `ComponentChanges.Watch`, `Resume` and the three events (`ComponentValueChangedEvent`, `AttributeValueChangedEvent`, `ComponentWatchStateChangedEvent`): named component watches of the server world ([decisions.md](decisions.md#named-component-watches-componentchanges-since-020-dev29)). Its text says what of it is off on this build (scope Players without kiln.players, typed values without kiln.combat v2 or kiln.items' fuel) and, on a game client, that it works only while the client hosts the world (a joined client has no server world: `Watch` answers `Ok = false`). Lab-proven on a dedicated server without a player; never run in a game client |
+| `kiln.component_changes` | service | core; kiln-decisions.dll lowers it with `events.component_net` | `07-watch.hosted` | the component watches' service is here (kiln_component_changes.h) |
 | `items.equip_sets` | sigdb feature (`server.d/dev29-10-equipment-sets.json`, used by the client unchanged: the game's equip functions and the commit's own rollback guards, captured from `items/InventoryCommit`) | core (sigdb); Kiln.Items lowers it at its start when its table is older than v6 (`service-older`), `items.equip` or `items.instances` is off (their reason), or kiln.items says sets cannot run (kiln.decisions or kiln.window_clock missing, this build's component layouts differ from what the snapshot reads, `faulted`); off until the server restarts after an invariant failure or a fault inside a set's transaction (`faulted`), and for the session like `items.equip` on a game client with no server world (`session`) | `10-items.equip-set` (and `10-items.equip-set.observer` with a second player) | `Items.CaptureSet`, `PlanSet`, `EquipSet`: a player's 20 equipment slots changed in one transaction with one decision (on since 0.2.0-dev.29, not yet confirmed in a real game) |
-| `events.component_writes.exact` | service row | kiln.decisions at its start | - | reserved: always `unavailable`, no feed of every component store is promised |
+| `events.component_writes.exact` | service row | kiln.decisions at its start | - | reserved: always `unavailable`, no feed of every component store is promised (the watches report net changes, and only for watched pairs) |
 | `events.thread_report`, `events.build`, `events.observe_marks` | sigdb features, static | core (sigdb) | - | dependency rows of chapter 07's signatures (the players mask, the building primitives, the mark functions); they claim no capability of their own |
 | `gamedata.buff_budget` | service row, static | kiln.gamedata with its table (kiln-content.dll); Kiln.Content says `service-missing` / `service-older` without it | `17-buffs-client` | `Content.Buffs.GetBudget()` answers ([gamedata.md](gamedata.md)). Not off for a world that is not there: the budget answers `NotReady` then |
 | `gamedata.buff_registration` | service row, static | kiln.gamedata with its table; lowered (`faulted`) when no room at all could be reserved or the world's buff collection is not readable | `17-buffs-client` | `Content.Buffs.Define(clone, options)` and `GetRegistration` answer; guided check `17-buffs-client` for what a player sees |
@@ -346,3 +355,23 @@ names the guided check a real game has not passed yet for a row that is on.
 | `gamedata.expanded_buff_room` | service row, session | kiln.gamedata at the first world | `17-buffs-client` | pending until the first world loads; available when the room of 4,096 buff clones was reserved next to the game's collection; unavailable (`faulted`) with the text "… the room is 1024" on the fallback |
 | `vfx.budget` | service row, static | kiln.vfx with its table (kiln-vfx.dll, game client), before the mods load; lowered (`faulted`) when the guard turns off; Kiln.Vfx says `service-missing` (needs kiln.vfx: a dedicated server has no VFX) / `service-older` without the table | `17-vfx-budget.before` / `17-vfx-budget.after` | `Vfx.ResourceBudget` answers ([vfx.md](vfx.md#the-resource-budget-since-020-dev29)): available when this game build's VFX count limit can be read (`symbol-missing` naming the `caps/vfx.*` constant that did not resolve, or the layout that does not check out). Not off before a world: the budget answers `NotReady` until kiln.vfx read the game's table |
 | `blocks.vfx_registration` | service row, static | kiln.vfx with its table; lowered (`faulted`) when Kiln's VFX are not built this session (no kiln.assets, the particle layouts changed, the build failed) or the guard turns off; Kiln.Vfx and Kiln.Blocks say `service-missing` / `service-older` without the table | `17-vfx-budget.before` / `17-vfx-budget.after` | `Blocks.Define(name, VfxBlock, options)` and `Blocks.GetVfxRegistration` answer: as `vfx.budget`, and a resource's bytes in the game's table can be compared with what Kiln served (`symbol-missing` naming vfx.play's constants or `caps/vfx.table_capacity_offset` otherwise) |
+
+### Gameplay hook groups
+
+The sigdb rows `gameplay.craft`, `gameplay.terraform`, `gameplay.spawn`, `gameplay.entities` and `gameplay.build`
+continue to describe resolved symbols/layouts. Native-owned session rows `gameplay.craft_hooks`,
+`gameplay.terraform_hooks`, `gameplay.spawn_hooks`, `gameplay.entities_hooks` and `gameplay.build_hooks` describe
+installation: pending with "resolved, not installed: no mod asked", pending with a safe-point wait, available when
+installed, or unavailable with the refusal reason. Session rows must not be manifest feature requirements.
+The existing static API aliases `gameplay.entity_events` and `gameplay.spawn_replace` remain available while their
+group resolves and lower on permanent refusal; they do not become pending and block admission of old manifests.
+The four new groups install on pre-world demand or a checked safe Pre, with at most two target attempts per tick
+and three attempts on thread-check refusal. The build-piece group retains its no-world/last-stop policy.
+Native `request_hooks(owner, mask)` is appended after `request_build`; the latter remains unchanged. Managed
+reference preflight requests all groups, conservatively including crafting-only and shipped-helper references.
+See [gameplay](gameplay.md#craft-terraform-natural-spawn-and-entity-hook-demand) for consumers and pending-call behavior.
+
+Pre-world reference demand includes the indirect consumers: `Kiln.Creatures` -> spawn hooks; `Kiln.Rules` -> build
+and terraform hooks; `Kiln.Quests` -> craft, build and terraform hooks. Direct `Kiln.Gameplay` references request
+all groups. `Kiln.Blocks` and admitted `blocks/` data packs request build/craft/terraform/spawn. The host requests only additional group bits as helper assemblies load; its 136-byte table fallback
+continues calling request_build when needed, while the older service owns the other startup hooks.

@@ -258,6 +258,11 @@ typedef struct KilnGameplayRecipe {
     KilnGameplayItem outputs[KILN_GAMEPLAY_MAX_OUTPUTS];
 } KilnGameplayRecipe;
 
+enum { KILN_GAMEPLAY_HOOK_BUILD=1u, KILN_GAMEPLAY_HOOK_CRAFT=2u, KILN_GAMEPLAY_HOOK_TERRAFORM=4u,
+       KILN_GAMEPLAY_HOOK_SPAWN=8u, KILN_GAMEPLAY_HOOK_ENTITIES=16u, KILN_GAMEPLAY_HOOK_ALL=31u };
+/* A group state: 0 resolved/unused, 1 installed, 2 waiting for safe Pre, 3 refused. */
+typedef struct KilnGameplayHookStatus { uint32_t state, installed_targets; char reason[512]; } KilnGameplayHookStatus;
+
 typedef struct KilnGameplayStatus {
     uint32_t size;          /* set to sizeof(KilnGameplayStatus) before calling */
     uint8_t intercept;      /* 1: pending events are read in Pre */
@@ -289,6 +294,7 @@ typedef struct KilnGameplayStatus {
      * State 0: idle/resolved, 1: installed, 2: waiting for stop, 3: refused (reason includes partial mask). */
     uint32_t build_hook_state, build_hook_mask;
     char build_hook_reason[512];
+    KilnGameplayHookStatus hook_groups[4]; /* craft, terraform, natural spawn, entities (appended) */
 } KilnGameplayStatus;
 
 /* component_change ops */
@@ -356,7 +362,18 @@ typedef struct KilnGameplayApi {
     /* First-use build interest, AnyThread. OK includes waiting for world stop (see gameplay.build_hooks).
      * UNAVAILABLE: refused for this process. Appended in dev.29: check header.size. */
     KilnResult(KILN_CALL* request_build)(KilnOwner owner);
+    /* AnyThread. Records demand; live worlds install at a checked safe Pre. OK includes pending; read group row.
+     * Bit mask of KILN_GAMEPLAY_HOOK_*. request_build retains its original semantics. */
+    KilnResult(KILN_CALL* request_hooks)(KilnOwner owner, uint32_t groups);
 } KilnGameplayApi;
+#ifdef __cplusplus
+static_assert(offsetof(KilnGameplayApi, request_build)==128);
+static_assert(offsetof(KilnGameplayApi, request_hooks)==136);
+static_assert(sizeof(KilnGameplayApi)==144);
+static_assert(sizeof(KilnGameplayHookStatus)==520);
+static_assert(offsetof(KilnGameplayStatus, hook_groups)==648);
+static_assert(sizeof(KilnGameplayStatus)==2728);
+#endif
 
 #ifdef __cplusplus
 }

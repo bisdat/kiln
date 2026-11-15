@@ -655,10 +655,11 @@ internal sealed partial class ModManager
     {
         why = "";
         if (!manifest.HasCode) return true;  // a data-only boot mod: its files only
-        bool gameplayRequested = false;
+        uint gameplayRequested = 0;
         var alc = new ModLoadContext(manifest.Id, directory, loaded: assembly => {
-            if (!gameplayRequested && GameplayBuildDemand.ReferencesGameplay(assembly)) {
-                gameplayRequested = true; GameplayBuildDemand.Request(_host, owner);
+            var demand=GameplayBuildDemand.GroupsFor(assembly) & ~gameplayRequested;
+            if (demand!=0) {
+                gameplayRequested |= demand; GameplayBuildDemand.Request(_host, owner,demand);
             }
         });
         try

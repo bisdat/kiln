@@ -295,6 +295,9 @@ start or inside a boot generation's prepare (a game client whose resources were 
 5. the process ends with exit code 0x4B02 (`KILN_KNOW_ROSTER_EXIT_CODE`, 19202; a Linux parent under Wine sees 2). If
    writing the files or the message blocks, kiln.boot's 65-second bound ends the process anyway.
 
+The launcher's Play page and Deck Home say ‘Kiln stopped the start’, name the mods, show the advice, and offer Review
+these mods to open the filtered mods list.
+
 Seen on the lab's dedicated server, with and without a boot generation (the 129 and 65-refused boots and the two
 boot-mod boots): steps 1 to 3 and 5, the save byte for byte unchanged. Not seen on a game client yet: the message box,
 a player who hosts, a player who joins (guided check `17-roster.refused-start`). The stop is a start-time act only:

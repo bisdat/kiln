@@ -32,6 +32,11 @@ internal static unsafe class WorldRows
         if (ProgramBudgetNative.T == null)
             ServiceCaps.Static(ProgramBudgetNative.Capability, false, WorldNative.T == null ? CapabilityReason.ServiceMissing : CapabilityReason.ServiceOlder,
                 WorldNative.T == null ? "kiln.world is not loaded" : "this kiln.world has no kiln.world.budget (update Kiln)", Service);
+        // events.component_net (since 0.2.0-dev.29): kiln-decisions.dll reports it with kiln.component_changes; without
+        // that table (the DLL is not installed, an older one, no game) nobody would, and ComponentChanges.Watch names it
+        if (ComponentChanges.Table() == null)
+            ServiceCaps.Static(ComponentChanges.Capability, false, CapabilityReason.ServiceMissing,
+                "kiln.component_changes is not loaded (kiln-decisions.dll of 0.2.0-dev.29 or later)", ComponentChangesNative.Service);
         // world.tracked_writes: WorldCapabilities reports it once and follows the session; under a new registry binding
         // (a test kit's next harness) it reports again from the table that is there now
         WorldCapabilities.Reset();
