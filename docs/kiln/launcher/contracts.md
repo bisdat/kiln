@@ -835,6 +835,27 @@ All written atomically; a file whose `pid` is not a live process is stale.
   file and kiln.log), `pid`, `utc`. The next start moves it to `roster-refused.last.json`: a launcher that shows why the
   last start ended reads that one after a new start, and `roster-refused.json` right after the exit. A launcher shows
   `why` and the `mods` after the game exits with 19202, and offers to disable those mods.
+- Launcher stopped-start notice (dev.29): `kiln_manage::stopped_start::read` reads `roster-refused.json` first,
+  then `boot.json` (`boot.stop`, or the older required-boot-mod exit 19201). Each read is capped at 256 KiB;
+  missing, invalid and unknown-format evidence produces no notice (invalid files are logged). It never changes
+  Kiln's files and does not read `.last.json` as a new stop. The command `launch_state.stoppedStart` returns the
+  kind, reason, mod ids and available Library display names, advice, UTC, exit code and runtime pid.
+  The watcher and command retain the process start observed after this launcher's Steam request, inspect the
+  evidence while it runs (including progress `failed`) and after exit. The embedded time must lie between that
+  process start (rounded down to its timestamp's whole second) and the observation of exit; the file mtime must
+  also be at least the process start. Windows requires the process pid; Proton uses the process time because
+  its host pid differs from the Windows pid, then pins the runtime pid when a stop is accepted. No observed
+  process identity means no notice: an old stop is never inferred from exit code alone.
+  For a process that stops between polls, format-1 failed `progress.json` may supply the runtime pid and start
+  time instead, but only if both its embedded start time and mtime are after this launcher's request. The stop
+  must then match that runtime pid and time window.
+  Desktop Play and Deck Home keep the notice until Dismiss or another start. The launcher stores the notice
+  and dismissed `(game, pid, UTC, exitCode)` in its own browser storage, so reload/restart cannot resurrect a
+  dismissed stop. Review these mods opens the existing mod list's exact-id filter. Ordinary quits produce none.
+  `kilnctl run` uses the same bounded reader within its foreground-run time interval and prints the reason and
+  advice before returning the original exit status. Detached `start` includes those lines in its existing failure
+  log tail. `status` labels the last stopped start from kilnctl's own `<run log stem>.stopped-start.json` receipt;
+  `run` clears this receipt before another start. This receipt is outside Kiln's state files.
 - `mods.json` (Kiln.Host, after every resolve/load/unload/reload; `generation` grows): `pid`, `written`, `generation`,
   `side`, `api`, `profile{id, generation, mode}`, `mods[]` (`{id, version, name, folder, source: profile|dropin, state:
   pending|loaded|disabled|failed|skipped|unloaded, reason, loadIndex, side, clients, faults}`).
