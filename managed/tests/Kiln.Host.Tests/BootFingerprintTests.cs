@@ -90,6 +90,48 @@ public sealed class BootFingerprintTests : ModsFixture
 
     // ------------------------------------------------------------------------------------------------ the hash
 
+    [Theory]
+    [InlineData("9007199254740992", "9007199254740992.0", true)]
+    [InlineData("9007199254740992.0", "9007199254740993.0", false)]
+    [InlineData("18446744073709551614.0", "18446744073709551615.0", false)]
+    [InlineData("1e400", "10e399", true)]
+    [InlineData("1e-400", "2e-400", false)]
+    [InlineData("-0", "0.0", true)]
+    public void Numeric_canonicalization_is_exact(string a, string b, bool equal)
+    {
+        var dir = Mod("numbers");
+        string Hash(string n) => BootFingerprint.Of("m", dir, Envelope(("patches", "m", "p", "{\"set\":{\"value\":" + n + "}}")));
+        Assert.Equal(equal, Hash(a) == Hash(b));
+    }
+
+    [Fact]
+    public void Line_breaks_inside_committed_text_remain_significant()
+    {
+        var dir = Mod("text");
+        string Hash(string text) => BootFingerprint.Of("m", dir, Envelope(("content", "m", "p",
+            new JsonObject { ["description"] = text }.ToJsonString())));
+        Assert.NotEqual(Hash("one\r\ntwo"), Hash("one\ntwo"));
+    }
+
+    [Fact]
+    public void Duplicate_JSON_keys_count_the_last_value_as_the_native_reader_does()
+    {
+        var duplicate = Mod("duplicate", ("blocks/p.json", Patch.Replace("\"min\": 16", "\"min\": 12, \"min\": 16")));
+        var plain = Mod("plain", ("blocks/p.json", Patch));
+        Assert.Single(BootFingerprint.FilePatches(duplicate));
+        Assert.Equal(BootFingerprint.Of("m", plain, new JsonObject()), BootFingerprint.Of("m", duplicate, new JsonObject()));
+    }
+
+    [Fact]
+    public void Patches_keep_native_file_application_order()
+    {
+        const string add = """{"resourcePatches":{"z":{"resource":"82706b40-61b1-4b8f-8b23-dcec6971bda1","type":"keen::BalancingTable","set":{"experienceNeedPerLevel[0]":{"add":2}}}}}""";
+        const string mul = """{"resourcePatches":{"a":{"resource":"82706b40-61b1-4b8f-8b23-dcec6971bda1","type":"keen::BalancingTable","set":{"experienceNeedPerLevel[0]":{"mul":3}}}}}""";
+        var first = Mod("add-first", ("blocks/1.json", add), ("blocks/2.json", mul));
+        var second = Mod("mul-first", ("blocks/1.json", mul), ("blocks/2.json", add));
+        Assert.NotEqual(BootFingerprint.Of("m", first, new JsonObject()), BootFingerprint.Of("m", second, new JsonObject()));
+    }
+
     [Fact]
     public void The_same_patches_give_the_same_hash_whatever_the_order_spacing_line_endings_and_number_spelling()
     {
@@ -168,10 +210,33 @@ public sealed class BootFingerprintTests : ModsFixture
     [InlineData(@"c:\games\enshrouded\KILN\mods\frost/icons/token.png", @"\\?\C:\Games\Enshrouded\kiln\mods\frost", "$mod/icons/token.png")]
     [InlineData(@"Z:\home\player\.steam\Enshrouded\kiln\mods\frost\a.png", @"Z:\home\player\.steam\Enshrouded\kiln\mods\frost", "$mod/a.png")]
     [InlineData(@"C:\Games\Enshrouded\kiln\mods\frosty\a.png", @"C:\Games\Enshrouded\kiln\mods\frost", @"C:\Games\Enshrouded\kiln\mods\frosty\a.png")]
-    [InlineData("line one\r\nline two", @"C:\x", "line one\nline two")]
+    [InlineData("line one\r\nline two", @"C:\x", "line one\r\nline two")]
     [InlineData("item:Torch", @"C:\x", "item:Torch")]
     public void Windows_paths_and_line_endings_are_counted_the_same_on_every_machine(string value, string modFolder, string counted) =>
         Assert.Equal(counted, BootFingerprint.Text(value, BootFingerprint.NormalizeRoot(modFolder)));
+
+    [Theory]
+    [InlineData(@"\\?\UNC\server\library\frost\icon.png", @"\\server\library\frost")]
+    [InlineData(@"\\server\library\frost\icon.png", @"\\?\UNC\server\library\frost")]
+    public void Extended_UNC_paths_match_the_mod_root(string value, string root) =>
+        Assert.Equal("$mod/icon.png", BootFingerprint.Text(value, BootFingerprint.NormalizeRoot(root)));
+
+    [Fact]
+    public void Culture_and_array_order_have_their_expected_effects()
+    {
+        var dir = Mod("culture");
+        var original = System.Globalization.CultureInfo.CurrentCulture;
+        try
+        {
+            string Hash(string values) => BootFingerprint.Of("m", dir, Envelope(("assets", "m", "I", values)));
+            System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.GetCultureInfo("en-US");
+            var first = Hash("[1.25,1500,\"I\",\"ı\"]");
+            System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.GetCultureInfo("tr-TR");
+            Assert.Equal(first, Hash("[1.25,1.5e3,\"I\",\"ı\"]"));
+            Assert.NotEqual(first, Hash("[1500,1.25,\"I\",\"ı\"]"));
+        }
+        finally { System.Globalization.CultureInfo.CurrentCulture = original; }
+    }
 
     [Theory]
     [InlineData("1500", "1500")]

@@ -95,9 +95,10 @@ and the server compares.
 - **The fingerprint** of a boot mod with side `both`: SHA-256 over every document its boot generation committed for it
   (what its `OnBoot` staged, as lowered) and the `resourcePatches` of its `blocks/*.json`, made once when the generation
   is published. kiln.log: `boot: more-flame-altars: boot content 3f9a0c4be1d27756 (the join compares it with the other
-  side's)`. It counts values, so these do not change it: the order of keys and files, spacing, line endings, how a
+  side's)`. It counts values, so these do not change it: object key order, directory enumeration order, spacing and line endings between JSON tokens, how a
   number is written (`1500`, `1500.0`), the mod's folder inside a path (an icon). Not in it: the mod's other files (its
-  version stands for them) and the roles it ran for. A mod that is not a boot mod, one with side `client` or `server`,
+  version stands for them) and the roles it ran for. String values retain their line breaks. Patches retain native application order
+  (files by name, then patch keys within each file): reordering writes to the same field can change the result. A mod that is not a boot mod, one with side `client` or `server`,
   and a process without a boot generation have none.
 - **On the wire:** the handshake property `kiln.boot` in HELLO and WELCOME, `<id>=<first 16 hex digits>` per mod, or
   `<id>=out` for a boot mod left out of this process's generation (its `OnBoot` failed, a dependency was out, a collector

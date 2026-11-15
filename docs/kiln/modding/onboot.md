@@ -109,7 +109,7 @@ the running mod see the same values. Writes, `Reload`, a `Changed` handler and `
 nothing syncs it later: a server and a player with other settings of your mod have other game data. So the join
 compares it. For each boot mod with side `both`, both sides fingerprint what their generation committed (the staged
 definitions as lowered, and the mod's resource patches, also those of its `blocks/*.json`), and the server treats a
-difference like a version difference of the mod: refused under `modSync: refuse`, a warning otherwise, with a message
+difference like a version difference of the mod: refused under `modSync: refuse`, a warning under `warn` or the default, no comparison under `off`, with a message
 that tells the player to use the server's settings and restart ([../network.md](../network.md#boot-content-at-the-join)).
 Read in `OnBoot` only settings a server and its players share (balance values the server sets for everyone), and say on
 your mod's page that players take the server's. A setting that may differ per player belongs in `OnLoad`. Stage the same

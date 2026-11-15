@@ -128,6 +128,21 @@ public sealed class BootGateTests : IDisposable
     }
 
     [Fact]
+    public void Without_boot_mods_recorded_frames_remain_byte_for_byte_identical()
+    {
+        _serverBoot = new(StringComparer.Ordinal);
+        var hello = Wire.DecodeHello(Hex(Dev28Hello));
+        var welcome = Wire.DecodeWelcome(Hex(Dev28Welcome));
+        foreach (var (key, value) in BootGate.Properties())
+        {
+            ((Dictionary<string, string>)hello.Properties)[key] = value;
+            ((Dictionary<string, string>)welcome.Properties)[key] = value;
+        }
+        Assert.Equal(Hex(Dev28Hello), Wire.EncodeHello(hello));
+        Assert.Equal(Hex(Dev28Welcome), Wire.EncodeWelcome(welcome));
+    }
+
+    [Fact]
     public void Kiln_Hosts_published_fingerprints_reach_the_handshake_through_the_seam()
     {
         BootGate.TestSource = null;  // the game's path: BootGate finds Kiln.Host's BootFingerprint.Current by reflection

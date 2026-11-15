@@ -8,10 +8,11 @@
 // staged, as Kiln.Blocks lowered it), and the "resourcePatches" of its blocks/*.json, read as kiln.content's prepare reads them
 // (gamedata_bootpatch.cpp file_docs; a key the file and OnBoot both have stays the file's). What it leaves out, because it differs per
 // machine or per role and changes no committed data: the envelope's owner entry (roles, the inputs hash over the whole folder, the
-// requires list), object key order, file-system order (entries are sorted by collector and key; files by name), number spelling (1500,
-// 1500.0, 1.5e3), CRLF in strings, and the mod's own folder inside a string (an item icon's full path counts as "$mod/<path>"). Other
+// requires list), object key order, file-system order (entries are sorted by collector and key, except patches keep application order; files by name), number spelling (1500,
+// 1500.0, 1.5e3), and the mod's own folder inside a string (an item icon's full path counts as "$mod/<path>"). Other
 // files of the mod (its assets, VFX, quests) are not in it: the mod's version stands for them.
 using System.Globalization;
+using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -109,12 +110,13 @@ internal static class BootFingerprint
         return list;
     }
 
-    /// <summary>The hash of <paramref name="entries"/>: sorted by collector and key (ordinal; equal keys keep their order: blocks files by
-    /// name), each document in its canonical form against the mod folder's <paramref name="roots"/> (<see cref="NormalizeRoot"/>).</summary>
+    /// <summary>The hash of <paramref name="entries"/>: sorted by collector and key (ordinal), except patches retain native application order (files by
+    /// name, then keys within each file), each document in its canonical form against the mod folder's <paramref name="roots"/> (<see cref="NormalizeRoot"/>).</summary>
     internal static string Hash(IEnumerable<(string Collector, string Key, JsonNode? Document)> entries, IReadOnlyList<string> roots)
     {
         var sb = new StringBuilder(Scheme).Append('\n');
-        foreach (var (collector, key, doc) in entries.OrderBy(e => e.Collector, StringComparer.Ordinal).ThenBy(e => e.Key, StringComparer.Ordinal))
+        foreach (var (collector, key, doc) in entries.OrderBy(e => e.Collector, StringComparer.Ordinal)
+                     .ThenBy(e => e.Collector == "patches" ? "" : e.Key, StringComparer.Ordinal))
         {
             Str(sb, collector);
             sb.Append(' ');
@@ -143,8 +145,9 @@ internal static class BootFingerprint
             {
                 var text = File.ReadAllText(f);
                 if (!text.Contains("resourcePatches", StringComparison.Ordinal)) continue;
-                if (JsonNode.Parse(text, documentOptions: options) is not JsonObject root || root["resourcePatches"] is not JsonObject section) continue;
-                foreach (var (key, doc) in section) list.Add((key, doc));
+                using var parsed = JsonDocument.Parse(text, options);
+                if (LastValues(parsed.RootElement) is not JsonObject root || root["resourcePatches"] is not JsonObject section) continue;
+                foreach (var (key, doc) in section.OrderBy(p => p.Key, StringComparer.Ordinal)) list.Add((key, doc));
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or ArgumentException or InvalidOperationException)
             {
@@ -154,23 +157,36 @@ internal static class BootFingerprint
         return list;
     }
 
+    // nlohmann::json keeps the last occurrence of duplicate object keys, including nested keys.
+    private static JsonNode? LastValues(JsonElement e)
+    {
+        if (e.ValueKind == JsonValueKind.Object)
+        {
+            var o = new JsonObject();
+            foreach (var p in e.EnumerateObject()) o[p.Name] = LastValues(p.Value);
+            return o;
+        }
+        if (e.ValueKind == JsonValueKind.Array) return new JsonArray(e.EnumerateArray().Select(LastValues).ToArray());
+        return JsonNode.Parse(e.GetRawText());
+    }
+
     /// <summary>A mod folder as strings are compared with it: forward slashes, no <c>\\?\</c> prefix, no trailing slash.</summary>
     internal static string NormalizeRoot(string fullPath) => Slashes(fullPath).TrimEnd('/');
 
     private static string Slashes(string p)
     {
         var s = p.Replace('\\', '/');
+        if (s.StartsWith("//?/UNC/", StringComparison.OrdinalIgnoreCase)) return "//" + s[8..];
         return s.StartsWith("//?/", StringComparison.Ordinal) ? s[4..] : s;
     }
 
-    /// <summary>A string as it is hashed: CRLF as LF, and a path inside the mod folder <paramref name="root"/> as <c>$mod/&lt;path&gt;</c>
+    /// <summary>A string as it is hashed: text unchanged, except a path inside the mod folder <paramref name="root"/> as <c>$mod/&lt;path&gt;</c>
     /// (any separator, the folder's case ignored: Windows paths).</summary>
     internal static string Text(string s, string root) => Text(s, [root]);
 
     /// <inheritdoc cref="Text(string, string)"/>
     internal static string Text(string s, IReadOnlyList<string> roots)
     {
-        s = s.Replace("\r\n", "\n", StringComparison.Ordinal);
         if (s.IndexOf('/') < 0 && s.IndexOf('\\') < 0) return s;
         var p = Slashes(s);
         foreach (var root in roots)
@@ -179,12 +195,28 @@ internal static class BootFingerprint
         return s;
     }
 
-    /// <summary>A JSON number as it is hashed: an integer as written, any other number as the double it is (integral ones as integers).</summary>
+    /// <summary>An exact decimal value, without rounding through a binary floating-point type or expanding a huge exponent.</summary>
     internal static string Number(string raw)
     {
-        if (raw.IndexOfAny(['.', 'e', 'E']) < 0) return raw;
-        if (!double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var d) || !double.IsFinite(d)) return raw;
-        return d == Math.Floor(d) && Math.Abs(d) < 9007199254740992d ? ((long)d).ToString(CultureInfo.InvariantCulture) : d.ToString("R", CultureInfo.InvariantCulture);
+        var negative = raw.StartsWith('-');
+        var value = negative ? raw[1..] : raw;
+        var at = value.IndexOfAny(['e', 'E']);
+        var exponent = at < 0 ? BigInteger.Zero : BigInteger.Parse(value[(at + 1)..], CultureInfo.InvariantCulture);
+        var mantissa = at < 0 ? value : value[..at];
+        var dot = mantissa.IndexOf('.');
+        if (dot >= 0) exponent -= mantissa.Length - dot - 1;
+        var digits = mantissa.Replace(".", "", StringComparison.Ordinal).TrimStart('0');
+        if (digits.Length == 0) return "0";
+        var trimmed = digits.TrimEnd('0');
+        exponent += digits.Length - trimmed.Length;
+        digits = trimmed;
+        var position = digits.Length + exponent;
+        string result;
+        if (exponent >= 0 && position <= 32) result = digits + new string('0', (int)exponent);
+        else if (exponent < 0 && position > 0 && position < digits.Length) result = digits.Insert((int)position, ".");
+        else if (position <= 0 && position >= -16) result = "0." + new string('0', (int)-position) + digits;
+        else result = digits + "e" + exponent.ToString(CultureInfo.InvariantCulture);
+        return negative ? "-" + result : result;
     }
 
     private static void Canonical(StringBuilder sb, JsonNode? node, IReadOnlyList<string> roots)
