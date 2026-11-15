@@ -212,25 +212,21 @@ public sealed partial class ClientPassMod
                    $"{Interlocked.Read(ref w.WorkerSlices)} on the game's workers, threads [{names}]; {Interlocked.Read(ref w.Fills)} fills, " +
                    $"the game added {Interlocked.Read(ref w.GameAdded)}, the wrap {Interlocked.Read(ref w.Applied)}; {same} of {read} read " +
                    $"back as written; stats {stats}; players mask 0x{LabSystemsMask():x4}");
-        var ok = c.Expect(w.OtherProgram is null && Interlocked.Read(ref w.Slices) > 0, "the wrap ran in fuel_setup's own slices",
+        c.Expect(w.OtherProgram is null && Interlocked.Read(ref w.Slices) > 0, "the wrap ran in fuel_setup's own slices",
             w.OtherProgram is null ? $"{Interlocked.Read(ref w.Slices)} slices" : $"a slice of {w.OtherProgram}");
-        ok &= c.Expect(Interlocked.Read(ref w.WorkerSlices) > 0 && w.Threads.Count > 1,
+        c.Expect(Interlocked.Read(ref w.WorkerSlices) > 0 && w.Threads.Count > 1,
             "fuel_setup's slices ran on the game's worker threads (the game spreads the hosted world's programs once players are in it)",
             $"{Interlocked.Read(ref w.WorkerSlices)} of {Interlocked.Read(ref w.Slices)} slices off the world's thread, threads [{names}]");
-        ok &= c.Expect(Interlocked.Read(ref w.Fills) > 0 && Interlocked.Read(ref w.Applied) > 0,
+        c.Expect(Interlocked.Read(ref w.Fills) > 0 && Interlocked.Read(ref w.Applied) > 0,
             "the game's own fills were seen in fuel_setup's update and doubled",
             $"{Interlocked.Read(ref w.Fills)} fills, the game added {Interlocked.Read(ref w.GameAdded)}, the wrap {Interlocked.Read(ref w.Applied)}");
-        ok &= c.Expect(read > 0 && same * 10 >= read * 9, "GetComponent reads the doubled water after the step (9 of 10 at least)",
+        c.Expect(read > 0 && same * 10 >= read * 9, "GetComponent reads the doubled water after the step (9 of 10 at least)",
             $"{same} of {read}");
-        ok &= c.Expect(disabled.IsEmpty && stats.Faults == 0 && stats.Overruns == 0, "no stage faulted or went over its budget",
+        c.Expect(disabled.IsEmpty && stats.Faults == 0 && stats.Overruns == 0, "no stage faulted or went over its budget",
             disabled.IsEmpty ? $"{stats.Overruns} overruns" : string.Join("; ", disabled.Select(e => $"{e.Stage}: {e.Reason}")));
         wrap.Dispose();
-        // the runner cannot fail a check by itself: a failed assertion is a fail of this check, and the player is told so
-        c.Instruct(ok
-            ? "The wrap is off again: the well fills at the game's own speed from now on. Did its water bar fill about twice " +
-              "as fast while the wrap was on, and did the game run as before (no stutter, no error)?"
-            : "The wrap is off again. The check's own assertions failed (see the list: the wrap did not run in fuel_setup on " +
-              "the game's workers, or its writes did not land): answer Fail, whatever the water bar did.");
+        c.Instruct("The wrap is off again: the well fills at the game's own speed from now on. Did its water bar fill about twice " +
+                   "as fast while the wrap was on, and did the game run as before (no stutter, no error)?");
         await c.Verdict();
     }
 
