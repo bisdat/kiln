@@ -86,6 +86,7 @@ std::vector<Reskin> g_reskins;                 // under g_mu
 std::map<std::pair<std::string, kvb::Guid>, uint64_t> g_reskin_defs;  // what was built at start, by mod and game material
 std::map<std::string, KilnOwner> g_reskin_owners;
 std::atomic<bool> g_reskin_watch{false};
+KilnHandle g_reskin_tick = 0;  // one subscription for the process, including prepare retries
 std::set<kvb::Guid> g_game_materials;  // original KFC keys only: resource_put accepts unknown overrides before binding
 // Every material the boot build built, by mod and block: define_json takes a block of the same definition whose files still have the same
 // bytes from here instead of decoding its textures again (kvb::MaterialRecord). Written once in on_ready, read under g_mu.
@@ -657,7 +658,7 @@ uint32_t reskin_release_locked(const std::string& mod) {
 }
 
 // Serves the result. false: something can't be served, and then no VFX is registered, since a VFX with a missing blob is fatal.
-bool serve(const kvb::CookResult& r) {
+bool serve(const kvb::CookResult& r, const kiln::boot::Input* boot = nullptr) {
     for (const kvb::ServedBlob& b : r.blobs) {
         KilnContentHash h{b.hash.size, b.hash.h0, b.hash.h1, b.hash.h2};
         const KilnResult rc = g_assets->blob_override(g_self, &h, b.data.data(), b.data.size());
@@ -692,10 +693,12 @@ bool serve(const kvb::CookResult& r) {
             r.owner = reskin_owner_locked(s.mod);
             if (!r.owner) {
                 KV_W("vfx: %s: cannot allocate a reskin owner: the game's material draws", s.mod.c_str());
+                if (boot && boot->strict(s.mod)) return false;
                 continue;
             }
             g_reskins.push_back(std::move(r));
             reskin_reconcile_locked(s.guid);
+            if (boot && boot->strict(s.mod) && g_reskins.back().failed) return false;
             continue;
         }
         const KilnResult rc = g_assets->resource_put(g_self, &k, s.data.data(), s.data.size(), KILN_ASSET_PUT_NEW);
@@ -710,7 +713,10 @@ bool serve(const kvb::CookResult& r) {
         std::memcpy(k.guid, s.guid.b, 16);
         k.type = s.type;
         const KilnResult rc = g_assets->resource_put(g_self, &k, s.data.data(), s.data.size(), KILN_ASSET_PUT_NEW);
-        if (rc != KILN_OK) KV_E("vfx: %s: kiln.assets refused it (%d): this VFX is not registered", s.what.c_str(), static_cast<int>(rc));
+        if (rc != KILN_OK) {
+            KV_E("vfx: %s: kiln.assets refused it (%d): this VFX is not registered", s.what.c_str(), static_cast<int>(rc));
+            if (boot) return false;  // ordinary on_ready keeps its per-VFX fallback
+        }
     }
     return true;
 }
@@ -945,15 +951,16 @@ void build_on_ready(const KilnApi* api, KilnOwner self, const kiln::boot::Input*
             if (r.mods_with_vfx) KV_W("vfx: no Kiln VFX or materials built from %u mod(s) with such blocks", r.mods_with_vfx);
             return;
         }
-        if (!serve(r)) {
+        if (!serve(r, boot)) {
+            build_forget();
             set_status(fingerprint, "kiln.assets refused a part: nothing registered", &r);
+            refuse_required(true, true, "kiln.assets refused part of the built VFX or materials");
             return;
         }
         {
             std::lock_guard lk(g_mu);
-            if (!g_reskins.empty()) {
-                KilnHandle h = 0;
-                if (api->subscribe_tick(self, KILN_TICK_POST, &reskin_tick, nullptr, &h) != KILN_OK)
+            if (!g_reskins.empty() && !g_reskin_tick) {
+                if (api->subscribe_tick(self, KILN_TICK_POST, &reskin_tick, nullptr, &g_reskin_tick) != KILN_OK)
                     KV_W("vfx: no tick: a reskin stays until the next start even if its mod unloads");
             }
         }
@@ -992,6 +999,7 @@ void build_on_ready(const KilnApi* api, KilnOwner self, const kiln::boot::Input*
     } catch (const kiln::boot::Refusal&) {
         throw;  // a boot document: the boot generation's prepare refuses the mod
     } catch (const std::exception& e) {
+        build_forget();
         KV_E("vfx: building mods' VFX failed (%s): no Kiln VFX this session", e.what());
         set_status("not checked", e.what(), nullptr);
         refuse_required(true, true, std::string("building mods' VFX failed (") + e.what() + ")");
@@ -1012,6 +1020,9 @@ void build_forget() {
     g_material_records.clear();
     g_foreign.clear();
     g_own_checks.store(0);
+    g_reskin_watch.store(false);
+    g_late_done.store(true);
+    g_off.store(false);
     g_status = "{}";
     KV_I("vfx: the boot generation's prepared VFX and materials are taken back");
 }
