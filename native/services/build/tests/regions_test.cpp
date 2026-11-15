@@ -10,11 +10,14 @@ struct KilnWorldEvent { int kind, event; };
 constexpr int KILN_WORLD_SERVER = 1, KILN_WORLD_STOPPING = 2;
 namespace kb {
 int voxel_closes = 0, transient_closes = 0;
+void terrain_budget_reset() {}
 void vox_world_closed() { ++voxel_closes; }
 void transient_world_closed() { ++transient_closes; }
 
 struct { bool persist = true; } F;
 std::string identity;
+std::string detail;
+void set_detail(const char* text) { detail = text; }
 std::string current_world() { return identity; }
 }
 #define KILN_REGIONS_HOST_TEST
@@ -77,6 +80,11 @@ int main() {
     kb::on_world(&stop, nullptr);
     check(kb::voxel_closes == 1, "world stop invalidates cached voxel pointers even if the next world reuses its address");
     check(kb::transient_closes == 1, "world stop unbinds the journal even when no menu server tick occurs");
+    kb::regions_lifecycle_ready(false, true);
+    check(!kb::F.persist, "subscription failure disables persistent writes");
+    kb::F.persist = true;
+    kb::regions_lifecycle_ready(true, false);
+    check(!kb::F.persist, "an installed subscriber without the core stop hook disables persistent writes");
     std::filesystem::remove_all(dir);
     std::printf("regions: %d passed, %d failed\n", passed, failed);
     return failed ? 1 : 0;

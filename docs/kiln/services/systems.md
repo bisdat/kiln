@@ -8,6 +8,7 @@ world. Since 0.2.0-dev.29.
 | Capability | What it says |
 |---|---|
 | `systems.wraps` | wraps work on this build; unavailable while native SET is loaded (reason `policy`) |
+| `systems.wraps.typed` | typed wraps (`Systems.Wrap<T>` with a view of Kiln.Game's `Ecs.Programs`); follows `systems.wraps` (each wrap checks its view's contract against the live descriptor) |
 | `systems.wraps.client` | wraps on the client world's programs (`WrapOptions.World = WorldKind.Client`), in a game client; `wrong-side` on a dedicated server. On since 0.2.0-dev.29 (held in dev.28), not yet confirmed in a real game: guided check `06a-wraps.client` |
 | `systems.threads` | the server world's players mask can be read (what puts program slices on the game's workers) |
 | `world.systems` | the sigdb feature behind them: the program scheduler and the players mask |
@@ -45,7 +46,9 @@ wrap.Dispose();   // or let the mod's unload remove it
   changes at run time). A replaced program emits none of the
   game's events and makes none of its structural changes unless your handler does; there is no per-entity Replace.
 - **Filters.** `When(info => ...)` runs on every slice (`SliceInfo`: count, step, thread, archetype key);
-  `WhenArchetype(has, lacks)` decides once per archetype and world (component names as in kiln.world).
+  `WhenArchetype(has, lacks)` decides once per archetype and world (component names as in kiln.world). One that cannot
+  decide (the build gives no archetype key, a name the world has no component of) turns its stage off with the reason
+  (`Disabled`) instead of skipping every slice; an empty slice is skipped.
 - **Lifetime.** `Wrap` is tick thread and returns at once; the stages apply in the target world's next step
   (`State` Pending → Active), again by program name in every later world of that kind, and go with `Dispose` (applied in
   the next step: no call starts after it) or when the mod unloads (the unload waits until no call of the mod's stages
@@ -98,6 +101,53 @@ A name the program does not list, an optional component the entity lacks, or a `
 Which attribute slot is which is the attribute's own: Health `[0]` current, `[1]` minimum, `[7]` maximum
 (docs/re/combat.md); Fuel `[0]` current, `[1]` maximum (docs/re/items.md).
 
+### Typed views (`Systems.Wrap<T>`)
+
+Kiln.Game carries a typed view of each of the game's programs, generated from the program catalog of the game build
+it was made for (`sigdb/programs/<side>/<sha256>.json`, [typegen.md](../typegen.md) §4.5): `Kiln.Ecs.Programs.FuelSetup`
+for `fuel_setup`, with a property per component its descriptor lists that the type dump has a layout for, in the
+program's own slot order:
+
+```csharp
+var made = Systems.Wrap<Ecs.Programs.FuelSetup>();
+if (!made.Ok) { Log.Warn(made.Reason!); return; }       // e.g. "fuel_setup: ... write list changed: +X -Y"
+made.Wrap!.AroundEach(
+    capture: (in Ecs.Programs.FuelSetup w) => w.FuelValues[0],               // before the game's update (not marked)
+    apply: (ref Ecs.Programs.FuelSetup w, in int before) =>                  // after it, with what capture kept
+    {
+        var added = w.FuelValues[0] - before;
+        if (added <= 0) return;
+        var fuel = w.Fuel;                                                   // Attribute32: marked for the save
+        fuel[0] += 3 * added;                                                // four times what the game added
+        fuel.Changed();                                                      // clamps to the maximum
+    });
+```
+
+| View member | What it is |
+|---|---|
+| `Name`, `Contract`, `Lists` (static) | the program, the FNV-1a-32 of its contract text (all 21 lists, three masks, flags, interval; chapter 06a 9.7) and that text without its empty lists |
+| `Entity`, `View` | the entity, and its untyped `EntityView` (names, singletons such as `impact::AttributeRegistry`) |
+| a `tpl`/`read` component `X` | `ref readonly Ecs.X X` |
+| an optional one (`tpl_opt`, `read_opt`, `write_opt`) | `bool HasX` and the reference (an entity without it throws: ask first) |
+| a `write` component | `ref Ecs.X X`: the first use per entity marks it for the save and replication, as `Write<T>` |
+| a `write` attribute (int slots: Fuel, Health, ...) | `Attribute32 X` (marked when used) and `ReadOnlySpan<int> XValues` (read, not marked) |
+
+- **The contract.** `Wrap<T>` asks kiln.world for the live descriptor's contract (`game_program_contract`) and refuses
+  (`Ok = false`) when it is not the view's: on a game build whose program changed, the reason names each list that did
+  (`+added -removed`), the flags or interval. A view binds an entity only on a slice of its own program whose live
+  contract is its own (asked once per world session), so a view never reads a slot of another layout.
+- **AroundEach** is a Before (capture, one `TSnap` per entity, kept for that slice on its thread) and an After (apply)
+  at one priority: an onion around the higher priorities' stages. A capture that throws turns both off for good; that
+  slice's snapshots are dropped and its update is the game's. Rows do not move inside a slice (structural changes wait
+  for the step's end), so apply sees each entity with its own snapshot.
+- **What has no typed property:** a component the type dump has no layout for (the `Dynamic*` components, such as
+  `DynamicFuelSetup`: kiln.world does not know their size, so even the untyped accessors refuse them), the singleton,
+  other-entity, filter and event lists. The 15 programs whose descriptor uses `other_write_unser`, `all_read` or
+  `all_write` have no view at all (untyped wraps still work).
+- Typed stages count, fault and budget like untyped ones; `ProgramWrap<T>.Untyped` is the wrap underneath.
+- A whole mod: the sample `mods/samples/WaterWorks` (wells refill `WellRefill` times as fast) and the template
+  `kiln-system-wrap` (`dotnet new kiln-system-wrap`).
+
 ### Change events
 
 A stage's writes through a view are compared when the stage is done with the entity. Changed components are coalesced
@@ -115,14 +165,20 @@ On a dedicated server with no player every slice runs on the world's thread. `Ki
 can run its handlers on N > 1 threads: `LabSystems.ForceParallel(steps)`, `StopParallel()`, `Forced`, `PlayersMask`.
 `mods/tests/systems-test` covers Before/After, iteration and slots in serial and forced-worker runs. Replace and INIT
 were tested serial only; the managed write-event row used forced workers. The reload sequence does not prove an unload
-interleaved with a blocked worker callback.
+interleaved with a blocked worker callback. Since 0.2.0-dev.29 it also checks every live program's contract against the
+committed catalog (817 of 817 on the lab's server build), a typed view's slots against kiln.world's named ones and
+GetComponent, a doctored contract's refusal, `AroundEach` on `fuel_setup` with forced workers, and a wrap applied when
+the world stops (the drain, and the wrap back to Pending). A dedicated server cannot stop and start its world in one
+process: the world-session keys of the caches are proven by the unit tests, the next boot only re-applies by name.
 
 ## Native: kiln.world v4
 
 The C table appends the game-program members to kiln.world (`KILN_WORLD_VERSION 4`): `game_program_find`, `_info`,
 `_list`, `game_programs_status`, `game_program_wrap` / `_unwrap`, `game_wrap_info`, `game_wraps_release`,
 `game_slice_run_original`, `wrap_original`, and per entity inside a stage `game_slice_iterate`, `game_slice_slot`,
-`game_slice_mark`, `game_slice_attr_changed`, `game_slice_archetype`, `game_archetype_has`. The header documents each
+`game_slice_mark`, `game_slice_attr_validate`, `game_slice_attr_changed`, `game_slice_archetype`, `game_archetype_has`;
+`game_world_session` (a lifecycle generation per world kind) and `game_program_contract` (a descriptor's contract and
+its text, since 0.2.0-dev.29). The header documents each
 (threads, results); `mods/tests/systems-test/native` uses all of them. A native stage's fault (SEH) is caught and turns
 that stage off; `KilnWrapStageFn` runs on the slice's thread.
 
@@ -140,7 +196,9 @@ keep memory the plugin frees itself alive.
   A wrap belongs to one world: it is applied in that world's own step, taken out when that world stops, and applied again
   by name in the next world of that kind.
 - Refused while native SET is loaded.
-- Per-entity views name components by string; generated typed views per program are the next step (planned).
+- Typed views exist for the game build Kiln was made for; on another build a changed program's typed wrap is refused
+  (its contract), untyped wraps go on. No typed property for `Dynamic*` components, singletons and other-entity lists;
+  no view for the 15 programs with `other_write_unser`, `all_read` or `all_write`.
 - Proven on a dedicated server with no player, serial and with the lab parallel switch; a real player's worker split,
   client-world wraps and what a player sees of a wrap's writes have not run in a real game (guided checks
   `06a-wraps.client`, `06a-wraps.waterworks`).

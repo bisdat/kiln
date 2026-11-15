@@ -11,8 +11,9 @@
        Private="false" ExcludeAssets="runtime").
        Properties: KilnGameDump (the dump; default below), KilnPython (default python3), KilnGameVariant (a short
        name: the variant gets intermediate and output folders of its own, so several dumps build side by side),
-       KilnLocalGameTypes (a file that replaces the legacy part), KilnGamePrograms (a program catalog: adds the program
-       descriptors Kiln.Ecs.Programs; a catalog is read from the exe and never committed, so only tests pass a made-up one). -->
+       KilnLocalGameTypes (a file that replaces the legacy part), KilnGamePrograms (the program catalog of the typed
+       program views Kiln.Ecs.Programs.*, for Kiln.Systems' Systems.Wrap<T>; default "auto": the committed catalog of the
+       dump's exe, sigdb/programs/<side>/<sha256>.json, and no views when there is none; tests pass a made-up one). -->
   <PropertyGroup>
     <RootNamespace>Kiln.GameTypes</RootNamespace>
     <AssemblyName>Kiln.Game</AssemblyName>
@@ -23,6 +24,7 @@
     <!-- The newest verified server build. A new game build is this one line. -->
     <KilnGameDump Condition="'$(KilnGameDump)' == ''">$(MSBuildThisFileDirectory)../../sigdb/types/server/f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2.json</KilnGameDump>
     <KilnPython Condition="'$(KilnPython)' == ''">python3</KilnPython>
+    <KilnGamePrograms Condition="'$(KilnGamePrograms)' == ''">auto</KilnGamePrograms>
     <!-- The generator's root class (its root option). Ecs.cs and the tests name it too (docs/kiln/typegen.md §3). -->
     <KilnGameRoot>Ecs</KilnGameRoot>
     <_KilnTypegen>$(MSBuildThisFileDirectory)../../tools/typegen/typegen.py</_KilnTypegen>
@@ -42,9 +44,14 @@
                       GlobalPropertiesToRemove="KilnGameDump;KilnGameVariant;KilnPython;KilnLocalGameTypes;KilnGamePrograms" />
     <ProjectReference Include="../services/Kiln.World/Kiln.World.csproj" Private="false"
                       GlobalPropertiesToRemove="KilnGameDump;KilnGameVariant;KilnPython;KilnLocalGameTypes;KilnGamePrograms" />
+    <!-- the typed program views (Ecs.Programs.*) are Kiln.Systems' IGameProgram<T> over its EntityView -->
+    <ProjectReference Include="../services/Kiln.Systems/Kiln.Systems.csproj" Private="false"
+                      GlobalPropertiesToRemove="KilnGameDump;KilnGameVariant;KilnPython;KilnLocalGameTypes;KilnGamePrograms" />
     <InternalsVisibleTo Include="Kiln.Game.Tests" />
     <_KilnGenInput Include="$(KilnGameDump);$(_KilnTypegen);$(MSBuildProjectFullPath)" />
-    <_KilnGenInput Include="$(KilnGamePrograms)" Condition="'$(KilnGamePrograms)' != ''" />
+    <_KilnGenInput Include="$(KilnGamePrograms)" Condition="'$(KilnGamePrograms)' != 'auto'" />
+    <!-- auto: every committed catalog (the dump's own is among them; a new one rebuilds) and the catalog code -->
+    <_KilnGenInput Include="$(MSBuildThisFileDirectory)../../sigdb/programs/**/*.json;$(MSBuildThisFileDirectory)../../tools/typegen/catalog.py" Condition="'$(KilnGamePrograms)' == 'auto'" />
   </ItemGroup>
 
   <Target Name="_KilnGameTypesPaths">
@@ -61,7 +68,7 @@
       <_KilnGenLegacy Include="$(_KilnGenDir)Kiln.Game.Legacy.g.cs" />
       <_KilnGenTable Include="$(_KilnGenDir)Kiln.Game.layouts" />
       <_KilnGenTypes Include="$(_KilnGenDir)Kiln.Game.types" />
-      <_KilnGenPrograms Include="$(_KilnGenDir)Kiln.Game.Programs.g.cs" Condition="'$(KilnGamePrograms)' != ''" />
+      <_KilnGenPrograms Include="$(_KilnGenDir)Kiln.Game.Programs.g.cs" />
     </ItemGroup>
   </Target>
 
@@ -81,13 +88,12 @@
       <Output TaskParameter="ExitCode" PropertyName="_KilnGenExit" />
     </Exec>
     <Error Condition="'$(_KilnGenExit)' != '0'" Text="Kiln.Game: tools/typegen/typegen.py failed on '$(KilnGameDump)' (exit $(_KilnGenExit))." />
-    <Exec Condition="'$(KilnGamePrograms)' != ''"
-          Command="&quot;$(KilnPython)&quot; &quot;$(_KilnTypegen)&quot; programs --catalog &quot;$(KilnGamePrograms)&quot; --dump &quot;$(KilnGameDump)&quot; --out &quot;$(_KilnGenDir)&quot; --root $(KilnGameRoot)"
+    <Exec Command="&quot;$(KilnPython)&quot; &quot;$(_KilnTypegen)&quot; programs --catalog &quot;$(KilnGamePrograms)&quot; --dump &quot;$(KilnGameDump)&quot; --out &quot;$(_KilnGenDir)&quot; --root $(KilnGameRoot)"
           IgnoreExitCode="true" EchoOff="true" CustomErrorRegularExpression="^typegen: error:"
           IgnoreStandardErrorWarningFormat="true" StandardOutputImportance="high">
       <Output TaskParameter="ExitCode" PropertyName="_KilnProgExit" />
     </Exec>
-    <Error Condition="'$(KilnGamePrograms)' != '' and '$(_KilnProgExit)' != '0'" Text="Kiln.Game: typegen.py programs failed on '$(KilnGamePrograms)' (exit $(_KilnProgExit))." />
+    <Error Condition="'$(_KilnProgExit)' != '0'" Text="Kiln.Game: typegen.py programs failed on '$(KilnGamePrograms)' (exit $(_KilnProgExit))." />
   </Target>
 
   <Target Name="_KilnAddGameTypes" AfterTargets="KilnGenerateGameTypes" DependsOnTargets="_KilnGameTypesPaths"

@@ -30,6 +30,7 @@
 // run outside it.
 #include <windows.h>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 
@@ -40,7 +41,7 @@
 namespace kb {
 namespace {
 
-constexpr uint32_t kBlocksPerStep = 32;  // put back at most this many blocks a step
+constexpr uint32_t kBlocksPerStep = 1;  // put back at most this many blocks a step
 
 // kiln/data/kiln.build/transient/<name>, through Win32 so each step reports its own failure.
 struct WinStore final : tj::Store {
@@ -203,7 +204,7 @@ void transient_pre(uint64_t step) {
         std::lock_guard lock(g_mu);
         bind_locked();
         if (g_j.world().empty()) return;
-        if (g_j.pending_blocks() && world_running() && F.write) {
+        if (step % 2 == 0 && g_j.pending_blocks() && regions_lifecycle_safe() && world_running() && F.write) {
             if (!g_logged_start) {
                 g_logged_start = true;
                 KB_I("transient edits: putting back an earlier session's transient cells in %zu block(s)", g_j.pending_blocks());
@@ -215,8 +216,14 @@ void transient_pre(uint64_t step) {
     std::vector<std::pair<tj::Bits, tj::Bits>> done(work.size());
     std::vector<PutBack> how(work.size(), PutBack::NotReady);
     const VoxelWorld* v = work.empty() ? nullptr : vox();
-    for (size_t n = 0; v && n < work.size() && F.write; ++n)
+    // Recovery uses the same counter as Terrain. Alternate steps leave a guaranteed opportunity for queued plans
+    // even if one recovery call overruns the cooperative time allowance. No engine call can be interrupted.
+    for (size_t n = 0; v && n < work.size() && F.write; ++n) {
+        if (!terrain_budget_reserve(2048, tj::kCells)) break;
+        const auto started = std::chrono::steady_clock::now();
         how[n] = put_back(*v, work[n].first, work[n].second, &done[n].first, &done[n].second);
+        terrain_budget_charge(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count());
+    }
     // 3. under the lock again: settle what was done (only the tick thread changes entries, so the copies are current)
     std::lock_guard lock(g_mu);
     bool settled = false;

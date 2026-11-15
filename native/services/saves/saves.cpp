@@ -10,6 +10,7 @@
 // the game snapshots the world in its next instance tick) and at the start of a step for everything else.
 #include <windows.h>
 #include "snapshot_stage.h"
+#include "new_world.h"
 #include <intrin.h>
 #include <shlobj.h>
 
@@ -509,7 +510,7 @@ uintptr_t __fastcall hk_load(uintptr_t out, uintptr_t inst) {
         ev.slot = slot;
         ev.revision = have ? rev : (hdr ? h.revision : 0);
         ev.world_unix = hdr ? h.unix_s : 0;
-        if (!hdr) ev.flags |= KILN_SAVE_EVENT_NEW_WORLD;
+        if (kiln::saves::new_world_file(file, hdr, have, rev, !zero16(guid))) ev.flags |= KILN_SAVE_EVENT_NEW_WORLD;
         if (have && !zero16(guid)) {
             ev.flags |= KILN_SAVE_EVENT_HAS_GUID;
             std::memcpy(ev.world_guid, guid, 16);

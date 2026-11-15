@@ -286,9 +286,9 @@ function Banners({ game, ctl, pending, onOffer, boot }: { game: GameInstall; ctl
     );
   }
   const advice = s?.runtime.installed && ctl.view.phase !== "vanilla" ? s.launchOptions?.advice : null;
-  if (advice && !s?.launchOptions?.hasDllOverride) {
+  if (advice && (!s?.launchOptions?.hasDllOverride || s.launchOptions.chainedOverrideMissing)) {
     out.push(
-      <Banner key="adv" tone="warn" title={ctl.kilnMissing ? "Kiln is not loading" : ctl.stuck ? "Kiln did not start" : "One Steam setting"}
+      <Banner key="adv" tone="warn" title={s?.launchOptions?.hasDllOverride && s.launchOptions.chainedOverrideMissing ? "One Steam setting for Ultimate ASI Loader" : ctl.kilnMissing ? "Kiln is not loading" : ctl.stuck ? "Kiln did not start" : "One Steam setting"}
         actions={<Button size="s" onClick={async () => {
           try {
             if (!navigator.clipboard) throw new Error("Clipboard unavailable");
@@ -296,7 +296,8 @@ function Banners({ game, ctl, pending, onOffer, boot }: { game: GameInstall; ctl
             toast.ok("Copied", "Paste it into Steam's launch options.");
           } catch (e) { toast.error(e, "Could not copy the launch option"); }
         }}>Copy</Button>}>
-        {ctl.stuck && "The game started without Kiln, so mods and \"Without mods\" can't apply. Close it, then set "}
+        {!s?.launchOptions?.hasDllOverride && ctl.stuck && "The game started without Kiln, so mods and \"Without mods\" can't apply. Close it, then set "}
+        {s?.launchOptions?.hasDllOverride && s.launchOptions.chainedOverrideMissing && "Kiln loads, but Ultimate ASI Loader and its .asi plugins may not start under Valve’s Proton. "}
         Steam, Enshrouded, Properties, Launch options: <span className="k-mono">{advice}</span>
       </Banner>,
     );

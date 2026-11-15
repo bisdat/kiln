@@ -147,6 +147,7 @@ native, builtin: `WINEDLLOVERRIDES="dinput8=n,b"`, or `dinput8` as "native, buil
 Kiln chains Ultimate ASI Loader as `xinput9_1_0.dll` in the game folder ([Installer](#installer)). Kiln loads it by
 its full path, but Wine still applies its rules for the name `xinput9_1_0`. Set it to native, builtin as well:
 `WINEDLLOVERRIDES="dinput8,xinput9_1_0=n,b"` (Steam: `WINEDLLOVERRIDES="dinput8,xinput9_1_0=n,b" %command%`).
+The launcher names both overrides when Ultimate ASI Loader is chained and reports a missing override.
 - Tested (2026-11-14, dedicated server lab under GE-Proton11-11, Kiln 0.2.0-dev.28's proxy, a test DLL of ours named
   `xinput9_1_0.dll`, not Ultimate ASI Loader itself): without the override, a DLL without version information did not
   run. Wine loaded its own `xinput9_1_0` instead, and `proxy.log` still said `loaded at ...`, so the log does not
@@ -365,3 +366,14 @@ engines' mods") and 5.8.
   `required[]`, each with its `kind` (`AdvertiseEngines.cs`), so a joining player's launcher learns what the server
   runs. The HELLO check still covers Kiln mods only: clients don't announce other engines' mods.
 - **Licences.** The launcher (MIT) only copies files. It never links or runs EML's GPL code or any other engine's code.
+
+An enabled EML package declaring `runtime` or `runtime-register-dll` also requires hosted ShroudForge, even without
+an enabled ShroudForge mod. The launcher uses the shared package reader and writes `emlRuntime` (package ids) into
+`kiln/profile.json`; the adapter reads that additive field, defaulting to empty. The launcher places EML packages in
+ShroudForge's mods folder with their `extended.mod.json` switches on. A compatibility entry in `mods.shroudforge`
+lets older adapters make the same hosting decision. Runtime EML entries are disabled on the kiln-eml route even
+when delegated: ShroudForge reads its placed copy and switch independently. This prevents older kiln-eml runners
+from falling back to data-only if their adapter fails; new aside reporting recognizes `emlRuntime` delegation. Missing/off ShroudForge disables the runtime EML entry and
+records its reason in `emlRuntimeBlocked`; kiln-eml reports `skipped`. Without a hosted or own ShroudForge runtime,
+kiln-eml independently refuses the entire runtime package. A server-only/client-only package remains subject to
+ShroudForge's existing targets check (`other-side`); patch/export-only EML packages are unchanged.

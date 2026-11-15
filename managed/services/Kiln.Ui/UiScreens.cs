@@ -76,7 +76,7 @@ public sealed class UiScreen : IDisposable
 
     public void Open()
     {
-        if (Disposed || _open) return;
+        if (Disposed || _open || UiNative.DrawingOffReason != null) return;
         _open = true;
         OpenedAt = Interlocked.Increment(ref UiEngine.ScreenOrder);
         FocusNext = true;

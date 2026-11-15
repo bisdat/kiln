@@ -1,1 +1,215 @@
 #nullable enable
+Kiln.CollectionEquipmentChange
+Kiln.CollectionEquipmentChange.CollectionEquipmentChange(Kiln.EventEntityKey TargetInventory, bool Vanity, uint Version, System.Collections.Generic.IReadOnlyList<Kiln.CollectionStack!>! Contents) -> void
+Kiln.CollectionEquipmentChange.Contents.get -> System.Collections.Generic.IReadOnlyList<Kiln.CollectionStack!>!
+Kiln.CollectionEquipmentChange.Contents.init -> void
+Kiln.CollectionEquipmentChange.Deconstruct(out Kiln.EventEntityKey TargetInventory, out bool Vanity, out uint Version, out System.Collections.Generic.IReadOnlyList<Kiln.CollectionStack!>! Contents) -> void
+Kiln.CollectionEquipmentChange.Equals(Kiln.CollectionEquipmentChange? other) -> bool
+Kiln.CollectionEquipmentChange.TargetInventory.get -> Kiln.EventEntityKey
+Kiln.CollectionEquipmentChange.TargetInventory.init -> void
+Kiln.CollectionEquipmentChange.Vanity.get -> bool
+Kiln.CollectionEquipmentChange.Vanity.init -> void
+Kiln.CollectionEquipmentChange.Version.get -> uint
+Kiln.CollectionEquipmentChange.Version.init -> void
+Kiln.CollectionStack
+Kiln.CollectionStack.<Clone>$() -> Kiln.CollectionStack!
+Kiln.CollectionStack.CollectionStack(Kiln.SlotId Source, Kiln.ItemId Item, int Count, Kiln.ItemInstanceRef Instance) -> void
+Kiln.CollectionStack.Count.get -> int
+Kiln.CollectionStack.Count.init -> void
+Kiln.CollectionStack.Deconstruct(out Kiln.SlotId Source, out Kiln.ItemId Item, out int Count, out Kiln.ItemInstanceRef Instance) -> void
+Kiln.CollectionStack.Equals(Kiln.CollectionStack? other) -> bool
+Kiln.CollectionStack.Instance.get -> Kiln.ItemInstanceRef
+Kiln.CollectionStack.Instance.init -> void
+Kiln.CollectionStack.Item.get -> Kiln.ItemId
+Kiln.CollectionStack.Item.init -> void
+Kiln.CollectionStack.Source.get -> Kiln.SlotId
+Kiln.CollectionStack.Source.init -> void
+Kiln.EmptyEquipment
+Kiln.EmptyEquipment.EmptyEquipment() -> void
+Kiln.EmptyEquipment.Equals(Kiln.EmptyEquipment? other) -> bool
+Kiln.EquipmentChange
+Kiln.EquipmentChange.Deconstruct(out Kiln.EquipmentChangeKind Kind) -> void
+Kiln.EquipmentChange.EquipmentChange(Kiln.EquipmentChange! original) -> void
+Kiln.EquipmentChange.EquipmentChange(Kiln.EquipmentChangeKind Kind) -> void
+Kiln.EquipmentChange.Kind.get -> Kiln.EquipmentChangeKind
+Kiln.EquipmentChange.Kind.init -> void
+Kiln.EquipmentChangeKind
+Kiln.EquipmentChangeKind.Collection = 3 -> Kiln.EquipmentChangeKind
+Kiln.EquipmentChangeKind.Equip = 1 -> Kiln.EquipmentChangeKind
+Kiln.EquipmentChangeKind.Set = 4 -> Kiln.EquipmentChangeKind
+Kiln.EquipmentChangeKind.Unequip = 2 -> Kiln.EquipmentChangeKind
+Kiln.EquipmentSet
+Kiln.EquipmentSet.<Clone>$() -> Kiln.EquipmentSet!
+Kiln.EquipmentSet.Deconstruct(out Kiln.EquipmentSetScope! Scope, out System.Collections.Generic.IReadOnlyList<Kiln.EquipmentSetEntry!>! Entries) -> void
+Kiln.EquipmentSet.Entries.get -> System.Collections.Generic.IReadOnlyList<Kiln.EquipmentSetEntry!>!
+Kiln.EquipmentSet.Entries.init -> void
+Kiln.EquipmentSet.Equals(Kiln.EquipmentSet? other) -> bool
+Kiln.EquipmentSet.EquipmentSet(Kiln.EquipmentSetScope! Scope, System.Collections.Generic.IReadOnlyList<Kiln.EquipmentSetEntry!>! Entries) -> void
+Kiln.EquipmentSet.Scope.get -> Kiln.EquipmentSetScope!
+Kiln.EquipmentSet.Scope.init -> void
+Kiln.EquipmentSetEntry
+Kiln.EquipmentSetEntry.<Clone>$() -> Kiln.EquipmentSetEntry!
+Kiln.EquipmentSetEntry.Deconstruct(out Kiln.EquipmentSlot Slot, out Kiln.EquipmentSetSelection! Selection) -> void
+Kiln.EquipmentSetEntry.Equals(Kiln.EquipmentSetEntry? other) -> bool
+Kiln.EquipmentSetEntry.EquipmentSetEntry(Kiln.EquipmentSlot Slot, Kiln.EquipmentSetSelection! Selection) -> void
+Kiln.EquipmentSetEntry.Selection.get -> Kiln.EquipmentSetSelection!
+Kiln.EquipmentSetEntry.Selection.init -> void
+Kiln.EquipmentSetEntry.Slot.get -> Kiln.EquipmentSlot
+Kiln.EquipmentSetEntry.Slot.init -> void
+Kiln.EquipmentSetScope
+Kiln.EquipmentSetScope.<Clone>$() -> Kiln.EquipmentSetScope!
+Kiln.EquipmentSetScope.Deconstruct(out System.Guid ProcessSession, out ulong WorldEpoch, out Kiln.EventEntityKey Player) -> void
+Kiln.EquipmentSetScope.Equals(Kiln.EquipmentSetScope? other) -> bool
+Kiln.EquipmentSetScope.EquipmentSetScope(System.Guid ProcessSession, ulong WorldEpoch, Kiln.EventEntityKey Player) -> void
+Kiln.EquipmentSetScope.Player.get -> Kiln.EventEntityKey
+Kiln.EquipmentSetScope.Player.init -> void
+Kiln.EquipmentSetScope.ProcessSession.get -> System.Guid
+Kiln.EquipmentSetScope.ProcessSession.init -> void
+Kiln.EquipmentSetScope.WorldEpoch.get -> ulong
+Kiln.EquipmentSetScope.WorldEpoch.init -> void
+Kiln.EquipmentSetSelection
+Kiln.EquipmentSetSelection.EquipmentSetSelection() -> void
+Kiln.EquipmentSetSelection.EquipmentSetSelection(Kiln.EquipmentSetSelection! original) -> void
+Kiln.InstanceEquipment
+Kiln.InstanceEquipment.Deconstruct(out Kiln.ItemInstanceRef Item) -> void
+Kiln.InstanceEquipment.Equals(Kiln.InstanceEquipment? other) -> bool
+Kiln.InstanceEquipment.InstanceEquipment(Kiln.ItemInstanceRef Item) -> void
+Kiln.InstanceEquipment.Item.get -> Kiln.ItemInstanceRef
+Kiln.InstanceEquipment.Item.init -> void
+Kiln.InventorySnapshotToken
+Kiln.InventorySnapshotToken.Deconstruct(out ulong Value, out ulong WorldEpoch, out Kiln.EntityId Player) -> void
+Kiln.InventorySnapshotToken.Equals(Kiln.InventorySnapshotToken other) -> bool
+Kiln.InventorySnapshotToken.InventorySnapshotToken() -> void
+Kiln.InventorySnapshotToken.InventorySnapshotToken(ulong Value, ulong WorldEpoch, Kiln.EntityId Player) -> void
+Kiln.InventorySnapshotToken.Player.get -> Kiln.EntityId
+Kiln.InventorySnapshotToken.Player.init -> void
+Kiln.InventorySnapshotToken.Value.get -> ulong
+Kiln.InventorySnapshotToken.Value.init -> void
+Kiln.InventorySnapshotToken.WorldEpoch.get -> ulong
+Kiln.InventorySnapshotToken.WorldEpoch.init -> void
+Kiln.PlayerEquippingEvent
+Kiln.PlayerEquippingEvent.Change.get -> Kiln.EquipmentChange!
+Kiln.PlayerEquippingEvent.Id.get -> Kiln.DecisionId
+Kiln.PlayerEquippingEvent.Involves(Kiln.EntityId entity) -> bool
+Kiln.PlayerEquippingEvent.Player.get -> Kiln.EntityId
+Kiln.PlayerEquippingEvent.PlayerEquippingEvent(Kiln.DecisionId id, Kiln.EventEntityKey player, Kiln.EquipmentChange! change, bool priorCanceled, string? priorCanceledBy) -> void
+Kiln.PlayerEquippingEvent.PlayerKey.get -> Kiln.EventEntityKey
+Kiln.PlayerEquippingEvent.PriorCanceled.get -> bool
+Kiln.PlayerEquippingEvent.PriorCanceledBy.get -> string?
+Kiln.SetEquipmentChange
+Kiln.SetEquipmentChange.Deconstruct(out ulong ItemsTicket, out Kiln.InventorySnapshotToken Snapshot, out Kiln.EquipmentSet! Set, out bool DryRun) -> void
+Kiln.SetEquipmentChange.DryRun.get -> bool
+Kiln.SetEquipmentChange.DryRun.init -> void
+Kiln.SetEquipmentChange.Equals(Kiln.SetEquipmentChange? other) -> bool
+Kiln.SetEquipmentChange.ItemsTicket.get -> ulong
+Kiln.SetEquipmentChange.ItemsTicket.init -> void
+Kiln.SetEquipmentChange.Set.get -> Kiln.EquipmentSet!
+Kiln.SetEquipmentChange.Set.init -> void
+Kiln.SetEquipmentChange.SetEquipmentChange(ulong ItemsTicket, Kiln.InventorySnapshotToken Snapshot, Kiln.EquipmentSet! Set, bool DryRun) -> void
+Kiln.SetEquipmentChange.Snapshot.get -> Kiln.InventorySnapshotToken
+Kiln.SetEquipmentChange.Snapshot.init -> void
+Kiln.SingleEquipmentChange
+Kiln.SingleEquipmentChange.Deconstruct(out Kiln.EquipmentChangeKind Operation, out Kiln.EquipmentSlot Slot, out Kiln.EquipmentSetSelection! Selection) -> void
+Kiln.SingleEquipmentChange.Equals(Kiln.SingleEquipmentChange? other) -> bool
+Kiln.SingleEquipmentChange.Operation.get -> Kiln.EquipmentChangeKind
+Kiln.SingleEquipmentChange.Operation.init -> void
+Kiln.SingleEquipmentChange.Selection.get -> Kiln.EquipmentSetSelection!
+Kiln.SingleEquipmentChange.Selection.init -> void
+Kiln.SingleEquipmentChange.SingleEquipmentChange(Kiln.EquipmentChangeKind Operation, Kiln.EquipmentSlot Slot, Kiln.EquipmentSetSelection! Selection) -> void
+Kiln.SingleEquipmentChange.Slot.get -> Kiln.EquipmentSlot
+Kiln.SingleEquipmentChange.Slot.init -> void
+Kiln.StackEquipment
+Kiln.StackEquipment.Deconstruct(out Kiln.ItemId Item, out Kiln.SlotId Source, out int ExpectedCount) -> void
+Kiln.StackEquipment.Equals(Kiln.StackEquipment? other) -> bool
+Kiln.StackEquipment.ExpectedCount.get -> int
+Kiln.StackEquipment.ExpectedCount.init -> void
+Kiln.StackEquipment.Item.get -> Kiln.ItemId
+Kiln.StackEquipment.Item.init -> void
+Kiln.StackEquipment.Source.get -> Kiln.SlotId
+Kiln.StackEquipment.Source.init -> void
+Kiln.StackEquipment.StackEquipment(Kiln.ItemId Item, Kiln.SlotId Source, int ExpectedCount) -> void
+abstract Kiln.EquipmentChange.<Clone>$() -> Kiln.EquipmentChange!
+abstract Kiln.EquipmentSetSelection.<Clone>$() -> Kiln.EquipmentSetSelection!
+override Kiln.CollectionEquipmentChange.<Clone>$() -> Kiln.CollectionEquipmentChange!
+override Kiln.CollectionEquipmentChange.Equals(object? obj) -> bool
+override Kiln.CollectionEquipmentChange.GetHashCode() -> int
+override Kiln.CollectionEquipmentChange.ToString() -> string!
+override Kiln.CollectionStack.Equals(object? obj) -> bool
+override Kiln.CollectionStack.GetHashCode() -> int
+override Kiln.CollectionStack.ToString() -> string!
+override Kiln.EmptyEquipment.<Clone>$() -> Kiln.EmptyEquipment!
+override Kiln.EmptyEquipment.Equals(object? obj) -> bool
+override Kiln.EmptyEquipment.GetHashCode() -> int
+override Kiln.EmptyEquipment.ToString() -> string!
+override Kiln.EquipmentChange.Equals(object? obj) -> bool
+override Kiln.EquipmentChange.GetHashCode() -> int
+override Kiln.EquipmentChange.ToString() -> string!
+override Kiln.EquipmentSet.Equals(object? obj) -> bool
+override Kiln.EquipmentSet.GetHashCode() -> int
+override Kiln.EquipmentSet.ToString() -> string!
+override Kiln.EquipmentSetEntry.Equals(object? obj) -> bool
+override Kiln.EquipmentSetEntry.GetHashCode() -> int
+override Kiln.EquipmentSetEntry.ToString() -> string!
+override Kiln.EquipmentSetScope.Equals(object? obj) -> bool
+override Kiln.EquipmentSetScope.GetHashCode() -> int
+override Kiln.EquipmentSetScope.ToString() -> string!
+override Kiln.EquipmentSetSelection.Equals(object? obj) -> bool
+override Kiln.EquipmentSetSelection.GetHashCode() -> int
+override Kiln.EquipmentSetSelection.ToString() -> string!
+override Kiln.InstanceEquipment.<Clone>$() -> Kiln.InstanceEquipment!
+override Kiln.InstanceEquipment.Equals(object? obj) -> bool
+override Kiln.InstanceEquipment.GetHashCode() -> int
+override Kiln.InstanceEquipment.ToString() -> string!
+override Kiln.InventorySnapshotToken.GetHashCode() -> int
+override Kiln.SetEquipmentChange.<Clone>$() -> Kiln.SetEquipmentChange!
+override Kiln.SetEquipmentChange.Equals(object? obj) -> bool
+override Kiln.SetEquipmentChange.GetHashCode() -> int
+override Kiln.SetEquipmentChange.ToString() -> string!
+override Kiln.SingleEquipmentChange.<Clone>$() -> Kiln.SingleEquipmentChange!
+override Kiln.SingleEquipmentChange.Equals(object? obj) -> bool
+override Kiln.SingleEquipmentChange.GetHashCode() -> int
+override Kiln.SingleEquipmentChange.ToString() -> string!
+override Kiln.StackEquipment.<Clone>$() -> Kiln.StackEquipment!
+override Kiln.StackEquipment.Equals(object? obj) -> bool
+override Kiln.StackEquipment.GetHashCode() -> int
+override Kiln.StackEquipment.ToString() -> string!
+override sealed Kiln.CollectionEquipmentChange.Equals(Kiln.EquipmentChange? other) -> bool
+override sealed Kiln.EmptyEquipment.Equals(Kiln.EquipmentSetSelection? other) -> bool
+override sealed Kiln.InstanceEquipment.Equals(Kiln.EquipmentSetSelection? other) -> bool
+override sealed Kiln.SetEquipmentChange.Equals(Kiln.EquipmentChange? other) -> bool
+override sealed Kiln.SingleEquipmentChange.Equals(Kiln.EquipmentChange? other) -> bool
+override sealed Kiln.StackEquipment.Equals(Kiln.EquipmentSetSelection? other) -> bool
+static Kiln.CollectionEquipmentChange.operator !=(Kiln.CollectionEquipmentChange? left, Kiln.CollectionEquipmentChange? right) -> bool
+static Kiln.CollectionEquipmentChange.operator ==(Kiln.CollectionEquipmentChange? left, Kiln.CollectionEquipmentChange? right) -> bool
+static Kiln.CollectionStack.operator !=(Kiln.CollectionStack? left, Kiln.CollectionStack? right) -> bool
+static Kiln.CollectionStack.operator ==(Kiln.CollectionStack? left, Kiln.CollectionStack? right) -> bool
+static Kiln.EmptyEquipment.operator !=(Kiln.EmptyEquipment? left, Kiln.EmptyEquipment? right) -> bool
+static Kiln.EmptyEquipment.operator ==(Kiln.EmptyEquipment? left, Kiln.EmptyEquipment? right) -> bool
+static Kiln.EquipmentChange.operator !=(Kiln.EquipmentChange? left, Kiln.EquipmentChange? right) -> bool
+static Kiln.EquipmentChange.operator ==(Kiln.EquipmentChange? left, Kiln.EquipmentChange? right) -> bool
+static Kiln.EquipmentSet.operator !=(Kiln.EquipmentSet? left, Kiln.EquipmentSet? right) -> bool
+static Kiln.EquipmentSet.operator ==(Kiln.EquipmentSet? left, Kiln.EquipmentSet? right) -> bool
+static Kiln.EquipmentSetEntry.operator !=(Kiln.EquipmentSetEntry? left, Kiln.EquipmentSetEntry? right) -> bool
+static Kiln.EquipmentSetEntry.operator ==(Kiln.EquipmentSetEntry? left, Kiln.EquipmentSetEntry? right) -> bool
+static Kiln.EquipmentSetScope.operator !=(Kiln.EquipmentSetScope? left, Kiln.EquipmentSetScope? right) -> bool
+static Kiln.EquipmentSetScope.operator ==(Kiln.EquipmentSetScope? left, Kiln.EquipmentSetScope? right) -> bool
+static Kiln.EquipmentSetSelection.operator !=(Kiln.EquipmentSetSelection? left, Kiln.EquipmentSetSelection? right) -> bool
+static Kiln.EquipmentSetSelection.operator ==(Kiln.EquipmentSetSelection? left, Kiln.EquipmentSetSelection? right) -> bool
+static Kiln.InstanceEquipment.operator !=(Kiln.InstanceEquipment? left, Kiln.InstanceEquipment? right) -> bool
+static Kiln.InstanceEquipment.operator ==(Kiln.InstanceEquipment? left, Kiln.InstanceEquipment? right) -> bool
+static Kiln.InventorySnapshotToken.operator !=(Kiln.InventorySnapshotToken left, Kiln.InventorySnapshotToken right) -> bool
+static Kiln.InventorySnapshotToken.operator ==(Kiln.InventorySnapshotToken left, Kiln.InventorySnapshotToken right) -> bool
+static Kiln.SetEquipmentChange.operator !=(Kiln.SetEquipmentChange? left, Kiln.SetEquipmentChange? right) -> bool
+static Kiln.SetEquipmentChange.operator ==(Kiln.SetEquipmentChange? left, Kiln.SetEquipmentChange? right) -> bool
+static Kiln.SingleEquipmentChange.operator !=(Kiln.SingleEquipmentChange? left, Kiln.SingleEquipmentChange? right) -> bool
+static Kiln.SingleEquipmentChange.operator ==(Kiln.SingleEquipmentChange? left, Kiln.SingleEquipmentChange? right) -> bool
+static Kiln.StackEquipment.operator !=(Kiln.StackEquipment? left, Kiln.StackEquipment? right) -> bool
+static Kiln.StackEquipment.operator ==(Kiln.StackEquipment? left, Kiln.StackEquipment? right) -> bool
+virtual Kiln.EquipmentChange.EqualityContract.get -> System.Type!
+virtual Kiln.EquipmentChange.Equals(Kiln.EquipmentChange? other) -> bool
+virtual Kiln.EquipmentChange.PrintMembers(System.Text.StringBuilder! builder) -> bool
+virtual Kiln.EquipmentSetSelection.EqualityContract.get -> System.Type!
+virtual Kiln.EquipmentSetSelection.Equals(Kiln.EquipmentSetSelection? other) -> bool
+virtual Kiln.EquipmentSetSelection.PrintMembers(System.Text.StringBuilder! builder) -> bool
+~override Kiln.InventorySnapshotToken.Equals(object obj) -> bool
+~override Kiln.InventorySnapshotToken.ToString() -> string

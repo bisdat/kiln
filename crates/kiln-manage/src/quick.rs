@@ -128,7 +128,7 @@ fn validate_zip(path: &Path) -> Result<()> {
 
 /// Serialize quick operations across threads and launcher processes. Keep the lock file: unlinking a held lock
 /// would let another process lock a different inode. Profile/game writes themselves use atomic replacement.
-fn lock(dirs: &DataDirs) -> Result<crate::util::LockedFile> {
+pub(crate) fn lock(dirs: &DataDirs) -> Result<crate::util::LockedFile> {
     std::fs::create_dir_all(&dirs.root)?;
     let f = std::fs::OpenOptions::new().create(true).truncate(false).read(true).write(true).open(dirs.root.join("quick.lock"))?;
     f.lock()?;
@@ -719,7 +719,18 @@ fn put_in_profile(dirs: &DataDirs, install: &GameInstall, target: &Target, refs:
     };
     let (missing, added) = details().map_err(|e| if target.created { cleanup_created(dirs, install, &p.id, e) } else { e })?;
     progress.report(None, &format!("adding to {}", p.name));
-    let saved = profile::save(dirs, &p).map_err(|e| if target.created { cleanup_created(dirs, install, &p.id, e) } else { e })?;
+    // another version of a mod in the profile: the one it replaced is kept for a roll back, with its settings as its
+    // game-folder copy holds them now (before the placement below carries them over), unless Settings keeps none. One
+    // transaction with the profile save (kept::prepare): committed when the save is done, undone when it is not.
+    let kept = crate::kept::prepare_changes(dirs, &p, Some(&install.path), &changes, false);
+    let saved = match profile::save(dirs, &p) {
+        Ok(saved) => saved,
+        Err(e) => {
+            kept.abort();
+            return Err(if target.created { cleanup_created(dirs, install, &p.id, e) } else { e });
+        }
+    };
+    report.notices.extend(kept.commit());
     if !running {
         progress.report(None, "writing the game's profile.json");
         match profile::refresh_active(dirs, install) {
@@ -792,6 +803,7 @@ pub fn revert(dirs: &DataDirs, profile_id: &str, changes: &[ProfileChange]) -> R
 fn revert_unlocked(dirs: &DataDirs, profile_id: &str, changes: &[ProfileChange]) -> Result<Profile> {
     let mut p = profile::get(dirs, profile_id)?;
     let mut changed = false;
+    let mut reverted = Vec::new();
     for c in changes.iter().rev() {
         let list = mods_of(&mut p.mods, c.kind);
         let Some(i) = list.iter().position(|m| m.id == c.after.id) else { continue };
@@ -804,10 +816,23 @@ fn revert_unlocked(dirs: &DataDirs, profile_id: &str, changes: &[ProfileChange])
                 list.remove(i);
             }
         }
+        reverted.push(c.clone());
         changed = true;
     }
     if !changed {
         return Ok(p);
     }
-    profile::save(dirs, &p)
+    // an Undo of an update or of a roll back is a change between versions too: the version left is kept, a kept one
+    // that comes back gets its settings at its next placement (kept::prepare, one transaction with the save)
+    let kept = crate::kept::prepare_changes(dirs, &p, None, &reverted, true);
+    match profile::save(dirs, &p) {
+        Ok(saved) => {
+            kept.commit();
+            Ok(saved)
+        }
+        Err(e) => {
+            kept.abort();
+            Err(e)
+        }
+    }
 }

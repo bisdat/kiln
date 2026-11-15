@@ -93,7 +93,7 @@
     ["failed", 56],
     ["updates", 64]
   ] },
-  "KilnWorldApiV4": { "size": 440, "fields": [
+  "KilnWorldApiV4": { "size": 448, "fields": [
     ["header", 0],
     ["register_program", 8],
     ["program_slot", 16],
@@ -148,7 +148,7 @@
     ["game_archetype_has", 408],
     ["game_slice_attr_changed", 416],
     ["game_slice_attr_validate", 424],
-    ["game_world_session", 432]
+    ["game_world_session", 432], ["game_program_contract", 440]
   ] },
   "KilnGameProgramInfo": { "size": 88, "fields": [
     ["size", 0],

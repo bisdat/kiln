@@ -89,6 +89,14 @@ static KilnUiWheel def(const KilnStr* items, uint32_t n, uint32_t hold = 0, cons
 }
 
 int main() {
+    kui::g_overlay_mode = kui::OverlayMode::drawing_off;
+    kui::g_menu_open = true;
+    kui::g_interactive = 3;
+    CHECK(!kui::capturing());
+    CHECK(kui::wheel_open(7, nullptr, nullptr, nullptr, nullptr) == KILN_ERR_UNAVAILABLE);
+    kui::g_menu_open = false;
+    kui::g_interactive = 0;
+    kui::g_overlay_mode = kui::OverlayMode::on;
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.IniFilename = nullptr;

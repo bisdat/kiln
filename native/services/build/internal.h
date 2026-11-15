@@ -135,6 +135,11 @@ KilnResult item_template(uint32_t item, KilnGuid* out);
 
 // ---- Kiln save regions (regions.cpp) ----
 bool regions_install();  // kiln_plugin_main: hook the game's save-region builder
+void terrain_budget_reset();
+bool terrain_budget_reserve(uint32_t read, uint32_t write);
+void terrain_budget_charge(double ms);
+bool regions_save_running(); // a confirmed load of the current world, never a count of process steps
+bool regions_lifecycle_safe(); // installed world-stop observer AND a functioning core destroy hook
 void regions_ready();    // on_ready
 void regions_keep(const int32_t origin[3], const uint32_t dims[3]);      // tick: chunks of a committed write
 size_t regions_release(const int32_t origin[3], const uint32_t dims[3]);  // chunks inside the box, forgotten

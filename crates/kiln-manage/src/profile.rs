@@ -218,6 +218,11 @@ impl ProfileFileMods {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileFile {
+    /// Enabled EML packages requiring hosted ShroudForge (default empty for older launchers).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub eml_runtime: Vec<String>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub eml_runtime_blocked: std::collections::BTreeMap<String, String>,
     #[serde(default, rename = "$schema", skip_serializing_if = "Option::is_none")]
     pub schema: Option<String>,
     pub format: u32,
@@ -779,15 +784,16 @@ pub fn create(dirs: &DataDirs, name: &str, copy_from: Option<&str>) -> Result<Pr
     check_profile(&p)?;
     let dir = dirs.profile(&id);
     for d in ["config", "data"] {
-        std::fs::create_dir_all(dir.join(d)).map_err(io_at(&dir, "creating"))?;
+        crate::durable::ensure_dir(&dir.join(d))?;
     }
     if let Some(s) = &src {
         let from = dirs.profile(&s.id).join("config");
         if from.is_dir() {
             crate::util::copy_tree(&from, &dir.join("config"))?;
+            crate::durable::flush_contents(&dir.join("config"))?;
         }
     }
-    crate::util::write_json_atomic(&meta_path(dirs, &id), &p)?;
+    crate::durable::json(&meta_path(dirs, &id), &p, &[dir.join("config"), dir.join("data")])?;
     Ok(p)
 }
 
@@ -832,7 +838,10 @@ pub fn save(dirs: &DataDirs, profile: &Profile) -> Result<Profile> {
     p.generation = next_generation(p.generation)?;
     p.created = stored.created;
     p.updated = now_rfc3339();
-    crate::util::write_json_atomic(&meta_path(dirs, &p.id), &p)?;
+    // durably (crate::durable): kept versions' records depend on the profile they follow
+    let mut text = serde_json::to_string_pretty(&p)?;
+    text.push('\n');
+    crate::durable::replace(&meta_path(dirs, &p.id), text.as_bytes())?;
     Ok(p)
 }
 
@@ -1176,7 +1185,33 @@ pub fn render(dirs: &DataDirs, profile: &Profile, install: &GameInstall, mode: P
         DataDirMode::Profile => Some(game_or_copy(&pdir.join("data"), install, mode, || format!("{COPY_ROOT_REL}/{pid}/data"))?),
     };
     let dropins = profile.dropins_file();
+    let view = crate::own_loaders::ProfileView::of_profile(profile).with_library(dirs, profile);
+    let eml_runtime = view.eml_runtime.clone();
+    let loaders = crate::own_loaders::find(&install.path, Some(&view));
+    let mut eml_runtime_blocked = std::collections::BTreeMap::new();
+    for id in &eml_runtime {
+        if let Some(m) = mods.eml.iter_mut().find(|m| &m.id == id) {
+            if crate::own_loaders::shroudforge_runs_eml(&loaders) {
+                // Compatibility signal for adapters predating emlRuntime: this profile uses SF for this package.
+                if !mods.shroudforge.iter().any(|s| s.id == *id && s.enabled) {
+                    let mut engine = m.clone();
+                    engine.enabled = true;
+                    mods.shroudforge.push(engine);
+                }
+                // SF reads its placed copy/switch, not this list. Disable kiln-eml's route even for old runners:
+                // if an older adapter fails before reserving the writer, no data-only fallback may run.
+                m.enabled = false;
+            } else {
+                m.enabled = false;
+                let why = if std::env::var("KILN_SHROUDFORGE").as_deref() == Ok("0") { "KILN_SHROUDFORGE=0" }
+                    else { "the ShroudForge component is missing or unavailable" };
+                eml_runtime_blocked.insert(id.clone(), format!("needs ShroudForge's runtime, which is not running: {why}; its data was not applied, so the game is as without the mod. Install/enable ShroudForge and activate again"));
+            }
+        }
+    }
     Ok(ProfileFile {
+        eml_runtime,
+        eml_runtime_blocked,
         schema: None,
         format: 1,
         id: profile.id.clone(),
@@ -1618,12 +1653,21 @@ pub fn activate(dirs: &DataDirs, profile_id: &str, install: &GameInstall) -> Res
     // chain.ini first: its [chain] lines (a compat rule may switch a chained loader off) decide which own loaders run
     let (_, order_notes) = write_chain_plan(dirs, &profile, install, &file)?;
     // ShroudForge and SET read their mods from their own folder in the game; the other engines' own loaders too.
-    let placed = crate::engine_mods::place(dirs, &profile, &install.path)?;
+    let mut placed = crate::engine_mods::place(dirs, &profile, &install.path)?;
+    // a version a roll back put into the profile: the settings it had before the update go back into its copy
+    placed.kept_files.extend(crate::kept::restore_after_place(dirs, &profile, &install.path));
     // Greeneye and Flame mods run from the copies place() just made in <game>/greeneye/ and <game>/mods/
     // (engine_mods::game_path_of)
     file.mods = render(dirs, &profile, install, mode)?.mods;
     let pj = install.path.join(crate::paths::game::PROFILE);
-    crate::util::write_json_atomic(&pj, &file)?;
+    // Preserve the legacy writer's conflict check: a directory in its staging slot may belong to another
+    // launcher/recovery. The durable writer uses exclusive random temps and never truncates that path.
+    let legacy_stage = crate::util::with_suffix(&pj, ".tmp");
+    if std::fs::symlink_metadata(&legacy_stage).is_ok_and(|m| m.is_dir()) {
+        return Err(Error::new(ErrorCode::Io, format!("{}: legacy profile staging path is a directory", legacy_stage.display())));
+    }
+    crate::durable::json(&pj, &file, &[])?;
+    crate::kept::crash_point(crate::kept::Step::GameProfileWritten);
     remove_if_there(&install.path.join(crate::paths::game::CHAIN_ONCE))?;
     remove_if_there(&install.path.join(crate::paths::game::PROFILE_ONCE))?;
     let a = Activation {
@@ -1642,7 +1686,7 @@ pub fn activate(dirs: &DataDirs, profile_id: &str, install: &GameInstall) -> Res
         retained: placed.retained,
         safety_notes: placed.safety_notes,
     };
-    let _ = crate::util::write_json_atomic(&activation_record(dirs, install), &a);
+    let _ = crate::durable::json(&activation_record(dirs, install), &a, &[pj.clone()]);
     Ok(a)
 }
 
@@ -1674,7 +1718,8 @@ pub fn refresh_active(dirs: &DataDirs, install: &GameInstall) -> Result<Option<A
         // A play-once profile also changes SF/SET's fixed folders. Reconcile those copies before the next normal
         // launch even though profile.json itself still describes the active profile. Never change them mid-game.
         if running_process(install)?.is_none() {
-            let placed = crate::engine_mods::place(dirs, &profile, &install.path)?;
+            let mut placed = crate::engine_mods::place(dirs, &profile, &install.path)?;
+            placed.kept_files.extend(crate::kept::restore_after_place(dirs, &profile, &install.path));
             // a copy placed only now (an older Kiln's file names the Library entry): the file must name the copy
             if !render(dirs, &profile, install, mode).is_ok_and(|fresh| same(&fresh, &file)) {
                 let mut a = activate(dirs, &profile.id, install)?;

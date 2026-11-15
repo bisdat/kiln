@@ -265,6 +265,8 @@ internal static partial class KilnApis
         "M:Kiln.Creatures.Near(Kiln.WorldPosition,System.Double,System.Nullable{Kiln.CreatureKind})", // Creatures.Near(WorldPosition, double, CreatureKind?): Services.RequireTickThread
         "M:Kiln.Creatures.RefreshCopies(Kiln.EntityId)", // Creatures.RefreshCopies(EntityId): via Creatures.Tick(string)
         "M:Kiln.Creatures.Spawn(System.String,Kiln.WorldPosition,System.Single,Kiln.CreatureSpawnOptions)", // Creatures.Spawn(string, WorldPosition, float, CreatureSpawnOptions?): Services.RequireTickThread
+        "M:Kiln.Decisions.LabDecide(Kiln.EntityId,System.Nullable{System.Boolean})", // Decisions.LabDecide(EntityId, bool?): via DecisionBroker.LabDecide(EntityId, bool?, out int)
+        "M:Kiln.Decisions.ReevaluatePickup(Kiln.EntityId,Kiln.EntityId)", // Decisions.ReevaluatePickup(EntityId, EntityId): Services.RequireTickThread
         "M:Kiln.Dialogues.ApplyOption(Kiln.EntityId,Kiln.EntityId,System.String,System.String,System.Int32)", // Dialogues.ApplyOption(EntityId, EntityId, string, string, int): Game.AssertTickThread
         "M:Kiln.Dialogues.Choose(Kiln.QuestHolder,System.Int64,System.Int32)", // Dialogues.Choose(QuestHolder, long, int): Game.AssertTickThread
         "M:Kiln.Dialogues.Close(Kiln.QuestHolder)", // Dialogues.Close(QuestHolder): Game.AssertTickThread
@@ -490,6 +492,13 @@ internal static partial class KilnApis
         "M:Kiln.ProgramWrap.BeforeEach(Kiln.EntityViewHandler,System.Nullable{System.Int32})", // ProgramWrap.BeforeEach(EntityViewHandler, int?): via ProgramWrap.Add(WrapStage, SliceHandler?, Delegate?, int?)
         "M:Kiln.ProgramWrap.Dispose", // ProgramWrap.Dispose(): Services.RequireTickThread
         "M:Kiln.ProgramWrap.Replace(Kiln.SliceHandler)", // ProgramWrap.Replace(SliceHandler): Services.RequireTickThread
+        "M:Kiln.ProgramWrap`1.After(Kiln.SliceHandler,System.Nullable{System.Int32})", // ProgramWrap<T>.After(SliceHandler, int?): via ProgramWrap.After(SliceHandler, int?)
+        "M:Kiln.ProgramWrap`1.AfterEach(Kiln.EntityHandler{`0},System.Nullable{System.Int32})", // ProgramWrap<T>.AfterEach(EntityHandler<T>, int?): via ProgramWrap.AfterEach(EntityViewHandler, int?)
+        "M:Kiln.ProgramWrap`1.AroundEach``1(Kiln.Capture{`0,``0},Kiln.Apply{`0,``0},System.Nullable{System.Int32})", // ProgramWrap<T>.AroundEach<TSnap>(Capture<T, TSnap>, Apply<T, TSnap>, int?): via ProgramWrap.Around(IAround, int?)
+        "M:Kiln.ProgramWrap`1.Before(Kiln.SliceHandler,System.Nullable{System.Int32})", // ProgramWrap<T>.Before(SliceHandler, int?): via ProgramWrap.Before(SliceHandler, int?)
+        "M:Kiln.ProgramWrap`1.BeforeEach(Kiln.EntityHandler{`0},System.Nullable{System.Int32})", // ProgramWrap<T>.BeforeEach(EntityHandler<T>, int?): via ProgramWrap.BeforeEach(EntityViewHandler, int?)
+        "M:Kiln.ProgramWrap`1.Dispose", // ProgramWrap<T>.Dispose(): via ProgramWrap.Dispose()
+        "M:Kiln.ProgramWrap`1.Replace(Kiln.SliceHandler)", // ProgramWrap<T>.Replace(SliceHandler): via ProgramWrap.Replace(SliceHandler)
         "M:Kiln.ProgressFact.Holds(Kiln.EntityId)", // ProgressFact.Holds(EntityId): Services.RequireTickThread
         "M:Kiln.ProgressFact.Holds(Kiln.Player)", // ProgressFact.Holds(Player): via ProgressFact.Holds(EntityId)
         "M:Kiln.Progression.Diagnostics.ExperienceForLevel(System.Int32)", // Progression.Diagnostics.ExperienceForLevel(int): Services.RequireTickThread
@@ -619,12 +628,14 @@ internal static partial class KilnApis
         "M:Kiln.Spire.get_Unlocked", // Spire.Unlocked.get: via ProgressFact.Holds(EntityId)
         "M:Kiln.Survivor.RescuedFor(Kiln.Player)", // Survivor.RescuedFor(Player): via ProgressFact.Holds(EntityId)
         "M:Kiln.Survivor.get_Rescued", // Survivor.Rescued.get: via ProgressFact.Holds(EntityId)
-        "M:Kiln.Systems.Wrap(System.String,Kiln.WrapOptions)", // Systems.Wrap(string, WrapOptions?): Services.RequireTickThread
+        "M:Kiln.Systems.Wrap(System.String,Kiln.WrapOptions)", // Systems.Wrap(string, WrapOptions?): via Systems.Check(string, WrapOptions, string, out SystemsNative.Table*, out int)
+        "M:Kiln.Systems.Wrap``1(Kiln.WrapOptions)", // Systems.Wrap<T>(WrapOptions?): via Systems.Check(string, WrapOptions, string, out SystemsNative.Table*, out int)
         "M:Kiln.Teleport.To(Kiln.EntityId,Kiln.WorldPosition,Kiln.TeleportOptions)", // Teleport.To(EntityId, WorldPosition, TeleportOptions?): via Teleport.Start(EntityId, WorldPosition, EntityId, TeleportOptions)
         "M:Kiln.Teleport.ToEntity(Kiln.EntityId,Kiln.EntityId,System.Double,Kiln.TeleportOptions)", // Teleport.ToEntity(EntityId, EntityId, double, TeleportOptions?): Services.RequireTickThread
         "M:Kiln.Teleport.ToSpawnPoint(Kiln.EntityId,Kiln.EntityId,Kiln.TeleportOptions)", // Teleport.ToSpawnPoint(EntityId, EntityId, TeleportOptions?): via Teleport.Start(EntityId, WorldPosition, EntityId, TeleportOptions)
         "M:Kiln.Terrain.Apply(Kiln.TerrainPatch,Kiln.TerrainApplyOptions)", // Terrain.Apply(TerrainPatch, TerrainApplyOptions?): via Terrain.Begin(TerrainPatch, TerrainApplyOptions?, string, string)
         "M:Kiln.Terrain.Forget(System.String)", // Terrain.Forget(string): Services.RequireTickThread
+        "M:Kiln.Terrain.Forget(System.String,System.Boolean)", // Terrain.Forget(string, bool): Services.RequireTickThread
         "M:Kiln.Terrain.Inspect(Kiln.TerrainPatch,Kiln.TerrainApplyOptions)", // Terrain.Inspect(TerrainPatch, TerrainApplyOptions?): via Terrain.Begin(TerrainPatch, TerrainApplyOptions?, string, string)
         "M:Kiln.Terrain.get_Applied", // Terrain.Applied.get: Services.RequireTickThread
         "M:Kiln.Time.ReleaseWeather(System.Nullable{System.Int32},System.Boolean)", // Time.ReleaseWeather(int?, bool): Services.RequireTickThread

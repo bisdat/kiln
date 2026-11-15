@@ -2,10 +2,12 @@
 // kiln.build: world edits the game itself saves and replicates (voxels through the engine's block writer and store
 // commit, props with the building helper's components). See native/core/abi/services/kiln_build.h for the contract and
 // docs/re/build.md for the evidence.
+#ifndef KILN_BUILD_WORLD_TEST
 #include <cstdarg>
 #include <cstdio>
 
 #include "internal.h"
+#include "terrain_budget.h"
 
 namespace kb {
 
@@ -23,6 +25,7 @@ namespace {
 std::mutex g_detail_mu;
 char g_detail[160] = "";
 uint64_t g_steps = 0;
+TerrainIoBudget g_terrain_budget;
 KilnHandle g_pre = 0;
 }  // namespace
 
@@ -50,6 +53,10 @@ void detail_copy(char* out, size_t n) {
     std::snprintf(out, n, "%s", g_detail);
 }
 
+void terrain_budget_reset() { g_terrain_budget.reset(); }
+bool terrain_budget_reserve(uint32_t read, uint32_t write) { return g_terrain_budget.acquire(read, write); }
+void terrain_budget_charge(double ms) { g_terrain_budget.charge(ms); }
+
 uint32_t fnv1a(std::string_view s, uint32_t h) {
     for (unsigned char c : s) {
         h ^= c;
@@ -63,11 +70,33 @@ int64_t m_to_fixed(double m) { return static_cast<int64_t>(std::llround(m * 4294
 uintptr_t server_world() { return g_api && g_api->server_world ? g_api->server_world() : 0; }
 bool tick_thread() { return g_api->on_tick_thread && g_api->on_tick_thread(); }
 
+#else
+namespace kb {
+#endif
+
 bool world_running() {
-    if (g_spawn && g_spawn->world_state) return g_spawn->world_state() == KILN_SPAWN_WORLD_RUNNING;
-    return g_steps > 24 * 60 * 4;  // without kiln.spawn: 4 minutes of steps
+    if (!regions_lifecycle_safe()) return false;
+    const uintptr_t world = server_world();
+    KilnSessionInfo session{};
+    session.size = sizeof session;
+    if (!world || !g_api->session || g_api->session(&session) != KILN_OK ||
+        !session.lifecycle || session.worlds[KILN_WORLD_SERVER] != world ||
+        (session.state != KILN_SESSION_HOST && session.state != KILN_SESSION_DEDICATED)) {
+        set_detail("the current server world is not running or its lifecycle cannot be observed");
+        return false;
+    }
+    if (g_spawn && g_spawn->world_state) {
+        if (g_spawn->world_state() == KILN_SPAWN_WORLD_RUNNING) return true;
+        set_detail("the current server world is loading; kiln.spawn has not reported Run");
+        return false;
+    }
+    // Core STARTED means the first simulation step, not that the save finished loading. Require the load hook too.
+    if (regions_save_running()) return true;
+    set_detail("world Run state unavailable: kiln.spawn is absent and kiln.saves has no confirmed loaded world");
+    return false;
 }
 
+#ifndef KILN_BUILD_WORLD_TEST
 namespace {
 
 template <class F>
@@ -88,15 +117,16 @@ KilnResult KILN_CALL t_status(KilnBuildStatus* out) {
     const uint32_t size = out->size;
     std::memset(out, 0, sizeof *out);
     out->size = size;
+    const bool lifecycle = regions_lifecycle_safe();
     out->read = F.read;
-    out->write = F.write;
+    out->write = F.write && lifecycle;
     out->props = F.props;
-    out->world = server_world() != 0;
+    out->world = lifecycle && world_running();
     out->reads = S.reads, out->writes = S.writes, out->cells_read = S.cells_read, out->cells_written = S.cells_written;
     out->blocks_written = S.blocks_written, out->props_placed = S.props_placed, out->props_removed = S.props_removed;
     out->refused = S.refused;
     detail_copy(out->detail, sizeof out->detail);
-    out->persist = F.persist;
+    out->persist = F.persist && lifecycle;
     regions_status(&out->kept_chunks, &out->saves_seen, &out->boxes_added);
     return KILN_OK;
 }
@@ -153,7 +183,7 @@ KilnResult KILN_CALL t_keep(const int32_t o[3], const uint32_t d[3]) {
         uint64_t n = 0;
         if (!box_ok(o, d, &n)) return KILN_ERR_INVALID_ARGUMENT;
         if (!tick_thread()) return KILN_ERR_WRONG_THREAD;
-        if (!F.persist) return KILN_ERR_UNAVAILABLE;
+        if (!F.persist || !regions_lifecycle_safe() || !world_running()) return KILN_ERR_UNAVAILABLE;
         regions_keep(o, d);
         return KILN_OK;
     });
@@ -164,11 +194,21 @@ KilnResult KILN_CALL t_release(const int32_t o[3], const uint32_t d[3], uint64_t
         if (released) *released = 0;
         if (!box_ok(o, d, &n)) return KILN_ERR_INVALID_ARGUMENT;
         if (!tick_thread()) return KILN_ERR_WRONG_THREAD;
-        if (!F.persist) return KILN_ERR_UNAVAILABLE;
+        if (!F.persist || !regions_lifecycle_safe() || !world_running()) return KILN_ERR_UNAVAILABLE;
         const size_t r = regions_release(o, d);
         if (released) *released = r;
         return KILN_OK;
     });
+}
+
+KilnResult KILN_CALL t_terrain_budget_reserve(uint32_t read, uint32_t write) {
+    if (read > 32768 || write > 4096) return KILN_ERR_INVALID_ARGUMENT;
+    if (!tick_thread()) return KILN_ERR_WRONG_THREAD;
+    if (!world_running()) return KILN_ERR_UNAVAILABLE;
+    return terrain_budget_reserve(read, write) ? KILN_OK : KILN_ERR_UNAVAILABLE;
+}
+void KILN_CALL t_terrain_budget_charge(double ms) {
+    if (tick_thread()) terrain_budget_charge(ms);
 }
 
 const KilnBuildApi kTable = {
@@ -189,15 +229,18 @@ const KilnBuildApi kTable = {
     &t_item_template,
     &t_keep,
     &t_release,
+    &t_terrain_budget_reserve,
+    &t_terrain_budget_charge,
 };
 
 void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
     ++g_steps;
     if (!server_world()) return;
+    g_terrain_budget.begin(tick ? tick->step : g_steps);
     try {
         selftest_pre(tick ? tick->step : g_steps);
         if (g_steps % 24 == 0) regions_flush();
-        transient_pre(g_steps);
+        transient_pre(tick ? tick->step : g_steps);
     } catch (...) {
     }
 }
@@ -264,7 +307,7 @@ void KILN_CALL on_ready(void*) {
     g_gameplay = static_cast<const KilnGameplayApi*>(g_api->service(kstr(KILN_GAMEPLAY_SERVICE), 1));
     props_resolve();
     regions_ready();
-    if (!g_spawn) KB_W("kiln.spawn is unavailable: props and the world-running check are off");
+    if (!g_spawn) KB_W("kiln.spawn is unavailable: voxel writes require core lifecycle and kiln.saves confirmed load state");
     if (!g_world) KB_W("kiln.world is unavailable: base protection and prop details are off");
     if (!g_gameplay) KB_W("kiln.gameplay is unavailable: KILN_BUILD_F_RESPECT_ZONES cannot check zones");
     KB_I("kiln.build: voxel read %s, write %s (kept by the save %s), items %s, props %s (spawn %s, world %s, gameplay %s)",
@@ -297,3 +340,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     selftest_init();
     return api->register_service(owner, KilnStr{KILN_BUILD_SERVICE, sizeof(KILN_BUILD_SERVICE) - 1}, &kTable);
 }
+
+#else
+} // namespace kb
+#endif // KILN_BUILD_WORLD_TEST

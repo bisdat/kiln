@@ -1,3 +1,6 @@
+// kiln-eml: preserve preparation causes and paths through the run and player status.
+use anyhow::Context;
+
 use std::{fs::File, io::BufReader, rc::Rc};
 
 use kfc::{container::{KFCCursor, KFCFile, KFCReader, KFCReaderOptions, KFCWriteOptions, KFCWriter}, reflection::TypeRegistry};
@@ -6,7 +9,7 @@ use crate::{alias::{Path, PathBuf}, log::{debug, error, info, warn}};
 
 pub fn load_kfc_file(
     kfc_path: impl AsRef<Path>
-) -> Result<Rc<KFCFile>, ()> {
+) -> anyhow::Result<Rc<KFCFile>> {
     let kfc_path = kfc_path.as_ref();
 
     match KFCFile::from_path(kfc_path, false) {
@@ -17,7 +20,7 @@ pub fn load_kfc_file(
                 path = ?kfc_path,
                 "Failed to open KFC file",
             );
-            Err(())
+            Err(anyhow::Error::new(e).context(format!("load_kfc_file: could not read {kfc_path} as a game archive")))
         }
     }
 }
@@ -25,7 +28,10 @@ pub fn load_kfc_file(
 pub fn create_reader(
     dir: &Path,
     file_name: &str,
-) -> Result<KFCCursor<KFCReader>, ()> {
+) -> anyhow::Result<KFCCursor<KFCReader>> {
+    // kiln-eml: use display paths, as the plugin does (support reports redact these).
+    let header = dir.join(format!("{file_name}.kfc.bak"));
+    let resources = dir.join(format!("{file_name}.kfc_resources"));
     match KFCReader::new_with_options(
         dir,
         file_name,
@@ -42,7 +48,7 @@ pub fn create_reader(
                 error = %e,
                 "Failed to create KFC reader",
             );
-            Err(())
+            Err(anyhow::Error::new(e).context(format!("create_reader: could not open {header} and {resources}")))
         }
     }
 }
@@ -52,22 +58,23 @@ pub fn create_writer(
     file_name: &str,
     type_registry: &Rc<TypeRegistry>,
     ref_file: &Rc<KFCFile>,
-) -> Result<crate::transaction::PatchWriter, ()> {
+) -> anyhow::Result<crate::transaction::PatchWriter> {
     // kiln-eml: only the private staging directory is writable by the KFC writer.
     let stage = dir.join(format!(".kiln-eml-stage-{}", uuid::Uuid::new_v4()));
-    crate::cleanup::record(dir.as_std_path(), file_name, stage.file_name().ok_or(())?).map_err(|_| ())?;
-    std::fs::create_dir(&stage).map_err(|_| ())?;
+    crate::cleanup::record(dir.as_std_path(), file_name, stage.file_name().ok_or_else(|| anyhow::anyhow!("create_writer: invalid stage path {stage}"))?).with_context(|| format!("create_writer: could not prepare stage {stage}"))?;
+    std::fs::create_dir(&stage).with_context(|| format!("create_writer: could not create stage {stage}"))?;
     let mut patch = crate::transaction::PatchWriter {
         writer: None, stage: stage.clone().into_std_path_buf(), game: dir.into(), name: file_name.into(),
     };
-    crate::transaction::atomic_copy(dir.join(format!("{file_name}.kfc.bak")).as_std_path(),
-        stage.join(crate::transaction::VANILLA_HEADER).as_std_path()).map_err(|_| ())?;
+    let backup = dir.join(format!("{file_name}.kfc.bak"));
+    crate::transaction::atomic_copy(backup.as_std_path(),
+        stage.join(crate::transaction::VANILLA_HEADER).as_std_path()).with_context(|| format!("create_writer: could not copy {backup} to {stage}"))?;
     crate::transaction::atomic_copy(stage.join(crate::transaction::VANILLA_HEADER).as_std_path(),
-        stage.join(format!("{file_name}.kfc")).as_std_path()).map_err(|_| ())?;
+        stage.join(format!("{file_name}.kfc")).as_std_path()).with_context(|| format!("create_writer: could not copy staged header in {stage}"))?;
     let resources_backup = dir.join(format!("{file_name}.kfc_resources.bak"));
     let resources = if resources_backup.exists() { resources_backup } else { dir.join(format!("{file_name}.kfc_resources")) };
     crate::transaction::atomic_copy(resources.as_std_path(),
-        stage.join(format!("{file_name}.kfc_resources")).as_std_path()).map_err(|_| ())?;
+        stage.join(format!("{file_name}.kfc_resources")).as_std_path()).with_context(|| format!("create_writer: could not copy {resources} to {stage}"))?;
     let writer = match KFCWriter::new_incremental_with_options(
         &stage,
         file_name,
@@ -91,7 +98,7 @@ pub fn create_writer(
                 error = %e,
                 "Failed to create KFC writer",
             );
-            return Err(());
+            return Err(anyhow::Error::new(e).context(format!("create_writer: could not create archive writer in {stage}")));
         }
     };
 
@@ -101,22 +108,23 @@ pub fn create_writer(
 
 pub fn create_backup(
     kfc_path: impl AsRef<Path>
-) -> Result<PathBuf, ()> {
+) -> anyhow::Result<PathBuf> {
     let path = kfc_path.as_ref();
     // kiln-eml: baseline writes happen before final publication. SF's lock/status must protect this shared pair too,
     // or a refused handoff can already have replaced the backups an active SF preparation is using.
-    let root = path.parent().ok_or(())?;
-    let stem = path.file_stem().ok_or(())?;
+    let root = path.parent().ok_or_else(|| anyhow::anyhow!("create_backup: archive has no parent: {path}"))?;
+    let stem = path.file_stem().ok_or_else(|| anyhow::anyhow!("create_backup: archive has no name: {path}"))?;
     let _sf = crate::ownership::before_baseline(root.as_std_path(), stem).map_err(|error| {
         error!(%error, "Refusing vanilla backup changes while ShroudForge owns the archive writer");
+        anyhow::Error::new(error).context("create_backup: ShroudForge owns the archive writer")
     })?;
     let mut bak_path = path.to_string();
     bak_path.push_str(".bak");
     let bak_path = Path::new(&bak_path);
 
     // kiln-eml: reject links and malformed data; a version change refreshes the backup atomically.
-    crate::transaction::regular(path.as_std_path()).map_err(|_| ())?;
-    if bak_path.exists() { crate::transaction::regular(bak_path.as_std_path()).map_err(|_| ())?; }
+    crate::transaction::regular(path.as_std_path()).with_context(|| format!("create_backup: archive {path} is not a regular file (links refused)"))?;
+    if bak_path.exists() { crate::transaction::regular(bak_path.as_std_path()).with_context(|| format!("create_backup: backup {bak_path} is not a regular file (links refused)"))?; }
     // kiln-eml: the checks below read the backup pair (and a new backup copies the live pair): hundreds of MiB on a real
     // client, so say so before it starts (the run's log would otherwise be silent for as long as it takes)
     let size = |p: &Path| std::fs::metadata(p.as_std_path()).map_or(0, |m| m.len());
@@ -139,10 +147,18 @@ pub fn create_backup(
         write_backup_seal(path, bak_path)?;
     }
     if bak_path.exists() && !validate_backup(path, bak_path) {
-        let old = KFCFile::get_version_tag(bak_path).map_err(|_| ())?;
-        let current = KFCFile::get_version_tag(path).map_err(|_| ())?;
-        // Same-version corruption is not an update. Never promote an existing patch to the vanilla backup.
-        if old == current { return Err(()); }
+        let old = KFCFile::get_version_tag(bak_path).with_context(|| format!("create_backup: could not read backup {bak_path} as a game archive"))?;
+        let current = KFCFile::get_version_tag(path).with_context(|| format!("create_backup: could not read version from {path}"))?;
+        // kiln-eml: diagnose only an already refused same-version pair; retain update/recovery behavior.
+        if old == current {
+            let resources = path.with_extension("kfc_resources.bak");
+            if resources.exists() {
+                crate::transaction::regular(resources.as_std_path()).with_context(|| format!("create_backup: backup {resources} is not a regular file (links refused)"))?;
+                File::open(&resources).with_context(|| format!("create_backup: could not read backup {resources}"))?;
+            }
+            load_kfc_file(bak_path).context("create_backup")?;
+            anyhow::bail!("create_backup: backup pair {bak_path} and {resources} does not match the seal Kiln recorded for the game's own files; verify the game files in Steam, then start through Kiln again");
+        }
     }
     if !bak_path.exists() || !validate_backup(path, bak_path) {
         let live = path.with_extension("kfc_resources");
@@ -151,12 +167,12 @@ pub fn create_backup(
             path.file_name().unwrap_or("the header"), live.file_name().unwrap_or("the resource file"),
             crate::progress::human(size(path) + size(&live))
         );
-        KFCFile::from_path(path, false).map_err(|_| ())?;
+        load_kfc_file(path).context("create_backup")?;
         // Snapshot resources before committing the matching header backup. Existing EML-only backups may lack this.
         let resources = path.with_extension("kfc_resources");
         let resources_backup = path.with_extension("kfc_resources.bak");
-        crate::transaction::atomic_copy(resources.as_std_path(), resources_backup.as_std_path()).map_err(|_| ())?;
-        crate::transaction::atomic_copy(path.as_std_path(), bak_path.as_std_path()).map_err(|_| ())?;
+        crate::transaction::atomic_copy(resources.as_std_path(), resources_backup.as_std_path()).with_context(|| format!("create_backup: could not copy {resources} to {resources_backup}"))?;
+        crate::transaction::atomic_copy(path.as_std_path(), bak_path.as_std_path()).with_context(|| format!("create_backup: could not copy {path} to {bak_path}"))?;
         write_backup_seal(path, bak_path)?;
     } else if path.with_extension("kfc_resources.bak").exists() && !seal_path(path).exists() {
         // Adopt a legacy unsealed pair only after validate_backup checked its live resource prefix.
@@ -336,9 +352,12 @@ fn backup_seal(path: &Path, bak: &Path) -> std::io::Result<BackupSeal> {
     })
 }
 
-fn write_backup_seal(path: &Path, bak: &Path) -> Result<(), ()> {
-    let bytes = serde_json::to_vec(&backup_seal(path, bak).map_err(|_| ())?).map_err(|_| ())?;
-    crate::transaction::atomic_write(seal_path(path).as_std_path(), &bytes).map_err(|_| ())
+fn write_backup_seal(path: &Path, bak: &Path) -> anyhow::Result<()> {
+    // kiln-eml: seal failures are preparation failures too; retain the I/O source.
+    let seal = seal_path(path);
+    let pair = backup_seal(path, bak).with_context(|| format!("create_backup: could not read backup pair {bak} and {}", path.with_extension("kfc_resources.bak")))?;
+    let bytes = serde_json::to_vec(&pair).context("create_backup: could not serialize backup seal")?;
+    crate::transaction::atomic_write(seal.as_std_path(), &bytes).with_context(|| format!("create_backup: could not write backup seal {seal}"))
 }
 
 fn backups_equal_live(path: &Path, bak: &Path) -> bool {
@@ -356,14 +375,14 @@ pub fn load_type_registry(
     game_dir: &Path,
     cache_dir: &Path,
     file_name: &str,
-) -> Result<(TypeRegistry, bool), ()> {
+) -> anyhow::Result<(TypeRegistry, bool)> {
     if let Err(e) = std::fs::create_dir_all(cache_dir) {
         warn!(
             error = %e,
             path = ?cache_dir,
             "Failed to create cache directory, unable to load or save type registry",
         );
-        return Err(());
+        return Err(anyhow::Error::new(e).context(format!("load_type_registry: could not create cache directory {cache_dir}")));
     }
 
     let types_path = cache_dir.join(format!("{file_name}-types.json"));
@@ -481,7 +500,7 @@ pub fn load_type_registry(
                     "Failed to load type registry",
                 );
 
-                return Err(());
+                return Err(anyhow::Error::new(e).context(format!("load_type_registry: could not extract types from {exe_path}")));
             }
         }
     };
@@ -697,6 +716,103 @@ mod kiln_tests {
         let env = mod_loader::ModEnvironment::load_from(&dir, &cache, vec![mod_dir]).unwrap();
         let args = crate::RunArgs { file_name: "g".into(), options: crate::RunOptions { patch: true, ..Default::default() } };
         (dir, env, args)
+    }
+
+    // kiln-eml: exercise real filesystem and parser failures, without a game install.
+    #[test]
+    fn preparation_cause_later_steps() {
+        let dir = fixture();
+        let bad = dir.join("broken.kfc.bak");
+        std::fs::write(&bad, b"KFC").unwrap();
+        let text = format!("{:#}", load_kfc_file(&bad).err().unwrap());
+        assert!(text.contains("load_kfc_file:") && text.contains("broken.kfc.bak"), "{text}");
+        assert!(text.contains("IO error: failed to fill whole buffer"), "{text}");
+        std::fs::remove_file(&bad).unwrap();
+        let text = format!("{:#}", load_kfc_file(&bad).err().unwrap());
+        assert!(text.contains("load_kfc_file:") && text.contains("os error") && text.contains("broken.kfc.bak"), "{text}");
+        let text = format!("{:#}", create_reader(&dir, "missing").err().unwrap());
+        assert!(text.contains("create_reader:") && text.contains("missing.kfc.bak") && text.contains("os error"), "{text}");
+        let base = load_kfc_file(dir.join("g.kfc")).unwrap();
+        let text = format!("{:#}", create_writer(&dir, "missing", &Rc::new(TypeRegistry::default()), &base).err().unwrap());
+        assert!(text.contains("create_writer:") && text.contains("missing.kfc.bak") && text.contains("os error"), "{text}");
+        let text = format!("{:#}", load_type_registry(&dir, &dir.join("cache"), "missing").err().unwrap());
+        assert!(text.contains("load_type_registry:") && text.contains("missing.exe") && text.contains("os error"), "{text}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn preparation_cause_busy_writer_and_copy() {
+        let dir = fixture();
+        let config = dir.join("shroudforge/config");
+        std::fs::create_dir_all(&config).unwrap();
+        let lock = File::create(config.join(".shroudforge-write.lock")).unwrap();
+        lock.lock().unwrap();
+        let text = format!("{:#}", create_backup(dir.join("g.kfc")).unwrap_err());
+        assert!(text.contains("create_backup:") && text.contains("ShroudForge") && text.contains("lock"), "{text}");
+        drop(lock);
+        std::fs::remove_file(dir.join("g.kfc_resources")).unwrap();
+        let text = format!("{:#}", create_backup(dir.join("g.kfc")).unwrap_err());
+        assert!(text.contains("create_backup:") && text.contains("g.kfc_resources") && text.contains("os error"), "{text}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn preparation_cause_unreadable_backup() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, env, args) = patch_fixture();
+        let bak = create_backup(dir.join("g.kfc")).unwrap();
+        std::fs::set_permissions(&bak, std::fs::Permissions::from_mode(0)).unwrap();
+        assert!(File::open(&bak).is_err(), "test requires an unprivileged host user");
+        let text = crate::run(&env, args).unwrap_err().to_string();
+        std::fs::set_permissions(&bak, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(text.contains("create_backup:") && text.contains("g.kfc.bak") && text.contains("Permission denied") && text.contains("os error"), "{text}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn preparation_cause_truncated_backup() {
+        let (dir, env, args) = patch_fixture();
+        let bak = create_backup(dir.join("g.kfc")).unwrap();
+        std::fs::write(&bak, b"KFC").unwrap();
+        let text = crate::run(&env, args).unwrap_err().to_string();
+        assert!(text.contains("create_backup:") && text.contains("g.kfc.bak") && text.contains("failed to fill whole buffer"), "{text}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    // kiln-eml: preparation failures must reach the run's public error.
+    #[test]
+    fn preparation_cause_seal() {
+        let (dir, env, args) = patch_fixture();
+        create_backup(dir.join("g.kfc")).unwrap();
+        let bak = dir.join("g.kfc_resources.bak");
+        let mut bytes = std::fs::read(&bak).unwrap();
+        bytes[0] ^= 1;
+        std::fs::write(&bak, bytes).unwrap();
+        let text = crate::run(&env, args).unwrap_err().to_string();
+        assert!(text.contains("could not prepare the game data: create_backup:"), "{text}");
+        assert!(text.contains("does not match the seal") && text.contains("g.kfc_resources.bak"), "{text}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn preparation_cause_link() {
+        for name in ["g.kfc", "g.kfc.bak", "g.kfc_resources.bak"] {
+            let (dir, env, args) = patch_fixture();
+            if name == "g.kfc_resources.bak" { create_backup(dir.join("g.kfc")).unwrap(); }
+            let target = dir.join("link-target");
+            if dir.join(name).exists() {
+                std::fs::rename(dir.join(name), &target).unwrap();
+            } else {
+                std::fs::copy(dir.join("g.kfc"), &target).unwrap();
+            }
+            std::os::unix::fs::symlink(&target, dir.join(name)).unwrap();
+            let text = crate::run(&env, args).unwrap_err().to_string();
+            assert!(text.contains("could not prepare the game data: create_backup:"), "{text}");
+            assert!(text.contains("link") && text.contains(name), "{text}");
+            std::fs::remove_dir_all(dir).unwrap();
+        }
     }
 
     #[test]

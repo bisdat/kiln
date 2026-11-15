@@ -3,6 +3,9 @@
 // Kiln's programs). The descriptor lives in the game's image; its names are read through SEH-guarded copies.
 #include "layout.h"
 
+#include <cstdio>
+#include <utility>
+
 namespace kw {
 namespace {
 
@@ -49,6 +52,40 @@ bool read_desc(const EngineDesc* desc, ProgramLayout& out, bool* no_view, std::s
         if (!read_names(*src[id], out.lists[id].names, why, kListName[id])) return false;
     out.sread_opt = d.sys_read_opt;
     out.swrite_opt = d.sys_write_opt;
+    return true;
+}
+
+bool contract_text(const EngineDesc* desc, std::string& out, std::string& why) {
+    EngineDesc d{};
+    if (!desc || !seh_copy(&d, desc, sizeof d)) {
+        why = "the descriptor is unreadable";
+        return false;
+    }
+    const std::pair<const char*, const NameListE*> lists[] = {
+        {"tpl", &d.tpl}, {"tpl_opt", &d.tpl_opt}, {"read", &d.read}, {"read_opt", &d.read_opt}, {"write", &d.write},
+        {"write_opt", &d.write_opt}, {"add", &d.add}, {"remove", &d.rem}, {"sys_read", &d.sys_read},
+        {"sys_write", &d.sys_write}, {"other_tpl", &d.other_tpl}, {"other_read", &d.other_read},
+        {"other_write", &d.other_write}, {"other_write_unser", &d.other_write_unser}, {"with", &d.with},
+        {"without", &d.without}, {"any_of", &d.any_of}, {"all_write", &d.all_write}, {"all_read", &d.all_read},
+        {"events_in", &d.events_in}, {"events_out", &d.events_out}};
+    static_assert(sizeof lists / sizeof lists[0] == 21, "chapter 06a 9.7: the descriptor's 21 lists");
+    out.clear();
+    std::vector<std::string> names;
+    for (const auto& [label, list] : lists) {
+        if (!read_names(*list, names, why, label)) return false;
+        out += label;
+        out += '=';
+        for (size_t i = 0; i < names.size(); ++i) {
+            if (i) out += ',';
+            out += names[i];
+        }
+        out += '\n';
+    }
+    char tail[160];
+    std::snprintf(tail, sizeof tail, "sys_read_opt=%016llx\nsys_write_opt=%016llx\nsys_write_parallel=%016llx\nflags=%08x\ninterval=%u\n",
+                  static_cast<unsigned long long>(d.sys_read_opt), static_cast<unsigned long long>(d.sys_write_opt),
+                  static_cast<unsigned long long>(d.sys_write_parallel), d.flags, d.interval);
+    out += tail;
     return true;
 }
 

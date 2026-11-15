@@ -46,11 +46,12 @@ bitflags! {
 
 impl AppState {
 
+    // kiln-eml: preparation helpers retain their step, path and source error.
     pub fn new(
         env: ModEnvironment,
         args: RunArgs,
         cache_diff: &CacheDiff,
-    ) -> Result<Self, ()> {
+    ) -> anyhow::Result<Self> {
         let game_dir = env.game_dir();
         let cache_dir = env.cache_dir();
         let file_name = &args.file_name;

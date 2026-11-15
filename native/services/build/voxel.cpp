@@ -256,7 +256,7 @@ KilnResult vox_write(const KilnBuildWrite* w, KilnBuildResult* result, uint32_t 
     const bool transient = (w->flags & KILN_BUILD_F_TRANSIENT) != 0;
     if (transient && (w->flags & KILN_BUILD_F_UNLOADED)) return done(KILN_ERR_INVALID_ARGUMENT);
     if (!tick_thread()) return done(KILN_ERR_WRONG_THREAD);
-    if (!F.write) return done(KILN_ERR_UNAVAILABLE);
+    if (!F.write || !regions_lifecycle_safe() || (!transient && !F.persist)) return done(KILN_ERR_UNAVAILABLE);
     const VoxelWorld* v = vox();
     if (!v || !world_running()) return done(KILN_ERR_UNAVAILABLE);
 

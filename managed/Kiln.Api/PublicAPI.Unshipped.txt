@@ -1,4 +1,104 @@
 #nullable enable
+Kiln.DecisionCompletedEvent
+Kiln.DecisionCompletedEvent.DecisionCompletedEvent(Kiln.DecisionResult! result) -> void
+Kiln.DecisionCompletedEvent.Involves(Kiln.EntityId entity) -> bool
+Kiln.DecisionCompletedEvent.Result.get -> Kiln.DecisionResult!
+Kiln.DecisionId
+Kiln.DecisionId.DecisionId() -> void
+Kiln.DecisionId.DecisionId(ulong WorldEpoch, ulong Request) -> void
+Kiln.DecisionId.Deconstruct(out ulong WorldEpoch, out ulong Request) -> void
+Kiln.DecisionId.Equals(Kiln.DecisionId other) -> bool
+Kiln.DecisionId.Request.get -> ulong
+Kiln.DecisionId.Request.init -> void
+Kiln.DecisionId.WorldEpoch.get -> ulong
+Kiln.DecisionId.WorldEpoch.init -> void
+Kiln.DecisionResult
+Kiln.DecisionResult.<Clone>$() -> Kiln.DecisionResult!
+Kiln.DecisionResult.Actor.get -> Kiln.EntityId
+Kiln.DecisionResult.Actor.init -> void
+Kiln.DecisionResult.AppliedHealth.get -> int?
+Kiln.DecisionResult.AppliedHealth.init -> void
+Kiln.DecisionResult.DecisionResult(Kiln.DecisionId Id, Kiln.DecisionTerminal Status, Kiln.EntityId Subject, Kiln.EntityId Actor, int? RequestedHealth, int? HealthBefore, int? AppliedHealth, string? Reason) -> void
+Kiln.DecisionResult.Deconstruct(out Kiln.DecisionId Id, out Kiln.DecisionTerminal Status, out Kiln.EntityId Subject, out Kiln.EntityId Actor, out int? RequestedHealth, out int? HealthBefore, out int? AppliedHealth, out string? Reason) -> void
+Kiln.DecisionResult.Equals(Kiln.DecisionResult? other) -> bool
+Kiln.DecisionResult.HealthBefore.get -> int?
+Kiln.DecisionResult.HealthBefore.init -> void
+Kiln.DecisionResult.Id.get -> Kiln.DecisionId
+Kiln.DecisionResult.Id.init -> void
+Kiln.DecisionResult.Ok.get -> bool
+Kiln.DecisionResult.Reason.get -> string?
+Kiln.DecisionResult.Reason.init -> void
+Kiln.DecisionResult.RequestedHealth.get -> int?
+Kiln.DecisionResult.RequestedHealth.init -> void
+Kiln.DecisionResult.Status.get -> Kiln.DecisionTerminal
+Kiln.DecisionResult.Status.init -> void
+Kiln.DecisionResult.Subject.get -> Kiln.EntityId
+Kiln.DecisionResult.Subject.init -> void
+Kiln.DecisionTerminal
+Kiln.DecisionTerminal.Allowed = 1 -> Kiln.DecisionTerminal
+Kiln.DecisionTerminal.AlreadyAlive = 3 -> Kiln.DecisionTerminal
+Kiln.DecisionTerminal.CapabilityReleased = 8 -> Kiln.DecisionTerminal
+Kiln.DecisionTerminal.NoPositiveRange = 5 -> Kiln.DecisionTerminal
+Kiln.DecisionTerminal.Prevented = 2 -> Kiln.DecisionTerminal
+Kiln.DecisionTerminal.QueueDropped = 10 -> Kiln.DecisionTerminal
+Kiln.DecisionTerminal.SourceChanged = 9 -> Kiln.DecisionTerminal
+Kiln.DecisionTerminal.StaleEntity = 4 -> Kiln.DecisionTerminal
+Kiln.DecisionTerminal.TimeoutReleased = 7 -> Kiln.DecisionTerminal
+Kiln.DecisionTerminal.WorldEnded = 11 -> Kiln.DecisionTerminal
+Kiln.DecisionTerminal.WriteRefused = 6 -> Kiln.DecisionTerminal
+Kiln.EventEntityKey
+Kiln.EventEntityKey.Deconstruct(out uint Entity, out bool HasSpawnTime, out ulong SpawnTime, out ulong LifeSerial, out ulong PlayerHandle, out ulong JoinedStep) -> void
+Kiln.EventEntityKey.Entity.get -> uint
+Kiln.EventEntityKey.Entity.init -> void
+Kiln.EventEntityKey.Equals(Kiln.EventEntityKey other) -> bool
+Kiln.EventEntityKey.EventEntityKey() -> void
+Kiln.EventEntityKey.EventEntityKey(uint Entity, bool HasSpawnTime, ulong SpawnTime, ulong LifeSerial, ulong PlayerHandle, ulong JoinedStep) -> void
+Kiln.EventEntityKey.HasSpawnTime.get -> bool
+Kiln.EventEntityKey.HasSpawnTime.init -> void
+Kiln.EventEntityKey.JoinedStep.get -> ulong
+Kiln.EventEntityKey.JoinedStep.init -> void
+Kiln.EventEntityKey.LifeSerial.get -> ulong
+Kiln.EventEntityKey.LifeSerial.init -> void
+Kiln.EventEntityKey.PlayerHandle.get -> ulong
+Kiln.EventEntityKey.PlayerHandle.init -> void
+Kiln.EventEntityKey.SpawnTime.get -> ulong
+Kiln.EventEntityKey.SpawnTime.init -> void
+override Kiln.DecisionId.GetHashCode() -> int
+override Kiln.DecisionResult.Equals(object? obj) -> bool
+override Kiln.DecisionResult.GetHashCode() -> int
+override Kiln.DecisionResult.ToString() -> string!
+override Kiln.EventEntityKey.GetHashCode() -> int
+static Kiln.DecisionId.operator !=(Kiln.DecisionId left, Kiln.DecisionId right) -> bool
+static Kiln.DecisionId.operator ==(Kiln.DecisionId left, Kiln.DecisionId right) -> bool
+static Kiln.DecisionResult.operator !=(Kiln.DecisionResult? left, Kiln.DecisionResult? right) -> bool
+static Kiln.DecisionResult.operator ==(Kiln.DecisionResult? left, Kiln.DecisionResult? right) -> bool
+static Kiln.EventEntityKey.operator !=(Kiln.EventEntityKey left, Kiln.EventEntityKey right) -> bool
+static Kiln.EventEntityKey.operator ==(Kiln.EventEntityKey left, Kiln.EventEntityKey right) -> bool
+~override Kiln.DecisionId.Equals(object obj) -> bool
+~override Kiln.DecisionId.ToString() -> string
+~override Kiln.EventEntityKey.Equals(object obj) -> bool
+~override Kiln.EventEntityKey.ToString() -> string
+Kiln.Decisions
+[KILNX001]static Kiln.Decisions.LabDecide(Kiln.EntityId subject, bool? allow) -> Kiln.DecisionId
+[KILNX001]static Kiln.Decisions.LabResolveEntity(Kiln.EntityId entity, out Kiln.EventEntityKey key, out Kiln.WorldPosition? position) -> int
+[KILNX001]static Kiln.Decisions.LabWindow(out ulong worldEpoch, out ulong step) -> int
+Kiln.PickupReevaluationResult
+Kiln.PickupReevaluationResult.<Clone>$() -> Kiln.PickupReevaluationResult!
+Kiln.PickupReevaluationResult.Deconstruct(out bool Ok, out string? Reason, out int ExposuresReset) -> void
+Kiln.PickupReevaluationResult.Equals(Kiln.PickupReevaluationResult? other) -> bool
+Kiln.PickupReevaluationResult.ExposuresReset.get -> int
+Kiln.PickupReevaluationResult.ExposuresReset.init -> void
+Kiln.PickupReevaluationResult.Ok.get -> bool
+Kiln.PickupReevaluationResult.Ok.init -> void
+Kiln.PickupReevaluationResult.PickupReevaluationResult(bool Ok, string? Reason, int ExposuresReset) -> void
+Kiln.PickupReevaluationResult.Reason.get -> string?
+Kiln.PickupReevaluationResult.Reason.init -> void
+override Kiln.PickupReevaluationResult.Equals(object? obj) -> bool
+override Kiln.PickupReevaluationResult.GetHashCode() -> int
+override Kiln.PickupReevaluationResult.ToString() -> string!
+static Kiln.PickupReevaluationResult.operator !=(Kiln.PickupReevaluationResult? left, Kiln.PickupReevaluationResult? right) -> bool
+static Kiln.PickupReevaluationResult.operator ==(Kiln.PickupReevaluationResult? left, Kiln.PickupReevaluationResult? right) -> bool
+static Kiln.Decisions.ReevaluatePickup(Kiln.EntityId drop, Kiln.EntityId receiver) -> Kiln.PickupReevaluationResult!
 Kiln.WorldKind
 Kiln.WorldKind.Client = 2 -> Kiln.WorldKind
 Kiln.WorldKind.Prediction = 1 -> Kiln.WorldKind

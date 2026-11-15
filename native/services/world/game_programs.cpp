@@ -431,6 +431,27 @@ KilnResult KILN_CALL game_program_info(uint32_t kind, int32_t index, KilnGamePro
     return KILN_OK;
 }
 
+KilnResult KILN_CALL game_program_contract(uint32_t kind, int32_t index, uint32_t* out_contract, char* text, uint32_t capacity,
+                                           uint32_t* out_size) {
+    if (out_size) *out_size = 0;
+    if (text && capacity) text[0] = 0;
+    if (!out_contract) return KILN_ERR_INVALID_ARGUMENT;
+    *out_contract = 0;
+    const auto d = directory(kind);
+    if (!d || index < 0 || static_cast<size_t>(index) >= d->entries.size()) return KILN_ERR_NOT_FOUND;
+    std::string body, why;
+    if (!contract_text(reinterpret_cast<const EngineDesc*>(d->entries[static_cast<size_t>(index)].desc), body, why))
+        return KILN_ERR_UNAVAILABLE;
+    *out_contract = fnv1a(body);
+    if (out_size) *out_size = static_cast<uint32_t>(body.size());
+    if (text && capacity) {
+        const size_t n = std::min<size_t>(body.size(), capacity - 1);
+        std::memcpy(text, body.data(), n);
+        text[n] = 0;
+    }
+    return KILN_OK;
+}
+
 int32_t KILN_CALL game_program_list(uint32_t kind, int32_t index, int32_t list, KilnStr* names, uint32_t capacity) {
     const auto d = directory(kind);
     if (!d || index < 0 || static_cast<size_t>(index) >= d->entries.size() || list < 0 || list >= KILN_GAME_LISTS) return -1;

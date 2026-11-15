@@ -592,7 +592,7 @@ tables in the same header.
   there, its gamepad hook. The game's own load runs first and under no lock of Kiln's, so loads on several threads
   never wait for each other because of Kiln, and a load that fails keeps its error (`native/services/ui/load_hook.h`;
   `native/services/ui/tests/test-load-hook-wine.sh` runs the hook in a Windows process under Wine, no game).
-- `KILN_UI_DISABLE=1` turns the overlay off (the service is then unavailable). It also turns off the progress window of the
+- `KILN_UI_DISABLE=1` turns the whole UI service off (the service is then unavailable). It also turns off the progress window of the
   early step (`kiln.progress`, [eml.md](eml.md#what-you-see-while-it-runs)).
 - The game-UI hooks cost one check per UI frame and per menu-entry call (a return-address compare); entries draw only
   while their menu is open. `KILN_NO_MENU_LOAD=1` keeps the mods' load at the first world step.
@@ -612,3 +612,69 @@ Kiln.Ui follows [the API contract](modding/contract.md) as far as it applies. It
   `[AnyThread]`, as their docs said.
 - **Events.** `Ui.Screens.Changed` (the game's UI thread, at once) and `ScreenChangedEvent` (the bus, tick thread, one
   step later) are two deliveries of one native callback, not two sources; both stay.
+
+## Overlay startup crash guard
+
+Before Vulkan hooks are installed, Kiln flushes a versioned record to
+`kiln/state/overlay-start.guard`. It records hooks installed, instance seen, device seen,
+swapchain created, and completes after the first successful present with the overlay drawn.
+A game that ends before that frame, however it ends, counts as an interrupted attempt (closing
+the game while it is still loading does too: the cost is one start without the overlay).
+
+On the next start only overlay drawing steps aside. Keys, native game-menu rows and
+`kiln.ui.tick` remain available. The drawing capability rows in
+`kiln/state/capabilities.json` carry the reason. The log says:
+
+> ui: the game closed during the last start while Kiln's overlay was starting (stage: instance seen); the overlay's drawing stays off for this start; key bindings and the Mods menu still work
+
+The stage varies. When detected it adds:
+“NVIDIA Streamline (a frame generation mod) is installed; it wraps the same graphics calls”.
+This is a likely conflict, not proof of the crash's cause.
+
+Once a guarded start has run for a minute, the next start tries the overlay again once
+(the log says so; automatic Streamline protection still takes precedence). A second interrupted attempt at the same stage keeps it off. To re-enable it, close the
+game and delete `kiln/state/overlay-start.guard`. Removing a detected graphics wrapper
+also permits a new attempt: the guard compares presence of `sl.interposer.dll`,
+`nvngx_dlss.dll`, `dxgi.dll`, `ReShade64.dll`, `opengl32.dll`, and `powrprof.dll`
+directly in the game folder or its `Streamline/` folder. Loaded Streamline, DLSS and
+ReShade also count; loaded Windows system copies of dxgi/opengl32/powrprof do not. It does not scan arbitrary
+subfolders. Unknown/unreadable records permit normal startup. File errors are logged once
+and do not prevent startup. This guard does not make Streamline and the overlay compatible.
+
+
+## Frame generation mods and drawing off
+
+When `sl.interposer.dll` is loaded, or installed directly next to the game or under
+`Streamline/`, Kiln automatically disables its Vulkan overlay drawing before installing
+any Vulkan hooks. No first crash is needed. The log explains the choice and the override.
+
+- `KILN_UI_OVERLAY=0`: drawing off; keep keys, native menu rows, game UI state and UI ticks.
+- `KILN_UI_OVERLAY=1`: try drawing even with Streamline or a guarded/locked record. This
+  can crash; the crash guard still records this attempt.
+- Unset (or another value): automatic choice, including crash-guard protection.
+- `KILN_UI_DISABLE=1`: turn the whole UI service off; wins over both overlay switches.
+
+These are environment switches. kiln.ui does not read a kiln.json setting for them.
+For Steam, set the variable in the game's launch environment using your platform's usual
+method, and remove the old `KILN_UI_DISABLE=1` workaround to keep keys and menus.
+
+Drawing off preserves the game's Mods entry and mods' native menu rows, including scrolling,
+keyboard/mouse/wheel bindings and native input subscriptions, game screen/language/crafting
+state, camera reads/projection and `kiln.ui.tick`. Mod loading and audio's UI-frame drain
+can therefore run at the menu. Input discovery finds the process's visible game window
+without a Vulkan surface. An invisible window, wheel or screen never captures the game.
+
+Windows and full mod screens stay closed; their Show/Open calls do not throw. The reason
+is in `Ui.Status.Error` and the unavailable `ui.windows` row. HUDs, toasts, draw callbacks,
+render-frame drawing, images, radial wheels and swapchain screen effects cannot draw.
+`ui.draw`, `render.draw` and `kiln.screen` report unavailable with the same reason;
+`kiln.ui` and `kiln.render` remain available. The camera hook is independent of drawing.
+
+The existing full Mods page uses ImGui even though it occupies the game's Credits page
+slot. In drawing-off mode the Mods action instead toggles its native menu caption to show the drawing-off reason; it does not open an empty page or take input. Full mod-manager tabs and config
+windows need drawing; `ui.menu_page` reports unavailable. This fallback status and the
+capability rows explain the degraded state. The length and layout of the fallback caption need a real-game check.
+
+This mode avoids Kiln's Vulkan interception. It does not make Streamline and Kiln's drawing
+compatible. Prefer automatic drawing off for frame generation; use the force-on switch only
+when intentionally testing coexistence.

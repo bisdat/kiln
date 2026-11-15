@@ -1,1 +1,2 @@
 #nullable enable
+Kiln.PlayerClientActionEvent.DecisionId.get -> Kiln.DecisionId
