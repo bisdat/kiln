@@ -45,6 +45,25 @@
         "symbol": "gameplay/InventoryTransfer"
       },
       "message": "Another mod hooks the inventory too. Item moves may behave oddly."
+    },
+    {
+      "id": "auto-loot-plus-before-ultimate-asi-loader",
+      "when": [
+        {
+          "mod": "native:auto-loot-plus"
+        },
+        {
+          "engine": "ultimate-asi-loader"
+        }
+      ],
+      "action": "before",
+      "subject": {
+        "mod": "native:auto-loot-plus"
+      },
+      "target": {
+        "engine": "ultimate-asi-loader"
+      },
+      "message": "Ultimate ASI Loader loads after Kiln so that Auto Loot Plus can hook the game first; Auto Loot Plus's F8 menu needs that."
     }
   ]
 }

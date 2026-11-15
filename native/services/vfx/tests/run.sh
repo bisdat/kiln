@@ -14,3 +14,5 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/test_gen
 "$out/test_generated"
 
 bash "$here/run_held.sh"
+
+bash "$here/run_boot_build.sh"

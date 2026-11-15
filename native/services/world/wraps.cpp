@@ -132,6 +132,7 @@ std::map<std::pair<int, const std::string*>, Prog> g_progs;
 std::vector<Retired> g_retired;
 KilnHandle g_next = 1;
 uint64_t g_seq = 0;
+bool g_client_ready = false;         // lifecycle and both client subscriptions succeeded
 bool g_ok = false;                    // the layout wraps need resolved
 bool g_counts_ok = false;             // the job's group counts resolved (per-entity iteration and slots)
 using AttrChangedFn = void (*)(void* component, void* registry);
@@ -662,6 +663,7 @@ uint32_t KILN_CALL in_program() {
 }
 
 void wraps_init() {
+    g_client_ready = false;
     g_by_address.clear();
     for (int p = 0; p < kWrapPools; ++p)
         for (int i = 0; i < kWrapSlots; ++i) g_by_address.push_back({reinterpret_cast<uintptr_t>(kTramps[p][i]), p, i});
@@ -694,11 +696,28 @@ void wraps_init() {
     const bool client = g_api->size >= offsetof(KilnApi, session) + sizeof(void*) && g_api->side() == KILN_SIDE_CLIENT;
     if (!client)
         report_row("systems.wraps.client", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_WRONG_SIDE, "a client world runs only in the game client");
+    else if (!g_api->feature(kstr("world.lifecycle")))
+        report_row("systems.wraps.client", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING,
+                   "client wraps need world.lifecycle to retire destroyed program tables");
     else if (g_ok)
-        report_row("systems.wraps.client", KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, "wraps on the client world's programs");
+        report_row("systems.wraps.client", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_OLDER,
+                   "client wrap tick and world-stop subscriptions are not ready");
     else
         report_row("systems.wraps.client", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING,
                "the program table or job layout did not resolve on this build (world.programs)");
+}
+
+void wraps_client_ready(bool tick, bool events) {
+    if (g_api->side() != KILN_SIDE_CLIENT || !g_ok || !g_api->feature(kstr("world.lifecycle"))) return;
+    g_client_ready = tick && events;
+    if (!g_client_ready)
+        report_row("systems.wraps.client", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_FAULTED,
+                   "client wrap tick or world-stop subscription failed");
+    else if (external_runner())
+        report_row("systems.wraps.client", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY, game_wraps_off_reason());
+    else
+        report_row("systems.wraps.client", KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE,
+                   "native Before, After and Replace on the client world's programs");
 }
 
 const char* game_wraps_off_reason() {
@@ -805,7 +824,10 @@ void wraps_pre(uint32_t kind, uintptr_t) {
     trim_finished();
     count_states();
     }
-    if (row.set) report_row("systems.wraps", row.state, row.reason, row.text);
+    if (row.set) {
+        report_row("systems.wraps", row.state, row.reason, row.text);
+        if (g_client_ready) report_row("systems.wraps.client", row.state, row.reason, row.text);
+    }
 }
 
 void wraps_world_event(const KilnWorldEvent* event) {

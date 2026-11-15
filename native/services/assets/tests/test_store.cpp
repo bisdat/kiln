@@ -30,6 +30,7 @@ bool g_fake_ui = false;
 bool g_fake_content = true;
 // the game's content index as game_index_keys (hooks.cpp) answers for it
 GameIndex g_fake_index = GameIndex::not_ready;
+bool g_fake_index_bad_alloc = false;
 std::vector<HashK> g_fake_keys;
 uint64_t g_fake_total = 0;  // > 0: the index's count when it is "too_many"
 std::function<void()> g_index_copy;
@@ -64,6 +65,7 @@ const void* KILN_CALL fake_service(KilnStr name, uint32_t) {
 bool resources_on() { return true; }
 bool content_hooks_on() { return g_fake_content; }
 GameIndex game_index_keys(std::vector<HashK>* out, size_t max_keys, uint64_t* total, std::string* why) {
+    if (g_fake_index_bad_alloc) throw std::bad_alloc();
     if (g_index_copy) g_index_copy();
     out->clear();
     *total = g_fake_total ? g_fake_total : g_fake_keys.size();
@@ -312,6 +314,15 @@ void blob_catalog(KilnOwner manifest, KilnOwner mod, KilnOwner native) {
     info.size = 31;
     check(op_catalog_open(mod, 0, &h, &info) == KILN_ERR_INVALID_ARGUMENT && info.size == 31 && info.status == 0, "info.size 31 refused, info untouched");
     // before the game's index is readable: the default open is NOT_READY with no handle; registrations-only works, incomplete
+    g_fake_index_bad_alloc = true;
+    bool allocation_refused = false;
+    try {
+        info = cat_info();
+        allocation_refused = op_catalog_open(mod, 0, &h, &info) == KILN_ERR_BUFFER_TOO_SMALL && h == 0 &&
+            info.status == KILN_BLOB_CATALOG_LIMIT_EXCEEDED && info.reason == KILN_BLOB_CATALOG_REASON_MEMORY_BUDGET;
+    } catch (const std::bad_alloc&) { }
+    g_fake_index_bad_alloc = false;
+    check(allocation_refused, "catalog allocation failure refuses without escaping the native API");
     const HashK g_over{64, 0xa0, 1, 1}, g_only{32, 0xa1, 2, 2};
     const KilnContentHash over = kch(g_over);
     {

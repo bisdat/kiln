@@ -193,6 +193,46 @@ void fake_api() {
     g_api = &g_fake;
 }
 
+// A client without the destroy hook cannot retire wraps when its world disappears.
+void client_lifecycle_row() {
+    KilnCapsApi caps{};
+    caps.header = {sizeof caps, 1};
+    static uint32_t state;
+    static std::string detail;
+    caps.report = [](KilnOwner, KilnStr name, uint32_t value, uint32_t, KilnStr text) -> KilnResult {
+        if (std::string_view(name.ptr, name.len) == "systems.wraps.client") {
+            state = value;
+            detail.assign(text.ptr, text.len);
+        }
+        return KILN_OK;
+    };
+    static const KilnCapsApi* table;
+    table = &caps;
+    g_fake.service = [](KilnStr, uint32_t) -> const void* { return table; };
+    g_fake.feature = [](KilnStr name) { return std::string_view(name.ptr, name.len) != "world.lifecycle"; };
+    g_side = KILN_SIDE_CLIENT;
+    wraps_init();
+    check(state == KILN_CAP_UNAVAILABLE && detail.find("world.lifecycle") != std::string::npos,
+          "client wraps refuse a build without world-stop notifications");
+    wraps_client_ready(true, true);
+    check(state == KILN_CAP_UNAVAILABLE, "subscriptions cannot enable wraps without lifecycle");
+    g_fake.feature = [](KilnStr) { return true; };
+    wraps_client_ready(false, true);
+    check(state == KILN_CAP_UNAVAILABLE, "client tick subscription failure keeps wraps off");
+    wraps_client_ready(true, false);
+    check(state == KILN_CAP_UNAVAILABLE, "world event subscription failure keeps wraps off");
+    wraps_client_ready(true, true);
+    check(state == KILN_CAP_AVAILABLE, "native client wraps available with lifecycle and both subscriptions");
+    g_fake_external.store(1);
+    wraps_pre(KILN_WORLD_CLIENT, 0);
+    check(state == KILN_CAP_UNAVAILABLE, "native SET lowers the client wrap row too");
+    g_fake_external.store(0);
+    wraps_pre(KILN_WORLD_CLIENT, 0);
+    check(state == KILN_CAP_AVAILABLE, "client wrap row recovers when native SET leaves");
+    g_side = KILN_SIDE_SERVER;
+    fake_api();
+}
+
 void layout() {
     L.world_storage = kStorage;
     L.storage_kind = 8;
@@ -1516,6 +1556,7 @@ void abi(const char* path) {
 int main(int argc, char** argv) {
     fake_api();
     layout();
+    client_lifecycle_row();
     directory();
     lab_switch();
     wraps_basics();

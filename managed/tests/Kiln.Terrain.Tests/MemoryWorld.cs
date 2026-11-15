@@ -10,6 +10,7 @@ internal sealed class MemoryWorld
     public const int GroundY = 100;         // cells below are stone (material 1), above air
     public string WorldId = "world-a";
     public bool Running = true;
+    public bool CanWait = true;
     public bool Loaded = true;
     public int Ticks;
     public readonly Dictionary<(int, int, int), Voxel> Edits = new();
@@ -59,6 +60,7 @@ internal sealed class MemoryWorld
     {
         public string Mod => mod;
         public bool WorldRunning => w.Running;
+        public bool CanWaitForWorld => w.CanWait;
         public string? WorldId => w.WorldId;
         public (int X, int Z)? GridCells => (20480, 20480);
         public string KilnVersion => "test";

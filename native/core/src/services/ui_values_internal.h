@@ -60,6 +60,7 @@ struct Env {
     double (*now_ms)() = nullptr;              // monotonic milliseconds (text rate)
     uint64_t (*tick_ms)() = nullptr;           // GetTickCount64 (capture times)
     bool (*client_side)() = nullptr;
+    bool (*layout_supported)() = nullptr;  // private UI layout measured for this client image
     bool (*row_available)(const char* name) = nullptr;              // kiln.caps shows the row available
     void (*row_off)(const char* name, const char* text) = nullptr;  // reports the row unavailable (faulted)
     bool (*client)(ClientNow* out) = nullptr;
@@ -127,6 +128,7 @@ void refused(Provider& p, uint32_t reason);
 using Installer = bool (*)(uint32_t list);
 void set_installer(uint32_t list, Installer fn);
 bool ensure_installed(uint32_t list);
+void disable_kind(uint32_t list, const char* why);
 
 // ---- the value chain ----
 // Runs the providers of `kind` matching view.item over `game` in order and returns the accumulated value. Writes no

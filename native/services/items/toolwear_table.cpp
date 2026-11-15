@@ -145,6 +145,7 @@ KilnResult KILN_CALL t_define(KilnOwner owner, KilnStr mod, uint32_t item, uint3
     if (const auto id = g_mod_ids.find(owner); id != g_mod_ids.end() && id->second != std::string(mod.ptr, mod.len))
         return KILN_ERR_INVALID_ARGUMENT;
     // an equal cost under another owner's rule is a change too (publish_locked compares the handle as well)
+    if (!activate()) return KILN_ERR_UNAVAILABLE;
     const Effective before = effective_locked(item);
     for (Layer& l : g_layers)
         if (l.owner == owner && l.item == item) {

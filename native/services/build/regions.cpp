@@ -138,13 +138,13 @@ void close_locked() {
     g_last_logged = ~size_t{0};
 }
 
-#ifndef KILN_REGIONS_HOST_TEST
 void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
     if (ev->kind != KILN_WORLD_SERVER || ev->event != KILN_WORLD_STOPPING) return;
+    vox_world_closed();
+    transient_world_closed();
     std::lock_guard lock(g_mu);
     close_locked();  // independent of the order kiln.saves receives the same event
 }
-#endif
 
 // Binds the set to the running world (kiln.saves' GUID): a different world saves the old set and loads its own.
 // Chunks kept before the GUID is known (a brand-new world before its first save) move into the world's set.

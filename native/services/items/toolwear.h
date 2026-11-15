@@ -368,7 +368,7 @@ inline void delta_after(State& s, Frame* f, void* durability) {
 // ---- the service's side (toolwear.cpp) --------------------------------------------------------------------------------
 
 struct Status {
-    bool on = false;         // the hooks are in and act
+    bool on = false;         // ready to apply rules; hooks are installed on demand
     bool faulted = false;    // a hook faulted: off for this process
     char why[160] = "";      // why it is off
     uint64_t dropped = 0;    // records the full queue did not take, since the process started
@@ -382,9 +382,11 @@ struct KilnApi;
 
 namespace kitems::toolwear {
 
-// Installs the three hooks, once wear.h's facts are resolved (items.cpp, after resolve). false: off, with `why` logged and
-// the capability lowered. Nothing is hooked when the row is held by the client gate on this side.
+// Prepares the debit capability once wear.h's facts are resolved. No hooks are installed here.
+// false: off, with the reason logged and the capability lowered.
 bool install(const KilnApi* api, uint64_t owner);
+// First valid rule request, on the authoritative tick: install once; failure lowers the row and refuses the rule.
+bool activate();
 // Tick thread, while a server world runs: the game's program directory (kiln.world v4) must name durability_loss and
 // actor_spawn_entity with the updates the signatures found; else the hooks go off. `world` is a KilnWorldApi or null (then
 // nothing is checked: the hash of the build is what approved the frames). Checked once per process.

@@ -206,6 +206,9 @@ internal static unsafe class UiValuesNative
     {
         id = 0;
         if (c == null || c->Text == null) return Internal;
+        // Reject before scanning or allocating an unbounded mod string on the game UI thread.
+        // UTF-8 needs at least one byte per UTF-16 code unit, including replacement fallback.
+        if (text.Length > 4096 || System.Text.Encoding.UTF8.GetByteCount(text) > 4096) return BufferTooSmall;
         var bytes = System.Text.Encoding.UTF8.GetBytes(text);
         ulong got = 0;
         fixed (byte* p = bytes)

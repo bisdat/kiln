@@ -33,7 +33,7 @@ internal static class ToolWearRuntime
 
     /// <summary>A server world may run in this process: a dedicated server, or a game that hosts (tests set it).</summary>
     internal static Func<bool> ServerHere = () => !BlocksBridge.IsClient || Client.IsHosting;
-    /// <summary>The capability is held by the client gate here (a hosted game before its game test): the intent waits, it is no error (tests set it).</summary>
+    /// <summary>A capability policy holds this row here: the intent waits without becoming a block error (tests set it).</summary>
     internal static Func<bool> Held = () => Capabilities.IsHeld(Capability);
     /// <summary>Sets the rule as the mod's (tests set it).</summary>
     internal static Func<ModBlocks, uint, int, ToolWearResult> Set = (mod, item, cost) => Items.ToolWear.Set(new ItemId(item), cost, null, mod.Owner, mod.Id);
@@ -91,11 +91,11 @@ internal static class ToolWearRuntime
         if (todo.Count == 0 || !ServerHere()) return;      // a joined game: nothing to rule, nothing to say
         if (Held())
         {
-            // switched off until its game test: said once per block, as information; the intent waits ("preview" lifts the gate)
+            // A policy hold is temporary: say so once per block and retain the intent.
             foreach (var i in todo.Where(i => !i.Said))
             {
                 i.Said = true;
-                BlocksBridge.Log(LogLevel.Info, $"blocks: {i.Mod.Id}: block {i.Block}: tool.wearPerDebit waits: {Capability} is switched off here until its game test");
+                BlocksBridge.Log(LogLevel.Info, $"blocks: {i.Mod.Id}: block {i.Block}: tool.wearPerDebit waits: {Capability} is held by capability policy here");
             }
             return;
         }

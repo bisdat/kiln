@@ -1,0 +1,17 @@
+{
+  "description": "Kiln's shipped compatibility rules: installed as <game>/kiln/compat-rules.json (tools/package/stage.sh, component core; tools/deploy-server.sh, tools/client/client.sh) and replaced by every update. Your own rules go in <configDir>/compat-rules.json; one with the same id replaces a rule here. Docs: docs/kiln/engines/README.md#closed-source-dll-mods.",
+  "format": 1,
+  "rules": [
+    {
+      "id": "auto-loot-plus-before-ultimate-asi-loader",
+      "when": [
+        { "mod": "native:auto-loot-plus" },
+        { "engine": "ultimate-asi-loader" }
+      ],
+      "action": "before",
+      "subject": { "mod": "native:auto-loot-plus" },
+      "target": { "engine": "ultimate-asi-loader" },
+      "message": "Ultimate ASI Loader loads after Kiln so that Auto Loot Plus can hook the game first; Auto Loot Plus's F8 menu needs that."
+    }
+  ]
+}
