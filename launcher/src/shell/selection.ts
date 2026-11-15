@@ -106,5 +106,10 @@ export function useOwnedSelection(game: string, owner: string | null): { sel: Se
   return { sel: mine ? k.sel : NONE, note: mine ? k.note : null };
 }
 
-// a Load (profile_activate) or "No profile" (profile_deactivate) of a game ends its selection, list open or not
-onProfileSwitch((game) => dropSelection(game));
+// An identity change ends the previous profile's selection, list open or not. Completion for the same identity keeps it.
+onProfileSwitch((game, profileId) => {
+  const kept = useSelection.getState().byGame[game];
+  // The optimistic identity change may already have cleared A, and the player selected in B.
+  if (profileId !== undefined && kept?.owner.split("\n")[0] === (profileId ?? "none")) return;
+  dropSelection(game);
+});

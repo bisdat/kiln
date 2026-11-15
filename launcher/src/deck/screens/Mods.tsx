@@ -5,7 +5,7 @@
 // next start while the game runs). Profiles are in the desktop UI's Settings.
 import { SfSelfHostedNotice } from "../../components/SfSelfHostedNotice";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import * as api from "../../api/commands";
 import type { AddReport } from "../../api/commands";
@@ -84,6 +84,9 @@ export default function Mods() {
   const [selMenu, setSelMenu] = useState(false);
   const [removingMany, setRemovingMany] = useState<ModRow[] | null>(null);
   const many = useRemoveMany(removingMany ?? [], mods.profileId, !!removingMany);
+  useLayoutEffect(() => {
+    setFocus(null); setSelMenu(false); setRemoving(null); setRemovingMany(null);
+  }, [gid, mods.profileId]);
   const live = useRef(mods);
   live.current = mods;
   const switchPicked = (on: boolean) => {

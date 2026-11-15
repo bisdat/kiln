@@ -6,6 +6,7 @@ import { create } from "zustand";
 import * as api from "./commands";
 import type { Distribution, GameId, GameInstall, ModKind, ProfileId } from "./commands";
 import { distributionOf } from "./distribution";
+import { profileSwitched } from "./oneActivation";
 import { notifyActivation } from "../shell/notices";
 
 /** Query keys, one place. */
@@ -143,6 +144,7 @@ export async function showActive(qc: QueryClient, g: GameId, profileId: ProfileI
   qc.setQueryData<api.Activation | null>(qk.active(g), profileId
     ? { generation: 0, pathMode: "z", profileJson: "", copied: 0, fingerprint: "", ...before, gameId: g, profileId, activated: new Date().toISOString() }
     : null);
+  if ((before?.profileId ?? null) !== profileId) profileSwitched(g, profileId);
   if (list) {
     qc.setQueryData<api.ProfileSummary[]>(qk.profiles, list.map((p) => ({
       ...p, active: p.id === profileId ? [...p.active.filter((x) => x !== g), g] : p.active.filter((x) => x !== g),
@@ -150,6 +152,7 @@ export async function showActive(qc: QueryClient, g: GameId, profileId: ProfileI
   }
   return () => {
     qc.setQueryData(qk.active(g), before ?? null);
+    if ((before?.profileId ?? null) !== profileId) profileSwitched(g, before?.profileId ?? null);
     if (list) qc.setQueryData(qk.profiles, list);
   };
 }
