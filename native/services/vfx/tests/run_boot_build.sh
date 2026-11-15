@@ -19,6 +19,7 @@ def between(a, b): return a + s.split(a, 1)[1].split(b, 1)[0]
     'void subscribe_reskins(const KilnApi* api, KilnOwner self) {\n' +
     between('        {\n            std::lock_guard lk(g_mu);\n            if (!g_reskins.empty()', '        {\n            std::lock_guard lk(g_mu);\n            for (const kvb::BuiltBlock&') + '}\n' +
     'void build_serve(const kvb::CookResult& r, [[maybe_unused]] const kiln::boot::Input* boot = nullptr) {\n' +
+    '    std::vector<BuildFailure>* failures = nullptr;\n' +
     between('        if (!serve(r', '        {\n            std::lock_guard lk(g_mu);\n            if (!g_reskins.empty()') + '}\n')
 PY
 c++ -std=c++23 -O0 -g0 -Wall -Wextra -fsanitize=address,undefined -pthread \

@@ -14,6 +14,7 @@
 
 #include "kiln_api.h"
 #include "services/kiln_assets.h"
+#include "services/kiln_assets_vfx.h"
 
 namespace ka {
 
@@ -118,6 +119,7 @@ extern std::atomic<uintptr_t> g_S;
 uint32_t game_handle(uintptr_t S, const Key& k);                     // 0 = not in the game
 bool game_data(uintptr_t S, uint32_t handle, DataSpan* out);
 bool game_type_list(uintptr_t S, uint32_t type, const uint8_t** keys, uint64_t* count);
+bool game_vfx_keys(uintptr_t S, std::vector<Key>* out);  // guarded, bounded copy of the original type list
 bool game_key_of(uintptr_t S, uint32_t handle, Key* out);
 
 // Hooks (hooks.cpp)
@@ -152,7 +154,22 @@ struct Served {
     size_t size = 0;
     uint32_t handle = 0;  // synthetic (new) or the game's (override); 0 until known
     bool is_new = false;
+    uint64_t registration = 0;  // identifies this put, including replacements by the same owner/key
 };
+struct ResourceRegistration {
+    Key key;
+    uint64_t registration;
+};
+struct ResourceOmission {
+    KilnOwner owner;
+    Key key;
+    std::string mod, why;
+};
+// Collector/test seam. Called with no store lock, ReadGuard, merged mutex or pending lock held.
+void report_resource_omission(const ResourceOmission& omission);
+// Hook/list candidates copied inside a ReadGuard. Resolves only still-live matching puts under the store
+// mutex, then reports outside it; an old enumeration cannot fault a replacement's mod.
+void report_vfx_omissions(const std::vector<ResourceRegistration>& omitted, const char* why);
 // One level of the resource index (immutable once published).
 struct ResSnap {
     std::unordered_map<Key, Served, KeyHash> keys;
@@ -173,6 +190,8 @@ struct ResView {
     // vanilla + new key lists per type, built on first use. The game keeps the list it was given: never freed.
     mutable std::mutex merged_mu;
     mutable std::unordered_map<uint32_t, const std::vector<uint8_t>*> merged;
+    mutable std::vector<Key> vfx_original;  // VFX cache also follows other loaders' original enumeration
+    mutable uint32_t vfx_capacity = 0;
     const Served* key(const Key& k) const;
     const Served* handle(uint32_t h) const;
     const Key* synth(uint32_t h) const;
@@ -228,6 +247,7 @@ extern std::atomic<uint64_t> g_icon_want;    // generation of the newest icon ke
 extern std::atomic<uint64_t> g_icon_served;  // generation the UI cache has taken in
 void icons_after_populate(uint64_t gen_used);  // hooks.cpp -> assets.cpp
 void on_resource_system_ready(uintptr_t S);    // hooks.cpp -> store.cpp
+bool store_note_resource_system(uintptr_t S);  // publish S under the store mutex; serializes the boot-only capacity gate
 void flush_pending_textures();                 // store.cpp -> assets.cpp: apply boot-time textures once S is up
 
 // Images (image.cpp)
@@ -311,6 +331,14 @@ std::string store_status_json();
 void store_owner_retired(KilnOwner owner);
 void store_drain_retired();  // runs that revert now if one is due (may wait: not from a reader or the observer)
 bool store_cleanup_idle();   // no revert due and no cleanup thread running (the host test)
+
+// Called before installing the resource hooks; path is the original KFC metadata (a .bak when present).
+void vfx_preflight_start(const std::wstring& path, uint32_t capacity);
+KilnResult KILN_CALL op_vfx_budget(KilnAssetsVfxBudget* out);
+KilnResult KILN_CALL op_vfx_set_capacity(KilnOwner owner, uint32_t capacity);
+KilnResult KILN_CALL op_vfx_resource_put(KilnOwner owner, KilnStr mod, const KilnAssetKey* key,
+                                      const void* data, size_t len, uint32_t flags);
+uint32_t vfx_capacity();  // lock-free for the type-list hook
 
 std::string api_path(int kind);
 std::wstring widen(const std::string& s);

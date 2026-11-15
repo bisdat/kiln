@@ -23,3 +23,4 @@ bash "$here/run_boot_build.sh"
 
 bash "$here/run_observer.sh"
 bash "$here/run_pending.sh"
+bash "$here/run_asset_admission.sh"

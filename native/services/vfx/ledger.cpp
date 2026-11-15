@@ -94,7 +94,7 @@ uint64_t waiting_for(const Request& q, uint64_t exclude = 0) {
 bool fits_now(const Request& q, uint64_t exclude) {
     if (built_of(q.guid)) return true;
     const uint64_t cap = g_seen ? g_last.limit : g_boot.admission;
-    const uint64_t taken = g_seen ? g_last.count : uint64_t{g_boot.game_vfx} + g_boot.built.size();
+    const uint64_t taken = g_seen ? g_last.count : uint64_t{g_boot.game_vfx} + g_boot.reserved + g_boot.built.size();
     return taken < cap && waiting_for(q,exclude) < cap - taken;
 }
 

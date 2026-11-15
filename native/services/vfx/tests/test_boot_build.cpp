@@ -14,6 +14,7 @@
 #include "../ledger.h"
 #include <type_traits>
 #include "services/kiln_assets.h"
+#include "services/kiln_assets_vfx.h"
 #define KV_I(...) ((void)0)
 #define KV_W(...) ((void)0)
 #define KV_E(...) ((void)0)
@@ -23,6 +24,7 @@ static void set_status(const char*, const std::string&, const kvb::CookResult*) 
 static void refuse_required(bool, bool, const std::string&) { ++refusals; }
 void build_forget();
 namespace ledger = kvx::ledger;  // boot.cpp's code is in namespace kvx; here it is included at file scope
+using kvx::BuildFailure;
 #include "boot_build_impl.inc"
 static unsigned failures = 0, subscriptions = 0, checks = 0;
 static int fail_type = 0;
@@ -41,7 +43,8 @@ static KilnResult KILN_CALL post(KilnOwner, KilnTaskFn, void*) { return KILN_OK;
 static KilnResult KILN_CALL remove(KilnOwner, const KilnAssetKey*) { return KILN_OK; }
 static KilnResult KILN_CALL subscribe(KilnOwner, int32_t, KilnTickFn, void*, KilnHandle* h) { *h = ++subscriptions; return KILN_OK; }
 template<class F> bool required_serve(F fn, const kvb::CookResult& r, const kiln::boot::Input& input) {
-    if constexpr (std::is_invocable_v<F, const kvb::CookResult&, const kiln::boot::Input*>) return fn(r, &input);
+    if constexpr (std::is_invocable_v<F, const kvb::CookResult&, const kiln::boot::Input*, std::vector<BuildFailure>*>) return fn(r, &input, nullptr);
+    else if constexpr (std::is_invocable_v<F, const kvb::CookResult&, const kiln::boot::Input*>) return fn(r, &input);
     else return fn(r);
 }
 int main() {
@@ -51,10 +54,13 @@ int main() {
     g_api = &api; g_assets = &assets; g_self = 1;
     kvb::CookResult r;
     kvb::ServedBlob b; b.data = payload; b.hash = kvb::content_hash(payload.data(), payload.size()); r.blobs.push_back(b);
-    kvb::ServedResource res; res.type = kvb::kTypeVfx; res.data = payload; r.resources.push_back(res);
+    kvb::ServedResource res; res.type = kvb::kTypeVfx; res.data = payload; res.mod = "required-vfx"; r.resources.push_back(res);
     kiln::boot::Input required; required.required.insert("reskin");
     fail_type = kvb::kTypeVfx;
     check(!required_serve(&serve, r, required), "a refused VFX resource must fail the build");
+    std::vector<BuildFailure> serving_failures;
+    check(serve(r, nullptr, &serving_failures) && serving_failures.size() == 1 &&
+          serving_failures.front().mod == "required-vfx", "ordinary serving retains the originating mod for its required prepare");
     build_serve(r, &required);
     check(refusals == 1, "failed serving reaches the required-participant refusal check");
     check(resources.empty() && blobs.empty(), "failed serving rolls back before returning");

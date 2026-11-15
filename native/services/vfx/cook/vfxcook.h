@@ -404,7 +404,7 @@ struct ServedResource {
     Bytes data;
     std::string what;
     bool override = false;  // replaces a game resource of this GUID (a material's "replaces"): served as an override, not a new key
-    std::string mod;        // with override: the mod it belongs to. kiln.vfx serves it under an owner of that mod's, never its own
+    std::string mod;        // originating mod. Material overrides use its owner; VFX retain it for admission failures
     bool standby = false;   // with override: an earlier mod in the load order replaces the same material; this one draws only if that one unloads
 };
 
