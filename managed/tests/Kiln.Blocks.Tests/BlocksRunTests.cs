@@ -218,7 +218,7 @@ public sealed class BlocksRunTests
                     args = new[] { new { name = "target", type = "ecs.EntityId", size = 4 } } } } }));
             void Compile() => Compiler.Lower(NewMod(), "file-native", Sword(new EffectBlock { Run = new NativeRef($"{Mod}.FileNative", []), Heal = 1 }));
             if (sync && argc == 1) Compile();
-            else Assert.Throws<BlockError>(Compile);
+            else Assert.Contains(sync ? "declares argc 2 for 1 named parameter(s)" : "is not \"sync\": true", Assert.Throws<BlockError>(Compile).Message);
         }
         finally { ModsBackend.Current = previous; Directory.Delete(dir, true); }
     }

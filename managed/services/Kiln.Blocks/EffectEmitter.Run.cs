@@ -109,14 +109,19 @@ internal static class RunNatives
         if (run.Parameters.Count > 0) return (full, run.Parameters);
         var dot = full.LastIndexOf('.');
         var mod = full[..dot];
-        var found = Declarations?.Invoke(full) ?? Read(mod, full);
+        string? why = null;
+        var found = Declarations?.Invoke(full) ?? Read(mod, full, out why);
         return found is null
-            ? throw new BlockError(ctx.Block, at, $"run: no [ImpactNative] {full} in {mod}'s impact/natives.json (the build writes it; KL340)")
+            ? throw new BlockError(ctx.Block, at, why is null
+                ? $"run: no [ImpactNative] {full} in {mod}'s impact/natives.json (the build writes it; KL340)"
+                : $"run: {full} in {mod}'s impact/natives.json {why} (KL340)")
             : (full, found);
     }
 
-    private static IReadOnlyList<NativeParameter>? Read(string mod, string full)
+    // The declaration of `full` in the mod's impact/natives.json; null with `why` set when one is there that Run cannot call.
+    private static IReadOnlyList<NativeParameter>? Read(string mod, string full, out string? why)
     {
+        why = null;
         var dir = Kiln.Mods.Get(mod)?.Info?.Directory;
         var file = dir is null ? null : Path.Combine(dir, "impact", "natives.json");
         if (file is null || !File.Exists(file)) return null;
@@ -125,7 +130,11 @@ internal static class RunNatives
         foreach (var n in natives.EnumerateArray())
         {
             if (!n.TryGetProperty("name", out var name) || name.GetString() != full) continue;
-            if (!n.TryGetProperty("sync", out var sync) || sync.ValueKind != JsonValueKind.True) continue;
+            if (!n.TryGetProperty("sync", out var sync) || sync.ValueKind != JsonValueKind.True)
+            {
+                why = "is not \"sync\": true: a native that answers a step later cannot run inside the effect (an [ImpactNative] method or RegisterSync can)";
+                return null;
+            }
             var list = new List<NativeParameter>();
             if (n.TryGetProperty("args", out var args))
                 foreach (var a in args.EnumerateArray())
@@ -137,7 +146,11 @@ internal static class RunNatives
                             a.TryGetProperty("optional", out var o) && o.GetBoolean(), a.TryGetProperty("raw", out var r) && r.GetBoolean(),
                             a.TryGetProperty("size", out var sz) ? sz.GetInt32() : 0)));
                 }
-            if (!n.TryGetProperty("argc", out var argc) || !argc.TryGetInt32(out var count) || count != list.Count) return null;
+            if (!n.TryGetProperty("argc", out var argc) || !argc.TryGetInt32(out var count) || count != list.Count)
+            {
+                why = $"declares argc {(n.TryGetProperty("argc", out var a2) ? a2.ToString() : "none")} for {list.Count} named parameter(s): they must match";
+                return null;
+            }
             return list;
         }
         return null;
