@@ -151,6 +151,21 @@ extern std::atomic<uint64_t> g_internal_runs;  // updates of kiln.world's own pr
 extern std::atomic<bool> g_world_live;         // our program ran during the previous step
 extern thread_local bool t_in_program;         // inside a Kiln program update on this thread
 
+// The one question every KILN_WORLD_STOPPING handler of kiln.world asks (the wrap drain, the client-world programs' stop):
+// were this world kind's jobs drained by the engine before STOPPING, or is there only the handler's own bounded wait?
+// The core answers it with its capability rows world.stop_drain.server / .client / .prediction (since 0.2.0-dev.29,
+// native/core/src/tick_drain.h): available = the core ran the game's WaitWorldJobs on the world (the prediction world:
+// on the client world it stops with) before dispatching STOPPING. engine is false for an unavailable row and for a core
+// without the rows. text: a few words for a log line or a capability text ("the engine drains the world's jobs first
+// (world.stop_drain.client)" / "a bounded wait (2000 ms) only (...)"); wait_ms is the handler's own bound, for the
+// words only. Any thread. Call it without kiln.world's own locks held: kiln.caps may call its subscribers on this
+// thread.
+struct StopDrain {
+    bool engine = false;
+    std::string text;
+};
+StopDrain world_stop_drain(uint32_t kind, uint32_t wait_ms);
+
 inline uintptr_t registry_of(uintptr_t world) {
     return *reinterpret_cast<const uintptr_t*>(world + L.world_storage);
 }

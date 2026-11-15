@@ -412,31 +412,9 @@ uint32_t external_runner() {
 // Kiln checked against the live descriptor's contract (game_program_contract), which needs nothing more of the build.
 constexpr const char* kTypedText = "typed program views: each wrap checks the view's contract against the live descriptor";
 
-// The core's guarantee about a world kind's jobs at its STOPPING (since 0.2.0-dev.29: the rows world.stop_drain.<kind>,
-// native/core/src/tick_drain.h). Read without g_mu held: kiln.caps may call its subscribers on this thread.
-struct DrainRow {
-    bool engine = false;
-    std::string text;  // for a capability text and the stop line
-};
-DrainRow drain_row(uint32_t kind) {
-    static constexpr const char* kName[KILN_WORLD_KINDS] = {"world.stop_drain.server", "world.stop_drain.prediction",
-                                                           "world.stop_drain.client"};
-    DrainRow d;
-    if (kind >= KILN_WORLD_KINDS) return d;
-    KilnCapRow row{};
-    row.size = sizeof row;
-    if (!g_wrap_caps || !g_wrap_caps->find || g_wrap_caps->find(kstr(kName[kind]), &row) != KILN_OK) {
-        d.text = std::string("a bounded wait (") + std::to_string(g_stop_wait_ms.load()) + " ms) only: this core has no " +
-                 kName[kind] + " row";
-        return d;
-    }
-    d.engine = row.state == KILN_CAP_AVAILABLE;
-    if (d.engine) d.text = std::string("the engine drains the world's jobs first (") + kName[kind] + ")";
-    else
-        d.text = std::string("a bounded wait (") + std::to_string(g_stop_wait_ms.load()) + " ms) only (" + kName[kind] + ": " +
-                 std::string(row.text.ptr ? row.text.ptr : "", row.text.len) + ")";
-    return d;
-}
+// The core's guarantee about a world kind's jobs at its STOPPING: world_stop_drain (world_internal.h, defined below).
+using DrainRow = StopDrain;
+DrainRow drain_row(uint32_t kind) { return world_stop_drain(kind, g_stop_wait_ms.load()); }
 std::string wraps_text(const char* what, uint32_t kind) { return std::string(what) + "; at a world stop " + drain_row(kind).text; }
 
 void report_row(const char* name, uint32_t state, uint32_t reason, const char* text) {
@@ -845,6 +823,26 @@ const char* game_wraps_off_reason() {
         case 2: return "wraps: the loaded modules could not be read, so native SET may be loaded";
         default: return "";
     }
+}
+
+StopDrain world_stop_drain(uint32_t kind, uint32_t wait_ms) {
+    static constexpr const char* kName[KILN_WORLD_KINDS] = {"world.stop_drain.server", "world.stop_drain.prediction",
+                                                           "world.stop_drain.client"};
+    StopDrain d;
+    if (kind >= KILN_WORLD_KINDS) return d;
+    const KilnCapsApi* caps = g_wrap_caps ? g_wrap_caps : static_cast<const KilnCapsApi*>(g_api->service(kstr(KILN_CAPS_SERVICE), 1));
+    KilnCapRow row{};
+    row.size = sizeof row;
+    const std::string bound = "a bounded wait (" + std::to_string(wait_ms) + " ms) only";
+    if (!caps || caps->header.size < offsetof(KilnCapsApi, find) + sizeof(void*) || !caps->find ||
+        caps->find(kstr(kName[kind]), &row) != KILN_OK) {
+        d.text = bound + ": this core has no " + kName[kind] + " row";
+        return d;
+    }
+    d.engine = row.state == KILN_CAP_AVAILABLE;
+    d.text = d.engine ? std::string("the engine drains the world's jobs first (") + kName[kind] + ")"
+                      : bound + " (" + kName[kind] + ": " + std::string(row.text.ptr ? row.text.ptr : "", row.text.len) + ")";
+    return d;
 }
 
 // The runner link, once a stage asked for an archetype: tried in a Pre (no slice of this world runs; mid2_checked checks the
