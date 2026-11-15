@@ -80,6 +80,7 @@ internal static partial class KilnApis
         "M:Kiln.Bans.Add(System.UInt64,System.String,System.Nullable{System.TimeSpan})", // Bans.Add(ulong, string, TimeSpan?): Game.AssertTickThread
         "M:Kiln.Bans.Remove(System.UInt64)", // Bans.Remove(ulong): Game.AssertTickThread
         "M:Kiln.Blocks.Apply(Kiln.BlockPlan)", // Blocks.Apply(BlockPlan): Services.RequireTickThread
+        "M:Kiln.Blocks.Define(System.String,Kiln.VfxBlock,Kiln.DefinitionRegistrationOptions)", // Blocks.Define(string, VfxBlock, DefinitionRegistrationOptions): Services.RequireTickThread
         "M:Kiln.Boss.KilledBy(Kiln.Player)", // Boss.KilledBy(Player): via ProgressFact.Holds(EntityId)
         "M:Kiln.Boss.get_Killed", // Boss.Killed.get: via ProgressFact.Holds(EntityId)
         "M:Kiln.Build.Add(Kiln.BuildShape,System.Byte,Kiln.BuildOptions)", // Build.Add(BuildShape, byte, BuildOptions?): via Build.RunShape(ShapeOp, BuildShape, byte, byte, double, float, int, BuildOptions?)

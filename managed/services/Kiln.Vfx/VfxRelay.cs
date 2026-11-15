@@ -321,6 +321,9 @@ internal static class VfxStartup
             ScreenRelay.Start();
             VfxCaps.Rows.Ensure();
             ServiceTick.Add("kiln vfx names", VfxNames.Drain);
+            // the budget's CapacityChangedEvent and the VFX definitions' DefinitionRegistrationChangedEvent: read every 25 steps while
+            // someone listens, nothing otherwise
+            ServiceTick.Add("kiln vfx budget", static (in TickInfo t) => VfxBudgetWatch.Tick(t.Step));
             unsafe
             {
                 VfxLog.Info($"Kiln.Vfx up: {(VfxNative.T != null ? "kiln.vfx present (client playback)" : "no kiln.vfx (server: relay only)")}, " +

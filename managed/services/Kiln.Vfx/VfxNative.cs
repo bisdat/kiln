@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
-// Mirror of native/core/abi/services/kiln_vfx.h (kiln.vfx v1). Layouts are checked by size at run time.
+// Mirror of native/core/abi/services/kiln_vfx.h (kiln.vfx v1). Layouts are checked by size at run time; the members appended
+// in 0.2.0-dev.29 (the resource budget) each by the header's size before they are called.
 using System.Runtime.InteropServices;
 
 namespace Kiln;
@@ -9,7 +10,7 @@ internal static unsafe partial class VfxNative
     public const string Name = "kiln.vfx";
     public const uint Version = 1;
 
-    public const int Ok = 0;
+    public const int Ok = 0, InvalidArgument = 1, Unavailable = 3, WrongThread = 4, BufferTooSmall = 5;
 
     // KilnVfxPlay.flags
     public const uint At = 1, On = 2, Verify = 4, TestFx = 8, TestCreate = 16, WaitGuid = 32;
@@ -76,6 +77,46 @@ internal static unsafe partial class VfxNative
         public delegate* unmanaged[Cdecl]<uint, byte*, int> BindGuid;
     }
 
+    /// <summary>The table with the members appended in 0.2.0-dev.29 (kiln_vfx.h: resource_budget, define_vfx_result,
+    /// vfx_registration). <see cref="Table"/> stays the v1 prefix every kiln.vfx has; each member is used only when the
+    /// header's size covers it (<see cref="Has"/>).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct BudgetTable
+    {
+        public Table V1;
+        public delegate* unmanaged[Cdecl]<KilnCapacityInfo*, int> ResourceBudget;
+        public delegate* unmanaged[Cdecl]<ulong, GameDataMirror.Str, GameDataMirror.Str, uint, KilnDefinitionReply*, byte*, nuint, nuint*, int> DefineVfxResult;
+        public delegate* unmanaged[Cdecl]<ulong, byte*, KilnDefinitionReply*, byte*, nuint, nuint*, int> VfxRegistration;
+    }
+
+    /// <summary>The most bytes a define or receipt report takes (the native side asks for this much before it does anything).</summary>
+    public const int AnswerReport = 4096;
+
+    /// <summary>The members of the resource budget, by their offset in <see cref="BudgetTable"/>.</summary>
+    public enum Member { ResourceBudget, DefineVfxResult, VfxRegistration }
+
+    /// <summary>The table, when its header covers <paramref name="member"/> (kiln.vfx since 0.2.0-dev.29); else null.</summary>
+    public static BudgetTable* Has(Member member)
+    {
+        var t = T;
+        if (t == null) return null;
+        var end = member switch
+        {
+            Member.ResourceBudget => (int)Marshal.OffsetOf<BudgetTable>(nameof(BudgetTable.ResourceBudget)),
+            Member.DefineVfxResult => (int)Marshal.OffsetOf<BudgetTable>(nameof(BudgetTable.DefineVfxResult)),
+            _ => (int)Marshal.OffsetOf<BudgetTable>(nameof(BudgetTable.VfxRegistration)),
+        } + sizeof(nint);
+        var b = (BudgetTable*)t;
+        if (t->Header.Size < (uint)end) return null;
+        var fn = member switch
+        {
+            Member.ResourceBudget => (nint)b->ResourceBudget,
+            Member.DefineVfxResult => (nint)b->DefineVfxResult,
+            _ => (nint)b->VfxRegistration,
+        };
+        return fn == 0 ? null : b;
+    }
+
     private static Table* _table;
     private static int _looked;  // 0 not yet, 1 looked up
 
@@ -95,7 +136,8 @@ internal static unsafe partial class VfxNative
     static VfxNative()
     {
         // fail loudly in development when the mirror drifts from the C header
-        global::System.Diagnostics.Debug.Assert(sizeof(Play) == 128 && sizeof(Info) == 88 && sizeof(Status) == 64 && sizeof(Table) == 112);
+        global::System.Diagnostics.Debug.Assert(sizeof(Play) == 128 && sizeof(Info) == 88 && sizeof(Status) == 64 && sizeof(Table) == 112 &&
+                                                sizeof(BudgetTable) == 136);
     }
 
     /// <summary>The builder's answer to a definition from code (docs/kiln/services/vfx-cook.md), or null when kiln.vfx isn't here.</summary>

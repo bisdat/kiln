@@ -138,6 +138,17 @@ public:
         return ++next_instance_;
     }
     void preload(const Frame&, const uint8_t*) override { ++preloads; }
+    // The game's registry: the count limit is what its map was reserved for, half the slots (the game's reserve makes 2 x the
+    // request), and its resources are listed (state 2) from the start.
+    bool registry(void*, Registry* out) override {
+        out->count = count_;
+        out->slots = kCapacity;
+        out->limit = static_cast<uint32_t>(kCapacity / 2);
+        out->init_state = 2;
+        return true;
+    }
+    const char* registry_missing() const override { return nullptr; }
+    const char* bytes_missing() const override { return nullptr; }
 
     void tick() { ++updates_; }
     uint64_t updates_ = 0;
