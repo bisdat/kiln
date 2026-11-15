@@ -47,6 +47,9 @@ internal sealed unsafe class FakeWorld : IDisposable
     internal int IterateResult = SystemsNative.Ok;  // what game_slice_iterate answers (Unavailable: a build that cannot iterate)
     internal int ArchetypeResult = SystemsNative.Ok;  // what game_slice_archetype answers
     internal readonly HashSet<uint> UnknownComponents = new();  // game_archetype_has answers -1 for these
+    // kiln.world's directory read inside a step gave up after its bound (another thread held the directory's lock):
+    // game_program_list answers -1 and game_program_contract NOT_FOUND for an existing program
+    internal bool DirectoryBusy;
     // game_program_contract of fuel_setup: the live descriptor's contract and its text (chapter 06a 9.7)
     internal const uint FuelContract = 0xC0FFEE01;
     internal const string FuelTail = "sys_read_opt=0000000000000000\nsys_write_opt=0000000000000000\nsys_write_parallel=0000000000000000\nflags=00000000\ninterval=1\n";
@@ -198,7 +201,7 @@ internal sealed unsafe class FakeWorld : IDisposable
     {
         F.ContractCalls++;
         if (contract == null) return SystemsNative.InvalidArgument;
-        if (index != 0 || kind == 1) return SystemsNative.NotFound;
+        if (index != 0 || kind == 1 || F.DirectoryBusy) return SystemsNative.NotFound;
         if (F.ContractResult != SystemsNative.Ok) return F.ContractResult;
         *contract = F.ContractValue;
         var b = System.Text.Encoding.UTF8.GetBytes(F.ContractText);
@@ -255,7 +258,7 @@ internal sealed unsafe class FakeWorld : IDisposable
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int List(uint kind, int index, int list, NativeStr* names, uint capacity)
     {
-        if (index is not (0 or 1)) return -1;
+        if (index is not (0 or 1) || F.DirectoryBusy) return -1;
         if (index == 1) return 0;
         NativeStr? one = list switch
         {

@@ -1894,6 +1894,39 @@ void abi(const char* path) {
     check(prefix && fx.at("KilnWorldApi").at("size").get<size_t>() == offsetof(KilnWorldApi, game_program_find),
           "abi.json: v3 is a prefix of v4 and ends where v4's first member starts");
 }
+// A stage that reads kiln.world's directory (what the first typed bind on a worker does: game_program_list and
+// game_program_contract) while another thread holds the directory's lock: the read gives up after its bound instead of
+// waiting inside the game's step.
+std::atomic<int32_t> g_dir_read{-99};
+std::atomic<bool> g_dir_done{false};
+void KILN_CALL st_dir_read(KilnGameSlice*, void*) {
+    g_dir_read = game_program_list(KILN_WORLD_SERVER, idx("fuel_setup"), KILN_GAME_LIST_WRITE, nullptr, 0);
+    g_dir_done = true;
+}
+void directory_read_in_stage() {
+    const KilnHandle h = wrap(95, "fuel_setup", KILN_WRAP_BEFORE, 0, &st_dir_read, nullptr);
+    wpre();
+    Job job(2);
+    run_slice(wentry(0), job);
+    const int32_t unlocked = g_dir_read.load();
+    check(unlocked >= 0, "a directory read inside a stage: the program's write list when nobody holds the lock");
+    const uint64_t bypasses = game_programs_test_directory_bypasses();
+    g_dir_done = false;
+    g_dir_read = -99;
+    game_programs_test_hold_directory_lock(true);
+    std::thread worker([&] {
+        Job j(2);
+        run_slice(wentry(0), j);
+    });
+    bool done = false;
+    for (int i = 0; i < 500 && !(done = g_dir_done.load()); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    game_programs_test_hold_directory_lock(false);
+    worker.join();
+    check(done && g_dir_read.load() == -1 && game_programs_test_directory_bypasses() > bypasses,
+          "a directory read inside a stage gives up after its bound while the lock is held (no unbounded wait on a worker)");
+    game_program_unwrap(h);
+    wpre();
+}
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -1920,6 +1953,7 @@ int main(int argc, char** argv) {
     stopping_timeout();
     retirement_under_load();
     per_entity();
+    directory_read_in_stage();
     stress_steps();
     stress_overlap();
     if (argc > 1) abi(argv[1]);

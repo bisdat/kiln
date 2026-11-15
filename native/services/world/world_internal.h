@@ -262,6 +262,8 @@ int32_t KILN_CALL game_program_find(uint32_t kind, KilnStr name);
 KilnResult KILN_CALL game_program_info(uint32_t kind, int32_t index, KilnGameProgramInfo* out);
 KilnResult KILN_CALL game_programs_status(KilnGameProgramsStatus* out);
 KilnResult KILN_CALL lab_parallel(uint32_t on, uint32_t steps);
+void game_programs_test_hold_directory_lock(bool hold);  // tests: hold the lock a directory read takes
+uint64_t game_programs_test_directory_bypasses();
 void game_programs_test_setup(uintptr_t image_lo, uintptr_t image_hi, bool table_ok, int64_t players_mask,
                               bool switch_enabled);  // host tests only
 
