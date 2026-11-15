@@ -54,8 +54,31 @@ internal static class BootFingerprint
 
     /// <summary>The fingerprint of mod <paramref name="modId"/> (folder <paramref name="directory"/>) over the envelope's
     /// <paramref name="collectors"/> (collector -> [{owner, key, document}]) and its blocks files' resource patches: lower-case SHA-256 hex.</summary>
-    internal static string Of(string modId, string directory, JsonObject collectors) =>
-        Hash(Entries(modId, directory, collectors), Roots(directory));
+    internal static string Of(string modId, string directory, JsonObject collectors)
+    {
+        var text = CanonicalText(Entries(modId, directory, collectors), Roots(directory));
+        LabDump(modId, text);
+        return Sha(text);
+    }
+
+    /// <summary>Labs only: while <c>kiln/control/boot-fingerprint.dump</c> exists, each fingerprint's hashed text is written to
+    /// <c>kiln/state/boot-fingerprints/&lt;id&gt;.txt</c> (UTF-8, the exact bytes), so two processes' inputs can be compared line by line.
+    /// Nothing creates the file in a release.</summary>
+    internal const string DumpSwitch = "boot-fingerprint.dump";
+
+    private static void LabDump(string modId, string text)
+    {
+        try
+        {
+            if (!File.Exists(Path.Combine(KilnPaths.Root, "control", DumpSwitch))) return;
+            var dir = Directory.CreateDirectory(Path.Combine(KilnPaths.State, "boot-fingerprints")).FullName;
+            File.WriteAllBytes(Path.Combine(dir, modId + ".txt"), Encoding.UTF8.GetBytes(text));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            // a lab aid: the fingerprint stands without it
+        }
+    }
 
     /// <summary>The mod folder as a path inside a document may name it: as given, and with its links resolved (Kiln.Blocks names a mod
     /// file by its resolved path, BlockFiles.InMod).</summary>
@@ -112,7 +135,13 @@ internal static class BootFingerprint
 
     /// <summary>The hash of <paramref name="entries"/>: sorted by collector and key (ordinal), except patches retain native application order (files by
     /// name, then keys within each file), each document in its canonical form against the mod folder's <paramref name="roots"/> (<see cref="NormalizeRoot"/>).</summary>
-    internal static string Hash(IEnumerable<(string Collector, string Key, JsonNode? Document)> entries, IReadOnlyList<string> roots)
+    internal static string Hash(IEnumerable<(string Collector, string Key, JsonNode? Document)> entries, IReadOnlyList<string> roots) =>
+        Sha(CanonicalText(entries, roots));
+
+    private static string Sha(string text) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+
+    /// <summary>What <see cref="Hash"/> hashes: the scheme line, then one line per document (collector, key, canonical JSON).</summary>
+    internal static string CanonicalText(IEnumerable<(string Collector, string Key, JsonNode? Document)> entries, IReadOnlyList<string> roots)
     {
         var sb = new StringBuilder(Scheme).Append('\n');
         foreach (var (collector, key, doc) in entries.OrderBy(e => e.Collector, StringComparer.Ordinal)
@@ -125,7 +154,7 @@ internal static class BootFingerprint
             Canonical(sb, doc, roots);
             sb.Append('\n');
         }
-        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString())));
+        return sb.ToString();
     }
 
     /// <summary>The "resourcePatches" sections of the mod's blocks/*.json (files by name, ordinal), as kiln.content reads them: a file that

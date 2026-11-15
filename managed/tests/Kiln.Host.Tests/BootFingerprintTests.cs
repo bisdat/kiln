@@ -257,6 +257,27 @@ public sealed class BootFingerprintTests : ModsFixture
         Assert.Equal(BootFingerprint.Of("m", Mod("empty"), new JsonObject()), BootFingerprint.Of("m", dir, new JsonObject()));
     }
 
+    [Fact]
+    public void A_lab_switch_writes_the_hashed_text_and_without_it_nothing_is_written()
+    {
+        var root = KilnPaths.Root;
+        KilnPaths.Root = Root;
+        try
+        {
+            var dir = Mod("m", ("blocks/patches.json", Patch));
+            var dump = Path.Combine(Root, "state", "boot-fingerprints", "more-altars.txt");
+            BootFingerprint.Of("more-altars", dir, new JsonObject());
+            Assert.False(File.Exists(dump));  // off unless a lab asks
+            Directory.CreateDirectory(Path.Combine(Root, "control"));
+            File.WriteAllText(Path.Combine(Root, "control", BootFingerprint.DumpSwitch), "");
+            var hash = BootFingerprint.Of("more-altars", dir, new JsonObject());
+            Assert.True(File.Exists(dump));
+            Assert.Equal(hash, Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(dump))));
+            Assert.Contains("experienceNeedPerLevel[0]", File.ReadAllText(dump));
+        }
+        finally { KilnPaths.Root = root; }
+    }
+
     // ------------------------------------------------------------------------------------------------ the publication
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
