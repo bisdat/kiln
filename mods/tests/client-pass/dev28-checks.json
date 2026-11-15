@@ -1357,7 +1357,8 @@
     "17c-roster-cap",
     "17d-material-pools"
    ],
-   "state": "open"
+   "state": "open",
+   "deferred": "belongs to the optional world-local material allocation, which is not built in this release: a mod's material pools are added once at boot and stay for the whole run; 17-material-pools covers them"
   },
   {
    "id": "18-c18.1",
