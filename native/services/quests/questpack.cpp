@@ -960,6 +960,7 @@ PackOut compile_pack(const std::vector<ModInput>& mods, const GameData& game) {
         out.ok = false;
         out.any = false;
         out.manifest["errors"] = out.errors;
+        out.manifest["failed"] = why;  // nothing of any mod is built (a boot generation's required mods are left out by it)
         return out;
     };
     if (!read_required(game, kGuidKnowledge, kTypeKnowledge, &p, &n, &err)) return fail(err);

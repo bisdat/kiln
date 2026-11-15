@@ -17,6 +17,9 @@
     <ProjectReference Include="../../services/Kiln.Players/Kiln.Players.csproj" />
     <ProjectReference Include="../../services/Kiln.Client/Kiln.Client.csproj" />
     <ProjectReference Include="../../services/Kiln.Network/Kiln.Network.csproj" />
+    <!-- Kiln.Host beside it, as in kiln/host: BootGateTests read its boot fingerprints through BootGate's reflection seam. Not on the
+         service autostart list, so loading it starts nothing. -->
+    <ProjectReference Include="../../Kiln.Host/Kiln.Host.csproj" />
   </ItemGroup>
   <ItemGroup>
     <!-- The admin commands' tick-thread hop after a guard request (SteamGuardRelayTests drives it on a real scheduler). -->

@@ -211,6 +211,7 @@ pub fn run() {
             commands::found::found_add,
             commands::cook::cook_plan,
             commands::cook::cook_run,
+            commands::cook::boot_snapshot_run,
             commands::logs::report_save,
             commands::logs::report_summary,
             commands::data_folder::data_folder_get,
@@ -222,7 +223,8 @@ pub fn run() {
             commands::data_folder::data_folder_notice_ack,
             commands::data_folder::data_folder_restart,
             commands::app::app_started,
-            commands::app::app_render_set
+            commands::app::app_render_set,
+            commands::updates::updates_check
         ]))
         .build(tauri::generate_context!())
         .expect("error while building the Kiln Launcher")

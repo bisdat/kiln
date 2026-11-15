@@ -4,7 +4,7 @@
     <RootNamespace>Kiln</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <NoWarn>$(NoWarn);CS1591;KILNX028</NoWarn>  <!-- defines KILNX028 (17b's groundwork): its own helpers use those types -->
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Kiln.Host" />
@@ -29,6 +29,7 @@
     <InternalsVisibleTo Include="Kiln.Combat" />
     <InternalsVisibleTo Include="Kiln.Gameplay" />
     <InternalsVisibleTo Include="Kiln.Saves" />
+    <InternalsVisibleTo Include="Kiln.Saves.Tests" />
     <InternalsVisibleTo Include="Kiln.Data" />
     <InternalsVisibleTo Include="Kiln.Content" />
     <InternalsVisibleTo Include="Kiln.Hooks" />

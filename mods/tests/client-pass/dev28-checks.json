@@ -535,6 +535,15 @@
    "state": "open"
   },
   {
+   "id": "08-boot.required-client",
+   "title": "A required boot mod's client-only content stops the start",
+   "chapter": "08",
+   "packages": [
+    "08-onboot"
+   ],
+   "state": "open"
+  },
+  {
    "id": "08-loader-order",
    "title": "Other-loader consumer ordering",
    "chapter": "08",
@@ -1402,6 +1411,16 @@
    "state": "open"
   },
   {
+   "id": "19d-brain-walks",
+   "title": "A creature with a Kiln.Blocks brain walks to you and stops",
+   "chapter": "19d",
+   "packages": [
+    "19d-creature-control"
+   ],
+   "state": "open",
+   "added": "19d-creature-control"
+  },
+  {
    "id": "19e-t1",
    "title": "Selected food/tool and replay-safe cost",
    "chapter": "19e",
@@ -1512,6 +1531,66 @@
    ],
    "state": "open",
    "added": "06a-program-wraps"
+  },
+  {
+   "id": "00-sigdb.in-place-patches",
+   "title": "Kiln's functions are found next to a loader that patched the game first",
+   "chapter": "00",
+   "packages": [
+    "00-integration"
+   ],
+   "state": "open",
+   "added": "coordinator (sigdb fix, 14 Nov)"
+  },
+  {
+   "id": "00-keys.physical-backquote",
+   "title": "Backquote is the key left of 1 on a UK keyboard layout",
+   "chapter": "00",
+   "packages": [
+    "00-integration"
+   ],
+   "state": "open",
+   "added": "fix round 00-integration.keys (GitHub issue 33, 14 Nov)"
+  },
+  {
+   "id": "rules.noclip-descent",
+   "title": "NoClip: sneak sinks every time, also in the game's sneak mode",
+   "chapter": "00",
+   "packages": [
+    "00-integration"
+   ],
+   "state": "open",
+   "added": "fix round 00-integration.noclip (GitHub issue 25, 14 Nov)"
+  },
+  {
+   "id": "rules.noclip-death",
+   "title": "NoClip: a death inside the ground ends it",
+   "chapter": "00",
+   "packages": [
+    "00-integration"
+   ],
+   "state": "open",
+   "added": "fix round 00-integration.noclip (GitHub issue 25, 14 Nov)"
+  },
+  {
+   "id": "rules.noclip-world",
+   "title": "NoClip: closing the world inside the ground",
+   "chapter": "00",
+   "packages": [
+    "00-integration"
+   ],
+   "state": "open",
+   "added": "fix round 00-integration.noclip (GitHub issue 25, 14 Nov)"
+  },
+  {
+   "id": "rules.noclip-disconnect",
+   "title": "NoClip: leaving a server inside the ground",
+   "chapter": "00",
+   "packages": [
+    "00-integration"
+   ],
+   "state": "open",
+   "added": "fix round 00-integration.noclip (GitHub issue 25, 14 Nov)"
   }
  ]
 }

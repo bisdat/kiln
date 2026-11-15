@@ -465,7 +465,11 @@ public sealed unsafe class SystemsTests
         Assert.Equal(v4["game_program_find"], (int)Marshal.OffsetOf(t, "GameProgramFind"));
         Assert.Equal(v4["game_program_wrap"], (int)Marshal.OffsetOf(t, "GameProgramWrap"));
         Assert.Equal(v4["game_slice_run_original"], (int)Marshal.OffsetOf(t, "GameSliceRunOriginal"));
+        Assert.Equal(v4["wrap_original"], (int)Marshal.OffsetOf(t, "WrapOriginal"));
+        Assert.Equal(v4["in_program"], (int)Marshal.OffsetOf(t, "InProgram"));
         Assert.Equal(v4["game_program_list"], (int)Marshal.OffsetOf(t, "GameProgramList"));
+        Assert.Equal(v4["game_slice_iterate"], (int)Marshal.OffsetOf(t, "GameSliceIterate"));
+        Assert.Equal(v4["game_slice_archetype"], (int)Marshal.OffsetOf(t, "GameSliceArchetype"));
         Assert.Equal(v4["game_archetype_has"], (int)Marshal.OffsetOf(t, "GameArchetypeHas"));
         Assert.Equal(v4["game_slice_slot"], (int)Marshal.OffsetOf(t, "GameSliceSlot"));
         Assert.Equal(v4["game_slice_mark"], (int)Marshal.OffsetOf(t, "GameSliceMark"));

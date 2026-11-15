@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// kiln-emf: the parts of EmfApi v22-v26 (and the table sizes up to v40) that need no game and no Windows, so host tests (tests/run.sh) run them with
+// kiln-emf: the parts of EmfApi v22-v26 (and the table sizes up to v42) that need no game and no Windows, so host tests (tests/run.sh) run them with
 // fakes: the table layout per version, mod windows (v24/v26 definitions as EMF copies them), the component policy and
 // the change queue (v23), E-prompt offers (v25) and picture paths (v26). The glue onto Kiln's services is in
 // api_level.cpp, api_components.cpp and api_windows.cpp.
@@ -54,11 +54,16 @@ constexpr uint32_t kApiV37Size = KEMF_FIELD_END(EmfApi, path_cancel);
 constexpr uint32_t kApiV38Size = KEMF_FIELD_END(EmfApi, door_lock);
 constexpr uint32_t kApiV39Size = KEMF_FIELD_END(EmfApi, enemy_target);
 constexpr uint32_t kApiV40Size = KEMF_FIELD_END(EmfApi, enemy_moving);
+// v41 (EMF 0.6.10) and v42 (0.6.11) are the version only: the table did not grow (EMF's api_sizes.h at 0.6.11).
+// v41: EmfMoveOrder.stuck_seconds and EMF_MOVE_PEACEFUL_ALL; v42: EmfPathResult.doors.
+constexpr uint32_t kApiV41Size = kApiV40Size;
+constexpr uint32_t kApiV42Size = kApiV40Size;
 // The smallest `size` each v36-v40 request struct may carry (the end of its last field in the version that added it).
 constexpr uint32_t kRemoveBuildingV36Size = KEMF_FIELD_END(EmfRemoveBuilding, why);
 constexpr uint32_t kPathQueryV37Size = KEMF_FIELD_END(EmfPathQuery, max_nodes);
 constexpr uint32_t kEnemyOrderV39Size = KEMF_FIELD_END(EmfEnemyOrder, why);
 constexpr uint32_t kMoveOrderV40Size = KEMF_FIELD_END(EmfMoveOrder, why);
+constexpr uint32_t kPathResultV37Size = KEMF_FIELD_END(EmfPathResult, length);  // before v42's doors
 constexpr uint32_t kComponentChangeV23Size = KEMF_FIELD_END(EmfComponentChange, user);
 constexpr uint32_t kWindowDefV24Size = KEMF_FIELD_END(EmfWindowDef, user);
 constexpr uint32_t kUiWidgetV24Size = KEMF_FIELD_END(EmfUiWidget, pad);
@@ -78,6 +83,8 @@ static_assert(kApiV33Size == 920 && kApiV34Size == 952 && kApiV35Size == 992 && 
               "EmfApi v33-v37 sizes");
 static_assert(kApiV38Size == 1040 && kApiV39Size == 1064 && kApiV40Size == 1088 && sizeof(EmfApi) == kApiV40Size,
               "EmfApi v38-v40 sizes");
+static_assert(kApiV41Size == 1088 && kApiV42Size == 1088 && sizeof(EmfApi) == kApiV42Size && EMF_API_VERSION == 42,
+              "EmfApi v41-v42: the version only");
 static_assert(offsetof(EmfApi, chat_tell_ex) == 760 && offsetof(EmfApi, hit_rule_add) == 792 &&
                   offsetof(EmfApi, buff_apply) == 840 && offsetof(EmfApi, world_to_screen) == 896,
               "EmfApi v30-v33 slots");
@@ -98,13 +105,15 @@ static_assert(kRemoveBuildingV36Size == 144 && sizeof(EmfRemoveBuilding) == 144 
                   offsetof(EmfRemoveBuilding, why) == 24,
               "EmfRemoveBuilding layout (v36)");
 static_assert(kPathQueryV37Size == 52 && sizeof(EmfPathQuery) == 52 && offsetof(EmfPathQuery, max_nodes) == 48 &&
-                  sizeof(EmfPathPoint) == 16 && sizeof(EmfPathResult) == 20,
-              "EmfPathQuery / EmfPathPoint / EmfPathResult layouts (v37)");
+                  sizeof(EmfPathPoint) == 16 && kPathResultV37Size == 20 && offsetof(EmfPathResult, count) == 12 &&
+                  offsetof(EmfPathResult, doors) == 24 && sizeof(EmfPathResult) == 32,
+              "EmfPathQuery / EmfPathPoint / EmfPathResult layouts (v37; v42 doors)");
 static_assert(kEnemyOrderV39Size == 120 && sizeof(EmfEnemyOrder) == 120 && offsetof(EmfEnemyOrder, why) == 24,
               "EmfEnemyOrder layout (v39)");
-static_assert(kMoveOrderV40Size == 128 && sizeof(EmfMoveOrder) == 128 && offsetof(EmfMoveOrder, points) == 16 &&
+static_assert(kMoveOrderV40Size == 128 && sizeof(EmfMoveOrder) == 136 && offsetof(EmfMoveOrder, stuck_seconds) == 128 &&
+                  offsetof(EmfMoveOrder, points) == 16 &&
                   offsetof(EmfMoveOrder, why) == 32,
-              "EmfMoveOrder layout (v40)");
+              "EmfMoveOrder layout (v40; v41 stuck_seconds)");
 static_assert(kComponentChangeV23Size == 48 && sizeof(EmfComponentChange) == 48, "EmfComponentChange layout (v23)");
 static_assert(kWindowDefV24Size == 72 && sizeof(EmfWindowDef) == 72 && offsetof(EmfWindowDef, cb) == 56,
               "EmfWindowDef layout (v24)");

@@ -50,6 +50,9 @@ KilnResult KILN_CALL game_wrap_info(KilnHandle wrap, KilnGameWrapInfo* out);
 KilnResult KILN_CALL game_wraps_release(KilnOwner owner, uint32_t* out_pending);
 KilnResult KILN_CALL game_slice_run_original(KilnGameSlice* slice);
 uint64_t KILN_CALL wrap_original(uintptr_t entry);
+uint32_t KILN_CALL in_program();  // the table's in_program: a Kiln program's update, a wrap stage or a kiln.types
+                                  // system_hook callback on this thread
+void in_program_resolve(const KilnTypesApi* types);  // on_ready: kiln.types' in_system_callback (null: that part is 0)
 KilnResult KILN_CALL game_slice_iterate(KilnGameSlice* slice, KilnSliceEntityFn each, void* user);
 void* KILN_CALL game_slice_slot(KilnGameSlice* slice, const uint64_t* iter, int32_t list, int32_t i, uint32_t* size,
                                 uint8_t* writable);

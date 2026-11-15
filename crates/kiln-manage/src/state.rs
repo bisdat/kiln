@@ -536,7 +536,7 @@ pub fn read_last_server(game_dir: &Path) -> Result<Option<LastServer>> {
 /// Holds a lock file ([`lock_file`]) until dropped.
 #[derive(Debug)]
 pub struct HeldLock {
-    _file: std::fs::File,
+    _file: crate::util::LockedFile,
 }
 
 /// Takes the lock of `path` (an exclusive lock on the file, made when missing), across threads and processes: polled every
@@ -550,7 +550,7 @@ pub fn lock_file(path: &Path, wait: std::time::Duration, canceled: &dyn Fn() -> 
     let start = std::time::Instant::now();
     loop {
         match file.try_lock() {
-            Ok(()) => return Ok(HeldLock { _file: file }),
+            Ok(()) => return Ok(HeldLock { _file: crate::util::LockedFile(file) }),
             Err(std::fs::TryLockError::WouldBlock) => {}
             Err(std::fs::TryLockError::Error(e)) => return Err(crate::util::io_at(path, "locking")(e)),
         }

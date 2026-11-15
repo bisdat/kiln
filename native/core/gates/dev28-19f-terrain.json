@@ -1,3 +1,0 @@
-{ "gates": [
-    { "name": "terrain.overlays", "checks": ["19f-overlay-client"], "side": "client" }
-] }

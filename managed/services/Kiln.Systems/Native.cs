@@ -83,7 +83,8 @@ internal static unsafe class SystemsNative
         public fixed byte Detail[128];
     }
 
-    // KilnWorldApi up to game_slice_attr_changed: the v3 table (header + 34 entries) and v4.
+    // KilnWorldApi up to game_slice_attr_changed: the v3 table (header + 34 entries), v4 to wrap_original, in_program
+    // (0.2.0-dev.28), then the per-entity members (0.2.0-dev.29).
     [StructLayout(LayoutKind.Sequential)]
     public struct Table
     {
@@ -99,6 +100,7 @@ internal static unsafe class SystemsNative
         public delegate* unmanaged[Cdecl]<ulong, uint*, int> GameWrapsRelease;
         public delegate* unmanaged[Cdecl]<Slice*, int> GameSliceRunOriginal;
         public nint WrapOriginal;
+        public nint InProgram;  // since 0.2.0-dev.28 (kiln.world's own guard; Kiln.Systems does not call it)
         public delegate* unmanaged[Cdecl]<uint, int, int, NativeStr*, uint, int> GameProgramList;
         public delegate* unmanaged[Cdecl]<Slice*, delegate* unmanaged[Cdecl]<ulong*, uint, uint, void*, uint>, void*, int> GameSliceIterate;
         public delegate* unmanaged[Cdecl]<Slice*, ulong*, int, int, uint*, byte*, void*> GameSliceSlot;

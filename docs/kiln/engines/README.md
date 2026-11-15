@@ -103,6 +103,17 @@ launcher puts them there:
   run a package and what helps (activation notes; for Kiln's copies `ownLoaders[].off`: switched off, the next
   activation switches it on; `otherSide`: its `targets` name the other side only, nothing to do; `unreadable`:
   ShroudForge refuses its files, no switch helps). Without ShroudForge nothing is written.
+- **An EML mod copied into ShroudForge's folder by hand** (dev.28). ShroudForge keeps it switched off (a legacy EML
+  package has no `extended.mod.json` until its switch is first turned on), and Kiln never writes into a folder it did
+  not place. Every place that explains it uses the words promised to a player on Nexus (2026-11-14): "You put this
+  mod into ShroudForge's folder yourself, and ShroudForge has it switched off. Switch it on in Kiln's in-game menu
+  (Mods > ShroudForge), or remove the folder and add the mod with Add mods." The launcher's list of mods in the game
+  folder (`found::scan`: Off, no "Add it" fix, since activation never places a copy beside the player's folder), the
+  activation notes (`ownLoaders[].ownOff` and the per-mod note, which say "press Play" instead of "Add mods" because
+  the mod is in the profile), kiln-eml's `off-in-shroudforge` reason and kiln.log line, and the in-game Mods page (on
+  the folder's own row in Mods > ShroudForge: "Switch it on below"). On a dedicated server, which has no in-game menu,
+  the second way out is the only one named. Text: `kiln_manage::shroudforge::hand_eml_off`; kiln-eml and `Kiln.Ui`
+  keep their own copy of the words.
 - **No double load.** When the loader does not start after all (Wine/Proton without the override), the plugin runs
   the profile's mods from the Library as usual (EML's: unless Kiln hosts ShroudForge for the profile, which then runs
   Kiln's copies in its folder). A folder in the engine's drop-in folder whose marker names this

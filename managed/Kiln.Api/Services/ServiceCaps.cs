@@ -322,6 +322,29 @@ internal sealed class ServiceCapRows
     private IDisposable? _tick;
     private bool _warned;
 
+    /// <summary>Reports every started rows set again now, as the periodic refresh would at its next turn (a set whose
+    /// service is off for a reason no step changes is skipped, as there). For a host whose capability inputs change
+    /// outside a step: the test kit, when a harness starts (rows decided under the harness before must not outlive it)
+    /// and when a test switches a row (a composed row follows its inputs at once, not 25 steps later). Any thread; never
+    /// throws.</summary>
+    internal static void RefreshStarted()
+    {
+        foreach (var rows in Volatile.Read(ref _all))
+        {
+            if (!rows.Started) continue;
+            try
+            {
+                if (rows.refreshOnlyWithService && SkipsRefresh(Capabilities.Get(rows.owner))) continue;
+            }
+            catch (Exception e)
+            {
+                rows.Warn(e);
+                continue;
+            }
+            rows.Refresh();
+        }
+    }
+
     /// <summary>Reports the rows when they were not reported under the current registry binding yet. Cheap otherwise
     /// (one comparison). Never throws: it runs in static constructors.</summary>
     public void Ensure()

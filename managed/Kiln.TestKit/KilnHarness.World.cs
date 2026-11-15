@@ -51,11 +51,11 @@ public sealed partial class KilnHarness
         StartRecordingFakes();  // KilnHarness.Fakes.cs
     }
 
-    partial void EndFakes()
+    partial void EndFakes(List<Exception> failures)
     {
-        EndRecordingFakes();
-        EndPlayers();
-        EndEntities();
+        EndRecordingFakes(failures);  // KilnHarness.Fakes.cs: every fake ends, also after one that threw
+        Ending(failures, EndPlayers);
+        Ending(failures, EndEntities);
     }
 
     /// <summary>The native services' Pre, before Kiln's: the save cycle, then the players' scan, then the saves pump.</summary>

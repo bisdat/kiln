@@ -702,6 +702,14 @@ typedef struct KilnWorldApi {
      * For code that names programs by their update pointer. */
     uint64_t(KILN_CALL* wrap_original)(uintptr_t entry);
 
+    /* ---- appended since 0.2.0-dev.28 (version stays 4). Check header.size ---- */
+    /* 1 when the calling thread is inside a Kiln world program's update (register_program, bind_program), inside a
+     * wrap stage on a game program's slice (game_program_wrap), or inside a kiln.types system_hook callback (kiln.types'
+     * in_system_callback; 0 for that part with a kiln.types that lacks it), else 0. The world is in the middle of its
+     * step there (maybe on a worker): a service whose calls must not run mid-step refuses them with
+     * KILN_ERR_WRONG_THREAD when this answers 1. Any thread; lock-free, no game call. */
+    uint32_t(KILN_CALL* in_program)(void);
+
     /* ---- per entity inside a stage (since 0.2.0-dev.29, still v4: check header.size) ----
      * The names of list `list` (KILN_GAME_LIST_*) of program `index`'s descriptor in that world's directory, in
      * descriptor order: returns how many (-1: no such program or list) and copies up to `capacity` into `names`

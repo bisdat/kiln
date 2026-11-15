@@ -1,7 +1,7 @@
 // The modpack consent modal. Play opens it from the refusal banner ("Get modpack") with the
 // game's last-server.json. Nothing downloads before the user ticks the box and presses Install: the backend command
 // takes the explicit consent flag. https only unless Settings allow http.
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, ShieldAlert } from "lucide-react";
 import { useState } from "react";
 import * as api from "../../api/commands";
@@ -9,6 +9,8 @@ import type { GameId, LastServer, ModpackInstallResult } from "../../api/command
 import { qk, useSettings } from "../../api/hooks";
 import { Banner, Button, KeyValue, Modal, Skeleton, Toggle, errorText, fmtBytes, runTask, shortHash, toast } from "../../ui";
 import { notifyActivation, notifyActivationOf } from "../../shell/notices";
+import { cookBeforePlay, cookingNotice } from "../../shell/cook";
+import { rememberLaunch } from "../../shell/play";
 
 export default function ModpackOffer({ gameId, lastServer, open, onClose }: { gameId: GameId; lastServer: LastServer; open: boolean; onClose: () => void }) {
   const qc = useQueryClient();
@@ -43,21 +45,40 @@ export default function ModpackOffer({ gameId, lastServer, open, onClose }: { ga
     qc.invalidateQueries({ queryKey: qk.pending(gameId) });
     onClose();
   };
+  // Launch starts the active profile (the modpack's, activated by the install) as Play does: the start is timed from
+  // here (launch_begin, so its cook and its boot game-data step are steps of the start's bar), its cook first (which
+  // writes the active profile again when it changed, then the boot game-data step for OnBoot mods; shell/cook.ts),
+  // then the start. As Play's own start ("launch_play"), so the Play surfaces follow it meanwhile.
+  const start = useMutation({
+    mutationKey: ["launch_play"],
+    mutationFn: async () => {
+      await api.launchBegin(gameId, "profile").catch(() => {});
+      void qc.invalidateQueries({ queryKey: ["launch_progress", gameId] });
+      await cookBeforePlay(gameId, cookingNotice);
+      return api.launchPlay(gameId, { mode: "profile", profileId: done?.profile.id });
+    },
+  });
   const launch = async () => {
+    setBusy(true);
     try {
-      const r = await api.launchPlay(gameId, { mode: "profile", profileId: done?.profile.id });
+      const r = await start.mutateAsync();
+      rememberLaunch(gameId, r.mode);
       notifyActivation(r.activation);
       onClose();
     } catch (e) {
+      // the start ended before the game existed: the launcher stops timing it
+      void api.launchEnd(gameId).catch(() => {});
       notifyActivationOf(e);
       toast.error(e, "Launch failed");
+    } finally {
+      setBusy(false);
     }
   };
   const p = preview.data;
   return (
     <Modal open={open} onClose={onClose} locked={busy} width={620} title={done ? "Modpack installed" : `${name} uses mods`}
       footer={done ? (
-        <><Button variant="ghost" onClick={onClose}>Close</Button><Button variant="molten" onClick={launch}>Launch</Button></>
+        <><Button variant="ghost" onClick={onClose} disabled={busy}>Close</Button><Button variant="molten" loading={busy} onClick={launch}>Launch</Button></>
       ) : (
         <><Button variant="ghost" onClick={dismiss} disabled={busy}>Not now</Button>
           <Button icon={<Download size={16} />} variant="primary" disabled={!pack || !agree || !httpOk || !!preview.error} loading={busy} onClick={install}>Download and install</Button></>

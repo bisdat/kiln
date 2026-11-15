@@ -325,7 +325,7 @@ public sealed class OverlayTests
         Assert.Equal(1, Assert.Single(run.Engine.Applied()).Blocks);
         // the block version 3 no longer addresses is free: another mod may take it
         var other = new Run(world, "mod-b", run.Session);
-        Assert.Equal(TerrainState.Completed, other.Apply(Solid("b", 1, new CellBox(64, 96, 64, 8, 8, 8), 3)).State);
+        Assert.Equal(TerrainState.Completed, other.Apply(Solid("b", 1, new CellBox(64, 96, 64, 8, 8, 8))).State);
     }
 
     [Fact]
@@ -465,6 +465,296 @@ public sealed class OverlayTests
         Assert.Equal(TerrainState.AlreadyApplied, run.Apply(Solid("p3", 1, new CellBox(64 + 24, 96, 64, 8, 8, 8))).State);
     }
 
+    [Fact]
+    public void A_resume_never_rewrites_a_committed_block_restored_to_its_before_value()
+    {
+        var world = new MemoryWorld();
+        var patch = Solid("resume", 1, new CellBox(64, 104, 64, 16, 8, 8));
+        using var cancel = new CancellationTokenSource();
+        world.OnTick = cancel.Cancel;
+        new Run(world).Apply(patch, new TerrainApplyOptions { CellsPerTick = 512, Cancel = cancel.Token });
+        // Save/restart loses session state, then a player removes the first block back to the original air.
+        world.Books["world-a|mod-a"] = System.Text.Json.JsonSerializer.Deserialize<TerrainBook>(
+            System.Text.Json.JsonSerializer.Serialize(world.Books["world-a|mod-a"]))!;
+        world.OnTick = null;
+        world.Edits.Clear();
+        var result = new Run(world).Apply(patch, new TerrainApplyOptions { CellsPerTick = 512 });
+        Assert.Equal(TerrainState.Conflict, result.State);
+        Assert.Equal(Voxel.Air, world.Get(64, 104, 64));
+        Assert.Equal(512, result.ChangedCells);
+    }
+
+    [Fact]
+    public void A_write_is_recorded_before_readback_can_fail_and_never_adopts_a_foreign_edit()
+    {
+        foreach (var failReadback in new[] { false, true })
+        {
+            var world = new MemoryWorld();
+            var patch = Solid("receipt", 1, new CellBox(64, 104, 64, 8, 8, 8));
+            world.AfterWrite = () =>
+            {
+                world.Set(64, 104, 64, Voxel.Of(7)); // e.g. a BuildEditEvent handler
+                if (failReadback) world.Loaded = false;
+            };
+            new Run(world).Apply(patch);
+            world.AfterWrite = null;
+            world.Loaded = true;
+            var run = new Run(world);
+            var result = run.Apply(patch with { Version = 2 });
+            Assert.Equal(TerrainState.Conflict, result.State);
+            Assert.Equal(Voxel.Of(7), world.Get(64, 104, 64));
+            Assert.Empty(run.Events);
+        }
+    }
+
+    [Fact]
+    public void A_base_fallback_keeps_receipts_when_a_later_block_is_refused()
+    {
+        var world = new MemoryWorld();
+        world.Bases.Add(new CellBox(64, 104, 64, 8, 8, 8));
+        world.RefuseWrite = box => box.X == 80 ? BuildRefusal.Canceled : BuildRefusal.None;
+        var patch = Solid("fallback", 1, new CellBox(64, 104, 64, 24, 8, 8));
+        Assert.Equal(TerrainState.Partial, new Run(world).Apply(patch).State);
+        world.Set(72, 104, 64, Voxel.Of(7));
+        world.RefuseWrite = null;
+        var result = new Run(world).Apply(patch);
+        Assert.Equal(TerrainState.Conflict, result.State);
+        Assert.Equal(Voxel.Of(7), world.Get(72, 104, 64));
+    }
+
+    [Fact]
+    public void Malformed_ledgers_are_refused_without_writes_or_exceptions()
+    {
+        Action<TerrainBook>[] corrupt =
+        [
+            b => b.Plans = null!,
+            b => b.Plans["vein"] = null!,
+            b => b.Plans["vein"].Region = null!,
+            b => b.Plans["vein"].Blocks = null!,
+            b => b.Plans["vein"].Blocks["bad-key"] = new TerrainBlock { GivenUp = true },
+            b => b.Plans["vein"].Version = -1,
+            b => b.Plans["vein"].Content = "forged",
+            b => b.Plans["vein"].Blocks.Values.First().After = "",
+            b => b.Plans = Enumerable.Range(0, 65).ToDictionary(i => $"p{i}", _ => b.Plans["vein"]),
+        ];
+        foreach (var damage in corrupt)
+        {
+            var world = new MemoryWorld();
+            var run = new Run(world);
+            var patch = Solid("vein", 1, new CellBox(64, 104, 64, 8, 8, 8));
+            run.Apply(patch);
+            damage(world.Books["world-a|mod-a"]);
+            world.Writes.Clear();
+            Assert.Equal(TerrainState.Refused, run.Apply(patch with { Version = 2 }).State);
+            Assert.False(run.Inspect(patch).Ok);
+            Assert.Empty(run.Engine.Applied());
+            Assert.False(run.Engine.Forget("vein"));
+            Assert.Empty(world.Writes);
+        }
+        var unreadable = new Run(new MemoryWorld { BookError = new InvalidDataException("invalid stored JSON") });
+        Assert.Equal(TerrainState.Refused, unreadable.Apply(Solid("vein", 1, new CellBox(64, 104, 64, 8, 8, 8))).State);
+    }
+
+    [Fact]
+    public void Reading_or_inspecting_a_running_plan_does_not_release_its_claims()
+    {
+        foreach (var transient in new[] { false, true })
+        {
+            var world = new MemoryWorld();
+            var a = new Run(world);
+            var b = new Run(world, "mod-b", a.Session);
+            var patch = Solid("hill", 1, new CellBox(64, 104, 64, 16, 8, 8));
+            world.OnTick = () =>
+            {
+                world.OnTick = null;
+                Assert.Single(a.Engine.Applied());
+                a.Inspect(patch);
+                Assert.False(a.Engine.Forget("hill"));
+                var other = Solid("other", 1, new CellBox(72, 104, 64, 8, 8, 8), 3,
+                    transient ? TerrainPersistence.Transient : TerrainPersistence.Kept);
+                Assert.Equal(TerrainState.Refused, b.Apply(other).State);
+            };
+            Assert.Equal(TerrainState.Completed, a.Apply(patch, new TerrainApplyOptions { CellsPerTick = 512 }).State);
+        }
+    }
+
+    [Fact]
+    public void An_apply_stops_if_the_world_ends_or_changes_while_it_waits()
+    {
+        foreach (var duringLoad in new[] { false, true })
+        {
+            var world = new MemoryWorld();
+            var run = new Run(world);
+            var patch = Solid("hill", 1, new CellBox(64, 104, 64, 16, 8, 8));
+            void Switch() { world.WorldId = "world-b"; }
+            if (duringLoad) world.OnLoad = Switch;
+            else world.OnTick = Switch;
+            var result = run.Apply(patch, new TerrainApplyOptions { CellsPerTick = 512 });
+            Assert.Equal(TerrainState.Partial, result.State);
+            Assert.Equal(duringLoad ? 0 : 1, world.Writes.Count);
+            Assert.False(world.Books.ContainsKey("world-b|mod-a"));
+        }
+        var stopped = new MemoryWorld();
+        stopped.OnTick = () => stopped.Running = false;
+        var result2 = new Run(stopped).Apply(Solid("stop", 1, new CellBox(64, 104, 64, 16, 8, 8)), new TerrainApplyOptions { CellsPerTick = 512 });
+        Assert.Equal(TerrainState.Partial, result2.State);
+        Assert.Single(stopped.Writes);
+    }
+
+    [Fact]
+    public void Inspect_reports_a_refused_probe_as_a_failure()
+    {
+        var world = new MemoryWorld { RefuseWrite = _ => BuildRefusal.Canceled };
+        var run = new Run(world);
+        var seen = run.Inspect(Solid("inspect", 1, new CellBox(64, 104, 64, 8, 8, 8)));
+        Assert.False(seen.Ok);
+        Assert.Equal(TerrainState.Partial, seen.Would);
+        Assert.NotNull(seen.Reason);
+    }
+
+    [Fact]
+    public void An_older_sidecar_cannot_authorize_writes_in_a_newer_world_save()
+    {
+        var world = new MemoryWorld();
+        var patch = Solid("lost-save", 1, new CellBox(64, 104, 64, 16, 8, 8));
+        using var cancel = new CancellationTokenSource();
+        world.OnTick = cancel.Cancel;
+        new Run(world).Apply(patch, new TerrainApplyOptions { CellsPerTick = 512, Cancel = cancel.Token });
+        world.OnTick = null;
+        world.Match = DataMatch.Older;
+        world.Writes.Clear();
+        var run = new Run(world);
+        Assert.Equal(TerrainState.Refused, run.Apply(patch).State);
+        Assert.False(run.Inspect(patch).Ok);
+        Assert.False(run.Engine.Forget("lost-save"));
+        Assert.Empty(run.Engine.Applied());
+        Assert.Empty(world.Writes);
+    }
+
+    [Fact]
+    public void Repeated_interrupted_region_changes_keep_the_ledger_bounded_and_readable()
+    {
+        var world = new MemoryWorld();
+        var run = new Run(world);
+        run.Apply(Solid("moving", 1, new CellBox(64, 104, 64, 8, 8, 8)));
+        using var cancel = new CancellationTokenSource();
+        world.OnTick = cancel.Cancel;
+        run.Apply(Solid("moving", 2, new CellBox(72, 104, 64, 16, 8, 8)), new TerrainApplyOptions { CellsPerTick = 512, Cancel = cancel.Token });
+        world.OnTick = null;
+        Assert.True(run.Apply(Solid("moving", 3, new CellBox(80, 104, 64, 16, 8, 8))).Ok);
+        Assert.Single(new Run(world).Engine.Applied());
+    }
+
+    [Fact]
+    public void Build_exceptions_are_partial_results_in_apply_and_inspect()
+    {
+        var run = new Run(new MemoryWorld { RefuseWrite = _ => throw new BuildException("world ended") });
+        var patch = Solid("exception", 1, new CellBox(64, 104, 64, 8, 8, 8));
+        Assert.Equal(TerrainState.Partial, run.Apply(patch).State);
+        Assert.False(run.Inspect(patch with { Id = "other" }).Ok);
+    }
+
+    [Fact]
+    public void Missing_ledger_fields_are_not_defaulted_into_fresh_ownership()
+    {
+        var world = new MemoryWorld();
+        new Run(world).Apply(Solid("vein", 1, new CellBox(64, 104, 64, 8, 8, 8)));
+        var json = System.Text.Json.JsonSerializer.Serialize(world.Books["world-a|mod-a"]);
+        foreach (var field in new[] { "Plans", "Version", "Region", "Content", "Complete", "Blocks", "EarlierBlocks", "EarlierRegion", "Before", "After", "GivenUp", "Why" })
+        {
+            var root = System.Text.Json.Nodes.JsonNode.Parse(json)!;
+            var record = root["Plans"]!["vein"]!;
+            var block = record["Blocks"]!["64,104,64"]!;
+            var target = field == "Plans" ? root : field is "Before" or "After" or "GivenUp" or "Why" ? block : record;
+            target.AsObject().Remove(field);
+            Assert.Throws<System.Text.Json.JsonException>(() => System.Text.Json.JsonSerializer.Deserialize<TerrainBook>(root.ToJsonString()));
+        }
+    }
+
+    // ---- the guarded write: an edit made while the batch is being written ----
+
+    [Fact]
+    public void An_edit_made_inside_the_write_is_never_written_over_and_its_block_is_given_up()
+    {
+        var world = new MemoryWorld();
+        var run = new Run(world);
+        var region = new CellBox(64, 104, 64, 16, 8, 8);    // two blocks of air, one batch at the default budget
+        var patch = Solid("guard", 1, region);
+        var foreign = (X: 66, Y: 106, Z: 66);               // a cell of the first block
+        var edited = false;
+        // another mod's BuildEditingEvent handler: after the overlay read the batch, before kiln.build commits it
+        world.Editing = _ =>
+        {
+            if (edited) return;
+            edited = true;
+            world.Set(foreign.X, foreign.Y, foreign.Z, Voxel.Of(7));
+        };
+        var r = run.Apply(patch);
+
+        var first = new CellBox(64, 104, 64, 8, 8, 8);
+        Assert.Equal((TerrainState.Conflict, false, 512L, 1), (r.State, r.Ok, r.ChangedCells, r.Batches));
+        Assert.Equal(new TerrainConflict(TerrainConflictKind.PlayerEdit, first), Assert.Single(r.Conflicts));
+        for (var z = 64; z < 72; z++)
+        for (var y = 104; y < 112; y++)
+        for (var x = 64; x < 80; x++)
+        {
+            var want = x >= 72 ? Voxel.Of(12) : (x, y, z) == foreign ? Voxel.Of(7) : Voxel.Air;
+            Assert.True(world.Get(x, y, z) == want, $"cell {x},{y},{z} is {world.Get(x, y, z)}, not {want}");
+        }
+        Assert.Equal(2, world.Stale);                       // the batch, then the block on its own
+        var e = Assert.Single(run.Events);                  // one event, for what was written
+        Assert.Equal((region, 512L, true), (e.Box, e.CellsChanged, e.Last));
+        // the ledger gave the block up: the plan owns one block, and neither a rerun nor version 2 touches the other
+        var block = world.Books["world-a|mod-a"].Plans["guard"].Blocks["64,104,64"];
+        Assert.Equal((true, (int)TerrainConflictKind.PlayerEdit), (block.GivenUp, block.Why));
+        Assert.Equal((true, 1, 1), (run.Engine.Applied()[0].Complete, run.Engine.Applied()[0].Blocks, run.Engine.Applied()[0].GivenUp));
+        var writes = world.Writes.Count;
+        Assert.Equal((TerrainState.Conflict, 0), (run.Apply(patch).State, world.Writes.Count - writes));
+        var two = run.Apply(Solid("guard", 2, region, 3));
+        Assert.Equal(TerrainState.Conflict, two.State);
+        Assert.Equal(Voxel.Of(7), world.Get(foreign.X, foreign.Y, foreign.Z));
+        Assert.Equal(Voxel.Air, world.Get(65, 105, 65));
+        Assert.Equal(Voxel.Of(40, 128), world.Get(73, 105, 65));
+
+        // a transient patch leaves the block alone the same way, with nothing to record
+        var other = new MemoryWorld();
+        var once = false;
+        other.Editing = _ => { if (!once) { once = true; other.Set(foreign.X, foreign.Y, foreign.Z, Voxel.Of(7)); } };
+        var t = new Run(other).Apply(Solid("pit", 1, region, keep: TerrainPersistence.Transient));
+        Assert.Equal((TerrainState.Conflict, 512L), (t.State, t.ChangedCells));
+        Assert.Equal((Voxel.Of(7), Voxel.Air, Voxel.Of(12)), (other.Get(foreign.X, foreign.Y, foreign.Z), other.Get(65, 105, 65), other.Get(73, 105, 65)));
+        Assert.Empty(other.Books.Values.SelectMany(b => b.Plans.Keys));
+    }
+
+    [Fact]
+    public void An_editing_handler_that_changes_no_cell_the_batch_writes_does_not_stop_it()
+    {
+        // nothing changed in between: one write a batch, as before the guard
+        var world = new MemoryWorld();
+        var calls = 0;
+        world.Editing = _ => calls++;
+        var r = new Run(world).Apply(Solid("hill", 1, new CellBox(64, 104, 64, 24, 8, 8)), new TerrainApplyOptions { CellsPerTick = 512 });
+        Assert.Equal((TerrainState.Completed, 3, 3, 3, 0), (r.State, r.Batches, world.Writes.Count, calls, world.Stale));
+
+        // added on top: the ground's cells are addressed but not written (already full); a handler digs one of them out.
+        // The guard compares only what the batch writes, so the batch goes on and the dug cell stays dug; the receipt was
+        // the intended "after", so version 2 finds the block changed and leaves it alone.
+        var add = new MemoryWorld();
+        var region = new CellBox(64, 96, 64, 16, 8, 8);     // ground below y 100, air from it
+        TerrainPatch Mound(int version, float height, byte material) =>
+            new("mound", version, region, new TerrainHeightfield([.. Enumerable.Repeat(height, 16 * 8)], 1, TerrainHeightMode.AddOnTop), [new(material)]);
+        var dug = false;
+        add.Editing = _ => { if (!dug) { dug = true; add.Set(66, 97, 66, Voxel.Air); } };
+        var run = new Run(add);
+        var first = run.Apply(Mound(1, 6, 12));             // y 96 to 101: the ground's four cells full already, two added
+        Assert.Equal((TerrainState.Completed, 0), (first.State, add.Stale));
+        Assert.Equal((Voxel.Air, Voxel.Of(12)), (add.Get(66, 97, 66), add.Get(66, 101, 66)));
+        add.Editing = null;
+        var up = run.Apply(Mound(2, 7, 20));                // one cell higher
+        Assert.Equal(new TerrainConflict(TerrainConflictKind.PlayerEdit, new CellBox(64, 96, 64, 8, 8, 8)), Assert.Single(up.Conflicts));
+        Assert.Equal((Voxel.Air, Voxel.Air, Voxel.Of(20)), (add.Get(66, 97, 66), add.Get(66, 102, 66), add.Get(73, 102, 66)));
+    }
+
     // ---- events ----
 
     [Fact]
@@ -577,6 +867,102 @@ public sealed class FacadeTests
     }
 
     [Fact]
+    public void The_kits_world_refuses_a_lost_ledger_and_accepts_a_first_install_over_matching_ground()
+    {
+        using var kiln = new Kiln.TestKit.KilnHarness();
+        kiln.Step(2);
+        // never had it: ground that already holds the result (built by hand) is a first install
+        for (var z = 0; z < Box.SizeZ; z++)
+        for (var y = 0; y < Box.SizeY; y++)
+        for (var x = 0; x < Box.SizeX; x++)
+            kiln.Terrain.Set(new CellPos(Box.X + x, Box.Y + y, Box.Z + z), Voxel.Of(12));
+        var first = Wait(kiln, () => Terrain.Apply(Vein()));
+        Assert.Equal((true, TerrainState.Completed, 0L), (first.Ok, first.State, first.ChangedCells));
+        Assert.Equal(["vein"], kiln.Terrain.Witnessed("kiln"));
+
+        // lost before any save: the record never reached the world file, so a first install again
+        Assert.True(kiln.Terrain.LoseLedger("kiln"));
+        Assert.Equal(TerrainState.Completed, Wait(kiln, () => Terrain.Apply(Vein())).State);
+
+        // saved, then lost (the world's Kiln data gone): refused, nothing written, also where a player dug since
+        var revision = kiln.Terrain.Revision;
+        kiln.Terrain.SaveWorld();
+        Assert.Equal(revision + 1, kiln.Terrain.Revision);
+        kiln.Terrain.Set(new CellPos(66, 98, 66), Voxel.Air);
+        Assert.True(kiln.Terrain.LoseLedger("kiln", wholeWorldData: true));
+        var writes = kiln.Terrain.Writes.Count;
+        var lost = Wait(kiln, () => Terrain.Apply(Vein()));
+        Assert.Equal((false, TerrainState.Refused, 0L), (lost.Ok, lost.State, lost.ChangedCells));
+        Assert.StartsWith("ownership lost: this world had plan 'vein'", lost.Reason);
+        Assert.Contains("this world has no Kiln data that could be read", lost.Reason);
+        Assert.Equal(TerrainState.Refused, Wait(kiln, () => Terrain.Inspect(Vein())).Would);
+        Assert.Equal(writes, kiln.Terrain.Writes.Count);
+        Assert.Equal(Voxel.Air, kiln.Terrain.Get(new CellPos(66, 98, 66)));
+
+        // another world of the same harness never had it
+        kiln.Terrain.WorldId = "another-world";
+        Assert.Equal(TerrainState.Completed, Wait(kiln, () => Terrain.Apply(Vein())).State);
+    }
+
+    [Fact]
+    public void The_kits_world_puts_transient_cells_back_at_a_restart_and_keeps_cells_changed_since()
+    {
+        using var kiln = new Kiln.TestKit.KilnHarness();
+        kiln.Step(2);
+        var cells = new byte[Box.Count];
+        Array.Fill(cells, (byte)1);
+        var flash = new TerrainPatch("flash", 1, Box, new TerrainVoxelVolume(cells), [new TerrainPaletteEntry(12)], TerrainPersistence.Transient);
+        var kept = new TerrainPatch("kept", 1, new CellBox(64, 96, 96, 8, 8, 8), new TerrainVoxelVolume([.. Enumerable.Repeat((byte)1, 512)]), [new TerrainPaletteEntry(20)]);
+        Assert.Equal(TerrainState.Completed, Wait(kiln, () => Terrain.Apply(flash)).State);
+        Assert.Equal(TerrainState.Completed, Wait(kiln, () => Terrain.Apply(kept)).State);
+        var ground = new CellPos(66, 97, 66);      // stone below y 100
+        var air = new CellPos(70, 102, 66);        // air above
+        var dug = new CellPos(72, 98, 66);
+        Assert.Equal(Voxel.Of(12), kiln.Terrain.Get(ground));
+        Assert.Equal(Voxel.Of(12), kiln.Terrain.Get(air));
+        kiln.Terrain.Set(dug, Voxel.Air);          // a player digs a transient cell: that change stays
+
+        kiln.Terrain.Restart();
+        Assert.Equal(Voxel.Of(1), kiln.Terrain.Get(ground));
+        Assert.Equal(Voxel.Air, kiln.Terrain.Get(air));
+        Assert.Equal(Voxel.Air, kiln.Terrain.Get(dug));
+        Assert.Equal(Voxel.Of(20), kiln.Terrain.Get(new CellPos(66, 98, 98)));   // the kept plan stays
+        Assert.Equal(TerrainState.AlreadyApplied, Wait(kiln, () => Terrain.Apply(kept)).State);
+
+        // applied again after the restart, then a kept write over part of it: those cells are meant to stay
+        Assert.Equal(TerrainState.Completed, Wait(kiln, () => Terrain.Apply(flash)).State);
+        var over = new TerrainPatch("over", 1, new CellBox(64, 96, 64, 8, 8, 8), new TerrainVoxelVolume([.. Enumerable.Repeat((byte)1, 512)]), [new TerrainPaletteEntry(30)]);
+        Assert.Equal(TerrainState.Completed, Wait(kiln, () => Terrain.Apply(over)).State);
+        kiln.Terrain.Restart();
+        Assert.Equal(Voxel.Of(30), kiln.Terrain.Get(ground));          // under the kept write: stays
+        Assert.Equal(Voxel.Of(30), kiln.Terrain.Get(air));
+        Assert.Equal(Voxel.Air, kiln.Terrain.Get(new CellPos(74, 102, 66)));   // the rest of the transient patch: back
+    }
+
+    [Fact]
+    public void An_edit_made_inside_the_write_on_the_kits_world_is_left_alone()
+    {
+        using var kiln = new Kiln.TestKit.KilnHarness();
+        kiln.Step(2);
+        var foreign = new CellPos(66, 98, 66);
+        var edited = false;
+        kiln.Terrain.Editing = _ =>
+        {
+            if (edited) return;
+            edited = true;
+            kiln.Terrain.Set(foreign, Voxel.Of(7));
+        };
+        var r = Wait(kiln, () => Terrain.Apply(Vein()));
+        Assert.Equal((TerrainState.Conflict, 512L), (r.State, r.ChangedCells));
+        Assert.Equal(new TerrainConflict(TerrainConflictKind.PlayerEdit, new CellBox(64, 96, 64, 8, 8, 8)), Assert.Single(r.Conflicts));
+        Assert.Equal(Voxel.Of(7), kiln.Terrain.Get(foreign));
+        Assert.Equal(Voxel.Of(1), kiln.Terrain.Get(new CellPos(65, 98, 66)));     // the rest of that block: the ground as it was
+        Assert.Equal(Voxel.Of(12), kiln.Terrain.Get(new CellPos(73, 98, 66)));
+        Assert.Equal(new CellBox(72, 96, 64, 8, 8, 8), Assert.Single(kiln.Terrain.Writes).Box);
+        Assert.Equal((1, 1), (kiln.Run(() => Terrain.Applied)[0].Blocks, kiln.Run(() => Terrain.Applied)[0].GivenUp));
+    }
+
+    [Fact]
     public void A_base_and_tiles_that_are_not_there_are_what_the_test_says()
     {
         using var kiln = new Kiln.TestKit.KilnHarness();
@@ -607,6 +993,50 @@ public sealed class FacadeTests
     }
 
     [Fact]
+    public void An_unloaded_mod_does_not_keep_receiving_terrain_changes()
+    {
+        using var kiln = new Kiln.TestKit.KilnHarness();
+        var mod = kiln.Load<TerrainFixture>(new Kiln.TestKit.ModManifest("terrain-listener"));
+        kiln.Step(2);
+        var received = 0;
+        void On(TerrainChangedEvent _) => received++;
+        kiln.As(mod, () => Terrain.Changed += On);
+        try
+        {
+            kiln.Unload(mod, checkCollected: false);
+            Wait(kiln, () => Terrain.Apply(Vein()));
+            Assert.Equal(0, received);
+        }
+        finally { Terrain.Changed -= On; }
+    }
+
+    [Fact]
+    public async Task A_mod_reload_releases_an_interrupted_apply_so_its_record_can_resume()
+    {
+        using var kiln = new Kiln.TestKit.KilnHarness();
+        var mod = kiln.Load<TerrainFixture>(new Kiln.TestKit.ModManifest("terrain-fixture"));
+        kiln.Step(2);
+        var first = kiln.As(mod, () => Terrain.Apply(Vein(), new TerrainApplyOptions { CellsPerTick = 512 }));
+        Assert.False(first.IsCompleted);
+        kiln.Reload(mod, checkCollected: false);
+        var resumed = kiln.As(mod, () => Terrain.Apply(Vein(), new TerrainApplyOptions { CellsPerTick = 512 }));
+        kiln.StepUntil(() => resumed.IsCompleted, 20);
+        Assert.Equal(TerrainState.Completed, (await resumed).State);
+        Assert.Equal(2, kiln.Terrain.Writes.Count);
+    }
+
+    [Fact]
+    public async Task Inspect_can_run_with_writes_disabled_but_wrong_thread_calls_are_refused()
+    {
+        using var kiln = new Kiln.TestKit.KilnHarness();
+        kiln.Step(2);
+        kiln.Capabilities.Override("terrain.overlays", false, "writes disabled");
+        Assert.True(Wait(kiln, () => Terrain.Inspect(Vein())).Ok);
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await Terrain.Inspect(Vein()));
+        Assert.Equal("vein", TerrainPatch.FromJson(Vein().ToJson()).Id);
+    }
+
+    [Fact]
     public void A_row_that_is_off_throws_by_its_name_and_a_bad_argument_is_a_bad_argument_first()
     {
         using var kiln = new Kiln.TestKit.KilnHarness();
@@ -623,3 +1053,5 @@ public sealed class FacadeTests
         Assert.Equal("kiln.terrain", Assert.Throws<KilnUnavailableException>(() => kiln.Run(() => (object)Terrain.Inspect(Vein()))).Capability);
     }
 }
+
+public sealed class TerrainFixture : Mod;

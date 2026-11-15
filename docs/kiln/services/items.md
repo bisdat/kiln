@@ -394,6 +394,61 @@ there; the host test checks the rule), a remote client, a request queued when th
 A dry run into the item's own slot cannot name the slot (`Slot` null): the game writes the selection only at its commit.
 What a player sees is the guided checks `items.equip` and `items.unequip` (mods/tests/client-pass, session 1).
 
+## Tool wear per debit (since 0.2.0-dev.28)
+`Items.SetToolWearPerDebit(tool, n)` (or `ToolBlock.WearPerDebit` in a block) sets what one of the game's wear debits
+costs a tool: `n` instead of the game's 1, 0 to 32767. Native table `kiln.toolwear` (`kiln_toolwear.h`), published by
+kiln-items.dll; capability `items.tool_wear_debit`.
+
+- **Per debit of the game, not per swing.** The game debits a tool in two places a rule reaches: when a hit debits the
+  attacker's weapon (the game's own hit-counter cap still decides whether it does), and after a projectile was spawned
+  with the tool as the used item. Two debits in one swing spend twice the cost; a swing with no debit spends nothing.
+- **Which tools take a rule:** a tool that is gear with an item of its own (an item entity): the game's axes (category
+  Tools) and pickaxes (category BuildTools). A torch (its durability burns down by another path), a rake and the
+  other tools without an item entity answer `Ok = false`, `Reason` `UnsupportedTool: …`.
+- **What stays the game's:** the skill roll that can save a debit, the clamp at 0 (a cost larger than what is left ends
+  at 0), the break notice, save, reload and repair. The armor a hit debits and a torch's burn-down are never touched.
+  Only the authoritative server world of the process is acted on (a dedicated server, or the host's own game).
+- **Rules:** the calling mod's. Setting it again replaces it (same `ToolWearRule`); across mods the latest set is in
+  effect, and disposing it reveals the one before. A rule goes when its mod unloads. Rules last for the process: they
+  are not saved (durability itself is the game's and is saved as usual). 256 tools can have had a rule in a process.
+- **Results** by Kiln's error rule: a refusal is `Ok = false` with `Reason` `UnsupportedTool`, `NoAuthoritativeWorld`,
+  `UnknownItem`, `PendingContent` or `TooManyRules`; `Reason` is `""` (not null) when `Ok`. A cost outside 0..32767 or
+  no item throws `ArgumentException`; the capability off throws `KilnUnavailableException` naming
+  `items.tool_wear_debit`. `Items.ToolWearStatus(tool)` says the cost in effect, whose rule it is, and why not.
+- **Events** on the server tick: `ToolWearRuleChangedEvent` once per change of the cost in effect or of whose rule it
+  is (an identical replay raises none), in the order the changes were made, whoever made them: a mod (raised before its
+  call returns), a native plugin through `kiln.toolwear` or a plugin's owner going away (raised on the next tick). Its
+  `Generation` grows by one per change, so five changes within one tick are five events even when the last state equals
+  the first. `ToolDurabilityChangedEvent` once per debit that changed the value (a cost of 0 or a debit the skill saved
+  raises none), with the item instance as it was at the debit, also under a native plugin's rule.
+- **Native plugins:** `define`, `remove`, `changes` and `status` as `kiln_toolwear.h` says; `rule_changes` (appended in
+  0.2.0-dev.28: check `header.size`) reads the rule changes after a generation, oldest first, as
+  `KilnToolWearRuleChange` records (item, cause `DEFINED`, `REMOVED` or `RETIRED`, cost, owner, rule handle and mod id
+  before and after, generation). Reading takes nothing away: each reader keeps its own cursor, so a plugin's reads do
+  not cost Kiln's managed events. The service holds the last 1024 changes and says how many a reader that fell behind
+  missed (`*lost`); Kiln.Items logs such a gap as a warning. `changes` (durability) is different: it takes the records
+  away, and Kiln.Items drains it every tick from the first one, so a plugin that drains it too takes records from the
+  managed `ToolDurabilityChangedEvent`s.
+
+### Lab test
+`mods/tests/toolwear-test` (with its second rule owner `toolwear-test-b`; how to run it is in its project file) drives
+the game's own debits of a real pickaxe in a lab: HitEvents through a declared program, and a projectile spawn. On server
+26430253 (lab `dev28-16b-tool-durability`, 2026-11-14), 11 of 11 PASS: a torch refused; one hit at cost 7 spends 7, two
+hits 14, a hit over the game's cap 0; the armor a hit debits loses the game's 1 while the weapon loses 7; a projectile
+spawn spends 7 at cost 7 and 0 at cost 0; another mod's rule on top (3) and its removal (back to 7, no event for an
+identical replay); forced parallel mode (the lab switch) with exact debits; the clamp at 0. Since the fix round
+(lab `dev28-16b-tool-durability-events`, 2026-11-14, 12 of 12 PASS) a native rule owner as well (`native/`,
+kiln-toolwear-test.dll in `kiln/plugins`): its define, its replacement, a second native owner's define and remove, all
+in one tick, then its retirement: five `ToolWearRuleChangedEvent`s in order with consecutive generations, a hit under
+its rule spends 6 with its durability event, and the mod's rule is back after the retirement.
+
+**Limits (not run):** worker threads: the two programs whose debits a rule changes (`durability_loss`,
+`actor_spawn_entity`) run on the world thread also in parallel mode, by their flags, so the hooks ran on one thread;
+the torch's burn-down (the only debit on worker threads) was not driven. The game's own armor: the armor items tried
+have no durability of their own, so an axe with a rule stood in as the armor a hit debits. Not run: save and reload,
+repair, a world change dropping queued changes (a host test proves it), a debit the skill saved, the world's durability
+setting off, the game client (held until check `16b-g`: the predicted bar in a hosted and a joined game).
+
 ## C (native plugins and services)
 ```c
 const KilnItemsApi* it = api->service((KilnStr){"kiln.items", 10}, 1);   /* in on_ready */

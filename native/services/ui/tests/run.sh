@@ -23,6 +23,9 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/../../
 # the middle and side mouse buttons and the wheel as key presses: twins of raw records and messages, notches (mouse_press.h)
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/mouse_press_test.cpp" -o "$out/mouse_press_test"
 "$out/mouse_press_test"
+# key names and which key a binding means on any layout (key_names.h, GitHub issue 33): plain logic
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/key_names_test.cpp" -o "$out/key_names_test"
+"$out/key_names_test"
 # the window procedure chain (another mod subclassing the game window after Kiln): fake window functions
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/chain_host" "$here/wndproc_chain_test.cpp" -o "$out/wndproc_chain_test"
 "$out/wndproc_chain_test"

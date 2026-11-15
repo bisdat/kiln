@@ -1,3 +1,0 @@
-{ "gates": [
-    { "name": "assets.blob_catalog", "checks": ["13-assets.catalog-client"], "side": "client" }
-] }

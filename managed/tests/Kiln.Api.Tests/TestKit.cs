@@ -7,6 +7,20 @@ using Xunit;
 
 namespace Kiln.Api.Tests;
 
+/// <summary>Kiln.TestKit's module initializer puts the kit's backend in place over Kiln.Api's placeholder, at the first
+/// touch of a kit type. Left to that touch it ran inside whichever test came first, after that test had read
+/// <c>Backend.Current</c>, so a test that restores "the backend it found" (ReflectedSafetyTests) failed when it ran
+/// first: NullBackend expected, KitBackend found. Run it once as this assembly loads, before any test reads the
+/// backend: every test then starts from the same one, whatever the order.</summary>
+internal static class KitBackendFirst
+{
+#pragma warning disable CA2255  // a test assembly: the kit's backend must be in place before the first test
+    [System.Runtime.CompilerServices.ModuleInitializer]
+#pragma warning restore CA2255
+    internal static void Init() =>
+        System.Runtime.CompilerServices.RuntimeHelpers.RunModuleConstructor(typeof(Kiln.TestKit.RecordingBackend).Module.ModuleHandle);
+}
+
 /// <summary>A backend that records log lines and lets a test say whether it is on the tick thread (Kiln.TestKit's
 /// <see cref="Kiln.TestKit.RecordingBackend"/>: lines, tables, the tick-thread switch).</summary>
 internal sealed class FakeBackend : Kiln.TestKit.RecordingBackend;

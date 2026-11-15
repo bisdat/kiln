@@ -90,6 +90,19 @@ An item's kind follows from what you fill in: `Tool` makes a tool, `Ammo` an arr
 | `Torch` (`torch`) | Held, it lights and burns down | `Durability` (seconds it burns while held, the tooltip's Duration: 600), `BreaksInto` |
 
 `BreaksInto` is what it becomes when its durability runs out, as the game's torch becomes a burnt one: a game item or one of yours. Only a torch burns down over time; the game wears the other tools by its own rule (the world's durability setting), with no number of the item's own, so `Durability` on them is refused.
+
+`WearPerDebit` (`wearPerDebit`, since 0.2.0-dev.28) says what each of the game's wear debits costs the tool instead of
+the game's 1: 0 to 32767, where 0 means it does not wear. It is per debit of the game, not per swing: a swing that hits
+twice is debited twice (two debits at 7 spend 14), and a swing that hits nothing spends nothing. It takes an axe or a
+pickaxe (a tool with an item of its own). A torch (whose `Durability` stays its burn time), a glider, a hook or a rod
+is refused when the block compiles; for a rake or a sieve the game answers when the cost is set (`UnsupportedTool` in
+the mod's block errors when it has no item of its own). The cost is set on the server where the world runs
+(a dedicated server, or the host's own game), once the world is there; a game that joined someone else's server sets
+nothing. On a game client it waits for its guided check (`16b-g`, capability `items.tool_wear_debit`). What it does
+and does not change: [services/items.md](../services/items.md#tool-wear-per-debit-since-020-dev28).
+```csharp
+Blocks.Define("brittle-pick", new ItemBlock { Name = "Brittle Pick", Tool = new ToolBlock { Harvests = Harvest.Stone, Power = 18, WearPerDebit = 7 } });
+```
 ```csharp
 Blocks.Define("garden-rake", new ItemBlock { Name = "Garden Rake", Tool = new ToolBlock { Harvests = ToolClass.Rake, Power = 750, Range = 5 } });
 Blocks.Define("slow-torch", new ItemBlock { Name = "Slow Torch", Tool = new ToolBlock { Harvests = ToolClass.Torch, Durability = 1200, BreaksInto = "ash" } });
@@ -334,7 +347,7 @@ Block = new MoveBlock
 - **No overlap.** Two routes of one move that select the same window are refused, both named, also when they say the same thing; there is no "the last one wins". A route does win over the chain's own link (primary and heavy chains still link up by themselves) for the windows it names.
 - At most 64 routes per move.
 
-**All or nothing.** A weapon with any `FollowUps` applies its moves, slots and routes as one *generation*: everything is checked on the game's data first, then a fresh set of sequence clones is made that no slot points at, their rules are set and read back, and only then the weapon's slots are switched, in one step. If any part is refused, nothing of it plays: the weapon keeps the generation it had, or its class's moves when it had none. (A weapon without `FollowUps` applies move by move as before, with the same clone GUIDs as before.)
+**All or nothing.** A weapon with any `FollowUps` applies its moves, slots and routes as one *generation*: everything is checked on the game's data first, then a fresh set of sequence clones is made that no slot points at; their rules and then the weapon's slots are written in one content transaction of the mod, every link and every slot read back, and only then kept. If any part is refused or does not read back, the transaction is taken back whole and read back, so nothing of it plays: the weapon keeps the generation it had, or its class's moves when it had none. (A weapon without `FollowUps` applies move by move as before, with the same clone GUIDs as before.)
 
 `Blocks.MovesStatus(handle)` says where a weapon is, and `WeaponMovesApplicationChangedEvent` is raised on the tick for every change:
 
@@ -344,6 +357,8 @@ Block = new MoveBlock
 | `Applied` | true | the slots play generation `AppliedGeneration`; `LiveClones` has its sequences by `slot/link` |
 | `Refused` | false | the last attempt (`RequestedGeneration`) was refused, `Reason` says which field and why; `AppliedGeneration` and `LiveClones` are still what plays |
 | `Removed` | false | the mod unloaded; the game's layers of it are off |
+
+What a failure leaves is read, not assumed. When the transaction is taken back and every field reads back as it was, the status is `Refused` and still names the generation that plays. When taking it back does not read back, Kiln takes every layer of the mod off (fail closed: what is left of the weapon cannot be told apart), and the status says so: `Refused`, a `Reason` with "no generation is applied" and "every layer of the mod was taken off", `AppliedGeneration` 0, and `LiveClones` holding what each slot plays as read, under `slot/<index>`. The mod's other weapons say the same and are planned again at the next ready pass, its other rules are applied again then; the weapon that failed is tried again when content is applied again. After every later application of the mod's rules (a world loaded again, a pack reload) the applied generation is written again in a transaction of its own and read back; when that fails, the status is `Refused` with the reason: it keeps the generation's number when the generation still plays, and says "no generation is applied" with what the slots play when it does not, and the next ready pass plans the weapon again. Removing a weapon resets what its generations wrote in a transaction and reads the slots back; when they still play a clone of the weapon, every layer of the mod is taken off instead and the `Removed` status's `Reason` says so.
 
 The same moves on the same game data are the same generation: applying them again changes nothing and raises no event. A refused weapon is tried again when content is applied again (a world loaded later). The clones' GUIDs follow the moves and the game's data (they change with a game update that changes the motions), and are the same on a server and its clients. The game cannot take a clone out again, so the clones of a refused or replaced generation stay registered, unused, until the game ends; a weapon takes at most 16 different sets of moves per run, then `Reason` starts with `RestartRequired`.
 

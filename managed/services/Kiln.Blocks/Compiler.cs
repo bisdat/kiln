@@ -61,6 +61,7 @@ internal sealed class BlockContext(ModBlocks mod, string block)
     public (Guid Guid, byte[] Blob) Build(ProgramBuilder b)
     {
         var built = b.Build(Mod.Id);
+        KindBudget.Current?.Built(built.Blob.Length);
         if (b.IsLate) Mod.LateBuilders[built.Guid] = b;
         return built;
     }
@@ -77,9 +78,21 @@ internal sealed class BlockContext(ModBlocks mod, string block)
 
     private BlockHandle Lookup(string name, string path)
     {
+        if (Lowered._bootLowering) return BootLowering.Reference(Mod, Block, name, path);  // only what this OnBoot staged before it
         var colon = name.IndexOf(':');
         // a product of a kind's plan names another by "consumer-mod:kind-...": staged with it, not published yet
-        if (colon > 0 && Mod.StagesFor != null && name.AsSpan(0, colon).SequenceEqual(Mod.Id) && Mod.Handles.TryGetValue(name[(colon + 1)..], out var staged)) return staged;
+        if (colon > 0 && Mod.StagesFor != null && name.AsSpan(0, colon).SequenceEqual(Mod.Id))
+        {
+            var local = name[(colon + 1)..];
+            if (Mod.Handles.TryGetValue(local, out var staged)) return staged;
+            // a product of the plan that is not staged yet: staged now, whatever order the plan lists them in
+            if (Mod.Pending.TryGetValue(local, out var product))
+            {
+                if (!Mod.Compiling.Add(local)) throw new BlockError(Block, path, $"\"{name}\" refers back to itself");
+                try { return product(); }
+                finally { Mod.Compiling.Remove(local); }
+            }
+        }
         if (colon > 0)
             return Blocks.Find(name[(colon + 1)..], name[..colon])
                    ?? throw new BlockError(Block, path, $"no block \"{name[(colon + 1)..]}\" in mod {name[..colon]} (is it loaded before this one?)");
@@ -91,6 +104,8 @@ internal sealed class BlockContext(ModBlocks mod, string block)
             try { return pending(); }
             finally { authored.Compiling.Remove(name); }
         }
+        // a committed boot definition of the mod: in the game since the boot generation, before (and after) its runtime activation
+        if (BootHandles.Find(authored.Id, name) is { } boot) return boot;
         throw new BlockError(Block, path, $"no block \"{name}\" in this mod; define it first, or say \"other-mod:{name}\"; there are: {string.Join(", ", Mod.Handles.Keys.Order())}");
     }
 }
@@ -114,6 +129,7 @@ internal static partial class Compiler
         // A kind's plan is being staged on this thread: whoever asked (an inline status, a data file's block named for the
         // first time, a closure over the mod's own ledger), the block joins the plan and nothing is committed.
         if (KindTransaction.Current is { } staging) return staging.Define(mod, name, block);
+        if (KindApply.NameReserved(mod, name)) throw new BlockError(name, null, "the name belongs to a block kind's pending or applied plan");
         var (handle, low, label) = Lower(mod, name, block);
         low.Commit();
         mod.Handles[name] = handle;
@@ -378,8 +394,6 @@ internal sealed class Lowered(ModBlocks mod)
     private readonly List<(string Section, string Entry, string Path, Guid Program)> _lateRules = new();
     private readonly List<(string Section, string Entry, JsonObject Rules, VfxLate Late)> _vfxLates = new();
     private readonly HashSet<Guid> _carriers = new();
-    // the kind transaction this was lowered under: it commits when the transaction does, never before
-    private readonly KindTransaction? _staging = KindTransaction.Current;
 
     public JsonObject Json { get; } = new();
 
@@ -512,9 +526,30 @@ internal sealed class Lowered(ModBlocks mod)
         public void Recipe(ulong owner, RecipeDefinition d) => BlocksBridge.Register(d, owner);
     }
 
+    /// <summary>Set while a boot generation is lowered (BootLowering.cs, chapter 08): a commit hands its registrations to the sink (the IR
+    /// envelope) and leaves the runtime parts (rules, late programs, after-commit actions) to the mod's runtime activation.</summary>
+    [ThreadStatic] internal static bool _bootLowering;
+
     public void Commit()
     {
-        if (_staging is { Committing: false }) throw new InvalidOperationException("a block staged for a kind's plan was committed before the plan: nothing of a plan registers until all of it is checked");
+        CommitRegistrations();
+        CommitAfter();
+    }
+
+    /// <summary>The first half of a commit: what the services register, and the ledger rows of the block's own mod. A kind's
+    /// plan runs this half for every block of the plan before the second half of any: a refusal here leaves nothing running.</summary>
+    internal void CommitRegistrations()
+    {
+        if (mod.StagesFor != null && !mod.CommitOpen) throw new InvalidOperationException("a block staged for a kind's plan was committed before the plan: nothing of a plan registers until all of it is checked");
+        if (_bootLowering)
+        {
+            foreach (var (guid, blob) in _programs)
+                if (!mod.LateBuilders.ContainsKey(guid)) Sink.Program(mod.Owner, guid, blob);
+            foreach (var (section, def) in _clones) Sink.Clone(mod.Owner, section, def);
+            foreach (var d in _items) Sink.Item(mod.Owner, d);
+            foreach (var d in _recipes) Sink.Recipe(mod.Owner, d);
+            return;
+        }
         foreach (var (guid, blob) in _programs)
         {
             if (mod.LateBuilders.ContainsKey(guid)) continue;     // BlockRuntime finishes it when content is ready
@@ -528,6 +563,13 @@ internal sealed class Lowered(ModBlocks mod)
         foreach (var d in _items) Sink.Item(mod.Owner, d);
         foreach (var d in _recipes) Sink.Recipe(mod.Owner, d);
         foreach (var (section, entry, rules) in _rules) BlockRuntime.AddRules(mod, section, entry, rules);
+    }
+
+    /// <summary>The second half: what runs in Kiln because the block exists (triggers, icons, checks at content ready).</summary>
+    internal void CommitAfter()
+    {
+        if (mod.StagesFor != null && !mod.CommitOpen) throw new InvalidOperationException("a block staged for a kind's plan was committed before the plan");
+        if (_bootLowering) return;  // a boot generation lowers registrations only; the runtime parts wait for the mod's runtime activation
         foreach (var a in _after) a();
         foreach (var (section, entry, rules, late) in _vfxLates)
         {
@@ -535,6 +577,35 @@ internal sealed class Lowered(ModBlocks mod)
             BlockRuntime.AddVfxLate(mod, late);
         }
     }
+
+    /// <summary>What this block registers and runs, into a hash: two lowerings that add the same register the same (a kind's plan in a
+    /// later content generation, Kinds/KindApply.cs). Items and recipes are in <see cref="Json"/>, which the caller adds.</summary>
+    internal void Digest(System.Security.Cryptography.IncrementalHash h)
+    {
+        void Text(string s)
+        {
+            h.AppendData(System.Text.Encoding.UTF8.GetBytes(s));
+            h.AppendData([0]);
+        }
+        foreach (var (guid, blob) in _programs)
+        {
+            Text(guid.ToString());
+            h.AppendData(blob);
+            h.AppendData([0]);
+        }
+        foreach (var (section, def) in _clones) Text($"{section}|{KindJson.Canonical(def)}");
+        foreach (var (section, entry, rules) in _rules) Text($"{section}|{entry}|{KindJson.Canonical(rules)}");
+        foreach (var (section, entry, path, program) in _lateRules) Text($"{section}|{entry}|{path}|{program}");
+        foreach (var (section, entry, _, late) in _vfxLates) Text($"{section}|{entry}|{late.Vfx.GameName}");
+        Text(_after.Count.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>The names of the game-data clones and new items this block registers (a kind's plan checks them at content ready).</summary>
+    internal IEnumerable<string> DefinitionNames =>
+        _clones.Select(c => c.Def["name"]?.GetValue<string>() ?? "").Concat(_items.Select(d => d.Name)).Where(n => n.Length > 0);
+
+    /// <summary>How many bytes of programs this block made (a plan's bound).</summary>
+    internal long GeneratedBytes => _programs.Sum(p => (long)p.Blob.Length) + Json.ToJsonString().Length;
 
     public string Summary()
     {

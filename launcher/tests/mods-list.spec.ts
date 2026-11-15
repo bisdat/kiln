@@ -79,11 +79,11 @@ test("a mod that is not in the profile switches on, and then is in it", async ({
 test("the list filters by name and by kind", async ({ page }) => {
   await desktop(page);
   await expect(row(page, "New Items")).toBeVisible({ timeout: 10_000 });
-  await page.locator(".k-hero").getByLabel("Filter").fill("chest");
+  await page.locator(".k-hero").getByLabel("Filter", { exact: true }).fill("chest");
   await expect(row(page, "Better Chests")).toBeVisible();
   await expect(row(page, "chestsort.dll")).toBeVisible();
   await expect(row(page, "New Items")).toHaveCount(0);
-  await page.getByLabel("Filter").fill("");
+  await page.getByLabel("Filter", { exact: true }).fill("");
   await page.getByRole("combobox", { name: "Kind" }).selectOption({ label: "Native" });
   await expect(list(page).getByRole("listitem")).toHaveCount(4);
   await expect(row(page, "FPS Unlock")).toBeVisible();
@@ -398,7 +398,7 @@ test("a right click on a row opens its menu where the pointer is", async ({ page
   // a field keeps the webview's own menu (copy, paste): nothing of Kiln's opens
   await page.keyboard.press("Escape");
   await desktop(page);
-  await page.locator(".k-hero").getByLabel("Filter").click({ button: "right" });
+  await page.locator(".k-hero").getByLabel("Filter", { exact: true }).click({ button: "right" });
   await expect(page.getByRole("menu")).toHaveCount(0);
 });
 

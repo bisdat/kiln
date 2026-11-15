@@ -146,6 +146,36 @@ public sealed class ConfigScreensTests : IDisposable
         Assert.False(Says("* share"));                  // the refused 500 is not back on the page
     }
 
+    /// <summary>A write that failed elsewhere than the page's own Apply (the mod's Set, a Save: neither throws for it,
+    /// ConfigFile.LastWriteError says why) shows on the mod's page with the file's other errors, until a write succeeds.</summary>
+    [Fact]
+    public void A_write_that_failed_outside_the_page_shows_on_it_until_a_write_succeeds()
+    {
+        Draw();
+        Assert.False(Says("cannot write"));
+        var file = _file.FilePath;
+        if (File.Exists(file)) File.Delete(file);
+        Directory.CreateDirectory(file);  // the file's place is taken: every write fails
+        try
+        {
+            _file.Set("share", 20);  // the mod's own Set: the value applies for this session, the file does not hold it
+            Assert.Equal(20, _file.Get("share"));
+            Draw();
+            Assert.True(Says("not saved: cannot write " + file));
+            _file.Save();
+            Draw();
+            Assert.True(Says("not saved: cannot write"));
+        }
+        finally
+        {
+            Directory.Delete(file, true);
+        }
+        _file.Save();  // writable again: the file holds every value
+        Assert.Null(_file.LastWriteError);
+        Draw();
+        Assert.False(Says("cannot write"));
+    }
+
     [Fact]
     public void The_default_buttons_see_the_applied_value_that_waits()
     {

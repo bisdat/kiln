@@ -4,7 +4,7 @@
 // a fake game that "runs" after Play. Fixtures are built on schema/examples (the contract examples).
 // Commands without a mock reject with not_implemented, like the wave-0 Rust stubs.
 import type {
-  Activation, AddReport, BundlePart, RunSide, AddedMod, AdminEndpoint, AppInfo, BootJson, BootState, ConfigDocument, CookJob, CookReason, CookedMod, ConfigFileInfo, ConfigTarget, CrashReport, ReportFinding, ReportSaved, Detected, Distribution,
+  Activation, AddReport, BootSnapshot, BundlePart, RunSide, AddedMod, AdminEndpoint, AppInfo, BootJson, BootState, ConfigDocument, CookJob, CookReason, CookedMod, ConfigFileInfo, ConfigTarget, CrashReport, ReportFinding, ReportSaved, Detected, Distribution,
   FoundMod, FoundReport, GameInstall, GameStatus, ImportReport, InstallReceipt, InstallResult, InstallState, Json, KilnError, LastServer, LaunchRequest, NewerKilnMod,
   LaunchResult, LauncherSettings, RenderInfo, LibraryEntry, LibraryRef, TakenOver, LogFile, LogTarget, ModKind, ModpackInstallRequest, ModpackInstallResult, ModsJson,
   NativeJson, NativePlanEntry, NativeUserState, PreStart, Profile, ProfileChange, ProfileMod, ProfileSummary, ProxyClass, Rejection, RemoveReport, ResolvePreview, RuntimeBundle, SaveBackup, SaveSlot,
@@ -15,6 +15,7 @@ import { serverMockHandlers } from "../pages/servers/mockServers";
 import { updateMockHandlers } from "./mockUpdate";
 import { deckMockHandlers } from "../deck/mockDeck";
 import { nexusMockHandlers, NEXUS_MOCK_ENABLED } from "./mockNexus";
+import { updatesMockHandlers } from "./mockUpdates";
 import { chainMockHandlers } from "./mockChain";
 import { dataFolderBlocks, dataFolderMockHandlers, mockDataDir, mockPickFolder } from "./mockDataFolder";
 import { mockSpeak, bootJsonAt, clearStartHistory, mockBegin, mockProgress, mockStartEnded, ownerScript, processAt, scriptedStart, setStartScript, type StartScript } from "./mockProgress";
@@ -244,6 +245,9 @@ const ownFolderNote = (id: string, path: string, on: boolean) => on
 const cookMods = new Map<string, { reason: CookReason | null; fails?: string; last?: CookedMod }>();
 /** How long each line of a cook task shows (tests: `__kilnMock.setCookPace`). */
 let cookStepMs = 120;
+/** What boot_snapshot_run (Play once with another profile) comes to, by profile id: absent = no mod of that start
+ *  needs the snapshot (`skipped`). Tests: `__kilnMock.setOnceBootSnapshot`. */
+const onceBootSnapshots = new Map<string, BootSnapshot>();
 
 /** What the next activation reports it kept in the game folder (tests: `__kilnMock.planActivation`), by whatever path
  *  it runs (profile_activate, the re-apply after profile_save, a reinstall's resume). */
@@ -1078,6 +1082,18 @@ const handlers: Record<string, Handler> = {
       return { mods };
     }, cookStepMs);
   },
+  // kiln_manage::boot_snapshot for a single start with another profile: the game data Play makes after its cook
+  boot_snapshot_run: (a) => {
+    const gid = S(a.gameId), pid = S(a.profileId);
+    gameOf(gid);
+    if (!profiles.has(pid)) reject("not_found", `no profile ${pid}`);
+    const s = onceBootSnapshots.get(pid) ?? { status: "skipped" as const, emptyKinds: [], reason: "no mod needs the boot snapshot" };
+    const steps = s.status === "skipped" ? ["no mod needs the boot snapshot"] : ["Game data for OnBoot mods (about 200 MB, once per game build): reading the game's archive"];
+    return startTask("boot_snapshot_run", "Game data for OnBoot mods", steps, () => {
+      if (running[gid]) reject("game_running", "Close the game first.");
+      return s;
+    }, cookStepMs);
+  },
   engine_status: (a) => {
     const g = gameOf(S(a.gameId));
     const st = (k: ModKind, file: string, state: Json | null) => ({ kind: k, plugin: `kiln-${k}`, state, file: `${g.path}/kiln/state/${file}` });
@@ -1303,6 +1319,7 @@ Object.assign(handlers, adminMockHandlers(mockEmit));
 Object.assign(handlers, updateMockHandlers(mockEmit, MOCK_DISTRIBUTION));
 Object.assign(handlers, deckMockHandlers(handlers));
 Object.assign(handlers, nexusMockHandlers(handlers, mockEmit, startTask, quickAdd));
+Object.assign(handlers, updatesMockHandlers(handlers, mockEmit));
 Object.assign(handlers, chainMockHandlers({ profiles, library, reject }));
 Object.assign(handlers, dataFolderMockHandlers(startTask, (id) => tasks.get(id)));
 // the save editor: synthetic character saves in memory, or a local fixture with ?editor=fixture (mockEditor.ts). Loaded
@@ -1655,6 +1672,7 @@ if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown 
   planAddNotices: (lines: string[]) => { addNotices.push(...lines); },
   setSfOwnFolder: (id: string, own = true) => { if (own) sfOwn.add(id); else sfOwn.delete(id); },
   setCookPace: (ms: number) => { cookStepMs = ms; },
+  setOnceBootSnapshot: (profileId: string, s: BootSnapshot | null) => { if (s) onceBootSnapshots.set(profileId, s); else onceBootSnapshots.delete(profileId); },
   setCook: (id: string, cook: { reason?: CookReason | null; fails?: string | null } | null) => {
     if (!cook) { cookMods.delete(id); return; }
     const m = cookMods.get(id) ?? { reason: null };

@@ -7,8 +7,10 @@ public enum TerrainPersistence
 {
     /// <summary>Saved with the world and recorded in the ledger: applied once per world.</summary>
     Kept = 0,
-    /// <summary>Not saved and not recorded: the ground is back at the next restart, and the patch may be applied
-    /// again whenever the mod asks.</summary>
+    /// <summary>Does not add a save region or ledger record; may be applied again whenever the mod asks. Gone after the
+    /// next restart: where the game's save writes the cells anyway (inside a base, or in a chunk another edit keeps),
+    /// kiln.build puts back what was there at the next start (<see cref="BuildFlags.Transient"/>). A cell someone changed
+    /// since keeps that change.</summary>
     Transient = 1,
 }
 
