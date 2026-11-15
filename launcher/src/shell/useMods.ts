@@ -76,7 +76,7 @@ export function useMods(game: GameInstall | null) {
   const toggle = (r: ModRow, on: boolean) => {
     if (!profile || !r.kind || r.found) return;
     if (r.entry) { edit.toggle(r.kind, r.id, on); return; }
-    const v = r.lib?.versions[0];
+    const v = r.lib?.versions.find((v) => !v.kept);
     if (!on || !v) return;
     const mod: ProfileMod = { id: r.id, version: v.version, hash: v.hash, enabled: true };
     edit.add(r.kind, mod);

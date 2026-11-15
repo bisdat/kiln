@@ -51,7 +51,7 @@ pub fn take_over(spec: &str) -> Result<i32> {
     let (id, version) = rest.split_once('@').map(|(i, v)| (i, Some(v))).unwrap_or((rest, None));
     let entries = kiln_manage::library::list(&dirs, Some(kind)).km()?;
     let Some(e) = entries.iter().find(|e| e.id == id) else { bail!("{} {id} is not in the library", kind.as_str()) };
-    let Some(v) = e.versions.iter().find(|v| version.is_none_or(|w| v.version == w)) else { bail!("{id}: no version {}", version.unwrap_or("?")) };
+    let Some(v) = e.versions.iter().find(|v| version.map_or(v.kept.is_none(), |w| v.version == w)) else { bail!("{id}: no version {}", version.unwrap_or("?")) };
     let r = kiln_manage::library::LibraryRef { kind, id: id.into(), version: v.version.clone(), hash: v.hash.clone() };
     let done = kiln_manage::library::take_over(&dirs, &r).km()?;
     if done.to == done.from {
@@ -108,7 +108,7 @@ pub fn add(profile: &str, mods: &[String], disabled: bool) -> Result<i32> {
         let (id, version) = rest.split_once('@').map(|(i, v)| (i, Some(v))).unwrap_or((rest, None));
         let entries = kiln_manage::library::list(&dirs, Some(kind)).km()?;
         let Some(e) = entries.iter().find(|e| e.id == id) else { bail!("{} {id} is not in the library (kilnctl library import)", kind.as_str()) };
-        let Some(v) = e.versions.iter().find(|v| version.is_none_or(|w| v.version == w)) else { bail!("{id}: no version {}", version.unwrap_or("?")) };
+        let Some(v) = e.versions.iter().find(|v| version.map_or(v.kept.is_none(), |w| v.version == w)) else { bail!("{id}: no version {}", version.unwrap_or("?")) };
         let m = ProfileMod { id: id.into(), version: v.version.clone(), hash: v.hash.clone(), enabled: !disabled };
         let list = p.mods.list_mut(kind);
         list.retain(|x| x.id != m.id);

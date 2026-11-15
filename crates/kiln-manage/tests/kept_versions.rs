@@ -440,3 +440,24 @@ fn a_dll_mods_config_and_a_flame_mods_settings_come_back_with_the_roll_back() {
     assert_eq!(read(&w.g.path, cfg), "radius=30");
     assert_eq!(w.entry(ModKind::Native, "auto-loot-plus").hash, native_new.hash);
 }
+
+#[test]
+fn removing_a_mod_cancels_its_pending_restore_before_it_is_added_again() {
+    let w = world("remove-pending");
+    w.drop_mod(&greeneye(&w.root, "1.0.0"));
+    put(&w.g.path, INI, b"zoom=1");
+    w.drop_mod(&greeneye(&w.root, "2.0.0"));
+    put(&w.g.path, INI, b"zoom=9");
+    kept::rollback(&w.dirs, Some(&w.g), &w.pid(), ModKind::Greeneye, "worstmap", None).unwrap();
+    let before = profile::get(&w.dirs, &w.pid()).unwrap();
+    let mut removed = before.clone();
+    removed.mods.greeneye.clear();
+    let removed = profile::save(&w.dirs, &removed).unwrap();
+    kept::follow_saved(&w.dirs, &before, &removed);
+    let mut readded = before.clone();
+    readded.generation = removed.generation;
+    let added = profile::save(&w.dirs, &readded).unwrap();
+    kept::follow_saved(&w.dirs, &removed, &added);
+    w.reapply();
+    assert_eq!(read(&w.g.path, INI), "zoom=9", "the canceled restore must not overwrite settings on a later add");
+}

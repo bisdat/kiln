@@ -395,7 +395,9 @@ fn settings_dir(dirs: &DataDirs, kind: ModKind, id: &str, version: &str, hash: &
     if !crate::manifest::is_mod_id(id) || version.contains(['/', '\\', ':']) || version.starts_with('.') {
         return Err(Error::invalid(format!("invalid kept version {id} {version}")));
     }
-    Ok(dirs.library().join(SETTINGS_DIR).join(kind.as_str()).join(id).join(name))
+    let path = dirs.library().join(SETTINGS_DIR).join(kind.as_str()).join(id).join(name);
+    crate::engine_mods::refuse_symlink_path(&dirs.root, &path)?;
+    Ok(path)
 }
 
 fn drop_settings(dirs: &DataDirs, kind: ModKind, id: &str, version: &str, hash: &str) {
@@ -434,13 +436,13 @@ fn copies_of(game: &Path, kind: ModKind, id: &str, version: &str, hash: &str) ->
         .collect()
 }
 
-/// Code or a manifest in a copy (never kept, never written back): what `engine_mods` calls code (the manifest, Lua,
-/// DLLs, XHL's plugin ini) and the other engines' manifests. Kiln's marker and its temporary files are no mod file.
+/// Only known settings extensions and logs are eligible, excluding engine manifests and markers.
+/// Unknown extensions may contain executable scripts and are never restored as settings.
 fn not_settings(rel: &str) -> bool {
     let low = rel.to_ascii_lowercase();
     let ext = low.rsplit_once('.').map(|(_, x)| x).unwrap_or("");
     let top = !low.contains('/');
-    low.starts_with("src/") || matches!(ext, "dll" | "exe" | "asi" | "lua" | "luac")
+    low.starts_with("src/") || !matches!(ext, "txt" | "ini" | "cfg" | "json" | "toml" | "yaml" | "yml" | "log")
         || (top && (matches!(low.as_str(), "mod.json" | "kiln.mod.json" | "native.json" | "flame.json" | "pack.toml" | "init.lua"
             | "extended.mod.json" | "native-plugin.ini" | "shroudtopia.json") || low.starts_with(crate::engine_mods::MARKER)))
         || low.ends_with(".kiln-tmp")
@@ -466,7 +468,10 @@ fn walk(dir: &Path, prefix: &str, out: &mut Vec<String>) -> Result<()> {
 /// Copies the settings of `version` from its game-folder copies in the first of `games` that has one into `into`
 /// (emptied first): each file not as Kiln placed it (changed or added since) that is no code, at its path relative to
 /// the game folder, and a ShroudForge package's setting values.
-fn take_settings(games: &[PathBuf], kind: ModKind, id: &str, v: &VersionRef, into: &Path) -> KeptSettings {
+fn take_settings(dirs: &DataDirs, games: &[PathBuf], kind: ModKind, id: &str, v: &VersionRef, into: &Path) -> std::result::Result<KeptSettings, String> {
+    let version_size = crate::library::record(dirs, &LibraryRef { kind, id: id.into(), version: v.version.clone(), hash: v.hash.clone() })
+        .map(|r| r.size).unwrap_or(0);
+    if let Some(why) = disk_refusal(dirs, version_size, 1) { return Err(why); }
     let mut out = KeptSettings::default();
     let _ = std::fs::remove_dir_all(into);
     for game in games {
@@ -482,6 +487,13 @@ fn take_settings(games: &[PathBuf], kind: ModKind, id: &str, v: &VersionRef, int
             files.sort();
             for rel in files.iter().filter(|r| !not_settings(r)) {
                 let src = copy.path.join(rel);
+                if crate::bundle::safe_rel_path(rel).is_err()
+                    || crate::engine_mods::refuse_symlink_path(game, &src).is_err() { continue; }
+                let Ok(meta) = std::fs::metadata(&src) else { continue };
+                if meta.len() > MAX_FILE || out.size.saturating_add(meta.len()) > MAX_TOTAL {
+                    out.left_out.push(format!("{rel_copy}/{rel}: too large to keep ({})", mib(meta.len())));
+                    continue;
+                }
                 let Ok((sha, size)) = crate::hash::sha256_file(&src) else {
                     out.left_out.push(format!("{rel_copy}/{rel}: not readable"));
                     continue;
@@ -493,9 +505,18 @@ fn take_settings(games: &[PathBuf], kind: ModKind, id: &str, v: &VersionRef, int
                 }
                 let game_rel = format!("{rel_copy}/{rel}");
                 let dst = into.join(&game_rel);
-                let copied = dst.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| std::fs::copy(&src, &dst).map(|_| ()));
+                if let Some(why) = disk_refusal(dirs, version_size + out.size + size, out.files.len() as u64 + 2) {
+                    return Err(why);
+                }
+                let copied = (|| -> Result<u64> {
+                    crate::engine_mods::refuse_symlink_path(into, &dst)?;
+                    let bytes = read_bounded(&src)?;
+                    if out.size + bytes.len() as u64 > MAX_TOTAL { return Err(Error::invalid("settings copy too large")); }
+                    crate::util::write_atomic_exclusive(&dst, &bytes)?;
+                    Ok(bytes.len() as u64)
+                })();
                 match copied {
-                    Ok(()) => { out.files.push(game_rel); out.size += size; }
+                    Ok(bytes) => { out.files.push(game_rel); out.size += bytes; }
                     Err(e) => out.left_out.push(format!("{game_rel}: {e}")),
                 }
             }
@@ -509,7 +530,7 @@ fn take_settings(games: &[PathBuf], kind: ModKind, id: &str, v: &VersionRef, int
         }
         break;
     }
-    out
+    Ok(out)
 }
 
 /// The client games (known to the launcher, and `extra`) whose `kiln/profile.json` names `profile_id`.
@@ -542,13 +563,28 @@ fn shown(dirs: &DataDirs, kind: ModKind, m: &ProfileMod) -> String {
 /// Never fails the change it follows: what could not be done is in the sentences returned.
 pub(crate) fn follow(dirs: &DataDirs, profile_id: &str, game: Option<&Path>, changes: &[(ModKind, ProfileMod, ProfileMod)]) -> Vec<String> {
     let changes: Vec<_> = changes.iter().filter(|(_, a, b)| a.id == b.id && (a.version != b.version || a.hash != b.hash)).collect();
-    if changes.is_empty() { return Vec::new(); }
+    if changes.is_empty() && nothing_kept(dirs) { return Vec::new(); }
+    let saved = crate::profile::get(dirs, profile_id).ok();
     let games = active_games(dirs, profile_id, game);
     let keep = keep_count(dirs) as usize;
     let mut notices = Vec::new();
     let done = update(dirs, |st| {
         for (kind, from, to) in &changes {
             follow_one(dirs, st, profile_id, &games, keep, *kind, from, to, &mut notices);
+        }
+        // A removal can be saved and undone before any placement. Cancel its restore at the save,
+        // rather than letting a later, unrelated add of the same version consume it.
+        if let Some(saved) = &saved {
+            for m in &mut st.mods {
+                let stale = m.restore.as_ref().is_some_and(|r| r.profile == profile_id
+                    && !saved.mods.list(m.kind).iter().any(|e| e.id == m.id && e.version == r.version && e.hash == r.hash));
+                if stale {
+                    let r = m.restore.take().expect("checked");
+                    if !m.kept.iter().any(|v| v.version == r.version && v.hash == r.hash) {
+                        drop_settings(dirs, m.kind, &m.id, &r.version, &r.hash);
+                    }
+                }
+            }
         }
         (true, ())
     });
@@ -593,16 +629,20 @@ fn follow_one(dirs: &DataDirs, st: &mut KeptState, profile_id: &str, games: &[Pa
             drop_settings(dirs, kind, &from.id, &from.version, &from.hash);
         }
     } else if entry_exists(dirs, kind, &from.id, &from.version, &from.hash) {
-        let settings = from_settings.unwrap_or_else(|| take_settings(games, kind, &from.id, &from_v, &dir));
+        let settings = from_settings.map(Ok).unwrap_or_else(|| take_settings(dirs, games, kind, &from.id, &from_v, &dir));
         let size = crate::library::record(dirs, &LibraryRef { kind, id: from.id.clone(), version: from.version.clone(), hash: from.hash.clone() })
             .map(|r| r.size).unwrap_or(0);
-        match disk_refusal(dirs, size + settings.size, settings.files.len() as u64 + 1) {
-            Some(why) => {
+        let settings = settings.and_then(|settings| match disk_refusal(dirs, size + settings.size, settings.files.len() as u64 + 1) {
+            Some(why) => Err(why),
+            None => Ok(settings),
+        });
+        match settings {
+            Err(why) => {
                 drop_settings(dirs, kind, &from.id, &from.version, &from.hash);
                 m.kept.retain(|v| !(v.version == from.version && v.hash == from.hash));
                 notices.push(format!("{name} {} was not kept for a roll back: {why}. It stays in your Library as an earlier version.", from.version));
             }
-            None => {
+            Ok(settings) => {
                 for left in &settings.left_out {
                     notices.push(format!("{name} {}: kept without {left}", from.version));
                 }
@@ -714,11 +754,12 @@ pub fn restore_after_place(dirs: &DataDirs, profile: &crate::profile::Profile, g
             let tag = format!("{}:{}", m.kind.as_str(), m.id);
             let mut back = Vec::new();
             for rel in &r.settings.files {
+                if crate::bundle::safe_rel_path(rel).is_err() { continue; }
                 let Some((copy, c)) = copies.iter().find(|(_, c)| rel.starts_with(&format!("{c}/"))) else {
                     notes.push(format!("{tag}: {rel} was not put back: the mod's copy is somewhere else now"));
                     continue;
                 };
-                match put_back(game, &copy.path, &rel[c.len() + 1..], &dir.join(rel)) {
+                match put_back(game, &copy.path, &rel[c.len() + 1..], &dir, &dir.join(rel)) {
                     Ok(true) => back.push(rel.clone()),
                     Ok(false) => {}
                     Err(e) => notes.push(format!("{tag}: {rel} was not put back: {}", e.message)),
@@ -759,21 +800,38 @@ pub fn restore_after_place(dirs: &DataDirs, profile: &crate::profile::Profile, g
 
 /// Writes the kept file `from` as `rel` in the copy `copy` (in `game`) unless it holds those bytes already. Never a
 /// code file, never through a link. -> whether it was written.
-fn put_back(game: &Path, copy: &Path, rel: &str, from: &Path) -> Result<bool> {
+fn put_back(game: &Path, copy: &Path, rel: &str, source_root: &Path, from: &Path) -> Result<bool> {
     crate::bundle::safe_rel_path(rel)?;
     if not_settings(rel) {
         return Err(Error::new(ErrorCode::Refused, "not a settings file"));
     }
     let to = copy.join(rel);
     crate::engine_mods::refuse_symlink_path(game, &to)?;
-    let bytes = std::fs::read(from).map_err(crate::util::io_at(from, "reading"))?;
-    if std::fs::read(&to).is_ok_and(|now| now == bytes) { return Ok(false); }
+    if !from.starts_with(source_root) { return Err(Error::invalid("settings source outside its copy")); }
+    crate::engine_mods::refuse_symlink_path(source_root, from)?;
+    let bytes = read_bounded(from)?;
+    if read_bounded(&to).is_ok_and(|now| now == bytes) { return Ok(false); }
     if let Some(parent) = to.parent() {
         crate::engine_mods::refuse_symlink_path(game, parent)?;
         std::fs::create_dir_all(parent).map_err(crate::util::io_at(parent, "creating"))?;
     }
-    crate::util::write_atomic(&to, &bytes)?;
+    crate::util::write_atomic_exclusive(&to, &bytes)?;
     Ok(true)
+}
+
+// Bound allocations even if a file grows after metadata was inspected.
+fn read_bounded(path: &Path) -> Result<Vec<u8>> {
+    use std::io::Read;
+    let file = std::fs::File::open(path)?;
+    if !file.metadata()?.is_file() || file.metadata()?.len() > MAX_FILE {
+        return Err(Error::new(ErrorCode::Refused, "not a bounded settings file"));
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_FILE + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_FILE {
+        return Err(Error::new(ErrorCode::Refused, "settings file too large"));
+    }
+    Ok(bytes)
 }
 
 #[cfg(test)]
@@ -789,6 +847,90 @@ mod tests {
         for rel in ["config.txt", "config.ini", "settings.json", "minimap_config.ini", "logs/run.log", "data/mod.json"] {
             assert!(!not_settings(rel), "{rel}");
         }
+    }
+
+    #[test]
+    fn review_disk_refusal_happens_before_settings_are_copied() {
+        let root = std::env::temp_dir().join(format!("km-review-space-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dirs = DataDirs::at(root.join("data"));
+        let game = root.join("game");
+        let copy = game.join("greeneye/map");
+        std::fs::create_dir_all(&copy).unwrap();
+        std::fs::write(copy.join("config.ini"), b"zoom=1").unwrap();
+        let hash = format!("kdh1:{}", "0".repeat(64));
+        let marker = crate::engine_mods::Marker { format: 1, kind: ModKind::Greeneye, id: "map".into(), version: "1.0.0".into(), hash: hash.clone() };
+        std::fs::create_dir_all(game.join("kiln/state")).unwrap();
+        crate::util::write_json_atomic(&game.join("kiln/state/library-placements.json"),
+            &serde_json::json!([{"path": copy, "marker": marker, "files": {}}])).unwrap();
+        let into = dirs.library().join(SETTINGS_DIR).join("greeneye/map/1.0.0+00000000");
+        let saved = with_free_space_for_tests(Some(0), || take_settings(&dirs, &[game], ModKind::Greeneye, "map",
+            &VersionRef { version: "1.0.0".into(), hash }, &into));
+        assert!(saved.is_err(), "a refused snapshot must not first write files to a full disk");
+        assert!(!into.exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn review_scripts_are_not_settings() {
+        for rel in ["run.bat", "run.CMD", "setup.ps1", "code.js", "code.py", "code.vbs", "code.sh"] {
+            assert!(not_settings(rel), "{rel}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn review_restore_does_not_follow_temporary_link() {
+        let root = std::env::temp_dir().join(format!("km-review-tmp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let copy = root.join("game/mod");
+        std::fs::create_dir_all(&copy).unwrap();
+        let outside = root.join("outside");
+        std::fs::write(&outside, b"precious").unwrap();
+        let from = root.join("saved");
+        std::fs::write(&from, b"settings").unwrap();
+        std::os::unix::fs::symlink(&outside, copy.join("config.ini.tmp")).unwrap();
+        assert!(put_back(&root.join("game"), &copy, "config.ini", &root, &from).unwrap());
+        assert_eq!(std::fs::read(copy.join("config.ini")).unwrap(), b"settings");
+        assert_eq!(std::fs::read(&outside).unwrap(), b"precious");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn review_restore_refuses_linked_source_and_oversized_file() {
+        let root = std::env::temp_dir().join(format!("km-review-source-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let copy = root.join("game/mod");
+        std::fs::create_dir_all(&copy).unwrap();
+        let outside = root.join("outside");
+        std::fs::write(&outside, b"private").unwrap();
+        let from = root.join("saved");
+        std::os::unix::fs::symlink(&outside, &from).unwrap();
+        assert!(put_back(&root.join("game"), &copy, "config.ini", &root, &from).is_err());
+        std::fs::remove_file(&from).unwrap();
+        std::fs::File::create(&from).unwrap().set_len(MAX_FILE + 1).unwrap();
+        assert!(put_back(&root.join("game"), &copy, "config.ini", &root, &from).is_err());
+        assert!(!copy.join("config.ini").exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn review_forget_does_not_delete_through_kept_ancestor_link() {
+        let root = std::env::temp_dir().join(format!("km-review-delete-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dirs = DataDirs::at(root.join("data"));
+        let outside = root.join("outside");
+        let victim = outside.join("1.0.0+00000000");
+        std::fs::create_dir_all(&victim).unwrap();
+        std::fs::write(victim.join("precious"), b"save").unwrap();
+        let parent = dirs.library().join(SETTINGS_DIR).join("greeneye");
+        std::fs::create_dir_all(&parent).unwrap();
+        std::os::unix::fs::symlink(&outside, parent.join("map")).unwrap();
+        drop_settings(&dirs, ModKind::Greeneye, "map", "1.0.0", &format!("kdh1:{}", "0".repeat(64)));
+        assert!(victim.join("precious").is_file());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

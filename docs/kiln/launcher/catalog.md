@@ -241,7 +241,8 @@ ShroudForge, SET, Greeneye, Flame, XHL and the other loaders' mods.
   it; **Remove** takes one out (you can no longer roll back to it). **Clean up** never removes a kept version.
 - **What is kept.** The mod's own files are the Library entry as you imported it. The settings are the files of its
   copy in the game folder that were not as Kiln put them there (changed or added since), never its code or manifest,
-  up to 16 MiB a file. A Kiln mod's configs live in your profile and are not tied to a version: a roll back leaves them
+  with a settings or log extension (`txt`, `ini`, `cfg`, `json`, `toml`, `yaml`, `yml`, `log`),
+  up to 16 MiB a file and 64 MiB per version. Other extensions are excluded from the settings backup. A Kiln mod's configs live in your profile and are not tied to a version: a roll back leaves them
   as they are. The same holds for mods that run from their Library folder and keep no files in the game folder.
 - **Update notices.** Kiln checks the newest version you have in your Library, kept ones included, so after a roll back
   the version you rolled back from is not offered to you again as an update; a newer upload still is. A notice can't

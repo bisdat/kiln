@@ -93,7 +93,7 @@ export function buildRows(x: ModInputs): ModRow[] {
     seen.add(key);
     const on = !!entry?.enabled;
     const row: ModRow = {
-      key, kind, id, name: lib?.name ?? id, version: entry?.version ?? lib?.versions[0]?.version ?? null, on, entry, lib, found: null,
+      key, kind, id, name: lib?.name ?? id, version: entry?.version ?? lib?.versions.find((v) => !v.kept)?.version ?? null, on, entry, lib, found: null,
       note: null, wontRun: null, withWorld: false, staysOff: false, changed: null,
     };
     if (on) {
@@ -131,7 +131,7 @@ export function buildRows(x: ModInputs): ModRow[] {
       if (kept) row.note = { text: "Left in the game folder", tone: "warn", title: kept.r.reason };
     }
     // its files were changed in its Library folder (a mod.json edited by hand): what Play would refuse, so it comes first
-    const used = entry ? lib?.versions.find((v) => v.hash === entry.hash) : lib?.versions[0];
+    const used = entry ? lib?.versions.find((v) => v.hash === entry.hash) : lib?.versions.find((v) => !v.kept);
     if (used?.changed) {
       row.changed = { kind, id, version: used.version, hash: used.hash };
       row.note = { text: "Changed on disk", tone: "warn",
@@ -221,8 +221,8 @@ export function bulkPlan(rows: ModRow[], on: boolean): BulkPlan {
     if (r.found || !r.kind) { plan.left.push({ name: r.name, why: "in the game folder, it has no switch" }); continue; }
     if (r.on === on) continue;
     if (r.entry) { plan.change.push({ kind: r.kind, before: r.entry, after: { ...r.entry, enabled: on } }); continue; }
-    const v = r.lib?.versions[0];
-    if (!v) { plan.left.push({ name: r.name, why: "no version of it is in the Library" }); continue; }
+    const v = r.lib?.versions.find((v) => !v.kept);
+    if (!v) { plan.left.push({ name: r.name, why: r.lib?.versions.length ? "only kept versions are in the Library; pick a version explicitly" : "no version of it is in the Library" }); continue; }
     plan.change.push({ kind: r.kind, before: null, after: { id: r.id, version: v.version, hash: v.hash, enabled: true } });
   }
   return plan;
