@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <memory>
 #include <cctype>
 #include <cstdarg>
 #include <cstdio>
@@ -312,6 +313,11 @@ void run_fuel_jobs(const Access& a) {
             continue;
         }
         unsigned long code = 0;
+        std::unique_ptr<WatchNote> note;  // 07 S7: what a component watch is told (only while something is watched)
+        if (note_wanted()) {
+            note = std::make_unique<WatchNote>();
+            note_begin(a, &batch[i].job.r.entity, 1, note.get());
+        }
         if (!run_fuel(a, batch[i].job, &res, &code)) {
             res.status = KILN_ITEMS_UNAVAILABLE;
             res.change_count = 0;
@@ -321,6 +327,7 @@ void run_fuel_jobs(const Access& a) {
             broken(b);
             continue;
         }
+        if (note) note_end(a, *note);
         if (!(res.flags & KILN_ITEMS_FUEL_DRY_RUN)) g_fuel_writes.fetch_add(res.changed, std::memory_order_relaxed);
     }
     float dt;
@@ -350,12 +357,18 @@ void run_fuel_jobs(const Access& a) {
         }
         KilnItemsFuelResult res{};
         unsigned long code = 0;
+        std::unique_ptr<WatchNote> note;  // 07 S7
+        if (note_wanted()) {
+            note = std::make_unique<WatchNote>();
+            note_begin(a, &job.r.entity, 1, note.get());
+        }
         if (!run_fuel(a, job, &res, &code)) {
             char b[160];
             std::snprintf(b, sizeof b, "a keep-full Fuel write faulted (0x%08lx) on entity %u", code, k.job.r.entity);
             broken(b);
             break;
         }
+        if (note) note_end(a, *note);
         if (res.changed == 0 && (job.r.flags & KILN_ITEMS_FUEL_ADD)) acc = 0;  // all at the level: owe nothing
         g_fuel_writes.fetch_add(res.changed, std::memory_order_relaxed);
         kept.push_back(Done{k.handle, acc, res});
@@ -415,6 +428,12 @@ void run_move_jobs(const Access& a) {
             continue;
         }
         unsigned long code = 0;
+        std::unique_ptr<WatchNote> note;  // 07 S7
+        if (note_wanted()) {
+            const KilnEntity holders[2] = {batch[i].job.r.from, batch[i].job.r.to};
+            note = std::make_unique<WatchNote>();
+            note_begin(a, holders, 2, note.get());
+        }
         if (!run_move(a, batch[i].job, g_tx, &res, &code)) {
             abandon_tx(g_tx);
             res.status = KILN_ITEMS_UNAVAILABLE;
@@ -427,6 +446,7 @@ void run_move_jobs(const Access& a) {
             broken(b);
             continue;
         }
+        if (note) note_end(a, *note);
         const bool moved = (res.status == KILN_ITEMS_DONE || res.status == KILN_ITEMS_PARTIAL) &&
                            !(res.flags & KILN_ITEMS_MOVE_DRY_RUN);
         if (moved) {
@@ -511,6 +531,11 @@ void program_body(void* ctx, const uint64_t* it) {
         code = 0;
         if (batch[i].job.r.flags & KILN_ITEMS_RECIPE)
             a.recipes = reinterpret_cast<void*>(g_api->singleton(g_api->server_world(), KilnStr{"g38_items::RecipeRegistry", 25}));
+        std::unique_ptr<WatchNote> note;  // 07 S7
+        if (note_wanted()) {
+            note = std::make_unique<WatchNote>();
+            note_begin(a, &batch[i].job.r.entity, 1, note.get());
+        }
         if (!run_job(a, batch[i].job, g_tx, &res, &code)) {
             abandon_tx(g_tx);
             res.status = KILN_ITEMS_UNAVAILABLE;
@@ -523,6 +548,7 @@ void program_body(void* ctx, const uint64_t* it) {
             broken(b);
             continue;
         }
+        if (note) note_end(a, *note);
         const bool committed = (res.status == KILN_ITEMS_DONE || res.status == KILN_ITEMS_PARTIAL) &&
                                !(res.flags & KILN_ITEMS_DRY_RUN);
         (committed ? g_commits : g_rollbacks).fetch_add(1);
@@ -1987,6 +2013,7 @@ void resolve() {
 void register_main();
 
 void KILN_CALL on_ready(void*) {
+    note_setup(kiln_component_changes_find(g_api), g_owner);  // 07 S7: this service's writes are named in component watches
     register_main();
     // v5: equip runs in a program of its own, an entity program over the player characters: kiln.world only
     const auto* w = static_cast<const KilnWorldApi*>(g_api->service(KilnStr{KILN_WORLD_SERVICE, std::strlen(KILN_WORLD_SERVICE)}, 1));

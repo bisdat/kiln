@@ -37,6 +37,7 @@
 #include "safetyhook.hpp"  // Context only: mid handlers keep their safetyhook::Context& signature
 #include "services/kiln_assets.h"
 #include "services/kiln_combat.h"
+#include "services/kiln_component_changes.h"
 #include "services/kiln_creature_control.h"
 #include "services/kiln_spawn.h"
 #include "services/kiln_types.h"
@@ -215,6 +216,34 @@ T get(const uint8_t* p, int64_t off) {
 bool on_tick() { return g_api->on_tick_thread(); }
 uintptr_t world() { return g_world.load(std::memory_order_acquire); }
 const void* registry() { return g_registry.load(std::memory_order_acquire); }
+
+// kiln.component_changes (since 0.2.0-dev.29, chapter 07 S7): Kiln's own writes of a watched attribute (set_health and
+// heal, god mode's restore, the decided regeneration and heal corrections, attribute set/add of Stamina and Mana) tell
+// it the whole component before and after, so a watch reports them as Kiln's ("kiln.combat"). Found at on_ready.
+const KilnComponentChangesApiV1* g_changes = nullptr;
+struct NotedWrite {
+    uint32_t index, entity, hash, size = 0;
+    uint8_t before[KILN_WATCH_MAX_BYTES];
+    NotedWrite(uint32_t idx, uint32_t e, uint32_t h) : index(kiln_component_watching(g_changes) ? idx : 0), entity(e), hash(h) {
+        uint64_t n = 0;
+        const void* p = index ? component(world(), hash, entity, &n) : nullptr;
+        if (p && n >= 1 && n <= KILN_WATCH_MAX_BYTES && copy_bytes(before, p, n)) size = static_cast<uint32_t>(n);
+    }
+    void done() const {
+        if (!size) return;
+        uint64_t n = 0;
+        uint8_t after[KILN_WATCH_MAX_BYTES];
+        const void* p = component(world(), hash, entity, &n);
+        if (p && n == size && copy_bytes(after, p, n)) kiln_component_write(g_changes, g_owner, index, entity, before, after, size, 0, "kiln.combat");
+    }
+};
+// add_health with the note above (every health write of this service goes through it).
+bool add_health_noted(uint32_t entity, uint8_t* comp, int32_t delta) {
+    const NotedWrite note(KILN_WATCH_HEALTH, entity, kHealthHash);
+    const bool ok = add_health(registry(), comp, delta);
+    if (ok) note.done();
+    return ok;
+}
 bool is_player_id(uint32_t e) { return e >= 1 && e <= 1023; }
 
 bool god_has(uint32_t e) {
@@ -729,7 +758,7 @@ void god_floors() {
         int32_t cur = 0, max = 0;
         read_health(world(), registry(), e, &cur, &max);
         const int32_t want = std::min(floor, max);
-        if (want > cur && add_health(registry(), comp, want - cur)) c_god_restored.fetch_add(1);
+        if (want > cur && add_health_noted(e, comp, want - cur)) c_god_restored.fetch_add(1);
     }
 }
 
@@ -1155,7 +1184,7 @@ void on_pre_impl(const KilnTickInfo* tick) {
         int32_t cur = 0, max = 0;
         if (!comp || !read_health(w, registry(), regen[i].entity, &cur, &max)) continue;
         const int32_t add = std::min(amount, std::max(0, max - cur));
-        if (add > 0) add_health(registry(), comp, add);
+        if (add > 0) add_health_noted(regen[i].entity, comp, add);
     }
     for (size_t i = 0; i < attr.size(); ++i) {
         const KilnCombatEvent& ev = events[attr_base + i];
@@ -1166,7 +1195,7 @@ void on_pre_impl(const KilnTickInfo* tick) {
         int32_t cur = 0, max = 0;
         if (!comp || !read_health(w, registry(), attr[i].entity, &cur, &max)) continue;
         const int32_t target = std::clamp(cur + (want - given), cur >= 1 ? 1 : 0, std::max(max, 0));
-        if (target != cur && add_health(registry(), comp, target - cur)) c_attr_corrected.fetch_add(1, std::memory_order_relaxed);
+        if (target != cur && add_health_noted(attr[i].entity, comp, target - cur)) c_attr_corrected.fetch_add(1, std::memory_order_relaxed);
     }
 
     // Apply HURT / HEAL decisions, then queue every held hit for this step's conclusion.
@@ -1520,12 +1549,14 @@ KilnResult attr_write(KilnEntity e, const AttrPair& ap, AttrLoaded& l, int64_t w
     }
     // want and cur are both s32, so want - cur can need 33 bits (an extreme current value): then a second add from the
     // value the first one left (the game's formula may have clamped it).
+    const NotedWrite note(ap.p.kind == KILN_ATTR_STAMINA || ap.p.kind == KILN_ATTR_MANA ? ap.p.kind : 0u, e, ap.comp_hash);
     for (int pass = 0; pass < 2 && want != cur; ++pass) {
         const int64_t step = std::clamp<int64_t>(want - cur, INT32_MIN, INT32_MAX);
         if (!attr_add_id(registry(), l.comp, static_cast<int32_t>(step), ap.p.cur_id)) return KILN_ERR_INTERNAL;
         if (step == want - cur) break;  // the usual case: one add
         if (!attr_slot(l, ap.p.cur_slot, &cur)) return KILN_ERR_INTERNAL;
     }
+    note.done();
     return KILN_OK;
 }
 
@@ -1585,7 +1616,7 @@ KilnResult t_set_health(KilnEntity e, int32_t value, int32_t* applied) {
     // God mode: never 0 (the game's death check runs in the step before the next Pre could restore it); a lower value
     // is undone at the next Pre like any other loss.
     if (want < 1 && god_has(e)) want = std::min(1, std::max(max, 0));
-    if (want != cur && !add_health(registry(), comp, want - cur)) return KILN_ERR_INTERNAL;
+    if (want != cur && !add_health_noted(e, comp, want - cur)) return KILN_ERR_INTERNAL;
     read_health(world(), registry(), e, &cur, &max);
     {
         std::lock_guard lock(g_mu);
@@ -1971,6 +2002,7 @@ void KILN_CALL on_ready(void*) {
     g_assets_api = static_cast<const KilnAssetsApi*>(g_api->service(KilnStr{KILN_ASSETS_SERVICE, std::strlen(KILN_ASSETS_SERVICE)}, 1));
     if (g_assets_api && g_assets_api->header.size < offsetof(KilnAssetsApi, resource_list) + sizeof(void*)) g_assets_api = nullptr;
     LOGI("attributes: kiln.types %s, kiln.assets %s", g_types_api ? "found" : "MISSING", g_assets_api ? "found" : "MISSING");
+    g_changes = kiln_component_changes_find(g_api);  // 07 S7: Kiln's own attribute writes are named in component watches
     if (!g_deaths_ok) return;
     g_world_api = static_cast<const KilnWorldApi*>(
         g_api->service(KilnStr{KILN_WORLD_SERVICE, std::strlen(KILN_WORLD_SERVICE)}, 1));

@@ -1172,4 +1172,96 @@ bool run_move(const Access& a, const MoveJob& job, uint8_t* tx, KilnItemsMoveRes
     }
 }
 
+// ---- kiln.component_changes (07 S7): engine.h WatchNote ----
+namespace {
+std::atomic<const KilnComponentChangesApiV1*> g_note_table{nullptr};
+std::atomic<KilnOwner> g_note_owner{0};
+const Acc kNoteAcc[7] = {A_COUNT, A_COUNT, A_COUNT, A_COUNT, A_FUEL, A_INVENTORY, A_SLOTSEL};  // by component index
+
+bool note_read(const Access& a, uint32_t index, KilnEntity e, uint8_t* out, uint32_t* size) {
+    const Acc which = kNoteAcc[index];
+    if (which == A_COUNT || !a.acc[which] || !e) return false;
+    PtrSize ps{};
+    E.read_other(&ps, a.storage, a.acc[which], e);
+    if (!ps.ptr || ps.size == 0 || ps.size > 256) return false;
+    std::memcpy(out, ps.ptr, ps.size);
+    *size = static_cast<uint32_t>(ps.size);
+    return true;
+}
+
+void note_add(const Access& a, uint32_t index, KilnEntity e, WatchNote* note) {
+    if (note->count >= WatchNote::kMax) return;
+    for (uint32_t i = 0; i < note->count; ++i)
+        if (note->items[i].entity == e && note->items[i].index == index) return;
+    WatchNote::Item& it = note->items[note->count];
+    it.entity = e;
+    it.index = index;
+    if (note_read(a, index, e, it.bytes, &it.size)) ++note->count;
+}
+
+void note_begin_impl(const Access& a, const KilnEntity* holders, uint32_t n, WatchNote* note) {
+    for (uint32_t h = 0; h < n; ++h) {
+        const KilnEntity holder = holders[h];
+        if (!holder) continue;
+        note_add(a, KILN_WATCH_SLOT_SELECTION, holder, note);
+        note_add(a, KILN_WATCH_FUEL, holder, note);
+        const uint8_t* setup = a.acc[A_SETUP] ? setup_via_access(&a, holder) : nullptr;
+        if (!setup) continue;
+        Tree t{};
+        walk(setup, &setup_via_access, &a, &t, 0, -1);
+        for (uint32_t i = 0; i < t.n; ++i) {
+            note_add(a, KILN_WATCH_INVENTORY, t.ids[i], note);
+            const auto* inv = a.acc[A_INVENTORY] ? static_cast<const uint8_t*>(other(a, A_INVENTORY, t.ids[i])) : nullptr;
+            if (!inv) continue;
+            for (uint32_t k = 0; k < 8; ++k) {
+                const KilnEntity pide = rd<uint32_t>(inv + 12 * k, 8);
+                if (pide && pide != 0xFFFFFFFFu) note_add(a, KILN_WATCH_FUEL, pide, note);
+            }
+        }
+    }
+}
+
+bool note_begin_guarded(const Access& a, const KilnEntity* holders, uint32_t n, WatchNote* note) {
+    __try {
+        note_begin_impl(a, holders, n, note);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        note->count = 0;
+        return false;
+    }
+}
+
+bool note_end_guarded(const Access& a, const WatchNote& note, const KilnComponentChangesApiV1* t, KilnOwner owner) {
+    __try {
+        uint8_t now[256];
+        for (uint32_t i = 0; i < note.count; ++i) {
+            const WatchNote::Item& it = note.items[i];
+            uint32_t size = 0;
+            if (note_read(a, it.index, it.entity, now, &size) && size == it.size && std::memcmp(now, it.bytes, size) != 0)
+                kiln_component_write(t, owner, it.index, it.entity, it.bytes, now, size, 0, "kiln.items");
+        }
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+}  // namespace
+
+void note_setup(const KilnComponentChangesApiV1* table, KilnOwner owner) {
+    g_note_owner.store(owner, std::memory_order_relaxed);
+    g_note_table.store(table, std::memory_order_release);
+}
+
+bool note_wanted() { return kiln_component_watching(g_note_table.load(std::memory_order_acquire)); }
+
+void note_begin(const Access& a, const KilnEntity* holders, uint32_t n, WatchNote* note) {
+    note->count = 0;
+    note_begin_guarded(a, holders, n, note);
+}
+
+void note_end(const Access& a, const WatchNote& note) {
+    const auto* t = g_note_table.load(std::memory_order_acquire);
+    if (note.count && t) note_end_guarded(a, note, t, g_note_owner.load(std::memory_order_relaxed));
+}
+
 }  // namespace kitems

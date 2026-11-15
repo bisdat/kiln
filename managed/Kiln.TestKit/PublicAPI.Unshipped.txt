@@ -90,3 +90,10 @@ static Kiln.TestKit.FakeProgramMark.operator !=(Kiln.TestKit.FakeProgramMark lef
 static Kiln.TestKit.FakeProgramMark.operator ==(Kiln.TestKit.FakeProgramMark left, Kiln.TestKit.FakeProgramMark right) -> bool
 static Kiln.TestKit.FakeProgramSlice.operator !=(Kiln.TestKit.FakeProgramSlice? left, Kiln.TestKit.FakeProgramSlice? right) -> bool
 static Kiln.TestKit.FakeProgramSlice.operator ==(Kiln.TestKit.FakeProgramSlice? left, Kiln.TestKit.FakeProgramSlice? right) -> bool
+Kiln.TestKit.HarnessComponentChanges
+Kiln.TestKit.HarnessComponentChanges.PresentPairs.get -> int
+Kiln.TestKit.HarnessComponentChanges.QueueOverflows.get -> ulong
+Kiln.TestKit.HarnessComponentChanges.QueuedFrames.get -> int
+Kiln.TestKit.HarnessComponentChanges.SetAttribute(Kiln.EntityId entity, Kiln.ObservedAttribute attribute, int current, int maximum) -> void
+Kiln.TestKit.HarnessComponentChanges.Watches.get -> int
+Kiln.TestKit.KilnHarness.ComponentChanges.get -> Kiln.TestKit.HarnessComponentChanges!

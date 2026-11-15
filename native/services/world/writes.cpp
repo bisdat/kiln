@@ -7,6 +7,7 @@
 // "Tracked writes"; the write path itself was captured and lab-checked for kiln.items (docs/re/items.md section 12).
 #include <chrono>
 
+#include "services/kiln_component_changes.h"
 #include "services/kiln_types.h"
 #include "world_internal.h"
 #include "write_queue.h"
@@ -38,6 +39,17 @@ std::atomic<uintptr_t> g_seen_world{0};
 std::atomic<uint64_t> g_updates{0};
 std::atomic<int64_t> g_last_update_ms{0}; // steady clock of the last update
 thread_local bool t_in_writes = false;
+// kiln.component_changes (since 0.2.0-dev.29): found at the first write request (tick thread); null without it. A tracked
+// write of a watched component tells it the whole component before and after, so a watch can name the mod (07 S7).
+std::atomic<const KilnComponentChangesApiV1*> g_changes{nullptr};
+std::atomic<bool> g_changes_asked{false};
+
+// The index of a watched component (kiln_component_changes.h), 0 for any other.
+uint32_t watched_index(const std::string& name) {
+    std::string_view n(name);
+    if (n.starts_with("keen::ecs::")) n.remove_prefix(11);
+    return kiln_component_index(n.data(), n.size());
+}
 
 std::mutex g_slots_mutex;
 std::map<uint32_t, int32_t> g_slots;      // component hash -> iterator slot of its accessor
@@ -60,6 +72,9 @@ struct EngineStore final : WriteStore {
     ProgramCtx* ctx = nullptr;
     const uint64_t* iter = nullptr;
     void* storage = nullptr;
+    // the whole component right before a write of a watched component (kiln.component_changes)
+    uint8_t before[KILN_WATCH_MAX_BYTES] = {};
+    uint32_t before_size = 0;
 
     uint64_t accessor(const WriteType& type) const {
         std::lock_guard lock(g_slots_mutex);
@@ -96,6 +111,10 @@ struct EngineStore final : WriteStore {
         if (!s.ptr || s.size > UINT32_MAX) return true;
         *data = const_cast<uint8_t*>(static_cast<const uint8_t*>(s.ptr));
         *size = static_cast<uint32_t>(s.size);
+        before_size = 0;
+        if (kiln_component_watching(g_changes.load(std::memory_order_acquire)) && s.size <= KILN_WATCH_MAX_BYTES &&
+            watched_index(type.name) && seh_copy(before, s.ptr, s.size))
+            before_size = static_cast<uint32_t>(s.size);
         return true;
     }
     bool formulas(uint8_t* component, const WriteType&) override {
@@ -129,6 +148,20 @@ struct EngineStore final : WriteStore {
         return s.ptr && s.size == 8 && seh_copy(out, s.ptr, 8);
     }
 };
+
+// A tracked write that changed a watched component: kiln.component_changes gets the whole component before (from the
+// mark, right before the write) and after, the mod's id and the ticket (any thread: this program may run on a worker).
+void tell_changes(const WriteJob& job, const WriteType& type, EngineStore& store) {
+    const auto* t = g_changes.load(std::memory_order_acquire);
+    const uint32_t index = watched_index(type.name);
+    if (!t || !index || store.before_size == 0) return;
+    const uint8_t* now = nullptr;
+    uint32_t size = 0;
+    uint8_t after[KILN_WATCH_MAX_BYTES];
+    if (store.read(job.entity, type, &now, &size) && now && size == store.before_size && seh_copy(after, now, size))
+        kiln_component_write(t, g_owner, index, job.entity, store.before, after, size, job.ticket, job.mod.empty() ? "kiln.world" : job.mod.c_str());
+    store.before_size = 0;
+}
 
 // Once per world: every accessor must be the type the component map says, as kiln.items checks its own.
 bool verify(ProgramCtx* ctx, const uint64_t* iter) {
@@ -214,7 +247,10 @@ void KILN_CALL writes_update(KilnProgramCtx* c, void*) {
             g_queue.complete(std::move(job), step);
             continue;
         }
-        if (write_run(job, known ? &type : nullptr, state, store)) g_queue.hold(std::move(job));
+        store.before_size = 0;
+        const bool hold = write_run(job, known ? &type : nullptr, state, store);
+        if (job.status == KILN_WORLD_WRITE_DONE && known) tell_changes(job, type, store);  // 07 S7: a watch's Kiln origin
+        if (hold) g_queue.hold(std::move(job));
         else g_queue.complete(std::move(job), step);
     }
     // What still waits (more than one update's share): an entity that lacks its component now may be gone, and its id
@@ -527,6 +563,7 @@ KilnResult KILN_CALL write_submit(KilnOwner owner, const KilnWorldWriteRequest* 
     if (!writes_available()) return KILN_ERR_UNAVAILABLE;
     // Between two steps, on the tick thread: the entity (and its generation) is read as the next update will find it.
     if (t_in_writes || t_in_program || !g_api->on_tick_thread()) return KILN_ERR_WRONG_THREAD;
+    if (!g_changes_asked.exchange(true)) g_changes.store(kiln_component_changes_find(g_api), std::memory_order_release);
     WriteJob job;
     job.owner = owner;
     job.entity = r->entity;

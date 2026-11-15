@@ -20,5 +20,7 @@
     <!-- dev.28 06a: a program wrap's writes raise ComponentWrittenEvent (ComponentWrittenEvent.FromWrap) -->
     <InternalsVisibleTo Include="Kiln.Systems" />
     <InternalsVisibleTo Include="Kiln.Systems.Tests" />
+    <!-- dev.29 07 S7: the component watches' native mirrors and consumer, tested with the decisions -->
+    <InternalsVisibleTo Include="Kiln.Decisions.Tests" />
   </ItemGroup>
 </Project>

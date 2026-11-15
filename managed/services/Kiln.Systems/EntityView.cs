@@ -401,7 +401,8 @@ internal sealed unsafe class ViewContext
         ctx.Lists = ProgramLists.Of(t, stage.Wrap.World, stage.Wrap.Program, s->ProgramIndex);
         ctx._step = s->Step;
         // the change events: server worlds only (a client world's are chapter 14's), and only while someone listens
-        ctx._track = stage.Wrap.World == WorldKind.Server && Events.HasSubscribers<ComponentWrittenEvent>();
+        // the bytes before are kept for ComponentWrittenEvent and, since 07 S7, for a component watch (its Kiln origin)
+        ctx._track = stage.Wrap.World == WorldKind.Server && (Events.HasSubscribers<ComponentWrittenEvent>() || ComponentChanges.Watching);
         ctx._count = 0;
         ctx._used = 0;
         ctx._entity = 0;
@@ -454,6 +455,7 @@ internal sealed unsafe class ViewContext
                 if (now.SequenceEqual(before)) continue;
                 WrapWrites.Add(new WrapWrites.Write(_step, _entity, ComponentName(r.Component), before.ToArray(), now.ToArray(),
                     stage.Wrap.Writer, stage.Wrap.ModId));
+                ComponentChanges.NoteWrapWrite(_entity, ComponentName(r.Component), before, now, stage.Wrap.ModId);  // 07 S7
             }
         _count = 0;
         _used = 0;

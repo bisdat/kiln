@@ -49,7 +49,9 @@ bool holding();
 // The metadata table of this window (never null). Any thread.
 std::shared_ptr<const Table> table();
 // One row sampled now. World thread, world-safe phase only (the caller is a finisher or a window call).
-bool resolve(uint32_t entity, Row* out);
+// count_miss false: an entity without a usable identity is not counted in the broker's metadata_misses (the
+// component watches ask about their roots this way, since 0.2.0-dev.29).
+bool resolve(uint32_t entity, Row* out, bool count_miss = true);
 
 // A producer can hold its kind (resolved; its hook goes in at the first listener): the kind is reported in
 // supported_kinds. hook_kind_off: its hook could not go in after all.
@@ -126,3 +128,11 @@ void world_stopped();
 KilnResult reevaluate(uint32_t drop, uint32_t receiver, uint32_t* reset);
 
 }  // namespace kiln::decisions::pickup_producer
+
+// kiln.component_changes (component_changes.cpp, since 0.2.0-dev.29): the second table of kiln-decisions.dll.
+namespace kiln::decisions::component_changes {
+// kiln_plugin_main: registers the table (KILN_OK, or what register_service said).
+KilnResult register_table(const KilnApi* api, KilnOwner owner);
+// on_ready, after kiln.decisions' own: `decisions_on` says whether kiln.decisions is on.
+void ready(bool decisions_on);
+}  // namespace kiln::decisions::component_changes

@@ -576,18 +576,21 @@ void KILN_CALL on_ready(void*) {
         }
         // The rows of chapter 07 that this build does not have (0.2.0-dev.29), so none of them reads on: player build
         // pieces wait for their replay gate (07 S0/S9, after 06a's program wraps), managed terraforming is out of V1
-        // (owner decision 10), the component watches (07 S7, kiln.component_changes) are not built yet, and an
-        // every-store feed is not promised at all. events.component_net is also a sigdb feature whose symbols resolve:
-        // lowered here, never raised.
+        // (owner decision 10), and an every-store feed is not promised at all. events.component_net is the component
+        // watches' (component_changes.cpp reports it).
         g_caps->report(g_owner, ks("events.build.pieces"), KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_MISSING,
                        ks("player build pieces are not cancelable in this build (their replay gate has not passed)"));
         g_caps->report(g_owner, ks("events.build.terraform"), KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_MISSING,
                        ks("not implemented: managed terraform cancel is not part of V1 (Gameplay.Protect's native policy still applies)"));
-        g_caps->report(g_owner, ks("events.component_net"), KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_MISSING,
-                       ks("kiln.component_changes (named component watches) is not in this build"));
         g_caps->report(g_owner, ks("events.component_writes.exact"), KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_MISSING,
                        ks("reserved: Kiln promises no feed of every component store"));
     }
+}
+
+// kiln.decisions first, then the component watches (they need to know whether it is on), whatever it returned early for.
+void KILN_CALL on_ready_all(void* user) {
+    on_ready(user);
+    component_changes::ready(g_on.load());
 }
 
 }  // namespace
@@ -613,12 +616,12 @@ bool interested(uint32_t kind, uint32_t entity) {
 }
 bool holding() { return g_shutdown.holding() && !g_budget_exceeded.load(std::memory_order_relaxed) && !g_broker->saturated(); }
 std::shared_ptr<const Table> table() { return g_metadata.table(); }
-bool resolve(uint32_t entity, Row* out) {
+bool resolve(uint32_t entity, Row* out, bool count_miss) {
     KilnWindowStateV1 s{};
     if (!world_safe(&s) || !g_shutdown.holding()) return false;
     bool miss = false;
     if (g_metadata.resolve(s.world_epoch, s.step, entity, out, &miss)) return true;
-    if (miss) g_broker->count_metadata_miss();
+    if (miss && count_miss) g_broker->count_metadata_miss();
     return false;
 }
 void hook_kind(uint32_t kind) {
@@ -668,8 +671,10 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     g_owner = owner;
     info->id = KilnStr{KILN_DECISIONS_SERVICE, sizeof(KILN_DECISIONS_SERVICE) - 1};
     info->version = KilnStr{"1", 1};
-    info->on_ready = &on_ready;
+    info->on_ready = &on_ready_all;
     lock_stopped.store(+[] { return !g_shutdown.holding(); });
     g_broker = new Broker();
-    return api->register_service(owner, KilnStr{KILN_DECISIONS_SERVICE, sizeof(KILN_DECISIONS_SERVICE) - 1}, &kTable);
+    const KilnResult rc = api->register_service(owner, KilnStr{KILN_DECISIONS_SERVICE, sizeof(KILN_DECISIONS_SERVICE) - 1}, &kTable);
+    if (rc == KILN_OK) component_changes::register_table(api, owner);  // since 0.2.0-dev.29: the second table of this DLL
+    return rc;
 }

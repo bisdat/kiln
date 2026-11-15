@@ -9,6 +9,7 @@
 
 #include "kiln_api.h"
 #include "moves.h"
+#include "services/kiln_component_changes.h"
 #include "services/kiln_items.h"
 
 namespace kitems {
@@ -317,6 +318,29 @@ struct MoveJob {
     KilnItemsMoveRequest r{};
 };
 bool run_move(const Access& a, const MoveJob& job, uint8_t* tx, KilnItemsMoveResult* res, unsigned long* code);
+
+// ---- kiln.component_changes (since 0.2.0-dev.29, chapter 07 S7) ----
+// A job of this service may change Inventory (give, take, recipes, moves, equipment, sets), Fuel (water) and
+// SlotSelection of the entities it names and of their inventory trees. While anything is watched
+// (kiln_component_watching), note_begin copies them through the program's own accessors before the job and note_end
+// compares them after it; each one that changed is told to kiln.component_changes as kiln.items' write. Guarded (a fault
+// copies or tells nothing). An accessor the program does not have is skipped.
+struct WatchNote {
+    struct Item {
+        KilnEntity entity;
+        uint32_t index, size;  // component index (kiln_component_changes.h), bytes
+        uint8_t bytes[256];
+    };
+    static constexpr uint32_t kMax = 600;  // two holders' trees: SlotSelection, Fuel, 32 x (Inventory + 8 item entities)
+    uint32_t count = 0;
+    Item items[kMax];
+};
+// on_ready: the table (null: kiln-decisions.dll is not loaded) and the service's owner.
+void note_setup(const KilnComponentChangesApiV1* table, KilnOwner owner);
+// Whether a job should be noted now (anything watched). Any thread, lock-free.
+bool note_wanted();
+void note_begin(const Access& a, const KilnEntity* holders, uint32_t n, WatchNote* note);
+void note_end(const Access& a, const WatchNote& note);
 
 // ---- equipment sets (v6, setexec.cpp) ----
 namespace sets {

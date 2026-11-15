@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <memory>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
@@ -477,7 +478,13 @@ void run_set(const Access& a, uint64_t* it, KilnEntity player, SetRequest&& set,
         f.out.status = sets::SetStatus::Refused;
         std::snprintf(f.out.reason, sizeof f.out.reason, "the player is dead");
     } else {
+        std::unique_ptr<WatchNote> note;  // 07 S7: the set's writes, for a component watch
+        if (note_wanted()) {
+            note = std::make_unique<WatchNote>();
+            note_begin(a, &player, 1, note.get());
+        }
         set_run(a, player, g_tx, set.job, &f.out);
+        if (note && !f.out.engine_fault) note_end(a, *note);
     }
     if (f.out.engine_fault && !f.out.seh && sets_lab_matrix()) {
         // lab only (kiln/data/kiln.items/sets-matrix): a mismatch is reported but sets stay on, so one boot maps every form
@@ -571,14 +578,23 @@ void KILN_CALL each(KilnProgramCtx* ctx, uint64_t* it, KilnEntity player, void*)
             // the game's equip has no such check; a dead character's inventory is being moved to its tombstone
             res.status = KILN_ITEMS_REFUSED;
             std::snprintf(res.message, sizeof res.message, "the player is dead");
-        } else if (!run_equip(a, player, batch[i].r, g_tx, &res, &code)) {
-            abandon_tx(g_tx);
-            res.status = KILN_ITEMS_UNAVAILABLE;
-            std::snprintf(res.message, sizeof res.message, "the game's equip faulted (0x%08lx)", code);
-            char b[160];
-            std::snprintf(b, sizeof b, "the game's %s faulted (0x%08lx) for player %u",
-                          (batch[i].r.flags & KILN_ITEMS_EQUIP_UNEQUIP) ? "unequip" : "equip", code, player);
-            broken(b);
+        } else {
+            std::unique_ptr<WatchNote> note;  // 07 S7: what a component watch is told (only while something is watched)
+            if (note_wanted()) {
+                note = std::make_unique<WatchNote>();
+                note_begin(a, &player, 1, note.get());
+            }
+            if (!run_equip(a, player, batch[i].r, g_tx, &res, &code)) {
+                abandon_tx(g_tx);
+                res.status = KILN_ITEMS_UNAVAILABLE;
+                std::snprintf(res.message, sizeof res.message, "the game's equip faulted (0x%08lx)", code);
+                char b[160];
+                std::snprintf(b, sizeof b, "the game's %s faulted (0x%08lx) for player %u",
+                              (batch[i].r.flags & KILN_ITEMS_EQUIP_UNEQUIP) ? "unequip" : "equip", code, player);
+                broken(b);
+            } else if (note) {
+                note_end(a, *note);
+            }
         }
         if (res.status == KILN_ITEMS_DONE && !(res.flags & KILN_ITEMS_EQUIP_DRY_RUN)) g_changed.fetch_add(1);
         else if (res.status != KILN_ITEMS_DONE) g_refused.fetch_add(1);
