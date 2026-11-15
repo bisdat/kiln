@@ -339,7 +339,10 @@ public static unsafe partial class Content
     private static void SyncMods()
     {
         if (ModsBackend.Current is null || _table == null) return;
-        var ids = Kiln.Mods.All.Where(m => m.State == ModState.Loaded).OrderBy(m => m.LoadIndex).Select(m => m.Id).ToArray();
+        var loaded = Kiln.Mods.All.Where(m => m.State == ModState.Loaded).OrderBy(m => m.LoadIndex).ToArray();
+        foreach (var entry in loaded)
+            if (entry.Info is { } info && ModContext.FindLive(info) is { } context) Track(context);
+        var ids = loaded.Select(m => m.Id).ToArray();
         var json = JsonSerializer.Serialize(ids);
         if (json == _lastModList) return;
         _lastModList = json;

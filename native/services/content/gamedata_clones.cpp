@@ -98,6 +98,7 @@ struct Def {
     uint32_t refusal = 0;        // buffs: why the last registration failed, as a KILN_DEFINE_* code (kiln_capacity.h); 0 = it did not
     bool await_header = false;   // buffs: registered in a batch, waits for the batch's header (batch_finish)
     std::array<uint8_t, 16> reg_id{};  // buffs: the registration id of the result-bearing definition it is (0: none)
+    std::set<uintptr_t> lookup_found;  // successful ordinary lookups, per live world (diagnostic snapshot)
     std::set<uintptr_t> probed;  // buffs: worlds where the game's own lookup was checked
     uint64_t version = 0;
     std::string listed;          // its entry in definitions(), as of listed_as (a fingerprint of what the entry shows)
@@ -1408,6 +1409,7 @@ void probe_buff(Def& d, uintptr_t world, bool say = false) {
             d.probed.insert(world);
             const uintptr_t got = call_get_buff(fnv1a(d.guid, 16), w.registry);
             const bool found = got == d.data;
+            if (found) d.lookup_found.insert(world); else d.lookup_found.erase(world);
             ++w.probes;
             if (!found) ++w.misses;
             if (found && !say && w.probes > 1) return;
@@ -1616,7 +1618,7 @@ struct Receipt {
     KilnOwner owner = 0;
     uint32_t timing = KILN_DEFINE_REQUIRE_REGISTERED;
     bool accepted = false;      // its call stored the definition for the next start
-    bool pending_file = false;  // replayed from a pending file at this start (the file goes once it settled)
+    bool pending_file = false;  // replayed from a pending file at this start (removed only once registered)
     std::filesystem::path file; // that file
     uint32_t code = 0;          // the refusal of its call when it took nothing (kept when no definition carries it)
     std::string reason;
@@ -1862,6 +1864,10 @@ void KILN_CALL on_client_pre(const KilnTickInfo* tick, void*) {
 }  // namespace
 
 void clones_boot() {
+    kiln::capacity::pending_io::diagnostic = [](const auto& path, const auto& why) {
+        LOGW("gamedata: stored definition %s refused: %s (left in place)", path.string().c_str(), why.c_str());
+    };
+
     g_defs_owner = g_api->owner_create(KilnStr{"gamedata:definitions", 20});
     set_owner_label(g_defs_owner, "gamedata definitions");
     uintptr_t fn = 0;
@@ -1888,7 +1894,7 @@ void clones_boot() {
         if (hooks->subscribe_owner_retiring(g_owner, &on_owner_retiring, nullptr, &h) != KILN_OK)
             LOGW("gamedata: kiln.hooks refused the owner-retiring subscription: a gone mod's buff clones count as in use until kiln.content sees it go");
     }
-    pending_replay();  // buff definitions mods stored for this start: defined before any mod loads, registered with the world's load
+    pending_replay();  // freeze prior-process requests now; admit once the host supplies loaded mods
     LOGI("gamedata: template clones %s; sequence, perk and buff clones on (the game's buff lookup %s)",
          g_templates ? "on" : "OFF (gamedata.template_clones not resolved)", g_get_buff ? "resolved for the self-check" : "not resolved");
 }
@@ -1937,6 +1943,7 @@ void clones_world_reset() {
         d.sequence_failures.clear();
         d.worlds.clear();  // a new world may get the same address
         d.probed.clear();
+        d.lookup_found.clear();
     }
     g_seq_maps.clear();
     g_perk_maps.clear();
@@ -2163,6 +2170,14 @@ constexpr char kSep = '/';
 #endif
 uint64_t g_receipt_seq = 0;
 std::map<std::array<uint8_t, 16>, uint64_t> g_receipt_age;  // insertion order, for forgetting old refusals
+struct PendingBootFile { kiln::capacity::PendingFile file; std::array<uint8_t,32> fingerprint; };
+bool g_pending_boot_captured = false;
+std::vector<PendingBootFile> g_pending_boot_files;
+bool g_pending_filter_known = false;
+std::set<std::string> g_pending_mods;
+std::set<std::filesystem::path> g_pending_replayed;
+std::set<KilnOwner> g_pending_standins;
+std::map<std::string, KilnOwner> g_pending_real_owners;
 std::map<std::string, KilnOwner> g_pending_owners;          // mod -> the owner of its definitions stored for this start
 
 std::filesystem::path u8path(const std::string& s) { return std::filesystem::path(std::u8string(s.begin(), s.end())); }
@@ -2273,6 +2288,7 @@ KilnResult define_buff_result(KilnOwner owner, const std::string& json, uint32_t
     const uint32_t bid = fnv1a(probe.guid, 16);
     std::lock_guard l1(store_mutex());
     std::lock_guard lock(g_mu);
+    take_retired();  // refuse an already retiring owner before it can consume a process-lifetime record
     const uintptr_t w = active_world();
     if (w && !g_api->on_world_thread(active_kind())) {
         *report = report_json("not on the thread of kiln.content's world", {});
@@ -2336,8 +2352,11 @@ KilnResult define_buff_result(KilnOwner owner, const std::string& json, uint32_t
             } else {
                 const std::string file = pending_file(mod, probe.guid);
                 const gjson doc = {{"format", 1}, {"mod", mod}, {"registrationId", uuid_text(id.data())}, {"definition", j}};
-                if (!kiln::capacity::write_atomic(u8path(file), doc.dump(2))) {
-                    refuse(KILN_DEFINE_STORAGE_FAILURE, "could not write " + file);
+                const std::string bytes = doc.dump(2);
+                if (bytes.size() > 65536) {
+                    refuse(KILN_DEFINE_STORAGE_FAILURE, "the stored definition exceeds the 65536-byte replay limit");
+                } else if (!kiln::capacity::pending_store_write(u8path(pending_dir()), u8path(file), bytes, &err)) {
+                    refuse(KILN_DEFINE_STORAGE_FAILURE, err + ": " + file);
                 } else {
                     std::lock_guard rl(g_rc_mu);
                     g_receipts[id].accepted = true;
@@ -2362,7 +2381,7 @@ KilnResult define_buff_result(KilnOwner owner, const std::string& json, uint32_t
                     else if (!asked)
                         notes.push_back("the game's buff lookup is not resolved on this build (gamedata.buff_lookup): not checked with it");
                     std::error_code ec;
-                    if (std::filesystem::remove(u8path(pending_file(mod, probe.guid)), ec))
+                    if (kiln::capacity::pending_io::remove(u8path(pending_file(mod, probe.guid))))
                         LOGI("gamedata: buff %s of %s is registered now: its stored definition for the next start is removed", probe.name.c_str(),
                              mod.c_str());
                     std::lock_guard rl(g_rc_mu);
@@ -2435,31 +2454,110 @@ void clones_owner_revoked(KilnOwner owner) {
 
 // The definitions mods stored for this start (define_buff_result, ALLOW_NEXT_START): defined now, in mod and GUID order,
 // under an owner "pending <mod>"; they register at the first world's load like any definition and are checked as any.
+void pending_owner_loaded(KilnOwner owner, const std::string& mod) {
+    std::lock_guard l1(store_mutex());
+    std::lock_guard lock(g_mu);
+    if (take_retired()) publish_budget();
+    if (g_gone.count(owner)) return;
+    g_pending_real_owners[mod] = owner;
+    auto it = g_pending_owners.find(mod);
+    if (it == g_pending_owners.end() || it->second == owner || !g_pending_standins.count(it->second)) return;
+    const auto standin = it->second;
+    for (auto& d : g_defs) if (d.owner == standin && d.mod == mod) d.owner = owner;
+    { std::lock_guard receipts(g_rc_mu);
+      for (auto& [id,r] : g_receipts) if (r.owner == standin && r.mod == mod) r.owner = owner; }
+    g_pending_standins.erase(standin);
+    it->second = owner;
+    publish_budget();
+}
+
+void pending_mods_changed(const std::vector<std::string>& mods) {
+    {
+        std::lock_guard l1(store_mutex());
+        std::lock_guard lock(g_mu);
+        g_pending_filter_known = true;
+        g_pending_mods = {mods.begin(), mods.end()};
+        for (auto& [mod,owner] : g_pending_owners) if (!g_pending_mods.count(mod)) g_gone.insert(owner);
+        publish_budget();
+    }
+    pending_replay();
+}
+
 void pending_replay() {
-    std::error_code ec;
-    const auto files = kiln::capacity::pending_files(u8path(pending_dir()));
-    for (const auto& f : files) {
+    if (!g_pending_boot_captured) {
+        g_pending_boot_captured = true;
+        kiln::capacity::PendingScan scan;
+        const auto files = kiln::capacity::pending_files_bounded(u8path(pending_dir()), &scan);
+        if (scan.unread) kiln::capacity::pending_io::refused(u8path(pending_dir()),
+            "pending store bound reached; at least " + std::to_string(scan.unread) + " entries left unread; enumeration stopped (4096 files / 268435456 bytes)");
+        for (const auto& file : files) {
+            std::string text;
+            if (kiln::capacity::pending_io::read(file.path, &text, 65536))
+                g_pending_boot_files.push_back({file, kiln::capacity::sha256(text)});
+            else kiln::capacity::pending_io::refused(file.path,"unreadable, oversized or unsafe boot pending file");
+        }
+    }
+    if (!g_pending_filter_known) return;  // no admission before the host's reliable loaded-mod list
+    for (const auto& boot : g_pending_boot_files) {
+        const auto& f = boot.file;
+        if (!g_pending_mods.count(f.mod)) {
+            kiln::capacity::pending_io::refused(f.path,"owning mod is not loaded in this profile; enable it to replay (left in place)");
+            continue;
+        }
+        if (g_pending_replayed.count(f.path)) continue;
         auto drop = [&](const std::string& why) {
-            LOGW("gamedata: the stored buff definition %s of %s is not used: %s (removed)", f.name.c_str(), f.mod.c_str(), why.c_str());
-            std::filesystem::remove(f.path, ec);
+            kiln::capacity::pending_io::refused(f.path, why);
         };
-        std::ifstream in(f.path, std::ios::binary);
-        std::string text(65537, '\0');
-        in.read(text.data(), static_cast<std::streamsize>(text.size()));
-        text.resize(static_cast<size_t>(std::max<std::streamsize>(in.gcount(), 0)));
+        std::string text;
+        if (!mod_folder_ok(f.mod) || !kiln::capacity::pending_io::read(f.path, &text, 65536)) {
+            kiln::capacity::pending_io::refused(f.path,"unreadable, oversized or unsafe pending file");
+            continue;
+        }
+        if (kiln::capacity::sha256(text) != boot.fingerprint) {
+            drop("changed after boot; retained for the next process start");
+            continue;
+        }
         const gjson doc = gjson::parse(text, nullptr, false);
         std::array<uint8_t, 16> id{};
-        if (text.size() > 65536 || doc.is_discarded() || !doc.is_object() || doc.value("format", 0) != 1 || !doc.contains("mod") ||
-            !doc["mod"].is_string() || doc["mod"].get<std::string>() != f.mod || !doc.contains("registrationId") ||
+        if (text.size() > 65536 || doc.is_discarded() || !doc.is_object() || !doc.contains("format") || !doc["format"].is_number_integer() ||
+            doc["format"] != 1 || !doc.contains("mod") || !doc["mod"].is_string() || doc["mod"].get<std::string>() != f.mod || !doc.contains("registrationId") ||
             !doc["registrationId"].is_string() || !uuid_parse(doc["registrationId"].get<std::string>(), &id) || !doc.contains("definition") ||
             !doc["definition"].is_object()) {
             drop("not a stored definition of format 1 for this folder");
             continue;
         }
+        uint8_t file_guid[16]{};
+        if (doc["definition"].contains("placeholder") || !doc["definition"].contains("guid") ||
+            !doc["definition"]["guid"].is_string() || !guid_parse(doc["definition"]["guid"].get<std::string>(), file_guid) ||
+            f.name != guid_text(file_guid) + ".json") {
+            drop("filename must be the definition GUID.json");
+            continue;
+        }
+        {
+            std::lock_guard l1(store_mutex());
+            std::lock_guard lock(g_mu);
+            const Def* current = buff_def(file_guid);
+            if (current && (current->mod != f.mod ||
+                nlohmann::json::parse(current->body.dump()) != nlohmann::json::parse(doc["definition"].dump()))) {
+                // Replaying after the reliable loaded list must preserve the precedence a boot replay had:
+                // this start's mod code is newer than the prior process's deferred request.
+                Receipt receipt;
+                std::memcpy(receipt.guid.data(), file_guid, 16);
+                receipt.mod = f.mod;
+                receipt.code = current->mod == f.mod ? KILN_DEFINE_SUPERSEDED : KILN_DEFINE_ID_COLLISION;
+                receipt.reason = "a current definition already owns this GUID; the stored request was not applied";
+                { std::lock_guard rl(g_rc_mu); g_receipts[id] = std::move(receipt); g_receipt_age[id] = ++g_receipt_seq; }
+                g_pending_replayed.insert(f.path);
+                drop("superseded by this start's definition; left in place");
+                continue;
+            }
+        }
         KilnOwner& o = g_pending_owners[f.mod];
+        if (auto real = g_pending_real_owners.find(f.mod); real != g_pending_real_owners.end()) o = real->second;
         if (!o) {
             const std::string name = "gamedata:pending:" + f.mod;
             o = g_api->owner_create(KilnStr{name.data(), name.size()});
+            if (o) g_pending_standins.insert(o);
             set_owner_label(o, "pending " + f.mod);
         }
         std::string rep;
@@ -2475,6 +2573,7 @@ void pending_replay() {
             continue;
         }
         d->reg_id = id;
+        g_pending_replayed.insert(f.path);
         {
             std::lock_guard rl(g_rc_mu);
             Receipt& r = g_receipts[id];
@@ -2504,11 +2603,11 @@ void pending_settle() {
             LOGI("gamedata: the stored buff definition of %s (receipt %s) at this start: %s%s%s", r.mod.c_str(), uuid_text(id.data()).c_str(),
                  registered ? "Registered" : "Refused", registered ? "" : ": ", registered ? "" : r.now_reason.c_str());
             r.pending_file = false, r.accepted = false;
-            gone.push_back(r.file);
+            if (registered) gone.push_back(r.file);
         }
     }
     std::error_code ec;
-    for (const auto& f : gone) std::filesystem::remove(f, ec);
+    for (const auto& f : gone) kiln::capacity::pending_io::remove(f);
     if (!gone.empty()) publish_budget();
 }
 
@@ -2550,8 +2649,16 @@ gjson clones_status() {
     gjson b = {{"active", BM.ok && BM.header != 0}, {"gameBuffs", BM.n}, {"clones", BM.used}, {"room", BM.room}, {"expanded", BM.expanded},
                {"headers", BM.headers.size()}, {"headerBytes", BM.header_bytes}, {"recordBytes", BM.array_bytes}, {"attaches", BM.attaches},
                {"worlds", BM.worlds.size()}, {"syncs", BM.syncs}, {"wordsFollowed", BM.words}};
+    gjson lookups = gjson::object();
+    for (const auto& d : g_defs) if (d.section == KILN_GD_BUFFS && !d.lookup_found.empty()) {
+        auto& entry = lookups[guid_text(d.guid)];
+        for (auto kind : {KILN_WORLD_SERVER, KILN_WORLD_CLIENT}) {
+            const auto world = g_api->world(kind);
+            entry[kind == KILN_WORLD_SERVER ? "server" : "client"] = world && d.lookup_found.count(world) != 0;
+        }
+    }
     if (!BM.why.empty()) b["why"] = BM.why;
-    return gjson{{"buffCopy", b}, {"perkMaps", g_perk_maps.size()}, {"texts", !g_texts_absent.load()},
+    return gjson{{"buffCopy", b}, {"buffLookups", lookups}, {"perkMaps", g_perk_maps.size()}, {"texts", !g_texts_absent.load()},
                  {"gameBuffLookup", g_get_buff != nullptr}};
 }
 
