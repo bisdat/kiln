@@ -94,6 +94,7 @@ struct Def {
     std::string mod;          // the owning mod ("pack <mod>" / "mod <mod>" owners; placeholders: the recorded mod)
     uint32_t slot = UINT32_MAX;  // buffs: the record index in Kiln's collection
     uint32_t refusal = 0;        // buffs: why the last registration failed, as a KILN_DEFINE_* code (kiln_capacity.h); 0 = it did not
+    bool await_header = false;   // buffs: registered in a batch, waits for the batch's header (batch_finish)
     std::set<uintptr_t> probed;  // buffs: worlds where the game's own lookup was checked
     uint64_t version = 0;
     std::string listed;          // its entry in definitions(), as of listed_as (a fingerprint of what the entry shows)
@@ -106,11 +107,12 @@ std::vector<Def> g_defs;
 // it before it was there (an item's equipment.placedEntity), at once instead of at its next periodic retry.
 std::atomic<uint64_t> g_template_gen{0};
 
-// Registering many at once (a world's load): the writes, the event order and the buff collection's header are done once per turn of
-// the store lock instead of once per clone (under store_mutex).
+// Registering many at once (a world's load, one section of a data pack, the content sync's definitions): the writes and the
+// event order are done once per turn of the store lock instead of once per clone, and the buff collection's header once per
+// batch (under store_mutex). A header per clone would leave one retired header per clone in near memory, none of which can
+// be freed while a reader may hold it (chapter 17.2 section 4: about 220 MB for 4,096 clones one at a time).
 bool g_batch = false;
 bool g_batch_changes = false;         // after_changes() is owed
-std::vector<size_t> g_batch_buffs;    // buff clones (g_defs indices) that wait for the header
 std::unordered_set<uint64_t> g_defs_layered;  // section << 32 | id: entries with layers of g_defs_owner in this world
 
 void changed() {
@@ -1488,9 +1490,16 @@ void register_buff(Def& d, uintptr_t world) {
     }
     // in a batch, the collection's header is built and the world pointed at it once, at the end of the turn (buffs_attach)
     if (!g_batch) {
-        if (BM.header_count != BM.n + BM.used && !build_header(&err)) {
-            buff_refuse(d, KILN_DEFINE_REGISTRATION_FAILED_RETAINED, err);
-            return;
+        if (BM.header_count != BM.n + BM.used) {
+            if (!build_header(&err)) {
+                buff_refuse(d, KILN_DEFINE_REGISTRATION_FAILED_RETAINED, err);
+                return;
+            }
+            // one clone defined from code while a world runs: a header each (a data pack's list makes one for all of it)
+            if (BM.headers.size() <= 8 || BM.headers.size() % 256 == 0)
+                LOGI("gamedata: buff header %zu for %s (%u records): Kiln keeps %llu bytes of headers; many clones at once belong in a "
+                     "data pack or before the world loads (one header for all)",
+                     BM.headers.size(), d.name.c_str(), BM.header_count, static_cast<unsigned long long>(BM.header_bytes));
         }
         if (!buff_world(world, &err)) {
             d.state = "waiting", d.problem = err;  // clones_tick tries again
@@ -1514,7 +1523,7 @@ void register_buff(Def& d, uintptr_t world) {
     changed();
     publish_texts(d);
     if (g_batch) {
-        g_batch_buffs.push_back(static_cast<size_t>(&d - g_defs.data()));
+        d.await_header = true;
         return;
     }
     buff_registered(d, world);
@@ -1539,26 +1548,42 @@ void buff_registered(Def& d, uintptr_t world, bool say) {
     probe_buff(d, world, say);
 }
 
-// The end of a batch's turn: the writes and event order, then the buff collection's header with every buff clone of the turn.
-void batch_finish(uintptr_t world) {
+// The end of a batch's turn: the writes and event order; with `buffs` (the batch's last turn), the buff collection's header
+// with every buff clone the batch registered, built once, and the world's registry pointed at it once.
+void batch_finish(uintptr_t world, bool buffs = true) {
     if (g_batch_changes) {
         g_batch_changes = false;
         after_changes();
     }
-    if (g_batch_buffs.empty()) return;
+    if (!buffs) return;
+    Def* last = nullptr;
+    uint32_t waiting = 0;
+    for (Def& d : g_defs)
+        if (d.await_header) last = &d, ++waiting;
+    if (!waiting) return;
     std::string err;
+    const uint64_t headers = BM.headers.size();
     const bool built = BM.header_count == BM.n + BM.used || build_header(&err);
     const bool attached = built && buff_world(world, &err);
-    for (size_t k = 0; k < g_batch_buffs.size(); ++k) {
-        Def& d = g_defs[g_batch_buffs[k]];
+    for (Def& d : g_defs) {
+        if (!d.await_header) continue;
+        d.await_header = false;
         if (!built) buff_refuse(d, KILN_DEFINE_REGISTRATION_FAILED_RETAINED, err);
         else if (!attached) d.state = "waiting", d.problem = err;  // clones_tick tries again
         else {
             d.worlds.insert(world);
-            buff_registered(d, world, k + 1 == g_batch_buffs.size());  // the last one's line and self-check are written
+            buff_registered(d, world, &d == last);  // the last one's line and self-check are written
         }
     }
-    g_batch_buffs.clear();
+    if (built && !attached)
+        LOGD("gamedata: buff batch: %u clone(s) wait for the %s world's BuffRegistry: %s", waiting, wname(world), err.c_str());
+    else if (built)
+        LOGI("gamedata: buff batch: %u clone(s) in the %s world, %s header (%u records); Kiln keeps %zu header(s), %llu bytes, and "
+             "%llu bytes of records (%u of %u clone records used)",
+             waiting, wname(world), BM.headers.size() > headers ? "one new" : "the current", BM.header_count, BM.headers.size(),
+             static_cast<unsigned long long>(BM.header_bytes), static_cast<unsigned long long>(BM.array_bytes), BM.used, BM.room);
+    else
+        LOGW("gamedata: buff batch: %u clone(s) in the %s world are not registered: %s", waiting, wname(world), err.c_str());
 }
 
 // Called under the clone lock. The server and hosted client consume the same item resource.
@@ -1739,9 +1764,9 @@ void clones_world_ready(uintptr_t world, uint32_t) {
             register_def(g_defs[i++], world);
             if (std::chrono::steady_clock::now() - t0 > std::chrono::milliseconds(10)) break;
         }
-        batch_finish(world);
-        g_batch = false;
         more = i < g_defs.size();
+        batch_finish(world, !more);  // the buff header once, after the last turn
+        g_batch = false;
     }
 }
 
@@ -1766,12 +1791,15 @@ void clones_tick(uint64_t step) {
     if (!w || !g_api->on_world_thread(active_kind())) return;
     std::lock_guard l1(store_mutex());
     std::lock_guard lock(g_mu);
+    g_batch = true;  // the clones that waited for the world's registries: one header, one attach
     for (Def& d : g_defs)
         if (d.state == "waiting") register_def(d, w);
         else if (d.section == KILN_GD_SEQUENCES && d.data && !d.worlds.count(w)) {
             // Complete entries/field installation too when the initial active-world attachment failed.
             register_sequence(d, w);
         }
+    batch_finish(w);
+    g_batch = false;
     if (BM.ok && BM.header) {
         std::string err;
         for (BuffWorld& x : BM.worlds)
@@ -1988,6 +2016,19 @@ void gd_pack_add(KilnOwner owner, uint32_t section, const gjson& list, const std
         out->errors.push_back(std::string(section_name(section)) + ".add: a list of definitions");
         return;
     }
+    // One batch for the list: a data pack applied while a world runs (a reload, a pack that comes later) and the content
+    // sync's definitions on a client register one by one, the buff header is built once at the end.
+    std::lock_guard l1(store_mutex());
+    std::lock_guard lock(g_mu);
+    struct Batch {
+        bool outer = !g_batch;
+        Batch() { g_batch = true; }
+        ~Batch() {
+            if (!outer) return;
+            batch_finish(active_world());
+            g_batch = false;
+        }
+    } batch;
     for (const gjson& d : list) {
         std::string rep;
         if (clones_define(owner, section, d.dump(), true, source, &rep) != KILN_OK) {

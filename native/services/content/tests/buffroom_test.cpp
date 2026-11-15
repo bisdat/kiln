@@ -101,7 +101,71 @@ bool blob_array(uintptr_t addr, uintptr_t* data, uint32_t* count) {
     return true;
 }
 }  // namespace gd
+
+// ---- the definition path (clones_define, register_def, gd_pack_add): what the buff path needs works, the rest throws ----
+[[noreturn]] void unreachable(const char* what) { throw std::logic_error(std::string("the buff path reached ") + what); }
+void StoreMutex::lock() { m_.lock(); }
+void StoreMutex::unlock() { m_.unlock(); }
+PhaseTimer::PhaseTimer(Phase) {}
+PhaseTimer::~PhaseTimer() {}
+LayerModScope::LayerModScope(const std::string&) {}
+LayerModScope::~LayerModScope() {}
+bool guid_parse(const std::string& s, uint8_t out[16]) {
+    unsigned a, b, c, d[8];
+    if (s.size() != 36 || std::sscanf(s.c_str(), "%8x-%4x-%4x-%2x%2x-%2x%2x%2x%2x%2x%2x", &a, &b, &c, &d[0], &d[1], &d[2], &d[3], &d[4],
+                                      &d[5], &d[6], &d[7]) != 11)
+        return false;
+    const uint32_t aa = a;
+    const uint16_t bb = b, cc = c;
+    std::memcpy(out, &aa, 4);
+    std::memcpy(out + 4, &bb, 2);
+    std::memcpy(out + 6, &cc, 2);
+    for (int i = 0; i < 8; ++i) out[8 + i] = static_cast<uint8_t>(d[i]);
+    return true;
+}
+uintptr_t g_test_world = 0;
+uintptr_t active_world() { return g_test_world; }
+uint32_t active_kind() { return KILN_WORLD_SERVER; }
+Engine E{};
+const KilnAssetsApi* assets_api() { return nullptr; }
+bool map_read(uintptr_t, std::vector<uint32_t>*, std::vector<uint64_t>*) { return false; }
+const Entry* Registry::lookup(const std::string&) const { unreachable("Registry::lookup"); }
+Registry& reg(uint32_t) { unreachable("reg"); }
+const Field* Schema::find(const std::string&) const { unreachable("Schema::find"); }
+bool store_drop(KilnOwner, uintptr_t) { return false; }
+size_t store_flush(std::string*) { return 0; }
+void store_for_each(const std::function<void(uintptr_t, const Slot&)>&) {}
+void store_originals(uintptr_t, size_t, uint8_t*) {}
+namespace gd {
+uint32_t g_after = 0;
+void after_changes() { ++g_after; }
+uint32_t apply_value(KilnOwner, uint64_t, uint32_t, const GEntry&, const std::string&, const gjson&, const std::string&,
+                     std::vector<std::string>*) {
+    return 0;
+}
+void forget_added(KilnOwner, uintptr_t) {}
+void GRegistry::add(GEntry e) {
+    by_id[e.id] = static_cast<uint32_t>(entries.size());
+    by_name[e.name] = static_cast<uint32_t>(entries.size());
+    entries.push_back(std::move(e));
+}
+const GEntry* GRegistry::get(uint32_t id) const {
+    auto it = by_id.find(id);
+    return it == by_id.end() ? nullptr : &entries[it->second];
+}
+const GEntry* GRegistry::lookup(const std::string& key) const {
+    if (auto it = by_name.find(key); it != by_name.end()) return &entries[it->second];
+    if (key.rfind("0x", 0) == 0) return get(static_cast<uint32_t>(std::stoul(key.substr(2), nullptr, 16)));
+    return nullptr;
+}
+bool resolve(Root, Node, const std::string&, std::vector<Resolved>*, std::string*, bool*) { unreachable("resolve"); }
+bool res_ready() { return true; }
+const char* section_name(uint32_t) { return "buffs"; }
+void sequence_clone_entries(GRegistry&, const uint8_t*, const std::string&, uintptr_t, uint32_t, size_t) { unreachable("sequences"); }
+const TType* type_hash(uint32_t) { return nullptr; }
+}  // namespace gd
 }  // namespace kc
+extern "C" void kc_nc_set_texts(uint32_t, const char*, size_t) {}
 
 namespace {
 using namespace kc::gd;
@@ -297,11 +361,105 @@ void test_slots_and_map() {
 }
 }  // namespace
 
+// A made-up API: one server world on this thread, whose BuffRegistry holds the game's collection at +0x20.
+uint8_t* g_registry = nullptr;
+KilnApi g_fake_api{};
+void make_world() {
+    g_registry = arena(0x40);
+    std::memcpy(g_registry + 0x20, &g_coll, 8);
+    g_fake_api = KilnApi{};
+    g_fake_api.world = [](uint32_t kind) -> uintptr_t { return kind == KILN_WORLD_SERVER ? 0x7000 : 0; };
+    g_fake_api.on_world_thread = [](uint32_t) -> bool { return true; };
+    g_fake_api.singleton = [](uintptr_t, KilnStr) -> uintptr_t { return reinterpret_cast<uintptr_t>(g_registry); };
+    kc::g_api = &g_fake_api;
+    // the game's buffs as build_sections lists them: name buff_<id>, its record
+    uintptr_t recs = 0;
+    uint32_t n = 0;
+    blob_array(g_coll + 0x18, &recs, &n);
+    for (uint32_t i = 0; i < n; ++i) {
+        GEntry e;
+        std::memcpy(&e.id, reinterpret_cast<void*>(recs + uintptr_t{i} * kStride), 4);
+        char b[24];
+        std::snprintf(b, sizeof b, "buff_%08x", e.id);
+        e.name = b;
+        e.addr = recs + uintptr_t{i} * kStride;
+        buffs.add(std::move(e));
+    }
+}
+
+std::string guid_of(uint32_t i) {
+    uint8_t g[16];
+    clone_guid(i, g);
+    char b[40];
+    std::snprintf(b, sizeof b, "%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x", static_cast<unsigned>(g[0] | g[1] << 8 | g[2] << 16 | uint32_t{g[3]} << 24),
+                  static_cast<unsigned>(g[4] | g[5] << 8), static_cast<unsigned>(g[6] | g[7] << 8), g[8], g[9], g[10], g[11], g[12], g[13], g[14],
+                  g[15]);
+    return b;
+}
+
+kc::gjson clone_list(uint32_t from, uint32_t n, const std::string& base) {
+    kc::gjson list = kc::gjson::array();
+    for (uint32_t i = from; i < from + n; ++i) list.push_back({{"guid", guid_of(i)}, {"name", "Batch_" + std::to_string(i)}, {"base", base}});
+    return list;
+}
+
+uint32_t registered() {
+    uint32_t n = 0;
+    for (const Def& d : g_defs) n += d.section == KILN_GD_BUFFS && d.state == "registered";
+    return n;
+}
+
+// One data pack's list while a world runs, and a world's load: one header each, not one per clone (chapter 17.2 section 4).
+void test_batches() {
+    make_game();
+    g_defs.clear();
+    make_world();
+    char base[16];
+    std::snprintf(base, sizeof base, "0x%08x", 0x9e3779b9u);
+    std::string err;
+    kc::g_test_world = 0;  // no world yet: definitions wait, then the world's load registers them all
+    {
+        kc::ApplyResult r;
+        gd_pack_add(1, KILN_GD_BUFFS, clone_list(0, 2000, base), "pack test/content/a.json", &r);
+        check(r.errors.empty() && r.applied == 2000, "2,000 definitions accepted before a world (" + std::to_string(r.errors.size()) + " errors)");
+    }
+    check(BM.headers.empty() && registered() == 0, "no world: no header, nothing registered");
+    kc::g_test_world = 0x7000;
+    clones_world_ready(0x7000, KILN_WORLD_SERVER);
+    check(registered() == 2000, "the world's load registers all 2,000 (" + std::to_string(registered()) + ")");
+    check(BM.headers.size() == 1, "with one header (" + std::to_string(BM.headers.size()) + ")");
+    uintptr_t slot = 0;
+    std::memcpy(&slot, g_registry + 0x20, 8);
+    check(slot == BM.header && BM.attaches == 1, "and one swap of the world's registry to it");
+
+    const size_t headers = BM.headers.size();
+    {
+        kc::ApplyResult r;
+        gd_pack_add(1, KILN_GD_BUFFS, clone_list(2000, 2096, base), "pack test/content/b.json", &r);
+        check(r.errors.empty() && r.applied == 2096, "a second pack of 2,096 while the world runs: accepted");
+    }
+    check(registered() == 4096 && BM.headers.size() == headers + 1, "registered with one more header (" + std::to_string(BM.headers.size()) + ")");
+    check(BM.used == 4096 && BM.header_count == kGameBuffs + 4096, "the room is used up exactly");
+    {
+        kc::ApplyResult r;
+        gd_pack_add(1, KILN_GD_BUFFS, clone_list(4096, 1, base), "pack test/content/c.json", &r);
+        check(r.errors.size() == 1 && r.errors[0].find("full (4096 clones)") != std::string::npos,
+              "the 4,097th is refused with its reason: " + (r.errors.empty() ? std::string("none") : r.errors[0]));
+    }
+    check(BM.headers.size() == headers + 1, "a refused clone builds no header");
+    uint32_t found = 0;
+    for (const Def& d : g_defs)
+        if (d.state == "registered" && game_lookup(BM.header, kc::fnv1a(d.guid, 16), kStride) == d.data) ++found;
+    check(found == 4096, "the game's lookup finds all 4,096 clones (" + std::to_string(found) + ")");
+    check(BM.header_bytes < (1u << 20), "two headers for 4,096 clones keep under 1 MiB (" + std::to_string(BM.header_bytes) + " bytes)");
+}
+
 int main() {
     try {
         test_room();
         test_sizes();
         test_slots_and_map();
+        test_batches();
     } catch (const std::exception& e) {
         std::printf("FAIL threw: %s\n", e.what());
         ++failures;

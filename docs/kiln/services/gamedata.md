@@ -238,6 +238,15 @@ that needs its own permanent numbers and its own name is a **clone**.
   for. A clone is refused, with its reason, when the room is full ("Kiln's buff collection is full (4096 clones)"),
   when its GUID's id is 0, a game buff's or another clone's (FNV-1a of two GUIDs can be equal: the second is refused
   and the message names the first), and when near memory has no room for a header. The room is fixed until a restart.
+- **Headers** (since 0.2.0-dev.29): the map the game reads is rebuilt and published as a new header when clones are
+  added, and an old header is never freed (a game thread may still be reading it). So clones are published in
+  batches: a world's load publishes one header for every clone defined before it, one data pack's `"add"` list one
+  header for the whole list (also when the pack is applied while the world runs, and for the content sync's
+  definitions on a client). kiln.log "buff batch: 2096 clone(s) in the server world, one new header (4370 records); Kiln
+  keeps 2 header(s), … bytes, and 804080 bytes of records". A clone defined from code while a world runs is
+  published at once, with a header of its own (about 100 KB at 4,096 clones): define many clones in a data pack or
+  before the world loads. `status` JSON `clones.buffCopy` counts `headers`, `headerBytes`, `recordBytes` and
+  `attaches`.
 - **Referencing them**:
   - an item's perk slot: code `Content.ItemData.Get(item).Set("perkReferences[2]", "Kiln_Sample_FrostbiteEdge")`
     (`perkIds[2]` follows: FNV-1a of the GUID); new items: kitbash `"perks": [null, null, "<perk clone GUID>"]`

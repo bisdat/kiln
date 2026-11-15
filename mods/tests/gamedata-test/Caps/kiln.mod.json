@@ -1,0 +1,9 @@
+{
+  "id": "gamedata-caps",
+  "name": "gamedata-test: Kiln's buff room (4,096 clones)",
+  "version": "0.1.0",
+  "apiVersion": "0.1",
+  "entryAssembly": "GamedataCaps.dll",
+  "side": "server",
+  "clients": "kiln"
+}
