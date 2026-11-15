@@ -245,9 +245,7 @@ internal sealed partial class EffectEmitter
     private void Hit(EffectBlock e, int target, int id)
     {
         var (damage, category, physical, primary) = DamagePart(e, id);
-        var pos = _b.V($"hitAt{id}", ImpactType.Float3);
-        _b.Call("getTransform", null, null, pos, target);
-        _b.Pop();
+        var pos = PositionOf(target, id);
         var one = _attackMods.TryGetValue(id, out var am) ? am : _b.VFloat("one", 1);  // a Run native's attackMod, or 1
         var zero = _b.VFloat("zero", 0);
         var yes = _b.VBool("yes", true);

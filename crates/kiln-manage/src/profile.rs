@@ -1188,6 +1188,7 @@ pub fn render(dirs: &DataDirs, profile: &Profile, install: &GameInstall, mode: P
     let view = crate::own_loaders::ProfileView::of_profile(profile).with_library(dirs, profile);
     let eml_runtime = view.eml_runtime.clone();
     let loaders = crate::own_loaders::find(&install.path, Some(&view));
+    crate::own_loaders::check_runtime_eml_loader(&loaders, &eml_runtime)?;
     let mut eml_runtime_blocked = std::collections::BTreeMap::new();
     for id in &eml_runtime {
         if let Some(m) = mods.eml.iter_mut().find(|m| &m.id == id) {
@@ -1762,6 +1763,9 @@ pub fn write_once(dirs: &DataDirs, profile_id: &str, install: &GameInstall) -> R
     // EML, EMF, Greeneye, Flame and Shroudtopia read a fixed folder too while their own loader is installed (Kiln
     // copies the active profile's mods there): their selection cannot change for a single start either.
     let loaders = crate::own_loaders::find(&install.path, Some(&crate::own_loaders::ProfileView::of_profile(&profile)));
+    // Name the runtime conflict before a fixed-folder refusal suggests activating this unsafe combination.
+    let view = crate::own_loaders::ProfileView::of_profile(&profile).with_library(dirs, &profile);
+    crate::own_loaders::check_runtime_eml_loader(&loaders, &view.eml_runtime)?;
     let fixed = crate::own_loaders::PLACED_FOR_LOADER.into_iter().filter(|k| crate::own_loaders::of_kind(&loaders, *k)
         .is_some_and(|l| l.delivery == crate::own_loaders::Delivery::Placed));
     // Greeneye and Flame mods run from Kiln's copies in <game>/greeneye/ and <game>/mods/ (engine_mods::run_folder): a

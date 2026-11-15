@@ -1135,8 +1135,69 @@ const GATED_ADDON_EXPORTS: [&str; 2] = ["shroudlink_shutdown", "DirectInput8Crea
 /// before Kiln hooks them; loading it late skips that wait.
 fn is_gated_addon(install: &GameInstall, e: &PlanEntry) -> bool {
     entry_host_path(install, &e.path)
-        .and_then(|h| crate::pe::exports(&h).ok())
-        .is_some_and(|x| GATED_ADDON_EXPORTS.iter().all(|n| x.iter().any(|e| e == n)))
+        .is_some_and(|h| gated_addon_at(&h))
+}
+
+/// Read-only explanation for a client profile; candidate versions are verified from their DLL exports.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShroudlinkNotice {
+    pub mods: Vec<String>,
+    pub addons: Vec<crate::library::LibraryRef>,
+}
+
+pub fn shroudlink_notice(dirs: &DataDirs, profile: &Profile, install: &GameInstall) -> Result<Option<ShroudlinkNotice>> {
+    if install.kind != crate::game::GameKind::Client { return Ok(None); }
+    let mods: Vec<String> = profile.mods.shroudlink.iter().filter(|m| m.enabled).map(|m| m.id.clone()).collect();
+    if mods.is_empty() { return Ok(None); }
+    let mut addons = Vec::new();
+    let mut dlls = Vec::new();
+    for e in crate::library::list(dirs, Some(ModKind::Native))? {
+        for v in e.versions {
+            let Ok(n) = crate::manifest::read_native(&v.folder) else { continue };
+            if n.phase != NativePhase::Dllmain { continue; }
+            let mut recognized = false;
+            for dll in &n.dlls {
+                let path = v.folder.join(dll);
+                recognized |= gated_addon_at(&path);
+                if profile.mods.native.iter().any(|m| m.enabled && m.id == e.id && m.version == v.version && m.hash == v.hash) {
+                    let path = if cfg!(windows) { path.to_string_lossy().into_owned() } else { crate::winpath::unix_to_z(&path)? };
+                    dlls.push((e.id.clone(), path));
+                }
+            }
+            if recognized { addons.push(crate::library::LibraryRef { kind: ModKind::Native, id: e.id.clone(), version: v.version, hash: v.hash }); }
+        }
+    }
+    if shroudlink_loaded(dirs, profile, install, &dlls)? { return Ok(None); }
+    Ok(Some(ShroudlinkNotice { mods, addons }))
+}
+
+fn shroudlink_loaded(dirs: &DataDirs, profile: &Profile, install: &GameInstall, dlls: &[(String, String)]) -> Result<bool> {
+    let p = plan(dirs, profile, install, dlls);
+    if let Some(e) = p.chain_error { return Err(e); }
+    Ok(p.entries.iter().any(|e| is_gated_addon(install, e) && match e.section {
+        Section::Profile => p.chain.profile.iter().any(|d| d.eq_ignore_ascii_case(&e.path)),
+        _ => !p.chain.rule_off.iter().any(|(_, d)| d.eq_ignore_ascii_case(&e.path)),
+    }))
+}
+
+/// Reports inspect the paths the game reads, including copied natives even if the Library is unavailable.
+pub(crate) fn shroudlink_report_missing(dirs: &DataDirs, install: &GameInstall, file: &crate::profile::ProfileFile) -> Result<bool> {
+    if install.kind != crate::game::GameKind::Client || !file.mods.shroudlink.iter().any(|m| m.enabled) { return Ok(false); }
+    let mut dlls = Vec::new();
+    for m in file.mods.native.iter().filter(|m| m.enabled) {
+        let Some(folder) = entry_host_path(install, &m.path) else { continue };
+        let Ok(n) = crate::manifest::read_native(&folder) else { continue };
+        if n.phase != NativePhase::Dllmain { continue; }
+        for d in n.dlls {
+            dlls.push((m.id.clone(), format!("{}\\{}", m.path.trim_end_matches(['/', '\\']), d)));
+        }
+    }
+    Ok(!shroudlink_loaded(dirs, &crate::report::profile_view(file), install, &dlls)?)
+}
+
+pub(crate) fn gated_addon_at(path: &Path) -> bool {
+    crate::pe::exports(path).ok().is_some_and(|x| GATED_ADDON_EXPORTS.iter().all(|n| x.iter().any(|e| e == n)))
 }
 
 /// `gated`: the entry is a DLL Kiln's start waits for ([`is_gated_addon`]); it is never offered "late".
@@ -1729,6 +1790,70 @@ mod tests {
             (Section::Profile, "dinput8.dll", true),
         ]);
         drop(t);
+    }
+
+    #[test]
+    fn shroudlink_notice_detection() {
+        let (_t, dirs, mut install) = scratch_install("sl-notice");
+        let mut p = crate::profile::create(&dirs, "Test", None).unwrap();
+        assert!(shroudlink_notice(&dirs, &p, &install).unwrap().is_none());
+        p.mods.shroudlink.push(crate::profile::ProfileMod { id: "assistants".into(), version: "1".into(), hash: "abc".into(), enabled: true });
+        assert!(shroudlink_notice(&dirs, &p, &install).unwrap().is_some());
+        p.mods.shroudlink[0].enabled = false;
+        assert!(shroudlink_notice(&dirs, &p, &install).unwrap().is_none());
+        p.mods.shroudlink[0].enabled = true;
+        install.kind = crate::game::GameKind::Server;
+        assert!(shroudlink_notice(&dirs, &p, &install).unwrap().is_none());
+        install.kind = crate::game::GameKind::Client;
+        std::fs::create_dir_all(install.path.join("kiln/chain")).unwrap();
+        let dll = install.path.join("kiln/chain/renamed.dll");
+        std::fs::write(&dll, crate::pe::build_test_dll(&["DirectInput8Create"], b"shroudlink")).unwrap();
+        std::fs::write(install.path.join("kiln/chain.ini"), "[chain]\nchain\\renamed.dll\n").unwrap();
+        assert!(shroudlink_notice(&dirs, &p, &install).unwrap().is_some());
+        std::fs::write(&dll, crate::pe::build_test_dll(&GATED_ADDON_EXPORTS, b"")).unwrap();
+        assert!(shroudlink_notice(&dirs, &p, &install).unwrap().is_none());
+        std::fs::remove_file(dll).unwrap();
+        assert!(shroudlink_notice(&dirs, &p, &install).unwrap().is_some());
+    }
+
+    #[test]
+    fn shroudlink_notice_native_versions_and_report() {
+        let (t, dirs, install) = scratch_install("sl-native-notice");
+        let mut p = crate::profile::create(&dirs, "test", None).unwrap();
+        p.mods.shroudlink.push(crate::profile::ProfileMod { id: "assistants".into(), version: "1".into(), hash: "abc".into(), enabled: true });
+        let incoming = t.0.join("incoming");
+        std::fs::create_dir_all(&incoming).unwrap();
+        let mut refs = Vec::new();
+        for marker in [b"shroudlink addon v1".as_slice(), b"shroudlink addon v2".as_slice()] {
+            std::fs::write(incoming.join("dinput8.dll"), crate::pe::build_test_dll(&GATED_ADDON_EXPORTS, marker)).unwrap();
+            let r = crate::library::import(&dirs, &[incoming.join("dinput8.dll")], &mut crate::task::NoProgress).unwrap();
+            refs.push(r.imported[0].clone());
+        }
+        assert_eq!(shroudlink_notice(&dirs, &p, &install).unwrap().unwrap().addons.len(), 2);
+        let r = &refs[0];
+        p.mods.native.push(crate::profile::ProfileMod { id: r.id.clone(), version: r.version.clone(), hash: r.hash.clone(), enabled: false });
+        assert!(shroudlink_notice(&dirs, &p, &install).unwrap().is_some());
+        p.mods.native[0].enabled = true;
+        assert!(shroudlink_notice(&dirs, &p, &install).unwrap().is_none());
+        let folder = crate::library::path_of(&dirs, r).unwrap();
+        let mut file: crate::profile::ProfileFile = serde_json::from_value(serde_json::json!({
+            "format":1, "id":"test", "name":"test", "generation":1,
+            "mods":{"native":[{"id":r.id,"path":crate::winpath::unix_to_z(&folder).unwrap()}], "shroudlink":[{"id":"assistants","path":"mods"}]}
+        })).unwrap();
+        assert!(!shroudlink_report_missing(&dirs, &install, &file).unwrap());
+        file.mods.native[0].enabled = false;
+        assert!(shroudlink_report_missing(&dirs, &install, &file).unwrap());
+        file.mods.native[0].enabled = true;
+        let n = crate::manifest::read_native(&folder).unwrap();
+        std::fs::remove_file(folder.join(&n.dlls[0])).unwrap();
+        assert!(shroudlink_notice(&dirs, &p, &install).unwrap().is_some());
+        assert!(shroudlink_report_missing(&dirs, &install, &file).unwrap());
+        p.mods.native[0].id = refs[1].id.clone();
+        p.mods.native[0].hash = refs[1].hash.clone();
+        p.mods.native[0].version = refs[1].version.clone();
+        assert!(shroudlink_notice(&dirs, &p, &install).unwrap().is_none());
+        p.mods.shroudlink.clear();
+        assert!(shroudlink_notice(&dirs, &p, &install).unwrap().is_none());
     }
 
     struct Scratch(PathBuf);

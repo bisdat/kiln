@@ -1,6 +1,8 @@
 {
   "format": 1,
   "perks": {
+    "perk-run-size": { "name": "Run Size", "onHit": [ { "run": "blocks-abilities-test.WrongSize", "damage": { "ice": 3 } } ] },
+    "perk-run-later": { "name": "Run Later", "onHit": [ { "run": "blocks-abilities-test.Later", "damage": { "ice": 3 } } ] },
     "perk-nothing": { "name": "Nothing" },
     "perk-bad-value": { "name": "Bad Value", "value": "lots", "modifies": { "strength": 1 } },
     "perk-typo": { "name": "Typo", "modifes": { "strength": 1 } }

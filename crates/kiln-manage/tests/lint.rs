@@ -673,3 +673,35 @@ fn a_value_over_its_max_length_is_not_matched_as_well() {
     let at: Vec<&str> = r.diagnostics.iter().filter(|d| d.pointer.as_deref() == Some("/mods/0/artifact/name")).map(|d| d.code.as_str()).collect();
     assert_eq!(at, ["KL108"], "{:?}", r.diagnostics);
 }
+
+#[test]
+fn run_bindings_reject_wrong_sizes_and_damage_with_only_knockback() {
+    let d = tmp("run-bindings-contract");
+    std::fs::create_dir_all(d.join("blocks")).unwrap();
+    std::fs::create_dir_all(d.join("impact")).unwrap();
+    std::fs::write(d.join("kiln.mod.json"), r#"{"id":"run-contract","version":"1.0.0","apiVersion":"0.2.0","side":"server"}"#).unwrap();
+    std::fs::write(d.join("impact/natives.json"), r#"{"format":1,"natives":[
+      {"name":"run-contract.WrongSize","argc":1,"sync":true,"args":[{"name":"target","type":"ecs.EntityId","size":8}]},
+      {"name":"run-contract.NeedsDamage","argc":1,"sync":true,"args":[{"name":"damage","type":"impact.DamageSetup","size":52}]}
+    ]}"#).unwrap();
+    std::fs::write(d.join("blocks/run.json"), r#"{"format":1,"effects":{
+      "wrong":{"run":"run-contract.WrongSize","heal":1},
+      "knock":{"run":"run-contract.NeedsDamage","knockback":"small"}
+    }}"#).unwrap();
+    let report = run(&[d], &opts());
+    let bindings: Vec<_> = report.diagnostics.iter().filter(|d| d.code == "KL340").collect();
+    assert_eq!(bindings.len(), 2, "{}", report.to_text());
+    assert!(bindings.iter().any(|d| d.message.contains("size")), "{}", report.to_text());
+    assert!(bindings.iter().any(|d| d.message.contains("damage") && d.message.contains("nothing")), "{}", report.to_text());
+}
+
+#[test]
+fn effect_run_names_obey_the_registry_byte_limit() {
+    let d = tmp("run-name-limit");
+    std::fs::create_dir_all(d.join("blocks")).unwrap();
+    std::fs::write(d.join("kiln.mod.json"), r#"{"id":"run-contract","version":"1.0.0","apiVersion":"0.2","side":"server","license":"MIT"}"#).unwrap();
+    let name = format!("run-contract.{}", "A".repeat(90));
+    std::fs::write(d.join("blocks/run.json"), serde_json::json!({"format":1,"effects":{"long":{"run":name,"heal":1}}}).to_string()).unwrap();
+    let report = run(&[d], &opts());
+    assert!(report.diagnostics.iter().any(|d| d.severity == Severity::Error && d.message.contains("90")), "{}", report.to_text());
+}

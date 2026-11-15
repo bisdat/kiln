@@ -53,6 +53,88 @@ public sealed unsafe class TypedHookTests : IDisposable
 
     static FakeRegistry.Link TheLink() => Assert.Single(FakeRegistry.Live, l => l.Kind == HookCookies.Typed);
 
+    [Fact]
+    public void Unload_waits_for_a_typed_handler_and_closes_admission_before_OnUnload()
+    {
+        var mod = Mod();
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var calls = 0;
+        var installed = TestMods.As(mod, () => TypedHooks.Detour(TimeScale, _ =>
+        {
+            Interlocked.Increment(ref calls);
+            entered.Set();
+            release.Wait(TimeSpan.FromSeconds(20));
+        }));
+        Assert.True(installed.Ok, installed.Reason);
+        var link = TheLink();
+        var worker = new Thread(() => FakeTyped.CallTyped(link, null));
+        worker.Start();
+        try
+        {
+            Assert.True(entered.Wait(TimeSpan.FromSeconds(5)));
+            // This is the host's barrier before OnUnload and dependent disposal. Retirement has not run yet.
+            Assert.Contains("1 call(s)", TestMods.BeginUnload(mod));
+            Assert.True(TestMods.IsAlive(mod));
+            Assert.Empty(FakeRegistry.Live);
+            Assert.DoesNotContain(HooksApi.Typed.Values, r => r.Mod == mod);
+            Assert.Contains("kiln.hooks", TestMods.UnloadWaitsFor(mod));
+            // A native dispatcher that already captured the removed link must pass through.
+            FakeTyped.CallTyped(link, null);
+            Assert.Equal(1, Volatile.Read(ref calls));
+            var e = Assert.Throws<InvalidOperationException>(() => TestMods.As(mod,
+                () => TypedHooks.Detour(TimeScale, _ => { })));
+            Assert.Contains("unloading", e.Message);
+            // The deferred install path also refuses instead of accepting a new pending request.
+            FakeTyped.InstallReady = 0;
+            Assert.Throws<InvalidOperationException>(() => TestMods.As(mod,
+                () => TypedHooks.Detour(TimeScale, _ => { })));
+            release.Set();
+            Assert.True(worker.Join(5000));
+            Assert.Null(TestMods.UnloadWaitsFor(mod));
+        }
+        finally
+        {
+            release.Set();
+            worker.Join(10000);
+            TestMods.Retire(mod);
+        }
+    }
+
+    [Fact]
+    public void A_pending_typed_install_cannot_open_admission_during_unload()
+    {
+        var mod = Mod();
+        FakeTyped.InstallReady = 0;
+        var pending = TestMods.As(mod, () => TypedHooks.Detour(TimeScale, _ => { }));
+        Assert.True(pending.Ok);
+        Assert.Equal(HookRegistrationState.Pending, pending.Handle!.State);
+        try
+        {
+            Assert.Null(TestMods.BeginUnload(mod));
+            FakeTyped.InstallReady = 1;
+            TestMods.DrainPending(mod);
+            Assert.Empty(FakeRegistry.Live);
+            Assert.Equal(HookRegistrationState.Refused, pending.Handle.State);
+            Assert.Contains("unloading", pending.Handle.Reason);
+        }
+        finally { TestMods.Retire(mod); }
+    }
+
+    [Fact]
+    public void A_first_typed_install_is_refused_after_unload_has_started()
+    {
+        var mod = Mod();
+        try
+        {
+            Assert.Null(TestMods.BeginUnload(mod));
+            Assert.Throws<InvalidOperationException>(() => TestMods.As(mod,
+                () => TypedHooks.Detour(TimeScale, _ => { })));
+            Assert.Empty(FakeRegistry.Live);
+        }
+        finally { TestMods.Retire(mod); }
+    }
+
     // the original of Six: a + b + c + d + e + f, in xmm0
     static void SixOriginal(HooksNative.CallFrame* f)
     {

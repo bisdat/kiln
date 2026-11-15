@@ -357,7 +357,7 @@ public static unsafe class TypedHooks
     {
         lock (HooksGate.Lifecycle)
         {
-            if (!mod.Alive) throw HooksGate.Retired(api, mod);
+            HooksGate.RequireOpen(api, mod);
             var pending = HookHandle.NewPending();
             HooksGate.Track(mod);
             mod.Retiring += pending.Remove;
@@ -375,11 +375,11 @@ public static unsafe class TypedHooks
             }
             mod.Scheduler.Post(InstallPending);
             // Retirement can take its cleanup list before Track attaches the first callback.
-            if (!mod.Alive)
+            if (!mod.Alive || mod.Unloading)
             {
                 pending.Remove();
                 HooksGate.Untrack(mod);
-                throw HooksGate.Retired(api, mod);
+                throw !mod.Alive ? HooksGate.Retired(api, mod) : HooksGate.Unloading(api, mod);
             }
             return new HookResult(true, null, pending);
         }
@@ -630,7 +630,7 @@ public static unsafe class TypedHooks
                 // Retirement drops the registration and then waits for the mod's in-flight count. Look again after
                 // counting this call: a registration dropped in between is not run, so no handler starts after its
                 // mod's retire stopped waiting.
-                if (!Hooks.Typed.TryGetValue((long)user, out var again) || !ReferenceEquals(again, reg) || !reg.Mod.Alive)
+                if (!Hooks.Typed.TryGetValue((long)user, out var again) || !ReferenceEquals(again, reg) || !reg.Mod.Alive || reg.Mod.Unloading)
                     return HooksNative.TypedContinue;
                 var outer = ModContext.CurrentMod;
                 ModContext.CurrentMod = reg.Mod;  // as DetourDispatch: gated calls inside the handler run as its mod

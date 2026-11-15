@@ -246,6 +246,51 @@ public sealed class ImpactNativesFakeTests
     }
 
     [Fact]
+    public void An_unknown_serial_pin_refuses_ECS_but_keeps_the_native_running()
+    {
+        var (kiln, mod) = Start();
+        using var owned = kiln;
+        var target = kiln.Entities.Create(new WorldPosition(1, 2, 3));
+        kiln.Entities.Set(target, default(Ecs.Health));
+        bool? read = null;
+        kiln.As(mod, () => Abilities.Natives.RegisterSync("Probe", 0, (ref NativeCall c) =>
+        {
+            read = ImpactNativeAccess.Context(ref c).TryRead<Ecs.Health>(target, out _);
+            return 7;
+        }));
+        kiln.Step(1);
+        kiln.Capabilities.Override("abilities.ecs_pin", false, "fixture: pin unknown");
+        Assert.Equal(7, kiln.ImpactNatives.Call(new FakeImpactCall("tk-natives.Probe")).Value);
+        Assert.Equal(false, read);
+        kiln.Step(25);
+        Assert.False(kiln.Run(() => Capabilities.Is("abilities.natives.ecs")));
+    }
+
+    [Fact]
+    public void Losing_the_serial_condition_closes_ECS_for_the_world_and_keeps_sync_calls()
+    {
+        var (kiln, mod) = Start();
+        using var owned = kiln;
+        var target = kiln.Entities.Create(new WorldPosition(1, 2, 3));
+        kiln.Entities.Set(target, default(Ecs.Health));
+        bool? read = null;
+        kiln.As(mod, () => Abilities.Natives.RegisterSync("SerialProbe", 0, (ref NativeCall c) =>
+        {
+            read = ImpactNativeAccess.Context(ref c).TryRead<Ecs.Health>(target, out _);
+            return 7;
+        }));
+        kiln.Step(1);
+        kiln.ImpactNatives.Call(new FakeImpactCall("tk-natives.SerialProbe"));
+        Assert.Equal(true, read);
+        kiln.ImpactNatives.Serial = false;
+        Assert.Equal(7, kiln.ImpactNatives.Call(new FakeImpactCall("tk-natives.SerialProbe")).Value);
+        Assert.Equal(false, read);
+        kiln.ImpactNatives.Serial = true;
+        kiln.ImpactNatives.Call(new FakeImpactCall("tk-natives.SerialProbe"));
+        Assert.Equal(false, read);
+    }
+
+    [Fact]
     public void FrostMark_bites_a_badly_hurt_enemy_through_its_generated_native()
     {
         using var kiln = new KilnHarness();

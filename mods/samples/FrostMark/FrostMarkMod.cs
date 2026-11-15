@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: MIT
-// FrostMark: a sword that runs a native on every hit. The native is a plain static method: the build turns it into a
-// same-step Impact native ("frostmark.OnHit"), and the sword's hit effect calls it first, before its own Ice damage, with the hit's
-// target and attackMod bound by parameter name.
+// FrostMark: a sword with an additional hit effect that runs a native first. The native is a plain static method: the build turns
+// it into a same-step Impact native ("frostmark.OnHit"), and the effect's program calls it before its own Ice damage, with the
+// target and the attackMod of that additional hit bound by parameter name. The weapon's ordinary strike is the game's, unchanged.
 using Kiln;
 
 namespace FrostMark;
 
 public static class Frost
 {
-    /// <summary>On a hit: an enemy below a quarter of its health takes 1.5 times the hit. Runs inside the hit's program, on
+    /// <summary>On the sword's additional effect hit: an enemy below a quarter of its health takes 1.5 times that hit (the
+    /// weapon's own strike is not this native's). Runs inside the effect's program, on
     /// the simulation's thread (no tick-thread API, no blocking); Health is read through impact_simulation's own accessor.</summary>
     [ImpactNative("OnHit")]
     public static bool OnHit(in NativeContext ctx, EntityId target, ref float attackMod)
@@ -24,14 +25,15 @@ public sealed class FrostMarkMod : Mod
 
     public override void OnLoad()
     {
-        // the sword's own hits (a weapon's OnHit needs no enhancement unlocked; a PerkBlock's OnHit takes the same effect).
+        // an additional effect on each of the sword's hits: Run, then Ice 10 (a weapon's OnHit needs no enhancement unlocked; a
+        // PerkBlock's OnHit takes the same effect). The weapon's own strike is dealt by the game as before.
         // Where the game's resources are not there (a unit test's harness), the native and the attachment still are.
         try
         {
             Blocks.Define("frostmark-sword", new WeaponBlock
             {
                 Name = "Frost Mark Sword",
-                Description = "Hits on a badly hurt enemy bite half again as deep.",
+                Description = "Each hit adds a bite of frost, half again as deep on a badly hurt enemy.",
                 Class = WeaponClass.Sword,
                 Stats = new WeaponStats { Level = 5, Power = 20, Rarity = Rarity.Uncommon },
                 OnHit = [new EffectBlock { Run = Natives.OnHit, Damage = Damage.Ice(10), Flinch = Flinch.None }],
