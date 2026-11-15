@@ -487,6 +487,11 @@ launcher's copies in `mods/` are skipped as drop-ins. The installer (agent `dete
 in `kiln/chain/`. It then loads, and kiln-eml stands aside, as verified on a lab server (section 5).
 
 ### Logs and state
+
+`could not prepare the game data: <step>: <cause>` names the refused preparation step and the file or underlying
+error in the log and state reasons. A backup seal mismatch means the vanilla pair cannot be trusted: verify the game
+files in Steam, then start through Kiln again. The same recovery applies when another tool changed the game data.
+A ShroudForge writer refusal carries its own lock or handoff explanation; let that writer finish before retrying.
 - `kiln.log`, owner `early:kiln-eml.dll`: EML's info, warning and error lines as `[eml] ...`, one line per failed or
   skipped mod, and a summary such as
   `kiln-eml: 2 EML mod(s) loaded, 3 resource(s) patched in enshrouded_server (1263 ms; hashed 12.0 KiB, reused 23 file(s))`.
