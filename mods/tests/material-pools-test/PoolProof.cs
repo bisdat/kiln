@@ -34,6 +34,9 @@ internal static class PoolProof
         if(keys.Length!=1)throw new InvalidDataException($"expected one {type}, got {keys.Length}");
         return Assets.ReadResource(keys[0])??throw new InvalidDataException("served resource unavailable: "+type);
     }
+    internal static string Ids(IEnumerable<uint> ids)=>"["+string.Join(",",ids)+"]";
+    internal static string Budget(CapacityQueryResult b)=>$"ok {b.Ok} {b.Budget.Readiness}: capacity {b.Budget.Capacity}, game {b.Budget.GameUsed}, kiln {b.Budget.KilnUsed}, reserved {b.Budget.Reserved}, available {b.Budget.Available?.ToString()??"-"}";
+    // Every row says what it read; a FAIL row also says what it expected. Detail goes to the log, never into the verdict.
     internal static IReadOnlyList<(string Name,bool Ok,string Detail)> Inspect()
     {
         var checks=new List<(string,bool,string)>();
@@ -41,37 +44,61 @@ internal static class PoolProof
         Check("capabilities",WorldTables.Available && Capabilities.Is("worldtables.material_pools") && Capabilities.Is("worldtables.budgets"),WorldTables.State);
         var rows=ReadPools(Resource("keen::VoxelBlueprintMaterialPoolRegistryResource"));
         var baseline=JsonSerializer.Deserialize<Baseline[]>(BaselineJson,new JsonSerializerOptions{PropertyNameCaseInsensitive=true})!;
-        Check("vanilla-rows-unchanged",baseline.All(b=>rows.Count(r=>r.Name==b.Name)==1 && rows.Single(r=>r.Name==b.Name) is var r && r.Slot==b.EquipmentSlot && r.Id==b.PoolId && r.Items.SequenceEqual(b.Items)));
+        var changed=new List<string>();
+        foreach(var b in baseline) {
+            var named=rows.Where(r=>r.Name==b.Name).ToArray();
+            if(named.Length!=1)changed.Add($"{b.Name}: {named.Length} rows");
+            else if(named[0] is var r && (r.Slot!=b.EquipmentSlot || r.Id!=b.PoolId || !r.Items.SequenceEqual(b.Items)))
+                changed.Add($"{b.Name}: expected pool {b.PoolId} slot {b.EquipmentSlot} members {Ids(b.Items)}; read pool {r.Id} slot {r.Slot} members {Ids(r.Items)}");
+        }
+        Check("vanilla-rows-unchanged",changed.Count==0,changed.Count==0?$"{baseline.Length} rows, {rows.Length} served":string.Join(" | ",changed));
         var wall=baseline.Single(b=>b.Name=="BuildingDefaultMaterials");
         var roof=baseline.Single(b=>b.Name=="BuildingRoofMaterials");
+        var missing=new List<string>();
+        uint Game(string debugName){var id=Content.Items.Get(debugName)?.Id??0;if(id==0)missing.Add(debugName+" not in Content.Items");return id;}
         var expected=new Dictionary<string,uint[]> {
-            ["four"]=[Item("ice"),Item("frost"),Item("slate"),Content.Items.Get("Block_T1_Wood_Rough_CRAFTING")?.Id??0],
-            ["shared"]=[Item("ice"),Content.Items.Get("Block_T1_Stone_Rough_CRAFTING")?.Id??0],
+            ["four"]=[Item("ice"),Item("frost"),Item("slate"),Game("Block_T1_Wood_Rough_CRAFTING")],
+            ["shared"]=[Item("ice"),Game("Block_T1_Stone_Rough_CRAFTING")],
             ["full"]=[..wall.Items,Item("ice"),Item("frost"),Item("slate")],
-            ["roof"]=[Content.Items.Get("Block_Roof_T1_PlantFibre")?.Id??0]
+            ["roof"]=[Game("Block_Roof_T1_PlantFibre")]
         };
         using var status=JsonDocument.Parse(WorldTables.StatusJson());
         var bindings=status.RootElement.GetProperty("shapeBindings").EnumerateArray().ToArray();
         var shapes=Resource("keen::VoxelBlueprintItemRegistryResource");var shapesAt=At(shapes,0,28,out var shapesCount);
         foreach(var key in Keys) {
-            var pool=rows.SingleOrDefault(r=>r.Name==Fixture+":"+key);var guid=BlockIds.Derive(Fixture,"materialpool",key);
-            Check("membership-"+key,pool is not null && pool.Id==BlockIds.Fnv(guid) && pool.Slot==(key=="roof"?roof.EquipmentSlot:wall.EquipmentSlot) && expected[key].All(i=>i!=0) && pool.Items.SequenceEqual(expected[key]));
+            var name=Fixture+":"+key;var pool=rows.SingleOrDefault(r=>r.Name==name);var guid=BlockIds.Derive(Fixture,"materialpool",key);
+            var slot=key=="roof"?roof.EquipmentSlot:wall.EquipmentSlot;var want=expected[key];
+            var member=pool is not null && pool.Id==BlockIds.Fnv(guid) && pool.Slot==slot && want.All(i=>i!=0) && pool.Items.SequenceEqual(want);
+            var read=pool is null?$"no served row named {name} ({rows.Length} rows: {string.Join(", ",rows.Select(r=>r.Name))})":$"read pool {pool.Id} slot {pool.Slot} members {Ids(pool.Items)}";
+            Check("membership-"+key,member,member?$"pool {pool!.Id} slot {pool.Slot}, {pool.Items.Length} member(s) in order":
+                $"expected pool {BlockIds.Fnv(guid)} slot {slot} members {Ids(want)}; {read}{(missing.Count>0?"; "+string.Join(", ",missing.Distinct()):"")}");
             var item=Content.Items.Get(Fixture+"."+key+"_shape");
-            Check("binding-"+key,item is not null && item.GetRef("equipment.voxelBlueprintMaterialPool")==guid && bindings.Any(b=>b.GetProperty("item").GetString()==item.Guid.ToString() && b.GetProperty("pool").GetString()==guid.ToString()) && Enumerable.Range(0,shapesCount).Any(i=>BitConverter.ToUInt32(shapes,shapesAt+28*i)==item.Id));
+            var reference=item?.GetRef("equipment.voxelBlueprintMaterialPool");
+            var bound=item is not null && bindings.Any(b=>b.GetProperty("item").GetString()==item.Guid.ToString() && b.GetProperty("pool").GetString()==guid.ToString());
+            var shapeRow=item is not null && Enumerable.Range(0,shapesCount).Any(i=>BitConverter.ToUInt32(shapes,shapesAt+28*i)==item.Id);
+            Check("binding-"+key,item is not null && reference==guid && bound && shapeRow,
+                item is null?$"no item {Fixture}.{key}_shape":$"item {item.Guid} ({item.Id}) pool reference {reference?.ToString()??"none"} (expected {guid}), status binding {bound}, shape row {shapeRow}");
             var model=Assets.ReadResource(new AssetKey(BlockIds.Derive(Fixture,"item",key+"_shape"),"keen::VoxelModelResource"));
-            Check("preview-data-"+key,model is {Length:>=28} && model.Skip(24).Count(v=>v==(key=="roof"?8:0x12))==3);
-            var budget=WorldTables.GetPoolBudget(Fixture+":"+key);
-            Check("budget-"+key,budget.Ok && budget.Budget.Capacity==64 && budget.Budget.GameUsed==0 && budget.Budget.KilnUsed==expected[key].Length && budget.Budget.Reserved==0);
+            var cells=model is {Length:>=28}?model.Skip(24).Count(v=>v==(key=="roof"?8:0x12)):-1;
+            Check("preview-data-"+key,cells==3,model is null?"no preview model":$"{model.Length} bytes, {cells} filled cell(s) (expected 3)");
+            var budget=WorldTables.GetPoolBudget(name);
+            Check("budget-"+key,budget.Ok && budget.Budget.Capacity==64 && budget.Budget.GameUsed==0 && budget.Budget.KilnUsed==want.Length && budget.Budget.Reserved==0,
+                Budget(budget)+$" (expected capacity 64, game 0, kiln {want.Length}, reserved 0)");
         }
         var shared=rows.SingleOrDefault(r=>r.Name==Fixture+":shared");var four=rows.SingleOrDefault(r=>r.Name==Fixture+":four");
         var materials=WorldTables.Materials.Where(m=>m.Mod==Fixture && m.Live).ToArray();
-        Check("shared-material-one-id",materials.Length==3 && materials.Select(m=>m.CellId).Distinct().Count()==3 && shared is not null && four is not null && shared.Items[0]==four.Items[0] && materials.Count(m=>m.Guid==BlockIds.Derive(Fixture,"material","ice"))==1);
-        Check("no-65-served",rows.All(r=>r.Items.Length<=64) && !rows.Any(r=>r.Name.EndsWith(":too-many",StringComparison.Ordinal)));
+        Check("shared-material-one-id",materials.Length==3 && materials.Select(m=>m.CellId).Distinct().Count()==3 && shared is not null && four is not null && shared.Items[0]==four.Items[0] && materials.Count(m=>m.Guid==BlockIds.Derive(Fixture,"material","ice"))==1,
+            $"live fixture materials {string.Join(", ",materials.Select(m=>m.Block+"="+m.CellId))}; shared first {shared?.Items.FirstOrDefault().ToString()??"no row"}, four first {four?.Items.FirstOrDefault().ToString()??"no row"}");
+        Check("no-65-served",rows.All(r=>r.Items.Length<=64) && !rows.Any(r=>r.Name.EndsWith(":too-many",StringComparison.Ordinal)),string.Join(", ",rows.Select(r=>r.Name+" "+r.Items.Length)));
         var vanilla=Content.Items.Get(BlockIds.Fnv(Guid.Parse("74cf7092-c244-49a4-87bf-7e95641037ba")));
-        Check("vanilla-shape-binding",vanilla is not null && BlockIds.Fnv(vanilla.GetRef("equipment.voxelBlueprintMaterialPool"))==wall.PoolId);
+        var vanillaRef=vanilla?.GetRef("equipment.voxelBlueprintMaterialPool");
+        Check("vanilla-shape-binding",vanilla is not null && vanillaRef is {} v && BlockIds.Fnv(v)==wall.PoolId,
+            vanilla is null?"no vanilla shape item 74cf7092-c244-49a4-87bf-7e95641037ba":$"{vanilla.Name}: pool reference {vanillaRef?.ToString()??"none"} (id {(vanillaRef is {} g?BlockIds.Fnv(g):0)}, expected {wall.PoolId})");
         var building=WorldTables.GetMaterialBudget(WorldMaterialCategory.Building);var terrain=WorldTables.GetMaterialBudget(WorldMaterialCategory.Terrain);
-        Check("material-budgets",building.Ok && building.Budget.Capacity==128 && building.Budget.GameUsed==79 && building.Budget.KilnUsed==3 && terrain.Ok && terrain.Budget.Capacity==127 && terrain.Budget.GameUsed==116);
-        Check("unknown-pool",WorldTables.GetPoolBudget("mp-fixture:absent").Budget.Readiness==CapacityReadiness.NotFound);
+        Check("material-budgets",building.Ok && building.Budget.Capacity==128 && building.Budget.GameUsed==79 && building.Budget.KilnUsed==3 && terrain.Ok && terrain.Budget.Capacity==127 && terrain.Budget.GameUsed==116,
+            $"building {Budget(building)} (expected 128/79/3); terrain {Budget(terrain)} (expected 127/116)");
+        var unknown=WorldTables.GetPoolBudget("mp-fixture:absent");
+        Check("unknown-pool",unknown.Budget.Readiness==CapacityReadiness.NotFound,Budget(unknown));
         return checks;
     }
     private sealed record Baseline(string Name,uint EquipmentSlot,uint PoolId,uint[] Items);

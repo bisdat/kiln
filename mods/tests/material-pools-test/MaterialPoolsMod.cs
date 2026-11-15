@@ -65,10 +65,14 @@ public sealed class MaterialPoolsMod:Mod
         Check("served-registration",registered.Ok && registered.State==DefinitionRegistrationState.Registered && registered.SlotsConsumed==2,registered.ToString());
         var repeat=Blocks.Define("served",CodePool(),new DefinitionRegistrationOptions());
         Check("served-idempotent",repeat==registered || repeat.RegistrationId==registered.RegistrationId && repeat.SnapshotRevision==registered.SnapshotRevision);
-        bool Throws(Action action){try{action();return false;}catch(ArgumentException){return true;}}
-        Check("65-refused-before-serving",Throws(()=>Blocks.Define("too-many",CodePool() with {Materials=Enumerable.Repeat(new BuildingMaterialPoolEntry(GameMaterial:"WoodRough"),65).ToArray()},new DefinitionRegistrationOptions(DefinitionTiming.AllowNextStart))) && WorldTables.GetPoolBudget("material-pools-test:too-many").Budget.Readiness==CapacityReadiness.NotFound);
-        Check("duplicate-refused",Throws(()=>Blocks.Define("duplicate",CodePool() with {Materials=[new(GameMaterial:"WoodRough"),new(GameMaterial:"WoodRough")]},new DefinitionRegistrationOptions())));
-        Check("roof-refused",Throws(()=>Blocks.Define("wrong-roof",CodePool() with {Roof=true},new DefinitionRegistrationOptions())));
+        var said="";
+        bool Throws(Action action){try{action();said="no exception";return false;}catch(ArgumentException e){said=e.Message;return true;}}
+        Check("65-refused-before-serving",Throws(()=>Blocks.Define("too-many",CodePool() with {Materials=Enumerable.Repeat(new BuildingMaterialPoolEntry(GameMaterial:"WoodRough"),65).ToArray()},new DefinitionRegistrationOptions(DefinitionTiming.AllowNextStart))) && WorldTables.GetPoolBudget("material-pools-test:too-many").Budget.Readiness==CapacityReadiness.NotFound,said);
+        // the author reads which entries: native's reason, not "malformed"
+        Check("duplicate-refused",Throws(()=>Blocks.Define("duplicate",CodePool() with {Materials=[new(GameMaterial:"WoodRough"),new(GameMaterial:"WoodRough")]},new DefinitionRegistrationOptions()))
+            && said.Contains("materials[0] (gameMaterial WoodRough) and materials[1] (gameMaterial WoodRough)",StringComparison.Ordinal),said);
+        Check("roof-refused",Throws(()=>Blocks.Define("wrong-roof",CodePool() with {Roof=true},new DefinitionRegistrationOptions()))
+            && said.Contains("materials[0] (gameMaterial WoodRough) is not a roof material",StringComparison.Ordinal),said);
         var absent=Blocks.Define("missing",CodePool() with {Materials=[new(GameMaterial:"ThisMaterialDoesNotExist")]},new DefinitionRegistrationOptions(DefinitionTiming.AllowNextStart));
         Check("unknown-base-refused",!absent.Ok && absent.Code==DefinitionRefusalCode.UnknownBase && absent.SlotsConsumed==0);
     }
@@ -103,7 +107,11 @@ public sealed class MaterialPoolsMod:Mod
     private sealed record CellWitness(Guid Guid,int[] Box);
     private async Task Cells(bool write,bool absent,string mod=PoolProof.Fixture)
     {
-        for(var i=0;i<7200 && Build.Grid is null;++i)await Context.Scheduler.NextTick();
+        // As build-test: a dedicated server's voxel world takes edits once the game reports the world running (its save
+        // loaded), not when the grid first answers; the async reads and writes then load the tiles they touch.
+        for(var i=0;i<24*300 && !(Spawn.Available && Spawn.WorldRunning && Build.Available && Build.Grid is not null);++i)await Context.Scheduler.NextTick();
+        if(!Spawn.WorldRunning || Build.Grid is null)throw new InvalidOperationException($"the world did not start running (world running {Spawn.WorldRunning}, grid {Build.Grid is not null}); nothing written");
+        for(var i=0;i<24*5;++i)await Context.Scheduler.NextTick();  // a few seconds more: the save's entities stream in
         var path=Path.Combine(Context.DataDirectory,"cells.json");CellWitness[] witnesses;
         if(write) {
             var positionFile=Path.Combine(Context.DataDirectory,"position.json");

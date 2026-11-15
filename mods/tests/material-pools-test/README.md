@@ -4,30 +4,21 @@ This fixture has been built and host-tested, **never run on a server or in a gam
 
 Use two **new, disposable** labs copied from the same test save. The mod selects clear cells inside the supplied base box (default corners `(3006, 902.6, 1530)` and `(3042, 906.6, 1570)`). It reads every proposed box and completes selection before its first write; occupied candidates are skipped. Each chosen box is logged as `mp: selected cells X Y Z SizeX SizeY SizeZ`. No space produces `mp: FAIL completed-without-exception: base has no room ...; nothing written` and no write. The main run writes three small kept cubes there and requests a real game save. The boundary run writes one cube and retains 49 definitions in its own world ledger. Never use a player's save. The runner refuses pre-existing worldtables ledgers and unrelated mods; it stops each lab before copying files. It never clears a world ledger to manufacture free capacity.
 
-The coordinator first builds/deploys the integrated Kiln stack, including the changed `native/services/content/refs.cpp`. Both `kiln-worldtables` and `kiln-content` were Windows-cross-built after the integration merge; neither was run here. The content reference admission and shared pending boundary are also covered by host sanitizer tests. An older kiln-content DLL will refuse the pool GUID and the binding checks must fail.
-
-From the integrated tree, with `KILN_OUT` pointing at the integrated build and `KILN_LABS` at the lab root:
+Deploy the whole stack of one tree into both labs: `tools/deploy-server.sh` builds what changed (kiln-worldtables and kiln-content among them; an older kiln-content refuses the pool GUID and the binding rows fail). Build the lab driver into the same `KILN_OUT` (the runner copies `$KILN_OUT/dotnet/bin/MaterialPoolsTest/debug/MaterialPoolsTest.dll` into the labs itself), then run the runner from the repository root:
 
 ```sh
-bash tools/lab/lab.sh new dev29-17d-pools 28350 --save /path/to/disposable-test-save
-bash tools/lab/lab.sh new dev29-17d-pools-boundary 28354 --save /path/to/disposable-test-save
-bash tools/deploy-server.sh "$KILN_LABS/dev29-17d-pools" --no-build
-bash tools/deploy-server.sh "$KILN_LABS/dev29-17d-pools-boundary" --no-build
-```
-
-Build `MaterialPoolsTest.csproj` with the same targeted/offline dotnet flags used in REPORT.md. If using this implementer's outputs, set `KILN_OUT=/home/jame/Work/kiln-codex/d29-17d/build`; its driver lives at `$KILN_OUT/dotnet/bin/MaterialPoolsTest/debug/MaterialPoolsTest.dll`. Before the run, copy this build's worldtables DLL and managed assemblies over the stopped integrated labs:
-
-```sh
-for name in dev29-17d-pools dev29-17d-pools-boundary; do
-  cp "$KILN_OUT/cmake/bin/services/kiln-content.dll" "$KILN_LABS/$name/kiln/services/"
-  cp "$KILN_OUT/cmake/bin/services/kiln-worldtables.dll" "$KILN_LABS/$name/kiln/services/"
-  cp "$KILN_OUT/dotnet/bin/Kiln.Blocks/debug/Kiln.Blocks.dll" "$KILN_LABS/$name/kiln/host/"
-  cp "$KILN_OUT/dotnet/bin/Kiln.Testing/debug/Kiln.Testing.dll" "$KILN_LABS/$name/kiln/host/"
-done
-/home/jame/Work/kiln-codex/slot python3 -B mods/tests/material-pools-test/run.py \
-  --lab dev29-17d-pools --boundary-lab dev29-17d-pools-boundary \
+bash tools/lab/lab.sh new dev29-17d-pools 28350 --save <disposable test save>
+bash tools/lab/lab.sh new dev29-17d-pools-boundary 28354 --save <disposable test save>
+tools/deploy-server.sh "$KILN_LABS/dev29-17d-pools" --policy any
+tools/deploy-server.sh "$KILN_LABS/dev29-17d-pools-boundary" --policy any
+dotnet build mods/tests/material-pools-test/MaterialPoolsTest.csproj --artifacts-path "$KILN_OUT/dotnet"
+python3 -B mods/tests/material-pools-test/run.py --lab dev29-17d-pools --boundary-lab dev29-17d-pools-boundary \
   --port 28351 --boundary-port 28355 --out "$KILN_OUT/material-pools-lab"
 ```
+
+In a build wave, put the wave's slot tool in front of the build commands and set `MP_LABSTART` to the wave's lab starter: the runner then starts each lab through it. The driver waits, as `mods/tests/build-test` does, until the game reports the world running before it reads or writes cells: a dedicated server's voxel world refuses edits while its save still loads, even though the tiles already read.
+
+Every `mp: PASS`/`mp: FAIL` row names what it read, and a FAIL row also what it expected: for a pool, the served row's pool id, equipment slot and member item ids in order against the expected ones; for a refusal, the reason the author was given.
 
 Use `--base-box X0 Y0 Z0 X1 Y1 Z1` for another base and vertical search range. `--position X Y Z` remains an optional override (read and checked before writes, with subsequent witnesses 3 m east); omit it for automatic selection. Selection is bounded to 4,096 reads. The runner uses `tools/lab/lab.sh` and the existing `tools/nettest` loopback protocol. Each start has a 480-second deadline. A timeout, missing completion, failed assertion, missing named PASS, wrong snapshot hash, or a mismatching client receiving WELCOME/DATA/FRAG fails the run. The loopback case does not prove a real client's renderer, replication, or menu.
 
