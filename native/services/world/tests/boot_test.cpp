@@ -27,7 +27,16 @@ int main() {
     check(bad(R"({"format":1,"programs":{"a":{"read":["Health"]}}})"));
     check(bad(R"({"format":1,"programs":{"a":{"flags":[]}}})"));
     check(bad(R"({"format":1,"programs":{"a":{"flags":["hostOnly"],"read":["Health"],"write":["Health"]}}})"));
-    check(bad(R"({"format":1,"programs":{"a":{},"b":{},"c":{},"d":{},"e":{},"f":{},"g":{},"h":{},"i":{}}})"));
+    // 32 declarations per file (0.2.0-dev.29; 8 before), all inside the 64 KiB bound; the 33rd refuses the whole file
+    auto many = [](int n) {
+        std::string t = R"({"format":1,"programs":{)";
+        for (int i = 0; i < n; ++i) t += (i ? "," : "") + std::string("\"p") + std::to_string(i) + "\":{}";
+        return t + "}}";
+    };
+    check(parse_boot_programs(many(9)).size() == 9);
+    check(parse_boot_programs(many(32)).size() == 32);
+    check(bad(many(33)));
+    check(kBootProgramsPerFile == 32);
     check(bad(R"({"format":1,"programs":{"a":{},}})"));
     check(bad(R"({"format":1,"programs":{"a":{"singletonsRead":["bad-name"]}}})"));
     check(parse_boot_programs(R"({"format":1,"programs":{"a":{"singletonsRead":["g38_items::ItemRegistry"]}}})")[0].lists[6].size()==1);

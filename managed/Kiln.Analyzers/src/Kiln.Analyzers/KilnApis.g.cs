@@ -330,7 +330,9 @@ internal static partial class KilnApis
         "M:Kiln.GameDataItemExtensions.Config(Kiln.ContentEntry,System.String)", // GameDataItemExtensions.Config(ContentEntry, string): via GameDataItemExtensions.Data(ContentEntry)
         "M:Kiln.GameDataItemExtensions.Data(Kiln.ContentEntry)", // GameDataItemExtensions.Data(ContentEntry): via GameDataRegistry.Get(uint)
         "M:Kiln.GameDataRegistry.Define(Kiln.GameDataClone)", // GameDataRegistry.Define(GameDataClone): via GameDataRegistry.Define(JsonObject)
+        "M:Kiln.GameDataRegistry.Define(Kiln.GameDataClone,Kiln.DefinitionRegistrationOptions)", // GameDataRegistry.Define(GameDataClone, DefinitionRegistrationOptions): via GameDataRegistry.Define(JsonObject, DefinitionRegistrationOptions)
         "M:Kiln.GameDataRegistry.Define(System.Text.Json.Nodes.JsonObject)", // GameDataRegistry.Define(JsonObject): via GameDataRegistry.Define(JsonObject, ulong)
+        "M:Kiln.GameDataRegistry.Define(System.Text.Json.Nodes.JsonObject,Kiln.DefinitionRegistrationOptions)", // GameDataRegistry.Define(JsonObject, DefinitionRegistrationOptions): Services.RequireTickThread
         "M:Kiln.GameDataRegistry.Dump(System.String,System.String)", // GameDataRegistry.Dump(string?, string?): via Content.RequireGD(string)
         "M:Kiln.GameDataRegistry.Get(System.Guid)", // GameDataRegistry.Get(Guid): via GameDataRegistry.Get(string)
         "M:Kiln.GameDataRegistry.Get(System.String)", // GameDataRegistry.Get(string): via Content.RequireGD(string)

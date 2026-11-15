@@ -11,6 +11,8 @@
 #include "nlohmann/json.hpp"
 namespace kw {
 constexpr size_t kBootProgramBytes = 65536;
+// Declarations per mod file (0.2.0-dev.29; 8 before). kiln.world's quota for all programs together is in programs.cpp.
+constexpr size_t kBootProgramsPerFile = 32;
 constexpr std::array<const char*, 16> kBootLists = {"tpl", "tplOptional", "read", "readOptional", "write", "writeOptional",
     "singletonsRead", "singletonsWrite", "otherTpl", "otherRead", "otherWrite", "with", "without", "anyOf", "eventsIn", "eventsOut"};
 struct BootProgram {
@@ -41,8 +43,9 @@ inline std::vector<BootProgram> parse_boot_programs(std::string_view text) {
     };
     auto json = nlohmann::json::parse(text, callback);
     if (!json.is_object() || json.size() != 2 || !json.contains("format") || json["format"] != 1 ||
-        !json.contains("programs") || !json["programs"].is_object() || json["programs"].size() > 8 || json["programs"].empty())
-        throw std::runtime_error("expected format 1 and 1..8 programs");
+        !json.contains("programs") || !json["programs"].is_object() || json["programs"].size() > kBootProgramsPerFile ||
+        json["programs"].empty())
+        throw std::runtime_error("expected format 1 and 1..32 programs");
     std::vector<BootProgram> out;
     for (auto& [key, value] : json["programs"].items()) {
         if (!boot_name(key) || key.size() > 63 || !value.is_object()) throw std::runtime_error("bad program key or descriptor");

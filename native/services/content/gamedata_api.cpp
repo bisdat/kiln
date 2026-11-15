@@ -11,6 +11,7 @@
 #include <fstream>
 
 #include "gamedata.h"
+#include "services/kiln_caps.h"
 
 namespace kc {
 namespace gd {
@@ -76,6 +77,7 @@ KilnResult leaf_at(uint32_t section, uint32_t id, const std::string& path, Resol
 }  // namespace
 
 uint64_t generation() { return g_gen.load(); }
+bool gd_ready() { return g_ready.load(); }
 
 std::string status_json() {
     gjson j;
@@ -375,11 +377,46 @@ KilnResult KILN_CALL t_unregister_section(KilnStr name) { return unregister_exte
 KilnResult KILN_CALL t_define(KilnOwner owner, uint32_t section, KilnStr json, char* report, size_t cap, size_t* len);
 KilnResult KILN_CALL t_definitions(char* buf, size_t cap, size_t* len);
 
+// ---- buff clones that answer (since 0.2.0-dev.29) ----
+constexpr size_t kAnswerReport = 4096;  // the most a define / receipt report takes (gamedata_clones.cpp report_json)
+
+KilnResult KILN_CALL t_buff_budget(KilnCapacityInfo* out) {
+    if (!out || out->size < sizeof(KilnCapacityInfo)) return KILN_ERR_INVALID_ARGUMENT;
+    buff_budget(out);
+    return KILN_OK;
+}
+
+KilnResult answer(KilnResult rc, const std::string& rep, char* report, size_t cap, size_t* len) {
+    copy_out(rep, report, cap, len);
+    return rc;
+}
+
+KilnResult KILN_CALL t_define_buff_result(KilnOwner owner, KilnStr json, uint32_t timing, KilnDefinitionReply* out, char* report, size_t cap,
+                                          size_t* len) {
+    if (len) *len = kAnswerReport;
+    if (!report || cap < kAnswerReport) return KILN_ERR_BUFFER_TOO_SMALL;  // before anything is read or changed
+    std::string rep;
+    const KilnResult rc = define_buff_result(owner, str(json), timing, out, &rep);
+    return answer(rc, rep, report, cap, len);
+}
+
+KilnResult KILN_CALL t_buff_registration(KilnOwner, const uint8_t id[16], KilnDefinitionReply* out, char* report, size_t cap, size_t* len) {
+    if (len) *len = kAnswerReport;
+    if (!report || cap < kAnswerReport) return KILN_ERR_BUFFER_TOO_SMALL;
+    std::string rep;
+    const KilnResult rc = buff_receipt(id, out, &rep);
+    return answer(rc, rep, report, cap, len);
+}
+
 const KilnGamedataApi kTable = {
     {sizeof(KilnGamedataApi), KILN_GAMEDATA_VERSION},
     &t_status, &t_count, &t_entry_at, &t_find, &t_get, &t_get_json, &t_set, &t_set_json, &t_reset, &t_fields, &t_dump,
     &t_configs, &t_register_section, &t_unregister_section, &t_define, &t_definitions,
+    &t_buff_budget, &t_define_buff_result, &t_buff_registration,
 };
+static_assert(sizeof(KilnGamedataApi) == 160 && offsetof(KilnGamedataApi, buff_budget) == 136 &&
+                  offsetof(KilnGamedataApi, define_buff_result) == 144 && offsetof(KilnGamedataApi, buff_registration) == 152,
+              "kiln.gamedata's table grows at its end only");
 
 KilnResult KILN_CALL t_define(KilnOwner owner, uint32_t section, KilnStr json, char* report, size_t cap, size_t* len) {
     if (len) *len = 0;
@@ -405,9 +442,19 @@ KilnResult KILN_CALL t_definitions(char* buf, size_t cap, size_t* len) {
 void gd_boot() {
     changes_boot();
     clones_boot();
-    if (g_api->register_service(g_owner, KilnStr{KILN_GAMEDATA_SERVICE, std::strlen(KILN_GAMEDATA_SERVICE)}, &kTable) != KILN_OK)
+    if (g_api->register_service(g_owner, KilnStr{KILN_GAMEDATA_SERVICE, std::strlen(KILN_GAMEDATA_SERVICE)}, &kTable) != KILN_OK) {
         LOGW("gamedata: registering kiln.gamedata failed");
+        return;
+    }
+    // the rows of the members appended in 0.2.0-dev.29: there with the table (a world not loaded yet is the answers'
+    // readiness, not a missing capability); gamedata.expanded_buff_room follows the reservation (gamedata_clones.cpp)
+    if (const auto* caps = static_cast<const KilnCapsApi*>(g_api->service(KilnStr{KILN_CAPS_SERVICE, sizeof(KILN_CAPS_SERVICE) - 1}, 1));
+        caps && caps->report)
+        for (const char* row : {"gamedata.buff_budget", "gamedata.buff_registration"})
+            caps->report(g_owner, KilnStr{row, std::strlen(row)}, KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, KilnStr{"kiln.gamedata v1, 0.2.0-dev.29", 30});
 }
+
+void gd_owner_revoked(KilnOwner owner) { clones_owner_revoked(owner); }
 
 void gd_world_ready(uintptr_t world, uint32_t kind) {
     PhaseTimer pt(PH_GD_READY);

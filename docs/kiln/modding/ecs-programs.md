@@ -36,11 +36,14 @@ See [WorldPrograms](../../../mods/samples/WorldPrograms/) for an event round tri
 fails explicitly. The declaration remains inert until its mod binds it. Disabled mods and client-only mods do not
 reserve server programs; profile entries take precedence over drop-ins, including disabled profile entries.
 
-A mod may declare eight programs in one file of at most 64 KiB. The file uses strict JSON: duplicate keys, unknown
+A mod may declare 32 programs in one file of at most 64 KiB (eight before 0.2.0-dev.29). The file uses strict JSON: duplicate keys, unknown
 fields and repeated access names are refused. The schema is [kiln-programs.schema.json](../../../schema/kiln-programs.schema.json).
 `kiln lint` discovers it alongside the manifest. The native service also checks engine limits (template slots 8,
 read/write slots 42, other-template slots 9, other accessors 92, total event inputs/outputs 24). Programs share the
-world service's 32-slot limit and the game's remaining scheduler capacity; refusals appear in `kiln.log`.
+world service's 64 slots (32 before 0.2.0-dev.29) with Kiln's own services, and the game's remaining scheduler capacity
+(its table of 896, which kiln.world checks live before each registration); mods' declarations leave the last 8 slots to
+Kiln's services, and refusals appear in `kiln.log`. kiln.log "kiln.world program slots: 21 of 64 taken, … by Kiln's
+services and loaders, … by mods' declarations: kiln_world, …, writer x1" names who holds each slot.
 
 Access lists are `tpl`, `tplOptional`, `read`, `readOptional`, `write`, `writeOptional`, `singletonsRead`,
 `singletonsWrite`, `otherTpl`, `otherRead`, `otherWrite`, `with`, `without`, `anyOf`, `eventsIn`, `eventsOut`. Names

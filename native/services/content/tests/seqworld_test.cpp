@@ -11,6 +11,7 @@
 #include <set>
 #include <unordered_set>
 #include "../gamedata.h"
+#include "services/kiln_capacity_util.hpp"  // libstdc++'s fstream has its own __try: parsed before the macro below
 #undef __try
 #define __try if (true)
 #define __except(x) else if (false)
@@ -69,8 +70,9 @@ int main() {
     if (!attach_sequence(recovering, 2) || listing(recovering)["state"] != "registered") throw std::runtime_error("recoverable failure did not register");
     if (listing(recovering)["registrations"]["server"]["state"] != "registered") throw std::runtime_error("server outcome lost");
     if (attach_sequence(d, 2) || listing(d)["state"] == "registered") throw std::runtime_error("permanent failure was retried");
-    static_assert(sizeof(KilnGamedataApi) == 136);
+    static_assert(sizeof(KilnGamedataApi) == 160);  // since 0.2.0-dev.29: buff_budget, define_buff_result, buff_registration
     static_assert(offsetof(KilnGamedataApi, definitions) == 128);
+    static_assert(offsetof(KilnGamedataApi, buff_budget) == 136 && offsetof(KilnGamedataApi, buff_registration) == 152);
     static_assert(sizeof(KilnContentApi) == 264);
     static_assert(offsetof(KilnContentApi, txn_begin) == 248);
     static_assert(offsetof(KilnContentApi, txn_end) == 256);
@@ -83,5 +85,5 @@ int main() {
     Def bounded; bounded.section=KILN_GD_SEQUENCES; bounded.data=16;
     for (int attempt=0; attempt<20; ++attempt) ensure_seq(bounded, 3);
     if (!bounded.sequence_failures[3].permanent) throw std::runtime_error("recoverable retries were unbounded");
-    std::puts("PASS sequence worlds: 13 runtime checks; 5 unchanged gamedata/content ABI assertions");
+    std::puts("PASS sequence worlds: 13 runtime checks; 6 gamedata/content ABI assertions (the gamedata table grew at its end)");
 }
