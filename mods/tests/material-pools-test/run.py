@@ -53,8 +53,11 @@ class Lab:
         j=json.loads(config.read_text()) if config.exists() else {};j['labPort']=port;config.write_text(json.dumps(j))
     def tool(self,verb):
         command=['bash',str(REPO/'tools/lab/lab.sh'),verb,self.name]
-        if verb=='start':command=['bash','-c','ulimit -e 1; exec nice -n 19 ionice -c 3 "$@"','mp-lab',*command]
-        return subprocess.run(command,check=True,capture_output=True,text=True).stdout
+        # MP_LABSTART: the build wave's lab starter (its shared limit on running labs and its memory scope), called as
+        # `<starter> <lab name>` from the repository root, in place of lab.sh start.
+        if verb=='start' and os.environ.get('MP_LABSTART'):command=[os.environ['MP_LABSTART'],self.name]
+        elif verb=='start':command=['bash','-c','ulimit -e 1; exec nice -n 19 ionice -c 3 "$@"','mp-lab',*command]
+        return subprocess.run(command,check=True,capture_output=True,text=True,cwd=str(REPO)).stdout
     def stop(self):self.tool('stop')
     def authored_driver(self,present):
         dst=self.kiln/'mods/material-pools-test/blocks';shutil.rmtree(dst,ignore_errors=True)
