@@ -632,7 +632,21 @@ fn placements_file(game: &Path) -> PathBuf {
 fn placements(game: &Path) -> Result<Vec<Placement>> {
     let file = placements_file(game);
     refuse_symlink_path(game, &file)?;
-    Ok(crate::util::read_json(&file)?.unwrap_or_default())
+    let mut entries: Vec<Placement> = crate::util::read_json(&file)?.unwrap_or_default();
+    // A copy placed in ShroudForge's mods folder while a launcher on Windows read its `paths.mods` with Windows'
+    // verbatim prefix (`\\?\C:\…\mods`, before 0.2.0-dev.29): the same folder, now named without it
+    // (sf_paths::windows_folder), so its receipt still names the copy. Of two receipts that then name one folder the
+    // later one is current (put_placement appends).
+    for r in &mut entries {
+        if let Some(s) = r.path.to_str().filter(|s| s.starts_with(r"\\?\")) {
+            let plain = crate::winpath::plain_path(s);
+            if plain.len() != s.len() { r.path = PathBuf::from(plain.into_owned()); }
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut kept: Vec<Placement> = entries.into_iter().rev().filter(|r| seen.insert(r.path.clone())).collect();
+    kept.reverse();
+    Ok(kept)
 }
 
 fn save_placements(game: &Path, entries: &[Placement]) -> Result<()> {
@@ -734,6 +748,34 @@ fn current_receipt(dst: &Path, r: &Placement) -> Placement {
     r
 }
 
+/// `text` is ShroudForge's switch for an EML package and nothing of the player's: a JSON object with `launcher: "EML"`,
+/// `schemaVersion` 1 and a boolean `enabled`, beside at most what ShroudForge's own `ensure_eml_extension` writes with
+/// its defaults (`$schema`, `targets` ["client", "server"], an empty `settings`). The workaround posted on Nexus for
+/// 0.2.0-dev.28, which had players put `{"schemaVersion":1,"enabled":true,"launcher":"EML"}` by hand into Kiln's
+/// game-folder copies that Kiln left without the switch, makes one.
+fn bare_eml_switch(text: &str) -> bool {
+    let Ok(serde_json::Value::Object(o)) = serde_json::from_str::<serde_json::Value>(text) else { return false };
+    o.get("launcher").and_then(|v| v.as_str()) == Some("EML")
+        && o.get("schemaVersion").and_then(|v| v.as_f64()) == Some(1.0)
+        && o.get("enabled").is_some_and(serde_json::Value::is_boolean)
+        && o.iter().all(|(k, v)| match k.as_str() {
+            "launcher" | "schemaVersion" | "enabled" | "$schema" => true,
+            "targets" => *v == serde_json::json!(["client", "server"]),
+            "settings" => v.as_object().is_some_and(|m| m.is_empty()),
+            _ => false,
+        })
+}
+
+/// The `extended.mod.json` in Kiln's EML copy `dst` is a switch Kiln did not write but takes as its own: its receipt
+/// (`r`, as [`current_receipt`] reads it) records no such file, and the file is ShroudForge's switch and nothing more
+/// ([`bare_eml_switch`]). It is the file Kiln writes there itself, so it is no setting of the player's: not carried to the
+/// next version, not set aside when the mod stops, and the next switch Kiln sets records it ([`switch_eml_copy`]).
+fn adopted_switch(dst: &Path, r: &Placement) -> bool {
+    const EXT: &str = "extended.mod.json";
+    r.marker.kind == ModKind::Eml && r.extension.is_none() && !r.files.contains_key(EXT)
+        && std::fs::read_to_string(dst.join(EXT)).is_ok_and(|t| bare_eml_switch(&t))
+}
+
 /// The settings of a ShroudForge `extended.mod.json` text by key (`settings.<key>`: its metadata and, with `values`, its
 /// value; a shorthand value counts as a value); None when it is no JSON object.
 fn sf_settings_in(text: &str, values: bool) -> Option<std::collections::BTreeMap<String, serde_json::Value>> {
@@ -802,14 +844,17 @@ fn switch_eml_copy(game: &Path, receipts: &mut Vec<Placement>, dst: &Path, on: b
     refuse_symlink_path(game, &dst.join("extended.mod.json.tmp"))?;
     refuse_symlink_path(game, &ext)?;
     let m = crate::shroudforge::read_mod(dst)?;
-    if m.extended && m.enabled == on && m.repair.is_empty() { return Ok(false); }
-    let before = if m.extended { Some(std::fs::read_to_string(&ext).map_err(io_at(&ext, "reading"))?) } else { None };
+    let write = !(m.extended && m.enabled == on && m.repair.is_empty());
     let index = receipts.iter().position(|r| r.path == dst);
+    // a switch made by hand that Kiln takes as its own is recorded even when it already says `on`
+    let adopt = m.extended && index.is_some_and(|i| adopted_switch(dst, &current_receipt(dst, &receipts[i])));
+    if !write && !adopt { return Ok(false); }
+    let before = if m.extended { Some(std::fs::read_to_string(&ext).map_err(io_at(&ext, "reading"))?) } else { None };
     let ours = index.map(|i| current_receipt(dst, &receipts[i])).filter(|r| match &before {
-        Some(text) => r.extension.as_deref() == Some(text.as_str()),
+        Some(text) => r.extension.as_deref() == Some(text.as_str()) || adopt,
         None => !r.files.contains_key("extended.mod.json"),
     });
-    crate::shroudforge::set_enabled(dst, on)?;
+    if write { crate::shroudforge::set_enabled(dst, on)?; }
     if let (Some(i), Some(mut receipt)) = (index, ours) {
         let mut next = receipts.clone();
         let saved = (|| {
@@ -820,6 +865,7 @@ fn switch_eml_copy(game: &Path, receipts: &mut Vec<Placement>, dst: &Path, on: b
         })();
         if let Err(e) = saved {
             let back = match &before {
+                _ if !write => Ok(()),
                 Some(text) => crate::util::write_atomic_exclusive(&ext, text.as_bytes()),
                 None => std::fs::remove_file(&ext).map_err(io_at(&ext, "removing")),
             };
@@ -830,7 +876,7 @@ fn switch_eml_copy(game: &Path, receipts: &mut Vec<Placement>, dst: &Path, on: b
         }
         *receipts = next;
     }
-    Ok(true)
+    Ok(write)
 }
 
 /// [`switch_eml_copy`] for a copy activation keeps or has just placed: a copy whose switch changed is in
@@ -1195,6 +1241,9 @@ fn copy_in_with(roots: Roots, src: &Path, dst: &Path, m: &Marker, kept: &[(Strin
     };
     for (rel, bytes) in settings {
         crate::bundle::safe_rel_path(rel)?;
+        // ShroudForge's switch and nothing more, kept from an earlier copy (a stash of 0.2.0-dev.28 holds the one made by
+        // hand): the switch is Kiln's to write (above, or switch_eml_copy), never the player's setting
+        if m.kind == ModKind::Eml && rel == "extended.mod.json" && std::str::from_utf8(bytes).is_ok_and(bare_eml_switch) { continue; }
         let to = staged.join(rel);
         refuse_symlink_path(&staged, &to)?;
         if let Some(p) = to.parent() { std::fs::create_dir_all(p).map_err(io_at(p, "creating"))?; }
@@ -2037,7 +2086,8 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
         // folder configured elsewhere) are not its.
         let sf_root = (kind == ModKind::Eml && crate::own_loaders::shroudforge_runs_eml(loaders))
             .then(|| crate::shroudforge::mods_dir(game_dir));
-        let sf_reads = |dst: &Path| sf_root.as_ref().is_some_and(|r| dst.parent() == Some(r.as_path()));
+        // (the same folder as Windows names it: ShroudForge spells its folder `\\?\C:\…\mods` there, Kiln the game's `C:\…`)
+        let sf_reads = |dst: &Path| sf_root.as_ref().is_some_and(|r| dst.parent().is_some_and(|p| crate::winpath::same_folder(p, r)));
         let server = game_dir.join(crate::game::SERVER_EXE).is_file();
         // Where each enabled mod goes: `<game>/mods/<folder>` for an EML mod a native DLL reads there (always, with or
         // without EML's own loader), else the own loader's folder while that loader is installed.
@@ -2595,7 +2645,10 @@ fn settings_changed(game: &Path, receipts: &[Placement], dst: &Path, kind: ModKi
     }
     let now = placement_files(dst, kind)?;
     let (mut settings, mut added, mut code) = (Vec::new(), Vec::new(), Vec::new());
-    for (rel, _) in now.iter().filter(|(rel, hash)| !rel.ends_with('/') && receipt.files.get(*rel) != Some(*hash)) {
+    // ShroudForge's switch made by hand in a copy Kiln left without it: Kiln's own file, not a setting of the player's
+    let adopted = adopted_switch(dst, receipt);
+    for (rel, _) in now.iter().filter(|(rel, hash)| !rel.ends_with('/') && receipt.files.get(*rel) != Some(*hash)
+        && !(adopted && rel.as_str() == "extended.mod.json")) {
         if is_game_settings_file(rel) {
             settings.push(rel.clone());
         } else if !receipt.files.contains_key(rel) && !is_game_code(rel) {
@@ -3470,6 +3523,34 @@ mod tests {
         pub(super) static FAIL_SAVE_PLACEMENTS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
         /// [`adopt`] on this thread stops before this step, as a crash would (a panic: nothing is taken back).
         pub(super) static STOP_ADOPT_BEFORE: std::cell::Cell<Option<AdoptStep>> = const { std::cell::Cell::new(None) };
+    }
+
+    /// Receipts a launcher on Windows wrote while it read ShroudForge's `paths.mods` with the verbatim prefix (before
+    /// 0.2.0-dev.29) name their copies by the plain spelling the launcher uses now (sf_paths::native_folder), so the
+    /// copies stay Kiln's; of two receipts that then name one folder the later one counts. Windows' strings, read on
+    /// any system.
+    #[test]
+    fn receipts_written_with_the_verbatim_prefix_name_their_copies_as_the_launcher_does_now() {
+        let t = std::env::temp_dir().join(format!("km-receipts-verbatim-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&t);
+        let game = t.join("game");
+        let receipt = |path: &str, version: &str| serde_json::json!({"path": path, "files": {},
+            "marker": {"format": 1, "kind": "shroudforge", "id": "bigstacks", "version": version, "hash": "kdh1:aa"}});
+        let mods = r"C:\Games\Enshrouded\mods";
+        let list = serde_json::json!([
+            receipt(&format!(r"{mods}\bigstacks"), "1.0.0"),
+            receipt(&format!(r"\\?\{mods}\bigstacks"), "1.1.0"),
+            receipt(&format!(r"\\?\{mods}\more-gliders"), "1.0.0"),
+            receipt(r"\\?\Volume{1b3}\mods\x", "1.0.0"),
+            receipt("/home/u/game/mods/flat", "1.0.0"),
+        ]);
+        std::fs::create_dir_all(game.join("kiln/state")).unwrap();
+        std::fs::write(placements_file(&game), serde_json::to_vec(&list).unwrap()).unwrap();
+        let got: Vec<(String, String)> = placements(&game).unwrap().into_iter()
+            .map(|r| (r.path.to_string_lossy().into_owned(), r.marker.version)).collect();
+        assert_eq!(got, [(format!(r"{mods}\bigstacks"), "1.1.0".to_string()), (format!(r"{mods}\more-gliders"), "1.0.0".into()),
+            (r"\\?\Volume{1b3}\mods\x".into(), "1.0.0".into()), ("/home/u/game/mods/flat".into(), "1.0.0".into())]);
+        let _ = std::fs::remove_dir_all(&t);
     }
 
     /// A ShroudForge package `id` with one setting, as a mod author ships it.

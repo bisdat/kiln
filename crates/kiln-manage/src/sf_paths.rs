@@ -179,8 +179,7 @@ pub(crate) fn sf_directory(game_dir: &Path, name: &str, fallback: &str) -> Optio
 /// trailing dots and spaces dropped from a name unless the path is verbatim (`\\?\`).
 pub(crate) fn windows_folder(game_dir: &Path, value: &str) -> Option<PathBuf> {
     if cfg!(windows) {
-        let p = Path::new(value);
-        return Some(if p.is_absolute() { p.to_path_buf() } else { game_dir.join(p) });
+        return Some(native_folder(game_dir, value));
     }
     let raw = value.replace('/', "\\");
     let verbatim = raw.starts_with(r"\\?\");
@@ -222,6 +221,16 @@ pub(crate) fn windows_folder(game_dir: &Path, value: &str) -> Option<PathBuf> {
         }
     }
     Some(out)
+}
+
+/// `value` as a launcher on Windows names the folder: absolute, else joined to the game folder, and without Windows'
+/// verbatim prefix. ShroudForge writes its `paths.mods` from a canonical path at every start, so after its first start
+/// it reads `\\?\C:\…\mods`, while Kiln names the game folder without the prefix (`steam::strip_verbatim`): copies
+/// Kiln places there and the folder it compares with are then named alike. A verbatim path without another spelling
+/// (`\\?\Volume{…}\x`) stays as it is ([`crate::winpath::plain_path`]).
+pub(crate) fn native_folder(game_dir: &Path, value: &str) -> PathBuf {
+    let v = crate::winpath::plain_path(value);
+    if crate::winpath::is_absolute_game_path(&v) { PathBuf::from(&*v) } else { game_dir.join(&*v) }
 }
 
 /// A drive path the prefix does not map, found through the game folder: the two name the same folders from where the
@@ -311,6 +320,19 @@ pub(crate) fn adapter_hosts_dropins(game_dir: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// On Windows ShroudForge's `paths.mods` is `\\?\C:\…\mods` after its first start; the folder Kiln compares with it
+    /// and copies into is named without that prefix, as Kiln names the game folder (`steam::strip_verbatim`).
+    #[test]
+    fn on_windows_a_verbatim_paths_mods_is_named_without_its_prefix() {
+        let game = Path::new(r"C:\Games\Enshrouded");
+        let named = |v: &str| native_folder(game, v).to_string_lossy().into_owned();
+        assert_eq!(named(r"\\?\C:\Games\Enshrouded\mods"), r"C:\Games\Enshrouded\mods");
+        assert_eq!(named(r"\\?\UNC\nas\games\mods"), r"\\nas\games\mods");
+        assert_eq!(named(r"D:\sfmods"), r"D:\sfmods");
+        assert_eq!(named(r"\\?\Volume{1b3}\mods"), r"\\?\Volume{1b3}\mods", "no other spelling: as it is");
+        assert_eq!(native_folder(game, "mods"), game.join("mods"), "relative to the game folder");
+    }
 
     #[test]
     fn scan_keeps_only_the_wanted_members_and_the_last_of_repeated_ones() {
