@@ -750,8 +750,10 @@ fn drop_parked(game: &Path, p: &Publication) -> bool {
 /// What a stop inside a publication left ([`copy_in_with`]), before anything looks at the copies ([`place`],
 /// [`unplace`]). By the journal and the receipt at each path: a publication whose receipt is written only loses its
 /// parked old copy; one stopped after the new copy was published (its marker and every Library file exactly what the
-/// journal says it published) gets that receipt now; one stopped after the old copy was parked and before the new one
-/// was published gets the old copy back where it was. A receipt that moved on, or a copy that is neither, ends the
+/// journal says it published, and it replaced a copy whose receipt is still the current one) gets that receipt now;
+/// one stopped after the old copy was parked and before the new one was published gets the old copy back where it was.
+/// A folder without a receipt is never adopted (a first placement stopped before its receipt stays the player's, as
+/// before). A receipt that moved on, or a copy that is neither, ends the
 /// record and nothing is touched: a mismatch is never resolved by trusting a receipt (`owned` still refuses it).
 fn recover_publications(game: &Path, receipts: &mut Vec<Placement>) -> Result<()> {
     let all = publications(game);
@@ -767,7 +769,9 @@ fn recover_publications(game: &Path, receipts: &mut Vec<Placement>) -> Result<()
         }
         changed = true;
         if current.map(|r| r.marker.clone()) != p.from { continue; } // the receipt moved on: nothing of this to finish
-        let published = p.path.is_dir() && marker(&p.path).as_ref() == Some(&p.to.marker)
+        // only a publication that replaced a copy Kiln held (its receipt still the current one): a folder without a
+        // receipt (a first placement stopped before its receipt, or one whose receipt is gone) is never adopted
+        let published = p.from.is_some() && p.path.is_dir() && marker(&p.path).as_ref() == Some(&p.to.marker)
             && player_entries(&p.path, p.to.marker.kind, &current_receipt(&p.path, &p.to)).ok().flatten().is_some();
         if published {
             receipts.retain(|r| r.path != p.path);
