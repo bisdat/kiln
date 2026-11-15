@@ -5,9 +5,11 @@
     python3 gen_roster.py <phase> <mod dir>
 
 phase: 64 (29 new entries, 64 with the game's 35), 65 (30), 129 (94: the start stops), 65-refused (30, with
-kiln/control/roster.fail-install: the start stops), 128 (93), 128-restart (93, after a restart), 128-control (93, with
-the negative control kiln/control/roster.no-pages). Each entry: a clone of one game villager with its own world bool
-knowledge "rc_<i>" as its unlock; GUIDs fixed (uuid5 of the entry's number).
+kiln/control/roster.fail-install: the start stops), 129-boot and 129-boot-required (94, the mod a boot mod: "boot": true
+or "required" in its kiln.mod.json, so the start runs a boot generation; the start stops), 128 (93), 128-restart (93,
+after a restart), 128-control (93, with the negative control kiln/control/roster.no-pages). Each entry: a clone of one
+game villager with its own world bool knowledge "rc_<i>" as its unlock; GUIDs fixed (uuid5 of the entry's number).
+Only the boot phases leave "boot" in the mod's kiln.mod.json.
 
     python3 gen_roster.py fixture <mods/tests/roster-cap-fixture>
 
@@ -20,7 +22,9 @@ import os
 import sys
 import uuid
 
-NEW = {"64": 29, "65": 30, "129": 94, "65-refused": 30, "128": 93, "128-restart": 93, "128-control": 93, "fixture": 93}
+NEW = {"64": 29, "65": 30, "129": 94, "65-refused": 30, "129-boot": 94, "129-boot-required": 94, "128": 93, "128-restart": 93,
+       "128-control": 93, "fixture": 93}
+BOOT = {"129-boot": True, "129-boot-required": "required"}
 NS = uuid.UUID("3b1c2a4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d")
 
 
@@ -57,6 +61,15 @@ def main():
     if not fixture:
         with open(os.path.join(mod, "lab.json"), "w", encoding="utf-8") as f:
             json.dump({"phase": phase, "new": n}, f)
+        manifest = os.path.join(mod, "kiln.mod.json")
+        with open(manifest, encoding="utf-8") as f:
+            m = json.load(f)
+        m.pop("boot", None)
+        if phase in BOOT:
+            m["boot"] = BOOT[phase]
+        with open(manifest, "w", encoding="utf-8") as f:
+            json.dump(m, f, indent=2)
+            f.write("\n")
 
 
 if __name__ == "__main__":

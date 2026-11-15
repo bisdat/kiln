@@ -342,10 +342,12 @@ typedef struct KilnKnowledgeStatus {
  * step; a step whose registry could not be read publishes NOT_READY, never an older answer.
  *
  * A roster the boot build cannot hold (more than 128 entries, or more than 64 where the second page cannot be
- * installed on this side) stops the start before any world loads, with KILN_KNOW_ROSTER_EXIT_CODE, an error line in
- * kiln.log and kiln/state/roster-refused.json ({"refused", "why", "mods", "side", "exitCode", "pid", "utc"}; the next
- * start moves it to roster-refused.last.json); a required boot mod's start is stopped by kiln.boot instead
- * (KILN_BOOT_EXIT_CODE).
+ * installed on this side) stops the start before any world loads, always the same way, with a boot generation or
+ * without one and for a required boot mod as for any other: kiln/state/roster-refused.json first
+ * (schema/state-roster-refused.schema.json; the next start moves it to roster-refused.last.json), an error line in
+ * kiln.log, then kiln.boot's stop_start (its stop line, progress.json "failed", boot.json "boot"."stop"), on a game
+ * client a message box that closes after 60 s, and the process ends with KILN_KNOW_ROSTER_EXIT_CODE (a Linux parent
+ * under Wine sees 2). Nothing may restart on it: the next start stops the same way.
  *
  * world_kind: KILN_WORLD_SERVER (0, this process's server world, a hosting client's included) or KILN_WORLD_CLIENT
  * (2, this process's client world). Prediction (1) and any other value: KILN_ERR_INVALID_ARGUMENT. A generation is

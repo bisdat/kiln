@@ -8,7 +8,9 @@
 //   129     94 new: the start stops before the world (lab.sh checks the exit code, the log, the state file and that
 //           the save did not change); this mod must not run
 //   65-refused  30 new with kiln/control/roster.fail-install (the hooks not installed): the start stops the same way
-//   128     93 new (128): the knowledge the 65 boot set survived the two stopped starts; entries 0/64, 1/65, 63/127 set
+//   129-boot, 129-boot-required  94 new, this mod a boot mod ("boot": true / "required"): a boot generation runs, and
+//           the start stops the same way (kiln.boot's stop_start; lab.sh checks boot.json and progress.json too)
+//   128     93 new (128): the knowledge the 65 boot set survived the four stopped starts; entries 0/64, 1/65, 63/127 set
 //           to contradict each other; every entry of page 2 against its knowledge; the one-per-world rule (locked
 //           destroyed, unlocked kept) on page 2; the events; the same once more with kiln.world's parallel switch on
 //           (kiln/control/systems.parallel; whether the roster programs then ran on a worker is in kiln.log, not here);
@@ -16,7 +18,7 @@
 //   128-restart  the same roster after a restart: what the save kept; then with kiln/control/roster.lab the server
 //           world's page is dropped (kiln/control/roster.drop-page) and must be computed again at the next step's start,
 //           and the one-per-world rule on page 2 must still be answered from it
-//   128-control  NEGATIVE CONTROL, kiln/control/roster.no-pages: 128 taken without the second page; the page-2
+//   128-control  NEGATIVE CONTROL, kiln/control/roster.no-pages with roster.lab: 128 taken without the second page; the page-2
 //           assertions below MUST fail (lab.sh passes the phase only when exactly these two fail): the snapshot gives no
 //           token, and the game's own reader keeps a locked page-2 NPC (it reads entry 63's bit)
 using System.Text.Json;
@@ -86,7 +88,9 @@ public sealed class RosterCapTestMod : Mod
                 case "64": await Fits(); break;
                 case "65": await Paged(30); break;
                 case "129":
-                case "65-refused": Fail("the start", "the server reached its world: the roster's refusal did not stop the start"); break;
+                case "65-refused":
+                case "129-boot":
+                case "129-boot-required": Fail("the start", "the server reached its world: the roster's refusal did not stop the start"); break;
                 case "128": await Full(); break;
                 case "128-restart": await Restarted(); break;
                 case "128-control": await Control(); break;
@@ -224,7 +228,7 @@ public sealed class RosterCapTestMod : Mod
             var id = d65.RootElement.GetProperty("unlock").GetUInt32();
             var was = d65.RootElement.GetProperty("value").GetBoolean();
             Check(id == E(64).Unlock && Knowledge.World.Has(id) == was,
-                $"the knowledge the 65 boot set (entry 64's unlock: {was}) survived the two stopped starts", $"{Knowledge.World.Get(id)}");
+                $"the knowledge the 65 boot set (entry 64's unlock: {was}) survived the four stopped starts", $"{Knowledge.World.Get(id)}");
         }
         // contradictions across the page boundary: 0/64 and 1/65 against the game's own entries, 63/127 both the mods'
         var s0 = Read(t, Knowledge.Npcs[0].NpcId);
