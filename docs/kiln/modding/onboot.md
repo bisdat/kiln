@@ -9,7 +9,8 @@ first start; Kiln keeps it, and the game has it from the next start (data files 
 together with every mod's files and handed to the game in one piece, before the game reads any of it. The first start
 has it, with the same ids as a definition made in `OnLoad`.
 
-Since 0.2.0-dev.28, on dedicated servers. The native side is kiln.boot ([../services/boot.md](../services/boot.md)).
+Since 0.2.0-dev.28 on dedicated servers, and since 0.2.0-dev.29 in a player's game too (a hosted world, and a game
+that joins a server). The native side is kiln.boot ([../services/boot.md](../services/boot.md)).
 
 ## Turning it on
 Add `boot` to `kiln.mod.json` ([manifest.md](manifest.md#boot-content-boot-since-020-dev28)):
@@ -41,8 +42,8 @@ public override void OnBoot(BootContext boot) { ... }
   a static survives: hand everything over by staging it. What `OnBoot` read (`boot.GameData`) cannot be handed to
   `OnLoad` in memory either: write what you need later into a file of your mod's data folder (`Context.DataDirectory`
   is the same folder in `OnBoot` and in `OnLoad`; create it first), or read it again through the run-time services.
-- `boot.ModId`, `boot.Generation` (the process's boot generation), `boot.Roles` (where the mod runs: a dedicated
-  server in this build) and `boot.GameData` (the game's data, read only, below).
+- `boot.ModId`, `boot.Generation` (the process's boot generation), `boot.Roles` (where the mod runs: `DedicatedServer`,
+  or in a player's game `HostedServer` and `Client` together) and `boot.GameData` (the game's data, read only, below).
 
 **What you may do:** stage definitions with `BootDefinitions.For(boot)` (Kiln.Blocks), read `boot.GameData`, log
 (`Log`), read your mod's own files (the folder is `Context.Info.Directory`).
