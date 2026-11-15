@@ -559,6 +559,14 @@ const stopStorage = "kiln-mock-stopped-starts";
 const stoppedStarts: Record<string, import("./commands").StoppedStart | null> = (() => {
   try { return JSON.parse(localStorage.getItem(stopStorage) ?? "{}"); } catch { return {}; }
 })();
+/** A Steam start without the launcher's Play path. Keep old IPC stop evidence to exercise late replies too. */
+function mockExternalStart(gameId: string, at = Date.now()) {
+  gameOf(gameId);
+  running[gameId] = { pid: ++pidSeq, mode: "profile", nonce: null, at, profile: activations[gameId]?.profileId ?? null };
+  launched.add(gameId);
+  emitGame(gameId, "started");
+  setTimeout(() => emitGame(gameId, "boot"), 2600);
+}
 export function scriptStoppedStart(kind: StopScript) { stopScript = kind; }
 function launch(gameId: string, req: LaunchRequest): LaunchResult {
   const g = gameOf(gameId);
@@ -1763,7 +1771,7 @@ export function mockEmit(name: string, payload: unknown): void {
 }
 
 // Playwright and the dev console reach the fake game through this (mock mode only).
-if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown }).__kilnMock = { scriptStoppedStart, stopGame: mockStopGame, emit: mockEmit, setLastServer: mockSetLastServer,
+if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown }).__kilnMock = { scriptStoppedStart, externalStart: mockExternalStart, stopGame: mockStopGame, emit: mockEmit, setLastServer: mockSetLastServer,
   calls: () => [...commandCalls],
   planCommand: (cmd: string, plan: CommandPlan) => { (commandPlans[cmd] ??= []).push(plan); },
   openGate: (name: string) => { const g = gateOf(name); g.open = true; g.waiters.splice(0).forEach((w) => w()); },

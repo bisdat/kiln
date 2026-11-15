@@ -2100,6 +2100,19 @@ impl Usage {
             let Ok(Some(p)) = crate::util::read_json::<crate::profile::Profile>(&e.path().join("meta.json")) else { continue };
             profiles.push((p.id, p.mods));
         }
+        // A profile offered for restoration still needs its Library packages,
+        // including switched-off entries. Pin until this snapshot is replaced.
+        let saved = dirs.root.join("snapshots/before-beta/profiles");
+        if crate::engine_mods::refuse_symlink_path(&dirs.root, &saved).is_ok() {
+            for e in std::fs::read_dir(&saved).into_iter().flatten().flatten() {
+                let meta = e.path().join("meta.json");
+                if !e.file_type().is_ok_and(|t| t.is_dir())
+                    || crate::engine_mods::refuse_symlink_path(&dirs.root, &meta).is_err() { continue; }
+                if let Ok(Some(p)) = crate::util::read_json::<crate::profile::Profile>(&meta) {
+                    profiles.push((format!("{} (before beta)", p.id), p.mods));
+                }
+            }
+        }
         let mut games = Vec::new();
         let now = crate::util::now_unix();
         for install in crate::game::known(dirs).unwrap_or_default() {
@@ -2174,13 +2187,13 @@ impl ActiveFile {
     }
 }
 
-/// Profiles (their ids) that list this entry, and the games whose active or play-once profile file points at it
+/// Profiles (their ids, including `<id> (before beta)` for saved profiles) that list this entry, and the games whose active or play-once profile file points at it
 /// (`<profile> (active in <game folder>)`): the game reads those files, whatever the profile says now.
 pub fn users(dirs: &DataDirs, r: &LibraryRef) -> Vec<String> {
     Usage::read(dirs).users(dirs, r)
 }
 
-/// Every version of the library that no profile and no known game's profile file lists: what "Clean up" may remove.
+/// Every version of the library that no live or saved pre-beta profile and no known game's profile file lists: what "Clean up" may remove.
 /// An earlier version kept for a roll back ([`crate::kept`]) is not: it is removed on its own (the Library's kept list).
 pub fn unused(dirs: &DataDirs) -> Result<Vec<LibraryRef>> {
     let usage = Usage::read(dirs);

@@ -2,8 +2,8 @@
 //! reads differently, copied before its first start writes anything, so that a switch back to the release can put them
 //! back (`update_switch` with `restore`; docs/kiln/launcher/releasing.md, "Going back from the beta").
 //!
-//! - **What:** `settings.json`, each profile's `profiles/<pid>/meta.json` (its mods, their switches and order) and the
-//!   Library's `library/kiln-kept.json` (the versions kept for a roll back). Never the mods themselves (the Library's
+//! - **What:** `settings.json` and each profile's `profiles/<pid>/meta.json` (its mods, their switches and order).
+//!   The live kept journal and its settings folders stay together. Never the mods themselves (the Library's
 //!   folders and their records), the profiles' mod settings (`config/`, `data/`), game folders or saves, nor
 //!   `update.json` (the self-update's own record: the switch back writes it for the release's "Updated to").
 //! - **Where:** `<data>/snapshots/before-beta/`: the files at their paths relative to the data folder, and `snapshot.json`
@@ -78,7 +78,8 @@ pub fn candidates(root: &Path) -> Vec<String> {
 }
 
 fn checked_candidates(root: &Path) -> Result<Vec<String>, Error> {
-    let mut paths = vec!["settings.json".to_string(), "library/kiln-kept.json".to_string()];
+    // The kept journal owns mutable settings folders. It cannot be rewound alone.
+    let mut paths = vec!["settings.json".to_string()];
     let mut issues = Vec::new();
     let profiles = root.join("profiles");
     if let Err(e) = check_components(root, "profiles") { issues.push(e.message); }
@@ -252,12 +253,7 @@ pub fn restore(root: &Path, channel: Option<&str>) -> Result<Vec<String>, Error>
     let mut prepared = Vec::new();
     for rel in &info.files {
         // only the kinds of file a copy takes, never a path out of the data folder
-        let ok = rel == "settings.json" || rel == "library/kiln-kept.json"
-            || (rel.starts_with("profiles/") && rel.ends_with("/meta.json") && rel.split('/').count() == 3
-                && rel.split('/').all(|p| !p.is_empty() && p != "." && p != ".."));
-        if !ok || rel.contains('\\') {
-            continue;
-        }
+        if !allowed(rel) { continue; }
         // Preflight the whole copy before replacing anything. A symlinked root is fine;
         // links below it must not redirect either the copy or the destination.
         check_components(root, &format!("{DIR}/{rel}"))?;
@@ -274,9 +270,32 @@ pub fn restore(root: &Path, channel: Option<&str>) -> Result<Vec<String>, Error>
             bytes = serde_json::to_vec_pretty(&v).map_err(|e| Error::new(ErrorCode::Internal, e.to_string()))?;
             bytes.push(b'\n');
         }
+        check_profile_packages(root, rel, &bytes)?;
         prepared.push((rel.clone(), bytes));
     }
     restore_transaction(root, prepared)
+}
+
+// Metadata-only restore cannot bring back packages removed by a legacy launcher
+// or by hand. Check all entries, even disabled ones, before any destination writes.
+fn check_profile_packages(root: &Path, rel: &str, bytes: &[u8]) -> Result<(), Error> {
+    if !rel.starts_with("profiles/") { return Ok(()); }
+    let profile: kiln_manage::profile::Profile = serde_json::from_slice(bytes)
+        .map_err(|e| Error::invalid(format!("Cannot restore {rel}: {e}")))?;
+    let dirs = kiln_manage::paths::DataDirs::at(root);
+    let mut missing = Vec::new();
+    for kind in kiln_manage::manifest::ModKind::ALL {
+        for m in profile.mods.list(kind) {
+            let r = kiln_manage::library::LibraryRef { kind, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() };
+            let there = kiln_manage::library::record(&dirs, &r).is_ok()
+                && kiln_manage::library::path_of(&dirs, &r).is_ok_and(|p| if kind == kiln_manage::manifest::ModKind::Plugin { p.is_file() } else { p.is_dir() });
+            if !there { missing.push(format!("{} {} {} ({})", kind.as_str(), m.id, m.version, m.hash)); }
+        }
+    }
+    if !missing.is_empty() {
+        return Err(Error::new(ErrorCode::NotFound, format!("Cannot restore {rel}. Reimport these missing Library packages first: {}.", missing.join(", "))));
+    }
+    Ok(())
 }
 
 // Inspect existing components without following a link. Missing destination components
@@ -317,7 +336,7 @@ pub fn continue_without_restore(root: &Path, version: &str, channel: &str, beta:
 }
 
 fn allowed(rel: &str) -> bool {
-    !rel.contains('\\') && (rel == "settings.json" || rel == "library/kiln-kept.json" ||
+    !rel.contains('\\') && (rel == "settings.json" ||
         (rel.starts_with("profiles/") && rel.ends_with("/meta.json") && rel.split('/').count() == 3 && rel.split('/').all(|p| !p.is_empty() && p != "." && p != "..")))
 }
 
@@ -375,11 +394,14 @@ fn finish_restore(root: &Path) -> Result<Vec<String>, Error> {
     // Verify every staged file before the first replacement, including on recovery.
     let mut prepared = Vec::new();
     for (rel, hash) in journal.files {
+        // Older stages included the journal without its settings payload.
+        if rel == "library/kiln-kept.json" { continue; }
         if !allowed(&rel) { return Err(Error::invalid("Unsafe path in beta restore journal.")); }
         check_components(root, &rel)?;
         check_components(root, &format!("{RESTORE_DIR}/new/{rel}"))?;
         let bytes = std::fs::read(root.join(RESTORE_DIR).join("new").join(&rel)).map_err(io(&root.join(&rel), "reading restore stage"))?;
         if kiln_manage::hash::sha256_hex(&bytes) != hash { return Err(Error::invalid("The staged beta restore file is incomplete.")); }
+        check_profile_packages(root, &rel, &bytes)?;
         prepared.push((rel, bytes));
     }
     let mut done = Vec::new();

@@ -75,7 +75,7 @@ export function EngineStatusList({ gameId }: { gameId: GameId }) {
 
 export function EngineRow({ s }: { s: EngineStatus }) {
   const selfFile = s.kind === "shroudforge" ? s.ownLoader?.file : null;
-  const word = selfFile ? `runs itself: ${selfFile}` : s.kind === "shroudforge" && isObj(s.state) && s.state.mode === "self-hosted"
+  const word = selfFile ? `own loader installed: ${selfFile}` : s.kind === "shroudforge" && isObj(s.state) && s.state.mode === "self-hosted"
     ? "Last start: self-hosted (loader no longer detected)" : headline(s.state);
   const reason = s.prerequisite?.text ?? s.error ?? (isObj(s.state) ? str(s.state.reason) ?? str(s.state.error) : null);
   const mods = modLines(s.state);

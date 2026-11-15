@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { stopFilter, stopIds, stopKey, stopSentence } from "../src/shell/stoppedStart";
+import { stopForProcess, stopFilter, stopIds, stopKey, stopSentence } from "../src/shell/stoppedStart";
 import { filterRows, type ModRow } from "../src/shell/mods";
 import type { StoppedStart } from "../src/api/commands";
 const stop: StoppedStart = { kind: "roster", reason: "128 entries", mods: ["a"], names: ["A"], advice: "Switch one off", utc: "2026-11-15T12:00:00Z", pid: 42, exitCode: 19202 };
@@ -28,4 +28,15 @@ test("reading rules: current roster and required mod, unknown, malformed, stale,
   expect(readMockStop(file, 42, 1001, 1100)).toBeNull();
   expect(readMockStop(file, 42, 900, 999)).toBeNull();
   expect(readMockStop(" ".repeat(256 * 1024) + file, 42, 900, 1100)).toBeNull();
+});
+
+test("a proven later Steam process retires the saved refusal without comparing Proton pids", () => {
+  const status = { running: true, started: "2026-11-15T12:01:00Z" };
+  expect(stopForProcess(stop, status)).toBeNull();
+  for (const started of [stop.utc, "2026-11-15T11:59:00Z", null, "invalid"])
+    expect(stopForProcess(stop, { running: true, started })).toBe(stop);
+  expect(stopForProcess(stop, { ...status, running: false })).toBe(stop);
+  expect(stopForProcess({ ...stop, utc: "invalid" }, status)?.utc).toBe("invalid");
+  expect(stopForProcess(stop, undefined)).toBe(stop);
+  expect(stopForProcess(null, status)).toBeNull();
 });

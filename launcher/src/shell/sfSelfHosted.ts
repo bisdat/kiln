@@ -1,7 +1,7 @@
 import type { FoundReport, Profile } from "../api/commands";
 
 export function sfSelfHostedText(file: string): string {
-  return `ShroudForge's own loader is installed in the game folder (${file}), so ShroudForge runs its mods itself. Your profile's ShroudForge switches do not apply. Remove that file, or let Kiln manage ShroudForge, to have the profile decide.`;
+  return `ShroudForge's own loader is installed (${file}). If it loads, Kiln's adapter steps aside and ShroudForge reads its own mods folder. Profile switches still update copies Kiln manages. Folders you installed yourself keep their own switches. Remove that loader or let Kiln manage ShroudForge to use Kiln's adapter.`;
 }
 
 export function sfSelfHostedFile(profile: Profile | null | undefined, found: FoundReport | null | undefined): string | null {
