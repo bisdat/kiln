@@ -7,9 +7,14 @@
 // kiln/data/kiln.items/sets-matrix) runs the rollback matrix instead: one fresh character per form of a set. Faults are injected into real runs through
 // Items.LabEquipSet (kiln/data/kiln.items/sets-lab): a refusal of the game's own equip at a chosen step, the commit's own
 // rollback bit, a faked mismatch after the commit (last: it switches sets off until the server restarts). After every
-// refusal, dry run and commit rollback kiln.items itself compares the canonical snapshot (InventorySetup, every
-// Inventory, SlotSelection, ItemState, OwnerRelationship) and would report InvariantFailure: a Refused or Simulated
-// status is that comparison passing; the test compares its own full read of the inventory as well. With
+// refusal, dry run and commit rollback kiln.items itself compares, in the same program update, the canonical snapshot
+// (the fields of InventorySetup, every Inventory, SlotSelection, ItemState and OwnerRelationship that decide what a set
+// selects) and every byte of the seven components its program declares (those five, Fuel and InventoryEmptyState) of
+// every entity of the player's tree, and reports InvariantFailure on a difference: a Refused, CommitRolledBack or
+// Simulated status is that comparison passing. The rows here compare Gear(): the inventory links, every stack's item,
+// count and item entity and the equipped flags. The rollback series (Series.cs, kiln/data/equipment-sets-test/series)
+// compares every byte of those components and of the item components the program cannot write, at every operation of
+// every enabled form, and over a save and a restart. With
 // kiln/control/systems.parallel the run repeats with the game's programs forced onto its workers (the native log line
 // of each set says the thread). The character is destroyed at the end.
 using System.Text.Json;
@@ -18,7 +23,7 @@ using Kiln.Testing;
 
 namespace EquipmentSetsTest;
 
-public sealed class EquipmentSetsTestMod : Mod
+public sealed partial class EquipmentSetsTestMod : Mod
 {
     private int _pass, _fail;
     private bool _stop;
@@ -192,6 +197,19 @@ public sealed class EquipmentSetsTestMod : Mod
                 at = new WorldPosition(q.X + 45, q.Y + 3, q.Z + 45);
                 break;
             }
+        if (File.Exists(Path.Combine(Context.DataDirectory, "series")))
+        {
+            if (LabSystems.Enabled) LabSystems.ForceParallel(LabSystems.MaxSteps);
+            try
+            {
+                await Series(at);
+            }
+            finally
+            {
+                if (LabSystems.Enabled) LabSystems.StopParallel();
+            }
+            return;
+        }
         if (File.Exists(Path.Combine(Context.DataDirectory, "matrix")))
         {
             if (LabSystems.Enabled) LabSystems.ForceParallel(LabSystems.MaxSteps);
@@ -548,6 +566,28 @@ public sealed class EquipmentSetsTestMod : Mod
                 $"SET-BACKPACK: a backpack change is {(plan.Ok ? "planned (kiln/data/kiln.items/sets-backpack)" : "refused before mutation")} [{plan.Reason}]");
         }
         else Check(false, $"SET-BACKPACK: no backpack to try: {Gear(p)}");
+
+        // ---- SET-FIFO: a set's dry run, the same set and a single equip asked in one step run in that order (the single
+        // equip run between the two sets would make the second StaleSnapshot) ----
+        {
+            var worn = Items.Equipped(p, EquipmentSlot.Ring1).IsNone ? EquipmentSlot.Ring0 : EquipmentSlot.Ring1;
+            var chest = Loose(p, Id("Armor_T1_Warrior_DPS_Chest"));
+            if (Items.Equipped(p, worn).IsNone || chest is null || Items.Read(p)!.FreeSlots() == 0)
+                Check(false, $"SET-FIFO: a worn ring, a loose chest piece and a free backpack slot are needed: {Gear(p)}");
+            else
+            {
+                var setB = Set(Items.CaptureSet(p).Set!.Scope, (worn, new EmptyEquipment()));
+                var ta = Items.EquipSet(p, setB, EquipOptions.DryRun);
+                var tb = Items.EquipSet(p, setB);
+                var tc = Items.Equip(p, chest.Slot, EquipmentSlot.ArmourUpperBody);
+                var a = await ta;
+                var b = await tb;
+                var c = await tc;
+                await Steps(1);
+                Check(a.Status == EquipmentSetStatus.Simulated && b.Status == EquipmentSetStatus.Done && Items.Equipped(p, worn).IsNone && c.Status == ItemsStatus.Done,
+                    $"SET-FIFO: a dry-run set, the same set and a single equip of one step ran in that order: Simulated, Done, Done [{Show(a)}] [{Show(b)}] [single: {c.Status} {c.Message}]");
+            }
+        }
 
         // ---- SET-INVARIANT (last: it switches equipment sets off until the server restarts) ----
         var last = Items.CaptureSet(p).Set!;
