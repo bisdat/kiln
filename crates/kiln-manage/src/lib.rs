@@ -100,6 +100,7 @@ pub mod kept;
 pub mod settings_files;
 pub(crate) mod durable;
 pub mod engine_mods;
+pub mod restore_data;
 pub mod found;
 pub mod own_loaders;
 pub mod shroudforge;
