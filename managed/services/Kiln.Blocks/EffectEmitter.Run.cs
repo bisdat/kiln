@@ -48,6 +48,8 @@ internal sealed partial class EffectEmitter
             var have = _b.TypeOf(v.Value);
             if (p.Arg.Type != "any" && RunNatives.Fnv(p.Arg.Type) != have.Hash)
                 throw new BlockError(_ctx.Block, at, $"{full}: parameter '{p.Name}' is {p.Arg.Type}; what it binds to is another type (KL340)");
+            if (p.Arg.Size != 0 && p.Arg.Size != have.Size)
+                throw new BlockError(_ctx.Block, at, $"{full}: parameter '{p.Name}' has size {p.Arg.Size}; what it binds to has size {have.Size} (KL340)");
             args[i] = v;
         }
         _b.CallNative(full, RunNatives.Fnv(full), $"run{id}", args);
@@ -62,11 +64,15 @@ internal sealed partial class EffectEmitter
         return self;
     }
 
+    private readonly Dictionary<int, int> _positions = new();
+
     private int PositionOf(int target, int id)
     {
+        if (_positions.TryGetValue(id, out var known)) return known;
         var pos = _b.V($"hitAt{id}", ImpactType.Float3);
         _b.Call("getTransform", null, null, pos, target);
         _b.Pop();
+        _positions[id] = pos;
         return pos;
     }
 
@@ -93,10 +99,13 @@ internal static class RunNatives
 
     internal static (string Full, IReadOnlyList<NativeParameter> Parameters) Resolve(BlockContext ctx, NativeRef run, string at)
     {
+        var name = run.FullName ?? (run.Name.Contains('.') ? run.Name : $"{ctx.Mod.Id}.{run.Name}");
+        if (!Abilities.Natives.ValidName(name))
+            throw new BlockError(ctx.Block, at, $"run: '{name}' is not a valid native name (<modid>.<Name>, at most 90 UTF-8 bytes; KL340)");
         // C#: the build's NativeRef (Natives.OnHit), a short name of this mod with its parameters
-        if (!run.Name.Contains('.')) return (run.FullName ?? $"{ctx.Mod.Id}.{run.Name}", run.Parameters);
+        if (!run.Name.Contains('.')) return (name, run.Parameters);
         // JSON: "<modid>.<Name>"; its parameters from that mod's impact/natives.json
-        var full = run.Name;
+        var full = name;
         if (run.Parameters.Count > 0) return (full, run.Parameters);
         var dot = full.LastIndexOf('.');
         var mod = full[..dot];
@@ -116,6 +125,7 @@ internal static class RunNatives
         foreach (var n in natives.EnumerateArray())
         {
             if (!n.TryGetProperty("name", out var name) || name.GetString() != full) continue;
+            if (!n.TryGetProperty("sync", out var sync) || sync.ValueKind != JsonValueKind.True) continue;
             var list = new List<NativeParameter>();
             if (n.TryGetProperty("args", out var args))
                 foreach (var a in args.EnumerateArray())
@@ -127,6 +137,7 @@ internal static class RunNatives
                             a.TryGetProperty("optional", out var o) && o.GetBoolean(), a.TryGetProperty("raw", out var r) && r.GetBoolean(),
                             a.TryGetProperty("size", out var sz) ? sz.GetInt32() : 0)));
                 }
+            if (!n.TryGetProperty("argc", out var argc) || !argc.TryGetInt32(out var count) || count != list.Count) return null;
             return list;
         }
         return null;

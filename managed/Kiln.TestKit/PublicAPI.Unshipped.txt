@@ -186,3 +186,5 @@ static Kiln.TestKit.FakeProgramMark.operator ==(Kiln.TestKit.FakeProgramMark lef
 static Kiln.TestKit.FakeProgramSlice.operator !=(Kiln.TestKit.FakeProgramSlice? left, Kiln.TestKit.FakeProgramSlice? right) -> bool
 static Kiln.TestKit.FakeProgramSlice.operator ==(Kiln.TestKit.FakeProgramSlice? left, Kiln.TestKit.FakeProgramSlice? right) -> bool
 virtual Kiln.TestKit.FakeGameNativeHandler.Invoke(Kiln.TestKit.FakeGameNativeCall call) -> byte
+Kiln.TestKit.HarnessImpactNatives.Serial.get -> bool
+Kiln.TestKit.HarnessImpactNatives.Serial.set -> void

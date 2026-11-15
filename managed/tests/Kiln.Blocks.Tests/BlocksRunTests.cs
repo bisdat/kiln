@@ -77,6 +77,153 @@ public sealed class BlocksRunTests
     }
 
     [Fact]
+    public void A_matching_type_with_the_wrong_size_is_a_compile_error()
+    {
+        var native = new NativeRef("WrongSize", [P("target", "ecs.EntityId", size: 8)]);
+        var e = Assert.Throws<BlockError>(() => Compiler.Lower(NewMod(), "wrongsize", Sword(new EffectBlock { Run = native, Heal = 1 })));
+        Assert.Contains("size", e.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("Bad.Mod.Native")]
+    [InlineData("other-mod.Bad Name")]
+    [InlineData("other-mod.é")]
+    public void Invalid_full_native_names_are_rejected(string full)
+    {
+        var native = new NativeRef(full, [P("target", "ecs.EntityId")]);
+        Assert.Throws<BlockError>(() => Compiler.Lower(NewMod(), "badname", Sword(new EffectBlock { Run = native, Heal = 1 })));
+    }
+
+    [Fact]
+    public void An_overlong_native_name_is_rejected_and_a_dotted_mod_id_is_valid()
+    {
+        var native = new NativeRef(new string('a', 91), []);
+        Assert.Throws<BlockError>(() => Compiler.Lower(NewMod(), "longname", Sword(new EffectBlock { Run = native, Heal = 1 })));
+        var dotted = new NativeRef("org.example.mod.Ok", [P("target", "ecs.EntityId")]);
+        Compiler.Lower(NewMod(), "dotted", Sword(new EffectBlock { Run = dotted, Heal = 1 }));
+    }
+
+    [Fact]
+    public void A_ref_position_is_not_overwritten_before_applyDamage()
+    {
+        var native = new NativeRef("MoveHit", [P("position", "float3", NativeArgDirection.InOut, size: 12)]);
+        var mod = NewMod();
+        Compiler.Lower(mod, "position", Sword(new EffectBlock { Run = native, Damage = new DamageBlock { Ice = 1 } }));
+        var lines = Listing(mod).Split('\n').ToList();
+        var run = lines.FindIndex(l => l.Contains($"{Mod}.MoveHit(hitAt1)"));
+        var hit = lines.FindIndex(l => l.Contains("applyDamage("));
+        Assert.True(run >= 0 && hit > run, Listing(mod));
+        Assert.DoesNotContain(lines.Skip(run + 1).Take(hit - run - 1), l => l.Contains("getTransform(") && l.Contains("hitAt1"));
+    }
+
+    [Theory]
+    [InlineData("self", "ecs.EntityId", 4)]
+    [InlineData("target", "ecs.EntityId", 4)]
+    [InlineData("attacker", "ecs.EntityId", 4)]
+    [InlineData("caster", "ecs.EntityId", 4)]
+    [InlineData("position", "float3", 12)]
+    [InlineData("attackMod", "float32", 4)]
+    [InlineData("damage", "impact.DamageSetup", 52)]
+    public void Every_binding_preserves_its_type_and_size_for_in_out_and_ref(string binding, string type, int size)
+    {
+        foreach (var dir in Enum.GetValues<NativeArgDirection>())
+        {
+            var native = new NativeRef("Bound", [P(binding, type, dir, optional: true, size: size)]);
+            Compiler.Lower(NewMod(), "bound", Sword(new EffectBlock { Run = native, Damage = new DamageBlock { Ice = 2 } }));
+        }
+    }
+
+    [Theory]
+    [InlineData("Time", 8)]
+    [InlineData("sint32", 4)]
+    [InlineData("uint32", 4)]
+    [InlineData("bool", 1)]
+    public void Types_without_a_matching_binding_are_compile_errors(string type, int size)
+    {
+        var native = new NativeRef("Unsupported", [new NativeParameter("target", new NativeArg(type, Raw: type == "uint32", Size: size))]);
+        Assert.Throws<BlockError>(() => Compiler.Lower(NewMod(), "unsupported", Sword(new EffectBlock { Run = native, Heal = 1 })));
+    }
+
+    [Fact]
+    public void A_false_Run_skips_every_part_and_Then_but_preserves_following_effects_and_query_cleanup()
+    {
+        var mod = NewMod();
+        var program = EffectEmitter.PointProgram(new BlockContext(mod, "guard"), "guard", [
+            new EffectBlock { On = EffectOn.Caster, Run = new NativeRef("Guard", []), Damage = new DamageBlock { Ice = 2 }, Heal = 1,
+                Area = new AreaBlock { Radius = 2, Effects = [new EffectBlock { Heal = 2 }] }, Then = [new EffectBlock { Heal = 3 }] },
+            new EffectBlock { On = EffectOn.Caster, Heal = 4 }
+        ], "effects", primary: false);
+        uint[] Words(int field)
+        {
+            var start = field + BitConverter.ToInt32(program.Blob, field);
+            return Enumerable.Range(0, BitConverter.ToInt32(program.Blob, field + 4)).Select(i => BitConverter.ToUInt32(program.Blob, start + i * 4)).ToArray();
+        }
+        var calls = new List<uint>();
+        void Execute(uint[] code)
+        {
+            var stack = new Stack<uint>();
+            for (var pc = 0; pc < code.Length;)
+                switch (code[pc++])
+                {
+                    case 11: stack.Push(code[pc++]); break;
+                    case 12: stack.Push(0); break;
+                    case 10: var to = code[pc++]; if (stack.Pop() == 0) pc = (int)to; break;
+                    case 27: stack.Pop(); break;
+                    case 19:
+                        pc++;
+                        var hash = code[pc++]; calls.Add(hash);
+                        var argc = hash == RunNatives.Fnv($"{Mod}.Guard") ? 0 : hash switch {
+                            0x01d09759 or 0xbf5ad13b => 1, 0xa18f5959 => 3, 0x044e4187 or 0x93e40aa9 => 6,
+                            _ => throw new InvalidOperationException($"unexpected native 0x{hash:x8}") };
+                        for (var i = 0; i < argc; i++) stack.Pop();
+                        stack.Push(hash == RunNatives.Fnv($"{Mod}.Guard") ? 0u : 1u);
+                        break;
+                    case 30: Assert.Empty(stack); return;
+                    default: throw new InvalidOperationException("unexpected opcode on the false path");
+                }
+        }
+        Execute(Words(0x18));
+        Assert.Equal(1, calls.Count(h => h == 0x044e4187));
+        Assert.DoesNotContain(0xb04d0e7au, calls);
+        Assert.DoesNotContain(0x19143416u, calls);
+        Execute(Words(0x20));
+        Assert.Contains(0x93e40aa9u, calls);
+    }
+
+    private sealed class FileMods(ModEntry entry) : IModsBackend
+    {
+        public IReadOnlyList<ModEntry> All => [entry];
+        public ModSide Side => ModSide.Server;
+        public ModEntry? Get(string id) => id == entry.Id ? entry : null;
+        public ModStats Stats(string id) => default;
+        public bool Send(ModContext? sender, string targetId, string method, object? payload) => false;
+        public Task<ModOperationResult> Request(ModOperation op, string arg) => throw new NotSupportedException();
+        public void Request(ModOperation op, string arg, Action<ModOperationResult> done, ModContext? caller) => throw new NotSupportedException();
+    }
+
+    [Theory]
+    [InlineData(false, 1)]
+    [InlineData(true, 2)]
+    [InlineData(true, 1)]
+    public void Json_Run_requires_a_sync_declaration_with_the_same_argc_as_its_parameters(bool sync, int argc)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "kiln-run-declaration-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(dir, "impact"));
+        var previous = ModsBackend.Current;
+        try
+        {
+            ModsBackend.Current = new FileMods(new ModEntry(Mod, Mod, "1.0", dir, ModSide.Server, ModState.Loaded, null, [], 0, new ModInfo(Mod, Mod, "1.0", dir)));
+            File.WriteAllText(Path.Combine(dir, "impact", "natives.json"), System.Text.Json.JsonSerializer.Serialize(new {
+                format = 1, natives = new[] { new { name = $"{Mod}.FileNative", argc, sync,
+                    args = new[] { new { name = "target", type = "ecs.EntityId", size = 4 } } } } }));
+            void Compile() => Compiler.Lower(NewMod(), "file-native", Sword(new EffectBlock { Run = new NativeRef($"{Mod}.FileNative", []), Heal = 1 }));
+            if (sync && argc == 1) Compile();
+            else Assert.Throws<BlockError>(Compile);
+        }
+        finally { ModsBackend.Current = previous; Directory.Delete(dir, true); }
+    }
+
+    [Fact]
     public void Json_names_the_native_and_its_parameters_come_from_the_mods_natives_json()
     {
         RunNatives.Declarations = full => full == "other-mod.Freeze" ? [P("target", "ecs.EntityId"), P("caster", "ecs.EntityId")] : null;
