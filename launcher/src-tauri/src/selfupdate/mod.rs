@@ -142,6 +142,9 @@ pub struct UpdateStatus {
     pub beta: Option<u32>,
     /// (dev.29) The channel a switch the player started goes to, while it downloads or waits for the restart.
     pub switching: Option<Channel>,
+    /// (dev.29) A test build: the copy of settings and profiles from before the beta (crate::snapshot), which a switch
+    /// back can put back (`update_switch` with `restore`).
+    pub before_beta: Option<crate::snapshot::Info>,
     /// Automatic checks are on (setting `updateCheck`).
     pub auto: bool,
     pub install: InstallInfo,
@@ -229,6 +232,7 @@ fn initial_status(current: &str, install: InstallInfo) -> UpdateStatus {
         build_channel: Channel::of_build(current),
         beta: feed::baked_beta(),
         switching: None,
+        before_beta: None,
         auto: true,
         install,
         page: feed::DOWNLOAD_PAGE.into(),
@@ -253,11 +257,37 @@ fn settings(current: &str) -> (bool, Channel) {
 
 /// The status with the settings as they are now.
 pub fn status() -> UpdateStatus {
+    // only a test build offers to put the copy back (a small file, read when asked)
+    let before = feed::baked_beta().and_then(|_| crate::state::dirs().ok()).and_then(|d| crate::snapshot::info(&d.root));
     let mut g = state();
     let (auto, channel) = settings(&g.status.current);
     g.status.auto = auto;
     g.status.channel = channel;
+    g.status.before_beta = before;
     g.status.clone()
+}
+
+/// Before the restart into a switch's build: a switch back to the release line records it (the next test build takes a
+/// new copy), and when the player asked, the copy from before the beta goes back (crate::snapshot). What fails here is
+/// logged; the restart goes on.
+fn before_switch_restart(ready: &Ready) {
+    let (switching, restore) = {
+        let g = state();
+        (g.status.switching, g.restore)
+    };
+    let Some(target) = switching.filter(|c| *c != Channel::Beta) else { return };
+    let _writing = crate::state::writing();
+    let Ok(d) = crate::state::dirs() else { return };
+    if restore {
+        match crate::snapshot::restore(&d.root) {
+            Ok(files) => log(&format!("put back the copy from before the beta: {}", files.join(", "))),
+            Err(e) => log(&format!("could not put back the copy from before the beta: {}", e.message)),
+        }
+    }
+    let to = feed::Build::parse(&ready.version).map(|b| { let mut v = b.version; v.build.clear(); v.to_string() }).unwrap_or_else(|| ready.version.clone());
+    if let Err(e) = crate::snapshot::left_beta(&d.root, &to, target.as_str()) {
+        log(&format!("cannot record the switch back: {}", e.message));
+    }
 }
 
 fn emit<R: Runtime>(app: &AppHandle<R>) {
@@ -791,6 +821,7 @@ pub fn restart(app: &AppHandle) -> Result<(), Error> {
     let Some(ready) = ready.filter(|_| phase == Phase::Ready) else {
         return Err(Error::new(ErrorCode::Conflict, "No update is ready."));
     };
+    before_switch_restart(&ready);
     if ready.installed {
         log(&format!("restarting into {}", ready.version));
         // from here on this process writes nothing more into a game folder: the new launcher takes over

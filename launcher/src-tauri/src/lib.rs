@@ -21,6 +21,7 @@ pub mod selftest;
 /// The self-update: only in direct builds (feature `self-update`); the Nexus Mods build compiles none of it.
 #[cfg(feature = "self-update")]
 pub mod selfupdate;
+pub mod snapshot;
 pub mod state;
 pub mod watch;
 
@@ -243,6 +244,18 @@ pub fn run() {
 /// the modpack watcher, Nexus (its instance lock, inbox and leftovers), the self-update's first check. Run once, when the
 /// folder is free (commands/data_folder.rs `start`).
 fn after_folder(app: &tauri::AppHandle) {
+    // (dev.29) the build of this start, and before the first start of a test build writes anything, the copy of the
+    // release's settings and profiles a switch back can put back (snapshot.rs)
+    if let Ok(d) = state::dirs() {
+        let version = app.package_info().version.to_string();
+        let baked = env!("KILN_LAUNCHER_BUILD_CHANNEL");
+        let channel = if !baked.is_empty() { baked } else if version.contains('-') { "dev" } else { "stable" };
+        match snapshot::at_start(&d.root, &version, channel, distribution::beta()) {
+            Ok(Some(i)) => commands::app::launcher_log("update", &format!("the copy from before the beta: {} files ({})", i.files.len(), i.files.join(", "))),
+            Ok(None) => {}
+            Err(e) => commands::app::launcher_log("update", &format!("the copy from before the beta could not be taken: {}", e.message)),
+        }
+    }
     // the installed runtime's and the bundles' sha256s from the last run (a start does not hash 1.5 GB again)
     if let Ok(d) = state::dirs() {
         kiln_manage::filecache::persist_at(&state::file_hashes(&d));

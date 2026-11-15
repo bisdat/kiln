@@ -126,6 +126,10 @@ mod imp {
         pub build_channel: &'static str,
         /// (dev.29) Always null: never a test build.
         pub beta: Option<u32>,
+        /// (dev.29) Always null: no switch.
+        pub switching: Option<()>,
+        /// (dev.29) Always null: no copy from before a beta to put back.
+        pub before_beta: Option<()>,
         pub auto: bool,
         pub install: Install,
         /// Where new versions are: the Kiln page on Nexus Mods.
@@ -164,6 +168,8 @@ mod imp {
             channel: if pre { "dev" } else { "stable" },
             build_channel: if pre { "dev" } else { "stable" },
             beta: None,
+            switching: None,
+            before_beta: None,
             auto: false,
             install: Install { kind: bundle_kind(), in_place: false, reason: Some(NO_SELF_UPDATE) },
             page: distribution::NEXUS_PAGE,
@@ -233,7 +239,7 @@ mod imp {
             assert!(s["available"].is_null() && s["ready"].is_null() && s["justUpdated"].is_null());
             assert_eq!(s["failures"], serde_json::json!([]));
             // the direct build's fields, so the frontend's UpdateStatus fits
-            for k in ["channel", "buildChannel", "beta", "checked", "progress", "skipped", "taskId", "error"] {
+            for k in ["channel", "buildChannel", "beta", "switching", "beforeBeta", "checked", "progress", "skipped", "taskId", "error"] {
                 assert!(s.get(k).is_some(), "{k} missing");
             }
             let c = serde_json::to_value(tauri::async_runtime::block_on(check(h))).unwrap();

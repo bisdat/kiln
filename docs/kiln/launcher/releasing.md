@@ -190,7 +190,42 @@ Direct builds only (the Nexus Mods build has none, above).
   refusals (the game running, Steam updating, a folder that is not Kiln's). When that fails, the start goes on with the
   Kiln the game has and says why. A test build itself keeps whatever the game has and offers its own newer Kiln as an
   update. The first switch back of all goes to 0.2.0-dev.28, which has none of this: its Play keeps the beta's Kiln in
-  the game until the player installs another on Runtime (Kiln of dev.29 reads its own files; that is the case to test).
+  the game until the player installs dev.28's on Runtime (a dev.28 launcher with a dev.29 Kiln in the game is the case
+  testers should report on).
+
+### Going back from the beta (0.2.0-dev.29)
+What a test build writes that a release build reads, and what the release does with it. "dev.28" is the release a
+first tester goes back to; the same rules hold for any release from dev.29 on, which also knows test builds. The copy
+(`<data>/snapshots/before-beta/`, `launcher/src-tauri/src/snapshot.rs`) is taken at the first start of a test build
+after a release build, before that start writes anything; a switch back offers to put it back ("Put back my profiles
+and settings from before the beta"), at Restart now, before the release starts. No file a test build of dev.29 writes
+has a new format number, and no file the release reads became strict (checked against `2301cc5f`, the dev.28 release:
+`git diff 2301cc5f -- crates/kiln-manage/src launcher/src-tauri/src` adds `deny_unknown_fields` only to files that are
+new in dev.29), so the release reads all of it; the copy is there for what the player changed in the beta (and for later
+test builds that do change a format).
+
+| File | Written by | What the release (dev.28) does with what the test build wrote | In the copy |
+|---|---|---|---|
+| `<data>/settings.json` | launcher | reads it: unknown keys are ignored (`keepVersions`), `updateChannel: "beta"` reads as no choice (it follows its own channel, dev); its next save drops `keepVersions` (a test build then uses the default, 1) | yes |
+| `<data>/update.json` | self-update | reads it (format 1): `updated` names the switch (`from` a build id with `+beta.<n>`), so its start says "Updated to <version>" | yes |
+| `<data>/profiles/<pid>/meta.json` | profiles | reads it: format 1, the same struct since dev.28 (a test build writes it durably, same shape); a mod version taken in the beta is an ordinary Library version | yes |
+| `<data>/profiles/<pid>/config/`, `data/` | the mods (their settings) | the mods' own files; left as they are | no |
+| Library entries `library/<kind>/<id>/<version>+<hash8>/` and their records | library | reads them (unchanged format); a version kept for a roll back is one more version there, and its Clean up may remove it (a test build then forgets it) | no (mods stay) |
+| `library/kiln-kept.json`, `library/kiln-kept/` | kept versions (new in dev.29) | does not read them; back on a test build, a kept entry that is gone is forgotten, a half-done change is finished or undone (`kept::recover`) | `kiln-kept.json`, when it was there |
+| `<data>/installs/*.json`, `<data>/runtime/*.zip` | games, shipped runtimes | read as before; both launchers' runtimes stay in the list | no |
+| `<data>/state/launcher-build.json`, `<data>/snapshots/before-beta/` | dev.29 (new) | does not read them | (the copy itself) |
+| `<game>/kiln/.install.json` (receipt) | install | reads it (format 1); its installer says `kiln-launcher <v> beta <n>` | no: Play installs the release's Kiln (dev.29 on; dev.28: Runtime) |
+| `<game>/kiln/profile.json`, `chain.ini` | activation | written again for the active profile at every Play, by whichever launcher plays | no |
+| `<game>/kiln/state/placement-journal.json` | placement (new in dev.29) | does not read it; back on a test build, recovery moves or deletes nothing a journal names without proving it | no |
+| `<game>/kiln/kiln.json` | Kiln settings | the runtime in the game reads it; the launcher edits keys by path and keeps the others (not checked by a test here) | no |
+| `<game>/kiln/config/compat-rules.json` (rules the player wrote) | the player | a `before` rule (new in dev.29) is reported as an error and skipped; the rules Kiln ships come with its runtime | no |
+| World saves and Kiln's data beside them | the game, mods | the game's: a world played with a test build may not load the same way on the release (the dialogs say so); the Saves page keeps backups | no |
+
+Tests: `launcher/src-tauri/src/snapshot/tests.rs` (`cargo test -p kiln-launcher snapshot`): a data folder in dev.28's
+formats, a test build's own writes (settings, a profile save, a new profile, kept versions, a mod), dev.28's settings
+reader and channel rule on the result, a second test build keeping the first copy, the restore byte for byte with
+what the beta added left in place, a new copy after a switch back, no copy for a release build or an empty folder,
+and a changed `snapshot.json` that cannot write outside the data folder.
 
 ### Manifest (`latest.json`)
 Tauri's static format, plus fields the updater ignores:
@@ -208,6 +243,9 @@ Tauri's static format, plus fields the updater ignores:
   "kiln": { "format": 1, "channel": "dev", "page": "https://frostdev.io/kiln", "runtime": "0.2.0-dev+20261106.0f1ffa6" }
 }
 ```
+A test build's manifest (`updates/frostdev.io/beta/latest.json`, `updates/github/latest.json`) has the build id as its
+`version` (`0.2.0-dev.29+beta.3`, the version its files are signed for), files named after `0.2.0-dev.29-beta.3`, and
+`"kiln": { "format": 1, "channel": "beta", "beta": 3, ... }` (`launcher/src-tauri/src/selfupdate/testdata/beta/latest.json`).
 `tools/release/lib/release.py manifest` writes it; `launcher/src-tauri/src/selfupdate/testdata/latest.json` is the
 example the tests read.
 
