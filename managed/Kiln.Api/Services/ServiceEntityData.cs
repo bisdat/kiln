@@ -36,8 +36,9 @@ internal static class ServiceEntityData
         IReadOnlyList<Replay> Replays(string scope, string key) => [];
     }
 
-    /// <summary>One retained service value and its identity refusal, if any; Entity may be None before matching.</summary>
-    internal sealed record Replay(EntityId Entity, Guid? Template, WorldPosition Position, string Json, string? Reason);
+    /// <summary>One retained service value; Entity is None before matching. Reason says why it waits (null: it is on its
+    /// entity); Refused is true when the identity was refused (ambiguity), false while the entity has only not been found yet.</summary>
+    internal sealed record Replay(EntityId Entity, Guid? Template, WorldPosition Position, string Json, string? Reason, bool Refused = false);
 
     private static readonly HashSet<string> StrictScopes = new(StringComparer.Ordinal);
     /// <summary>Opt in optional-generation equality and unique positional matching for this scope only.

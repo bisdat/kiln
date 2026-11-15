@@ -43,6 +43,22 @@ public sealed class StrictScaleReplayTests : IDisposable
         Assert.Equal(0,TransformScaleKeeper.Counts.Waiting);
         Assert.Empty(ServiceEntityData.Store!.Replays("kiln:world", "transform-scale"));
     }
+    // Lab (dev29-scaleid, boot 2): the keeper's check ran before the chest had loaded and kiln.log said "kept, not
+    // re-applied: waiting for a unique entity" ten seconds before the scale was set again. A record whose entity has
+    // only not been found yet is the ordinary case at every start: listed for the mod, never logged as a refusal.
+    [Fact] public void A_record_whose_entity_has_not_loaded_yet_is_listed_but_not_logged_as_refused() {
+        table.Absorb("kiln:world",JsonNode.Parse("""{"entities":[{"template":"CHEST","pos":[42,0,0],"keys":{"transform-scale":{"mod":"m","scale":{"x":2,"y":2,"z":2},"base":{"x":1,"y":1,"z":1}}}}]}""".Replace("CHEST",Chest.ToString()))!.AsObject());
+        table.StartMatching(); table.Tick(); table.HandOverServiceValues(); TransformScaleKeeper.ApplyWaiting();
+        Assert.DoesNotContain(capture.Lines, l => l.Contains("kept, not re-applied"));
+        var waiting = Assert.Single(World.GetWaitingTransformScales());
+        Assert.Contains("has not been found", waiting.Reason);
+        var replay = Assert.Single(ServiceEntityData.Store!.Replays("kiln:world", "transform-scale"));
+        Assert.False(replay.Refused);
+        Place(2001);  // the chest loads; a lookup matches it at once (the periodic matching has its own pace)
+        Assert.NotNull(ServiceEntityData.Store!.Get(new EntityId(2001), "kiln:world", "transform-scale"));
+        Assert.Empty(World.GetWaitingTransformScales());
+        Assert.DoesNotContain(capture.Lines, l => l.Contains("kept, not re-applied"));
+    }
     [Fact] public void Restart_neighbours_wait_even_after_one_disappears() {
         Place(2001); Place(2002,x:42.2);
         table.Absorb("kiln:world",JsonNode.Parse("""{"entities":[{"template":"CHEST","pos":[42,0,0],"keys":{"transform-scale":{"mod":"m","scale":{"x":2,"y":2,"z":2},"base":{"x":1,"y":1,"z":1}}}}]}""".Replace("CHEST",Chest.ToString()))!.AsObject());

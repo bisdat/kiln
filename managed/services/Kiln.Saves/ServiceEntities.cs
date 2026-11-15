@@ -73,7 +73,8 @@ internal sealed class ServiceEntities(EntityTable? testTable = null) : ServiceEn
         var table = Table(scope);
         return table.Records.Where(r => r.ByMod.TryGetValue(scope, out var keys) && keys.ContainsKey(key))
             .Select(r => new ServiceEntityData.Replay(new EntityId(r.Entity), r.Template, (r.WaitingReason is not null ? r.MatchPosition : null) ?? new WorldPosition(r.X, r.Y, r.Z),
-                r.ByMod[scope][key].Json ?? "null", r.WaitingReason ?? (r.Entity == 0 ? "waiting for a unique entity at the recorded place" : null))).ToList();
+                r.ByMod[scope][key].Json ?? "null", r.WaitingReason ?? (r.Entity == 0 ? "its entity has not been found at the recorded place yet" : null),
+                r.WaitingReason is not null)).ToList();
     }
 
     private static void Check(string scope, string key)

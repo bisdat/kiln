@@ -190,7 +190,9 @@ internal static class TransformScaleKeeper
             ToApply.Remove(id);
             ModInvoke.Run(mod, () => _ = SetAgain(entity, w.Saved), "kiln.world: setting a kept transform scale again");
         }
-        foreach (var record in WaitingScales())
+        // Said once per record and world, and only for a refused identity: a record whose entity has only not loaded
+        // yet is the ordinary case at every start (lab: the line came ten seconds before the match) and is not a finding.
+        foreach (var record in WaitingScales(null, refusedOnly: true))
         {
             var warning = $"mod '{record.Mod}', template {record.Template}, position {record.Position}, scale {record.Scale}: kept, not re-applied: {record.Reason}";
             if (IdentityNotes.Add(warning)) Backend.Current.Log(0, LogLevel.Info, "kiln.world: " + warning);
@@ -198,9 +200,9 @@ internal static class TransformScaleKeeper
     }
 
     /// <summary>Waiting identity diagnostics, including unresolved records with no live entity. Not a write result.</summary>
-    internal static IReadOnlyList<WaitingTransformScale> WaitingScales(string? modId = null) =>
+    internal static IReadOnlyList<WaitingTransformScale> WaitingScales(string? modId = null, bool refusedOnly = false) =>
         ServiceEntityData.Store?.Replays(Scope, Key)
-            .Where(r => r.Reason is not null && Parse(r.Json) is { } saved && (modId is null || saved.Mod == modId))
+            .Where(r => r.Reason is not null && (!refusedOnly || r.Refused) && Parse(r.Json) is { } saved && (modId is null || saved.Mod == modId))
             .Select(r => new WaitingTransformScale(Parse(r.Json)!.Mod, r.Template, r.Position, Parse(r.Json)!.Scale, r.Reason!))
             .ToList() ?? [];
 
