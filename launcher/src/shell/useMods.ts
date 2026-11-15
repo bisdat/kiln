@@ -10,7 +10,7 @@ import { qk, useActiveProfile, useGameStatus, useLaunchState, useLibrary, usePro
 import { engineStatusKey } from "../components/EngineStatus";
 import { useFound } from "../pages/profiles/GameFolder";
 import { profileQueueState, useProfileEdit, watchProfileEdits, type Edit } from "../pages/profiles/useProfileEdit";
-import { applyBulk, buildRows, bulkPlan, changeKey, countLine, revertBulk, type BulkChange, type BulkPlan, type ModRow } from "./mods";
+import { applyBulk, buildRows, bulkPlan, changeKey, countLine, defaultVersion, revertBulk, type BulkChange, type BulkPlan, type ModRow } from "./mods";
 import { useRetained } from "./notices";
 
 /** The profile a player gets when they never made one (kiln_manage::quick::DEFAULT_PROFILE). Loaded, the main screen
@@ -76,7 +76,7 @@ export function useMods(game: GameInstall | null) {
   const toggle = (r: ModRow, on: boolean) => {
     if (!profile || !r.kind || r.found) return;
     if (r.entry) { edit.toggle(r.kind, r.id, on); return; }
-    const v = r.lib?.versions.find((v) => !v.kept);
+    const v = defaultVersion(r.lib);
     if (!on || !v) return;
     const mod: ProfileMod = { id: r.id, version: v.version, hash: v.hash, enabled: true };
     edit.add(r.kind, mod);

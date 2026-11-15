@@ -11,6 +11,7 @@ import { invalidateAdmin, useAdminCall, useAdminQuery, useHasOp, useInAdminProvi
 import * as api from "../../api/commands";
 import type { LibraryEntry, LibraryRef } from "../../api/commands";
 import { useLibrary } from "../../api/hooks";
+import { defaultVersion } from "../../shell/mods";
 import { confirm } from "../../admin/ui";
 import type { KilnMod, ModOpResult, TestReport } from "../../admin/types";
 import {
@@ -236,7 +237,7 @@ function SyncDialog({ id, open, onClose, mods }: { id: string; open: boolean; on
               <Toggle checked={!!cur} disabled={handPlaced} label={e.name} hint={handPlaced ? "A folder put there by hand has this id." : `${e.kind}, ${e.id}`}
                 onChange={(on) => {
                   const m = new Map(want);
-                  const v = e.versions.find((v) => !v.kept);
+                  const v = defaultVersion(e);
                   if (on && v) m.set(k, { kind: e.kind, id: e.id, version: v.version, hash: v.hash });
                   else m.delete(k);
                   setWant(m);
