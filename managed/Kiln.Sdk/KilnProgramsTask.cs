@@ -16,7 +16,7 @@ namespace Kiln.Sdk;
 /// with the attribute's access lists and flags. kiln.world reserves these programs before the world starts (chapter 06a 9.5);
 /// the author keeps no list by hand. Entries the project's own file declares stay; one that declares a [Query]'s key
 /// with other lists is an error. The assembly is read with System.Reflection.Metadata and never loaded.
-/// Error KILN036: a [Query] kiln.world cannot reserve (a bad key or name, no entity list, more than 8 programs, a
+/// Error KILN036: a [Query] kiln.world cannot reserve (a bad key or name, no entity list, more than 32 programs, a
 /// hand-written entry that says otherwise). Error KILN031: the assembly or the file cannot be read or written.
 /// </summary>
 public sealed class KilnPrograms : Microsoft.Build.Utilities.Task
@@ -36,8 +36,9 @@ public sealed class KilnPrograms : Microsoft.Build.Utilities.Task
     public static readonly (string Json, string Property)[] Flags =
         [("init", "Init"), ("hostOnly", "HostOnly"), ("exclusive", "Exclusive"), ("chunked", "Chunked"), ("pinned", "Pinned"), ("barrier", "Barrier")];
 
-    /// <summary>The most programs one file may reserve (kiln-programs.schema.json, boot_programs.h).</summary>
-    public const int MostPrograms = 8;
+    /// <summary>The most programs one file may reserve (kiln-programs.schema.json, boot_programs.h kBootProgramsPerFile:
+    /// 32 since 0.2.0-dev.29).</summary>
+    public const int MostPrograms = 32;
 
     /// <summary>The built mod assembly.</summary>
     [Required] public string AssemblyPath { get; set; } = "";
@@ -204,7 +205,7 @@ public sealed class KilnPrograms : Microsoft.Build.Utilities.Task
             programs[q.Key] = entry;
         }
         if (programs.Count > MostPrograms)
-            problems.Add($"kiln.programs.json would reserve {programs.Count} programs; kiln.world reserves at most {MostPrograms} per mod");
+            problems.Add($"kiln.programs.json would reserve {programs.Count} programs; kiln.world reserves at most {MostPrograms} per file");
         var file = new JsonObject { ["format"] = 1, ["programs"] = programs };
         return (file.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n", problems);
     }

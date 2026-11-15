@@ -109,13 +109,14 @@ public class ProgramsTaskTests
     }
 
     [Fact]
-    public void More_than_eight_programs_and_what_kiln_world_cannot_reserve_are_errors()
+    public void More_than_32_programs_and_what_kiln_world_cannot_reserve_are_errors()
     {
         var hand = new JsonObject();
-        for (var i = 0; i < 7; i++) hand[$"p{i}"] = new JsonObject { ["read"] = new JsonArray("Health"), ["flags"] = new JsonArray() };
+        for (var i = 0; i < KilnPrograms.MostPrograms - 1; i++) hand[$"p{i}"] = new JsonObject { ["read"] = new JsonArray("Health"), ["flags"] = new JsonArray() };
         var (ok, engine, _) = Run(new JsonObject { ["format"] = 1, ["programs"] = hand }.ToJsonString());
-        Assert.False(ok);
-        Assert.Contains(engine.Errors, x => x.Code == "KILN036" && x.Message.Contains("at most 8"));
+        Assert.False(ok);   // 31 by hand and the two [Query] structs: 33
+        Assert.Equal(32, KilnPrograms.MostPrograms);
+        Assert.Contains(engine.Errors, x => x.Code == "KILN036" && x.Message.Contains("at most 32"));
 
         static Dictionary<string, string[]> L(params (string, string[])[] lists) => lists.ToDictionary(l => l.Item1, l => l.Item2);
         Assert.Null(KilnPrograms.Check("A", "a_b", L(("read", ["Fuel"]))));

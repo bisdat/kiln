@@ -197,7 +197,7 @@ public override void OnLoad()
   the mod into the mod's `kiln.programs.json` (key: the attribute's `Key`, or the struct's full name with `.` and `+` as
   `_`; the lists; the flags), and kiln.world reserves those programs when the server starts. `Define` binds the handler
   to the reservation by that key. Entries the project's own `kiln.programs.json` declares stay; a hand-written entry
-  under a `[Query]`'s key with other lists, more than 8 programs, a bad name or a query without an entity list stops the
+  under a `[Query]`'s key with other lists, more than 32 programs (the boot limit per file), a bad name or a query without an entity list stops the
   build (KILN036). A mod built without the Kiln SDK writes the file itself in the same form
   (`schema/kiln-programs.schema.json`).
 - **Results.** `ProgramRegistration`: `Ok = false` with `"not reserved at boot: rebuild the mod and restart the server"`
