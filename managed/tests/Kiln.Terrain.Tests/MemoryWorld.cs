@@ -10,6 +10,7 @@ internal sealed class MemoryWorld
     public const int GroundY = 100;         // cells below are stone (material 1), above air
     public string WorldId = "world-a";
     public bool Running = true;
+    public bool ProvenNewSession = true;
     public bool CanWait = true;
     public bool Loaded = true;
     public int Ticks;
@@ -60,6 +61,7 @@ internal sealed class MemoryWorld
     {
         public string Mod => mod;
         public bool WorldRunning => w.Running;
+        public bool NewWorldSession => w.ProvenNewSession;
         public bool CanWaitForWorld => w.CanWait;
         public string? WorldId => w.WorldId;
         public (int X, int Z)? GridCells => (20480, 20480);
@@ -128,7 +130,7 @@ internal sealed class MemoryWorld
         {
             if (w.BookError is { } error) throw error;
             var key = w.WorldId + "|" + mod;
-            if (!w.Books.TryGetValue(key, out var b)) w.Books[key] = b = new TerrainBook();
+            if (!w.Books.TryGetValue(key, out var b)) w.Books[key] = b = TerrainBook.Create(NewWorldSession);
             return b;
         }
 

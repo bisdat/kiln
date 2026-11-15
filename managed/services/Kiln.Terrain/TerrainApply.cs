@@ -11,9 +11,13 @@ internal sealed class TerrainEngine(ITerrainBackend backend, TerrainSession sess
 
     public async Task<TerrainResult> Apply(TerrainPlan plan, TerrainApplyOptions options, int edge)
     {
+        if (backend.BudgetStep is not null) edge = Math.Min(edge, 8);
         var patch = plan.Patch;
+        if (!Enum.IsDefined(options.InstallChoice)) throw new ArgumentException("unknown InstallChoice", nameof(options));
+        if (patch.Persistence != TerrainPersistence.Kept && options.InstallChoice != TerrainInstallChoice.Automatic)
+            throw new ArgumentException("InstallChoice applies only to kept overlays", nameof(options));
         TerrainResult Result(TerrainState state, string? reason, long cells = 0, int batches = 0, IReadOnlyList<TerrainConflict>? conflicts = null) =>
-            new(state is TerrainState.Completed or TerrainState.AlreadyApplied, reason, state, patch.Id, patch.Version, cells, batches, conflicts ?? []);
+            new(state is TerrainState.Completed or TerrainState.AlreadyApplied or TerrainState.Adopted, reason, state, patch.Id, patch.Version, cells, batches, conflicts ?? []);
 
         if (!await WaitForWorld(options.Cancel)) return Result(TerrainState.Refused, "the world did not start running");
         CheckGrid(plan);
@@ -33,19 +37,30 @@ internal sealed class TerrainEngine(ITerrainBackend backend, TerrainSession sess
 
     private async Task<TerrainResult> Run(TerrainPlan plan, TerrainApplyOptions options, int edge, string world, bool kept)
     {
+        if (backend.BudgetStep is not null) edge = Math.Min(edge, 8);
         var patch = plan.Patch;
+        if (!Enum.IsDefined(options.InstallChoice)) throw new ArgumentException("unknown InstallChoice", nameof(options));
+        if (patch.Persistence != TerrainPersistence.Kept && options.InstallChoice != TerrainInstallChoice.Automatic)
+            throw new ArgumentException("InstallChoice applies only to kept overlays", nameof(options));
+        double? presenceShare = null;
+        bool installedWithoutProof = false, adoptFromPresence = false;
+        string? presenceReason = null;
         TerrainResult Result(TerrainState state, string? reason, long cells = 0, int batches = 0, IReadOnlyList<TerrainConflict>? conflicts = null) =>
-            new(state is TerrainState.Completed or TerrainState.AlreadyApplied, reason, state, patch.Id, patch.Version, cells, batches, conflicts ?? []);
+            new(state is TerrainState.Completed or TerrainState.AlreadyApplied or TerrainState.Adopted, DecisionReason(reason, presenceReason), state, patch.Id, patch.Version, cells, batches, conflicts ?? [])
+            { PresenceShare = presenceShare, InstalledWithoutProof = installedWithoutProof };
         TerrainBook? book = null;
         TerrainRecord? rec = null;
         if (kept)
         {
+            if (backend.PersistenceFailure is { } unavailable) return Result(TerrainState.Refused, unavailable);
             if (!TryBook(out book, out var error)) return Result(TerrainState.Refused, error);
             session.Learn(world, backend.Mod, book!);
             TerrainLoss.Witness(backend, book!);   // the witness knows every plan the ledger has (TerrainLoss)
             book!.Plans.TryGetValue(patch.Id, out rec);
             if (rec is not null)
             {
+                presenceShare = rec.PresenceShare;
+                installedWithoutProof = rec.InstalledWithoutProof;
                 if (patch.Version < rec.Version)
                     return Result(TerrainState.Refused, $"this world has plan '{patch.Id}' at version {rec.Version}; version {patch.Version} is older and a downgrade is never applied");
                 if (patch.Version == rec.Version && rec.Content != plan.ContentHash)
@@ -70,7 +85,25 @@ internal sealed class TerrainEngine(ITerrainBackend backend, TerrainSession sess
             if (foreign.Count > 0)
                 return Result(TerrainState.Refused, $"{foreign.Count} block(s) belong to {foreign[0].Owner}", conflicts: foreign);
             // no record, but the witness says this world had one: its ledger was lost (TerrainLoss, "When the ledger is gone")
-            if (rec is null && !book.Unforget(patch.Id) && TerrainLoss.Check(backend, plan, book) is { } lost) return Result(lost.State, lost.Reason);
+            if (rec is null && options.InstallChoice == TerrainInstallChoice.Automatic && !book.WasForgotten(patch.Id) && TerrainLoss.Check(backend, plan, book) is { } lost)
+            {
+                if (lost.State != TerrainState.NeedsAdoption) return Result(lost.State, lost.Reason);
+                var sample = await SamplePresence(plan, options, edge, world);
+                if (sample.Error is not null) return Result(TerrainState.Partial, sample.Error);
+                presenceShare = sample.Share;
+                presenceReason = PresenceReason(plan, sample);
+                session.WarnOnce(world, backend.Mod, patch.Id, presenceReason);
+                if (sample.Equal != sample.Cells && sample.Share >= PresenceBound)
+                    return Result(TerrainState.NeedsAdoption, presenceReason);
+                adoptFromPresence = sample.Equal == sample.Cells;
+                installedWithoutProof = !adoptFromPresence;
+                // Sampling may have yielded while another mod claimed these blocks. Recheck before publishing ours.
+                foreach (var b in plan.Blocks())
+                    if (session.OwnerOf(world, backend.Mod, TerrainPlan.BlockKey(b)) is { } owner)
+                        return Result(TerrainState.Refused, $"a block belongs to {owner}", conflicts: [new(TerrainConflictKind.OtherPlan, TerrainPlan.WholeBlock(b), owner)]);
+            }
+            book.Unforget(patch.Id);
+            if (backend.NewWorldSession) book.EstablishedInNewWorld = true;
 
             if (rec is null)
             {
@@ -100,6 +133,10 @@ internal sealed class TerrainEngine(ITerrainBackend backend, TerrainSession sess
             rec.Region = TerrainRecord.FromBox(plan.Region);
             rec.Content = plan.ContentHash;
             rec.Complete = false;
+            rec.PresenceShare = presenceShare;
+            rec.InstalledWithoutProof = installedWithoutProof;
+            if (options.InstallChoice == TerrainInstallChoice.Adopt || adoptFromPresence) { rec.Adopted = true; rec.Adopting = true; }
+            if (options.InstallChoice == TerrainInstallChoice.InstallAnyway) { rec.Adopted = false; rec.Adopting = false; }
             rec.KilnVersion = backend.KilnVersion;
             backend.Save(book);
             if (!TerrainLoss.Witness(backend, book))
@@ -112,6 +149,32 @@ internal sealed class TerrainEngine(ITerrainBackend backend, TerrainSession sess
             var foreign = plan.Blocks().Select(b => (Box: b, Owner: session.OwnerOf(world, backend.Mod, TerrainPlan.BlockKey(b))))
                 .Where(b => b.Owner is not null).Select(b => new TerrainConflict(TerrainConflictKind.OtherPlan, TerrainPlan.WholeBlock(b.Box), b.Owner)).ToList();
             if (foreign.Count > 0) return Result(TerrainState.Refused, $"blocks belong to {foreign[0].Owner}", conflicts: foreign);
+        }
+        if (kept && rec!.Adopting)
+        {
+            // Read first, then publish all receipts together. No writes or Changed events on adoption.
+            var adopted = new Dictionary<string, TerrainBlock>();
+            foreach (var box in plan.Batches(edge))
+            {
+                if (options.Cancel.IsCancellationRequested || !SameWorld(world)) return Result(TerrainState.Partial, "adoption stopped");
+                if (!await backend.Load(box, options.LoadTimeout) || !SameWorld(world))
+                    return Result(TerrainState.Partial, "adoption could not read the current terrain");
+                var read = await Read(box, world);
+                if (!read.Ok)
+                    return Result(TerrainState.Partial, "adoption could not read the current terrain");
+                foreach (var part in TerrainPlan.Cut(box, 8))
+                {
+                    if (!plan.AnyAddressed(part)) continue;
+                    var hash = TerrainPlan.Fingerprint(box, read.Cells, part);
+                    adopted[TerrainPlan.BlockKey(part)] = new TerrainBlock { Before = hash, After = hash };
+                }
+            }
+            rec!.Blocks = adopted;
+            rec.EarlierBlocks = null; rec.EarlierRegion = null;
+            rec.Adopted = true; rec.Adopting = false; rec.Complete = true; rec.AppliedAt = DateTimeOffset.UtcNow;
+            backend.Save(book!);
+            session.Learn(world, backend.Mod, book!);
+            return Result(TerrainState.Adopted, presenceReason ?? "Current terrain adopted without writing. Original terrain cannot be restored; Forget only releases ownership.");
         }
         var batches = plan.Batches(edge);
         var conflicts = new List<TerrainConflict>();
@@ -127,12 +190,17 @@ internal sealed class TerrainEngine(ITerrainBackend backend, TerrainSession sess
             try { loaded = await backend.Load(box, options.LoadTimeout); }
             catch (BuildException e) { stop = e.Message; break; }
             if (!SameWorld(world)) { stop = "the world stopped or changed"; break; }
-            if (!loaded || !backend.TryRead(box, out var now))
+            var read = loaded ? await Read(box, world) : (false, Array.Empty<Voxel>());
+            var now = read.Item2;
+            if (!read.Item1)
             {
                 stop = $"the voxel tiles under {box} did not load";
                 break;
             }
+            if (!await session.Budget.Acquire(backend, 0, 0) || !SameWorld(world)) { stop = "the world stopped or changed"; break; }
+            var started = backend.BudgetMilliseconds;
             var (stopped, cells, wrote) = await Batch(plan, box, now, rec, options, conflicts, world);
+            session.Budget.Charge(backend, started);
             if (stopped is not null) { stop = stopped; }
             if (wrote)
             {
@@ -177,7 +245,7 @@ internal sealed class TerrainEngine(ITerrainBackend backend, TerrainSession sess
             if (!plan.AnyAddressed(part)) continue;
             var key = TerrainPlan.BlockKey(part);
             var before = TerrainPlan.Fingerprint(box, now, part);
-            var what = rec is null ? BlockPlan.Write : Decide(rec, key, part, before);
+            var what = rec is null ? BlockPlan.Write : await Decide(rec, key, part, before, world);
             switch (what)
             {
                 case BlockPlan.Done:
@@ -238,7 +306,7 @@ internal sealed class TerrainEngine(ITerrainBackend backend, TerrainSession sess
             BuildResult r;
             // guarded: kiln.build commits only if the masked cells still hold what this batch read, compared after its
             // BuildEditingEvent handlers and right before the commit, so an edit made in between is never written over
-            try { r = await backend.Write(box, cells, mask, options.InBases, transient, label, options.LoadTimeout, expected: now); }
+            try { r = await Write(box, cells, mask, options.InBases, transient, label, options.LoadTimeout, expected: now); }
             catch (BuildException e) { return (e.Message, changed, wrote); }
             if (!SameWorld(world)) return ("the world stopped or changed", r.CellsChanged, !r.Refused);
             if (r.Refusal is BuildRefusal.Base or BuildRefusal.Changed)
@@ -254,7 +322,7 @@ internal sealed class TerrainEngine(ITerrainBackend backend, TerrainSession sess
                     if (!SameWorld(world)) return ("the world stopped or changed", changed, wrote);
                     Record([block]);
                     BuildResult pr;
-                    try { pr = await backend.Write(part, pc, pm, options.InBases, transient, label, options.LoadTimeout, expected: Sub(box, now, mask, part).Cells); }
+                    try { pr = await Write(part, pc, pm, options.InBases, transient, label, options.LoadTimeout, expected: Sub(box, now, mask, part).Cells); }
                     catch (BuildException e) { return (e.Message, changed, wrote); }
                     if (pr.Refusal is BuildRefusal.Base or BuildRefusal.Changed)
                     {
@@ -292,14 +360,14 @@ internal sealed class TerrainEngine(ITerrainBackend backend, TerrainSession sess
         }
         else { Record(blocks); Committed(blocks); }
         if (!SameWorld(world)) return ("the world stopped or changed", changed, wrote);
-        if (rec is not null && !backend.TryRead(box, out _))
+        if (rec is not null && !(await Read(box, world)).Ok)
             return ($"the voxel tiles under {box} went away after the write", changed, wrote);
         return (null, changed, wrote);
     }
 
     /// <summary>What to do with a block the record may know. <paramref name="now"/> is the fingerprint of the block's cells
     /// inside the new region.</summary>
-    private BlockPlan Decide(TerrainRecord rec, string key, CellBox part, string now)
+    private async Task<BlockPlan> Decide(TerrainRecord rec, string key, CellBox part, string now, string world)
     {
         if (rec.Blocks.TryGetValue(key, out var mine))
         {
@@ -314,20 +382,25 @@ internal sealed class TerrainEngine(ITerrainBackend backend, TerrainSession sess
             if (old.GivenUp) return BlockPlan.GivenUp;
             // the earlier version's fingerprint is over its own region's part of the block
             var oldPart = TerrainPlan.Intersect(TerrainPlan.WholeBlock(part), TerrainRecord.ToBox(rec.EarlierRegion ?? []));
-            if (oldPart.IsEmpty || !backend.TryRead(oldPart, out var cells)) return BlockPlan.PlayerEdit;
-            return TerrainPlan.Fingerprint(oldPart, cells, oldPart) == old.After ? BlockPlan.Write : BlockPlan.PlayerEdit;
+            if (oldPart.IsEmpty) return BlockPlan.PlayerEdit;
+            var read = await Read(oldPart, world);
+            if (!read.Ok) return BlockPlan.PlayerEdit;
+            return TerrainPlan.Fingerprint(oldPart, read.Cells, oldPart) == old.After ? BlockPlan.Write : BlockPlan.PlayerEdit;
         }
         return BlockPlan.Write;
     }
 
     public async Task<TerrainPlanReport> Inspect(TerrainPlan plan, TerrainApplyOptions options, int edge)
     {
+        if (backend.BudgetStep is not null) edge = Math.Min(edge, 8);
         var patch = plan.Patch;
         var batches = plan.Batches(edge);
         var blockList = plan.Blocks().ToList();
+        double? presenceShare = null;
+        string? presenceReason = null;
         TerrainPlanReport Report(bool ok, string? reason, TerrainState would, IReadOnlyList<TerrainConflict>? conflicts = null) =>
-            new(ok, reason, plan.Region, plan.AddressedCells, blockList.Count, batches.Count, (long)blockList.Count * TerrainPlan.BytesPerBlock,
-                would, conflicts ?? []);
+            new(ok, DecisionReason(reason, presenceReason), plan.Region, plan.AddressedCells, blockList.Count, batches.Count, (long)blockList.Count * TerrainPlan.BytesPerBlock,
+                would, conflicts ?? []) { PresenceShare = presenceShare };
 
         if (!backend.WorldRunning) return Report(false, "the world is not running", TerrainState.Refused);
         CheckGrid(plan);
@@ -357,7 +430,16 @@ internal sealed class TerrainEngine(ITerrainBackend backend, TerrainSession sess
                 if (session.OwnerOf(world, backend.Mod, TerrainPlan.BlockKey(b)) is { } owner)
                     foreign.Add(new TerrainConflict(TerrainConflictKind.OtherPlan, TerrainPlan.WholeBlock(b), owner));
             if (foreign.Count > 0) return Report(true, null, TerrainState.Refused, foreign);
-            if (rec is null && !book.WasForgotten(patch.Id) && TerrainLoss.Check(backend, plan, book) is { } lost) return Report(true, lost.Reason, lost.State);
+            if (rec is null && options.InstallChoice == TerrainInstallChoice.Automatic && !book.WasForgotten(patch.Id) && TerrainLoss.Check(backend, plan, book) is { } lost)
+            {
+                if (lost.State != TerrainState.NeedsAdoption) return Report(true, lost.Reason, lost.State);
+                var sample = await SamplePresence(plan, options, edge, world);
+                if (sample.Error is not null) return Report(false, sample.Error, TerrainState.Partial);
+                presenceShare = sample.Share;
+                presenceReason = PresenceReason(plan, sample);
+                if (sample.Equal == sample.Cells) return Report(true, presenceReason, TerrainState.Adopted);
+                if (sample.Share >= PresenceBound) return Report(true, presenceReason, TerrainState.NeedsAdoption);
+            }
         }
         if (session.Running(world, backend.Mod, patch.Id)) return Report(true, "the plan is being applied already", TerrainState.Refused);
         if (patch.Persistence == TerrainPersistence.Transient)
@@ -370,7 +452,18 @@ internal sealed class TerrainEngine(ITerrainBackend backend, TerrainSession sess
         try { loaded = await backend.Load(plan.Region, options.LoadTimeout); }
         catch (BuildException e) { return Report(false, e.Message, TerrainState.Partial); }
         if (!SameWorld(world)) return Report(false, "the world stopped or changed", TerrainState.Partial);
-        if (!loaded || !backend.TryRead(plan.Region, out var now))
+        if (!loaded)
+            return Report(false, $"the voxel tiles under {plan.Region} did not load", TerrainState.Partial);
+        var now = new Voxel[plan.Region.Count];
+        foreach (var chunk in plan.Batches(edge))
+        {
+            var read = await Read(chunk, world);
+            if (!read.Ok) return Report(false, "the world stopped or tiles went away", TerrainState.Partial);
+            for (var z = 0; z < chunk.SizeZ; z++)
+            for (var y = 0; y < chunk.SizeY; y++)
+                read.Cells.AsSpan(chunk.Index(0,y,z),chunk.SizeX).CopyTo(now.AsSpan(plan.Region.Index(chunk.X-plan.Region.X,chunk.Y+y-plan.Region.Y,chunk.Z+z-plan.Region.Z),chunk.SizeX));
+        }
+        if (!SameWorld(world))
             return Report(false, $"the voxel tiles under {plan.Region} did not load", TerrainState.Partial);
 
         var conflicts = new List<TerrainConflict>();
@@ -378,9 +471,13 @@ internal sealed class TerrainEngine(ITerrainBackend backend, TerrainSession sess
         TerrainRecord? view = rec is null ? null : ViewFor(rec, patch.Version);
         foreach (var part in blockList)
         {
+            if (!await session.Budget.Acquire(backend, 0, 0) || !SameWorld(world)) return Report(false, "the world stopped or changed", TerrainState.Partial);
+            var started = backend.BudgetMilliseconds;
+            try
+            {
             var whole = TerrainPlan.WholeBlock(part);
             var key = TerrainPlan.BlockKey(part);
-            var what = view is null ? BlockPlan.Write : Decide(view, key, part, TerrainPlan.Fingerprint(plan.Region, now, part));
+            var what = view is null ? BlockPlan.Write : await Decide(view, key, part, TerrainPlan.Fingerprint(plan.Region, now, part), world);
             if (what is BlockPlan.PlayerEdit or BlockPlan.GivenUp)
             {
                 conflicts.Add(new TerrainConflict(what == BlockPlan.GivenUp ? WhyOf(view!, key) : TerrainConflictKind.PlayerEdit, whole));
@@ -391,11 +488,13 @@ internal sealed class TerrainEngine(ITerrainBackend backend, TerrainSession sess
             // a dry-run write of the block: kiln.build says whether a base is in the way
             var (pc, pm) = Sub(plan.Region, plan.Target, plan.Addressed, part);
             BuildResult probe;
-            try { probe = await backend.Write(part, pc, pm, false, true, "terrain inspect", options.LoadTimeout, dryRun: true); }
+            try { probe = await Write(part, pc, pm, false, true, "terrain inspect", options.LoadTimeout, dryRun: true); }
             catch (BuildException e) { return Report(false, e.Message, TerrainState.Partial); }
             if (!SameWorld(world)) return Report(false, "the world stopped or changed", TerrainState.Partial);
             if (probe.Refusal == BuildRefusal.Base) conflicts.Add(new TerrainConflict(TerrainConflictKind.BaseZone, whole));
             else if (probe.Refused) return Report(false, probe.Reason, TerrainState.Partial);
+            }
+            finally { session.Budget.Charge(backend, started); }
         }
         return Report(true, null, conflicts.Count == 0 ? TerrainState.Completed : TerrainState.Conflict, conflicts);
     }
@@ -416,6 +515,14 @@ internal sealed class TerrainEngine(ITerrainBackend backend, TerrainSession sess
         return new TerrainRecord { Version = version, Region = rec.Region, EarlierBlocks = earlier, EarlierRegion = region };
     }
 
+    public TerrainResult Forget(string id, bool restoreTerrain)
+    {
+        if (restoreTerrain)
+            return new(false, "Original terrain cannot be restored: overlays store fingerprints, not original cells; adopted terrain has no original image. Use Forget(id) to release ownership only.", TerrainState.Refused, id, 0, 0, 0, []);
+        var ok = Forget(id);
+        return new(ok, ok ? null : "no removable plan in this world", ok ? TerrainState.Completed : TerrainState.Refused, id, 0, 0, 0, []);
+    }
+
     public bool Forget(string id)
     {
         if (session.Running(backend.WorldId ?? "", backend.Mod, id)) return false;
@@ -432,7 +539,80 @@ internal sealed class TerrainEngine(ITerrainBackend backend, TerrainSession sess
         if (!TryBook(out var book, out _)) return [];
         session.Learn(backend.WorldId ?? "", backend.Mod, book!);
         return book.Plans.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => new TerrainPlanInfo(p.Key, p.Value.Version, p.Value.Box,
-            p.Value.Complete, p.Value.Blocks.Values.Count(b => !b.GivenUp), p.Value.Blocks.Values.Count(b => b.GivenUp), p.Value.AppliedAt)).ToList();
+            p.Value.Complete, p.Value.Blocks.Values.Count(b => !b.GivenUp), p.Value.Blocks.Values.Count(b => b.GivenUp), p.Value.AppliedAt) { Adopted = p.Value.Adopted, PresenceShare = p.Value.PresenceShare, InstalledWithoutProof = p.Value.InstalledWithoutProof }).ToList();
+    }
+
+    private static string? DecisionReason(string? reason, string? presence) =>
+        reason is null || presence is null || reason == presence ? reason ?? presence : $"{reason} {presence}";
+
+    private const double PresenceBound = 0.25;
+    private readonly record struct Presence(long Equal, long Cells, string? Error = null)
+    {
+        public double Share => Cells == 0 ? 0 : (double)Equal / Cells;
+    }
+
+    private async Task<Presence> SamplePresence(TerrainPlan plan, TerrainApplyOptions options, int edge, string world)
+    {
+        long equal = 0, cells = 0;
+        foreach (var box in plan.Batches(edge))
+        {
+            if (options.Cancel.IsCancellationRequested || !SameWorld(world)) return new(0, 0, "presence sampling stopped");
+            try
+            {
+                if (!await backend.Load(box, options.LoadTimeout) || !SameWorld(world)) return new(0, 0, "presence sampling could not load terrain");
+                var read = await Read(box, world);
+                if (!read.Ok || options.Cancel.IsCancellationRequested || !SameWorld(world)) return new(0, 0, "presence sampling stopped or could not read terrain");
+                var started = backend.BudgetMilliseconds;
+                try
+                {
+                    for (var z = 0; z < box.SizeZ; z++)
+                    for (var y = 0; y < box.SizeY; y++)
+                    for (var x = 0; x < box.SizeX; x++)
+                    {
+                        var ri = plan.Region.Index(box.X + x - plan.Region.X, box.Y + y - plan.Region.Y, box.Z + z - plan.Region.Z);
+                        if (!plan.Addressed[ri]) continue;
+                        cells++;
+                        if (read.Cells[box.Index(x,y,z)].Raw == plan.Target[ri].Raw) equal++;
+                    }
+                }
+                finally { session.Budget.Charge(backend, started); }
+            }
+            catch (BuildException e) { return new(0, 0, $"presence sampling failed: {e.Message}"); }
+        }
+        return new(equal, cells);
+    }
+
+    private string PresenceReason(TerrainPlan plan, Presence sample)
+    {
+        var share = sample.Share.ToString("0.##%", System.Globalization.CultureInfo.InvariantCulture);
+        var action = sample.Equal == sample.Cells
+            ? "already present; adopting without writing. Original terrain cannot be restored"
+            : sample.Share >= PresenceBound ? "needs adoption; nothing written; choose Adopt or InstallAnyway"
+            : "below the 25% presence bound; installing without proof";
+        return $"terrain: {backend.Mod}/{plan.Patch.Id}, world {backend.SaveIdentity.Id ?? backend.WorldId}: {sample.Equal}/{sample.Cells} addressed cells exactly match ({share}); {action}. " +
+            "Presence bound: 25%. Removing more than 75% of the measured overlay can make it look absent and allow refill; naturally matching cells can also trigger adoption.";
+    }
+
+    private async Task<(bool Ok, Voxel[] Cells)> Read(CellBox box, string world)
+    {
+        if (!await session.Budget.Acquire(backend, box.Count + (backend.BudgetStep is null ? 0 : 4), 0) || !SameWorld(world)) return (false, []);
+        var start = backend.BudgetMilliseconds;
+        try { var ok = backend.TryRead(box, out var cells); return (ok, cells); }
+        finally { session.Budget.Charge(backend, start); }
+    }
+
+    private async Task<BuildResult> Write(CellBox box, Voxel[] cells, bool[] mask, bool inBases, bool transient,
+        string label, TimeSpan timeout, bool dryRun = false, Voxel[]? expected = null)
+    {
+        var world = backend.WorldId ?? "";
+        if (!await backend.Load(box, timeout) || !SameWorld(world)) return new BuildResult(0, 0, false, false, box, 0, BuildRefusal.NotLoaded);
+        // Native widening, compare, before/readback, and streaming probes. Even a refused write pays this allowance.
+        var widened = TerrainPlan.WholeBlock(box).Count; // production units never cross an 8-cell boundary
+        var reads = backend.BudgetStep is null ? 0 : widened * 4;
+        if (!await session.Budget.Acquire(backend, reads, dryRun ? 0 : widened) || !SameWorld(world)) return new BuildResult(0, 0, false, false, box, 0, BuildRefusal.NotLoaded);
+        var start = backend.BudgetMilliseconds;
+        try { return await backend.Write(box, cells, mask, inBases, transient, label, timeout, dryRun, expected); }
+        finally { session.Budget.Charge(backend, start); }
     }
 
     private bool SameWorld(string world) => backend.WorldRunning && (backend.WorldId ?? "") == world;
@@ -443,6 +623,12 @@ internal sealed class TerrainEngine(ITerrainBackend backend, TerrainSession sess
         {
             book = null;
             error = "the world is not running";
+            return false;
+        }
+        if (backend.PersistenceFailure is { } failure)
+        {
+            book = null;
+            error = failure;
             return false;
         }
         try

@@ -1,8 +1,8 @@
 # Kiln.Terrain: bounded terrain overlays
 
 A mod declares a bounded patch of ground (an ore vein, a mound, a tunnel, a small dungeon shell) and Kiln applies it
-**once per world**, over several ticks, remembers who owns it and at which version, and refuses to write over what
-players changed afterwards. The cells are ordinary world edits made through [kiln.build](build.md): the game saves
+**once per world**, over several ticks, remembers who owns it and at which version, and protects recorded plans against writing over what
+players changed afterwards. Without history it uses a presence heuristic, with the limits below. The cells are ordinary world edits made through [kiln.build](build.md): the game saves
 them and sends them to every client like a player's own digging, so vanilla clients follow.
 
 | Layer | File |
@@ -10,7 +10,7 @@ them and sends them to every client like a player's own digging, so vanilla clie
 | Managed | `managed/services/Kiln.Terrain/` → `kiln/host/Kiln.Terrain.dll` (`Terrain`, `TerrainPatch`, events) |
 | Native | none: the library calls `Kiln.Build` and `Kiln.Saves` and adds no engine entry |
 | Sample | `mods/samples/OreVein` |
-| Test | `mods/tests/terrain-overlay-test` (three boots), `managed/tests/Kiln.Terrain.Tests` |
+| Test | `mods/tests/terrain-overlay-test` (four boots), `managed/tests/Kiln.Terrain.Tests` |
 | Evidence | `docs/re/build.md` |
 
 ## Using it
@@ -26,7 +26,7 @@ var mound = new TerrainPatch("mound", 1, new CellBox(corner.X, corner.Y, corner.
     new TerrainHeightfield(heights, Fill: 1, Mode: TerrainHeightMode.AddOnTop), [new TerrainPaletteEntry(1)]);
 
 var report = await Terrain.Inspect(mound);          // what would happen; writes nothing
-var result = await Terrain.Apply(mound);            // one batch a tick
+var result = await Terrain.Apply(mound);            // bounded units across ticks; may need adoption
 if (!result.Ok) Log.Warn($"mound: {result.State}, {result.Reason}");
 ```
 
@@ -45,10 +45,9 @@ Call it from mod code on the tick thread, on the server side (a dedicated server
 - **See another mod's plan when that mod is not loaded.** The ledger is the owning mod's world data (see "The
   ledger"). Two mods that are both loaded never write one block; a mod added later can write over the ground of a
   mod that was removed.
-- **Know about edits before its first apply.** A fresh plan writes over whatever is in its region (outside bases).
-- **Recognise a lost ledger when Kiln's witness is lost too.** A plan whose ledger record was lost is refused by Kiln's
-  witness, a second file outside the world's Kiln data; when all of `kiln/data` is lost, the plan is a first install
-  again (see "When the ledger is gone").
+- **Prove ownership from terrain alone.** Matching cells can be natural or player-made; excavations can erase
+  signs of an earlier overlay. Unknown history uses the 25% presence heuristic below. Removing more than 75% of
+  the measured overlay can make it look absent and allow a refill; naturally matching cells can require adoption.
 - **Large landscapes.** A region is at most 128 m across and 1,048,576 cells; every block it touches is saved in
   full (1 KiB before packing) and sent to every player near it like any edit. Baked terrain (replacing the shipped
   tiles before the world loads) is not built: `terrain.baked` is off.
@@ -57,7 +56,7 @@ Call it from mod code on the tick thread, on the server side (a dedicated server
 ## Game tests
 | Check | What it settles | State |
 |---|---|---|
-| `19f-overlay-client` | an overlay on a world a player hosts, and as a joined player sees it: appears, collides, digs, survives a reload | open; holds `terrain.overlays` on clients |
+| `19f-overlay-client` | an overlay on a world a player hosts, and as a joined player sees it: appears, collides, digs, survives a reload | unconfirmed real-game check |
 | `19f-terrain-client`, `19f-derived-companions` | a cooked terrain tile on a real client (the baked route's qualification) | open; no fixture in the client pass yet |
 | `19f-base-exposure`, `19f-outer-tile` | removing a saved block; ground outside the shipped extent | deferred: no qualified primitive |
 
@@ -118,11 +117,20 @@ An unknown `kind`, an unknown property or a wrong length is an `ArgumentExceptio
 | Region, position | inside the voxel grid, Y from 0 to 8191 | reads outside the grid report "ready" and return air |
 | Palette | 1 to 255 entries | a cell's number is a byte |
 | Kept plans per mod and world | 64 | bounds the mod's world data |
-| Cells per tick (`TerrainApplyOptions.CellsPerTick`) | default 32,768; 512 to 262,144 | one batch a tick; a full default batch took 42 ms on a lab server with no player (one measurement, 2026-11-13) |
-| Batch | a box of whole 8-cell blocks, at most `CellsPerTick` cells, edge 8, 16, 32 or 64 | a saved edit is an 8x8x8 block |
+| Cells per tick (`TerrainApplyOptions.CellsPerTick`) | default 32,768; 512 to 262,144 | an upper limit for this call; it cannot raise the shared host allowance |
+| Shared host allowance per server step | 4,096 write cells; 32,768 read cells; 2 ms of admitted work | every mod's Apply, adoption and Inspect shares the session budget, including conservative allowances for native internal reads and streaming probes |
+| Production work unit | at most one 8³-cell block (512 cells) | bounds an indivisible engine call; the per-call limit can only lower work, never raise the host budget |
 
-- **Moving a world without Kiln data applies overlays again.** Copying only the world save to another PC (including Steam cloud transfer) loses both ledger and witness in `kiln/data`; Kiln treats the plan as a first install and can put back terrain a player dug away. Keep the world's Kiln data with its save.
-- **No shared write budget.** Each concurrent `Apply` has its own `CellsPerTick` allowance; the default is not a total per-world limit. Multiple mods or applies add their work together, and `Inspect` can traverse many batches synchronously. One 32,768-cell write took 42 ms on an idle lab server; there is no demonstrated host frame-time bound.
+Terrain work is admitted in FIFO order. Native transient recovery spends the same allowance through the
+appended kiln.build budget API. Recovery attempts one 512-cell block on alternate steps, leaving regular
+opportunities for queued plans even if a recovery call overruns the time threshold. Large journals therefore
+restore gradually; old worlds can take many ticks to settle. When a cell allowance or the elapsed-work limit is exhausted, the operation
+continues on a later tick; synchronous tile reads and probes do not let Inspect bypass this. Forget only changes
+ownership metadata and uses no cell allowance; restoration is refused because original cells are not stored.
+The 2 ms limit is cooperative: it stops further admission after a unit completes and cannot interrupt an engine call.
+A single call, source lowering, storage I/O, or user callback can exceed it. The earlier idle-server measurement of
+42 ms for 32,768 cells motivated the much smaller 512-cell units; a host frame-time guarantee still requires the
+real-game checks. No client benchmark is claimed.
 
 Batches run in a fixed order (z, then y, then x), one per tick. The same patch gives the same batches and the same
 cells on every machine (`AddOnTop` depends on the ground it finds).
@@ -148,12 +156,19 @@ int Batches, IReadOnlyList<TerrainConflict> Conflicts)`:
 | State | Ok | Meaning |
 |---|---|---|
 | `Completed` | yes | every batch is written |
+| `NeedsAdoption` | no | unknown history and 25% to less than 100% matching addressed cells; no terrain written |
+| `Adopted` | yes | current cells recorded without writing; original cells cannot be restored |
 | `AlreadyApplied` | yes | this world has this plan at this version: nothing was read or written |
 | `Conflict` | no | written except in the blocks listed in `Conflicts`; those were left alone |
 | `Partial` | no | stopped (canceled, tiles did not load, a write was refused): `Batches` are in the world |
 | `Refused` | no | nothing was written (`Reason` says why) |
 
-`TerrainApplyOptions`: `CellsPerTick`, `InBases` (default false: a block inside a player base's build zone is not
+`TerrainResult.PresenceShare`, `TerrainPlanInfo.PresenceShare` and `TerrainPlanReport.PresenceShare` are nullable
+fractions from 0 to 1: the exact-match share when a decision used sampling. Results and plan info also expose
+`InstalledWithoutProof`, retained in the ledger with the share for a below-bound automatic install. A null share
+means no sampling decision was used. The result reason and the log give counts, the share and the heuristic limit.
+
+`TerrainApplyOptions`: `InstallChoice` (default `Automatic`), `CellsPerTick`, `InBases` (default false: a block inside a player base's build zone is not
 written and is listed as a conflict), `LoadTimeout` (default 20 s per batch), `Cancel` (checked between batches),
 `Progress` (`IProgress<TerrainProgress>`: batches and cells so far; progress is not a change event).
 
@@ -177,7 +192,12 @@ witness of the plans (see "When the ledger is gone"): keep backups of the world 
 
 | Situation | What happens |
 |---|---|
-| No record, and Kiln's witness has no entry for the plan (this world never had it) | a first install: every block is written, also where the ground already holds the plan's result; "before" and "after" are recorded |
+| No record, confirmed new-world session/provenance, or a legacy ledger with history | automatic first install; cells are recorded and written |
+| No record or history, all addressed cells match | `Adopted`; record current cells without writing |
+| No record or history, at least 25% but not all addressed cells match | `NeedsAdoption`; nothing written, one warning per plan/world/session |
+| No record or history, less than 25% addressed cells match | install automatically without proof; record the measured share and `InstalledWithoutProof` |
+| Explicit `InstallChoice = Adopt` | `Adopted`; current cells become the complete ownership receipt, no terrain writes or Changed events; original terrain cannot be restored |
+| Explicit `InstallChoice = InstallAnyway` | install over current cells, accepting refill of player excavations |
 | No record, but the witness has the plan from an earlier world file (the ledger was lost) | `Refused`: "ownership lost: …"; nothing is written or recorded (see "When the ledger is gone") |
 | No record, and `Forget` left a tombstone for this id | a first install over whatever is there; the tombstone is used up |
 | Same id, same version, same content, state `applied` | `AlreadyApplied` |
@@ -205,46 +225,82 @@ Rules that follow from the engine:
   no other mod can read: another mod's plan over the same blocks is refused only while the owning mod is loaded and
   has used `Kiln.Terrain` in this session. (A ledger shared by all mods needs a world bundle of Kiln's own in
   Kiln.Saves: about half a day, not in this version.)
-- A fresh plan does not know whether a player dug there before it: it writes. Guarded are upgrades (by the
-  fingerprints), resumes and edits made while a batch is being written.
+- A fresh plan with history writes without knowing whether a player dug there before it. Without history it
+  samples first; the heuristic can miss a heavily excavated overlay. Upgrades, resumes and edits during a batch
+  remain guarded by fingerprints and compare-before-write.
 - `Terrain.Applied` lists the calling mod's records in this world. `Forget` returns false while that plan is being
   applied, so it cannot discard the receipts of a running write.
 
 ### When the ledger is gone
 
-The ledger is in the world's Kiln data (`kiln/data/worlds/<world id>/`), next to the world save, not in it. If that data
-is lost or cannot be read, or the mod's ledger key is gone, while the world save keeps the ground, a kept plan has no
-record again, and its next `Apply` would be a first install that writes over everything changed there since.
+The ledger is the mod's bundle in `kiln/data/worlds/<world id>/`; the witness is
+`kiln/data/kiln.terrain/<world id>/<mod id>.json`. Neither travels inside the game's `.ksd` file. A missing
+ledger and witness do **not** prove a first installation. Copying only the save, including Steam Cloud transfer
+to a second PC, uses the same presence check as adding Kiln and a new terrain mod to a long-played world.
 
-So Kiln keeps a **witness** in a second place: `kiln/data/kiln.terrain/<world id>/<mod id>.json` lists the kept plans
-the mod has a ledger record of in that world, each with the world file's revision when the record was made ("since").
-`Apply` writes it before a new plan's first cell, and fills in any plan its ledger has that the witness lacks;
-if that write fails, Apply refuses before changing cells (fix the storage error and retry); a new
-world, which has no id before its first save, gets it once that save is written. The witness is not in the world's
-Kiln data folder, so it outlives the loss of that folder or of the ledger key. A record goes into the Kiln data of
-every save after it was made, so for a kept plan with no record:
+A confirmed new-world load allows automatic first installation: a known slot whose world file is absent,
+corroborated by readable engine identity fields with revision zero and no GUID. An unknown path, unreadable
+header/identity, dangling link, or missing Steam mirror for an existing engine identity is not proof. Kiln.Saves
+retains the fact through that session's first save; the ledger preserves it for later sessions.
 
-- **The witness has the plan, from a world file older than this one:** the world had the record and lost it. `Apply`
-  returns `Refused` ("ownership lost: this world had plan 'x' (recorded at world revision n; the world file is at
-  revision m now), but …"), writes nothing, records nothing and raises no event; `Inspect` reports `Would = Refused`
-  with the same reason. It holds whatever the ground looks like now, also where every block was changed since.
-- **The witness does not have the plan:** this world never had it. A first install, also over ground that already
-  holds the plan's result (a player built the same thing, or the ground is that material anyway).
-- **The witness has the plan, but not from an older world file:** the record never reached a save (the server
-  stopped first), or an older world file was put back. A first install; the entry is made new.
-- **The witness cannot be read:** `Refused` ("ownership unknown: …") for plans with no record, as whether the world had
-  them cannot be told; the file is never replaced. Plans with a record work as before.
+A **legacy ledger** with an **absent provenance field** counts as history of that world: a plan it does not record
+installs as in dev.28. Absence is preserved when that ledger is written again. A ledger created by dev.29 is marked
+at creation, even if the first call only inspects or needs adoption: `EstablishedInNewWorld: false` means unproven;
+`EstablishedInNewWorld: true` means new-world provenance. Explicit false stays unproven on later sessions,
+including after another plan was successfully installed. It is never mistaken for the older absent field.
+Existing receipts, recorded adoptions and deliberate Forget tombstones keep their existing decisions.
 
-What it cannot see: when all of `kiln/data` is lost (the world's Kiln data and the witness), or the world save is
-moved to another server without it, a plan with no record is a first install again. (kiln.build's kept chunks live
-there too, so after the next restart only the ground inside player bases still shows such a plan.) An older world file
-put back and played on past the witness's revision while the mod was not installed is taken for a lost ledger.
+With no history, Automatic reads every addressed target cell **before any terrain write**, through the shared
+budget. It counts exact voxel-value matches, excluding explicit **leave padding** (volume index 0, and cells above
+an AddOnTop height). Explicitly addressed air still counts. There is no marker that distinguishes other background
+cells or a material mound from naturally identical ground, so all remaining addressed cells are measured:
 
-What an operator can do: restore the world's Kiln data from a backup that matches the world save
-(`Saves.RestoreOnNextStart`, or a `kilnctl backup` archive); the ledger is back and the plan behaves as recorded. If the
-world truly never had the plan, remove the plan's entry from the witness file named in the reason. Adopting the
-ground as it stands (recording its cells as the plan's) is not available in this version, and `Terrain.Forget` does
-not help: with no record there is nothing to forget.
+- **100% equal:** already present; adopt current cells without writing, returning `Adopted`.
+- **At least 25% and less than 100% equal:** partly present; return `NeedsAdoption`, no write. The result and log
+  report the measured share and the choices below.
+- **Less than 25% equal:** treat as absent and install, recording the share and `InstalledWithoutProof`.
+
+The **25% bound is conservative evidence, not proof**. A plan can combine carving, material fill and air; counting
+only changed-from-original cells is impossible without the lost original terrain. Excluding declared leave cells
+avoids dilution by padding. Requiring a majority would miss overlays with half their material excavated, so the
+lower quarter bound protects more excavated plans while still allowing an absent ore vein or fill in open air.
+A mound of earth on earth or a mostly-air box can naturally meet this bound: naturally matching cells can require
+an explicit decision even on a first install. **Removing more than 75% of the measured overlay can make it look
+absent and cause it to be written again.** A nine-tenths excavation is explicitly outside this protection.
+
+A surviving older witness still refuses known lost ownership before sampling; an unreadable witness is refused
+without replacement. A witness entry at this revision or a newer one does not alone prove a fresh world.
+Sampling decisions are logged once per plan/world/session, naming the plan, world, measured share and limit.
+Transient patches and the explicit choices are unchanged:
+
+```csharp
+// Record what exists now, including excavations; write no cells.
+var adopted = await Terrain.Apply(patch, new TerrainApplyOptions {
+    InstallChoice = TerrainInstallChoice.Adopt
+});
+// Or deliberately accept possible refill of player edits.
+var installed = await Terrain.Apply(patch, new TerrainApplyOptions {
+    InstallChoice = TerrainInstallChoice.InstallAnyway
+});
+```
+
+Adoption returns `Adopted` with a reason explaining that original terrain cannot be restored. `Applied` exposes
+`TerrainPlanInfo.Adopted`; later versions still use normal fingerprint conflict checks. An interrupted adoption
+resumes reading, never silently becomes an installation. `Forget(id)` releases ownership and leaves terrain;
+`Forget(id, restoreTerrain: true)` returns `Refused` with the missing-original-cells reason and keeps ownership.
+This refusal also applies to ordinary overlays: no original-cell restore primitive exists.
+
+Moving a save **with its matching WorldData sidecar generation** preserves the ledger and existing receipts even
+if other Kiln data is absent. The sidecar is itself under `kiln/data`; it is not an extra field in the game save.
+Moving only the witness/other Kiln data without the ledger refuses known lost ownership; unknown plans use
+the presence check. Keep the complete matching `kiln/data` or a Kiln backup with the save: the kept-region list and
+transient journal are separate and are needed for retention outside bases and transient restoration. A ledger
+alone does not recreate a missing region list. With neither record, sampling may authorize an automatic write
+below the bound, with the excavation limit described above.
+
+The first-save witness remains defense in depth, not proof required for automatic installation. If a crash loses
+both records, the surviving save uses the presence heuristic and its limits. Actual snapshot/save ordering remains
+a real-game check; sampling does not establish crash consistency.
 
 ### Inspect
 
@@ -255,7 +311,7 @@ public static Task<TerrainPlanReport> Inspect(TerrainPatch patch, TerrainApplyOp
 
 A dry run: validates, loads the tiles, and reports `Box`, `Cells` (addressed), `Blocks`, `Batches`,
 `EstimatedBytes` (what the save grows by at most: 1,024 bytes per block before the game's own packing), what
-`Apply` would do (`Would`: a `TerrainState`) and the conflicts it would meet. It writes nothing and records nothing.
+`Apply` would do (`Would`: a `TerrainState`) and the conflicts it would meet. It writes no cells and no plan receipt; opening missing WorldData creates its provenance-marked empty ledger.
 `Ok = false` when the world is not running or the tiles did not load.
 
 ### Events
@@ -273,6 +329,12 @@ so each of its blocks raises the two events once more. Terraforming is not part 
 | Row | On when |
 |---|---|
 | `kiln.terrain` | the library is loaded |
-| `terrain.overlays` | kiln.build reads, writes and keeps, and kiln.saves is on; server side. On a client that hosts a world it is on since 0.2.0-dev.29; game test `19f-overlay-client` remains unconfirmed |
+| `terrain.overlays` | kiln.build reads, writes and keeps; kiln.saves actually observes loads and writes (so sidecars belong to the current world); core `world.lifecycle` actually observes stops, Build subscribed successfully, and the shared native budget extension is present. Missing lifecycle makes the row unavailable with that reason. On since dev.29; `19f-overlay-client` remains unconfirmed |
 | `terrain.baked` | off (baked regions are not built) |
 | `terrain.biomes` | off |
+
+Persistent operations require lifecycle observation even with a readable voxel grid. Without kiln.spawn, native
+writes additionally require the current core server-world identity and kiln.saves' confirmed loaded state; process
+step counts and grid readability never prove Run. Missing state refuses writes. Menu and joined sessions have no
+hosted server world: Apply refuses promptly, Applied is empty, and Forget returns false. These are runtime
+availability checks, not release holds.

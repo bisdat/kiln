@@ -7,10 +7,8 @@
 // the Kiln data of every save after it was made, so:
 //  - a plan with a witness entry, no record, and a world file newer than "since": the world had the record and lost it:
 //    refused, nothing written;
-//  - no witness entry: the world never had the plan (or lost the witness as well): a first install, whatever the
-//    ground holds (a plan whose result the ground already shows is accepted);
-//  - an entry whose "since" is not older than the world file: the record was never saved (the server stopped first),
-//    or an older world file was put back: a first install, and the entry is made new.
+//  - without older witness evidence, legacy history or confirmed new-world provenance allows a first install.
+//    Otherwise the engine must sample the addressed cells before deciding whether to install or adopt.
 // Forget takes the plan's entry away. Tick thread.
 namespace Kiln;
 
@@ -39,13 +37,13 @@ internal static class TerrainLoss
 {
     /// <summary>The one call before a kept plan's first install (Apply and Inspect, once the plan's record is known to
     /// be missing from a valid <paramref name="book"/>). Null: a first install. Otherwise
-    /// <see cref="TerrainState.Refused"/> and the reason, with nothing written and nothing recorded.</summary>
+    /// Refused or NeedsAdoption (the engine must sample) and the reason, with nothing written and nothing recorded.</summary>
     public static (TerrainState State, string Reason)? Check(ITerrainBackend backend, TerrainPlan plan, TerrainBook book)
     {
         var patch = plan.Patch;
         if (patch.Persistence != TerrainPersistence.Kept || book.Plans.ContainsKey(patch.Id)) return null;
         var (id, revision) = backend.SaveIdentity;
-        if (id is null) return null;   // a new world before its first save: nothing of it was ever saved
+        if (id is null) return backend.NewWorldSession || book.HasHistory ? null : Adoption(backend, plan);
         TerrainWitness? witness;
         try { witness = backend.ReadWitness(id); }
         catch (InvalidDataException e)
@@ -55,11 +53,15 @@ internal static class TerrainLoss
             Kiln.Backend.Current.Log(0, LogLevel.Warn, $"terrain: {backend.Mod}: {bad}");
             return (TerrainState.Refused, bad);
         }
-        if (witness is null || !witness.Plans.TryGetValue(patch.Id, out var entry) || entry.Since >= revision) return null;
+        if (witness is null || !witness.Plans.TryGetValue(patch.Id, out var entry) || entry.Since >= revision)
+            return backend.NewWorldSession || book.HasHistory ? null : Adoption(backend, plan);
         var reason = Reason(patch.Id, entry.Since, revision, backend.LoadedData, backend.WitnessLocation(id));
         Kiln.Backend.Current.Log(0, LogLevel.Warn, $"terrain: {backend.Mod}: {reason}");
         return (TerrainState.Refused, reason);
     }
+
+    private static (TerrainState, string) Adoption(ITerrainBackend backend, TerrainPlan plan) =>
+        (TerrainState.NeedsAdoption, $"terrain: plan '{backend.Mod}/{plan.Patch.Id}', world {backend.SaveIdentity.Id ?? backend.WorldId}: needs adoption; ownership history is unknown. Nothing written. Call Terrain.Apply with InstallChoice = Adopt (record current cells; original terrain cannot be restored), or InstallAnyway (accept refill of player edits).");
 
     /// <summary>The refusal's text: what was lost, why it is refused, and what an operator can do.</summary>
     internal static string Reason(string plan, uint since, uint revision, DataMatch data, string witness)
@@ -70,7 +72,7 @@ internal static class TerrainLoss
         return $"ownership lost: this world had plan '{plan}' (recorded at world revision {since}; the world file is at revision {revision} now), " +
                $"but {cause}. Nothing was written, so whatever changed there since is kept. To own it again, restore this world's Kiln data " +
                "from a backup that matches the world save (Saves.RestoreOnNextStart, or a kilnctl backup). If this world truly never had " +
-               $"the plan (an older world file was put back and played on), remove '{plan}' from {witness}";
+               $"the plan (an older world file was put back and played on), remove '{plan}' from {witness}. Or explicitly choose TerrainInstallChoice.Adopt (record current cells) or InstallAnyway (accept possible refill)";
     }
 
     /// <summary>Puts every plan of <paramref name="book"/> into the witness (Apply: when it starts, and once it made a new
