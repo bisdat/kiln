@@ -101,12 +101,15 @@ public sealed partial class ClientPassMod
     [ClientCheck("menu.scroll", "The pause menu scrolls when mods' entries do not fit (experiment)", Area = "Menus and hooks",
         Since = Dev27, Tags = [Visual], Order = 149)]
     public Task MenuScroll(CheckContext c) => Outside(c,
-        "An experiment: Kiln wraps the pause menu in the game's own scroll view once it has more than 3 mods' entries. It " +
-        "may end the game once; then send kiln/logs/kiln.log and kiln/state/menu-scroll.off. Setup: modEntries Auto (the " +
-        "default), mods/tests/menu-many-test with Entries 20 (more than fit), any resolution (say which). kiln.log should " +
-        "say \"ui: the pause menu can scroll (experiment)\" at start. 1) Open the pause menu: does the list reach from " +
-        "the top of the menu down to near the bottom of the screen (not a third of it), with every entry there, and " +
-        "kiln.log say \"ui: the pause menu scrolls: ...\" with a scroll view almost as tall as the column? 2) The " +
+        "An experiment: Kiln wraps the pause menu in the game's own scroll view when its entries (the game's, Kiln's " +
+        "and the mods', down to Quit) are taller than the menu's space at this resolution (since 0.2.0-dev.29; before, " +
+        "once it had more than 3 mods' entries). It may end the game once; then send kiln/logs/kiln.log and " +
+        "kiln/state/menu-scroll.off. Setup: modEntries Auto (the default), mods/tests/menu-many-test with Entries 20 " +
+        "(more than fit), any resolution (say which). kiln.log should say \"ui: the pause menu can scroll (experiment)\" " +
+        "at start. 1) Open the pause menu: does the list reach from the top of the menu down to near the bottom of the " +
+        "screen (not a third of it), with every entry there, and kiln.log say \"ui: the pause menu's entries are taller " +
+        "than its space (... of ... UI units): it scrolls\" and \"ui: the pause menu scrolls: ...\" with a scroll view " +
+        "almost as tall as the column? 2) The " +
         "scrollbar at the list's right: does it look like the game's other list scrollbars (a track and a thumb about as " +
         "long as the visible part of the list), not a plain white bar? 3) Turn the mouse wheel over it: does the list " +
         "scroll and the thumb move, with entries clipped at the menu's edges? 4) With the arrow keys go down past the last " +
@@ -114,11 +117,13 @@ public sealed partial class ClientPassMod
         "visible? kiln.log says \"ui: the pause menu's scroll view moved: offset ...\" the first times it moves. 5) " +
         "Scroll with the wheel, then press an arrow key: the view stays where the wheel put it until the highlight moves, " +
         "then follows it. 6) The same as 4) with a gamepad (d-pad, then the stick), down to Quit and back. 7) Return to " +
-        "Main Menu and back into the world: does it still work? 8) Set menu-many-test's Entries to 2 (3 or fewer mods' " +
-        "entries in all): is it exactly as before 0.2.0-dev.27 (no scroll view, centred as the game draws it)? Send " +
-        "screenshots of 1), 4) at Quit and 8), and every kiln.log line starting with \"ui: the pause menu\" or " +
-        "\"ui: the scrolling pause menu\". Did it fill the column, look like the game's scrollbars, and follow the keys " +
-        "and the pad to Quit and back?");
+        "Main Menu and back into the world: does it still work? 8) Set menu-many-test's Entries to 0 and, in Kiln " +
+        "settings, menus-client modEntries to Never (only the game's entries and Kiln's Mods: they fit), Apply, and open " +
+        "the pause menu: is it exactly as the game draws it (no scroll view, the same spacing as without Kiln, no gap " +
+        "above the first entry or below Quit), and kiln.log say \"ui: the pause menu's entries fit its space (... of " +
+        "... UI units): drawn as the game draws it\"? Set modEntries back to Auto. Send screenshots of 1), 4) at Quit " +
+        "and 8), and every kiln.log line starting with \"ui: the pause menu\" or \"ui: the scrolling pause menu\". Did " +
+        "it fill the column, look like the game's scrollbars, and follow the keys and the pad to Quit and back?");
 
     [ClientCheck("boot.proxy", "The game started with Kiln's proxy", Area = "Menus and hooks", Since = Dev21, Order = 108)]
     public async Task BootProxy(CheckContext c)

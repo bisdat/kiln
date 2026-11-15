@@ -5,7 +5,7 @@ namespace MenuManyTest;
 
 public sealed class Settings
 {
-    [Comment("How many entries this mod adds to the pause menu. More than 3 makes the menu scroll (or, where it can't, moves the entries to Kiln's Mods page).")]
+    [Comment("How many entries this mod adds to the pause menu. Entries past what the screen holds make the pause menu scroll (or, where it can't, more than 3 move to Kiln's Mods page).")]
     [Range(0, 24)]
     public int Entries { get; set; } = 8;
 }
