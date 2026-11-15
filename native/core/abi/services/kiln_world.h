@@ -814,7 +814,7 @@ typedef struct KilnWorldApi {
      * KILN_PROGRAM_REFUSED with the name that world lacks, a full table, ...; KILN_PROGRAM_FAULTED after a fault of its
      * callback in that world. A new client world starts every program over (FAULTED stays until a new bind).
      * KILN_ERR_NOT_FOUND: no such handle, or the program is not for that world; KILN_ERR_INVALID_ARGUMENT: no state
-     * pointer or a bad kind. Any thread; lock-free. */
+     * pointer or a bad kind. Any thread; takes a short registry lock to resolve the handle. */
     KilnResult(KILN_CALL* program_world_state)(KilnHandle program, uint32_t world_kind, int32_t* state, KilnStr* reason);
     /* bind_program for the world of `world_kind`: binds the declaration `key` of mod `mod_id` that kiln.world reserved
      * from <mod>/kiln.programs.json at boot with "world": "client", "both" (client side) or "prediction". Exactly one of
@@ -832,8 +832,7 @@ typedef struct KilnWorldApi {
     /* Stops a callback: register_program_world's program handle (its client or prediction side) or a binding handle
      * of bind_program_world (for KILN_WORLD_SERVER: unregister_program). No call starts after this returns.
      * KILN_OK: no call of it runs any more: its code and user data may go. KILN_ERR_WRONG_THREAD: a call was still
-     * running after a bounded wait (2 ms; it happens only off the client world's thread, e.g. a host's server thread,
-     * while a client step runs it): it finishes on its own and kiln.world forgets the binding at the client world's
+     * running after a bounded wait (2 ms, e.g. a host's server thread unbinding while a client worker runs it): it finishes on its own and kiln.world forgets the binding at the client world's
      * next Pre or stop; keep the code and user data alive (call again later: KILN_OK once it has finished).
      * KILN_ERR_NOT_FOUND: no such handle. Any thread outside a program update or wrap stage. */
     KilnResult(KILN_CALL* unbind_program_world)(KilnHandle binding);

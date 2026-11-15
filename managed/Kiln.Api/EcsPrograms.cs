@@ -170,7 +170,8 @@ public static unsafe class EcsPrograms
         mod.Retiring += binding.Dispose;
         ClientBindings.Watch(binding);
         var (state, why) = binding.WorldState();
-        return state is ProgramRefused or ProgramFaulted or ProgramSkipped
+        return state is ProgramRefused or ProgramFaulted or ProgramSkipped ||
+            (state == ProgramPending && why == "registered from the next client world")
             ? new EcsProgramBinding(false, why.Length > 0 ? why : "the client world that runs now refused the program", world, binding)
             : new EcsProgramBinding(true, null, world, binding);
     }
@@ -307,6 +308,8 @@ public static unsafe class EcsPrograms
         internal GCHandle Root;
         internal ulong Handle;
         internal bool Failed;
+        internal volatile bool DisposeRequested;
+        private readonly object _disposeLock = new();
         internal ulong ReportedSession;  // the client world session whose refusal was raised (ClientBindings)
 
         /// <summary>A client or prediction binding's state in the world that runs now (kiln.world's program_world_state).</summary>
@@ -393,18 +396,26 @@ public static unsafe class EcsPrograms
             Root.Free();
         }
 
-        // A client or prediction binding: any thread. kiln.world closes it at once; when one of its calls still ran (a
-        // host unloading the mod from its server thread while a client step runs it) the callback's GCHandle is kept for
-        // good, since that call holds it, and kiln.world forgets the binding by itself once the call has finished.
+        // Keep the handle and root until native unbind confirms that every call has returned.
+        // A service tick retries a deferred close, including disposal requested inside a slice.
         private void DisposeClient()
         {
-            var h = Interlocked.Exchange(ref Handle, 0);
-            if (h == 0) return;
-            var result = ((EcsClientTable*)Native)->UnbindProgramWorld(h);
-            Mod.Retiring -= Dispose;
-            ClientBindings.Forget(this);
-            if (result == 0 || result == 2) Root.Free();  // drained (or kiln.world no longer knows it)
-            else Mod.Log.Warn($"ECS program '{Key}' ({World} world): a call was still running when it was unbound; it ends by itself (result {result})");
+            lock (_disposeLock)
+            {
+                if (Handle == 0) return;
+                var first = !DisposeRequested;
+                DisposeRequested = true;
+                var result = ((EcsClientTable*)Native)->UnbindProgramWorld(Handle);
+                if (result != 0 && result != 2)
+                {
+                    if (first) Mod.Log.Warn($"ECS program '{Key}' ({World} world): a call was still running when it was unbound; disposal will retry (result {result})");
+                    return;
+                }
+                Handle = 0;
+                Mod.Retiring -= Dispose;
+                ClientBindings.Forget(this);
+                Root.Free();
+            }
         }
     }
     // Raises EcsProgramRefusedEvent for client and prediction bindings: polled on Kiln's service tick (the tick thread at
@@ -440,6 +451,7 @@ public static unsafe class EcsPrograms
         {
             foreach (var b in Volatile.Read(ref _live))
             {
+                if (b.DisposeRequested) { b.Dispose(); continue; }
                 var t = (EcsClientTable*)b.Native;
                 var session = t->GameWorldSession((uint)WorldKind.Client);
                 if (session == 0 || session == b.ReportedSession) continue;
@@ -459,7 +471,7 @@ public static unsafe class EcsPrograms
         try
         {
             var binding = (Binding)GCHandle.FromIntPtr((nint)user).Target!;
-            if (!binding.Mod.Alive || binding.Failed) return;
+            if (!binding.Mod.Alive || binding.Failed || binding.DisposeRequested) return;
             var previous = ModContext.CurrentMod;
             try
             {

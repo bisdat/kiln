@@ -223,7 +223,7 @@ void programs_client_init(bool client_tick, bool world_events);
 bool programs_client_on();                                // world.programs.client is available
 void programs_client_pre(const KilnTickInfo* tick);       // the client world's Pre (main thread)
 void programs_world_event(const KilnWorldEvent* event);   // a world starts or stops
-KilnResult reserve_program_world(const std::string& mod, const std::string& key, const KilnProgramDesc* desc, uint32_t worlds);
+KilnResult reserve_program_world(const std::string& mod, const std::string& key, const KilnProgramDesc* desc, uint32_t worlds, uint32_t declared_worlds = 0);
 KilnResult KILN_CALL register_program_world(KilnOwner owner, uint32_t kind, const KilnProgramDesc* desc, KilnHandle* out);
 KilnResult KILN_CALL program_world_state(KilnHandle program, uint32_t kind, int32_t* state, KilnStr* reason);
 KilnResult KILN_CALL bind_program_world(KilnOwner owner, KilnStr mod, KilnStr key, uint32_t kind, KilnProgramEachFn each,

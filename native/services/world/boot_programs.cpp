@@ -97,7 +97,7 @@ void reserve(const Candidate& candidate) {
         if (dropped) KW_W("managed program %s/%s: %s; %s", candidate.policy.id.c_str(), program.key.c_str(), dropped,
                           worlds ? "reserved for its other world only" : "not reserved");
         if (!worlds) continue;
-        const auto result = reserve_program_world(candidate.policy.id, program.key, &desc, worlds);
+        const auto result = reserve_program_world(candidate.policy.id, program.key, &desc, worlds, program.worlds);
         if (result == KILN_OK) KW_I("managed program %s/%s reserved as %s%s", candidate.policy.id.c_str(), program.key.c_str(), name,
                                     worlds == kWorldBitServer ? "" : worlds == kWorldBitClient ? " (client world)"
                                     : worlds == kWorldBitPrediction ? " (prediction storage)" : " (server and client worlds)");
