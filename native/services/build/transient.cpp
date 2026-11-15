@@ -187,6 +187,15 @@ void transient_kept_failed(const std::vector<std::array<int32_t, 3>>& uncommitte
     g_kept_undo.clear();
 }
 
+void transient_world_closed() {
+    std::lock_guard lock(g_mu);
+    g_j.bind("");
+    g_kept_undo.clear();
+    g_restored_at = UINT64_MAX;
+    g_put_back = g_left = 0;
+    g_logged_start = g_logged_fault = false;
+}
+
 void transient_pre(uint64_t step) {
     // 1. under the lock: the blocks to look at this step (copies)
     std::vector<std::pair<tj::Key, tj::Entry>> work;

@@ -41,6 +41,23 @@ public sealed class OverlayTests
         public TerrainEngine Engine => new(World.For(mod), Session, null);
     }
 
+    [Fact]
+    public void No_world_refuses_ledger_queries_and_forgetting_without_opening_a_sidecar()
+    {
+        var world = new MemoryWorld { Running = false, BookError = new InvalidOperationException("no world sidecar") };
+        var run = new Run(world);
+        Assert.Empty(run.Engine.Applied());
+        Assert.False(run.Engine.Forget("hill"));
+    }
+
+    [Fact]
+    public void A_joined_or_ended_session_refuses_apply_without_waiting_for_a_server_tick()
+    {
+        var world = new MemoryWorld { Running = false, CanWait = false, OnTick = () => throw new InvalidOperationException("no server ticks") };
+        Assert.Equal(TerrainState.Refused, new Run(world).Apply(Solid("hill", 1, new CellBox(64, 96, 64, 8, 8, 8))).State);
+        Assert.Equal(0, world.Ticks);
+    }
+
     // ---- lowering ----
 
     [Fact]
