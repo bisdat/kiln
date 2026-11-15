@@ -258,22 +258,31 @@ typedef struct KilnBootApiV1 {
      * a registered collector's owner, an unknown mod, an empty reason. */
     KilnResult(KILN_CALL* activation_fault)(KilnOwner collector, KilnStr mod_id, KilnStr kind, KilnStr key, KilnStr reason);
 
-    /* Appended (0.2.0-dev.29); check header.size before calling. A service found that this start must not go on: the
-     * content a saved world needs cannot be built, so no world may load (kiln.knowledge: a roster the game cannot
-     * hold). Works in every process, with a deferred generation or without one, at any moment after the services
-     * loaded: inside a collector's prepare (before the game's entry point) or later (the game's resource start). In
-     * this order: one issue of code KILN_BOOT_ISSUE_START_STOPPED, phase "stop", per mod in `mods` (comma-separated
-     * ids; empty: one issue that names no mod); the stop line "boot: the start stops (exit code 0x<code>): <reason>"
-     * in kiln.log; the files the launcher reads (progress.json state "failed" with `reason`; boot.json, whose "boot"
-     * section has "stop": {"code", "reason", "by", "mods"} and "exitCode": code), waited for on disk; then
-     * `before_exit(user)` when not NULL (a game client's message to the player: it must return, and should return by
-     * itself, e.g. a message box with a timeout); callback faults are contained, and a 65-second overall deadline
-     * terminates even if the state writer or callback blocks; then the process ends with `exit_code` without any DLL's detach code.
-     * Does not return. A Unix wrapper (Wine) sees the low byte of exit_code: give a code whose low byte says what it is
-     * (KILN_BOOT_EXIT_CODE ends in 1, kiln.knowledge's KILN_KNOW_ROSTER_EXIT_CODE in 2), and say in `reason` that
-     * restarting does not help. KILN_ERR_UNAVAILABLE: a stop is under way already (the process is about to end).
-     * A call while any core world is present is refused with KILN_ERR_UNAVAILABLE, without stop side effects.
-     * KILN_ERR_INVALID_ARGUMENT: caller 0, an empty reason, exit_code 0 (nothing happens). */
+    /* Appended (0.2.0-dev.29); check header.size before calling. A START-TIME call: a service found that this start
+     * must not go on, because the content a saved world needs cannot be built, so no world may load (kiln.knowledge: a
+     * roster the game cannot hold). It works with a deferred generation or without one, inside a collector's prepare
+     * (before the game's entry point) or after it (the game's resource start), and only until the first world: while
+     * any core world (prediction included) is present, or once one has run in this process (KilnSessionInfo.sessions),
+     * it answers KILN_ERR_UNAVAILABLE and does nothing (ending the process could lose play). That check is a sample,
+     * not a lock: a world whose first step is under way at that moment is not seen yet, so call it only where no world
+     * can be starting (the boot thread, ResourceInit).
+     * In this order: one issue of code KILN_BOOT_ISSUE_START_STOPPED, phase "stop", per mod in `mods` (comma-separated
+     * ids; empty: one issue that names no mod); the stop line "boot: the start stops (exit code 0x<code>): <reason>" in
+     * kiln.log; the files the launcher reads (progress.json state "failed" with `reason`; boot.json, whose "boot" section
+     * has "stop": {"code", "reason", "by", "mods"} and "exitCode": code), then a wait of a second at most per file until
+     * another reader could see that text in progress.json, boot.json and kiln.log (best effort, not a flush of every
+     * file to the disk; at a bound it goes on and logs which file it did not see); then `before_exit(user)` when not
+     * NULL (a game client's message to the player: it should return by itself, e.g. a message box with a timeout; a
+     * fault in it is contained); then the process ends with `exit_code` without any DLL's detach code. If the files or
+     * before_exit block, a 65-second bound ends the process anyway. Does not return.
+     * A Unix wrapper (Wine) sees the low byte of exit_code: give a code whose low byte says what it is
+     * (KILN_BOOT_EXIT_CODE ends in 1, kiln.knowledge's KILN_KNOW_ROSTER_EXIT_CODE in 2; both collide with ordinary
+     * statuses 1 and 2, see docs/kiln/dedicated-servers.md), and say in `reason` that restarting does not help.
+     * KILN_ERR_UNAVAILABLE: a world is present or has run (nothing happens), or a stop is under way already (the
+     * process is about to end). KILN_ERR_INVALID_ARGUMENT: caller 0, an empty reason, exit_code 0 (nothing happens).
+     * Mixed versions: a caller beside an older kiln.boot finds no member (header.size) and must end the start itself, as
+     * kiln.knowledge does (its state file, log line, message, exit; no boot.json stop record, no progress.json
+     * "failed"); an older service that does not know this call is not made to stop by a newer kiln.boot. */
     KilnResult(KILN_CALL* stop_start)(KilnOwner caller, KilnStr mods, KilnStr reason, uint32_t exit_code,
                                       void(KILN_CALL* before_exit)(void* user), void* user);
 } KilnBootApiV1;

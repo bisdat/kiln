@@ -30,6 +30,7 @@
 #include "../log.h"
 #include "../profile.h"
 #include "../registry.h"
+#include "../tick.h"
 #include "../worldinfo.h"
 #include "nlohmann/json.hpp"
 #include "services/kiln_boot.h"
@@ -130,7 +131,7 @@ void (*g_exit_late)(uint32_t) = &os_exit_late;  // the same for the stop after t
 void (*g_late_hold)(void* user, const std::string& last_line) = nullptr;  // boot.cpp: the state files of a stop after the entry point
 void* g_late_hold_user = nullptr;
 // boot.cpp: the state files of a service's stop (stop_start), before or after the entry point
-void (*g_stop_state)(void* user, const std::string& last_line, const std::string& why) = nullptr;
+void (*g_stop_state)(void* user, const std::string& last_line, const std::string& why, uint32_t code) = nullptr;
 void* g_stop_state_user = nullptr;
 // stop_start: what stopped the start (boot.json "boot"."stop"); g_stopping is set once
 struct Stop {
@@ -141,6 +142,19 @@ struct Stop {
 Stop g_stop;
 std::atomic<bool> g_stopping{false};
 std::chrono::milliseconds g_stop_timeout{65000};  // includes state IO and the caller's 60-second message
+
+// The core's start phase is over: a world is present now, or one has run in this process (tick.cpp counts a world's
+// sessions from its first step). stop_start refuses then.
+bool world_started() {
+    for (uint32_t k = 0; k < KILN_WORLD_KINDS; ++k)
+        if (worldinfo::world(k)) return true;
+    KilnSessionInfo info{};
+    info.size = sizeof info;
+    if (tick::session(&info) == KILN_OK)
+        for (uint32_t k = 0; k < KILN_WORLD_KINDS; ++k)
+            if (info.sessions[k]) return true;
+    return false;
+}
 
 // A bad service callback must not unwind past the final termination. No C++ objects in the SEH frame.
 void stop_callback(void(KILN_CALL* fn)(void*), void* user) {
@@ -1055,9 +1069,10 @@ KilnResult KILN_CALL b_activation_fault(KilnOwner collector, KilnStr mod_id, Kil
 KilnResult KILN_CALL b_stop_start(KilnOwner caller, KilnStr mods, KilnStr reason, uint32_t exit_code, void(KILN_CALL* before_exit)(void*),
                                   void* user) {
     if (!caller || !reason.ptr || !reason.len || !exit_code) return KILN_ERR_INVALID_ARGUMENT;
-    // This API is for refusing a start, never for killing unsaved play. Include prediction worlds.
-    for (uint32_t k = 0; k < KILN_WORLD_KINDS; ++k)
-        if (worldinfo::world(k)) return KILN_ERR_UNAVAILABLE;
+    // A start-time call only: never once a world (any kind, prediction included) is present or has run in this process
+    // (the core's start phase is over then, and ending the process could lose play). A sample, not a lock: a world whose
+    // first step is under way right now is not seen yet (worldinfo and the sessions are set at a world's first step).
+    if (world_started()) return KILN_ERR_UNAVAILABLE;
     if (g_stopping.exchange(true)) return KILN_ERR_UNAVAILABLE;  // the first stop ends the process
     const std::string why(sv(reason));
     std::vector<std::string> ids;
@@ -1094,7 +1109,7 @@ KilnResult KILN_CALL b_stop_start(KilnOwner caller, KilnStr mods, KilnStr reason
     });
     KLOG_E("%s", last.c_str());
     try {
-        if (g_stop_state) g_stop_state(g_stop_state_user, last, why);
+        if (g_stop_state) g_stop_state(g_stop_state_user, last, why, exit_code);
     } catch (...) {
         KLOG_E("boot: stop state writer failed; terminating with the recorded reason");
     }
@@ -1340,7 +1355,7 @@ void late_hold(void (*write_state)(void* user, const std::string& last_line), vo
 }
 
 // boot.cpp: what writes the state files when a service stops the start (b_stop_start), set before the services load.
-void stop_writer(void (*write_state)(void* user, const std::string& last_line, const std::string& why), void* user) {
+void stop_writer(void (*write_state)(void* user, const std::string& last_line, const std::string& why, uint32_t code), void* user) {
     std::lock_guard lk(g_mutex);
     g_stop_state = write_state;
     g_stop_state_user = user;
