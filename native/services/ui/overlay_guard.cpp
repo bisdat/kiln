@@ -72,16 +72,25 @@ VOID CALLBACK ran_fine(PVOID, BOOLEAN) {
         logf(KILN_LOG_INFO, "ui: overlay crash guard: the game ran a minute without the overlay; the next start tries the overlay again");
     } catch (...) { error(); }
 }
-void report(const std::string& why) {
-    const auto* caps = static_cast<const KilnCapsApi*>(g_api->service(KilnStr{KILN_CAPS_SERVICE, sizeof(KILN_CAPS_SERVICE)-1}, 1));
-    if (caps && caps->report)
-        caps->report(g_owner, KilnStr{"kiln.ui", 7}, KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_FAULTED, KilnStr{why.data(), why.size()});
-}
+
 }
 bool overlay_guard_start() noexcept {
     try {
+        bool sl = false;
+        const auto wrapper_set = modules(sl);
+        char option[8] = {};
+        const DWORD option_size = GetEnvironmentVariableA("KILN_UI_OVERLAY", option, sizeof option);
+        const int environment = option_size == 1 && option[0] == '0' ? 0 : option_size == 1 && option[0] == '1' ? 1 : -1;
+        auto apply_mode = [&](bool guarded) {
+            g_overlay_mode = choose_overlay_mode(false, guarded, sl, environment);
+            if (!overlay_drawing_on()) {
+                g_overlay_reason = "the overlay's drawing is off: ";
+                g_overlay_reason += environment == 0 ? "KILN_UI_OVERLAY=0" : guarded ? "an earlier overlay start was interrupted" : "NVIDIA Streamline is installed";
+            }
+        };
+        apply_mode(false);
         auto dir = api_path(KILN_PATH_STATE);
-        if (dir.empty()) { error(); return false; }
+        if (dir.empty()) { error(); return !overlay_drawing_on(); }
         path = (dir / L"overlay-start.guard").wstring();
         char b[513]; DWORD n = 0;
         HANDLE h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
@@ -90,26 +99,36 @@ bool overlay_guard_start() noexcept {
             CloseHandle(h);
             if (!ok || !overlay_guard::parse(std::string(b, n), record)) error();
         } else if (GetLastError() != ERROR_FILE_NOT_FOUND && GetLastError() != ERROR_PATH_NOT_FOUND) error();
-        bool sl = false;
-        auto start = overlay_guard::begin(record, modules(sl));
+        auto start = overlay_guard::begin(record, wrapper_set);
+        apply_mode(start.off);
         record = start.record;
+        if (environment == 1) {
+            // Explicit opt-in bypasses OFF for this attempt, preserving failure history.
+            record.phase = overlay_guard::Phase::trying;
+            record.stage = overlay_guard::Stage::begun;
+        }
         active = true;
         // An ON attempt is not recorded until vk_install, immediately before detours.
-        if (start.off) {
+        if (start.off && !overlay_drawing_on()) {
             save();
             if (record.phase == overlay_guard::Phase::guarded &&
                 !CreateTimerQueueTimer(&ran_timer, nullptr, &ran_fine, nullptr, kRanFineMs, 0, WT_EXECUTEONLYONCE))
                 logf(KILN_LOG_WARN, "ui: overlay crash guard: no timer; the overlay stays off until kiln/state/overlay-start.guard is deleted");
             std::string why = "the game closed during the last start while Kiln's overlay was starting (stage: ";
             why += overlay_guard::stage_name(record.failed_stage);
-            why += "); the overlay stays off for this start";
+            why += "); the overlay's drawing stays off for this start; key bindings and the Mods menu still work";
             if (record.phase == overlay_guard::Phase::locked) why += "; it failed twice at this stage; delete kiln/state/overlay-start.guard to try again";
             if (sl) why += "; NVIDIA Streamline (a frame generation mod) is installed; it wraps the same graphics calls";
+            why += "; KILN_UI_OVERLAY=1 tries drawing at your own risk";
             logf(KILN_LOG_WARN, "ui: %s", why.c_str());
-            report(why);
+
         }
-        return start.off;
-    } catch (...) { error(); return false; }
+        if (!overlay_drawing_on() && !start.off)
+            logf(KILN_LOG_INFO, "ui: %s; key bindings and the Mods menu still work; KILN_UI_OVERLAY=1 tries drawing at your own risk", g_overlay_reason.c_str());
+        else if (environment == 1 && (sl || start.off))
+            logf(KILN_LOG_WARN, "ui: KILN_UI_OVERLAY=1: trying overlay drawing despite Streamline or an interrupted start; the crash guard records this attempt");
+        return !overlay_drawing_on();
+    } catch (...) { error(); return !overlay_drawing_on(); }
 }
 void overlay_guard_stage(overlay_guard::Stage stage) noexcept {
     try {

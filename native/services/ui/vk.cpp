@@ -1207,6 +1207,7 @@ bool enable_hook(const PreparedHook& p) {
 }  // namespace
 
 bool vk_install() {
+    if (!overlay_drawing_on()) return false; // future device-only mode selects its installer here
     static thread_local bool installing = false;
     if (installing) return g_installed.load();
     installing = true;
@@ -1278,14 +1279,16 @@ KilnResult vk_subscribe_pre_overlay(KilnUiPreOverlayFn fn, KilnUiSwapchainGoneFn
 }
 
 bool vk_unsubscribe(KilnHandle handle) {
+    if (!overlay_drawing_on()) return false;
     std::lock_guard<std::mutex> lk(g_mu);
     return std::erase_if(g_pre_overlay, [&](const PreOverlaySub& s) { return s.handle == handle; }) > 0;
 }
 
-void vk_set_pre_overlay_demand(uint32_t count) { g_pre_demand.store(count, std::memory_order_relaxed); }
-void vk_add_swapchain_usage(uint32_t usage) { g_extra_usage.fetch_or(usage); }
+void vk_set_pre_overlay_demand(uint32_t count) { if (!overlay_drawing_on()) return; g_pre_demand.store(count, std::memory_order_relaxed); }
+void vk_add_swapchain_usage(uint32_t usage) { if (!overlay_drawing_on()) return; g_extra_usage.fetch_or(usage); }
 
 void vk_status(KilnUiStatus* out) {
+    if (!overlay_drawing_on()) return;
     out->hooked = g_installed.load() ? 1 : 0;
     out->wine = g_wine ? 1 : 0;
     // no lock here: frame callbacks (which may ask for the status) run while draw() holds g_mu

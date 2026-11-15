@@ -134,6 +134,7 @@ uint32_t current_mods() {
 }
 
 void enqueue(HWND h, UINT m, WPARAM w, LPARAM l) {
+    if (!overlay_drawing_on()) return;
     std::lock_guard<std::mutex> lk(g_qmu);
     if (g_queue.size() >= 1024) g_queue.pop_front();
     g_queue.push_back({h, m, w, l});
@@ -879,6 +880,31 @@ void input_attach(HWND hwnd) {
             break;
         }
     }
+}
+
+// No swapchain surface exists in drawing-off mode. Poll from the game's UI tick,
+// at most twice a second; select a visible unowned window of this process only.
+void input_poll_window() {
+    static uint64_t next = 0;
+    const auto now = GetTickCount64();
+    if (now < next) return;
+    next = now + 500;
+    static bool imports = false;
+    if (!imports) { imports = true; input_install_iat(); }
+    struct Candidate { HWND hwnd = nullptr; int64_t area = 0; } candidate;
+    EnumWindows([](HWND h, LPARAM arg) -> BOOL {
+        DWORD pid = 0;
+        GetWindowThreadProcessId(h, &pid);
+        if (pid != GetCurrentProcessId() || !IsWindowVisible(h) || GetWindow(h, GW_OWNER) ||
+            (GetWindowLongPtrW(h, GWL_EXSTYLE) & WS_EX_TOOLWINDOW)) return TRUE;
+        RECT r{};
+        if (!GetClientRect(h, &r)) return TRUE;
+        const int64_t area = int64_t(r.right - r.left) * (r.bottom - r.top);
+        auto& best = *reinterpret_cast<Candidate*>(arg);
+        if (area > best.area) best = {h, area};
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&candidate));
+    if (candidate.hwnd) { g_hwnd.store(candidate.hwnd); input_attach(candidate.hwnd); }
 }
 
 bool input_attached() { return g_attached != nullptr; }

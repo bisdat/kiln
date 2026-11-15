@@ -20,7 +20,7 @@ int main() {
         check(begin(finish(locked.record), "sl").off);
         check(!begin(locked.record, "none").off);
         check(!begin({}, "sl").off); // deleting record re-enables
-        check(!begin(finish(first.record), "sl").off); // normal exit before frame
+        check(!begin(finish(first.record), "sl").off); // successful first drawn frame
     }
     Record r;
     check(!parse("unreadable", r));
