@@ -347,3 +347,23 @@ names the guided check a real game has not passed yet for a row that is on.
 | `gamedata.expanded_buff_room` | service row, session | kiln.gamedata at the first world | `17-buffs-client` | pending until the first world loads; available when the room of 4,096 buff clones was reserved next to the game's collection; unavailable (`faulted`) with the text "… the room is 1024" on the fallback |
 | `vfx.budget` | service row, static | kiln.vfx with its table (kiln-vfx.dll, game client), before the mods load; lowered (`faulted`) when the guard turns off; Kiln.Vfx says `service-missing` (needs kiln.vfx: a dedicated server has no VFX) / `service-older` without the table | `17-vfx-budget.before` / `17-vfx-budget.after` | `Vfx.ResourceBudget` answers ([vfx.md](vfx.md#the-resource-budget-since-020-dev29)): available when this game build's VFX count limit can be read (`symbol-missing` naming the `caps/vfx.*` constant that did not resolve, or the layout that does not check out). Not off before a world: the budget answers `NotReady` until kiln.vfx read the game's table |
 | `blocks.vfx_registration` | service row, static | kiln.vfx with its table; lowered (`faulted`) when Kiln's VFX are not built this session (no kiln.assets, the particle layouts changed, the build failed) or the guard turns off; Kiln.Vfx and Kiln.Blocks say `service-missing` / `service-older` without the table | `17-vfx-budget.before` / `17-vfx-budget.after` | `Blocks.Define(name, VfxBlock, options)` and `Blocks.GetVfxRegistration` answer: as `vfx.budget`, and a resource's bytes in the game's table can be compared with what Kiln served (`symbol-missing` naming vfx.play's constants or `caps/vfx.table_capacity_offset` otherwise) |
+
+### Gameplay hook groups
+
+The sigdb rows `gameplay.craft`, `gameplay.terraform`, `gameplay.spawn`, `gameplay.entities` and `gameplay.build`
+continue to describe resolved symbols/layouts. Native-owned session rows `gameplay.craft_hooks`,
+`gameplay.terraform_hooks`, `gameplay.spawn_hooks`, `gameplay.entities_hooks` and `gameplay.build_hooks` describe
+installation: pending with "resolved, not installed: no mod asked", pending with a safe-point wait, available when
+installed, or unavailable with the refusal reason. Session rows must not be manifest feature requirements.
+The existing static API aliases `gameplay.entity_events` and `gameplay.spawn_replace` remain available while their
+group resolves and lower on permanent refusal; they do not become pending and block admission of old manifests.
+The four new groups install on pre-world demand or a checked safe Pre, with at most two target attempts per tick
+and three attempts on thread-check refusal. The build-piece group retains its no-world/last-stop policy.
+Native `request_hooks(owner, mask)` is appended after `request_build`; the latter remains unchanged. Managed
+reference preflight requests all groups, conservatively including crafting-only and shipped-helper references.
+See [gameplay](gameplay.md#craft-terraform-natural-spawn-and-entity-hook-demand) for consumers and pending-call behavior.
+
+Pre-world reference demand includes the indirect consumers: `Kiln.Creatures` -> spawn hooks; `Kiln.Rules` -> build
+and terraform hooks; `Kiln.Quests` -> craft, build and terraform hooks. Direct `Kiln.Gameplay` references request
+all groups. `Kiln.Blocks` and admitted `blocks/` data packs request build/craft/terraform/spawn. The host requests only additional group bits as helper assemblies load; its 136-byte table fallback
+continues calling request_build when needed, while the older service owns the other startup hooks.
