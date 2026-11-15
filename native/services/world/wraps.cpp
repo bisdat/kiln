@@ -1213,7 +1213,7 @@ KilnResult KILN_CALL game_slice_archetype(KilnGameSlice* slice, uintptr_t* out_l
     std::memcpy(&storage, f->ctx->job, sizeof storage);
     if (!storage || !map_find_ptr(storage + static_cast<uintptr_t>(L.storage_entities), slice->entity_ids[0], &rec) || !rec ||
         !seh_copy(&layout, reinterpret_cast<const void*>(rec + static_cast<uintptr_t>(L.entity_layout)), 8) || !layout)
-        return KILN_ERR_NOT_FOUND;
+        return KILN_ERR_UNAVAILABLE;  // nonempty slice: cannot decide, rather than silently rejecting every slice
     *out_layout = layout;
     return KILN_OK;
 }

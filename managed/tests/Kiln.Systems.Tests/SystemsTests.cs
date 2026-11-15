@@ -668,9 +668,18 @@ public sealed unsafe class SystemsTests
     {
         using var w = new FakeWorld();
         w.SetTableSize(size);
-        Assert.Null(Systems.Find("fuel_setup"));
-        Assert.Throws<KilnUnavailableException>(() => Systems.Wrap("fuel_setup"));
-        Assert.Empty(w.Wraps);
+        if (size == 440)
+        {
+            Assert.NotNull(Systems.Find("fuel_setup"));
+            Assert.True(Systems.Wrap("fuel_setup").Ok);
+            Assert.False(Systems.Wrap<FuelView>().Ok);
+        }
+        else
+        {
+            Assert.Null(Systems.Find("fuel_setup"));
+            Assert.Throws<KilnUnavailableException>(() => Systems.Wrap("fuel_setup"));
+            Assert.Empty(w.Wraps);
+        }
     }
 
     [Theory]

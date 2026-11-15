@@ -113,6 +113,12 @@ internal static unsafe class SystemsNative
         public delegate* unmanaged[Cdecl]<uint, int, uint*, byte*, uint, uint*, int> GameProgramContract;  // since 0.2.0-dev.29
     }
 
+    // The M2 prefix remains sufficient for untyped wraps. Probe the optional S7 tail separately.
+    [StructLayout(LayoutKind.Sequential, Size = 440)]
+    private struct M2Table { public ServiceHeader Header; }
+
+    internal static bool HasContract(Table* t) => t != null && t->Header.Size >= (uint)sizeof(Table) && t->GameProgramContract != null;
+
     private static Table* _table;
     private static bool _looked;
 
@@ -122,7 +128,7 @@ internal static unsafe class SystemsNative
         get
         {
             if (_table != null || _looked) return _table;
-            _table = Services.Get<Table>(Name, Version);
+            _table = (Table*)Services.Get<M2Table>(Name, Version);
             _looked = true;
             return _table;
         }

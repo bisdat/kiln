@@ -28,17 +28,57 @@ public static partial class Ecs
             /// <summary>The untyped view (by name; singletons).</summary>
             public readonly global::Kiln.EntityView View => _e;
             /// <summary>tpl <c>Lantern</c>.</summary>
-            public readonly ref readonly global::Kiln.Ecs.Lantern Lantern => ref _e.ReadAt<global::Kiln.Ecs.Lantern>(0, 0, "Lantern");
+            public readonly ref readonly global::Kiln.Ecs.Lantern Lantern
+            {
+                get
+                {
+                    if (global::Kiln.Ecs.WhyNot<global::Kiln.Ecs.Lantern>() is { } why)
+                        throw new global::System.InvalidOperationException(why);
+                    return ref _e.ReadAt<global::Kiln.Ecs.Lantern>(0, 0, "Lantern");
+                }
+            }
             /// <summary>The entity has tpl_opt <c>Unlit</c>.</summary>
             public readonly bool HasUnlit => _e.HasAt(1, 0);
             /// <summary>tpl_opt <c>Unlit</c>.</summary>
-            public readonly ref readonly global::Kiln.Ecs.Unlit Unlit => ref _e.ReadAt<global::Kiln.Ecs.Unlit>(1, 0, "Unlit");
+            public readonly ref readonly global::Kiln.Ecs.Unlit Unlit
+            {
+                get
+                {
+                    if (global::Kiln.Ecs.WhyNot<global::Kiln.Ecs.Unlit>() is { } why)
+                        throw new global::System.InvalidOperationException(why);
+                    return ref _e.ReadAt<global::Kiln.Ecs.Unlit>(1, 0, "Unlit");
+                }
+            }
             /// <summary>read <c>Gauges</c>.</summary>
-            public readonly ref readonly global::Kiln.Ecs.Gauges Gauges => ref _e.ReadAt<global::Kiln.Ecs.Gauges>(2, 0, "Gauges");
+            public readonly ref readonly global::Kiln.Ecs.Gauges Gauges
+            {
+                get
+                {
+                    if (global::Kiln.Ecs.WhyNot<global::Kiln.Ecs.Gauges>() is { } why)
+                        throw new global::System.InvalidOperationException(why);
+                    return ref _e.ReadAt<global::Kiln.Ecs.Gauges>(2, 0, "Gauges");
+                }
+            }
             /// <summary>read <c>Comet</c>.</summary>
-            public readonly ref readonly global::Kiln.Ecs.Comet Comet => ref _e.ReadAt<global::Kiln.Ecs.Comet>(2, 1, "Comet");
+            public readonly ref readonly global::Kiln.Ecs.Comet Comet
+            {
+                get
+                {
+                    if (global::Kiln.Ecs.WhyNot<global::Kiln.Ecs.Comet>() is { } why)
+                        throw new global::System.InvalidOperationException(why);
+                    return ref _e.ReadAt<global::Kiln.Ecs.Comet>(2, 1, "Comet");
+                }
+            }
             /// <summary>write <c>Warmth</c> (marked when used).</summary>
-            public readonly ref global::Kiln.Ecs.Warmth Warmth => ref _e.WriteAt<global::Kiln.Ecs.Warmth>(4, 0, "Warmth");
+            public readonly ref global::Kiln.Ecs.Warmth Warmth
+            {
+                get
+                {
+                    if (global::Kiln.Ecs.WhyNot<global::Kiln.Ecs.Warmth>() is { } why)
+                        throw new global::System.InvalidOperationException(why);
+                    return ref _e.WriteAt<global::Kiln.Ecs.Warmth>(4, 0, "Warmth");
+                }
+            }
         }
 
         /// <summary>Program <c>torch_burn</c>. Untyped (no layout in the dump): Torch.</summary>
@@ -58,7 +98,15 @@ public static partial class Ecs
             /// <summary>The untyped view (by name; singletons).</summary>
             public readonly global::Kiln.EntityView View => _e;
             /// <summary>write <c>Warmth</c> (marked when used).</summary>
-            public readonly ref global::Kiln.Ecs.Warmth Warmth => ref _e.WriteAt<global::Kiln.Ecs.Warmth>(4, 1, "Warmth");
+            public readonly ref global::Kiln.Ecs.Warmth Warmth
+            {
+                get
+                {
+                    if (global::Kiln.Ecs.WhyNot<global::Kiln.Ecs.Warmth>() is { } why)
+                        throw new global::System.InvalidOperationException(why);
+                    return ref _e.WriteAt<global::Kiln.Ecs.Warmth>(4, 1, "Warmth");
+                }
+            }
         }
 
         /// <summary>Program <c>unlit_cleanup</c>.</summary>
@@ -78,7 +126,15 @@ public static partial class Ecs
             /// <summary>The untyped view (by name; singletons).</summary>
             public readonly global::Kiln.EntityView View => _e;
             /// <summary>tpl <c>Unlit</c>.</summary>
-            public readonly ref readonly global::Kiln.Ecs.Unlit Unlit => ref _e.ReadAt<global::Kiln.Ecs.Unlit>(0, 0, "Unlit");
+            public readonly ref readonly global::Kiln.Ecs.Unlit Unlit
+            {
+                get
+                {
+                    if (global::Kiln.Ecs.WhyNot<global::Kiln.Ecs.Unlit>() is { } why)
+                        throw new global::System.InvalidOperationException(why);
+                    return ref _e.ReadAt<global::Kiln.Ecs.Unlit>(0, 0, "Unlit");
+                }
+            }
         }
     }
 }

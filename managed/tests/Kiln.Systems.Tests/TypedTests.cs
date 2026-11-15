@@ -44,6 +44,24 @@ internal ref struct NoContractView : IGameProgram<NoContractView>
 public sealed unsafe class TypedTests
 {
     [Fact]
+    public void An_M2_table_keeps_untyped_wraps_and_refuses_typed_access_without_reading_the_tail()
+    {
+        using var w = new FakeWorld();
+        w.SetTableSize(440);
+        Assert.NotNull(Systems.Find("fuel_setup"));
+        var wrap = Systems.Wrap("fuel_setup");
+        Assert.True(wrap.Ok, wrap.Reason);
+        var calls = 0;
+        wrap.Wrap!.BeforeEach((ref EntityView e) => calls++);
+        w.Call(w.Wraps[0]);
+        Assert.Equal(3, calls);
+        var typed = Systems.Wrap<FuelView>();
+        Assert.False(typed.Ok);
+        Assert.Contains("contract", typed.Reason);
+        Assert.Equal(0, w.ContractCalls);
+    }
+
+    [Fact]
     public void A_typed_wrap_checks_the_contract_and_its_view_reads_the_programs_slots()
     {
         using var w = new FakeWorld();

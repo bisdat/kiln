@@ -983,10 +983,20 @@ def programs_text(m, path):
                                  f"            public readonly global::System.ReadOnlySpan<int> {prop}Values => _e.AttributeReadAt({lid}, {i}, \"{comp}\");\n")
                 elif writable:
                     props.append(f"            /// <summary>{note} (marked when used).</summary>\n"
-                                 f"            public readonly ref {ctype} {prop} => ref _e.WriteAt<{ctype}>({lid}, {i}, \"{comp}\");\n")
+                                 f"            public readonly ref {ctype} {prop}\n"
+                                 f"            {{\n                get\n                {{\n"
+                                 f"                    if (global::Kiln.{r}.WhyNot<{ctype}>() is {{ }} why)\n"
+                                 f"                        throw new global::System.InvalidOperationException(why);\n"
+                                 f"                    return ref _e.WriteAt<{ctype}>({lid}, {i}, \"{comp}\");\n"
+                                 f"                }}\n            }}\n")
                 else:
                     props.append(f"            /// <summary>{note}.</summary>\n"
-                                 f"            public readonly ref readonly {ctype} {prop} => ref _e.ReadAt<{ctype}>({lid}, {i}, \"{comp}\");\n")
+                                 f"            public readonly ref readonly {ctype} {prop}\n"
+                                 f"            {{\n                get\n                {{\n"
+                                 f"                    if (global::Kiln.{r}.WhyNot<{ctype}>() is {{ }} why)\n"
+                                 f"                        throw new global::System.InvalidOperationException(why);\n"
+                                 f"                    return ref _e.ReadAt<{ctype}>({lid}, {i}, \"{comp}\");\n"
+                                 f"                }}\n            }}\n")
         miss = f" Untyped (no layout in the dump): {', '.join(esc(x) for x in missing)}." if missing else ""
         text = lists_text(cat, p).replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
         contract = int(p["contract"], 16)

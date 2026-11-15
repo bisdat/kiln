@@ -315,7 +315,7 @@ internal sealed unsafe class ProgramLists
             {
                 var t = SystemsNative.T;
                 uint c = 0;
-                state = t != null && t->GameProgramContract((uint)_world, _index, &c, null, 0, null) == SystemsNative.Ok ? 1 : 2;
+                state = SystemsNative.HasContract(t) && t->GameProgramContract((uint)_world, _index, &c, null, 0, null) == SystemsNative.Ok ? 1 : 2;
                 _contract = c;
                 Volatile.Write(ref _contractState, state);
             }

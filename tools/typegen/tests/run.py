@@ -337,6 +337,22 @@ def test_programs_match_their_expected_output():
     assert "WorldScan" not in text                                                 # all_read: no view
 
 
+def test_program_slots_validate_component_layout_before_memory_access():
+    out = work("program-layout-guard")
+    rc, so, se = run("programs", "--catalog", CATALOG, "--dump", DUMP, "--out", out)
+    assert rc == 0, se
+    text = read(os.path.join(out, "Kiln.Game.Programs.g.cs")).decode()
+    # Same-size field moves do not change a program descriptor or sizeof(T).
+    # Every raw typed read/write must run the recursive live-layout check first.
+    import re
+    slots = list(re.finditer(r'return ref _e\.(?:ReadAt|WriteAt)<([^>]+)>', text))
+    assert slots, "typed slots bypass the layout guard (expression-bodied accessors)"
+    assert len(slots) == len(re.findall(r"_e\.(?:ReadAt|WriteAt)<", text))
+    for slot in slots:
+        getter = text[text.rfind("get", 0, slot.start()):slot.start()]
+        assert f"global::Kiln.Ecs.WhyNot<{slot.group(1)}>()" in getter
+
+
 def test_the_programs_file_declares_no_type_directly_in_namespace_kiln():
     text = read(os.path.join(EXPECTED, "Kiln.Game.Programs.g.cs")).decode()
     body = text[text.index("namespace Kiln;"):]
@@ -364,7 +380,8 @@ def test_programs_auto_finds_the_committed_catalog_of_the_dumps_exe():
     assert "public static uint Contract => 0xE4713C0Bu;" in text                    # the catalog's fuel_setup
     assert 'public readonly global::Kiln.Attribute32 Fuel => _e.AttributeAt(4, 0, "Fuel");' in text
     assert 'FuelValues => _e.AttributeReadAt(4, 0, "Fuel");' in text
-    assert "FuelSetupComponent => ref _e.ReadAt<global::Kiln.Ecs.FuelSetup>(0, 0, \"FuelSetup\")" in text
+    assert "public readonly ref readonly global::Kiln.Ecs.FuelSetup FuelSetupComponent" in text
+    assert 'return ref _e.ReadAt<global::Kiln.Ecs.FuelSetup>(0, 0, "FuelSetup");' in text
     assert "struct NpcBed " not in text                                            # other_write_unser
 
 

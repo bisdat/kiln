@@ -153,6 +153,8 @@ public static unsafe class Systems
         options ??= new WrapOptions();
         var refused = Check(program, options, "Systems.Wrap", out var t, out var index);
         if (refused is not null) return new WrapResult<ProgramWrap<T>>(false, refused, null);
+        if (!SystemsNative.HasContract(t))
+            return new WrapResult<ProgramWrap<T>>(false, $"{program}: kiln.world has no program contract member; typed wraps need a newer native service", null);
         var typed = Capabilities.Get("systems.wraps.typed");
         if (typed.State != CapabilityState.Available) throw new KilnUnavailableException("systems.wraps.typed", typed.ReasonText);
         var buffer = new byte[8192];

@@ -1259,6 +1259,7 @@ struct Seen {
     uint32_t count = 0;
     std::vector<KilnResult> rcs;
     uintptr_t fuel = 0, dfs = 0, ct = 0, tpl = 0, archetype = 0;
+    KilnResult archetype_rc = KILN_OK;
     uint32_t fuel_size = 0, ct_size = 0;
     uint8_t fuel_writable = 9, ct_writable = 9;
     bool slot_outside = true;
@@ -1294,7 +1295,7 @@ void KILN_CALL st_iterate(KilnGameSlice* s, void*) {
                            game_slice_mark(s, dummy, KILN_GAME_LIST_WRITE, 0) == KILN_ERR_WRONG_THREAD;
     g_seen4.rcs.push_back(game_slice_iterate(s, &each_record, s));
     g_seen4.index_after = reinterpret_cast<ProgramCtx*>(s->program_ctx)->index;
-    game_slice_archetype(s, &g_seen4.archetype);
+    g_seen4.archetype_rc = game_slice_archetype(s, &g_seen4.archetype);
 }
 uint32_t KILN_CALL each_stop(uint64_t*, uint32_t row, KilnEntity, void*) { return row == 2; }
 void KILN_CALL st_iterate_after(KilnGameSlice* s, void*) {
@@ -1471,6 +1472,19 @@ void per_entity() {
         run_slice(wentry(0), j2);
         check(at == 3 && g_seen4.archetype == lb2,
               "archetype: the first entity is found in the entity map's slot of its id's hash, as the game finds it");
+        bits[0] &= ~(1ull << at);
+        g_seen4 = Seen{};
+        run_slice(wentry(0), j2);
+        check(g_seen4.archetype == 0 && g_seen4.archetype_rc == KILN_ERR_UNAVAILABLE,
+              "a nonempty slice with no entity-map entry reports an undecidable archetype, not an empty slice");
+        bits[0] |= 1ull << at;
+        Job empty(0);
+        counts(empty, 1, 1, 2);
+        std::memcpy(empty.bytes, &st, 8);
+        g_seen4 = Seen{};
+        run_slice(wentry(0), empty);
+        check(g_seen4.archetype_rc == KILN_ERR_NOT_FOUND,
+              "an empty slice remains a transient archetype miss");
     }
     KilnGameSlice outside{};
     outside.size = sizeof outside;
