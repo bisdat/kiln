@@ -228,13 +228,42 @@ qb::ojson npcs_from_blocks(const std::string& mod, const std::vector<qb::ojson>&
 // Every enabled mod of the load order with a quests/ folder, as kiln.assets finds its assets.json. `boot`: a boot generation's prepare
 // (chapter 08): a mod it excludes is left out, and each mod's OnBoot documents (the quests file's format) follow its own files and blocks,
 // before what its code defined at an earlier start.
-// A mod's input holds native quests, knowledge or NPCs: a document with a "knowledge", "quests", "dialogues" or "npcs"
-// entry that is not empty. An input without (no files, empty files) never stops the start.
+// A conservative check for what compile_pack treats as native, without building or reading the game's resources.
+// Chat quests, unbound/chat dialogues and plain game-NPC placement need no rebuilt resources. Auto topics can only
+// come from native quests (already caught below). Keep clone/roster entries and qualified dialogue references native,
+// as compile_pack does, even when their own compilation might fail. Only object sections are read by the compiler.
 bool ships(const qb::ModInput& m) {
+    const auto section = [](const qb::ojson& d, const char* key) -> const qb::ojson& {
+        static const qb::ojson empty = qb::ojson::object();
+        const auto it = d.find(key);
+        return it != d.end() && it->is_object() ? *it : empty;
+    };
+    std::map<std::string, const qb::ojson*> dialogues;
+    for (const qb::ojson& d : m.documents) {
+        if (!section(d, "knowledge").empty()) return true;
+        for (const auto& [name, q] : section(d, "quests").items()) {
+            (void)name;
+            if (!q.is_object()) continue;
+            const auto journal = q.find("journal");
+            if (journal == q.end() || !journal->is_string() || journal->get_ref<const std::string&>() != "chat") return true;
+        }
+        // The last definition of a dialogue wins, including code/boot documents after the mod's files.
+        for (const auto& [name, dialogue] : section(d, "dialogues").items()) dialogues[name] = &dialogue;
+    }
+    std::set<std::string> npc_names;  // compile_pack keeps the first object definition of an NPC
     for (const qb::ojson& d : m.documents)
-        if (d.is_object())
-            for (const char* k : {"knowledge", "quests", "dialogues", "npcs"})
-                if (d.contains(k) && (d[k].is_object() || d[k].is_array()) && !d[k].empty()) return true;
+        for (const auto& [name, n] : section(d, "npcs").items()) {
+            if (!n.is_object() || !npc_names.insert(name).second) continue;
+            if (n.contains("clone") || n.contains("roster")) return true;
+            const auto ref = n.find("dialogue");
+            if (ref == n.end() || !ref->is_string()) continue;
+            const std::string& id = ref->get_ref<const std::string&>();
+            if (id.find(':') != std::string::npos) return true;
+            const auto dialogue = dialogues.find(id);
+            if (dialogue == dialogues.end()) continue;
+            const auto native = dialogue->second->find("native");
+            if (native == dialogue->second->end() || !native->is_boolean() || native->get<bool>()) return true;
+        }
     return false;
 }
 

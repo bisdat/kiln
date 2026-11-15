@@ -452,6 +452,9 @@ What counts as the whole build failing, and what does not:
 | No enabled mod ships native quests, knowledge or NPCs (no files, or files with none) | **no** | nothing to lose |
 | The roster cannot be held | as the roster (0x4B02), not as this stop | the more precise reason |
 
+Chat quests (`"journal": "chat"`), chat conversations (`"native": false`) and ordinary placement of an existing game
+NPC need no rebuilt resources. A missing native-resource hook does not stop a start containing only those inputs.
+
 The stop is a start-time act only, as the roster's: once a world is present or has run in this process, kiln.log says
 `native: the start could NOT be stopped: …` and the process goes on without the mods' native data. A required boot mod
 whose content the failed build left out is also reported to kiln.boot (0x4B01) afterwards, but the stop above comes

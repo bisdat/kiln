@@ -280,6 +280,8 @@ void mod(const std::string& id, const std::string& quests, const std::string& ma
 }
 const std::string kGood = R"({"format":1,"knowledge":{"met":{"scope":"world"}}})";
 const std::string kBroken = R"({"format":1,"broken":true,"knowledge":{"x":{"type":"bogus"}}})";
+const std::string kChatQuest = R"({"format":1,"quests":{"q":{"name":"Q","journal":"chat","giver":"n","steps":[{"id":"s","text":"Talk"}]}},"npcs":{"n":{"template":"NPC_Workshop_Alchemist01","place":{"near":"player"}}}})";
+const std::string kChatDialogue = R"({"format":1,"npcs":{"n":{"template":"NPC_Workshop_Alchemist01","dialogue":"d","place":{"near":"player"}}},"dialogues":{"d":{"native":false,"start":"a","nodes":{"a":{"text":"Hello","options":[{"text":"Bye"}]}}}}})";
 void lab_switch(const std::string& word) { write(t_root / "control" / "knowledge.fail-build", word + "\n"); }
 
 // A fresh start: no mods, no switch, every fake as it is in a working game; the service's state as at a process start.
@@ -371,6 +373,105 @@ void empty_input_never_stops() {
     t_hook_ok = false;
     boot_and_resource_init();
     CHECK(t_stops.empty());
+}
+
+// These paths do not invoke the fake compiler: the real compiler's chat/placement classification must also govern
+// the decision to stop when ResourceInit cannot be hooked. A required boot participant is still prepared normally.
+void non_native_hook_failures() {
+    for (const std::string& input : {
+             kChatQuest, kChatDialogue,
+             std::string(R"({"format":1,"quests":{"q":{"name":"Q","journal":"chat","steps":[{"id":"s","text":"Talk"}]}}})"),
+             std::string(R"({"format":1,"dialogues":{"d":{"native":false,"start":"a","nodes":{"a":{"text":"Hello"}}}}})"),
+             std::string(R"({"format":1,"dialogues":{"d":{"start":"a","nodes":{"a":{"text":"Unbound"}}}}})"),
+             std::string(R"({"format":1,"npcs":{"n":{"template":"NPC_Workshop_Alchemist01","place":{"near":"player"}}}})")})
+        for (bool unresolved : {false, true})
+            for (bool boot : {false, true}) {
+                start((std::string("no native resources, ") + (unresolved ? "unresolved ResourceInit" : "hook refused") +
+                       (boot ? ", required boot mod: no stop" : ": no stop")).c_str());
+                mod("chat", input);
+                t_hook_ok = false;
+                t_symbol = !unresolved;
+                t_boot = boot;
+                native_pack_install();
+                native_pack_boot();
+                native_pack_ready();
+                CHECK(!g_no_hook.empty());
+                if (boot) {
+                    const std::string env = R"({"owners":[{"id":"chat","owner":11,"required":true}]})";
+                    KilnBootPrepareInputV1 in{sizeof in, KILN_BOOT_VERSION, 1, KilnStr{env.data(), env.size()}};
+                    KilnBootPreparedV1 out{sizeof out};
+                    KilnBootIssueV1 issue{sizeof issue};
+                    CHECK(t_prepare && t_prepare(nullptr, &in, &out, &issue) == KILN_OK);
+                    CHECK(out.ok == 1 && out.plan);
+                    if (out.ok && out.destroy) out.destroy(out.plan);
+                }
+                CHECK(t_stops.empty() && t_faults.empty());
+                CHECK(t_puts.empty() && kiln::qb::t_compiles == 0);
+                dump();
+            }
+
+    start("chat-only mods and kiln.assets unavailable at ResourceInit: no stop");
+    mod("chat", kChatQuest);
+    mod("talk", kChatDialogue);
+    t_assets = false;
+    boot_and_resource_init();
+    CHECK(t_stops.empty() && kiln::qb::t_compiles == 0);
+
+    // First NPC object definition wins; a shadowed clone must not turn placement-only input into native content.
+    for (bool native : {false, true}) {
+        start(native ? "the first native NPC stays native" : "a shadowed native NPC needs no rebuilt resources");
+        const std::string placement = R"({"format":1,"npcs":{"n":{"template":"NPC_Workshop_Alchemist01","place":{"near":"player"}}}})";
+        const std::string clone = R"({"format":1,"npcs":{"n":{"template":"NPC_Workshop_Alchemist01","clone":{}}}})";
+        mod("chat", native ? clone : placement);
+        write(t_root / "mods/chat/quests/z.json", native ? placement : clone);
+        t_hook_ok = false;
+        native_pack_install();
+        native_pack_boot();
+        native_pack_ready();
+        CHECK(native ? content_stop({"chat"}, "assets/ResourceInit") : t_stops.empty());
+        CHECK(kiln::qb::t_compiles == 0);
+        dump();
+    }
+
+    // Last dialogue definition wins across documents, as in compile_pack; a later native definition must still stop.
+    for (bool native : {false, true}) {
+        start(native ? "a later native dialogue definition still stops" : "a later chat dialogue definition needs no resources");
+        mod("chat", kChatDialogue);
+        write(t_root / "mods/chat/quests/z.json", R"({"format":1,"dialogues":{"d":{"native":true}}})");
+        if (!native) write(t_root / "mods/chat/quests/zz.json", R"({"format":1,"dialogues":{"d":{"native":false}}})");
+        t_hook_ok = false;
+        native_pack_install();
+        native_pack_boot();
+        native_pack_ready();
+        CHECK(native ? content_stop({"chat"}, "assets/ResourceInit") : t_stops.empty());
+        CHECK(kiln::qb::t_compiles == 0);
+        dump();
+    }
+}
+
+// Genuine native input still stops without a hook, independently of a knowledge entry. This includes the compiler's
+// conservative clone/roster and qualified-reference cases, and native data alongside chat-only content.
+void native_hook_controls() {
+    for (const std::string& input : {
+             std::string(R"({"format":1,"quests":{"q":{"name":"Q","steps":[{"id":"s","text":"Talk"}]}}})"),
+             std::string(R"({"format":1,"npcs":{"n":{"template":"NPC_Workshop_Alchemist01","dialogue":"d"}},"dialogues":{"d":{"start":"a","nodes":{"a":{"text":"Hello"}}}}})"),
+             std::string(R"({"format":1,"npcs":{"n":{"template":"NPC_Workshop_Alchemist01","clone":{}}}})"),
+             std::string(R"({"format":1,"npcs":{"n":{"template":"NPC_Workshop_Alchemist01","roster":{}}}})"),
+             std::string(R"({"format":1,"npcs":{"n":{"template":"NPC_Workshop_Alchemist01","dialogue":"alpha:d"}},"dialogues":{"d":{"native":false}}})"),
+             std::string(R"({"format":1,"knowledge":{"met":{}},"quests":{"q":{"journal":"chat"}},"dialogues":{"d":{"native":false}}})")})
+        for (bool unresolved : {false, true}) {
+            start(unresolved ? "native input, unresolved ResourceInit: still stops" : "native input, hook refused: still stops");
+            mod("alpha", input);
+            mod("chat", kChatQuest);
+            t_hook_ok = false;
+            t_symbol = !unresolved;
+            native_pack_install();
+            native_pack_boot();
+            native_pack_ready();
+            CHECK(content_stop({"alpha"}, "assets/ResourceInit"));
+            CHECK(t_puts.empty() && kiln::qb::t_compiles == 0);
+            dump();
+        }
 }
 
 // One mod's files that throw when read are that mod's error: it is left out and named, every other mod is read, built
@@ -704,6 +805,8 @@ int main(int argc, char** argv) {
     g_api = &t_api;
     served_and_single_mod_errors();
     empty_input_never_stops();
+    non_native_hook_failures();
+    native_hook_controls();
     one_mods_read();
     whole_read();
     whole_compile();
