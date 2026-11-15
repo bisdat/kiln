@@ -296,7 +296,7 @@ refusal is read from `state/shroudforge.json` (`game_thread=unavailable(<hook>:<
 `hooks.json` a few seconds after boot, once ShroudForge has reported.
 
 **Compat rules.** `compat-rules.json` tells Kiln about known clashes. Two files are read, Kiln's own (`kiln/compat-rules.json`,
-may be missing) and yours (`<configDir>/compat-rules.json`, in the launcher `profiles/<profile>/config/`). A rule of
+shipped in the runtime's core component since dev.29 and replaced by every update; may be missing on an older install) and yours (`<configDir>/compat-rules.json`, in the launcher `profiles/<profile>/config/`). A rule of
 yours with the same `id` replaces Kiln's. Plain JSON, no comments.
 
 ```json
@@ -312,7 +312,8 @@ yours with the same `id` replaces Kiln's. Plain JSON, no comments.
   `{"symbol": "chat/ChatLogAdd"}` (an overlap on that function). No `when`: always. At most 8 matchers; a module
   pattern with wildcards has at most 64 characters and 4 `*`.
 - `action`: `warn` (log the message), `late` (the `subject` module loads late), `disable` (the `subject` module, mod or
-  engine does not load). `late` and `disable` need a `subject`.
+  engine does not load), `before` (dev.29: the `subject` loads before the `target`, below). `late`, `disable` and
+  `before` need a `subject`; `before` also needs a `target`, and only `before` takes one.
 - Who applies what: the launcher writes `chain.ini` and the profile, so it applies `late` and `disable` of chain entries
   (a line `; kiln rule <id>` marks what a rule wrote). kiln-core logs `warn` rules, switches off a **mod the profile lists**
   (`disable` on `{"mod": "emf:coolmod"}`, before the plugins read the profile; the rule's message is the reason in the
@@ -324,8 +325,56 @@ yours with the same `id` replaces Kiln's. Plain JSON, no comments.
 - A rule that does not validate (bad id, no `subject` for `late`/`disable`, an unknown key) is dropped with a warning in
   kiln.log; the other rules stay. To switch a shipped rule off, give your own rule its `id` and a `when` that never holds.
 
-Limits: the core knows an engine from the profile's lists, ShroudForge's state and a few DLL names (`shroudforge-runtime.dll`,
-`emf_core.dll`, `enshwick.dll`); a mod folder placed by hand (not in a profile list) cannot be switched off by a rule in
+**One DLL before another (`before`, dev.29).** Some DLL mods must hook the game before another one does, not only before
+or after Kiln. Kiln ships one such rule in `kiln/compat-rules.json`:
+
+```json
+{ "id": "auto-loot-plus-before-ultimate-asi-loader",
+  "when": [ { "mod": "native:auto-loot-plus" }, { "engine": "ultimate-asi-loader" } ],
+  "action": "before", "subject": { "mod": "native:auto-loot-plus" }, "target": { "engine": "ultimate-asi-loader" },
+  "message": "Ultimate ASI Loader loads after Kiln so that Auto Loot Plus can hook the game first; Auto Loot Plus's F8 menu needs that." }
+```
+
+Auto Loot Plus redirects the game's `GetProcAddress` import in its `DllMain` (for its F8 menu), but only while that slot
+still holds kernel32's own function. Ultimate ASI Loader redirects the same import when it loads and puts it back only
+when the game first calls it, after Kiln's entry gate. So whichever loads second finds the slot taken, and Auto Loot Plus
+must load first. Kiln's proxy always loads `[chain]` (where the installer put Ultimate ASI Loader) before `[profile]`
+(where Auto Loot Plus is, a Library native), and its late phase keeps that order, so the switches alone order them right
+only as "Ultimate ASI Loader late, Auto Loot Plus not". The rule writes exactly that:
+
+- The launcher loads every chain entry the `target` names late (a `; kiln rule <id>` line in `[late]`) and keeps every
+  entry the `subject` names early, whatever their "Load after Kiln and ShroudForge" switches say: the profile's late
+  switch for a `[profile]` entry is not written while the rule applies, and the player's own `[late]` line for a
+  `[chain]` entry becomes `; kiln rule <id> off: <line>` (back at the next activation without the rule). It pins both
+  even when the order is already right, so a switch flipped later cannot undo it. The player's own `[late]` line for the
+  target stays the player's.
+- Matching: `module` by file name, `engine` by what the launcher reads in a chain DLL (Ultimate ASI Loader by its
+  `IsUltimateASILoader` export, whatever it is called: `xinput9_1_0.dll`, `dinput8.dll`, `version.dll` or another name), `mod`
+  by the Library id of a native mod of the profile. Auto Loot Plus's id `auto-loot-plus` comes from its package's
+  `mods/auto-loot-plus` folder, under any proxy name of its DLL. Imported without that folder (only its `dinput8.dll`), or
+  with its DLL renamed to a name that is no proxy name, it gets another id and the shipped rule does not fire: the switches
+  decide as before. Write your own rule with that id (`{"mod": "native:<id>"}`) in that case. Installed as the game's
+  `dinput8.dll` before Kiln, the installer chains it as `kiln\chain\chain-loader-dinput8.dll` (a `[chain]` entry without
+  a Library id): a rule of yours with `{"module": "chain-loader-dinput8.dll"}` as the subject orders that one.
+- On the profile page both switches show the rule ("Loads late: rule <id>", "Loads first: rule <id>"), the rule's
+  message stands under both entries, and neither switch can be moved against the rule. The activation's notes and the
+  launcher's log (`profile: note: <message>`) say the same sentence; without a `message` Kiln writes one from the file
+  names.
+- An order that cannot be made moves nothing and is a warning on the profile page and in the activation's notes: the
+  target is EMF's own loader or shroudlink's client addon (neither ever loads late), it starts outside Kiln's chain (next to
+  the game under a proxy name Windows loads, or from another loader), the subject and the target name the same DLL, two
+  `before` rules ask opposite orders, or a `late` rule loads the subject late (the `late` rule stays). A side a `disable`
+  rule switches off leaves nothing to order (a note, no warning).
+- kiln-core reads the rule and reports it in `hooks.json` `rules` (with its `target`): `applied: true` when every subject
+  entry loaded before every target entry (a late entry after all early ones, list order within a phase), otherwise
+  `applied: false` and a kiln.log warning naming both (`activate the profile again`). The core knows Ultimate ASI Loader's
+  chain entry by the same export, and a `[profile]` entry's native mod by its Library folder.
+- Older readers: a Kiln launcher or core from before dev.29 drops a `before` rule as one that does not validate (the
+  launcher shows "A rule file did not read: ... unknown variant `before`"; the core logs `rule #1: unknown key "target";
+  dropped`) and keeps the file's other rules. Nothing moves there.
+
+Limits: the core knows an engine from the profile's lists, ShroudForge's state, a few DLL names (`shroudforge-runtime.dll`,
+`emf_core.dll`, `enshwick.dll`) and, since dev.29, Ultimate ASI Loader's chain entry by its `IsUltimateASILoader` export; a mod folder placed by hand (not in a profile list) cannot be switched off by a rule in
 the core, and the report says so. A `disable` on a native mod whose DLLs load in phase dllmain does not stop the proxy
 from loading them (it ran before the core): the rule is reported as not applied (`its DLL was loaded by the proxy before
 kiln-core started`) and the mod shows as loaded. Activate the profile again so the launcher's chain.ini keeps them out.
