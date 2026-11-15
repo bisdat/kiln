@@ -40,9 +40,22 @@ internal sealed unsafe class ComponentChangesFake : IKitFake
         FakeTables.Features([ComponentChanges.Capability]);
     }
 
-    public void Start(KilnHarness harness) => ModelOf(harness).Start(harness);
+    // Kiln.World's consumer (ComponentChanges) keeps its table, owner, attachment and last batch in statics, and the kit's
+    // backend is one object for every harness, so nothing tells it a harness ended: each harness starts and ends with
+    // it reset, or a harness after one that watched stays bound to that one's service and gets no event.
+    public void Start(KilnHarness harness)
+    {
+        ComponentChanges.Reset();
+        ModelOf(harness).Start(harness);
+    }
+
     public void BeforeStep(KilnHarness harness, ulong step) => ModelOf(harness).BeforeStep(step);
-    public void End(KilnHarness harness) => ModelOf(harness).End();
+
+    public void End(KilnHarness harness)
+    {
+        ModelOf(harness).End();
+        ComponentChanges.Reset();
+    }
 
     public void AddCoverage(List<CoverageRow> rows) => rows.Add(new CoverageRow("Component watches", CoverageKind.RecordingFake,
         [N.Service, ComponentChanges.Capability],

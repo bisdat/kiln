@@ -50,6 +50,26 @@ public sealed class ComponentWatchUnloadTests
         Assert.Equal(2, kiln.Lines("tk-watch", "watch: event").Count);
     }
 
+    // Kiln.World's consumer state is static and the kit's backend is one object for every harness: a harness that
+    // watched must not leave the next one bound to its own (ended) service, or the next one's events never come.
+    [Fact]
+    public void A_harness_after_one_that_watched_gets_its_events()
+    {
+        for (var run = 1; run <= 2; run++)
+        {
+            using var kiln = new KilnHarness();
+            kiln.Step(2);
+            var e = kiln.Entities.Create(new WorldPosition(1, 2, 3));
+            kiln.Entities.SetBytes(e, "Health", Bytes(1));
+            var mod = kiln.Load<TkWatchMod>(new ModManifest("tk-watch"));
+            kiln.Step(3);
+            kiln.Entities.SetBytes(e, "Health", Bytes(2));
+            kiln.Step(2);
+            Assert.True(kiln.Lines("tk-watch", "watch: event").Count == 1, $"harness {run}: {kiln.Lines("tk-watch", "watch: event").Count} event line(s)");
+            kiln.Unload(mod);
+        }
+    }
+
     [Fact]
     public void A_reload_with_live_watches_leaves_only_the_new_instance_s()
     {
