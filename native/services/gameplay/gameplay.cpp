@@ -134,7 +134,7 @@ namespace {
 KilnResult KILN_CALL t_subscribe(KilnOwner owner, uint32_t mask, KilnGameplayFn f, void* user, KilnHandle* out) {
     if (!f || !mask) return KILN_ERR_INVALID_ARGUMENT;
     if (g_api->on_tick_thread && !g_api->on_tick_thread() && g_step != 0) return KILN_ERR_WRONG_THREAD;
-    if ((mask & (1u << KILN_GAMEPLAY_BUILD)) && !build_request(owner)) return KILN_ERR_UNAVAILABLE;
+    if (!hooks_interest(mask,owner)) return KILN_ERR_UNAVAILABLE;
     Sub s{g_next_handle++, owner, mask, f, user, true};
     g_subs.push_back(s);
     recompute_mask();
@@ -183,18 +183,20 @@ KilnResult KILN_CALL t_watch(KilnEntity e, bool on) {
 KilnResult KILN_CALL t_status(KilnGameplayStatus* out) {
     // Callers built before the entity fields existed pass the shorter size; they get the fields they know.
     if (!out || out->size < offsetof(KilnGameplayStatus, entity_hooks)) return KILN_ERR_INVALID_ARGUMENT;
+    std::lock_guard publication(hooks_publication());
     KilnGameplayStatus s{};
     s.size = sizeof s;
     s.intercept = F.intercept;
     s.emit = program_active();
-    s.craft_hook = F.craft;
+    s.craft_hook = hooks_installed(KILN_GAMEPLAY_HOOK_CRAFT);
+    hooks_status(&s);
     s.build_hooks = build_installed();
     s.build_hook_state = build_state();
     s.build_hook_mask = build_mask();
     const auto why = build_reason();
     std::snprintf(s.build_hook_reason, sizeof s.build_hook_reason, "%s", why.c_str());
-    s.terraform_hook = F.terraform;
-    s.spawn_hook = F.spawn;
+    s.terraform_hook = hooks_installed(KILN_GAMEPLAY_HOOK_TERRAFORM);
+    s.spawn_hook = hooks_installed(KILN_GAMEPLAY_HOOK_SPAWN);
     s.teleport = F.components;
     s.world = world() != 0;
     s.zones = static_cast<uint32_t>(zone_count());
@@ -247,8 +249,13 @@ KilnResult KILN_CALL t_component_change(KilnOwner owner, KilnEntity e, uint32_t 
 KilnResult KILN_CALL t_request_build(KilnOwner owner) { return build_request(owner) ? KILN_OK : KILN_ERR_UNAVAILABLE; }
 // Kiln.Host reads this member by its offset (GameplayBuildDemand.Request: the host has no reference to Kiln.Gameplay).
 static_assert(offsetof(KilnGameplayApi, request_build) == 8 + 15 * sizeof(void*) &&
-                  sizeof(KilnGameplayApi) == offsetof(KilnGameplayApi, request_build) + sizeof(void*),
-              "request_build is the 16th member of KilnGameplayApi, and the last");
+                  sizeof(KilnGameplayApi) == offsetof(KilnGameplayApi, request_hooks) + sizeof(void*),
+              "request_build remains the 16th member; request_hooks is appended last");
+
+KilnResult KILN_CALL t_request_hooks(KilnOwner owner,uint32_t groups) {
+    if(!groups || (groups & ~KILN_GAMEPLAY_HOOK_ALL)) return KILN_ERR_INVALID_ARGUMENT;
+    return hooks_request(groups,owner) ? KILN_OK : KILN_ERR_UNAVAILABLE;
+}
 
 const KilnGameplayApi kTable = {
     {sizeof(KilnGameplayApi), KILN_GAMEPLAY_VERSION},
@@ -268,12 +275,15 @@ const KilnGameplayApi kTable = {
     &t_spawn_replace_clear,
     &t_component_change,
     &t_request_build,
+    &t_request_hooks,
 };
 
 KilnHandle g_pre = 0, g_post = 0, g_late_pre = 0, g_build_world = 0;
 void KILN_CALL on_build_world(const KilnWorldEvent* e, void*) {
     if (e->event == KILN_WORLD_STOPPING) build_poll(e->kind);
 }
+
+void KILN_CALL on_client_hooks_pre(const KilnTickInfo*,void*) { hooks_poll(); }
 
 void KILN_CALL on_late_pre(const KilnTickInfo*, void*) { g_in_sim.store(true, std::memory_order_release); }
 
@@ -297,7 +307,7 @@ void tick_subscribers() {
             changed = true;
             continue;
         }
-        if (want & (1u << KILN_GAMEPLAY_BUILD)) build_request(s.owner);
+        hooks_interest(want,s.owner);
         const uint32_t m = want | 1u;
         if (m != s.mask) {
             g_subs[i].mask = m;
@@ -325,6 +335,7 @@ void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
         g_api->subscribe_tick(g_owner, KILN_TICK_PRE, &on_late_pre, nullptr, &g_late_pre) != KILN_OK)
         g_late_pre = 0;
     tick_subscribers();
+    hooks_poll();
     build_poll();
     g_in_step.store(false, std::memory_order_relaxed);
     zones_refresh();
@@ -454,17 +465,18 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     recipes_init();
     hooks_install();
     const bool entity_hooks = entities_install();
+    KilnHandle client_hooks=0;
+    api->subscribe_world_tick(owner,KILN_WORLD_CLIENT,KILN_TICK_PRE,&on_client_hooks_pre,nullptr,&client_hooks);
     build_lifecycle(api->subscribe_world(owner, &on_build_world, nullptr, &g_build_world) == KILN_OK);
     if (api->subscribe_tick(owner, KILN_TICK_PRE, &on_pre, nullptr, &g_pre) != KILN_OK ||
         api->subscribe_tick(owner, KILN_TICK_POST, &on_post, nullptr, &g_post) != KILN_OK) {
         KG_E("kiln.gameplay: no tick subscription; the service is unavailable");
         return KILN_ERR_UNAVAILABLE;
     }
-    KG_I("kiln.gameplay: intercept %s (queues %s), emit %s, craft hook %s, terraform hook %s, "
-         "spawn hook %s, entity hooks %s, discard %s, components %s, transforms %s; hashes craft %08x accept %08x loot %08x "
+    KG_I("kiln.gameplay: intercept %s (queues %s), emit %s, "
+         "discard %s, components %s, transforms %s; hashes craft %08x accept %08x loot %08x "
          "pickup %08x accepted %08x declined %08x",
-         F.intercept ? "on" : "off", F.queues ? "on" : "off", F.emit ? "on" : "off", F.craft ? "on" : "off",
-         F.terraform ? "on" : "off", F.spawn ? "on" : "off", entity_hooks ? "on" : "off", F.discard ? "on" : "off",
+         F.intercept ? "on" : "off", F.queues ? "on" : "off", F.emit ? "on" : "off", F.discard ? "on" : "off",
          F.components ? "on" : "off", F.transforms ? "on" : "off", H.craft_request, H.accept_offer, H.loot, H.pickup, H.accepted, H.declined);
     if (!F.intercept && !F.craft && !F.build && !F.terraform && !F.spawn && !F.components && !entity_hooks)
         return KILN_ERR_UNAVAILABLE;

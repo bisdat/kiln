@@ -9,9 +9,12 @@
 //     with their own subscribers (subscribe_world) and task queues; their steps finish their own jobs.
 // World lifecycle: a world "starts" at its first step (a new world pointer of that kind) and "stops" when the game
 // destroys it (hook on WorldDestroy, feature "world.lifecycle"). Leaving a hosted game and hosting another gives the
-// same kind a new world: services see a new session number and a new world() pointer.
+// same kind a new world: services see a new session number and a new world() pointer. Before a STOPPING the core runs
+// the game's WaitWorldJobs on the server world and (since 0.2.0-dev.29) the client world; the prediction world stops
+// with the client world, after it (tick_drain.h, capability rows world.stop_drain.<kind>).
 #pragma once
 #include "common.h"
+#include "tick_drain.h"
 
 namespace kiln::tick {
 
@@ -32,5 +35,9 @@ KilnResult post_world(KilnOwner owner, uint32_t kind, KilnTaskFn fn, void* user)
 KilnResult subscribe_world(KilnOwner owner, KilnWorldEventFn fn, void* user, KilnHandle* out);
 KilnResult remove(KilnHandle handle);
 KilnResult session(KilnSessionInfo* out);
+// What the core guarantees about a world kind's jobs at its STOPPING in this process (tick_drain.h); the capability rows
+// world.stop_drain.<kind> say it. Any thread.
+StopDrain stop_drain(uint32_t kind);
+bool waits_jobs();  // WaitWorldJobs resolved (tick.wait_jobs)
 
 }  // namespace kiln::tick

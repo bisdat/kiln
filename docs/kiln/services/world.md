@@ -127,7 +127,9 @@ using var sub = Events.On<ComponentWrittenEvent>(e => Log.Info($"{e.Component} o
   `Faulted` and is logged for the mod.
 - **Events.** `ComponentWrittenEvent` is posted on the tick thread for every write a mod made through these calls
   that changed bytes (not for `Unchanged`, not for a refusal), with the result; it is an `IEntityEvent`, so
-  `EventFilter.ForEntity` works. A change the game makes itself raises nothing.
+  `EventFilter.ForEntity` works. A change the game makes itself raises nothing. To be told of every net change of
+  named components, whoever made it, watch them: `ComponentChanges.Watch` (since 0.2.0-dev.29; a tracked write shows
+  there with `Origin = Kiln` and the mod's id: [decisions.md](decisions.md#named-component-watches-componentchanges-since-020-dev29)).
 - **Which world, which entity.** A write belongs to the server world that runs when you call: one made before the
   first world exists answers `Dropped`, and one that has not run when a hosted game opens another world answers
   `Dropped` too. It also carries its entity's generation, the entity's `SpawnTime` (the entities the game or Kiln.Spawn

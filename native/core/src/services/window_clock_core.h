@@ -39,13 +39,16 @@ inline bool tell_plain(FaultedFn fn, uint32_t code) {
 }
 
 // The two window services, in the order of window_begin. A table without the member (an older, shorter table) or a
-// service that faulted in a window call is left out. kiln.decisions may say a step does not need it (window_wanted):
-// then it gets neither call in that step; a table without window_wanted is called every step.
+// service that faulted in a window call is left out. Each may say a step does not need it (window_wanted: kiln.decisions
+// since 0.2.0-dev.29, kiln.component_changes since it was built in 0.2.0-dev.29): then it gets neither call in that
+// step; a table without window_wanted is called every step.
 struct Windows {
     WindowFn decisions_begin = nullptr, decisions_end = nullptr;
     WantedFn decisions_wanted = nullptr;
     FaultedFn decisions_faulted = nullptr;
     WindowFn changes_begin = nullptr, changes_end = nullptr;
+    WantedFn changes_wanted = nullptr;
+    FaultedFn changes_faulted = nullptr;
 
     bool any() const { return decisions_begin || decisions_end || changes_begin || changes_end; }
 
@@ -62,18 +65,28 @@ struct Windows {
             c && c->header.size >= offsetof(KilnComponentChangesApiV1, window_end) + sizeof(void*)) {
             w.changes_begin = c->window_begin;
             w.changes_end = c->window_end;
+            if (c->header.size >= offsetof(KilnComponentChangesApiV1, window_wanted) + sizeof(void*)) w.changes_wanted = c->window_wanted;
+            if (c->header.size >= offsetof(KilnComponentChangesApiV1, window_faulted) + sizeof(void*)) w.changes_faulted = c->window_faulted;
         }
         return w;
     }
 };
 
-// A fault mask of begin()/end() names kiln.decisions: tell it (window_faulted, when its table has the member) before
-// the core leaves it out, so that it stops holding and ends what it holds instead of waiting for window calls that will
-// not come. `already` is the mask of services told before (each is told once). Returns the services told now.
+// A fault mask of begin()/end() names a window service: tell it (window_faulted, when its table has the member) before
+// the core leaves it out, so that it stops (kiln.decisions: holding, and ends what it holds; kiln.component_changes:
+// every watch ends) instead of waiting for window calls that will not come. `already` is the mask of services told
+// before (each is told once). Returns the services told now (1 decisions, 2 component_changes).
 inline uint32_t tell_faulted(uint32_t mask, uint32_t already, const Windows& w, uint32_t code, Teller tell = &tell_plain) {
-    if (!(mask & 1) || (already & 1) || !w.decisions_faulted) return 0;
-    tell(w.decisions_faulted, code);
-    return 1;
+    uint32_t told = 0;
+    if ((mask & 1) && !(already & 1) && w.decisions_faulted) {
+        tell(w.decisions_faulted, code);
+        told |= 1;
+    }
+    if ((mask & 2) && !(already & 2) && w.changes_faulted) {
+        tell(w.changes_faulted, code);
+        told |= 2;
+    }
+    return told;
 }
 
 class Core {
@@ -108,7 +121,7 @@ public:
     }
 
     // After the last Pre subscriber, before the game's sim step. With `windows` (feature tick.wait_jobs): phase 2,
-    // decisions (when it wants this step) then component_changes, then phase 3. Without: straight to phase 3, no call.
+    // decisions then component_changes (each when it wants this step), then phase 3. Without: straight to phase 3, no call.
     // Returns a mask of the services that faulted (1 decisions, 2 component_changes); begun() says which were called.
     uint32_t begin(bool windows, const Windows& w, Caller call = &call_plain, Asker ask = &ask_plain) {
         uint32_t faulted = 0;
@@ -124,8 +137,12 @@ public:
                 }
             }
             if (w.changes_begin) {
-                if (call(w.changes_begin, epoch, step)) begun_ |= 2;
-                else faulted |= 2;
+                uint32_t want = 1;
+                if (w.changes_wanted && !ask(w.changes_wanted, &want)) faulted |= 2, want = 0;
+                if (want) {
+                    if (call(w.changes_begin, epoch, step)) begun_ |= 2;
+                    else faulted |= 2;
+                }
             }
         }
         set_phase(KILN_WINDOW_SIM);

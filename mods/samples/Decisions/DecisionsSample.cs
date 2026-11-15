@@ -5,6 +5,8 @@
 //   /survive          you cannot die: a lethal loss leaves you at 1 health (again to turn it off)
 //   /nopickup <item>  walk-over pickups of that item (name or id) are refused for you (again to turn it off)
 //   /noring           equipping a ring is refused for you (again to turn it off)
+//   /watchme          your health, stamina and inventory are watched: each change is logged with who made it
+//                     (Kiln's writers by name, otherwise Unknown; again to turn it off)
 //
 // Each player's choice applies to that player only: the handlers filter on the players who asked, so nothing is held
 // for anyone else. /survive and /nopickup require events.death and events.pickup respectively.
@@ -29,6 +31,11 @@ public sealed class DecisionsSampleMod : Mod
     public override void OnUnload()
     {
         foreach (var s in _subs) s.Dispose();
+        foreach (var (watch, handler) in _watches.Values)
+        {
+            handler.Dispose();
+            watch.Dispose();
+        }
     }
 
     // A handler that filters on the players in `who`: subscribed again when the set changes, so the service holds the
@@ -89,6 +96,31 @@ public sealed class DecisionsSampleMod : Mod
             if (e.Change is SingleEquipmentChange { Operation: EquipmentChangeKind.Equip, Slot: EquipmentSlot.Ring0 or EquipmentSlot.Ring1 }) e.Cancel();
         }, EventFilter.ForEntities(_noRing));
         c.Reply(on ? "you cannot put on a ring now" : "you can put on rings again");
+    }
+
+    // Named component watches (since 0.2.0-dev.29): a watch names what is followed; the handler only filters.
+    private readonly Dictionary<EntityId, (ComponentWatch Watch, IDisposable Handler)> _watches = [];
+
+    [Command("watchme", Description = "toggle: log every change of your health, stamina and inventory, and who made it")]
+    private void WatchMe(CommandContext c)
+    {
+        var p = Me(c);
+        if (_watches.Remove(p, out var had))
+        {
+            had.Handler.Dispose();
+            had.Watch.Dispose();
+            c.Reply("your components are not watched any more");
+            return;
+        }
+        if (!Capabilities.Is(ComponentChanges.Capability)) throw new CommandException($"watches are off here: {Capabilities.Why(ComponentChanges.Capability)}");
+        var r = ComponentChanges.Watch(new(ComponentWatchScope.Entities, [p],
+            ObservedComponents.Health | ObservedComponents.Stamina | ObservedComponents.Inventory, ComponentWatchExpansion.PlayerInventoryAndItems));
+        if (!r.Ok) throw new CommandException($"the watch was refused: {r.Reason}");
+        var handler = Events.On<ComponentValueChangedEvent>(e =>
+            Log.Info($"{e.Component} of {e.Entity} (yours: {p}) changed at step {e.Step}: {e.Origin}{(e.SourceMod is { } m ? " by " + m : "")}"),
+            EventFilter.ForEntity(p));  // a filter on the root also sees its linked inventory pages
+        _watches[p] = (r.Watch!, handler);
+        c.Reply($"watching {r.Pairs} of your components; changes go to the server log");
     }
 
     private static EntityId Me(CommandContext c) =>

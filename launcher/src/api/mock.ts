@@ -1,3 +1,4 @@
+import { mockStoppedFile, readMockStop, type StopScript } from "./mockStoppedStart";
 // Browser-only mock of the Tauri backend. commands.ts uses it automatically when
 // window.__TAURI_INTERNALS__ is absent (vite dev in a plain browser, Playwright smoke tests in mock mode), and for
 // read-only not_implemented commands in dev builds (./fallback.ts). State lives in memory: profiles, library, tasks,
@@ -553,8 +554,17 @@ function emitGame(gameId: string, kind: "started" | "stopped" | "boot" | "mods" 
   mockEmit("kiln://game", { gameId, kind, pid: s.pid, status: s });
 }
 
+let stopScript: StopScript | null = null;
+const stopStorage = "kiln-mock-stopped-starts";
+const stoppedStarts: Record<string, import("./commands").StoppedStart | null> = (() => {
+  try { return JSON.parse(localStorage.getItem(stopStorage) ?? "{}"); } catch { return {}; }
+})();
+export function scriptStoppedStart(kind: StopScript) { stopScript = kind; }
 function launch(gameId: string, req: LaunchRequest): LaunchResult {
   const g = gameOf(gameId);
+  stoppedStarts[gameId] = null;
+  localStorage.setItem(stopStorage, JSON.stringify(stoppedStarts));
+  const stop = stopScript; stopScript = null;
   // a scripted start Steam never made a game for (noProcess) is no game: Play again replaces it
   if (running[gameId] && running[gameId]!.from !== Infinity) reject("game_running", "The game is already running.");
   if (req.mode === "once" && !req.profileId) reject("invalid_argument", "Pick a profile to play once.");
@@ -571,6 +581,14 @@ function launch(gameId: string, req: LaunchRequest): LaunchResult {
   if (!req.skipBackup && req.mode !== "vanilla") backup = makeBackup(gameId, "launch", null, profile);
   running[gameId] = { pid, mode: req.mode, nonce, at: Date.now(), profile };
   launched.add(gameId);
+  if (stop) setTimeout(() => {
+    const ended = Date.now();
+    stoppedStarts[gameId] = readMockStop(mockStoppedFile(stop, pid, ended), pid, running[gameId]?.at ?? ended, ended);
+    localStorage.setItem(stopStorage, JSON.stringify(stoppedStarts));
+    mockStopGame(gameId);
+    (window as unknown as { __kilnStopCompleted: number }).__kilnStopCompleted = ((window as unknown as { __kilnStopCompleted?: number }).__kilnStopCompleted ?? 0) + 1;
+  }, 250);
+
   const sc = scriptedStart(gameId);
   if (sc) {
     // the scripted start: Steam starts the process when the script says, boot.json comes at the end of Kiln's boot
@@ -1279,7 +1297,7 @@ const handlers: Record<string, Handler> = {
       "[E 12:01:20.749] [kiln] kiln service tick 'kiln creature brains' threw (1x): System.InvalidOperationException: wrong thread",
       "[E 12:01:22.073] [kiln] kiln service tick 'kiln creature brains' threw (2x): System.InvalidOperationException: wrong thread",
     ] };
-    return { boot, mods: boot ? (modsExample as unknown as ModsJson) : null, native: boot ? (nativeExample as unknown as NativeJson) : null, stale: !r && !!boot, log };
+    return { stoppedStart: stoppedStarts[S(a.gameId)] ?? null, boot, mods: boot ? (modsExample as unknown as ModsJson) : null, native: boot ? (nativeExample as unknown as NativeJson) : null, stale: !r && !!boot, log };
   },
 
   // what kiln-eml does before the game's window exists: only on request (tests: `__kilnMock.setPreStart`), so that a plain
@@ -1733,7 +1751,7 @@ export function mockEmit(name: string, payload: unknown): void {
 }
 
 // Playwright and the dev console reach the fake game through this (mock mode only).
-if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown }).__kilnMock = { stopGame: mockStopGame, emit: mockEmit, setLastServer: mockSetLastServer,
+if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown }).__kilnMock = { scriptStoppedStart, stopGame: mockStopGame, emit: mockEmit, setLastServer: mockSetLastServer,
   calls: () => [...commandCalls],
   planCommand: (cmd: string, plan: CommandPlan) => { (commandPlans[cmd] ??= []).push(plan); },
   openGate: (name: string) => { const g = gateOf(name); g.open = true; g.waiters.splice(0).forEach((w) => w()); },

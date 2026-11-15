@@ -759,8 +759,11 @@ typedef struct KilnWorldApi {
      * component changed for the save and replication (the engine's MarkWritten), once per entity and component.
      * KILN_ERR_INVALID_ARGUMENT: not a write list or name; KILN_ERR_UNAVAILABLE: no tracker on this slot or build. */
     KilnResult(KILN_CALL* game_slice_mark)(KilnGameSlice* slice, const uint64_t* iter, int32_t list, int32_t i);
-    /* Inside a stage: the slice's archetype key (all its entities share one archetype): the layout of its first
-     * entity's record, read from the entity map. That read is narrowed, not proven: the map's capacity and count and the
+    /* Inside a stage: the slice's archetype key (all its entities share one archetype). Since dev.29 it is the layout in
+     * the engine's own slice record, the one ProgramRunner set the slice's columns up from (world.slice_record: a mid
+     * link on the runner's entry, put in in the Pre after the first call; checked against the trampoline's entry and the
+     * job's count). Until that link is in, or without it, it is the layout of the first entity's record, read from the
+     * entity map. That read is narrowed, not proven: the map's capacity and count and the
      * record's id are compared before and after the layout read, which catches a grow, a count change and a record that
      * names another entity, but not an erase and an insert between the two reads (the count is the same) nor a record
      * freed and reused for the same id. On a server world the map is at rest while slices run (structural changes are

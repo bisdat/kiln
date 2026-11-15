@@ -52,6 +52,13 @@ KilnDecisionsApiV1 decisions_table() {
     t.window_end = &dec_end;
     return t;
 }
+uint32_t g_chg_want = 1, g_chg_asked = 0;
+uint32_t KILN_CALL chg_wanted() {
+    ++g_chg_asked;
+    return g_chg_want;
+}
+std::vector<uint32_t> g_chg_told;
+void KILN_CALL chg_faulted(uint32_t code) { g_chg_told.push_back(code); }
 KilnComponentChangesApiV1 changes_table() {
     KilnComponentChangesApiV1 t{};
     t.header = {sizeof t, KILN_COMPONENT_CHANGES_VERSION};
@@ -188,6 +195,40 @@ int main() {
     g_core.end(told_w);
     check(g_log == std::vector<std::string>({"chg.begin@2:2/19", "chg.end@4:2/19"}), "no end call for the faulted service in that step");
     g_fault_dec_begin = false;
+
+    // since 0.2.0-dev.29 kiln.component_changes says too whether a step needs it (window_wanted): with no watch it gets
+    // neither call and no step waits for the world's jobs on its account (07 S7: nothing runs for a player whose mods
+    // watch nothing)
+    KilnComponentChangesApiV1 chg_lazy = chg;
+    chg_lazy.window_wanted = &chg_wanted;
+    chg_lazy.window_faulted = &chg_faulted;
+    const wc::Windows changes_lazy = wc::Windows::from(&lazy, &chg_lazy);
+    check(changes_lazy.changes_wanted == &chg_wanted && changes_lazy.changes_faulted == &chg_faulted, "the appended members are read");
+    g_log.clear();
+    g_want = 0;
+    g_chg_want = 0;
+    g_chg_asked = 0;
+    g_core.pre(20, 90);
+    check(g_core.begin(true, changes_lazy) == 0 && g_chg_asked == 1 && g_core.begun() == 0 && g_log.empty(),
+          "no watch: component_changes is asked and not begun");
+    g_core.end(changes_lazy);
+    check(g_log.empty(), "no watch: no end call either");
+    g_chg_want = 1;
+    g_core.pre(21, 90);
+    g_core.begin(true, changes_lazy);
+    check(g_core.begun() == 2, "a watch: component_changes begun");
+    g_core.end(changes_lazy);
+    check(g_log == std::vector<std::string>({"chg.begin@2:2/21", "chg.end@4:2/21"}), "a watch: both calls");
+    // a component_changes table that is too short for window_wanted: called every step, as before
+    KilnComponentChangesApiV1 chg_short = chg_lazy;
+    chg_short.header.size = offsetof(KilnComponentChangesApiV1, window_wanted);
+    check(wc::Windows::from(nullptr, &chg_short).changes_wanted == nullptr, "an older table: window_wanted not read");
+    // its fault is told to it (window_faulted), once
+    g_chg_told.clear();
+    check(wc::tell_faulted(2, 0, changes_lazy, 0xC0000005u) == 2 && g_chg_told == std::vector<uint32_t>({0xC0000005u}),
+          "component_changes is told of its own fault");
+    check(wc::tell_faulted(2, 2, changes_lazy, 1) == 0 && g_chg_told.size() == 1, "told once");
+    check(wc::tell_faulted(3, 0, told_w, 1) == 1, "both faulted, only decisions has window_faulted: only it is told");
 
     std::printf("window_clock_test: %d PASS, %d FAIL\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

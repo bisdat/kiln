@@ -663,9 +663,11 @@ internal sealed unsafe class EntitiesFake : IDisposable
                 return Fail(WorldAbi.Refused, $"{name} is an attribute: its first {WorldAbi.AttributeHeader} bytes (group, values offset, flags, count) are the " +
                                               "game's and cannot change; change the values of a copy read from the entity (World.Update)");
         }
+        var whole = now.ToArray();  // the whole component before, for a component watch (07 S7)
         next.CopyTo(range);  // the game's attribute formulas (a clamp to the maximum) do not run offline
         job.After = range.ToArray();
         job.Status = WorldAbi.Done;
+        ComponentChangesFake.NoteWrite(_harness, job.Entity, name, whole, now.ToArray(), job.Mod);  // kiln.world's token
         return (job.Flags & WorldAbi.Verify) != 0 && job.Writers > 0;
     }
 

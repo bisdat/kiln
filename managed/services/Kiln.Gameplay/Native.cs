@@ -75,6 +75,7 @@ internal static unsafe class GameplayNative
         public ulong DiscardsSeen, DiscardsCanceled;
         public uint BuildHookState, BuildHookMask;
         public fixed byte BuildHookReason[512];
+        public fixed byte HookGroups[4 * 520];
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -133,6 +134,10 @@ internal static unsafe class GameplayNative
         t != null && t->Header.Size >= (uint)(sizeof(Table) + 5 * sizeof(nint))
             ? *(delegate* unmanaged[Cdecl]<ulong, int>*)((byte*)t + sizeof(Table) + 4 * sizeof(nint))
             : null;
+
+    public static delegate* unmanaged[Cdecl]<ulong, uint, int> RequestHooks(Table* t) =>
+        t != null && t->Header.Size >= 144
+            ? *(delegate* unmanaged[Cdecl]<ulong, uint, int>*)((byte*)t + 136) : null;
 
     private static Table* _table;
     public static Table* T => _table != null ? _table : (_table = Services.Get<Table>("kiln.gameplay", 1));

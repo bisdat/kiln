@@ -39,6 +39,7 @@
     <TkMod Include="mods/TkFakes/TkFakes.csproj" />
     <TkMod Include="mods/TkProgress/TkProgress.csproj" />
     <TkMod Include="mods/TkBoot/TkBoot.csproj" />
+    <TkMod Include="mods/TkWatch/TkWatch.csproj" />
     <ProjectReference Include="@(TkMod)" />
     <!-- Kiln.Hooks beside the kit, as in kiln/host: TkOffline reads it (a service that remembers a missing table). -->
     <ProjectReference Include="../../services/Kiln.Hooks/Kiln.Hooks.csproj" />
