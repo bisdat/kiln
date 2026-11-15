@@ -13,8 +13,8 @@
  * game): a prediction or client world's debit is forwarded untouched.
  *
  * Threads: define, remove and changes on the tick thread; status and rule_changes on any thread.
- * Capability: items.tool_wear_debit (sigdb; lowered by the service when its guards do not pass; held on the client
- * side by the client gate until check 16b-g).
+ * Capability: items.tool_wear_debit (sigdb; lowered by the service when its guards do not pass; on in hosted worlds since
+ * 0.2.0-dev.29; check 16b-g remains unconfirmed).
  */
 #ifndef KILN_TOOLWEAR_H
 #define KILN_TOOLWEAR_H

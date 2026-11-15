@@ -30,12 +30,12 @@ var result = await Terrain.Apply(mound);            // one batch a tick
 if (!result.Ok) Log.Warn($"mound: {result.State}, {result.Reason}");
 ```
 
-Call it from mod code on the tick thread, on the server side (a dedicated server, or the world a player hosts once
-its game test has passed). `Apply` waits for the world to run, so a mod may call it from `OnLoad`. The sample
+Call it from mod code on the tick thread, on the server side (a dedicated server, or the world a player hosts; both are on since
+0.2.0-dev.29, with hosted behavior still unconfirmed). `Apply` waits for the world to run, so a mod may call it from `OnLoad`. The sample
 `mods/samples/OreVein` does both shapes: a heightfield from C# and a voxel volume from `vein.json`.
 
 ## What it cannot do
-- **Take ground away again.** `Forget` and removing the mod leave the cells. A plan that should be reversible keeps
+- **Take ground away again.** `Forget` and removing the mod do not undo the cells; indefinite retention through vanilla saves outside bases has not been established. A plan that should be reversible keeps
   what it replaced itself (`Build.Read` before, `Build.Write` after), or uses `Transient` (gone after the next restart,
   see below).
 - **A mod's own materials.** A palette names the game's materials only (1 to 116, 128 to 212). Materials a mod adds
@@ -121,6 +121,9 @@ An unknown `kind`, an unknown property or a wrong length is an `ArgumentExceptio
 | Cells per tick (`TerrainApplyOptions.CellsPerTick`) | default 32,768; 512 to 262,144 | one batch a tick; a full default batch took 42 ms on a lab server with no player (one measurement, 2026-11-13) |
 | Batch | a box of whole 8-cell blocks, at most `CellsPerTick` cells, edge 8, 16, 32 or 64 | a saved edit is an 8x8x8 block |
 
+- **Moving a world without Kiln data applies overlays again.** Copying only the world save to another PC (including Steam cloud transfer) loses both ledger and witness in `kiln/data`; Kiln treats the plan as a first install and can put back terrain a player dug away. Keep the world's Kiln data with its save.
+- **No shared write budget.** Each concurrent `Apply` has its own `CellsPerTick` allowance; the default is not a total per-world limit. Multiple mods or applies add their work together, and `Inspect` can traverse many batches synchronously. One 32,768-cell write took 42 ms on an idle lab server; there is no demonstrated host frame-time bound.
+
 Batches run in a fixed order (z, then y, then x), one per tick. The same patch gives the same batches and the same
 cells on every machine (`AddOnTop` depends on the ground it finds).
 
@@ -197,8 +200,8 @@ Rules that follow from the engine:
   `Apply` of that id is a first install over whatever is there, of any version, and not taken for a lost ledger; that
   apply uses the tombstone up. A ledger keeps 64 tombstones per mod and world (past that the oldest goes). The cells
   stay. Nothing can delete
-  a saved block, so the terrain under an overlay never comes back by itself.
-- **A mod that is gone keeps its ground.** Its cells stay in the world. Its ledger is in its own world data, which
+  a saved block through this API; this does not guarantee indefinite retention through vanilla saves outside bases.
+- **Removing a mod does not undo its ground.** Later vanilla retention outside bases remains unconfirmed. Its ledger is in its own world data, which
   no other mod can read: another mod's plan over the same blocks is refused only while the owning mod is loaded and
   has used `Kiln.Terrain` in this session. (A ledger shared by all mods needs a world bundle of Kiln's own in
   Kiln.Saves: about half a day, not in this version.)
@@ -270,6 +273,6 @@ so each of its blocks raises the two events once more. Terraforming is not part 
 | Row | On when |
 |---|---|
 | `kiln.terrain` | the library is loaded |
-| `terrain.overlays` | kiln.build reads, writes and keeps, and kiln.saves is on; server side. On a client that hosts a world it is held until the game test `19f-overlay-client` |
+| `terrain.overlays` | kiln.build reads, writes and keeps, and kiln.saves is on; server side. On a client that hosts a world it is on since 0.2.0-dev.29; game test `19f-overlay-client` remains unconfirmed |
 | `terrain.baked` | off (baked regions are not built) |
 | `terrain.biomes` | off |

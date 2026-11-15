@@ -6,8 +6,8 @@
  *
  * Deferred mode. The core decides it once, before the service DLLs load (kiln_plugin_main): it is on when hooks are
  * on, .NET is on, an enabled Kiln mod of this side has "boot": true or "boot": "required" in its kiln.mod.json, the
- * row "mods.boot" is available and, on a game client, the row "mods.boot.client" is available too (the client gate
- * holds it until the guided client checks pass). Without deferred mode nothing changes: collector() and the staging
+ * row "mods.boot" is available and, on a game client, the row "mods.boot.client" is available too (open since
+ * 0.2.0-dev.29; held in 0.2.0-dev.28). Without deferred mode nothing changes: collector() and the staging
  * calls answer KILN_ERR_UNAVAILABLE and every collector keeps its on_ready path.
  *
  * The phase, in order (one process, one generation; every step on the boot thread, before the game's entry point):

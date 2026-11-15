@@ -1,5 +1,8 @@
 # Kiln architecture
 
+The client gate list is empty in 0.2.0-dev.29: every capability held in dev.28 is open, subject to its normal dependencies and side restrictions. The remaining 20 have not been confirmed in a real game; the [client pass](client-pass.md) records that confirmation work.
+
+
 ```
 enshrouded_server.exe / enshrouded.exe
  └─ imports DINPUT8 ──► <game>/dinput8.dll              native/proxy  (forwards to system dinput8)

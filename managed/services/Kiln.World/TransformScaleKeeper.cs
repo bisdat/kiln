@@ -9,6 +9,16 @@
 // the next load, but does not restore a scale already written in this session (the record stays for reinstall).
 // Setting the scale the entity had before Kiln's first write (its
 // game scale) forgets the record. Guide: docs/kiln/services/world.md "Transform scale".
+||||||| 1224a4ff
+// A transform scale set with World.SetTransformScale survives a save and restart (0.2.0-dev.28 fix round). The game's
+// save does not keep it: a placed prop is saved without the scale of its CurrentTransform and comes back at its
+// template's (lab: docs/re/world.md "Transform scale and the save"). So Kiln keeps it beside the save, in kiln.saves'
+// entity attachments under the scope "kiln:world" (template + position at the save, as a mod's EntityData), and sets it
+// again through the same tracked write when kiln.saves matches the loaded entity: on a dedicated server in the first
+// second the world runs, before a player can be in it. The value is set again in the context of the mod that set it,
+// and only while that mod is loaded and lists CurrentTransform under "writes": a removed mod's scales go with it (the
+// record stays, so the scale comes back with the mod). Setting the scale the entity had before Kiln's first write (its
+// game scale) forgets the record. Guide: docs/kiln/services/world.md "Transform scale".
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -82,8 +92,8 @@ internal static class TransformScaleKeeper
     }
 
     /// <summary>After a committed <see cref="World.SetTransformScale"/> (tick thread, the mod's context): records the scale
-    /// for the next start, or forgets it when it is the game's own. True when the scale the entity has now is the one it
-    /// will have after a save and restart; false when it is for this session only (Kiln's own tools, an entity the save
+    /// for the next start, or forgets it when it is the game's own. True when replay was recorded or the original scale restored,
+    /// without guaranteeing future identity or size; false when it is for this session only (Kiln's own tools, an entity the save
     /// does not keep, kiln.saves off).</summary>
     internal static bool Record(EntityId entity, Scale3? before, Scale3 now, string? modId)
     {

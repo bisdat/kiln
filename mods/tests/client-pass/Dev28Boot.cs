@@ -6,8 +6,8 @@ using static Kiln.Testing.ClientCheckTags;
 
 namespace ClientPass;
 
-// 08-onboot (chapter 08): Mod.OnBoot on a game client. mods.boot.client and mods.boot.vfx are held on a client until these checks pass
-// (native/core/gates/dev28-08-onboot.json). The fixture is the sample boot-gallery (chapter 08 §6, built with S8): without it in the
+// 08-onboot (chapter 08): Mod.OnBoot on a game client. mods.boot.client and mods.boot.vfx are open since 0.2.0-dev.29.
+// Boot VFX and both loader orders still need these checks for confirmation. The fixture is the sample boot-gallery (chapter 08 §6, built with S8): without it in the
 // profile both checks end at Need and cannot pass. Each check runs over several starts; the part reached is kept in the mod's data
 // folder. Orders 3000-3099 (port block 28100).
 public sealed partial class ClientPassMod

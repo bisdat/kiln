@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// The client gate: capabilities that ship switched off until their guided client checks have passed in a real game.
+// The client gate can hold capabilities until guided real-game checks pass. Its list is empty in 0.2.0-dev.29.
 // The list is native/core/gates/*.json (README.md there), compiled in. While a name is held:
 //   - kiln.caps shows it unavailable, reason policy, text "game test pending: <check ids>" (caps.cpp, the core's own
 //     report: unavailable beats whatever a service reports, and a sigdb feature whose symbols resolved);

@@ -1072,8 +1072,8 @@ void decide(bool hooks, const std::string& safe_idle) {
     const bool client = image().side == KILN_SIDE_CLIENT;
     const std::string idle = "safe idle: " + safe_idle;
     // The rows that do not depend on the decision first: the decision reads mods.boot.client. On a client both rows say
-    // what this build can do; the client gate (native/core/gates/dev28-08-onboot.json) holds them until the guided
-    // checks 08-boot.first-start-definitions and 08-loader-order pass, and kiln.json "preview" lifts it.
+    // what this build can do; the gate list is empty since 0.2.0-dev.29. Boot VFX is open but unconfirmed by
+    // 08-boot.first-start-definitions; 08-loader-order still covers both loader orders.
     std::vector<Row> rows = {{"mods.boot.phase", KILN_CAP_PENDING, KILN_CAP_REASON_SESSION, "no boot-author frame is open"},
                              game_data_row(hooks, idle)};
     if (client) {

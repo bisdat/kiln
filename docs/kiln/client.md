@@ -83,7 +83,7 @@ tools/client/client.sh logs [n] | report [n] | check | backup-saves
 ```
 A `"server"` or `"client"` section overrides the top-level keys on that side (`config.cpp: apply_side`).
 `"preview"`: lifts the client gate ([services/caps.md](services/caps.md#the-client-gate-dev28)) for capabilities that
-ship switched off until their game test: `true` for all of them, or a list of capability names. In a side section it
+are held until their game test (the list is empty in 0.2.0-dev.29): `true` for all of them, or a list of capability names. In a side section it
 replaces the top-level value.
 `"cooked"`: what kiln.assets does with a mod's cooked file no cook of this game made (no receipt lists it,
 [modding/cooking.md](modding/cooking.md)): `"warn"` (the default, `kCookedDefault` in `native/services/assets/cooktrust.h`)
