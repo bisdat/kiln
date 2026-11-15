@@ -192,6 +192,9 @@ mkdir -p "$work/source"
 rm -f "$work"/source/*.tar.gz
 tar --sort=name --owner=0 --group=0 --numeric-owner --mode='u=rwX,go=rX' --mtime="@$SOURCE_DATE_EPOCH" -C "$work" \
   --transform "s|^src|kiln-$version|" -czf "$work/source/kiln-$version-src.tar.gz" src
+# the exported files (NUL-separated): the modding site's guide stages these pages and checks its links against them,
+# since the export has no .git (tools/docs-site/stage-guide.py, KILN_DOCS_TRACKED)
+(cd "$src" && find . -type f -printf '%P\0') > "$work/src-files"
 [[ $(sed 's/[-+].*//' "$src/VERSION") == "${version%%-*}" ]] || die "VERSION in the export is $(cat "$src/VERSION"), not for $version"
 # The API gate (tools/release/api-gate.sh), before any build: no line of a PublicAPI.Shipped.txt removed since the
 # previous v* release, and new API only with a raised API version (Kiln.Mods.ApiVersion), so a mod can ask for it.
@@ -589,6 +592,7 @@ for f in "$KILN_OUT"/nuget/*."$sdk_version".nupkg; do cp "$f" "$out/sdk/"; done
 cp "$vsix" "$out/sdk/"
 # the modding site (guide + API reference, DocFX) in sdk/api/, when the export has its build script
 if [[ -f $src/tools/docs-site/build.sh ]]; then
+  export KILN_DOCS_TRACKED=$work/src-files
   quiet low "$src/tools/docs-site/build.sh" "$out/sdk/api"   # the modding site: guide + API reference (DocFX)
 else
   note "no tools/docs-site/build.sh in the export: the API reference (sdk/api/) is left out"
