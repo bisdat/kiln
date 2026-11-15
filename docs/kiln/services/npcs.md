@@ -40,7 +40,8 @@ engine's, [docs/kiln/modding/quests.md](../modding/quests.md).
   world with exit status 3, the stop line, `content-refused.json`, `boot.json` `boot.stop` and progress.json `failed`,
   the save byte for byte the same; a mod with its own error beside a good one was named and left out while the good one
   was served; `late` logged that the start could not be stopped and the server ran on; a mod with no native content
-  and the switch on did not stop. A game client's stop (its message box) is not seen yet. See
+  and the switch on did not stop. One mod whose `kiln.mod.json` field has the wrong type (left out and named, the
+  others served) is host-tested only. A game client's stop (its message box) is not seen yet. See
   [When the whole build fails](#when-the-whole-build-fails-since-020-dev29).
 
 ## What needs what
@@ -441,7 +442,8 @@ What counts as the whole build failing, and what does not:
 
 | Case | Stops the start | Why |
 |---|---|---|
-| Reading the mods' files throws (a `kiln.mod.json` field of the wrong type, such as `"side": 5`) | yes, naming the mods read so far and the one being read | nothing is built. Inside a boot generation this is the knowledge collector's refusal, which kiln.boot already stops with 0x4B01 |
+| One mod's files throw when they are read (a `kiln.mod.json` field of the wrong type, such as `"side": 5`) | **no**: that mod is left out and named (`native: <mod>: reading its files failed (…)`), every other mod is read, built and served; a required boot mod is refused through kiln.boot by name (0x4B01) | one mod's error |
+| The read throws in a way that is no one mod's (listing the profile's mods or the mods folder fails: an allocation failure, a path that does not convert) | yes, naming the mods read before it that ship such content | nothing is built. Inside a boot generation the knowledge collector's refusal names no mod, and kiln.boot stops with 0x4B01 |
 | The build throws | yes, naming the mods that ship such content | nothing is built |
 | The shared resources do not build (the manifest's `failed`: the game's knowledge, journal or NPC collection missing or damaged, two mods defining one clone, a template the game does not have) | yes, naming the mods the build was to serve | nothing is served |
 | kiln.assets refuses the built knowledge, journal, NPC collection or a template, or kiln.assets is not there | yes, naming the mods the build was to serve | the shared pack is not served as it was built |
@@ -456,8 +458,8 @@ whose content the failed build left out is also reported to kiln.boot (0x4B01) a
 first. Never restart on exit status 3 either: the next start stops the same way.
 
 **Lab switch** `kiln/control/knowledge.fail-build` (read once at the start, a warning at every start while it is there;
-never needed in play): its first word forces one kind of whole failure without a broken game: `read` (reading the
-mods' files throws), `compile` (the build throws), `shared` (the build cannot read the game's
+never needed in play): its first word forces one kind of whole failure without a broken game: `read` (the read throws
+after every mod was read, a failure that is no one mod's), `compile` (the build throws), `shared` (the build cannot read the game's
 `GameKnowledgeResource`), `assets` (the built pack is not given to kiln.assets), `hook` (the hook on `ResourceInit` is
 not installed), or `late` (the build serves as usual; 30 steps after the server world's first one the stop is asked
 for, which must log that it could not be stopped and must not end the process). Each stops only when a mod ships such
@@ -465,7 +467,8 @@ content, as the real failure does. Another word is ignored with a warning.
 
 Tested: host, `native/services/quests/tests/run.sh` (`native_pack_test.cpp`: native_pack.cpp with fake Kiln
 services and a fake build: every case above by its real cause and by the switch, with and without a boot generation,
-and the texts of both stops). Lab: `mods/tests/content-stop-test/lab.sh` (a dedicated server: a normal start, each
+one mod with a wrong-typed `kiln.mod.json` field beside good ones (optional and required in a boot generation), and the
+texts of both stops). Lab: `mods/tests/content-stop-test/lab.sh` (a dedicated server: a normal start, each
 switch, one broken mod beside a good one, `late`, and no content with the switch on).
 
 ## API

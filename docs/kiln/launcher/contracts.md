@@ -837,8 +837,8 @@ All written atomically; a file whose `pid` is not a live process is stale.
   last start ended reads that one after a new start, and `roster-refused.json` right after the exit. A launcher shows
   `why` and the `mods` after the game exits with 19202, and offers to disable those mods.
 - `content-refused.json` (kiln.knowledge, 0.2.0-dev.29; `state-content-refused.schema.json`): the whole build of the
-  mods' native quests, knowledge and NPCs failed, so nothing of it is served (reading the mods' files failed, the build
-  threw, the shared resources did not build, kiln.assets refused the built pack or is not there, the hook on the game's
+  mods' native quests, knowledge and NPCs failed, so nothing of it is served (reading the mods' files failed in a way
+  that is no one mod's, the build threw, the shared resources did not build, kiln.assets refused the built pack or is not there, the hook on the game's
   resource start is not there), while at least one enabled mod ships such content; the start stopped before any world
   loaded and the process ended with 19203 (0x4B03; a Linux parent under Wine sees 3). One mod's own errors never write
   it. The same fields, order of writing and `.last.json` rule as `roster-refused.json`, with `exitCode` 19203,
