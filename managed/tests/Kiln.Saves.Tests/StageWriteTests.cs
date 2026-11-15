@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Issue #39: on a hard drive every forced write of the save cycle held the server for up to 4 s. A staging whose manifest is
-// the one already in its file writes nothing. The player's case: 5 bundles, nothing changed, two stagings per autosave (the
-// save request's, then the snapshot staging at the next Post): the snapshot staging writes no file, and a crash at any point
-// still finds the generation that matches the world file.
+// the one already in its file writes nothing, and the save request's manifest of a generation with the previous one's
+// bundles is not forced to disk. The player's case: 5 bundles, nothing changed, two stagings per autosave (the save
+// request's, then the snapshot staging at the next Post): one manifest written and not forced, no file inside Post, and a
+// crash at any point still finds the generation that matches the world file.
 using System.Reflection;
 using Xunit;
 using static Kiln.InstanceHarness;
@@ -17,6 +18,7 @@ public sealed class StageWriteTests : IDisposable
     public void Dispose() => _h.Dispose();
 
     private static long Writes => Interlocked.Read(ref WorldStore.FilesWritten);
+    private static long Forced => Interlocked.Read(ref WorldStore.FilesForced);
 
     private string Pending(uint revision) => Path.Combine(_h.Root, "manifests", $"{revision:D10}.pending.json");
 
@@ -36,26 +38,83 @@ public sealed class StageWriteTests : IDisposable
             [new SavesNative.Event { Kind = kind, Seq = seq, Revision = revision, SaveSeq = saveSeq, WorldUnix = unix, Reason = (uint)SaveReason.Autosave }]);
 
     [Fact]
-    public void TheSnapshotStagingOfAnAutosaveWithNothingChangedWritesNoFile()
+    public void AnAutosaveWithNothingChangedWritesOneManifestNotForcedToDiskAndNoFileInsidePost()
     {
         FiveBundles(1);
+        var (writes, forced) = (Writes, Forced);
         Dispatch(SavesNative.EvSaving, 101, 1);
         Dispatch(SavesNative.EvSnapshot, 102, 1, saveSeq: 101);
-        Dispatch(SavesNative.EvWritten, 103, 1, saveSeq: 101, unix: 1001);   // generation 1: its blobs and manifest are on disk
+        Dispatch(SavesNative.EvWritten, 103, 1, saveSeq: 101, unix: 1001);   // generation 1: new data, every file forced
+        Assert.Equal((7L, 7L), (Writes - writes, Forced - forced));            // 5 blobs, the pending and the confirmed manifest
         for (uint gen = 2, seq = 200; gen <= 4; gen++, seq += 10)
         {
-            var before = Writes;
+            (writes, forced) = (Writes, Forced);
             Dispatch(SavesNative.EvSaving, seq, gen);                          // the save request: handlers, first staging
-            Assert.Equal(1, Writes - before);                                  // 0 new blobs, this generation's pending manifest
+            Assert.Equal((1L, 0L), (Writes - writes, Forced - forced));        // 0 new blobs; the pending manifest, not forced
             var bytes = File.ReadAllBytes(Pending(gen));
             Dispatch(SavesNative.EvSnapshot, seq + 1, gen, saveSeq: seq);      // the next Post: nothing changed since
-            Assert.Equal(1, Writes - before);                                  // no file written inside Post
+            Assert.Equal((1L, 0L), (Writes - writes, Forced - forced));        // no file written inside Post
             Assert.Equal(bytes, File.ReadAllBytes(Pending(gen)));
             Assert.Equal(5, _h.Scopes(gen).Count(s => s.StartsWith("world/mod-", StringComparison.Ordinal)));
             Dispatch(SavesNative.EvWritten, seq + 2, gen, saveSeq: seq, unix: 1000 + gen);
+            Assert.Equal((2L, 1L), (Writes - writes, Forced - forced));        // the confirmation after the world write is forced
             Assert.False(File.Exists(Pending(gen)));
         }
+        (writes, forced) = (Writes, Forced);
+        Store.GetBundleRaw("world/mod-3", "mod-3").Keys["state"].Json = "{\"v\":40}";   // a changed save forces as before
+        Dispatch(SavesNative.EvSaving, 300, 5);
+        Assert.Equal((2L, 2L), (Writes - writes, Forced - forced));            // its new blob and its manifest
+        Dispatch(SavesNative.EvSnapshot, 301, 5, saveSeq: 300);
+        Dispatch(SavesNative.EvWritten, 302, 5, saveSeq: 300, unix: 1005);
+        Assert.Equal((3L, 3L), (Writes - writes, Forced - forced));
         Assert.Empty(Directory.EnumerateFiles(_h.Root, "*.tmp-*", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public void ASnapshotStagingThatFindsAChangeForcesItsWriteAfterAnUnforcedRequestStaging()
+    {
+        FiveBundles(1);
+        _h.Save(1);
+        var (writes, forced) = (Writes, Forced);
+        Store.Stage(2, SaveReason.Autosave, late: false);
+        Assert.Equal((1L, 0L), (Writes - writes, Forced - forced));
+        Store.GetBundleRaw("world/mod-1", "mod-1").Keys["state"].Json = "{\"v\":50}";   // the last simulation step changed it
+        Store.Stage(2, SaveReason.Autosave, late: false, snapshot: true);
+        Assert.Equal((3L, 2L), (Writes - writes, Forced - forced));            // its new blob and the manifest, both forced
+        Assert.Equal(50, _h.Bundle(2, "world/mod-1")!["keys"]!["state"]!["v"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void TheFirstSaveOfASessionForcesItsManifestEvenWhenNothingChanged()
+    {
+        FiveBundles(1);
+        _h.Save(1);
+        Assert.Equal(DataMatch.Exact, _h.Restart(1, new FakeInstanceWorld()));   // a new process: nothing confirmed by it yet
+        var forced = Forced;
+        Store.Stage(2, SaveReason.Autosave, late: false);
+        Assert.Equal(1L, Forced - forced);
+        Store.Commit(2, 1002, SaveReason.Autosave);
+        forced = Forced;
+        Store.Stage(3, SaveReason.Autosave, late: false);                      // the next one has generation 2 to rely on
+        Assert.Equal(0L, Forced - forced);
+        Store.Stage(5, SaveReason.Autosave, late: false);                      // not the generation right after the confirmed one
+        Assert.Equal(1L, Forced - forced);
+    }
+
+    [Fact]
+    public void APowerLossThatTearsAnUnforcedManifestLoadsThePreviousGenerationWithTheSameData()
+    {
+        FiveBundles(3);
+        _h.Save(1);
+        Store.Stage(2, SaveReason.Autosave, late: false);                      // not forced: the bundles of generation 1
+        File.WriteAllBytes(Pending(2), new byte[64]);                          // what the disk can hold after a power loss
+        Assert.Equal(DataMatch.Older, _h.Restart(2, new FakeInstanceWorld(), unix: 9999));   // world file 2 on disk
+        Assert.Equal(1u, Store.Generation);
+        Assert.Equal(3, Value(0));
+        Assert.Equal(7, Value(4));
+        File.Delete(Pending(2));                                               // or the rename was lost: the same result
+        Assert.Equal(DataMatch.Older, _h.Restart(2, new FakeInstanceWorld(), unix: 9999));
+        Assert.Equal(3, Value(0));
     }
 
     [Fact]
@@ -98,6 +157,8 @@ public sealed class StageWriteTests : IDisposable
         Store.Stage(2, SaveReason.Autosave, late: false);                     // same data as generation 1
         Assert.Equal(1, Writes - before);
         Assert.True(File.Exists(Pending(2)));                                   // a crash after the world write finds it
+        Assert.Equal(DataMatch.Staged, _h.Restart(2, new FakeInstanceWorld(), unix: 9999));
+        Assert.Equal(1, Value(0));
     }
 
     private sealed class Capture : IKilnBackend

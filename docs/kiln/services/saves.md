@@ -84,7 +84,15 @@ data (objects are serialized when the mod unloads and read into the new instance
 - This ordering covers native inventory transactions, including container default loot. It does not promise that an arbitrary mod's writes in a later Post callback are captured; make save data changes before the final staging callback.
 - Loading picks the generation of the world file on disk (revision + file time); a crash or `kill -9` at any moment
   gives the old or the new generation, matching the world file, never a mix: every file is written to a temp name,
-  flushed and renamed, and bundles are content-addressed (`blobs/ab/<sha256>.json`, checked on load).
+  forced to disk and renamed, and bundles are content-addressed (`blobs/ab/<sha256>.json`, checked on load).
+- One manifest is not forced to disk (since 0.2.0-dev.29): the pending manifest of a generation whose bundles are those
+  of the previous generation, which this process confirmed and which is still on disk, with no new blob (the usual
+  autosave when no mod data changed; on a hard drive each forced write held the game for up to seconds). A staging
+  whose manifest is already in its file (the snapshot staging when nothing changed since the save request) writes
+  nothing. A game crash or `kill -9` finds exactly the same files: the system still writes what was renamed. A power
+  loss or a system crash before the system wrote that file can leave it missing or torn; loading then skips it (logged
+  as an unusable manifest) and takes the previous generation (`DataMatch.Older`), whose bundles are the same. A lost
+  rename after a power loss already gave that result before. A save whose data changed forces every file as before.
 - Restoring an older world file brings back its mod data: Kiln keeps the newest 30 generations and every generation of
   a world file in the save folder or its `backup/` (the game's own 10 backups). An older restore (no generation kept)
   loads the newest older generation (`DataMatch.Older`, logged as a warning).
@@ -543,7 +551,9 @@ The pump (`set_pump`) is taken by Kiln.Saves; native plugins poll `next_event` (
 - One world per server (the dedicated server's `saveDirectory/world0.ksd`). A brand-new world has no id until its
   first save; data written before that is kept in memory and written with the first save.
 - The kill -9 window: none for the generation choice. A generation is staged before the world write; a crash between
-  the two leaves revision R on disk and loads generation R.
+  the two leaves revision R on disk and loads generation R. After a power loss or a system crash, the world file of
+  an unchanged save can load the previous generation (`DataMatch.Older`, the same bundles) when the system had not yet
+  written that save's pending manifest (see "How consistency works").
 - Moving creatures may be matched to the wrong entity of the same template if two stand within 16 m of the saved spot.
 - System.Text.Json caches the metadata of every type it serialized process-wide, which would keep an unloaded mod's
   load context alive; Kiln.Saves resets those caches (the runtime's hot-reload hook) when a mod whose data it

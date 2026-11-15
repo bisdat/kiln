@@ -15,7 +15,12 @@ namespace Kiln;
 /// changed. <c>manifests/&lt;revision&gt;.pending.json</c>: the generation staged for the world save with that
 /// revision (written when the game accepts the save, before its snapshot). <c>manifests/&lt;revision&gt;-&lt;world
 /// file time&gt;.json</c>: the same generation, confirmed after the world file was written. Every file is written to a
-/// temp name, flushed and renamed, so a crash leaves the old or the new file, never a torn one.</para>
+/// temp name, forced to disk and renamed, so a crash leaves the old or the new file, never a torn one. One exception
+/// (since 0.2.0-dev.29, issue #39): the pending manifest of a generation whose bundles are those of the previous one,
+/// confirmed and on disk, with no new blob, is renamed into place without being forced to disk. A game crash or kill -9
+/// cannot tell the difference (the system still writes the file); a power loss or a system crash before the system wrote
+/// it can leave that one file missing or torn, and loading then skips it (an unusable manifest is logged) and takes the
+/// previous generation, whose bundles are the same: what a lost rename could already give.</para>
 /// <para>Loading picks the manifest of the world file on disk (its header revision + time), so restoring an older world
 /// file (from the game's backup folder or a Kiln backup) brings back the mod data that belongs to it. Manifests are
 /// kept for the newest 30 generations and for every world file in the save folder and its <c>backup/</c>.</para>
@@ -40,8 +45,14 @@ internal sealed unsafe class WorldStore
     /// earlier (issue #39: on a hard drive each forced write could hold the server for seconds).</summary>
     private (string Path, string Content)? _staged;
 
-    /// <summary>Files <see cref="WriteAtomic(string, byte[])"/> wrote in this process (tests count the writes of a save).</summary>
-    internal static long FilesWritten;
+    /// <summary>The generation this process confirmed last: its revision, world file time and bundles
+    /// (<see cref="BundlesKey"/>). The save request's staging of the next generation with the same bundles and no new blob
+    /// renames its manifest into place without forcing it to disk (the class remarks say what a crash then finds).</summary>
+    private (uint Revision, uint Unix, string Bundles)? _confirmed;
+
+    /// <summary>Files <see cref="WriteAtomic(string, byte[])"/> wrote in this process, and of them the ones forced to disk
+    /// (tests count the writes and the forced writes of a save).</summary>
+    internal static long FilesWritten, FilesForced;
 
     internal readonly EntityTable Entities;
 
@@ -156,6 +167,7 @@ internal sealed unsafe class WorldStore
         Match = DataMatch.None;
         _loadedRevision = _loadedUnix = 0;
         _staged = null;
+        _confirmed = null;
         _opened = false;
         _closed = true;
         WorldConfigs.Announce(null);
@@ -182,6 +194,7 @@ internal sealed unsafe class WorldStore
         _loadedRevision = revision;
         _loadedUnix = unix;
         _staged = null;
+        _confirmed = null;
         DetachAll();
         var dir = Path.Combine(Root!, "manifests");
         var all = ListManifests(dir);
@@ -444,11 +457,16 @@ internal sealed unsafe class WorldStore
         // The same manifest is already in that file (the save request's staging, one simulation step before the snapshot
         // staging, found nothing changed): writing it again would only change its creation time, which nothing reads.
         // Blobs are content-addressed (Put writes only a blob that is not on disk). So a crash at any point finds the same
-        // files as after a rewrite: that manifest was forced to disk and renamed before this staging, as before.
+        // files as after a rewrite: that manifest was renamed into place before this staging, as before.
         var unchanged = _staged is { } last && last.Path == path && last.Content == content && File.Exists(path);
+        // The save request's staging of a generation with the bundles of the previous one (confirmed by this process, still
+        // on disk) and no new blob: not forced to disk (the class remarks). The snapshot staging, a late staging and every
+        // staging with a change force their write as before.
+        var same = !unchanged && !snapshot && !late && fresh == 0 && _confirmed is { } c && c.Revision == gen - 1 &&
+                   c.Bundles == BundlesKey(list) && File.Exists(CommittedPath(c.Revision, c.Unix));
         if (!unchanged)
         {
-            WriteAtomic(path, Encoding.UTF8.GetBytes(man.ToJsonString()), ref disk);
+            WriteAtomic(path, Encoding.UTF8.GetBytes(man.ToJsonString()), ref disk, force: !same);
             _staged = (path, content);
         }
         Generation = gen;
@@ -456,7 +474,18 @@ internal sealed unsafe class WorldStore
         SavesRuntime.Log(late ? LogLevel.Warn : TimingLevel(ms),
             $"Kiln.Saves: staged mod data generation {gen} ({Saves.Text(reason)}{(late ? ", late: after the world write" : "")}" +
             $"{(snapshot ? ", snapshot staging" : "")}): {entries.Count} bundles, {fresh} new blobs ({bytes} bytes)" +
-            $"{(unchanged ? ", manifest unchanged: nothing written" : "")} in {ms:F1} ms ({disk.Text})");
+            $"{(unchanged ? ", manifest unchanged: nothing written" : "")}" +
+            $"{(same ? $", bundles as in generation {gen - 1}: manifest not forced to disk" : "")} in {ms:F1} ms ({disk.Text})");
+    }
+
+    /// <summary>A manifest's bundle list in one fixed form (scope, sha256, size; ordinal by scope), to compare two manifests.</summary>
+    internal static string BundlesKey(JsonObject? list)
+    {
+        if (list == null) return "";
+        var sb = new StringBuilder();
+        foreach (var (scope, e) in list.OrderBy(kv => kv.Key, StringComparer.Ordinal))
+            sb.Append(scope).Append('\n').Append(e?["sha256"]?.GetValue<string>()).Append('\n').Append(e?["size"]?.ToJsonString()).Append('\n');
+        return sb.ToString();
     }
 
     /// <summary>A staging or a commit that takes longer than this logs at Info, not Debug (issue #39: on a hard drive a
@@ -469,12 +498,13 @@ internal sealed unsafe class WorldStore
     /// part a busy hard drive can hold for seconds) and renaming them into place.</summary>
     internal struct DiskTime
     {
-        public int Files;
+        public int Files, Unforced;
         public double FlushMs, RenameMs;
 
         public readonly string Text => Files == 0
             ? "no file written"
-            : $"{Files} file{(Files == 1 ? "" : "s")} written: {FlushMs:F1} ms forcing to disk, {RenameMs:F1} ms renaming";
+            : $"{Files} file{(Files == 1 ? "" : "s")} written{(Unforced > 0 ? $" ({Unforced} not forced to disk)" : "")}: " +
+              $"{FlushMs:F1} ms forcing to disk, {RenameMs:F1} ms renaming";
     }
 
     /// <summary>What a pending manifest says apart from its creation time.</summary>
@@ -548,11 +578,13 @@ internal sealed unsafe class WorldStore
             man["state"] = "committed";
             man["worldUnix"] = unix;
             man["committedUnixMs"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            WriteAtomic(CommittedPath(rev, unix), Encoding.UTF8.GetBytes(man.ToJsonString()), ref disk);
+            WriteAtomic(CommittedPath(rev, unix), Encoding.UTF8.GetBytes(man.ToJsonString()), ref disk);  // always forced
             File.Delete(pending);
+            _confirmed = (rev, unix, BundlesKey(man["bundles"] as JsonObject));
         }
         catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException)
         {
+            _confirmed = null;
             SavesRuntime.Log(LogLevel.Error, $"Kiln.Saves: confirming generation {rev} failed: {e.Message} (it stays staged; loading still finds it)");
             return;
         }
@@ -604,18 +636,27 @@ internal sealed unsafe class WorldStore
         WriteAtomic(path, data, ref disk);
     }
 
-    /// <summary>Writes <paramref name="data"/> to a temp name, forces it to disk and renames it into place; the time of the
+    /// <summary>Writes <paramref name="data"/> to a temp name, forces it to disk (unless <paramref name="force"/> is false:
+    /// only an unchanged generation's pending manifest, see the class remarks) and renames it into place; the time of the
     /// last two steps goes into <paramref name="disk"/>.</summary>
-    internal static void WriteAtomic(string path, byte[] data, ref DiskTime disk)
+    internal static void WriteAtomic(string path, byte[] data, ref DiskTime disk, bool force = true)
     {
         var tmp = $"{path}.tmp-{Environment.ProcessId}-{Interlocked.Increment(ref _tmpCounter)}";
         long t;
         using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16))
         {
             fs.Write(data);
-            t = System.Diagnostics.Stopwatch.GetTimestamp();
-            fs.Flush(flushToDisk: true);
-            disk.FlushMs += System.Diagnostics.Stopwatch.GetElapsedTime(t).TotalMilliseconds;
+            if (force)
+            {
+                t = System.Diagnostics.Stopwatch.GetTimestamp();
+                fs.Flush(flushToDisk: true);
+                disk.FlushMs += System.Diagnostics.Stopwatch.GetElapsedTime(t).TotalMilliseconds;
+                Interlocked.Increment(ref FilesForced);
+            }
+            else
+            {
+                disk.Unforced++;
+            }
         }
         t = System.Diagnostics.Stopwatch.GetTimestamp();
         File.Move(tmp, path, overwrite: true);
