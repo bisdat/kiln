@@ -97,7 +97,8 @@ runtime opens assemblies through it, and every managed load then fails with `0x8
 | `client install ZIP`, `client uninstall` `[--dir D] [--real]` | `bundle install/uninstall` for the client; without `--dir` the Steam client folder, which needs `--real` |
 | `client activate PROFILE \| --deactivate [--dir D] [--real]` | Profile activation: `kiln/profile.json`, chain.ini `[profile]`, `<configDir>/native.json` (Z: or copy mode) |
 | `client play-once vanilla\|no-mods\|profile\|clear [--profile P] [--dir D] [--real]` | Writes `kiln/play-once.ini` for the next start (profile: also `kiln/profile.once.json` + `kiln/chain/once.ini`). Never starts the game and never touches Steam's config |
-| `library import PATH...`, `library list [KIND]` | The launcher's content-addressed mod library (`$KILN_DATA_DIR`, else `~/.local/share/kiln`) |
+| `library import PATH...`, `library list [KIND]` | The launcher's content-addressed mod library (`$KILN_DATA_DIR`, else `~/.local/share/kiln`); `list` marks an earlier version an update kept "(kept for a roll back)" |
+| `library rollback P kind:id[@version]` | (dev.29) Puts the earlier version an update kept back into profile P (the newest kept one unless named), as the launcher's "Roll back to" does; the version rolled away from is kept. Saves the profile only: the game's `kiln/profile.json` and the mod's settings in the game folder follow at its next activation ([launcher/library.md](launcher/library.md), "Rolling back an update") |
 | `profile create NAME [--copy-from P]`, `profile add P kind:id[@version]... [--disabled]`, `profile show P [--side S]` | Launcher profiles; `show` prints the resolved load order |
 
 ### Preflight checks
