@@ -808,6 +808,13 @@ struct FreezeReport {
     size_t threads = 0;   // other threads listed and opened (candidates for stopping)
     size_t stopped = 0;   // of those, the ones SuspendThread really stopped
     size_t unopened = 0, unstopped = 0, in_range = 0, moved = 0, no_context = 0;
+    size_t exited = 0;    // listed, could not be stopped, and has ended (its exit code is set): it runs no code
+    // the first threads that stayed unchecked, for the log line written after everything runs again
+    struct Unchecked { DWORD tid, error, exit_code; bool no_id; } why[4] = {};
+    size_t why_n = 0;
+    void note(DWORD tid, DWORD error, DWORD exit_code, bool no_id) {
+        if (why_n < 4) why[why_n++] = {tid, error, exit_code, no_id};
+    }
     double stopped_ms = 0;  // how long the other threads stood still
     double list_ms = 0;     // listing and opening them first (they still run)
     bool written = false;
@@ -820,10 +827,23 @@ void write_with_threads_stopped(std::vector<Stopped>& th, uintptr_t addr, const 
     QueryPerformanceFrequency(&freq);
     QueryPerformanceCounter(&t0);
     for (Stopped& s : th) {
-        if (unchecked && s.unknown_id) ++rep.no_context;
-        s.suspended = !s.skip && SuspendThread(s.h) != static_cast<DWORD>(-1);
-        if (s.suspended) ++rep.stopped;
-        if (!s.skip && !s.suspended) ++rep.unstopped;
+        // A thread that has ended cannot stand in the bytes: it is neither stopped nor counted as unchecked. Under Wine
+        // (lab, dev29-p07lab) a listed thread whose SuspendThread fails is the ordinary case at almost every
+        // installation, and a checked installation refused all of them. GetExitCodeThread is one system call, as
+        // SuspendThread is; an exit code of STILL_ACTIVE (259) counts as running.
+        DWORD code = STILL_ACTIVE;
+        if (s.unknown_id) {  // its id could not be read, so it is never stopped (it might be this thread)
+            if (GetExitCodeThread(s.h, &code) && code != STILL_ACTIVE) { ++rep.exited; continue; }
+            if (unchecked) { ++rep.no_context; rep.note(0, GetLastError(), code, true); }
+            continue;
+        }
+        if (s.skip) continue;  // the calling thread
+        s.suspended = SuspendThread(s.h) != static_cast<DWORD>(-1);
+        if (s.suspended) { ++rep.stopped; continue; }
+        const DWORD error = GetLastError();
+        if (GetExitCodeThread(s.h, &code) && code != STILL_ACTIVE) { ++rep.exited; continue; }
+        ++rep.unstopped;
+        rep.note(GetThreadId(s.h), error, code, false);
     }
     alignas(16) CONTEXT ctx;
     for (Stopped& s : th) {
@@ -1000,9 +1020,10 @@ Target* target_for(uintptr_t addr, bool* refused_quietly, uint32_t* unchecked = 
     FreezeReport rep;
     if (enable_detour(*t, rep, unchecked)) {
         KLOG_D("hooks: detour on rva %s written with %zu other thread(s) stopped (of %zu listed) for %.2f ms, %.2f ms to "
-               "list and open them (%zu not openable, %zu moved out of the replaced bytes, %zu without a context)",
+               "list and open them (%zu not openable, %zu moved out of the replaced bytes, %zu without a context, %zu "
+               "ended)",
                hex(rva_of(addr)).c_str(), rep.stopped, rep.threads, rep.stopped_ms, rep.list_ms, rep.unopened, rep.moved,
-               rep.no_context);
+               rep.no_context, rep.exited);
         if (rep.stopped_ms > 50)
             KLOG_W("hooks: the other threads stood still for %.1f ms while the detour on rva %s was written",
                    rep.stopped_ms, hex(rva_of(addr)).c_str());
@@ -1017,7 +1038,17 @@ Target* target_for(uintptr_t addr, bool* refused_quietly, uint32_t* unchecked = 
             KLOG_E("hooks: %zu thread(s) paused inside the first bytes of rva %s could not be moved; they may crash when they "
                    "run on", rep.in_range - rep.moved, hex(rva_of(addr)).c_str());
     } else {
-        if (unchecked) return fail(false); // checked install never falls back to an unchecked patch
+        if (unchecked) {  // a checked installation never falls back to an unchecked patch
+            if (rep.why_n)
+                KLOG_W("hooks: rva %s: checked installation refused, nothing written: %zu thread(s) could not be checked "
+                       "(%zu not opened, %zu not stopped, %zu without an id or a context; %zu ended ones not counted); the "
+                       "first: thread %lu, stop error %lu, exit code %lu%s",
+                       hex(rva_of(addr)).c_str(), rep.unopened + rep.unstopped + rep.no_context, rep.unopened, rep.unstopped,
+                       rep.no_context, rep.exited, static_cast<unsigned long>(rep.why[0].tid),
+                       static_cast<unsigned long>(rep.why[0].error), static_cast<unsigned long>(rep.why[0].exit_code),
+                       rep.why[0].no_id ? " (its id could not be read)" : "");
+            return fail(false);
+        }
         // No thread list, or a trampoline of a shape we don't know: safetyhook's own way (page trap, no thread stops).
         KLOG_W("hooks: rva %s: could not stop the other threads; using safetyhook's enable", hex(rva_of(addr)).c_str());
         if (!t->hook.enable()) {
