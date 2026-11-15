@@ -75,6 +75,10 @@ with tempfile.TemporaryDirectory(prefix='kiln-sf-fixtures-', dir=build.parent) a
         if self_hosted:
             assert status['mode'] == 'self-hosted' and not log.exists(), (name, status)
             assert status.get('menu') != 'kiln', status
+            loader = status['loaderFile']
+            line = ("shroudforge: its own loader (" + loader + ") runs it; Kiln's profile does not decide ShroudForge mods this start").encode()
+            assert result.stdout.count(line) == 1, result.stdout
+            assert loader and loader in status['reason'], status
             print('PASS', name)
             return
         if reservation:

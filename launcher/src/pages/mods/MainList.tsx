@@ -3,6 +3,7 @@
 // configs, the version, its folder, remove). A mod found in the game folder is a row with its state and its fix, no
 // switch. Above the list: the filter (with many mods), Notes (what the last activation said about mod folders, when it
 // said something), Load order, Engines and Add mods. It scrolls inside the page.
+import { SfSelfHostedNotice } from "../../components/SfSelfHostedNotice";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, MoreHorizontal } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
@@ -239,6 +240,7 @@ export function MainList({ game, mods, running }: { game: GameInstall; mods: Mod
   const foundStart = shown.findIndex((r) => r.found);
   return (
     <div className={"k-mods" + (mods.rows.length ? "" : " empty") + (selecting ? " selecting" : "")} onKeyDown={keys}>
+      <SfSelfHostedNotice profile={mods.profile} found={mods.found.data} />
       <div className="k-mods-bar">
         {many && (
           <>
