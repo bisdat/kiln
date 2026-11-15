@@ -216,7 +216,7 @@ table is not read yet (its `World` token is set then) or on a build where progra
 budget read before the world starts is not a promise: registration still checks the live table at the world's start.
 The prediction world is not a kind of its own here (`ArgumentException`). Without kiln.world.budget (an older kiln.world)
 it throws `KilnUnavailableException("world.program_budget")`. A change posts `CapacityChangedEvent` (`Quota`
-`world.program_budget`) at the next step, measured every 25 steps while something listens. Native code: the table
+`world.program_budget`) at the next step, measured separately for Server and Client every 25 steps while something listens; switching query kinds does not itself report a change. Native code: the table
 `kiln.world.budget` (`native/core/abi/services/kiln_world_budget.h`), a table of its own next to kiln.world.
 `World.Status` stays what it was (a legacy diagnostic).
 

@@ -542,6 +542,7 @@ void test_results() {
     uint8_t stored[16];
     std::memcpy(stored, a.r.registration_id, 16);
     check(receipt(stored).r.disposition == KILN_DEFINITION_ACCEPTED_NEXT_START, "its receipt says so");
+    check(define(5, def(12), KILN_DEFINE_ALLOW_NEXT_START).r.ok, "store a second boot request to test current-mod precedence");
 
     kc::g_test_world = 0x7000;
     clones_world_ready(0x7000, KILN_WORLD_SERVER);
@@ -554,6 +555,15 @@ void test_results() {
     check(a.rc == KILN_OK && a.r.ok && a.r.disposition == KILN_DEFINITION_REGISTERED && a.r.slots_consumed == 1 && a.r.reason_code == 0 &&
               a.report["reason"].is_null(),
           "RequireRegistered in a world: Registered, SlotsConsumed 1");
+    g_get_buff = [](uint32_t id, uintptr_t reg) -> uintptr_t {
+        uintptr_t header = 0; std::memcpy(&header, reinterpret_cast<void*>(reg + 0x20), 8);
+        return game_lookup(header, id, kStride);
+    };
+    auto& looked = g_defs.front();
+    looked.probed.clear(); probe_buff(looked, 0x7000);
+    check(clones_status()["buffLookups"][kc::guid_text(looked.guid)]["server"] == true,
+          "boundary proof names the GUID whose ordinary game lookup succeeded");
+    g_get_buff = nullptr;
     uint8_t first[16];
     std::memcpy(first, a.r.registration_id, 16);
     b = budget();
@@ -638,11 +648,30 @@ void test_results() {
     const auto malformed = u8path(pending_dir()) / "test" / "malformed.json";
     fs::create_directories(malformed.parent_path());
     { std::ofstream out(malformed); out << R"({"format":"wrong"})"; }
+    pending_replay();
+    check(g_defs.empty(), "pending replay waits for the reliable loaded-mod filter");
+    a = define(5, def(11), KILN_DEFINE_ALLOW_NEXT_START);
+    check(a.r.ok, "a new OnLoad request is accepted for the next process start");
+    const auto fresh_file = u8path(pending_file("test", a.r.definition_guid));
+    g_defs.clear(); g_receipts.clear(); g_pending_owners.clear();
+    g_pending_filter_known = true;
+    g_pending_mods = {"another-mod"};
+    pending_replay();
+    check(g_defs.empty(), "disabled mod's pending file is not applied");
+    std::string current_report;
+    clones_define(77, KILN_GD_BUFFS, with(def(12), "description", "current OnLoad definition").dump(), false, "mod OnLoad", &current_report);
+    g_pending_mods = {"test"};
     bool replay_threw = false;
     try { pending_replay(); } catch (const std::exception&) { replay_threw = true; }
-    check(!replay_threw && !fs::exists(malformed), "malformed pending field types are refused without throwing at boot");
-    check(g_defs.size() == 1 && g_defs[0].name == "Result_2" && g_defs[0].state != "registered", "the next start defines the stored clone before the world");
+    check(!replay_threw && fs::exists(malformed), "malformed pending field types are refused without throwing and left in place");
+    auto resumed = std::find_if(g_defs.begin(), g_defs.end(), [](const Def& d) { return d.name == "Result_2"; });
+    check(g_defs.size() == 2 && resumed != g_defs.end() && resumed->state != "registered", "the next start defines the stored clone before the world");
+    auto current = std::find_if(g_defs.begin(), g_defs.end(), [](const Def& d) { return d.name == "Result_12"; });
+    check(current != g_defs.end() && current->body.value("description", "") == "current OnLoad definition",
+          "deferred replay never overwrites this start's newer OnLoad definition");
     check(receipt(stored).r.disposition == KILN_DEFINITION_ACCEPTED_NEXT_START, "its receipt: still AcceptedNextStart before the world");
+    pending_owner_loaded(90, "test");
+    check(resumed->owner == 90 && g_receipts.at(resumed->reg_id).owner == 90, "pending stand-in handed to real mod owner");
     kc::g_test_world = 0x7000;
     clones_world_ready(0x7000, KILN_WORLD_SERVER);
     a = receipt(stored);
@@ -650,7 +679,14 @@ void test_results() {
     files = 0;
     for (auto it = fs::recursive_directory_iterator(kc::data_dir(), ec); !ec && it != fs::recursive_directory_iterator(); ++it)
         files += it->is_regular_file();
-    check(files == 0, "and its file is gone (" + std::to_string(files) + " left)");
+    fs::remove(malformed);
+    check(files == 3 && fs::exists(fresh_file), "the refused file and new next-start request remain (" + std::to_string(files) + " left)");
+    on_owner_retiring(90, nullptr);
+    pending_owner_loaded(91, "test");
+    check(budget().kiln_used == 0 && budget().reserved == 2, "real owner's retirement reserves replayed clone");
+    pending_owner_loaded(91, "test");
+    check(budget().kiln_used == 0 && budget().reserved == 2,
+          "a later loaded owner does not resurrect retired clones without defining them again");
     fs::remove_all(kc::data_dir(), ec);
 }
 

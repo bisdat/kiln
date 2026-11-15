@@ -176,7 +176,8 @@ public static unsafe class ContentSync
                     .Register<PartMsg>(MsgPart, static (m, w) => m.Encode(w), static (ref NetReader r) => PartMsg.Decode(ref r), OnPart, NetDirection.ToClient)
                     .Register<AckMsg>(MsgAck, static (m, w) => m.Encode(w), static (ref NetReader r) => AckMsg.Decode(ref r), OnAck, NetDirection.ToServer);
                 Network.Disconnected += _ => OnLeave("left the server");
-                Network.ServerReady += _ => OnLeave(null);
+                Network.ServerReady += _ => { OnLeave(null); EnsureContentAdmission(); };
+                EnsureContentAdmission();
             }
             finally
             {
@@ -226,6 +227,33 @@ public static unsafe class ContentSync
     // The server role: a dedicated server, or a client while it hosts (its server world runs here). A client in the
     // menu or joined to another machine (REMOTE) has no server world: its only peer is the remote server, never a
     // client of ours. The hosted server world's session number tells hosted games apart.
+    internal static bool RequiresBuffAdmission()
+    {
+        if (!Content.GameDataAvailable) return false;
+        try
+        {
+            var room = Content.Buffs.GetBudget();
+            if (room.Ok) return room.Budget.KilnUsed != 0 || room.Budget.Reserved != 0;
+        }
+        catch (KilnUnavailableException) { }
+        return Content.Buffs.Definitions().Count != 0;
+    }
+
+    private static IDisposable? _contentAdmission;
+    private static readonly Dictionary<uint, AdmissionHold> ContentHolds = new();
+    private static void EnsureContentAdmission()
+    {
+        if (!ServerRole || _contentAdmission != null ||
+            ((NetNative.ReadStatus()?.Roles ?? 0) & NetNative.RoleServer) == 0) return;
+        _contentAdmission = NetAdmission.OnJoin("kiln.content", peer =>
+        {
+            if (!peer.HasChannel(ChannelName) || !RequiresBuffAdmission()) return null;
+            if (ContentHolds.Remove(peer.Id, out var previous)) previous.End();
+            var hold = NetAdmission.HoldPeer(peer, "kiln.content", "Waiting for this game's content and added-buff capacity check", TimeSpan.FromSeconds(120));
+            ContentHolds[peer.Id] = hold;
+            return hold;
+        });
+    }
     private static uint _serverSession;
     private static bool _serving;
 
@@ -235,6 +263,10 @@ public static unsafe class ContentSync
     /// <summary>Drops everything the server side holds (the state, which peer has which parts). Under no lock.</summary>
     private static void ResetServer(string why)
     {
+        _contentAdmission?.Dispose(); _contentAdmission = null;
+        foreach (var hold in ContentHolds.Values) hold.End();
+        ContentHolds.Clear();
+
         int peers;
         lock (Sent)
         {
@@ -262,7 +294,14 @@ public static unsafe class ContentSync
             if (!role) return;
         }
         _serving = true;
+        EnsureContentAdmission();
         var peers = Network.Peers;
+        foreach (var entry in ContentHolds.ToArray())
+            if (entry.Value.Ended || !peers.Any(p => p.Id == entry.Key))
+            {
+                ContentHolds.Remove(entry.Key);
+                entry.Value.End();
+            }
         if (_channel is null || peers.Count == 0 || !peers.Any(p => p.State == NetPeerState.Ready && p.HasChannel(ChannelName)))
         {
             lock (Sent)
@@ -562,6 +601,19 @@ public static unsafe class ContentSync
         Log(a.Result is 0 or 2 ? LogLevel.Info : LogLevel.Warn,
             $"{ctx.Sender.Name}: content state {a.StateId:x8} {what}: {a.Applied} change(s), {a.Reset} local reset, {a.Errors} error(s) in {a.Millis} ms" +
             (a.Detail.Length > 0 ? $"; {a.Detail}" : ""));
+        if (a.Result is not (0 or 2))
+        {
+            lock (Sent) Acked.Remove(ctx.Sender.Id);
+            var required = RequiresBuffAdmission();
+            if (ContentHolds.Remove(ctx.Sender.Id, out var refused))
+            {
+                if (required) refused.Refuse(a.Detail); else refused.End();
+            }
+            else if (required) NetAdmission.RefusePeer(ctx.Sender, a.Detail, "kiln.content");
+            return;
+        }
+        if (_export is not { } current || current.StateId != a.StateId) return;
+        if (ContentHolds.Remove(ctx.Sender.Id, out var accepted)) accepted.End();
         lock (Sent) Acked[ctx.Sender.Id] = a.StateId;
         // docs/kiln/network.md "Clients without Kiln": only an ack of the state served now clears the client. An older one may
         // lack a template added since; the current one is on its way to it.
@@ -706,11 +758,22 @@ public static unsafe class ContentSync
         Apply(p.StateId, p.Json, p.Fields, p.Compressed, st.Generation);
     }
 
+    internal static string? BuffRoomRefusal(JsonObject server, CapacityInfo room, IReadOnlySet<Guid> existing)
+    {
+        if (server["buffs"] is not JsonObject section || section["add"] is not JsonArray adds || adds.Count == 0) return null;
+        var guids = adds.OfType<JsonObject>().Select(x => Guid.TryParse((string?)x["guid"], out var g) ? g : Guid.Empty).ToHashSet();
+        if (guids.Contains(Guid.Empty)) return "This server sent an invalid added buff GUID; update the server's mods.";
+        if (!room.Ready || room.Available is not { } available) return "This game's added-buff room is not ready; rejoin after content loads.";
+        var needed = guids.Count(g => !existing.Contains(g));
+        return needed <= available ? null : $"This server uses {guids.Count} added buffs; this game has room for {room.Capacity} " +
+            $"({available} slots free). Restart the game to retry its larger reservation, or use fewer buff mods on the server.";
+    }
+    internal static bool ApplySucceeded(int rc, IReadOnlyList<string> errors) => rc == ContentNative.Ok && errors.Count == 0;
+
     private static void Apply(uint stateId, string json, uint fields, int compressed, ulong generation)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var t = Content.T;
-        t->RevertOwner(_owner);
         JsonObject server;
         try
         {
@@ -725,6 +788,18 @@ public static unsafe class ContentSync
             _appliedGeneration = generation;
             return;
         }
+        if (server["buffs"] is JsonObject buffs && buffs["add"] is JsonArray { Count: > 0 })
+        {
+            var reason = BuffRoomRefusal(server, Content.Buffs.GetBudget().Budget,
+                Content.Buffs.Definitions().Where(d => d.State is "registered" or "orphaned").Select(d => d.Guid).ToHashSet());
+            if (reason is not null)
+            {
+                _status = _status with { State = ContentSyncState.Failed, StateId = stateId, Detail = reason };
+                _channel?.SendToServer(new AckMsg(stateId, 3, 0, 0, 1, 0, reason));
+                return;
+            }
+        }
+        t->RevertOwner(_owner);
         // the programs the definitions name first: kiln.gamedata checks a clone's program reference against what is served
         var (programs, localPrograms, programErrors) = SyncPrograms.Serve(server, _owner);
         if (programs > 0 || localPrograms > 0)
@@ -756,7 +831,7 @@ public static unsafe class ContentSync
         _appliedState = stateId;
         _appliedGeneration = Content.Status()?.Generation ?? generation;
         var ms = (uint)sw.ElapsedMilliseconds;
-        var ok = rc == ContentNative.Ok;
+        var ok = ApplySucceeded(rc, errors);
         var examples = Examples(server, 4);
         Log(errors.Count == 0 && ok ? LogLevel.Info : LogLevel.Warn,
             $"content state {stateId:x8} applied: {applied} change(s) from the server ({fields} sent{(reset > 0 ? $", {reset} local-only change(s) put back" : "")}), " +
@@ -1017,19 +1092,34 @@ public static unsafe class ContentSync
         using (var s = new ContentNative.Utf8(source))
             fixed (byte* b = buf)
                 rc = t->ApplyJson(_owner, j.Str, s.Str, b, cap, &len);
+        var (applied, errors) = ReadApplyReport(Encoding.UTF8.GetString(buf, 0, (int)Math.Min(len, (nuint)(cap - 1))));
+        if (rc != ContentNative.Ok && errors.Count == 0) errors.Add(ContentNative.Message(rc));
+        return (applied, errors, rc);
+    }
+
+    internal static (int Applied, List<string> Errors) ReadApplyReport(string text)
+    {
         var errors = new List<string>();
         var applied = 0;
         try
         {
-            using var doc = JsonDocument.Parse(Encoding.UTF8.GetString(buf, 0, (int)Math.Min(len, (nuint)(cap - 1))));
-            if (doc.RootElement.TryGetProperty("applied", out var a)) applied = a.GetInt32();
-            if (doc.RootElement.TryGetProperty("errors", out var e)) errors.AddRange(e.EnumerateArray().Select(x => x.GetString() ?? ""));
+            using var doc = JsonDocument.Parse(text);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object ||
+                !doc.RootElement.TryGetProperty("applied", out var count) || count.ValueKind != JsonValueKind.Number || !count.TryGetInt32(out applied) || applied < 0 ||
+                !doc.RootElement.TryGetProperty("errors", out var entries) || entries.ValueKind != JsonValueKind.Array)
+                throw new JsonException("invalid content apply report");
+            foreach (var entry in entries.EnumerateArray())
+            {
+                if (entry.ValueKind != JsonValueKind.String) throw new JsonException("invalid content error entry");
+                errors.Add(entry.GetString() ?? "");
+            }
         }
         catch (JsonException)
         {
+            applied = 0;
+            errors.Add("The native content apply report is incomplete or invalid; update Kiln and rejoin.");
         }
-        if (rc != ContentNative.Ok && errors.Count == 0) errors.Add(ContentNative.Message(rc));
-        return (applied, errors, rc);
+        return (applied, errors);
     }
 
     // ------------------------------------------------------------------------------------------------- codec -----
