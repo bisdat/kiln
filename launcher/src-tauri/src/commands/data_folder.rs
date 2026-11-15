@@ -661,6 +661,7 @@ pub fn hold_for_move(f: &Folder) -> Result<(), Error> {
         return Err(df::Refusal::new(df::RefusalCode::Locked, OTHER_LAUNCHER).into_error());
     }
     begin_alone(|running| {
+        if let Some(e) = crate::snapshot::startup::refusal() { return Err(e); }
         if let Some(e) = f.held_error() {
             return Err(e);
         }

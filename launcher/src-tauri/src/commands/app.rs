@@ -60,7 +60,9 @@ pub struct LauncherSettings {
     /// `checkUpdates`, which old files may still carry (ignored).
     #[serde(default = "yes")]
     pub update_check: bool,
-    /// The update channel, "stable" or "dev"; absent: the channel of the running build (a dev build follows dev).
+    /// The update channel, "stable", "dev" (the release line: "Release" in the UI) or "beta" (dev.29: test builds);
+    /// absent: the channel of the running build (a dev build follows dev, a test build beta). A launcher before
+    /// dev.29 reads "beta" as absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_channel: Option<String>,
     /// The fire on Play (WebGL). Off: the plain Play button (Settings, Appearance).
@@ -264,8 +266,14 @@ pub fn spawn_task(
     let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut p = TaskProgress { app: app.clone(), task, cancel, last: Instant::now() - Duration::from_secs(1) };
-        let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(&mut p)))
+        let alone = ALONE_KINDS.contains(&p.task.kind.as_str());
+        let _writing = (!alone).then(crate::state::writing);
+        let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            if !alone && let Some(e) = crate::snapshot::startup::refusal() { return Err(e); }
+            work(&mut p)
+        }))
             .unwrap_or_else(|_| Err(Error::new(ErrorCode::Internal, "the task panicked (a bug; see launcher.log)")));
+        drop(_writing);
         let mut t = p.task;
         t.finished = Some(kiln_manage::util::now_rfc3339());
         match out {
@@ -701,6 +709,7 @@ fn append_log(d: &kiln_manage::paths::DataDirs, lines: &[String]) {
 
 /// Writes the lines held back during a move that did not commit (the data folder is free again).
 pub fn flush_held_log() {
+    let _writing = crate::state::writing();
     let lines = std::mem::take(&mut *HELD_LOG.lock().unwrap_or_else(|e| e.into_inner()));
     if lines.is_empty() {
         return;

@@ -6,6 +6,7 @@ import { HashRouter } from "react-router-dom";
 import App from "./App";
 import { isTauri, loadMock } from "./api/commands";
 import { UiModeGate } from "./deck/mode";
+import { SnapshotGate } from "./shell/SnapshotGate";
 import { DataFolderGate } from "./shell/DataFolderGate";
 import { Started } from "./shell/started";
 import "./theme/base.css";
@@ -24,9 +25,9 @@ createRoot(document.getElementById("root")!).render(
       <HashRouter>
         {/* a data folder that cannot be used: only its dialog, before either UI (shell/DataFolderGate.tsx) */}
         <DataFolderGate>
-          <UiModeGate>
+          <SnapshotGate><UiModeGate>
             <App />
-          </UiModeGate>
+          </UiModeGate></SnapshotGate>
         </DataFolderGate>
       </HashRouter>
     </QueryClientProvider>

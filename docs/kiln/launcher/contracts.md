@@ -1244,15 +1244,16 @@ Shared types (TypeScript names, defined in `commands.ts`; Rust in kiln-manage un
 | update | `update_status` | - | `UpdateStatus` |
 | update | `update_check` | - | `UpdateStatus` (asks the sources now) |
 | update | `update_install` | - | `TaskId` -> `UpdateStatus` (download, verify; the AppImage is put in place; `unsupported` for a .deb, .rpm or development build) |
+| update | `update_switch` | channel: `stable` \| `dev` \| `beta`, restore?: bool | `TaskId` -> `UpdateStatus` (dev.29: the channel switch the player started, after saving `updateChannel`: the channel's newest build downloaded, verified and put in place like an update; back from a test build to the release line also an older one, to the beta only a newer one; `not_found` when the channel has no other build; `restore`: the restart puts the "before beta" copy back first; `unsupported` as for `update_install`) |
 | update | `update_restart` | - | null (restarts into the update that is ready; Windows: runs its installer; returns only on failure) |
 | update | `update_skip` | version: string \| null | `UpdateStatus` (null: un-skips) |
 | update | `update_ack` | - | `UpdateStatus` (clears `justUpdated`) |
 
 The Nexus Mods build (`AppInfo.distribution` "nexus", built without the `self-update` feature; [releasing.md](releasing.md)
-"The two builds") has the same six commands with no self-update behind them: `update_status`, `update_check`,
+"The two builds") has the same seven commands with no self-update behind them: `update_status`, `update_check`,
 `update_skip` and `update_ack` return the same `UpdateStatus` with `phase: "disabled"`, `distribution: "nexus"`,
-`auto: false`, `install.inPlace: false` and `page` = the Kiln page on Nexus Mods, and change nothing; `update_install`
-and `update_restart` reject with `unsupported` (detail: that page). Nothing in that build reads the network for updates
+`auto: false`, `install.inPlace: false` and `page` = the Kiln page on Nexus Mods, and change nothing; `update_install`,
+`update_switch` and `update_restart` reject with `unsupported` (detail: that page). Nothing in that build reads the network for updates
 or emits `kiln://update`; its UI calls none of these commands.
 | library | `library_add` | gameId, paths: string[] | `TaskId` -> `AddReport` (import + add to the game's active profile + write profile.json, section 7 "Add a mod"; rejects at once with `unsupported` when the game has no `kiln/`) |
 | profile | `profile_revert` | profileId, changes: ProfileChange[] | `Profile` (undoes a `library_add`; profile.json follows where the profile is active, as after `profile_save`) |
@@ -1513,3 +1514,5 @@ kilnctl is built on the crate; it also has `bundle`, `client`, `admin` and `depl
   `/logs`, `/saves`, `/editor`, `/settings`, `/about`; Servers `/servers/:id/{overview,logs,ticks,settings,configs,mods,
   backups,modpack}`; Admin `/servers/:id/admin/{players,map,zones,items,spawn,world,combat,creatures,gamedata,permissions,
   content,saves,crashes}` (`admin/configs`, `admin/mods` and `admin/console` redirect to the merged server pages).
+
+Beta startup gate commands: `snapshot_status` returns `{ phase: "preparing" | "blocked" | "ready", reasons: string[], canContinue: boolean }`; `snapshot_continue` takes no arguments and records an explicit decision to continue without a complete pre-beta copy. Neither bypasses an unfinished restore journal. `UpdateStatus.restoreRequested` records the accepted restore choice, and `beforeBetaWarning` carries persisted opt-out reasons.

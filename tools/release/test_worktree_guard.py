@@ -136,6 +136,14 @@ class WorktreeGuard(unittest.TestCase):
                 self.assertNotIn("Next (by hand", r.stdout)
             else:
                 self.assertIn("tools/release/publish.sh /x/out", r.stdout)
+        # a test build (release.sh --beta N): its own next steps, the beta channel only, never Nexus Mods
+        r = subprocess.run(["bash", "-euo", "pipefail", "-c", block + '\nprintf "%s" "$closing"'],
+                           env={"PATH": os.environ["PATH"], "worktree": "0", "version": "0.2.0-dev.29", "name": "0.2.0-dev.29-beta.3",
+                                "channel": "beta", "beta": "3", "out": "/x/out", "log": "/x/log"}, capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Test build 3 of 0.2.0-dev.29 (beta channel)", r.stdout)
+        self.assertIn("v0.2.0-dev.29-beta.3", r.stdout)
+        self.assertNotIn("nexus.py", r.stdout)
 
     def test_usage_text_says_so(self):
         r = subprocess.run(["bash", str(HERE / "release.sh"), "--help"], capture_output=True, text=True, timeout=60)
