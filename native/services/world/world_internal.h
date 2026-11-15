@@ -166,6 +166,7 @@ bool seh_each(KilnProgramEachFn fn, KilnProgramCtx* ctx, uint64_t* iter, KilnEnt
 bool seh_update(KilnProgramUpdateFn fn, KilnProgramCtx* ctx, void* user, unsigned long* code);
 bool seh_teleport_cb(KilnTeleportFn fn, const KilnTeleportResult* r, void* user, unsigned long* code);
 bool seh_register_program(RegisterProgramFn fn, uintptr_t world, const EngineDesc* d, bool* ok, unsigned long* code);
+bool seh_call(void (*fn)(void*), void* ctx, unsigned long* code);  // fn(ctx) under the structured-exception guard
 bool seh_iter_begin(void* ctx, void* iter, uint32_t size, unsigned long* code);
 bool seh_iter_next(void* ctx, void* iter, uint32_t size, bool* more, unsigned long* code);
 bool seh_get_component(uintptr_t world, uint32_t hash, uint32_t entity, Slice* out);
@@ -215,6 +216,23 @@ const KilnTypesApi* program_types();  // kiln.types, or null
 // `removed`), instead of being refused whole. Before the first server world registers.
 using ProgramPrunedFn = void (*)(std::string_view name);
 void program_set_prune(KilnHandle program, ProgramPrunedFn removed);
+
+// ---- programs.cpp: Kiln programs in a client's client world and prediction storage (since 0.2.0-dev.29) ----
+// Which worlds a program is for (a boot reservation's "world"): bit (1 << KILN_WORLD_*).
+constexpr uint32_t kWorldBitServer = 1u << KILN_WORLD_SERVER, kWorldBitPrediction = 1u << KILN_WORLD_PREDICTION,
+                   kWorldBitClient = 1u << KILN_WORLD_CLIENT;
+// boot: world.programs.client's inputs (a client, the RegisterAllPrograms hook, the maps, world.lifecycle, the client
+// world's tick and world events); reports the row. Before boot_programs_init (its reservations need to know).
+void programs_client_init(bool client_tick, bool world_events);
+bool programs_client_on();                                // world.programs.client is available
+void programs_client_pre(const KilnTickInfo* tick);       // the client world's Pre (main thread)
+void programs_world_event(const KilnWorldEvent* event);   // a world starts or stops
+KilnResult reserve_program_world(const std::string& mod, const std::string& key, const KilnProgramDesc* desc, uint32_t worlds, uint32_t declared_worlds = 0);
+KilnResult KILN_CALL register_program_world(KilnOwner owner, uint32_t kind, const KilnProgramDesc* desc, KilnHandle* out);
+KilnResult KILN_CALL program_world_state(KilnHandle program, uint32_t kind, int32_t* state, KilnStr* reason);
+KilnResult KILN_CALL bind_program_world(KilnOwner owner, KilnStr mod, KilnStr key, uint32_t kind, KilnProgramEachFn each,
+                                        KilnProgramUpdateFn update, void* user, KilnHandle* out);
+KilnResult KILN_CALL unbind_program_world(KilnHandle binding);
 
 // ---- writes.cpp: tracked writes (kiln.world v3) ----
 bool writes_available();

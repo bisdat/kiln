@@ -1,0 +1,1 @@
+{ "id": "fixture-programs-world", "version": "1.0.0", "apiVersion": "0.2", "side": "both", "clients": "none", "license": "MIT", "entryAssembly": "FixtureProgramsWorld.dll" }

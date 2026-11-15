@@ -34,7 +34,7 @@ internal static class BudgetFixture
     public static void Define(string dataDirectory, Action<string> info)
     {
         const string Row = "blocks.vfx_registration";
-        var doc = new JsonObject { ["format"] = 1, ["at"] = DateTime.UtcNow.ToString("o") };
+        var doc = new JsonObject { ["format"] = 1, ["fixture"] = ClientPass.VfxBudgetProof.Fixture, ["process"] = ClientPass.VfxBudgetProof.ProcessKey, ["at"] = DateTime.UtcNow.ToString("o") };
         if (!Capabilities.Is(Row))
         {
             info($"budget: {Capabilities.Why(Row)}");

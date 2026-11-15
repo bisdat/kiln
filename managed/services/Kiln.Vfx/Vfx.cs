@@ -393,7 +393,7 @@ public static unsafe class Vfx
     /// read from its archive, <c>AccountingMismatch</c> when the table's counts do not add up. A change posts
     /// <see cref="CapacityChangedEvent"/> (<c>Quota</c> <c>vfx.budget</c>) at a later step while something listens.</para>
     /// <para>A snapshot kiln.vfx keeps: any thread, never a read of the game's memory. Not run in a game client yet (guided check
-    /// <c>17-vfx-budget</c>).</para>
+    /// <c>17-vfx-budget.before</c> and <c>17-vfx-budget.after</c>).</para>
     /// </summary>
     /// <exception cref="KilnUnavailableException"><c>vfx.budget</c>: no kiln.vfx here (a dedicated server has no VFX), one older
     /// than 0.2.0-dev.29, or one that cannot read the game's VFX table on this game build.</exception>

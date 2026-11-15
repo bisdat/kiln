@@ -27,6 +27,16 @@ public static class Descriptors
         "'await ...ConfigureAwait(false)' runs elsewhere. Use Context.Scheduler.Post(() => ...) or " +
         "'await Context.Scheduler.NextTick()' to get back.");
 
+    public static readonly DiagnosticDescriptor ClientWorldOffMainThread = Rule("KILN109",
+        "Client-world API called off the game's main thread",
+        "'{0}' for the client world must be called on the game's main thread, but this code runs {1}; call it in OnLoad or post it with Client.Post",
+        Threading, DiagnosticSeverity.Warning,
+        "EcsPrograms.TryBind(..., WorldKind.Client) and (..., WorldKind.Prediction) bind a program of a client's worlds, " +
+        "which kiln.world takes only on the game's main thread: in OnLoad (a client mod loads in the main menu, on that " +
+        "thread) or in Client.Post work. Elsewhere it throws InvalidOperationException. Code in Task.Run, threads, timers, " +
+        "thread-pool callbacks and after 'await ...ConfigureAwait(false)' runs elsewhere; on a host, the server's tick thread " +
+        "(Scheduler.Post, a reload's OnLoad) is not the main thread either. Since 0.2.0-dev.29.");
+
     public static readonly DiagnosticDescriptor AsyncVoid = Rule("KILN102",
         "Avoid async void",
         "{0}",

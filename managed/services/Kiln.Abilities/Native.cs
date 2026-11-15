@@ -156,7 +156,15 @@ internal static unsafe class AbilitiesNative
         public delegate* unmanaged[Cdecl]<uint, uint, NativeArgRaw*, int> NativeDeclareTyped;
         public delegate* unmanaged[Cdecl]<uint, uint*, int> NativeStateFn;
         public delegate* unmanaged[Cdecl]<ulong, uint*, int> NativeAttachStateFn;
+        // the ECS bridge (06c S5): native_ecs_read, native_ecs_write
+        public delegate* unmanaged[Cdecl]<NativeCall*, NativeStr, uint, void*, uint, int> NativeEcsRead;
+        public delegate* unmanaged[Cdecl]<NativeCall*, NativeStr, uint, void*, uint, uint, void*, void*, int> NativeEcsWrite;
     }
+
+    // KILN_NATIVE_ECS_* (KilnNativeCounters.ecs_state / ecs_reason)
+    public const uint EcsPending = 0, EcsOn = 1, EcsOff = 2;
+    public const uint EcsReasonNone = 0, EcsReasonNoWorldApi = 1, EcsReasonLayout = 2, EcsReasonCounts = 3, EcsReasonRegistry = 4;
+    public const uint EcsAttribute = 1;  // KILN_NATIVE_ECS_ATTRIBUTE
 
     /// <summary>KilnNativeArg (since 0.2.0-dev.29).</summary>
     [StructLayout(LayoutKind.Sequential)]
@@ -184,6 +192,8 @@ internal static unsafe class AbilitiesNative
         public ulong SyncCalls, SyncFaults, SyncSlow, DeadCalls, AttachEntered, AttachSkipped, TypedRefused, TypedUnconnected;
         public ulong RetireDeferred, WatchdogReports;
         public uint RetirePending, AttachPending, AttachActive, AttachOff;
+        public ulong LockBypass;
+        public uint EcsState, EcsReason;
     }
 
     public const uint CountersNatives = 1;  // KILN_NATIVE_COUNTERS_NATIVES: the RegisterNative hook is in

@@ -49,8 +49,19 @@ KilnAbilityEvent new_event(uint32_t kind) { KilnAbilityEvent e{}; e.kind = kind;
 void capture_args(KilnAbilityEvent&, ArgSlice*, NativeCtx*) {}
 bool event_room = false;
 bool push_event(const KilnAbilityEvent&) { return event_room; }
+std::atomic<uint32_t> g_inflight{0};
+std::vector<const AttachSet*> g_retired;
 #include "registration_under_test.h"
 int main() {
+    // A thunk has loaded a binding but has not entered its owner's gate yet.
+    auto* binding = new SyncBinding{nullptr, nullptr, g_gates.of(77), "test.Native"};
+    g_retired_bindings.push_back(binding);
+    g_inflight = 1;
+    free_retired();
+    assert(g_retired_bindings.size() == 1);
+    g_inflight = 0;
+    free_retired();
+    assert(g_retired_bindings.empty());
     std::string why;
     uint32_t hash;
     int i = add_kiln_native(1, "test.Native", 1, SLOT_MANAGED, &hash, why);

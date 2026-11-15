@@ -22,6 +22,7 @@ internal sealed class SystemsFake : IKitFake
         WorldBudgetTable.Register();
         FakeTables.Offline("systems.define", "the test kit has no boot reservations (kiln.programs.json): Systems.Define needs a server");
         FakeTables.Offline("systems.wraps.client", "the test kit fakes a server world only");
+        FakeTables.Offline("world.programs.client", "the test kit fakes a server world only (no client world for EcsPrograms.TryBind)");
         FakeTables.Offline("systems.threads", "the test kit runs every slice on its tick thread: no players mask, no workers");
     }
 

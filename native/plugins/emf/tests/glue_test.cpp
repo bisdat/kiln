@@ -2,6 +2,7 @@
 // Exercise the production adapters against fake Kiln services, including
 // callback reentrancy.
 #include "emf_internal.h"
+#include "services/kiln_caps.h"
 #include "services/kiln_render.h"
 #include "v26_model.h"
 #include <algorithm>
@@ -404,6 +405,28 @@ static void test_program(void* ctx,void*) {
     CHECK(table.program_write_other(ctx,"undeclared",5000,24)==nullptr);
     CHECK(table.program_write_other(ctx,"Health",5000,25)==nullptr);
 }
+// ---- the client world (0.2.0-dev.29): register_program(EMF_WORLD_CLIENT), _def and on_event through kiln.world's
+// register_program_world, one relay per event type per world kind, delivery after that world's step ----
+static std::map<std::string, uint32_t> program_worlds;  // the kind each program was registered for
+static std::vector<KilnHandle> unbound, unregistered;
+static bool client_row_available = true;
+static int client_events = 0, client_program_runs = 0;
+static std::thread::id client_event_thread;
+static void client_program(void*, void*) { ++client_program_runs; }
+static void client_event_cb(EmfWorld *, const void *, uint32_t, void *) {
+    ++client_events;
+    client_event_thread = std::this_thread::get_id();
+}
+static const KilnCapsApi *caps_table() {
+    static KilnCapsApi caps{};
+    caps.header.size = sizeof caps;
+    caps.find = [](KilnStr name, KilnCapRow *row) -> KilnResult {
+        if (std::string_view(name.ptr, name.len) != "world.programs.client") return KILN_ERR_NOT_FOUND;
+        row->state = client_row_available ? KILN_CAP_AVAILABLE : KILN_CAP_UNAVAILABLE;
+        return KILN_OK;
+    };
+    return &caps;
+}
 static void accepted_cb(EmfWorld *, uint32_t player, uint32_t entity, void *) {
     CHECK(player == 2 && entity == 5000);
     ++accepts;
@@ -425,9 +448,19 @@ static void test_components(KilnWorldApi &world) {
         if (std::string(d->name.ptr,d->name.len)=="two_events")
             passed_other_write=d->other_write.count==1 && std::string(d->other_write.items[0].ptr,d->other_write.items[0].len)=="Health";
         programs[std::string(d->name.ptr, d->name.len)] = *d;
+        program_worlds[std::string(d->name.ptr, d->name.len)] = KILN_WORLD_SERVER;
         *h = programs.size();
         return KILN_OK;
     };
+    world.register_program_world = [](KilnOwner, uint32_t kind, const KilnProgramDesc *d, KilnHandle *h) -> KilnResult {
+        if (kind != KILN_WORLD_CLIENT || (d->flags & KILN_PROGRAM_HOST_ONLY)) return KILN_ERR_INVALID_ARGUMENT;  // as kiln.world
+        programs[std::string(d->name.ptr, d->name.len)] = *d;
+        program_worlds[std::string(d->name.ptr, d->name.len)] = kind;
+        *h = 1000 + programs.size();
+        return KILN_OK;
+    };
+    world.unbind_program_world = [](KilnHandle h) -> KilnResult { unbound.push_back(h); return KILN_OK; };
+    world.unregister_program = [](KilnHandle h) -> KilnResult { unregistered.push_back(h); return KILN_OK; };
     world.program_slot = [](KilnHandle,int32_t kind,KilnStr name)->int32_t {
         const std::string key(name.ptr,name.len);
         if (kind==KILN_SLOT_OTHER_WRITE) return key=="Health"?2:-1;
@@ -447,9 +480,41 @@ static void test_components(KilnWorldApi &world) {
     EmfProgramDef definition{}; definition.size=sizeof definition; definition.name="two_events";
     definition.world_kind=EMF_WORLD_SERVER; definition.fn=&test_program; definition.events_in=inputs; definition.other_write=writes;
     CHECK(table.register_program_def(&definition));
+    // the client world: a dedicated server refuses at the call as before (false, an "unsupported" note); so does a
+    // client whose world.programs.client is off; a client with it registers through register_program_world
+    const auto api_service = const_cast<KilnApi *>(g_api)->service;
+    const_cast<KilnApi *>(g_api)->service = [](KilnStr n, uint32_t) -> const void * {
+        return std::string_view(n.ptr, n.len) == KILN_CAPS_SERVICE ? caps_table() : nullptr;
+    };
+    const int unsupported_before = unsupported_calls;
+    g_side = KILN_SIDE_SERVER;
+    CHECK(!table.register_program("cprog", EMF_WORLD_CLIENT, &client_program, nullptr));
+    CHECK(!table.on_event(EMF_WORLD_CLIENT, "ClientEvent", 24, &client_event_cb, nullptr));
+    g_side = KILN_SIDE_CLIENT;
+    client_row_available = false;
+    CHECK(!table.register_program("cprog", EMF_WORLD_CLIENT, &client_program, nullptr));
+    client_row_available = true;
+    CHECK(!table.register_program("pprog", 1 /* the prediction world */, &client_program, nullptr));
+    CHECK(unsupported_calls == unsupported_before + 4);
+    CHECK(table.register_program("cprog", EMF_WORLD_CLIENT, &client_program, nullptr));
+    EmfProgramDef cdef{}; cdef.size=sizeof cdef; cdef.name="cprog_def"; cdef.world_kind=EMF_WORLD_CLIENT; cdef.fn=&client_program;
+    const char* cin[]={"ClientEvent",nullptr}; cdef.events_in=cin;
+    CHECK(table.register_program_def(&cdef));
+    CHECK(table.on_event(EMF_WORLD_CLIENT, "ClientEvent", 24, &client_event_cb, nullptr));
+    CHECK(table.on_event(EMF_WORLD_SERVER, "ClientEvent", 24, &client_event_cb, nullptr));  // the same name in the server world
     components_on_ready();
     events_on_ready();
     CHECK(passed_other_write);
+    CHECK(program_worlds.at("two_events") == KILN_WORLD_SERVER && program_worlds.at("cprog") == KILN_WORLD_CLIENT &&
+          program_worlds.at("cprog_def") == KILN_WORLD_CLIENT);
+    CHECK(programs.at("cprog").flags == KILN_PROGRAM_SYSTEM && programs.at("two_events").flags == (KILN_PROGRAM_SYSTEM | KILN_PROGRAM_HOST_ONLY));
+    CHECK(programs.at("cprog_def").events_in.count == 1);
+    // one relay per event type per world kind
+    CHECK(program_worlds.at("emf_evc_ClientEvent") == KILN_WORLD_CLIENT && program_worlds.at("emf_ev_ClientEvent") == KILN_WORLD_SERVER);
+    CHECK(programs.at("emf_evc_ClientEvent").flags == KILN_PROGRAM_SYSTEM);
+    programs.at("cprog").each(nullptr, nullptr, 0, programs.at("cprog").user);
+    CHECK(client_program_runs == 1);
+    const_cast<KilnApi *>(g_api)->service = api_service;
     struct ProgramQueue { uint16_t first=1; uint8_t pad[6]{}; uintptr_t blocks=0; uint32_t count=1; } qa,qb;
     alignas(8) uint8_t page_a[256]{},page_b[256]{};
     uint32_t one=11,two=22; std::memcpy(page_a+8,&one,4); std::memcpy(page_b+8,&two,4);
@@ -498,6 +563,31 @@ static void test_components(KilnWorldApi &world) {
     events_world_stopping();
     events_after_step(w, EMF_WORLD_SERVER);
     CHECK(accepts == 1); // copied old-world accepts are discarded
+    {
+        // The client world's relay: copies made in its step go to its registrations after its step, on that thread, and
+        // never to the server world's; the server world's never to the client's.
+        alignas(8) uint8_t cblock[256]{};
+        Queue cq;
+        cq.blocks = reinterpret_cast<uintptr_t>(cblock);
+        uint64_t citer = reinterpret_cast<uintptr_t>(&cq);
+        auto &relay = programs.at("emf_evc_ClientEvent");
+        relay.each(nullptr, &citer, 0, relay.user);
+        events_after_step(w, EMF_WORLD_SERVER);
+        CHECK(client_events == 0);
+        auto cw = reinterpret_cast<EmfWorld *>(worlds[2]);
+        std::thread([&] { events_after_step(cw, EMF_WORLD_CLIENT); }).join();
+        CHECK(client_events == 1 && client_event_thread != std::this_thread::get_id());  // on the thread that ran the step
+        relay.each(nullptr, &citer, 0, relay.user);
+        events_world_stopping(EMF_WORLD_CLIENT);  // the client world stops: its copies are never delivered to the next
+        events_after_step(cw, EMF_WORLD_CLIENT);
+        CHECK(client_events == 1);
+        auto &srelay = programs.at("emf_ev_ClientEvent");
+        srelay.each(nullptr, &citer, 0, srelay.user);
+        events_after_step(cw, EMF_WORLD_CLIENT);
+        CHECK(client_events == 1);
+        events_after_step(w, EMF_WORLD_SERVER);
+        CHECK(client_events == 2);
+    }
     CHECK(table.offer_remove(w, 5000));
     step();
     step();
@@ -508,6 +598,11 @@ static void test_components(KilnWorldApi &world) {
     CHECK(!table.offer_active(w, 5000));
     CHECK(!table.player_level_set(w,2,5,0));
     components_world_started();
+    // shutdown: a client-world program's handle goes to unbind_program_world, a server one's to unregister_program
+    events_shutdown();
+    CHECK(unbound.size() == 3 && unregistered.size() >= 3);
+    for (KilnHandle h : unbound) CHECK(h > 1000);
+    for (KilnHandle h : unregistered) CHECK(h < 1000);
 }
 
 // ---- v18 attributes on kiln.combat v2 ----

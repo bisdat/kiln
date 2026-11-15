@@ -126,7 +126,7 @@ public static unsafe partial class World
     /// <param name="kind">The server world (default) or the client world.</param>
     /// <exception cref="ArgumentException"><paramref name="kind"/> is not Server or Client.</exception>
     /// <exception cref="KilnUnavailableException"><c>world.program_budget</c>: kiln.world.budget is not here (kiln.world
-    /// is missing or older than 0.2.0-dev.29, or programs are off on this build).</exception>
+    /// is missing or older than 0.2.0-dev.29). Programs off on this build return <c>NotReady</c>.</exception>
     [AnyThread]
     [RequiresCapability(ProgramBudgetNative.Capability)]
     public static ProgramBudgetResult GetProgramBudget(CapacityWorldKind kind = CapacityWorldKind.Server)
@@ -140,24 +140,24 @@ public static unsafe partial class World
         var rc = t->ProgramBudget((uint)kind, &r);
         if (rc == WorldNative.InvalidArgument) throw new ArgumentException($"world kind {kind} refused by kiln.world.budget", nameof(kind));
         if (rc != WorldNative.Ok) throw new InvalidOperationException($"World.GetProgramBudget: {WorldNative.Describe(rc)}");
-        return ProgramBudgetWatch.Seen(ProgramBudgetNative.ToResult(r));
+        return ProgramBudgetWatch.Seen(kind, ProgramBudgetNative.ToResult(r));
     }
 }
 
 /// <summary>The program budget's <see cref="CapacityChangedEvent"/> (<c>Quota</c> <c>world.program_budget</c>, the
-/// server world's engine slots and Kiln's slots): measured every 25 steps while something listens, nothing otherwise.</summary>
+/// each world's engine slots and Kiln's slots): measured separately every 25 steps while something listens.</summary>
 internal static class ProgramBudgetWatch
 {
     private static readonly object Gate = new();
-    private static ProgramBudgetResult? _last;
+    private static readonly Dictionary<CapacityWorldKind, ProgramBudgetResult> Last = new();
 
-    public static ProgramBudgetResult Seen(ProgramBudgetResult r)
+    public static ProgramBudgetResult Seen(CapacityWorldKind kind, ProgramBudgetResult r)
     {
         ProgramBudgetResult? prev;
         lock (Gate)
         {
-            prev = _last;
-            _last = r;
+            Last.TryGetValue(kind, out prev);
+            Last[kind] = r;
         }
         if (prev is null || !Events.HasSubscribers<CapacityChangedEvent>()) return r;
         if (CapacityMapping.Changed(ProgramBudgetNative.Capability, prev.KilnSlots, r.KilnSlots) is { } a) Events.Enqueue(a);
@@ -168,12 +168,10 @@ internal static class ProgramBudgetWatch
     public static void Tick(ulong step)
     {
         if (step % 25 != 9 || !Events.HasSubscribers<CapacityChangedEvent>()) return;
-        try
+        foreach (var kind in new[] { CapacityWorldKind.Server, CapacityWorldKind.Client })
         {
-            World.GetProgramBudget();
-        }
-        catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException)
-        {
+            try { World.GetProgramBudget(kind); }
+            catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException) { }
         }
     }
 }

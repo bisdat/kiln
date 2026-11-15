@@ -408,6 +408,11 @@ void emit(KilnKnowledgeEvent e) {  // caller holds g_mu
 }
 }  // namespace
 
+void knowledge_reason(const std::string& text) {
+    std::lock_guard lock(g_mu);
+    if (g_reason.empty()) g_reason = text.substr(0, 159);
+}
+
 void emit_roster_change(uint32_t kind, uint32_t generation, uint32_t npc_id, uint8_t before, uint8_t after, uint16_t version,
                         uint64_t revision, uint64_t step) {
     KilnKnowledgeEvent e{};

@@ -99,10 +99,17 @@ public sealed class ImpactNativesTaskTests
     }
 
     [Fact]
+    public void TheFullGeneratedNameMustFitTheRuntimeLimit()
+    {
+        Assert.Throws<InvalidOperationException>(() => KilnImpactNatives.Merge(null, new string('m', 64),
+            new[] { (new string('N', 60), "[]") }));
+    }
+
+    [Fact]
     public void TheReaderFindsTheAttributesWithoutLoadingTheAssembly()
     {
         var entries = KilnImpactNatives.Read(Assembly);
-        Assert.Equal(["GenMaybe", "GenOnHit", "GenWrites"], entries.Select(e => e.Name).Order());
+        Assert.Equal(["GenMaybe", "GenOnHit", "GenThrows", "GenTimeAlias", "GenTimeThrow", "GenWrites"], entries.Select(e => e.Name).Order());
         Assert.StartsWith("[{\"name\":\"scale\"", entries.Single(e => e.Name == "GenMaybe").Args);
     }
 }

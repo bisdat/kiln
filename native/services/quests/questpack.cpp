@@ -935,6 +935,7 @@ PackOut compile_pack(const std::vector<ModInput>& mods, const GameData& game) {
         for (auto& [id, d] : c.knowledge) out.knowledge.push_back(d);
         out.quests.insert(out.quests.end(), c.quests.begin(), c.quests.end());
         out.npcs.insert(out.npcs.end(), c.npcs.begin(), c.npcs.end());
+        if (!c.npcs.empty()) out.roster_mods.push_back(mod.id);
         out.content_items.insert(out.content_items.end(), c.items.begin(), c.items.end());
         out.content_recipes.insert(out.content_recipes.end(), c.recipes.begin(), c.recipes.end());
         for (TextOut& t : c.texts) {
@@ -984,8 +985,14 @@ PackOut compile_pack(const std::vector<ModInput>& mods, const GameData& game) {
                              ? game.roster_max(static_cast<uint32_t>(std::min<uint64_t>(need, UINT32_MAX)), &why)
                              : kMaxNpcs;
         if (out.roster_max != kMaxNpcsPaged) out.roster_max = kMaxNpcs;
-        if (!rebuild_npcs(p, n, out.npcs, &out.res_npcs, &err, out.roster_max))
-            return fail(why.empty() ? err : err + " (the second unlock page is not available here: " + why + ")");
+        if (!rebuild_npcs(p, n, out.npcs, &out.res_npcs, &err, out.roster_max)) {
+            const std::string text = why.empty() ? err : err + " (the second unlock page is not available here: " + why + ")";
+            if (need > out.roster_max) {  // too many entries, not a damaged collection: the start stops (native_pack.cpp)
+                out.roster_refused = true;
+                out.roster_refusal = text;
+            }
+            return fail(text);
+        }
         out.roster_boot_ids = npc_ids(p, n);
         std::sort(out.roster_boot_ids.begin(), out.roster_boot_ids.end());
         for (const NpcDef& d : out.npcs) out.roster_kiln_ids.push_back(d.id);

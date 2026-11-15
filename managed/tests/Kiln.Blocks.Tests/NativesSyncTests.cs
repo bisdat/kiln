@@ -184,6 +184,7 @@ public sealed unsafe class NativesSyncTests
     public void NamesFollowTheNativeRule()
     {
         Assert.True(Abilities.Natives.ValidName("mymod.OnHit"));
+        Assert.True(Abilities.Natives.ValidName("my.mod.OnHit"));
         Assert.True(Abilities.Natives.ValidName("my-mod.On_Hit2"));
         Assert.False(Abilities.Natives.ValidName("mymod.On-Hit"));
         Assert.False(Abilities.Natives.ValidName("mymod."));

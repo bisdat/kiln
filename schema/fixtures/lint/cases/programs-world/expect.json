@@ -1,0 +1,22 @@
+{
+  "catalog": false,
+  "description": "kiln.programs.json's \"world\" (0.2.0-dev.29, chapter 14): client, both, prediction and the default server are taken; hostOnly on a client or prediction program is refused as the native reader refuses it, and a world kiln.world does not know is a schema error",
+  "diagnostics": [
+    {
+      "code": "KL109",
+      "col": 57,
+      "file": "kiln.programs.json",
+      "line": 8,
+      "message": "program 'badflag': hostOnly is for server programs; a \"client\" program never runs in the server world (native/services/world/boot_programs.h refuses the file)",
+      "severity": "error"
+    },
+    {
+      "code": "KL105",
+      "col": 28,
+      "file": "kiln.programs.json",
+      "line": 9,
+      "message": "\"Client\" is not one of \"server\", \"client\", \"both\", \"prediction\"; did you mean \"client\"?",
+      "severity": "error"
+    }
+  ]
+}

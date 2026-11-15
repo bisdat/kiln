@@ -163,6 +163,25 @@ public sealed unsafe class ProgramBudgetTests
     }
 
     [Fact]
+    public void Alternating_world_reads_do_not_invent_capacity_changes()
+    {
+        With(true, () =>
+        {
+            _readiness = 1; _generation = 999; _tokenless = false;
+            int changes = 0;
+            using var subscription = Events.On<CapacityChangedEvent>(_ => changes++);
+            World.GetProgramBudget(CapacityWorldKind.Server);
+            World.GetProgramBudget(CapacityWorldKind.Client);
+            Events.DrainQueued(); changes = 0;
+            World.GetProgramBudget(CapacityWorldKind.Server);
+            World.GetProgramBudget(CapacityWorldKind.Client);
+            Events.DrainQueued();
+            Assert.Equal(0, changes);
+            return 0;
+        });
+    }
+
+    [Fact]
     public void GetProgramBudget_is_any_thread_and_names_its_capability()
     {
         var m = typeof(World).GetMethod(nameof(World.GetProgramBudget))!;

@@ -249,6 +249,8 @@ KilnResult define_buff_result(KilnOwner owner, const std::string& json, uint32_t
 KilnResult buff_receipt(const uint8_t registration_id[16], KilnDefinitionReply* out, std::string* report);
 void buff_budget(KilnCapacityInfo* out);  // out->size checked by the caller
 void clones_owner_revoked(KilnOwner owner);  // kiln.content found the owner revoked: its clones' records are reserved
+void pending_mods_changed(const std::vector<std::string>& mods);
+void pending_owner_loaded(KilnOwner owner, const std::string& mod);
 void pending_replay();   // clones_boot: the buff definitions mods stored for this start
 void pending_settle();   // after a world's load: stored definitions that settled lose their file (clone lock held)
 bool gd_ready();         // kiln.gamedata's registries are built for the current world

@@ -9,6 +9,8 @@
  *      game's save and its replication to players see them (write_submit; docs/re/world.md "Tracked writes").
  *   5. Game programs (v4): the game's own ECS programs of every world, by name, and the threads they run on
  *      (game_program_*, below).
+ *   6. Kiln programs in a game client's client world and prediction storage (since 0.2.0-dev.29: register_program_world,
+ *      program_world_state, bind_program_world, unbind_program_world at the end of the table).
  * Only kiln.world hooks the game's program registration; everyone else registers programs through this table.
  * Evidence and engine notes: docs/re/world.md. Usage: docs/kiln/services/world.md.
  *
@@ -535,6 +537,19 @@ typedef struct KilnGameWrapInfo {
 
 typedef void(KILN_CALL* KilnProgramEventFn)(const void* data, uint32_t size, void* user);
 
+/* Since 0.2.0-dev.29 (foreign_layout): kiln.world's view of one of the game's programs for code that runs inside that
+ * program's update with the program's own iterator (kiln.abilities' natives inside impact_simulation; chapter 06c 9.1). */
+typedef struct KilnForeignLayout {
+    uint32_t size;        /* the caller's sizeof */
+    uint32_t world_kind;  /* KILN_WORLD_* */
+    uint64_t session;     /* game_world_session(world_kind) it was computed in: it is void once that changes */
+    int32_t program;      /* the program's index in that world's directory */
+    uint32_t iter_size;   /* bytes of the iterator the view computed */
+    uint32_t counts[8];   /* the view's group counts: tpl, read, write, singletons, other_tpl, other, events_in, events_out */
+    uint64_t handle;      /* kiln.world's: the view */
+    char why[128];        /* when foreign_layout said KILN_ERR_UNAVAILABLE */
+} KilnForeignLayout;
+
 typedef struct KilnWorldApi {
     KilnServiceHeader header; /* { sizeof(KilnWorldApi), KILN_WORLD_VERSION } */
 
@@ -782,6 +797,117 @@ typedef struct KilnWorldApi {
      * header.size. */
     KilnResult(KILN_CALL* game_program_contract)(uint32_t world_kind, int32_t index, uint32_t* out_contract, char* text,
                                                  uint32_t capacity, uint32_t* out_size);
+
+    /* ---- foreign views: since 0.2.0-dev.29 (chapter 06c 9.1), still v4: check header.size ----
+     * Code that runs inside one of the game's programs and holds that program's iterator reads and writes other
+     * entities through the program's own other_read / other_write accessors, with its job's storage, tracker and
+     * write flag (the tracked-write path): explicit arguments, no thread-local state, any thread inside the update.
+     * The view of program `name` in the live world of `world_kind` (the wraps' view algorithm, from its descriptor):
+     * *out (out->size set) gets the session, the index, the counts, the iterator size and the handle the calls below
+     * take. KILN_ERR_NOT_FOUND: no such program or no directory now; KILN_ERR_UNAVAILABLE: the layout cannot be
+     * computed (out->why). The view lasts for the process; a new session needs a new one. Tick thread. */
+    KilnResult(KILN_CALL* foreign_layout)(uint32_t world_kind, KilnStr name, KilnForeignLayout* out);
+    /* The iterator qword of name `name` of list `list` (KILN_GAME_LIST_*) in the view, or -1. Any thread. */
+    int32_t(KILN_CALL* foreign_slot)(const KilnForeignLayout* layout, int32_t list, KilnStr name);
+    /* Inside the program's update, `iter` its iterator: KILN_OK when the job's group counts are the view's;
+     * KILN_ERR_UNAVAILABLE when they differ, the session ended or the job cannot be read (the view's slots must then not
+     * be used on that iterator). out_counts (optional, 8) gets the job's counts. */
+    KilnResult(KILN_CALL* foreign_check)(const KilnForeignLayout* layout, const uint64_t* iter, uint32_t* out_counts);
+    /* Inside the update: component `component` (short name: "Health") of entity `entity` through the program's
+     * other_read or other_write accessor (ReadOther); *size its bytes. NULL when the entity has none (*rc KILN_OK) or
+     * on a refusal (*rc): KILN_ERR_NOT_FOUND not in those lists, KILN_ERR_UNAVAILABLE a session that ended, an accessor
+     * that is not the component map's type, KILN_ERR_INTERNAL a fault (rc optional). */
+    const void*(KILN_CALL* foreign_read)(const KilnForeignLayout* layout, const uint64_t* iter, KilnStr component,
+                                         uint32_t entity, uint32_t* size, KilnResult* rc);
+    /* The same through the program's other_write accessor with the job's tracker (WriteOther): the component, marked
+     * written for the save and replication; write it before the update returns. KILN_ERR_NOT_FOUND: not in
+     * other_write; KILN_ERR_UNAVAILABLE also when the tracked write is not known on this build. */
+    void*(KILN_CALL* foreign_write)(const KilnForeignLayout* layout, const uint64_t* iter, KilnStr component, uint32_t entity,
+                                    uint32_t* size, KilnResult* rc);
+    /* After writing an attribute component through foreign_write: the game's formulas (AttrChanged) with the program's
+     * impact::AttributeRegistry singleton. KILN_ERR_INVALID_ARGUMENT: the block holds no values (component[6] bit 0),
+     * or the program does not declare the registry; KILN_ERR_UNAVAILABLE: not on this build; KILN_ERR_INTERNAL: they
+     * faulted. */
+    KilnResult(KILN_CALL* foreign_attr_changed)(const KilnForeignLayout* layout, const uint64_t* iter, void* component);
+
+    /* ---- Kiln programs in a client's worlds: appended since 0.2.0-dev.29 (version stays 4) after the foreign
+     * views, at offsets 496, 504, 512 and 520 (the table is 528 bytes with them). Check header.size for each member you
+     * use.
+     *
+     * A game client has a client world (KILN_WORLD_CLIENT, the local player, camera and presentation; it steps on the
+     * game's main thread and runs its program slices as tasks on the game's workers, SYSTEM, CHUNKED and PINNED ones
+     * on the main thread) and, inside it, the prediction storage (KILN_WORLD_PREDICTION, which runs the client world's
+     * table: the programs without the client flag 0x1, without HOST_ONLY and without the engine's bit 0x40, every
+     * prediction step on the main thread). A Kiln program can run in either: kiln.world registers it into the client
+     * world's table at the client world's RegisterAllPrograms, every client world (hosted or joined) anew, after the
+     * game's own programs, so it runs after every client program it conflicts with. It runs in this player's process
+     * only: no other player and no vanilla client sees what it does, unless the server does the same.
+     *
+     * Its names are checked against THAT world's maps when that world registers its programs: a name the client
+     * world lacks refuses the program for that world (program_world_state says why), never for the others. While
+     * capability world.programs.client is not available (a dedicated server, a build without the symbols, the world's
+     * lifecycle, or the client world's tick), nothing is registered into a client world and these members answer
+     * KILN_ERR_UNAVAILABLE for the client and prediction kinds.
+     *
+     * A world stop (KILN_WORLD_STOPPING of the client world) closes every client-table program: no call starts, the
+     * running ones are waited for (2 s at most) and each registration goes back to PENDING for the next client world.
+     * Bindings stay: a bound callback runs again in the next client world that accepts the program. The core does not
+     * wait for a client world's jobs before that event (it does for the server world): when a call is still running
+     * after the wait, its program is refused for good (that late call can no longer change its state) and a process
+     * latch is set: no client-world program registers again until the game restarts, and world.programs.client goes
+     * unavailable (reason faulted) saying why. The same latch follows a fault in the engine's RegisterProgram (or in
+     * Kiln's reads of the client world's maps and table around it) or a table that does not add up after it; what was
+     * registered before stays as it is (the engine's table is never undone).
+     *
+     * Writes there are this player's local state. write_other answers NULL inside a client or prediction program (the
+     * game's other-entity write marks the change for the save and replication through the job's tracker); mark_written
+     * still calls the engine's MarkWritten if you ask, but only static evidence says a client job's tracker takes it:
+     * Kiln.Api's TryWrite does not call it there.
+     *
+     * Handles: register_program_world gives a program handle (as register_program: program_slot and program_info
+     * take it; program_info answers for the server world). bind_program_world gives a binding handle for
+     * unbind_program_world; for KILN_WORLD_SERVER it is bind_program's handle. program_world_state takes either. */
+
+    /* Accepts a program for the world of `world_kind`. KILN_WORLD_SERVER: register_program. KILN_WORLD_CLIENT:
+     * kiln.world ORs the client flag 0x1 into desc->flags (never set engine bits yourself); KILN_PROGRAM_HOST_ONLY is
+     * refused. KILN_WORLD_PREDICTION: registered into the client world's table without 0x1, so the client world skips
+     * it and the prediction storage runs it; KILN_PROGRAM_HOST_ONLY is refused. A client or prediction program may be
+     * accepted at any time outside a program update or wrap stage: it registers into the next client world (one that
+     * runs already does not get it; program_world_state says "registered from the next client world").
+     * desc->each or desc->update is its callback (owner = `owner`); unbind_program_world with its handle stops it.
+     * KILN_ERR_UNAVAILABLE: world.programs.client is not available (client and prediction kinds), or programs are off
+     * on this build; KILN_ERR_INVALID_ARGUMENT: a bad kind, descriptor, flag or name (logged); KILN_ERR_WRONG_THREAD:
+     * from inside a program update or wrap stage. */
+    KilnResult(KILN_CALL* register_program_world)(KilnOwner owner, uint32_t world_kind, const KilnProgramDesc* desc,
+                                                  KilnHandle* out);
+    /* The program's state in the world of `world_kind` now (KILN_PROGRAM_*), and why in words (`reason`, optional,
+     * valid for the life of the process; "" when there is nothing to say). KILN_PROGRAM_PENDING with "waiting for a
+     * client world" in the menu, "registered from the next client world" for a program accepted while one runs;
+     * KILN_PROGRAM_REFUSED with the name that world lacks, a full table, ...; KILN_PROGRAM_FAULTED after a fault of its
+     * callback in that world. A new client world starts every program over (FAULTED stays until a new bind).
+     * KILN_ERR_NOT_FOUND: no such handle, or the program is not for that world; KILN_ERR_INVALID_ARGUMENT: no state
+     * pointer or a bad kind. Any thread; takes a short registry lock to resolve the handle. */
+    KilnResult(KILN_CALL* program_world_state)(KilnHandle program, uint32_t world_kind, int32_t* state, KilnStr* reason);
+    /* bind_program for the world of `world_kind`: binds the declaration `key` of mod `mod_id` that kiln.world reserved
+     * from <mod>/kiln.programs.json at boot with "world": "client", "both" (client side) or "prediction". Exactly one of
+     * each / update (KILN_WORLD_SERVER: each only, and it is bind_program). The callback runs on the client world's
+     * workers or the main thread (prediction: the main thread), from the client world that runs now (when it
+     * registered the program) and in every later one, until unbind_program_world or the owner's revocation.
+     * Thread: the world's own thread outside its step (the client and prediction kinds: the game's main thread, also
+     * in the main menu and in kiln_plugin_main / on_ready; KILN_WORLD_SERVER: the tick thread).
+     * KILN_ERR_NOT_FOUND: no such reservation for that world; KILN_ERR_INVALID_ARGUMENT: another binding holds it, or
+     * a bad argument; KILN_ERR_UNAVAILABLE: world.programs.client is not available, or the last binding's calls are
+     * still finishing (try again after the client world's next step); KILN_ERR_WRONG_THREAD; KILN_ERR_REVOKED. */
+    KilnResult(KILN_CALL* bind_program_world)(KilnOwner owner, KilnStr mod_id, KilnStr key, uint32_t world_kind,
+                                              KilnProgramEachFn each, KilnProgramUpdateFn update, void* user,
+                                              KilnHandle* out);
+    /* Stops a callback: register_program_world's program handle (its client or prediction side) or a binding handle
+     * of bind_program_world (for KILN_WORLD_SERVER: unregister_program). No call starts after this returns.
+     * KILN_OK: no call of it runs any more: its code and user data may go. KILN_ERR_WRONG_THREAD: a call was still
+     * running after a bounded wait (2 ms, e.g. a host's server thread unbinding while a client worker runs it): it finishes on its own and kiln.world forgets the binding at the client world's
+     * next Pre or stop; keep the code and user data alive (call again later: KILN_OK once it has finished).
+     * KILN_ERR_NOT_FOUND: no such handle. Any thread outside a program update or wrap stage. */
+    KilnResult(KILN_CALL* unbind_program_world)(KilnHandle binding);
 } KilnWorldApi;
 
 enum {

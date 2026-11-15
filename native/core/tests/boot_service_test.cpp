@@ -165,9 +165,19 @@ std::vector<uint32_t> t_late_exits;  // the stop after the entry point ends the 
 void fake_exit_late(uint32_t code) { t_late_exits.push_back(code); }
 std::vector<std::string> t_held;  // write_state's last lines
 void fake_write_state(void*, const std::string& last) { t_held.push_back(last); }
+std::vector<std::string> t_events;  // "prepare:<c>", "destroy:<c>:<round>", the stop's steps
+std::vector<std::string> t_stops;  // the stop writer's (last line, why), and the order of the stop's steps
+void fake_stop_state(void*, const std::string& last, const std::string& why) {
+    t_stops.push_back(last + " | " + why);
+    t_events.push_back("stop-state");
+}
+void KILN_CALL fake_before_exit(void* user) {
+    ++*static_cast<int*>(user);
+    t_events.push_back("before-exit");
+}
 
 // ---- seven fake collectors ----
-enum class Do { Ok, Refuse, RefuseNobody, Error, OkNoPlan, Throw, Warn, OkWithError };
+enum class Do { Ok, Refuse, RefuseNobody, Error, OkNoPlan, Throw, Warn, OkWithError, StopStart };
 struct Fake {
     int index = 0;
     Do act = Do::Ok;
@@ -177,7 +187,6 @@ struct Fake {
     std::vector<json> seen;  // the IR of each call
 };
 Fake t_fake[7];
-std::vector<std::string> t_events;  // "prepare:<c>", "destroy:<c>:<round>"
 struct Plan {
     int collector, round;
 };
@@ -224,6 +233,15 @@ KilnResult KILN_CALL fake_prepare(void* user, const KilnBootPrepareInputV1* in, 
             std::snprintf(issue->key, sizeof issue->key, "bad-item");
             std::snprintf(issue->reason, sizeof issue->reason, "over the item table's capacity");
             return KILN_OK;
+        case Do::StopStart: {  // a collector that finds in its prepare that the start must stop (kiln.knowledge's roster)
+            const std::string why = "kiln.knowledge: the roster holds at most 128 NPCs";
+            const KilnResult r = B.stop_start(50 + f.index, ks(f.blame), ks(why), 0x4B02u, nullptr, nullptr);
+            t_events.push_back(r == KILN_OK ? "stop-returned" : "stop-refused");
+            out->ok = 1;  // the host test's exit adapter returned: go on as if nothing happened
+            out->plan = plan();
+            out->destroy = &destroy_plan;
+            return KILN_OK;
+        }
         case Do::Error: return KILN_ERR_INTERNAL;
         case Do::OkNoPlan: out->ok = 1; return KILN_OK;
         case Do::Throw: throw std::runtime_error("collector fault");
@@ -253,6 +271,10 @@ void reset_boot() {
     g_self = 0;
     g_exit_code = 0;
     g_late_hold = nullptr;
+    g_stop = Stop{};
+    g_stopping = false;
+    g_stop_state = nullptr;
+    t_stops.clear();
     g_exit = &fake_exit;
     g_exit_late = &fake_exit_late;
     t_late_exits.clear();
@@ -1040,6 +1062,78 @@ void activation_fault_cases() {
     CHECK(state_of("keep") == KILN_BOOT_STATE_COMMITTED);
     CHECK(t_late_exits == std::vector<uint32_t>{0x4B01u} && t_held.size() == 1);
     pass_line("BOOT-ACTIVATION-FAULT required transitive dependent stops the start", f1);
+}
+
+// kiln.boot stop_start (0.2.0-dev.29): a service stops the start the same way with a boot generation or without one,
+// inside a collector's prepare or after the publication: one issue per mod, the stop line, the launcher's files, the
+// caller's last word, then the late exit with the caller's code (never 0x4B01 for it, never "the start goes on").
+void stop_start_cases() {
+    using namespace kiln::boot_svc;
+    t_case = "stop-start-plain";
+    const int f0 = t_fail;
+    reset_boot();
+    t_image.side = KILN_SIDE_SERVER;
+    profile_with({});
+    kiln::boot_svc::decide(true, "");  // no boot mod: no deferred generation
+    stop_writer(&fake_stop_state, nullptr);
+    int said = 0;
+    // nothing happens for a bad call
+    CHECK(B.stop_start(0, ks("a"), ks("why"), 0x4B02u, nullptr, nullptr) == KILN_ERR_INVALID_ARGUMENT);
+    CHECK(B.stop_start(5, ks("a"), ks(""), 0x4B02u, nullptr, nullptr) == KILN_ERR_INVALID_ARGUMENT);
+    CHECK(B.stop_start(5, ks("a"), ks("why"), 0, nullptr, nullptr) == KILN_ERR_INVALID_ARGUMENT);
+    CHECK(t_late_exits.empty() && t_stops.empty() && g_issues.empty());
+    CHECK(B.stop_start(5, ks("roster-cap-test, other"), ks("kiln.knowledge: too many NPCs. Do not restart"), 0x4B02u, &fake_before_exit,
+                       &said) == KILN_OK);
+    CHECK(t_late_exits == std::vector<uint32_t>{0x4B02u} && t_exits.empty());  // the caller's code, the late way, once
+    CHECK(said == 1 && t_events == (std::vector<std::string>{"stop-state", "before-exit"}));  // the files before the message
+    CHECK(t_stops.size() == 1 && t_stops[0].find("boot: the start stops (exit code 0x4B02): kiln.knowledge: too many NPCs") == 0 &&
+          t_stops[0].find("| kiln.knowledge: too many NPCs. Do not restart") != std::string::npos);
+    json rep = report();
+    CHECK(rep["exitCode"] == 0x4B02 && rep["status"].is_null() && rep["stop"]["code"] == 0x4B02 &&
+          rep["stop"]["mods"] == json::array({"roster-cap-test", "other"}) && rep["stop"]["reason"] == "kiln.knowledge: too many NPCs. Do not restart");
+    int stopped = 0;
+    for (const auto& i : rep["issues"]) stopped += i["code"] == "StartStopped" && i["phase"] == "stop";
+    CHECK(stopped == 2);
+    // a second stop while the first ends the process: refused, nothing more
+    CHECK(B.stop_start(5, ks(""), ks("again"), 0x4B03u, nullptr, nullptr) == KILN_ERR_UNAVAILABLE && t_late_exits.size() == 1);
+    pass_line("BOOT-STOP-START without a boot generation (issues, stop line, files, then the message, exit 0x4B02 once)", f0);
+
+    t_case = "stop-start-prepare";
+    const int f1 = t_fail;
+    deferred_with({"opt", "req!"});
+    stop_writer(&fake_stop_state, nullptr);
+    run_authors({"opt", "req!"});
+    t_fake[4].act = Do::StopStart;  // the knowledge collector
+    t_fake[4].blame = "opt";
+    commit_with(envelope({"opt", "req!"}));
+    // during PREPARING (activation_fault answers UNAVAILABLE there): the stop happens all the same
+    CHECK(t_late_exits == std::vector<uint32_t>{0x4B02u} && t_exits.empty() && t_stops.size() == 1);
+    CHECK(std::find(t_events.begin(), t_events.end(), "stop-returned") != t_events.end());
+    rep = report();
+    CHECK(rep["stop"]["code"] == 0x4B02 && rep["stop"]["mods"] == json::array({"opt"}) && rep["exitCode"] == 0x4B02);
+    pass_line("BOOT-STOP-START inside a collector's prepare (a not required mod: still stopped, 0x4B02)", f1);
+
+    t_case = "stop-start-published";
+    const int f2 = t_fail;
+    deferred_with({"opt", "req!"});
+    stop_writer(&fake_stop_state, nullptr);
+    run_authors({"opt", "req!"});
+    CHECK(commit_with(envelope({"opt", "req!"})).status == KILN_BOOT_STATUS_PUBLISHED);
+    CHECK(kiln::boot_svc::after_clr(true, &fake_write_state, nullptr) && t_exits.empty());
+    late_hold(&fake_write_state, nullptr);
+    for (const char* who : {"req", "opt"}) {  // a required mod and one that is not: the same stop, the same code
+        g_stopping = false;
+        g_exit_code = 0;
+        t_late_exits.clear();
+        t_stops.clear();
+        t_held.clear();
+        CHECK(B.stop_start(5, ks(who), ks("kiln.knowledge: too many NPCs"), 0x4B02u, nullptr, nullptr) == KILN_OK);
+        CHECK(t_late_exits == std::vector<uint32_t>{0x4B02u} && t_stops.size() == 1 && t_held.empty());  // never 0x4B01
+    }
+    bool gone_on = false;
+    for (const auto& l : t_log) gone_on |= l.find("the start goes on without it") != std::string::npos;
+    CHECK(!gone_on);
+    pass_line("BOOT-STOP-START after the publication (required and not: exit 0x4B02, never 'the start goes on')", f2);
 }
 
 // A boot mod that ran no OnBoot and is in no envelope (blocks files only) takes part all the same: a collector can refuse
@@ -1857,6 +1951,7 @@ int main(int argc, char** argv) {
     warning_case();
     missing_collector_cases();
     activation_fault_cases();
+    stop_start_cases();
     files_only_cases();
     strict_cases();
     patch_jsonc_cases();

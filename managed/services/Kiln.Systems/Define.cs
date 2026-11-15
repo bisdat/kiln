@@ -204,7 +204,10 @@ public static unsafe partial class Systems
             var wanted = expected.Split('\n');
             var at = 0;
             while (at < actual.Length && at < wanted.Length && actual[at] == wanted[at]) at++;
-            var difference = at < wanted.Length ? wanted[at].Split('=')[0] : "declaration";
+            // a line the boot text has and the [Query]'s has not: its "world" (since 0.2.0-dev.29, a declaration for a
+            // client's worlds: a [Query] program is the server world's)
+            var difference = at < wanted.Length && wanted[at].Length > 0 ? wanted[at].Split('=')[0]
+                : at < actual.Length && actual[at].Length > 0 ? actual[at].Split('=')[0] : "declaration";
             return new ProgramRegistration(false, $"{key}: {difference} differs from the boot reservation; " +
                 "rebuild is in the game only after a server restart: this reservation was made at boot from the earlier declaration", key, null);
         }

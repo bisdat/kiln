@@ -30,6 +30,8 @@ public sealed class TickThreadAnalyzer : DiagnosticAnalyzer
             {
                 var member = Member(ctx.Operation);
                 if (member is null || !cache.RequiresTickThread(member)) return;
+                // a client-world TryBind is the game's main thread's, not the tick thread's: KILN109 says it (since 0.2.0-dev.29)
+                if (ClientWorldAnalyzer.IsClientWorldBind(ctx.Operation)) return;
                 var where = classifier.Classify(ctx.Operation.Syntax, ctx.Operation.SemanticModel!, ctx.CancellationToken);
                 if (where.Kind != ThreadKind.Off) return;
                 var props = ImmutableDictionary<string, string?>.Empty;

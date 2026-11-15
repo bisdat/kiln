@@ -146,6 +146,7 @@ enum {
     KILN_BOOT_ISSUE_NOT_COMMITTED = 8,        /* .NET or Kiln.Host never committed the generation */
     KILN_BOOT_ISSUE_WRONG_ROLE = 9,           /* lowered content needs a role the mod does not have */
     KILN_BOOT_ISSUE_ACTIVATION_FAULT = 10,    /* a consumer faulted binding published content */
+    KILN_BOOT_ISSUE_START_STOPPED = 11,       /* since 0.2.0-dev.29: a service stopped the start (stop_start) */
 };
 #define KILN_BOOT_ISSUE_SHADOWED_BY_FILE (KILN_BOOT_ISSUE_WARNING | 1u) /* a file definition won over staged code */
 
@@ -256,6 +257,23 @@ typedef struct KilnBootApiV1 {
      * KILN_ERR_UNAVAILABLE: no deferred mode, or nothing is published yet. KILN_ERR_INVALID_ARGUMENT: the caller is not
      * a registered collector's owner, an unknown mod, an empty reason. */
     KilnResult(KILN_CALL* activation_fault)(KilnOwner collector, KilnStr mod_id, KilnStr kind, KilnStr key, KilnStr reason);
+
+    /* Appended (0.2.0-dev.29); check header.size before calling. A service found that this start must not go on: the
+     * content a saved world needs cannot be built, so no world may load (kiln.knowledge: a roster the game cannot
+     * hold). Works in every process, with a deferred generation or without one, at any moment after the services
+     * loaded: inside a collector's prepare (before the game's entry point) or later (the game's resource start). In
+     * this order: one issue of code KILN_BOOT_ISSUE_START_STOPPED, phase "stop", per mod in `mods` (comma-separated
+     * ids; empty: one issue that names no mod); the stop line "boot: the start stops (exit code 0x<code>): <reason>"
+     * in kiln.log; the files the launcher reads (progress.json state "failed" with `reason`; boot.json, whose "boot"
+     * section has "stop": {"code", "reason", "by", "mods"} and "exitCode": code), waited for on disk; then
+     * `before_exit(user)` when not NULL (a game client's message to the player: it must return, and should return by
+     * itself, e.g. a message box with a timeout); then the process ends with `exit_code` without any DLL's detach code.
+     * Does not return. A Unix wrapper (Wine) sees the low byte of exit_code: give a code whose low byte says what it is
+     * (KILN_BOOT_EXIT_CODE ends in 1, kiln.knowledge's KILN_KNOW_ROSTER_EXIT_CODE in 2), and say in `reason` that
+     * restarting does not help. KILN_ERR_UNAVAILABLE: a stop is under way already (the process is about to end).
+     * KILN_ERR_INVALID_ARGUMENT: caller 0, an empty reason, exit_code 0 (nothing happens). */
+    KilnResult(KILN_CALL* stop_start)(KilnOwner caller, KilnStr mods, KilnStr reason, uint32_t exit_code,
+                                      void(KILN_CALL* before_exit)(void* user), void* user);
 } KilnBootApiV1;
 
 #pragma pack(pop)

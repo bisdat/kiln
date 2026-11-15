@@ -202,13 +202,27 @@ public sealed class KilnPrograms : Microsoft.Build.Utilities.Task
             programs = root["programs"] as JsonObject ?? throw new InvalidDataException("kiln.programs.json: \"programs\" must be an object");
             programs = (JsonObject)programs.DeepClone();
         }
+        // "world" (since 0.2.0-dev.29, kiln.world's boot_programs.h): what kiln.world takes, said at build time; kiln.world
+        // refuses the whole file at the game's start otherwise
+        foreach (var (key, node) in programs)
+        {
+            if (node is not JsonObject entry || entry["world"] is not { } world) continue;
+            var w = world is JsonValue v && v.TryGetValue<string>(out var text) ? text : null;
+            if (w is not ("server" or "client" or "both" or "prediction"))
+                problems.Add($"kiln.programs.json: '{key}': \"world\" is \"server\", \"client\", \"both\" or \"prediction\", not {world.ToJsonString()}");
+            else if (w is "client" or "prediction" && entry["flags"] is JsonArray flags && flags.Any(f => f?.GetValue<string>() == "hostOnly"))
+                problems.Add($"kiln.programs.json: '{key}': hostOnly is for server programs; a \"{w}\" program never runs in the server world");
+        }
         foreach (var q in queries.OrderBy(q => q.Key, StringComparer.Ordinal))
         {
             var entry = Entry(q);
             if (programs[q.Key] is { } hand)
             {
-                if (!JsonNode.DeepEquals(hand, entry))
-                    problems.Add($"kiln.programs.json declares '{q.Key}' by hand with other lists or flags than [Query] {q.Type}: remove the hand-written entry (the build writes it)");
+                // a [Query] program is the server world's: a hand entry saying "world": "server" says the same
+                var same = hand.DeepClone();
+                if (same is JsonObject o && o["world"] is JsonValue sv && sv.TryGetValue<string>(out var sw) && sw == "server") o.Remove("world");
+                if (!JsonNode.DeepEquals(same, entry))
+                    problems.Add($"kiln.programs.json declares '{q.Key}' by hand with other lists, flags or world than [Query] {q.Type}: remove the hand-written entry (the build writes it)");
                 continue;
             }
             programs[q.Key] = entry;

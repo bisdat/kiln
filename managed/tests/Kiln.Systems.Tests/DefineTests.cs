@@ -59,6 +59,10 @@ public sealed unsafe class DefineTests
     [InlineData("interval=1", "interval=2", "interval")]
     [InlineData("with=", "with=Fuel", "with")]
     [InlineData("anyOf=", "anyOf=Fuel", "anyOf")]
+    // "world" is part of the reservation (0.2.0-dev.29): the same lists reserved for a client's worlds are not this program
+    [InlineData("interval=1\n", "interval=1\nworld=client\n", "world")]
+    [InlineData("interval=1\n", "interval=1\nworld=both\n", "world")]
+    [InlineData("interval=1\n", "interval=1\nworld=prediction\n", "world")]
     public void Changed_boot_declaration_is_refused_before_publication(string old, string changed, string difference)
     {
         using var w = World();

@@ -277,12 +277,15 @@ public sealed class BootPhaseTests : ModsFixture
         var text = File.ReadAllText(Header());
         var body = text[text.IndexOf("typedef struct KilnBootApiV1 {", StringComparison.Ordinal)..];
         body = body[..body.IndexOf("} KilnBootApiV1;", StringComparison.Ordinal)];
-        var native = Regex.Matches(body, @"\(KILN_CALL\s*\*\s*(\w+)\)").Select(m => m.Groups[1].Value.Replace("_", "")).ToList();
+        // members only: stop_start's before_exit is a parameter of that member, not a member
+        var native = Regex.Matches(body, @"\(KILN_CALL\s*\*\s*(\w+)\)").Select(m => m.Groups[1].Value.Replace("_", ""))
+            .Where(n => n != "beforeexit").ToList();
         var managed = typeof(KilnBootApi).GetFields().Where(f => f.Name is not "Size" and not "Version").Select(f => f.Name.ToLowerInvariant()).ToList();
-        // the mirror is the table up to active_plan: what was appended after it (activation_fault, which collectors call)
-        // the host does not use, and it reads no member beyond its own size
-        Assert.Equal(11, native.Count);
+        // the mirror is the table up to active_plan: what was appended after it (activation_fault, which collectors call;
+        // stop_start, which services call) the host does not use, and it reads no member beyond its own size
+        Assert.Equal(12, native.Count);
         Assert.Equal("activationfault", native[10]);
+        Assert.Equal("stopstart", native[11]);
         Assert.Equal(native.Take(10), managed);
         Assert.Equal(8 + 10 * IntPtr.Size, Marshal.SizeOf<KilnBootApi>());
         Assert.Equal(24, Marshal.SizeOf<KilnBootCommitResultV1>());
