@@ -382,6 +382,14 @@ static void sig_blocks(const char* dir) {
     frag2.resolve();
     CHECK(frag2.sig("mod/scoped", &info) && info.status == sigdb::SigStatus::Match && info.json.find("Pair") != std::string::npos,
           "sig: a fragment's descriptor uses a struct the core declared; its sret buffer is the rcx the function reads");
+    uintptr_t status_address = 0;
+    sigdb::SigStatus status = sigdb::SigStatus::Unresolved;
+    std::string status_text = "old";
+    CHECK(frag2.sig_status("mod/scoped", &status_address, &status, &status_text) &&
+              status_address == info.address && status == info.status && status_text.empty(),
+          "status-only read returns address and Match without diagnostic payloads");
+    CHECK(!frag2.sig_status("mod/absent", &status_address, &status, &status_text),
+          "status-only read does not invent an absent descriptor");
     const auto stale_report = std::filesystem::path(dir) / "typed-stale-report.json";
     frag2.write_report(stale_report);
     {
@@ -395,6 +403,9 @@ static void sig_blocks(const char* dir) {
     mismatch.write_report(std::filesystem::path(dir)); // opening a directory as a report fails
     CHECK(mismatch.sig("mod/scoped", &info) && info.status == sigdb::SigStatus::Mismatch,
           "sig query: failed report replacement cannot turn a mismatching resolver on");
+    CHECK(mismatch.sig_status("mod/scoped", &status_address, &status, &status_text) &&
+              status == info.status && status_address == info.address && status_text == info.text,
+          "status-only read sees replacement mismatch and its reason");
     {
         std::ifstream in(stale_report);
         nlohmann::json old; in >> old;

@@ -53,7 +53,9 @@ public sealed partial class ClientPassMod
         try
         {
             var off = await Snapshot(0);
-            if (off == null || off[5] != 1 || off[1] != 0) return;
+            if (off == null) return;
+            c.Expect(off[1] == 0, "the sample is off for the control");
+            if (off[5] != 1 || off[1] != 0) return;
             c.Instruct("CONTROL: the sample now observes calls without changing volume. Empty a watering can, fill it at a well, " +
                 "then water until empty. Record the amount. Use this same can and well for the next stage. Confirm only after completing the control.");
             if (await c.Verdict() != ClientCheckVerdict.Pass) return;
@@ -63,7 +65,9 @@ public sealed partial class ClientPassMod
             c.Expect(controlRuns > 0, "observed real-item calls with the sample off", $"{controlRuns} calls");
             if (controlRuns <= 0) return;
             var on = await Snapshot(1);
-            if (on == null || on[5] != 1 || on[1] != 1) return;
+            if (on == null) return;
+            c.Expect(on[1] == 1, "the sample is on for the enabled comparison");
+            if (on[5] != 1 || on[1] != 1) return;
             c.Instruct("The sample is now ON. Repeat with the same empty can and well. One fill must give about twice the CONTROL water. " +
                 "Play for two minutes with no crash or stutter. Fail if the control and enabled runs are alike, even if another mod already increased capacity.");
             if (await c.Verdict() != ClientCheckVerdict.Pass) return;

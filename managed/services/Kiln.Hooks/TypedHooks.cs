@@ -342,7 +342,7 @@ public static unsafe class TypedHooks
             return Refused(mod, sig.Symbol, "this core has no safe typed installation timing query");
         // no fallback to the unchecked detour_typed: a core without the checked member refuses
         if (HooksNative.CheckedInstall == null) return Refused(mod, sig.Symbol, NoCheckedInstall);
-        if (!CanInstallNow()) return Pend(api, sig, handler, priority, mod, 0);
+        if (!CanInstallNow() || !TakeInstallTurn()) return Pend(api, sig, handler, priority, mod, 0);
         // null: kiln.hooks could not check every thread before the first patch; tried again at a later safe tick
         return InstallNow(sig, handler, priority, mod, 1) ?? Pend(api, sig, handler, priority, mod, 1);
     }
@@ -364,7 +364,7 @@ public static unsafe class TypedHooks
             void InstallPending()
             {
                 if (!mod.Alive || pending.State == HookRegistrationState.Removed) return;
-                if (!CanInstallNow()) { mod.Scheduler.Post(InstallPending); return; }
+                if (!CanInstallNow() || !TakeInstallTurn()) { mod.Scheduler.Post(InstallPending); return; }  // a later safe tick
                 try
                 {
                     var result = InstallNow(sig, handler, priority, mod, ++attempts);
@@ -385,11 +385,51 @@ public static unsafe class TypedHooks
         }
     }
 
-    private static bool CanInstallNow()
+    private static bool CanInstallNow() => InstallReadiness() != 0;
+
+    // kiln.hooks' typed_install_ready: 0 not now, 1 in a running world's Pre, 2 no world runs (an older core says 1 for both).
+    private static uint InstallReadiness()
     {
         var t = HooksNative.T;
-        return t != null && *(uint*)t >= 288 && ((HooksNative.CheckedTable*)t)->InstallReady != null &&
-            ((HooksNative.CheckedTable*)t)->InstallReady() != 0;
+        return t != null && *(uint*)t >= 288 && ((HooksNative.CheckedTable*)t)->InstallReady != null
+            ? ((HooksNative.CheckedTable*)t)->InstallReady() : 0;
+    }
+
+    /// <summary>How many typed hooks go in during one safe tick of a running world. The first detour on a game function
+    /// stops the game's other threads while kiln.hooks checks them: a mod that asks for twenty hooks at once would make
+    /// one long pause of them. The rest stay pending and go in at the following ticks, in the order they were asked.
+    /// With no world running there is nobody to pause, and no limit.</summary>
+    internal const int InstallsPerSafeTick = 4;
+
+    // A tick's Pre drains the pending installations within well under a millisecond and the next tick is 16 ms or more
+    // later, so "the same tick" is "within this window of the first installation counted". (Seam: unit tests set the clock.)
+    internal static Func<long> InstallClock = System.Diagnostics.Stopwatch.GetTimestamp;
+    private static readonly long InstallWindow = System.Diagnostics.Stopwatch.Frequency / 200;  // 5 ms
+    private static readonly object InstallTurns = new();
+    private static long _installWindowStart = long.MinValue;
+    private static int _installsInWindow;
+
+    internal static void ResetInstallTurns()
+    {
+        lock (InstallTurns) { _installWindowStart = long.MinValue; _installsInWindow = 0; }
+    }
+
+    // Whether this installation may go in now (and counts it), or waits for a later safe tick.
+    private static bool TakeInstallTurn()
+    {
+        if (InstallReadiness() != 1) return true;  // no world runs
+        var now = InstallClock();
+        lock (InstallTurns)
+        {
+            if (_installWindowStart == long.MinValue || now - _installWindowStart >= InstallWindow || now < _installWindowStart)
+            {
+                _installWindowStart = now;
+                _installsInWindow = 0;
+            }
+            if (_installsInWindow >= InstallsPerSafeTick) return false;
+            _installsInWindow++;
+            return true;
+        }
     }
 
     // Attempt `attempt` (1-based) of the installation: the result, or null when kiln.hooks could not check every thread

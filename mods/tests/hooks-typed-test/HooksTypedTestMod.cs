@@ -47,10 +47,13 @@ public sealed class HooksTypedTestMod : Mod
         if (load > 1)
         {
             // a hot reload: one typed hook installed, one call through it; the unload takes it off again
-            var r = Volume.Detour((ref Volume.Call c) => c.CallOriginal());
+            var calls = 0;
+            var r = Volume.Detour((ref Volume.Call c) => { Interlocked.Increment(ref calls); c.CallOriginal(); });
             if (r.Ok) _hooks.Add(r.Handle!);
             var v = Volume.Invoke(0);
-            if (!r.Ok || v.Value != 18) Log.Error($"hooks-typed-test: FAIL reload {load}: hook {r.Ok} ({r.Reason}), Invoke {v.Value}");
+            if (!r.Ok || r.Handle?.State != HookRegistrationState.Installed || calls != 1 || v.Value != 18 || v.Has != 1)
+                Log.Error($"hooks-typed-test: FAIL reload {load}: hook {r.Handle?.State} ({r.Handle?.Reason ?? r.Reason}), handler calls {calls}, Invoke {{{v.Value},{v.Has}}}");
+            else Log.Info($"hooks-typed-test: PASS reload {load}: installed hook, one handler call, Invoke {{18,1}}");
             return;
         }
         _ = Run();

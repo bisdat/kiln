@@ -110,6 +110,8 @@ struct SigInfo {
     uintptr_t address = 0;    // live address (0 = unresolved)
 };
 bool sig(std::string_view symbol, SigInfo* out);   // core first, then the fragment named by the prefix
+// Status only: no descriptor, JSON or fingerprint copies. Text is empty on Match.
+bool sig_status(std::string_view symbol, uintptr_t* address, SigStatus* status, std::string* text);
 uint64_t sig_revision(); // process-local revision of the immutable executable / loaded descriptor set
 bool sig_at(uintptr_t live_addr, SigInfo* out);    // the described symbol resolved to exactly this address
 std::vector<std::string> sig_symbols();            // core symbols with a descriptor
