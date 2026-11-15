@@ -189,5 +189,9 @@ inline bool same_counts(const ProgramLayout& p, const JobCounts& c) {
 bool game_layout(const EngineDesc* desc, uintptr_t world, ProgramLayout& out, std::string& why);
 // The descriptor's name, lists (names only) and singleton masks; *no_view: it uses a list the layout does not model.
 bool read_desc(const EngineDesc* desc, ProgramLayout& out, bool* no_view, std::string& why);
+// The descriptor's contract text (chapter 06a 9.7; tools/typegen/catalog.py writes the same): for each of its 21 lists in
+// descriptor order "<list>=" + its names joined by "," + "\n", then the three masks, flags and interval. Its FNV-1a-32 is
+// the contract (game_program_contract). False with `why` when the descriptor cannot be read.
+bool contract_text(const EngineDesc* desc, std::string& out, std::string& why);
 
 }  // namespace kw

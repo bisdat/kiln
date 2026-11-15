@@ -366,6 +366,10 @@ uint32_t external_runner() {
     return v;
 }
 
+// systems.wraps.typed (Kiln.Systems' Systems.Wrap<T>) follows systems.wraps: a typed wrap is an untyped one whose view
+// Kiln checked against the live descriptor's contract (game_program_contract), which needs nothing more of the build.
+constexpr const char* kTypedText = "typed program views: each wrap checks the view's contract against the live descriptor";
+
 void report_row(const char* name, uint32_t state, uint32_t reason, const char* text) {
     if (g_wrap_caps && g_wrap_caps->report)
         g_wrap_caps->report(g_owner, KilnStr{name, std::strlen(name)}, state, reason, KilnStr{text, std::strlen(text)});
@@ -704,11 +708,15 @@ void wraps_init() {
                             hooks->subscribe_owner_retiring(g_owner, &on_owner_retiring, nullptr, &retiring) == KILN_OK;
     if (!g_retiring_subscribed)
         KW_W("wraps: kiln.hooks has no owner cleanup here; a revoked owner's wraps are found once a second");
-    if (g_ok)
+    if (g_ok) {
         report_row("systems.wraps", KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, "Before, After and Replace on the game's programs");
-    else
+        report_row("systems.wraps.typed", KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, kTypedText);
+    } else {
         report_row("systems.wraps", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING,
                "the program table or job layout did not resolve on this build (world.programs)");
+        report_row("systems.wraps.typed", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING,
+               "the program table or job layout did not resolve on this build (world.programs)");
+    }
     const bool client = g_api->size >= offsetof(KilnApi, session) + sizeof(void*) && g_api->side() == KILN_SIDE_CLIENT;
     if (!client)
         report_row("systems.wraps.client", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_WRONG_SIDE, "a client world runs only in the game client");
@@ -842,6 +850,7 @@ void wraps_pre(uint32_t kind, uintptr_t) {
     }
     if (row.set) {
         report_row("systems.wraps", row.state, row.reason, row.text);
+        report_row("systems.wraps.typed", row.state, row.reason, row.state == KILN_CAP_AVAILABLE ? kTypedText : row.text);
         if (g_client_ready) report_row("systems.wraps.client", row.state, row.reason, row.text);
     }
 }
@@ -858,17 +867,23 @@ void wraps_world_event(const KilnWorldEvent* event) {
         for (int i = 0; i < kWrapSlots; ++i)
             if (g_pools[pool].slots[i].state == S_LIVE) restore(pool, i, true);
         lock.unlock(); // a finishing stage can need game_wrap_info/release's registry lock
-        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(g_stop_wait_ms.load());
-        uint32_t remaining = 0;
+        const auto t0 = std::chrono::steady_clock::now();
+        const auto until = t0 + std::chrono::milliseconds(g_stop_wait_ms.load());
+        uint32_t remaining = 0, first = 0;
+        bool counted = false;
         do {
             remaining = 0;
             for (const Slot& slot : g_pools[pool].slots) remaining += slot.in_flight.load(std::memory_order_seq_cst);
+            if (!counted) first = remaining, counted = true;
             if (!remaining) break;
             std::this_thread::yield();
         } while (std::chrono::steady_clock::now() < until);
+        const auto waited = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
         if (remaining) KW_E("world %u stops: wrap drain timed out with %u calls still in flight", event->kind, remaining);
         lock.lock();
-        if (live_slots) KW_I("world %u stops: its wraps are taken out and wait for the next world", event->kind);
+        if (live_slots)
+            KW_I("world %u stops: its wraps are taken out and wait for the next world (drained: %u calls in flight at the "
+                 "stop, %u after %lld us)", event->kind, first, remaining, static_cast<long long>(waited));
         drop_pool(pool, true); // retired chains retain their views until their last in-flight call exits, even on timeout
     } else if (event->event == KILN_WORLD_STARTED) {
         if (live_slots) {
@@ -1095,6 +1110,14 @@ int32_t view_slot(Frame& f, int id, int32_t i, const View** out_view) {
     return v->layout.lists[id].slot[static_cast<size_t>(i)];
 }
 
+// The entity map's own hash of an id (docs/re/spawn.md: the game's entity map find, server 0x650c50): it probes from
+// this, not from the id (the component maps' keys are hashes already and probe from them as they are).
+uint32_t entity_hash(uint32_t k) {
+    uint32_t x = ((k >> 16) ^ k) * 0x45d9f3bu;
+    x = ((x >> 16) ^ x) * 0x45d9f3bu;
+    return (x >> 16) ^ x;
+}
+
 bool map_find_ptr(uintptr_t map, uint32_t key, uintptr_t* value) {  // the entity map: u32 keys, pointer values
     if (!map || !L.map.ok()) return false;
     uint64_t cap = 0;
@@ -1106,7 +1129,7 @@ bool map_find_ptr(uintptr_t map, uint32_t key, uintptr_t* value) {  // the entit
         !seh_copy(&keys, reinterpret_cast<const void*>(map + L.map.keys), 8) ||
         !seh_copy(&values, reinterpret_cast<const void*>(map + L.map.values), 8) || !bits || !keys || !values)
         return false;
-    uint64_t i = key & (cap - 1);
+    uint64_t i = entity_hash(key) & (cap - 1);
     for (uint64_t probes = 0; probes < cap; ++probes) {
         uint64_t word = 0;
         uint32_t k = 0;
@@ -1190,7 +1213,7 @@ KilnResult KILN_CALL game_slice_archetype(KilnGameSlice* slice, uintptr_t* out_l
     std::memcpy(&storage, f->ctx->job, sizeof storage);
     if (!storage || !map_find_ptr(storage + static_cast<uintptr_t>(L.storage_entities), slice->entity_ids[0], &rec) || !rec ||
         !seh_copy(&layout, reinterpret_cast<const void*>(rec + static_cast<uintptr_t>(L.entity_layout)), 8) || !layout)
-        return KILN_ERR_NOT_FOUND;
+        return KILN_ERR_UNAVAILABLE;  // nonempty slice: cannot decide, rather than silently rejecting every slice
     *out_layout = layout;
     return KILN_OK;
 }

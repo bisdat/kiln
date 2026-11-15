@@ -130,21 +130,67 @@ public static unsafe class Systems
     {
         ArgumentException.ThrowIfNullOrEmpty(program);
         options ??= new WrapOptions();
+        var refused = Check(program, options, "Systems.Wrap", out _, out _);
+        return refused is not null ? new WrapResult<ProgramWrap>(false, refused, null)
+            : new WrapResult<ProgramWrap>(true, null, new ProgramWrap(program, options, ModContext.CurrentMod));
+    }
+
+    /// <summary>A typed wrap on the program of view <typeparamref name="T"/> (Kiln.Game's <c>Ecs.Programs.*</c>, made from
+    /// the program catalog of the game build Kiln was built for): the stages of <see cref="Wrap(string, WrapOptions?)"/>
+    /// plus per-entity stages and <see cref="ProgramWrap{T}.AroundEach{TSnap}"/> that see the typed view. The live
+    /// descriptor's contract must be the view's: on another game build whose program changed, the wrap is refused.</summary>
+    /// <returns><c>Ok = false</c>: the program is not in that world, native SET is loaded, or its live descriptor differs
+    /// from the view's (the reason names each list that changed: <c>"fuel_setup: write list changed: +X -Y"</c>).</returns>
+    /// <exception cref="ArgumentException">The view has no name or no contract, or the world is
+    /// <see cref="WorldKind.Prediction"/>.</exception>
+    /// <exception cref="KilnUnavailableException"><c>systems.wraps.typed</c> (or <c>systems.wraps.client</c>) is off.</exception>
+    [TickThreadOnly, RequiresCapability("systems.wraps.typed")]
+    public static WrapResult<ProgramWrap<T>> Wrap<T>(WrapOptions? options = null) where T : IGameProgram<T>, allows ref struct
+    {
+        var program = T.Name;
+        if (string.IsNullOrEmpty(program)) throw new ArgumentException($"{typeof(T).Name} names no program", nameof(T));
+        if (T.Contract == 0) throw new ArgumentException($"{typeof(T).Name} carries no contract", nameof(T));
+        options ??= new WrapOptions();
+        var refused = Check(program, options, "Systems.Wrap", out var t, out var index);
+        if (refused is not null) return new WrapResult<ProgramWrap<T>>(false, refused, null);
+        if (!SystemsNative.HasContract(t))
+            return new WrapResult<ProgramWrap<T>>(false, $"{program}: kiln.world has no program contract member; typed wraps need a newer native service", null);
+        var typed = Capabilities.Get("systems.wraps.typed");
+        if (typed.State != CapabilityState.Available) throw new KilnUnavailableException("systems.wraps.typed", typed.ReasonText);
+        var buffer = new byte[8192];
+        uint live = 0, length = 0;
+        int rc;
+        fixed (byte* text = buffer)
+            rc = t->GameProgramContract((uint)options.World, index, &live, text, (uint)buffer.Length, &length);
+        if (rc != SystemsNative.Ok)
+            return new WrapResult<ProgramWrap<T>>(false, $"{program}: kiln.world cannot read its descriptor (result {rc})", null);
+        if (live != T.Contract)
+            return new WrapResult<ProgramWrap<T>>(false, Contracts.Differences(program, T.Lists,
+                System.Text.Encoding.UTF8.GetString(buffer, 0, (int)Math.Min(length, (uint)buffer.Length))), null);
+        return new WrapResult<ProgramWrap<T>>(true, null,
+            new ProgramWrap<T>(new ProgramWrap(program, options, ModContext.CurrentMod)));
+    }
+
+    // What both Wraps check: the world, the thread, the mod, the capability rows, the program in that world. Null: go.
+    private static string? Check(string program, WrapOptions options, string member, out SystemsNative.Table* t, out int index)
+    {
+        t = null;
+        index = -1;
         if (options.World == WorldKind.Prediction)
             throw new ArgumentException("the prediction world has no program table of its own (it runs the client world's)", nameof(options));
-        Services.RequireTickThread("Systems.Wrap");
+        Services.RequireTickThread(member);
         if (ModContext.CurrentMod is { Alive: false }) throw new InvalidOperationException("the mod is unloading");
         var why = WhyOff(options.World);
-        if (why.Refuse is { } refuse) return new WrapResult<ProgramWrap>(false, refuse, null);
-        var t = SystemsNative.T;
+        if (why.Refuse is { } refuse) return refuse;
+        t = SystemsNative.T;
         if (t == null) throw new KilnUnavailableException("systems.wraps", "kiln.world v4 is not here");
-        var index = FindIndex(t, program, options.World);
+        index = FindIndex(t, program, options.World);
         if (index < 0)
-            return new WrapResult<ProgramWrap>(false, $"{program}: no such program in the {Lower(options.World)} world" +
-                (options.World == WorldKind.Server ? " (it may be a client program)" : ""), null);
+            return $"{program}: no such program in the {Lower(options.World)} world" +
+                (options.World == WorldKind.Server ? " (it may be a client program)" : "");
         var info = Info(t, options.World, index)!;
-        if (!info.Runs) return new WrapResult<ProgramWrap>(false, $"{program} has no update in the {Lower(options.World)} world", null);
-        return new WrapResult<ProgramWrap>(true, null, new ProgramWrap(program, options, ModContext.CurrentMod));
+        if (!info.Runs) return $"{program} has no update in the {Lower(options.World)} world";
+        return null;
     }
 
     // ---- what Wrap says when wraps are off ----

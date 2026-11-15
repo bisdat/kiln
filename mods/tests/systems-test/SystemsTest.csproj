@@ -19,6 +19,10 @@
     <ProjectReference Include="../../../managed/services/Kiln.Systems/Kiln.Systems.csproj" Private="false" ExcludeAssets="runtime" />
     <!-- ComponentWrittenEvent: a wrap's writes through entity views -->
     <ProjectReference Include="../../../managed/services/Kiln.World/Kiln.World.csproj" Private="false" ExcludeAssets="runtime" />
+    <!-- the well of the AroundEach row -->
+    <ProjectReference Include="../../../managed/services/Kiln.Spawn/Kiln.Spawn.csproj" Private="false" ExcludeAssets="runtime" />
+    <!-- the typed program views (Ecs.Programs.FuelSetup) and Ecs.Get -->
+    <ProjectReference Include="../../../managed/Kiln.Game/Kiln.Game.csproj" Private="false" ExcludeAssets="runtime" />
     <None Include="kiln.mod.json" CopyToOutputDirectory="PreserveNewest" />
     <Compile Remove="native/**;Peer/**" />
   </ItemGroup>

@@ -488,29 +488,35 @@ static Span<V> Slots<T, V>(ref T x) where T : unmanaged, IGameAttribute<T, V> wh
 The slots have no names: which one is the current, the base or the maximum value is the game's data and differs per
 attribute. The four base fields (`rootId`, `storageOffset`, `flags`, `storageCount`) are ordinary fields.
 
-### 4.5 Program descriptors (`typegen.py programs`)
+### 4.5 Program views (`typegen.py programs`)
 ```sh
-python3 tools/typegen/typegen.py programs --catalog <catalog.json> --dump <dump> --out <dir> [--root Ecs]
+python3 tools/typegen/typegen.py programs --catalog <catalog.json|auto> --dump <dump> --out <dir> [--root Ecs]
 ```
-reads a program catalog, `[{"name": "fuel_setup", "lists": {"0x18": ["FuelSetup"], "0x58": ["Fuel"]}}, …]`, the list
-keys being offsets in the game's program descriptor (0x18 tpl, 0x28 tpl_opt, 0x38 read, 0x48 read_opt, 0x58 write,
-0x68 write_opt, 0x78 add, 0x88 remove, 0x98 sys_read, 0xB0 sys_write, 0xD0 other_tpl, 0xE0 other_read, 0xF0
-other_write, 0x100 other_write_unser, 0x110 with, 0x120 without, 0x130 any_of, 0x140 all_write, 0x150 all_read, 0x160
-events_in, 0x170 events_out), and writes `Kiln.Game.Programs.g.cs`: a static class `Ecs.Programs`, nested in the root class (`Kiln.EcsPrograms` is Kiln.Api's world-programs API), with one nested
-class per program (`FuelSetup`; a name that does not start with a letter gets `Program` in front) holding `Name`,
-`Contract` and each list as `Type[]` of generated types (`typeof(Ecs.Fuel)`; event lists name events; the two `sys_`
-lists stay names). A name the dump lacks in the component (or event) list, an unknown key or offset, and two programs
-with one C# name stop the generator. `Contract` is FNV-1a-64 of the text `program <name>\n` followed, for each
-non-empty list in offset order, by `<list> <qualified names sorted, comma-separated>\n`.
+reads a program catalog (`sigdb/programs/<side>/<exe_sha256>.json`, written and checked by `tools/typegen/catalog.py`:
+every program the exe registers, its 21 access lists, masks, flags, interval and contract; structure only, see
+`sigdb/builds/README.md`) and writes `Kiln.Game.Programs.g.cs`: a static class `Ecs.Programs`, nested in the root
+class (`Kiln.EcsPrograms` is Kiln.Api's world-programs API), with one `ref struct` view per program
+(`Ecs.Programs.FuelSetup` for `fuel_setup`), implementing Kiln.Systems' `IGameProgram<T>` for `Systems.Wrap<T>`
+([services/systems.md](services/systems.md#typed-views-systemswrapt)):
 
-A catalog is read from the exe: none is in the tree, and nothing generated from one is committed. The build compiles
-the descriptors only when `-p:KilnGamePrograms=<catalog>` is given (the tests pass the made-up
-`Fixtures/gen/programs.json`). The typed program views of the foundations design need `Kiln.Systems`, which does not
-exist yet.
+- static `Name`, `Contract` (FNV-1a-32 of the program's contract text, chapter 06a 9.7, as the catalog carries it and
+  kiln.world's `game_program_contract` computes it from the live descriptor) and `Lists` (that text without its empty
+  lists); `Entity` and `View` (the untyped `EntityView`);
+- a property per component of the `tpl`, `tpl_opt`, `read`, `read_opt`, `write` and `write_opt` lists that the dump
+  has (`ref readonly Ecs.X` to read, `ref Ecs.X` to write, `bool HasX` for an optional one, `Attribute32 X` and
+  `ReadOnlySpan<int> XValues` for an int attribute that the program writes), reaching the slot by its place in its list,
+  as kiln.world's `game_slice_slot` takes it. A property named like the view, or like one of its members, gets
+  `Component` after it (`FuelSetupComponent`). A component the dump lacks has none (the summary names it).
+
+`--catalog auto` takes the committed catalog of the dump's exe and writes a file with an empty `Ecs.Programs` when
+there is none. A catalog its own check rejects, one of another exe than the dump, and two programs with one C# name stop
+the generator. Programs whose descriptor uses `other_write_unser`, `all_read` or `all_write` (15 on build 26430253) get
+no view: kiln.world's slot layout does not model those lists. The build runs it on every `Kiln.Game` (`KilnGamePrograms`,
+default `auto`; the tests pass the made-up `Fixtures/gen/programs.json`). On the committed server dump: 802 views.
 
 ### 4.6 Still raw
 Blob arrays and blob strings (37 fields on this build) stay `fixed byte` buffers: their data lies behind a
-self-relative offset. Writing a component, typed program access and typed events are not here (dev.27).
+self-relative offset. Typed events are not here.
 
 ## 5. Verified (lab, server svn 1287369, `f0d824be…`)
 `tools/typegen/probe` (mod `typegen-probe`) is the lab check of the typed reads; it no longer dumps (`typedump` does,

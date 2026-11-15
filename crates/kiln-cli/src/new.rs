@@ -42,6 +42,7 @@ const TEMPLATES: &[&str] = &[
     include_str!("../../../templates/kiln-hooks/.template.config/template.json"),
     include_str!("../../../templates/kiln-shader/.template.config/template.json"),
     include_str!("../../../templates/kiln-world-program/.template.config/template.json"),
+    include_str!("../../../templates/kiln-system-wrap/.template.config/template.json"),
 ];
 
 /// Options every template has that `kiln new` sets itself (or that are internal).

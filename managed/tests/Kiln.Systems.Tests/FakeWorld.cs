@@ -45,6 +45,25 @@ internal sealed unsafe class FakeWorld : IDisposable
     internal bool NoRegistry;  // fuel_setup does not declare impact::AttributeRegistry
     internal ulong StepNow = 77;  // the step a fake slice says
     internal int IterateResult = SystemsNative.Ok;  // what game_slice_iterate answers (Unavailable: a build that cannot iterate)
+    internal int ArchetypeResult = SystemsNative.Ok;  // what game_slice_archetype answers
+    internal readonly HashSet<uint> UnknownComponents = new();  // game_archetype_has answers -1 for these
+    // game_program_contract of fuel_setup: the live descriptor's contract and its text (chapter 06a 9.7)
+    internal const uint FuelContract = 0xC0FFEE01;
+    internal const string FuelTail = "sys_read_opt=0000000000000000\nsys_write_opt=0000000000000000\nsys_write_parallel=0000000000000000\nflags=00000000\ninterval=1\n";
+    internal uint ContractValue = FuelContract;
+    internal int ContractResult = SystemsNative.Ok;
+    internal int ContractCalls;
+    internal string ContractText = Full("read_opt=CurrentTransform\nwrite=Fuel\nsys_read=impact::AttributeRegistry\n");
+
+    /// <summary>A contract text of all 21 lists from the non-empty ones given (one <c>list=names</c> line each).</summary>
+    internal static string Full(string lists)
+    {
+        string[] order = ["tpl", "tpl_opt", "read", "read_opt", "write", "write_opt", "add", "remove", "sys_read", "sys_write",
+            "other_tpl", "other_read", "other_write", "other_write_unser", "with", "without", "any_of", "all_write", "all_read",
+            "events_in", "events_out"];
+        var given = lists.Split('\n', StringSplitOptions.RemoveEmptyEntries).ToDictionary(l => l[..l.IndexOf('=')], l => l[(l.IndexOf('=') + 1)..]);
+        return string.Concat(order.Select(l => $"{l}={given.GetValueOrDefault(l, "")}\n")) + FuelTail;
+    }
     private readonly SystemsNative.Table* _table;
     private readonly nint[] _names;
 
@@ -84,6 +103,7 @@ internal sealed unsafe class FakeWorld : IDisposable
         _table->GameSliceAttrChanged = &AttrChanged;
         _table->GameSliceAttrValidate = &AttrValidate;
         _table->GameWorldSession = &WorldSession;
+        _table->GameProgramContract = &Contract;
         for (var r = 0; r < 8; r++)
         {
             var f = Fuel + 16 * r;
@@ -104,7 +124,7 @@ internal sealed unsafe class FakeWorld : IDisposable
             _names[k] = (nint)p;
         }
         _old = Kiln.Backend.Current;
-        Kiln.Backend.Current = new Backend((nint)_table, feature ?? (n => n is "systems.wraps"));
+        Kiln.Backend.Current = new Backend((nint)_table, feature ?? (n => n is "systems.wraps" or "systems.wraps.typed"));
         Capabilities.Reset();
         SystemsNative.Reset();
         Logs.Clear();
@@ -139,6 +159,57 @@ internal sealed unsafe class FakeWorld : IDisposable
                 return s;
             }
         }
+    }
+
+    // One slice through every stage of program `index` that is not gone, as kiln.world's trampoline runs it: the
+    // Befores in the order made, `update` (the game's), the Afters in the reverse order; one slice record for all.
+    internal void Dispatch(int index = 0, Action? update = null)
+    {
+        fixed (uint* ids = EntityIds)
+        {
+            var name = System.Text.Encoding.UTF8.GetBytes(Names[index]);
+            fixed (byte* n = name)
+            {
+                var s = new SystemsNative.Slice
+                {
+                    Size = (uint)sizeof(SystemsNative.Slice), WorldKind = 0, ProgramCtx = (void*)0x5150, Count = (uint)EntityIds.Length,
+                    ThreadIsWorld = 1, EntityIds = ids, EntityStride = 4, ProgramIndex = index, Step = StepNow,
+                    Program = new NativeStr { Ptr = n, Len = (nuint)name.Length },
+                };
+                foreach (var w in Wraps.Where(x => x.Index == index && x.Stage == SystemsNative.Before).ToList())
+                    if (!w.Gone)
+                    {
+                        s.Stage = SystemsNative.Before;
+                        w.Fn(&s, w.User);
+                    }
+                update?.Invoke();
+                foreach (var w in Wraps.Where(x => x.Index == index && x.Stage == SystemsNative.After).Reverse().ToList())
+                    if (!w.Gone)
+                    {
+                        s.Stage = SystemsNative.After;
+                        w.Fn(&s, w.User);
+                    }
+            }
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int Contract(uint kind, int index, uint* contract, byte* text, uint capacity, uint* size)
+    {
+        F.ContractCalls++;
+        if (contract == null) return SystemsNative.InvalidArgument;
+        if (index != 0 || kind == 1) return SystemsNative.NotFound;
+        if (F.ContractResult != SystemsNative.Ok) return F.ContractResult;
+        *contract = F.ContractValue;
+        var b = System.Text.Encoding.UTF8.GetBytes(F.ContractText);
+        if (size != null) *size = (uint)b.Length;
+        if (text != null && capacity > 0)
+        {
+            var n = Math.Min(b.Length, (int)capacity - 1);
+            b.AsSpan(0, n).CopyTo(new Span<byte>(text, n));
+            text[n] = 0;
+        }
+        return SystemsNative.Ok;
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
@@ -340,10 +411,11 @@ internal sealed unsafe class FakeWorld : IDisposable
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int Archetype(SystemsNative.Slice* s, nuint* out_)
     {
-        *out_ = F.Layout;
-        return SystemsNative.Ok;
+        *out_ = F.ArchetypeResult == SystemsNative.Ok ? F.Layout : 0;
+        return F.ArchetypeResult;
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-    private static int Has(uint kind, nuint layout, uint hash) => layout == F.Layout ? (F.LayoutHas.Contains(hash) ? 1 : 0) : -1;
+    private static int Has(uint kind, nuint layout, uint hash) =>
+        layout != F.Layout || F.UnknownComponents.Contains(hash) ? -1 : F.LayoutHas.Contains(hash) ? 1 : 0;
 }

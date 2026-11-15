@@ -5,8 +5,11 @@
 //     a second Replace (systems-test-peer holds one), a throw that disables only its stage, a tick-thread API inside a
 //     handler, per-entity stages, handlers on the game's workers with the switch on; with the switch on again, writes
 //     through entity views (one ComponentWrittenEvent per entity and component per step, on the tick thread) and
-//     Attribute32.Changed; then `reload-test systems-test 20` through the control folder (each reload makes wraps again;
-//     the old instance's must go with it).
+//     Attribute32.Changed, and EntityView.Attribute refusing a write slot that is not an attribute; then
+//     `reload-test systems-test 20` through the control folder (each reload makes wraps again; the old instance's must
+//     go with it).
+//  3. The boot after the restart (the native part's mark file is there): the same per-entity wrap on fuel_setup, made
+//     again by name in a new process, is applied, filters by archetype and reads Fuel through the view.
 using System.Collections.Concurrent;
 using Kiln;
 using Kiln.Testing;
@@ -34,10 +37,10 @@ public sealed class SystemsTestMod : Mod
     public override void OnLoad()
     {
         Directory.CreateDirectory(Context.DataDirectory);
-        var pidFile = Path.Combine(Context.DataDirectory, "pid");
-        var pid = Environment.ProcessId.ToString();
-        _reload = File.Exists(pidFile) && File.ReadAllText(pidFile) == pid;
-        File.WriteAllText(pidFile, pid);
+        // A reload of reload-test, or the first load in this process: the AppDomain outlives a mod's load context. (The
+        // process id cannot tell: under Wine the next boot often gets the same one.)
+        _reload = AppDomain.CurrentDomain.GetData("systems-test.loaded") is not null;
+        AppDomain.CurrentDomain.SetData("systems-test.loaded", "yes");
         if (_reload)
         {
             // a reload of reload-test: wraps that this instance's unload must take with it
@@ -45,14 +48,75 @@ public sealed class SystemsTestMod : Mod
             w?.Before((ref Slice s) => { }).AfterEach(e => { });
             return;
         }
-        if (File.Exists(Path.Combine(KilnDir, "data", "systems-test-mark.txt"))) _done = true;  // the boot after the restart
+        if (File.Exists(Path.Combine(KilnDir, "data", "systems-test-mark.txt"))) _restart = true;  // the boot after the restart
         Context.Tick.Post += OnPost;
     }
 
     private void OnPost(in TickInfo tick)
     {
-        if (!_labDone) LabWindow(tick);
+        if (_restart) RestartRows(tick);
+        else if (!_labDone) LabWindow(tick);
         else if (!_done) WrapRows(tick);
+    }
+
+    // ---- 3. the boot after the restart ----
+    private bool _restart;
+    private ulong _r0;
+    private ProgramWrap? _again;
+    private long _againEntities, _againFuel, _againBad;
+    private int _againFaults;
+
+    private void RestartRows(in TickInfo tick)
+    {
+        if (_done) return;
+        try
+        {
+            if (_r0 == 0)
+            {
+                // after the native part's restart row (it starts once the world has loaded its entities)
+                if (tick.Step % 25 != 0 || !File.Exists(Control("systems-native.done")) || Systems.Find("fuel_setup") is null) return;
+                _r0 = tick.Step;
+                var r = Systems.Wrap("fuel_setup");
+                _again = r.Wrap;
+                _again?.WhenArchetype(["Fuel"]).BeforeEach((ref EntityView e) =>
+                {
+                    Interlocked.Increment(ref _againEntities);
+                    var fuel = e.Attribute("Fuel");
+                    if (fuel.HasValues && fuel.Count >= 2 && fuel[1] >= 0) Interlocked.Increment(ref _againFuel);
+                    else if (!fuel.HasValues) Interlocked.Increment(ref _againBad);
+                });
+                if (_again is not null) _again.Disabled += _ => Interlocked.Increment(ref _againFaults);
+                Check("the next boot: Systems.Wrap(\"fuel_setup\") again by name", r.Ok && _again is not null, r.Reason);
+                return;
+            }
+            switch (tick.Step - _r0)
+            {
+                case 100:
+                {
+                    var stats = _again!.Stats;
+                    Check("the next boot: the same per-entity wrap is applied in the new world and reads Fuel through its view",
+                        _again.State == WrapState.Active && Interlocked.Read(ref _againEntities) > 0 &&
+                        Interlocked.Read(ref _againFuel) == Interlocked.Read(ref _againEntities) && stats.Faults == 0 &&
+                        _againFaults == 0,
+                        $"state {_again.State}, {Interlocked.Read(ref _againEntities)} entities, Fuel read on " +
+                        $"{Interlocked.Read(ref _againFuel)} ({Interlocked.Read(ref _againBad)} without values), {stats.Slices} slices, " +
+                        $"{stats.Faults} faults");
+                    _again.Dispose();
+                    break;
+                }
+                case 104:
+                    Check("the next boot: Dispose removes it", _again!.State == WrapState.Removed);
+                    Log.Info($"systems-test (managed, after the restart): {_pass} PASS, {_fail} FAIL");
+                    _done = true;
+                    break;
+            }
+        }
+        catch (Exception e)
+        {
+            Check($"restart step {tick.Step - _r0}", false, e.ToString());
+            Log.Info($"systems-test (managed, after the restart): {_pass} PASS, {_fail} FAIL");
+            _done = true;
+        }
     }
 
     // ---- 1. the lab switch ----
@@ -118,8 +182,8 @@ public sealed class SystemsTestMod : Mod
     private readonly ConcurrentDictionary<int, byte> _writeThreads = new();
     private readonly ConcurrentDictionary<(uint, ulong), byte> _wrote = new();
     private readonly ConcurrentDictionary<uint, int> _eventsPer = new();
-    private int _badEvents;
-    private string? _badEvent, _attrResult;
+    private int _badEvents, _nonAttrTried;
+    private string? _badEvent, _attrResult, _nonAttr;
 
     private void WrapRows(in TickInfo tick)
     {
@@ -130,6 +194,8 @@ public sealed class SystemsTestMod : Mod
             {
                 if (tick.Step % 25 != 0 || !File.Exists(Control("systems-native.done"))) return;
                 _t0 = tick.Step;
+                var done = File.ReadAllText(Control("systems-native.done")).Split(' ', '\n');
+                if (done.Length > 1 && done[0] == "mark") uint.TryParse(done[1], out _marked);
                 Log.Info($"systems-test (managed): the native part is done; wraps from step {_t0}");
             }
             var n = tick.Step - _t0;
@@ -220,6 +286,9 @@ public sealed class SystemsTestMod : Mod
                 }
                 case 424:
                     Check("Attribute32.Changed clamps to max", _attrResult?.StartsWith("clamped") == true, _attrResult ?? "no entity with a maximum seen");
+                    Check("EntityView.Attribute refuses fuel_setup's DynamicFuelSetup (a write slot that is not an attribute) " +
+                        "before marking it or running the game's formulas", _nonAttr?.StartsWith("refused") == true &&
+                        _writer!.Stats.Faults == 0, _nonAttr ?? "not tried");
                     break;
                 case 430:
                     foreach (var w in new[] { _throwing, _guard, _each, _replace, _writer }) w?.Dispose();
@@ -228,10 +297,13 @@ public sealed class SystemsTestMod : Mod
                     Check("Dispose: every wrap removed", _throwing!.State == WrapState.Removed && _guard!.State == WrapState.Removed &&
                         _writer!.State == WrapState.Removed);
                     break;
-                case 440:
-                    Log.Info($"systems-test (managed): {_pass} PASS, {_fail} FAIL");
-                    _done = true;
-                    File.WriteAllText(Control("systems-reload.cmd"), "reload-test systems-test 20\n");
+                default:
+                    if (n >= 440 && Typed(n - 440))
+                    {
+                        Log.Info($"systems-test (managed): {_pass} PASS, {_fail} FAIL");
+                        _done = true;
+                        File.WriteAllText(Control("systems-reload.cmd"), "reload-test systems-test 20\n");
+                    }
                     break;
             }
         }
@@ -243,10 +315,183 @@ public sealed class SystemsTestMod : Mod
         }
     }
 
+    // ---- 2b. typed views (S7): Systems.Wrap<Ecs.Programs.FuelSetup>, the contract, AroundEach ----
+    private const int Window = 1200;  // steps (49 s at 24.5 Hz): about nine of a well's own fills
+    private ProgramWrap<Ecs.Programs.FuelSetup>? _typed, _room, _around;
+    private readonly ConcurrentDictionary<uint, (byte[] Transform, bool Same)> _typedSeen = new();
+    private uint _marked;  // the native part's mark row entity: its Fuel must reach the save as written (boot B)
+    private readonly ConcurrentDictionary<uint, int> _fillers = new();   // entity -> Fuel maximum (640 and more)
+    private readonly ConcurrentDictionary<int, byte> _aroundThreads = new();
+    private string? _typedBad, _doctored;
+    private long _gameAdded1, _gameFills1, _gameAdded2, _gameFills2, _aroundApplied;
+    private volatile int _k = 1;  // 1: the vanilla window (observe), 4: four times what the game adds
+    private Dictionary<uint, int> _snap1 = new(), _snap2 = new();
+    private Task<EntityId>? _well;
+    private ProgramWrap? _all, _withFuel, _noFuel;
+    private long _allSlices, _withSlices, _withoutSlices;
+    private string? _archetypeOff;
+
+    // True when the typed rows are done.
+    private bool Typed(ulong m)
+    {
+        switch (m)
+        {
+            case 0:
+            {
+                var r = Systems.Wrap<Ecs.Programs.FuelSetup>();
+                Check("typed: Systems.Wrap<Ecs.Programs.FuelSetup>() is made: the live fuel_setup has the catalog's contract",
+                    r.Ok && Ecs.Programs.FuelSetup.Contract == 0xE4713C0Bu, r.Reason ?? $"contract 0x{Ecs.Programs.FuelSetup.Contract:X8}");
+                _typed = r.Wrap;
+                _typed?.AfterEach((ref Ecs.Programs.FuelSetup v) =>
+                {
+                    if (!v.HasCurrentTransform) return;
+                    // the view's position (read_opt 0) and kiln.world's name lookup must name one slot
+                    ref readonly var typed = ref v.CurrentTransform;
+                    ref readonly var named = ref v.View.Read<Ecs.CurrentTransform>("CurrentTransform");
+                    var same = System.Runtime.CompilerServices.Unsafe.AreSame(ref System.Runtime.CompilerServices.Unsafe.AsRef(in typed),
+                        ref System.Runtime.CompilerServices.Unsafe.AsRef(in named));
+                    var values = v.FuelValues;
+                    ref readonly var fuel = ref v.View.Read<Ecs.Fuel>("Fuel");
+                    same &= values.Length > 0 && values[0] == fuel.dataStorage[0];
+                    _typedSeen[v.Entity.Value] = (Bytes(in typed), same);
+                });
+                // WhenArchetype on the real entity map: every fuel_setup slice has Fuel (a write list), none lacks it
+                _all = Systems.Wrap("fuel_setup").Wrap!.Before((ref Slice s) => Interlocked.Increment(ref _allSlices));
+                _withFuel = Systems.Wrap("fuel_setup").Wrap!.WhenArchetype(["Fuel"]).Before((ref Slice s) => Interlocked.Increment(ref _withSlices));
+                _noFuel = Systems.Wrap("fuel_setup").Wrap!.WhenArchetype([], ["Fuel"]).Before((ref Slice s) => Interlocked.Increment(ref _withoutSlices));
+                _withFuel.Disabled += e => _archetypeOff ??= e.Reason;
+                _noFuel.Disabled += e => _archetypeOff ??= e.Reason;
+                var doctored = Systems.Wrap<DoctoredFuelSetup>();
+                _doctored = doctored.Reason;
+                Check("typed: a doctored contract is refused with the list that changed", !doctored.Ok &&
+                    doctored.Reason?.Contains("write list changed: +DynamicFuelSetup -DynamicFuelSetupV2") == true, doctored.Reason);
+                return false;
+            }
+            case 10:
+                // the well of chapter 06a 9.13: the save's own containers (water barrels, 150 charges) fill by rain only; a
+                // Prop_NPC_Water_Well_a tops itself up (fuel_setup's automatic fill). Next to the mark row's barrel.
+                if (_marked != 0 && World.Position(new EntityId(_marked)) is { } at && Spawn.Available)
+                    _well = Spawn.Entity("Prop_NPC_Water_Well_a", new WorldPosition(at.X + 4, at.Y, at.Z));
+                return false;
+            case 20:
+            {
+                // the typed slots against GetComponent on the tick thread (static wells: their transform does not move)
+                int checkedN = 0, bad = 0;
+                foreach (var (id, seen) in _typedSeen)
+                {
+                    checkedN++;
+                    var got = Ecs.Get<Ecs.CurrentTransform>(new EntityId(id));
+                    if (!seen.Same || got is not { } t || !Bytes(in t).AsSpan().SequenceEqual(seen.Transform)) { bad++; _typedBad ??= $"entity {id}"; }
+                }
+                Check("typed: Ecs.Programs.FuelSetup's slots are kiln.world's named slots and equal GetComponent",
+                    checkedN > 0 && bad == 0 && _typed!.Stats.Faults == 0,
+                    $"{checkedN} entities with a transform, {bad} differ ({_typedBad ?? "none"})");
+                long all = Interlocked.Read(ref _allSlices), with = Interlocked.Read(ref _withSlices), without = Interlocked.Read(ref _withoutSlices);
+                Check("WhenArchetype on the game's entity map: has Fuel takes every fuel_setup slice, lacks Fuel none",
+                    all > 0 && with == all && without == 0 && _archetypeOff is null,
+                    $"{all} slices, {with} with Fuel, {without} without; {_archetypeOff ?? "no stage off"}");
+                foreach (var x in new[] { _all, _withFuel, _noFuel }) x?.Dispose();
+                _typed!.Dispose();
+                // room: wells and barrels (Fuel maximum 640 or more) to a tenth, so a window of fills stays below the maximum
+                _room = Systems.Wrap<Ecs.Programs.FuelSetup>().Wrap!;
+                _room.BeforeEach((ref Ecs.Programs.FuelSetup v) =>
+                {
+                    var values = v.FuelValues;
+                    if (values.Length < 2 || values[1] < 640 || v.Entity.Value == _marked || !_fillers.TryAdd(v.Entity.Value, values[1])) return;
+                    var fuel = v.Fuel;
+                    fuel[0] = values[1] / 10;
+                    fuel.Changed();
+                });
+                return false;
+            }
+            case 40:
+                _room!.Dispose();
+                Check("the well of chapter 06a 9.13 is spawned and given room (a tenth of its water)",
+                    _well is { IsCompletedSuccessfully: true } && _fillers.ContainsKey(_well.Result.Value),
+                    _well is null ? "not spawned (no mark row entity, or kiln.spawn is off)"
+                        : _well.IsCompletedSuccessfully ? $"entity {_well.Result}, {_fillers.Count} containers in all" : $"{_well.Status}: {_well.Exception?.InnerException?.Message}");
+                // the vanilla window: what the game adds per fill (k = 1, nothing written)
+                _around = Systems.Wrap<Ecs.Programs.FuelSetup>().Wrap!;
+                _around.AroundEach(
+                    capture: (in Ecs.Programs.FuelSetup v) => v.FuelValues.Length > 0 ? v.FuelValues[0] : int.MinValue,
+                    apply: (ref Ecs.Programs.FuelSetup v, in int before) =>
+                    {
+                        if (before == int.MinValue || !_fillers.ContainsKey(v.Entity.Value)) return;
+                        var now = v.FuelValues[0];
+                        var added = now - before;
+                        if (added <= 0) return;
+                        _aroundThreads.TryAdd(Environment.CurrentManagedThreadId, 0);
+                        if (_k == 1)
+                        {
+                            Interlocked.Add(ref _gameAdded1, added);
+                            Interlocked.Increment(ref _gameFills1);
+                            return;
+                        }
+                        Interlocked.Add(ref _gameAdded2, added);
+                        Interlocked.Increment(ref _gameFills2);
+                        var fuel = v.Fuel;
+                        fuel[0] = now + (_k - 1) * added;  // four times what the game added in this update
+                        fuel.Changed();
+                        Interlocked.Add(ref _aroundApplied, fuel[0] - now);
+                    });
+                return false;
+            case 41 + Window:
+                _snap1 = Snapshot();
+                _k = 4;
+                _aroundThreads.Clear();
+                Check("LabSystems.ForceParallel for the x4 window", LabSystems.ForceParallel(Window + 20));
+                return false;
+            case 41 + 2 * Window:
+            {
+                _snap2 = Snapshot();
+                LabSystems.StopParallel();
+                var stats = _around!.Stats;
+                _around.Dispose();
+                long external = 0;
+                foreach (var (id, v) in _snap2) if (_snap1.TryGetValue(id, out var was)) external += v - was;
+                double a1 = _gameFills1 > 0 ? (double)_gameAdded1 / _gameFills1 : 0, a2 = _gameFills2 > 0 ? (double)_gameAdded2 / _gameFills2 : 0;
+                var landed = _gameAdded2 > 0 ? (double)external / _gameAdded2 : 0;
+                var perFill = a1 > 0 ? a2 / a1 : 0;
+                var rate = _gameAdded1 > 0 ? (double)external / _gameAdded1 : 0;
+                Check("AroundEach fuel_setup scale x4 (±5 %): the wells gained 4.00 times what the game's own update added",
+                    _gameFills1 > 0 && _gameFills2 > 0 && Math.Abs(landed - 4) <= 0.2 && Math.Abs(perFill - 1) <= 0.1 && stats.Faults == 0,
+                    $"x{landed:F3} ({external} units in the window, the game added {_gameAdded2} in {_gameFills2} fills on " +
+                    $"{_fillers.Count} wells); per fill {a2:F1} vs {a1:F1} in the vanilla window (x{perFill:F3}); over equal " +
+                    $"windows x{rate:F2} the vanilla window's {_gameAdded1} units ({_gameFills1} fills)");
+                Check("AroundEach (forced): captures and applies ran on N>1 threads", _aroundThreads.Count > 1,
+                    $"{_aroundThreads.Count} thread(s), {stats.Slices} slices");
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static byte[] Bytes<T>(in T value) where T : unmanaged =>
+        System.Runtime.InteropServices.MemoryMarshal.AsBytes(
+            System.Runtime.InteropServices.MemoryMarshal.CreateReadOnlySpan(ref System.Runtime.CompilerServices.Unsafe.AsRef(in value), 1)).ToArray();
+
+    // The fillers' Fuel now, on the tick thread (GetComponent).
+    private Dictionary<uint, int> Snapshot()
+    {
+        var d = new Dictionary<uint, int>();
+        foreach (var id in _fillers.Keys)
+            if (Ecs.Get<Ecs.Fuel>(new EntityId(id)) is { } f) d[id] = f.Values[0];
+        return d;
+    }
+
     // ---- writes through entity views: Before takes one unit off 20 containers, After gives it back ----
     private void WriteBefore(ref EntityView e)
     {
         if (!_writing) return;
+        if (Interlocked.Exchange(ref _nonAttrTried, 1) == 0)
+        {
+            try
+            {
+                var bad = e.Attribute("DynamicFuelSetup");
+                _nonAttr = $"not refused: {bad.Count} slots";
+            }
+            catch (ArgumentException x) { _nonAttr = $"refused: {x.Message}"; }
+        }
         var id = e.Entity.Value;
         if (!_targets.ContainsKey(id))
         {
@@ -302,4 +547,15 @@ public sealed class SystemsTestMod : Mod
         try { a(); return false; }
         catch (T) { return true; }
     }
+}
+
+// fuel_setup as a view made for another game build would see it: one write list entry renamed, so another contract.
+internal ref struct DoctoredFuelSetup : IGameProgram<DoctoredFuelSetup>
+{
+    public static string Name => "fuel_setup";
+    public static uint Contract => 0x0BADF00Du;
+    public static string Lists => "tpl=FuelSetup\nread_opt=CurrentTransform,DynamicShelter\nwrite=Fuel,DynamicFuelSetupV2\n" +
+        "sys_read=WeatherSystem,g38_daytime::Daytime,impact::AttributeRegistry\nsys_write=ServerFactoryInfo\n" +
+        "sys_read_opt=0000000000000000\nsys_write_opt=0000000000000000\nsys_write_parallel=0000000000000001\nflags=00000000\ninterval=1\n";
+    static DoctoredFuelSetup IGameProgram<DoctoredFuelSetup>.Bind(EntityView entity) => default;
 }

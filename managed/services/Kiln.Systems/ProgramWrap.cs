@@ -72,9 +72,10 @@ public sealed unsafe class ProgramWrap : IDisposable
     private readonly List<ManagedStage> _stages = new();
     private readonly object _lock = new();
     private Func<SliceInfo, bool>? _when;
-    private sealed class ArchetypeFilter(uint[] has, uint[] lacks)
+    private sealed class ArchetypeFilter(uint[] has, uint[] lacks, string[] hasNames, string[] lacksNames)
     {
         internal readonly uint[] Has = has, Lacks = lacks;
+        internal readonly string[] HasNames = hasNames, LacksNames = lacksNames;
         internal readonly System.Collections.Concurrent.ConcurrentDictionary<(ulong Session, nint Layout), bool> Cache = new();
     }
     private ArchetypeFilter? _archetype;
@@ -134,6 +135,23 @@ public sealed unsafe class ProgramWrap : IDisposable
     public ProgramWrap AfterEach(EntityViewHandler handler, int? priority = null) =>
         Add(WrapStage.After, null, handler ?? throw new ArgumentNullException(nameof(handler)), priority);
 
+    // AroundEach (ProgramWrap<T>): a Before that captures and an After that applies, at one priority, off together.
+    internal void Around(IAround around, int? priority)
+    {
+        Services.RequireTickThread("ProgramWrap.AroundEach");
+        var before = Make(WrapStage.Before, null, around.CaptureView, priority, around);
+        var after = Make(WrapStage.After, null, around.ApplyView, priority, around);
+        before.Partner = after;
+        after.Partner = before;
+        if (before.State == WrapState.Refused) before.RaiseDisabled(before.Detail ?? "refused");
+        if (after.State == WrapState.Refused) after.RaiseDisabled(after.Detail ?? "refused");
+        if (before.State == WrapState.Refused || after.State == WrapState.Refused)
+        {
+            before.Unwrap();
+            after.Unwrap();
+        }
+    }
+
     /// <summary>Instead of the game's update; call <see cref="Slice.RunOriginal"/> to run it. One per program.</summary>
     /// <returns><c>Ok = false</c> when another mod replaces the program (named in the reason).</returns>
     [TickThreadOnly]
@@ -165,7 +183,8 @@ public sealed unsafe class ProgramWrap : IDisposable
     public ProgramWrap WhenArchetype(IEnumerable<string> has, IEnumerable<string>? lacks = null)
     {
         ArgumentNullException.ThrowIfNull(has);
-        var filter = new ArchetypeFilter(Hashes(has), lacks is null ? [] : Hashes(lacks));
+        string[] h = [.. has], l = lacks is null ? [] : [.. lacks];
+        var filter = new ArchetypeFilter(Hashes(h), Hashes(l), h, l);
         Volatile.Write(ref _archetype, filter);
         return this;
     }
@@ -240,13 +259,13 @@ public sealed unsafe class ProgramWrap : IDisposable
         return this;
     }
 
-    private ManagedStage Make(WrapStage kind, SliceHandler? slice, Delegate? each, int? priority)
+    private ManagedStage Make(WrapStage kind, SliceHandler? slice, Delegate? each, int? priority, IAround? around = null)
     {
         lock (_lock)
             if (_disposed) throw new ObjectDisposedException(nameof(ProgramWrap));
         if (Mod is { Alive: false }) throw new InvalidOperationException("the mod is unloading");
         var off = Systems.WhyOff(World);
-        var stage = new ManagedStage(this, kind, slice, each, priority ?? _options.Priority);
+        var stage = new ManagedStage(this, kind, slice, each, priority ?? _options.Priority) { Around = around };
         if (off.Refuse is { } refuse)
         {
             stage.Refuse(refuse);
@@ -277,28 +296,48 @@ public sealed unsafe class ProgramWrap : IDisposable
         return [.. list];
     }
 
-    // The filters, per slice: When on every call, WhenArchetype cached per archetype.
-    internal bool Accepts(SystemsNative.Slice* s)
+    // The filters, per slice: When on every call, WhenArchetype cached per archetype. `off`: WhenArchetype cannot decide
+    // on this build or world (no archetype key at all, a name the world has no component of): the stage must go off
+    // rather than skip every slice without a word.
+    internal bool Accepts(SystemsNative.Slice* s, out string? off)
     {
+        off = null;
         var archetype = Volatile.Read(ref _archetype);
         var when = Volatile.Read(ref _when);
         if (archetype is null && when is null) return true;
         nint layout = 0;
         var t = SystemsNative.T;
-        if (t != null && (archetype is not null || when is not null))
+        var rc = SystemsNative.Unavailable;
+        if (t != null)
         {
             nuint l = 0;
-            if (t->GameSliceArchetype(s, &l) == SystemsNative.Ok) layout = (nint)l;
+            rc = t->GameSliceArchetype(s, &l);
+            if (rc == SystemsNative.Ok) layout = (nint)l;
         }
         if (archetype is not null)
         {
-            if (layout == 0 || t == null) return false;
+            if (rc == SystemsNative.NotFound) return false;  // an empty slice, an entity the map does not hold: this slice
+            if (layout == 0 || t == null)
+            {
+                off = $"WhenArchetype cannot read a slice's archetype on this build (kiln.world answered {rc})";
+                return false;
+            }
             var key = (t->GameWorldSession((uint)World), layout);
             if (!archetype.Cache.TryGetValue(key, out var ok))
             {
                 ok = true;
-                foreach (var h in archetype.Has) ok &= t->GameArchetypeHas((uint)World, (nuint)layout, h) == 1;
-                foreach (var h in archetype.Lacks) ok &= t->GameArchetypeHas((uint)World, (nuint)layout, h) == 0;
+                for (var i = 0; i < archetype.Has.Length + archetype.Lacks.Length; i++)
+                {
+                    var has = i < archetype.Has.Length;
+                    var r = t->GameArchetypeHas((uint)World, (nuint)layout, has ? archetype.Has[i] : archetype.Lacks[i - archetype.Has.Length]);
+                    if (r < 0)
+                    {
+                        off = $"WhenArchetype: {(has ? archetype.HasNames[i] : archetype.LacksNames[i - archetype.Has.Length])} " +
+                            $"is not a component of this world";
+                        return false;
+                    }
+                    ok &= has ? r == 1 : r == 0;
+                }
                 archetype.Cache.TryAdd(key, ok);
             }
             if (!ok) return false;
@@ -310,7 +349,7 @@ public sealed unsafe class ProgramWrap : IDisposable
     {
         var filter = Volatile.Read(ref _archetype);
         if (filter is not null)
-            Interlocked.CompareExchange(ref _archetype, new ArchetypeFilter(filter.Has, filter.Lacks), filter);
+            Interlocked.CompareExchange(ref _archetype, new ArchetypeFilter(filter.Has, filter.Lacks, filter.HasNames, filter.LacksNames), filter);
     }
 
     internal void OnDisabled(WrapDisabledEvent e)
@@ -380,6 +419,8 @@ internal sealed unsafe class ManagedStage
     internal volatile bool Removing;
     internal string? Detail;
     internal long ManagedFaults;
+    internal IAround? Around;           // the stage is one half of an AroundEach
+    internal ManagedStage? Partner;     // its other half: they go off together
     private GCHandle _self;
     private volatile int _disabled;   // 1: an exception turned it off here
     private volatile bool _raised;
@@ -522,6 +563,7 @@ internal sealed unsafe class ManagedStage
         if (Interlocked.Exchange(ref _disabled, 1) != 0) return;
         Unwrap();
         RaiseDisabled(reason);
+        Partner?.Off($"the other half of its AroundEach went off: {reason}");
     }
 
     private void Fail(Exception e)
@@ -530,6 +572,7 @@ internal sealed unsafe class ManagedStage
         if (Interlocked.Exchange(ref _disabled, 1) != 0) return;
         Unwrap();  // the stage is off from now on; kiln.world takes it out in the next step
         RaiseDisabled($"it threw {e.GetType().Name}: {e.Message}");
+        Partner?.Off($"the other half of its AroundEach threw {e.GetType().Name}");
         // the host's mod policy counts it (5 in 60 s disable the mod): rethrown as scheduled work of the mod
         var info = ExceptionDispatchInfo.Capture(e);
         if (Wrap.Mod is { } mod) mod.Scheduler.Post(() => info.Throw());
@@ -558,8 +601,10 @@ internal sealed unsafe class ManagedStage
         try
         {
             ModContext.CurrentMod = mod;
-            if (_disabled != 0 || Removing || mod is { Alive: false } || !Wrap.Accepts(s))
+            string? off = null;
+            if (_disabled != 0 || Removing || mod is { Alive: false } || !Wrap.Accepts(s, out off))
             {
+                if (off is not null) Off(off);       // the filter cannot decide here: the stage goes off and says why
                 if (replace) RunOriginalQuietly(s);  // this slice is the game's
                 return;
             }
@@ -592,6 +637,8 @@ internal sealed unsafe class ManagedStage
     {
         var t = SystemsNative.T;
         if (t == null) return;
+        var around = Around;
+        if (around is not null && !around.Begin(Kind, s)) return;  // an After whose Before kept nothing of this slice
         var outerEach = _each;
         var outerView = _view;
         var outerCtx = _ctx;
@@ -609,6 +656,7 @@ internal sealed unsafe class ManagedStage
         finally
         {
             _ctx?.End();  // the last entity's writes, even when a handler threw
+            around?.End(Kind, _eachError is null && rc == SystemsNative.Ok);
             _each = outerEach;
             _view = outerView;
             _ctx = outerCtx;

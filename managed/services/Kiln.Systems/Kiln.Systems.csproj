@@ -14,5 +14,7 @@
     <!-- a wrap's writes through an entity view raise Kiln.World's ComponentWrittenEvent -->
     <ProjectReference Include="../Kiln.World/Kiln.World.csproj" Private="false" />
     <InternalsVisibleTo Include="Kiln.Systems.Tests" />
+    <!-- Kiln.Game's generated program views (Ecs.Programs.*) reach a slot by its descriptor position (EntityView.ReadAt) -->
+    <InternalsVisibleTo Include="Kiln.Game" />
   </ItemGroup>
 </Project>
