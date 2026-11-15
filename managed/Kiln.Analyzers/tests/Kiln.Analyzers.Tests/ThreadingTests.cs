@@ -9,6 +9,19 @@ public sealed class TickThreadTests
     private static readonly TickThreadAnalyzer A = new();
 
     [Fact]
+    public async Task ImpactNativeMethodsCannotUseTickThreadApis()
+    {
+        var d = await Run(A, """
+            public static class N
+            {
+                [ImpactNative("Hit")]
+                public static bool Hit() { Chat.Broadcast("unsafe from a worker"); return true; }
+            }
+            """, extra: new[] { Microsoft.CodeAnalysis.MetadataReference.CreateFromFile(typeof(Kiln.ImpactNativeAttribute).Assembly.Location) });
+        Ids(d, "KILN101");
+    }
+
+    [Fact]
     public async Task Task_run_thread_and_timers_are_off_thread()
     {
         var d = await Run(A, """

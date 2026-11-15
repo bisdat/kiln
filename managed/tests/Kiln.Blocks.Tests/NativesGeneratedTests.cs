@@ -29,6 +29,21 @@ namespace Kiln.Blocks.Tests.GeneratedNatives
             v = new Vector3(1, 2, 3);
         }
 
+        [ImpactNative("GenTimeAlias")]
+        public static void TimeAlias(ref TimeSpan a, ref TimeSpan b) { a = TimeSpan.FromSeconds(2); b += a; }
+
+        [ImpactNative("GenTimeThrow")]
+        public static void TimeThrow(ref TimeSpan a) { a = TimeSpan.FromSeconds(2); throw new InvalidOperationException("time fault"); }
+
+        public static ModContext? ThrowMod;
+        [ImpactNative("GenThrows")]
+        public static void Throws(ref int value)
+        {
+            ThrowMod = HostAccess.Current;
+            value = 42;
+            throw new InvalidOperationException("generated native fault");
+        }
+
         [ImpactNative("GenMaybe")]
         public static byte Maybe(Optional<float> scale, [Raw] uint tag) => (byte)((scale.HasValue ? 100 : 0) + tag);
     }
@@ -163,6 +178,37 @@ namespace Kiln.Blocks.Tests
         }
 
         [Fact]
+        public void AThrowingGeneratedMethodAnswersInternalAndKeepsItsWrites()
+        {
+            using var call = new Call((Sint32, 4, BitConverter.GetBytes(1), 0));
+            var e = AbilitiesDispatch.AddSync("plain-mod.GenThrows", Thunk("GenThrows"), Plain);
+            try
+            {
+                var dispatch = (delegate* unmanaged[Cdecl]<AbilitiesNative.NativeCall*, void*, void>)typeof(AbilitiesDispatch)
+                    .GetMethod("SyncDispatch", BindingFlags.NonPublic | BindingFlags.Static)!.MethodHandle.GetFunctionPointer();
+                var t = new Thread(() => dispatch(call.C, (void*)e.Id));
+                t.Start(); t.Join();
+                Assert.Equal(0x11, call.C->OutError);
+                Assert.Equal(42, BitConverter.ToInt32(call.Bytes(0, 4)));
+                Assert.Same(Plain, GeneratedNatives.Methods.ThrowMod);
+                Assert.Equal(1, e.Faults);
+            }
+            finally { AbilitiesDispatch.RemoveSync(e); }
+        }
+
+        [Fact]
+        public void TimeRefsAliasAndKeepWritesOnExceptions()
+        {
+            using var alias = new Call((Time, 8, BitConverter.GetBytes(1_000_000_000L), 0), (Time, 8, null, 0));
+            alias.C->Args[1] = alias.C->Args[0];
+            Invoke("GenTimeAlias", alias);
+            Assert.Equal(4_000_000_000L, BitConverter.ToInt64(alias.Bytes(0, 8)));
+            using var fault = new Call((Time, 8, BitConverter.GetBytes(1_000_000_000L), 0));
+            Assert.Throws<InvalidOperationException>(() => Invoke("GenTimeThrow", fault));
+            Assert.Equal(2_000_000_000L, BitConverter.ToInt64(fault.Bytes(0, 8)));
+        }
+
+        [Fact]
         public void TheNativeRefNamesTheParametersBlocksBindBy()
         {
             var r = GeneratedNatives.Natives.GenOnHit;
@@ -181,7 +227,7 @@ namespace Kiln.Blocks.Tests
         public void TheEntryAttributesCarryTheNativesJsonArgs()
         {
             var entries = typeof(NativesGeneratedTests).Assembly.GetCustomAttributes<ImpactNativeEntryAttribute>().ToDictionary(a => a.Name);
-            Assert.Equal(["GenMaybe", "GenOnHit", "GenWrites"], entries.Keys.Order());
+            Assert.Equal(["GenMaybe", "GenOnHit", "GenThrows", "GenTimeAlias", "GenTimeThrow", "GenWrites"], entries.Keys.Order());
             Assert.Contains("\"type\":\"Time\",\"dir\":\"inout\",\"size\":8", entries["GenWrites"].Args);
         }
     }

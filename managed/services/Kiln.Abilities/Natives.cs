@@ -516,8 +516,10 @@ public static unsafe partial class Abilities
         // natives_core.h valid_native_name: "<modid>.<Name>", Name [A-Za-z0-9_], 90 bytes at most
         internal static bool ValidName(string full)
         {
-            var dot = full.IndexOf('.');
+            var dot = full.LastIndexOf('.');
             if (dot <= 0 || dot + 1 >= full.Length || Encoding.UTF8.GetByteCount(full) > 90) return false;
+            for (var i = 0; i < dot; i++)
+                if (!char.IsAsciiLetterLower(full[i]) && !char.IsAsciiDigit(full[i]) && full[i] is not ('.' or '_' or '-')) return false;
             for (var i = dot + 1; i < full.Length; i++)
                 if (!char.IsAsciiLetterOrDigit(full[i]) && full[i] != '_') return false;
             return true;

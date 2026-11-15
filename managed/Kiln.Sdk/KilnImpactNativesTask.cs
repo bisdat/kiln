@@ -131,6 +131,8 @@ public sealed class KilnImpactNatives : Microsoft.Build.Utilities.Task
         foreach (var (name, args) in entries)
         {
             var full = $"{id}.{name}";
+            if (System.Text.Encoding.UTF8.GetByteCount(full) > 90)
+                throw new InvalidOperationException($"{full}: native names must fit the runtime limit of 90 UTF-8 bytes");
             var argList = JsonNode.Parse(args) as JsonArray ?? throw new InvalidOperationException($"{full}: its args are not a JSON array");
             var entry = new JsonObject
             {
