@@ -450,7 +450,10 @@ including when it only uses crafting. Native plugins request on first use and sh
 will later add build/break protection. A first runtime request waits for the last world's stop; build/break zones
 are refused until installation, rather than accepted without protection. This lets ShroudForge inspect the unmodified `PlaceProp` entry
 when the profile contains no such mod and no native plugin requests the group. Once those hooks are installed, ShroudForge's entity spawning still cannot find
-its prop-spawn helper through that entry; a ShroudForge-side fix is in review. A mid-install failure can also leave
+its prop-spawn helper through that entry unless it can read the game's original code: the ShroudForge Kiln ships
+(d8a394bc) reads through that detour, but it refuses the original file as a whole when any code inside a function
+differs, and Kiln's rules service patches a few function interiors at every start. A ShroudForge-side change is
+proposed (accept interior jumps for the whole-file comparison only). A mid-install failure can also leave
 pass-through jumps in some entries; see the gameplay service's refusal status and installed-target mask.
 
 ### Shroudlink client addon
