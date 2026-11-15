@@ -849,7 +849,7 @@ typedef struct KilnSetStatusV1 {
     uint32_t size;          /* in: sizeof(KilnSetStatusV1) */
     uint8_t available;      /* 1: sets can run now (feature items.equip_sets, equip, item instances, kiln.decisions'
                                kind 18, kiln.window_clock, this build's component layouts; not switched off) */
-    uint8_t broken;         /* 1: switched off until the server restarts (an invariant failure or a fault) */
+    uint8_t broken;         /* 1: switched off until the server, or the hosting player's game, restarts (an invariant failure or a fault) */
     uint16_t reserved;
     uint32_t snapshots;     /* live snapshots */
     uint32_t pending;       /* set requests queued or deciding */

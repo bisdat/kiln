@@ -231,7 +231,7 @@ void set_detail(const char* s) {
 
 void broken(const char* why) {
     if (g_state.exchange(KILN_ITEMS_PROGRAM_BROKEN) != KILN_ITEMS_PROGRAM_BROKEN)
-        LOGE("equip is off until the server restarts: %s", why);
+        LOGE("equip is off until the server, or the hosting player's game, restarts (other item calls still run): %s", why);
     set_detail(why);
 }
 
@@ -471,9 +471,13 @@ void run_set(const Access& a, uint64_t* it, KilnEntity player, SetRequest&& set,
         f.out.status = sets::SetStatus::Unavailable;
         std::snprintf(f.out.reason, sizeof f.out.reason, "%s", off_why && off_why[0] ? off_why : "equip is off (see kiln.log)");
     } else if (!dead_now(it, &dead)) {
-        broken("reading the player's Actor faulted");
-        f.out.status = sets::SetStatus::Unavailable;
-        std::snprintf(f.out.reason, sizeof f.out.reason, "reading the player's Actor faulted: nothing was changed");
+        // a fault before the transaction: reported as every fault is (the faulted event, kiln.log, sets and equips off)
+        f.out.status = sets::SetStatus::InvariantFailure;
+        f.out.engine_fault = true;
+        f.out.seh = true;
+        std::snprintf(f.out.reason, sizeof f.out.reason,
+                      "the game faulted reading the player's Actor before the transaction opened: nothing was changed; sets and equips are off "
+                      "until the server, or the hosting player's game, restarts; other item calls still run");
     } else if (dead) {
         f.out.status = sets::SetStatus::Refused;
         std::snprintf(f.out.reason, sizeof f.out.reason, "the player is dead");
@@ -723,7 +727,10 @@ bool same_key(const KilnEventEntityKey& a, const KilnEventEntityKey& b) { return
 
 // The sets' part of equip_pre: ends what has to end, files decisions, verifies the session of what may run this step.
 // `blocked`: per player, the ticket after which its single equips wait this step (setorder.h singles_wait_from: FIFO).
-void sets_in_pre(uint64_t step, int state, std::vector<SetFinished>* out, std::vector<std::pair<KilnEntity, uint64_t>>* blocked) {
+// `timed_out`: per player, the lowest ticket of a set that ended this Pre because it did not run within 250 steps (a single
+// equip after it that times out too waited behind it).
+void sets_in_pre(uint64_t step, int state, std::vector<SetFinished>* out, std::vector<std::pair<KilnEntity, uint64_t>>* blocked,
+                 std::vector<std::pair<KilnEntity, uint64_t>>* timed_out) {
     if (g_sets_live.load(std::memory_order_acquire) == 0) return;  // no set: nothing to do (and no lock taken)
     const bool off = state == KILN_ITEMS_PROGRAM_NONE || state == KILN_ITEMS_PROGRAM_BROKEN || sets_broken();
     const KilnDecisionsApiV1* d = sets_decisions();
@@ -755,7 +762,10 @@ void sets_in_pre(uint64_t step, int state, std::vector<SetFinished>* out, std::v
             uint32_t refusal = 0;
             if (off) why = "equipment sets are off (see kiln.log)", st = sets::SetStatus::Unavailable;
             else if (r.canceled) why = "canceled before it ran (the asking mod unloaded, or set_cancel)";
-            else if (step > r.submitted + kTimeoutSteps) why = "the set did not run within 250 steps";
+            else if (step > r.submitted + kTimeoutSteps) {
+                why = "the set did not run within 250 steps";
+                timed_out->emplace_back(r.job.player, r.ticket);
+            }
             else if (r.phase == SetPhase::Deciding && r.decided) {
                 switch (r.verdict) {
                     case KILN_DECISION_PREVENTED: why = "a PlayerEquippingEvent handler canceled the set", st = sets::SetStatus::Canceled; break;
@@ -973,8 +983,8 @@ void equip_pre(uintptr_t world, uint64_t step) {
     const int state = g_state.load();
     // v6: sets first, so a single request queued after a set of the same player waits for it (FIFO)
     std::vector<SetFinished> sets_done;
-    std::vector<std::pair<KilnEntity, uint64_t>> blocked;
-    sets_in_pre(step, state, &sets_done, &blocked);
+    std::vector<std::pair<KilnEntity, uint64_t>> blocked, timed_out;
+    sets_in_pre(step, state, &sets_done, &blocked, &timed_out);
     deliver_sets(sets_done);
     std::vector<KilnItemsEquipResult> ended;
     std::vector<std::pair<uint64_t, KilnEntity>> check;
@@ -985,8 +995,14 @@ void equip_pre(uintptr_t world, uint64_t step) {
             const bool stale = step > i->submitted + kTimeoutSteps;
             if (off || stale) {
                 KilnItemsEquipResult r = result_of(*i, step);
+                // a single equip that waited behind an equipment set of its player (one still waiting, or one that timed out in
+                // this Pre) says so: the program did not fail to run it, the set before it held it back
+                const bool behind = !off && (i->ticket > blocking_ticket(blocked, i->r.player) || i->ticket > blocking_ticket(timed_out, i->r.player));
                 fail(&r, off ? KILN_ITEMS_UNAVAILABLE : KILN_ITEMS_DROPPED,
-                     off ? "equip is off (see kiln.log)" : "kiln_items_equip did not run for player %u for 10 s", i->r.player);
+                     off      ? "equip is off (see kiln.log)"
+                     : behind ? "waited 250 steps behind an equipment set of player %u that did not run (FIFO): not run"
+                              : "kiln_items_equip did not run for player %u for 10 s",
+                     i->r.player);
                 ended.push_back(r);
                 i = g_pending.erase(i);
                 continue;

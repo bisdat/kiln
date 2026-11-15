@@ -54,6 +54,8 @@ struct FakeGame final : SetEngine {
     std::map<uint32_t, std::vector<uint8_t>> own;
     bool rollback_damages = false;
     int fulls = 0;
+    uint32_t unreadable = 0;  // an item entity whose ItemState cannot be read whole (from the start)
+    bool unreadable_after_rollback = false;  // ring B's ItemState cannot be read after the rollback
 
     bool enter() {
         if (faulted) ++calls_after_fault;
@@ -147,17 +149,18 @@ struct FakeGame final : SetEngine {
         out->clear();
         // records as the game adapter writes them: {u32 entity, u8 part, u32 size, bytes}; the slots as one record of the
         // player, each item's own bytes as its ItemState (part 4)
-        auto record = [out](uint32_t e, uint8_t part, const std::vector<uint8_t>& b) {
-            const uint32_t n = static_cast<uint32_t>(b.size());
+        auto record = [out](uint32_t e, uint8_t part, const std::vector<uint8_t>& b, bool whole = true) {
+            const uint32_t n = whole ? static_cast<uint32_t>(b.size()) : kFullUnreadable;
             out->insert(out->end(), reinterpret_cast<const uint8_t*>(&e), reinterpret_cast<const uint8_t*>(&e) + 4);
             out->push_back(part);
             out->insert(out->end(), reinterpret_cast<const uint8_t*>(&n), reinterpret_cast<const uint8_t*>(&n) + 4);
-            out->insert(out->end(), b.begin(), b.end());
+            if (whole) out->insert(out->end(), b.begin(), b.end());
         };
         std::vector<uint8_t> slots;
         encode(SnapPrefix{}, live, &slots);
         record(m.player, 1, slots);
-        for (const ItemRec& r : m.items) record(r.pide, 4, own[r.pide]);
+        for (const ItemRec& r : m.items)
+            record(r.pide, 4, own[r.pide], r.pide != unreadable && !(r.pide == 5002 && unreadable_after_rollback && rollbacks > 0));
         return true;
     }
     void restore() {
@@ -182,7 +185,10 @@ struct FakeGame final : SetEngine {
         if (corrupt_commit == 5) live.actionbar[0] = 999;
         if (corrupt_commit == 6)
             for (ItemRec& r : live.items)
-                if (r.pide == 5002) r.owner = G1;
+                if (r.pide == 5002 || r.pide == 5006) r.owner = G1;
+        if (corrupt_commit == 7)
+            for (ItemRec& r : live.items)
+                if (r.pide == 5001) r.owner = EQB;
         open = false;
         return true;
     }
@@ -350,6 +356,35 @@ int main() {
         c.corrupt_commit = 6;  // the moved ring's owner left at the backpack although it lies in an equipment page now
         const SetOutcome oc = execute(c, job(c, {op(kRing0, 1, 5002, RingB)}), PlanOptions{}, nullptr, nullptr);
         check(oc.status == SetStatus::InvariantFailure && (oc.flags & kResultCommitted) && rules(c), "an owner that does not follow its item's inventory: InvariantFailure");
+        FakeGame u = owned();
+        const SetOutcome ou = execute(u, job(u, {op(kRing0, 0), op(kRing1, 1, 5001, RingA)}), PlanOptions{}, nullptr, nullptr);
+        check(ou.status == SetStatus::Done && ou.changes.size() == 2 && rules(u), "owners following their inventories: an unequip and an equip of what came off: Done");
+        auto ringed = [&owned] {  // ring B worn in Ring1 as well (the cycle's fixture)
+            FakeGame y = owned();
+            y.at(page_slot(selection_index(kRing1))) = Stack{page_slot(selection_index(kRing1)), RingB, 1, 5006};
+            y.live.equipment[selection_index(kRing1)] = page_slot(selection_index(kRing1));
+            ItemRec r{};
+            r.pide = 5006, r.item = RingB, r.stamp = 1006, r.has_state = 1, r.contained = page_slot(selection_index(kRing1)), r.has_owner = 1;
+            y.live.items.push_back(r);
+            y.sync_items();
+            y.own[5006] = {6, 17, 3, 0x40, 0, 0, 0x7f, 1};
+            return y;
+        };
+        PlanOptions cycles;
+        cycles.cycles = true;
+        FakeGame y = ringed();
+        const SetOutcome oy = execute(y, job(y, {op(kRing0, 1, 5006, RingB), op(kRing1, 1, 5001, RingA)}), cycles, nullptr, nullptr);
+        check(oy.status == SetStatus::Done && oy.steps == 3 && oy.changes.size() == 2 && rules(y),
+              "owners following their inventories: two worn rings exchanged through a free slot (a cycle): Done");
+        FakeGame yc = ringed();
+        yc.corrupt_commit = 6;
+        const SetOutcome oyc = execute(yc, job(yc, {op(kRing0, 1, 5006, RingB), op(kRing1, 1, 5001, RingA)}), cycles, nullptr, nullptr);
+        check(oyc.status == SetStatus::InvariantFailure && (oyc.flags & kResultCommitted) && rules(yc),
+              "a cycle whose ring keeps the temporary slot's inventory as its owner: InvariantFailure");
+        FakeGame uc = owned();
+        uc.corrupt_commit = 7;  // the ring that came off keeps the equipment page as its owner in the backpack
+        const SetOutcome ouc = execute(uc, job(uc, {op(kRing0, 0)}), PlanOptions{}, nullptr, nullptr);
+        check(ouc.status == SetStatus::InvariantFailure && rules(uc), "an unequip whose ring keeps its old page as the owner: InvariantFailure");
         FakeGame d = owned();
         d.corrupt_commit = 3;  // an owner set to an entity that is no inventory of it
         const SetOutcome od = execute(d, job(d, {op(kRing0, 1, 5002, RingB)}), PlanOptions{}, nullptr, nullptr);
@@ -443,13 +478,17 @@ int main() {
             const SetOutcome o = execute(g, job(g, three()), PlanOptions{}, nullptr, nullptr);
             // before the transaction opened (the reads): Unavailable, nothing changed; after it: InvariantFailure, MayHaveMutated
             const bool ok = o.engine_fault && g.calls_after_fault == 0 && rules(g) &&
-                            (n < probe.tx_open_call ? o.status == SetStatus::Unavailable && !(o.flags & kResultMayHaveMutated)
-                                                    : o.status == SetStatus::InvariantFailure && (o.flags & kResultMayHaveMutated));
+                            o.status == SetStatus::InvariantFailure && o.seh &&
+                            (n < probe.tx_open_call ? !(o.flags & kResultMayHaveMutated) && std::strstr(o.reason, "nothing was changed") &&
+                                                          std::strstr(o.reason, "sets and equips are off") && std::strstr(o.reason, "other item calls still run")
+                                                    : (o.flags & kResultMayHaveMutated) && std::strstr(o.reason, "unknown state") &&
+                                                          std::strstr(o.reason, "other item calls still run"));
             if (!ok) std::printf("     fault at call %ld of %ld: status %u flags %u after %ld\n", n, total, static_cast<unsigned>(o.status), o.flags, g.calls_after_fault);
             all = all && ok;
         }
         char what[160];
-        std::snprintf(what, sizeof what, "a fault at each of the %ld engine calls: InvariantFailure (or Unavailable before the transaction), off, no call after it", total);
+        std::snprintf(what, sizeof what, "a fault at each of the %ld engine calls: InvariantFailure (MayHaveMutated once the transaction opened; before it, "
+                      "nothing was changed), sets and equips off, no call after it", total);
         check(all && total >= 8, what);
         FakeGame d = world();
         execute(d, job(d, three(), kRequestDryRun), PlanOptions{}, nullptr, nullptr);
@@ -460,7 +499,7 @@ int main() {
             g.fault_call = n;
             const SetOutcome o = execute(g, job(g, three(), kRequestDryRun), PlanOptions{}, nullptr, nullptr);
             dry_all = dry_all && o.engine_fault && (o.flags & kResultDryRun) && g.calls_after_fault == 0 && rules(g) &&
-                      (n < d.tx_open_call ? o.status == SetStatus::Unavailable : o.status == SetStatus::InvariantFailure);
+                      o.status == SetStatus::InvariantFailure && (n < d.tx_open_call) == !(o.flags & kResultMayHaveMutated);
         }
         check(dry_all, "a fault at each engine call of a dry run: InvariantFailure, DryRun kept, no call after it");
     }
@@ -498,8 +537,28 @@ int main() {
         FakeGame f = world();
         f.fault_call = 1;  // the full read before the transaction
         const SetOutcome of = execute(f, job(f, three()), PlanOptions{}, nullptr, nullptr);
-        check(of.status == SetStatus::Unavailable && of.engine_fault && f.tx_opens == 0 && !(of.flags & kResultMayHaveMutated) && rules(f),
-              "a fault reading the full bytes before the transaction: Unavailable, nothing opened, sets off");
+        check(of.status == SetStatus::InvariantFailure && of.engine_fault && of.seh && f.tx_opens == 0 && !(of.flags & kResultMayHaveMutated) &&
+                  std::strstr(of.reason, "before the transaction opened: nothing was changed") && rules(f),
+              "a fault reading the full bytes before the transaction: InvariantFailure without MayHaveMutated (the faulted event), nothing opened, sets off");
+        FakeGame q = world();
+        q.fault_call = 0;  // the snapshot read
+        const SetOutcome oq = execute(q, job(q, three()), PlanOptions{}, nullptr, nullptr);
+        check(oq.status == SetStatus::InvariantFailure && oq.engine_fault && q.tx_opens == 0 && !(oq.flags & kResultMayHaveMutated) &&
+                  std::strstr(oq.reason, "sets and equips are off") && rules(q),
+              "a fault in the first read: InvariantFailure without MayHaveMutated, nothing opened, sets and equips off");
+
+        // a component that cannot be read whole: refused before the transaction; read before and not after: never equal
+        FakeGame un = world();
+        un.unreadable = 5003;
+        const SetOutcome ou2 = execute(un, job(un, three()), PlanOptions{}, nullptr, nullptr);
+        check(ou2.status == SetStatus::Unavailable && !ou2.engine_fault && un.tx_opens == 0 && std::strstr(ou2.reason, "cannot be read whole") && rules(un),
+              "an item's ItemState that cannot be read whole: refused before the transaction (a rollback could not be checked), sets stay on");
+        FakeGame ua = world();
+        ua.fail_step = 1;
+        ua.unreadable_after_rollback = true;
+        const SetOutcome oa = execute(ua, job(ua, three()), PlanOptions{}, nullptr, nullptr);
+        check(oa.status == SetStatus::InvariantFailure && (oa.flags & kResultMayHaveMutated) && std::strstr(oa.reason, "could not be read after it") && rules(ua),
+              "a component readable before the transaction and not after the rollback: InvariantFailure, not equal");
     }
 
     // ---- the lab's faults (a real run injects them; here the fake answers as the game would) ----
