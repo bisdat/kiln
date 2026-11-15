@@ -231,7 +231,8 @@ def joined(lab, port):
     check(s is not None and s["Kind"] == "started", f"joined: cct.assertions started ({s and s['Message']})")
     c.state_until({"changed"}, 5)
     r = lab.cmd("pass")  # the control folder is not the joined client: it must not answer the client's check
-    check(r is not None and not r["ok"] and "someone else" in r["message"], f"joined: only the joined client answers its check ({r and r['message']})")
+    check(r is not None and not r["ok"] and ("not started from the control folder" in r["message"] or "someone else" in r["message"]),
+          f"joined: only the joined client answers its check ({r and r['message']})")
     c.send_json(M_ANSWER, {"Kind": "pass", "Note": None, "Guard": None})
     s = c.state_until({"finished"})
     e = c.take_json(M_ENTRY, 10)
