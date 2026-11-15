@@ -652,8 +652,8 @@ internal sealed unsafe class WorldStore
     }
 
     /// <summary>Writes <paramref name="data"/> to a temp name, forces it to disk (unless <paramref name="force"/> is false:
-    /// only an unchanged generation's pending manifest, see the class remarks) and renames it into place; the time of the
-    /// last two steps goes into <paramref name="disk"/>.</summary>
+    /// only an unchanged generation's pending manifest and confirmation, see the class remarks) and renames it into place;
+    /// the time of the last two steps goes into <paramref name="disk"/>.</summary>
     internal static void WriteAtomic(string path, byte[] data, ref DiskTime disk, bool force = true)
     {
         var tmp = $"{path}.tmp-{Environment.ProcessId}-{Interlocked.Increment(ref _tmpCounter)}";
