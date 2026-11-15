@@ -1761,7 +1761,8 @@ KilnResult KILN_CALL t_define_pool(KilnOwner owner,KilnStr name,KilnStr json,uin
         if(deps==g_dependencies.end()){refusal=KILN_DEFINE_OWNER_INACTIVE;reason="owning mod is not enabled";}
         if(!refusal) {
             const auto admission=pool_admission(definition);
-            if(admission.bad_argument)return KILN_ERR_INVALID_ARGUMENT;
+            // the author's own mistake: a bad argument, its reason in the report (mutation-free, so a probe may grow)
+            if(admission.bad_argument)return give_text(admission.reason,report,cap,out_len,KILN_ERR_INVALID_ARGUMENT);
             refusal=admission.code;reason=admission.reason;
         }
         const auto boot=g_boot_definitions.find(definition.mod+"/p/"+definition.block);

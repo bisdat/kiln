@@ -70,10 +70,11 @@ internal static unsafe partial class WorldTablesNative
         if(t==null || !HasAppend(t->Size,offset) || *(nint*)((byte*)t+offset)==0)throw ServiceCaps.Unavailable(capability,"this worldtables table does not provide the appended member");
         return t;
     }
-    private static void ResultCode(int rc,string capability)
+    // report: what native said about a bad argument (an author's duplicate or roof disagreement names its entries)
+    internal static void ResultCode(int rc,string capability,string? report=null)
     {
         if(rc==3)throw ServiceCaps.Unavailable(capability);
-        if(rc==1)throw new ArgumentException("The worldtables request is malformed.");
+        if(rc==1)throw new ArgumentException(string.IsNullOrEmpty(report)?"The worldtables request is malformed.":report);
         if(rc!=0)throw new InvalidOperationException($"worldtables returned {rc}");
     }
     internal static CapacityQueryResult MaterialBudget(WorldMaterialCategory category)
@@ -105,7 +106,7 @@ internal static unsafe partial class WorldTablesNative
                     :t->DefinePoolResult(owner,new Str {Ptr=pn,Len=(nuint)n.Length},new Str {Ptr=pd,Len=(nuint)d.Length},(uint)timing,&reply,pr,(nuint)buffer.Length,&length);
             }
             if(rc==5 && length<(16u<<20)){buffer=new byte[checked((int)length+1)];continue;}
-            ResultCode(rc,capability);
+            ResultCode(rc,capability,rc==1 && length>0 && length<(nuint)buffer.Length?Encoding.UTF8.GetString(buffer,0,(int)length):null);
             if(length>=(nuint)buffer.Length)throw new InvalidOperationException("worldtables report length exceeded its buffer");
             return DefinitionRegistration.ToResult(reply,Encoding.UTF8.GetString(buffer,0,(int)length));
         }

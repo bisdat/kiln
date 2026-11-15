@@ -140,7 +140,9 @@ typedef struct KilnWorldTablesApi {
     KilnResult(KILN_CALL* pool_budget)(KilnStr pool_name, KilnCapacityInfo* out);
     /* Same writer document as define_json, with one buildingMaterialPools entry named by name.
      * Probe/grow is mutation-free. Registered means an identical row in the served boot table.
-     * AllowNextStart atomically persists one definition+receipt envelope, consuming zero live entries. */
+     * AllowNextStart atomically persists one definition+receipt envelope, consuming zero live entries.
+     * KILN_ERR_INVALID_ARGUMENT: the document is wrong; for the author's own mistake (two entries that are one building
+     * item, a roof disagreement) report holds the reason naming the entries (out_len its length). */
     KilnResult(KILN_CALL* define_pool_result)(KilnOwner owner, KilnStr name, KilnStr typed_pool_json, uint32_t timing,
         KilnDefinitionReply* out, char* report, size_t capacity, size_t* out_len);
     /* owner=0 is a pure any-thread query. Internal host observation on Post may supply the exact loaded
