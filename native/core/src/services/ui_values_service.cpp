@@ -5,7 +5,7 @@
 //
 // Client only: on a dedicated server init() says no (there is no game UI to hook). On the client nothing is hooked at
 // boot: each kind installs its links when the first provider of that kind registers and kiln.caps shows the kind's row
-// available and not held by the client gate, so a row held until the owner's client pass never reaches game code.
+// available. Slot snapshot reads also install the inspection links on first use.
 #include <cstddef>
 #include <cstring>
 #include <string>
@@ -37,8 +37,7 @@ std::atomic<const KilnUiApi*> g_ui{nullptr};
 
 const KilnCapsApi* caps() { return static_cast<const KilnCapsApi*>(svc::find(KILN_CAPS_SERVICE, 1)); }
 
-// A kind's hooks go in only when the client gate does not hold its row (native/core/gates/dev28-05a-value-providers
-// .json) and the row is available (its sigdb feature resolved, nobody reported it off).
+// A kind installs only when its capability row is available; retain policy-hold support for future gates.
 bool row_available(const char* name) {
     const KilnCapsApi* c = caps();
     const KilnStr n{name, std::strlen(name)};
@@ -171,6 +170,11 @@ void wire() {
     e.now_ms = [] { return kiln::now_ms(); };
     e.tick_ms = []() -> uint64_t { return GetTickCount64(); };
     e.client_side = [] { return image().side == KILN_SIDE_CLIENT; };
+    // 05a's fixed private fields and mid-hook register contracts were derived only on this image.
+    // A matching code pattern alone cannot prove those layouts on another executable, even with policy=any.
+    e.layout_supported = [] {
+        return image().sha256 == "5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77";
+    };
     e.row_available = &row_available;
     e.row_off = &row_off;
     e.client = &client_now;
@@ -203,6 +207,9 @@ bool init() {
     // Each feature resolves on its own; the rows (and the client gate) decide at registration time.
     static const char* const kFeatures[] = {"ui.values.detail", "ui.values.slot",          "ui.values.held",
                                             "ui.values.hud",    "ui.values.tooltip_lines", "ui.slots.inspect"};
+    if (!env().layout_supported())
+        for (uint32_t k = 0; k < kListChanges; ++k)
+            disable_kind(k, "private UI layout is not measured for this client image");
     std::string on, off;
     for (const char* f : kFeatures) {
         std::string& to = sigdb::feature(f) ? on : off;
@@ -211,7 +218,7 @@ bool init() {
     }
     KLOG_I(
         "ui.values: features resolved:%s; not resolved:%s. A kind hooks the game when its first provider "
-        "registers and its row is available",
+        "registers and its row is available; slot inspection also hooks on first copy_slots",
         on.empty() ? " none" : on.c_str(), off.empty() ? " none" : off.c_str());
     return true;
 }

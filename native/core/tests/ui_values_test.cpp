@@ -45,6 +45,7 @@ uint64_t version = 1;
 double clock_ms = 1000;
 uint64_t ticks = 5000;
 bool client_side = true;
+bool layout_supported = true;
 std::set<std::string> rows;         // rows kiln.caps shows available
 std::vector<std::string> rows_off;  // row_off reports
 ClientNow client{};
@@ -104,6 +105,7 @@ void install() {
     e.now_ms = [] { return clock_ms; };
     e.tick_ms = [] { return ticks; };
     e.client_side = [] { return client_side; };
+    e.layout_supported = [] { return layout_supported; };
     e.row_available = [](const char* n) { return rows.count(n) != 0; };
     e.row_off = [](const char* n, const char*) { rows_off.push_back(n); };
     e.client = [](ClientNow* out) {
@@ -208,6 +210,7 @@ void reset() {
     version = 1;
     clock_ms = 1000;
     client_side = true;
+    layout_supported = true;
     rows = {"ui.values.detail", "ui.values.slot",          "ui.values.held",
             "ui.values.hud",    "ui.values.tooltip_lines", "ui.slots.inspect", "kiln.ui"};
     rows_off.clear();
@@ -2375,10 +2378,71 @@ void slot_layout_is_independent() {
           "detail: its missing label offset still refuses safely");
 }
 
+void runtime_write_faults() {
+    for (uint32_t kind : {uint32_t(KUI_DETAIL), uint32_t(KUI_SLOT)}) {
+        prime_bars();
+        const auto o = fake::owner("mod:write-fault");
+        Script s;
+        s.flags = KUI_CURRENT | KUI_MAXIMUM;
+        s.current = 12; s.maximum = 24;
+        add_value(o, kind, 0, &scripted, &s);
+        fill_view_bytes(g_mem.record, 1, 0, 0xAA, 1, 9, 1, 2);
+        fill_view_bytes(g_mem.slot_view, 1, 0, 0xAA, 1, 9, 1, 2);
+        fill_bar(0.5f, 1, 2);
+        size_t attempts = 0;
+        env().write = +[](uintptr_t, const void*, size_t) { ++fake::writes; return false; };
+        if (kind == KUI_DETAIL) draw_detail(); else draw_slot();
+        attempts = fake::writes;
+        if (kind == KUI_DETAIL) draw_detail(); else draw_slot();
+        auto r = reg_record();
+        CHECK(attempts == 1 && fake::writes == attempts && fake::rows_off.size() == 1 &&
+              T()->subscribe(o, kind, 0, &pass, nullptr, &r) == KILN_ERR_UNAVAILABLE,
+              "write fault: bar kind %u stops immediately and stays off", kind);
+        fake::install();
+    }
+    prime_update();
+    const auto o = fake::owner("mod:pair-fault");
+    Script s; s.flags = KUI_CURRENT; s.current = 37;
+    add_value(o, KUI_HEALTH, 0, &scripted, &s);
+    add_value(o, KUI_MANA, 0, &scripted, &s);
+    CHECK(arm(), "write fault: arm pair test");
+    FakePlay p; p.entity(77); p.pair(KUI_HEALTH, 50, 100); p.pair(KUI_MANA, 50, 100);
+    env().write = +[](uintptr_t, const void*, size_t) { ++fake::writes; return false; };
+    update({{Event::Capture, &p}});
+    update({{Event::Capture, &p}});
+    CHECK(fake::writes == 1 && fake::rows_off.size() == 1 && !any(KUI_HEALTH) && !any(KUI_MANA),
+          "write fault: all HUD kinds stop on the first failed write");
+    fake::install();
+}
+
+void unknown_layout() {
+    prime_update();
+    fake::layout_supported = false;
+    auto r = reg_record();
+    CHECK(T()->subscribe(fake::owner("mod:unknown-exe"), KUI_HEALTH, 0, &pass, nullptr, &r) == KILN_ERR_UNAVAILABLE &&
+          fake::raws.empty() && fake::mids.empty(), "layout: matching signatures on an unmeasured image install nothing");
+}
+
+void write_layout_validation() {
+    for (const char* name : {"ui/play.health", "ui/play.healthMax", "ui/play.heldFuel", "ui/play.heldFuelMax"}) {
+        for (int64_t bad : {int64_t(-4), int64_t(0x3100), INT64_MAX, int64_t(0x580)}) {
+            prime_update();
+            fake::constants[name] = bad;
+            auto r = reg_record();
+            const uint32_t kind = std::strstr(name, "held") ? KUI_HELD : KUI_HEALTH;
+            CHECK(T()->subscribe(fake::owner("mod:bad-layout"), kind, 0, &pass, nullptr, &r) == KILN_ERR_UNAVAILABLE &&
+                  fake::raws.empty() && fake::mids.empty(), "layout: reject %s=%lld before hooking", name, (long long)bad);
+        }
+    }
+}
+
 }  // namespace
 
 int main() {
     fake::install();
+    runtime_write_faults();
+    write_layout_validation();
+    unknown_layout();
     table_and_arguments();
     quota();
     order_and_queued_changes();
