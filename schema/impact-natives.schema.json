@@ -29,6 +29,7 @@
           "argc": { "type": "integer", "minimum": 0, "maximum": 31, "description": "Values the ECALL pops (default: the length of args)." },
           "returns": { "type": "string" },
           "suspends": { "type": "boolean", "default": false, "description": "true for managed (C#) natives: the ECALL re-runs next step and then pushes the handler's value." },
+          "sync": { "type": "boolean", "default": false, "description": "Since 0.2.0-dev.29: a typed declaration of a synchronous native (Abilities.Natives.RegisterSync, [ImpactNative]). Every argument's \"type\" (one name, or \"any\") and \"size\" bind: kiln.abilities refuses a program that passes a variable of another type or size (E_ARGTYPE) and checks every call (0x2C, 0x18). Without it the entry declares the argc only, as before." },
           "doc": { "type": "string" },
           "query": { "type": "boolean" },
           "args": {
@@ -44,7 +45,8 @@
                 "dir": { "enum": ["in", "out", "inout"], "default": "in" },
                 "doc": { "type": "string" },
                 "optional": { "type": "boolean" },
-                "raw": { "type": "boolean", "description": "Accepts a raw integer (not only a variable handle)." }
+                "raw": { "type": "boolean", "description": "Accepts a raw integer (not only a variable handle)." },
+                "size": { "type": "integer", "minimum": 0, "maximum": 65535, "description": "Since 0.2.0-dev.29, with \"sync\": the variable's size in bytes (0 = any; omitted = the type's known size)." }
               },
               "x-kiln-unknownKeys": "warning"
             }

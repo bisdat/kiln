@@ -231,6 +231,40 @@ destroyed before the first run). Keys: a variable alias or debug name of the pro
   ECALL re-runs in the next step. Lab: `native Double(21) on impact 50331651 … site 0x7e570001` then `kiln.Log: … Out::value
   = 42` and `kiln.Signal tag 7 value 42`. A handler that throws completes the call with error 0x11 (the instance
   stops). `Abilities.Natives.Declare(fullName, argc)` lets a program that calls it pass the verifier first.
+- **Synchronous natives** (since 0.2.0-dev.29, capability `abilities.natives.sync`, server only):
+  `Abilities.Natives.RegisterSync(name, argc, handler)` → `NativeResult { Ok, Reason, Hash }`. The handler
+  (`NativeSyncHandler`: `byte (ref NativeCall call)`) runs inside the program's ECALL, in the same simulation step, on
+  the thread that runs `impact_simulation` (the server world's thread on a dedicated server, also in the lab's
+  forced-parallel window); its return value is what the ECALL pushes. It reads and writes the arguments through the
+  call (`GetU32/SetU32`, `GetFloat/SetFloat`, `VariableType`; `Bytes` for advanced mods); `CallOriginal()` throws
+  (there is none). No tick-thread API in it, no blocking: a handler over 0.2 ms is logged (the first call of each
+  handler is, while .NET compiles it). An exception answers 0x11 (that instance stops with Error). When the mod
+  unloads the native is taken off in that Pre: from then on its hash answers 0x1F. A game-state limit is `Ok = false`
+  (registry full, Kiln's native slots used up, the name taken or a vanilla native's), a bad name or argc
+  `ArgumentException`, the capability off `KilnUnavailableException`. Lab (`natives-only`): `PASS pass 1: sync native:
+  a program's signal arrives in its start step (0 steps; the suspending native: 1)`, `PASS ... a loop over 5 targets
+  with a sync native finishes in 1 step: 5 call(s), sum 10`, `PASS ... unload during a running cast: 0 calls after the
+  Pre that removed it`, `PASS registry full is Ok=false after 14 more sync native(s)`. `Register` (one step later, on
+  the tick thread) stays the tool for slow work and tick-thread API.
+- **Attachments to the game's programs** (since 0.2.0-dev.29, capability `abilities.natives.attach`, server only):
+  `Abilities.Natives.Attach(program, "getTransform", NativeStage.Before | Instead | After, handler, site, priority)` →
+  `AttachResult { Ok, Reason, Handle }` hooks one vanilla native's calls in one program (at one call site) without
+  cloning the program: the registry keeps the game's own (`Programs.Info(id).FromKiln` stays false). The filter
+  (program, site; 0 = any) is compared in native code, so other programs' calls never enter managed code. Every
+  matching Before runs (highest priority first) and may change arguments, `CallOriginal()` or `Return`; then, if none
+  answered, the one Instead for that native, program and site; then, if still undecided, the game's native, once; then
+  every After (lowest first; `CallOriginal()` does nothing there). The stages share one call record. Dispose the
+  handle to detach (from that Pre on the handler gets no call); a mod's attachments end when it unloads. `Ok = false`:
+  program not loaded, site not found, a second Instead, no free Kiln slot. Attached before the world has loaded its
+  programs, the program and site are checked then; one that is not there is logged and stays off. A game update that
+  rebuilds a program changes its sites ("site not found"). `Natives.Wrap` and `OnDamage` are Before attachments on
+  every call now (same order and behaviour; with an older kiln-abilities.dll they keep the global dispatcher). Only
+  calls of a native are reachable: a point between two natives, or a program rewritten in memory, are not (they need
+  registration of vanilla program ids, which `program_register` refuses). Lab: `PASS pass 1: Attach(0x7a120ee8,
+  "getTransform", site 0xfcce4e0a): 1 call per cast, 0 for other programs ..., FromKiln False`, `PASS ... the thunk
+  counter shows 0 managed transitions for non-matching calls`, `PASS ... stage order: Before x2, Instead, After, in
+  recorded order`, `PASS ... a second Instead is refused`, `PASS ... site not found is Ok=false`, `PASS ... detach during
+  a running cast: 0 calls after the Pre that removed it`.
 - **Built-ins**: `kiln.Log(value)` (one kiln.log line) and `kiln.Signal(value, tag)` → `ImpactSignalEvent`
   (`Tag`, `Value`, `AsInt/AsFloat/AsEntity`, `Impact`, `Site`). Neither suspends.
 - **Programs**: ship them as kiln.assets resources (`assets/assets.json`, kind `resource`, type
@@ -273,6 +307,27 @@ runtime verdict of each rule, and the C++ verifier matches all of them).
 
    Managed (C#) natives run on the tick thread: their ECALL suspends (result byte 1) and re-runs the next step, which
    then pushes the handler's value (`"suspends": true` in natives.json; the result is only valid after the resume).
+
+   **Typed declarations** (since 0.2.0-dev.29). kiln.abilities reads every loading mod's `impact/natives.json` when it
+   starts (the profile's enabled Kiln mods and the drop-ins of kiln/mods without `.disabled`; kiln.log: `impact/
+   natives.json of N mod(s): T typed and A argc-only declaration(s)`), before any program is verified. An entry with
+   `"sync": true` is a typed declaration: each argument's `"type"` (one impact type name, or `"any"`) and `"size"`
+   (bytes; omitted = the type's known size) bind, with `"optional"` (may be 0, not connected) and `"raw"` (takes a raw
+   integer). Any other entry declares the argc only, as before (its argument types stay notes for the cook). The same
+   from C#: `Abilities.Natives.DeclareTyped(fullName, params NativeArg[])`; natively `native_declare_typed`. With a typed
+   declaration:
+   - the verifier refuses a program whose ECALL pushes (ICONST/ICONST0/ICONST1 right before it) a variable of another
+     type or size, a raw value for a variable argument, or nothing for a required one: `E_ARGTYPE: code pc 4: native
+     0x0d6eb872 args[1] is variable 2 (type 0xe89f7410, 4 bytes); it takes type 0x9859f31e (4 bytes)`. A call of a
+     native declared by argc only and not registered yet passes with a `W_ARGTYPE` warning in kiln.log;
+   - every call (sync or managed) is checked before its handler runs: another type or size, a raw value, a handle
+     out of the layout or the data: 0x2C; a required argument not connected: 0x18 (the instance stops with Error; the
+     handler is not called). This also covers programs registered before the declaration.
+   - the cook (`tools/impact`) reports the same type mismatch as an error (`E_ARGTYPE`) instead of `W_ARGTYPE`.
+   Lab: `PASS a program passing float32 to an int parameter is refused at registration (E_ARGTYPE)`, `PASS an
+   argc-only declaration still warns`, `PASS ... and answers 0x2C at run time once the native is typed: 1 call refused
+   0x2C (float32 for int), 1 refused 0x18 (not connected), 0 handler call(s)`, `PASS types
+   sint32/float32/bool/Time/EntityId/WorldTransform round trip`.
 3. **Arguments.** ECALL pops `argc` (≤ 31) values; `args[0]` = the top of the stack (the last value pushed), which is
    the game's own convention (applyDamage `args[0]` = wasBlocked output, `args[1]` = root attacker, `args[2]` =
    target). A value is a variable handle `0xFFFF0000 | index` (resolved through the native context's
@@ -294,7 +349,7 @@ runtime verdict of each rule, and the C++ verifier matches all of them).
      sint32 `0x9859f31e`, float32 `0xe89f7410`, bool `0xc894953d`, Time `0xdfe4e404`; COPY operands are variable name
      hashes of two present variables of the same type; variable `offsetInBytes + size` inside `data`;
    - every ECALL hash is a vanilla native, a live Kiln native or one declared in a loaded mod's `impact/natives.json`,
-     with the matching argc (the blob carries no argc);
+     with the matching argc (the blob carries no argc); a typed declaration's argument types and sizes (above);
    - every ECALL site that calls a query native (forEachEntityWithFactionInRange `0x19143416`, destroyFactionQuery
      `0x93e40aa9`, forEachPlayerInRange `0xa8787e70`, destroyPlayerQuery `0x22a62ea4`, entityInRangeWithFaction
      `0x61946152`) is listed in `queryCallIds` (createImpactInstance preallocates query state only for those sites);
@@ -323,7 +378,12 @@ Kiln.Abilities; it gets every event of the previous step in Pre as an array of 6
 its interest mask, `KILN_ABILITY_INTEREST_HOLD` for holds), `hold_filter`, `instance_vars/read/write/info`,
 `entity_overrides` (config overrides for the next instance on an entity: by config id, name hash or index),
 `program_count/info/vars/register/refresh`, `native_count/at/find/declare/register/unregister/complete/wrap/observe`,
-`set_wrap_dispatcher`, `call_original`, `release_owner`, `attr_get/attr_add`, `sequence_state`, `sequence_play`.
+`set_wrap_dispatcher`, `call_original`, `release_owner`, `attr_get/attr_add`, `sequence_state`, `sequence_play`;
+appended in 0.2.0-dev.29 (check `header.size`): `native_register_sync` (a native answered inside the call by its own
+`fn`, refusals as `KILN_NATIVE_REFUSED_*`), `native_counters` (`KilnNativeCounters`: calls in flight, sync calls,
+faults, calls over budget, calls of a removed native, attachment callbacks entered and filters that skipped a call,
+calls a typed declaration refused), `native_attach` / `native_detach` (one callback per attachment,
+`KilnNativeFilter`, stages `KILN_NATIVE_BEFORE / INSTEAD / AFTER`), `native_declare_typed` (`KilnNativeArg`).
 
 How it hooks (all fail soft; `kiln.abilities: natives on, programs on, instances on, attributes on, sequences on`):
 - `registerNative` (0x996b80) is detoured at boot to capture the game's 107 natives per registry; at the server
@@ -338,9 +398,16 @@ How it hooks (all fail soft; `kiln.abilities: natives on, programs on, instances
 
 ## Costs and limits
 - Without subscribers the hot paths are one atomic load each (createImpactInstance, runImpact, the three wrapped
-  natives).
+  natives); since 0.2.0-dev.29 every native thunk also counts itself in and out (two atomic adds).
+- The game's native registry takes 128 natives (half its capacity of 256; measured in the lab on server 26430253),
+  107 of them its own: Kiln's built-ins and every mod's `Register`/`RegisterSync` natives share the other 21 (wraps of
+  vanilla natives need none). A refused registration says so (`Ok = false`, "native registry full"). A native that was
+  taken off keeps its entry for the rest of the process (its hash answers 0x1F); registering the same name again
+  reuses it.
 - A hold delays the first run of the held programs' new instances by one step; a managed native delays its ECALL by
-  one step per call (a loop over 5 targets takes 5 steps); fire-and-forget work belongs in `kiln.Signal`.
+  one step per call (a loop over 5 targets takes 5 steps; a synchronous native: all in one step); fire-and-forget work
+  belongs in `kiln.Signal`.
+- A synchronous native's handler holds up `impact_simulation`, and with it the server's step, for as long as it runs.
 - Programs are verified, never trusted: see the contract. A program is copied into memory that is never freed
   (running instances read their code live).
 - Vanilla clients: tooltips and local prediction stay vanilla (a tweaked mana cost or damage shows vanilla numbers in
@@ -355,7 +422,10 @@ mkdir -p ~/srv/enshrouded/labs/<lab>/kiln/data/kiln.abilities && touch ~/srv/ens
 tools/lab/lab.sh start <lab>
 grep -a abilities-test ~/srv/enshrouded/labs/<lab>/kiln/logs/kiln.log    # ... summary: 73 PASS, 0 FAIL
 ```
-It spawns Vukahs and explosions 40+ m from the copied world's flame altar and removes them.
+It spawns Vukahs and explosions 40+ m from the copied world's flame altar and removes them. The natives v2 rows
+(`NativesV2*.cs`, package 06c) run at the end, or alone with `kiln/data/abilities-test/natives-only`; with
+`kiln/control/systems.parallel` they run a second time inside a forced-parallel window, and the unload row needs
+`mods/tests/natives-helper` deployed (built like abilities-test).
 
 The key path without a client: with `"labPort"` in the lab's `kiln/config/network.json`, a fake Kiln client
 (tools/nettest's `Client`) that sends `CastRequest("firenova:fire-nova")` on `kiln:abilities` gets
