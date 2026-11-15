@@ -493,8 +493,14 @@ QueryAnswer page_query(const Sidecars& sc, uintptr_t registry, ReadLive&& read_l
         a.why = Sidecars::Bit::Unreadable;
         return a;
     }
-    if (index < kPage || live.status != 0) return a;
+    if (index < kPage) return a;
     a.kind = QueryAnswer::Kind::Kept;
+    // Never dispatch a known extra entry to the modulo-64 reader, even for an invalid cache:
+    // a setter can make that cache valid between this read and the original call.
+    if (live.status != 0) {
+        a.why = Sidecars::Bit::Stale;
+        return a;
+    }
     uint32_t kind = kKindUnknown, session = 0;
     const Sidecars::Owner o = sc.owner(registry, &kind, &session);
     if (o != Sidecars::Owner::Found) {
@@ -526,7 +532,8 @@ QueryAnswer page_query(const Sidecars& sc, uintptr_t registry, ReadLive&& read_l
 // equals the cache's value; false otherwise (the knowledge moved: the producer computes in the step anyway).
 template <class Eval>
 bool recompute(const LiveCache& live, const Span& span, uint64_t stride, uint8_t error_status, void* ctx, Eval&& eval,
-               Pending* out) {
+               Pending* out, bool allow_recovery = true) {
+    if (!allow_recovery) return false;  // client evaluator safety outside its program is not established
     if (live.status != 0 || live.count <= kPage || live.count > kExpanded || span.count != live.count || span.ptr != live.span_ptr)
         return false;
     Result16 r{};

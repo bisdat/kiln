@@ -77,7 +77,8 @@ inline bool can_stop_start(const KilnApi* api) {
 
 // Stops the start through kiln.boot (kiln_boot.h stop_start: the issue per mod, the stop line, boot.json and
 // progress.json "failed", `before_exit`, then the process ends with `code`). Does not return when it works. false:
-// this kiln.boot has no such call, or a stop is under way already: the caller ends the process itself.
+// this kiln.boot has no such call, a stop is under way already, or a world is present. Never use a direct-exit
+// fallback while a world is present: the shared call refuses it to preserve unsaved play.
 inline bool stop_start(const KilnApi* api, KilnOwner caller, const std::string& mods_csv, const std::string& reason, uint32_t code,
                        void(KILN_CALL* before_exit)(void*) = nullptr, void* user = nullptr) {
     if (!can_stop_start(api)) return false;

@@ -75,8 +75,9 @@ public sealed partial class ClientPassMod
         c.Expect(On(sw, e0.NpcId) == s0 && On(cw, e0.NpcId) == s0, "entry 0 did not move in either world", $"server {On(sw, e0.NpcId)}, client {On(cw, e0.NpcId)}");
         // each world bound its own registry and the game's own evaluation of it attached a page (once per process and world)
         var log = ReadKilnLog();
-        // and the context the game passed is that world's G38Knowledge (a lost page is computed again only with it): "is NOT"
-        // fails here, and so does no line at all
+        // and the context the game passed is that world's G38Knowledge: "is NOT" fails here, and so does no line at all. A game
+        // client computes no lost page again (that stays off until the client evaluator is shown safe outside its program);
+        // this line is the evidence a later client recomputation needs
         foreach (var w in new[] { "server", "client" })
         {
             var not = log.Contains($"roster: the {w} world's evaluator context is NOT", StringComparison.Ordinal);

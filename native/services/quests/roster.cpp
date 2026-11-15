@@ -24,10 +24,11 @@
 // invalid" status 1, which its only caller (unique_npc_spawns) treats like an unlocked NPC: kept (counted: no page,
 // stale, unowned, moved, busy). Everything else goes to the game as it was asked.
 //
-// A page that is missing for a computed cache (a setter that did not pair, a busy lock, a world that bound its
-// registry late) is computed again at that world's next Pre, where nothing of its step runs: the game's evaluator on
+// On a dedicated server, a page missing from a computed cache (a setter that did not pair, a busy lock, a world
+// that bound its registry late) is computed again at that world's next Pre, where nothing of its step runs: the game's evaluator on
 // the knowledge context the game itself passed for that world, kept only when it agrees with the cache (page 0 and
-// version); at most twice per cache. Without that, status 1 would last until the knowledge next changes.
+// version); at most twice per cache. On clients recovery stays off until verified; missing pages stay kept
+// until the game's next evaluation.
 //
 // A roster the boot build cannot hold (more than 128 entries, or more than 64 where the second page cannot be
 // installed) stops the start at ResourceInit, before any world loads (roster_refuse_start): a world loaded without the
@@ -357,6 +358,9 @@ WorldSeen* resolve(uint32_t kind) {
 
 // A lost page (a computed cache of more than 64 entries without its page), computed again at the world's safe point.
 void recover(uint32_t kind, WorldSeen& w) {
+    // Neither hosted-server nor client-world recovery may call the client executable's evaluator
+    // outside its program until its side effects and context lifetime have been verified in a client.
+    if (g_client) return;
     LiveCache live;
     if (!read_live(w.reg, &live) || !g_sidecars.wants_page(kind, w.session, w.reg, live)) {
         w.tries = 0;
@@ -388,7 +392,7 @@ void recover(uint32_t kind, WorldSeen& w) {
                                       *r = Result16{static_cast<uint8_t>(R.eval_error), {}, 0, 0};
                                   }
                               },
-                              &p);
+                              &p, !g_client);
     LiveCache again;
     if (ok && !fault && read_live(w.reg, &again) && again == live && g_sidecars.attach(w.reg, p) == Sidecars::Attach::Attached) {
         const uint64_t n = c_recovered.fetch_add(1, std::memory_order_relaxed) + 1;
@@ -473,6 +477,16 @@ void KILN_CALL on_client_post(const KilnTickInfo* tick, void*) { post(KILN_WORLD
 
 void want() {
     if (!g_wanted.exchange(true, std::memory_order_acq_rel)) KI("roster: a mod reads the roster: each world publishes its snapshot after its step");
+}
+
+// A world is present now, or one has run in this process (KilnApi.session): the start phase is over.
+bool world_started() {
+    KilnSessionInfo s{};
+    s.size = sizeof s;
+    if (g_api->size < offsetof(KilnApi, session) + sizeof(void*) || g_api->session(&s) != KILN_OK) return false;
+    for (uint32_t k = 0; k < KILN_WORLD_KINDS; ++k)
+        if (s.worlds[k] || s.sessions[k]) return true;
+    return false;
 }
 
 // The player's message when the roster stops a game client's start: owned by the game's window when it has one, so it
@@ -691,6 +705,13 @@ bool npc_unlock_pages(uintptr_t registry, uint64_t pages[2], uint32_t* npages, u
 }
 
 void roster_refuse_start(const std::string& why, const std::vector<std::string>& mods) {
+    // a start-time call only: a world present now or run in this process (ending it could lose play) is not stopped
+    const auto cannot_stop = [] {
+        KE("roster: the start could NOT be stopped: a world already ran in this process, and ending it now could lose play. "
+           "These mods' native quests, knowledge and NPCs are not built; a world saved now drops their progress. Quit and fix "
+           "the mod list");
+    };
+    if (world_started()) return cannot_stop();
     std::string list, csv;
     for (const std::string& m : mods) list += (list.empty() ? "" : ", ") + m, csv += (csv.empty() ? "" : ",") + m;
     if (list.empty()) list = "(none named)";
@@ -744,7 +765,13 @@ void roster_refuse_start(const std::string& why, const std::vector<std::string>&
                     "say more. This message closes by itself after 60 seconds.");
     kiln::boot::stop_start(g_api, g_owner, csv, "kiln.knowledge: " + why + "; mods: " + list + ". " + advice, KILN_KNOW_ROSTER_EXIT_CODE,
                            g_client ? &show_box : nullptr, &box);
-    // without kiln.boot's call (or a stop already under way): the same by hand
+    // kiln.boot did not stop the start. A world present now or run in this process (kiln.boot refuses then too): ending
+    // the process could lose play, so it goes on, loudly (a start-time call only; not seen in the lab)
+    if (world_started()) return cannot_stop();
+    // a stop under way already (another service): it ends the process within its bound
+    if (kiln::boot::can_stop_start(g_api))
+        for (;;) Sleep(1000);
+    // an older kiln.boot without stop_start: the same by hand (no boot.json stop record, no progress.json "failed")
     if (g_client) show_box(&box);
     const std::wstring log = kiln_path(KILN_PATH_LOGS, "kiln.log");  // the log line on disk first (its writer is a thread)
     const ULONGLONG until = GetTickCount64() + 1500;

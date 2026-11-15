@@ -576,7 +576,7 @@ void build_once() {
             build_locked(nullptr, nullptr, &left_out, &stop);
         }
     }
-    if (stop.set) roster_refuse_start(stop.why, stop.mods);  // before any world loads; does not return
+    if (stop.set) roster_refuse_start(stop.why, stop.mods);  // before any world loads; returns only after a world ran
     // a required boot mod whose native data the build left out: kiln.boot stops the start (the call does not return then)
     for (const LeftOut& l : left_out) kiln::boot::activation_fault(g_api, g_owner, l.mod, "knowledge", "", "kiln.knowledge: " + l.why);
 }
@@ -649,6 +649,7 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
         if (stop.set) {  // before any world loads; does not return (the lock goes first)
             g_mu.unlock();
             roster_refuse_start(stop.why, stop.mods);
+            g_mu.lock();  // only when a world ran already (not at a boot generation's prepare): the build stays refused
         }
         if (!left_out.empty()) {  // built in prepare: a required mod the build left out is refused here (destroy takes the build back)
             const LeftOut first = left_out.front();
@@ -684,7 +685,7 @@ void native_pack_ready() {
         size_t n = 0;
         if (res_read(gk, qb::kTypeKnowledge, &p, &n)) build_locked(nullptr, nullptr, nullptr, &stop);
     }
-    if (stop.set) roster_refuse_start(stop.why, stop.mods);  // before any world loads; does not return
+    if (stop.set) roster_refuse_start(stop.why, stop.mods);  // before any world loads; returns only after a world ran
 }
 
 std::string native_pack_manifest() {
