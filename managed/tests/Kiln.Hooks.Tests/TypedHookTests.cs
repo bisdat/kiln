@@ -424,6 +424,37 @@ public sealed unsafe class TypedHookTests : IDisposable
         finally { c->DetourTypedChecked = member; }
     }
 
+    [Fact]
+    public void InARunningWorldAFewHooksGoInPerSafeTickAndTheRestAtTheNext()
+    {
+        FakeTyped.InstallReady = 1;  // a running world's Pre: each first detour stops the game's other threads
+        long now = 1_000_000;
+        TypedHooks.InstallClock = () => now;
+        TypedHooks.ResetInstallTurns();
+        var mod = Mod();
+        var asked = TypedHooks.InstallsPerSafeTick + 3;
+        var results = new List<HookResult>();
+        for (var i = 0; i < asked; i++) results.Add(TestMods.As(mod, () => TypedHooks.Detour(Six, _ => { })));
+        Assert.All(results, r => Assert.True(r.Ok));
+        Assert.Equal(TypedHooks.InstallsPerSafeTick, results.Count(r => r.Handle!.State == HookRegistrationState.Installed));
+        Assert.Equal(3, results.Count(r => r.Handle!.State == HookRegistrationState.Pending));
+        Assert.Equal(TypedHooks.InstallsPerSafeTick, FakeTyped.CheckedCalls);
+        TestMods.DrainPending(mod);  // the same tick: its turns are used up
+        Assert.Equal(TypedHooks.InstallsPerSafeTick, FakeTyped.CheckedCalls);
+        Assert.Equal(3, results.Count(r => r.Handle!.State == HookRegistrationState.Pending));
+        now += System.Diagnostics.Stopwatch.Frequency / 50;  // the next tick, 20 ms later
+        TestMods.DrainPending(mod);
+        Assert.All(results, r => Assert.Equal(HookRegistrationState.Installed, r.Handle!.State));
+        Assert.Equal(asked, FakeTyped.CheckedCalls);
+
+        // with no world running nobody is paused: no limit
+        FakeTyped.InstallReady = 2;
+        TypedHooks.ResetInstallTurns();
+        var free = new List<HookResult>();
+        for (var i = 0; i < TypedHooks.InstallsPerSafeTick * 3; i++) free.Add(TestMods.As(mod, () => TypedHooks.Detour(Six, _ => { })));
+        Assert.All(free, r => Assert.Equal(HookRegistrationState.Installed, r.Handle!.State));
+    }
+
     [Theory]
     [InlineData(true)]   // asked for where it can install now (Pre, or no world): the first attempt is immediate
     [InlineData(false)]  // asked for during a step: pending first, every attempt at a later safe tick

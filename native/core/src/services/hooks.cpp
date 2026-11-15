@@ -359,12 +359,14 @@ KilnResult KILN_CALL h_validate_typed(KilnStr symbol, uintptr_t expected_address
     });
 }
 
+// 0: not now. 1: on the authoritative (or joined client's) Pre thread: a world runs, and a first detour on a target
+// stops the player's game for its check, so the caller paces its installations. 2: no live world: nobody is playing.
 uint32_t KILN_CALL h_typed_install_ready() {
     if (tick::typed_install_pre()) return 1;
     KilnSessionInfo s{}; s.size = sizeof s;
     if (tick::session(&s) != KILN_OK) return 0;
     for (auto w : s.worlds) if (w) return 0;
-    return 1;
+    return 2;
 }
 
 // detour_typed and detour_typed_checked: the same descriptor check and link; `unchecked` (the checked member) gives the
