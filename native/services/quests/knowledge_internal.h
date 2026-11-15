@@ -101,8 +101,9 @@ void roster_world_event(const KilnWorldEvent* e);
 // The boot build could not hold the mods' roster (more than 128 entries, or more than 64 where the second page cannot be
 // installed): the start stops here, before any world loads (the error line, kiln/state/roster-refused.json, kiln.boot's
 // activation fault for each mod, on a client a message box; then the process ends with KILN_KNOW_ROSTER_EXIT_CODE).
-// Call with no lock held. Does not return.
-[[noreturn]] void roster_refuse_start(const std::string& why, const std::vector<std::string>& mods);
+// Call with no lock held. Does not return, except when a world is present or has run in this process already (a
+// start-time call only: ending the process then could lose play): then it logs that the start could not be stopped.
+void roster_refuse_start(const std::string& why, const std::vector<std::string>& mods);
 // One registry's pages (as npc_unlock_pages_server, for any registry).
 bool npc_unlock_pages(uintptr_t registry, uint64_t pages[2], uint32_t* npages, uint16_t* version, uint32_t* count);
 KilnResult KILN_CALL roster_world(uint32_t kind, uint32_t* out_generation, uint32_t* out_readiness);

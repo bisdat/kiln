@@ -347,7 +347,11 @@ typedef struct KilnKnowledgeStatus {
  * (schema/state-roster-refused.schema.json; the next start moves it to roster-refused.last.json), an error line in
  * kiln.log, then kiln.boot's stop_start (its stop line, progress.json "failed", boot.json "boot"."stop"), on a game
  * client a message box that closes after 60 s, and the process ends with KILN_KNOW_ROSTER_EXIT_CODE (a Linux parent
- * under Wine sees 2). Nothing may restart on it: the next start stops the same way.
+ * under Wine sees 2). Nothing may restart on it: the next start stops the same way. A start-time act only: once a
+ * world is present or has run in this process, nothing is stopped (an error line says so). Beside an older kiln.boot
+ * without stop_start, kiln.knowledge stops by itself (no boot.json stop record, no progress.json "failed"); an older
+ * kiln.knowledge cannot be made to stop: run one matched bundle. A lost page is computed again on a dedicated server
+ * only; a game client keeps its ids "kept" until the game's own next evaluation.
  *
  * world_kind: KILN_WORLD_SERVER (0, this process's server world, a hosting client's included) or KILN_WORLD_CLIENT
  * (2, this process's client world). Prediction (1) and any other value: KILN_ERR_INVALID_ARGUMENT. A generation is

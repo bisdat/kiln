@@ -25,6 +25,7 @@
 #include "profile.h"
 #include "progress_state.h"
 #include "sigdb.h"
+#include "stop_facts.h"
 #include "tick.h"
 #include "services/hooks_internal.h"
 #include "services/service.h"
@@ -51,7 +52,7 @@ void bound();
 bool after_clr(bool clr_started, void (*write_state)(void* user, const std::string& last_line), void* user);
 nlohmann::json report();
 void late_hold(void (*write_state)(void* user, const std::string& last_line), void* user);
-void stop_writer(void (*write_state)(void* user, const std::string& last_line, const std::string& why), void* user);
+void stop_writer(void (*write_state)(void* user, const std::string& last_line, const std::string& why, uint32_t code), void* user);
 }  // namespace kiln::boot_svc
 
 namespace kiln {
@@ -434,13 +435,14 @@ const char* game_label(uint32_t side) {
 
 // `file` holds `text`: waited for, bounded, before the process ends. kiln.log's and progress.json's writers are threads
 // of their own with no flush (each writes in order), so their last words are on disk once the text is there.
-void wait_for_file_text(const std::filesystem::path& file, const std::string& text) {
+bool wait_for_file_text(const std::filesystem::path& file, const std::string& text) {
     const double until = now_ms() + 1000;
     std::string got;
     while (now_ms() < until) {
-        if (read_file(file, &got) && got.find(text) != std::string::npos) return;
+        if (read_file(file, &got) && got.find(text) != std::string::npos) return true;
         Sleep(10);
     }
+    return false;
 }
 
 // boot_svc::after_clr's hold path: the start stops before the game's entry point. What the launcher reads is written
@@ -458,34 +460,64 @@ void hold_boot(void* user, const std::string& last_line) {
     wait_for_file_text(paths().logs / L"kiln.log", last_line);
 }
 
+// The facts a stop writes boot.json from, from any thread (stop_facts.h): boot() publishes a copy after each change of
+// its own facts, from the moment a service may stop the start; never destroyed.
+FactsBox<BootFacts>& g_facts = *new FactsBox<BootFacts>;
+
 // kiln.boot's stop after the entry point (a required boot mod whose published content could not be applied,
 // boot_svc b_activation_fault): the same state files as hold_boot, from the facts boot() ended with.
-BootFacts* g_late_facts = nullptr;
 void late_hold_boot(void*, const std::string& last_line) {
-    if (!g_late_facts) return;
     const std::string why = "a required boot mod's content could not be applied, so Kiln stopped the start (no save loads "
                             "without it); boot.json \"boot\" says which mod and why";
+    bool published = false;
+    g_facts.with([&](BootFacts& lf) {
+        published = true;
+        lf.errors.push_back(why);
+        write_boot_json(lf);
+    });
+    if (!published) return;
     progress_state::failed(why);
-    g_late_facts->errors.push_back(why);
-    write_boot_json(*g_late_facts);
     wait_for_file_text(paths().state / L"progress.json", "\"failed\"");
     wait_for_file_text(paths().logs / L"kiln.log", last_line);
 }
 
-// A service's stop (kiln.boot stop_start: kiln.knowledge's roster that cannot be held), before or after the game's
-// entry point: the same files as hold_boot and late_hold_boot, from boot()'s facts while it runs and from the facts it
-// ended with afterwards.
-std::atomic<BootFacts*> g_stop_facts{nullptr};
-std::atomic<bool> g_stop_before_entry{true};
-void stop_state(void*, const std::string& last_line, const std::string& why) {
-    progress_state::failed(why);
-    if (BootFacts* f = g_stop_facts.load()) {
-        f->errors.push_back(why);
-        write_boot_json(*f);
+// boot.json's "boot"."stop" says `code`: waited for like the other files (bounded).
+bool wait_for_stop_record(const std::filesystem::path& file, uint32_t code) {
+    const double until = now_ms() + 1000;
+    std::string got;
+    while (now_ms() < until) {
+        if (read_file(file, &got)) {
+            const auto doc = nlohmann::json::parse(got, nullptr, false);
+            if (doc.is_object() && doc.contains("boot") && doc["boot"].is_object() && doc["boot"].contains("stop") &&
+                doc["boot"]["stop"].is_object() && doc["boot"]["stop"].value("code", 0u) == code)
+                return true;
+        }
+        Sleep(10);
     }
+    return false;
+}
+
+// A service's stop (kiln.boot stop_start: kiln.knowledge's roster that cannot be held), before or after the game's
+// entry point: the same files as hold_boot and late_hold_boot, from the facts boot() published last (g_facts: never
+// boot()'s own frame, so any thread may call this at any moment). Best effort: it writes progress.json and boot.json,
+// then waits, a second at most each, until progress.json says "failed", boot.json holds the stop record and kiln.log
+// the stop line; that is text another reader can see, not a flush of every file to the disk. At a bound it goes on and
+// says which file it did not see.
+std::atomic<bool> g_stop_before_entry{true};
+void stop_state(void*, const std::string& last_line, const std::string& why, uint32_t code) {
+    progress_state::failed(why);
+    const bool facts = g_facts.with([&](BootFacts& f) {
+        f.errors.push_back(why);
+        write_boot_json(f);
+    });
     if (g_stop_before_entry.load()) caps::boot_complete();  // capabilities.json is not written yet before the entry point
-    wait_for_file_text(paths().state / L"progress.json", "\"failed\"");
-    wait_for_file_text(paths().logs / L"kiln.log", last_line);
+    std::string missed;
+    if (!wait_for_file_text(paths().state / L"progress.json", "\"failed\"")) missed += " progress.json";
+    if (!facts) missed += " boot.json (no facts published yet)";
+    else if (!wait_for_stop_record(paths().state / L"boot.json", code)) missed += " boot.json";
+    if (!missed.empty()) KLOG_W("boot: the stop goes on without seeing its record in:%s (a second each at most)", missed.c_str());
+    if (!wait_for_file_text(paths().logs / L"kiln.log", last_line))
+        KLOG_W("boot: the stop goes on without seeing its line in kiln.log (a second at most)");
 }
 
 void boot() {
@@ -581,12 +613,9 @@ void boot() {
     // is published after OnBoot: decided here, so the collectors know it in kiln_plugin_main and on_ready.
     boot_svc::decide(hooks, f.safe_idle);
 
-    // a service may stop the start from here on (kiln.boot stop_start): its files come from these facts until boot ends
-    g_stop_facts.store(&f);
-    struct StopFactsScope {  // boot() left early (host tests, an exception): no stop may write a dead frame's facts
-        BootFacts* mine;
-        ~StopFactsScope() { g_stop_facts.compare_exchange_strong(mine, nullptr); }
-    } stop_scope{&f};
+    // a service may stop the start from here on (kiln.boot stop_start): its files come from the copy of these facts
+    // published after each change below (g_facts), never from this frame
+    g_facts.publish(f);
     boot_svc::stop_writer(&stop_state, nullptr);
     if (hooks) load_plugins();  // kiln/services/*.dll, then plugins (profile-aware), then on_ready
     else progress_state::step("plugins");
@@ -594,6 +623,7 @@ void boot() {
     if (hooks) arm_unload();    // on_unload at the process's exit call
     for (const auto& p : plugin_records())
         if (std::string_view(p.status) == "failed") f.errors.push_back("plugin " + p.file + ": " + p.error);
+    g_facts.publish(f);
     progress_state::step("native");
     native_mods::run_boot();
     native_mods::arm_world(hooks);
@@ -602,9 +632,11 @@ void boot() {
     if (config().clr) {
         progress_state::step("dotnet", {}, "Kiln.Host");
         f.clr_tried = true;
+        g_facts.publish(f);  // a boot generation's prepare (inside clr::boot) may stop the start
         f.clr_started = clr::boot(api());
         if (!f.clr_started) f.clr_error = "the .NET host did not start (kiln.log, [clr] lines)";
     }
+    g_facts.publish(f);
     // Kiln.Host ran the boot mods' OnBoot and committed their generation inside clr::boot. In a boot profile anything but
     // a published generation keeps the entry point held and ends the process (KILN_BOOT_EXIT_CODE): no save loads
     // without its mods' content. The commit sits before chain.ini [late] DLLs and before the game's entry point.
@@ -612,9 +644,8 @@ void boot() {
     native_mods::run_late();  // chain DLLs named in kiln/chain.ini [late]: after everything Kiln hosts hooked
     check_entry_patch(f);
     write_boot_json(f);
-    g_late_facts = new BootFacts(f);  // never freed: kiln.boot may need it at any later moment
+    g_facts.publish(f);  // the facts boot ended with: a later stop or late hold writes from these
     boot_svc::late_hold(&late_hold_boot, nullptr);
-    g_stop_facts.store(g_late_facts);  // a later stop (the game's resource start) writes from the facts boot ended with
     g_stop_before_entry.store(false);
     caps::boot_complete();  // capabilities.json, then a write after each change (at most one a second)
     hooks::boot_complete();  // state/hooks.json + the foreign-hook check (kiln.hooks v2)
