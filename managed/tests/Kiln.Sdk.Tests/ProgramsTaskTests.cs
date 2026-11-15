@@ -75,6 +75,55 @@ public class ProgramsTaskTests
     }
 
     [Fact]
+    public void Unchanged_output_keeps_its_timestamp()
+    {
+        var dir = Directory.CreateTempSubdirectory("kiln-programs-").FullName;
+        try
+        {
+            var path = Path.Combine(dir, "kiln.programs.json");
+            var task = new KilnPrograms { BuildEngine = new Engine(), AssemblyPath = Self, ProgramsPath = path };
+            Assert.True(task.Execute());
+            var stamp = new DateTime(2001, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            File.SetLastWriteTimeUtc(path, stamp);
+            Assert.True(task.Execute());
+            Assert.Equal(stamp, File.GetLastWriteTimeUtc(path));
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
+    [Fact]
+    public void Removing_last_query_removes_stale_generated_output_and_preserves_source_entries()
+    {
+        var dir = Directory.CreateTempSubdirectory("kiln-programs-").FullName;
+        try
+        {
+            var path = Path.Combine(dir, "kiln.programs.json");
+            var source = Path.Combine(dir, "source.json");
+            var task = new KilnPrograms { BuildEngine = new Engine(), AssemblyPath = Self, ProgramsPath = path };
+            Assert.True(task.Execute());
+            task.AssemblyPath = typeof(KilnPrograms).Assembly.Location; // no Query attributes
+            Assert.True(task.Execute());
+            Assert.False(File.Exists(path));
+            Assert.Equal("", task.Written);
+            File.WriteAllText(source, """{"format":1,"programs":{"manual":{"read":["Fuel"],"flags":[]}}}""");
+            task.SourcePath = source;
+            Assert.True(task.Execute());
+            Assert.NotNull(JsonNode.Parse(File.ReadAllText(path))!["programs"]!["manual"]);
+            File.WriteAllText(source, "broken json");
+            Assert.False(task.Execute());
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
+    [Fact]
+    public void Two_query_types_with_the_same_key_are_refused_even_if_lists_match()
+    {
+        var q = KilnPrograms.Find(Self)[0];
+        var result = KilnPrograms.Merge(null, [q, q with { Type = "OtherType" }]);
+        Assert.Contains(result.Problems, p => p.Contains("same key"));
+    }
+
+    [Fact]
     public void Each_Query_struct_becomes_one_kiln_programs_json_entry_under_the_key_Define_binds()
     {
         var found = KilnPrograms.Find(Self).OrderBy(q => q.Key, StringComparer.Ordinal).ToList();

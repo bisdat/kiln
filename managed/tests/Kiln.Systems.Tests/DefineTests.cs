@@ -52,6 +52,26 @@ public sealed unsafe class DefineTests
     }
 
     [Fact]
+    public void Defined_handler_refuses_tick_APIs_even_on_world_thread_and_restores_guard()
+    {
+        using var w = World();
+        var mod = NewMod("define-guard");
+        w.Reserved.Add(("define-guard", "my_wells"));
+        w.ReservedSlots[1] = ["Fuel"];
+        var blocked = 0;
+        var r = InMod(mod, () => Systems.Define("my_wells", new ProgramOptions(), (ref Wells e) =>
+        {
+            try { Services.RequireTickThread("test mutation"); }
+            catch (InvalidOperationException) { blocked++; }
+        }));
+        Assert.True(r.Ok);
+        w.RunDefined();
+        Assert.Equal(w.EntityIds.Length, blocked);
+        Services.RequireTickThread("after callback");
+        r.Dispose();
+    }
+
+    [Fact]
     public void Define_binds_its_query_s_boot_reservation_and_runs_once_per_entity_with_the_typed_query()
     {
         using var w = World();
