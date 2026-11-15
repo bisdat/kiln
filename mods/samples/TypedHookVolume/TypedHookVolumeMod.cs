@@ -20,9 +20,10 @@ public sealed class TypedHookVolumeMod : Mod
         {
             if (m.Sender != "client-pass" || m.Payload is not long[] { Length: 2 } q) return;
             if (q[1] is 0 or 1) Volatile.Write(ref _enabled, (int)q[1]);
+            // the hook's state: 1 installed, 0 pending (installs at a safe tick), 2 refused, 3 removed, -1 no hook asked for
             Mods.Send(m.Sender, "typed-proof-result", new long[] { q[0], Volatile.Read(ref _enabled),
                 Interlocked.Read(ref _controlCalls), Interlocked.Read(ref _enabledCalls), Interlocked.Read(ref _enabledEdits),
-                _hook?.State == HookRegistrationState.Installed ? 1 : 0 });
+                _hook is { } h ? (long)h.State : -1 });
         });
         // the typed link kind, and this function's descriptor fitting its code on this game build
         if (!Capabilities.Is("hooks.typed") || !Capabilities.Is(GetItemVolume.Capability))
@@ -37,7 +38,10 @@ public sealed class TypedHookVolumeMod : Mod
             return;
         }
         _hook = r.Handle;
-        Log.Info($"every item's volume doubled (GetItemVolume of a null item: {GetItemVolume.Invoke(0).Value})");
+        // Pending: asked for during a step, it goes in at the next safe tick (a late refusal is logged by Kiln and its
+        // handle's State says Refused, with the Reason)
+        Log.Info(r.Pending ? "every item's volume is doubled once the hook goes in at the next safe tick"
+                           : $"every item's volume doubled (GetItemVolume of a null item: {GetItemVolume.Invoke(0).Value})");
     }
 
     private void Doubled(ref GetItemVolume.Call c)

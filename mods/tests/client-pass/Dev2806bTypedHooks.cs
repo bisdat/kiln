@@ -9,8 +9,13 @@ namespace ClientPass;
 // not. Order block 2700-2799 (lab port 28070).
 //
 // - 06b-typed-hooks.client: the sample typed-hook-volume (mods/samples/TypedHookVolume) in a hosted world: hooks.typed
-//   and sig/items/GetItemVolume are available in the client's process, the hook installs, and a watering can takes
-//   twice the water at a well (GetItemVolume is the game's own cap of that transfer); the game plays on normally.
+//   and sig/items/GetItemVolume are available in the client's process, the hook installs (since dev.29 through
+//   detour_typed_checked: the first detour is written only with every thread of the game checked, the render and
+//   network threads included; the sample asks at load, at the main menu), its handler runs on the game's own calls,
+//   and a watering can takes twice the water at a well against an unchanged control with the sample off
+//   (GetItemVolume is the game's own cap of that transfer); the game plays on with no crash or stutter.
+//   Not covered here (listed in the 06b report): a hook first installed during a hosted step with another player
+//   joined, and leaving and rejoining a world with the hook in place.
 //
 // Not written: 06b-terrain-args (optional, gates nothing; plan §6): its diagnostic needs a client-side fixture that
 // hooks rules/TerrainDamage with a pass-through typed link, and this pack does not reference Kiln.Hooks.
@@ -35,7 +40,14 @@ public sealed partial class ClientPassMod
             if (!Mods.Send("typed-hook-volume", "typed-proof", new long[] { nonce, mode }))
             { c.Expect(false, "the sample accepts the proof request"); return null; }
             if (!await c.Until(() => reply != null, TimeSpan.FromSeconds(5), "the sample replies with observed handler counts")) return null;
-            c.Expect(reply![5] == 1, "the sample's hook is installed");
+            c.Expect(reply![5] == 1, "the sample's hook is installed (through the checked installation)", reply[5] switch
+            {
+                0 => "still pending: it did not go in at a safe tick",
+                2 => "refused: see kiln.log (a descriptor that does not fit, or threads Kiln could not check before the first patch)",
+                3 => "removed",
+                -1 => "the sample did not ask for it (its log says why)",
+                var v => $"state {v}",
+            });
             return reply;
         }
         try

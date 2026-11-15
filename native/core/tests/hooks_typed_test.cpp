@@ -275,6 +275,9 @@ struct Big {  // 24 bytes: returned through a hidden buffer
     int64_t x, y;
     int32_t z;
 };
+struct Huge {  // 128 bytes: a return larger than the inline snapshot (64)
+    int64_t v[16];
+};
 
 }  // namespace
 
@@ -294,6 +297,12 @@ __declspec(noinline) Big tg_sret(int64_t a, double b, int64_t c, int64_t d, int6
     r.x = a + d;
     r.y = c + e;
     r.z = static_cast<int32_t>(b * 2.0);
+    return r;
+}
+__declspec(noinline) Huge tg_huge(int64_t a) {
+    g_real.fetch_add(1);
+    Huge r;
+    for (int i = 0; i < 16; ++i) r.v[i] = a + i;
     return r;
 }
 __declspec(noinline) double tg_f64(double a, double b) {
@@ -399,6 +408,7 @@ namespace {
 // Calls through volatile pointers: the compiler may not fold or inline the "game".
 float (*volatile p_mix6)(int32_t, float, double, int64_t, float, int64_t) = tg_mix6;
 Big (*volatile p_sret)(int64_t, double, int64_t, int64_t, int64_t) = tg_sret;
+Huge (*volatile p_huge)(int64_t) = tg_huge;
 double (*volatile p_f64)(double, double) = tg_f64;
 uint64_t (*volatile p_sum12)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
                              uint64_t, uint64_t, uint64_t) = tg_sum12;
@@ -585,6 +595,16 @@ uintptr_t KILN_CALL sret_after(KilnCallFrame* f, void*) {  // an "After" step: c
     out->z += 1000;
     return KILN_TYPED_CONTINUE;
 }
+// the original ran, then the handler overwrites the whole return buffer (and rax) and faults: the caller must get the
+// original's struct as it returned (repair C of the dev.29 review: the complete result, not only rax/xmm0)
+uintptr_t KILN_CALL sret_fault(KilnCallFrame* f, void* size) {
+    ++g_sret_calls;
+    A->call_original_frame(f);
+    std::memset(reinterpret_cast<void*>(f->gpr[0]), 0xEE, reinterpret_cast<uintptr_t>(size));
+    f->rax = 0x999;
+    *static_cast<volatile int*>(nullptr) = 1;
+    return KILN_TYPED_CONTINUE;
+}
 uintptr_t KILN_CALL sret_skip(KilnCallFrame* f, void*) {  // replace the function: fill the caller's buffer
     ++g_sret_calls;
     auto* out = reinterpret_cast<Big*>(f->gpr[0]);
@@ -615,6 +635,29 @@ void test_sret() {
     g_real = 0;
     const Big r2 = p_sret(1, 3.5, 3, 4, 5);
     check(g_real == 0 && r2.x == 100 && r2.y == 5 && r2.z == 3, "a handler that skips fills the caller's buffer itself");
+    A->revoke_owner(6);
+    // a native handler that faults after CallOriginal, having overwritten the struct: the original's struct comes back
+    const size_t faults = log_count("faulted");
+    const auto o3 = ord(0, "t/sret-fault");
+    A->detour_typed(6, T(&tg_sret), &o3, &sig, &sret_fault, reinterpret_cast<void*>(sizeof(Big)), &h);
+    g_real = 0;
+    g_sret_calls = 0;
+    const Big r3 = p_sret(1, 3.5, 3, 4, 5);
+    check(g_sret_calls == 1 && g_real == 1 && r3.x == want.x && r3.y == want.y && r3.z == want.z,
+          "a handler that overwrites a 24-byte struct return and faults after the original: the caller gets the "
+          "original's struct, the function ran once");
+    A->revoke_owner(6);
+    const KilnSigArg hargs[] = {arg("a", KILN_SIG_S64)};
+    const KilnSig hsig = sig_of(hargs, 1, KILN_SIG_STRUCT, sizeof(Huge), 1);
+    const Huge hwant = p_huge(40);
+    const auto o4 = ord(0, "t/huge-fault");
+    A->detour_typed(6, T(&tg_huge), &o4, &hsig, &sret_fault, reinterpret_cast<void*>(sizeof(Huge)), &h);
+    g_real = 0;
+    g_sret_calls = 0;
+    const Huge hr = p_huge(40);
+    check(g_sret_calls == 1 && g_real == 1 && !std::memcmp(&hr, &hwant, sizeof hr),
+          "...and a 128-byte one (larger than the inline snapshot)");
+    check(log_count("faulted") == faults + 2, "both faults are logged");
     A->revoke_owner(6);
 }
 

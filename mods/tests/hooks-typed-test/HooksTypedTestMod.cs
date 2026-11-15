@@ -29,6 +29,7 @@ public sealed class HooksTypedTestMod : Mod
 {
     private const string KeepKey = "hooks-typed-test.loads";
     private int _pass, _fail;
+    private readonly List<string> _skipped = [];
     private readonly List<HookHandle> _hooks = [];
     private nint _fake;  // a zeroed block that stands in for a Daytime the game never sees
 
@@ -73,12 +74,18 @@ public sealed class HooksTypedTestMod : Mod
     [DllImport("kiln-hooks-typed-test.dll", EntryPoint = "kiln_typed_test_av", CallingConvention = CallingConvention.Cdecl)]
     private static extern void NativeAccessViolation();
 
+    [DllImport("kernel32.dll")]
+    private static extern nint VirtualAlloc(nint address, nuint size, uint type, uint protect);
+
     // Run BEFORE and AFTER in separate disposable lab processes. A CLR fail-fast is a FAILED boundary proof.
-    // Control: kiln/control/hooks-typed-av-before OR hooks-typed-av-after. Never enabled by the normal lab run.
+    // Control: kiln/control/hooks-typed-av-before OR hooks-typed-av-after OR hooks-typed-av-managed. Never enabled by the
+    // normal lab run. (On .NET 10 the first two end the process: an access violation in native code under a managed frame
+    // is a fail-fast of the runtime, 0xC0000005; see docs/kiln/services/hooks.md, Faults.)
     private void HardFaultResult()
     {
         var mods = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(Context.Info.Directory))!;
         var root = Path.GetDirectoryName(mods)!;
+        if (File.Exists(Path.Combine(root, "control", "hooks-typed-av-managed"))) { ManagedFaults(); return; }
         var after = File.Exists(Path.Combine(root, "control", "hooks-typed-av-after"));
         if (!after && !File.Exists(Path.Combine(root, "control", "hooks-typed-av-before"))) return;
         var calls = 0;
@@ -92,6 +99,33 @@ public sealed class HooksTypedTestMod : Mod
         Drop(fault); Drop(count);
         Check(calls == 1 && result.Value == 18 && result.Has == 1,
             $"AV {(after ? "after" : "before")} CallOriginal: struct result {{18,1}}, original once ({calls}), process continued");
+    }
+
+    // A hardware fault in the handler's own managed code after CallOriginal, having overwritten the struct: at the null
+    // page (the runtime raises NullReferenceException) and then at a no-access page above 64 KiB (an
+    // AccessViolationException, which .NET does not let managed code catch). The second may end the process: last.
+    private unsafe void ManagedFaults()
+    {
+        foreach (var high in new[] { false, true })
+        {
+            var page = high ? VirtualAlloc(0, 4096, 0x3000 /* MEM_COMMIT | MEM_RESERVE */, 0x01 /* PAGE_NOACCESS */) : 0x10;
+            var calls = 0;
+            var count = Hold(Volume.Detour((ref Volume.Call c) => { Interlocked.Increment(ref calls); c.CallOriginal(); }, -10), "fault counter");
+            var fault = Hold(Volume.Detour((ref Volume.Call c) =>
+            {
+                c.CallOriginal();
+                c.Result.Value = 999;
+                c.Result.Has = 0;
+                *(int*)page = 1;
+            }, 10), "fault handler");
+            var what = high ? $"a write to a no-access page (0x{page:x}) in the handler's managed code" : "a write to the null page (0x10) in the handler's managed code";
+            Log.Info($"hooks-typed-test: next: {what}, after CallOriginal");
+            var result = Volume.Invoke(0);
+            Drop(fault);
+            Drop(count);
+            Check(page != 0 && calls == 1 && result.Value == 18 && result.Has == 1,
+                $"{what}, after CallOriginal: struct result {{{result.Value},{result.Has}}}, original once ({calls}), process continued");
+        }
     }
 
     private void Drop(HookHandle h)
@@ -120,7 +154,8 @@ public sealed class HooksTypedTestMod : Mod
         {
             Check(false, $"the run stopped: {e.GetType().Name}: {e.Message}");
         }
-        Log.Info($"hooks-typed-test: done, {_pass} PASS, {_fail} FAIL");
+        Log.Info($"hooks-typed-test: done, {_pass} PASS, {_fail} FAIL" +
+                 (_skipped.Count > 0 ? $" ({_skipped.Count} row(s) not run here: {string.Join("; ", _skipped)})" : ""));
     }
 
     private void Rows()
@@ -303,7 +338,9 @@ public sealed class HooksTypedTestMod : Mod
     {
         if (!Kiln.Testing.LabSystems.Enabled)
         {
-            Check(false, "typed hook on workers: the lab parallel switch is off (kiln/control/systems.parallel)");
+            // a run for another row (the AV rows: exactly one control file); the worker row needs its own run with the switch
+            _skipped.Add("typed hook on workers: the lab parallel switch is off (kiln/control/systems.parallel)");
+            Log.Info($"hooks-typed-test: SKIP {_skipped[^1]}");
             return;
         }
         // The worker's direct call of a tick descriptor: SetTimeScale with the stand-in Daytime, and a handler that
