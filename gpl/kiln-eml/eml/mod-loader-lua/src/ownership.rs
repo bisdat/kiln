@@ -509,6 +509,18 @@ pub fn retained_containers(root: &Path, stem: &str, active: bool) -> io::Result<
     Ok(retained)
 }
 
+/// kiln-eml: recovery authorization is tied to the exact live header, never the backup's smaller count.
+/// Management must compare the digest again after Steam verification and before moving anything.
+pub fn recovery_inventory(root: &Path, stem: &str) -> io::Result<serde_json::Value> {
+    check_stem(stem)?;
+    let header = root.join(format!("{stem}.kfc"));
+    let hash = digest(root, &header)?;
+    let count = kfc::container::KFCFile::get_container_count(&header).map_err(|e| invalid(&e.to_string()))?;
+    if digest(root, &header)? != hash { return Err(invalid("game index changed while recording recovery evidence")); }
+    Ok(serde_json::json!({"stem": stem, "headerSha256": hash.sha256, "containers": count,
+        "unproven": !owns_output(root, stem)?}))
+}
+
 /// The containers (`<stem>_NNN.dat`) of the owned output that is live now, as its receipt lists them: what a restore
 /// leaves behind unless it removes them. Read before the vanilla header goes back. None: no live generation is listed.
 pub(crate) fn live_containers(root: &Path, stem: &str) -> io::Result<Option<BTreeMap<String, Digest>>> {
@@ -731,6 +743,22 @@ pub(crate) mod tests {
     }
     fn publish(root: &Path, files: &[PathBuf]) {
         for path in files { fs::copy(path, root.join(path.file_name().unwrap())).unwrap(); }
+    }
+    #[test]
+    fn recovery_inventory_uses_live_index_not_backup() {
+        use std::rc::Rc;
+        use kfc::{container::{KFCFile, KFCWriter}, reflection::TypeRegistry};
+        let root=std::env::temp_dir().join(format!("kiln-recovery-{}",uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        fs::File::create(root.join("g.kfc")).unwrap();fs::File::create(root.join("g.kfc_resources")).unwrap();
+        let mut writer:crate::transaction::Writer=KFCWriter::new(&root,"g",Rc::new(TypeRegistry::default()),"fixture").unwrap();
+        writer.finalize().unwrap();
+        fs::write(root.join("g.kfc.bak"),b"invalid backup").unwrap();
+        let evidence=super::recovery_inventory(&root,"g").unwrap();
+        assert_eq!(evidence["containers"].as_u64().unwrap(),KFCFile::get_container_count(root.join("g.kfc")).unwrap() as u64);
+        assert_eq!(evidence["headerSha256"],super::digest(&root,&root.join("g.kfc")).unwrap().sha256);
+        assert_eq!(evidence["unproven"],true);
+        fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn real_eml_content_write_disable_restores_original_pair_and_referenced_dat_sizes() {

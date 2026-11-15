@@ -280,3 +280,21 @@ pub async fn eml_restore(game_id: String) -> Result<Vec<String>, Error> {
     })
     .await
 }
+
+#[tauri::command]
+pub async fn eml_data_plan(game_id: String) -> Result<kiln_manage::restore_data::Plan, Error> {
+    blocking(move || kiln_manage::restore_data::plan(&crate::state::game(&game_id)?.path)).await
+}
+#[tauri::command]
+pub async fn eml_data_apply(game_id: String, fingerprint: String, verified: bool) -> Result<kiln_manage::restore_data::Moved, Error> {
+    blocking(move || kiln_manage::restore_data::apply(&crate::state::game(&game_id)?.path, &fingerprint, verified)).await
+}
+#[tauri::command]
+pub async fn eml_data_undo(game_id: String, folder: String) -> Result<kiln_manage::restore_data::Moved, Error> {
+    blocking(move || kiln_manage::restore_data::undo(&crate::state::game(&game_id)?.path, &folder)).await
+}
+
+#[tauri::command]
+pub async fn eml_data_latest(game_id: String) -> Result<Option<kiln_manage::restore_data::Moved>, Error> {
+    blocking(move || kiln_manage::restore_data::latest(&crate::state::game(&game_id)?.path)).await
+}

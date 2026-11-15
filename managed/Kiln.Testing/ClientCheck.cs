@@ -180,8 +180,7 @@ public sealed class CheckContext
         _run.Instruct(text);
     }
 
-    /// <summary>Records an automatic assertion next to the player's verdict. It does not throw and does not change the
-    /// verdict.</summary>
+    /// <summary>Records an automatic assertion next to the player's verdict. It does not throw. A failure prevents a recorded pass, including failures during finishing.</summary>
     /// <param name="condition">The result.</param>
     /// <param name="what">What was asserted, e.g. "three hits counted".</param>
     /// <param name="detail">What was seen, e.g. "counted 2".</param>

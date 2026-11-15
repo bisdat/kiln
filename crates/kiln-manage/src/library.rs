@@ -24,7 +24,7 @@ pub struct LibraryRef {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportSource {
-    /// "file" | "folder" | "modpack"
+    /// "file" | "folder" | "modpack" | "replaced-dll" (from: JSON of the original release LibraryRef)
     #[serde(rename = "type")]
     pub kind: String,
     pub from: String,
@@ -1969,6 +1969,101 @@ pub fn record(dirs: &DataDirs, r: &LibraryRef) -> Result<ImportRecord> {
     crate::util::read_json::<ImportRecord>(&record_path(&folder))?
         .filter(|rec| rec.format == 1 && rec.kind == r.kind && rec.id == r.id && rec.version == r.version && rec.hash == r.hash)
         .ok_or_else(|| Error::not_found(format!("{} {} {} is not in the library", r.kind.as_str(), r.id, r.version)))
+}
+
+/// The real release a local DLL replacement was based on. Local builds keep the release's version line,
+/// but must never acquire a provider receipt claiming these patched bytes came from that provider.
+pub(crate) fn replacement_base(source: Option<&ImportSource>) -> Option<LibraryRef> {
+    source.filter(|s| s.kind == "replaced-dll").and_then(|s| serde_json::from_str(&s.from).ok())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplacedDll {
+    pub entry: LibraryRef,
+    pub notices: Vec<String>,
+}
+
+/// Replace one DLL of a native Library mod, retaining its identity and profile position. `confirmed` acknowledges
+/// the filename/kind warnings returned with `detail.replaceDllConfirmation`. Uses the ordinary kept transaction.
+pub fn replace_dll(dirs: &DataDirs, profile_id: &str, from: &LibraryRef, file: &Path, confirmed: bool) -> Result<ReplacedDll> {
+    let _one = crate::quick::lock(dirs)?;
+    if from.kind != ModKind::Native {
+        return Err(Error::invalid("Replace DLL is available for native DLL mods only."));
+    }
+    crate::quick::validate_import_path(file)?;
+    if !file.is_file() || !file.extension().is_some_and(|x| x.eq_ignore_ascii_case("dll")) {
+        return Err(Error::invalid("Choose one .dll file."));
+    }
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    std::fs::File::open(file)?.take(crate::quick::MAX_IMPORT_FILE + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > crate::quick::MAX_IMPORT_FILE { return Err(Error::invalid("DLL is too large (limit: 512 MiB).")); }
+    if !crate::pe::is_pe64_dll(&bytes) { return Err(Error::invalid("Choose a 64-bit Windows DLL.")); }
+    let folder = path_of(dirs, from)?;
+    crate::quick::validate_import_path(&folder)?;
+    let mut rec = record(dirs, from)?;
+    if recorded_hash(&folder, &rec)? != from.hash { return Err(changed_error(from, &folder)); }
+    let mut dlls = Vec::new();
+    let mut pending = vec![folder.clone()];
+    while let Some(dir) = pending.pop() {
+        for e in std::fs::read_dir(dir)? {
+            let e = e?;
+            if e.file_name().to_string_lossy().starts_with('.') { continue; }
+            if e.file_type()?.is_dir() { pending.push(e.path()); }
+            else if e.path().extension().is_some_and(|x| x.eq_ignore_ascii_case("dll")) { dlls.push(e.path()); }
+        }
+    }
+    dlls.sort();
+    let name = file_name(file);
+    let matching: Vec<_> = dlls.iter().filter(|p| file_name(p).eq_ignore_ascii_case(&name)).collect();
+    let target = match matching.as_slice() {
+        [one] => (*one).clone(),
+        [] if dlls.len() == 1 => dlls[0].clone(),
+        _ => return Err(Error::invalid(format!("Choose a DLL matching exactly one file in this package: {}.",
+            dlls.iter().map(|p| p.strip_prefix(&folder).unwrap().display().to_string()).collect::<Vec<_>>().join(", ")))),
+    };
+    let rel = target.strip_prefix(&folder).map_err(|_| Error::invalid("DLL escapes its package."))?;
+    let mut warnings = Vec::new();
+    let old_name = file_name(&target);
+    if !old_name.eq_ignore_ascii_case(&name) {
+        warnings.push(format!("Replace `{old_name}` with `{name}`? The file keeps the name `{old_name}`."));
+    }
+    // Inspect the replacement under its final name as detection also uses proxy filenames.
+    let tmp = TempDir::new(&dirs.library(), "replace-dll")?;
+    let size = copy_mod_tree(&folder, tmp.path())?;
+    let old_size = std::fs::metadata(tmp.path().join(rel))?.len();
+    std::fs::write(tmp.path().join(rel), &bytes)?;
+    crate::quick::validate_import_path(tmp.path())?;
+    let old = detect_dll(&target);
+    let new = detect_dll(&tmp.path().join(rel));
+    if old.kind != new.kind || old.engine != new.engine {
+        warnings.push(format!("This DLL looks like a different kind of component: {} Previously: {} Confirm replacement?", new.reason, old.reason));
+    }
+    if !warnings.is_empty() && !confirmed {
+        let mut e = Error::new(ErrorCode::Refused, warnings.join(" "));
+        e.detail = Some(serde_json::json!({"replaceDllConfirmation": true}));
+        return Err(e);
+    }
+    let mut p = crate::profile::get(dirs, profile_id)?;
+    let i = p.mods.list(from.kind).iter().position(|m| m.id == from.id && m.version == from.version && m.hash == from.hash)
+        .ok_or_else(|| Error::new(ErrorCode::Conflict, "The mod changed in this profile. Reload it first."))?;
+    let before = p.mods.list(from.kind)[i].clone();
+    rec.source = Some(ImportSource { kind: "replaced-dll".into(), from: serde_json::to_string(&replacement_base(rec.source.as_ref()).unwrap_or_else(|| from.clone()))? });
+    rec.imported = crate::util::now_rfc3339();
+    rec.hash = recorded_hash(tmp.path(), &rec)?;
+    rec.size = size - old_size + bytes.len() as u64;
+    if rec.hash == from.hash { return Ok(ReplacedDll { entry: from.clone(), notices: vec!["The DLL is unchanged.".into()] }); }
+    let next = LibraryRef { hash: rec.hash.clone(), ..from.clone() };
+    commit_folder(dirs, tmp.path(), rec, &mut ImportReport::default())?;
+    let after = crate::profile::ProfileMod { hash: next.hash.clone(), ..before.clone() };
+    p.mods.list_mut(from.kind)[i] = after.clone();
+    let kept = crate::kept::prepare(dirs, &p, None, &[(from.kind, before, after)]);
+    if let Some(why) = kept.failure() { return Err(Error::new(ErrorCode::Io, format!("DLL not replaced in profile: {why}"))); }
+    if let Err(e) = crate::profile::save(dirs, &p) { kept.abort(); return Err(e); }
+    let mut notices = kept.commit();
+    if crate::kept::keep_count(dirs) == 0 { notices.push("No earlier versions are kept for rollback in Settings; the old build remains in the Library.".into()); }
+    Ok(ReplacedDll { entry: next, notices })
 }
 
 /// What lists library versions: the launcher's profiles, and the profile files the known games hold now (the game
