@@ -31,6 +31,7 @@
       "propertyNames": { "$ref": "#/$defs/name" },
       "additionalProperties": { "$ref": "#/$defs/materialTweak" }
     },
+    "buildingMaterialPools": { "type": "object", "propertyNames": { "$ref": "#/$defs/name" }, "additionalProperties": { "$ref": "#/$defs/buildingMaterialPool" } },
     "buildingMaterials": {
       "type": "object",
       "description": "New building materials: an id and a GUID in the game's tables, and a block item. 49 fit across all mods. Needs \"clients\": \"mod\".",
@@ -237,6 +238,8 @@
   },
   "additionalProperties": false,
   "$defs": {
+    "buildingMaterialPool": {"type": "object", "required": ["name", "materials"], "additionalProperties": false, "properties": {"name": {"type": "string", "minLength": 1}, "roof": {"type": "boolean"}, "was": {"type": "string", "minLength": 1}, "materials": {"type": "array", "minItems": 1, "maxItems": 64, "items": {"oneOf": [{"type": "object", "required": ["material"], "additionalProperties": false, "properties": {"material": {"type": "string", "minLength": 1}}}, {"type": "object", "required": ["gameMaterial"], "additionalProperties": false, "properties": {"gameMaterial": {"type": "string", "minLength": 1}}}]}}}},
+
     "resourcePatch": {
       "type": "object",
       "description": "One resource and the fields to set in it.",
@@ -1976,6 +1979,7 @@
       ],
       "description": "A new shape on the game's building materials: beside the walls and floors in the build menu, taking every material they take.",
       "properties": {
+        "materialPool": {"type":"string","minLength":1},
         "tweak": {
           "$ref": "#/$defs/tweak"
         },

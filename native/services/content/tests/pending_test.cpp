@@ -121,6 +121,27 @@ int main() {
   check(!linked.complete && said==1,"a link at the store root is refused and named, not read as an empty store");
   cap::pending_io::diagnostic={};
  }
+ // worldtables' pool envelopes are named "@pool-<guid>.json". That prefix is a file name's only, once: a folder (a
+ // mod's, or one between the trusted base and the store) keeps the plain rule, and the rest of the name is a component.
+ {
+  namespace io = cap::pending_io;
+  check(io::file_component("@pool-0b1e66b9-c653-5ee9-8453-2b6de00832a7.json") && io::file_component("a.json"),"a pool envelope's file name is accepted");
+  check(!io::component("@pool-mod") && !io::component("@pool-0b1e66b9-c653-5ee9-8453-2b6de00832a7.json"),"the pool prefix is not a folder's");
+  check(!io::file_component("@pool-") && !io::file_component("@pool-.") && !io::file_component("@pool-..") && !io::file_component("@pool-a.") &&
+        !io::file_component("@pool-a ") && !io::file_component("@pool-a/b") && !io::file_component("@pool-a\\b") && !io::file_component("@pool-@pool-a.json") &&
+        !io::file_component("@x.json") && !io::file_component("@pool-CON"),"the rest of a pool envelope's name keeps the component rule");
+  auto store=base/"prefix-store";
+  fs::create_directories(store/"pending"/"@pool-mod"); {std::ofstream(store/"pending"/"@pool-mod"/"a.json")<<"x";}
+  fs::create_directories(store/"pending"/"mod"); {std::ofstream(store/"pending"/"mod"/"@pool-0b1e66b9-c653-5ee9-8453-2b6de00832a7.json")<<"x";}
+  std::vector<std::string> named;
+  io::diagnostic=[&](const auto& p,const auto&){named.push_back(p.filename().string());};
+  cap::PendingScan scan; auto files=cap::pending_files_bounded(io::TrustedBase{store},store/"pending",&scan);
+  check(files.size()==1 && files[0].mod=="mod" && files[0].name.rfind("@pool-",0)==0,"the scan lists the envelope and not a file under an @pool- folder");
+  check(std::count(named.begin(),named.end(),"@pool-mod")==1,"an @pool- folder is refused as a mod component, by name");
+  std::string why;
+  check(!cap::pending_store_write(io::TrustedBase{store},store/"pending",store/"pending"/"@pool-mod"/"b.json","x",&why),"no write into an @pool- folder");
+  io::diagnostic={};
+ }
  fs::remove_all(base);
  std::cout<<"pending boundary: "<<checks<<" checks, "<<fails<<" failures\n";
  return fails?1:0;

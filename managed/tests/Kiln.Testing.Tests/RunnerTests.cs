@@ -9,6 +9,14 @@ namespace Kiln.CheckRunnerTests;
 public sealed class RunnerTests
 {
     [Fact]
+    public void Untagged_check_can_pass_after_a_failed_check_and_still_skip()
+    {
+        using var h=new Harness();h.Start("t.transition-fail");
+        Assert.Equal("fail",h.Answer(AnswerKind.Pass).Verdict);
+        h.Start("t.transition-pass");Assert.Equal("pass",h.Answer(AnswerKind.Pass).Verdict);
+        h.Start("t.transition-fail");Assert.Equal("skip",h.Answer(AnswerKind.Skip).Verdict);
+    }
+    [Fact]
     public void A_pass_on_its_assertions_and_the_verdict()
     {
         using var h = new Harness();
@@ -440,7 +448,7 @@ public sealed class RunnerTests
         }
         var list = Do("l", "list");
         Assert.True(list.GetProperty("ok").GetBoolean());
-        Assert.Equal(20, list.GetProperty("data").GetProperty("checks").GetArrayLength());
+        Assert.Equal(22, list.GetProperty("data").GetProperty("checks").GetArrayLength());
         var run = Do("r", "run cct t.pass");
         Assert.True(run.GetProperty("ok").GetBoolean(), run.ToString());
         Assert.Equal("asking", Do("s", "status").GetProperty("data").GetProperty("current").GetProperty("phase").GetString());

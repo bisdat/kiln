@@ -9,10 +9,12 @@ here=$(cd "$(dirname "$0")" && pwd)
 out=$KILN_OUT/worldtables-host-test
 mkdir -p "$out"
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/.." -I"$here/../../surfaces/cook" -I"$here/../../../third_party" \
-    "$here/test_merge.cpp" "$here/../merge.cpp" "$here/../terrain.cpp" "$here/../../surfaces/cook/surfacecheck.cpp" -o "$out/test_merge"
+    "$here/test_merge.cpp" "$here/../reflect.cpp" "$here/../merge.cpp" "$here/../terrain.cpp" "$here/../../surfaces/cook/surfacecheck.cpp" -o "$out/test_merge"
 "$out/test_merge" "$@"
 # Terrain materials: the same, and with KILN_TERRAIN_RES=<folder of the game's registry.bin pools.bin world.bin vfx.bin blend.bin simple.bin> it also
 # merges two into them and leaves merged-*.bin there for tests/terrain_roundtrip.py.
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/.." -I"$here/../../surfaces/cook" -I"$here/../../../third_party" \
     "$here/test_terrain.cpp" "$here/../merge.cpp" "$here/../terrain.cpp" "$here/../../surfaces/cook/surfacecheck.cpp" -o "$out/test_terrain"
 "$out/test_terrain" ${KILN_TERRAIN_RES:+"$KILN_TERRAIN_RES"}
+# Durable next-start pools use the reviewed shared pending-store boundary.
+KILN_OUT="$KILN_OUT" bash "$here/pool_store_test.sh"
