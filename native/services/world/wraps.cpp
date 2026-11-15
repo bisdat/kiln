@@ -858,17 +858,23 @@ void wraps_world_event(const KilnWorldEvent* event) {
         for (int i = 0; i < kWrapSlots; ++i)
             if (g_pools[pool].slots[i].state == S_LIVE) restore(pool, i, true);
         lock.unlock(); // a finishing stage can need game_wrap_info/release's registry lock
-        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(g_stop_wait_ms.load());
-        uint32_t remaining = 0;
+        const auto t0 = std::chrono::steady_clock::now();
+        const auto until = t0 + std::chrono::milliseconds(g_stop_wait_ms.load());
+        uint32_t remaining = 0, first = 0;
+        bool counted = false;
         do {
             remaining = 0;
             for (const Slot& slot : g_pools[pool].slots) remaining += slot.in_flight.load(std::memory_order_seq_cst);
+            if (!counted) first = remaining, counted = true;
             if (!remaining) break;
             std::this_thread::yield();
         } while (std::chrono::steady_clock::now() < until);
+        const auto waited = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
         if (remaining) KW_E("world %u stops: wrap drain timed out with %u calls still in flight", event->kind, remaining);
         lock.lock();
-        if (live_slots) KW_I("world %u stops: its wraps are taken out and wait for the next world", event->kind);
+        if (live_slots)
+            KW_I("world %u stops: its wraps are taken out and wait for the next world (drained: %u calls in flight at the "
+                 "stop, %u after %lld us)", event->kind, first, remaining, static_cast<long long>(waited));
         drop_pool(pool, true); // retired chains retain their views until their last in-flight call exits, even on timeout
     } else if (event->event == KILN_WORLD_STARTED) {
         if (live_slots) {

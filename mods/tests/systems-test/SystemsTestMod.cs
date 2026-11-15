@@ -5,8 +5,11 @@
 //     a second Replace (systems-test-peer holds one), a throw that disables only its stage, a tick-thread API inside a
 //     handler, per-entity stages, handlers on the game's workers with the switch on; with the switch on again, writes
 //     through entity views (one ComponentWrittenEvent per entity and component per step, on the tick thread) and
-//     Attribute32.Changed; then `reload-test systems-test 20` through the control folder (each reload makes wraps again;
-//     the old instance's must go with it).
+//     Attribute32.Changed, and EntityView.Attribute refusing a write slot that is not an attribute; then
+//     `reload-test systems-test 20` through the control folder (each reload makes wraps again; the old instance's must
+//     go with it).
+//  3. The boot after the restart (the native part's mark file is there): the same per-entity wrap on fuel_setup, made
+//     again by name in a new process, is applied, filters by archetype and reads Fuel through the view.
 using System.Collections.Concurrent;
 using Kiln;
 using Kiln.Testing;
@@ -45,14 +48,74 @@ public sealed class SystemsTestMod : Mod
             w?.Before((ref Slice s) => { }).AfterEach(e => { });
             return;
         }
-        if (File.Exists(Path.Combine(KilnDir, "data", "systems-test-mark.txt"))) _done = true;  // the boot after the restart
+        if (File.Exists(Path.Combine(KilnDir, "data", "systems-test-mark.txt"))) _restart = true;  // the boot after the restart
         Context.Tick.Post += OnPost;
     }
 
     private void OnPost(in TickInfo tick)
     {
-        if (!_labDone) LabWindow(tick);
+        if (_restart) RestartRows(tick);
+        else if (!_labDone) LabWindow(tick);
         else if (!_done) WrapRows(tick);
+    }
+
+    // ---- 3. the boot after the restart ----
+    private bool _restart;
+    private ulong _r0;
+    private ProgramWrap? _again;
+    private long _againEntities, _againFuel, _againBad;
+    private int _againFaults;
+
+    private void RestartRows(in TickInfo tick)
+    {
+        if (_done) return;
+        try
+        {
+            if (_r0 == 0)
+            {
+                if (tick.Step < 100 || tick.Step % 25 != 0 || Systems.Find("fuel_setup") is null) return;
+                _r0 = tick.Step;
+                var r = Systems.Wrap("fuel_setup");
+                _again = r.Wrap;
+                _again?.WhenArchetype(["Fuel"]).BeforeEach((ref EntityView e) =>
+                {
+                    Interlocked.Increment(ref _againEntities);
+                    var fuel = e.Attribute("Fuel");
+                    if (fuel.HasValues && fuel.Count >= 2 && fuel[1] >= 0) Interlocked.Increment(ref _againFuel);
+                    else if (!fuel.HasValues) Interlocked.Increment(ref _againBad);
+                });
+                if (_again is not null) _again.Disabled += _ => Interlocked.Increment(ref _againFaults);
+                Check("the next boot: Systems.Wrap(\"fuel_setup\") again by name", r.Ok && _again is not null, r.Reason);
+                return;
+            }
+            switch (tick.Step - _r0)
+            {
+                case 100:
+                {
+                    var stats = _again!.Stats;
+                    Check("the next boot: the same per-entity wrap is applied in the new world and reads Fuel through its view",
+                        _again.State == WrapState.Active && Interlocked.Read(ref _againEntities) > 0 &&
+                        Interlocked.Read(ref _againFuel) == Interlocked.Read(ref _againEntities) && stats.Faults == 0 &&
+                        _againFaults == 0,
+                        $"state {_again.State}, {Interlocked.Read(ref _againEntities)} entities, Fuel read on " +
+                        $"{Interlocked.Read(ref _againFuel)} ({Interlocked.Read(ref _againBad)} without values), {stats.Slices} slices, " +
+                        $"{stats.Faults} faults");
+                    _again.Dispose();
+                    break;
+                }
+                case 104:
+                    Check("the next boot: Dispose removes it", _again!.State == WrapState.Removed);
+                    Log.Info($"systems-test (managed, after the restart): {_pass} PASS, {_fail} FAIL");
+                    _done = true;
+                    break;
+            }
+        }
+        catch (Exception e)
+        {
+            Check($"restart step {tick.Step - _r0}", false, e.ToString());
+            Log.Info($"systems-test (managed, after the restart): {_pass} PASS, {_fail} FAIL");
+            _done = true;
+        }
     }
 
     // ---- 1. the lab switch ----
@@ -118,8 +181,8 @@ public sealed class SystemsTestMod : Mod
     private readonly ConcurrentDictionary<int, byte> _writeThreads = new();
     private readonly ConcurrentDictionary<(uint, ulong), byte> _wrote = new();
     private readonly ConcurrentDictionary<uint, int> _eventsPer = new();
-    private int _badEvents;
-    private string? _badEvent, _attrResult;
+    private int _badEvents, _nonAttrTried;
+    private string? _badEvent, _attrResult, _nonAttr;
 
     private void WrapRows(in TickInfo tick)
     {
@@ -220,6 +283,9 @@ public sealed class SystemsTestMod : Mod
                 }
                 case 424:
                     Check("Attribute32.Changed clamps to max", _attrResult?.StartsWith("clamped") == true, _attrResult ?? "no entity with a maximum seen");
+                    Check("EntityView.Attribute refuses fuel_setup's DynamicFuelSetup (a write slot that is not an attribute) " +
+                        "before marking it or running the game's formulas", _nonAttr?.StartsWith("refused") == true &&
+                        _writer!.Stats.Faults == 0, _nonAttr ?? "not tried");
                     break;
                 case 430:
                     foreach (var w in new[] { _throwing, _guard, _each, _replace, _writer }) w?.Dispose();
@@ -247,6 +313,15 @@ public sealed class SystemsTestMod : Mod
     private void WriteBefore(ref EntityView e)
     {
         if (!_writing) return;
+        if (Interlocked.Exchange(ref _nonAttrTried, 1) == 0)
+        {
+            try
+            {
+                var bad = e.Attribute("DynamicFuelSetup");
+                _nonAttr = $"not refused: {bad.Count} slots";
+            }
+            catch (ArgumentException x) { _nonAttr = $"refused: {x.Message}"; }
+        }
         var id = e.Entity.Value;
         if (!_targets.ContainsKey(id))
         {
