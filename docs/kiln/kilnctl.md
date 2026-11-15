@@ -172,6 +172,11 @@ unverified build it ports Kiln's symbols (`tools/sigport/port.py`), boots the la
 green, else leaves `NEXT.txt` + `symbols.patch` for a human and the server starts in safe idle. Record a gate baseline
 once: `kilnctl gate <name> --baseline`. See docs/kiln/sigport.md.
 
+`NEXT.txt` also lists the port's descriptor reviews (`sig needs review: <symbol>: was [...], is [...]`, from
+sigport's report): a described game function whose code reads other argument positions on the new build, or whose
+descriptor the core would refuse there. They do not stop a mark: the symbols port, and only that function's typed
+hooks and calls stay off until its descriptor is fixed ([sigport.md](sigport.md#descriptors-across-a-port)).
+
 ## Files kilnctl writes
 | Path | What |
 |---|---|

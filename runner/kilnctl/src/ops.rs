@@ -737,6 +737,7 @@ pub fn port_flow(inst: &Instance, old: Option<PathBuf>, new: &Path, f: &FlowArgs
         next.push(format!("the port is incomplete: low confidence {:?}, lost {:?} (see {})", rep.low, rep.lost,
             rep.out.join("report.txt").display()));
     }
+    next.extend(next_for_sigs(&rep));
     if !rep.defs_unchanged {
         next.push(format!("the definitions need changes: review and apply {} to the Kiln tree (git apply), redeploy \
                            (kilnctl deploy {}), then run kilnctl port {} --mark", rep.patch().display(), inst.name, inst.name));
@@ -779,6 +780,14 @@ pub fn port_flow(inst: &Instance, old: Option<PathBuf>, new: &Path, f: &FlowArgs
         if next.is_empty() { "nothing left to do".to_string() } else { next.iter().map(|n| format!("- {n}")).collect::<Vec<_>>().join("\n") });
     std::fs::write(rep.out.join("NEXT.txt"), text)?;
     Ok(FlowOutcome { marked, summary })
+}
+
+/// NEXT.txt lines for the port's descriptor reviews. They do not stop a mark: the symbols port, only the typed hooks
+/// and calls of a reviewed descriptor stay off (the core turns sig/<symbol> off when the code does not fit).
+pub fn next_for_sigs(rep: &sigport::PortReport) -> Vec<String> {
+    rep.sig_review.iter()
+        .map(|l| format!("{l}; typed hooks and calls of it stay off on this build until the descriptor is fixed (docs/kiln/sigport.md)"))
+        .collect()
 }
 
 pub fn port_cmd(inst: &Instance, old: Option<PathBuf>, new: Option<PathBuf>, f: &FlowArgs) -> Result<i32> {
