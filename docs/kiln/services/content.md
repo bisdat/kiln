@@ -443,14 +443,24 @@ registering in the client world's Pre is too late: `apply_armor` faulted on a he
   `Kiln_Unknown_Item` at boot but hooks the lookup only when a client world's item registry finishes loading (the loading screen, where the
   install's short stop of the other threads is not seen), and only if this game joined someone else's server (no server world in the
   process) or mods here define items. A single-player or hosted world without item mods never has the hook; its unknown ids stay NULL, as
-  without Kiln. Once in, the hook stays until the game closes. It is installed the way dev.28 installed it at boot (the plain installer:
-  the checked one refuses on PCs where Kiln cannot open every thread). kiln.log, once per client world:
-  `new content: client world: the game's item lookup is hooked now (this game joined a server, which may send items of mods this game does
-  not have: they show as [Unknown item])`, `... is hooked now (mods here define 3 item(s): one this world's registry does not have yet
-  shows as [Unknown item])`, `... is not hooked (this game hosts its world and no mod defines items, so no unknown item id can reach it)`
-  or `... is hooked (since an earlier world of this game)`. An item a mod defines while a client world without the hook runs:
-  `new content: client world: an item was defined while this world runs and the game's item lookup is not hooked: its [Unknown item]
-  placeholder starts with the next world`. The boot line says `unknown item ids answered by a placeholder when needed`.
+  without Kiln. Once in, the hook stays until the game closes. The install follows the gameplay hooks' rule (no live world of any kind):
+  - **No world runs** (a join's loading screen: no server world, the client world still loading, the prediction world only steps inside
+    the client world's frame): the plain installer, as dev.28 installed this hook at boot. The checked one refuses on PCs where Kiln cannot
+    open every thread, and the join is where the placeholder is needed.
+  - **A world runs** (a host: the server world's job threads call the lookup; or a join whose client world already steps because the
+    early registration is off): the checked installer. kiln.hooks' `mid2_checked` places the detour only when every other thread could be
+    stopped and none is inside the bytes it replaces; the raw link then joins that target without writing (the pattern of
+    `quests/roster.cpp`). Refused: no hook and no placeholder in this world, and the next world's registry load tries again.
+
+  kiln.log, once per client world: `new content: client world: the game's item lookup is hooked now (this game joined a server, which may
+  send items of mods this game does not have: they show as [Unknown item]; no world runs yet)`, `... is hooked now (mods here define 3
+  item(s): one this world's registry does not have yet shows as [Unknown item]; checked install: a world runs)`, `... is not hooked (this
+  game hosts its world and no mod defines items, so no unknown item id can reach it)`, `... is hooked (since an earlier world of this
+  game)`, or (warning) `the [Unknown item] placeholder is off for this world: the game's item lookup could not be hooked because the
+  install could not be checked while a world runs (...); the next world's registry load tries again`. An item a mod defines while a
+  client world without the hook runs: `new content: client world: an item was defined while this world runs and the game's item lookup
+  is not hooked: its [Unknown item] placeholder starts with the next world`. The boot line says `unknown item ids answered by a
+  placeholder when needed`.
 - **Definitions made later** cannot be there earlier: data packs' `add` lists and `OnReady` handlers run when kiln.content's registries are ready
   (hosted: long before the client world; a first joined world: ~300 ms after its first step; later worlds keep them from the first). In that
   window such an item answers "[Unknown item]", then its definition takes over.

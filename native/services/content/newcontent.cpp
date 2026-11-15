@@ -761,6 +761,7 @@ struct WorldState {
     uint64_t registered_ms = 0;  // when every definition was first in (0: not yet)
     bool find_decided = false;   // the client world's line on the item lookup hook is out (itemfind_hooked)
     bool find_late_said = false; // ... and the one for an item defined while this world runs
+    size_t find_items = 0;       // items mods defined when that line went out
 };
 WorldState g_ws[KILN_WORLD_KINDS];
 std::mutex g_ui_mu;  // the recipe-UI hook reads the client / server state from the UI thread
@@ -3345,7 +3346,7 @@ std::atomic<uintptr_t> g_unknown_reg{0};   // the registry whose misses are answ
 std::atomic<uintptr_t> g_unknown_tmpl{0};  // the clone copied per id
 uint32_t g_unknown_id = 0;                 // Kiln_Unknown_Item's own id
 uintptr_t g_itemfind_fn = 0;
-bool g_itemfind_tried = false;             // the hook was installed (or refused) once: it stays until the process ends
+bool g_itemfind_tried = false;             // installed (it stays until the process ends), or failed for good; a checked refusal is tried again
 constexpr uint32_t kUnknownProbe = 0x4B494C4E;  // the self-check's id ("KILN"), asked once per world
 
 // The game's data holds more keen::ItemInfo resources than its registry lists (test and deprecated items: Armor_Tint_TEST
@@ -3434,8 +3435,16 @@ uintptr_t __fastcall hk_itemfind(uint32_t id, uintptr_t reg) {
 // can reach the client world before its registry has it). So the hook goes in when a client world's item registry
 // finishes loading, on the loading screen where the install's short stop of the other threads is not seen, and only
 // when one of the two holds; a host without item mods never hooks it. Once in, it stays until the process ends.
-// Installed as dev.28 installed it at boot (RawHook::install): the checked installer refuses on PCs where Kiln cannot
-// open every thread, and a refusal here would cost the placeholder on a join.
+// How it is installed follows the gameplay hooks' rule (kiln.hooks' typed_install_ready: no live world of any kind):
+//  - no world runs in the process (a join: no server world, and its client world is still loading; the prediction
+//    world only steps inside the client world's frame): the plain installer, as dev.28 installed this hook at boot.
+//    The checked one refuses on PCs where Kiln cannot open every thread, and a refusal would cost the placeholder on
+//    the join that needs it.
+//  - a world runs (a host: the server world's job threads call the lookup; or the client world already steps when the
+//    early registration is off): the checked installer, as quests/roster.cpp uses it: kiln.hooks' mid2_checked places
+//    the physical detour, refusing before any byte is written while a thread cannot be shown to be outside the bytes
+//    it replaces, and the raw link joins that target without writing. Refused: no hook and no placeholder in this
+//    world; the next world's registry load tries again.
 size_t mod_items() {
     std::lock_guard lock(store_mutex());
     size_t n = 0;
@@ -3443,12 +3452,34 @@ size_t mod_items() {
     return n;
 }
 
+void itemfind_place(KilnRegisters&) {}  // the checked placer's mid link: it only places the detour, then goes
+
+enum class FindInstall { ok, unchecked, failed };  // unchecked: the checked install was refused, nothing was written
+
+FindInstall itemfind_install(bool world_runs, std::string* why) {
+    static const char kLabel[] = "content/ItemRegistryFind";
+    const auto raw = [&] {
+        if (g_itemfind_hook.install(g_api, g_owner, g_itemfind_fn, reinterpret_cast<void*>(&hk_itemfind), kLabel)) return true;
+        *why = g_itemfind_hook.error() ? g_itemfind_hook.error() : "kiln.hooks refused the hook";
+        return false;
+    };
+    if (!world_runs) return raw() ? FindInstall::ok : FindInstall::failed;
+    kiln::MidHook2 placer;
+    if (!placer.install_checked(g_api, g_owner, g_itemfind_fn, &itemfind_place, kLabel)) {
+        *why = placer.error() ? placer.error() : "the checked installation was refused";
+        return FindInstall::unchecked;
+    }
+    const bool ok = raw();  // the target has its detour now: the link joins its chain without writing a game byte
+    placer.revoke();
+    return ok ? FindInstall::ok : FindInstall::failed;
+}
+
 // The client world's registry is complete (unknown_enable): whether the lookup is hooked for it, installing it on first
 // need. One kiln.log line per world says which and why.
 bool itemfind_hooked(WorldState& ws) {
     const char* w = wname(g_early_kind);
     if (ws.find_decided) {
-        if (!g_itemfind_hook && !ws.find_late_said && mod_items()) {
+        if (!g_itemfind_hook && !ws.find_late_said && mod_items() > ws.find_items) {
             ws.find_late_said = true;
             LOGI("new content: %s world: an item was defined while this world runs and the game's item lookup is not hooked: "
                  "its [Unknown item] placeholder starts with the next world", w);
@@ -3456,37 +3487,47 @@ bool itemfind_hooked(WorldState& ws) {
         return static_cast<bool>(g_itemfind_hook);
     }
     ws.find_decided = true;
+    const size_t items = ws.find_items = mod_items();
     if (g_itemfind_hook) {
         LOGI("new content: %s world: the game's item lookup is hooked (%s)", w,
              g_early_test ? "at boot: <kiln>/data/content/early-test" : "since an earlier world of this game");
         return true;
     }
     if (g_itemfind_tried) {
-        LOGI("new content: %s world: the game's item lookup is not hooked (the hook was refused earlier); an unknown item id stays NULL", w);
+        LOGI("new content: %s world: the game's item lookup is not hooked (it could not be hooked earlier); an unknown item id stays NULL", w);
         return false;
     }
     KilnSessionInfo si{};
     si.size = sizeof si;
-    g_api->session(&si);
+    const bool known = g_api->session(&si) == KILN_OK;
     const bool hosts = si.worlds[KILN_WORLD_SERVER] != 0;
-    const size_t items = mod_items();
+    bool world_runs = !known;  // without the session's answer, as if a world ran: the checked installer
+    for (uintptr_t x : si.worlds) world_runs |= x != 0;
     if (hosts && !items) {
         LOGI("new content: %s world: the game's item lookup is not hooked (this game hosts its world and no mod defines items, so "
              "no unknown item id can reach it)", w);
         return false;
     }
-    g_itemfind_tried = true;
-    if (!g_itemfind_hook.install(g_api, g_owner, g_itemfind_fn, reinterpret_cast<void*>(&hk_itemfind), "content/ItemRegistryFind")) {
-        LOGW("new content: %s world: the game's item lookup could not be hooked (%s); an unknown item id stays NULL", w,
-             g_itemfind_hook.error() ? g_itemfind_hook.error() : "?");
+    std::string why;
+    const FindInstall rc = itemfind_install(world_runs, &why);
+    if (rc == FindInstall::unchecked) {  // nothing written: the next world's registry load tries again
+        LOGW("new content: %s world: the [Unknown item] placeholder is off for this world: the game's item lookup could not be "
+             "hooked because the install could not be checked while a world runs (%s); the next world's registry load tries again",
+             w, why.c_str());
         return false;
     }
+    g_itemfind_tried = true;
+    if (rc == FindInstall::failed) {
+        LOGW("new content: %s world: the game's item lookup could not be hooked (%s); an unknown item id stays NULL", w, why.c_str());
+        return false;
+    }
+    const char* how = world_runs ? "checked install: a world runs" : "no world runs yet";
     if (!hosts)
         LOGI("new content: %s world: the game's item lookup is hooked now (this game joined a server, which may send items of "
-             "mods this game does not have: they show as [Unknown item])", w);
+             "mods this game does not have: they show as [Unknown item]; %s)", w, how);
     else
         LOGI("new content: %s world: the game's item lookup is hooked now (mods here define %zu item(s): one this world's "
-             "registry does not have yet shows as [Unknown item])", w, items);
+             "registry does not have yet shows as [Unknown item]; %s)", w, items, how);
     return true;
 }
 

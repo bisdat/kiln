@@ -3,11 +3,14 @@
 // when it is needed (GitHub issue 39), on the host: newcontent.cpp's own early_boot, unknown_enable and hk_itemfind over
 // a fake kiln.hooks table and a fake lookup whose entry jumps to the hook once it is "installed".
 //  - boot: the lookup is not hooked (the placeholder is defined); the lab's early-test file hooks it at boot
-//  - a join (no server world in this process): hooked when the client world's item registry finishes loading, and an id
-//    the registry lacks answers the placeholder
+//  - a join (no server world in this process): hooked when the client world's item registry finishes loading, with the
+//    plain installer (no world runs: dev.28's boot install), and an id the registry lacks answers the placeholder
 //  - a host without item mods: never hooked; an item defined while its client world runs: a line, and the next world's
 //    registry load hooks it
-//  - a host with item mods: hooked at the registry load
+//  - a host with item mods: hooked at the registry load with the checked installer (a world runs): kiln.hooks'
+//    mid2_checked places the detour, the raw link joins it, the placer goes
+//  - the checked install refused: no hook, a line, and the next world's registry load hooks it
+//  - a join whose client world already steps (early registration off): the checked installer
 //  - the handler entered while install() has not returned yet (a job thread on the fresh detour): it answers through the
 //    chain and never through an unset pointer
 //  - <kiln>/data/content/no-unknown-items: never hooked
@@ -49,8 +52,15 @@ bool client = true;              // side()
 bool early_test = false;         // <kiln>/data/content/early-test
 bool no_unknown = false;         // <kiln>/data/content/no-unknown-items
 uintptr_t server_world = 0;      // the session's live server world (0: this game joined someone else's server)
+uintptr_t client_world = 0;      // the session's live client world (0: still loading)
 bool enter_during_install = false;  // raw_detour calls the new link before it returns (a job thread on the fresh detour)
-std::vector<std::string> installs;  // labels, in order
+bool refuse_checked = false;     // mid2_checked: a thread could not be checked
+std::vector<std::string> installs;  // raw links' labels, in order
+std::vector<std::string> checked;   // mid2_checked calls on the lookup: "placed" or "refused"
+bool placed = false;             // the lookup has a physical detour that the checked installer wrote
+int unchecked_patches = 0;       // raw links that wrote the lookup's detour themselves (the plain installer)
+KilnHandle placer = 0;           // the checked placer's mid link on the lookup
+bool placer_revoked = false;
 std::vector<std::string> lines;     // kiln.log
 KilnHandle next_handle = 1;
 
@@ -76,6 +86,7 @@ uintptr_t entered = 0;  // what the link answered when entered inside raw_detour
 KilnResult KILN_CALL raw_detour(KilnOwner, uintptr_t target, const KilnHookOrder* o, void* fn, void** original, KilnHandle* out) {
     installs.emplace_back(o && o->label.ptr ? std::string(o->label.ptr, o->label.len) : "?");
     if (target == reinterpret_cast<uintptr_t>(&entry)) {
+        if (!placed && !detour) ++unchecked_patches;      // the first link on the target writes its detour
         *original = reinterpret_cast<void*>(&real_find);  // the continuation is published first, as kiln.hooks does
         detour = reinterpret_cast<Find>(fn);              // from here the link is reachable
         if (enter_during_install) entered = detour(kKnown, kReg);
@@ -85,7 +96,21 @@ KilnResult KILN_CALL raw_detour(KilnOwner, uintptr_t target, const KilnHookOrder
     *out = next_handle++;
     return KILN_OK;
 }
-KilnResult KILN_CALL revoke(KilnHandle) { return KILN_OK; }
+// The checked mid installation: places the target's detour, or refuses before writing anything.
+KilnResult KILN_CALL mid2_checked(KilnOwner, uintptr_t target, const KilnHookOrder*, KilnMidFn, void*, KilnHandle* out, uint32_t* unchecked) {
+    if (target == reinterpret_cast<uintptr_t>(&entry)) checked.emplace_back(refuse_checked ? "refused" : "placed");
+    if (refuse_checked) {
+        if (unchecked) *unchecked = 1;
+        return KILN_HOOKS_ERR_UNCHECKED;
+    }
+    if (target == reinterpret_cast<uintptr_t>(&entry)) placed = true, placer = next_handle;
+    *out = next_handle++;
+    return KILN_OK;
+}
+KilnResult KILN_CALL revoke(KilnHandle h) {
+    if (h && h == placer) placer_revoked = true;
+    return KILN_OK;
+}
 uintptr_t KILN_CALL caller(KilnHandle) { return 0; }
 
 KilnHooksApi hooks = [] {
@@ -93,6 +118,7 @@ KilnHooksApi hooks = [] {
     h.header.size = sizeof h;
     h.header.version = 2;
     h.raw_detour = &raw_detour;
+    h.mid2_checked = &mid2_checked;
     h.revoke = &revoke;
     h.caller = &caller;
     return h;
@@ -115,7 +141,7 @@ KilnResult KILN_CALL constant(KilnStr name, int64_t* out) {
     return KILN_OK;
 }
 uint32_t KILN_CALL side() { return client ? KILN_SIDE_CLIENT : KILN_SIDE_SERVER; }
-uintptr_t KILN_CALL world(uint32_t kind) { return kind == KILN_WORLD_SERVER ? server_world : 0; }
+uintptr_t KILN_CALL world(uint32_t kind) { return kind == KILN_WORLD_SERVER ? server_world : kind == KILN_WORLD_CLIENT ? client_world : 0; }
 bool KILN_CALL on_world_thread(uint32_t) { return false; }
 KilnResult KILN_CALL session(KilnSessionInfo* s) {
     const uint32_t size = s->size;
@@ -123,6 +149,7 @@ KilnResult KILN_CALL session(KilnSessionInfo* s) {
     s->size = size;
     s->side = side();
     s->worlds[KILN_WORLD_SERVER] = server_world;
+    s->worlds[KILN_WORLD_CLIENT] = client_world;
     s->sessions[KILN_WORLD_SERVER] = server_world ? 1 : 0;
     return KILN_OK;
 }
@@ -301,7 +328,10 @@ void case_join() {
     check(!fake::has(fake::installs, kFind), "a join: not hooked before the client world's registry loads");
     registry_loaded(fake::kReg, 1);
     check(fake::has(fake::installs, kFind), "a join: hooked when the client world's item registry finished loading");
-    check(fake::logged("item lookup is hooked") && fake::logged("joined"), "a join: kiln.log says it is hooked and why");
+    check(fake::checked.empty() && fake::unchecked_patches == 1,
+          "a join: the plain installer (no world runs yet), as dev.28's boot install; no checked installation");
+    check(fake::logged("item lookup is hooked") && fake::logged("joined") && fake::logged("no world runs yet"),
+          "a join: kiln.log says it is hooked, why and how");
     check(fake::logged("self-check through the game's lookup: ok"), "a join: the placeholder's self-check passes");
     const uintptr_t u = fake::entry(0x0badf00d, fake::kReg);
     check(u != 0 && id_of(u) == 0x0badf00d, "a join: an id the registry lacks answers a placeholder with that id");
@@ -327,6 +357,8 @@ void case_host_plain() {
     // the next world: mods define items now
     registry_loaded(fake::kReg2, 2);
     check(fake::has(fake::installs, kFind), "the next world's registry load hooks it (mods define items now)");
+    check(fake::checked.size() == 1 && fake::checked[0] == "placed" && fake::unchecked_patches == 0,
+          "the next world (a host: the server world runs): the checked installer placed the detour");
     const uintptr_t u = fake::entry(0x0badf00d, fake::kReg2);
     check(u != 0 && id_of(u) == 0x0badf00d, "the next world answers the placeholder");
 }
@@ -338,9 +370,47 @@ void case_host_items() {
     check(!fake::has(fake::installs, kFind), "a host with item mods: not hooked before the registry loads");
     registry_loaded(fake::kReg, 1);
     check(fake::has(fake::installs, kFind), "a host with item mods: hooked at the registry load");
-    check(fake::logged("item lookup is hooked") && fake::logged("define"), "a host with item mods: kiln.log says it is hooked and why");
+    check(fake::checked.size() == 1 && fake::checked[0] == "placed" && fake::unchecked_patches == 0,
+          "a host with item mods: the checked installer placed the detour (the server world runs); the raw link wrote nothing");
+    check(fake::placer_revoked, "a host with item mods: the checked placer's mid link is revoked once the raw link is in");
+    check(fake::logged("item lookup is hooked") && fake::logged("define") && fake::logged("checked install: a world runs"),
+          "a host with item mods: kiln.log says it is hooked, why and how");
     const uintptr_t u = fake::entry(0x0badf00d, fake::kReg);
     check(u != 0 && id_of(u) == 0x0badf00d, "a host with item mods: an id the registry lacks answers the placeholder");
+}
+
+void case_checked_refused() {
+    boot();
+    fake::server_world = 0x4000;
+    fake::refuse_checked = true;
+    check(define_mod_item(), "a mod defines an item before the world");
+    registry_loaded(fake::kReg, 1);
+    check(fake::checked.size() == 1 && fake::checked[0] == "refused", "a host with item mods: the checked installer was asked and refused");
+    check(!fake::has(fake::installs, kFind) && fake::unchecked_patches == 0 && !fake::detour,
+          "a checked refusal: no hook, and no unchecked install instead");
+    check(fake::logged("placeholder is off for this world") && fake::logged("could not be checked") &&
+              fake::logged("next world's registry load tries again"),
+          "a checked refusal: kiln.log says the placeholder is off for this world and why");
+    check(fake::entry(0x0badf00d, fake::kReg) == 0, "a checked refusal: an unknown id stays NULL in this world");
+    const size_t said = fake::lines.size();
+    synced_again();
+    check(fake::lines.size() == said && fake::checked.size() == 1, "a checked refusal: not tried again in the same world, no second line");
+    // the next world: the threads can be checked now
+    fake::refuse_checked = false;
+    registry_loaded(fake::kReg2, 2);
+    check(fake::checked.size() == 2 && fake::checked[1] == "placed" && fake::has(fake::installs, kFind) && fake::unchecked_patches == 0,
+          "the next world's registry load tries again: hooked with the checked installer");
+    const uintptr_t u = fake::entry(0x0badf00d, fake::kReg2);
+    check(u != 0 && id_of(u) == 0x0badf00d, "the next world answers the placeholder");
+}
+
+void case_join_client_steps() {
+    boot();
+    fake::server_world = 0;
+    fake::client_world = 0x9000 + fake::kReg;  // the client world steps already (its first Pre: early registration off)
+    registry_loaded(fake::kReg, 1);
+    check(fake::has(fake::installs, kFind) && fake::checked.size() == 1 && fake::checked[0] == "placed" && fake::unchecked_patches == 0,
+          "a join whose client world already steps: hooked with the checked installer");
 }
 
 void case_enter_during_install() {
@@ -377,6 +447,8 @@ int main() {
         {"join", &case_join},
         {"host without item mods", &case_host_plain},
         {"host with item mods", &case_host_items},
+        {"checked install refused", &case_checked_refused},
+        {"join, client world already stepping", &case_join_client_steps},
         {"handler entered during install", &case_enter_during_install},
         {"early-test", &case_early_test},
         {"no-unknown-items", &case_opt_out},
