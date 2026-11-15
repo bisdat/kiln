@@ -641,11 +641,12 @@ void entity_phase(uint64_t n) {
 
 // ---- archetype cost (dev.29, boot B, before the managed rows start): what WhenArchetype's slice-record link and one
 // archetype-reading stage cost a step. A census wraps every game program with a counting Before for 60 steps and keeps
-// the busiest; then three phases of kCostSteps steps each: P0 no wrap and no link (nothing asked for an archetype in this
-// process yet), P1 a Before on the busiest program that reads its slice's archetype every slice (its first read puts
-// kiln.world's mid link on types/ProgramRunner in the next Pre), P2 that wrap gone, the link still there. A step's time is
-// this plugin's Pre to its Post (the game's step and the other subscribers between, the same in every phase).
-constexpr uint64_t kCostSteps = 1800;
+// the busiest; then five phases of kCostSteps steps each: P0 no wrap and no link (nothing asked for an archetype in this
+// process yet), then twice in turn P1 a Before on the busiest program that reads its slice's archetype every slice (its
+// first read puts kiln.world's scoped slice-record link on types/ProgramRunner in the next Pre) and P2 that wrap gone, the
+// link still there (taking turns, so a drift of the world's own load over the run does not read as the link's cost). A
+// step's time is this plugin's Pre to its Post (the game's step and the other subscribers between).
+constexpr uint64_t kCostSteps = 1200;
 struct CensusWrap {
     KilnHandle handle = 0;
     std::string name;
@@ -656,13 +657,17 @@ struct {
     std::string busy;
     uint64_t busy_slices = 0;
     KilnHandle wrap = 0;
-    int phase = -1;  // the phase whose steps are timed now (0..2), -1 none
+    int phase = -1;  // the phase whose steps are timed now (0 P0, 1 P1a, 2 P2a, 3 P1b, 4 P2b), -1 none
     LARGE_INTEGER pre{};
     bool pre_set = false;
-    std::vector<float> step_us[3];
+    std::vector<float> step_us[5];
     std::mutex mu;
     std::vector<float> call_ns;   // game_slice_archetype, P1
     uint64_t calls = 0, ok = 0, empty = 0, other = 0;  // empty: a slice with no entity (NOT_FOUND, not a failure)
+    // P3, the same stage with the lab switch forcing the world's programs onto the workers
+    bool forced = false;
+    uint64_t f_calls = 0, f_ok = 0, f_off = 0, f_other = 0;
+    std::vector<float> f_ns;
 } g_cost;
 double qpc_us(LARGE_INTEGER a, LARGE_INTEGER b) {
     static LARGE_INTEGER f{};
@@ -682,6 +687,14 @@ void KILN_CALL st_archetype_cost(KilnGameSlice* s, void*) {
     const KilnResult rc = W->game_slice_archetype(s, &layout);
     QueryPerformanceCounter(&b);
     std::lock_guard lock(g_cost.mu);
+    if (g_cost.forced) {
+        ++g_cost.f_calls;
+        if (rc == KILN_OK) ++g_cost.f_ok;
+        else if (rc != KILN_ERR_NOT_FOUND) ++g_cost.f_other;
+        if (!s->thread_is_world) ++g_cost.f_off;
+        if (g_cost.f_ns.size() < 200000) g_cost.f_ns.push_back(static_cast<float>(qpc_us(a, b) * 1000.0));
+        return;
+    }
     ++g_cost.calls;
     if (rc == KILN_OK) ++g_cost.ok;
     else if (rc == KILN_ERR_NOT_FOUND) ++g_cost.empty;
@@ -698,7 +711,9 @@ void KILN_CALL on_post(const KilnTickInfo*, void*) {
 // n counts from the restart boot's start; the mark row ran at 10. True when the phase is over.
 bool cost_phase(uint64_t n) {
     auto& c = g_cost;
-    const uint64_t p0 = 150, p1 = p0 + kCostSteps + 20, p2 = p1 + kCostSteps + 20, end = p2 + kCostSteps + 20;
+    const uint64_t p0 = 150, p1 = p0 + kCostSteps + 20, p2 = p1 + kCostSteps + 20, p1b = p2 + kCostSteps + 20,
+                   p2b = p1b + kCostSteps + 20, end = p2b + kCostSteps + 20;
+    const uint64_t p3 = end + 20, p3_end = p3 + 300;  // the archetype stage again, the world's programs on the workers
     if (n == 70) {
         KilnGameProgramsStatus st{};
         st.size = sizeof st;
@@ -734,6 +749,36 @@ bool cost_phase(uint64_t n) {
         if (c.wrap) W->game_program_unwrap(c.wrap);
     } else if (n == p2) {
         c.phase = 2;
+    } else if (n == p1b - 20) {
+        c.phase = -1;
+        if (!c.busy.empty()) c.wrap = wrap(c.busy.c_str(), KILN_WRAP_BEFORE, &st_archetype_cost, nullptr);
+    } else if (n == p1b) {
+        c.phase = 3;
+    } else if (n == p2b - 20) {
+        c.phase = -1;
+        if (c.wrap) W->game_program_unwrap(c.wrap);
+    } else if (n == p2b) {
+        c.phase = 4;
+    } else if (n == end + 5) {
+        // P3: the parallel filter row. The lab switch forces the server world's entity programs onto the game's workers;
+        // the scoped capture is per thread, so the stage's reads must come from the slice record there too.
+        if (!c.busy.empty()) c.wrap = wrap(c.busy.c_str(), KILN_WRAP_BEFORE, &st_archetype_cost, nullptr);
+        {
+            std::lock_guard lock(c.mu);
+            c.forced = true;
+        }
+        const KilnResult rc = W->lab_parallel(1, 310);
+        if (rc != KILN_OK) say("cost: the lab switch said %d (kiln/control/systems.parallel?)", rc);
+    } else if (n == p3_end) {
+        if (c.wrap) W->game_program_unwrap(c.wrap);
+        W->lab_parallel(0, 0);
+        std::lock_guard lock(c.mu);
+        row(c.f_calls > 0 && c.f_ok > 0 && c.f_off > 0 && c.f_other == 0,
+            "archetype on the workers (forced parallel): %s's stage read %llu archetypes, %llu off the world thread, %llu OK, "
+            "%llu other; ns p50/p99 %.0f/%.0f", c.busy.c_str(), static_cast<unsigned long long>(c.f_calls),
+            static_cast<unsigned long long>(c.f_off), static_cast<unsigned long long>(c.f_ok),
+            static_cast<unsigned long long>(c.f_other), pct(c.f_ns, 0.5), pct(c.f_ns, 0.99));
+        return true;
     } else if (n == end) {
         c.phase = -1;
         std::vector<float> calls;
@@ -744,19 +789,51 @@ bool cost_phase(uint64_t n) {
         const size_t head = std::min<size_t>(calls.size(), static_cast<size_t>(c.busy_slices / 60 + 1));
         const std::vector<float> first(calls.begin(), calls.begin() + static_cast<ptrdiff_t>(head)),
             later(calls.begin() + static_cast<ptrdiff_t>(head), calls.end());
-        row(c.busy_slices > 0 && c.ok > 0 && c.other == 0 && c.step_us[0].size() >= kCostSteps / 2 &&
-                c.step_us[1].size() >= kCostSteps / 2 && c.step_us[2].size() >= kCostSteps / 2,
-            "archetype cost: %s (%llu slices in 60 steps); step us p50/p99: P0 no link %.1f/%.1f (%zu steps), P1 link + one "
-            "archetype stage %.1f/%.1f (%zu), P2 link only %.1f/%.1f (%zu); game_slice_archetype ns p50/p99: first step "
-            "(the map) %.0f/%.0f (%zu calls), later (the slice record) %.0f/%.0f (%zu calls); %llu of %llu OK, %llu empty",
+        auto both = [&](int a, int b) {
+            std::vector<float> v = c.step_us[a];
+            v.insert(v.end(), c.step_us[b].begin(), c.step_us[b].end());
+            return v;
+        };
+        const std::vector<float> p1all = both(1, 3), p2all = both(2, 4);
+        bool sized = true;
+        for (const auto& v : c.step_us) sized = sized && v.size() >= kCostSteps / 2;
+        row(c.busy_slices > 0 && c.ok > 0 && c.other == 0 && sized,
+            "archetype cost: %s (%llu slices in 60 steps); step us p50/p99: P0 no link %.1f/%.1f (%zu steps); P1 link + one "
+            "archetype stage %.1f/%.1f (%zu; %.1f then %.1f); P2 link only %.1f/%.1f (%zu; %.1f then %.1f); game_slice_archetype "
+            "ns p50/p99: first step (the map) %.0f/%.0f (%zu calls), later (the slice record) %.0f/%.0f (%zu calls); %llu of %llu "
+            "OK, %llu empty",
             c.busy.c_str(), static_cast<unsigned long long>(c.busy_slices), pct(c.step_us[0], 0.5), pct(c.step_us[0], 0.99),
-            c.step_us[0].size(), pct(c.step_us[1], 0.5), pct(c.step_us[1], 0.99), c.step_us[1].size(),
-            pct(c.step_us[2], 0.5), pct(c.step_us[2], 0.99), c.step_us[2].size(), pct(first, 0.5), pct(first, 0.99),
-            first.size(), pct(later, 0.5), pct(later, 0.99), later.size(), static_cast<unsigned long long>(c.ok),
-            static_cast<unsigned long long>(c.calls), static_cast<unsigned long long>(c.empty));
-        return true;
+            c.step_us[0].size(), pct(p1all, 0.5), pct(p1all, 0.99), p1all.size(), pct(c.step_us[1], 0.5),
+            pct(c.step_us[3], 0.5), pct(p2all, 0.5), pct(p2all, 0.99), p2all.size(), pct(c.step_us[2], 0.5),
+            pct(c.step_us[4], 0.5), pct(first, 0.5), pct(first, 0.99), first.size(), pct(later, 0.5), pct(later, 0.99),
+            later.size(), static_cast<unsigned long long>(c.ok), static_cast<unsigned long long>(c.calls),
+            static_cast<unsigned long long>(c.empty));
     }
     return false;
+}
+
+// ---- link-only boot (dev.29, round 7): kiln/control/systems-test-link-only and no kiln-types.dll. Nothing else runs: a
+// Before on the busiest of a few programs reads its slice's archetype, so kiln.world puts its slice-record link on the
+// runner with the checked install as the first detour there (kiln.log: "hooks: typed link \"world/slice-record\" on rva
+// ... (... 1 on target, new detour)"), and the reads must succeed.
+bool g_link_only = false;
+void link_only_phase(uint64_t n) {
+    auto& c = g_cost;
+    if (n == 10) {
+        row(T == nullptr, "link-only boot: kiln.types is not loaded (its runner detour is not there)");
+        c.busy = "is_actor_in_shape";
+        c.wrap = wrap(c.busy.c_str(), KILN_WRAP_BEFORE, &st_archetype_cost, nullptr);
+    } else if (n == 600) {
+        if (c.wrap) W->game_program_unwrap(c.wrap);
+        std::lock_guard lock(c.mu);
+        row(c.calls > 0 && c.ok > 0 && c.other == 0,
+            "link-only boot: the archetype reads succeed with the slice-record link as the runner's first detour (%llu reads, "
+            "%llu OK, %llu empty, %llu other); kiln.log has the checked install's line", static_cast<unsigned long long>(c.calls),
+            static_cast<unsigned long long>(c.ok), static_cast<unsigned long long>(c.empty), static_cast<unsigned long long>(c.other));
+        g_done = true;
+        say("done, %d PASS, %d FAIL", g_pass, g_fail);
+        announce_done();
+    }
 }
 
 // ---- kiln.spawn inside the world's step (dev.29): a native stage asks kiln.spawn to create and to destroy. The empty lab
@@ -874,7 +951,7 @@ void restart_phase(uint64_t n) {
     wchar_t w[1100];
     if (MultiByteToWideChar(CP_UTF8, 0, p.c_str(), -1, w, 1100) > 0) DeleteFileW(w);
     say("restart row done; the archetype cost phases follow (about %llu steps)",
-        static_cast<unsigned long long>(3 * kCostSteps + 200));
+        static_cast<unsigned long long>(5 * kCostSteps + 450));
 }
 
 // ---- S3: kiln.types under wraps ----
@@ -1104,6 +1181,10 @@ void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
         say("start at step %llu (%u entities with Health)", static_cast<unsigned long long>(g_start), health);
     }
     const uint64_t n = tick->step - g_start;
+    if (g_link_only) {
+        link_only_phase(n);
+        return;
+    }
     if (g_restart.after_restart) {
         restart_phase(n);
         return;
@@ -1190,6 +1271,16 @@ extern "C" __declspec(dllexport) KilnResult KILN_CALL kiln_plugin_main(const Kil
                                                       &g_restart.written, &g_restart.seen, &g_restart.before) == 6;
                 std::fclose(f);
                 if (g_restart.after_restart) say("the boot after the restart: only the mark row runs");
+            }
+            {  // the link-only boot (kiln/control/systems-test-link-only)
+                char dir[1024];
+                size_t len = 0;
+                if (g_api->path(KILN_PATH_CONTROL, dir, sizeof dir - 1, &len) == KILN_OK)
+                    if (FILE* f = open_utf8(std::string(dir, len) + "\\systems-test-link-only", L"r")) {
+                        std::fclose(f);
+                        g_link_only = true;
+                        say("the link-only boot: only the slice-record link row runs");
+                    }
             }
         };
     KilnHandle h = 0;

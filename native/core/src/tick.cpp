@@ -1,8 +1,13 @@
 // SPDX-License-Identifier: MIT
 #include "tick.h"
+#include "tick_watch.h"
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <string>
+#include <thread>
 #include <cstdio>
 #include <memory>
 #include <mutex>
@@ -57,6 +62,22 @@ int64_t g_world_storage = 0;  // world -> entity storage (the sim step's first a
 int64_t g_off_kind = 0, g_off_clock = 0, g_off_period = -1;
 using WaitWorldJobsFn = void(__cdecl*)(uintptr_t world);
 WaitWorldJobsFn g_wait_jobs = nullptr;
+
+// The watch over hk_world_destroy's wait for a world's jobs (tick_watch.h): a thread started with the tick hook that only
+// logs "still waiting" while that wait lasts (sparsely); it never ends the wait or frees anything.
+WaitWatch g_wait_watch;
+std::mutex g_watchdog_mu;
+std::condition_variable g_watchdog_cv;
+void wait_watchdog() {
+    for (;;) {
+        {
+            std::unique_lock lock(g_watchdog_mu);
+            g_watchdog_cv.wait_for(lock, std::chrono::milliseconds(250));
+        }
+        std::string line;
+        if (g_wait_watch.due(now_ms(), &line)) KLOG_W("%s", line.c_str());
+    }
+}
 bool g_post_warned = false;
 
 thread_local uint32_t g_typed_pre = 0;
@@ -457,9 +478,14 @@ void __fastcall hk_world_destroy(uintptr_t world) {
             // next wait on that queue the same way. Safe early and twice (EMF notes).
             if (waits_before_stop(kind) && g_wait_jobs) {
                 const double w0 = now_ms();
+                KLOG_I("tick: %s world 0x%llx: waiting for world jobs before STOPPING (WaitWorldJobs)",
+                       kKindName[kind], static_cast<unsigned long long>(world));
+                g_wait_watch.arm(kKindName[kind], world, w0);  // the watchdog says so if it lasts (tick_watch.h)
                 g_wait_jobs(world);
-                KLOG_I("tick: %s world 0x%llx: its jobs are drained by the engine (WaitWorldJobs, %.0f us) before STOPPING",
-                       kKindName[kind], static_cast<unsigned long long>(world), (now_ms() - w0) * 1000.0);
+                const uint32_t said = g_wait_watch.disarm();
+                KLOG_I("tick: %s world 0x%llx: its jobs are drained by the engine (WaitWorldJobs, %.0f us) before STOPPING%s",
+                       kKindName[kind], static_cast<unsigned long long>(world), (now_ms() - w0) * 1000.0,
+                       said ? " (after the watchdog's \"still waiting\" lines)" : "");
             } else if (waits_before_stop(kind)) {
                 KLOG_W("tick: %s world 0x%llx: STOPPING without the engine's wait (tick.wait_jobs did not resolve); "
                        "subscribers have their own bounded wait only", kKindName[kind], static_cast<unsigned long long>(world));
@@ -502,6 +528,14 @@ bool install() {
     if (sigdb::feature("tick.wait_jobs") && sigdb::symbol("WaitWorldJobs", &wait))
         g_wait_jobs = reinterpret_cast<WaitWorldJobsFn>(wait);
     window_clock::enable_windows(g_wait_jobs != nullptr);
+    if (g_wait_jobs) {
+        try {
+            std::thread(&wait_watchdog).detach();
+        } catch (...) {
+            KLOG_W("tick: no watchdog thread for the wait before a world's STOPPING; a wait that does not return is only "
+                   "named by its \"waiting for world jobs\" line");
+        }
+    }
     if (!g_hook.install(sim_step, reinterpret_cast<void*>(&hk_sim_step), "tick/SimStep")) {
         KLOG_E("tick: hooking SimStep at %p failed", reinterpret_cast<void*>(sim_step));
         return false;
