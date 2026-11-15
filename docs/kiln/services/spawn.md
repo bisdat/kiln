@@ -83,6 +83,13 @@ a game client while it hosts a world).
   compiles as it did in dev.26); `Spawn.TryItem` takes an `ItemId`.
 - **Threads.** The world calls are `[TickThreadOnly]`; `Lookup`, `Template`, `Templates`, `Tracked`, `WorldKey`,
   `WorldRunning`, `SupportsComponents` and `Available` are `[AnyThread]` (the native functions are thread-safe).
+  Creating and destroying (`Entity`, `Item`, `TryEntity`, `TryItem`, `Destroy`, `CleanupTracked`) also refuse inside
+  a program wrap's stage or a Kiln program, where the world is in the middle of its step and the entity map must not
+  change (`InvalidOperationException` naming `Slice.Post`; since 0.2.0-dev.29 also when such code runs on the world's
+  own thread). Post the call (`Slice.Post`, `Scheduler.Post`) and it runs before the next step. Inside a
+  `GameSystems.Hook` callback they still go through, as in 0.2.0-dev.28, with a warning in kiln.log once per mod and
+  call kind: the entity is created or destroyed in the middle of the step, which is unsafe once the game runs its
+  programs on worker threads; post it with `Scheduler.Post`.
 - **Events.** Every write already posts one: `EntitySpawnedEvent`, `EntityDestroyedEvent`.
 
 Tested offline in `managed/tests/Kiln.Contract.Tests/SpawnContractTests.cs` (rows, exceptions, attributes); not run
@@ -140,6 +147,11 @@ Every spawn without `NoTrack` is recorded in `kiln/data/spawn/<world GUID>.json`
 `template_get`, `template_count`, `template_at`, `tracked_count`, `tracked_at`, `cleanup(tag, origin, &result)`,
 `refresh(&live)`, `world_key`, `world_state`. Game-state functions return `KILN_ERR_WRONG_THREAD` off the tick
 thread and `KILN_ERR_UNAVAILABLE` before the world runs; the catalog and tracked-list reads work from any thread.
+`spawn`, `spawn_item`, `destroy` and `cleanup` also return `KILN_ERR_WRONG_THREAD` on the tick thread inside a program
+wrap's stage or a Kiln program's callback (kiln.world's `in_program` answers 1 and kiln.types' `in_system_callback` 0:
+the world is mid-step), and kiln.log says to post the call (since 0.2.0-dev.29; `native/services/spawn/midstep.h`).
+Inside a kiln.types system-hook callback they go through as in 0.2.0-dev.28, with one warning per call kind in kiln.log.
+EMF's `hook_program` callbacks keep EMF's own rule: EMF's `spawn` and `destroy` refuse outside a world callback.
 Native plugins look it up in `on_ready`: `api->service({"kiln.spawn", 10}, 1)`.
 
 ## Failure modes

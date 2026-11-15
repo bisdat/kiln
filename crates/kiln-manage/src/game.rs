@@ -538,6 +538,7 @@ fn fallback_install_state(install: &GameInstall) -> crate::install::InstallState
         modified: Vec::new(),
         upgrade_available: None,
         missing_parts: Vec::new(),
+        switch_back: None,
     }
 }
 

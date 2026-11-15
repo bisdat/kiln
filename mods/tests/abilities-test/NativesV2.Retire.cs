@@ -144,4 +144,42 @@ public sealed partial class AbilitiesTestMod
         _spawned.Add(await Abilities.RunProgram(guid, p));
         await Steps(4);
     }
+
+    // Review round 2: hk_create / hk_run when Kiln's lock is held past their bound (lab fixture kiln/control/impact.lockhold):
+    // the instance created then gets no hold and no tracking (no Starting, no Started event), its run is delayed and
+    // still happens, the bypass counter grows; once the lock is free a run is complete again (held, started, signal).
+    private async Task TestLockGiveUp(WorldPosition p)
+    {
+        if (!File.Exists(Path.Combine(ControlDir, "impact.lockhold"))) { Info("no kiln/control/impact.lockhold: the lock give-up row is skipped"); return; }
+        const uint tag = 0x6C0E;
+        var guid = new Guid("06c0000e-0000-4000-8000-000000000001");
+        var id = Abilities.Programs.Register(ProgramBuilder.Raw(guid,
+            [11, tag, 11, 0xFFFF0000, 19, 0x06c000e1, Abilities.HashOf("kiln.Signal"), 27, 30], [30],
+            [("Out::value", Sint32, 4, BitConverter.GetBytes(7))]), out _);
+        using var hold = Abilities.HoldPrograms(id);
+        var b0 = Abilities.Natives.LabLockBypass ?? 0;
+        _starting.Clear();
+        _started.Clear();
+        _signals.Clear();
+        File.WriteAllText(Path.Combine(ControlDir, "impact.lockhold.now"), "300");
+        await Steps(2);  // armed in a Pre: the next creation holds the lock
+        var e1 = await Abilities.RunProgram(guid, p);
+        _spawned.Add(e1);
+        await Steps(20);
+        var b1 = Abilities.Natives.LabLockBypass ?? 0;
+        var sig1 = _signals.FirstOrDefault(s => s.Impact.Self == e1 && s.Tag == tag);
+        var starting1 = _starting.Any(s => s.Impact.Self == e1);
+        var started1 = _started.Any(s => s.Impact.Self == e1);
+        Check(b1 > b0 && !starting1 && !started1 && sig1 is { AsInt: 7 },
+            $"with Kiln's lock held past the bound, an instance's creation gives up: {b1 - b0} bypass(es), no hold " +
+            $"({(starting1 ? "Starting seen" : "no Starting")}), no tracking ({(started1 ? "Started seen" : "no Started")}), and its run " +
+            $"still happens (signal {sig1?.AsInt} at step {sig1?.Step})");
+        // recovered: a complete run
+        var e2 = await Abilities.RunProgram(guid, p with { Z = p.Z + 3 });
+        _spawned.Add(e2);
+        await Steps(8);
+        var sig2 = _signals.FirstOrDefault(s => s.Impact.Self == e2 && s.Tag == tag);
+        Check(_starting.Any(s => s.Impact.Self == e2) && _started.Any(s => s.Impact.Self == e2) && sig2 is { AsInt: 7 },
+            $"once the lock is free again, a run is complete: held (Starting), tracked (Started), signal {sig2?.AsInt}");
+    }
 }

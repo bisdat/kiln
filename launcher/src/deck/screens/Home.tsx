@@ -1,3 +1,4 @@
+import { StoppedStartNotice } from "../../shell/StoppedStartNotice";
 // Deck Home: the game's name, how many mods are on (every kind counts), the big Play button (the kiln's mouth), Kiln's
 // state with its one next step (Install, Update, Find game), and the last boot in one line. Only a profile other than
 // the default is named; profiles are switched in Settings (the desktop UI's, or the Deck's).
@@ -81,6 +82,8 @@ export default function Home() {
   else if (change?.state === "failed") kilnWord = { text: `${change.what} failed`, tone: "err" };
   else if (!rt) kilnWord = { text: "Checking", tone: "idle" };
   else if (!rt.installed) kilnWord = { text: kiln.shroudforge ? "ShroudForge is in this game" : "Kiln not installed", tone: "warn" };
+  // (dev.29) the game's Kiln came with a test build; Play puts this launcher's own in first (shell/play.ts)
+  else if (rt.switchBack) kilnWord = { text: `Kiln ${kilnLabel(kilnVer ?? "")} · from the beta, Play installs ${kilnLabel(rt.switchBack.to)}`, tone: "warn" };
   else if (rt.upgradeAvailable) kilnWord = { text: `Kiln ${kilnLabel(kilnVer ?? "")} · update ready`, tone: "warn" };
   else kilnWord = { text: `Kiln ${kilnLabel(kilnVer ?? "")}`, tone: "ok" };
   const advice = rt?.installed && s?.launchOptions?.advice && (!s.launchOptions.hasDllOverride || s.launchOptions.chainedOverrideMissing);
@@ -95,6 +98,7 @@ export default function Home() {
         <h1 className="deck-name">Enshrouded</h1>
         {count && <p className="deck-line" data-testid="deck-mods"><span className="deck-label">Mods</span> {count}{other && <span data-testid="deck-profile"> · Profile: {other}</span>}</p>}
         <p className="deck-line" data-testid="deck-kiln-state"><Word tone={kilnWord.tone}>{kilnWord.text}</Word></p>
+        <StoppedStartNotice ctl={ctl} deck />
         {t && tw && (
           <div className="deck-start" data-testid="deck-start">
             <p className="deck-line deck-start-line" role="status">{tw.line}</p>

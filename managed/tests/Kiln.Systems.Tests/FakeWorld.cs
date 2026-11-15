@@ -46,6 +46,8 @@ internal sealed unsafe class FakeWorld : IDisposable
     internal ulong StepNow = 77;  // the step a fake slice says
     internal int IterateResult = SystemsNative.Ok;  // what game_slice_iterate answers (Unavailable: a build that cannot iterate)
     internal int ArchetypeResult = SystemsNative.Ok;  // what game_slice_archetype answers
+    internal readonly Queue<int> ArchetypeResults = new();  // answered first, one per call (then ArchetypeResult)
+    internal int ArchetypeCalls;
     internal readonly HashSet<uint> UnknownComponents = new();  // game_archetype_has answers -1 for these
     // kiln.world's directory read inside a step gave up after its bound (another thread held the directory's lock):
     // game_program_list answers -1 and game_program_contract NOT_FOUND for an existing program
@@ -498,8 +500,10 @@ internal sealed unsafe class FakeWorld : IDisposable
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int Archetype(SystemsNative.Slice* s, nuint* out_)
     {
-        *out_ = F.ArchetypeResult == SystemsNative.Ok ? F.Layout : 0;
-        return F.ArchetypeResult;
+        F.ArchetypeCalls++;
+        var rc = F.ArchetypeResults.TryDequeue(out var next) ? next : F.ArchetypeResult;
+        *out_ = rc == SystemsNative.Ok ? F.Layout : 0;
+        return rc;
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]

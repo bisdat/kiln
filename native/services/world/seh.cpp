@@ -35,6 +35,18 @@ bool seh_teleport_cb(KilnTeleportFn fn, const KilnTeleportResult* r, void* user,
     }
 }
 
+// Kiln's own code that reads game memory raw (a client world's name maps, its program table's count and entries, since
+// 0.2.0-dev.29): a fault there ends the call and is reported. Objects of fn's own frames are not destroyed on a fault
+// (a leak on a path that switches the feature off).
+bool seh_call(void (*fn)(void*), void* ctx, unsigned long* code) {
+    __try {
+        fn(ctx);
+        return true;
+    } __except (*code = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 bool seh_register_program(RegisterProgramFn f, uintptr_t world, const EngineDesc* d, bool* ok, unsigned long* code) {
     __try {
         *ok = f(world, d, false);

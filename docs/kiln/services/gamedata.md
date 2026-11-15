@@ -258,12 +258,11 @@ that needs its own permanent numbers and its own name is a **clone**.
   - `Content.Buffs.Define(clone, new DefinitionRegistrationOptions(timing))` (and the `JsonObject` overload; tick
     thread): a `DefinitionRegistrationResult`. `RequireRegistered`: registered now (the record in Kiln's copy, the
     world's BuffRegistry reading it, and the game's own getBuffType asked to find it where `gamedata.buff_lookup`
-    resolves; otherwise a warning says it was not checked), or refused with a `Code` and a `Reason` without taking
-    room: `NoWorld`, `NotReady` (game data or the world's BuffRegistry not loaded yet), `CapacityExceeded`,
+    resolves; otherwise a warning says it was not checked), or refused with a `Code` and a `Reason` (a post-allocation failure retains its occupied record): `NoWorld`, `NotReady` (game data or the world's BuffRegistry not loaded yet), `CapacityExceeded`,
     `IdCollision` (the GUID's id is 0, a game buff's or another clone's), `NameTaken`, `UnknownBase`, `OwnerInactive`.
     `AllowNextStart`: the same when it can register now; when only the moment is wrong it writes
     `kiln/data/gamedata/pending/<mod>/<guid>.json` and answers `AcceptedNextStart` (no room taken; the definition is not
-    registered in this process); the next start defines it before the mods load ("stored for this start: defined"),
+    registered in this process); the next start waits for the reliable loaded-mod list, admits only loaded owners,
     the world's load registers it ("... at this start: Registered") and the file goes. A known refusal (full, a taken
     id or name) is never stored. A failure after the record was taken answers `Retained` with `SlotsConsumed` 1. The
     same definition again answers the same, `SlotsConsumed` 1 once, and posts nothing; a change posts
@@ -274,7 +273,7 @@ that needs its own permanent numbers and its own name is a **clone**.
     `Superseded` (a later definition of the GUID), `Retained` / `OwnerInactive` (the mod unloaded: its record stays,
     reserved, until a loaded mod defines the GUID again), `NotFound` for an id this process does not know (receipts
     live as long as the process; the ones stored for the next start come back with their file).
-  - Not posted: the events for a stored definition settled at the next start (its receipt answers it).
+  - Stored definitions are handed to the loaded mod's owner. Inactive-mod and refused files stay on disk; delete unused files from the pending folder to reclaim its 4,096-file / 256 MiB allowance. Writes are flushed before acknowledgement. Startup settlement is available through its receipt; it does not currently post a managed definition event.
 - **Referencing them**:
   - an item's perk slot: code `Content.ItemData.Get(item).Set("perkReferences[2]", "Kiln_Sample_FrostbiteEdge")`
     (`perkIds[2]` follows: FNV-1a of the GUID); new items: kitbash `"perks": [null, null, "<perk clone GUID>"]`

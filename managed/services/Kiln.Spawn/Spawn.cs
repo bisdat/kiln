@@ -458,6 +458,7 @@ public static unsafe partial class Spawn
         fixed (byte* tag = tagBytes)
         fixed (byte* origin = originBytes)
         {
+            HookWarning("spawn_item");
             rc = t->SpawnItem(itemId, (uint)amount, new Vec3(position), Math.Max(level, options?.Level ?? 0),
                 (uint)(options?.Flags ?? SpawnFlags.None), new NativeStr { Ptr = tag, Len = (nuint)tagBytes.Length },
                 new NativeStr { Ptr = origin, Len = (nuint)originBytes.Length }, &id);
@@ -552,6 +553,7 @@ public static unsafe partial class Spawn
             req.TemplateName = new NativeStr { Ptr = n, Len = (nuint)nameBytes.Length };
             req.Tag = new NativeStr { Ptr = tag, Len = (nuint)tagBytes.Length };
             req.Origin = new NativeStr { Ptr = o, Len = (nuint)originBytes.Length };
+            HookWarning("spawn");
             rc = t->Spawn(&req, &id);
         }
         Check(rc, name ?? guid.ToString());
@@ -590,7 +592,9 @@ public static unsafe partial class Spawn
         if (entity.IsPlayer) throw new ArgumentException("players cannot be destroyed", nameof(entity));
         var watched = Events.HasSubscribers<EntityDestroyedEvent>();
         var info = watched ? Inspect(entity) : null;
-        var rc = Require("Spawn.Destroy")->Destroy(entity.Value);
+        var table = Require("Spawn.Destroy");
+        HookWarning("destroy");
+        var rc = table->Destroy(entity.Value);
         if (rc == NotFound) return false;
         Check(rc, $"destroy {entity}", Caps.Destroy);
         if (watched) Events.Post(new EntityDestroyedEvent(entity, info?.Template, info?.TemplateName, info?.Position, "destroy", Origin));
@@ -759,6 +763,7 @@ public static unsafe partial class Spawn
         fixed (byte* tp = tb)
         fixed (byte* op = ob)
         {
+            HookWarning("cleanup");
             rc = t->Cleanup(new NativeStr { Ptr = tp, Len = (nuint)tb.Length }, new NativeStr { Ptr = op, Len = (nuint)ob.Length }, &r);
         }
         Check(rc, "cleanup");
@@ -830,6 +835,23 @@ public static unsafe partial class Spawn
         }
     }
 
+    // Inside a GameSystems.Hook callback (a kiln.types system hook) create and destroy go through as on 0.2.0-dev.28 until
+    // the owner decides; the world is in the middle of its step there. One warning per mod and call kind (kiln.spawn
+    // itself says it once per call kind for every caller, native ones too).
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(string Mod, string Kind), byte> HookWarned = new();
+    private static void HookWarning(string kind)
+    {
+        if (!GameSystems.InHookCallback) return;
+        var mod = ModContext.CurrentMod;
+        if (!HookWarned.TryAdd((mod?.Info.Id ?? "kiln", kind), 0)) return;
+        var what = kind is "destroy" or "cleanup" ? "destroyed" : "created";
+        var text = $"kiln.spawn: {kind} in a GameSystems.Hook callback: an entity {what} in the middle of the world's step. " +
+                   "Allowed as in 0.2.0-dev.28, but unsafe once the game runs its programs on worker threads (a second player " +
+                   "in the world); post it with Scheduler.Post. Said once per mod and call kind";
+        if (mod is not null) mod.Log.Warn(text);
+        else Backend.Current.Log(0, LogLevel.Warn, text);
+    }
+
     // `capability`: what an "unavailable" answer of this call means (the world does not run, or a feature is off).
     private static void Check(int rc, string what, string capability = Caps.World)
     {
@@ -838,7 +860,11 @@ public static unsafe partial class Spawn
         throw rc switch
         {
             Unavailable => ServiceCaps.Unavailable(capability, $"kiln.spawn: {what}: unavailable (the world is not running yet, or not on this build)"),
-            WrongThread => new InvalidOperationException($"kiln.spawn: {what}: not on the tick thread"),
+            // On the tick thread kiln.spawn refuses create and destroy only inside the world's step (since 0.2.0-dev.29).
+            WrongThread => new InvalidOperationException(Game.IsTickThread
+                ? $"kiln.spawn: {what}: refused inside the world's step (a program wrap's stage or a Kiln program), " +
+                  "where the entity map must not change; post it (slice.Post in a wrap stage, or Scheduler.Post) so it runs after the step"
+                : $"kiln.spawn: {what}: not on the tick thread"),
             NotFound => new SpawnException($"kiln.spawn: {what}: unknown template or entity", rc),
             InvalidArgument => new SpawnException($"kiln.spawn: {what}: invalid argument", rc),
             _ => new SpawnException($"kiln.spawn: {what}: refused by the game (see kiln.log)", rc),

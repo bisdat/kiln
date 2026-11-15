@@ -24,6 +24,11 @@ KillMode=mixed
 TimeoutStopSec=90
 Restart=on-failure
 RestartSec=15
+# Kiln stopped the start because the mod list cannot run: 1 = kiln.boot (0x4B01, a required boot mod), 2 = the NPC roster
+# cannot be held (0x4B02, kiln/state/roster-refused.json). Wine passes on the low byte. A restart stops the same way and
+# only spins: fix the mod list, then start the unit again. Under Wine an unrelated failure exiting 1 or 2 is kept down
+# too: read kiln/logs/kiln.log before starting again (docs/kiln/dedicated-servers.md).
+RestartPreventExitStatus=1 2
 SyslogIdentifier=kiln@%i
 
 [Install]

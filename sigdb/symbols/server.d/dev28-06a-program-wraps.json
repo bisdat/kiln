@@ -1,7 +1,7 @@
 {
   "format": 1,
   "side": "server",
-  "comment": "kiln.world, game-program wraps (0.2.0-dev.28, chapter 06a): the program scheduler's live path and the players mask that decides whether a world's program slices run inline on the world's thread or as tasks on the game's workers. Wraps themselves need no symbol of their own (they swap the update pointer of a program-table entry, entry+0x28, with the world/programs.* constants); these resolve the scheduler for the threads report and the lab's parallel switch. SimStep (it sets storage+0x518 = 1 at entry, so it always takes this path) calls RunInitPrograms, then StepPrograms in a loop: StepPrograms' prologue decides parallel per world kind (server: the u16 players mask at storage+mask != 0; prediction: never; client: always), cuts slices and runs ProgramRunner (types/ProgramRunner) inline or posts SliceTaskFn tasks. The players mask holds bit (id-1) mod 16 for every live player entity (ids 1..1023). Same bytes on server 26430253 (f0d824be) and client 26430625 (5d9ef2f1); svn 1273043 (d7baa768) has another prologue frame size, which the second StepPrograms strategy (the kind dispatch, 0x22 bytes in) does not depend on.",
+  "comment": "kiln.world, game-program wraps (0.2.0-dev.28, chapter 06a): the program scheduler's live path and the players mask that decides whether a world's program slices run inline on the world's thread or as tasks on the game's workers. Wraps themselves need no symbol of their own (they swap the update pointer of a program-table entry, entry+0x28, with the world/programs.* constants); these resolve the scheduler for the threads report and the lab's parallel switch. SimStep (it sets storage+0x518 = 1 at entry, so it always takes this path) calls RunInitPrograms, then StepPrograms in a loop: StepPrograms' prologue decides parallel per world kind (server: the u16 players mask at storage+mask != 0; prediction: never; client: always), cuts slices and runs ProgramRunner (types/ProgramRunner) inline or posts SliceTaskFn tasks. The players mask holds bit (id-1) mod 16 for every live player entity (ids 1..1023). Same bytes on server 26430253 (f0d824be) and client 26430625 (5d9ef2f1); svn 1273043 (d7baa768) has another prologue frame size, which the second StepPrograms strategy (the kind dispatch, 0x22 bytes in) does not depend on. world.slice_record (dev.29): the engine slice record's entry, rows and archetype layout, read in types/ProgramRunner, for WhenArchetype's scheduler-stable source.",
   "symbols": {
     "world/StepPrograms": {
       "find": [
@@ -27,10 +27,41 @@
           "pattern": "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 30 48 8B F9 33 D2 48 8D 4C 24 20 E8 ?? ?? ?? ?? 8B 47 10"
         }
       ]
+    },
+    "@world/ProgramRunner.slice": {
+      "comment": "types/ProgramRunner's prologue (rcx storage, rdx the engine's slice record, r8 index, r9 worker area): the slice record's program-table entry (mov rbx,[rdx+entry]; the runner calls [entry+0x28], the update), its end and first rows (mov r15d,[rdx+end]; sub r15d,[rdx+first]: the job's entity count). The bytes types/ProgramRunner is found by, then the three reads.",
+      "find": [
+        {
+          "pattern": "48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 4C 89 64 24 20 55 41 56 41 57 48 8D AC 24 70 F8 FF FF 48 81 EC 90 08 00 00 48 8B 5A {world/slice.entry:d8} 45 33 E4 44 8B 7A {world/slice.end:d8} 0F 57 C0 44 2B 7A {world/slice.first:d8}"
+        }
+      ]
+    },
+    "@world/ProgramRunner.layout": {
+      "comment": "types/ProgramRunner hands the slice's archetype layout and group to the column setup (mov r9,[rdi+group]; mov r8,[rdi+layout]; rdi = the slice record): the layout is the archetype object whose bitset is at +0 (the same object as an entity record's world/entity.layout; out/06a-program-wraps/client-static/r5). Then the stores of the column setup's frame.",
+      "find": [
+        {
+          "pattern": "4C 8B 4F {world/slice.group:d8} 4C 8B 47 {world/slice.layout:d8} 48 89 85 F8 00 00 00 48 8D 86 ?? ?? ?? ?? 48 89 85 00 01 00 00 48 8D 83 ?? ?? ?? ?? 0F B6 88 ?? ?? ?? ?? 48 89 8D E8 00 00 00 48 8D 8D 08 01 00 00"
+        }
+      ]
     }
   },
   "constants": {
     "world/storage.players_mask": {
+      "min_votes": 1
+    },
+    "world/slice.entry": {
+      "min_votes": 1
+    },
+    "world/slice.end": {
+      "min_votes": 1
+    },
+    "world/slice.first": {
+      "min_votes": 1
+    },
+    "world/slice.group": {
+      "min_votes": 1
+    },
+    "world/slice.layout": {
       "min_votes": 1
     }
   },
@@ -43,6 +74,20 @@
       ],
       "constants": [
         "world/storage.players_mask"
+      ]
+    },
+    "world.slice_record": {
+      "comment": "kiln.world's archetype source for a wrap stage (0.2.0-dev.29): a mid link on types/ProgramRunner's first instruction records the engine's slice record on the thread; a stage reads the slice's layout from it, checked against the entry and row count the trampoline ran with. Installed when a stage first asks for its slice's archetype.",
+      "symbols": [
+        "types/ProgramRunner",
+        "@world/ProgramRunner.slice",
+        "@world/ProgramRunner.layout"
+      ],
+      "constants": [
+        "world/slice.entry",
+        "world/slice.end",
+        "world/slice.first",
+        "world/slice.layout"
       ]
     }
   }

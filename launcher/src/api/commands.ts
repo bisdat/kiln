@@ -116,7 +116,7 @@ export interface LauncherSettings {
   savesKeep: number;
   /** Check for launcher updates at the start and every 6 hours (default on). */
   updateCheck: boolean;
-  /** Absent or null: the channel of the running build (a dev build follows dev). */
+  /** Absent or null: the channel of the running build (a dev build follows dev, a test build beta). */
   updateChannel?: UpdateChannel | null;
   /** The WebGL fire on Play (default on); off draws the plain Play button. */
   animatedFire?: boolean;
@@ -291,6 +291,10 @@ export interface InstallState {
   /** Parts absent from the receipt that a reinstall adds: defaults not turned off, plus required dependencies.
    *  Absent from older backends. */
   missingParts?: string[];
+  /** (dev.29) The game's Kiln came with a test build of the launcher (its receipt's installer says beta) and this
+   *  launcher ships an older one: after a switch back to the release, the next Play installs `to` (the launcher's own)
+   *  in place of `from`. Absent from older backends and from kilnctl. */
+  switchBack?: { from: string; to: string } | null;
 }
 
 // profiles
@@ -755,7 +759,11 @@ export interface NativeJson {
     init?: { export?: string; result?: number | null; fault?: string | null; ms?: number } | null;
   }[];
 }
+export interface StoppedStart {
+  kind: "roster" | "boot-mod"; reason: string; mods: string[]; names: string[]; advice: string; utc: string; exitCode: number; pid: number;
+}
 export interface BootState {
+  stoppedStart?: StoppedStart | null;
   boot: BootJson | null;
   mods: ModsJson | null;
   native: NativeJson | null;
@@ -1137,7 +1145,9 @@ export const appAssetsImport = (kind: "editor" | "admin", from: string | null = 
 // update.rs: the launcher's self-update (frostdev.io, then GitHub; signed). Changes arrive as kiln://update.
 // The Nexus Mods build has the same commands without a self-update: phase "disabled", install/restart reject with
 // `unsupported`, nothing is fetched (and the UI calls none of them there: api/distribution.ts).
-export type UpdateChannel = "stable" | "dev";
+/** "dev" is the public release line while there is no stable release ("Release" in the UI); "beta" (dev.29) are test
+ *  builds of the next release (api/channel.ts). */
+export type UpdateChannel = "stable" | "dev" | "beta";
 export type UpdatePhase = "idle" | "checking" | "upToDate" | "available" | "skipped" | "failed" | "downloading" | "ready" | "disabled";
 export type UpdateInstallKind = "appimage" | "nsis" | "msi" | "deb" | "rpm" | "unbundled";
 export interface UpdateFailure { source: string; step: "manifest" | "download" | "signature" | "hash"; message: string }
@@ -1166,6 +1176,29 @@ export interface UpdateStatus {
   justUpdated: { from: string; to: string; at: string; source: string; notes: string | null } | null;
   taskId: TaskId | null;
   error: KilnError | null;
+  /** (dev.29) The channel this build belongs to: a test build's is "beta" (baked in when it was built), else the
+   *  channel of its version. Absent from an older backend: the version's. */
+  buildChannel?: UpdateChannel;
+  /** (dev.29) This test build's beta number (null: not a test build). */
+  beta?: number | null;
+  /** (dev.29) The channel switch the player started (update_switch) while it downloads or waits for the restart. */
+  switching?: UpdateChannel | null;
+  restoreRequested?: boolean;
+  beforeBetaWarning?: string[];
+  /** (dev.29) The copy of settings and profiles taken before the first start of a test build: a switch back can put
+   *  it back (update_switch `restore`). */
+  beforeBeta?: BeforeBeta | null;
+}
+/** selfupdate/snapshot.rs: what a "before beta" copy holds. */
+export interface BeforeBeta {
+  /** When it was taken (RFC 3339). */
+  taken: string;
+  /** The launcher that wrote the files last before the test build (its version, "" when not known). */
+  from: string;
+  /** The test build that took it. */
+  by: string;
+  /** Files in it (settings.json, each profile's meta.json, the Library's kiln-kept.json). */
+  files: string[];
 }
 /** Guard the command boundary as well as the UI: even a stale callback or a directly mounted hook cannot invoke
  *  an updater command in the Nexus build. Failure to read the distribution also fails closed. */
@@ -1183,6 +1216,10 @@ export const updateRestart = () => selfUpdateCall<null>("update_restart");
 /** null: un-skips. */
 export const updateSkip = (version: string | null) => selfUpdateCall<UpdateStatus>("update_skip", { version });
 export const updateAck = () => selfUpdateCall<UpdateStatus>("update_ack");
+/** (dev.29) A channel switch the player asked for: downloads and installs the newest build of `channel` (on the way
+ *  back from a test build also an older one), then "Restart now" (updateRestart) runs it. `restore`: the restart puts
+ *  the "before beta" copy back first (status.beforeBeta). Task result: UpdateStatus. */
+export const updateSwitch = (channel: UpdateChannel, restore = false) => selfUpdateCall<TaskId>("update_switch", { channel, restore });
 
 // game.rs
 export const gameList = () => call<GameInstall[]>("game_list");
@@ -1913,6 +1950,7 @@ export const dataFolderRestart = () => call<null>("data_folder_restart");
 
 /** Every command name (the Rust side registers the same list; mock.ts answers or rejects each). */
 export const COMMANDS = [
+  "snapshot_status", "snapshot_continue",
   "app_info", "app_settings_get", "app_settings_set", "app_open_path", "app_open_url", "task_list", "task_get", "task_cancel",
   "game_list", "game_detect", "game_add", "game_remove", "game_status",
   "runtime_list", "runtime_import", "runtime_status", "runtime_install", "runtime_uninstall", "runtime_rollback", "runtime_classify",
@@ -1935,7 +1973,7 @@ export const COMMANDS = [
   "config_kiln_read", "config_kiln_set", "config_kiln_reset",
   "app_assets_status", "app_assets_import",
   "server_console_open", "server_console_close",
-  "update_status", "update_check", "update_install", "update_restart", "update_skip", "update_ack",
+  "update_status", "update_check", "update_install", "update_switch", "update_restart", "update_skip", "update_ack",
   "library_add", "library_add_to_profile", "profile_revert", "profile_ensure_default",
   "deck_browse", "deck_gamepad", "deck_fullscreen", "deck_quit",
   "nexus_account", "nexus_sign_in", "nexus_sign_out", "nexus_search", "nexus_mod", "nexus_installed", "nexus_download", "nexus_links", "nexus_link_install", "nexus_link_dismiss", "nexus_handler_status", "nexus_handler_set",
@@ -1979,3 +2017,7 @@ export async function onKilnEvent<E extends KilnEventName>(name: E, handler: (pa
   if (isTauri()) return tauriListen<KilnEvents[E]>(name, (e) => handler(e.payload));
   return (await loadMock()).mockListen(name, handler as (payload: unknown) => void);
 }
+
+export interface SnapshotStartup { phase: "preparing" | "blocked" | "ready"; reasons: string[]; canContinue?: boolean }
+export const snapshotStatus = () => call<SnapshotStartup>("snapshot_status");
+export const snapshotContinue = () => call<null>("snapshot_continue");

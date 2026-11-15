@@ -235,11 +235,15 @@ public static unsafe partial class Gameplay
 
     private static void CheckBuildProtection(int rc, ProtectionZone zone)
     {
-        if (rc != 3 || (zone.Deny & (GameplayActions.Build | GameplayActions.Break)) == 0) return;
+        if(rc!=3) return;
+        if((zone.Deny & (GameplayActions.Build | GameplayActions.Break))==0) {
+            var row=(zone.Deny & GameplayActions.Terraform)!=0 ? "gameplay.terraform_hooks" : "gameplay.spawn_hooks";
+            throw ServiceCaps.Unavailable(row,Capabilities.Why(row));
+        }
         var t = GameplayNative.T;
         GameplayNative.Status status = default;
         status.Size = (uint)sizeof(GameplayNative.Status);
-        var waiting = t != null && t->Status(&status) == Ok && status.Size >= (uint)sizeof(GameplayNative.Status) &&
+        var waiting = t != null && t->Status(&status) == Ok && status.Size >= 648 &&
                       status.BuildHookState == 2;
         throw ServiceCaps.Unavailable("gameplay.build_hooks", waiting
             ? "build protection begins with the next world: this mod asked for it while a world was running"
@@ -378,6 +382,8 @@ public static unsafe partial class Gameplay
     public static IDisposable WatchEntities(EntityCategories categories)
     {
         EnsureListener();
+        if ((categories & EntityCategories.All) != 0 && PrepareHookEvents(16) is { } why)
+            throw ServiceCaps.Unavailable("gameplay.entities_hooks",why);
         var mod = ModContext.CurrentMod;
         var w = new EntityWatch(categories & EntityCategories.All, mod);
         lock (Gate)
@@ -388,11 +394,19 @@ public static unsafe partial class Gameplay
         return w;
     }
 
-    /// <summary>True when the entity lifecycle events work on this build (capability <c>gameplay.entity_events</c>).</summary>
+    /// <summary>True when this build can provide entity lifecycle events (capability <c>gameplay.entity_events</c>).
+    /// Requests the hooks on demand; in a running world delivery begins after their safe Pre installation.</summary>
     [AnyThread]
     public static bool EntityEventsAvailable
     {
-        get { Used(); return GameplayNative.EntityFilter(GameplayNative.T) != null && Status is { EntityHooks: true }; }
+        get {
+            Used();
+            var t = GameplayNative.T;
+            if (GameplayNative.EntityFilter(t) == null) return false;
+            // Availability is also queried before subscribing. An idle installed flag must not disable the source.
+            if (GameplayNative.RequestHooks(t) != null) return PrepareHookEvents(16) == null;
+            return Status is { EntityHooks: true };
+        }
     }
 
     // Once per step (tick): tell the native hooks which categories to record.
@@ -557,12 +571,29 @@ public static unsafe partial class Gameplay
         }
     }
 
+    internal static readonly string[] HookRows = ["gameplay.craft_hooks", "gameplay.terraform_hooks", "gameplay.spawn_hooks", "gameplay.entities_hooks"];
+    internal static string? PrepareHookEvents(uint groups)
+    {
+        var t=GameplayNative.T;
+        if(t==null) return "kiln.gameplay is unavailable";
+        var request=GameplayNative.RequestHooks(t);
+        if(request==null || request(Services.CallerOwner,groups)==Ok) return null;
+        return string.Join("; ",HookRows.Where((_,i)=>(groups & (2u<<i))!=0).Select(Capabilities.Why));
+    }
+    internal static void RegisterHookEvent(Type type,uint groups,string legacyRow)
+    {
+        var request=GameplayNative.RequestHooks(GameplayNative.T);
+        var row=request==null ? legacyRow : HookRows[groups==2 ? 0 : groups==4 ? 1 : groups==8 ? 2 : 3];
+        EventProducers.Register(type,row,()=>PrepareHookEvents(groups),allowPending:true);
+    }
+
     internal static string? PrepareBuildEvents()
     {
         var t = GameplayNative.T;
         if (t == null) return "kiln.gameplay is unavailable";
         var request = GameplayNative.RequestBuild(t);
         if (request == null) return null; // Older service: its group was installed at startup.
+        if (PrepareHookEvents(4) is { } terraform) return terraform;
         if (request(Services.CallerOwner) == Ok) return null;
         return Capabilities.Get("gameplay.build_hooks").ReasonText;
     }
@@ -584,7 +615,7 @@ public static unsafe partial class Gameplay
             var t = GameplayNative.T;
             GameplayNative.Status status = default;
             status.Size = (uint)sizeof(GameplayNative.Status);
-            if (t != null && t->Status(&status) == Ok && status.Size >= (uint)sizeof(GameplayNative.Status) &&
+            if (t != null && t->Status(&status) == Ok && status.Size >= 648 &&
                 _buildNotice != status.BuildHookState)
             {
                 _buildNotice = status.BuildHookState;
@@ -600,6 +631,12 @@ public static unsafe partial class Gameplay
         if (Events.HasSubscribers<EntityLeaveLevelEvent>()) m |= GameplayNative.Mask(GameplayNative.EntityLeft);
         if (Events.HasSubscribers<ItemTossEvent>()) m |= GameplayNative.Mask(GameplayNative.Discard);
         SyncEntityFilter();
+        uint groups=0;
+        if((m & GameplayNative.Mask(GameplayNative.Crafted))!=0) groups|=2;
+        if((m & GameplayNative.Mask(GameplayNative.Build))!=0) groups|=4;
+        if((m & GameplayNative.Mask(GameplayNative.Spawn))!=0) groups|=8;
+        if((m & (GameplayNative.Mask(GameplayNative.EntityJoined)|GameplayNative.Mask(GameplayNative.EntityLeft)))!=0) groups|=16;
+        if(groups!=0) PrepareHookEvents(groups);
         return m;
     }
 

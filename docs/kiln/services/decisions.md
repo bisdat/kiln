@@ -139,10 +139,116 @@ and `AppliedHealth`.
 | `decisions.native_guards` | the death hook cannot be prepared (unresolved, faulted), or the service stopped |
 | `events.build.pieces` | always in 0.2.0-dev.29: player build pieces are not cancelable yet |
 | `events.build.terraform` | always: managed terraform cancel is not part of V1 (`Gameplay.Protect`'s native policy still applies) |
-| `events.component_net`, `events.component_writes.exact` | always in 0.2.0-dev.29: named component watches are not built yet; an every-store feed is not promised |
+| `events.component_net` | named component watches (below): off when kiln.decisions is off, the game's `GetComponent` or `WaitWorldJobs` does not resolve on the build (a sigdb feature of each executable), kiln.world is missing, or one of the service's window calls faulted (`faulted`, for the process). On since 0.2.0-dev.29; on a game client only while it hosts the world; never run in a game client or with a connected player (`07-watch.hosted`) |
+| `events.component_writes.exact` | always: a feed of every component store is not promised (component watches report net changes) |
 
 While a row is off, `Events.On<T>` for its event throws `KilnUnavailableException` naming it, and nothing is
 subscribed. A handler for a base class is never refused. Check `Capabilities.Is` first.
+
+## Named component watches (`ComponentChanges`, since 0.2.0-dev.29)
+
+A mod names entities and components, and is told after each step what changed, with who wrote it where Kiln knows.
+The service is `kiln.component_changes` in the same DLL; the managed side is Kiln.World.
+
+```csharp
+var r = ComponentChanges.Watch(new(ComponentWatchScope.Entities, [player], ObservedComponents.Health | ObservedComponents.Inventory,
+    ComponentWatchExpansion.PlayerInventoryAndItems));
+if (!r.Ok) Log.Warn($"watch refused: {r.Reason}");
+Events.On<ComponentValueChangedEvent>(e => Log.Info($"{e.Entity} {e.Component} {e.Origin} {e.SourceMod}"), EventFilter.ForEntity(player));
+Events.On<AttributeValueChangedEvent>(e => Log.Info($"{e.Attribute}: {e.Before} -> {e.After} of {e.MaximumAfter}"));
+// later: r.Watch!.Dispose();
+```
+
+- **What is watched.** Scope `Entities`: 1 to 128 roots, as the lives they are when the watch is made (an entity
+  without a spawn time that is not a player in the game is refused: its id could name a later entity). Scope `Players`:
+  every player in the game, as they join and leave (a player who joins is watched from its first step, without a
+  change for joining). Components: any of Health, Stamina, Mana, Fuel, Inventory, SlotSelection. Expansion
+  `PlayerInventoryAndItems` also watches Inventory on every 8-slot inventory linked from a root's InventorySetup
+  (Virtual links followed in link order: depth 3, at most 32 inventories and 64 setups) and Fuel on the item entities in
+  them, followed again every step; a cycle, a missing setup or a tree past those bounds suspends the watch instead of
+  covering part of it. Subscribing to the events watches nothing: only `Watch` does, and handlers only ever see
+  watched pairs. Every watch is on the server world (`ComponentWatch.World`); a client's own world is not watched.
+- **When.** The core calls the service after the last Pre subscriber and after the world's jobs, before Post (the
+  step's window, `kiln.window_clock`). A change is the difference between two compares: the simulation of a step and
+  the Post and Pre around it, where Kiln's own tick-thread writers run (`Combat.SetHealth`, a decision's survival
+  health). It is a **net** change: a value that changed and came back between two compares raises nothing. The event is
+  posted in the next Pre; `Step` is the step whose compare saw it. A new watch's first baseline is read at the next
+  window, so the first event can come in the step after next. Usually one event per entity and component per step,
+  whatever number of watches cover it (`WatchIds`). The exception: when a watch starts covering a pair other watches
+  already cover, the pair's interval is split at that window's start, so its watches keep their own baselines; a change
+  before the split (in Post or Pre) and another after it (in the simulation) give two events of the same pair with the
+  same `Step`, the first for the older watches only, the second for all of them, its `Before` the first one's `After`.
+  `RootEntities` names the roots it belongs to, so `EventFilter.ForEntity(root)` sees its linked inventories' changes.
+  `Before` and `After` are copies of at most 256 bytes; an empty one means the component was not there, **or was larger
+  than 256 bytes** (such a component is never compared: one that grows past 256 bytes looks like it went).
+- **Identity.** A root is a life (its id and spawn time, or a player's session): one destroyed whose id the game gives
+  to a new entity suspends its watch (`SuspendedMetadata`), at the next window's start or, when it happens inside the
+  simulation, before that step's compare emits anything; no event is ever reported under the old life for the new
+  entity. A linked inventory or item entity has a life only Kiln keeps (a serial, and for an item entity the item in its
+  slot): one that leaves every watched tree and comes back gets a new one. An item replaced by another of the same item
+  under the same entity id between two compares cannot be told apart from the same item (the engine gives no allocation
+  serial for it).
+- **Who wrote it (`Origin`).** Kiln's own writers tell the service what they wrote, with the bytes before and after:
+  tracked writes (`World.Write`, `Update`, `WriteField`, `WriteAt`: the mod's id), program wraps' entity views (the
+  wrap's mod), kiln.combat's health and attribute writes (`kiln.combat`: `SetHealth`, `Heal`, god mode's restore, the
+  attribute set and add of Stamina and Mana), kiln.items' give, take, recipe, move, fuel, equip and equipment-set jobs
+  (`kiln.items`). `Kiln`: one source, and its writes, in the order they were made, lead from the bytes before to the
+  bytes after (net attribution: it does not prove nothing else wrote and put the same bytes back). `Mixed`: there were
+  Kiln writes, but from more than one source, or something else wrote too (the chain does not reach the bytes after),
+  or more than 32 writes, or one was lost (`KILN_CHANGE_TOKENS_LOST`). `Unknown`: no Kiln writer reported a write.
+  **`Game` is never reported:** a change without a report may be the game's, another loader's mod or a raw write
+  (`World.WriteRaw`, a hook), and Kiln cannot tell them apart. `SourceMod` names the sources (a mod's id, or the Kiln
+  service that wrote for a mod it does not know), several joined by `", "`; the record's field is 128 bytes, so a long
+  list can be cut short: `Mixed` stays right, the list is not exhaustive. Program wraps name their writes only while
+  a managed watch exists in the process; a watch made by a native mod alone gets `Unknown` for them (never `Game`).
+- **Typed attributes.** `AttributeValueChangedEvent` carries the current and maximum value of Health, Stamina and Mana
+  (as kiln.combat's attribute pairs read them) and Fuel (kiln.items' fuel, in the game's units, 64 per charge), read at
+  the compares; only when one of them changed, and only where the build has those readers. The raw event comes either
+  way.
+- **Budgets.** 32 watches (suspended ones included); 4096 distinct present (entity, component) pairs over all watches
+  (overlapping watches count a pair once; an absent component is not counted, but it is still read every step); 128
+  roots for any one pair. They are the process's, shared by every mod: there is no per-mod share or reservation, first
+  come first served (one mod can take all 32 watches or all 4096 pairs), and the earlier watch wins when they grow;
+  each watch's `State` and `Pairs` show what it holds. A `Watch` that would exceed them answers `Ok = false` with the
+  reason and no watch. A watch that grows past them later (a player joins, an inventory is linked, an absent component
+  appears in the simulation) is suspended whole before anything of that step is emitted for it (`SuspendedBudget`),
+  with `LastCompleteStep`; one whose root is gone or is another entity now is suspended the same way
+  (`SuspendedMetadata`). Either raises `ComponentWatchStateChangedEvent` in the next Pre. `ComponentChanges.Resume` starts it again from scratch (the same
+  lives, the budgets again; no change from while it was suspended is reported).
+- **The queue.** At most two steps' changes wait for the managed consumer (which reads every Pre); a step's frame holds
+  every record of that step's compare, with interval splits and presence exchanges (4096 present pairs are not a limit
+  on its records). A watch that ends is taken out of what waits, even of a batch the consumer has begun to read. A
+  third step's are not queued: every ready watch is suspended (`SuspendedBudget`, "the change queue is full") and the service
+  counts it; nothing is silently missing from a watch that says it is ready.
+- **Ends.** `Dispose` (any thread), the mod's unload (its owner) and the server world's stop end a watch
+  (`Disposed`); what was not read of a world that stopped is dropped (its entity ids would mean another world's
+  entities). A watch of a stopped world cannot be resumed.
+- **Cost.** While no watch exists the core makes neither window call for it and no step waits for the world's jobs on
+  its account; a Kiln writer's check is a few lock-free loads (the table, the service's on, stopped and watch-count
+  flags) before it copies anything; nothing is allocated. With watches: the service reads every watched pair, present
+  or absent, once per step after the world's jobs, and asks each root's identity at both windows; at a window's start it checks
+  the roots and links and, when they changed, plans the pairs again (new pairs read once more, a pair a new watch joins
+  compared once more for the split); the exceptional recount when pairs appear past 4096 walks the watches again. A
+  Kiln writer copies the bytes before its write only for an entity whose component the service may watch (a lock-free
+  filter of the watched pairs: an unrelated watch costs a writer one more load). The filter is 65,536 slots by a hash of
+  the entity id, one component mask per slot; collisions only add yeses, so an entity nothing watches can still pay a
+  copy through a collision (the host test: 4,853 yeses among 65,536 unwatched ids with 4,000 watched entities). A new
+  or resumed watch, and a link that enters a watched tree, are in the filter before their first baseline; a write
+  before that baseline is outside the watch's interval by design. kiln.items still walks the inventory
+  tree of the holder it changes (link ids only) to ask that filter for each entity in it. Every player of a server pays
+  for the watches of every mod on it: the budgets bound the pairs, not the time, and not the time handlers take. Lab
+  (`component-watch-test`, dedicated server, no player, build 26430253, 2026-11-15, four runs on a shared machine under
+  heavy load, so the tails are the machine's as much as the service's; the last 1024 steps of each): 32 watches holding
+  4096 present pairs (4240 in all): window_begin p50 0.33-0.41 ms, p99 0.46-2.5 ms, max 0.58-12.4 ms; window_end p50
+  0.68-1.24 ms, p99 1.2-5.5 ms, max 2.5-12.6 ms. 8 watches on 1221 entities, 3860 pairs, none present: begin p50
+  0.53-0.71 ms, p99 0.80-5.2 ms; end p50 0.62-1.07 ms, p99 1.1-5.5 ms (an absent pair costs a read like a present one,
+  and every root is asked its identity twice a step). A kiln.items give or take job's note, p50 (p99): no watch 0.1 µs
+  (0.7-0.9); a watch on another entity 0.3-0.5 µs (2.3-3.4), nothing copied; a watch on the holder 0.9-1.2 µs
+  (6.0-6.7), nine or ten components copied a job.
+
+The capability is `events.component_net`; `Watch` and `Resume` throw `KilnUnavailableException` naming it while it is
+off, and so does `Events.On` for the three events. The test kit fakes the service rule for rule
+(`KilnHarness.ComponentChanges`, [modding/unit-tests.md](../modding/unit-tests.md)).
 
 ## A world that goes back
 
@@ -201,6 +307,21 @@ player session), is not held in that step.
   The appended `is_stopped` reads shutdown without taking a broker lock. The table is 184 bytes; check `header.size`
   covers each optional member. An older native table lacks this last member: managed recovery then uses the faulted
   service row. Older managed layers can use the original prefix but cannot locally recover poisoned-lock completions.
+- `kiln.component_changes` v1 (`kiln_component_changes.h`, the second table of `kiln-decisions.dll`, 144 bytes with
+  `watched` appended): one consumer (`attach`), `watch` / `resume` / `status` / `remove` / `release_owner`, the change
+  batches (`begin_events`, `read_events` with a stride of at least the 1808-byte record, `ack_events`), and
+  `record_write`. A batch is frozen at `begin_events`, but a watch that ends (disposed, its owner
+  unloaded) is taken out of it too, so it can shrink before it is read: a native consumer uses the count `read_events`
+  returns in `required`, never the one `begin_events` gave; the batch's id stays valid until `ack_events`, also when
+  nothing is left in it (and an emptied batch no longer holds one of the queue's two frames). A frame is the records
+  of one `window_end`, including interval splits and presence exchanges: the 4096 present pairs are not a limit on
+  the records of a frame. For native writers `record_write`:
+  after a write of a watched component, the whole component before and after, the source's name; any thread, copied
+  during the call, a bounded lock (never waits for ever: a write it cannot take is counted as lost, and the step's
+  records say so: Mixed where other writes were reported, Unknown where none was). `kiln_component_write` and `kiln_component_watching` in the header are the one-line form a writer
+  uses. `window_begin`, `window_end`, `window_wanted` and `window_faulted` are the core's; `counters` (appended) gives
+  what the service did, with its window calls' p50 and p99; `watched(entity)` (appended) is the writers' filter, asked
+  through `kiln_component_watched` before a writer copies a component.
 - `kiln.window_clock` v1 (`kiln_window_clock.h`): the step's phase (Pre 1, Preparing 2, Sim 3, AfterJobs 4, Post 5,
   Stopping 6), the world epoch and the process session. World reads are legal on the world thread in phases 1, 2, 4
   and 5 only.
@@ -211,6 +332,10 @@ player session), is not held in that step.
   the dispatcher, the three producers, the one-verdict rule of equipment inputs.
 - Host tests: `native/services/decisions/tests/run.sh` (wire layout, broker, death and pickup rules),
   `native/services/players/tests/run.sh` (the selective hold), `native/core/tests/test-window-clock.sh`.
-- Lab: `mods/tests/decisions-api-test`, plain and with `kiln/control/systems.parallel`.
+- Lab: `mods/tests/decisions-api-test`, plain and with `kiln/control/systems.parallel`; component watches:
+  `mods/tests/component-watch-test` (WATCH-NET-ORIGIN, WATCH-LINKS, WATCH-BUDGET, WATCH-COST), the same way.
+- Component watches, host and offline: `native/services/decisions/tests/watch_test.cpp` (the rules),
+  `Kiln.Decisions.Tests/ComponentChangesTests.cs` (the managed consumer on the test kit's fake, the same cases).
 - Guided checks (`mods/tests/client-pass/Dev28Events.cs`): `07-events.decision-rollback` (confirms `events.death`
-  and `events.pickup` in a real game; they are on without it since 0.2.0-dev.29), `07-piece-rollback` (skipped: not built), `07-native-terraform`.
+  and `events.pickup` in a real game; they are on without it since 0.2.0-dev.29), `07-piece-rollback` (skipped: not built), `07-native-terraform`;
+  `07-watch.hosted` (`Dev29Watches.cs`: component watches in a hosted world with a real player).

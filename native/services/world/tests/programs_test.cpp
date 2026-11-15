@@ -27,6 +27,9 @@ bool map_find_u16(uintptr_t,uint32_t key,uint16_t* value) {
     return true;
 }
 void teleport_in_program(KilnProgramCtx*) {}
+bool game_in_slice() { return false; }  // wraps.cpp's: no wrap stage in this fixture
+void map_each_u16(uintptr_t,const std::function<void(uint32_t,uint16_t)>&) {}  // entities.cpp's
+uint32_t current_thread_id() { return 1; }
 void writes_world_changing() {}  // tracked-write lifecycle belongs to writes_test; this fixture tests programs
 void writes_before_world(uintptr_t) {}
 void writes_after_world() {}
@@ -52,11 +55,13 @@ bool seh_register_program(RegisterProgramFn,uintptr_t world,const EngineDesc* d,
     std::memcpy(reinterpret_cast<void*>(entry+L.entry_id),&id,2);
     ++*count;*ok=true;return true;
 }
+bool seh_call(void (*f)(void*),void* c,unsigned long*) { f(c);return true; }
 bool seh_iter_begin(void* ctx,void* iter,uint32_t size,unsigned long*) { fn.iter_begin(ctx,iter,size);return true; }
 bool seh_iter_next(void* ctx,void* iter,uint32_t size,bool* more,unsigned long*) { *more=fn.iter_next(ctx,iter,size);return true; }
 bool seh_read_u64(uintptr_t address,uint64_t* value) { std::memcpy(value,reinterpret_cast<void*>(address),8);return true; }
 bool seh_queue_push(void*,void*,uint8_t,uint32_t,uint32_t,void**) { return false; }
 bool seh_copy(void* to,const void* from,size_t size) { std::memcpy(to,from,size);return true; }
+StopDrain world_stop_drain(uint32_t, uint32_t) { return StopDrain{false, "a bounded wait only (test)"}; }
 }
 using namespace kw;
 int main() {
@@ -242,6 +247,39 @@ int main() {
     check(state(3).state==KILN_PROGRAM_REFUSED && engine_calls==3,"the 897th is refused before the game is called");
     check(*reinterpret_cast<uint16_t*>(world)==896,"the engine table holds 896, no more");
     engine_on=false;
+    for (Program* p : g_programs) delete p;
+    g_programs.clear();
+    std::fill(std::begin(g_by_slot),std::end(g_by_slot),nullptr);
+
+    // "world" is part of a reservation's identity (0.2.0-dev.29, chapter 14): a declaration that is not the server
+    // world's alone ends its boot snapshot with its world; a server one's text is what it was before
+    g_registered_once=false;
+    g_client_on=true;
+    KilnStr names[]={kstr("RenderTransform")};
+    auto entity=[&](const std::string& name,uint32_t flags) { KilnProgramDesc d=sys(name); d.flags=flags; d.read={names,1,0}; return d; };
+    KilnProgramDesc ws=entity("w_server",KILN_PROGRAM_HOST_ONLY),wc=entity("w_client",0),wb=entity("w_both",KILN_PROGRAM_HOST_ONLY),
+        wp=entity("w_prediction",0);
+    check(reserve_program_world("writer","s",&ws,kWorldBitServer)==KILN_OK && reserve_program_world("writer","c",&wc,kWorldBitClient)==KILN_OK &&
+          reserve_program_world("writer","b",&wb,kWorldBitServer|kWorldBitClient)==KILN_OK &&
+          reserve_program_world("writer","p",&wp,kWorldBitPrediction)==KILN_OK,"four reservations, one per world");
+    auto text=[&](const char* key) {
+        uint32_t n=0;
+        if (program_reservation(kstr("writer"),kstr(key),nullptr,0,&n)!=KILN_OK) return std::string("?");
+        std::string t(n,'\0');
+        program_reservation(kstr("writer"),kstr(key),t.data(),n,&n);
+        return t;
+    };
+    const std::string ts=text("s"),tc=text("c"),tb=text("b"),tp=text("p");
+    check(ts.find("world=")==std::string::npos && ts.size()>=26 && ts.compare(ts.size()-26,26,"flags=00000010\ninterval=1\n")==0,
+          "a server reservation's snapshot has no world line: the text it had before 0.2.0-dev.29");
+    check(tc.size()>13 && tc.compare(tc.size()-13,13,"world=client\n")==0 && tc.find("read=RenderTransform\n")!=std::string::npos,
+          "a client reservation's snapshot ends with world=client");
+    check(tb.size()>11 && tb.compare(tb.size()-11,11,"world=both\n")==0 && tp.size()>17 && tp.compare(tp.size()-17,17,"world=prediction\n")==0,
+          "both and prediction say so too");
+    check(tc.substr(0,tc.size()-13)==tp.substr(0,tp.size()-17) && tc!=tp,
+          "the same lists and flags for another world: another reservation (a rebuild under one key is refused until a restart)");
+    g_client_on=false;
+    g_side_programs=0;
     for (Program* p : g_programs) delete p;
     g_programs.clear();
     std::fill(std::begin(g_by_slot),std::end(g_by_slot),nullptr);

@@ -32,8 +32,12 @@ int main(int argc,char** argv) {
         for(unsigned k=1;k<KILN_WORLD_KINDS;++k) { s->worlds[k]=(other_worlds & (1u<<k)) ? 1 : 0; }
         s->lifecycle=1; return KILN_OK; };
     api.symbol=[](KilnStr,uintptr_t* p)->KilnResult { *p=reinterpret_cast<uintptr_t>(&original); return KILN_OK; };
+    hooks.typed_install_ready=[]()->uint32_t { return live || other_worlds ? 0 : 2; };
+    hooks.detour_typed_checked=[](KilnOwner,uintptr_t,const KilnHookOrder*,const KilnSig*,KilnTypedFn,void*,KilnHandle* out)->KilnResult { *out=100; return KILN_OK; };
+    hooks.call_original_frame=[](KilnCallFrame*)->KilnResult { return KILN_OK; };
     api.feature=[](KilnStr)->bool { return true; };
-    kg::g_api=&api; kg::F.build=true;
+    kg::g_api=&api; kg::F.build=true; kg::F.craft=kg::F.terraform=kg::F.spawn=true;
+    kg::fn.craft=kg::fn.terraform=kg::fn.queue_spawn=reinterpret_cast<uintptr_t>(&original);
     kg::fn.place_block=kg::fn.place_prop=kg::fn.dismantle=kg::fn.dismantle2=kg::fn.pick_up=reinterpret_cast<uintptr_t>(&original);
     kg::hooks_install(); CHECK(installs==0);
     CHECK(reinterpret_cast<uint8_t(*)(uint8_t*,void*,uint32_t)>(kg::fn.place_prop)(nullptr,nullptr,1)==7);
@@ -44,6 +48,7 @@ int main(int argc,char** argv) {
     kg::build_lifecycle(mode!="unobserved");
     if(mode=="failure") fail_at=3;
     if(mode=="precheck") valid=false;
+    if(mode=="zones") CHECK(kg::hooks_request(KILN_GAMEPLAY_HOOK_TERRAFORM,11));
     live=mode!="immediate";
     if(mode=="hosted") other_worlds=6;
     std::thread a([] { kg::build_request(11); }), b([] { kg::build_request(22); }); a.join(); b.join();

@@ -5,14 +5,22 @@
 import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
+import { stopKey } from "./stoppedStart";
+
+const useStops = create(persist<{ notices: Record<string, api.StoppedStart>; dismissed: Record<string, string> }>(() => ({ notices: {}, dismissed: {} }), { name: "kiln-stopped-starts" }));
+function clearStop(id: string) {
+  const s = useStops.getState().notices[id];
+  useStops.setState((m) => ({ notices: Object.fromEntries(Object.entries(m.notices).filter(([g]) => g !== id)), dismissed: s ? { ...m.dismissed, [id]: stopKey(s) } : m.dismissed }));
+}
 import * as api from "../api/commands";
 import type { GameInstall, LaunchMode, StartTimeline } from "../api/commands";
 import { invalidateGame, useActiveProfile, useGame, useGameStatus, useLaunchState, useProfiles, useRuntimeChanges, useStartTimeline } from "../api/hooks";
-import { toast } from "../ui";
+import { runTask, toast } from "../ui";
 import { bootSnapshotBeforeOnce, cookBeforePlay, cookingNotice } from "./cook";
 import { notifyLibraryChanged } from "./libraryChanged";
 import { gameState, playState, runStarted, type GameStateView } from "./gameState";
-import { notifyActivation, notifyActivationOf } from "./notices";
+import { notifyActivation, notifyActivationOf, notifyInstall } from "./notices";
 import { quietText, showsProgress, STEAM_WAIT_MS } from "./startProgress";
 
 // A shared monotonic clock: changing the system clock while a start is pending cannot restart its grace period.
@@ -56,6 +64,8 @@ export interface PlayControl {
   timeline: StartTimeline | null;
   /** The last timeline whatever its phase (idle, failed, ended, legacy: said as what they are). */
   lastTimeline: StartTimeline | null;
+  stoppedStart: api.StoppedStart | null;
+  dismissStop: () => void;
   profileName: string | null;
   play: (mode: LaunchMode, profileId?: string) => void;
 }
@@ -70,6 +80,14 @@ export function usePlayControl(): PlayControl {
   const changingRuntime = useRuntimeChanges((m) => !!game && m.last[game.id]?.state === "running");
   const memo = useLaunchMemo();
   const id = game?.id ?? "";
+  const stops = useStops();
+  const evidence = launchState.data?.stoppedStart;
+  useEffect(() => {
+    if (evidence && stops.dismissed[id] !== stopKey(evidence)
+      && (!stops.notices[id] || stopKey(stops.notices[id]) !== stopKey(evidence)))
+      useStops.setState((m) => ({ notices: { ...m.notices, [id]: evidence } }));
+  }, [id, evidence, stops.dismissed, stops.notices]);
+  const stoppedStart = stops.notices[id] ?? null;
   const s = status.data;
   const running = !!s?.running;
   const at = memo.at[id];
@@ -94,10 +112,10 @@ export function usePlayControl(): PlayControl {
   // the states that are not a start going well win over the timeline, as before it: Steam updating, vanilla, No Kiln
   // (the proxy did not load: play-once still there, or no boot and no word from Kiln a minute in)
   const exception = !!s?.steamUpdating || (running && (state.view.phase === "vanilla" || kilnMissing));
-  const progress = !exception && showsProgress(tl) ? tl : null;
+  const progress = !stoppedStart && !exception && showsProgress(tl) ? tl : null;
   const running_ = !!progress && running;
   const quiet = !exception && running && tl?.phase === "quiet" ? tl : null;
-  const view: GameStateView = exception ? state.view
+  const view: GameStateView = stoppedStart ? { phase: running ? "running" : "stopped", label: "Kiln stopped the start", tone: "warn", pulse: false, detail: stoppedStart.reason } : exception ? state.view
     : running_ ? { phase: "starting", label: "Starting", tone: "ember", pulse: true, detail: progress!.running != null ? progress!.steps[progress!.running].label : "Waiting for Kiln" }
     : quiet ? { phase: "running", label: "No word from Kiln", tone: "warn", pulse: true, detail: quietText(quiet) }
     : tl?.phase === "idle" && running && state.view.label !== "Safe idle" ? { phase: "running", label: "Safe idle", tone: "warn", pulse: true, detail: tl.why ?? "Kiln hooked nothing" }
@@ -112,8 +130,11 @@ export function usePlayControl(): PlayControl {
     // closure's game id may be another game's by the time the request ends (another one selected meanwhile)
     mutationFn: async ({ gameId, req }: { gameId: string; req: api.LaunchRequest }) => {
       // the start is timed from here: its own steps (cook, profile, Steam), then what the game's Kiln says
+      clearStop(gameId);
+      qc.setQueryData(["launch_state", gameId], (old: api.BootState | undefined) => old ? { ...old, stoppedStart: null } : old);
       await api.launchBegin(gameId, req.mode).catch(() => {});
       void qc.invalidateQueries({ queryKey: ["launch_progress", gameId] });
+      if (await switchBackFirst(gameId, req)) invalidateGame(qc, gameId);
       await beforeStart(gameId, req);
       return api.launchPlay(gameId, req);
     },
@@ -158,7 +179,7 @@ export function usePlayControl(): PlayControl {
     }
   }, [id, running, process, sameRun, pending, launching, memo.at]);
   const since = runStarted(s, now, memo.since[id]);
-  const starting = exception ? state.starting && !s?.steamUpdating
+  const starting = stoppedStart ? false : exception ? state.starting && !s?.steamUpdating
     : (state.starting && !(spoke && !progress)) || running_ || (!running && !s?.steamUpdating && (launching > 0 || (!!progress && pending) || (at !== undefined && now - at < 120_000)));
   const activeProfile = profiles.data?.find((p) => p.id === active.data?.profileId) ?? null;
   return {
@@ -174,9 +195,31 @@ export function usePlayControl(): PlayControl {
     kilnMissing,
     timeline: progress,
     lastTimeline: tl,
+    stoppedStart,
+    dismissStop: () => clearStop(id),
     profileName: activeProfile?.name ?? null,
     play: (mode, profileId) => launch.mutate({ gameId: id, req: { mode, profileId: profileId ?? null } }),
   };
+}
+
+/** (dev.29) After a switch back from a test build, the game's Kiln is the beta's and this launcher ships an older one
+ *  (InstallState.switchBack): a start with Kiln (not vanilla) installs the launcher's own first, through the ordinary
+ *  install (its receipt, its backup, its refusals: a running game, Steam updating, a folder that is not Kiln's). When it
+ *  cannot, the start goes on with the Kiln the game has and says why. Resolves true when it installed. */
+export async function switchBackFirst(gameId: string, req: api.LaunchRequest): Promise<boolean> {
+  if (req.mode === "vanilla") return false;
+  const back = await api.gameStatus(gameId).then((s) => s.runtime.switchBack ?? null).catch(() => null);
+  if (!back) return false;
+  try {
+    const r = await runTask<api.InstallResult>(() => api.runtimeInstall(gameId, back.to, {}), {
+      done: `Kiln ${back.to} installed`, detail: () => `This game had Kiln ${back.from} from the beta; the release's goes with this launcher.`, quiet: true,
+    });
+    notifyInstall(r);
+    return true;
+  } catch (e) {
+    toast.error(e, `Kiln ${back.to} could not be installed: the game starts with Kiln ${back.from} from the beta`);
+    return false;
+  }
 }
 
 /** What a start does before launch_play, by its mode: with the profile, its cook and then the boot game-data step

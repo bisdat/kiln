@@ -51,6 +51,8 @@ sets::PlanOptions sets_plan_options();
 void sets_lab_init();
 bool sets_lab();
 bool sets_lab_matrix();  // kiln/data/kiln.items/sets-matrix: a state mismatch does not switch sets off (lab matrix only)
+// lab only (kiln/data/kiln.items/notes-lab): give/take jobs log what the component watch note costs them (07 S7)
+bool notes_lab();
 // A plan as the ABI has it (KilnSetPlanV1's status, refusal, steps).
 void sets_fill_plan(const sets::SetPlan& p, uint64_t valid_through, KilnSetPlanV1* out);
 

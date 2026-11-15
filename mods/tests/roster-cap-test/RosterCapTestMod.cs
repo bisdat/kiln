@@ -3,14 +3,24 @@
 // Player-free lab test, driven by lab.sh: each boot gets a quests/roster.json from gen_roster.py and lab.json says the
 // phase. The lab save is used up across the boots (the knowledge granted in one boot is in the next):
 //   64      29 new entries (64 in all): no hook, capacity 64; a grant on entry 63 shows in the snapshot one step later
-//   65      30 new (65): the page is installed at the start, capacity 128; entry 64 follows its own knowledge
-//   129     94 new: refused at the start with the 128 text; the game's 35 are what the world has
-//   65-off  30 new with the lab switch kiln/data/kiln.knowledge/roster-64: refused with the 64 text and the reason
-//   128     93 new (128): entries 0/64, 1/65, 63/127 set to contradict each other; every entry of page 2 against its
-//           knowledge; the one-per-world rule (locked destroyed, unlocked kept) on page 2; the events; the same once more
-//           with kiln.world's parallel switch on (kiln/control/systems.parallel; whether the roster programs then ran on
-//           a worker is in kiln.log, not here); what it set is written for the next boot
-//   128-restart  the same roster after a restart: what the save kept
+//   65      30 new (65): the page is installed at the start, capacity 128; entry 64 follows its own knowledge (what it
+//           set is written for the 128 boot)
+//   129     94 new: the start stops before the world (lab.sh checks the exit code, the log, the state file and that
+//           the save did not change); this mod must not run
+//   65-refused  30 new with kiln/control/roster.fail-install (the hooks not installed): the start stops the same way
+//   129-boot, 129-boot-required  94 new, this mod a boot mod ("boot": true / "required"): a boot generation runs, and
+//           the start stops the same way (kiln.boot's stop_start; lab.sh checks boot.json and progress.json too)
+//   128     93 new (128): the knowledge the 65 boot set survived the four stopped starts; entries 0/64, 1/65, 63/127 set
+//           to contradict each other; every entry of page 2 against its knowledge; the one-per-world rule (locked
+//           destroyed, unlocked kept) on page 2; the events; the same once more with kiln.world's parallel switch on
+//           (kiln/control/systems.parallel; whether the roster programs then ran on a worker is in kiln.log, not here);
+//           what it set is written for the next boot
+//   128-restart  the same roster after a restart: what the save kept; then with kiln/control/roster.lab the server
+//           world's page is dropped (kiln/control/roster.drop-page) and must be computed again at the next step's start,
+//           and the one-per-world rule on page 2 must still be answered from it
+//   128-control  NEGATIVE CONTROL, kiln/control/roster.no-pages with roster.lab: 128 taken without the second page; the page-2
+//           assertions below MUST fail (lab.sh passes the phase only when exactly these two fail): the snapshot gives no
+//           token, and the game's own reader keeps a locked page-2 NPC (it reads entry 63's bit)
 using System.Text.Json;
 using Kiln;
 using Kiln.Testing;
@@ -77,13 +87,13 @@ public sealed class RosterCapTestMod : Mod
             {
                 case "64": await Fits(); break;
                 case "65": await Paged(30); break;
-                case "129": await Refused(94, "the roster holds at most 128 NPCs (two 64-bit unlock pages): 35 of the game's + 94 new"); break;
-                case "65-off":
-                    await Refused(30, "the roster holds at most 64 NPCs (a 64-bit unlock mask): 35 of the game's + 30 new " +
-                                      "(the second unlock page is not available here: lab switch kiln/data/kiln.knowledge/roster-64)");
-                    break;
+                case "129":
+                case "65-refused":
+                case "129-boot":
+                case "129-boot-required": Fail("the start", "the server reached its world: the roster's refusal did not stop the start"); break;
                 case "128": await Full(); break;
                 case "128-restart": await Restarted(); break;
+                case "128-control": await Control(); break;
                 default: Fail("the phase", $"lab.json says '{phase}'"); break;
             }
         }
@@ -182,22 +192,9 @@ public sealed class RosterCapTestMod : Mod
         Check(await WaitFor(() => Read(t, e64.NpcId) == want, 60), $"entry 64 reads {want} (entry 0 reads {s0})", $"{Read(t, e64.NpcId)}");
         Check(Read(t, e0.NpcId) == s0, "entry 0 did not move");
         Check(await WaitFor(() => Knowledge.FindNpc("Kiln_RosterCap_029")?.Unlocked == want, 30), $"Kiln's catalog reads entry 64 from the page: {Knowledge.FindNpc("Kiln_RosterCap_029")}");
-    }
-
-    private async Task Refused(int n, string text)
-    {
-        var manifest = NativeQuests.ManifestJson;
-        Check(manifest.Contains(text, StringComparison.Ordinal), $"the build refused {35 + n} entries with: {text}", manifest.Length > 600 ? manifest[..600] : manifest);
-        Check(Knowledge.Npcs.Count == 35, $"the world has the game's 35 entries: {Knowledge.Npcs.Count}");
-        if (await Token() is { } t) Budget(t, 64, 0, false);
-        else Fail("a server world token", "none");
-        var row = Capabilities.Get("npcs.expanded_roster");
-        Note($"npcs.expanded_roster: {Row("npcs.expanded_roster")}");
-        // what a world whose mods' build was refused keeps of their knowledge (an older Kiln does the same with this roster)
-        var rc28 = NativeIds.Knowledge(Tag, "rc_28");
-        Note($"observed: the knowledge rc_28 (granted in an earlier boot) reads {Knowledge.World.Get(rc28)?.ToString() ?? "unknown to this world"}");
-        if (n == 94) Check(row.State == CapabilityState.Available, "npcs.expanded_roster stays available (nothing was installed for a roster it could not hold)");
-        else Check(row.State == CapabilityState.Unavailable && row.Reason == CapabilityReason.Policy, "npcs.expanded_roster: unavailable, policy (the lab switch)");
+        // for the 128 boot, after the two stopped starts: what this boot's knowledge holds
+        File.WriteAllText(Path.Combine(Context.DataDirectory, "expect65.json"),
+            JsonSerializer.Serialize(new { unlock = e64.Unlock, value = Knowledge.World.Has(e64.Unlock) }));
     }
 
     private readonly Dictionary<uint, bool> _set = [];
@@ -222,7 +219,17 @@ public sealed class RosterCapTestMod : Mod
         var order = Knowledge.Npcs;
         NativeNpcInfo E(int index) => At(order, index) ?? throw new InvalidOperationException($"roster index {index} is not the mod's");
         Check(Enumerable.Range(35, 93).All(i => At(order, i)?.Id == $"rc_npc_{i - 35:000}"), "the mod's entries are indices 35 to 127, in key order");
-        Note($"observed after the refused boots: entry 63's knowledge (granted in the 64 boot) {Knowledge.World.Has(E(63).Unlock)}, entry 64's (65 boot) {Knowledge.World.Has(E(64).Unlock)}");
+        // the two starts in between stopped before their world: nothing of this mod's knowledge was dropped
+        var e65 = Path.Combine(Context.DataDirectory, "expect65.json");
+        if (!File.Exists(e65)) Fail("expect65.json", "the 65 boot did not write it");
+        else
+        {
+            using var d65 = JsonDocument.Parse(File.ReadAllText(e65));
+            var id = d65.RootElement.GetProperty("unlock").GetUInt32();
+            var was = d65.RootElement.GetProperty("value").GetBoolean();
+            Check(id == E(64).Unlock && Knowledge.World.Has(id) == was,
+                $"the knowledge the 65 boot set (entry 64's unlock: {was}) survived the four stopped starts", $"{Knowledge.World.Get(id)}");
+        }
         // contradictions across the page boundary: 0/64 and 1/65 against the game's own entries, 63/127 both the mods'
         var s0 = Read(t, Knowledge.Npcs[0].NpcId);
         var s1 = Read(t, Knowledge.Npcs[1].NpcId);
@@ -320,5 +327,80 @@ public sealed class RosterCapTestMod : Mod
             Check(await WaitFor(() => Spawn.Find(guid).Count == 1, 300), $"the kept page-2 NPC {guid} came back from the save: {Spawn.Find(guid).Count}");
         }
         Budget(t, 128, 93, true);
+        await Recovered(t, d);
+    }
+
+    // ---- the lab's lost page (kiln/control/roster.lab, roster.drop-page): computed again at the next step's start
+
+    private string KilnDir() => Path.GetFullPath(Path.Combine(Mods.All.First(x => x.Id == Tag).Directory, "..", ".."));
+
+    private string LogFrom(long at)
+    {
+        using var f = new FileStream(Path.Combine(KilnDir(), "logs", "kiln.log"), FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        if (at > f.Length) at = 0;
+        f.Seek(at, SeekOrigin.Begin);
+        using var r = new StreamReader(f);
+        return r.ReadToEnd();
+    }
+
+    private long LogLength() => new FileInfo(Path.Combine(KilnDir(), "logs", "kiln.log")).Length;
+
+    private async Task Recovered(CapacityWorldToken t, JsonDocument d)
+    {
+        var order = Knowledge.Npcs;
+        var unlocked = At(order, 66);  // set unlocked by the 128 boot (66 % 3 == 0)
+        var locked = At(order, 127);   // set locked
+        if (unlocked is null || locked is null) { Fail("the recovery's entries", "66 or 127 is not the mod's"); return; }
+        var from = LogLength();
+        File.WriteAllText(Path.Combine(KilnDir(), "control", "roster.drop-page"), "");
+        const string dropped = "roster: lab: the server world's second page dropped";
+        const string again = "roster: the server world's second page was missing for its cache";
+        Check(await WaitFor(() => LogFrom(from).Contains(dropped, StringComparison.Ordinal), 300), "lab: the server world's page was dropped");
+        Check(await WaitFor(() => LogFrom(from).Contains(again, StringComparison.Ordinal), 300), "the lost page was computed again at the next step's start");
+        var bad = new List<string>();
+        foreach (var kv in d.RootElement.GetProperty("set").EnumerateObject())
+        {
+            var id = Convert.ToUInt32(kv.Name, 16);
+            if (Read(t, id) != kv.Value.GetBoolean()) bad.Add($"{kv.Name}: {Read(t, id)}");
+        }
+        Check(bad.Count == 0, "after the recovery: every entry set reads the same in the snapshot", string.Join("; ", bad));
+        await Uniqueness(unlocked, locked, "recovered page", 40);
+        var text = LogFrom(from);
+        var at = text.IndexOf(dropped, StringComparison.Ordinal);
+        Check(at >= 0 && !text[at..].Contains("roster: lab: a page attached by the game's own evaluation", StringComparison.Ordinal),
+            "no evaluation of the game's attached a page after the drop: the one-per-world rule was answered from the recomputed page");
+    }
+
+    // ---- the negative control (kiln/control/roster.no-pages): the page-2 assertions must fail without the page
+
+    private async Task Control()
+    {
+        var m = Mine();
+        Check(m is { Ok: true } && m.Npcs.Count(x => x.Roster) == 93, $"control: the build took 93 entries without the page: {m?.Npcs.Count}");
+        Check(Capabilities.Get("npcs.expanded_roster").ReasonText.Contains("NEGATIVE CONTROL", StringComparison.Ordinal),
+            $"control: npcs.expanded_roster names the control: {Row("npcs.expanded_roster")}");
+        var order = Knowledge.Npcs;
+        var e63 = At(order, 63);
+        var e127 = At(order, 127);
+        if (e63 is null || e127 is null) { Fail("control: entries 63 and 127", "not the mod's"); return; }
+        foreach (var (e, on) in new[] { (e63, true), (e127, false) })
+            if (Knowledge.World.Has(e.Unlock) != on)
+            {
+                var r = on ? await Knowledge.World.Grant(e.Unlock) : await Knowledge.World.Revoke(e.Unlock);
+                if (!r.Ok) Note($"control: set {e.Id} to {on}: {r.Reason}");
+            }
+        await Steps(30);
+        // EXPECTED TO FAIL 1: without the page Kiln does not answer the roster (no token)
+        CapacityWorldToken? t = null;
+        await WaitFor(() => (t = NativeQuests.GetServerRosterWorld().World) is not null, 100);
+        Check(t is { } tok && NativeQuests.GetUnlock(e127.NpcId, tok) is { Ok: true, Unlocked: false },
+            "control: a server world token and page 2 read from the snapshot", $"{NativeQuests.GetServerRosterWorld()}");
+        // EXPECTED TO FAIL 2: the game's own reader takes entry 127's state from bit 63 (entry 63 unlocked): kept
+        foreach (var old in Spawn.Find(e127.Guid)) Spawn.Destroy(old);
+        await Steps(10);
+        var l = await Spawn.Entity(e127.Guid, new WorldPosition(3950, 834, 1490), 0, new SpawnOptions { Flags = SpawnFlags.NoTrack });
+        await Steps(40);
+        Check(!Spawn.Exists(l), $"control: the game destroyed the locked page-2 entry's NPC {e127.Id} ({l})");
+        if (Spawn.Exists(l)) Spawn.Destroy(l);
     }
 }

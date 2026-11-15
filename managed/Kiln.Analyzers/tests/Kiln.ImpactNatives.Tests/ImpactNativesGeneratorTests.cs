@@ -98,6 +98,12 @@ public sealed class ImpactNativesGeneratorTests
     [InlineData("""[ImpactNative("M")] public static bool M([Raw] int r) => true;""", "KILN171", "[Raw] goes on a uint")]
     [InlineData("""[ImpactNative("M")] public static bool M(int a, NativeContext c) => true;""", "KILN171", "must be the first parameter")]
     [InlineData("""[ImpactNative("M")] public static int M() => 1;""", "KILN172", "returns bool, byte or void")]
+    [InlineData("""[ImpactNative("M")] public static async void M() { await System.Threading.Tasks.Task.CompletedTask; }""", "KILN170", "must not be async")]
+    [InlineData("""[ImpactNative("M")] public static bool M(ref NativeContext c) => true;""", "KILN171", "passed by value")]
+    [InlineData("""[ImpactNative("M")] public static bool M(out NativeContext c) { c = default; return true; }""", "KILN171", "passed by value")]
+    [InlineData("""[ImpactNative("M")] public static bool M([Raw] ref uint r) => true;""", "KILN171", "[Raw] goes on a uint")]
+    [InlineData("""[ImpactNative("M")] public static bool M(ref readonly int r) => true;""", "KILN171", "use 'in'")]
+
     [InlineData("""[ImpactNative("M")] public static bool M() => true; [ImpactNative("M")] public static bool N() => true;""", "KILN173", "is used by")]
     public void AShapeTheGeneratorCannotMakeIsAnErrorNamingTheMethod(string members, string id, string text)
     {
@@ -115,6 +121,71 @@ public sealed class ImpactNativesGeneratorTests
                                  "public static class C { [Kiln.ImpactNative(\"M\")] public static bool M() => true; }", withAbilities: false);
         Assert.Null(text);
         Assert.Equal("KILN174", Assert.Single(gen).Id);
+    }
+
+    [Theory]
+    [InlineData("public static class C { [Kiln.ImpactNative(\"class\")] public static bool @event() => true; }")]
+    [InlineData("public static class C { [Kiln.ImpactNative(\"1\")] public static bool A() => true; [Kiln.ImpactNative(\"_1\")] public static bool B() => true; }")]
+    [InlineData("public static class C { [Kiln.ImpactNative(\"Natives\")] public static bool M() => true; }")]
+    public void ValidEscapedNamesCompile(string source)
+    {
+        var (_, gen, compile) = Run(source);
+        Assert.Empty(gen);
+        Assert.Empty(compile.Select(d => d.ToString()));
+    }
+
+    [Theory]
+    [InlineData("public interface I { [Kiln.ImpactNative(\"M\")] static abstract bool M(); }")]
+    [InlineData("public static class C<T> { [Kiln.ImpactNative(\"M\")] public static bool M() => true; }")]
+    [InlineData("public class O { private class C { [Kiln.ImpactNative(\"M\")] public static bool M() => true; } }")]
+    [InlineData("file static class C { [Kiln.ImpactNative(\"M\")] public static bool M() => true; }")]
+    [InlineData("public static partial class C { [Kiln.ImpactNative(\"M\")] public static partial void M(); }")]
+    public void UncallableMethodsHaveAGeneratorDiagnostic(string source)
+    {
+        var (text, gen, _) = Run(source);
+        Assert.Contains(gen, d => d.Id == "KILN170");
+        Assert.Null(text);
+    }
+
+    [Fact]
+    public void InParametersSelectTheAnnotatedOverload()
+    {
+        var (text, gen, compile) = Run("public static class C { [Kiln.ImpactNative(\"M\")] public static bool M(in int x) => true; public static bool M(int x) => false; }");
+        Assert.Empty(gen);
+        Assert.Empty(compile);
+        Assert.Contains("global::C.M(in a0)", text);
+    }
+
+    [Theory]
+    [InlineData("int?")]
+    [InlineData("System.ReadOnlySpan<int>")]
+    [InlineData("E")]
+    public void UnsupportedTypesHaveDiagnostics(string type)
+    {
+        var (_, gen, _) = Run("enum E : byte { A } public static class C { [Kiln.ImpactNative(\"M\")] public static bool M(" + type + " x) => true; }");
+        Assert.Contains(gen, d => d.Id == "KILN171");
+    }
+
+    [Fact]
+    public void DeclarationOrderDoesNotChangeGeneratedRegistration()
+    {
+        const string a = "[Kiln.ImpactNative(\"A\")] public static bool A() => true;";
+        const string b = "[Kiln.ImpactNative(\"B\")] public static bool B() => true;";
+        Assert.Equal(Run("public static class C {" + a + b + "}").Source,
+                     Run("public static class C {" + b + a + "}").Source);
+    }
+
+    [Fact]
+    public void NestedPartialAndOverloadedMethodsCompile()
+    {
+        var (text, gen, compile) = Run("namespace Nested; public partial class Outer { internal static partial class Inner { " +
+            "[Kiln.ImpactNative(\"Int\")] public static bool Hit(in int x) => true; " +
+            "[Kiln.ImpactNative(\"Float\")] public static bool Hit(float x) => throw new System.Exception(); } }");
+        Assert.Empty(gen);
+        Assert.Empty(compile.Select(d => d.ToString()));
+        var path = Path.Combine(Snapshots, "Nested.g.cs.txt");
+        if (Environment.GetEnvironmentVariable("KILN_IMPACT_REGEN") == "1") File.WriteAllText(path, text);
+        Assert.True(File.Exists(path) && File.ReadAllText(path) == text);
     }
 
     [Fact]

@@ -373,7 +373,10 @@ public sealed class SystemsTestMod : Mod
                     same &= values.Length > 0 && values[0] == fuel.dataStorage[0];
                     _typedSeen[v.Entity.Value] = (Bytes(in typed), same);
                 });
-                // WhenArchetype on the real entity map: every fuel_setup slice has Fuel (a write list), none lacks it
+                // WhenArchetype on the game's slices: every fuel_setup slice has Fuel (a write list), none lacks it. The first
+                // read comes from the entity map; it puts kiln.world's slice-record link on the program runner, and the later
+                // ones read the engine's slice record (kiln.log: "WhenArchetype reads each slice's archetype from the
+                // engine's slice record", and the counts at the world's stop)
                 _all = Systems.Wrap("fuel_setup").Wrap!.Before((ref Slice s) => Interlocked.Increment(ref _allSlices));
                 _withFuel = Systems.Wrap("fuel_setup").Wrap!.WhenArchetype(["Fuel"]).Before((ref Slice s) => Interlocked.Increment(ref _withSlices));
                 _noFuel = Systems.Wrap("fuel_setup").Wrap!.WhenArchetype([], ["Fuel"]).Before((ref Slice s) => Interlocked.Increment(ref _withoutSlices));
@@ -405,7 +408,7 @@ public sealed class SystemsTestMod : Mod
                     checkedN > 0 && bad == 0 && _typed!.Stats.Faults == 0,
                     $"{checkedN} entities with a transform, {bad} differ ({_typedBad ?? "none"})");
                 long all = Interlocked.Read(ref _allSlices), with = Interlocked.Read(ref _withSlices), without = Interlocked.Read(ref _withoutSlices);
-                Check("WhenArchetype on the game's entity map: has Fuel takes every fuel_setup slice, lacks Fuel none",
+                Check("WhenArchetype on the game's slices: has Fuel takes every fuel_setup slice, lacks Fuel none",
                     all > 0 && with == all && without == 0 && _archetypeOff is null,
                     $"{all} slices, {with} with Fuel, {without} without; {_archetypeOff ?? "no stage off"}");
                 foreach (var x in new[] { _all, _withFuel, _noFuel }) x?.Dispose();
@@ -564,8 +567,9 @@ public sealed class SystemsTestMod : Mod
                     _reContract is { Ok: true } && reA > 0 && Interlocked.Read(ref _reFuel) == reA,
                     $"{reA} entity calls after the rebind, Fuel on {Interlocked.Read(ref _reFuel)}");
                 var bWithout = Systems.Define(FuelQuery.Key, new ProgramOptions(), (ref BWithoutQuery q) => Interlocked.Increment(ref _bCalls));
-                Check("define.reload.contract: a changed 'without' under the same key is Ok=false, names the list and says restart",
-                    bWithout is { Ok: false } && bWithout.Reason!.Contains("without") &&
+                Check("define.reload.contract: a changed 'without' under the same key is Ok=false by the reservation comparison, names the list and says restart",
+                    bWithout is { Ok: false } &&
+                    bWithout.Reason!.StartsWith($"{FuelQuery.Key}: without differs from the boot reservation", StringComparison.Ordinal) &&
                     bWithout.Reason.Contains("rebuild is in the game only after a server restart"), bWithout.Reason);
                 var bReadOpt = Systems.Define(FuelQuery.Key, new ProgramOptions(), (ref BReadOptQuery q) => Interlocked.Increment(ref _bCalls));
                 Check("define.reload.contract: a changed required/optional split under the same key is Ok=false",
@@ -735,8 +739,11 @@ internal ref struct UnreservedQuery : IQuery<UnreservedQuery>
 }
 
 // define.reload.contract's "declaration B" variants: the same key as FuelQuery, each one list or flag changed from A, so
-// Define refuses them under A's boot reservation (and boot B reserves the WITHOUT one, which then binds).
-[Query(Key = FuelQuery.Key, Template = ["FuelSetup"], Read = ["Fuel"], Without = ["DynamicShelter"])]
+// Define refuses them under A's boot reservation by comparing the declaration with the reserved one (the reason names the
+// first list that differs). Each is a declaration this build accepts (Shelter is a template component of the game's
+// programs), so the refusal can only be that comparison. Boot B reserves the Pinned-flag one (BFlagsQuery), which then
+// binds.
+[Query(Key = FuelQuery.Key, Template = ["FuelSetup"], Read = ["Fuel"], Without = ["Shelter"])]
 internal ref struct BWithoutQuery : IQuery<BWithoutQuery>
 {
     public EcsProgramContext Context;

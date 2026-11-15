@@ -299,7 +299,8 @@ fn wait_ready(inst: &Instance, mut watch: LogWatch, timeout: Duration, mut launc
             }
             Launch::Systemd(unit) => {
                 if t0.elapsed() > Duration::from_secs(3) && !unit_running(unit) {
-                    bail!("{unit} is {} (journalctl --user -u {unit})", unit_state(unit).unwrap_or_else(|| "unknown".into()));
+                    let reason = crate::run::last_stop(inst).map(|s| format!("; Kiln stopped the start: {} {}", s.reason, s.advice)).unwrap_or_default();
+                    bail!("{unit} is {}{reason} (journalctl --user -u {unit})", unit_state(unit).unwrap_or_else(|| "unknown".into()));
                 }
             }
         }
@@ -412,6 +413,9 @@ pub fn stop(inst: &Instance, timeout: Option<Duration>) -> Result<()> {
 
 pub fn status(inst: &Instance) -> Result<i32> {
     let pid = procs::find_server(&inst.prefix);
+    if pid.is_none() && let Some(stop) = crate::run::last_stop(inst) {
+        println!("Last start stopped by Kiln: {}\n{}", stop.reason, stop.advice);
+    }
     println!("instance  {} ({})", inst.name, inst.file.display());
     let build = steam::buildid(&inst.dir).map(|b| format!(", build {b}")).unwrap_or_default();
     let installed = if inst.exe().exists() { "installed" } else { "NOT INSTALLED" };

@@ -1,0 +1,8 @@
+{
+  "id": "emf_client_probe",
+  "name": "EMF client-world probe (Kiln's guided checks)",
+  "version": "0.1.0",
+  "emf": 40,
+  "side": "client",
+  "dll": "emf_client_probe.dll"
+}

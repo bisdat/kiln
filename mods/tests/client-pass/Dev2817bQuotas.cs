@@ -8,6 +8,9 @@
 // joined: more server-only programs change no protocol; the fixture mods world-programs-quota-a and -b (64 declarations)
 // fill the slots, the check moves the player with a teleport (a replicated change) and asks whether the game stayed well.
 // It confirms nothing is held (the quota ships on); it needs a second Steam account or a second person.
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json.Nodes;
 using Kiln;
 using Kiln.Testing;
 
@@ -30,14 +33,26 @@ public sealed partial class ClientPassMod
         c.Expect(budget.Ok && budget.Budget.KilnUsed + budget.Budget.Reserved == 4096, "the fixture's clones fill it",
             budget.Ok ? $"Kiln {budget.Budget.KilnUsed}, reserved {budget.Budget.Reserved}" : budget.Reason);
         var defs = Content.Buffs.Definitions().Where(d => d.Name.StartsWith("CapsBuff_", StringComparison.Ordinal)).ToList();
-        var first = defs.FirstOrDefault(d => d.Name == "CapsBuff_0000");
-        var last = defs.Where(d => d.State == "registered").OrderBy(d => d.Name, StringComparer.Ordinal).LastOrDefault();
-        if (!c.Expect(first?.State == "registered" && last is not null, "the first and the last accepted clone are registered",
+        var firstGuid = Guid.Parse("615e6c08-7d7e-5de3-a6b3-7fa8f90bd2c1");
+        var bytes = SHA1.HashData(Encoding.UTF8.GetBytes("kiln-17b-gamedata-caps-4095")).AsSpan(0, 16).ToArray();
+        bytes[7] = (byte)((bytes[7] & 15) | 0x50); bytes[8] = (byte)((bytes[8] & 63) | 0x80);
+        var lastGuid = new Guid(bytes);
+        var first = defs.FirstOrDefault(d => d.Guid == firstGuid && d.Name == "CapsBuff_0000");
+        var last = defs.FirstOrDefault(d => d.Guid == lastGuid && d.Name == "CapsBuff_4095");
+        if (!c.Expect(first?.State == "registered" && last?.State == "registered", "the first and the last accepted clone are registered",
                 $"{first?.Name}: {first?.State}; last: {last?.Name}"))
         {
             await c.Verdict();
             return;
         }
+        void CheckLookups(string phase)
+        {
+            var lookups = JsonNode.Parse(Content.GameDataStatus())?["clones"]?["buffLookups"];
+            foreach (var guid in new[] { firstGuid, lastGuid })
+                c.Expect((bool?)lookups?[guid.ToString()]?["server"] == true && (bool?)lookups?[guid.ToString()]?["client"] == true,
+                    $"{phase}: the ordinary lookup found {guid} in both hosted registries");
+        }
+        CheckLookups("before rejoin");
         foreach (var d in new[] { first!, last! })
         {
             try
@@ -54,6 +69,14 @@ public sealed partial class ClientPassMod
                    "Then leave the world and host it again (or save and reload), and run the check list's next step; " +
                    "finally host a second world with the same mods and look at a buff of the mod there too. Pass when " +
                    "the icons and their times showed each time and nothing looked out of place.");
+        var generation = World.GetProgramBudget().World;
+        await c.Verdict();
+        c.Instruct("Leave and host the world again, then press continue. The next checks require a new world generation and repeat both boundary lookups.");
+        await c.Verdict();
+        c.Expect(World.GetProgramBudget().World is { } after && after != generation, "the world was actually rejoined");
+        c.Expect(Content.Buffs.Definitions().Any(d => d.Guid == firstGuid && d.State == "registered") &&
+                 Content.Buffs.Definitions().Any(d => d.Guid == lastGuid && d.State == "registered"), "both exact boundary GUIDs registered after rejoin");
+        CheckLookups("after rejoin");
         await c.Verdict();
     }
 
@@ -64,8 +87,18 @@ public sealed partial class ClientPassMod
         if (!await Need(c, "world-programs-quota-a", "world-programs-quota-b") || !await NeedPlayer(c)) return;
         var budget = World.GetProgramBudget();
         c.Log.Info($"client-pass: 17-programs-vanilla budget Kiln {budget.KilnSlots}, engine {budget.EngineSlots}");
-        var taken = budget.KilnSlots.KilnUsed + budget.KilnSlots.Reserved;
-        c.Expect(budget.Ok && taken > 32, "the server runs more of Kiln's programs than the old room of 32",
+        int taken = 0;
+        foreach (var mod in new[] { "world-programs-quota-a", "world-programs-quota-b" })
+        {
+            var file = Path.Combine(Context.DataDirectory, "..", mod, "quota-proof.json");
+            JsonNode? proof = File.Exists(file) ? JsonNode.Parse(File.ReadAllText(file)) : null;
+            var current = (uint?)proof?["generation"] == budget.World?.Generation;
+            var ran = (int?)proof?["ran"] ?? 0;
+            c.Expect(current && ran > 0 && (long?)proof?["minimumRuns"] > 0,
+                $"{mod}: callbacks executed in this world ({proof?.ToJsonString() ?? "no proof"})");
+            if (current) taken += ran;
+        }
+        c.Expect(budget.Ok && taken > 32, "more than 32 quota callbacks executed in this world",
             budget.Ok ? $"{taken} of {budget.KilnSlots.Capacity} slots, the world's table {budget.EngineSlots.GameUsed + budget.EngineSlots.KilnUsed + budget.EngineSlots.Reserved} of {budget.EngineSlots.Capacity}" : budget.Reason);
         if (Ahead(c, 4) is { } there)
         {

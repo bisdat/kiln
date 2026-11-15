@@ -14,6 +14,8 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <thread>
 #include <cstdio>
 #include <cstring>
 #include <map>
@@ -28,6 +30,8 @@
 #include "../log.h"
 #include "../profile.h"
 #include "../registry.h"
+#include "../tick.h"
+#include "../worldinfo.h"
 #include "nlohmann/json.hpp"
 #include "services/kiln_boot.h"
 #include "services/kiln_caps.h"
@@ -126,6 +130,36 @@ void (*g_exit)(uint32_t) = &os_exit;  // the OS-exit adapter (the host test repl
 void (*g_exit_late)(uint32_t) = &os_exit_late;  // the same for the stop after the entry point
 void (*g_late_hold)(void* user, const std::string& last_line) = nullptr;  // boot.cpp: the state files of a stop after the entry point
 void* g_late_hold_user = nullptr;
+// boot.cpp: the state files of a service's stop (stop_start), before or after the entry point
+void (*g_stop_state)(void* user, const std::string& last_line, const std::string& why, uint32_t code) = nullptr;
+void* g_stop_state_user = nullptr;
+// stop_start: what stopped the start (boot.json "boot"."stop"); g_stopping is set once
+struct Stop {
+    uint32_t code = 0;
+    std::string reason, by;
+    std::vector<std::string> mods;
+};
+Stop g_stop;
+std::atomic<bool> g_stopping{false};
+std::chrono::milliseconds g_stop_timeout{65000};  // includes state IO and the caller's 60-second message
+
+// The core's start phase is over: a world is present now, or one has run in this process (tick.cpp counts a world's
+// sessions from its first step). stop_start refuses then.
+bool world_started() {
+    for (uint32_t k = 0; k < KILN_WORLD_KINDS; ++k)
+        if (worldinfo::world(k)) return true;
+    KilnSessionInfo info{};
+    info.size = sizeof info;
+    if (tick::session(&info) == KILN_OK)
+        for (uint32_t k = 0; k < KILN_WORLD_KINDS; ++k)
+            if (info.sessions[k]) return true;
+    return false;
+}
+
+// A bad service callback must not unwind past the final termination. No C++ objects in the SEH frame.
+void stop_callback(void(KILN_CALL* fn)(void*), void* user) {
+    __try { fn(user); } __except (1) {}
+}
 
 // ---- small helpers ----
 template <size_t N>
@@ -241,6 +275,7 @@ std::string code_name(uint32_t code) {
         case KILN_BOOT_ISSUE_NOT_COMMITTED: return "NotCommitted";
         case KILN_BOOT_ISSUE_WRONG_ROLE: return "WrongRole";
         case KILN_BOOT_ISSUE_ACTIVATION_FAULT: return "ActivationFault";
+        case KILN_BOOT_ISSUE_START_STOPPED: return "StartStopped";
         case KILN_BOOT_ISSUE_SHADOWED_BY_FILE: return "ShadowedByFile";
         default: {
             char b[32];
@@ -1028,6 +1063,69 @@ KilnResult KILN_CALL b_activation_fault(KilnOwner collector, KilnStr mod_id, Kil
     return KILN_OK;  // the host test's exit adapter returned
 }
 
+// A service stops the start (kiln_boot.h stop_start): the issue per mod, the stop line, the launcher's files (boot.cpp's
+// g_stop_state), the caller's last word to the player, then the process ends with the caller's code. Any thread, any
+// phase, deferred mode or not.
+KilnResult KILN_CALL b_stop_start(KilnOwner caller, KilnStr mods, KilnStr reason, uint32_t exit_code, void(KILN_CALL* before_exit)(void*),
+                                  void* user) {
+    if (!caller || !reason.ptr || !reason.len || !exit_code) return KILN_ERR_INVALID_ARGUMENT;
+    // A start-time call only: never once a world (any kind, prediction included) is present or has run in this process
+    // (the core's start phase is over then, and ending the process could lose play). A sample, not a lock: a world whose
+    // first step is under way right now is not seen yet (worldinfo and the sessions are set at a world's first step).
+    if (world_started()) return KILN_ERR_UNAVAILABLE;
+    if (g_stopping.exchange(true)) return KILN_ERR_UNAVAILABLE;  // the first stop ends the process
+    const std::string why(sv(reason));
+    std::vector<std::string> ids;
+    for (std::string_view rest = sv(mods); !rest.empty();) {
+        const size_t comma = rest.find(',');
+        std::string_view id = rest.substr(0, comma);
+        while (!id.empty() && id.front() == ' ') id.remove_prefix(1);
+        while (!id.empty() && id.back() == ' ') id.remove_suffix(1);
+        if (!id.empty()) ids.emplace_back(id);
+        rest = comma == std::string_view::npos ? std::string_view() : rest.substr(comma + 1);
+    }
+    std::string last;
+    {
+        std::lock_guard lk(g_mutex);
+        g_stop = Stop{exit_code, why, reg::owner_name(caller), ids};
+        g_exit_code = exit_code;
+        if (ids.empty()) issue_locked({KILN_BOOT_ISSUE_START_STOPPED, "", "", "", "stop", why});
+        for (const std::string& id : ids) issue_locked({KILN_BOOT_ISSUE_START_STOPPED, id, "", "", "stop", why});
+        char line[96];
+        std::snprintf(line, sizeof line, "boot: the start stops (exit code 0x%04X)", exit_code);
+        last = std::string(line) + ": " + why + "; state/boot.json \"boot\".\"stop\" says why";
+    }
+    // A blocked writer or arbitrary before_exit callback cannot leave a refused start running forever.
+    std::mutex deadline_mu;
+    std::condition_variable deadline_cv;
+    bool done = false;
+    std::atomic<bool> expired{false};
+    std::thread deadline([&] {
+        std::unique_lock lk(deadline_mu);
+        if (deadline_cv.wait_for(lk, g_stop_timeout, [&] { return done; })) return;
+        expired = true;
+        lk.unlock();
+        g_exit_late(exit_code);
+    });
+    KLOG_E("%s", last.c_str());
+    try {
+        if (g_stop_state) g_stop_state(g_stop_state_user, last, why, exit_code);
+    } catch (...) {
+        KLOG_E("boot: stop state writer failed; terminating with the recorded reason");
+    }
+    if (before_exit) stop_callback(before_exit, user);
+    {
+        std::lock_guard lk(deadline_mu);
+        done = true;
+    }
+    deadline_cv.notify_one();
+    deadline.join();
+    if (!expired) g_exit_late(exit_code);
+    return KILN_OK;  // the host test's exit adapter returned
+}
+
+static_assert(sizeof(KilnBootApiV1) == 104 && offsetof(KilnBootApiV1, stop_start) == 96, "append-only boot ABI");
+
 const KilnBootApiV1 kTable = {
     {sizeof(KilnBootApiV1), KILN_BOOT_VERSION},
     &b_status,
@@ -1041,6 +1139,7 @@ const KilnBootApiV1 kTable = {
     &b_collector,
     &b_active_plan,
     &b_activation_fault,
+    &b_stop_start,
 };
 
 }  // namespace
@@ -1255,6 +1354,13 @@ void late_hold(void (*write_state)(void* user, const std::string& last_line), vo
     g_late_hold_user = user;
 }
 
+// boot.cpp: what writes the state files when a service stops the start (b_stop_start), set before the services load.
+void stop_writer(void (*write_state)(void* user, const std::string& last_line, const std::string& why, uint32_t code), void* user) {
+    std::lock_guard lk(g_mutex);
+    g_stop_state = write_state;
+    g_stop_state_user = user;
+}
+
 // boot.json "boot".
 json report() {
     std::lock_guard lk(g_mutex);
@@ -1279,10 +1385,12 @@ json report() {
     return {{"deferred", g_deferred},
             {"reason", g_why},
             {"bootMods", g_boot_mods},
-            {"status", g_deferred || g_exit_code ? json(status_name(g_status)) : json(nullptr)},
+            {"status", g_deferred || g_status != KILN_BOOT_STATUS_COLLECTING ? json(status_name(g_status)) : json(nullptr)},
             {"generation", g_deferred ? json(kGeneration) : json(nullptr)},
             {"published", g_root.load(std::memory_order_acquire) != nullptr},
             {"exitCode", g_exit_code ? json(g_exit_code) : json(nullptr)},
+            {"stop", g_stop.code ? json{{"code", g_stop.code}, {"reason", g_stop.reason}, {"by", g_stop.by}, {"mods", g_stop.mods}}
+                                 : json(nullptr)},
             {"collectors", collectors},
             {"owners", owners},
             {"issues", issues}};

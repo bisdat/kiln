@@ -40,10 +40,12 @@ One process has at most one boot generation. Every step runs on the boot thread,
 | `collector(owner, id, prepare, user)` | bind only | registers a collector |
 | `active_plan(id, &gen)` | any | the published plan of a collector; NULL before the publication or without a generation |
 | `activation_fault(owner, mod_id, kind, key, reason)` | any | appended in dev.28: published content of a mod could not be applied (below) |
+| `stop_start(caller, mods, reason, exit_code, before_exit, user)` | any | appended in dev.29: a service stops the start with its own code (below) |
 
 Every out struct starts with its size, set by the caller; a smaller size is `KILN_ERR_INVALID_ARGUMENT`. A too-small
 buffer writes nothing (`KILN_ERR_BUFFER_TOO_SMALL` with `*required`). Strings in are UTF-8 and copied.
-`activation_fault` was appended to the v1 table: check `header.size` before calling it (the helper does).
+`activation_fault` and `stop_start` were appended to the v1 table: check `header.size` before calling them (the helpers
+`kiln::boot::activation_fault` and `kiln::boot::stop_start` do).
 
 Limits: a definition is at most `KILN_BOOT_DEFINITION_MAX` (1 MiB) of JSON, an author stages at most
 `KILN_BOOT_OWNER_DEFINITIONS` (4096), the envelope is at most 64 MiB; one game-data read is at most 4 MiB and one author
@@ -126,9 +128,35 @@ process ends with exit code 0x4B01, as before the entry point. A required transi
 dependent boot owners become `ACTIVATION_FAULT`, and managed `Mods.BootState` reads the native state so they cannot
 load against the failed content. Only a registered collector's owner may call it.
 
+## stop_start
+A service that finds that this start must not go on, because the content a saved world needs cannot be built, ends it
+with `stop_start` (helper `kiln::boot::stop_start(api, owner, mods_csv, reason, code, before_exit, user)`). It is a
+**start-time call**: it works the same with a boot generation or without one, inside a collector's prepare (where
+`activation_fault` answers UNAVAILABLE) or after the game's entry point, for a required mod and for one that is not,
+but only until the first world. While a world of any kind is present, or once one has run in this process, it answers
+UNAVAILABLE and does nothing (ending the process could lose play); that check samples the core's world state and is
+not a lock, so call it only where no world can be starting (the boot thread, ResourceInit).
+
+In order: an issue of code `StartStopped`, phase `stop`, per mod (comma-separated ids); the stop line `boot: the start
+stops (exit code 0x<code>): <reason>`; progress.json `failed` with the reason and boot.json with `boot.stop` `{code,
+reason, by, mods}` and `boot.exitCode`; then a wait of a second at most per file until another reader could see that
+text in progress.json, boot.json and kiln.log (best effort: observable text, not a flush of every file; at a bound it
+goes on and logs which file it did not see); `before_exit(user)` (a game client's message: it should close by itself;
+a fault in it is contained); then the process ends with the service's code, without any DLL's detach code. If the
+files or the message block, a 65-second bound ends the process anyway. It does not return; a second stop while the
+first is under way answers UNAVAILABLE. The facts boot.json is written from are a copy the core publishes after each
+change of its own (never the boot thread's live frame), so a stop from any thread writes whole facts.
+
+Mixed versions: a service beside an older kiln.boot without the member (it checks `header.size`) ends the start by
+itself (kiln.knowledge: its state file, log line, message and exit, without boot.json's stop record or progress.json
+`failed`); an older service that does not know the call cannot be made to stop by a newer kiln.boot. The only user is
+kiln.knowledge's roster (0x4B02, [npcs.md](npcs.md)).
+
 ## The exit code
 `KILN_BOOT_EXIT_CODE` is 0x4B01 (19201). A start that kiln.boot stops ends with it, before the game's entry point or
-at an activation fault of a required mod; `boot.json` says `"exitCode": 19201`. Under Wine the Linux parent gets only
+at an activation fault of a required mod; `boot.json` says `"exitCode": 19201`. A service's `stop_start` ends with the
+service's own code instead (19202 for the roster), and `boot.json` says that one. Neither may be restarted on: see
+[dedicated-servers.md](../dedicated-servers.md#when-kiln-stops-the-start-no-restart-loop). Under Wine the Linux parent gets only
 the low byte as the exit status: 1. Seen on a test server (the lab's wrapper writes it to `kiln/state/exit-code.txt`):
 1 for a stop before the entry point (a required mod's patch of an unknown type) and for one after it (a required mod's
 patch of a missing resource), 0 for a normal stop with Ctrl-C. Not run on Windows, where a parent sees the whole
@@ -146,7 +174,8 @@ code. kiln.log ends with `boot: the start stops before the game's entry point (e
 | `generation`, `status`, `published` | the generation and where it ended: `published`, `aborted`, `activation-fault` |
 | `owners` | each participant: `id`, `author` (it ran `OnBoot`), `required`, `state`, `definitions`, `issues` |
 | `issues` | every issue: `mod`, `kind`, `key`, `phase` (stage, callback, prepare, commit, activation), `code`, `reason`, `warning` |
-| `exitCode` | 19201 when the start stopped, else null |
+| `exitCode` | the code the process ended with when the start stopped (19201, or a service's `stop_start` code), else null |
+| `stop` | since dev.29: `{code, reason, by, mods}` when a service ended the start with `stop_start`, else null |
 
 ## After the commit (managed side)
 Kiln.Host freezes each boot mod's inputs at the commit (every file of its folder but Kiln's own and the runtime's, JSON by
@@ -164,7 +193,12 @@ handles, which no runtime unload clears: `Blocks.Find` and a block's reference b
   reverse destruction, the seven collectors, files-only participants, `activation_fault`, the game-data reader;
   `BOOT-STRICT-*`: the `required` flag in every prepare's input, and per collector slot a collector built on
   `entry_error` with a malformed file, a malformed entry and an unreadable file, required (the start stops naming the
-  entry, nothing published) and optional (the entry skipped, the rest published)).
+  entry, nothing published) and optional (the entry skipped, the rest published); `stop_start`: without a generation,
+  inside a prepare, after the publication, refused while a world is present or after one ran, a faulting or blocked
+  `before_exit`, a throwing writer, two callers).
+- Host: `native/core/tests/test-stop-facts.sh` (the facts a stop writes boot.json from, under the thread sanitizer,
+  while boot() changes and publishes them; `test-stop-facts.sh old` runs the round-2 pattern, a pointer to the live
+  facts, which the sanitizer flags).
 - Offline: `managed/tests/Kiln.Blocks.Tests` (staging, lowering, `BootHandleTests`: the handle map), `Kiln.Host.Tests`
   (`BootPhaseTests`, including the pin of `KilnBootApiV1`'s member order; `BootInputsTests`: the frozen inputs).
 - Offline, the test kit: `Kiln.TestKit.Tests` (`BootFakeTests`: `KilnHarness.BootPhase`), `Kiln.Sdk.Tests`

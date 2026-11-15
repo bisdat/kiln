@@ -85,6 +85,7 @@ public enum CraftResult
 /// phase of the same step. Forge's ItemCraftedEvent, fired for failures too: check <see cref="Succeeded"/>.</summary>
 public sealed class ItemCraftedEvent : GameplayEvent
 {
+    static ItemCraftedEvent() => Gameplay.RegisterHookEvent(typeof(ItemCraftedEvent),2,"gameplay.craft");
     public EntityId Operator { get; internal init; }
     public EntityId Station { get; internal init; }
     public uint RecipeId { get; internal init; }
@@ -244,6 +245,7 @@ public sealed class TeleportedEvent : GameplayEvent
 /// <see cref="GameplayActions.Spawn"/> zone arrive already canceled with <see cref="Entity"/> none.</summary>
 public sealed class NaturalSpawnEvent : GameplayCancelableEvent
 {
+    static NaturalSpawnEvent() => Gameplay.RegisterHookEvent(typeof(NaturalSpawnEvent),8,"gameplay.spawn");
     public EntityId Entity { get; internal init; }
     public Guid Template { get; internal init; }
     public WorldPosition Position { get; internal init; }
@@ -320,6 +322,7 @@ internal struct TemplateLookup
 /// (weakspots, links) of a creature you keep can break it.</remarks>
 public sealed class EntityJoinLevelEvent : GameplayCancelableEvent, IEntityLifecycleEvent
 {
+    static EntityJoinLevelEvent() => Gameplay.RegisterHookEvent(typeof(EntityJoinLevelEvent),16,"gameplay.entity_events");
     private TemplateLookup _t;
     public EntityId Entity { get; internal init; }
     public Guid? Template { get; internal init; }
@@ -337,6 +340,7 @@ public sealed class EntityJoinLevelEvent : GameplayCancelableEvent, IEntityLifec
 /// bulk removal when the world shuts down.</summary>
 public sealed class EntityLeaveLevelEvent : GameplayEvent, IEntityLifecycleEvent
 {
+    static EntityLeaveLevelEvent() => Gameplay.RegisterHookEvent(typeof(EntityLeaveLevelEvent),16,"gameplay.entity_events");
     private TemplateLookup _t;
     public EntityId Entity { get; internal init; }
     public Guid? Template { get; internal init; }

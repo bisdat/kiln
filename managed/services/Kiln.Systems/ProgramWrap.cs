@@ -213,7 +213,7 @@ public sealed unsafe class ProgramWrap : IDisposable
     {
         get
         {
-            long slices = 0, entities = 0, faults = 0, overruns = 0;
+            long slices = 0, entities = 0, faults = 0, overruns = 0, skips = 0;
             double us = 0;
             var threads = 0;
             var t = SystemsNative.T;
@@ -227,8 +227,9 @@ public sealed unsafe class ProgramWrap : IDisposable
                     overruns += (long)i.Overruns;
                     us += i.TotalNs / 1000.0;
                     threads = Math.Max(threads, (int)i.Threads);
+                    skips += Interlocked.Read(ref s.ArchetypeSkips);
                 }
-            return new WrapStats(slices, entities, us, faults, overruns, threads);
+            return new WrapStats(slices, entities, us, faults, overruns, threads) { ArchetypeSkips = skips };
         }
     }
 
@@ -298,10 +299,13 @@ public sealed unsafe class ProgramWrap : IDisposable
 
     // The filters, per slice: When on every call, WhenArchetype cached per archetype. `off`: WhenArchetype cannot decide
     // on this build or world (no archetype key at all, a name the world has no component of): the stage must go off
-    // rather than skip every slice without a word.
-    internal bool Accepts(SystemsNative.Slice* s, out string? off)
+    // rather than skip every slice without a word. `changed`: kiln.world saw the entity map change under its archetype
+    // read (KILN_WORLD_ERR_CHANGED) on all of ArchetypeReads reads: transient, so only this slice is left to the game.
+    internal const int ArchetypeReads = 3;
+    internal bool Accepts(SystemsNative.Slice* s, out string? off, out bool changed)
     {
         off = null;
+        changed = false;
         var archetype = Volatile.Read(ref _archetype);
         var when = Volatile.Read(ref _when);
         if (archetype is null && when is null) return true;
@@ -312,11 +316,18 @@ public sealed unsafe class ProgramWrap : IDisposable
         {
             nuint l = 0;
             rc = t->GameSliceArchetype(s, &l);
+            for (var reads = 1; archetype is not null && rc == SystemsNative.Changed && reads < ArchetypeReads; reads++)
+                rc = t->GameSliceArchetype(s, &l);
             if (rc == SystemsNative.Ok) layout = (nint)l;
         }
         if (archetype is not null)
         {
-            if (rc == SystemsNative.NotFound) return false;  // an empty slice, an entity the map does not hold: this slice
+            if (rc == SystemsNative.NotFound) return false;  // an empty slice: this slice
+            if (rc == SystemsNative.Changed)
+            {
+                changed = true;  // the map changed under every read: this slice is the game's, the stage stays on
+                return false;
+            }
             if (layout == 0 || t == null)
             {
                 off = $"WhenArchetype cannot read a slice's archetype on this build (kiln.world answered {rc})";
@@ -419,6 +430,7 @@ internal sealed unsafe class ManagedStage
     internal volatile bool Removing;
     internal string? Detail;
     internal long ManagedFaults;
+    internal long ArchetypeSkips;       // slices left to the game: the archetype read saw the map change (Accepts)
     internal IAround? Around;           // the stage is one half of an AroundEach
     internal ManagedStage? Partner;     // its other half: they go off together
     private GCHandle _self;
@@ -599,6 +611,17 @@ internal sealed unsafe class ManagedStage
         else ProgramWrap.PostToTick(() => Wrap.OnDisabled(e));
     }
 
+    // WhenArchetype left a slice to the game (the entity map changed under all its reads): counted in Stats, said once.
+    private void ArchetypeSkipped()
+    {
+        if (Interlocked.Increment(ref ArchetypeSkips) != 1) return;
+        var text = $"{Wrap.Program}: WhenArchetype could not read a slice's archetype ({ProgramWrap.ArchetypeReads} reads, the " +
+            "entity map changed under each); the slice was left to the game and the stage stays on (counted in " +
+            "Stats.ArchetypeSkips; said once per stage)";
+        if (Wrap.Mod is { } m) m.Log.Warn(text);
+        else Backend.Current.Log(0, LogLevel.Warn, $"Kiln.Systems: {text}");
+    }
+
     // Turned off for a reason that is not the mod's (the build cannot do what the stage asks): no count for its policy.
     private void Off(string reason)
     {
@@ -644,9 +667,11 @@ internal sealed unsafe class ManagedStage
         {
             ModContext.CurrentMod = mod;
             string? off = null;
-            if (_disabled != 0 || Removing || mod is { Alive: false } || !Wrap.Accepts(s, out off))
+            var changed = false;
+            if (_disabled != 0 || Removing || mod is { Alive: false } || !Wrap.Accepts(s, out off, out changed))
             {
                 if (off is not null) Off(off);       // the filter cannot decide here: the stage goes off and says why
+                if (changed) ArchetypeSkipped();     // a change under the read: only this slice, counted
                 if (replace) RunOriginalQuietly(s);  // this slice is the game's
                 return;
             }

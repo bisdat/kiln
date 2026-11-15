@@ -449,7 +449,21 @@ void __fastcall hk_world_destroy(uintptr_t world) {
             const uint64_t steps = g_steps[kind].load();
             KLOG_I("tick: %s world 0x%llx stopping (session %u, %llu steps since boot)", kKindName[kind],
                    static_cast<unsigned long long>(world), session, static_cast<unsigned long long>(steps));
-            if (kind == KILN_WORLD_SERVER && g_wait_jobs) g_wait_jobs(world);  // safe early and twice (EMF notes)
+            // The engine's own wait for the world's task queue, before anyone sees STOPPING (tick_drain.h): the server
+            // world, and since 0.2.0-dev.29 the client world (its own queue; the prediction world stops with it, after).
+            // WaitWorldJobs is the game's (mov rcx,[world+world.jobs]; jmp WaitTaskGroup) and has no time limit, as at
+            // the end of every GameServer update: it returns when the queue's tasks have finished. No program slice is
+            // in that queue here (StepPrograms waited for its own); a task that never finished would hang the game's
+            // next wait on that queue the same way. Safe early and twice (EMF notes).
+            if (waits_before_stop(kind) && g_wait_jobs) {
+                const double w0 = now_ms();
+                g_wait_jobs(world);
+                KLOG_I("tick: %s world 0x%llx: its jobs are drained by the engine (WaitWorldJobs, %.0f us) before STOPPING",
+                       kKindName[kind], static_cast<unsigned long long>(world), (now_ms() - w0) * 1000.0);
+            } else if (waits_before_stop(kind)) {
+                KLOG_W("tick: %s world 0x%llx: STOPPING without the engine's wait (tick.wait_jobs did not resolve); "
+                       "subscribers have their own bounded wait only", kKindName[kind], static_cast<unsigned long long>(world));
+            }
             // The prediction world is not a world object of its own: its storage lives in an object at
             // client world + 0x15F56C0, which this destroy frees (docs/re/client.md). It stops with the client world.
             const uintptr_t prediction = worldinfo::world(KILN_WORLD_PREDICTION);
@@ -511,6 +525,10 @@ bool install() {
 }
 
 bool installed() { return g_installed && !g_faulted.load(); }
+bool waits_jobs() { return g_wait_jobs != nullptr; }
+StopDrain stop_drain(uint32_t kind) {
+    return stop_drain_of(kind, image().side, installed(), lifecycle(), waits_jobs());
+}
 bool lifecycle() { return g_lifecycle && !g_faulted.load(); }
 
 bool typed_install_pre() { return !g_faulted.load() && g_typed_pre != 0; }

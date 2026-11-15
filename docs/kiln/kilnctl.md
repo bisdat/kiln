@@ -142,7 +142,10 @@ start (adds `gameSettings`). kilnctl never edits an existing file; change the po
 Files in `runner/systemd/`:
 - `kiln@.service`: `ExecStartPre=%h/.local/bin/kilnctl preflight %i`, `ExecStart=%h/.local/bin/kilnctl run %i`,
   `Type=exec`, `KillSignal=SIGINT`, `KillMode=mixed` (only kilnctl gets SIGINT; whatever is left after it exits is
-  SIGKILLed), `TimeoutStopSec=90`, `Restart=on-failure`, `RestartSec=15`, at most 5 starts in 10 minutes.
+  SIGKILLed), `TimeoutStopSec=90`, `Restart=on-failure`, `RestartSec=15`, at most 5 starts in 10 minutes, and
+  `RestartPreventExitStatus=1 2`: exit status 1 (kiln.boot stopped the start, 0x4B01) and 2 (the NPC roster cannot be
+  held, 0x4B02) mean the mod list cannot run, so the unit stays down until it is fixed (`kilnctl run` passes the
+  server's status on; Wine gives the low byte).
 - `kiln-backup@.service` + `kiln-backup@.timer`: `kilnctl backup %i` daily (randomised by 30 min, `Persistent=true`).
 
 A release ships the three units next to kilnctl (`runtime/`; on GitHub as `kiln-systemd-units-<version>.tar.gz`):

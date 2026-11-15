@@ -292,7 +292,10 @@ test("a long detail stays inside its line at 1024×640 and on the Deck, and the 
   const fits = async () => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1 && document.documentElement.scrollHeight <= innerHeight + 1);
   await page.setViewportSize({ width: 1024, height: 640 });
   await open(page);
-  await mock(page).script({ scale: 0.06, servicesDetail: long, quietAt: undefined });
+  // scale 0.12, not 0.06: the detail is on screen while kiln-vfx is the current service, 18 s of the owner's start. At
+  // 0.06 that is 1.08 s, as long as one polling interval of the expect below, and a start that begins a few
+  // milliseconds later (the status read before Play, dev.29) misses it about one run in three on a busy machine.
+  await mock(page).script({ scale: 0.12, servicesDetail: long, quietAt: undefined });
   await mouth(page).click();
   await expect(page.locator(".k-start-line")).toContainText("kiln-vfx, building the materials", { timeout: 20_000 });
   expect(await inside(".k-start-line")).toBe(true);
@@ -309,7 +312,7 @@ test("a long detail stays inside its line at 1024×640 and on the Deck, and the 
   await expect(page.locator('[data-deck-screen="home"]')).toBeVisible();
   const focused = () => page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset?.deckId ?? null);
   await expect.poll(focused).toBe("mouth");
-  await mock(page).script({ scale: 0.06, servicesDetail: long });
+  await mock(page).script({ scale: 0.12, servicesDetail: long });
   await page.keyboard.press("Enter");
   const deck = page.getByTestId("deck-start");
   await expect(deck).toContainText("kiln-vfx, building the materials", { timeout: 20_000 });

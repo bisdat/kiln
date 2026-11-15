@@ -20,14 +20,19 @@ echo "== seqnames-test (host)"
 bash "$here/seqnames_test.sh"
 bash "$here/seqworld_test.sh"
 bash "$here/buffroom_test.sh"
+bash "$here/pending_test.sh"
+bash "$here/apply_report_test.sh"
 echo "== near-test (host)"
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/near_test.cpp" "$here/../nearmem.cpp" -o "$out/near-test"
 "$out/near-test"
 echo "== near-win-test (Wine)"
-"$here/../../../build.sh" near-win-test >/dev/null
+"$here/../../../build.sh" near-win-test pending-win-test >/dev/null
 export WINEPREFIX=$KILN_OUT/content-tests-pfx WINEDEBUG=-all WINEDLLOVERRIDES="mscoree=;mshtml=;winedbg.exe=d"
 # no window may reach the desktop: an unset WAYLAND_DISPLAY means the desktop's wayland-0
 unset DISPLAY; export WAYLAND_DISPLAY=kiln-no-display
 mkdir -p "$WINEPREFIX"
 [[ -f $WINEPREFIX/system.reg ]] || wine wineboot -i >/dev/null 2>&1
 wine "$KILN_OUT/cmake/bin/content-tests/near-win-test.exe"
+
+echo "== pending-win-test (Wine)"
+wine "$KILN_OUT/cmake/bin/content-tests/pending-win-test.exe"

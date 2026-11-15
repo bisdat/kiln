@@ -417,9 +417,17 @@ struct LeftOut {
     std::string mod, why;
 };
 
-// `left_out` (a boot generation): the required mods of `required` the build could not build whole.
+// The build could not hold the mods' roster: the caller stops the start once g_mu is released (roster_refuse_start).
+struct RosterStop {
+    bool set = false;
+    std::string why;
+    std::vector<std::string> mods;
+};
+
+// `left_out` (a boot generation): the required mods of `required` the build could not build whole. `stop`: set when
+// the roster was refused (then nothing is served and the start must not go on).
 void build_locked(const std::vector<qb::ModInput>* prepared = nullptr, const std::set<std::string>* required = nullptr,
-                  std::vector<LeftOut>* left_out = nullptr) {
+                  std::vector<LeftOut>* left_out = nullptr, RosterStop* stop = nullptr) {
     if (g_built) return;
     g_built = true;
     KilnBuildInfo bi{sizeof bi};
@@ -475,6 +483,11 @@ void build_locked(const std::vector<qb::ModInput>* prepared = nullptr, const std
         return;
     }
     for (const std::string& e : p.errors) KW("native: %s", e.c_str());
+    if (p.roster_refused && stop) {
+        stop->set = true;
+        stop->why = p.roster_refusal;
+        stop->mods = p.roster_mods;
+    }
     // compile_pack's fail(): the shared resources did not build, nothing is served (a mod's own errors say ok: false)
     if (p.manifest.contains("failed") && p.manifest["failed"].is_string()) whole = "the mods' native quests are not served: " + p.manifest["failed"].get<std::string>();
     const qb::ojson manifest_mods = p.manifest.contains("mods") ? p.manifest["mods"] : qb::ojson::array();
@@ -548,6 +561,7 @@ void build_locked(const std::vector<qb::ModInput>* prepared = nullptr, const std
 
 void build_once() {
     std::vector<LeftOut> left_out;
+    RosterStop stop;
     {
         std::lock_guard lock(g_mu);
         if (!A) A = static_cast<const KilnAssetsApi*>(g_api->service(kstr(KILN_ASSETS_SERVICE), 1));
@@ -559,9 +573,10 @@ void build_once() {
                     if (plan->required.count(m.id)) left_out.push_back({m.id, "kiln.assets is not available: native quests and NPCs are off"});
             g_built = true;
         } else {
-            build_locked(nullptr, nullptr, &left_out);
+            build_locked(nullptr, nullptr, &left_out, &stop);
         }
     }
+    if (stop.set) roster_refuse_start(stop.why, stop.mods);  // before any world loads; returns only after a world ran
     // a required boot mod whose native data the build left out: kiln.boot stops the start (the call does not return then)
     for (const LeftOut& l : left_out) kiln::boot::activation_fault(g_api, g_owner, l.mod, "knowledge", "", "kiln.knowledge: " + l.why);
 }
@@ -628,8 +643,14 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
     size_t n = 0;
     if (!g_built && A && A->header.size >= sizeof(KilnAssetsApi) && A->resource_data && res_read(gk, qb::kTypeKnowledge, &p, &n)) {
         std::vector<LeftOut> left_out;
-        build_locked(&plan->mods, &plan->required, &left_out);
+        RosterStop stop;
+        build_locked(&plan->mods, &plan->required, &left_out, &stop);
         plan->built_early = true;
+        if (stop.set) {  // before any world loads; does not return (the lock goes first)
+            g_mu.unlock();
+            roster_refuse_start(stop.why, stop.mods);
+            g_mu.lock();  // only when a world ran already (not at a boot generation's prepare): the build stays refused
+        }
         if (!left_out.empty()) {  // built in prepare: a required mod the build left out is refused here (destroy takes the build back)
             const LeftOut first = left_out.front();
             g_mu.unlock();
@@ -652,15 +673,19 @@ bool native_pack_boot() {
 
 void native_pack_ready() {
     // A client whose resource service was up before Kiln loaded: the hook will not fire.
-    std::lock_guard lock(g_mu);
-    if (g_built || g_boot) return;  // a boot generation builds in its prepare or at the hook
-    if (!A) A = static_cast<const KilnAssetsApi*>(g_api->service(kstr(KILN_ASSETS_SERVICE), 1));
-    if (!A || A->header.size < sizeof(KilnAssetsApi) || !A->resource_data) return;
-    qb::Guid gk;
-    qb::parse_guid(qb::kGuidKnowledge, &gk);
-    const uint8_t* p = nullptr;
-    size_t n = 0;
-    if (res_read(gk, qb::kTypeKnowledge, &p, &n)) build_locked();
+    RosterStop stop;
+    {
+        std::lock_guard lock(g_mu);
+        if (g_built || g_boot) return;  // a boot generation builds in its prepare or at the hook
+        if (!A) A = static_cast<const KilnAssetsApi*>(g_api->service(kstr(KILN_ASSETS_SERVICE), 1));
+        if (!A || A->header.size < sizeof(KilnAssetsApi) || !A->resource_data) return;
+        qb::Guid gk;
+        qb::parse_guid(qb::kGuidKnowledge, &gk);
+        const uint8_t* p = nullptr;
+        size_t n = 0;
+        if (res_read(gk, qb::kTypeKnowledge, &p, &n)) build_locked(nullptr, nullptr, nullptr, &stop);
+    }
+    if (stop.set) roster_refuse_start(stop.why, stop.mods);  // before any world loads; returns only after a world ran
 }
 
 std::string native_pack_manifest() {

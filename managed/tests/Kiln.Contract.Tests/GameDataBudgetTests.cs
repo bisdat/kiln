@@ -107,6 +107,16 @@ public sealed unsafe class GameDataBudgetTests : FakeTableTest
     }
 
     [Fact]
+    public void An_unused_buff_room_does_not_add_a_mandatory_content_join_requirement()
+    {
+        ServeTable(appended: true);
+        _readiness = 1; _kiln = 0;
+        Assert.False(ContentSync.RequiresBuffAdmission());
+        _kiln = 1;
+        Assert.True(ContentSync.RequiresBuffAdmission());
+    }
+
+    [Fact]
     public void The_appended_table_is_the_v1_table_and_three_pointers()
     {
         Assert.Equal(136, sizeof(GameDataNative.Table));

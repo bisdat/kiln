@@ -8,6 +8,11 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/../../
 g++ -std=c++20 -O1 -g -pthread -Wall -Wextra -fsanitize=address,undefined -D__fastcall= \
     -I"$here/host" -I"$here/../../../core/abi" "$here/programs_test.cpp" -o "$out/programs_test"
 "$out/programs_test"
+# client_world_test: Kiln programs in a client's client world and prediction storage (0.2.0-dev.29, chapter 14) over a
+# fake process with three worlds (a host's server world, its client world, the prediction storage).
+g++ -std=c++20 -O1 -g -pthread -Wall -Wextra -fsanitize=address,undefined -D__fastcall= \
+    -I"$here/host" -I"$here/../../../third_party" -I"$here/../../../core/abi" "$here/client_world_test.cpp" -o "$out/client_world_test"
+"$out/client_world_test" "$here/abi.json"
 
 # writes_test links a consumer compiled against the v2 header 0.2.0-dev.26 shipped (tests/v2 comes first for it).
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/v2" -I"$here/../../../core/abi/services" \
