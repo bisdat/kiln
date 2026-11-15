@@ -7,6 +7,7 @@
 #include "../game_programs.cpp"
 #include "../layout.cpp"
 #include "../wraps.cpp"
+#include "../foreign.cpp"
 #include <barrier>
 
 #include <cstdarg>
@@ -103,6 +104,20 @@ bool map_find_u16(uintptr_t, uint32_t key, uint16_t* value) {
     const auto it = g_type_index.find(key);
     if (it == g_type_index.end()) return false;
     if (value) *value = it->second;
+    return true;
+}
+// the engine's ReadOther / WriteOther over a fake store: entity -> component bytes, per accessor
+std::map<std::pair<uintptr_t, uint32_t>, std::vector<uint8_t>> g_fstore;
+int g_fwrites = 0;
+bool seh_read_other(Slice* out, void*, void* accessor, uint32_t entity, unsigned long*) {
+    const auto at = g_fstore.find({reinterpret_cast<uintptr_t>(accessor), entity});
+    *out = at == g_fstore.end() ? Slice{} : Slice{at->second.data(), at->second.size()};
+    return true;
+}
+bool seh_write_other(Slice* out, void*, ProgramCtx*, uint64_t accessor, uint32_t entity, unsigned long*) {
+    ++g_fwrites;  // the tracker marks it
+    const auto at = g_fstore.find({static_cast<uintptr_t>(accessor), entity});
+    *out = at == g_fstore.end() ? Slice{} : Slice{at->second.data(), at->second.size()};
     return true;
 }
 }  // namespace kw
@@ -1823,6 +1838,82 @@ void stress_overlap() {
           "overlap stress: 2,000 chain changes under 8 threads' slices, every chain freed, in-flight 0");
 }
 
+// ---- foreign views (chapter 06c 9.1): another service's code inside a game program's update, with its iterator ----
+NameRef g_fo_read[] = {{"Health", 6}, {"CurrentTransform", 16}}, g_fo_write[] = {{"Fuel", 4}};
+void foreign_views() {
+    // program 1 of the live world (per_entity's): other_read Health and CurrentTransform, other_write Fuel
+    g_wdesc[1].other_read = {g_fo_read, 2};
+    g_wdesc[1].other_write = {g_fo_write, 1};
+    KilnForeignLayout l{};
+    l.size = sizeof l;
+    check(foreign_layout(KILN_WORLD_SERVER, kstr("no_such_program"), &l) == KILN_ERR_NOT_FOUND, "foreign: no such program");
+    check(foreign_layout(KILN_WORLD_SERVER, kstr(kWNames[1]), &l) == KILN_OK && l.program == idx(kWNames[1]) &&
+              l.session == game_world_session(KILN_WORLD_SERVER) && l.counts[5] == 3 && l.iter_size == 4 * 8 && l.handle,
+          "foreign: the view of a program: its other lists (3 accessors after ctx), the session and index");
+    // other_read by type index (CurrentTransform 5, Health 30), then other_write (Fuel)
+    check(foreign_slot(&l, KILN_GAME_LIST_OTHER_READ, kstr("CurrentTransform")) == 1 &&
+              foreign_slot(&l, KILN_GAME_LIST_OTHER_READ, kstr("Health")) == 2 &&
+              foreign_slot(&l, KILN_GAME_LIST_OTHER_WRITE, kstr("Fuel")) == 3 &&
+              foreign_slot(&l, KILN_GAME_LIST_OTHER_WRITE, kstr("Health")) == -1,
+          "foreign: slots by the view algorithm (sorted by type index within a list)");
+    Job j(1);
+    counts(j, 0, 0, 0);
+    j.bytes[0x7A8] = 3;  // the job's other count
+    L.job_storage = 0x20;  // the job's storage (JobStorage) for ReadOther / WriteOther
+    static uint8_t job_storage[16];
+    const auto js = reinterpret_cast<uintptr_t>(job_storage);
+    std::memcpy(j.bytes + 0x20, &js, 8);
+    ProgramCtx ctx{j.bytes, 0, 0};
+    uint16_t health_type = 30, fuel_type = 20, wrong_type = 21, ct_type = 5;
+    uint64_t iter[4] = {reinterpret_cast<uint64_t>(&ctx), reinterpret_cast<uint64_t>(&ct_type),
+                        reinterpret_cast<uint64_t>(&health_type), reinterpret_cast<uint64_t>(&fuel_type)};
+    uint32_t jc[8] = {};
+    check(foreign_check(&l, iter, jc) == KILN_OK && jc[5] == 3, "foreign: the job's group counts are the view's");
+    j.bytes[0x7A8] = 2;
+    check(foreign_check(&l, iter, jc) == KILN_ERR_UNAVAILABLE && jc[5] == 2, "foreign: other counts differ: refused");
+    j.bytes[0x7A8] = 3;
+    F.read_other = true;
+    fn.read_other = [](Slice*, void*, void*, uint32_t) {};
+    F.write_other = true;
+    g_fstore[{iter[2], 7}] = {1, 2, 3, 4};
+    g_fstore[{iter[3], 7}] = {9, 9};
+    uint32_t size = 0;
+    KilnResult rc = KILN_ERR_INTERNAL;
+    const void* h = foreign_read(&l, iter, kstr("Health"), 7, &size, &rc);
+    check(h && rc == KILN_OK && size == 4 && static_cast<const uint8_t*>(h)[2] == 3, "foreign: read another entity's component");
+    check(!foreign_read(&l, iter, kstr("Health"), 8, &size, &rc) && rc == KILN_OK && size == 0,
+          "foreign: an entity without it: null, no error");
+    check(!foreign_read(&l, iter, kstr("Mana"), 7, &size, &rc) && rc == KILN_ERR_NOT_FOUND,
+          "foreign: a component the program does not declare: refused, no access");
+    const int writes = g_fwrites;
+    auto* f = static_cast<uint8_t*>(foreign_write(&l, iter, kstr("Fuel"), 7, &size, &rc));
+    check(f && rc == KILN_OK && size == 2 && g_fwrites == writes + 1, "foreign: write through other_write, marked by the tracker");
+    check(!foreign_write(&l, iter, kstr("Health"), 7, &size, &rc) && rc == KILN_ERR_NOT_FOUND && g_fwrites == writes + 1,
+          "foreign: a read-only component is not written");
+    check(foreign_read(&l, iter, kstr("Fuel"), 7, &size, &rc) && rc == KILN_OK, "foreign: other_write is readable too");
+    // an accessor that is not the component map's type: refused, and stays refused for that view
+    KilnForeignLayout l2{};
+    l2.size = sizeof l2;
+    check(foreign_layout(KILN_WORLD_SERVER, kstr(kWNames[1]), &l2) == KILN_OK, "foreign: a second view");
+    uint64_t bad[4] = {iter[0], iter[1], reinterpret_cast<uint64_t>(&wrong_type), iter[3]};
+    g_fstore[{bad[2], 7}] = {1};
+    check(!foreign_read(&l2, bad, kstr("Health"), 7, &size, &rc) && rc == KILN_ERR_UNAVAILABLE &&
+              !foreign_read(&l2, iter, kstr("Health"), 7, &size, &rc) && rc == KILN_ERR_UNAVAILABLE,
+          "foreign: an accessor of another type is refused once and for the view");
+    check(foreign_attr_changed(&l, iter, f) == KILN_ERR_UNAVAILABLE, "foreign: attribute formulas not known here: unavailable");
+    // the world goes: the view is void
+    world_event(KILN_WORLD_STOPPING, KILN_WORLD_SERVER);
+    check(!foreign_read(&l, iter, kstr("Health"), 7, &size, &rc) && rc == KILN_ERR_UNAVAILABLE &&
+              foreign_check(&l, iter, nullptr) == KILN_ERR_UNAVAILABLE && foreign_slot(&l, KILN_GAME_LIST_OTHER_READ, kstr("Health")) == -1,
+          "foreign: a view of a world that stopped answers nothing");
+    world_event(KILN_WORLD_STARTED, KILN_WORLD_SERVER);
+    wpre();
+    g_wdesc[1].other_read = {};
+    g_wdesc[1].other_write = {};
+    F.read_other = F.write_other = false;
+    L.job_storage = -1;
+}
+
 // ---- tests/abi.json: the v4 table and its structs, field for field ----
 void abi(const char* path) {
     std::ifstream in(path);
@@ -1852,6 +1943,14 @@ void abi(const char* path) {
         F(KilnWorldApi, game_slice_iterate); F(KilnWorldApi, game_slice_slot); F(KilnWorldApi, game_slice_mark);
         F(KilnWorldApi, game_slice_archetype); F(KilnWorldApi, game_archetype_has); F(KilnWorldApi, game_slice_attr_changed); F(KilnWorldApi, game_slice_attr_validate); F(KilnWorldApi, game_world_session);
         F(KilnWorldApi, game_program_contract);
+        F(KilnWorldApi, foreign_layout); F(KilnWorldApi, foreign_slot); F(KilnWorldApi, foreign_check);
+        F(KilnWorldApi, foreign_read); F(KilnWorldApi, foreign_write); F(KilnWorldApi, foreign_attr_changed);
+    }
+    {
+        auto& l = list("KilnForeignLayout", sizeof(KilnForeignLayout));
+        F(KilnForeignLayout, size); F(KilnForeignLayout, world_kind); F(KilnForeignLayout, session);
+        F(KilnForeignLayout, program); F(KilnForeignLayout, iter_size); F(KilnForeignLayout, counts);
+        F(KilnForeignLayout, handle); F(KilnForeignLayout, why);
     }
     {
         auto& l = list("KilnGameSlice", sizeof(KilnGameSlice));
@@ -1959,6 +2058,7 @@ int main(int argc, char** argv) {
     stopping_timeout();
     retirement_under_load();
     per_entity();
+    foreign_views();
     directory_read_in_stage();
     stress_steps();
     stress_overlap();

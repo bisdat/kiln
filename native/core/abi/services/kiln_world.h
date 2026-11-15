@@ -528,6 +528,19 @@ typedef struct KilnGameWrapInfo {
 
 typedef void(KILN_CALL* KilnProgramEventFn)(const void* data, uint32_t size, void* user);
 
+/* Since 0.2.0-dev.29 (foreign_layout): kiln.world's view of one of the game's programs for code that runs inside that
+ * program's update with the program's own iterator (kiln.abilities' natives inside impact_simulation; chapter 06c 9.1). */
+typedef struct KilnForeignLayout {
+    uint32_t size;        /* the caller's sizeof */
+    uint32_t world_kind;  /* KILN_WORLD_* */
+    uint64_t session;     /* game_world_session(world_kind) it was computed in: it is void once that changes */
+    int32_t program;      /* the program's index in that world's directory */
+    uint32_t iter_size;   /* bytes of the iterator the view computed */
+    uint32_t counts[8];   /* the view's group counts: tpl, read, write, singletons, other_tpl, other, events_in, events_out */
+    uint64_t handle;      /* kiln.world's: the view */
+    char why[128];        /* when foreign_layout said KILN_ERR_UNAVAILABLE */
+} KilnForeignLayout;
+
 typedef struct KilnWorldApi {
     KilnServiceHeader header; /* { sizeof(KilnWorldApi), KILN_WORLD_VERSION } */
 
@@ -767,6 +780,38 @@ typedef struct KilnWorldApi {
      * header.size. */
     KilnResult(KILN_CALL* game_program_contract)(uint32_t world_kind, int32_t index, uint32_t* out_contract, char* text,
                                                  uint32_t capacity, uint32_t* out_size);
+
+    /* ---- foreign views: since 0.2.0-dev.29 (chapter 06c 9.1), still v4: check header.size ----
+     * Code that runs inside one of the game's programs and holds that program's iterator reads and writes other
+     * entities through the program's own other_read / other_write accessors, with its job's storage, tracker and
+     * write flag (the tracked-write path): explicit arguments, no thread-local state, any thread inside the update.
+     * The view of program `name` in the live world of `world_kind` (the wraps' view algorithm, from its descriptor):
+     * *out (out->size set) gets the session, the index, the counts, the iterator size and the handle the calls below
+     * take. KILN_ERR_NOT_FOUND: no such program or no directory now; KILN_ERR_UNAVAILABLE: the layout cannot be
+     * computed (out->why). The view lasts for the process; a new session needs a new one. Tick thread. */
+    KilnResult(KILN_CALL* foreign_layout)(uint32_t world_kind, KilnStr name, KilnForeignLayout* out);
+    /* The iterator qword of name `name` of list `list` (KILN_GAME_LIST_*) in the view, or -1. Any thread. */
+    int32_t(KILN_CALL* foreign_slot)(const KilnForeignLayout* layout, int32_t list, KilnStr name);
+    /* Inside the program's update, `iter` its iterator: KILN_OK when the job's group counts are the view's;
+     * KILN_ERR_UNAVAILABLE when they differ, the session ended or the job cannot be read (the view's slots must then not
+     * be used on that iterator). out_counts (optional, 8) gets the job's counts. */
+    KilnResult(KILN_CALL* foreign_check)(const KilnForeignLayout* layout, const uint64_t* iter, uint32_t* out_counts);
+    /* Inside the update: component `component` (short name: "Health") of entity `entity` through the program's
+     * other_read or other_write accessor (ReadOther); *size its bytes. NULL when the entity has none (*rc KILN_OK) or
+     * on a refusal (*rc): KILN_ERR_NOT_FOUND not in those lists, KILN_ERR_UNAVAILABLE a session that ended, an accessor
+     * that is not the component map's type, KILN_ERR_INTERNAL a fault (rc optional). */
+    const void*(KILN_CALL* foreign_read)(const KilnForeignLayout* layout, const uint64_t* iter, KilnStr component,
+                                         uint32_t entity, uint32_t* size, KilnResult* rc);
+    /* The same through the program's other_write accessor with the job's tracker (WriteOther): the component, marked
+     * written for the save and replication; write it before the update returns. KILN_ERR_NOT_FOUND: not in
+     * other_write; KILN_ERR_UNAVAILABLE also when the tracked write is not known on this build. */
+    void*(KILN_CALL* foreign_write)(const KilnForeignLayout* layout, const uint64_t* iter, KilnStr component, uint32_t entity,
+                                    uint32_t* size, KilnResult* rc);
+    /* After writing an attribute component through foreign_write: the game's formulas (AttrChanged) with the program's
+     * impact::AttributeRegistry singleton. KILN_ERR_INVALID_ARGUMENT: the block holds no values (component[6] bit 0),
+     * or the program does not declare the registry; KILN_ERR_UNAVAILABLE: not on this build; KILN_ERR_INTERNAL: they
+     * faulted. */
+    KilnResult(KILN_CALL* foreign_attr_changed)(const KilnForeignLayout* layout, const uint64_t* iter, void* component);
 } KilnWorldApi;
 
 enum {
