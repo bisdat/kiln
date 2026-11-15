@@ -15,6 +15,11 @@
 // program's own slices can show: its slices ran on the game's workers (fails when the wrap never ran on one), the game's
 // own fills were seen in fuel_setup's update and the doubled water is what GetComponent reads afterwards. The player
 // judges what they see: a well's water bar refilling faster while the wrap is on.
+//
+// 06a-define.hosted: Systems.Define (S8) in a hosted world with a second player. kiln.world reserved the pass's own program
+// (ClientPassFuelQuery, from this mod's kiln.programs.json) when the game started its hosted world; the check binds it,
+// asserts it ran for the hosted world's water containers with Fuel read through the query on the game's workers (fails
+// when it never ran on one), and that nothing calls it after Dispose. The player judges whether the game ran as before.
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using Kiln;
@@ -160,6 +165,48 @@ public sealed partial class ClientPassMod
         }
     }
 
+    [ClientCheck("06a-define.hosted", "A program of a mod's own (Systems.Define) in a hosted world with a second player", Area = "Systems",
+        Since = Dev29, Tags = [TwoPlayers], Needs = ClientCheckNeeds.Hosted, Order = ProgramWrapsOrder + 2)]
+    public async Task ProgramDefineHosted(CheckContext c)
+    {
+        if (!await NeedOpen(c, "systems.define") || !await NeedPlayer(c)) return;
+        if (!Capabilities.Is("systems.define"))
+        {
+            await c.Skip($"systems.define is unavailable: {Capabilities.Why("systems.define")}");
+            return;
+        }
+        long calls = 0, fuel = 0;
+        var threads = new ConcurrentDictionary<string, byte>();
+        var made = Systems.Define(ClientPassFuelQuery.Key, new ProgramOptions(), (ref ClientPassFuelQuery q) =>
+        {
+            Interlocked.Increment(ref calls);
+            if (q.Context.TryGet<Ecs.Fuel>(out _)) Interlocked.Increment(ref fuel);
+            threads.TryAdd(Waterworks.ThreadName(), 0);
+        });
+        if (!c.Expect(made.Ok, "the program kiln.world reserved at boot from client-pass's kiln.programs.json is bound", made.Reason ?? made.Key))
+        {
+            await c.Verdict();
+            return;
+        }
+        c.OnEnd(() => made.Dispose());
+        c.Instruct("A program of the pass's own now runs over your hosted world's water containers (barrels, wells, cans) and " +
+                   "only counts them. Keep the second player in the world and stay near a few containers for about 30 seconds.");
+        await c.Delay(TimeSpan.FromSeconds(30));
+        var seen = $"{Interlocked.Read(ref calls)} entity calls, Fuel read on {Interlocked.Read(ref fuel)}, threads {string.Join(", ", threads.Keys.Order())}";
+        c.Log.Info($"client-pass: 06a-define.hosted client_pass_fuel: {seen}");
+        c.Expect(Interlocked.Read(ref calls) > 0 && Interlocked.Read(ref fuel) == Interlocked.Read(ref calls),
+            "it ran for the hosted world's containers and read their Fuel through the query", seen);
+        c.Expect(threads.Keys.Any(n => n.Contains("Task-Default", StringComparison.Ordinal)),
+            "it ran on the game's workers (Task-Default), as the game runs its own entity programs with a player in the world", seen);
+        made.Dispose();
+        var before = Interlocked.Read(ref calls);
+        await c.Ticks(25);
+        c.Expect(Interlocked.Read(ref calls) == before, "nothing calls it after Dispose (25 steps)",
+            $"{before} then {Interlocked.Read(ref calls)}");
+        c.Instruct("While it ran: did the game run as before (no stutter or freeze that the game does not have otherwise)?");
+        await c.Verdict();
+    }
+
     [ClientCheck("06a-wraps.waterworks", "Program wraps with a second player: a well refills twice as fast", Area = "Systems",
         Since = Dev29, Tags = [TwoPlayers, Visual], Needs = ClientCheckNeeds.Hosted, Order = ProgramWrapsOrder + 1)]
     public async Task ProgramWrapsWaterworks(CheckContext c)
@@ -263,4 +310,14 @@ public sealed partial class ClientPassMod
 #pragma warning disable KILNX001
     private static int LabSystemsMask() => LabSystems.PlayersMask ?? 0xFFFF;
 #pragma warning restore KILNX001
+}
+
+// 06a-define.hosted's program: the hosted world's water containers (template FuelSetup, read Fuel). kiln.programs.json beside
+// this file reserves it (what Kiln.Sdk's KilnPrograms task writes for it; this mod is built without the Kiln SDK).
+[Query(Key = Key, Template = ["FuelSetup"], Read = ["Fuel"])]
+internal ref struct ClientPassFuelQuery : IQuery<ClientPassFuelQuery>
+{
+    public const string Key = "client_pass_fuel";
+    public EcsProgramContext Context;
+    public static ClientPassFuelQuery Bind(EcsProgramContext context) => new() { Context = context };
 }
