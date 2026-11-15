@@ -75,6 +75,10 @@ struct Directory {
 #ifdef _WIN32
     std::vector<Handle> ancestors;
 #endif
+    // Set by open() without create when the directory (the base or a store component) is simply not there: nothing is
+    // stored yet. That is the ordinary state of every installation that never stored a definition, so it is not a
+    // refusal and nothing is logged; the caller reads it as an empty store.
+    bool missing=false;
     Directory()=default;
     Directory(const Directory&)=delete;
     ~Directory(){close(h);
@@ -85,6 +89,7 @@ struct Directory {
     // Ordinary open of a trusted directory: its ancestors are the player's layout, not our store.
     bool open(const fs::path& input,bool create=false) {
         std::error_code ec;
+        missing=false;
         path=fs::absolute(input,ec);
         if(ec)return unavailable(input,"resolve trusted base",ec.value());
         if(create) {
@@ -94,7 +99,11 @@ struct Directory {
 #ifdef _WIN32
         h=CreateFileW(path.c_str(),FILE_LIST_DIRECTORY|FILE_READ_ATTRIBUTES,FILE_SHARE_READ|FILE_SHARE_WRITE,
             nullptr,OPEN_EXISTING,FILE_FLAG_BACKUP_SEMANTICS,nullptr);
-        if(h==invalid)return unavailable(path,"open trusted base",GetLastError());
+        if(h==invalid) {
+            const DWORD code=GetLastError();
+            if(!create && (code==ERROR_FILE_NOT_FOUND || code==ERROR_PATH_NOT_FOUND)) {missing=true;return false;}
+            return unavailable(path,"open trusted base",code);
+        }
         BY_HANDLE_FILE_INFORMATION info{};
         if(!GetFileInformationByHandle(h,&info))return unavailable(path,"read trusted base attributes",GetLastError());
         if(!(info.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY))return unavailable(path,"trusted base is not a directory",ERROR_DIRECTORY);
@@ -105,7 +114,11 @@ struct Directory {
         path=fs::path(std::wstring(resolved.data(),n));
 #else
         h=::open(path.c_str(),O_RDONLY|O_DIRECTORY|O_CLOEXEC);
-        if(h<0)return unavailable(path,"open trusted base",errno);
+        if(h<0) {
+            const int code=errno;
+            if(!create && code==ENOENT) {missing=true;return false;}
+            return unavailable(path,"open trusted base",code);
+        }
 #endif
         return true;
     }
@@ -131,7 +144,11 @@ struct Directory {
                     return unavailable(child,"create store directory",GetLastError());
                 next=acquire();
             }
-            if(next==invalid)return unavailable(child,"open store directory",GetLastError());
+            if(next==invalid) {
+                const DWORD code=GetLastError();
+                if(!create && (code==ERROR_FILE_NOT_FOUND || code==ERROR_PATH_NOT_FOUND)) {missing=true;return false;}
+                return unavailable(child,"open store directory",code);
+            }
             BY_HANDLE_FILE_INFORMATION info{};
             if(!GetFileInformationByHandle(next,&info)) {auto code=GetLastError();close(next);return unavailable(child,"read store attributes",code);}
             if(info.dwFileAttributes&FILE_ATTRIBUTE_REPARSE_POINT) {close(next);return unsafe(child,"store directory is a reparse point");}
@@ -148,6 +165,7 @@ struct Directory {
             if(next<0) {
                 const int code=errno;struct stat st{};
                 if(fstatat(h,part.c_str(),&st,AT_SYMLINK_NOFOLLOW)==0 && S_ISLNK(st.st_mode))return unsafe(child,"store directory is a link");
+                if(!create && code==ENOENT) {missing=true;return false;}
                 return unavailable(child,"open store directory",code);
             }
             close(h);h=next;

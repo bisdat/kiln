@@ -18,6 +18,22 @@ int main() {
         fs::create_directories(base);
         cap::pending_io::TrustedBase trusted{base};
         auto root=base/L"pending",file=root/L"mod"/L"a.json";
+        // A store that was never written is the ordinary state of every installation: empty, complete, and silent.
+        {
+            static int said=0;
+            cap::pending_io::diagnostic=[](const auto& p,const auto& why){++said;std::printf("pending-win diagnostic: %ls: %s\n",p.c_str(),why.c_str());};
+            const auto never=base/L"never"/L"service";
+            cap::PendingScan a;
+            check(cap::pending_files_bounded(cap::pending_io::TrustedBase{never},never/L"pending",&a).empty() && a.complete,
+                  "a trusted base that does not exist is an empty, complete store");
+            cap::PendingScan b;
+            check(cap::pending_files_bounded(trusted,root,&b).empty() && b.complete,"a store root that does not exist is an empty, complete store");
+            std::string none,why;
+            check(!cap::pending_io::read(trusted,file,&none,100),"a file in a folder that does not exist is not there");
+            check(cap::pending_store_write(trusted,root,root/L"fresh"/L"f.json","first",&why),"the first write creates the store");
+            check(said==0,"a fresh store and its first write say nothing");
+            check(cap::pending_io::remove(trusted,root/L"fresh"/L"f.json"),"remove the first file");
+        }
         cap::pending_io::diagnostic=[](const auto& p,const auto& why){std::printf("pending-win diagnostic: %ls: %s\n",p.c_str(),why.c_str());};
         check(cap::pending_io::write_atomic(trusted,file,"old"),"create missing store and mod; write");
         check(cap::pending_io::write_atomic(trusted,file,"new"),"replace");

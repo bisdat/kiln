@@ -260,12 +260,12 @@ inline std::vector<PendingFile> pending_files_bounded(const pending_io::TrustedB
     bool stopped=false;
     uint64_t fuel=4*pending_max_files;  // includes mod directories, both passes, invalid entries and crash temporaries
     pending_io::Directory root;
-    if (!root.open(base,dir)) { stats->complete=false; return out; }
+    if (!root.open(base,dir)) { if (!root.missing) stats->complete=false; return out; }  // no folder: an empty store
     if (!root.visit([&](const auto& mod) {
         if (root.regular(mod)==1) return;
         if (!pending_io::component(mod.string())) { pending_io::refused(dir/mod,"invalid mod component"); return; }
         pending_io::Directory folder;
-        if (!folder.open(base,dir/mod)) { stats->complete=false; stopped=true; return; }
+        if (!folder.open(base,dir/mod)) { if (folder.missing) return; stats->complete=false; stopped=true; return; }
         // Discard regular crash leftovers in a separate streaming pass. Refused reparse/link entries remain.
         if (!folder.visit([&](const auto& name) {
             if (name.extension()!=".tmp") return;

@@ -92,6 +92,35 @@ int main() {
  for(int i=0;i<16385;++i){std::ofstream out(root/"mod"/("bad@"+std::to_string(i)+".json"));out<<"x";}
  cap::PendingScan hostile;cap::pending_files_bounded(cap::pending_io::TrustedBase{base},root,&hostile);
  check(!hostile.complete && hostile.unread>=1,"excess invalid entries stop enumeration instead of bypassing its work bound");
+ // A store that was never written: the ordinary state of every installation. Nothing is refused and nothing is logged.
+ {
+  fs::remove_all(base); fs::create_directories(base);
+  int said=0; std::string what;
+  cap::pending_io::diagnostic=[&](const auto& p,const auto& reason){++said;what=p.string()+": "+reason;};
+  const auto service=base/"never"/"service";   // the trusted base itself does not exist yet
+  cap::PendingScan fresh;
+  check(cap::pending_files_bounded(cap::pending_io::TrustedBase{service},service/"pending",&fresh).empty() && fresh.complete && fresh.files==0,
+        "a trusted base that does not exist is an empty, complete store");
+  fs::create_directories(service);
+  cap::PendingScan no_root;
+  check(cap::pending_files_bounded(cap::pending_io::TrustedBase{service},service/"pending",&no_root).empty() && no_root.complete,
+        "a store root that does not exist is an empty, complete store");
+  std::string none;
+  check(!cap::pending_io::read(cap::pending_io::TrustedBase{service},service/"pending"/"mod"/"a.json",&none,100),"a file in a folder that does not exist is not there");
+  check(said==0,"a store that was never written says nothing");
+  if(said) std::cerr<<"  said: "<<what<<'\n';
+  std::string why;
+  check(cap::pending_store_write(cap::pending_io::TrustedBase{service},service/"pending",service/"pending"/"mod"/"a.json","first",&why),"the first write creates the store");
+  check(said==0,"the first write into a fresh store says nothing");
+  if(said) std::cerr<<"  said: "<<what<<'\n';
+  cap::PendingScan after;
+  check(cap::pending_files_bounded(cap::pending_io::TrustedBase{service},service/"pending",&after).size()==1 && after.complete,"and the store then holds the one file");
+  // a link where the store root should be is still a refusal, with its line
+  fs::remove_all(service/"pending"); fs::create_directories(base/"elsewhere"); fs::create_directory_symlink(base/"elsewhere",service/"pending");
+  cap::PendingScan linked; cap::pending_files_bounded(cap::pending_io::TrustedBase{service},service/"pending",&linked);
+  check(!linked.complete && said==1,"a link at the store root is refused and named, not read as an empty store");
+  cap::pending_io::diagnostic={};
+ }
  fs::remove_all(base);
  std::cout<<"pending boundary: "<<checks<<" checks, "<<fails<<" failures\n";
  return fails?1:0;
