@@ -40,6 +40,7 @@ const KilnApi* g_api = nullptr;
 uint64_t g_owner = 0;
 std::atomic<bool> g_installed{false}, g_faulted{false};
 char g_why[160] = "not installed";
+std::mutex g_why_mu;  // status is any-thread; activation/program verification can replace the reason on tick
 std::atomic<uint32_t> g_thread_ids[8] = {};
 std::atomic<uint32_t> g_threads{0};
 
@@ -169,7 +170,11 @@ uint64_t op_step() { return current_step(); }
 int op_max_index(void* attributes) { return wear::attribute_index(attributes, E.attr_durability_max); }
 
 void off(uint32_t reason, const char* why) {
-    std::snprintf(g_why, sizeof g_why, "%s", why);
+    g.on.store(false, std::memory_order_release);
+    {
+        std::lock_guard lock(g_why_mu);
+        std::snprintf(g_why, sizeof g_why, "%s", why);
+    }
     items_log(KILN_LOG_WARN, "tool wear: off: %s", why);
     const auto* caps = static_cast<const KilnCapsApi*>(g_api->service(str(KILN_CAPS_SERVICE), KILN_CAPS_VERSION));
     if (caps && caps->report) caps->report(g_owner, str(wear::kFeature), KILN_CAP_UNAVAILABLE, reason, str(why));
@@ -182,6 +187,7 @@ bool install(const KilnApi* api, uint64_t owner) {
     g_owner = owner;
     const wear::Facts& f = wear::facts();
     if (!f.ok) {
+        std::lock_guard lock(g_why_mu);
         std::snprintf(g_why, sizeof g_why, "%s", f.why);  // wear::resolve said so and lowered the row
         return false;
     }
@@ -207,6 +213,21 @@ bool install(const KilnApi* api, uint64_t owner) {
     g.ops.spawn_request_pide = f.spawn_request_pide;
     g.ops.spawn_iter_base = f.spawn_iter_base;
     g.ops.spawn_itemstate_slot = f.spawn_itemstate_slot;
+    {
+        std::lock_guard lock(g_why_mu);
+        g_why[0] = 0;
+    }
+    g.on.store(true, std::memory_order_release);  // ready; no game code is intercepted until a rule is requested
+    return true;
+}
+
+bool activate() {
+    // Called only by define on the authoritative tick, before its rule becomes visible to workers.
+    if (!g.on.load(std::memory_order_acquire)) return false;
+    if (g_installed.load(std::memory_order_acquire)) return true;
+    const auto* api = g_api;
+    const auto owner = g_owner;
+    const wear::Facts& f = wear::facts();
     // The observing detour first: were a later hook to fail, a WearDelta detour that only looks changes nothing.
     if (!g_delta_hook.install(api, owner, reinterpret_cast<uintptr_t>(f.wear_delta), reinterpret_cast<void*>(&on_wear_delta), "items/toolwear-delta") ||
         !g_item_hook.install(api, owner, reinterpret_cast<uintptr_t>(f.wear_item), reinterpret_cast<void*>(&on_wear_item), "items/toolwear-item") ||
@@ -216,9 +237,7 @@ bool install(const KilnApi* api, uint64_t owner) {
         off(KILN_CAP_REASON_FAULTED, "a hook of the durability debit could not be placed (kiln.log has the hook registry's reason)");
         return false;
     }
-    g_why[0] = 0;
-    g_installed.store(true);
-    g.on.store(true, std::memory_order_release);
+    g_installed.store(true, std::memory_order_release);
     items_log(KILN_LOG_INFO, "tool wear: hooks in (WearItem at the weapon site, the projectile spawn's debit, WearDelta observed)");
     return true;
 }
@@ -283,7 +302,10 @@ Status status() {
     Status s;
     s.on = g.on.load(std::memory_order_acquire);
     s.faulted = g_faulted.load(std::memory_order_acquire);
-    std::snprintf(s.why, sizeof s.why, "%s", s.faulted ? "a hook faulted" : g_why);
+    {
+        std::lock_guard lock(g_why_mu);
+        std::snprintf(s.why, sizeof s.why, "%s", s.faulted ? "a hook faulted" : g_why);
+    }
     s.dropped = g.queue.dropped();
     s.hit_seen = g.hit_seen.load(std::memory_order_relaxed);
     s.hit_applied = g.hit_applied.load(std::memory_order_relaxed);

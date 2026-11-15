@@ -295,7 +295,9 @@ still takes (0.2.0-dev.27; `kiln_manage::start_progress`, commands `launch_begin
 - **Not progress.** Safe idle (with Kiln's reason), Kiln failing to go on, the game ending, "No Kiln" (Steam did not
   load Kiln's proxy), a vanilla start and Steam updating the game are said as before, without a bar. No word from Kiln
   for 60 s (120 s inside the early plugins) is "No word from Kiln" with its sentence (a game waiting at its menu for
-  its mods says so), without a bar or a countdown, and the mod list is back. A Play that ends before the game exists
+  its mods says so; at the last step it says the game is still loading or at a menu Kiln did not see), without a bar
+  or a countdown, and the mod list is back. A game that is in a world is not "No word from Kiln" (0.2.0-dev.29): its
+  start is over for the window, and one whose menu mark never came ends at its first world. A Play that ends before the game exists
   (refused before Steam was asked) ends the start, and the page is as it was before Play. When Steam has taken the
   start and the game's process does not exist a minute later (a first start under Proton makes its prefix first),
   the bar stops counting and says "Steam is still preparing the game: this can take minutes the first time"; after

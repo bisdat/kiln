@@ -7,7 +7,10 @@ spawns creatures, plays an effect, sets the time), tells you what to do and what
 by itself, and asks one yes/no question. You answer with a key. Every answer is written to a file, so a pass leaves a
 record that a script turns into a summary.
 
-The pass covers the lines of the status page that wait for a game test: the 18 rows of "Built, game test pending", the
+The pass confirms behavior in the real game; it no longer opens capabilities. All 22 holds from 0.2.0-dev.28
+are gone in 0.2.0-dev.29, and the remaining 20 capabilities are on but unconfirmed. The gate mechanism remains
+([caps](services/caps.md#the-client-gate-dev28)); its list is empty, so no `"preview"` setting is needed.
+The pass covers the release’s "On, not yet confirmed in a real game" entries, the
 dev.22 and dev.21 client checklists (11 items each), and two lines new in 0.2.0-dev.26 (the achievement guard, and
 Kiln's unload when the game quits). `mods/tests/client-pass/rows.json` maps each line to its checks.
 

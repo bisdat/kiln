@@ -103,7 +103,7 @@ function ModsView({ id, live, liveError }: { id: string; live: KilnMod[] | null;
       {disk.error && <Banner tone="warn" title="Files">{api.toKilnError(disk.error).message}</Banner>}
       <div className="k-split-page" style={{ gap: 24 }}>
         <div className="k-split-main" style={{ gap: 10 }}>
-          <WellInput label="Filter mods" value={q} onChange={(e) => setQ(e.target.value)} note={`${shown.length} of ${rows.length}`} />
+          <WellInput label="Filter mods" value={q} onChange={(e) => setQ(e.target.value)} onClear={() => setQ("")} note={`${shown.length} of ${rows.length}`} />
           <Table aria-label="Server mods" fill columns={cols} rows={shown} rowKey={(r) => r.key} selectedKey={cur?.key ?? null} onRowClick={(r) => setSel(r.key)}
             empty={disk.isLoading ? "Reading kiln/mods." : "No mods in kiln/mods. Sync some from the library."} />
         </div>

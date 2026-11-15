@@ -134,7 +134,7 @@ export function ServerConsole({ serverId }: { serverId: string }) {
         <div className="k-seg">
           <button type="button" className={paused ? "on" : ""} aria-pressed={paused} onClick={() => pause(!paused)}>{paused && held.length ? `Paused, ${held.length} new` : "Pause"}</button>
         </div>
-        <WellInput label="Filter" compact value={filter} onChange={(e) => setFilter(e.target.value)} wellStyle={{ flex: "1 1 110px", marginLeft: "auto", minHeight: 30 }} />
+        <WellInput label="Filter" compact value={filter} onChange={(e) => setFilter(e.target.value)} onClear={() => setFilter("")} wellStyle={{ flex: "1 1 110px", marginLeft: "auto", minHeight: 30 }} />
         <Menu label="More for the console" icon={<MoreHorizontal />} size="s" items={[
           { label: `Copy ${shown.length} line${shown.length === 1 ? "" : "s"}`, disabled: !shown.length, onSelect: copy },
           ...(running && inside ? [{ label: "Kiln commands", onSelect: () => setCmds(true) }] : []),
@@ -318,7 +318,7 @@ function CommandsDialog({ onClose }: { onClose: () => void }) {
   const cur = (cmds.data ?? []).find((c) => c.name === sel) ?? list[0];
   return (
     <Modal open onClose={onClose} title="Commands" width={640} footer={<Button onClick={onClose}>Close</Button>}>
-      <WellInput label="Filter" data-autofocus value={q} onChange={(e) => setQ(e.target.value)} />
+      <WellInput label="Filter" data-autofocus value={q} onChange={(e) => setQ(e.target.value)} onClear={() => setQ("")} />
       {cmds.error ? <span className="k-error-text">{cmds.error.message}</span> : (
         <div className="k-cmd-dialog">
           <div className="k-list k-cmd-names">

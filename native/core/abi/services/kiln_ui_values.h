@@ -7,11 +7,13 @@
  * dossier is the design; docs/kiln/ui.md the author's page.
  *
  * Capabilities (kiln.caps rows; sigdb features of sigdb/symbols/client.d/dev28-05a-value-providers.json, each on or
- * off by itself, each client-gated until the owner's client pass): ui.values.detail (KUI_DETAIL), ui.values.slot
+ * off by itself; the gate list is empty in 0.2.0-dev.29, real-game checks remain unconfirmed): ui.values.detail (KUI_DETAIL), ui.values.slot
  * (KUI_SLOT), ui.values.held (KUI_HELD), ui.values.hud (KUI_HEALTH, KUI_STAMINA, KUI_MANA), ui.values.tooltip_lines
  * (tooltip_lines, open/close_tooltip_details), ui.slots.inspect (copy_slots, subscribe_slots). A kind's game hooks are
  * installed when the first provider of that kind registers and its row is available; one kind failing leaves the
- * others working, and the game's own value is drawn whenever no provider changes it.
+ * others working, and the game's own value is drawn whenever no provider changes it. These six rows never exist on a
+ * dedicated server. They require the measured client build; after a game update they are off until Kiln is updated.
+ * A slot snapshot read also installs inspection hooks; those hooks and collection remain after consumers leave.
  *
  * Results. A call that cannot be processed returns a KilnResult: KILN_ERR_INVALID_ARGUMENT (bad argument or record
  * size), KILN_ERR_UNAVAILABLE (the capability is off, or not the client), KILN_ERR_REVOKED (the owner is retired),

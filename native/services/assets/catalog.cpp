@@ -179,7 +179,7 @@ bool catalog_start() {
     return watching;
 }
 
-KilnResult op_catalog_open(KilnOwner owner, uint32_t mode, KilnHandle* handle, KilnBlobCatalogInfo* info) {
+KilnResult op_catalog_open(KilnOwner owner, uint32_t mode, KilnHandle* handle, KilnBlobCatalogInfo* info) try {
     if (handle) *handle = 0;
     if (!handle || !info || info->size < sizeof(KilnBlobCatalogInfo) || !owner ||
         (mode != KILN_BLOB_CATALOG_REQUIRE_COMPLETE && mode != KILN_BLOB_CATALOG_REGISTRATIONS_ONLY))
@@ -248,6 +248,11 @@ KilnResult op_catalog_open(KilnOwner owner, uint32_t mode, KilnHandle* handle, K
     }
     fill(info, snap->status, snap->generation, snap->entries.size(), snap->flags, KILN_BLOB_CATALOG_REASON_NONE);
     return KILN_OK;
+} catch (const std::bad_alloc&) {
+    // Building copies and sorting need temporary memory in addition to the retained-snapshot budget.
+    // Never unwind an allocation failure into a mod's unmanaged call or the game's tick stack.
+    *handle = 0;
+    return refuse(info, KILN_BLOB_CATALOG_LIMIT_EXCEEDED, KILN_BLOB_CATALOG_REASON_MEMORY_BUDGET);
 }
 
 KilnResult op_catalog_read(KilnHandle handle, uint64_t first, KilnBlobCatalogEntry* out, uint32_t entry_size, size_t cap,

@@ -49,6 +49,15 @@ bool is_emf_loader(const KilnChainEntry& e) {
     return GetProcAddress(m, "emf_loader_identity") || GetProcAddress(m, "emf_loader_play_once");
 }
 
+// The engine word of a loaded chain DLL that its exports name, for `before` rules (dev.29): Ultimate ASI Loader, by the
+// export the launcher knows it by too (crates/kiln-manage/src/engines.rs), whatever the file is called. Empty otherwise.
+std::string engine_of(const KilnChainEntry& e, const std::string& path) {
+    HMODULE m = static_cast<HMODULE>(e.module);
+    if (!m) m = GetModuleHandleW(to_wide(path).c_str());  // a DLL the late phase loaded
+    if (m && GetProcAddress(m, "IsUltimateASILoader")) return "ultimate-asi-loader";
+    return {};
+}
+
 // The proxy's chain entries, a late one with the status the late phase gave it (still "late" while it has not run).
 std::vector<ChainRow> chain_rows() {
     std::vector<ChainRow> rows;
@@ -67,6 +76,11 @@ std::vector<ChainRow> chain_rows() {
         r.late_ignored = status == kLateAlreadyLoaded;
         r.loader = is_emf_loader(e);
         emf_chained = emf_chained || r.loader;
+        if (r.on()) r.engine = engine_of(e, r.path);
+        if (e.source == KILN_CHAIN_SOURCE_PROFILE) {
+            const std::string id = native_mods::dllmain_mod_of(i);
+            if (!id.empty()) r.mod = "kiln:" + id;
+        }
         rows.push_back(std::move(r));
     }
     // EMF's loader (chained) reads dinput8-chain.ini and starts those DLLs itself
@@ -103,6 +117,8 @@ Facts gather_facts(const std::vector<ChainRow>& rows, const std::vector<std::str
     f.modules = loaded_module_names();
     for (const ChainRow& r : rows)
         if (r.on()) add_unique(f.modules, r.file);
+    for (const ChainRow& r : rows)  // an engine a chain DLL's exports name (the launcher classifies its chain DLLs too)
+        if (r.on() && !r.engine.empty()) add_unique(f.engines, r.engine);
     f.symbols = symbols;
     f.engines.push_back("kiln");
     if (sf_hosted) add_unique(f.engines, "shroudforge");
@@ -188,6 +204,7 @@ ojson rules_report(const std::vector<ChainRow>& rows, const Facts& facts) {
         o["applied"] = oc.applied;
         o["message"] = r.message;
         o["subject"] = r.has_subject ? matcher_json(r.subject) : ojson(nullptr);
+        if (r.has_target) o["target"] = matcher_json(r.target);  // dev.29, `before` only
         o["source"] = r.source;
         if (!oc.note.empty()) o["note"] = oc.note;
         out.push_back(std::move(o));

@@ -49,7 +49,7 @@ Machine-readable copies:
 | `<game>/kiln/state/mods.json` | Kiln.Host | launcher | `state-mods.schema.json`, `examples/state-mods.json` |
 | `<game>/kiln/state/native.json` | native loader (core) | launcher | `state-native.schema.json`, `examples/state-native.json` |
 | `<game>/kiln/state/hooks.json` | kiln-core (kiln.hooks v2, compat report) | launcher | `hooks-state.schema.json`, `examples/hooks-state.json`, `fixtures/hooks-state/` |
-| `<game>/kiln/compat-rules.json`, `<configDir>/compat-rules.json` | Kiln (shipped, may be missing) / the player | kiln-core, launcher | `compat-rules.schema.json`, `examples/compat-rules.json`, `fixtures/compat-rules/cases.json` |
+| `<game>/kiln/compat-rules.json`, `<configDir>/compat-rules.json` | Kiln (shipped in the runtime's `core` component since dev.29, from `native/core/compat-rules.json`; replaced by every update; may be missing on an older install) / the player | kiln-core, launcher | `compat-rules.schema.json`, `examples/compat-rules.json`, `fixtures/compat-rules/cases.json` |
 | `<game>/kiln/state/emf.json` | kiln-emf | launcher | format in `docs/re/emf-compat.md` |
 | `<game>/kiln/state/last-server.json` | Kiln.Network (client) | launcher | `state-last-server.schema.json`, `examples/state-last-server.json` |
 | `<server>/kiln/data/kiln-admin/endpoint.json` | Kiln.Admin | launcher, kilnctl | `admin-endpoint.schema.json`, `examples/admin-endpoint.json` |
@@ -72,7 +72,8 @@ or state and at most every 250 ms for a change of label, detail or count (the la
 thread of its own (nothing in the game waits for the disk, and no write comes from a per-frame hook). Fields:
 `format` 1, `pid`, `kiln` (with the build stamp), `side`, `started` (UTC, milliseconds), `atMs`, `state`
 (`booting`, `loading`, `ready`, `idle`, `failed`), `plan`, `steps` (`id`, `label`, `detail`, `done`/`total`, `ms`,
-`tookMs`, `parts`), `why`. A stale file is told by `pid` and `started`, as for boot.json; nothing deletes it, and it
+`tookMs`, `parts`), `why`, and (0.2.0-dev.29) `worldMs`: when the game's first world began, ms since `started`, written
+at once (absent before). A stale file is told by `pid` and `started`, as for boot.json; nothing deletes it, and it
 is not written again after `ready`, `idle` or `failed`. boot.json is unchanged.
 
 | Step | What Kiln does there | Detail, count |
@@ -91,9 +92,11 @@ is not written again after `ready`, `idle` or `failed`. boot.json is unchanged.
 
 `ready`: once step `game` has begun (the mods are loaded and their content applied) and the side's signal has come,
 in whichever order (a signal that comes first is remembered): a client's when kiln-ui sees the main menu's builder run
-(or the first in-game frame); a server's at Kiln.Host's ServerStarted (what `kilnctl run --wait` waits for), or
-without .NET the server world's first step. A step begins when the one before it ends, so in a final state the steps' `tookMs` add up to
-`atMs`.
+(or the first in-game frame), or (0.2.0-dev.29) when its first world begins, so a start whose menu mark never comes
+(another mod's hook over the menu) still ends, and kiln.log says the mark had not come; a server's at Kiln.Host's
+ServerStarted (what `kilnctl run --wait` waits for), or without .NET the server world's first step. A step begins when
+the one before it ends, so in a final state the steps' `tookMs` add up to `atMs`. The launcher takes a client whose file
+has `worldMs` and has said nothing for 60 s for a start that is over (the player is in a world), not for a silent one.
 
 Shared definitions (ids, semver, kdh1, game paths): `schema/common.schema.json`. Validate every example with
 `bun run check:schemas` in `launcher/`.
@@ -567,7 +570,10 @@ Grammar (same dialect as 5.2):
   and kiln.log note it). The core does not load a late DLL of a native mod that
   is disabled, on the other side or refused by `native.policy`, and it says `already-loaded` for a DLL that was in the
   process before the late phase (EMF's loader starts the DLLs of `dinput8-chain.ini` itself). The launcher keeps an entry in its own section and adds the same path to
-  `[late]`; a `;` line in front (`; kiln rule <id>`) is a comment like any other.
+  `[late]`; a `;` line in front (`; kiln rule <id>`) is a comment like any other. A compat rule that keeps an entry
+  early (dev.29 `before`: it must load before another DLL, whose entry the rule puts in `[late]`) writes the player's own
+  `[late]` line for it as `; kiln rule <id> off: <line>`, and a profile's late switch for such a `[profile]` entry is not
+  written; the next activation without the rule puts both back. An older proxy reads both as it reads every comment.
 - One DLL per line. A `key = value` line counts by its value. Only values ending in `.dll` (case-insensitive) count;
   other lines are ignored.
 - Paths: absolute (`Z:\…` under Proton, real paths on Windows, UNC) or relative to `<game>/kiln/`; `/` is read as `\`.
@@ -1247,7 +1253,7 @@ or emits `kiln://update`; its UI calls none of these commands.
 | engines | `engine_adopt_folder` | kind: ModKind, id, profileId, gameId | `Adopted {kind, id, version, path, renamedFrom?, already?, settingsKept?}`. "Let Kiln manage this folder" (dev.27, `engine_mods::adopt`): the player's own ShroudForge folder that serves the profile entry becomes Kiln's placement (marker, receipt, inventory), as if activation had copied it there. Only on the player's request, never by itself. Refuses: `unsupported` for another kind; `not_found` when the entry is not in the profile or no folder of the player's holds it; `game_running`; `conflict` unless the profile is the one the game uses; `refused` with the folder's path and the first file that differs when its files are not byte for byte the Library entry's (the switch and the setting values in `extended.mod.json` may differ and stay; a link, a file of the player's, a changed setting description or range, or a second folder with the same package are refused), and for a copy of Kiln's own whose files changed; `hash_mismatch` when the Library entry changed on disk. Nothing in the folder is rewritten: it gets the marker file `.kiln-library.json` and, when it had another name, the name `<id>` (`renamedFrom`). `already`: it was Kiln's, nothing changed. `settingsKept`: the settings whose values are the player's. The next activation switches it as the profile says and updates it; the launcher runs `profile_activate` right after, which also refreshes the notes |
 | engines | `eml_backup` | gameId | `EmlBackup[] {file, backup, patched}` (EML's `<exe>.kfc.bak` next to each `.kfc`; `patched`: they differ; read/hash errors and symlinks are refused) |
 | engines | `eml_restore` | gameId | Legacy `string[]` signature; always `refused` for direct restoration (`game_running` takes precedence while running). Disable EML mods and launch updated Kiln for ownership-aware archive-writer restoration; shared backups alone prove no ownership. |
-| compat | `chain_view` | profileId, gameId | `ChainView {entries: ChainViewEntry[], rules: CompatRuleResult[], ruleErrors, session \| null, overlaps: ChainOverlap[], active, current, error}` (the profile's chain entries with their `[late]` state and who set it (`lateBy`: `player`, `profile` or `rule:<id>`; a `[late]` line that a rule wrote into chain.ini, marked `; kiln rule <id>`, is that rule's even when it is another profile's; `gated`: shroudlink's client addon, by its exports, as a [chain] proxy or a profile native: no late switch is offered and `chain_set_late` refuses late for it, only switching it back), the compat rules evaluated over the profile, and the overlaps of the game's last `state/hooks.json` mapped to chain entries and Library items; `session` null: no hooks.json yet) |
+| compat | `chain_view` | profileId, gameId | `ChainView {entries: ChainViewEntry[], rules: CompatRuleResult[], ruleErrors, session \| null, overlaps: ChainOverlap[], active, current, error}` (the profile's chain entries with their `[late]` state and who set it (`lateBy`: `player`, `profile` or `rule:<id>`; a `[late]` line that a rule wrote into chain.ini, marked `; kiln rule <id>`, is that rule's even when it is another profile's; dev.29 `earlyBy`: `rule:<id>` when a `before` rule keeps the entry loading first, so its switch is the rule's (`late` false) and `lateBy` is the rule's for the DLL it loads after; a rule result of action `before` carries `early` (the entries it keeps first) besides `targets` (the ones it loads late), and `warning` when it fired but could not order them (nothing moved); `gated`: shroudlink's client addon, by its exports, as a [chain] proxy or a profile native: no late switch is offered and `chain_set_late` refuses late for it, only switching it back), the compat rules evaluated over the profile, and the overlaps of the game's last `state/hooks.json` mapped to chain entries and Library items; `session` null: no hooks.json yet) |
 | compat | `chain_set_late` | profileId, gameId, path: string, late: boolean | `ChainView` (a `[profile]` entry changes the profile's late list, saved and re-applied where it is active; a `[chain]` entry changes the game's `chain.ini [late]` for every profile and is refused with `game_running` while the game runs; `not_found` when `path` is not in the profile's chain) |
 | found | `found_scan` | gameId, profileId | `FoundReport {gameId, profileId, kilnInstalled, mods: FoundMod[], loaders: OwnLoader[], unreadable: {path, reason}[], truncated}`; `FoundMod {kind: ModKind \| null, name, id, version, path (relative to the game, '/'), state: "loads"\|"off"\|"inProfile"\|"cannotRun", via?: "kiln"\|"ownLoader", reason, fix?: "dropins"\|"add", profileMod?}`, `OwnLoader {engine, name, kinds, file}` (mods in the game folder Kiln did not put there and whether they load with that profile: profiles.md "Mods in the game folder"; never fails over a missing or unreadable folder) |
 | found | `found_add` | gameId, profileId, path | `TaskId` -> `AddReport` (imports a `found_scan` entry into the Library and adds it to the profile, enabled; through `library_add`'s flow when the profile is active in the game; a refusal is in `import.skipped`; the player's folder stays) |

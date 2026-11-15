@@ -82,6 +82,38 @@ public sealed class ModCatalogTests : IDisposable
             rows);
     }
 
+    [Fact]
+    public void Inactive_shroudtopia_names_its_settings_and_reported_name()
+    {
+        Write("shroudtopia.json", new
+        {
+            updatedUnixMs = StartMs + 60_000,
+            mods = new[] { new { id = "library-id", name = "Reported Name.With Dot", status = "inactive", reason = "" } },
+        });
+        var row = Assert.Single(Read().Mods.Where(m => m.Engine == "shroudtopia"));
+        Assert.Equal(ModRunState.Disabled, row.State);
+        Assert.Equal("Switched off in Shroudtopia's settings.", row.Reason);
+        Assert.Equal("In shroudtopia/shroudtopia.json in the profile's config folder, set active to true in the mods entry named \"Reported Name.With Dot\" (the name in kiln.log's Registered mod line). Save the file; Shroudtopia reads it again while the game runs.", row.Help);
+    }
+
+    // x-01 task 9b: a Shroudtopia mod that is switched on and never sets its own `active` flag read "inactive",
+    // "Switched off in Shroudtopia's settings.", which sent the player to a setting that was already on.
+    [Fact]
+    public void A_shroudtopia_mod_that_does_not_report_itself_active_is_waiting_with_the_plugins_reason()
+    {
+        Write("shroudtopia.json", new
+        {
+            updatedUnixMs = StartMs + 60_000,
+            mods = new[] { new { id = "item-skill-text", name = "item-skill-text", status = "activating",
+                reason = "switched on, but the mod does not report itself active: it leaves its own 'active' flag off after Activate" } },
+        });
+        var row = Assert.Single(Read().Mods.Where(m => m.Engine == "shroudtopia"));
+        Assert.Equal(ModRunState.Waiting, row.State);
+        Assert.Equal("Switched on, but the mod does not report itself active: it leaves its own 'active' flag off after Activate.", row.Reason);
+        Assert.Contains("[shroudtopia:item-skill-text]", row.Help);
+        Assert.DoesNotContain("set active to true", row.Help);
+    }
+
     // ---- the launcher's normalisation (EngineStatus.tsx; the cases of launcher/tests/engine-kinds.spec.ts) ----
 
     private static JsonElement J(string json) => JsonDocument.Parse(json).RootElement;
@@ -148,6 +180,7 @@ public sealed class ModCatalogTests : IDisposable
     [InlineData("pending", ModRunState.Waiting)]
     [InlineData("waiting-for-abi", ModRunState.Waiting)]
     [InlineData("candidate", ModRunState.Waiting)]
+    [InlineData("activating", ModRunState.Waiting)]
     [InlineData("skipped", ModRunState.NotLoaded)]
     [InlineData("duplicate", ModRunState.NotLoaded)]
     [InlineData("something new", ModRunState.NotLoaded)]

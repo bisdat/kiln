@@ -22,6 +22,8 @@ static int g_fail = 0;
 namespace fake {
 std::map<uint32_t, int32_t> rules;      // what the hooks would read
 bool hooks_on = true, tick = true, catalog = true, full = false;
+bool activation_ok = true;
+int activations = 0;
 uintptr_t world = 0x1000;
 std::vector<kitems::toolwear::Change> queue;
 const KilnToolWearApi* table = nullptr;
@@ -53,6 +55,7 @@ KilnResult items_item_info(uint32_t id, KilnItemInfo* out) {
 }  // namespace kitems
 
 namespace kitems::toolwear {
+bool activate() { ++fake::activations; return fake::activation_ok; }
 bool set_rule(uint32_t item, int32_t cost) {
     if (cost < 0) {
         fake::rules.erase(item);
@@ -169,8 +172,17 @@ int main() {
     auto s = state(fake::kPickaxe);
     CHECK(s.ok == 1 && s.has_rule == 0 && s.pending == 0 && s.generation == 0 && s.dropped_events == 3 && s.owner_mod_id[0] == 0 && s.reason[0] == 0);
 
+    // Startup, status and refused requests do not activate game hooks. A valid request must activate them,
+    // and a hook-install failure must refuse the rule before publishing a layer.
+    CHECK(fake::activations == 0);
+    fake::activation_ok = false;
+    CHECK(t->define(A, S("mod-a"), fake::kPickaxe, 7, &a) == KILN_ERR_UNAVAILABLE && a == 0);
+    CHECK(fake::activations == 1 && fake::rules.empty() && state(fake::kPickaxe).generation == 0);
+    fake::activation_ok = true;
+
     // one owner's rule: in effect, in the hooks' table, one generation
     CHECK(t->define(A, S("mod-a"), fake::kPickaxe, 7, &a) == KILN_OK && a != 0 && fake::rules[fake::kPickaxe] == 7);
+    CHECK(fake::activations == 2);
     s = state(fake::kPickaxe);
     CHECK(s.has_rule == 1 && s.per_debit == 7 && s.generation == 1 && !std::strcmp(s.owner_mod_id, "mod-a"));
     // the same owner, the same cost: the same handle, nothing changes
@@ -203,6 +215,7 @@ int main() {
 
     // refusals: nothing reaches the hooks' table
     const auto before = fake::rules;
+    const int activations_before_refusals = fake::activations;
     CHECK(t->define(A, S("mod-a"), fake::kTorch, 7, &x) == KILN_TOOLWEAR_UNSUPPORTED_TOOL && x == 0);
     CHECK(t->define(A, S("mod-a"), fake::kSword, 7, &x) == KILN_TOOLWEAR_UNSUPPORTED_TOOL);
     CHECK(t->define(A, S("mod-a"), fake::kRake, 7, &x) == KILN_TOOLWEAR_UNSUPPORTED_TOOL);
@@ -222,6 +235,7 @@ int main() {
     fake::catalog = false;
     CHECK(t->define(A, S("mod-a"), fake::kPickaxe, 7, &x) == KILN_TOOLWEAR_PENDING && state(fake::kPickaxe).pending == 1 && state(fake::kPickaxe).ok == 0);
     fake::catalog = true;
+    CHECK(fake::activations == activations_before_refusals);
     fake::tick = false;
     CHECK(t->define(A, S("mod-a"), fake::kPickaxe, 7, &x) == KILN_ERR_WRONG_THREAD && t->remove(A, a) == KILN_ERR_WRONG_THREAD);
     uint32_t n = 0;

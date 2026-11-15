@@ -1005,6 +1005,22 @@ bool loaded_by_proxy(const std::string& mod_id) {
     return false;
 }
 
+std::string dllmain_mod_of(size_t index) {
+    std::lock_guard lock(g_mutex);
+    const KilnBootInfo& bi = boot_info();
+    if (index >= bi.chain_count || bi.chain[index].source != KILN_CHAIN_SOURCE_PROFILE) return {};
+    const std::wstring path = lower(to_wide(sv(bi.chain[index].path)));
+    for (const Mod& m : g_mods) {
+        if (m.phase != KILN_NATIVE_PHASE_DLLMAIN || m.id.empty()) continue;
+        for (const Dll& d : m.dlls) {
+            std::string f = d.file;
+            std::replace(f.begin(), f.end(), '/', '\\');
+            if (final_path(fs::path(to_wide(m.folder)) / to_wide(f)) == path) return m.id;
+        }
+    }
+    return {};
+}
+
 std::vector<LateRow> late_rows() {
     std::lock_guard lock(g_mutex);
     std::vector<LateRow> out;

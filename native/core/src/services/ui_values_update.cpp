@@ -147,7 +147,7 @@ bool held_view(uintptr_t play, uint32_t local, uint32_t pide, uint8_t* out) {
     return read && found && !mismatch && view_u32(out, v.item) != 0;
 }
 
-std::atomic<bool> g_held_missing_logged{false}, g_write_failed_logged{false};
+std::atomic<bool> g_held_missing_logged{false};
 
 // The stage: original pairs and own inventory rows, for every observer, before any provider.
 void publish_stage(uintptr_t play, uint32_t local, const ClientNow& c, const uint32_t* cur, const uint32_t* max,
@@ -228,11 +228,12 @@ void run_pair(uint32_t kind, uintptr_t play, const KilnUiItemView& view, uint32_
     in.current = cur;
     in.maximum = max;
     const KilnUiBarValue out = run_chain(kind, view, in, st);
-    bool ok = true;
-    if (out.current != cur) ok &= env().write(play + g_upd.cur[kind], &out.current, sizeof out.current);
-    if (out.maximum != max) ok &= env().write(play + g_upd.max[kind], &out.maximum, sizeof out.maximum);
-    if (!ok && !g_write_failed_logged.exchange(true))
-        logf(KILN_LOG_ERROR, "ui.values: writing a player-UI pair failed");
+    if (!any(kind)) return;  // a prior HUD pair may have faulted in this update
+    if ((out.current != cur && !env().write(play + g_upd.cur[kind], &out.current, sizeof out.current)) ||
+        (out.maximum != max && !env().write(play + g_upd.max[kind], &out.maximum, sizeof out.maximum))) {
+        disable_kind(kind, "player-UI pair write fault");
+        return;
+    }
     publish_value(kind, view, out);
 }
 
@@ -351,7 +352,8 @@ bool install_update(uint32_t list) {
     if (list == KUI_HELD) {
         uintptr_t at = 0;
         if (!sig_constant("ui/play.heldFuel", &g_upd.cur[KUI_HELD]) ||
-            !sig_constant("ui/play.heldFuelMax", &g_upd.max[KUI_HELD]) || !load_models() ||
+            !sig_constant("ui/play.heldFuelMax", &g_upd.max[KUI_HELD]) ||
+            g_upd.cur[KUI_HELD] != 0x2e40 || g_upd.max[KUI_HELD] != 0x2e44 || !load_models() ||
             !sig_symbol("ui/HeldItemCapture", &at)) {
             logf(KILN_LOG_ERROR, "ui.values: the held item's symbols or constants did not resolve");
             return false;
@@ -371,9 +373,13 @@ bool install_update(uint32_t list) {
         static const char* const kPairs[][2] = {{"ui/play.health", "ui/play.healthMax"},
                                                 {"ui/play.stamina", "ui/play.staminaMax"},
                                                 {"ui/play.mana", "ui/play.manaMax"}};
+        // This private layout family is measured on client 26430625. Refuse drift rather than
+        // writing another readable field (SEH cannot detect a wrong but mapped address).
+        static constexpr int64_t expected[] = {0x578, 0x584, 0x59c};
         for (uint32_t k = KUI_HEALTH; k <= KUI_MANA; ++k)
             if (!sig_constant(kPairs[k - KUI_HEALTH][0], &g_upd.cur[k]) ||
-                !sig_constant(kPairs[k - KUI_HEALTH][1], &g_upd.max[k])) {
+                !sig_constant(kPairs[k - KUI_HEALTH][1], &g_upd.max[k]) ||
+                g_upd.cur[k] != expected[k - KUI_HEALTH] || g_upd.max[k] != expected[k - KUI_HEALTH] + 4) {
                 logf(KILN_LOG_ERROR, "ui.values: the HUD pairs' constants did not resolve");
                 return false;
             }

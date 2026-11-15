@@ -1382,6 +1382,9 @@ export interface ChainViewEntry {
   lateBy: string | null;
   /** "rule:<id>" when a compat rule switches it off. */
   offBy: string | null;
+  /** dev.29: "rule:<id>" when a `before` rule keeps it loading first (in the proxy) whatever its late switch says; the
+   *  switch is the rule's while the rule applies (`late` is false). Absent from an older backend. */
+  earlyBy?: string | null;
   /** EMF's loader: it starts EMF itself, which Kiln's EMF support has to see when it starts, so Kiln always loads it
    *  first and the late switch is not offered. */
   loader: boolean;
@@ -1389,7 +1392,8 @@ export interface ChainViewEntry {
    *  so it is never switched late; one already late (an older Kiln allowed it) can be switched back. */
   gated?: boolean;
 }
-export type RuleAction = "warn" | "late" | "disable";
+/** before (dev.29): the rule's subject loads before its target (the target late, the subject early). */
+export type RuleAction = "warn" | "late" | "disable" | "before";
 export interface CompatRuleResult {
   id: string;
   source: "kiln" | "user";
@@ -1397,8 +1401,14 @@ export interface CompatRuleResult {
   message: string;
   fired: boolean;
   applied: boolean;
+  /** The chain entries it moves late or switches off (before: the ones that load after). */
   targets: string[];
+  /** before: the chain entries it keeps loading first. */
+  early?: string[];
   note?: string;
+  /** before: both sides are there but the order cannot be made (a DLL that never loads late, a cycle, another rule):
+   *  nothing was moved. Shown as a warning. */
+  warning?: string;
 }
 export type OverlapKind = "foreign-before" | "foreign-over" | "refused" | "other";
 export interface ChainOverlap {

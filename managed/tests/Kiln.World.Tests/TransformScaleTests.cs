@@ -98,14 +98,17 @@ public sealed class TransformScaleTests
         Assert.Equal("keen::ecs::CurrentTransform.transform.scale at +40 (keen::float3: a struct of three float32)", why);
     }
 
+    // 0.2.0-dev.28 held the row on both sides until its guided check (13-world.transform-scale). The owner opened every
+    // held capability for 0.2.0-dev.29 (native/core/gates/README.md): no gate file may hold it again by accident.
     [Fact]
-    public void Transform_scale_is_held_on_both_sides_until_the_player_check()
+    public void Transform_scale_is_not_held_by_the_client_gate()
     {
-        using var gates = JsonDocument.Parse(File.ReadAllText(Path.Combine(Repo(), "native", "core", "gates", "dev28-13b-shroudforge.json")));
-        var row = Assert.Single(gates.RootElement.GetProperty("gates").EnumerateArray(),
-            g => g.GetProperty("name").GetString() == World.TransformScaleCapability);
-        Assert.False(row.TryGetProperty("side", out _));
-        Assert.Equal(["13-world.transform-scale"], row.GetProperty("checks").EnumerateArray().Select(c => c.GetString()));
+        foreach (var file in Directory.GetFiles(Path.Combine(Repo(), "native", "core", "gates"), "*.json"))
+        {
+            using var gates = JsonDocument.Parse(File.ReadAllText(file));
+            Assert.DoesNotContain(gates.RootElement.GetProperty("gates").EnumerateArray(),
+                g => g.GetProperty("name").GetString() == World.TransformScaleCapability);
+        }
     }
 
     [Fact]

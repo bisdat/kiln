@@ -141,6 +141,10 @@ pub struct Progress {
     pub steps: Vec<ProgressStep>,
     #[serde(default)]
     pub why: Option<String>,
+    /// Milliseconds since `started` when the game's first world began (since 0.2.0-dev.29; None: not yet, or an older
+    /// runtime). A client's start ends there too when its main menu's mark never came.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub world_ms: Option<u64>,
 }
 
 impl Progress {
@@ -164,6 +168,7 @@ impl Progress {
     /// Every time within [`MAX_MS`], every count within [`MAX_COUNT`].
     pub fn in_bounds(&self) -> bool {
         in_bounds_ms(self.at_ms)
+            && self.world_ms.is_none_or(in_bounds_ms)
             && self.steps.iter().all(|s| {
                 in_bounds_ms(s.ms)
                     && s.took_ms.is_none_or(in_bounds_ms)
@@ -868,7 +873,8 @@ pub enum Phase {
     Booting,
     /// Kiln's boot is complete, the game goes on loading.
     Loading,
-    /// The main menu can be used.
+    /// The main menu can be used. Also a client in its world whose start has said nothing for [`QUIET_MS`]: the game is
+    /// in use, so a step of Kiln's that never ended is not shown as a silent start (kiln.log names where it stood).
     Ready,
     /// Safe idle: the game runs without mods (`why`).
     Idle,
@@ -1075,13 +1081,19 @@ pub fn timeline(i: &Inputs) -> Option<Timeline> {
     let running = out.iter().position(|s| s.state == StepState::Running);
     let quiet_ms = p.and(i.written).map(|w| i.now.saturating_sub(w).max(0) as u64);
     let in_early = running.is_some_and(|r| out[r].id == "early-plugins");
+    let quiet = quiet_ms.is_some_and(|q| q >= if in_early { QUIET_EARLY_MS } else { QUIET_MS });
+    // a client in its world (progress.json's worldMs, written when the world began): the player is playing. A start that
+    // still says something (mods that load at the first world) goes on; one that has said nothing since is over for the
+    // window rather than "quiet" for the whole session (a Nexus report, 2026-11-14: 5,183 s)
+    let in_world = p.is_some_and(|p| p.side.as_deref() == Some("client") && p.world_ms.is_some());
     let phase = match p {
         Some(p) => match p.state.as_str() {
             "ready" => Phase::Ready,
             "idle" => Phase::Idle,
             "failed" => Phase::Failed,
             _ if !i.running => Phase::Ended,
-            _ if quiet_ms.is_some_and(|q| q >= if in_early { QUIET_EARLY_MS } else { QUIET_MS }) => Phase::Quiet,
+            _ if quiet && in_world => Phase::Ready,
+            _ if quiet => Phase::Quiet,
             "loading" => Phase::Loading,
             _ => Phase::Booting,
         },
@@ -1108,7 +1120,8 @@ pub fn timeline(i: &Inputs) -> Option<Timeline> {
 /// The kept form of a start that reached `ready` (None: it did not). It is stored under the timeline's version identity
 /// (progress.json's `kiln`), with the install receipt's version beside it (`receipt`, [`version_identity`]).
 pub fn kept_from(t: &Timeline, progress: &Progress, receipt: Option<&str>, fingerprint: &str, finished: i64, launcher: Option<&LauncherStart>) -> Option<KeptStart> {
-    if t.phase != Phase::Ready {
+    // (a client in its world with a step that never ended is over for the window, but its times are no start's times)
+    if t.phase != Phase::Ready || progress.state != "ready" {
         return None;
     }
     // stored under the runtime's own string (the lookup may have gone by the receipt's identity)

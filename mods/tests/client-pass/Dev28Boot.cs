@@ -6,8 +6,8 @@ using static Kiln.Testing.ClientCheckTags;
 
 namespace ClientPass;
 
-// 08-onboot (chapter 08): Mod.OnBoot on a game client. mods.boot.client and mods.boot.vfx are held on a client until these checks pass
-// (native/core/gates/dev28-08-onboot.json). The fixture is the sample boot-gallery (chapter 08 §6, built with S8): without it in the
+// 08-onboot (chapter 08): Mod.OnBoot on a game client. These checks need client boot, not
+// staged VFX/materials (absent in this release); ordinary VFX files build at start. The fixture is the sample boot-gallery (chapter 08 §6, built with S8): without it in the
 // profile both checks end at Need and cannot pass. Each check runs over several starts; the part reached is kept in the mod's data
 // folder. Orders 3000-3099 (port block 28100).
 public sealed partial class ClientPassMod
@@ -28,7 +28,7 @@ public sealed partial class ClientPassMod
         Tags = [Visual], Needs = ClientCheckNeeds.Hosted, Order = 3000)]
     public async Task BootFirstStartDefinitions(CheckContext c)
     {
-        if (!await Need(c, BootGallery) || !await NeedOpen(c, "mods.boot.client", "mods.boot.vfx", "mods.boot.resource_patches")) return;
+        if (!await Need(c, BootGallery) || !await NeedOpen(c, "mods.boot.client", "mods.boot.resource_patches")) return;
         var stageFile = Path.Combine(c.Mod.DataDirectory, "boot-first-start.stage");
         var stage = BootStage.Read(stageFile);
         var pid = Environment.ProcessId;
@@ -158,7 +158,7 @@ public sealed partial class ClientPassMod
         Tags = [Frameworks, Visual], Needs = ClientCheckNeeds.Hosted, Order = 3001)]
     public async Task BootLoaderOrder(CheckContext c)
     {
-        if (!await Need(c, BootGallery) || !await NeedOpen(c, "mods.boot.client", "mods.boot.vfx")) return;
+        if (!await Need(c, BootGallery) || !await NeedOpen(c, "mods.boot.client")) return;
         var order = BootLoaderOrderOf(c, out var detail, out var published);
         if (order is null)
         {

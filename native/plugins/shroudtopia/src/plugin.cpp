@@ -45,10 +45,33 @@ struct Loaded {
     bool client = false, server = false;
     Mod* mod = nullptr;
     bool loaded = false, active = false;  // snapshots read only under the foreign-code guard
-    std::string status = "registered";  // registered, loaded, active, inactive, skipped, faulted, own-loader
+    bool activate_repeats = false;    // the mod left its `active` flag off after Activate: said once (update_mods)
+    bool deactivate_repeats = false;  // the mod left it on after Deactivate: said once
+    // registered, loaded, active, activating (switched on, the mod does not report itself active), inactive, skipped,
+    // faulted, own-loader
+    std::string status = "registered";
     std::string reason;
     uint64_t updates = 0;
 };
+
+// Upstream Shroudtopia (s0t7x/shroudtopia) calls its mod interface 0.0.x and 0.1.x (the header has not changed since
+// 0.0.3; its main branch is 0.1.1), and the 1.0 compatibility release has the same header: those are what Kiln
+// provides. Another number is another build of Shroudtopia (the Shroudweave fork calls itself 0.2.x), whose loader may
+// hand a mod something Kiln does not.
+bool known_target(const std::string& target) {
+    return target.empty() || target.rfind("0.0.", 0) == 0 || target.rfind("0.1.", 0) == 0 || target.rfind("1.0", 0) == 0;
+}
+
+// Why a mod that is switched on reads "activating" and not "active".
+std::string not_active_reason(const Loaded& m) {
+    std::string why = "switched on, but the mod does not report itself active: it leaves its own 'active' flag off after "
+                      "Activate, so Activate is called again on every update, as Shroudtopia's own loader does. Its "
+                      "activation may be failing on this game version";
+    if (!known_target(m.target))
+        why += "; it says it targets Shroudtopia " + m.target + ", and Kiln provides Shroudtopia " + std::string(kShroudtopiaVersion) +
+               "'s mod interface: a mod made for another build of Shroudtopia may need something Kiln does not provide yet";
+    return why;
+}
 
 ModContext* g_ctx = nullptr;
 std::mutex g_mu;  // g_mods, g_seen (the loop thread writes, write_status reads)
@@ -426,10 +449,12 @@ void check_and_load() {
         m->target = meta.targetShroudtopiaVersion;
         m->client = meta.hasClientSupport;
         m->server = meta.hasServerSupport;
-        if (!m->target.empty() && m->target.rfind("0.", 0) != 0)
-            H.logf(KILN_LOG_WARN, "%s targets Shroudtopia %s; this is %s", m->name.c_str(), m->target.c_str(), kShroudtopiaVersion);
+        if (!known_target(m->target))
+            H.logf(KILN_LOG_WARN, "%s targets Shroudtopia %s; Kiln provides Shroudtopia %s's mod interface", m->name.c_str(),
+                   m->target.c_str(), kShroudtopiaVersion);
         loader_log(KILN_LOG_INFO, "Registered mod: " + m->name + " " + m->version + " by " + m->author + " (" + m->origin + ", " +
                                       path_utf8(c.dll) + ")");
+        config::ensure_profile_entry(m->name, m->origin == "profile");
         g_ctx->registeredMods[path_utf8(c.dll)] = inst;  // as Shroudtopia: keyed by the DLL path (only this thread writes)
         std::lock_guard lock(g_mu);
         g_mods.push_back(std::move(m));
@@ -482,21 +507,50 @@ void update_mods() {
         set_current_mod(m->name);
         const json v = config::mod_get(m->name.c_str(), "active");
         const bool should = v.is_boolean() && v.get<bool>();
+        // As Shroudtopia's UpdateMods (dllmain.cpp, the same in 0.1.1 and on main): Activate is called whenever the
+        // setting is on and the mod's own `active` field is off, Deactivate whenever the setting is off and the field
+        // is on, and the loader never writes that field (only `loaded`). A mod that does not keep the field is
+        // therefore activated (or deactivated) again on every update, there and here: Kiln keeps the calls, says so
+        // once instead of once per update, and does not report such a mod as switched off.
         if (should) {
             if (!m->active) {
-                loader_log(KILN_LOG_INFO, "Activating: " + m->name);
+                if (!m->activate_repeats) loader_log(KILN_LOG_INFO, "Activating: " + m->name);
                 drive(*m, "Activate", [&] { m->mod->Activate(g_ctx); });
                 if (m->status == "faulted") continue;
+                if (!m->active && !m->activate_repeats) {
+                    m->activate_repeats = true;
+                    m->reason = not_active_reason(*m);
+                    loader_log(KILN_LOG_WARN, m->name + ": " + m->reason);
+                }
             }
+            if (m->active && m->activate_repeats) {
+                m->activate_repeats = false;
+                m->reason.clear();
+                loader_log(KILN_LOG_INFO, m->name + " reports itself active now");
+            }
+            m->deactivate_repeats = false;
             drive(*m, "Update", [&] { m->mod->Update(g_ctx); });
             if (m->status == "faulted") continue;
             ++m->updates;
-        } else if (m->active) {
-            loader_log(KILN_LOG_INFO, "Deactivating: " + m->name);
-            drive(*m, "Deactivate", [&] { m->mod->Deactivate(g_ctx); });
-            if (m->status == "faulted") continue;
+        } else {
+            if (m->activate_repeats) {
+                m->activate_repeats = false;
+                m->reason.clear();
+            }
+            if (m->active) {
+                if (!m->deactivate_repeats) loader_log(KILN_LOG_INFO, "Deactivating: " + m->name);
+                drive(*m, "Deactivate", [&] { m->mod->Deactivate(g_ctx); });
+                if (m->status == "faulted") continue;
+                if (m->active && !m->deactivate_repeats) {
+                    m->deactivate_repeats = true;
+                    loader_log(KILN_LOG_WARN, m->name + ": switched off, but the mod leaves its own 'active' flag on after "
+                                              "Deactivate, so Deactivate is called again on every update, as Shroudtopia's "
+                                              "own loader does");
+                }
+            }
+            if (!m->active) m->deactivate_repeats = false;
         }
-        m->status = m->active ? "active" : "inactive";
+        m->status = m->active ? "active" : should ? "activating" : "inactive";
         set_current_mod({});
     }
 }

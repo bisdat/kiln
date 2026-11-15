@@ -177,10 +177,10 @@ Events.On<EntityScaleChangedEvent>(e => Log.Info(e.ToString()));
 - **What it is not.** The rendered transform only: colliders, attachments and `ScaleComponent` keep their size, and
   nothing is promised about physics. A creature's uniform size is `CreatureRef.Scale` (unchanged). What a player sees,
   and what a vanilla player sees, is check `13-world.transform-scale` of the guided game test; until it has run the docs
-  claim the tracked write and its readback only. `world.transform_scale` stays held on both sides until that check
-  confirms what a player sees; the client-pass profile's `"preview": true` opens it for testing.
+  claim the tracked write and its readback only. `world.transform_scale` is on on both sides since 0.2.0-dev.29;
+  that check still has not confirmed what a player sees.
 - **When the row is decided.** Kiln.World starts right before the mods load, so a mod's `OnLoad` reads
-  `world.transform_scale` (and `world.tracked_writes`) already decided: available, held by the gate, or off with its
+  `world.transform_scale` (and `world.tracked_writes`) already decided: available or off with its
   reason. While kiln.types is there but the game has not filled its type table yet, the row is `Pending` ("waits for the
   game's type table") and is decided within 25 steps of the table filling; on a dedicated server the table is filled
   before the mods load.
@@ -194,22 +194,10 @@ Events.On<EntityScaleChangedEvent>(e => Log.Info(e.ToString()));
   nothing. ShroudForge's own Lua setter, hosted unchanged, keeps its broader rule.
 - **The answer** is the tracked write's: `Before` and `Now` are the 12 bytes the write read and left in the step it ran
   (null on a refusal), `Kept` is the readback one step later where the game writes the type too, `SaveTracked` and
-  `ReplicationTracked` are the game's own per-type bits from the same answer, and `Persisted` says whether the entity has
-  this scale again after a save and restart (below).
-- **Across a save and restart** (since the dev.28 fix round). The game's save does not keep a transform scale: a placed
-  chest scaled with a tracked write, marked for the save, came back at 1, 1, 1 (lab, build f0d824be; the save's record of
-  a placed prop has no scale, [docs/re/world.md](../../re/world.md#transform-scale-and-the-save)). So Kiln keeps it beside
-  the save, in kiln.saves' entity attachments (the bundle `entity/kiln:world`; the entity is known again by its template
-  and its position at the save, as [`EntityData`](saves.md) is), and sets it again through the same tracked write when
-  kiln.saves matches the loaded entity: on the test server about one second after the game loaded the world (what a
-  player who joins sees is check `13-world.transform-scale`); an entity that loads later gets it within about 5 s. `Persisted == true`: kept (or set back to the game's
-  own scale, which the game brings back itself: setting the scale the entity had before Kiln's first write forgets the
-  record). `false`: this session only: an entity the save does not keep (most enemies, loot pickups), a write made outside
-  a mod, or kiln.saves is off. The scale is set again in the name of the mod that set it last, only while that mod is
-  loaded and lists `CurrentTransform` under `"writes"`: remove the mod and its props keep the game's size (the record
-  stays, so they get it back with the mod); kiln.log says why one was not set again. Setting it again is a normal
-  `SetTransformScale`, so an `EntityScaleChangedEvent` is posted for it. A scale the game or another tool changed after
-  Kiln's write is kept as the entity has it at the save.
+  `ReplicationTracked` are the game's own per-type bits from the same answer, and `Persisted` says whether replay was recorded (or the original scale restored); it does not guarantee the identity or size of the entity after a restart.
+- **Across a save and restart.** The tested placed chest reloaded at 1, 1, 1 without Kiln replay despite being marked for saving ([lab evidence](../../re/world.md#transform-scale-and-the-save)); this does not establish how players, NPCs, mounts or other entity families save scale. Kiln records scale beside the save in kiln.saves' `entity/kiln:world` attachments and reapplies it through a tracked write when a loaded entity matches by template and saved position. Replay is asynchronous, with no promise that it finishes before players arrive. It runs in the last setting mod's name while that mod is loaded and declares `CurrentTransform` under `"writes"`. Restoring the original scale removes the record; removing a mod skips future replay but keeps the record for reinstall. A later save refreshes the recorded scale from the live component.
+- **Limits: size and entity type.** Every finite positive factor is accepted, from subnormal values through `float.MaxValue`, on any entity with writable `CurrentTransform`, including players, occupied mounts and physics bodies. There is no safe size range or entity-family allowlist. Extreme scales can overflow or degenerate downstream calculations; safety for those entities has not been established. Colliders, interaction components, attachments, `ScaleComponent` and building voxels are not resized. Dirty tracking does not prove that a vanilla viewer receives or renders the scale.
+- **Limits: replay identity and removal.** A kept scale is reapplied by template and position, not a durable entity identity: the first matching static entity within 0.5 m or mobile entity within 16 m can receive it. Nearby identical entities can receive each other's scales; same-id/template replacement can also be mistaken for the earlier entity. Removing a mod from a running world does not restore its live scales; restore them explicitly before unloading if needed. Removing the mod before the next load prevents replay, but does not prove every entity family returns to its original size in a vanilla game.
 - **Capabilities:** `world.transform_scale` (Kiln.World's row: the layout) and `world.tracked_writes`; either off throws
   `KilnUnavailableException` naming it.
 

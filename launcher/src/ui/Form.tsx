@@ -1,5 +1,7 @@
 // Form primitives: Field, TextInput, NumberInput, Select, Slider, TextArea, Toggle, WellInput (a well with its label
-// inside: Filter, Search items), FlameToggle (light a mod or put it out). Fields sit in wells; the rim catches flame on focus.
+// inside: Filter, Search items; with onClear a filter box with a clear button and Esc), FlameToggle (light a mod or put
+// it out). Fields sit in wells; the rim catches flame on focus.
+import { X } from "lucide-react";
 import { forwardRef, useEffect, useId, useRef, useState, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
 
 export interface FieldProps {
@@ -151,17 +153,57 @@ export interface WellInputProps extends Omit<InputHTMLAttributes<HTMLInputElemen
   note?: ReactNode;
   compact?: boolean;
   wellStyle?: React.CSSProperties;
+  /** A filter box (controlled `value`): while it has text, a clear (X) button at its end, and Esc in it empties it;
+   *  both leave the focus in the box. Esc in an empty box is left to the page (a dialog closes, as before). */
+  onClear?: () => void;
+  /** The clear button's name (and tooltip); default "Clear <label>" ("Clear filter"). */
+  clearLabel?: string;
 }
 
+/** True when this Esc belongs to a filter box with text (a WellInput with onClear; its input carries
+ *  data-esc-clears): the box empties itself, so a listener on the window that sees keys before React does
+ *  (ui/Modal.tsx) must leave it alone. An empty box, a modifier or an IME composition: false, and Esc does what it did
+ *  before. */
+export function escClearsFilter(e: Pick<KeyboardEvent, "key" | "ctrlKey" | "altKey" | "metaKey" | "shiftKey" | "isComposing" | "target">): boolean {
+  if (e.key !== "Escape" || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || e.isComposing) return false;
+  const t = e.target as { getAttribute?: (n: string) => string | null; value?: unknown } | null;
+  return !!t && typeof t.getAttribute === "function" && t.getAttribute("data-esc-clears") !== null && typeof t.value === "string" && t.value !== "";
+}
+
+const clearWord = (label: ReactNode) => (typeof label === "string" ? `Clear ${label.toLowerCase()}` : "Clear");
+
 /** An input set in a well with its label inside it. */
-export const WellInput = forwardRef<HTMLInputElement, WellInputProps>(function WellInput({ label, note, compact, wellStyle, id, className, ...rest }, ref) {
+export const WellInput = forwardRef<HTMLInputElement, WellInputProps>(function WellInput({ label, note, compact, wellStyle, id, className, onClear, clearLabel, onKeyDown, ...rest }, ref) {
   const auto = useId();
   const fid = id ?? auto;
+  const box = useRef<HTMLInputElement | null>(null);
+  const setRef = (el: HTMLInputElement | null) => {
+    box.current = el;
+    if (typeof ref === "function") ref(el);
+    else if (ref) ref.current = el;
+  };
+  const filled = onClear !== undefined && rest.value !== undefined && rest.value !== null && String(rest.value) !== "";
+  const clear = () => { onClear?.(); box.current?.focus(); };
+  const keyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    onKeyDown?.(e);
+    if (e.defaultPrevented || !onClear || !escClearsFilter(e.nativeEvent)) return;
+    // the box's own: nothing on the page reacts to it (Modal lets it pass, see escClearsFilter); once the box is
+    // empty, Esc goes on as before
+    e.preventDefault();
+    e.stopPropagation();
+    onClear();
+  };
+  const word = clearLabel ?? clearWord(label);
   return (
     <div className={["k-well", compact && "compact", className].filter(Boolean).join(" ")} style={wellStyle}>
       <label className="k-label" htmlFor={fid}>{label}</label>
-      <input ref={ref} id={fid} autoComplete="off" spellCheck={false} {...rest} />
+      <input ref={setRef} id={fid} autoComplete="off" spellCheck={false} data-esc-clears={onClear ? "" : undefined} onKeyDown={keyDown} {...rest} />
       {note !== undefined && note !== null && <span className="k-well-note">{note}</span>}
+      {filled && (
+        <button type="button" className="k-well-clear" aria-label={word} title={`${word} (Esc)`} aria-controls={fid} onClick={clear}>
+          <X aria-hidden />
+        </button>
+      )}
     </div>
   );
 });

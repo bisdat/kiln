@@ -45,10 +45,10 @@ test.describe("desktop", () => {
     await page.getByRole("radio", { name: "All Enshrouded" }).or(page.getByRole("tab", { name: "All Enshrouded" })).or(page.getByRole("button", { name: "All Enshrouded" })).first().click();
     await expect(card(page, "HD Texture Pack")).toBeVisible();
     await expect(card(page, "Bigger Bags EMF")).toContainText("EMF mod");
-    await page.getByLabel("Search").fill("night");
+    await page.getByLabel("Search", { exact: true }).fill("night");
     await expect(card(page, "Night Sky")).toBeVisible();
     await expect(grid(page).getByRole("listitem")).toHaveCount(1);
-    await page.getByLabel("Search").fill("");
+    await page.getByLabel("Search", { exact: true }).fill("");
     await page.getByRole("radio", { name: /Installed/ }).or(page.getByRole("tab", { name: /Installed/ })).or(page.getByRole("button", { name: /^Installed/ })).first().click();
     await expect(grid(page).getByRole("listitem")).toHaveCount(1);
     await expect(card(page, "Weather Plus")).toBeVisible();

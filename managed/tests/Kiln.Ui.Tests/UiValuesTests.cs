@@ -959,4 +959,16 @@ public sealed unsafe class UiValuesTests : IDisposable
             Assert.True(first >= 0 && first < wrapped.FindIndex(l => l.Contains("TI-16")));
         }
     }
+    [Fact]
+    public void Oversized_text_is_refused_before_native_interning()
+    {
+        var c = new UiValuesNative.ProviderContext { Text = FakeUiValues.Ops };
+        foreach (var text in new[] { new string('x', 4097), new string('ü', 2049) })
+        {
+            Assert.Equal(UiValuesNative.BufferTooSmall, UiValuesNative.Intern(&c, text, out var id));
+            Assert.Equal(0ul, id);
+        }
+        Assert.Empty(FakeUiValues.Texts);
+    }
+
 }

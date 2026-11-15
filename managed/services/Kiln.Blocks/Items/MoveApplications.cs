@@ -200,8 +200,14 @@ internal static class MoveApplications
                     txn = Host.Begin(e.Owner);
                     var errors = txn.Apply(e.Resets.DeepClone().AsObject(), $"remove moves of {e.Plan.Mod}:{e.Plan.Name}");
                     if (errors.Count > 0) failed = errors[0];
-                    else if (e.SlotIndexes.Select(i => (i, g: Host.Slot(e.Plan.Item, i))).FirstOrDefault(s => s.g is { } g && CloneBases.ContainsKey(g)) is { g: not null } still)
-                        failed = $"slot {still.i} still plays a clone of the weapon";
+                    else
+                        foreach (var index in e.SlotIndexes)
+                        {
+                            var read = Host.Slot(e.Plan.Item, index);
+                            if (read == null) failed = $"slot {index} could not be read";
+                            else if (CloneBases.ContainsKey(read.Value)) failed = $"slot {index} still plays a clone of the weapon";
+                            if (failed != null) break;
+                        }
                     if (failed == null && !txn.Commit()) failed = "the mod's layers were taken off meanwhile";
                     txn = null;
                 }

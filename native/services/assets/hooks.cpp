@@ -626,10 +626,8 @@ GameIndex game_index_keys(std::vector<HashK>* out, size_t max_keys, uint64_t* to
         *why = "the content hooks are off";
         return GameIndex::unsupported;
     }
-    if (!g_game_map.load()) {
-        GameBlob unused;
-        (void)game_blob_find(HashK{}, &unused);  // fetches the index as a blob read would
-    }
+    // Any-thread catalog queries only observe the index published by the game's content hook.
+    // Do not run game_blob_find's lazy accessor on the caller's thread while loading may still own the reader.
     const void* m = g_game_map.load();
     if (!m) {
         *why = "the game has not opened its content index yet";
