@@ -1,0 +1,11 @@
+{
+  "format": 1,
+  "programs": {
+    "pin": { "world": "client", "read": ["RenderTransform"], "flags": [] },
+    "relay": { "world": "both", "eventsIn": ["EntityDiedEvent"], "flags": ["system", "hostOnly"] },
+    "predicted": { "world": "prediction", "read": ["CurrentTransform"], "flags": [] },
+    "server": { "otherRead": ["Health"] },
+    "badflag": { "world": "client", "flags": ["system", "hostOnly"] },
+    "badworld": { "world": "Client" }
+  }
+}

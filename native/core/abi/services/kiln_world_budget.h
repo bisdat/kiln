@@ -58,7 +58,9 @@ typedef struct KilnWorldBudgetApi {
     KilnResult(KILN_CALL* program_budget)(uint32_t world_kind, KilnProgramBudgetReply* out);
     /* Since dev.29: immutable boot declaration for (mod id, key), independent of any live world or binding.
      * UTF-8 canonical text: each of the 16 kiln.programs.json lists, in schema order, as name=a,b\n (empty included),
-     * then flags=%08x\ninterval=%u\n. Names retain declaration order and required/optional lists stay separate.
+     * then flags=%08x\ninterval=%u\n, then for a declaration that is not the server world's alone (its "world", since
+     * 0.2.0-dev.29) world=client\n, world=both\n or world=prediction\n. Names retain declaration order and
+     * required/optional lists stay separate.
      * *out_size is bytes, without a NUL. NULL text sizes the reply; otherwise capacity must cover the whole reply.
      * NOT_FOUND clears *out_size; BUFFER_TOO_SMALL reports the required bytes and copies nothing. Any thread.
      * Older budget-only tables are 16 bytes; test header.size before reading this member at +16. */

@@ -47,6 +47,7 @@ Machine-readable copies:
 | `<game>/kiln/state/boot.json` | kiln-core | launcher | `state-boot.schema.json`, `examples/state-boot.json` |
 | `<game>/kiln/state/progress.json` | kiln-core (dev.27; services, plugins and Kiln.Host report through kiln.progress v2) | launcher, server operators | `state-progress.schema.json`, `examples/state-progress.json`; section "Start progress" below |
 | `<game>/kiln/state/mods.json` | Kiln.Host | launcher | `state-mods.schema.json`, `examples/state-mods.json` |
+| `<game>/kiln/state/roster-refused.json` (`.last.json` after the next start) | kiln.knowledge (0.2.0-dev.29), when the mods' NPC roster stops the start | launcher, server operators | `state-roster-refused.schema.json`, `examples/state-roster-refused.json`; section 5.9 |
 | `<game>/kiln/state/native.json` | native loader (core) | launcher | `state-native.schema.json`, `examples/state-native.json` |
 | `<game>/kiln/state/hooks.json` | kiln-core (kiln.hooks v2, compat report) | launcher | `hooks-state.schema.json`, `examples/hooks-state.json`, `fixtures/hooks-state/` |
 | `<game>/kiln/compat-rules.json`, `<configDir>/compat-rules.json` | Kiln (shipped in the runtime's `core` component since dev.29, from `native/core/compat-rules.json`; replaced by every update; may be missing on an older install) / the player | kiln-core, launcher | `compat-rules.schema.json`, `examples/compat-rules.json`, `fixtures/compat-rules/cases.json` |
@@ -818,6 +819,43 @@ All written atomically; a file whose `pid` is not a live process is stale.
   when another loader had started the DLL before the late phase, so `[late]` moved nothing),
   `services[]` (`name@version`), `plugins[]` (`{file, id, version, status, error}`), `native{loaded, failed, pending}`,
   `clr{started, error}`, `errors[]`.
+- `boot.json` `boot.stop` (0.2.0-dev.29, kiln.boot `stop_start`): `{code, reason, by, mods[]}` when a service ended the
+  start on purpose (with or without a boot generation), else null; `boot.exitCode` is then that code. kiln.knowledge's
+  roster uses code 19202 (0x4B02): show `reason` and do not restart (below). progress.json says `state` `failed` with
+  the same reason.
+- `roster-refused.json` (kiln.knowledge, 0.2.0-dev.29; `state-roster-refused.schema.json`): the mods' NPC roster cannot
+  be held on this side (more than 128 entries, or more than 64 where the second unlock page cannot be installed), so the
+  start stopped before any world loaded and the process ended with 19202 (0x4B02; a Linux parent under Wine sees 2).
+  Written first, before kiln.log's line, before kiln.boot writes boot.json and progress.json and before the game
+  client's message box, so it is there even when the player ends the game while the message is open. Fields:
+  `format` 1, `refused` true, `why` (the build's refusal, word for word: show it), `mods[]` (the mods that add roster
+  NPCs: the ones to remove or update), `side` (`client`|`server`), `exitCode` 19202, `unixExitStatus` 2, `restart`
+  false (a restart stops the same way: never restart on it), `advice` (what to do, as in kiln.log), `bootStop` (true:
+  kiln.boot ended the start, so boot.json `boot.stop` and progress.json say the same; false: an older core, only this
+  file and kiln.log), `pid`, `utc`. The next start moves it to `roster-refused.last.json`: a launcher that shows why the
+  last start ended reads that one after a new start, and `roster-refused.json` right after the exit. A launcher shows
+  `why` and the `mods` after the game exits with 19202, and offers to disable those mods.
+- Launcher stopped-start notice (dev.29): `kiln_manage::stopped_start::read` reads `roster-refused.json` first,
+  then `boot.json` (`boot.stop`, or the older required-boot-mod exit 19201). Each read is capped at 256 KiB;
+  missing, invalid and unknown-format evidence produces no notice (invalid files are logged). It never changes
+  Kiln's files and does not read `.last.json` as a new stop. The command `launch_state.stoppedStart` returns the
+  kind, reason, mod ids and available Library display names, advice, UTC, exit code and runtime pid.
+  The watcher and command retain the process start observed after this launcher's Steam request, inspect the
+  evidence while it runs (including progress `failed`) and after exit. The embedded time must lie between that
+  process start (rounded down to its timestamp's whole second) and the observation of exit; the file mtime must
+  also be at least the process start. Windows requires the process pid; Proton uses the process time because
+  its host pid differs from the Windows pid, then pins the runtime pid when a stop is accepted. No observed
+  process identity means no notice: an old stop is never inferred from exit code alone.
+  For a process that stops between polls, format-1 failed `progress.json` may supply the runtime pid and start
+  time instead, but only if both its embedded start time and mtime are after this launcher's request. The stop
+  must then match that runtime pid and time window.
+  Desktop Play and Deck Home keep the notice until Dismiss or another start. The launcher stores the notice
+  and dismissed `(game, pid, UTC, exitCode)` in its own browser storage, so reload/restart cannot resurrect a
+  dismissed stop. Review these mods opens the existing mod list's exact-id filter. Ordinary quits produce none.
+  `kilnctl run` uses the same bounded reader within its foreground-run time interval and prints the reason and
+  advice before returning the original exit status. Detached `start` includes those lines in its existing failure
+  log tail. `status` labels the last stopped start from kilnctl's own `<run log stem>.stopped-start.json` receipt;
+  `run` clears this receipt before another start. This receipt is outside Kiln's state files.
 - `mods.json` (Kiln.Host, after every resolve/load/unload/reload; `generation` grows): `pid`, `written`, `generation`,
   `side`, `api`, `profile{id, generation, mode}`, `mods[]` (`{id, version, name, folder, source: profile|dropin, state:
   pending|loaded|disabled|failed|skipped|unloaded, reason, loadIndex, side, clients, faults}`).

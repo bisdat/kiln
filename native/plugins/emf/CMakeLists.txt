@@ -35,6 +35,12 @@ add_library(emf-probe SHARED "${CMAKE_SOURCE_DIR}/../mods/tests/emf-test/probe/e
 target_include_directories(emf-probe PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set_target_properties(emf-probe PROPERTIES OUTPUT_NAME emf_probe RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/emf-test")
 
+# Client-world probe (mods/tests/emf-client-test, since 0.2.0-dev.29): the client pass's programs.client-emf check, never
+# packaged as a player mod. Installed by hand into <game>/emf/mods/emf_client_probe/ with its mod.json.
+add_library(emf-client-probe SHARED "${CMAKE_SOURCE_DIR}/../mods/tests/emf-client-test/probe.cpp")
+target_include_directories(emf-client-probe PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+set_target_properties(emf-client-probe PROPERTIES OUTPUT_NAME emf_client_probe RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/emf-test")
+
 # Mod messages conformance probe (mods/tests/emf-net-test): lab only, never packaged as a player mod.
 add_library(emf-net-probe SHARED "${CMAKE_SOURCE_DIR}/../mods/tests/emf-net-test/probe.cpp")
 target_include_directories(emf-net-probe PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")

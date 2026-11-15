@@ -63,11 +63,33 @@ Kiln.EventEntityKey.PlayerHandle.get -> ulong
 Kiln.EventEntityKey.PlayerHandle.init -> void
 Kiln.EventEntityKey.SpawnTime.get -> ulong
 Kiln.EventEntityKey.SpawnTime.init -> void
+Kiln.EcsProgramBinding
+Kiln.EcsProgramBinding.<Clone>$() -> Kiln.EcsProgramBinding!
+Kiln.EcsProgramBinding.Deconstruct(out bool Ok, out string? Reason, out Kiln.WorldKind World, out System.IDisposable? Handle) -> void
+Kiln.EcsProgramBinding.EcsProgramBinding(bool Ok, string? Reason, Kiln.WorldKind World, System.IDisposable? Handle) -> void
+Kiln.EcsProgramBinding.Equals(Kiln.EcsProgramBinding? other) -> bool
+Kiln.EcsProgramBinding.Handle.get -> System.IDisposable?
+Kiln.EcsProgramBinding.Handle.init -> void
+Kiln.EcsProgramBinding.Ok.get -> bool
+Kiln.EcsProgramBinding.Ok.init -> void
+Kiln.EcsProgramBinding.Reason.get -> string?
+Kiln.EcsProgramBinding.Reason.init -> void
+Kiln.EcsProgramBinding.World.get -> Kiln.WorldKind
+Kiln.EcsProgramBinding.World.init -> void
+Kiln.EcsProgramContext.World.get -> Kiln.WorldKind
+Kiln.EcsProgramRefusedEvent
+Kiln.EcsProgramRefusedEvent.Key.get -> string!
+Kiln.EcsProgramRefusedEvent.ModId.get -> string!
+Kiln.EcsProgramRefusedEvent.Reason.get -> string!
+Kiln.EcsProgramRefusedEvent.World.get -> Kiln.WorldKind
 override Kiln.DecisionId.GetHashCode() -> int
 override Kiln.DecisionResult.Equals(object? obj) -> bool
 override Kiln.DecisionResult.GetHashCode() -> int
 override Kiln.DecisionResult.ToString() -> string!
 override Kiln.EventEntityKey.GetHashCode() -> int
+override Kiln.EcsProgramBinding.Equals(object? obj) -> bool
+override Kiln.EcsProgramBinding.GetHashCode() -> int
+override Kiln.EcsProgramBinding.ToString() -> string!
 static Kiln.DecisionId.operator !=(Kiln.DecisionId left, Kiln.DecisionId right) -> bool
 static Kiln.DecisionId.operator ==(Kiln.DecisionId left, Kiln.DecisionId right) -> bool
 static Kiln.DecisionResult.operator !=(Kiln.DecisionResult? left, Kiln.DecisionResult? right) -> bool
@@ -415,3 +437,7 @@ static Kiln.DefinitionRegistrationResult.operator ==(Kiln.DefinitionRegistration
 ~override Kiln.CapacityWorldToken.Equals(object obj) -> bool
 *REMOVED*~[KILNX028]override Kiln.CapacityWorldToken.ToString() -> string
 ~override Kiln.CapacityWorldToken.ToString() -> string
+const Kiln.EcsPrograms.ClientWorldCapability = "world.programs.client" -> string!
+static Kiln.EcsProgramBinding.operator !=(Kiln.EcsProgramBinding? left, Kiln.EcsProgramBinding? right) -> bool
+static Kiln.EcsProgramBinding.operator ==(Kiln.EcsProgramBinding? left, Kiln.EcsProgramBinding? right) -> bool
+static Kiln.EcsPrograms.TryBind(string! key, Kiln.EcsProgramCallback! callback, Kiln.WorldKind world) -> Kiln.EcsProgramBinding!

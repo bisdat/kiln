@@ -6,7 +6,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, MoreHorizontal } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { Link } from "react-router-dom";
+import { useSearchParams, Link } from "react-router-dom";
 import * as api from "../../api/commands";
 import type { AddReport, GameInstall, ModKind } from "../../api/commands";
 import { qk, useNexusEnabled } from "../../api/hooks";
@@ -43,7 +43,8 @@ export function MainList({ game, mods, running }: { game: GameInstall; mods: Mod
   const qc = useQueryClient();
   const nexus = useNexusEnabled();
   const addMods = useAddMods();
-  const [text, setText] = useState("");
+  const [params] = useSearchParams();
+  const [text, setText] = useState(params.get("filter") ?? "");
   const [kind, setKind] = useState<ModKind | "">("");
   const [settings, setSettings] = useState<{ kind: ModKind; id: string; name: string } | null>(null);
   const [configs, setConfigs] = useState<string | null>(null);
@@ -88,11 +89,12 @@ export function MainList({ game, mods, running }: { game: GameInstall; mods: Mod
   const cook = useQuery({ queryKey: ["cook_plan", game.id], queryFn: () => api.cookPlan(game.id) });
   const cookable = new Map((cook.data ?? []).map((j) => [j.id, j]));
   const kinds = kindsOf(mods.rows);
-  const many = mods.rows.length > FILTER_FROM;
+  const many = !!text || mods.rows.length > FILTER_FROM;
   const shown = filterRows(mods.rows, many ? text : "", many ? kind : "");
   const loaded = !!mods.profile;
   const check = useRemoveCheck(rm, pid);
 
+  useEffect(() => { setText(params.get("filter") ?? ""); }, [params]);
   // All on / All off: the rows shown now (the filter narrows them), one save, Undo in the toast
   const filtered = shown.length !== mods.rows.length;
   const planOn = bulkPlan(shown, true);

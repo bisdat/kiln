@@ -151,6 +151,8 @@ internal static partial class KilnApis
         "M:Kiln.Combat.TryGetHealth(Kiln.EntityId,Kiln.Health@)", // Combat.TryGetHealth(EntityId, out Health): Services.RequireTickThread
         "M:Kiln.CommandContext.Reply(System.String)", // CommandContext.Reply(string): via Chat.Tell(EntityId, string)
         "M:Kiln.Commands.Execute(Kiln.CommandSource,System.String)", // Commands.Execute(CommandSource, string): Services.RequireTickThread
+        "M:Kiln.ComponentChanges.Resume(Kiln.ComponentWatch)", // ComponentChanges.Resume(ComponentWatch): Services.RequireTickThread
+        "M:Kiln.ComponentChanges.Watch(Kiln.ComponentWatchRequest)", // ComponentChanges.Watch(ComponentWatchRequest): Services.RequireTickThread
         "M:Kiln.Config.RegisterWorld``1(System.String)", // Config.RegisterWorld<T>(string?): Game.AssertTickThread
         "M:Kiln.Config.Register``1(Kiln.ConfigKind,System.String)", // Config.Register<T>(ConfigKind, string?): Game.AssertTickThread
         "M:Kiln.ConfigFile.Reload", // ConfigFile.Reload(): Game.AssertTickThread
@@ -277,6 +279,7 @@ internal static partial class KilnApis
         "M:Kiln.Dialogues.Talk(Kiln.QuestHolder,System.String)", // Dialogues.Talk(QuestHolder, string?): Game.AssertTickThread
         "M:Kiln.Dialogues.View(Kiln.QuestHolder)", // Dialogues.View(QuestHolder): Game.AssertTickThread
         "M:Kiln.EcsPrograms.Bind(System.String,Kiln.EcsProgramCallback)", // EcsPrograms.Bind(string, EcsProgramCallback): Services.RequireTickThread
+        "M:Kiln.EcsPrograms.TryBind(System.String,Kiln.EcsProgramCallback,Kiln.WorldKind)", // EcsPrograms.TryBind(string, EcsProgramCallback, WorldKind): Services.RequireTickThread
         "M:Kiln.EntityData.Clear(Kiln.EntityId)", // EntityData.Clear(EntityId): via EntityData.Keys(EntityId, string, bool)
         "M:Kiln.EntityData.Get``1(Kiln.EntityId,System.String)", // EntityData.Get<T>(EntityId, string): via PlayerData.Get<T>(ulong, string)
         "M:Kiln.EntityData.Has(Kiln.EntityId,System.String)", // EntityData.Has(EntityId, string): via PlayerData.Contains(ulong, string)

@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <memory>
 #include <cctype>
 #include <cstdarg>
 #include <cstdio>
@@ -138,7 +139,7 @@ void set_detail(const char* s) {
 
 void broken(const char* why) {
     if (g_program.exchange(KILN_ITEMS_PROGRAM_BROKEN) != KILN_ITEMS_PROGRAM_BROKEN)
-        LOGE("give/take are off until the server restarts: %s", why);
+        LOGE("give/take are off until the server, or the hosting player's game, restarts: %s", why);
     set_detail(why);
 }
 
@@ -312,6 +313,8 @@ void run_fuel_jobs(const Access& a) {
             continue;
         }
         unsigned long code = 0;
+        NoteLease note;  // 07 S7: what a component watch is told (only while something is watched)
+        if (note_wanted()) note.begin(a, &batch[i].job.r.entity, 1);
         if (!run_fuel(a, batch[i].job, &res, &code)) {
             res.status = KILN_ITEMS_UNAVAILABLE;
             res.change_count = 0;
@@ -321,6 +324,7 @@ void run_fuel_jobs(const Access& a) {
             broken(b);
             continue;
         }
+        if (note) note.end(a);
         if (!(res.flags & KILN_ITEMS_FUEL_DRY_RUN)) g_fuel_writes.fetch_add(res.changed, std::memory_order_relaxed);
     }
     float dt;
@@ -350,12 +354,15 @@ void run_fuel_jobs(const Access& a) {
         }
         KilnItemsFuelResult res{};
         unsigned long code = 0;
+        NoteLease note;  // 07 S7
+        if (note_wanted()) note.begin(a, &job.r.entity, 1);
         if (!run_fuel(a, job, &res, &code)) {
             char b[160];
             std::snprintf(b, sizeof b, "a keep-full Fuel write faulted (0x%08lx) on entity %u", code, k.job.r.entity);
             broken(b);
             break;
         }
+        if (note) note.end(a);
         if (res.changed == 0 && (job.r.flags & KILN_ITEMS_FUEL_ADD)) acc = 0;  // all at the level: owe nothing
         g_fuel_writes.fetch_add(res.changed, std::memory_order_relaxed);
         kept.push_back(Done{k.handle, acc, res});
@@ -415,6 +422,11 @@ void run_move_jobs(const Access& a) {
             continue;
         }
         unsigned long code = 0;
+        NoteLease note;  // 07 S7
+        if (note_wanted()) {
+            const KilnEntity holders[2] = {batch[i].job.r.from, batch[i].job.r.to};
+            note.begin(a, holders, 2);
+        }
         if (!run_move(a, batch[i].job, g_tx, &res, &code)) {
             abandon_tx(g_tx);
             res.status = KILN_ITEMS_UNAVAILABLE;
@@ -427,6 +439,7 @@ void run_move_jobs(const Access& a) {
             broken(b);
             continue;
         }
+        if (note) note.end(a);
         const bool moved = (res.status == KILN_ITEMS_DONE || res.status == KILN_ITEMS_PARTIAL) &&
                            !(res.flags & KILN_ITEMS_MOVE_DRY_RUN);
         if (moved) {
@@ -438,6 +451,51 @@ void run_move_jobs(const Access& a) {
     }
     std::lock_guard lock(g_mu);
     for (auto& r : results) g_move_done.push_back(r);
+}
+
+// lab only (notes_lab(), kiln/data/kiln.items/notes-lab): what the component watch note costs a give/take job, logged
+// per 200 jobs (07 S7 review: an unrelated watch must not make every job copy its holder's tree). Program thread.
+uint64_t lab_now_ns() {
+    LARGE_INTEGER c, f;
+    QueryPerformanceCounter(&c);
+    QueryPerformanceFrequency(&f);
+    return static_cast<uint64_t>(static_cast<double>(c.QuadPart) * 1e9 / static_cast<double>(f.QuadPart));
+}
+struct NotesLabSample {
+    uint64_t job_ns, note_ns;
+    uint32_t copied;
+    bool wanted;
+};
+std::vector<NotesLabSample> g_notes_lab;
+uint64_t g_notes_lab_step = 0;
+void notes_lab_flush();
+// A block ends at 200 jobs, or before a job that comes more than 30 steps after the last one (the lab's next scenario).
+void notes_lab_add(uint64_t step, uint64_t job_ns, uint64_t note_ns, uint32_t copied, bool wanted) {
+    if (!g_notes_lab.empty() && step > g_notes_lab_step + 30) notes_lab_flush();
+    g_notes_lab_step = step;
+    g_notes_lab.push_back({job_ns, note_ns, copied, wanted});
+    if (g_notes_lab.size() >= 200) notes_lab_flush();
+}
+void notes_lab_flush() {
+    std::vector<uint64_t> job, note;
+    uint32_t noted = 0, copied_all = 0;
+    for (const auto& x : g_notes_lab) {
+        job.push_back(x.job_ns);
+        note.push_back(x.note_ns);
+        noted += x.wanted ? 1u : 0u;
+        copied_all += x.copied;
+    }
+    std::sort(job.begin(), job.end());
+    std::sort(note.begin(), note.end());
+    auto at = [](const std::vector<uint64_t>& v, double q) { return static_cast<double>(v[static_cast<size_t>(q * static_cast<double>(v.size() - 1))]) / 1000.0; };
+    uint32_t pooled = 0;
+    uint64_t extra = 0;
+    note_pool_stats(&pooled, &extra);
+    LOGI("kiln.items: notes-lab: %zu give/take job(s), %u while something was watched: job p50 %.1f us p99 %.1f us max %.1f us; "
+         "note p50 %.2f us p99 %.2f us max %.2f us; %u component(s) copied; %u pooled note(s), %llu made outside the pool",
+         g_notes_lab.size(), noted, at(job, 0.5), at(job, 0.99), at(job, 1.0), at(note, 0.5), at(note, 0.99), at(note, 1.0), copied_all,
+         pooled, static_cast<unsigned long long>(extra));
+    g_notes_lab.clear();
 }
 
 // One update of the program: verify once, then run up to kPerUpdate queued transactions.
@@ -511,6 +569,12 @@ void program_body(void* ctx, const uint64_t* it) {
         code = 0;
         if (batch[i].job.r.flags & KILN_ITEMS_RECIPE)
             a.recipes = reinterpret_cast<void*>(g_api->singleton(g_api->server_world(), KilnStr{"g38_items::RecipeRegistry", 25}));
+        const bool lab = notes_lab();
+        const uint64_t t0 = lab ? lab_now_ns() : 0;
+        NoteLease note;  // 07 S7
+        const bool wanted = note_wanted();
+        if (wanted) note.begin(a, &batch[i].job.r.entity, 1);
+        const uint64_t t1 = lab ? lab_now_ns() : 0;
         if (!run_job(a, batch[i].job, g_tx, &res, &code)) {
             abandon_tx(g_tx);
             res.status = KILN_ITEMS_UNAVAILABLE;
@@ -523,6 +587,9 @@ void program_body(void* ctx, const uint64_t* it) {
             broken(b);
             continue;
         }
+        const uint64_t t2 = lab ? lab_now_ns() : 0;
+        if (note) note.end(a);
+        if (lab) notes_lab_add(step, lab_now_ns() - t0, (t1 - t0) + (lab_now_ns() - t2), note.copied(), wanted);
         const bool committed = (res.status == KILN_ITEMS_DONE || res.status == KILN_ITEMS_PARTIAL) &&
                                !(res.flags & KILN_ITEMS_DRY_RUN);
         (committed ? g_commits : g_rollbacks).fetch_add(1);
@@ -1987,6 +2054,7 @@ void resolve() {
 void register_main();
 
 void KILN_CALL on_ready(void*) {
+    note_setup(kiln_component_changes_find(g_api), g_owner);  // 07 S7: this service's writes are named in component watches
     register_main();
     // v5: equip runs in a program of its own, an entity program over the player characters: kiln.world only
     const auto* w = static_cast<const KilnWorldApi*>(g_api->service(KilnStr{KILN_WORLD_SERVICE, std::strlen(KILN_WORLD_SERVICE)}, 1));

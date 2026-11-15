@@ -1,0 +1,16 @@
+{
+ "advice": "Do not restart the game or the server: the next start stops the same way (a dedicated server under Wine exits with status 2; a supervisor must not restart on it). Fix the mod list: remove these mods, or run a Kiln and game build where the roster's second unlock page installs",
+ "bootStop": true,
+ "exitCode": 19202,
+ "format": 1,
+ "mods": [
+  "roster-cap-test"
+ ],
+ "pid": 260,
+ "refused": true,
+ "restart": false,
+ "side": "server",
+ "unixExitStatus": 2,
+ "utc": "2026-11-15T10:47:03Z",
+ "why": "the roster holds at most 128 NPCs (two 64-bit unlock pages): 35 of the game's + 94 new"
+}

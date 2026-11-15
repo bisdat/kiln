@@ -494,11 +494,12 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
         }
         var dependencies = DependencyClosure(manifest);
         ulong owner = 0;
-        bool gameplayRequested = false;
+        uint gameplayRequested = 0;
         var alc = new ModLoadContext(manifest.Id, directory, dependencies.Count > 0 ? name => ResolveExport(dependencies, name) : null,
             loaded: assembly => {
-                if (!gameplayRequested && GameplayBuildDemand.ReferencesGameplay(assembly)) {
-                    gameplayRequested = true; GameplayBuildDemand.Request(_host, owner);
+                var demand=GameplayBuildDemand.GroupsFor(assembly) & ~gameplayRequested;
+                if (demand!=0) {
+                    gameplayRequested |= demand; GameplayBuildDemand.Request(_host, owner,demand);
                 }
             });
         try

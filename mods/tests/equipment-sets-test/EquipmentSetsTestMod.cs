@@ -6,7 +6,7 @@
 // FAIL line named after the chapter's table (SET-CAPTURE ... SET-INVARIANT). kiln/data/equipment-sets-test/matrix (with
 // kiln/data/kiln.items/sets-matrix) runs the rollback matrix instead: one fresh character per form of a set. Faults are injected into real runs through
 // Items.LabEquipSet (kiln/data/kiln.items/sets-lab): a refusal of the game's own equip at a chosen step, the commit's own
-// rollback bit, a faked mismatch after the commit (last: it switches sets off until the server restarts). After every
+// rollback bit, a faked mismatch after the commit (last: it switches sets off until the server, or the hosting game, restarts). After every
 // refusal, dry run and commit rollback kiln.items itself compares, in the same program update, the canonical snapshot
 // (the fields of InventorySetup, every Inventory, SlotSelection, ItemState and OwnerRelationship that decide what a set
 // selects) and every byte of the seven components its program declares (those five, Fuel and InventoryEmptyState) of
@@ -14,7 +14,8 @@
 // Simulated status is that comparison passing. The rows here compare Gear(): the inventory links, every stack's item,
 // count and item entity and the equipped flags. The rollback series (Series.cs, kiln/data/equipment-sets-test/series)
 // compares every byte of those components and of the item components the program cannot write, at every operation of
-// every enabled form, and over a save and a restart. With
+// every enabled form (a save and a restart are attempted, but the game does not load a spawned stand-in from the world
+// save; a real character's are the guided checks 10-items.equip-set.persist and .persist.after). With
 // kiln/control/systems.parallel the run repeats with the game's programs forced onto its workers (the native log line
 // of each set says the thread). The character is destroyed at the end.
 using System.Text.Json;
@@ -589,7 +590,7 @@ public sealed partial class EquipmentSetsTestMod : Mod
             }
         }
 
-        // ---- SET-INVARIANT (last: it switches equipment sets off until the server restarts) ----
+        // ---- SET-INVARIANT (last: it switches equipment sets off until the server, or the hosting game, restarts) ----
         var last = Items.CaptureSet(p).Set!;
         var target = Loose(p, ringMana) ?? Loose(p, ringLight) ?? Loose(p, ringShock);
         if (target is null) Check(false, $"SET-INVARIANT: no ring in the backpack: {Gear(p)}");

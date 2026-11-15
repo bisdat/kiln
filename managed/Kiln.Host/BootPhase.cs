@@ -486,7 +486,7 @@ internal static unsafe class BootPhase
     internal static string CodeName(uint code) => code switch
     {
         1 => "DuplicateDefinition", 2 => "CallbackFailed", 3 => "Dependency", 4 => "PrepareRefused", 5 => "CollectorFault", 6 => "CollectorMissing",
-        7 => "GenerationAborted", 8 => "NotCommitted", 9 => "WrongRole", 10 => "ActivationFault", 0x80000001u => "ShadowedByFile",
+        7 => "GenerationAborted", 8 => "NotCommitted", 9 => "WrongRole", 10 => "ActivationFault", 11 => "StartStopped", 0x80000001u => "ShadowedByFile",
         _ => $"0x{code:x8}",
     };
 
@@ -655,10 +655,11 @@ internal sealed partial class ModManager
     {
         why = "";
         if (!manifest.HasCode) return true;  // a data-only boot mod: its files only
-        bool gameplayRequested = false;
+        uint gameplayRequested = 0;
         var alc = new ModLoadContext(manifest.Id, directory, loaded: assembly => {
-            if (!gameplayRequested && GameplayBuildDemand.ReferencesGameplay(assembly)) {
-                gameplayRequested = true; GameplayBuildDemand.Request(_host, owner);
+            var demand=GameplayBuildDemand.GroupsFor(assembly) & ~gameplayRequested;
+            if (demand!=0) {
+                gameplayRequested |= demand; GameplayBuildDemand.Request(_host, owner,demand);
             }
         });
         try

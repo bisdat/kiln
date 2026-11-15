@@ -121,6 +121,8 @@ bool map_find_u16(uintptr_t, uint32_t key, uint16_t* value) {
 // the engine's ReadOther / WriteOther over a fake store: entity -> component bytes, per accessor
 std::map<std::pair<uintptr_t, uint32_t>, std::vector<uint8_t>> g_fstore;
 int g_fwrites = 0;
+bool g_client_program = false;  // what programs.cpp's in_client_program answers (foreign.cpp refuses its writes then)
+bool in_client_program() { return g_client_program; }
 bool seh_read_other(Slice* out, void*, void* accessor, uint32_t entity, unsigned long*) {
     const auto at = g_fstore.find({reinterpret_cast<uintptr_t>(accessor), entity});
     *out = at == g_fstore.end() ? Slice{} : Slice{at->second.data(), at->second.size()};
@@ -190,6 +192,12 @@ bool g_hooks_on = true;
 KilnOwnerRetiringFn g_retiring_fn = nullptr;
 void* g_retiring_user = nullptr;
 KilnOwner g_retiring_observer = 0;
+constexpr uintptr_t kRunner = 0x14064ac00;  // types/ProgramRunner, as sigdb resolves it
+KilnMidFn g_mid_fn = nullptr;
+void* g_mid_user = nullptr;
+uintptr_t g_mid_target = 0;
+int g_mid_calls = 0;
+KilnResult g_mid_rc = KILN_OK;
 KilnHooksApi g_fake_hooks = [] {
     KilnHooksApi h{};
     h.header = {sizeof(KilnHooksApi), KILN_HOOKS_VERSION};
@@ -199,6 +207,19 @@ KilnHooksApi g_fake_hooks = [] {
         return KILN_OK;
     };
     h.unsubscribe_owner_retiring = [](KilnHandle) -> KilnResult { return KILN_OK; };
+    // the checked mid link kiln.world puts on types/ProgramRunner's entry (world.slice_record): recorded, so a test can run
+    // it as the runner would; g_mid_rc != OK refuses it as an unchecked thread would
+    h.mid2_checked = [](KilnOwner, uintptr_t target, const KilnHookOrder*, KilnMidFn fn, void* user, KilnHandle* out,
+                        uint32_t* unchecked) -> KilnResult {
+        ++g_mid_calls;
+        if (g_mid_rc != KILN_OK) {
+            if (unchecked) *unchecked = 2;
+            return g_mid_rc;
+        }
+        g_mid_fn = fn, g_mid_user = user, g_mid_target = target;
+        if (out) *out = 7;
+        return KILN_OK;
+    };
     return h;
 }();
 KilnApi g_fake{};
@@ -220,9 +241,39 @@ void fake_api() {
         return g_hooks_on && std::string(name.ptr, name.len) == KILN_HOOKS_SERVICE ? &g_fake_hooks : nullptr;
     };
     g_fake.path = [](int32_t, char*, size_t, size_t*) -> KilnResult { return KILN_ERR_UNAVAILABLE; };
-    g_fake.symbol = [](KilnStr, uintptr_t*) -> KilnResult { return KILN_ERR_NOT_FOUND; };
+    g_fake.symbol = [](KilnStr name, uintptr_t* out) -> KilnResult {
+        if (std::string(name.ptr, name.len) != "types/ProgramRunner") return KILN_ERR_NOT_FOUND;
+        *out = kRunner;
+        return KILN_OK;
+    };
     g_api = &g_fake;
 }
+
+// The core's world.stop_drain.<kind> rows as kiln.caps answers them (since dev.29): g_drain[kind] = 1 available
+// ("drained by the engine"), 0 unavailable (a bounded wait only), -1 no row (an older core).
+int g_drain[KILN_WORLD_KINDS] = {-1, -1, -1};
+KilnResult KILN_CALL fake_caps_find(KilnStr name, KilnCapRow* out) {
+    static const char* kNames[KILN_WORLD_KINDS] = {"world.stop_drain.server", "world.stop_drain.prediction",
+                                                  "world.stop_drain.client"};
+    for (uint32_t k = 0; k < KILN_WORLD_KINDS; ++k) {
+        if (std::string_view(name.ptr, name.len) != kNames[k] || g_drain[k] < 0) continue;
+        static const char kOn[] = "drained by the engine: WaitWorldJobs on the world before STOPPING";
+        static const char kOff[] = "bounded wait only: tick.wait_jobs did not resolve";
+        out->state = g_drain[k] ? KILN_CAP_AVAILABLE : KILN_CAP_UNAVAILABLE;
+        out->reason = g_drain[k] ? KILN_CAP_REASON_NONE : KILN_CAP_REASON_SYMBOL_MISSING;
+        out->name = name;
+        out->text = g_drain[k] ? KilnStr{kOn, sizeof kOn - 1} : KilnStr{kOff, sizeof kOff - 1};
+        return KILN_OK;
+    }
+    return KILN_ERR_NOT_FOUND;
+}
+KilnCapsApi g_stop_caps = [] {
+    KilnCapsApi c{};
+    c.header = {sizeof c, 1};
+    c.report = [](KilnOwner, KilnStr, uint32_t, uint32_t, KilnStr) -> KilnResult { return KILN_OK; };
+    c.find = &fake_caps_find;
+    return c;
+}();
 
 // A client without the destroy hook cannot retire wraps when its world disappears.
 void client_lifecycle_row() {
@@ -255,8 +306,20 @@ void client_lifecycle_row() {
     check(state == KILN_CAP_UNAVAILABLE, "client tick subscription failure keeps wraps off");
     wraps_client_ready(true, false);
     check(state == KILN_CAP_UNAVAILABLE, "world event subscription failure keeps wraps off");
+    caps.find = &fake_caps_find;
+    g_drain[KILN_WORLD_CLIENT] = 1;
     wraps_client_ready(true, true);
     check(state == KILN_CAP_AVAILABLE, "native client wraps available with lifecycle and both subscriptions");
+    check(detail.find("at a world stop the engine drains the world's jobs first (world.stop_drain.client)") != std::string::npos,
+          "the client wrap row says the core drains the client world's jobs before its stop");
+    g_drain[KILN_WORLD_CLIENT] = 0;
+    wraps_client_ready(true, true);
+    check(state == KILN_CAP_AVAILABLE &&
+              detail.find("at a world stop a bounded wait (2000 ms) only (world.stop_drain.client: bounded wait only") !=
+                  std::string::npos,
+          "without the engine's drain the client wrap row says the stop has a bounded wait only");
+    g_drain[KILN_WORLD_CLIENT] = 1;
+    wraps_client_ready(true, true);
     check(typed_state == wraps_state && wraps_state != 99, "systems.wraps.typed is reported with systems.wraps");
     g_fake_external.store(1);
     wraps_pre(KILN_WORLD_CLIENT, 0);
@@ -273,6 +336,8 @@ void client_lifecycle_row() {
           "systems.define follows kiln.world's own programs (off when they did not hook, on when they did)");
     g_side = KILN_SIDE_SERVER;
     fake_api();
+    g_wrap_caps = nullptr;  // `caps` goes with this frame; the next wraps_init looks kiln.caps up again
+    g_drain[KILN_WORLD_CLIENT] = -1;
 }
 
 void layout() {
@@ -302,6 +367,10 @@ void layout() {
     L.entity_layout = 0x18;
     L.entity_id = 0x10;
     L.map = MapFields{0x08, 0x10, 0x28, 0x40, 0x54};
+    L.slice_entry = 0x10;  // the engine's slice record (world.slice_record)
+    L.slice_layout = 0x18;
+    L.slice_first = 0x28;
+    L.slice_end = 0x2C;
     F.write = true;
 }
 
@@ -1138,6 +1207,9 @@ void stopping_under_load() {
     const auto trampoline = reinterpret_cast<UpdateFn>(update_of(wentry(1)));
     std::thread worker([&] { Job j(3); run_slice(wentry(1), j); });
     while (!b.entered.load()) std::this_thread::yield();
+    g_wrap_caps = &g_stop_caps;  // the core says the engine drained the server world's jobs (and yet a call is in flight)
+    g_drain[KILN_WORLD_SERVER] = 1;
+    const int contradictions = logs_with("wrap calls were in flight although the engine drains");
     std::atomic<bool> stopped{false};
     std::thread stopper([&] { world_event(KILN_WORLD_STOPPING, KILN_WORLD_SERVER); stopped = true; });
     auto& entry = *reinterpret_cast<uintptr_t*>(wentry(1) + kEntryUpdateAt);
@@ -1156,6 +1228,12 @@ void stopping_under_load() {
           "blocked stage finishes normally; stop drains and returns it to pending");
     check(std::string(winfo(b.h).detail).rfind("world stop: 1 in flight at the stop, 0 after the wait (", 0) == 0,
           "a stage back in PENDING says what the stop's drain found (1 call in flight at the stop, none after the wait)");
+    check(std::string(winfo(b.h).detail).find("; drained by the engine") != std::string::npos &&
+              logs_with("the engine drains the world's jobs first (world.stop_drain.server)") >= 1,
+          "the stage's detail and the stop line say the core's guarantee (world.stop_drain.server)");
+    check(logs_with("1 wrap calls were in flight although the engine drains") == contradictions + 1,
+          "a call in flight at a stop the engine drained is logged as an error");
+    g_drain[KILN_WORLD_SERVER] = 0;
     game_program_unwrap(b.h);
     check(std::string(winfo(b.h).detail) == "unwrapped", "once removed its detail is the removal's again");
     world_event(KILN_WORLD_STARTED, KILN_WORLD_SERVER);
@@ -1177,8 +1255,9 @@ void stopping_timeout() {
     world_event(KILN_WORLD_STOPPING, KILN_WORLD_SERVER);
     check(g_stop_timeout_logs.load() == logs + 1 && winfo(h).running == 1 && !g_retired.empty(),
           "bounded stop logs once and retains the chain while a callback still runs");
-    check(std::string(winfo(h).detail).rfind("world stop: 1 in flight at the stop, 1 after the wait (", 0) == 0,
-          "a timed-out drain says so in the waiting stage's detail (1 call still in flight after the wait)");
+    check(std::string(winfo(h).detail).rfind("world stop: 1 in flight at the stop, 1 after the wait (", 0) == 0 &&
+              std::string(winfo(h).detail).find("; bounded wait only") != std::string::npos,
+          "a timed-out drain says so in the waiting stage's detail (1 call still in flight after the wait; bounded wait only)");
     b.release = true;
     worker.join();
     game_program_unwrap(h);
@@ -1186,6 +1265,8 @@ void stopping_timeout() {
     world_event(KILN_WORLD_STARTED, KILN_WORLD_SERVER);
     wpre();
     check(g_retired.empty(), "timed-out stop's chain is reclaimed only after its callback exits");
+    g_wrap_caps = nullptr;
+    g_drain[KILN_WORLD_SERVER] = -1;
 }
 
 // The core's tick faulted (tick.cpp disable(): every world pointer cleared, no STOPPING will come): a slice that finds no
@@ -1373,6 +1454,34 @@ uint32_t KILN_CALL each_stop(uint64_t*, uint32_t row, KilnEntity, void*) { retur
 void KILN_CALL st_iterate_after(KilnGameSlice* s, void*) {
     g_seen4.rcs.push_back(game_slice_iterate(s, &each_stop, nullptr));
     g_seen4.index_after = reinterpret_cast<ProgramCtx*>(s->program_ctx)->index;
+}
+
+// The runner link is installed with mid2_checked, which refuses while a thread cannot be checked: tried again
+// kRecordSpacing Pres later, kRecordAttempts times at most, then WhenArchetype keeps the entity-map read and says so.
+void record_link_refused() {
+    check(g_record_ok && !g_record_live.load() && !g_record_wanted.load(),
+          "slice record: the feature resolved; no link before a stage asks for an archetype");
+    wpre();
+    check(g_mid_calls == 0, "slice record: no link is put in while nobody asked");
+    g_mid_rc = KILN_HOOKS_ERR_UNCHECKED;
+    g_record_wanted = true;  // what a stage's first archetype read sets
+    wpre();
+    check(g_mid_calls == 1 && !g_record_live.load() && logs_with("tried again in 16 Pres") == 1,
+          "slice record: a refused link is said and not live");
+    for (int i = 0; i < 16; ++i) wpre();
+    check(g_mid_calls == 1, "slice record: no second try within 16 Pres");
+    wpre();
+    check(g_mid_calls == 2, "slice record: the second try comes 16 Pres later");
+    for (int i = 0; i < 8 * 17; ++i) wpre();
+    check(g_mid_calls == 8 && g_record_gaveup.load() && logs_with("was refused 8 times") == 1,
+          "slice record: after 8 refusals it gives up and says WhenArchetype keeps the entity-map read");
+    // as before the row: the next stage that asks puts the link in at once
+    g_record_gaveup = false;
+    g_record_attempts = 0;
+    g_record_wait = 0;
+    g_record_wanted = false;
+    g_mid_rc = KILN_OK;
+    g_mid_calls = 0;
 }
 
 void per_entity() {
@@ -1662,8 +1771,12 @@ void per_entity() {
         std::memcpy(recs[1] + 0x10, &ids[1], 4);
         const int64_t saved = L.entity_id;
         L.entity_id = -1;
+        check(archetype_of(ids[1], &rc) == 0 && rc == KILN_WORLD_ERR_CHANGED,
+              "archetype: without the record's id offset the map's layout is not trusted; the slice-record link is coming");
+        g_record_ok = false;
         check(archetype_of(ids[1], &rc) == 0 && rc == KILN_ERR_UNAVAILABLE,
-              "archetype: without the record's id offset the layout is not trusted (this build cannot read archetypes)");
+              "archetype: with neither the record's id offset nor the slice record, this build cannot read archetypes");
+        g_record_ok = true;
         L.entity_id = saved;
         // A concurrent map mutation during the archetype read (a grow, or an insert/erase) is detected: the test seam
         // changes the map between the layout read and the coherence re-check, and the read turns undecidable instead of
@@ -1685,6 +1798,55 @@ void per_entity() {
         wraps_test_archetype_gap(nullptr);
         check(archetype_of(ids[2], &rc) == reinterpret_cast<uintptr_t>(lay[2]) && rc == KILN_OK,
               "archetype: decides again once the map is steady under the read");
+
+        // The scheduler-stable source: the engine's slice record that ProgramRunner runs. The archetype reads above asked
+        // for it, so the next Pre put the link on the runner's entry; from then on a slice whose runner recorded its
+        // record reads the layout from there, checked against the trampoline's entry and the job's count.
+        wpre();
+        check(g_record_live.load() && g_mid_fn && g_mid_target == kRunner && g_mid_calls == 1,
+              "slice record: the first archetype read put the mid link on types/ProgramRunner in the next Pre");
+        alignas(16) static uint64_t rec_layout[2] = {1ull << 4, 0};
+        alignas(16) static uint8_t srec[0x38]{};
+        auto set_rec = [&](uintptr_t entry, uint32_t first, uint32_t end) {
+            const auto lp = reinterpret_cast<uintptr_t>(rec_layout);
+            std::memcpy(srec + 0x10, &entry, 8);
+            std::memcpy(srec + 0x18, &lp, 8);
+            std::memcpy(srec + 0x28, &first, 4);
+            std::memcpy(srec + 0x2C, &end, 4);
+        };
+        // ProgramRunner(storage, slice record, ...): its entry runs the link with rdx = the record, then the slice
+        auto via_runner = [&](uint32_t first, KilnResult* rc) {
+            KilnRegisters regs{};
+            regs.rdx = reinterpret_cast<uintptr_t>(srec);
+            g_mid_fn(&regs, g_mid_user);
+            return archetype_of(first, rc);
+        };
+        const auto rl = reinterpret_cast<uintptr_t>(rec_layout);
+        const uint64_t from_rec = g_arch_record.load(), mism = g_arch_mismatch.load();
+        set_rec(wentry(0), 5, 8);  // 3 rows: the job's count
+        check(via_runner(ids[2], &rc) == rl && rc == KILN_OK && g_arch_record.load() == from_rec + 1,
+              "slice record: the layout comes from the slice record the runner recorded, not from the entity map");
+        wraps_test_archetype_gap(+[] { uint32_t c = g_m2count + 1; std::memcpy(reinterpret_cast<void*>(g_m2 + 0x54), &c, 4); });
+        check(via_runner(ids[2], &rc) == rl && rc == KILN_OK,
+              "slice record: a map that changes meanwhile does not matter to it");
+        std::memcpy(m2 + 0x54, &mcount, 4);
+        wraps_test_archetype_gap(nullptr);
+        check(archetype_of(ids[2], &rc) == reinterpret_cast<uintptr_t>(lay[2]) && rc == KILN_OK,
+              "slice record: taken and cleared by the trampoline: a later slice with no record of its own reads the map");
+        set_rec(wentry(1), 5, 8);
+        check(via_runner(ids[2], &rc) == reinterpret_cast<uintptr_t>(lay[2]) && rc == KILN_OK && g_arch_mismatch.load() == mism + 1,
+              "slice record: a record of another program's entry is not trusted (the map answers)");
+        set_rec(wentry(0), 5, 9);
+        check(via_runner(ids[2], &rc) == reinterpret_cast<uintptr_t>(lay[2]) && rc == KILN_OK && g_arch_mismatch.load() == mism + 2,
+              "slice record: a record whose rows are not the job's count is not trusted (the map answers)");
+        set_rec(wentry(0), 5, 8);
+        const int64_t saved_entities = L.storage_entities;
+        L.storage_entities = -1;
+        check(via_runner(ids[2], &rc) == rl && rc == KILN_OK,
+              "slice record: decides on a build whose entity map did not resolve");
+        check(archetype_of(ids[2], &rc) == 0 && rc == KILN_WORLD_ERR_CHANGED,
+              "slice record: there, a slice with no record is left to the game (transient), not turned off");
+        L.storage_entities = saved_entities;
     }
     KilnGameSlice outside{};
     outside.size = sizeof outside;
@@ -1965,6 +2127,11 @@ void foreign_views() {
     const int writes = g_fwrites;
     auto* f = static_cast<uint8_t*>(foreign_write(&l, iter, kstr("Fuel"), 7, &size, &rc));
     check(f && rc == KILN_OK && size == 2 && g_fwrites == writes + 1, "foreign: write through other_write, marked by the tracker");
+    g_client_program = true;  // the same call from a Kiln client or prediction program's callback (package 14)
+    check(!foreign_write(&l, iter, kstr("Fuel"), 7, &size, &rc) && rc == KILN_ERR_UNAVAILABLE && g_fwrites == writes + 1 &&
+              foreign_attr_changed(&l, iter, f) == KILN_ERR_UNAVAILABLE,
+          "foreign: from a Kiln client program, foreign_write and foreign_attr_changed refuse (nothing saved or sent)");
+    g_client_program = false;
     check(!foreign_write(&l, iter, kstr("Health"), 7, &size, &rc) && rc == KILN_ERR_NOT_FOUND && g_fwrites == writes + 1,
           "foreign: a read-only component is not written");
     check(foreign_read(&l, iter, kstr("Fuel"), 7, &size, &rc) && rc == KILN_OK, "foreign: other_write is readable too");
@@ -2030,7 +2197,8 @@ void abi(const char* path) {
     };
 #define F(S, f) l.push_back(nlohmann::json::array({#f, offsetof(S, f)}))
     {
-        auto& l = list("KilnWorldApiV4", sizeof(KilnWorldApi));
+        // the v4 table up to the foreign views (0.2.0-dev.29's client-world members after them: client_world_test.cpp)
+        auto& l = list("KilnWorldApiV4", offsetof(KilnWorldApi, foreign_attr_changed) + sizeof(void*));
         F(KilnWorldApi, header); F(KilnWorldApi, register_program); F(KilnWorldApi, program_slot); F(KilnWorldApi, program_info);
         F(KilnWorldApi, iter_begin); F(KilnWorldApi, iter_next); F(KilnWorldApi, current_entity); F(KilnWorldApi, command_buffer);
         F(KilnWorldApi, queue_push); F(KilnWorldApi, queue_add); F(KilnWorldApi, queue_remove); F(KilnWorldApi, mark_written);
@@ -2162,6 +2330,7 @@ int main(int argc, char** argv) {
     stopping_timeout();
     tick_fault_closes_admission();
     retirement_under_load();
+    record_link_refused();
     per_entity();
     foreign_views();
     directory_read_in_stage();

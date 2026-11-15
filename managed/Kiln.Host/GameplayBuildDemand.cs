@@ -8,15 +8,33 @@ namespace Kiln.Host;
 // Optional native service access: Kiln.Host must not acquire a reference to Kiln.Gameplay.
 internal static class GameplayBuildDemand
 {
-    internal static bool ReferencesGameplay(Assembly assembly) =>
-        assembly.GetReferencedAssemblies().Any(n => n.Name == "Kiln.Gameplay");
+    // Optional service facades that themselves consume gameplay events/rules. Keep this explicit: following every
+    // shared Kiln.* dependency would make an unrelated facade count as using every service.
+    private static uint GroupsForReference(string? name) => name switch {
+        "Kiln.Gameplay" => 31u,
+        "Kiln.Creatures" => 8u, // CreatureVariants natural-spawn events/replacements
+        "Kiln.Rules" => 5u, // RulesRuntime's BuildEvent
+        "Kiln.Quests" => 7u, // craft/build objectives
+        "Kiln.Blocks" => 15u, // NPC variants and declarative craft/build objectives
+        _ => 0u,
+    };
+    internal static uint GroupsFor(Assembly assembly) =>
+        assembly.GetReferencedAssemblies().Aggregate(0u,(mask,n)=>mask|GroupsForReference(n.Name));
 
-    internal static unsafe void Request(IHostServices host, ulong owner)
+    internal static unsafe void Request(IHostServices host, ulong owner, uint demand=31)
     {
         var table = (byte*)host.Service("kiln.gameplay", 1);
-        // KilnGameplayApi: service header, 15 preceding function pointers, then request_build (append-only).
+        // KilnGameplayApi: request_build stays at 128, request_hooks follows at 136.
         var offset = 8 + 15 * sizeof(nint);
         if (table == null || *(uint*)table < offset + sizeof(nint) || *(uint*)(table + 4) < 1) return;
+        if (*(uint*)table >= 144) {
+            var groups = *(delegate* unmanaged[Cdecl]<ulong, uint, int>*)(table + 136);
+            if (groups != null) {
+                if (groups(owner,demand) != 0) host.Log(LogLevel.Warn,$"mod owner {owner}: gameplay hook demand refused (see group capability rows)");
+                return;
+            }
+        }
+        if((demand & 1)==0) return; // Old service already installs the four other groups at startup.
         var request = *(delegate* unmanaged[Cdecl]<ulong, int>*)(table + offset);
         if (request != null && request(owner) != 0)
             host.Log(LogLevel.Warn, $"mod owner {owner}: gameplay.build_hooks request refused: {Kiln.Capabilities.Why("gameplay.build_hooks")}");
@@ -24,7 +42,7 @@ internal static class GameplayBuildDemand
 
     // Startup demand must precede the first world even on dedicated servers, whose ordinary OnLoad runs at Pre.
     // Inspect metadata only: do not instantiate a mod or run its module initializer/OnLoad earlier.
-    internal static bool ReferencesGameplay(string entry, IEnumerable<string> exportedAssemblies)
+    internal static uint GroupsFor(string entry, IEnumerable<string> exportedAssemblies)
     {
         var pending = new Queue<string>(); pending.Enqueue(entry);
         // A shipped helper can be loaded by name in OnLoad, without an AssemblyRef from the entry assembly.
@@ -36,6 +54,7 @@ internal static class GameplayBuildDemand
                 File.Exists(Path.Combine(Path.GetDirectoryName(typeof(ModManager).Assembly.Location)!, name))) continue;
             pending.Enqueue(helper);
         }
+        uint demand=0;
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var exports = exportedAssemblies.ToArray();
         while (pending.TryDequeue(out var path))
@@ -43,14 +62,14 @@ internal static class GameplayBuildDemand
             if (!seen.Add(path)) continue;
             using var stream = File.OpenRead(path);
             using var pe = new PEReader(stream);
-            MetadataReader metadata;
-            try { if (!pe.HasMetadata) continue; metadata = pe.GetMetadataReader(); }
-            catch (BadImageFormatException) when (path != entry) { continue; } // native helper, not an assembly
+            if (!pe.HasMetadata) continue; // Valid native PE helper, not an assembly.
+            var metadata = pe.GetMetadataReader(); // Malformed metadata must take the conservative fallback.
 
             foreach (var handle in metadata.AssemblyReferences)
             {
                 var name = metadata.GetString(metadata.GetAssemblyReference(handle).Name);
-                if (name == "Kiln.Gameplay") return true;
+                demand |= GroupsForReference(name);
+                if(demand==31) return demand;
                 if (name != Path.GetFileName(name) || name.Contains('\\')) continue;
                 // Match the loader: shared Kiln.* assemblies are provided by the host, not the mod's own folder.
                 if (name.StartsWith("Kiln.", StringComparison.Ordinal) &&
@@ -61,7 +80,7 @@ internal static class GameplayBuildDemand
                     pending.Enqueue(exported);
             }
         }
-        return false;
+        return demand;
     }
 }
 
@@ -74,7 +93,6 @@ internal sealed partial class ModManager
         var admitted = candidates.Where(c => roles.ContainsKey(c.Directory)).ToArray();
         foreach (var (manifest, directory) in admitted)
         {
-            if (!manifest.HasCode) continue;
             try
             {
                 var dependencies = new HashSet<string>(StringComparer.Ordinal);
@@ -84,16 +102,23 @@ internal sealed partial class ModManager
                             AddDependencies(dependency);
                 }
                 AddDependencies(manifest);
-                if (!GameplayBuildDemand.ReferencesGameplay(Path.Combine(directory, manifest.EntryAssembly),
+                uint demand=Directory.Exists(Path.Combine(directory,"blocks")) ? 15u : 0u;
+                if (Directory.Exists(Path.Combine(directory,"quests"))) demand |= 7u;
+                if(manifest.HasCode) demand |= GameplayBuildDemand.GroupsFor(Path.Combine(directory, manifest.EntryAssembly),
                         admitted.Where(c => dependencies.Contains(c.Manifest.Id))
-                            .SelectMany(c => c.Manifest.Exports.Select(f => Path.Combine(c.Directory, f))))) continue;
+                            .SelectMany(c => c.Manifest.Exports.Select(f => Path.Combine(c.Directory, f))));
+                if(demand==0) continue;
                 var owner = _host.OwnerCreate("mod:" + manifest.Id);
-                try { GameplayBuildDemand.Request(_host, owner); }
+                try { GameplayBuildDemand.Request(_host, owner,demand); }
                 finally { _host.OwnerRevoke(owner); }
             }
             catch (Exception e) when (e is IOException or BadImageFormatException or UnauthorizedAccessException)
             {
-                _host.Log(LogLevel.Warn, $"mod {manifest.Id}: gameplay preflight could not read assembly references: {e.Message}; checked again at load");
+                _host.Log(LogLevel.Warn, $"mod {manifest.Id}: gameplay preflight could not read assembly references: {e.Message}; conservatively requesting all hook groups before the world");
+                // Unknown metadata must not discard demand or defer building protection until the next world.
+                var owner = _host.OwnerCreate("mod:" + manifest.Id);
+                try { GameplayBuildDemand.Request(_host, owner); }
+                finally { _host.OwnerRevoke(owner); }
             }
         }
     }

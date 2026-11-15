@@ -250,6 +250,9 @@ void* KILN_CALL foreign_write(const KilnForeignLayout* layout, const uint64_t* i
                               uint32_t* size, KilnResult* rc) {
     t_last_write = {};
     if (size) *size = 0;
+    // Not from a Kiln client or prediction program (package 14): world.programs.client promises that nothing such a
+    // program writes is saved or sent, and this path is not verified for a client job (write_other's reason, programs.cpp).
+    if (in_client_program()) return set_rc(rc, KILN_ERR_UNAVAILABLE), nullptr;
     const ForeignView* v = view_of(layout);
     ProgramCtx* ctx = ctx_of(iter);
     if (!v || !ctx || foreign_check(layout, iter, nullptr) != KILN_OK || !F.write_other) return set_rc(rc, KILN_ERR_UNAVAILABLE), nullptr;
@@ -269,6 +272,9 @@ void* KILN_CALL foreign_write(const KilnForeignLayout* layout, const uint64_t* i
 }
 
 KilnResult KILN_CALL foreign_attr_changed(const KilnForeignLayout* layout, const uint64_t* iter, void* component) {
+    // Not from a Kiln client or prediction program: what AttrChanged marks is not decoded (docs/re/world.md), and that
+    // capability promises nothing saved or sent.
+    if (in_client_program()) return KILN_ERR_UNAVAILABLE;
     const ForeignView* v = view_of(layout);
     if (!v || !iter) return KILN_ERR_UNAVAILABLE;
     const AttrChangedFn f = g_attr_fn.load(std::memory_order_acquire);

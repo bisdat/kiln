@@ -17,6 +17,7 @@
 #include "engine.h"
 #include "equip.h"
 #include "instances.h"
+#include "setexec.h"
 #include "setplan.h"
 #include "setsnap.h"
 #include "setsvc.h"
@@ -241,7 +242,25 @@ namespace {
 std::atomic<bool> g_broken{false};
 std::mutex g_broken_mu;
 char g_broken_why[160] = "";
+std::atomic<uint32_t> g_parts{UINT32_MAX};  // UINT32_MAX: no set has run yet
+
+// "" when all seven are read; else which are not (for kiln.log and the capability row)
+void parts_text(uint32_t parts, char* out, size_t cap) {
+    out[0] = 0;
+    size_t at = 0;
+    for (int k = 0; k < 7; ++k)
+        if (!(parts & (1u << k)) && at < cap)
+            at += static_cast<size_t>(std::snprintf(out + at, cap - at, "%s%s", at ? ", " : "", sets::kFullParts[k]));
+}
 }  // namespace
+
+void sets_full_parts(uint32_t parts) {
+    if (g_parts.exchange(parts) == parts) return;
+    char missing[160];
+    parts_text(parts, missing, sizeof missing);
+    if (missing[0]) LOGW("equipment sets: a rollback is compared over the components this build's equip program declares; it cannot read: %s", missing);
+    else LOGI("equipment sets: a rollback is compared over all seven components of the equip program (%s, ...)", sets::kFullParts[0]);
+}
 
 void sets_break(const char* why) {
     {
@@ -250,13 +269,13 @@ void sets_break(const char* why) {
         std::snprintf(g_broken_why, sizeof g_broken_why, "%s", why);
         g_broken.store(true);
     }
-    LOGE("equipment sets are off until the server restarts: %s", why);
+    LOGE("equipment sets are off until the server, or the hosting player's game, restarts: %s", why);
 }
 
 bool sets_available(char* why, size_t cap) {
     if (g_broken.load()) {
         std::lock_guard lock(g_broken_mu);
-        std::snprintf(why, cap, "equipment sets were switched off until the server restarts: %s", g_broken_why);
+        std::snprintf(why, cap, "sets and equips were switched off until the server or the hosting game restarts: %s", g_broken_why);
         return false;
     }
     if (!E.sets_ok) return std::snprintf(why, cap, "items.equip_sets is off on this build (the commit's guards or the equip functions did not resolve)"), false;
@@ -374,6 +393,11 @@ KilnResult sets_status(KilnSetStatusV1* out) {
     out->available = sets_available(why, sizeof why) ? 1 : 0;
     out->broken = g_broken.load() ? 1 : 0;
     std::snprintf(out->detail, sizeof out->detail, "%s", out->available ? "" : why);
+    if (const uint32_t parts = g_parts.load(); out->available && parts != UINT32_MAX) {  // known once a set ran
+        char missing[160];
+        parts_text(parts, missing, sizeof missing);
+        if (missing[0]) std::snprintf(out->detail, sizeof out->detail, "a rollback is not compared for %s (not in this build's equip program)", missing);
+    }
     const SetCounters& c = set_counters();
     out->pending = c.pending.load();
     out->done = c.done.load();
@@ -414,7 +438,7 @@ const char* find_text(SnapStore::Find f) {
 }  // namespace
 
 namespace {
-bool g_lab = false, g_matrix = false;
+bool g_lab = false, g_matrix = false, g_notes_lab = false;
 PlanOptions g_plan_options;
 }  // namespace
 
@@ -426,6 +450,8 @@ void sets_lab_init() {
     const std::filesystem::path dir = std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(buf), len)) / "kiln.items";
     g_lab = std::filesystem::exists(dir / "sets-lab", ec);
     g_matrix = g_lab && std::filesystem::exists(dir / "sets-matrix", ec);
+    g_notes_lab = std::filesystem::exists(dir / "notes-lab", ec);
+    if (g_notes_lab) LOGW("kiln.items: lab switch notes-lab (kiln/data/kiln.items): give/take jobs log their component watch note's cost");
     // cycles (two worn items exchanged through a free slot) passed the rollback matrix (2026-11-15): on unless a lab turns
     // them off to see the refusal
     g_plan_options.cycles = !std::filesystem::exists(dir / "sets-no-cycles", ec);
@@ -437,6 +463,7 @@ void sets_lab_init() {
 
 bool sets_lab() { return g_lab; }
 bool sets_lab_matrix() { return g_matrix; }
+bool notes_lab() { return g_notes_lab; }
 
 PlanOptions sets_plan_options() { return g_plan_options; }
 

@@ -57,7 +57,7 @@ void KILN_CALL run_ask(void* user) {
     auto* a = static_cast<Ask*>(user);
     a->out = a->fn();
 }
-// kiln.decisions' window_wanted, guarded like a window call (a fault counts as one).
+// A window service's window_wanted, guarded like a window call (a fault counts as one).
 bool ask_guarded(WantedFn fn, uint32_t* out) {
     Ask a{fn, 0};
     unsigned long code = 0;
@@ -65,7 +65,7 @@ bool ask_guarded(WantedFn fn, uint32_t* out) {
         *out = a.out;
         return true;
     }
-    KLOG_E("window clock: kiln.decisions' window_wanted faulted (0x%08lx)", code);
+    KLOG_E("window clock: a window service's window_wanted faulted (0x%08lx)", code);
     g_fault_code = code;
     *out = 0;
     return false;
@@ -83,14 +83,15 @@ bool tell_guarded(FaultedFn fn, uint32_t code) {
     Tell t{fn, code};
     unsigned long c = 0;
     if (guard::task(&run_tell, &t, &c)) return true;
-    KLOG_E("window clock: kiln.decisions' window_faulted faulted as well (0x%08lx)", c);
+    KLOG_E("window clock: a window service's window_faulted faulted as well (0x%08lx)", c);
     return false;
 }
 
 void note_faults(uint32_t mask) {
     if (!mask) return;
     if ((mask & 1) && !(g_faulted & 1)) KLOG_E("window clock: kiln.decisions faulted in a window call; it gets no further one");
-    // before it is left out: kiln.decisions stops holding and ends what it holds (its deadlines moved at these calls)
+    // before it is left out: kiln.decisions stops holding and ends what it holds (its deadlines moved at these calls);
+    // kiln.component_changes ends its watches
     tell_faulted(mask, g_faulted, g_tables, static_cast<uint32_t>(g_fault_code), &tell_guarded);
     if ((mask & 2) && !(g_faulted & 2))
         KLOG_E("window clock: kiln.component_changes faulted in a window call; it gets no further one");

@@ -1,3 +1,4 @@
+import { stopIds } from "./stoppedStart";
 // The one list of mods the main screen and the Deck's Mods screen show (docs/kiln/launcher/app.md, "Play"): every
 // Library entry of every kind, the loaded profile's entries the Library lacks, and the mods a player put in the game
 // folder that the launcher did not place (kiln_manage::found). A row is on when its mod is in the loaded profile and
@@ -269,6 +270,7 @@ export function revertBulk(p: Profile, changes: BulkChange[], touched: ReadonlyS
 
 /** The filter: words in the name or id, and one kind ("" every kind). */
 export function filterRows(rows: ModRow[], text: string, kind: ModKind | ""): ModRow[] {
+  const ids = stopIds(text);
   const q = lower(text.trim());
-  return rows.filter((r) => (!kind || r.kind === kind) && (!q || lower(`${r.name} ${r.id}`).includes(q)));
+  return rows.filter((r) => (!kind || r.kind === kind) && (ids ? ids.includes(r.id) : (!q || lower(`${r.name} ${r.id}`).includes(q))));
 }

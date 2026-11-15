@@ -73,6 +73,7 @@ pub mod hash;
 pub mod hostenv;
 pub mod launch;
 pub mod start_progress;
+pub mod stopped_start;
 pub mod paths;
 pub mod data_folder;
 pub mod data_folder_move;

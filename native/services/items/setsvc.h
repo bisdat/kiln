@@ -21,7 +21,11 @@ const sets::SetLayout* sets_layout(char* why, size_t cap);
 
 // Whether sets can run now; the reason when not. Any thread.
 bool sets_available(char* why, size_t cap);
-// Switches sets off until the server restarts (an invariant failure, a fault inside the transaction). Logged once.
+// Which of the seven components (setexec.h kFullParts, a bit each) the rollback comparison reads on this build: the
+// adapter reports it at every set; kiln.log says it once (naming any it cannot read), set_status' detail carries it.
+void sets_full_parts(uint32_t parts);
+// Switches sets off until the server, or the hosting player's game, restarts (an invariant failure, a fault inside the
+// set's reads or transaction). Logged once.
 void sets_break(const char* why);
 bool sets_broken();
 
@@ -47,6 +51,8 @@ sets::PlanOptions sets_plan_options();
 void sets_lab_init();
 bool sets_lab();
 bool sets_lab_matrix();  // kiln/data/kiln.items/sets-matrix: a state mismatch does not switch sets off (lab matrix only)
+// lab only (kiln/data/kiln.items/notes-lab): give/take jobs log what the component watch note costs them (07 S7)
+bool notes_lab();
 // A plan as the ABI has it (KilnSetPlanV1's status, refusal, steps).
 void sets_fill_plan(const sets::SetPlan& p, uint64_t valid_through, KilnSetPlanV1* out);
 

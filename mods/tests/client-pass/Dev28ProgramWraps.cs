@@ -6,7 +6,10 @@
 // its own world's slices (the prediction world, which runs the client world's table, is forwarded untouched), the client
 // world's slices ran on the game's workers, a third wrap with an archetype filter (WhenArchetype: the client world's
 // entity map, read on the workers while entities come and go) decided its slices, no stage faulted or went over its
-// budget, and the wraps are gone after Dispose. What only a player can judge is asked: that the game looked and ran as before while they were on. The joined
+// budget, and the wraps are gone after Dispose. It also prints the core's world-stop guarantee per world kind
+// (world.stop_drain.*, since 0.2.0-dev.29: the game's WaitWorldJobs on the server and the client world before their
+// STOPPING) and expects all three available in a client; kiln.log's stop lines at leave, rejoin and exit are the
+// proof of the stop itself (docs/kiln/services/systems.md). What only a player can judge is asked: that the game looked and ran as before while they were on. The joined
 // half (a client joined to a dedicated server) is not here: a joined check's body runs on the server.
 //
 // 06a-wraps.waterworks: the product proof (chapter 06a 6, 9.13) in a hosted world with a second player in it, where the
@@ -61,6 +64,13 @@ public sealed partial class ClientPassMod
                 await c.Skip($"{row} is unavailable: {Capabilities.Why(row)}");
                 return;
             }
+        var drains = new[] { "world.stop_drain.server", "world.stop_drain.client", "world.stop_drain.prediction" }
+            .Select(Capabilities.Get).ToArray();
+        foreach (var d in drains)
+            c.Log.Info($"client-pass: 06a-wraps.client {d.Name}: {d.State} ({d.Reason}): {d.ReasonText}");
+        c.Expect(drains.All(d => d.IsAvailable),
+            "the core drains every world kind's jobs before that world's stop (world.stop_drain.server, .client, .prediction)",
+            string.Join("; ", drains.Select(d => $"{d.Name} {d.State}: {d.ReasonText}")));
         var client = new WrapCount();
         var server = new WrapCount();
         var disabled = new ConcurrentQueue<WrapDisabledEvent>();
@@ -85,9 +95,10 @@ public sealed partial class ClientPassMod
         serverWrap.Before((ref Slice s) => server.Add(ref s));
         serverWrap.Disabled += e => disabled.Enqueue(e);
         // The archetype filter on a client: render_transform reads CurrentTransform and runs without StaticTransform, so every
-        // slice it runs passes this filter; deciding it reads each slice's first entity in the client world's entity map
-        // (statically the server's map, out/06a-program-wraps/client-static) on the game's workers. A slice it cannot
-        // decide turns the wrap off with a reason (a Disabled event below).
+        // slice it runs passes this filter. Its first read comes from the client world's entity map; it puts kiln.world's
+        // slice-record link on the program runner, and from the next step on each slice's archetype is read from the
+        // engine's own slice record on the game's workers. A slice it cannot decide turns the wrap off with a reason (a
+        // Disabled event below); a change under a map read leaves that slice to the game (Stats.ArchetypeSkips).
         var archetype = new WrapCount();
         var w3 = Systems.Wrap("render_transform", new WrapOptions { World = WorldKind.Client });
         if (!c.Expect(w3.Ok && w3.Wrap is not null, "a second wrap of render_transform, with an archetype filter", w3.Ok ? "made" : w3.Reason))
@@ -118,7 +129,8 @@ public sealed partial class ClientPassMod
         c.Expect(archetypeWrap.State == WrapState.Active && admitted > 0 && admitted * 100 >= all * 95 &&
                  Interlocked.Read(ref archetype.OffWorldThread) > 0,
             "the archetype filter decided the client world's slices on the workers (every render_transform slice passes it)",
-            $"{admitted} of {all} slices admitted, {Interlocked.Read(ref archetype.OffWorldThread)} off the world's thread; {archetypeWrap.State}");
+            $"{admitted} of {all} slices admitted, {Interlocked.Read(ref archetype.OffWorldThread)} off the world's thread, " +
+            $"{archetypeWrap.Stats.ArchetypeSkips} left to the game; {archetypeWrap.State}");
         c.Expect(disabled.IsEmpty && clientWrap.Stats.Faults == 0 && serverWrap.Stats.Faults == 0 && archetypeWrap.Stats.Faults == 0 &&
                  clientWrap.Stats.Overruns == 0 && serverWrap.Stats.Overruns == 0 && archetypeWrap.Stats.Overruns == 0,
             "no stage faulted or went over its budget", disabled.IsEmpty ? "none" : string.Join("; ", disabled.Select(e => $"{e.Program}: {e.Reason}")));

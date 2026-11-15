@@ -3,6 +3,7 @@
 // the reply's layout, NoWorld and NotReady clearing both budgets while the configured limits stay, a ready pair with the
 // game's, Kiln's and another loader's entries told apart, one revision for both that rises only on a change, and the
 // prediction kind refused.
+#include <algorithm>
 #include <cstdarg>
 #include <cstdio>
 #include <vector>
@@ -19,6 +20,9 @@ KilnSessionInfo g_session{};
 std::vector<uintptr_t> g_table;  // the directory's descriptors, by index
 uint32_t g_game = 0;
 bool g_directory = false;
+std::vector<uintptr_t> g_client_table;  // a game client's client world (0.2.0-dev.29: Kiln's client-table programs)
+uint32_t g_client_game = 0;
+bool g_client_directory = false;
 ProgramLedger g_ledger;
 KilnResult KILN_CALL game_programs_status(KilnGameProgramsStatus* out) {
     const uint32_t size = out->size;
@@ -27,12 +31,17 @@ KilnResult KILN_CALL game_programs_status(KilnGameProgramsStatus* out) {
     out->directory[KILN_WORLD_SERVER] = g_directory;
     out->programs[KILN_WORLD_SERVER] = static_cast<uint32_t>(g_table.size());
     out->game_programs[KILN_WORLD_SERVER] = g_game;
+    out->directory[KILN_WORLD_CLIENT] = g_client_directory;
+    out->programs[KILN_WORLD_CLIENT] = static_cast<uint32_t>(g_client_table.size());
+    out->game_programs[KILN_WORLD_CLIENT] = g_client_game;
     return KILN_OK;
 }
 bool game_program_at(uint32_t kind, int32_t index, ProgramRef* out) {
-    if (kind != KILN_WORLD_SERVER || !g_directory || index < 0 || static_cast<size_t>(index) >= g_table.size()) return false;
+    const auto& t = kind == KILN_WORLD_CLIENT ? g_client_table : g_table;
+    const bool dir = kind == KILN_WORLD_CLIENT ? g_client_directory : kind == KILN_WORLD_SERVER && g_directory;
+    if (!dir || index < 0 || static_cast<size_t>(index) >= t.size()) return false;
     out->index = index;
-    out->desc = g_table[static_cast<size_t>(index)];
+    out->desc = t[static_cast<size_t>(index)];
     return true;
 }
 ProgramLedger program_ledger() { return g_ledger; }
@@ -129,6 +138,28 @@ int main() {
     std::tie(rc, r) = ask(KILN_WORLD_SERVER);
     check(r.readiness == KILN_CAPACITY_ACCOUNTING_MISMATCH && zero(r.engine_slots) && zero(r.kiln_slots), "counts over the table: a mismatch, both cleared");
     g_game = 817;
+    // A game client's client world (0.2.0-dev.29): Kiln's entries in its table are the client-side descriptors the ledger
+    // lists next to the server ones (a "both" program: one slot, an entry in each table). Its own scope and generation.
+    g_ledger.descs.push_back(0x9100);  // a both program's client-side descriptor
+    g_ledger.descs.push_back(0x9300);  // a client program's
+    std::sort(g_ledger.descs.begin(), g_ledger.descs.end());
+    g_session.worlds[KILN_WORLD_CLIENT] = 0xA000;
+    g_session.sessions[KILN_WORLD_CLIENT] = 2;
+    g_client_table.clear();
+    for (uintptr_t i = 0; i < 817; ++i) g_client_table.push_back(0x150000000 + i * 0x190);
+    g_client_table.push_back(0x9100);
+    g_client_table.push_back(0x9300);
+    g_client_game = 817;
+    g_client_directory = true;
+    std::tie(rc, r) = ask(KILN_WORLD_CLIENT);
+    check(rc == KILN_OK && r.readiness == KILN_CAPACITY_VALID && r.generation == 2 && r.engine_slots.world_kind == KILN_WORLD_CLIENT &&
+              r.engine_slots.game_used == 817 && r.engine_slots.kiln_used == 2 && r.engine_slots.reserved == 0,
+          "the client world: its table's 896, the game's 817, Kiln's 2 client-side entries found by the ledger");
+    check(r.kiln_slots.capacity == 64 && r.kiln_slots.kiln_used == 13, "the 64 Kiln slots are the same process-wide ledger");
+    g_client_table.push_back(0x7ff800);  // a client entry the ledger does not know: another loader's
+    check(ask(KILN_WORLD_CLIENT).second.engine_slots.reserved == 1, "an entry Kiln did not register: another loader's");
+    g_session.worlds[KILN_WORLD_CLIENT] = 0;
+    check(ask(KILN_WORLD_CLIENT).second.readiness == KILN_CAPACITY_NO_WORLD, "the client world stopped (the menu): NoWorld");
     F.programs = false;
     check(ask(KILN_WORLD_SERVER).second.readiness == KILN_CAPACITY_NOT_READY, "programs off on this build: NotReady");
     std::printf("world program budget: %s %d checks, %d failures\n", failures ? "FAIL" : "PASS", checks, failures);
