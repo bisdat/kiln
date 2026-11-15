@@ -160,17 +160,32 @@ fn config_file(game_dir: &Path) -> PathBuf {
 /// A folder ShroudForge's config names, as the adapter's `sf_directory(root, name, fallback)` finds it: `paths.<name>`
 /// when it is a non-empty string, else `<game>/<fallback>`. None: this system cannot name that folder.
 pub(crate) fn sf_directory(game_dir: &Path, name: &str, fallback: &str) -> Option<PathBuf> {
+    match configured_directory(game_dir, name) {
+        Some(v) => windows_folder(game_dir, &v),
+        None => Some(ci_child(game_dir, fallback)),
+    }
+}
+
+// The old Windows launcher uses this spelling as its receipt key, including the verbatim prefix.
+#[cfg(windows)]
+pub(crate) fn legacy_mods_directory(game_dir: &Path) -> PathBuf {
+    match configured_directory(game_dir, "mods") {
+        Some(v) => {
+            let p = Path::new(&v);
+            if p.is_absolute() { p.to_path_buf() } else { game_dir.join(p) }
+        }
+        None => ci_child(game_dir, "mods"),
+    }
+}
+
+fn configured_directory(game_dir: &Path, name: &str) -> Option<String> {
     // read_config: any failure is an empty object; `value` of another type throws and sf_directory falls back
-    let configured = match scan(&config_file(game_dir), &["paths"], &["mods", "state"]) {
+    match scan(&config_file(game_dir), &["paths"], &["mods", "state"]) {
         Scan::Doc(d) => match d.get("paths").and_then(|p| p.get(name)) {
             Some(Field::Str(s)) if !s.is_empty() => Some(s.clone()),
             _ => None,
         },
         _ => None,
-    };
-    match configured {
-        Some(v) => windows_folder(game_dir, &v),
-        None => Some(ci_child(game_dir, fallback)),
     }
 }
 

@@ -625,6 +625,16 @@ fn engine_lock(managed: &Path, root: &Path) -> Result<std::fs::File> {
     Ok(lock)
 }
 
+// The parent of an EML copy and the folder ShroudForge reads. The platform is explicit so host tests
+// exercise the Windows decision used by placement, without a Windows filesystem.
+fn sf_reads_parent(parent: &Path, root: &Path, windows: bool) -> bool {
+    if windows {
+        crate::winpath::windows_same_folder(&parent.to_string_lossy(), &root.to_string_lossy())
+    } else {
+        crate::winpath::same_folder(parent, root)
+    }
+}
+
 fn placements_file(game: &Path) -> PathBuf {
     game.join("kiln/state/library-placements.json")
 }
@@ -649,6 +659,18 @@ fn placements(game: &Path) -> Result<Vec<Placement>> {
     Ok(kept)
 }
 
+// Keep the spelling dev.28 keys its own-loader receipts by. DLL companion receipts are
+// keyed by the game folder instead, so they must not acquire ShroudForge's spelling.
+#[cfg(any(windows, test))]
+fn compatible_receipt_path(path: &str, kind: ModKind, game_folder: bool, sf_root: &str) -> String {
+    if !game_folder && matches!(kind, ModKind::ShroudForge | ModKind::Eml) {
+        if let Some(rest) = crate::winpath::windows_below(sf_root, path).filter(|rest| rest.len() == 1) {
+            return format!("{}\\{}", sf_root.trim_end_matches(['\\', '/']), rest[0]);
+        }
+    }
+    path.to_owned()
+}
+
 fn save_placements(game: &Path, entries: &[Placement]) -> Result<()> {
     #[cfg(test)]
     if tests::FAIL_SAVE_PLACEMENTS.with(|f| f.replace(false)) { return Err(Error::invalid("injected receipt write failure")); }
@@ -658,6 +680,17 @@ fn save_placements(game: &Path, entries: &[Placement]) -> Result<()> {
     std::fs::create_dir_all(parent).map_err(io_at(parent, "creating"))?;
     let tmp = crate::library::TempDir::new(parent, "receipt")?;
     let staged = tmp.path().join("receipt.json");
+    #[cfg(windows)]
+    let compatible: Vec<Placement> = {
+        let root = crate::sf_paths::legacy_mods_directory(game);
+        entries.iter().cloned().map(|mut r| {
+            r.path = PathBuf::from(compatible_receipt_path(&r.path.to_string_lossy(), r.marker.kind,
+                r.game_folder, &root.to_string_lossy()));
+            r
+        }).collect()
+    };
+    #[cfg(windows)]
+    let entries = compatible.as_slice();
     crate::util::write_json_atomic(&staged, &entries)?;
     crate::util::rename_replace(&staged, &file)
 }
@@ -2087,7 +2120,7 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
         let sf_root = (kind == ModKind::Eml && crate::own_loaders::shroudforge_runs_eml(loaders))
             .then(|| crate::shroudforge::mods_dir(game_dir));
         // (the same folder as Windows names it: ShroudForge spells its folder `\\?\C:\…\mods` there, Kiln the game's `C:\…`)
-        let sf_reads = |dst: &Path| sf_root.as_ref().is_some_and(|r| dst.parent().is_some_and(|p| crate::winpath::same_folder(p, r)));
+        let sf_reads = |dst: &Path| sf_root.as_ref().is_some_and(|r| dst.parent().is_some_and(|p| sf_reads_parent(p, r, cfg!(windows))));
         let server = game_dir.join(crate::game::SERVER_EXE).is_file();
         // Where each enabled mod goes: `<game>/mods/<folder>` for an EML mod a native DLL reads there (always, with or
         // without EML's own loader), else the own loader's folder while that loader is installed.
@@ -3523,6 +3556,26 @@ mod tests {
         pub(super) static FAIL_SAVE_PLACEMENTS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
         /// [`adopt`] on this thread stops before this step, as a crash would (a panic: nothing is taken back).
         pub(super) static STOP_ADOPT_BEFORE: std::cell::Cell<Option<AdoptStep>> = const { std::cell::Cell::new(None) };
+    }
+
+    #[test]
+    fn receipts_keep_the_older_launchers_shroudforge_spelling_on_disk() {
+        let root = r"\\?\C:\Game\mods";
+        for kind in [ModKind::ShroudForge, ModKind::Eml] {
+            assert_eq!(compatible_receipt_path(r"C:\Game\mods\sample", kind, false, root),
+                r"\\?\C:\Game\mods\sample");
+        }
+        assert_eq!(compatible_receipt_path(r"C:\Game\mods\sample", ModKind::Eml, true, root), r"C:\Game\mods\sample");
+        assert_eq!(compatible_receipt_path(r"C:\Game\mods2\sample", ModKind::Eml, false, root), r"C:\Game\mods2\sample");
+    }
+
+    #[test]
+    fn sf_reads_parent_uses_windows_comparison_only_on_windows() {
+        let plain = Path::new(r"C:\Games\Enshrouded\mods");
+        let sf = Path::new(r"\\?\c:\games\enshrouded\MODS");
+        assert!(sf_reads_parent(plain, sf, true));
+        assert_eq!(sf_reads_parent(plain, sf, false), cfg!(windows));
+        assert!(!sf_reads_parent(Path::new(r"C:\Games\Enshrouded\mods2"), sf, true));
     }
 
     /// Receipts a launcher on Windows wrote while it read ShroudForge's `paths.mods` with the verbatim prefix (before

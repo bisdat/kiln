@@ -239,12 +239,16 @@ fn windows_same_folder(a: &str, b: &str) -> bool {
     fn key(p: &str) -> (usize, Vec<String>) {
         let mut p = p.replace('/', "\\");
         // `\\?\C:\x` names `C:\x`, `\\?\UNC\host\share` names `\\host\share`; other verbatim paths have no other name
-        if let Some(rest) = p.strip_prefix(r"\\?\UNC\") {
+        // Literal trailing dots/spaces need the extended namespace; an ordinary Win32 path
+        // would trim them. Keep that namespace in the key instead of aliasing another folder.
+        let literal = p.split('\\').any(|name| name.ends_with('.') || name.ends_with(' '));
+        if let Some(rest) = p.strip_prefix(r"\\?\UNC\").filter(|_| !literal) {
             p = format!(r"\\{rest}");
-        } else if let Some(rest) = p.strip_prefix(r"\\?\").filter(|r| r.as_bytes().get(1) == Some(&b':')) {
+        } else if let Some(rest) = p.strip_prefix(r"\\?\").filter(|r| !literal && r.as_bytes().get(1) == Some(&b':')) {
             p = rest.to_owned();
         }
-        let rooted = p.bytes().take_while(|&c| c == b'\\').count().min(2);
+        let rooted = p.bytes().take_while(|&c| c == b'\\').count().min(2)
+            + usize::from(p.as_bytes().get(1) == Some(&b':') && p.as_bytes().get(2) == Some(&b'\\')) * 3;
         // Windows' ordinal case-blind comparison: one upper-case character for each
         let fold = |s: &str| s.chars().map(|c| { let mut u = c.to_uppercase(); if u.len() == 1 { u.next().unwrap_or(c) } else { c } }).collect::<String>();
         (rooted, p.split('\\').filter(|s| !s.is_empty() && *s != ".").map(fold).collect())
@@ -627,6 +631,13 @@ mod tests {
         assert!(!windows_same_folder(mods, &format!("{mods}-other")), "a sibling");
         assert!(!windows_same_folder(r"\\?\Volume{1}\mods", r"Volume{1}\mods"), "a volume path has no other spelling");
         assert!(!windows_same_folder(r"\mods", "mods"), "rooted is not relative");
+    }
+
+    #[test]
+    fn windows_verbatim_literal_names_are_not_plain_names() {
+        assert!(!windows_same_folder(r"\\?\C:\Game.\mods", r"C:\Game.\mods"));
+        assert!(!windows_same_folder(r"\\?\UNC\nas\share\Game \mods", r"\\nas\share\Game \mods"));
+        assert!(!windows_same_folder("C:", r"C:\"));
     }
 
     fn tmp(name: &str) -> Utf8PathBuf {

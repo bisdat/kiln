@@ -63,6 +63,11 @@ pub(crate) fn strip_verbatim(s: &str) -> std::borrow::Cow<'_, str> {
 /// [`strip_verbatim`] where the path has a spelling without the prefix (a drive letter or a server): a verbatim path
 /// without one (`\\?\Volume{…}\x`) stays as it is.
 pub(crate) fn plain_path(s: &str) -> std::borrow::Cow<'_, str> {
+    // Win32 trims these components without the verbatim prefix. Such a spelling would name
+    // a different folder, so it must also stay verbatim in receipts and comparison keys.
+    if s.starts_with(r"\\?\") && s.split('\\').skip(1).any(|c| c.ends_with(['.', ' '])) {
+        return s.into();
+    }
     let plain = strip_verbatim(s);
     if plain.len() == s.len() || is_absolute_game_path(&plain) { plain } else { s.into() }
 }
@@ -77,7 +82,8 @@ pub(crate) fn windows_below(base: &str, path: &str) -> Option<Vec<String>> {
     fn parts(p: &str) -> (usize, Vec<String>) {
         let p = p.replace('/', "\\");
         let p = plain_path(&p);
-        let lead = p.bytes().take_while(|&b| b == b'\\').count().min(2);
+        let lead = p.bytes().take_while(|&b| b == b'\\').count().min(2)
+            + if p.as_bytes().get(1) == Some(&b':') && p.as_bytes().get(2) == Some(&b'\\') { 3 } else { 0 };
         (lead, p.split('\\').filter(|c| !c.is_empty() && *c != ".").map(str::to_owned).collect())
     }
     fn same_name(a: &str, b: &str) -> bool {
@@ -260,6 +266,15 @@ mod tests {
         assert_eq!(plain_path(r"\\?\UNC\nas\games\mods"), r"\\nas\games\mods");
         assert_eq!(plain_path(r"\\?\Volume{1b3}\mods"), r"\\?\Volume{1b3}\mods");
         assert_eq!(plain_path("/home/u/game/mods"), "/home/u/game/mods");
+    }
+
+    #[test]
+    fn verbatim_names_that_need_the_prefix_keep_it() {
+        for p in [r"\\?\C:\Game.\mods", r"\\?\C:\Game \mods", r"\\?\UNC\nas\share\Game.\mods"] {
+            assert_eq!(plain_path(p), p, "removing the prefix changes Win32 name resolution");
+            assert!(!windows_same_folder(p, &strip_verbatim(p)));
+        }
+        assert!(!windows_same_folder("C:", r"C:\"), "drive current directory is not its root");
     }
 
     /// The launcher on Linux keeps comparing host paths exactly: `/game/Mods` and `/game/mods` are two folders there.
