@@ -479,6 +479,16 @@ void want() {
     if (!g_wanted.exchange(true, std::memory_order_acq_rel)) KI("roster: a mod reads the roster: each world publishes its snapshot after its step");
 }
 
+// A world is present now, or one has run in this process (KilnApi.session): the start phase is over.
+bool world_started() {
+    KilnSessionInfo s{};
+    s.size = sizeof s;
+    if (g_api->size < offsetof(KilnApi, session) + sizeof(void*) || g_api->session(&s) != KILN_OK) return false;
+    for (uint32_t k = 0; k < KILN_WORLD_KINDS; ++k)
+        if (s.worlds[k] || s.sessions[k]) return true;
+    return false;
+}
+
 // The player's message when the roster stops a game client's start: owned by the game's window when it has one, so it
 // is not lost behind it, and closed by itself after 60 s so a game behind a fullscreen or Wayland window does not look
 // hung (the reason is on disk before it opens).
@@ -695,6 +705,13 @@ bool npc_unlock_pages(uintptr_t registry, uint64_t pages[2], uint32_t* npages, u
 }
 
 void roster_refuse_start(const std::string& why, const std::vector<std::string>& mods) {
+    // a start-time call only: a world present now or run in this process (ending it could lose play) is not stopped
+    const auto cannot_stop = [] {
+        KE("roster: the start could NOT be stopped: a world already ran in this process, and ending it now could lose play. "
+           "These mods' native quests, knowledge and NPCs are not built; a world saved now drops their progress. Quit and fix "
+           "the mod list");
+    };
+    if (world_started()) return cannot_stop();
     std::string list, csv;
     for (const std::string& m : mods) list += (list.empty() ? "" : ", ") + m, csv += (csv.empty() ? "" : ",") + m;
     if (list.empty()) list = "(none named)";
@@ -748,7 +765,13 @@ void roster_refuse_start(const std::string& why, const std::vector<std::string>&
                     "say more. This message closes by itself after 60 seconds.");
     kiln::boot::stop_start(g_api, g_owner, csv, "kiln.knowledge: " + why + "; mods: " + list + ". " + advice, KILN_KNOW_ROSTER_EXIT_CODE,
                            g_client ? &show_box : nullptr, &box);
-    // without kiln.boot's call (or a stop already under way): the same by hand
+    // kiln.boot did not stop the start. A world present now or run in this process (kiln.boot refuses then too): ending
+    // the process could lose play, so it goes on, loudly (a start-time call only; not seen in the lab)
+    if (world_started()) return cannot_stop();
+    // a stop under way already (another service): it ends the process within its bound
+    if (kiln::boot::can_stop_start(g_api))
+        for (;;) Sleep(1000);
+    // an older kiln.boot without stop_start: the same by hand (no boot.json stop record, no progress.json "failed")
     if (g_client) show_box(&box);
     const std::wstring log = kiln_path(KILN_PATH_LOGS, "kiln.log");  // the log line on disk first (its writer is a thread)
     const ULONGLONG until = GetTickCount64() + 1500;
