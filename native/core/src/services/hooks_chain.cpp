@@ -744,7 +744,7 @@ struct Stopped {
 };
 
 constexpr DWORD kThreadAccess = THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_SET_CONTEXT |
-                                THREAD_QUERY_LIMITED_INFORMATION;
+                                THREAD_QUERY_LIMITED_INFORMATION | SYNCHRONIZE;
 
 // Every thread of the process, opened (not stopped yet), through ntdll's NtGetNextThread: one cheap call per thread (a
 // Toolhelp snapshot costs several milliseconds under Wine). False: not available here, nothing is left open.
@@ -808,7 +808,7 @@ struct FreezeReport {
     size_t threads = 0;   // other threads listed and opened (candidates for stopping)
     size_t stopped = 0;   // of those, the ones SuspendThread really stopped
     size_t unopened = 0, unstopped = 0, in_range = 0, moved = 0, no_context = 0;
-    size_t exited = 0;    // listed, could not be stopped, and has ended (its exit code is set): it runs no code
+    size_t exited = 0;    // listed, could not be stopped, and its thread object is signalled
     // the first threads that stayed unchecked, for the log line written after everything runs again
     struct Unchecked { DWORD tid, error, exit_code; bool no_id; } why[4] = {};
     size_t why_n = 0;
@@ -827,21 +827,23 @@ void write_with_threads_stopped(std::vector<Stopped>& th, uintptr_t addr, const 
     QueryPerformanceFrequency(&freq);
     QueryPerformanceCounter(&t0);
     for (Stopped& s : th) {
-        // A thread that has ended cannot stand in the bytes: it is neither stopped nor counted as unchecked. Under Wine
-        // (lab, dev29-p07lab) a listed thread whose SuspendThread fails is the ordinary case at almost every
-        // installation, and a checked installation refused all of them. GetExitCodeThread is one system call, as
-        // SuspendThread is; an exit code of STILL_ACTIVE (259) counts as running.
+        // Only a signalled thread object proves termination. An exit status alone is not a wait:
+        // termination may be asynchronous, and 259 is also a legitimate final exit code.
         DWORD code = STILL_ACTIVE;
         if (s.unknown_id) {  // its id could not be read, so it is never stopped (it might be this thread)
-            if (GetExitCodeThread(s.h, &code) && code != STILL_ACTIVE) { ++rep.exited; continue; }
-            if (unchecked) { ++rep.no_context; rep.note(0, GetLastError(), code, true); }
+            const DWORD wait = WaitForSingleObject(s.h, 0);
+            const DWORD error = wait == WAIT_FAILED ? GetLastError() : ERROR_SUCCESS;
+            if (wait == WAIT_OBJECT_0) { ++rep.exited; continue; }
+            GetExitCodeThread(s.h, &code);  // diagnostic only
+            if (unchecked) { ++rep.no_context; rep.note(0, error, code, true); }
             continue;
         }
         if (s.skip) continue;  // the calling thread
         s.suspended = SuspendThread(s.h) != static_cast<DWORD>(-1);
         if (s.suspended) { ++rep.stopped; continue; }
         const DWORD error = GetLastError();
-        if (GetExitCodeThread(s.h, &code) && code != STILL_ACTIVE) { ++rep.exited; continue; }
+        if (WaitForSingleObject(s.h, 0) == WAIT_OBJECT_0) { ++rep.exited; continue; }
+        GetExitCodeThread(s.h, &code);  // diagnostic only
         ++rep.unstopped;
         rep.note(GetThreadId(s.h), error, code, false);
     }
