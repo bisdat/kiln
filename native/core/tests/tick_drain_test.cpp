@@ -8,6 +8,7 @@
 #include <string>
 
 #include "../src/tick_drain.h"
+#include "../src/tick_watch.h"
 
 namespace {
 int checks = 0, failures = 0;
@@ -68,6 +69,41 @@ int main(int argc, char** argv) {
     const auto entering = body.find("waiting for world jobs before STOPPING");
     check(entering != std::string::npos && entering < call,
           "the log identifies an engine wait even if it never returns");
+
+    // The watch over that wait (tick_watch.h): a watchdog thread that only logs. Nothing before kFirstMs; then lines at
+    // 5 s, 10 s, 20 s, 40 s of waiting (each twice as late), naming the world, the time and the busy queue; nothing once
+    // the wait returned, and a new wait starts over.
+    {
+        kiln::tick::WaitWatch w;
+        std::string line;
+        check(!w.due(1000, &line), "watch: nothing while no wait runs");
+        w.arm("client", 0x1234, 1000);
+        check(!w.due(1000 + 4999, &line), "watch: no line before 5 s of waiting");
+        check(w.due(1000 + 5000, &line) && line.find("tick: client world 0x1234: still waiting for world jobs before STOPPING "
+                                                     "(WaitWorldJobs) after 5 s") != std::string::npos &&
+                  line.find("the game's own job queue of this world is still busy") != std::string::npos &&
+                  line.find("nothing is freed") != std::string::npos,
+              "watch: after 5 s a line names the world, the time and the game's busy queue");
+        check(!w.due(1000 + 5000, &line) && !w.due(1000 + 9999, &line), "watch: one line, not one per poll");
+        check(w.due(1000 + 10000, &line) && line.find("after 10 s") != std::string::npos, "watch: the next line at 10 s");
+        check(!w.due(1000 + 19999, &line) && w.due(1000 + 20000, &line) && line.find("after 20 s") != std::string::npos,
+              "watch: then at 20 s (each twice as late: sparse)");
+        check(w.due(1000 + 45000, &line) && line.find("after 45 s") != std::string::npos && !w.due(1000 + 89999, &line) &&
+                  w.due(1000 + 90000, &line),
+              "watch: a late poll says the time it saw, and the next one comes at twice that");
+        check(w.disarm() == 5 && !w.due(1000 + 1e7, &line), "watch: once the wait returned nothing more is said");
+        w.arm("server", 0x99, 50000);
+        check(!w.due(54999, &line) && w.due(55000, &line) && line.find("server world 0x99") != std::string::npos &&
+                  line.find("after 5 s") != std::string::npos && w.disarm() == 1,
+              "watch: a new wait starts over");
+    }
+    // tick.cpp arms the watch around the wait and says how long it took when it returns
+    const size_t arm = body.find("g_wait_watch.arm(");
+    const size_t disarm = body.find("g_wait_watch.disarm()");
+    check(arm != std::string::npos && disarm != std::string::npos && arm < call && call < disarm,
+          "hk_world_destroy arms the watch before WaitWorldJobs and disarms it after");
+    check(src.find("std::thread(&wait_watchdog)") != std::string::npos && src.find("g_wait_watch.due(") != std::string::npos,
+          "a watchdog thread polls the watch and logs what is due");
     std::printf("tick drain: %s %d checks, %d failures\n", failures ? "FAIL" : "PASS", checks, failures);
     return failures ? 1 : 0;
 }
