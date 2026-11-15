@@ -23,7 +23,8 @@ internal static partial class Ops
     {
         public static RulesClient ClientOf(EntityId e) => rulesapi::Kiln.Rules.ClientOf(e);
         public static EffectiveRules Of(EntityId e) => rulesapi::Kiln.Rules.Of(e);
-        public static RulesStatus? Status() => rulesapi::Kiln.Rules.Status();
+        // Kiln.Rules' own: with the test kit referenced, Kiln.Creatures' obsolete Kiln.RulesStatus can be in reach too
+        public static rulesapi::Kiln.RulesStatus? Status() => rulesapi::Kiln.Rules.Status();
         public static IReadOnlyList<string> Presets => rulesapi::Kiln.Rules.Presets;
         public static IReadOnlyList<RuleSet> Active => rulesapi::Kiln.Rules.Active;
     }
