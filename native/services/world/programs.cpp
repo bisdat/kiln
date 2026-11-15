@@ -1050,17 +1050,11 @@ void programs_reap_owners() {
     }
 }
 
-KilnResult reserve_program(const std::string& mod, const std::string& key, const KilnProgramDesc* desc) {
-    if (programs_registered() + kBuiltinHeadroom >= static_cast<uint32_t>(kMaxPrograms)) {
-        KW_E("managed program %s/%s refused: the last %d of kiln.world's %d program slots stay for Kiln's own services", mod.c_str(),
-             key.c_str(), kBuiltinHeadroom, kMaxPrograms);
-        return KILN_ERR_UNAVAILABLE;
-    }
-    KilnHandle handle = 0;
-    const auto result = register_program(g_owner, desc, &handle, false);
-    if (result != KILN_OK) return result;
-    Program* p = by_handle(handle);
-    // Copy the declaration, not the live descriptor (which the world's validation may later prune).
+// The boot declaration of a reservation as kiln.world.budget's program_reservation answers it: copied from the
+// declaration, not the live descriptor (which the world's validation may later prune). A declaration that is not the
+// server world's alone ends with its "world" (since 0.2.0-dev.29, chapter 14: part of the reservation's identity, so a
+// declaration rebuilt for another world under the same key is a different one); a server one's text is as it was.
+std::string reservation_text(const KilnProgramDesc* desc, uint32_t interval, uint32_t worlds) {
     const KilnNames* lists[] = {&desc->tpl, &desc->tpl_optional, &desc->read, &desc->read_optional, &desc->write,
         &desc->write_optional, &desc->singletons_read, &desc->singletons_write, &desc->other_tpl, &desc->other_read,
         &desc->other_write, &desc->with, &desc->without, &desc->any_of, &desc->events_in, &desc->events_out};
@@ -1076,8 +1070,25 @@ KilnResult reserve_program(const std::string& mod, const std::string& key, const
         snapshot += '\n';
     }
     char tail[64];
-    std::snprintf(tail, sizeof tail, "flags=%08x\ninterval=%u\n", desc->flags, p->desc.interval);
+    std::snprintf(tail, sizeof tail, "flags=%08x\ninterval=%u\n", desc->flags, interval);
     snapshot += tail;
+    if (worlds != kWorldBitServer)
+        snapshot += worlds == kWorldBitClient ? "world=client\n" : worlds == kWorldBitPrediction ? "world=prediction\n"
+                    : worlds == (kWorldBitServer | kWorldBitClient) ? "world=both\n" : "world=other\n";
+    return snapshot;
+}
+
+KilnResult reserve_program(const std::string& mod, const std::string& key, const KilnProgramDesc* desc) {
+    if (programs_registered() + kBuiltinHeadroom >= static_cast<uint32_t>(kMaxPrograms)) {
+        KW_E("managed program %s/%s refused: the last %d of kiln.world's %d program slots stay for Kiln's own services", mod.c_str(),
+             key.c_str(), kBuiltinHeadroom, kMaxPrograms);
+        return KILN_ERR_UNAVAILABLE;
+    }
+    KilnHandle handle = 0;
+    const auto result = register_program(g_owner, desc, &handle, false);
+    if (result != KILN_OK) return result;
+    Program* p = by_handle(handle);
+    std::string snapshot = reservation_text(desc, p->desc.interval, kWorldBitServer);
     std::lock_guard lock(g_mutex);
     p->reservation = std::move(snapshot);
     p->reserved_mod = mod;
@@ -1296,8 +1307,10 @@ KilnResult reserve_program_world(const std::string& mod, const std::string& key,
     KilnHandle handle = 0;
     const auto result = register_program_in(g_owner, desc, &handle, false, worlds);
     if (result != KILN_OK) return result;
+    std::string snapshot = reservation_text(desc, 1, worlds);  // the interval every Kiln program gets
     std::lock_guard lock(g_mutex);
     Program* p = g_programs[handle - 1];
+    p->reservation = std::move(snapshot);
     p->reserved_mod = mod;
     p->reserved_key = key;
     return KILN_OK;
