@@ -5,6 +5,7 @@
 // resolved by the engine later, at finalize, by hash; kiln.world validates every name against the world's maps first,
 // because one unknown component or event aborts the engine's access resolution for that program half-way.
 #include <algorithm>
+#include <cstdio>
 #include <chrono>
 #include <array>
 #include <utility>
@@ -41,7 +42,7 @@ struct Program : ProgramLayout {  // name, lists, singleton masks, group counts:
     void* user = nullptr;
     bool internal = false;
     ProgramPrunedFn pruned = nullptr;  // set: unknown other-write names are dropped, not fatal (the write program)
-    std::string reserved_mod, reserved_key;
+    std::string reserved_mod, reserved_key, reservation; // immutable, captured before engine normalization/pruning
     EngineDesc desc{};
     int slot = -1;  // trampoline index
     std::atomic<int> state{KILN_PROGRAM_PENDING};
@@ -739,9 +740,45 @@ KilnResult reserve_program(const std::string& mod, const std::string& key, const
     const auto result = register_program(g_owner, desc, &handle, false);
     if (result != KILN_OK) return result;
     Program* p = by_handle(handle);
+    // Copy the declaration, not the live descriptor (which the world's validation may later prune).
+    const KilnNames* lists[] = {&desc->tpl, &desc->tpl_optional, &desc->read, &desc->read_optional, &desc->write,
+        &desc->write_optional, &desc->singletons_read, &desc->singletons_write, &desc->other_tpl, &desc->other_read,
+        &desc->other_write, &desc->with, &desc->without, &desc->any_of, &desc->events_in, &desc->events_out};
+    const char* names[] = {"tpl", "tplOptional", "read", "readOptional", "write", "writeOptional", "singletonsRead",
+        "singletonsWrite", "otherTpl", "otherRead", "otherWrite", "with", "without", "anyOf", "eventsIn", "eventsOut"};
+    std::string snapshot;
+    for (size_t i=0; i<16; ++i) {
+        snapshot += names[i]; snapshot += '=';
+        for (uint32_t j=0; j<lists[i]->count; ++j) {
+            if (j) snapshot += ',';
+            snapshot += sv(lists[i]->items[j]);
+        }
+        snapshot += '\n';
+    }
+    char tail[64];
+    std::snprintf(tail, sizeof tail, "flags=%08x\ninterval=%u\n", desc->flags, p->desc.interval);
+    snapshot += tail;
+    std::lock_guard lock(g_mutex);
+    p->reservation = std::move(snapshot);
     p->reserved_mod = mod;
     p->reserved_key = key;
     return KILN_OK;
+}
+KilnResult KILN_CALL program_reservation(KilnStr mod, KilnStr key, char* text, uint32_t capacity, uint32_t* out_size) {
+    if (!out_size) return KILN_ERR_INVALID_ARGUMENT;
+    *out_size = 0;
+    if (!mod.ptr || !key.ptr) return KILN_ERR_INVALID_ARGUMENT;
+    std::lock_guard lock(g_mutex);
+    for (const Program* p : g_programs) {
+        if (p->reserved_mod != sv(mod) || p->reserved_key != sv(key)) continue;
+        *out_size = static_cast<uint32_t>(p->reservation.size());
+        if (text) {
+            if (capacity < *out_size) return KILN_ERR_BUFFER_TOO_SMALL;
+            std::memcpy(text, p->reservation.data(), *out_size);
+        }
+        return KILN_OK;
+    }
+    return KILN_ERR_NOT_FOUND;
 }
 KilnResult KILN_CALL bind_program(KilnOwner owner, KilnStr mod, KilnStr key, KilnProgramEachFn each, void* user, KilnHandle* out) {
     if (out) *out = 0;

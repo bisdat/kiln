@@ -50,6 +50,10 @@ internal sealed unsafe class FakeWorld : IDisposable
     // kiln.world's directory read inside a step gave up after its bound (another thread held the directory's lock):
     // game_program_list answers -1 and game_program_contract NOT_FOUND for an existing program
     internal bool DirectoryBusy;
+    internal int ListCalls;
+    internal string? ReservationOverride;
+    internal int Binds;
+    private readonly byte* _budget = (byte*)NativeMemory.AllocZeroed(24);
     // kiln.world's boot reservations (programs v2, what Systems.Define binds): (mod id, key) reserved at boot, the names of
     // each slot kind (KILN_SLOT_*) the reserved program has, the bound callback, unbinds
     internal readonly HashSet<(string Mod, string Key)> Reserved = new();
@@ -83,7 +87,7 @@ internal sealed unsafe class FakeWorld : IDisposable
         public bool IsTickThread => Thread.CurrentThread.ManagedThreadId == TickThread;
         public bool HasFeature(string name) => feature(name);
         public void Log(ulong owner, LogLevel level, string text) => Logs.Add($"[{level}] {text}");
-        public nint Service(string name, uint minVersion) => name == SystemsNative.Name ? table : 0;
+        public nint Service(string name, uint minVersion) => name == "kiln.world.budget" ? (nint)F._budget : name == SystemsNative.Name ? table : 0;
         public ulong OwnerCreate(string id) => 999;
     }
 
@@ -94,6 +98,8 @@ internal sealed unsafe class FakeWorld : IDisposable
     internal FakeWorld(Func<string, bool>? feature = null)
     {
         Current = this;
+        *(uint*)_budget = 24; *(uint*)(_budget + 4) = 1;
+        *(delegate* unmanaged[Cdecl]<NativeStr, NativeStr, byte*, uint, uint*, int>*)(_budget + 16) = &Reservation;
         TickThread = Thread.CurrentThread.ManagedThreadId;
         _table = (SystemsNative.Table*)NativeMemory.AllocZeroed((nuint)sizeof(SystemsNative.Table));
         _table->Header = new ServiceHeader { Size = (uint)sizeof(SystemsNative.Table), Version = 4 };
@@ -237,6 +243,7 @@ internal sealed unsafe class FakeWorld : IDisposable
     private static int EcsBind(ulong owner, NativeStr mod, NativeStr key, delegate* unmanaged[Cdecl]<void*, ulong*, uint, void*, void> each,
         void* user, ulong* handle)
     {
+        F.Binds++;
         *handle = 0;
         if (F.BindResult != SystemsNative.Ok) return F.BindResult;
         if (!F.Reserved.Contains((mod.ToString(), key.ToString()))) return SystemsNative.NotFound;
@@ -268,6 +275,30 @@ internal sealed unsafe class FakeWorld : IDisposable
         ulong* iter = stackalloc ulong[64];
         foreach (var e in EntityIds)
             if (Bound != null) Bound((void*)0x6160, iter, e, BoundUser);
+    }
+
+    internal void SetReservationSize(uint size) => *(uint*)_budget = size;
+
+    internal static string Snapshot(bool barrels = false)
+    {
+        string[] lists = ["tpl", "tplOptional", "read", "readOptional", "write", "writeOptional", "singletonsRead",
+            "singletonsWrite", "otherTpl", "otherRead", "otherWrite", "with", "without", "anyOf", "eventsIn", "eventsOut"];
+        return string.Concat(lists.Select(n => n + "=" + (barrels ? n switch {
+            "tpl" => "FuelSetup", "readOptional" => "CurrentTransform", "write" => "Fuel", "without" => "DynamicShelter", _ => ""
+        } : n == "read" ? "Fuel" : "") + "\n")) + (barrels ? "flags=00000010\n" : "flags=00000000\n") + "interval=1\n";
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int Reservation(NativeStr mod, NativeStr key, byte* text, uint capacity, uint* size)
+    {
+        if (!F.Reserved.Contains((mod.ToString(), key.ToString()))) return SystemsNative.NotFound;
+        var body = F.ReservationOverride ?? Snapshot(key.ToString() == "Kiln_SystemsTests_Barrels");
+        // Preserve the existing slot-mismatch regression as a declaration mismatch.
+        if (F.ReservedSlots.TryGetValue(2, out var names) && names.Contains("Health")) body = body.Replace("write=Fuel", "write=Health");
+        var bytes = System.Text.Encoding.UTF8.GetBytes(body);
+        *size = (uint)bytes.Length;
+        if (text != null && capacity >= bytes.Length) bytes.CopyTo(new Span<byte>(text, bytes.Length));
+        return text != null && capacity < bytes.Length ? SystemsNative.BufferTooSmall : SystemsNative.Ok;
     }
 
     internal void SetTableSize(uint size) => _table->Header.Size = size;
@@ -310,6 +341,7 @@ internal sealed unsafe class FakeWorld : IDisposable
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int List(uint kind, int index, int list, NativeStr* names, uint capacity)
     {
+        F.ListCalls++;
         if (index is not (0 or 1) || F.DirectoryBusy) return -1;
         if (index == 1) return 0;
         NativeStr? one = list switch

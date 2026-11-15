@@ -37,6 +37,7 @@ bool game_program_at(uint32_t kind, int32_t index, ProgramRef* out) {
 }
 ProgramLedger program_ledger() { return g_ledger; }
 uint32_t program_quota() { return 64; }
+KilnResult KILN_CALL program_reservation(KilnStr, KilnStr, char*, uint32_t, uint32_t*) { return KILN_ERR_NOT_FOUND; }
 }  // namespace kw
 
 using namespace kw;
@@ -57,7 +58,7 @@ int main() {
     L.programs_max = 896;
     check(sizeof(KilnProgramBudgetReply) == 152 && offsetof(KilnProgramBudgetReply, access) == 24 &&
               offsetof(KilnProgramBudgetReply, kiln_slots) == 56 && offsetof(KilnProgramBudgetReply, engine_slots) == 104 &&
-              sizeof(KilnProgramAccessLimits) == 32 && sizeof(KilnWorldBudgetApi) == 16,
+              sizeof(KilnProgramAccessLimits) == 32 && sizeof(KilnWorldBudgetApi) == 24 && offsetof(KilnWorldBudgetApi, program_reservation) == 16,
           "the reply is 152 bytes: access +24, kiln_slots +56, engine_slots +104");
     auto ask = [](uint32_t kind) {
         KilnProgramBudgetReply r;
