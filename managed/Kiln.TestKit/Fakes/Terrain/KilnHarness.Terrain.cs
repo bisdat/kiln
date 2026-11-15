@@ -27,8 +27,8 @@ public readonly record struct FakeTerrainWrite(string Mod, string Label, CellBox
 /// <para><b>The ledger and its loss.</b> Kiln keeps a witness of every mod's kept plans per world (as in the game,
 /// outside the ledger). <see cref="SaveWorld"/> is the game writing the world file; <see cref="LoseLedger"/> loses a
 /// mod's ledger while the cells and the witness stay. A plan whose record was saved and then lost is refused
-/// ("ownership lost"); a plan this world never had is a first install, also over ground that already holds its result;
-/// a record lost before any save is a first install too.</para>
+/// ("ownership lost"). A pristine harness session permits first installation, including over matching ground.
+/// Restart retires that new-world proof; missing history then needs adoption unless the ledger preserves its provenance.</para>
 /// <para><b>Transient overlays.</b> kiln.build's transient journal is modelled: <see cref="Restart"/> puts every cell
 /// a transient write changed back to its earlier value unless it was changed since (as the game's next start does).</para>
 /// <para><b>Not modelled.</b> Streaming, the game's save itself (a new harness starts with an empty world and no
@@ -121,7 +121,11 @@ public sealed class HarnessTerrain
     public void Restart()
     {
         SaveWorld();
-        lock (State.Lock) State.PutBackTransient();
+        lock (State.Lock)
+        {
+            State.RestartedWorlds.Add(State.WorldId);
+            State.PutBackTransient();
+        }
     }
 
     /// <summary>Loses <paramref name="mod"/>'s terrain ledger in this world, as when the world's Kiln data or the

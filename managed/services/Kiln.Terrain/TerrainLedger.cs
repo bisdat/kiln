@@ -6,6 +6,21 @@ namespace Kiln;
 internal sealed class TerrainBook
 {
     public const string Key = "kiln.terrain.ledger";
+    // Absent = pre-dev.29 history. Explicit false = a dev.29 ledger created without new-world proof.
+    // Preserve absence when reserializing legacy ledgers; never promote a new unproven ledger to legacy history.
+    private bool? _provenance;
+    [System.Text.Json.Serialization.JsonPropertyName("EstablishedInNewWorld")]
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public bool? Provenance
+    {
+        get => _provenance;
+        set => _provenance = value ?? throw new System.Text.Json.JsonException("null terrain provenance is not legacy history");
+    }
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool EstablishedInNewWorld { get => _provenance == true; set => _provenance = value; }
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool HasHistory => _provenance is null or true;
+    public static TerrainBook Create(bool newWorld) => new() { EstablishedInNewWorld = newWorld };
     [System.Text.Json.Serialization.JsonRequired]
     public Dictionary<string, TerrainRecord> Plans { get; set; } = new();
 
@@ -50,6 +65,7 @@ internal sealed class TerrainBook
         foreach (var (id, rec) in Plans!)
         {
             if (!TerrainPlan.ValidId(id) || rec is null || rec.Version < 1 || !Hash(rec.Content)) Bad();
+            if (rec!.PresenceShare is { } share && (!double.IsFinite(share) || share < 0 || share > 1)) Bad();
             var box = Box(rec!.Region, grid);
             Blocks(rec.Blocks, box);
             if (rec.EarlierBlocks is not null)
@@ -103,6 +119,10 @@ internal sealed class TerrainRecord
 {
     [System.Text.Json.Serialization.JsonRequired]
     public int Version { get; set; }
+    public bool Adopted { get; set; }
+    public bool Adopting { get; set; }
+    public double? PresenceShare { get; set; }
+    public bool InstalledWithoutProof { get; set; }
     [System.Text.Json.Serialization.JsonRequired]
     public int[] Region { get; set; } = [];
     /// <summary>TerrainPlan.ContentHash of the patch that was applied.</summary>
@@ -147,6 +167,7 @@ internal sealed class TerrainBlock
 /// mod's book is read at its first call, so a plan of a mod that is not loaded is not known here (the contract's limit).</summary>
 internal sealed class TerrainSession
 {
+    internal readonly TerrainWorkBudget Budget = new();
     // world id -> mod id -> plan id -> block keys
     private readonly Dictionary<string, Dictionary<string, Dictionary<string, HashSet<string>>>> _worlds = new(StringComparer.Ordinal);
 
@@ -170,9 +191,15 @@ internal sealed class TerrainSession
     public bool Begin(string world, string mod, string plan) => _running.TryAdd((world, mod, plan), new(StringComparer.Ordinal));
     public bool Running(string world, string mod, string plan) => _running.ContainsKey((world, mod, plan));
     public void End(string world, string mod, string plan) => _running.Remove((world, mod, plan));
-    public void Clear() { _running.Clear(); _worlds.Clear(); }
+    private readonly HashSet<(string World, string Mod, string Plan)> _warned = new();
+    public void WarnOnce(string world, string mod, string plan, string reason)
+    {
+        if (_warned.Add((world, mod, plan))) Kiln.Backend.Current.Log(0, LogLevel.Warn, reason);
+    }
+    public void Clear() { _running.Clear(); _worlds.Clear(); _warned.Clear(); Budget.Clear(); }
     public void Retire(string mod)
     {
+        Budget.Retire(mod);
         foreach (var key in _running.Keys.Where(k => k.Mod == mod).ToList()) _running.Remove(key);
         foreach (var mods in _worlds.Values) mods.Remove(mod);
     }

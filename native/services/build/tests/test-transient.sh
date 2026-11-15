@@ -19,3 +19,15 @@ cxx=${CXX:-$(command -v clang++ || command -v g++)}
 "$cxx" -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-omit-frame-pointer \
     -o "$out/voxel_lifecycle_test" "$here/voxel_lifecycle_test.cpp"
 "$out/voxel_lifecycle_test"
+
+# World-state admission and the save-file proof on which automatic terrain installation relies.
+"$cxx" -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-omit-frame-pointer \
+    -o "$out/world_state_test" "$here/world_state_test.cpp"
+"$out/world_state_test"
+"$cxx" -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-omit-frame-pointer \
+    -o "$out/new_world_test" "$here/../../saves/tests/new_world_test.cpp"
+"$out/new_world_test"
+
+"$cxx" -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-omit-frame-pointer \
+    -o "$out/terrain_budget_test" "$here/terrain_budget_test.cpp"
+"$out/terrain_budget_test"

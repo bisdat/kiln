@@ -45,6 +45,7 @@ std::mutex g_mu;
 std::set<std::array<int32_t, 3>> g_chunks;  // Kiln-kept chunks (cell coordinates / 32)
 std::string g_world;                         // world GUID text the set belongs to ("" = unknown yet)
 bool g_dirty = false;
+bool g_lifecycle_ok = false;
 std::filesystem::path g_dir;                 // kiln/data/kiln.build/regions
 std::vector<Box> g_boxes;   // boxes over g_chunks, recomputed when the set changes
 bool g_boxes_stale = true;
@@ -140,6 +141,7 @@ void close_locked() {
 
 void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
     if (ev->kind != KILN_WORLD_SERVER || ev->event != KILN_WORLD_STOPPING) return;
+    terrain_budget_reset();
     vox_world_closed();
     transient_world_closed();
     std::lock_guard lock(g_mu);
@@ -286,6 +288,7 @@ uint8_t* __fastcall hk_save_regions(uint8_t* result, GameArray* list, uintptr_t 
         transient_before_save();
     } catch (...) {
     }
+    if (!regions_lifecycle_safe() || !F.persist) return r;
     if (!r || r[0] != 0 || !list) return r;  // the game failed itself: leave it alone
     std::vector<Box> boxes;
     try {
@@ -337,16 +340,45 @@ bool regions_install() {
     return true;
 }
 
+void regions_lifecycle_ready(bool subscribed, bool observed);
+
 void regions_ready() {
     g_saves = static_cast<const KilnSavesApi*>(g_api->service(kstr(KILN_SAVES_SERVICE), 1));
     KilnHandle h{};
-    if (g_api->subscribe_world(g_owner, &on_world, nullptr, &h) != KILN_OK)
-        KB_W("save regions: world-close subscription failed");
+    const bool subscribed = g_api->subscribe_world(g_owner, &on_world, nullptr, &h) == KILN_OK;
+    KilnSessionInfo session{};
+    session.size = sizeof session;
+    regions_lifecycle_ready(subscribed, g_api->session && g_api->session(&session) == KILN_OK && session.lifecycle);
+    if (!g_lifecycle_ok) KB_W("persistent terrain writes require world.lifecycle and a world-stop subscription");
     std::lock_guard lock(g_mu);
     load_locked();
 }
 
 #endif
+
+void regions_lifecycle_ready(bool subscribed, bool observed) {
+    g_lifecycle_ok = subscribed && observed;
+    if (!g_lifecycle_ok) {
+        F.persist = false;
+        set_detail("persistent terrain writes require world.lifecycle and a world-stop subscription");
+    }
+}
+
+bool regions_lifecycle_safe() {
+    if (!g_lifecycle_ok) {
+        set_detail("persistent terrain writes require world.lifecycle and a world-stop subscription");
+        return false;
+    }
+#ifndef KILN_REGIONS_HOST_TEST
+    KilnSessionInfo session{};
+    session.size = sizeof session;
+    if (g_lifecycle_ok && (!g_api->session || g_api->session(&session) != KILN_OK || !session.lifecycle)) {
+        set_detail("persistent terrain writes require world.lifecycle and a world-stop subscription");
+        return false;
+    }
+#endif
+    return g_lifecycle_ok;
+}
 
 void regions_keep(const int32_t origin[3], const uint32_t dims[3]) {
     if (!F.persist) return;
@@ -391,6 +423,14 @@ void regions_flush() {
 
 #ifndef KILN_REGIONS_HOST_TEST
 std::string regions_world() { return current_world(); }
+
+bool regions_save_running() {
+    if (!g_saves) return false;
+    KilnSavesStatus st{};
+    st.size = sizeof st;
+    return g_saves->status(&st) == KILN_OK && (st.features & KILN_SAVES_CAN_LOAD) &&
+        (st.state == KILN_SAVES_STATE_RUNNING || st.state == KILN_SAVES_STATE_SAVING);
+}
 
 bool regions_saves_written(uint64_t* written) {
     if (!g_saves) return false;

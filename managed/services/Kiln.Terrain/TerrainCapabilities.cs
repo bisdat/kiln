@@ -14,7 +14,7 @@ internal static class TerrainCaps
     /// <summary>Biome changes: not built.</summary>
     public const string Biomes = "terrain.biomes";
 
-    private static readonly string[] Needs = ["kiln.build", "build.read", "build.write", "build.persist", "kiln.saves"];
+    private static readonly string[] Needs = ["kiln.build", "build.read", "build.write", "build.persist", "kiln.saves", "saves.load", "saves.write"];
 
     internal static readonly ServiceCapRows Rows = new(Library, Report, everySteps: 25);
 
@@ -28,7 +28,12 @@ internal static class TerrainCaps
             on = true;
             foreach (var n in Needs) on &= Capabilities.Is(n);
         }
-        ServiceCaps.Static(Overlays, on, CapabilityReason.ServiceMissing, "kiln.build or kiln.saves is not loaded", Needs);
+        string? failure = null;
+        if (on)
+            failure = Terrain.BackendFactory is { } factory ? factory().PersistenceFailure :
+                BuildTerrainBackend.PersistenceReason();
+        if (failure is not null) ServiceCaps.Report(Overlays, CapabilityState.Unavailable, CapabilityReason.Session, failure);
+        else ServiceCaps.Static(Overlays, on, CapabilityReason.ServiceMissing, "kiln.build or kiln.saves is not loaded", Needs);
         ServiceCaps.Report(Baked, CapabilityState.Unavailable, CapabilityReason.Policy, "baked terrain regions are not built in this version");
         ServiceCaps.Report(Biomes, CapabilityState.Unavailable, CapabilityReason.Policy, "biome changes are not built in this version");
     }
@@ -38,7 +43,6 @@ internal static class TerrainCaps
     {
         Terrain.CapabilityOverride?.Invoke(capability);
         Rows.Ensure();
-        if (Capabilities.Is(capability)) return;
         Report();
         if (Capabilities.Is(capability)) return;
         throw ServiceCaps.Unavailable(capability);
