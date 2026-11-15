@@ -153,6 +153,7 @@ std::string symbol_name_at(uintptr_t) {
 std::vector<LiveDiff> live_differs() { return g_live_diffs; }
 uint64_t sig_revision() { return 1; }
 bool sig(std::string_view, SigInfo*) { return false; }
+bool sig_status(std::string_view, uintptr_t*, SigStatus*, std::string*) { return false; }
 bool sig_at(uintptr_t, SigInfo*) { return false; }
 bool fingerprint(uintptr_t, hooks::fp::Fingerprint*) { return false; }
 }  // namespace sigdb

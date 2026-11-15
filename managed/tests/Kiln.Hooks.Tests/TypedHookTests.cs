@@ -676,6 +676,19 @@ public sealed unsafe class TypedHookTests : IDisposable
         Assert.Contains("typed-proof", check);
         Assert.Contains("controlRuns > 0", check);
         Assert.Contains("enabledEdits > 0", check);
+        Assert.Contains("c.Expect(off[1] == 0", check);
+        Assert.Contains("c.Expect(on[1] == 1", check);
+    }
+
+    [Fact]
+    public void LabReloadRequiresAnInstalledHookAndAnObservedHandlerCall()
+    {
+        var root = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(SourcePath())!, "../../.."));
+        var lab = File.ReadAllText(Path.Combine(root, "mods/tests/hooks-typed-test/HooksTypedTestMod.cs"));
+        var reload = lab[lab.IndexOf("if (load > 1)")..lab.IndexOf("public override void OnUnload")];
+        Assert.Contains("r.Handle?.State != HookRegistrationState.Installed", reload);
+        Assert.Contains("calls != 1", reload);
+        Assert.Contains("Interlocked.Increment(ref calls)", reload);
     }
 
     static string SourcePath([System.Runtime.CompilerServices.CallerFilePath] string path = "") => path;

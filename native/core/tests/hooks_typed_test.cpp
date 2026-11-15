@@ -159,6 +159,13 @@ bool sig(std::string_view symbol, SigInfo* out) {
     for (const auto& [address, info] : g_sigs) if (info.symbol == symbol) { *out = info; out->address = address; return true; }
     return false;
 }
+bool sig_status(std::string_view symbol, uintptr_t* address, SigStatus* status, std::string* text) {
+    for (const auto& [a, info] : g_sigs) if (info.symbol == symbol) {
+        *address = a; *status = info.status; *text = info.status == SigStatus::Match ? "" : info.text;
+        return true;
+    }
+    return false;
+}
 bool sig_at(uintptr_t a, SigInfo* out) {
     auto it = g_sigs.find(a);
     if (it == g_sigs.end()) return false;
