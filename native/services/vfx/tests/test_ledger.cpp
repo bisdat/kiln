@@ -366,6 +366,9 @@ static void test_capacity(const fs::path& base) {
     // a changed content of an accepted block takes no new slot
     auto chg = define(request("big", "n0", 1000, 9999, KILN_DEFINE_ALLOW_NEXT_START, 9));
     check(chg.r.ok && chg.r.disposition == KILN_DEFINITION_ACCEPTED_NEXT_START, "a changed content of a stored block: accepted (no new slot)");
+    auto replacement = define(request("big", "n0", 9000, 10000, KILN_DEFINE_ALLOW_NEXT_START, 10));
+    check(replacement.r.ok && files_in(base) == files && receipt(id_of(chg.r)).r.reason_code == KILN_DEFINE_SUPERSEDED,
+          "replacing the GUID in one pending file at full capacity reuses that file's reservation");
     // the capacity follows the game's table once read
     ledger::Boot b = boot_of("big", 0);
     ledger::Seen s;
@@ -432,6 +435,37 @@ static void test_storage(const fs::path& base) {
           "a crash's temporary file: the new file is whole and the temporary one gone");
 }
 
+static void test_review_regressions(const fs::path& base) {
+    fresh_root(base);
+    auto b = boot_of("fxmod", 1);
+    ledger::boot(b);
+    ledger::observe(seen_of(b, 2048));
+    ledger::observe({});
+    check(!ledger::observed() && budget().readiness == KILN_CAPACITY_NOT_READY,
+          "a stopped/unreadable registry invalidates the previous ready snapshot");
+    ledger::observe(seen_of(b, 2048));
+    check(budget().kiln_used == 1, "a second world publishes a fresh snapshot");
+    fresh_root(base);
+    ledger::boot(boot_of("fxmod", 0));
+    auto first = define(request("fxmod", "one", 80, 1, KILN_DEFINE_ALLOW_NEXT_START));
+    auto clash = define(request("othermod", "two", 80, 2, KILN_DEFINE_ALLOW_NEXT_START));
+    check(first.r.ok && !clash.r.ok && clash.r.reason_code == KILN_DEFINE_ID_COLLISION && files_in(base) == 1,
+          "two pending mods cannot both reserve the same GUID");
+    auto alias = define(request("fxmod", "alias", 80, 1, KILN_DEFINE_ALLOW_NEXT_START));
+    check(!alias.r.ok && alias.r.reason_code == KILN_DEFINE_ID_COLLISION && files_in(base) == 1,
+          "a second pending name for the same GUID is refused before boot rejects duplicate IDs");
+    check(receipt(id_of(first.r)).r.ok && stored_registration(base / "pending" / "fxmod" / "one.json") == ledger::uuid_text(id_of(first.r)),
+          "refusing a second name preserves the original accepted receipt and file");
+    ledger::Seen corrupt;
+    corrupt.init_state = 2;
+    corrupt.limit = 2048;
+    corrupt.count = UINT64_MAX;
+    ledger::observe(corrupt);
+    auto over = define(request("fxmod", "over", 81, 1, KILN_DEFINE_ALLOW_NEXT_START));
+    check(!over.r.ok && over.r.reason_code == KILN_DEFINE_CAPACITY_EXCEEDED && files_in(base) == 1,
+          "an invalid huge game count cannot wrap admission into acceptance");
+}
+
 static void test_report() {
     std::printf("-- reports\n");
     const std::string r = ledger::report_json(std::string(9000, 'x'), std::vector<std::string>(40, std::string(300, 'w')));
@@ -455,6 +489,7 @@ int main(int argc, char** argv) {
     test_capacity(base);
     test_stored(base);
     test_storage(base);
+    test_review_regressions(base);
     test_report();
     std::error_code ec;
     fs::remove_all(base, ec);

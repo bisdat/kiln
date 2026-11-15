@@ -85,7 +85,7 @@ std::atomic<void*> g_fxc{nullptr};
 std::atomic<uint32_t> g_thread{0};
 std::atomic<uint64_t> g_updates{0};
 std::atomic<bool> g_system_said{false};
-std::atomic<void (*)()> g_build_update{nullptr};
+std::atomic<void (*)(void*)> g_build_update{nullptr};
 std::atomic<bool (*)(const uint8_t*)> g_build_refuses{nullptr};
 std::atomic<int64_t (*)(const uint8_t*)> g_build_one_shot{nullptr};
 std::atomic<uint64_t> g_refused{0};
@@ -355,7 +355,7 @@ void guid_text(const uint8_t g[16], char out[40]) {
 }
 
 int64_t map_slot(const MapView& m, const uint8_t guid[16]) {
-    if (!m.capacity || !m.count || !m.bits || !m.keys || zero16(guid)) return -1;
+    if (!m.capacity || (m.capacity & (m.capacity - 1)) || m.capacity > (1u << 24) || m.count > m.capacity || !m.count || !m.bits || !m.keys || zero16(guid)) return -1;
     uint64_t k0, k1;
     std::memcpy(&k0, guid, 8);
     std::memcpy(&k1, guid + 8, 8);
@@ -370,7 +370,7 @@ int64_t map_slot(const MapView& m, const uint8_t guid[16]) {
 }
 
 int map_find(const MapView& m, const uint8_t guid[16]) {
-    if (!m.capacity || !m.count || !m.bits || !m.keys) return -1;
+    if (!m.capacity || (m.capacity & (m.capacity - 1)) || m.capacity > (1u << 24) || m.count > m.capacity || !m.count || !m.bits || !m.keys) return -1;
     return map_slot(m, guid) >= 0 ? 1 : 0;
 }
 
@@ -465,7 +465,7 @@ double fixed_to_m(int64_t v) { return static_cast<double>(v) / 4294967296.0; }
 
 void core_set_game(Game* game) { g_game.store(game, std::memory_order_release); }
 
-void core_set_build_hooks(void (*update)(), bool (*refuses)(const uint8_t guid[16]), int64_t (*one_shot)(const uint8_t guid[16])) {
+void core_set_build_hooks(void (*update)(void*), bool (*refuses)(const uint8_t guid[16]), int64_t (*one_shot)(const uint8_t guid[16])) {
     g_build_update.store(update, std::memory_order_release);
     g_build_refuses.store(refuses, std::memory_order_release);
     g_build_one_shot.store(one_shot, std::memory_order_release);
@@ -481,7 +481,7 @@ Game* core_game() { return g_game.load(std::memory_order_acquire); }
 void core_update(void* fxc, int64_t now) {
     Game* game = core_game();
     if (!game) return;
-    if (const auto update = g_build_update.load(std::memory_order_acquire)) update();
+    if (const auto update = g_build_update.load(std::memory_order_acquire)) update(fxc);
     g_updates.fetch_add(1, std::memory_order_relaxed);
     const uint32_t tid = thread_id();
     const uint32_t prev_tid = g_thread.exchange(tid, std::memory_order_relaxed);

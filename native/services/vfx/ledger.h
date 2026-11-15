@@ -92,7 +92,7 @@ bool budget_available();
 bool registration_available();
 void boot(Boot b);         // once per start, after the build served (also with nothing built)
 void forget();             // a prepared build taken back: nothing is built
-void observe(const Seen& s);  // the update thread; ignored unless init_state is 2
+void observe(const Seen& s);  // the update thread; invalidates the snapshot unless init_state is 2
 bool observed();
 uint32_t release(const std::string& mod);  // the mod is no longer loaded: how many of its built VFX are kept for it now
 void activate(const std::string& mod);     // a block of the mod compiled in this lifetime of it

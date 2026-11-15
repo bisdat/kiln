@@ -270,8 +270,14 @@ void forget() {
 }
 
 void observe(const Seen& s) {
-    if (s.init_state != 2) return;  // the system has not listed its resources yet: nothing about them is read
     std::lock_guard lk(g_mu);
+    if (s.init_state != 2) {
+        g_seen = false;
+        g_last = {};
+        g_verdict.clear();
+        publish();
+        return;
+    }
     g_last = s;
     g_seen = true;
     g_verdict.clear();
@@ -338,6 +344,18 @@ KilnResult define(const Request& q, KilnDefinitionReply* out, std::string* repor
         return KILN_ERR_UNAVAILABLE;
     }
     const Id id = registration_id(q.mod, q.guid, q.canonical);
+    const bool pending_collision = std::any_of(g_receipts.begin(), g_receipts.end(), [&](const auto& entry) {
+        const Receipt& other = entry.second;
+        return other.accepted && other.guid == q.guid && (other.mod != q.mod || other.name != q.name);
+    });
+    // A second name can hash to the existing receipt (name is not part of its identity).
+    // Refuse that call without changing the receipt/file of the first name.
+    if (pending_collision && g_receipts.count(id)) {
+        kiln::capacity::reply_init(out, KILN_DEFINITION_VFX, id.data(), q.guid.data());
+        kiln::capacity::reply_refused(out, KILN_DEFINE_ID_COLLISION, g_pub.revision);
+        *report = report_json("another block name already stores this GUID for the next start", q.warnings);
+        return KILN_OK;
+    }
     Receipt& r = receipt_of(id);
     r.guid = q.guid, r.mod = q.mod, r.name = q.name, r.definition = q.definition;
     uint32_t code = 0;
@@ -365,6 +383,8 @@ KilnResult define(const Request& q, KilnDefinitionReply* out, std::string* repor
     };
     if (!q.owner_live) {
         refuse(KILN_DEFINE_OWNER_INACTIVE, "the mod's owner is no longer active");
+    } else if (pending_collision) {
+        refuse(KILN_DEFINE_ID_COLLISION, "another owner or block name already has an accepted definition of this GUID for the next start");
     } else if (b && b->mod != q.mod) {
         refuse(KILN_DEFINE_ID_COLLISION, "the GUID is the VFX " + b->mod + ":" + b->name + "'s (\"was\" names another mod's block?)");
     } else {
@@ -395,9 +415,9 @@ KilnResult define(const Request& q, KilnDefinitionReply* out, std::string* repor
                 taken = g_seen ? g_last.count : uint64_t{g_boot.game_vfx} + g_boot.built.size();
                 std::set<Id> later;
                 for (const auto& [rid, x] : g_receipts)
-                    if (x.accepted && x.guid != q.guid && !built_of(x.guid)) later.insert(x.guid);
+                    if (x.accepted && x.guid != q.guid && !built_of(x.guid) && (x.mod != q.mod || x.name != q.name)) later.insert(x.guid);
                 waiting = later.size();
-                over = taken + waiting + 1 > cap;
+                over = taken >= cap || waiting >= cap - taken;
             }
             if (over)
                 refuse(KILN_DEFINE_CAPACITY_EXCEEDED, "the game's VFX table holds " + std::to_string(cap) + " resources; " + std::to_string(taken) +

@@ -20,3 +20,5 @@ g++ -std=c++20 -O0 -g0 -Wall -Wextra -fsanitize=address,undefined "$here/test_ge
 bash "$here/run_held.sh"
 
 bash "$here/run_boot_build.sh"
+
+bash "$here/run_observer.sh"

@@ -1254,16 +1254,26 @@ void check_own_data() {
 // vfx/Resolve, which would acquire the resource. Readers of the budget copy what this publishes.
 namespace {
 std::atomic<uint32_t> g_observe_n{0};
+std::mutex g_observe_mu;
+void* g_observe_controller = nullptr;
 std::vector<std::pair<ledger::Id, uint8_t>> g_verdicts;  // update thread only
 bool g_verdicts_done = false;                            // update thread only
 bool g_guard_said = false;                               // update thread only
 
-void observe_registry() {
+void observe_registry(void* fxc) {
+    std::lock_guard observation(g_observe_mu);
+    if (fxc != g_observe_controller) {
+        g_observe_controller = fxc;
+        g_observe_n = 0;
+        g_verdicts_done = false;
+        ledger::observe({});
+    }
     if (g_observe_n.fetch_add(1, std::memory_order_relaxed) % 30 != 0) return;
     kvx::Game* game = kvx::core_game();
-    if (!game) return;
+    if (!game) { ledger::observe({}); return; }
     if (!game->has_guard()) {
         // the guard's map check failed or a read faulted: the map is not what the signatures promised, so nothing is read
+        ledger::observe({});
         if (!g_guard_said) {
             g_guard_said = true;
             lower_rows(true, true, "the guard is off: the game's VFX map does not read as the signatures promised (kiln.log says why)",
@@ -1272,8 +1282,11 @@ void observe_registry() {
         return;
     }
     Registry reg;
-    if (!game->registry(nullptr, &reg) || reg.init_state != 2) return;
-    if (!g_verdicts_done) {
+    if (!game->registry(fxc, &reg) || reg.init_state != 2) {
+        ledger::observe({});
+        return;
+    }
+    {
         std::vector<std::pair<kvb::Guid, Built>> vfx;
         {
             std::lock_guard lk(g_mu);
@@ -1284,12 +1297,12 @@ void observe_registry() {
         uint32_t own = 0, other = 0;
         std::vector<uint8_t> buf;
         for (const auto& [g, b] : vfx) {
-            const int in_map = game->is_registered(nullptr, g.b);
-            if (in_map < 0) return;  // not ready after all: the next reading
+            const int in_map = game->is_registered(fxc, g.b);
+            if (in_map < 0) { ledger::observe({}); return; }  // not ready after all
             uint8_t v = ledger::kMissing;
             if (in_map == 1) {
                 buf.assign(b.served_size, 0);
-                v = !game->read_resource(nullptr, g.b, buf.data(), buf.size()) ? ledger::kUnchecked
+                v = !game->read_resource(fxc, g.b, buf.data(), buf.size()) ? ledger::kUnchecked
                     : bytes_hash(buf.data(), buf.size()) == b.served             ? ledger::kOwn
                                                                                  : ledger::kOther;
             }
@@ -1302,9 +1315,9 @@ void observe_registry() {
             for (auto& [id, v] : out)
                 if (v == ledger::kOther) v = ledger::kUnchecked;
         g_verdicts = std::move(out);
-        g_verdicts_done = true;
-        KV_I("vfx: the game's VFX table: %llu of %u resources (state %u); %u of Kiln's %zu VFX in it with Kiln's bytes",
+        if (!g_verdicts_done) KV_I("vfx: the game's VFX table: %llu of %u resources (state %u); %u of Kiln's %zu VFX in it with Kiln's bytes",
              static_cast<unsigned long long>(reg.count), reg.limit, reg.init_state, own, g_verdicts.size());
+        g_verdicts_done = true;
     }
     ledger::Seen seen;
     seen.limit = reg.limit;
@@ -1315,9 +1328,18 @@ void observe_registry() {
 }
 }  // namespace
 
-void build_on_update() {
+void build_world_ended() {
+    std::lock_guard observation(g_observe_mu);
+    g_observe_controller = nullptr;
+    g_observe_n = 0;
+    g_verdicts_done = false;
+    g_verdicts.clear();
+    ledger::observe({});
+}
+
+void build_on_update(void* fxc) {
     check_own_data();
-    observe_registry();
+    observe_registry(fxc);
     if (g_late_done.load(std::memory_order_acquire)) return;
     bool expected = false;
     if (!g_late_done.compare_exchange_strong(expected, true)) return;

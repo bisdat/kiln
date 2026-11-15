@@ -115,6 +115,14 @@ static void test_map_rules() {
     wrong = v;
     wrong.capacity = 17;
     check(!map_valid(wrong), "map: a capacity that is no power of two is not valid");
+    wrong = v;
+    wrong.count = 17;
+    check(map_find(wrong, a) == -1 && map_slot(wrong, a) == -1,
+          "map: lookup rejects count beyond capacity before reading keys");
+    wrong = v;
+    wrong.capacity = (1ull << 32) + 16;
+    check(map_find(wrong, a) == -1 && map_slot(wrong, a) == -1,
+          "map: lookup rejects corrupt huge capacity before reading keys");
     // a full map must end
     std::vector<uint64_t> fb(1, 0xffffull), fk(32, 0);
     MapView full;
@@ -611,7 +619,7 @@ int main(int argc, char** argv) {
 
     // ---- a registered VFX the builder turned off, and its update hook ----
     static int build_updates = 0;
-    core_set_build_hooks([] { ++build_updates; }, [](const uint8_t*) { return true; }, nullptr);
+    core_set_build_hooks([](void*) { ++build_updates; }, [](const uint8_t*) { return true; }, nullptr);
     check(core_is_registered(known) == 0, "build hook: a refused VFX reads as unknown");
     auto p_off = at(known);
     const KilnVfx h_off = core_play(1, &p_off);

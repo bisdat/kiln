@@ -383,14 +383,14 @@ public:
     MapView map(void* fxc) override {
         MapView v;
         uintptr_t sys = fxc ? sys_of_scene(scene_of(reinterpret_cast<uintptr_t>(fxc))) : 0;
-        if (!sys) sys = g_sys.load(std::memory_order_relaxed);
+        if (!sys && !fxc) sys = g_sys.load(std::memory_order_relaxed);
         if (sys) read_view(sys, &v);
         return v;
     }
 
     int is_registered(void* fxc, const uint8_t guid[16]) override {
         uintptr_t sys = fxc ? sys_of_scene(scene_of(reinterpret_cast<uintptr_t>(fxc))) : 0;
-        if (!sys) sys = g_sys.load(std::memory_order_relaxed);
+        if (!sys && !fxc) sys = g_sys.load(std::memory_order_relaxed);
         if (!sys) return -1;
         const int r = guard_lookup(sys, guid);
         return r == -2 ? -1 : r;
@@ -410,7 +410,7 @@ public:
 
     bool read_resource(void* fxc, const uint8_t guid[16], void* out, size_t n) override {
         uintptr_t sys = fxc ? sys_of_scene(scene_of(reinterpret_cast<uintptr_t>(fxc))) : 0;
-        if (!sys) sys = g_sys.load(std::memory_order_relaxed);
+        if (!sys && !fxc) sys = g_sys.load(std::memory_order_relaxed);
         MapView v;
         return sys && L.sys_table >= 0 && read_view(sys, &v) && seh_resource(sys, &v, guid, out, n);
     }
@@ -497,13 +497,15 @@ public:
     bool registry(void* fxc, Registry* out) override {
         if (g_reg_missing || !g_guard_on.load(std::memory_order_relaxed)) return false;
         uintptr_t sys = fxc ? sys_of_scene(scene_of(reinterpret_cast<uintptr_t>(fxc))) : 0;
-        if (!sys) sys = g_sys.load(std::memory_order_relaxed);
+
         MapView v;
         uint32_t limit = 0;
         uint8_t state = 0;
         if (!sys || !read_view(sys, &v) || !seh_read(sys + L.reg_map + L.reg_limit, &limit, sizeof limit) ||
             !seh_read(sys + L.init_state, &state, sizeof state))
             return false;
+        if (!v.capacity || (v.capacity & (v.capacity - 1)) || v.capacity > (1u << 24) ||
+            !limit || limit > v.capacity || v.count > v.capacity) return false;
         out->count = v.count;
         out->slots = v.capacity;
         out->limit = limit;
