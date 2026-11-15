@@ -18,7 +18,8 @@
 //   CommitCalled -> desired        Done, the actual deltas
 //   CommitCalled -> snapshot       CommitRolledBack (the commit rolled back by itself)
 //   anything else, a mismatch after a rollback, a fault: InvariantFailure (MayHaveMutated), the capability goes off; no
-//   engine call repairs anything after a fault.
+//   engine call repairs anything after a fault. A fault in a read before the transaction: InvariantFailure without
+//   MayHaveMutated (nothing was changed), reported and switched off the same way.
 // "As it was" after a rollback is two comparisons: the canonical snapshot (what a set selects) and every byte of the
 // seven components the program declares, of every entity of the player's tree (SetEngine::full), read before the
 // transaction opened and again after the rollback, in the same program update. An engine fault after the transaction
@@ -61,7 +62,7 @@ struct SetOutcome {
     uint32_t failed_operation = UINT32_MAX;  // the step the game refused
     uint32_t flags = 0;                      // kResult*
     uint32_t refusal = KILN_SET_REFUSAL_NONE;
-    bool engine_fault = false;               // equipment sets go off until the server restarts
+    bool engine_fault = false;               // equipment sets go off until the server, or the hosting player's game, restarts
     bool seh = false;                        // the game faulted (a structured exception), not a state mismatch
     uint32_t steps = 0;                      // steps staged
     char reason[256] = "";
@@ -106,9 +107,14 @@ public:
     // Every byte of the seven components kiln_items_equip declares (kFullParts) of every entity of `m`: the player, its
     // InventorySetup nodes, its inventories and its item entities, each as {u32 entity, u8 part, u32 size, the bytes}. The
     // canonical snapshot reads only the fields that decide what a set selects; a rollback must give back all of these
-    // (fuel, ItemState's level, rarity and damage, the action bars' selection, the empty states, ...).
+    // (fuel, ItemState's level, rarity and damage, the action bars' selection, the empty states, ...). A part whose
+    // accessor this build's program does not declare has no record (the program cannot write it either; the adapter says
+    // which once in kiln.log and in the capability row); size 0 is an entity without that component; a component that
+    // cannot be read whole has size kFullUnreadable and no bytes.
     virtual bool full(const SetModel& m, std::vector<uint8_t>* out) = 0;
 };
+
+constexpr uint32_t kFullUnreadable = 0xFFFFFFFFu;
 
 // The parts of SetEngine::full in its records' order (kiln.items' Acc order: setexec.cpp checks it).
 inline constexpr const char* kFullParts[7] = {"Fuel", "Inventory", "InventoryEmptyState", "InventorySetup", "ItemState", "OwnerRelationship", "SlotSelection"};
@@ -185,6 +191,11 @@ inline bool same_full(const std::vector<uint8_t>& a, const std::vector<uint8_t>&
         std::memcpy(&ea, &a[i], 4), std::memcpy(&eb, &b[i], 4), std::memcpy(&sa, &a[i + 5], 4), std::memcpy(&sb, &b[i + 5], 4);
         const uint8_t part = a[i + 4];
         const char* name = part < 7 ? kFullParts[part] : "a component";
+        if (ea == eb && part == b[i + 4] && (sa == kFullUnreadable || sb == kFullUnreadable)) {
+            // read before, not after (or the other way): never "equal"
+            std::snprintf(why, cap, "%s of entity %u %s", name, ea, sb == kFullUnreadable ? "could not be read after it" : "could not be read before it");
+            return false;
+        }
         if (ea != eb || part != b[i + 4] || sa != sb || i + 9 + sa > a.size() || i + 9 + sb > b.size()) {
             std::snprintf(why, cap, "%s of entity %u is %s after it (size %u, was %u)", name, ea, sb == 0 ? "gone" : "not the same record", sb, sa);
             return false;
@@ -197,6 +208,21 @@ inline bool same_full(const std::vector<uint8_t>& a, const std::vector<uint8_t>&
         i += 9 + sa;
     }
     std::snprintf(why, cap, "the component bytes differ in length (%zu, were %zu)", b.size(), a.size());
+    return false;
+}
+
+// The first record of a SetEngine::full read that could not be read whole (false: none).
+inline bool full_unreadable(const std::vector<uint8_t>& a, char* why, size_t cap) {
+    for (size_t i = 0; i + 9 <= a.size();) {
+        uint32_t e = 0, n = 0;
+        std::memcpy(&e, &a[i], 4), std::memcpy(&n, &a[i + 5], 4);
+        if (n == kFullUnreadable) {
+            const uint8_t part = a[i + 4];
+            std::snprintf(why, cap, "%s of entity %u cannot be read whole on this build", part < 7 ? kFullParts[part] : "a component", e);
+            return true;
+        }
+        i += 9 + n;
+    }
     return false;
 }
 
@@ -249,22 +275,30 @@ inline SetOutcome execute(SetEngine& g, const SetJob& job, const PlanOptions& op
         char at[48] = "";
         if (at_step != UINT32_MAX) std::snprintf(at, sizeof at, " at step %u of %u", at_step, of_steps);
         std::snprintf(o.reason, sizeof o.reason, "the game faulted %s%s%s", where, at,
-                      tx_open ? ": the inventory may be in an unknown state (nothing rolled back or repaired); equipment sets and single equips are "
-                                "off until the server restarts"
-                              : ": nothing was changed; equipment sets and single equips are off until the server restarts");
+                      tx_open ? ": the inventory may be in an unknown state (not rolled back); sets and equips are off until the server, or the "
+                                "hosting player's game, restarts; other item calls still run"
+                              : ": nothing was changed; sets and equips are off until the server, or the hosting player's game, restarts; other item "
+                                "calls still run");
+        return o;
+    };
+    // a fault in a read before the transaction opened: nothing was changed, and it is reported as every fault is
+    // (InvariantFailure without MayHaveMutated: the faulted event, kiln.log's error line, sets and equips off)
+    auto read_fault = [&](const char* what) {
+        o.status = SetStatus::InvariantFailure;
+        o.engine_fault = true;
+        o.seh = true;
+        o.changes.clear();
+        std::snprintf(o.reason, sizeof o.reason,
+                      "the game faulted %s before the transaction opened: nothing was changed; sets and equips are off until the server, or the "
+                      "hosting player's game, restarts; other item calls still run",
+                      what);
         return o;
     };
 
     // ---- Queued: the snapshot again, from the program's accessors ----
     SetModel now;
     SnapStatus st = SnapStatus::Ok;
-    if (!g.read(&now, &st)) {
-        o.status = SetStatus::Unavailable;
-        o.engine_fault = true;
-        o.seh = true;
-        std::snprintf(o.reason, sizeof o.reason, "reading the player's inventory inside the program faulted: nothing was changed; equipment sets are off until the server restarts");
-        return o;
-    }
+    if (!g.read(&now, &st)) return read_fault("reading the player's inventory inside the program");
     std::vector<uint8_t> bytes;
     if (st == SnapStatus::Ok) encode(job.prefix, now, &bytes);
     if (st != SnapStatus::Ok || bytes != job.baseline) {
@@ -297,11 +331,10 @@ inline SetOutcome execute(SetEngine& g, const SetJob& job, const PlanOptions& op
 
     // every byte of the program's components before anything is staged: a rollback must give back all of them
     std::vector<uint8_t> whole;
-    if (!g.full(now, &whole)) {
+    if (!g.full(now, &whole)) return read_fault("reading the player's components inside the program");
+    if (char why[160] = ""; full_unreadable(whole, why, sizeof why)) {  // a rollback could not be checked: refused before it
         o.status = SetStatus::Unavailable;
-        o.engine_fault = true;
-        o.seh = true;
-        std::snprintf(o.reason, sizeof o.reason, "reading the player's components inside the program faulted: nothing was changed; equipment sets are off until the server restarts");
+        std::snprintf(o.reason, sizeof o.reason, "%s: a rollback could not be checked, so the set is refused before anything changed", why);
         return o;
     }
 
@@ -319,7 +352,7 @@ inline SetOutcome execute(SetEngine& g, const SetJob& job, const PlanOptions& op
         } else if (s.op == OpKind::Equip) {
             uint64_t from = s.source;
             if (s.pide) {  // an item entity: where the steps before put it, never the request's slot
-                if (!g.locate(s.pide, &from)) return fault("looking for an item inside the transaction", true, false);
+                if (!g.locate(s.pide, &from)) return fault("locating an item in the transaction", true, false);
                 if (!from) {
                     refused = true;
                     o.failed_operation = i;

@@ -124,22 +124,26 @@ bool g_tx(uint8_t* tx, int which) {
 // passes, both guarded: the sizes, then the copy into a buffer the caller sized from the first (no allocation in here).
 static_assert(A_COUNT == 7 && A_FUEL == 0 && A_INVENTORY == 1 && A_EMPTY == 2 && A_SETUP == 3 && A_ITEMSTATE == 4 && A_OWNER == 5 && A_SLOTSEL == 6,
               "kFullParts (setexec.h) names the parts in Acc order");
+// A part whose accessor the program does not declare on this build has no record (the program cannot write it); an
+// entity without the component is size 0; a component over 64 KiB is kFullUnreadable with no bytes (never "equal").
 bool g_full(const Access* a, const uint32_t* ents, uint32_t n, uint8_t* buf, uint64_t cap, uint64_t* used) {
     __try {
         uint64_t at = 0;
         for (uint32_t i = 0; i < n; ++i)
             for (int k = 0; k < A_COUNT; ++k) {
+                if (!a->acc[k]) continue;
                 PtrSize ps{};
-                if (a->acc[k]) E.read_other(&ps, a->storage, a->acc[k], ents[i]);
-                const uint32_t size = ps.ptr && ps.size <= 0x10000 ? static_cast<uint32_t>(ps.size) : 0;
+                E.read_other(&ps, a->storage, a->acc[k], ents[i]);
+                const uint32_t size = !ps.ptr ? 0 : ps.size <= 0x10000 ? static_cast<uint32_t>(ps.size) : sets::kFullUnreadable;
+                const uint32_t bytes = size == sets::kFullUnreadable ? 0 : size;
                 if (buf) {
-                    if (at + 9 + size > cap) return *used = UINT64_MAX, true;  // changed between the passes: not the same
+                    if (at + 9 + bytes > cap) return *used = UINT64_MAX, true;  // changed between the passes: not the same
                     std::memcpy(buf + at, &ents[i], 4);
                     buf[at + 4] = static_cast<uint8_t>(k);
                     std::memcpy(buf + at + 5, &size, 4);
-                    if (size) std::memcpy(buf + at + 9, ps.ptr, size);
+                    if (bytes) std::memcpy(buf + at + 9, ps.ptr, bytes);
                 }
-                at += 9 + size;
+                at += 9 + bytes;
             }
         *used = at;
         return true;
@@ -182,6 +186,10 @@ public:
         for (const ItemRec& r : m.items) ents.push_back(r.pide);
         std::sort(ents.begin(), ents.end());
         ents.erase(std::unique(ents.begin(), ents.end()), ents.end());
+        uint32_t parts = 0;  // the parts this build's program declares (the comparison reads exactly these)
+        for (int k = 0; k < A_COUNT; ++k)
+            if (a_.acc[k]) parts |= 1u << k;
+        sets_full_parts(parts);
         uint64_t need = 0, used = 0;
         if (!g_full(&a_, ents.data(), static_cast<uint32_t>(ents.size()), nullptr, 0, &need)) return false;
         out->assign(need, 0);
