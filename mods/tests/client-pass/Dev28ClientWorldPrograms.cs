@@ -12,7 +12,11 @@
 //   14-q4                      the client world's event types by name
 //   programs.client-emf        EMF register_program, register_program_def and on_event in the client world (the probe)
 //   programs.client-visual     a harmless visual write: a barrel drawn 1 m higher, with its bytes and its event
+//   programs.client-persistence the same write through a save and a reload: the barrel is where the game has it
 //   programs.client-rejoin     leave and join again with the fixture's programs running; an unload and a load with them
+//   programs.client-delayed-stop  a deliberately delayed callback (the fixture's "delay") when the client world stops:
+//                              the stop's latency, whether a call was still inside, and the latch it then sets (last:
+//                              it may switch client-world programs off until the game restarts)
 // Not here, manual (the notes): a second, vanilla client watching the visual write; an exit with programs running.
 using System.Text.RegularExpressions;
 using Kiln;
@@ -80,6 +84,22 @@ public sealed partial class ClientPassMod
             $"{worlds} client world(s) with kiln.world's \"no Kiln programs there\" line");
         c.Expect(!log.Any(l => l.Contains("registered into the client world", StringComparison.Ordinal)), "no Kiln program registered into a client world", "");
         c.Expect(!log.Any(l => l.Contains("client-world programs are off until the game restarts", StringComparison.Ordinal)), "no latch", "");
+        // the engine's own counts of the client world that runs now (kiln.world.budget reads its table): nothing of Kiln
+        var budget = World.GetProgramBudget(CapacityWorldKind.Client);
+        if (c.Expect(budget.Ok, "the client world's program table can be read (World.GetProgramBudget(Client))", budget.Reason ?? "ok"))
+        {
+            var e = budget.EngineSlots;
+            c.Expect(e.KilnUsed == 0, "the client world's table holds no Kiln entry", $"Kiln {e.KilnUsed}");
+            c.Expect(e.GameUsed > 0 && e.GameUsed + e.KilnUsed + e.Reserved <= e.Capacity,
+                "the game's own programs are all there and the table adds up",
+                $"game {e.GameUsed}, other loaders {e.Reserved}, of {e.Capacity}");
+            c.Log.Info($"client-pass: programs.client-baseline client table: game {e.GameUsed}, Kiln {e.KilnUsed}, other loaders " +
+                       $"{e.Reserved}, of {e.Capacity} (compare with 14-client-world-programs' line with the fixture)");
+        }
+        var server = World.GetProgramBudget(CapacityWorldKind.Server);
+        if (server.Ok)
+            c.Expect(true, "the hosted server world's table, for comparison",
+                $"game {server.EngineSlots.GameUsed}, Kiln {server.EngineSlots.KilnUsed}, other loaders {server.EngineSlots.Reserved}");
         c.Expect(true, "world.programs.client in this start", Capabilities.Why(EcsPrograms.ClientWorldCapability));
         c.Instruct("Through that sequence: did loading, frame pacing and play look as without Kiln's client programs (a vanilla " +
                    "player joining you is best)? Pass if they did.");
@@ -124,6 +144,12 @@ public sealed partial class ClientPassMod
             "a program naming a component no world has was refused for the client world, with the name", s.Line[(s.Line.IndexOf("refused:", StringComparison.Ordinal))..]);
         var registered = log.Count(l => l.Contains("program kiln_managed_", StringComparison.Ordinal) && l.Contains("registered into the client world as #", StringComparison.Ordinal));
         c.Expect(registered >= 4, "kiln.log: \"program … registered into the client world as #N\"", $"{registered} line(s)");
+        if (World.GetProgramBudget(CapacityWorldKind.Client) is { Ok: true } budget)
+        {
+            var e = budget.EngineSlots;
+            c.Expect(e.KilnUsed >= 4, "the engine's client table holds Kiln's entries (kiln.world.budget)", $"game {e.GameUsed}, Kiln {e.KilnUsed}, other loaders {e.Reserved}");
+            c.Log.Info($"client-pass: 14-client-world-programs client table: game {e.GameUsed}, Kiln {e.KilnUsed}, other loaders {e.Reserved}, of {e.Capacity}");
+        }
         c.Expect(log.Any(l => l.Contains($"{Fixture}: refused (event, thread main)", StringComparison.Ordinal) ||
                               l.Contains("bound, refused by the world that runs now", StringComparison.Ordinal)),
             "the refusal reached the mod: TryBind's answer, or EcsProgramRefusedEvent on the main thread", "");
@@ -281,10 +307,64 @@ public sealed partial class ClientPassMod
         await c.Verdict();
     }
 
-    // ------------------------------------------------------------------- 7. leave, rejoin, unload, load again ----
+    // --------------------------------------------------------- 7. the persistence boundary: a save and a reload ----
+
+    private const string PersistenceMark = "client-pass: programs.client-persistence barrel ";
+
+    [ClientCheck("programs.client-persistence", "A client program's write is not saved: the barrel after a save and a reload",
+        Area = "Systems", Since = Dev29, Tags = [Visual], Needs = ClientCheckNeeds.Hosted, Order = ClientWorldProgramsOrder + 6)]
+    public async Task ClientProgramsPersistence(CheckContext c)
+    {
+        if (!await NeedClientPrograms(c) || !await Need(c, Fixture)) return;
+        if (BootLog(c, "kiln.log") is not { } log)
+        {
+            await c.Verdict();
+            return;
+        }
+        // the second half: a barrel this check floated in an earlier client world of this start (the save and the reload
+        // in between); the game's own position of it, read in the hosted server world, is where it was spawned
+        var mark = log.LastOrDefault(l => l.Contains(PersistenceMark, StringComparison.Ordinal));
+        var m = mark is null ? null : Regex.Match(mark, @"session (\d+) at \(([-\d.]+), ([-\d.]+), ([-\d.]+)\)");
+        if (m is { Success: true } && uint.Parse(m.Groups[1].Value) != Client.ClientWorldSession)
+        {
+            var spawned = new WorldPosition(double.Parse(m.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture),
+                double.Parse(m.Groups[3].Value, System.Globalization.CultureInfo.InvariantCulture),
+                double.Parse(m.Groups[4].Value, System.Globalization.CultureInfo.InvariantCulture));
+            var near = Nearby.Entities(spawned, 1.5, "CurrentTransform");
+            var positions = near.Select(e => World.Position(e)).Where(p => p is not null).Select(p => p!.Value).ToList();
+            var closest = positions.OrderBy(p => Math.Abs(p.X - spawned.X) + Math.Abs(p.Z - spawned.Z)).FirstOrDefault();
+            c.Expect(positions.Count > 0, "the saved world has an entity where the barrel was spawned", $"{positions.Count} near {spawned}");
+            if (positions.Count > 0)
+                c.Expect(Math.Abs(closest.Y - spawned.Y) < 0.5, "the game's own position of it: on the ground, not 1 m up (the client write was not saved)",
+                    $"y {closest.Y:F2} m, spawned at {spawned.Y:F2} m");
+            c.Instruct($"Walk to the barrel at {spawned}. Is it standing on the ground (not floating)? Pass if it is.");
+            await c.Verdict();
+            return;
+        }
+        if (Ahead(c, 3) is not { } at)
+        {
+            await c.Skip("the player's place is not known");
+            return;
+        }
+        var barrel = await SpawnHere(c, "Prop_Deco_Steppeprops_Barrel_01", at);
+        if (barrel.IsNone)
+        {
+            await c.Verdict();
+            return;
+        }
+        await c.Delay(TimeSpan.FromSeconds(2));
+        var p = World.Position(barrel) ?? at;
+        Mods.Send(Fixture, "visual-target", new[] { p.X, p.Y, p.Z });
+        c.Log.Info(FormattableString.Invariant($"{PersistenceMark}session {Client.ClientWorldSession} at ({p.X:F2}, {p.Y:F2}, {p.Z:F2})"));
+        c.Instruct("A barrel 3 m ahead floats 1 m up in this game only. Now save and quit to the main menu, load the same world " +
+                   "again (a new client world: the fixture forgets its target), and run this check again.");
+        await c.Skip("the second half runs after the save and the reload");
+    }
+
+    // ------------------------------------------------------------------- 8. leave, rejoin, unload, load again ----
 
     [ClientCheck("programs.client-rejoin", "Client programs through leaving, joining again, an unload and a load", Area = "Systems",
-        Since = Dev29, Needs = ClientCheckNeeds.Hosted, Order = ClientWorldProgramsOrder + 6)]
+        Since = Dev29, Needs = ClientCheckNeeds.Hosted, Order = ClientWorldProgramsOrder + 7)]
     public async Task ClientProgramsRejoin(CheckContext c)
     {
         if (!await NeedClientPrograms(c) || !await Need(c, Fixture)) return;
@@ -327,6 +407,74 @@ public sealed partial class ClientPassMod
             "the new instance bound again in the world that runs", "");
         c.Expect(Summaries(tail).LastOrDefault() is { } s && s.Of("system").Client > 0, "and its programs run", "");
         c.Instruct("Did the game run as before through leaving, joining, hosting and the reload? Pass if it did.");
+        await c.Verdict();
+    }
+
+    // --------------------------------------------------------- 9. a deliberately delayed callback at the stop ----
+
+    [ClientCheck("programs.client-delayed-stop", "A client world stops while a delayed callback is inside", Area = "Systems",
+        Since = Dev29, Needs = ClientCheckNeeds.Hosted, Order = ClientWorldProgramsOrder + 8)]
+    public async Task ClientProgramsDelayedStop(CheckContext c)
+    {
+        if (!await NeedOpen(c, EcsPrograms.ClientWorldCapability) || !await NeedPlayer(c) || !await Need(c, Fixture)) return;
+        if (BootLog(c, "kiln.log") is not { } log)
+        {
+            await c.Verdict();
+            return;
+        }
+        var armed = Array.FindLastIndex(log, l => l.Contains($"{Fixture}: delay armed", StringComparison.Ordinal));
+        var stop = armed < 0 ? -1 : Array.FindIndex(log, armed, l => l.Contains("client world stops:", StringComparison.Ordinal) &&
+                                                                 l.Contains("registration(s) closed", StringComparison.Ordinal));
+        if (stop < 0)
+        {
+            if (!Capabilities.Is(EcsPrograms.ClientWorldCapability))
+            {
+                await c.Skip($"{EcsPrograms.ClientWorldCapability} is off already: {Capabilities.Why(EcsPrograms.ClientWorldCapability)}");
+                return;
+            }
+            Mods.Send(Fixture, "delay", 2500);
+            c.Instruct("Run this check last: it may switch client-world programs off until the game restarts. One of the fixture's " +
+                       "callbacks now sleeps 2.5 s on a worker in every client step, so the game stalls. Open the menu and leave " +
+                       "the world to the main menu now, then host a world again and run this check once more.");
+            await c.Skip("the stop is read after the player left the world");
+            return;
+        }
+        var line = log[stop];
+        c.Log.Info($"client-pass: programs.client-delayed-stop {line}");
+        var m = Regex.Match(line, @"\((\d+) call\(s\) running at the stop, (\d+) after (\d+) us");
+        if (!c.Expect(m.Success, "kiln.log has the stop's line after the delay was armed", line))
+        {
+            await c.Verdict();
+            return;
+        }
+        var atStop = int.Parse(m.Groups[1].Value);
+        var after = int.Parse(m.Groups[2].Value);
+        var waited = long.Parse(m.Groups[3].Value);
+        c.Expect(true, "calls inside at the stop, still inside after the wait, the wait (the stop's latency)",
+            $"{atStop}, {after}, {waited / 1000.0:F1} ms");
+        var late = log.Skip(armed).Count(l => l.Contains("its world began to stop while a slice of it ran", StringComparison.Ordinal));
+        c.Expect(true, "slices that stopped at their next entity (kiln.log, doubling)", $"{late} line(s)");
+        var latched = log.Skip(armed).Any(l => l.Contains("client-world programs are off until the game restarts:", StringComparison.Ordinal));
+        if (after > 0)
+        {
+            c.Expect(latched, "a callback still inside after the wait set the process latch", "");
+            c.Expect(!Capabilities.Is(EcsPrograms.ClientWorldCapability) &&
+                     Capabilities.Get(EcsPrograms.ClientWorldCapability).Reason == CapabilityReason.Faulted,
+                "world.programs.client is unavailable (faulted) since", Capabilities.Why(EcsPrograms.ClientWorldCapability));
+            c.Expect(waited >= 1_900_000 && waited < 3_000_000, "the stop waited about 2 s, not longer", $"{waited / 1000.0:F0} ms");
+            KilnUnavailableException? refused = null;
+            try { EcsPrograms.TryBind("cpf_system", _ => { }, WorldKind.Client); }
+            catch (KilnUnavailableException e) { refused = e; }
+            catch (InvalidOperationException) { }
+            c.Expect(refused is not null, "a bind now throws KilnUnavailableException with the reason", refused?.Message ?? "no exception");
+        }
+        else
+        {
+            // the game had waited for its tasks before the stop (or the delayed call had returned): nothing latched
+            c.Expect(!latched, "no call inside after the wait: no latch", atStop == 0 ? "no call was inside at the stop" : "the calls left inside the wait");
+        }
+        c.Instruct("When you left the world: did the game reach the main menu without a crash and without a hang longer than the " +
+                   "stall (about 2.5 s a frame)? Pass if it did.");
         await c.Verdict();
     }
 }

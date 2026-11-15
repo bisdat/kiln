@@ -266,20 +266,27 @@ presentation; a program that must change what others see belongs in the server w
   its `RegisterAllPrograms` (hosted and joined alike), after the game's own programs, so it runs after every client
   program it conflicts with. Its names are checked against **that** world's maps first: a name the client world lacks
   refuses it there only, with the name (`EcsProgramRefusedEvent` for a world after the bind, also when the mod's callback
-  threw there; `kiln.log`: `program … refused for the client world: …`). Registered: `program kiln_managed_… registered into the client world as #N`. At the client
+  threw there: the binding then stays off, and the event comes again in each later client world; `kiln.log`:
+  `program … refused for the client world: …`). Registered: `program kiln_managed_… registered into the client world as #N`. At the client
   world's first step kiln.log lists its event types (`client world 0x… event map (question 4): …`; a host's server world's
   too) while such a program exists.
 - **Threads.** The callback runs on the game's workers or the main thread, several slices at once: no tick-thread API in
   it, UI work through `Client.Post`; `EcsProgramContext.World` says which world it is in. A client world's entity ids are
   its own: the same number can name another entity in the server world.
-- **Stop and unload.** When the client world stops (leaving to the menu, joining elsewhere) no call starts and the
-  running ones are waited for, 2 s at most; each registration with no call inside waits for the next client world, and
-  the binding stays and runs again there. The core waits for a client world's jobs before it destroys the world only
-  where it says so (not yet in this core): when a call is still running after the 2 s, kiln.log says `client world
-  stops: N call(s) of Kiln programs still running after … us; their bindings are kept`, that program is off for good,
-  no client-world program registers again until the game restarts and `world.programs.client` goes unavailable
-  (faulted) with the reason. That late call may still read the world the game is destroying. The same latch follows a
-  fault in the engine's RegisterProgram for a client world, or a table that does not add up after it.
+- **Stop and unload.** When the client world stops (leaving to the menu, joining elsewhere) no call starts, a slice
+  already running stops before its next entity (your callback is not called for the rest of it), and inside a callback
+  that still runs kiln.world's helpers refuse (iteration, the current entity, the command buffer, other-entity reads,
+  events); the running callbacks are waited for, 2 s at most; each registration waits for the next client world, and
+  the binding stays and runs again there. A slice is also checked against the world it belongs to: a job of an earlier
+  client world that starts late is refused (`kiln.log`: `a slice of another world … was refused`). The core does not yet
+  wait for a client world's jobs before it destroys the world (it does for the server world): when a callback is still
+  running after the 2 s, kiln.log says `client world stops: N call(s) of Kiln programs still running after … us; their
+  bindings are kept`, every client and prediction program is refused with that reason, no client-world program
+  registers again until the game restarts and `world.programs.client` goes unavailable (faulted) with the reason. That
+  late callback may still read the world the game is destroying. The same latch follows a fault in the engine's
+  RegisterProgram for a client world, or a table that does not add up after it: the programs registered before it in
+  that world stay in the game's table but no longer run, and say so. `EcsProgramRefusedEvent` follows in each later
+  client world, and `TryBind` throws `KilnUnavailableException` with the reason.
 - **Disposing** the handle, or the mod's unload, unbinds: from then on no call of it starts once kiln.world has seen it
   close. A dispose made inside a call of the program itself, or one that finds a call still running (a host unloading
   the mod from its server thread while a client step runs it), is finished later: Kiln retries on its service tick and
@@ -287,8 +294,10 @@ presentation; a program that must change what others see belongs in the server w
   before that: do not free what a running callback still uses.
 - **Writes** through `TryWrite` change this player's client world only: in a client or prediction program it does not
   mark the write for the game's save or replication (it does in the server world), as the game's own client programs
-  write what they draw. `TryWriteOther` answers false there (the game's other-entity write marks the change; kiln.world's
-  `write_other` refuses it in a client program). A `TryWrite` raises `ClientComponentWrittenEvent` (Kiln.World; entity,
+  write what they draw; native `mark_written` is a no-op there. `TryWriteOther` answers false there: kiln.world's
+  `write_other` refuses it in a client program. Not because of the save (per the notes the game's WriteOther marks only a
+  server-world block) but because the other-entity path of a client job has not been read in a client run; the foreign
+  views' `foreign_write` and `foreign_attr_changed` refuse from a client program too. A `TryWrite` raises `ClientComponentWrittenEvent` (Kiln.World; entity,
   component, the bytes before and after, `Writer` `"<modid>/program:<key>"`) while it has listeners. Whether every game
   version leaves such an unmarked write alone has not been run in a game: guided check `programs.client-visual`.
   `World.Write` has no client world.
