@@ -146,7 +146,9 @@ export interface Zone {
   owners: string[];
   allowAdmins: boolean;
 }
+export interface GameplayHookRow { state: "idle" | "waiting" | "installed" | "refused" | "unknown"; reason: string }
 export interface GameplayStatus {
+  hookGroups?: Partial<Record<"build" | "terraform" | "spawn", GameplayHookRow>>;
   available: boolean;
   intercept?: boolean;
   craftHook?: boolean;

@@ -166,7 +166,7 @@ public static unsafe partial class Gameplay
 
     /// <summary>Adds a protection zone, owned by the calling mod (removed when it unloads). Tick thread.</summary>
     /// <exception cref="KilnUnavailableException">A build/break deny cannot be enforced yet. Names
-    /// <c>gameplay.build_hooks</c>; a request first made during a running world begins protection in the next world.
+    /// <c>gameplay.build_hooks</c>; a request first made during a running world waits for checked installation at safe Pre ticks.
     /// The zone is not stored and no deny bits are silently removed.</exception>
     [TickThreadOnly]
     [RequiresCapability("kiln.gameplay")]
@@ -245,8 +245,13 @@ public static unsafe partial class Gameplay
         status.Size = (uint)sizeof(GameplayNative.Status);
         var waiting = t != null && t->Status(&status) == Ok && status.Size >= 648 &&
                       status.BuildHookState == 2;
+        // Round 2/3 native tables can still wait for world stop (including the older 144-byte table).
+        // Keep their actual policy in the error; table size alone cannot distinguish that build from this one.
+        var legacyWait = GameplayNative.RequestHooks(t) == null || System.Text.Encoding.UTF8.GetString(
+            new ReadOnlySpan<byte>(status.BuildHookReason, 512)).Contains("world to stop", StringComparison.Ordinal);
         throw ServiceCaps.Unavailable("gameplay.build_hooks", waiting
-            ? "build protection begins with the next world: this mod asked for it while a world was running"
+            ? legacyWait ? "build protection begins with the next world: this mod asked for it while a world was running"
+                         : "build protection is waiting for checked installation at a safe Pre"
             : "build protection is unavailable: " + Capabilities.Get("gameplay.build_hooks").ReasonText);
     }
 

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 using System.Reflection;
+using System.Diagnostics;
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
 
@@ -10,6 +11,7 @@ internal static class GameplayBuildDemand
 {
     // Optional service facades that themselves consume gameplay events/rules. Keep this explicit: following every
     // shared Kiln.* dependency would make an unrelated facade count as using every service.
+    internal const uint HostReady=0; // KilnGameplayApi.request_hooks announcement; no hook bits
     private static uint GroupsForReference(string? name) => name switch {
         "Kiln.Gameplay" => 31u,
         "Kiln.Creatures" => 8u, // CreatureVariants natural-spawn events/replacements
@@ -40,15 +42,52 @@ internal static class GameplayBuildDemand
             host.Log(LogLevel.Warn, $"mod owner {owner}: gameplay.build_hooks request refused: {Kiln.Capabilities.Why("gameplay.build_hooks")}");
     }
 
+    // Cache only metadata, not dependency closure: exports differ between admitted mods. A changed identity is read
+    // again. Bounds make uncertain/oversized input conservative demand, never evidence that no hooks are needed.
+    internal sealed class MetadataPass
+    {
+        private readonly record struct Identity(string Path,long Length,long Written,long Created);
+        private readonly Dictionary<Identity,string[]?> _cache=new();
+        private long _bytes;
+        internal int AssembliesRead { get; private set; }
+        internal string[] References(string path)
+        {
+            path=Path.GetFullPath(path);
+            if(OperatingSystem.IsWindows()) path=path.ToUpperInvariant();
+            var info=new FileInfo(path);
+            var key=new Identity(path,info.Length,info.LastWriteTimeUtc.Ticks,info.CreationTimeUtc.Ticks);
+            if(_cache.TryGetValue(key,out var cached))
+                return cached ?? throw new BadImageFormatException("cached unreadable assembly: "+path);
+            if(AssembliesRead>=4096 || key.Length>64L*1024*1024 || _bytes+key.Length>256L*1024*1024)
+                throw new IOException("gameplay metadata pass budget reached (4096 files / 64 MiB per file / 256 MiB total)");
+            ++AssembliesRead; _bytes+=key.Length;
+            try {
+                using var stream=File.OpenRead(path);
+                using var pe=new PEReader(stream);
+                var refs=pe.HasMetadata ? ReadReferences(pe.GetMetadataReader()) : [];
+                info.Refresh();
+                if(!info.Exists || info.Length!=key.Length || info.LastWriteTimeUtc.Ticks!=key.Written || info.CreationTimeUtc.Ticks!=key.Created)
+                    throw new IOException("assembly changed during gameplay metadata pass: "+path);
+                _cache[key]=refs;
+                return refs;
+            } catch { _cache[key]=null; throw; }
+        }
+        private static string[] ReadReferences(MetadataReader metadata) => metadata.AssemblyReferences
+            .Select(h=>metadata.GetString(metadata.GetAssemblyReference(h).Name)).ToArray();
+    }
+
     // Startup demand must precede the first world even on dedicated servers, whose ordinary OnLoad runs at Pre.
     // Inspect metadata only: do not instantiate a mod or run its module initializer/OnLoad earlier.
-    internal static uint GroupsFor(string entry, IEnumerable<string> exportedAssemblies)
+    internal static uint GroupsFor(string entry, IEnumerable<string> exportedAssemblies, MetadataPass? pass=null)
     {
+        pass ??= new MetadataPass();
         var pending = new Queue<string>(); pending.Enqueue(entry);
         // A shipped helper can be loaded by name in OnLoad, without an AssemblyRef from the entry assembly.
         // Conservatively inspect those helpers too, before the first world; actual loads are checked again.
+        int helpers=0;
         foreach (var helper in Directory.EnumerateFiles(Path.GetDirectoryName(entry)!, "*.dll"))
         {
+            if(++helpers>4096) throw new IOException("gameplay preflight helper-count budget reached");
             var name = Path.GetFileName(helper);
             if (name.StartsWith("Kiln.", StringComparison.Ordinal) &&
                 File.Exists(Path.Combine(Path.GetDirectoryName(typeof(ModManager).Assembly.Location)!, name))) continue;
@@ -60,14 +99,8 @@ internal static class GameplayBuildDemand
         while (pending.TryDequeue(out var path))
         {
             if (!seen.Add(path)) continue;
-            using var stream = File.OpenRead(path);
-            using var pe = new PEReader(stream);
-            if (!pe.HasMetadata) continue; // Valid native PE helper, not an assembly.
-            var metadata = pe.GetMetadataReader(); // Malformed metadata must take the conservative fallback.
-
-            foreach (var handle in metadata.AssemblyReferences)
+            foreach (var name in pass.References(path))
             {
-                var name = metadata.GetString(metadata.GetAssemblyReference(handle).Name);
                 demand |= GroupsForReference(name);
                 if(demand==31) return demand;
                 if (name != Path.GetFileName(name) || name.Contains('\\')) continue;
@@ -88,6 +121,10 @@ internal sealed partial class ModManager
 {
     internal void PrepareGameplayHooks()
     {
+        // Zero is an ABI-pinned announcement, not demand. Old tables ignore it through the size-checked adapter.
+        GameplayBuildDemand.Request(_host,0,GameplayBuildDemand.HostReady);
+        var timer=Stopwatch.StartNew();
+        var metadata=new GameplayBuildDemand.MetadataPass();
         var candidates = BootCandidates(); // Same profile/disabled/duplicate rules as the boot admission pass.
         var roles = ResolveBootRoles(candidates, out _);
         var admitted = candidates.Where(c => roles.ContainsKey(c.Directory)).ToArray();
@@ -106,7 +143,7 @@ internal sealed partial class ModManager
                 if (Directory.Exists(Path.Combine(directory,"quests"))) demand |= 7u;
                 if(manifest.HasCode) demand |= GameplayBuildDemand.GroupsFor(Path.Combine(directory, manifest.EntryAssembly),
                         admitted.Where(c => dependencies.Contains(c.Manifest.Id))
-                            .SelectMany(c => c.Manifest.Exports.Select(f => Path.Combine(c.Directory, f))));
+                            .SelectMany(c => c.Manifest.Exports.Select(f => Path.Combine(c.Directory, f))),metadata);
                 if(demand==0) continue;
                 var owner = _host.OwnerCreate("mod:" + manifest.Id);
                 try { GameplayBuildDemand.Request(_host, owner,demand); }
@@ -121,5 +158,6 @@ internal sealed partial class ModManager
                 finally { _host.OwnerRevoke(owner); }
             }
         }
+        _host.Log(LogLevel.Info,$"gameplay pre-world demand: {metadata.AssembliesRead} assemblies read in {timer.Elapsed.TotalMilliseconds:F1} ms");
     }
 }
