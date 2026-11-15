@@ -1618,6 +1618,26 @@
    "added": "06a-program-wraps (dev.29 S8)"
   },
   {
+   "id": "06a-wraps.client-stop",
+   "title": "Client-world wraps registered through leave and rejoin: the stop lines in order",
+   "chapter": "06a",
+   "packages": [
+    "06a-program-wraps"
+   ],
+   "state": "open",
+   "added": "06a-program-wraps"
+  },
+  {
+   "id": "06a-wraps.client-exit",
+   "title": "Client-world wraps registered at the game's exit: the exit's stop lines in order",
+   "chapter": "06a",
+   "packages": [
+    "06a-program-wraps"
+   ],
+   "state": "open",
+   "added": "06a-program-wraps"
+  },
+  {
    "id": "00-sigdb.in-place-patches",
    "title": "Kiln's functions are found next to a loader that patched the game first",
    "chapter": "00",

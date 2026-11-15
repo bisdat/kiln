@@ -405,7 +405,10 @@ object, bitset at +0, the same object as an entity record's `world/entity.layout
 setup S `0x629570` / C `0x98d6e0`), archetype group `+0x20`, first/end rows u32 `+0x28/+0x2c` (end - first = the job's
 count). ProgramRunner's rdx is this record, and the update call reads `[[rdi+0x10]+0x28]` from it (S `0x64b169`), so the
 update runs inside the runner call of its own record: kiln.world's `world.slice_record` (sigdb
-`@world/ProgramRunner.slice` / `.layout`, dev.29) records rdx at the runner's entry for WhenArchetype. [static] Job J: Storage `+0`, command buffer `+8`, entity list `+0x830` (16 B/entry), count `+0x838`.
+`@world/ProgramRunner.slice` / `.layout`, dev.29) keeps rdx for WhenArchetype with a typed link around the runner: the
+record is set for exactly the one continuation call (the single update call at F+0x571, the return at F+0x5b6) and the
+outer value is restored when it returns, is skipped by a later hook or unwinds (Windows `__finally`), so it never
+outlives the runner call it came from; a trampoline takes it once. [static] Job J: Storage `+0`, command buffer `+8`, entity list `+0x830` (16 B/entry), count `+0x838`.
 Task: Storage `+0`, slices `+8`, slice index u32 `+0x10`, worker value u32 `+0x14`. [static] [lab]
 
 ### World stop and the world's jobs [static]
