@@ -414,7 +414,7 @@ const char* find_text(SnapStore::Find f) {
 }  // namespace
 
 namespace {
-bool g_lab = false, g_matrix = false;
+bool g_lab = false, g_matrix = false, g_notes_lab = false;
 PlanOptions g_plan_options;
 }  // namespace
 
@@ -426,6 +426,8 @@ void sets_lab_init() {
     const std::filesystem::path dir = std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(buf), len)) / "kiln.items";
     g_lab = std::filesystem::exists(dir / "sets-lab", ec);
     g_matrix = g_lab && std::filesystem::exists(dir / "sets-matrix", ec);
+    g_notes_lab = std::filesystem::exists(dir / "notes-lab", ec);
+    if (g_notes_lab) LOGW("kiln.items: lab switch notes-lab (kiln/data/kiln.items): give/take jobs log their component watch note's cost");
     // cycles (two worn items exchanged through a free slot) passed the rollback matrix (2026-11-15): on unless a lab turns
     // them off to see the refusal
     g_plan_options.cycles = !std::filesystem::exists(dir / "sets-no-cycles", ec);
@@ -437,6 +439,7 @@ void sets_lab_init() {
 
 bool sets_lab() { return g_lab; }
 bool sets_lab_matrix() { return g_matrix; }
+bool notes_lab() { return g_notes_lab; }
 
 PlanOptions sets_plan_options() { return g_plan_options; }
 

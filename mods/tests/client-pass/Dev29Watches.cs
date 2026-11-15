@@ -8,11 +8,15 @@ namespace ClientPass;
 // Orders 2910-2919.
 //
 // - 07-watch.hosted: in a hosted world with the real player, a watch of every player in the game follows the player
-//   (a real player session, not a lab stand-in), reports the game's own stamina use as Unknown (never Game, never Kiln),
-//   reports Kiln's own health write as kiln.combat's and an item Kiln gives as kiln.items' change of a linked inventory
-//   page, and reports the player's own inventory action as not Kiln's. None of this ran with a connected player or in a
-//   game client before this pass: the lab used spawned 1_Player stand-ins on a dedicated server. events.component_net is
-//   on without it (nothing ships held). Every Expect is a requirement but the two that pass `true` (shown, not judged).
+//   (a real player session, not a lab stand-in: every record of the character carries the same nonzero session),
+//   reports the game's own stamina use as Unknown (never Game, never Kiln), reports Kiln's own health write as
+//   kiln.combat's with the typed values of the bar, and an item Kiln gives as kiln.items' change of a linked inventory
+//   page reached through the root's filter, and reports the player's own inventory drag as not Kiln's; the watch stays
+//   Ready. None of this ran with a connected player or in a game client before this pass: the lab used spawned 1_Player
+//   stand-ins on a dedicated server. events.component_net is on without it (nothing ships held). Every Expect is a
+//   requirement but those that pass `true` (shown, not judged).
+// - 07-watch.joined: a game client without a server world (the main menu, a joined game) asks for a watch every 30 s and
+//   logs the answer in its own kiln.log (WatchProbe below): Watch answers no (no watch, no id), and nothing breaks.
 public sealed partial class ClientPassMod
 {
     private const string WatchGift = "Consumable_Grenade_Explosive_PowderBall_T1";  // as component-watch-test gives it
@@ -34,9 +38,14 @@ public sealed partial class ClientPassMod
         var changes = new List<ComponentValueChangedEvent>();
         var typed = new List<AttributeValueChangedEvent>();
         var states = new List<ComponentWatchStateChangedEvent>();
+        var sessions = new HashSet<ulong>();  // the player sessions of every record of your character
         var subs = new List<IDisposable>
         {
-            Events.On<ComponentValueChangedEvent>(e => changes.Add(e), EventFilter.ForEntity(p)),
+            Events.On<ComponentValueChangedEvent>(e =>
+            {
+                changes.Add(e);
+                if (e.Entity == p) sessions.Add(e.Key.PlayerHandle);
+            }, EventFilter.ForEntity(p)),
             Events.On<AttributeValueChangedEvent>(e => typed.Add(e), EventFilter.ForEntity(p)),
             Events.On<ComponentWatchStateChangedEvent>(e => states.Add(e)),
         };
@@ -80,6 +89,10 @@ public sealed partial class ClientPassMod
         c.Expect(health.Any(e => e.Origin == ChangeOrigin.Kiln && e.SourceMod == "kiln.combat"),
             "Kiln's own health write is reported as kiln.combat's",
             string.Join(", ", health.Take(4).Select(e => $"step {e.Step}: {e.Origin}/{e.SourceMod ?? "none"}")));
+        var bar = typed.FirstOrDefault(a => a.Attribute == ObservedAttribute.Health);
+        c.Expect(bar is not null && bar.Before == hp && bar.After == Math.Max(1, hp - 10) && bar.MaximumAfter > 0,
+            "the typed health values are your bar's: before and after Kiln's write, with the maximum",
+            bar is null ? "no typed health event" : $"{bar.Before} -> {bar.After} of {bar.MaximumAfter} (Kiln set {hp} -> {Math.Max(1, hp - 10)})");
 
         // 3. Kiln gives an item: a change of a linked inventory page, kiln.items' write, seen through your own filter
         changes.Clear();
@@ -100,10 +113,57 @@ public sealed partial class ClientPassMod
         c.Expect(own.Length > 0 && own.All(e => e.Origin != ChangeOrigin.Kiln),
             "your own inventory action is not reported as Kiln's",
             string.Join(", ", own.Take(4).Select(e => $"page {e.Entity.Value}: {e.Origin}/{e.SourceMod ?? "none"}")));
-        c.Expect(!states.Any(s => s.WatchId == r.Watch!.Id), "the watch stayed ready all along (no suspension)",
+        c.Expect(!states.Any(s => s.WatchId == r.Watch!.Id) && r.Watch!.State == ComponentWatchState.Ready, "the watch stayed ready all along (no suspension)",
             string.Join(", ", states.Select(s => $"{s.State}: {s.Reason}")));
+        c.Expect(sessions.Count == 1 && !sessions.Contains(0), "every record of your character carries your player session (the Players scope follows the real session)",
+            string.Join(", ", sessions));
         c.Expect(true, "what the watch covered at the end (shown, not required)", $"{r.Watch!.Pairs} pair(s), last complete step {r.Watch.LastCompleteStep}");
         await Items.Take(p, given.Item, 3);
         await c.Verdict();
+    }
+
+    [ClientCheck("07-watch.joined", "A joined client and the main menu cannot watch", Area = "Cancelable events", Since = Dev29,
+        Needs = ClientCheckNeeds.Joined, Order = 2911)]
+    public async Task WatchJoined(CheckContext c)
+    {
+        c.Instruct("Your game asks for a component watch while it hosts no world (main menu, joined game: every 30 seconds) and " +
+                   "writes the answer to its own kiln/logs/kiln.log as 'client-pass: WATCH-JOINED'. Open that file (your game's, " +
+                   "not the server's): one line from before you joined (the main menu) and one with a time after you joined.");
+        c.Instruct("Was it so: both lines say server_world=0 watch_ok=0 watch_id=0 (with the reason, or the exception that " +
+                   "refused it), the game did not stop or stutter, and this server's watches were not touched?");
+        await c.Verdict();
+    }
+
+    // 07-watch.joined: a game client hosting no world asks for a watch now and then and logs the answer (the menu has no
+    // world at all; a joined client has only its own client world, which v1 never watches). Started at load.
+    private bool _watchProbeStop;
+
+    private async Task WatchProbe()
+    {
+        if (!Client.IsClient) return;  // a dedicated server has its world: component-watch-test
+        var last = DateTime.MinValue;
+        var was = (ClientState)(-1);
+        while (!_watchProbeStop)
+        {
+            await Context.Scheduler.NextTick();
+            var state = Client.State;
+            if (state is not (ClientState.Menu or ClientState.Remote)) continue;  // hosting: 07-watch.hosted
+            if (state == was && DateTime.UtcNow - last < TimeSpan.FromSeconds(30)) continue;
+            if (state != was && DateTime.UtcNow - last < TimeSpan.FromSeconds(5)) continue;  // let a join settle
+            last = DateTime.UtcNow;
+            was = state;
+            string answer;
+            try
+            {
+                var r = ComponentChanges.Watch(new(ComponentWatchScope.Players, [], ObservedComponents.Health));
+                r.Watch?.Dispose();
+                answer = $"watch_ok={(r.Ok ? 1 : 0)} watch_id={r.Watch?.Id ?? 0} pairs={r.Pairs}: {r.Reason}";
+            }
+            catch (Exception e)
+            {
+                answer = $"watch_ok=0 watch_id=0 ({e.GetType().Name}: {e.Message})";
+            }
+            Log.Info($"client-pass: WATCH-JOINED ({(state == ClientState.Menu ? "main menu" : "joined")}) server_world=0 {answer}");
+        }
     }
 }

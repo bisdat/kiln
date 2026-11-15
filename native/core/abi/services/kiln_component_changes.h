@@ -10,12 +10,16 @@
  * in those inventories; the other components stay on the root. Every watch is on the server world (world_kind 0, the
  * only one v1 watches) and on one world session: when that world stops, the watch is Disposed and never resumed.
  *
- * Budgets: 32 watches; 4096 distinct present (entity life, component) pairs over all watches; 128 roots for any one
- * pair. A watch that would exceed them is NOT created: watch() answers KILN_OK with watch_id 0 and the reason (status
- * 1 budget, 2 metadata). A watch whose expansion grows past them later (a player joins, an inventory is linked) is
- * suspended whole before that step's compare (status 1), as is a watch whose root cannot be followed any more (status
- * 2: gone, another life of its id, an inventory tree Kiln cannot walk completely). It never covers less than it says.
- * resume() rebuilds it from scratch with a fresh baseline and no catch-up change.
+ * Budgets: 32 watches (suspended ones count); 4096 distinct present (entity life, component) pairs over all watches;
+ * 128 roots for any one pair. They are the process's, shared by every owner: no per-mod share or reservation, first
+ * come first served (the earlier watch keeps its pairs when watches grow); status() and the service's row show what is
+ * held. Absent pairs are not counted but are read every window. A watch that would exceed them is NOT created: watch()
+ * answers KILN_OK with watch_id 0 and the reason (status 1 budget, 2 metadata). A watch whose expansion grows past them
+ * later (a player joins, an inventory is linked, an absent component appears during the sim) is suspended whole before
+ * anything of that step is emitted for it (status 1), as is a watch whose root cannot be followed any more (status 2:
+ * gone, another life of its id, also when the id is reused inside the sim, an inventory tree Kiln cannot walk
+ * completely). It never covers less than it says. resume() rebuilds it from scratch with a fresh baseline and no
+ * catch-up change.
  *
  * Windows. The core calls window_begin after the last Pre subscriber and window_end after WaitWorldJobs, before the
  * Post subscribers (kiln_window_clock.h phases 2 and 4), and only in steps where window_wanted() is nonzero (a watch
@@ -24,7 +28,10 @@
  * presence differ from its baseline, which is the pair's bytes at the previous window_end (or at the window_begin that
  * added it). So the interval of a record is from one compare to the next: the game's sim step and the Post and Pre
  * around it, where Kiln's own tick-thread writers (Combat.SetHealth, a decision's survival health) run. It is a net
- * change: A -> B -> A inside one interval gives no record; it is not a feed of every store.
+ * change: A -> B -> A inside one interval gives no record; it is not a feed of every store. A watch that joins a pair
+ * other watches cover splits its interval at window_begin (a record for the older watches if it changed since their
+ * baseline): with a change after the split too, one pair has two records of the same step. Bytes are compared up to
+ * 256: a larger component is absent (empty bytes), so one that grows past 256 looks like it went.
  *
  * Origin. Native writers that change a watched component call record_write with the bytes before and after, inside
  * the interval and while they hold the component. A record's origin is Kiln (2) when every token of the interval for

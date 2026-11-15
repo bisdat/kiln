@@ -9,7 +9,11 @@
 //  WATCH-BUDGET      4096 present pairs exactly are taken, one more is refused (Ok false, no watch, the reason); the 33rd
 //                    watch is refused; a watch whose root is destroyed is suspended whole, with its last complete step
 //  WATCH-COST        the window calls' p50 / p99 with 4096 pairs over 1600 steps (chapter 07 §8.5), from the service
-// plain, then again with the lab's forced-parallel switch (kiln/control/systems.parallel) where it is there.
+//  WATCH-WORKER      in the forced-parallel run: tokens recorded off the world thread (kiln/control/systems.parallel, and
+//                    kiln/control/impact.unpin to let CHUNKED programs onto the game's workers)
+// plain, then again with the lab's forced-parallel switch (kiln/control/systems.parallel) where it is there. The review's
+// rows (ReviewRows.cs) follow: WATCH-OVERLAP, WATCH-REUSE, WATCH-SET-ROLLBACK, WATCH-QUEUE, WATCH-NOTE-COST, WATCH-GROWTH,
+// WATCH-COST-ABSENT.
 using System.Runtime.InteropServices;
 using Kiln;
 
@@ -21,7 +25,7 @@ internal struct Raw40
     public ulong A, B, C, D, E;
 }
 
-public sealed class ComponentWatchTestMod : Mod
+public sealed partial class ComponentWatchTestMod : Mod
 {
     private const string Id = "component-watch-test";
     private int _passes, _failures;
@@ -352,7 +356,14 @@ public sealed class ComponentWatchTestMod : Mod
             else Log.Info($"{Id}: the lab parallel switch is off (no kiln/control/systems.parallel): the worker-thread run was skipped");
 
             await Links(roots[2]);
+            await Overlap(roots[0]);
+            await Reuse(at);
+            await LinkedReentry(at);
+            await SetRollback(at);
+            await Queue(roots[0], roots[1]);
+            await NoteCost(roots[3], roots[1]);
             await Budget(at);
+            await AbsentCost();
         }
         catch (Exception e)
         {
@@ -384,6 +395,7 @@ public sealed class ComponentWatchTestMod : Mod
             var hp = Hp(p);
             var tokensBefore = Counter("tokens");
             var offBefore = Counter("tokens_off_world_thread");
+            var lostBefore = Counter("tokens_lost");
 
             // a write no Kiln writer reports (this mod's world program, inside the simulation)
             _changes.Clear();
@@ -451,6 +463,16 @@ public sealed class ComponentWatchTestMod : Mod
             Check(Of(p, "Health").Length == 0 && Hp(p) == hp, $"[{run}] WATCH-NET-ORIGIN A -> B -> A gives no event ({Of(p, "Health").Length})");
             var tokens = Counter("tokens") - tokensBefore;
             Check(tokens >= 5, $"[{run}] kiln.component_changes took {tokens} token(s) in this run, {Counter("tokens_off_world_thread") - offBefore} off the world thread");
+            if (run == "parallel")
+            {
+                var off = Counter("tokens_off_world_thread") - offBefore;
+                var lost = Counter("tokens_lost") - lostBefore;
+                if (off > 0)
+                    Check(lost == 0, $"WATCH-WORKER tokens_off_world_thread_delta={off} tokens_lost_delta={lost} (this mod's raw program ran on thread {_rawThread})");
+                else
+                    Log.Info($"{Id}: WATCH-WORKER NOT SHOWN: tokens_off_world_thread_delta=0 tokens_lost_delta={lost}: no noted writer ran on a worker in the forced window " +
+                             $"(this mod's raw program on thread {_rawThread}); {Counters()}");
+            }
         }
         finally
         {
@@ -508,6 +530,7 @@ public sealed class ComponentWatchTestMod : Mod
     // 4096 pairs are storage chests (3 inventory pages each) full of water pouches (each pouch is an item entity with
     // Fuel), all spawned transient.
     private const string Pouch = "Tool_Water_Pouch_Refillable", Chest = "Prop_Decoration_T1_Storage_24";
+    private readonly HashSet<EntityId> _chests = [];
 
     private async Task<List<(EntityId Root, int Pairs)>> Probe(IEnumerable<EntityId> roots, ObservedComponents components = ObservedComponents.All)
     {
@@ -533,6 +556,7 @@ public sealed class ComponentWatchTestMod : Mod
             if (!e.IsNone) made.Add(e);
         }
         _spawned.AddRange(made);
+        foreach (var e in made) _chests.Add(e);
         await Wait(5);
         if (pouches > 0)
             foreach (var e in made) await Items.Give(e, Pouch, pouches);
@@ -616,16 +640,18 @@ public sealed class ComponentWatchTestMod : Mod
             // WATCH-COST: 1600 steps with 4096 pairs; the stand-ins' own stamina and health recharge as the game runs them
             _changes.Clear();
             var start = Counter("changes");
+            var overflows = Counter("overflows");
             await Wait(cost ? 1600 : 30);
             var c = Counters();
             if (cost)
-            Check(Counter("samples") > 0 && Counter("present") == 4096 && Counter("overflows") == 0,
+            Check(Counter("samples") > 0 && Counter("present") == 4096 && Counter("overflows") == overflows,
                 $"WATCH-COST: 4096 pairs over 1600 steps: begin p50 {Counter("begin_p50_ns") / 1000.0:F1} us p99 {Counter("begin_p99_ns") / 1000.0:F1} us max {Counter("begin_max_ns") / 1000.0:F1} us, " +
                 $"end p50 {Counter("end_p50_ns") / 1000.0:F1} us p99 {Counter("end_p99_ns") / 1000.0:F1} us max {Counter("end_max_ns") / 1000.0:F1} us; " +
                 $"{Counter("changes") - start} change(s) ({_changes.Count} delivered, {_changes.Count(x => x.Origin == ChangeOrigin.Unknown)} Unknown); {c}");
+            if (cost && !keep) await Growth(watches, _chests);
 
             // a root destroyed: its watch is suspended whole, with its last complete step, and says why
-            var victim = watches.FirstOrDefault(x => x.Request.Entities.Count > 1);
+            var victim = watches.FirstOrDefault(x => x.State == ComponentWatchState.Ready && x.Request.Entities.Count > 1);
             if (victim is not null)
             {
                 _states.Clear();

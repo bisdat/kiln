@@ -327,8 +327,10 @@ public static unsafe class ComponentChanges
     /// it would exceed a budget (32 watches; 4096 present (entity, component) pairs over all watches; 128 roots for any
     /// pair), when a root cannot be followed (it does not exist, or it has no identity Kiln can tell from a later entity
     /// of its id: no spawn time and not a player in the game), or when no server world runs (a client that joined a game).
-    /// The first changes are reported from the step after the next one (a baseline is read at the next step's start).
-    /// Pre or Post on the tick thread.</summary>
+    /// The budgets are the process's, shared by every mod: no mod has a share or a reservation, the first watches made get
+    /// them (and keep them when watches grow), and <see cref="ComponentWatch.State"/> and the service's status row show
+    /// what is held. The first changes are reported from the step after the next one (a baseline is read at the next
+    /// step's start). Pre or Post on the tick thread.</summary>
     /// <exception cref="ArgumentNullException"><paramref name="request"/> is null.</exception>
     /// <exception cref="ArgumentException">An empty, too long (over 128) or repeating list for
     /// <see cref="ComponentWatchScope.Entities"/>, a list for <see cref="ComponentWatchScope.Players"/>, an entity that is
@@ -587,6 +589,11 @@ public static unsafe class ComponentChanges
         var t = Table();
         if (t == null || !Bind(t)) return;
         Poll(t);
+        if (_labHold > 0)
+        {
+            _labHold--;  // LabHoldDelivery: the changes stay queued in the service
+            return;
+        }
         Deliver(t);
     }
 
@@ -713,6 +720,24 @@ public static unsafe class ComponentChanges
 
     // ------------------------------------------------------------------------------------------------ lab and tests ----
 
+    private static int _labHold;
+
+    /// <summary>Lab only (mods/tests/component-watch-test, WATCH-QUEUE): the next <paramref name="steps"/> Pre steps read
+    /// no change from the service (the watch states still are), so its two-frame queue fills and overflows as when a
+    /// consumer falls behind: every ready watch in the process is suspended. Only when <c>kiln/control/watches.lab</c>
+    /// exists; false otherwise or off the tick thread. Not for mods.</summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="steps"/> is not 0..10.</exception>
+    [Experimental("KILNX001", UrlFormat = "https://github.com/frostdev-ops/kiln/blob/main/docs/kiln/modding/analyzers.md#kilnx001")]
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public static bool LabHoldDelivery(int steps)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(steps);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(steps, 10);
+        if (!Game.IsTickThread || !File.Exists(Path.Combine(KilnPaths.Control, "watches.lab"))) return false;
+        _labHold = steps;
+        return true;
+    }
+
     /// <summary>Lab only (mods/tests/component-watch-test): the service's counters as one line of <c>name=value</c>
     /// pairs (watches, pairs, present pairs, queued frames, overflows, tokens, the window calls' p50, p99 and maximum in
     /// nanoseconds over the last 1024 windows with pairs), or null without the service. Not for mods.</summary>
@@ -744,6 +769,7 @@ public static unsafe class ComponentChanges
     /// <summary>Test hook: forget the table, the owner and every watch (a harness ends).</summary>
     internal static void Reset()
     {
+        _labHold = 0;
         lock (Gate)
         {
             _table = 0;

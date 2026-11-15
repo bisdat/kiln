@@ -173,9 +173,21 @@ Events.On<AttributeValueChangedEvent>(e => Log.Info($"{e.Attribute}: {e.Before} 
   the Post and Pre around it, where Kiln's own tick-thread writers run (`Combat.SetHealth`, a decision's survival
   health). It is a **net** change: a value that changed and came back between two compares raises nothing. The event is
   posted in the next Pre; `Step` is the step whose compare saw it. A new watch's first baseline is read at the next
-  window, so the first event can come in the step after next. One event per entity and component, whatever number of
-  watches cover it (`WatchIds`); `RootEntities` names the roots it belongs to, so `EventFilter.ForEntity(root)` sees its
-  linked inventories' changes. `Before` and `After` are copies; a component that appeared or went has an empty one.
+  window, so the first event can come in the step after next. Usually one event per entity and component per step,
+  whatever number of watches cover it (`WatchIds`). The exception: when a watch starts covering a pair other watches
+  already cover, the pair's interval is split at that window's start, so its watches keep their own baselines; a change
+  before the split (in Post or Pre) and another after it (in the simulation) give two events of the same pair with the
+  same `Step`, the first for the older watches only, the second for all of them, its `Before` the first one's `After`.
+  `RootEntities` names the roots it belongs to, so `EventFilter.ForEntity(root)` sees its linked inventories' changes.
+  `Before` and `After` are copies of at most 256 bytes; an empty one means the component was not there, **or was larger
+  than 256 bytes** (such a component is never compared: one that grows past 256 bytes looks like it went).
+- **Identity.** A root is a life (its id and spawn time, or a player's session): one destroyed whose id the game gives
+  to a new entity suspends its watch (`SuspendedMetadata`), at the next window's start or, when it happens inside the
+  simulation, before that step's compare emits anything; no event is ever reported under the old life for the new
+  entity. A linked inventory or item entity has a life only Kiln keeps (a serial, and for an item entity the item in its
+  slot): one that leaves every watched tree and comes back gets a new one. An item replaced by another of the same item
+  under the same entity id between two compares cannot be told apart from the same item (the engine gives no allocation
+  serial for it).
 - **Who wrote it (`Origin`).** Kiln's own writers tell the service what they wrote, with the bytes before and after:
   tracked writes (`World.Write`, `Update`, `WriteField`, `WriteAt`: the mod's id), program wraps' entity views (the
   wrap's mod), kiln.combat's health and attribute writes (`kiln.combat`: `SetHealth`, `Heal`, god mode's restore, the
@@ -186,16 +198,22 @@ Events.On<AttributeValueChangedEvent>(e => Log.Info($"{e.Attribute}: {e.Before} 
   or more than 32 writes, or one was lost (`KILN_CHANGE_TOKENS_LOST`). `Unknown`: no Kiln writer reported a write.
   **`Game` is never reported:** a change without a report may be the game's, another loader's mod or a raw write
   (`World.WriteRaw`, a hook), and Kiln cannot tell them apart. `SourceMod` names the sources (a mod's id, or the Kiln
-  service that wrote for a mod it does not know), several joined by `", "`.
+  service that wrote for a mod it does not know), several joined by `", "`; the record's field is 128 bytes, so a long
+  list can be cut short: `Mixed` stays right, the list is not exhaustive. Program wraps name their writes only while
+  a managed watch exists in the process; a watch made by a native mod alone gets `Unknown` for them (never `Game`).
 - **Typed attributes.** `AttributeValueChangedEvent` carries the current and maximum value of Health, Stamina and Mana
   (as kiln.combat's attribute pairs read them) and Fuel (kiln.items' fuel, in the game's units, 64 per charge), read at
   the compares; only when one of them changed, and only where the build has those readers. The raw event comes either
   way.
-- **Budgets.** 32 watches; 4096 distinct present (entity, component) pairs over all watches (an absent component costs
-  nothing; overlapping watches count a pair once); 128 roots for any one pair. A `Watch` that would exceed them
-  answers `Ok = false` with the reason and no watch. A watch that grows past them later (a player joins, an inventory
-  is linked) is suspended whole before that step's compare (`SuspendedBudget`), with `LastCompleteStep`; one whose root
-  is gone or is another entity now is suspended the same way (`SuspendedMetadata`). Either raises
+- **Budgets.** 32 watches (suspended ones included); 4096 distinct present (entity, component) pairs over all watches
+  (overlapping watches count a pair once; an absent component is not counted, but it is still read every step); 128
+  roots for any one pair. They are the process's, shared by every mod: there is no per-mod share or reservation, first
+  come first served (one mod can take all 32 watches or all 4096 pairs), and the earlier watch wins when they grow;
+  `Status` and the service's row show what is held. A `Watch` that would exceed them answers `Ok = false` with the
+  reason and no watch. A watch that grows past them later (a player joins, an inventory is linked, an absent component
+  appears in the simulation) is suspended whole before anything of that step is emitted for it (`SuspendedBudget`),
+  with `LastCompleteStep`; one whose root is gone or is another entity now is suspended the same way
+  (`SuspendedMetadata`). Either raises
   `ComponentWatchStateChangedEvent` in the next Pre. `ComponentChanges.Resume` starts it again from scratch (the same
   lives, the budgets again; no change from while it was suspended is reported).
 - **The queue.** At most two steps' changes wait for the managed consumer (which reads every Pre). A third step's
@@ -205,9 +223,16 @@ Events.On<AttributeValueChangedEvent>(e => Log.Info($"{e.Attribute}: {e.Before} 
   (`Disposed`); what was not read of a world that stopped is dropped (its entity ids would mean another world's
   entities). A watch of a stopped world cannot be resumed.
 - **Cost.** While no watch exists the core makes neither window call for it and no step waits for the world's jobs on
-  its account; a Kiln writer asks one lock-free word before it copies anything; nothing is allocated. With watches the
-  service reads each watched pair once per step after the world's jobs (and new pairs once more at the window's
-  start). Measured in the lab with 4096 pairs: see the release's report (WATCH-COST).
+  its account; a Kiln writer's check is a few lock-free loads (the table, the service's on, stopped and watch-count
+  flags) before it copies anything; nothing is allocated. With watches: the service reads every watched pair, present
+  or absent, once per step after the world's jobs, and asks each root's identity once; at a window's start it checks
+  the roots and links and, when they changed, plans the pairs again (new pairs read once more, a pair a new watch joins
+  compared once more for the split); the exceptional recount when pairs appear past 4096 walks the watches again. A
+  Kiln writer copies the bytes before its write only for an entity whose component the service may watch (a lock-free
+  filter of the watched pairs: an unrelated watch costs a writer one more load); kiln.items still walks the inventory
+  tree of the holder it changes (link ids only) to ask that filter for each entity in it. Every player of a server pays
+  for the watches of every mod on it: the budgets bound the pairs, not the time, and not the time handlers take. Lab
+  (dedicated server, no player, build 26430253, 2026-11-15): see below.
 
 The capability is `events.component_net`; `Watch` and `Resume` throw `KilnUnavailableException` naming it while it is
 off, and so does `Events.On` for the three events. The test kit fakes the service rule for rule

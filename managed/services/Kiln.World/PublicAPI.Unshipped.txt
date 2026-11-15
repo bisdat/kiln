@@ -185,3 +185,4 @@ static Kiln.ComponentWatchRequest.operator ==(Kiln.ComponentWatchRequest? left, 
 static Kiln.ComponentWatchResult.operator !=(Kiln.ComponentWatchResult? left, Kiln.ComponentWatchResult? right) -> bool
 static Kiln.ComponentWatchResult.operator ==(Kiln.ComponentWatchResult? left, Kiln.ComponentWatchResult? right) -> bool
 [KILNX001]static Kiln.ComponentChanges.LabCounters() -> string?
+[KILNX001]static Kiln.ComponentChanges.LabHoldDelivery(int steps) -> bool

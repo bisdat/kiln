@@ -453,6 +453,51 @@ void run_move_jobs(const Access& a) {
     for (auto& r : results) g_move_done.push_back(r);
 }
 
+// lab only (notes_lab(), kiln/data/kiln.items/notes-lab): what the component watch note costs a give/take job, logged
+// per 200 jobs (07 S7 review: an unrelated watch must not make every job copy its holder's tree). Program thread.
+uint64_t lab_now_ns() {
+    LARGE_INTEGER c, f;
+    QueryPerformanceCounter(&c);
+    QueryPerformanceFrequency(&f);
+    return static_cast<uint64_t>(static_cast<double>(c.QuadPart) * 1e9 / static_cast<double>(f.QuadPart));
+}
+struct NotesLabSample {
+    uint64_t job_ns, note_ns;
+    uint32_t copied;
+    bool wanted;
+};
+std::vector<NotesLabSample> g_notes_lab;
+uint64_t g_notes_lab_step = 0;
+void notes_lab_flush();
+// A block ends at 200 jobs, or before a job that comes more than 30 steps after the last one (the lab's next scenario).
+void notes_lab_add(uint64_t step, uint64_t job_ns, uint64_t note_ns, uint32_t copied, bool wanted) {
+    if (!g_notes_lab.empty() && step > g_notes_lab_step + 30) notes_lab_flush();
+    g_notes_lab_step = step;
+    g_notes_lab.push_back({job_ns, note_ns, copied, wanted});
+    if (g_notes_lab.size() >= 200) notes_lab_flush();
+}
+void notes_lab_flush() {
+    std::vector<uint64_t> job, note;
+    uint32_t noted = 0, copied_all = 0;
+    for (const auto& x : g_notes_lab) {
+        job.push_back(x.job_ns);
+        note.push_back(x.note_ns);
+        noted += x.wanted ? 1u : 0u;
+        copied_all += x.copied;
+    }
+    std::sort(job.begin(), job.end());
+    std::sort(note.begin(), note.end());
+    auto at = [](const std::vector<uint64_t>& v, double q) { return static_cast<double>(v[static_cast<size_t>(q * static_cast<double>(v.size() - 1))]) / 1000.0; };
+    uint32_t pooled = 0;
+    uint64_t extra = 0;
+    note_pool_stats(&pooled, &extra);
+    LOGI("kiln.items: notes-lab: %zu give/take job(s), %u while something was watched: job p50 %.1f us p99 %.1f us max %.1f us; "
+         "note p50 %.2f us p99 %.2f us max %.2f us; %u component(s) copied; %u pooled note(s), %llu made outside the pool",
+         g_notes_lab.size(), noted, at(job, 0.5), at(job, 0.99), at(job, 1.0), at(note, 0.5), at(note, 0.99), at(note, 1.0), copied_all,
+         pooled, static_cast<unsigned long long>(extra));
+    g_notes_lab.clear();
+}
+
 // One update of the program: verify once, then run up to kPerUpdate queued transactions.
 void program_body(void* ctx, const uint64_t* it) {
     g_updates.fetch_add(1, std::memory_order_relaxed);
@@ -524,8 +569,12 @@ void program_body(void* ctx, const uint64_t* it) {
         code = 0;
         if (batch[i].job.r.flags & KILN_ITEMS_RECIPE)
             a.recipes = reinterpret_cast<void*>(g_api->singleton(g_api->server_world(), KilnStr{"g38_items::RecipeRegistry", 25}));
+        const bool lab = notes_lab();
+        const uint64_t t0 = lab ? lab_now_ns() : 0;
         NoteLease note;  // 07 S7
-        if (note_wanted()) note.begin(a, &batch[i].job.r.entity, 1);
+        const bool wanted = note_wanted();
+        if (wanted) note.begin(a, &batch[i].job.r.entity, 1);
+        const uint64_t t1 = lab ? lab_now_ns() : 0;
         if (!run_job(a, batch[i].job, g_tx, &res, &code)) {
             abandon_tx(g_tx);
             res.status = KILN_ITEMS_UNAVAILABLE;
@@ -538,7 +587,9 @@ void program_body(void* ctx, const uint64_t* it) {
             broken(b);
             continue;
         }
+        const uint64_t t2 = lab ? lab_now_ns() : 0;
         if (note) note.end(a);
+        if (lab) notes_lab_add(step, lab_now_ns() - t0, (t1 - t0) + (lab_now_ns() - t2), note.copied(), wanted);
         const bool committed = (res.status == KILN_ITEMS_DONE || res.status == KILN_ITEMS_PARTIAL) &&
                                !(res.flags & KILN_ITEMS_DRY_RUN);
         (committed ? g_commits : g_rollbacks).fetch_add(1);
