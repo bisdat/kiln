@@ -4,7 +4,8 @@
 //! The Nexus Mods build (no `self-update` feature, crate::distribution) has the same commands, so the frontend and
 //! the command list stay the same, but none of them updates anything: `update_status`, `update_check`, `update_skip`
 //! and `update_ack` return a status with phase `disabled` (distribution `nexus`, page: the Kiln page on Nexus Mods),
-//! `update_install` and `update_restart` refuse with `unsupported`. Nothing in that build touches the network for it.
+//! `update_install`, `update_switch` and `update_restart` refuse with `unsupported`. Nothing in that build touches the
+//! network for it.
 
 use super::TaskId;
 use kiln_manage::Error;
@@ -28,6 +29,14 @@ pub async fn update_check(app: AppHandle) -> Result<UpdateStatus, Error> {
 #[tauri::command]
 pub async fn update_install(app: AppHandle) -> Result<TaskId, Error> {
     imp::install(&app)
+}
+
+/// (dev.29) The channel switch the player started: `channel` ("stable", "dev" or "beta"; the caller saved it as
+/// `updateChannel` first), its newest build downloaded, verified and put in place (back from a test build also an older
+/// one); `restore`: "Restart now" puts the "before beta" copy back first. The task's result is the status.
+#[tauri::command]
+pub async fn update_switch(app: AppHandle, channel: String, restore: Option<bool>) -> Result<TaskId, Error> {
+    imp::switch(&app, &channel, restore.unwrap_or(false))
 }
 
 /// "Restart now" into the update that is ready. Returns only on failure.
@@ -66,6 +75,11 @@ mod imp {
 
     pub fn install(app: &AppHandle) -> Result<String, Error> {
         selfupdate::install(app)
+    }
+
+    pub fn switch(app: &AppHandle, channel: &str, restore: bool) -> Result<String, Error> {
+        let target = selfupdate::feed::Channel::parse(channel).ok_or_else(|| Error::invalid(format!("no update channel {channel:?} (stable, dev, beta)")))?;
+        selfupdate::switch(app, target, restore)
     }
 
     pub fn restart(app: &AppHandle) -> Result<(), Error> {
@@ -182,6 +196,11 @@ mod imp {
         Err(refuse())
     }
 
+    /// The Nexus build never switches: a launcher from the download page can (the UI links to it).
+    pub fn switch<R: Runtime>(_: &AppHandle<R>, _channel: &str, _restore: bool) -> Result<String, Error> {
+        Err(refuse())
+    }
+
     pub fn restart<R: Runtime>(_: &AppHandle<R>) -> Result<(), Error> {
         Err(refuse())
     }
@@ -223,6 +242,11 @@ mod imp {
             assert_eq!(serde_json::to_value(ack(h)).unwrap(), s);
             let e = install(h).unwrap_err();
             assert_eq!(e.code, ErrorCode::Unsupported);
+            for ch in ["beta", "dev", "stable"] {
+                assert_eq!(switch(h, ch, true).unwrap_err().code, ErrorCode::Unsupported, "{ch}");
+            }
+            // never a test build, and its channel follows the version
+            assert_eq!((s["buildChannel"].as_str(), s["beta"].is_null()), (s["channel"].as_str(), true));
             assert_eq!(restart(h).unwrap_err().code, ErrorCode::Unsupported);
         }
 

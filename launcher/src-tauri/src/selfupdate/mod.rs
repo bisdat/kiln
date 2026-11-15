@@ -10,6 +10,10 @@
 //!   compared by their id ([`feed::Build`]: the version, then a test build's beta number), never downwards.
 //! - Checks: 8 s after the start and every 6 hours while the launcher runs (setting `updateCheck`, default on), and
 //!   on request (`update_check`). A check is one plain GET of a small JSON file: no ids, no version, nothing else.
+//! - Switch ([`switch`], 0.2.0-dev.29): the player chose another channel and asked to switch now: the newest build of
+//!   that channel is downloaded, verified and installed like an update, and on the way back from a test build to the
+//!   release line also when it is older ([`feed::switch_accepts`]). Only this path ever goes down; a background check or
+//!   an Update never does.
 //! - Install: the AppImage is replaced in place (the new version runs after a restart); on Windows the verified NSIS
 //!   installer runs on "Restart now" (it closes the launcher and starts the new one). Other installs (.deb, .rpm,
 //!   development builds) get the download page ([`kind`]).
@@ -136,6 +140,8 @@ pub struct UpdateStatus {
     pub build_channel: Channel,
     /// (dev.29) This test build's beta number.
     pub beta: Option<u32>,
+    /// (dev.29) The channel a switch the player started goes to, while it downloads or waits for the restart.
+    pub switching: Option<Channel>,
     /// Automatic checks are on (setting `updateCheck`).
     pub auto: bool,
     pub install: InstallInfo,
@@ -203,12 +209,14 @@ struct Inner {
     pending: Option<(Update, Vec<u8>)>,
     /// A check or a download runs.
     busy: bool,
+    /// The switch that is ready asked to put the "before beta" copy back at the restart (update_switch `restore`).
+    restore: bool,
 }
 
 static STATE: OnceLock<Mutex<Inner>> = OnceLock::new();
 
 fn state() -> std::sync::MutexGuard<'static, Inner> {
-    STATE.get_or_init(|| Mutex::new(Inner { status: initial_status("0.0.0", kind::classify("", None, None)), pending: None, busy: false }))
+    STATE.get_or_init(|| Mutex::new(Inner { status: initial_status("0.0.0", kind::classify("", None, None)), pending: None, busy: false, restore: false }))
         .lock()
         .unwrap_or_else(|e| e.into_inner())
 }
@@ -220,6 +228,7 @@ fn initial_status(current: &str, install: InstallInfo) -> UpdateStatus {
         channel: Channel::of_build(current),
         build_channel: Channel::of_build(current),
         beta: feed::baked_beta(),
+        switching: None,
         auto: true,
         install,
         page: feed::DOWNLOAD_PAGE.into(),
@@ -338,6 +347,52 @@ where
     (None, failures)
 }
 
+/// Which builds count: an update (only newer, [`feed::accepts`]) or a switch the player started ([`feed::switch_accepts`]:
+/// to the beta only newer, back to the release line also older).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rule {
+    Update,
+    Switch,
+}
+
+/// What a check or a download looks for: the channel, the rule, and the current build's id ([`feed::this_build`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Want {
+    pub channel: Channel,
+    pub rule: Rule,
+    pub current: String,
+}
+
+impl Want {
+    pub fn update(channel: Channel, current: String) -> Want {
+        Want { channel, rule: Rule::Update, current }
+    }
+
+    pub fn switch(channel: Channel, current: String) -> Want {
+        Want { channel, rule: Rule::Switch, current }
+    }
+
+    /// Does the manifest's build count?
+    pub fn takes(&self, remote: &str) -> bool {
+        match self.rule {
+            Rule::Update => feed::accepts(&self.current, remote, self.channel),
+            Rule::Switch => feed::switch_accepts(&self.current, remote, self.channel),
+        }
+    }
+
+    fn nothing(&self) -> &'static str {
+        match self.rule {
+            Rule::Update => "it offers no newer version",
+            Rule::Switch => "it offers no other build to switch to",
+        }
+    }
+}
+
+/// An update for the app's own build on `channel`.
+fn want_update<R: Runtime>(app: &AppHandle<R>, channel: Channel) -> Want {
+    Want::update(channel, feed::this_build(&app.package_info().version.to_string()))
+}
+
 /// A user-facing account of an updater error at `step` (`step` is the default for transport errors).
 fn describe(e: &tauri_plugin_updater::Error, step: Step) -> (Step, String) {
     use tauri_plugin_updater::Error as U;
@@ -369,32 +424,45 @@ fn failure(src: &Source, (step, message): (Step, String)) -> Failure {
     Failure { source: src.name.clone(), step, message }
 }
 
-/// The updater for one source and channel. Requests: a connect timeout and a read timeout, no total limit (a slow
-/// line still finishes the download).
-fn updater_for<R: Runtime>(app: &AppHandle<R>, src: &Source, channel: Channel) -> Result<tauri_plugin_updater::Updater, Failure> {
-    let url = tauri::Url::parse(src.url(channel)).map_err(|e| failure(src, (Step::Manifest, format!("bad address: {e}"))))?;
+/// The updater for one source and what is wanted. Requests: a connect timeout and a read timeout, no total limit (a
+/// slow line still finishes the download).
+fn updater_for<R: Runtime>(app: &AppHandle<R>, src: &Source, want: &Want) -> Result<tauri_plugin_updater::Updater, Failure> {
+    let url = tauri::Url::parse(src.url(want.channel)).map_err(|e| failure(src, (Step::Manifest, format!("bad address: {e}"))))?;
+    let w = want.clone();
     app.updater_builder()
         .endpoints(vec![url])
         .and_then(|b| {
             b.configure_client(|c| c.connect_timeout(Duration::from_secs(15)).read_timeout(Duration::from_secs(60)))
-                // the current build's id: its version and the baked-in beta number (feed::Build)
-                .version_comparator(move |cur, rel| feed::accepts(&feed::this_build(&cur.to_string()), &rel.version.to_string(), channel))
+                // the current build is the want's id (its version and the baked-in beta number: feed::Build), not the
+                // plain version the plugin passes
+                .version_comparator(move |_, rel| w.takes(&rel.version.to_string()))
                 .build()
         })
         .map_err(|e| failure(src, describe(&e, Step::Manifest)))
 }
 
-/// One source's answer: an update, or None when it has nothing newer.
+/// One source's answer: an update, or None when it has nothing newer (for this launcher's own build).
 pub async fn check_source<R: Runtime>(app: &AppHandle<R>, src: &Source, channel: Channel) -> Result<Option<Update>, Failure> {
-    let updater = updater_for(app, src, channel)?;
+    check_source_for(app, src, &want_update(app, channel)).await
+}
+
+/// One source's answer for `want`.
+pub async fn check_source_for<R: Runtime>(app: &AppHandle<R>, src: &Source, want: &Want) -> Result<Option<Update>, Failure> {
+    let updater = updater_for(app, src, want)?;
     updater.check().await.map_err(|e| failure(src, describe(&e, Step::Manifest)))
 }
 
 /// The first source that answers.
 pub async fn check_sources<R: Runtime>(app: &AppHandle<R>, sources: &[Source], channel: Channel) -> (Option<(String, Option<Update>)>, Vec<Failure>) {
+    check_sources_for(app, sources, &want_update(app, channel)).await
+}
+
+/// The first source that answers, for `want`.
+pub async fn check_sources_for<R: Runtime>(app: &AppHandle<R>, sources: &[Source], want: &Want) -> (Option<(String, Option<Update>)>, Vec<Failure>) {
     try_sources(sources, |src| {
         let app = app.clone();
-        async move { check_source(&app, &src, channel).await }
+        let want = want.clone();
+        async move { check_source_for(&app, &src, &want).await }
     })
     .await
 }
@@ -437,13 +505,25 @@ pub async fn acquire<R: Runtime>(
     channel: Channel,
     progress: Arc<Mutex<Option<DownloadProgress>>>,
 ) -> (Option<(String, Acquired)>, Vec<Failure>) {
+    acquire_for(app, sources, &want_update(app, channel), progress).await
+}
+
+/// [`acquire`] for `want`: an update, or the build a switch installs. The signature, the signed version (the build id,
+/// beta number included), the sha256 and the sources in order are the same for both.
+pub async fn acquire_for<R: Runtime>(
+    app: &AppHandle<R>,
+    sources: &[Source],
+    want: &Want,
+    progress: Arc<Mutex<Option<DownloadProgress>>>,
+) -> (Option<(String, Acquired)>, Vec<Failure>) {
     try_sources(sources, |src| {
         let app = app.clone();
         let progress = progress.clone();
+        let want = want.clone();
         async move {
-            let update = check_source(&app, &src, channel)
+            let update = check_source_for(&app, &src, &want)
                 .await?
-                .ok_or_else(|| failure(&src, (Step::Manifest, "it offers no newer version".into())))?;
+                .ok_or_else(|| failure(&src, (Step::Manifest, want.nothing().into())))?;
             let bytes = fetch(&update, &src, &progress).await?;
             Ok(Acquired { update, bytes })
         }
@@ -471,7 +551,7 @@ pub async fn check<R: Runtime>(app: &AppHandle<R>, manual: bool) -> UpdateStatus
     emit(app);
     let (_, channel) = settings(&current);
     let sources = feed::sources();
-    let (answer, failures) = check_sources(app, &sources, channel).await;
+    let (answer, failures) = check_sources_for(app, &sources, &Want::update(channel, feed::this_build(&current))).await;
     let now = kiln_manage::util::now_rfc3339();
     let how = if manual { "check" } else { "automatic check" };
     {
@@ -518,29 +598,12 @@ pub async fn check<R: Runtime>(app: &AppHandle<R>, manual: bool) -> UpdateStatus
 
 /// Starts the download and install as a task (`kiln://task`, "Update the launcher"); its result is the status.
 pub fn install(app: &AppHandle) -> Result<String, Error> {
-    {
-        let mut g = state();
-        if !g.status.install.in_place {
-            return Err(Error::new(ErrorCode::Unsupported, g.status.install.reason.clone().unwrap_or_else(|| "This install cannot update itself.".into()))
-                .with_detail(g.status.page.clone()));
-        }
-        if g.status.phase == Phase::Ready {
-            return Err(Error::new(ErrorCode::Conflict, "The update is ready: restart the launcher to use it."));
-        }
-        if g.busy {
-            return Err(Error::new(ErrorCode::Busy, "An update check or download is already running."));
-        }
-        g.busy = true;
-        g.status.phase = Phase::Downloading;
-        g.status.progress = None;
-        g.status.error = None;
-        g.status.failures.clear();
-    }
+    begin(None, false)?;
     emit(app);
     log("install requested");
     let a = app.clone();
     let id = crate::commands::app::spawn_task(app, "update_install", "Update the launcher".into(), move |p| {
-        let out = run_install(&a, p);
+        let out = run_install(&a, p, None);
         state().busy = false;
         emit(&a);
         out.and_then(|_| crate::commands::app::to_value(status()))
@@ -550,18 +613,67 @@ pub fn install(app: &AppHandle) -> Result<String, Error> {
     Ok(id)
 }
 
-fn run_install(app: &AppHandle, p: &mut dyn kiln_manage::task::Progress) -> Result<(), Error> {
+/// (dev.29) The switch the player started: the newest build of `target` is downloaded, verified and put in place like an
+/// update (an older one too on the way back from a test build: [`feed::switch_accepts`]), as a task (`update_switch`);
+/// its result is the status, `ready` when it is in place. "Restart now" ([`restart`]) runs it; `restore` puts the
+/// "before beta" copy back first (snapshot.rs). The caller saved `updateChannel` = `target` before.
+pub fn switch(app: &AppHandle, target: Channel, restore: bool) -> Result<String, Error> {
+    begin(Some(target), restore)?;
+    emit(app);
+    log(&format!("switch to {} requested{}", target.as_str(), if restore { " (the before-beta copy goes back at the restart)" } else { "" }));
+    let a = app.clone();
+    let title = if target == Channel::Beta { "Switch to the beta" } else { "Switch back to the release" };
+    let id = crate::commands::app::spawn_task(app, "update_switch", title.into(), move |p| {
+        let out = run_install(&a, p, Some(target));
+        state().busy = false;
+        emit(&a);
+        out.and_then(|_| crate::commands::app::to_value(status()))
+    });
+    state().status.task_id = Some(id.clone());
+    emit(app);
+    Ok(id)
+}
+
+/// The checks an install or a switch starts with, then the state for its download.
+fn begin(switching: Option<Channel>, restore: bool) -> Result<(), Error> {
+    let mut g = state();
+    if !g.status.install.in_place {
+        return Err(Error::new(ErrorCode::Unsupported, g.status.install.reason.clone().unwrap_or_else(|| "This install cannot update itself.".into()))
+            .with_detail(g.status.page.clone()));
+    }
+    if g.status.phase == Phase::Ready {
+        return Err(Error::new(ErrorCode::Conflict, "The update is ready: restart the launcher to use it."));
+    }
+    if g.busy {
+        return Err(Error::new(ErrorCode::Busy, "An update check or download is already running."));
+    }
+    g.busy = true;
+    g.status.phase = Phase::Downloading;
+    g.status.progress = None;
+    g.status.error = None;
+    g.status.failures.clear();
+    g.status.switching = switching;
+    g.restore = restore && switching.is_some();
+    Ok(())
+}
+
+fn run_install(app: &AppHandle, p: &mut dyn kiln_manage::task::Progress, switching: Option<Channel>) -> Result<(), Error> {
     let current = state().status.current.clone();
     let (_, channel) = settings(&current);
+    let build = feed::this_build(&current);
+    let want = match switching {
+        Some(target) => Want::switch(target, build),
+        None => Want::update(channel, build),
+    };
     let sources = feed::sources();
     let progress: Arc<Mutex<Option<DownloadProgress>>> = Arc::new(Mutex::new(None));
     let (tx, rx) = std::sync::mpsc::channel();
-    let (app2, progress2) = (app.clone(), progress.clone());
+    let (app2, progress2, want2) = (app.clone(), progress.clone(), want.clone());
     let job = tauri::async_runtime::spawn(async move {
-        let r = acquire(&app2, &sources, channel, progress2).await;
+        let r = acquire_for(&app2, &sources, &want2, progress2).await;
         let _ = tx.send(r);
     });
-    p.report(None, "Looking for the update");
+    p.report(None, if switching.is_some() { "Looking for the build" } else { "Looking for the update" });
     let mut last_emit = Instant::now();
     let (got, failures) = loop {
         match rx.recv_timeout(Duration::from_millis(150)) {
@@ -572,6 +684,8 @@ fn run_install(app: &AppHandle, p: &mut dyn kiln_manage::task::Progress) -> Resu
                     let mut g = state();
                     g.status.phase = if g.status.available.is_some() { Phase::Available } else { Phase::Idle };
                     g.status.progress = None;
+                    g.status.switching = None;
+                    g.restore = false;
                     log("install canceled");
                     return Err(Error::new(ErrorCode::Canceled, "Canceled."));
                 }
@@ -602,6 +716,8 @@ fn run_install(app: &AppHandle, p: &mut dyn kiln_manage::task::Progress) -> Resu
         g.status.progress = None;
         g.status.failures = failures;
         g.status.error = Some(e.clone());
+        g.status.switching = None;
+        g.restore = false;
         e
     };
     let Some((source, acq)) = got else {
@@ -609,11 +725,19 @@ fn run_install(app: &AppHandle, p: &mut dyn kiln_manage::task::Progress) -> Resu
             ErrorCode::Refused
         } else if failures.iter().any(|f| f.step == Step::Hash) {
             ErrorCode::HashMismatch
+        } else if switching.is_some() && !failures.is_empty() && failures.iter().all(|f| f.step == Step::Manifest && f.message == want.nothing()) {
+            // every source answered: the channel has nothing to switch to (the newest test build is older than this one)
+            ErrorCode::NotFound
         } else {
             ErrorCode::Network
         };
-        log(&format!("install failed: {}", summary(&failures)));
-        let e = Error::new(code, "The update could not be downloaded and verified from any source.").with_detail(summary(&failures));
+        let what = if switching.is_some() { "switch" } else { "install" };
+        log(&format!("{what} failed: {}", summary(&failures)));
+        let e = if code == ErrorCode::NotFound {
+            Error::new(code, "That channel has no other build for this launcher: you have its newest one, or a newer one.").with_detail(summary(&failures))
+        } else {
+            Error::new(code, "The update could not be downloaded and verified from any source.").with_detail(summary(&failures))
+        };
         return Err(fail(e, failures));
     };
     let version = acq.update.version.clone();
@@ -653,7 +777,7 @@ fn run_install(app: &AppHandle, p: &mut dyn kiln_manage::task::Progress) -> Resu
     g.status.failures = failures;
     g.status.ready = Some(Ready { version: version.clone(), source: source.clone(), installed: true });
     drop(g);
-    log(&format!("{version} from {source} is in place; it runs after a restart"));
+    log(&format!("{version} from {source} is in place{}; it runs after a restart", switching.map(|c| format!(" (switch to {})", c.as_str())).unwrap_or_default()));
     Ok(())
 }
 

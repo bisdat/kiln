@@ -2,6 +2,8 @@
 //! on a missing manifest, a dead host, a failed download, a bad signature, a wrong signed version and a wrong sha256.
 //! testdata/: `payload.bin` (starts like an ELF file, as an AppImage does), its signature `payload.bin.sig` (signed
 //! for version 0.2.0-dev.2) and `test.pub`, the public half of a throwaway key used only here.
+//! testdata/beta/ (dev.29): `payload.bin` signed with a second throwaway key (`beta/test.pub`) for the build ids
+//! 0.2.0-dev.2, 0.2.0-dev.3, 0.2.0-dev.3+beta.1 and 0.2.0-dev.3+beta.2: test builds, the final build, a switch back.
 
 use super::feed::{Channel, Source};
 use super::*;
@@ -115,10 +117,14 @@ fn tampered() -> Vec<u8> {
 
 /// A mock app at version `current` with the updater plugin and the test key.
 fn app(current: &str) -> tauri::App<tauri::test::MockRuntime> {
+    app_keyed(current, PUBKEY)
+}
+
+fn app_keyed(current: &str, pubkey: &str) -> tauri::App<tauri::test::MockRuntime> {
     let mut ctx = tauri::test::mock_context(tauri::test::noop_assets());
     ctx.config_mut().plugins.0.insert(
         "updater".into(),
-        serde_json::json!({ "pubkey": PUBKEY.trim(), "requireSignedVersion": true, "dangerousInsecureTransportProtocol": true }),
+        serde_json::json!({ "pubkey": pubkey.trim(), "requireSignedVersion": true, "dangerousInsecureTransportProtocol": true }),
     );
     ctx.package_info_mut().version = current.parse().unwrap();
     tauri::test::mock_builder().plugin(tauri_plugin_updater::Builder::new().build()).build(ctx).unwrap()
@@ -279,4 +285,157 @@ fn nothing_newer_is_no_download() {
     assert!(got.is_none());
     assert_eq!(failures[0].message, "it offers no newer version");
     assert_eq!(f.hits("/files/kiln.AppImage"), 0);
+}
+
+// ---------------------------------------------------------------- dev.29: test builds and channel switches
+
+const BETA_PUBKEY: &str = include_str!("testdata/beta/test.pub");
+
+/// `payload.bin`'s signature (the beta test key) for a build id.
+fn beta_sig(id: &str) -> &'static str {
+    match id {
+        "0.2.0-dev.2" => include_str!("testdata/beta/payload-0.2.0-dev.2.sig"),
+        "0.2.0-dev.3" => include_str!("testdata/beta/payload-0.2.0-dev.3.sig"),
+        "0.2.0-dev.3+beta.1" => include_str!("testdata/beta/payload-0.2.0-dev.3-beta.1.sig"),
+        "0.2.0-dev.3+beta.2" => include_str!("testdata/beta/payload-0.2.0-dev.3-beta.2.sig"),
+        _ => panic!("no test signature for {id}"),
+    }
+}
+
+/// A feed with one manifest per channel: (channel, the version the manifest announces, the id the file is signed for,
+/// the sha256 it lists). Every manifest points at the same file.
+fn channel_feed(entries: &[(&str, &str, &str, Option<&str>)]) -> Server {
+    let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = l.local_addr().unwrap().port();
+    let file = format!("http://127.0.0.1:{port}/files/kiln.AppImage");
+    let mut routes = vec![("/files/kiln.AppImage".to_string(), 200, PAYLOAD.to_vec())];
+    for (channel, announced, signed, sha) in entries {
+        let mut entry = serde_json::json!({ "url": file, "signature": beta_sig(signed).trim() });
+        if let Some(s) = sha {
+            entry["sha256"] = (*s).into();
+        }
+        let beta = feed::Build::parse(announced).and_then(|b| b.beta);
+        let m = serde_json::to_vec(&serde_json::json!({
+            "version": announced,
+            "notes": "Test build.",
+            "pub_date": "2026-11-15T12:00:00Z",
+            "platforms": { "linux-x86_64": entry.clone(), "windows-x86_64": entry },
+            "kiln": { "format": 1, "channel": channel, "beta": beta },
+        }))
+        .unwrap();
+        routes.push((format!("/{channel}/latest.json"), 200, m));
+    }
+    Server::serve(l, routes)
+}
+
+fn offered(app: &tauri::App<tauri::test::MockRuntime>, srcs: &[Source], want: &Want) -> Option<String> {
+    let (answer, failures) = run(check_sources_for(app.handle(), srcs, want));
+    assert!(failures.is_empty(), "{failures:?}");
+    answer.unwrap().1.map(|u| u.version)
+}
+
+#[test]
+fn a_test_build_is_offered_on_the_beta_channel_and_never_on_the_release_line() {
+    // a release build (0.2.0-dev.2): the beta channel names test build 1 of 0.2.0-dev.3
+    let f = channel_feed(&[("beta", "0.2.0-dev.3+beta.1", "0.2.0-dev.3+beta.1", None), ("dev", "0.2.0-dev.3+beta.1", "0.2.0-dev.3+beta.1", None)]);
+    let app = app_keyed("0.2.0-dev.2", BETA_PUBKEY);
+    let src = [f.source("frostdev.io")];
+    assert_eq!(offered(&app, &src, &Want::update(Channel::Beta, "0.2.0-dev.2".into())).as_deref(), Some("0.2.0-dev.3+beta.1"));
+    assert_eq!(f.hits("/beta/latest.json"), 1);
+    // the same test build in the release line's manifest (a mistake on the server) is still no update for it
+    assert_eq!(offered(&app, &src, &Want::update(Channel::Dev, "0.2.0-dev.2".into())), None);
+    // the download verifies the signature for the whole id, beta number included
+    let (got, failures) = run(acquire_for(app.handle(), &src, &Want::update(Channel::Beta, "0.2.0-dev.2".into()), Arc::new(Mutex::new(None))));
+    assert!(failures.is_empty(), "{failures:?}");
+    let (_, acq) = got.unwrap();
+    assert_eq!((acq.update.version.as_str(), acq.bytes.as_slice()), ("0.2.0-dev.3+beta.1", PAYLOAD));
+}
+
+#[test]
+fn a_test_builds_file_cannot_pass_for_another_build() {
+    let app = app_keyed("0.2.0-dev.2", BETA_PUBKEY);
+    // beta 1's file announced as beta 2, and as the final build: the signed id does not match
+    for announced in ["0.2.0-dev.3+beta.2", "0.2.0-dev.3"] {
+        let f = channel_feed(&[("beta", announced, "0.2.0-dev.3+beta.1", None)]);
+        let (got, failures) = run(acquire_for(app.handle(), &[f.source("frostdev.io")], &Want::update(Channel::Beta, "0.2.0-dev.2".into()), Arc::new(Mutex::new(None))));
+        assert!(got.is_none(), "{announced}");
+        assert_eq!(steps(&failures), [("frostdev.io", Step::Signature)], "{announced}");
+        assert!(failures[0].message.contains("signed for 0.2.0-dev.3+beta.1"), "{}", failures[0].message);
+    }
+}
+
+#[test]
+fn beta_one_to_beta_two_to_the_final_build() {
+    let app = app_keyed("0.2.0-dev.3", BETA_PUBKEY);
+    let progress = || Arc::new(Mutex::new(None));
+    // test build 1 is offered test build 2 (same version, higher beta number)
+    let f = channel_feed(&[("beta", "0.2.0-dev.3+beta.2", "0.2.0-dev.3+beta.2", None)]);
+    let (got, failures) = run(acquire_for(app.handle(), &[f.source("frostdev.io")], &Want::update(Channel::Beta, "0.2.0-dev.3+beta.1".into()), progress()));
+    assert!(failures.is_empty(), "{failures:?}");
+    assert_eq!(got.unwrap().1.update.version, "0.2.0-dev.3+beta.2");
+    // test build 2 is offered the final build of its version, on the beta channel and following the release again
+    let f = channel_feed(&[("beta", "0.2.0-dev.3", "0.2.0-dev.3", None), ("dev", "0.2.0-dev.3", "0.2.0-dev.3", None)]);
+    for ch in [Channel::Beta, Channel::Dev] {
+        let (got, failures) = run(acquire_for(app.handle(), &[f.source("frostdev.io")], &Want::update(ch, "0.2.0-dev.3+beta.2".into()), progress()));
+        assert!(failures.is_empty(), "{ch:?}: {failures:?}");
+        assert_eq!(got.unwrap().1.update.version, "0.2.0-dev.3", "{ch:?}");
+    }
+    // and the final build is not offered a test build of its own version
+    let f = channel_feed(&[("beta", "0.2.0-dev.3+beta.2", "0.2.0-dev.3+beta.2", None)]);
+    assert_eq!(offered(&app, &[f.source("frostdev.io")], &Want::update(Channel::Beta, "0.2.0-dev.3".into())), None);
+}
+
+#[test]
+fn going_down_to_the_release_happens_only_as_the_switch_the_player_started() {
+    // test build 2 of 0.2.0-dev.3 following the release again; the release line's newest is 0.2.0-dev.2, older
+    let f = channel_feed(&[("dev", "0.2.0-dev.2", "0.2.0-dev.2", Some(&kiln_manage::hash::sha256_hex(PAYLOAD)))]);
+    let app = app_keyed("0.2.0-dev.3", BETA_PUBKEY);
+    let cur = || "0.2.0-dev.3+beta.2".to_string();
+    // a background check and an Update: nothing (never down), and no file is fetched
+    assert_eq!(offered(&app, &[f.source("frostdev.io")], &Want::update(Channel::Dev, cur())), None);
+    let (got, failures) = run(acquire_for(app.handle(), &[f.source("frostdev.io")], &Want::update(Channel::Dev, cur()), Arc::new(Mutex::new(None))));
+    assert!(got.is_none());
+    assert_eq!(failures[0].message, "it offers no newer version");
+    assert_eq!(f.hits("/files/kiln.AppImage"), 0);
+    // the switch back: the older release, downloaded and verified (signature, signed version, sha256)
+    let (got, failures) = run(acquire_for(app.handle(), &[f.source("frostdev.io")], &Want::switch(Channel::Dev, cur()), Arc::new(Mutex::new(None))));
+    assert!(failures.is_empty(), "{failures:?}");
+    let (source, acq) = got.unwrap();
+    assert_eq!((source.as_str(), acq.update.version.as_str(), acq.bytes.as_slice()), ("frostdev.io", "0.2.0-dev.2", PAYLOAD));
+    assert_eq!(f.hits("/files/kiln.AppImage"), 1);
+}
+
+#[test]
+fn a_switch_uses_both_sources_and_every_check_of_an_update() {
+    let app = app_keyed("0.2.0-dev.3", BETA_PUBKEY);
+    let cur = || "0.2.0-dev.3+beta.2".to_string();
+    let g = channel_feed(&[("dev", "0.2.0-dev.2", "0.2.0-dev.2", None)]);
+    // frostdev.io lists a wrong sha256: GitHub's copy is taken
+    let f = channel_feed(&[("dev", "0.2.0-dev.2", "0.2.0-dev.2", Some(&"0".repeat(64)))]);
+    let (got, failures) = run(acquire_for(app.handle(), &[f.source("frostdev.io"), g.source("GitHub")], &Want::switch(Channel::Dev, cur()), Arc::new(Mutex::new(None))));
+    assert_eq!(got.unwrap().0, "GitHub");
+    assert_eq!(steps(&failures), [("frostdev.io", Step::Hash)]);
+    // frostdev.io is down: GitHub
+    let (got, failures) = run(acquire_for(app.handle(), &[dead_source("frostdev.io"), g.source("GitHub")], &Want::switch(Channel::Dev, cur()), Arc::new(Mutex::new(None))));
+    assert_eq!(got.unwrap().0, "GitHub");
+    assert_eq!(steps(&failures), [("frostdev.io", Step::Manifest)]);
+    // a file signed for another build is refused on a switch too
+    let bad = channel_feed(&[("dev", "0.2.0-dev.2", "0.2.0-dev.3+beta.1", None)]);
+    let (got, failures) = run(acquire_for(app.handle(), &[bad.source("frostdev.io")], &Want::switch(Channel::Dev, cur()), Arc::new(Mutex::new(None))));
+    assert!(got.is_none());
+    assert_eq!(steps(&failures), [("frostdev.io", Step::Signature)]);
+}
+
+#[test]
+fn a_switch_to_the_beta_never_goes_down() {
+    // the final build of 0.2.0-dev.3 runs; the beta channel still names its test build 2: nothing to switch to
+    let f = channel_feed(&[("beta", "0.2.0-dev.3+beta.2", "0.2.0-dev.3+beta.2", None)]);
+    let app = app_keyed("0.2.0-dev.3", BETA_PUBKEY);
+    let (got, failures) = run(acquire_for(app.handle(), &[f.source("frostdev.io")], &Want::switch(Channel::Beta, "0.2.0-dev.3".into()), Arc::new(Mutex::new(None))));
+    assert!(got.is_none());
+    assert_eq!(failures[0].message, "it offers no other build to switch to");
+    assert_eq!(f.hits("/files/kiln.AppImage"), 0);
+    // from the release before, it is a switch up
+    let (got, _) = run(acquire_for(app.handle(), &[f.source("frostdev.io")], &Want::switch(Channel::Beta, "0.2.0-dev.2".into()), Arc::new(Mutex::new(None))));
+    assert_eq!(got.unwrap().1.update.version, "0.2.0-dev.3+beta.2");
 }

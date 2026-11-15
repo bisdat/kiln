@@ -14,6 +14,7 @@ import * as api from "../api/commands";
 import type { UpdateStatus } from "../api/commands";
 import { invalidateGame, useDistribution, useGame, useGameStatus } from "../api/hooks";
 import { useUpdate, useUpdateFeed, useUpdateStore } from "../api/update";
+import { buildLabel } from "../api/channel";
 import { Button, IconButton, ProgressBar, installNote, runTask, toast, useTasks, waitTask } from "../ui";
 import { notifyInstall } from "./notices";
 import "./update.css";
@@ -100,7 +101,7 @@ function Offer({ s, onClose }: { s: UpdateStatus; onClose: () => void }) {
   };
   const skip = () => api.updateSkip(a.version).then(onClose, () => failed("Skip failed"));
   return (
-    <Card title={`Kiln ${a.version}`} onDismiss={onClose}>
+    <Card title={`Kiln ${buildLabel(a.version)}`} onDismiss={onClose}>
       <div className="k-upd-actions">
         <Button variant="ghost" onClick={skip}>Skip</Button>
         {s.install.inPlace
@@ -157,7 +158,7 @@ function JustUpdated({ s, onClose }: { s: UpdateStatus; onClose: () => void }) {
     }
   };
   return (
-    <Card title={`Updated to ${u.to}`} onDismiss={ack}>
+    <Card title={`Updated to ${buildLabel(u.to)}`} onDismiss={ack}>
       {next && (
         <div className="k-upd-actions">
           <Button variant="ghost" onClick={onClose}>Later</Button>

@@ -1172,6 +1172,22 @@ export interface UpdateStatus {
   buildChannel?: UpdateChannel;
   /** (dev.29) This test build's beta number (null: not a test build). */
   beta?: number | null;
+  /** (dev.29) The channel switch the player started (update_switch) while it downloads or waits for the restart. */
+  switching?: UpdateChannel | null;
+  /** (dev.29) The copy of settings and profiles taken before the first start of a test build: a switch back can put
+   *  it back (update_switch `restore`). */
+  beforeBeta?: BeforeBeta | null;
+}
+/** selfupdate/snapshot.rs: what a "before beta" copy holds. */
+export interface BeforeBeta {
+  /** When it was taken (RFC 3339). */
+  taken: string;
+  /** The launcher that wrote the files last before the test build (its version, "" when not known). */
+  from: string;
+  /** The test build that took it. */
+  by: string;
+  /** Files in it (settings.json, update.json, each profile's meta.json, the Library's kiln-kept.json). */
+  files: string[];
 }
 /** Guard the command boundary as well as the UI: even a stale callback or a directly mounted hook cannot invoke
  *  an updater command in the Nexus build. Failure to read the distribution also fails closed. */
@@ -1189,6 +1205,10 @@ export const updateRestart = () => selfUpdateCall<null>("update_restart");
 /** null: un-skips. */
 export const updateSkip = (version: string | null) => selfUpdateCall<UpdateStatus>("update_skip", { version });
 export const updateAck = () => selfUpdateCall<UpdateStatus>("update_ack");
+/** (dev.29) A channel switch the player asked for: downloads and installs the newest build of `channel` (on the way
+ *  back from a test build also an older one), then "Restart now" (updateRestart) runs it. `restore`: the restart puts
+ *  the "before beta" copy back first (status.beforeBeta). Task result: UpdateStatus. */
+export const updateSwitch = (channel: UpdateChannel, restore = false) => selfUpdateCall<TaskId>("update_switch", { channel, restore });
 
 // game.rs
 export const gameList = () => call<GameInstall[]>("game_list");
@@ -1919,7 +1939,7 @@ export const COMMANDS = [
   "config_kiln_read", "config_kiln_set", "config_kiln_reset",
   "app_assets_status", "app_assets_import",
   "server_console_open", "server_console_close",
-  "update_status", "update_check", "update_install", "update_restart", "update_skip", "update_ack",
+  "update_status", "update_check", "update_install", "update_switch", "update_restart", "update_skip", "update_ack",
   "library_add", "library_add_to_profile", "profile_revert", "profile_ensure_default",
   "deck_browse", "deck_gamepad", "deck_fullscreen", "deck_quit",
   "nexus_account", "nexus_sign_in", "nexus_sign_out", "nexus_search", "nexus_mod", "nexus_installed", "nexus_download", "nexus_links", "nexus_link_install", "nexus_link_dismiss", "nexus_handler_status", "nexus_handler_set",

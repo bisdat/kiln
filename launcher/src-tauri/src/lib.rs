@@ -176,6 +176,7 @@ pub fn run() {
             commands::update::update_status,
             commands::update::update_check,
             commands::update::update_install,
+            commands::update::update_switch,
             commands::update::update_restart,
             commands::update::update_skip,
             commands::update::update_ack,

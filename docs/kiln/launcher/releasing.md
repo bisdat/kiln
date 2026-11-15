@@ -149,9 +149,20 @@ Direct builds only (the Nexus Mods build has none, above).
   launcher (`plugins.updater.pubkey` in `tauri.conf.json`), and with `requireSignedVersion` the version in the
   signature must equal the version the manifest announces, so an old signed file cannot be offered under a new
   number. A file that fails is never installed, whichever source served it.
-- **Channels:** Settings > Updates. Without a choice, a build follows its own channel: a dev build follows dev, a
-  stable build follows stable. Stable never offers a pre-release; dev offers both, whichever is newer. Nothing is
-  ever downgraded.
+- **Channels:** Settings > Updates > Channel (Release, Beta (test builds)). Without a choice, a build follows its own
+  channel: a dev build follows dev, a stable build stable, a test build beta (baked in). Stable never offers a
+  pre-release; dev offers both, whichever is newer, and never a test build; beta offers test builds and releases, by
+  the order of "Test builds" above. An update is never a downgrade.
+- **Switching (0.2.0-dev.29):** choosing Beta on a release build, or Release on a test build, opens a dialog that says
+  what happens (worlds played with a test build may not load the same way on the release; servers and players must run
+  the same build) and switches now: `update_switch` saves nothing itself (the UI saved `updateChannel` first), downloads
+  the channel's newest build from the same sources in the same order, with the same signature, signed-version, sha256
+  and size checks, puts it in place and offers Restart now. To the beta it takes only a newer build; back to the release
+  line any other build, **also an older one**: the only way the launcher ever goes down, and only as the switch the
+  player started (never a background check, never Update), never to a build other than the one the channel's manifest
+  names (`feed::switch_accepts`). The Beta mark in the header (and under the logo on the Deck) names the test build and
+  is one click back. A .deb, .rpm or development build gets the download page; the Nexus Mods build shows only where
+  test builds are (the download page, a launcher that updates itself) and calls no update command.
 - **Checks:** 8 s after the start and every 6 hours while the launcher runs (Settings > Updates > "Check
   automatically", on by default), and Check now in Settings and About. A check is one GET of a small JSON file: no
   ids, no version in the URL, no cookies, nothing else (the request carries the HTTP library's User-Agent). The
