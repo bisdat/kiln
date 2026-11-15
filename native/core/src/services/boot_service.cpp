@@ -14,6 +14,8 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <thread>
 #include <cstdio>
 #include <cstring>
 #include <map>
@@ -28,6 +30,7 @@
 #include "../log.h"
 #include "../profile.h"
 #include "../registry.h"
+#include "../worldinfo.h"
 #include "nlohmann/json.hpp"
 #include "services/kiln_boot.h"
 #include "services/kiln_caps.h"
@@ -137,6 +140,12 @@ struct Stop {
 };
 Stop g_stop;
 std::atomic<bool> g_stopping{false};
+std::chrono::milliseconds g_stop_timeout{65000};  // includes state IO and the caller's 60-second message
+
+// A bad service callback must not unwind past the final termination. No C++ objects in the SEH frame.
+void stop_callback(void(KILN_CALL* fn)(void*), void* user) {
+    __try { fn(user); } __except (1) {}
+}
 
 // ---- small helpers ----
 template <size_t N>
@@ -1046,6 +1055,9 @@ KilnResult KILN_CALL b_activation_fault(KilnOwner collector, KilnStr mod_id, Kil
 KilnResult KILN_CALL b_stop_start(KilnOwner caller, KilnStr mods, KilnStr reason, uint32_t exit_code, void(KILN_CALL* before_exit)(void*),
                                   void* user) {
     if (!caller || !reason.ptr || !reason.len || !exit_code) return KILN_ERR_INVALID_ARGUMENT;
+    // This API is for refusing a start, never for killing unsaved play. Include prediction worlds.
+    for (uint32_t k = 0; k < KILN_WORLD_KINDS; ++k)
+        if (worldinfo::world(k)) return KILN_ERR_UNAVAILABLE;
     if (g_stopping.exchange(true)) return KILN_ERR_UNAVAILABLE;  // the first stop ends the process
     const std::string why(sv(reason));
     std::vector<std::string> ids;
@@ -1068,12 +1080,36 @@ KilnResult KILN_CALL b_stop_start(KilnOwner caller, KilnStr mods, KilnStr reason
         std::snprintf(line, sizeof line, "boot: the start stops (exit code 0x%04X)", exit_code);
         last = std::string(line) + ": " + why + "; state/boot.json \"boot\".\"stop\" says why";
     }
+    // A blocked writer or arbitrary before_exit callback cannot leave a refused start running forever.
+    std::mutex deadline_mu;
+    std::condition_variable deadline_cv;
+    bool done = false;
+    std::atomic<bool> expired{false};
+    std::thread deadline([&] {
+        std::unique_lock lk(deadline_mu);
+        if (deadline_cv.wait_for(lk, g_stop_timeout, [&] { return done; })) return;
+        expired = true;
+        lk.unlock();
+        g_exit_late(exit_code);
+    });
     KLOG_E("%s", last.c_str());
-    if (g_stop_state) g_stop_state(g_stop_state_user, last, why);
-    if (before_exit) before_exit(user);
-    g_exit_late(exit_code);
+    try {
+        if (g_stop_state) g_stop_state(g_stop_state_user, last, why);
+    } catch (...) {
+        KLOG_E("boot: stop state writer failed; terminating with the recorded reason");
+    }
+    if (before_exit) stop_callback(before_exit, user);
+    {
+        std::lock_guard lk(deadline_mu);
+        done = true;
+    }
+    deadline_cv.notify_one();
+    deadline.join();
+    if (!expired) g_exit_late(exit_code);
     return KILN_OK;  // the host test's exit adapter returned
 }
+
+static_assert(sizeof(KilnBootApiV1) == 104 && offsetof(KilnBootApiV1, stop_start) == 96, "append-only boot ABI");
 
 const KilnBootApiV1 kTable = {
     {sizeof(KilnBootApiV1), KILN_BOOT_VERSION},

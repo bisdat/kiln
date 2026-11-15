@@ -24,10 +24,11 @@
 // invalid" status 1, which its only caller (unique_npc_spawns) treats like an unlocked NPC: kept (counted: no page,
 // stale, unowned, moved, busy). Everything else goes to the game as it was asked.
 //
-// A page that is missing for a computed cache (a setter that did not pair, a busy lock, a world that bound its
-// registry late) is computed again at that world's next Pre, where nothing of its step runs: the game's evaluator on
+// On a dedicated server, a page missing from a computed cache (a setter that did not pair, a busy lock, a world
+// that bound its registry late) is computed again at that world's next Pre, where nothing of its step runs: the game's evaluator on
 // the knowledge context the game itself passed for that world, kept only when it agrees with the cache (page 0 and
-// version); at most twice per cache. Without that, status 1 would last until the knowledge next changes.
+// version); at most twice per cache. On clients recovery stays off until verified; missing pages stay kept
+// until the game's next evaluation.
 //
 // A roster the boot build cannot hold (more than 128 entries, or more than 64 where the second page cannot be
 // installed) stops the start at ResourceInit, before any world loads (roster_refuse_start): a world loaded without the
@@ -357,6 +358,9 @@ WorldSeen* resolve(uint32_t kind) {
 
 // A lost page (a computed cache of more than 64 entries without its page), computed again at the world's safe point.
 void recover(uint32_t kind, WorldSeen& w) {
+    // Neither hosted-server nor client-world recovery may call the client executable's evaluator
+    // outside its program until its side effects and context lifetime have been verified in a client.
+    if (g_client) return;
     LiveCache live;
     if (!read_live(w.reg, &live) || !g_sidecars.wants_page(kind, w.session, w.reg, live)) {
         w.tries = 0;
@@ -388,7 +392,7 @@ void recover(uint32_t kind, WorldSeen& w) {
                                       *r = Result16{static_cast<uint8_t>(R.eval_error), {}, 0, 0};
                                   }
                               },
-                              &p);
+                              &p, !g_client);
     LiveCache again;
     if (ok && !fault && read_live(w.reg, &again) && again == live && g_sidecars.attach(w.reg, p) == Sidecars::Attach::Attached) {
         const uint64_t n = c_recovered.fetch_add(1, std::memory_order_relaxed) + 1;

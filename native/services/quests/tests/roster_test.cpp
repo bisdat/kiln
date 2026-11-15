@@ -501,7 +501,7 @@ void review() {
         // the loader's reset (status 0x10): the game's own answer (its "cache invalid")
         sc.bind(KILN_WORLD_SERVER, 4, 0xaaa);
         auto reset = [&](LiveCache* l) { *l = LiveCache{0x10, 0, 0, 0x100, 70}; return true; };
-        CHECK(page_query(sc, 0xaaa, reset, index64).kind == QueryAnswer::Kind::Game);
+        CHECK(page_query(sc, 0xaaa, reset, index64).kind == QueryAnswer::Kind::Kept);  // no aliasing reader after reset
         // review round 2: a registry whose fields cannot be read, or an entry the collection cannot place: the id may be
         // at 64 or more, and the game's own query would read bit index & 63 of page 0 (another entry's state, which
         // can destroy an unlocked NPC): kept, never the game's answer
@@ -509,6 +509,19 @@ void review() {
         CHECK(a.kind == QueryAnswer::Kind::Kept && a.why == Sidecars::Bit::Unreadable);
         a = page_query(sc, 0xaaa, steady, [](const LiveCache&, uint64_t*) { return false; });
         CHECK(a.kind == QueryAnswer::Kind::Kept && a.why == Sidecars::Bit::Unreadable);
+    }
+    // A high entry with a loader-reset cache must never dispatch to the original:
+    // a setter can make status valid before that call, which would then alias bit 0.
+    {
+        Sidecars sc;
+        sc.bind(KILN_WORLD_SERVER, 1, 0xaaa);
+        LiveCache loading = live;
+        loading.status = 0x10;
+        const auto answer = page_query(sc, 0xaaa,
+            [&](LiveCache* out) { *out = loading; return true; },
+            [](const LiveCache&, uint64_t* i) { *i = 64; return true; });
+        CHECK(answer.kind == QueryAnswer::Kind::Kept);
+        CHECK(answer.why == Sidecars::Bit::Stale);
     }
     // review round 2: a recomputation only with the context the game passed, and only while it is the world's
     // G38Knowledge now; otherwise the missing page answers NoContext until the game's next evaluation attaches one
@@ -620,6 +633,9 @@ void review() {
         CHECK(sc.wants_page(KILN_WORLD_SERVER, 1, 0xaaa, cache));  // no page: asked for
         Pending p;
         sc.epochs(p.epochs);
+        // A checked pointer alone does not authorize evaluating outside a client program.
+        CHECK(!recompute(cache, r.span(), kStride, 1, reinterpret_cast<void*>(uintptr_t{0x7700}), game_eval, &p, false));
+        CHECK(k.calls == 0);
         CHECK(recompute(cache, r.span(), kStride, 1, reinterpret_cast<void*>(uintptr_t{0x7700}), game_eval, &p));
         CHECK(p.ctx == 0x7700 && p.pages == 2 && p.version == 11 && p.masks[0] == 0x1 && p.masks[1] == 0x4);
         CHECK(sc.attach(0xaaa, p) == Sidecars::Attach::Attached);
