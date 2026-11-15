@@ -5,8 +5,9 @@
  *
  * Threads: functions marked "tick" touch game state and must run on the tick thread in Pre or Post (posted tasks
  * count as Pre); elsewhere they return KILN_ERR_WRONG_THREAD. Managed mods always call from there. spawn, spawn_item,
- * destroy and cleanup also return KILN_ERR_WRONG_THREAD on the tick thread inside the world's step (since 0.2.0-dev.29:
- * kiln.world's in_program answers 1 there: a wrap stage, a Kiln program, a kiln.types system callback); post them.
+ * destroy and cleanup also return KILN_ERR_WRONG_THREAD on the tick thread inside a program wrap's stage or a Kiln
+ * program's callback (since 0.2.0-dev.29: kiln.world's in_program answers 1 there); post them. Inside a kiln.types
+ * system-hook callback they go through as on dev.28, with one warning per call kind in kiln.log.
  * Catalog and tracked-list reads are thread-safe.
  *
  * Templates are identified by their 16-byte GUID in the game's (Windows) layout: the text form

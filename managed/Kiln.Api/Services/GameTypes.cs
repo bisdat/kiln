@@ -398,6 +398,9 @@ public sealed record GameSystem(int Index, string Name, ulong Rva, bool Enabled,
 public static unsafe class GameSystems
 {
     private static TypesNative.Table* Table => GameTypes.Table;
+    [ThreadStatic] private static int _hookDepth;
+    // A Hook callback runs on this thread (Kiln.Spawn warns once per mod and call kind when one creates or destroys).
+    internal static bool InHookCallback => _hookDepth > 0;
     private static readonly ConditionalWeakTable<ModContext, object> Owners = new();
     private sealed record NativeOwner(ulong Value);
     private static readonly ConditionalWeakTable<IKilnBackend, NativeOwner> ToolOwners = new();
@@ -545,7 +548,9 @@ public static unsafe class GameSystems
             try
             {
                 ModContext.CurrentMod = Mod;
-                (after ? After : Before)?.Invoke();
+                _hookDepth++;
+                try { (after ? After : Before)?.Invoke(); }
+                finally { _hookDepth--; }
             }
             catch (Exception error)
             {

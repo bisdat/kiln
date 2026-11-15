@@ -103,11 +103,33 @@ const KilnWorldApi* world_api() {
     return p;
 }
 
-// Create and destroy: the tick thread in Pre or Post, never inside the world's step (midstep.h). A refusal is logged the
-// first time and each time the count doubles.
-KilnResult structural_call(const char* what) {
+// kiln.types' table, for its in_system_callback (midstep.h), looked up like kiln.world's.
+const KilnTypesApi* types_api() {
+    static std::atomic<const KilnTypesApi*> t{nullptr};
+    const KilnTypesApi* p = t.load(std::memory_order_acquire);
+    if (!p) {
+        p = static_cast<const KilnTypesApi*>(
+            g_api->service(KilnStr{KILN_TYPES_SERVICE, sizeof(KILN_TYPES_SERVICE) - 1}, KILN_TYPES_VERSION));
+        if (p) t.store(p, std::memory_order_release);
+    }
+    return p;
+}
+
+// Create and destroy (midstep.h): the tick thread in Pre or Post. Inside a wrap stage or a Kiln program refused; a
+// refusal is logged the first time and each time the count doubles. Inside a kiln.types system-hook callback allowed as
+// on dev.28, with one warning per call kind.
+OncePerKind g_hook_warned;
+KilnResult structural_call(const char* what, uint32_t kind) {
     if (!on_tick()) return KILN_ERR_WRONG_THREAD;
-    if (structural_gate(true, world_api()) == Gate::Ok) return KILN_OK;
+    switch (structural_gate(true, world_api(), types_api())) {
+        case Gate::Ok:
+            return KILN_OK;
+        case Gate::InSystemHook:
+            if (g_hook_warned.first(kind)) logw("kiln.spawn: %s: %s", what, kSystemHookText);
+            return KILN_OK;
+        default:
+            break;
+    }
     static std::atomic<uint64_t> refused{0};
     const uint64_t n = refused.fetch_add(1) + 1;
     if ((n & (n - 1)) == 0)
@@ -312,7 +334,7 @@ KilnResult do_spawn(const Resolved& t, const KilnVec3& p, float yaw_deg, int32_t
                     const KilnSpawnComponent* extra = nullptr, uint32_t extra_count = 0) {
     if (out) *out = 0;
     if (!g_ok) return KILN_ERR_UNAVAILABLE;
-    if (const KilnResult gate = structural_call(pickup ? "spawn_item" : "spawn"); gate != KILN_OK) return gate;
+    if (const KilnResult gate = structural_call(pickup ? "spawn_item" : "spawn", pickup ? kKindSpawnItem : kKindSpawn); gate != KILN_OK) return gate;
     if (world_state() != KILN_SPAWN_WORLD_RUNNING) return KILN_ERR_UNAVAILABLE;
     if (!finite_pos(p) || !std::isfinite(yaw_deg) || level < 0 || level > 1000) return KILN_ERR_INVALID_ARGUMENT;
     if (extra_count > KILN_SPAWN_MAX_COMPONENTS || (extra_count && !extra)) return KILN_ERR_INVALID_ARGUMENT;
@@ -715,7 +737,7 @@ KilnResult i_spawn_item(uint32_t item_id, uint32_t amount, KilnVec3 position, in
 
 KilnResult i_destroy(KilnEntity entity) {
     if (!g_ok) return KILN_ERR_UNAVAILABLE;
-    if (const KilnResult gate = structural_call("destroy"); gate != KILN_OK) return gate;
+    if (const KilnResult gate = structural_call("destroy", kKindDestroy); gate != KILN_OK) return gate;
     if (entity >= 1 && entity <= 1023) return KILN_ERR_INVALID_ARGUMENT;
     if (!game::can_destroy()) return KILN_ERR_UNAVAILABLE;
     unsigned long fault = 0;
@@ -877,7 +899,7 @@ KilnResult KILN_CALL t_tracked_at(size_t index, KilnTrackedEntity* out) {
 KilnResult i_cleanup(KilnStr tag, KilnStr origin, KilnSpawnCleanup* out) {
     if (out && out->size < sizeof(KilnSpawnCleanup)) return KILN_ERR_INVALID_ARGUMENT;
     if (!g_ok) return KILN_ERR_UNAVAILABLE;
-    if (const KilnResult gate = structural_call("cleanup"); gate != KILN_OK) return gate;
+    if (const KilnResult gate = structural_call("cleanup", kKindCleanup); gate != KILN_OK) return gate;
     if (!game::world_ready()) return KILN_ERR_UNAVAILABLE;
     if (!tracker::opened()) open_tracker();
     refresh_impl(true);

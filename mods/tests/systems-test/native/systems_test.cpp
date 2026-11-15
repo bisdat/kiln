@@ -761,11 +761,16 @@ bool cost_phase(uint64_t n) {
 
 // ---- kiln.spawn inside the world's step (dev.29): a native stage asks kiln.spawn to create and to destroy. The empty lab
 // server runs its slices inline on the world's own thread, which passes the tick-thread check; kiln.spawn must refuse
-// both there (KILN_ERR_WRONG_THREAD: kiln.world's in_program answers 1) and create nothing.
+// both there (KILN_ERR_WRONG_THREAD: kiln.world's in_program answers 1) and create nothing. A kiln.types system-hook
+// callback on the same program does the same and must go through as on dev.28 (one warning per call kind in kiln.log):
+// the well it creates is destroyed again from Pre.
 struct {
-    KilnHandle handle = 0;
+    KilnHandle handle = 0, hook = 0;
     std::atomic<int> calls{0}, on_world{0}, spawn_rc{-1}, destroy_rc{-1};
     std::atomic<uint32_t> spawned{0};
+    std::atomic<int> hook_calls{0}, hook_on_world{0}, hook_spawn_rc{-1}, hook_destroy_rc{-1};
+    std::atomic<uint32_t> hook_spawned{0};
+    int cleanup_rc = -1;
     uint32_t before = 0;
 } g_midstep;
 const KilnSpawnApi* spawn_api() {
@@ -784,15 +789,43 @@ void KILN_CALL st_spawn_midstep(KilnGameSlice* s, void*) {
     g_midstep.spawned = e;
     g_midstep.destroy_rc = sp->destroy(5000);
 }
+void KILN_CALL hook_spawn_midstep(void*, void*) {
+    const KilnSpawnApi* sp = spawn_api();
+    if (!sp || g_midstep.hook_calls.fetch_add(1) != 0) return;  // once
+    if (GetCurrentThreadId() == g_tick_tid) g_midstep.hook_on_world.fetch_add(1);
+    KilnSpawnRequest r{};
+    r.size = sizeof r;
+    r.template_name = ks("Prop_NPC_Water_Well_a");
+    r.tag = ks("systems-test-midstep-hook");
+    KilnEntity e = 0;
+    g_midstep.hook_spawn_rc = sp->spawn(&r, &e);
+    g_midstep.hook_spawned = e;
+    g_midstep.hook_destroy_rc = sp->destroy(5000);
+}
 void midstep_phase(uint64_t n) {
     if (n == 12) {
         const KilnSpawnApi* sp = spawn_api();
         g_midstep.before = sp ? static_cast<uint32_t>(sp->tracked_count()) : 0;
         g_midstep.handle = wrap("fuel_network", KILN_WRAP_BEFORE, &st_spawn_midstep, nullptr);
+        const int32_t i = T ? T->system_find(ks("fuel_network")) : -1;
+        if (i < 0 || T->system_hook(g_owner, static_cast<uint32_t>(i), &hook_spawn_midstep, nullptr, nullptr, &g_midstep.hook) != KILN_OK)
+            g_midstep.hook = 0;
+    } else if (n == 58) {
+        if (g_midstep.hook) T->system_unhook(g_midstep.hook), g_midstep.hook = 0;
+        const KilnSpawnApi* sp = spawn_api();
+        if (sp && g_midstep.hook_spawned.load()) g_midstep.cleanup_rc = sp->destroy(g_midstep.hook_spawned.load());  // Pre
     } else if (n == 60) {
         if (g_midstep.handle) W->game_program_unwrap(g_midstep.handle);
         const KilnSpawnApi* sp = spawn_api();
         const uint32_t after = sp ? static_cast<uint32_t>(sp->tracked_count()) : 0;
+        row(sp && g_midstep.hook_calls.load() >= 1 && g_midstep.hook_on_world.load() == 1 &&
+                g_midstep.hook_spawn_rc.load() == KILN_OK && g_midstep.hook_spawned.load() != 0 &&
+                g_midstep.hook_destroy_rc.load() == KILN_ERR_NOT_FOUND && g_midstep.cleanup_rc == KILN_OK,
+            "spawn in a system hook: inside a kiln.types system-hook callback on the world's own thread kiln.spawn lets create "
+            "(%d, entity %u) and destroy (%d: no such entity) through as on dev.28 (kiln.log warns once per kind); the well "
+            "was destroyed again from Pre (%d)",
+            g_midstep.hook_spawn_rc.load(), g_midstep.hook_spawned.load(), g_midstep.hook_destroy_rc.load(),
+            g_midstep.cleanup_rc);
         row(sp && g_midstep.calls.load() >= 1 && g_midstep.on_world.load() == 1 &&
                 g_midstep.spawn_rc.load() == KILN_ERR_WRONG_THREAD && g_midstep.destroy_rc.load() == KILN_ERR_WRONG_THREAD &&
                 g_midstep.spawned.load() == 0 && after == g_midstep.before,
