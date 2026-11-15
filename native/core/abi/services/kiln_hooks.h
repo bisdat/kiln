@@ -364,10 +364,17 @@ typedef struct KilnHooksApi {
     KilnResult(KILN_CALL* subscribe_owner_retiring)(KilnOwner observer_owner, KilnOwnerRetiringFn fn, void* user,
                                                     KilnHandle* out);
     KilnResult(KILN_CALL* unsubscribe_owner_retiring)(KilnHandle handle);
+    /* Optional checked mid installation: refuses before writing when any thread
+     * cannot be checked, or is paused inside the bytes to replace. No unsafe fallback.
+     * Existing targets need no physical patch. Check header.size. */
+    KilnResult(KILN_CALL* mid2_checked)(KilnOwner owner, uintptr_t target, const KilnHookOrder* order,
+        KilnMidFn fn, void* user, KilnHandle* out, uint32_t* unchecked);
 } KilnHooksApi;
 
 #ifdef __cplusplus
 }
+static_assert(sizeof(KilnHooksApi) == 264, "KilnHooksApi is 264 bytes");
+static_assert(offsetof(KilnHooksApi, mid2_checked) == 256, "checked installation is appended at 256");
 #endif
 
 #endif /* KILN_HOOKS_H */

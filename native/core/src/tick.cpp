@@ -13,6 +13,7 @@
 #include "log.h"
 #include "registry.h"
 #include "services/hooks_internal.h"
+#include "services/window_clock.h"
 #include "sigdb.h"
 #include "progress_state.h"
 #include "worldinfo.h"
@@ -213,6 +214,7 @@ void begin_world(uint32_t kind, uintptr_t world) {
     g_kind_thread[kind].store(GetCurrentThreadId());
     if (kind == KILN_WORLD_SERVER) g_thread.store(GetCurrentThreadId());
     g_generation.fetch_add(1);
+    if (kind == KILN_WORLD_SERVER) window_clock::world_started();  // a new world epoch, before any subscriber hears of it
     if (kind == KILN_WORLD_SERVER && session == 1) KLOG_I("tick: first server-world step on thread %lu", GetCurrentThreadId());
     // progress.json: the game's first world (any kind): a dedicated server without .NET is ready here, and so is a client
     // whose main menu mark never came (progress_file.h, Mark::world_started; later worlds change nothing)
@@ -270,7 +272,10 @@ uintptr_t server_step(uintptr_t storage, uintptr_t ticked, uintptr_t r8, uintptr
             std::lock_guard lock(g_last_mutex);
             g_last = info;
         }
+        window_clock::pre(info.step);
         run(g_pre, info);
+        // After the last Pre subscriber: the window services sample the world (kiln_window_clock.h, phase 2), then Sim.
+        window_clock::begin();
     } catch (...) {
         disable("server Pre");
         return g_hook.call<uintptr_t>(storage, ticked, r8, r9);  // no Post with incomplete tick info
@@ -282,9 +287,12 @@ uintptr_t server_step(uintptr_t storage, uintptr_t ticked, uintptr_t r8, uintptr
     if (g_faulted.load()) return result;
 
     try {
-        if (!g_post.empty()) {
+        // A window service begun in this step makes it wait for the world's jobs also when nobody subscribed to Post
+        // (kiln.decisions with no listener and nothing held is not begun: window_wanted).
+        if (!g_post.empty() || window_clock::wants_end()) {
             if (g_wait_jobs) {
                 g_wait_jobs(storage - static_cast<uintptr_t>(g_world_storage));
+                window_clock::end();  // phase 4: the window services compare and release; then Post (phase 5)
                 run(g_post, info);
             } else if (!g_post_warned) {
                 g_post_warned = true;
@@ -445,7 +453,9 @@ void __fastcall hk_world_destroy(uintptr_t world) {
                 dispatch_event(KILN_WORLD_STOPPING, KILN_WORLD_PREDICTION, prediction, ps);
                 worldinfo::set_world(KILN_WORLD_PREDICTION, 0);
             }
+            if (kind == KILN_WORLD_SERVER) window_clock::stopping();
             dispatch_event(KILN_WORLD_STOPPING, kind, world, session);
+            if (kind == KILN_WORLD_SERVER) window_clock::stopped();
             worldinfo::set_world(kind, 0);  // the next step of this kind (even at the same address) starts a session
             g_generation.fetch_add(1);
         }
@@ -469,6 +479,7 @@ bool install() {
     uintptr_t wait = 0;
     if (sigdb::feature("tick.wait_jobs") && sigdb::symbol("WaitWorldJobs", &wait))
         g_wait_jobs = reinterpret_cast<WaitWorldJobsFn>(wait);
+    window_clock::enable_windows(g_wait_jobs != nullptr);
     if (!g_hook.install(sim_step, reinterpret_cast<void*>(&hk_sim_step), "tick/SimStep")) {
         KLOG_E("tick: hooking SimStep at %p failed", reinterpret_cast<void*>(sim_step));
         return false;

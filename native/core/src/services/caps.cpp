@@ -522,7 +522,8 @@ KilnResult KILN_CALL c_report(KilnOwner owner, KilnStr name, uint32_t state, uin
             if (it != g_names.end()) {
                 // a name the core reports itself is static; the client gate's report does not make it so
                 const Report* core = core_report(it->second);
-                if (state == KILN_CAP_PENDING && core && core->kind != kGate) return KILN_ERR_INVALID_ARGUMENT;
+                if (state == KILN_CAP_PENDING && core && core->kind != kGate &&
+                    n != "events.death" && n != "events.pickup") return KILN_ERR_INVALID_ARGUMENT;
                 for (Report& r : it->second.reports)
                     if (r.owner == owner) mine = &r;
             }

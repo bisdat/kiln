@@ -265,6 +265,8 @@ internal static partial class KilnApis
         "M:Kiln.Creatures.Near(Kiln.WorldPosition,System.Double,System.Nullable{Kiln.CreatureKind})", // Creatures.Near(WorldPosition, double, CreatureKind?): Services.RequireTickThread
         "M:Kiln.Creatures.RefreshCopies(Kiln.EntityId)", // Creatures.RefreshCopies(EntityId): via Creatures.Tick(string)
         "M:Kiln.Creatures.Spawn(System.String,Kiln.WorldPosition,System.Single,Kiln.CreatureSpawnOptions)", // Creatures.Spawn(string, WorldPosition, float, CreatureSpawnOptions?): Services.RequireTickThread
+        "M:Kiln.Decisions.LabDecide(Kiln.EntityId,System.Nullable{System.Boolean})", // Decisions.LabDecide(EntityId, bool?): via DecisionBroker.LabDecide(EntityId, bool?, out int)
+        "M:Kiln.Decisions.ReevaluatePickup(Kiln.EntityId,Kiln.EntityId)", // Decisions.ReevaluatePickup(EntityId, EntityId): Services.RequireTickThread
         "M:Kiln.Dialogues.ApplyOption(Kiln.EntityId,Kiln.EntityId,System.String,System.String,System.Int32)", // Dialogues.ApplyOption(EntityId, EntityId, string, string, int): Game.AssertTickThread
         "M:Kiln.Dialogues.Choose(Kiln.QuestHolder,System.Int64,System.Int32)", // Dialogues.Choose(QuestHolder, long, int): Game.AssertTickThread
         "M:Kiln.Dialogues.Close(Kiln.QuestHolder)", // Dialogues.Close(QuestHolder): Game.AssertTickThread
@@ -623,6 +625,7 @@ internal static partial class KilnApis
         "M:Kiln.Teleport.ToSpawnPoint(Kiln.EntityId,Kiln.EntityId,Kiln.TeleportOptions)", // Teleport.ToSpawnPoint(EntityId, EntityId, TeleportOptions?): via Teleport.Start(EntityId, WorldPosition, EntityId, TeleportOptions)
         "M:Kiln.Terrain.Apply(Kiln.TerrainPatch,Kiln.TerrainApplyOptions)", // Terrain.Apply(TerrainPatch, TerrainApplyOptions?): via Terrain.Begin(TerrainPatch, TerrainApplyOptions?, string, string)
         "M:Kiln.Terrain.Forget(System.String)", // Terrain.Forget(string): Services.RequireTickThread
+        "M:Kiln.Terrain.Forget(System.String,System.Boolean)", // Terrain.Forget(string, bool): Services.RequireTickThread
         "M:Kiln.Terrain.Inspect(Kiln.TerrainPatch,Kiln.TerrainApplyOptions)", // Terrain.Inspect(TerrainPatch, TerrainApplyOptions?): via Terrain.Begin(TerrainPatch, TerrainApplyOptions?, string, string)
         "M:Kiln.Terrain.get_Applied", // Terrain.Applied.get: Services.RequireTickThread
         "M:Kiln.Time.ReleaseWeather(System.Nullable{System.Int32},System.Boolean)", // Time.ReleaseWeather(int?, bool): Services.RequireTickThread

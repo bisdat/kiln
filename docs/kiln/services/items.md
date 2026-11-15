@@ -583,3 +583,11 @@ Kiln.Items followed [the API contract](../modding/contract.md) since dev.26; dev
 - `[TickThreadOnly]` on every member that reaches a tick-thread check (`Read`, `Give`, `Take`, `Move`, the `Fuel`
   calls, ...).
 - Tested offline: `managed/tests/Kiln.Contract.Tests/Group10ContractTests.cs` and the conformance rules.
+
+## Typed equipment decisions (since 0.2.0-dev.29)
+`PlayerEquippingEvent`: a player's equipment input, one slot (`SingleEquipmentChange` with `InstanceEquipment`,
+`StackEquipment` for a plain stack such as arrows, or `EmptyEquipment`) or the game's collection swap
+(`CollectionEquipmentChange`, its contents as read in Pre), shares one verdict with the same input's
+`PlayerClientActionEvent`: refused when either canceled. Kiln set requests (`SetEquipmentChange`) come with
+10-equipment-sets. The set model (`EquipmentSet`, `EquipmentSetEntry`, `EquipmentSetSelection`, `InventorySnapshotToken`)
+is declared here as chapter 10 has it. Capability `events.equip`. [decisions.md](decisions.md#equipment).

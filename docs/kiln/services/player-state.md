@@ -123,6 +123,9 @@ Use what exists for the rest: fall damage `EntityFallEvent`, death `EntityDeathE
 **A client action.** A client's input reaches the server world inside the sim step: the game copies it into `PlayerInput` after Pre, and the action's program runs it in that same step. So no Pre ever sees a client's action before it ran. While a handler subscribes to `PlayerClientActionEvent`, Kiln therefore holds each new client action for one step, right before the game's programs (the start of `DeliverEvents`), and posts it in the next Pre:
 - Not canceled, the game runs it in that step: one step late, about 17 ms with a client joined.
 - Canceled, its version is marked consumed, the way the game ignores an old version. It never runs, then or later.
+- Its player left in between (another player can take the same entity id), or the world stopped: the held action is
+  dropped and runs for nobody; kiln.log counts it (since 0.2.0-dev.29: a held action keeps its holder, the world and the
+  player's connection, and only that holder's input is ever put back or marked consumed).
 
 The client is not told. What it shows depends on the program. An equip (`equipment_actions`) runs on the server only, so the client shows the server's equipment. An inventory move (`inventory_actions`) is predicted by the client, which has to take the server's state back. Both are manual tests.
 
@@ -168,3 +171,10 @@ Health and the other vitals are `NetworkPlayerAttributes`, updated once per step
 - A state a new build adds fires `PlayerStateChangedEvent` with a raw id: `(PlayerStateId)0x0140` and `e.Name` the game's name. `PlayerStates.All` lists it with `NamedByKiln == false`.
 - A state a new build drops reads as unknown.
 - Regenerate the constants: `python3 tools/typegen/playerstates.py --exe <enshrouded.exe> managed/services/Kiln.Players/PlayerStateIds.g.cs`. `--check` lists what changed first.
+
+## One verdict with the typed equipment event (since 0.2.0-dev.29)
+For `changeEquipmentAction` and `swapEquipmentSetAction`, while a `PlayerEquippingEvent` handler (Kiln.Items) listens,
+`PlayerClientActionEvent.DecisionId` names the decision the input is part of: the typed event follows with the same id,
+starts with this event's vote, and the input is canceled when either canceled (answered to the game once). A typed
+listener alone holds only those two inputs (kiln.playerstate `client_action_interest`), so the player's other client
+actions do not wait a step for it. [decisions.md](decisions.md#equipment).
