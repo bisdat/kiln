@@ -98,12 +98,20 @@ uint32_t roster_max(uint32_t needed, std::string* why);
 void roster_built(std::vector<uint32_t> boot_ids, std::vector<uint32_t> kiln_ids);
 uint32_t roster_limit();  // 64 or 128
 void roster_world_event(const KilnWorldEvent* e);
-// The boot build could not hold the mods' roster (more than 128 entries, or more than 64 where the second page cannot be
-// installed): the start stops here, before any world loads (the error line, kiln/state/roster-refused.json, kiln.boot's
-// activation fault for each mod, on a client a message box; then the process ends with KILN_KNOW_ROSTER_EXIT_CODE).
-// Call with no lock held. Does not return, except when a world is present or has run in this process already (a
-// start-time call only: ending the process then could lose play): then it logs that the start could not be stopped.
-void roster_refuse_start(const std::string& why, const std::vector<std::string>& mods);
+// The start stops here, before any world loads (start_stop.cpp; the texts in start_stop.h), for `kind`:
+//  - StartStop::Roster: the boot build could not hold the mods' roster (more than 128 entries, or more than 64 where
+//    the second page cannot be installed); KILN_KNOW_ROSTER_EXIT_CODE, kiln/state/roster-refused.json.
+//  - StartStop::Content: the whole build of the mods' native quests and NPCs failed and nothing of it is served
+//    (native_pack.cpp); KILN_KNOW_CONTENT_EXIT_CODE, kiln/state/content-refused.json.
+// The state file, the error line, kiln.boot's stop_start (an issue per mod, its stop line, progress.json "failed",
+// boot.json "boot"."stop"), on a client a message box; then the process ends with the kind's code. `mods`: the mods
+// whose content is involved. Call with no lock held. Does not return, except when a world is present or has run in
+// this process already (a start-time call only: ending the process then could lose play): then it logs that the start
+// could not be stopped.
+enum class StartStop : uint8_t;
+void refuse_start(StartStop kind, const std::string& why, const std::vector<std::string>& mods);
+// kiln_plugin_main: the state file of a start an earlier stop ended moves aside (<file>.last.json).
+void start_stop_main();
 // One registry's pages (as npc_unlock_pages_server, for any registry).
 bool npc_unlock_pages(uintptr_t registry, uint64_t pages[2], uint32_t* npages, uint16_t* version, uint32_t* count);
 KilnResult KILN_CALL roster_world(uint32_t kind, uint32_t* out_generation, uint32_t* out_readiness);

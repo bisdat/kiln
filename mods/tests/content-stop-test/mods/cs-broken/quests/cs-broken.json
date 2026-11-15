@@ -1,0 +1,7 @@
+{
+  "format": 1,
+  "comment": "content-stop-test: one mod's own error (ok: false in the manifest); the start must go on without it",
+  "knowledge": {
+    "cs_bad": { "scope": "world", "type": "bogus" }
+  }
+}

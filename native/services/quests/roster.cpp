@@ -31,8 +31,9 @@
 // until the game's next evaluation.
 //
 // A roster the boot build cannot hold (more than 128 entries, or more than 64 where the second page cannot be
-// installed) stops the start at ResourceInit, before any world loads (roster_refuse_start): a world loaded without the
-// mods' NPCs and knowledge would drop their progress at its next save.
+// installed) stops the start at ResourceInit, before any world loads (native_pack.cpp asks start_stop.cpp's
+// refuse_start, StartStop::Roster): a world loaded without the mods' NPCs and knowledge would drop their progress at its
+// next save.
 #include <windows.h>
 
 #include <algorithm>
@@ -44,7 +45,6 @@
 #include <string_view>
 #include <vector>
 
-#include "kiln_boot_collector.hpp"
 #include "kiln_hook.hpp"
 #include "knowledge_internal.h"
 #include "roster_core.h"
@@ -479,43 +479,6 @@ void want() {
     if (!g_wanted.exchange(true, std::memory_order_acq_rel)) KI("roster: a mod reads the roster: each world publishes its snapshot after its step");
 }
 
-// A world is present now, or one has run in this process (KilnApi.session): the start phase is over.
-bool world_started() {
-    KilnSessionInfo s{};
-    s.size = sizeof s;
-    if (g_api->size < offsetof(KilnApi, session) + sizeof(void*) || g_api->session(&s) != KILN_OK) return false;
-    for (uint32_t k = 0; k < KILN_WORLD_KINDS; ++k)
-        if (s.worlds[k] || s.sessions[k]) return true;
-    return false;
-}
-
-// The player's message when the roster stops a game client's start: owned by the game's window when it has one, so it
-// is not lost behind it, and closed by itself after 60 s so a game behind a fullscreen or Wayland window does not look
-// hung (the reason is on disk before it opens).
-struct StopBox {
-    std::wstring text;
-};
-BOOL CALLBACK find_game_window(HWND h, LPARAM out) {
-    DWORD pid = 0;
-    GetWindowThreadProcessId(h, &pid);
-    if (pid != GetCurrentProcessId() || !IsWindowVisible(h) || GetWindow(h, GW_OWNER)) return TRUE;
-    *reinterpret_cast<HWND*>(out) = h;
-    return FALSE;
-}
-void KILN_CALL show_box(void* user) {
-    using TimeoutBox = int(WINAPI*)(HWND, LPCWSTR, LPCWSTR, UINT, WORD, DWORD);
-    const HMODULE u32 = GetModuleHandleW(L"user32.dll");
-    const auto fn = u32 ? reinterpret_cast<TimeoutBox>(reinterpret_cast<void*>(GetProcAddress(u32, "MessageBoxTimeoutW"))) : nullptr;
-    if (!fn) {
-        KW("roster: no message box with a timeout on this system (user32 MessageBoxTimeoutW): the reason is in kiln.log only");
-        return;
-    }
-    HWND owner = nullptr;
-    EnumWindows(&find_game_window, reinterpret_cast<LPARAM>(&owner));
-    fn(owner, static_cast<const StopBox*>(user)->text.c_str(), L"Kiln: the NPC roster is too long",
-       MB_OK | MB_ICONERROR | MB_TOPMOST | MB_SETFOREGROUND, 0, 60000);
-}
-
 }  // namespace
 
 // ============================================================================================= the service ======
@@ -570,11 +533,6 @@ void roster_main() {
              "built WITHOUT the second unlock page, so the unlock states of entries 64 and up are wrong and the game can keep or remove "
              "the wrong NPCs; never on a save you keep. Delete the file to play");
     if (g_ctl_lab) KW("roster: lab switch kiln/control/roster.lab is present: lab diagnostics (an attach line per page, kiln/control/roster.drop-page)");
-    // the state file of a start the roster stopped describes that start only: it moves aside at the next one
-    const std::wstring refused = kiln_path(KILN_PATH_STATE, "roster-refused.json");
-    if (!refused.empty() && GetFileAttributesW(refused.c_str()) != INVALID_FILE_ATTRIBUTES &&
-        MoveFileExW(refused.c_str(), kiln_path(KILN_PATH_STATE, "roster-refused.last.json").c_str(), MOVEFILE_REPLACE_EXISTING))
-        KW("roster: the previous start was stopped by the roster (kiln/state/roster-refused.last.json says why)");
     KilnHandle h = 0;
     g_api->subscribe_world_tick(g_owner, KILN_WORLD_SERVER, KILN_TICK_PRE, &on_server_pre, nullptr, &h);
     g_api->subscribe_world_tick(g_owner, KILN_WORLD_SERVER, KILN_TICK_POST, &on_server_post, nullptr, &h);
@@ -702,100 +660,6 @@ bool npc_unlock_pages(uintptr_t registry, uint64_t pages[2], uint32_t* npages, u
         *npages = 2;
     }
     return true;
-}
-
-void roster_refuse_start(const std::string& why, const std::vector<std::string>& mods) {
-    // a start-time call only: a world present now or run in this process (ending it could lose play) is not stopped
-    const auto cannot_stop = [] {
-        KE("roster: the start could NOT be stopped: a world already ran in this process, and ending it now could lose play. "
-           "These mods' native quests, knowledge and NPCs are not built; a world saved now drops their progress. Quit and fix "
-           "the mod list");
-    };
-    if (world_started()) return cannot_stop();
-    std::string list, csv;
-    for (const std::string& m : mods) list += (list.empty() ? "" : ", ") + m, csv += (csv.empty() ? "" : ",") + m;
-    if (list.empty()) list = "(none named)";
-    const bool by_boot = kiln::boot::can_stop_start(g_api);
-    char head[96];
-    std::snprintf(head, sizeof head, "roster: the start is stopped (pid %lu, exit code 0x%X): ", GetCurrentProcessId(),
-                  KILN_KNOW_ROSTER_EXIT_CODE);
-    const std::string advice = "Do not restart the game or the server: the next start stops the same way (a dedicated server under "
-                               "Wine exits with status 2; a supervisor must not restart on it). Fix the mod list: remove these mods, or "
-                               "run a Kiln and game build where the roster's second unlock page installs";
-    const std::string line = std::string(head) + why + "; mods: " + list +
-                             ". No world was loaded and no save was opened: a world without these mods' NPCs and knowledge would drop "
-                             "their progress at its next save. " + advice + " (kiln/state/roster-refused.json)";
-    // first the file a launcher reads and the log line: nothing below may keep them from the disk (a player who ends
-    // the game while its message is open still has the reason)
-    SYSTEMTIME st{};
-    GetSystemTime(&st);
-    char utc[32];
-    std::snprintf(utc, sizeof utc, "%04u-%02u-%02uT%02u:%02u:%02uZ", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
-    nlohmann::json j = {{"format", 1},
-                        {"refused", true},
-                        {"why", why},
-                        {"mods", mods},
-                        {"side", g_client ? "client" : "server"},
-                        {"exitCode", KILN_KNOW_ROSTER_EXIT_CODE},
-                        {"unixExitStatus", KILN_KNOW_ROSTER_EXIT_CODE & 0xff},
-                        {"restart", false},
-                        {"advice", advice},
-                        {"bootStop", by_boot},
-                        {"pid", GetCurrentProcessId()},
-                        {"utc", utc}};
-    const std::string doc = j.dump(1) + "\n";
-    const std::wstring state = kiln_path(KILN_PATH_STATE, "roster-refused.json");
-    if (!state.empty()) {
-        HANDLE f = CreateFileW(state.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (f != INVALID_HANDLE_VALUE) {
-            DWORD wrote = 0;
-            WriteFile(f, doc.data(), static_cast<DWORD>(doc.size()), &wrote, nullptr);
-            FlushFileBuffers(f);
-            CloseHandle(f);
-        }
-    }
-    KE("%s", line.c_str());
-    // kiln.boot ends the start the same way with a boot generation or without one, before the game's entry point (a
-    // boot generation's prepare) or after it (the game's resource start): its stop line, progress.json "failed",
-    // boot.json "boot"."stop", then the message on a client, then exit 0x4B02 (it does not return)
-    StopBox box;
-    box.text = wide("Kiln stopped the game's start.\n\n" + why + "\n\nMods: " + list +
-                    "\n\nNo world was loaded and no save was opened, so nothing of your progress was lost. Starting again stops "
-                    "the same way: remove these mods, or update Kiln.\n\nkiln/logs/kiln.log and kiln/state/roster-refused.json "
-                    "say more. This message closes by itself after 60 seconds.");
-    kiln::boot::stop_start(g_api, g_owner, csv, "kiln.knowledge: " + why + "; mods: " + list + ". " + advice, KILN_KNOW_ROSTER_EXIT_CODE,
-                           g_client ? &show_box : nullptr, &box);
-    // kiln.boot did not stop the start. A world present now or run in this process (kiln.boot refuses then too): ending
-    // the process could lose play, so it goes on, loudly (a start-time call only; not seen in the lab)
-    if (world_started()) return cannot_stop();
-    // a stop under way already (another service): it ends the process within its bound
-    if (kiln::boot::can_stop_start(g_api))
-        for (;;) Sleep(1000);
-    // an older kiln.boot without stop_start: the same by hand (no boot.json stop record, no progress.json "failed")
-    if (g_client) show_box(&box);
-    const std::wstring log = kiln_path(KILN_PATH_LOGS, "kiln.log");  // the log line on disk first (its writer is a thread)
-    const ULONGLONG until = GetTickCount64() + 1500;
-    std::string tail(65536, '\0');
-    while (!log.empty() && GetTickCount64() < until) {
-        HANDLE f = CreateFileW(log.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
-                               FILE_ATTRIBUTE_NORMAL, nullptr);
-        bool found = false;
-        if (f != INVALID_HANDLE_VALUE) {
-            LARGE_INTEGER size{};
-            GetFileSizeEx(f, &size);
-            LARGE_INTEGER at{};
-            at.QuadPart = size.QuadPart > static_cast<LONGLONG>(tail.size()) ? size.QuadPart - static_cast<LONGLONG>(tail.size()) : 0;
-            SetFilePointerEx(f, at, nullptr, FILE_BEGIN);
-            DWORD got = 0;
-            if (ReadFile(f, tail.data(), static_cast<DWORD>(tail.size()), &got, nullptr))
-                found = std::string_view(tail.data(), got).find(head) != std::string_view::npos;
-            CloseHandle(f);
-        }
-        if (found) break;
-        Sleep(10);
-    }
-    TerminateProcess(GetCurrentProcess(), KILN_KNOW_ROSTER_EXIT_CODE);
-    for (;;) Sleep(1000);
 }
 
 KilnResult KILN_CALL roster_world(uint32_t kind, uint32_t* out_generation, uint32_t* out_readiness) {

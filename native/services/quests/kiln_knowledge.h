@@ -353,6 +353,14 @@ typedef struct KilnKnowledgeStatus {
  * kiln.knowledge cannot be made to stop: run one matched bundle. A lost page is computed again on a dedicated server
  * only; a game client keeps its ids "kept" until the game's own next evaluation.
  *
+ * Since 0.2.0-dev.29 the start stops the same way when the WHOLE build of the mods' native quests, knowledge and NPCs
+ * fails and nothing of it is served, while at least one enabled mod ships such content: reading the mods' files
+ * failed, the build threw, the shared resources did not build (the manifest's "failed"), kiln.assets refused the built
+ * pack or is not there, or the hook on the game's resource start (assets/ResourceInit) is not there. Its state file is
+ * kiln/state/content-refused.json (schema/state-content-refused.schema.json; moved to content-refused.last.json at the
+ * next start), its exit code KILN_KNOW_CONTENT_EXIT_CODE (a Linux parent under Wine sees 3). One mod's own errors
+ * never stop the start: that mod is loaded without its native content, as before.
+ *
  * world_kind: KILN_WORLD_SERVER (0, this process's server world, a hosting client's included) or KILN_WORLD_CLIENT
  * (2, this process's client world). Prediction (1) and any other value: KILN_ERR_INVALID_ARGUMENT. A generation is
  * the core session's counter of that kind (KilnSessionInfo.sessions[kind]); 0 is no token, and is
@@ -373,6 +381,7 @@ typedef struct KilnKnowledgeStatus {
  *   registry's layout did not resolve, feature quests.npc). out->size smaller than the struct: INVALID_ARGUMENT. */
 #define KILN_NPC_UNKNOWN_ID 7u /* npc_unlock_at's readiness for an id the snapshot does not have (not a capacity readiness) */
 #define KILN_KNOW_ROSTER_EXIT_CODE 0x4B02u /* the start stopped: the mods' roster cannot be held (a Unix wrapper sees 2) */
+#define KILN_KNOW_CONTENT_EXIT_CODE 0x4B03u /* the start stopped: the mods' native quests and NPCs could not be built at all (a Unix wrapper sees 3) */
 
 typedef struct KilnNpcUnlockReply {
     uint32_t size;              /* set by the caller: sizeof(KilnNpcUnlockReply) */

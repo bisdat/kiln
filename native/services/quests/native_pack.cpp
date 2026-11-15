@@ -7,9 +7,16 @@
 // yet; on a client whose service was up before Kiln loaded, in on_ready). Every reader in the game goes through the
 // resource service's slots (key -> handle -> data), which kiln.assets answers: the registries keep the handle and ask
 // for the data when their world loads (docs/re/quests.md, "R4").
+//
+// When the WHOLE build fails, so that nothing of the mods' native content is served (reading their files fails, the
+// build throws, the shared resources do not build, kiln.assets refuses the pack or is not there, the hook on
+// ResourceInit is not there), the start stops before any world loads (refuse_start, StartStop::Content), as long as an
+// enabled mod ships such content: a world loaded without it drops the mods' progress at its next save. One mod's own
+// errors (its manifest entry ok: false) leave that mod out, and the start goes on (docs/kiln/services/npcs.md).
 #include <windows.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <filesystem>
 #include <set>
@@ -23,6 +30,7 @@
 
 #include "knowledge_internal.h"
 #include "questpack.h"
+#include "start_stop.h"
 #include "kiln_boot_collector.hpp"
 #include "kiln_hook.hpp"
 #include "services/kiln_assets.h"
@@ -41,6 +49,20 @@ std::string g_manifest = "{\"mods\":[],\"errors\":[]}";
 std::unordered_map<std::string, uint32_t> g_names;  // "<mod>:<name>" (lower case) -> knowledge id
 kiln::RawHook g_init_hook;
 const KilnAssetsApi* A = nullptr;
+
+// kiln/control/knowledge.fail-build (labs and tests only, never needed in play; read once at the start, loud while
+// present): one kind of whole-build failure without a broken game. Its first word: read (reading the mods' files
+// throws), compile (the build throws), shared (the build cannot read the game's GameKnowledgeResource, so the shared
+// resources do not build), assets (the built pack is not given to kiln.assets, as when it refuses), hook (the hook on
+// ResourceInit is not installed), late (the build serves as usual; 30 steps after the server world's first one the
+// stop is asked for, which must not end the process). Each stops the start only when a mod ships such content, as the
+// real failure does.
+enum class Fail : uint8_t { None, Read, Compile, Shared, Assets, Hook, Late };
+Fail g_fail = Fail::None;
+const std::string kFailSwitch = "lab switch kiln/control/knowledge.fail-build";
+std::string g_no_hook;              // why the hook on ResourceInit is not there: nothing builds the pack at the resource start
+std::vector<std::string> g_served;  // the mods whose content the build served (under g_mu)
+std::atomic<uint32_t> g_late_posts{0};
 
 std::wstring widen(const std::string& s) {
     if (s.empty()) return {};
@@ -205,8 +227,20 @@ qb::ojson npcs_from_blocks(const std::string& mod, const std::vector<qb::ojson>&
 // Every enabled mod of the load order with a quests/ folder, as kiln.assets finds its assets.json. `boot`: a boot generation's prepare
 // (chapter 08): a mod it excludes is left out, and each mod's OnBoot documents (the quests file's format) follow its own files and blocks,
 // before what its code defined at an earlier start.
-void collect_mods(std::vector<qb::ModInput>* mods, bool client, const kiln::boot::Input* boot = nullptr) {
+// A mod's input holds native quests, knowledge or NPCs: a document with a "knowledge", "quests", "dialogues" or "npcs"
+// entry that is not empty. An input without (no files, empty files) never stops the start.
+bool ships(const qb::ModInput& m) {
+    for (const qb::ojson& d : m.documents)
+        if (d.is_object())
+            for (const char* k : {"knowledge", "quests", "dialogues", "npcs"})
+                if (d.contains(k) && (d[k].is_object() || d[k].is_array()) && !d[k].empty()) return true;
+    return false;
+}
+
+// `reading`: the id of the mod being read once it has files of such content (a throw names it).
+void collect_mods(std::vector<qb::ModInput>* mods, bool client, const kiln::boot::Input* boot = nullptr, std::string* reading = nullptr) {
     auto one = [&](const std::string& dir) {
+        if (reading) reading->clear();
         std::error_code ec;
         const fs::path base(widen(dir));
         const fs::path qdir = base / L"quests";
@@ -304,6 +338,7 @@ void collect_mods(std::vector<qb::ModInput>* mods, bool client, const kiln::boot
         if (!fs::is_directory(qdir, ec) && !fs::exists(code, ec) && !fs::exists(npc_blocks, ec) && block_npcs.empty() && block_quests.empty() &&
             boot_docs.empty())
             return;
+        if (reading) *reading = mf["id"].get<std::string>();
         const std::string side = mf.value("side", "both");
         if ((side == "server" && client) || (side == "client" && !client)) return;
         qb::ModInput m;
@@ -366,6 +401,7 @@ void collect_mods(std::vector<qb::ModInput>* mods, bool client, const kiln::boot
         const qb::ojson cook = qb::ojson::parse(read_file(base / L"assets" / L"cook.json"), nullptr, false, true);
         if (!cook.is_discarded() && cook.is_object()) m.guid_namespace = cook.value("guidNamespace", "");
         else if (fs::exists(base / L"assets" / L"cook.json", ec)) strict("assets/cook.json", "not valid JSON (its \"guidNamespace\" names the mod's GUIDs)");
+        if (g_fail == Fail::Read && ships(m)) throw std::runtime_error(kFailSwitch + ": read");
         mods->push_back(std::move(m));
     };
     const auto* prof = static_cast<const KilnProfileApi*>(g_api->service(KilnStr{"kiln.profile", 12}, 1));
@@ -395,6 +431,11 @@ void collect_mods(std::vector<qb::ModInput>* mods, bool client, const kiln::boot
 
 bool put_resource(const char* what, const qb::Guid& g, uint32_t type, const qb::Bytes& data, uint32_t flags) {
     if (data.empty()) return true;
+    if (g_fail == Fail::Assets) {
+        KW("native: %s (%s, %zu bytes): not given to kiln.assets (%s: assets), as when it refuses it", what, qb::guid_text(g).c_str(),
+           data.size(), kFailSwitch.c_str());
+        return false;
+    }
     KilnAssetKey k{};
     std::memcpy(k.guid, g.b, 16);
     k.type = type;
@@ -417,17 +458,60 @@ struct LeftOut {
     std::string mod, why;
 };
 
-// The build could not hold the mods' roster: the caller stops the start once g_mu is released (roster_refuse_start).
-struct RosterStop {
+// The start must not go on: the caller stops it once g_mu is released (refuse_start).
+struct Stop {
     bool set = false;
+    StartStop kind = StartStop::Roster;
     std::string why;
     std::vector<std::string> mods;
 };
 
+// The mods that ship native quests, knowledge or NPCs (ships). An empty input never stops anything.
+std::vector<std::string> shipping(const std::vector<qb::ModInput>& mods) {
+    std::vector<std::string> ids;
+    for (const qb::ModInput& m : mods)
+        if (ships(m)) ids.push_back(m.id);
+    return ids;
+}
+// The mods whose content the build was to serve: the manifest's entries that came out whole (ok).
+std::vector<std::string> built(const qb::ojson& manifest_mods) {
+    std::vector<std::string> ids;
+    for (const auto& e : manifest_mods)
+        if (e.is_object() && e.value("ok", false) && e.contains("id") && e["id"].is_string()) ids.push_back(e["id"].get<std::string>());
+    return ids;
+}
+// The whole build failed and nothing of the mods' native content is served: the start stops when `mods` (those whose
+// content is involved) is not empty. A stop set first (the roster's) stays.
+void whole_stop(Stop* stop, const std::string& why, const std::vector<std::string>& mods) {
+    if (!stop || stop->set || mods.empty()) return;
+    *stop = Stop{true, StartStop::Content, why, mods};
+}
+bool client_side() {
+    KilnBuildInfo bi{sizeof bi};
+    g_api->build_info(&bi);
+    return bi.side == KILN_SIDE_CLIENT;
+}
+// Without a boot generation, for a stop that comes instead of the build: the mods that ship such content (a read that
+// throws keeps the mods read before it and names the one it was reading).
+std::vector<std::string> shipping_now() {
+    std::vector<qb::ModInput> mods;
+    std::string reading;
+    try {
+        collect_mods(&mods, client_side(), nullptr, &reading);
+    } catch (const std::exception& e) {
+        KW("native: reading the mods' quest files failed: %s", e.what());
+        std::vector<std::string> ids = shipping(mods);
+        if (!reading.empty() && std::find(ids.begin(), ids.end(), reading) == ids.end()) ids.push_back(reading);
+        return ids;
+    }
+    return shipping(mods);
+}
+
 // `left_out` (a boot generation): the required mods of `required` the build could not build whole. `stop`: set when
-// the roster was refused (then nothing is served and the start must not go on).
+// the roster was refused, or when the whole build failed while a mod ships such content (whole_stop): then nothing is
+// served and the start must not go on. One mod's own errors set neither.
 void build_locked(const std::vector<qb::ModInput>* prepared = nullptr, const std::set<std::string>* required = nullptr,
-                  std::vector<LeftOut>* left_out = nullptr, RosterStop* stop = nullptr) {
+                  std::vector<LeftOut>* left_out = nullptr, Stop* stop = nullptr) {
     if (g_built) return;
     g_built = true;
     KilnBuildInfo bi{sizeof bi};
@@ -445,10 +529,15 @@ void build_locked(const std::vector<qb::ModInput>* prepared = nullptr, const std
         mods = plan->mods;
         required = &plan->required;
     } else {
+        std::string reading;
         try {
-            collect_mods(&mods, client);  // the mods' files: nothing they hold may throw out of the game's resource init
+            collect_mods(&mods, client, nullptr, &reading);  // the mods' files: nothing they hold may throw out of the game's resource init
         } catch (const std::exception& e) {
             KW("native: reading the mods' quest files failed: %s", e.what());
+            // nothing is built: the whole build failed (the mods read before the throw and the one it was reading)
+            std::vector<std::string> who = shipping(mods);
+            if (!reading.empty() && std::find(who.begin(), who.end(), reading) == who.end()) who.push_back(reading);
+            whole_stop(stop, std::string("reading the mods' quest files failed: ") + e.what(), who);
             return;
         }
     }
@@ -470,16 +559,21 @@ void build_locked(const std::vector<qb::ModInput>* prepared = nullptr, const std
         }
     };
     qb::GameData game;
-    game.read = &res_read;
+    if (g_fail == Fail::Shared)  // the lab switch: the game's knowledge resource cannot be read, so the shared resources do not build
+        game.read = [](const qb::Guid& g, uint32_t type, const uint8_t** d, size_t* n) { return type != qb::kTypeKnowledge && res_read(g, type, d, n); };
+    else
+        game.read = &res_read;
     game.template_by_name = &template_by_name;
     game.roster_max = &roster_max;  // 64, or 128 with the second unlock page (installed only when a roster needs it)
     qb::PackOut p;
     try {
+        if (g_fail == Fail::Compile) throw std::runtime_error(kFailSwitch + ": compile");
         p = qb::compile_pack(mods, game);
     } catch (const std::exception& e) {
         KW("native: the build failed: %s", e.what());
         whole = std::string("the build of the mods' native quests failed: ") + e.what();
         required_left_out(qb::ojson::array());
+        whole_stop(stop, whole, shipping(mods));
         return;
     }
     for (const std::string& e : p.errors) KW("native: %s", e.c_str());
@@ -488,9 +582,13 @@ void build_locked(const std::vector<qb::ModInput>* prepared = nullptr, const std
         stop->why = p.roster_refusal;
         stop->mods = p.roster_mods;
     }
-    // compile_pack's fail(): the shared resources did not build, nothing is served (a mod's own errors say ok: false)
-    if (p.manifest.contains("failed") && p.manifest["failed"].is_string()) whole = "the mods' native quests are not served: " + p.manifest["failed"].get<std::string>();
     const qb::ojson manifest_mods = p.manifest.contains("mods") ? p.manifest["mods"] : qb::ojson::array();
+    // compile_pack's fail(): the shared resources did not build, nothing is served (a mod's own errors say ok: false):
+    // the start stops, naming the mods it was to serve (a roster that cannot be held stops as the roster, set above)
+    if (p.manifest.contains("failed") && p.manifest["failed"].is_string()) {
+        whole = "the mods' native quests are not served: " + p.manifest["failed"].get<std::string>();
+        whole_stop(stop, whole, built(manifest_mods));
+    }
     struct Said {
         decltype(required_left_out)& f;
         const qb::ojson& m;
@@ -513,6 +611,9 @@ void build_locked(const std::vector<qb::ModInput>* prepared = nullptr, const std
     for (const qb::TemplateOut& t : p.templates)
         if (!put_resource(t.name.c_str(), t.guid, qb::kTypeTemplate, t.data, t.is_new ? KILN_ASSET_PUT_NEW : KILN_ASSET_PUT_OVERRIDE) && whole.empty())
             whole = "kiln.assets refused the built template " + t.name;
+    // a refused part: the shared pack is not served as it was built (every mod's knowledge, journal and NPCs are in it)
+    if (!whole.empty()) whole_stop(stop, whole, built(manifest_mods));
+    else g_served = built(manifest_mods);
     // names for Knowledge.Resolve: "<mod>:<name>"
     for (const auto& m : p.manifest["mods"]) {
         if (!m.value("ok", false)) continue;
@@ -561,22 +662,27 @@ void build_locked(const std::vector<qb::ModInput>* prepared = nullptr, const std
 
 void build_once() {
     std::vector<LeftOut> left_out;
-    RosterStop stop;
+    Stop stop;
     {
         std::lock_guard lock(g_mu);
         if (!A) A = static_cast<const KilnAssetsApi*>(g_api->service(kstr(KILN_ASSETS_SERVICE), 1));
         if (!A || A->header.size < sizeof(KilnAssetsApi) || !A->resource_data || !A->resource_put) {
-            if (!g_built) KW("native: kiln.assets is not available: mods' native quests and NPCs are off");
-            const auto* plan = g_boot && !g_built ? static_cast<const BootPlan*>(kiln::boot::published(g_api, "knowledge")) : nullptr;
-            if (plan)
-                for (const qb::ModInput& m : plan->mods)
-                    if (plan->required.count(m.id)) left_out.push_back({m.id, "kiln.assets is not available: native quests and NPCs are off"});
+            if (!g_built) {
+                KW("native: kiln.assets is not available: mods' native quests and NPCs are off");
+                const auto* plan = g_boot ? static_cast<const BootPlan*>(kiln::boot::published(g_api, "knowledge")) : nullptr;
+                if (plan)
+                    for (const qb::ModInput& m : plan->mods)
+                        if (plan->required.count(m.id)) left_out.push_back({m.id, "kiln.assets is not available: native quests and NPCs are off"});
+                // nothing can be served: the whole build failed
+                whole_stop(&stop, "kiln.assets is not available (the mods' native quests and NPCs are served through it)",
+                           plan ? shipping(plan->mods) : g_boot ? std::vector<std::string>() : shipping_now());
+            }
             g_built = true;
         } else {
             build_locked(nullptr, nullptr, &left_out, &stop);
         }
     }
-    if (stop.set) roster_refuse_start(stop.why, stop.mods);  // before any world loads; returns only after a world ran
+    if (stop.set) refuse_start(stop.kind, stop.why, stop.mods);  // before any world loads; returns only after a world ran
     // a required boot mod whose native data the build left out: kiln.boot stops the start (the call does not return then)
     for (const LeftOut& l : left_out) kiln::boot::activation_fault(g_api, g_owner, l.mod, "knowledge", "", "kiln.knowledge: " + l.why);
 }
@@ -587,12 +693,76 @@ char __fastcall hk_resource_init(uintptr_t S, void* cfg) {
     return ok;
 }
 
+// The lab switch's word (kiln/control/knowledge.fail-build), logged at every start while the file is there.
+Fail read_fail_switch() {
+    const std::string dir = path_of(KILN_PATH_CONTROL);
+    if (dir.empty()) return Fail::None;
+    std::ifstream f(fs::path(widen(dir)) / L"knowledge.fail-build", std::ios::binary);
+    if (!f) return Fail::None;
+    std::string word;
+    f >> word;
+    std::transform(word.begin(), word.end(), word.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    static const struct {
+        const char* word;
+        Fail fail;
+        const char* does;
+    } kWords[] = {
+        {"read", Fail::Read, "reading the mods' quest files throws, so the start stops when a mod ships native quests or NPCs"},
+        {"compile", Fail::Compile, "the build of the mods' native quests throws, so the start stops when a mod ships them"},
+        {"shared", Fail::Shared, "the build cannot read the game's GameKnowledgeResource, so the shared resources do not build "
+                                 "and the start stops when a mod ships native quests or NPCs"},
+        {"assets", Fail::Assets, "the built pack is not given to kiln.assets, as when it refuses it, so the start stops when a mod "
+                                 "ships native quests or NPCs"},
+        {"hook", Fail::Hook, "the hook on the game's resource start (assets/ResourceInit) is not installed, so the start stops "
+                             "when a mod ships native quests or NPCs"},
+        {"late", Fail::Late, "the build serves as usual; 30 steps after the server world's first one the stop is asked for, "
+                             "which must not end the process"},
+    };
+    for (const auto& w : kWords)
+        if (word == w.word) {
+            KW("native: LAB SWITCH kiln/control/knowledge.fail-build is present (%s): %s. Delete the file to play", w.word, w.does);
+            return w.fail;
+        }
+    KW("native: kiln/control/knowledge.fail-build is present but says \"%s\", not read, compile, shared, assets, hook or late: "
+       "IGNORED; delete the file",
+       word.c_str());
+    return Fail::None;
+}
+
+// The lab switch "late": 30 steps after the server world's first one (a world runs), the stop a whole failure asks for.
+// refuse_start must log that the start could not be stopped and return: ending the process now could lose play.
+void KILN_CALL on_late(const KilnTickInfo*, void*) {
+    if (g_late_posts.fetch_add(1) != 30) return;
+    std::vector<std::string> who;
+    {
+        std::lock_guard lock(g_mu);
+        who = g_served;
+    }
+    if (who.empty()) return;  // nothing was served: nothing to stop for
+    KW("native: %s: late: the stop of a whole-build failure is asked for after a world ran", kFailSwitch.c_str());
+    refuse_start(StartStop::Content, kFailSwitch + ": late: a whole-build failure after a world ran", who);
+}
+
 }  // namespace
 
 void native_pack_install() {
+    g_fail = read_fail_switch();
+    g_no_hook.clear();
+    g_served.clear();
+    g_late_posts = 0;
+    if (g_fail == Fail::Late && g_api->size >= offsetof(KilnApi, subscribe_world_tick) + sizeof(void*)) {
+        KilnHandle h = 0;
+        g_api->subscribe_world_tick(g_owner, KILN_WORLD_SERVER, KILN_TICK_POST, &on_late, nullptr, &h);
+    }
     uintptr_t a = 0;
     if (g_api->symbol(kstr("assets/ResourceInit"), &a) != KILN_OK || !a) {
         KW("native: assets/ResourceInit is not resolved: mods' native quests and NPCs are off");
+        g_no_hook = "assets/ResourceInit is not resolved on this game build, so nothing builds them at the game's resource start";
+        return;
+    }
+    if (g_fail == Fail::Hook) {
+        KW("native: hook on ResourceInit failed: mods' native quests and NPCs are off (%s: hook)", kFailSwitch.c_str());
+        g_no_hook = "the hook on the game's resource start (assets/ResourceInit) was not installed (" + kFailSwitch + ": hook)";
         return;
     }
     // before kiln.assets' link (as the old layered hook ran): its post-init code (the resource service it serves our
@@ -600,6 +770,8 @@ void native_pack_install() {
     if (!g_init_hook.install(g_api, g_owner, a, reinterpret_cast<void*>(&hk_resource_init), "assets/ResourceInit", 0,
                              "kiln.assets")) {
         KW("native: hook on ResourceInit failed: mods' native quests and NPCs are off");
+        g_no_hook = std::string("the hook on the game's resource start (assets/ResourceInit) could not be installed (") +
+                    (g_init_hook.error() ? g_init_hook.error() : "refused") + ")";
         return;
     }
 }
@@ -641,14 +813,23 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
     qb::parse_guid(qb::kGuidKnowledge, &gk);
     const uint8_t* p = nullptr;
     size_t n = 0;
-    if (!g_built && A && A->header.size >= sizeof(KilnAssetsApi) && A->resource_data && res_read(gk, qb::kTypeKnowledge, &p, &n)) {
+    const bool up = !g_built && A && A->header.size >= sizeof(KilnAssetsApi) && A->resource_data && res_read(gk, qb::kTypeKnowledge, &p, &n);
+    if (!up && !g_built && !g_no_hook.empty()) {  // nothing will build these mods' pack at the game's resource start
+        const std::vector<std::string> who = shipping(plan->mods);
+        if (!who.empty()) {  // before any world loads; does not return (the lock goes first)
+            g_mu.unlock();
+            refuse_start(StartStop::Content, g_no_hook, who);
+            g_mu.lock();  // only when a world ran already: the mods' native content stays off
+        }
+    }
+    if (up) {
         std::vector<LeftOut> left_out;
-        RosterStop stop;
+        Stop stop;
         build_locked(&plan->mods, &plan->required, &left_out, &stop);
         plan->built_early = true;
         if (stop.set) {  // before any world loads; does not return (the lock goes first)
             g_mu.unlock();
-            roster_refuse_start(stop.why, stop.mods);
+            refuse_start(stop.kind, stop.why, stop.mods);
             g_mu.lock();  // only when a world ran already (not at a boot generation's prepare): the build stays refused
         }
         if (!left_out.empty()) {  // built in prepare: a required mod the build left out is refused here (destroy takes the build back)
@@ -673,19 +854,26 @@ bool native_pack_boot() {
 
 void native_pack_ready() {
     // A client whose resource service was up before Kiln loaded: the hook will not fire.
-    RosterStop stop;
+    Stop stop;
     {
         std::lock_guard lock(g_mu);
         if (g_built || g_boot) return;  // a boot generation builds in its prepare or at the hook
         if (!A) A = static_cast<const KilnAssetsApi*>(g_api->service(kstr(KILN_ASSETS_SERVICE), 1));
-        if (!A || A->header.size < sizeof(KilnAssetsApi) || !A->resource_data) return;
-        qb::Guid gk;
-        qb::parse_guid(qb::kGuidKnowledge, &gk);
-        const uint8_t* p = nullptr;
-        size_t n = 0;
-        if (res_read(gk, qb::kTypeKnowledge, &p, &n)) build_locked(nullptr, nullptr, nullptr, &stop);
+        bool up = false;
+        if (A && A->header.size >= sizeof(KilnAssetsApi) && A->resource_data) {
+            qb::Guid gk;
+            qb::parse_guid(qb::kGuidKnowledge, &gk);
+            const uint8_t* p = nullptr;
+            size_t n = 0;
+            up = res_read(gk, qb::kTypeKnowledge, &p, &n);
+            if (up) build_locked(nullptr, nullptr, nullptr, &stop);
+        }
+        if (!up && !g_no_hook.empty()) {  // nothing will build the mods' pack at the game's resource start: the whole build failed
+            g_built = true;
+            whole_stop(&stop, g_no_hook, shipping_now());
+        }
     }
-    if (stop.set) roster_refuse_start(stop.why, stop.mods);  // before any world loads; returns only after a world ran
+    if (stop.set) refuse_start(stop.kind, stop.why, stop.mods);  // before any world loads; returns only after a world ran
 }
 
 std::string native_pack_manifest() {
