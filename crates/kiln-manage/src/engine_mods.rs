@@ -2015,6 +2015,7 @@ pub(crate) fn same_mod_elsewhere(root: &Path, kind: ModKind, src: &Path, dst: &P
 pub fn place(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Path) -> Result<PlaceReport> {
     let view = crate::own_loaders::ProfileView::of_profile(profile).with_library(dirs, profile);
     let loaders = crate::own_loaders::find(game_dir, Some(&view));
+    crate::own_loaders::check_runtime_eml_loader(&loaders, &view.eml_runtime)?;
     let mut rep = place_with(dirs, profile, game_dir, &loaders)?;
     rep.own_loaders = crate::own_loaders::notes(game_dir, &loaders, Some(&view));
     Ok(rep)

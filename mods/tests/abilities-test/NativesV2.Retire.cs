@@ -8,9 +8,10 @@
 // (abilities.natives.ecs) off for the rest of that world, so the bridge's rows (natives-gen-test, blocks-abilities-test's
 // Run rows, FrostMark) run in another start, with the pin as the game sets it (docs/kiln/services/abilities.md).
 // The probe's count of calls off the tick thread is the game's split of impact_simulation's slice over its threads, which
-// depends on what else the world holds: with abilities-test and natives-helper alone, two starts on the merged dev.29 tree
-// put all 12 probe calls on the world thread (while a Hold handler ran on a worker in the same window); with
-// blocks-abilities-test also loaded (its scenarios not started) 12 of 12 ran on workers, as in round 3. Run A loads it.
+// depends on how much Impact work the world holds: with abilities-test and natives-helper alone, two starts on the merged
+// dev.29 tree put all 12 probe calls on the world thread (while a Hold handler ran on a worker in the same window); with
+// blocks-abilities-test running beside them (its scenarios spawn characters, enemies and hits) 12 of 12 ran on workers, as
+// in round 3. Run A loads it; the row's line names the mods loaded.
 // The world-stop row hands off to the shell that runs the lab (data/stop-request): its lines are read from kiln.log.
 using Kiln;
 using Kiln.Testing;
@@ -74,7 +75,9 @@ public sealed partial class AbilitiesTestMod
         var reads = parts.Length > 2 ? int.Parse(parts[2]) : -1;
         if (unpin && LabSystems.Forced)
         {
-            Check(calls == 12 && off > 0, $"with impact_simulation unpinned in the forced window, sync native handlers run on the game's workers: {off} of {calls} call(s) off the tick thread");
+            // the game's split of impact_simulation's slice depends on what the world holds: the roster goes with the count
+            Check(calls == 12 && off > 0, $"with impact_simulation unpinned in the forced window, sync native handlers run on the game's workers: {off} of {calls} call(s) off the tick thread; " +
+                $"mods loaded: {string.Join(", ", Kiln.Mods.All.Where(m => m.IsLoaded).Select(m => m.Id))}");
             // the bridge's serial condition: off for this world with its reason, every TryRead refused, said once in kiln.log
             var row = Capabilities.Get("abilities.natives.ecs");
             var lines = LogCount("NativeContext's reads and writes of other entities are off for this world: impact_simulation does not run serially");
@@ -82,7 +85,8 @@ public sealed partial class AbilitiesTestMod
                 $"with the pin cleared, the ECS bridge is off for this world: {reads} of {calls} TryRead(s) answered, abilities.natives.ecs " +
                 $"{row.State} ({row.ReasonText}), {lines} kiln.log line(s) saying so");
         }
-        else Info($"probe: {off} of {calls} call(s) off the tick thread (unpin {unpin}, forced {LabSystems.Forced})");
+        else Info($"probe: {off} of {calls} call(s) off the tick thread (unpin {unpin}, forced {LabSystems.Forced}); mods loaded: " +
+                  string.Join(", ", Kiln.Mods.All.Where(m => m.IsLoaded).Select(m => m.Id)));
     }
 
     // op "unload" or "reload": requested while Hold's handler is inside; the retirement waits for it.

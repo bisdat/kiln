@@ -195,8 +195,8 @@ merges the mods' blocks at boot, so a table published after it would have missed
 | `audio.relay` | managed, session | Kiln.Audio, at its start (the first service tick) and every 25 steps | server side: a sound, track or voice line reaches someone (`Sound.Available`, `Voiceover.Available` there): a Kiln client with the `kiln:audio` channel is connected, or this host's own client plays. Pending while nobody listens; unavailable without the channel (`needs kiln.net`); `wrong-side` in a client that only joined |
 | `vfx.relay` | managed, session | Kiln.Vfx, likewise | the same for `Vfx.Available` and the `kiln:vfx` channel |
 | `screen.relay` | managed, session | Kiln.Vfx, likewise | server side: the `kiln:screen` channel is open (`ScreenEffects.Available` there) |
-| `gameplay.entity_events` | managed, static | Kiln.Gameplay | the entity lifecycle events work (`Gameplay.EntityEventsAvailable`): needs kiln.gameplay and `gameplay.entities` |
-| `gameplay.spawn_replace` | managed, static | Kiln.Gameplay | natural spawns can be replaced (`Gameplay.ReplaceNaturalSpawns`): needs kiln.gameplay with the replacement function, `gameplay.spawn`, and the random spawners' hook in (`faulted` when it is off) |
+| `gameplay.entity_events` | native, static API alias | kiln.gameplay (managed fallback on older tables) | lifecycle demand can be accepted, including pending (`Gameplay.EntityEventsAvailable`); see `gameplay.entities_hooks` for delivery state |
+| `gameplay.spawn_replace` | native, static API alias | kiln.gameplay (managed fallback on older tables) | natural-spawn replacement registration is supported; see `gameplay.spawn_hooks` for activation/refusal |
 | `gameplay.*` (ten), `build.*` (five), `skills.functions`, `skills.login_guard`, `skills.shadow`, `skills.tree_load` | sigdb features | core; Kiln.Gameplay, Kiln.Build and Kiln.Skills lower theirs when their service is not loaded | what kiln.gameplay, kiln.build and kiln.skills serve |
 | `content.references` | managed, static | Kiln.Content | this kiln.content sets references (`ContentEntry.SetRef`, `SetPerks`; table v4) |
 | `content.ready` | managed, session | Kiln.Content, at its start and every 25 steps | the registries are loaded and the data packs applied (`Content.Ready`); unavailable without kiln.content |
@@ -367,13 +367,23 @@ installation: pending with "resolved, not installed: no mod asked", pending with
 installed, or unavailable with the refusal reason. Session rows must not be manifest feature requirements.
 The existing static API aliases `gameplay.entity_events` and `gameplay.spawn_replace` remain available while their
 group resolves and lower on permanent refusal; they do not become pending and block admission of old manifests.
-The four new groups install on pre-world demand or a checked safe Pre, with at most two target attempts per tick
-and three attempts on thread-check refusal. The build-piece group retains its no-world/last-stop policy.
-Native `request_hooks(owner, mask)` is appended after `request_build`; the latter remains unchanged. Managed
+All five groups install on pre-world demand or checked safe Pre, sharing at most two target attempts per tick
+and three attempts on thread-check refusal; after the third the row stays pending ("waiting for the next no-world
+moment") and the group installs when no world runs (a client's menu; a server's next start). With no world running, a
+thread-check refusal installs unchecked at once. Build's five targets are behind the other five: three Pres alone,
+five Pres for simultaneous all-group demand without retries. Refused partial groups stay inert. No announcement from a demand-aware Host triggers legacy all-group installation: at the first
+client menu UI tick with no world, or in one batch at the first eligible world-start Pre; retries are paced. A legacy status probe before any announcement also requests all groups;
+modern announced-host status probes preserve idle groups.
+Native `request_hooks(owner, mask)` is appended after `request_build`; build now uses the same checked path. Mask 0 announces the new Host before scanning. Managed
 reference preflight requests all groups, conservatively including crafting-only and shipped-helper references.
 See [gameplay](gameplay.md#craft-terraform-natural-spawn-and-entity-hook-demand) for consumers and pending-call behavior.
 
-Pre-world reference demand includes the indirect consumers: `Kiln.Creatures` -> spawn hooks; `Kiln.Rules` -> build
-and terraform hooks; `Kiln.Quests` -> craft, build and terraform hooks. Direct `Kiln.Gameplay` references request
+Pre-world reference demand includes the indirect consumers: `Kiln.Creatures` -> spawn hooks; `Kiln.Quests` -> craft,
+build and terraform hooks (`Kiln.Rules` -> none: it asks for build and terraform when a rule set keeping builds outside
+bases is applied). Direct `Kiln.Gameplay` references request
 all groups. `Kiln.Blocks` and admitted `blocks/` data packs request build/craft/terraform/spawn. The host requests only additional group bits as helper assemblies load; its 136-byte table fallback
 continues calling request_build when needed, while the older service owns the other startup hooks.
+
+Admitted `quests/` packs request craft/build/terraform (mask 7). Unreadable or over-budget metadata requests all
+groups; reflected/path-loaded use outside the inspected closure requests at the first API call. The Host caches
+metadata across mods within a bounded pass and logs its assemblies-read count and elapsed milliseconds.

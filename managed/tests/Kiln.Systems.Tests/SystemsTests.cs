@@ -515,6 +515,43 @@ public sealed unsafe class SystemsTests
         Assert.Equal(82, BitConverter.ToInt32(events[3].Result.After.Span[8..]));
     }
 
+    [Theory]
+    [InlineData(false)]  // the next poll is in the menu, after stop but before a new world starts
+    [InlineData(true)]   // rapid rehost: B uses A's entity ids and step before the next poll
+    public void Final_worker_writes_are_discarded_at_server_stop(bool rehostBeforePoll)
+    {
+        using var w = new FakeWorld();
+        var events = new List<ComponentWrittenEvent>();
+        using var sub = Events.On<ComponentWrittenEvent>(events.Add);
+        var wrap = Systems.Wrap("fuel_setup").Wrap!;
+        wrap.BeforeEach((ref EntityView e) => e.Attribute("Fuel")[0] += 1);
+        var worker = new Thread(() => w.Call(w.Wraps[0]));
+        worker.Start();
+        Assert.True(worker.Join(5000));  // the engine's drained final step, with no next service tick
+        Assert.Equal(3, WrapWrites.Waiting);
+        Assert.Empty(events);
+        w.Session++;  // native game_programs_world_event increments on STOPPING, even in the menu
+        if (!rehostBeforePoll)
+        {
+            ProgramWrap.Poll();
+            Assert.Empty(events);
+            Assert.Equal(0, WrapWrites.Waiting);
+        }
+        w.Session++;  // B starts
+        for (var row = 0; row < 3; ++row) *(int*)(w.Fuel + 16 * row + 8) = 1000 * (row + 1);
+        w.Call(w.Wraps[0]);  // same step, entity ids and component; only B's writes may join this group
+        ProgramWrap.Poll();
+        Assert.Equal(3, events.Count);
+        for (var row = 0; row < 3; ++row)
+        {
+            Assert.Equal(1000 * (row + 1), BitConverter.ToInt32(events[row].Result.Before.Span[8..]));
+            Assert.Equal(1000 * (row + 1) + 1, BitConverter.ToInt32(events[row].Result.After.Span[8..]));
+        }
+        Assert.Equal(0, WrapWrites.Waiting);
+        ProgramWrap.Poll();
+        Assert.Equal(3, events.Count);
+    }
+
     [Fact]
     public void Entity_views_refuse_what_the_program_does_not_list_and_copy_nothing_without_listeners()
     {

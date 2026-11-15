@@ -389,7 +389,8 @@ public static unsafe class EcsPrograms
                 if (kind == HashKind)
                     slot = unchecked((int)((delegate* unmanaged[Cdecl]<NativeStr, uint>)Native->Prefix.ComponentHash)(str));
                 else
-                    slot = ((delegate* unmanaged[Cdecl]<ulong, int, NativeStr, int>)Native->Prefix.ProgramSlot)(Handle, kind, str);
+                    slot = ((delegate* unmanaged[Cdecl]<ulong, int, NativeStr, int>)Native->Prefix.ProgramSlot)(
+                        World == WorldKind.Server ? Handle : Handle & 0xFFUL, kind, str);
             }
             if ((kind is 0 or 1 or 2) && slot >= 0)   // an undeclared name throws in Declared: nothing to size or warn about
             {

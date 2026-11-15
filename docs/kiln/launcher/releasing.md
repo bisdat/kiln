@@ -189,7 +189,7 @@ Direct builds only (the Nexus Mods build has none, above).
   next Play (not a vanilla start) installs it first through the ordinary install: the same receipt and backups, the same
   refusals (the game running, Steam updating, a folder that is not Kiln's). When that fails, the start goes on with the
   Kiln the game has and says why. A test build itself keeps whatever the game has and offers its own newer Kiln as an
-  update. The first switch back of all goes to 0.2.0-dev.28, which has none of this: its Play keeps the beta's Kiln in
+  update. A release launcher offers only its shipped runtime as an ordinary update, even when a newer test runtime is cached. Other cached bundles remain selectable on Runtime. An unbundled release offers no automatic runtime update. The first switch back of all goes to 0.2.0-dev.28, which has none of this: its Play keeps the beta's Kiln in
   the game until the player installs dev.28's on Runtime (a dev.28 launcher with a dev.29 Kiln in the game is the case
   testers should report on).
 
@@ -197,12 +197,14 @@ Direct builds only (the Nexus Mods build has none, above).
 What a test build writes that a release build reads, and what the release does with it. "dev.28" is the release a
 first tester goes back to; the same rules hold for any release from dev.29 on, which also knows test builds. The copy
 (`<data>/snapshots/before-beta/`, `launcher/src-tauri/src/snapshot.rs`) is taken at the first start of a test build
-after a release build, before settings, profiles, kept-version recovery, updater state or background watchers may write. Every copied file is flushed before the staged folder is published; the build marker is written last. A failed copy or marker holds the launcher behind a blocking notice listing the reason and omitted files. The player may quit, or explicitly continue without a restore copy; that decision and its reasons are recorded in the marker and shown by the switch dialog. A completed copy survives a failed marker write and is reused, never replaced with beta-modified files. A switch back offers to put a whole copy back ("Put back my profiles
+after a release build, before settings, profiles, kept-version recovery, updater state or background watchers may write. Capture, startup recovery and restore hold the data-folder lock exclusively. Close another launcher using that folder before continuing. Restore keeps the lock through restart handoff or blocked recovery, and returns to shared access if the operation returns to the original session. Ordinary starts of the same build still share the folder when no startup work is needed. Every copied file is flushed before the staged folder is published; the build marker is written last. A failed copy or marker holds the launcher behind a blocking notice listing the reason and omitted files. The player may quit, or explicitly continue without a restore copy; that decision and its reasons are recorded in the marker and shown by the switch dialog. A completed copy survives a failed marker write and is reused, never replaced with beta-modified files. A switch back offers to put a whole copy back ("Put back my profiles
 and settings from before the beta"), at Restart now, before the release starts. No file a test build of dev.29 writes
 has a new format number, and no file the release reads became strict (checked against `2301cc5f`, the dev.28 release:
 `git diff 2301cc5f -- crates/kiln-manage/src launcher/src-tauri/src` adds `deny_unknown_fields` only to files that are
 new in dev.29), so the release reads all of it; the copy is there for what the player changed in the beta (and for later
 test builds that do change a format).
+
+From dev.29 onward, Clean up and ordinary removal count saved pre-beta profiles as package users, named `<profile> (before beta)`, until that snapshot is replaced. Restore checks every saved profile's Library references before replacing any files, including on interrupted-restore recovery. Missing packages must be reimported first. Dev.28 cannot protect these saved references during cleanup. Keep those packages if you use that legacy launcher before returning to the beta.
 
 | File | Written by | What the release (dev.28) does with what the test build wrote | In the copy |
 |---|---|---|---|
@@ -211,7 +213,7 @@ test builds that do change a format).
 | `<data>/profiles/<pid>/meta.json` | profiles | reads it: format 1, the same struct since dev.28 (a test build writes it durably, same shape); a mod version taken in the beta is an ordinary Library version | yes |
 | `<data>/profiles/<pid>/config/`, `data/` | the mods (their settings) | the mods' own files; left as they are | no |
 | Library entries `library/<kind>/<id>/<version>+<hash8>/` and their records | library | reads them (unchanged format); a version kept for a roll back is one more version there, and its Clean up may remove it (a test build then forgets it) | no (mods stay) |
-| `library/kiln-kept.json`, `library/kiln-kept/` | kept versions (new in dev.29) | does not read them; back on a test build, a kept entry that is gone is forgotten, a half-done change is finished or undone (`kept::recover`) | `kiln-kept.json`, when it was there |
+| `library/kiln-kept.json`, `library/kiln-kept/` | kept versions (new in dev.29) | does not read them; back on a test build, a kept entry that is gone is forgotten, a half-done change is finished or undone (`kept::recover`) | no. The live journal and its settings folders stay together. Old copies and restore stages also skip this journal |
 | `<data>/installs/*.json`, `<data>/runtime/*.zip` | games, shipped runtimes | read as before; both launchers' runtimes stay in the list | no |
 | `<data>/state/launcher-build.json`, `<data>/snapshots/before-beta/` | dev.29 (new) | does not read them | (the copy itself) |
 | `<game>/kiln/.install.json` (receipt) | install | reads it (format 1); its installer says `kiln-launcher <v> beta <n>` | no: Play installs the release's Kiln (dev.29 on; dev.28: Runtime) |

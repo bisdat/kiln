@@ -225,6 +225,21 @@ fn healthy_install_finds_nothing() {
     }
 }
 
+// The state files of Kiln's deliberate stops (roster, the mods' NPCs and quests not built) go into the zip whole, the
+// next start's .last copies too: a support thread can tell which stop it was (dev.29).
+#[test]
+fn stop_state_files_are_in_the_report() {
+    let f = Fx::healthy("stops");
+    let names = ["roster-refused.json", "content-refused.json", "content-refused.last.json"];
+    for n in names {
+        f.w(&format!("kiln/state/{n}"), br#"{"format":1,"refused":true,"exitCode":19203,"unixExitStatus":3,"mods":["cs-good"]}"#);
+    }
+    let r = build(&f.input());
+    for n in names {
+        assert!(file(&r, &format!("game/kiln/state/{n}")).is_some_and(|t| t.contains("cs-good")), "{n} missing");
+    }
+}
+
 #[test]
 fn a_test_build_names_its_channel_and_beta_number() {
     let f = Fx::healthy("channel");
@@ -268,6 +283,43 @@ fn addon_log_is_optional_bounded_and_redacted() {
     assert!(!r.files.iter().any(|(n, _)| n.ends_with("shroudlink_keys.json") || n.ends_with("shroudlink_mods_off.json")));
     assert_eq!(std::fs::read_to_string(f.game.join("shroudlink_client.log")).unwrap(),
         old.repeat(SMALL_LOG_MAX as usize / old.len() + 1) + last, "collection is read-only");
+}
+
+/// GitHub issue 39: a player's "slow motion" report could not be told apart from the save cycle because the zip had no
+/// tick-stats.jsonl (Kiln's per-minute step times, rewritten at every game start). It is in the zip now: the newest lines,
+/// whole, within [`TICK_STATS_MAX`].
+#[test]
+fn tick_stats_are_collected_newest_lines_whole_and_bounded() {
+    let f = Fx::healthy("tick-stats");
+    let absent = build(&f.input());
+    assert!(file(&absent, "game/kiln/logs/tick-stats.jsonl").is_none());
+    assert!(absent.errors.is_empty(), "{:?}", absent.errors);
+
+    let line = |t: &str, rate: f64| format!(
+        "{{\"time\":\"2026-11-15T{t}\",\"world\":\"server\",\"steps\":3580,\"rate\":{rate:.2},\"clock_rate\":59.67,\
+         \"step_ms\":{{\"p50\":4.120,\"p99\":9.870,\"max\":2310.500}},\"pre_ms\":{{\"p50\":0.0210,\"p99\":0.0900,\"max\":0.300}},\
+         \"post_ms\":{{\"p50\":0.0110,\"p99\":0.0500,\"max\":0.200}},\"interval_ms\":{{\"p50\":16.67,\"p99\":33.40,\"max\":2402.10}},\
+         \"subs\":{{\"pre\":12,\"post\":9}}}}\n");
+    let old = line("22:45:00", 59.67);
+    let last = line("00:33:00", 24.46);
+    let n = TICK_STATS_MAX as usize / old.len() + 50;
+    f.w("kiln/logs/tick-stats.jsonl", old.repeat(n) + &last);
+    let r = build(&f.input());
+    let t = file(&r, "game/kiln/logs/tick-stats.jsonl").expect("tick-stats.jsonl must be in the report");
+    assert!(t.len() as u64 <= TICK_STATS_MAX + 200, "{}", t.len());
+    let mut lines = t.lines();
+    assert!(lines.next().is_some_and(|l| l.starts_with("... (older lines left out")), "a cut file says so first");
+    let rest: Vec<&str> = lines.collect();
+    assert!(rest.len() > 100, "{}", rest.len());
+    for l in &rest {
+        serde_json::from_str::<serde_json::Value>(l).unwrap_or_else(|e| panic!("every line after the note is whole JSON ({e}): {l}"));
+    }
+    assert_eq!(rest.last().copied(), Some(last.trim_end()), "the newest line is kept");
+    assert_eq!(std::fs::read_to_string(f.game.join("kiln/logs/tick-stats.jsonl")).unwrap(), old.repeat(n) + &last, "collection is read-only");
+    // a short file whole, without the note
+    f.w("kiln/logs/tick-stats.jsonl", last.clone());
+    let r = build(&f.input());
+    assert_eq!(file(&r, "game/kiln/logs/tick-stats.jsonl"), Some(last.as_str()));
 }
 
 /// manage-import F9: the addon log sits in the game root, where no Kiln component writes; a link planted there (by a
@@ -974,4 +1026,28 @@ fn chained_loader_override_finding() {
     assert!(!ids(&build(&input)).contains(&"proton-chained-override"));
     input.install.as_mut().unwrap().platform = Platform::Windows;
     assert!(!ids(&build(&input)).contains(&"proton-chained-override"));
+}
+
+#[test]
+fn shroudlink_addon_finding_is_one_info_and_client_only() {
+    let fx = Fx::new("sl-addon-hint");
+    fx.w("enshrouded.exe", b"fixture only");
+    fx.profile(serde_json::json!(false), serde_json::json!({"shroudlink":[
+        {"id":"assistants","path":"sl/assistants"}, {"id":"expeditions","path":"sl/expeditions"}
+    ]}));
+    let input = fx.input();
+    let report = build(&input);
+    let findings = report.findings.iter().filter(|f| f.id == "shroudlink-client-addon").collect::<Vec<_>>();
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0].level, Level::Info);
+    assert!(findings[0].text.contains("My mods") && findings[0].text.contains("assistants, expeditions"));
+    let mut server = input.clone();
+    server.install.as_mut().unwrap().kind = GameKind::Server;
+    assert!(!build(&server).findings.iter().any(|f| f.id == "shroudlink-client-addon"));
+    fx.profile(serde_json::json!(false), serde_json::json!({"shroudlink":[{"id":"assistants","path":"sl","enabled":false}]}));
+    assert!(!build(&input).findings.iter().any(|f| f.id == "shroudlink-client-addon"));
+    fx.profile(serde_json::json!(false), serde_json::json!({"shroudlink":[{"id":"assistants","path":"sl"}]}));
+    fx.w("kiln/chain/renamed.dll", crate::pe::build_test_dll(&["DirectInput8Create", "shroudlink_shutdown"], b""));
+    fx.w("kiln/chain.ini", "[chain]\nchain\\renamed.dll\n");
+    assert!(!build(&input).findings.iter().any(|f| f.id == "shroudlink-client-addon"));
 }

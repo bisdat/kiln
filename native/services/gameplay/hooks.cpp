@@ -22,7 +22,8 @@
 namespace kg {
 namespace {
 
-kiln::RawHook h_block, h_prop, h_dis, h_dis2, h_pick;
+FrameLink h_block{KILN_GAMEPLAY_HOOK_BUILD}, h_prop{KILN_GAMEPLAY_HOOK_BUILD}, h_dis{KILN_GAMEPLAY_HOOK_BUILD},
+          h_dis2{KILN_GAMEPLAY_HOOK_BUILD}, h_pick{KILN_GAMEPLAY_HOOK_BUILD};
 FrameLink h_craft{KILN_GAMEPLAY_HOOK_CRAFT}, h_terra{KILN_GAMEPLAY_HOOK_TERRAFORM}, h_spawn{KILN_GAMEPLAY_HOOK_SPAWN};
 const KilnSpawnApi* g_spawn = nullptr;
 
@@ -67,17 +68,16 @@ inline KilnEntity op_player(const uint8_t* op) {
     return e;
 }
 
-std::atomic<bool> g_build_installed{false};
 
 inline bool want_build() {
-    return g_build_installed.load(std::memory_order_acquire) && has_subscribers(KILN_GAMEPLAY_BUILD);
+    return build_installed() && has_subscribers(KILN_GAMEPLAY_BUILD);
 }
 
 // ---- building ----
 // All five return the success flag (al) that the caller passes on to BuildFinish.
-uint8_t build_common(kiln::RawHook& h, uint32_t op_kind, uint32_t action, uint8_t* op, void* arg, uint32_t item,
+uint8_t build_common(FrameLink& h, uint32_t op_kind, uint32_t action, uint8_t* op, void* arg, uint32_t item,
                      double x, double y, double z, KilnEntity target) {
-    if (!g_build_installed.load(std::memory_order_acquire)) return h.call<uint8_t>(op, arg, item);
+    if (!build_installed()) return h.call<uint8_t>(op, arg, item);
     const KilnEntity player = op_player(op);
     const uint32_t zone = zone_check(player, x, y, z, action);
     if (zone) {
@@ -104,13 +104,13 @@ uint8_t build_common(kiln::RawHook& h, uint32_t op_kind, uint32_t action, uint8_
 }
 
 uint8_t __fastcall hk_place_block(uint8_t* op, const float* xf, uint32_t item) {
-    if (!g_build_installed.load(std::memory_order_acquire)) return h_block.call<uint8_t>(op, const_cast<float*>(xf), item);
+    if (!build_installed()) return h_block.call<uint8_t>(op, const_cast<float*>(xf), item);
     return build_common(h_block, KILN_GAMEPLAY_BUILD_PLACE_BLOCK, KILN_GAMEPLAY_DENY_BUILD, op, const_cast<float*>(xf),
                         item, xf[0], xf[1], xf[2], 0);
 }
 
 uint8_t __fastcall hk_place_prop(uint8_t* op, const uint8_t* desc, uint32_t item) {
-    if (!g_build_installed.load(std::memory_order_acquire)) return h_prop.call<uint8_t>(op, const_cast<uint8_t*>(desc), item);
+    if (!build_installed()) return h_prop.call<uint8_t>(op, const_cast<uint8_t*>(desc), item);
     float p[3];
     std::memcpy(p, desc + 0x10, sizeof p);  // desc: +0 template GUID, +0x10 position (float metres), +0x1c rotation
     return build_common(h_prop, KILN_GAMEPLAY_BUILD_PLACE_PROP, KILN_GAMEPLAY_DENY_BUILD, op, const_cast<uint8_t*>(desc),
@@ -118,19 +118,19 @@ uint8_t __fastcall hk_place_prop(uint8_t* op, const uint8_t* desc, uint32_t item
 }
 
 uint8_t __fastcall hk_dismantle(uint8_t* op, const float* xf, uint32_t item) {
-    if (!g_build_installed.load(std::memory_order_acquire)) return h_dis.call<uint8_t>(op, const_cast<float*>(xf), item);
+    if (!build_installed()) return h_dis.call<uint8_t>(op, const_cast<float*>(xf), item);
     return build_common(h_dis, KILN_GAMEPLAY_BUILD_DISMANTLE, KILN_GAMEPLAY_DENY_BREAK, op, const_cast<float*>(xf),
                         item, xf[0], xf[1], xf[2], 0);
 }
 
 uint8_t __fastcall hk_dismantle2(uint8_t* op, const float* xf, uint32_t item) {
-    if (!g_build_installed.load(std::memory_order_acquire)) return h_dis2.call<uint8_t>(op, const_cast<float*>(xf), item);
+    if (!build_installed()) return h_dis2.call<uint8_t>(op, const_cast<float*>(xf), item);
     return build_common(h_dis2, KILN_GAMEPLAY_BUILD_DISMANTLE, KILN_GAMEPLAY_DENY_BREAK, op, const_cast<float*>(xf),
                         item, xf[0], xf[1], xf[2], 0);
 }
 
 uint8_t __fastcall hk_pick_up(uint8_t* op, const uint32_t* what, uint32_t item) {
-    if (!g_build_installed.load(std::memory_order_acquire)) return h_pick.call<uint8_t>(op, const_cast<uint32_t*>(what), item);
+    if (!build_installed()) return h_pick.call<uint8_t>(op, const_cast<uint32_t*>(what), item);
     const KilnEntity prop = what[0];
     KilnVec3 p{};
     entity_position(prop, &p);  // a placed prop: static; read-only from a worker (guarded)
@@ -313,15 +313,6 @@ uint32_t* __fastcall hk_spawn(void* a, uint32_t* out, void* c, uint32_t d, const
     return res;
 }
 
-bool hook(kiln::RawHook& h, uintptr_t target, void* detour, const char* what) {
-    const std::string label = std::string("gameplay/") + what;  // the sigdb symbol name
-    if (!h.install(g_api, g_owner, target, detour, label.c_str())) {
-        KG_E("hooking %s at %p failed", what, reinterpret_cast<void*>(target));
-        return false;
-    }
-    return true;
-}
-
 }  // namespace
 
 void hooks_set_spawn_service(const void* p) { g_spawn = static_cast<const KilnSpawnApi*>(p); }
@@ -352,101 +343,18 @@ uint32_t hooks_spawn_replace_clear(KilnOwner owner) {
     return static_cast<uint32_t>(n);
 }
 
-namespace {
-std::recursive_mutex& g_build_mu=hooks_publication();
-uint32_t g_build_state = 0, g_build_mask = 0; // idle, installed, waiting, refused
-KilnOwner g_build_requester = 0;
-bool g_build_requested = false, g_build_lifecycle = false;
-std::string g_build_reason = "resolved, not installed: no mod asked";
-const char* build_names[] = {"gameplay/PlaceBlueprint", "gameplay/PlaceProp", "gameplay/DismantleBlock",
-                            "gameplay/DismantleBlock2", "gameplay/PickUpProp"};
-
-// Single installation-policy seam: replace waiting for the stop with checked raw installation at server Pre
-// once kiln.hooks provides it. session() is an AnyThread snapshot. A STOPPING callback excludes only the world
-// whose jobs the core has drained; every other world (including a hosting client's prediction world) must be gone.
-bool build_may_install(uint32_t stopping) {
-    KilnSessionInfo session{}; session.size = sizeof session;
-    if (!g_api->session || g_api->session(&session) != KILN_OK) return false;
-    if (stopping == KILN_WORLD_SERVER && !g_api->feature(kstr("tick.wait_jobs"))) return false;
-    for (uint32_t k = 0; k < KILN_WORLD_KINDS; ++k)
-        if (k != stopping && session.worlds[k]) return false;
-    return true;
-}
-void build_publish() {
-    const auto* caps = static_cast<const KilnCapsApi*>(g_api->service(kstr(KILN_CAPS_SERVICE), 1));
-    if (caps && caps->report)
-        caps->report(g_owner, kstr("gameplay.build_hooks"),
-            g_build_state == 1 ? KILN_CAP_AVAILABLE : g_build_state == 3 ? KILN_CAP_UNAVAILABLE : KILN_CAP_PENDING,
-            g_build_state == 1 ? KILN_CAP_REASON_NONE : g_build_state == 3 ? KILN_CAP_REASON_FAULTED : KILN_CAP_REASON_SESSION,
-            kstr(g_build_reason));
-}
-}
-void build_lifecycle(bool available) { std::lock_guard lock(g_build_mu); g_build_lifecycle = available; }
-bool build_installed() { return g_build_installed.load(std::memory_order_acquire); }
-uint32_t build_state() { std::lock_guard lock(g_build_mu); return g_build_state; }
-uint32_t build_mask() { std::lock_guard lock(g_build_mu); return g_build_mask; }
-std::string build_reason() { std::lock_guard lock(g_build_mu); return g_build_reason; }
-void build_poll(uint32_t stopping) {
-    std::lock_guard lock(g_build_mu);
-    if (!g_build_requested || g_build_state == 1 || g_build_state == 3 || !build_may_install(stopping)) return;
-    const uintptr_t targets[] = {fn.place_block, fn.place_prop, fn.dismantle, fn.dismantle2, fn.pick_up};
-    kiln::RawHook* hooks[] = {&h_block, &h_prop, &h_dis, &h_dis2, &h_pick};
-    void* detours[] = {reinterpret_cast<void*>(&hk_place_block), reinterpret_cast<void*>(&hk_place_prop),
-        reinterpret_cast<void*>(&hk_dismantle), reinterpret_cast<void*>(&hk_dismantle2), reinterpret_cast<void*>(&hk_pick_up)};
-    auto refuse = [&](const std::string& why) {
-        g_build_state = 3;
-        g_build_reason = "refused: " + why + "; installed target mask " + std::to_string(g_build_mask) +
-                         " (all installed detours pass through; no build events or build/break denies)";
-        for (unsigned i=0; i<5; ++i) if (g_build_mask & (1u << i)) g_build_reason += std::string("; ") + build_names[i];
-        KG_W("kiln.gameplay: build hooks %s", g_build_reason.c_str()); build_publish();
-    };
-    if (!F.build) { refuse("gameplay.build symbols/layouts did not resolve"); return; }
-    // Revalidate every resolved symbol and readable executable entry before the first write. The existing hook()
-    // helper adds no byte validation of its own; sigdb resolution supplies the signature validation.
-    for (unsigned i = 0; i < 5; ++i) {
-        uintptr_t resolved = 0;
-        if (!targets[i] || !g_api->symbol || g_api->symbol(kstr(build_names[i]), &resolved) != KILN_OK ||
-            resolved != targets[i] || !seh_build_target(targets[i])) { refuse(std::string(build_names[i]) + " failed pre-check"); return; }
-    }
-    for (unsigned i = 0; i < 5; ++i) {
-        if (!hook(*hooks[i], targets[i], detours[i], build_names[i] + 9)) {
-            refuse(std::string(build_names[i]) + ": " + (hooks[i]->error() ? hooks[i]->error() : "install failed")); return;
-        }
-        g_build_mask |= 1u << i;
-    }
-    g_build_state = 1; g_build_reason = "installed";
-    g_build_installed.store(true, std::memory_order_release);
-    KG_I("kiln.gameplay: build hooks installed at first use by %llu", static_cast<unsigned long long>(g_build_requester));
-    build_publish();
-}
-bool build_request(KilnOwner owner) {
-    std::lock_guard lock(g_build_mu);
-    if (g_build_state == 3) {
-        if (!g_build_requested) KG_W("kiln.gameplay: build hooks %s (owner %llu)", g_build_reason.c_str(),
-                                   static_cast<unsigned long long>(owner));
-        g_build_requested = true;
-        return false;
-    }
-    if (!g_build_requested) {
-        g_build_requested = true; g_build_requester = owner;
-        if (!build_may_install(KILN_WORLD_KINDS)) {
-            KilnSessionInfo session{}; session.size = sizeof session;
-            const bool observed = g_build_lifecycle && g_api->session && g_api->session(&session) == KILN_OK && session.lifecycle;
-            g_build_state = observed ? 2 : 3;
-            g_build_reason = "build hooks wait for the world to stop: asked while a world ran; building-piece events begin with the next world";
-            if (!observed) g_build_reason = "refused: cannot observe world stop; build events unavailable in this process";
-            KG_W("kiln.gameplay: %s (owner %llu)", g_build_reason.c_str(), static_cast<unsigned long long>(owner));
-            build_publish();
-        }
-    }
-    build_poll();
-    return g_build_state != 3;
-}
-
 bool hooks_install() {
-    { std::lock_guard lock(g_build_mu);
-      if (!F.build) { g_build_state=3; g_build_reason="refused: gameplay.build symbols/layouts did not resolve"; }
-      build_publish(); }
+    hooks_init_control();
+    hook_register(KILN_GAMEPLAY_HOOK_BUILD,&h_block,F.build ? fn.place_block : 0,"gameplay/PlaceBlueprint",&FrameLink::dispatch<&hk_place_block>,
+                  {KILN_SIG_PTR,KILN_SIG_PTR,KILN_SIG_U32},KILN_SIG_U8);
+    hook_register(KILN_GAMEPLAY_HOOK_BUILD,&h_prop,F.build ? fn.place_prop : 0,"gameplay/PlaceProp",&FrameLink::dispatch<&hk_place_prop>,
+                  {KILN_SIG_PTR,KILN_SIG_PTR,KILN_SIG_U32},KILN_SIG_U8);
+    hook_register(KILN_GAMEPLAY_HOOK_BUILD,&h_dis,F.build ? fn.dismantle : 0,"gameplay/DismantleBlock",&FrameLink::dispatch<&hk_dismantle>,
+                  {KILN_SIG_PTR,KILN_SIG_PTR,KILN_SIG_U32},KILN_SIG_U8);
+    hook_register(KILN_GAMEPLAY_HOOK_BUILD,&h_dis2,F.build ? fn.dismantle2 : 0,"gameplay/DismantleBlock2",&FrameLink::dispatch<&hk_dismantle2>,
+                  {KILN_SIG_PTR,KILN_SIG_PTR,KILN_SIG_U32},KILN_SIG_U8);
+    hook_register(KILN_GAMEPLAY_HOOK_BUILD,&h_pick,F.build ? fn.pick_up : 0,"gameplay/PickUpProp",&FrameLink::dispatch<&hk_pick_up>,
+                  {KILN_SIG_PTR,KILN_SIG_PTR,KILN_SIG_U32},KILN_SIG_U8);
     hook_register(KILN_GAMEPLAY_HOOK_CRAFT,&h_craft,F.craft ? fn.craft : 0,"gameplay/CraftRecipe",&FrameLink::dispatch<&hk_craft>,
                   {KILN_SIG_PTR,KILN_SIG_PTR},KILN_SIG_S32);
     hook_register(KILN_GAMEPLAY_HOOK_TERRAFORM,&h_terra,F.terraform ? fn.terraform : 0,"gameplay/TerraformImpact",&FrameLink::dispatch<&hk_terraform>,

@@ -559,6 +559,14 @@ const stopStorage = "kiln-mock-stopped-starts";
 const stoppedStarts: Record<string, import("./commands").StoppedStart | null> = (() => {
   try { return JSON.parse(localStorage.getItem(stopStorage) ?? "{}"); } catch { return {}; }
 })();
+/** A Steam start without the launcher's Play path. Keep old IPC stop evidence to exercise late replies too. */
+function mockExternalStart(gameId: string, at = Date.now()) {
+  gameOf(gameId);
+  running[gameId] = { pid: ++pidSeq, mode: "profile", nonce: null, at, profile: activations[gameId]?.profileId ?? null };
+  launched.add(gameId);
+  emitGame(gameId, "started");
+  setTimeout(() => emitGame(gameId, "boot"), 2600);
+}
 export function scriptStoppedStart(kind: StopScript) { stopScript = kind; }
 function launch(gameId: string, req: LaunchRequest): LaunchResult {
   const g = gameOf(gameId);
@@ -823,6 +831,13 @@ type Handler = (args: Record<string, unknown>) => unknown;
 const S = (v: unknown) => String(v ?? "");
 
 const handlers: Record<string, Handler> = {
+  shroudlink_notice: (a) => {
+    const p = a.profile as Profile;
+    if (games.find((g) => g.id === a.gameId)?.kind !== "client" || !p.mods.shroudlink?.some((m) => m.enabled)) return null;
+    const addons = library.filter((e) => e.kind === "native" && e.id === "shroudlink-addon").flatMap((e) => e.versions.map((v) => ({ kind: e.kind, id: e.id, version: v.version, hash: v.hash })));
+    if (addons.some((a) => p.mods.native.some((m) => m.enabled && m.id === a.id && m.hash === a.hash && m.version === a.version))) return null;
+    return { mods: p.mods.shroudlink.filter((m) => m.enabled).map((m) => m.id), addons };
+  },
   snapshot_status: () => ({ phase: "ready", reasons: [] }),
   snapshot_continue: () => null,
   // app
@@ -1756,7 +1771,7 @@ export function mockEmit(name: string, payload: unknown): void {
 }
 
 // Playwright and the dev console reach the fake game through this (mock mode only).
-if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown }).__kilnMock = { scriptStoppedStart, stopGame: mockStopGame, emit: mockEmit, setLastServer: mockSetLastServer,
+if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown }).__kilnMock = { scriptStoppedStart, externalStart: mockExternalStart, stopGame: mockStopGame, emit: mockEmit, setLastServer: mockSetLastServer,
   calls: () => [...commandCalls],
   planCommand: (cmd: string, plan: CommandPlan) => { (commandPlans[cmd] ??= []).push(plan); },
   openGate: (name: string) => { const g = gateOf(name); g.open = true; g.waiters.splice(0).forEach((w) => w()); },
@@ -1811,3 +1826,14 @@ if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown 
   },
   /** The runtime versions runtime_install put in, in order. */
   installs: () => [...runtimeInstalls] };
+
+// Deterministic browser fixture for the missing Shroudlink client addon.
+const slNotice = typeof location === "undefined" ? null : new URLSearchParams(location.search).get("slNotice");
+if (slNotice) {
+  for (const p of profiles.values()) {
+    p.mods.shroudlink = slNotice === "empty" ? [] : [{ id: "assistants", version: "1", hash: "sl", enabled: slNotice !== "off" }];
+    p.mods.native = [];
+  }
+  if (slNotice !== "missing") library.push({ kind: "native", id: "shroudlink-addon", name: "Shroudlink client addon", versions: [{ version: "1", hash: "sl-addon", folder: "/mock/addon", imported: "2026-11-15", side: "client", clients: "none", size: 1, source: null, manifestId: null, manifest: null }] });
+  if (slNotice === "server") for (const g of games) g.kind = "server";
+}

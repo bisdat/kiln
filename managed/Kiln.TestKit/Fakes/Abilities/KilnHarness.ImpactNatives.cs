@@ -31,7 +31,7 @@ public sealed partial class KilnHarness
 /// <see cref="SetGameNative"/> says (else it pushes 1). The programs that exist and the natives they call at which sites
 /// are the ones <see cref="AddProgram"/> declares. NativeContext reads and writes the fake world's components
 /// (<see cref="KilnHarness.Entities"/>) of the types in <see cref="OtherRead"/> and <see cref="OtherWrite"/>, on from the
-/// first Kiln native call of the world; a write is stored as written and raises Kiln.Abilities'
+/// first Kiln native call of the world while <see cref="Serial"/> holds (unknown pin or non-serial: off for that world); a write is stored as written and raises Kiln.Abilities'
 /// <c>ComponentWrittenEvent</c> in the next step.</para>
 /// <para><b>Not modelled</b> (offline): the programs' code (nothing runs a program: the test makes each call), program
 /// registration, instances, attributes and their formulas, sequences, buffs, <c>Natives.Register</c>'s suspending natives,
@@ -72,6 +72,15 @@ public sealed class HarnessImpactNatives
     {
         ArgumentNullException.ThrowIfNull(call);
         return _harness.Run(() => Model.Run(call));
+    }
+
+    /// <summary>The simulated pin-and-world-thread condition for ECS access (default true). Set between calls; false
+    /// closes the bridge for this fake world on its next call/access, as the real service does. The fake still runs
+    /// handlers on a dedicated thread; it does not reproduce the game's scheduler or affinity.</summary>
+    public bool Serial
+    {
+        get => _harness.Run(() => Model.Serial);
+        set => _harness.Run(() => Model.Serial = value);
     }
 
     /// <summary>The types of impact_simulation's other_read list: what NativeContext.TryRead may read of any entity (with

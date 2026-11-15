@@ -68,3 +68,16 @@ Path(sys.argv[2]).write_text(prefix + s[s.index("const EcsView* ecs_for("):s.ind
 PYCODE
 g++ "${flags[@]}" -I"$out" "$here/ecs_test.cpp" -o "$out/ecs_test"
 "$out/ecs_test"
+
+# Exercise the production queue, drained stop and next-Pre delivery/cancellation bodies.
+python3 - "$here/../abilities.cpp" "$out/events_under_test.h" <<'PYCODE'
+from pathlib import Path
+import sys
+s = Path(sys.argv[1]).read_text()
+queue = s[s.index("bool push_event("):s.index("KilnAbilityEvent new_event(")]
+delivery = s[s.index("    // collect events\n"):s.index("\nvoid KILN_CALL on_world(")]
+stop = s[s.index("void KILN_CALL on_world("):s.index("// ------------------------------------------------------------------------------------------- table")]
+Path(sys.argv[2]).write_text(queue + "\nvoid deliver(uintptr_t world) {\n" + delivery + stop)
+PYCODE
+g++ "${flags[@]}" -I"$out" "$here/events_test.cpp" -o "$out/events_test"
+"$out/events_test"

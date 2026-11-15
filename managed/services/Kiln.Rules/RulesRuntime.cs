@@ -40,7 +40,7 @@ internal static unsafe class RulesRuntime
     // NoClip requests a death or a teleport used up, per player: the rule sets (id, version) that asked then. A set asks
     // anew when it is updated or applied again.
     private static readonly Dictionary<EntityId, HashSet<(long Id, int Version)>> Spent = new();
-    private static bool _dirty, _started;
+    private static bool _dirty, _started, _policyStarted;
     private static int _retiring;  // inside Leave: its rule sets end without resolving (the caller resolves, or the next tick)
     private static ulong _step;
     private static ModConfig<RulesPolicy>? _config;
@@ -59,12 +59,27 @@ internal static unsafe class RulesRuntime
     {
         if (_started) return;
         _started = true;
-        // Kiln's own, whichever mod's call starts it: the config is <configDir>/rules.json and outlives every mod
+        AsKiln(StartAsKiln);
+    }
+
+    /// <summary>Only the server's limits: registers <c>rules.json</c> (followed when it changes) without the rest of
+    /// <see cref="Start"/>. NoClip reads them before any rule set exists (issue #37), and reading them must not
+    /// subscribe to building events or the gameplay listener. Once; tick thread.</summary>
+    internal static void StartPolicy()
+    {
+        if (_policyStarted) return;
+        _policyStarted = true;
+        AsKiln(RegisterPolicy);
+    }
+
+    // Kiln's own, whichever mod's call starts it: the config is <configDir>/rules.json and outlives every mod
+    private static void AsKiln(Action start)
+    {
         var outer = ModContext.CurrentMod;
         ModContext.CurrentMod = null;
         try
         {
-            StartAsKiln();
+            start();
         }
         finally
         {
@@ -72,7 +87,7 @@ internal static unsafe class RulesRuntime
         }
     }
 
-    private static void StartAsKiln()
+    private static void RegisterPolicy()
     {
         try
         {
@@ -88,18 +103,14 @@ internal static unsafe class RulesRuntime
         {
             Log(LogLevel.Warn, $"rules.json unavailable ({e.Message}); the defaults apply");
         }
+    }
+
+    private static void StartAsKiln()
+    {
+        StartPolicy();
         RulesPresets.WriteDefaults();
         RulesNet.Start();
         ServiceTick.Add("kiln rules", Tick);
-        Events.On<BuildEvent>(OnBuild, EventPriority.Monitor);
-        try
-        {
-            Gameplay.Enable();  // BuildEvent comes from kiln.gameplay's listener (KeepBuildsOutsideBases)
-        }
-        catch (Exception e) when (e is FileNotFoundException or TypeLoadException)
-        {
-            Log(LogLevel.Warn, $"Kiln.Gameplay unavailable: builds outside bases are not kept ({e.Message})");
-        }
         Events.On<ServerStoppingEvent>(_ => WorldClosing(), EventPriority.Lowest);
         Events.On<NetPeerReadyEvent>(e =>
         {
@@ -107,6 +118,29 @@ internal static unsafe class RulesRuntime
                 if (PlayersByEntity.TryGetValue(e.Peer.Player, out var s)) s.ClientSent = false;
         });
         Log(LogLevel.Info, $"Kiln.Rules up: {Describe(Rules.Status())}");
+    }
+
+    // BuildEvent makes kiln.gameplay install the game's five build hooks (on first use since 0.2.0-dev.29), and only a
+    // rule set that keeps builds outside bases needs it: asked once, when such rules first take effect, never at start.
+    // Where building events are not produced here, those builds are not kept and every other rule still applies.
+    private static bool _buildEventsAsked;
+
+    private static void WantBuildEvents()
+    {
+        if (_buildEventsAsked) return;
+        _buildEventsAsked = true;
+        AsKiln(() =>
+        {
+            try
+            {
+                Gameplay.Enable();  // BuildEvent comes from kiln.gameplay's listener
+                Events.On<BuildEvent>(OnBuild, EventPriority.Monitor);
+            }
+            catch (Exception e) when (e is KilnUnavailableException or FileNotFoundException or TypeLoadException)
+            {
+                Log(LogLevel.Warn, $"builds outside bases are not kept: {e.Message}");
+            }
+        });
     }
 
     private static string Describe(RulesStatus? s) => s is null
@@ -369,6 +403,7 @@ internal static unsafe class RulesRuntime
             }
             var before = s.Effective;
             s.Effective = eff;
+            if (eff.KeepBuildsOutsideBases) WantBuildEvents();
             Apply(s, before);
             if (s.Clip is not null) ended.Add(s);
             if (Events.HasSubscribers<PlayerRulesChangedEvent>()) Events.Post(new PlayerRulesChangedEvent(before, eff));

@@ -275,7 +275,12 @@ kiln.abilities states the same contract from the runtime side in docs/kiln/servi
   float32 to Twice's int parameter is refused from the build's impact/natives.json`, `PASS the cooked program calling
   the generated Twice answers in its start step`, `PASS a loop over 5 targets with a generated native finishes in 1
   step`, `PASS types sint32/float32/bool/Time/EntityId/float3 round trip through generated natives`. A whole mod built
-  this way: `mods/samples/FrostMark` (a sword's hit effect runs its native first, `EffectBlock.Run` in docs/kiln/modding/blocks.md).
+  this way: `mods/samples/FrostMark` (a sword's additional hit effect runs its native first, `EffectBlock.Run` in
+  docs/kiln/modding/blocks.md). Run binds by name and checks each parameter's type and byte size against what it binds; the
+  `attackMod`, `damage` and `position` it binds are the effect's own hit's (its target position; a changed position moves that
+  hit), not the weapon strike's; a JSON `"run"` needs the native declared `"sync": true` with a matching `argc` (what this
+  generator writes). Guided check `06c-impact-damage` asserts the matching Ice-10 damage events and their attackMod 1 / 1.5; the
+  player judges the extra ice number on screen (crits and rounding move it; fresh targets when a hurt one dies early).
 - **Built-ins** (mod id `kiln`; neither suspends; both push 1):
   - `kiln.Log(value)` (`0xc0b137a7`): writes a kiln.log line with the program, instance, entity, site and the value
     (typed by its variable, or a raw integer).

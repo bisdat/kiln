@@ -65,10 +65,12 @@ warnings for services or mods that failed to load.
 Normal Kiln hooks and managed mods stay off under the default policy until an update adds the build.
 "safe idle: no symbol definitions" means the server's symbol definitions are missing or could not be resolved.
 No kiln.log at all: the server didn't load dinput8.dll (wrong folder, or Wine without the setting above).
-"roster: the start is stopped ... exit code 0x4B02" or "boot: the start stops ... (exit code 0x4B01)": Kiln ended the
-start on purpose, before the world loaded, because the mod list cannot run without losing the world's progress. Do
-not restart (it stops the same way): fix the mod list the line names. Under Wine the exit status is 2 (or 1); a panel
-or script that restarts crashed servers must not restart on it (systemd: RestartPreventExitStatus=1 2).
+"roster: the start is stopped ... exit code 0x4B02", "native: the start is stopped ... exit code 0x4B03" or "boot: the
+start stops ... (exit code 0x4B01)": Kiln ended the start on purpose, before the world loaded, because the mod list
+cannot run without losing the world's progress. Do not restart (it stops the same way): fix the mod list the line
+names (0x4B03: remove or update those mods; if it still stops, send kiln/logs/kiln.log). Under Wine the exit status is
+2, 3 or 1; a panel or script that restarts crashed servers must not restart on it (systemd:
+RestartPreventExitStatus=1 2 3).
 
 Server builds this pack knows:
 @BUILDS@

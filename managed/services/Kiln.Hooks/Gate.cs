@@ -20,6 +20,15 @@ internal static class HooksGate
     public static InvalidOperationException Retired(string api, ModContext mod) =>
         new($"{api}: mod '{mod.Info.Id}' has unloaded; an unloaded mod cannot install hooks");
 
+    internal static InvalidOperationException Unloading(string api, ModContext mod) =>
+        new($"{api}: mod '{mod.Info.Id}' is unloading; it cannot install hooks");
+
+    internal static void RequireOpen(string api, ModContext mod)
+    {
+        if (!mod.Alive) throw Retired(api, mod);
+        if (mod.Unloading) throw Unloading(api, mod);
+    }
+
     internal sealed class ModHooks
     {
         public bool SymbolsLoaded;
@@ -51,9 +60,19 @@ internal static class HooksGate
         => Tracked.GetOrAdd(mod, m =>
         {
             var mh = new ModHooks();
+            m.UnloadStarting += () => CloseAdmission(m, mh);
             m.Retiring += () => Retire(m, mh);
             return mh;
         });
+
+    private static string? CloseAdmission(ModContext mod, ModHooks mh)
+    {
+        // Removing registrations closes typed dispatch admission (increment, then dictionary recheck). Installs
+        // share Forget's lifecycle lock and refuse ModContext.Unloading, even for a mod's first hook.
+        Hooks.Forget(mod);
+        var left = Interlocked.Read(ref mh.InFlight.Value);
+        return left == 0 ? null : $"{left} call(s) still inside hook handlers (kiln.hooks)";
+    }
 
     private static void Retire(ModContext mod, ModHooks mh)
     {

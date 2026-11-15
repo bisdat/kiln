@@ -48,6 +48,7 @@ Machine-readable copies:
 | `<game>/kiln/state/progress.json` | kiln-core (dev.27; services, plugins and Kiln.Host report through kiln.progress v2) | launcher, server operators | `state-progress.schema.json`, `examples/state-progress.json`; section "Start progress" below |
 | `<game>/kiln/state/mods.json` | Kiln.Host | launcher | `state-mods.schema.json`, `examples/state-mods.json` |
 | `<game>/kiln/state/roster-refused.json` (`.last.json` after the next start) | kiln.knowledge (0.2.0-dev.29), when the mods' NPC roster stops the start | launcher, server operators | `state-roster-refused.schema.json`, `examples/state-roster-refused.json`; section 5.9 |
+| `<game>/kiln/state/content-refused.json` (`.last.json` after the next start) | kiln.knowledge (0.2.0-dev.29), when the whole build of the mods' native quests and NPCs failed and stops the start | launcher, server operators | `state-content-refused.schema.json`, `examples/state-content-refused.json`; section 5.9 |
 | `<game>/kiln/state/native.json` | native loader (core) | launcher | `state-native.schema.json`, `examples/state-native.json` |
 | `<game>/kiln/state/hooks.json` | kiln-core (kiln.hooks v2, compat report) | launcher | `hooks-state.schema.json`, `examples/hooks-state.json`, `fixtures/hooks-state/` |
 | `<game>/kiln/compat-rules.json`, `<configDir>/compat-rules.json` | Kiln (shipped in the runtime's `core` component since dev.29, from `native/core/compat-rules.json`; replaced by every update; may be missing on an older install) / the player | kiln-core, launcher | `compat-rules.schema.json`, `examples/compat-rules.json`, `fixtures/compat-rules/cases.json` |
@@ -821,8 +822,8 @@ All written atomically; a file whose `pid` is not a live process is stale.
   `clr{started, error}`, `errors[]`.
 - `boot.json` `boot.stop` (0.2.0-dev.29, kiln.boot `stop_start`): `{code, reason, by, mods[]}` when a service ended the
   start on purpose (with or without a boot generation), else null; `boot.exitCode` is then that code. kiln.knowledge's
-  roster uses code 19202 (0x4B02): show `reason` and do not restart (below). progress.json says `state` `failed` with
-  the same reason.
+  roster uses code 19202 (0x4B02), its whole build of the mods' native quests and NPCs that failed 19203 (0x4B03): show
+  `reason` and do not restart (below). progress.json says `state` `failed` with the same reason.
 - `roster-refused.json` (kiln.knowledge, 0.2.0-dev.29; `state-roster-refused.schema.json`): the mods' NPC roster cannot
   be held on this side (more than 128 entries, or more than 64 where the second unlock page cannot be installed), so the
   start stopped before any world loaded and the process ended with 19202 (0x4B02; a Linux parent under Wine sees 2).
@@ -835,12 +836,23 @@ All written atomically; a file whose `pid` is not a live process is stale.
   file and kiln.log), `pid`, `utc`. The next start moves it to `roster-refused.last.json`: a launcher that shows why the
   last start ended reads that one after a new start, and `roster-refused.json` right after the exit. A launcher shows
   `why` and the `mods` after the game exits with 19202, and offers to disable those mods.
+- `content-refused.json` (kiln.knowledge, 0.2.0-dev.29; `state-content-refused.schema.json`): the whole build of the
+  mods' native quests, knowledge and NPCs failed, so nothing of it is served (reading the mods' files failed in a way
+  that is no one mod's, the build threw, the shared resources did not build, kiln.assets refused the built pack or is not there, the hook on the game's
+  resource start is not there), while at least one enabled mod ships such content; the start stopped before any world
+  loaded and the process ended with 19203 (0x4B03; a Linux parent under Wine sees 3). One mod's own errors never write
+  it. The same fields, order of writing and `.last.json` rule as `roster-refused.json`, with `exitCode` 19203,
+  `unixExitStatus` 3, `why` (what failed, word for word: show it), `mods[]` (the mods whose content was not served: the
+  ones to remove or update) and `advice` (remove or update them; send kiln.log if it still stops). A launcher shows
+  `why` and the `mods` after the game exits with 19203, and offers to disable those mods.
 - Launcher stopped-start notice (dev.29): `kiln_manage::stopped_start::read` reads `roster-refused.json` first,
-  then `boot.json` (`boot.stop`, or the older required-boot-mod exit 19201). Each read is capped at 256 KiB;
+  then `content-refused.json`, then `boot.json` (`boot.stop`, or the older required-boot-mod exit 19201). The kind is
+  `roster` (19202), `content` (19203) or `boot-mod` (anything else); the notice shows a sentence of its own for
+  `roster` and `content` with the reason under it, and the reason with the names for `boot-mod`. Each read is capped at 256 KiB;
   missing, invalid and unknown-format evidence produces no notice (invalid files are logged). It never changes
   Kiln's files and does not read `.last.json` as a new stop. The command `launch_state.stoppedStart` returns the
   kind, reason, mod ids and available Library display names, advice, UTC, exit code and runtime pid.
-  The watcher and command retain the process start observed after this launcher's Steam request, inspect the
+  The watcher and command retain the observed process start, including external Steam starts, and inspect the
   evidence while it runs (including progress `failed`) and after exit. The embedded time must lie between that
   process start (rounded down to its timestamp's whole second) and the observation of exit; the file mtime must
   also be at least the process start. Windows requires the process pid; Proton uses the process time because
@@ -849,7 +861,7 @@ All written atomically; a file whose `pid` is not a live process is stale.
   For a process that stops between polls, format-1 failed `progress.json` may supply the runtime pid and start
   time instead, but only if both its embedded start time and mtime are after this launcher's request. The stop
   must then match that runtime pid and time window.
-  Desktop Play and Deck Home keep the notice until Dismiss or another start. The launcher stores the notice
+  Desktop Play and Deck Home keep the notice until Dismiss, launcher Play or a running process whose timestamp proves it started after the refusal. Missing, invalid or indistinguishable timestamps keep the notice. Host and runtime pids are not compared to retire it under Proton. The launcher stores the notice
   and dismissed `(game, pid, UTC, exitCode)` in its own browser storage, so reload/restart cannot resurrect a
   dismissed stop. Review these mods opens the existing mod list's exact-id filter. Ordinary quits produce none.
   `kilnctl run` uses the same bounded reader within its foreground-run time interval and prints the reason and
@@ -1552,6 +1564,27 @@ kilnctl is built on the crate; it also has `bundle`, `client`, `admin` and `depl
   `/logs`, `/saves`, `/editor`, `/settings`, `/about`; Servers `/servers/:id/{overview,logs,ticks,settings,configs,mods,
   backups,modpack}`; Admin `/servers/:id/admin/{players,map,zones,items,spawn,world,combat,creatures,gamedata,permissions,
   content,saves,crashes}` (`admin/configs`, `admin/mods` and `admin/console` redirect to the merged server pages).
+
+Library usage includes saved profiles under `snapshots/before-beta/profiles/`, named `<id> (before beta)`. Clean up
+and ordinary removal protect their packages until the snapshot is replaced, including disabled entries. Saved
+profiles and metadata files are never read through symlinks. Explicit forced removal still honors its existing
+confirmation. Restore preflights saved profile references against present Library records and paths before any
+replacement, also when recovering a staged restore. A legacy launcher can still remove these packages; restore then
+refuses and names what to reimport.
+
+The beta copy includes launcher settings and profile metadata. It excludes `library/kiln-kept.json` and its
+settings folders. Restore and recovery skip that journal even in older copies and restore stages, leaving its live
+payload and ownership together.
+
+A release launcher selects only its shipped runtime for automatic game updates, comparing bundle version and
+creation time. Cached test runtimes remain available for explicit selection on Runtime. Without a shipped runtime a
+release offers no automatic game update. Test launchers keep the existing cached-bundle update behavior.
+
+Capture, startup recovery and restore upgrade the existing data-folder lock to exclusive access. Another launcher
+using that folder causes a clear refusal. A blocked restore retains exclusivity; a completed startup or a return to
+the original session downgrades to shared access. Restart handoff keeps exclusivity until the process releases the
+lock. An identical startup with no beta work may share the folder. An upgrade refusal returns to the session only
+after shared access is reacquired. A lock error holds local writers behind the recovery gate until restart.
 
 Beta startup gate commands: `snapshot_status` returns `{ phase: "preparing" | "blocked" | "ready", reasons: string[], canContinue: boolean }`; `snapshot_continue` takes no arguments and records an explicit decision to continue without a complete pre-beta copy. Neither bypasses an unfinished restore journal. `UpdateStatus.restoreRequested` records the accepted restore choice, and `beforeBetaWarning` carries persisted opt-out reasons.
 

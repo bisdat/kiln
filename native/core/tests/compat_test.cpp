@@ -12,6 +12,7 @@
 #include "chain_status.h"
 #include "compat.h"
 #include "compat_rules.h"
+#include "hook_owner.h"
 #include "nlohmann/json.hpp"
 
 namespace {
@@ -117,9 +118,10 @@ ChainRow row(const char* file, const char* status, bool late = false, const char
     return r;
 }
 
+// Each link is labelled like the target's symbol (a service hooks a symbol under its own name).
 json target(const char* rva, const char* symbol, std::vector<const char*> owners, json before = nullptr, json over = nullptr) {
     json links = json::array();
-    for (const char* o : owners) links.push_back({{"owner", o}, {"kind", "raw"}, {"priority", 0}, {"label", "x"}});
+    for (const char* o : owners) links.push_back({{"owner", o}, {"kind", "raw"}, {"priority", 0}, {"label", symbol ? symbol : "x"}});
     return {{"rva", rva}, {"symbol", symbol ? json(symbol) : json(nullptr)}, {"label", symbol ? symbol : "rva"}, {"links", links},
             {"foreignBefore", before}, {"foreignOver", over}};
 }
@@ -149,8 +151,10 @@ void overlap_cases() {
         check(strings(o[0]["owners"]) == std::vector<std::string>({"chat", "emf"}), "foreign-before: owners are short and unique");
         check(o[0]["fix"] == "late" && o[0]["chainEntry"]["status"] == "loaded" && o[0]["chainEntry"]["late"] == false, "foreign-before: fix late, chain entry");
         const std::string msg = o[0]["message"].get<std::string>();
-        check(msg.find("xhl-core.dll+0x2a0") != std::string::npos && msg.find("chat, emf") != std::string::npos &&
-              msg.find("[late]") != std::string::npos, "foreign-before: the message names both sides and the fix: " + msg);
+        check(msg.find("xhl-core.dll+0x2a0 hooked the function before Kiln did; Kiln's chat/ChatLogAdd (kiln-chat), "
+                       "chat/ChatLogAdd (kiln-emf) chained over it.") != std::string::npos &&
+                  msg.find("[late]") != std::string::npos,
+              "foreign-before: the message names both sides (each hook with its owner, once) and the fix: " + msg);
     }
     // the same module already late: nothing to move
     o = compute_overlaps(map, {row("XHL-Core.dll", "loaded", true)}, {});
@@ -169,6 +173,10 @@ void overlap_cases() {
     if (o.size() == 1) {
         check(o[0]["kind"] == "foreign-over" && o[0]["fix"] == "none", "foreign-over: kind, fix none");
         check(strings(o[0]["owners"]) == std::vector<std::string>({"items", "emf:coolmod"}), "foreign-over: owners");
+        const std::string msg = o[0]["message"].get<std::string>();
+        check(msg.rfind("xhl-core.dll+0x4410 hooked over Kiln's gameplay/InventoryTransfer (kiln-items), "
+                        "gameplay/InventoryTransfer (emf:coolmod). Kiln's detour stays armed", 0) == 0,
+              "foreign-over: the message names each hook with its owner: " + msg);
     }
     map["targets"].push_back(target("0x5000", "a/B", {"service:kiln-a.dll"}, dest("one.dll", "0x1"), dest("two.dll", "0x2")));
     o = compute_overlaps(map, chain, {});
@@ -214,6 +222,31 @@ void overlap_cases() {
     check(o.size() == 1 && o[0]["fix"] == "none", "refused for another reason: fix none");
     // deterministic: same input, same output
     check(compute_overlaps(map, chain, refused) == compute_overlaps(map, chain, refused), "compute_overlaps is deterministic");
+
+    // GitHub issue 39: three sigdb symbols name ItemRegistryFind, and the map's label is the alphabetically first
+    // (build/ItemFind), while the only hook on it is kiln-content's content/ItemRegistryFind. The line names that hook.
+    map = {{"targets", json::array({{{"rva", "0xe94470"}, {"symbol", "build/ItemFind"}, {"label", "build/ItemFind"},
+                                     {"links", json::array({{{"owner", "service:kiln-content.dll"}, {"kind", "raw"}, {"priority", 0},
+                                                             {"label", "content/ItemRegistryFind"}}})},
+                                     {"foreignBefore", dest("quick-deposit.dll", "0x16100")}, {"foreignOver", nullptr}}})},
+           {"foreign", json::array()}};
+    o = compute_overlaps(map, {}, {});
+    check(o.size() == 1 && o[0]["symbol"] == "build/ItemFind" && strings(o[0]["owners"]) == std::vector<std::string>({"content"}),
+          "issue 39: the row keeps the sigdb symbol and the short owners (rules and the launcher match on them)");
+    if (o.size() == 1) {
+        const std::string msg = o[0]["message"].get<std::string>();
+        check(msg.rfind("quick-deposit.dll+0x16100 hooked the function before Kiln did; Kiln's content/ItemRegistryFind "
+                        "(kiln-content) chained over it.", 0) == 0 && msg.find("build/ItemFind") == std::string::npos,
+              "issue 39: the line names the hook and its owner, not the first sigdb symbol: " + msg);
+    }
+    // the owner as the lines show it (hook_owner.h)
+    check(hook_owner_text("service:kiln-content.dll") == "kiln-content" && hook_owner_text("plugin:kiln-emf.DLL") == "kiln-emf" &&
+              hook_owner_text("emf:coolmod") == "emf:coolmod" && hook_owner_text("native:fps-unlock") == "native:fps-unlock" &&
+              hook_owner_text("kiln") == "kiln" && hook_owner_text("") == "",
+          "hook_owner_text: service and plugin DLLs by name, other owners as they are");
+    check(hook_link_text("content/ItemRegistryFind", "service:kiln-content.dll") == "content/ItemRegistryFind (kiln-content)" &&
+              hook_link_text("a/B", "") == "a/B",
+          "hook_link_text: <label> (<owner>), the label alone without an owner");
 }
 
 // The reports are built from rows the core wrote itself: `refused` has null symbol, rva, module and offset. Nothing in

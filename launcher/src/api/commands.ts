@@ -760,7 +760,7 @@ export interface NativeJson {
   }[];
 }
 export interface StoppedStart {
-  kind: "roster" | "boot-mod"; reason: string; mods: string[]; names: string[]; advice: string; utc: string; exitCode: number; pid: number;
+  kind: "roster" | "boot-mod" | "content"; reason: string; mods: string[]; names: string[]; advice: string; utc: string; exitCode: number; pid: number;
 }
 export interface BootState {
   stoppedStart?: StoppedStart | null;
@@ -1978,7 +1978,7 @@ export const COMMANDS = [
   "deck_browse", "deck_gamepad", "deck_fullscreen", "deck_quit",
   "nexus_account", "nexus_sign_in", "nexus_sign_out", "nexus_search", "nexus_mod", "nexus_installed", "nexus_download", "nexus_links", "nexus_link_install", "nexus_link_dismiss", "nexus_handler_status", "nexus_handler_set",
   "engine_settings_get", "engine_settings_set", "engine_status", "engine_own_folders", "engine_adopt_folder", "eml_backup", "eml_restore", "eml_data_plan", "eml_data_apply", "eml_data_undo", "eml_data_latest",
-  "chain_view", "chain_set_late",
+  "chain_view", "chain_set_late", "shroudlink_notice",
   "found_scan", "found_add",
   "cook_plan", "cook_run", "boot_snapshot_run",
   "report_save", "report_summary",
@@ -2021,3 +2021,6 @@ export async function onKilnEvent<E extends KilnEventName>(name: E, handler: (pa
 export interface SnapshotStartup { phase: "preparing" | "blocked" | "ready"; reasons: string[]; canContinue?: boolean }
 export const snapshotStatus = () => call<SnapshotStartup>("snapshot_status");
 export const snapshotContinue = () => call<null>("snapshot_continue");
+
+export interface ShroudlinkNotice { mods: string[]; addons: LibraryRef[] }
+export const shroudlinkNotice = (profile: Profile, gameId: GameId) => call<ShroudlinkNotice | null>("shroudlink_notice", { profile, gameId });

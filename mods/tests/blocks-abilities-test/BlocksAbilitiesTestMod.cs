@@ -207,6 +207,7 @@ public sealed partial class BlocksAbilitiesTestMod : Mod
             RowsBySync();
             await Perks();
             await RunPerk();
+            await RunLift();
             await AbilityCosts();
             await Deliveries();
             await Flights();
@@ -281,6 +282,8 @@ public sealed partial class BlocksAbilitiesTestMod : Mod
             var e = errors.FirstOrDefault(x => x.Contains(block, StringComparison.Ordinal));
             Check(e != null && words.All(w => e.Contains(w, StringComparison.OrdinalIgnoreCase)), $"{block}: \"{e}\"");
         }
+        Named("perk-run-size", "WrongSize", "size 8", "size 4");
+        Named("perk-run-later", "Later", "sync");
         Named("perk-nothing", "does nothing");
         Named("perk-bad-value", "value", "lots");
         Named("perk-typo", "modifes");
@@ -309,7 +312,7 @@ public sealed partial class BlocksAbilitiesTestMod : Mod
         Named("status-no-time", "seconds");
         Named("item-eat-material", "onEat");
         Named("item-empty-rule", "canEat");
-        string[] wrong = ["perk-nothing", "perk-bad-value", "perk-typo", "ability-nothing", "ability-charges", "ability-bad-cone", "ability-no-effects", "ability-unknown-delivery", "ability-bad-homing", "ability-casts-nothing", "talent-no-anchor", "talent-levels", "talent-class", "talent-tiers",
+        string[] wrong = ["perk-run-size", "perk-run-later", "perk-nothing", "perk-bad-value", "perk-typo", "ability-nothing", "ability-charges", "ability-bad-cone", "ability-no-effects", "ability-unknown-delivery", "ability-bad-homing", "ability-casts-nothing", "talent-no-anchor", "talent-levels", "talent-class", "talent-tiers",
             "tree-no-nodes", "tree-bad-require", "tree-loop", "tree-game-node", "tree-same-cell", "trigger-nothing", "trigger-bad-state", "trigger-stop-state", "trigger-end-action", "trigger-stop-eaten", "status-bad-while", "status-no-time", "item-eat-material", "item-empty-rule"];
         var made = wrong.Where(blocks.Contains).ToList();
         Check(made.Count == 0, $"none of the {wrong.Length} wrong blocks became anything: {string.Join(", ", made)}");

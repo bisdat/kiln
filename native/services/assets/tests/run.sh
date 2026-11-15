@@ -11,7 +11,7 @@ out=$KILN_OUT/assets-host-test
 mkdir -p "$out"
 
 # The service's header is C: it compiles as C11.
-printf '#include "services/kiln_assets.h"\n_Static_assert(KILN_ASSET_PUT_PIN == 4, "KILN_ASSET_PUT_PIN");\n_Static_assert(sizeof(KilnBlobCatalogInfo) == 32, "info");\n_Static_assert(sizeof(KilnBlobCatalogEntry) == 48, "entry");\n' |
+printf '#include "services/kiln_assets.h"\n#include "services/kiln_assets_vfx.h"\n_Static_assert(KILN_ASSET_PUT_PIN == 4, "KILN_ASSET_PUT_PIN");\n_Static_assert(sizeof(KilnBlobCatalogInfo) == 32, "info");\n_Static_assert(sizeof(KilnBlobCatalogEntry) == 48, "entry");\n_Static_assert(sizeof(KilnAssetsVfxBudget) == 16, "vfx budget");\n' |
   gcc -std=c11 -Wall -Wextra -pedantic -fsyntax-only -I"$here/../../../core/abi" -x c -
 echo "PASS kiln_assets.h compiles as C11"
 
@@ -26,6 +26,8 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -DKILN_ASSETS_CATALOG_TEST -fsanitize=addres
   "$here/test_store.cpp" "$here/../store.cpp" "$here/../catalog.cpp" "$here/../util.cpp" -o "$out/test_store" -pthread
 # Resource bytes are never freed by design (the game keeps pointers into them): no leak check.
 ASAN_OPTIONS=detect_leaks=0 "$out/test_store"
+
+KILN_OUT="$KILN_OUT" bash "$here/run_vfx.sh"
 
 # Which cooked files a game loads (cooktrust.cpp): SHA-256, the cook receipts, kiln.json's "cooked".
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=undefined \

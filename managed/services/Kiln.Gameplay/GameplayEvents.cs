@@ -184,8 +184,8 @@ public enum BuildOutcome
 /// synchronously; this event then reports <see cref="BuildOutcome.DeniedByZone"/>.</summary>
 /// <remarks>Managed mods referencing Kiln.Gameplay request the five building detours at host startup, even for
 /// crafting-only use. Native plugins request them at startup if they will later add build/break denies. With no worlds this
-/// happens immediately. Interest first seen while any world runs waits for the last world to stop; building events
-/// begin in the next world (earlier operations are not replayed). Check capability <c>gameplay.build_hooks</c> for the
+/// happens immediately. Interest first seen while any world runs waits for checked installation at safe Pre ticks; the shared
+/// budget is two targets per Pre (five building targets need three Pres when alone). Earlier operations are not replayed. Check capability <c>gameplay.build_hooks</c> for the
 /// waiting/refusal reason. Unsubscribing leaves installed hooks in place, passing through without listeners or zones.
 /// Terraforming uses its separate hook.</remarks>
 public sealed class BuildEvent : GameplayEvent

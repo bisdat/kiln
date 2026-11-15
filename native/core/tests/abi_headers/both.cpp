@@ -24,3 +24,5 @@ static_assert(std::is_same_v<decltype(KilnAbilitiesApi::program_info), KilnResul
               std::is_same_v<decltype(KilnWorldApi::program_info), KilnResult(KILN_CALL*)(KilnHandle, KilnWorldProgramInfo*)>,
               "each table takes its own struct");
 #endif
+
+static_assert(sizeof(struct KilnProgramInfo) == sizeof(KilnProgramInfo), "the legacy struct tag also names the first header\'s type");

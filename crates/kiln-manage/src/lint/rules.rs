@@ -1655,34 +1655,63 @@ fn natives(out: &mut Out, m: &LMod, f: &LFile) {
 /// An effect's `"run": "<modid>.<Name>"` (EffectBlock.Run, 0.2.0-dev.29): Kiln.Blocks binds the native's parameters by name (self,
 /// target, attacker, caster, position, attackMod, damage). With the native's declaration in this mod's impact/natives.json (its build
 /// writes the [ImpactNative] entries there), a parameter of another name is KL340, and so is a required attackMod or damage in an
-/// effect that deals no damage (nothing to bind). Another mod's native, or one this mod's files do not declare yet, is not checked.
+/// effect that deals no damage (nothing to bind), a parameter of another type or size than its binding, a declaration that is not
+/// `"sync": true`, and one whose argc is not its number of named parameters (Kiln.Blocks refuses each when it loads the block).
+/// Another mod's native, or one this mod's files do not declare yet, is not checked.
 fn run_bindings(out: &mut Out, m: &LMod) {
     const BINDINGS: &[&str] = &["self", "target", "attacker", "caster", "position", "attackMod", "damage"];
-    // name -> [(parameter, optional)] from this mod's impact/natives.json
-    let mut declared: HashMap<String, Vec<(String, bool)>> = HashMap::new();
+    // a declaration of this mod's impact/natives.json: "sync", argc, [(parameter, optional, type, size)]
+    type Declared = (bool, Option<f64>, Vec<(String, bool, String, f64)>);
+    let mut declared: HashMap<String, Declared> = HashMap::new();
     for f in m.files.iter().filter(|f| f.kind == "natives") {
         for n in f.root.as_ref().and_then(|r| r.get("natives")).and_then(Node::as_array).into_iter().flatten() {
             let Some(name) = n.get("name").and_then(Node::as_str) else { continue };
             let args = n.get("args").and_then(Node::as_array).into_iter().flatten()
-                .filter_map(|a| Some((a.get("name")?.as_str()?.to_string(), a.get("optional").and_then(|o| o.as_bool()).unwrap_or(false))))
+                .filter_map(|a| Some((a.get("name")?.as_str()?.to_string(), a.get("optional").and_then(|o| o.as_bool()).unwrap_or(false),
+                    a.get("type").and_then(Node::as_str).unwrap_or("any").to_string(), a.get("size").and_then(Node::as_f64).unwrap_or(0.0))))
                 .collect();
-            declared.insert(name.to_string(), args);
+            let sync = n.get("sync").and_then(|s| s.as_bool()).unwrap_or(false);
+            declared.insert(name.to_string(), (sync, n.get("argc").and_then(Node::as_f64), args));
         }
     }
-    fn walk(out: &mut Out, file: &str, node: &Node, declared: &HashMap<String, Vec<(String, bool)>>) {
+    fn walk(out: &mut Out, file: &str, node: &Node, declared: &HashMap<String, Declared>) {
         if let Some(members) = node.as_object() {
             if let Some(run) = node.get("run")
                 && let Some(full) = run.as_str()
-                && let Some(params) = declared.get(full)
+                && let Some((sync, argc, params)) = declared.get(full)
             {
-                let hits = node.get("damage").is_some() || node.get("knockback").is_some();
-                for (p, optional) in params {
+                if !sync {
+                    out.push(Diagnostic::new(file, codes::RUN_BINDING, run.span, &format!(
+                        "run {full}: its declaration is not \"sync\": true; a native that answers a step later cannot run inside the effect")));
+                }
+                if argc.is_none_or(|a| a != params.len() as f64) {
+                    out.push(Diagnostic::new(file, codes::RUN_BINDING, run.span, &format!(
+                        "run {full}: its declaration's argc ({}) is not its {} named parameter(s)",
+                        argc.map_or("none".to_string(), |a| a.to_string()), params.len())));
+                }
+                let damage = node.get("damage").is_some();
+                let hits = damage || node.get("knockback").and_then(Node::as_str).is_some_and(|k| k != "none");
+                for (p, optional, ty, size) in params {
                     if !BINDINGS.contains(&p.as_str()) {
                         out.push(Diagnostic::new(file, codes::RUN_BINDING, run.span, &format!(
                             "run {full}: parameter '{p}' names nothing a run native gets; its parameters are named {}", BINDINGS.join(", "))));
-                    } else if !optional && !hits && (p == "attackMod" || p == "damage") {
+                    } else if !optional && ((p == "attackMod" && !hits) || (p == "damage" && !damage)) {
                         out.push(Diagnostic::new(file, codes::RUN_BINDING, run.span, &format!(
                             "run {full}: parameter '{p}' has nothing to bind to: this effect deals no damage (give it damage, or make the parameter Optional)")));
+                    } else if (p != "attackMod" || hits) && (p != "damage" || damage) {
+                        let (want, bytes) = match p.as_str() {
+                            "position" => ("float3", 12.0),
+                            "attackMod" => ("float32", 4.0),
+                            "damage" => ("impact.DamageSetup", 52.0),
+                            _ => ("ecs.EntityId", 4.0),
+                        };
+                        if ty != "any" && ty != want {
+                            out.push(Diagnostic::new(file, codes::RUN_BINDING, run.span, &format!(
+                                "run {full}: parameter '{p}' is {ty}; what it binds to is {want}")));
+                        } else if *size != 0.0 && *size != bytes {
+                            out.push(Diagnostic::new(file, codes::RUN_BINDING, run.span, &format!(
+                                "run {full}: parameter '{p}' has size {size}; what it binds to has size {bytes}")));
+                        }
                     }
                 }
             }

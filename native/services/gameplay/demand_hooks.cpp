@@ -2,7 +2,10 @@
 #include "demand_hooks.h"
 #include "services/kiln_caps.h"
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 namespace kg {
 std::recursive_mutex& hooks_publication() { static std::recursive_mutex mutex; return mutex; }
 namespace {
@@ -13,11 +16,18 @@ struct Entry {
 struct Group {
     std::vector<Entry> entries;
     std::atomic<bool> installed{false}; uint32_t state=0, retries=0, next=0, reason_code=KILN_CAP_REASON_NONE; KilnOwner owner=0;
+    // deferred: refused three times for unchecked threads while a world ran; tried again at the next no-world moment.
+    // was_deferred: that happened (for the line when it finally goes in).
+    bool deferred=false, was_deferred=false;
     std::string reason="resolved, not installed: no mod asked";
 };
-Group groups[4];
-const char* names[]={"craft", "terraform", "spawn", "entities"};
-int index(uint32_t bit) { for(int i=0;i<4;++i) if(bit==(2u<<i)) return i; return -1; }
+Group groups[5];
+bool host_announced=false, first_world=false, legacy_fallback=false, legacy_reported=false, legacy_batch_pending=false, legacy_skip_same_pre=false;
+std::filesystem::path lab_control;
+bool lab_enabled=false;
+constexpr uint32_t bits[]={2,4,8,16,1};
+const char* names[]={"craft", "terraform", "spawn", "entities", "build"};
+int index(uint32_t bit) { for(int i=0;i<5;++i) if(bit==bits[i]) return i; return -1; }
 void publish(int i) {
     auto& g=groups[i]; const auto* caps=static_cast<const KilnCapsApi*>(g_api->service(kstr(KILN_CAPS_SERVICE),1));
     const std::string row=std::string("gameplay.")+names[i]+"_hooks";
@@ -39,8 +49,13 @@ void refuse(int i, const std::string& why) {
     auto& g=groups[i]; g.state=3; g.reason_code=KILN_CAP_REASON_FAULTED; g.reason="refused: "+why+"; installed pass-through targets "+std::to_string(g.next);
     KG_W("kiln.gameplay: %s hooks %s",names[i],g.reason.c_str()); publish(i);
 }
+unsigned pre_writes=0;  // late installer calls in the current hooks_poll (one Pre)
 void advance(int i, const KilnHooksApi* h, unsigned& budget) {
     auto& g=groups[i];
+    // While a world runs, each checked write stops the game's other threads (kiln.hooks logs that time at debug and
+    // warns above 50 ms): the whole call is timed here and logged at info, so a late install's cost is in kiln.log.
+    const bool late=h->typed_install_ready()==1;
+    if(!late) g.deferred=false;  // a no-world moment: a group that waited since a refusal during play is tried now
     while(g.next<g.entries.size() && budget) {
         auto& e=g.entries[g.next];
         if(!e.target) { refuse(i,std::string(e.label)+" did not resolve"); return; }
@@ -48,23 +63,65 @@ void advance(int i, const KilnHooksApi* h, unsigned& budget) {
         // Services used to precede plugin-owned priority-zero links. Pin the supported peers explicitly so a
         // late join keeps that order. EMF's priority-one newest-first links still precede gameplay; rules has its
         // own before-kiln.gameplay constraint. Creature lifetime registration precedes gameplay in service load order.
-        const auto order=kiln::hook_detail::make_order(0,e.label,"kiln.set,kiln.shroudforge,kiln.npcai","kiln.creatures");
+        const auto order=kiln::hook_detail::make_order(0,e.label,"kiln.set,kiln.shroudforge,kiln.npcai","kiln.creatures,kiln.build,kiln.rules");
         FrameLink::api=h; --budget;
-        const auto rc=h->detour_typed_checked(g_owner,e.target,&order,&sig,e.handler,e.link,&e.handle);
+        // Lab negative control only: a second marker was required at service load. Refuse BEFORE the installer,
+        // so the lab cannot accidentally patch the selected target or anything after it.
+        std::string forced; unsigned target=0;
+        if(lab_enabled) { std::ifstream control(lab_control / "gameplay.unchecked"); control >> forced >> target; }
+        const bool inject=forced==names[i] && target==g.next;
+        const auto t0=std::chrono::steady_clock::now();
+        const auto rc=inject ? static_cast<KilnResult>(KILN_HOOKS_ERR_UNCHECKED) :
+            h->detour_typed_checked(g_owner,e.target,&order,&sig,e.handler,e.link,&e.handle);
+        if(inject) KG_W("kiln.gameplay: LAB %s target %u unchecked attempt %u (nothing written)",names[i],g.next,g.retries+1);
+        else if(late) {
+            const double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-t0).count();
+            KG_I("kiln.gameplay: %s %s during play: the installer call took %.1f ms on the world's thread (write %u in this Pre)",
+                 e.label,rc==KILN_OK ? "went in" : "was refused",ms,++pre_writes);
+        }
         if(rc!=KILN_OK) {
             char text[512]{}; size_t n=0;
-            if(h->typed_refusal) h->typed_refusal(text,sizeof text,&n);
+            if(!inject && h->typed_refusal) h->typed_refusal(text,sizeof text,&n);
+            if(rc==KILN_HOOKS_ERR_UNCHECKED && !late) {
+                // No world runs in the process (start, a menu, after a stop): no game job runs and nobody plays, the moment
+                // dev.28 wrote every one of these hooks unchecked. Only a refusal for threads that could not be checked
+                // falls back; any other refusal (the code does not fit its descriptor, the bytes changed) stays one.
+                const auto plain=h->detour_typed ? h->detour_typed(g_owner,e.target,&order,&sig,e.handler,e.link,&e.handle)
+                                                 : static_cast<KilnResult>(KILN_ERR_UNAVAILABLE);
+                if(plain!=KILN_OK) {
+                    refuse(i,std::string(e.label)+" (error "+std::to_string(plain)+"): the checked install was refused for threads "
+                           "it could not check, and the unchecked install with no world running failed too; see kiln.log"); return;
+                }
+                KG_W("kiln.gameplay: %s hooks: %s installed unchecked: no world running (%s)",names[i],e.label,
+                     inject ? "the checked install refused by gameplay.unchecked" :
+                              "the checked install found threads it could not check; kiln.hooks' warning above counts them");
+                ++g.next; g.retries=0;
+                continue;
+            }
             if(rc==KILN_HOOKS_ERR_UNCHECKED && ++g.retries<3) {
                 g.reason=std::string("waiting: ")+e.label+" thread check refused; retry at next safe Pre"; publish(i); return;
             }
-            refuse(i,std::string(e.label)+" (error "+std::to_string(rc)+"): "+
-                (rc==KILN_HOOKS_ERR_UNCHECKED ? "thread check refused on three attempts; see kiln.log" : text)); return;
+            if(rc==KILN_HOOKS_ERR_UNCHECKED) {
+                // Three refusals while a world runs. No unchecked write during play (a thread that could not be checked may
+                // run inside the bytes): the group waits for the next moment no world runs and goes in then.
+                g.retries=0; g.deferred=g.was_deferred=true;
+                const char* when=hooks_watch_no_world(true) ? "the next menu" : "the next server start";
+                g.reason=std::string("waiting for the next no-world moment (")+when+"): "+e.label+
+                    " thread check refused on three attempts during play; installed pass-through targets "+std::to_string(g.next);
+                publish(i);
+                KG_W("kiln.gameplay: %s hooks wait for the next no-world moment (%s): %s thread check refused on three attempts "
+                     "during play; see kiln.log",names[i],when,e.label);
+                return;
+            }
+            refuse(i,std::string(e.label)+" (error "+std::to_string(rc)+"): "+text); return;
         }
         ++g.next; g.retries=0;
     }
     if(g.next==g.entries.size()) {
         g.state=1; g.reason="installed"; g.installed.store(true,std::memory_order_release); publish(i);
         KG_I("kiln.gameplay: %s hooks installed on first use by %llu",names[i],static_cast<unsigned long long>(g.owner));
+        if(g.was_deferred) KG_I("kiln.gameplay: %s hooks installed with no world running, after waiting since the refusal during play",names[i]);
+        g.was_deferred=false;
     }
 }
 }
@@ -79,10 +136,10 @@ void hook_register(uint32_t bit,FrameLink* link,uintptr_t target,const char* lab
 }
 bool hooks_installed(uint32_t bit) { int i=index(bit); return i>=0 && groups[i].installed.load(std::memory_order_acquire); }
 bool hooks_request(uint32_t mask,KilnOwner owner) {
-    if(!mask || (mask & ~KILN_GAMEPLAY_HOOK_ALL)) return false;
+    if(mask & ~KILN_GAMEPLAY_HOOK_ALL) return false;
+    if(mask==0) { std::lock_guard lock(hooks_publication()); host_announced=true; return true; }
     bool ok=true;
-    if(mask & KILN_GAMEPLAY_HOOK_BUILD) ok=build_request(owner);
-    for(int i=0;i<4;++i) if(mask & (2u<<i)) {
+    for(int i=0;i<5;++i) if(mask & bits[i]) {
         auto& g=groups[i]; std::lock_guard lock(hooks_publication());
         if(g.state==0) {
             g.owner=owner; g.state=2; g.reason="waiting for safe Pre; events and rules begin after installation (earlier events are not replayed)"; publish(i);
@@ -90,16 +147,82 @@ bool hooks_request(uint32_t mask,KilnOwner owner) {
             if(!h) refuse(i,"kiln.hooks has no checked typed installer");
             else if(h->typed_install_ready()==2) { unsigned budget=6; advance(i,h,budget); }
             else KG_I("kiln.gameplay: %s hooks waiting for safe Pre (owner %llu); events and rules begin after installation",names[i],static_cast<unsigned long long>(owner));
+        } else if(g.state==2 && g.deferred) {
+            const auto* h=installer();
+            if(h && h->typed_install_ready()==2) { unsigned budget=16; advance(i,h,budget); }
         }
         ok=(g.state!=3) && ok;
     }
     return ok;
 }
-void hooks_poll() {
-    const auto* h=installer(); if(!h || !h->typed_install_ready()) return;
-    unsigned budget=2;
-    for(int i=0;i<4 && budget;++i) { auto& g=groups[i]; std::lock_guard lock(hooks_publication()); if(g.state==2) advance(i,h,budget); }
+void legacy_result() {
+    if(!legacy_fallback || legacy_reported) return;
+    bool complete=true, refused=false;
+    for(auto& g:groups) { complete &= g.state==1 || g.state==3; refused |= g.state==3; }
+    if(complete) { legacy_reported=true;
+        if(!refused) KG_I("no demand-aware host: all gameplay hooks installed as before");
+        else KG_W("no demand-aware host: requested all gameplay hooks; some refused (see group rows)"); }
 }
+void hooks_poll() {
+    const auto* h=installer(); if(!h) return;
+    const uint32_t ready=h->typed_install_ready(); if(!ready) return;
+    std::lock_guard lock(hooks_publication());
+    pre_writes=0;
+    if(legacy_skip_same_pre) { legacy_skip_same_pre=false; return; }
+    // Legacy-only first-world batch precedes old Host's first Pre/OnLoad. A checked refusal still retries later;
+    // all ordinary late demand (and those retries) shares the two-target budget.
+    unsigned budget=legacy_batch_pending ? 10 : 2;
+    legacy_batch_pending=false;
+    for(int i=0;i<5 && budget;++i) if(groups[i].state==2 && (!groups[i].deferred || ready==2)) advance(i,h,budget);
+    legacy_result();
+}
+void hooks_poll_no_world() {
+    const auto* h=installer(); if(!h || h->typed_install_ready()!=2) return;
+    std::lock_guard lock(hooks_publication());
+    unsigned budget=16;
+    for(int i=0;i<5;++i) if(groups[i].state==2 && groups[i].deferred) advance(i,h,budget);
+    bool waiting=false;
+    for(auto& g:groups) waiting |= g.state==2 && g.deferred;
+    if(!waiting) hooks_watch_no_world(false);
+    legacy_result();
+}
+void hooks_init_control() {
+    char path[4096]{}; size_t n=0;
+    if(!g_api->path || g_api->path(KILN_PATH_CONTROL,path,sizeof path,&n)!=KILN_OK || !n || n>=sizeof path) return;
+    lab_control=std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(path),n));
+    std::error_code ec;
+    lab_enabled=std::filesystem::exists(lab_control / "gameplay.lab",ec);
+    if(lab_enabled) KG_W("kiln.gameplay: LAB unchecked control enabled by gameplay.lab; never enable on a player's server");
+    else if(std::filesystem::exists(lab_control / "gameplay.unchecked",ec))
+        KG_W("kiln.gameplay: gameplay.unchecked IGNORED without gameplay.lab at service load");
+}
+void hooks_world_started(bool world_notification) {
+    std::lock_guard lock(hooks_publication());
+    if(first_world) return;
+    first_world=true;
+    if(!host_announced) {
+        legacy_fallback=true;
+        const auto* h=installer();
+        const uint32_t ready=h ? h->typed_install_ready() : 0;
+        hooks_request(KILN_GAMEPLAY_HOOK_ALL,g_owner);
+        // No-world requests already attempted each group once. A refusal must not get an immediate second try.
+        if(ready!=2) {
+            legacy_batch_pending=true;
+            if(h && h->typed_install_ready()) {
+                hooks_poll();
+                // begin_world is inside the first Pre. Its ordinary gameplay subscriber still follows; retries
+                // belong to a LATER Pre, not that second callback in the same one.
+                legacy_skip_same_pre=world_notification;
+            }
+        }
+        legacy_result();
+    }
+}
+bool build_request(KilnOwner owner) { return hooks_request(KILN_GAMEPLAY_HOOK_BUILD,owner); }
+bool build_installed() { return hooks_installed(KILN_GAMEPLAY_HOOK_BUILD); }
+uint32_t build_state() { std::lock_guard lock(hooks_publication()); return groups[4].state; }
+uint32_t build_mask() { std::lock_guard lock(hooks_publication()); return (1u<<groups[4].next)-1; }
+std::string build_reason() { std::lock_guard lock(hooks_publication()); return groups[4].reason; }
 bool hooks_interest(uint32_t mask,KilnOwner owner) {
     uint32_t groups=0;
     if(mask & (1u<<KILN_GAMEPLAY_CRAFTED)) groups|=KILN_GAMEPLAY_HOOK_CRAFT;

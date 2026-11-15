@@ -15,9 +15,9 @@ public sealed class GameplayDemandMod : Mod
 public sealed unsafe class GameplayDemandTests : ModsFixture
 {
     private static FakeHost? _host;
-    private static int _requests; private static uint _groups;
+    private static int _requests, _announcements; private static uint _groups;
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-    private static int RequestGroups(ulong owner,uint groups) { ++_requests; _groups=groups; _host!.Log(LogLevel.Info,$"gameplay-demand-request:{owner}"); return 0; }
+    private static int RequestGroups(ulong owner,uint groups) { if(groups==0) { ++_announcements; return 0; } ++_requests; _groups=groups; _host!.Log(LogLevel.Info,$"gameplay-demand-request:{owner}"); return 0; }
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int Request(ulong owner) { ++_requests; _host!.Log(LogLevel.Info, $"gameplay-demand-request:{owner}"); return 0; }
 
@@ -91,7 +91,7 @@ public sealed unsafe class GameplayDemandTests : ModsFixture
     }
 
     [Theory]
-    [InlineData(typeof(Creatures),8u)] [InlineData(typeof(Rules),5u)] [InlineData(typeof(Quests),7u)] [InlineData(typeof(BootDefinitions),15u)]
+    [InlineData(typeof(Creatures),8u)] [InlineData(typeof(Rules),0u)] [InlineData(typeof(Quests),7u)] [InlineData(typeof(BootDefinitions),15u)]
     public void Shared_facade_references_count_their_indirect_gameplay_consumers(Type facade,uint expected)
     {
         var a=System.Reflection.Emit.AssemblyBuilder.DefineDynamicAssembly(new System.Reflection.AssemblyName("FacadeProbe"+Guid.NewGuid().ToString("N")),System.Reflection.Emit.AssemblyBuilderAccess.RunAndCollect);
@@ -133,6 +133,60 @@ public sealed unsafe class GameplayDemandTests : ModsFixture
         host.Services["kiln.gameplay"]=(nint)table;
         try { using var mods=NewManager(host); mods.PrepareGameplayHooks(); Assert.Equal(31u,_groups); }
         finally { NativeMemory.Free(table); _host=null; }
+    }
+
+    [Theory]
+    [InlineData(136)] [InlineData(144)]
+    public void Preflight_announces_demand_aware_host_even_without_any_mods(int size)
+    {
+        Assert.Equal(0u,GameplayBuildDemand.HostReady);
+        var host=new FakeHost(); _host=host; _requests=_announcements=0;
+        var table=(byte*)NativeMemory.AllocZeroed((nuint)size); *(uint*)table=(uint)size; *(uint*)(table+4)=1;
+        *(nint*)(table+128)=(nint)(delegate* unmanaged[Cdecl]<ulong,int>)&Request;
+        if(size==144) *(nint*)(table+136)=(nint)(delegate* unmanaged[Cdecl]<ulong,uint,int>)&RequestGroups;
+        host.Services["kiln.gameplay"]=(nint)table;
+        try { using var mods=NewManager(host); mods.PrepareGameplayHooks();
+            Assert.Equal(size==144 ? 1 : 0,_announcements); Assert.Equal(0,_requests); }
+        finally { NativeMemory.Free(table); _host=null; }
+    }
+
+    [Fact]
+    public void Metadata_is_cached_across_mods_by_path_and_file_identity_only_within_one_pass()
+    {
+        InstallHello();
+        var path=Path.Combine(ModsDir,"hello",Manifest.Read(Path.Combine(ModsDir,"hello")).EntryAssembly);
+        var pass=new GameplayBuildDemand.MetadataPass();
+        Assert.Equal(pass.References(path),pass.References(path)); Assert.Equal(1,pass.AssembliesRead);
+        File.SetLastWriteTimeUtc(path,File.GetLastWriteTimeUtc(path).AddSeconds(2));
+        pass.References(path); Assert.Equal(2,pass.AssembliesRead);
+        var fresh=new GameplayBuildDemand.MetadataPass(); fresh.References(path); Assert.Equal(1,fresh.AssembliesRead);
+    }
+    [Fact]
+    public void Preflight_logs_metadata_read_count_and_elapsed_time_even_for_an_empty_profile()
+    {
+        var host=new FakeHost(); using var mods=NewManager(host); mods.PrepareGameplayHooks();
+        Assert.Contains(host.Lines,x=>x.Contains("gameplay pre-world demand: 0 assemblies read in ") && x.EndsWith(" ms"));
+    }
+    [Fact]
+    public void Oversized_metadata_is_conservative_demand_without_reading_the_file()
+    {
+        InstallHello();
+        using(var file=File.Create(Path.Combine(ModsDir,"hello","HugeHelper.dll"))) file.SetLength(64L*1024*1024+1);
+        var host=new FakeHost(); _host=host; _groups=0;
+        var table=(byte*)NativeMemory.AllocZeroed(144); *(uint*)table=144; *(uint*)(table+4)=1;
+        *(nint*)(table+136)=(nint)(delegate* unmanaged[Cdecl]<ulong,uint,int>)&RequestGroups;
+        host.Services["kiln.gameplay"]=(nint)table;
+        try { using var mods=NewManager(host); mods.PrepareGameplayHooks(); Assert.Equal(31u,_groups); }
+        finally { NativeMemory.Free(table); _host=null; }
+    }
+
+    [Fact]
+    public void Shared_exports_are_read_once_across_all_admitted_mods_in_the_preflight()
+    {
+        InstallLibSet();
+        var expected=Directory.EnumerateDirectories(ModsDir).SelectMany(d=>Directory.EnumerateFiles(d,"*.dll")).Count();
+        var host=new FakeHost(); using var mods=NewManager(host); mods.PrepareGameplayHooks();
+        Assert.Contains(host.Lines,x=>x.Contains($"gameplay pre-world demand: {expected} assemblies read in "));
     }
 
 }

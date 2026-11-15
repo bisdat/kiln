@@ -151,17 +151,20 @@ Another engine (Enshwick, EMF, ShroudForge, a closed DLL) may have hooked a func
 target's live bytes with the exe file's before it hooks:
 
 ```
-[kiln] hooks: chat/ChatLogAdd chained over enshwick.dll+0x11ea80
+[kiln] hooks: chat/ChatLogAdd (kiln-chat) chained over enshwick.dll+0x11ea80
 ```
 
 Kiln's detour sits in front of the other module's jump and the call goes on into it. The map records it as
-`foreignBefore`.
+`foreignBefore`. These lines name Kiln's hooks on the function by their labels and owners (`<label> (<owner>)`, the
+owner `service:kiln-chat.dll` as `kiln-chat`), not by the sigdb name of the address: several symbols can name one
+function, and the map's `label` is the alphabetically first of them (dev.29, GitHub issue 39: `build/ItemFind` for
+kiln-content's `content/ItemRegistryFind`).
 
 After boot and at the first world, never per frame, Kiln checks that each target still begins with its own detour.
 If another module hooked over it:
 
 ```
-[kiln] hooks: xhl.dll+0x4410 hooked over Kiln's chat/ChatLogAdd (Kiln's detour stays armed; it is reached through their jump)
+[kiln] hooks: xhl.dll+0x4410 hooked over Kiln's chat/ChatLogAdd (kiln-chat) (Kiln's detour stays armed; it is reached through their jump)
 ```
 
 The map records `foreignOver`. Kiln never writes over that target again, and never removes the other module's jump.

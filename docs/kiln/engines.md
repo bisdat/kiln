@@ -199,12 +199,12 @@ Library import rules; a runtime plugin may already run an engine's mods placed i
 
 ### ShroudForge self-hosting
 
-ShroudForge can also host itself: its own proxy in the game folder starts it, and Kiln's adapter stands aside
-before consulting the profile. ShroudForge scans its own mods folder; the profile's ShroudForge switches do not
-decide that start. Kiln still writes managed packages' switches during activation; self-hosting does not undo those writes.
+ShroudForge can also host itself. If its own proxy loads, Kiln's adapter steps aside and ShroudForge reads its own
+mods folder. Profile switches still update copies Kiln manages. Folders you installed yourself keep their own switches.
 
-Engines shows **runs itself: <file>**, and Mods (desktop and Deck) names the detected loader when the loaded profile
-contains ShroudForge mods, including switched-off entries. Remove that file to let Kiln's adapter host ShroudForge.
+Engines shows **own loader installed: <file>** when disk detection finds a loader. Mods on desktop and Deck names the
+detected loader when the loaded profile contains ShroudForge mods, including switched off entries. This says the file
+is installed. It does not prove it loaded. Remove that file to let Kiln's adapter host ShroudForge.
 For ShroudForge's `dinput8.dll`, **Let Kiln manage ShroudForge** opens Runtime's existing **Switch from ShroudForge**
 confirmation. That operation backs up only `dinput8.dll`: other SF proxies must be removed separately.
 Under Proton a proxy still needs its DLL override to actually load; disk detection is a warning before Play, not proof
@@ -405,6 +405,14 @@ records its reason in `emlRuntimeBlocked`; kiln-eml reports `skipped`. Without a
 kiln-eml independently refuses the entire runtime package. A server-only/client-only package remains subject to
 ShroudForge's existing targets check (`other-side`); patch/export-only EML packages are unchanged.
 
+Activation and Play refuse a profile with enabled runtime EML packages while EML's standalone loader is detected in a
+game-folder proxy slot or an active DLL chain. That loader prevents Kiln from starting the ShroudForge runtime those
+packages need. The refusal names the packages and loader before any engine packages are placed. Switch those packages
+off, or remove the standalone EML loader from the game folder or its DLL chain, then activate the profile again. This
+also applies under Wine or Proton when the proxy has no DLL override. Patch-only profiles and disabled runtime
+packages keep their existing behavior. The refusal does not remove packages already placed or repair game data another
+loader changed.
+
 ### Restore the game's data
 
 For a game folder another mod loader changed before Kiln. kiln-eml then finds game data it cannot prove it wrote
@@ -447,8 +455,27 @@ Never run on Windows or against a real game folder; the moves are tested on Linu
 
 Kiln no longer changes the game's five building functions merely by starting `kiln.gameplay`: a selected managed mod which references `Kiln.Gameplay` (or ships a helper with that reference) requests them during the host's pre-world preflight,
 including when it only uses crafting. Native plugins request on first use and should request at startup if they
-will later add build/break protection. A first runtime request waits for the last world's stop; build/break zones
+will later add build/break protection. A first runtime request uses checked safe-Pre installation; build/break zones
 are refused until installation, rather than accepted without protection. This lets ShroudForge inspect the unmodified `PlaceProp` entry
-when the profile contains no such mod and no native plugin requests the group. Once those hooks are installed, ShroudForge's entity spawning still cannot find
-its prop-spawn helper through that entry; a ShroudForge-side fix is in review. A mid-install failure can also leave
+when the profile contains no such mod and no native plugin requests the group. Once those hooks are installed (a
+typed link writes the same registry entry jump as a raw one), ShroudForge's entity spawning still cannot find
+its prop-spawn helper through that entry unless it can read the game's original code: the ShroudForge Kiln ships
+(d8a394bc) reads through that detour, but it refuses the original file as a whole when any code inside a function
+differs, and Kiln's rules service patches a few function interiors at every start. A ShroudForge-side change is
+proposed (accept interior jumps for the whole-file comparison only). On a lab server it refused the file before any
+code comparison: `ShroudForge original call graph: executable file refused: image base/size; live-only resolution`.
+The game's executables are built for address-space randomisation (DYNAMICBASE, high-entropy), so the loaded image is
+never at its preferred base 0x140000000 and its in-memory header names the relocated base; Windows relocates it too.
+The reader therefore also has to accept a relocated image. A mid-install failure can also leave
 pass-through jumps in some entries; see the gameplay service's refusal status and installed-target mask.
+
+### Shroudlink client addon
+
+Shroudlink packages run in Kiln's `kiln-shroudlink` server core. The in-game MODS tab next to Skills is drawn by
+Shroudlink's separate client addon. Import the addon from the Shroudlink download into the Library as a native mod and
+switch it on in the client profile.
+
+On desktop and Steam Deck, the mods list explains when a client profile enables Shroudlink mods without loading the
+addon: the mods still run, but the tab needs the addon. If an addon is in the Library, **Switch addon on** enables it
+in that profile. Otherwise the notice names the Shroudlink download. Support reports include an informational finding
+naming the profile and enabled mods. Dedicated-server installs do not need the client addon and show no notice.
