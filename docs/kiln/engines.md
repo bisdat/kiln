@@ -430,8 +430,9 @@ Never run on Windows or against a real game folder; the moves are tested on Linu
 
 Kiln no longer changes the game's five building functions merely by starting `kiln.gameplay`: a selected managed mod which references `Kiln.Gameplay` (or ships a helper with that reference) requests them during the host's pre-world preflight,
 including when it only uses crafting. Native plugins request on first use and should request at startup if they
-will later add build/break protection. A first runtime request waits for the last world's stop; build/break zones
+will later add build/break protection. A first runtime request uses checked safe-Pre installation; build/break zones
 are refused until installation, rather than accepted without protection. This lets ShroudForge inspect the unmodified `PlaceProp` entry
-when the profile contains no such mod and no native plugin requests the group. Once those hooks are installed, ShroudForge's entity spawning still cannot find
-its prop-spawn helper through that entry; a ShroudForge-side fix is in review. A mid-install failure can also leave
+when the profile contains no such mod and no native plugin requests the group. An installed typed link uses the same Kiln registry entry jump as a raw link. The ShroudForge fork's entry-detour reader
+therefore needs the same handling; converting the link does not restore pristine entry bytes. Verify its helper
+resolution/SpiderHook with the coordinator's fork build; upstream readers which require pristine code remain affected. A mid-install failure can also leave
 pass-through jumps in some entries; see the gameplay service's refusal status and installed-target mask.

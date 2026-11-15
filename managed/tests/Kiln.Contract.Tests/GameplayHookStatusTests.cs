@@ -42,13 +42,15 @@ public sealed unsafe class GameplayHookStatusTests : FakeTableTest
     private static int RemoveZone(uint id) => 0;
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void Protect_waiting_for_world_stop_throws_the_named_unavailable_exception(bool update)
+    [InlineData(false,136,true)] [InlineData(true,136,true)]
+    [InlineData(false,144,true)] [InlineData(true,144,true)]
+    [InlineData(false,144,false)] [InlineData(true,144,false)]
+    public void Protect_waiting_names_the_actual_install_policy_including_older_tables(bool update,int size,bool waitForStop)
     {
-        _state = 2; _legacy = false; _allowZoneAdd=update;
-        var t = (GameplayNative.Table*)NativeMemory.AllocZeroed((nuint)sizeof(GameplayNative.Table));
-        t->Header = new ServiceHeader { Size = (uint)sizeof(GameplayNative.Table), Version = 1 };
+        _state = 2; _legacy = false; _allowZoneAdd=update; _stopWait=waitForStop;
+        var t = (GameplayNative.Table*)NativeMemory.AllocZeroed((nuint)size);
+        t->Header = new ServiceHeader { Size = (uint)size, Version = 1 };
+        if(size==144) *(nint*)((byte*)t+136)=(nint)(delegate* unmanaged[Cdecl]<ulong,uint,int>)&RequestGroups;
         t->Status = &Status; t->ZoneAdd = &RefuseZone; t->ZoneUpdate = &RefuseUpdate; t->ZoneRemove = &RemoveZone;
         Swap(typeof(Gameplay), "_listening", 1);
         Serve("kiln.gameplay", t, typeof(GameplayNative), "_table");
@@ -59,11 +61,12 @@ public sealed unsafe class GameplayHookStatusTests : FakeTableTest
         });
         if (handle != null) Assert.Equal(GameplayActions.Terraform,handle.Zone.Deny);
         Assert.Contains("gameplay.build_hooks", e.Message);
-        Assert.Contains("build protection begins with the next world: this mod asked for it while a world was running", e.Message);
+        Assert.Contains(waitForStop ? "build protection begins with the next world: this mod asked for it while a world was running" :
+            "build protection is waiting for checked installation at a safe Pre", e.Message);
     }
 
     private static uint _state;
-    private static bool _legacy;
+    private static bool _legacy, _stopWait;
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int Status(GameplayNative.Status* s)
@@ -72,6 +75,8 @@ public sealed unsafe class GameplayHookStatusTests : FakeTableTest
         s->EntityHooks = 1;
         s->DiscardOn = 1;
         s->BuildHookState = _state;
+        if(_stopWait) { var why="build hooks wait for the world to stop: asked while a world ran"u8;
+            for(int i=0;i<why.Length;++i) s->BuildHookReason[i]=why[i]; }
         if (_legacy) s->Size = (uint)Marshal.OffsetOf<GameplayNative.Status>(nameof(GameplayNative.Status.BuildHookState));
         return 0;
     }

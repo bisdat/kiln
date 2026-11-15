@@ -5,6 +5,9 @@
 #include <cstdio>
 #include <thread>
 #include <map>
+#include <filesystem>
+#include <fstream>
+#include <cstdlib>
 #include "services/kiln_caps.h"
 namespace kg {
 KilnResult component_change(KilnOwner,KilnEntity,uint32_t,const void*,uint32_t,uint32_t) { return KILN_ERR_UNAVAILABLE; }
@@ -22,6 +25,8 @@ bool seh_get_transform(uintptr_t,KilnEntity,const int64_t**) { return false; }
 bool seh_get_component(uintptr_t,uint32_t,KilnEntity,void**,uint32_t*) { return false; }
 }
 static unsigned ready=2, installs=0, originals=0, checks=0, failed=0, retry=0;
+static std::string control_path;
+static bool retry_each=false; static std::map<std::string,unsigned> target_tries;
 static uint32_t interest=0; static bool partial=false;
 static std::map<std::string,uint32_t> rows; static KilnCapsApi caps{};
 static KilnHooksApi ht{}; static KilnApi api{};
@@ -35,8 +40,10 @@ int main(int argc,char** argv) {
     ht.typed_install_ready=[]()->uint32_t { return ready; };
     ht.raw_detour=[](KilnOwner,uintptr_t,const KilnHookOrder*,void*,void**,KilnHandle*)->KilnResult { ++installs; return KILN_ERR_INTERNAL; };
     ht.detour_typed_checked=[](KilnOwner,uintptr_t,const KilnHookOrder* order,const KilnSig* sig,KilnTypedFn f,void* u,KilnHandle* out)->KilnResult {
-        ++installs; CHECK(order->priority==0 && kg::sv(order->before)=="kiln.set,kiln.shroudforge,kiln.npcai" && kg::sv(order->after)=="kiln.creatures");
-        CHECK(sig->argc>=2 && sig->argc<=6); if(retry && (!partial || installs>1)) { --retry; return KILN_HOOKS_ERR_UNCHECKED; }
+        ++installs; CHECK(order->priority==0 && kg::sv(order->before)=="kiln.set,kiln.shroudforge,kiln.npcai" && kg::sv(order->after)=="kiln.creatures,kiln.build,kiln.rules");
+        CHECK(sig->argc>=2 && sig->argc<=6);
+        if(retry_each && ++target_tries[std::string(kg::sv(order->label))]<3) return KILN_HOOKS_ERR_UNCHECKED;
+        if(retry && (!partial || installs>1)) { --retry; return KILN_HOOKS_ERR_UNCHECKED; }
         *out=links.size()+1; links.push_back({f,u}); return KILN_OK;
     };
     ht.call_original_frame=[](KilnCallFrame* f)->KilnResult { ++originals; f->rax=7; return KILN_OK; };
@@ -53,10 +60,86 @@ int main(int argc,char** argv) {
     };
     kg::g_api=&api; kg::g_owner=1; kg::L.world_storage=8;
     kg::F.craft=kg::F.terraform=kg::F.spawn=true; kg::fn.craft=kg::fn.terraform=kg::fn.queue_spawn=100;
+    if(mode.starts_with("r4-")) {
+        kg::F.build=true;
+        kg::fn.place_block=kg::fn.place_prop=kg::fn.dismantle=kg::fn.dismantle2=kg::fn.pick_up=100;
+    }
+    if(mode.find("inject")!=std::string::npos || mode=="r4-build-unmarked") {
+        control_path=(std::filesystem::path(std::getenv("KILN_OUT"))/"gameplay-inject-fixture").string();
+        std::filesystem::create_directories(control_path);
+        std::filesystem::remove(std::filesystem::path(control_path)/"gameplay.lab");
+        if(mode!="r4-build-unmarked") std::ofstream(std::filesystem::path(control_path)/"gameplay.lab").close();
+        std::ofstream(std::filesystem::path(control_path)/"gameplay.unchecked") << "build " << (mode=="r4-build-inject-0" ? 0 : 2);
+        api.path=[](int32_t,char* b,size_t cap,size_t* n)->KilnResult { *n=control_path.size(); if(cap<*n) return KILN_ERR_BUFFER_TOO_SMALL;
+            std::memcpy(b,control_path.data(),*n); return KILN_OK; };
+    }
     kg::hooks_install(); kg::entities_install(); CHECK(installs==0);
     CHECK(rows["gameplay.craft_hooks"]==KILN_CAP_PENDING); CHECK(rows["gameplay.terraform_hooks"]==KILN_CAP_PENDING);
     CHECK(rows["gameplay.spawn_hooks"]==KILN_CAP_PENDING); CHECK(rows["gameplay.entities_hooks"]==KILN_CAP_PENDING);
     CHECK(rows["gameplay.spawn_replace"]==KILN_CAP_AVAILABLE); CHECK(rows["gameplay.entity_events"]==KILN_CAP_AVAILABLE);
+    if(mode.starts_with("r4-")) {
+        if(mode=="r4-legacy-retry" || mode=="r4-legacy-retry-noworld") {
+            retry_each=true; ready=mode=="r4-legacy-retry" ? 1 : 2;
+            if(ready==1) { KilnWorldEvent e{}; e.event=KILN_WORLD_STARTED; e.kind=KILN_WORLD_SERVER; kg::on_build_world(&e,nullptr); }
+            else { KilnGameplayStatus s{}; s.size=sizeof s; CHECK(kg::t_status(&s)==KILN_OK); }
+            CHECK(installs==5); // one attempt per group in the batch, no immediate retry after a refusal
+            if(ready==1) { kg::hooks_poll(); CHECK(installs==5); } // ordinary on_pre later in that SAME first Pre
+            ready=1; for(int n=0;n<30;++n) kg::hooks_poll(); CHECK(installs==30); CHECK(kg::build_installed());
+        } else if(mode=="r4-legacy-status" || mode=="r4-aware-status") {
+            const bool aware=mode=="r4-aware-status";
+            if(aware) CHECK(kg::t_request_hooks(99,0)==KILN_OK);
+            ready=2; KilnGameplayStatus s{}; s.size=sizeof s; CHECK(kg::t_status(&s)==KILN_OK);
+            CHECK(installs==(aware ? 0u : 10u)); CHECK(static_cast<bool>(s.build_hooks)==!aware);
+        } else if(mode.find("inject")!=std::string::npos) {
+            ready=0; CHECK(kg::t_request_build(77)==KILN_OK); ready=1;
+            for(int n=0;n<4;++n) kg::hooks_poll();
+            const auto count=mode=="r4-build-inject-0" ? 0u : 2u;
+            CHECK(installs==count); CHECK(links.size()==count); CHECK(!kg::build_installed()); CHECK(kg::build_state()==3);
+            CHECK(kg::build_mask()==((1u<<count)-1)); CHECK(kg::build_reason().find("three attempts")!=std::string::npos);
+            if(count) { KilnCallFrame f{}; CHECK(links[0].fn(&f,links[0].user)==KILN_TYPED_CONTINUE); CHECK(originals==0); }
+            kg::hooks_poll(); CHECK(installs==count); std::filesystem::remove_all(control_path);
+        } else if(mode=="r4-all-retry") {
+            retry_each=true; ready=0; CHECK(kg::t_request_hooks(77,31)==KILN_OK); ready=1;
+            for(int n=1;n<=18;++n) { kg::hooks_poll(); CHECK(kg::build_installed()==(n==18)); }
+            CHECK(installs==30); CHECK(kg::build_installed());
+        } else if(mode=="r4-all-pace") {
+            ready=0; CHECK(kg::t_request_hooks(77,31)==KILN_OK); CHECK(installs==0); ready=1;
+            for(unsigned n=1;n<=5;++n) { kg::hooks_poll(); CHECK(installs==n*2); CHECK(kg::build_installed()==(n==5)); }
+        } else if(mode=="r4-build-subscribe") {
+            ready=0; KilnHandle h=0; CHECK(kg::t_subscribe(77,1u<<KILN_GAMEPLAY_BUILD,&event,nullptr,&h)==KILN_OK);
+            CHECK(installs==0); ready=1; for(int n=0;n<3;++n) kg::hooks_poll(); CHECK(installs==6); CHECK(kg::build_installed());
+            CHECK(kg::t_unsubscribe(h)==KILN_OK); CHECK(kg::build_installed());
+        } else {
+        const bool compatibility=mode=="r4-old-host" || mode=="r4-native-only" || mode=="r4-client-menu";
+        if(compatibility || mode=="r4-aware-host" || mode=="r4-client-menu") {
+            if(!compatibility) CHECK(kg::t_request_hooks(99,0)==KILN_OK);
+            ready=mode=="r4-client-menu" ? 2 : 1; // core's first authoritative world notification is inside TypedPreScope, before Host OnLoad
+            KilnWorldEvent ev{}; ev.event=KILN_WORLD_STARTED; ev.kind=KILN_WORLD_SERVER;
+            if(mode=="r4-client-menu") {
+                KilnUiTickApi ui{}; ui.unsubscribe=[](KilnHandle)->KilnResult { return KILN_OK; };
+                kg::g_compat_ui=&ui; kg::g_compat_menu=123; kg::on_compat_menu(1,nullptr); CHECK(kg::g_compat_menu==0);
+            } else kg::on_build_world(&ev,nullptr);
+            CHECK(installs==(compatibility ? 10u : 0u));
+            ready=1;
+            for(int i=0;i<5;++i) kg::hooks_poll();
+            CHECK(installs==(compatibility ? 10u : 0u));
+            if(compatibility) CHECK(kg::build_installed());
+            else { CHECK(kg::t_request_hooks(77,1)==KILN_OK); CHECK(!kg::build_installed());
+                for(int i=0;i<3;++i) kg::hooks_poll(); CHECK(kg::build_installed()); CHECK(installs==5); }
+        } else {
+            const bool immediate=mode=="r4-build-immediate";
+            ready=immediate ? 2 : 0;
+            CHECK(kg::t_request_build(77)==KILN_OK);
+            CHECK(installs==(immediate ? 5u : 0u));
+            if(!immediate) { CHECK(kg::build_state()==2); CHECK(kg::build_reason().find("safe Pre")!=std::string::npos);
+                ready=1; kg::hooks_poll(); CHECK(installs==2); CHECK(!kg::build_installed());
+                kg::hooks_poll(); CHECK(installs==4); CHECK(!kg::build_installed()); kg::hooks_poll(); }
+            CHECK(kg::build_installed()); CHECK(installs==5); CHECK(kg::build_mask()==31);
+        }
+        }
+        if(mode=="r4-build-unmarked") std::filesystem::remove_all(control_path);
+        std::printf("remaining %s: %u checks, %u failures\n",mode.c_str(),checks,failed); return failed ? 1 : 0;
+    }
     if(mode=="idle") {
         uint8_t from[16]={1},to[16]={2}; CHECK(kg::hooks_spawn_replace(77,from,to,0)==KILN_OK);
         CHECK(kg::hooks_spawn_replace_clear(77)==0); CHECK(kg::entity_filter(0)==KILN_OK); kg::hooks_poll(); CHECK(installs==0);

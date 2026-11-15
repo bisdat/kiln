@@ -18,13 +18,13 @@ std::recursive_mutex& hooks_publication();
 bool hooks_request(uint32_t groups, KilnOwner owner);
 bool hooks_installed(uint32_t group);
 void hooks_poll();
+void hooks_init_control();
+void hooks_world_started(bool world_notification=false);
 bool hooks_interest(uint32_t mask, KilnOwner owner);
 bool hooks_denies(uint32_t denies, KilnOwner owner);
 void hooks_status(KilnGameplayStatus* status);
 
 bool build_request(KilnOwner owner);
-void build_lifecycle(bool available);
-void build_poll(uint32_t stopping = KILN_WORLD_KINDS);
 bool build_installed();
 uint32_t build_state();
 uint32_t build_mask();
