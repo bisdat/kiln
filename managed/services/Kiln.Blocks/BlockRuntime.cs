@@ -149,7 +149,7 @@ internal static class BlockRuntime
                 if (Interlocked.Exchange(ref mod.Settle, null) is { } settle) settle([$"its pass at content ready failed: {e.Message}"]);
                 throw;
             }
-        }, () => mod.RulesDirty);
+        }, () => mod.RulesDirty || MoveApplications.NeedsReady(mod));
     }
 
     internal static Guid? ResolveLate(LateRef r)

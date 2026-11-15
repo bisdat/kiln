@@ -52,6 +52,8 @@ internal interface IMoveHost
     IReadOnlyDictionary<Guid, (string State, string? Error)> Clones();
     /// <summary>Defines a sequence clone as <paramref name="owner"/>'s. Throws what kiln.gamedata throws when it refuses.</summary>
     void Define(JsonObject definition, ulong owner);
+    IReadOnlyDictionary<string, (string State, string? Error)> Worlds(Guid guid);
+    Func<Guid, IReadOnlyDictionary<string, (string State, string? Error)>> WorldReader() => Worlds;
     /// <summary>Opens a content transaction of <paramref name="owner"/>. Throws when it cannot (no transactions here, one is open).</summary>
     IMoveTransaction Begin(ulong owner);
     /// <summary>Takes every layer of <paramref name="owner"/> off (fail closed).</summary>
@@ -143,6 +145,7 @@ internal static class MoveApplications
     {
         if (Entries.IsEmpty) return;
         var content = Host.ContentGeneration;
+        if (NeedsReady(mod)) Replay(mod, problem);
         foreach (var e in Entries.Values.Where(e => ReferenceEquals(e.Mod, mod)).ToList())
         {
             bool again;
@@ -476,6 +479,64 @@ internal static class MoveApplications
         }
     }
 
+    internal const int RegistrationPassLimit = 120; // 120 ready passes, normally 8 seconds at 60 steps/s.
+
+    internal static bool NeedsReady(ModBlocks mod) => Entries.Values.Any(e => ReferenceEquals(e.Mod, mod) && !e.Removed && e.Active is { } gen && RegistrationIssue(gen) != null);
+
+    private static (bool Pending, string Reason)? RegistrationIssue(RouteGeneration gen)
+    {
+        (bool Pending, string Reason)? pending = null;
+        var read = Host.WorldReader();
+        foreach (var guid in gen.LiveClones.Values)
+        {
+            var worlds = read(guid);
+            if (worlds.Count == 0) pending = (true, "no consuming world is ready");
+            foreach (var (world, outcome) in worlds)
+            {
+                if (outcome.State == "registered") continue;
+                var why = $"{world} world: {outcome.State} ({outcome.Error ?? "sequence registry attachment"})";
+                if (outcome.State is "failed" or "error" or "missing") return (false, why);
+                pending = (true, why);
+            }
+        }
+        return pending;
+    }
+
+    // Reset only this weapon's item-slot layers. The existing unverified-rollback policy still applies to a write fault.
+    private static bool Suspend(Entry e, RouteGeneration gen, string reason, Action<string> problem)
+    {
+        var reset = new JsonObject();
+        foreach (var (path, _) in gen.SlotRules) reset[path] = new JsonObject { ["reset"] = true };
+        IMoveTransaction? txn = null;
+        try
+        {
+            txn = Host.Begin(e.Owner);
+            var errors = txn.Apply(Document("itemdata", [(gen.Item, reset)]), "suspend routed moves");
+            if (errors.Count > 0) throw new InvalidOperationException(errors[0]);
+            foreach (var index in gen.SlotGuids.Keys)
+                if (Host.Slot(gen.Item, index) is not { } g || CloneBases.ContainsKey(g))
+                    throw new InvalidOperationException($"slot {index} could not be verified as unrouted");
+            if (!txn.Commit()) throw new InvalidOperationException("slot reset was cancelled");
+            txn = null;
+        }
+        catch (Exception x) when (Recoverable(x))
+        {
+            (MoveRestore Outcome, string? Error)? back = null;
+            if (txn != null) { try { back = txn.Rollback(); } catch (Exception y) when (Recoverable(y)) { reason += $"; rollback failed: {y.Message}"; } }
+            if (e.Removed) return false;
+            Lost(e, gen, e.Requested, Host.ContentGeneration, $"could not suspend routed moves ({reason}): {x.Message}", problem);
+            if (back?.Outcome == MoveRestore.Revoked) Revoked(e, "slot suspension rollback could not be verified", problem);
+            return false;
+        }
+        if (e.Removed) return false;
+        e.Active = null;
+        lock (e.Json) e.Json.Remove("movesReady");
+        e.Mod.ReportDirty = true;
+        Publish(e, new MoveApplicationResult { State = MoveApplicationState.PendingContent, Reason = "PendingContent",
+            RequestedGeneration = e.Requested, ContentGeneration = Host.ContentGeneration });
+        return true;
+    }
+
     /// <summary>After the mod's rules were applied again (every content application, and every pass that applies the mod's rules): each applied
     /// generation is written again through a content transaction and read back. One that does not hold is a refusal in its status, with what the
     /// slots play, and the next ready pass plans it again (unless every layer of the mod had to be taken off).</summary>
@@ -487,6 +548,13 @@ internal static class MoveApplications
             {
                 if (e.Removed || e.Active is not { } gen) continue;
                 var request = e.Current.RequestedGeneration;
+                if (RegistrationIssue(gen) is { } issue)
+                {
+                    if (!Suspend(e, gen, issue.Reason, problem)) continue;
+                    if (issue.Pending) { var readyContent = Host.ContentGeneration; Host.Later(e.Mod, next => Finish(e, request, readyContent, gen, next)); }
+                    else Refuse(e, request, Host.ContentGeneration, issue.Reason, problem);
+                    continue;
+                }
                 var wrote = Write(e, gen, $"moves of {e.Plan.Mod}:{e.Plan.Name} (again)", out var why, out var back);
                 if (wrote != Wrote.Failed) continue;
                 var content = Host.ContentGeneration;
@@ -579,7 +647,7 @@ internal static class MoveApplications
     }
 
     // Steps 3 to 5, one ready pass later: the clones are in the world (BlockRuntime waits for that before it runs a mod's ready work).
-    private static void Finish(Entry e, ulong request, ulong content, RouteGeneration gen, Action<string> problem)
+    private static void Finish(Entry e, ulong request, ulong content, RouteGeneration gen, Action<string> problem, int waits = 0)
     {
         lock (e)
         {
@@ -591,6 +659,18 @@ internal static class MoveApplications
                 {
                     // content was applied again since the rows were read: read them again
                     Run(e, problem);
+                    return;
+                }
+                if (RegistrationIssue(gen) is { } issue)
+                {
+                    if (e.Active is { } active && !Suspend(e, active, issue.Reason, problem)) return;
+                    if (e.Removed) return;
+                    if (issue.Pending && waits < RegistrationPassLimit)
+                    {
+                        Host.Later(e.Mod, next => Finish(e, request, content, gen, next, waits + 1));
+                        return;
+                    }
+                    Refuse(e, request, content, $"block {plan.Block}, moves: {issue.Reason}" + (issue.Pending ? "; registration timed out after 120 ready passes" : ""), problem);
                     return;
                 }
                 var have = Host.Clones();
