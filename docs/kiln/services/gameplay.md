@@ -270,6 +270,16 @@ a simultaneous first request for all five needs five successful Pre passes (ten 
 safe Pre passes, at most three attempts per target, then refuses once with a reason. A signature refusal is final.
 No unchecked fallback is used. Old cores lacking checked typed installation are explicitly refused.
 
+The cost of a write during play is logged at info, one line per target:
+`kiln.gameplay: <target> went in during play: the installer call took <ms> ms on the world's thread (write <k> in this Pre)`.
+A lab server without players (38 to 40 of its 41 to 43 threads stopped per write, on a build machine with a load
+average of 11 to 25) measured 2.0 to 9.2 ms with the other threads stopped and 3.1 to 11.6 ms for the whole call
+per target; the worst write, on the busiest run, stopped them for 26.6 ms (a 37.9 ms call). Two writes in one Pre
+made that step 8 to 14 ms longer (42 to 44 ms steps became 49 to 58 ms); the game's own autosave step in the same
+runs took 140 to 160 ms. A target another owner already detoured (TerraformImpact with kiln.rules, DestroyEntity
+with kiln.creatures) only gains a link: 0.1 to 1.1 ms. A server with players, and a hosting client with its render
+threads, have more running threads to stop; that cost has not been measured.
+
 Group rows show resolved/unused, waiting, installed or refused; appended native status fields include state,
 installed-target count and reason. Existing CraftHook, TerraformHook, SpawnHook and EntityHooks booleans mean fully
 installed. The existing static `gameplay.spawn_replace` and `gameplay.entity_events` capabilities stay available
