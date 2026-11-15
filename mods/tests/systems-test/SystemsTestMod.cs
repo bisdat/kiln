@@ -587,7 +587,7 @@ public sealed class SystemsTestMod : Mod
     private ProgramRegistration? _reContract;
     private long _reCalls, _reFuel, _bCalls;
 
-    // define.reload.contract, boot B: the lab reserved systems_test_fuel with declaration B (the WITHOUT variant) and set
+    // define.reload.contract, boot B: the lab reserved systems_test_fuel with declaration B (the Pinned-flag variant) and set
     // the control file. Independent of the restart/wrap state machine: after the world is up, declaration B binds and runs,
     // and declaration A (FuelQuery) is refused with the restart sentence. Runs in the same boot as the mark-restart rows.
     private bool _defineB, _defineBDone;
@@ -604,7 +604,9 @@ public sealed class SystemsTestMod : Mod
             {
                 if (tick.Step % 25 != 0 || !File.Exists(Control("systems-native.done")) || Systems.Find("fuel_setup") is null) return;
                 _defineBFrom = tick.Step;
-                _bBound = Systems.Define(FuelQuery.Key, new ProgramOptions(), (ref BWithoutQuery q) =>
+                // The lab reserved declaration B as the Pinned-flag variant (valid components, unlike a 'without' of a name
+                // the build does not know): it binds here, and declaration A (no flag) is refused.
+                _bBound = Systems.Define(FuelQuery.Key, new ProgramOptions { Pinned = true }, (ref BFlagsQuery q) =>
                 {
                     Interlocked.Increment(ref _bBoundCalls);
                 });
