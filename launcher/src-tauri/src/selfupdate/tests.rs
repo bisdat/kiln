@@ -439,3 +439,16 @@ fn a_switch_to_the_beta_never_goes_down() {
     let (got, _) = run(acquire_for(app.handle(), &[f.source("frostdev.io")], &Want::switch(Channel::Beta, "0.2.0-dev.2".into()), Arc::new(Mutex::new(None))));
     assert_eq!(got.unwrap().1.update.version, "0.2.0-dev.3+beta.2");
 }
+
+#[test]
+fn failed_restore_does_not_mark_the_beta_as_left() {
+    let root = std::env::temp_dir().join(format!("kiln-switch-restore-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    // The user asked for a copy that has since disappeared. Do not restart
+    // or claim a release ran: the next beta must retain the original copy.
+    let result = prepare_switch_restart(&root, "0.2.0-dev.28", Channel::Dev, true);
+    assert!(result.is_err());
+    assert!(!root.join(crate::snapshot::LAST_BUILD).exists());
+    std::fs::remove_dir_all(root).unwrap();
+}

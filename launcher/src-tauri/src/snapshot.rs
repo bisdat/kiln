@@ -158,15 +158,19 @@ pub fn left_beta(root: &Path, to_version: &str, channel: &str) -> Result<(), Err
 pub fn restore(root: &Path, channel: Option<&str>) -> Result<Vec<String>, Error> {
     let info = info(root).ok_or_else(|| Error::not_found("There is no copy from before the beta."))?;
     let dir = root.join(DIR);
-    let mut done = Vec::new();
+    let mut prepared = Vec::new();
     for rel in &info.files {
         // only the kinds of file a copy takes, never a path out of the data folder
         let ok = rel == "settings.json" || rel == "library/kiln-kept.json"
             || (rel.starts_with("profiles/") && rel.ends_with("/meta.json") && rel.split('/').count() == 3
                 && rel.split('/').all(|p| !p.is_empty() && p != "." && p != ".."));
-        if !ok {
+        if !ok || rel.contains('\\') {
             continue;
         }
+        // Preflight the whole copy before replacing anything. A symlinked root is fine;
+        // links below it must not redirect either the copy or the destination.
+        check_components(root, &format!("{DIR}/{rel}"))?;
+        check_components(root, rel)?;
         let from = dir.join(rel);
         let mut bytes = std::fs::read(&from).map_err(io(&from, "reading"))?;
         if rel == "settings.json"
@@ -179,14 +183,35 @@ pub fn restore(root: &Path, channel: Option<&str>) -> Result<Vec<String>, Error>
             bytes = serde_json::to_vec_pretty(&v).map_err(|e| Error::new(ErrorCode::Internal, e.to_string()))?;
             bytes.push(b'\n');
         }
-        let to: PathBuf = root.join(rel);
+        prepared.push((rel.clone(), bytes));
+    }
+    let mut done = Vec::new();
+    for (rel, bytes) in prepared {
+        let to: PathBuf = root.join(&rel);
         if let Some(p) = to.parent() {
             std::fs::create_dir_all(p).map_err(io(p, "creating"))?;
         }
-        kiln_manage::util::write_atomic(&to, &bytes)?;
-        done.push(rel.clone());
+        kiln_manage::util::write_atomic_exclusive(&to, &bytes)?;
+        done.push(rel);
     }
     Ok(done)
+}
+
+// Inspect existing components without following a link. Missing destination components
+// are made later; missing source components fail when the copy is read.
+fn check_components(root: &Path, rel: &str) -> Result<(), Error> {
+    let mut path = root.to_path_buf();
+    for component in rel.split('/') {
+        path.push(component);
+        match std::fs::symlink_metadata(&path) {
+            Ok(m) if m.file_type().is_symlink() => return Err(Error::new(ErrorCode::Refused,
+                format!("Cannot restore through a symbolic link: {}", path.display()))),
+            Ok(_) => {},
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+            Err(e) => return Err(io(&path, "checking")(e)),
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -128,6 +128,10 @@ impl Build {
     /// May `channel` offer this build? Stable: a release without a pre-release part; dev (the release line): no test
     /// build; beta: test builds and releases (a tester is offered the final build).
     pub fn on(&self, channel: Channel) -> bool {
+        // Reserved beta metadata with an invalid number is never a release.
+        if self.beta.is_none() && (self.version.build == "beta" || self.version.build.starts_with("beta.")) {
+            return false;
+        }
         match channel {
             Channel::Stable => !self.version.is_prerelease() && self.beta.is_none(),
             Channel::Dev => self.beta.is_none(),
@@ -231,8 +235,8 @@ pub fn accepts(current: &str, remote: &str, channel: Channel) -> bool {
 
 /// Is `remote` what a channel switch the player started installs, for a launcher at `current` going to `target`?
 /// A build `target` may offer ([`Build::on`]), and: to the beta, only a newer one (a test build older than the
-/// release one runs is no test build of anything to come); back to the release line (stable, dev), any other build,
-/// also an older one. Only the switch ([`super::switch`]) asks this, never a background check or an Update.
+/// release one runs is no test build of anything to come); back from a test build to the release line (stable, dev),
+/// also an older one. A release build can only move forward. Only the switch ([`super::switch`]) asks this, never a background check or an Update.
 pub fn switch_accepts(current: &str, remote: &str, target: Channel) -> bool {
     let (Some(cur), Some(rem)) = (Build::parse(current), Build::parse(remote)) else { return false };
     if !rem.on(target) {
@@ -240,7 +244,7 @@ pub fn switch_accepts(current: &str, remote: &str, target: Channel) -> bool {
     }
     match target {
         Channel::Beta => rem.order(&cur) == Ordering::Greater,
-        Channel::Stable | Channel::Dev => rem.order(&cur) != Ordering::Equal,
+        Channel::Stable | Channel::Dev => rem.order(&cur) == Ordering::Greater || (cur.beta.is_some() && rem.order(&cur) == Ordering::Less),
     }
 }
 
@@ -293,6 +297,22 @@ pub fn short_notes(notes: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn malformed_beta_ids_are_never_release_candidates() {
+        for id in ["0.2.0-dev.29+beta.0", "0.2.0-dev.29+beta.x", "0.2.0-dev.29+beta.03", "0.2.0-dev.29+beta"] {
+            for ch in [Channel::Dev, Channel::Stable, Channel::Beta] {
+                assert!(!accepts("0.2.0-dev.28", id, ch), "{id} on {ch:?}");
+                assert!(!switch_accepts("0.2.0-dev.30+beta.1", id, ch), "{id} switch to {ch:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_release_cannot_use_switch_to_rollback_another_release() {
+        assert!(!switch_accepts("0.2.0-dev.29", "0.2.0-dev.28", Channel::Dev));
+        assert!(!switch_accepts("0.2.1", "0.2.0", Channel::Stable));
+    }
 
     #[test]
     fn sources_are_frostdev_then_github() {

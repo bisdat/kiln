@@ -235,3 +235,29 @@ fn a_restored_choice_of_the_beta_says_the_release() {
     restore(root, None).unwrap();
     assert_eq!(serde_json::from_str::<serde_json::Value>(&read(root, "settings.json")).unwrap()["updateChannel"], "beta");
 }
+
+#[test]
+fn incomplete_copy_does_not_partly_restore() {
+    let t = tmp("incomplete");
+    dev28_folder(&t.0);
+    take(&t.0, "28", "29+beta.1").unwrap();
+    put(&t.0, "profiles/ember-run/meta.json", "beta profile");
+    std::fs::remove_file(t.0.join(DIR).join("settings.json")).unwrap();
+    assert!(restore(&t.0, Some("dev")).is_err());
+    assert_eq!(read(&t.0, "profiles/ember-run/meta.json"), "beta profile");
+}
+
+#[cfg(unix)]
+#[test]
+fn restore_refuses_a_profile_parent_symlink() {
+    let t = tmp("symlink");
+    let root = t.0.join("data");
+    dev28_folder(&root);
+    take(&root, "28", "29+beta.1").unwrap();
+    let outside = t.0.join("outside");
+    std::fs::rename(root.join("profiles/ember-run"), &outside).unwrap();
+    put(&outside, "meta.json", "outside profile");
+    std::os::unix::fs::symlink(&outside, root.join("profiles/ember-run")).unwrap();
+    assert!(restore(&root, Some("dev")).is_err());
+    assert_eq!(read(&outside, "meta.json"), "outside profile");
+}
