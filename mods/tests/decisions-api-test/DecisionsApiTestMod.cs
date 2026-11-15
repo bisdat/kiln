@@ -192,6 +192,23 @@ public sealed class DecisionsApiTestMod : Mod
                 }
             }
             else Log.Info("decisions-api-test: the lab parallel switch is off (no kiln/control/systems.parallel): the death suite ran once");
+            // dev.29 (review P1 "health-zero interval"): what else acts on health 0 while a death is held, plain and
+            // with the entity programs on the workers
+            await IntervalSuite("plain");
+            if (Kiln.Testing.LabSystems.Enabled)
+            {
+                Kiln.Testing.LabSystems.ForceParallel(2400);
+                await Wait(2);
+                try
+                {
+                    await IntervalSuite("parallel");
+                }
+                finally
+                {
+                    Kiln.Testing.LabSystems.StopParallel();
+                    await Wait(2);
+                }
+            }
             // S5: cancelable walk-over pickup on the range-only fixture, plain and parallel forced
             await PickupSuite("plain");
             if (Kiln.Testing.LabSystems.Enabled)
@@ -339,6 +356,161 @@ public sealed class DecisionsApiTestMod : Mod
         {
             foreach (var sub in subs) sub.Dispose();
             foreach (var e in who)
+                if (Spawn.Exists(e)) Spawn.Destroy(e);
+            await Wait(3);
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------- the interval ----
+    // A refused lethal loss leaves health at 0 from the lethal write until the answer in the next Pre (the game skips the
+    // entity's death meanwhile). Does anything else of the game treat that 0 as dead? A forced-ready Vukah (its AI runs)
+    // and a spawned 1_Player stand-in are each refused once; every step from the lethal write to 20 steps after the restore
+    // records health, the Actor's raw dead bit (+0xbf8 bit 7), its pending death (+0xeaa) and +0xeab (the gate of the
+    // enemy AI's Death condition), the enemy AI state, the AI's own state changes, Kiln.Combat's EntityDeathEvent and the
+    // item drops near the body. A second Vukah whose death is allowed is the control: the same instruments must see it die.
+
+    private static int ActorByte(EntityId e, int at) => World.ReadBytes(e, "Actor") is { } b && b.Length > at ? b[at] : -1;
+
+    private static int DropsNear(EntityId e)
+    {
+        if (World.Position(e) is not { } at) return -1;
+        var n = 0;
+        foreach (var d in World.Find("PickupItem"))
+            if (World.Position(d) is { } p && Math.Abs(p.X - at.X) < 12 && Math.Abs(p.Z - at.Z) < 12 && Math.Abs(p.Y - at.Y) < 12) n++;
+        return n;
+    }
+
+    private sealed record Sample(ulong Step, string When, int Hp, bool Dead, int Pending, int Eab, string Ai, int Drops, bool Exists)
+    {
+        public override string ToString() => $"step {Step} {When}: hp {Hp}, raw dead {Dead}, pending death {Pending}, +0xeab {Eab}, AI {Ai}, drops near {Drops}, there {Exists}";
+    }
+
+    private Sample Take(EntityId e, string when, bool creature) => new(_step, when, Hp(e), DeadMark(e), DeathPending(e), ActorByte(e, 0xeab),
+        creature ? Creatures.Of(e).State.ToString() : "-", DropsNear(e), Spawn.Exists(e));
+
+    private async Task IntervalSuite(string run)
+    {
+        var mine = new List<EntityId>();
+        var subs = new List<IDisposable>();
+        var states = new List<(EntityId E, EnemyState From, EnemyState To, StateCondition Why, ulong Step)>();
+        var deaths = new List<(EntityId E, ulong Step)>();
+        try
+        {
+            if (!Capabilities.Is("events.death")) return;
+            var at = new WorldPosition(3845, 835, 1490);
+            var vukah = await Spawn.Entity("Enemy_Vukah_Melee", at, 0, new SpawnOptions { Tag = "decisions-api-test", Flags = SpawnFlags.Transient });
+            var control = await Spawn.Entity("Enemy_Vukah_Melee", new WorldPosition(at.X + 30, at.Y, at.Z), 0,
+                new SpawnOptions { Tag = "decisions-api-test", Flags = SpawnFlags.Transient });
+            var stand = await Spawn.Entity("1_Player", new WorldPosition(at.X - 6, at.Y, at.Z), options: new SpawnOptions { Tag = "decisions-api-test", Flags = SpawnFlags.Transient });
+            mine.AddRange([vukah, control, stand]);
+            // the game marks an enemy ready for gameplay only near a player; the lab has none: force it (its AI runs then).
+            // The body's components come some steps after the spawn.
+            async Task<bool> Ready(EntityId e)
+            {
+                for (var i = 0; i < 60; i++)
+                {
+                    try
+                    {
+                        Creatures.Of(e).ForceReady();
+                        return true;
+                    }
+                    catch (NotSupportedException) when (i < 59)
+                    {
+                        await Wait(1);
+                    }
+                }
+                return false;
+            }
+            var ready = await Ready(vukah) & await Ready(control);
+            subs.Add(Events.On<CreatureStateEvent>(e =>
+            {
+                if (e.Entity == vukah || e.Entity == control) states.Add((e.Entity, e.From, e.To, e.Condition, _step));
+            }));
+            subs.Add(Events.On<EntityDeathEvent>(e =>
+            {
+                if (mine.Contains(e.Victim)) deaths.Add((e.Victim, _step));
+            }));
+            for (var i = 0; i < 60 && (Creatures.Of(vukah).State is EnemyState.Spawning or EnemyState.Start or EnemyState.Invalid); i++) await Wait(1);
+            await Wait(10);
+            Check(ready && Hp(vukah) > 0 && Hp(stand) > 0 && Creatures.Of(vukah).State is not (EnemyState.Spawning or EnemyState.Dead or EnemyState.Invalid),
+                $"[{run}] INTERVAL fixture: a Vukah with its AI running (forced ready {ready}, {Creatures.Of(vukah).State}, hp {Hp(vukah)}), a stand-in player (hp {Hp(stand)})");
+
+            var held = new List<Sample>();
+            var log = new List<(EntityId E, Sample S)>();
+            var refused = new HashSet<EntityId> { vukah, stand };
+            var dying = new List<EntityDyingEvent>();
+            subs.Add(Events.On<EntityDyingEvent>(d =>
+            {
+                dying.Add(d);
+                // the state after the whole lethal step, before the answer: what the interval left
+                var c = d.Entity == vukah;
+                held.Add(Take(d.Entity, "held, before the answer", c));
+                if (!refused.Contains(d.Entity)) return;
+                d.SurvivalHealth = 1;
+                d.Cancel();
+            }, EventFilter.ForEntity(vukah)));
+            subs.Add(Events.On<EntityDyingEvent>(d => { if (d.Entity == stand) { dying.Add(d); held.Add(Take(d.Entity, "held, before the answer", false)); d.SurvivalHealth = 1; d.Cancel(); } },
+                EventFilter.ForEntity(stand)));
+            void Trail(in TickInfo t)
+            {
+                foreach (var e in (EntityId[])[vukah, stand])
+                    if (Spawn.Exists(e)) log.Add((e, Take(e, "Post", e == vukah)));
+            }
+            var dropsBefore = DropsNear(vukah);
+            var stepBefore = _step;
+            Context.Tick.Post += Trail;
+            try
+            {
+                await Wait(3);  // the Post handler is in from the next step on: the samples begin before the lethal write
+                Combat.SetHealth(vukah, 0);
+                Combat.SetHealth(stand, 0);
+                await Wait(22);
+            }
+            finally
+            {
+                Context.Tick.Post -= Trail;
+            }
+            foreach (var (e, smp) in log.Take(14)) Log.Info($"decisions-api-test: [{run}] interval {(e == vukah ? "Vukah" : "stand-in")} {e.Value}: {smp}");
+            foreach (var smp in held) Log.Info($"decisions-api-test: [{run}] interval held sample: {smp}");
+            foreach (var x in states.Where(x => x.E == vukah)) Log.Info($"decisions-api-test: [{run}] interval Vukah AI {x.From} -> {x.To} ({x.Why}) at step {x.Step}");
+            var vEnd = dying.Where(d => d.Entity == vukah).Select(d => EndOf(x => x.Id == d.Id)).LastOrDefault();
+            var sEnd = dying.Where(d => d.Entity == stand).Select(d => EndOf(x => x.Id == d.Id)).LastOrDefault();
+            var vLog = log.Where(x => x.E == vukah).Select(x => x.S).ToList();
+            var sLog = log.Where(x => x.E == stand).Select(x => x.S).ToList();
+            var vHeld = held.FirstOrDefault(h => h.Ai != "-");
+            var sHeld = held.FirstOrDefault(h => h.Ai == "-");
+            Check(vEnd is { Status: DecisionTerminal.Prevented } && sEnd is { Status: DecisionTerminal.Prevented },
+                $"[{run}] INTERVAL both deaths were held and refused (Vukah {vEnd?.Status}, stand-in {sEnd?.Status})");
+            Check(vHeld is { Hp: <= 0, Dead: false, Pending: 0 } && vHeld.Ai != nameof(EnemyState.Dead) && vHeld.Drops == dropsBefore,
+                $"[{run}] INTERVAL Vukah after the lethal step, before the answer: {vHeld}");
+            Check(vLog.Count > 0 && vLog.Any(x => x.Hp <= 0) && vLog.All(x => !x.Dead && x.Pending == 0 && x.Ai != nameof(EnemyState.Dead) && x.Exists && x.Drops == dropsBefore) &&
+                  vLog.Last().Hp == 1 && !states.Any(x => x.E == vukah && (x.To == EnemyState.Dead || x.Why == StateCondition.Death)) &&
+                  !deaths.Any(x => x.E == vukah),
+                $"[{run}] INTERVAL Vukah over {vLog.Count} steps ({vLog.Count(x => x.Hp <= 0)} Post sample(s) at health 0): never raw dead, never pending death, AI never Dead (no Death condition), no " +
+                $"EntityDeathEvent, no drop, health {vLog.FirstOrDefault()?.Hp} -> {vLog.LastOrDefault()?.Hp}; AI {string.Join(",", vLog.Select(x => x.Ai).Distinct())}");
+            Check(sHeld is { Hp: <= 0, Dead: false, Pending: 0 } && sLog.Count > 0 && sLog.All(x => !x.Dead && x.Pending == 0 && x.Exists) && sLog.Last().Hp == 1 &&
+                  !deaths.Any(x => x.E == stand),
+                $"[{run}] INTERVAL stand-in player: held {sHeld}; over {sLog.Count} steps never raw dead or pending, no EntityDeathEvent, health -> {sLog.LastOrDefault()?.Hp}");
+
+            // the control: the same instruments see an allowed death
+            subs.Add(Events.On<EntityDyingEvent>(d => { if (d.Entity == control) dying.Add(d); }, EventFilter.ForEntity(control)));
+            Combat.SetHealth(control, 0);
+            await Wait(12);
+            var cEnd = dying.Where(d => d.Entity == control).Select(d => EndOf(x => x.Id == d.Id)).LastOrDefault();
+            foreach (var x in states.Where(x => x.E == control)) Log.Info($"decisions-api-test: [{run}] interval control AI {x.From} -> {x.To} ({x.Why}) at step {x.Step}");
+            Check(cEnd is { Status: DecisionTerminal.Allowed } && DeadMark(control) && deaths.Any(x => x.E == control) &&
+                  (Creatures.Of(control).State == EnemyState.Dead || states.Any(x => x.E == control && x.To == EnemyState.Dead)),
+                $"[{run}] INTERVAL control: the allowed death is seen by the same instruments (outcome {cEnd?.Status}, raw dead {DeadMark(control)}, " +
+                $"EntityDeathEvent {deaths.Any(x => x.E == control)}, AI {Creatures.Of(control).State}, drops near {DropsNear(control)})");
+        }
+        catch (Exception e)
+        {
+            Check(false, $"[{run}] the interval suite threw: {e}");
+        }
+        finally
+        {
+            foreach (var sub in subs) sub.Dispose();
+            foreach (var e in mine)
                 if (Spawn.Exists(e)) Spawn.Destroy(e);
             await Wait(3);
         }

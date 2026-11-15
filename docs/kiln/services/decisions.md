@@ -72,6 +72,14 @@ and `AppliedHealth`.
   an actor dead directly, or removes it, is not held. This is not damage cancellation: the lethal hit has already
   changed the health and shown its effects (refuse the hit itself in `EntityHurtEvent`).
 - An entity that is already dead (a corpse, or the game's state 12) is never a new decision.
+- Between the lethal step and the answer (one step; two at the most) the entity has health 0 but is not dead. On a
+  dedicated server nothing of the game was seen to act on that 0 (lab, 0.2.0-dev.29, a Vukah with its AI running and a
+  spawned character, also with the entity programs on worker threads): no dead mark, no pending death, no AI change
+  (the enemy AI takes its Death condition from the actor's dead state, not from health), no `EntityDeathEvent`, no
+  drop; then the survival health is written. Clients are sent that health 0 for the step: whether a player's own
+  screen shows anything of a death for it is the guided check `07-events.decision-rollback`. Not tested: a save
+  written in that step would keep the health 0, and after a reload the game would decide that death again (held again
+  only while a mod listens).
 - A canceled death is carried out in Pre with kiln.combat's own health setter, and told once to `CombatChangedEvent`
   listeners (origin `kiln.decisions`), never by a second write.
 - Native plugins (pets, 19d) can guard an entity's death without any mod listening: `set_death_guard` below,
