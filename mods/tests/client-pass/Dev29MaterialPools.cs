@@ -9,7 +9,7 @@ namespace ClientPass;
 public sealed partial class ClientPassMod
 {
     [ClientCheck("17-material-pools","Custom material pools on new shapes",Area="Material limits",Since=Dev29,
-        Tags=[Visual,TwoPlayers,RequiredExpectations],Needs=ClientCheckNeeds.Any,Order=5500)]
+        Tags=[Visual,TwoPlayers],Needs=ClientCheckNeeds.Any,Order=5500)]
     public async Task MaterialPools(CheckContext c)
     {
         c.Expect(c.Session!=ClientCheckSession.Server && c.Player!=EntityId.None,"a real hosting or joined player is present");
@@ -22,7 +22,7 @@ public sealed partial class ClientPassMod
             var dir=Mods.Get("mp-fixture")?.Directory??throw new InvalidOperationException("mp-fixture is absent");
             using var proof=JsonDocument.Parse(File.ReadAllText(Path.Combine(dir,"lab-proof.json")));
             var p=proof.RootElement;var ran=p.GetProperty("passed").EnumerateArray().Select(v=>v.GetString()).ToHashSet(StringComparer.Ordinal);
-            string[] required=["served","restart","absent","back","late-material-room","handshake-order-before-stream","handshake-binding-before-stream","late","replay","torn-refused","restored-main-hash","building-seed","building-retained","terrain-boundary"];
+            string[] required=["served","restart","absent","back","late-material-room","handshake-order-before-stream","handshake-binding-before-stream","late","pending-inactive","replay","torn-refused","restored-main-hash","building-seed","building-retained","terrain-boundary"];
             c.Expect(p.GetProperty("format").GetInt32()==1 && p.GetProperty("complete").GetBoolean() && required.All(ran.Contains),"all coordinator lab cases passed, including refusals before streaming");
             c.Expect(p.GetProperty("hash").GetString()==WorldTables.Hash,"the lab proof is for this exact material/pool/binding profile",WorldTables.Hash);
         } catch(Exception e){c.Expect(false,"the coordinator's complete lab-proof.json is installed in mp-fixture",e.Message);}

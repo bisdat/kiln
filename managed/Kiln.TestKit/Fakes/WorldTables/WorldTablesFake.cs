@@ -84,7 +84,7 @@ internal sealed class PoolFakeState
         ["pools"]=new JsonArray(new[]{"BuildingDefaultMaterials","BuildingRoofMaterials","TerrainMaterials","OvergrowthMaterials"}.Select(n=>(JsonNode)new JsonObject {["name"]=n}).ToArray()),
         ["customPools"]=new JsonArray(Served.Values.Select(p=>(JsonNode)new JsonObject {["name"]=p.Mod+":"+p.Key,["guid"]=p.Guid.ToString(),["poolId"]=BlockIds.Fnv(p.Guid),["items"]=new JsonArray(p.Items.Select(i=>(JsonNode)JsonValue.Create(i)!).ToArray())}).ToArray()),
         ["shapeBindings"]=new JsonArray(),
-        ["poolRegistrations"]=new JsonArray(Receipts.Values.Select(r=>(JsonNode)new JsonObject {["registration"]=Convert.ToHexStringLower(DefinitionRegistration.IdBytes(r.RegistrationId)),["definition"]=r.Definition.ToString(),["mod"]=Owners[r.RegistrationId],["state"]=(uint)r.State,["code"]=(uint)r.Code,["slots"]=r.SlotsConsumed,["revision"]=r.SnapshotRevision,["reason"]=r.Reason}).ToArray())
+        ["poolRegistrations"]=new JsonArray(Receipts.Values.Select(r=>(JsonNode)new JsonObject {["registration"]=Convert.ToHexStringLower(DefinitionRegistration.IdBytes(r.RegistrationId)),["definition"]=r.Definition.ToString(),["mod"]=Owners[r.RegistrationId],["owner"]=ActiveOwners.GetValueOrDefault(r.Definition),["state"]=(uint)r.State,["code"]=(uint)r.Code,["slots"]=r.SlotsConsumed,["revision"]=r.SnapshotRevision,["reason"]=r.Reason}).ToArray())
     };
 }
 
@@ -172,7 +172,7 @@ internal static unsafe class WorldTablesFakeTable
     }
     [UnmanagedCallersOnly(CallConvs=[typeof(CallConvCdecl)])]private static int Registration(ulong owner,byte* id,KilnDefinitionReply* output,byte* b,nuint c,nuint* n)
     {
-        try{if(id==null || output==null || output->Size<64 || n==null)return 1;var guid=new Guid(new ReadOnlySpan<byte>(id,16),bigEndian:true);if(guid==Guid.Empty)return 1;var s=State;if(s is null || FakeTables.Off("worldtables.material_pools"))return 3;lock(s.Gate){var r=s.Receipts.TryGetValue(guid,out var known)?known:new(false,"no material-pool registration of that id",DefinitionRefusalCode.NotFound,guid,Guid.Empty,DefinitionRegistrationKind.BuildingMaterialPool,DefinitionRegistrationState.Refused,0,s.Revision,[]);var report=Report(r);*n=(nuint)Encoding.UTF8.GetByteCount(report);if(b==null || c<=*n)return 5;Fill(output,r);return Copy(report,b,c,n);}}catch{return 7;}
+        try{if(id==null || output==null || output->Size<64 || n==null)return 1;var guid=new Guid(new ReadOnlySpan<byte>(id,16),bigEndian:true);if(guid==Guid.Empty)return 1;var s=State;if(s is null || FakeTables.Off("worldtables.material_pools"))return 3;lock(s.Gate){var r=s.Receipts.TryGetValue(guid,out var known)?known:new(false,"no material-pool registration of that id",DefinitionRefusalCode.NotFound,guid,Guid.Empty,DefinitionRegistrationKind.BuildingMaterialPool,DefinitionRegistrationState.Refused,0,s.Revision,[]);var report=Report(r);*n=(nuint)Encoding.UTF8.GetByteCount(report);if(b==null || c<=*n)return 5;if(owner!=0 && r.State==DefinitionRegistrationState.Registered && !s.ActiveOwners.ContainsKey(r.Definition)){if(!Harness!.PoolOwnerActive(owner))return 6;s.ActiveOwners[r.Definition]=owner;}Fill(output,r);return Copy(report,b,c,n);}}catch{return 7;}
     }
     [UnmanagedCallersOnly(CallConvs=[typeof(CallConvCdecl)])]private static int DefineJson(WorldTablesNative.Str json,byte* b,nuint c,nuint* n)
     {

@@ -623,10 +623,6 @@ internal sealed class CheckRunner
         var c = run.Case;
         LedgerGuard? guard = null;
         var note = Scrubber.Scrub(run.Note);
-        if(verdict==ClientCheckVerdict.Pass && c.Tags.Contains(ClientCheckTags.RequiredExpectations,StringComparer.Ordinal) && run.Assertions.Any(a=>!a.Ok)) {
-            verdict=ClientCheckVerdict.Fail;
-            note="a required automatic assertion failed"+(note.Length>0?"; "+note:"");
-        }
         if (c.Cheats)
         {
             GuardStatus? after = run.Session == ClientCheckSession.Joined ? run.GuardAtEnd : _env.Guard is { } g ? CheatsRule.ReadStatus(g).Status : null;

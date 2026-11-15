@@ -23,7 +23,7 @@
 #include "kiln_api.h"
 #include "kiln_boot_collector.hpp"
 #include "merge.h"
-#include "pool_registration.h"
+#include "pool_store.h"
 #include "reflect.h"
 #include "surfacecheck.h"
 #include "terrain.h"
@@ -94,7 +94,7 @@ std::map<std::string,PoolGameMaterial> g_game_pool_materials;
 bool g_game_pool_materials_read=false;
 bool g_has_pool_shapes=false;
 std::map<std::string,uint32_t> g_pool_original_ids;
-std::vector<kiln::capacity::PendingFile> g_pending_files;
+PoolBootStore g_pending_boot;
 std::vector<PoolDefinition> g_pool_replayed;
 bool g_pool_layout_ok=false;
 std::string g_pool_reason;
@@ -177,20 +177,7 @@ std::string read_text(const fs::path& p) {
 fs::path data_dir() { return to_path(api_path(KILN_PATH_DATA)) / L"worldtables"; }
 
 bool write_atomic(const fs::path& path, const std::string& text) {
-    std::error_code ec;
-    fs::create_directories(path.parent_path(), ec);
-    const fs::path tmp = fs::path(path).concat(L".tmp");
-    {
-        std::ofstream f(tmp, std::ios::binary);
-        if (!f) return false;
-        f.write(text.data(), static_cast<std::streamsize>(text.size()));
-        if (!f) return false;
-    }
-    if (!MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING)) {
-        fs::remove(tmp, ec);
-        return false;
-    }
-    return true;
+    return kiln::capacity::write_atomic(path,text);
 }
 
 // Every mod folder in the load order: the profile's, and kiln/mods when no profile says otherwise. The rule kiln.assets uses for manifests.
@@ -222,17 +209,23 @@ std::vector<std::string> mod_folders() {
     return out;
 }
 
+kiln::capacity::pending_io::TrustedBase pending_base() {
+    static const bool hooked=[] {
+        kiln::capacity::pending_io::diagnostic=[](const auto& path,const auto& why) {
+            const auto detail=why.rfind("unsafe: ",0)==0 || why.rfind("unavailable: ",0)==0?why:"unsafe: "+why;
+            const auto message="stored definition "+to_utf8(path)+" refused: "+detail+" (left in place)";
+            WT_W("worldtables: %s",message.c_str());g_errors.push_back(message);
+        };return true;
+    }();
+    (void)hooked;return {data_dir()};
+}
 fs::path pool_pending_dir(const std::string& mod) {return data_dir()/L"pending"/to_path(mod);}
 bool persist_pool(const PoolReceipt& receipt) {
     const fs::path path=pool_pending_dir(receipt.definition.mod)/to_path("@pool-"+receipt.definition.guid.text()+".json");
-    const fs::path staging=fs::path(path).concat(L".stage");
-    std::error_code cleanup;fs::remove(staging,cleanup);if(cleanup)return false;
-    if(!kiln::capacity::write_atomic(staging,receipt.envelope())) return false;
-    HANDLE handle=CreateFileW(staging.c_str(),GENERIC_WRITE,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
-    const bool flushed=handle!=INVALID_HANDLE_VALUE && FlushFileBuffers(handle)!=0;
-    if(handle!=INVALID_HANDLE_VALUE)CloseHandle(handle);
-    if(flushed && MoveFileExW(staging.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))return true;
-    std::error_code ec;fs::remove(staging,ec);return false;
+    std::string reason;
+    const bool ok=kiln::capacity::pending_store_write(pending_base(),data_dir()/L"pending",path,receipt.envelope(),&reason);
+    if(!ok)kiln::capacity::pending_io::refused(path,"unsafe: "+reason);
+    return ok;
 }
 
 // ---- what makes a block "the same" for the boot merge: what its tables depend on, not its name or recipe -------------
@@ -355,17 +348,16 @@ void read_mod(const std::string& dir, const fs::path& pending_root, const kiln::
                 throw kiln::boot::Refusal(man.id, "worldtables", b.key, "kiln.worldtables: a boot document is not a blocks file (a JSON object)");
             add("boot code: " + b.key, ojson::parse(b.document.dump(), nullptr, false));
         }
-    for(const auto& pending:g_pending_files) {
-        if(pending.mod!=man.id || pending.path.extension()!=L".json")continue;
-        if(pending.name.rfind("@pool-",0)==0) {
-            PoolDefinition definition;std::string why;
-            if(!pool_envelope(parse_relaxed(read_text(pending.path)),man.id,&definition,&why)) {
-                g_errors.push_back(man.id+": refused torn/invalid pool pending envelope "+pending.name+": "+why);continue;
-            }
-            definition.dependencies=man.dependencies;g_pool_replayed.push_back(definition);
-            ojson doc={{"buildingMaterialPools",{{definition.block,ojson::parse(definition.definition)}}}};
-            docs.emplace_back("kept pool receipt: "+pending.name,std::move(doc));
-        } else add("kept from code: "+pending.name,parse_relaxed(read_text(pending.path)));
+    for(auto definition:g_pool_replayed)if(definition.mod==man.id) {
+        definition.dependencies=man.dependencies;
+        docs.emplace_back("kept pool receipt: "+definition.guid.text(),ojson{{"buildingMaterialPools",{{definition.block,ojson::parse(definition.definition)}}}});
+        g_pending_dirs[man.id]=pending_root/to_path(man.id);
+    }
+    for(const auto& frozen:g_pending_boot.files) {
+        const auto& pending=frozen.file;
+        if(pending.mod!=man.id || pending.path.extension()!=L".json" || pending.name.rfind("@pool-",0)==0)continue;
+        std::string bytes;
+        if(g_pending_boot.read(pending_base(),frozen,&bytes))add("kept from code: "+pending.name,parse_relaxed(bytes));
         g_pending_dirs[man.id]=pending_root/to_path(man.id);
     }
     std::set<std::string> seen;
@@ -647,7 +639,7 @@ std::string status_text() {
     o["shapeBindings"]=ojson::array();
     for(const auto& shape:g_shapes_in)if(!shape.pool.zero())o["shapeBindings"].push_back({{"item",shape.item.text()},{"pool",shape.pool.text()},{"mod",shape.mod},{"block",shape.block}});
     o["poolRegistrations"]=ojson::array();
-    for(const auto& [id,r]:g_pool_registrations.receipts)o["poolRegistrations"].push_back({{"registration",r.key()},{"definition",r.definition.guid.text()},{"mod",r.definition.mod},{"state",r.reply.disposition},{"code",r.reply.reason_code},{"slots",r.reply.slots_consumed},{"revision",r.reply.snapshot_revision},{"reason",r.reason.empty()?ojson(nullptr):ojson(r.reason)}});
+    for(const auto& [id,r]:g_pool_registrations.receipts)o["poolRegistrations"].push_back({{"registration",r.key()},{"definition",r.definition.guid.text()},{"mod",r.definition.mod},{"owner",g_pool_owners.count(r.definition.guid)?g_pool_owners.at(r.definition.guid):KilnOwner(0)},{"state",r.reply.disposition},{"code",r.reply.reason_code},{"slots",r.reply.slots_consumed},{"revision",r.reply.snapshot_revision},{"reason",r.reason.empty()?ojson(nullptr):ojson(r.reason)}});
     o["revision"]=g_pool_registrations.revision;
     o["firstNewId"] = g_first_new_id;
     o["room"] = g_room;
@@ -1255,28 +1247,23 @@ void record_world(const std::string& world) {
 // Blocks kept from code that the code didn't define this session go from the next start. By the time the world runs every mod's OnLoad has run; a
 // block a mod defines later is kept again when it's defined (define_json), so it never drops out for good.
 bool prune_mod_pending(const std::string& mod,const std::set<std::string>& keep_names,bool explicit_pools=true) {
-    const auto dir=pool_pending_dir(mod);std::error_code ec;
-    std::vector<std::pair<fs::path,Guid>> gone;
-    for(auto it=fs::directory_iterator(dir,ec);!ec && it!=fs::directory_iterator();it.increment(ec)) {
-        if(it->path().extension()!=L".json")continue;
-        auto key=to_utf8(it->path().stem());Guid guid;
+    kiln::capacity::PendingScan scan;
+    const auto files=kiln::capacity::pending_files_bounded(pending_base(),data_dir()/L"pending",&scan);
+    if(!scan.complete)return false;
+    for(const auto& f:files) {
+        if(f.mod!=mod || f.path.extension()!=L".json")continue;
+        auto key=to_utf8(f.path.stem());Guid guid;
         if(!pool_prune_allowed(key,explicit_pools))continue;
         if(key.rfind("@pool-",0)==0) {
-            PoolDefinition def;std::string why;
-            if(!pool_envelope(parse_relaxed(read_text(it->path())),mod,&def,&why)) {
-                WT_W("worldtables: refusing invalid pending pool %s: %s",key.c_str(),why.c_str());continue;
-            }
+            PoolDefinition def;std::string why,bytes;
+            if(!kiln::capacity::pending_io::read(pending_base(),f.path,&bytes,65536) || !pool_envelope(parse_relaxed(bytes),mod,&def,&why))continue;
+            if(f.name!="@pool-"+def.guid.text()+".json")continue;
             key=def.block;guid=def.guid;
         }
-        if(!keep_names.count(key))gone.emplace_back(it->path(),guid);
-    }
-    if(ec && ec!=std::errc::no_such_file_or_directory)return false;
-    for(const auto& [path,guid]:gone) {
-        std::error_code error;const bool removed=fs::remove(path,error);
-        if(error){WT_W("worldtables: cannot prune %s: %s",to_utf8(path).c_str(),error.message().c_str());return false;}
-        if(!removed)continue;
+        if(keep_names.count(key))continue;
+        if(!kiln::capacity::pending_io::remove(pending_base(),f.path))return false;
         if(!guid.zero())g_pool_registrations.remove_pending(guid);
-        WT_I("worldtables: %s: the code no longer defines %s: it's gone from the next start",mod.c_str(),to_utf8(path.stem()).c_str());
+        WT_I("worldtables: %s: the code no longer defines %s: it's gone from the next start",mod.c_str(),key.c_str());
     }
     return true;
 }
@@ -1464,7 +1451,9 @@ KilnResult KILN_CALL t_define(KilnStr json, char* report, size_t cap, size_t* ou
                 one["format"] = 1;
                 one[section] = ojson::object();
                 one[section][name] = doc[section][name];
-                if (!write_atomic(pending / to_path(name + ".json"), one.dump(1))) WT_W("worldtables: %s:%s: can't keep it for the next start", mf.mod.c_str(), name.c_str());
+                std::string pending_reason;
+                if (!kiln::capacity::pending_store_write(pending_base(),data_dir()/L"pending",pending / to_path(name + ".json"), one.dump(1), &pending_reason))
+                    kiln::capacity::pending_io::refused(pending / to_path(name + ".json"),"unsafe: "+pending_reason);
             };
             for (const Tweak& t : mf.tweaks) g_defined.insert(mf.mod + "/" + t.block);
             for (const Material& m : mf.materials) g_defined.insert(mf.mod + "/" + m.block);
@@ -1798,13 +1787,20 @@ KilnResult KILN_CALL t_define_pool(KilnOwner owner,KilnStr name,KilnStr json,uin
     } catch(const nlohmann::json::exception&){return KILN_ERR_INVALID_ARGUMENT;}
       catch(const std::exception& e){WT_E("worldtables: define_pool_result: %s",e.what());return KILN_ERR_INTERNAL;}
 }
-KilnResult KILN_CALL t_pool_registration(KilnOwner,const uint8_t id[16],KilnDefinitionReply* out,char* report,size_t cap,size_t* out_len) {
+KilnResult KILN_CALL t_pool_registration(KilnOwner owner,const uint8_t id[16],KilnDefinitionReply* out,char* report,size_t cap,size_t* out_len) {
     if(!id || !out || out->size<sizeof *out || !out_len)return KILN_ERR_INVALID_ARGUMENT;
     std::array<uint8_t,16> key{};std::memcpy(key.data(),id,16);
     if(std::all_of(key.begin(),key.end(),[](uint8_t b){return b==0;}))return KILN_ERR_INVALID_ARGUMENT;
     std::lock_guard lock(g_mu);if(!g_pool_cap)return KILN_ERR_UNAVAILABLE;
     const auto receipt=g_pool_registrations.query(key);const auto text=receipt.report();
     *out_len=text.size();if(!report || cap<=text.size())return KILN_ERR_BUFFER_TOO_SMALL;
+    // Boot receipts have no runtime owner yet. The managed observer labels them with the exact loaded
+    // context, without redefining their immutable row. Never hand a retired real owner's row to a reload.
+    if(owner && receipt.reply.disposition==KILN_DEFINITION_REGISTERED && !g_pool_owners.count(receipt.definition.guid)) {
+        const auto check=g_api->post_world(owner,g_client?KILN_WORLD_CLIENT:KILN_WORLD_SERVER,&pool_owner_probe,nullptr);
+        if(check!=KILN_OK)return check;
+        if(!track_pool_owner(receipt.definition.guid,owner))return KILN_ERR_UNAVAILABLE;
+    }
     const uint32_t size=out->size;*out=receipt.reply;out->size=size;
     return give_text(text,report,cap,out_len);
 }
@@ -1861,8 +1857,16 @@ Config read_config() {
 void read_all(const kiln::boot::Input* boot) {
     try {
         const fs::path pending = data_dir() / L"pending";
-        g_pending_files=kiln::capacity::pending_files(pending);
-        for (const std::string& dir : mod_folders()) {
+        const auto folders=mod_folders();
+        std::set<std::string> enabled;
+        for(const auto& dir:folders) {
+            Manifest man;if(!read_manifest(to_path(dir),&man) || (!g_client && man.side=="client") || (boot && boot->out(man.id)))continue;
+            enabled.insert(man.id);
+        }
+        g_pool_replayed=g_pending_boot.replay(pending_base(),enabled);
+        for(const auto& f:g_pending_boot.files)if(!enabled.count(f.file.mod))
+            kiln::capacity::pending_io::refused(f.file.path,"unsafe: owning mod is not loaded in this profile; left in place");
+        for (const std::string& dir : folders) {
             try {
                 read_mod(dir, pending, boot);
             } catch (const kiln::boot::Refusal&) {
@@ -1895,7 +1899,7 @@ void forget_locked() {
     g_live.clear();
     g_kept_read.clear();
     g_shapes.clear();
-    g_pool_defs.clear(); g_custom_pools.clear(); g_grouped.clear(); g_dependencies.clear(); g_game_pool_materials.clear();g_game_pool_materials_read=false;g_has_pool_shapes=false; g_pool_original_ids.clear(); g_pending_files.clear(); g_pool_replayed.clear();
+    g_pool_defs.clear(); g_custom_pools.clear(); g_grouped.clear(); g_dependencies.clear(); g_game_pool_materials.clear();g_game_pool_materials_read=false;g_has_pool_shapes=false; g_pool_original_ids.clear(); g_pool_replayed.clear();
     g_pool_owners.clear();g_pool_registrations.receipts.clear();++g_pool_registrations.revision;g_budgets_ready=false;
     g_craft_read.clear();
     g_boot_definitions.clear();
@@ -1967,6 +1971,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     if (api->abi_version != KILN_ABI_VERSION || api->size < sizeof(KilnApi)) return KILN_ERR_UNAVAILABLE;
     g_api = api;
     g_self = owner;
+    g_pending_boot.capture(pending_base()); // before managed OnBoot/OnLoad; never recaptured
     info->id = KilnStr{KILN_WORLDTABLES_SERVICE, sizeof(KILN_WORLDTABLES_SERVICE) - 1};
     info->version = KilnStr{"1", 1};
     g_client = api->side() == KILN_SIDE_CLIENT;

@@ -25,7 +25,7 @@ public sealed class MaterialTableChangedEvent : KilnEvent
 }
 
 // Snapshots only: no game-memory walk. A server mod carries Post; joined clients use kiln.client's own Post.
-// Subscribers are installed only when a mod uses pools/budgets or listens for the material-table event.
+// Custom boot rows need owner observation even without an API call; other observers start on pool/budget/event use.
 internal static unsafe class WorldTablesEvents
 {
     [StructLayout(LayoutKind.Sequential)] private struct ClientPrefix
@@ -35,15 +35,42 @@ internal static unsafe class WorldTablesEvents
         public delegate* unmanaged[Cdecl]<ulong,int> Unsubscribe;
     }
     private static readonly object Gate=new();
-    private static IDisposable? _tick;
+    private static IDisposable? _tick,_bootProbe;
+    private static bool _bootChecked;
     private static ModContext? _rider;
     private static readonly HashSet<Guid> DeferredSeen=[];
+    private static readonly HashSet<(Guid,ulong)> Adopted=[];
     private static readonly Dictionary<Guid,DefinitionRegistrationResult> Receipts=[];
     private static readonly Dictionary<string,CapacityInfo> Budgets=[];
     private static string _hash=WorldTablesNative.EmptyHash;
     private static ClientPrefix* _client;
     private static ulong _clientHandle,_owner;
     private static bool _faulted;
+    // Start ownership observation for boot rows even when their mod never calls a pool API.
+    // One bounded metadata snapshot decides this; no custom pool leaves no continuing pool observer.
+    internal static void WatchBoot()
+    {
+        lock(Gate) {
+            if(_bootChecked)return;
+            ProbeBoot();
+            if(!_bootChecked)_bootProbe??=ServiceTick.Add("worldtables boot pool owners",static(in TickInfo _)=>ProbeBoot());
+        }
+    }
+    private static void ProbeBoot()
+    {
+        lock(Gate) {
+            if(_bootChecked)return;
+            var state=WorldTablesNative.State;
+            if(state==WorldTablesNative.Waiting)return;
+            bool pools=false;
+            try {
+                if(state is WorldTablesNative.Merged or WorldTablesNative.Untouched)
+                    pools=(JsonNode.Parse(WorldTables.StatusJson()) as JsonObject)?["customPools"] is JsonArray {Count:>0};
+            } catch(Exception e) {BlocksBridge.Log(LogLevel.Error,"worldtables boot owner observation failed: "+e.Message);}
+            _bootChecked=true;_bootProbe?.Dispose();_bootProbe=null;
+            if(pools)Enable();
+        }
+    }
     internal static void Enable()
     {
         lock(Gate) {
@@ -66,7 +93,10 @@ internal static unsafe class WorldTablesEvents
             if(_rider is {Alive:true})return;
             if(_rider!=null)_rider.Tick.Post-=ServerPost;
             _rider=candidates.FirstOrDefault();
-            if(_rider!=null)_rider.Tick.Post+=ServerPost;
+            if(_rider is {} rider) {
+                rider.Tick.Post+=ServerPost;
+                rider.Retiring+=()=>{lock(Gate){if(ReferenceEquals(_rider,rider)){rider.Tick.Post-=ServerPost;_rider=null;}}};
+            }
         }
     }
     private static void ServerPost(in TickInfo _)=>Poll();
@@ -88,6 +118,11 @@ internal static unsafe class WorldTablesEvents
                 foreach(var n in doc["poolRegistrations"] as JsonArray??[]) {
                     var id=new Guid(Convert.FromHexString((string)n!["registration"]!),bigEndian:true);
                     var state=(DefinitionRegistrationState)(uint)n["state"]!;var code=(DefinitionRefusalCode)(uint)n["code"]!;
+                    if(state==DefinitionRegistrationState.Registered) {
+                        var mod=Mods.All.FirstOrDefault(m=>m.Id==(string)n["mod"]! && m.IsLoaded);
+                        var context=mod?.Info is {} info?ModContext.FindLive(info):null;
+                        if(context is {Alive:true} && Adopted.Add((id,context.Owner)))WorldTablesNative.AdoptRegistration(id,context.Owner);
+                    }
                     var now=new DefinitionRegistrationResult(code==DefinitionRefusalCode.None,(string?)n["reason"],code,id,Guid.Parse((string)n["definition"]!),DefinitionRegistrationKind.BuildingMaterialPool,state,(uint)n["slots"]!,(ulong)n["revision"]!,[]);
                     Receipts.TryGetValue(id,out var before);
                     if(before is not null && before.State==now.State && before.Code==now.Code && before.SlotsConsumed==now.SlotsConsumed && before.Reason==now.Reason)continue;
@@ -114,10 +149,10 @@ internal static unsafe class WorldTablesEvents
     {
         lock(Gate) {
             if(_rider!=null)_rider.Tick.Post-=ServerPost;_rider=null;
-            _tick?.Dispose();_tick=null;
+            _tick?.Dispose();_tick=null;_bootProbe?.Dispose();_bootProbe=null;_bootChecked=false;
             if(_clientHandle!=0 && _client!=null && _client->Unsubscribe!=null)_client->Unsubscribe(_clientHandle);
             _clientHandle=0;_client=null;_owner=0;_faulted=false;
-            Receipts.Clear();Budgets.Clear();DeferredSeen.Clear();_hash=WorldTablesNative.EmptyHash;
+            Receipts.Clear();Budgets.Clear();DeferredSeen.Clear();Adopted.Clear();_hash=WorldTablesNative.EmptyHash;
         }
     }
 }

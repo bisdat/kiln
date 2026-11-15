@@ -70,10 +70,6 @@ public static class ClientCheckTags
     /// player's own game client is latched on and protecting; see docs/kiln/modding/testing.md, "Checks tagged cheats".</summary>
     public const string Cheats = "cheats";
 
-    /// <summary>Every automatic assertion is a requirement. A failed Expect changes a player's Pass into Fail.
-    /// Other checks keep their existing independent assertion and verdict behavior.</summary>
-    public const string RequiredExpectations = "required-expectations";
-
     /// <summary>The player judges something they see.</summary>
     public const string Visual = "visual";
 

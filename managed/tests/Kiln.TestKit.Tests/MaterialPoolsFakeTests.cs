@@ -6,6 +6,23 @@ public sealed class MaterialPoolsFakeTests
     private sealed class PoolMod:Mod;
     private static BuildingMaterialPoolBlock Pool(int n=2)=>new() {Name="Walls",Materials=Enumerable.Range(0,n).Select(i=>new BuildingMaterialPoolEntry(GameMaterial:i%2==0?"WoodRough":"StoneRough")).ToArray()};
     [Fact]
+    public void Replayed_boot_receipt_adopts_loaded_owner_without_redefinition()
+    {
+        using var h=new KilnHarness();h.WorldTables.ServePool("pool-replay-owner","walls",Pool());
+        var mod=h.Load<PoolMod>(new ModManifest("pool-replay-owner").Set("clients","mod"));
+        h.Step(3); // no pool API/Define call may be needed to attach the replay owner
+        using var status=System.Text.Json.JsonDocument.Parse(h.Run(WorldTables.StatusJson));
+        var hex=status.RootElement.GetProperty("poolRegistrations")[0].GetProperty("registration").GetString()!;
+        var id=new Guid(Convert.FromHexString(hex),bigEndian:true);
+        h.Reload(mod);h.Step(3);
+        Assert.Equal(DefinitionRegistrationState.Retained,h.Run(()=>WorldTables.GetMaterialPoolRegistration(id)).State);
+        Assert.Equal(2u,h.Run(()=>WorldTables.GetPoolBudget("pool-replay-owner:walls")).Budget.Reserved);
+        var reloaded=mod;
+        Assert.Equal(DefinitionRegistrationState.Retained,h.Run(()=>WorldTables.GetMaterialPoolRegistration(id)).State);
+        var explicitAgain=h.As(reloaded,()=>Blocks.Define("walls",Pool(),new DefinitionRegistrationOptions()));
+        Assert.Equal(DefinitionRegistrationState.Registered,explicitAgain.State);Assert.Equal(2u,explicitAgain.SlotsConsumed);
+    }
+    [Fact]
     public void An_unloaded_owner_retains_the_immutable_row_without_reporting_it_registered()
     {
         using var h=new KilnHarness();h.WorldTables.ServePool("pool-unload","walls",Pool());

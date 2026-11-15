@@ -9,12 +9,12 @@ namespace Kiln.CheckRunnerTests;
 public sealed class RunnerTests
 {
     [Fact]
-    public void Required_expectations_cannot_be_overridden_by_a_player_pass()
+    public void Untagged_check_can_pass_after_a_failed_check_and_still_skip()
     {
-        using var h=new Harness();h.Start("t.required-fail");
+        using var h=new Harness();h.Start("t.transition-fail");
         Assert.Equal("fail",h.Answer(AnswerKind.Pass).Verdict);
-        h.Start("t.required-pass");Assert.Equal("pass",h.Answer(AnswerKind.Pass).Verdict);
-        h.Start("t.required-fail");Assert.Equal("skip",h.Answer(AnswerKind.Skip).Verdict);
+        h.Start("t.transition-pass");Assert.Equal("pass",h.Answer(AnswerKind.Pass).Verdict);
+        h.Start("t.transition-fail");Assert.Equal("skip",h.Answer(AnswerKind.Skip).Verdict);
     }
     [Fact]
     public void A_pass_on_its_assertions_and_the_verdict()

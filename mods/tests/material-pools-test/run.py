@@ -19,7 +19,7 @@ REPO=HERE.parents[2]
 PROOF=['capabilities','vanilla-rows-unchanged',*[kind+'-'+key for key in ('four','shared','full','roof') for kind in ('membership','binding','preview-data','budget')],
        'shared-material-one-id','no-65-served','vanilla-shape-binding','material-budgets','unknown-pool']
 SERVED=['served-registration','served-idempotent','65-refused-before-serving','duplicate-refused','roof-refused','unknown-base-refused']
-FINAL=['served','restart','absent','back','late-material-room','handshake-order-before-stream','handshake-binding-before-stream','late','replay','torn-refused','restored-main-hash',
+FINAL=['served','restart','absent','back','late-material-room','handshake-order-before-stream','handshake-binding-before-stream','late','pending-inactive','replay','torn-refused','restored-main-hash',
        'building-seed','building-retained','terrain-boundary']
 
 def valid_result(mode,result,log,required):
@@ -31,13 +31,15 @@ def rejected_before_stream(welcome,reject,data_frames):
     return welcome is None and reject is not None and 'building' in reject[0].lower() and 'materials' in reject[0].lower() and data_frames==0
 
 class Lab:
-    def __init__(self,name,build,out,port,position):
+    def __init__(self,name,build,out,port,position,base_box):
         if not re.fullmatch('[a-zA-Z0-9._-]+',name) or name in ('.','..'):raise ValueError('invalid lab name')
         self.name=name;self.root=Path(os.environ.get('KILN_LABS',Path.home()/'srv/enshrouded/labs'))/name
         if not (self.root/'enshrouded_server.exe').is_file():raise ValueError('create a new disposable lab first: '+str(self.root))
         self.kiln=self.root/'kiln';self.build=build;self.out=out;self.port=port;self.position=position
         self.data=self.kiln/'data/material-pools-test';self.data.mkdir(parents=True,exist_ok=True)
-        (self.data/'position.json').write_text(json.dumps(position))
+        (self.data/'base-box.json').write_text(json.dumps(base_box))
+        if position is not None:(self.data/'position.json').write_text(json.dumps(position))
+        else:(self.data/'position.json').unlink(missing_ok=True)
         self.stop()
         unknown=[p.name for p in (self.kiln/'mods').glob('*') if p.is_dir() and not p.name.startswith('mp-') and p.name!='material-pools-test']
         if unknown:raise ValueError('lab must contain only this test: '+str(unknown))
@@ -116,15 +118,16 @@ def main():
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--lab',required=True);ap.add_argument('--boundary-lab',required=True)
     ap.add_argument('--port',type=int,default=28351);ap.add_argument('--boundary-port',type=int,default=28355)
-    ap.add_argument('--position',nargs=3,type=float,required=True,metavar=('X','Y','Z'),help='inside a flame base in BOTH disposable save copies')
+    ap.add_argument('--position',nargs=3,type=float,metavar=('X','Y','Z'),help='optional clear-ground override inside the base in both save copies')
+    ap.add_argument('--base-box',nargs=6,type=float,default=[3006,902.6,1530,3042,906.6,1570],metavar=('X0','Y0','Z0','X1','Y1','Z1'),help='base bounds and vertical clear-cell search range in metres')
     ap.add_argument('--out',type=Path,required=True);a=ap.parse_args()
     if a.lab==a.boundary_lab:raise ValueError('the boundary run requires its own new lab')
     build=Path(os.environ['KILN_OUT']);passed=[]
-    lab=Lab(a.lab,build,a.out/'main',a.port,a.position);boundary=Lab(a.boundary_lab,build,a.out/'boundary',a.boundary_port,a.position)
+    lab=Lab(a.lab,build,a.out/'main',a.port,a.position,a.base_box);boundary=Lab(a.boundary_lab,build,a.out/'boundary',a.boundary_port,a.position,a.base_box)
     def done(name):passed.append(name);print('PASS mp-lab.'+name,flush=True)
     try:
         fixture=json.loads((HERE/'fixtures/mp-fixture/blocks/pools.json').read_text());lab.fixture()
-        initial,status=lab.run('served','served',PROOF+SERVED+['cells-written-and-game-saved','restart-materials-and-cells-live'],during=lambda s:handshake(lab,s));done('served')
+        initial,status=lab.run('served','served',PROOF+SERVED+['all-ground-read-before-write','cells-written-and-game-saved','restart-materials-and-cells-live'],during=lambda s:handshake(lab,s));done('served')
         again,_=lab.run('restart','restart',PROOF+['restart-materials-and-cells-live'])
         if initial['hash']!=again['hash']:raise RuntimeError('hash changed on identical restart')
         done('restart')
@@ -145,7 +148,24 @@ def main():
         if len(envelopes)!=1:raise RuntimeError('expected ONE durable definition+receipt envelope')
         envelope=envelopes[0];valid=json.loads(envelope.read_text())
         if valid.get('mod')!='material-pools-test' or valid.get('block')!='late':raise RuntimeError('wrong durable envelope')
-        lab.run('replay','replay',['restart-receipt-registered','restart-same-receipt','restart-one-row']);done('replay')
+        # A different loaded observer must see a disabled owner's file refused once, unchanged and unapplied.
+        original_data=lab.data;disabled=lab.kiln/'mods/material-pools-test/.disabled'
+        observer=lab.kiln/'mods/mp-pending-observer';observer.mkdir(parents=True,exist_ok=True)
+        manifest=json.loads((HERE/'kiln.mod.json').read_text());manifest['id']='mp-pending-observer'
+        (observer/'kiln.mod.json').write_text(json.dumps(manifest))
+        shutil.copy(build/'dotnet/bin/MaterialPoolsTest/debug/MaterialPoolsTest.dll',observer)
+        lab.data=lab.kiln/'data/mp-pending-observer';lab.data.mkdir(parents=True,exist_ok=True)
+        shutil.copy(original_data/'receipt.txt',lab.data/'receipt.txt');before=envelope.read_bytes();disabled.touch()
+        try:
+            lab.run('inactive','inactive',['inactive-request-unapplied','inactive-file-named'])
+            if envelope.read_bytes()!=before:raise RuntimeError('inactive request changed or disappeared')
+            lines=(lab.out/'inactive.log').read_text(errors='replace').splitlines()
+            named=[line for line in lines if envelope.name in line and 'owning mod is not loaded' in line]
+            if len(named)!=1:raise RuntimeError('inactive file must be named exactly once')
+            done('pending-inactive')
+        finally:
+            disabled.unlink(missing_ok=True);lab.data=original_data;lab.remove('mp-pending-observer')
+        lab.run('replay','replay',['restart-receipt-registered','restart-owner-adopted-before-redefine','restart-same-receipt','restart-one-row']);done('replay')
         # Torn file: neither a row nor a Registered receipt may survive a new process.
         envelope.write_text('{"format":1,"canonical":');lab.run('torn','torn',['torn-envelope-refused']);done('torn-refused')
         envelope.unlink();lab.fixture();lab.authored_driver(True)
@@ -155,7 +175,7 @@ def main():
         # Seed 49 building IDs through roofs (50 selector places) so the 49-ID limit is independent of selector room.
         # Then remove the mod: all 49 retained records have NO selectable block items. A further live ID is refused.
         boundary.content('mp-cap-building',{'format':1,'buildingMaterials':{f'm{i}':{'name':f'ID seed {i}','roof':True} for i in range(49)}})
-        boundary.run('building-seed','building-seed',['building-49-plus-1','boundary-refusal-count','cells-written-and-game-saved']);done('building-seed')
+        boundary.run('building-seed','building-seed',['building-49-plus-1','boundary-refusal-count','all-ground-read-before-write','cells-written-and-game-saved']);done('building-seed')
         boundary.remove('mp-cap-building');boundary.content('mp-overflow',{'format':1,'buildingMaterials':{'overflow':{'name':'50th building ID','roof':True}}})
         boundary.run('building-retained','building-retained',['building-49-plus-1','boundary-refusal-count','retained-building-no-selector-items','absent-materials-and-cells-retained']);done('building-retained')
         boundary.remove('mp-overflow');boundary.content('mp-cap-terrain',{'format':1,'terrainMaterials':{f'm{i}':{'name':f'Terrain ID {i}','like':'TerrainStone','placeable':False} for i in range(12)}})

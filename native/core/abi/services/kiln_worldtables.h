@@ -143,6 +143,9 @@ typedef struct KilnWorldTablesApi {
      * AllowNextStart atomically persists one definition+receipt envelope, consuming zero live entries. */
     KilnResult(KILN_CALL* define_pool_result)(KilnOwner owner, KilnStr name, KilnStr typed_pool_json, uint32_t timing,
         KilnDefinitionReply* out, char* report, size_t capacity, size_t* out_len);
+    /* owner=0 is a pure any-thread query. Internal host observation on Post may supply the exact loaded
+     * owner's token to adopt a previously unowned boot receipt; it cannot reactivate a retired real owner.
+     * Buffer probes never adopt. The record shape is the shared buff/VFX KilnDefinitionReply. */
     KilnResult(KILN_CALL* pool_registration)(KilnOwner owner, const uint8_t registration_id[16], KilnDefinitionReply* out,
         char* report, size_t capacity, size_t* out_len);
 } KilnWorldTablesApi;

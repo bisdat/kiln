@@ -36,7 +36,12 @@ public sealed class MaterialPoolsMod:Mod
                     Check("late-material-uses-vanilla-room",pending.Status==TableBlockStatus.Pending && vanillaRoom.Ok && vanillaRoom.Budget.KilnUsed==0 && vanillaRoom.Budget.Available==3);
                     break;
                 case "late":Late();break;
-                case "replay":Replay();break;
+                case "replay":await Replay();break;
+                case "inactive":
+                    var inactiveId=Guid.Parse(File.ReadAllText(Path.Combine(Context.DataDirectory,"receipt.txt")));
+                    Check("inactive-request-unapplied",WorldTables.GetMaterialPoolRegistration(inactiveId).Code==DefinitionRefusalCode.NotFound && WorldTables.GetPoolBudget("material-pools-test:late").Budget.Readiness==CapacityReadiness.NotFound);
+                    using(var inactive=JsonDocument.Parse(WorldTables.StatusJson()))Check("inactive-file-named",inactive.RootElement.GetProperty("errors").EnumerateArray().Any(e=>e.GetString()!.Contains("material-pools-test",StringComparison.Ordinal) && e.GetString()!.Contains("owning mod is not loaded",StringComparison.Ordinal)));
+                    break;
                 case "torn":
                     var oldId=Guid.Parse(File.ReadAllText(Path.Combine(Context.DataDirectory,"receipt.txt")));
                     using(var torn=JsonDocument.Parse(WorldTables.StatusJson()))Check("torn-envelope-refused",WorldTables.GetMaterialPoolRegistration(oldId).Code==DefinitionRefusalCode.NotFound && WorldTables.GetPoolBudget("material-pools-test:late").Budget.Readiness==CapacityReadiness.NotFound && torn.RootElement.GetProperty("errors").EnumerateArray().Any(e=>e.GetString()!.Contains("torn/invalid",StringComparison.Ordinal)));
@@ -47,7 +52,7 @@ public sealed class MaterialPoolsMod:Mod
                 case "status":Check("status-snapshot",true);break;
                 default:throw new InvalidOperationException("unknown test mode "+Mode);
             }
-        } catch(Exception e){Check("completed-without-exception",false,e.ToString());}
+        } catch(Exception e){Check("completed-without-exception",false,e.Message);}
         var status=WorldTables.StatusJson();File.WriteAllText(Path.Combine(Context.DataDirectory,"served.json"),status);
         var result=new {mode=Mode,hash=WorldTables.Hash,passed=_passed,failed=_failed};
         var path=Path.Combine(Context.DataDirectory,"result.json");File.WriteAllText(path+".tmp",JsonSerializer.Serialize(result));File.Move(path+".tmp",path,true);
@@ -80,11 +85,16 @@ public sealed class MaterialPoolsMod:Mod
         if(!accepted.Ok)throw new InvalidOperationException("cannot checkpoint a refused deferred request");
         File.WriteAllText(Path.Combine(Context.DataDirectory,"receipt.txt"),accepted.RegistrationId.ToString());
     }
-    private void Replay()
+    private async Task Replay()
     {
         var id=Guid.Parse(File.ReadAllText(Path.Combine(Context.DataDirectory,"receipt.txt")));
         var receipt=WorldTables.GetMaterialPoolRegistration(id);
         Check("restart-receipt-registered",receipt.Ok && receipt.State==DefinitionRegistrationState.Registered && receipt.SlotsConsumed==2,receipt.ToString());
+        for(int i=0;i<3;++i)await Context.Scheduler.NextTick();
+        using(var ownership=JsonDocument.Parse(WorldTables.StatusJson())) {
+            var row=ownership.RootElement.GetProperty("poolRegistrations").EnumerateArray().Single(r=>r.GetProperty("definition").GetString()==receipt.Definition.ToString());
+            Check("restart-owner-adopted-before-redefine",row.GetProperty("owner").GetUInt64()!=0 && row.GetProperty("state").GetUInt32()==(uint)DefinitionRegistrationState.Registered);
+        }
         var same=Blocks.Define("late",CodePool() with {Name="Late Code Pool"},new DefinitionRegistrationOptions());
         Check("restart-same-receipt",same.Ok && same.RegistrationId==id && same.SlotsConsumed==2);
         var actual=PoolProof.ReadPools(PoolProof.Resource("keen::VoxelBlueprintMaterialPoolRegistryResource"));
@@ -96,15 +106,20 @@ public sealed class MaterialPoolsMod:Mod
         for(var i=0;i<7200 && Build.Grid is null;++i)await Context.Scheduler.NextTick();
         var path=Path.Combine(Context.DataDirectory,"cells.json");CellWitness[] witnesses;
         if(write) {
-            // Caller must supply a position inside a flame base in the disposable lab save. No fallback coordinate.
-            var p=JsonSerializer.Deserialize<double[]>(File.ReadAllText(Path.Combine(Context.DataDirectory,"position.json")))!;
-            if(p.Length!=3)throw new InvalidDataException("position.json takes [x,y,z] in a flame base");
+            var positionFile=Path.Combine(Context.DataDirectory,"position.json");
+            var position=File.Exists(positionFile)?JsonSerializer.Deserialize<double[]>(File.ReadAllText(positionFile)):null;
+            var boundsFile=Path.Combine(Context.DataDirectory,"base-box.json");
+            var bounds=File.Exists(boundsFile)?JsonSerializer.Deserialize<double[]>(File.ReadAllText(boundsFile))!:PoolGround.DefaultBase;
             var live=WorldTables.Materials.Where(m=>m.Mod==mod && m.Live && !m.Terrain).ToArray();
             if(mod=="mp-cap-building")live=live.Take(1).ToArray(); // one saved witness; the world's table retains all 49 definitions
             if(live.Length==0)throw new InvalidOperationException("no live test material to write");
+            // Selection must finish for ALL materials before the first write. Failure leaves the world untouched.
+            var boxes=await PoolGround.Find(live.Length,bounds,position,p=>Build.BoxAround(p,1,1,1),b=>Build.ReadAsync(b));
+            foreach(var box in boxes)Context.Log.Info($"mp: selected cells {box.X} {box.Y} {box.Z} {box.SizeX} {box.SizeY} {box.SizeZ}");
+            Check("all-ground-read-before-write",boxes.Count==live.Length);
             var list=new List<CellWitness>();
             foreach(var material in live) {
-                var box=Build.BoxAround(new WorldPosition(p[0]+list.Count*3,p[1],p[2]),1,1,1);
+                var box=boxes[list.Count];
                 var cells=Enumerable.Repeat(Voxel.Of((byte)material.CellId,255),checked((int)box.Count)).ToArray();
                 var result=await Build.WriteAsync(box,cells,new BuildOptions{Flags=BuildFlags.InBases});
                 if(!result.Ok || !result.Verified || !result.Kept)throw new InvalidOperationException("test cells were not a verified kept write: "+result);

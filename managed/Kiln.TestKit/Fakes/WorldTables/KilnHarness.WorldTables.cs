@@ -19,6 +19,9 @@ public sealed class HarnessWorldTables
     /// <summary>Configures one actual served boot row. Validation and entry counts match pool admission; this never claims UI ingestion.</summary>
     public void ServePool(string mod,string key,BuildingMaterialPoolBlock block)=>_h.Run(()=>{
         lock(State.Gate){var checkedPool=State.Validate(mod,block);if(checkedPool.Code!=DefinitionRefusalCode.None)throw new ArgumentException(checkedPool.Reason);var guid=BlockIds.Derive(mod,"materialpool",block.Was??key);if(State.OriginalIds.Contains(BlockIds.Fnv(guid)) || State.Served.Values.Any(p=>p.Guid!=guid && BlockIds.Fnv(p.Guid)==BlockIds.Fnv(guid)))throw new ArgumentException("pool id collision");State.Served[mod+":"+key]=new(mod,key,guid,checkedPool.Canonical,checkedPool.Items,block.Roof);var receipt=State.Prepare(mod,key,block,DefinitionTiming.RequireRegistered,true);State.Commit(receipt,mod,checkedPool.Canonical);}
+        // Fixture boot rows are scripted after the harness has started its services. Re-run the real startup
+        // reporter against that boot snapshot; bypassing it would hide missing production owner observation.
+        WorldTablesEvents.Reset();BlocksRows.Rows.Refresh();
     });
     /// <summary>Configures a live or retained building/terrain material and its block item. A pool cannot use terrain, retained materials or item 0.</summary>
     public void Material(string mod,string key,uint item,bool roof=false,bool live=true,bool terrain=false){lock(State.Gate)State.Materials[mod+":"+key]=new(item,roof,live,terrain);}

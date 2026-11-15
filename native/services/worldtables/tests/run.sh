@@ -16,3 +16,5 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/.." -I
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/.." -I"$here/../../surfaces/cook" -I"$here/../../../third_party" \
     "$here/test_terrain.cpp" "$here/../merge.cpp" "$here/../terrain.cpp" "$here/../../surfaces/cook/surfacecheck.cpp" -o "$out/test_terrain"
 "$out/test_terrain" ${KILN_TERRAIN_RES:+"$KILN_TERRAIN_RES"}
+# Durable next-start pools use the reviewed shared pending-store boundary.
+KILN_OUT="$KILN_OUT" bash "$here/pool_store_test.sh"

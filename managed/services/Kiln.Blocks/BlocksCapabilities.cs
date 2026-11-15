@@ -24,5 +24,6 @@ internal static class BlocksRows
         AffixRuntime.RefreshCapabilities();
         // blocks.vfx_registration is kiln.vfx's row (Blocks.Define(name, VfxBlock, options)); without its table nobody reports it
         VfxCaps.ReportBudgetRows();
+        WorldTablesNative.ReportBudgetRows();
     }
 }

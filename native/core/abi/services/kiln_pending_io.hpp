@@ -32,6 +32,9 @@ inline bool injected(const char* step) {return fail_step && std::string_view(fai
 inline bool injected(const char*) {return false;}
 #endif
 inline bool component(const std::string& s) {
+    // worldtables reserves this ordinary filename prefix for pool envelopes. Validate its entire suffix
+    // with the same component policy; separators, traversal and trailing dots/spaces remain refused.
+    if(s.rfind("@pool-",0)==0)return component(s.substr(6));
     if (s.empty() || s=="." || s==".." || s.back()=='.' || s.back()==' ') return false;
     for (unsigned char c:s) if (!(c>='a'&&c<='z') && !(c>='A'&&c<='Z') && !(c>='0'&&c<='9') && c!='-' && c!='_' && c!='.') return false;
     // Windows device names remain special even with an extension.

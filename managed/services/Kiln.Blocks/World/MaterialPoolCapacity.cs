@@ -34,13 +34,29 @@ public static partial class WorldTables
     public static DefinitionRegistrationResult GetMaterialPoolRegistration(Guid registrationId)
     {
         if(registrationId==Guid.Empty)throw new ArgumentException("An empty registration ID is invalid.",nameof(registrationId));
-        return WorldTablesNative.Registration(registrationId);
+        var result=WorldTablesNative.Registration(registrationId);WorldTablesEvents.Enable();return result;
     }
     internal static bool PoolName(string? text)=>text is {Length:>0} && text.Split(':') is var parts && parts.Length<=2 && parts.All(p=>MaterialPoolValidation.Valid(p));
 }
 
 internal static unsafe partial class WorldTablesNative
 {
+    internal static void ReportBudgetRows()
+    {
+        // Native reports resolved/missing executable inputs. Managed only supplies the missing/older fallback.
+        // Never infer availability from an ABI pointer or overwrite a native layout refusal.
+        var t=T;
+        bool Missing(uint offset)=>t==null || !HasAppend(t->Size,offset) || *(nint*)((byte*)t+offset)==0;
+        var budgets=Missing(144) || Missing(152);
+        var pools=Missing(160) || Missing(168);
+        if(!pools && t!=null && t->State!=null && t->Status!=null)WorldTablesEvents.WatchBoot();
+        if(!budgets && !pools)return;
+        ServiceCaps.Probe(Name);
+        var reason=t==null?CapabilityReason.ServiceMissing:CapabilityReason.ServiceOlder;
+        var text=t==null?"kiln.worldtables is not here: no native boot table service":"this kiln.worldtables has no appended budgets or material-pool registration members: update Kiln";
+        foreach(var (name,missing) in new[]{("worldtables.budgets",budgets),("worldtables.material_pools",pools)})
+            if(missing && Capabilities.Get(name).Reason==CapabilityReason.Unknown)ServiceCaps.Static(name,false,reason,text,Name);
+    }
     internal static bool HasAppend(uint size,uint offset)=>size>=offset+8;
     internal static void RequirePoolWriter()
     {
@@ -49,6 +65,7 @@ internal static unsafe partial class WorldTablesNative
     }
     private static Table* RequireAppend(uint offset,string capability)
     {
+        ReportBudgetRows();
         var t=T;
         if(t==null || !HasAppend(t->Size,offset) || *(nint*)((byte*)t+offset)==0)throw ServiceCaps.Unavailable(capability,"this worldtables table does not provide the appended member");
         return t;
@@ -72,6 +89,7 @@ internal static unsafe partial class WorldTablesNative
         return CapacityMapping.ToResult(reply);
     }
     internal static DefinitionRegistrationResult DefinePool(ulong owner,string name,string document,DefinitionTiming timing)=>PoolCall(owner,name,document,timing,Guid.Empty);
+    internal static void AdoptRegistration(Guid id,ulong owner)=>_ = PoolCall(owner,"","",DefinitionTiming.RequireRegistered,id);
     internal static DefinitionRegistrationResult Registration(Guid id)=>PoolCall(0,"","",DefinitionTiming.RequireRegistered,id);
     private static DefinitionRegistrationResult PoolCall(ulong owner,string name,string document,DefinitionTiming timing,Guid id)
     {
