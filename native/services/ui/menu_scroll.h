@@ -12,14 +12,17 @@
 //   close site ends exactly what the open site of the same builder call began (Pair). An open site that finds a begin
 //   still open (the close site did not run: something this analysis missed) says "unbalanced", and the experiment
 //   stops for the process.
-// - A menu that fits is drawn as it always was: Kiln wraps the column only while the menu has more mods' rows than
-//   the rule of menu_rows.h lets it show (kFew), the case where Quit leaves the screen.
-// - A crash guard: before the first begin in a process a "trying" marker is written; it goes once the wrapped builder
-//   has run to its close site kTrialFrames times in this process (a wrong nesting is fatal within the first frames;
-//   no wall-clock time, no "then closed": a player who presses Quit afterwards does not count as a crash). A start
-//   that finds it (the game ended while trying) turns it into an "off" record naming the Kiln version and the game
-//   build it happened with: scrolling stays off on every start with that version and build; another version or build
-//   tries once more. Deleting the file tries again. A marker that exists but cannot be read counts as there (off).
+// - A menu that fits is drawn as it always was: since dev.29 Kiln wraps the column only while the menu's rows are
+//   taller than the column (read from the game's layout: "wrap by height" below), the case where Quit leaves the
+//   screen. Until a height is read (the first frames; a build where it never reads) the count rule decides: more mods'
+//   rows than menu_rows.h's kFew in the modes that draw them all.
+// - A crash guard: before Kiln's first call in the game's menu in a process (the height probe, or the first begin) a
+//   "trying" marker is written; it goes once the builder has run to its close site kTrialFrames times with each kind
+//   of Kiln's calls begun in this process (Guard; a wrong nesting is fatal within the first frames; no wall-clock
+//   time, no "then closed": a player who presses Quit afterwards does not count as a crash). A start that finds it
+//   (the game ended while trying) turns it into an "off" record naming the Kiln version and the game build it
+//   happened with: scrolling (and its probe) stays off on every start with that version and build; another version or
+//   build tries once more. Deleting the file tries again. A marker that exists but cannot be read counts as there (off).
 // - After a begin that succeeded, every way out closes what was opened, in order (Nest, unwind_order); when even that
 //   faults, nesting cannot be restored and the process ends on purpose (the marker is on the disk: the next start
 //   stays off) rather than handing the game a column it would fail on.
@@ -63,10 +66,130 @@ constexpr At at_close(Pair& p) {
     return At::end;
 }
 
-// Wrap the pause menu's column in this frame? Only where the menu would otherwise run off the screen: the modes that
-// draw every mod's row (ALWAYS, AUTO) with more of them than the rule lets a menu show.
+// The count rule (0.2.0-dev.27 and dev.28; since dev.29 only the fallback while no height has been read, see below):
+// wrap where the modes that draw every mod's row (ALWAYS, AUTO) have more of them than the rule lets a menu show.
 constexpr bool wants(uint32_t mode, size_t mods_rows) {
     return (mode == menu_rows::show_always || mode == menu_rows::show_auto) && mods_rows > menu_rows::kFew;
+}
+
+// ---- dev.29: wrap by height ----
+// The count rule missed the owner's menu (2026-11-15, 1280x720): the game's 13 entries, Kiln's Creative and Mods and
+// SET's tools entry are 16 rows, and Quit to Desktop left the screen with only 2 mods' rows counted. The game's 13
+// entries alone nearly fill the column, so what decides is the rows' height, not the mods' count.
+//
+// What is measured (UI units, the layout of the previous frames: a node's rectangle is the one the game laid out last):
+//  - the space: the column's height. The column is as tall as its parent (size {0, 1}) whether Kiln wraps it or not.
+//  - the rows: from the top of the first row to the bottom of the last one (Quit). Kiln opens and closes an empty
+//    stack of no size (a probe) right before the menu's first entry and another right after its last, as two more
+//    children where the entries are (the column, or Kiln's stack in the scroll view): rows = end.y - top.y. Two
+//    siblings: the same number whether the game's rectangles are absolute or relative to their parent, with any
+//    scroll offset, wrapped or not.
+// So both states read the same height for the same rows (the rows do not change with the wrap: AUTO draws every row
+// while the menu can scroll), and the decision is: rows taller than the space by more than kOver: wrap; shorter by
+// more than kRoom: unwrap; in between: as it is (hysteresis). The game's own spacer and build number below Quit do not
+// count: a menu whose Quit is on the screen is drawn as the game draws it.
+inline constexpr float kOver = 1.0f;    // rows taller than the space by more than this: wrap
+inline constexpr float kRoom = 12.0f;   // rows shorter than the space by more than this: unwrap
+inline constexpr uint32_t kSettle = 2;  // builder calls in a row before a reading counts: the third reads a laid-out tree
+inline constexpr uint64_t kFlipWindow = 120;  // UI frames: a decision that flips back sooner is an oscillation
+
+struct Fit {
+    bool known = false;   // a reading decided (else the count rule)
+    bool wrap = false;    // the decision once known
+    bool locked = false;  // it flipped back within kFlipWindow frames: wrapped for the rest of the process
+    uint32_t flips = 0;
+    uint64_t flipped_at = 0;  // the UI frame of the last change
+};
+
+// Wrap the pause menu's column in this builder call?
+// By height once a reading decided; the count rule until then (the first frames of a process, or a build where the
+// probe reads nothing plausible).
+constexpr bool wants(const Fit& f, uint32_t mode, size_t mods_rows) {
+    return f.known ? f.wrap : wants(mode, mods_rows);
+}
+
+// Consecutive builder calls with the probe in the same state (wrapped or not), on consecutive UI frames: a reading is
+// trusted from the (kSettle + 1)-th on. A node made in this frame for the first time has no layout yet, and a state
+// change moves the nodes: their first rectangles are not this tree's.
+struct Track {
+    int8_t state = -1;  // 0 not wrapped, 1 wrapped, -1 no probe
+    uint64_t frame = 0;
+    uint32_t run = 0;
+};
+
+constexpr bool fresh(Track& t, bool wrapped, bool probed, uint64_t frame) {
+    const int8_t s = probed ? (wrapped ? 1 : 0) : -1;
+    if (s >= 0 && s == t.state && frame == t.frame + 1) ++t.run;
+    else t.run = s >= 0 ? 1 : 0;
+    t.state = s;
+    t.frame = frame;
+    return t.run > kSettle;
+}
+
+// One reading from the rectangles (x, y, w, h): the column's and the two probes'.
+struct Heights {
+    bool ok = false;
+    float rows = 0, space = 0;
+};
+
+inline bool finite4(const float r[4]) {
+    for (int i = 0; i < 4; ++i)
+        if (!std::isfinite(r[i]) || std::fabs(r[i]) > 100000.0f) return false;
+    return true;
+}
+
+inline Heights heights(const float col[4], const float top[4], const float end[4]) {
+    Heights h;
+    if (!finite4(col) || !finite4(top) || !finite4(end) || col[3] <= 0.0f) return h;
+    h.space = col[3];
+    h.rows = end[1] - top[1];
+    h.ok = h.rows > kOver && h.rows < 100000.0f;  // probes never laid out read 0: not a height
+    return h;
+}
+
+enum class Change { none, wrap, unwrap, lock };
+
+// A trusted reading in UI frame `frame` of a builder call that was `wrapped`: the decision for the next calls. A change
+// that comes back within kFlipWindow frames of the one before means two readings disagree (the layout is not as
+// analysed): wrapped for the rest of the process, the safe side (Quit reachable either way).
+constexpr Change fit_step(Fit& f, bool wrapped, float rows, float space, uint64_t frame) {
+    bool want = wrapped;  // in the band: as it is
+    if (f.locked || rows > space + kOver) want = true;
+    else if (rows + kRoom < space) want = false;
+    f.known = true;
+    f.wrap = want;
+    if (want == wrapped) return Change::none;
+    if (f.flips > 0 && frame - f.flipped_at < kFlipWindow) {
+        f.locked = true;
+        f.wrap = true;
+        return wrapped ? Change::none : Change::lock;
+    }
+    ++f.flips;
+    f.flipped_at = frame;
+    return want ? Change::wrap : Change::unwrap;
+}
+
+// What the close site does with one builder call's rectangles (menu_scroll.cpp; the host test runs the same).
+struct Decider {
+    Fit fit;
+    Track track;
+};
+
+struct Measured {
+    bool trusted = false;  // a reading of a settled tree
+    Heights h;             // its heights (h.ok: plausible)
+    Change change = Change::none;
+};
+
+// `probed`: both probes were placed in this call, the second after its last entry.
+inline Measured measure(Decider& d, bool wrapped, bool probed, uint64_t frame, const float col[4], const float top[4],
+                        const float end[4]) {
+    Measured m;
+    if (!fresh(d.track, wrapped, probed, frame)) return m;
+    m.trusted = true;
+    m.h = heights(col, top, end);
+    if (m.h.ok) m.change = fit_step(d.fit, wrapped, m.h.rows, m.h.space, frame);
+    return m;
 }
 
 // ---- what a begin opened, and the order to close it in ----
@@ -143,7 +266,8 @@ inline Start decide(File trying, File off, const std::string& off_text, std::str
 // finds the trying marker and stays off again).
 constexpr bool may_delete_trying(bool moved, bool off_written) { return !moved && off_written; }
 
-// The trial: once per wrapped builder call that reached its close site. Returns true once, when the marker may go.
+// The trial: once per builder call that reached its close site with Kiln's calls of one kind in it (Guard). Returns
+// true once, when that kind has passed.
 struct Trial {
     uint32_t frames = 0;
     bool done = false;
@@ -153,6 +277,44 @@ constexpr bool trial_step(Trial& t) {
     if (t.done) return false;
     if (++t.frames < kTrialFrames) return false;
     t.done = true;
+    return true;
+}
+
+// Since dev.29 the guard covers two kinds of Kiln's calls in the game's menu: the height probe (every pause-menu frame
+// while scrolling is on) and the scroll view (only where the menu is wrapped). Each kind has its own trial of
+// kTrialFrames builder calls that reached their close site. The marker is on the disk from Kiln's first call of a kind
+// in this process until every kind begun so far has passed its trial; a kind that begins after the marker went (the
+// first wrap, long after the probe's trial) writes it again. So a crash while either is being tried keeps scrolling
+// off at the next start, as before.
+enum class Try : uint8_t { probe = 0, wrap = 1 };
+
+struct Guard {
+    Trial trial[2];
+    bool begun[2] = {false, false};
+    bool on_disk = false;  // the marker is (being) written and not cleared
+};
+
+// Before Kiln's first call of kind `k` in this process: true when the marker must be written now (the caller writes it
+// before the call; when that fails, scrolling goes off).
+constexpr bool guard_begin(Guard& g, Try k) {
+    const int i = static_cast<int>(k);
+    if (g.begun[i]) return false;
+    g.begun[i] = true;
+    if (g.on_disk) return false;
+    g.on_disk = true;
+    return true;
+}
+
+// A builder call in which Kiln's calls of kind `k` ran reached its close site: true once the marker may go (every kind
+// begun so far has passed its trial).
+constexpr bool guard_step(Guard& g, Try k) {
+    const int i = static_cast<int>(k);
+    if (!g.begun[i]) return false;
+    trial_step(g.trial[i]);
+    if (!g.on_disk) return false;
+    for (int j = 0; j < 2; ++j)
+        if (g.begun[j] && !g.trial[j].done) return false;
+    g.on_disk = false;
     return true;
 }
 

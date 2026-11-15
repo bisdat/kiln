@@ -4,14 +4,18 @@
 //
 // Two mid-function hooks in the pause menu's builder, both on the UI thread inside one builder call:
 //  - ui/SystemMenuColumnOpened: the column frame (a vertical stack, the builder's local at rbp+sysmenu.column) is set
-//    up and has no child yet. When the menu would run off the screen (menu_scroll::wants), Kiln begins the game's
-//    scrolling layout there exactly as the credits do (parameters from ScrollParamsInit, a 4-byte state block on the
-//    column's node, ScrollLayoutBegin(layout, 1, state, 0, params), the scroll speed) and opens a vertical stack in it
-//    for the menu's own children (aligned and sized as the column's children are).
+//    up and has no child yet. When the menu runs off its space (menu_scroll::wants: by height since dev.29), Kiln
+//    begins the game's scrolling layout there exactly as the credits do (parameters from ScrollParamsInit, a 4-byte
+//    state block on the column's node, ScrollLayoutBegin(layout, 1, state, 0, params), the scroll speed) and opens a
+//    vertical stack in it for the menu's own children (aligned and sized as the column's children are).
 //  - ui/SystemMenuColumnClosing: right before the builder closes the column. Kiln closes its stack and ends the
-//    scroll view begun in the same call.
+//    scroll view begun in the same call, then reads the heights (the column's, the rows') and decides for the next
+//    calls.
 // There is no jump out of the builder between the two sites and none into the code between them (static analysis of
 // 26430625), so every begin meets its end; menu_scroll::Pair enforces it besides.
+// Between the two, game.cpp's entry-renderer hook calls scroll_entry_next before and scroll_entry_drawn after each
+// entry: before the first entry and after the one that was the last in the previous builder call (Quit) Kiln opens and
+// closes an empty stack of no size where the entries are (the height probes, menu_scroll.h "wrap by height").
 #include <windows.h>
 
 #include <atomic>
@@ -19,6 +23,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <utility>
 
 #include "kiln_hook.hpp"
 #include "menu_scroll.h"
@@ -73,6 +78,8 @@ alignas(16) uint8_t g_layout[0x800];
 alignas(16) uint8_t g_params[0x200];
 alignas(16) uint8_t g_inner[0x80];
 alignas(16) uint8_t g_bar[0x100];
+alignas(16) uint8_t g_probe_top[0x80];  // the height probes' frame builders (the node at +8): before the first entry,
+alignas(16) uint8_t g_probe_end[0x80];  // after the last
 void* g_state = nullptr;  // this call's 4-byte state block: the scroll offset (a float; ScrollLayoutEnd reads it)
 float g_last_offset = 0.0f;
 int g_offset_lines = 0;   // kiln.log lines about the offset moving (the first few only)
@@ -83,10 +90,19 @@ std::atomic<uint32_t> g_status{KILN_UI_SCROLL_UNAVAILABLE};
 menu_scroll::Pair g_pair;  // UI thread
 bool g_broken = false;     // a step faulted: no more begins in this process
 menu_scroll::Nest g_nest;  // what the current builder call's begin opened (UI thread)
-bool g_marker_written = false;
-std::atomic<bool> g_clear_marker{false};  // the trial passed: after_frame removes the marker
+menu_scroll::Guard g_guard;               // UI thread: the crash guard's trials (the probe, the scroll view)
+std::atomic<bool> g_clear_marker{false};  // the trials passed: after_frame removes the marker
 uint32_t g_scrolled_frames = 0;
-menu_scroll::Trial g_trial;
+// the decision by height (UI thread)
+menu_scroll::Decider g_decider;
+bool g_in_call = false;           // between the column's open and close sites of this builder call, scrolling on
+uint32_t g_entries_now = 0;       // the entry renderer's calls in this builder call so far
+uint32_t g_entries_last = 0;      // in the last builder call (the end probe goes after the call with this number)
+bool g_top_placed = false;        // the top probe went before this builder call's first entry
+uint32_t g_probe_after = 0;       // the end probe went after this call in this builder call (0: no end probe)
+uint64_t g_frames_done = 0;       // UI frames finished (scroll_after_frame)
+int g_fit_lines = 0;              // kiln.log lines about the decision (a few only)
+uint32_t g_unreadable = 0;        // trusted readings that were not plausible, in a row
 std::wstring g_trying, g_off;  // the marker files
 std::wstring g_gave_up;       // why Kiln ended the game on purpose (give_up), for the next start and the player
 std::string g_trying_u8, g_off_u8;
@@ -280,34 +296,41 @@ bool begin_scroll(uint8_t* column) {
     return true;
 }
 
+// The crash guard's marker, written and on the disk before Kiln's first call of a kind in this process
+// (menu_scroll::Guard: the height probe, the scroll view).
+bool write_marker() {
+    KilnBuildInfo bi{};
+    bi.size = sizeof bi;
+    std::string kiln = "?", build = "?";
+    if (g_api->build_info(&bi) == KILN_OK) {
+        build = bi.exe_sha256;
+        if (bi.kiln_version.ptr) kiln.assign(bi.kiln_version.ptr, bi.kiln_version.len);
+    }
+    return write_file(g_trying, menu_scroll::marker_text(kiln, build));
+}
+
 void on_open(KilnRegisters& r) {
+    g_in_call = false;
+    g_entries_now = 0;
+    g_top_placed = false;
+    g_probe_after = 0;
     if (!g_on.load(std::memory_order_relaxed) || g_broken) return;
-    const bool want = menu_scroll::wants(game_menu_mode(), game_pause_mods_rows());
+    const bool want = menu_scroll::wants(g_decider.fit, game_menu_mode(), game_pause_mods_rows());
     switch (menu_scroll::at_open(g_pair, want)) {
     case menu_scroll::At::unbalanced:
         turn_off(KILN_UI_SCROLL_OFF_FAULTED, "the pause menu's column opened twice without closing in between (not as "
                                              "the static analysis says)");
         return;
     case menu_scroll::At::nothing:
+        g_in_call = true;
         return;
     default:
         break;
     }
-    if (!g_marker_written) {
-        // the crash guard: written and on the disk before the first begin in this process
-        KilnBuildInfo bi{};
-        bi.size = sizeof bi;
-        std::string kiln = "?", build = "?";
-        if (g_api->build_info(&bi) == KILN_OK) {
-            build = bi.exe_sha256;
-            if (bi.kiln_version.ptr) kiln.assign(bi.kiln_version.ptr, bi.kiln_version.len);
-        }
-        if (!write_file(g_trying, menu_scroll::marker_text(kiln, build))) {
-            g_pair.open = false;
-            turn_off(KILN_UI_SCROLL_OFF_FAULTED, "its crash guard could not write kiln/state/menu-scroll.trying");
-            return;
-        }
-        g_marker_written = true;
+    if (menu_scroll::guard_begin(g_guard, menu_scroll::Try::wrap) && !write_marker()) {
+        g_pair.open = false;
+        turn_off(KILN_UI_SCROLL_OFF_FAULTED, "its crash guard could not write kiln/state/menu-scroll.trying");
+        return;
     }
     auto* column = reinterpret_cast<uint8_t*>(r.rbp + static_cast<intptr_t>(F.column));
     if (!begin_scroll(column)) {
@@ -315,14 +338,78 @@ void on_open(KilnRegisters& r) {
         g_broken = true;
         g_pair.open = false;
         turn_off(KILN_UI_SCROLL_OFF_FAULTED, "beginning the game's scroll view faulted (closed again in order)");
+        return;
+    }
+    g_in_call = true;
+}
+
+// A height probe: an empty stack with no width and no height, opened and closed where the entries are (the column, or
+// Kiln's stack in the scroll view). The game lays it out as one more child: its top is where the next row would start
+// (menu_scroll.h "wrap by height"). The same calls as Kiln's own stack in the scroll view. False when it was not placed
+// (scrolling went off).
+bool place_probe(uint8_t* b) {
+    if (menu_scroll::guard_begin(g_guard, menu_scroll::Try::probe) && !write_marker()) {
+        turn_off(KILN_UI_SCROLL_OFF_FAULTED, "its crash guard could not write kiln/state/menu-scroll.trying");
+        return false;
+    }
+    std::memset(b, 0, 0x80);
+    if (!guarded([b] { F.vstack(b, 0.0f); })) give_up("faulted inside the game's stack (its height probe)");
+    const bool sized = guarded([b] {
+        if (void* node = *reinterpret_cast<void**>(b + 8)) F.size(node, pack(0.0f, 0.0f));
+    });
+    if (!guarded([b] { F.frame_end(b); })) give_up("faulted while closing its height probe");
+    if (!sized) {
+        g_broken = true;
+        turn_off(KILN_UI_SCROLL_OFF_FAULTED, "sizing its height probe faulted (closed again in order)");
+        return false;
+    }
+    return true;
+}
+
+// The trusted readings of the heights: the decision for the next builder calls, said in kiln.log.
+void decide(uint8_t* column, bool wrapped, bool probed) {
+    float col[4], top[4] = {NAN, NAN, NAN, NAN}, end[4] = {NAN, NAN, NAN, NAN};
+    rect_of(*reinterpret_cast<void**>(column + (F.column_node - F.column)), col);
+    if (probed) {
+        rect_of(*reinterpret_cast<void**>(g_probe_top + 8), top);
+        rect_of(*reinterpret_cast<void**>(g_probe_end + 8), end);
+    }
+    const menu_scroll::Measured m = menu_scroll::measure(g_decider, wrapped, probed, g_frames_done + 1, col, top, end);
+    if (!m.trusted) return;
+    if (!m.h.ok) {
+        if (++g_unreadable == 3)
+            logf(KILN_LOG_WARN, "ui: the pause menu's height does not read on this game build (column y %.1f h %.1f, "
+                                "rows from %.1f to %.1f): until it does, it scrolls once it has more than %u mods' entries",
+                 col[1], col[3], top[1], end[1], menu_rows::kFew);
+        return;
+    }
+    g_unreadable = 0;
+    // the first reading, then each change; a dozen lines are enough to see what it does
+    if ((m.change == menu_scroll::Change::none && g_fit_lines > 0) || g_fit_lines >= 12) return;
+    ++g_fit_lines;
+    const float rows = m.h.rows, space = m.h.space;
+    switch (m.change) {
+    case menu_scroll::Change::wrap:
+        logf(KILN_LOG_INFO, "ui: the pause menu's entries are taller than its space (%.0f of %.0f UI units): it scrolls",
+             rows, space);
+        break;
+    case menu_scroll::Change::unwrap:
+        logf(KILN_LOG_INFO, "ui: the pause menu's entries fit its space (%.0f of %.0f UI units): drawn as the game draws it",
+             rows, space);
+        break;
+    case menu_scroll::Change::lock:
+        logf(KILN_LOG_WARN, "ui: the pause menu's height readings disagree (%.0f of %.0f UI units, %s): it stays a scroll "
+                            "view in this game", rows, space, wrapped ? "wrapped" : "not wrapped");
+        break;
+    case menu_scroll::Change::none:
+        logf(KILN_LOG_INFO, "ui: the pause menu's entries: %.0f of %.0f UI units (%s)", rows, space,
+             wrapped ? "it scrolls" : "drawn as the game draws it");
+        break;
     }
 }
 
-void on_close(KilnRegisters& r) {
-    if (menu_scroll::at_close(g_pair) != menu_scroll::At::end) return;
-    if (!unwind()) give_up("faulted while closing its scroll view");
-    // the crash guard's trial: wrapped builder calls that ran to their close site
-    if (g_marker_written && menu_scroll::trial_step(g_trial)) g_clear_marker = true;
+// The scroll view's first frames: the offset and the plausibility of what the layout says (wrapped calls only).
+void wrapped_frames(uint8_t* column) {
     // the offset (the state block the game's scroll view keeps): said the first few times it moves, so a try shows
     // whether the view follows the highlight (keys, pad) as well as the wheel
     if (g_offset_lines < 4 && g_state) {
@@ -337,7 +424,6 @@ void on_close(KilnRegisters& r) {
     }
     // the first frames: what the layout says (once the game laid the scroll view out at least once)
     if (++g_scrolled_frames > 8) return;
-    auto* column = reinterpret_cast<uint8_t*>(r.rbp + static_cast<intptr_t>(F.column));
     float col[4], inner[4], outer[4];
     rect_of(*reinterpret_cast<void**>(column + (F.column_node - F.column)), col);
     rect_of(*reinterpret_cast<void**>(g_inner + 8), inner);
@@ -361,6 +447,23 @@ void on_close(KilnRegisters& r) {
         logf(KILN_LOG_INFO, "ui: the pause menu scrolls: %zu mods' entries; column %.0fx%.0f at (%.0f, %.0f), scroll view "
                             "%.0fx%.0f, entries %.0fx%.0f (UI units; entries taller than the view = it scrolls)",
              game_pause_mods_rows(), col[2], col[3], col[0], col[1], outer[2], outer[3], inner[2], inner[3]);
+}
+
+void on_close(KilnRegisters& r) {
+    const bool wrapped = menu_scroll::at_close(g_pair) == menu_scroll::At::end;
+    if (wrapped && !unwind()) give_up("faulted while closing its scroll view");
+    const bool in_call = std::exchange(g_in_call, false);
+    const uint32_t entries = std::exchange(g_entries_now, 0u);
+    const bool top = std::exchange(g_top_placed, false);
+    const uint32_t probe_after = std::exchange(g_probe_after, 0u);
+    const bool probed = top && probe_after != 0 && probe_after == entries;  // the end probe after this call's last entry
+    if (in_call) g_entries_last = entries;
+    // the crash guard's trials: builder calls with Kiln's calls in them that ran to their close site
+    if (top && menu_scroll::guard_step(g_guard, menu_scroll::Try::probe)) g_clear_marker = true;
+    if (wrapped && menu_scroll::guard_step(g_guard, menu_scroll::Try::wrap)) g_clear_marker = true;
+    auto* column = reinterpret_cast<uint8_t*>(r.rbp + static_cast<intptr_t>(F.column));
+    if (wrapped) wrapped_frames(column);
+    if (in_call && g_on.load(std::memory_order_relaxed) && !g_broken) decide(column, wrapped, probed);
 }
 
 bool sym(const char* n, uintptr_t* out) { return g_api->symbol(KilnStr{n, std::strlen(n)}, out) == KILN_OK && *out; }
@@ -482,16 +585,31 @@ bool scroll_install(bool system_menu_hooked) {
     }
     g_status = KILN_UI_SCROLL_ON;
     g_on = true;
-    logf(KILN_LOG_INFO, "ui: the pause menu can scroll (experiment): it does once it has more than %u mods' entries; "
-                        "crash guard %s", menu_rows::kFew, g_trying_u8.c_str());
+    logf(KILN_LOG_INFO, "ui: the pause menu can scroll (experiment): it does when its entries are taller than its space "
+                        "(measured in the menu; until measured, once it has more than %u mods' entries); crash guard %s",
+         menu_rows::kFew, g_trying_u8.c_str());
     return true;
 }
 
 uint32_t scroll_status() { return g_status.load(); }
 bool scroll_on() { return g_on.load(std::memory_order_relaxed); }
-bool scroll_wrapped_now() { return g_pair.open; }
 
-void scroll_after_frame(uint64_t) {
+void scroll_entry_next() {
+    // not the pause menu's column (or scrolling is off), not its first entry, or no last entry known yet
+    if (!g_in_call || g_entries_now != 0 || g_entries_last == 0 || g_top_placed) return;
+    if (g_broken || !g_on.load(std::memory_order_relaxed)) return;
+    g_top_placed = place_probe(g_probe_top);
+}
+
+void scroll_entry_drawn() {
+    if (!g_in_call) return;
+    const uint32_t n = ++g_entries_now;
+    if (!g_top_placed || n != g_entries_last || g_probe_after || g_broken || !g_on.load(std::memory_order_relaxed)) return;
+    if (place_probe(g_probe_end)) g_probe_after = n;
+}
+
+void scroll_after_frame(uint64_t frame) {
+    g_frames_done = frame;
     if (!g_clear_marker.exchange(false)) return;
     if (DeleteFileW(g_trying.c_str()) || GetLastError() == ERROR_FILE_NOT_FOUND)
         logf(KILN_LOG_INFO, "ui: the scrolling pause menu drew %u frames without trouble: its crash guard is cleared",

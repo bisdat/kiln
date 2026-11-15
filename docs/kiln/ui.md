@@ -50,25 +50,40 @@ e.Visible = false;       // hide for now; e.Text = "…" relabels; e.Dispose() r
 - The game's menus do not scroll: every entry before Settings pushes the game's own entries down, and with enough of
   them Quit leaves the screen. So the player's Kiln setting `modEntries` (`kiln/config/menus-client.json`, on the
   Mods page under **Kiln settings**) decides when mods' entries are drawn: `Auto` (the default: every one in the pause
-  menu where it scrolls, below; otherwise as `Few`), `Few` (a menu draws them while it has at most 3 visible ones, else
-  none of them), `Always` (every one, as before 0.2.0-dev.27) or `Never`.
-- **The pause menu scrolls (an experiment, feature `ui.menu_scroll`).** With more than 3 mods' entries kiln.ui wraps
-  the pause menu's column in the game's own scroll view (the one the credits use: mouse wheel, clipping, following the
-  keyboard and gamepad focus); with fewer it draws the menu exactly as the game does. Begin and end sit at the
-  column's own open and close in the game's builder (`native/services/ui/menu_scroll.h`). A crash guard writes
-  `kiln/state/menu-scroll.trying` before the first scrolled frame of a start and removes it once the scrolled menu has
-  drawn 48 frames in that process (a wrong nesting would have ended the game by then; quitting afterwards is fine); a
-  start that finds it (or cannot read it) keeps scrolling off (`kiln/state/menu-scroll.off`, naming the Kiln version
-  and game build, written before the marker goes; another version or build tries once more; delete the file to try
-  again) and tells the player with a toast. A fault in Kiln's own calls closes what it opened, in order, and turns
-  scrolling off; when even that fails the game ends on purpose with a kiln.log line, rather than a moment later in its
-  own menu code. kiln.log says when it is on (`ui: the pause menu can scroll`, `ui: the pause menu scrolls: ...`
-  with the sizes it saw) and when it switched itself off and why. The main menu does not scroll. Kiln's
-  own **Mods** entry is always drawn. Every mod's entry of the menu the player can open where they are (the main
-  menu, or the pause menu in a world) is listed on the Mods page under **Menu entries**; choosing one there closes the
-  Kiln menu and runs the entry's `onClick` exactly as the menu would (on the UI thread after the next frame). Nothing
-  changes for a mod: `Ui.Menus.Add` returns the entry as before, whether a menu draws it or not. The 3 is a guess
-  (no row height is known for a 1080p screen); the guided client check `MenuRowsLeaveQuitOnScreen` asks for it.
+  menu while it can scroll, below, wrapped or not; otherwise as `Few`), `Few` (a menu draws them while it has at most
+  3 visible ones, else none of them), `Always` (every one, as before 0.2.0-dev.27) or `Never`.
+- **The pause menu scrolls (an experiment, feature `ui.menu_scroll`).** When its entries (the game's, Kiln's and the
+  mods', from the first to Quit) are taller than the menu's column at this resolution and UI scale, kiln.ui wraps the
+  column in the game's own scroll view (the one the credits use: mouse wheel, clipping, following the keyboard and
+  gamepad focus); when they fit it draws the menu exactly as the game does. This holds in every `modEntries` mode:
+  with SET and Kiln, the game's 13 entries plus Kiln's Mods, Creative and SET tools already put Quit below a 1280x720
+  or 1920x1080 screen. The height comes from the game's own layout: right after the menu's last entry Kiln opens and
+  closes an empty frame of no size (its top is the entries' bottom), compares that with the column's height, and
+  decides for the next frames (the layout read is two frames old). The same height is read wrapped or not, and the
+  menu changes only when the entries are taller than the column, or shorter by 12 UI units (a row is about 60), so it
+  never flips back and forth; two readings that disagree keep it a scroll view for the rest of the game.
+  The game's own spacer and build number below Quit do not count: a menu whose Quit is on the screen is drawn as the
+  game draws it. Until a height has been read (the first frames of a game, or a game build where it never reads)
+  it scrolls once it has more than 3 mods' entries, as dev.27 and dev.28 did. Begin and end sit at the column's own
+  open and close in the game's builder (`native/services/ui/menu_scroll.h`). A crash guard writes
+  `kiln/state/menu-scroll.trying` before Kiln's first call in the menu in a start (the height frame at the first
+  pause menu, or the first scrolled frame, whichever comes first, and again for a first scrolled frame after it went)
+  and removes it once each of the two has drawn 48 frames in that process (a wrong nesting would have ended the game
+  by then; quitting afterwards is fine); a start that finds it (or cannot read it) keeps scrolling and the height
+  frame off (`kiln/state/menu-scroll.off`, naming the Kiln version and game build, written before the marker goes;
+  another version or build tries once more; delete the file to try again) and tells the player with a toast. A fault
+  in Kiln's own calls closes what it opened, in order, and turns scrolling off; when even that fails the game ends on
+  purpose with a kiln.log line, rather than a moment later in its own menu code. kiln.log says when it is on
+  (`ui: the pause menu can scroll`), what it read (`ui: the pause menu's entries: <entries> of <space> UI units`,
+  then each change: `... are taller than its space ...: it scrolls`, `... fit its space ...: drawn as the game draws
+  it`), the scroll view's sizes (`ui: the pause menu scrolls: ...`) and when it switched itself off and why. The main
+  menu does not scroll. Kiln's own **Mods** entry is always drawn. Every mod's entry of the menu the player can open
+  where they are (the main menu, or the pause menu in a world) is listed on the Mods page under **Menu entries**;
+  choosing one there closes the Kiln menu and runs the entry's `onClick` exactly as the menu would (on the UI thread
+  after the next frame). Nothing changes for a mod: `Ui.Menus.Add` returns the entry as before, whether a menu draws
+  it or not. `Few`'s 3 is the setting's limit, not a measured fit: the pause menu does not depend on it, and the main
+  menu (which does not scroll) can still lose its last entries on a small screen; the guided client check
+  `MenuRowsLeaveQuitOnScreen` asks how many entries fit before Quit leaves the screen.
 
 ### Which screen is open
 ```csharp

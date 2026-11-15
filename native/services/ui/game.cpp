@@ -26,7 +26,6 @@
 
 #include "kiln_hook.hpp"
 #include "menu_rows.h"
-#include "menu_scroll.h"
 #include "menu_site.h"
 #include "ui.h"
 
@@ -266,18 +265,16 @@ std::vector<Entry> visible_of(uint32_t menu) {
     return out;
 }
 
-// The entries one menu draws in this builder call: Kiln's own Mods entry always, the mods' as the mode says
-// (menu_rows.h). AUTO draws every one exactly when this call of the pause menu's builder is wrapped in the scroll view
-// (menu_scroll.cpp decided it at the column's open site, before the Settings entry): one decision per builder call,
-// whatever changed in between.
-std::vector<Entry> entries_of(uint32_t menu) {
-    const bool wrapped = menu == KILN_UI_MENU_PAUSE && scroll_wrapped_now();
-    return menu_rows::pick(visible_of(menu), g_shown.load(std::memory_order_relaxed), is_builtin, wrapped);
-}
+// Can this menu scroll in this process (menu_rows.h's `scrolls`)? Only the pause menu, while menu_scroll.cpp is on.
+// Since dev.29 the pause menu is wrapped by the rows' height (menu_scroll.h), so AUTO draws every mod's row whether
+// this call is wrapped or not: the rows must not change with the wrap, or the height read in one state would not hold
+// in the other (wrapped: every row, too tall; unwrapped: the rule few, fits; and back).
+bool scrolls(uint32_t menu) { return menu == KILN_UI_MENU_PAUSE && scroll_on(); }
 
-// For the Mods page's list (any thread): whether the pause menu would be wrapped with these rows.
-bool scrolls(uint32_t menu, uint32_t mode, size_t rows) {
-    return menu == KILN_UI_MENU_PAUSE && scroll_on() && menu_scroll::wants(mode, rows);
+// The entries one menu draws in this builder call: Kiln's own Mods entry always, the mods' as the mode says
+// (menu_rows.h).
+std::vector<Entry> entries_of(uint32_t menu) {
+    return menu_rows::pick(visible_of(menu), g_shown.load(std::memory_order_relaxed), is_builtin, scrolls(menu));
 }
 
 void activated(KilnHandle h) {
@@ -381,7 +378,11 @@ bool __fastcall hk_sys_entry(const GameText* t, uint8_t p2, uint8_t attention) {
                 activated(e.handle);
         }
     }
-    return g_sys_hook.call<bool>(t, p2, attention);
+    // the scrolling pause menu's height probes: before the menu's first entry and after its last (menu_scroll.cpp)
+    scroll_entry_next();
+    const bool chosen = g_sys_hook.call<bool>(t, p2, attention);
+    scroll_entry_drawn();
+    return chosen;
 }
 
 void* __fastcall hk_craft(uint64_t packed, int32_t select) {
@@ -709,7 +710,7 @@ uint32_t game_menu_entries(KilnUiMenuEntry* out, uint32_t capacity) {
         o.text_len = e.text ? static_cast<uint32_t>(e.text->size()) : 0;
         o.flags = e.flags;
         o.order = e.order;
-        o.drawn = visible(e) && e.menu < 3 && menu_rows::draws_mods(mode, shown[e.menu], scrolls(e.menu, mode, shown[e.menu])) ? 1u : 0u;
+        o.drawn = visible(e) && e.menu < 3 && menu_rows::draws_mods(mode, shown[e.menu], scrolls(e.menu)) ? 1u : 0u;
     }
     return static_cast<uint32_t>(mods.size());
 }
