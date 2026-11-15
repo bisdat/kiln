@@ -831,6 +831,13 @@ internal sealed unsafe class ComponentChangesModel
         _graves.AddLast((w.Id, w.Owner, 3u, why, w.LastComplete));
         if (_graves.Count > Graveyard) _graves.RemoveFirst();
         _watches.Remove(w);
+        // its unread records go with it (as the service): a record names only watches that are still there
+        foreach (var f in _frames.Concat([_pending]))
+        {
+            foreach (var c in f) c.Watches.Remove(w.Id);
+            f.RemoveAll(c => c.Watches.Count == 0);
+        }
+        FramesDropped += (ulong)_frames.RemoveAll(f => f.Count == 0);
         if (_watches.Count == 0)  // nothing watched: nothing kept (as the service)
         {
             _pairs = [];

@@ -586,6 +586,43 @@ static void test_world_stop() {
     CHECK(status_of(s, sid) == KILN_WATCH_DISPOSED);
 }
 
+// A watch that ends takes its undelivered records with it: a later watch (the same mod loaded again) is never told of a
+// change from before it existed, for a watch that is gone.
+static void test_ended_watch_records() {
+    Run r;
+    r.w.entity(2000);
+    r.w.entity(2001);
+    r.w.put(2000, KILN_WATCH_HEALTH, bytes40(1));
+    r.w.put(2001, KILN_WATCH_HEALTH, bytes40(1));
+    const uint64_t a = r.watch({2000}, 1);
+    const uint64_t shared = r.watch({2000, 2001}, 1, 0, nullptr, KILN_WATCH_SCOPE_ENTITIES, 202);
+    r.tick();
+    r.tick([&] {
+        r.w.set_byte(2000, 1, 0, 2);
+        r.w.set_byte(2001, 1, 0, 2);
+    });  // queued, not read: 2 records
+    CHECK(r.c.release_owner(r.mod) == 1);  // the mod unloads: its watch and what only it was told go
+    KilnComponentChangesCountersV1 n{};
+    n.size = sizeof n;
+    r.c.counters(&n);
+    CHECK(n.queued_records == 2);  // both still go to the other owner's watch
+    auto ch = r.drain();
+    CHECK(ch.size() == 2);
+    for (const auto& c : ch) CHECK(c.watch_count == 1 && c.watches[0] == shared);  // the ended watch is not named
+    r.tick([&] { r.w.set_byte(2000, 1, 0, 3); });
+    CHECK(r.c.release_owner(202) == 1);  // the last one: nothing queued stays
+    n = KilnComponentChangesCountersV1{};
+    n.size = sizeof n;
+    r.c.counters(&n);
+    CHECK(n.queued_records == 0 && n.queued_frames == 0 && n.frames_dropped == 1);
+    const uint64_t b = r.watch({2001}, 1);  // the next load
+    r.tick();
+    r.tick();
+    CHECK(r.drain().empty());  // nothing from before it, nothing of the ended watches
+    (void)a;
+    (void)b;
+}
+
 static void test_owners() {
     Run r;
     r.w.entity(2000);
@@ -856,6 +893,7 @@ int main() {
     test_lives();
     test_world_stop();
     test_owners();
+    test_ended_watch_records();
     test_players();
     test_links();
     test_dynamic_budget();

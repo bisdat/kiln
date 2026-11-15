@@ -827,6 +827,23 @@ private:
         watches_.erase(std::remove_if(watches_.begin(), watches_.end(), [&](const Watch& x) { return x.id == id; }), watches_.end());
         count_.store(static_cast<uint32_t>(watches_.size()));
         replan_ = true;
+        // what it was told and nobody has read goes with it: no later watch (its mod loaded again) is told of a change
+        // from before it existed, and a record names only watches that are still there. A batch already frozen is left
+        // as it is (a read of it gives the same records until it is acked).
+        auto purge = [id](std::vector<Change>& v) {
+            for (Change& c : v) c.watches.erase(std::remove(c.watches.begin(), c.watches.end(), id), c.watches.end());
+            v.erase(std::remove_if(v.begin(), v.end(), [](const Change& c) { return c.watches.empty(); }), v.end());
+        };
+        for (auto it = frames_.begin(); it != frames_.end();) {
+            purge(*it);
+            if (it->empty()) {
+                ++c_.frames_dropped;
+                it = frames_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        purge(pending_);
         if (watches_.empty()) {  // nothing watched: nothing kept (no window call comes to clear it)
             pairs_.clear();
             linked_.clear();

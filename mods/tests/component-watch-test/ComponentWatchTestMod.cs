@@ -313,7 +313,7 @@ public sealed class ComponentWatchTestMod : Mod
                 await Release("plain");
                 if (Kiln.Testing.LabSystems.Enabled)
                 {
-                    Kiln.Testing.LabSystems.ForceParallel(4000);
+                    Kiln.Testing.LabSystems.ForceParallel(3000);
                     await Wait(2);
                     Log.Info($"{Id}: parallel forced (mask 0x{Kiln.Testing.LabSystems.PlayersMask:x4})");
                     try
