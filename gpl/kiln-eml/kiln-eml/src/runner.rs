@@ -493,9 +493,11 @@ pub fn run(cfg: &RunConfig, mut mods: Vec<Utf8PathBuf>, entries: Vec<Entry>) -> 
         }
     }
     if out.phase == Phase::Failed {
+        let reason = format!("the EML run failed: {}", out.error.as_deref().unwrap_or("unknown cause"));
+        out.reason = Some(reason.clone());
         for e in out.mods.iter_mut().filter(|e| e.state == "pending") {
             e.state = "failed".into();
-            e.reason = Some("the EML run failed (see error)".into());
+            e.reason = Some(reason.clone());
         }
         // never start on a half-applied state: back to vanilla data, and forget the cache so the next start re-runs
         if backup.exists() && cfg.patch && owned(cfg, &file).is_ok() {
@@ -581,7 +583,7 @@ fn unproven_sentence(why: &str) -> String {
         was left as it is. If ShroudForge asset mods or another loader wrote it, nothing needs doing. If it still carries \
         EML mods you switched off: enable any EML mod for one start and disable it again; Kiln preserves unproven \
         destination containers in kiln/eml/displaced rather than deleting them. Or use Steam's \"Verify integrity of \
-        game files\" (which may leave extra containers)")
+        game files\" (which may leave extra containers): verify the game files in Steam, then start through Kiln again")
 }
 
 /// `224.4 MiB`
@@ -905,6 +907,31 @@ mod tests {
         std::fs::write(&b, b"short").unwrap();
         assert!(files_differ(&a, &b, &progress), "another length");
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn preparation_cause_reaches_status_reasons() {
+        let (d, paths) = mods_fixture("prepare-cause", &["a", "b"]);
+        // Enough to select the archive; a missing reflection executable fails preparation before backup creation.
+        std::fs::write(d.join("enshrouded.kfc"), b"KFC").unwrap();
+        let candidates = paths.iter().map(|path| crate::discover::Candidate {
+            path: path.clone(), source: "test".into(), enabled: true,
+        }).collect::<Vec<_>>();
+        let (mods, entries) = crate::discover::resolve(&candidates);
+        let cfg = RunConfig { game_dir: d.clone(), cache_dir: d.join("cache"), patch: true, ..Default::default() };
+        let out = run(&cfg, mods, entries);
+        assert_eq!(out.phase, Phase::Failed);
+        let error = out.error.as_deref().unwrap();
+        assert!(error.contains("could not prepare the game data: load_type_registry:") && error.contains("enshrouded.exe") && error.contains("os error"), "{error}");
+        assert!(out.reason.as_deref().unwrap().contains(error));
+        for entry in &out.mods {
+            assert_eq!(entry.state, "failed");
+            assert!(entry.reason.as_deref().unwrap().contains(error));
+        }
+        let json = serde_json::to_value(&out).unwrap();
+        assert!(json["reason"].as_str().unwrap().contains(error));
+        assert!(json["mods"][0]["reason"].as_str().unwrap().contains(error));
+        std::fs::remove_dir_all(d).unwrap();
     }
 
     #[test]
