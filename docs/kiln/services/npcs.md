@@ -243,7 +243,7 @@ The numbers:
 
 | Limit | Why | What happens |
 |---|---|---|
-| 128 roster NPCs in all, 35 are the game's (64 where Kiln's second unlock page cannot be installed) | the game keeps the unlock states in one u64 per world and takes an entry's index modulo 64; Kiln keeps a second page beside it ([The roster's size](#the-rosters-size-since-020-dev29)) | build error for the mod group, with the reason |
+| 128 roster NPCs in all, 35 are the game's (64 where Kiln's second unlock page cannot be installed) | the game keeps the unlock states in one u64 per world and takes an entry's index modulo 64; Kiln keeps a second page beside it ([The roster's size](#the-rosters-size-since-020-dev29)) | the start stops before any world loads, with the reason (a world without the mods' data would drop their progress) |
 | 32 texts per line | the client stops the game above it (`0x460b40`) | Kiln writes one per line |
 | 8 knowledge operations per line | the server pushes at most 9, with "heard" | build error |
 | 6,050 world and 11,000 player objects (5,825 and 10,744 are the game's) | what the game reserves its run-time maps for (`0x99ead0`) | build warning; beyond it is untested. Those numbers bound entries set at run time, so this is likely softer than it looks. A quest costs 4 player objects + 3 to 5 per step + 1 per line; 256 are left before the warning. quests-sample (4 quests, 11 lines) takes 50, NpcSample 17 |
@@ -262,17 +262,45 @@ reader of the value, on the dedicated server and the client: [docs/re/npc-roster
 
 | Your mods' roster (the game's 35 included) | What runs | Capacity |
 |---|---|---|
-| no roster NPC, or 64 entries at most | nothing is hooked. Two callbacks after each world's step return at once until a mod reads the roster (below); from then on each world reads its registry's value after its step | 64 |
+| no roster NPC, or 64 entries at most | nothing is hooked. Two callbacks before and two after each world's step return at once until a mod reads the roster (below); from then on each world reads its registry's value after its step | 64 |
 | 65 to 128 entries | at the start, before any world, the three hooks go in (`quests/NpcEvalUnlocks`, `NpcRegistrySetUnlocks`, `NpcIsUnlocked`, through kiln.hooks' checked installation, which writes no byte while a thread cannot be shown to be outside them) | 128 |
-| 129 or more | refused at the start: "the roster holds at most 128 NPCs (two 64-bit unlock pages): 35 of the game's + 94 new"; none of the mods' native quests and NPCs are built (as for every build error) | 128 |
-| 65 or more where the second page is not available (feature `quests.npc_pages` did not resolve, a hook could not go in) | refused at the start with the 64 text and the reason: "… (the second unlock page is not available here: …)" | 64 |
+| 129 or more | **the start stops** before any world loads: "the roster holds at most 128 NPCs (two 64-bit unlock pages): 35 of the game's + 94 new" | – |
+| 65 or more where the second page is not available (feature `quests.npc_pages` did not resolve, a hook could not go in) | **the start stops** the same way, with the 64 text and the reason: "… (the second unlock page is not available here: …)" | – |
+
+**A stopped start.** A roster the build cannot hold would leave the world without all of the mods' native quests,
+knowledge and NPCs, and a world loaded so drops the mods' knowledge (unlocks, quest progress) at its next save. So the
+process ends at the game's resource start, before any world or save is opened: an error line in `kiln.log` ("roster:
+the start is stopped (pid …, exit code 0x4B02): <the reason>; mods: …"), `kiln/state/roster-refused.json`
+(`refused`, `why`, `mods`, `side`, `exitCode`, `pid`, `utc`; the next start moves it to `roster-refused.last.json`),
+on a game client a message box with the reason, then exit code `0x4B02` (`KILN_KNOW_ROSTER_EXIT_CODE`; a Unix wrapper
+sees 2). This covers a dedicated server, a player who hosts and a player who joins (the client stops at its own start).
+In a boot generation (mods with `"boot": true`) each mod is also reported to kiln.boot as an activation fault, so a
+required boot mod's start is stopped by kiln.boot itself (`KILN_BOOT_EXIT_CODE`, its `boot.json`). A launcher sees the
+exit code and the state file; it does not yet get kiln.boot's `progress.json` "failed" state for this stop (that needs a
+kiln.boot call to stop a start from any service, not only for a required boot mod).
 
 `npcs.expanded_roster` says which: available "installed" once the page is in, available "ready" while it could go in
-and nothing needs it, unavailable with the reason otherwise. An entry at index 64 or more whose page does not match
-the game's value (not computed yet, a setter that no paged evaluation came before) is never answered from the game's
-value: the game's query then gives its own "cache invalid" answer, which its only caller (`unique_npc_spawns`, the
-one-per-world rule) treats like an unlocked NPC: it is kept, not destroyed. The Survivors directory never reads the
-value: it evaluates each entry's own requirement.
+and nothing needs it, unavailable with the reason otherwise.
+
+**Which world a page belongs to.** Each world binds its own registry, on its own thread, at its start and before every
+step (its `NpcRegistry` singleton, under its core session); a page is attached only for a registry a live world bound,
+and only that world's stop removes it (a hosting game's two worlds keep their pages apart; a stop of one leaves the
+other's alone). An evaluation that was running when its world stopped attaches nothing. Kiln never reads another
+world's memory to find out who owns a registry.
+
+**"Kept".** An entry at index 64 or more is never answered from the game's value. When its page cannot answer (no page
+for the cache, a page that no longer matches it, a registry no live world bound, a world that stopped or a value that
+changed while the answer was read, a busy lock), the game's query gives its own "cache invalid" answer, which its only
+caller (`unique_npc_spawns`, the one-per-world rule) treats like an unlocked NPC: it is kept, not destroyed. Each of
+these is counted in the world's stop line in `kiln.log` ("kept N: no page, stale, unowned, moved, busy"). The Survivors
+directory never reads the value: it evaluates each entry's own requirement.
+
+**A lost page.** A page that is missing for a computed cache (a setter that did not pair with its evaluation, a busy
+lock, a registry bound late) would otherwise stay missing until the knowledge changes. Kiln computes it again before
+the world's next step, where nothing of the step runs: the game's evaluator on the knowledge context the game itself
+passed for that world (or the world's `G38Knowledge`, once the process has seen the game pass exactly that one), kept
+only when it agrees with the game's cache (page 0 and the version); twice per cache at most ("roster: the server
+world's second page was missing for its cache (version …): computed again at the step's start").
 
 **Saves and other versions.** Nothing of the pages is saved: the game saves knowledge (the mods' unlock objects among
 it) and the NPC entities; the value and the pages are computed again from knowledge after every start. A world saved
@@ -280,21 +308,32 @@ with 128 entries and loaded:
 
 - with Kiln and the same mods: as before the restart (lab: an entry on page 2 unlocked before a restart is unlocked
   after it).
-- with an older Kiln (0.2.0-dev.28 and before: 64 at most): the build refuses the roster at the start, so none of the
-  mods' native quests and NPCs are built, and their knowledge objects are unknown to that world: the game drops them
-  as it loads the save, so the mods' unlock states and quest progress are gone once that world is saved again (lab: a
-  mod's unlock granted before a boot whose build was refused was not there in the boot after it). Do not open such a
-  world with an older Kiln.
+- with this Kiln where the page cannot be installed, or with more than 128 entries: the start stops before the world
+  loads (above); the save is not touched (lab: the save byte for byte the same, and the knowledge set before two
+  stopped starts still there after them).
+- with an older Kiln (0.2.0-dev.28 and before: 64 at most): that Kiln refuses the roster at the start but does not
+  stop, so none of the mods' native quests and NPCs are built, and their knowledge objects are unknown to that world:
+  the game drops them as it loads the save, so the mods' unlock states and quest progress are gone once that world is
+  saved again. Do not open such a world with an older Kiln.
 - without Kiln, or without the mods: the game has only its own 35 entries, as for any mod NPC at any roster size; the
   mods' knowledge is dropped the same way (the game's load keeps only ids it knows). Not run without Kiln: what the
   vanilla game does with the mods' NPC entities in such a save.
 
-A player joining with a client that cannot install the second page (its `npcs.expanded_roster` unavailable) builds
-none of the mods' native quests and NPCs, so the mods' requirement of their clients (`clients: "mod"`) and the
-templates refuse it as for a client without the mods.
+A player joining with this Kiln on a client that cannot install the second page does not get past its own start (the
+message box above; guided check `17-roster.refused-start`). A client with an older Kiln builds none of the mods' native
+quests and NPCs and does not stop; whether the server admits it is up to the mods' requirement of their clients
+(`clients: "mod"` asks for the mod, not for its roster): not run.
+
+**Lab switches** (`kiln/control/`, read at the start, logged at every start while present; never needed to play):
+`roster.fail-install` (the hooks are not installed, as if their installation failed: a roster past 64 stops the start),
+`roster.no-pages` (NEGATIVE CONTROL: 128 entries taken without the second page; page-2 states are wrong and the game may
+keep the wrong NPCs; never on a save you keep), `roster.lab` (a log line per attached page, and `roster.drop-page`,
+polled, drops a world's page once so its recomputation can be seen). The 0.2.0-dev.29 test builds' data-folder switch
+`kiln/data/kiln.knowledge/roster-64` is gone.
 
 **Reading the roster** (any thread, from snapshots each world publishes after its step; never a game call on your
-thread; one completed step old at most):
+thread; the snapshot of the world's last completed step, and NotReady after a step whose registry could not be read,
+never an older answer):
 
 ```csharp
 RosterWorldResult w = NativeQuests.GetServerRosterWorld();      // Ok with a token, or NoWorld / NotReady
