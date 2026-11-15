@@ -321,7 +321,7 @@ void add_limited(const fs::path& mod, const std::wstring& root, const fs::path& 
 // One mod's folder -> its input. false: nothing to do here.
 // `boot`: a boot generation's prepare (chapter 08): a mod it excludes is left out; the mod's OnBoot documents (a blocks file's form) come after
 // its data files and baked blocks and before what Kiln kept from code at an earlier start.
-bool read_mod(const std::string& dir, const fs::path& pending_root, kvb::ModInput* m, const kiln::boot::Input* boot = nullptr) {
+bool read_mod(const std::string& dir, const fs::path& pending_root, kvb::ModInput* m, const kiln::boot::Input* boot = nullptr, std::vector<BuildFailure>* failures = nullptr) {
     const fs::path d = to_path(dir);
     std::error_code ec;
     const fs::path manifest = d / L"kiln.mod.json";
@@ -360,11 +360,15 @@ bool read_mod(const std::string& dir, const fs::path& pending_root, kvb::ModInpu
     std::vector<std::string> refused;
     if (root.empty()) {
         KV_W("vfx: %s: the mod's folder cannot be opened to check where its files are: its blocks are not read", m->id.c_str());
+        if (failures) failures->push_back({m->id, "vfx", "blocks", "kiln.vfx: the mod's folder cannot be opened: its blocks are not read"});
         kiln::boot::entry_error(boot, m->id, "vfx", "blocks", "kiln.vfx: the mod's folder cannot be opened: its blocks are not read");
     } else {
         add_limited(d, root, d / L"blocks", "blocks", kvx_generated::kBlocks, m, &refused);
         add_limited(d, root, d / L"blocks" / L"generated", "blocks/generated", kvx_generated::kGenerated, m, &refused);
     }
+    if (failures)
+        for (const auto& what : refused)
+            failures->push_back({m->id, "vfx", what.substr(0, what.find(": not read")), "kiln.vfx: " + what});
     if (!refused.empty()) {
         const std::string what = refused.front();
         kiln::boot::entry_error(boot, m->id, "vfx", what.substr(0, what.find(": not read")), "kiln.vfx: " + what);
@@ -733,13 +737,34 @@ std::pair<std::string, std::string> required_vfx_content(const KilnApi* api, con
     return {};
 }
 
-void build_on_ready(const KilnApi* api, KilnOwner self, const kiln::boot::Input* boot) {
+void build_on_ready(const KilnApi* api, KilnOwner self, const kiln::boot::Input* boot, std::vector<BuildFailure>* failures) {
     g_api = api;
     g_self = self;
     // a boot generation: a required participant whose VFX or materials this start cannot build at all is refused (kiln.boot stops the
     // start); another mod's are off with the lines below, as they always were
     const auto refuse_required = [&](bool vfx, bool materials, const std::string& why) {
-        if (!boot) return;
+        if (!boot) {
+            // The held build (no boot input yet): every mod's file with such a section is noted, as required_vfx_content finds
+            // them; the collector's prepare refuses the ones of a required participant (held.h).
+            if (failures) {
+                const fs::path pending = to_path(api_path(KILN_PATH_DATA)) / L"vfx" / L"pending";
+                for (const auto& dir : mod_folders()) {
+                    kvb::ModInput m;
+                    if (!read_mod(dir, pending, &m)) continue;
+                    for (const auto& [file, text] : m.documents) {
+                        if (file.rfind("pending/", 0) == 0) continue;  // Kiln's own cache of its code
+                        const ojson doc = kvb::parse_relaxed(text);
+                        if (!doc.is_object()) continue;
+                        for (const auto& [key, want] : {std::pair{"vfx", vfx}, std::pair{"materials", materials}})
+                            if (want && doc.contains(key) && doc[key].is_object() && !doc[key].empty()) {
+                                failures->push_back({m.id, "vfx", file, "kiln.vfx: " + file + ": " + why});
+                                break;
+                            }
+                    }
+                }
+            }
+            return;
+        }
         std::pair<std::string, std::string> hit;
         try {
             hit = required_vfx_content(api, *boot, vfx, materials);
@@ -788,7 +813,7 @@ void build_on_ready(const KilnApi* api, KilnOwner self, const kiln::boot::Input*
         std::vector<kvb::ModInput> mods;
         for (const std::string& dir : mod_folders()) {
             kvb::ModInput m;
-            if (!read_mod(dir, pending, &m, boot)) continue;
+            if (!read_mod(dir, pending, &m, boot, failures)) continue;
             if (std::find(skip.begin(), skip.end(), m.id) != skip.end()) {
                 KV_I("vfx: %s: skipped by kiln/config/vfx.json", m.id.c_str());
                 continue;
@@ -881,6 +906,7 @@ void build_on_ready(const KilnApi* api, KilnOwner self, const kiln::boot::Input*
         const kvb::CookResult r = kvb::cook_mods(mods, opt);
         // a required participant whose VFX or materials did not all build is refused before anything is served (the prepare's
         // catch takes back what this build did); another mod's errors are logged below as they always were
+        record_cook_failures(failures, r.mod_errors);
         if (boot)
             for (const auto& [id, errs] : r.mod_errors)
                 if (!errs.empty() && boot->strict(id)) {
