@@ -65,8 +65,30 @@ public sealed unsafe class GameplayHookStatusTests : FakeTableTest
             "build protection is waiting for checked installation at a safe Pre", e.Message);
     }
 
+    // Refused three times for unchecked threads during play: the group waits for the next no-world moment, and
+    // protection says so instead of promising the next safe Pre.
+    [Fact]
+    public void Protect_waiting_for_the_next_no_world_moment_says_so()
+    {
+        _state = 2; _legacy = false; _allowZoneAdd=false; _stopWait=false; _noWorldWait=true;
+        try
+        {
+            var t = (GameplayNative.Table*)NativeMemory.AllocZeroed((nuint)144);
+            t->Header = new ServiceHeader { Size = 144, Version = 1 };
+            *(nint*)((byte*)t+136)=(nint)(delegate* unmanaged[Cdecl]<ulong,uint,int>)&RequestGroups;
+            t->Status = &Status; t->ZoneAdd = &RefuseZone; t->ZoneUpdate = &RefuseUpdate; t->ZoneRemove = &RemoveZone;
+            Swap(typeof(Gameplay), "_listening", 1);
+            Serve("kiln.gameplay", t, typeof(GameplayNative), "_table");
+            var e = Assert.Throws<KilnUnavailableException>(() => Gameplay.Protect(new ProtectionZone { Deny=GameplayActions.Break }));
+            Assert.Contains("gameplay.build_hooks", e.Message);
+            Assert.Contains("build protection waits for the next no-world moment: waiting for the next no-world moment (the next server start)", e.Message);
+            Assert.DoesNotContain("at a safe Pre", e.Message);
+        }
+        finally { _noWorldWait=false; }
+    }
+
     private static uint _state;
-    private static bool _legacy, _stopWait;
+    private static bool _legacy, _stopWait, _noWorldWait;
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int Status(GameplayNative.Status* s)
@@ -76,6 +98,8 @@ public sealed unsafe class GameplayHookStatusTests : FakeTableTest
         s->DiscardOn = 1;
         s->BuildHookState = _state;
         if(_stopWait) { var why="build hooks wait for the world to stop: asked while a world ran"u8;
+            for(int i=0;i<why.Length;++i) s->BuildHookReason[i]=why[i]; }
+        if(_noWorldWait) { var why="waiting for the next no-world moment (the next server start): gameplay/DismantleBlock thread check refused on three attempts during play; installed pass-through targets 2"u8;
             for(int i=0;i<why.Length;++i) s->BuildHookReason[i]=why[i]; }
         if (_legacy) s->Size = (uint)Marshal.OffsetOf<GameplayNative.Status>(nameof(GameplayNative.Status.BuildHookState));
         return 0;
