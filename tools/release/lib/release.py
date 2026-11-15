@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: MIT
 """Helpers for tools/release/*.sh (docs/kiln/launcher/releasing.md).
 
-  manifest   write an update manifest (latest.json): Tauri's static updater format + Kiln's fields
+  manifest   write an update manifest (latest.json): Tauri's static updater format + Kiln's fields (--beta N: a test
+             build's, version X.Y.Z-dev.N+beta.B; docs/kiln/launcher/releasing.md "Test builds")
+  order      compare two build ids as the launcher's updater does (prints -1, 0 or 1)
   sums       write or check SHA256SUMS for a release folder
   verify     check a Tauri updater signature (.sig) against the public key and the version it must be signed for
   deb        print a .deb's control fields and file list (what dpkg-deb -I / -c show), checking them
@@ -50,6 +52,9 @@ def cmd_manifest(a):
         }
         for k in keys.split(","):
             platforms[k] = entry
+    beta = build_beta(a.version)
+    if (a.beta is not None or beta is not None) and (a.beta != beta or a.channel != "beta"):
+        raise SystemExit(f"manifest: a test build needs --channel beta, --beta N and the version X.Y.Z-dev.N+beta.N (got {a.version}, --beta {a.beta}, --channel {a.channel})")
     m = {
         "version": a.version,
         "notes": notes,
@@ -57,12 +62,76 @@ def cmd_manifest(a):
         "platforms": platforms,
         "kiln": {"format": 1, "channel": a.channel, "page": a.page},
     }
+    if beta is not None:
+        m["kiln"]["beta"] = beta
     if a.runtime:
         m["kiln"]["runtime"] = a.runtime
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     with open(a.out, "w", encoding="utf-8") as f:
         json.dump(m, f, indent=2)
         f.write("\n")
+
+
+# ---------------------------------------------------------------- build order (launcher/src-tauri/src/selfupdate/feed.rs, Build)
+
+_SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?(?:\+([0-9A-Za-z.-]+))?$")
+
+
+def build_beta(build_id):
+    """A test build's beta number: the build metadata `beta.<n>` (n >= 1, no leading zero), else None."""
+    m = _SEMVER.match(build_id)
+    if not m or not m.group(5):
+        return None
+    b = re.fullmatch(r"beta\.([1-9]\d{0,8})", m.group(5))
+    return int(b.group(1)) if b else None
+
+
+def build_order(a, b):
+    """-1, 0, 1: semver precedence (build metadata ignored), then at the same version a final build above its test
+    builds and a higher beta number above a lower one (what the launcher's updater does)."""
+    def key(v):
+        m = _SEMVER.match(v)
+        if not m:
+            raise ValueError(f"not a version: {v}")
+        return [int(m.group(i)) for i in (1, 2, 3)], m.group(4)
+
+    def pre_cmp(x, y):
+        if x == y:
+            return 0
+        if x is None:
+            return 1
+        if y is None:
+            return -1
+        xs, ys = x.split("."), y.split(".")
+        for p, q in zip(xs, ys):
+            if p == q:
+                continue
+            pn, qn = p.isdigit(), q.isdigit()
+            if pn and qn:
+                return -1 if int(p) < int(q) else 1
+            if pn != qn:
+                return -1 if pn else 1
+            return -1 if p < q else 1
+        return (len(xs) > len(ys)) - (len(xs) < len(ys))
+
+    (na, pa), (nb, pb) = key(a), key(b)
+    if na != nb:
+        return -1 if na < nb else 1
+    c = pre_cmp(pa, pb)
+    if c:
+        return c
+    ba, bb = build_beta(a), build_beta(b)
+    if ba == bb:
+        return 0
+    if ba is None:
+        return 1
+    if bb is None:
+        return -1
+    return -1 if ba < bb else 1
+
+
+def cmd_order(a):
+    print(build_order(a.a, a.b))
 
 
 # ---------------------------------------------------------------- sums
@@ -463,12 +532,13 @@ def cmd_scan(a):
 # ---------------------------------------------------------------- updater (the self-update in a launcher build)
 
 # what the self-update leaves in a launcher binary (launcher/src-tauri/src/selfupdate/feed.rs, tauri.conf.json): the
-# update feeds (frostdev.io, GitHub's stable and dev channels), the updater's public key (in the embedded config),
+# update feeds (frostdev.io, GitHub's stable, dev and beta channels), the updater's public key (in the embedded config),
 # and the updater plugin's crate (its source paths in panic messages). The Nexus Mods build has none of them.
 UPDATE_FEEDS = [
     ("the frostdev.io update feed", b"frostdev.io/kiln/updates"),
     ("the GitHub stable update feed", b"/releases/latest/download/latest.json"),
     ("the GitHub dev update feed", b"/releases/download/updates-dev"),
+    ("the GitHub beta update feed", b"/releases/download/updates-beta"),
 ]
 UPDATER_PLUGIN = ("the updater plugin (tauri-plugin-updater)", b"tauri-plugin-updater")
 LAUNCHER_BINARIES = ("kiln-launcher", "kiln-launcher.exe")
@@ -780,7 +850,8 @@ def main():
     sub = p.add_subparsers(dest="cmd", required=True)
     m = sub.add_parser("manifest")
     m.add_argument("--version", required=True)
-    m.add_argument("--channel", required=True, choices=["stable", "dev"])
+    m.add_argument("--channel", required=True, choices=["stable", "dev", "beta"])
+    m.add_argument("--beta", type=int, help="a test build's beta number (the version must end in +beta.N)")
     m.add_argument("--notes")
     m.add_argument("--date")
     m.add_argument("--page", default="https://frostdev.io/kiln")
@@ -788,6 +859,10 @@ def main():
     m.add_argument("--entry", action="append", required=True)
     m.add_argument("--out", required=True)
     m.set_defaults(fn=cmd_manifest)
+    o = sub.add_parser("order")
+    o.add_argument("a")
+    o.add_argument("b")
+    o.set_defaults(fn=cmd_order)
     s = sub.add_parser("sums")
     s.add_argument("dir")
     s.add_argument("--check", action="store_true")

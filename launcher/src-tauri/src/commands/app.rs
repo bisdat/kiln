@@ -60,7 +60,9 @@ pub struct LauncherSettings {
     /// `checkUpdates`, which old files may still carry (ignored).
     #[serde(default = "yes")]
     pub update_check: bool,
-    /// The update channel, "stable" or "dev"; absent: the channel of the running build (a dev build follows dev).
+    /// The update channel, "stable", "dev" (the release line: "Release" in the UI) or "beta" (dev.29: test builds);
+    /// absent: the channel of the running build (a dev build follows dev, a test build beta). A launcher before
+    /// dev.29 reads "beta" as absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_channel: Option<String>,
     /// The fire on Play (WebGL). Off: the plain Play button (Settings, Appearance).

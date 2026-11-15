@@ -2,14 +2,18 @@
 // profile (a background feature: the Mods screen shows its switches), the notes about mod folders (the switch, and
 // the last activation's notes to read again: components/FolderNotes.tsx), the data folder (../DataFolder.tsx), Quit.
 // The last line names what the Deck detection saw (for testers' reports).
+// (dev.29) Channel: Release or Beta (test builds); A on it switches (DeckSwitchDialog: what happens, the build installed
+// now, Restart now), both ways; a test build says so in the row.
 // The Nexus Mods build (api/distribution.ts) has no launcher updates: its row is "New versions: Nexus Mods" (A opens
-// the Kiln page there in the browser), and no update command is called.
+// the Kiln page there in the browser) and "Test builds" (A opens the download page), and no update command is called.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import * as api from "../../api/commands";
-import type { UiMode, UpdateStatus } from "../../api/commands";
-import { NEXUS_PAGE } from "../../api/distribution";
+import type { UiMode, UpdateChannel, UpdateStatus } from "../../api/commands";
+import { RELEASE_CHANNEL, buildLabel, channelName, channelWord, restoreWords, switchKind, switchWords } from "../../api/channel";
+import { DIRECT_DOWNLOAD_PAGE, NEXUS_PAGE } from "../../api/distribution";
+import { runSwitch } from "../../shell/ChannelSwitch";
 import { useActiveProfile, useAppInfo, useDistribution, useGame, useGameStatus, useNexusEnabled, useProfiles, useSettings } from "../../api/hooks";
 import * as nx from "../../api/nexus";
 import { useNexusAccount } from "../../shell/catalogInstall";
@@ -47,6 +51,7 @@ export default function Settings() {
   const [notesOpen, setNotesOpen] = useState(false);
   const [full, setFull] = useState<boolean | null>(null);
   const [upBusy, setUpBusy] = useState(false);
+  const [switchTo, setSwitchTo] = useState<UpdateChannel | null>(null);
   const [nexusBusy, setNexusBusy] = useState(false);
   const nexus = useNexusAccount();
   const nexusEnabled = useNexusEnabled();
@@ -90,14 +95,23 @@ export default function Settings() {
   };
   let upWord = "", upTone: "ok" | "warn" | "info" | "idle" | "ember" = "idle";
   if (u) {
-    if (u.ready) { upWord = `${u.ready.version} ready`; upTone = "ok"; }
+    if (u.ready) { upWord = `${buildLabel(u.ready.version)} ready`; upTone = "ok"; }
     else if (u.phase === "downloading") { upWord = "Downloading"; upTone = "ember"; }
     else if (u.phase === "checking") { upWord = "Checking"; upTone = "ember"; }
-    else if (u.available) { upWord = `${u.available.version} available`; upTone = "info"; }
+    else if (u.available) { upWord = `${buildLabel(u.available.version)} available`; upTone = "info"; }
     else if (u.phase === "failed") { upWord = "Check failed"; upTone = "warn"; }
     else if (u.checked) { upWord = "Up to date"; upTone = "ok"; }
   }
   const pad = Object.values(pads.native)[0]?.name ?? pads.browser[0] ?? null;
+  // the channel row: a test build goes back to the release; a release build to the beta (or, following the beta
+  // already, back to following the release)
+  const onBeta = u?.buildChannel === "beta";
+  const channelTarget: UpdateChannel = onBeta || u?.channel === "beta" ? RELEASE_CHANNEL : "beta";
+  const changeChannel = () => {
+    if (!u) return;
+    if (switchKind(u, channelTarget)) setSwitchTo(channelTarget);
+    else void saveSettings(qc, () => ({ updateChannel: channelTarget })).then(() => api.updateStatus().then((x) => qc.setQueryData(["update_status"], x)).catch(() => {}));
+  };
   return (
     <Screen name="settings" title="Settings">
       <div className="deck-list deck-scroll">
@@ -121,9 +135,19 @@ export default function Settings() {
             disabled={upBusy || u?.phase === "checking" || u?.phase === "downloading"}
             onClick={() => void update()} />
         )}
+        {selfUpdates && u && (
+          <Row id="set-channel" title="Channel" a={onBeta ? "Switch back" : "Change"}
+            sub={onBeta ? `Test build ${u.beta ?? ""} of ${u.current}` : channelName(u.channel)}
+            end={<Word tone={onBeta ? "warn" : "ember"}>{onBeta ? `Beta ${u.beta ?? ""}` : channelWord(u.channel)}</Word>}
+            disabled={upBusy || u.phase === "downloading"} onClick={changeChannel} />
+        )}
         {dist === "nexus" && (
           <Row id="set-versions" title="New versions" a="Open" sub={info.data ? `Kiln Launcher ${info.data.version}` : undefined}
             end={<Word tone="info">Nexus Mods</Word>} onClick={() => void api.appOpenUrl(NEXUS_PAGE).catch((e) => toast.error(e))} />
+        )}
+        {dist === "nexus" && (
+          <Row id="set-test-builds" title="Test builds" a="Open" sub="A launcher from the download page can switch to them"
+            end={<Word tone="info">Download page</Word>} onClick={() => void api.appOpenUrl(DIRECT_DOWNLOAD_PAGE).catch((e) => toast.error(e))} />
         )}
         {nexusEnabled && <Row id="set-nexus" title="Nexus Mods" a={nexusDisconnect ? "Sign out" : "Sign in"}
           disabled={nexusBusy || !nexus.data || (!nexus.data.configured && !nexusDisconnect)}
@@ -152,6 +176,7 @@ export default function Settings() {
         {pad ? ` · ${pad}` : ""}
       </p>
       {quit && <QuitDialog onClose={() => setQuit(false)} />}
+      {switchTo && u && switchKind(u, switchTo) && <DeckSwitchDialog s={u} target={switchTo} onClose={() => setSwitchTo(null)} />}
       {profiles && game && <ProfileDialog game={game} onClose={() => setProfiles(false)} />}
       {notesOpen && (
         <Dialog name="folder-notes" title="Notes about your mod folders" wide onClose={() => setNotesOpen(false)} backLabel="Close"
@@ -160,5 +185,40 @@ export default function Settings() {
         </Dialog>
       )}
     </Screen>
+  );
+}
+
+/** (dev.29) A channel switch on the Deck: what happens (worlds, multiplayer), the build installed now, Restart now. A
+ *  switch back with a "before beta" copy offers to put the profiles and settings from before the beta back. */
+function DeckSwitchDialog({ s, target, onClose }: { s: UpdateStatus; target: UpdateChannel; onClose: () => void }) {
+  const qc = useQueryClient();
+  const kind = switchKind(s, target)!;
+  const w = switchWords(kind);
+  const [busy, setBusy] = useState(false);
+  const ready = s.phase === "ready" && s.switching === target && s.ready;
+  const downloading = busy || (s.phase === "downloading" && s.switching === target);
+  const go = async (restore: boolean) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const next = await runSwitch(qc, s, target, restore);
+      if (next) qc.setQueryData(["update_status"], next);
+    } finally { setBusy(false); }
+  };
+  const r = kind === "back" && s.beforeBeta && s.install.inPlace ? restoreWords(s.beforeBeta.taken) : null;
+  const buttons = ready
+    ? <><DeckButton primary onClick={() => api.updateRestart().catch((e) => toast.error(e))}>Restart now</DeckButton><DeckButton onClick={onClose}>Later</DeckButton></>
+    : <>
+      <DeckButton primary disabled={downloading || s.phase === "ready"} onClick={() => void go(false)}>{s.install.inPlace ? w.confirm : "Open the download page"}</DeckButton>
+      {r && <DeckButton disabled={downloading || s.phase === "ready"} onClick={() => void go(true)}>Switch back, put back my setup</DeckButton>}
+    </>;
+  return (
+    <Dialog name="channel-switch" title={ready ? `Ready: ${buildLabel(s.ready!.version)}` : w.title} wide onClose={onClose} locked={downloading} buttons={buttons}>
+      <div className="deck-scroll" data-testid={`deck-switch-${kind}`}>
+        {ready ? <p>Restart now to run it.</p> : w.say.map((line) => <p key={line}>{line}</p>)}
+        {!ready && r && <p className="deck-note">{r.hint}</p>}
+        {downloading && <p className="deck-note">Downloading…</p>}
+      </div>
+    </Dialog>
   );
 }

@@ -157,6 +157,15 @@ class LinuxReleaseTests(unittest.TestCase):
         self.assertTrue(self.updater_check(marker + "frostdev.io/kiln/updates".encode("utf-16le")))
         self.assertTrue(self.updater_check(b"\x7fELF" + release.BUILD_MARKERS["direct"], absent=False))
 
+    def test_updater_scan_knows_the_beta_feed(self):
+        # dev.29: the beta channel's GitHub feed is one of the self-update's strings: never in the Nexus build, and a
+        # direct build without it is missing part of its self-update
+        marker = b"\x7fELF" + bytes(60) + release.BUILD_MARKERS["nexus"]
+        problems = self.updater_check(marker + b"/releases/download/updates-beta/latest.json")
+        self.assertTrue(any("the GitHub beta update feed" in p for p in problems), problems)
+        problems = self.updater_check(b"\x7fELF" + release.BUILD_MARKERS["direct"], absent=False)
+        self.assertTrue(any("lacks the GitHub beta update feed" in p for p in problems), problems)
+
     def test_nexus_upload_gate_rejects_a_direct_build_even_in_nexus_folder(self):
         spec = importlib.util.spec_from_file_location("nexus_gate", HERE / "nexus.py")
         nexus = importlib.util.module_from_spec(spec)

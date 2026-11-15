@@ -149,6 +149,7 @@ pub const NAMES: &[&str] = &[
     "update_status",
     "update_check",
     "update_install",
+    "update_switch",
     "update_restart",
     "update_skip",
     "update_ack",

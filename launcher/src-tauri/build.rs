@@ -5,6 +5,31 @@ use std::path::Path;
 #[path = "../../crates/kiln-manage/src/nexus/oauth/registration.rs"]
 mod oauth_registration;
 
+/// The channel and beta number a build is made for (docs/kiln/launcher/releasing.md, "Test builds"):
+/// `KILN_LAUNCHER_CHANNEL` (empty or unset: the channel follows the version; `stable`, `dev` or `beta`) and, for `beta`
+/// only, `KILN_LAUNCHER_BETA` (the beta number, 1 or more). Baked into the binary as `KILN_LAUNCHER_BUILD_CHANNEL` and
+/// `KILN_LAUNCHER_BUILD_BETA` (selfupdate/feed.rs reads them with `env!`). Anything else stops the build.
+fn bake_channel() {
+    for name in ["KILN_LAUNCHER_CHANNEL", "KILN_LAUNCHER_BETA"] {
+        println!("cargo:rerun-if-env-changed={name}");
+    }
+    let channel = std::env::var("KILN_LAUNCHER_CHANNEL").unwrap_or_default();
+    let beta = std::env::var("KILN_LAUNCHER_BETA").unwrap_or_default();
+    let channel = channel.trim();
+    let beta = beta.trim();
+    if !matches!(channel, "" | "stable" | "dev" | "beta") {
+        panic!("KILN_LAUNCHER_CHANNEL must be empty, stable, dev or beta, not {channel:?}");
+    }
+    match (channel, beta) {
+        ("beta", b) if !b.is_empty() && !b.starts_with('0') && b.len() <= 9 && b.bytes().all(|c| c.is_ascii_digit()) => {}
+        ("beta", b) => panic!("KILN_LAUNCHER_CHANNEL=beta needs KILN_LAUNCHER_BETA, the beta number (1, 2, ...), not {b:?}"),
+        (_, "") => {}
+        (c, b) => panic!("KILN_LAUNCHER_BETA={b} is only for KILN_LAUNCHER_CHANNEL=beta (it is {c:?})"),
+    }
+    println!("cargo:rustc-env=KILN_LAUNCHER_BUILD_CHANNEL={channel}");
+    println!("cargo:rustc-env=KILN_LAUNCHER_BUILD_BETA={beta}");
+}
+
 fn main() {
     for name in ["KILN_NEXUS_ENABLED", "KILN_RELEASE_BUILD", "KILN_NEXUS_OAUTH_CLIENT_ID", "KILN_NEXUS_OAUTH_REDIRECT_URI"] {
         println!("cargo:rerun-if-env-changed={name}");
@@ -30,6 +55,7 @@ fn main() {
     } else if config.get("plugins").and_then(|p| p.get("updater")).is_some_and(|v| v.is_null()) {
         panic!("The Nexus Tauri config requires --no-default-features and no self-update feature");
     }
+    bake_channel();
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     // KILN_GIT names the commit when there is no .git (a release builds from a `git archive` export)
     let commit = std::env::var("KILN_GIT").ok().filter(|c| !c.trim().is_empty()).unwrap_or_else(|| {

@@ -469,8 +469,38 @@ pub struct ReportInput {
     pub roots: Option<Vec<SteamRoot>>,
     /// Extra facts for summary.txt (kilnctl: the instance's Wine runner).
     pub facts: Vec<(String, String)>,
+    /// (dev.29) The launcher's update channel: summary.txt, the short summary and report.json say it (a tester's report
+    /// says which test build). None: not a launcher (kilnctl) or not known.
+    pub channel: Option<ReportChannel>,
     /// Default [`Redactor::current`].
     pub redactor: Option<Redactor>,
+}
+
+/// The launcher's channel for a report: the channel its build belongs to, its beta number (a test build), and the
+/// channel it follows (the setting).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportChannel {
+    /// "stable", "dev" or "beta".
+    pub build: String,
+    pub beta: Option<u32>,
+    pub follows: String,
+}
+
+impl ReportChannel {
+    /// "Beta, test build 3 (follows Beta)", "Release (follows Release)".
+    pub fn words(&self) -> String {
+        let name = |c: &str| match c {
+            "beta" => "Beta",
+            "stable" => "Stable",
+            _ => "Release",
+        };
+        let build = match self.beta {
+            Some(n) => format!("{}, test build {n}", name(&self.build)),
+            None => name(&self.build).to_string(),
+        };
+        format!("{build} (follows {})", name(&self.follows))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -949,6 +979,9 @@ pub fn build(input: &ReportInput) -> Report {
     let _ = writeln!(sys, "OS:            {}{}", os.name, os.kernel.as_deref().map(|k| format!(" (kernel {k})")).unwrap_or_default());
     let _ = writeln!(sys, "Steam Deck:    {}{}", if deck { "yes" } else { "no" },
         if os.deck_signals.is_empty() { String::new() } else { format!(" ({})", os.deck_signals.join(", ")) });
+    if let Some(c) = &input.channel {
+        let _ = writeln!(sys, "{:<15}{}", "Channel:", c.words());
+    }
     for (k, v) in &input.facts {
         let _ = writeln!(sys, "{:<15}{v}", format!("{k}:"));
     }
@@ -1749,6 +1782,9 @@ fn finish(mut cx: Ctx, mut s: String, sys: String, body: String, input: &ReportI
     let mut short = String::new();
     let _ = writeln!(short, "Kiln support report, {}", rfc(now));
     let _ = writeln!(short, "{tool}; Kiln in the game: {}", facts.kiln.as_deref().unwrap_or("not installed"));
+    if let Some(c) = &input.channel {
+        let _ = writeln!(short, "Channel: {}", c.words());
+    }
     let os = os_info();
     let _ = writeln!(short, "OS: {}{}; Steam Deck: {}", os.name, facts.proton.as_deref().map(|p| format!("; Proton: {p}")).unwrap_or_default(),
         if input.deck.unwrap_or(os.deck) { "yes" } else { "no" });
@@ -1777,7 +1813,7 @@ fn finish(mut cx: Ctx, mut s: String, sys: String, body: String, input: &ReportI
 
     let mut report = Report { written: rfc(now), summary, short, findings: cx.findings, errors: cx.errors, files: Vec::new() };
     let json = serde_json::to_vec_pretty(&serde_json::json!({
-        "format": 1, "written": report.written, "tool": redact(tool, cx.red), "findings": report.findings, "errors": report.errors,
+        "format": 1, "written": report.written, "tool": redact(tool, cx.red), "channel": input.channel, "findings": report.findings, "errors": report.errors,
     }))
     .unwrap_or_default();
     let mut files = vec![("summary.txt".to_string(), report.summary.clone().into_bytes()), ("report.json".to_string(), json)];
