@@ -26,7 +26,7 @@ function ItemsPage() {
       <OfflineNote />
       <NeedsOp ops="item_search" what="Item search">
         <SplitPage form aside={sel ? <GiveForm key={sel.id} item={sel} players={players} /> : <span className="k-empty-title">Pick an item, then give it to a player or drop it into the world.</span>}>
-          <WellInput label="Search items" autoFocus value={q} onChange={(e) => setQ(e.target.value)} note={count} style={{ fontSize: 16 }} />
+          <WellInput label="Search items" autoFocus value={q} onChange={(e) => setQ(e.target.value)} onClear={() => setQ("")} note={count} style={{ fontSize: 16 }} />
           <Table aria-label="Items" fill rows={rows} rowKey={(r) => String(r.id)} rowHeight={44} selectedKey={sel ? String(sel.id) : null} onRowClick={(r) => setSel(r.id)}
             columns={[
               { key: "n", header: "Item", sort: (a, b) => a.name.localeCompare(b.name), render: (r) => <NameId name={r.name} id={r.debug ?? undefined} /> },

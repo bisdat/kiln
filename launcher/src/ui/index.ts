@@ -11,7 +11,7 @@ export { Tabs, NavTabs, Segmented } from "./Tabs";
 export type { TabItem, NavTabItem } from "./Tabs";
 export { Table, NameId } from "./Table";
 export type { Column, TableProps } from "./Table";
-export { Field, TextInput, TextArea, Select, NumberInput, Slider, Toggle, WellInput, FlameToggle } from "./Form";
+export { Field, TextInput, TextArea, Select, NumberInput, Slider, Toggle, WellInput, FlameToggle, escClearsFilter } from "./Form";
 export type { FieldProps, ToggleProps, SliderProps, SelectProps, NumberInputProps, WellInputProps } from "./Form";
 export { Modal, ConfirmDanger, ArchText, typeToConfirm, setTypeToConfirm } from "./Modal";
 export type { ModalProps, ConfirmDangerProps } from "./Modal";
