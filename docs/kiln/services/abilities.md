@@ -245,8 +245,10 @@ destroyed before the first run). Keys: a variable alias or debug name of the pro
   start of the unload, before its `OnUnload` runs, and the unload waits up to 2 ms for a call inside to leave. A call
   still inside after that holds the mod's `OnUnload` and the disposal of its resources back (kiln.log: `mod <id>: its
   unload waits: 1 call(s) still inside its native handlers (kiln.abilities)`); they run in the first Pre after the call
-  left, never forced, and a reload's new load waits with them. At shutdown the host waits 5 s for such a call, then
-  skips that mod's `OnUnload` rather than run it under the call. What the native side retires (bindings, attachment
+  left, never forced, and a reload's new load waits with them. A mod it depends on waits with it (`its dependent <id>
+  still waits`): the deferred unloads keep the order of ordinary ones, dependents first. At shutdown the host waits 5 s,
+  then skips the `OnUnload` and disposal of what still waits, dependents first, each named with what it waits for,
+  rather than run them under the call. What the native side retires (bindings, attachment
   sets) also stays until the calls leave. On a server none of this waits in practice: the unload runs in Pre or Post,
   when no `impact_simulation` slice runs. From then on its hash answers 0x1F. A game-state limit is `Ok = false`
   (registry full, Kiln's native slots used up, the name taken or a vanilla native's), a bad name or argc
