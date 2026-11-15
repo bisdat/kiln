@@ -65,7 +65,10 @@ internal static unsafe class NativeEcs
 /// raised as <see cref="ComponentWrittenEvent"/> on the tick thread (first "before", last "after", every writer once).</summary>
 internal static class NativeWrites
 {
-    internal sealed record Write(ulong Step, uint Entity, string Component, byte[] Before, byte[] After, string Writer, string ModId);
+    internal sealed record Write(ulong Step, uint Entity, string Component, byte[] Before, byte[] After, string Writer, string ModId)
+    {
+        internal long Session { get; } = Lifecycle.ServerSession;
+    }
 
     private const int Most = 65536;
     private static readonly ConcurrentQueue<Write> Queue = new();
@@ -92,6 +95,7 @@ internal static class NativeWrites
         while (Queue.TryDequeue(out var w))
         {
             Interlocked.Decrement(ref _count);
+            if (w.Session != Lifecycle.ServerSession) continue;
             if (!groups.TryGetValue((w.Step, w.Entity, w.Component), out var g))
             {
                 g = new Group(w);

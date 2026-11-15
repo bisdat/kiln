@@ -1881,6 +1881,8 @@ void foreign_views() {
     j.bytes[0x7A8] = 3;  // the job's other count
     L.job_storage = 0x20;  // the job's storage (JobStorage) for ReadOther / WriteOther
     static uint8_t job_storage[16];
+    const auto registry = view_of(&l)->registry;
+    std::memcpy(job_storage, &registry, sizeof registry);
     const auto js = reinterpret_cast<uintptr_t>(job_storage);
     std::memcpy(j.bytes + 0x20, &js, 8);
     ProgramCtx ctx{j.bytes, 0, 0};
@@ -1892,6 +1894,11 @@ void foreign_views() {
     j.bytes[0x7A8] = 2;
     check(foreign_check(&l, iter, jc) == KILN_ERR_UNAVAILABLE && jc[5] == 2, "foreign: other counts differ: refused");
     j.bytes[0x7A8] = 3;
+    const auto other_registry = registry + 8;
+    std::memcpy(job_storage, &other_registry, sizeof other_registry);
+    check(foreign_check(&l, iter, nullptr) == KILN_ERR_UNAVAILABLE,
+          "foreign: identical job counts from another world's storage are refused");
+    std::memcpy(job_storage, &registry, sizeof registry);
     F.read_other = true;
     fn.read_other = [](Slice*, void*, void*, uint32_t) {};
     F.write_other = true;
@@ -1911,6 +1918,10 @@ void foreign_views() {
     check(!foreign_write(&l, iter, kstr("Health"), 7, &size, &rc) && rc == KILN_ERR_NOT_FOUND && g_fwrites == writes + 1,
           "foreign: a read-only component is not written");
     check(foreign_read(&l, iter, kstr("Fuel"), 7, &size, &rc) && rc == KILN_OK, "foreign: other_write is readable too");
+    uint64_t changed[4] = {iter[0], iter[1], reinterpret_cast<uint64_t>(&wrong_type), iter[3]};
+    g_fstore[{changed[2], 7}] = {5, 6, 7, 8};
+    check(!foreign_read(&l, changed, kstr("Health"), 7, &size, &rc) && rc == KILN_ERR_UNAVAILABLE,
+          "foreign: a previously verified slot cannot change to another accessor type");
     // an accessor that is not the component map's type: refused, and stays refused for that view
     KilnForeignLayout l2{};
     l2.size = sizeof l2;
@@ -1921,6 +1932,29 @@ void foreign_views() {
               !foreign_read(&l2, iter, kstr("Health"), 7, &size, &rc) && rc == KILN_ERR_UNAVAILABLE,
           "foreign: an accessor of another type is refused once and for the view");
     check(foreign_attr_changed(&l, iter, f) == KILN_ERR_UNAVAILABLE, "foreign: attribute formulas not known here: unavailable");
+    auto* attribute_view = const_cast<ForeignView*>(view_of(&l));
+    attribute_view->attr_registry = 1;
+    g_fstore[{iter[3], 9}] = {0, 0, 0, 0, 8, 0, 1, 0};
+    void* attribute = foreign_write(&l, iter, kstr("Fuel"), 9, &size, &rc);
+    const auto attr_calls = g_attr_calls.load();
+    g_attr_fn = +[](void*, void*) { ++g_attr_calls; };
+    check(attribute && foreign_attr_changed(&l, iter, attribute) == KILN_OK && g_attr_calls == attr_calls + 1,
+          "foreign: formulas accept the last declared attribute write on this thread");
+    check(foreign_attr_changed(&l, iter, job_storage) == KILN_ERR_INVALID_ARGUMENT && g_attr_calls == attr_calls + 1,
+          "foreign: formulas refuse a pointer not returned by the last write");
+    NameRef non_attr[] = {{"CurrentTransform", 16}};
+    g_wdesc[1].other_write = {non_attr, 1};
+    KilnForeignLayout l3{}; l3.size = sizeof l3;
+    check(foreign_layout(KILN_WORLD_SERVER, kstr(kWNames[1]), &l3) == KILN_OK, "foreign: non-attribute fixture view");
+    auto* live_view = const_cast<ForeignView*>(view_of(&l3));
+    live_view->attr_registry = 1;
+    uint64_t attr_iter[4] = {iter[0], iter[1], iter[2], iter[1]};
+    g_fstore[{attr_iter[3], 9}] = {0, 0, 0, 0, 8, 0, 1, 0};
+    void* not_attribute = foreign_write(&l3, attr_iter, kstr("CurrentTransform"), 9, &size, &rc);
+    g_attr_fn = +[](void*, void*) {};
+    check(foreign_attr_changed(&l3, attr_iter, not_attribute) == KILN_ERR_INVALID_ARGUMENT,
+          "foreign: an unverified attribute type cannot run attribute formulas");
+    g_attr_fn = nullptr;
     // the world goes: the view is void
     world_event(KILN_WORLD_STOPPING, KILN_WORLD_SERVER);
     check(!foreign_read(&l, iter, kstr("Health"), 7, &size, &rc) && rc == KILN_ERR_UNAVAILABLE &&

@@ -320,6 +320,7 @@ void capture_args(KilnAbilityEvent& ev, const ArgSlice* args, const NativeCtx* c
 
 // The thunk body. No C++ objects with destructors live here (seh_dispatch wraps it); locks are taken in helpers.
 thread_local bool t_in_game = false;   // inside the game's own native (a fault there is not retried)
+thread_local NativeCtx* t_ctx = nullptr;  // the active VM frame on this thread
 thread_local int t_slot = -1;          // the slot whose thunk runs on this thread now (call_original; no registration)
 thread_local bool t_orig_ran = false;  // the game's native ran in this call: it never runs a second time (the latch)
 thread_local int32_t t_stage = KILN_NATIVE_BEFORE;  // the attachment stage running on this thread (call_original)
@@ -707,6 +708,8 @@ NativeResult* __fastcall thunk(NativeResult* out, ArgSlice* args, NativeCtx* ctx
     const int outer_inside = t_inside;
     t_gate = nullptr;
     t_inside = -1;
+    NativeCtx* const outer_ctx = t_ctx;
+    t_ctx = ctx;
     const int outer_slot = t_slot;  // a game native that runs a program inside its call (nested thunks)
     const bool outer_ran = t_orig_ran, outer_in_game = t_in_game;
     t_slot = I;
@@ -719,6 +722,7 @@ NativeResult* __fastcall thunk(NativeResult* out, ArgSlice* args, NativeCtx* ctx
     t_stage = outer_stage;
     t_gate = outer_gate;
     t_inside = outer_inside;
+    t_ctx = outer_ctx;
     t_slot = outer_slot;
     t_orig_ran = outer_ran;
     t_in_game = outer_in_game;
@@ -973,7 +977,10 @@ uint64_t g_ecs_tried = UINT64_MAX;  // tick thread: the session a view was asked
 constexpr const char* kImpactSimulation = "impact_simulation";
 
 bool world_foreign() {
-    return g_world_api && g_world_api->header.size >= offsetof(KilnWorldApi, foreign_attr_changed) + sizeof(void*);
+    return g_world_api && g_world_api->header.size >= offsetof(KilnWorldApi, foreign_attr_changed) + sizeof(void*) &&
+           g_world_api->foreign_layout && g_world_api->foreign_slot && g_world_api->foreign_check &&
+           g_world_api->foreign_read && g_world_api->foreign_write && g_world_api->foreign_attr_changed &&
+           g_world_api->game_program_find && g_world_api->game_world_session;
 }
 
 void ecs_off(uint32_t reason) {
@@ -1048,12 +1055,21 @@ void ecs_first(const NativeCtx* ctx) {
 
 // The call's iterator and the view, when the bridge is on for this world.
 const EcsView* ecs_for(const KilnNativeCall* call, const uint64_t** iter) {
-    if (!call || g_ecs_state.load(std::memory_order_acquire) != KILN_NATIVE_ECS_ON) return nullptr;
+    if (t_slot < 0 || !call || call->size < sizeof(KilnNativeCall) || g_ecs_state.load(std::memory_order_acquire) != KILN_NATIVE_ECS_ON) return nullptr;
     const EcsView* v = g_ecs.load(std::memory_order_acquire);
     const auto* ctx = static_cast<const NativeCtx*>(call->engine[2]);
-    if (!v || !ctx || !ctx->iter_ctx || g_ecs_checked.load(std::memory_order_acquire) != v) return nullptr;
+    if (!v || !ctx || ctx != t_ctx || !ctx->iter_ctx || g_ecs_checked.load(std::memory_order_acquire) != v) return nullptr;
     *iter = reinterpret_cast<const uint64_t*>(ctx->iter_ctx);
     return v;
+}
+
+KilnResult ecs_access_result(KilnResult rc) {
+    if (rc == KILN_ERR_INTERNAL || rc == KILN_ERR_UNAVAILABLE) {
+        g_ecs_reason.store(KILN_NATIVE_ECS_REASON_FAULT);
+        if (g_ecs_state.exchange(KILN_NATIVE_ECS_OFF) != KILN_NATIVE_ECS_OFF)
+            logw("kiln.abilities: foreign ECS access failed; the bridge is off for this world (a write may already have begun)");
+    }
+    return rc;
 }
 
 KilnResult KILN_CALL t_native_ecs_read(const KilnNativeCall* call, KilnStr component, uint32_t entity, void* out, uint32_t size) {
@@ -1064,10 +1080,10 @@ KilnResult KILN_CALL t_native_ecs_read(const KilnNativeCall* call, KilnStr compo
     uint32_t have = 0;
     KilnResult rc = KILN_OK;
     const void* p = g_world_api->foreign_read(&v->l, iter, component, entity, &have, &rc);
-    if (rc != KILN_OK) return rc;
+    if (rc != KILN_OK) return ecs_access_result(rc);
     if (!p) return KILN_ERR_NOT_FOUND;
     if (size > have) return KILN_ERR_INVALID_ARGUMENT;  // the whole component, or its first `size` bytes
-    return read_bytes(p, out, size) ? KILN_OK : KILN_ERR_INTERNAL;
+    return read_bytes(p, out, size) ? KILN_OK : ecs_access_result(KILN_ERR_INTERNAL);
 }
 
 KilnResult KILN_CALL t_native_ecs_write(KilnNativeCall* call, KilnStr component, uint32_t entity, const void* value,
@@ -1080,19 +1096,26 @@ KilnResult KILN_CALL t_native_ecs_write(KilnNativeCall* call, KilnStr component,
     uint32_t have = 0;
     KilnResult rc = KILN_OK;
     const void* r = g_world_api->foreign_read(&v->l, iter, component, entity, &have, &rc);
-    if (rc != KILN_OK) return rc;
+    if (rc != KILN_OK) return ecs_access_result(rc);
     if (!r) return KILN_ERR_NOT_FOUND;
     if (have != size) return KILN_ERR_INVALID_ARGUMENT;
+    if (flags & KILN_NATIVE_ECS_ATTRIBUTE) {
+        uint8_t old_header[8], new_header[8];
+        if (size < sizeof old_header) return KILN_ERR_INVALID_ARGUMENT;
+        if (!read_bytes(r, old_header, sizeof old_header) || !read_bytes(value, new_header, sizeof new_header))
+            return ecs_access_result(KILN_ERR_INTERNAL);
+        if (std::memcmp(old_header, new_header, sizeof old_header) != 0) return KILN_ERR_INVALID_ARGUMENT;
+    }
     void* p = g_world_api->foreign_write(&v->l, iter, component, entity, &have, &rc);
-    if (rc != KILN_OK) return rc;
+    if (rc != KILN_OK) return ecs_access_result(rc);
     if (!p || have != size) return KILN_ERR_NOT_FOUND;
-    if (before && !read_bytes(p, before, size)) return KILN_ERR_INTERNAL;
-    if (!write_bytes(p, value, size)) return KILN_ERR_INTERNAL;
+    if (before && !read_bytes(p, before, size)) return ecs_access_result(KILN_ERR_INTERNAL);
+    if (!write_bytes(p, value, size)) return ecs_access_result(KILN_ERR_INTERNAL);
     if (flags & KILN_NATIVE_ECS_ATTRIBUTE) {
         const KilnResult f = g_world_api->foreign_attr_changed(&v->l, iter, p);
-        if (f != KILN_OK && f != KILN_ERR_INVALID_ARGUMENT) return f;
+        if (f != KILN_OK && f != KILN_ERR_INVALID_ARGUMENT) return ecs_access_result(f);
     }
-    if (after && !read_bytes(p, after, size)) return KILN_ERR_INTERNAL;
+    if (after && !read_bytes(p, after, size)) return ecs_access_result(KILN_ERR_INTERNAL);
     return KILN_OK;
 }
 

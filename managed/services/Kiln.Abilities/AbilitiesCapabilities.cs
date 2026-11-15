@@ -148,6 +148,7 @@ internal static class AbilitiesCaps
                     "needs a kiln.world with foreign views (0.2.0-dev.29)"),
                 AbilitiesNative.EcsReasonLayout => (CapabilityState.Unavailable, CapabilityReason.Faulted,
                     "kiln.world could not compute impact_simulation's view in this world (see kiln.log)"),
+                5 => (CapabilityState.Unavailable, CapabilityReason.Faulted, "a foreign ECS access failed; the bridge is off for this world (a write may have begun)"),
                 AbilitiesNative.EcsReasonCounts => (CapabilityState.Unavailable, CapabilityReason.Faulted,
                     "the first native call's job counts are not kiln.world's view of impact_simulation in this world"),
                 _ => (CapabilityState.Unavailable, CapabilityReason.Faulted,

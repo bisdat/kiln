@@ -4,8 +4,8 @@
 // writes other entities through the program's own other_read / other_write accessors, with the job's storage, tracker
 // and write flag, as tracked writes do (writes.cpp). The slots come from the wraps' view algorithm (layout.cpp's
 // game_layout over the live descriptor), checked against the job's group counts before they are used (foreign_check),
-// and each accessor against the world's component map once per view. Explicit arguments, no thread-local state: any
-// thread inside the program's update.
+// and each live accessor against the world's component map. Reads and writes take explicit arguments;
+// attribute formulas follow the last write on that thread inside the program's update.
 #include <atomic>
 #include <cstring>
 #include <deque>
@@ -24,7 +24,7 @@ namespace {
 constexpr const char* kAttributeRegistry = "impact::AttributeRegistry";
 using AttrChangedFn = void (*)(void* component, void* registry);
 
-// A computed view: immutable after foreign_layout made it, except each accessor's one-time check. Kept for the
+// A computed view: immutable after foreign_layout made it, except each accessor's failure latch. Kept for the
 // process (one per program and world session that asked: a handful).
 struct ForeignView {
     uint32_t kind = 0;
@@ -34,6 +34,8 @@ struct ForeignView {
     uintptr_t registry = 0;  // the world's registry when it was made (the component map for the accessor checks)
     struct Access {
         int32_t read = -1, write = -1;  // iterator qwords: other_read (or other_write) / other_write
+        std::string name;
+        int attribute = -1;             // -1 unknown, 0 ordinary, 1 an AttributeComponent
         uint16_t index = 0;             // the world's type index of the component (0: not in the component map)
     };
     std::unordered_map<uint32_t, Access> by_hash;  // write_hash(short name)
@@ -48,6 +50,30 @@ std::deque<ForeignView> g_views;  // stable addresses: a handle is a view's addr
 std::atomic<AttrChangedFn> g_attr_fn{nullptr};
 std::atomic<bool> g_attr_resolved{false};
 
+struct LastWrite {
+    const ForeignView* view = nullptr;
+    const uint64_t* iter = nullptr;
+    void* component = nullptr;
+    uint32_t size = 0;
+    int attribute = -1;
+};
+thread_local LastWrite t_last_write;
+
+int attribute_kind(std::string_view name) {
+    const auto* types = program_types();
+    if (!types || !types->type_by_name || !types->type_info) return -1;
+    const std::string full = "keen::ecs::" + std::string(name);
+    const KilnType* type = types->type_by_name(kstr(full));
+    if (!type) return -1;
+    for (unsigned depth = 0; depth < 16 && type; ++depth) {
+        KilnTypeInfo info{}; info.size = sizeof info;
+        if (types->type_info(type, &info) != KILN_OK) return -1;
+        if (sv(info.name) == "AttributeComponent") return depth > 0 ? 1 : 0;
+        type = info.inner;
+    }
+    return type ? -1 : 0;
+}
+
 const ForeignView* view_of(const KilnForeignLayout* l) {
     if (!l || l->size < offsetof(KilnForeignLayout, why) || !l->handle) return nullptr;
     const auto* v = reinterpret_cast<const ForeignView*>(l->handle);
@@ -57,12 +83,12 @@ const ForeignView* view_of(const KilnForeignLayout* l) {
 
 ProgramCtx* ctx_of(const uint64_t* iter) { return iter ? reinterpret_cast<ProgramCtx*>(iter[0]) : nullptr; }
 
-// The accessor at `slot` is the component map's type of the component (its first u16 is the type index), once.
+// The live accessor at `slot` is the component map's type (its first u16 is the type index).
 bool accessor_ok(const ForeignView& v, int32_t slot, uint16_t index, const uint64_t* iter) {
     if (slot < 1 || static_cast<uint32_t>(slot) >= v.qwords || !iter[slot] || index == 0) return false;
     std::atomic<uint8_t>& c = v.checked[static_cast<size_t>(slot)];
     const uint8_t s = c.load(std::memory_order_acquire);
-    if (s) return s == 1;
+    if (s == 2) return false;  // a fault stays closed, but a success belongs to that iterator only
     uint16_t held = 0;
     const bool ok = seh_copy(&held, reinterpret_cast<const void*>(iter[slot]), 2) && held == index;
     c.store(ok ? 1 : 2, std::memory_order_release);
@@ -81,7 +107,7 @@ const ForeignView::Access* access_of(const ForeignView& v, KilnStr component) {
     const std::string_view name = sv(component);
     if (name.empty()) return nullptr;
     const auto at = v.by_hash.find(write_hash(name));
-    return at == v.by_hash.end() ? nullptr : &at->second;
+    return at == v.by_hash.end() || at->second.name != name ? nullptr : &at->second;
 }
 
 void set_rc(KilnResult* rc, KilnResult value) {
@@ -136,6 +162,8 @@ KilnResult KILN_CALL foreign_layout(uint32_t world_kind, KilnStr name, KilnForei
         const List& l = v.layout.lists[id];
         for (size_t i = 0; i < l.names.size(); ++i) {
             auto& a = v.by_hash[write_hash(l.names[i])];
+            a.name = l.names[i];
+            a.attribute = attribute_kind(l.names[i]);
             if (id == L_OWRITE) a.write = l.slot[i];
             if (a.read < 0 || id == L_OREAD) a.read = l.slot[i];
             if (l.index.size() > i) a.index = l.index[i];
@@ -184,6 +212,11 @@ KilnResult KILN_CALL foreign_check(const KilnForeignLayout* layout, const uint64
     const ForeignView* v = view_of(layout);
     ProgramCtx* ctx = ctx_of(iter);
     if (!v || !ctx || !ctx->job || !counts_known()) return KILN_ERR_UNAVAILABLE;
+    // Counts and type indices can coincide across worlds. The job's storage must belong to this view's registry.
+    uintptr_t registry = 0;
+    const void* storage = storage_of_job(ctx);
+    if (!storage || !seh_copy(&registry, storage, sizeof registry) || !registry || registry != v->registry)
+        return KILN_ERR_UNAVAILABLE;
     JobCounts c;
     if (!read_job_counts(ctx->job, &c)) return KILN_ERR_UNAVAILABLE;
     if (out_counts) {
@@ -198,7 +231,7 @@ const void* KILN_CALL foreign_read(const KilnForeignLayout* layout, const uint64
     if (size) *size = 0;
     const ForeignView* v = view_of(layout);
     ProgramCtx* ctx = ctx_of(iter);
-    if (!v || !ctx || !F.read_other || !fn.read_other) return set_rc(rc, KILN_ERR_UNAVAILABLE), nullptr;
+    if (!v || !ctx || foreign_check(layout, iter, nullptr) != KILN_OK || !F.read_other || !fn.read_other) return set_rc(rc, KILN_ERR_UNAVAILABLE), nullptr;
     const ForeignView::Access* a = access_of(*v, component);
     if (!a || a->read < 0) return set_rc(rc, KILN_ERR_NOT_FOUND), nullptr;
     if (!accessor_ok(*v, a->read, a->index, iter)) return set_rc(rc, KILN_ERR_UNAVAILABLE), nullptr;
@@ -215,10 +248,11 @@ const void* KILN_CALL foreign_read(const KilnForeignLayout* layout, const uint64
 
 void* KILN_CALL foreign_write(const KilnForeignLayout* layout, const uint64_t* iter, KilnStr component, uint32_t entity,
                               uint32_t* size, KilnResult* rc) {
+    t_last_write = {};
     if (size) *size = 0;
     const ForeignView* v = view_of(layout);
     ProgramCtx* ctx = ctx_of(iter);
-    if (!v || !ctx || !F.write_other) return set_rc(rc, KILN_ERR_UNAVAILABLE), nullptr;
+    if (!v || !ctx || foreign_check(layout, iter, nullptr) != KILN_OK || !F.write_other) return set_rc(rc, KILN_ERR_UNAVAILABLE), nullptr;
     const ForeignView::Access* a = access_of(*v, component);
     if (!a || a->write < 0) return set_rc(rc, KILN_ERR_NOT_FOUND), nullptr;
     if (!accessor_ok(*v, a->write, a->index, iter)) return set_rc(rc, KILN_ERR_UNAVAILABLE), nullptr;
@@ -230,6 +264,7 @@ void* KILN_CALL foreign_write(const KilnForeignLayout* layout, const uint64_t* i
     set_rc(rc, KILN_OK);
     if (!s.ptr || s.size == 0 || s.size > UINT32_MAX) return nullptr;
     if (size) *size = static_cast<uint32_t>(s.size);
+    t_last_write = LastWrite{v, iter, const_cast<void*>(s.ptr), static_cast<uint32_t>(s.size), a->attribute};
     return const_cast<void*>(s.ptr);
 }
 
@@ -238,6 +273,9 @@ KilnResult KILN_CALL foreign_attr_changed(const KilnForeignLayout* layout, const
     if (!v || !iter) return KILN_ERR_UNAVAILABLE;
     const AttrChangedFn f = g_attr_fn.load(std::memory_order_acquire);
     if (!f) return KILN_ERR_UNAVAILABLE;
+    if (t_last_write.view != v || t_last_write.iter != iter || t_last_write.component != component ||
+        t_last_write.size < 8 || t_last_write.attribute == 0) return KILN_ERR_INVALID_ARGUMENT;
+    if (t_last_write.attribute < 0 || foreign_check(layout, iter, nullptr) != KILN_OK) return KILN_ERR_UNAVAILABLE;
     uint8_t flags = 0;
     if (!component || v->attr_registry < 1 || !iter[v->attr_registry] ||
         !seh_copy(&flags, static_cast<const uint8_t*>(component) + 6, 1) || !(flags & 1))
