@@ -85,6 +85,11 @@ public static class NoClip
                     : $"NoClip off for {name}.");
         }
         if (!Available) throw new KilnUnavailableException(Capability, Capabilities.Why(Capability));
+        // A world can have /noclip without any mod calling Rules.Apply.
+        // Load the server's rules.json *before* consulting the policy: until
+        // it is loaded, Limits contains only the deny-by-default values. Only the
+        // policy: the rest of the rules runtime starts with the rule set below.
+        RulesRuntime.StartPolicy();
         if (!RulesRuntime.Limits.AllowNoClip)
             return new(false, false, "policy", $"NoClip stays off for {name}: this server's rules.json does not allow it (allowNoClip).");
         var client = Rules.ClientOf(player);
@@ -249,6 +254,12 @@ public static class NoClip
     /// <summary>One line: whether it works here, whether the server allows it, and who has it.</summary>
     internal static string Status()
     {
+        // The local console also runs on joined clients. Their file is not the server's policy.
+        if (Client.IsRemote)
+            return "NoClip status belongs to the server you joined. Use /noclip status in server chat to check its rules.json and players.";
+        // /noclip status is a first-class command even if no rule set was
+        // ever applied; report the loaded policy, not uninitialized defaults.
+        RulesRuntime.StartPolicy();
         var who = new List<string>();
         try
         {

@@ -14,6 +14,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../services/Kiln.Rules/Kiln.Rules.csproj" Aliases="global,rulesapi" />
+    <ProjectReference Include="../../Kiln.TestKit/Kiln.TestKit.csproj" />
     <Compile Include="../../../mods/Kiln.Admin/Ops.Rules.cs" Link="AdminOps.Rules.cs" />
   </ItemGroup>
 </Project>
