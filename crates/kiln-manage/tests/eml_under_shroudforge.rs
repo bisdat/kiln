@@ -724,3 +724,50 @@ fn a_switch_made_by_hand_is_not_carried_into_the_next_version() {
     engine_mods::place(&s.dirs, &p, &s.game).unwrap();
     assert_eq!(ext_of(&copy).as_deref(), Some(theirs));
 }
+
+#[test]
+fn runtime_eml_alone_hosts_and_gets_a_switch() {
+    let s = setup("runtime-alone");
+    let src = legacy(&s.t.0, "quiver", "0.8.2");
+    put(&src, "mod.json", br#"{"id":"quiver","name":"Quiver","version":"0.8.2","capabilities":["patch","runtime-register-dll"]}"#);
+    let r = import(&s.dirs, &src, ModKind::Eml, "quiver");
+    let mut p = s.profile(vec![pm(&r, true)]);
+    p.mods.shroudforge.clear();
+    let view = own_loaders::ProfileView::of_profile(&p).with_library(&s.dirs, &p);
+    assert!(own_loaders::shroudforge_runs_eml(&own_loaders::find(&s.game, Some(&view))));
+    engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+    assert!(shroudforge::read_mod(&s.game.join("mods/quiver")).unwrap().enabled);
+    let install = runtime_install(&s.game);
+    let rendered = profile::render(&s.dirs, &p, &install, kiln_manage::game::PathMode::Native).unwrap();
+    assert_eq!(rendered.eml_runtime, ["quiver"]);
+    assert!(rendered.eml_runtime_blocked.is_empty());
+    assert!(!rendered.mods.eml[0].enabled, "older kiln-eml must never fall back to data-only");
+    assert!(rendered.mods.shroudforge.iter().any(|m| m.id == "quiver" && m.enabled), "older adapter hosting signal");
+    let file_view = own_loaders::ProfileView::of_file(&rendered);
+    assert!(own_loaders::shroudforge_runs_eml(&own_loaders::find(&s.game, Some(&file_view))));
+}
+
+fn runtime_install(game: &Path) -> kiln_manage::game::GameInstall {
+    use kiln_manage::game::*;
+    GameInstall { id: "test".into(), kind: GameKind::Client, path: game.into(), exe: "enshrouded.exe".into(),
+        app_id: kiln_manage::CLIENT_APP_ID, library: None, platform: Platform::Proton, prefix: None,
+        build_id: None, exe_sha256: None, steam_flavor: None, path_mode: PathMode::Native, source: "manual".into() }
+}
+
+#[test]
+fn runtime_eml_missing_component_is_disabled_and_not_placed() {
+    let s = setup("runtime-missing");
+    std::fs::remove_file(s.game.join("kiln/plugins/shroudforge/shroudforge-runtime.dll")).unwrap();
+    let src = legacy(&s.t.0, "quiver", "0.8.2");
+    put(&src, "mod.json", br#"{"id":"quiver","name":"Quiver","version":"0.8.2","capabilities":["patch","runtime"]}"#);
+    put(&src, "native-plugin.ini", b"test");
+    let r = import(&s.dirs, &src, ModKind::Eml, "quiver");
+    let mut p = s.profile(vec![pm(&r, true)]);
+    p.mods.shroudforge.clear();
+    let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+    assert!(!s.game.join("mods/quiver").exists());
+    assert!(rep.warnings.iter().any(|w| w.contains("needs ShroudForge's runtime")), "{rep:?}");
+    let rendered = profile::render(&s.dirs, &p, &runtime_install(&s.game), kiln_manage::game::PathMode::Native).unwrap();
+    assert!(!rendered.mods.eml[0].enabled);
+    assert!(rendered.eml_runtime_blocked["quiver"].contains("component is missing"));
+}

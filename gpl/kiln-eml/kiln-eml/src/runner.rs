@@ -326,6 +326,23 @@ fn files_differ(a: &Utf8Path, b: &Utf8Path, progress: &Progress) -> bool {
     compare().unwrap_or(true)
 }
 
+pub(crate) fn runtime_unavailable(cfg: &RunConfig) -> String {
+    if std::env::var("KILN_SHROUDFORGE").as_deref() == Ok("0") {
+        return "KILN_SHROUDFORGE=0; remove that override and start again".into();
+    }
+    let state = cfg.game_dir.join("kiln/state/shroudforge.json");
+    if let Ok(bytes) = std::fs::read(state) {
+        if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+            if v.get("pid").and_then(|v| v.as_u64()) == Some(std::process::id() as u64) {
+                if let Some(why) = v.get("reason").and_then(|v| v.as_str()) {
+                    return format!("{why}. Enable/install the ShroudForge component and activate the profile again");
+                }
+            }
+        }
+    }
+    "ShroudForge did not reserve this start (component missing, off, incompatible, or an older adapter); install/update the ShroudForge component and activate the profile again".into()
+}
+
 /// Runs EML over `mods` (the paths `discover::resolve` chose; `entries` are its entries, updated in place).
 pub fn run(cfg: &RunConfig, mut mods: Vec<Utf8PathBuf>, entries: Vec<Entry>) -> Outcome {
     let _serial = RUN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -355,6 +372,18 @@ pub fn run(cfg: &RunConfig, mut mods: Vec<Utf8PathBuf>, entries: Vec<Entry>) -> 
         o.ms = started.elapsed().as_secs_f64() * 1000.0;
         o
     };
+    // Reaching this runner means no ShroudForge writer reserved the run. Never run just the data half.
+    let why = runtime_unavailable(cfg);
+    mods.retain(|path| {
+        let needs = crate::discover::classify(path).is_ok_and(|m| m.capabilities.iter()
+            .any(|c| matches!(c, Capability::Runtime | Capability::RuntimeRegisterDll)));
+        if needs {
+            let reason = format!("needs ShroudForge's runtime, which is not running: {why}; its data was not applied, so the game is as without the mod");
+            tracing::warn!(%path, %reason, "EML package skipped whole");
+            set_state(&mut out.mods, path, "skipped", Some(reason));
+        }
+        !needs
+    });
     let selected = match cfg.file_name.as_deref() {
         Some(name @ ("enshrouded" | "enshrouded_server")) => Some(name.to_owned()),
         Some(_) => None,

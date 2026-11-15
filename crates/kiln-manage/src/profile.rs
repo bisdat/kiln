@@ -218,6 +218,11 @@ impl ProfileFileMods {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileFile {
+    /// Enabled EML packages requiring hosted ShroudForge (default empty for older launchers).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub eml_runtime: Vec<String>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub eml_runtime_blocked: std::collections::BTreeMap<String, String>,
     #[serde(default, rename = "$schema", skip_serializing_if = "Option::is_none")]
     pub schema: Option<String>,
     pub format: u32,
@@ -1180,7 +1185,33 @@ pub fn render(dirs: &DataDirs, profile: &Profile, install: &GameInstall, mode: P
         DataDirMode::Profile => Some(game_or_copy(&pdir.join("data"), install, mode, || format!("{COPY_ROOT_REL}/{pid}/data"))?),
     };
     let dropins = profile.dropins_file();
+    let view = crate::own_loaders::ProfileView::of_profile(profile).with_library(dirs, profile);
+    let eml_runtime = view.eml_runtime.clone();
+    let loaders = crate::own_loaders::find(&install.path, Some(&view));
+    let mut eml_runtime_blocked = std::collections::BTreeMap::new();
+    for id in &eml_runtime {
+        if let Some(m) = mods.eml.iter_mut().find(|m| &m.id == id) {
+            if crate::own_loaders::shroudforge_runs_eml(&loaders) {
+                // Compatibility signal for adapters predating emlRuntime: this profile uses SF for this package.
+                if !mods.shroudforge.iter().any(|s| s.id == *id && s.enabled) {
+                    let mut engine = m.clone();
+                    engine.enabled = true;
+                    mods.shroudforge.push(engine);
+                }
+                // SF reads its placed copy/switch, not this list. Disable kiln-eml's route even for old runners:
+                // if an older adapter fails before reserving the writer, no data-only fallback may run.
+                m.enabled = false;
+            } else {
+                m.enabled = false;
+                let why = if std::env::var("KILN_SHROUDFORGE").as_deref() == Ok("0") { "KILN_SHROUDFORGE=0" }
+                    else { "the ShroudForge component is missing or unavailable" };
+                eml_runtime_blocked.insert(id.clone(), format!("needs ShroudForge's runtime, which is not running: {why}; its data was not applied, so the game is as without the mod. Install/enable ShroudForge and activate again"));
+            }
+        }
+    }
     Ok(ProfileFile {
+        eml_runtime,
+        eml_runtime_blocked,
         schema: None,
         format: 1,
         id: profile.id.clone(),

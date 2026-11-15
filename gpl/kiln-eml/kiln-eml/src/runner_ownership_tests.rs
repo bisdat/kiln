@@ -486,3 +486,34 @@ fn a_backup_of_an_earlier_game_build_is_not_reported_as_unproven_data() {
     assert_eq!((out.phase, out.error.as_deref()), (Phase::Done, None), "{out:?}");
     assert_eq!(std::fs::read(g.game().join("enshrouded.kfc.bak")).unwrap(), live[0]);
 }
+
+#[test]
+fn runtime_package_never_applies_data_without_shroudforge() {
+    for cap in ["runtime", "runtime-register-dll"] {
+        let g = Game::new(&format!("runtime-whole-{cap}"), CONTENT);
+        std::fs::write(g.root.join("mods/a/mod.json"), format!(r#"{{"id":"a","name":"a","version":"1.0.0","capabilities":["patch","{cap}"]}}"#)).unwrap();
+        let out = g.with_mod();
+        assert_eq!(out.mods[0].state, "skipped", "{out:?}");
+        assert!(out.mods[0].reason.as_deref().unwrap().contains("needs ShroudForge's runtime"));
+        assert_eq!(g.archives(), g.vanilla, "runtime package applied data");
+    }
+}
+
+#[test]
+fn unavailable_runtime_does_not_stop_patch_only_packages() {
+    let g = Game::new("runtime-and-patch", "error('runtime package must not run')");
+    std::fs::write(g.root.join("mods/a/mod.json"), r#"{"id":"a","name":"a","version":"1.0.0","capabilities":["patch","runtime-register-dll"]}"#).unwrap();
+    let b = g.root.join("mods/b");
+    std::fs::create_dir_all(b.join("src")).unwrap();
+    std::fs::write(b.join("mod.json"), r#"{"id":"b","name":"b","version":"1.0.0","capabilities":["patch"]}"#).unwrap();
+    std::fs::write(b.join("src/mod.lua"), CONTENT).unwrap();
+    std::fs::create_dir_all(g.game().join("kiln/state")).unwrap();
+    std::fs::write(g.game().join("kiln/state/shroudforge.json"), serde_json::json!({"pid":std::process::id(),"reason":"runtime DLL cannot be loaded"}).to_string()).unwrap();
+    let candidates = ["a", "b"].map(|id| crate::discover::Candidate { path: g.root.join(format!("mods/{id}")), source: "test".into(), enabled: true });
+    let (mods, entries) = crate::discover::resolve(&candidates);
+    let out = run(&g.cfg, mods, entries);
+    assert_eq!(out.mods[0].state, "skipped");
+    assert!(out.mods[0].reason.as_deref().unwrap().contains("runtime DLL cannot be loaded"));
+    assert_eq!(out.mods[1].state, "loaded");
+    assert_ne!(g.archives(), g.vanilla);
+}

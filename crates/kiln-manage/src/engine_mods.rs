@@ -2306,9 +2306,14 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
         // without EML's own loader), else the own loader's folder while that loader is installed.
         let mut targets: Vec<(&crate::profile::ProfileMod, PathBuf, PathBuf, bool)> = Vec::new();
         for m in list.iter().filter(|m| m.enabled) {
-            if kind != ModKind::Native && root.is_none() && game_folder_of(dirs, kind, m).is_none() { continue; }
             let src = crate::library::path_of(dirs, &crate::library::LibraryRef {
                 kind, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() })?;
+            if kind == ModKind::Eml && crate::own_loaders::eml_needs_runtime(&src)
+                && !crate::own_loaders::shroudforge_runs_eml(loaders) {
+                rep.warnings.push(format!("{}: needs ShroudForge's runtime, which is not available; its data was not applied, so the game is as without the mod. Install the ShroudForge component and activate again", tag(&m.id)));
+                continue;
+            }
+            if kind != ModKind::Native && root.is_none() && game_folder_of(dirs, kind, m).is_none() { continue; }
             if kind == ModKind::Native {
                 for folder in crate::library::native_settings_dirs(&src) {
                     let dst = game_dir.join(EML_GAME_MODS).join(folder.file_name().expect("settings folder"));

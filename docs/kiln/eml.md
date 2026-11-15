@@ -25,7 +25,11 @@ GPL-3.0-or-later plugin built from EML's own source (`kiln/plugins/kiln-eml.dll`
 - On Linux it needs `WINEDLLOVERRIDES="dbghelp=native,builtin"`, otherwise Wine's builtin dbghelp loads and EML never
   runs.
 - The runtime step (`loader.runtime.register_dll`, capability `runtime`) is a stub in 0.2.0: it is declared and logged,
-  and nothing is loaded.
+  and nothing is loaded. Kiln therefore requires ShroudForge for any enabled package declaring `runtime` or
+  `runtime-register-dll`: the launcher hosts ShroudForge even when no ShroudForge mods are selected, places the
+  EML package in its mods folder, and enables its switch. If that runtime is unavailable, kiln-eml skips the whole
+  package (`skipped`, with the cause and installation advice); it never applies just its data. Patch/export-only
+  packages keep running. This does not undo unowned patches or repair items already lost from a save.
 
 ### KFC patching
 The game data is `<exe>.kfc` (header and tables), `<exe>.kfc_resources` (resident resources) and
@@ -51,6 +55,7 @@ The game data is `<exe>.kfc` (header and tables), `<exe>.kfc_resources` (residen
 mods/<folder or .zip>/
   mod.json        { "id", "name", "version" (semver), "capabilities": ["patch"|"export"|"runtime"|"runtime-register-dll"],
                     "dependencies": [{ "id", "version" (semver req), "optional" }], "authors", "description", "license", "icon" }
+  // runtime and runtime-register-dll require ShroudForge; no data-only fallback
   src/mod.lua     the main module (require "mods.<id>" = src/mod.lua)
   src/**.lua      more modules: require("a.b") = src/a/b.lua; another mod's: require("mods.<id>.a.b")
   ...             data files the mod reads with io.read (inside its own folder only)
@@ -230,7 +235,7 @@ It fails soft:
   journals survive next-start cleanup; receipt, cleanup-record and journal temps there are removed. These SF journals
   are historical evidence, not instructions for rolling archives back; current recovery proof is in the stem receipt.
 - **ShroudForge asset mods and EML mods together.** In a start where Kiln hosts ShroudForge (the active profile lists
-  an enabled SF mod), only ShroudForge writes the game data: its early step reserves the writer before it prepares
+  an enabled SF mod or an EML package requiring runtime), only ShroudForge writes the game data: its early step reserves the writer before it prepares
   (`kiln.eml` `stand_aside`, section 6), and kiln-eml publishes `aside` and patches nothing. SF builds
   its startup asset mods and the EML packages in its mods folder that it has switched on in one pass, so the game has
   both. SF runs a package there only while its `extended.mod.json` says `enabled: true` (a legacy EML package has no

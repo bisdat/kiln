@@ -177,8 +177,8 @@ pub fn find(game_dir: &Path, profile: Option<&ProfileView>) -> Vec<OwnLoader> {
     // says so: a switched-on ShroudForge package in its mods folder, or a startup patch of an earlier start in its state
     // file (ShroudForge then puts the game data back). The launcher must reach the same answer: it places the profile's
     // EML mods for the loader that runs them (`sf_paths::adapter_hosts_dropins`).
-    let hosts = profile.is_some_and(|p| p.enabled(ModKind::ShroudForge).next().is_some() || (p.dropins_shroudforge && crate::sf_paths::adapter_hosts_dropins(game_dir)));
-    if hosts && runtime && game_dir.join(plugin).is_file() {
+    let hosts = std::env::var("KILN_SHROUDFORGE").as_deref() == Ok("1") || profile.is_some_and(|p| p.enabled(ModKind::ShroudForge).next().is_some() || !p.eml_runtime.is_empty() || (p.dropins_shroudforge && crate::sf_paths::adapter_hosts_dropins(game_dir)));
+    if hosts && runtime && game_dir.join(plugin).is_file() && std::env::var("KILN_SHROUDFORGE").as_deref() != Ok("0") {
         out.push(OwnLoader { kind: ModKind::Eml, engine: Engine::ShroudForge, file: plugin.into(), via: Via::HostedShroudForge, folder: sf_folder(game_dir),
             delivery: Delivery::Placed });
     }
@@ -213,6 +213,7 @@ pub struct ProfileView {
     /// The Library folder of each mod (kind, id, host path) where the caller knows it: activation finds the player's own
     /// folder of a mod by that entry's manifest id ([`own_folder_of`]).
     pub sources: Vec<(ModKind, String, PathBuf)>,
+    pub eml_runtime: Vec<String>,
 }
 
 fn names_shroudforge(d: &crate::profile::Dropins) -> bool {
@@ -228,7 +229,7 @@ impl ProfileView {
         for k in ModKind::ALL {
             for m in p.mods.list(k) { mods.push((k, m.id.clone(), m.enabled)); }
         }
-        ProfileView { mods, dropins_shroudforge: names_shroudforge(&p.dropins_file()), sources: Vec::new() }
+        ProfileView { mods, dropins_shroudforge: names_shroudforge(&p.dropins_file()), sources: Vec::new(), eml_runtime: Vec::new() }
     }
 
     pub fn of_file(f: &crate::profile::ProfileFile) -> Self {
@@ -236,14 +237,17 @@ impl ProfileView {
         for k in ModKind::ALL {
             for m in f.mods.folders(k).into_iter().flatten() { mods.push((k, m.id.clone(), m.enabled)); }
         }
-        ProfileView { mods, dropins_shroudforge: names_shroudforge(&f.dropins), sources: Vec::new() }
+        ProfileView { mods, dropins_shroudforge: names_shroudforge(&f.dropins), sources: Vec::new(), eml_runtime: f.eml_runtime.clone() }
     }
 
     /// [`ProfileView::sources`] of a launcher profile's EML mods, from the Library.
     pub fn with_library(mut self, dirs: &crate::paths::DataDirs, p: &crate::profile::Profile) -> Self {
         for m in p.mods.list(ModKind::Eml) {
             let r = crate::library::LibraryRef { kind: ModKind::Eml, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() };
-            if let Ok(path) = crate::library::path_of(dirs, &r) { self.sources.push((ModKind::Eml, m.id.clone(), path)); }
+            if let Ok(path) = crate::library::path_of(dirs, &r) {
+                if m.enabled && eml_needs_runtime(&path) { self.eml_runtime.push(m.id.clone()); }
+                self.sources.push((ModKind::Eml, m.id.clone(), path));
+            }
         }
         self
     }
@@ -474,6 +478,9 @@ pub fn notes(game_dir: &Path, loaders: &[OwnLoader], profile: Option<&ProfileVie
         let label = short(kind);
         let folder = format!("{}/", l.folder.trim_end_matches('/'));
         let mut text = match (l.via, l.engine) {
+            (Via::HostedShroudForge, _) if profile.is_some_and(|p| !p.eml_runtime.is_empty()) => format!(
+                "Kiln hosts ShroudForge because the EML package {} needs ShroudForge's runtime: ShroudForge then runs the {label} mods in {folder}",
+                profile.and_then(|p| p.eml_runtime.first()).expect("runtime requirement")),
             (Via::HostedShroudForge, _) => format!("Kiln hosts ShroudForge for this profile's ShroudForge mods: ShroudForge then runs the {label} mods in {folder}"),
             (_, Engine::ShroudForge) if kind == ModKind::Eml => format!("{who} ({}) is installed: it carries EML and runs the {label} mods in {folder}", l.file),
             _ => format!("{who} ({}) is installed: it runs the {label} mods in {folder}", l.file),
@@ -1136,4 +1143,9 @@ mod tests {
         assert!(n[0].text.contains("Kiln copied this profile's 3 EML mod(s) into mods/ for it"), "{}", n[0].text);
         std::fs::remove_dir_all(g).unwrap();
     }
+}
+
+/// Use the shared package reader; never infer runtime requirements from DLL filenames.
+pub fn eml_needs_runtime(folder: &Path) -> bool {
+    crate::shroudforge::read_mod(folder).is_ok_and(|m| m.capabilities.iter().any(|c| c == "runtime" || c == "runtime-register-dll"))
 }

@@ -172,7 +172,19 @@ pub fn without_profile_copies(candidates: Vec<Candidate>, profile: &[(String, bo
 /// runs a package only while its switch is on and on the sides it targets ([`shroudforge_switch`]): a package there it
 /// has off is `off-in-shroudforge`, one for the other side `other-side`.
 pub fn aside_entries(profile_json: &str, kiln_dir: &Utf8Path, roots: &[Utf8PathBuf], who: &str, shroudforge: Option<bool>) -> Vec<Entry> {
-    let ids = profile_ids(profile_json);
+    let mut ids = profile_ids(profile_json);
+    // These entries are intentionally off on the kiln-eml route, including for older runners. SF's own switch
+    // runs the package; report that delegation truthfully only while SF actually owns this start.
+    if shroudforge.is_some() {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(profile_json) {
+            if let Some(required) = v.get("emlRuntime").and_then(|v| v.as_array()) {
+                for (id, enabled) in &mut ids {
+                    if required.iter().any(|r| r.as_str() == Some(id.as_str()))
+                        && v.get("emlRuntimeBlocked").and_then(|v| v.get(id.as_str())).is_none() { *enabled = true; }
+                }
+            }
+        }
+    }
     let paths = profile_candidates(profile_json, kiln_dir);
     let folder = roots.first().map(|r| r.to_string()).unwrap_or_else(|| "mods".into());
     ids.into_iter().enumerate().map(|(i, (id, enabled))| {
@@ -1066,4 +1078,66 @@ mod tests {
         std::fs::remove_dir_all(d).unwrap();
     }
 
+}
+
+/// The launcher deliberately disabled these entries because their required engine is unavailable.
+pub fn apply_runtime_blocks(json: &str, kiln: &Utf8Path, entries: &mut [Entry], unavailable: &str) {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else { return };
+    let blocked = v.get("emlRuntimeBlocked").and_then(|v| v.as_object());
+    for ((id, _), candidate) in profile_ids(json).into_iter().zip(profile_candidates(json, kiln)) {
+        if candidate.enabled { continue; }
+        let delegated = v.get("emlRuntime").and_then(|v| v.as_array()).is_some_and(|a| a.iter().any(|v| v.as_str() == Some(id.as_str())));
+        let fallback = format!("needs ShroudForge's runtime, which is not running: {unavailable}; its data was not applied, so the game is as without the mod");
+        if let Some(reason) = blocked.and_then(|b| b.get(&id)).and_then(|v| v.as_str()).or_else(|| delegated.then_some(fallback.as_str())) {
+            for e in entries.iter_mut().filter(|e| e.source == "profile" && e.path == candidate.path.as_str()) {
+                e.id = Some(id.clone());
+                e.state = "skipped".into();
+                e.reason = Some(reason.into());
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod runtime_block_tests {
+    use super::*;
+    #[test]
+    fn unavailable_runtime_reason_survives_a_missing_placement() {
+        let json = r#"{"mods":{"eml":[{"id":"quiver","path":"missing","enabled":false}]},"emlRuntimeBlocked":{"quiver":"needs ShroudForge's runtime: component missing"}}"#;
+        let kiln = Utf8Path::new("/nonexistent-kiln-runtime-test");
+        let (mods, mut entries) = resolve(&profile_candidates(json, kiln));
+        assert!(mods.is_empty());
+        apply_runtime_blocks(json, kiln, &mut entries, "not hosted");
+        assert_eq!(entries[0].id.as_deref(), Some("quiver"));
+        assert_eq!(entries[0].state, "skipped");
+        assert!(entries[0].reason.as_deref().unwrap().contains("component missing"));
+    }
+}
+
+#[cfg(test)]
+mod runtime_delegation_tests {
+    use super::*;
+    #[test]
+    fn delegated_entry_is_off_for_old_runners_but_reported_under_shroudforge() {
+        let root = Utf8PathBuf::from_path_buf(std::env::temp_dir().join(format!("eml-delegated-{}", std::process::id()))).unwrap();
+        let dir = root.join("quiver");
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(dir.join("mod.json"), r#"{"id":"quiver","name":"Q","version":"1.0.0","capabilities":["runtime"]}"#).unwrap();
+        std::fs::write(dir.join("src/mod.lua"), "return {}").unwrap();
+        std::fs::write(dir.join("extended.mod.json"), r#"{"schemaVersion":1,"launcher":"EML","enabled":true,"targets":["client"]}"#).unwrap();
+        std::fs::write(dir.join(".kiln-library.json"), r#"{"format":1,"kind":"eml","id":"quiver","version":"1.0.0","hash":"h"}"#).unwrap();
+        let json = serde_json::json!({"mods":{"eml":[{"id":"quiver","path":dir.as_str(),"enabled":false}]},"emlRuntime":["quiver"]}).to_string();
+        let candidates = profile_candidates(&json, &root);
+        assert!(!candidates[0].enabled);
+        let (mods, mut fallback) = resolve(&candidates);
+        assert!(mods.is_empty());
+        apply_runtime_blocks(&json, &root, &mut fallback, "adapter failed before reservation");
+        assert_eq!(fallback[0].state, "skipped");
+        assert!(fallback[0].reason.as_deref().unwrap().contains("adapter failed before reservation"));
+        let rows = aside_entries(&json, &root, &[root.clone()], "ShroudForge (hosted by Kiln)", Some(false));
+        assert_eq!(rows[0].state, "own-loader", "{rows:?}");
+        let rows = aside_entries(&json, &root, &[root.clone()], "ShroudForge (hosted by Kiln)", Some(true));
+        assert_eq!(rows[0].state, "other-side", "{rows:?}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
