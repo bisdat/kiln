@@ -22,8 +22,11 @@ engine's, [docs/kiln/modding/quests.md](../modding/quests.md).
 - **Lab and offline: verified on the dedicated server** (svn 1287369): see "Verification".
 - **Seen in a real client** (joined to a lab): Tobin's topics in the game's NPC menu, his greeting's voice-over, his quest in the game's journal.
 - **Not seen yet**: map markers, notifications, the tracked-quest HUD, step counters, the NPC directory, the summon tool and beds. See "Manual test".
-- **A roster over 64 entries** (since 0.2.0-dev.29): lab-tested on the dedicated server; on a game client not seen yet
-  (guided check `17-roster-client`). See [The roster's size](#the-rosters-size-since-020-dev29).
+- **A roster over 64 entries** (since 0.2.0-dev.29): lab-tested on the dedicated server without a player
+  (`mods/tests/roster-cap-test/lab.sh`: 64, 65, 128 and 129 entries, the lab switch, a restart); there the roster's
+  programs ran on the world's thread, also with kiln.world's parallel switch on, so a run of the hooks on the game's
+  workers (a server with players) is written for but not seen; on a game client not seen yet (guided check
+  `17-roster-client`). See [The roster's size](#the-rosters-size-since-020-dev29).
 
 ## What needs what
 
@@ -278,10 +281,13 @@ with 128 entries and loaded:
 - with Kiln and the same mods: as before the restart (lab: an entry on page 2 unlocked before a restart is unlocked
   after it).
 - with an older Kiln (0.2.0-dev.28 and before: 64 at most): the build refuses the roster at the start, so none of the
-  mods' native quests and NPCs are built; their NPCs and their knowledge stay in the save as data that world cannot use,
-  as for any mod NPC without its mod.
-- without Kiln, or without the mods: the game has only its own 35 entries; the same as for any mod NPC at any roster
-  size. Not run in a game: what the vanilla game does with the unknown knowledge ids and templates in such a save.
+  mods' native quests and NPCs are built, and their knowledge objects are unknown to that world: the game drops them
+  as it loads the save, so the mods' unlock states and quest progress are gone once that world is saved again (lab: a
+  mod's unlock granted before a boot whose build was refused was not there in the boot after it). Do not open such a
+  world with an older Kiln.
+- without Kiln, or without the mods: the game has only its own 35 entries, as for any mod NPC at any roster size; the
+  mods' knowledge is dropped the same way (the game's load keeps only ids it knows). Not run without Kiln: what the
+  vanilla game does with the mods' NPC entities in such a save.
 
 A player joining with a client that cannot install the second page (its `npcs.expanded_roster` unavailable) builds
 none of the mods' native quests and NPCs, so the mods' requirement of their clients (`clients: "mod"`) and the

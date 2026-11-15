@@ -69,7 +69,16 @@ Snapshots g_snaps;
 Owners g_owners;              // written once by the boot build (before any world), read on world threads
 std::atomic<bool> g_wanted{false};
 
-std::atomic<uint64_t> c_paged{0}, c_attached{0}, c_unpaired{0}, c_answered{0}, c_closed{0}, c_faults{0};
+std::atomic<uint64_t> c_paged{0}, c_attached{0}, c_unpaired{0}, c_answered{0}, c_closed{0}, c_faults{0}, c_off_tick{0};
+std::atomic<bool> g_said_eval_off{false}, g_said_query_off{false};
+
+// Once per process: where the hooks ran (a dedicated server runs the roster programs on workers once a player is in;
+// a lab proves it with kiln.world's parallel switch). The log is the lab's evidence.
+void note_thread(std::atomic<bool>& said, const char* what) {
+    if (g_api->on_tick_thread()) return;
+    c_off_tick.fetch_add(1, std::memory_order_relaxed);
+    if (!said.exchange(true)) KI("roster: %s on thread %lu, not the server world's tick thread", what, GetCurrentThreadId());
+}
 
 bool cst_value(const char* name, int64_t* out) { return g_api->constant(kstr(name), out) == KILN_OK; }
 bool sym_value(const char* name, uintptr_t* out) { return g_api->symbol(kstr(name), out) == KILN_OK && *out; }
@@ -115,6 +124,7 @@ Result16* hk_eval(Result16* out, void* ctx, uint16_t* seen, const Span* span) {
     const PageOutcome o = eval_pages(out, ctx, seen, s, static_cast<uint64_t>(R.stride), static_cast<uint8_t>(R.eval_error),
                                      [original](Result16* r, void* c, uint16_t* v, const Span* sp) { original(r, c, v, sp); });
     c_paged.fetch_add(1, std::memory_order_relaxed);
+    note_thread(g_said_eval_off, "a paged evaluation ran");
     if (o.complete) {
         Pending p;
         p.span_ptr = s.ptr;
@@ -155,6 +165,7 @@ uint8_t* hk_query(uint8_t* out, uintptr_t reg, uint32_t id) {
         status = 0;
         value = b == Sidecars::Bit::Unlocked;
         c_answered.fetch_add(1, std::memory_order_relaxed);
+        note_thread(g_said_query_off, "an id past 63 was answered from its page");
     } else {
         c_closed.fetch_add(1, std::memory_order_relaxed);
     }
@@ -390,9 +401,11 @@ void roster_world_event(const KilnWorldEvent* e) {
     g_sidecars.drop_world(e->kind);
     if (g_limit.expanded() || g_wanted.load())
         KI("roster: the %s world stopped: its snapshots and second pages are gone (paged %llu, attached %llu, unpaired %llu, answered "
-           "%llu, failed closed %llu)", e->kind == KILN_WORLD_SERVER ? "server" : "client", static_cast<unsigned long long>(c_paged.load()),
-           static_cast<unsigned long long>(c_attached.load()), static_cast<unsigned long long>(c_unpaired.load()),
-           static_cast<unsigned long long>(c_answered.load()), static_cast<unsigned long long>(c_closed.load()));
+           "%llu, failed closed %llu, off the tick thread %llu, lock busy %llu)", e->kind == KILN_WORLD_SERVER ? "server" : "client",
+           static_cast<unsigned long long>(c_paged.load()), static_cast<unsigned long long>(c_attached.load()),
+           static_cast<unsigned long long>(c_unpaired.load()), static_cast<unsigned long long>(c_answered.load()),
+           static_cast<unsigned long long>(c_closed.load()), static_cast<unsigned long long>(c_off_tick.load()),
+           static_cast<unsigned long long>(g_sidecars.busy()));
 }
 
 bool npc_unlock_pages(uintptr_t registry, uint64_t pages[2], uint32_t* npages, uint16_t* version, uint32_t* count) {
