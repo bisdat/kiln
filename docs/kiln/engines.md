@@ -147,6 +147,7 @@ native, builtin: `WINEDLLOVERRIDES="dinput8=n,b"`, or `dinput8` as "native, buil
 Kiln chains Ultimate ASI Loader as `xinput9_1_0.dll` in the game folder ([Installer](#installer)). Kiln loads it by
 its full path, but Wine still applies its rules for the name `xinput9_1_0`. Set it to native, builtin as well:
 `WINEDLLOVERRIDES="dinput8,xinput9_1_0=n,b"` (Steam: `WINEDLLOVERRIDES="dinput8,xinput9_1_0=n,b" %command%`).
+The launcher names both overrides when Ultimate ASI Loader is chained and reports a missing override.
 - Tested (2026-11-14, dedicated server lab under GE-Proton11-11, Kiln 0.2.0-dev.28's proxy, a test DLL of ours named
   `xinput9_1_0.dll`, not Ultimate ASI Loader itself): without the override, a DLL without version information did not
   run. Wine loaded its own `xinput9_1_0` instead, and `proxy.log` still said `loaded at ...`, so the log does not

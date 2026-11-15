@@ -486,7 +486,7 @@ pub enum Level {
 #[serde(rename_all = "camelCase")]
 pub struct Finding {
     /// Stable name: `not-installed`, `proxy-not-kiln`, `files-missing`, `files-changed`, `not-loaded`,
-    /// `proton-override`, `unknown-build`, `safe-idle`, `own-loader`, `loader-in-folder`, `unlisted-mods`,
+    /// `proton-override`, `proton-chained-override`, `unknown-build`, `safe-idle`, `own-loader`, `loader-in-folder`, `unlisted-mods`,
     /// `mod-failed`, `hosted-mods`, `hosted-off`, `crash`, `profile-invalid`, `newer-mods`, `no-game`, `sf-startup-failed`.
     pub id: String,
     pub level: Level,
@@ -985,8 +985,12 @@ pub fn build(input: &ReportInput) -> Report {
             facts.proton = tool.or(version);
         }
         if let Some(lo) = crate::game::launch_options_info(i, &roots) {
-            let _ = writeln!(g, "Launch opts:   {} (dinput8 override: {})", lo.value.as_deref().unwrap_or("(none)"), if lo.has_dll_override { "yes" } else { "no" });
+            let _ = writeln!(g, "Launch opts:   {} (dinput8 override: {}; chained xinput9_1_0 override missing: {})", lo.value.as_deref().unwrap_or("(none)"), if lo.has_dll_override { "yes" } else { "no" }, if lo.chained_override_missing { "yes" } else { "no" });
             facts.override_missing = !lo.has_dll_override;
+            if lo.chained_override_missing {
+                cx.find("proton-chained-override", Level::Warning, format!("Ultimate ASI Loader is chained as xinput9_1_0.dll and neither Steam's launch options nor the prefix registry sets xinput9_1_0 to native first: under Valve's Proton, Wine loads its own xinput9_1_0 instead and the loader with its .asi plugins does not start (GE-Proton loads it without). Set: {}", lo.advice.as_deref().unwrap_or(crate::game::CHAINED_DLL_OVERRIDE_ADVICE)));
+            }
+            facts.override_advice = lo.advice;
         }
         let running = crate::proc::find_game(i).ok().flatten();
         facts.running = running.is_some();
@@ -1449,6 +1453,7 @@ struct Facts {
     kiln: Option<String>,
     proton: Option<String>,
     override_missing: bool,
+    override_advice: Option<String>,
     running: bool,
     profile: Option<String>,
     profile_broken: bool,
@@ -1670,7 +1675,7 @@ fn check_not_loaded(cx: &mut Ctx, install: Option<&GameInstall>, dirs: Option<&D
     }
     let proton = i.platform == Platform::Proton;
     let why = if proton && facts.override_missing {
-        format!(" Under Proton the game loads Kiln's dinput8.dll only with this in Steam's launch options for Enshrouded: {}", crate::game::DLL_OVERRIDE_ADVICE)
+        format!(" Under Proton the game loads Kiln's dinput8.dll only with this in Steam's launch options for Enshrouded: {}", facts.override_advice.as_deref().unwrap_or(crate::game::DLL_OVERRIDE_ADVICE))
     } else if proton {
         " Check Steam's launch options for Enshrouded (WINEDLLOVERRIDES) and the Proton version.".to_string()
     } else {
@@ -1701,7 +1706,7 @@ fn check_not_loaded(cx: &mut Ctx, install: Option<&GameInstall>, dirs: Option<&D
         said = true;
     }
     if !said && proton && facts.override_missing {
-        cx.find("proton-override", Level::Warning, format!("Steam's launch options for Enshrouded have no dinput8 override: under Proton Kiln may not load. Set: {}", crate::game::DLL_OVERRIDE_ADVICE));
+        cx.find("proton-override", Level::Warning, format!("Steam's launch options for Enshrouded have no dinput8 override: under Proton Kiln may not load. Set: {}", facts.override_advice.as_deref().unwrap_or(crate::game::DLL_OVERRIDE_ADVICE)));
     }
 }
 
