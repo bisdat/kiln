@@ -73,12 +73,15 @@ public static class GenNatives
     internal static int HurtCalls, HurtBefore = -1;
     internal static bool HurtRead, HurtWrite1, HurtWrite2, UndeclaredRead = true;
     internal static EntityId HurtRoot;
-    internal static int HurtThread;
+    internal static int HurtThread, PostThread;
+    internal static readonly System.Collections.Concurrent.ConcurrentBag<int> BridgeThreads = new();
     [ImpactNative("Hurt")]
     public static bool Hurt(in NativeContext ctx, EntityId target)
     {
         HurtCalls++;
         HurtThread = Environment.CurrentManagedThreadId;
+        BridgeThreads.Add(HurtThread);
+        ctx.Post(() => PostThread = Environment.CurrentManagedThreadId);  // runs on the mod's tick, later
         HurtRoot = ctx.Root;
         UndeclaredRead = ctx.TryRead<Ecs.ScaleComponent>(target, out _);
         HurtRead = ctx.TryRead<Ecs.Health>(target, out var h);
@@ -90,6 +93,43 @@ public static class GenNatives
         HurtWrite2 = ctx.TryWrite(target, in h);
         return true;
     }
+
+    // Review round 3: an attribute's TryWrite keeps the eight-byte header and runs the game's formulas: Health's current
+    // set past its maximum ([7]) comes back clamped to it
+    internal static byte[] HeaderBefore = [], HeaderAfter = [];
+    internal static int OverMax = -1, OverRead = -1;
+    [ImpactNative("Overheal")]
+    public static bool Overheal(in NativeContext ctx, EntityId target)
+    {
+        BridgeThreads.Add(Environment.CurrentManagedThreadId);
+        if (!ctx.TryRead<Ecs.Health>(target, out var h)) return false;
+        HeaderBefore = System.Runtime.InteropServices.MemoryMarshal.AsBytes(new ReadOnlySpan<Ecs.Health>(in h))[..8].ToArray();
+        OverMax = h.Values[7];
+        h.Values[0] = OverMax + 100;
+        if (!ctx.TryWrite(target, in h) || !ctx.TryRead<Ecs.Health>(target, out var a)) return false;
+        HeaderAfter = System.Runtime.InteropServices.MemoryMarshal.AsBytes(new ReadOnlySpan<Ecs.Health>(in a))[..8].ToArray();
+        OverRead = a.Values[0];
+        return true;
+    }
+
+    // S7: a saved prop's CurrentTransform (a wall torch of the base; the save tracks the component) 1/16 m up through the
+    // bridge: the save keeps it across a restart. Position y is fixed point 32.32 at bytes 8..16.
+    internal static long NudgeAfter = long.MinValue;
+    [ImpactNative("Nudge")]
+    public static bool Nudge(in NativeContext ctx, EntityId target)
+    {
+        BridgeThreads.Add(Environment.CurrentManagedThreadId);
+        if (!ctx.TryRead<Ecs.CurrentTransform>(target, out var c)) return false;
+        var bytes = System.Runtime.InteropServices.MemoryMarshal.AsBytes(new Span<Ecs.CurrentTransform>(ref c));
+        System.Buffers.Binary.BinaryPrimitives.WriteInt64LittleEndian(bytes[8..], System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(bytes[8..]) + (1L << 28));
+        if (!ctx.TryWrite(target, in c) || !ctx.TryRead<Ecs.CurrentTransform>(target, out var a)) return false;
+        NudgeAfter = YOf(a);
+        return true;
+    }
+
+    internal static long YOf(in Ecs.CurrentTransform t) =>
+        System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(System.Runtime.InteropServices.MemoryMarshal.AsBytes(
+            new ReadOnlySpan<Ecs.CurrentTransform>(in t))[8..]);
 
     [ImpactNative("Check")]
     public static bool Check(int s, float f, bool b, TimeSpan t, EntityId e, Vector3 v)
@@ -143,8 +183,11 @@ public sealed class NativesGenTestMod : Mod
 
     private async Task Steps(int n) { for (var i = 0; i < n; i++) await Context.Scheduler.NextTick(); }
 
+    private int _tickThread;
+
     private async Task Run()
     {
+        _tickThread = Environment.CurrentManagedThreadId;
         try
         {
             Check(!_registeredAtOnLoad && _onLoadRefusal?.Contains("E_ARGTYPE") == true,
@@ -304,10 +347,10 @@ public sealed class NativesGenTestMod : Mod
             var parts = File.ReadAllText(restartFile).Split(' ');
             var at = new WorldPosition(double.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture),
                 double.Parse(parts[2], System.Globalization.CultureInfo.InvariantCulture), double.Parse(parts[3], System.Globalization.CultureInfo.InvariantCulture));
-            var want = int.Parse(parts[4]);
+            var want = long.Parse(parts[4]);
             var again = Spawn.FindByName(parts[0], at, 1.0, max: 4).FirstOrDefault(x => Spawn.Inspect(x)?.TemplateName == parts[0]);
-            var got = again.IsNone ? -1 : HealthOf(again);
-            Check(got == want, $"after a restart, the Health a native wrote through impact_simulation is in the save: {parts[0]} at {at} " +
+            var got = again.IsNone ? long.MinValue : TorchY(again);
+            Check(got == want, $"after a restart, the CurrentTransform a native wrote through impact_simulation is in the save: {parts[0]} at {at} y " +
                 $"{(again.IsNone ? "not found" : got.ToString())} (written {want})");
             File.Delete(restartFile);
         }
@@ -319,8 +362,10 @@ public sealed class NativesGenTestMod : Mod
         Abilities.Programs.Register(Program(hurtGuid, [11, hT, 19, 0x06c0a571, Natives.Hurt.HashFor(Context.Info.Id), 27, 30],
             [("Target::value", EntityIdType, 4, BitConverter.GetBytes(vukah.Value))]));
         _written.Clear();
+        _started.Clear();
         var calls0 = GenNatives.HurtCalls;
-        var e = await Abilities.RunProgram(hurtGuid, p with { X = p.X + 3 });
+        // the instance's hierarchy root is the Vukah (ImpactOptions.Root): NativeContext.Root must say the same as ImpactRef.Root
+        var e = await Abilities.RunProgram(hurtGuid, p with { X = p.X + 3 }, new ImpactOptions { Root = vukah });
         _spawned.Add(e);
         await Steps(8);
         var after = HealthOf(vukah);
@@ -333,33 +378,55 @@ public sealed class NativesGenTestMod : Mod
               BitConverter.ToInt32(mine[0].Result.Before.Span[8..]) == start && BitConverter.ToInt32(mine[0].Result.After.Span[8..]) == start - 7,
             $"one ComponentWrittenEvent per entity and component per step, on the tick thread: {mine.Count} event(s), writer " +
             $"{mine.FirstOrDefault()?.Writer}, before {start}, after {start - 7}");
-        Info($"Root of the Hurt instance: {GenNatives.HurtRoot} (a program run by Abilities.RunProgram: its own entity or none)");
-        // a saved entity of the base with Health (the altar, a townsperson): written through a native for the next run
-        foreach (var name in new[] { "FlameAltar", "Townsfolk", "NPC_" })
+        await Steps(2);
+        Check(GenNatives.PostThread == _tickThread, $"NativeContext.Post runs on the owning mod's tick: thread {GenNatives.PostThread} (tick {_tickThread})");
+        // an attribute's header stays, and the formulas clamp what the native wrote past the maximum
+        var overGuid = new Guid("06c0a5e0-0000-4000-8000-000000000009");
+        Abilities.Programs.Register(Program(overGuid, [11, hT, 19, 0x06c0a591, Natives.Overheal.HashFor(Context.Info.Id), 27, 30],
+            [("Target::value", EntityIdType, 4, BitConverter.GetBytes(vukah.Value))]));
+        _spawned.Add(await Abilities.RunProgram(overGuid, p with { X = p.X + 5 }));
+        await Steps(6);
+        Check(GenNatives.HeaderBefore.Length == 8 && GenNatives.HeaderBefore.AsSpan().SequenceEqual(GenNatives.HeaderAfter) &&
+              GenNatives.OverMax > 0 && GenNatives.OverRead == GenNatives.OverMax && HealthOf(vukah) == GenNatives.OverMax,
+            $"TryWrite of an attribute keeps its header ({Convert.ToHexString(GenNatives.HeaderBefore)} -> {Convert.ToHexString(GenNatives.HeaderAfter)}) " +
+            $"and the game's formulas run: Health set to {GenNatives.OverMax + 100} reads {GenNatives.OverRead} (maximum {GenNatives.OverMax})");
+        var st = _started.FirstOrDefault(s => s.Impact.Self == e);
+        Check(st is not null && GenNatives.HurtRoot == vukah && st.Impact.Root == vukah,
+            $"NativeContext.Root is the instance's hierarchy root, as ImpactRef.Root reads it: {GenNatives.HurtRoot} / {st?.Impact.Root} (root {vukah})");
+
+        // a saved prop of the base (a wall torch: CurrentTransform is in impact_simulation's other_write list and the save
+        // tracks it): written through a native for the next run, which reads it after the restart
+        var torch = Spawn.FindByName("Prop_Torch01_Wall_On_Craftable", max: 1).FirstOrDefault();
+        if (!torch.IsNone && Spawn.Inspect(torch) is { TemplateName: { } template } info)
         {
-            var saved = Spawn.FindByName(name, max: 8).FirstOrDefault(x => HealthOf(x) > 7);
-            if (saved.IsNone || Spawn.Inspect(saved) is not { TemplateName: { } template } info) continue;
-            var before = HealthOf(saved);
+            var before = TorchY(torch);
             var prog = new Guid("06c0a5e0-0000-4000-8000-000000000008");
-            Abilities.Programs.Register(Program(prog, [11, hT, 19, 0x06c0a581, Natives.Hurt.HashFor(Context.Info.Id), 27, 30],
-                [("Target::value", EntityIdType, 4, BitConverter.GetBytes(saved.Value))]));
+            Abilities.Programs.Register(Program(prog, [11, hT, 19, 0x06c0a581, Natives.Nudge.HashFor(Context.Info.Id), 27, 30],
+                [("Target::value", EntityIdType, 4, BitConverter.GetBytes(torch.Value))]));
             _spawned.Add(await Abilities.RunProgram(prog, p with { Z = p.Z + 4 }));
             await Steps(8);
-            var now = HealthOf(saved);
-            Info($"a saved {template} ({saved}) at {info.Position}: Health {before} -> {now} through the native; the next run reads it after the restart");
-            if (now == before - 7)
+            var now = TorchY(torch);
+            Check(before != long.MinValue && now == before + (1L << 28) && GenNatives.NudgeAfter == now,
+                $"a native writes a saved prop's CurrentTransform through impact_simulation (save-tracked: {World.WriteInfo<Ecs.CurrentTransform>().SaveTracked}): " +
+                $"{template} ({torch}) y {before / 4294967296.0:F4} -> {now / 4294967296.0:F4} m");
+            if (now == before + (1L << 28))
             {
                 Directory.CreateDirectory(Context.DataDirectory);
                 var inv = System.Globalization.CultureInfo.InvariantCulture;
                 File.WriteAllText(restartFile, $"{template} {info.Position.X.ToString(inv)} {info.Position.Y.ToString(inv)} {info.Position.Z.ToString(inv)} {now}");
             }
-            break;
         }
+        else Fail("no saved wall torch (Prop_Torch01_Wall_On_Craftable) in this world for the restart row");
+        var threads = GenNatives.BridgeThreads.Distinct().ToList();
+        Check(threads.Count > 0 && threads.All(t => t == _tickThread) && Capabilities.Get("abilities.natives.ecs").State == CapabilityState.Available,
+            $"with the world's pin set (the game's default) every bridged call ran on the world's thread: {GenNatives.BridgeThreads.Count} call(s) on thread(s) " +
+            $"{string.Join(",", threads)} (the world's: {_tickThread}); abilities.natives.ecs {Capabilities.Get("abilities.natives.ecs").State}");
     }
 
     private void Info(string what) => Log.Info($"natives-gen-test: INFO {what}");
 
     private static int HealthOf(EntityId e) => World.TryRead<Ecs.Health>(e, "Health", out var h) ? h.Values[0] : -1;
+    private static long TorchY(EntityId e) => World.TryRead<Ecs.CurrentTransform>(e, "CurrentTransform", out var c) ? GenNatives.YOf(c) : long.MinValue;
 
     private bool LogHas(string text)
     {

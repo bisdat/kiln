@@ -127,6 +127,11 @@ foreach(dir ${KILN_PLUGIN_DIRS})
     endif()
 endforeach()
 
+# Compile-only: kiln_world.h and kiln_abilities.h in one translation unit, both orders (core/tests/test-abi-headers.sh).
+add_library(kiln-abi-headers OBJECT core/tests/abi_headers/world_first.c core/tests/abi_headers/abilities_first.c
+            core/tests/abi_headers/both.cpp)
+target_include_directories(kiln-abi-headers PRIVATE core/abi)
+
 add_library(kiln-native-hello SHARED samples/native-hello/plugin.cpp)
 target_include_directories(kiln-native-hello PRIVATE core/abi)
 

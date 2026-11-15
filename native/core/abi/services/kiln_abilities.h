@@ -149,8 +149,11 @@ enum {
     KILN_NATIVE_KIND_SYNC = 4,    /* since 0.2.0-dev.29: registered through native_register_sync (answers inside the call) */
 };
 
-/* A program in the ImpactRegistry (program_info). */
-typedef struct KilnProgramInfo {
+/* A program in the ImpactRegistry (program_info). Named KilnImpactProgramInfo since 0.2.0-dev.29: kiln_world.h had a
+ * struct of the same name (a Kiln ECS program, KilnWorldProgramInfo), so no plugin could include both headers. The old
+ * name stays as an alias of the struct of the header included first (KILN_PROGRAM_INFO_ALIAS): write the new names in
+ * code that includes both. Layout unchanged. */
+typedef struct KilnImpactProgramInfo {
     uint32_t size;        /* set by the caller */
     uint32_t id;
     uint8_t guid[16];     /* game byte order */
@@ -158,7 +161,11 @@ typedef struct KilnProgramInfo {
     uint16_t stack_size;
     uint8_t streams;      /* usedStreams bits: OnCollision 1, OnHit 2, OnParry 4, EntityInRange 8 */
     uint8_t kiln;         /* 1 = inserted by Kiln */
-} KilnProgramInfo;
+} KilnImpactProgramInfo;
+#ifndef KILN_PROGRAM_INFO_ALIAS
+#define KILN_PROGRAM_INFO_ALIAS 2 /* 1: KilnProgramInfo is kiln_world.h's, 2: kiln_abilities.h's */
+typedef KilnImpactProgramInfo KilnProgramInfo;
+#endif
 
 /* A managed native call or a sync wrapper call (job thread): the native context, typed access through the
  * instance's variables. `out_error`/`out_value` are what the native returns to the interpreter. */
@@ -254,6 +261,11 @@ enum {
     KILN_NATIVE_ECS_REASON_LAYOUT = 2,       /* kiln.world could not compute impact_simulation's view (kiln.log) */
     KILN_NATIVE_ECS_REASON_COUNTS = 3,       /* the job's group counts are not the view's */
     KILN_NATIVE_ECS_REASON_REGISTRY = 4,     /* the iterator's impact::ImpactSystem qword is not the captured registry */
+    KILN_NATIVE_ECS_REASON_FAULT = 5,        /* foreign access faulted or its live view guard failed */
+    KILN_NATIVE_ECS_REASON_NOT_SERIAL = 6,   /* impact_simulation does not run serially on the world's thread in this world:
+                                                the world's pin of CHUNKED programs to it is clear, or a call came on another
+                                                thread (two slices could touch one entity at once) */
+    KILN_NATIVE_ECS_REASON_PIN_UNKNOWN = 7,  /* the pin cannot be read on this build (sigdb abilities.ecs_pin unresolved) */
 };
 
 /* since 0.2.0-dev.29 (native_counters). Reads every field the caller's size covers. */
@@ -308,7 +320,7 @@ typedef struct KilnAbilitiesApi {
 
     /* ---- programs ---- */
     uint32_t(KILN_CALL* program_count)(void); /* tick */
-    KilnResult(KILN_CALL* program_info)(uint32_t program_id, KilnProgramInfo* out);              /* tick */
+    KilnResult(KILN_CALL* program_info)(uint32_t program_id, KilnImpactProgramInfo* out);        /* tick */
     KilnResult(KILN_CALL* program_vars)(uint32_t program_id, KilnImpactVar* out, uint32_t cap, uint32_t* count); /* tick */
     /* tick. Verifies and inserts a keen::ImpactProgram blob (copied). *out_id = its id. INVALID_ARGUMENT: the
      * verifier refused it (error says why, NUL-terminated) or the GUID is already in the registry; UNAVAILABLE: the

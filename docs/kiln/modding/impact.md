@@ -274,7 +274,8 @@ kiln.abilities states the same contract from the runtime side in docs/kiln/servi
   (`mods/tests/natives-gen-test`, a mod built this way): `PASS before its natives registered, a program passing
   float32 to Twice's int parameter is refused from the build's impact/natives.json`, `PASS the cooked program calling
   the generated Twice answers in its start step`, `PASS a loop over 5 targets with a generated native finishes in 1
-  step`, `PASS types sint32/float32/bool/Time/EntityId/float3 round trip through generated natives`.
+  step`, `PASS types sint32/float32/bool/Time/EntityId/float3 round trip through generated natives`. A whole mod built
+  this way: `mods/samples/FrostMark` (a sword's hit effect runs its native first, `EffectBlock.Run` in docs/kiln/modding/blocks.md).
 - **Built-ins** (mod id `kiln`; neither suspends; both push 1):
   - `kiln.Log(value)` (`0xc0b137a7`): writes a kiln.log line with the program, instance, entity, site and the value
     (typed by its variable, or a raw integer).
@@ -444,6 +445,9 @@ again:  pop
 ## Testing
 - **Offline:** `impact.py lint`, `impact.py cook`, and `python3 -m unittest discover -s tools/impact/tests` (synthetic
   only).
+- **Your natives in a unit test** (since 0.2.0-dev.29): Kiln.TestKit's fake kiln.abilities runs a mod's `[ImpactNative]`
+  methods, `RegisterSync` natives and attachments, and the test makes the ECALLs (`kiln.ImpactNatives.Call`):
+  docs/kiln/modding/unit-tests.md#impact-natives. `ImpactNativesFakeTests` runs FrostMark that way.
 - **Local check against the installed game:** `impact.py roundtrip`. Every vanilla program must round-trip, and
   listings go to `$KILN_OUT/dis/` (do not commit them).
 - **Lab, no player needed:** `tools/impact/lab/run.sh <lab>` cooks a boot-time override of the Fireball explosion

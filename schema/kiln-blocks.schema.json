@@ -483,7 +483,8 @@
         "chance": { "type": "number", "minimum": 0, "maximum": 1, "description": "The whole effect happens this often." },
         "area": { "$ref": "#/$defs/area" },
         "then": { "$ref": "#/$defs/effects", "description": "More effects, on the same target." },
-        "casts": { "$ref": "#/$defs/ref", "description": "An ability the target casts, as from code: its costs and cooldown apply. With on: caster, whoever wields, wears or cast." }
+        "casts": { "$ref": "#/$defs/ref", "description": "An ability the target casts, as from code: its costs and cooldown apply. With on: caster, whoever wields, wears or cast." },
+        "run": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*\\.[A-Za-z0-9_]+$", "description": "A mod's [ImpactNative] method, \"<modid>.<Name>\", called first when the effect happens, with its parameters bound by name (self, target, attacker, caster, position, attackMod, damage); when it returns false the rest of the effect, then included, does not happen. Its parameters come from that mod's impact/natives.json (kiln lint KL340)." }
       },
       "additionalProperties": false
     },

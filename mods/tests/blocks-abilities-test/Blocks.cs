@@ -21,6 +21,9 @@ public sealed partial class BlocksAbilitiesTestMod
         Blocks.Define("perk-chance", new PerkBlock { Name = "Chance", OnHit = [new EffectBlock { Chance = 0.3, Damage = Damage.Ice(1) }] });
         Blocks.Define("perk-quiet", new PerkBlock { Name = "Quiet", OnKill = [new EffectBlock { Heal = 1 }, new EffectBlock { Heal = 2 }] });
         Blocks.Define("perk-icon", new PerkBlock { Name = "Icon", Icon = "Perk_Damage_Ice", OnKill = [new EffectBlock { Heal = 1 }] });
+        // 06c S6: a perk whose hit effect runs a native first: it sees the hit's attackMod and changes it before the effect's damage
+        var runHit = Blocks.Define("perk-run", new PerkBlock { Name = "Frost Run", OnHit = [new EffectBlock { Run = Natives.Frost, Damage = Damage.Ice(13), Flinch = Flinch.None }] });
+        Blocks.Define("run-sword", new WeaponBlock { Name = "Run Sword", Class = WeaponClass.Sword, Stats = new WeaponStats { Level = 5, Power = 20, Rarity = Rarity.Uncommon }, Perks = [runHit] });
         Blocks.Define("perk-sword", new WeaponBlock { Name = "Perk Sword", Class = WeaponClass.Sword, Stats = new WeaponStats { Level = 5, Power = 20, Rarity = Rarity.Uncommon }, Perks = [hit, might] });
 
         // ---- spells with what is new

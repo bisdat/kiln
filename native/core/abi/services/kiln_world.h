@@ -124,7 +124,7 @@ enum {
     KILN_SLOT_EVENT_OUT = 8,   /* iter[slot] = event sender */
 };
 
-/* KilnProgramInfo.state */
+/* KilnWorldProgramInfo.state */
 enum {
     KILN_PROGRAM_PENDING = 0,  /* accepted; waits for the server world's program registration */
     KILN_PROGRAM_ACTIVE = 1,   /* registered into the server world (runs once the world ticks) */
@@ -133,14 +133,22 @@ enum {
     KILN_PROGRAM_SKIPPED = 4,  /* registered, but the engine skips it (a required singleton is missing) */
 };
 
-typedef struct KilnProgramInfo {
-    uint32_t size;        /* set to sizeof(KilnProgramInfo) before calling */
+/* A Kiln ECS program's state (program_info). Named KilnWorldProgramInfo since 0.2.0-dev.29: kiln_abilities.h had a
+ * struct of the same name (an Impact program, KilnImpactProgramInfo), so no plugin could include both headers. The old
+ * name stays as an alias of the struct of the header included first (KILN_PROGRAM_INFO_ALIAS): write the new names
+ * in code that includes both. Layout unchanged. */
+typedef struct KilnWorldProgramInfo {
+    uint32_t size;        /* set to sizeof(KilnWorldProgramInfo) before calling */
     uint32_t state;       /* KILN_PROGRAM_* state */
     uint32_t engine_id;   /* the program's id in the world (1-based; 0 before registration) */
     uint32_t iter_size;   /* bytes of the iterator (kiln.world passes one at least this big to `each`) */
     uint64_t updates;     /* update calls so far (slices; one per step for SYSTEM programs) */
     uint64_t entities;    /* entities iterated so far (each-mode only) */
-} KilnProgramInfo;
+} KilnWorldProgramInfo;
+#ifndef KILN_PROGRAM_INFO_ALIAS
+#define KILN_PROGRAM_INFO_ALIAS 1 /* 1: KilnProgramInfo is kiln_world.h's, 2: kiln_abilities.h's */
+typedef KilnWorldProgramInfo KilnProgramInfo;
+#endif
 
 /* ======================================================================================= entities ============== */
 
@@ -562,7 +570,7 @@ typedef struct KilnWorldApi {
     /* Qword index into the iterator of `name` in list `kind` (KILN_SLOT_*), or -1 when it is not declared there. The
      * layout is computed from the descriptor at registration and is the same for every update. Any thread. */
     int32_t(KILN_CALL* program_slot)(KilnHandle program, int32_t kind, KilnStr name);
-    KilnResult(KILN_CALL* program_info)(KilnHandle program, KilnProgramInfo* out);
+    KilnResult(KILN_CALL* program_info)(KilnHandle program, KilnWorldProgramInfo* out);
 
     /* ---- inside a program update (ctx = the argument your update got) ---- */
     /* Raw mode only: fills `iter` (size bytes; see program_info.iter_size). KILN_ERR_BUFFER_TOO_SMALL if size is less. */
@@ -804,7 +812,7 @@ typedef struct KilnWorldApi {
     /* ---- foreign views: since 0.2.0-dev.29 (chapter 06c 9.1), still v4: check header.size ----
      * Code that runs inside one of the game's programs and holds that program's iterator reads and writes other
      * entities through the program's own other_read / other_write accessors, with its job's storage, tracker and
-     * write flag (the tracked-write path): explicit arguments, no thread-local state, any thread inside the update.
+     * write flag (the tracked-write path): any thread inside the update; attribute formulas follow that thread's last write.
      * The view of program `name` in the live world of `world_kind` (the wraps' view algorithm, from its descriptor):
      * *out (out->size set) gets the session, the index, the counts, the iterator size and the handle the calls below
      * take. KILN_ERR_NOT_FOUND: no such program or no directory now; KILN_ERR_UNAVAILABLE: the layout cannot be
@@ -812,7 +820,7 @@ typedef struct KilnWorldApi {
     KilnResult(KILN_CALL* foreign_layout)(uint32_t world_kind, KilnStr name, KilnForeignLayout* out);
     /* The iterator qword of name `name` of list `list` (KILN_GAME_LIST_*) in the view, or -1. Any thread. */
     int32_t(KILN_CALL* foreign_slot)(const KilnForeignLayout* layout, int32_t list, KilnStr name);
-    /* Inside the program's update, `iter` its iterator: KILN_OK when the job's group counts are the view's;
+    /* Inside the program's update, `iter` its iterator: KILN_OK when the job's group counts and storage registry are the view's;
      * KILN_ERR_UNAVAILABLE when they differ, the session ended or the job cannot be read (the view's slots must then not
      * be used on that iterator). out_counts (optional, 8) gets the job's counts. */
     KilnResult(KILN_CALL* foreign_check)(const KilnForeignLayout* layout, const uint64_t* iter, uint32_t* out_counts);
@@ -827,7 +835,7 @@ typedef struct KilnWorldApi {
      * other_write; KILN_ERR_UNAVAILABLE also when the tracked write is not known on this build. */
     void*(KILN_CALL* foreign_write)(const KilnForeignLayout* layout, const uint64_t* iter, KilnStr component, uint32_t entity,
                                     uint32_t* size, KilnResult* rc);
-    /* After writing an attribute component through foreign_write: the game's formulas (AttrChanged) with the program's
+    /* Immediately after foreign_write on the same thread, for its returned pointer and a reflected attribute type: the game's formulas (AttrChanged) with the program's
      * impact::AttributeRegistry singleton. KILN_ERR_INVALID_ARGUMENT: the block holds no values (component[6] bit 0),
      * or the program does not declare the registry; KILN_ERR_UNAVAILABLE: not on this build; KILN_ERR_INTERNAL: they
      * faulted. */

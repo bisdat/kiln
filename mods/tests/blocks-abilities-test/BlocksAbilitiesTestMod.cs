@@ -206,6 +206,7 @@ public sealed partial class BlocksAbilitiesTestMod : Mod
             Ids();
             RowsBySync();
             await Perks();
+            await RunPerk();
             await AbilityCosts();
             await Deliveries();
             await Flights();

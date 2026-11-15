@@ -14,7 +14,7 @@ namespace NativesHelper;
 public sealed class NativesHelperMod : Mod
 {
     private static int _calls;
-    private int _held, _probes, _probesOff, _tick;
+    private int _held, _probes, _probesOff, _probeReads, _tick;
     private readonly string _nonce = Guid.NewGuid().ToString("N")[..8];
 
     private string Data(string name) => Path.Combine(Context.DataDirectory, name);
@@ -50,7 +50,10 @@ public sealed class NativesHelperMod : Mod
         {
             var calls = Interlocked.Increment(ref _probes);
             var off = Environment.CurrentManagedThreadId != _tick ? Interlocked.Increment(ref _probesOff) : Volatile.Read(ref _probesOff);
-            File.WriteAllText(Data("probe"), $"{calls} {off}");
+            // the ECS bridge from this call (its own Faction, impact_simulation's other_read): refused off the world's thread
+            var read = ImpactNativeAccess.Context(ref c).TryRead<FactionByte>(c.Self, out _);
+            if (read) Interlocked.Increment(ref _probeReads);
+            File.WriteAllText(Data("probe"), $"{calls} {off} {Volatile.Read(ref _probeReads)}");
             c.SetU32(0, (uint)calls);
             return 1;
         });
@@ -97,4 +100,15 @@ public sealed class NativesHelperMod : Mod
         Log.Info($"natives-helper: unloading after {Volatile.Read(ref _calls)} call(s) (load {_nonce})");
         File.WriteAllText(Data("unloaded"), $"{_nonce} {Now}");
     }
+}
+
+/// <summary>The game's Faction component (1 byte), hand-written for the bridge rows: impact_simulation reads it for other entities.</summary>
+public struct FactionByte : IGameComponent<FactionByte>
+{
+    public byte Value;
+    public static uint Hash => 0xA1F30F21u;
+    public static string Name => "Faction";
+    public static string QualifiedName => "keen::ecs::Faction";
+    public static int Size => 1;
+    public static ulong Layout => 0x06CD96300A6FA5BFul;
 }

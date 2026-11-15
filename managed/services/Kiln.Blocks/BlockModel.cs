@@ -89,6 +89,14 @@ public sealed record EffectBlock : IBlock
 
     /// <summary>The spell's charges a cast takes besides the one the game takes.</summary>
     internal (string Item, int Count)? TakesCharges { get; init; }
+
+    /// <summary>A mod's <c>[ImpactNative]</c> method, called first, in the effect's own program, the moment the effect happens:
+    /// <c>Run = Natives.OnHit</c> (the build's <see cref="NativeRef"/>), JSON <c>"run": "&lt;modid&gt;.&lt;Name&gt;"</c>. Its parameters are bound
+    /// by name: <c>self</c> (the effect's own entity), <c>target</c>, <c>attacker</c> or <c>caster</c> (the caster), <c>position</c> (the target's,
+    /// <c>Vector3</c>), <c>attackMod</c> (<c>ref float</c>: this effect's hit, which <see cref="Damage"/> deals with it) and <c>damage</c>
+    /// (<c>ref DamageSetup</c>: the same hit's); any other name, or a required one with nothing to bind here, is a build error (lint
+    /// KL340). When it returns false the rest of this effect, <see cref="Then"/> included, does not happen. Since 0.2.0-dev.29.</summary>
+    public NativeRef? Run { get; init; }
 }
 
 /// <summary>An area: who is in it is found when it happens.</summary>

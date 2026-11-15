@@ -245,8 +245,12 @@ destroyed before the first run). Keys: a variable alias or debug name of the pro
   start of the unload, before its `OnUnload` runs, and the unload waits up to 2 ms for a call inside to leave. A call
   still inside after that holds the mod's `OnUnload` and the disposal of its resources back (kiln.log: `mod <id>: its
   unload waits: 1 call(s) still inside its native handlers (kiln.abilities)`); they run in the first Pre after the call
-  left, never forced, and a reload's new load waits with them. At shutdown the host waits 5 s for such a call, then
-  skips that mod's `OnUnload` rather than run it under the call. What the native side retires (bindings, attachment
+  left, never forced, and a reload's new load waits with them. A mod it depends on waits with it (`its dependent <id>
+  still waits`): the deferred unloads keep the order of ordinary ones, dependents first. At shutdown the host waits 5 s,
+  then skips the `OnUnload` and disposal of what still waits, dependents first, each named with what it waits for,
+  rather than run them under the call. A waiting unload is not a pause: ticks, events and scheduled work still reach
+  the mod while it waits; a shutdown that skips `OnUnload` also skips the disposal, so data a mod writes only in
+  `OnUnload` may not be written; an `UnloadStarting` step (a service's) that never returns blocks the unload. What the native side retires (bindings, attachment
   sets) also stays until the calls leave. On a server none of this waits in practice: the unload runs in Pre or Post,
   when no `impact_simulation` slice runs. From then on its hash answers 0x1F. A game-state limit is `Ok = false`
   (registry full, Kiln's native slots used up, the name taken or a vanilla native's), a bad name or argc
@@ -273,7 +277,10 @@ destroyed before the first run). Keys: a variable alias or debug name of the pro
   answered, the one Instead for that native, program and site; then, if still undecided, the game's native, once; then
   every After (lowest first; `CallOriginal()` does nothing there). The stages share one call record. Dispose the
   handle to detach (from that Pre on the handler gets no call); a mod's attachments end when it unloads. `Ok = false`:
-  program not loaded, site not found, a second Instead, no free Kiln slot. Attached before the world has loaded its
+  program not loaded, site not found, a second Instead, no free Kiln slot. The rows `abilities.natives.sync` and
+  `abilities.natives.attach` are decided before the mods' `OnLoad` (Kiln starts Kiln.Abilities right before it loads
+  them), so the pattern is the contract's: `if (Capabilities.Is("abilities.natives.attach")) Abilities.Natives.Attach(...)`
+  in `OnLoad` (mods/samples/FrostMark). Attached before the world has loaded its
   programs, the program and site are checked then (`State`: `Pending` until then); one that is not there is logged and
   stays off (`Off`). Attachments are checked again in the Pre after any program is registered (kiln.assets or
   `Programs.Register`), so one naming a mod's program that goes in later turns `Active` then (`attachment N on native
@@ -297,18 +304,37 @@ destroyed before the first run). Keys: a variable alias or debug name of the pro
   `Health`, `Mana`, `Stamina`, `Inventory`, `CurrentTransform`, ...), `TryWrite<T>(entity, in value)` for other_write;
   an attribute (`Health`, `Mana`, ...) then runs the game's formulas (read it, change its values, write it back). Any
   other type, an entity without it, or the bridge off: `false`, with no access. `Root` is the instance's
-  `ImpactHierarchy` root; `Post(action)` queues work to the tick thread as the native's mod. A change raises one
+  `ImpactHierarchy` root, the entity `ImpactOptions.Root` or the game's cast gave it (none for an instance without a
+  hierarchy, such as `Abilities.RunProgram` without a root); `Post(action)` queues work to the tick thread as the native's mod. A change raises one
   `ComponentWrittenEvent` per entity and component per step in the next Pre (first before, last after), `Writer`
   `"<modid>/native:<name>"`. The first Kiln native call of each server world checks its iterator against kiln.world's
   view of impact_simulation: kiln.log `impact_simulation's view (kiln.world, session N): ctx + tpl 1, read 6, write 1,
   singletons 21, other_tpl 4, other 93, events 2/14 (...); impact::ImpactSystem at qword 34 (+0x110)`, then the job's
-  counts and the registry at that qword; a mismatch turns the bridge off for that world (the natives still run). The
-  calls' data expires when the call returns. Lab (`mods/tests/natives-gen-test`): `PASS the self-check of the first
+  counts and the registry at that qword; a mismatch turns the bridge off for that world (the natives still run).
+  **Its condition: impact_simulation runs serially on the server world's thread.** The game pins CHUNKED programs to the
+  world's thread while a byte of the world's storage is set (copied from the world's config; it is set on every
+  observed dedicated server, host and client); kiln.abilities reads that byte through sigdb (feature
+  `abilities.ecs_pin`: the scheduler's compare at `storage + abilities/impact.pin`, 0x3d17f8 on both shipped
+  executables) at the self-check and at every access, together with the calling thread. A cleared pin (the lab's
+  `kiln/control/impact.unpin`, or a game update that unpins it) or a call off the world's thread switches the bridge off
+  for that world (`impact_simulation does not run serially on the world's thread`, said once), and a build where sigdb
+  does not resolve the pin has it off (`symbol-missing`); same-step natives go on either way. With the slices one after
+  another on one thread, no two calls touch one entity at once; two workers on one entity are not handled, and need
+  this condition. Limits that stay: a write that faults can already have changed state (the guard contains the fault, it
+  does not roll it back; the bridge is then off for the world); the write-event queue holds 65,536 and an overflow means
+  later writes raise no event (the writes stand); entity ids carry no generation (a reused id names its current
+  occupant); a hand-written projection is checked only for its size (use the generated `Ecs.*` types); an attribute's
+  eight-byte header cannot be changed (`TryWrite` answers false). The calls' data expires when the call returns. Lab (`mods/tests/natives-gen-test`): `PASS the self-check of the first
   native call`, `PASS TryWrite<Health> inside the native's call is seen by World.TryRead`, `PASS TryRead of a type
   impact_simulation does not declare for other entities returns false with no access`, `PASS one ComponentWrittenEvent
-  per entity and component per step, on the tick thread`. That the write is in the save is not shown in the lab: the
-  Vukah it writes is not saved, and the lab's save has no saved entity with Health that the row finds (the row writes one,
-  and checks it after a restart, when there is one).
+  per entity and component per step, on the tick thread`, `PASS NativeContext.Root is the instance's hierarchy root, as
+  ImpactRef.Root reads it`, `PASS NativeContext.Post runs on the owning mod's tick`, `PASS TryWrite of an attribute keeps
+  its header ... and the game's formulas run: Health set to <max + 100> reads <max>`, `PASS with the world's pin set (the
+  game's default) every bridged call ran on the world's thread`; in abilities-test with `impact.unpin`: `PASS with the
+  pin cleared, the ECS bridge is off for this world: 0 of 12 TryRead(s) answered ..., 1 kiln.log line(s) saying so`; and across a restart (a wall torch of the base, CurrentTransform 1/16 m up through a native; the
+  first start writes it, a second start of the same lab checks it) `PASS after a restart, the CurrentTransform a native wrote through impact_simulation is in the save`. What the save
+  keeps is the game's choice per component (`World.WriteInfo<T>().SaveTracked`: `CurrentTransform`, `Level`, `Fuel` yes;
+  `Health`, `Comfort` no on a dedicated server): a write of an untracked component lasts until the world reloads.
 - **Built-ins**: `kiln.Log(value)` (one kiln.log line) and `kiln.Signal(value, tag)` → `ImpactSignalEvent`
   (`Tag`, `Value`, `AsInt/AsFloat/AsEntity`, `Impact`, `Site`). Neither suspends.
 - **Programs**: ship them as kiln.assets resources (`assets/assets.json`, kind `resource`, type
@@ -482,7 +508,14 @@ It spawns Vukahs and explosions 40+ m from the copied world's flame altar and re
 retirement rows need `mods/tests/natives-helper` deployed (built like abilities-test). Lab-only
 `kiln/control/impact.unpin` (present at start, server build f0d824be only) clears the world's pin byte each Pre, so in
 the parallel path `impact_simulation` runs on the game's workers (`LAB (kiln/control/impact.unpin)` in kiln.log); on
-every observed dedicated server, host and client the byte is 1 and it runs on the world thread. With
+every observed dedicated server, host and client the byte is 1 and it runs on the world thread. The unpin rows need a
+world of their own (a lab start of their own): a cleared pin, or a call off the world's thread, switches
+`abilities.natives.ecs` off for the rest of that world (the serial condition), so the ECS bridge rows
+(`mods/tests/natives-gen-test`, `blocks-abilities-test`'s Run rows, FrostMark) run in another start, with the pin as
+the game sets it. The full player-free pass is two starts: natives-only with `systems.parallel`, `impact.unpin`,
+`impact.lockhold` and `world-stop-row` (abilities-test, natives-helper, and blocks-abilities-test loaded without its
+scenarios: the probe row's count of calls on the game's workers is the game's split of impact_simulation's slice, which
+depends on what the world holds; without it two starts put all 12 probe calls on the world thread), then the rest. With
 `kiln/data/abilities-test/world-stop-row` the last row holds a handler and writes
 `kiln/data/natives-helper/stop-request`: the shell running the lab then stops the server and reads the order of
 `Hold let go` and `the server world stops with no Kiln native call inside` in kiln.log.
@@ -571,4 +604,6 @@ events, as dev.27's buff work set them).
   dispatched waits for the next step, and an impact change that waited goes out only while the instance is the one
   written ([contract](../modding/contract.md#3-change-events)).
 - **Not done in dev.27:** `PlaySequence` keeps its `bool`.
-- Tested offline: `managed/tests/Kiln.Contract.Tests/Group8ContractTests.cs` and the conformance rules.
+- Tested offline: `managed/tests/Kiln.Contract.Tests/Group8ContractTests.cs` and the conformance rules; the natives
+  (sync natives, `[ImpactNative]`, attachments, typed declarations, the ECS bridge) on Kiln.TestKit's fake kiln.abilities
+  in `managed/tests/Kiln.TestKit.Tests/ImpactNativesFakeTests.cs` (docs/kiln/modding/unit-tests.md#impact-natives).

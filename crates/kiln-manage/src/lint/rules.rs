@@ -147,6 +147,7 @@ pub(crate) fn run(l: &mut Linter) {
         crafted_rolled(&mut out, m, cat);
         quests(&mut out, m);
         blocks(&mut out, m, &code, cat);
+        run_bindings(&mut out, m);
         skipped_refs += vfx(&mut out, m, cat);
         surfaces(&mut out, m);
         quests_native(&mut out, m);
@@ -1645,6 +1646,61 @@ fn natives(out: &mut Out, m: &LMod, f: &LFile) {
             && prefix != id
         {
             out.push(Diagnostic::new(&f.display, codes::NATIVE_PREFIX, name_node.span, &format!("a Kiln native is named \"<modid>.<Name>\": this mod's id is \"{id}\", not \"{prefix}\"")));
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------------------ run bindings ----
+
+/// An effect's `"run": "<modid>.<Name>"` (EffectBlock.Run, 0.2.0-dev.29): Kiln.Blocks binds the native's parameters by name (self,
+/// target, attacker, caster, position, attackMod, damage). With the native's declaration in this mod's impact/natives.json (its build
+/// writes the [ImpactNative] entries there), a parameter of another name is KL340, and so is a required attackMod or damage in an
+/// effect that deals no damage (nothing to bind). Another mod's native, or one this mod's files do not declare yet, is not checked.
+fn run_bindings(out: &mut Out, m: &LMod) {
+    const BINDINGS: &[&str] = &["self", "target", "attacker", "caster", "position", "attackMod", "damage"];
+    // name -> [(parameter, optional)] from this mod's impact/natives.json
+    let mut declared: HashMap<String, Vec<(String, bool)>> = HashMap::new();
+    for f in m.files.iter().filter(|f| f.kind == "natives") {
+        for n in f.root.as_ref().and_then(|r| r.get("natives")).and_then(Node::as_array).into_iter().flatten() {
+            let Some(name) = n.get("name").and_then(Node::as_str) else { continue };
+            let args = n.get("args").and_then(Node::as_array).into_iter().flatten()
+                .filter_map(|a| Some((a.get("name")?.as_str()?.to_string(), a.get("optional").and_then(|o| o.as_bool()).unwrap_or(false))))
+                .collect();
+            declared.insert(name.to_string(), args);
+        }
+    }
+    fn walk(out: &mut Out, file: &str, node: &Node, declared: &HashMap<String, Vec<(String, bool)>>) {
+        if let Some(members) = node.as_object() {
+            if let Some(run) = node.get("run")
+                && let Some(full) = run.as_str()
+                && let Some(params) = declared.get(full)
+            {
+                let hits = node.get("damage").is_some() || node.get("knockback").is_some();
+                for (p, optional) in params {
+                    if !BINDINGS.contains(&p.as_str()) {
+                        out.push(Diagnostic::new(file, codes::RUN_BINDING, run.span, &format!(
+                            "run {full}: parameter '{p}' names nothing a run native gets; its parameters are named {}", BINDINGS.join(", "))));
+                    } else if !optional && !hits && (p == "attackMod" || p == "damage") {
+                        out.push(Diagnostic::new(file, codes::RUN_BINDING, run.span, &format!(
+                            "run {full}: parameter '{p}' has nothing to bind to: this effect deals no damage (give it damage, or make the parameter Optional)")));
+                    }
+                }
+            }
+            for mb in members {
+                walk(out, file, &mb.value, declared);
+            }
+        } else if let Some(items) = node.as_array() {
+            for x in items {
+                walk(out, file, x, declared);
+            }
+        }
+    }
+    if declared.is_empty() {
+        return;
+    }
+    for f in m.files.iter().filter(|f| f.kind == "blocks") {
+        if let Some(root) = &f.root {
+            walk(out, &f.display, root, &declared);
         }
     }
 }

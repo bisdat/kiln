@@ -203,11 +203,26 @@ public sealed class ModContext
         if (Interlocked.Exchange(ref _unloadStarted, 1) != 0) return UnloadWaitsFor();
         _unloadSteps = UnloadStarting is { } starting ? Array.ConvertAll(starting.GetInvocationList(), d => (Func<string?>)d) : [];
         UnloadStarting = null;
-        return Ask(_unloadSteps);
+        return AskUnloadSteps();
     }
 
     /// <summary>What the unload still waits for (null: nothing): the steps again, after <see cref="BeginUnload"/>.</summary>
-    internal string? UnloadWaitsFor() => Volatile.Read(ref _unloadStarted) == 0 ? null : Ask(_unloadSteps);
+    internal string? UnloadWaitsFor() => Volatile.Read(ref _unloadStarted) == 0 ? null : AskUnloadSteps();
+
+    private string? AskUnloadSteps()
+    {
+        var waiting = Ask(_unloadSteps);
+        // A service may subscribe from another service's start step. Run those additions too,
+        // before the host can decide that disposal is safe, and retain them for later polls.
+        while (UnloadStarting is { } added)
+        {
+            UnloadStarting = null;
+            var steps = Array.ConvertAll(added.GetInvocationList(), d => (Func<string?>)d);
+            _unloadSteps = [.. _unloadSteps, .. steps];
+            if (Ask(steps) is { } more) waiting = waiting is null ? more : waiting + "; " + more;
+        }
+        return waiting;
+    }
 
     private string? Ask(Func<string?>[] steps)
     {

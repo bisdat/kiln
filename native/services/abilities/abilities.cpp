@@ -35,16 +35,13 @@
 #include "services/kiln_assets.h"
 #include "services/kiln_profile.h"
 #include "services/kiln_spawn.h"
-// kiln_world.h and kiln_abilities.h both name a struct KilnProgramInfo: kiln.world's is another name in this file
-#define KilnProgramInfo KilnWorldProgramInfo
 #include "services/kiln_world.h"
-#undef KilnProgramInfo
 #include "verify.h"
 
 using namespace kab;
 
 static_assert(sizeof(KilnAbilityEvent) == 640 && sizeof(KilnImpactVar) == 88 && sizeof(KilnConfigOverride) == 80 &&
-              sizeof(KilnNativeInfo) == 88 && sizeof(KilnProgramInfo) == 44 && sizeof(KilnNativeCall) == 104 &&
+              sizeof(KilnNativeInfo) == 88 && sizeof(KilnImpactProgramInfo) == 44 && sizeof(KilnNativeCall) == 104 &&
               sizeof(KilnAbilitiesStatus) == 160);
 // since 0.2.0-dev.29: the table's tail (append only) and the counters
 static_assert(offsetof(KilnAbilitiesApi, sequence_play) == 232 && offsetof(KilnAbilitiesApi, native_register_sync) == 240 &&
@@ -320,6 +317,7 @@ void capture_args(KilnAbilityEvent& ev, const ArgSlice* args, const NativeCtx* c
 
 // The thunk body. No C++ objects with destructors live here (seh_dispatch wraps it); locks are taken in helpers.
 thread_local bool t_in_game = false;   // inside the game's own native (a fault there is not retried)
+thread_local NativeCtx* t_ctx = nullptr;  // the active VM frame on this thread
 thread_local int t_slot = -1;          // the slot whose thunk runs on this thread now (call_original; no registration)
 thread_local bool t_orig_ran = false;  // the game's native ran in this call: it never runs a second time (the latch)
 thread_local int32_t t_stage = KILN_NATIVE_BEFORE;  // the attachment stage running on this thread (call_original)
@@ -707,6 +705,8 @@ NativeResult* __fastcall thunk(NativeResult* out, ArgSlice* args, NativeCtx* ctx
     const int outer_inside = t_inside;
     t_gate = nullptr;
     t_inside = -1;
+    NativeCtx* const outer_ctx = t_ctx;
+    t_ctx = ctx;
     const int outer_slot = t_slot;  // a game native that runs a program inside its call (nested thunks)
     const bool outer_ran = t_orig_ran, outer_in_game = t_in_game;
     t_slot = I;
@@ -719,6 +719,7 @@ NativeResult* __fastcall thunk(NativeResult* out, ArgSlice* args, NativeCtx* ctx
     t_stage = outer_stage;
     t_gate = outer_gate;
     t_inside = outer_inside;
+    t_ctx = outer_ctx;
     t_slot = outer_slot;
     t_orig_ran = outer_ran;
     t_in_game = outer_in_game;
@@ -937,14 +938,14 @@ void lab_hold_lock_now() {  // a job thread, inside the step
     while (!held.load()) SwitchToThread();  // `held` is not touched once it is true
     logw("kiln.abilities: LAB (kiln/control/impact.lockhold): Kiln's lock is held for %d ms by a thread of its own", ms);
 }
-int64_t g_world_storage = -1;
-constexpr int64_t kPinByte = 0x3d17f8;  // build f0d824be (server 26430253) only
+int64_t g_world_storage = -1;  // sigdb world.storage
+int64_t g_pin_off = -1;        // sigdb abilities/impact.pin (feature abilities.ecs_pin): the pin byte in the world's storage
 
 void lab_unpin() {
-    if (!g_lab_unpin || g_world_storage <= 0) return;
+    if (!g_lab_unpin || g_world_storage <= 0 || g_pin_off <= 0) return;
     const uintptr_t w = g_api->server_world();
     if (!w) return;
-    auto* pin = reinterpret_cast<uint8_t*>(w + static_cast<uintptr_t>(g_world_storage) + kPinByte);
+    auto* pin = reinterpret_cast<uint8_t*>(w + static_cast<uintptr_t>(g_world_storage) + static_cast<uintptr_t>(g_pin_off));
     uint8_t v = 0;
     if (!read_bytes(pin, &v, 1) || v == 0) return;
     const uint8_t zero = 0;
@@ -973,7 +974,10 @@ uint64_t g_ecs_tried = UINT64_MAX;  // tick thread: the session a view was asked
 constexpr const char* kImpactSimulation = "impact_simulation";
 
 bool world_foreign() {
-    return g_world_api && g_world_api->header.size >= offsetof(KilnWorldApi, foreign_attr_changed) + sizeof(void*);
+    return g_world_api && g_world_api->header.size >= offsetof(KilnWorldApi, foreign_attr_changed) + sizeof(void*) &&
+           g_world_api->foreign_layout && g_world_api->foreign_slot && g_world_api->foreign_check &&
+           g_world_api->foreign_read && g_world_api->foreign_write && g_world_api->foreign_attr_changed &&
+           g_world_api->game_program_find && g_world_api->game_world_session;
 }
 
 void ecs_off(uint32_t reason) {
@@ -1017,6 +1021,27 @@ void ecs_pre() {
     g_ecs.store(v, std::memory_order_release);
 }
 
+// The serial condition now (ecs_serial): the world's pin byte and the calling thread.
+uint32_t ecs_serial_now() {
+    const uintptr_t w = g_api->server_world();
+    uint8_t pin = 0;
+    const bool known = g_world_storage > 0 && g_pin_off > 0 && w &&
+                       read_bytes(reinterpret_cast<const void*>(w + static_cast<uintptr_t>(g_world_storage) + static_cast<uintptr_t>(g_pin_off)), &pin, 1);
+    return ecs_serial(known, pin, on_tick());
+}
+
+const char* ecs_reason_text(uint32_t reason) {
+    switch (reason) {
+        case KILN_NATIVE_ECS_REASON_COUNTS: return "the job's group counts are not kiln.world's view";
+        case KILN_NATIVE_ECS_REASON_REGISTRY: return "the iterator's impact::ImpactSystem qword is not the captured registry";
+        case KILN_NATIVE_ECS_REASON_NOT_SERIAL:
+            return "impact_simulation does not run serially on the world's thread here (its pin is clear, or a call came on another "
+                   "thread): two slices could touch one entity at once";
+        case KILN_NATIVE_ECS_REASON_PIN_UNKNOWN: return "the world's pin of impact_simulation to its thread cannot be read on this build";
+        default: return "see above";
+    }
+}
+
 // The first Kiln native call of each view (any thread inside impact_simulation): the self-check.
 void ecs_first(const NativeCtx* ctx) {
     const EcsView* v = g_ecs.load(std::memory_order_acquire);
@@ -1028,7 +1053,11 @@ void ecs_first(const NativeCtx* ctx) {
     if (iter && v->system_slot > 0) read_bytes(iter + v->system_slot, &at, 8);
     // the registry Kiln's natives went into at the world's setup (one of those the RegisterNative hook captured)
     const auto registry = static_cast<uint64_t>(g_native_registry.load(std::memory_order_relaxed));
-    const uint32_t reason = ecs_verdict(counts_ok, v->system_slot, at, registry);
+    uint32_t reason = ecs_verdict(counts_ok, v->system_slot, at, registry);
+    const uint32_t serial = ecs_serial_now();
+    if (reason == KILN_NATIVE_ECS_REASON_NONE) reason = serial;
+    logi("kiln.abilities: NativeContext self-check: impact_simulation serial on the world's thread: %s",
+         serial == KILN_NATIVE_ECS_REASON_NONE ? "yes (the pin is set, the call is on the world's thread)" : ecs_reason_text(serial));
     logi("kiln.abilities: NativeContext self-check, first native call in this world: the job's group counts are %s the "
          "view's (tpl %u, read %u, write %u, singletons %u, other_tpl %u, other %u, events %u/%u)",
          counts_ok ? "" : "NOT", job[0], job[1], job[2], job[3], job[4], job[5], job[6], job[7]);
@@ -1040,20 +1069,34 @@ void ecs_first(const NativeCtx* ctx) {
         logi("kiln.abilities: NativeContext's reads and writes of other entities are on in this world (abilities.natives.ecs)");
     } else {
         ecs_off(reason);
-        logw("kiln.abilities: NativeContext's reads and writes of other entities are off in this world: %s",
-             reason == KILN_NATIVE_ECS_REASON_COUNTS ? "the job's group counts are not kiln.world's view"
-                                                     : "the iterator's impact::ImpactSystem qword is not the captured registry");
+        logw("kiln.abilities: NativeContext's reads and writes of other entities are off for this world: %s", ecs_reason_text(reason));
     }
 }
 
 // The call's iterator and the view, when the bridge is on for this world.
 const EcsView* ecs_for(const KilnNativeCall* call, const uint64_t** iter) {
-    if (!call || g_ecs_state.load(std::memory_order_acquire) != KILN_NATIVE_ECS_ON) return nullptr;
+    if (t_slot < 0 || !call || call->size < sizeof(KilnNativeCall) || g_ecs_state.load(std::memory_order_acquire) != KILN_NATIVE_ECS_ON) return nullptr;
     const EcsView* v = g_ecs.load(std::memory_order_acquire);
     const auto* ctx = static_cast<const NativeCtx*>(call->engine[2]);
-    if (!v || !ctx || !ctx->iter_ctx || g_ecs_checked.load(std::memory_order_acquire) != v) return nullptr;
+    if (!v || !ctx || ctx != t_ctx || !ctx->iter_ctx || g_ecs_checked.load(std::memory_order_acquire) != v) return nullptr;
+    // the serial condition at every access: a cleared pin or a call off the world's thread switches it off for the world
+    if (const uint32_t serial = ecs_serial_now(); serial != KILN_NATIVE_ECS_REASON_NONE) {
+        g_ecs_reason.store(serial);
+        if (g_ecs_state.exchange(KILN_NATIVE_ECS_OFF) != KILN_NATIVE_ECS_OFF)
+            logw("kiln.abilities: NativeContext's reads and writes of other entities are off for this world: %s", ecs_reason_text(serial));
+        return nullptr;
+    }
     *iter = reinterpret_cast<const uint64_t*>(ctx->iter_ctx);
     return v;
+}
+
+KilnResult ecs_access_result(KilnResult rc) {
+    if (rc == KILN_ERR_INTERNAL || rc == KILN_ERR_UNAVAILABLE) {
+        g_ecs_reason.store(KILN_NATIVE_ECS_REASON_FAULT);
+        if (g_ecs_state.exchange(KILN_NATIVE_ECS_OFF) != KILN_NATIVE_ECS_OFF)
+            logw("kiln.abilities: foreign ECS access failed; the bridge is off for this world (a write may already have begun)");
+    }
+    return rc;
 }
 
 KilnResult KILN_CALL t_native_ecs_read(const KilnNativeCall* call, KilnStr component, uint32_t entity, void* out, uint32_t size) {
@@ -1064,10 +1107,10 @@ KilnResult KILN_CALL t_native_ecs_read(const KilnNativeCall* call, KilnStr compo
     uint32_t have = 0;
     KilnResult rc = KILN_OK;
     const void* p = g_world_api->foreign_read(&v->l, iter, component, entity, &have, &rc);
-    if (rc != KILN_OK) return rc;
+    if (rc != KILN_OK) return ecs_access_result(rc);
     if (!p) return KILN_ERR_NOT_FOUND;
     if (size > have) return KILN_ERR_INVALID_ARGUMENT;  // the whole component, or its first `size` bytes
-    return read_bytes(p, out, size) ? KILN_OK : KILN_ERR_INTERNAL;
+    return read_bytes(p, out, size) ? KILN_OK : ecs_access_result(KILN_ERR_INTERNAL);
 }
 
 KilnResult KILN_CALL t_native_ecs_write(KilnNativeCall* call, KilnStr component, uint32_t entity, const void* value,
@@ -1080,19 +1123,26 @@ KilnResult KILN_CALL t_native_ecs_write(KilnNativeCall* call, KilnStr component,
     uint32_t have = 0;
     KilnResult rc = KILN_OK;
     const void* r = g_world_api->foreign_read(&v->l, iter, component, entity, &have, &rc);
-    if (rc != KILN_OK) return rc;
+    if (rc != KILN_OK) return ecs_access_result(rc);
     if (!r) return KILN_ERR_NOT_FOUND;
     if (have != size) return KILN_ERR_INVALID_ARGUMENT;
+    if (flags & KILN_NATIVE_ECS_ATTRIBUTE) {
+        uint8_t old_header[8], new_header[8];
+        if (size < sizeof old_header) return KILN_ERR_INVALID_ARGUMENT;
+        if (!read_bytes(r, old_header, sizeof old_header) || !read_bytes(value, new_header, sizeof new_header))
+            return ecs_access_result(KILN_ERR_INTERNAL);
+        if (std::memcmp(old_header, new_header, sizeof old_header) != 0) return KILN_ERR_INVALID_ARGUMENT;
+    }
     void* p = g_world_api->foreign_write(&v->l, iter, component, entity, &have, &rc);
-    if (rc != KILN_OK) return rc;
+    if (rc != KILN_OK) return ecs_access_result(rc);
     if (!p || have != size) return KILN_ERR_NOT_FOUND;
-    if (before && !read_bytes(p, before, size)) return KILN_ERR_INTERNAL;
-    if (!write_bytes(p, value, size)) return KILN_ERR_INTERNAL;
+    if (before && !read_bytes(p, before, size)) return ecs_access_result(KILN_ERR_INTERNAL);
+    if (!write_bytes(p, value, size)) return ecs_access_result(KILN_ERR_INTERNAL);
     if (flags & KILN_NATIVE_ECS_ATTRIBUTE) {
         const KilnResult f = g_world_api->foreign_attr_changed(&v->l, iter, p);
-        if (f != KILN_OK && f != KILN_ERR_INVALID_ARGUMENT) return f;
+        if (f != KILN_OK && f != KILN_ERR_INVALID_ARGUMENT) return ecs_access_result(f);
     }
-    if (after && !read_bytes(p, after, size)) return KILN_ERR_INTERNAL;
+    if (after && !read_bytes(p, after, size)) return ecs_access_result(KILN_ERR_INTERNAL);
     return KILN_OK;
 }
 
@@ -2066,8 +2116,8 @@ uint32_t KILN_CALL t_program_count() {
     return n;
 }
 
-KilnResult KILN_CALL t_program_info(uint32_t id, KilnProgramInfo* out) {
-    if (!out || out->size < sizeof(KilnProgramInfo)) return KILN_ERR_INVALID_ARGUMENT;
+KilnResult KILN_CALL t_program_info(uint32_t id, KilnImpactProgramInfo* out) {
+    if (!out || out->size < sizeof(KilnImpactProgramInfo)) return KILN_ERR_INVALID_ARGUMENT;
     const uint8_t* prog = get_program(g_prog_registry.load(), id);
     ProgramHeader h{};
     if (!prog || !read_bytes(prog, &h, sizeof h)) return KILN_ERR_NOT_FOUND;
@@ -3018,11 +3068,8 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
         std::error_code ec;
         if (api->path(KILN_PATH_CONTROL, path, sizeof path, &n) == KILN_OK && n < sizeof path &&
             std::filesystem::exists(std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(path), n)) / "impact.unpin", ec) &&
-            api->build_info(&bi) == KILN_OK && bi.side == KILN_SIDE_SERVER && std::strncmp(bi.exe_sha256, "f0d824be", 8) == 0) {
-            int64_t v = -1;
-            g_world_storage = api->constant(KilnStr{"world.storage", 13}, &v) == KILN_OK ? v : -1;
-            g_lab_unpin = g_world_storage > 0;
-        }
+            api->build_info(&bi) == KILN_OK && bi.side == KILN_SIDE_SERVER)
+            g_lab_unpin = true;  // with the pin resolved (below)
         if (api->path(KILN_PATH_CONTROL, path, sizeof path, &n) == KILN_OK && n < sizeof path) {
             const auto control = std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(path), n));
             if (std::filesystem::exists(control / "impact.lockhold", ec) && api->build_info(&bi) == KILN_OK && bi.side == KILN_SIDE_SERVER)
@@ -3031,6 +3078,13 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
                 g_lab_lockhold_on = true;
             }
         }
+    }
+    {  // the ECS bridge's serial condition and the lab's unpin: the pin byte through sigdb (feature abilities.ecs_pin)
+        int64_t v = -1;
+        g_world_storage = api->constant(KilnStr{"world.storage", 13}, &v) == KILN_OK ? v : -1;
+        v = -1;
+        g_pin_off = api->feature(KilnStr{"abilities.ecs_pin", 17}) && api->constant(KilnStr{"abilities/impact.pin", 20}, &v) == KILN_OK ? v : -1;
+        if (g_world_storage <= 0 || g_pin_off <= 0) g_lab_unpin = false;
     }
     info->id = KilnStr{KILN_ABILITIES_SERVICE, sizeof(KILN_ABILITIES_SERVICE) - 1};
     info->version = KilnStr{"1", 1};

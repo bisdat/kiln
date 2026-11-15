@@ -111,6 +111,8 @@ internal sealed partial class EffectEmitter
             target = Caster;
             origin = null;
         }
+        // a mod's [ImpactNative] first, with the trigger's variables; false skips the rest of this effect, Then included
+        if (e.Run is { } run) RunNative(run, e, target, origin, id, end, path);
         if (e.Area is { } area)
         {
             if (area.Radius <= 0) throw new BlockError(_ctx.Block, $"{path}.area.radius", $"{area.Radius} must be more than 0");
@@ -242,6 +244,33 @@ internal sealed partial class EffectEmitter
 
     private void Hit(EffectBlock e, int target, int id)
     {
+        var (damage, category, physical, primary) = DamagePart(e, id);
+        var pos = _b.V($"hitAt{id}", ImpactType.Float3);
+        _b.Call("getTransform", null, null, pos, target);
+        _b.Pop();
+        var one = _attackMods.TryGetValue(id, out var am) ? am : _b.VFloat("one", 1);  // a Run native's attackMod, or 1
+        var zero = _b.VFloat("zero", 0);
+        var yes = _b.VBool("yes", true);
+        var no = _b.VBool("no", false);
+        _b.Call("applyDamage", null,
+            _b.V($"blocked{id}", ImpactType.Bool), Caster, target, pos,
+            _b.V("normal", ImpactType.Float3, Up),
+            _b.VByte("direction", ImpactType.Direction, 1), one, zero, zero, null, _b.VInt("special", 0),
+            _b.VGuid($"scale{id}", ImpactType.Attribute, physical ? PhysicalScale : MagicScale, primary ? CfgDamageScale : 0),
+            _b.VByte($"push{id}", ImpactType.Push, (byte)e.Knockback), _b.VU16($"reaction{id}", ImpactType.Reaction, (ushort)e.Flinch),
+            damage,
+            _b.VByte($"category{id}", ImpactType.AttackMask, category), _b.V("weapon", ImpactType.WeaponCategory),
+            _b.V("material", ImpactType.Material), null, no, yes, no, _b.VByte("visceral", ImpactType.Visceral, 0), no, no);
+        _b.Pop();
+    }
+
+    // The effect's damage setup variable and its hit's category, made once per effect (a Run native binds the same one).
+    private readonly Dictionary<int, (int Damage, byte Category, bool Physical, bool Primary)> _damages = new();
+    private readonly Dictionary<int, int> _attackMods = new();
+
+    private (int Damage, byte Category, bool Physical, bool Primary) DamagePart(EffectBlock e, int id)
+    {
+        if (_damages.TryGetValue(id, out var have)) return have;
         var d = e.Damage ?? new DamageBlock();
         var main = Primary && e.Damage != null && PrimaryDamage == null;
         if (main) PrimaryDamage = d;
@@ -261,23 +290,7 @@ internal sealed partial class EffectEmitter
         var damage = _b.V("itemDamage", ImpactType.Damage);
         if (primary) _b.SetVar(damage, bytes, CfgDamage);
         else damage = _b.V($"damage{id}", ImpactType.Damage, bytes);
-        var pos = _b.V($"hitAt{id}", ImpactType.Float3);
-        _b.Call("getTransform", null, null, pos, target);
-        _b.Pop();
-        var one = _b.VFloat("one", 1);
-        var zero = _b.VFloat("zero", 0);
-        var yes = _b.VBool("yes", true);
-        var no = _b.VBool("no", false);
-        _b.Call("applyDamage", null,
-            _b.V($"blocked{id}", ImpactType.Bool), Caster, target, pos,
-            _b.V("normal", ImpactType.Float3, Up),
-            _b.VByte("direction", ImpactType.Direction, 1), one, zero, zero, null, _b.VInt("special", 0),
-            _b.VGuid($"scale{id}", ImpactType.Attribute, physical ? PhysicalScale : MagicScale, primary ? CfgDamageScale : 0),
-            _b.VByte($"push{id}", ImpactType.Push, (byte)e.Knockback), _b.VU16($"reaction{id}", ImpactType.Reaction, (ushort)e.Flinch),
-            damage,
-            _b.VByte($"category{id}", ImpactType.AttackMask, category), _b.V("weapon", ImpactType.WeaponCategory),
-            _b.V("material", ImpactType.Material), null, no, yes, no, _b.VByte("visceral", ImpactType.Visceral, 0), no, no);
-        _b.Pop();
+        return _damages[id] = (damage, category, physical, primary);
     }
 
     private void Apply(StatusApply a, int target, int id, string path)

@@ -641,7 +641,9 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
     // closes them at the start of the unload and says when one is still inside after its bounded wait. OnUnload and the
     // disposal then run in a later Pre, once nothing is inside: never forced (kiln.abilities' watchdog names a call
     // inside for over a second). The mod keeps its place meanwhile (the same id cannot load twice); a reload's load waits
-    // with it. At shutdown a call still inside after ShutdownWait means that mod's OnUnload is skipped, not forced.
+    // with it. A mod whose dependent still waits waits too (the call inside the dependent may use the dependency's code
+    // or state), so the deferred unloads keep the order of ordinary ones: dependents first. At shutdown what still waits
+    // after ShutdownWait is skipped (its OnUnload and disposal), in that order, never forced.
 
     private sealed record WaitingUnload(LoadedMod Mod, Action Finish, long Since, string What);
 
@@ -656,12 +658,34 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
 
     private bool WaitsForQuiet(LoadedMod mod, Action finish, string what)
     {
-        if (_waitingUnloads.Exists(w => ReferenceEquals(w.Mod, mod))) return true;
-        var inside = mod.ModContext.BeginUnload();
-        if (inside is null) return false;
+        var waiting = _waitingUnloads.FindIndex(w => ReferenceEquals(w.Mod, mod));
+        if (waiting >= 0)
+        {
+            // An unload/reload requested during a deferred disable must still remove the old context.
+            if (what == "unload" && _waitingUnloads[waiting].What == "disable")
+                _waitingUnloads[waiting] = _waitingUnloads[waiting] with { Finish = finish, What = what };
+            return true;
+        }
+        var inside = mod.ModContext.BeginUnload();  // its own admission closes now in any case
+        var waits = WaitsFor(mod, inside);
+        if (waits is null) return false;
         _waitingUnloads.Add(new WaitingUnload(mod, finish, Stopwatch.GetTimestamp(), what));
-        _host.Log(LogLevel.Warn, $"mod {mod.Id}: its {what} waits: {inside}; OnUnload and the disposal run when that call leaves");
+        _host.Log(LogLevel.Warn, $"mod {mod.Id}: its {what} waits: {waits}; OnUnload and the disposal run when that is over");
         return true;
+    }
+
+    // What mod's unload still waits for, or null: a call inside its own code (`inside`, the unload steps' answer), and
+    // the waiting unloads of mods that depend on it, directly or through another.
+    private string? WaitsFor(LoadedMod mod, string? inside)
+    {
+        var dependents = Dependents(mod.Id).Where(d => _waitingUnloads.Exists(w => ReferenceEquals(w.Mod, d))).Select(d => d.Id).ToList();
+        var deps = dependents.Count switch
+        {
+            0 => null,
+            1 => $"its dependent {dependents[0]} still waits",
+            _ => $"its dependents {string.Join(", ", dependents)} still wait",
+        };
+        return inside is null ? deps : deps is null ? inside : $"{inside}; {deps}";
     }
 
     // Pre: the waiting unloads whose calls left go on, then what waited for them (a reload's load).
@@ -669,14 +693,20 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
     {
         if (_waitingUnloads.Count == 0) return;
         var done = false;
-        for (var i = 0; i < _waitingUnloads.Count; i++)
+        // dependents were added first: one pass in order finishes a dependent before its dependency; passes repeat
+        // while one goes on
+        for (var progress = true; progress;)
         {
-            var w = _waitingUnloads[i];
-            if (w.Mod.ModContext.UnloadWaitsFor() is not null) continue;
-            _waitingUnloads.RemoveAt(i--);
-            _host.Log(LogLevel.Info, $"mod {w.Mod.Id}: the call its {w.What} waited for left after {Stopwatch.GetElapsedTime(w.Since).TotalSeconds:0.0} s: it goes on");
-            w.Finish();
-            done = true;
+            progress = false;
+            for (var i = 0; i < _waitingUnloads.Count; i++)
+            {
+                var w = _waitingUnloads[i];
+                if (WaitsFor(w.Mod, w.Mod.ModContext.UnloadWaitsFor()) is not null) continue;
+                _waitingUnloads.RemoveAt(i--);
+                _host.Log(LogLevel.Info, $"mod {w.Mod.Id}: what its {w.What} waited for is over after {Stopwatch.GetElapsedTime(w.Since).TotalSeconds:0.0} s: it goes on");
+                w.Finish();
+                done = progress = true;
+            }
         }
         if (!done) return;
         UnloadCaches.Clear(_host.Log);
@@ -719,8 +749,9 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
     public void UnloadAll(string reason)
     {
         ChangeNoticeQueue.FlushFinal(reason);
+        _afterUnloads.Clear();  // shutdown must never resume a previously queued reload
         for (var i = _mods.Count - 1; i >= 0; i--)
-            if (!UnloadWaiting(_mods[i].Id)) UnloadOne(_mods[i], ModState.Unloaded, reason);
+            UnloadOne(_mods[i], ModState.Unloaded, reason);  // also upgrade a waiting disable to a full unload
         // no Pre follows: wait here for the calls still inside, then skip what still waits (never forced)
         var sw = Stopwatch.StartNew();
         while (_waitingUnloads.Count > 0 && sw.Elapsed < ShutdownWait)
@@ -728,9 +759,10 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
             FinishWaitingUnloads();
             if (_waitingUnloads.Count > 0) Thread.Sleep(1);
         }
+        // dependents first (the order they began to wait in), each with what it still waits for
         foreach (var w in _waitingUnloads)
             _host.Log(LogLevel.Error, $"mod {w.Mod.Id}: its OnUnload and disposal are skipped at {reason}: " +
-                                      $"{w.Mod.ModContext.UnloadWaitsFor() ?? "a call"} after {sw.Elapsed.TotalSeconds:0.0} s");
+                                      $"{WaitsFor(w.Mod, w.Mod.ModContext.UnloadWaitsFor()) ?? "a call"} after {sw.Elapsed.TotalSeconds:0.0} s");
         _waitingUnloads.Clear();
         _afterUnloads.Clear();
         ChangeNoticeQueue.FlushFinal(reason);  // what the unloads' writes left waiting: no step follows for it either

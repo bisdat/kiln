@@ -66,9 +66,12 @@ internal static class ServiceTick
 
     /// <summary>Of <see cref="AutoStart"/>, the services the host starts right before the mods load (their OnLoad runs
     /// before the first service tick): rows a mod reads in OnLoad and that depend on no mod. Kiln.World's
-    /// <c>world.transform_scale</c> and <c>world.tracked_writes</c> (0.2.0-dev.28 fix round). Started again at the first tick
-    /// with the rest, which does nothing for a type whose start already ran.</summary>
-    internal static readonly (string Assembly, string Type)[] EarlyStart = [("Kiln.World", "Kiln.WorldStartup")];
+    /// <c>world.transform_scale</c> and <c>world.tracked_writes</c> (0.2.0-dev.28 fix round); Kiln.Abilities'
+    /// <c>abilities.natives.sync</c> and <c>abilities.natives.attach</c> (0.2.0-dev.29: RegisterSync and Attach are accepted
+    /// in OnLoad, so their rows say so there). Started again at the first tick with the rest, which does nothing for a type
+    /// whose start already ran.</summary>
+    internal static readonly (string Assembly, string Type)[] EarlyStart =
+        [("Kiln.World", "Kiln.WorldStartup"), ("Kiln.Abilities", "Kiln.AbilitiesStartup")];
 
     private static readonly object Lock = new();
     private static Entry[] _entries = [];

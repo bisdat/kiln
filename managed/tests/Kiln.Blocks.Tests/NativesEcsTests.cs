@@ -10,6 +10,24 @@ namespace Kiln.Blocks.Tests;
 [Collection("raw gates")]
 public sealed unsafe class NativesEcsTests
 {
+    [Fact]
+    public void The_bridge_tail_matches_the_native_contract_and_probes_only_its_extent()
+    {
+        Assert.Equal(312, sizeof(AbilitiesNative.TableV2));
+        Assert.Equal(296, (int)Marshal.OffsetOf<AbilitiesNative.TableV2>(nameof(AbilitiesNative.TableV2.NativeEcsRead)));
+        Assert.Equal(304, (int)Marshal.OffsetOf<AbilitiesNative.TableV2>(nameof(AbilitiesNative.TableV2.NativeEcsWrite)));
+        Assert.Equal(128, sizeof(AbilitiesNative.NativeCounters));
+        Assert.Equal(120, (int)Marshal.OffsetOf<AbilitiesNative.NativeCounters>(nameof(AbilitiesNative.NativeCounters.EcsState)));
+        Assert.Equal(124, (int)Marshal.OffsetOf<AbilitiesNative.NativeCounters>(nameof(AbilitiesNative.NativeCounters.EcsReason)));
+        AbilitiesNative.TableV2 table = default;
+        foreach (var size in new uint[] { 296, 304, 312, 320 })
+        {
+            table.V1.Header.Size = size;
+            Assert.Equal(size >= 304, AbilitiesNative.Has(&table.V1, nameof(AbilitiesNative.TableV2.NativeEcsRead)));
+            Assert.Equal(size >= 312, AbilitiesNative.Has(&table.V1, nameof(AbilitiesNative.TableV2.NativeEcsWrite)));
+        }
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     public struct Hp : IGameAttribute<Hp, int>
     {
@@ -87,6 +105,24 @@ public sealed unsafe class NativesEcsTests
     static ModContext NewMod(string id) => HostAccess.CreateContext(new ModInfo(id, id, "1.0.0", "no-such-folder"), 0, "no-such-folder");
 
     [Fact]
+    public void Writes_from_a_previous_world_do_not_raise_events_in_the_next_world()
+    {
+        NativeWrites.Reset();
+        var previous = Lifecycle.Phase;
+        var events = new List<ComponentWrittenEvent>();
+        using var sub = Events.On<ComponentWrittenEvent>(events.Add);
+        try
+        {
+            NativeWrites.Add(new NativeWrites.Write(1, 7, "Health", new byte[4], new byte[4], "old/native:Hit", "old"));
+            Lifecycle.Phase = ServerPhase.Booting;
+            NativeWrites.Flush();
+            Assert.Empty(events);
+            Assert.Equal(0, NativeWrites.Waiting);
+        }
+        finally { Lifecycle.Phase = previous; NativeWrites.Reset(); }
+    }
+
+    [Fact]
     public void Reads_and_writes_go_through_the_core_and_a_change_raises_one_event_per_step_entity_and_component()
     {
         NativeWrites.Reset();
@@ -161,6 +197,11 @@ public sealed unsafe class NativesEcsTests
         Assert.Equal((CapabilityState.Unavailable, CapabilityReason.Faulted), (counts.State, counts.Reason));
         Assert.Contains("job counts", counts.Text);
         Assert.Contains("native registry", AbilitiesCaps.DecideEcs(true, true, AbilitiesNative.EcsOff, AbilitiesNative.EcsReasonRegistry, CapabilityState.Available).Text);
+        var serial = AbilitiesCaps.DecideEcs(true, true, AbilitiesNative.EcsOff, AbilitiesNative.EcsReasonNotSerial, CapabilityState.Available);
+        Assert.Equal(CapabilityState.Unavailable, serial.State);
+        Assert.Contains("does not run serially on the world's thread", serial.Text);
+        Assert.Equal(CapabilityReason.SymbolMissing,
+            AbilitiesCaps.DecideEcs(true, true, AbilitiesNative.EcsOff, AbilitiesNative.EcsReasonPinUnknown, CapabilityState.Available).Reason);
         Assert.Equal(CapabilityReason.ServiceOlder, AbilitiesCaps.DecideEcs(true, false, null, 0, CapabilityState.Available).Reason);
         Assert.Equal(CapabilityState.Unavailable, AbilitiesCaps.DecideEcs(true, true, AbilitiesNative.EcsOn, 0, CapabilityState.Unavailable).State);
         Assert.Equal(CapabilityReason.ServiceMissing, AbilitiesCaps.DecideEcs(false, false, null, 0, CapabilityState.Available).Reason);

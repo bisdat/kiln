@@ -26,6 +26,97 @@ public sealed unsafe class NativeAdmissionOrderTests : ModsFixture
     }
 
     [Fact]
+    public void An_unload_upgrades_a_waiting_disable_to_a_full_unload()
+    {
+        InstallHello();
+        var host = new FakeHost();
+        using var mods = NewManager(host);
+        mods.LoadAll();
+        var old = mods.Find("hello")!;
+        bool held = true;
+        old.ModContext.UnloadStarting += () => held ? "fixture call" : null;
+        typeof(ModManager).GetMethod("Disable", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(mods, [old, "fixture", new InvalidOperationException("fixture fault")]);
+        mods.Unload("hello", out _);
+        held = false;
+        mods.Pre(Tick(1), []);
+        Assert.Null(mods.Find("hello"));
+    }
+
+    [Fact]
+    public void Shutdown_fully_unloads_a_mod_whose_disable_was_waiting()
+    {
+        InstallHello();
+        var host = new FakeHost();
+        using var mods = NewManager(host);
+        mods.LoadAll();
+        var old = mods.Find("hello")!;
+        bool held = true;
+        old.ModContext.UnloadStarting += () => held ? "fixture call" : null;
+        typeof(ModManager).GetMethod("Disable", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(mods, [old, "fixture", new InvalidOperationException("fixture fault")]);
+        held = false;
+        mods.UnloadAll("test shutdown");
+        Assert.Null(mods.Find("hello"));
+        Assert.Empty(mods.Mods);
+    }
+
+    [Fact]
+    public void An_unload_step_added_by_another_step_is_not_lost()
+    {
+        InstallHello();
+        var host = new FakeHost();
+        using var mods = NewManager(host);
+        mods.LoadAll();
+        var ctx = mods.Find("hello")!.ModContext;
+        bool held = true;
+        ctx.UnloadStarting += () =>
+        {
+            ctx.UnloadStarting += () => held ? "late service call" : null;
+            return null;
+        };
+        mods.Unload("hello", out _);
+        Assert.NotNull(mods.Find("hello"));
+        Assert.False(host.Has("goodbye"));
+        held = false;
+        mods.Pre(Tick(1), []);
+        Assert.Null(mods.Find("hello"));
+    }
+
+    [Fact]
+    public void Shutdown_does_not_resume_a_queued_reload()
+    {
+        InstallHello();
+        var host = new FakeHost();
+        using var mods = NewManager(host);
+        mods.LoadAll();
+        bool held = true;
+        mods.Find("hello")!.ModContext.UnloadStarting += () => held ? "fixture call" : null;
+        Assert.True(mods.ReloadCore("hello").Ok);
+        held = false;
+        mods.UnloadAll("test shutdown");
+        Assert.Null(mods.Find("hello"));
+        Assert.Empty(mods.Mods);
+    }
+
+    [Fact]
+    public void Repeated_reload_requests_keep_only_one_replacement()
+    {
+        InstallHello();
+        var host = new FakeHost();
+        using var mods = NewManager(host);
+        mods.LoadAll();
+        bool held = true;
+        mods.Find("hello")!.ModContext.UnloadStarting += () => held ? "fixture call" : null;
+        Assert.True(mods.ReloadCore("hello").Ok);
+        Assert.True(mods.ReloadCore("hello").Ok);
+        held = false;
+        mods.Pre(Tick(1), []);
+        Assert.Single(mods.Mods);
+        mods.UnloadAll("test cleanup");
+    }
+
+    [Fact]
     public void A_handler_inside_when_the_unload_begins_leaves_before_OnUnload_runs()
     {
         InstallHello();
@@ -154,6 +245,101 @@ public sealed unsafe class NativeAdmissionOrderTests : ModsFixture
         }
         finally
         {
+            release.Set();
+            AbilitiesDispatch.RemoveSync(e);
+            NativeMemory.Free(call);
+        }
+    }
+
+    // sample-consumer depends on sample-lib (sample-tests on both): a dependent that waits for a call inside holds its
+    // dependencies' unloads too, in the order of ordinary unloads (dependents first)
+    [Fact]
+    public void A_dependency_waits_for_its_waiting_dependent_and_they_unload_in_order()
+    {
+        InstallLibSet();
+        var host = new FakeHost();
+        using var mods = NewManager(host);
+        mods.LoadAll();
+        var consumer = mods.Find("sample-consumer")!.ModContext;
+        using var inside = new ManualResetEventSlim(false);
+        using var release = new ManualResetEventSlim(false);
+        var e = AbilitiesDispatch.AddSync("sample-consumer.Held", (ref NativeCall c) =>
+        {
+            inside.Set();
+            release.Wait(TimeSpan.FromSeconds(20));
+            return 1;
+        }, consumer);
+        AbilitiesDispatch.Watch(consumer);
+        var call = NewCall();
+        try
+        {
+            var t = new Thread(() => SyncDispatch(call, (void*)e.Id));
+            t.Start();
+            Assert.True(inside.Wait(TimeSpan.FromSeconds(10)));
+            Assert.True(mods.Unload("sample-lib", out _));
+            Assert.True(host.Has("mod sample-tests unloaded"));                     // a dependent with nothing inside goes
+            Assert.False(host.Has("sample-consumer unloading"));                    // the one with a call inside waits
+            Assert.False(host.Has("sample-lib unloading"), host.Dump());             // and so does what it depends on
+            Assert.True(host.Has("mod sample-lib: its unload waits: its dependent sample-consumer still waits"), host.Dump());
+            Assert.NotNull(mods.Find("sample-lib"));
+            mods.Pre(Tick(1), []);
+            Assert.False(host.Has("sample-lib unloading"));
+            release.Set();
+            Assert.True(t.Join(TimeSpan.FromSeconds(20)));
+            mods.Pre(Tick(2), []);
+            var lines = host.Dump().Split('\n').ToList();
+            var c = lines.FindIndex(l => l.Contains("sample-consumer unloading"));
+            var l2 = lines.FindIndex(l => l.Contains("sample-lib unloading"));
+            Assert.True(c >= 0 && l2 > c, host.Dump());                             // dependent first, then its dependency
+            Assert.Null(mods.Find("sample-lib"));
+            Assert.Null(mods.Find("sample-consumer"));
+        }
+        finally
+        {
+            release.Set();
+            AbilitiesDispatch.RemoveSync(e);
+            NativeMemory.Free(call);
+        }
+    }
+
+    [Fact]
+    public void At_shutdown_what_still_waits_is_skipped_in_order_and_named()
+    {
+        InstallLibSet();
+        var host = new FakeHost();
+        using var mods = NewManager(host);
+        mods.LoadAll();
+        var consumer = mods.Find("sample-consumer")!.ModContext;
+        using var inside = new ManualResetEventSlim(false);
+        using var release = new ManualResetEventSlim(false);
+        var e = AbilitiesDispatch.AddSync("sample-consumer.Held", (ref NativeCall c) =>
+        {
+            inside.Set();
+            release.Wait(TimeSpan.FromSeconds(20));
+            return 1;
+        }, consumer);
+        AbilitiesDispatch.Watch(consumer);
+        var call = NewCall();
+        var wait = ModManager.ShutdownWait;
+        ModManager.ShutdownWait = TimeSpan.FromMilliseconds(200);
+        try
+        {
+            var t = new Thread(() => SyncDispatch(call, (void*)e.Id));
+            t.Start();
+            Assert.True(inside.Wait(TimeSpan.FromSeconds(10)));
+            mods.UnloadAll("server stopping");
+            Assert.False(host.Has("sample-consumer unloading"));
+            Assert.False(host.Has("sample-lib unloading"));                          // never under the call, never before its dependent
+            var lines = host.Dump().Split('\n').ToList();
+            var c = lines.FindIndex(l => l.Contains("mod sample-consumer: its OnUnload and disposal are skipped at server stopping"));
+            var l2 = lines.FindIndex(l => l.Contains("mod sample-lib: its OnUnload and disposal are skipped at server stopping"));
+            Assert.True(c >= 0 && l2 > c, host.Dump());                              // named, dependents first
+            Assert.True(host.Has("1 call(s) still inside its native handlers (kiln.abilities)"));
+            Assert.True(host.Has("its dependent sample-consumer still waits"));
+        }
+        finally
+        {
+            ModManager.ShutdownWait = wait;
             release.Set();
             AbilitiesDispatch.RemoveSync(e);
             NativeMemory.Free(call);

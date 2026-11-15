@@ -163,7 +163,8 @@ internal static unsafe class AbilitiesNative
 
     // KILN_NATIVE_ECS_* (KilnNativeCounters.ecs_state / ecs_reason)
     public const uint EcsPending = 0, EcsOn = 1, EcsOff = 2;
-    public const uint EcsReasonNone = 0, EcsReasonNoWorldApi = 1, EcsReasonLayout = 2, EcsReasonCounts = 3, EcsReasonRegistry = 4;
+    public const uint EcsReasonNone = 0, EcsReasonNoWorldApi = 1, EcsReasonLayout = 2, EcsReasonCounts = 3, EcsReasonRegistry = 4,
+        EcsReasonFault = 5, EcsReasonNotSerial = 6, EcsReasonPinUnknown = 7;
     public const uint EcsAttribute = 1;  // KILN_NATIVE_ECS_ATTRIBUTE
 
     /// <summary>KilnNativeArg (since 0.2.0-dev.29).</summary>

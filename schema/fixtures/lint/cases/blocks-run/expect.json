@@ -1,0 +1,21 @@
+{
+  "description": "blocks-run: an effect's run native (EffectBlock.Run, 06c S6): KL340 for a parameter that names no binding and for a required attackMod with no damage in the effect; an optional damage and another mod's native are fine.",
+  "diagnostics": [
+    {
+      "code": "KL340",
+      "col": 26,
+      "file": "blocks/run.json",
+      "line": 5,
+      "message": "run fixture-blocks-run.OnHit: parameter 'attackMod' has nothing to bind to: this effect deals no damage (give it damage, or make the parameter Optional)",
+      "severity": "error"
+    },
+    {
+      "code": "KL340",
+      "col": 25,
+      "file": "blocks/run.json",
+      "line": 6,
+      "message": "run fixture-blocks-run.Odd: parameter 'victim' names nothing a run native gets; its parameters are named self, target, attacker, caster, position, attackMod, damage",
+      "severity": "error"
+    }
+  ]
+}
