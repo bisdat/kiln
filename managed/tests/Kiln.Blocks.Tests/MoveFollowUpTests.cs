@@ -1000,6 +1000,19 @@ public sealed class MoveFollowUpTests : IDisposable
         Assert.Empty(_game.LinksNow);
     }
 
+    [Fact]
+    public void A_removal_with_an_unreadable_slot_revokes_the_owner()
+    {
+        Start(Warden());
+        _game.Pump();
+        // The item disappeared from the registry during removal: a null read cannot prove the reset.
+        _game.SlotRows = null;
+        MoveApplications.Forget(Mod);
+        Assert.Equal(1, _game.Revokes);
+        Assert.Contains("could not be read", Status().Reason);
+        Assert.Contains("every layer of the mod was taken off instead", Status().Reason);
+    }
+
     [Theory]
     [InlineData("sequences")]
     [InlineData("itemdata")]
