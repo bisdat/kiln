@@ -20,8 +20,11 @@ internal sealed unsafe class DecisionsFake : IKitFake
     {
         if (_table == null)
         {
-            var t = (N.Table*)NativeMemory.AllocZeroed((nuint)sizeof(N.Table));  // process lifetime, never freed
-            t->Header = new ServiceHeader { Size = (uint)sizeof(N.Table), Version = N.Version };
+            // the whole dev.29 table (prepare_kind included); the native-only members stay null
+            var tail = (N.TableTail*)NativeMemory.AllocZeroed((nuint)sizeof(N.TableTail));  // process lifetime, never freed
+            var t = &tail->Base;
+            t->Header = new ServiceHeader { Size = (uint)sizeof(N.TableTail), Version = N.Version };
+            tail->PrepareKind = &PrepareKind;
             t->SupportedKinds = &SupportedKinds;
             t->Attach = &Attach;
             t->ResolveEntity = &ResolveEntity;
@@ -140,6 +143,21 @@ internal sealed unsafe class DecisionsFake : IKitFake
     private static int AckOutcomes(ulong owner, ulong batch)
     {
         try { return Model?.AckOutcomes(owner, batch) ?? FakeTables.Unavailable; } catch { return FakeTables.Internal; }
+    }
+
+    // prepare_kind: a hooked kind's producer is ready unless the test made its install fail (DecisionsModel.PrepareRefusals).
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int PrepareKind(uint kind, byte* reason, uint size)
+    {
+        try
+        {
+            if (Model is not { } m) return FakeTables.Unavailable;
+            return m.PrepareKind(kind, reason, size);
+        }
+        catch
+        {
+            return FakeTables.Internal;
+        }
     }
 
     // The walk-over producer's suppressed exposures, as far as the fake knows them (a canceled kind-2 decision).

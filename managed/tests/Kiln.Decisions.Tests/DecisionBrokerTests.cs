@@ -114,7 +114,8 @@ public sealed unsafe class DecisionBrokerTests : IDisposable
             N.PayloadSize(18), N.PayloadSize(32), N.PayloadSize(33), N.PayloadSize(3)));
         var t = (N.Table*)KitBackend.Instance.Service(N.Service, 1);
         Assert.True(t != null);
-        Assert.Equal((136u, 1u), (t->Header.Size, t->Header.Version));
+        Assert.Equal(((uint)sizeof(N.TableTail), 1u), (t->Header.Size, t->Header.Version));  // the whole dev.29 table
+        Assert.True(N.Has(t, N.PrepareKindOffset) && ((N.TableTail*)t)->PrepareKind != null);
     }
 
     [Fact]

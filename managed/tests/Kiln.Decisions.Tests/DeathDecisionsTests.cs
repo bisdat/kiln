@@ -227,4 +227,37 @@ public sealed class DeathDecisionsTests : IDisposable
         kiln.Decisions.Model.SupportedHookKinds = 1ul << (int)N.KindDeath;
         _subs.Add(Events.On<EntityDyingEvent>(_ => { }));
     }
+
+    // Since 0.2.0-dev.29 the death hook goes in when a mod first subscribes (kiln.decisions' prepare_kind), not at the
+    // service's start: a harness that nobody subscribes in asks for nothing, a subscription asks, and an install that
+    // fails at that moment lowers events.death with its reason and refuses the subscription by the row's name.
+    [Fact]
+    public void The_death_hook_goes_in_at_the_first_subscription_and_a_failed_install_refuses_it_by_name()
+    {
+        using var kiln = new KilnHarness();
+        kiln.Step(2);
+        kiln.Decisions.Model.SupportedHookKinds = 1ul << (int)N.KindDeath;
+        kiln.Step(3);
+        Assert.False(kiln.Decisions.Model.Prepared.ContainsKey(N.KindDeath));  // nobody listens: nothing prepared
+        kiln.Decisions.Model.PrepareRefusals[N.KindDeath] = (DeathDecisions.Row, "kiln.hooks could not hook the target (see kiln.log)");
+        var off = Assert.Throws<KilnUnavailableException>(() => Events.On<EntityDyingEvent>(_ => { }));
+        Assert.Equal("events.death", off.Capability);
+        Assert.Contains("could not hook the target", off.Message);
+        Assert.Equal(1, kiln.Decisions.Model.Prepared[N.KindDeath]);
+        Assert.False(Capabilities.Is(DeathDecisions.Row));  // the row reads off
+        Assert.False(Events.HasSubscribers<EntityDyingEvent>());  // nothing was subscribed
+        // a later subscription is refused as well (the row is off now), and nothing is held for anyone
+        Assert.Throws<KilnUnavailableException>(() => Events.On<EntityDyingEvent>(_ => { }));
+        kiln.Step(2);
+        Assert.Equal(0, kiln.Decisions.Model.ActiveCount);
+    }
+
+    [Fact]
+    public void A_subscription_prepares_the_death_kind_once_it_holds()
+    {
+        using var kiln = Started(out var entity);
+        _subs.Add(Events.On<EntityDyingEvent>(_ => { }, EventFilter.ForEntity(entity)));
+        Assert.True(kiln.Decisions.Model.Prepared.GetValueOrDefault(N.KindDeath) >= 1);
+        Assert.True(Capabilities.Is(DeathDecisions.Row));
+    }
 }

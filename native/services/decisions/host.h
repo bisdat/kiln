@@ -3,6 +3,7 @@
 // back. Internal to kiln-decisions.dll.
 #pragma once
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "kiln_api.h"
@@ -43,8 +44,14 @@ std::shared_ptr<const Table> table();
 // One row sampled now. World thread, world-safe phase only (the caller is a finisher or a window call).
 bool resolve(uint32_t entity, Row* out);
 
-// A producer's hooks are in: its kind is reported in supported_kinds.
+// A producer can hold its kind (resolved; its hook goes in at the first listener): the kind is reported in
+// supported_kinds. hook_kind_off: its hook could not go in after all.
 void hook_kind(uint32_t kind);
+void hook_kind_off(uint32_t kind);
+// The service holds at all (not shut down after a fault). Any thread, lock free: the hooks ask it first.
+bool holding_allowed();
+// Lowers a capability row (unavailable, `reason`, `why`). Any thread.
+void lower(const char* row, uint32_t reason, const char* why);
 void logf(int level, const char* fmt, ...);
 
 }  // namespace kiln::decisions::host
@@ -52,9 +59,15 @@ void logf(int level, const char* fmt, ...);
 // The death producer (death.cpp).
 namespace kiln::decisions::death_producer {
 
-// The service is on (on_ready): installs the hook unless events.death is held, unresolved or the hook fails.
+// The service is on (on_ready): resolves what the hook needs (nothing is installed: events.death is ready unless held
+// or unresolved). arm(): puts the hook in now (a mod listens, a native guard is set); false: it cannot (the rows are
+// lowered with the reason when the install itself failed). Any thread.
 void ready();
+bool arm();
 bool installed();
+bool usable();  // ready or armed
+// Something to keep the windows for: a hold, or a native guard (it asks the window's epoch).
+bool busy();
 // window_begin, before the metadata is rebuilt: the entities the death producer needs rows for (every entity with
 // Health while a listener takes all deaths). World thread, no world job live.
 void discover(std::vector<uint32_t>& wanted);
@@ -63,8 +76,8 @@ void window_begin(uint64_t epoch, uint64_t step);
 void world_stopped();
 // KilnDecisionsApiV1.set_death_guard. Any thread.
 KilnResult set_guard(KilnOwner owner, KilnDeathGuardFn guard);
-// The words for decisions.native_guards and events.death when the hook is not in (empty when it is).
-const char* why_not();
+// The words for decisions.native_guards and events.death when the producer cannot hold (empty when it can).
+std::string why_not();
 uint32_t why_not_reason();
 
 }  // namespace kiln::decisions::death_producer
@@ -72,11 +85,15 @@ uint32_t why_not_reason();
 // The walk-over pickup producer (pickup.cpp).
 namespace kiln::decisions::pickup_producer {
 
-// The service is on (on_ready): installs the hook unless events.pickup is held, unresolved or the hook fails.
+// The service is on (on_ready): resolves what the hook needs (nothing installed). arm(): puts it in now (a mod
+// listens); false: it cannot (events.pickup is lowered with the reason when the install itself failed). Any thread.
 void ready();
+bool arm();
 bool installed();
-// The words and reason for events.pickup when the hook is not in (empty / KILN_CAP_REASON_NONE when it is).
-const char* why_not();
+bool usable();  // ready or armed
+bool busy();    // an exposure is sampled
+// The words and reason for events.pickup when the producer cannot hold (empty / KILN_CAP_REASON_NONE when it can).
+std::string why_not();
 uint32_t why_not_reason();
 // window_begin, before the metadata is rebuilt: drops (PickupItemZone) and live players while anyone listens.
 void discover(std::vector<uint32_t>& wanted);

@@ -31,6 +31,10 @@ void KILN_CALL dec_end(uint64_t e, uint64_t s) { note("dec.end", e, s); }
 void KILN_CALL chg_begin(uint64_t e, uint64_t s) { note("chg.begin", e, s); }
 void KILN_CALL chg_end(uint64_t e, uint64_t s) { note("chg.end", e, s); }
 
+uint32_t g_want = 1;
+int g_asked = 0;
+uint32_t KILN_CALL dec_wanted() { return ++g_asked, g_want; }
+
 bool g_fault_dec_begin = false;
 bool faulting_caller(wc::WindowFn fn, uint64_t e, uint64_t s) {
     if (fn == &dec_begin && g_fault_dec_begin) return false;
@@ -128,6 +132,42 @@ int main() {
     g_core.pre(14, 90);
     check(g_core.begin(true, both, &faulting_caller) == 1, "fault mask names decisions");
     check(g_log == std::vector<std::string>({"chg.begin@2:2/14"}) && g_core.get().phase == KILN_WINDOW_SIM, "the other service still ran; phase reached sim");
+
+    // kiln.decisions with nothing to do (no listener, nothing held: window_wanted 0) gets no window call, and the step
+    // need not wait for the world's jobs on its account (begun() is 0); component_changes is unaffected
+    KilnDecisionsApiV1 lazy = dec;
+    lazy.window_wanted = &dec_wanted;
+    const wc::Windows lazy_both = wc::Windows::from(&lazy, &chg);
+    const wc::Windows lazy_only = wc::Windows::from(&lazy, nullptr);
+    g_log.clear();
+    g_want = 0;
+    g_asked = 0;
+    g_core.pre(15, 90);
+    check(g_core.begin(true, lazy_only) == 0 && g_asked == 1 && g_log.empty() && g_core.begun() == 0, "nothing wanted: no begin, nothing begun");
+    check(g_core.get().phase == KILN_WINDOW_SIM, "nothing wanted: the phase still reaches sim");
+    check(g_core.end(lazy_only) == 0 && g_log.empty() && g_core.get().phase == KILN_WINDOW_POST, "nothing wanted: no end call either");
+    g_log.clear();
+    g_core.pre(16, 90);
+    g_core.begin(true, lazy_both);
+    check(g_core.begun() == 2, "nothing wanted by decisions: only component_changes begun");
+    g_core.end(lazy_both);
+    check(g_log == std::vector<std::string>({"chg.begin@2:2/16", "chg.end@4:2/16"}), "nothing wanted: component_changes alone runs");
+    // something to do again (a listener, an open request): both calls, in order
+    g_log.clear();
+    g_want = 1;
+    g_core.pre(17, 90);
+    g_core.begin(true, lazy_only);
+    check(g_core.begun() == 1, "wanted: decisions begun");
+    g_core.end(lazy_only);
+    check(g_log == std::vector<std::string>({"dec.begin@2:2/17", "dec.end@4:2/17"}), "wanted: begin and end");
+    // an end without its begin in this step (the windows were off) calls nothing
+    g_log.clear();
+    g_core.pre(18, 90);
+    g_core.begin(false, lazy_only);
+    g_core.end(lazy_only);
+    check(g_log.empty(), "no begin this step: no end");
+    // a table without window_wanted (older, shorter): wanted every step, as before
+    check(both.decisions_wanted == nullptr && lazy_both.decisions_wanted == &dec_wanted, "window_wanted read only when the table has it");
 
     std::printf("window_clock_test: %d PASS, %d FAIL\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

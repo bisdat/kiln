@@ -14,6 +14,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include "host.h"
@@ -51,6 +52,7 @@ struct Interest {
 std::mutex g_interest_mutex;
 Interest g_interest[64];
 std::atomic<uint32_t> g_interest_state[64];  // 0 none, 1 a list, 2 all: what a hook asks first, without the lock
+std::atomic<uint64_t> g_interest_kinds{0};    // bit n: kind n has an interest (window_wanted asks it)
 std::atomic<bool> g_budget_exceeded{false};   // written at window_begin
 std::atomic<uint64_t> g_epoch{0}, g_step{0};  // the window the step is in
 std::atomic<uint32_t> g_world_thread{0};      // the thread window_begin ran on
@@ -131,8 +133,16 @@ KilnResult KILN_CALL d_detach(KilnOwner dispatcher) {
         std::lock_guard lock(g_interest_mutex);
         for (auto& i : g_interest) i = Interest{};
         for (auto& i : g_interest_state) i.store(0);
+        g_interest_kinds.store(0);
     }
     return rc;
+}
+
+// A hooked kind's producer puts its hook in (the first listener). False: it cannot; its row says why.
+bool arm_kind(uint32_t kind) {
+    if (kind == KILN_DECISION_DEATH) return death_producer::arm();
+    if (kind == KILN_DECISION_WALKOVER) return pickup_producer::arm();
+    return true;
 }
 
 KilnResult KILN_CALL d_resolve_entity(uint32_t entity, KilnEventEntityKey* key, double position[3], uint32_t* has_position) {
@@ -165,9 +175,13 @@ KilnResult KILN_CALL d_interest(KilnOwner dispatcher, const KilnDecisionInterest
     std::sort(next.ids.begin(), next.ids.end());
     next.ids.erase(std::unique(next.ids.begin(), next.ids.end()), next.ids.end());
     const uint32_t state = next.all ? 2u : next.ids.empty() ? 0u : 1u;
+    // The first interest of a hooked kind puts its hook in (also for a consumer that never called prepare_kind).
+    if (state != 0 && !arm_kind(in->kind)) return KILN_ERR_UNAVAILABLE;
     std::lock_guard lock(g_interest_mutex);
     g_interest[in->kind] = std::move(next);
     g_interest_state[in->kind].store(state);
+    if (state != 0) g_interest_kinds.fetch_or(1ull << in->kind);
+    else g_interest_kinds.fetch_and(~(1ull << in->kind));
     return KILN_OK;
 }
 
@@ -246,7 +260,7 @@ KilnResult KILN_CALL d_enqueue_native(KilnOwner producer, const KilnDecisionRequ
 
 KilnResult KILN_CALL d_reevaluate_pickup(uint32_t drop, uint32_t receiver, uint32_t* exposures_reset) {
     if (exposures_reset) *exposures_reset = 0;
-    if (!g_on.load() || !pickup_producer::installed()) return KILN_ERR_UNAVAILABLE;
+    if (!g_on.load() || !pickup_producer::usable()) return KILN_ERR_UNAVAILABLE;
     if (!world_safe(nullptr)) return KILN_ERR_WRONG_THREAD;
     return pickup_producer::reevaluate(drop, receiver, exposures_reset);
 }
@@ -289,7 +303,44 @@ void KILN_CALL d_window_end(uint64_t epoch, uint64_t step) {
     g_broker->drain_sinks();
 }
 
-KilnResult KILN_CALL d_set_death_guard(KilnOwner owner, KilnDeathGuardFn guard) { return death_producer::set_guard(owner, guard); }
+KilnResult KILN_CALL d_set_death_guard(KilnOwner owner, KilnDeathGuardFn guard) {
+    if (!g_on.load()) return KILN_ERR_UNAVAILABLE;
+    return death_producer::set_guard(owner, guard);
+}
+
+// since 0.2.0-dev.29: a kind's producer ready to hold now (its hook goes in); any thread
+KilnResult KILN_CALL d_prepare_kind(uint32_t kind, char* reason, uint32_t reason_size) {
+    if (reason && reason_size) reason[0] = 0;
+    auto say = [&](const std::string& why) {
+        if (reason && reason_size) std::snprintf(reason, reason_size, "%s", why.c_str());
+    };
+    if (kind == 0 || kind >= 64 || payload_size(kind) == 0) return KILN_ERR_INVALID_ARGUMENT;
+    if (!g_on.load()) {
+        say("kiln.decisions is off (see its capability row)");
+        return KILN_ERR_UNAVAILABLE;
+    }
+    if (kPreparedKinds & (1ull << kind)) return KILN_OK;
+    if (kind == KILN_DECISION_DEATH) {
+        if (death_producer::arm()) return KILN_OK;
+        say(death_producer::why_not());
+        return KILN_ERR_UNAVAILABLE;
+    }
+    if (kind == KILN_DECISION_WALKOVER) {
+        if (pickup_producer::arm()) return KILN_OK;
+        say(pickup_producer::why_not());
+        return KILN_ERR_UNAVAILABLE;
+    }
+    say("this build has no producer of that kind");
+    return KILN_ERR_UNAVAILABLE;
+}
+
+// since 0.2.0-dev.29, core only: whether this step needs the window calls (and the wait for the world's jobs)
+uint32_t KILN_CALL d_window_wanted() {
+    if (!g_on.load(std::memory_order_relaxed)) return 0;
+    if (g_interest_kinds.load(std::memory_order_relaxed) != 0) return 1;  // a listener: metadata, deadlines, samples
+    if (death_producer::busy() || pickup_producer::busy()) return 1;      // a hold or an exposure to follow; a guard
+    return g_broker->active_count() != 0 ? 1u : 0u;                       // an open request's deadline
+}
 
 const KilnDecisionsApiV1 kTable = {
     {sizeof(KilnDecisionsApiV1), KILN_DECISIONS_VERSION},
@@ -311,6 +362,9 @@ const KilnDecisionsApiV1 kTable = {
     &d_window_end,
     &d_set_death_guard,
     &d_enqueue_native,  // since 0.2.0-dev.29
+    &d_prepare_kind,    // since 0.2.0-dev.29
+    &d_window_wanted,   // since 0.2.0-dev.29
+    nullptr,            // window_faulted: since 0.2.0-dev.29
 };
 
 void KILN_CALL on_world(const KilnWorldEvent* e, void*) {
@@ -358,24 +412,25 @@ void KILN_CALL on_ready(void*) {
     g_on.store(true);
     logf(KILN_LOG_INFO, "decisions: on (requests %u, outcomes %u, metadata rows %u; players %s)", KILN_DECISIONS_MAX_ACTIVE,
          KILN_DECISIONS_MAX_OUTCOMES, KILN_DECISIONS_MAX_METADATA, g_players ? "from kiln.players" : "unknown: no kiln.players");
-    // Producers. The death hook decides decisions.native_guards (19d-pets' guard needs the hook) and, when the hook
-    // could not go in although events.death resolved, lowers events.death with the reason.
+    // Producers: they resolve what their hooks need; nothing is hooked until a mod listens (since 0.2.0-dev.29). The
+    // death producer decides decisions.native_guards (19d-pets' guard needs its hook, which then goes in with the
+    // guard). A producer that cannot hold here lowers its row with the reason (a row the gate holds says so itself).
     death_producer::ready();
     pickup_producer::ready();
     if (g_caps) {
-        if (death_producer::installed()) {
-            g_caps->report(g_owner, ks("decisions.native_guards"), KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, ks("the death boundary's guard (set_death_guard)"));
+        if (death_producer::usable()) {
+            g_caps->report(g_owner, ks("decisions.native_guards"), KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE,
+                           ks("the death boundary's guard (set_death_guard); its hook goes in with the first guard or death listener"));
         } else {
-            g_caps->report(g_owner, ks("decisions.native_guards"), KILN_CAP_UNAVAILABLE, death_producer::why_not_reason(),
-                           ks(death_producer::why_not()));
-            if (death_producer::why_not_reason() == KILN_CAP_REASON_FAULTED || death_producer::why_not_reason() == KILN_CAP_REASON_SERVICE_MISSING)
-                g_caps->report(g_owner, ks("events.death"), KILN_CAP_UNAVAILABLE, death_producer::why_not_reason(), ks(death_producer::why_not()));
+            const std::string why = death_producer::why_not();
+            g_caps->report(g_owner, ks("decisions.native_guards"), KILN_CAP_UNAVAILABLE, death_producer::why_not_reason(), ks(why.c_str()));
+            if (death_producer::why_not_reason() != KILN_CAP_REASON_POLICY)
+                g_caps->report(g_owner, ks("events.death"), KILN_CAP_UNAVAILABLE, death_producer::why_not_reason(), ks(why.c_str()));
         }
-        // The same for events.pickup: a feature that resolved but whose hook could not go in reads unavailable with why
-        // (unresolved rows already say so themselves).
-        if (!pickup_producer::installed() &&
-            (pickup_producer::why_not_reason() == KILN_CAP_REASON_FAULTED || pickup_producer::why_not_reason() == KILN_CAP_REASON_SERVICE_MISSING))
-            g_caps->report(g_owner, ks("events.pickup"), KILN_CAP_UNAVAILABLE, pickup_producer::why_not_reason(), ks(pickup_producer::why_not()));
+        if (!pickup_producer::usable() && pickup_producer::why_not_reason() != KILN_CAP_REASON_POLICY) {
+            const std::string why = pickup_producer::why_not();
+            g_caps->report(g_owner, ks("events.pickup"), KILN_CAP_UNAVAILABLE, pickup_producer::why_not_reason(), ks(why.c_str()));
+        }
         // The rows of chapter 07 that this build does not have (0.2.0-dev.29), so none of them reads on: player build
         // pieces wait for their replay gate (07 S0/S9, after 06a's program wraps), managed terraforming is out of V1
         // (owner decision 10), the component watches (07 S7, kiln.component_changes) are not built yet, and an
@@ -425,6 +480,13 @@ bool resolve(uint32_t entity, Row* out) {
 }
 void hook_kind(uint32_t kind) {
     if (kind < 64) g_hook_kinds.fetch_or(1ull << kind);
+}
+void hook_kind_off(uint32_t kind) {
+    if (kind < 64) g_hook_kinds.fetch_and(~(1ull << kind));
+}
+bool holding_allowed() { return true; }
+void lower(const char* row, uint32_t reason, const char* why) {
+    if (g_caps) g_caps->report(g_owner, ks(row), KILN_CAP_UNAVAILABLE, reason, ks(why));
 }
 void logf(int level, const char* fmt, ...) {
     char b[512];

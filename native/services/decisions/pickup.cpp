@@ -24,6 +24,7 @@
 #include "host.h"
 #include "kiln_hook.hpp"
 #include "pickup_core.h"
+#include "producer_arm.h"
 #include "services/kiln_players.h"
 
 namespace kiln::decisions::pickup_producer {
@@ -43,10 +44,9 @@ uint32_t g_zone_hash = 0, g_range_hash = 0, g_item_hash = 0;
 const KilnPlayersApi* g_players = nullptr;
 
 kiln::MidHook2 g_hook;
+uintptr_t g_helper = 0;  // events/PickupInRange: hooked at the first listener (ProducerArm)
 pickup::Exposures g_exposures;
-std::atomic<bool> g_armed{false};
-std::string g_why = "the pickup producer did not start";
-uint32_t g_why_reason = KILN_CAP_REASON_SERVICE_MISSING;
+ProducerArm g_arm;  // Ready at the start, Armed once a mod listens for a walk-over pickup
 std::atomic<uint32_t> g_logged{0};
 std::atomic<uint64_t> g_off_world{0};
 
@@ -56,7 +56,7 @@ struct HookPorts {
     KilnRegisters& r;
     uint32_t e = UINT32_MAX;
 
-    bool armed() const { return g_armed.load(std::memory_order_relaxed); }
+    bool armed() const { return g_arm.armed() && host::holding_allowed(); }
     bool server_world() const { return host::in_server_world(reinterpret_cast<const void*>(r.rdx)); }  // RDX: the context
     uint32_t receiver() const { return *reinterpret_cast<const uint32_t*>(r.rsp + kReceiverArg); }
     bool any_interest() const { return host::interest_state(KILN_DECISION_WALKOVER) != 0; }
@@ -136,8 +136,7 @@ struct SamplePorts {
 };
 
 void not_in(const char* why, uint32_t reason, int level) {
-    g_why = why;
-    g_why_reason = reason;
+    g_arm.refuse(why, reason);
     host::logf(level, "decisions: walk-over pickups are not held: %s", why);
 }
 
@@ -164,21 +163,44 @@ void ready() {
     g_item_hash = world->component_hash(ks("PickupItem"));
     g_players = static_cast<const KilnPlayersApi*>(api->service(ks(KILN_PLAYERS_SERVICE), KILN_PLAYERS_VERSION));
     g_current = reinterpret_cast<CurrentEntityFn>(current);
-    if (!g_hook.install(api, host::owner(), helper, &pickup_mid, "kiln.decisions/walk-over-pickup", 100))
-        return not_in(g_hook.error() ? g_hook.error() : "the pickup hook could not be installed", KILN_CAP_REASON_FAULTED, KILN_LOG_WARN);
-    g_why.clear();
-    g_why_reason = KILN_CAP_REASON_NONE;
-    g_armed.store(true);
+    g_helper = helper;
+    g_arm.ready();
     host::hook_kind(KILN_DECISION_WALKOVER);
-    host::logf(KILN_LOG_INFO, "decisions: walk-over pickups can be held (entry hook at events/PickupInRange; the interaction helper is untouched)");
+    host::logf(KILN_LOG_INFO, "decisions: walk-over pickups can be held; the entry hook at events/PickupInRange goes in when a mod listens "
+               "for one, nothing is hooked before");
 }
 
-bool installed() { return g_armed.load(); }
-const char* why_not() { return g_why.c_str(); }
-uint32_t why_not_reason() { return g_why_reason; }
+bool arm() {
+    if (g_arm.armed()) return true;
+    const bool ok = g_arm.arm([](std::string& error) {
+        if (g_hook.install(host::api(), host::owner(), g_helper, &pickup_mid, "kiln.decisions/walk-over-pickup", 100)) return true;
+        error = g_hook.error() ? g_hook.error() : "the pickup hook could not be installed";
+        return false;
+    });
+    static std::atomic<bool> told{false};
+    if (told.exchange(true)) return ok;
+    if (ok) {
+        host::logf(KILN_LOG_INFO, "decisions: walk-over pickups are held from now on (entry hook at events/PickupInRange; the interaction helper "
+                   "is untouched)");
+    } else if (g_arm.state() == ProducerArm::State::Refused && g_arm.reason() == KILN_CAP_REASON_FAULTED) {
+        const std::string why = g_arm.why();
+        host::logf(KILN_LOG_WARN, "decisions: walk-over pickups are not held: %s", why.c_str());
+        host::hook_kind_off(KILN_DECISION_WALKOVER);
+        host::lower("events.pickup", KILN_CAP_REASON_FAULTED, why.c_str());
+    } else {
+        told.store(false);  // refused at the start: its row already says why
+    }
+    return ok;
+}
+
+bool installed() { return g_arm.armed(); }
+bool usable() { return g_arm.usable(); }
+std::string why_not() { return g_arm.why(); }
+uint32_t why_not_reason() { return g_arm.reason(); }
+bool busy() { return g_exposures.size() != 0; }
 
 void discover(std::vector<uint32_t>& wanted) {
-    if (!g_armed.load(std::memory_order_relaxed) || host::interest_state(KILN_DECISION_WALKOVER) == 0) return;
+    if (!g_arm.armed() || host::interest_state(KILN_DECISION_WALKOVER) == 0) return;
     // Drops: every entity with PickupItemZone (the walk-over program's own set). Receivers: the live players; a
     // spawned character as receiver is named by the interest itself (decisions.cpp adds those ids).
     static std::vector<KilnEntity> found;  // world thread only
@@ -207,13 +229,13 @@ void discover(std::vector<uint32_t>& wanted) {
 }
 
 void window_begin(uint64_t epoch, uint64_t step) {
-    if (!g_armed.load(std::memory_order_relaxed)) return;
+    if (!g_arm.armed()) return;
     SamplePorts s;
     g_exposures.sample(epoch, step, host::broker(), s, true);
 }
 
 void window_end(uint64_t epoch, uint64_t step) {
-    if (!g_armed.load(std::memory_order_relaxed)) return;
+    if (!g_arm.armed()) return;
     SamplePorts s;
     g_exposures.sample(epoch, step, host::broker(), s, false);
 }
@@ -221,7 +243,7 @@ void window_end(uint64_t epoch, uint64_t step) {
 void world_stopped() {
     g_exposures.clear();
     const auto& s = g_exposures.stats;
-    if (g_armed.load())
+    if (g_arm.armed())
         host::logf(KILN_LOG_INFO,
                    "decisions: walk-over pickups this world: filed %llu (%llu on a worker thread), refused visits %llu, permitted %llu, released %llu, "
                    "exposures closed %llu, reopened %llu, metadata misses %llu, dropped %llu, other worlds' visits passed %llu",
@@ -234,7 +256,7 @@ void world_stopped() {
 
 KilnResult reevaluate(uint32_t drop, uint32_t receiver, uint32_t* reset) {
     if (reset) *reset = 0;
-    if (!g_armed.load()) return KILN_ERR_UNAVAILABLE;
+    if (!g_arm.armed()) return KILN_OK;  // nobody listened yet: no exposure was held, nothing to reopen
     const uint32_t n = g_exposures.reopen(drop, receiver, host::broker());
     if (reset) *reset = n;
     return KILN_OK;

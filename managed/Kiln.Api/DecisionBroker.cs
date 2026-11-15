@@ -133,6 +133,26 @@ internal static unsafe class DecisionsNative
         public delegate* unmanaged[Cdecl]<ulong, ulong, void> WindowEnd;
     }
 
+    /// <summary>The table with the members appended after <see cref="Table"/>: set_death_guard and enqueue_native
+    /// (native callers only), prepare_kind, window_wanted and window_faulted (since 0.2.0-dev.29; the last two are the
+    /// core's). A member is read only when <c>Base.Header.Size</c> covers it (<see cref="Has"/>).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableTail
+    {
+        public Table Base;
+        public void* SetDeathGuard;
+        public void* EnqueueNative;
+        public delegate* unmanaged[Cdecl]<uint, byte*, uint, int> PrepareKind;
+        public void* WindowWanted;
+        public void* WindowFaulted;
+    }
+
+    /// <summary>Whether <paramref name="t"/>'s header covers the member at byte <paramref name="offset"/>.</summary>
+    public static bool Has(Table* t, int offset) => t != null && t->Header.Size >= (uint)(offset + sizeof(nint));
+
+    /// <summary>Where prepare_kind is in the table (bytes).</summary>
+    public static readonly int PrepareKindOffset = sizeof(Table) + 2 * sizeof(nint);
+
     [StructLayout(LayoutKind.Sequential)]
     public struct WindowState
     {
@@ -152,8 +172,8 @@ internal static unsafe class DecisionsNative
     /// <summary>The mirrors have the sizes the header asserts.</summary>
     internal static bool LayoutMatchesNative =>
         sizeof(EntityKey) == 40 && sizeof(Request) == 1168 && sizeof(Interest) == 40 && sizeof(Answer) == 32 &&
-        sizeof(Receipt) == 208 && sizeof(Outcome) == 328 && sizeof(Table) == 136 && sizeof(WindowState) == 48 &&
-        sizeof(ClockTable) == 16;
+        sizeof(Receipt) == 208 && sizeof(Outcome) == 328 && sizeof(Table) == 136 && sizeof(TableTail) == 176 &&
+        PrepareKindOffset == 152 && sizeof(WindowState) == 48 && sizeof(ClockTable) == 16;
 
     /// <summary>The payload size the service accepts for <paramref name="kind"/>; 0 for a kind it refuses.</summary>
     internal static int PayloadSize(uint kind) => kind switch
@@ -372,10 +392,10 @@ internal static unsafe class DecisionBroker
             next[kind] = producer;
             Volatile.Write(ref _producers, next);
         }
-        // the row can read on where the service is not (an older runtime, a service that took another consumer): ask it
+        // the row can read on where the service is not (an older runtime, a service that took another consumer): ask it;
+        // and a subscription is what puts the kind's game hook in (since 0.2.0-dev.29 nothing is hooked before)
         foreach (var type in producer.EventTypes)
-            EventProducers.Register(type, producer.Capability, () => (SupportedKinds >> (int)kind & 1) != 0 ? null
-                : Available ? $"kiln.decisions has no producer of kind {kind} in this build" : "kiln.decisions is not here");
+            EventProducers.Register(type, producer.Capability, () => Prepare(kind));
         Start();
     }
 
@@ -475,6 +495,25 @@ internal static unsafe class DecisionBroker
 
     /// <summary>Whether the service's table is here (no call into it).</summary>
     internal static bool Available => Table() != null;
+
+    /// <summary>Makes the service ready to hold <paramref name="kind"/> now: a hooked kind's game hook goes in at its
+    /// first subscriber (kiln.decisions' prepare_kind, since 0.2.0-dev.29). Null: it holds; else why it cannot (the
+    /// service lowered the kind's row with that reason). Any thread; asked at every subscription to the kind's events
+    /// (cheap once the hook is in).</summary>
+    internal static string? Prepare(uint kind)
+    {
+        var t = Table();
+        if (t == null) return "kiln.decisions is not here";
+        if ((t->SupportedKinds() >> (int)kind & 1) == 0) return $"kiln.decisions has no producer of kind {kind} in this build";
+        if (!DecisionsNative.Has(t, DecisionsNative.PrepareKindOffset)) return null;  // an older table: its hooks are in from the start
+        var prepare = ((DecisionsNative.TableTail*)t)->PrepareKind;
+        if (prepare == null) return null;
+        var reason = stackalloc byte[192];
+        var rc = prepare(kind, reason, 192);
+        if (rc == DecisionsNative.Ok) return null;
+        var text = DecisionsNative.Text(reason, 192);
+        return text.Length == 0 ? $"kiln.decisions refused kind {kind} ({rc})" : text;
+    }
 
     /// <summary>The kinds the service has a producer for (bit n: kind n); 0 without the service. Any thread.</summary>
     internal static ulong SupportedKinds

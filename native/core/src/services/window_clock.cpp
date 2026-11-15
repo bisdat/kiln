@@ -47,6 +47,27 @@ bool call_guarded(WindowFn fn, uint64_t epoch, uint64_t step) {
     return false;
 }
 
+struct Ask {
+    WantedFn fn;
+    uint32_t out;
+};
+void KILN_CALL run_ask(void* user) {
+    auto* a = static_cast<Ask*>(user);
+    a->out = a->fn();
+}
+// kiln.decisions' window_wanted, guarded like a window call (a fault counts as one).
+bool ask_guarded(WantedFn fn, uint32_t* out) {
+    Ask a{fn, 0};
+    unsigned long code = 0;
+    if (guard::task(&run_ask, &a, &code)) {
+        *out = a.out;
+        return true;
+    }
+    KLOG_E("window clock: kiln.decisions' window_wanted faulted (0x%08lx)", code);
+    *out = 0;
+    return false;
+}
+
 void note_faults(uint32_t mask) {
     if (!mask) return;
     if ((mask & 1) && !(g_faulted & 1)) KLOG_E("window clock: kiln.decisions faulted in a window call; it gets no further one");
@@ -92,7 +113,11 @@ bool init() {
 KILN_SERVICE(window_clock, KILN_WINDOW_CLOCK_SERVICE, KILN_WINDOW_CLOCK_VERSION, &kTable, &init);
 
 void enable_windows(bool on) { g_windows.store(on); }
-bool wants_end() { return g_windows.load(std::memory_order_relaxed) && g_any.load(std::memory_order_relaxed); }
+// Since 0.2.0-dev.29 only the services begun in this step count: kiln.decisions with nothing to do (no listener,
+// nothing held) makes no step wait for the world's jobs.
+bool wants_end() {
+    return g_windows.load(std::memory_order_relaxed) && g_any.load(std::memory_order_relaxed) && g_core.begun() != 0;
+}
 
 void world_started() {
     g_core.world_started();
@@ -104,7 +129,7 @@ void pre(uint64_t step) {
     g_core.pre(step, GetCurrentThreadId());
 }
 
-void begin() { note_faults(g_core.begin(g_windows.load(std::memory_order_relaxed), g_tables, &call_guarded)); }
+void begin() { note_faults(g_core.begin(g_windows.load(std::memory_order_relaxed), g_tables, &call_guarded, &ask_guarded)); }
 void end() { note_faults(g_core.end(g_tables, &call_guarded)); }
 void stopping() { g_core.stopping(); }
 void stopped() { g_core.stopped(); }

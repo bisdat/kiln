@@ -34,6 +34,11 @@ the next Pre on the tick thread. So:
   is posted in the next Pre, answered there, and the game runs (or skips) the input in that step.
 - **Which ones are held:** those a handler's `EventFilter.ForEntity` names; a handler without a filter (also one for
   a base class such as `KilnEvent`) holds every one of its kind. Nothing is held while nobody listens.
+- **Nothing is hooked until a mod listens.** The death and pickup hooks go in at the first `Events.On` for their event
+  (or, for death, the first native guard) and stay for the process. If a hook cannot go in at that moment, its row is
+  lowered with the reason and that `Events.On` throws `KilnUnavailableException` naming the row. While nothing is
+  listened for or held, kiln.decisions gets no step window, and the step does not wait for the world's jobs on its
+  account.
 - **Only the server world's.** A game client that hosts runs the death and pickup programs in its own client and
   prediction worlds too, with entity ids that overlap the server world's; a joined client has no server world. The
   hooks tell the worlds apart by the storage the program's job names (as kiln.world's program wraps do) and pass every
@@ -106,7 +111,7 @@ and `AppliedHealth`.
 | Row | Off when |
 |---|---|
 | `kiln.decisions`, `kiln.window_clock` | the service is not loaded, or the core has no `tick.wait_jobs` (no step window without the world's jobs done) |
-| `events.death` | its symbols do not resolve on the game build, or its hook could not go in; on since 0.2.0-dev.29 and not yet confirmed in a real game (`07-events.decision-rollback`) |
+| `events.death` | its symbols do not resolve on the game build, the world layout constants (`world.storage`, `storage.kind`) are unknown, kiln.combat is missing, or its hook could not go in at the first subscription; on since 0.2.0-dev.29 and not yet confirmed in a real game (`07-events.decision-rollback`) |
 | `events.pickup` | as `events.death` (also not yet confirmed in a real game: `07-events.decision-rollback`) |
 | `events.equip` | kiln.playerstate cannot hold an equipment input alone (an older kiln-players.dll, no hold point on the build), or kiln.decisions is not here |
 | `decisions.native_guards` | the death hook is not in (unresolved, faulted) |
@@ -129,12 +134,16 @@ player session), is not held in that step.
 - One consumer: the managed host's dispatcher. `attach`, `interest`, the request and outcome batches (freeze, read,
   ack; a read consumes nothing), `answer`.
 - `set_death_guard(owner, fn)`: `fn(epoch, entity, health)` is asked at the death boundary for every entity with health
-  0 or less, before any interest, on the death program's thread (a worker on a busy server): return 1 to skip that
-  entity's death in this step. Native code of a pinned module, cheap, no managed call. One guard at a time.
+  0 or less in the server world, before any interest, on the death program's thread (a worker on a busy server):
+  return 1 to skip that entity's death in this step. Native code of a pinned module, cheap, no managed call. One guard
+  at a time. Setting the first guard puts the death hook in.
 - `enqueue_native(owner, request, sink, user, &id)`: a native Pre adapter's decision (kind 18, kiln.items' equipment
   sets). The dispatcher decides it like any other; `sink` is called exactly once with its outcome record, on the world
   thread, outside the service's lock.
 - Both were appended after `window_end`; check `header.size` before calling.
+- `prepare_kind(kind, reason, size)` (appended in 0.2.0-dev.29): puts a kind's hook in now (the managed dispatcher calls
+  it at a subscription); `KILN_ERR_UNAVAILABLE` with the reason when it cannot. `window_wanted` and `window_faulted`
+  after it are the core's.
 - `kiln.window_clock` v1 (`kiln_window_clock.h`): the step's phase (Pre 1, Preparing 2, Sim 3, AfterJobs 4, Post 5,
   Stopping 6), the world epoch and the process session. World reads are legal on the world thread in phases 1, 2, 4
   and 5 only.

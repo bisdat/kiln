@@ -13,7 +13,9 @@ public sealed unsafe class DecisionsFakeTests
         var decisions = (uint*)KitBackend.Instance.Service("kiln.decisions", 1);
         var clock = (uint*)KitBackend.Instance.Service("kiln.window_clock", 1);
         Assert.True(decisions != null && clock != null);
-        Assert.Equal((136u, 1u), (decisions[0], decisions[1]));  // header: size (16 functions), version
+        // header: size (21 members: the 16 of the first table, set_death_guard, enqueue_native, and since 0.2.0-dev.29
+        // prepare_kind, window_wanted, window_faulted), version
+        Assert.Equal((176u, 1u), (decisions[0], decisions[1]));
         Assert.Equal((16u, 1u), (clock[0], clock[1]));
         Assert.Contains(Coverage.All, r => r.Capabilities.Contains("kiln.decisions") && r.Capabilities.Contains("kiln.window_clock") && r.Kind == CoverageKind.RecordingFake);
     }

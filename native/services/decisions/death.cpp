@@ -22,6 +22,7 @@
 #include "death_core.h"
 #include "host.h"
 #include "kiln_hook.hpp"
+#include "producer_arm.h"
 #include "services/kiln_combat.h"
 
 namespace kiln::decisions::death_producer {
@@ -35,15 +36,14 @@ constexpr uintptr_t kActorSlot = 0x48;  // [rsp+0x48] at the boundary: the Actor
 
 CurrentEntityFn g_current = nullptr;
 StateTestFn g_state_test = nullptr;
-uintptr_t g_next = 0;  // events/DeathNextEntity
+uintptr_t g_next = 0;      // events/DeathNextEntity
+uintptr_t g_boundary = 0;  // events/DeathBoundary: hooked at the first listener (ProducerArm)
 const KilnCombatApi* g_combat = nullptr;
 uint32_t g_health_hash = 0, g_actor_hash = 0;
 
 kiln::MidHook2 g_hook;
 death::Holds g_holds;
-std::atomic<bool> g_armed{false};
-std::string g_why = "the death producer did not start";
-uint32_t g_why_reason = KILN_CAP_REASON_SERVICE_MISSING;
+ProducerArm g_arm;  // Ready at the start, Armed once a mod listens (or a native guard is set)
 std::atomic<uint32_t> g_logged{0};
 std::atomic<uint64_t> g_off_world{0};  // holds filed off the world thread (a worker running the death program)
 
@@ -66,7 +66,7 @@ struct HookPorts {
     uint32_t e = UINT32_MAX;
 
     int32_t health() const { return static_cast<int32_t>(static_cast<uint32_t>(r.rax)); }
-    bool armed() const { return g_armed.load(std::memory_order_relaxed); }
+    bool armed() const { return g_arm.armed() && host::holding_allowed(); }
     bool server_world() const { return host::in_server_world(reinterpret_cast<const void*>(r.rsi)); }  // RSI: the context
     uint32_t entity() {
         if (e == UINT32_MAX) {
@@ -138,8 +138,7 @@ uint32_t finish(Finish& f, void*) {
 }
 
 void not_in(const char* why, uint32_t reason, int level) {
-    g_why = why;
-    g_why_reason = reason;
+    g_arm.refuse(why, reason);
     host::logf(level, "decisions: deaths are not held: %s", why);
 }
 
@@ -174,23 +173,44 @@ void ready() {
     g_next = next;
     g_combat = combat;
     host::broker().set_finisher(KILN_DECISION_DEATH, &finish, nullptr);
-    if (!g_hook.install(api, host::owner(), boundary, &death_mid, "kiln.decisions/death-boundary", 100)) {
-        not_in(g_hook.error() ? g_hook.error() : "the death hook could not be installed", KILN_CAP_REASON_FAULTED, KILN_LOG_WARN);
-        return;
-    }
-    g_why.clear();
-    g_why_reason = KILN_CAP_REASON_NONE;
-    g_armed.store(true);
+    g_boundary = boundary;
+    g_arm.ready();
     host::hook_kind(KILN_DECISION_DEATH);
-    host::logf(KILN_LOG_INFO, "decisions: deaths can be held (hook at events/DeathBoundary, skip to events/DeathNextEntity)");
+    host::logf(KILN_LOG_INFO, "decisions: deaths can be held; the hook at events/DeathBoundary goes in when a mod listens for a death (or a "
+               "native guard is set), nothing is hooked before");
 }
 
-bool installed() { return g_armed.load(); }
-const char* why_not() { return g_why.c_str(); }
-uint32_t why_not_reason() { return g_why_reason; }
+bool arm() {
+    if (g_arm.armed()) return true;
+    const bool ok = g_arm.arm([](std::string& error) {
+        if (g_hook.install(host::api(), host::owner(), g_boundary, &death_mid, "kiln.decisions/death-boundary", 100)) return true;
+        error = g_hook.error() ? g_hook.error() : "the death hook could not be installed";
+        return false;
+    });
+    static std::atomic<bool> told{false};
+    if (told.exchange(true)) return ok;
+    if (ok) {
+        host::logf(KILN_LOG_INFO, "decisions: deaths are held from now on (hook at events/DeathBoundary, skip to events/DeathNextEntity)");
+    } else if (g_arm.state() == ProducerArm::State::Refused && g_arm.reason() == KILN_CAP_REASON_FAULTED) {
+        const std::string why = g_arm.why();
+        host::logf(KILN_LOG_WARN, "decisions: deaths are not held: %s", why.c_str());
+        host::hook_kind_off(KILN_DECISION_DEATH);
+        host::lower("events.death", KILN_CAP_REASON_FAULTED, why.c_str());
+        host::lower("decisions.native_guards", KILN_CAP_REASON_FAULTED, why.c_str());
+    } else {
+        told.store(false);  // not ready (refused at the start): its rows already say why
+    }
+    return ok;
+}
+
+bool installed() { return g_arm.armed(); }
+bool usable() { return g_arm.usable(); }
+std::string why_not() { return g_arm.why(); }
+uint32_t why_not_reason() { return g_arm.reason(); }
+bool busy() { return g_holds.size() != 0 || g_guard.load(std::memory_order_relaxed) != nullptr; }
 
 void discover(std::vector<uint32_t>& wanted) {
-    if (!g_armed.load(std::memory_order_relaxed) || host::interest_state(KILN_DECISION_DEATH) != 2) return;
+    if (!g_arm.armed() || host::interest_state(KILN_DECISION_DEATH) != 2) return;
     // An unfiltered listener: every entity with Health needs a row (one pass over the entity map; the metadata budget
     // of 8192 rows turns the producer off rather than covering part of the world).
     static std::vector<KilnEntity> found;  // world thread only
@@ -213,14 +233,14 @@ void discover(std::vector<uint32_t>& wanted) {
 }
 
 void window_begin(uint64_t epoch, uint64_t step) {
-    if (!g_armed.load(std::memory_order_relaxed)) return;
+    if (!g_arm.armed()) return;
     g_holds.housekeeping(epoch, step, host::broker(), [](uint32_t e) { return host::interested(KILN_DECISION_DEATH, e); });
 }
 
 void world_stopped() {
     g_holds.clear();
     const auto& s = g_holds.stats;
-    if (g_armed.load())
+    if (g_arm.armed())
         host::logf(KILN_LOG_INFO, "decisions: deaths this world: filed %llu (%llu on a worker thread), held visits %llu, released %llu, guarded %llu, metadata misses %llu, dropped %llu, other worlds' visits passed %llu",
                    static_cast<unsigned long long>(s.filed.load()), static_cast<unsigned long long>(g_off_world.load()), static_cast<unsigned long long>(s.held.load()),
                    static_cast<unsigned long long>(s.released.load()), static_cast<unsigned long long>(s.guarded.load()),
@@ -237,8 +257,8 @@ KilnResult set_guard(KilnOwner owner, KilnDeathGuardFn guard) {
         g_guard_owner = 0;
         return KILN_OK;
     }
-    if (!g_armed.load()) return KILN_ERR_UNAVAILABLE;
     if (g_guard_owner != 0 && g_guard_owner != owner) return KILN_ERR_UNAVAILABLE;
+    if (!arm()) return KILN_ERR_UNAVAILABLE;  // a guard needs the hook: it goes in with the first guard
     g_guard_owner = owner;
     g_guard.store(guard, std::memory_order_release);
     host::logf(KILN_LOG_INFO, "decisions: a native death guard is set (owner %llu)", static_cast<unsigned long long>(owner));

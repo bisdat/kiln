@@ -10,6 +10,8 @@ flags=(-std=c++20 -O1 -g -pthread -Wall -Wextra -fsanitize=address,undefined -fn
 g++ "${flags[@]}" "$here/contract_test.cpp" -o "$out/contract_test"
 "$out/contract_test"
 g++ "${flags[@]}" "$here/world_gate_test.cpp" -o "$out/world_gate_test"
+g++ "${flags[@]}" "$here/producer_arm_test.cpp" -o "$out/producer_arm_test"
+"$out/producer_arm_test"
 "$out/world_gate_test"
 g++ "${flags[@]}" "$here/queue_test.cpp" -o "$out/queue_test"
 "$out/queue_test"

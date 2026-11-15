@@ -174,7 +174,9 @@ typedef void(KILN_CALL* KilnDecisionSinkFn)(const KilnDecisionOutcomeV1* outcome
 
 typedef struct KilnDecisionsApiV1 {
     KilnServiceHeader header;
-    /* Bit n is set when kind n has a producer that is installed and on. Kind 33 is never set in v1. */
+    /* Bit n is set when kind n has a producer that is on: for a hooked kind (1, 2) its symbols resolved, and its hook
+     * goes in at the kind's first prepare_kind or interest (since 0.2.0-dev.29: nothing is hooked while nobody
+     * listens); the bit goes when that install fails. Kind 33 is never set in v1. */
     uint64_t(KILN_CALL* supported_kinds)(void);
     /* Makes `dispatcher` the one consumer. KILN_ERR_UNAVAILABLE while another owner is attached. */
     KilnResult(KILN_CALL* attach)(KilnOwner dispatcher);
@@ -237,6 +239,26 @@ typedef struct KilnDecisionsApiV1 {
      * full; the sink has been told QUEUE_DROPPED under *request_id. */
     KilnResult(KILN_CALL* enqueue_native)(KilnOwner producer, const KilnDecisionRequestV1* request, KilnDecisionSinkFn sink, void* user,
                                           uint64_t* request_id);
+
+    /* ======== appended since 0.2.0-dev.29: producers that start when a mod listens, and the core's window calls.
+     * Check header.size covers a member before calling it. ========
+     * prepare_kind: makes kind `kind`'s producer ready to hold now. A hooked kind (1 death, 2 walk-over pickup) puts its
+     * game hook in the first time (it stays for the process; the install stops the game's other threads for a
+     * moment); a prepared kind (16, 17, 18) needs nothing. KILN_OK: the kind holds from its first interest on.
+     * KILN_ERR_UNAVAILABLE: it cannot (the service is off or shut down, the symbols did not resolve, the hook did not go
+     * in: the kind's capability row is lowered with the reason, which is copied to `reason` when it is given,
+     * NUL-terminated). KILN_ERR_INVALID_ARGUMENT: no such kind. Any thread. The first interest of a hooked kind and
+     * set_death_guard prepare it as well. */
+    KilnResult(KILN_CALL* prepare_kind)(uint32_t kind, char* reason, uint32_t reason_size);
+    /* Core only, after the last Pre subscriber of a step: nonzero when the step needs window_begin and window_end
+     * (an interest, an open request, a hold, a sampled exposure, a native guard, or a shutdown or invalidation to carry
+     * out). Zero: the core makes neither call in this step and does not wait for the world's jobs on this service's
+     * account. World thread. */
+    uint32_t(KILN_CALL* window_wanted)(void);
+    /* Core only: a window call of this service faulted (`code` is the exception code); the core makes no further
+     * window call of it in this process. The service stops holding at once (both producers pass to the game), ends
+     * what it held fail open (CAPABILITY_RELEASED) without reading the world, and lowers its rows. World thread. */
+    void(KILN_CALL* window_faulted)(uint32_t code);
 } KilnDecisionsApiV1;
 
 #ifdef __cplusplus

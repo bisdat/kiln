@@ -287,7 +287,8 @@ uintptr_t server_step(uintptr_t storage, uintptr_t ticked, uintptr_t r8, uintptr
     if (g_faulted.load()) return result;
 
     try {
-        // A published window service makes the step wait for the world's jobs also when nobody subscribed to Post.
+        // A window service begun in this step makes it wait for the world's jobs also when nobody subscribed to Post
+        // (kiln.decisions with no listener and nothing held is not begun: window_wanted).
         if (!g_post.empty() || window_clock::wants_end()) {
             if (g_wait_jobs) {
                 g_wait_jobs(storage - static_cast<uintptr_t>(g_world_storage));

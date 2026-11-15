@@ -65,6 +65,11 @@ internal sealed unsafe class DecisionsModel
     public Func<FakeDecisionAnswer, FakeDecisionFinish?>? Finisher;
     public int FailRequestReads, FailRequestAcks, FailOutcomeReads, FailOutcomeAcks;
     public ulong SupportedHookKinds;
+    /// <summary>prepare_kind's refusals by kind (the native install of that kind's hook failed with this reason): the
+    /// kind's row is lowered (faulted) and its bit leaves <see cref="SupportedHookKinds"/>, as the native service does.</summary>
+    public readonly Dictionary<uint, (string Row, string Reason)> PrepareRefusals = [];
+    /// <summary>How many prepare_kind calls the fake answered, by kind (a subscription asks it).</summary>
+    public readonly Dictionary<uint, int> Prepared = [];
 
     // ---- the harness's life ----
     public void Start(KilnHarness harness)
@@ -475,6 +480,27 @@ internal sealed unsafe class DecisionsModel
     /// <summary>kiln.decisions' reevaluate_pickup: forgets the suppressed walk-over exposures of (drop, receiver), 0 for
     /// any, as the native producer reopens them. Unavailable without a walk-over producer (<see cref="SupportedHookKinds"/>
     /// bit 2).</summary>
+    public int PrepareKind(uint kind, byte* reason, uint size)
+    {
+        if (reason != null && size > 0) reason[0] = 0;
+        if (kind is 0 or >= 64) return FakeTables.InvalidArgument;
+        (string Row, string Reason) refusal;
+        lock (_lock)
+        {
+            Prepared[kind] = Prepared.GetValueOrDefault(kind) + 1;
+            if ((SupportedKinds >> (int)kind & 1) == 0) return FakeTables.Unavailable;
+            if (!PrepareRefusals.TryGetValue(kind, out refusal)) return FakeTables.Ok;
+            SupportedHookKinds &= ~(1ul << (int)kind);
+        }
+        KitBackend.Instance.Capabilities.Report(KitBackend.CapabilityOwner, refusal.Row, CapState.Unavailable, CapReason.Faulted, refusal.Reason,
+            KitBackend.CapabilityOwner);
+        var bytes = System.Text.Encoding.UTF8.GetBytes(refusal.Reason);
+        var n = (int)Math.Min((uint)bytes.Length, size == 0 ? 0 : size - 1);
+        for (var i = 0; i < n; i++) reason[i] = bytes[i];
+        if (size > 0) reason[n] = 0;
+        return FakeTables.Unavailable;
+    }
+
     public int ReevaluatePickup(uint drop, uint receiver, uint* reset)
     {
         lock (_lock)

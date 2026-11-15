@@ -7,8 +7,8 @@ namespace kiln::window_clock {
 
 // Whether the window calls (phases 2 and 4) run at all: the tick hook has WaitWorldJobs.
 void enable_windows(bool on);
-// True when a window service is published and the windows are enabled: the step then waits for the world's jobs
-// and calls end(), also with no Post subscriber.
+// True when a window service was begun in this step and the windows are enabled: the step then waits for the
+// world's jobs and calls end(), also with no Post subscriber. A service that wanted nothing this step does not count.
 bool wants_end();
 
 void world_started();            // KILN_WORLD_STARTED (server), before its subscribers
