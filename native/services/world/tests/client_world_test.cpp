@@ -57,6 +57,15 @@ void map_each_u16(uintptr_t map, const std::function<void(uint32_t, uint16_t)>& 
     for (const auto& [k, v] : maps)
         if (k.first == map) fn(k.second, v);
 }
+// the core's answer about a client world's jobs at its stop (wraps.cpp's world_stop_drain in the service)
+bool g_engine_drain = false;
+StopDrain world_stop_drain(uint32_t, uint32_t wait_ms) {
+    StopDrain d;
+    d.engine = g_engine_drain;
+    d.text = g_engine_drain ? "the engine drains the world's jobs first (world.stop_drain.client)"
+                            : "a bounded wait (" + std::to_string(wait_ms) + " ms) only: this core has no world.stop_drain.client row";
+    return d;
+}
 void teleport_in_program(KilnProgramCtx*) {}
 void writes_world_changing() {}
 void writes_before_world(uintptr_t) {}
@@ -119,7 +128,9 @@ bool seh_read_u64(uintptr_t address, uint64_t* value) {
     return true;
 }
 bool seh_queue_push(void*, void*, uint8_t, uint32_t, uint32_t, void**) { return false; }
+const void* fail_copy_from = nullptr;  // the fake guard answers a fault for a read of this address
 bool seh_copy(void* to, const void* from, size_t size) {
+    if (from && from == fail_copy_from) return false;
     std::memcpy(to, from, size);
     return true;
 }
@@ -784,8 +795,11 @@ int main(int argc, char** argv) {
     check(g_latched.load() && log_count("client world stops: 1 call(s) of Kiln programs still running after") == 1,
           "a call still inside after the wait: the review's line, and the process latch");
     std::string w1;
-    check(state_of(1, KILN_WORLD_CLIENT, &w1) == KILN_PROGRAM_REFUSED && w1 == "a call of it was still running when the client world stopped",
-          "that side is refused for good, never reset to PENDING");
+    check(state_of(1, KILN_WORLD_CLIENT, &w1) == KILN_PROGRAM_REFUSED && w1.find("off until the game restarts") != std::string::npos &&
+              w1.find("still running") != std::string::npos,
+          "that side is refused for good with the latch's reason, never reset to PENDING");
+    check(log_count("program kiln_r_p1: a call was still running in the client world when it stopped") == 1,
+          "kiln.log names the program whose call was inside");
     check(state_of(2, KILN_WORLD_CLIENT, &w1) == KILN_PROGRAM_REFUSED && w1.find("off until the game restarts") != std::string::npos,
           "the others say the process latch");
     check(g_row.state == KILN_CAP_UNAVAILABLE && g_row.reason == KILN_CAP_REASON_FAULTED && g_row.text.find("still running") != std::string::npos,
@@ -795,7 +809,7 @@ int main(int argc, char** argv) {
     check(client.count() == 817 && state_of(1, KILN_WORLD_CLIENT) == KILN_PROGRAM_REFUSED,
           "the next client world registers nothing while the old call is still inside");
     lingering.join();  // the old call returns now, after the next world was set up, and its callback faults
-    check(state_of(1, KILN_WORLD_CLIENT, &w1) == KILN_PROGRAM_REFUSED && w1 == "a call of it was still running when the client world stopped" &&
+    check(state_of(1, KILN_WORLD_CLIENT, &w1) == KILN_PROGRAM_REFUSED && w1.find("off until the game restarts") != std::string::npos &&
               r1->side[KILN_WORLD_CLIENT].calls_in.load() == 0,
           "the old call's fault on its way out changes nothing of the side (its session was cleared)");
     KilnProgramDesc after_latch = system_desc("kiln_r_after");
@@ -835,8 +849,32 @@ int main(int argc, char** argv) {
     engine_calls = 0;
     on_world(client.at());
     engine_fault_name.clear();
-    check(state_of(1, KILN_WORLD_CLIENT) == KILN_PROGRAM_ACTIVE && client.count() == 818,
-          "the program registered before the fault is left as it is (the engine's table is not undone)");
+    check(client.count() == 818 && state_of(1, KILN_WORLD_CLIENT, &w1) == KILN_PROGRAM_REFUSED &&
+              w1.find("off until the game restarts: the engine's RegisterProgram faulted") != std::string::npos &&
+              r1->side[KILN_WORLD_CLIENT].session.load() == 0,
+          "the program registered before the fault stays in the engine's table (not undone) but is refused with the latch's "
+          "reason and out of the registration (one truth)");
+    {
+        Probe before_latch;
+        KilnHandle hb2 = 0;
+        r1->side[KILN_WORLD_CLIENT].open.store(false);
+        r1->side[KILN_WORLD_CLIENT].closing = false;
+        r1->side[KILN_WORLD_CLIENT].each.store(&probe_each);
+        r1->side[KILN_WORLD_CLIENT].user.store(&before_latch);
+        r1->side[KILN_WORLD_CLIENT].open.store(true);  // as if bound before the latch
+        Job j(client.storage(), {});
+        slice(r1, j);
+        check(before_latch.calls[KILN_WORLD_CLIENT].load() == 0 && hb2 == 0,
+              "its slices in that world run nothing (it never runs while the row says faulted)");
+        r1->side[KILN_WORLD_CLIENT].open.store(false);
+        r1->side[KILN_WORLD_CLIENT].each.store(nullptr);
+        r1->side[KILN_WORLD_CLIENT].user.store(nullptr);
+    }
+    int32_t table_state = -1;
+    KilnStr table_why{};
+    check(program_world_state(0, KILN_WORLD_CLIENT, &table_state, &table_why) == KILN_OK && table_state == KILN_PROGRAM_REFUSED &&
+              sv(table_why).find("RegisterProgram faulted") != std::string_view::npos,
+          "program_world_state(0, CLIENT): the client table's own state says the latch and why");
     check(state_of(2, KILN_WORLD_CLIENT, &w1) == KILN_PROGRAM_REFUSED && w1.find("RegisterProgram faulted") != std::string::npos,
           "the faulting one is refused with the fault");
     check(state_of(3, KILN_WORLD_CLIENT, &w1) == KILN_PROGRAM_REFUSED && w1.find("off until the game restarts") != std::string::npos &&
@@ -875,6 +913,159 @@ int main(int argc, char** argv) {
           "a raw read that faulted: refused, latched, the engine never called");
     unlatch();
     g_table_stop_wait_ms = 2000;
+
+    {  // ==== the package's closing review (its own scope: names of the earlier sections are reused) ====
+    reset_programs();
+    unlatch();
+    for (auto& t : g_table_storage) t.store(0);
+    g_names.push_back("kiln_c_ent");
+    KilnProgramDesc ent = system_desc("kiln_c_ent", 0);  // an entity program reading Health: one callback per entity
+    ent.read = KilnNames{health, 1, 0};
+    check(reserve_program_world("writer", "ent", &ent, kWorldBitClient | kWorldBitPrediction, kWorldBitClient) == KILN_OK,
+          "an entity program for the client world and the prediction storage");
+    Program* ce = g_programs[0];
+    client.make(KILN_WORLD_CLIENT, 817);
+    on_world(client.at());
+    int32_t st0 = -1;
+    check(program_world_state(0, KILN_WORLD_CLIENT, &st0, nullptr) == KILN_OK && st0 == KILN_PROGRAM_ACTIVE &&
+              program_world_state(0, KILN_WORLD_SERVER, &st0, nullptr) == KILN_ERR_NOT_FOUND,
+          "program_world_state(0, CLIENT) while a client world runs: ACTIVE (and handle 0 is no server program)");
+
+    // (1) a slice of 1,000 entities whose world begins to stop at entity 10: at most one more callback, then nothing of
+    // that world is touched (no iteration, no CurrentEntity, no helper), and the slice is finished on paper
+    struct Late {
+        std::atomic<int> calls{0};
+        std::atomic<bool> at_ten{false};
+        std::atomic<int> entity_before{-1}, entity_after{-1};
+        bool helpers_refused = false;
+    } late;
+    std::atomic<int> marks{0};
+    static std::atomic<int>* g_marks = nullptr;
+    g_marks = &marks;
+    fn.mark_written = [](void*, void*, void*, void*, uint16_t, uint8_t) { g_marks->fetch_add(1); };
+    KilnHandle hl = 0;
+    auto late_each = [](KilnProgramCtx* c, uint64_t* it, KilnEntity, void* user) {
+        auto& l = *static_cast<Late*>(user);
+        const int n = l.calls.fetch_add(1) + 1;
+        if (n == 1) l.entity_before = static_cast<int>(current_entity(c));
+        if (n != 10) return;
+        l.at_ten = true;
+        while (!g_table_stopping.load()) std::this_thread::yield();  // the main thread began the stop
+        uint32_t size = 7;
+        const uint64_t w[6] = {0, 1, 2, 3, 4, 5};
+        mark_written(c, w);
+        l.entity_after = static_cast<int>(current_entity(c));
+        l.helpers_refused = l.entity_after == 0 && !command_buffer(c) && !read_other(c, 1, 5, &size) && size == 0 &&
+                            !iter_next(c, it, 4096) && iter_begin(c, it, 4096) == KILN_ERR_UNAVAILABLE &&
+                            program_emit(c, kstr("ClientEvent"), w, 8) == KILN_ERR_UNAVAILABLE &&
+                            program_events(c, kstr("ClientEvent"), [](const void*, uint32_t, void*) {}, nullptr) == KILN_ERR_UNAVAILABLE &&
+                            !write_other(c, 1, 5, &size);
+    };
+    check(bind_program_world(40, kstr("writer"), kstr("ent"), KILN_WORLD_CLIENT, late_each, nullptr, &late, &hl) == KILN_OK,
+          "bound: a callback that holds the slice at entity 10 until the world begins to stop");
+    std::vector<uint32_t> thousand(1000);
+    for (uint32_t i = 0; i < 1000; ++i) thousand[i] = 5000 + i;
+    Job big(client.storage(), thousand, 1);
+    ProgramCtx big_ctx{big.bytes, 0, 0};
+    const uint64_t late_before = g_late_slices.load();
+    const int off_lines = log_count("off until the game restarts");
+    std::thread worker([&] { ce->desc.update(&big_ctx); });
+    while (!late.at_ten.load()) std::this_thread::yield();
+    client_stops(client.at());  // on the main thread, while the worker's slice is inside
+    worker.join();
+    check(late.calls.load() >= 10 && late.calls.load() <= 11, "a slice of 1,000 whose world stops at entity 10: at most one more callback");
+    check(late.entity_before.load() == 5000 && late.helpers_refused,
+          "inside that call after the stop began: CurrentEntity, the command buffer, read_other, iteration, emit and events refuse");
+    check(marks.load() == 0, "mark_written from a client program is a no-op (nothing marked for the save or replication)");
+    check(big_ctx.index == 1000 && g_late_slices.load() == late_before + 1,
+          "the slice is finished on paper (index = its entity count) and counted");
+    check(!g_latched.load() && log_count("its world began to stop while a slice of it ran") >= 1,
+          "no latch: the call left at its next entity, inside the stop's wait");
+    check(log_count("off until the game restarts") == off_lines, "no 'off until the game restarts' line without the latch");
+    fn.mark_written = nullptr;
+
+    // (2) the gate tells which world a slice belongs to: after world N stopped and N+1 registered, a job of N (its storage)
+    // is refused and counted; N+1's own slices and the prediction storage's run, a second prediction storage is refused
+    late.calls = 0;
+    late.at_ten = true;  // no hold
+    client2.make(KILN_WORLD_CLIENT, 817);
+    on_world(client2.at());  // world N+1 at another address: its storage is another
+    const uint64_t other_before = g_other_world_slices.load();
+    Job stale_job(client.storage(), {1, 2, 3}, 1);  // a job of world N entering late
+    slice(ce, stale_job);
+    check(late.calls.load() == 0 && g_other_world_slices.load() == other_before + 1 && logged_has("a slice of another world"),
+          "a job of the stopped world (its own storage) is refused and counted, with N+1's session");
+    Job fresh_job(client2.storage(), {1, 2, 3}, 1);
+    slice(ce, fresh_job);
+    check(late.calls.load() == 3, "N+1's own slice runs");
+    Probe pred_probe;
+    KilnHandle hpred = 0;
+    check(bind_program_world(41, kstr("writer"), kstr("ent"), KILN_WORLD_PREDICTION, &probe_each, nullptr, &pred_probe, &hpred) == KILN_OK,
+          "the prediction side bound");
+    FakeStorage prediction2(KILN_WORLD_PREDICTION);
+    Job pj(prediction.mem.data(), {9}, 1);
+    slice(ce, pj);
+    Job pj2(prediction2.mem.data(), {9}, 1);
+    slice(ce, pj2);
+    check(pred_probe.calls[KILN_WORLD_PREDICTION].load() == 1 && g_other_world_slices.load() == other_before + 2,
+          "the prediction storage's first slice names it for the session; another prediction storage is refused");
+    check(unbind_program_world(hpred) == KILN_OK, "prediction side unbound");
+
+    // (1c) the core's drain (06a, world.stop_drain.client): the stop's row and line say it; a call inside at the stop
+    // although the engine drained the world's jobs is an error and latches, also when it leaves within the wait
+    g_engine_drain = true;
+    client_stops(client2.at());
+    check(logged_has("Kiln client-table registration(s) closed for the next client world (0 call(s) running at the stop, 0 after") &&
+              logged_has("the engine drains the world's jobs first (world.stop_drain.client))") && !g_latched.load(),
+          "with the engine's drain: the stop line names it, nothing inside, no latch");
+    check(g_row.state == KILN_CAP_AVAILABLE && g_row.text.find("waiting for a world; at a world stop the engine drains") != std::string::npos,
+          "the row's text says which guarantee a stop has");
+    world_event(KILN_WORLD_STARTED, KILN_WORLD_CLIENT, client2.at());
+    check(g_row.text.find("a client world runs; at a world stop the engine drains") != std::string::npos, "also while a world runs");
+    client2.make(KILN_WORLD_CLIENT, 817);
+    on_world(client2.at());
+    Late brief;
+    KilnHandle hbrief = 0;
+    check(unbind_program_world(hl) == KILN_OK &&
+              bind_program_world(42, kstr("writer"), kstr("ent"), KILN_WORLD_CLIENT, late_each, nullptr, &brief, &hbrief) == KILN_OK,
+          "bound again: a callback that holds its slice at entity 10 until the stop begins, then leaves");
+    Job brief_job(client2.storage(), thousand, 1);
+    ProgramCtx brief_ctx{brief_job.bytes, 0, 0};
+    std::thread brief_worker([&] { ce->desc.update(&brief_ctx); });
+    while (!brief.at_ten.load()) std::this_thread::yield();
+    client_stops(client2.at());
+    brief_worker.join();
+    check(logged_has("call(s) of Kiln programs were inside although the engine drains") && g_latched.load() &&
+              g_row.state == KILN_CAP_UNAVAILABLE && g_row.text.find("although the engine drains") != std::string::npos,
+          "with the engine's drain a call inside at the stop is an error and latches, though it left within the wait");
+    std::string wb;
+    check(state_of(1, KILN_WORLD_CLIENT, &wb) == KILN_PROGRAM_REFUSED && wb.find("although the engine drains") != std::string::npos,
+          "every side says it");
+    g_engine_drain = false;
+    unlatch();
+    for (Program* p : g_programs)
+        for (Side& sd : p->side) sd.state.store(KILN_PROGRAM_PENDING), sd.reason.store(nullptr);
+    hl = hbrief;
+
+    // (4) raw reads under the guard: the storage kind in on_world, the event map in the first client Pre
+    client_stops(client2.at());
+    client.make(KILN_WORLD_CLIENT, 817);
+    fail_copy_from = client.storage() + kKind;
+    on_world(client.at());
+    fail_copy_from = nullptr;
+    check(logged_has("its storage's kind could not be read; no Kiln programs registered there") && client.count() == 817,
+          "a storage kind that cannot be read: nothing registered, kiln.log says so");
+    on_world(client.at());
+    g_client_world = client.at();
+    fail_seh_call = true;  // the event map's read faults
+    programs_client_pre(nullptr);
+    check(logged_has("client world 0x") && logged_has("reading its event map faulted"),
+          "the first client Pre's event-map dump under the guard: a fault is said, nothing else happens");
+    g_client_world = 0;
+    check(unbind_program_world(hl) == KILN_OK, "unbound");
+    client_stops(client.at());
+
+    }
 
     reset_programs();
     std::printf("client world programs: %s %d checks, %d failures\n", failures ? "FAIL" : "PASS", checks, failures);

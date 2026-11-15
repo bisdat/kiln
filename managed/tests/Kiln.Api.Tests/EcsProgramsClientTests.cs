@@ -265,6 +265,68 @@ public sealed unsafe class EcsProgramsClientTests : KilnTest
     }
 
     [Fact]
+    public void Callbacks_that_throw_on_several_workers_at_once_fail_the_binding_once_and_every_later_session_hears_it()
+    {
+        var seen = new List<EcsProgramRefusedEvent>();
+        Events.On<EcsProgramRefusedEvent>(seen.Add);
+        using var together = new Barrier(4);
+        var r = As(NewMod("pinner"), () => EcsPrograms.TryBind("pin", _ =>
+        {
+            together.SignalAndWait(TimeSpan.FromSeconds(5));  // four workers inside at once, then all throw
+            throw new InvalidOperationException("boom");
+        }, WorldKind.Client));
+        var workers = Enumerable.Range(0, 4).Select(_ => new Thread(() => _native.Run("pin"))).ToArray();
+        foreach (var w in workers) w.Start();
+        foreach (var w in workers) w.Join();
+        lock (Backend.Lines) Assert.Single(Backend.Lines, l => l.Contains("ECS program disabled", StringComparison.Ordinal));
+        _client.RunPre();
+        Assert.Contains("its callback threw InvalidOperationException: boom", Assert.Single(seen).Reason);
+        _client.RunPre();
+        Assert.Single(seen);  // once per client world session
+        _native.Session = 6;  // a later client world: kiln.world still says ACTIVE, the binding's own state is FAULTED
+        _client.RunPre();
+        Assert.Equal(2, seen.Count);
+        r.Handle!.Dispose();
+    }
+
+    [Fact]
+    public void A_bind_refused_by_the_latch_throws_with_the_latch_reason_even_while_the_row_still_says_available()
+    {
+        _native.Latched = "client-world programs are off until the game restarts: the engine's RegisterProgram faulted (0xc0000005)";
+        try
+        {
+            Assert.Equal(CapabilityState.Available, Capabilities.Get(EcsPrograms.ClientWorldCapability).State);  // not yet updated
+            var e = Assert.Throws<KilnUnavailableException>(() => As(NewMod("pinner"), () => EcsPrograms.TryBind("pin", _ => { }, WorldKind.Client)));
+            Assert.Contains("RegisterProgram faulted", e.Message);
+            Assert.DoesNotContain("still finishing", e.Message);
+        }
+        finally { _native.Latched = null; }
+        _native.Busy = true;  // the other KILN_ERR_UNAVAILABLE: the last binding's calls still finish
+        try
+        {
+            var r = As(NewMod("pinner"), () => EcsPrograms.TryBind("pin", _ => { }, WorldKind.Client));
+            Assert.False(r.Ok);
+            Assert.Contains("still finishing", r.Reason);
+        }
+        finally { _native.Busy = false; }
+    }
+
+    [Fact]
+    public void The_client_event_queue_never_holds_more_than_its_capacity()
+    {
+        var accepted = 0;
+        Parallel.For(0, ClientEvents.Capacity + 5000, new ParallelOptions { MaxDegreeOfParallelism = 8 }, _ =>
+        {
+            if (ClientEvents.Enqueue(new EcsProgramRefusedEvent("m", "k", WorldKind.Client, "x"))) Interlocked.Increment(ref accepted);
+        });
+        Assert.Equal(ClientEvents.Capacity, accepted);
+        Assert.Equal(ClientEvents.Capacity, ClientEvents.QueuedCount);
+        _client.RunPre();
+        Assert.Equal(0, ClientEvents.QueuedCount);
+        Assert.True(ClientEvents.Enqueue(new EcsProgramRefusedEvent("m", "k", WorldKind.Client, "after")));
+    }
+
+    [Fact]
     public void Events_of_a_client_world_that_ended_are_not_delivered()
     {
         var seen = new List<EcsProgramRefusedEvent>();
@@ -439,7 +501,8 @@ public sealed unsafe class EcsProgramsClientTests : KilnTest
         internal readonly Dictionary<string, (int State, string Reason)> States = [];
         private readonly Dictionary<ulong, string> _handles = [];
         private readonly Dictionary<string, nint> _reasons = [];
-        internal bool MainThread = true, CallRunning;
+        internal bool MainThread = true, CallRunning, Busy;
+        internal string? Latched;  // kiln.world's process latch: binds answer KILN_ERR_UNAVAILABLE, handle 0's state REFUSED
         internal ulong Session = 2;
         internal int Unbinds;
         private ulong _next = 0x1000;
@@ -536,6 +599,7 @@ public sealed unsafe class EcsProgramsClientTests : KilnTest
             var self = Current!;
             *handle = 0;
             if (!self.MainThread) return 4;  // KILN_ERR_WRONG_THREAD, as kiln.world off the main thread
+            if (self.Latched is not null || self.Busy) return 3;  // KILN_ERR_UNAVAILABLE
             var k = key.ToString();
             if (!Reserved.Contains((k, kind))) return 2;
             if (self.Bound.ContainsKey(k)) return 1;
@@ -563,6 +627,14 @@ public sealed unsafe class EcsProgramsClientTests : KilnTest
         private static int WorldState(ulong handle, uint kind, int* state, NativeStr* reason)
         {
             var self = Current!;
+            if (handle == 0)  // the client table's own state
+            {
+                *state = self.Latched is null ? 1 : 2;
+                var text = self.Latched ?? "";
+                if (!self._reasons.TryGetValue(text, out var at)) self._reasons[text] = at = Marshal.StringToHGlobalAnsi(text);
+                *reason = new NativeStr { Ptr = (byte*)at, Len = (nuint)text.Length };
+                return 0;
+            }
             if (!self._handles.TryGetValue(handle, out var k)) return 2;
             var (st, why) = self.States.TryGetValue(k, out var s) ? s : (1, "");
             *state = st;

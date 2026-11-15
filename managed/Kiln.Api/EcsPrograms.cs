@@ -161,6 +161,8 @@ public static unsafe class EcsPrograms
                 4 => throw new InvalidOperationException(
                     $"EcsPrograms.TryBind(\"{key}\", ..., WorldKind.{world}) must run on the game's main thread: in OnLoad (a client mod loads in the main menu) or through Client.Post"),
                 6 => throw new InvalidOperationException("the mod is unloading"),
+                // the row may not say it yet: kiln.world's own state of the client table tells the process latch apart
+                3 when TableLatch(client, world) is { } latched => throw new KilnUnavailableException(ClientWorldCapability, latched),
                 3 when row.State == CapabilityState.Available => new EcsProgramBinding(false,
                     $"'{key}': the last binding's calls are still finishing; try again after the next client step", world, null),
                 3 => throw new KilnUnavailableException(ClientWorldCapability, row.ReasonText),
@@ -181,6 +183,17 @@ public static unsafe class EcsPrograms
     }
 
     internal const int ProgramPending = 0, ProgramActive = 1, ProgramRefused = 2, ProgramFaulted = 3, ProgramSkipped = 4;
+
+    // kiln.world's state of the client table itself (program_world_state with handle 0, since 0.2.0-dev.29): the process
+    // latch's reason once client-world programs are off until the game restarts, else null.
+    private static string? TableLatch(EcsClientTable* t, WorldKind world)
+    {
+        int state = ProgramPending;
+        NativeStr reason = default;
+        if (t->ProgramWorldState(0, (uint)world, &state, &reason) != 0 || state != ProgramRefused) return null;
+        var text = reason.ToString();
+        return text.Length > 0 ? text : "client-world programs are off until the game restarts";
+    }
 
     private static readonly string[] DeclarationLists = ["tpl", "tplOptional", "read", "readOptional", "write", "writeOptional",
         "singletonsRead", "singletonsWrite", "otherTpl", "otherRead", "otherWrite", "with", "without", "anyOf", "eventsIn", "eventsOut"];
@@ -311,14 +324,26 @@ public static unsafe class EcsPrograms
         internal readonly WorldKind World = world;
         internal GCHandle Root;
         internal ulong Handle;
-        internal bool Failed;
+        private int _failed;  // 1 once its callback threw: it runs no more until bound again
+        private string? _failedReason;
+        internal bool Failed => Volatile.Read(ref _failed) != 0;
+        /// <summary>Marks the binding failed: true for the first caller only (callbacks on several workers may throw at once).</summary>
+        internal bool Fail(string reason)
+        {
+            if (Interlocked.CompareExchange(ref _failed, 1, 0) != 0) return false;
+            Volatile.Write(ref _failedReason, reason);
+            return true;
+        }
         internal volatile bool DisposeRequested;
         private readonly object _disposeLock = new();
         internal ulong ReportedSession;  // the client world session whose refusal was raised (ClientBindings)
 
-        /// <summary>A client or prediction binding's state in the world that runs now (kiln.world's program_world_state).</summary>
+        /// <summary>A client or prediction binding's state in the world that runs now: FAULTED with the managed reason once
+        /// its callback threw (kiln.world does not see a managed exception: its state stays ACTIVE), else kiln.world's
+        /// program_world_state.</summary>
         internal (int State, string Reason) WorldState()
         {
+            if (Failed) return (ProgramFaulted, Volatile.Read(ref _failedReason) ?? "its callback threw");
             var t = (EcsClientTable*)Native;
             int state = ProgramPending;
             NativeStr reason = default;
@@ -503,12 +528,11 @@ public static unsafe class EcsPrograms
             }
             catch (Exception error)
             {
-                binding.Failed = true;
-                binding.Mod.Log.Error($"ECS program disabled: {error}");
-                // a client or prediction program: the same notification as a native fault, in the client world's next Pre
-                if (binding.World != WorldKind.Server && Events.HasSubscribers<EcsProgramRefusedEvent>())
-                    ClientEvents.Enqueue(new EcsProgramRefusedEvent(binding.Mod.Info.Id, binding.Key, binding.World,
-                        $"its callback threw {error.GetType().Name}: {error.Message}; it stays off until it is bound again"));
+                // the first throw only (workers may throw at once): logged once; a client or prediction binding then says
+                // FAULTED (WorldState), and the refusal poll raises EcsProgramRefusedEvent in the client world's next Pre
+                // and once in every later client world session, as for a native fault
+                if (binding.Fail($"its callback threw {error.GetType().Name}: {error.Message}; it stays off until it is bound again"))
+                    binding.Mod.Log.Error($"ECS program disabled: {error}");
             }
             finally { ModContext.CurrentMod = previous; }
         }
