@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "tick.h"
+#include "tick_stats.h"
 #include "tick_watch.h"
 
 #include <algorithm>
@@ -102,8 +103,24 @@ struct Window {
     uint64_t steps = 0;
     uint64_t clock = 0;
     std::vector<float> step, pre, post, interval;
+    // since 0.2.0-dev.29, the parts of Pre and Post (tick_stats.h): the server world's job wait per step that waited, the
+    // window services' end, and the worst step
+    std::vector<float> wait;
+    stats::Part wait_part, windows;
+    stats::Worst worst;
 };
+// A new window. The vectors keep their capacity: after the first minute a step allocates nothing for its numbers.
+void reset(Window& w) {
+    w.start = 0;
+    w.steps = 0;
+    w.clock = 0;
+    for (auto* v : {&w.step, &w.pre, &w.post, &w.interval, &w.wait}) v->clear();
+    w.wait_part = stats::Part{};
+    w.windows = stats::Part{};
+    stats::reset(w.worst);
+}
 Window g_win;
+stats::Subs g_slots;  // the server world's subscribers' times (tick thread), parallel to g_pre / g_post
 std::FILE* g_stats = nullptr;
 std::mutex g_stats_mutex;  // the server and the client worlds write tick-stats.jsonl from different threads
 
@@ -150,6 +167,7 @@ struct KindState {
     double prev_start = 0;
     uint64_t step = 0;
     Window win;
+    stats::Subs slots;  // parallel to pre / post
 };
 KindState g_kind[KILN_WORLD_KINDS];
 uintptr_t g_server_world_seen = 0;  // tick thread
@@ -165,37 +183,89 @@ float pct(std::vector<float>& v, double q) {
 
 float maxof(const std::vector<float>& v) { return v.empty() ? 0 : *std::max_element(v.begin(), v.end()); }
 
-// Writes one tick-stats.jsonl line when the window spans 60 s. `world` names the kind on a client ("server", ...);
-// null on a dedicated server, whose lines keep their original shape.
-void write_window(Window& w, const char* world, size_t pre_subs, size_t post_subs) {
+// One tick-stats.jsonl line of the window (write_window).
+void write_line(Window& w, const stats::Subs& slots, const char* world, double span, size_t pre_subs, size_t post_subs,
+                bool waits) {
+    SYSTEMTIME t;
+    GetLocalTime(&t);
+    stats::Line l;
+    l.year = t.wYear;
+    l.month = t.wMonth;
+    l.day = t.wDay;
+    l.hour = t.wHour;
+    l.minute = t.wMinute;
+    l.second = t.wSecond;
+    l.world = world;
+    l.steps = static_cast<unsigned long long>(w.steps);
+    l.rate = w.steps * 1000.0 / span;
+    l.clock_rate = w.clock * 1000.0 / span;
+    l.step = {pct(w.step, 0.5), pct(w.step, 0.99), maxof(w.step)};
+    l.pre = {pct(w.pre, 0.5), pct(w.pre, 0.99), maxof(w.pre)};
+    l.post = {pct(w.post, 0.5), pct(w.post, 0.99), maxof(w.post)};
+    l.interval = {pct(w.interval, 0.5), pct(w.interval, 0.99), maxof(w.interval)};
+    l.pre_count = pre_subs;
+    l.post_count = post_subs;
+    l.waits = waits;
+    l.wait = {pct(w.wait, 0.5), pct(w.wait, 0.99), maxof(w.wait)};
+    l.wait_part = w.wait_part;
+    l.windows = w.windows;
+    auto name = [](uint64_t owner) { return reg::owner_name(owner); };
+    l.post_subs = stats::by_owner(slots.post, slots.gone_post, name);
+    l.pre_subs = stats::by_owner(slots.pre, slots.gone_pre, name);
+    stats::top(l.pre_subs, stats::kPreTop);
+    if (w.worst.total >= 0) {
+        l.has_worst = true;
+        l.worst_pre = w.worst.pre;
+        l.worst_step = w.worst.step;
+        l.worst_post = w.worst.post;
+        l.worst_wait = w.worst.wait;
+        l.worst_windows = w.worst.windows;
+        l.worst_hour = w.worst.hour;
+        l.worst_minute = w.worst.minute;
+        l.worst_second = w.worst.second;
+        l.worst_milli = w.worst.milli;
+        l.worst_post_subs = stats::by_owner(w.worst.post_subs, name);
+        l.worst_pre_subs = stats::by_owner(w.worst.pre_subs, name);
+        stats::top(l.worst_pre_subs, stats::kPreTop);
+    }
+    const std::string line = stats::format(l);
+    {
+        std::lock_guard lock(g_stats_mutex);
+        if (g_stats) {
+            std::fputs(line.c_str(), g_stats);
+            std::fflush(g_stats);
+        }
+    }
+}
+
+// Writes one tick-stats.jsonl line when the window spans 60 s (the line: tick_stats.h). `world` names the kind on a client
+// ("server", ...); null on a dedicated server, whose lines keep their original shape. `waits`: this world's Post waits for
+// its jobs (the server world with WaitWorldJobs), so the line has the wait and the window services' end. Owner names are
+// looked up here, once a minute, not on each step.
+void write_window(Window& w, stats::Subs& slots, const char* world, size_t pre_subs, size_t post_subs, bool waits) {
     const double now = now_ms();
     if (w.start == 0) w.start = now;
     const double span = now - w.start;
     if (span < 60000.0) return;
-    {
-        std::lock_guard lock(g_stats_mutex);
-        if (g_stats) {
-            SYSTEMTIME t;
-            GetLocalTime(&t);
-            char tag[48] = "";
-            if (world) std::snprintf(tag, sizeof tag, "\"world\":\"%s\",", world);
-            std::fprintf(
-                g_stats,
-                "{\"time\":\"%04u-%02u-%02uT%02u:%02u:%02u\",%s\"steps\":%llu,\"rate\":%.2f,\"clock_rate\":%.2f,"
-                "\"step_ms\":{\"p50\":%.3f,\"p99\":%.3f,\"max\":%.3f},"
-                "\"pre_ms\":{\"p50\":%.4f,\"p99\":%.4f,\"max\":%.3f},"
-                "\"post_ms\":{\"p50\":%.4f,\"p99\":%.4f,\"max\":%.3f},"
-                "\"interval_ms\":{\"p50\":%.2f,\"p99\":%.2f,\"max\":%.2f},\"subs\":{\"pre\":%zu,\"post\":%zu}}\n",
-                t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond, tag,
-                static_cast<unsigned long long>(w.steps), w.steps * 1000.0 / span, w.clock * 1000.0 / span,
-                pct(w.step, 0.5), pct(w.step, 0.99), maxof(w.step), pct(w.pre, 0.5), pct(w.pre, 0.99), maxof(w.pre),
-                pct(w.post, 0.5), pct(w.post, 0.99), maxof(w.post), pct(w.interval, 0.5), pct(w.interval, 0.99),
-                maxof(w.interval), pre_subs, post_subs);
-            std::fflush(g_stats);
-        }
+    try {  // a line that cannot be built (out of memory) is skipped; it never stops the tick
+        write_line(w, slots, world, span, pre_subs, post_subs, waits);
+    } catch (...) {
     }
-    w = Window{};
+    reset(w);
+    stats::clear(slots);
     w.start = now;
+}
+
+// The step's numbers into its window: the worst step keeps its breakdown and the local time it ended.
+void account_worst(Window& w, const stats::Subs& slots, float pre, float step, float post, float wait, float windows,
+                   bool post_ran) {
+    if (!stats::beat(w.worst, pre, step, post, wait, windows, slots, post_ran)) return;
+    SYSTEMTIME t;
+    GetLocalTime(&t);
+    w.worst.hour = t.wHour;
+    w.worst.minute = t.wMinute;
+    w.worst.second = t.wSecond;
+    w.worst.milli = t.wMilliseconds;
 }
 
 // ---- world events ----
@@ -235,8 +305,13 @@ void begin_world(uint32_t kind, uintptr_t world) {
     const uint32_t session = g_sessions[kind].fetch_add(1) + 1;
     worldinfo::set_world(kind, world);
     if (session > 1) {  // tick-stats windows per session: a window must not span the main menu between two worlds
-        if (kind == KILN_WORLD_SERVER) g_win = Window{};
-        else g_kind[kind].win = Window{};
+        if (kind == KILN_WORLD_SERVER) {
+            reset(g_win);
+            stats::clear(g_slots);
+        } else {
+            reset(g_kind[kind].win);
+            stats::clear(g_kind[kind].slots);
+        }
     }
     g_kind_thread[kind].store(GetCurrentThreadId());
     if (kind == KILN_WORLD_SERVER) g_thread.store(GetCurrentThreadId());
@@ -253,9 +328,17 @@ void begin_world(uint32_t kind, uintptr_t world) {
 }
 
 // ---- server world (kind 0) ----
-void run(std::vector<std::shared_ptr<reg::TickSub>>& subs, const KilnTickInfo& info) {
-    for (auto& s : subs) {
-        if (!s->live.load(std::memory_order_acquire)) continue;
+// Runs the subscribers in order, each one's time into its slot (`slots` is parallel to `subs`; one clock read per
+// subscriber: each end is the next one's start, `t` the first start).
+void run(std::vector<std::shared_ptr<reg::TickSub>>& subs, std::vector<stats::Slot>& slots, const KilnTickInfo& info,
+         double t) {
+    const bool timed = slots.size() == subs.size();
+    for (size_t i = 0; i < subs.size(); ++i) {
+        auto& s = subs[i];
+        if (!s->live.load(std::memory_order_acquire)) {
+            if (timed) slots[i].cur = 0;
+            continue;
+        }
         unsigned long code = 0;
         if (!guard::tick(s->fn, &info, s->user, &code)) {
             s->live.store(false);
@@ -263,6 +346,12 @@ void run(std::vector<std::shared_ptr<reg::TickSub>>& subs, const KilnTickInfo& i
             KLOG_E("tick subscriber of '%s' faulted (0x%08lx) and was removed", reg::owner_name(s->owner).c_str(),
                    code);
         }
+        const double e = now_ms();
+        if (timed) {
+            slots[i].cur = static_cast<float>(e - t);
+            slots[i].part.add(slots[i].cur);
+        }
+        t = e;
     }
 }
 
@@ -283,6 +372,9 @@ uintptr_t server_step(uintptr_t storage, uintptr_t ticked, uintptr_t r8, uintptr
         if (v != g_version) {
             g_pre = reg::tick_subs(KILN_TICK_PRE);
             g_post = reg::tick_subs(KILN_TICK_POST);
+            stats::rebind(g_slots.pre, g_slots.gone_pre, g_pre);
+            stats::rebind(g_slots.post, g_slots.gone_post, g_post);
+            stats::reserve(g_win.worst, g_slots);
             g_version = v;
         }
         reg::drain_posts();
@@ -301,7 +393,7 @@ uintptr_t server_step(uintptr_t storage, uintptr_t ticked, uintptr_t r8, uintptr
             g_last = info;
         }
         window_clock::pre(info.step);
-        run(g_pre, info);
+        run(g_pre, g_slots.pre, info, now_ms());
         // After the last Pre subscriber: the window services sample the world (kiln_window_clock.h, phase 2), then Sim.
         window_clock::begin();
     } catch (...) {
@@ -317,11 +409,21 @@ uintptr_t server_step(uintptr_t storage, uintptr_t ticked, uintptr_t r8, uintptr
     try {
         // A window service begun in this step makes it wait for the world's jobs also when nobody subscribed to Post
         // (kiln.decisions with no listener and nothing held is not begun: window_wanted).
+        float wait_ms = 0, windows_ms = 0;
+        bool post_ran = false;
         if (!g_post.empty() || window_clock::wants_end()) {
             if (g_wait_jobs) {
                 g_wait_jobs(storage - static_cast<uintptr_t>(g_world_storage));
+                const double tw = now_ms();
                 window_clock::end();  // phase 4: the window services compare and release; then Post (phase 5)
-                run(g_post, info);
+                const double te = now_ms();
+                run(g_post, g_slots.post, info, te);
+                wait_ms = static_cast<float>(tw - t2);
+                windows_ms = static_cast<float>(te - tw);
+                post_ran = true;
+                g_win.wait.push_back(wait_ms);
+                g_win.wait_part.add(wait_ms);
+                g_win.windows.add(windows_ms);
             } else if (!g_post_warned) {
                 g_post_warned = true;
                 KLOG_W("tick: Post subscribers exist but WaitWorldJobs is unresolved; Post is not delivered");
@@ -332,6 +434,8 @@ uintptr_t server_step(uintptr_t storage, uintptr_t ticked, uintptr_t r8, uintptr
         g_win.step.push_back(static_cast<float>(t2 - t1));
         g_win.pre.push_back(static_cast<float>(t1 - t0));
         g_win.post.push_back(static_cast<float>(t3 - t2));
+        account_worst(g_win, g_slots, static_cast<float>(t1 - t0), static_cast<float>(t2 - t1), static_cast<float>(t3 - t2),
+                      wait_ms, windows_ms, post_ran);
         g_win.clock += info.clock_delta;
         ++g_win.steps;
         g_prev_clock = info.clock;
@@ -362,19 +466,35 @@ void refresh(uint32_t kind, KindState& K) {
         }
     }
     for (KilnHandle h : dead) remove(h);
+    stats::rebind(K.slots.pre, K.slots.gone_pre, K.pre);
+    stats::rebind(K.slots.post, K.slots.gone_post, K.post);
+    stats::reserve(K.win.worst, K.slots);
     K.sub_version = g_sub_version.load(std::memory_order_acquire);
     K.reg_version = rv;
 }
 
-void run_subs(std::vector<std::shared_ptr<Sub>>& subs, const KilnTickInfo& info) {
-    for (auto& s : subs) {
-        if (!s->live.load(std::memory_order_acquire)) continue;
+// As run() for the server world: each subscriber's time into its slot, one clock read per subscriber.
+void run_subs(std::vector<std::shared_ptr<Sub>>& subs, std::vector<stats::Slot>& slots, const KilnTickInfo& info,
+              double t) {
+    const bool timed = slots.size() == subs.size();
+    for (size_t i = 0; i < subs.size(); ++i) {
+        auto& s = subs[i];
+        if (!s->live.load(std::memory_order_acquire)) {
+            if (timed) slots[i].cur = 0;
+            continue;
+        }
         unsigned long code = 0;
         if (!guard::tick(s->tick, &info, s->user, &code)) {
             remove(s->handle);
             KLOG_E("%s-world tick subscriber of '%s' faulted (0x%08lx) and was removed", kKindName[info.world_kind],
                    reg::owner_name(s->owner).c_str(), code);
         }
+        const double e = now_ms();
+        if (timed) {
+            slots[i].cur = static_cast<float>(e - t);
+            slots[i].part.add(slots[i].cur);
+        }
+        t = e;
     }
 }
 
@@ -420,7 +540,7 @@ uintptr_t other_step(uint32_t kind, uintptr_t storage, uintptr_t ticked, uintptr
         info.wall_delta_ms = (K.step == 1 || fresh) ? 0 : t0 - K.prev_start;
         g_steps[kind].store(K.step, std::memory_order_relaxed);
         g_last_step_ms[kind].store(static_cast<int64_t>(t0), std::memory_order_relaxed);
-        if (!K.pre.empty()) run_subs(K.pre, info);
+        if (!K.pre.empty()) run_subs(K.pre, K.slots.pre, info, now_ms());
     } catch (...) {
         disable("client/prediction Pre");
         return g_hook.call<uintptr_t>(storage, ticked, r8, r9);
@@ -432,18 +552,21 @@ uintptr_t other_step(uint32_t kind, uintptr_t storage, uintptr_t ticked, uintptr
     if (g_faulted.load()) return result;
 
     try {
-        if (!K.post.empty()) run_subs(K.post, info);
+        const bool post_ran = !K.post.empty();
+        if (post_ran) run_subs(K.post, K.slots.post, info, t2);  // a client-side world's step finished its own jobs
         const double t3 = now_ms();
         Window& w = K.win;
         if (K.step > 1 && info.wall_delta_ms > 0) w.interval.push_back(static_cast<float>(t0 - K.prev_start));
         w.step.push_back(static_cast<float>(t2 - t1));
         w.pre.push_back(static_cast<float>(t1 - t0));
         w.post.push_back(static_cast<float>(t3 - t2));
+        account_worst(w, K.slots, static_cast<float>(t1 - t0), static_cast<float>(t2 - t1), static_cast<float>(t3 - t2), 0, 0,
+                      post_ran);
         w.clock += info.clock_delta;
         ++w.steps;
         K.prev_clock = info.clock;
         K.prev_start = t0;
-        write_window(w, kKindName[kind], K.pre.size(), K.post.size());
+        write_window(w, K.slots, kKindName[kind], K.pre.size(), K.post.size(), false);
     } catch (...) {
         disable("client/prediction Post");
     }
@@ -584,7 +707,8 @@ KilnResult last(KilnTickInfo* out) {
 }
 
 void write_stats_if_due() {
-    write_window(g_win, image().side == KILN_SIDE_CLIENT ? "server" : nullptr, g_pre.size(), g_post.size());
+    write_window(g_win, g_slots, image().side == KILN_SIDE_CLIENT ? "server" : nullptr, g_pre.size(), g_post.size(),
+                 g_wait_jobs != nullptr);
 }
 
 KilnResult subscribe_world_tick(KilnOwner owner, uint32_t kind, int32_t phase, KilnTickFn fn, void* user,
