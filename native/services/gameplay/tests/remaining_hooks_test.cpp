@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <cstdlib>
+#include <algorithm>
 #include "services/kiln_caps.h"
 namespace kg {
 KilnResult component_change(KilnOwner,KilnEntity,uint32_t,const void*,uint32_t,uint32_t) { return KILN_ERR_UNAVAILABLE; }
@@ -105,6 +106,21 @@ int main(int argc,char** argv) {
         } else if(mode=="r4-all-pace") {
             ready=0; CHECK(kg::t_request_hooks(77,31)==KILN_OK); CHECK(installs==0); ready=1;
             for(unsigned n=1;n<=5;++n) { kg::hooks_poll(); CHECK(installs==n*2); CHECK(kg::build_installed()==(n==5)); }
+        } else if(mode=="r4-late-timing") {
+            // A write while a world runs stops the game's other threads: each one is logged at info with the time the
+            // installer call took and its place in the Pre. Nobody plays during a no-world install: no line then.
+            static std::vector<std::string> lines;
+            api.log=[](KilnOwner,int level,KilnStr t) { if(level==KILN_LOG_INFO) lines.emplace_back(t.ptr,t.len); };
+            auto seen=[&](const char* text) { return std::count_if(lines.begin(),lines.end(),[&](const std::string& s) { return s.find(text)!=std::string::npos; }); };
+            ready=2; CHECK(kg::t_request_hooks(77,KILN_GAMEPLAY_HOOK_CRAFT)==KILN_OK); CHECK(installs==1);
+            CHECK(seen("during play")==0);
+            ready=0; CHECK(kg::t_request_hooks(77,KILN_GAMEPLAY_HOOK_BUILD)==KILN_OK); CHECK(installs==1); ready=1;
+            kg::hooks_poll();
+            CHECK(seen("kiln.gameplay: gameplay/PlaceBlueprint went in during play: the installer call took ")==1);
+            CHECK(seen(" ms on the world's thread (write 1 in this Pre)")==1);
+            for(int n=0;n<6;++n) kg::hooks_poll();
+            CHECK(kg::build_installed()); CHECK(seen("went in during play")==5);
+            CHECK(seen("kiln.gameplay: gameplay/PickUpProp went in during play")==1);
         } else if(mode=="r4-build-subscribe") {
             ready=0; KilnHandle h=0; CHECK(kg::t_subscribe(77,1u<<KILN_GAMEPLAY_BUILD,&event,nullptr,&h)==KILN_OK);
             CHECK(installs==0); ready=1; for(int n=0;n<3;++n) kg::hooks_poll(); CHECK(installs==6); CHECK(kg::build_installed());

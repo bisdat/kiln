@@ -2,6 +2,7 @@
 #include "demand_hooks.h"
 #include "services/kiln_caps.h"
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -45,8 +46,12 @@ void refuse(int i, const std::string& why) {
     auto& g=groups[i]; g.state=3; g.reason_code=KILN_CAP_REASON_FAULTED; g.reason="refused: "+why+"; installed pass-through targets "+std::to_string(g.next);
     KG_W("kiln.gameplay: %s hooks %s",names[i],g.reason.c_str()); publish(i);
 }
+unsigned pre_writes=0;  // late installer calls in the current hooks_poll (one Pre)
 void advance(int i, const KilnHooksApi* h, unsigned& budget) {
     auto& g=groups[i];
+    // While a world runs, each checked write stops the game's other threads (kiln.hooks logs that time at debug and
+    // warns above 50 ms): the whole call is timed here and logged at info, so a late install's cost is in kiln.log.
+    const bool late=h->typed_install_ready()==1;
     while(g.next<g.entries.size() && budget) {
         auto& e=g.entries[g.next];
         if(!e.target) { refuse(i,std::string(e.label)+" did not resolve"); return; }
@@ -61,9 +66,15 @@ void advance(int i, const KilnHooksApi* h, unsigned& budget) {
         std::string forced; unsigned target=0;
         if(lab_enabled) { std::ifstream control(lab_control / "gameplay.unchecked"); control >> forced >> target; }
         const bool inject=forced==names[i] && target==g.next;
+        const auto t0=std::chrono::steady_clock::now();
         const auto rc=inject ? static_cast<KilnResult>(KILN_HOOKS_ERR_UNCHECKED) :
             h->detour_typed_checked(g_owner,e.target,&order,&sig,e.handler,e.link,&e.handle);
         if(inject) KG_W("kiln.gameplay: LAB %s target %u unchecked attempt %u (nothing written)",names[i],g.next,g.retries+1);
+        else if(late) {
+            const double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-t0).count();
+            KG_I("kiln.gameplay: %s %s during play: the installer call took %.1f ms on the world's thread (write %u in this Pre)",
+                 e.label,rc==KILN_OK ? "went in" : "was refused",ms,++pre_writes);
+        }
         if(rc!=KILN_OK) {
             char text[512]{}; size_t n=0;
             if(!inject && h->typed_refusal) h->typed_refusal(text,sizeof text,&n);
@@ -119,6 +130,7 @@ void legacy_result() {
 void hooks_poll() {
     const auto* h=installer(); if(!h || !h->typed_install_ready()) return;
     std::lock_guard lock(hooks_publication());
+    pre_writes=0;
     if(legacy_skip_same_pre) { legacy_skip_same_pre=false; return; }
     // Legacy-only first-world batch precedes old Host's first Pre/OnLoad. A checked refusal still retries later;
     // all ordinary late demand (and those retries) shares the two-target budget.
