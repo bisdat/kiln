@@ -35,6 +35,7 @@
 #include <vector>
 
 #include "kiln_api.h"
+#include "services/kiln_spawn.h"
 #include "services/kiln_types.h"
 #include "services/kiln_world.h"
 
@@ -661,7 +662,7 @@ struct {
     std::vector<float> step_us[3];
     std::mutex mu;
     std::vector<float> call_ns;   // game_slice_archetype, P1
-    uint64_t calls = 0, ok = 0, other = 0;
+    uint64_t calls = 0, ok = 0, empty = 0, other = 0;  // empty: a slice with no entity (NOT_FOUND, not a failure)
 } g_cost;
 double qpc_us(LARGE_INTEGER a, LARGE_INTEGER b) {
     static LARGE_INTEGER f{};
@@ -683,6 +684,7 @@ void KILN_CALL st_archetype_cost(KilnGameSlice* s, void*) {
     std::lock_guard lock(g_cost.mu);
     ++g_cost.calls;
     if (rc == KILN_OK) ++g_cost.ok;
+    else if (rc == KILN_ERR_NOT_FOUND) ++g_cost.empty;
     else ++g_cost.other;
     if (g_cost.call_ns.size() < 200000) g_cost.call_ns.push_back(static_cast<float>(qpc_us(a, b) * 1000.0));
 }
@@ -696,8 +698,8 @@ void KILN_CALL on_post(const KilnTickInfo*, void*) {
 // n counts from the restart boot's start; the mark row ran at 10. True when the phase is over.
 bool cost_phase(uint64_t n) {
     auto& c = g_cost;
-    const uint64_t p0 = 100, p1 = p0 + kCostSteps + 20, p2 = p1 + kCostSteps + 20, end = p2 + kCostSteps + 20;
-    if (n == 20) {
+    const uint64_t p0 = 150, p1 = p0 + kCostSteps + 20, p2 = p1 + kCostSteps + 20, end = p2 + kCostSteps + 20;
+    if (n == 70) {
         KilnGameProgramsStatus st{};
         st.size = sizeof st;
         W->game_programs_status(&st);
@@ -713,7 +715,7 @@ bool cost_phase(uint64_t n) {
                 w.handle = 0;
         }
         say("cost: a census of %zu game programs for 60 steps", c.census.size());
-    } else if (n == 80) {
+    } else if (n == 130) {
         for (auto& w : c.census) {
             if (w.seen.slices.load() > c.busy_slices) c.busy_slices = w.seen.slices.load(), c.busy = w.name;
             if (w.handle) W->game_program_unwrap(w.handle);
@@ -742,24 +744,69 @@ bool cost_phase(uint64_t n) {
         const size_t head = std::min<size_t>(calls.size(), static_cast<size_t>(c.busy_slices / 60 + 1));
         const std::vector<float> first(calls.begin(), calls.begin() + static_cast<ptrdiff_t>(head)),
             later(calls.begin() + static_cast<ptrdiff_t>(head), calls.end());
-        row(c.busy_slices > 0 && c.calls > 0 && c.other == 0 && c.step_us[0].size() >= kCostSteps / 2 &&
+        row(c.busy_slices > 0 && c.ok > 0 && c.other == 0 && c.step_us[0].size() >= kCostSteps / 2 &&
                 c.step_us[1].size() >= kCostSteps / 2 && c.step_us[2].size() >= kCostSteps / 2,
             "archetype cost: %s (%llu slices in 60 steps); step us p50/p99: P0 no link %.1f/%.1f (%zu steps), P1 link + one "
             "archetype stage %.1f/%.1f (%zu), P2 link only %.1f/%.1f (%zu); game_slice_archetype ns p50/p99: first step "
-            "(the map) %.0f/%.0f (%zu calls), later (the slice record) %.0f/%.0f (%zu calls); %llu of %llu OK",
+            "(the map) %.0f/%.0f (%zu calls), later (the slice record) %.0f/%.0f (%zu calls); %llu of %llu OK, %llu empty",
             c.busy.c_str(), static_cast<unsigned long long>(c.busy_slices), pct(c.step_us[0], 0.5), pct(c.step_us[0], 0.99),
             c.step_us[0].size(), pct(c.step_us[1], 0.5), pct(c.step_us[1], 0.99), c.step_us[1].size(),
             pct(c.step_us[2], 0.5), pct(c.step_us[2], 0.99), c.step_us[2].size(), pct(first, 0.5), pct(first, 0.99),
             first.size(), pct(later, 0.5), pct(later, 0.99), later.size(), static_cast<unsigned long long>(c.ok),
-            static_cast<unsigned long long>(c.calls));
+            static_cast<unsigned long long>(c.calls), static_cast<unsigned long long>(c.empty));
         return true;
     }
     return false;
 }
 
+// ---- kiln.spawn inside the world's step (dev.29): a native stage asks kiln.spawn to create and to destroy. The empty lab
+// server runs its slices inline on the world's own thread, which passes the tick-thread check; kiln.spawn must refuse
+// both there (KILN_ERR_WRONG_THREAD: kiln.world's in_program answers 1) and create nothing.
+struct {
+    KilnHandle handle = 0;
+    std::atomic<int> calls{0}, on_world{0}, spawn_rc{-1}, destroy_rc{-1};
+    std::atomic<uint32_t> spawned{0};
+    uint32_t before = 0;
+} g_midstep;
+const KilnSpawnApi* spawn_api() {
+    return static_cast<const KilnSpawnApi*>(g_api->service(ks(KILN_SPAWN_SERVICE), KILN_SPAWN_VERSION));
+}
+void KILN_CALL st_spawn_midstep(KilnGameSlice* s, void*) {
+    const KilnSpawnApi* sp = spawn_api();
+    if (!sp || g_midstep.calls.fetch_add(1) != 0) return;  // once
+    if (s->thread_is_world) g_midstep.on_world.fetch_add(1);
+    KilnSpawnRequest r{};
+    r.size = sizeof r;
+    r.template_name = ks("Prop_NPC_Water_Well_a");
+    r.tag = ks("systems-test-midstep");
+    KilnEntity e = 0;
+    g_midstep.spawn_rc = sp->spawn(&r, &e);
+    g_midstep.spawned = e;
+    g_midstep.destroy_rc = sp->destroy(5000);
+}
+void midstep_phase(uint64_t n) {
+    if (n == 12) {
+        const KilnSpawnApi* sp = spawn_api();
+        g_midstep.before = sp ? static_cast<uint32_t>(sp->tracked_count()) : 0;
+        g_midstep.handle = wrap("fuel_network", KILN_WRAP_BEFORE, &st_spawn_midstep, nullptr);
+    } else if (n == 60) {
+        if (g_midstep.handle) W->game_program_unwrap(g_midstep.handle);
+        const KilnSpawnApi* sp = spawn_api();
+        const uint32_t after = sp ? static_cast<uint32_t>(sp->tracked_count()) : 0;
+        row(sp && g_midstep.calls.load() >= 1 && g_midstep.on_world.load() == 1 &&
+                g_midstep.spawn_rc.load() == KILN_ERR_WRONG_THREAD && g_midstep.destroy_rc.load() == KILN_ERR_WRONG_THREAD &&
+                g_midstep.spawned.load() == 0 && after == g_midstep.before,
+            "spawn mid-step: inside a wrap stage on the world's own thread kiln.spawn refuses create (%d) and destroy (%d) "
+            "with WRONG_THREAD and creates nothing (stage ran %d time(s), %d on the world thread; tracked %u -> %u)",
+            g_midstep.spawn_rc.load(), g_midstep.destroy_rc.load(), g_midstep.calls.load(), g_midstep.on_world.load(),
+            g_midstep.before, after);
+    }
+}
+
 // The boot after the restart: the written well, found by its position, holds the written value (plus what it filled).
 void restart_phase(uint64_t n) {
     if (n > 10) {
+        midstep_phase(n);
         if (cost_phase(n)) {
             g_done = true;
             say("done, %d PASS, %d FAIL", g_pass, g_fail);
