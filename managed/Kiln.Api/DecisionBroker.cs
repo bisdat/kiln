@@ -135,7 +135,7 @@ internal static unsafe class DecisionsNative
 
     /// <summary>The table with the members appended after <see cref="Table"/>: set_death_guard and enqueue_native
     /// (native callers only), prepare_kind, window_wanted and window_faulted (since 0.2.0-dev.29; the last two are the
-    /// core's). A member is read only when <c>Base.Header.Size</c> covers it (<see cref="Has"/>).</summary>
+    /// core's), and is_stopped (lock-free fault observation). A member is read only when <c>Base.Header.Size</c> covers it (<see cref="Has"/>).</summary>
     [StructLayout(LayoutKind.Sequential)]
     public struct TableTail
     {
@@ -145,6 +145,7 @@ internal static unsafe class DecisionsNative
         public delegate* unmanaged[Cdecl]<uint, byte*, uint, int> PrepareKind;
         public void* WindowWanted;
         public void* WindowFaulted;
+        public delegate* unmanaged[Cdecl]<uint> IsStopped;
     }
 
     /// <summary>Whether <paramref name="t"/>'s header covers the member at byte <paramref name="offset"/>.</summary>
@@ -172,7 +173,7 @@ internal static unsafe class DecisionsNative
     /// <summary>The mirrors have the sizes the header asserts.</summary>
     internal static bool LayoutMatchesNative =>
         sizeof(EntityKey) == 40 && sizeof(Request) == 1168 && sizeof(Interest) == 40 && sizeof(Answer) == 32 &&
-        sizeof(Receipt) == 208 && sizeof(Outcome) == 328 && sizeof(Table) == 136 && sizeof(TableTail) == 176 &&
+        sizeof(Receipt) == 208 && sizeof(Outcome) == 328 && sizeof(Table) == 136 && sizeof(TableTail) == 184 &&
         PrepareKindOffset == 152 && sizeof(WindowState) == 48 && sizeof(ClockTable) == 16;
 
     /// <summary>The payload size the service accepts for <paramref name="kind"/>; 0 for a kind it refuses.</summary>
@@ -336,6 +337,7 @@ internal static unsafe class DecisionBroker
 
     /// <summary>How many ended decisions are remembered, so that one whose request arrives late is not dispatched.</summary>
     private const int TerminalMemory = 16384;
+    private const int PendingMemory = 4096;
 
     private static readonly object Gate = new();
     private static DecisionProducer?[] _producers = new DecisionProducer?[64];  // copy on write under Gate
@@ -354,6 +356,8 @@ internal static unsafe class DecisionBroker
     private static Guid _session;
     private static ulong _requestBatch, _step;
     private static readonly HashSet<DecisionId> Dispatched = [];
+    private static readonly Dictionary<DecisionId, DecisionsNative.Request> Uncompleted = [];
+    private static bool _nativeStopped;
     private static readonly HashSet<DecisionId> Terminal = [];
     private static readonly Queue<DecisionId> TerminalOrder = new();
     private static readonly Dictionary<DecisionId, bool?> Lab = [];
@@ -395,7 +399,7 @@ internal static unsafe class DecisionBroker
         // the row can read on where the service is not (an older runtime, a service that took another consumer): ask it;
         // and a subscription is what puts the kind's game hook in (since 0.2.0-dev.29 nothing is hooked before)
         foreach (var type in producer.EventTypes)
-            EventProducers.Register(type, producer.Capability, () => Prepare(kind));
+            EventProducers.Register(type, producer.Capability, () => Prepare(kind), allowPending: true);
         Start();
     }
 
@@ -439,7 +443,7 @@ internal static unsafe class DecisionBroker
         if (_pumping || !Backend.Current.IsTickThread) return;
         try
         {
-            if (Bind(_step)) SyncInterest();
+            if (!StopIfFaulted() && Bind(_step) && !StopIfFaulted()) SyncInterest();
         }
         catch (Exception e)
         {
@@ -497,7 +501,8 @@ internal static unsafe class DecisionBroker
     internal static bool Available => Table() != null;
 
     /// <summary>Makes the service ready to hold <paramref name="kind"/> now: a hooked kind's game hook goes in at its
-    /// first subscriber (kiln.decisions' prepare_kind, since 0.2.0-dev.29). Null: it holds; else why it cannot (the
+    /// first subscriber (kiln.decisions' prepare_kind, since 0.2.0-dev.29). Null: accepted, possibly pending until Pre;
+    /// else why it cannot (the
     /// service lowered the kind's row with that reason). Any thread; asked at every subscription to the kind's events
     /// (cheap once the hook is in).</summary>
     internal static string? Prepare(uint kind)
@@ -565,21 +570,7 @@ internal static unsafe class DecisionBroker
         var t = Table(step);
         if (t == null) return false;
         if (Window() is not { } now) return false;
-        if (now.ProcessSession != _session)
-        {
-            // another process of the game as far as the service is concerned (a test's next harness): nothing of the
-            // last one is open any more
-            _session = now.ProcessSession;
-            _attached = false;
-            _attachRefusedLogged = false;
-            _requestBatch = 0;
-            Dispatched.Clear();
-            Terminal.Clear();
-            TerminalOrder.Clear();
-            Lab.Clear();
-        LabOpen.Clear();
-            Array.Clear(Pushed);
-        }
+        RefreshSession(now);
         if (_attached) return true;
         if (!now.WorldSafePhase) return false;  // no world yet: attach waits for the first Pre
         if (_owner == 0)
@@ -604,6 +595,27 @@ internal static unsafe class DecisionBroker
         return true;
     }
 
+    private static void RefreshSession(WindowState now)
+    {
+        if (now.ProcessSession != _session)
+        {
+            // another process of the game as far as the service is concerned (a test's next harness): nothing of the
+            // last one is open any more
+            _session = now.ProcessSession;
+            _attached = false;
+            _attachRefusedLogged = false;
+            _requestBatch = 0;
+            Dispatched.Clear();
+            Terminal.Clear();
+            TerminalOrder.Clear();
+            Lab.Clear();
+            Uncompleted.Clear();
+            _nativeStopped = false;
+            LabOpen.Clear();
+            Array.Clear(Pushed);
+        }
+    }
+
     // ---------------------------------------------------------------------------------------------------- the pump ----
 
     /// <summary>One Pre: interests, outcomes, requests, and the outcomes of what was just answered. Tick thread. A call
@@ -617,15 +629,41 @@ internal static unsafe class DecisionBroker
         _pumping = true;
         try
         {
+            if (StopIfFaulted()) return;
             if (!Bind(step)) return;
+            if (StopIfFaulted()) return;
             SyncInterest();
             PumpOutcomes();
-            if (PumpRequests(step)) PumpOutcomes();
+            if (PumpRequests(step) && !StopIfFaulted()) PumpOutcomes();
+            StopIfFaulted();
         }
         finally
         {
             _pumping = false;
         }
+    }
+
+    private static bool StopIfFaulted()
+    {
+        if (Window() is { } now) RefreshSession(now);
+        if (_nativeStopped) return true;
+        var t = Table();
+        if (t == null) return false;
+        var stopped = DecisionsNative.Has(t, 176) && ((DecisionsNative.TableTail*)t)->IsStopped != null
+            && ((DecisionsNative.TableTail*)t)->IsStopped() != 0;
+        if (!stopped && Capabilities.Get(DecisionsNative.Service).Reason != CapabilityReason.Faulted) return false;
+        _nativeStopped = true;
+        // No further native broker call, even if its mutex never becomes usable again.
+        foreach (var r in Uncompleted.Values.ToArray())
+        {
+            var o = new DecisionsNative.Outcome {
+                Size = (uint)sizeof(DecisionsNative.Outcome), Version = 1, Kind = r.Kind,
+                Status = (uint)DecisionTerminal.CapabilityReleased, RequestId = r.RequestId,
+                WorldEpoch = r.WorldEpoch, Subject = r.Subject, Actor = r.Actor,
+            };
+            Complete(ref o);
+        }
+        return true;
     }
 
     private static void SyncInterest()
@@ -686,6 +724,7 @@ internal static unsafe class DecisionBroker
         {
             ulong batch = 0;
             uint count = 0;
+            if (StopIfFaulted()) return answered;
             if (t->BeginRequests(_owner, &batch, &count) != DecisionsNative.Ok || batch == 0 || count == 0) return answered;
             if (batch != _requestBatch)
             {
@@ -703,9 +742,16 @@ internal static unsafe class DecisionBroker
             Interlocked.Increment(ref BatchesRead);
             for (uint i = 0; i < count; i++)
             {
+                if (StopIfFaulted()) return answered;
                 var copy = records[i];  // a handler may reach code that reads another batch into the buffer
+                var id = new DecisionId(copy.WorldEpoch, copy.RequestId);
+                // Retain every dispatched identity until its completion, with bounded memory even if outcomes are
+                // never readable. Do not acknowledge or dispatch beyond this budget: native deadlines fail open.
+                if (Uncompleted.Count >= PendingMemory && !Uncompleted.ContainsKey(id) && !Terminal.Contains(id))
+                    return answered;
                 if (Dispatch(t, ref copy, step)) answered = true;
             }
+            if (StopIfFaulted()) return answered;
             if (t->AckRequests(_owner, batch) != DecisionsNative.Ok) return answered;  // it comes again; Dispatched keeps handlers from running twice
             _requestBatch = 0;
             Dispatched.Clear();
@@ -722,6 +768,7 @@ internal static unsafe class DecisionBroker
             Lab.Remove(id);
             return false;
         }
+        Uncompleted[id] = r;
         DecisionRequest? request = null;
         DecisionProducer? producer = null;
         var verdict = DecisionVerdict.Allowed;
@@ -768,6 +815,7 @@ internal static unsafe class DecisionBroker
         };
         DecisionsNative.Receipt receipt = default;
         receipt.Size = (uint)sizeof(DecisionsNative.Receipt);
+        if (StopIfFaulted()) return false;
         var rc = t->Answer(_owner, &answer, &receipt);
         Interlocked.Increment(ref AnswersSent);
         if (producer is not null && request is not null)
@@ -795,6 +843,7 @@ internal static unsafe class DecisionBroker
         {
             ulong batch = 0;
             uint count = 0;
+            if (StopIfFaulted()) return;
             if (t->BeginOutcomes(_owner, &batch, &count) != DecisionsNative.Ok || batch == 0 || count == 0) return;
             var records = (DecisionsNative.Outcome*)Buffer((long)count * sizeof(DecisionsNative.Outcome));
             uint required = 0;
@@ -810,6 +859,7 @@ internal static unsafe class DecisionBroker
                 var copy = records[i];
                 Complete(ref copy);
             }
+            if (StopIfFaulted()) return;
             if (t->AckOutcomes(_owner, batch) != DecisionsNative.Ok) return;  // it comes again; Terminal keeps an outcome from being posted twice
         }
     }
@@ -817,6 +867,7 @@ internal static unsafe class DecisionBroker
     private static void Complete(ref DecisionsNative.Outcome o)
     {
         var id = new DecisionId(o.WorldEpoch, o.RequestId);
+        Uncompleted.Remove(id);
         if (!Terminal.Add(id)) return;  // posted already (the batch was read again)
         TerminalOrder.Enqueue(id);
         while (TerminalOrder.Count > TerminalMemory) Terminal.Remove(TerminalOrder.Dequeue());
@@ -899,7 +950,7 @@ internal static unsafe class DecisionBroker
             throw new ArgumentException($"decision kind {kind} takes {DecisionsNative.PayloadSize(kind)} payload bytes, not {payload.Length}", nameof(payload));
         Services.RequireTickThread("DecisionBroker.Enqueue");
         result = DecisionsNative.Unavailable;
-        if (!Bind(_step) || Window() is not { } now) return null;
+        if (StopIfFaulted() || !Bind(_step) || StopIfFaulted() || Window() is not { } now) return null;
         Start();
         var t = (DecisionsNative.Table*)_table;
         DecisionsNative.Request r = default;
@@ -947,6 +998,8 @@ internal static unsafe class DecisionBroker
             _retryAt = 0;
             _producers = new DecisionProducer?[64];
         }
+        Uncompleted.Clear();
+        _nativeStopped = false;
         _session = default;
         _attached = false;
         _owner = 0;

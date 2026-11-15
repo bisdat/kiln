@@ -25,6 +25,7 @@ internal sealed unsafe class DecisionsFake : IKitFake
             var t = &tail->Base;
             t->Header = new ServiceHeader { Size = (uint)sizeof(N.TableTail), Version = N.Version };
             tail->PrepareKind = &PrepareKind;
+            tail->IsStopped = &IsStopped;
             t->SupportedKinds = &SupportedKinds;
             t->Attach = &Attach;
             t->ResolveEntity = &ResolveEntity;
@@ -144,6 +145,9 @@ internal sealed unsafe class DecisionsFake : IKitFake
     {
         try { return Model?.AckOutcomes(owner, batch) ?? FakeTables.Unavailable; } catch { return FakeTables.Internal; }
     }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static uint IsStopped() => Model?.Faulted == true ? 1u : 0u;
 
     // prepare_kind: a hooked kind's producer is ready unless the test made its install fail (DecisionsModel.PrepareRefusals).
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]

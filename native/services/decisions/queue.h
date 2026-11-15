@@ -9,6 +9,7 @@
 // requests a native Pre adapter filed (file_native, kind 18) are collected under the mutex and called by
 // drain_sinks() after it is released.
 #pragma once
+#include "bounded_mutex.h"
 #include <algorithm>
 #include <array>
 #include <cstdio>
@@ -143,7 +144,8 @@ private:
     }
 
     KilnResult file_locked(const KilnDecisionRequestV1& in, uint64_t epoch, uint64_t step, uint64_t* id) {
-        if (!attached_) return KILN_ERR_UNAVAILABLE;
+        const auto stopped = lock_stopped.load(std::memory_order_acquire);
+        if (!attached_ || (stopped && stopped())) return KILN_ERR_UNAVAILABLE;
         const uint64_t rid = ++next_id_;
         if (id) *id = rid;
         if (free_.empty()) {
@@ -308,7 +310,7 @@ public:
         req_batch_ = Batch<KilnDecisionRequestV1>{};
     }
     // Tests: the lock, held by the caller (a fault that left it held).
-    std::unique_lock<std::mutex> lock_for_tests() { return std::unique_lock(m_); }
+    std::unique_lock<BoundedMutex> lock_for_tests() { return std::unique_lock(m_); }
 
     // The world stopped: nothing is held any more.
     void world_ended(uint64_t step) {
@@ -479,7 +481,7 @@ private:
         }
     }
 
-    mutable std::mutex m_;
+    mutable BoundedMutex m_;
     bool attached_ = false;
     KilnOwner owner_ = 0;
     uint64_t next_id_ = 0, batch_seq_ = 0;

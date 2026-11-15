@@ -6,8 +6,8 @@
 //
 // Rules of this module:
 //  - No hook calls managed code or a tick-only service. A hook copies a request and reads a verdict.
-//  - World reads happen in sample() only, which runs at window_begin (no world job is live) or in resolve_entity
-//    (world thread, world-safe phase). A hook reads the published table.
+//  - Entity sampling and the direct allocation-counter check run only on the world thread in a world-safe phase.
+//    A hook reads the published metadata table and its program's declared context.
 #include <windows.h>
 
 #include <atomic>
@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <mutex>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "host.h"
@@ -47,16 +48,15 @@ Broker* g_broker = nullptr;  // made in kiln_plugin_main, never freed (4096 requ
 Metadata g_metadata;
 WorldGate g_gate;  // set in on_ready from the core constants world.storage and storage.kind
 Shutdown g_shutdown;  // a fault (a window call, a hook) stops every producer together (shutdown.h)
-ResetWatch g_resets;  // kiln.items' reset generation of item instances: a rollback invalidates everything (reset_watch.h)
-const KilnItemsApi* g_items = nullptr;  // looked up at the first window_begin (world thread)
-bool g_items_looked = false;
+CounterWatch g_counter;
+int64_t g_counter_offset = -1, g_storage_offset = -1;
 
 // The consumer's interest per kind: all entities, or a list.
 struct Interest {
     bool all = false;
     std::vector<uint32_t> ids;  // sorted
 };
-std::mutex g_interest_mutex;
+BoundedMutex g_interest_mutex;
 Interest g_interest[64];
 std::atomic<uint32_t> g_interest_state[64];  // 0 none, 1 a list, 2 all: what a hook asks first, without the lock
 std::atomic<uint64_t> g_interest_kinds{0};    // bit n: kind n has an interest (window_wanted asks it)
@@ -102,7 +102,7 @@ void finish_shutdown(uint64_t step) {
          "decisions: shut down for this process: %s. Deaths and walk-over pickups pass to the game from now on; %s; events.death, "
          "events.pickup, events.equip, decisions.native_guards and kiln.decisions are off",
          g_shutdown.why(),
-         f.released ? "every open decision ended CapabilityReleased" : "the open decisions could not be ended (a lock was left held) and are not told");
+         f.released ? "every open decision ended CapabilityReleased" : "the native broker was abandoned (a lock was left held); managed dispatches recover locally, native sinks are not told");
 }
 
 // The clock state when the caller is on the world thread in a world-safe phase.
@@ -116,10 +116,13 @@ bool world_safe(KilnWindowStateV1* out) {
 
 // A table entry's check: world_safe, and the first such call after a hook's fault carries the shutdown out (never from
 // inside a broker call: host::resolve, which finishers call under the broker's lock, uses world_safe alone).
+void reset_if_rolled_back(uint64_t step);
+
 bool entry_safe(KilnWindowStateV1* out) {
     KilnWindowStateV1 s{};
     if (!world_safe(&s)) return false;
     finish_shutdown(s.step);
+    if (g_shutdown.holding()) reset_if_rolled_back(s.step);
     if (out) *out = s;
     return true;
 }
@@ -319,27 +322,19 @@ KilnResult KILN_CALL d_reevaluate_pickup(uint32_t drop, uint32_t receiver, uint3
     return pickup_producer::reevaluate(drop, receiver, exposures_reset);
 }
 
-// kiln.items' count of the times it forgot its item stamps (the entity id counter went down, a world closed or
-// started); ResetWatch::kUnknown without kiln.items or its item instances (a hosting client has no kiln.items).
-uint64_t items_generation() {
-    if (!g_items_looked) {
-        g_items_looked = true;
-        g_items = static_cast<const KilnItemsApi*>(g_api->service(ks(KILN_ITEMS_SERVICE), 4));
-        if (g_items && g_items->header.size < offsetof(KilnItemsApi, instances_status) + sizeof(void*)) g_items = nullptr;
-        if (!g_items)
-            logf(KILN_LOG_INFO, "decisions: no kiln.items item instances here: a rollback of the world's entity ids is not seen (chapter 07 4.1)");
-    }
-    if (!g_items || !g_items->instances_status) return ResetWatch::kUnknown;
-    KilnItemsInstancesStatus st{};
-    st.size = sizeof st;
-    if (g_items->instances_status(&st) != KILN_OK || !(st.flags & KILN_ITEMS_INSTANCES_ON)) return ResetWatch::kUnknown;
-    return st.resets;
-}
-
 // A rollback (or another world): every open request, hold, exposure and identity of the last one goes before anything
 // is sampled or held again (reset_watch.h).
 void reset_if_rolled_back(uint64_t step) {
-    if (!g_resets.changed(items_generation())) return;
+    const uintptr_t world = g_api->server_world();
+    if (!world || g_counter_offset < 0 || g_storage_offset < 0) return;
+    KilnWindowStateV1 state{};
+    if (g_clock->get(&state) != KILN_OK) return;
+    uint32_t next = 0;
+    if (!seh::counter(world + static_cast<uintptr_t>(g_storage_offset + g_counter_offset), &next)) {
+        g_shutdown.stop("reading the server world's entity counter faulted");
+        return;
+    }
+    if (!g_counter.observe(state.world_epoch, next)) return;
     struct Holds {
         void clear() { death_producer::clear(); }
     };
@@ -351,7 +346,7 @@ void reset_if_rolled_back(uint64_t step) {
     g_broker->drain_sinks();
     if (open || had)
         logf(KILN_LOG_WARN,
-             "decisions: kiln.items forgot its item stamps (the world's entity id counter went down, or a world closed or started): %u open "
+             "decisions: the server world entity counter went down: %u open "
              "decision(s) ended StaleEntity, every hold and walk-over exposure is forgotten, identities are sampled anew",
              open);
 }
@@ -361,7 +356,8 @@ void KILN_CALL d_window_begin(uint64_t epoch, uint64_t step) {
     if (!g_on.load(std::memory_order_relaxed)) return;
     finish_shutdown(step);  // a hook faulted since the last window
     if (!holding()) return;
-    reset_if_rolled_back(step);  // before any sample: kiln.items looked at the entity id counter in this step's Pre
+    reset_if_rolled_back(step);  // direct server-world counter check before sampling
+    if (!holding()) return;
     g_epoch.store(epoch);
     g_step.store(step);
     g_world_thread.store(GetCurrentThreadId());
@@ -454,29 +450,47 @@ void KILN_CALL d_window_faulted(uint32_t code) {
     finish_shutdown(s.step);
 }
 
+template <typename T, T Fn> struct SafeEntry;
+template <typename R, typename... A, R(KILN_CALL* Fn)(A...)>
+struct SafeEntry<R(KILN_CALL*)(A...), Fn> {
+    static R KILN_CALL call(A... args) noexcept {
+        try { return Fn(args...); }
+        catch (...) {
+            g_shutdown.stop("a service call could not acquire a lock or threw");
+            if constexpr (std::is_void_v<R>) return;
+            else if constexpr (std::is_same_v<R, KilnResult>) return KILN_ERR_UNAVAILABLE;
+            else return 0;
+        }
+    }
+};
+#define SAFE_ENTRY(fn) &SafeEntry<decltype(&fn), &fn>::call
+
+uint32_t KILN_CALL d_is_stopped() { return g_shutdown.holding() ? 0u : 1u; }
+
 const KilnDecisionsApiV1 kTable = {
     {sizeof(KilnDecisionsApiV1), KILN_DECISIONS_VERSION},
-    &d_supported_kinds,
-    &d_attach,
-    &d_resolve_entity,
-    &d_interest,
-    &d_enqueue_prepared,
-    &d_begin_requests,
-    &d_read_requests,
-    &d_ack_requests,
-    &d_answer,
-    &d_begin_outcomes,
-    &d_read_outcomes,
-    &d_ack_outcomes,
-    &d_reevaluate_pickup,
-    &d_detach,
-    &d_window_begin,
-    &d_window_end,
-    &d_set_death_guard,
-    &d_enqueue_native,  // since 0.2.0-dev.29
-    &d_prepare_kind,    // since 0.2.0-dev.29
-    &d_window_wanted,   // since 0.2.0-dev.29
-    &d_window_faulted,  // since 0.2.0-dev.29
+    SAFE_ENTRY(d_supported_kinds),
+    SAFE_ENTRY(d_attach),
+    SAFE_ENTRY(d_resolve_entity),
+    SAFE_ENTRY(d_interest),
+    SAFE_ENTRY(d_enqueue_prepared),
+    SAFE_ENTRY(d_begin_requests),
+    SAFE_ENTRY(d_read_requests),
+    SAFE_ENTRY(d_ack_requests),
+    SAFE_ENTRY(d_answer),
+    SAFE_ENTRY(d_begin_outcomes),
+    SAFE_ENTRY(d_read_outcomes),
+    SAFE_ENTRY(d_ack_outcomes),
+    SAFE_ENTRY(d_reevaluate_pickup),
+    SAFE_ENTRY(d_detach),
+    SAFE_ENTRY(d_window_begin),
+    SAFE_ENTRY(d_window_end),
+    SAFE_ENTRY(d_set_death_guard),
+    SAFE_ENTRY(d_enqueue_native),  // since 0.2.0-dev.29
+    SAFE_ENTRY(d_prepare_kind),    // since 0.2.0-dev.29
+    SAFE_ENTRY(d_window_wanted),   // since 0.2.0-dev.29
+    SAFE_ENTRY(d_window_faulted),  // since 0.2.0-dev.29
+    &d_is_stopped,
 };
 
 void KILN_CALL on_world(const KilnWorldEvent* e, void*) {
@@ -507,6 +521,12 @@ void off(const char* why) {
         g_caps->report(g_owner, ks(KILN_DECISIONS_SERVICE), KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_MISSING, ks(why));
 }
 
+void KILN_CALL prepare_pre(const KilnTickInfo*, void*) {
+    if (!holding()) return;
+    if (death_producer::pending()) death_producer::arm();
+    if (pickup_producer::pending()) pickup_producer::arm();
+}
+
 void KILN_CALL on_ready(void*) {
     g_caps = static_cast<const KilnCapsApi*>(g_api->service(ks(KILN_CAPS_SERVICE), KILN_CAPS_VERSION));
     g_clock = static_cast<const KilnWindowClockApiV1*>(g_api->service(ks(KILN_WINDOW_CLOCK_SERVICE), KILN_WINDOW_CLOCK_VERSION));
@@ -517,6 +537,9 @@ void KILN_CALL on_ready(void*) {
     if (!g_clock) return off("kiln.window_clock is not there");
     if (!g_world) return off("kiln.world is not there");
     g_spawn_time_hash = g_world->component_hash(ks("SpawnTime"));
+    g_api->constant(ks("world.storage"), &g_storage_offset);
+    g_api->constant(ks("items/storage.next_id"), &g_counter_offset);
+    if (g_counter_offset <= 0 || g_counter_offset >= 0x10000 || (g_counter_offset & 3)) g_counter_offset = -1;
     {
         // The hooks tell the server world's program invocations from a hosting client's other worlds by these.
         int64_t world_storage = -1, storage_kind = -1;
@@ -526,7 +549,9 @@ void KILN_CALL on_ready(void*) {
     }
     g_metadata.set_sampler(&sample, nullptr);
     KilnHandle h = 0;
-    if (g_api->subscribe_world(g_owner, &on_world, nullptr, &h) != KILN_OK) return off("no world events");
+    if (g_api->subscribe_world(g_owner, SAFE_ENTRY(on_world), nullptr, &h) != KILN_OK) return off("no world events");
+    if (g_api->subscribe_tick(g_owner, KILN_TICK_PRE, SAFE_ENTRY(prepare_pre), nullptr, &h) != KILN_OK)
+        return off("no safe Pre installation callback");
     g_on.store(true);
     logf(KILN_LOG_INFO, "decisions: on (requests %u, outcomes %u, metadata rows %u; players %s)", KILN_DECISIONS_MAX_ACTIVE,
          KILN_DECISIONS_MAX_OUTCOMES, KILN_DECISIONS_MAX_METADATA, g_players ? "from kiln.players" : "unknown: no kiln.players");
@@ -574,7 +599,7 @@ const KilnWorldApi* world() { return g_world; }
 const KilnCapsApi* caps() { return g_caps; }
 Broker& broker() { return *g_broker; }
 bool in_server_world(const void* ctx) { return g_gate.owns(ctx, g_api->server_world()); }
-bool world_layout_known() { return g_gate.layout_known(); }
+bool world_layout_known() { return g_gate.layout_known() && g_counter_offset >= 0; }
 uint64_t epoch() { return g_epoch.load(std::memory_order_relaxed); }
 uint64_t step() { return g_step.load(std::memory_order_relaxed); }
 uint32_t world_thread() { return g_world_thread.load(std::memory_order_relaxed); }
@@ -608,6 +633,20 @@ void hook_faulted(const char* what, unsigned long code) {
     std::snprintf(why, sizeof why, "%s faulted (0x%08lx)", what, code);
     g_shutdown.stop(why);  // both hooks pass from now on; the world thread finishes it
 }
+bool install_safe() {
+    if (!g_api->world(KILN_WORLD_SERVER) && !g_api->world(KILN_WORLD_CLIENT) && !g_api->world(KILN_WORLD_PREDICTION)) return true;
+    KilnWindowStateV1 s{};
+    return g_clock && g_clock->get(&s) == KILN_OK && s.phase == KILN_WINDOW_PRE &&
+           s.world_thread == GetCurrentThreadId();
+}
+void pending(const char* row) {
+    if (g_caps) g_caps->report(g_owner, ks(row), KILN_CAP_PENDING, KILN_CAP_REASON_SESSION, ks("hook installation waits for the server world's Pre"));
+    if (!g_shutdown.holding()) lower(row, KILN_CAP_REASON_FAULTED, g_shutdown.why());
+}
+void available(const char* row) {
+    if (g_caps) g_caps->report(g_owner, ks(row), KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, ks("hook installed at a safe point"));
+    if (!g_shutdown.holding()) lower(row, KILN_CAP_REASON_FAULTED, g_shutdown.why());
+}
 void lower(const char* row, uint32_t reason, const char* why) {
     if (g_caps) g_caps->report(g_owner, ks(row), KILN_CAP_UNAVAILABLE, reason, ks(why));
 }
@@ -630,6 +669,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     info->id = KilnStr{KILN_DECISIONS_SERVICE, sizeof(KILN_DECISIONS_SERVICE) - 1};
     info->version = KilnStr{"1", 1};
     info->on_ready = &on_ready;
+    lock_stopped.store(+[] { return !g_shutdown.holding(); });
     g_broker = new Broker();
     return api->register_service(owner, KilnStr{KILN_DECISIONS_SERVICE, sizeof(KILN_DECISIONS_SERVICE) - 1}, &kTable);
 }

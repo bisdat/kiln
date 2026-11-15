@@ -10,6 +10,11 @@
 
 namespace kiln::decisions::seh {
 
+bool counter(uintptr_t address, uint32_t* out) {
+    __try { *out = *reinterpret_cast<const volatile uint32_t*>(address); return true; }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+
 bool call(void (*body)(KilnRegisters& r), KilnRegisters& r, unsigned long* code) {
     __try {
         body(r);

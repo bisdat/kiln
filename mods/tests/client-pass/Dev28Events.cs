@@ -63,6 +63,12 @@ public sealed partial class ClientPassMod
         uint RingWorn() => PlayerStates.EquipmentOf(p) is { } q ? Math.Max(q[PlayerEquipSlot.Ring0].Id == EventsRing ? EventsRing : 0, q[PlayerEquipSlot.Ring1].Id == EventsRing ? EventsRing : 0) : 0;
         var wait = TimeSpan.FromSeconds(120);
 
+        // A subscription made outside safe Pre can be pending. Never make the
+        // lethal write until the native installation has actually succeeded.
+        await c.Until(() => Capabilities.Get("events.death").State != CapabilityState.Pending, wait, "the death hook's safe Pre installation");
+        if (!c.Expect(Capabilities.Is("events.death"), "the death hook is installed", Capabilities.Why("events.death"))) {
+            await c.Verdict(); return;
+        }
         // 1. a lethal loss, refused: kept alive at 1
         var max = Combat.GetHealth(p)?.Max ?? 0;
         c.Instruct("Step 1 of 6: your health goes to 0 now and Kiln refuses the death, keeping you at 1 health. Watch your screen " +
@@ -140,6 +146,10 @@ public sealed partial class ClientPassMod
                 picking.Add(e);
                 if (!allow) e.Cancel();
             }, EventFilter.ForEntity(drop)));
+            await c.Until(() => Capabilities.Get("events.pickup").State != CapabilityState.Pending, wait, "the pickup hook's safe Pre installation");
+            if (!c.Expect(Capabilities.Is("events.pickup"), "the pickup hook is installed", Capabilities.Why("events.pickup"))) {
+                await c.Verdict(); return;
+            }
             c.Instruct("Step 2 of 6, second part: another item of the same kind lies about four metres ahead of you, a little to the " +
                        "right. Walk over it the same way, WITHOUT pressing the interact key, and stand on it for a few seconds. Kiln " +
                        "refuses this pickup: it should stay on the ground, and nothing should flash into your inventory or vanish and " +

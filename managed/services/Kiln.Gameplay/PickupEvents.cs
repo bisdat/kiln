@@ -19,8 +19,11 @@ namespace Kiln;
 /// until the receiver leaves the item's range and comes back, the item or its amount changes, or a mod calls
 /// <see cref="Decisions.ReevaluatePickup"/>. Not canceling lets the game's next attempt run, once, within two steps of
 /// the first; if that attempt gives the receiver nothing (no room), the attempt after it is a new decision. Every
-/// decision ends in one <see cref="DecisionCompletedEvent"/> with the same <see cref="Id"/> (its <c>Subject</c> is the
-/// item on the ground, its <c>Actor</c> the receiver).
+/// delivered decision ends in one <see cref="DecisionCompletedEvent"/> with the same <see cref="Id"/> when its native
+/// outcome reaches the dispatcher (outbox saturation can lose outcomes). On permanent native fault, this managed
+/// layer completes dispatched records it still retains locally as CapabilityReleased, once, without calling a
+/// poisoned broker. Native sinks cannot be notified when their broker lock was abandoned. Subject is the ground
+/// item and Actor is the receiver.
 /// </summary>
 /// <remarks>
 /// <para>Exposures are sampled before and after each step's simulation: leaving and coming back wholly between two
@@ -29,7 +32,8 @@ namespace Kiln;
 /// <para>Which pickups are held: those whose receiver or item a handler's filter names
 /// (<see cref="EventFilter.ForEntity(EntityId)"/>); a handler without a filter holds every walk-over pickup.</para>
 /// <para>Capability <c>events.pickup</c>: while it is off, <c>Events.On&lt;ItemPickingUpEvent&gt;</c> throws <see cref="KilnUnavailableException"/>
-/// naming it. Since 0.2.0-dev.29.</para>
+/// naming it. A pending safe-Pre installation accepts the listener; captures start after the row becomes available.
+/// Since 0.2.0-dev.29.</para>
 /// </remarks>
 [ServerOnly, TickThreadOnly]
 public sealed class ItemPickingUpEvent : CancelableEvent, IEntityEvent

@@ -65,6 +65,8 @@ internal sealed unsafe class DecisionsModel
     public Func<FakeDecisionAnswer, FakeDecisionFinish?>? Finisher;
     public int FailRequestReads, FailRequestAcks, FailOutcomeReads, FailOutcomeAcks;
     public ulong SupportedHookKinds;
+    public bool Faulted, PreparePending;
+    public int BrokerCallsAfterFault;
     /// <summary>prepare_kind's refusals by kind (the native install of that kind's hook failed with this reason): the
     /// kind's row is lowered (faulted) and its bit leaves <see cref="SupportedHookKinds"/>, as the native service does.</summary>
     public readonly Dictionary<uint, (string Row, string Reason)> PrepareRefusals = [];
@@ -189,7 +191,8 @@ internal sealed unsafe class DecisionsModel
         }
     }
 
-    private int Consumer(ulong owner) => !WorldSafe ? FakeTables.WrongThread : _attached && _owner == owner ? FakeTables.Ok : FakeTables.Unavailable;
+    private int BrokerRefused() { BrokerCallsAfterFault++; return FakeTables.Unavailable; }
+    private int Consumer(ulong owner) => Faulted ? BrokerRefused() : !WorldSafe ? FakeTables.WrongThread : _attached && _owner == owner ? FakeTables.Ok : FakeTables.Unavailable;
 
     public int Interest(ulong owner, N.Interest* i)
     {
@@ -484,6 +487,12 @@ internal sealed unsafe class DecisionsModel
     {
         if (reason != null && size > 0) reason[0] = 0;
         if (kind is 0 or >= 64) return FakeTables.InvalidArgument;
+        if (PreparePending && kind == N.KindDeath) {
+            KitBackend.Instance.Capabilities.Report(KitBackend.CapabilityOwner, "events.death", CapState.Pending, CapReason.Session,
+                "wait for Pre", KitBackend.CapabilityOwner);
+            global::Kiln.Capabilities.Report("events.death", CapabilityState.Pending, CapabilityReason.Session, "wait for Pre");
+            return FakeTables.Ok;
+        }
         (string Row, string Reason) refusal;
         lock (_lock)
         {

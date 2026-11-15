@@ -697,18 +697,18 @@ public static class Events
 /// <remarks>Only Kiln's own event types belong here: the registry keeps the type for the life of the process.</remarks>
 internal static class EventProducers
 {
-    private static readonly ConcurrentDictionary<Type, (string Capability, Func<string?>? Off)> Needs = new();
+    private static readonly ConcurrentDictionary<Type, (string Capability, Func<string?>? Off, bool AllowPending)> Needs = new();
 
     /// <summary>Says that <paramref name="eventType"/> is produced only while <paramref name="capability"/> is
     /// available. <paramref name="off"/>, when given, is asked at every subscription as well: it returns why the event
     /// cannot be produced right now although the row reads available (the service behind it is not there), or null.
     /// A refusal always names <paramref name="capability"/>. Any thread; registering a type again replaces its entry.</summary>
-    public static void Register(Type eventType, string capability, Func<string?>? off = null)
+    public static void Register(Type eventType, string capability, Func<string?>? off = null, bool allowPending = false)
     {
         ArgumentNullException.ThrowIfNull(eventType);
         ArgumentException.ThrowIfNullOrEmpty(capability);
         if (!typeof(KilnEvent).IsAssignableFrom(eventType)) throw new ArgumentException($"{eventType} is not a KilnEvent", nameof(eventType));
-        Needs[eventType] = (capability, off);
+        Needs[eventType] = (capability, off, allowPending);
     }
 
     /// <summary>The capability <paramref name="eventType"/> itself was registered with; null when none.</summary>
@@ -723,7 +723,7 @@ internal static class EventProducers
         for (var t = subscribed; t != null && t != typeof(KilnEvent) && t != typeof(object); t = t.BaseType)
         {
             if (!Needs.TryGetValue(t, out var need)) continue;
-            if (!Capabilities.Is(need.Capability)) return ServiceCaps.Unavailable(need.Capability, $"{t.Name} is not produced here");
+            if (!Capabilities.Is(need.Capability) && !(need.AllowPending && Capabilities.Get(need.Capability).State == CapabilityState.Pending)) return ServiceCaps.Unavailable(need.Capability, $"{t.Name} is not produced here");
             if (need.Off?.Invoke() is { } why) return new KilnUnavailableException(need.Capability, $"{t.Name} is not produced here: {why}");
         }
         return null;

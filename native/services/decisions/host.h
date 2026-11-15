@@ -16,6 +16,7 @@
 
 namespace kiln::decisions::seh {
 // shutdown's guard around a hook body (seh.cpp): false when it faulted or threw, with the exception code.
+bool counter(uintptr_t address, uint32_t* out);
 bool call(void (*body)(KilnRegisters& r), KilnRegisters& r, unsigned long* code);
 }  // namespace kiln::decisions::seh
 
@@ -60,6 +61,9 @@ bool holding_allowed();
 // call (shutdown.h). Any thread.
 void hook_faulted(const char* what, unsigned long code);
 // Lowers a capability row (unavailable, `reason`, `why`). Any thread.
+bool install_safe();
+void pending(const char* row);
+void available(const char* row);
 void lower(const char* row, uint32_t reason, const char* why);
 void logf(int level, const char* fmt, ...);
 
@@ -73,6 +77,7 @@ namespace kiln::decisions::death_producer {
 // lowered with the reason when the install itself failed). Any thread.
 void ready();
 bool arm();
+bool pending();
 bool installed();
 bool usable();  // ready or armed
 // Something to keep the windows for: a hold, or a native guard (it asks the window's epoch).
@@ -102,6 +107,7 @@ namespace kiln::decisions::pickup_producer {
 // listens); false: it cannot (events.pickup is lowered with the reason when the install itself failed). Any thread.
 void ready();
 bool arm();
+bool pending();
 bool installed();
 bool usable();  // ready or armed
 bool busy();    // an exposure is sampled

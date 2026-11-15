@@ -15,7 +15,7 @@ public sealed unsafe class DecisionsFakeTests
         Assert.True(decisions != null && clock != null);
         // header: size (21 members: the 16 of the first table, set_death_guard, enqueue_native, and since 0.2.0-dev.29
         // prepare_kind, window_wanted, window_faulted), version
-        Assert.Equal((176u, 1u), (decisions[0], decisions[1]));
+        Assert.Equal((184u, 1u), (decisions[0], decisions[1]));
         Assert.Equal((16u, 1u), (clock[0], clock[1]));
         Assert.Contains(Coverage.All, r => r.Capabilities.Contains("kiln.decisions") && r.Capabilities.Contains("kiln.window_clock") && r.Kind == CoverageKind.RecordingFake);
     }

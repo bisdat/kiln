@@ -2,9 +2,10 @@
 // kiln.decisions: when a producer's game hook goes in, with nothing of the game in it (tests/producer_arm_test.cpp).
 //
 // Since 0.2.0-dev.29 nothing is hooked for a player whose mods do not use decisions: at the service's start a producer
-// only resolves what its hook needs (Ready); the hook goes in at the kind's first prepare_kind (a mod subscribed to its
-// event), its first interest, or (death) the first native guard, and then stays for the process (Armed). An install
-// that fails at that moment refuses the kind for the process (Refused, with the reason): its capability row is lowered
+// only resolves what its hook needs (Ready). The kind's first prepare_kind (a mod subscribed to its event), first
+// interest, or (death) first native guard requests installation. It runs in the server Pre or immediately with no
+// worlds, then stays for the process (Armed). An install that fails refuses the kind for the process
+// (Refused, with the reason): its capability row is lowered
 // and the subscribing mod gets the row's refusal. Nothing is retried.
 #pragma once
 #include <atomic>
@@ -19,6 +20,10 @@ namespace kiln::decisions {
 class ProducerArm {
 public:
     enum class State : uint8_t { Unresolved, Ready, Armed, Refused };
+
+    // Serialize preparation AND its row publication. A capability callback may reenter on this thread.
+    // No game hook ever takes this mutex.
+    auto preparing() { return std::unique_lock(publication_); }
 
     // The start found what the hook needs; it goes in at the first arm().
     void ready() {
@@ -58,8 +63,17 @@ public:
         return true;
     }
 
+    template<class Install>
+    bool prepare(bool safe, Install&& install) {
+        if (armed()) return true;
+        if (!safe) { requested_.store(true, std::memory_order_release); return usable(); }
+        requested_.store(false, std::memory_order_release);
+        return arm(install);
+    }
+    bool pending() const { return requested_.load(std::memory_order_acquire) && !armed() && usable(); }
+
     // Lock free: the hook is in (a hook reads this first).
-    bool armed() const { return armed_.load(std::memory_order_relaxed); }
+    bool armed() const { return armed_.load(std::memory_order_acquire); }
     // Ready or Armed: the kind can be held (its supported_kinds bit).
     bool usable() const {
         std::lock_guard lock(m_);
@@ -80,8 +94,9 @@ public:
 
 private:
     mutable std::mutex m_;
+    std::recursive_mutex publication_;
     State state_ = State::Unresolved;
-    std::atomic<bool> armed_{false};
+    std::atomic<bool> armed_{false}, requested_{false};
     std::string why_ = "the producer did not start";
     uint32_t reason_ = KILN_CAP_REASON_SERVICE_MISSING;
 };

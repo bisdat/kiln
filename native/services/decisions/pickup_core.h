@@ -30,6 +30,7 @@
 // an old answer). A decision that ended without an answer (a timeout, the consumer gone, a full queue) is released the
 // same way: one attempt runs, fail open, and the next one asks again.
 #pragma once
+#include "bounded_mutex.h"
 #include <atomic>
 #include <cstdint>
 #include <cstring>
@@ -55,6 +56,7 @@ struct Exposure {
 };
 
 struct Stats {
+    std::atomic<uint64_t> lock_bypasses{0};
     std::atomic<uint64_t> visits{0}, filed{0}, refused{0}, permitted{0}, released{0}, misses{0}, dropped{0}, closed{0}, reopened{0};
     std::atomic<uint64_t> foreign{0};  // visits of another world (client, prediction) or with no server world: passed
     std::atomic<uint64_t> expired{0};  // permits no visit used before their deadline
@@ -68,6 +70,14 @@ public:
     //   uint64_t epoch(); uint64_t step(); bool holding(); bool row(uint32_t entity, uint64_t epoch, Row* out);
     template <class P>
     Visit visit(P& p, Broker& broker) {
+        try { return visit_locked(p, broker); }
+        catch (const LockUnavailable&) {
+            stats.lock_bypasses.fetch_add(1, std::memory_order_relaxed);
+            return Visit::Pass;
+        }
+    }
+    template <class P>
+    Visit visit_locked(P& p, Broker& broker) {
         if (!p.armed()) return Visit::Pass;
         // Not the server world's own invocation (a hosting client's client or prediction world, ids overlapping the
         // server world's; a joined client without a server world): the game's own pickup, nothing read (world_gate.h).
@@ -146,7 +156,15 @@ public:
             std::memcpy(q.payload.pickup.position, x.position, sizeof x.position);
         }
         uint64_t id = 0;
-        const KilnResult rc = broker.file(q, epoch, p.step(), &id);
+        KilnResult rc;
+        try { rc = broker.file(q, epoch, p.step(), &id); }
+        catch (const LockUnavailable&) {
+            // No request was filed. Do not retain an exposure created by a
+            // visit that bypassed a poisoned/contended broker.
+            map_.erase(it);
+            stats.lock_bypasses.fetch_add(1, std::memory_order_relaxed);
+            return Visit::Pass;
+        }
         if (rc != KILN_OK) {
             if (rc == KILN_ERR_BUFFER_TOO_SMALL) stats.dropped.fetch_add(1, std::memory_order_relaxed);
             return Visit::Pass;  // fail open for this attempt (the exposure stays Open: the next one tries to file again)
@@ -248,6 +266,7 @@ public:
         return true;
     }
 
+    std::unique_lock<BoundedMutex> lock_for_tests() { return std::unique_lock(m_); }
     Stats stats;
 
 private:
@@ -273,7 +292,7 @@ private:
         return map_.erase(it);
     }
 
-    mutable std::mutex m_;
+    mutable BoundedMutex m_;
     Map map_;
     uint64_t next_epoch_ = 0;  // process-wide, never 0 for an exposure
 };

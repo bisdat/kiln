@@ -35,10 +35,17 @@ the next Pre on the tick thread. So:
 - **Which ones are held:** those a handler's `EventFilter.ForEntity` names; a handler without a filter (also one for
   a base class such as `KilnEvent`) holds every one of its kind. Nothing is held while nobody listens.
 - **Nothing is hooked until a mod listens.** The death and pickup hooks go in at the first `Events.On` for their event
-  (or, for death, the first native guard) and stay for the process. If a hook cannot go in at that moment, its row is
-  lowered with the reason and that `Events.On` throws `KilnUnavailableException` naming the row. While nothing is
+  (or, for death, the first native guard) at the safe installation point below, and stay for the process. A failure
+  already known at subscription time throws `KilnUnavailableException` naming the row. While nothing is
   listened for or held, kiln.decisions gets no step window, and the step does not wait for the world's jobs on its
   account.
+- **Pending installation.** Subscribing to a death or pickup decision during simulation records the request and
+  registers the listener without blocking. Its row reads `pending` until installation in the server world's Pre
+  (or installation at once while no world runs). No decisions are captured before the hook is in. Both hooks use a
+  checked installer: if any thread cannot be checked, or is paused inside the bytes being replaced, installation is
+  refused before writing. The row becomes unavailable with its reason; an existing listener learns this through
+  `CapabilityChangedEvent` or by polling the row, not an exception thrown later by the tick. A subscription to an
+  already unavailable row still throws `KilnUnavailableException`.
 - **Only the server world's.** A game client that hosts runs the death and pickup programs in its own client and
   prediction worlds too, with entity ids that overlap the server world's; a joined client has no server world. The
   hooks tell the worlds apart by the storage the program's job names (as kiln.world's program wraps do) and pass every
@@ -57,7 +64,7 @@ the next Pre on the tick thread. So:
 | `NoPositiveRange` | a canceled death of an entity whose maximum health is not positive |
 | `WriteRefused` | kiln.combat refused the health write of a canceled death, or the health stayed at 0 |
 | `TimeoutReleased` | no answer in time; the action was released |
-| `CapabilityReleased` | the listener went away while the action was held; it was released |
+| `CapabilityReleased` | the listener or capability went away while the action was held; it was released |
 | `SourceChanged` | what was held changed under the hold (another program marked the actor dead; the pickup's receiver, item or amount changed) |
 | `QueueDropped` | more than 4096 decisions were open: this action was never held (fail open) |
 | `WorldEnded` | the world stopped |
@@ -74,7 +81,7 @@ and `AppliedHealth`.
 - An entity that is already dead (a corpse, or the game's state 12) is never a new decision.
 - Between the lethal step and the answer (one step; two at the most) the entity has health 0 but is not dead. On a
   dedicated server nothing of the game was seen to act on that 0 (lab, 0.2.0-dev.29, a Vukah with its AI running and a
-  spawned character, also with the entity programs on worker threads): no dead mark, no pending death, no AI change
+  spawned character, also with the entity programs on worker threads): no dead mark, no pending death, no AI death transition
   (the enemy AI takes its Death condition from the actor's dead state, not from health), no `EntityDeathEvent`, no
   drop; then the survival health is written. Clients are sent that health 0 for the step: whether a player's own
   screen shows anything of a death for it is the guided check `07-events.decision-rollback`. Not tested: a save
@@ -126,10 +133,10 @@ and `AppliedHealth`.
 | Row | Off when |
 |---|---|
 | `kiln.decisions`, `kiln.window_clock` | the service is not loaded, or the core has no `tick.wait_jobs` (no step window without the world's jobs done) |
-| `events.death` | its symbols do not resolve on the game build, the world layout constants (`world.storage`, `storage.kind`) are unknown, kiln.combat is missing, or its hook could not go in at the first subscription; on since 0.2.0-dev.29 and not yet confirmed in a real game (`07-events.decision-rollback`) |
+| `events.death` | its symbols do not resolve on the game build, the world layout constants (`world.storage`, `storage.kind`, `items/storage.next_id`) are unknown, kiln.combat is missing, or its hook could not go in at the first subscription; on since 0.2.0-dev.29 and not yet confirmed in a real game (`07-events.decision-rollback`) |
 | `events.pickup` | as `events.death` (also not yet confirmed in a real game: `07-events.decision-rollback`) |
 | `events.equip` | kiln.playerstate cannot hold an equipment input alone (an older kiln-players.dll, no hold point on the build), or kiln.decisions is not here |
-| `decisions.native_guards` | the death hook is not in (unresolved, faulted) |
+| `decisions.native_guards` | the death hook cannot be prepared (unresolved, faulted), or the service stopped |
 | `events.build.pieces` | always in 0.2.0-dev.29: player build pieces are not cancelable yet |
 | `events.build.terraform` | always: managed terraform cancel is not part of V1 (`Gameplay.Protect`'s native policy still applies) |
 | `events.component_net`, `events.component_writes.exact` | always in 0.2.0-dev.29: named component watches are not built yet; an every-store feed is not promised |
@@ -139,22 +146,34 @@ subscribed. A handler for a base class is never refused. Check `Capabilities.Is`
 
 ## A world that goes back
 
-When the world's entity ids go back (a rollback, the same world loaded again; kiln.items sees its entity id counter go
-down and forgets its item stamps), every open decision ends `StaleEntity`, every death hold, walk-over suppression and
-permit is forgotten, and identities are sampled anew in that step's window, also when the world pointer, the entity id
-and its SpawnTime are the same as before. The game then goes on as without the old holds; a new lethal visit or pickup
-is a new decision. This needs kiln.items' item instances (`items.instances`): where they are off, and in a game client
-that hosts (no kiln.items there), such a rollback is not seen.
+Decisions reads the server world's entity-allocation counter directly, independently of kiln.items and its instance
+tracking. The existing sigdb constants identify the counter on both executable builds. A decrease in the same world
+epoch ends open decisions `StaleEntity` and clears death holds, pickup exposures and metadata lives together, even
+when the world address, entity id and SpawnTime match. This check runs before world-safe consumer dispatch/answer
+calls and at window start, including in a world a client hosts. A new world epoch establishes a fresh baseline.
+This is conservative detection of counter regression; no claim is made that an in-place rollback was induced in a
+real hosted game. A normal world stop remains its own invalidation path.
 
 ## When something faults
 
-A fault in one of kiln.decisions' step-window calls (the core then never calls it again) or inside one of its hooks
-shuts the whole service down for the process, at once: both hooks pass every death and pickup to the game, every open
-decision ends `CapabilityReleased` (its `DecisionCompletedEvent` still comes), and `events.death`, `events.pickup`,
-`events.equip`, `decisions.native_guards` and `kiln.decisions` read unavailable (`faulted`) with the reason; kiln.log
-has one line. Nothing is held across the fault: the hold deadlines advanced at the window calls that stopped. A new
-subscription to the events is refused by name; equipment inputs go on with the generic `PlayerClientActionEvent` vote
-alone.
+A fault in a window call or hook permanently stops holding. Every decisions-owned lock shared with a hook has a finite
+attempt/time budget and checks shutdown while contended. A hook that gives up passes the action to the game and
+increments its bypass counter; it never unlocks another thread's mutex. Hook-side logs do not take core logging
+locks. Tick API failures shut the service down rather than waiting on a poisoned lock.
+
+When the broker lock is usable, open requests end `CapabilityReleased` through the broker and native sinks are told
+outside its lock. If the broker lock was left held, the native broker is abandoned: it cannot enumerate or notify
+native `enqueue_native` sinks safely, so those sinks are **not told**. Native adapters must also observe the service's
+faulted row or the optional lock-free `is_stopped` member; they must not wait indefinitely for a sink after shutdown.
+The managed dispatcher completes every dispatched decision it retains without a completion locally as
+`CapabilityReleased`, once, and stops calling the broker. It retains at most 4096 incomplete dispatched identities;
+if that fills while outcomes cannot be read, further requests stay native and fail open at their deadlines. It cannot
+recover identities it never received, and older
+managed layers lack this local recovery. Normal outbox-loss limits above still apply.
+
+`events.death`, `events.pickup`, `events.equip`, `decisions.native_guards` and `kiln.decisions` become unavailable with
+the fault reason. Shutdown is logged once and persists across world restarts. Equipment inputs then retain only the
+generic `PlayerClientActionEvent` vote.
 
 ## Limits
 
@@ -170,14 +189,18 @@ player session), is not held in that step.
 - `set_death_guard(owner, fn)`: `fn(epoch, entity, health)` is asked at the death boundary for every entity with health
   0 or less in the server world, before any interest, on the death program's thread (a worker on a busy server):
   return 1 to skip that entity's death in this step. Native code of a pinned module, cheap, no managed call. One guard
-  at a time. Setting the first guard puts the death hook in.
+  at a time. Setting the first guard requests safe installation; `KILN_OK` may mean pending until Pre. Poll
+  `events.death` for that pending state; no guard runs before installation.
 - `enqueue_native(owner, request, sink, user, &id)`: a native Pre adapter's decision (kind 18, kiln.items' equipment
   sets). The dispatcher decides it like any other; `sink` is called exactly once with its outcome record, on the world
-  thread, outside the service's lock.
+  thread, outside the service's lock, except after a poisoned-lock shutdown as described above.
 - Both were appended after `window_end`; check `header.size` before calling.
-- `prepare_kind(kind, reason, size)` (appended in 0.2.0-dev.29): puts a kind's hook in now (the managed dispatcher calls
-  it at a subscription); `KILN_ERR_UNAVAILABLE` with the reason when it cannot. `window_wanted` and `window_faulted`
-  after it are the core's.
+- `prepare_kind(kind, reason, size)` (appended in 0.2.0-dev.29): puts a kind's hook in at a safe point (the managed dispatcher calls
+  it at a subscription), or requests installation in the next safe Pre, returning `KILN_OK` while the row is pending;
+  `KILN_ERR_UNAVAILABLE` with the reason when it cannot. `window_wanted` and `window_faulted` after it are the core's.
+  The appended `is_stopped` reads shutdown without taking a broker lock. The table is 184 bytes; check `header.size`
+  covers each optional member. An older native table lacks this last member: managed recovery then uses the faulted
+  service row. Older managed layers can use the original prefix but cannot locally recover poisoned-lock completions.
 - `kiln.window_clock` v1 (`kiln_window_clock.h`): the step's phase (Pre 1, Preparing 2, Sim 3, AfterJobs 4, Post 5,
   Stopping 6), the world epoch and the process session. World reads are legal on the world thread in phases 1, 2, 4
   and 5 only.

@@ -74,6 +74,19 @@ public sealed class DeathDecisionsTests : IDisposable
     private DecisionResult Single(DecisionId id) => Assert.Single(_completed, r => r.Id == id);
 
     [Fact]
+    public void A_pending_hook_accepts_a_listener_until_the_next_Pre()
+    {
+        using var kiln = Started(out var entity);
+        kiln.Decisions.Model.PreparePending = true;
+        _subs.Add(Events.On<EntityDyingEvent>(_ => { }, EventFilter.ForEntity(entity)));
+        Assert.Equal(CapabilityState.Pending, Capabilities.Get(DeathDecisions.Row).State);
+        _subs.Add(Events.On<EntityDyingEvent>(_ => { }, EventFilter.ForEntity(entity)));
+        kiln.Decisions.Model.PreparePending = false;
+        kiln.Call(() => Capabilities.Report(DeathDecisions.Row, CapabilityState.Available));
+        Assert.True(Capabilities.Is(DeathDecisions.Row));
+    }
+
+    [Fact]
     public void A_canceled_death_keeps_the_entity_alive_and_says_so_once()
     {
         using var kiln = Started(out var e);

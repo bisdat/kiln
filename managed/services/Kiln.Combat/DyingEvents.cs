@@ -27,7 +27,8 @@ namespace Kiln;
 /// handlers ask for: a handler with <see cref="EventFilter.ForEntity(EntityId)"/> holds those entities only; a handler
 /// without a filter (also one for a base class such as <see cref="KilnEvent"/>) holds every death in the world.</para>
 /// <para>Capability <c>events.death</c>: while it is off, <c>Events.On&lt;EntityDyingEvent&gt;</c> throws <see cref="KilnUnavailableException"/>
-/// naming it. Since 0.2.0-dev.29.</para>
+/// naming it. A pending safe-Pre installation accepts the listener; captures start after the row becomes available.
+/// Since 0.2.0-dev.29.</para>
 /// </remarks>
 [ServerOnly, TickThreadOnly]
 public sealed class EntityDyingEvent : CancelableEvent, IEntityEvent

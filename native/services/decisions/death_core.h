@@ -32,6 +32,7 @@
 // kept alive (NoPositiveRange), else the combat service's own health setter writes the survival health clamped to
 // 1..max and the value read back decides (Prevented, or WriteRefused).
 #pragma once
+#include "bounded_mutex.h"
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
@@ -48,6 +49,7 @@ namespace kiln::decisions::death {
 enum class Visit { Pass, Skip };
 
 struct Stats {
+    std::atomic<uint64_t> lock_bypasses{0};
     std::atomic<uint64_t> guarded{0}, filed{0}, held{0}, released{0}, misses{0}, dropped{0}, blocked{0};
     std::atomic<uint64_t> foreign{0};  // visits of another world (client, prediction) or with no server world: passed
 };
@@ -73,6 +75,14 @@ public:
     //   bool row(uint32_t entity, uint64_t epoch, Row* out); void filed(uint32_t entity, uint64_t request_id);
     template <class P>
     Visit visit(P& p, Broker& broker) {
+        try { return visit_locked(p, broker); }
+        catch (const LockUnavailable&) {
+            stats.lock_bypasses.fetch_add(1, std::memory_order_relaxed);
+            return Visit::Pass;
+        }
+    }
+    template <class P>
+    Visit visit_locked(P& p, Broker& broker) {
         const int32_t hp = p.health();
         if (hp > 0 || !p.armed()) return Visit::Pass;
         if (!p.server_world()) {
@@ -180,10 +190,11 @@ public:
         return holds_.size();
     }
 
+    std::unique_lock<BoundedMutex> lock_for_tests() { return std::unique_lock(m_); }
     Stats stats;
 
 private:
-    mutable std::mutex m_;
+    mutable BoundedMutex m_;
     std::unordered_map<uint32_t, Hold> holds_;
 };
 

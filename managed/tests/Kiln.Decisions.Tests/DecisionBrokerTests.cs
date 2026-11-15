@@ -106,6 +106,61 @@ public sealed unsafe class DecisionBrokerTests : IDisposable
 
     private DecisionResult Single(DecisionId id) => Assert.Single(_completed, r => r.Id == id);
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void A_poisoned_broker_completes_dispatched_decisions_locally_once(bool hasStoppedMember)
+    {
+        using var kiln = Started();
+        var entity = kiln.Entities.Create();
+        On<TestDyingEvent>(_ => { });
+        var model = kiln.Decisions.Model;
+        model.FailOutcomeReads = 1;
+        var id = Capture(kiln, entity);
+        kiln.Step();
+        Assert.Empty(_completed);
+        var table = (N.Table*)KitBackend.Instance.Service(N.Service, 1);
+        var size = table->Header.Size;
+        try
+        {
+            if (!hasStoppedMember) table->Header.Size = 176; // the previous native table has no stop flag
+            model.Faulted = true;
+            kiln.Call(() => Capabilities.Report(N.Service, CapabilityState.Unavailable, CapabilityReason.Faulted, "poisoned broker"));
+            kiln.Step(3);
+            kiln.Call(() => On<KilnEvent>(_ => { })); // a later subscription must not reopen native access
+            Assert.Equal(DecisionTerminal.CapabilityReleased, Single(id).Status);
+            Assert.False(Single(id).Ok);
+            Assert.Equal(0, model.BrokerCallsAfterFault);
+            Assert.Single(_completed);
+        }
+        finally
+        {
+            table->Header.Size = size;
+            kiln.Call(() => Capabilities.Report(N.Service, CapabilityState.Available));
+        }
+    }
+
+    [Fact]
+    public void Lost_outcomes_cannot_grow_the_fault_recovery_memory_without_bound()
+    {
+        using var kiln = Started();
+        var entity = kiln.Entities.Create();
+        var seen = 0;
+        On<TestDyingEvent>(_ => seen++);
+        kiln.Decisions.Model.FailOutcomeReads = 100;
+        for (var round = 0; round < 5; round++)
+        {
+            for (var i = 0; i < 1000; i++) Capture(kiln, entity);
+            kiln.Step();
+        }
+        Assert.Equal(4096, seen); // later requests stay native and fail open at their deadlines
+        kiln.Decisions.Model.Faulted = true;
+        kiln.Step();
+        Assert.Equal(4096, _completed.Count);
+        Assert.All(_completed, r => Assert.Equal(DecisionTerminal.CapabilityReleased, r.Status));
+        Assert.Equal(0, kiln.Decisions.Model.BrokerCallsAfterFault);
+    }
+
     [Fact]
     public void The_mirrors_are_the_headers()
     {

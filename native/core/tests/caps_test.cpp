@@ -275,6 +275,14 @@ void rules() {
     CHECK(rep(d, "kiln.yy", P, KILN_CAP_REASON_SESSION) == KILN_ERR_INVALID_ARGUMENT &&
               rep(d, "kiln.yy", U, KILN_CAP_REASON_FAULTED) == KILN_OK && get("kiln.yy").flags == 0,
           "core names are static: pending refused (and no session flag), unavailable allowed");
+    caps::op([&](std::vector<caps::Event>& ev) {
+        caps::set_core_locked("events.death", caps::kFeature, A, KILN_CAP_REASON_NONE, "resolved", "sigdb", 0, ev);
+        return KILN_OK;
+    });
+    CHECK(rep(d, "events.death", P, KILN_CAP_REASON_SESSION, "wait for Pre") == KILN_OK &&
+          is("events.death", P, KILN_CAP_REASON_SESSION), "decision hook row can wait for safe installation");
+    CHECK(rep(d, "events.death", A, KILN_CAP_REASON_NONE) == KILN_OK && is("events.death", A, KILN_CAP_REASON_NONE),
+          "decision hook row becomes available after installation");
     rep(d, "t.pend", P, KILN_CAP_REASON_SESSION);
     rep(e, "t.pend", A, KILN_CAP_REASON_NONE);
     CHECK(is("t.pend", P, KILN_CAP_REASON_SESSION), "worst wins: pending over available");

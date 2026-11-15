@@ -107,10 +107,7 @@ void pickup_body(KilnRegisters& r) {
         const unsigned long tid = GetCurrentThreadId();
         const bool worker = tid != host::world_thread();
         if (worker) g_off_world.fetch_add(1, std::memory_order_relaxed);
-        const uint32_t n = g_logged.fetch_add(1, std::memory_order_relaxed);
-        if (n < 32 || n % 1000 == 0)
-            host::logf(KILN_LOG_INFO, "decisions: walk-over pickup of drop %u by %u held (step %llu, thread %lu, %s)", p.entity(), p.receiver(),
-                       static_cast<unsigned long long>(host::step()), tid, worker ? "a worker thread" : "the world thread");
+        g_logged.fetch_add(1, std::memory_order_relaxed);
     }
 }
 
@@ -156,7 +153,7 @@ void ready() {
                       KILN_LOG_INFO);
     if (!api->feature(ks("events.pickup"))) return not_in("feature events.pickup did not resolve on this game build", KILN_CAP_REASON_SYMBOL_MISSING, KILN_LOG_WARN);
     if (!host::world_layout_known())
-        return not_in("the world layout constants world.storage and storage.kind did not resolve: the hook could not tell the server world "
+        return not_in("the world layout constants world.storage, storage.kind and items/storage.next_id did not resolve: the hook could not tell the server world "
                       "from a hosting client's client and prediction worlds",
                       KILN_CAP_REASON_SYMBOL_MISSING, KILN_LOG_WARN);
     if (api->symbol(ks("events/PickupInRange"), &helper) != KILN_OK || api->symbol(ks("world/CurrentEntityId"), &current) != KILN_OK || !helper ||
@@ -177,15 +174,18 @@ void ready() {
 }
 
 bool arm() {
+    auto preparation = g_arm.preparing();
     if (g_arm.armed()) return true;
-    const bool ok = g_arm.arm([](std::string& error) {
-        if (g_hook.install(host::api(), host::owner(), g_helper, &pickup_mid, "kiln.decisions/walk-over-pickup", 100)) return true;
+    const bool ok = g_arm.prepare(host::install_safe(), [](std::string& error) {
+        if (g_hook.install_checked(host::api(), host::owner(), g_helper, &pickup_mid, "kiln.decisions/walk-over-pickup", 100)) return true;
         error = g_hook.error() ? g_hook.error() : "the pickup hook could not be installed";
         return false;
     });
+    if (g_arm.pending()) { host::pending("events.pickup"); return true; }
     static std::atomic<bool> told{false};
     if (told.exchange(true)) return ok;
     if (ok) {
+        host::available("events.pickup");
         host::logf(KILN_LOG_INFO, "decisions: walk-over pickups are held from now on (entry hook at events/PickupInRange; the interaction helper "
                    "is untouched)");
     } else if (g_arm.state() == ProducerArm::State::Refused && g_arm.reason() == KILN_CAP_REASON_FAULTED) {
@@ -199,6 +199,7 @@ bool arm() {
     return ok;
 }
 
+bool pending() { return g_arm.pending(); }
 bool installed() { return g_arm.armed(); }
 bool usable() { return g_arm.usable(); }
 std::string why_not() { return g_arm.why(); }

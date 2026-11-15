@@ -8,6 +8,7 @@
 //
 // The game side is a Sampler (decisions.cpp reads kiln.world and kiln.players through it; tests fake it).
 #pragma once
+#include "bounded_mutex.h"
 #include <algorithm>
 #include <atomic>
 #include <cstring>
@@ -60,7 +61,7 @@ public:
     }
 
     // The table of the current step (never null). Any thread.
-    std::shared_ptr<const Table> table() const { return published_.load(); }
+    std::shared_ptr<const Table> table() const { std::lock_guard lock(m_); return published_; }
 
     // One row, sampled now (world-safe phase, world thread: the caller checked). False: no entity or no usable
     // identity; *miss says which (true = the entity is there but cannot be told from another life of its id).
@@ -83,7 +84,7 @@ public:
         t->step = step;
         std::lock_guard lock(m_);
         if (wanted.size() > KILN_DECISIONS_MAX_METADATA) {
-            published_.store(std::shared_ptr<const Table>(std::move(t)));
+            published_ = std::shared_ptr<const Table>(std::move(t));
             return false;
         }
         t->rows.reserve(wanted.size());
@@ -105,7 +106,7 @@ public:
             const uint64_t cut = seen[lives_.size() - kMaxLives / 2];
             for (auto it = lives_.begin(); it != lives_.end();) it = it->second.seen_step < cut ? lives_.erase(it) : std::next(it);
         }
-        published_.store(std::shared_ptr<const Table>(std::move(t)));
+        published_ = std::shared_ptr<const Table>(std::move(t));
         return true;
     }
 
@@ -114,7 +115,7 @@ public:
     void clear() {
         std::lock_guard lock(m_);
         lives_.clear();
-        published_.store(std::shared_ptr<const Table>(std::make_shared<Table>()));
+        published_ = std::make_shared<Table>();
     }
 
 private:
@@ -164,12 +165,12 @@ private:
         return true;
     }
 
-    mutable std::mutex m_;
+    mutable BoundedMutex m_;
     Sampler sampler_ = nullptr;
     void* user_ = nullptr;
     std::unordered_map<uint32_t, Life> lives_;
     uint64_t next_serial_ = 0;  // process-wide: never reset, also not by clear()
-    std::atomic<std::shared_ptr<const Table>> published_{std::make_shared<Table>()};
+    std::shared_ptr<const Table> published_{std::make_shared<Table>()};
 };
 
 }  // namespace kiln::decisions

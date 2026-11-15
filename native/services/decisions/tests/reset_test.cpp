@@ -109,6 +109,13 @@ static void window_begin(ResetWatch& w, uint64_t generation, Broker& b, Metadata
 }
 
 int main() {
+    CounterWatch hosted;
+    CHECK(!hosted.observe(1, 5000));
+    CHECK(!hosted.observe(1, 5010));
+    CHECK(hosted.observe(1, 4990));
+    CHECK(!hosted.observe(1, 4990));
+    CHECK(!hosted.observe(2, 2000));
+
     Broker b;
     Metadata md;
     death::Holds holds;
@@ -164,6 +171,19 @@ int main() {
     ResetWatch blind;
     CHECK(!blind.changed(ResetWatch::kUnknown) && !blind.changed(ResetWatch::kUnknown));
 #endif
+    // Same-address/id/SpawnTime rollback without any Items reset generation (hosting client path).
+    CounterWatch direct;
+    CHECK(!direct.observe(1, 5000));
+    CHECK(direct.observe(1, 4900));
+    CHECK(invalidate_after_reset(b, md, holds, exposures, 14)==2);
+    auto direct_out=outcomes(b,14);
+    CHECK(direct_out.size()==2 && direct_out.begin()->second.status==KILN_DECISION_STALE_ENTITY &&
+          direct_out.rbegin()->second.status==KILN_DECISION_STALE_ENTITY);
+    CHECK(holds.size()==0 && exposures.size()==0 && b.active_count()==0);
+    uint32_t misses=0;
+    std::vector<uint32_t> direct_wanted={2000,2022,3000};
+    CHECK(md.rebuild(1,14,direct_wanted,&misses));
+    CHECK(md.table()->find(2000)->key.life_serial!=serial_after);
     std::printf("reset_test: %d PASS, %d FAIL\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

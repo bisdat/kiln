@@ -40,13 +40,14 @@ public:
     void stop(const char* why) {
         if (stopped_.exchange(true, std::memory_order_acq_rel)) return;
         std::snprintf(why_, sizeof why_, "%s", why ? why : "a fault");
+        reason_ready_.store(true, std::memory_order_release);
         pending_.store(true, std::memory_order_release);
     }
     // A finish() is due (a stop() that was not finished yet). Any thread.
     bool pending() const { return pending_.load(std::memory_order_acquire); }
     // Whether the broker may still be called (its lock was free at finish()). Any thread.
     bool broker_ok() const { return broker_ok_.load(std::memory_order_acquire); }
-    const char* why() const { return why_; }
+    const char* why() const { return reason_ready_.load(std::memory_order_acquire) ? why_ : "a fault is being reported"; }
 
     struct Finished {
         bool released = false;  // the open requests were ended (else the broker's lock was held)
@@ -61,8 +62,9 @@ public:
         Finished f;
         char reason[192];
         std::snprintf(reason, sizeof reason, "kiln.decisions shut down: %s; the action was released", why_);
+        broker_ok_.store(false, std::memory_order_release);
         f.released = broker.try_release_all(KILN_DECISION_CAPABILITY_RELEASED, reason, step);
-        if (!f.released) broker_ok_.store(false, std::memory_order_release);
+        if (f.released) broker_ok_.store(true, std::memory_order_release);
         const bool h = holds.try_clear(), x = exposures.try_clear();
         f.cleared = h && x;
         for (const char* row : kShutdownRows)
@@ -72,7 +74,7 @@ public:
     }
 
 private:
-    std::atomic<bool> stopped_{false}, pending_{false}, broker_ok_{true};
+    std::atomic<bool> stopped_{false}, pending_{false}, broker_ok_{true}, reason_ready_{false};
     char why_[128] = {};
 };
 

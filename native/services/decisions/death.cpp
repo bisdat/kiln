@@ -49,7 +49,7 @@ std::atomic<uint64_t> g_off_world{0};  // holds filed off the world thread (a wo
 
 bool tid_off_world() { return GetCurrentThreadId() != host::world_thread(); }
 
-std::mutex g_guard_mutex;
+BoundedMutex g_guard_mutex;
 std::atomic<KilnDeathGuardFn> g_guard{nullptr};
 KilnOwner g_guard_owner = 0;
 
@@ -97,12 +97,7 @@ struct HookPorts {
     void filed(uint32_t entity, uint64_t id) const {
         const uint32_t n = g_logged.fetch_add(1, std::memory_order_relaxed);
         if (tid_off_world()) g_off_world.fetch_add(1, std::memory_order_relaxed);
-        if (n < 32 || n % 1000 == 0) {
-            const unsigned long tid = GetCurrentThreadId();
-            host::logf(KILN_LOG_INFO, "decisions: death of entity %u held (request %llu, health %d, step %llu, thread %lu, %s)", entity,
-                       static_cast<unsigned long long>(id), health(), static_cast<unsigned long long>(host::step()), tid,
-                       tid == host::world_thread() ? "the world thread" : "a worker thread");
-        }
+        (void)n;
     }
 };
 
@@ -158,7 +153,7 @@ void ready() {
                       KILN_LOG_INFO);
     if (!api->feature(ks("events.death"))) return not_in("feature events.death did not resolve on this game build", KILN_CAP_REASON_SYMBOL_MISSING, KILN_LOG_WARN);
     if (!host::world_layout_known())
-        return not_in("the world layout constants world.storage and storage.kind did not resolve: the hook could not tell the server world "
+        return not_in("the world layout constants world.storage, storage.kind and items/storage.next_id did not resolve: the hook could not tell the server world "
                       "from a hosting client's client and prediction worlds",
                       KILN_CAP_REASON_SYMBOL_MISSING, KILN_LOG_WARN);
     if (api->symbol(ks("events/DeathBoundary"), &boundary) != KILN_OK || api->symbol(ks("events/DeathNextEntity"), &next) != KILN_OK ||
@@ -186,15 +181,18 @@ void ready() {
 }
 
 bool arm() {
+    auto preparation = g_arm.preparing();
     if (g_arm.armed()) return true;
-    const bool ok = g_arm.arm([](std::string& error) {
-        if (g_hook.install(host::api(), host::owner(), g_boundary, &death_mid, "kiln.decisions/death-boundary", 100)) return true;
+    const bool ok = g_arm.prepare(host::install_safe(), [](std::string& error) {
+        if (g_hook.install_checked(host::api(), host::owner(), g_boundary, &death_mid, "kiln.decisions/death-boundary", 100)) return true;
         error = g_hook.error() ? g_hook.error() : "the death hook could not be installed";
         return false;
     });
+    if (g_arm.pending()) { host::pending("events.death"); return true; }
     static std::atomic<bool> told{false};
     if (told.exchange(true)) return ok;
     if (ok) {
+        host::available("events.death");
         host::logf(KILN_LOG_INFO, "decisions: deaths are held from now on (hook at events/DeathBoundary, skip to events/DeathNextEntity)");
     } else if (g_arm.state() == ProducerArm::State::Refused && g_arm.reason() == KILN_CAP_REASON_FAULTED) {
         const std::string why = g_arm.why();
@@ -208,6 +206,7 @@ bool arm() {
     return ok;
 }
 
+bool pending() { return g_arm.pending(); }
 bool installed() { return g_arm.armed(); }
 bool usable() { return g_arm.usable(); }
 std::string why_not() { return g_arm.why(); }

@@ -220,8 +220,9 @@ typedef struct KilnDecisionsApiV1 {
      * A guard is native code of a pinned module: it calls no managed code and no tick-only service, keeps no game
      * pointer, and must be cheap (it also runs for every corpse of the world, once a step). One guard at a time: a
      * second owner gets KILN_ERR_UNAVAILABLE; `guard` NULL removes the owner's. Keep the module loaded while a guard
-     * is set. KILN_ERR_UNAVAILABLE as well while the death hook is not installed (capability decisions.native_guards
-     * says why). Any thread. */
+     * is set. The first guard requests safe installation like prepare_kind; KILN_OK may mean pending until Pre
+     * (events.death reports Pending). No guard runs before installation. KILN_ERR_UNAVAILABLE if installation is
+     * refused (capability decisions.native_guards says why). Any thread. */
     KilnResult(KILN_CALL* set_death_guard)(KilnOwner owner, KilnDeathGuardFn guard);
 
     /* ======== appended: the verdict route of native Pre adapters (kind 18, kiln.items' equipment sets).
@@ -236,15 +237,18 @@ typedef struct KilnDecisionsApiV1 {
      * it copies what it needs, calls no managed code and files nothing from inside. `producer` is the caller's owner
      * (diagnostics). World thread, world-safe phase (KILN_ERR_WRONG_THREAD otherwise); KILN_ERR_UNAVAILABLE without
      * an attached dispatcher: the caller lets the action run (fail open). KILN_ERR_BUFFER_TOO_SMALL: the queue is
-     * full; the sink has been told QUEUE_DROPPED under *request_id. */
+     * full; the sink has been told QUEUE_DROPPED under *request_id. Exception: after a fault that leaves the broker
+     * lock held, sinks cannot be enumerated safely and are not called; adapters must observe is_stopped or the faulted
+     * service row and abandon their pending work fail open. */
     KilnResult(KILN_CALL* enqueue_native)(KilnOwner producer, const KilnDecisionRequestV1* request, KilnDecisionSinkFn sink, void* user,
                                           uint64_t* request_id);
 
     /* ======== appended since 0.2.0-dev.29: producers that start when a mod listens, and the core's window calls.
      * Check header.size covers a member before calling it. ========
      * prepare_kind: makes kind `kind`'s producer ready to hold now. A hooked kind (1 death, 2 walk-over pickup) puts its
-     * game hook in the first time (it stays for the process; the install stops the game's other threads for a
-     * moment); a prepared kind (16, 17, 18) needs nothing. KILN_OK: the kind holds from its first interest on.
+     * game hook in at a safe Pre (or at once with no world). A call during simulation returns KILN_OK with the row
+     * pending: the listener may register, but captures start only after installation. A prepared kind (16, 17, 18)
+     * needs nothing. KILN_OK: the request was accepted; the row distinguishes pending installation from available.
      * KILN_ERR_UNAVAILABLE: it cannot (the service is off or shut down, the symbols did not resolve, the hook did not go
      * in: the kind's capability row is lowered with the reason, which is copied to `reason` when it is given,
      * NUL-terminated). KILN_ERR_INVALID_ARGUMENT: no such kind. Any thread. The first interest of a hooked kind and
@@ -257,12 +261,19 @@ typedef struct KilnDecisionsApiV1 {
     uint32_t(KILN_CALL* window_wanted)(void);
     /* Core only: a window call of this service faulted (`code` is the exception code); the core makes no further
      * window call of it in this process. The service stops holding at once (both producers pass to the game), ends
-     * what it held fail open (CAPABILITY_RELEASED) without reading the world, and lowers its rows. World thread. */
+     * what it held fail open (CAPABILITY_RELEASED) when the broker lock is usable, and lowers its rows. With a
+     * poisoned broker lock, dispatched managed decisions are completed locally by a supporting managed layer;
+     * native sinks cannot be enumerated safely and are not told. Observe is_stopped or the faulted service row.
+     * World thread. */
     void(KILN_CALL* window_faulted)(uint32_t code);
+    /* Any thread, lock-free. Nonzero after permanent fault shutdown. Older tables lack this slot. */
+    uint32_t(KILN_CALL* is_stopped)(void);
 } KilnDecisionsApiV1;
 
 #ifdef __cplusplus
 }
+static_assert(sizeof(KilnDecisionsApiV1) == 184, "KilnDecisionsApiV1 is 184 bytes");
+static_assert(offsetof(KilnDecisionsApiV1, is_stopped) == 176, "is_stopped is appended at 176");
 static_assert(sizeof(KilnEventEntityKey) == 40, "KilnEventEntityKey is 40 bytes");
 static_assert(sizeof(KilnSetOpV1) == 40, "KilnSetOpV1 is 40 bytes");
 static_assert(offsetof(KilnDecisionRequestV1, payload) == 144, "the request payload starts at 144");

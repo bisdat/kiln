@@ -21,6 +21,7 @@
 // count, owner and label equal a revoked link's revives that link (same slot, same stubs, a new handle) instead of
 // taking a new slot; see revive() for why a call still in flight through the old incarnation stays correct.
 #include "hooks_chain.h"
+#include "hooks_patch_policy.h"
 
 #include <windows.h>
 
@@ -735,6 +736,7 @@ bool make_patch(const Target& t, PatchBytes& out) {
 
 struct Stopped {
     HANDLE h = nullptr;
+    bool unknown_id = false;
     bool skip = false;  // the calling thread: listed (its handle is closed with the others) but never stopped
     bool suspended = false;
     bool has_rip = false;
@@ -764,6 +766,7 @@ bool open_threads_nt(std::vector<Stopped>& out) {
         Stopped st;
         st.h = prev = h;  // `prev` stays open: it is the cursor for the next call, and we close it with the rest
         const DWORD id = GetThreadId(h);
+        st.unknown_id = id == 0;
         st.skip = id == 0 || id == me;  // a thread whose id we cannot read is never stopped: it might be this one
         out.push_back(st);
     }
@@ -774,7 +777,7 @@ bool open_threads_nt(std::vector<Stopped>& out) {
 }
 
 // The same through a Toolhelp snapshot. False: no list.
-bool open_threads_toolhelp(std::vector<Stopped>& out, size_t& unopened) {
+bool open_threads_toolhelp(std::vector<Stopped>& out, size_t& unopened, bool checked = false) {
     const HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
     if (snap == INVALID_HANDLE_VALUE) return false;
     THREADENTRY32 te{};
@@ -791,7 +794,13 @@ bool open_threads_toolhelp(std::vector<Stopped>& out, size_t& unopened) {
         st.h = h;
         out.push_back(st);
     }
+    const DWORD error = GetLastError();
     CloseHandle(snap);
+    if (checked && error != ERROR_NO_MORE_FILES) {
+        for (auto& t : out) CloseHandle(t.h);
+        out.clear();
+        return false;
+    }
     return true;
 }
 
@@ -806,11 +815,12 @@ struct FreezeReport {
 
 // Nothing in here may allocate, log, lock or throw: other threads are stopped.
 void write_with_threads_stopped(std::vector<Stopped>& th, uintptr_t addr, const PatchBytes& pb, const IpMap* map,
-                                uintptr_t tramp, FreezeReport& rep) {
+                                uintptr_t tramp, FreezeReport& rep, uint32_t* unchecked = nullptr) {
     LARGE_INTEGER t0, t1, freq;
     QueryPerformanceFrequency(&freq);
     QueryPerformanceCounter(&t0);
     for (Stopped& s : th) {
+        if (unchecked && s.unknown_id) ++rep.no_context;
         s.suspended = !s.skip && SuspendThread(s.h) != static_cast<DWORD>(-1);
         if (s.suspended) ++rep.stopped;
         if (!s.skip && !s.suspended) ++rep.unstopped;
@@ -824,6 +834,17 @@ void write_with_threads_stopped(std::vector<Stopped>& th, uintptr_t addr, const 
             s.rip = static_cast<uintptr_t>(ctx.Rip);
         } else {
             ++rep.no_context;
+        }
+    }
+    if (unchecked) {
+        size_t in_bytes = 0;
+        for (const auto& s : th)
+            if (s.has_rip && s.rip > addr && s.rip < addr + pb.len) ++in_bytes;
+        *unchecked = static_cast<uint32_t>(rep.unopened + rep.unstopped + rep.no_context + in_bytes);
+        // Strict callers refuse BEFORE changing bytes or any thread context.
+        if (!checked_patch_allowed(rep.unopened + rep.unstopped + rep.no_context, in_bytes)) {
+            for (auto& s : th) if (s.suspended) ResumeThread(s.h);
+            return;
         }
     }
     DWORD old = 0;
@@ -856,7 +877,7 @@ void write_with_threads_stopped(std::vector<Stopped>& th, uintptr_t addr, const 
 
 // g_mutex held. Writes the detour over the function's first bytes with the other threads stopped. False: could not (the
 // caller falls back to safetyhook's enable()); nothing was written then.
-bool enable_detour(Target& t, FreezeReport& rep) {
+bool enable_detour(Target& t, FreezeReport& rep, uint32_t* unchecked = nullptr) {
     PatchBytes pb;
     if (!make_patch(t, pb)) return false;
     IpMap map;
@@ -866,11 +887,11 @@ bool enable_detour(Target& t, FreezeReport& rep) {
     LARGE_INTEGER l0, l1, freq;
     QueryPerformanceFrequency(&freq);
     QueryPerformanceCounter(&l0);
-    if (!open_threads_nt(th) && !open_threads_toolhelp(th, rep.unopened)) return false;
+    if (!open_threads_nt(th) && !open_threads_toolhelp(th, rep.unopened, unchecked != nullptr)) { if (unchecked) *unchecked = 1; return false; }
     QueryPerformanceCounter(&l1);
     rep.list_ms = 1000.0 * static_cast<double>(l1.QuadPart - l0.QuadPart) / static_cast<double>(freq.QuadPart);
     for (const Stopped& s : th) rep.threads += s.skip ? 0 : 1;
-    write_with_threads_stopped(th, t.addr, pb, have_map ? &map : nullptr, t.trampoline, rep);
+    write_with_threads_stopped(th, t.addr, pb, have_map ? &map : nullptr, t.trampoline, rep, unchecked);
     for (Stopped& s : th) CloseHandle(s.h);
     return rep.written;
 }
@@ -880,7 +901,7 @@ bool enable_detour(Target& t, FreezeReport& rep) {
 
 // g_mutex held. Finds or creates the target: entry stub, head cell, the one safetyhook inline detour. *refused_quietly
 // is set when the address was refused before with the same bytes (nothing allocated, nothing logged).
-Target* target_for(uintptr_t addr, bool* refused_quietly) {
+Target* target_for(uintptr_t addr, bool* refused_quietly, uint32_t* unchecked = nullptr) {
     State& s = S();
     if (auto it = s.by_addr.find(addr); it != s.by_addr.end()) return it->second;
     if (auto it = s.refused.find(addr); it != s.refused.end()) {
@@ -977,7 +998,7 @@ Target* target_for(uintptr_t addr, bool* refused_quietly) {
     t->trampoline = t->hook.target_address() ? t->hook.trampoline().address() : 0;
     t->head->store(t->trampoline, std::memory_order_release);
     FreezeReport rep;
-    if (enable_detour(*t, rep)) {
+    if (enable_detour(*t, rep, unchecked)) {
         KLOG_D("hooks: detour on rva %s written with %zu other thread(s) stopped (of %zu listed) for %.2f ms, %.2f ms to "
                "list and open them (%zu not openable, %zu moved out of the replaced bytes, %zu without a context)",
                hex(rva_of(addr)).c_str(), rep.stopped, rep.threads, rep.stopped_ms, rep.list_ms, rep.unopened, rep.moved,
@@ -996,6 +1017,7 @@ Target* target_for(uintptr_t addr, bool* refused_quietly) {
             KLOG_E("hooks: %zu thread(s) paused inside the first bytes of rva %s could not be moved; they may crash when they "
                    "run on", rep.in_range - rep.moved, hex(rva_of(addr)).c_str());
     } else {
+        if (unchecked) return fail(false); // checked install never falls back to an unchecked patch
         // No thread list, or a trampoline of a shape we don't know: safetyhook's own way (page trap, no thread stops).
         KLOG_W("hooks: rva %s: could not stop the other threads; using safetyhook's enable", hex(rva_of(addr)).c_str());
         if (!t->hook.enable()) {
@@ -1058,7 +1080,7 @@ void note_slot_use() {
 //    place: no recursion, no second run. If the old and new links are otherwise equal, the old one is simply kept
 //    (revived in place).
 KilnResult install(Kind kind, KilnOwner owner, uintptr_t addr, const Order& order, void* fn, void* user,
-                   uint32_t arg_count, void** original, KilnHandle* out) {
+                   uint32_t arg_count, void** original, KilnHandle* out, uint32_t* unchecked = nullptr) {
     State& s = S();
     if (!fn || !addr) return KILN_ERR_INVALID_ARGUMENT;
     if (!s.ready) return KILN_ERR_UNAVAILABLE;
@@ -1066,7 +1088,7 @@ KilnResult install(Kind kind, KilnOwner owner, uintptr_t addr, const Order& orde
     const bool had_target = s.by_addr.count(addr) != 0;
     if (!had_target && s.next_link >= kMaxLinks) return KILN_ERR_UNAVAILABLE;  // a new target has nothing to revive
     bool quiet = false;
-    Target* t = target_for(addr, &quiet);
+    Target* t = target_for(addr, &quiet, unchecked);
     if (!t) return KILN_ERR_UNAVAILABLE;
     normalize(*t);
     const std::string owner_name =
@@ -1276,8 +1298,9 @@ KilnResult install_v1(KilnOwner owner, uintptr_t target, int32_t priority, KilnD
     return install(Kind::V1, owner, target, o, reinterpret_cast<void*>(fn), user, 4, nullptr, out);
 }
 KilnResult install_mid(KilnOwner owner, uintptr_t target, const Order& order, KilnMidFn fn, void* user,
-                       KilnHandle* out) {
-    return install(Kind::Mid, owner, target, order, reinterpret_cast<void*>(fn), user, 0, nullptr, out);
+                       KilnHandle* out, uint32_t* unchecked) {
+    if (unchecked) *unchecked = 0;
+    return install(Kind::Mid, owner, target, order, reinterpret_cast<void*>(fn), user, 0, nullptr, out, unchecked);
 }
 
 KilnResult install_typed(KilnOwner owner, uintptr_t target, const Order& order, uint32_t nstack, KilnTypedFn fn,
