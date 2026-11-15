@@ -1,11 +1,13 @@
 // The profile's native page, closed DLL mods (dev.21): the DLLs chain.ini loads (the game's [chain] proxies and this
 // profile's dllmain natives) with a "load after Kiln and ShroudForge" switch each, the last session's hook overlaps
-// with a suggested fix, and the compat rules that apply. Backend: kiln_manage::compat::view (chain_view).
+// with a suggested fix, and the compat rules that apply. Backend: kiln_manage::compat::view (chain_view). dev.29: a
+// rule that orders two DLLs (`before`) holds both switches and says why under each (chainOrder.ts).
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as api from "../../api/commands";
 import type { ChainOverlap, ChainView, ChainViewEntry, CompatRuleResult, Profile } from "../../api/commands";
 import { useGame } from "../../api/hooks";
 import { Badge, Banner, Button, Panel, Skeleton, Toggle, errorText, fmtAgo, toast, type Tone } from "../../ui";
+import { entryOrder, orderSides, orderWarnings } from "./chainOrder";
 
 const KIND: Record<ChainOverlap["kind"], { word: string; tone: Tone; title: string }> = {
   "foreign-before": { word: "Hooked first", tone: "warn", title: "This module hooked the function before Kiln; Kiln chained over it." },
@@ -13,7 +15,7 @@ const KIND: Record<ChainOverlap["kind"], { word: string; tone: Tone; title: stri
   refused: { word: "Refused", tone: "err", title: "A hosted engine refused or failed its hook here." },
   other: { word: "Overlap", tone: "warn", title: "Both hook the same function." },
 };
-const ACTION: Record<CompatRuleResult["action"], string> = { warn: "Warns", late: "Loads late", disable: "Switches off" };
+const ACTION: Record<CompatRuleResult["action"], string> = { warn: "Warns", late: "Loads late", disable: "Switches off", before: "Sets the load order" };
 const rule = (by: string | null) => (by?.startsWith("rule:") ? by.slice(5) : null);
 // shroudlink's client addon (ChainViewEntry.gated): no late switch, only one back from late
 const GATED = "Loads first: shroudlink's client addon has to find the game's functions before Kiln hooks them, or its MODS tab switches off.";
@@ -53,13 +55,16 @@ export function ChainCard({ profile, update }: { profile: Profile; update: (edit
         <div className="k-stack" style={{ gap: 14 }}>
           {v.error && <Banner tone="warn" title="This profile's DLLs are not listed">{v.error}</Banner>}
           {v.active && !v.current && <span className="k-hint">Changed since the game's files were written: it applies at the next Activate or Play.</span>}
+          {orderWarnings(v.rules).map((w) => <Banner key={w.id} tone="warn" title="Load order not changed">{w.text} (compat rule {w.id})</Banner>)}
           {v.entries.length === 0 ? (
             <span className="k-hint">No proxy DLLs in the chain and no dllmain natives in this profile.</span>
           ) : (
             <div className="k-list" role="list" aria-label="Chain entries">
               {v.entries.map((e) => {
-                const r = rule(e.lateBy);
+                const r = rule(e.lateBy) ?? rule(e.earlyBy ?? null);
                 const off = rule(e.offBy);
+                // a `before` rule holds this switch: its sentence under the entry, no switch against it
+                const order = entryOrder(e, v.rules);
                 return (
                   <div key={e.path} className="k-list-item" role="listitem" style={{ flexWrap: "wrap" }}>
                     <span className="k-mono" title={e.path} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{e.file}</span>
@@ -71,10 +76,11 @@ export function ChainCard({ profile, update }: { profile: Profile; update: (edit
                     {off && <Badge tone="err" title={v.rules.find((x) => x.id === off)?.message}>Off by rule {off}</Badge>}
                     <span className="k-spacer" />
                     {e.gated && <span className={e.late ? "k-hint k-tone-warn" : "k-hint"} data-gated style={{ flexBasis: "100%", order: 1 }}>{e.late ? GATED_LATE : GATED}</span>}
+                    {order && <span className="k-hint" data-order style={{ flexBasis: "100%", order: 1 }}>{order.text}</span>}
                     {!e.loader && (!e.gated || e.late) && (
                       <Toggle checked={e.late} disabled={!!r || !!off || setChain.isPending} onChange={(on) => setLate(e, on)}
                         label="Load after Kiln and ShroudForge"
-                        hint={r ? `Rule ${r}` : e.section === "chain" && e.late ? "Every profile of this game" : undefined} />
+                        hint={order ? order.hint : r ? `Rule ${r}` : e.section === "chain" && e.late ? "Every profile of this game" : undefined} />
                     )}
                   </div>
                 );
@@ -119,11 +125,13 @@ export function ChainCard({ profile, update }: { profile: Profile; update: (edit
                     <div className="k-stack" style={{ gap: 2, flex: "1 1 280px", minWidth: 0 }}>
                       <div className="k-row">
                         <span className="k-mono">{r.id}</span>
-                        <Badge tone={r.action === "warn" ? "warn" : r.action === "disable" ? "err" : "info"}>{ACTION[r.action]}</Badge>
+                        <Badge tone={r.action === "warn" || r.warning ? "warn" : r.action === "disable" ? "err" : "info"}>{ACTION[r.action]}</Badge>
                         <span className="k-hint">{r.source === "user" ? "Your rule" : "Kiln's rule"}</span>
                       </div>
                       {r.message && <span className="k-hint">{r.message}</span>}
-                      {r.targets.length > 0 && <span className="k-hint k-mono">{r.targets.map((t) => t.split(/[\\/]/).pop()).join(", ")}</span>}
+                      {orderSides(r) ? <span className="k-hint k-mono">{orderSides(r)}</span>
+                        : r.targets.length > 0 && <span className="k-hint k-mono">{r.targets.map((t) => t.split(/[\\/]/).pop()).join(", ")}</span>}
+                      {r.warning && <span className="k-hint k-tone-warn">{r.warning}</span>}
                       {r.note && <span className="k-hint" style={{ fontStyle: "italic" }}>{r.note}</span>}
                     </div>
                   </div>

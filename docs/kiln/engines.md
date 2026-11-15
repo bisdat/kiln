@@ -114,6 +114,20 @@ What `[late]` cannot do:
 - **A disabled mod.** A native mod's DLL in `[late]` loads only when the mod does (see
   [native-mods.md](native-mods.md#switches-and-policy)).
 
+### DLLs that must hook the game's imports first
+
+Some DLL mods change the game's import table in their `DllMain`, and only where a slot still holds the real system
+function. Two of them in one chain then depend on their order: Auto Loot Plus redirects the game's `GetProcAddress`
+import (its F8 menu) but skips a slot someone redirected already, and Ultimate ASI Loader redirects that import when it
+loads and puts it back only when the game first calls it, after Kiln's entry gate. The order is the phases': the proxy
+loads `[chain]`, then `dinput8-chain.ini`, then `[profile]`, and the late phase loads its DLLs in the same list order
+after all of them. A `[profile]` DLL (Auto Loot Plus from the Library) therefore loads before a `[chain]` one (Ultimate
+ASI Loader, where the installer put it) only when the `[chain]` one is late and the `[profile]` one is not. A compat rule
+with the action `before` says which DLL must come first, and the launcher writes that into chain.ini whatever the two
+switches say; Kiln ships the rule for this pair. The proxy's own order is not changed for this: reordering lines inside
+a phase would be new behaviour in the DLL every player's game loads first, and the phases already express it. Details,
+matching and limits: [engines/README.md](engines/README.md#closed-source-dll-mods).
+
 ## Linux: Wine, Proton and other launchers
 
 Wine has its own `dinput8.dll` and `xinput9_1_0.dll`. For a DLL of the same name in the game folder, Wine decides by
