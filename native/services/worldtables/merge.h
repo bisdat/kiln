@@ -253,6 +253,21 @@ PoolResolution resolve_pools(const std::vector<PoolDefinition>& definitions, con
                              const std::map<std::string, PoolGameMaterial>& game);
 void bind_shape_pools(std::vector<Shape>* shapes, const std::vector<PoolDefinition>& definitions,
                       const std::vector<MaterialPool>& pools, std::vector<std::string>* errors);
+// The custom-pool writer's checks of the game's own pool table, run before any material is fitted: "" when the
+// accepted pools can be written into these bytes, else why not. The writer runs the same checks.
+std::string check_custom_pools(const Bytes& game, const Layouts& L, const std::vector<MaterialPool>& groups);
+// A game build whose pool table fails those checks keeps every mod material and shape: its pools are refused, each
+// by name with the reason, and nothing is grouped, so the ordinary merge serves the rest.
+void admit_custom_pools(const Bytes& game, const Layouts& L, PoolResolution* r);
+// Budgets from what the game's own bytes held before Kiln's merge (no vanilla constants). capacity 0: unknown.
+struct BudgetCounts { uint32_t capacity = 0, game = 0, kiln = 0, reserved = 0; bool ready = false; };
+BudgetCounts material_budget_counts(uint32_t category, uint32_t game_used, uint64_t live, uint64_t retained);
+BudgetCounts pool_budget_counts(const std::string& pool, uint32_t original, uint32_t served);
+// The automatic prune: a stored file (a kept block or a pool envelope) of a mod loaded this session goes when that
+// mod did not define its block again; a mod that is not loaded keeps every file (the profile's business).
+bool stored_file_goes(const std::string& stem, const std::string& block, bool owner_loaded, const std::set<std::string>& defined);
+// The note for a stored file whose mod is not loaded: kept, not unsafe.
+std::string kept_file_text(const std::string& path);
 // Transactional custom-row writer: failure leaves *out unchanged. Grouped mod materials are
 // excluded from vanilla auto-append even when their group failed admission.
 bool merge_pools(const Bytes& game, const Layouts& L, const std::vector<Placed>& placed,

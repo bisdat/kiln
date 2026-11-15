@@ -13,7 +13,7 @@ int main() {
  PoolRegistrations ledger;auto receipt=ledger.prepare(mf.pools.at(0),KILN_DEFINE_ALLOW_NEXT_START,false);auto path=root/"pending/p"/("@pool-"+receipt.definition.guid.text()+".json");std::string reason;
  check("durable write",kiln::capacity::pending_store_write(base,root/"pending",path,receipt.envelope(),&reason));
  check("same process file waits",empty.replay(base,{"p"}).empty());
- PoolBootStore boot;boot.capture(base);check("inactive mod not applied",boot.replay(base,{}).empty());check("inactive file retained",fs::exists(path));
+ PoolBootStore boot;boot.capture(base);check("inactive mod not applied",boot.replay(base,{}).empty());check("an inactive mod's file is not refused as unsafe (the service notes it kept, once)",errors.empty());check("inactive file retained",fs::exists(path));
  auto rows=boot.replay(base,{"p"});check("loaded mod replays exactly one",rows.size()==1 && rows[0].definition==receipt.definition.definition);
  auto wrong=parse_relaxed(receipt.envelope());wrong["format"]="1";PoolDefinition def;check("wrong envelope type refused",!pool_envelope(wrong,"p",&def,&reason));
  check("oversize refused on write",!kiln::capacity::pending_store_write(base,root/"pending",path,std::string(65537,'x'),&reason));
