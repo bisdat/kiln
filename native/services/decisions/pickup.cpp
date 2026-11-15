@@ -254,11 +254,12 @@ void world_stopped() {
     if (g_arm.armed())
         host::logf(KILN_LOG_INFO,
                    "decisions: walk-over pickups this world: filed %llu (%llu on a worker thread), refused visits %llu, permitted %llu, released %llu, "
-                   "exposures closed %llu, reopened %llu, metadata misses %llu, dropped %llu, other worlds' visits passed %llu",
+                   "exposures closed %llu, reopened %llu, permits expired %llu, metadata misses %llu, dropped %llu, other worlds' visits passed %llu",
                    static_cast<unsigned long long>(s.filed.load()), static_cast<unsigned long long>(g_off_world.load()),
                    static_cast<unsigned long long>(s.refused.load()), static_cast<unsigned long long>(s.permitted.load()),
                    static_cast<unsigned long long>(s.released.load()), static_cast<unsigned long long>(s.closed.load()),
-                   static_cast<unsigned long long>(s.reopened.load()), static_cast<unsigned long long>(s.misses.load()),
+                   static_cast<unsigned long long>(s.reopened.load()), static_cast<unsigned long long>(s.expired.load()),
+                   static_cast<unsigned long long>(s.misses.load()),
                    static_cast<unsigned long long>(s.dropped.load()), static_cast<unsigned long long>(s.foreign.load()));
 }
 

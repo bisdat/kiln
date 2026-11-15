@@ -84,9 +84,12 @@ and `AppliedHealth`.
   comes back, the item or its amount changes, the drop is another life, or a mod calls
   `Decisions.ReevaluatePickup(drop, receiver)` (Pre or Post; `Ok = false`, reason `NoActiveExposure`, when there was
   none). Leaving and coming back wholly between two samples is not seen.
-- An allow lets the game pick up exactly this exposure. `Amount` is read only: changing it could destroy the whole drop
-  after a partial grant; a partial grant changes the amount, which is a new exposure and a new decision. The game
-  scales the amount it gives by the server's `resourceDropStackAmountFactor`.
+- An allow is a one-shot permit: the game's next attempt at this exposure runs, once, if it comes by the decision's
+  deadline (two steps after the first attempt; a later one asks again). If that attempt gives the receiver nothing (an
+  inventory without room), the drop stays and the game's next attempt is a new decision. A decision that ended without
+  an answer (a timeout, no dispatcher, a full queue) lets one attempt run the same way. `Amount` is read only: changing
+  it could destroy the whole drop after a partial grant; a partial grant changes the amount, which is a new exposure
+  and a new decision. The game scales the amount it gives by the server's `resourceDropStackAmountFactor`.
 - Interaction pickups (the interact key) are not held here: cancel `LootEvent` for those.
 
 ## Equipment

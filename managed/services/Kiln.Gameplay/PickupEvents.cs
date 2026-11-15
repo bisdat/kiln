@@ -3,7 +3,7 @@
 // pickup of a drop by a receiver at the entry of its range helper (native/services/decisions/pickup.cpp) and files a
 // request of kind 2; in the next Pre Kiln.Api's dispatcher hands it to PickupDecisions, which posts
 // ItemPickingUpEvent. A cancel suppresses this sampled exposure (the drop stays, the receiver's inventory is unchanged,
-// the game tries again and is refused again); an allow lets the helper run for exactly this exposure.
+// the game tries again and is refused again); an allow lets the helper run once, at the game's next attempt.
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -17,7 +17,8 @@ namespace Kiln;
 /// tried: until the answer the item stays on the ground. <see cref="CancelableEvent.Cancel"/> refuses it for this
 /// exposure: the item stays, the receiver gets nothing, and the game's later attempts are refused without asking again
 /// until the receiver leaves the item's range and comes back, the item or its amount changes, or a mod calls
-/// <see cref="Decisions.ReevaluatePickup"/>. Not canceling lets the pickup happen once for this exposure. Every
+/// <see cref="Decisions.ReevaluatePickup"/>. Not canceling lets the game's next attempt run, once, within two steps of
+/// the first; if that attempt gives the receiver nothing (no room), the attempt after it is a new decision. Every
 /// decision ends in one <see cref="DecisionCompletedEvent"/> with the same <see cref="Id"/> (its <c>Subject</c> is the
 /// item on the ground, its <c>Actor</c> the receiver).
 /// </summary>

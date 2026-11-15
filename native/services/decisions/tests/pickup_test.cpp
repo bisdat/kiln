@@ -142,10 +142,11 @@ static void test_request_and_states() {
     CHECK(x.visit(v, b) == pickup::Visit::Refuse && b.counters().filed == 2);
     auto r2 = drain(b, 12).at(0);
     CHECK(r2.exposure_epoch > old_epoch);
-    // allowed: a permit for this key, the helper runs (and keeps running for this exposure)
+    // allowed: a one-shot permit for this key. Chapter 07 §4.3: "After a Pre allow, a one-shot permit runs the original
+    // only for that complete key on the next fresh visit." The helper runs once; a further visit is no longer let
+    // through on this answer (test_permit_is_one_shot).
     answer(b, r2, true, 12);
     CHECK(x.visit(v, b) == pickup::Visit::Pass && x.stats.permitted.load() == 1);
-    CHECK(x.visit(v, b) == pickup::Visit::Pass && b.counters().filed == 2);
     // a partial grant changes the amount: a new exposure and a new decision (the permit does not carry over)
     w.drops[3000].amount = 1;
     CHECK(x.visit(v, b) == pickup::Visit::Refuse && b.counters().filed == 3);
@@ -174,11 +175,13 @@ static void test_keys_never_cross() {
     CHECK(x.visit(a, b) == pickup::Visit::Pass);
     CHECK(x.visit(c, b) == pickup::Visit::Refuse);  // the other drop is still held
     answer(b, reqs.at(1), false, 11);
-    CHECK(x.visit(c, b) == pickup::Visit::Refuse && x.visit(a, b) == pickup::Visit::Pass);
+    // the canceled drop stays refused; the permitted one's permit is spent (chapter 07 §4.3: "a one-shot permit runs
+    // the original only for that complete key on the next fresh visit"): its next attempt is a new decision
+    CHECK(x.visit(c, b) == pickup::Visit::Refuse && x.visit(a, b) == pickup::Visit::Refuse && b.counters().filed == 3);
     // a second receiver on the permitted drop is another key: a new decision
     w.rows[2023] = row_of(2023, 52);
     w.drops[3000].receiver = 2023;
-    CHECK(x.visit(a, b) == pickup::Visit::Refuse && b.counters().filed == 3);
+    CHECK(x.visit(a, b) == pickup::Visit::Refuse && b.counters().filed == 4);
 }
 
 static void test_samples_close_exposures() {
@@ -321,6 +324,55 @@ static void test_other_worlds_pass() {
     CHECK(x.visit(v, b) == pickup::Visit::Refuse && b.counters().filed == 1);
 }
 
+// Chapter 07 §4.3: "After a Pre allow, a one-shot permit runs the original only for that complete key on the next fresh
+// visit. A permit expires at deadline or any metadata mismatch." The helper's real outcome is not seen by the hook: a
+// grant takes the drop (the window sample closes the exposure), a failure (no room) leaves it, and the game tries
+// again at its next attempt. Where the chapter is silent (that retry) the next attempt is a new decision.
+static void test_permit_is_one_shot() {
+    World w;
+    Broker b;
+    pickup::Exposures x;
+    DropSampler s{w};
+    b.attach(9);
+    w.drops[3000] = {2022, 0x2b0cf1d5, 3};
+    w.rows[3000] = row_of(3000, 50);
+    w.rows[2022] = row_of(2022, 51);
+    Visitor v{w, 3000};
+    CHECK(x.visit(v, b) == pickup::Visit::Refuse);  // filed at step 10: deadline 12
+    auto r = drain(b, 11).at(0);
+    answer(b, r, true, 11);
+    v.st = 11;
+    CHECK(x.visit(v, b) == pickup::Visit::Pass && x.stats.permitted.load() == 1);  // the next fresh visit: the helper runs
+    // the helper gave nothing (an inventory without room): the drop is still there, the permit is spent. The game's
+    // next attempt is not let through on the old permit; it is a new decision, refused while open
+    CHECK(x.visit(v, b) == pickup::Visit::Refuse && b.counters().filed == 2);
+    auto r2 = drain(b, 12).at(0);
+    CHECK(r2.exposure_epoch > r.exposure_epoch && r2.capture_step == 11);
+    // allowed again, and this time the helper gives: the drop goes and the window sample closes the exposure
+    answer(b, r2, true, 12);
+    v.st = 12;
+    CHECK(x.visit(v, b) == pickup::Visit::Pass && x.stats.permitted.load() == 2);
+    w.drops.erase(3000);
+    x.sample(1, 12, b, s, false);
+    CHECK(x.size() == 0 && b.counters().filed == 2);
+    // a permit that is not used by its deadline expires: allowed in the Pre of capture + 1, no visit until capture + 3
+    w.drops[3000] = {2022, 0x2b0cf1d5, 3};
+    v.st = 20;
+    CHECK(x.visit(v, b) == pickup::Visit::Refuse && b.counters().filed == 3);
+    auto r3 = drain(b, 21).at(0);
+    answer(b, r3, true, 21);
+    b.window_begin(1, 23);
+    x.sample(1, 23, b, s, true);  // window_begin of capture + 3
+    v.st = 23;
+    CHECK(x.visit(v, b) == pickup::Visit::Refuse && b.counters().filed == 4);  // asked again: no stale permit
+    // a timeout (the consumer never answered) lets one attempt through, then asks again: fail open, never a hold for good
+    b.window_begin(1, 26);  // capture 23 + 3: TimeoutReleased
+    x.sample(1, 26, b, s, true);
+    v.st = 26;
+    CHECK(x.visit(v, b) == pickup::Visit::Pass && x.stats.released.load() == 1);
+    CHECK(x.visit(v, b) == pickup::Visit::Refuse && b.counters().filed == 5);
+}
+
 int main() {
     test_reset_after_answer_before_next_visit();
     test_request_and_states();
@@ -328,6 +380,7 @@ int main() {
     test_samples_close_exposures();
     test_fail_open();
     test_other_worlds_pass();
+    test_permit_is_one_shot();
     std::printf("pickup_test: %d PASS, %d FAIL\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

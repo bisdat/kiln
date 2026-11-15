@@ -19,9 +19,16 @@
 // What happens wholly between two samples (leaving and coming back) is not seen: the exposure is SAMPLED.
 //
 // States of an exposure: Open (no request yet) -> Pending (a request is filed; visits are refused) -> Suppressed (a
-// handler canceled; visits are refused until the exposure closes or Decisions.ReevaluatePickup reopens it) or
-// Released (allowed, or failed open: visits pass for the rest of this exposure). An allow is therefore a permit for
-// exactly this key: a partial grant changes the amount, which is a new exposure and a new decision.
+// handler canceled; visits are refused until the exposure closes or Decisions.ReevaluatePickup reopens it), or a
+// one-shot pass. §4.3: "After a Pre allow, a one-shot permit runs the original only for that complete key on the next
+// fresh visit. A permit expires at deadline or any metadata mismatch." So an allow lets exactly one visit run the
+// helper, before the request's deadline (capture + 2; unused by then, the window sample at capture + 3 lets it expire),
+// and the exposure is Open again under a new exposure epoch. The hook does not see the helper's result: a grant takes
+// the drop (the next sample closes the exposure), a partial grant changes the amount (a new exposure), and a failure
+// (no room) leaves the drop for the game's next attempt, which, the permit being spent, is a new decision (the chapter
+// does not say what a retry after a failed helper call is; this is the reading that never lets an attempt through on
+// an old answer). A decision that ended without an answer (a timeout, the consumer gone, a full queue) is released the
+// same way: one attempt runs, fail open, and the next one asks again.
 #pragma once
 #include <atomic>
 #include <cstdint>
@@ -35,10 +42,11 @@
 namespace kiln::decisions::pickup {
 
 enum class Visit { Pass, Refuse };
-enum class State : uint8_t { Open, Pending, Suppressed, Released };
+enum class State : uint8_t { Open, Pending, Suppressed, Released };  // Released: reopen() only (the reset of a spent pass)
 
 struct Exposure {
     uint64_t world_epoch = 0, exposure_epoch = 0, request_id = 0;
+    uint64_t deadline_step = 0;  // the pending request's deadline (capture + 2, queue.h): an allow unused by then expires
     uint32_t receiver = 0, item = 0, amount = 0;
     KilnEventEntityKey drop_key{}, receiver_key{};
     uint32_t has_position = 0;
@@ -49,6 +57,7 @@ struct Exposure {
 struct Stats {
     std::atomic<uint64_t> visits{0}, filed{0}, refused{0}, permitted{0}, released{0}, misses{0}, dropped{0}, closed{0}, reopened{0};
     std::atomic<uint64_t> foreign{0};  // visits of another world (client, prediction) or with no server world: passed
+    std::atomic<uint64_t> expired{0};  // permits no visit used before their deadline
 };
 
 class Exposures {
@@ -103,7 +112,7 @@ public:
         }
         Exposure& x = it->second;
         switch (x.state) {
-            case State::Released: return Visit::Pass;
+            case State::Released: spend(x); return Visit::Pass;
             case State::Suppressed: return refuse();
             case State::Pending: {
                 const uint32_t st = broker.status_of(x.request_id);
@@ -112,8 +121,10 @@ public:
                     x.state = State::Suppressed;
                     return refuse();
                 }
-                x.state = State::Released;  // allowed (a permit for this key), or released by a timeout or a failure
+                // allowed (the one-shot permit of this key, before its deadline: sample() lets a late one expire), or
+                // released by a timeout or a failure: this visit runs the helper, the next attempt asks again
                 (st == KILN_DECISION_ALLOWED ? stats.permitted : stats.released).fetch_add(1, std::memory_order_relaxed);
+                spend(x);
                 return Visit::Pass;
             }
             case State::Open: break;
@@ -138,11 +149,11 @@ public:
         const KilnResult rc = broker.file(q, epoch, p.step(), &id);
         if (rc != KILN_OK) {
             if (rc == KILN_ERR_BUFFER_TOO_SMALL) stats.dropped.fetch_add(1, std::memory_order_relaxed);
-            x.state = State::Released;  // fail open for this exposure
-            return Visit::Pass;
+            return Visit::Pass;  // fail open for this attempt (the exposure stays Open: the next one tries to file again)
         }
         x.state = State::Pending;
         x.request_id = id;
+        x.deadline_step = p.step() + 2;  // as the broker sets it for a hooked kind (queue.h file_locked)
         stats.filed.fetch_add(1, std::memory_order_relaxed);
         return refuse();
     }
@@ -173,6 +184,11 @@ public:
             if (why) {
                 it = close(it, broker, status, why, step);
                 continue;
+            }
+            // an allow that no visit used by its deadline expires (§4.3): the next attempt asks again
+            if (x.state == State::Pending && step > x.deadline_step && broker.status_of(x.request_id) == KILN_DECISION_ALLOWED) {
+                stats.expired.fetch_add(1, std::memory_order_relaxed);
+                spend(x);
             }
             ++it;
         }
@@ -240,6 +256,15 @@ private:
     Visit refuse() {
         stats.refused.fetch_add(1, std::memory_order_relaxed);
         return Visit::Refuse;
+    }
+
+    // A one-shot pass is used (or an allow expired): the exposure is Open again under a new epoch, so the next attempt
+    // is a new decision with a key of its own.
+    void spend(Exposure& x) {
+        x.state = State::Open;
+        x.exposure_epoch = ++next_epoch_;
+        x.request_id = 0;
+        x.deadline_step = 0;
     }
 
     Map::iterator close(Map::iterator it, Broker& broker, uint32_t status, const char* why, uint64_t step) {
