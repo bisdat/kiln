@@ -559,7 +559,8 @@ static void test_world_stop() {
     const uint64_t id = r.watch({2000}, 1);
     r.tick();
     r.tick([&] { r.w.set_byte(2000, 1, 0, 2); });
-    r.c.world_stopped("the server world stopped");
+    const auto gone = r.c.world_stopped("the server world stopped");
+    CHECK(gone.watches == 1 && gone.frames == 1 && gone.records == 1);  // what the stop's log line counts
     KilnComponentWatchStatusV1 st{};
     CHECK(status_of(r, id, &st) == KILN_WATCH_DISPOSED && std::strstr(st.reason, "stopped"));
     CHECK(r.c.window_wanted() == 0);

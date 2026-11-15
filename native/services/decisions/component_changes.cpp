@@ -51,6 +51,10 @@ uint32_t g_hash[7] = {};
 uint32_t g_setup_hash = 0;
 std::atomic<uint32_t> g_world_thread{0};
 std::atomic<bool> g_read_faulted{false};
+// Between the server world's KILN_WORLD_STOPPING and the next KILN_WORLD_STARTED: a window call then would be a bug of
+// the core's (counted, logged at the stop and at the process exit, and nothing is read).
+std::atomic<bool> g_world_gone{false};
+std::atomic<uint64_t> g_calls_after_stop{0}, g_calls_this_world{0};
 
 KilnStr ks(const char* s) { return KilnStr{s, std::strlen(s)}; }
 constexpr const char* kNames[7] = {"", "Health", "Stamina", "Mana", "Fuel", "Inventory", "SlotSelection"};
@@ -227,7 +231,14 @@ KilnResult KILN_CALL c_remove(KilnOwner owner, uint64_t id) {
 }
 KilnResult KILN_CALL c_release_owner(KilnOwner owner) {
     if (!g_core.on()) return KILN_ERR_UNAVAILABLE;
-    g_core.release_owner(owner);
+    const uint32_t n = g_core.release_owner(owner);
+    if (n > 0) {
+        KilnComponentChangesCountersV1 c{};
+        c.size = sizeof c;
+        g_core.counters(&c);
+        host::logf(KILN_LOG_INFO, "component changes: %u watch(es) released with their owner (its mod unloaded); %u watch(es), %u pair(s) left%s",
+                   n, c.watches, c.pairs, c.watches == 0 ? ": nothing is watched, no window call from the next step" : "");
+    }
     return KILN_OK;
 }
 KilnResult KILN_CALL c_begin_events(KilnOwner d, uint64_t* batch, uint32_t* records) {
@@ -275,6 +286,11 @@ void log_stats() {
 }
 
 void KILN_CALL c_window_begin(uint64_t epoch, uint64_t step) {
+    if (g_world_gone.load(std::memory_order_relaxed)) {
+        g_calls_after_stop.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+    g_calls_this_world.fetch_add(1, std::memory_order_relaxed);
     if (!g_core.on() || g_core.stopped()) return;
     g_world_thread.store(GetCurrentThreadId(), std::memory_order_relaxed);
     const uint64_t t0 = now_ns();
@@ -283,6 +299,11 @@ void KILN_CALL c_window_begin(uint64_t epoch, uint64_t step) {
     check_reads();
 }
 void KILN_CALL c_window_end(uint64_t epoch, uint64_t step) {
+    if (g_world_gone.load(std::memory_order_relaxed)) {
+        g_calls_after_stop.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+    g_calls_this_world.fetch_add(1, std::memory_order_relaxed);
     if (!g_core.on() || g_core.stopped()) return;
     const uint64_t t0 = now_ns();
     g_core.window_end(epoch, step);
@@ -343,10 +364,22 @@ const KilnComponentChangesApiV1 kTable = {
 };
 
 void KILN_CALL on_world(const KilnWorldEvent* e, void*) {
-    if (e->kind != KILN_WORLD_SERVER || e->event != KILN_WORLD_STOPPING) return;
+    if (e->kind != KILN_WORLD_SERVER) return;
+    if (e->event == KILN_WORLD_STARTED) {
+        g_world_gone.store(false);
+        g_calls_this_world.store(0);
+        return;
+    }
+    if (e->event != KILN_WORLD_STOPPING) return;
+    g_world_gone.store(true);
     if (!g_core.on() || g_core.stopped()) return;
-    if (g_core.any()) host::logf(KILN_LOG_INFO, "component changes: the server world stopped; every watch ended (Disposed)");
-    g_core.world_stopped("the server world stopped; create a new watch in the next world");
+    const auto t0 = std::chrono::steady_clock::now();
+    const watch::Watcher::Stopped s = g_core.world_stopped("the server world stopped; create a new watch in the next world");
+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    host::logf(KILN_LOG_INFO,
+               "component changes: the server world stopped: %u watch(es) ended (Disposed), %u unread record(s) in %u frame(s) dropped "
+               "(never delivered into another world), in %.3f ms; %llu window call(s) in this world, none after it",
+               s.watches, s.records, s.frames, ms, static_cast<unsigned long long>(g_calls_this_world.load()));
 }
 
 void off(uint32_t reason, const char* why) {
@@ -356,6 +389,17 @@ void off(uint32_t reason, const char* why) {
 }
 
 }  // namespace
+
+// The process exits (kiln.decisions' on_unload): what came after the world's stop. Logs only; no game memory.
+void at_exit() {
+    KilnComponentChangesCountersV1 c{};
+    c.size = sizeof c;
+    g_core.counters(&c);
+    host::logf(KILN_LOG_INFO, "component changes: process exit: %llu window call(s) after the server world stopped (0 expected), %u watch(es) left, "
+               "%llu change(s) and %llu queue overflow(s) in this process",
+               static_cast<unsigned long long>(g_calls_after_stop.load()), c.watches, static_cast<unsigned long long>(c.changes),
+               static_cast<unsigned long long>(c.queue_overflows));
+}
 
 KilnResult register_table(const KilnApi* api, KilnOwner owner) {
     g_api = api;

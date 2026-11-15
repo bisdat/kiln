@@ -631,8 +631,16 @@ public:
 
     // The world stops (KILN_WORLD_STOPPING): every watch ends (its entity ids mean nothing in the next world), what
     // was not read is dropped (counted). Also after a fault (stop()).
-    void world_stopped(const char* why) {
+    struct Stopped {
+        uint32_t watches = 0, frames = 0, records = 0;
+    };
+    Stopped world_stopped(const char* why) {
         std::lock_guard lock(m_);
+        Stopped out;
+        out.watches = static_cast<uint32_t>(watches_.size());
+        out.frames = static_cast<uint32_t>(frames_.size()) + batch_frames_;
+        for (const auto& f : frames_) out.records += static_cast<uint32_t>(f.size());
+        out.records += static_cast<uint32_t>(batch_.size() + pending_.size());
         while (!watches_.empty()) end_watch(watches_.front(), why);
         pairs_.clear();
         linked_.clear();
@@ -646,6 +654,7 @@ public:
         batch_id_ = 0;
         batch_frames_ = 0;
         present_ = 0;
+        return out;
     }
     void stop(const char* why) {
         stopped_.store(true);

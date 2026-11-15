@@ -544,17 +544,25 @@ public static unsafe class ComponentChanges
     }
 
     // A mod unloads: its watches end (the service ends them as well when its owner is revoked).
+    // The service ends every watch of the mod's owner in one call (release_owner); here they are only forgotten, so
+    // nothing of the mod (its watch objects, their requests) stays referenced and its load context can be collected.
+    // The service also ends them by itself when it finds the owner revoked (about once a second), as a backstop.
     private static void Release(ModContext mod)
     {
         lock (Mods) Mods.Remove(mod);
+        var n = 0;
         foreach (var w in Registry.Values)
             if (ReferenceEquals(w.Mod, mod))
             {
                 w.Update((uint)ComponentWatchState.Disposed, "its mod unloaded", w.LastCompleteStep, 0);
-                Forget(w, remove: true);
+                Forget(w, remove: false);
+                n++;
             }
         var t = (ComponentChangesNative.Table*)Volatile.Read(ref _table);
-        if (t != null && mod.Owner != 0) t->ReleaseOwner(mod.Owner);
+        var rc = t != null && mod.Owner != 0 ? t->ReleaseOwner(mod.Owner) : ComponentChangesNative.Unavailable;
+        if (n > 0)
+            Backend.Current.Log(0, LogLevel.Info, $"kiln component changes: {mod.Info.Id} unloads: {n} watch(es) released by its owner " +
+                (rc == ComponentChangesNative.Ok ? "" : $"(kiln.component_changes answered {rc}: it ends them when it finds the owner revoked)"));
     }
 
     internal static void Forget(ComponentWatch watch, bool remove)

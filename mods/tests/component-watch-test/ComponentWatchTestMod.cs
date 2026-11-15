@@ -98,6 +98,161 @@ public sealed class ComponentWatchTestMod : Mod
 
     private static int Hp(EntityId e) => Combat.GetHealth(e)?.Current ?? int.MinValue;
 
+    private string _mode = "full";
+
+    // kiln/data/component-watch-test/mode: full (the default), keep, fresh, release
+    private string Mode()
+    {
+        try
+        {
+            var f = Path.Combine(Context.DataDirectory, "mode");
+            return File.Exists(f) ? File.ReadAllText(f).Trim() : "full";
+        }
+        catch (IOException)
+        {
+            return "full";
+        }
+    }
+
+    // ---- RELEASE: a mod (component-watch-helper) that unloads and reloads with live watches ----
+    private const string Helper = "component-watch-helper";
+
+    private string HelperFile(string name) => Path.GetFullPath(Path.Combine(Context.DataDirectory, "..", Helper, name));
+
+    private string[] HelperLines(string name)
+    {
+        try
+        {
+            return File.Exists(HelperFile(name)) ? File.ReadAllLines(HelperFile(name)) : [];
+        }
+        catch (IOException)
+        {
+            return [];
+        }
+    }
+
+    // The helper's last ready line: "<nonce> <root> <watch ids...>", once its watches are made.
+    private async Task<(string Nonce, EntityId Root)?> HelperReady(string? not)
+    {
+        for (var i = 0; i < 1200; i++)
+        {
+            var l = HelperLines("ready.txt").LastOrDefault()?.Split(' ');
+            if (l is { Length: >= 2 } && l[0] != not && uint.TryParse(l[1], out var root)) return (l[0], new EntityId(root));
+            await Wait(1);
+        }
+        return null;
+    }
+
+    private int EventsOf(string nonce) => HelperLines("events.txt").Count(l => l.StartsWith(nonce + " ", StringComparison.Ordinal));
+
+    // The host's own check that unloaded mod contexts were collected (kiln/control "gc", Kiln.Host).
+    private async Task<string> Gc(string tag)
+    {
+        var dir = Path.GetFullPath(Path.Combine(Context.DataDirectory, "..", "..", "control"));
+        Directory.CreateDirectory(dir);
+        var name = $"cwt-gc-{tag}-{Environment.TickCount64}";
+        var result = Path.Combine(dir, name + ".result.json");
+        File.WriteAllText(Path.Combine(dir, name + ".cmd.tmp"), "gc");
+        File.Move(Path.Combine(dir, name + ".cmd.tmp"), Path.Combine(dir, name + ".cmd"));
+        for (var i = 0; i < 600 && !File.Exists(result); i++) await Wait(1);
+        await Wait(2);
+        try
+        {
+            return File.Exists(result) ? File.ReadAllText(result).Replace("\n", " ").Replace("\r", "").Replace("\n", "") : "(no result)";
+        }
+        catch (IOException e)
+        {
+            return $"(unreadable: {e.Message})";
+        }
+    }
+
+    private static bool GcClean(string json) => json.Contains("\"ok\": true") && json.Contains("\"leaked\": []");
+
+    // Writers in the steps around the release: Combat.SetHealth in Pre and a tracked write (kiln.world's program, inside
+    // the simulation; on a worker when the players mask is forced) on the root the helper watches.
+    private async Task Writers(EntityId root, int steps)
+    {
+        for (var i = 0; i < steps && Spawn.Exists(root); i++)
+        {
+            var hp = Hp(root);
+            if (hp > 10) Combat.SetHealth(root, hp - 1);
+            var h = World.ReadBytes(root, "Health");
+            if (h is { Length: >= 8 }) _ = World.WriteAt(root, "Health", BitConverter.ToUInt16(h, 4), Math.Max(2, hp - 2));
+            await Wait(1);
+        }
+    }
+
+    private string? _lastNonce;
+
+    private async Task Release(string run)
+    {
+        var first = await HelperReady(_lastNonce);
+        if (first is not { } a)
+        {
+            Check(false, $"[{run}] RELEASE: the helper never said it was ready ({HelperFile("ready.txt")})");
+            return;
+        }
+        await Wait(5);
+        var live = Counter("watches");
+        Check(live >= 3 && Counter("pairs") > 0, $"[{run}] RELEASE: {Helper} (load {a.Nonce}) holds live watches: {Counters()}");
+        var hp = Hp(a.Root);
+        Combat.SetHealth(a.Root, hp - 3);
+        await Wait(4);
+        var before = EventsOf(a.Nonce);
+        Check(before >= 1, $"[{run}] RELEASE: the helper's handler is told of a change of its root {a.Root.Value} ({before} event line(s))");
+
+        // unload with writers running in the same steps
+        var writing = Writers(a.Root, 8);
+        var t0 = Environment.TickCount64;
+        var unloaded = await Mods.UnloadAsync(Helper);
+        var ms = Environment.TickCount64 - t0;
+        await writing;
+        await Wait(1);
+        var windows = Counter("windows");
+        var after = Counters();
+        Check(unloaded.Ok && Counter("watches") == 0 && Counter("pairs") == 0,
+            $"[{run}] RELEASE: the unload ({unloaded.Ok} {unloaded.Message}, {ms} ms) released the watches by owner and dropped the pairs: {after}");
+        await Wait(10);
+        Check(Counter("windows") == windows, $"[{run}] RELEASE: no window call once nothing is watched (window_wanted 0): windows {windows} -> {Counter("windows")} over 10 steps");
+        var gone = EventsOf(a.Nonce);
+        Combat.SetHealth(a.Root, Math.Max(5, Hp(a.Root) - 3));
+        await Wait(5);
+        Check(EventsOf(a.Nonce) == gone, $"[{run}] RELEASE: no event reaches the unloaded load context ({gone} -> {EventsOf(a.Nonce)} event line(s) of load {a.Nonce})");
+        var gc = await Gc(run + "-unload");
+        Check(GcClean(gc), $"[{run}] RELEASE: the host finds the unloaded context collected: {gc}");
+
+        // the next load watches again
+        var loaded = await Mods.LoadAsync(Helper);
+        var second = await HelperReady(a.Nonce);
+        await Wait(5);
+        var ok = second is { } b && Counter("watches") == live;
+        if (second is { } bb)
+        {
+            Combat.SetHealth(bb.Root, Hp(bb.Root) - 3);
+            await Wait(4);
+        }
+        Check(loaded.Ok && ok && second is { } c2 && EventsOf(c2.Nonce) >= 1,
+            $"[{run}] RELEASE: the next load ({loaded.Ok} {loaded.Message}) watches again: load {second?.Nonce}, {Counters()}, its events {(second is { } c3 ? EventsOf(c3.Nonce) : -1)}");
+
+        // a reload with live watches: only the new instance's remain
+        var writing2 = second is { } w2 ? Writers(w2.Root, 8) : Task.CompletedTask;
+        var reloaded = await Mods.ReloadAsync(Helper);
+        await writing2;
+        var third = await HelperReady(second?.Nonce);
+        await Wait(5);
+        Check(reloaded.Ok && third is not null && Counter("watches") == live,
+            $"[{run}] RELEASE: a reload with live watches ({reloaded.Ok} {reloaded.Message}) leaves only the new load's ({third?.Nonce}): {Counters()}");
+        var gc2 = await Gc(run + "-reload");
+        Check(GcClean(gc2), $"[{run}] RELEASE: after the reload the old context is collected too: {gc2}");
+
+        _lastNonce = third?.Nonce;
+        // leave the helper unloaded for the next run (it loads again there)
+        var end = await Mods.UnloadAsync(Helper);
+        await Wait(3);
+        Check(end.Ok && Counter("watches") == 0, $"[{run}] RELEASE: unloaded at the end: {Counters()}");
+        if (run == "plain") _ = await Mods.LoadAsync(Helper);  // the parallel run starts from a fresh load
+    }
+
     private static string Counters() => ComponentChanges.LabCounters() ?? "(no counters)";
 
     private static long Counter(string name)
@@ -132,6 +287,48 @@ public sealed class ComponentWatchTestMod : Mod
             _subs.Add(Events.On<AttributeValueChangedEvent>(e => _attributes.Add(e)));
             _subs.Add(Events.On<ComponentWatchStateChangedEvent>(e => _states.Add(e)));
             var at = new WorldPosition(3845, 835, 1480);
+            _mode = Mode();
+            Log.Info($"{Id}: mode {_mode} ({Path.Combine(Context.DataDirectory, "mode")})");
+            if (_mode == "keep")
+            {
+                // a world stop with live watches: the full budget, a Players watch, a suspended one, none disposed
+                Check(Counter("watches") == 0, $"KEEP: no watch before this run ({Counters()})");
+                await Budget(at, keep: true, cost: false);
+                return;
+            }
+            if (_mode == "fresh")
+            {
+                // the boot after that stop: nothing of the first world's watches; a fresh one works; the same fill as
+                // KEEP, all disposed before the stop (the stop's timing without watches)
+                Check(Counter("watches") == 0 && Counter("pairs") == 0, $"FRESH: no watch from the first world exists ({Counters()})");
+                var fresh = await SpawnPlayers(2, at);
+                await Wait(45);
+                await Origin("fresh", fresh[0]);
+                await Budget(at, keep: false, cost: false);
+                Check(Counter("watches") == 0, $"FRESH: every watch of this run disposed before the stop ({Counters()})");
+                return;
+            }
+            if (_mode == "release")
+            {
+                await Release("plain");
+                if (Kiln.Testing.LabSystems.Enabled)
+                {
+                    Kiln.Testing.LabSystems.ForceParallel(4000);
+                    await Wait(2);
+                    Log.Info($"{Id}: parallel forced (mask 0x{Kiln.Testing.LabSystems.PlayersMask:x4})");
+                    try
+                    {
+                        await Release("parallel");
+                    }
+                    finally
+                    {
+                        Kiln.Testing.LabSystems.StopParallel();
+                        await Wait(2);
+                    }
+                }
+                else Log.Info($"{Id}: the lab parallel switch is off (no kiln/control/systems.parallel): the parallel release was skipped");
+                return;
+            }
             var roots = await SpawnPlayers(4, at);
             await Wait(45);
             Check(roots.Count == 4 && roots.All(e => Hp(e) > 0), $"four 1_Player stand-ins (no connected player): {string.Join(", ", roots.Select(e => $"{e.Value}: {Hp(e)}"))}");
@@ -163,8 +360,10 @@ public sealed class ComponentWatchTestMod : Mod
         }
         finally
         {
-            foreach (var e in _spawned)
-                if (Spawn.Exists(e)) Spawn.Destroy(e);
+            // keep and fresh leave their stand-ins for the stop (the two stops compare the same world)
+            if (_mode is not ("keep" or "fresh"))
+                foreach (var e in _spawned)
+                    if (Spawn.Exists(e)) Spawn.Destroy(e);
             Log.Info($"{Id}: counters at the end: {Counters()}");
             Log.Info($"{Id} done: {_passes} PASS, {_failures} FAIL");
         }
@@ -340,7 +539,7 @@ public sealed class ComponentWatchTestMod : Mod
         return made;
     }
 
-    private async Task Budget(WorldPosition at)
+    private async Task Budget(WorldPosition at, bool keep = false, bool cost = true)
     {
         // 60 more stand-ins (64 in all), each given water pouches into its own inventory
         var bipeds = await SpawnPlayers(60, new WorldPosition(at.X, at.Y, at.Z + 20));
@@ -391,25 +590,35 @@ public sealed class ComponentWatchTestMod : Mod
                 ComponentWatchExpansion.PlayerInventoryAndItems));
             Check(one is { Ok: false, Watch: null, Pairs: 1 } && one.Reason!.Contains("4097"),
                 $"WATCH-BUDGET: one more disjoint pair is refused: ok {one?.Ok}, watch {(one?.Watch is null ? "none" : "made")}, reason: {one?.Reason}");
+            if (keep)
+            {
+                // the stop's run: a Players watch beside the full budget (no player in a lab: no pair)
+                var players = ComponentChanges.Watch(new(ComponentWatchScope.Players, [], ObservedComponents.Health | ObservedComponents.Stamina));
+                Check(players is { Ok: true, Pairs: 0 }, $"KEEP: a Players watch is made beside the full budget: {players.Ok} {players.Pairs} {players.Reason}");
+                if (players.Watch is { } pw) watches.Add(pw);
+            }
             // overlap is free: up to 32 watches; the 33rd is refused
-            while (watches.Count < 32)
+            while (!keep && watches.Count < 32)
             {
                 var r = ComponentChanges.Watch(new(ComponentWatchScope.Entities, [all[0].Root], ObservedComponents.Health));
                 if (!r.Ok) break;
                 watches.Add(r.Watch!);
             }
-            var many = ComponentChanges.Watch(new(ComponentWatchScope.Entities, [all[0].Root], ObservedComponents.Health));
+            var many = keep ? null : ComponentChanges.Watch(new(ComponentWatchScope.Entities, [all[0].Root], ObservedComponents.Health));
+            if (many is not null)
             Check(watches.Count == 32 && !many.Ok && many.Watch is null && (many.Reason ?? "").Contains("32 watches"),
                 $"WATCH-BUDGET: the 33rd watch is refused: {many.Reason}");
             // a Players watch with no player in the game: made, no pair (no connected player in a lab)
-            var everyone = ComponentChanges.Watch(new(ComponentWatchScope.Players, [], ObservedComponents.Health));
+            var everyone = keep ? null : ComponentChanges.Watch(new(ComponentWatchScope.Players, [], ObservedComponents.Health));
+            if (everyone is not null)
             Check(!everyone.Ok && (everyone.Reason ?? "").Contains("32 watches"), $"WATCH-BUDGET: a 33rd watch of scope Players is refused the same way ({everyone.Reason})");
 
             // WATCH-COST: 1600 steps with 4096 pairs; the stand-ins' own stamina and health recharge as the game runs them
             _changes.Clear();
             var start = Counter("changes");
-            await Wait(1600);
+            await Wait(cost ? 1600 : 30);
             var c = Counters();
+            if (cost)
             Check(Counter("samples") > 0 && Counter("present") == 4096 && Counter("overflows") == 0,
                 $"WATCH-COST: 4096 pairs over 1600 steps: begin p50 {Counter("begin_p50_ns") / 1000.0:F1} us p99 {Counter("begin_p99_ns") / 1000.0:F1} us max {Counter("begin_max_ns") / 1000.0:F1} us, " +
                 $"end p50 {Counter("end_p50_ns") / 1000.0:F1} us p99 {Counter("end_p99_ns") / 1000.0:F1} us max {Counter("end_max_ns") / 1000.0:F1} us; " +
@@ -438,9 +647,17 @@ public sealed class ComponentWatchTestMod : Mod
         }
         finally
         {
-            foreach (var w in watches) w.Dispose();
-            await Wait(2);
-            Log.Info($"{Id}: watches disposed: {Counters()}");
+            if (keep)
+            {
+                // nothing is disposed: the server's stop has to end them
+                Log.Info($"{Id}: KEEP: {watches.Count} watch(es) stay live for the stop ({string.Join(", ", watches.GroupBy(w => w.State).Select(g => $"{g.Count()} {g.Key}"))}): {Counters()}");
+            }
+            else
+            {
+                foreach (var w in watches) w.Dispose();
+                await Wait(2);
+                Log.Info($"{Id}: watches disposed: {Counters()}");
+            }
         }
     }
 }

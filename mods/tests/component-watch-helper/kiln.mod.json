@@ -1,0 +1,9 @@
+{
+  "id": "component-watch-helper",
+  "name": "Component watches lab helper",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "ComponentWatchHelper.dll",
+  "side": "server",
+  "description": "Helper of component-watch-test's RELEASE rows (07 S7): when that mod's mode is 'release', it spawns two 1_Player stand-ins and keeps three component watches live (every player, one stand-in with its inventories expanded, one whose root it destroys so that it is suspended) without ever disposing them, and writes the changes it is told of to its data folder, so the driver can unload, load and reload it and see what its unload releases. Does nothing in the other modes."
+}

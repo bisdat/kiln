@@ -135,4 +135,6 @@ namespace kiln::decisions::component_changes {
 KilnResult register_table(const KilnApi* api, KilnOwner owner);
 // on_ready, after kiln.decisions' own: `decisions_on` says whether kiln.decisions is on.
 void ready(bool decisions_on);
+// The process exits (the plugin's on_unload): one log line of what came after the world's stop.
+void at_exit();
 }  // namespace kiln::decisions::component_changes

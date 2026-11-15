@@ -593,6 +593,9 @@ void KILN_CALL on_ready_all(void* user) {
     component_changes::ready(g_on.load());
 }
 
+// The process exits (kiln_api.h on_unload: under Wine, and where kiln.json turns it on): logs only.
+void KILN_CALL on_unload_all(void*) { component_changes::at_exit(); }
+
 }  // namespace
 
 namespace host {
@@ -672,6 +675,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     info->id = KilnStr{KILN_DECISIONS_SERVICE, sizeof(KILN_DECISIONS_SERVICE) - 1};
     info->version = KilnStr{"1", 1};
     info->on_ready = &on_ready_all;
+    if (info->size >= offsetof(KilnPluginInfo, on_unload) + sizeof(info->on_unload)) info->on_unload = &on_unload_all;
     lock_stopped.store(+[] { return !g_shutdown.holding(); });
     g_broker = new Broker();
     const KilnResult rc = api->register_service(owner, KilnStr{KILN_DECISIONS_SERVICE, sizeof(KILN_DECISIONS_SERVICE) - 1}, &kTable);
