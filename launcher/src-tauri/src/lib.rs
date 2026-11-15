@@ -99,6 +99,7 @@ pub fn run() {
             commands::library::library_lint,
             commands::library::library_take_over,
             commands::library::library_rollback,
+            commands::library::library_replace_dll,
             commands::config::config_list,
             commands::config::config_read,
             commands::config::config_set,
