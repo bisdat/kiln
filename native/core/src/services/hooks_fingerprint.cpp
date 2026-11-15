@@ -779,6 +779,16 @@ Verdict check(const Shape& sh, const Fingerprint& f, std::string* text) {
     return Verdict::Match;
 }
 
+bool compiled_matches(const KilnSig& c, const Sig& s, std::string* reason) {
+    auto fail = [&](const std::string& why) { if (reason) *reason = "compiled descriptor differs from loaded descriptor: " + why; return false; };
+    if (c.sret != s.sret || c.ret_kind != s.ret_kind || c.ret_size != s.ret_size) return fail("return class, size or hidden buffer");
+    if (c.argc != s.args.size()) return fail("argument / stack count");
+    for (uint32_t i = 0; i < c.argc; ++i)
+        if (c.args[i].kind != s.args[i].kind || c.args[i].size != s.args[i].size)
+            return fail("argument " + std::to_string(i + 1) + " class or size");
+    return true;
+}
+
 Verdict check_sig(const Sig& sig, const Fingerprint& f, std::string* text) {
     auto say = [&](const std::string& s) {
         if (text) *text = s;

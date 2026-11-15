@@ -11,9 +11,19 @@ namespace TypedHookVolume;
 public sealed class TypedHookVolumeMod : Mod
 {
     private HookHandle? _hook;
+    private int _enabled = 1;
+    private long _controlCalls, _enabledCalls, _enabledEdits;
 
     public override void OnLoad()
     {
+        Context.Messages.On("typed-proof", m =>
+        {
+            if (m.Sender != "client-pass" || m.Payload is not long[] { Length: 2 } q) return;
+            if (q[1] is 0 or 1) Volatile.Write(ref _enabled, (int)q[1]);
+            Mods.Send(m.Sender, "typed-proof-result", new long[] { q[0], Volatile.Read(ref _enabled),
+                Interlocked.Read(ref _controlCalls), Interlocked.Read(ref _enabledCalls), Interlocked.Read(ref _enabledEdits),
+                _hook?.State == HookRegistrationState.Installed ? 1 : 0 });
+        });
         // the typed link kind, and this function's descriptor fitting its code on this game build
         if (!Capabilities.Is("hooks.typed") || !Capabilities.Is(GetItemVolume.Capability))
         {
@@ -30,10 +40,16 @@ public sealed class TypedHookVolumeMod : Mod
         Log.Info($"every item's volume doubled (GetItemVolume of a null item: {GetItemVolume.Invoke(0).Value})");
     }
 
-    private static void Doubled(ref GetItemVolume.Call c)
+    private void Doubled(ref GetItemVolume.Call c)
     {
+        var enabled = Volatile.Read(ref _enabled) != 0;
         c.CallOriginal();
-        if (c.Item != 0 && c.Result.Has != 0) c.Result.Value *= 2;  // a real item that has a volume
+        if (c.Item == 0 || c.Result.Has == 0) return;
+        if (!enabled) { Interlocked.Increment(ref _controlCalls); return; }
+        Interlocked.Increment(ref _enabledCalls);
+        var before = c.Result.Value;
+        c.Result.Value *= 2;
+        if (c.Result.Value != before) Interlocked.Increment(ref _enabledEdits);
     }
 
     public override void OnUnload() => _hook?.Remove();  // also removed by Kiln when the mod unloads

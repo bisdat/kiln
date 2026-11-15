@@ -38,7 +38,7 @@ internal static unsafe class FakeRegistry
         lock (Gate) { Slots.Clear(); Symbols.Clear(); }
         if (_table == null)
         {
-            _table = (HooksNative.TypedTable*)NativeMemory.AllocZeroed((nuint)sizeof(HooksNative.TypedTable));
+            _table = (HooksNative.TypedTable*)NativeMemory.AllocZeroed((nuint)sizeof(HooksNative.CheckedTable));
             var v1 = &_table->V1;
             v1->Detour = &Detour;
             v1->Mid = &Mid;
@@ -51,7 +51,7 @@ internal static unsafe class FakeRegistry
             FakeTyped.Fill(_table);
         }
         // header.size (the table's first field) says how far the table goes: an older core's stops before the typed members
-        *(uint*)_table = typed ? (uint)sizeof(HooksNative.TypedTable) : 0;
+        *(uint*)_table = typed ? (uint)sizeof(HooksNative.CheckedTable) : 0;
         FakeTyped.Reset();
         HooksNative.UseForTests(&_table->V1);
     }

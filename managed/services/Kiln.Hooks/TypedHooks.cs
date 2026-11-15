@@ -15,10 +15,14 @@ namespace Kiln;
 /// resolve on this build, or kiln.hooks has no room for another hooked address. A programming error (a null handler, a
 /// malformed descriptor) throws <see cref="ArgumentException"/> instead, and a core without typed links throws
 /// <see cref="KilnUnavailableException"/> naming <c>hooks.typed</c>.</summary>
-/// <param name="Ok">True when the hook is installed.</param>
+/// <param name="Ok">True when installed or accepted pending; inspect Pending and Handle.State for completion.</param>
 /// <param name="Reason">Why it was refused; null when <paramref name="Ok"/>.</param>
 /// <param name="Handle">Removes the hook (it also goes when the mod unloads); null when refused.</param>
-public sealed record HookResult(bool Ok, string? Reason, HookHandle? Handle) : IKilnResult;
+public sealed record HookResult(bool Ok, string? Reason, HookHandle? Handle) : IKilnResult
+{
+    /// <summary>The request was accepted and will install at the next safe tick. Observe Handle.State for completion.</summary>
+    public bool Pending => Handle?.State == HookRegistrationState.Pending;
+}
 
 /// <summary>A typed hook was refused (<see cref="HookResult.Ok"/> false): a game update changed the function, or its
 /// symbol no longer resolves. Posted on the tick thread (queued for the next step when the hook was asked for on
@@ -104,7 +108,7 @@ public sealed class SigDescriptor
         RetSize = retSize;
         Sret = sret;
         Invoke = invoke;
-        Args = (SigArg[])args.Clone();
+        Args = Array.AsReadOnly((SigArg[])args.Clone());
         if (Positions > HooksNative.MaxPositions)
             throw new ArgumentException($"{symbol}: {Positions} positions, a typed link forwards at most {HooksNative.MaxPositions}", nameof(args));
     }
@@ -143,7 +147,8 @@ internal unsafe struct SigState
     public int Called, Skip;
     public ulong Rax;
     public fixed byte Xmm0[16];
-    public fixed byte Buffer[SnapshotMax];  // the sret buffer as the original left it (structs up to 64 bytes)
+    public fixed byte Buffer[SnapshotMax];  // inline snapshot for the core descriptors
+    public byte* LargeBuffer;              // larger fragment structs; released when dispatch leaves
 }
 
 /// <summary>A typed call in flight, as the generated <c>Call</c> wraps it. Positions count the hidden return buffer:
@@ -217,6 +222,8 @@ public readonly unsafe ref struct SigCall
     public void CallOriginal()
     {
         if (_st->Called != 0) return;
+        if (_sig.Sret && _sig.RetSize > SigState.SnapshotMax && _st->LargeBuffer == null)
+            _st->LargeBuffer = (byte*)NativeMemory.Alloc(_sig.RetSize);
         var t = HooksNative.Typed;
         if (t == null || t->CallOriginalFrame(_f) != HooksNative.Ok)
             throw new InvalidOperationException($"{_sig.Symbol}: kiln.hooks refused CallOriginal (the call is no longer in flight)");
@@ -225,8 +232,11 @@ public readonly unsafe ref struct SigCall
         _st->Called = 1;
         _st->Rax = _f->Rax;
         Unsafe.CopyBlockUnaligned(_st->Xmm0, _f->Xmm0R, 16);
-        if (_sig.Sret && _sig.RetSize <= SigState.SnapshotMax && _f->Gpr[0] != 0)
-            Unsafe.CopyBlockUnaligned(_st->Buffer, (void*)_f->Gpr[0], _sig.RetSize);
+        if (_sig.Sret && _f->Gpr[0] != 0)
+        {
+            Unsafe.CopyBlockUnaligned(_st->LargeBuffer != null ? _st->LargeBuffer : _st->Buffer,
+                (void*)_f->Gpr[0], _sig.RetSize);
+        }
     }
 
     /// <summary>Whether <see cref="CallOriginal"/> ran.</summary>
@@ -282,9 +292,19 @@ public unsafe struct SigFrame
 [EditorBrowsable(EditorBrowsableState.Never)]
 public static unsafe class TypedHooks
 {
+    private sealed class Validation
+    {
+        public readonly object Gate = new();
+        public nuint Table, Address;
+        public ulong Revision;
+        public int Rc;
+        public string Reason = "";
+        public bool HasValue;
+    }
+    private static readonly ConditionalWeakTable<SigDescriptor, Validation> Validations = new();
+
     // Whether a described symbol's row is on (seam: unit tests replace it). Core symbols have a kiln.caps row
-    // "sig/<symbol>"; a mod's own fragment has none, so its descriptors' statuses come from the fragment's report
-    // (Symbols.LoadShipped reads it).
+    // "sig/<symbol>"; a mod's own fragment has none, so its status is queried from the current native resolver.
     internal static Func<string, bool> SigRowOn = DefaultSigRowOn;
 
     // The tick guard of a "tick" Invoke (seam: unit tests run on no tick thread of a game).
@@ -311,6 +331,48 @@ public static unsafe class TypedHooks
         var api = sig.Symbol + ".Detour";
         var t = HooksNative.RequireTyped(api);
         var mod = HooksGate.RequireAdvanced(api);
+        if (*(uint*)t < 288 || ((HooksNative.CheckedTable*)t)->InstallReady == null)
+            return Refused(mod, sig.Symbol, "this core has no safe typed installation timing query");
+        if (!CanInstallNow())
+        {
+            lock (HooksGate.Lifecycle)
+            {
+                if (!mod.Alive) throw HooksGate.Retired(api, mod);
+                var pending = HookHandle.NewPending();
+                HooksGate.Track(mod);
+                mod.Retiring += pending.Remove;
+                void InstallPending()
+                {
+                    if (!mod.Alive || pending.State == HookRegistrationState.Removed) return;
+                    if (!CanInstallNow()) { mod.Scheduler.Post(InstallPending); return; }
+                    try { pending.Complete(InstallNow(sig, handler, priority, mod)); }
+                    catch (Exception e) { pending.Complete(Refused(mod, sig.Symbol, e.Message)); }
+                }
+                mod.Scheduler.Post(InstallPending);
+                // Retirement can take its cleanup list before Track attaches the first callback.
+                if (!mod.Alive)
+                {
+                    pending.Remove();
+                    HooksGate.Untrack(mod);
+                    throw HooksGate.Retired(api, mod);
+                }
+                return new HookResult(true, null, pending);
+            }
+        }
+        return InstallNow(sig, handler, priority, mod);
+    }
+
+    private static bool CanInstallNow()
+    {
+        var t = HooksNative.T;
+        return t != null && *(uint*)t >= 288 && ((HooksNative.CheckedTable*)t)->InstallReady != null &&
+            ((HooksNative.CheckedTable*)t)->InstallReady() != 0;
+    }
+
+    private static HookResult InstallNow(SigDescriptor sig, SigHandler handler, int priority, ModContext mod)
+    {
+        var api = sig.Symbol + ".Detour";
+        var t = HooksNative.RequireTyped(api);
         nuint address = 0;
         if (HooksNative.WithUtf8(sig.Symbol, s => { nuint a; var r = t->V1.Symbol(s, &a); address = a; return r; }) != HooksNative.Ok || address == 0)
             return Refused(mod, sig.Symbol, $"symbol {sig.Symbol} does not resolve on this game build");
@@ -338,8 +400,11 @@ public static unsafe class TypedHooks
         };
     }
 
+    private static int ValidateNative(HooksNative.TypedTable* t, SigDescriptor sig, nuint address, ulong revision) =>
+        InstallNative(t, 0, address, sig, 0, 0, null, revision);
+
     private static int InstallNative(HooksNative.TypedTable* t, ulong owner, nuint address, SigDescriptor sig, int priority,
-        long cookie, ulong* native)
+        long cookie, ulong* native, ulong revision = 0)
     {
         var n = sig.Args.Count;
         var names = new byte[n][];
@@ -369,8 +434,10 @@ public static unsafe class TypedHooks
                 order.Size = (uint)sizeof(HooksNative.OrderRaw);
                 order.Priority = priority;
                 order.Label = new NativeStr { Ptr = l, Len = (nuint)label.Length };
+                if (native == null)
+                    return HooksNative.Checked->ValidateTyped(order.Label, address, revision, &raw);
                 // kiln.hooks copies the label and reads the descriptor during the call only: the pins end here
-                return t->DetourTyped(owner, address, &order, &raw, &Dispatch, (void*)(nint)cookie, native);
+                return InstallAtSafePoint(t, owner, address, &order, &raw, cookie, native);
             }
         }
         finally
@@ -379,6 +446,13 @@ public static unsafe class TypedHooks
                 if (h.IsAllocated) h.Free();
         }
     }
+
+    // Integration seam for package 07: its mid2_checked only accepts a KilnMidFn and CANNOT install a typed link.
+    // Coordinator: expose the same checked target policy as detour_typed_checked, then switch ONLY this call to it,
+    // with a header.size check. Do not substitute mid2_checked: the handler ABI is different.
+    internal static int InstallAtSafePoint(HooksNative.TypedTable* t, ulong owner, nuint address,
+        HooksNative.OrderRaw* order, HooksNative.SigRaw* sig, long cookie, ulong* native) =>
+        t->DetourTyped(owner, address, order, sig, &Dispatch, (void*)(nint)cookie, native);
 
     private static HookResult Refused(ModContext mod, string symbol, string reason)
     {
@@ -418,9 +492,31 @@ public static unsafe class TypedHooks
         var row = HooksCaps.Sig(sig.Symbol);
         // never a call into a function whose code does not fit the descriptor (§9.4): its row is off then
         if (!SigRowOn(sig.Symbol)) throw ServiceCaps.Unavailable(row, $"{api}: the function does not fit its descriptor on this game build, or its symbol does not resolve");
+        var checkedTable = HooksNative.Checked;
+        if (checkedTable == null) throw ServiceCaps.Unavailable(row, $"{api}: this core has no typed descriptor validation; refusing an unchecked call");
         nuint address = 0;
-        if (HooksNative.WithUtf8(sig.Symbol, s => { nuint a; var r = t->V1.Symbol(s, &a); address = a; return r; }) != HooksNative.Ok || address == 0)
-            throw ServiceCaps.Unavailable(row, $"{api}: symbol {sig.Symbol} does not resolve on this game build");
+        ulong revision = 0;
+        var status = HooksNative.WithUtf8(sig.Symbol, s =>
+        {
+            nuint a; ulong r;
+            var rc = checkedTable->SigStatus(s, &a, &r);
+            address = a; revision = r;
+            return rc;
+        });
+        if (status != HooksNative.Ok || address == 0)
+            throw ServiceCaps.Unavailable(row, $"{api}: {HooksNative.TypedRefusal(t)} (current resolver descriptor is unavailable)");
+        var cached = Validations.GetValue(sig, _ => new Validation());
+        lock (cached.Gate)
+        {
+            if (!cached.HasValue || cached.Table != (nuint)t || cached.Address != address || cached.Revision != revision)
+            {
+                cached.Rc = ValidateNative(t, sig, address, revision);
+                cached.Reason = cached.Rc == HooksNative.Ok ? "" : HooksNative.TypedRefusal(t);
+                cached.Table = (nuint)t; cached.Address = address; cached.Revision = revision; cached.HasValue = true;
+            }
+            if (cached.Rc == HooksNative.InvalidArgument) throw new ArgumentException($"{api}: malformed descriptor", nameof(sig));
+            if (cached.Rc != HooksNative.Ok) throw ServiceCaps.Unavailable(row, $"{api}: {cached.Reason}");
+        }
         fixed (SigFrame* f = &frame)
         {
             f->Frame.Stack = f->StackArgs;
@@ -477,10 +573,16 @@ public static unsafe class TypedHooks
             {
                 frame->Rax = st.Rax;
                 Unsafe.CopyBlockUnaligned(frame->Xmm0R, st.Xmm0, 16);
-                if (reg is { Sig.Sret: true } && reg.Sig.RetSize <= SigState.SnapshotMax && frame->Gpr[0] != 0)
-                    Unsafe.CopyBlockUnaligned((void*)frame->Gpr[0], st.Buffer, reg.Sig.RetSize);
+                if (reg is { Sig.Sret: true } && frame->Gpr[0] != 0 &&
+                    (reg.Sig.RetSize <= SigState.SnapshotMax || st.LargeBuffer != null))
+                    Unsafe.CopyBlockUnaligned((void*)frame->Gpr[0],
+                        st.LargeBuffer != null ? st.LargeBuffer : st.Buffer, reg.Sig.RetSize);
             }
             return HooksNative.TypedContinue;
+        }
+        finally
+        {
+            NativeMemory.Free(st.LargeBuffer);
         }
     }
 }

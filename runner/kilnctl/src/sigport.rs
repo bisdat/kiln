@@ -84,7 +84,7 @@ pub struct PortReport {
     pub changed: usize,
     pub unverified_fixed: Vec<String>,
     /// "sig needs review: <symbol>: was [...], is [...]": described functions whose code changed, or whose descriptor
-    /// the core would refuse on the new build (port.py's summary.sig_review; their typed hooks stay off until fixed)
+    /// the core would refuse on the new build (port.py's summary.sig_review; matching descriptors can remain on)
     pub sig_review: Vec<String>,
 }
 
@@ -226,6 +226,15 @@ mod tests {
     }
 
     #[test]
+    fn a_review_line_does_not_claim_a_matching_descriptor_is_disabled() {
+        let j = r#"{"new": {"sha256": "ab"}, "summary": {"sig_review": ["sig needs review: m/F: return changed"]}}"#;
+        let r = parse_report(j, PathBuf::from("/o")).unwrap();
+        let lines = crate::ops::next_for_sigs(&r);
+        assert!(!lines[0].contains("stay off on this build until"));
+        assert!(lines[0].contains("only refused descriptors are disabled automatically"));
+    }
+
+    #[test]
     fn sig_review_lines() {
         let j = r#"{"new": {"sha256": "ab"}, "summary": {"complete": true, "defs_unchanged": true,
             "sig_review": ["sig needs review: time/SetTimeScale: was [rcx, xmm1, r8], is [rcx, xmm1, r8, stack+0x28] (mismatch: x)"]}}"#;
@@ -234,6 +243,6 @@ mod tests {
         assert!(r.sig_review[0].starts_with("sig needs review: time/SetTimeScale: was [rcx, xmm1, r8], is "));
         assert_eq!(crate::ops::next_for_sigs(&r), vec![
             "sig needs review: time/SetTimeScale: was [rcx, xmm1, r8], is [rcx, xmm1, r8, stack+0x28] (mismatch: x); \
-             typed hooks and calls of it stay off on this build until the descriptor is fixed (docs/kiln/sigport.md)".to_string()]);
+             review the descriptor before using typed hooks or calls; only refused descriptors are disabled automatically (docs/kiln/sigport.md)".to_string()]);
     }
 }

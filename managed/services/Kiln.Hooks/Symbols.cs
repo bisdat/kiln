@@ -81,6 +81,15 @@ public static unsafe class Symbols
     public static SigSummary LoadShipped()
     {
         var mod = HooksGate.RequireAdvanced("Symbols.LoadShipped");
+        lock (HooksGate.Lifecycle) return LoadShipped(mod);
+    }
+
+    // Serialize replacement with delayed retirement: an earlier context must never unload the fragment of a reload.
+    private static readonly Dictionary<string, ModContext> FragmentOwners = new(StringComparer.Ordinal);
+
+    private static SigSummary LoadShipped(ModContext mod)
+    {
+        if (!mod.Alive) throw HooksGate.Retired("Symbols.LoadShipped", mod);
         var t = HooksNative.Require("Symbols.LoadShipped");
         // Pick the fragment for the side this process runs as, so a coremod ships server.json and/or client.json and
         // the right one resolves (the client hosts a server world, so client coremods are real).
@@ -94,8 +103,9 @@ public static unsafe class Symbols
             HooksNative.WithUtf8(path, pp => t->LoadSymbols(mod.Owner, idp, pp, sp)));
         if (rc != HooksNative.Ok)
             throw new InvalidOperationException($"Symbols.LoadShipped: {HooksNative.Describe(rc)} (see kiln.log)");
+        FragmentOwners[mod.Info.Id] = mod;
         HooksGate.Track(mod).SymbolsLoaded = true;
-        ReadFragmentSigs(mod);
+        // Signature status is queried from this resolver load, never from its diagnostic report.
         var r = new SigSummary((int)s.Symbols, (int)s.SymbolsOk, (int)s.Constants, (int)s.ConstantsOk,
             (int)s.Features, (int)s.FeaturesOk);
         mod.Log.Info($"hooks: loaded shipped symbols ({r.SymbolsOk}/{r.Symbols} symbols, {r.ConstantsOk}/{r.Constants} constants)");
@@ -104,39 +114,19 @@ public static unsafe class Symbols
 
     internal static void UnloadShipped(ModContext mod)
     {
-        FragmentSigs.TryRemove(mod.Info.Id, out _);
-        var t = HooksNative.T;
-        if (t == null) return;
-        HooksNative.WithUtf8(mod.Info.Id, s => t->UnloadSymbols(s));
+        lock (HooksGate.Lifecycle)
+        {
+            if (!FragmentOwners.TryGetValue(mod.Info.Id, out var owner) || !ReferenceEquals(owner, mod)) return;
+            FragmentOwners.Remove(mod.Info.Id);
+
+            var t = HooksNative.T;
+            if (t == null) return;
+            HooksNative.WithUtf8(mod.Info.Id, s => t->UnloadSymbols(s));
+        }
     }
 
-    // ---- typed descriptors of a mod's fragment (dev.29) ----
-    // A core descriptor's status is a kiln.caps row ("sig/<symbol>"); a fragment's descriptors have none. kiln.hooks
-    // writes the fragment's resolution, descriptors included ("sigs": {"<modid>/name": {"status": "match", ...}}), to
-    // kiln/logs/sigdb-<modid>.json while load_symbols runs; it is read once right after, and dropped with the fragment.
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, IReadOnlyDictionary<string, bool>> FragmentSigs =
-        new(StringComparer.Ordinal);
-
-    /// <summary>The report kiln.hooks writes for a fragment (seam: unit tests point it elsewhere).</summary>
+    // Diagnostic parsing is retained for tooling/tests; report contents never authorize a call.
     internal static Func<string, string> FragmentReport = id => Path.Combine(KilnPaths.Root, "logs", $"sigdb-{id}.json");
-
-    private static void ReadFragmentSigs(ModContext mod)
-    {
-        IReadOnlyDictionary<string, bool> sigs;
-        try
-        {
-            sigs = ParseFragmentSigs(File.ReadAllText(FragmentReport(mod.Info.Id)));
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
-        {
-            // no report: every descriptor of the fragment stays off (Invoke throws naming its row)
-            mod.Log.Warn($"hooks: the report of the shipped symbols was not readable ({e.Message}); typed calls of the fragment's descriptors are off");
-            sigs = new Dictionary<string, bool>();
-        }
-        FragmentSigs[mod.Info.Id] = sigs;
-        foreach (var (name, ok) in sigs)
-            if (!ok) mod.Log.Warn($"hooks: {name}: the descriptor does not fit the function's code on this game build (kiln.log says why); typed hooks and calls of it are off");
-    }
 
     /// <summary>The descriptors of a fragment's report: name to "its status is match".</summary>
     internal static IReadOnlyDictionary<string, bool> ParseFragmentSigs(string json)
@@ -158,7 +148,17 @@ public static unsafe class Symbols
     {
         var slash = symbol.IndexOf('/');
         if (slash <= 0) return false;
-        return FragmentSigs.TryGetValue(symbol[..slash], out var sigs) && sigs.TryGetValue(symbol, out var ok) && ok;
+        lock (HooksGate.Lifecycle)
+        {
+            if (!FragmentOwners.ContainsKey(symbol[..slash])) return false;
+            var t = HooksNative.Checked;
+            if (t == null) return false;
+            return HooksNative.WithUtf8(symbol, s =>
+            {
+                nuint address; ulong revision;
+                return t->SigStatus(s, &address, &revision) == HooksNative.Ok && address != 0;
+            });
+        }
     }
 }
 

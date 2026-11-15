@@ -77,9 +77,30 @@ public unsafe struct Registers
     public float XmmF(int n) => BitConverter.ToSingle(Xmm(n));
 }
 
+/// <summary>The lifecycle of a hook request.</summary>
+public enum HookRegistrationState { Pending, Installed, Refused, Removed }
+
 /// <summary>A handle to an installed hook or patch; removing it is idempotent.</summary>
 public sealed class HookHandle : IDisposable
 {
+    private int _state = (int)HookRegistrationState.Installed;
+    private HookHandle? _deferred;
+    private string? _reason;
+    /// <summary>Pending until the next safe tick; Installed, Refused, or Removed afterwards.</summary>
+    public HookRegistrationState State => (HookRegistrationState)Volatile.Read(ref _state);
+    /// <summary>The late installation refusal, or null.</summary>
+    public string? Reason => Volatile.Read(ref _reason);
+    internal static HookHandle NewPending() => new(0, 0) { _state = (int)HookRegistrationState.Pending };
+    internal void Complete(HookResult result)
+    {
+        lock (this)
+        {
+            if (State == HookRegistrationState.Removed) { result.Handle?.Remove(); return; }
+            _deferred = result.Handle;
+            _reason = result.Reason;
+            Volatile.Write(ref _state, (int)(result.Ok ? HookRegistrationState.Installed : HookRegistrationState.Refused));
+        }
+    }
     private long _cookie;
     internal ulong Native;
     // Which install of the cookie this handle made: a cookie is reused (see HookCookies), so a stale handle must not
@@ -89,7 +110,15 @@ public sealed class HookHandle : IDisposable
 
     /// <summary>Removes this hook/patch. The detour stays installed if other handlers remain on the target; this
     /// owner's handler simply leaves the chain.</summary>
-    public void Remove() => Hooks.Remove(this, ref _cookie);
+    public void Remove()
+    {
+        lock (this)
+        {
+            Volatile.Write(ref _state, (int)HookRegistrationState.Removed);
+            _deferred?.Remove(); _deferred = null;
+            Hooks.Remove(this, ref _cookie);
+        }
+    }
     public void Dispose() => Remove();
 }
 

@@ -310,12 +310,53 @@ KilnResult typed_check(uintptr_t target, const KilnSig* sig, const KilnHookOrder
     }
     std::string text;
     const fp::Verdict v = fp::check(fp::shape_of(*sig), f, &text);
-    if (v == fp::Verdict::Match) return KILN_OK;
-    // Unknown is accepted only for a symbol whose own descriptor passed (a fragment's "abi": "trust").
-    if (v == fp::Verdict::Unknown && described) return KILN_OK;
+    // Preserve the named fingerprint refusal first; even a matching shape must equal the loaded descriptor.
+    if (v == fp::Verdict::Match || (v == fp::Verdict::Unknown && described)) {
+        if (described && !fp::compiled_matches(*sig, info.descriptor, &why)) return KILN_HOOKS_ERR_SIG_MISMATCH;
+        return KILN_OK;
+    }
     why = text;
     KLOG_W("hooks: typed hook on %s refused: %s", name.c_str(), why.c_str());
     return v == fp::Verdict::Mismatch ? KILN_HOOKS_ERR_SIG_MISMATCH : KILN_HOOKS_ERR_SIG_UNKNOWN;
+}
+
+KilnResult KILN_CALL h_sig_status(KilnStr symbol, uintptr_t* address, uint64_t* revision) {
+    if (!address || !revision || !symbol.ptr || !symbol.len) return KILN_ERR_INVALID_ARGUMENT;
+    *address = 0;
+    KILN_GUARD("sig_status", KILN_ERR_INTERNAL, {
+        sigdb::SigInfo info;
+        // A replacement racing this copy must invalidate any cached verdict.
+        const auto before = sigdb::sig_revision();
+        const bool found = sigdb::sig(sv(symbol), &info);
+        *revision = sigdb::sig_revision();
+        if (before != *revision) return KILN_ERR_UNAVAILABLE;
+        if (!found) { typed_refusal_text() = "no descriptor in the current resolver load"; return KILN_ERR_NOT_FOUND; }
+        *address = info.address;
+        typed_refusal_text() = info.text;
+        if (info.status == sigdb::SigStatus::Match && info.address) return KILN_OK;
+        return info.status == sigdb::SigStatus::Mismatch ? KILN_HOOKS_ERR_SIG_MISMATCH : KILN_HOOKS_ERR_SIG_UNKNOWN;
+    });
+}
+
+KilnResult KILN_CALL h_validate_typed(KilnStr symbol, uintptr_t expected_address, uint64_t expected_revision, const KilnSig* sig) {
+    if (sig_positions(sig) < 0) return KILN_ERR_INVALID_ARGUMENT;
+    uintptr_t address = 0; uint64_t revision = 0;
+    const auto status = h_sig_status(symbol, &address, &revision);
+    if (status != KILN_OK) return status;
+    if (address != expected_address || revision != expected_revision) return KILN_ERR_UNAVAILABLE;
+    KILN_GUARD("validate_typed", KILN_ERR_INTERNAL, {
+        const auto checked = typed_check(address, sig, nullptr);
+        if (sigdb::sig_revision() != revision) return KILN_ERR_UNAVAILABLE;
+        return checked;
+    });
+}
+
+uint32_t KILN_CALL h_typed_install_ready() {
+    if (tick::typed_install_pre()) return 1;
+    KilnSessionInfo s{}; s.size = sizeof s;
+    if (tick::session(&s) != KILN_OK) return 0;
+    for (auto w : s.worlds) if (w) return 0;
+    return 1;
 }
 
 KilnResult KILN_CALL h_detour_typed(KilnOwner owner, uintptr_t target, const KilnHookOrder* order, const KilnSig* sig,
@@ -326,7 +367,7 @@ KilnResult KILN_CALL h_detour_typed(KilnOwner owner, uintptr_t target, const Kil
     KILN_GUARD("detour_typed", KILN_ERR_INTERNAL, {
         const KilnResult checked = typed_check(target, sig, order);
         if (checked != KILN_OK) return checked;
-        return chain::install_typed(owner, target, order_of(order), nstack, fn, user, out);
+        return chain::install_typed(owner, target, order_of(order), nstack, fn, user, out, sig->sret ? sig->ret_size : 0);
     });
 }
 
@@ -530,6 +571,10 @@ const KilnHooksApi kTable = {
     // owner cleanup (dev.28)
     &h_subscribe_owner_retiring,
     &h_unsubscribe_owner_retiring,
+    nullptr, // package 07 mid2_checked slot; coordinator: retain its implementation at offset 256
+    &h_validate_typed,
+    &h_sig_status,
+    &h_typed_install_ready,
 };
 
 std::mutex g_ready_mutex;

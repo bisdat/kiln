@@ -268,6 +268,20 @@ class SigCarry(SyntheticPort):
 class Descriptors(unittest.TestCase):
     """sig blocks (kiln.hooks typed links): composed like the other sections, found in either place."""
 
+    def test_a_return_class_change_needs_review_even_with_identical_arguments(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            old, new, defs = root / "old.exe", root / "new.exe", root / "defs.json"
+            old_rva = build_pe(old, [([h("8b c1 c3")], True)])[0]  # mov eax, ecx; ret
+            new_rva = build_pe(new, [([h("66 0f 6e c1 c3")], True)])[0]  # movd xmm0, ecx; ret
+            defs.write_text(json.dumps({"format": 1, "symbols": {}, "sigs": {"m/F": {
+                "ret": "s32", "args": [{"name": "x", "type": "s32"}], "invoke": "any"}}}))
+            rows, review = port.review_sigs(defs, old, new, {"m/F": {
+                "ok_old": True, "ok_new": True, "old": hex(old_rva), "new": hex(new_rva)}})
+            self.assertEqual(rows["m/F"]["old"]["reads"], rows["m/F"]["new"]["reads"])
+            self.assertEqual(len(review), 1)
+            self.assertIn("return was rax, is xmm0", review[0])
+
     def test_sigs_and_structs_compose_and_overlay(self):
         from sigdb_check import sig_blocks
         with tempfile.TemporaryDirectory() as d:

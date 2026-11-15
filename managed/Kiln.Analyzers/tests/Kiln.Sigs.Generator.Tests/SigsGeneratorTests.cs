@@ -145,10 +145,24 @@ public sealed class SigsGeneratorTests
         Assert.Contains("public nint Daytime { get => unchecked((nint)(long)_c.Int(3)); set => _c.SetInt(3, unchecked((ulong)(long)value)); }", s);
         Assert.Contains("public ref global::Kiln.Sigs.Half Result => ref *(global::Kiln.Sigs.Half*)_c.RetAddress;", s);  // 4 bytes: in rax
         Assert.Contains("*(global::Kiln.Sigs.Pair*)&__slot0 = pair;", s);
-        Assert.Contains("__frame.SetInt(1, unchecked((ulong)(nint)(&__copy1)));", s);
+        Assert.Contains("__frame.SetInt(1, unchecked((ulong)(nint)__copy1));", s);
         Assert.Contains("return *(global::Kiln.Sigs.Half*)&__rax;", s);
         Assert.Contains("[global::System.Runtime.InteropServices.FieldOffset(4)] public float B;", s);
         Assert.Contains("public const int SizeOf = 12;", s);
+    }
+
+    [Theory]
+    [InlineData(12)]
+    [InlineData(16)]
+    [InlineData(24)]
+    public void IndirectAggregateTemporaryIsExplicitlyAligned(int size)
+    {
+        var json = "{\"structs\":{\"Aggregate\":{\"size\":" + size + ",\"align\":16}},\"sigs\":{\"m/F\":{\"args\":[{\"name\":\"a\",\"type\":\"Aggregate\"}],\"invoke\":\"any\"}}}";
+        var text = SigsEmitter.Emit(SigsModel.Parse([("sigdb/server.json", json)]));
+        Assert.Contains($"stackalloc byte[{size + 15}]", text);
+        Assert.Contains("+ 15) & ~(nuint)15", text);
+        Assert.Contains("*__copy0 = a;", text);
+        Assert.DoesNotContain("(&__copy0)", text);
     }
 
     [Fact]

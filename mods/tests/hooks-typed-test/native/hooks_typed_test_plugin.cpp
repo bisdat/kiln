@@ -171,3 +171,10 @@ extern "C" __declspec(dllexport) KilnResult KILN_CALL kiln_plugin_main(const Kil
     api->subscribe_tick(owner, KILN_TICK_PRE, &on_pre, nullptr, &h);
     return KILN_OK;
 }
+
+// Coordinator-only destructive probe, called only when the managed lab's explicit AV control file is present.
+extern "C" __declspec(dllexport) void kiln_typed_test_av() {
+    void* page = VirtualAlloc(nullptr, 4096, MEM_RESERVE | MEM_COMMIT, PAGE_NOACCESS);
+    if (!page) RaiseException(EXCEPTION_ACCESS_VIOLATION, 0, 0, nullptr);
+    *static_cast<volatile unsigned char*>(page) = 1;
+}

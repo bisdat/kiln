@@ -58,6 +58,12 @@ using WaitWorldJobsFn = void(__cdecl*)(uintptr_t world);
 WaitWorldJobsFn g_wait_jobs = nullptr;
 bool g_post_warned = false;
 
+thread_local uint32_t g_typed_pre = 0;
+struct TypedPreScope {
+    bool active;
+    explicit TypedPreScope(bool enabled) : active(enabled) { if (active) ++g_typed_pre; }
+    ~TypedPreScope() { if (active) --g_typed_pre; }
+};
 std::atomic<DWORD> g_thread{0};  // the server world's thread (on_tick_thread)
 std::mutex g_last_mutex;
 KilnTickInfo g_last{};
@@ -241,6 +247,7 @@ uintptr_t server_step(uintptr_t storage, uintptr_t ticked, uintptr_t r8, uintptr
     const double t0 = now_ms();
     KilnTickInfo info{};
     try {
+        TypedPreScope safe(true);
         const uintptr_t world = storage - static_cast<uintptr_t>(g_world_storage);
         // A new world, or the same address again after the game destroyed the previous one (allocator reuse).
         bool fresh = false;
@@ -364,6 +371,7 @@ uintptr_t other_step(uint32_t kind, uintptr_t storage, uintptr_t ticked, uintptr
     const double t0 = now_ms();
     KilnTickInfo info{};
     try {
+        TypedPreScope safe(kind == KILN_WORLD_CLIENT && !worldinfo::server_world());
         const uintptr_t world = storage - static_cast<uintptr_t>(g_world_storage);
         bool fresh = false;
         if (world != K.world || worldinfo::world(kind) != world) {
@@ -493,6 +501,8 @@ bool install() {
 
 bool installed() { return g_installed && !g_faulted.load(); }
 bool lifecycle() { return g_lifecycle && !g_faulted.load(); }
+
+bool typed_install_pre() { return !g_faulted.load() && g_typed_pre != 0; }
 
 bool on_tick_thread() { return !g_faulted.load() && g_thread.load(std::memory_order_relaxed) == GetCurrentThreadId(); }
 

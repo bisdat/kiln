@@ -55,7 +55,10 @@ namespace Kiln.Sigs.Abilities
     /// <summary>The game function <c>abilities/RegisterNative</c> as a typed hook and call: <c>bool (ptr registry, u32 hash, ptr fn, ptr name, u8 argc)</c> (sigdb descriptor;
     /// its code reads [rcx, rdx, r8, r9, stack+0x28]). It has no direct call (its descriptor says <c>invoke: none</c>): hook it only. Advanced mods only. Its capability row <c>sig/abilities/RegisterNative</c> is on when the symbol resolved
     /// and the function's code fits the descriptor on this game build; when it does not, <see cref="Detour"/> is refused
-    /// with the reason and a direct call throws.</summary>
+    /// with the reason and a direct call throws.
+    /// <para>A matching fingerprint does not prove complete type identity: f32 versus f64, two types in one stack slot,
+    /// integer versus pointer, aggregate layout, and the extent of a return buffer are not told apart. Review these
+    /// meanings for this executable; a matching fingerprint is not a substitute for that review.</para></summary>
     public static unsafe class RegisterNative
     {
         /// <summary>The sigdb symbol.</summary>
@@ -117,7 +120,8 @@ namespace Kiln.Sigs.Abilities
         public delegate void Handler(ref Call call);
 
         /// <summary>Hooks the function: <paramref name="handler"/> runs on every call, on the calling thread (game worker
-        /// threads too), in priority order (higher first). Removed with the handle or when the mod unloads. Refused
+        /// threads too), in priority order (higher first). An accepted request can be pending until the next safe Pre:
+        /// inspect the result's Pending and Handle.State. Removed with the handle or when the mod unloads. Refused
         /// (<c>Ok</c> false with the reason; a <see cref="global::Kiln.HookRefusedEvent"/> is posted) when the function's code
         /// does not fit the descriptor on this game build or the symbol does not resolve.</summary>
         /// <exception cref="global::System.ArgumentNullException">A null handler.</exception>
@@ -138,7 +142,10 @@ namespace Kiln.Sigs.Core
     /// <summary>The game function <c>GetComponent</c> as a typed hook and call: <c>void (ptr output, ptr world, u32 componentHash, u32 entity)</c> (sigdb descriptor;
     /// its code reads [rcx, rdx, r8, r9]). <see cref="Invoke"/> calls it directly, on the tick thread only. Advanced mods only. Its capability row <c>sig/GetComponent</c> is on when the symbol resolved
     /// and the function's code fits the descriptor on this game build; when it does not, <see cref="Detour"/> is refused
-    /// with the reason and a direct call throws.</summary>
+    /// with the reason and a direct call throws.
+    /// <para>A matching fingerprint does not prove complete type identity: f32 versus f64, two types in one stack slot,
+    /// integer versus pointer, aggregate layout, and the extent of a return buffer are not told apart. Review these
+    /// meanings for this executable; a matching fingerprint is not a substitute for that review.</para></summary>
     public static unsafe class GetComponent
     {
         /// <summary>The sigdb symbol.</summary>
@@ -192,7 +199,8 @@ namespace Kiln.Sigs.Core
         public delegate void Handler(ref Call call);
 
         /// <summary>Hooks the function: <paramref name="handler"/> runs on every call, on the calling thread (game worker
-        /// threads too), in priority order (higher first). Removed with the handle or when the mod unloads. Refused
+        /// threads too), in priority order (higher first). An accepted request can be pending until the next safe Pre:
+        /// inspect the result's Pending and Handle.State. Removed with the handle or when the mod unloads. Refused
         /// (<c>Ok</c> false with the reason; a <see cref="global::Kiln.HookRefusedEvent"/> is posted) when the function's code
         /// does not fit the descriptor on this game build or the symbol does not resolve.</summary>
         /// <exception cref="global::System.ArgumentNullException">A null handler.</exception>
@@ -229,7 +237,10 @@ namespace Kiln.Sigs.Items
     /// <summary>The game function <c>items/AttrChanged</c> as a typed hook and call: <c>void (ptr component, ptr registry)</c> (sigdb descriptor;
     /// its code reads [rcx, rdx]). It has no direct call (its descriptor says <c>invoke: none</c>): hook it only. Advanced mods only. Its capability row <c>sig/items/AttrChanged</c> is on when the symbol resolved
     /// and the function's code fits the descriptor on this game build; when it does not, <see cref="Detour"/> is refused
-    /// with the reason and a direct call throws.</summary>
+    /// with the reason and a direct call throws.
+    /// <para>A matching fingerprint does not prove complete type identity: f32 versus f64, two types in one stack slot,
+    /// integer versus pointer, aggregate layout, and the extent of a return buffer are not told apart. Review these
+    /// meanings for this executable; a matching fingerprint is not a substitute for that review.</para></summary>
     public static unsafe class AttrChanged
     {
         /// <summary>The sigdb symbol.</summary>
@@ -275,7 +286,8 @@ namespace Kiln.Sigs.Items
         public delegate void Handler(ref Call call);
 
         /// <summary>Hooks the function: <paramref name="handler"/> runs on every call, on the calling thread (game worker
-        /// threads too), in priority order (higher first). Removed with the handle or when the mod unloads. Refused
+        /// threads too), in priority order (higher first). An accepted request can be pending until the next safe Pre:
+        /// inspect the result's Pending and Handle.State. Removed with the handle or when the mod unloads. Refused
         /// (<c>Ok</c> false with the reason; a <see cref="global::Kiln.HookRefusedEvent"/> is posted) when the function's code
         /// does not fit the descriptor on this game build or the symbol does not resolve.</summary>
         /// <exception cref="global::System.ArgumentNullException">A null handler.</exception>
@@ -292,7 +304,10 @@ namespace Kiln.Sigs.Items
     /// <summary>The game function <c>items/AttrFind</c> as a typed hook and call: <c>AttrRef* (AttrRef* /*hidden return buffer*/, u32 attribute, ptr registry)</c> (sigdb descriptor;
     /// its code reads [rcx, rdx, r8]). <see cref="Invoke"/> calls it directly, on the tick thread only. Advanced mods only. Its capability row <c>sig/items/AttrFind</c> is on when the symbol resolved
     /// and the function's code fits the descriptor on this game build; when it does not, <see cref="Detour"/> is refused
-    /// with the reason and a direct call throws.</summary>
+    /// with the reason and a direct call throws.
+    /// <para>A matching fingerprint does not prove complete type identity: f32 versus f64, two types in one stack slot,
+    /// integer versus pointer, aggregate layout, and the extent of a return buffer are not told apart. Review these
+    /// meanings for this executable; a matching fingerprint is not a substitute for that review.</para></summary>
     public static unsafe class AttrFind
     {
         /// <summary>The sigdb symbol.</summary>
@@ -342,7 +357,8 @@ namespace Kiln.Sigs.Items
         public delegate void Handler(ref Call call);
 
         /// <summary>Hooks the function: <paramref name="handler"/> runs on every call, on the calling thread (game worker
-        /// threads too), in priority order (higher first). Removed with the handle or when the mod unloads. Refused
+        /// threads too), in priority order (higher first). An accepted request can be pending until the next safe Pre:
+        /// inspect the result's Pending and Handle.State. Removed with the handle or when the mod unloads. Refused
         /// (<c>Ok</c> false with the reason; a <see cref="global::Kiln.HookRefusedEvent"/> is posted) when the function's code
         /// does not fit the descriptor on this game build or the symbol does not resolve.</summary>
         /// <exception cref="global::System.ArgumentNullException">A null handler.</exception>
@@ -376,7 +392,10 @@ namespace Kiln.Sigs.Items
     /// <summary>The game function <c>items/GetItemVolume</c> as a typed hook and call: <c>OptS32* (OptS32* /*hidden return buffer*/, keen::ItemInfo* item)</c> (sigdb descriptor;
     /// its code reads [rcx, rdx]). <see cref="Invoke"/> calls it directly, from any thread. Advanced mods only. Its capability row <c>sig/items/GetItemVolume</c> is on when the symbol resolved
     /// and the function's code fits the descriptor on this game build; when it does not, <see cref="Detour"/> is refused
-    /// with the reason and a direct call throws.</summary>
+    /// with the reason and a direct call throws.
+    /// <para>A matching fingerprint does not prove complete type identity: f32 versus f64, two types in one stack slot,
+    /// integer versus pointer, aggregate layout, and the extent of a return buffer are not told apart. Review these
+    /// meanings for this executable; a matching fingerprint is not a substitute for that review.</para></summary>
     public static unsafe class GetItemVolume
     {
         /// <summary>The sigdb symbol.</summary>
@@ -422,7 +441,8 @@ namespace Kiln.Sigs.Items
         public delegate void Handler(ref Call call);
 
         /// <summary>Hooks the function: <paramref name="handler"/> runs on every call, on the calling thread (game worker
-        /// threads too), in priority order (higher first). Removed with the handle or when the mod unloads. Refused
+        /// threads too), in priority order (higher first). An accepted request can be pending until the next safe Pre:
+        /// inspect the result's Pending and Handle.State. Removed with the handle or when the mod unloads. Refused
         /// (<c>Ok</c> false with the reason; a <see cref="global::Kiln.HookRefusedEvent"/> is posted) when the function's code
         /// does not fit the descriptor on this game build or the symbol does not resolve.</summary>
         /// <exception cref="global::System.ArgumentNullException">A null handler.</exception>
@@ -459,7 +479,10 @@ namespace Kiln.Sigs.Rules
     /// <summary>The game function <c>rules/QuatRotate</c> as a typed hook and call: <c>ptr (ptr output, ptr rotation, ptr vector)</c> (sigdb descriptor;
     /// its code reads [rcx, rdx, r8]). <see cref="Invoke"/> calls it directly, from any thread. Advanced mods only. Its capability row <c>sig/rules/QuatRotate</c> is on when the symbol resolved
     /// and the function's code fits the descriptor on this game build; when it does not, <see cref="Detour"/> is refused
-    /// with the reason and a direct call throws.</summary>
+    /// with the reason and a direct call throws.
+    /// <para>A matching fingerprint does not prove complete type identity: f32 versus f64, two types in one stack slot,
+    /// integer versus pointer, aggregate layout, and the extent of a return buffer are not told apart. Review these
+    /// meanings for this executable; a matching fingerprint is not a substitute for that review.</para></summary>
     public static unsafe class QuatRotate
     {
         /// <summary>The sigdb symbol.</summary>
@@ -513,7 +536,8 @@ namespace Kiln.Sigs.Rules
         public delegate void Handler(ref Call call);
 
         /// <summary>Hooks the function: <paramref name="handler"/> runs on every call, on the calling thread (game worker
-        /// threads too), in priority order (higher first). Removed with the handle or when the mod unloads. Refused
+        /// threads too), in priority order (higher first). An accepted request can be pending until the next safe Pre:
+        /// inspect the result's Pending and Handle.State. Removed with the handle or when the mod unloads. Refused
         /// (<c>Ok</c> false with the reason; a <see cref="global::Kiln.HookRefusedEvent"/> is posted) when the function's code
         /// does not fit the descriptor on this game build or the symbol does not resolve.</summary>
         /// <exception cref="global::System.ArgumentNullException">A null handler.</exception>
@@ -550,7 +574,10 @@ namespace Kiln.Sigs.Time
     /// <summary>The game function <c>time/GetGameTime</c> as a typed hook and call: <c>s64 (keen::Daytime* daytime, s64 ecsNow)</c> (sigdb descriptor;
     /// its code reads [rcx, rdx]). <see cref="Invoke"/> calls it directly, on the tick thread only. Advanced mods only. Its capability row <c>sig/time/GetGameTime</c> is on when the symbol resolved
     /// and the function's code fits the descriptor on this game build; when it does not, <see cref="Detour"/> is refused
-    /// with the reason and a direct call throws.</summary>
+    /// with the reason and a direct call throws.
+    /// <para>A matching fingerprint does not prove complete type identity: f32 versus f64, two types in one stack slot,
+    /// integer versus pointer, aggregate layout, and the extent of a return buffer are not told apart. Review these
+    /// meanings for this executable; a matching fingerprint is not a substitute for that review.</para></summary>
     public static unsafe class GetGameTime
     {
         /// <summary>The sigdb symbol.</summary>
@@ -600,7 +627,8 @@ namespace Kiln.Sigs.Time
         public delegate void Handler(ref Call call);
 
         /// <summary>Hooks the function: <paramref name="handler"/> runs on every call, on the calling thread (game worker
-        /// threads too), in priority order (higher first). Removed with the handle or when the mod unloads. Refused
+        /// threads too), in priority order (higher first). An accepted request can be pending until the next safe Pre:
+        /// inspect the result's Pending and Handle.State. Removed with the handle or when the mod unloads. Refused
         /// (<c>Ok</c> false with the reason; a <see cref="global::Kiln.HookRefusedEvent"/> is posted) when the function's code
         /// does not fit the descriptor on this game build or the symbol does not resolve.</summary>
         /// <exception cref="global::System.ArgumentNullException">A null handler.</exception>
@@ -632,7 +660,10 @@ namespace Kiln.Sigs.Time
     /// <summary>The game function <c>time/SetTimeScale</c> as a typed hook and call: <c>void (keen::Daytime* daytime, f32 scale, s64 ecsNow)</c> (sigdb descriptor;
     /// its code reads [rcx, xmm1, r8]). <see cref="Invoke"/> calls it directly, on the tick thread only. Advanced mods only. Its capability row <c>sig/time/SetTimeScale</c> is on when the symbol resolved
     /// and the function's code fits the descriptor on this game build; when it does not, <see cref="Detour"/> is refused
-    /// with the reason and a direct call throws.</summary>
+    /// with the reason and a direct call throws.
+    /// <para>A matching fingerprint does not prove complete type identity: f32 versus f64, two types in one stack slot,
+    /// integer versus pointer, aggregate layout, and the extent of a return buffer are not told apart. Review these
+    /// meanings for this executable; a matching fingerprint is not a substitute for that review.</para></summary>
     public static unsafe class SetTimeScale
     {
         /// <summary>The sigdb symbol.</summary>
@@ -682,7 +713,8 @@ namespace Kiln.Sigs.Time
         public delegate void Handler(ref Call call);
 
         /// <summary>Hooks the function: <paramref name="handler"/> runs on every call, on the calling thread (game worker
-        /// threads too), in priority order (higher first). Removed with the handle or when the mod unloads. Refused
+        /// threads too), in priority order (higher first). An accepted request can be pending until the next safe Pre:
+        /// inspect the result's Pending and Handle.State. Removed with the handle or when the mod unloads. Refused
         /// (<c>Ok</c> false with the reason; a <see cref="global::Kiln.HookRefusedEvent"/> is posted) when the function's code
         /// does not fit the descriptor on this game build or the symbol does not resolve.</summary>
         /// <exception cref="global::System.ArgumentNullException">A null handler.</exception>
@@ -718,7 +750,10 @@ namespace Kiln.Sigs.Weather
     /// <summary>The game function <c>weather/SampleAt</c> as a typed hook and call: <c>WeatherSample* (WeatherSample* /*hidden return buffer*/, keen::WeatherSystem* weather, keen::WorldTransform* at, s64 now)</c> (sigdb descriptor;
     /// its code reads [rcx, rdx, r8, r9]). <see cref="Invoke"/> calls it directly, on the tick thread only. Advanced mods only. Its capability row <c>sig/weather/SampleAt</c> is on when the symbol resolved
     /// and the function's code fits the descriptor on this game build; when it does not, <see cref="Detour"/> is refused
-    /// with the reason and a direct call throws.</summary>
+    /// with the reason and a direct call throws.
+    /// <para>A matching fingerprint does not prove complete type identity: f32 versus f64, two types in one stack slot,
+    /// integer versus pointer, aggregate layout, and the extent of a return buffer are not told apart. Review these
+    /// meanings for this executable; a matching fingerprint is not a substitute for that review.</para></summary>
     public static unsafe class SampleAt
     {
         /// <summary>The sigdb symbol.</summary>
@@ -772,7 +807,8 @@ namespace Kiln.Sigs.Weather
         public delegate void Handler(ref Call call);
 
         /// <summary>Hooks the function: <paramref name="handler"/> runs on every call, on the calling thread (game worker
-        /// threads too), in priority order (higher first). Removed with the handle or when the mod unloads. Refused
+        /// threads too), in priority order (higher first). An accepted request can be pending until the next safe Pre:
+        /// inspect the result's Pending and Handle.State. Removed with the handle or when the mod unloads. Refused
         /// (<c>Ok</c> false with the reason; a <see cref="global::Kiln.HookRefusedEvent"/> is posted) when the function's code
         /// does not fit the descriptor on this game build or the symbol does not resolve.</summary>
         /// <exception cref="global::System.ArgumentNullException">A null handler.</exception>
@@ -811,7 +847,10 @@ namespace Kiln.Sigs.World
     /// <summary>The game function <c>world/ReadOther</c> as a typed hook and call: <c>ptr (ptr output, ptr storage, u16* accessor, u32 entity)</c> (sigdb descriptor;
     /// its code reads [rcx] and passes [rdx, r8, r9] on). It has no direct call (its descriptor says <c>invoke: none</c>): hook it only. Advanced mods only. Its capability row <c>sig/world/ReadOther</c> is on when the symbol resolved
     /// and the function's code fits the descriptor on this game build; when it does not, <see cref="Detour"/> is refused
-    /// with the reason and a direct call throws.</summary>
+    /// with the reason and a direct call throws.
+    /// <para>A matching fingerprint does not prove complete type identity: f32 versus f64, two types in one stack slot,
+    /// integer versus pointer, aggregate layout, and the extent of a return buffer are not told apart. Review these
+    /// meanings for this executable; a matching fingerprint is not a substitute for that review.</para></summary>
     public static unsafe class ReadOther
     {
         /// <summary>The sigdb symbol.</summary>
@@ -869,7 +908,8 @@ namespace Kiln.Sigs.World
         public delegate void Handler(ref Call call);
 
         /// <summary>Hooks the function: <paramref name="handler"/> runs on every call, on the calling thread (game worker
-        /// threads too), in priority order (higher first). Removed with the handle or when the mod unloads. Refused
+        /// threads too), in priority order (higher first). An accepted request can be pending until the next safe Pre:
+        /// inspect the result's Pending and Handle.State. Removed with the handle or when the mod unloads. Refused
         /// (<c>Ok</c> false with the reason; a <see cref="global::Kiln.HookRefusedEvent"/> is posted) when the function's code
         /// does not fit the descriptor on this game build or the symbol does not resolve.</summary>
         /// <exception cref="global::System.ArgumentNullException">A null handler.</exception>

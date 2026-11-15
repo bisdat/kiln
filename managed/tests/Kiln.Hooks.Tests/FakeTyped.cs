@@ -16,6 +16,11 @@ internal static unsafe class FakeTyped
 
     public static readonly Dictionary<nuint, Function> Functions = new();
     public static readonly Dictionary<string, nuint> SymbolTable = new(StringComparer.Ordinal);
+    public static SigDescriptor? ShippedSig;
+    public static uint InstallReady = 1;
+    public static int ValidationCalls;
+    public static int ResolverResult;
+    public static ulong ResolverRevision = 1;
     public static int Refuse;              // the result of the next detour_typed (0: it installs)
     public static string RefusalText = "";  // what typed_refusal says after a refusal
     public static bool RefuseCallOriginal;  // call_original_frame answers KILN_ERR_INVALID_ARGUMENT
@@ -38,6 +43,11 @@ internal static unsafe class FakeTyped
 
     public static void Reset()
     {
+        InstallReady = 1;
+        ShippedSig = null;
+        ValidationCalls = 0;
+        ResolverResult = 0;
+        ResolverRevision++;
         Functions.Clear();
         SymbolTable.Clear();
         Refuse = 0;
@@ -55,6 +65,37 @@ internal static unsafe class FakeTyped
         t->CallOriginalFrame = &CallOriginalFrame;
         t->CallWithFrame = &CallWithFrame;
         t->TypedRefusal = &TypedRefusal;
+        var c = (HooksNative.CheckedTable*)t;
+        *(nint*)&c->ValidateTyped = (nint)(delegate* unmanaged[Cdecl]<FakeRegistry.NativeText, nuint, ulong, SigText*, int>)&Validate;
+        *(nint*)&c->SigStatus = (nint)(delegate* unmanaged[Cdecl]<FakeRegistry.NativeText, nuint*, ulong*, int>)&Status;
+        c->InstallReady = &ReadInstallReady;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    static uint ReadInstallReady() => InstallReady;
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    static int Status(FakeRegistry.NativeText symbol, nuint* address, ulong* revision)
+    {
+        *revision = ResolverRevision;
+        var name = Text(symbol);
+        *address = SymbolTable.GetValueOrDefault(name);
+        var slash = name.IndexOf('/');
+        if (*address == 0 && slash > 0 && name.EndsWith("/Fn") && FakeRegistry.HasSymbols(name[..slash])) *address = 0x1234;
+        return ResolverResult;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    static int Validate(FakeRegistry.NativeText symbol, nuint address, ulong revision, SigText* s)
+    {
+        ValidationCalls++;
+        if (ShippedSig is {} d && (s->Argc != d.Args.Count || s->RetKind != (uint)d.Ret || s->RetSize != d.RetSize ||
+            s->Sret != (d.Sret ? 1 : 0))) { _refusal = "compiled descriptor differs from resolver descriptor"; return HooksNative.SigMismatch; }
+        if (ShippedSig is {} sig)
+            for (var i = 0; i < s->Argc; i++)
+                if (s->Args[i].Kind != (uint)sig.Args[i].Kind || s->Args[i].Size != sig.Args[i].Size)
+                { _refusal = "compiled descriptor argument differs from resolver descriptor"; return HooksNative.SigMismatch; }
+        return HooksNative.Ok;
     }
 
     [StructLayout(LayoutKind.Sequential)]

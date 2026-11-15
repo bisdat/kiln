@@ -120,6 +120,8 @@ KilnResult add_owner_retiring(KilnOwner, OwnerRetiringFn, void*, KilnHandle*) { 
 KilnResult remove_owner_retiring(KilnHandle) { return KILN_ERR_NOT_FOUND; }
 }  // namespace reg
 namespace tick {
+bool typed_install_pre() { return false; }
+KilnResult session(KilnSessionInfo* out) { *out = {}; out->size = sizeof *out; return KILN_OK; }
 KilnResult subscribe_world(KilnOwner, KilnWorldEventFn, void*, KilnHandle*) { return KILN_ERR_UNAVAILABLE; }
 }  // namespace tick
 namespace sigdb {
@@ -152,6 +154,11 @@ std::vector<LiveDiff> live_differs() { return g_live_diffs; }
 std::map<uintptr_t, SigInfo> g_sigs;
 std::atomic<bool> g_no_file{false};  // "the exe file's code is not in use"
 std::vector<uint8_t> g_text_file;    // the .game section as it was before anything was hooked: "the exe file's code"
+uint64_t sig_revision() { return 1; }
+bool sig(std::string_view symbol, SigInfo* out) {
+    for (const auto& [address, info] : g_sigs) if (info.symbol == symbol) { *out = info; out->address = address; return true; }
+    return false;
+}
 bool sig_at(uintptr_t a, SigInfo* out) {
     auto it = g_sigs.find(a);
     if (it == g_sigs.end()) return false;
@@ -826,6 +833,8 @@ void test_fingerprint_check() {
     // a described symbol whose own descriptor did not fit this build is off, whatever the caller declares
     kiln::sigdb::SigInfo info;
     info.symbol = "game/Hot";
+    info.descriptor.ret_kind = KILN_SIG_U64; info.descriptor.ret_size = 8;
+    info.descriptor.args = {{"x", "u64", KILN_SIG_U64, 8}, {"y", "f64", KILN_SIG_F64, 8}};
     info.status = kiln::sigdb::SigStatus::Mismatch;
     info.text = "the function reads [rcx, xmm1], the descriptor's fingerprint says [rcx, rdx]";
     kiln::sigdb::g_sigs[t] = info;
@@ -1125,6 +1134,10 @@ int main(int, char**) {
     check(A->header.size == sizeof(KilnHooksApi) && A->detour_typed && A->call_original_frame && A->call_with_frame &&
               A->fingerprint && A->typed_refusal,
           "the service table carries the five typed entries", "size " + std::to_string(A->header.size));
+    check(offsetof(KilnHooksApi, validate_typed) == 264 && offsetof(KilnHooksApi, sig_status) == 272 &&
+        offsetof(KilnHooksApi, typed_install_ready) == 280 && sizeof(KilnHooksApi) == 288 &&
+        A->validate_typed && A->sig_status && A->typed_install_ready,
+        "the typed safety extension preserves package 07's reserved slot and all older prefixes");
 
     test_call_with_frame();
     test_mixed_through_thunk();

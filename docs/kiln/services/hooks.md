@@ -286,8 +286,11 @@ if (Capabilities.Is("hooks.typed") && Capabilities.Is(GetItemVolume.Capability))
   a fault inside the game's function is the game's.
 - **Faults**: a handler that throws is caught in Kiln's dispatcher (logged on the mod's log, three times per install):
   when it had called the original, the caller gets the original's result (whatever the handler wrote since), else the
-  original runs with the arguments as the handler left them. A native handler that faults is disabled by the SEH guard
-  under the same rule. A fault while the original runs is the game's.
+  original runs with the arguments as the handler left them. The native guard disables a faulting link and restores
+  the original's complete result, including its struct-return buffer; snapshot storage is allocated before entering
+  the handler. A fault before CallOriginal forwards the call once. A fault while the original runs is the game's.
+  Windows SEH unwinding across a managed transition still needs the explicit before/after AV lab probes; ordinary
+  managed exceptions and the portable snapshot tests do not prove that boundary.
 - **Threads**: the handler runs on the thread that calls the function, game worker threads too; it runs as its mod
   (gated calls work), and the mod's unload waits for handlers in flight (one second, then the unload goes on and the
   mod's fragment stays until the last one returns).
@@ -298,8 +301,20 @@ if (Capabilities.Is("hooks.typed") && Capabilities.Is(GetItemVolume.Capability))
   (kiln/logs/sigdb-&lt;modid&gt;.json) decides whether the descriptor fits; `"abi": "trust"` accepts a function whose code
   the check cannot follow. The generator's warnings: KILN180 (a descriptor it cannot use), KILN181 (descriptors but no
   Kiln.Hooks), KILN182 (an unreadable sigdb file).
+- **What a matching fingerprint does not prove**: f32 versus f64, two types in one stack slot, integer versus
+  pointer, aggregate layout, and the extent of a return buffer are not told apart. The compiled descriptor is also
+  compared with the resolver's loaded descriptor before Invoke, including return class and sizes, but two equally
+  wrong descriptions can still agree. Review the native function's meanings for each executable after an update.
+- **Installation timing**: a request outside a safe Pre point while worlds run is accepted with `HookResult.Pending`
+  true and a handle whose `State` is `Pending`. The host drains it in the next authoritative Pre (joined clients use
+  client Pre). With no world, or in that Pre, it installs immediately. A late refusal changes `Handle.State` to
+  `Refused`, sets its `Reason`, and posts `HookRefusedEvent` once; removing a pending handle cancels it.
+  The coordinator must connect `TypedHooks.InstallAtSafePoint` to package 07's checked typed installation policy;
+  its `mid2_checked` accepts a different handler ABI and cannot be substituted directly.
 - **Cost per call** (lab, Wine, server f0d824be, 2026-11-14): a managed typed pass-through hook adds 47 ns to a call
   of GetItemVolume (best of three rounds of 10^6 calls through `Invoke`: 158 ns without the hook, 205 ns with it).
+  This is a historical measurement before the descriptor validation and complete-result snapshot repairs; remeasure
+  the current build before using it to budget a hot function.
 - **What it costs a player whose mods use none**: nothing is hooked and nothing runs per call. The core checks the
   ten descriptors once when sigdb loads (a decode of up to 300 instructions each, from the exe file's bytes).
 - **What has run**: unit tests of both halves, and `mods/tests/hooks-typed-test` on a dedicated server (lab, Wine,

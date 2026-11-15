@@ -782,11 +782,11 @@ pub fn port_flow(inst: &Instance, old: Option<PathBuf>, new: &Path, f: &FlowArgs
     Ok(FlowOutcome { marked, summary })
 }
 
-/// NEXT.txt lines for the port's descriptor reviews. They do not stop a mark: the symbols port, only the typed hooks
-/// and calls of a reviewed descriptor stay off (the core turns sig/<symbol> off when the code does not fit).
+/// NEXT.txt lines for the port's descriptor reviews. They do not stop a mark. A review can also flag changed code
+/// whose descriptor still matches; only a refused descriptor's sig/<symbol> row is turned off by the core.
 pub fn next_for_sigs(rep: &sigport::PortReport) -> Vec<String> {
     rep.sig_review.iter()
-        .map(|l| format!("{l}; typed hooks and calls of it stay off on this build until the descriptor is fixed (docs/kiln/sigport.md)"))
+        .map(|l| format!("{l}; review the descriptor before using typed hooks or calls; only refused descriptors are disabled automatically (docs/kiln/sigport.md)"))
         .collect()
 }
 

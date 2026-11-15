@@ -137,6 +137,19 @@ internal static unsafe class HooksNative
         public delegate* unmanaged[Cdecl]<byte*, nuint, nuint*, int> TypedRefusal;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CheckedTable
+    {
+        public TypedTable Typed;
+        public void* SubscribeOwnerRetiring, UnsubscribeOwnerRetiring, Mid2Checked;
+        public delegate* unmanaged[Cdecl]<NativeStr, nuint, ulong, SigRaw*, int> ValidateTyped;
+        public delegate* unmanaged[Cdecl]<NativeStr, nuint*, ulong*, int> SigStatus;
+        public delegate* unmanaged[Cdecl]<uint> InstallReady;
+    }
+
+    public static CheckedTable* Checked => T != null && T->Header.Size >= 280 &&
+        ((CheckedTable*)T)->ValidateTyped != null && ((CheckedTable*)T)->SigStatus != null ? (CheckedTable*)T : null;
+
     /// <summary>The typed members of the table, or null when kiln.hooks is missing or older than dev.28 (its
     /// header.size does not cover them). Never cached: it follows <see cref="T"/>.</summary>
     public static TypedTable* Typed

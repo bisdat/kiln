@@ -519,6 +519,22 @@ int main(int argc, char** argv) {
     test_pass(false);
     test_pass(true);
     test_window();
+    {
+        fp::Sig loaded;
+        loaded.ret_kind = KILN_SIG_F32; loaded.ret_size = 4;
+        loaded.args.push_back({"x", "f32", KILN_SIG_F32, 4});
+        KilnSigArg arg{{nullptr, 0}, KILN_SIG_F32, 4};
+        KilnSig c{}; c.size = sizeof c; c.argc = 1; c.args = &arg;
+        c.ret_kind = KILN_SIG_F32; c.ret_size = 4;
+        std::string reason;
+        check(fp::compiled_matches(c, loaded, &reason), "compiled descriptor equals resolver descriptor");
+        arg.kind = KILN_SIG_S32;
+        check(!fp::compiled_matches(c, loaded, &reason), "compiled integer against shipped float refused");
+        arg.kind = KILN_SIG_F32; c.argc = 0;
+        check(!fp::compiled_matches(c, loaded, &reason), "compiled stack/argument count differs");
+        c.argc = 1; c.ret_kind = KILN_SIG_S32;
+        check(!fp::compiled_matches(c, loaded, &reason), "compiled return class differs");
+    }
     test_check();
     test_parse();
     test_pdata();

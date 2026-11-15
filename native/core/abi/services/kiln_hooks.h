@@ -364,7 +364,23 @@ typedef struct KilnHooksApi {
     KilnResult(KILN_CALL* subscribe_owner_retiring)(KilnOwner observer_owner, KilnOwnerRetiringFn fn, void* user,
                                                     KilnHandle* out);
     KilnResult(KILN_CALL* unsubscribe_owner_retiring)(KilnHandle handle);
+    /* Reserved for package 07's mid2_checked (ac937674), offset 256. Null until integrated. */
+    KilnResult(KILN_CALL* mid2_checked)(KilnOwner, uintptr_t, const KilnHookOrder*, KilnMidFn, void*, KilnHandle*, uint32_t*);
+    /* dev.29 typed safety extension. Check header.size covers each member before reading it.
+     * validate_typed checks THIS compiled descriptor against the resolver descriptor and original image bytes.
+     * sig_status queries the current resolver (never a report); revision changes at fragment replacement/unload.
+     * typed_install_ready permits installation with no live world OR on the current authoritative/joined-client Pre thread. */
+    KilnResult(KILN_CALL* validate_typed)(KilnStr symbol, uintptr_t expected_address, uint64_t expected_revision, const KilnSig* sig);
+    KilnResult(KILN_CALL* sig_status)(KilnStr symbol, uintptr_t* address, uint64_t* revision);
+    uint32_t(KILN_CALL* typed_install_ready)(void);
 } KilnHooksApi;
+#ifdef __cplusplus
+static_assert(offsetof(KilnHooksApi, mid2_checked) == 256);
+static_assert(offsetof(KilnHooksApi, validate_typed) == 264);
+static_assert(offsetof(KilnHooksApi, sig_status) == 272);
+static_assert(offsetof(KilnHooksApi, typed_install_ready) == 280);
+static_assert(sizeof(KilnHooksApi) == 288);
+#endif
 
 #ifdef __cplusplus
 }

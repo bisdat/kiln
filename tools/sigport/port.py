@@ -1168,9 +1168,10 @@ def review_sigs(defs, old_exe, new_exe, rsyms):
         row.update(verdict=verdict, text=text)
         out[name] = row
         a, b = row["old"], row["new"]
-        changed = any(a[k] != b[k] for k in ("result", "reads", "passes", "indirect", "stack"))
+        changed = any(a[k] != b[k] for k in ("result", "reads", "passes", "indirect", "stack", "ret"))
         if changed or verdict != "match":
             review.append(f"sig needs review: {name}: was {abifp.reads_text(a)}, is {abifp.reads_text(b)}"
+                          + (f"; return was {a['ret']}, is {b['ret']}" if a["ret"] != b["ret"] else "")
                           + ("" if verdict == "match" else f" ({verdict}: {text})"))
     return out, review
 

@@ -23,13 +23,45 @@ public sealed partial class ClientPassMod
         if (!await Need(c, "typed-hook-volume") || !await NeedPlayer(c)) return;
         foreach (var row in new[] { "hooks.typed", "sig/items/GetItemVolume" })
             c.Expect(Capabilities.Is(row), $"{row} is available in this game", Capabilities.Why(row));
-        c.Instruct("The sample typed-hook-volume hooks the game's own function that says how much an item holds and " +
-                   "doubles its answer. Take an empty watering can to a well (or any water you fill it from) and fill it " +
-                   "once; then water plants or soil until it is empty. With the sample, one fill should give about twice " +
-                   "the water a fill gives without it (if you know the vanilla amount, compare; else unload the sample, " +
-                   "start again and compare the two). Then play on for two minutes: no stutter, no crash, nothing else " +
-                   "changed. Pass when the can took about twice the water and the game ran normally; fail with what you " +
-                   "saw otherwise.");
-        await c.Verdict();
+        long sequence = DateTime.UtcNow.Ticks;
+        async Task<long[]?> Snapshot(long mode)
+        {
+            var nonce = ++sequence;
+            long[]? reply = null;
+            using var listener = c.Mod.Messages.On("typed-proof-result", m =>
+            {
+                if (m.Sender == "typed-hook-volume" && m.Payload is long[] { Length: 6 } data && data[0] == nonce) reply = data;
+            });
+            if (!Mods.Send("typed-hook-volume", "typed-proof", new long[] { nonce, mode }))
+            { c.Expect(false, "the sample accepts the proof request"); return null; }
+            if (!await c.Until(() => reply != null, TimeSpan.FromSeconds(5), "the sample replies with observed handler counts")) return null;
+            c.Expect(reply![5] == 1, "the sample's hook is installed");
+            return reply;
+        }
+        try
+        {
+            var off = await Snapshot(0);
+            if (off == null || off[5] != 1 || off[1] != 0) return;
+            c.Instruct("CONTROL: the sample now observes calls without changing volume. Empty a watering can, fill it at a well, " +
+                "then water until empty. Record the amount. Use this same can and well for the next stage. Confirm only after completing the control.");
+            if (await c.Verdict() != ClientCheckVerdict.Pass) return;
+            var control = await Snapshot(2);
+            if (control == null) return;
+            var controlRuns = control[2] - off[2];
+            c.Expect(controlRuns > 0, "observed real-item calls with the sample off", $"{controlRuns} calls");
+            if (controlRuns <= 0) return;
+            var on = await Snapshot(1);
+            if (on == null || on[5] != 1 || on[1] != 1) return;
+            c.Instruct("The sample is now ON. Repeat with the same empty can and well. One fill must give about twice the CONTROL water. " +
+                "Play for two minutes with no crash or stutter. Fail if the control and enabled runs are alike, even if another mod already increased capacity.");
+            if (await c.Verdict() != ClientCheckVerdict.Pass) return;
+            var enabled = await Snapshot(2);
+            if (enabled == null) return;
+            var enabledRuns = enabled[3] - on[3];
+            var enabledEdits = enabled[4] - on[4];
+            c.Expect(enabledRuns > 0 && enabledEdits > 0 && enabledEdits <= enabledRuns,
+                "the sample's handler ran and itself changed real-item results", $"{enabledRuns} calls, {enabledEdits} edits");
+        }
+        finally { Mods.Send("typed-hook-volume", "typed-proof", new long[] { ++sequence, 1 }); }
     }
 }

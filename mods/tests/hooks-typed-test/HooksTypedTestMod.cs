@@ -70,6 +70,30 @@ public sealed class HooksTypedTestMod : Mod
         return r.Handle!;
     }
 
+    [DllImport("kiln-hooks-typed-test.dll", EntryPoint = "kiln_typed_test_av", CallingConvention = CallingConvention.Cdecl)]
+    private static extern void NativeAccessViolation();
+
+    // Run BEFORE and AFTER in separate disposable lab processes. A CLR fail-fast is a FAILED boundary proof.
+    // Control: kiln/control/hooks-typed-av-before OR hooks-typed-av-after. Never enabled by the normal lab run.
+    private void HardFaultResult()
+    {
+        var mods = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(Context.Info.Directory))!;
+        var root = Path.GetDirectoryName(mods)!;
+        var after = File.Exists(Path.Combine(root, "control", "hooks-typed-av-after"));
+        if (!after && !File.Exists(Path.Combine(root, "control", "hooks-typed-av-before"))) return;
+        var calls = 0;
+        var count = Hold(Volume.Detour((ref Volume.Call c) => { Interlocked.Increment(ref calls); c.CallOriginal(); }, -10), "AV counter");
+        var fault = Hold(Volume.Detour((ref Volume.Call c) =>
+        {
+            if (after) { c.CallOriginal(); c.Result.Value = 999; c.Result.Has = 0; }
+            NativeAccessViolation();
+        }, 10), "AV handler");
+        var result = Volume.Invoke(0);
+        Drop(fault); Drop(count);
+        Check(calls == 1 && result.Value == 18 && result.Has == 1,
+            $"AV {(after ? "after" : "before")} CallOriginal: struct result {{18,1}}, original once ({calls}), process continued");
+    }
+
     private void Drop(HookHandle h)
     {
         h.Remove();
@@ -87,6 +111,7 @@ public sealed class HooksTypedTestMod : Mod
             WrongDescriptor();
             TimeScale();
             ItemVolume();
+            HardFaultResult();
             OwnFragment();
             Cost();
             await Workers();

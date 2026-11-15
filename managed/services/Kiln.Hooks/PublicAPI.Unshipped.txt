@@ -99,3 +99,11 @@ static Kiln.SigArg.operator ==(Kiln.SigArg left, Kiln.SigArg right) -> bool
 static Kiln.TypedHooks.Detour(Kiln.SigDescriptor! sig, Kiln.SigHandler! handler, int priority = 0) -> Kiln.HookResult!
 static Kiln.TypedHooks.Invoke(Kiln.SigDescriptor! sig, ref Kiln.SigFrame frame) -> void
 virtual Kiln.SigHandler.Invoke(Kiln.SigCall call) -> void
+Kiln.HookRegistrationState
+Kiln.HookRegistrationState.Pending = 0 -> Kiln.HookRegistrationState
+Kiln.HookRegistrationState.Installed = 1 -> Kiln.HookRegistrationState
+Kiln.HookRegistrationState.Refused = 2 -> Kiln.HookRegistrationState
+Kiln.HookRegistrationState.Removed = 3 -> Kiln.HookRegistrationState
+Kiln.HookHandle.State.get -> Kiln.HookRegistrationState
+Kiln.HookHandle.Reason.get -> string?
+Kiln.HookResult.Pending.get -> bool

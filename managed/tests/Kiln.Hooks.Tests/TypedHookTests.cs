@@ -373,6 +373,195 @@ public sealed unsafe class TypedHookTests : IDisposable
     }
 
     [Fact]
+    public void TheCheckedTableAppendsToTheOldTypedPrefix()
+    {
+        Assert.Equal(240, sizeof(HooksNative.TypedTable));
+        Assert.Equal(288, sizeof(HooksNative.CheckedTable));
+        Assert.Equal(264, (int)System.Runtime.InteropServices.Marshal.OffsetOf<HooksNative.CheckedTable>("ValidateTyped"));
+        Assert.Equal(272, (int)System.Runtime.InteropServices.Marshal.OffsetOf<HooksNative.CheckedTable>("SigStatus"));
+        Assert.Equal(280, (int)System.Runtime.InteropServices.Marshal.OffsetOf<HooksNative.CheckedTable>("InstallReady"));
+    }
+
+    [Theory]
+    [InlineData("integer")]
+    [InlineData("stack")]
+    [InlineData("return")]
+    public void InvokeRefusesACompiledDescriptorDifferentFromTheLoadedOne(string change)
+    {
+        TypedHooks.SigRowOn = _ => true;
+        FakeTyped.ShippedSig = Six;
+        var args = Six.Args.ToArray();
+        if (change == "integer") args[1] = new SigArg("b", SigKind.S32, 4);
+        if (change == "stack") args = args[..^1];
+        var compiled = new SigDescriptor(Six.Symbol, change == "return" ? SigKind.S64 : Six.Ret,
+            change == "return" ? 8u : Six.RetSize, false, SigInvoke.Any, args);
+        var calls = 0;
+        FakeTyped.Functions[Address] = _ => calls++;
+        var frame = default(SigFrame);
+        var mod = Mod();
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var e = Assert.Throws<KilnUnavailableException>(() => TestMods.As(mod, () => TypedHooks.Invoke(compiled, ref frame)));
+            Assert.Contains("descriptor", e.Message);
+        }
+        Assert.Equal(1, FakeTyped.ValidationCalls);
+        Assert.Equal(0, calls);
+    }
+
+    [Fact]
+    public void InvokeCachesValidationForTheDescriptorAndResolverRevision()
+    {
+        TypedHooks.SigRowOn = _ => true;
+        FakeTyped.ShippedSig = Six;
+        var calls = 0;
+        FakeTyped.Functions[Address] = _ => calls++;
+        var frame = default(SigFrame);
+        var mod = Mod();
+        TestMods.As(mod, () => { TypedHooks.Invoke(Six, ref frame); TypedHooks.Invoke(Six, ref frame); });
+        Assert.Equal(2, calls);
+        Assert.Equal(1, FakeTyped.ValidationCalls);
+        FakeTyped.ResolverRevision++;
+        TestMods.As(mod, () => TypedHooks.Invoke(Six, ref frame));
+        Assert.Equal(2, FakeTyped.ValidationCalls);
+        var twin = new SigDescriptor(Six.Symbol, Six.Ret, Six.RetSize, Six.Sret, Six.Invoke, Six.Args.ToArray());
+        TestMods.As(mod, () => TypedHooks.Invoke(twin, ref frame));
+        Assert.Equal(3, FakeTyped.ValidationCalls); // a distinct descriptor instance has its own verdict
+    }
+
+    [Fact]
+    public void ACoreWithoutATimingQueryRefusesADetourInsteadOfLeavingItPendingForever()
+    {
+        *(uint*)HooksNative.T = 256;
+        var mod = Mod();
+        var result = TestMods.As(mod, () => TypedHooks.Detour(Six, _ => { }));
+        Assert.False(result.Ok);
+        Assert.Contains("timing", result.Reason);
+        Assert.Empty(FakeRegistry.Live);
+        TestMods.Retire(mod);
+    }
+
+    [Fact]
+    public void InvokeOnAnOlderTableRefusesRatherThanCallingUnchecked()
+    {
+        TypedHooks.SigRowOn = _ => true;
+        *(uint*)HooksNative.T = 256;
+        var calls = 0;
+        FakeTyped.Functions[Address] = _ => calls++;
+        var frame = default(SigFrame);
+        var e = Assert.Throws<KilnUnavailableException>(() => TestMods.As(Mod(), () => TypedHooks.Invoke(Six, ref frame)));
+        Assert.Contains("validation", e.Message);
+        Assert.Equal(0, calls);
+    }
+
+    [Fact]
+    public void GeneratedIndirectAggregatesReachNativeFromSixteenByteAlignedStorage()
+    {
+        TypedHooks.SigRowOn = _ => true;
+        foreach (var n in new[] { 12, 16, 24 }) FakeTyped.SymbolTable[$"alignment/F{n}"] = Address;
+        var calls = 0;
+        FakeTyped.Functions[Address] = f => { Assert.Equal(0UL, f->Gpr[0] & 15UL); calls++; };
+        TestMods.As(Mod(), () =>
+        {
+            Kiln.Sigs.Alignment.F12.Invoke(default);
+            Kiln.Sigs.Alignment.F16.Invoke(default);
+            Kiln.Sigs.Alignment.F24.Invoke(default);
+        });
+        Assert.Equal(3, calls);
+    }
+
+    [Fact]
+    public void ADetourDuringAStepIsPendingUntilTheNextSafeTick()
+    {
+        FakeTyped.InstallReady = 0;
+        var mod = Mod();
+        var result = TestMods.As(mod, () => TypedHooks.Detour(Six, _ => { }));
+        Assert.Empty(FakeRegistry.Live);
+        Assert.True(result.Ok);
+        Assert.Equal("Pending", result.Handle!.GetType().GetProperty("State")!.GetValue(result.Handle)!.ToString());
+        FakeTyped.InstallReady = 1;
+        TestMods.DrainPending(mod);
+        Assert.Single(FakeRegistry.Live);
+        Assert.Equal("Installed", result.Handle.GetType().GetProperty("State")!.GetValue(result.Handle)!.ToString());
+        result.Handle.Remove();
+    }
+
+    [Fact]
+    public void ALateDetourRefusalPostsExactlyOneEvent()
+    {
+        FakeTyped.InstallReady = 0;
+        var mod = Mod();
+        var events = 0;
+        using var subscription = TestMods.As(mod, () => Events.On<HookRefusedEvent>(_ => events++));
+        var result = TestMods.As(mod, () => TypedHooks.Detour(Six, _ => { }));
+        Assert.Empty(FakeRegistry.Live);
+        FakeTyped.InstallReady = 1; FakeTyped.Refuse = HooksNative.SigMismatch;
+        FakeTyped.RefusalText = "updated game";
+        TestMods.DrainPending(mod); TestMods.DrainPending(mod);
+        Assert.Equal(1, events);
+        Assert.Equal("Refused", result.Handle!.GetType().GetProperty("State")!.GetValue(result.Handle)!.ToString());
+        Assert.Empty(FakeRegistry.Live);
+        TestMods.Retire(mod);
+    }
+
+    [Fact]
+    public void TheSampleCountsItsOwnEditsAndObservesAnUnmodifiedControl()
+    {
+        var sample = new global::TypedHookVolume.TypedHookVolumeMod();
+        var method = sample.GetType().GetMethod("Doubled", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        var handler = (Kiln.Sigs.Items.GetItemVolume.Handler)Delegate.CreateDelegate(typeof(Kiln.Sigs.Items.GetItemVolume.Handler), sample, method);
+        FakeTyped.SymbolTable[Kiln.Sigs.Items.GetItemVolume.Symbol] = Address;
+        var result = TestMods.As(Mod(), () => Kiln.Sigs.Items.GetItemVolume.Detour(handler));
+        long Counter(string name) => (long)sample.GetType().GetField(name, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(sample)!;
+        Assert.Equal(0, Counter("_enabledEdits")); // merely installing the hook is no proof
+        var bytes = stackalloc byte[8];
+        var ptr = (ulong)bytes;
+        void Original(HooksNative.CallFrame* f) { *(int*)ptr = 32; ((byte*)ptr)[4] = 1; f->Rax = ptr; }
+        FakeTyped.CallTyped(TheLink(), Original, f => { f->Gpr[0] = ptr; f->Gpr[1] = 123; });
+        Assert.Equal(64, *(int*)ptr);
+        Assert.Equal(1, Counter("_enabledEdits"));
+        sample.GetType().GetField("_enabled", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.SetValue(sample, 0);
+        FakeTyped.CallTyped(TheLink(), Original, f => { f->Gpr[0] = ptr; f->Gpr[1] = 123; });
+        Assert.Equal(32, *(int*)ptr);
+        Assert.Equal(1, Counter("_controlCalls"));
+        // Another mod's changed original does not count as an edit by this sample in the control.
+        FakeTyped.CallTyped(TheLink(), f => { Original(f); *(int*)ptr = 64; }, f => { f->Gpr[0] = ptr; f->Gpr[1] = 123; });
+        Assert.Equal(64, *(int*)ptr);
+        Assert.Equal(1, Counter("_enabledEdits"));
+        FakeTyped.CallTyped(TheLink(), Original, f => { f->Gpr[0] = ptr; f->Gpr[1] = 0; });
+        Assert.Equal(2, Counter("_controlCalls")); // null-item Invoke probes supply no real-item evidence
+        result.Handle!.Remove();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RemovingOrRetiringAPendingDetourCancelsItsInstallation(bool retire)
+    {
+        FakeTyped.InstallReady = 0;
+        var mod = Mod();
+        var result = TestMods.As(mod, () => TypedHooks.Detour(Six, _ => { }));
+        if (retire) TestMods.Retire(mod); else result.Handle!.Remove();
+        FakeTyped.InstallReady = 1;
+        TestMods.DrainPending(mod);
+        Assert.Empty(FakeRegistry.Live);
+        Assert.Equal(HookRegistrationState.Removed, result.Handle!.State);
+        if (!retire) TestMods.Retire(mod);
+    }
+
+    [Fact]
+    public void GuidedTypedVolumeCheckRequiresObservedCallsAndOffControl()
+    {
+        var source = SourcePath();
+        var root = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(source)!, "../../.."));
+        var check = File.ReadAllText(Path.Combine(root, "mods/tests/client-pass/Dev2806bTypedHooks.cs"));
+        Assert.Contains("typed-proof", check);
+        Assert.Contains("controlRuns > 0", check);
+        Assert.Contains("enabledEdits > 0", check);
+    }
+
+    static string SourcePath([System.Runtime.CompilerServices.CallerFilePath] string path = "") => path;
+
+    [Fact]
     public void InvokeFillsTheFrameAndForwardsTheStackArguments()
     {
         var mod = Mod();
@@ -473,6 +662,29 @@ public sealed unsafe class TypedHookTests : IDisposable
         Assert.Empty(Symbols.ParseFragmentSigs("""{"symbols": {}}"""));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void FragmentStatusComesFromResolverEvenWithStaleOrMissingReport(bool matches)
+    {
+        var dir = Path.Combine(AppContext.BaseDirectory, "no-such-mod-folder", _id);
+        Directory.CreateDirectory(Path.Combine(dir, "sigdb"));
+        File.WriteAllText(Path.Combine(dir, "sigdb", "server.json"), "{}");
+        var report = Path.Combine(dir, "stale.json");
+        File.WriteAllText(report, "{\"sigs\":{\"" + _id + "/Fn\":{\"status\":\"match\"}}}");
+        var was = Symbols.FragmentReport;
+        Symbols.FragmentReport = _ => matches ? Path.Combine(dir, "report-write-failed") : report;
+        FakeTyped.ResolverResult = matches ? 0 : HooksNative.SigMismatch;
+        try
+        {
+            var mod = Mod();
+            TestMods.As(mod, () => Symbols.LoadShipped());
+            Assert.Equal(matches, Symbols.FragmentSigMatches(_id + "/Fn"));
+            TestMods.Retire(mod);
+        }
+        finally { Symbols.FragmentReport = was; }
+    }
+
     [Fact]
     public void LoadShippedReadsTheFragmentsDescriptorsAndTheUnloadDropsThem()
     {
@@ -501,6 +713,56 @@ public sealed unsafe class TypedHookTests : IDisposable
         {
             Symbols.FragmentReport = was;
         }
+    }
+
+    [Fact]
+    public void AFaultAfterOriginalRestoresALargeStructReturn()
+    {
+        var sig = new SigDescriptor(GameTime.Symbol, SigKind.Struct, 128, true, SigInvoke.None);
+        var mod = Mod();
+        TestMods.As(mod, () => TypedHooks.Detour(sig, c =>
+        {
+            c.CallOriginal();
+            new Span<byte>(c.ReturnBuffer, 128).Fill(99);
+            throw new InvalidOperationException("after original");
+        }));
+        var buffer = stackalloc byte[128];
+        var address = (nuint)buffer;
+        var result = FakeTyped.CallTyped(TheLink(), f =>
+        {
+            new Span<byte>((void*)f->Gpr[0], 128).Fill(42);
+            f->Rax = f->Gpr[0];
+        }, f => f->Gpr[0] = address);
+        Assert.Equal(1, FakeTyped.OriginalCalls);
+        Assert.Equal(address, (nuint)result.Rax);
+        Assert.All(new ReadOnlySpan<byte>(buffer, 128).ToArray(), b => Assert.Equal((byte)42, b));
+    }
+
+    [Fact]
+    public void OldFragmentCleanupCannotRemoveANewerLoadsSymbols()
+    {
+        var dir = Path.Combine(AppContext.BaseDirectory, "no-such-mod-folder", _id);
+        Directory.CreateDirectory(Path.Combine(dir, "sigdb"));
+        File.WriteAllText(Path.Combine(dir, "sigdb", "server.json"), "{}");
+        var wasReport = Symbols.FragmentReport;
+        var report = Path.Combine(dir, "report.json");
+        File.WriteAllText(report, "{\"sigs\":{\"" + _id + "/Fn\":{\"status\":\"match\"}}}");
+        Symbols.FragmentReport = _ => report;
+        try
+        {
+            var old = Mod();
+            var next = Mod();
+            TestMods.As(old, () => Symbols.LoadShipped());
+            TestMods.As(next, () => Symbols.LoadShipped());
+            // The timed-out retire's polling task eventually calls this with the old context.
+            Symbols.UnloadShipped(old);
+            Assert.True(FakeRegistry.HasSymbols(_id));
+            Assert.True(Symbols.FragmentSigMatches(_id + "/Fn"));
+            TestMods.Retire(old);
+            TestMods.Retire(next);
+            Assert.False(FakeRegistry.HasSymbols(_id));
+        }
+        finally { Symbols.FragmentReport = wasReport; }
     }
 
     [Fact]

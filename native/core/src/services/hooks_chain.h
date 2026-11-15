@@ -80,7 +80,7 @@ KilnResult install_mid(KilnOwner owner, uintptr_t target, const Order& order, Ki
 // A typed link (dev.28): `fn` gets the call as a KilnCallFrame; `nstack` stack arguments are forwarded to the rest of
 // the chain (the caller derived it from the KilnSig and checked the fingerprint).
 KilnResult install_typed(KilnOwner owner, uintptr_t target, const Order& order, uint32_t nstack, KilnTypedFn fn,
-                         void* user, KilnHandle* out);
+                         void* user, KilnHandle* out, uint32_t sret_size = 0);
 // Inside a typed handler: runs the rest of the chain once. KILN_ERR_INVALID_ARGUMENT when `frame` is not a handler's.
 KilnResult call_original_frame(KilnCallFrame* frame);
 

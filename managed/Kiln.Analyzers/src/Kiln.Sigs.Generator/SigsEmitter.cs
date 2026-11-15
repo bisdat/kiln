@@ -263,7 +263,10 @@ internal static class SigsEmitter
         sb.AppendLine($"    /// <summary>The game function <c>{sym}</c> as a typed hook and call: <c>{Xml(Proto(d))}</c> (sigdb descriptor;");
         sb.AppendLine($"    /// {abi}). {invokeText} Advanced mods only. Its capability row <c>{Xml(row)}</c> is on when the symbol resolved");
         sb.AppendLine("    /// and the function's code fits the descriptor on this game build; when it does not, <see cref=\"Detour\"/> is refused");
-        sb.AppendLine("    /// with the reason and a direct call throws.</summary>");
+        sb.AppendLine("    /// with the reason and a direct call throws.");
+        sb.AppendLine("    /// <para>A matching fingerprint does not prove complete type identity: f32 versus f64, two types in one stack slot,");
+        sb.AppendLine("    /// integer versus pointer, aggregate layout, and the extent of a return buffer are not told apart. Review these");
+        sb.AppendLine("    /// meanings for this executable; a matching fingerprint is not a substitute for that review.</para></summary>");
         sb.AppendLine($"    {vis} static unsafe class {cls}");
         sb.AppendLine("    {");
         sb.AppendLine("        /// <summary>The sigdb symbol.</summary>");
@@ -361,7 +364,8 @@ internal static class SigsEmitter
 
         // ---- Detour ----
         sb.AppendLine("        /// <summary>Hooks the function: <paramref name=\"handler\"/> runs on every call, on the calling thread (game worker");
-        sb.AppendLine("        /// threads too), in priority order (higher first). Removed with the handle or when the mod unloads. Refused");
+        sb.AppendLine("        /// threads too), in priority order (higher first). An accepted request can be pending until the next safe Pre:");
+        sb.AppendLine("        /// inspect the result's Pending and Handle.State. Removed with the handle or when the mod unloads. Refused");
         sb.AppendLine("        /// (<c>Ok</c> false with the reason; a <see cref=\"global::Kiln.HookRefusedEvent\"/> is posted) when the function's code");
         sb.AppendLine("        /// does not fit the descriptor on this game build or the symbol does not resolve.</summary>");
         sb.AppendLine("        /// <exception cref=\"global::System.ArgumentNullException\">A null handler.</exception>");
@@ -416,8 +420,10 @@ internal static class SigsEmitter
                         }
                         else
                         {
-                            sb.AppendLine($"            var __copy{i} = {v};");
-                            sb.AppendLine($"            __frame.SetInt({pos}, unchecked((ulong)(nint)(&__copy{i})));");
+                            sb.AppendLine($"            byte* __raw{i} = stackalloc byte[{a.Type.Size + 15}];");
+                            sb.AppendLine($"            var __copy{i} = ({t}*)(((nuint)__raw{i} + 15) & ~(nuint)15);");
+                            sb.AppendLine($"            *__copy{i} = {v};");
+                            sb.AppendLine($"            __frame.SetInt({pos}, unchecked((ulong)(nint)__copy{i}));");
                         }
                         break;
                     default: sb.AppendLine($"            __frame.SetInt({pos}, {ToSlot(a.Type, root, v)});"); break;
