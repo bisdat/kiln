@@ -92,7 +92,10 @@ public sealed unsafe class SetDecisionsTests
         }
         finally
         {
+            // events.equip's producers too (kinds 16 and 17, registered by the subscription): the broker is process-wide and
+            // DecisionBrokerTests registers its own kind-16 producer
             Items.ResetSetsForTests();
+            EquipDecisions.ResetForTests();
             ClientActionDecisions.ResetForTests();
             FakeTables.Features([EquipDecisions.Row]);
         }
