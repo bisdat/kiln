@@ -198,6 +198,22 @@ pub fn shroudforge_runs_eml(loaders: &[OwnLoader]) -> bool {
     loaders.iter().any(|o| o.kind == ModKind::Eml && o.engine == Engine::ShroudForge)
 }
 
+/// A standalone EML loader makes kiln-eml finish before hosted ShroudForge can reserve the startup writer.
+/// Its runtime packages must not be delegated or placed for that loader, which bypasses kiln-eml's whole-package
+/// guard. Disk detection is deliberately conservative under Wine too, even without an active DLL override.
+pub(crate) fn check_runtime_eml_loader(loaders: &[OwnLoader], ids: &[String]) -> crate::Result<()> {
+    if !ids.is_empty() {
+        if let Some(loader) = loaders.iter().find(|o| o.kind == ModKind::Eml && o.engine == Engine::Eml) {
+            return Err(crate::Error::new(crate::ErrorCode::Refused, format!(
+                "These EML mods need ShroudForge's runtime: {}. EML's own loader ({}) is installed, and it keeps Kiln from starting \
+                 ShroudForge, so they would not run. Switch those mods off, or remove that loader from the game folder or its DLL \
+                 chain, then activate the profile again.",
+                ids.join(", "), loader.file)));
+        }
+    }
+    Ok(())
+}
+
 /// The kinds whose own loader reads a fixed folder of the game. EML, EMF and Shroudtopia mods are copied there only
 /// while that loader is installed; Greeneye and Flame mods always run from Kiln's copy there
 /// (engine_mods::run_folder), and SF and SET are always placed as well (their Kiln plugins read only their own folder).

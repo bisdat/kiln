@@ -771,3 +771,109 @@ fn runtime_eml_missing_component_is_disabled_and_not_placed() {
     assert!(!rendered.mods.eml[0].enabled);
     assert!(rendered.eml_runtime_blocked["quiver"].contains("component is missing"));
 }
+
+fn runtime_eml(s: &Setup, capability: &str) -> profile::Profile {
+    let src = legacy(&s.t.0, "quiver", "0.8.2");
+    put(&src, "mod.json", format!(r#"{{"id":"quiver","name":"Quiver","version":"0.8.2","capabilities":["patch","{capability}"]}}"#).as_bytes());
+    let r = import(&s.dirs, &src, ModKind::Eml, "quiver");
+    let mut p = s.profile(vec![pm(&r, true)]);
+    p.mods.shroudforge.clear();
+    p
+}
+
+fn assert_runtime_eml_refused<T: std::fmt::Debug>(result: kiln_manage::Result<T>, loader: &str) {
+    let err = result.expect_err("a standalone EML loader prevents ShroudForge from starting the runtime");
+    assert_eq!(err.code, kiln_manage::ErrorCode::Refused, "{err:?}");
+    for text in ["quiver", "ShroudForge", "EML", loader, "Switch those mods off", "remove that loader", "activate"] {
+        assert!(err.message.contains(text), "missing {text:?}: {}", err.message);
+    }
+}
+
+#[test]
+fn runtime_eml_refuses_render_and_placement_with_each_standalone_loader_route() {
+    for capability in ["runtime", "runtime-register-dll"] {
+        for route in ["proxy", "chain", "emf-chain"] {
+            let s = setup(&format!("runtime-refuse-{capability}-{route}"));
+            let p = runtime_eml(&s, capability);
+            let loader = match route {
+                "proxy" => { eml_loader(&s.game); "dbghelp.dll" },
+                "chain" => {
+                    put(&s.game, "kiln/chain/eml.dll", &build_test_dll(&[], b"EML_LOG_FILE_PATH"));
+                    put(&s.game, "kiln/chain.ini", b"[chain]\nchain\\eml.dll\n");
+                    "kiln/chain/eml.dll"
+                },
+                _ => {
+                    put(&s.game, "loaders/eml.dll", &build_test_dll(&[], b"EML_LOG_FILE_PATH"));
+                    put(&s.game, "dinput8-chain.ini", b"[EMF]\nloaders\\eml.dll\n");
+                    "loaders/eml.dll"
+                },
+            };
+            assert_runtime_eml_refused(engine_mods::place(&s.dirs, &p, &s.game), loader);
+            assert_runtime_eml_refused(profile::render(&s.dirs, &p, &runtime_install(&s.game), kiln_manage::game::PathMode::Native), loader);
+            assert!(!s.game.join("mods").exists(), "refuse before placing any engine package");
+            assert!(!s.game.join("kiln/state/library-placements.json").exists());
+        }
+    }
+}
+
+#[test]
+fn runtime_eml_refuses_activation_before_placing_packages() {
+    let s = setup("runtime-refuse-activate");
+    let p = runtime_eml(&s, "runtime-register-dll");
+    let p = profile::save(&s.dirs, &p).unwrap();
+    eml_loader(&s.game);
+    assert_runtime_eml_refused(profile::activate(&s.dirs, &p.id, &runtime_install(&s.game)), "dbghelp.dll");
+    assert!(!s.game.join("mods").exists());
+    assert!(!s.game.join("kiln/profile.json").exists());
+    assert!(!s.game.join("kiln/chain.ini").exists());
+}
+
+#[test]
+fn runtime_eml_refuses_play_if_a_standalone_loader_appears_after_activation() {
+    use kiln_manage::launch::{self, LaunchMode, LaunchRequest};
+    let s = setup("runtime-refuse-play");
+    let p = runtime_eml(&s, "runtime");
+    let p = profile::save(&s.dirs, &p).unwrap();
+    let install = runtime_install(&s.game);
+    profile::activate(&s.dirs, &p.id, &install).unwrap();
+    let before = std::fs::read(s.game.join("kiln/profile.json")).unwrap();
+    std::fs::remove_dir_all(s.game.join("mods")).unwrap();
+    eml_loader(&s.game);
+    let request = LaunchRequest { mode: LaunchMode::Profile, profile_id: None, skip_backup: true };
+    assert_runtime_eml_refused(launch::play_with(&s.dirs, &install, &request, Some(&[]), &|_| panic!("Steam must not be asked")), "dbghelp.dll");
+    assert!(!s.game.join("mods").exists(), "Play must not republish to the standalone loader");
+    assert_eq!(std::fs::read(s.game.join("kiln/profile.json")).unwrap(), before);
+}
+
+#[test]
+fn runtime_eml_refuses_play_once_with_the_loader_conflict_message() {
+    use kiln_manage::launch::{self, LaunchMode, LaunchRequest};
+    let s = setup("runtime-refuse-once");
+    let p = runtime_eml(&s, "runtime-register-dll");
+    let p = profile::save(&s.dirs, &p).unwrap();
+    eml_loader(&s.game);
+    let request = LaunchRequest { mode: LaunchMode::Once, profile_id: Some(p.id), skip_backup: true };
+    assert_runtime_eml_refused(launch::play_with(&s.dirs, &runtime_install(&s.game), &request, Some(&[]), &|_| panic!("Steam must not be asked")), "dbghelp.dll");
+    assert!(!s.game.join("mods").exists());
+    assert!(!s.game.join("kiln/profile.once.json").exists());
+    assert!(!s.game.join("kiln/play-once.ini").exists());
+}
+
+#[test]
+fn patch_only_eml_and_disabled_runtime_eml_keep_standalone_loader_behavior() {
+    let s = setup("runtime-refuse-controls");
+    let mut p = runtime_eml(&s, "runtime");
+    p.mods.eml[0].enabled = false;
+    let patch = import(&s.dirs, &legacy(&s.t.0, "more-gliders", "0.2.2"), ModKind::Eml, "more-gliders");
+    p.mods.eml.push(pm(&patch, true));
+    let p = profile::save(&s.dirs, &p).unwrap();
+    eml_loader(&s.game);
+    profile::activate(&s.dirs, &p.id, &runtime_install(&s.game)).unwrap();
+    assert!(s.game.join("mods/more-gliders/src/mod.lua").is_file());
+    assert!(!s.game.join("mods/quiver").exists());
+    let file = profile::read_game_profile(&s.game).unwrap().unwrap();
+    assert!(file.eml_runtime.is_empty());
+    assert!(file.mods.eml.iter().any(|m| m.id == "more-gliders" && m.enabled));
+    assert!(file.mods.shroudforge.is_empty());
+    assert!(ext_of(&s.game.join("mods/more-gliders")).is_none());
+}

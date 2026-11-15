@@ -405,6 +405,14 @@ records its reason in `emlRuntimeBlocked`; kiln-eml reports `skipped`. Without a
 kiln-eml independently refuses the entire runtime package. A server-only/client-only package remains subject to
 ShroudForge's existing targets check (`other-side`); patch/export-only EML packages are unchanged.
 
+Activation and Play refuse a profile with enabled runtime EML packages while EML's standalone loader is detected in a
+game-folder proxy slot or an active DLL chain. That loader prevents Kiln from starting the ShroudForge runtime those
+packages need. The refusal names the packages and loader before any engine packages are placed. Switch those packages
+off, or remove the standalone EML loader from the game folder or its DLL chain, then activate the profile again. This
+also applies under Wine or Proton when the proxy has no DLL override. Patch-only profiles and disabled runtime
+packages keep their existing behavior. The refusal does not remove packages already placed or repair game data another
+loader changed.
+
 ### Restore the game's data
 
 For a game folder another mod loader changed before Kiln. kiln-eml then finds game data it cannot prove it wrote
