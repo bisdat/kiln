@@ -173,6 +173,16 @@ of 5d9ef2f1. Helper: `kx.py` (copied from the NoClip research) over the exe as a
   entries' focus for the keys and the pad (the end code says so; nothing has run). Settled by the first try: `dl` 1
   scrolls vertically, the wheel scrolls, the inner stack sizes to its entries. Kiln's experiment (`native/services/ui/menu_scroll.cpp`) does exactly what the credits do,
   in the column, and logs the sizes it saw.
+- **The height (dev.29; from a screenshot and the first try, nothing new run).** The owner's 1280x720 screenshot
+  (2026-11-15, 16 rows: the game's 13, Kiln's Mods, Creative, SET tools) puts an entry frame every 40 px from 20 px,
+  with 53 px and 27 px between the three groups, and Quit's at 700..740 px (cut). With the first try's column of 1020
+  units at 3440x1440 both fit a UI 1080 units high at any resolution: column at y 30, 1020 tall, a row 60, the gaps
+  80 + 40; the 13 game rows alone are 900. **[rt]** (pixels) **[hyp]** (the 1080-unit UI; the parts of the 87 units
+  below Quit). Kiln does not rely on these numbers: it reads the column's rectangle and the top of an empty,
+  zero-sized stack it opens after the last entry (the same `UiVStack` / `UiNodeSize` / `UiFrameEnd` as its own stack
+  in the view; the probe's top is the rows' bottom), and wraps when the rows are taller than the column
+  (`menu_scroll.h`). That the probe is laid out like any child (a rectangle at the rows' bottom, no height) is a
+  reading of the layout rules above, for the client pass to confirm (kiln.log's `ui: the pause menu's entries: ...`).
 - **Cost and risk:** the game's layout asserts are fatal (`0xcb4c38`: "SmallDynamicArray is out of elements", then
   `0x8a0d90`): a wrong nesting ends the game on the first scrolled frame, which no run-time check can rule out before
   it. Kiln's crash guard limits that to one start per Kiln version and game build. A game update moves every one of
