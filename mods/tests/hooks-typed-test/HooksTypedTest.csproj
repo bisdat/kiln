@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Lab test of typed hooks and calls (chapter 06b; docs/kiln/services/hooks.md "Typed hooks"), player-free: prints
+       "hooks-typed-test: PASS|FAIL ..." lines to kiln.log. The lab needs native/'s kiln-hooks-typed-test.dll in
+       kiln/plugins (the boot rows) and kiln/control/systems.parallel (the worker row).
+       Build: dotnet build mods/tests/hooks-typed-test -c Release -o $KILN_OUT/mods/hooks-typed-test (artifacts-path $KILN_OUT/dotnet). -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <GenerateRuntimeConfigurationFiles>false</GenerateRuntimeConfigurationFiles>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <!-- LabSystems is a lab member (KILNX001) -->
+    <NoWarn>$(NoWarn);KILNX001</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../managed/Kiln.Api/Kiln.Api.csproj" Private="false" ExcludeAssets="runtime" />
+    <ProjectReference Include="../../../managed/services/Kiln.Hooks/Kiln.Hooks.csproj" Private="false" ExcludeAssets="runtime" />
+    <ProjectReference Include="../../../managed/services/Kiln.Sigs/Kiln.Sigs.csproj" Private="false" ExcludeAssets="runtime" />
+    <ProjectReference Include="../../../managed/Kiln.Testing/Kiln.Testing.csproj" Private="false" ExcludeAssets="runtime" />
+    <!-- the typed classes of the mod's own fragment (as Kiln.Sdk's Kiln.Sigs.targets wires it for a mod) -->
+    <ProjectReference Include="../../../managed/Kiln.Analyzers/src/Kiln.Sigs.Generator/Kiln.Sigs.Generator.csproj"
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" Private="false" />
+    <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="KilnSigdb" />
+    <AdditionalFiles Include="sigdb/server.json" KilnSigdb="true" />
+    <None Include="kiln.mod.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="sigdb/server.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- the natives the boot row compares RegisterNative's argc with (tools/impact's survey) -->
+    <None Include="../../../tools/impact/data/natives.json" Link="natives.json" CopyToOutputDirectory="PreserveNewest" />
+    <Compile Remove="native/**" />
+  </ItemGroup>
+</Project>

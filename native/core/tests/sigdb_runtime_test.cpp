@@ -382,6 +382,28 @@ static void sig_blocks(const char* dir) {
     frag2.resolve();
     CHECK(frag2.sig("mod/scoped", &info) && info.status == sigdb::SigStatus::Match && info.json.find("Pair") != std::string::npos,
           "sig: a fragment's descriptor uses a struct the core declared; its sret buffer is the rcx the function reads");
+    const auto stale_report = std::filesystem::path(dir) / "typed-stale-report.json";
+    frag2.write_report(stale_report);
+    {
+        std::ofstream out(file);
+        out << R"({"format":1,"symbols":{"mod/scoped":{"find":[{"pattern":"8B 81 34 12 00 00 C3"}],
+                 "sig":{"args":[{"name":"scale","type":"f32"}]}}}})";
+    }
+    sigdb::Resolver mismatch(&r);
+    CHECK(mismatch.load(file, "mod/"), "sig query: replacement descriptor loads");
+    mismatch.resolve();
+    mismatch.write_report(std::filesystem::path(dir)); // opening a directory as a report fails
+    CHECK(mismatch.sig("mod/scoped", &info) && info.status == sigdb::SigStatus::Mismatch,
+          "sig query: failed report replacement cannot turn a mismatching resolver on");
+    {
+        std::ifstream in(stale_report);
+        nlohmann::json old; in >> old;
+        CHECK(old["sigs"]["mod/scoped"]["status"] == "match", "sig query: stale matching report remains readable");
+    }
+    frag2.write_report(std::filesystem::path(dir));
+    CHECK(frag2.sig("mod/scoped", &info) && info.status == sigdb::SigStatus::Match && info.descriptor.sret,
+          "sig query: failed report write cannot turn a matching resolver off; parsed descriptor is returned");
+    std::filesystem::remove(stale_report);
     test_query = false;
     std::filesystem::remove(file);
 }

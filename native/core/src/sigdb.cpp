@@ -651,6 +651,7 @@ public:
         auto it = sigs_.find(std::string(name));
         if (it == sigs_.end()) return false;
         if (out) {
+            out->descriptor = it->second.sig;
             out->symbol = it->first;
             out->status = it->second.status;
             out->text = it->second.note;
@@ -1152,6 +1153,7 @@ private:
 };
 
 // ---- global state ----
+std::atomic<uint64_t> g_sig_revision{1};
 Resolver g_core;
 bool g_core_loaded = false;
 double g_ms = 0;
@@ -1184,6 +1186,7 @@ bool load_and_resolve(const std::filesystem::path& definitions) {
             KLOG_E("sigdb: %s: %s", to_utf8(f.filename().wstring()).c_str(), g_core.load_error.c_str());
 
     g_core.resolve();
+    ++g_sig_revision;
     g_core_loaded = true;
     g_ms = g_core.ms();
     g_core.log_unresolved();
@@ -1219,12 +1222,15 @@ bool load_fragment(std::string_view id, const std::filesystem::path& file, const
     if (summary) res->summarize(*summary);
     std::lock_guard lock(g_frag_mutex);
     g_fragments[std::string(id)] = std::move(res);
+    ++g_sig_revision;
     return true;
 }
 
 bool unload_fragment(std::string_view id) {
     std::lock_guard lock(g_frag_mutex);
-    return g_fragments.erase(std::string(id)) != 0;
+    const bool removed = g_fragments.erase(std::string(id)) != 0;
+    if (removed) ++g_sig_revision;
+    return removed;
 }
 
 bool any_symbol(std::string_view name, uintptr_t* out) {
@@ -1289,6 +1295,8 @@ std::string symbol_name_at(uintptr_t live_addr) {
 }
 
 // ---- kiln.hooks typed links ----
+uint64_t sig_revision() { return g_sig_revision.load(); }
+
 bool sig(std::string_view symbol, SigInfo* out) {
     if (g_core.sig(symbol, out)) return true;
     const std::string pfx = prefix_of(symbol);

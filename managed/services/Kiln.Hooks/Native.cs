@@ -71,6 +71,130 @@ internal static unsafe class HooksNative
         public delegate* unmanaged[Cdecl]<Stats*, int> GetStats;
     }
 
+    // ---- typed links (kiln_hooks.h "typed links", since 0.2.0-dev.28) ----
+    public const int SigMismatch = 100, SigUnknown = 101;  // KILN_HOOKS_ERR_SIG_MISMATCH / _UNKNOWN
+    public const int Unchecked = 102;                       // KILN_HOOKS_ERR_UNCHECKED (detour_typed_checked, dev.29)
+    public const nuint TypedContinue = 0, TypedSkip = 1;    // KILN_TYPED_CONTINUE / KILN_TYPED_SKIP
+    public const int MaxPositions = 20;                    // KILN_SIG_MAX_ARGS: 4 registers + 16 stack slots
+
+    /// <summary>KilnCallFrame (0x90 bytes): one Win64 call as data.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CallFrame
+    {
+        public fixed ulong Gpr[4];      // +0x00 rcx rdx r8 r9
+        public fixed byte Xmm[64];      // +0x20 xmm0..3, 16 bytes each
+        public ulong* Stack;            // +0x60 the 5th and later arguments
+        public ulong Rax;               // +0x68
+        public fixed byte Xmm0R[16];    // +0x70
+        public ulong Slot;              // +0x80
+        public ulong Reserved;          // +0x88
+    }
+
+    /// <summary>KilnSigArg.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SigArgRaw
+    {
+        public NativeStr Name;
+        public uint Kind;
+        public uint Size;
+    }
+
+    /// <summary>KilnSig.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SigRaw
+    {
+        public uint Size;
+        public uint Argc;
+        public SigArgRaw* Args;
+        public uint RetKind;
+        public uint RetSize;
+        public byte Sret;
+        public fixed byte Pad[7];
+    }
+
+    /// <summary>KilnHookOrder (with the dev.21 flags).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct OrderRaw
+    {
+        public uint Size;
+        public int Priority;
+        public NativeStr Label;
+        public NativeStr Before;
+        public NativeStr After;
+        public uint Flags;
+    }
+
+    /// <summary>The kiln.hooks table up to typed_refusal: the v1 members (<see cref="Table"/>), the v2 block (not used
+    /// by managed code, so untyped) and the typed block. A core is new enough when its header.size covers it.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TypedTable
+    {
+        public Table V1;
+        public void* RawDetour, Caller, Detour2, CallOriginal2, Mid2, MapJson;
+        public delegate* unmanaged[Cdecl]<ulong, nuint, OrderRaw*, SigRaw*, delegate* unmanaged[Cdecl]<CallFrame*, void*, nuint>, void*, ulong*, int> DetourTyped;
+        public delegate* unmanaged[Cdecl]<CallFrame*, int> CallOriginalFrame;
+        public delegate* unmanaged[Cdecl]<nuint, CallFrame*, uint, int> CallWithFrame;
+        public delegate* unmanaged[Cdecl]<nuint, byte*, nuint, nuint*, int> Fingerprint;
+        public delegate* unmanaged[Cdecl]<byte*, nuint, nuint*, int> TypedRefusal;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CheckedTable
+    {
+        public TypedTable Typed;
+        public void* SubscribeOwnerRetiring, UnsubscribeOwnerRetiring, Mid2Checked;
+        public delegate* unmanaged[Cdecl]<NativeStr, nuint, ulong, SigRaw*, int> ValidateTyped;
+        public delegate* unmanaged[Cdecl]<NativeStr, nuint*, ulong*, int> SigStatus;
+        public delegate* unmanaged[Cdecl]<uint> InstallReady;
+        // detour_typed_checked (dev.29): detour_typed with package 07's checked patch policy; same arguments
+        public delegate* unmanaged[Cdecl]<ulong, nuint, OrderRaw*, SigRaw*, delegate* unmanaged[Cdecl]<CallFrame*, void*, nuint>, void*, ulong*, int> DetourTypedChecked;
+    }
+
+    /// <summary>header.size that covers detour_typed_checked (offset 288).</summary>
+    public const uint CheckedInstallSize = 296;
+
+    /// <summary>The table with detour_typed_checked, or null on a core without it (older than 0.2.0-dev.29): managed code
+    /// then refuses a typed hook rather than patch through the unchecked detour_typed. Never cached.</summary>
+    public static CheckedTable* CheckedInstall => T != null && T->Header.Size >= CheckedInstallSize &&
+        ((CheckedTable*)T)->DetourTypedChecked != null ? (CheckedTable*)T : null;
+
+    public static CheckedTable* Checked => T != null && T->Header.Size >= 280 &&
+        ((CheckedTable*)T)->ValidateTyped != null && ((CheckedTable*)T)->SigStatus != null ? (CheckedTable*)T : null;
+
+    /// <summary>The typed members of the table, or null when kiln.hooks is missing or older than dev.28 (its
+    /// header.size does not cover them). Never cached: it follows <see cref="T"/>.</summary>
+    public static TypedTable* Typed
+    {
+        get
+        {
+            var t = T;
+            return t != null && t->Header.Size >= (uint)sizeof(TypedTable) ? (TypedTable*)t : null;
+        }
+    }
+
+    /// <summary>The typed table, or <see cref="KilnUnavailableException"/> naming <c>hooks.typed</c>.</summary>
+    public static TypedTable* RequireTyped(string api)
+    {
+        var t = Typed;
+        if (t != null) return t;
+        HooksCaps.Rows.Ensure();
+        throw ServiceCaps.Unavailable(HooksCaps.Typed, T == null
+            ? $"{api}: kiln.hooks is unavailable on this build"
+            : $"{api}: this core's kiln.hooks has no typed links (older than 0.2.0-dev.28)");
+    }
+
+    /// <summary>The text of the last refused detour_typed on this thread ("" when none).</summary>
+    public static string TypedRefusal(TypedTable* t)
+    {
+        nuint len = 0;
+        t->TypedRefusal(null, 0, &len);  // asks for the length (BufferTooSmall)
+        if (len == 0 || len > 64 * 1024) return "";
+        var buf = new byte[(int)len + 1];
+        fixed (byte* p = buf)
+            if (t->TypedRefusal(p, (nuint)buf.Length, &len) != Ok) return "";
+        return Encoding.UTF8.GetString(buf, 0, (int)len);
+    }
+
     private static Table* _table;
     private static bool _looked;
 
@@ -112,6 +236,9 @@ internal static unsafe class HooksNative
         Unavailable => "unavailable",
         WrongThread => "wrong thread",
         BufferTooSmall => "buffer too small",
+        SigMismatch => "the descriptor does not fit the function's code",
+        SigUnknown => "the function's code could not be followed far enough to check the descriptor",
+        Unchecked => "a thread could not be checked before the first detour on the target was written (nothing was written)",
         _ => $"error {rc}",
     };
 

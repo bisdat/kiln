@@ -113,6 +113,9 @@ KilnResult remove_owner_retiring(KilnHandle) { return KILN_ERR_NOT_FOUND; }
 }  // namespace reg
 namespace tick {
 KilnResult subscribe_world(KilnOwner, KilnWorldEventFn, void*, KilnHandle*) { return KILN_ERR_UNAVAILABLE; }
+// Typed installation timing (dev.29, typed_install_ready): no world and no Pre here.
+bool typed_install_pre() { return false; }
+KilnResult session(KilnSessionInfo* out) { *out = {}; out->size = sizeof *out; return KILN_OK; }
 }  // namespace tick
 namespace sigdb {
 bool any_symbol(std::string_view, uintptr_t*) { return false; }
@@ -143,6 +146,9 @@ std::vector<LiveDiff> live_differs() { return {}; }
 // Typed links (dev.28) ask sigdb for a symbol's descriptor and fingerprint: none here, ShroudForge's hooks are raw.
 bool sig_at(uintptr_t, SigInfo*) { return false; }
 bool fingerprint(uintptr_t, hooks::fp::Fingerprint*) { return false; }
+// The resolver's descriptor status (dev.29, sig_status / validate_typed): no descriptors here.
+uint64_t sig_revision() { return 1; }
+bool sig(std::string_view, SigInfo*) { return false; }
 }  // namespace sigdb
 namespace svc {
 Registrar::Registrar(Service* s) { g_service = s; }

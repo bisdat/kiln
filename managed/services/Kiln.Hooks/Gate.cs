@@ -70,10 +70,31 @@ internal static class HooksGate
         // Wait for any game thread still inside this mod's handlers to leave before its context is unloaded. New calls
         // can no longer reach them (chains emptied, dictionary cleared), so this drains in microseconds.
         var sw = Stopwatch.StartNew();
-        while (Interlocked.Read(ref mh.InFlight.Value) > 0 && sw.ElapsedMilliseconds < 1000)
+        while (Interlocked.Read(ref mh.InFlight.Value) > 0 && sw.ElapsedMilliseconds < DrainWaitMs)
             Thread.SpinWait(64);
-        if (mh.SymbolsLoaded) Symbols.UnloadShipped(mod);
+        var left = Interlocked.Read(ref mh.InFlight.Value);
+        if (left == 0)
+        {
+            if (mh.SymbolsLoaded) Symbols.UnloadShipped(mod);
+            return;
+        }
+        // A handler still runs (blocked or slow) on a game thread. The unload goes on (no new call reaches the mod), but
+        // what the running call may still use stays: the mod's fragment (its symbols and descriptor statuses) and this
+        // tracker, until the count is 0. Polled off the unload path, for as long as it takes.
+        try { mod.Log.Warn($"hooks: {left} handler call(s) of this mod still running {DrainWaitMs} ms after it unloaded; its symbols stay loaded until they return"); }
+        catch { /* the warning is all it is */ }
+        _ = Task.Run(async () =>
+        {
+            while (Interlocked.Read(ref mh.InFlight.Value) > 0) await Task.Delay(DrainPollMs).ConfigureAwait(false);
+            if (mh.SymbolsLoaded) Symbols.UnloadShipped(mod);
+        });
     }
+
+    /// <summary>How long a retire waits for the mod's handler calls in flight before it lets the unload go on (and
+    /// keeps polling off the unload path; seam for tests).</summary>
+    internal static int DrainWaitMs = 1000;
+
+    internal static int DrainPollMs = 50;
 
     internal static ModHooks Current(ModContext mod) => Tracked.TryGetValue(mod, out var mh) ? mh : Track(mod);
 

@@ -1591,6 +1591,16 @@
    ],
    "state": "open",
    "added": "fix round 00-integration.noclip (GitHub issue 25, 14 Nov)"
+  },
+  {
+   "id": "06b-typed-hooks.client",
+   "title": "Typed hooks: a mod's typed hook runs in the game",
+   "chapter": "06b",
+   "packages": [
+    "06b-typed-hooks"
+   ],
+   "state": "open",
+   "added": "06b-typed-hooks"
   }
  ]
 }
