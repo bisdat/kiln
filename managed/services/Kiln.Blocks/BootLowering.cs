@@ -9,8 +9,10 @@
 //   item     -> content  {"op": "define", "kind": "items", "definition": NewContent.ToJson(item)}
 //   recipe   -> content  {"op": "define", "kind": "recipes", "definition": NewContent.ToJson(recipe)}
 //   a game-tree talent's node -> skills {"nodes": [node]}
-// and nothing reaches a service. Ids come from the same BlockIds rules as a runtime Define, so both give the same GUIDs. A data file of the mod
-// with the same kind and name wins: the staged definition is left out with a ShadowedByFile warning.
+// and nothing reaches a service. Ids come from the same BlockIds rules as a runtime Define, so both give the same GUIDs. A file a definition
+// names (an item's or a game-tree talent's PNG icon) is read against the mod's folder the request gives ("dir"), as a runtime Define reads it
+// against the loaded mod's (no loaded mod lists the mod yet), with the same checks: the document names the same full path, or refuses the same
+// icon. A data file of the mod with the same kind and name wins: the staged definition is left out with a ShadowedByFile warning.
 //
 // Activation. A committed boot mod's runtime instance (Kiln.Host after its OnLoad, every activation) defines the committed definitions again
 // into its runtime ledger with a sink that registers nothing (the generation did): the runtime parts (rules applied at content ready, late
@@ -41,8 +43,8 @@ internal static class BootLowering
     {
         var req = JsonNode.Parse(request)!.AsObject();
         var id = (string)req["id"]!;
-        var mod = new ModBlocks(id, 0) { ManifestClients = (string?)req["clients"] };
-        var shadow = DataFileNames((string?)req["dir"]);
+        var mod = new ModBlocks(id, 0) { ManifestClients = (string?)req["clients"], BootDirectory = (string?)req["dir"] };
+        var shadow = DataFileNames(mod.BootDirectory);
         _dataFiles = shadow;
         var sink = new BootSink();
         var definitions = new JsonArray();
@@ -84,10 +86,13 @@ internal static class BootLowering
                 try
                 {
                     var block = (IBlock)JsonSerializer.Deserialize((string)s["json"]!, type, BlockJson.SharedOptions)!;
+                    var errorsBefore = mod.Errors.Count;
                     var (handle, low, _) = Lower(mod, key, block, type);
                     low.Commit();
                     mod.Handles[key] = handle;
                     if (low.Json["node"] is JsonObject node) sink.Skills(key, node);
+                    foreach (var error in mod.Errors.Skip(errorsBefore))
+                        issues.Add(new JsonObject { ["kind"] = kind, ["key"] = key, ["code"] = "IconRefused", ["reason"] = error });
                 }
                 catch (Exception e) when (e is BlockError or JsonException or ArgumentException or InvalidOperationException or NotSupportedException)
                 {

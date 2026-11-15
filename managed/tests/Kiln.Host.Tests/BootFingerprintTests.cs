@@ -34,6 +34,16 @@ public sealed class PatchBootMod : Kiln.Mod
     }
 }
 
+/// <summary>A boot mod whose item has a PNG icon of its folder: the boot lowering commits it as the file's full path, as a run-time define names it.</summary>
+public sealed class IconBootMod : Kiln.Mod
+{
+    public override void OnBoot(BootContext boot)
+    {
+        var staged = BootDefinitions.For(boot).Define("token", new ItemBlock { Name = "Token", Visual = new VisualBlock { Icon = "icons/token.png" } });
+        if (!staged.Ok) throw new InvalidOperationException(staged.Reason);
+    }
+}
+
 [Collection("boot generation")]  // BootGeneration, Capabilities and Config are process-wide
 public sealed class BootFingerprintTests : ModsFixture
 {
@@ -204,6 +214,27 @@ public sealed class BootFingerprintTests : ModsFixture
         Assert.Equal(direct, viaLink);
     }
 
+    [Fact]
+    public void A_link_in_the_mod_folders_parent_and_a_trailing_separator_do_not_change_the_fingerprint()
+    {
+        var real = Mod("library-parent/frost");
+        var parentLink = Path.Combine(ModsDir, "linked-parent");
+        Directory.CreateSymbolicLink(parentLink, Path.GetDirectoryName(real)!);
+        var via = Path.Combine(parentLink, "frost") + Path.DirectorySeparatorChar;
+        JsonObject Docs(string icon) => Envelope(("skills", "frost", "talent#1",
+            new JsonObject { ["iconFile"] = icon }.ToJsonString()));
+        Assert.Equal(BootFingerprint.Of("frost", real, Docs(Path.Combine(real, "icons", "token.png"))),
+            BootFingerprint.Of("frost", via, Docs(Path.Combine(real, "icons", "token.png"))));
+    }
+
+    [Fact]
+    public void Native_windows_and_Wine_drive_folders_count_the_same_icon()
+    {
+        (string, string, JsonNode?)[] Entry(string path) => [("content", "token#1", new JsonObject { ["icon"] = path })];
+        Assert.Equal(BootFingerprint.Hash(Entry(@"C:\Games\frost\icons\token.png"), [BootFingerprint.NormalizeRoot(@"c:\games\frost\")]),
+            BootFingerprint.Hash(Entry(@"Z:\home\player\mods\frost/icons/token.png"), [BootFingerprint.NormalizeRoot(@"Z:\home\player\mods\frost")]));
+    }
+
     [Theory]
     [InlineData(@"C:\Games\Enshrouded\kiln\mods\frost\icons\token.png", @"C:\Games\Enshrouded\kiln\mods\frost", "$mod/icons/token.png")]
     [InlineData(@"\\?\C:\Games\Enshrouded\kiln\mods\frost\icons\token.png", @"C:\Games\Enshrouded\kiln\mods\frost\", "$mod/icons/token.png")]
@@ -354,6 +385,61 @@ public sealed class BootFingerprintTests : ModsFixture
             Assert.Matches("^[0-9a-f]{64}$", seven);
             Assert.Equal(seven, Run(7));
             Assert.NotEqual(seven, Run(9));
+        }
+        finally
+        {
+            Config.Reset();
+            Capabilities.Reset();
+            KilnPaths.Root = root;
+            KilnPaths.Config = null!;
+        }
+    }
+
+    private const string IconMod = """
+        { "id": "icon-boot", "name": "Icon Boot", "version": "1.0.0", "apiVersion": "0.2", "side": "both", "clients": "mod", "boot": true,
+          "entryAssembly": "Kiln.Host.Tests.dll", "entryType": "Kiln.Host.Tests.IconBootMod" }
+        """;
+
+    [Fact]
+    public void A_committed_icons_full_path_counts_as_its_place_in_the_mods_folder_in_another_folder_and_through_a_link()
+    {
+        // two machines: the mod in kiln/mods, and the mod in a library elsewhere that kiln/mods reaches through a link. The boot lowering
+        // names the icon by its full, link-resolved path (BlockFiles.InMod), which differs; what is hashed does not (the lab switch's dump)
+        var root = KilnPaths.Root;
+        KilnPaths.Root = Root;
+        KilnPaths.Config = null!;
+        _states = new(StringComparer.Ordinal);
+        Capabilities.Report("mods.boot", CapabilityState.Available, CapabilityReason.None);
+        Directory.CreateDirectory(KilnPaths.Control);
+        File.WriteAllText(Path.Combine(KilnPaths.Control, BootFingerprint.DumpSwitch), "");
+        string Install(string dir)
+        {
+            Directory.CreateDirectory(Path.Combine(dir, "icons"));
+            File.WriteAllText(Path.Combine(dir, Manifest.FileName), IconMod);
+            File.Copy(Path.Combine(AppContext.BaseDirectory, "Kiln.Host.Tests.dll"), Path.Combine(dir, "Kiln.Host.Tests.dll"));
+            File.WriteAllBytes(Path.Combine(dir, "icons", "token.png"), [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+            return dir;
+        }
+        (string Fingerprint, string Hashed) Run()
+        {
+            var host = new FakeHost();
+            var current = Start(host);
+            Assert.True(current.TryGetValue("icon-boot", out var fp), host.Dump());
+            Assert.Matches("^[0-9a-f]{64}$", fp);
+            return (fp!, File.ReadAllText(Path.Combine(KilnPaths.State, "boot-fingerprints", "icon-boot.txt")));
+        }
+        try
+        {
+            var plain = Install(Path.Combine(ModsDir, "icon-boot"));
+            var (a, hashedA) = Run();
+            Directory.Delete(plain, recursive: true);
+            var library = Install(Path.Combine(Root, "library", "icon-boot"));
+            Directory.CreateSymbolicLink(Path.Combine(ModsDir, "icon-boot"), library);
+            var (b, hashedB) = Run();
+            Assert.Contains("\"icon\":\"$mod/icons/token.png\"", hashedA);
+            Assert.DoesNotContain(BootFingerprint.NormalizeRoot(Root), hashedA, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(hashedA, hashedB);
+            Assert.Equal(a, b);
         }
         finally
         {
