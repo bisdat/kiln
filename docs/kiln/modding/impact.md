@@ -274,7 +274,8 @@ kiln.abilities states the same contract from the runtime side in docs/kiln/servi
   (`mods/tests/natives-gen-test`, a mod built this way): `PASS before its natives registered, a program passing
   float32 to Twice's int parameter is refused from the build's impact/natives.json`, `PASS the cooked program calling
   the generated Twice answers in its start step`, `PASS a loop over 5 targets with a generated native finishes in 1
-  step`, `PASS types sint32/float32/bool/Time/EntityId/float3 round trip through generated natives`.
+  step`, `PASS types sint32/float32/bool/Time/EntityId/float3 round trip through generated natives`. A whole mod built
+  this way: `mods/samples/FrostMark` (a sword's hit effect runs its native first, `EffectBlock.Run` in docs/kiln/modding/blocks.md).
 - **Built-ins** (mod id `kiln`; neither suspends; both push 1):
   - `kiln.Log(value)` (`0xc0b137a7`): writes a kiln.log line with the program, instance, entity, site and the value
     (typed by its variable, or a raw integer).

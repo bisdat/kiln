@@ -1,0 +1,18 @@
+<Project>
+  <!-- FrostMark (docs/kiln/modding/impact.md, "[ImpactNative] methods"; docs/kiln/services/abilities.md): an [ImpactNative]
+       method a sword runs on every hit (EffectBlock.Run), which reads the target's Health through NativeContext and
+       makes the hit 1.5 times as strong on an enemy below a quarter of its health; and an attachment (Natives.Attach) on
+       applyDamage in the vanilla Fireball explosion that counts its hits. Built the way a mod author builds it: Kiln.Sdk in
+       repository mode, so the generator writes the native's thunk and registration and its typed impact/natives.json entry.
+       Build: dotnet build mods/samples/FrostMark/FrostMark.csproj -t:KilnDeploy -p:KilnModsDir=<folder> -->
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.props" />
+  <PropertyGroup>
+    <KilnModId>frostmark</KilnModId>
+    <KilnModName>Frost Mark</KilnModName>
+    <Version>0.1.0</Version>
+    <KilnServices>Abilities;Blocks;Items;Chat;World;Game</KilnServices>
+    <KilnSide>server</KilnSide>
+    <KilnClients>kiln</KilnClients>
+  </PropertyGroup>
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.targets" />
+</Project>
