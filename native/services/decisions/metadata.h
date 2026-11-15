@@ -109,7 +109,8 @@ public:
         return true;
     }
 
-    // World stop, or the item instance counter went back (a rolled-back world): every row and every life is void.
+    // World stop, or kiln.items' reset generation moved (the entity id counter went back: a rolled-back world;
+    // decisions.cpp reset_if_rolled_back, reset_watch.h): every row and every life is void.
     void clear() {
         std::lock_guard lock(m_);
         lives_.clear();

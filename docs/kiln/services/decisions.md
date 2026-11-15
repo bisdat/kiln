@@ -122,6 +122,15 @@ and `AppliedHealth`.
 While a row is off, `Events.On<T>` for its event throws `KilnUnavailableException` naming it, and nothing is
 subscribed. A handler for a base class is never refused. Check `Capabilities.Is` first.
 
+## A world that goes back
+
+When the world's entity ids go back (a rollback, the same world loaded again; kiln.items sees its entity id counter go
+down and forgets its item stamps), every open decision ends `StaleEntity`, every death hold, walk-over suppression and
+permit is forgotten, and identities are sampled anew in that step's window, also when the world pointer, the entity id
+and its SpawnTime are the same as before. The game then goes on as without the old holds; a new lethal visit or pickup
+is a new decision. This needs kiln.items' item instances (`items.instances`): where they are off, and in a game client
+that hosts (no kiln.items there), such a rollback is not seen.
+
 ## When something faults
 
 A fault in one of kiln.decisions' step-window calls (the core then never calls it again) or inside one of its hooks

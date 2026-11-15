@@ -214,6 +214,7 @@ std::string why_not() { return g_arm.why(); }
 uint32_t why_not_reason() { return g_arm.reason(); }
 bool busy() { return g_holds.size() != 0 || g_guard.load(std::memory_order_relaxed) != nullptr; }
 bool try_clear() { return g_holds.try_clear(); }
+void clear() { g_holds.clear(); }
 
 void discover(std::vector<uint32_t>& wanted) {
     if (!g_arm.armed() || host::interest_state(KILN_DECISION_DEATH) != 2) return;

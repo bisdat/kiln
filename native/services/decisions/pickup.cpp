@@ -205,6 +205,7 @@ std::string why_not() { return g_arm.why(); }
 uint32_t why_not_reason() { return g_arm.reason(); }
 bool busy() { return g_exposures.size() != 0; }
 bool try_clear() { return g_exposures.try_clear(); }
+void clear() { g_exposures.clear(); }
 
 void discover(std::vector<uint32_t>& wanted) {
     if (!g_arm.armed() || host::interest_state(KILN_DECISION_WALKOVER) == 0) return;

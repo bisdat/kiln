@@ -300,6 +300,13 @@ public:
         req_batch_ = Batch<KilnDecisionRequestV1>{};
         return true;
     }
+    // A rollback (reset_watch.h): every open request ends `status`; undelivered copies go, the consumer stays.
+    void release_open(uint32_t status, const char* reason, uint64_t step) {
+        std::lock_guard lock(m_);
+        release_all(status, reason, step);
+        arrivals_.clear();
+        req_batch_ = Batch<KilnDecisionRequestV1>{};
+    }
     // Tests: the lock, held by the caller (a fault that left it held).
     std::unique_lock<std::mutex> lock_for_tests() { return std::unique_lock(m_); }
 

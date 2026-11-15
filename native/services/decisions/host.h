@@ -79,6 +79,8 @@ bool usable();  // ready or armed
 bool busy();
 // The shutdown: forgets every hold unless a fault left the lock held (false then).
 bool try_clear();
+// A rollback (reset_watch.h): forgets every hold. World thread, no world job live.
+void clear();
 // window_begin, before the metadata is rebuilt: the entities the death producer needs rows for (every entity with
 // Health while a listener takes all deaths). World thread, no world job live.
 void discover(std::vector<uint32_t>& wanted);
@@ -104,6 +106,7 @@ bool installed();
 bool usable();  // ready or armed
 bool busy();    // an exposure is sampled
 bool try_clear();  // the shutdown: forgets every exposure unless a fault left the lock held (false then)
+void clear();      // a rollback (reset_watch.h): forgets every exposure, its suppression or permit
 // The words and reason for events.pickup when the producer cannot hold (empty / KILN_CAP_REASON_NONE when it can).
 std::string why_not();
 uint32_t why_not_reason();

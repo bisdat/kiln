@@ -22,7 +22,9 @@
 #include "metadata.h"
 #include "queue.h"
 #include "services/kiln_caps.h"
+#include "reset_watch.h"
 #include "services/kiln_decisions.h"
+#include "services/kiln_items.h"
 #include "services/kiln_players.h"
 #include "services/kiln_window_clock.h"
 #include "services/kiln_world.h"
@@ -45,6 +47,9 @@ Broker* g_broker = nullptr;  // made in kiln_plugin_main, never freed (4096 requ
 Metadata g_metadata;
 WorldGate g_gate;  // set in on_ready from the core constants world.storage and storage.kind
 Shutdown g_shutdown;  // a fault (a window call, a hook) stops every producer together (shutdown.h)
+ResetWatch g_resets;  // kiln.items' reset generation of item instances: a rollback invalidates everything (reset_watch.h)
+const KilnItemsApi* g_items = nullptr;  // looked up at the first window_begin (world thread)
+bool g_items_looked = false;
 
 // The consumer's interest per kind: all entities, or a list.
 struct Interest {
@@ -314,11 +319,49 @@ KilnResult KILN_CALL d_reevaluate_pickup(uint32_t drop, uint32_t receiver, uint3
     return pickup_producer::reevaluate(drop, receiver, exposures_reset);
 }
 
+// kiln.items' count of the times it forgot its item stamps (the entity id counter went down, a world closed or
+// started); ResetWatch::kUnknown without kiln.items or its item instances (a hosting client has no kiln.items).
+uint64_t items_generation() {
+    if (!g_items_looked) {
+        g_items_looked = true;
+        g_items = static_cast<const KilnItemsApi*>(g_api->service(ks(KILN_ITEMS_SERVICE), 4));
+        if (g_items && g_items->header.size < offsetof(KilnItemsApi, instances_status) + sizeof(void*)) g_items = nullptr;
+        if (!g_items)
+            logf(KILN_LOG_INFO, "decisions: no kiln.items item instances here: a rollback of the world's entity ids is not seen (chapter 07 4.1)");
+    }
+    if (!g_items || !g_items->instances_status) return ResetWatch::kUnknown;
+    KilnItemsInstancesStatus st{};
+    st.size = sizeof st;
+    if (g_items->instances_status(&st) != KILN_OK || !(st.flags & KILN_ITEMS_INSTANCES_ON)) return ResetWatch::kUnknown;
+    return st.resets;
+}
+
+// A rollback (or another world): every open request, hold, exposure and identity of the last one goes before anything
+// is sampled or held again (reset_watch.h).
+void reset_if_rolled_back(uint64_t step) {
+    if (!g_resets.changed(items_generation())) return;
+    struct Holds {
+        void clear() { death_producer::clear(); }
+    };
+    struct Exposures {
+        void clear() { pickup_producer::clear(); }
+    };
+    const bool had = death_producer::busy() || pickup_producer::busy();
+    const uint32_t open = invalidate_after_reset(*g_broker, g_metadata, Holds{}, Exposures{}, step);
+    g_broker->drain_sinks();
+    if (open || had)
+        logf(KILN_LOG_WARN,
+             "decisions: kiln.items forgot its item stamps (the world's entity id counter went down, or a world closed or started): %u open "
+             "decision(s) ended StaleEntity, every hold and walk-over exposure is forgotten, identities are sampled anew",
+             open);
+}
+
 // ---- step windows (core only) ----
 void KILN_CALL d_window_begin(uint64_t epoch, uint64_t step) {
     if (!g_on.load(std::memory_order_relaxed)) return;
     finish_shutdown(step);  // a hook faulted since the last window
     if (!holding()) return;
+    reset_if_rolled_back(step);  // before any sample: kiln.items looked at the entity id counter in this step's Pre
     g_epoch.store(epoch);
     g_step.store(step);
     g_world_thread.store(GetCurrentThreadId());
