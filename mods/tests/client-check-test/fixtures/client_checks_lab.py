@@ -311,6 +311,13 @@ def main():
         check(e is not None and len(e["assertions"]) == 2 and all(x["ok"] for x in e["assertions"]), "cct.flag-unset: no cheats body ran")
         e = run_and_answer(lab, "cct.cleanup", "pass")
         check("cct.cleanup: the clean-up ran" in lab.kiln_log(), "cct.cleanup: the clean-up ran")
+        e = run_and_answer(lab, "cct.failed-expect", "pass")
+        check(e is not None and e["verdict"] == "fail" and e.get("playerAnswer") == "pass" and e.get("assertionFailureCount") == 1
+              and "this check cannot pass: 1 assertion(s) failed: the requirement this check fails on purpose" in e["note"],
+              f"cct.failed-expect: a pass after a failed assertion is recorded as fail, with the answer and the reason ({e and (e['verdict'], e['note'])})")
+        listed = lab.cmd("list")
+        row = next((x for x in (listed["data"]["checks"] if listed and listed["ok"] else []) if x["id"] == "cct.failed-expect"), None)
+        check(row is not None and row.get("verdict") == "fail", f"cct.failed-expect: the list shows it failed ({row and row.get('verdict')})")
 
         joined(lab, a.lab_port)
 

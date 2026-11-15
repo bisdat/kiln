@@ -91,8 +91,118 @@ public sealed class RunnerTests
         Assert.Equal("asking", c.Phase);
         Assert.Contains("without asking", c.Instruction);
         var e = h.Answer(AnswerKind.Pass);
-        Assert.Equal("pass", e.Verdict);  // the player's verdict; the failed assertion sits beside it
+        Assert.Equal("fail", e.Verdict);  // requirements decide even when the player passes
         Assert.Single(e.Assertions, a => !a.Ok && a.What == "two hits" && a.Detail == "seen 1");
+    }
+
+    [Theory]
+    [InlineData("Pass", "fail")]
+    [InlineData("Fail", "fail")]
+    [InlineData("Skip", "skip")]
+    public void Failed_requirements_preserve_the_answer_but_prevent_a_pass(string answerName, string verdict)
+    {
+        var answer = Enum.Parse<AnswerKind>(answerName);
+        using var h = new Harness();
+        h.Start("t.noask");
+        var e = h.Answer(answer, "player evidence");
+        Assert.Equal(verdict, e.Verdict);
+        var json = JsonSerializer.SerializeToElement(e);
+        Assert.Equal(LedgerEntry.VerdictName((ClientCheckVerdict)(int)answer), json.GetProperty("playerAnswer").GetString());
+        Assert.Contains("player evidence", e.Note);
+        if (answer == AnswerKind.Pass)
+        {
+            Assert.Contains("this check cannot pass: 1 assertion(s) failed: two hits", e.Note);
+            Assert.Contains("the player answered pass", e.Note);
+            Assert.Contains("this check cannot pass", h.Last(RunEventKind.Changed)!.Current!.Instruction);
+            Assert.Contains("this check cannot pass", h.Runner.View.Message);
+        }
+        Assert.Equal(verdict, h.OnDisk().Single().Verdict);
+    }
+
+    [Fact]
+    public void A_late_failure_during_finish_grace_overrides_the_pass()
+    {
+        using var h = new Harness();
+        h.Start("t.pass");
+        var run = h.Runner.Current!;
+        var body = new TaskCompletionSource();
+        run.Body = body.Task; // keep the body running after it asked for a verdict
+        Assert.Null(h.Runner.Answer(AnswerKind.Pass));
+        ((ICheckRun)run).Expect(false, "late worker activity", "zero slices");
+        h.Runner.Step();
+        Assert.Equal("this check cannot pass: 1 assertion(s) failed: late worker activity", h.Runner.View.Current!.Instruction);
+        body.SetResult();
+        h.Pump();
+        var e = h.OnDisk().Single();
+        Assert.Equal("fail", e.Verdict);
+        Assert.Contains("the player answered pass", e.Note);
+        Assert.Contains(e.Assertions, a => !a.Ok && a.What == "late worker activity" && a.Detail == "zero slices");
+    }
+
+    [Fact]
+    public void A_failure_after_the_assertion_storage_cap_still_decides()
+    {
+        using var h = new Harness();
+        h.Start("t.pass");
+        var run = (ICheckRun)h.Runner.Current!;
+        for (var i = 0; i < CheckRunner.MaxAssertions; i++) run.Expect(true, "padding", null);
+        run.Expect(false, "worker never ran", "zero slices");
+        var e = h.Answer(AnswerKind.Pass);
+        Assert.Equal("fail", e.Verdict);
+        Assert.Contains(e.Assertions, a => !a.Ok && a.What == "worker never ran");
+        Assert.Contains("1 assertion(s) failed", e.Note);
+    }
+
+    [Fact]
+    public void The_reason_names_the_first_three_failures_and_counts_the_rest()
+    {
+        using var h = new Harness();
+        h.Start("t.pass");
+        var run = (ICheckRun)h.Runner.Current!;
+        for (var i = 1; i <= 5; i++) run.Expect(false, $"requirement {i}", null);
+        var e = h.Answer(AnswerKind.Pass);
+        Assert.Equal("fail", e.Verdict);
+        Assert.Equal(5, e.AssertionFailureCount);
+        Assert.Contains("this check cannot pass: 5 assertion(s) failed: requirement 1; requirement 2; requirement 3; and 2 more", e.Note);
+        Assert.DoesNotContain("requirement 4", e.Note);
+        Assert.Equal(5, e.Assertions.Count(a => !a.Ok));
+    }
+
+    [Fact]
+    public void An_older_pass_with_failed_assertions_counts_as_failed()
+    {
+        var old = new LedgerEntry
+        {
+            Verdict = "pass", Note = "", Assertions = [new LedgerAssertion { What = "one", Ok = true }, new LedgerAssertion { What = "two", Ok = false }],
+        };
+        Assert.Equal("fail", old.Counted);
+        Assert.Equal("recorded as a pass with 1 failed assertion(s): not a pass", old.CountedNote);
+        var clean = old with { Assertions = [new LedgerAssertion { What = "one", Ok = true }] };
+        Assert.Equal("pass", clean.Counted);
+        Assert.Equal("", clean.CountedNote);
+        var skipped = old with { Verdict = "skip", Note = "not here" };
+        Assert.Equal("skip", skipped.Counted);
+        Assert.Equal("not here", skipped.CountedNote);
+        // neither helper is part of the file
+        var json = JsonSerializer.Serialize(old);
+        Assert.DoesNotContain("ounted", json);
+        Assert.DoesNotContain("ailedAssertions", json);
+    }
+
+    [Fact]
+    public void A_cleanup_failure_overrides_pass_and_finished_events_stay_final()
+    {
+        using var h = new Harness();
+        h.Start("t.pass");
+        var run = (ICheckRun)h.Runner.Current!;
+        run.OnEnd(() =>
+        {
+            run.Expect(false, "restored the scene", "not restored");
+            return Task.CompletedTask;
+        });
+        Assert.Equal("fail", h.Answer(AnswerKind.Pass).Verdict);
+        var finished = h.Events.FindLastIndex(e => e.Kind == RunEventKind.Finished);
+        Assert.DoesNotContain(h.Events.Skip(finished + 1), e => e.Kind == RunEventKind.Changed);
     }
 
     [Fact]
