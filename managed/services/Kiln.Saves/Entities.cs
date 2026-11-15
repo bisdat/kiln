@@ -16,9 +16,59 @@ namespace Kiln;
 /// only. In particular, inventory item entities have no world position and cannot use this positional identity.
 /// A destroyed entity loses its attachments within a second. Attachments not matched within 10 minutes of a
 /// load are kept for 3 sessions, then dropped. Already-saved attachments survive temporarily unknown metadata
-/// within that retention window, but cannot match until their template's persistence flags are known.</remarks>
-internal sealed class EntityTable
+/// within that retention window, but cannot match until their template's persistence flags are known.
+/// Opted-in strict scopes are separate: exactly one candidate in the radius, then equal optional SpawnTime values.
+/// Loaded entities normally have no SpawnTime; when both values are absent, use also checks template and positional
+/// uniqueness at the recorded place. This is positional identity, not proof of an incarnation. Ambiguity stays waiting
+/// until explicit attachment or ordinary missed-session expiry. Destroyed/replaced live records are dropped.</remarks>
+internal sealed class EntityTable(bool strict = false)
 {
+    private readonly Dictionary<string, EntityTable> _strict = new(StringComparer.Ordinal);
+
+    /// <summary>Opt in one scope without changing other attachments. Late claims are checked at their original saved place.</summary>
+    internal EntityTable Strict(string scope)
+    {
+        if (_strict.TryGetValue(scope, out var table)) return table;
+        table = new EntityTable(true);
+        _strict.Add(scope, table);
+        foreach (var r in _live.Values.Concat(_unresolved).ToList())
+            if (r.ByMod.Remove(scope, out var keys))
+            {
+                var copy = new Rec { Template = r.Template, Name = r.Name, X = r.X, Y = r.Y, Z = r.Z,
+                    Yaw = r.Yaw, Generation = r.Generation, MatchPosition = r.MatchPosition,
+                    WaitingReason = r.WaitingReason, Missed = r.Missed, Transient = r.Transient };
+                copy.ByMod[scope] = keys;
+                if (_live.TryGetValue(r.Entity, out var live) && ReferenceEquals(live, r))
+                {
+                    copy.Entity = r.Entity;
+                    table._live[copy.Entity] = copy; // transfer ownership before inspection/search can throw
+                    try
+                    {
+                        if (!table.SameGeneration(copy, new EntityId(copy.Entity))) continue;
+                        if (table.Unique(copy, new EntityId(copy.Entity)))
+                        {
+                            // Register immediately hands existing live values to the new strict consumer.
+                            continue;
+                        }
+                    }
+                    catch (Exception e) when (e is InvalidOperationException or KilnUnavailableException)
+                    {
+                        // Keep ownership and continue migrating the remaining keys. Register hands this live value to
+                        // the consumer, whose use-time check will retry; failure must not lose or permanently block it.
+                        SavesRuntime.Log(LogLevel.Debug, $"Kiln.Saves: strict identity of entity {copy.Entity} waits for lookup: {e.Message}");
+                        continue;
+                    }
+                    table._live.Remove(copy.Entity);
+                    copy.Entity = 0;
+                }
+                table._unresolved.Add(copy);
+            }
+        table.StartMatching();
+        return table;
+    }
+
+    internal IEnumerable<Rec> Records => _live.Values.Concat(_unresolved);
+
     private const double StaticRadius = 0.5, MobileRadius = 16;
     private static readonly TimeSpan MatchWindow = TimeSpan.FromMinutes(10);
     private const int MaxMissedSessions = 3;
@@ -33,6 +83,9 @@ internal sealed class EntityTable
     internal sealed class Rec
     {
         public uint Entity;
+        public long? Generation;
+        public WorldPosition? MatchPosition; // original attachment/save place, retained across a lenient claim
+        public string? WaitingReason;
         public Guid? Template;
         public string? Name;
         public double X, Y, Z;
@@ -43,13 +96,14 @@ internal sealed class EntityTable
         public string Where => $"({X:F1}, {Y:F1}, {Z:F1})";
     }
 
-    public string Summary => $"entity attachments: {_live.Count} live, {_unresolved.Count} waiting for their entity";
-    public int LiveCount => _live.Count;
-    public int UnresolvedCount => _unresolved.Count;
-    public int Matched => _matched;
+    public string Summary => $"entity attachments: {LiveCount} live, {UnresolvedCount} waiting for their entity";
+    public int LiveCount => _live.Count + _strict.Values.Sum(t => t.LiveCount);
+    public int UnresolvedCount => _unresolved.Count + _strict.Values.Sum(t => t.UnresolvedCount);
+    public int Matched => _matched + _strict.Values.Sum(t => t.Matched);
 
     public void Clear()
     {
+        foreach (var t in _strict.Values) t.Clear();
         _live.Clear();
         _unresolved.Clear();
         _serviceClaims.Clear();
@@ -59,6 +113,8 @@ internal sealed class EntityTable
     // ---- load ----
     public void Absorb(string mod, JsonObject doc)
     {
+        if (!strict && (ServiceEntityData.IsStrict(mod) || doc["strict"]?.GetValue<bool>() == true))
+        { Strict(mod).Absorb(mod, doc); return; }
         if (doc["entities"] is not JsonArray list) return;
         foreach (var n in list)
         {
@@ -67,10 +123,12 @@ internal sealed class EntityTable
             {
                 Template = Guid.TryParse(o["template"]?.GetValue<string>(), out var g) ? g : null,
                 Name = o["name"]?.GetValue<string>(),
+                MatchPosition = new WorldPosition(p[0]!.GetValue<double>(), p[1]!.GetValue<double>(), p[2]!.GetValue<double>()),
                 X = p[0]!.GetValue<double>(),
                 Y = p[1]!.GetValue<double>(),
                 Z = p[2]!.GetValue<double>(),
                 Yaw = o["yaw"]?.GetValue<float>() ?? 0,
+                WaitingReason = o["waiting"]?.GetValue<string>(),
                 Missed = o["missed"]?.GetValue<int>() ?? 0,
             };
             // Several mods may have attached data to the same entity: one record per (template, position).
@@ -88,6 +146,7 @@ internal sealed class EntityTable
 
     public void StartMatching()
     {
+        foreach (var t in _strict.Values) t.StartMatching();
         _matchUntil = DateTime.UtcNow + MatchWindow;
         _nextMatch = DateTime.MinValue;
     }
@@ -100,22 +159,28 @@ internal sealed class EntityTable
     /// <summary>The record of a live entity, or of a loaded attachment saved for it (matched now); null if neither.</summary>
     public Rec? FindOrMatch(EntityId e)
     {
-        if (_live.TryGetValue(e.Value, out var r)) return r;
+        if (_live.TryGetValue(e.Value, out var r)) return !strict || SameGeneration(r, e) ? r : null;
         if (_unresolved.Count == 0 || !SpawnLink.Available || SpawnLink.Inspect(e) is not { } info) return null;
         if (!CanPersist(info.Template)) return null;
         foreach (var u in _unresolved)
         {
             if (u.Template != info.Template || !Near(u, info.Position, RadiusFor(u.Template))) continue;
+            if (strict && !Unique(u, e)) continue;
             Claim(u, e);
             return u;
         }
         return null;
     }
 
-    /// <summary>The record of a live entity; creates it (after trying to match a loaded attachment to it).</summary>
+    /// <summary>Explicitly attaches to a chosen live entity, creating or rebinding a record. For a strict scope this
+    /// clears a waiting refusal; automatic replay must use FindOrMatch instead.</summary>
     public Rec Attach(EntityId e)
     {
-        if (_live.TryGetValue(e.Value, out var r)) return r;
+        if (_live.TryGetValue(e.Value, out var r))
+        {
+            if (!strict || SameGeneration(r, e)) return r;
+            // A replaced live entity has no attachment to rebind; SameGeneration dropped it.
+        }
         if (!SpawnLink.Available) throw SavesCaps.Off("kiln.spawn", "EntityData needs kiln.spawn (entity lookups), which is unavailable");
         var info = SpawnLink.Inspect(e) ?? throw new ArgumentException($"entity {e} does not exist", nameof(e));
         // A loaded attachment waiting for exactly this entity?
@@ -123,17 +188,20 @@ internal sealed class EntityTable
             foreach (var u in _unresolved)
             {
                 if (u.Template != info.Template || !Near(u, info.Position, RadiusFor(u.Template))) continue;
+                if (strict) { u.WaitingReason = null; u.MatchPosition = info.Position; } // explicit choice
                 Claim(u, e);
                 return u;
             }
         r = new Rec { Entity = e.Value };
         Update(r, info);
+        r.MatchPosition = info.Position;
         _live[e.Value] = r;
         return r;
     }
 
     private static void Update(Rec r, SpawnLink.Ent info)
     {
+        r.Generation = info.Generation;
         r.Template = info.Template;
         r.Name = info.Name;
         r.X = info.Position.X;
@@ -159,6 +227,7 @@ internal sealed class EntityTable
     // ---- periodic (tick thread, ~1 s) ----
     public void Tick()
     {
+        foreach (var t in _strict.Values) t.Tick();
         if (_live.Count == 0 && _unresolved.Count == 0) return;
         var available = SpawnLink.Available;
         var now = DateTime.UtcNow;
@@ -197,6 +266,11 @@ internal sealed class EntityTable
             {
                 return;  // kiln.spawn cannot tell right now: drop nothing
             }
+            if (strict && (info is null || info.Template != r.Template || info.Generation != r.Generation))
+            {
+                (gone ??= []).Add(id);
+                continue;
+            }
             if (info != null && info.Template == r.Template)
             {
                 r.X = info.Position.X;
@@ -211,10 +285,7 @@ internal sealed class EntityTable
         if (gone == null) return;
         foreach (var id in gone)
         {
-            var r = _live[id];
-            _live.Remove(id);
-            _dropped++;
-            SavesRuntime.Log(LogLevel.Debug, $"Kiln.Saves: entity {id} ({r.Name ?? "?"}) is gone: attachments of {string.Join(", ", r.ByMod.Keys)} dropped");
+            DropRecord(_live[id]);
         }
     }
 
@@ -227,6 +298,7 @@ internal sealed class EntityTable
             var radius = RadiusFor(g);
             foreach (var cand in SpawnLink.Find(g, new WorldPosition(u.X, u.Y, u.Z), radius, 16))
             {
+                if (strict && !Unique(u, cand)) break;
                 if (_live.ContainsKey(cand.Value)) continue;
                 Claim(u, cand);
                 break;
@@ -237,9 +309,57 @@ internal sealed class EntityTable
             SavesRuntime.Log(LogLevel.Info, $"Kiln.Saves: entity attachments: matched {n} loaded entities ({_matched} this session), {_unresolved.Count} waiting");
     }
 
+    /// <summary>Equal optional SpawnTime values, including absent == absent. Missing values require positional checking
+    /// at use (HoldsStrict); equality alone is not proof. A known missing/replaced live entity loses its record.</summary>
+    internal bool SameGeneration(Rec r, EntityId e)
+    {
+        var info = SpawnLink.Inspect(e);
+        if (info is not null && info.Template == r.Template && info.Generation == r.Generation) return true;
+        DropRecord(r);
+        return false;
+    }
+
+    private void DropRecord(Rec r)
+    {
+        if (_live.TryGetValue(r.Entity, out var live) && ReferenceEquals(live, r)) _live.Remove(r.Entity);
+        _dropped++;
+        SavesRuntime.Log(LogLevel.Debug, $"Kiln.Saves: entity {r.Entity} ({r.Name ?? "?"}) is gone: attachments of {string.Join(", ", r.ByMod.Keys)} dropped");
+    }
+
+    /// <summary>Right before replay: template and optional generation equality; absent generations additionally require
+    /// one candidate at the attachment's place now. This is positional identity, not proof against every id reuse.</summary>
+    internal bool HoldsStrict(Rec r, EntityId e)
+    {
+        if (!SameGeneration(r, e) || r.WaitingReason is not null) return false;
+        if (r.Generation is not null || Unique(r, e)) return true;
+        if (r.WaitingReason is not null && _live.Remove(e.Value)) _unresolved.Add(r);
+        return false;
+    }
+
+    /// <summary>Finds an existing record for explicit removal, including an ambiguous waiting record, without claiming
+    /// or creating one. A nonexistent entity or mismatched live generation has no record to remove.</summary>
+    internal Rec? FindForRemoval(EntityId e)
+    {
+        var info = SpawnLink.Inspect(e);
+        if (_live.TryGetValue(e.Value, out var live))
+            return SameGeneration(live, e) ? live : null;
+        if (info is null) return null;
+        return _unresolved.FirstOrDefault(r => r.Template == info.Template && Near(r, info.Position, RadiusFor(r.Template)));
+    }
+
+    private bool Unique(Rec r, EntityId e)
+    {
+        if (r.WaitingReason is not null || r.Template is not { } g) return false;
+        var candidates = SpawnLink.Find(g, r.MatchPosition ?? new WorldPosition(r.X, r.Y, r.Z), RadiusFor(g), 2, required: true);
+        if (candidates.Count > 1)
+            r.WaitingReason = "two entities of this kind are within reach of the recorded place: Kiln cannot tell which one was scaled; mod must re-apply";
+        return candidates.Count == 1 && candidates[0] == e;
+    }
+
     private void Claim(Rec u, EntityId e)
     {
         _unresolved.Remove(u);
+        u.MatchPosition ??= new WorldPosition(u.X, u.Y, u.Z);
         u.Entity = e.Value;
         u.Missed = 0;
         if (SpawnLink.Inspect(e) is { } info)
@@ -257,6 +377,7 @@ internal sealed class EntityTable
     /// are handed to that service (Kiln.World sets a saved transform scale again). Tick thread, service context.</summary>
     public void HandOverServiceValues()
     {
+        foreach (var t in _strict.Values) t.HandOverServiceValues();
         if (_serviceClaims.Count == 0) return;
         var claims = _serviceClaims.ToList();
         _serviceClaims.Clear();
@@ -300,6 +421,7 @@ internal sealed class EntityTable
             {
                 w.WriteStartObject();
                 w.WriteNumber("format", 1);
+                if (strict) w.WriteBoolean("strict", true);
                 w.WriteString("scope", "entity/" + mod);
                 w.WriteStartArray("entities");
                 foreach (var (r, keys) in list.OrderBy(t => t.r.Template).ThenBy(t => t.r.X).ThenBy(t => t.r.Z).ThenBy(t => t.r.Y))
@@ -307,12 +429,15 @@ internal sealed class EntityTable
                     w.WriteStartObject();
                     if (r.Template is { } g) w.WriteString("template", g.ToString());
                     if (r.Name != null) w.WriteString("name", r.Name);
+                    var place = strict && r.WaitingReason is not null && r.MatchPosition is { } anchor
+                        ? anchor : new WorldPosition(r.X, r.Y, r.Z);
                     w.WriteStartArray("pos");
-                    w.WriteNumberValue(Math.Round(r.X, 3));
-                    w.WriteNumberValue(Math.Round(r.Y, 3));
-                    w.WriteNumberValue(Math.Round(r.Z, 3));
+                    w.WriteNumberValue(Math.Round(place.X, 3));
+                    w.WriteNumberValue(Math.Round(place.Y, 3));
+                    w.WriteNumberValue(Math.Round(place.Z, 3));
                     w.WriteEndArray();
                     w.WriteNumber("yaw", MathF.Round(r.Yaw, 2));
+                    if (r.WaitingReason is not null) w.WriteString("waiting", r.WaitingReason);
                     if (r.Missed > 0) w.WriteNumber("missed", r.Missed);
                     w.WriteStartObject("keys");
                     foreach (var (k, s) in keys)
@@ -340,10 +465,13 @@ internal sealed class EntityTable
             }
             yield return (mod, ms.ToArray());
         }
+        foreach (var t in _strict.Values)
+            foreach (var bundle in t.Stage(json)) yield return bundle;
     }
 
     public void Retire(string mod, JsonSerializerOptions? opts, ModContext ctx)
     {
+        foreach (var t in _strict.Values) t.Retire(mod, opts, ctx);
         foreach (var r in _live.Values.Concat(_unresolved))
             if (r.ByMod.TryGetValue(mod, out var keys))
                 foreach (var (k, s) in keys)
