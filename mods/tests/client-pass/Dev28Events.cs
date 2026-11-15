@@ -43,11 +43,6 @@ public sealed partial class ClientPassMod
                 e.SurvivalHealth = 1;
                 e.Cancel();
             }, EventFilter.ForEntity(p)),
-            Events.On<ItemPickingUpEvent>(e =>
-            {
-                picking.Add(e);
-                if (!allow) e.Cancel();
-            }, EventFilter.ForEntity(p)),
         };
         var equipOn = Capabilities.Is("events.equip");
         if (equipOn)
@@ -80,37 +75,86 @@ public sealed partial class ClientPassMod
             $"{dying.Count} event(s), outcome {death?.Status} applied {death?.AppliedHealth}: {death?.Reason}; health now {Combat.GetHealth(p)?.Current} of {max}");
         await c.Ticks(150);
 
-        // 2. a walk-over pickup, refused: the item stays on the ground. A real drop with the walk-over components added at
-        //    its spawn; the receiver is left to the game (nothing forces it, unlike the lab's fixture).
-        var ahead = Ahead(c, 4) ?? World.Position(p)!.Value;
-        EntityId drop = default;
-        try
+        // 2. a walk-over pickup, refused: the item stays on the ground. Two drops of the same item and amount, each a real
+        //    drop with the walk-over components added at its spawn and nothing else (no receiver, no players mask: the
+        //    game decides who is in range). The first is an unheld control: walking over it must give an item by walking
+        //    (the game's PickupEvent from that drop, no interaction), and how many it gave is the grant to expect (the
+        //    server's resourceDropStackAmountFactor scales a stack). Without that contact the check fails: it cannot
+        //    judge a refusal it never saw. Every event, outcome and grant below is matched to its exact drop.
+        var item = new ItemId(EventsGround);
+        var grants = new List<ItemPickupEvent>();   // the game's PickupEvent ("+N"), after the fact
+        var taken = new List<LootEvent>();          // an interaction pickup (the interact key): not a walk-over one
+        subs.Add(Events.On<ItemPickupEvent>(e => { if (e.Receiver == p) grants.Add(e); }));
+        subs.Add(Events.On<LootEvent>(e => { if (e.Guest == p) taken.Add(e); }));
+        async Task<EntityId> WalkOverDrop(WorldPosition at)
         {
-            drop = await Spawn.Item(EventsGround, 3, ahead, options: new SpawnOptions
+            try
             {
-                Tag = "client-pass",
-                Flags = SpawnFlags.Transient,
-                Components = [SpawnComponent.Of("PickupItemZone", new byte[8]), SpawnComponent.Of("DynamicIsPlayerInRange", new byte[16])],
-            });
-            drops.Add(drop);
+                var d = await Spawn.Item(EventsGround, 3, at, options: new SpawnOptions
+                {
+                    Tag = "client-pass",
+                    Flags = SpawnFlags.Transient,
+                    Components = [SpawnComponent.Of("PickupItemZone", new byte[8]), SpawnComponent.Of("DynamicIsPlayerInRange", new byte[16])],
+                });
+                drops.Add(d);
+                return d;
+            }
+            catch (Exception e) when (e is KilnUnavailableException or SpawnException)
+            {
+                c.Expect(false, "a walk-over drop could be spawned in front of you", e.Message);
+                return default;
+            }
         }
-        catch (Exception e) when (e is KilnUnavailableException or SpawnException)
+        int Inventory() => Items.Read(p)?.Count(item) ?? 0;
+        int GrantedBy(EntityId d) => grants.Where(g => g.Source == d && g.ItemId == item.Value).Sum(g => g.Count);
+        bool Interacted(EntityId d) => taken.Any(t => t.Host == d);
+
+        var control = await WalkOverDrop(Ahead(c, 4, right: -2) ?? World.Position(p)!.Value);
+        var grant = 0;
+        if (!control.IsNone)
         {
-            c.Expect(false, "a walk-over drop could be spawned in front of you", e.Message);
+            var start = Inventory();
+            c.Instruct("Step 2 of 6, first part: an item lies about four metres ahead of you, a little to the left. Walk over it " +
+                       "WITHOUT pressing the interact key. Kiln does not hold this one: it is the control, and it should go into your " +
+                       "inventory the usual way, by walking.");
+            await c.Until(() => GrantedBy(control) > 0 || Interacted(control), wait, "the control item picked up by walking over it");
+            await c.Ticks(30);
+            grant = GrantedBy(control);
+            var contact = c.Expect(grant > 0 && !Interacted(control) && !Spawn.Exists(control) && Inventory() - start == grant,
+                "walking over the control item picked it up (no interact key): the game gave it by walking",
+                Interacted(control) ? "it was taken with the interact key, which is not a walk-over pickup"
+                : grant == 0 ? "no item came by walking over it within the time: no walk-over contact happened (or this drop is not a " +
+                               "walk-over pickup on this build); the refusal below cannot be judged"
+                : $"the game's grant {grant}, inventory {start} -> {Inventory()}, item still there {Spawn.Exists(control)}");
+            if (!contact) control = default;
         }
-        var have = Items.Read(p)?.Count(new ItemId(EventsGround)) ?? 0;
+        EntityId drop = default;
+        if (!control.IsNone) drop = await WalkOverDrop(Ahead(c, 4, right: 2) ?? World.Position(p)!.Value);
+        var have = Inventory();
         if (!drop.IsNone)
         {
-            c.Instruct("Step 2 of 6: an item lies about four metres in front of you. Walk over it, WITHOUT pressing the interact " +
-                       "key, and stand on it for a few seconds. Kiln refuses the pickup: it should stay on the ground, and nothing " +
-                       "should flash into your inventory or vanish and come back.");
-            await c.Until(() => EndOf(picking, e => e.Id) is not null, wait, "a walk-over pickup decision for the item");
-            var pick = EndOf(picking, e => e.Id);
-            c.Expect(pick is { Status: DecisionTerminal.Prevented } && Spawn.Exists(drop) && (Items.Read(p)?.Count(new ItemId(EventsGround)) ?? 0) == have,
-                "the walk-over pickup was asked for and refused; the item is still on the server's ground and not in your inventory",
+            // only this drop is held (its own filter), and only its events count
+            subs.Add(Events.On<ItemPickingUpEvent>(e =>
+            {
+                if (e.GroundEntity != drop) return;
+                picking.Add(e);
+                if (!allow) e.Cancel();
+            }, EventFilter.ForEntity(drop)));
+            c.Instruct("Step 2 of 6, second part: another item of the same kind lies about four metres ahead of you, a little to the " +
+                       "right. Walk over it the same way, WITHOUT pressing the interact key, and stand on it for a few seconds. Kiln " +
+                       "refuses this pickup: it should stay on the ground, and nothing should flash into your inventory or vanish and " +
+                       "come back.");
+            await c.Until(() => picking.Count > 0 && picking.All(e => outcomes.Any(o => o.Id == e.Id)), wait, "a walk-over pickup decision for that item");
+            await c.Ticks(60);
+            var mine = picking.All(e => e.GroundEntity == drop && e.Receiver == p && e.Item == item && e.Amount == 3);
+            var ends = picking.Select(e => outcomes.FirstOrDefault(o => o.Id == e.Id)).ToList();
+            c.Expect(picking.Count > 0 && mine && ends.All(o => o is { Status: DecisionTerminal.Prevented } && o.Subject == drop && o.Actor == p) &&
+                     Spawn.Exists(drop) && Inventory() == have && GrantedBy(drop) == 0 && !Interacted(drop),
+                "the walk-over pickup of that item was asked for and refused; it is still on the server's ground and nothing of it reached you",
                 picking.Count == 0
-                    ? "no walk-over pickup was asked for: the game did not pick the item up by walking (the drop may not be a walk-over one on this build)"
-                    : $"{picking.Count} event(s), outcome {pick?.Status}: {pick?.Reason}; item there {Spawn.Exists(drop)}, inventory {have} -> {Items.Read(p)?.Count(new ItemId(EventsGround))}");
+                    ? "no walk-over pickup of that item was asked for, although walking over the control gave one"
+                    : $"{picking.Count} event(s) for drop {drop} (all for it and you: {mine}), outcomes {string.Join(", ", ends.Select(o => o?.Status.ToString() ?? "none"))}; " +
+                      $"item there {Spawn.Exists(drop)}, inventory {have} -> {Inventory()}, game grant {GrantedBy(drop)}, interact {Interacted(drop)}");
         }
 
         // 3. an equip, refused: the ring stays in the bag
@@ -130,7 +174,8 @@ public sealed partial class ClientPassMod
                     : $"{equipping.Count} event(s) ({equipping[^1].Change}), outcome {eq?.Status}: {eq?.Reason}; ring worn 0x{RingWorn():x8}");
         }
         c.Instruct("Look at your screen and inventory for a few seconds: health bar above 0, no death screen; the item still on the " +
-                   "ground; the ring not worn. If a second viewer is joined, ask them too. Note anything that looked wrong for a moment.");
+                   "ground; the ring not worn. If a second player is joined (best a vanilla one, without Kiln), ask them too: they " +
+                   "should see the item on the ground and you alive. Note anything that looked wrong for a moment.");
         await c.Ticks(300);
 
         // 4-6. the allowed controls
@@ -139,12 +184,19 @@ public sealed partial class ClientPassMod
         {
             var re = Decisions.ReevaluatePickup(drop, p);
             c.Expect(re.Ok, "the refused pickup is asked again", re.Reason);
-            c.Instruct("Step 4 of 6: now the pickup is allowed. Walk over the item again (step off and back on if you are standing on it). " +
-                       "It should go into your inventory once.");
+            c.Instruct("Step 4 of 6: now the pickup is allowed. Walk over the same item again (step off and back on if you are " +
+                       "standing on it). It should go into your inventory once, as much as the control gave you.");
             var before = picking.Count;
-            await c.Until(() => picking.Count > before && EndOf(picking, e => e.Id) is not null, wait, "the allowed pickup's outcome");
-            c.Expect(EndOf(picking, e => e.Id) is { Status: DecisionTerminal.Allowed } && !Spawn.Exists(drop) && (Items.Read(p)?.Count(new ItemId(EventsGround)) ?? 0) > have,
-                "the allowed pickup put the item into your inventory and off the ground", $"inventory {have} -> {Items.Read(p)?.Count(new ItemId(EventsGround))}");
+            await c.Until(() => GrantedBy(drop) > 0 && picking.Skip(before).Any(e => outcomes.Any(o => o.Id == e.Id && o.Status == DecisionTerminal.Allowed)),
+                wait, "the allowed pickup of that item and its grant");
+            await c.Ticks(60);  // a second grant would show by now
+            var allowed = picking.Skip(before).Select(e => outcomes.FirstOrDefault(o => o.Id == e.Id)).Where(o => o is not null).ToList();
+            var got = GrantedBy(drop);
+            c.Expect(allowed.Any(o => o!.Status == DecisionTerminal.Allowed) && got == grant && Inventory() - have == grant && !Spawn.Exists(drop) &&
+                     grants.Count(g => g.Source == drop) == 1 && !Interacted(drop),
+                $"the allowed pickup gave exactly what the control gave ({grant}), once, and took the item off the ground",
+                $"outcomes {string.Join(", ", allowed.Select(o => o!.Status))}; game grant {got} in {grants.Count(g => g.Source == drop)} event(s), " +
+                $"inventory {have} -> {Inventory()}, item there {Spawn.Exists(drop)}, interact {Interacted(drop)}");
         }
         if (equipOn)
         {
