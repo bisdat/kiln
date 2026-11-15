@@ -453,21 +453,23 @@ loader ran later). That case is as before: verify in Steam, then move the files 
 Never run on Windows or against a real game folder; the moves are tested on Linux with an interruption at every step
 (`cargo test -p kiln-manage --features full restore_data`), the dialog with `launcher/tests/restore-data.spec.ts`.
 
-Kiln no longer changes the game's five building functions merely by starting `kiln.gameplay`: a selected managed mod which references `Kiln.Gameplay` (or ships a helper with that reference) requests them during the host's pre-world preflight,
-including when it only uses crafting. Native plugins request on first use and should request at startup if they
-will later add build/break protection. A first runtime request uses checked safe-Pre installation; build/break zones
-are refused until installation, rather than accepted without protection. This lets ShroudForge inspect the unmodified `PlaceProp` entry
-when the profile contains no such mod and no native plugin requests the group. Once those hooks are installed (a
-typed link writes the same registry entry jump as a raw one), ShroudForge's entity spawning still cannot find
-its prop-spawn helper through that entry unless it can read the game's original code: the ShroudForge Kiln ships
-(d8a394bc) reads through that detour, but it refuses the original file as a whole when any code inside a function
-differs, and Kiln's rules service patches a few function interiors at every start. A ShroudForge-side change is
-proposed (accept interior jumps for the whole-file comparison only). On a lab server it refused the file before any
-code comparison: `ShroudForge original call graph: executable file refused: image base/size; live-only resolution`.
-The game's executables are built for address-space randomisation (DYNAMICBASE, high-entropy), so the loaded image is
-never at its preferred base 0x140000000 and its in-memory header names the relocated base; Windows relocates it too.
-The reader therefore also has to accept a relocated image. A mid-install failure can also leave
-pass-through jumps in some entries; see the gameplay service's refusal status and installed-target mask.
+Kiln no longer changes the game's five building functions merely by starting `kiln.gameplay`: a selected managed mod
+which references `Kiln.Gameplay` (or ships a helper with that reference) requests them during the host's pre-world
+preflight, including when it only uses crafting. Native plugins request on first use and should request at startup if
+they will later add build/break protection. A first runtime request uses checked safe-Pre installation; build/break
+zones are refused until installation, rather than accepted without protection. This lets ShroudForge inspect the
+unmodified `PlaceProp` entry when the profile contains no such mod and no native plugin requests the group. Once those
+hooks are installed (a typed link writes the same registry entry jump as a raw one), ShroudForge's entity spawning
+still cannot find its prop-spawn helper through that entry unless it can read the game's original code. The
+ShroudForge Kiln ships (frostdev-ops/shroudforge#2, merge 4a4e81eb) trusts the game's file as this process's image
+when the only differences are function-entry detours (whose targets may be any executable memory), jumps inside
+functions in the exact forms safetyhook and Kiln write, at original instruction boundaries and bounded, ShroudForge's
+own recorded main-menu call sites, and an image moved by address randomisation once its relocations, checked against
+the loaded image, are applied. A function is still read through the file only when its own difference is an entry
+detour. kiln.log has one line either way: `executable file accepted (load delta ...) beside N entry detour(s), M
+interior jump(s) and K own patch(es)` or `executable file refused: <reason> (RVA ...); live-only resolution`. Not seen
+in a game yet. A mid-install failure can also leave pass-through jumps in some entries; see the gameplay service's
+refusal status and installed-target mask.
 
 ### Shroudlink client addon
 
