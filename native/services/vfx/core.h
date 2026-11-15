@@ -118,7 +118,7 @@ void guard_refused(const uint8_t guid[16], const char* where);
 // The VFX builder (boot.cpp) plugs in here. `update` runs at the top of every FxController update. `refuses` says a registered VFX must not
 // play after all: its GUID then counts as unknown, in the queue and in the guard. `one_shot_ns` is how long a built one-shot runs, which the
 // builder knows exactly; 0 for anything else, which keeps one_shot_ns(VfxLengths)'s rule. Any of them may be null.
-void core_set_build_hooks(void (*update)(), bool (*refuses)(const uint8_t guid[16]), int64_t (*one_shot_ns)(const uint8_t guid[16]));
+void core_set_build_hooks(void (*update)(void*), bool (*refuses)(const uint8_t guid[16]), int64_t (*one_shot_ns)(const uint8_t guid[16]));
 bool core_build_refuses(const uint8_t guid[16]);
 
 // ---- what the resource budget reads of the VFX system (package 17a S2; ledger.h, docs/re/vfx.md 4.3) ----

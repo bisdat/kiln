@@ -10,6 +10,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#ifdef KILN_VFX_LEDGER_TEST
+#include <functional>
+#endif
 #include <string>
 #include <string_view>
 #include <utility>
@@ -83,6 +86,9 @@ struct Request {
 };
 
 // ---- the process (vfx.cpp, boot.cpp) ----
+#ifdef KILN_VFX_LEDGER_TEST
+void set_writer_for_tests(std::function<bool(const std::filesystem::path&, std::string_view)> writer);
+#endif
 void reset();  // a new process (the host test)
 void set_pending_root(const std::filesystem::path& root);  // <data>/vfx/pending
 // The capability rows: vfx.budget (the count limit can be read on this build) and blocks.vfx_registration (also Kiln's
@@ -92,7 +98,7 @@ bool budget_available();
 bool registration_available();
 void boot(Boot b);         // once per start, after the build served (also with nothing built)
 void forget();             // a prepared build taken back: nothing is built
-void observe(const Seen& s);  // the update thread; ignored unless init_state is 2
+void observe(const Seen& s);  // the update thread; invalidates the snapshot unless init_state is 2
 bool observed();
 uint32_t release(const std::string& mod);  // the mod is no longer loaded: how many of its built VFX are kept for it now
 void activate(const std::string& mod);     // a block of the mod compiled in this lifetime of it

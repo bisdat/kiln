@@ -14,6 +14,9 @@ void real_game_trace(double seconds);
 // A simulated game: its own registered set (sim_known), FX pool, an entity that exists and one that goes away. For tests and
 // labs (kiln/config/vfx.json "sim"), so the whole path from Kiln.Vfx to the game's door runs without a client.
 Game* sim_game();
+// Host-test controls for the simulated resource table (reset with capacity kSimKnown).
+void sim_resource_table(uint64_t capacity, bool shrink_between_reads = false);
+
 void sim_update();  // one simulated FxController update
 uint64_t sim_params_applied();
 void sim_last_param(uint32_t* hash, uint32_t* type, float* first_float);

@@ -20,6 +20,7 @@
 #include <cstring>
 
 #include "game.h"
+#include "resource_read.h"
 #include "kiln_hook.hpp"
 
 namespace kvx {
@@ -31,6 +32,7 @@ const KilnApi* g_api = nullptr;
 struct Layout {
     int64_t map_count = -1, map_cap = -1, map_bits = -1, map_keys = -1, map_vals = -1, sys_table = -1, slot_resource = -1, scene_sys = -1;
     ResLayout res;
+    int64_t table_capacity = -1;
     int64_t render_holder = -1, holder_scene = -1, fxc_render = -1, fxc_world = -1, fxc_pool = -1;
     int64_t fx_guid = -1, fx_vfx_handle = -1, fx_has_end = -1, fx_end_time = -1, fx_has_finish = -1, fx_finish_time = -1;
     int64_t reg_map = -1, reg_limit = -1, init_state = -1;  // the resource budget's reads (sigdb client.d/dev29-17a-vfx-cap.json)
@@ -112,40 +114,42 @@ bool seh_valid(const MapView* v, bool* out) {
         return false;
     }
 }
+bool read_table(uintptr_t sys, ResourceTable* out);
 // VfxResolve's walk from a map slot to the VfxResource: values[slot] -> table[value * 0xc0] -> +slot.resource.
 bool seh_lengths(uintptr_t sys, const MapView* v, const uint8_t* guid, VfxLengths* out) {
     __try {
-        const int64_t slot = map_slot(*v, guid);
-        if (slot < 0 || !v->values) return false;
-        const uintptr_t table = *reinterpret_cast<const uintptr_t*>(sys + L.sys_table);
-        const uint8_t* res = *reinterpret_cast<const uint8_t* const*>(table + v->values[slot] * 0xc0ull + L.slot_resource);
-        if (!res) return false;
+        uintptr_t ptr = 0;
+        if (L.slot_resource < 0 || L.slot_resource > 0xc0 - sizeof(uintptr_t) ||
+            !resource_pointer(*v, guid, 216, 0xc0, static_cast<uint32_t>(L.slot_resource),
+                [sys](ResourceTable* t){return read_table(sys, t);}, &seh_read, &ptr)) return false;
+        const uint8_t* res = reinterpret_cast<const uint8_t*>(ptr);
         read_lengths(res, L.res, out);
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
 }
+bool read_table(uintptr_t sys, ResourceTable* out) {
+    return L.sys_table >= 0 && L.table_capacity >= 0 &&
+        seh_read(sys + L.sys_table, &out->records, sizeof out->records) &&
+        seh_read(sys + L.table_capacity, &out->capacity, sizeof out->capacity);
+}
 bool seh_resource(uintptr_t sys, const MapView* v, const uint8_t* guid, void* out, size_t n) {
     __try {
-        const int64_t slot = map_slot(*v, guid);
-        if (slot < 0 || !v->values) return false;
-        const uintptr_t table = *reinterpret_cast<const uintptr_t*>(sys + L.sys_table);
-        const uint8_t* res = *reinterpret_cast<const uint8_t* const*>(table + v->values[slot] * 0xc0ull + L.slot_resource);
-        if (!res) return false;
-        std::memcpy(out, res, n);
-        return true;
+        if (L.slot_resource < 0 || L.slot_resource > 0xc0 - sizeof(uintptr_t)) return false;
+        return resource_copy(*v, guid, out, n, 0xc0, static_cast<uint32_t>(L.slot_resource),
+            [sys](ResourceTable* t) { return read_table(sys, t); }, &seh_read);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
 }
 bool seh_params(uintptr_t sys, const MapView* v, const uint8_t* guid, VfxParamLayout* out) {
     __try {
-        const int64_t slot = map_slot(*v, guid);
-        if (slot < 0 || !v->values) return false;
-        const uintptr_t table = *reinterpret_cast<const uintptr_t*>(sys + L.sys_table);
-        const uint8_t* res = *reinterpret_cast<const uint8_t* const*>(table + v->values[slot] * 0xc0ull + L.slot_resource);
-        if (!res) return false;
+        uintptr_t ptr = 0;
+        if (L.slot_resource < 0 || L.slot_resource > 0xc0 - sizeof(uintptr_t) ||
+            !resource_pointer(*v, guid, 216, 0xc0, static_cast<uint32_t>(L.slot_resource),
+                [sys](ResourceTable* t){return read_table(sys, t);}, &seh_read, &ptr)) return false;
+        const uint8_t* res = reinterpret_cast<const uint8_t*>(ptr);
         read_params(res, L.res, out);
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -383,14 +387,14 @@ public:
     MapView map(void* fxc) override {
         MapView v;
         uintptr_t sys = fxc ? sys_of_scene(scene_of(reinterpret_cast<uintptr_t>(fxc))) : 0;
-        if (!sys) sys = g_sys.load(std::memory_order_relaxed);
+        if (!sys && !fxc) sys = g_sys.load(std::memory_order_relaxed);
         if (sys) read_view(sys, &v);
         return v;
     }
 
     int is_registered(void* fxc, const uint8_t guid[16]) override {
         uintptr_t sys = fxc ? sys_of_scene(scene_of(reinterpret_cast<uintptr_t>(fxc))) : 0;
-        if (!sys) sys = g_sys.load(std::memory_order_relaxed);
+        if (!sys && !fxc) sys = g_sys.load(std::memory_order_relaxed);
         if (!sys) return -1;
         const int r = guard_lookup(sys, guid);
         return r == -2 ? -1 : r;
@@ -410,7 +414,7 @@ public:
 
     bool read_resource(void* fxc, const uint8_t guid[16], void* out, size_t n) override {
         uintptr_t sys = fxc ? sys_of_scene(scene_of(reinterpret_cast<uintptr_t>(fxc))) : 0;
-        if (!sys) sys = g_sys.load(std::memory_order_relaxed);
+        if (!sys && !fxc) sys = g_sys.load(std::memory_order_relaxed);
         MapView v;
         return sys && L.sys_table >= 0 && read_view(sys, &v) && seh_resource(sys, &v, guid, out, n);
     }
@@ -497,13 +501,15 @@ public:
     bool registry(void* fxc, Registry* out) override {
         if (g_reg_missing || !g_guard_on.load(std::memory_order_relaxed)) return false;
         uintptr_t sys = fxc ? sys_of_scene(scene_of(reinterpret_cast<uintptr_t>(fxc))) : 0;
-        if (!sys) sys = g_sys.load(std::memory_order_relaxed);
+
         MapView v;
         uint32_t limit = 0;
         uint8_t state = 0;
         if (!sys || !read_view(sys, &v) || !seh_read(sys + L.reg_map + L.reg_limit, &limit, sizeof limit) ||
             !seh_read(sys + L.init_state, &state, sizeof state))
             return false;
+        if (!v.capacity || (v.capacity & (v.capacity - 1)) || v.capacity > (1u << 24) ||
+            !limit || limit > v.capacity || v.count > v.capacity) return false;
         out->count = v.count;
         out->slots = v.capacity;
         out->limit = limit;
@@ -514,8 +520,8 @@ public:
     const char* registry_missing() const override { return g_reg_missing; }
 
     const char* bytes_missing() const override {
-        if (L.sys_table < 0 || L.slot_resource < 0 || L.map_vals < 0)
-            return "the constants vfx/sys.vfx_table, vfx/vfx_slot.resource and vfx/map.vals (feature vfx.play) did not resolve on this game build";
+        if (L.sys_table < 0 || L.slot_resource < 0 || L.map_vals < 0 || L.table_capacity < 0)
+            return "the constants vfx/sys.vfx_table, vfx/vfx_slot.resource vfx/map.vals and caps/vfx.table_capacity_offset did not resolve on this game build";
         return nullptr;
     }
 
@@ -554,6 +560,8 @@ Game* real_game(const KilnApi* api, KilnOwner owner) {
         return nullptr;
     }
     F.resolve = reinterpret_cast<ResolveFn>(a_resolve);
+    if (!cst("caps/vfx.table_capacity_offset", &L.table_capacity) || L.table_capacity <= 0 || L.table_capacity > 0x100000)
+        L.table_capacity = -1;
     // the resource budget's reads (package 17a S2): the count limit the game enforces is the u32 right before the map's count
     // (find-slot compares [map+0x54] with [map+0x50]), and VfxInitResources' state byte. A layout that says otherwise is not read.
     int64_t reg_map = -1, reg_limit = -1, init_state = -1;

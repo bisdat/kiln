@@ -1,109 +1,83 @@
 // SPDX-License-Identifier: MIT
-// 17a-vfx-cap S2: the guided check of the VFX resource budget (Vfx.ResourceBudget) and of VFX defined with an answer
-// (Blocks.Define(name, VfxBlock, options), Blocks.GetVfxRegistration). Both ship on in 0.2.0-dev.29 with no run in a real game
-// client: the host tests run kiln.vfx's ledger and a simulated game, nothing has read the real game's VFX table. A new VFX needs
-// "clients": "mod" and this mod says "kiln", so the definitions are its fixture's: vfx-test (mods/tests/vfx-test/Budget.cs) defines
-// three VFX in its OnLoad with AllowNextStart and writes the answers to its data folder. The check runs over two starts: at the
-// first the three are accepted for the next start (the game lists its VFX once, before mods load); at the next they are registered,
-// the budget counts them, and the check plays them in front of the player, who confirms they show.
+// A non-passing preparation and a separate restart/registration/visual proof. No game-client run is claimed.
 using System.Text.Json.Nodes;
 using Kiln;
 using Kiln.Testing;
 using static Kiln.Testing.ClientCheckTags;
-
 namespace ClientPass;
-
 public sealed partial class ClientPassMod
 {
     private const int VfxCapOrder = 2000 + (28320 - 28000) * 10;
     private const string VfxTest = "vfx-test";
-
-    [ClientCheck("17-vfx-budget", "The VFX budget, and VFX defined with an answer: registered at the next start and played",
-        Area = "Limits", Since = Dev29, Tags = [Visual], Needs = ClientCheckNeeds.Hosted, Order = VfxCapOrder + 2)]
-    public async Task VfxBudget(CheckContext c)
+    private static JsonObject? VfxEvidence(string file)
     {
-        if (!await Need(c, VfxTest) || !await NeedPlayer(c)) return;
-        CapacityQueryResult before;
-        try
-        {
-            before = Vfx.ResourceBudget;
-        }
-        catch (KilnUnavailableException e)
-        {
-            c.Expect(false, "vfx.budget is available in a game client", e.Message);
-            await c.Verdict();
-            return;
-        }
-        var b = before.Budget;
-        c.Log.Info($"client-pass: 17-vfx-budget budget {b}");
-        c.Expect(true, "the budget as read", before.Ok
-            ? $"capacity {b.Capacity}, the game's {b.GameUsed}, Kiln's {b.KilnUsed}, reserved {b.Reserved}, left {b.Available}"
-            : before.Reason);
-        c.Expect(before.Ok, "the budget is ready in a world (kiln.vfx read the game's VFX table)", before.Reason);
-        c.Expect(before.Ok && b.GameUsed > 0 && b.Capacity > b.GameUsed, "the game's own VFX and the table's capacity are counted",
-            $"capacity {b.Capacity}, the game's {b.GameUsed}");
+        try { return JsonNode.Parse(File.ReadAllText(file)) as JsonObject; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException) { return null; }
+    }
+    private static string VfxEvidenceFile(CheckContext c) => Path.Combine(c.Mod.DataDirectory,"17-vfx-budget-before.json");
+    private static JsonObject? VfxFixture(CheckContext c) => VfxEvidence(Path.Combine(c.Mod.DataDirectory,"..",VfxTest,"budget.json"));
 
-        // the fixture's answers at its OnLoad of this start
-        var file = Path.Combine(c.Mod.DataDirectory, "..", VfxTest, "budget.json");
-        JsonObject? doc = null;
-        try
-        {
-            doc = JsonNode.Parse(File.ReadAllText(file)) as JsonObject;
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
-        {
-        }
-        var effects = (doc?["effects"] as JsonArray)?.OfType<JsonObject>().ToList() ?? [];
-        if (!c.Expect(effects.Count == 3, "vfx-test defined its three VFX with an answer at this start",
-                (string?)doc?["off"] ?? (doc == null ? $"no {file}" : $"{effects.Count} answers")))
-        {
-            await c.Verdict();
-            return;
-        }
-        var never = doc!["requireRegistered"] as JsonObject;
-        c.Expect((string?)never?["code"] is "RegistryClosed" or "CapacityExceeded" && never?["ok"]?.GetValue<bool>() == false,
-            "a new VFX under RequireRegistered is refused and not stored", $"{never?["state"]} ({never?["code"]}): {never?["reason"]}");
+    [ClientCheck("17-vfx-budget.before", "VFX restart proof (1 of 2): record three accepted definitions, then restart",
+        Area = "Limits", Since = Dev29, Tags = [Visual], Needs = ClientCheckNeeds.Hosted, Order = VfxCapOrder + 2)]
+    public async Task VfxBudgetBefore(CheckContext c)
+    {
+        if (!await Need(c,VfxTest) || !await NeedPlayer(c)) return;
+        var file = VfxEvidenceFile(c);
+        File.Delete(file); // an unsuccessful new preparation must not leave an earlier proof usable
+        var b = Vfx.ResourceBudget;
+        c.Expect(b.Ok,"the first start's budget is ready",b.Reason);
+        var fixture = VfxFixture(c);
+        var valid = VfxBudgetProof.Before(fixture,VfxBudgetProof.ProcessKey,b.Budget.KilnUsed,out var evidence);
+        if (valid)
+            foreach(var entry in fixture!["effects"]!.AsArray().OfType<JsonObject>())
+            {
+                var name = (string)entry["name"]!;
+                var r = Blocks.GetVfxRegistration(Guid.Parse((string)entry["registrationId"]!));
+                valid &= c.Expect(r.Ok && r.State == DefinitionRegistrationState.AcceptedNextStart && r.SlotsConsumed == 0 &&
+                    r.Definition == VfxId.Named(VfxTest,name).Guid,
+                    $"{name} is still accepted for the next start, with no live slot",$"{r.State}: {r.Reason}");
+            }
+        c.Expect(valid,"this process's fixture has exactly budget_red/green/blue accepted with zero slots, and budget_never_stored refused");
+        if (!b.Ok || !valid) { await c.Verdict(); return; }
+        var tmp = file + ".tmp";
+        File.WriteAllText(tmp,evidence!.ToJsonString()); File.Move(tmp,file,true);
+        c.Instruct("Preparation recorded. Quit to the desktop, restart with the same mods/profile, host this world, then run 17-vfx-budget.after. This preparation cannot pass the visual/restart proof.");
+        await c.Skip("Preparation recorded; restart the game and run 17-vfx-budget.after.");
+    }
 
-        // what each of the three is now
-        var receipts = new List<(string Name, DefinitionRegistrationResult R)>();
-        foreach (var e in effects)
-            receipts.Add(((string)e["name"]!, Blocks.GetVfxRegistration(Guid.Parse((string)e["registrationId"]!))));
-        var said = string.Join("; ", receipts.Select(x => $"{x.Name}: {x.R.State} ({x.R.Code}), {x.R.SlotsConsumed} slot(s)"));
-        c.Log.Info($"client-pass: 17-vfx-budget receipts {said}");
-        if (receipts.All(x => x.R.State == DefinitionRegistrationState.AcceptedNextStart))
+    [ClientCheck("17-vfx-budget.after", "VFX restart proof (2 of 2): exact registrations, three more slots and three visible bursts",
+        Area = "Limits", Since = Dev29, Tags = [Visual], Needs = ClientCheckNeeds.Hosted, Order = VfxCapOrder + 3)]
+    public async Task VfxBudgetAfter(CheckContext c)
+    {
+        if (!await Need(c,VfxTest) || !await NeedPlayer(c)) return;
+        var evidence = VfxEvidence(VfxEvidenceFile(c));
+        if (evidence == null) { await c.Skip("Run 17-vfx-budget.before in the first start before attempting the restart proof."); return; }
+        var current = VfxFixture(c);
+        var before = Vfx.ResourceBudget; var b = before.Budget;
+        c.Expect(before.Ok,"the second start's budget is ready",before.Reason);
+        var valid = VfxBudgetProof.After(evidence,current,VfxBudgetProof.ProcessKey,b.KilnUsed);
+        c.Expect(valid,"a different game process has the same exact fixture receipts and exactly three more Kiln slots than the first start",
+            $"KilnUsed now {b.KilnUsed}; first start {evidence["kilnUsed"]}");
+        if (!before.Ok || !valid) { await c.Verdict(); return; }
+        var effects = current!["effects"]!.AsArray().OfType<JsonObject>().ToDictionary(e => (string)e["name"]!);
+        var registered = true;
+        foreach(var name in VfxBudgetProof.Names)
         {
-            c.Expect(receipts.All(x => x.R.Ok && x.R.SlotsConsumed == 0), "part 1: the three are accepted for the next start, no slot taken now", said);
-            c.Instruct("Part 1 of 2. The test mod vfx-test defined three new VFX, and they were accepted for the next start: the game " +
-                       "lists its VFX once, before mods load. Quit the game to the desktop, start it again with the same profile, " +
-                       "host this world, and run this check again: then the three are registered and played in front of you. " +
-                       "Pass now if every assertion above is ok.");
-            await c.Verdict();
-            return;
+            var id = Guid.Parse((string)effects[name]["registrationId"]!);
+            var r = Blocks.GetVfxRegistration(id);
+            registered &= c.Expect(r.Ok && r.State == DefinitionRegistrationState.Registered && r.SlotsConsumed == 1 &&
+                r.RegistrationId == id && r.Definition == VfxId.Named(VfxTest,name).Guid,
+                $"{name} is this exact definition, registered with one slot",$"{r.State} ({r.Code}): {r.Reason}");
         }
-        if (!c.Expect(receipts.All(x => x.R.Ok && x.R.State == DefinitionRegistrationState.Registered && x.R.SlotsConsumed == 1),
-                "part 2: the three are registered at this start, 1 slot each", said))
-        {
-            await c.Verdict();
-            return;
-        }
-        c.Expect(before.Ok && b.KilnUsed >= 3, "the budget counts them as Kiln's", $"Kiln's {b.KilnUsed}");
-
-        if (Ahead(c, 5, right: -2, up: 1) is not { } left || Ahead(c, 5, up: 1) is not { } middle || Ahead(c, 5, right: 2, up: 1) is not { } right)
-        {
-            c.Expect(false, "the player's place is known");
-            await c.Verdict();
-            return;
-        }
-        var at = new[] { left, middle, right };
-        c.Instruct("Part 2 of 2. Look 5 m ahead: every 3 seconds three bursts play side by side, left to right red, green and blue: " +
-                   "about 40 small sprites each that fly up and fade in about a second. They are VFX a mod defined from code at the " +
-                   "last start, registered with the game at this one. Pass when you see all three, each in its colour.");
-        await RepeatUntilVerdict(c, TimeSpan.FromSeconds(3), () =>
-        {
-            for (var i = 0; i < receipts.Count; i++) PlayVfx(c, VfxId.Named(VfxTest, receipts[i].Name), at[i]);
+        if (!registered) { await c.Verdict(); return; }
+        if (Ahead(c,5,right:-2,up:1) is not { } left || Ahead(c,5,up:1) is not { } middle || Ahead(c,5,right:2,up:1) is not { } right)
+        { c.Expect(false,"the player's place is known"); await c.Verdict(); return; }
+        var at = new[] {left,middle,right};
+        c.Instruct("Look 5 m ahead: three bursts repeat every 3 seconds, left to right red, green and blue, about 40 sprites each flying up and fading. Pass only when you see all three in their colours.");
+        await RepeatUntilVerdict(c,TimeSpan.FromSeconds(3),() => {
+            for(var i=0;i<VfxBudgetProof.Names.Length;++i) PlayVfx(c,VfxId.Named(VfxTest,VfxBudgetProof.Names[i]),at[i]);
         });
         var after = Vfx.ResourceBudget;
-        c.Expect(after.Ok && after.Budget with { Revision = 0 } == b with { Revision = 0 }, "playing them changed nothing in the budget",
-            after.Ok ? $"Kiln's {after.Budget.KilnUsed}, reserved {after.Budget.Reserved}" : after.Reason);
+        c.Expect(after.Ok && after.Budget with { Revision=0 } == b with { Revision=0 },"playing the three bursts did not change the budget",after.Reason);
     }
 }
