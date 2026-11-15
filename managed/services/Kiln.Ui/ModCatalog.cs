@@ -658,11 +658,11 @@ internal static class ModCatalog
 
     /// <summary>Gives each row its own <see cref="ModManagerLogic.KeyOf"/>: the mod manager's ImGui ids and its selection
     /// are made from it, and two rows with one ImGui id raise ImGui's "conflicting ID" popup and cannot be chosen apart.
-    /// Rows keyed by their path cover the DLLs of one name; what is left (a DLL chained twice, two native mods of one id,
-    /// an engine that reports a mod twice) gets "#2", "#3" after the key in the list's order, which every read repeats.
-    /// The first row keeps its plain key.</summary>
+    /// KeyOf includes folder and source, so distinguishable rows retain their keys when the list changes. Only repeated
+    /// reports of the same identity need "#2", "#3"; reserve real keys first so a generated suffix cannot displace one.</summary>
     internal static void UniqueKeys(List<CatalogMod> mods)
     {
+        var reserved = new HashSet<string>(mods.Select(ModManagerLogic.KeyOf), StringComparer.Ordinal);
         var seen = new HashSet<string>(StringComparer.Ordinal);  // ImGui hashes ids as they are spelled
         for (var i = 0; i < mods.Count; i++)
         {
@@ -672,7 +672,8 @@ internal static class ModCatalog
             for (var n = 2; ; n++)
             {
                 var next = m with { Key = $"{key}#{n}" };
-                if (!seen.Add(ModManagerLogic.KeyOf(next))) continue;
+                var nextKey = ModManagerLogic.KeyOf(next);
+                if (reserved.Contains(nextKey) || !seen.Add(nextKey)) continue;
                 mods[i] = next;
                 break;
             }

@@ -923,8 +923,48 @@ public sealed class ModCatalogTests : IDisposable
         Assert.Equal(4, rows.Count);
         Assert.Equal(4, rows.Select(r => r.Id).Distinct(StringComparer.Ordinal).Count());
         Assert.Equal(4, rows.Select(r => r.Key).Distinct(StringComparer.Ordinal).Count());
-        Assert.Equal(["native/creative", "emf/a"], rows.Where(r => r.Mod.State == ModRunState.Loaded).Select(r => r.Key));
+        Assert.Equal(["creative", "a"], rows.Where(r => r.Mod.State == ModRunState.Loaded).Select(r => r.Mod.Id));
+        Assert.Equal(@"C:\g\kiln\mods\creative", rows.Single(r => r.Mod.Engine == "native" && r.Mod.State == ModRunState.Loaded).Mod.Folder);
+        Assert.Equal("emf/a", rows.Single(r => r.Mod.Engine == "emf" && r.Mod.State == ModRunState.Loaded).Key);
         Assert.Equal(rows.Select(r => r.Key), ModManagerLogic.Rows(Read(), EngineFilter.All, "").Select(r => r.Key));  // the same at every read
+    }
+
+    [Fact]
+    public void Duplicate_row_keys_follow_the_folder_and_source_across_refreshes()
+    {
+        var a = new CatalogMod { Engine = "shroudforge", Id = "same", Name = "A", Folder = @"C:\mods\a", Source = "folder" };
+        var b = a with { Name = "B", Folder = @"C:\mods\b" };
+        List<CatalogMod> first = [a, b];
+        ModCatalog.UniqueKeys(first);
+        var selected = ModManagerLogic.KeyOf(first[1]);
+        List<CatalogMod> reversed = [b with { State = ModRunState.Disabled }, a];
+        ModCatalog.UniqueKeys(reversed);
+        Assert.Equal(selected, ModManagerLogic.KeyOf(reversed[0]));
+        List<CatalogMod> remaining = [b];
+        ModCatalog.UniqueKeys(remaining);
+        Assert.Equal(selected, ModManagerLogic.KeyOf(remaining[0]));
+        var chain = a with { Engine = "chain", Key = a.Folder, Source = "profile" };
+        Assert.NotEqual(ModManagerLogic.KeyOf(chain), ModManagerLogic.KeyOf(chain with { Source = "chain" }));
+    }
+
+    [Fact]
+    public void Generated_suffixes_do_not_take_a_real_rows_key()
+    {
+        var a = new CatalogMod { Engine = "emf", Id = "a", Name = "A" };
+        List<CatalogMod> rows = [a, a, a with { Id = "a#2" }];
+        ModCatalog.UniqueKeys(rows);
+        Assert.Equal(ModManagerLogic.KeyOf(a with { Id = "a#2" }), ModManagerLogic.KeyOf(rows[2]));
+        Assert.Equal(3, rows.Select(ModManagerLogic.KeyOf).Distinct().Count());
+    }
+
+    [Fact]
+    public void Path_keys_cannot_reset_imguis_hash_with_three_hash_characters()
+    {
+        var a = new CatalogMod { Engine = "chain", Id = "dinput8.dll", Name = "DLL", Key = @"C:\a###same\dinput8.dll" };
+        var b = a with { Key = @"C:\b###same\dinput8.dll" };
+        var rows = ModManagerLogic.Rows(new CatalogSnapshot { Mods = [a, b] }, EngineFilter.All, "");
+        Assert.All(rows, row => Assert.DoesNotContain("###", row.Id));
+        Assert.NotEqual(rows[0].Id, rows[1].Id);
     }
 
     // ---- engine mods whose manifest id is no Kiln id: the profile has the Library's id, the plugin reports the manifest's ----

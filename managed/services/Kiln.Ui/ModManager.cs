@@ -51,9 +51,18 @@ internal sealed record ModRow(CatalogMod Mod, string Id, string Sub, string Key)
 /// <summary>The screen's logic without drawing: what the columns list for a snapshot, a filter and a search (tests use it).</summary>
 internal static class ModManagerLogic
 {
-    /// <summary>A row's key: its ImGui id (<c>"##mod." + key</c>) and what the selection holds. Unique in a snapshot
-    /// (<see cref="ModCatalog.UniqueKeys"/>); the id, or the path where the id repeats (<see cref="CatalogMod.Key"/>).</summary>
-    public static string KeyOf(CatalogMod m) => m.Engine + "/" + (m.Key ?? m.Id);
+    /// <summary>A row's ImGui id and selection key. Folder and source identify the same row across refreshes even
+    /// when another row of the same id disappears. Encoding also keeps ImGui's ### hash-reset syntax out of paths.</summary>
+    public static string KeyOf(CatalogMod m)
+    {
+        var key = m.Key ?? m.Id;
+        if (!string.IsNullOrEmpty(m.Folder) || m.Source.Length > 0)
+            key = "@" + Convert.ToBase64String(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(
+                new[] { key, m.Folder ?? "", m.Source }));
+        else
+            key = key.Replace("%", "%25").Replace("@", "%40").Replace("#", "%23");
+        return m.Engine + "/" + key;
+    }
 
     /// <summary>The left column: All, Needs attention (only when something failed or is missing), then each engine, then
     /// the mods' entries in the game's menus (when there are any here) and Kiln's settings.</summary>
