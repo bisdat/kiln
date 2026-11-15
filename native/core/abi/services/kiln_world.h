@@ -859,10 +859,13 @@ typedef struct KilnWorldApi {
      * callback; the slice is finished on paper), and inside a call that runs then every helper refuses (iter_begin and
      * iter_next, current_entity, command_buffer and the queue calls, read_other, program_events, program_emit); the
      * running callbacks are waited for (2 s at most) and each registration goes back to PENDING for the next client world.
-     * Bindings stay: a bound callback runs again in the next client world that accepts the program. The core does not
-     * wait for a client world's jobs before that event (it does for the server world): when a callback is still running
-     * after the wait, a process latch is set: every client-table program is refused with the latch's reason (that late
-     * call can no longer change any state), no client-world program registers again until the game restarts, and
+     * Bindings stay: a bound callback runs again in the next client world that accepts the program. Since 0.2.0-dev.29
+     * the core runs the game's WaitWorldJobs on the client world before that event (capability world.stop_drain.client),
+     * and the game lets no slice outlive the step that ran it, so no call is inside then; the checks above, the wait and
+     * the latch are the safety net for a core without that row and for a drain that did not hold. A call inside at the
+     * stop although the engine drained is an error and latches; so does one still running after the wait. The latch:
+     * every client-table program is refused with the latch's reason (that late call can no longer change any state), no
+     * client-world program registers again until the game restarts, and
      * world.programs.client goes unavailable (reason faulted) saying why. The same latch follows a fault in the engine's
      * RegisterProgram (or in Kiln's reads of the client world's maps and table around it) or a table that does not add up
      * after it; what the engine registered before stays in its table (it is never undone) but no longer runs: every side,

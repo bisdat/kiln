@@ -61,6 +61,7 @@ bool seh_iter_next(void* ctx,void* iter,uint32_t size,bool* more,unsigned long*)
 bool seh_read_u64(uintptr_t address,uint64_t* value) { std::memcpy(value,reinterpret_cast<void*>(address),8);return true; }
 bool seh_queue_push(void*,void*,uint8_t,uint32_t,uint32_t,void**) { return false; }
 bool seh_copy(void* to,const void* from,size_t size) { std::memcpy(to,from,size);return true; }
+StopDrain world_stop_drain(uint32_t, uint32_t) { return StopDrain{false, "a bounded wait only (test)"}; }
 }
 using namespace kw;
 int main() {

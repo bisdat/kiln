@@ -280,12 +280,17 @@ presentation; a program that must change what others see belongs in the server w
   that still runs kiln.world's helpers refuse (iteration, the current entity, the command buffer, other-entity reads,
   events); the running callbacks are waited for, 2 s at most; each registration waits for the next client world, and
   the binding stays and runs again there. A slice is also checked against the world it belongs to: a job of an earlier
-  client world that starts late is refused (`kiln.log`: `a slice of another world … was refused`). The core does not yet
-  wait for a client world's jobs before it destroys the world (it does for the server world): when a callback is still
-  running after the 2 s, kiln.log says `client world stops: N call(s) of Kiln programs still running after … us; their
-  bindings are kept`, every client and prediction program is refused with that reason, no client-world program
-  registers again until the game restarts and `world.programs.client` goes unavailable (faulted) with the reason. That
-  late callback may still read the world the game is destroying. The same latch follows a fault in the engine's
+  client world that starts late is refused (`kiln.log`: `a slice of another world … was refused`). Since 0.2.0-dev.29 the
+  core runs the game's WaitWorldJobs on the client world before its stop (capability `world.stop_drain.client`; kiln.log
+  `tick: client world 0x…: its jobs are drained by the engine (WaitWorldJobs, T us) before STOPPING`), and the game lets no
+  slice outlive the step that ran it: no callback is inside at the stop, and the stop line says `(0 call(s) running at the
+  stop, 0 after … us; the engine drains the world's jobs first (world.stop_drain.client))`. The per-entity check, the
+  slice's world and the 2 s wait stay as a safety net for a core without that row and for a drain that did not hold:
+  a callback inside at the stop although the engine drained is an error (`… were inside although …`) and latches; so
+  does one still running after the 2 s (kiln.log `client world stops: N call(s) of Kiln programs still running after …
+  us; their bindings are kept`): every client and prediction program is refused with that reason, no client-world
+  program registers again until the game restarts and `world.programs.client` goes unavailable (faulted) with the
+  reason. Without the drain such a late callback may still read the world the game is destroying. The same latch follows a fault in the engine's
   RegisterProgram for a client world, or a table that does not add up after it: the programs registered before it in
   that world stay in the game's table but no longer run, and say so. `EcsProgramRefusedEvent` follows in each later
   client world, and `TryBind` throws `KilnUnavailableException` with the reason.
@@ -311,8 +316,9 @@ presentation; a program that must change what others see belongs in the server w
   entries there).
 - **Capability** `world.programs.client`: on in a game client whose build resolved kiln.world's program registration,
   the name maps and `world.lifecycle`, with the client world's tick; the text says "waiting for a world" in the menu and "a
-  client world runs" in game; `wrong-side` on a dedicated server; unavailable (faulted) for the rest of the process after
-  the latch above.
+  client world runs" in game, with the stop's guarantee ("at a world stop the engine drains the world's jobs first
+  (world.stop_drain.client)", or a bounded wait only); `wrong-side` on a dedicated server; unavailable (faulted) for the
+  rest of the process after the latch above.
 - **What every player pays.** With no client declaration in any mod: at the game's start kiln.world reads the
   `kiln.programs.json` of each enabled `client` and `both` mod that has one; each client world's RegisterAllPrograms
   runs kiln.world's existing hook, which registers nothing and logs its old line; each client Pre enters kiln.world's
@@ -321,7 +327,8 @@ presentation; a program that must change what others see belongs in the server w
   declaration was accepted at the start (or a native service registered one) every client world registers it, also
   after its mod unloaded (inert): the slot and that cost stay for the process.
 - Not yet run in a game client: guided checks `programs.client-baseline`, `14-client-world-programs`,
-  `programs.client-joined`, `14-q4`, `programs.client-emf`, `programs.client-visual`, `programs.client-rejoin`
+  `programs.client-joined`, `14-q4`, `programs.client-emf`, `programs.client-visual`, `programs.client-persistence`,
+  `programs.client-rejoin`, `programs.client-delayed-stop`, `programs.client-exit`
   (mods/tests/client-pass, with the fixture mods/tests/client-programs-fixture and the EMF probe mods/tests/emf-client-test).
 - Native code: `register_program_world`, `program_world_state`, `bind_program_world` and `unbind_program_world` at the
   end of the kiln.world table (offsets 496 to 520, after the foreign views at 448 to 488; the table is 528 bytes;

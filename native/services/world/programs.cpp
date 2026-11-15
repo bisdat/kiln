@@ -301,7 +301,11 @@ bool side_counts_match(Program* p, Side& s, uint32_t kind, ProgramCtx* ctx, uint
 
 // Whether a client-table call's world is gone: the client world began to stop, or the side left the registration the
 // call started in. Checked before every entity of a slice (the gate is passed once per slice) and by every helper a
-// callback can call: from then on nothing of that world is touched.
+// callback can call: from then on nothing of that world is touched. A safety net: with the core's drain
+// (world.stop_drain.client, since 0.2.0-dev.29) no slice of a client world runs when its STOPPING comes (StepPrograms
+// waits for the world's queue before it returns, the world is destroyed on the thread that steps it, and the core runs
+// WaitWorldJobs before STOPPING); it is for a core without that row (a bounded wait only) and for a drain that did not
+// hold.
 bool side_gone(const Side& s, uint64_t session) {
     return g_table_stopping.load(std::memory_order_seq_cst) || s.session.load(std::memory_order_seq_cst) != session;
 }
@@ -377,7 +381,8 @@ void dispatch_side(Program* p, uint32_t kind, ProgramCtx* ctx, const uint8_t* st
     }
     // The slice must belong to the world that registration was for: its job's storage against the session's (item 2 of
     // the closing review: a job of a stopped client world entering after the next one registered carries the old world's
-    // storage). The prediction storage's is learnt from its first slice of the session.
+    // storage). The prediction storage's is learnt from its first slice of the session. A safety net, as side_gone:
+    // with the core's drain no job of a stopped world can enter; this is for a core without it and a drain that failed.
     const auto at = reinterpret_cast<uintptr_t>(storage);
     uintptr_t want = g_table_storage[kind].load(std::memory_order_seq_cst);
     if (!want && kind == KILN_WORLD_PREDICTION && g_table_storage[kind].compare_exchange_strong(want, at)) want = at;
@@ -1572,6 +1577,8 @@ void report_latch() {
 
 constexpr const char* kRowMenu = "Kiln programs in the client world and the prediction storage: waiting for a world";
 constexpr const char* kRowWorld = "Kiln programs in the client world and the prediction storage: a client world runs";
+// The row's text with the core's guarantee at a client world's stop (world_stop_drain's words).
+std::string row_text(const char* base, const StopDrain& drain) { return std::string(base) + "; at a world stop " + drain.text; }
 
 }  // namespace
 
@@ -1824,16 +1831,23 @@ void programs_client_pre(const KilnTickInfo*) {
 // (call_gone); the running callbacks are waited for, at most g_table_stop_wait_ms; each registration goes back to PENDING
 // for the next client world (a FAULTED one stays so until it is bound again); bindings stay. When a callback is still
 // inside after the wait, the process latch is set and every side is refused with its reason, its session cleared (that
-// late call can no longer write its state); nothing registers again and the row says so. The core does not wait for a
-// client world's jobs before this event (it does for the server world): the per-entity check, the bounded wait and the
-// latch are the only guard until it does. The row says whether a world runs.
+// late call can no longer write its state); nothing registers again and the row says so. Since 0.2.0-dev.29 the core runs
+// the game's WaitWorldJobs on the client world before this event (world.stop_drain.client, world_stop_drain): then no
+// call can be inside here, and one that is (the drain did not hold) is an error that latches as a timeout does. Without
+// that row the per-entity check, the bounded wait and the latch are the only guard. The row says whether a world runs
+// and which guarantee the stop has.
 void programs_world_event(const KilnWorldEvent* e) {
     if (!e || e->kind != KILN_WORLD_CLIENT || !g_client_on.load()) return;
     if (e->event == KILN_WORLD_STARTED) {
-        if (!g_latched.load()) report_client_row(KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, kRowWorld);
+        if (!g_latched.load())
+            report_client_row(KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE,
+                              row_text(kRowWorld, world_stop_drain(KILN_WORLD_CLIENT, g_table_stop_wait_ms.load())).c_str());
         return;
     }
     if (e->event != KILN_WORLD_STOPPING) return;
+    // What the core guarantees about the client world's jobs at this STOPPING (06a, world.stop_drain.client): asked first,
+    // without kiln.world's locks (kiln.caps may call its subscribers on this thread).
+    const StopDrain drain = world_stop_drain(KILN_WORLD_CLIENT, g_table_stop_wait_ms.load());
     if (g_side_programs.load()) {
         g_table_stopping.store(true, std::memory_order_seq_cst);
         g_table_live.store(false);
@@ -1850,6 +1864,12 @@ void programs_world_event(const KilnWorldEvent* e) {
         };
         const auto t0 = std::chrono::steady_clock::now();
         const uint32_t first = running();
+        // With the engine's drain no call can be inside now: one that is means the drain did not hold. It is an error, and
+        // it latches as a timeout does (below), also when the call leaves within the wait. Without the drain the bounded
+        // wait is the only guard (as before 0.2.0-dev.29's core drain).
+        const bool drain_broken = first != 0 && drain.engine;
+        if (drain_broken)
+            KW_E("client world stops: %u call(s) of Kiln programs were inside although %s", first, drain.text.c_str());
         uint32_t left = first;
         while (left && std::chrono::steady_clock::now() < t0 + std::chrono::milliseconds(g_table_stop_wait_ms.load())) {
             std::this_thread::yield();
@@ -1884,7 +1904,9 @@ void programs_world_event(const KilnWorldEvent* e) {
                 KW_E("client world stops: %u call(s) of Kiln programs still running after %lld us; their bindings are kept", stuck,
                      static_cast<long long>(waited));
                 latch_client("a call of a Kiln program was still running " + std::to_string(waited) +
-                             " us after the client world began to stop (it may read the destroyed world)");
+                             " us after the client world began to stop (it may read the destroyed world; " + drain.text + ")");
+            } else if (drain_broken) {
+                latch_client("a call of a Kiln program was inside the client world at its stop although " + drain.text);
             }
             if (g_latched.load()) {
                 latch_all_sides();  // every side, the stuck ones too: refused with the latch's reason
@@ -1906,11 +1928,11 @@ void programs_world_event(const KilnWorldEvent* e) {
                     if (s.closing && s.calls_in.load(std::memory_order_seq_cst) == 0) forget_binding(s);
         }
         KW_I("client world stops: %u Kiln client-table registration(s) closed for the next client world (%u call(s) running at the "
-             "stop, %u after %lld us%s)", closed, first, stuck, static_cast<long long>(waited),
+             "stop, %u after %lld us; %s%s)", closed, first, stuck, static_cast<long long>(waited), drain.text.c_str(),
              g_latched.load() ? "; client-world programs are off until the game restarts" : "");
     }
     if (g_latched.load()) report_latch();
-    else report_client_row(KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, kRowMenu);
+    else report_client_row(KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, row_text(kRowMenu, drain).c_str());
 }
 
 }  // namespace kw

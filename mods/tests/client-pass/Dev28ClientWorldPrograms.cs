@@ -17,6 +17,11 @@
 //   programs.client-delayed-stop  a deliberately delayed callback (the fixture's "delay") when the client world stops:
 //                              the stop's latency, whether a call was still inside, and the latch it then sets (last:
 //                              it may switch client-world programs off until the game restarts)
+//   programs.client-exit       the last start's exit with the fixture's programs running (kiln.prev.log)
+// Since 0.2.0-dev.29's core drain (06a, world.stop_drain.client) the core runs the game's WaitWorldJobs on the client world
+// before its STOPPING: at every leave, rejoin and exit kiln.log has "tick: client world 0x…: its jobs are drained by the
+// engine (WaitWorldJobs, T us) before STOPPING", kiln.world's stop line finds no call inside, and the game's own log
+// (enshrouded.log) never says "[task] TaskQueue '…' is not idle during destroy!".
 // Not here, manual (the notes): a second, vanilla client watching the visual write; an exit with programs running.
 using System.Text.RegularExpressions;
 using Kiln;
@@ -51,6 +56,48 @@ public sealed partial class ClientPassMod
             .Where(m => m.Success)
             .Select(m => new Summary(uint.Parse(m.Groups[1].Value), m.Groups[2].Value == "joined", m.Groups[3].Value,
                 ulong.Parse(m.Groups[4].Value), m.Groups[5].Value))];
+
+    private const string DrainLine = "its jobs are drained by the engine (WaitWorldJobs";
+    private const string QueueNotIdle = "is not idle during destroy!";
+
+    // The game's own log (enshrouded.log in the game folder), or null when it cannot be read (said by the check).
+    private static string[]? GameOwnLog(CheckContext c)
+    {
+        var path = Path.Combine(Path.GetDirectoryName(KilnFolder()) ?? ".", "enshrouded.log");
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream);
+            return reader.ReadToEnd().Split('\n');
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            c.Expect(true, "the game's own log (enshrouded.log) could not be read: look at it by hand", ex.Message);
+            return null;
+        }
+    }
+
+    // The core's guarantee at a client world's stop: both client kinds' rows must read available on a game client.
+    private static bool DrainRows(CheckContext c, string check)
+    {
+        var rows = new[] { "world.stop_drain.client", "world.stop_drain.prediction" }.Select(Capabilities.Get).ToArray();
+        foreach (var d in rows) c.Log.Info($"client-pass: {check} {d.Name}: {d.State} ({d.Reason}): {d.ReasonText}");
+        return c.Expect(rows.All(d => d.IsAvailable), "the core drains the client world's jobs before its stop (world.stop_drain.client, .prediction)",
+            string.Join("; ", rows.Select(d => $"{d.Name} {d.State}: {d.ReasonText}")));
+    }
+
+    // Every client world stop of a log: the core's drain line before kiln.world's stop line, which found no call inside.
+    private static void StopsDrained(CheckContext c, string[] log, string what)
+    {
+        var stops = log.Where(l => l.Contains("client world stops:", StringComparison.Ordinal) && l.Contains("registration(s) closed", StringComparison.Ordinal)).ToList();
+        var drained = log.Count(l => l.Contains("tick: client world 0x", StringComparison.Ordinal) && l.Contains(DrainLine, StringComparison.Ordinal));
+        c.Expect(stops.Count > 0 && drained >= stops.Count, $"{what}: the core's line \"tick: client world …: {DrainLine}, T us) before STOPPING\" at each stop",
+            $"{drained} drain line(s), {stops.Count} stop(s)");
+        c.Expect(stops.All(l => l.Contains("(0 call(s) running at the stop, 0 after", StringComparison.Ordinal) &&
+                                l.Contains("the engine drains the world's jobs first", StringComparison.Ordinal)),
+            $"{what}: kiln.world's stop line found no call inside and names the engine's drain", stops.LastOrDefault() ?? "no stop");
+        c.Expect(!log.Any(l => l.Contains("were inside although", StringComparison.Ordinal)), $"{what}: no call inside although the engine drained", "");
+    }
 
     private static async Task<bool> NeedClientPrograms(CheckContext c)
     {
@@ -128,6 +175,7 @@ public sealed partial class ClientPassMod
             return;
         }
         c.Log.Info($"client-pass: 14-client-world-programs {s!.Line}");
+        DrainRows(c, "14-client-world-programs");
         var sys = s.Of("system");
         var ent = s.Of("entities");
         var bothClient = s.Of("both client");
@@ -382,9 +430,12 @@ public sealed partial class ClientPassMod
             return;
         }
         c.Expect(true, "client worlds with the programs running", string.Join(", ", running));
-        var stops = log.Where(l => l.Contains("client world stops:", StringComparison.Ordinal) && l.Contains("registration(s) closed", StringComparison.Ordinal)).ToList();
-        c.Expect(stops.Count >= 2 && stops.All(l => l.Contains("(0 call(s) running at the stop", StringComparison.Ordinal)),
-            "every client world stopped with no call of a program inside", $"{stops.Count} stop(s)");
+        DrainRows(c, "programs.client-rejoin");
+        StopsDrained(c, log, "leave and rejoin");
+        if (GameOwnLog(c) is { } game)
+            c.Expect(!game.Any(l => l.Contains(QueueNotIdle, StringComparison.Ordinal)),
+                "the game's own log never says \"[task] TaskQueue '…' is not idle during destroy!\"",
+                game.FirstOrDefault(l => l.Contains(QueueNotIdle, StringComparison.Ordinal)) ?? "none");
         c.Expect(!log.Any(l => l.Contains("still running after", StringComparison.Ordinal) || l.Contains("off until the game restarts", StringComparison.Ordinal)),
             "no call outlived its world and nothing latched", "");
         c.Expect(log.Count(l => l.Contains("program kiln_managed_", StringComparison.Ordinal) && l.Contains("registered into the client world as #", StringComparison.Ordinal)) >= 4 * running.Count,
@@ -455,7 +506,22 @@ public sealed partial class ClientPassMod
         var late = log.Skip(armed).Count(l => l.Contains("its world began to stop while a slice of it ran", StringComparison.Ordinal));
         c.Expect(true, "slices that stopped at their next entity (kiln.log, doubling)", $"{late} line(s)");
         var latched = log.Skip(armed).Any(l => l.Contains("client-world programs are off until the game restarts:", StringComparison.Ordinal));
-        if (after > 0)
+        var drain = Array.FindIndex(log, armed, l => l.Contains("tick: client world 0x", StringComparison.Ordinal) && l.Contains(DrainLine, StringComparison.Ordinal));
+        if (Capabilities.Get("world.stop_drain.client").IsAvailable)
+        {
+            // the core waited for the client world's jobs before STOPPING: the delayed call had returned (the game's step
+            // waits for its tasks), kiln.world finds nothing inside and nothing latches; the stall is the game's own
+            c.Expect(drain >= 0 && drain < stop, "the core's drain line comes before kiln.world's stop line",
+                drain >= 0 ? log[drain] : "no drain line");
+            c.Expect(atStop == 0 && after == 0 && !latched, "with the engine's drain: no call inside at the stop, no latch",
+                $"{atStop} at the stop, {after} after; {(latched ? "latched" : "not latched")}");
+            c.Expect(Summaries(log.Skip(armed).ToArray()).Any(x => x.Number(@"delayed calls (\d+)") > 0),
+                "the fixture's delayed callback did sleep in that world", "");
+            if (GameOwnLog(c) is { } game)
+                c.Expect(!game.Any(l => l.Contains(QueueNotIdle, StringComparison.Ordinal)),
+                    "the game's own log never says \"[task] TaskQueue '…' is not idle during destroy!\"", "");
+        }
+        else if (after > 0)
         {
             c.Expect(latched, "a callback still inside after the wait set the process latch", "");
             c.Expect(!Capabilities.Is(EcsPrograms.ClientWorldCapability) &&
@@ -475,6 +541,33 @@ public sealed partial class ClientPassMod
         }
         c.Instruct("When you left the world: did the game reach the main menu without a crash and without a hang longer than the " +
                    "stall (about 2.5 s a frame)? Pass if it did.");
+        await c.Verdict();
+    }
+
+    // ------------------------------------------------- 10. the last start's exit with the programs running ----
+
+    [ClientCheck("programs.client-exit", "The last start's exit with client programs running", Area = "Systems",
+        Since = Dev29, Needs = ClientCheckNeeds.Hosted, Order = ClientWorldProgramsOrder + 9)]
+    public async Task ClientProgramsExit(CheckContext c)
+    {
+        if (!await NeedOpen(c, EcsPrograms.ClientWorldCapability) || !await NeedPlayer(c)) return;
+        if (BootLog(c, "kiln.prev.log") is not { } prev ||
+            !prev.Any(l => l.Contains($"{Fixture}: cpf_system (Client) bound", StringComparison.Ordinal)))
+        {
+            c.Instruct($"With {Fixture} in the profile: host a world, walk for 10 s, and exit the game from the world (Quit to " +
+                       "desktop) while its programs run. Start the game again, host a world and run this check (it reads " +
+                       "kiln.prev.log, the last start's log).");
+            await c.Skip("the last start did not run the fixture's programs");
+            return;
+        }
+        DrainRows(c, "programs.client-exit");
+        StopsDrained(c, prev, "the last start, up to its exit");
+        var last = Array.FindLastIndex(prev, l => l.Contains("client world stops:", StringComparison.Ordinal));
+        var running = Array.FindLastIndex(prev, l => l.Contains($"{Fixture}: session", StringComparison.Ordinal) && l.Contains(" running after ", StringComparison.Ordinal));
+        c.Expect(last > running, "the last start's client world stopped after its programs ran (the exit)", last >= 0 ? prev[last] : "no stop");
+        c.Expect(!prev.Any(l => l.Contains("client-world programs are off until the game restarts", StringComparison.Ordinal)), "no latch in the last start", "");
+        c.Instruct("Did the game close normally at that exit (no crash report, no hang), and does this start's world load as " +
+                   "before? Pass if both.");
         await c.Verdict();
     }
 }

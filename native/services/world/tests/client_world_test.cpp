@@ -57,6 +57,15 @@ void map_each_u16(uintptr_t map, const std::function<void(uint32_t, uint16_t)>& 
     for (const auto& [k, v] : maps)
         if (k.first == map) fn(k.second, v);
 }
+// the core's answer about a client world's jobs at its stop (wraps.cpp's world_stop_drain in the service)
+bool g_engine_drain = false;
+StopDrain world_stop_drain(uint32_t, uint32_t wait_ms) {
+    StopDrain d;
+    d.engine = g_engine_drain;
+    d.text = g_engine_drain ? "the engine drains the world's jobs first (world.stop_drain.client)"
+                            : "a bounded wait (" + std::to_string(wait_ms) + " ms) only: this core has no world.stop_drain.client row";
+    return d;
+}
 void teleport_in_program(KilnProgramCtx*) {}
 void writes_world_changing() {}
 void writes_before_world(uintptr_t) {}
@@ -1001,6 +1010,42 @@ int main(int argc, char** argv) {
     check(pred_probe.calls[KILN_WORLD_PREDICTION].load() == 1 && g_other_world_slices.load() == other_before + 2,
           "the prediction storage's first slice names it for the session; another prediction storage is refused");
     check(unbind_program_world(hpred) == KILN_OK, "prediction side unbound");
+
+    // (1c) the core's drain (06a, world.stop_drain.client): the stop's row and line say it; a call inside at the stop
+    // although the engine drained the world's jobs is an error and latches, also when it leaves within the wait
+    g_engine_drain = true;
+    client_stops(client2.at());
+    check(logged_has("Kiln client-table registration(s) closed for the next client world (0 call(s) running at the stop, 0 after") &&
+              logged_has("the engine drains the world's jobs first (world.stop_drain.client))") && !g_latched.load(),
+          "with the engine's drain: the stop line names it, nothing inside, no latch");
+    check(g_row.state == KILN_CAP_AVAILABLE && g_row.text.find("waiting for a world; at a world stop the engine drains") != std::string::npos,
+          "the row's text says which guarantee a stop has");
+    world_event(KILN_WORLD_STARTED, KILN_WORLD_CLIENT, client2.at());
+    check(g_row.text.find("a client world runs; at a world stop the engine drains") != std::string::npos, "also while a world runs");
+    client2.make(KILN_WORLD_CLIENT, 817);
+    on_world(client2.at());
+    Late brief;
+    KilnHandle hbrief = 0;
+    check(unbind_program_world(hl) == KILN_OK &&
+              bind_program_world(42, kstr("writer"), kstr("ent"), KILN_WORLD_CLIENT, late_each, nullptr, &brief, &hbrief) == KILN_OK,
+          "bound again: a callback that holds its slice at entity 10 until the stop begins, then leaves");
+    Job brief_job(client2.storage(), thousand, 1);
+    ProgramCtx brief_ctx{brief_job.bytes, 0, 0};
+    std::thread brief_worker([&] { ce->desc.update(&brief_ctx); });
+    while (!brief.at_ten.load()) std::this_thread::yield();
+    client_stops(client2.at());
+    brief_worker.join();
+    check(logged_has("call(s) of Kiln programs were inside although the engine drains") && g_latched.load() &&
+              g_row.state == KILN_CAP_UNAVAILABLE && g_row.text.find("although the engine drains") != std::string::npos,
+          "with the engine's drain a call inside at the stop is an error and latches, though it left within the wait");
+    std::string wb;
+    check(state_of(1, KILN_WORLD_CLIENT, &wb) == KILN_PROGRAM_REFUSED && wb.find("although the engine drains") != std::string::npos,
+          "every side says it");
+    g_engine_drain = false;
+    unlatch();
+    for (Program* p : g_programs)
+        for (Side& sd : p->side) sd.state.store(KILN_PROGRAM_PENDING), sd.reason.store(nullptr);
+    hl = hbrief;
 
     // (4) raw reads under the guard: the storage kind in on_world, the event map in the first client Pre
     client_stops(client2.at());
