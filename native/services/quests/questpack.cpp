@@ -20,6 +20,7 @@
 //    a search-area marker) with its own name tag, visible while the step is active; Kiln.Quests/Native puts it at the place.
 #include "questpack.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cctype>
 #include <cstring>
@@ -975,7 +976,20 @@ PackOut compile_pack(const std::vector<ModInput>& mods, const GameData& game) {
     }
     if (!out.npcs.empty()) {
         if (!read_required(game, kGuidNpcs, kTypeNpcs, &p, &n, &err)) return fail(err);
-        if (!rebuild_npcs(p, n, out.npcs, &out.res_npcs, &err)) return fail(err);
+        // the roster's maximum: 64, or 128 where kiln.knowledge can keep a second unlock page (asked only when needed,
+        // so nothing is hooked for a roster that fits in 64)
+        const uint64_t need = uint64_t{npc_count(p, n)} + out.npcs.size();
+        std::string why;
+        out.roster_max = need > kMaxNpcs && game.roster_max
+                             ? game.roster_max(static_cast<uint32_t>(std::min<uint64_t>(need, UINT32_MAX)), &why)
+                             : kMaxNpcs;
+        if (out.roster_max != kMaxNpcsPaged) out.roster_max = kMaxNpcs;
+        if (!rebuild_npcs(p, n, out.npcs, &out.res_npcs, &err, out.roster_max))
+            return fail(why.empty() ? err : err + " (the second unlock page is not available here: " + why + ")");
+        out.roster_boot_ids = npc_ids(p, n);
+        std::sort(out.roster_boot_ids.begin(), out.roster_boot_ids.end());
+        for (const NpcDef& d : out.npcs) out.roster_kiln_ids.push_back(d.id);
+        std::sort(out.roster_kiln_ids.begin(), out.roster_kiln_ids.end());
     }
     // several mods may add lines to one game NPC: their edits go into one override, in load order
     std::vector<Ctx::Tpl> merged;

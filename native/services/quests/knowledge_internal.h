@@ -80,7 +80,27 @@ KilnResult KILN_CALL flame_set(KilnOwner owner, uint32_t level, uint64_t* out_re
 KilnResult KILN_CALL flame_result(uint64_t request, KilnFlameResult* out);
 void flame_ready();
 
-// NpcRegistry unlock state (quests.npc): bit i = npc i unlocked; false when unreadable.
-bool npc_unlock_mask(uint64_t* mask, uint16_t* version);
+// NpcRegistry unlock state of the server world's catalog (quests.npc): pages[0] bit i = entry i unlocked, pages[1]
+// bit i = entry 64 + i (only when *npages is 2: the registry's second page matches its cache); false when unreadable
+// or not computed yet. *count: the registry's entries.
+bool npc_unlock_pages_server(uint64_t pages[2], uint32_t* npages, uint16_t* version, uint32_t* count);
+
+// The roster (roster.cpp; roster_core.h; docs/re/npc-roster.md).
+void roster_main();   // kiln_plugin_main: what this side has for the second page; the two worlds' Post callbacks
+void roster_ready();  // on_ready: the capability rows npcs.*
+// The boot build's question (questpack.h GameData::roster_max): 64, or 128 with the second page installed now.
+uint32_t roster_max(uint32_t needed, std::string* why);
+// The boot build's roster: the collection's ids before it and the ids it added (both sorted).
+void roster_built(std::vector<uint32_t> boot_ids, std::vector<uint32_t> kiln_ids);
+uint32_t roster_limit();  // 64 or 128
+void roster_world_event(const KilnWorldEvent* e);
+// One registry's pages (as npc_unlock_pages_server, for any registry).
+bool npc_unlock_pages(uintptr_t registry, uint64_t pages[2], uint32_t* npages, uint16_t* version, uint32_t* count);
+KilnResult KILN_CALL roster_world(uint32_t kind, uint32_t* out_generation, uint32_t* out_readiness);
+KilnResult KILN_CALL roster_budget(uint32_t kind, uint32_t generation, KilnCapacityInfo* out);
+KilnResult KILN_CALL npc_unlock_at(uint32_t kind, uint32_t generation, uint32_t npc_id, KilnNpcUnlockReply* out);
+// knowledge.cpp: a roster change into the event ring (KILN_KNOW_EVENT_ROSTER). Any thread.
+void emit_roster_change(uint32_t kind, uint32_t generation, uint32_t npc_id, uint8_t before, uint8_t after, uint16_t version,
+                        uint64_t revision, uint64_t step);
 
 }  // namespace kiln::knowledge

@@ -397,15 +397,36 @@ const uint8_t* npc_find(const uint8_t* res, size_t len, uint32_t id) {
     return nullptr;
 }
 
-bool rebuild_npcs(const uint8_t* res, size_t len, const std::vector<NpcDef>& npcs, Bytes* out, std::string* err) {
+uint32_t npc_count(const uint8_t* res, size_t len) {
+    size_t at = 0;
+    uint32_t n = 0;
+    if (!arr(res, len, 0, &at, &n) || at + uint64_t{n} * kNpc > len) return 0;
+    return n;
+}
+
+std::vector<uint32_t> npc_ids(const uint8_t* res, size_t len) {
+    std::vector<uint32_t> ids;
+    size_t at = 0;
+    uint32_t n = 0;
+    if (!arr(res, len, 0, &at, &n) || at + uint64_t{n} * kNpc > len) return ids;
+    for (uint32_t i = 0; i < n; ++i) ids.push_back(rd32(res + at + uint64_t{i} * kNpc));
+    return ids;
+}
+
+bool rebuild_npcs(const uint8_t* res, size_t len, const std::vector<NpcDef>& npcs, Bytes* out, std::string* err, uint32_t max_npcs) {
     out->assign(res, res + len);
     Bytes& b = *out;
     size_t at = 0;
     uint32_t n = 0;
     if (!grow_array(b, 0, static_cast<uint32_t>(npcs.size()), kNpc, {0x80}, &at, &n, err)) return false;
-    if (n + npcs.size() > kMaxNpcs) {
+    if (max_npcs != kMaxNpcsPaged) max_npcs = kMaxNpcs;  // the two maxima there are
+    if (n + npcs.size() > max_npcs) {
         char t[160];
-        std::snprintf(t, sizeof t, "the roster holds at most %u NPCs (a 64-bit unlock mask): %u of the game's + %zu new", kMaxNpcs, n, npcs.size());
+        if (max_npcs == kMaxNpcs)
+            std::snprintf(t, sizeof t, "the roster holds at most %u NPCs (a 64-bit unlock mask): %u of the game's + %zu new", max_npcs, n, npcs.size());
+        else
+            std::snprintf(t, sizeof t, "the roster holds at most %u NPCs (two 64-bit unlock pages): %u of the game's + %zu new", max_npcs, n,
+                          npcs.size());
         *err = t;
         return false;
     }

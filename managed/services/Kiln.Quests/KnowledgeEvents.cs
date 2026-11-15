@@ -182,6 +182,7 @@ internal static unsafe class KnowledgeEventPump
     private static IDisposable? _tick;
     private static ulong _cursor;
     private static uint _listen = uint.MaxValue;
+    private static bool _rosterOn;
 
     public static void Start()
     {
@@ -203,6 +204,16 @@ internal static unsafe class KnowledgeEventPump
         var line = Events.HasSubscribers<DialogueLineEvent>();
         var dknow = Events.HasSubscribers<DialogueKnowledgeEvent>();
         var request = Events.HasSubscribers<KnowledgeRequestEvent>();
+        var roster = Events.HasSubscribers<RosterUnlockChangedEvent>();
+        var rosterTable = roster && !_rosterOn ? KnowledgeNative.Roster(t) : null;
+        if (rosterTable != null)
+        {
+            // the worlds publish roster snapshots (and so their changes) only once something reads the roster
+            uint gen = 0, readiness = 0;
+            rosterTable->RosterWorld(0, &gen, &readiness);
+            rosterTable->RosterWorld(2, &gen, &readiness);
+            _rosterOn = true;
+        }
         var listen = (request ? 1u : 0u) | (dknow ? 2u : 0u);
         if (listen != _listen)
         {
@@ -211,7 +222,7 @@ internal static unsafe class KnowledgeEventPump
         }
         var last = t->LastSeq();
         if (last <= _cursor) return;
-        if (!changed && !line && !dknow && !request)
+        if (!changed && !line && !dknow && !request && !roster)
         {
             _cursor = last;
             return;
@@ -239,6 +250,10 @@ internal static unsafe class KnowledgeEventPump
                     case 1 when changed:
                         Events.Post(new KnowledgeChangedEvent(new EntityId(e.Target), e.Id, e.OldValue, e.NewValue, (KnowledgeType)e.Extra,
                             e.Request, e.Step));
+                        break;
+                    case 6 when roster && e.Npc != 0 && e.Target is 0 or 2:
+                        Events.Post(new RosterUnlockChangedEvent(new CapacityWorldToken((CapacityWorldKind)e.Target, e.Npc), e.Id,
+                            e.OldValue != 0, e.NewValue != 0, (ushort)e.Extra, e.Request));
                         break;
                     case 2 when line:
                         Events.Post(new DialogueLineEvent(new EntityId(e.Target), new EntityId(e.Npc), e.Id, (DialogueAction)e.OldValue, e.Step));
