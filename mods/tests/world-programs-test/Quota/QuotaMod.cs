@@ -16,6 +16,7 @@ public sealed class QuotaMod : Mod
     private readonly long[] _runs = new long[32];
     private readonly List<IDisposable> _bound = [];
     private int _pass, _fail, _refused;
+    private bool _proofReady, _unloaded;
     private string Me => Context.Info.Id;
 
     private void Check(bool ok, string what)
@@ -25,9 +26,27 @@ public sealed class QuotaMod : Mod
         Log.Info($"{Me}: {(ok ? "PASS" : "FAIL")} {what}");
     }
 
+    private bool ClearProof(bool create)
+    {
+        try
+        {
+            if (create) Directory.CreateDirectory(Context.DataDirectory);
+            if (!Directory.Exists(Context.DataDirectory)) return true;
+            var file = Path.Combine(Context.DataDirectory, "quota-proof.json");
+            File.Delete(file);
+            File.Delete(file + ".tmp");
+            return true;
+        }
+        catch (Exception e)
+        {
+            Check(false, $"quota proof bookkeeping: {e.Message}");
+            return false;
+        }
+    }
+
     public override void OnLoad()
     {
-        File.Delete(Path.Combine(Context.DataDirectory, "quota-proof.json"));
+        _proofReady = ClearProof(create: true);
         for (var i = 0; i < 32; i++)
         {
             var k = i;
@@ -46,7 +65,8 @@ public sealed class QuotaMod : Mod
 
     public override void OnUnload()
     {
-        File.Delete(Path.Combine(Context.DataDirectory, "quota-proof.json"));
+        _unloaded = true;
+        ClearProof(create: false);
         foreach (var b in _bound) b.Dispose();
     }
 
@@ -60,9 +80,17 @@ public sealed class QuotaMod : Mod
             Check(_bound.Count > 0 && runs.All(r => r > 0), $"{runs.Count(r => r > 0)} of {_bound.Count} bound programs ran (runs {(runs.Length > 0 ? runs.Min() : 0)}..{(runs.Length > 0 ? runs.Max() : 0)})");
             var generation = World.GetProgramBudget().World?.Generation;
             var proof = Path.Combine(Context.DataDirectory, "quota-proof.json");
-            Directory.CreateDirectory(Context.DataDirectory);
-            File.WriteAllText(proof + ".tmp", JsonSerializer.Serialize(new { generation, ran = runs.Count(r => r > 0), minimumRuns = runs.Length > 0 ? runs.Min() : 0 }));
-            File.Move(proof + ".tmp", proof, true);
+            if (_proofReady && !_unloaded)
+            {
+                try
+                {
+                    File.WriteAllText(proof + ".tmp", JsonSerializer.Serialize(new { generation, ran = runs.Count(r => r > 0), minimumRuns = runs.Length > 0 ? runs.Min() : 0 }));
+                    File.Move(proof + ".tmp", proof, true);
+                    Check(true, "quota proof written after callbacks ran");
+                }
+                catch (Exception proofError) { Check(false, $"quota proof write: {proofError.Message}"); }
+            }
+            else Check(false, "quota proof unavailable (initialization failed or mod unloaded)");
             var s = World.Status;
             Log.Info($"{Me}: World.Status kiln programs {s.KilnPrograms}, engine {s.EnginePrograms} of {s.EngineMax}");
 #if QUOTA_A

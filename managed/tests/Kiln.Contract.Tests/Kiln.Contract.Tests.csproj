@@ -50,6 +50,9 @@
     <ProjectReference Include="../../services/Kiln.CreatureControl/Kiln.CreatureControl.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="../../../mods/tests/world-programs-test/Quota/QuotaMod.cs" Link="Fixtures/QuotaMod.cs" />
+  </ItemGroup>
+  <ItemGroup>
     <!-- The analyzers' tick-thread table, generated from the services' code: the attributes are checked against it. -->
     <None Include="../../Kiln.Analyzers/src/Kiln.Analyzers/KilnApis.g.cs" Link="KilnApis.g.cs" CopyToOutputDirectory="PreserveNewest" />
     <!-- The services' released API (dev.26): an old method group must not gain an overload (OldCallShapesTests). -->

@@ -255,17 +255,17 @@ struct PendingFile {
 inline constexpr uint64_t pending_max_files = 4096, pending_max_file_bytes = 65536;
 inline constexpr uint64_t pending_max_bytes = pending_max_files * pending_max_file_bytes;
 struct PendingScan { uint64_t files=0, bytes=0, unread=0; bool complete=true; };
-inline std::vector<PendingFile> pending_files_bounded(const std::filesystem::path& dir, PendingScan* stats) {
+inline std::vector<PendingFile> pending_files_bounded(const pending_io::TrustedBase& base,const std::filesystem::path& dir, PendingScan* stats) {
     std::vector<PendingFile> out;
     bool stopped=false;
     uint64_t fuel=4*pending_max_files;  // includes mod directories, both passes, invalid entries and crash temporaries
     pending_io::Directory root;
-    if (!root.open(dir)) { stats->complete=false; return out; }
+    if (!root.open(base,dir)) { stats->complete=false; return out; }
     if (!root.visit([&](const auto& mod) {
         if (root.regular(mod)==1) return;
         if (!pending_io::component(mod.string())) { pending_io::refused(dir/mod,"invalid mod component"); return; }
         pending_io::Directory folder;
-        if (!folder.open(dir/mod)) { stats->complete=false; stopped=true; return; }
+        if (!folder.open(base,dir/mod)) { stats->complete=false; stopped=true; return; }
         // Discard regular crash leftovers in a separate streaming pass. Refused reparse/link entries remain.
         if (!folder.visit([&](const auto& name) {
             if (name.extension()!=".tmp") return;
@@ -299,29 +299,39 @@ inline std::vector<PendingFile> pending_files_bounded(const std::filesystem::pat
     });
     return out;
 }
+inline std::vector<PendingFile> pending_files_bounded(const std::filesystem::path& dir, PendingScan* stats) {
+    return pending_files_bounded(pending_io::TrustedBase{dir.parent_path()},dir,stats);
+}
+inline std::vector<PendingFile> pending_files(const pending_io::TrustedBase& base,const std::filesystem::path& dir) {
+    PendingScan stats;return pending_files_bounded(base,dir,&stats);
+}
 inline std::vector<PendingFile> pending_files(const std::filesystem::path& dir) {
-    PendingScan stats;return pending_files_bounded(dir,&stats);
+    return pending_files(pending_io::TrustedBase{dir.parent_path()},dir);
 }
 // Serialized by the service's admission lock. Generic write_atomic keeps its original API and regular-file policy.
-inline bool pending_store_write(const std::filesystem::path& root,const std::filesystem::path& file,
+inline bool pending_store_write(const pending_io::TrustedBase& base,const std::filesystem::path& root,const std::filesystem::path& file,
                                 std::string_view bytes,std::string* reason) {
     if (file.parent_path().parent_path().lexically_normal()!=root.lexically_normal() ||
         !pending_io::component(file.parent_path().filename().string())) { *reason="invalid pending mod/file components";return false; }
     if (bytes.size()>pending_max_file_bytes) { *reason="pending definition exceeds 65536 bytes";return false; }
     pending_io::Directory directory;
-    if (!directory.open(root,true)) { *reason="pending root is unsafe or unavailable";return false; }
-    PendingScan stats;pending_files_bounded(root,&stats);
+    if (!directory.open(base,root,true)) { *reason="pending root unavailable or unsafe (see the named component in kiln.log)";return false; }
+    PendingScan stats;pending_files_bounded(base,root,&stats);
     pending_io::Directory mod;
     uint64_t old=UINT64_MAX;
-    if (mod.open(file.parent_path())) old=mod.size(file.filename());
+    if (mod.open(base,file.parent_path())) old=mod.size(file.filename());
     const bool exists=old!=UINT64_MAX;
     if ((exists && old>stats.bytes) || !stats.complete || stats.files+(exists?0:1)>pending_max_files ||
         stats.bytes-(exists?old:0)+bytes.size()>pending_max_bytes) {
         *reason="pending store is full or could not be safely counted (4096 files / 268435456 bytes); check permissions, remove unused pending files or enable their mods";
         return false;
     }
-    if(!write_atomic(file,bytes)) { *reason="pending write, flush or durable rename failed";return false; }
+    if(!pending_io::write_atomic(base,file,bytes)) { *reason="pending write, flush or durable rename failed";return false; }
     return true;
 }
 
+inline bool pending_store_write(const std::filesystem::path& root,const std::filesystem::path& file,
+                                std::string_view bytes,std::string* reason) {
+    return pending_store_write(pending_io::TrustedBase{root.parent_path()},root,file,bytes,reason);
+}
 }  // namespace kiln::capacity
