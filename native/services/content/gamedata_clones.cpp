@@ -47,6 +47,8 @@
 #include <unordered_set>
 
 #include "gamedata.h"
+#include "services/kiln_capacity.h"
+#include "services/kiln_caps.h"
 
 // kiln.content's loca texts (newcontent.cpp): `json` = "text" or {"en": "...", "de": "..."}. Linked weakly: without
 // it (an older newcontent.cpp) the stub below answers and clones keep the base's texts.
@@ -61,7 +63,15 @@ namespace kc::gd {
 
 namespace {
 
-constexpr uint32_t kBuffRoom = 1024;  // buff clones per process (records in Kiln's copy of the collection)
+// Buff clones per process: records in Kiln's copy of the collection (chapter 17.2). Kiln's own quota, not the game's: the
+// game finds a buff by its u32 id through the collection's map, and a buff on an entity or in a save carries that id, never
+// a record index. The larger room is reserved up front at the first world; when the address space near the game's
+// collection cannot give it, the room is the fallback (0.2.0-dev.28's). Fixed for the process: a restart changes it.
+constexpr uint32_t kBuffRoomExpanded = 4096;
+constexpr uint32_t kBuffRoomFallback = 1024;
+// The most bytes one block of the copy (its records, or a header with its map) may take: sizes are computed in 64 bits
+// and checked against this before near memory is asked, so no count can wrap into a small allocation.
+constexpr uint64_t kBuffBlockMax = 64ull << 20;
 
 struct Def {
     uint32_t section = 0;
@@ -83,6 +93,7 @@ struct Def {
     bool rebuild = false;     // a placeholder taken over by its mod: build the record again from the base
     std::string mod;          // the owning mod ("pack <mod>" / "mod <mod>" owners; placeholders: the recorded mod)
     uint32_t slot = UINT32_MAX;  // buffs: the record index in Kiln's collection
+    uint32_t refusal = 0;        // buffs: why the last registration failed, as a KILN_DEFINE_* code (kiln_capacity.h); 0 = it did not
     std::set<uintptr_t> probed;  // buffs: worlds where the game's own lookup was checked
     uint64_t version = 0;
     std::string listed;          // its entry in definitions(), as of listed_as (a fingerprint of what the entry shows)
@@ -1003,25 +1014,83 @@ void register_perk(Def& d, uintptr_t world) {
 // ---- buffs: Kiln's copy of the buff collection ------------------------------------------------------------------
 struct BuffWorld {
     uintptr_t world = 0, registry = 0, slot = 0;
+    uint32_t probes = 0, misses = 0;  // clones the game's own lookup was asked for in this world, and how many it did not find
 };
 struct BuffMirror {
     bool tried = false, ok = false;
+    bool expanded = false;      // the room is kBuffRoomExpanded (the larger reservation succeeded)
     std::string why;
     const TType* ct = nullptr;  // keen::BuffTypeCollectionResource
     uint32_t f_entries = 0, f_keys = 0, f_values = 0, f_buffs = 0;  // header field offsets
     uintptr_t coll = 0;         // the game's collection (resource data)
     uintptr_t orig = 0;         // its buffs array
     uint32_t n = 0, stride = 0, cap = 0, used = 0, buckets0 = 0;
+    uint32_t room = 0;          // clone records reserved (cap - n): kBuffRoomExpanded or kBuffRoomFallback
     uintptr_t array = 0;        // Kiln's records: n game records, then clones
     uintptr_t header = 0;       // the collection the registries read (Kiln's; 0 = none built yet)
     uint32_t header_count = 0;  // records it lists
     std::set<uintptr_t> headers;     // every header Kiln built (a registry may still point at an older one)
     std::vector<uint32_t> relocs;    // positions of the i32 self-relative offsets inside a record
     std::vector<uint32_t> ids;       // record index -> buffTypeId
+    std::unordered_map<uint32_t, uint32_t> by_id;  // buffTypeId -> record index, the game's and the clones' (ids are u32)
     std::vector<BuffWorld> worlds;
     uint64_t syncs = 0, words = 0;
+    uint64_t array_bytes = 0;        // the records' block
+    uint64_t header_bytes = 0;       // every header built, together (none is freed: a reader may still hold one)
+    uint64_t attaches = 0;           // registry pointers swapped to a new header
     bool reach_warned = false;
 } BM;
+
+// The records of Kiln's copy: n game records, then `room` clones, `stride` bytes each. False (and why) when the count
+// does not fit 32 bits (every index of the game's map is a u32) or the bytes are more than one block may take. The
+// product is taken only once the count is known to fit, so it cannot wrap 64 bits.
+bool buff_mirror_size(uint32_t n, uint32_t room, uint32_t stride, uint32_t* cap, size_t* bytes, std::string* why) {
+    if (!n || !stride || stride % 8) {
+        *why = "the buff collection's layout is not usable (" + std::to_string(n) + " records of " + std::to_string(stride) + " bytes)";
+        return false;
+    }
+    const uint64_t c = uint64_t{n} + room;
+    if (c > UINT32_MAX) {
+        *why = "the buff record count " + std::to_string(c) + " does not fit 32 bits";
+        return false;
+    }
+    const uint64_t b = c * stride;
+    if (b > kBuffBlockMax) {
+        *why = "the buff records would take " + std::to_string(b) + " bytes, over " + std::to_string(kBuffBlockMax) + " in one block";
+        return false;
+    }
+    *cap = static_cast<uint32_t>(c);
+    *bytes = static_cast<size_t>(b);
+    return true;
+}
+
+// A header listing `records` records: the collection struct (`head_size` bytes, its BlobArrays ending by `fields_end`),
+// the map's buckets ({u32 start, u32 count}: `buckets0`, doubled while the load is over 3/4, at most 2^20), its keys and its
+// values. False (and why) for a layout that does not hold together or a total over one block.
+struct BuffHeaderSize {
+    uint32_t buckets = 0;
+    uint64_t head = 0, entries = 0, keys = 0, total = 0;
+};
+bool buff_header_size(uint32_t head_size, uint32_t fields_end, uint32_t records, uint32_t buckets0, BuffHeaderSize* out,
+                      std::string* why) {
+    if (!buckets0 || (buckets0 & (buckets0 - 1)) || buckets0 > (1u << 20) || !records || fields_end > head_size) {
+        *why = "the buff collection's map layout is not usable (" + std::to_string(buckets0) + " buckets, " + std::to_string(records) +
+               " records, fields to +" + std::to_string(fields_end) + " of " + std::to_string(head_size) + ")";
+        return false;
+    }
+    uint64_t b = buckets0;
+    while (records > b / 4 * 3 && b < (1u << 20)) b <<= 1;
+    out->buckets = static_cast<uint32_t>(b);
+    out->head = (uint64_t{head_size} + 15) & ~uint64_t{15};
+    out->entries = b * 8;
+    out->keys = uint64_t{records} * 4;
+    out->total = out->head + out->entries + 2 * out->keys;  // each part is under 2^35: no wrap
+    if (out->total > kBuffBlockMax) {
+        *why = "a buff collection header for " + std::to_string(records) + " records would take " + std::to_string(out->total) + " bytes";
+        return false;
+    }
+    return true;
+}
 
 std::mutex g_bg_mu;
 std::unordered_map<uint32_t, std::array<uint8_t, 16>> g_buff_guids;  // buffTypeId -> GUID (references, clones)
@@ -1073,6 +1142,29 @@ uint32_t put_words(uintptr_t dst, const uint8_t* rec, size_t n) {
     return w;
 }
 
+// The row of the buff room (kiln.caps): pending until the first world reserves it, then available only when the
+// 4,096-clone reservation succeeded (a requested room is not an installed one).
+void report_buff_room() {
+    if (!g_api || !g_api->service) return;
+    const auto* caps = static_cast<const KilnCapsApi*>(g_api->service(KilnStr{KILN_CAPS_SERVICE, sizeof(KILN_CAPS_SERVICE) - 1}, 1));
+    if (!caps || !caps->report) return;
+    static constexpr char kRow[] = "gamedata.expanded_buff_room";
+    uint32_t state = KILN_CAP_UNAVAILABLE, reason = KILN_CAP_REASON_FAULTED;
+    std::string text;
+    if (!BM.tried) {
+        state = KILN_CAP_PENDING, reason = KILN_CAP_REASON_SESSION;
+        text = "Kiln reserves room for " + std::to_string(kBuffRoomExpanded) + " buff clones when the first world loads";
+    } else if (BM.ok && BM.expanded) {
+        state = KILN_CAP_AVAILABLE, reason = KILN_CAP_REASON_NONE;
+        text = "room for " + std::to_string(BM.room) + " buff clones";
+    } else if (BM.ok) {
+        text = "near memory had no room for " + std::to_string(kBuffRoomExpanded) + " buff clones: the room is " + std::to_string(BM.room);
+    } else {
+        text = BM.why;
+    }
+    caps->report(g_owner, KilnStr{kRow, sizeof kRow - 1}, state, reason, KilnStr{text.data(), text.size()});
+}
+
 bool mirror_init(std::string* err) {
     if (BM.ok) return true;
     if (BM.tried) {
@@ -1084,6 +1176,7 @@ bool mirror_init(std::string* err) {
         BM.why = "buff clones are not available: " + why;
         *err = BM.why;
         LOGW("gamedata: %s", BM.why.c_str());
+        report_buff_room();
         return false;
     };
     const GRegistry& B = greg(KILN_GD_BUFFS);
@@ -1107,37 +1200,90 @@ bool mirror_init(std::string* err) {
         return fail("the buff collection is not readable");
     BM.stride = B.type->size;
     if (BM.stride % 8) return fail("a buff record is not 8-byte sized");
+    if (fid->offset + 4 > BM.stride) return fail("buffTypeId is outside the buff record");
+    {
+        std::string why;
+        BuffHeaderSize hs;
+        const uint32_t fields_end = std::max({BM.f_entries, BM.f_keys, BM.f_values, BM.f_buffs}) + 8;
+        if (!buff_header_size(BM.ct->size, fields_end, BM.n, BM.buckets0, &hs, &why)) return fail(why);
+    }
     relocs_of(B.type, 0, 0, &BM.relocs);
-    BM.cap = BM.n + kBuffRoom;
-    BM.array = reinterpret_cast<uintptr_t>(near_alloc(BM.coll, static_cast<size_t>(BM.cap) * BM.stride));
+    // The larger room first; its records are reserved now, in one block that never moves (the game may hold a pointer
+    // to any record). When near memory cannot give that block, the fallback's.
+    size_t bytes = 0;
+    for (const uint32_t room : {kBuffRoomExpanded, kBuffRoomFallback}) {
+        std::string why;
+        uint32_t cap = 0;
+        if (!buff_mirror_size(BM.n, room, BM.stride, &cap, &bytes, &why)) return fail(why);
+        BM.array = reinterpret_cast<uintptr_t>(near_alloc(BM.coll, bytes));
+        if (BM.array) {
+            BM.cap = cap, BM.room = room, BM.expanded = room == kBuffRoomExpanded;
+            break;
+        }
+        if (room == kBuffRoomExpanded)
+            LOGW("gamedata: buff clones: no memory near the buff collection for %u clones (%zu bytes); trying the %u-clone room",
+                 room, bytes, kBuffRoomFallback);
+    }
     if (!BM.array) return fail("no memory near the buff collection");
+    BM.array_bytes = bytes;
     std::vector<uint8_t> rec(BM.stride);
     BM.ids.resize(BM.n);
+    BM.by_id.clear();
     for (uint32_t i = 0; i < BM.n; ++i) {
         const uintptr_t src = BM.orig + static_cast<uintptr_t>(i) * BM.stride, dst = BM.array + static_cast<uintptr_t>(i) * BM.stride;
         if (!rd(src, rec.data(), BM.stride) || !rebase(rec.data(), src, dst)) return fail("a buff record is out of reach");
         std::memcpy(reinterpret_cast<void*>(dst), rec.data(), BM.stride);
         std::memcpy(&BM.ids[i], rec.data() + fid->offset, 4);
+        BM.by_id.emplace(BM.ids[i], i);
     }
     BM.ok = true;
-    LOGI("gamedata: buff clones: Kiln's copy of the buff collection at %p (%u game buffs, room for %u clones; %zu self-relative "
-         "offsets per %u-byte record; the game's collection %p, %u map buckets)",
-         reinterpret_cast<void*>(BM.array), BM.n, kBuffRoom, BM.relocs.size(), BM.stride, reinterpret_cast<void*>(BM.coll), BM.buckets0);
+    LOGI("gamedata: buff clones: Kiln's copy of the buff collection at %p (%u game buffs, room for %u clones%s, %zu bytes; %zu "
+         "self-relative offsets per %u-byte record; the game's collection %p, %u map buckets)",
+         reinterpret_cast<void*>(BM.array), BM.n, BM.room, BM.expanded ? "" : " (the fallback room)", bytes, BM.relocs.size(), BM.stride,
+         reinterpret_cast<void*>(BM.coll), BM.buckets0);
+    report_buff_room();
     return true;
+}
+
+// Kiln's copy of the game's records follows them (the layers kiln.content writes there). store_mutex held.
+void sync_game_records() {
+    std::vector<uint8_t> rec(BM.stride);
+    uint32_t words = 0;
+    for (uint32_t i = 0; i < BM.n; ++i) {
+        const uintptr_t src = BM.orig + static_cast<uintptr_t>(i) * BM.stride, dst = BM.array + static_cast<uintptr_t>(i) * BM.stride;
+        if (!rd(src, rec.data(), BM.stride)) continue;
+        if (!rebase(rec.data(), src, dst)) {
+            if (!BM.reach_warned) LOGW("gamedata: buff record %u: a changed list is out of reach of Kiln's copy; it keeps the old one", i);
+            BM.reach_warned = true;
+            continue;
+        }
+        words += put_words(dst, rec.data(), BM.stride);
+    }
+    ++BM.syncs;
+    BM.words += words;
+    if (words) LOGD("gamedata: buff copy: %u word(s) followed the game's records", words);
 }
 
 // A new collection header listing n + used records, with its own map (id & (buckets - 1) -> {start, count}, keys,
 // values = record indices). Kiln's memory near the game's collection; never freed (a reader may hold an old one).
 bool build_header(std::string* err) {
-    const uint32_t T = BM.n + BM.used;
-    uint32_t B = BM.buckets0;
-    while (T > B / 4 * 3 && B < (1u << 20)) B <<= 1;
-    const size_t hsz = (BM.ct->size + 15) & ~size_t(15), esz = static_cast<size_t>(B) * 8, ksz = static_cast<size_t>(T) * 4;
-    auto* blk = static_cast<uint8_t*>(near_alloc(BM.coll, hsz + esz + 2 * ksz));
-    if (!blk) {
-        *err = "no memory near the buff collection";
+    if (BM.used > BM.room || BM.n + BM.used > BM.cap || BM.ids.size() != size_t{BM.n} + BM.used) {
+        *err = "Kiln's buff collection is inconsistent (" + std::to_string(BM.used) + " clones, room " + std::to_string(BM.room) + ")";
         return false;
     }
+    const uint32_t T = BM.n + BM.used;
+    BuffHeaderSize hs;
+    const uint32_t fields_end = std::max({BM.f_entries, BM.f_keys, BM.f_values, BM.f_buffs}) + 8;
+    if (!buff_header_size(BM.ct->size, fields_end, T, BM.buckets0, &hs, err)) return false;
+    const uint32_t B = hs.buckets;
+    const size_t hsz = static_cast<size_t>(hs.head), esz = static_cast<size_t>(hs.entries), ksz = static_cast<size_t>(hs.keys);
+    auto* blk = static_cast<uint8_t*>(near_alloc(BM.coll, static_cast<size_t>(hs.total)));
+    if (!blk) {
+        *err = "no memory near the buff collection for its header (" + std::to_string(hs.total) + " bytes)";
+        return false;
+    }
+    BM.header_bytes += hs.total;  // never freed, also when the checks below refuse it
+    if (!BM.header) sync_game_records();  // the first header: the copy follows the game's records from now on (buffs_sync)
     std::memset(blk, 0, hsz + esz + 2 * ksz);
     uint8_t* entries = blk + hsz;
     auto* keys = reinterpret_cast<uint32_t*>(blk + hsz + esz);
@@ -1171,6 +1317,18 @@ bool build_header(std::string* err) {
         *err = "Kiln's buff collection is out of reach";
         return false;
     }
+    // What the game's lookup relies on, checked before any registry reads it: every bucket's range inside the keys, and
+    // every value a record index below the count (getBuffType's `ja` lets index == count through: never emit one).
+    for (uint32_t b = 0; b < B; ++b)
+        if (uint64_t{start[b]} + count[b] > T) {
+            *err = "Kiln's buff collection map is inconsistent (bucket " + std::to_string(b) + ")";
+            return false;
+        }
+    for (uint32_t k = 0; k < T; ++k)
+        if (values[k] >= T) {
+            *err = "Kiln's buff collection map is inconsistent (value " + std::to_string(values[k]) + " of " + std::to_string(T) + ")";
+            return false;
+        }
     BM.header = reinterpret_cast<uintptr_t>(blk);
     BM.header_count = T;
     BM.headers.insert(BM.header);
@@ -1215,75 +1373,111 @@ bool buff_world(uintptr_t world, std::string* err) {
             *err = "writing the BuffRegistry faulted";
             return false;
         }
+        ++BM.attaches;
         LOGI("gamedata: the %s world's BuffRegistry (%p +0x%llx) reads Kiln's buff collection: %u buffs (%u clones)", wname(world),
              reinterpret_cast<void*>(w->registry), static_cast<unsigned long long>(w->slot - w->registry), BM.header_count, BM.used);
     }
     return true;
 }
 
-// The game's own lookup of a clone in a world (once per world): proof that getBuffType finds Kiln's record.
-void probe_buff(Def& d, uintptr_t world) {
+// The game's own lookup of a clone in a world (once per clone and world): proof that getBuffType finds Kiln's record.
+// The line is written for the first clone of a world, when `say` (the last of a batch), and for every clone it does
+// not find; at thousands of clones a line each would bury the log, so the others count in the world's probes.
+void probe_buff(Def& d, uintptr_t world, bool say = false) {
     if (!g_get_buff || d.probed.count(world)) return;
-    for (const BuffWorld& w : BM.worlds)
+    for (BuffWorld& w : BM.worlds)
         if (w.world == world) {
             d.probed.insert(world);
             const uintptr_t got = call_get_buff(fnv1a(d.guid, 16), w.registry);
+            const bool found = got == d.data;
+            ++w.probes;
+            if (!found) ++w.misses;
+            if (found && !say && w.probes > 1) return;
             const uintptr_t first = call_get_buff(BM.ids.empty() ? 0 : BM.ids[0], w.registry);
-            LOGI("gamedata: the game's getBuffType(0x%08x) in the %s world = %p (%s); a game buff 0x%08x = %p (%s)", fnv1a(d.guid, 16),
-                 wname(world), reinterpret_cast<void*>(got), got == d.data ? "the clone's record" : "NOT the clone's record",
-                 BM.ids.empty() ? 0 : BM.ids[0], reinterpret_cast<void*>(first), first == BM.array ? "Kiln's copy" : "the game's own");
+            if (found)
+                LOGI("gamedata: the game's getBuffType(0x%08x) in the %s world = %p (the clone's record, %u of %u); a game buff 0x%08x = %p (%s)",
+                     fnv1a(d.guid, 16), wname(world), reinterpret_cast<void*>(got), d.slot - BM.n + 1, BM.used, BM.ids.empty() ? 0 : BM.ids[0],
+                     reinterpret_cast<void*>(first), first == BM.array ? "Kiln's copy" : "the game's own");
+            else
+                LOGW("gamedata: the game's getBuffType(0x%08x) in the %s world = %p: NOT the clone's record (%s, record %u at %p); a game buff "
+                     "0x%08x = %p (%s)",
+                     fnv1a(d.guid, 16), wname(world), reinterpret_cast<void*>(got), d.name.c_str(), d.slot, reinterpret_cast<void*>(d.data),
+                     BM.ids.empty() ? 0 : BM.ids[0], reinterpret_cast<void*>(first), first == BM.array ? "Kiln's copy" : "the game's own");
         }
 }
 
-void buff_registered(Def& d, uintptr_t world);
+void buff_registered(Def& d, uintptr_t world, bool say = false);
+
+void buff_refuse(Def& d, uint32_t code, std::string why) {
+    d.state = "error", d.problem = std::move(why), d.refusal = code;
+}
+
+// A record of Kiln's copy for d: its own from an earlier registration, or the next free one. False, with d refused and
+// why, when it cannot have one: the id is 0 (the game's lookup answers nothing for it), a game buff's or another clone's
+// (the map would hold one id twice and the game would find only the first), or the room is full.
+bool take_buff_slot(Def& d, uint32_t id) {
+    char hex[16];
+    std::snprintf(hex, sizeof hex, "0x%08x", id);
+    if (!id) {
+        buff_refuse(d, KILN_DEFINE_ID_COLLISION, "the GUID's buff id is 0, which the game never finds: use another GUID");
+        return false;
+    }
+    if (auto it = BM.by_id.find(id); it != BM.by_id.end() && it->second != d.slot) {
+        if (it->second < BM.n) {
+            buff_refuse(d, KILN_DEFINE_ID_COLLISION, std::string("the GUID is a game buff's (id ") + hex + ")");
+            return false;
+        }
+        std::string other = "another clone";
+        for (const Def& x : g_defs)
+            if (&x != &d && x.section == KILN_GD_BUFFS && x.slot == it->second) other = x.name + " (" + guid_text(x.guid) + ")";
+        buff_refuse(d, KILN_DEFINE_ID_COLLISION, std::string("the buff id ") + hex + " of this GUID is " + other + "'s: use another GUID");
+        return false;
+    }
+    if (d.slot != UINT32_MAX) return true;
+    if (BM.used >= BM.room) {
+        buff_refuse(d, KILN_DEFINE_CAPACITY_EXCEEDED, "Kiln's buff collection is full (" + std::to_string(BM.room) + " clones)");
+        return false;
+    }
+    d.slot = BM.n + BM.used++;
+    BM.ids.push_back(id);
+    BM.by_id.emplace(id, d.slot);
+    return true;
+}
 
 void register_buff(Def& d, uintptr_t world) {
     GRegistry& B = greg(KILN_GD_BUFFS);
     std::string err;
     if (!B.type || !B.available) {
-        d.state = "error", d.problem = "the buff registry is not available";
+        buff_refuse(d, KILN_DEFINE_NOT_READY, "the buff registry is not available");
         return;
     }
     if (!mirror_init(&err)) {
-        d.state = "error", d.problem = err;
+        buff_refuse(d, KILN_DEFINE_NOT_READY, err);
         return;
     }
     const uint32_t id = fnv1a(d.guid, 16);
-    for (uint32_t i = 0; i < BM.n; ++i)
-        if (BM.ids[i] == id) {
-            char b[16];
-            std::snprintf(b, sizeof b, "0x%08x", id);
-            d.state = "error", d.problem = std::string("the GUID is a game buff's (id ") + b + ")";
-            return;
-        }
     if (const GEntry* n = B.lookup(d.name); n && n->id != id) {
-        d.state = "error", d.problem = "the name " + d.name + " is taken";
+        buff_refuse(d, KILN_DEFINE_NAME_TAKEN, "the name " + d.name + " is taken");
         return;
     }
     const GEntry* base = B.lookup(d.base);
     if (!base || base->id == id) {
-        d.state = "error", d.problem = "unknown base buff " + d.base;
+        buff_refuse(d, KILN_DEFINE_UNKNOWN_BASE, "unknown base buff " + d.base);
         return;
     }
-    if (d.slot == UINT32_MAX) {
-        if (BM.used >= kBuffRoom) {
-            d.state = "error", d.problem = "Kiln's buff collection is full (" + std::to_string(kBuffRoom) + " clones)";
-            return;
-        }
-        d.slot = BM.n + BM.used++;
-        BM.ids.push_back(id);
-    }
+    if (!take_buff_slot(d, id)) return;
     const uintptr_t dst = BM.array + static_cast<uintptr_t>(d.slot) * BM.stride;
     if (!d.data || d.rebuild) {
         std::vector<uint8_t> rec(BM.stride);
         const TField* fid = B.type->field("buffTypeId");
+        // a refusal from here on keeps the record it took: retained, and counted as reserved, never as free room
         if (!rd(base->addr, rec.data(), BM.stride)) {
-            d.state = "error", d.problem = "the base buff's record is not readable";
+            buff_refuse(d, KILN_DEFINE_REGISTRATION_FAILED_RETAINED, "the base buff's record is not readable");
             return;
         }
         store_originals(base->addr, BM.stride, rec.data());  // what rules changed on the base is not the clone's (see apply_fields)
         if (!rebase(rec.data(), base->addr, dst) || !fid) {
-            d.state = "error", d.problem = "the base buff's record is not readable";
+            buff_refuse(d, KILN_DEFINE_REGISTRATION_FAILED_RETAINED, "the base buff's record is out of reach of Kiln's copy");
             return;
         }
         std::memcpy(rec.data() + fid->offset, &id, 4);
@@ -1295,7 +1489,7 @@ void register_buff(Def& d, uintptr_t world) {
     // in a batch, the collection's header is built and the world pointed at it once, at the end of the turn (buffs_attach)
     if (!g_batch) {
         if (BM.header_count != BM.n + BM.used && !build_header(&err)) {
-            d.state = "error", d.problem = err;
+            buff_refuse(d, KILN_DEFINE_REGISTRATION_FAILED_RETAINED, err);
             return;
         }
         if (!buff_world(world, &err)) {
@@ -1326,14 +1520,23 @@ void register_buff(Def& d, uintptr_t world) {
     buff_registered(d, world);
 }
 
-void buff_registered(Def& d, uintptr_t world) {
-    if (d.state != "registered")
-        LOGI("gamedata: buff %s (%s, id 0x%08x, clone of %s%s): record %u of Kiln's buff collection (%p)", d.name.c_str(),
-             guid_text(d.guid).c_str(), fnv1a(d.guid, 16), d.base.c_str(), d.placeholder ? ", placeholder" : "", d.slot,
-             reinterpret_cast<void*>(d.data));
+void buff_registered(Def& d, uintptr_t world, bool say) {
+    if (d.state != "registered") {
+        // a line for each of the first clones and for the last of a batch; the rest at debug level (thousands would bury the log)
+        static uint32_t lines = 0;
+        if (say || lines < 32) {
+            ++lines;
+            LOGI("gamedata: buff %s (%s, id 0x%08x, clone of %s%s): record %u of Kiln's buff collection (%p)", d.name.c_str(),
+                 guid_text(d.guid).c_str(), fnv1a(d.guid, 16), d.base.c_str(), d.placeholder ? ", placeholder" : "", d.slot,
+                 reinterpret_cast<void*>(d.data));
+        } else {
+            LOGD("gamedata: buff %s (id 0x%08x): record %u", d.name.c_str(), fnv1a(d.guid, 16), d.slot);
+        }
+    }
     d.state = "registered";
     d.problem.clear();
-    probe_buff(d, world);
+    d.refusal = 0;
+    probe_buff(d, world, say);
 }
 
 // The end of a batch's turn: the writes and event order, then the buff collection's header with every buff clone of the turn.
@@ -1346,13 +1549,13 @@ void batch_finish(uintptr_t world) {
     std::string err;
     const bool built = BM.header_count == BM.n + BM.used || build_header(&err);
     const bool attached = built && buff_world(world, &err);
-    for (size_t i : g_batch_buffs) {
-        Def& d = g_defs[i];
-        if (!built) d.state = "error", d.problem = err;
+    for (size_t k = 0; k < g_batch_buffs.size(); ++k) {
+        Def& d = g_defs[g_batch_buffs[k]];
+        if (!built) buff_refuse(d, KILN_DEFINE_REGISTRATION_FAILED_RETAINED, err);
         else if (!attached) d.state = "waiting", d.problem = err;  // clones_tick tries again
         else {
             d.worlds.insert(world);
-            buff_registered(d, world);
+            buff_registered(d, world, k + 1 == g_batch_buffs.size());  // the last one's line and self-check are written
         }
     }
     g_batch_buffs.clear();
@@ -1418,22 +1621,8 @@ void register_def(Def& d, uintptr_t world) {
 
 // ---- buffs: the mirror follows the game's records; buff GUIDs ----
 void buffs_sync() {
-    if (!BM.ok || !BM.header) return;
-    std::vector<uint8_t> rec(BM.stride);
-    uint32_t words = 0;
-    for (uint32_t i = 0; i < BM.n; ++i) {
-        const uintptr_t src = BM.orig + static_cast<uintptr_t>(i) * BM.stride, dst = BM.array + static_cast<uintptr_t>(i) * BM.stride;
-        if (!rd(src, rec.data(), BM.stride)) continue;
-        if (!rebase(rec.data(), src, dst)) {
-            if (!BM.reach_warned) LOGW("gamedata: buff record %u: a changed list is out of reach of Kiln's copy; it keeps the old one", i);
-            BM.reach_warned = true;
-            continue;
-        }
-        words += put_words(dst, rec.data(), BM.stride);
-    }
-    ++BM.syncs;
-    BM.words += words;
-    if (words) LOGD("gamedata: buff copy: %u word(s) followed the game's records", words);
+    if (!BM.ok || !BM.header) return;  // no registry reads Kiln's copy yet: the first header syncs it (build_header)
+    sync_game_records();
 }
 
 void buff_guid_note(const uint8_t g[16]) {
@@ -1521,6 +1710,7 @@ void clones_boot() {
         KilnHandle h = 0;
         g_api->subscribe_world_tick(g_owner, KILN_WORLD_CLIENT, KILN_TICK_PRE, &on_client_pre, nullptr, &h);
     }
+    report_buff_room();
     LOGI("gamedata: template clones %s; sequence, perk and buff clones on (the game's buff lookup %s)",
          g_templates ? "on" : "OFF (gamedata.template_clones not resolved)", g_get_buff ? "resolved for the self-check" : "not resolved");
 }
@@ -1528,6 +1718,17 @@ void clones_boot() {
 // Every definition, in turns of about 10 ms of the store lock: a game thread that needs it (a drop table the game loads) waits one turn
 // at most, and each turn writes once.
 void clones_world_ready(uintptr_t world, uint32_t) {
+    {
+        // The buff room is reserved as soon as the game's collection is known, before any mod spends a slot (chapter 17.2
+        // section 5): the budget is ready before the first clone. Until a clone exists the registries read the game's own
+        // collection; the copy costs its block of near memory and nothing per step.
+        std::lock_guard l1(store_mutex());
+        std::lock_guard lock(g_mu);
+        if (const GRegistry& B = greg(KILN_GD_BUFFS); !BM.tried && B.type && B.available) {
+            std::string err;
+            mirror_init(&err);
+        }
+    }
     size_t i = 0;
     for (bool more = true; more;) {
         std::lock_guard l1(store_mutex());
@@ -1753,7 +1954,8 @@ std::string clones_json() {
 
 gjson clones_status() {
     std::lock_guard lock(g_mu);
-    gjson b = {{"active", BM.ok && BM.header != 0}, {"gameBuffs", BM.n}, {"clones", BM.used}, {"room", kBuffRoom},
+    gjson b = {{"active", BM.ok && BM.header != 0}, {"gameBuffs", BM.n}, {"clones", BM.used}, {"room", BM.room}, {"expanded", BM.expanded},
+               {"headers", BM.headers.size()}, {"headerBytes", BM.header_bytes}, {"recordBytes", BM.array_bytes}, {"attaches", BM.attaches},
                {"worlds", BM.worlds.size()}, {"syncs", BM.syncs}, {"wordsFollowed", BM.words}};
     if (!BM.why.empty()) b["why"] = BM.why;
     return gjson{{"buffCopy", b}, {"perkMaps", g_perk_maps.size()}, {"texts", !g_texts_absent.load()},

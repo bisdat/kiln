@@ -222,9 +222,22 @@ that needs its own permanent numbers and its own name is a **clone**.
   no runtime map to add to. With the first buff clone Kiln serves the collection from its own copy: the game's records
   at the same indices, then the clones, and a rebuilt map; each world's BuffRegistry is pointed at it. The game's
   records stay where every layer writes (buff tweaks, config adds, tooltips work as before); Kiln's copy follows them
-  after each change. Room: 1,024 buff clones per process. kiln.log "the server world's BuffRegistry (… +0x20) reads
-  Kiln's buff collection: 276 buffs (2 clones)", and the game's own lookup as a self-check: "the game's
-  getBuffType(0x26317bd2) in the server world = … (the clone's record); a game buff 0xcdbe9c80 = … (Kiln's copy)".
+  after each change. kiln.log "the server world's BuffRegistry (… +0x20) reads Kiln's buff collection: 276 buffs
+  (2 clones)", and the game's own lookup as a self-check for the first clone of a world, the last of each batch and
+  every clone it does not find: "the game's getBuffType(0x26317bd2) in the server world = … (the clone's record, 1 of 2);
+  a game buff 0xcdbe9c80 = … (Kiln's copy)".
+- **Room** (since 0.2.0-dev.29): 4,096 buff clones per process, all mods together. It is Kiln's own quota, not the
+  game's: the game finds a buff by its 32-bit id, and a buff on an entity, on the wire (`BuffNetworkData`) or in a save
+  carries that id, never a record number, so the room changes nothing the game sends or saves. The records are
+  reserved in one block next to the game's collection when the first world loads (804,080 bytes for 4,096 clones and
+  the game's 274 buffs, plus a header of about 100 KB with the map once a clone exists); the registries keep reading
+  the game's own collection until there is a clone. When the address space next to the collection cannot give that
+  block (kiln.log "no memory near the buff collection for 4096 clones … trying the 1024-clone room"), the room is
+  1,024 for the process. Capability `gamedata.expanded_buff_room` says which: pending until the first world, then
+  available with 4,096 or unavailable with the reason. Sizes are computed in 64 bits and checked before memory is asked
+  for. A clone is refused, with its reason, when the room is full ("Kiln's buff collection is full (4096 clones)"),
+  when its GUID's id is 0, a game buff's or another clone's (FNV-1a of two GUIDs can be equal: the second is refused
+  and the message names the first), and when near memory has no room for a header. The room is fixed until a restart.
 - **Referencing them**:
   - an item's perk slot: code `Content.ItemData.Get(item).Set("perkReferences[2]", "Kiln_Sample_FrostbiteEdge")`
     (`perkIds[2]` follows: FNV-1a of the GUID); new items: kitbash `"perks": [null, null, "<perk clone GUID>"]`
