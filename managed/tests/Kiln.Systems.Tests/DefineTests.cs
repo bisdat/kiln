@@ -29,8 +29,8 @@ public sealed unsafe class DefineTests
 {
     private const string BarrelsKey = "Kiln_SystemsTests_Barrels";
 
-    private static ModContext NewMod(string id) =>
-        HostAccess.CreateContext(new ModInfo(id, id, "1.0.0", Path.GetTempPath()) { Side = ModSide.Server }, 60 + (ulong)id.Length, Path.GetTempPath());
+    private static ModContext NewMod(string id, ulong? owner = null) =>
+        HostAccess.CreateContext(new ModInfo(id, id, "1.0.0", Path.GetTempPath()) { Side = ModSide.Server }, owner ?? (60 + (ulong)id.Length), Path.GetTempPath());
 
     private static T InMod<T>(ModContext mod, Func<T> f)
     {
@@ -49,6 +49,83 @@ public sealed unsafe class DefineTests
         w.ReservedSlots[0] = ["FuelSetup"];
         w.ReservedSlots[1] = ["CurrentTransform"];
         w.ReservedSlots[2] = ["Fuel"];
+    }
+
+    [Theory]
+    [InlineData("without=DynamicShelter", "without=StaticTransform", "without")]
+    [InlineData("readOptional=CurrentTransform", "read=CurrentTransform", "read")]
+    [InlineData("flags=00000010", "flags=00000090", "flags")]
+    [InlineData("flags=00000010", "flags=00000410", "flags")]
+    [InlineData("interval=1", "interval=2", "interval")]
+    [InlineData("with=", "with=Fuel", "with")]
+    [InlineData("anyOf=", "anyOf=Fuel", "anyOf")]
+    public void Changed_boot_declaration_is_refused_before_publication(string old, string changed, string difference)
+    {
+        using var w = World();
+        var mod = NewMod("changed");
+        Reserve(w, "changed", BarrelsKey);
+        w.ReservationOverride = FakeWorld.Snapshot(true).Replace(old, changed);
+        var r = InMod(mod, () => Systems.Define(BarrelsKey, new ProgramOptions { HostOnly = true }, (ref Barrels b) => { }));
+        Assert.False(r.Ok);
+        Assert.Contains(difference, r.Reason);
+        Assert.Contains("rebuild is in the game only after a server restart: this reservation was made at boot from the earlier declaration", r.Reason);
+        Assert.Equal(0, w.Binds);
+    }
+
+    [Theory]
+    [InlineData(0u)]
+    [InlineData(16u)]
+    public void Missing_reservation_member_never_binds_unchecked(uint size)
+    {
+        using var w = World();
+        w.SetReservationSize(size);
+        var mod = NewMod("old-core");
+        Reserve(w, "old-core", BarrelsKey);
+        var e = Assert.Throws<KilnUnavailableException>(() => InMod(mod, () => Systems.Define(BarrelsKey,
+            new ProgramOptions { HostOnly = true }, (ref Barrels b) => { })));
+        Assert.Equal("systems.define", e.Capability);
+        Assert.Contains("program_reservation", e.Message);
+        Assert.Equal(0, w.Binds);
+    }
+
+    [Fact]
+    public void Unchanged_query_binds_after_dispose_and_reload()
+    {
+        using var w = World();
+        w.Reserved.Add(("reload", "my_wells")); w.ReservedSlots[1] = ["Fuel"];
+        var first = NewMod("reload");
+        var calls = 0;
+        var a = InMod(first, () => Systems.Define("my_wells", new ProgramOptions(), (ref Wells b) => calls++));
+        Assert.True(a.Ok);
+        first.Retire();
+        Assert.Equal(1, w.Unbinds);
+        w.RunDefined(); Assert.Equal(0, calls);
+        a.Dispose(); // already drained by retirement
+        var b = InMod(NewMod("reload", 999), () => Systems.Define("my_wells", new ProgramOptions(), (ref Wells b) => calls += 10));
+        Assert.True(b.Ok);
+        w.RunDefined(); Assert.Equal(10 * w.EntityIds.Length, calls);
+        b.Dispose();
+        Assert.Equal(2, w.Binds);
+    }
+
+    [Fact]
+    public void Defined_handler_refuses_tick_APIs_even_on_world_thread_and_restores_guard()
+    {
+        using var w = World();
+        var mod = NewMod("define-guard");
+        w.Reserved.Add(("define-guard", "my_wells"));
+        w.ReservedSlots[1] = ["Fuel"];
+        var blocked = 0;
+        var r = InMod(mod, () => Systems.Define("my_wells", new ProgramOptions(), (ref Wells e) =>
+        {
+            try { Services.RequireTickThread("test mutation"); }
+            catch (InvalidOperationException) { blocked++; }
+        }));
+        Assert.True(r.Ok);
+        w.RunDefined();
+        Assert.Equal(w.EntityIds.Length, blocked);
+        Services.RequireTickThread("after callback");
+        r.Dispose();
     }
 
     [Fact]
@@ -107,11 +184,12 @@ public sealed unsafe class DefineTests
         var mod = NewMod("define-d");
         Reserve(w, "define-d", BarrelsKey);
         w.ReservedSlots[2] = ["Health"];  // the running reservation writes Health, the [Query] Fuel: built from other sources
-        var e = Assert.Throws<ArgumentException>(() =>
-            InMod(mod, () => Systems.Define(BarrelsKey, new ProgramOptions { HostOnly = true }, (ref Barrels b) => { })));
-        Assert.Contains("'Fuel' is in its [Query] Write list", e.Message);
-        Assert.Contains("rebuild the mod and restart the server", e.Message);
-        Assert.Equal(1, w.Unbinds);
+        var r = InMod(mod, () => Systems.Define(BarrelsKey, new ProgramOptions { HostOnly = true }, (ref Barrels b) => { }));
+        Assert.False(r.Ok);
+        Assert.Contains("write", r.Reason);
+        Assert.Contains("server restart", r.Reason);
+        Assert.Equal(0, w.Binds);
+        Assert.Equal(0, w.Unbinds);
     }
 
     [Fact]

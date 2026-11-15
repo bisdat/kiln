@@ -200,6 +200,7 @@ void* write_other(KilnProgramCtx* ctx, uint64_t accessor, KilnEntity entity, uin
 KilnResult unregister_program(KilnHandle program);
 void programs_reap_owners();
 void boot_programs_init();
+KilnResult KILN_CALL program_reservation(KilnStr mod, KilnStr key, char* text, uint32_t capacity, uint32_t* out_size);
 KilnResult reserve_program(const std::string& mod, const std::string& key, const KilnProgramDesc* desc);
 KilnResult KILN_CALL bind_program(KilnOwner owner, KilnStr mod, KilnStr key, KilnProgramEachFn each, void* user, KilnHandle* out);
 uint32_t KILN_CALL program_capabilities();

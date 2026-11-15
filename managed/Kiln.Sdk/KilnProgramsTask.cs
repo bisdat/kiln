@@ -69,7 +69,6 @@ public sealed class KilnPrograms : Microsoft.Build.Utilities.Task
             Log.LogError(null, "KILN031", null, AssemblyPath, 0, 0, 0, 0, $"cannot read the mod assembly for its [Query] programs: {e.Message}");
             return false;
         }
-        if (queries.Count == 0) return true;
         var ok = true;
         foreach (var q in queries.Where(q => q.Problem is not null))
         {
@@ -80,11 +79,19 @@ public sealed class KilnPrograms : Microsoft.Build.Utilities.Task
         try
         {
             var existing = SourcePath.Length > 0 && File.Exists(SourcePath) ? File.ReadAllText(SourcePath) : null;
+            Written = "";
+            if (queries.Count == 0 && existing is null)
+            {
+                // The last Query was removed: do not deploy the previous build's boot reservations.
+                if (File.Exists(ProgramsPath)) File.Delete(ProgramsPath);
+                return true;
+            }
             var (text, problems) = Merge(existing, queries);
             foreach (var p in problems) Log.LogError(null, "KILN036", null, ProgramsPath, 0, 0, 0, 0, p);
             if (problems.Count > 0) return false;
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(ProgramsPath))!);
-            File.WriteAllText(ProgramsPath, text, new UTF8Encoding(false));
+            if (!File.Exists(ProgramsPath) || File.ReadAllText(ProgramsPath) != text)
+                File.WriteAllText(ProgramsPath, text, new UTF8Encoding(false));
             Written = string.Join(";", queries.Select(q => q.Key));
             Log.LogMessage(MessageImportance.Normal, $"kiln.programs.json: {string.Join(", ", queries.Select(q => q.Key))} (the [Query] structs of {Path.GetFileName(AssemblyPath)})");
             return true;
@@ -184,6 +191,8 @@ public sealed class KilnPrograms : Microsoft.Build.Utilities.Task
     public static (string Text, List<string> Problems) Merge(string? existing, IReadOnlyList<Query> queries)
     {
         var problems = new List<string>();
+        foreach (var group in queries.GroupBy(q => q.Key, StringComparer.Ordinal).Where(g => g.Count() > 1))
+            problems.Add($"[Query] types {string.Join(", ", group.Select(q => q.Type))} declare the same key '{group.Key}': give each query a distinct Key");
         JsonObject programs;
         if (existing is null) programs = new JsonObject();
         else

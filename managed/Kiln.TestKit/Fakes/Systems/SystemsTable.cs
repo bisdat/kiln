@@ -157,6 +157,9 @@ internal static unsafe class SystemsTable
         *output = default;
         output->Size = size;
         output->State = s.State;
+        output->Disabled = s.Disabled;
+        output->Overruns = s.Overruns;
+        output->TotalNs = s.TotalNs;
         output->Reason = s.Reason;
         output->Stage = s.Kind;
         output->Priority = s.Priority;

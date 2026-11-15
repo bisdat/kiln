@@ -4,6 +4,8 @@
 // the world starts (the boot reservations EcsPrograms.Bind binds, docs/kiln/world.md "Programs v2"), and Define binds the
 // mod's per-entity handler to it.
 using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Text;
 
 namespace Kiln;
 
@@ -144,10 +146,10 @@ public static unsafe partial class Systems
     /// <param name="each">The per-entity handler.</param>
     /// <returns><c>Ok = false</c> with <see cref="NotReserved"/>'s text when kiln.world reserved no such program for the mod
     /// at boot (a mod built without its [Query] in kiln.programs.json, or loaded after the server started), or with
-    /// kiln.world's refusal (another binding holds it).</returns>
+    /// kiln.world's refusal (another binding holds it), or the first list/flags/interval difference from the immutable
+    /// boot snapshot. A changed declaration requires a server restart; it is refused before publishing the callback.</returns>
     /// <exception cref="ArgumentException">A null or empty key, <typeparamref name="T"/> has no [Query], the key or the
-    /// options are not the [Query]'s, or a name of its lists is not in the program kiln.world reserved under the key (a
-    /// mod built from other sources than the running one: rebuild and restart).</exception>
+    /// options are not the [Query]'s.</exception>
     /// <exception cref="KilnUnavailableException"><c>systems.define</c> is off (kiln.world's programs did not resolve on
     /// this build).</exception>
     [TickThreadOnly, ServerOnly, RequiresCapability("systems.define")]
@@ -173,6 +175,39 @@ public static unsafe partial class Systems
         var table = EcsPrograms.Table;
         if (table == null || (table->Capabilities() & 4) == 0)
             throw new KilnUnavailableException("systems.define", "kiln.world's boot programs (v2) are not here");
+        var reservations = Services.Get<ReservationTable>("kiln.world.budget", 1);
+        if (reservations == null || reservations->ProgramReservation == null)
+            throw new KilnUnavailableException("systems.define", "kiln.world.budget.program_reservation is missing (update Kiln)");
+        var modBytes = Encoding.UTF8.GetBytes(mod.Info.Id);
+        var keyBytes = Encoding.UTF8.GetBytes(key);
+        uint length = 0;
+        string snapshot;
+        fixed (byte* m = modBytes, k = keyBytes)
+        {
+            var who = new NativeStr { Ptr = m, Len = (nuint)modBytes.Length };
+            var name = new NativeStr { Ptr = k, Len = (nuint)keyBytes.Length };
+            var result = reservations->ProgramReservation(who, name, null, 0, &length);
+            if (result == SystemsNative.NotFound) return new ProgramRegistration(false, NotReserved, key, null);
+            if (result != SystemsNative.Ok || length == 0 || length > 65536)
+                throw new KilnUnavailableException("systems.define", "kiln.world.budget.program_reservation could not read the boot snapshot");
+            var bytes = new byte[length];
+            fixed (byte* text = bytes)
+                result = reservations->ProgramReservation(who, name, text, length, &length);
+            if (result != SystemsNative.Ok || length > bytes.Length)
+                throw new KilnUnavailableException("systems.define", "kiln.world.budget.program_reservation could not copy the boot snapshot");
+            snapshot = Encoding.UTF8.GetString(bytes, 0, (int)length);
+        }
+        var expected = Declaration(query);
+        if (snapshot != expected)
+        {
+            var actual = snapshot.Split('\n');
+            var wanted = expected.Split('\n');
+            var at = 0;
+            while (at < actual.Length && at < wanted.Length && actual[at] == wanted[at]) at++;
+            var difference = at < wanted.Length ? wanted[at].Split('=')[0] : "declaration";
+            return new ProgramRegistration(false, $"{key}: {difference} differs from the boot reservation; " +
+                "rebuild is in the game only after a server restart: this reservation was made at boot from the earlier declaration", key, null);
+        }
         EcsProgramCallback callback = context =>
         {
             var view = T.Bind(context);
@@ -187,14 +222,6 @@ public static unsafe partial class Systems
                 SystemsNative.Unavailable => $"{key}: the program is not running (it faulted or its world is gone)",
                 _ => $"{key}: kiln.world refused the binding (result {rc})",
             }, key, null);
-        // The reservation is the build's [Query]: every name the iterator gives a slot must be in it.
-        foreach (var (kind, list, name) in SlotNames(query))
-            if (binding!.Lookup(kind, name).Slot < 0)
-            {
-                binding.Dispose();
-                throw new ArgumentException($"{typeof(T).Name}: '{name}' is in its [Query] {list} list but not in the program " +
-                    $"kiln.world reserved at boot as '{key}' (a mod built from other sources): rebuild the mod and restart the server", nameof(T));
-            }
         return new ProgramRegistration(true, null, key, binding);
     }
 
@@ -214,19 +241,26 @@ public static unsafe partial class Systems
     private static string Flags(ProgramOptions o) => Flags(o.Init, o.HostOnly, o.Exclusive, o.Chunked, o.Pinned, o.Barrier);
     private static string Flags(QueryAttribute q) => Flags(q.Init, q.HostOnly, q.Exclusive, q.Chunked, q.Pinned, q.Barrier);
 
-    // The names of a [Query] that hold an iterator slot, with kiln.world's slot kind (KILN_SLOT_*: 0 tpl, 1 read, 2 write,
-    // 3 singleton, 4 other tpl, 5 other read, 6 other write, 7 events in, 8 events out). with/without/anyOf hold none.
-    private static IEnumerable<(int Kind, string List, string Name)> SlotNames(QueryAttribute q)
+    // Separate append-only service: the original budget reader's prefix remains 16 bytes.
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct ReservationTable
     {
-        (int, string, string[])[] lists =
-        [
-            (0, "Template", q.Template), (0, "TemplateOptional", q.TemplateOptional), (1, "Read", q.Read),
-            (1, "ReadOptional", q.ReadOptional), (2, "Write", q.Write), (2, "WriteOptional", q.WriteOptional),
-            (3, "SingletonsRead", q.SingletonsRead), (3, "SingletonsWrite", q.SingletonsWrite), (4, "OtherTemplate", q.OtherTemplate),
-            (5, "OtherRead", q.OtherRead), (6, "OtherWrite", q.OtherWrite), (7, "EventsIn", q.EventsIn), (8, "EventsOut", q.EventsOut),
-        ];
-        foreach (var (kind, list, names) in lists)
-            foreach (var name in names ?? [])
-                yield return (kind, list, name);
+        internal ServiceHeader Header;
+        internal nint ProgramBudget;
+        internal delegate* unmanaged[Cdecl]<NativeStr, NativeStr, byte*, uint, uint*, int> ProgramReservation;
+    }
+
+    internal static string Declaration(QueryAttribute q)
+    {
+        (string, string[])[] lists = [
+            ("tpl", q.Template), ("tplOptional", q.TemplateOptional), ("read", q.Read), ("readOptional", q.ReadOptional),
+            ("write", q.Write), ("writeOptional", q.WriteOptional), ("singletonsRead", q.SingletonsRead),
+            ("singletonsWrite", q.SingletonsWrite), ("otherTpl", q.OtherTemplate), ("otherRead", q.OtherRead),
+            ("otherWrite", q.OtherWrite), ("with", q.With), ("without", q.Without), ("anyOf", q.AnyOf),
+            ("eventsIn", q.EventsIn), ("eventsOut", q.EventsOut) ];
+        uint flags = (q.Init ? 8u : 0) | (q.HostOnly ? 16u : 0) | (q.Exclusive ? 128u : 0) |
+            (q.Chunked ? 512u : 0) | (q.Pinned ? 1024u : 0) | (q.Barrier ? 2048u : 0);
+        return string.Concat(lists.Select(l => l.Item1 + "=" + string.Join(",", l.Item2 ?? []) + "\n")) +
+            $"flags={flags:x8}\ninterval=1\n"; // entity queries reserve interval 1; no public interval override
     }
 }

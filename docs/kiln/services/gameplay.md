@@ -206,3 +206,38 @@ its range helper and posted in a later Pre; cancel it to keep the item on the gr
 Player build edits: `BuildEvent` still reports them after the fact, and `Gameplay.Protect` zones refuse them natively
 (also terraforming). A managed cancelable event for player pieces (`events.build.pieces`) is not in this build, and
 managed terraform cancel (`events.build.terraform`) is not part of V1.
+
+### First use of the building hooks
+
+`gameplay.build` still means the five building symbols and layouts resolved. The session capability
+`gameplay.build_hooks` and the appended native status fields distinguish resolved/unused, installed, waiting for
+world stop, and refused (with a reason and installed-target mask). `build_hooks` / `Gameplay.Status.BuildHooks`
+remain true only for a complete installed group. No building detour is installed at service start. Before the game starts, Kiln.Host preflights the admitted profile/drop-in assemblies' reference metadata and requests
+the group in the mod's name if they reference `Kiln.Gameplay` (including shipped helper assemblies, which may be loaded by name).
+The loaded assembly's `GetReferencedAssemblies()` is checked again before OnBoot/OnLoad and when the mod loader
+loads its helper assemblies. Merely referencing `Kiln.Gameplay` for crafting therefore also installs the group:
+Shipped helpers are inspected conservatively even if they are not eventually used;
+that conservative cost prevents a later land claim from creating an unprotected zone. Profiles without such a
+managed mod still leave the five functions untouched unless a native plugin requests them.
+A native build subscription, managed `BuildEvent` interest (including base-event handlers), or a zone add/update
+denying Build or Break also requests the group. Native plugins which might add build/break denies later must call
+`request_build` (or subscribe to BUILD) in `kiln_plugin_main`/`on_ready`. A request before any world starts installs immediately. A request while any server,
+client, or prediction world exists waits until the last world stops; events begin in the next world. The remaining
+waiting cases are a first gameplay-using managed mod hot-loaded during a world, or a native plugin which did not
+request at startup (including a newly introduced helper not present at startup). There is no
+next-Pre guarantee with the current raw-detour API. Operations in this window are neither observed nor replayed;
+a build/break zone add or update is refused with UNAVAILABLE until the whole group is installed. No new zone is
+stored and no old zone is changed. Managed Protect/ZoneHandle.Update throw `KilnUnavailableException` naming
+`gameplay.build_hooks`: "build protection begins with the next world: this mod asked for it while a world was running".
+Kiln never silently removes build/break bits: the caller may explicitly submit a different set of denies. Other zone actions and Kiln's
+explicit build API zone checks retain their own behavior. Capability changes and a warning report the wait/refusal. Direct managed `BuildEvent` subscriptions also use the
+existing event-producer check: a refused group throws `KilnUnavailableException` naming `gameplay.build_hooks`;
+a pending group accepts the subscription and logs that events begin in the next world.
+Unsubscribing or removing the last zone leaves installed hooks in place; they pass through when unused.
+
+All targets are resolved and their executable/readable entry bytes checked before installation. If installing a
+later target nevertheless fails, earlier raw detours remain physically installed, passing directly to the game:
+revoking a raw link would retain its jump too. No event or Build/Break denial is produced by that partial group.
+Status reports refusal and the mask (bits 0..4: PlaceBlueprint, PlaceProp, DismantleBlock, DismantleBlock2, PickUpProp).
+This physical partial-install state was also possible with the previous startup installation. It is refused for the
+process without repeated attempts. Terraforming, craft and natural-spawn hooks remain separate startup hooks.

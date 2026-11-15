@@ -332,17 +332,17 @@ KilnResult KILN_CALL h_sig_status(KilnStr symbol, uintptr_t* address, uint64_t* 
     if (!address || !revision || !symbol.ptr || !symbol.len) return KILN_ERR_INVALID_ARGUMENT;
     *address = 0;
     KILN_GUARD("sig_status", KILN_ERR_INTERNAL, {
-        sigdb::SigInfo info;
+        sigdb::SigStatus status;
+        std::string text;
         // A replacement racing this copy must invalidate any cached verdict.
         const auto before = sigdb::sig_revision();
-        const bool found = sigdb::sig(sv(symbol), &info);
+        const bool found = sigdb::sig_status(sv(symbol), address, &status, &text);
         *revision = sigdb::sig_revision();
         if (before != *revision) return KILN_ERR_UNAVAILABLE;
         if (!found) { typed_refusal_text() = "no descriptor in the current resolver load"; return KILN_ERR_NOT_FOUND; }
-        *address = info.address;
-        typed_refusal_text() = info.text;
-        if (info.status == sigdb::SigStatus::Match && info.address) return KILN_OK;
-        return info.status == sigdb::SigStatus::Mismatch ? KILN_HOOKS_ERR_SIG_MISMATCH : KILN_HOOKS_ERR_SIG_UNKNOWN;
+        typed_refusal_text() = text;
+        if (status == sigdb::SigStatus::Match && *address) return KILN_OK;
+        return status == sigdb::SigStatus::Mismatch ? KILN_HOOKS_ERR_SIG_MISMATCH : KILN_HOOKS_ERR_SIG_UNKNOWN;
     });
 }
 
@@ -359,12 +359,14 @@ KilnResult KILN_CALL h_validate_typed(KilnStr symbol, uintptr_t expected_address
     });
 }
 
+// 0: not now. 1: on the authoritative (or joined client's) Pre thread: a world runs, and a first detour on a target
+// stops the player's game for its check, so the caller paces its installations. 2: no live world: nobody is playing.
 uint32_t KILN_CALL h_typed_install_ready() {
     if (tick::typed_install_pre()) return 1;
     KilnSessionInfo s{}; s.size = sizeof s;
     if (tick::session(&s) != KILN_OK) return 0;
     for (auto w : s.worlds) if (w) return 0;
-    return 1;
+    return 2;
 }
 
 // detour_typed and detour_typed_checked: the same descriptor check and link; `unchecked` (the checked member) gives the

@@ -13,7 +13,8 @@ internal sealed class FakeHost : IHostServices, IKilnBackend
     public bool IsTickThread => true;
     public bool HasFeature(string name) => name != "no.such.feature";
     public void Log(ulong owner, LogLevel level, string text) => Log(level, text);
-    public nint Service(string name, uint minVersion) => 0;
+    public readonly Dictionary<string, nint> Services = [];
+    public nint Service(string name, uint minVersion) => Services.GetValueOrDefault(name);
     public readonly List<string> Lines = [];
     public readonly HashSet<ulong> Revoked = [];
     private ulong _next = 1;

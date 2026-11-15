@@ -71,6 +71,11 @@ task workers once one is (the client world always uses workers). So:
   raises `Disabled` (`WrapDisabledEvent`, tick thread) with the reason, and a managed exception also counts toward the
   host's fault policy of the mod (five in 60 s disable the mod).
 
+A view stage whose directory lists/contract could not be read within the native lock's bound is suspended (`Pending`)
+with a logged reason. It retries at most once per world step, up to eight failed attempts per stage and world session.
+A successful retry resumes the same stage; after eight failed steps it is removed and raises `Disabled`. These failures
+do not count against the mod's fault policy. Cached successful lists and contracts are reused; failed reads are not cached.
+
 ## Per entity: reading and writing the program's components
 
 ```csharp
@@ -203,10 +208,13 @@ public override void OnLoad()
 - **Results.** `ProgramRegistration`: `Ok = false` with `"not reserved at boot: rebuild the mod and restart the server"`
   when kiln.world reserved nothing under the key for the mod (the file is missing, or the mod was loaded after the server
   started), or with kiln.world's refusal (another binding holds it). `ArgumentException`: the struct has no `[Query]`,
-  the key or the options are not the `[Query]`'s, or a name the iterator gives a slot (templates, reads, writes,
-  singletons, other-entity and event lists) is not in the running reservation: a mod built from other sources than the
-  one the server reserved. The filters (`With`, `Without`, `AnyOf`) and the flags are checked against the `[Query]`
-  only. `KilnUnavailableException("systems.define")` when kiln.world's programs did not resolve on the build.
+  the key or the options are not the `[Query]`'s. Before publishing a callback, Define reads the immutable declaration
+  reserved at boot for `(mod id, key)` through `kiln.world.budget.program_reservation`. All 16 lists (including their
+  name order, required/optional split, and With/Without/AnyOf), flags and interval must match exactly. Query programs
+  currently reserve interval 1. A difference returns `Ok = false` naming the first field and saying
+  "rebuild is in the game only after a server restart: this reservation was made at boot from the earlier declaration".
+  Reloading an unchanged mod can bind again after disposal; reloading a changed declaration cannot change the snapshot.
+  A core without the reservation-query member throws `KilnUnavailableException("systems.define")`; it never binds unchecked.
 - **The handler** gets the query for one entity; the query reads and writes through `EcsProgramContext` (`TryGet`,
   `TrySet`, `TryReadOther`, events, `QueueAdd`), as `EcsPrograms.Bind` does. Worker threads: no tick-thread API inside
   it; a handler that throws is turned off with a line in the mod's log. `Dispose` (tick thread) unbinds it and waits
@@ -214,15 +222,18 @@ public override void OnLoad()
   of the mod binds it again.
 - `[ServerOnly]` (the server world, also on a host). Lab: `mods/tests/systems-test` binds one in `OnLoad`, checks it ran
   for `fuel_setup`'s containers, that a query without a reservation is `Ok = false`, and its handler on N > 1 threads with
-  the lab parallel switch.
+  the lab parallel switch. Those rows do not establish changed-declaration refusal across reload, blocked-worker unload,
+  or hosted/client gameplay. These are requirements in the lab source, not a lab run made by this repair. Host tests
+  cover declaration equality; the changed-query reload row still needs a lab run.
 
 ## Unit tests
 
 Under `dotnet test` with Kiln.TestKit the wraps run on the kit's fake of kiln.world v4: the test declares the programs
 (`kiln.Programs.Add`, or `Add<Ecs.Programs.FuelSetup>()` for a typed view) and each step runs them over the fake world's
 entities through the mod's stages, typed views and `AroundEach` included; marks and `ComponentWrittenEvent` follow.
-Not modelled: worker threads (one thread, the harness's tick thread), singleton slots, the attribute formulas,
-budgets and native faults, client worlds and `Systems.Define` (offline). The details:
+The fake models the 1 ms stage budget (excluding the declared original), ten consecutive overruns disabling the stage,
+and the real managed exception/mod fault policy. Not modelled: worker threads (one thread, the harness's tick thread), singleton slots, the attribute formulas,
+native faults, client worlds and `Systems.Define` (offline). The details:
 [modding/unit-tests.md](../modding/unit-tests.md#program-wraps).
 
 ## In the lab: the parallel switch

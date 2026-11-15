@@ -377,8 +377,9 @@ typedef struct KilnHooksApi {
     /* ======== typed safety extension (since 0.2.0-dev.29): check header.size covers each member before reading it ========
      * validate_typed checks THIS compiled descriptor against the resolver descriptor and original image bytes.
      * sig_status queries the current resolver (never a report); revision changes at fragment replacement/unload.
-     * typed_install_ready permits installation with no live world OR on the current authoritative/joined-client Pre
-     * thread. */
+     * typed_install_ready permits installation with no live world (2) OR on the current authoritative/joined-client Pre
+     * thread (1); 0: not now. On 1 a world is running and each first detour on a target stops the game's other
+     * threads for its check: install a few per tick, not a batch. */
     KilnResult(KILN_CALL* validate_typed)(KilnStr symbol, uintptr_t expected_address, uint64_t expected_revision,
                                           const KilnSig* sig);
     KilnResult(KILN_CALL* sig_status)(KilnStr symbol, uintptr_t* address, uint64_t* revision);

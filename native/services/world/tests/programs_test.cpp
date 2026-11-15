@@ -197,8 +197,24 @@ int main() {
     std::fill(std::begin(g_by_slot),std::end(g_by_slot),nullptr);
     for (int i=0;i<55;++i) { KilnProgramDesc d=sys("svc_"+std::to_string(i)); KilnHandle h=0; register_program(g_owner,&d,&h,false); }
     KilnProgramDesc m1=sys("mod_a"),m2=sys("mod_b");
+    KilnStr required[]={kstr("Fuel"),kstr("Health")}, optional[]={kstr("CurrentTransform")}, excluded[]={kstr("StaticTransform")};
+    m1.flags=KILN_PROGRAM_EXCLUSIVE|KILN_PROGRAM_PINNED;
+    m1.read={required,2,0}; m1.read_optional={optional,1,0}; m1.without={excluded,1,0};
     check(reserve_program("writer","a",&m1)==KILN_OK && programs_registered()==56,"a mod's declaration takes slot 56");
     check(reserve_program("writer","b",&m2)==KILN_ERR_UNAVAILABLE && programs_registered()==56,"the next waits on the 8 kept for services: refused");
+    uint32_t bytes=0;
+    check(program_reservation(kstr("writer"),kstr("a"),nullptr,0,&bytes)==KILN_OK && bytes>0,"reservation query sizes the immutable boot snapshot");
+    std::vector<char> snapshot(bytes+1);
+    check(program_reservation(kstr("writer"),kstr("a"),snapshot.data(),bytes,&bytes)==KILN_OK,"reservation query copies its snapshot");
+    const std::string saved(snapshot.data(),bytes);
+    check(saved.find("flags=00000480\ninterval=1\n")!=std::string::npos,"snapshot preserves flags and scheduler interval");
+    check(saved.find("read=Fuel,Health\nreadOptional=CurrentTransform\n")!=std::string::npos && saved.find("without=StaticTransform\n")!=std::string::npos,"snapshot retains ordered names, optional split and filter");
+    required[0]=kstr("ChangedAfterBoot");
+    g_programs.back()->desc.interval=9; // live descriptors are not the boot contract
+    check(program_reservation(kstr("writer"),kstr("a"),snapshot.data(),bytes,&bytes)==KILN_OK && std::string(snapshot.data(),bytes)==saved,"snapshot survives changes to the live descriptor");
+    check(program_reservation(kstr("other-mod"),kstr("a"),nullptr,0,&bytes)==KILN_ERR_NOT_FOUND && bytes==0,"reservation identity includes mod id");
+    check(program_reservation(kstr("writer"),kstr("a"),snapshot.data(),1,&bytes)==KILN_ERR_BUFFER_TOO_SMALL,"short reservation buffer is refused");
+    check(program_reservation(kstr("writer"),kstr("a"),nullptr,0,nullptr)==KILN_ERR_INVALID_ARGUMENT,"reservation query needs a size output");
     int late=0;
     for (int i=0;i<8;++i) { KilnProgramDesc d=sys("late_"+std::to_string(i)); KilnHandle h=0; late+=register_program(g_owner,&d,&h,false)==KILN_OK; }
     check(late==8 && programs_registered()==64,"a service that registers later still finds its 8");
