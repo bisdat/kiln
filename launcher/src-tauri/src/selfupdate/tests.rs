@@ -65,14 +65,19 @@ impl Server {
     }
 
     fn source(&self, name: &str) -> Source {
-        Source { name: name.into(), stable: self.url("/stable/latest.json"), dev: self.url("/dev/latest.json") }
+        Source { name: name.into(), stable: self.url("/stable/latest.json"), dev: self.url("/dev/latest.json"), beta: self.url("/beta/latest.json") }
     }
 }
 
 /// A port nothing listens on.
 fn dead_source(name: &str) -> Source {
     let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
-    Source { name: name.into(), stable: format!("http://127.0.0.1:{port}/stable/latest.json"), dev: format!("http://127.0.0.1:{port}/dev/latest.json") }
+    Source {
+        name: name.into(),
+        stable: format!("http://127.0.0.1:{port}/stable/latest.json"),
+        dev: format!("http://127.0.0.1:{port}/dev/latest.json"),
+        beta: format!("http://127.0.0.1:{port}/beta/latest.json"),
+    }
 }
 
 fn manifest(version: &str, file_url: &str, sha256: Option<&str>) -> Vec<u8> {

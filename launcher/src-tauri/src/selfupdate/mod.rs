@@ -5,7 +5,9 @@
 //!   GitHub. The plugin checks every download against the public key in tauri.conf.json, and the version the file
 //!   was signed for against the version the manifest announces (`requireSignedVersion`); a file that fails is never
 //!   installed, whichever source served it.
-//! - Channels: stable and dev ([`feed::Channel`]); the setting `updateChannel`, else the build's own channel.
+//! - Channels: stable, dev (the release line) and beta (test builds, 0.2.0-dev.29 on) ([`feed::Channel`]); the setting
+//!   `updateChannel`, else the build's own channel (a test build's is baked in: [`feed::baked_channel`]). Builds are
+//!   compared by their id ([`feed::Build`]: the version, then a test build's beta number), never downwards.
 //! - Checks: 8 s after the start and every 6 hours while the launcher runs (setting `updateCheck`, default on), and
 //!   on request (`update_check`). A check is one plain GET of a small JSON file: no ids, no version, nothing else.
 //! - Install: the AppImage is replaced in place (the new version runs after a restart); on Windows the verified NSIS
@@ -124,11 +126,16 @@ pub struct Updated {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateStatus {
-    /// This launcher's version.
+    /// This launcher's version (a test build: the version of the release it leads to; `beta` has its number).
     pub current: String,
     /// Always `direct` here (the Nexus build has no self-update: commands/update.rs).
     pub distribution: crate::distribution::Distribution,
+    /// The channel followed: the setting, else `build_channel`.
     pub channel: Channel,
+    /// (dev.29) The channel this build belongs to: a test build's is beta (baked in), else its version's.
+    pub build_channel: Channel,
+    /// (dev.29) This test build's beta number.
+    pub beta: Option<u32>,
     /// Automatic checks are on (setting `updateCheck`).
     pub auto: bool,
     pub install: InstallInfo,
@@ -211,6 +218,8 @@ fn initial_status(current: &str, install: InstallInfo) -> UpdateStatus {
         current: current.into(),
         distribution: crate::distribution::Distribution::Direct,
         channel: Channel::of_build(current),
+        build_channel: Channel::of_build(current),
+        beta: feed::baked_beta(),
         auto: true,
         install,
         page: feed::DOWNLOAD_PAGE.into(),
@@ -252,7 +261,9 @@ pub fn start<R: Runtime>(app: AppHandle<R>) {
     let current = app.package_info().version.to_string();
     let install = kind::detect(&app);
     let store = load_store();
-    let just = store.updated.clone().filter(|u| u.to == current);
+    // update.json names builds by their id (a test build's has its beta number: feed::this_build)
+    let build = feed::this_build(&current);
+    let just = store.updated.clone().filter(|u| u.to == build);
     if store.updated.is_some() && just.is_none() {
         // an update that is not this version (never restarted into it, or replaced by hand since)
         save_store(|s| s.updated = None);
@@ -268,11 +279,12 @@ pub fn start<R: Runtime>(app: AppHandle<R>) {
         g.status.channel = channel;
     }
     log(&format!(
-        "Kiln Launcher {current} (pid {}, {:?}, {}), channel {}, automatic checks {}",
+        "Kiln Launcher {current} (pid {}, {:?}, {}), channel {}{}, automatic checks {}",
         std::process::id(),
         install.kind,
         if install.in_place { "updates in place" } else { "updates by download" },
         channel.as_str(),
+        feed::baked_beta().map(|n| format!(" (test build {n}, {build})")).unwrap_or_default(),
         if auto { "on" } else { "off" }
     ));
     if let Some(u) = &just {
@@ -365,7 +377,8 @@ fn updater_for<R: Runtime>(app: &AppHandle<R>, src: &Source, channel: Channel) -
         .endpoints(vec![url])
         .and_then(|b| {
             b.configure_client(|c| c.connect_timeout(Duration::from_secs(15)).read_timeout(Duration::from_secs(60)))
-                .version_comparator(move |cur, rel| feed::accepts(&cur.to_string(), &rel.version.to_string(), channel))
+                // the current build's id: its version and the baked-in beta number (feed::Build)
+                .version_comparator(move |cur, rel| feed::accepts(&feed::this_build(&cur.to_string()), &rel.version.to_string(), channel))
                 .build()
         })
         .map_err(|e| failure(src, describe(&e, Step::Manifest)))
@@ -609,7 +622,7 @@ fn run_install(app: &AppHandle, p: &mut dyn kiln_manage::task::Progress) -> Resu
     }
     p.report(Some(1.0), &format!("Verified {version} from {source}"));
     let updated = Updated {
-        from: current.clone(),
+        from: feed::this_build(&current),
         to: version.clone(),
         at: kiln_manage::util::now_rfc3339(),
         source: source.clone(),
@@ -667,7 +680,7 @@ pub fn restart(app: &AppHandle) -> Result<(), Error> {
     let current = state().status.current.clone();
     save_store(|s| {
         s.updated = Some(Updated {
-            from: current,
+            from: feed::this_build(&current),
             to: update.version.clone(),
             at: kiln_manage::util::now_rfc3339(),
             source: ready.source.clone(),

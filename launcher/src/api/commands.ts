@@ -116,7 +116,7 @@ export interface LauncherSettings {
   savesKeep: number;
   /** Check for launcher updates at the start and every 6 hours (default on). */
   updateCheck: boolean;
-  /** Absent or null: the channel of the running build (a dev build follows dev). */
+  /** Absent or null: the channel of the running build (a dev build follows dev, a test build beta). */
   updateChannel?: UpdateChannel | null;
   /** The WebGL fire on Play (default on); off draws the plain Play button. */
   animatedFire?: boolean;
@@ -1136,7 +1136,9 @@ export const appAssetsImport = (kind: "editor" | "admin", from: string | null = 
 // update.rs: the launcher's self-update (frostdev.io, then GitHub; signed). Changes arrive as kiln://update.
 // The Nexus Mods build has the same commands without a self-update: phase "disabled", install/restart reject with
 // `unsupported`, nothing is fetched (and the UI calls none of them there: api/distribution.ts).
-export type UpdateChannel = "stable" | "dev";
+/** "dev" is the public release line while there is no stable release ("Release" in the UI); "beta" (dev.29) are test
+ *  builds of the next release (api/channel.ts). */
+export type UpdateChannel = "stable" | "dev" | "beta";
 export type UpdatePhase = "idle" | "checking" | "upToDate" | "available" | "skipped" | "failed" | "downloading" | "ready" | "disabled";
 export type UpdateInstallKind = "appimage" | "nsis" | "msi" | "deb" | "rpm" | "unbundled";
 export interface UpdateFailure { source: string; step: "manifest" | "download" | "signature" | "hash"; message: string }
@@ -1165,6 +1167,11 @@ export interface UpdateStatus {
   justUpdated: { from: string; to: string; at: string; source: string; notes: string | null } | null;
   taskId: TaskId | null;
   error: KilnError | null;
+  /** (dev.29) The channel this build belongs to: a test build's is "beta" (baked in when it was built), else the
+   *  channel of its version. Absent from an older backend: the version's. */
+  buildChannel?: UpdateChannel;
+  /** (dev.29) This test build's beta number (null: not a test build). */
+  beta?: number | null;
 }
 /** Guard the command boundary as well as the UI: even a stale callback or a directly mounted hook cannot invoke
  *  an updater command in the Nexus build. Failure to read the distribution also fails closed. */

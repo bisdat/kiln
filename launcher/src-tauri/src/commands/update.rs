@@ -108,6 +108,10 @@ mod imp {
         pub distribution: Distribution,
         /// The build's own channel (a pre-release is dev); nothing follows it here.
         pub channel: &'static str,
+        /// (dev.29) The same: a Nexus build is never a test build (they are not uploaded there).
+        pub build_channel: &'static str,
+        /// (dev.29) Always null: never a test build.
+        pub beta: Option<u32>,
         pub auto: bool,
         pub install: Install,
         /// Where new versions are: the Kiln page on Nexus Mods.
@@ -144,6 +148,8 @@ mod imp {
             current: current.into(),
             distribution: Distribution::Nexus,
             channel: if pre { "dev" } else { "stable" },
+            build_channel: if pre { "dev" } else { "stable" },
+            beta: None,
             auto: false,
             install: Install { kind: bundle_kind(), in_place: false, reason: Some(NO_SELF_UPDATE) },
             page: distribution::NEXUS_PAGE,
@@ -208,7 +214,7 @@ mod imp {
             assert!(s["available"].is_null() && s["ready"].is_null() && s["justUpdated"].is_null());
             assert_eq!(s["failures"], serde_json::json!([]));
             // the direct build's fields, so the frontend's UpdateStatus fits
-            for k in ["channel", "checked", "progress", "skipped", "taskId", "error"] {
+            for k in ["channel", "buildChannel", "beta", "checked", "progress", "skipped", "taskId", "error"] {
                 assert!(s.get(k).is_some(), "{k} missing");
             }
             let c = serde_json::to_value(tauri::async_runtime::block_on(check(h))).unwrap();

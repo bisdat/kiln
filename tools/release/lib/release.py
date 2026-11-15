@@ -463,12 +463,13 @@ def cmd_scan(a):
 # ---------------------------------------------------------------- updater (the self-update in a launcher build)
 
 # what the self-update leaves in a launcher binary (launcher/src-tauri/src/selfupdate/feed.rs, tauri.conf.json): the
-# update feeds (frostdev.io, GitHub's stable and dev channels), the updater's public key (in the embedded config),
+# update feeds (frostdev.io, GitHub's stable, dev and beta channels), the updater's public key (in the embedded config),
 # and the updater plugin's crate (its source paths in panic messages). The Nexus Mods build has none of them.
 UPDATE_FEEDS = [
     ("the frostdev.io update feed", b"frostdev.io/kiln/updates"),
     ("the GitHub stable update feed", b"/releases/latest/download/latest.json"),
     ("the GitHub dev update feed", b"/releases/download/updates-dev"),
+    ("the GitHub beta update feed", b"/releases/download/updates-beta"),
 ]
 UPDATER_PLUGIN = ("the updater plugin (tauri-plugin-updater)", b"tauri-plugin-updater")
 LAUNCHER_BINARIES = ("kiln-launcher", "kiln-launcher.exe")

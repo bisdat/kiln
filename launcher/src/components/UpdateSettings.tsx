@@ -6,6 +6,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import * as api from "../api/commands";
 import type { LauncherSettings, UpdateChannel, UpdateStatus } from "../api/commands";
+import { channelOptions } from "../api/channel";
 import { NEXUS_PAGE } from "../api/distribution";
 import { useAppInfo, useDistribution, useSettings } from "../api/hooks";
 import { useUpdate, useUpdateStore } from "../api/update";
@@ -89,8 +90,7 @@ function SelfUpdatesCard() {
     <Card title="Updates" sub={<span className="k-mono">{s.current}</span>}>
       <Toggle checked={v.updateCheck !== false} onChange={(on) => save.mutate({ updateCheck: on })} label="Check automatically" hint="Sends no personal data." />
       <Field label="Channel" htmlFor="st-upd-channel">
-        <Select id="st-upd-channel" value={s.channel} onChange={setChannel} style={{ width: 200 }}
-          options={[{ value: "stable", label: "Stable" }, { value: "dev", label: "Dev" }]} />
+        <Select id="st-upd-channel" value={s.channel} onChange={setChannel} style={{ width: 200 }} options={channelOptions(s.channel)} />
       </Field>
       <div className="k-row" style={{ justifyContent: "space-between", flexWrap: "nowrap", gap: 14 }}>
         <span className="k-hint" role="status">

@@ -90,18 +90,57 @@ part of a release version (the updater ignores it). After a stable release, rais
 The runtime keeps its own version, `<VERSION>+<yyyymmdd>.<commit>` (bundle.md). In a release folder its zip is named
 after the release: `runtime/kiln-runtime-<release version>.zip`.
 
+### Test builds (the beta channel, 0.2.0-dev.29 on)
+A test build of the next release must sort **below** that release and **above** the one before it, so that a tester is
+offered the final build when it is out. Semver cannot say that with a pre-release suffix: `0.2.0-dev.29-beta.1` and
+`0.2.0-dev.29.beta.1` both sort above `0.2.0-dev.29` (an identifier more, or `29-beta` as text against `29`), and
+`0.2.0-dev.29-beta.1` even sorts above `0.2.0-dev.30` (a text identifier outranks a number). So a test build keeps the
+version of the release it leads to and carries its **beta number** outside the precedence:
+
+| What | A test build (beta 3 of 0.2.0-dev.29) | The final build |
+|---|---|---|
+| The launcher's version (Tauri, the bundles, `VERSION` in the export, the runtime's `0.2.0-dev.29+<date>.<commit>`) | `0.2.0-dev.29` | `0.2.0-dev.29` |
+| Baked in at build time (`KILN_LAUNCHER_CHANNEL`, `KILN_LAUNCHER_BETA`; `build.rs`) | channel `beta`, beta `3` | none (the channel follows the version: dev) |
+| The build's id: the manifest's `version`, the version its updater signature is made for | `0.2.0-dev.29+beta.3` | `0.2.0-dev.29` |
+| The manifest's `kiln` object | `"channel": "beta", "beta": 3` | `"channel": "dev"` |
+| Name of the folder, the files, the tag, the download path | `0.2.0-dev.29-beta.3` (`kiln-0.2.0-dev.29-beta.3/`, `v0.2.0-dev.29-beta.3`) | `0.2.0-dev.29` |
+
+The beta number sits in the id as build metadata (`+beta.3`): semver's precedence ignores it, so the updater's order
+is ours (`selfupdate/feed.rs`, `Build`): **newer version; or the same version with a higher beta number; or the same
+version as a final build** (a final build is above all its test builds). Any other build metadata still never decides.
+The updater's signature check (`requireSignedVersion`) compares the whole id, build metadata included (semver equality),
+so a test build's file can never be offered as another test build or as the final, nor the other way round. Tauri's
+bundler accepts only a numeric build number in the app version (the NSIS installer's file version), which is why the
+launcher itself keeps the plain version and the beta number is baked in. `Channel::of_build` of a test build is beta
+(baked in), never guessed from the version.
+
+| Running | Channel | Offered |
+|---|---|---|
+| release 0.2.0-dev.28 | Release (dev) | 0.2.0-dev.29 when it is out; never a test build |
+| release 0.2.0-dev.28 | Beta | beta 1 of 0.2.0-dev.29 (newer version) |
+| beta 1 of 0.2.0-dev.29 | Beta | beta 2 (same version, higher beta number) |
+| beta 2 of 0.2.0-dev.29 | Beta or Release | the final 0.2.0-dev.29 (same version, final) |
+| the final 0.2.0-dev.29 | Beta | beta 1 of 0.2.0-dev.30; never a late beta of 0.2.0-dev.29 |
+| beta 2 of 0.2.0-dev.29 | Release, with "Switch back to the release" | 0.2.0-dev.28 (lower: only as the switch the player started) |
+
 ## The self-update
 Direct builds only (the Nexus Mods build has none, above).
 - **Sources, in order:** frostdev.io, then GitHub Releases.
 
-  | Channel | frostdev.io | GitHub |
-  |---|---|---|
-  | stable | `https://frostdev.io/kiln/updates/stable/latest.json` | `https://github.com/frostdev-ops/kiln/releases/latest/download/latest.json` |
-  | dev | `https://frostdev.io/kiln/updates/dev/latest.json` | `https://github.com/frostdev-ops/kiln/releases/download/updates-dev/latest.json` |
+  | Channel | In the UI | frostdev.io | GitHub |
+  |---|---|---|---|
+  | stable | "Stable (none yet)", only where chosen | `https://frostdev.io/kiln/updates/stable/latest.json` | `https://github.com/frostdev-ops/kiln/releases/latest/download/latest.json` |
+  | dev | "Release" | `https://frostdev.io/kiln/updates/dev/latest.json` | `https://github.com/frostdev-ops/kiln/releases/download/updates-dev/latest.json` |
+  | beta (0.2.0-dev.29) | "Beta (test builds)" | `https://frostdev.io/kiln/updates/beta/latest.json` | `https://github.com/frostdev-ops/kiln/releases/download/updates-beta/latest.json` |
 
   GitHub's "latest" release skips pre-releases, so the dev channel has a fixed pre-release, `updates-dev`, whose
-  `latest.json` each dev release replaces. Files: `https://frostdev.io/kiln/downloads/<version>/<path in the release
-  folder>` and the GitHub release `v<version>`.
+  `latest.json` each dev release replaces; the beta channel has its own, `updates-beta`. Files:
+  `https://frostdev.io/kiln/downloads/<name>/<path in the release folder>` and the GitHub release `v<name>` (`<name>`:
+  the version, or for a test build `X.Y.Z-dev.N-beta.B`, "Test builds" below).
+  Every public release up to now is a dev build (`X.Y.Z-dev.N`): dev is the release line players have, so the UI calls
+  it "Release" until a stable release exists (`STABLE_RELEASED` in `launcher/src/api/channel.ts`; flip it with the first
+  stable release, then stable is "Release" and dev "Dev builds"). The stored values (`updateChannel` in settings.json)
+  stay `stable`, `dev` and `beta`; a launcher before dev.29 reads `beta` as no choice and follows its own channel.
 - **Fallback:** each source is tried with its own updater (`launcher/src-tauri/src/selfupdate/`). A check takes the
   first source that answers. A download falls back to GitHub when anything fails on frostdev.io: no manifest
   (network, 404, invalid JSON), the download, the signature, or the sha256 the manifest lists. `launcher.log` says
