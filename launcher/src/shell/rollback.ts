@@ -8,10 +8,12 @@ import type { GameId, LibraryEntry, LibraryVersion, ModKind, RollbackReport } fr
 import { qk } from "../api/hooks";
 import { toast } from "../ui";
 
-/** The kept versions a mod can roll back to: never the one its profile entry uses (by version and hash: two builds can
- *  share a version), newest kept first. */
-export function rollbackTargets(lib: LibraryEntry | null, entry: { version: string; hash: string } | null): LibraryVersion[] {
-  return (lib?.versions ?? []).filter((v) => !!v.kept && !(entry && v.version === entry.version && v.hash === entry.hash))
+/** The kept versions a mod can roll back to in the profile `profileId`: the ones that profile's change kept (another
+ *  profile's are that profile's), never the one its entry uses (by version and hash: two builds can share a version),
+ *  newest kept first. */
+export function rollbackTargets(lib: LibraryEntry | null, entry: { version: string; hash: string } | null, profileId: string | null = null): LibraryVersion[] {
+  const mine = (v: LibraryVersion) => !v.kept?.profiles?.length || (profileId !== null && v.kept.profiles.includes(profileId));
+  return (lib?.versions ?? []).filter((v) => !!v.kept && mine(v) && !(entry && v.version === entry.version && v.hash === entry.hash))
     .sort((a, b) => (b.kept!.kept).localeCompare(a.kept!.kept));
 }
 

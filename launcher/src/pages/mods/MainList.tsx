@@ -195,7 +195,7 @@ export function MainList({ game, mods, running }: { game: GameInstall; mods: Mod
         onSelect: () => void cookAgain(game.id, r.id, r.name).then(() => qc.invalidateQueries({ queryKey: ["cook_plan"] })) }] : []),
       ...otherVersions(r.lib, cur).map((v) => ({ label: `Use ${v.version}`, disabled: !loaded, onSelect: () => mods.setVersion(r, v.version, v.hash) })),
       // an earlier version an update kept, with its settings (shell/rollback.ts)
-      ...(r.kind && r.entry && pid ? rollbackTargets(r.lib, r.entry).map((v) => ({ label: `Roll back to ${v.version}`, disabled: !!busy,
+      ...(r.kind && r.entry && pid ? rollbackTargets(r.lib, r.entry, pid).map((v) => ({ label: `Roll back to ${v.version}`, disabled: !!busy,
         onSelect: () => void rollBack(qc, game.id, pid, r.kind!, r.id, r.name, v, mods.edit.flush) })) : []),
       ...(folder ? [{ label: "Open folder", onSelect: () => api.appOpenPath(folder).catch((e) => toast.error(e)) }] : []),
       ...(r.kind && r.lib ? [{ label: "Updates…", onSelect: () => setSource({ kind: r.kind!, id: r.id, name: r.name }) }] : []),

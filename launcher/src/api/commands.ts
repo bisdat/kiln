@@ -466,6 +466,8 @@ export interface KeptInfo {
   /** The settings files kept with it (relative to the game folder) and their bytes. */
   settings: string[];
   settingsSize: number;
+  /** The profiles whose change kept it: only they roll back to it (absent or empty: any). */
+  profiles?: string[];
 }
 /** A version of one mod (kiln_manage::kept::VersionRef). */
 export interface VersionRef { version: string; hash: string }

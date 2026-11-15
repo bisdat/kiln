@@ -125,6 +125,13 @@ pub struct KeptVersion {
     pub settings: KeptSettings,
 }
 
+impl KeptVersion {
+    /// Kept by the change of `profile` (an entry that does not say is anyone's).
+    fn of_profile(&self, profile: &str) -> bool {
+        self.profile.as_deref().is_none_or(|p| p == profile)
+    }
+}
+
 /// Settings waiting for the next placement of a version a roll back put into a profile ([`restore_after_place`]), in
 /// the game folder they came from (`settings.game`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -212,6 +219,9 @@ pub struct KeptInfo {
     /// Their bytes (the entry's own size is the version's `size`).
     #[serde(default)]
     pub settings_size: u64,
+    /// The profiles whose change kept it (only they roll back to it); empty: any.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub profiles: Vec<String>,
 }
 
 /// What [`rollback`] did.
@@ -523,9 +533,12 @@ pub(crate) fn info(dirs: &DataDirs) -> std::collections::HashMap<String, KeptInf
     let Some(st) = view(dirs) else { return out };
     for m in st.mods {
         for v in m.kept {
-            out.insert(info_key(m.kind, &m.id, &v.hash), KeptInfo {
+            let profile = v.profile.clone();
+            let info = out.entry(info_key(m.kind, &m.id, &v.hash)).or_insert_with(|| KeptInfo {
                 kept: v.kept, replaced_by: v.replaced_by.map(|r| r.version), settings: v.settings.files, settings_size: v.settings.size,
+                profiles: Vec::new(),
             });
+            if let Some(p) = profile.filter(|p| !info.profiles.contains(p)) { info.profiles.push(p); }
         }
     }
     out
@@ -578,8 +591,18 @@ pub(crate) fn forget(dirs: &DataDirs, r: &LibraryRef) {
 pub fn apply_count(dirs: &DataDirs) -> Result<()> {
     if nothing_kept(dirs) { return Ok(()); }
     let keep = keep_count(dirs) as usize;
-    update(dirs, |st, _| for m in &mut st.mods { m.kept.truncate(keep); })?;
+    update(dirs, |st, _| for m in &mut st.mods { truncate_per_profile(&mut m.kept, keep); })?;
     Ok(())
+}
+
+/// At most `keep` kept versions per profile that left them (newest kept first).
+fn truncate_per_profile(kept: &mut Vec<KeptVersion>, keep: usize) {
+    let mut seen: BTreeMap<Option<String>, usize> = BTreeMap::new();
+    kept.retain(|v| {
+        let n = seen.entry(v.profile.clone()).or_insert(0);
+        *n += 1;
+        *n <= keep
+    });
 }
 
 // ------------------------------------------------------------------------------------------------ settings copies
@@ -908,13 +931,14 @@ fn follow_one(dirs: &DataDirs, st: &mut KeptState, profile_id: &str, games: &[Pa
     let m = mod_of(st, kind, &from.id);
     // this profile's roll back to `from` that was never placed: the settings waiting for it are still the ones it has
     let mut from_settings = None;
-    if let Some(i) = m.restores.iter().position(|r| r.version == from.version && r.hash == from.hash) {
+    if let Some(i) = m.restores.iter().position(|r| r.profile == profile_id && r.version == from.version && r.hash == from.hash) {
         from_settings = Some(m.restores.remove(i).settings);
     }
-    // a kept version comes back: its settings wait for its next placement in this profile (one restore per profile)
-    if let Some(i) = m.kept.iter().position(|v| v.version == to.version && v.hash == to.hash) {
+    // a version this profile kept comes back: its settings wait for its next placement in this profile (one restore per
+    // profile). One another profile kept stays that profile's.
+    if let Some(i) = m.kept.iter().position(|v| v.version == to.version && v.hash == to.hash && v.of_profile(profile_id)) {
         let v = m.kept.remove(i);
-        m.restores.clear();
+        m.restores.retain(|r| r.profile != profile_id);
         if !v.settings.is_empty() {
             m.restores.push(PendingRestore { version: v.version, hash: v.hash, profile: profile_id.to_string(), settings: v.settings });
         }
@@ -930,14 +954,14 @@ fn follow_one(dirs: &DataDirs, st: &mut KeptState, profile_id: &str, games: &[Pa
         });
         match settings {
             Err(why) => {
-                m.kept.retain(|v| !(v.version == from.version && v.hash == from.hash));
+                m.kept.retain(|v| !(v.version == from.version && v.hash == from.hash && v.of_profile(profile_id)));
                 notices.push(format!("{name} {} was not kept for a roll back: {why}. It stays in your Library as an earlier version.", from.version));
             }
             Ok(s) => {
                 for left in &s.left_out {
                     notices.push(format!("{name} {}: kept without {left}", from.version));
                 }
-                m.kept.retain(|v| !(v.version == from.version && v.hash == from.hash));
+                m.kept.retain(|v| !(v.version == from.version && v.hash == from.hash && v.of_profile(profile_id)));
                 m.kept.insert(0, KeptVersion {
                     version: from.version.clone(), hash: from.hash.clone(), kept: crate::util::now_rfc3339(), replaced_by: Some(to_v),
                     profile: Some(profile_id.to_string()), settings: s,
@@ -945,7 +969,7 @@ fn follow_one(dirs: &DataDirs, st: &mut KeptState, profile_id: &str, games: &[Pa
             }
         }
     }
-    m.kept.truncate(keep);
+    truncate_per_profile(&mut m.kept, keep);
 }
 
 /// [`prepare`] for the changes of an add or its Undo ([`ProfileChange`]: `before` -> `after`, or back with `undo`).
@@ -980,7 +1004,7 @@ pub fn follow_saved(dirs: &DataDirs, before: &Profile, after: &Profile) -> Vec<S
 // ------------------------------------------------------------------------------------------------ roll back
 
 /// "Roll back to <version>": in profile `profile_id`, the mod `kind`/`id` uses the kept version `to` (None: the newest
-/// kept one) instead of its current entry, switched on or off as it was. The profile is saved, nothing else: the
+/// one this profile's change kept; another profile's kept versions are that profile's) instead of its current entry, switched on or off as it was. The profile is saved, nothing else: the
 /// caller writes the game's profile.json again as after any profile save, and the kept settings go back into the
 /// mod's game-folder copy at that placement ([`restore_after_place`]). The version rolled away from becomes the kept
 /// one, with its settings as its copies hold them now (in the games where the profile is active; `game`: one more).
@@ -994,7 +1018,8 @@ pub fn rollback(dirs: &DataDirs, game: Option<&crate::game::GameInstall>, profil
     };
     let before = p.mods.list(kind)[i].clone();
     let name = shown(dirs, kind, &before);
-    let kept: Vec<KeptVersion> = kept_versions(dirs, kind, id).into_iter().filter(|v| !(v.version == before.version && v.hash == before.hash)).collect();
+    let kept: Vec<KeptVersion> = kept_versions(dirs, kind, id).into_iter()
+        .filter(|v| v.of_profile(profile_id) && !(v.version == before.version && v.hash == before.hash)).collect();
     let pick = match to {
         Some(t) => kept.iter().find(|v| v.version == t.version && v.hash == t.hash).ok_or_else(|| Error::not_found(format!(
             "{name} {} is not kept for a roll back (any more): it was removed, or a newer roll back took its place.", t.version)))?,
@@ -1016,7 +1041,8 @@ pub fn rollback(dirs: &DataDirs, game: Option<&crate::game::GameInstall>, profil
         }
     };
     let mut notices = prepared.commit();
-    let is_kept = keep_count(dirs) > 0 && kept_versions(dirs, kind, id).iter().any(|v| v.version == before.version && v.hash == before.hash);
+    let is_kept = keep_count(dirs) > 0 && kept_versions(dirs, kind, id).iter()
+        .any(|v| v.version == before.version && v.hash == before.hash && v.of_profile(profile_id));
     if keep_count(dirs) == 0 {
         notices.push(format!("{name} {} is not kept (Settings keeps no earlier versions): it stays in your Library as an earlier version.", before.version));
     }
@@ -1029,6 +1055,11 @@ pub fn rollback(dirs: &DataDirs, game: Option<&crate::game::GameInstall>, profil
 }
 
 // ------------------------------------------------------------------------------------------------ restore
+
+/// Is `game` the game folder a restore's settings came from (any, when it does not say)?
+fn same_game(r: &PendingRestore, game: &Path) -> bool {
+    r.settings.game.as_deref().is_none_or(|g| crate::steam::same_path(&crate::steam::canon(Path::new(g)), &crate::steam::canon(game)))
+}
 
 /// After `engine_mods::place` placed `profile` in `game`: the settings a roll back of this profile kept, in this game,
 /// go back into the copies of the version it put into the profile (each file written over the one the placement carried
@@ -1044,7 +1075,7 @@ pub fn restore_after_place(dirs: &DataDirs, profile: &Profile, game: &Path) -> V
             let (kind, id) = (m.kind, m.id.clone());
             let mut waiting = Vec::new();
             for r in std::mem::take(&mut m.restores) {
-                if r.profile != profile.id { waiting.push(r); continue; }
+                if r.profile != profile.id || !same_game(&r, game) { waiting.push(r); continue; }
                 if !lists(profile, kind, &id, &r.version, &r.hash) { continue; } // the profile moved on: dropped
                 let copies = copies_of(game, kind, &id, &r.version, &r.hash);
                 if copies.is_empty() { waiting.push(r); continue; }

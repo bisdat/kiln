@@ -248,7 +248,9 @@ ShroudForge, SET, Greeneye, Flame, XHL and the other loaders' mods.
   the version you rolled back from is not offered to you again as an update; a newer upload still is. A notice can't
   be dismissed or pinned (there is no such switch yet).
 - **Another profile** never uses a kept version unless you pick it: switching the mod on there takes the newest version
-  that is not a kept one.
+  that is not a kept one. A kept version belongs to the profile it was kept in: only that profile offers **Roll back
+  to** it, another profile's update or roll back of the same mod never takes it, and the settings a roll back brings
+  back go into that profile's copy in the game they came from (with the profile loaded in another game they wait).
 - **Older launchers** (before dev.29) see a kept version as one more version of the mod ("Use <version>"), and their
   Clean up may remove it; dev.29 then forgets it.
 

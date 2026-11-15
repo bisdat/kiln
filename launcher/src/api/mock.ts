@@ -182,7 +182,7 @@ if (KEPT_SEED) {
 
 /** library_rollback and an Undo of one (profile_revert): the version left is kept, a kept one that comes back is not;
  *  kept versions after the others (kiln_manage::kept::follow). */
-function followKept(kind: ModKind, id: string, from: VersionRef, to: VersionRef) {
+function followKept(profileId: string, kind: ModKind, id: string, from: VersionRef, to: VersionRef) {
   const e = library.find((l) => l.kind === kind && l.id === id);
   if (!e) return;
   const keep = settings.keepVersions ?? 1;
@@ -191,7 +191,7 @@ function followKept(kind: ModKind, id: string, from: VersionRef, to: VersionRef)
   const settingsOf = back?.kept?.settings ?? [];
   if (back) back.kept = null;
   const left = at(from);
-  if (left && keep > 0) left.kept = { kept: now(), replacedBy: to.version, settings: settingsOf.length ? settingsOf : [], settingsSize: 0 };
+  if (left && keep > 0) left.kept = { kept: now(), replacedBy: to.version, settings: settingsOf.length ? settingsOf : [], settingsSize: 0, profiles: [profileId] };
   const kept = e.versions.filter((v) => v.kept).sort((a, b) => b.kept!.kept.localeCompare(a.kept!.kept));
   kept.slice(keep).forEach((v) => { v.kept = null; });
   e.versions.sort((a, b) => Number(!!a.kept) - Number(!!b.kept) || b.version.localeCompare(a.version));
@@ -213,7 +213,7 @@ function mockRollback(a: Record<string, unknown>): RollbackReport {
   list[i] = after;
   const next = { ...p, generation: p.generation + 1, updated: now() };
   profiles.set(pid, next);
-  followKept(kind, id, before, after);
+  followKept(pid, kind, id, before, after);
   reapplyWhereActive(pid);
   return { profileId: pid, profileName: p.name, kind, id, name: e?.name ?? id, from: { version: before.version, hash: before.hash },
     to: { version: after.version, hash: after.hash }, changes: [{ kind, before, after }], kept: (settings.keepVersions ?? 1) > 0, settings: files, notices: [] };
@@ -970,7 +970,7 @@ const handlers: Record<string, Handler> = {
       const i = list.findIndex((m) => m.id === c.after.id);
       if (i < 0 || list[i].version !== c.after.version || list[i].hash !== c.after.hash || list[i].enabled !== c.after.enabled) continue;
       if (c.before) list[i] = c.before; else list.splice(i, 1);
-      if (c.before && (c.before.version !== c.after.version || c.before.hash !== c.after.hash)) followKept(c.kind, c.after.id, c.after, c.before);
+      if (c.before && (c.before.version !== c.after.version || c.before.hash !== c.after.hash)) followKept(id, c.kind, c.after.id, c.after, c.before);
       changed = true;
     }
     if (!changed) return p;

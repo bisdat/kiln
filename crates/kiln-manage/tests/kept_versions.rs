@@ -463,3 +463,42 @@ fn removing_a_mod_cancels_its_pending_restore_before_it_is_added_again() {
     w.reapply();
     assert_eq!(read(&w.g.path, INI), "zoom=9", "the canceled restore must not overwrite settings on a later add");
 }
+
+/// Two profiles in two games use the same mod. A roll back's settings belong to its profile and the game they came
+/// from: the other profile's update of the same version does not take them, and the same profile placed in the other
+/// game does not get them; placed in its own game, it does.
+#[test]
+fn a_roll_backs_settings_belong_to_its_profile_and_its_game() {
+    let w = world("two-games");
+    w.drop_mod(&greeneye(&w.root, "1.0.0"));
+    put(&w.g.path, INI, b"zoom=1");
+    w.drop_mod(&greeneye(&w.root, "2.0.0"));
+    put(&w.g.path, INI, b"zoom=9");
+    let p = w.pid();
+    // a second game with its own profile, Q, on 1.0.0
+    let g2 = GameInstall { id: "g-kept-2".into(), path: w.root.join("game2"), ..w.g.clone() };
+    put(&g2.path, "enshrouded.exe", b"MZ");
+    std::fs::create_dir_all(g2.path.join("kiln")).unwrap();
+    kiln_manage::game::write_record(&w.dirs, &g2, None).unwrap();
+    let one = library::list(&w.dirs, Some(ModKind::Greeneye)).unwrap()[0].versions.iter().find(|v| v.version == "1.0.0").cloned().unwrap();
+    let mut q = profile::create(&w.dirs, "Second", None).unwrap();
+    q.mods.greeneye.push(profile::ProfileMod { id: "worstmap".into(), version: one.version.clone(), hash: one.hash.clone(), enabled: true });
+    let q = profile::save(&w.dirs, &q).unwrap();
+    profile::activate(&w.dirs, &q.id, &g2).unwrap();
+    put(&g2.path, INI, b"zoom=5");
+    // P rolls back in the first game (the game folder follows at its next placement)
+    kept::rollback(&w.dirs, Some(&w.g), &p, ModKind::Greeneye, "worstmap", None).unwrap();
+    // Q is placed and updates to 2.0.0 in the second game: its change must not take P's settings
+    profile::refresh_active(&w.dirs, &g2).unwrap();
+    assert_eq!(read(&g2.path, INI), "zoom=5", "P's settings never go into Q's game");
+    quick::add_with(&w.dirs, &g2, &[greeneye(&w.root, "2.0.0")], false, &mut NoProgress).unwrap();
+    assert_eq!(read(&g2.path, INI), "zoom=5");
+    // P placed in the second game too: not the game its settings came from
+    profile::activate(&w.dirs, &p, &g2).unwrap();
+    assert_eq!(engine_mods::marker(&g2.path.join(MAP)).unwrap().version, "1.0.0");
+    assert_eq!(read(&g2.path, INI), "zoom=5", "P's settings came from the first game");
+    // P placed in its own game: 1.0.0 with its old settings
+    w.reapply();
+    assert_eq!(engine_mods::marker(&w.g.path.join(MAP)).unwrap().version, "1.0.0");
+    assert_eq!(read(&w.g.path, INI), "zoom=1");
+}

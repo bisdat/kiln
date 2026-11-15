@@ -26,6 +26,15 @@ test("a kept version is offered as Roll back to, never as Use, and never the one
   expect(rollbackTargets(null, null)).toEqual([]);
 });
 
+test("only the profile whose change kept a version rolls back to it", () => {
+  const mine = { ...kept("2026-11-14T00:00:00Z"), profiles: ["my-mods"] };
+  const theirs = { ...kept("2026-11-13T00:00:00Z"), profiles: ["server-isles"] };
+  const e = entry("map", [ver("2.0.0"), ver("1.0.0", mine), ver("0.9.0", theirs), ver("0.8.0", kept("2026-11-01T00:00:00Z"))]);
+  const inUse = { version: "2.0.0", hash: hash("2.0.0") };
+  expect(rollbackTargets(e, inUse, "my-mods").map((v) => v.version)).toEqual(["1.0.0", "0.8.0"]);
+  expect(rollbackTargets(e, inUse, "server-isles").map((v) => v.version)).toEqual(["0.9.0", "0.8.0"]);
+});
+
 test("two builds of one version: the kept one is told apart by its hash", () => {
   const e = entry("fly", [ver("0.0.0", null, "new"), ver("0.0.0", kept("2026-11-14T00:00:00Z"), "old")]);
   expect(rollbackTargets(e, { version: "0.0.0", hash: hash("new") }).map((v) => v.hash)).toEqual([hash("old")]);

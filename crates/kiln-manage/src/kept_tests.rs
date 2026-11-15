@@ -334,3 +334,44 @@ fn the_next_start_repairs_what_the_state_and_the_disk_disagree_on() {
     assert!(w.kept().is_empty());
     w.tidy_on_disk();
 }
+
+/// Two profiles in two games, the same mod: a roll back's restore belongs to its profile and to the game its settings
+/// came from. The other profile's placement, change and update leave it alone; the same profile placed in the other
+/// game does not apply it either.
+#[test]
+fn a_restore_belongs_to_its_profile_and_its_game() {
+    let w = World::updated("two");
+    let p = w.pid(&w.g);
+    let g2 = install(&w.root, "game2", &w.dirs);
+    let q = crate::profile::create(&w.dirs, "Second", None).unwrap();
+    let mut q2 = q.clone();
+    let one = crate::library::list(&w.dirs, Some(ModKind::Greeneye)).unwrap()[0].versions.iter().find(|v| v.version == "1.0.0").cloned().unwrap();
+    q2.mods.greeneye.push(ProfileMod { id: "worstmap".into(), version: one.version.clone(), hash: one.hash.clone(), enabled: true });
+    let q = crate::profile::save(&w.dirs, &q2).unwrap();
+    crate::profile::activate(&w.dirs, &q.id, &g2).unwrap();
+    w.write(&g2, "5");
+    // P rolls back in the first game: its restore waits for P's placement there
+    w.rollback().unwrap();
+    assert_eq!(pending_restores(&w.dirs, ModKind::Greeneye, "worstmap").iter().map(|r| r.profile.as_str()).collect::<Vec<_>>(), [p.as_str()]);
+    // Q, which uses the same version in the second game, is placed: P's restore is not applied there, nor taken
+    crate::profile::refresh_active(&w.dirs, &g2).unwrap();
+    assert_eq!(w.settings(&g2), ("1.0.0".into(), "zoom=5".into(), "chests=5".into()));
+    assert_eq!(pending_restores(&w.dirs, ModKind::Greeneye, "worstmap").len(), 1);
+    // Q updates to 2.0.0 in the second game: its own change keeps its 1.0.0, and P's restore is still there
+    w.drop_in(&g2, "2.0.0");
+    assert_eq!(w.version_in(&g2), "2.0.0");
+    assert_eq!(pending_restores(&w.dirs, ModKind::Greeneye, "worstmap").iter().map(|r| r.profile.as_str()).collect::<Vec<_>>(), [p.as_str()]);
+    // P's kept 2.0.0 stays P's (Q's change to that version does not take it), and Q's 1.0.0 is Q's own
+    let kept: Vec<(String, Option<String>)> = kept_versions(&w.dirs, ModKind::Greeneye, "worstmap").into_iter().map(|v| (v.version, v.profile)).collect();
+    assert!(kept.contains(&("2.0.0".into(), Some(p.clone()))) && kept.contains(&("1.0.0".into(), Some(q.id.clone()))), "{kept:?}");
+    // P placed in the second game (it is active there now too): not the game its settings came from, not applied
+    crate::profile::activate(&w.dirs, &p, &g2).unwrap();
+    assert_eq!(w.settings(&g2).0, "1.0.0");
+    assert_ne!(w.settings(&g2).1, "zoom=1", "P's restore came from the first game");
+    assert_eq!(pending_restores(&w.dirs, ModKind::Greeneye, "worstmap").len(), 1);
+    // P placed in its own game: applied there
+    crate::profile::refresh_active(&w.dirs, &w.g).unwrap();
+    assert_settings(&w, "1.0.0", OLD);
+    assert!(pending_restores(&w.dirs, ModKind::Greeneye, "worstmap").is_empty());
+    w.tidy_on_disk();
+}
