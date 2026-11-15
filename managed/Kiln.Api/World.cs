@@ -3,6 +3,19 @@ using System.Numerics;
 
 namespace Kiln;
 
+/// <summary>The kinds of world a process runs (kiln_api.h's KILN_WORLD_* values). A dedicated server runs the server
+/// world; a game client runs the client world and its prediction world while in game, plus the server world while it
+/// hosts (single player or co-op host).</summary>
+public enum WorldKind
+{
+    /// <summary>The authoritative gameplay world: a dedicated server's, or a host's.</summary>
+    Server = 0,
+    /// <summary>The client's prediction storage; it runs the client world's programs.</summary>
+    Prediction = 1,
+    /// <summary>The client's own world: local player, camera, presentation.</summary>
+    Client = 2,
+}
+
 /// <summary>A server-world entity id. Ids can be reused after an entity is destroyed. On a dedicated server player
 /// entities are slot + 1 (1..16 with 16 slots); <see cref="IsPlayer"/> tests the engine's reserved range 1..1023.</summary>
 public readonly record struct EntityId(uint Value)

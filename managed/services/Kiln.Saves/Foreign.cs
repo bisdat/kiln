@@ -89,10 +89,12 @@ internal static unsafe class SpawnLink
     }
     public static bool WorldRunning => T != null && T->WorldState() == 2;
 
-    internal sealed record Ent(EntityId Entity, Guid? Template, string? Name, WorldPosition Position, float Yaw);
+    /// <summary>Live identity and transform; Generation is the same SpawnTime used by native tracked writes, null when absent.</summary>
+    internal sealed record Ent(EntityId Entity, Guid? Template, string? Name, WorldPosition Position, float Yaw, long? Generation = null);
 
     /// <summary>Tick thread. Null when the entity does not exist; throws when kiln.spawn could not tell (wrong thread,
-    /// world not there), so callers never mistake "unknown" for "destroyed".</summary>
+    /// world not there), so callers never mistake "unknown" for "destroyed". Includes SpawnTime when present;
+    /// a missing generation never proves that a reused id still names the original entity.</summary>
     public static Ent? Inspect(EntityId e)
     {
         var t = T;
@@ -102,7 +104,7 @@ internal static unsafe class SpawnLink
         if (rc == 2) return null;  // KILN_ERR_NOT_FOUND
         if (rc != 0) throw new InvalidOperationException($"kiln.spawn could not inspect entity {e} (rc {rc})");
         Guid? g = s.HasTemplate != 0 ? new Guid(new ReadOnlySpan<byte>(s.Template, 16)) : null;
-        return new Ent(e, g, g is { } x ? Template(x).name : null, new WorldPosition(s.Position.X, s.Position.Y, s.Position.Z), s.Yaw);
+        return new Ent(e, g, g is { } x ? Template(x).name : null, new WorldPosition(s.Position.X, s.Position.Y, s.Position.Z), s.Yaw, s.HasSpawnTime != 0 ? s.SpawnTime : null);
     }
 
     /// <summary>Tick thread. Where the entity stands now (dev.27, instance data sync's "nearby"); null when it does not

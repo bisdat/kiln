@@ -27,7 +27,8 @@ public sealed class BootGalleryMod : Mod
         Required(effect.Ok, effect.Reason);
         // a number from the game's data: the token stacks like the game's wood logs (at most 250)
         var stack = wood.Data!.Value.TryGetProperty("maxStackSize", out var max) && max.TryGetInt32(out var n) ? Math.Min(250, n) : 20;
-        var item = definitions.Define("wood-token", new ItemBlock { Name = "Boot Token", Stack = stack });
+        // its icon is a PNG of the mod's folder (icons/token.png, copied by the project), as for an item defined in OnLoad
+        var item = definitions.Define("wood-token", new ItemBlock { Name = "Boot Token", Stack = stack, Visual = new VisualBlock { Icon = "icons/token.png" } });
         Required(item.Ok, item.Reason);
         var spell = definitions.Define("cold-bolt", new SpellBlock { Name = "Boot Bolt", Cast = new CastBlock { ManaCost = 2 }, Delivery = new ProjectileBlock { OnHit = ["cold-hit"] } });
         Required(spell.Ok, spell.Reason);

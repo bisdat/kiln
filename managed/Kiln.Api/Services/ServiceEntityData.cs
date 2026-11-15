@@ -14,7 +14,7 @@ internal static class ServiceEntityData
     internal interface IStore
     {
         /// <summary>Records <paramref name="json"/> (null: removes the key). True when the entity has a positional identity
-        /// that a save keeps (a known, saved world template), so the value comes back after a restart; false (nothing
+        /// that a save keeps (a known, saved world template), so the value is retained for a restart (strict scopes may wait rather than replay); false (nothing
         /// recorded) for a session-only entity or when kiln.saves cannot keep data now.</summary>
         bool Set(EntityId entity, string scope, string key, string? json);
 
@@ -27,11 +27,26 @@ internal static class ServiceEntityData
         /// <summary>The keys and values of <paramref name="scope"/> on a live entity (empty when none).</summary>
         IReadOnlyDictionary<string, string> Values(EntityId entity, string scope);
 
-        /// <summary>True when <paramref name="entity"/> is still the entity the value was matched to (its record is live,
-        /// holds the key, and the entity has the record's template): checked right before a value is used, because an
-        /// entity id can be handed out again to another entity.</summary>
+        /// <summary>True when the live record holds the key and template. Strict scopes also require equal optional
+        /// SpawnTime values and current positional uniqueness when both are absent (normal after a save load). This is
+        /// positional identity, not proof of an incarnation; checked immediately before replay.</summary>
         bool Holds(EntityId entity, string scope, string key);
+
+        /// <summary>Strict replay records, including retained waiting values and their reason. Empty for stores without strict identity support.</summary>
+        IReadOnlyList<Replay> Replays(string scope, string key) => [];
     }
+
+    /// <summary>One retained service value; Entity is None before matching. Reason says why it waits (null: it is on its
+    /// entity); Refused is true when the identity was refused (ambiguity), false while the entity has only not been found yet.</summary>
+    internal sealed record Replay(EntityId Entity, Guid? Template, WorldPosition Position, string Json, string? Reason, bool Refused = false);
+
+    private static readonly HashSet<string> StrictScopes = new(StringComparer.Ordinal);
+    /// <summary>Opt in optional-generation equality and unique positional matching for this scope only.
+    /// Missing SpawnTime is normal for loaded entities; matching remains positional identity, not proof.</summary>
+    internal static void UseStrict(string scope) => StrictScopes.Add(scope);
+    /// <summary>Whether this scope opted in; default matching remains lenient for every other caller.</summary>
+    internal static bool IsStrict(string scope) => StrictScopes.Contains(scope);
+
 
     /// <summary>What a service is told for its scope.</summary>
     internal sealed class Consumer

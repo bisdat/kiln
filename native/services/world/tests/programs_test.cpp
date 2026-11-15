@@ -27,6 +27,7 @@ bool map_find_u16(uintptr_t,uint32_t key,uint16_t* value) {
     return true;
 }
 void teleport_in_program(KilnProgramCtx*) {}
+void writes_world_changing() {}  // tracked-write lifecycle belongs to writes_test; this fixture tests programs
 void writes_before_world(uintptr_t) {}
 void writes_after_world() {}
 uint32_t writes_capability() { return KILN_WORLD_CAP_TRACKED_WRITES; }

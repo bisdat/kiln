@@ -16,6 +16,7 @@
 #include <windows.h>
 #endif
 
+#include "layout.h"
 #include "services/kiln_caps.h"
 #include "wraps.h"
 
@@ -35,7 +36,11 @@ struct Entry {
     const std::string* name = nullptr;  // interned: valid for the life of the process
     uint32_t desc_flags = 0, entry_flags = 0, flags = 0;
     uintptr_t entry = 0, desc = 0, update = 0;
+    std::vector<const std::string*> lists[KILN_GAME_LISTS];  // the descriptor's names, interned
 };
+static_assert(int{KILN_GAME_LISTS} == int{L_COUNT} && int{KILN_GAME_LIST_EVENTS_OUT} == int{L_EOUT} &&
+                  int{KILN_GAME_LIST_SYS_READ} == int{L_SREAD} && int{KILN_GAME_LIST_WRITE} == int{L_WRITE},
+              "the ABI's list ids are layout.h's");
 
 struct Directory {
     uint32_t kind = 0;
@@ -142,6 +147,18 @@ std::shared_ptr<Directory> read_table(uint32_t kind, uintptr_t world, uint16_t c
             std::snprintf(name, sizeof name, "#%u", static_cast<unsigned>(i));
         e.name = intern(std::string_view(name, std::strlen(name)));
         if (e.desc) seh_copy(&e.desc_flags, reinterpret_cast<const void*>(e.desc + offsetof(EngineDesc, flags)), 4);
+        {
+            ProgramLayout names;
+            bool no_view = false;
+            std::string why;
+            if (e.desc && read_desc(reinterpret_cast<const EngineDesc*>(e.desc), names, &no_view, why)) {
+                for (int id = 0; id < L_COUNT; ++id)
+                    for (const std::string& n : names.lists[id].names) e.lists[id].push_back(intern(n));
+                if (no_view) e.flags |= KILN_GAME_PROGRAM_NO_VIEW;
+            } else {
+                e.flags |= KILN_GAME_PROGRAM_NO_VIEW;
+            }
+        }
         if (in_image(e.desc)) e.flags |= KILN_GAME_PROGRAM_GAME;
         if (!e.update) e.flags |= KILN_GAME_PROGRAM_NO_UPDATE;
         if (e.flags & KILN_GAME_PROGRAM_GAME) {
@@ -383,6 +400,10 @@ uint64_t game_programs_step(uint32_t kind) { return kind < kKinds ? g_step[kind]
 
 // ---- the table ----
 
+uint64_t KILN_CALL game_world_session(uint32_t kind) {
+    return kind < kKinds ? g_generation[kind].load(std::memory_order_acquire) : 0;
+}
+
 int32_t KILN_CALL game_program_find(uint32_t kind, KilnStr name) {
     const auto d = directory(kind);
     if (!d) return -1;
@@ -408,6 +429,14 @@ KilnResult KILN_CALL game_program_info(uint32_t kind, int32_t index, KilnGamePro
     out->flags = e.flags;
     game_program_wrap_stats(kind, e.name, out);
     return KILN_OK;
+}
+
+int32_t KILN_CALL game_program_list(uint32_t kind, int32_t index, int32_t list, KilnStr* names, uint32_t capacity) {
+    const auto d = directory(kind);
+    if (!d || index < 0 || static_cast<size_t>(index) >= d->entries.size() || list < 0 || list >= KILN_GAME_LISTS) return -1;
+    const auto& v = d->entries[static_cast<size_t>(index)].lists[list];
+    for (uint32_t i = 0; names && i < capacity && i < v.size(); ++i) names[i] = kstr(*v[i]);
+    return static_cast<int32_t>(v.size());
 }
 
 KilnResult KILN_CALL game_programs_status(KilnGameProgramsStatus* out) {

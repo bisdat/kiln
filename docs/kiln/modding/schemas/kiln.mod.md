@@ -33,6 +33,7 @@ Validated by Kiln.Host at load time and by Kiln.Sdk at build time (managed/Kiln.
 | `loadBefore` | array of [id](#id) |  | Load before these mods when they are present (no requirement). |
 | `name` | string |  | Display name (default: the id). |
 | `side` | `"server"` \| `"client"` \| `"both"` |  | Where the mod loads; mods for the other side are skipped. Default `"server"`. |
+| `systems` | object |  | What the mod does to the game's own ECS programs (Kiln.Systems, docs/kiln/services/systems.md). |
 | `tests` | boolean or object |  | Kiln.Testing: true = autoRun. |
 | `updates` | object \| null |  | Where new versions of the mod are published, for the launcher's and `kiln updates check`'s update notice (a notice and a link: Kiln never downloads or installs a version by itself). A tagged union by provider; each provider takes only its own properties. Never a reason to refuse a mod: a value Kiln can't read is ignored with a warning (KL103), and a provider this Kiln does not know means "update checks unsupported". Docs: docs/kiln/modding/manifest.md, "updates". Kiln warns (not refused). |
 | `url` | string |  |  |

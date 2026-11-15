@@ -99,3 +99,7 @@ override Kiln.PickupReevaluationResult.ToString() -> string!
 static Kiln.PickupReevaluationResult.operator !=(Kiln.PickupReevaluationResult? left, Kiln.PickupReevaluationResult? right) -> bool
 static Kiln.PickupReevaluationResult.operator ==(Kiln.PickupReevaluationResult? left, Kiln.PickupReevaluationResult? right) -> bool
 static Kiln.Decisions.ReevaluatePickup(Kiln.EntityId drop, Kiln.EntityId receiver) -> Kiln.PickupReevaluationResult!
+Kiln.WorldKind
+Kiln.WorldKind.Client = 2 -> Kiln.WorldKind
+Kiln.WorldKind.Prediction = 1 -> Kiln.WorldKind
+Kiln.WorldKind.Server = 0 -> Kiln.WorldKind
