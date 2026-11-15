@@ -111,13 +111,16 @@ internal static unsafe class SystemsNative
         public delegate* unmanaged[Cdecl]<Slice*, ulong*, int, int, int> GameSliceAttrValidate;
         public delegate* unmanaged[Cdecl]<uint, ulong> GameWorldSession;
         public delegate* unmanaged[Cdecl]<uint, int, uint*, byte*, uint, uint*, int> GameProgramContract;  // since 0.2.0-dev.29
+        // since 0.2.0-dev.29 (06c S5): foreign views, for native services (kiln.abilities' natives); no managed caller
+        public nint ForeignLayout, ForeignSlot, ForeignCheck, ForeignRead, ForeignWrite, ForeignAttrChanged;
     }
 
     // The M2 prefix remains sufficient for untyped wraps. Probe the optional S7 tail separately.
     [StructLayout(LayoutKind.Sequential, Size = 440)]
     private struct M2Table { public ServiceHeader Header; }
 
-    internal static bool HasContract(Table* t) => t != null && t->Header.Size >= (uint)sizeof(Table) && t->GameProgramContract != null;
+    internal static bool HasContract(Table* t) =>
+        t != null && t->Header.Size >= (uint)Marshal.OffsetOf<Table>(nameof(Table.GameProgramContract)) + (uint)sizeof(nint) && t->GameProgramContract != null;
 
     private static Table* _table;
     private static bool _looked;
