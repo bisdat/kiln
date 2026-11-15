@@ -2,7 +2,9 @@
 
 An ECS program runs inside the game's scheduler on a worker thread. Declare its access in `kiln.programs.json`, next
 to `kiln.mod.json`. The native world service reads this file before the server creates its scheduler. Bind the callback
-in your normal `OnLoad`. `Kiln.Sdk` copies the file and includes it in `KilnPack` and `KilnDeploy`.
+in your normal `OnLoad`. `Kiln.Sdk` copies the file and includes it in `KilnPack` and `KilnDeploy`. Since
+0.2.0-dev.29 the typed way is `Systems.Define` over a `[Query]` struct: the build writes its entry into
+`kiln.programs.json` for you ([../services/systems.md](../services/systems.md#programs-of-your-own-systemsdefine)).
 
 ```json
 {
@@ -36,11 +38,14 @@ See [WorldPrograms](../../../mods/samples/WorldPrograms/) for an event round tri
 fails explicitly. The declaration remains inert until its mod binds it. Disabled mods and client-only mods do not
 reserve server programs; profile entries take precedence over drop-ins, including disabled profile entries.
 
-A mod may declare eight programs in one file of at most 64 KiB. The file uses strict JSON: duplicate keys, unknown
+A mod may declare 32 programs in one file of at most 64 KiB (eight before 0.2.0-dev.29). The file uses strict JSON: duplicate keys, unknown
 fields and repeated access names are refused. The schema is [kiln-programs.schema.json](../../../schema/kiln-programs.schema.json).
 `kiln lint` discovers it alongside the manifest. The native service also checks engine limits (template slots 8,
 read/write slots 42, other-template slots 9, other accessors 92, total event inputs/outputs 24). Programs share the
-world service's 32-slot limit and the game's remaining scheduler capacity; refusals appear in `kiln.log`.
+world service's 64 slots (32 before 0.2.0-dev.29) with Kiln's own services, and the game's remaining scheduler capacity
+(its table of 896, which kiln.world checks live before each registration); mods' declarations leave the last 8 slots to
+Kiln's services, and refusals appear in `kiln.log`. kiln.log "kiln.world program slots: 21 of 64 taken, … by Kiln's
+services and loaders, … by mods' declarations: kiln_world, …, writer x1" names who holds each slot.
 
 Access lists are `tpl`, `tplOptional`, `read`, `readOptional`, `write`, `writeOptional`, `singletonsRead`,
 `singletonsWrite`, `otherTpl`, `otherRead`, `otherWrite`, `with`, `without`, `anyOf`, `eventsIn`, `eventsOut`. Names
@@ -76,7 +81,7 @@ restart the server, then reload code. Editing the file while the server runs doe
 
 ## Hooks around game systems
 
-`systems.wraps.client` is open since 0.2.0-dev.29: a native plugin can target the client world’s programs when symbols and world lifecycle support are available and no conflicting runtime disables wraps. There is no managed client-wrap API in this tree. Native callers must release and drain wraps before freeing callback memory; automatic owner retirement is unfinished. `06a-wraps.client` remains a catalog entry without an implemented guided check or real-game confirmation.
+`systems.wraps.client` is open since 0.2.0-dev.29. Managed callers select `WrapOptions.World = WorldKind.Client`; native plugins can select the client world too, when symbols and lifecycle support resolve and no conflicting runtime disables wraps. Native callers must release and drain before freeing callback memory. The implemented `06a-wraps.client` guided check counts callbacks and filtered admissions on workers; real-game confirmation is still pending.
 
 ```csharp
 hook = GameSystems.Hook("combat_experience_source",

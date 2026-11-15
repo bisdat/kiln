@@ -16,6 +16,11 @@ g++ -std=c++20 -O1 -g -pthread -Wall -Wextra -fsanitize=address,undefined -I"$he
     "$here/writes_test.cpp" "$out/v2_consumer.o" -o "$out/writes_test"
 "$out/writes_test" "$here/parity.json"
 
+# budget_test: kiln.world.budget (0.2.0-dev.29) over a fake session, directory and slot ledger.
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -D__fastcall= -I"$here/host" \
+    -I"$here/../../../third_party" -I"$here/../../../core/abi" "$here/budget_test.cpp" -o "$out/budget_test"
+"$out/budget_test"
+
 # wraps_test: kiln.world v4 (the game's programs: directory, lab switch, wraps) over a fake world table.
 g++ -std=c++20 -O1 -g -pthread -Wall -Wextra -fsanitize=address,undefined -D__fastcall= -I"$here/host" \
     -I"$here/../../../third_party" -I"$here/../../../core/abi" "$here/wraps_test.cpp" -o "$out/wraps_test"

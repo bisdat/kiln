@@ -51,6 +51,23 @@ internal static unsafe class GameDataNative
 
     public const uint Modified = 1, Clone = 2;
 
+    /// <summary>The table with the members appended in 0.2.0-dev.29 (kiln_gamedata.h: buff_budget, define_buff_result,
+    /// buff_registration). <see cref="Table"/> stays the v1 prefix every kiln.gamedata has.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct BuffTable
+    {
+        public Table V1;
+        public delegate* unmanaged[Cdecl]<KilnCapacityInfo*, int> BuffBudget;
+        public delegate* unmanaged[Cdecl]<ulong, NativeStr, uint, KilnDefinitionReply*, byte*, nuint, nuint*, int> DefineBuffResult;
+        public delegate* unmanaged[Cdecl]<ulong, byte*, KilnDefinitionReply*, byte*, nuint, nuint*, int> BuffRegistration;
+    }
+
+    /// <summary>The most bytes a define or receipt report takes (the native side asks for this much before it does anything).</summary>
+    public const int AnswerReport = 4096;
+
+    /// <summary>The appended members, or null when kiln.gamedata is missing or older than 0.2.0-dev.29.</summary>
+    public static BuffTable* Buffs(Table* t) => t != null && t->Header.Size >= (uint)sizeof(BuffTable) ? (BuffTable*)t : null;
+
     /// <summary>Calls a JSON-returning function, growing the buffer when it reports BufferTooSmall.</summary>
     public static (int Rc, string Text) Json(Func<IntPtr, nuint, IntPtr, int> call, int cap = 1 << 16)
     {
@@ -89,7 +106,12 @@ internal static class GameDataSectionStarter
     private static readonly HashSet<string> Tried = new();
 
     [ModuleInitializer]
-    internal static void Init() => ServiceTick.Add("kiln gamedata sections", static (in TickInfo t) => Tick(t.Step));
+    internal static void Init()
+    {
+        ServiceTick.Add("kiln gamedata sections", static (in TickInfo t) => Tick(t.Step));
+        // the buff budget's CapacityChangedEvent: a snapshot read every 25 steps while someone listens, nothing otherwise
+        ServiceTick.Add("kiln gamedata buff budget", static (in TickInfo t) => BuffBudgetWatch.Tick(t.Step));
+    }
 
     private static bool _blocksStarted;
 
@@ -274,7 +296,7 @@ public static unsafe partial class Content
     internal static Func<Guid, IReadOnlyDictionary<string, (string State, string? Error)>> SequenceRegistrationReader()
     {
         var t = GD;
-        if (t == null || t->Header.Size < (uint)sizeof(GameDataNative.Table))
+        if (t == null)
             return _ => new Dictionary<string, (string, string?)> { ["local"] = ("failed", "registration outcomes unavailable") };
         var snapshot = new Dictionary<Guid, IReadOnlyDictionary<string, (string, string?)>>();
         var (rc, text) = GameDataNative.Json((b, c, l) => t->Definitions((byte*)b, c, (nuint*)l));
@@ -490,6 +512,141 @@ public sealed unsafe class GameDataRegistry : IReadOnlyList<GameDataEntry>
     {
         clone.Values.Require(Section.ToString().ToLowerInvariant(), $"{Section} clone {clone.Name}");
         return Define(clone.ToJson());
+    }
+
+    // ------------------------------------------------------------------- buff clones that answer (0.2.0-dev.29) ---
+
+    /// <summary>
+    /// <see cref="Content.Buffs"/> only: Kiln's room for buff clones, all mods together, for this process. The room is
+    /// Kiln's own quota, not the game's (the game finds a buff by its 32-bit id): 4,096 clones (1,024 when the larger
+    /// block could not be reserved; <see cref="CapacityInfo.Expanded"/> says which), reserved when the first world loads.
+    /// <see cref="CapacityInfo.GameUsed"/> is 0 (the game's own buffs take no clone room), <see cref="CapacityInfo.KilnUsed"/>
+    /// the clones of loaded mods and of Kiln, <see cref="CapacityInfo.Reserved"/> the records nothing active uses (kept for a
+    /// mod that is gone, placeholders, orphans, a record whose registration failed): a record is never freed in a process.
+    /// Before the first world the answer is not ready (<c>NotReady</c>). A snapshot: any thread, never a game call.
+    /// </summary>
+    /// <exception cref="ArgumentException">Called on another registry than <see cref="Content.Buffs"/>.</exception>
+    /// <exception cref="KilnUnavailableException"><c>gamedata.buff_budget</c>: kiln.gamedata is missing or older.</exception>
+    [AnyThread]
+    [RequiresCapability("gamedata.buff_budget")]
+    public CapacityQueryResult GetBudget()
+    {
+        RequireBuffs(nameof(GetBudget));
+        var t = GameDataNative.Buffs(Content.GD);
+        if (t == null) throw ContentCaps.Off(ContentCaps.BuffBudget, "this kiln.gamedata has no buff budget (update Kiln)");
+        var n = KilnCapacityInfo.New();
+        var rc = t->BuffBudget(&n);
+        if (rc != ContentNative.Ok) throw new InvalidOperationException($"GameDataRegistry.GetBudget: {ContentNative.Message(rc)}");
+        return BuffBudgetWatch.Seen(CapacityMapping.ToResult(n));
+    }
+
+    /// <summary>
+    /// <see cref="Content.Buffs"/> only: defines a buff clone and says what became of it (chapter 17's result-bearing
+    /// definition). <see cref="DefinitionTiming.RequireRegistered"/>: registered now (its record in Kiln's collection and the
+    /// world's buff registry reading it; where the game's own lookup resolves on this build, it is asked to find it), or
+    /// refused: <c>NoWorld</c> / <c>NotReady</c> before a world can take it, <c>CapacityExceeded</c>,
+    /// <c>IdCollision</c> (its GUID's buff id is a game buff's or another clone's), <c>NameTaken</c>, <c>UnknownBase</c>,
+    /// <c>OwnerInactive</c>. A failure after allocation retains its record and reports the occupied slot.
+    /// <see cref="DefinitionTiming.AllowNextStart"/>: the same when it can register now; when only
+    /// the moment is wrong (no world yet) the definition is stored and registers at the next process start
+    /// (<see cref="DefinitionRegistrationState.AcceptedNextStart"/>, no room taken now; not registered in this process).
+    /// The same definition again answers the same, with <see cref="DefinitionRegistrationResult.SlotsConsumed"/> 1 once.
+    /// A change is posted afterwards as <see cref="DefinitionRegistrationChangedEvent"/> (and
+    /// <see cref="CapacityChangedEvent"/> when the budget changed), at the next step. Tick thread.
+    /// </summary>
+    /// <exception cref="ArgumentException">Another registry than <see cref="Content.Buffs"/>, or a malformed definition
+    /// (the message says why); nothing was changed.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="clone"/> or <paramref name="options"/> is null.</exception>
+    /// <exception cref="KilnUnavailableException"><c>gamedata.buff_registration</c>: kiln.gamedata is missing or older.</exception>
+    [TickThreadOnly]
+    [RequiresCapability("gamedata.buff_registration")]
+    public DefinitionRegistrationResult Define(GameDataClone clone, DefinitionRegistrationOptions options)
+    {
+        RequireBuffs(nameof(Define));
+        ArgumentNullException.ThrowIfNull(clone);
+        clone.Values.Require("buffs", $"Buffs clone {clone.Name}");
+        return Define(clone.ToJson(), options);
+    }
+
+    /// <inheritdoc cref="Define(GameDataClone, DefinitionRegistrationOptions)"/>
+    /// <param name="definition">The data-pack <c>"add"</c> entry: <c>{"guid", "name", "base", "fields", "displayName",
+    /// "description", "texts"}</c>.</param>
+    /// <param name="options">What the call may settle for.</param>
+    [TickThreadOnly]
+    [RequiresCapability("gamedata.buff_registration")]
+    public DefinitionRegistrationResult Define(JsonObject definition, DefinitionRegistrationOptions options)
+    {
+        RequireBuffs(nameof(Define));
+        ArgumentNullException.ThrowIfNull(definition);
+        var timing = DefinitionRegistration.Timing(options, nameof(options));
+        Services.RequireTickThread("GameDataRegistry.Define");
+        var t = GameDataNative.Buffs(Content.GD);
+        if (t == null) throw ContentCaps.Off(ContentCaps.BuffRegistration, "this kiln.gamedata has no result-bearing buff definitions (update Kiln)");
+        var mod = ModContext.CurrentMod ?? throw new InvalidOperationException("buff clones must be defined from mod code");
+        var owner = Content.Owner();
+        using var j = new ContentNative.Utf8(definition.ToJsonString());
+        var reply = KilnDefinitionReply.New();
+        var buf = stackalloc byte[GameDataNative.AnswerReport + 1];
+        nuint len = 0;
+        var rc = t->DefineBuffResult(owner, j.Str, timing, &reply, buf, (nuint)(GameDataNative.AnswerReport + 1), &len);
+        var report = Report(buf, len);
+        var name = definition["name"] is JsonValue nv && nv.TryGetValue<string>(out var n) ? n : "?";
+        if (rc == ContentNative.InvalidArgument) throw new ArgumentException($"Buffs clone {name}: {ReasonOf(report) ?? "not a definition"}", nameof(definition));
+        if (rc == ContentNative.WrongThread) throw new InvalidOperationException($"GameDataRegistry.Define: {ReasonOf(report) ?? "not on the world's thread"}");
+        if (rc != ContentNative.Ok) throw new InvalidOperationException($"GameDataRegistry.Define({name}): {ContentNative.Message(rc)}");
+        var result = DefinitionRegistration.ToResult(reply, report);
+        BuffBudgetWatch.Defined(mod.Info.Id, result);
+        return result;
+    }
+
+    /// <summary><see cref="Content.Buffs"/> only: what became of a definition since its
+    /// <see cref="Define(GameDataClone, DefinitionRegistrationOptions)"/> call, by its
+    /// <see cref="DefinitionRegistrationResult.RegistrationId"/>: registered, superseded by a later definition of the GUID,
+    /// kept for a mod that is gone (<c>OwnerInactive</c>, its room still taken), stored for the next start or settled at
+    /// this one. <c>NotFound</c> for an id this process does not know (receipts are not kept across a restart, except
+    /// the ones stored for it). Any thread; it never waits.</summary>
+    /// <exception cref="ArgumentException">Another registry than <see cref="Content.Buffs"/>, or the empty GUID.</exception>
+    /// <exception cref="KilnUnavailableException"><c>gamedata.buff_registration</c>: kiln.gamedata is missing or older.</exception>
+    [AnyThread]
+    [RequiresCapability("gamedata.buff_registration")]
+    public DefinitionRegistrationResult GetRegistration(Guid registrationId)
+    {
+        RequireBuffs(nameof(GetRegistration));
+        DefinitionRegistration.CheckId(registrationId, nameof(registrationId));
+        var t = GameDataNative.Buffs(Content.GD);
+        if (t == null) throw ContentCaps.Off(ContentCaps.BuffRegistration, "this kiln.gamedata has no result-bearing buff definitions (update Kiln)");
+        var id = DefinitionRegistration.IdBytes(registrationId);
+        var reply = KilnDefinitionReply.New();
+        var buf = stackalloc byte[GameDataNative.AnswerReport + 1];
+        nuint len = 0;
+        int rc;
+        fixed (byte* p = id) rc = t->BuffRegistration(0, p, &reply, buf, (nuint)(GameDataNative.AnswerReport + 1), &len);
+        var report = Report(buf, len);
+        if (rc == ContentNative.InvalidArgument) throw new ArgumentException(ReasonOf(report) ?? "not a registration id", nameof(registrationId));
+        if (rc != ContentNative.Ok) throw new InvalidOperationException($"GameDataRegistry.GetRegistration: {ContentNative.Message(rc)}");
+        return DefinitionRegistration.ToResult(reply, report);
+    }
+
+    private void RequireBuffs(string member)
+    {
+        if (Section != GameDataSection.Buffs)
+            throw new ArgumentException($"GameDataRegistry.{member} is for Content.Buffs only, not {Section}", nameof(Section));
+    }
+
+    // The report of a define or receipt answer: the buffer is the size the native side asks for before it does anything.
+    private static string Report(byte* buf, nuint len) =>
+        System.Text.Encoding.UTF8.GetString(buf, (int)Math.Min(len, (nuint)GameDataNative.AnswerReport));
+
+    private static string? ReasonOf(string report)
+    {
+        try
+        {
+            return JsonNode.Parse(report)?["reason"]?.GetValue<string>();
+        }
+        catch (Exception e) when (e is JsonException or InvalidOperationException or FormatException)
+        {
+            return null;
+        }
     }
 
     /// <summary>This section's clone definitions (any thread).</summary>
@@ -993,13 +1150,16 @@ internal static unsafe class GameDataMissing
         {
             _world = world;
             _placed.Clear();
+            var byGuid = new Dictionary<Guid, GameDataDefinition>();
+            foreach (var d in defs) byGuid.TryAdd(d.Guid, d);
+            var todo = new List<(Guid Guid, SeenClone Seen)>();
             foreach (var (g, seen) in rec.Clones)
             {
                 if (!Guid.TryParse(g, out var guid)) continue;
-                var cur = defs.FirstOrDefault(d => d.Guid == guid);
-                if (cur != null && cur.State != "orphaned") continue;  // defined (or already a placeholder)
-                Place(guid, seen);
+                if (byGuid.TryGetValue(guid, out var cur) && cur.State != "orphaned") continue;  // defined (or already a placeholder)
+                todo.Add((guid, seen));
             }
+            PlaceAll(todo);
             if (_placed.Count > 0)
                 Log(LogLevel.Warn, $"{_placed.Count} perk / buff clone(s) of mods that are not loaded are kept as placeholders (saved references stay): {string.Join(", ", _placed)}");
             else if (rec.Clones.Count > 0)
@@ -1074,6 +1234,85 @@ internal static unsafe class GameDataMissing
         {
             return null;
         }
+    }
+
+    // Every placeholder of a world's load in one data-pack document: kiln.gamedata registers the list as one batch and
+    // publishes one buff collection header for it. A define each publishes a header per buff clone, and none of them can be
+    // freed (a lab: 2,096 placeholders, 2,097 headers, 167 MB of near memory). Without kiln.content's table: one by one.
+    private static void PlaceAll(List<(Guid Guid, SeenClone Seen)> todo)
+    {
+        if (todo.Count == 0) return;
+        var t = Content.T;
+        if (t == null)
+        {
+            foreach (var (g, seen) in todo) Place(g, seen);
+            return;
+        }
+        var lists = new Dictionary<string, JsonArray>();
+        foreach (var (g, seen) in todo)
+        {
+            var (section, ph, _) = Placeholder(g, seen);
+            var key = section == GameDataSection.Perks ? "perks" : "buffs";
+            if (!lists.TryGetValue(key, out var list)) lists[key] = list = new JsonArray();
+            list.Add(ph);
+        }
+        var doc = new JsonObject { ["format"] = 1 };
+        foreach (var (key, list) in lists) doc[key] = new JsonObject { ["add"] = list };
+        const int cap = 1 << 20;
+        var buf = (byte*)NativeMemory.Alloc(cap);
+        int rc;
+        string text;
+        try
+        {
+            nuint len = 0;
+            using (var j = new ContentNative.Utf8(doc.ToJsonString()))
+            using (var src = new ContentNative.Utf8("missing gamedata"))
+                rc = t->ApplyJson(_owner, j.Str, src.Str, buf, cap, &len);
+            text = System.Text.Encoding.UTF8.GetString(buf, (int)Math.Min(len, (nuint)(cap - 1)));
+        }
+        finally
+        {
+            NativeMemory.Free(buf);
+        }
+        if (rc != ContentNative.Ok && rc != ContentNative.InvalidArgument)
+        {
+            Log(LogLevel.Warn, $"placeholders as one document: {ContentNative.Message(rc)}; one by one");
+            foreach (var (g, seen) in todo) Place(g, seen);
+            return;
+        }
+        var errors = new List<string>();
+        try
+        {
+            if (JsonNode.Parse(text)?["errors"] is JsonArray es) errors.AddRange(es.Select(e => (string?)e ?? ""));
+        }
+        catch (JsonException)
+        {
+        }
+        foreach (var (g, seen) in todo)
+        {
+            var (section, _, label) = Placeholder(g, seen);
+            var prefix = $"{(section == GameDataSection.Perks ? "perks" : "buffs")}.add {seen.Name}: ";
+            var why = errors.FirstOrDefault(e => e.StartsWith(prefix, StringComparison.Ordinal));
+            if (why != null) Log(LogLevel.Warn, $"{seen.Section} {label} ({g}): no placeholder: {why[prefix.Length..]}");
+            else _placed.Add($"{seen.Section} {label} ({seen.Id})");
+        }
+    }
+
+    private static (GameDataSection Section, JsonObject Json, string Label) Placeholder(Guid guid, SeenClone seen)
+    {
+        var mod = seen.Mod ?? "?";
+        var label = $"{mod}:{seen.Name}";
+        var section = seen.Section == "perks" ? GameDataSection.Perks : GameDataSection.Buffs;
+        return (section, new JsonObject
+        {
+            ["guid"] = guid.ToString("D"),
+            ["name"] = seen.Name,
+            ["base"] = seen.Base,
+            ["displayName"] = $"[Missing: {label}]",
+            ["description"] = $"This {(section == GameDataSection.Perks ? "perk" : "effect")} ({seen.DisplayName ?? seen.Name}) comes from the mod \"{mod}\", " +
+                              "which is not installed. It does nothing until the mod is back.",
+            ["placeholder"] = new JsonObject { ["mod"] = mod, ["name"] = seen.Name, ["displayName"] = seen.DisplayName },
+        }, label);
     }
 
     private static void Place(Guid guid, SeenClone seen)

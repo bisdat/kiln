@@ -9,6 +9,7 @@
 
 #include "kiln_api.h"
 #include "held.h"
+#include "services/kiln_capacity.h"
 
 namespace kiln::boot {
 struct Input;  // kiln_boot_collector.hpp
@@ -47,5 +48,15 @@ KilnResult build_define_json(KilnOwner owner, KilnStr json, char* report, size_t
 
 // JSON: what was built, the budget, the fingerprint.
 KilnResult build_status_json(char* buf, size_t cap, size_t* out_len);
+
+// ---- the resource budget (since 0.2.0-dev.29; kiln_vfx.h resource_budget, define_vfx_result, vfx_registration; ledger.h) ----
+// After the table is registered, before the mods load: the capability rows vfx.budget and blocks.vfx_registration from what this
+// build can read (Game::registry_missing, bytes_missing). The start's build and the guard lower them later when they must.
+void budget_start(const KilnApi* api, KilnOwner self);
+KilnResult build_resource_budget(KilnCapacityInfo* out);
+KilnResult build_define_vfx_result(KilnOwner owner, KilnStr name, KilnStr json, uint32_t timing, KilnDefinitionReply* out, char* report,
+                                   size_t cap, size_t* out_len);
+KilnResult build_vfx_registration(KilnOwner owner, const uint8_t registration_id[16], KilnDefinitionReply* out, char* report, size_t cap,
+                                  size_t* out_len);
 
 }  // namespace kvx

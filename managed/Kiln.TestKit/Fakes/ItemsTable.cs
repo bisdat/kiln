@@ -373,7 +373,7 @@ internal sealed unsafe class ItemsFake
     public static readonly string[] Features = [TransactionFeature, ReadFeature, ProgramFeature];
 
     public static readonly string[] OfflineRows = ["items.fuel", "items.move", "items.names", "items.transfer", "items.moves", "items.instances",
-        "items.equip", "items.pide_options", "items.result_peek", "items.recipe"];
+        "items.equip", "items.equip_sets", "items.pide_options", "items.result_peek", "items.recipe"];
 
     internal sealed class Stack
     {

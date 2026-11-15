@@ -175,3 +175,15 @@ pub async fn library_lint(entry: Option<LibraryRef>, profile_id: Option<String>)
     })
     .await
 }
+
+/// Local native DLL replacement: ordinary profile retention, then the update placement path.
+#[tauri::command]
+pub async fn library_replace_dll(app: AppHandle, profile_id: String, entry: LibraryRef, path: String, confirmed: bool) -> Result<library::ReplacedDll, Error> {
+    let (r, applied) = blocking(move || {
+        let d = dirs()?;
+        let r = library::replace_dll(&d, &profile_id, &entry, std::path::Path::new(&path), confirmed)?;
+        Ok((r, super::profile::reapply_where_active(&d, &profile_id)))
+    }).await?;
+    super::profile::announce_applied(&app, applied);
+    Ok(r)
+}

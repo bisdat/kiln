@@ -125,6 +125,7 @@ bool resolve() {
     L.reg_templates = cst("world/registry.templates");
     L.storage_entities = cst("world/storage.entities");
     L.entity_layout = cst("world/entity.layout");
+    L.entity_id = cst("spawn/record.id");  // spawn's declaration (CreateEntity writes it at +0x10 on both builds)
     L.tp_applied = cst("world/teleport.applied");
     L.tp_find_ground = cst("world/teleport.find_ground");
     L.tp_target_entity = cst("world/teleport.target_entity");
@@ -378,6 +379,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     wraps_init();
     const bool hooked = programs_init();
     if (!hooked) F.programs = F.teleport = false;
+    wraps_define_row(F.programs);
     if (hooked) {
         // kiln.world's own program: no entity query, no access; pushes teleport records and proves the world runs.
         KilnProgramDesc d{};
@@ -407,5 +409,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
          F.singletons ? "on" : "off", F.events ? "on" : "off", F.queue ? "on" : "off", F.write ? "on" : "off",
          F.read_other ? "on" : "off", F.teleport ? "on" : "off", F.dead ? "on" : "off", writes_available() ? "on" : "off");
     if (!F.entities && !F.programs) return KILN_ERR_UNAVAILABLE;  // nothing works on this build
-    return api->register_service(owner, KilnStr{KILN_WORLD_SERVICE, sizeof(KILN_WORLD_SERVICE) - 1}, &kTable);
+    const KilnResult rc = api->register_service(owner, KilnStr{KILN_WORLD_SERVICE, sizeof(KILN_WORLD_SERVICE) - 1}, &kTable);
+    if (rc == KILN_OK) program_budget_register();  // kiln.world.budget: a table of its own (since 0.2.0-dev.29)
+    return rc;
 }

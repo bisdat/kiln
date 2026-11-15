@@ -63,6 +63,7 @@ internal static class ServiceNames
         "kiln.vfx",
         "kiln.window_clock",
         "kiln.world",
+        "kiln.world.budget",
         "kiln.worldtables",
     ];
 

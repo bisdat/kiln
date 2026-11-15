@@ -31,6 +31,7 @@
 #include "../sigdb.h"
 #include "../tick.h"
 #include "hooks_chain.h"
+#include "hooks_patch_policy.h"
 #include "hooks_fingerprint.h"
 #include "hooks_internal.h"
 #include "service.h"
@@ -317,23 +318,83 @@ KilnResult typed_check(uintptr_t target, const KilnSig* sig, const KilnHookOrder
     }
     std::string text;
     const fp::Verdict v = fp::check(fp::shape_of(*sig), f, &text);
-    if (v == fp::Verdict::Match) return KILN_OK;
-    // Unknown is accepted only for a symbol whose own descriptor passed (a fragment's "abi": "trust").
-    if (v == fp::Verdict::Unknown && described) return KILN_OK;
+    // Preserve the named fingerprint refusal first; even a matching shape must equal the loaded descriptor.
+    if (v == fp::Verdict::Match || (v == fp::Verdict::Unknown && described)) {
+        if (described && !fp::compiled_matches(*sig, info.descriptor, &why)) return KILN_HOOKS_ERR_SIG_MISMATCH;
+        return KILN_OK;
+    }
     why = text;
     KLOG_W("hooks: typed hook on %s refused: %s", name.c_str(), why.c_str());
     return v == fp::Verdict::Mismatch ? KILN_HOOKS_ERR_SIG_MISMATCH : KILN_HOOKS_ERR_SIG_UNKNOWN;
 }
 
-KilnResult KILN_CALL h_detour_typed(KilnOwner owner, uintptr_t target, const KilnHookOrder* order, const KilnSig* sig,
-                                    KilnTypedFn fn, void* user, KilnHandle* out) {
+KilnResult KILN_CALL h_sig_status(KilnStr symbol, uintptr_t* address, uint64_t* revision) {
+    if (!address || !revision || !symbol.ptr || !symbol.len) return KILN_ERR_INVALID_ARGUMENT;
+    *address = 0;
+    KILN_GUARD("sig_status", KILN_ERR_INTERNAL, {
+        sigdb::SigStatus status;
+        std::string text;
+        // A replacement racing this copy must invalidate any cached verdict.
+        const auto before = sigdb::sig_revision();
+        const bool found = sigdb::sig_status(sv(symbol), address, &status, &text);
+        *revision = sigdb::sig_revision();
+        if (before != *revision) return KILN_ERR_UNAVAILABLE;
+        if (!found) { typed_refusal_text() = "no descriptor in the current resolver load"; return KILN_ERR_NOT_FOUND; }
+        typed_refusal_text() = text;
+        if (status == sigdb::SigStatus::Match && *address) return KILN_OK;
+        return status == sigdb::SigStatus::Mismatch ? KILN_HOOKS_ERR_SIG_MISMATCH : KILN_HOOKS_ERR_SIG_UNKNOWN;
+    });
+}
+
+KilnResult KILN_CALL h_validate_typed(KilnStr symbol, uintptr_t expected_address, uint64_t expected_revision, const KilnSig* sig) {
+    if (sig_positions(sig) < 0) return KILN_ERR_INVALID_ARGUMENT;
+    uintptr_t address = 0; uint64_t revision = 0;
+    const auto status = h_sig_status(symbol, &address, &revision);
+    if (status != KILN_OK) return status;
+    if (address != expected_address || revision != expected_revision) return KILN_ERR_UNAVAILABLE;
+    KILN_GUARD("validate_typed", KILN_ERR_INTERNAL, {
+        const auto checked = typed_check(address, sig, nullptr);
+        if (sigdb::sig_revision() != revision) return KILN_ERR_UNAVAILABLE;
+        return checked;
+    });
+}
+
+// 0: not now. 1: on the authoritative (or joined client's) Pre thread: a world runs, and a first detour on a target
+// stops the player's game for its check, so the caller paces its installations. 2: no live world: nobody is playing.
+uint32_t KILN_CALL h_typed_install_ready() {
+    if (tick::typed_install_pre()) return 1;
+    KilnSessionInfo s{}; s.size = sizeof s;
+    if (tick::session(&s) != KILN_OK) return 0;
+    for (auto w : s.worlds) if (w) return 0;
+    return 2;
+}
+
+// detour_typed and detour_typed_checked: the same descriptor check and link; `unchecked` (the checked member) gives the
+// first patch of a target mid2_checked's policy (hooks_chain.cpp, write_with_threads_stopped). Runs under the caller's
+// guard.
+KilnResult detour_typed_impl(KilnOwner owner, uintptr_t target, const KilnHookOrder* order, const KilnSig* sig,
+                             KilnTypedFn fn, void* user, KilnHandle* out, uint32_t* unchecked) {
     const int positions = sig_positions(sig);
     if (!fn || positions < 0 || !valid_target(target)) return KILN_ERR_INVALID_ARGUMENT;
     const uint32_t nstack = positions > 4 ? static_cast<uint32_t>(positions - 4) : 0;
-    KILN_GUARD("detour_typed", KILN_ERR_INTERNAL, {
-        const KilnResult checked = typed_check(target, sig, order);
-        if (checked != KILN_OK) return checked;
-        return chain::install_typed(owner, target, order_of(order), nstack, fn, user, out);
+    const KilnResult checked = typed_check(target, sig, order);
+    if (checked != KILN_OK) return checked;
+    return chain::install_typed(owner, target, order_of(order), nstack, fn, user, out, sig->sret ? sig->ret_size : 0,
+                                unchecked);
+}
+
+KilnResult KILN_CALL h_detour_typed(KilnOwner owner, uintptr_t target, const KilnHookOrder* order, const KilnSig* sig,
+                                    KilnTypedFn fn, void* user, KilnHandle* out) {
+    KILN_GUARD("detour_typed", KILN_ERR_INTERNAL,
+               return detour_typed_impl(owner, target, order, sig, fn, user, out, nullptr););
+}
+
+KilnResult KILN_CALL h_detour_typed_checked(KilnOwner owner, uintptr_t target, const KilnHookOrder* order,
+                                            const KilnSig* sig, KilnTypedFn fn, void* user, KilnHandle* out) {
+    KILN_GUARD("detour_typed_checked", KILN_ERR_INTERNAL, {
+        uint32_t unchecked = 0;
+        const KilnResult rc = detour_typed_impl(owner, target, order, sig, fn, user, out, &unchecked);
+        return chain::checked_install_result(rc, unchecked);  // `unchecked` read after the installation ran
     });
 }
 
@@ -537,7 +598,14 @@ const KilnHooksApi kTable = {
     // owner cleanup (dev.28)
     &h_subscribe_owner_retiring,
     &h_unsubscribe_owner_retiring,
+    // checked mid installation (dev.29, package 07)
     &h_mid2_checked,
+    // typed safety extension (dev.29)
+    &h_validate_typed,
+    &h_sig_status,
+    &h_typed_install_ready,
+    // checked typed installation (dev.29)
+    &h_detour_typed_checked,
 };
 
 std::mutex g_ready_mutex;

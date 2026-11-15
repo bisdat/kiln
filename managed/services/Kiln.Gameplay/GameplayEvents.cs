@@ -181,8 +181,17 @@ public enum BuildOutcome
 /// Post phase: the operation already ran (or was refused) inside the step on a game worker thread, where no mod code
 /// can run. To refuse edits use <see cref="Gameplay.Protect"/> zones, which the game's building code consults
 /// synchronously; this event then reports <see cref="BuildOutcome.DeniedByZone"/>.</summary>
+/// <remarks>Managed mods referencing Kiln.Gameplay request the five building detours at host startup, even for
+/// crafting-only use. Native plugins request them at startup if they will later add build/break denies. With no worlds this
+/// happens immediately. Interest first seen while any world runs waits for the last world to stop; building events
+/// begin in the next world (earlier operations are not replayed). Check capability <c>gameplay.build_hooks</c> for the
+/// waiting/refusal reason. Unsubscribing leaves installed hooks in place, passing through without listeners or zones.
+/// Terraforming uses its separate hook.</remarks>
 public sealed class BuildEvent : GameplayEvent
 {
+    static unsafe BuildEvent() => EventProducers.Register(typeof(BuildEvent),
+        GameplayNative.RequestBuild(GameplayNative.T) != null ? "gameplay.build_hooks" : "gameplay.build",
+        Gameplay.PrepareBuildEvents, allowPending: true);
     public BuildKind Kind { get; internal init; }
     public EntityId Player { get; internal init; }
     /// <summary>Block / prop item (place), material item (dismantle); 0 for terraforming.</summary>

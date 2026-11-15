@@ -1,0 +1,22 @@
+{
+ "format": 1,
+ "comment": "abilities-test, package 06c (NativesV2.Typed.cs): read by kiln.abilities when it starts. The sync entries are typed declarations (the verifier refuses a program that does not fit them, the thunk checks every call); NvLate and NvLate2 are argc only, as an older file declares them.",
+ "natives": [
+  {"name": "abilities-test.NvTyped", "sync": true, "args": [
+   {"name": "out", "type": "sint32", "dir": "out", "size": 4},
+   {"name": "in", "type": "sint32", "size": 4}]},
+  {"name": "abilities-test.NvRound", "sync": true, "args": [
+   {"name": "s", "type": "sint32", "dir": "inout", "size": 4},
+   {"name": "f", "type": "float32", "dir": "inout", "size": 4},
+   {"name": "b", "type": "bool", "dir": "inout", "size": 1},
+   {"name": "t", "type": "Time", "dir": "inout", "size": 8},
+   {"name": "e", "type": "ecs.EntityId", "dir": "inout", "size": 4},
+   {"name": "w", "type": "WorldTransform", "dir": "inout", "size": 56}]},
+  {"name": "abilities-test.NvCheck", "sync": true, "args": [
+   {"name": "s", "type": "sint32"}, {"name": "f", "type": "float32"}, {"name": "b", "type": "bool"},
+   {"name": "t", "type": "Time"}, {"name": "e", "type": "ecs.EntityId"}, {"name": "w", "type": "WorldTransform"}]},
+  {"name": "abilities-test.NvLate", "argc": 2, "args": [
+   {"name": "out", "types": ["sint32"], "dir": "out"}, {"name": "in", "types": ["sint32"]}]},
+  {"name": "abilities-test.NvLate2", "argc": 2}
+ ]
+}

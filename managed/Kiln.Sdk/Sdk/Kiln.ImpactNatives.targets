@@ -1,0 +1,29 @@
+<Project>
+  <!--
+    Kiln.ImpactNatives: a mod's [ImpactNative] methods as synchronous Impact natives (docs/kiln/modding/impact.md "Typed
+    natives", chapter 06c S4). The generator writes each method's thunk, its registration at the mod's load and a
+    NativeRef (Natives.<Name>); the KilnImpactNatives task then writes the methods' typed declarations into the output's
+    impact/natives.json (with the mod's id), which kiln.abilities reads when the server starts. Imported by Sdk.targets
+    after Kiln.Mod.targets. Needs Abilities in KilnServices (warning KILN174 otherwise).
+
+    Properties: KilnImpactNatives=false turns both off.
+  -->
+  <PropertyGroup>
+    <KilnImpactNatives Condition="'$(KilnImpactNatives)' == ''">true</KilnImpactNatives>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(KilnImpactNatives)' == 'true'">
+    <!-- the generator: repository mode builds it from source; package mode takes it from analyzers/dotnet/cs -->
+    <ProjectReference Include="$(KilnRepoRoot)managed/Kiln.Analyzers/src/Kiln.ImpactNatives/Kiln.ImpactNatives.csproj"
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" Private="false"
+                      Condition="'$(KilnRepoMode)' == 'true' and Exists('$(KilnRepoRoot)managed/Kiln.Analyzers/src/Kiln.ImpactNatives/Kiln.ImpactNatives.csproj')" />
+    <Analyzer Include="$(MSBuildThisFileDirectory)../analyzers/dotnet/cs/Kiln.ImpactNatives.dll"
+              Condition="'$(KilnRepoMode)' != 'true' and Exists('$(MSBuildThisFileDirectory)../analyzers/dotnet/cs/Kiln.ImpactNatives.dll')" />
+  </ItemGroup>
+
+  <UsingTask TaskName="Kiln.Sdk.KilnImpactNatives" AssemblyFile="$(_KilnTasksDir)Kiln.Sdk.Tasks.dll" Condition="'$(KilnRepoMode)' != 'true'" />
+  <UsingTask TaskName="Kiln.Sdk.KilnImpactNatives" AssemblyFile="$(_KilnTasksDir)Kiln.Sdk.Tasks.dll" TaskFactory="TaskHostFactory" Condition="'$(KilnRepoMode)' == 'true'" />
+  <Target Name="KilnImpactNatives" AfterTargets="KilnManifest" Condition="'$(KilnImpactNatives)' == 'true' and '$(KilnManifest)' != 'false'">
+    <KilnImpactNatives AssemblyPath="$(TargetPath)" ManifestPath="$(OutDir)kiln.mod.json" NativesPath="$(OutDir)impact/natives.json" />
+  </Target>
+</Project>

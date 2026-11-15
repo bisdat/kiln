@@ -154,15 +154,25 @@ class Checks(unittest.TestCase):
         self.assertEqual(row(text, "Items", "demo.first")[-1],
                          "flash was green \\| not blue \\<guard warning\\>")
 
-    def test_failed_assertions_are_reported_even_with_a_pass(self):
+    def test_an_older_pass_with_failed_assertions_is_shown_as_failed(self):
         checks = fixture("client-checks.json")
         checks["entries"][-1]["note"] = "guard warning"
         checks["entries"][-1]["assertions"] = [
             {"what": "one", "ok": True}, {"what": "two", "ok": False}, {"what": "three", "ok": False}]
         _, text, _ = Run(checks=checks)()
         r = row(text, "Items", "demo.first")
-        self.assertEqual(r[3], "pass")
-        self.assertEqual(r[-1], "guard warning; 2 of 3 assertions failed")
+        self.assertEqual(r[3], "fail")
+        self.assertEqual(r[-1], "guard warning; 2 of 3 assertions failed; recorded as a pass: not a pass")
+        # the count wins when more failed than the entry keeps rows for
+        checks["entries"][-1]["assertionFailureCount"] = 70
+        checks["entries"][-1]["verdict"] = "fail"
+        checks["entries"][-1]["playerAnswer"] = "pass"
+        _, text, _ = Run(checks=checks)()
+        r = row(text, "Items", "demo.first")
+        self.assertEqual(r[3], "fail")
+        self.assertEqual(r[-1], "guard warning; 70 of 70 assertions failed")
+        del checks["entries"][-1]["assertionFailureCount"], checks["entries"][-1]["playerAnswer"]
+        checks["entries"][-1]["verdict"] = "pass"
         checks["entries"][-1]["assertions"] = [{"what": "one", "ok": True}]
         _, text, _ = Run(checks=checks)()
         self.assertEqual(row(text, "Items", "demo.first")[-1], "guard warning")

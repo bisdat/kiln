@@ -120,6 +120,15 @@ public sealed class ClientCheckTestMod : Mod
         await c.Verdict();
     }
 
+    [ClientCheck("cct.failed-expect", "A failed assertion keeps a pass from being recorded", Area = Area, Since = Since, Order = 12)]
+    public async Task FailedExpect(CheckContext c)
+    {
+        c.Instruct("Answer pass: the entry must say fail, with your answer beside it.");
+        c.Expect(true, "a value shown without being required", "42");
+        c.Expect(false, "the requirement this check fails on purpose", "it never holds");
+        await c.Verdict();
+    }
+
     [ClientCheck("cct.wait", "Waits for its verdict", Area = Area, Since = Since, Order = 11)]
     public async Task Wait(CheckContext c)
     {

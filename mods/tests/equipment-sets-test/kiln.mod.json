@@ -1,0 +1,10 @@
+{
+  "id": "equipment-sets-test",
+  "name": "Equipment sets lab test",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "EquipmentSetsTest.dll",
+  "side": "server",
+  "advanced": true,
+  "description": "Lab test of kiln.items v6 equipment sets through Kiln.Items (10-equipment-sets): on a spawned 1_Player character, Items.CaptureSet, PlanSet and EquipSet in one transaction each, the one PlayerEquippingEvent per set (cancel, allow), a dry run, omitted and explicitly empty slots, stale plans and scopes, the session JSON, and faults injected into real runs (a refused step at the start, the middle and the end, the commit's own rollback bit, a faked mismatch last, which switches sets off) with the inventory compared before and after. Needs kiln/data/kiln.items/sets-lab; kiln/control/systems.parallel puts the game's programs on its workers; kiln/data/equipment-sets-test/matrix with kiln/data/kiln.items/sets-matrix runs the rollback matrix instead (one fresh character per form; a mismatch does not switch sets off there). PASS and FAIL lines in kiln.log, then 'equipment-sets-test done: N PASS, 0 FAIL'."
+}

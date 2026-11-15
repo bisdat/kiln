@@ -345,6 +345,91 @@ public sealed unsafe class SystemsTests
         Assert.Equal(0, seen);
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(3)]
+    [InlineData(7)]
+    public void A_directory_read_that_gave_up_suspends_then_resumes_the_same_view_stage(int failures)
+    {
+        using var w = new FakeWorld();
+        var mod = NewMod("busydir");
+        var first = InMod(mod, () => Systems.Wrap("fuel_setup").Wrap!);
+        WrapDisabledEvent? off = null;
+        first.Disabled += e => off = e;
+        var seen = 0;
+        InMod(mod, () => first.BeforeEach((ref EntityView e) => { seen++; _ = e.Has("Fuel"); }));
+        ProgramWrap.Poll(); // model the world's Pre publishing the native stage's Active state
+        w.DirectoryBusy = true;  // the first slice of the session: kiln.world's bounded read gave up
+        w.Call(w.Wraps[0]);
+        Assert.Equal(0, seen);
+        Assert.Equal(WrapState.Pending, first.State);
+        Assert.Contains(FakeWorld.Logs, l => l.Contains("suspended"));
+        Assert.Null(off);
+        lock (mod.PendingLock) Assert.Empty(mod.Pending);  // not the mod's fault: nothing for its fault policy
+        for (var n = 1; n < failures; n++)
+        {
+            w.StepNow++; w.Call(w.Wraps[0]);
+            Assert.Null(off);
+        }
+        var attempts = w.ListCalls;
+        w.Call(w.Wraps[0]);
+        Assert.Equal(attempts, w.ListCalls); // no second read in the same step
+        w.DirectoryBusy = false;
+        w.StepNow++;
+        w.Call(w.Wraps[0]);
+        Assert.Equal(w.EntityIds.Length, seen);
+        Assert.Equal(WrapState.Active, first.State);
+        Assert.Null(off);
+        // the failed read was not kept for the session: a new stage on the next slice sees the program's lists
+        var fuel = 0;
+        var second = InMod(mod, () => Systems.Wrap("fuel_setup").Wrap!);
+        InMod(mod, () => second.BeforeEach((ref EntityView e) => { if (e.Has("Fuel")) fuel++; }));
+        w.Call(w.Wraps[^1]);
+        Assert.Equal(w.EntityIds.Length, fuel);
+    }
+
+    [Fact]
+    public void Cached_directory_does_not_skip_worker_slices_while_retry_gate_is_busy()
+    {
+        using var w = new FakeWorld();
+        var wrap = Systems.Wrap("fuel_setup").Wrap!;
+        var seen = 0;
+        wrap.BeforeEach((ref EntityView e) => seen++);
+        w.Call(w.Wraps[0]); // warm the successful directory cache
+        var stage = Systems.Live.Keys.Single(s => s.Wrap == wrap);
+        var gate = typeof(ManagedStage).GetField("_directoryGate", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(stage)!;
+        using var held = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var worker = new Thread(() => { lock (gate) { held.Set(); release.Wait(); } });
+        worker.Start();
+        try
+        {
+            Assert.True(held.Wait(TimeSpan.FromSeconds(5)));
+            w.Call(w.Wraps[0]);
+            Assert.Equal(2 * w.EntityIds.Length, seen);
+        }
+        finally { release.Set(); worker.Join(); }
+    }
+
+    [Fact]
+    public void Directory_failure_exhausts_eight_step_attempts_without_mod_faults()
+    {
+        using var w = new FakeWorld();
+        var mod = NewMod("retry-dir");
+        var wrap = InMod(mod, () => Systems.Wrap("fuel_setup").Wrap!);
+        var disabled = new List<WrapDisabledEvent>(); wrap.Disabled += disabled.Add;
+        InMod(mod, () => wrap.BeforeEach((ref EntityView e) => { }));
+        w.DirectoryBusy = true;
+        for (var n = 0; n < 8; n++)
+        {
+            w.StepNow++; w.Call(w.Wraps[0]);
+            if (n < 7) Assert.Empty(disabled);
+        }
+        Assert.Single(disabled);
+        Assert.Contains("8", disabled[0].Reason);
+        lock (mod.PendingLock) Assert.Empty(mod.Pending);
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct FuelBlock
     {
@@ -568,6 +653,40 @@ public sealed unsafe class SystemsTests
         w.ArchetypeResult = SystemsNative.Ok;
         w.Call(w.Wraps[0]);
         Assert.Equal(1, ran);
+    }
+
+    // kiln.world says the entity map changed under its read (KILN_WORLD_ERR_CHANGED, 100): a transient answer. The filter
+    // reads again (3 reads in all); still changed, it leaves that one slice to the game, counts it and says so once in
+    // kiln.log. It never turns the stage off for that: only "cannot be read on this build" (UNAVAILABLE) does.
+    [Fact]
+    public void A_changed_archetype_read_is_read_again_then_skips_only_that_slice_and_is_counted()
+    {
+        using var w = new FakeWorld();
+        var ran = 0;
+        var disabled = new List<WrapDisabledEvent>();
+        var wrap = Systems.Wrap("fuel_setup").Wrap!.WhenArchetype(["Fuel"]).Before((ref Slice s) => ran++);
+        wrap.Disabled += disabled.Add;
+        w.LayoutHas.Add(Hash("Fuel"));
+        const int changed = 100;
+        w.ArchetypeResults.Enqueue(changed);
+        w.ArchetypeResults.Enqueue(changed);
+        w.Call(w.Wraps[0]);
+        Assert.Equal(1, ran);                      // the third read decided
+        Assert.Equal(3, w.ArchetypeCalls);
+        w.ArchetypeCalls = 0;
+        w.ArchetypeResult = changed;
+        w.Call(w.Wraps[0]);
+        w.Call(w.Wraps[0]);
+        Assert.Equal(1, ran);                      // both slices left to the game
+        Assert.Equal(6, w.ArchetypeCalls);         // bounded: 3 reads per slice
+        Assert.Empty(disabled);
+        Assert.False(w.Wraps[0].Gone);
+        Assert.Equal(2, wrap.Stats.ArchetypeSkips);
+        Assert.Equal(1, FakeWorld.Logs.Count(l => l.Contains("WhenArchetype") && l.Contains("left to the game")));
+        w.ArchetypeResult = SystemsNative.Ok;
+        w.Call(w.Wraps[0]);
+        Assert.Equal(2, ran);                      // the stage was never off
+        Assert.Equal(0, wrap.Stats.Faults);
     }
 
     [Fact]

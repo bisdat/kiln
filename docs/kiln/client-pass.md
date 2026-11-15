@@ -51,6 +51,7 @@ assets built first: their descriptions say so).
 | `menu-many-test` | `mods/tests/menu-many-test` | many pause-menu entries (`menu.rows-quit`, `menu.scroll`); its setting `Entries` (0 to 24) takes a new number without a restart |
 | `weapon-moves-test` | `mods/tests/weapon-moves-test` (run `build-assets.py` first) | moves and held models with moving parts (`blocks.moves-*`, `blocks.held-animated`); `blocks.held-animated-two-players` needs a joined dedicated server |
 | `cosmetic-sample` | `mods/samples/CosmeticSample` | session 2 only: the hood and the cape |
+| `roster-cap-fixture` | `mods/tests/roster-cap-fixture` (data only) | `17-roster-client`: 93 new roster NPCs, so the roster holds 128; it changes the Survivors directory of every world it is in, so load it for that check. `17-roster.refused-start`: the same fixture with `kiln/control/roster.fail-install`, a start that must stop before any world |
 
 **Frameworks profile** (sessions 3 to 5): `client-pass` and one mod of each framework you have: an EML mod, a
 ShroudForge mod (one that writes its own settings helps `launcher.kept-mod-files`), a Greeneye mod, Flame (Creative

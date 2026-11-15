@@ -279,6 +279,31 @@ Files: `<data>/library/kiln-kept.json` and `<data>/library/kiln-kept/` ([contrac
 Tests: `cargo test -p kiln-manage --features full --test kept_versions`, `launcher/tests/rollback.spec.ts`,
 `launcher/unit/rollback.test.ts`.
 
+### Replace DLL…
+
+For a patched DLL you got from a mod's author or its forum. A native DLL mod in the loaded profile has **Replace
+DLL…** in its menu on Play (dropping a DLL on the window still adds it as a new mod).
+
+- **What it does.** You choose one 64-bit Windows DLL. Kiln makes a new build of the same mod in your Library: the
+  mod's files as they are, with that one DLL swapped. The mod keeps its place in your list, its switch and its
+  settings. With the game closed, the game folder follows at once, as after an update; a running game gets it at its
+  next start.
+- **Which file is replaced.** The one with the same file name (case does not matter). When the mod has exactly one DLL
+  and yours has another name, Kiln asks first, and the file keeps the mod's name, because the loader finds it by that
+  name. A mod with several DLLs and no match is refused with their names.
+- **A different kind of DLL** than the one it replaces (by what it exports) is asked about before it is used.
+- **The build before it is kept** like a version before an update: **Roll back to <version> (earlier build)** returns
+  to it, and **Earlier versions to keep** counts it.
+- **The version stays the author's.** The row shows it with "replaced DLL" and the date. Update notices still compare
+  the release the mod came from, so a later release is offered as before. Kiln never records your patched file as
+  that release.
+- **Other profiles** that switch the mod on take your replaced build, as the newest one.
+
+From the command line: `kilnctl library replace-dll native:<id> <file> --profile <profile-id>` (`--confirm` accepts
+the two questions above; the game folder follows at the profile's next activation). Not run in the desktop window or
+on Windows yet. Tests: `cargo test -p kiln-manage --features full --test replace_dll`, `launcher/unit/replaceDll.test.ts`,
+`launcher/tests/replace-dll.spec.ts`.
+
 ## Mod Manager Download links (nxm://)
 This is opt-in: Settings > Nexus Mods > "Mod Manager Download links". It never turns on at install or start.
 

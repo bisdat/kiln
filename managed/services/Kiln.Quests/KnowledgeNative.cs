@@ -192,6 +192,31 @@ internal static unsafe class KnowledgeNative
         public delegate* unmanaged[Cdecl]<ulong, FlameOutcome*, int> FlameResult;
     }
 
+    // The roster's reads (appended in 0.2.0-dev.29; kiln_knowledge.h "the roster"): KilnNpcUnlockReply, 40 bytes.
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct NpcUnlockReply
+    {
+        public uint Size, Readiness, WorldKind, Generation, NpcId, Unlocked, KnowledgeVersion, ReservedZero;
+        public ulong Revision;
+    }
+
+    /// <summary>The table with the members appended in 0.2.0-dev.29 (roster_world, roster_budget, npc_unlock_at at
+    /// 240, 248, 256). <see cref="Table"/> stays the prefix every kiln.knowledge of this release line has: an older
+    /// one without these members keeps working, and only the roster's reads say it is older.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct RosterTable
+    {
+        public Table V1;
+        public delegate* unmanaged[Cdecl]<uint, uint*, uint*, int> RosterWorld;
+        public delegate* unmanaged[Cdecl]<uint, uint, KilnCapacityInfo*, int> RosterBudget;
+        public delegate* unmanaged[Cdecl]<uint, uint, uint, NpcUnlockReply*, int> NpcUnlockAt;
+    }
+
+    /// <summary>The roster's members, or null when kiln.knowledge is missing or older than 0.2.0-dev.29 (its header
+    /// says how many members it has).</summary>
+    internal static RosterTable* Roster(Table* t) =>
+        t != null && sizeof(NpcUnlockReply) == 40 && t->Header.Size >= (uint)sizeof(RosterTable) ? (RosterTable*)t : null;
+
     internal const int Ok = 0, InvalidArgument = 1, NotFound = 2, Unavailable = 3, WrongThread = 4, BufferTooSmall = 5,
         Internal = 7;
 

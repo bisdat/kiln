@@ -31,7 +31,10 @@
 #include "core.h"
 #include "generated.h"
 #include "kiln_boot_collector.hpp"
+#include "ledger.h"
 #include "services/kiln_assets.h"
+#include "services/kiln_capacity_util.hpp"
+#include "services/kiln_caps.h"
 #include "services/kiln_profile.h"
 
 namespace kvx {
@@ -486,7 +489,9 @@ bool read_game_materials(const fs::path& path, std::set<kvb::Guid>* out) {
     return true;
 }
 
-kvb::GameCounts counts_from_game() {
+// `vfx_counted`: the game's own VfxResources were counted in its archive (false: the known number stands in for them).
+kvb::GameCounts counts_from_game(bool* vfx_counted) {
+    *vfx_counted = false;
     const fs::path game = to_path(api_path(KILN_PATH_GAME));
     std::map<uint32_t, kvb::KfcBundle> bundles;
     std::string why;
@@ -494,7 +499,19 @@ kvb::GameCounts counts_from_game() {
         KV_W("vfx: %s: the budget uses the known numbers for the game's own VFX", why.c_str());
         return {};
     }
+    const auto vfx = bundles.find(kvb::kTypeVfx);
+    *vfx_counted = vfx != bundles.end() && vfx->second.count != 0;
     return kvb::game_counts_from(bundles);
+}
+
+// The VFX resources the game's VFX system holds, as its code says: the count limit VfxSystemCreate reserves its GUID map with
+// (sigdb caps/vfx.map_limit_request, client.d/dev29-17a-vfx-cap.json). 0: not resolved on this build (a dedicated server, a
+// game update); the cook's own number (kvb::Capacity) admits then, as before. Read at the start, before the game runs.
+uint32_t capacity_in_code() {
+    int64_t v = 0;
+    static constexpr char kName[] = "caps/vfx.map_limit_request";
+    if (g_api->constant(KilnStr{kName, sizeof kName - 1}, &v) != KILN_OK || v <= 0 || v > (1 << 20)) return 0;
+    return static_cast<uint32_t>(v);
 }
 
 // What made the carry-over index: Kiln's version with its build stamp (a new Kiln never takes an old index), the game exe and the side.
@@ -743,6 +760,106 @@ std::pair<std::string, std::string> required_vfx_content(const KilnApi* api, con
     return {};
 }
 
+namespace {
+// ---- the resource budget (package 17a S2; ledger.h) ----------------------------------------------------------------------------
+
+// The capability rows of the appended members. vfx.budget: the game's table can be read on this build; blocks.vfx_registration:
+// also its resources' bytes can be compared and Kiln's VFX are built this session (`off` empty). Reported with the table, before
+// the mods load (chapter 17 I1: a table not read yet is the answers' readiness, not a missing capability), and again when the
+// start's build or the guard turns them off.
+struct Row {
+    std::string off;  // why it is off; empty: on
+    uint32_t reason = KILN_CAP_REASON_NONE;
+};
+Row g_budget_row{"kiln.vfx has not started", KILN_CAP_REASON_SERVICE_MISSING}, g_registration_row{"kiln.vfx has not started", KILN_CAP_REASON_SERVICE_MISSING};
+std::mutex g_rows_mu;  // the two rows
+bool g_rows_started = false;
+
+void report_row(const char* name, const Row& row) {
+    const auto* caps = static_cast<const KilnCapsApi*>(g_api->service(KilnStr{KILN_CAPS_SERVICE, sizeof(KILN_CAPS_SERVICE) - 1}, 1));
+    if (!caps || caps->header.size < offsetof(KilnCapsApi, report) + sizeof(void*) || !caps->report) return;
+    static constexpr char kOn[] = "kiln.vfx v1, 0.2.0-dev.29";
+    const std::string text = row.off.empty() ? std::string(kOn) : row.off;
+    caps->report(g_self, KilnStr{name, std::strlen(name)}, row.off.empty() ? KILN_CAP_AVAILABLE : KILN_CAP_UNAVAILABLE,
+                 row.off.empty() ? KILN_CAP_REASON_NONE : row.reason, KilnStr{text.data(), text.size()});
+}
+
+// Lowers a row that is on (the first reason stays) and reports both; the members follow (ledger::set_available).
+void lower_rows(bool budget, bool registration, const std::string& why, uint32_t reason) {
+    Row b, r;
+    {
+        std::lock_guard lk(g_rows_mu);
+        if (!g_rows_started) return;
+        bool changed = false;
+        if (budget && g_budget_row.off.empty()) g_budget_row = {why, reason}, changed = true;
+        if ((budget || registration) && g_registration_row.off.empty()) g_registration_row = {why, reason}, changed = true;
+        if (!changed) return;
+        b = g_budget_row, r = g_registration_row;
+    }
+    ledger::set_available(b.off.empty(), r.off.empty());
+    KV_W("vfx: %s%s off: %s", budget ? "vfx.budget and " : "", "blocks.vfx_registration", why.c_str());
+    report_row("vfx.budget", b);
+    report_row("blocks.vfx_registration", r);
+}
+
+void rows_after_build(const std::string& off) {
+    if (!off.empty()) lower_rows(false, true, off, KILN_CAP_REASON_FAULTED);
+}
+
+// What became, at this start, of each definition a mod stored at an earlier one (a pending file with a "registration"): the
+// receipt is that definition's only when its id derives from this file's block (a file edited by hand is not it).
+std::vector<ledger::Stored> stored_receipts(const std::vector<kvb::ModInput>& mods, const kvb::CookResult& r) {
+    std::vector<ledger::Stored> out;
+    for (const kvb::ModInput& m : mods)
+        for (const auto& [file, text] : m.documents) {
+            if (file.rfind("pending/", 0) != 0) continue;
+            const ojson doc = kvb::parse_relaxed(text);
+            if (!doc.is_object() || !doc.contains("registration") || !doc["registration"].is_string() || !doc.contains("vfx") ||
+                !doc["vfx"].is_object() || doc["vfx"].size() != 1 || !doc["vfx"].begin().value().is_object())
+                continue;
+            ledger::Stored st;
+            if (!ledger::uuid_parse(doc["registration"].get<std::string>(), &st.registration)) continue;
+            st.mod = m.id;
+            st.name = doc["vfx"].begin().key();
+            const ojson& block = doc["vfx"].begin().value();
+            const std::string id_name = block.contains("was") && block["was"].is_string() ? block["was"].get<std::string>() : st.name;
+            const kvb::Guid guid = kvb::block_id(m.id, "vfx", id_name);
+            std::memcpy(st.guid.data(), guid.b, 16);
+            if (ledger::registration_id(m.id, st.guid, nlohmann::json::parse(block.dump()).dump()) != st.registration) continue;
+            const std::string written = block.dump();
+            st.definition = bytes_hash(reinterpret_cast<const uint8_t*>(written.data()), written.size());  // as the builder hashes a block
+            const auto built = std::find_if(r.blocks.begin(), r.blocks.end(), [&](const kvb::BuiltBlock& b) { return b.mod == m.id && b.name == st.name; });
+            if (built != r.blocks.end() && built->guid == guid && built->definition == st.definition) {
+                st.built = true;
+            } else if (built != r.blocks.end()) {
+                st.code = KILN_DEFINE_SUPERSEDED;
+                st.why = "the mod's own block " + st.name + " (a data file or a baked one comes first) is what this start built";
+            } else {
+                st.code = KILN_DEFINE_GAME_REFUSED;
+                st.why = "this start did not build it (kiln.log says why)";
+                if (const auto e = r.mod_errors.find(m.id); e != r.mod_errors.end()) {
+                    for (const std::string& line : e->second) {
+                        if (line.find("over the game's limits") != std::string::npos) {
+                            st.code = KILN_DEFINE_CAPACITY_EXCEEDED, st.why = line;
+                            break;
+                        }
+                        if (line.find("vfx." + st.name) != std::string::npos) st.why = line;
+                    }
+                }
+            }
+            out.push_back(std::move(st));
+        }
+    return out;
+}
+
+ledger::Id id_of(const kvb::Guid& g) {
+    ledger::Id id{};
+    std::memcpy(id.data(), g.b, 16);
+    return id;
+}
+
+}  // namespace
+
 void build_on_ready(const KilnApi* api, KilnOwner self, const kiln::boot::Input* boot, std::vector<BuildFailure>* failures) {
     g_api = api;
     g_self = self;
@@ -783,11 +900,41 @@ void build_on_ready(const KilnApi* api, KilnOwner self, const kiln::boot::Input*
             throw kiln::boot::Refusal(hit.first, "vfx", hit.second, "kiln.vfx: " + hit.second + ": its " + (vfx && materials ? "VFX and materials" : vfx ? "VFX" : "materials") +
                                                                        " cannot be built in this start: " + why);
     };
+    // The resource budget's view of this start (ledger.h): what was built and served, what each definition stored at an
+    // earlier start became. Published on every way out of this function, also when nothing was built (`off` says why
+    // Kiln's VFX are not built at all this session: then blocks.vfx_registration is off).
+    struct LedgerBoot {
+        ledger::Boot b;
+        std::string off;
+        bool served = false;  // this start's VFX were served (else none of them is registered)
+        ~LedgerBoot() {
+            try {
+                if (!served) {
+                    b.built.clear();
+                    for (ledger::Stored& st : b.stored)
+                        if (st.built)
+                            st.built = false, st.code = KILN_DEFINE_GAME_REFUSED,
+                            st.why = off.empty() ? "kiln.assets refused part of this start's VFX: none of them is registered" : off;
+                }
+                ledger::boot(std::move(b));
+                rows_after_build(off);
+            } catch (...) {
+            }
+        }
+    } lb;
+    {
+        const std::string data = api_path(KILN_PATH_DATA);
+        ledger::set_pending_root(data.empty() ? fs::path() : to_path(data) / L"vfx" / L"pending");
+        const uint32_t in_code = capacity_in_code();
+        lb.b.admission = in_code ? in_code : kvb::Capacity{}.vfx;
+        if (!in_code) KV_I("vfx: the game's VFX count limit is not known from its code on this build: the build admits against %u", lb.b.admission);
+    }
     try {
         g_assets = static_cast<const KilnAssetsApi*>(api->service(KilnStr{KILN_ASSETS_SERVICE, sizeof(KILN_ASSETS_SERVICE) - 1}, 1));
         if (!g_assets || g_assets->header.size < sizeof(KilnAssetsApi)) {
             KV_W("vfx: kiln.assets is not there: no Kiln VFX this session");
             set_status("not checked", "no kiln.assets", nullptr);
+            lb.off = "kiln.assets is not there: no Kiln VFX this session";
             refuse_required(true, true, "kiln.assets is not there, so no Kiln VFX or material is built");
             return;
         }
@@ -803,6 +950,7 @@ void build_on_ready(const KilnApi* api, KilnOwner self, const kiln::boot::Input*
                  "don't draw; the game's own materials still work. %s",
                  material_diff.c_str());
         }
+        if (!diff.empty()) lb.off = "this game build changed what Kiln's particle modules are written for: mod VFX are off until Kiln is updated";
         if (!diff.empty() && !material_diff.empty()) {
             set_status("changed", diff + "; " + material_diff, nullptr);
             refuse_required(true, true, "this game build changed what Kiln's particle modules and materials are written for (kiln.log says what)");
@@ -810,7 +958,8 @@ void build_on_ready(const KilnApi* api, KilnOwner self, const kiln::boot::Input*
         }
         if (!diff.empty()) refuse_required(true, false, "this game build changed what Kiln's particle modules are written for (kiln.log says what)");
         if (!material_diff.empty()) refuse_required(false, true, "this game build changed what Kiln's materials are written for (kiln.log says what)");
-        g_game = counts_from_game();
+        g_game = counts_from_game(&lb.b.game_counted);
+        lb.b.game_vfx = g_game.vfx;
         if (!read_game_materials(to_path(api_path(KILN_PATH_GAME)) / L"enshrouded.kfc", &g_game_materials))
             KV_W("vfx: original material keys could not be read: material replacements are refused this session");
 
@@ -828,6 +977,7 @@ void build_on_ready(const KilnApi* api, KilnOwner self, const kiln::boot::Input*
         }
         kvb::CookOptions opt;
         opt.game = g_game;
+        opt.capacity.vfx = lb.b.admission;  // the game's own count limit where its code says it (the budget reads the live one)
         opt.game_has_material = [](const kvb::Guid& g) { return g_game_materials.count(g) != 0; };
         opt.read_file = &read_all;
         opt.cache = disk_cache();
@@ -942,6 +1092,7 @@ void build_on_ready(const KilnApi* api, KilnOwner self, const kiln::boot::Input*
                 g_material_records[key] = std::move(rec);
             }
         }
+        lb.b.stored = stored_receipts(mods, r);
         for (const std::string& e : r.errors) KV_E("vfx: %s", e.c_str());
         for (const std::string& e : r.refused_mods) KV_E("vfx: %s", e.c_str());
         for (const std::string& w : r.warnings) KV_W("vfx: %s", w.c_str());
@@ -980,6 +1131,13 @@ void build_on_ready(const KilnApi* api, KilnOwner self, const kiln::boot::Input*
                         it->second.served_size = static_cast<uint32_t>(s.data.size());
                     }
         }
+        lb.served = true;
+        for (const kvb::BuiltBlock& b : r.blocks) {
+            ledger::BuiltVfx v;
+            std::memcpy(v.guid.data(), b.guid.b, 16);
+            v.mod = b.mod, v.name = b.name, v.definition = b.definition;
+            lb.b.built.push_back(std::move(v));
+        }
         if (!r.blocks.empty()) g_own_checks.store(600);
         set_status(fingerprint, fingerprint_detail, &r);
         const kvb::Capacity& cap = r.capacity;
@@ -1000,6 +1158,9 @@ void build_on_ready(const KilnApi* api, KilnOwner self, const kiln::boot::Input*
         throw;  // a boot document: the boot generation's prepare refuses the mod
     } catch (const std::exception& e) {
         build_forget();
+        lb.served = false;
+        lb.b.built.clear();
+        lb.off = std::string("building mods' VFX failed (") + e.what() + "): no Kiln VFX this session";
         KV_E("vfx: building mods' VFX failed (%s): no Kiln VFX this session", e.what());
         set_status("not checked", e.what(), nullptr);
         refuse_required(true, true, std::string("building mods' VFX failed (") + e.what() + ")");
@@ -1024,6 +1185,7 @@ void build_forget() {
     g_late_done.store(true);
     g_off.store(false);
     g_status = "{}";
+    ledger::forget();
     KV_I("vfx: the boot generation's prepared VFX and materials are taken back");
 }
 
@@ -1086,8 +1248,76 @@ void check_own_data() {
     }
 }
 
+// The resource budget's reading of the game's VFX table (ledger::observe), on this update thread, the one place kiln.vfx reads the
+// game's memory for it: the count limit, count and state every 30 updates, and once the state is 2 what each of Kiln's VFX is
+// there (in the map, with the bytes Kiln served). The membership check is a read of the map (Game::is_registered), never
+// vfx/Resolve, which would acquire the resource. Readers of the budget copy what this publishes.
+namespace {
+std::atomic<uint32_t> g_observe_n{0};
+std::vector<std::pair<ledger::Id, uint8_t>> g_verdicts;  // update thread only
+bool g_verdicts_done = false;                            // update thread only
+bool g_guard_said = false;                               // update thread only
+
+void observe_registry() {
+    if (g_observe_n.fetch_add(1, std::memory_order_relaxed) % 30 != 0) return;
+    kvx::Game* game = kvx::core_game();
+    if (!game) return;
+    if (!game->has_guard()) {
+        // the guard's map check failed or a read faulted: the map is not what the signatures promised, so nothing is read
+        if (!g_guard_said) {
+            g_guard_said = true;
+            lower_rows(true, true, "the guard is off: the game's VFX map does not read as the signatures promised (kiln.log says why)",
+                       KILN_CAP_REASON_FAULTED);
+        }
+        return;
+    }
+    Registry reg;
+    if (!game->registry(nullptr, &reg) || reg.init_state != 2) return;
+    if (!g_verdicts_done) {
+        std::vector<std::pair<kvb::Guid, Built>> vfx;
+        {
+            std::lock_guard lk(g_mu);
+            for (const auto& [g, b] : g_built)
+                if (b.served_size) vfx.emplace_back(g, b);
+        }
+        std::vector<std::pair<ledger::Id, uint8_t>> out;
+        uint32_t own = 0, other = 0;
+        std::vector<uint8_t> buf;
+        for (const auto& [g, b] : vfx) {
+            const int in_map = game->is_registered(nullptr, g.b);
+            if (in_map < 0) return;  // not ready after all: the next reading
+            uint8_t v = ledger::kMissing;
+            if (in_map == 1) {
+                buf.assign(b.served_size, 0);
+                v = !game->read_resource(nullptr, g.b, buf.data(), buf.size()) ? ledger::kUnchecked
+                    : bytes_hash(buf.data(), buf.size()) == b.served             ? ledger::kOwn
+                                                                                 : ledger::kOther;
+            }
+            own += v == ledger::kOwn;
+            other += v == ledger::kOther;
+            out.emplace_back(id_of(g), v);
+        }
+        // as check_own_data: when not one matches, the comparison does not hold on this build, so none is proven either way
+        if (!own && other)
+            for (auto& [id, v] : out)
+                if (v == ledger::kOther) v = ledger::kUnchecked;
+        g_verdicts = std::move(out);
+        g_verdicts_done = true;
+        KV_I("vfx: the game's VFX table: %llu of %u resources (state %u); %u of Kiln's %zu VFX in it with Kiln's bytes",
+             static_cast<unsigned long long>(reg.count), reg.limit, reg.init_state, own, g_verdicts.size());
+    }
+    ledger::Seen seen;
+    seen.limit = reg.limit;
+    seen.count = reg.count;
+    seen.init_state = reg.init_state;
+    seen.kiln = g_verdicts;
+    ledger::observe(seen);
+}
+}  // namespace
+
 void build_on_update() {
     check_own_data();
+    observe_registry();
     if (g_late_done.load(std::memory_order_acquire)) return;
     bool expected = false;
     if (!g_late_done.compare_exchange_strong(expected, true)) return;
@@ -1134,6 +1364,37 @@ int64_t build_one_shot_ns(const uint8_t guid[16]) {
     return it == g_built.end() ? 0 : it->second.one_shot_ns;
 }
 
+namespace {
+// The builder on one definition from code (define_json, define_vfx_result): `lookup`: a particle may name a material of the
+// mod's data files or one already kept from code, so those are read for it.
+kvb::CookResult cook_code(kvb::ModInput m, bool lookup) {
+    if (lookup) {
+        kvb::ModInput all;
+        const fs::path pending_root = to_path(api_path(KILN_PATH_DATA)) / L"vfx" / L"pending";
+        if (read_mod(m.dir, pending_root, &all))
+            for (auto& [file, text] : all.documents) m.lookup_documents.push_back(std::move(text));
+        m.advanced = all.advanced;  // read from the manifest even when the mod has no data files
+    }
+    kvb::CookOptions opt;
+    shader_switches(&opt);
+    opt.game = g_game;
+    opt.game_has_material = [](const kvb::Guid& g) { return g_game_materials.count(g) != 0; };
+    opt.read_file = &read_all;
+    opt.cache = disk_cache();
+    opt.game_has_blob = game_has_blob;
+    // A material the boot build built from the same definition and the same file bytes is not built again (kvb::MaterialRecord):
+    // the report is the same, without decoding its textures. The copy is taken under g_mu, the cook runs without it.
+    opt.known_material = [copy = kvb::MaterialRecord{}](const std::string& mod, const std::string& name, uint64_t definition) mutable -> const kvb::MaterialRecord* {
+        std::lock_guard lk(g_mu);
+        const auto it = g_material_records.find({mod, name});
+        if (it == g_material_records.end() || it->second.definition != definition) return nullptr;
+        copy = it->second;
+        return &copy;
+    };
+    return kvb::cook_mods({std::move(m)}, opt);
+}
+}  // namespace
+
 KilnResult build_define_json(KilnOwner owner, KilnStr json, char* report, size_t cap, size_t* out_len) {
     KilnResult rc = KILN_OK;
     std::string text;
@@ -1150,8 +1411,11 @@ KilnResult build_define_json(KilnOwner owner, KilnStr json, char* report, size_t
                 std::lock_guard lk(g_mu);
                 released = reskin_release_locked(mod);
             }
+            // its VFX stay in the game's table for the process: the budget counts them reserved until a block of the mod compiles
+            const uint32_t kept_for_mod = ledger::release(mod);
             result["ok"] = true;
             result["released"] = released;
+            result["vfxKept"] = kept_for_mod;
             text = result.dump();
             if (out_len) *out_len = text.size();
             if (report && cap) {
@@ -1178,48 +1442,26 @@ KilnResult build_define_json(KilnOwner owner, KilnStr json, char* report, size_t
             if (doc.contains("vfx")) only["vfx"] = doc["vfx"];
             if (doc.contains("materials")) only["materials"] = doc["materials"];
             m.documents.emplace_back("code", only.dump());
-            // A particle in this definition may name a material of the mod's data files, or one already kept from code.
-            if (doc.contains("vfx")) {
-                kvb::ModInput all;
-                const fs::path pending_root = to_path(api_path(KILN_PATH_DATA)) / L"vfx" / L"pending";
-                if (read_mod(m.dir, pending_root, &all))
-                    for (auto& [file, text] : all.documents) m.lookup_documents.push_back(std::move(text));
-                m.advanced = all.advanced;  // read from the manifest even when the mod has no data files
-            }
-            kvb::CookOptions opt;
-            shader_switches(&opt);
-            opt.game = g_game;
-            opt.game_has_material = [](const kvb::Guid& g) { return g_game_materials.count(g) != 0; };
-            opt.read_file = &read_all;
-            opt.cache = disk_cache();
-            opt.game_has_blob = game_has_blob;
-            // A material the boot build built from the same definition and the same file bytes is not built again (kvb::MaterialRecord):
-            // the report is the same, without decoding its textures. The copy is taken under g_mu, the cook runs without it.
-            opt.known_material = [copy = kvb::MaterialRecord{}](const std::string& mod, const std::string& name, uint64_t definition) mutable -> const kvb::MaterialRecord* {
-                std::lock_guard lk(g_mu);
-                const auto it = g_material_records.find({mod, name});
-                if (it == g_material_records.end() || it->second.definition != definition) return nullptr;
-                copy = it->second;
-                return &copy;
-            };
-            const kvb::CookResult r = kvb::cook_mods({m}, opt);
+            const kvb::CookResult r = cook_code(m, doc.contains("vfx"));
             if (r.materials_reused) KV_D("vfx: %s: %u material(s) as the boot build made them (same definition and files)", m.id.c_str(), r.materials_reused);
             result = kvb::report_json(r);
             if (!r.errors.empty() || !r.refused_mods.empty()) rc = KILN_ERR_INVALID_ARGUMENT;
             const fs::path pending = to_path(api_path(KILN_PATH_DATA)) / L"vfx" / L"pending" / to_path(m.id);
             std::lock_guard lk(g_mu);
-            const auto keep = [&](const char* section, const std::string& name, const std::string& file) {
+            // a definition kept for the next start: written whole or not at all (kiln_capacity_util.hpp write_atomic); a receipt whose
+            // stored definition the file held is superseded by another content (ledger::kept)
+            const auto keep = [&](const char* section, const std::string& name, const std::string& file, uint64_t definition) {
                 ojson one = ojson::object();
                 one["format"] = 1;
                 one[section] = ojson::object();
                 one[section][name] = doc[section][name];
-                std::error_code ec;
-                fs::create_directories(pending, ec);
-                std::ofstream f(pending / to_path(file), std::ios::binary);
-                const std::string s = one.dump(1);
-                f.write(s.data(), static_cast<std::streamsize>(s.size()));
-                if (!f) KV_W("vfx: %s:%s: can't keep it for the next start", m.id.c_str(), name.c_str());
+                if (!kiln::capacity::write_atomic(pending / to_path(file), one.dump(1))) {
+                    KV_W("vfx: %s:%s: can't keep it for the next start", m.id.c_str(), name.c_str());
+                    return;
+                }
+                if (std::strcmp(section, "vfx") == 0) ledger::kept(m.id, name, definition);
             };
+            if (rc == KILN_OK && (!r.blocks.empty() || !r.materials.empty())) ledger::activate(m.id);  // a block of the mod compiles: it is loaded
             for (size_t i = 0; i < r.blocks.size(); ++i) {
                 const kvb::BuiltBlock& b = r.blocks[i];
                 const auto it = g_built.find(b.guid);
@@ -1229,7 +1471,7 @@ KilnResult build_define_json(KilnOwner owner, KilnStr json, char* report, size_t
                 }
                 // The game enumerates VFX once: this one is there from the next start.
                 result["blocks"][i]["status"] = "pending";
-                keep("vfx", b.name, b.name + ".json");
+                keep("vfx", b.name, b.name + ".json", b.definition);
             }
             for (size_t i = 0; i < r.materials.size(); ++i) {
                 const kvb::BuiltMaterialBlock& b = r.materials[i];
@@ -1247,7 +1489,7 @@ KilnResult build_define_json(KilnOwner owner, KilnStr json, char* report, size_t
                 }
                 // The renderer lists the textures of every material once at boot, and a texture it didn't list is fatal: this one is there from the next start.
                 result["materials"][i]["status"] = "pending";
-                keep("materials", b.name, "material-" + b.name + ".json");
+                keep("materials", b.name, "material-" + b.name + ".json", b.definition);
             }
         }
         text = result.dump();
@@ -1272,6 +1514,131 @@ KilnResult build_status_json(char* buf, size_t cap, size_t* out_len) {
     std::memcpy(buf, g_status.data(), g_status.size());
     buf[g_status.size()] = 0;
     return KILN_OK;
+}
+
+// ---- the resource budget's C members (kiln_vfx.h, since 0.2.0-dev.29; package 17a S2) -----------------------------------------
+
+void budget_start(const KilnApi* api, KilnOwner self) {
+    if (!g_api) g_api = api;
+    if (!g_self) g_self = self;
+    Game* game = core_game();
+    Row b, r;
+    {
+        std::lock_guard lk(g_rows_mu);
+        g_rows_started = true;
+        if (!game) g_budget_row = {"kiln.vfx has no game layer here", KILN_CAP_REASON_SERVICE_MISSING};
+        else if (const char* why = game->registry_missing()) g_budget_row = {why, KILN_CAP_REASON_SYMBOL_MISSING};
+        else g_budget_row = {};
+        if (!g_budget_row.off.empty()) g_registration_row = g_budget_row;
+        else if (const char* why = game->bytes_missing()) g_registration_row = {why, KILN_CAP_REASON_SYMBOL_MISSING};
+        else g_registration_row = {};
+        b = g_budget_row, r = g_registration_row;
+    }
+    ledger::set_available(b.off.empty(), r.off.empty());
+    report_row("vfx.budget", b);
+    report_row("blocks.vfx_registration", r);
+}
+
+KilnResult build_resource_budget(KilnCapacityInfo* out) {
+    if (!out || out->size < sizeof(KilnCapacityInfo)) return KILN_ERR_INVALID_ARGUMENT;
+    return ledger::budget(out);
+}
+
+namespace {
+KilnResult answer(KilnResult rc, const std::string& rep, char* report, size_t cap, size_t* out_len) {
+    const size_t n = rep.size() < cap ? rep.size() : cap - 1;  // a report is under kReportMax, and cap is at least that
+    std::memcpy(report, rep.data(), n);
+    report[n] = 0;
+    if (out_len) *out_len = rep.size();
+    return rc;
+}
+}  // namespace
+
+KilnResult build_define_vfx_result(KilnOwner owner, KilnStr name, KilnStr json, uint32_t timing, KilnDefinitionReply* out, char* report, size_t cap,
+                                   size_t* out_len) {
+    if (out_len) *out_len = ledger::kReportMax;
+    if (!report || cap < ledger::kReportMax) return KILN_ERR_BUFFER_TOO_SMALL;  // before anything is read or changed
+    std::string rep;
+    KilnResult rc = KILN_OK;
+    const auto bad = [&](const std::string& why) {
+        rep = ledger::report_json(why, {});
+        rc = KILN_ERR_INVALID_ARGUMENT;
+    };
+    try {
+        const std::string block_name = name.ptr ? std::string(name.ptr, name.len) : std::string();
+        const ojson doc = json.ptr ? kvb::parse_relaxed(std::string(json.ptr, json.len)) : ojson();
+        const bool shape = doc.is_object() && doc.contains("mod") && doc["mod"].is_string() && doc.contains("dir") && doc["dir"].is_string() &&
+                           doc.contains("block") && doc["block"].is_object() &&
+                           (!doc.contains("format") || (doc["format"].is_number_integer() && doc["format"].get<int>() == 1));
+        if (!out || out->size < sizeof(KilnDefinitionReply)) {
+            bad("the answer struct is missing or smaller than KilnDefinitionReply");
+        } else if (timing != KILN_DEFINE_REQUIRE_REGISTERED && timing != KILN_DEFINE_ALLOW_NEXT_START) {
+            bad("timing " + std::to_string(timing) + " is not REQUIRE_REGISTERED (0) or ALLOW_NEXT_START (1)");
+        } else if (!ledger::valid_name(block_name)) {
+            bad("\"" + block_name + "\" is not a block name (letters, digits, '-', '_', '.'; at most 128)");
+        } else if (!shape) {
+            bad("expected {\"format\": 1, \"mod\": id, \"dir\": folder, \"block\": {...one VFX block...}}");
+        } else if (!ledger::valid_mod(doc["mod"].get<std::string>())) {
+            bad("\"" + doc["mod"].get<std::string>() + "\" is not a mod id");
+        } else if (!ledger::registration_available()) {
+            rc = KILN_ERR_UNAVAILABLE;
+            rep = ledger::report_json("blocks.vfx_registration is off in this process (Capabilities.Why says why)", {});
+        } else {
+            kvb::ModInput m;
+            m.id = doc["mod"].get<std::string>();
+            m.dir = doc["dir"].get<std::string>();
+            m.side = "client";  // the manifest's rule was checked when the mod loaded
+            ojson only = ojson::object();
+            only["format"] = 1;
+            only["vfx"] = ojson::object();
+            only["vfx"][block_name] = doc["block"];
+            m.documents.emplace_back("code", only.dump());
+            // the same validation and builder as a blocks file; a block it refuses is a bad argument, as for define_json
+            const kvb::CookResult r = cook_code(m, true);
+            const auto built = std::find_if(r.blocks.begin(), r.blocks.end(), [&](const kvb::BuiltBlock& b) { return b.name == block_name; });
+            if (!r.errors.empty()) bad(r.errors.front());
+            else if (!r.refused_mods.empty()) bad(r.refused_mods.front());
+            else if (built == r.blocks.end()) bad("kiln.vfx did not build it and did not say why");
+            else {
+                ledger::Request q;
+                q.mod = m.id;
+                q.name = block_name;
+                q.guid = id_of(built->guid);
+                q.definition = built->definition;
+                q.block = doc["block"].dump();  // in its own key order: the builder hashes this text, a pending file stores it
+                q.canonical = nlohmann::json::parse(q.block).dump();
+                q.timing = timing;
+                // post() refuses a revoked owner; for a live one it queues a no-op task (the probe reskins use)
+                q.owner_live = owner != 0 && g_api && g_api->post(owner, &reskin_noop, nullptr) != KILN_ERR_REVOKED;
+                q.warnings = r.warnings;
+                rc = ledger::define(q, out, &rep);
+                if (rc == KILN_OK)
+                    KV_I("vfx: %s: vfx %s defined with an answer: %s", m.id.c_str(), block_name.c_str(),
+                         out->disposition == KILN_DEFINITION_REGISTERED          ? "registered"
+                         : out->disposition == KILN_DEFINITION_ACCEPTED_NEXT_START ? "accepted for the next start"
+                         : out->disposition == KILN_DEFINITION_RETAINED          ? "retained"
+                                                                                 : "refused");
+            }
+        }
+    } catch (const std::exception& e) {
+        rc = KILN_ERR_INTERNAL;
+        rep = ledger::report_json(e.what(), {});
+    }
+    return answer(rc, rep, report, cap, out_len);
+}
+
+KilnResult build_vfx_registration(KilnOwner, const uint8_t registration_id[16], KilnDefinitionReply* out, char* report, size_t cap, size_t* out_len) {
+    if (out_len) *out_len = ledger::kReportMax;
+    if (!report || cap < ledger::kReportMax) return KILN_ERR_BUFFER_TOO_SMALL;
+    std::string rep;
+    KilnResult rc = KILN_OK;
+    try {
+        rc = ledger::receipt(registration_id, out, &rep);
+    } catch (const std::exception& e) {
+        rc = KILN_ERR_INTERNAL;
+        rep = ledger::report_json(e.what(), {});
+    }
+    return answer(rc, rep, report, cap, out_len);
 }
 
 }  // namespace kvx

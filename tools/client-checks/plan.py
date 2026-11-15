@@ -487,6 +487,8 @@ def render(plan: dict) -> str:
            f"{plan['index']} in the index are this release's"]
     if plan["later"]:
         out.append("Played in a later release: " + ", ".join(f"{x['ids']} in {x['release']}" for x in plan["later"]))
+    out.append("A Pass confirms a check only when every assertion passed, including during finishing. "
+               "The ledger report shows forced Fail reasons and rejects older passes with failed assertions.")
     total = 0
     for s in plan["sessions"]:
         total += s["minutes"]

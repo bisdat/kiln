@@ -213,7 +213,7 @@ public sealed unsafe class ProgramWrap : IDisposable
     {
         get
         {
-            long slices = 0, entities = 0, faults = 0, overruns = 0;
+            long slices = 0, entities = 0, faults = 0, overruns = 0, skips = 0;
             double us = 0;
             var threads = 0;
             var t = SystemsNative.T;
@@ -227,8 +227,9 @@ public sealed unsafe class ProgramWrap : IDisposable
                     overruns += (long)i.Overruns;
                     us += i.TotalNs / 1000.0;
                     threads = Math.Max(threads, (int)i.Threads);
+                    skips += Interlocked.Read(ref s.ArchetypeSkips);
                 }
-            return new WrapStats(slices, entities, us, faults, overruns, threads);
+            return new WrapStats(slices, entities, us, faults, overruns, threads) { ArchetypeSkips = skips };
         }
     }
 
@@ -298,10 +299,13 @@ public sealed unsafe class ProgramWrap : IDisposable
 
     // The filters, per slice: When on every call, WhenArchetype cached per archetype. `off`: WhenArchetype cannot decide
     // on this build or world (no archetype key at all, a name the world has no component of): the stage must go off
-    // rather than skip every slice without a word.
-    internal bool Accepts(SystemsNative.Slice* s, out string? off)
+    // rather than skip every slice without a word. `changed`: kiln.world saw the entity map change under its archetype
+    // read (KILN_WORLD_ERR_CHANGED) on all of ArchetypeReads reads: transient, so only this slice is left to the game.
+    internal const int ArchetypeReads = 3;
+    internal bool Accepts(SystemsNative.Slice* s, out string? off, out bool changed)
     {
         off = null;
+        changed = false;
         var archetype = Volatile.Read(ref _archetype);
         var when = Volatile.Read(ref _when);
         if (archetype is null && when is null) return true;
@@ -312,11 +316,18 @@ public sealed unsafe class ProgramWrap : IDisposable
         {
             nuint l = 0;
             rc = t->GameSliceArchetype(s, &l);
+            for (var reads = 1; archetype is not null && rc == SystemsNative.Changed && reads < ArchetypeReads; reads++)
+                rc = t->GameSliceArchetype(s, &l);
             if (rc == SystemsNative.Ok) layout = (nint)l;
         }
         if (archetype is not null)
         {
-            if (rc == SystemsNative.NotFound) return false;  // an empty slice, an entity the map does not hold: this slice
+            if (rc == SystemsNative.NotFound) return false;  // an empty slice: this slice
+            if (rc == SystemsNative.Changed)
+            {
+                changed = true;  // the map changed under every read: this slice is the game's, the stage stays on
+                return false;
+            }
             if (layout == 0 || t == null)
             {
                 off = $"WhenArchetype cannot read a slice's archetype on this build (kiln.world answered {rc})";
@@ -419,6 +430,7 @@ internal sealed unsafe class ManagedStage
     internal volatile bool Removing;
     internal string? Detail;
     internal long ManagedFaults;
+    internal long ArchetypeSkips;       // slices left to the game: the archetype read saw the map change (Accepts)
     internal IAround? Around;           // the stage is one half of an AroundEach
     internal ManagedStage? Partner;     // its other half: they go off together
     private GCHandle _self;
@@ -445,7 +457,49 @@ internal sealed unsafe class ManagedStage
 
     internal bool PerEntity => Each is not null || View is not null;
 
-    internal WrapState State => _state;
+    internal WrapState State => _directorySuspended ? WrapState.Pending : _state;
+    private readonly object _directoryGate = new();
+    private volatile bool _directorySuspended;
+    private ulong _directorySession = ulong.MaxValue, _directoryStep;
+    private int _directoryAttempts;
+    private volatile bool _directoryReady;
+
+    private bool DirectoryReady(SystemsNative.Table* t, SystemsNative.Slice* s)
+    {
+        var session = t->GameWorldSession((uint)Wrap.World);
+        // Successful lists are session-cached: concurrent steady-state slices need no retry gate at all.
+        if (Volatile.Read(ref _directorySession) == session && _directoryReady) return true;
+        // No worker waits for another worker performing the bounded directory reads.
+        if (!Monitor.TryEnter(_directoryGate)) return false;
+        try
+        {
+            if (_directorySession != session)
+            {
+                _directoryReady = false; _directoryAttempts = 0;
+                Volatile.Write(ref _directorySession, session);
+            }
+            if (_directoryReady) return true;
+            if (_directoryAttempts != 0 && _directoryStep == s->Step) return false;
+            _directoryStep = s->Step;
+            var lists = ProgramLists.Of(t, Wrap.World, Wrap.Program, s->ProgramIndex);
+            if (lists.Complete && (lists.Contract is not null || !lists.ContractUnread))
+            {
+                _directoryReady = true; _directorySuspended = false; Detail = null;
+                return true;
+            }
+            _directorySuspended = true;
+            Detail = $"program directory unavailable: suspended ({++_directoryAttempts}/8 attempts; retry next step)";
+            if (_directoryAttempts == 1) Wrap.Mod?.Log.Warn(Detail);
+            if (_directoryAttempts >= 8)
+            {
+                _directorySuspended = false;
+                Off($"program directory unavailable after 8 attempts on separate steps: {Wrap.Program}");
+            }
+            return false;
+        }
+        finally { Monitor.Exit(_directoryGate); }
+    }
+
 
     internal void Refuse(string why)
     {
@@ -557,6 +611,17 @@ internal sealed unsafe class ManagedStage
         else ProgramWrap.PostToTick(() => Wrap.OnDisabled(e));
     }
 
+    // WhenArchetype left a slice to the game (the entity map changed under all its reads): counted in Stats, said once.
+    private void ArchetypeSkipped()
+    {
+        if (Interlocked.Increment(ref ArchetypeSkips) != 1) return;
+        var text = $"{Wrap.Program}: WhenArchetype could not read a slice's archetype ({ProgramWrap.ArchetypeReads} reads, the " +
+            "entity map changed under each); the slice was left to the game and the stage stays on (counted in " +
+            "Stats.ArchetypeSkips; said once per stage)";
+        if (Wrap.Mod is { } m) m.Log.Warn(text);
+        else Backend.Current.Log(0, LogLevel.Warn, $"Kiln.Systems: {text}");
+    }
+
     // Turned off for a reason that is not the mod's (the build cannot do what the stage asks): no count for its policy.
     private void Off(string reason)
     {
@@ -602,9 +667,11 @@ internal sealed unsafe class ManagedStage
         {
             ModContext.CurrentMod = mod;
             string? off = null;
-            if (_disabled != 0 || Removing || mod is { Alive: false } || !Wrap.Accepts(s, out off))
+            var changed = false;
+            if (_disabled != 0 || Removing || mod is { Alive: false } || !Wrap.Accepts(s, out off, out changed))
             {
                 if (off is not null) Off(off);       // the filter cannot decide here: the stage goes off and says why
+                if (changed) ArchetypeSkipped();     // a change under the read: only this slice, counted
                 if (replace) RunOriginalQuietly(s);  // this slice is the game's
                 return;
             }
@@ -637,6 +704,7 @@ internal sealed unsafe class ManagedStage
     {
         var t = SystemsNative.T;
         if (t == null) return;
+        if (View is not null && !DirectoryReady(t, s)) return;
         var around = Around;
         if (around is not null && !around.Begin(Kind, s)) return;  // an After whose Before kept nothing of this slice
         var outerEach = _each;

@@ -16,6 +16,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <thread>
 #include <map>
 #include <mutex>
 #include <string>
@@ -28,8 +29,11 @@
 #include "kiln_api.h"
 #include "nlohmann/json.hpp"
 #include "kiln_hook.hpp"
+#include "natives_core.h"
+#include "natives_json.h"
 #include "services/kiln_abilities.h"
 #include "services/kiln_assets.h"
+#include "services/kiln_profile.h"
 #include "services/kiln_spawn.h"
 #include "verify.h"
 
@@ -38,6 +42,13 @@ using namespace kab;
 static_assert(sizeof(KilnAbilityEvent) == 640 && sizeof(KilnImpactVar) == 88 && sizeof(KilnConfigOverride) == 80 &&
               sizeof(KilnNativeInfo) == 88 && sizeof(KilnProgramInfo) == 44 && sizeof(KilnNativeCall) == 104 &&
               sizeof(KilnAbilitiesStatus) == 160);
+// since 0.2.0-dev.29: the table's tail (append only) and the counters
+static_assert(offsetof(KilnAbilitiesApi, sequence_play) == 232 && offsetof(KilnAbilitiesApi, native_register_sync) == 240 &&
+              offsetof(KilnAbilitiesApi, native_counters) == 248 && offsetof(KilnAbilitiesApi, native_attach) == 256 &&
+              offsetof(KilnAbilitiesApi, native_detach) == 264 && offsetof(KilnAbilitiesApi, native_declare_typed) == 272 &&
+              offsetof(KilnAbilitiesApi, native_state) == 280 && offsetof(KilnAbilitiesApi, native_attach_state) == 288 &&
+              sizeof(KilnAbilitiesApi) == 296 && sizeof(KilnNativeCounters) == 112 && sizeof(KilnNativeFilter) == 16 &&
+              sizeof(KilnNativeArg) == 8);
 
 namespace {
 
@@ -93,6 +104,34 @@ std::atomic<uint64_t> c_created{0}, c_held{0}, c_ovr_applied{0}, c_ovr_mismatch{
     c_observed{0}, c_signals{0}, c_managed_calls{0}, c_managed_suspends{0}, c_delivered{0}, c_dropped{0}, c_wrap{0},
     c_refused{0};
 
+// since 0.2.0-dev.29: the native thunks' own counters (native_counters)
+std::atomic<uint64_t> c_sync_calls{0}, c_sync_faults{0}, c_sync_slow{0}, c_dead_calls{0}, c_lock_bypass{0},
+    c_attach_entered{0}, c_attach_skipped{0}, c_typed_refused{0}, c_typed_unconnected{0};
+std::atomic<uint32_t> g_inflight{0};  // calls inside a Kiln thunk right now
+
+int64_t g_qpf = 0;  // QueryPerformanceFrequency, set at init
+int64_t qpc() {
+    LARGE_INTEGER t;
+    QueryPerformanceCounter(&t);
+    return t.QuadPart;
+}
+int64_t now_ns() { return g_qpf > 0 ? static_cast<int64_t>(static_cast<double>(qpc()) * 1e9 / static_cast<double>(g_qpf)) : 0; }
+constexpr int64_t kRetireWaitNs = 2'000'000;  // the bounded wait of a retirement or a world stop (review P1)
+
+// A hook visit never waits on a lock for long. Kiln's tick-thread work under g_mu / g_ev_mu is short, so a job thread
+// that cannot take one within about a millisecond gives up and takes the path that needs no lock (a dropped event, a
+// managed call that suspends one more step).
+bool bounded_lock(std::mutex& m) {
+    if (m.try_lock()) return true;
+    const int64_t end = qpc() + (g_qpf > 0 ? g_qpf / 1000 : 0);
+    while (qpc() < end) {
+        SwitchToThread();
+        if (m.try_lock()) return true;
+    }
+    c_lock_bypass.fetch_add(1, std::memory_order_relaxed);
+    return false;
+}
+
 // Pending work the hot detours must check: held + canceled + per-impact overrides (0 = the fast path).
 std::atomic<uint32_t> g_pending{0};
 std::atomic<uint32_t> g_first_instance{0};  // the first instance seen (layout check)
@@ -126,13 +165,18 @@ void recount_pending() {  // g_mu held
     g_entity_ovr_count.store(static_cast<uint32_t>(g_entity_ovr.size()), std::memory_order_release);
 }
 
-void push_event(const KilnAbilityEvent& ev) {
-    std::lock_guard lock(g_ev_mu);
+bool push_event(const KilnAbilityEvent& ev) {  // job threads
+    if (!bounded_lock(g_ev_mu)) {
+        c_dropped.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+    std::lock_guard lock(g_ev_mu, std::adopt_lock);
     if (g_events.size() >= kMaxEvents) {
         c_dropped.fetch_add(1, std::memory_order_relaxed);
-        return;
+        return false;
     }
     g_events.push_back(ev);
+    return true;
 }
 
 KilnAbilityEvent new_event(uint32_t kind) {
@@ -162,7 +206,10 @@ std::map<uintptr_t, std::vector<Captured>> g_registries;  // (g_mu)
 uintptr_t g_last_registry = 0;                            // (g_mu)
 thread_local bool t_kiln_registering = false;
 
-enum SlotKind : uint32_t { SLOT_FREE = 0, SLOT_WRAPPED, SLOT_LOG, SLOT_SIGNAL, SLOT_MANAGED, SLOT_DEAD };
+// SLOT_MANAGED_SYNC (since 0.2.0-dev.29): a Kiln native answered inside the ECALL by its own fn (no original).
+enum SlotKind : uint32_t { SLOT_FREE = 0, SLOT_WRAPPED, SLOT_LOG, SLOT_SIGNAL, SLOT_MANAGED, SLOT_DEAD, SLOT_MANAGED_SYNC };
+bool kiln_kind(uint32_t k) { return k == SLOT_LOG || k == SLOT_SIGNAL || k == SLOT_MANAGED || k == SLOT_MANAGED_SYNC; }
+bool mod_kind(uint32_t k) { return k == SLOT_MANAGED || k == SLOT_MANAGED_SYNC; }  // a mod's native: unregister, owner
 
 struct Slot {
     std::atomic<uint32_t> kind{SLOT_FREE};
@@ -174,13 +221,33 @@ struct Slot {
     char name[96]{};
     KilnOwner owner = 0;
     uintptr_t registered_in = 0;  // the native registry this slot's thunk is registered in
+    // SLOT_MANAGED_SYNC: the native's own fn, user and owner gate as one immutable binding, stored before `kind` is
+    // published (release) and read after it (acquire); retired (not freed) when taken off
+    std::atomic<const SyncBinding*> sync{nullptr};
+    // SLOT_WRAPPED: the attachments of this native (natives_core.h), an immutable set swapped on the tick thread; an
+    // old set is freed in a later Pre when no thunk runs (g_retired)
+    std::atomic<const AttachSet*> attach{nullptr};
+    // a Kiln native's typed declaration (native_declare_typed), checked before its handler sees a call; swapped like
+    // `attach`
+    std::atomic<const std::vector<KilnNativeArg>*> typed{nullptr};
 };
 constexpr int kSlots = 160;
 Slot g_slots[kSlots];
 
+// since 0.2.0-dev.29 (review P1): owner admission and deferred retirement (natives_core.h). g_mu.
+OwnerGates g_gates;
+std::vector<const SyncBinding*> g_retired_bindings;  // taken off, freed in a Pre once their gate is quiet
+void retire_binding(const SyncBinding* b) {          // g_mu held
+    if (b) g_retired_bindings.push_back(b);
+}
+std::vector<Deferred<KilnOwner>> g_deferred_owners;  // owners whose retirement waits for its calls to leave (g_mu)
+std::atomic<bool> g_programs_added{false};           // a Kiln program went in after the readiness check
+
 std::unordered_map<uint32_t, int> g_slot_of;          // hash -> slot (g_mu)
 std::unordered_map<uint32_t, uint32_t> g_vanilla_argc; // hash -> argc, the game's own natives (g_mu)
 std::unordered_map<uint32_t, uint32_t> g_declared;     // hash -> argc, from natives.json (g_mu)
+std::unordered_map<uint32_t, std::vector<KilnNativeArg>> g_typed;  // hash -> typed declaration (g_mu; since dev.29)
+std::vector<const std::vector<KilnNativeArg>*> g_retired_typed;   // swapped out, freed in a Pre (g_mu)
 
 KilnNativeWrapFn g_wrap_fn = nullptr;
 void* g_wrap_user = nullptr;
@@ -247,45 +314,105 @@ void capture_args(KilnAbilityEvent& ev, const ArgSlice* args, const NativeCtx* c
 }
 
 // The thunk body. No C++ objects with destructors live here (seh_dispatch wraps it); locks are taken in helpers.
-thread_local bool t_in_game = false;  // inside the game's own native (a fault there is not retried)
+thread_local bool t_in_game = false;   // inside the game's own native (a fault there is not retried)
+thread_local int t_slot = -1;          // the slot whose thunk runs on this thread now (call_original; no registration)
+thread_local bool t_orig_ran = false;  // the game's native ran in this call: it never runs a second time (the latch)
+thread_local int32_t t_stage = KILN_NATIVE_BEFORE;  // the attachment stage running on this thread (call_original)
+// since 0.2.0-dev.29 (review P1): the owner gate this thread's callback entered, and its watchdog record (a fault
+// leaves both through on_fault)
+thread_local OwnerGate* t_gate = nullptr;
+thread_local int t_inside = -1;
+InsideTable<64> g_inside;
+std::atomic<bool> g_watchdog_on{false};
+std::atomic<uint64_t> c_watchdog_reports{0}, c_retire_deferred{0};
+void leave_gate() {
+    if (OwnerGate* g = t_gate) {
+        t_gate = nullptr;
+        gate_leave(*g);
+    }
+}
+void watch(int64_t now, const char* what, KilnOwner owner) {
+    if (g_watchdog_on.load(std::memory_order_relaxed)) t_inside = g_inside.claim(now, what, owner);
+}
+void unwatch() {
+    g_inside.release(t_inside);
+    t_inside = -1;
+}
 NativeResult* call_fn(NativeFn fn, NativeResult* out, ArgSlice* args, NativeCtx* ctx) {
+    t_orig_ran = true;
     t_in_game = true;
     NativeResult* r = fn(out, args, ctx);
     t_in_game = false;
     return r;
 }
 
+// The call record a dispatcher or a sync native's fn gets (the wrap path's, also for sync natives).
+void fill_call(KilnNativeCall& c, const Slot& s, NativeResult* out, ArgSlice* args, NativeCtx* ctx) {
+    std::memset(&c, 0, sizeof c);
+    c.size = sizeof c;
+    c.hash = s.hash;
+    c.argc = static_cast<uint32_t>(std::min<uint64_t>(args->count, 31));
+    c.args = args->data;
+    c.layout = ctx->layout;
+    c.layout_count = ctx->layout_count;
+    c.data = ctx->data;
+    c.data_size = ctx->data_size;
+    c.impact_id = ctx->impact_id;
+    c.program_id = ctx->program_id;
+    c.site = ctx->site;
+    c.self = self_of(ctx->impact_id);
+    c.engine[0] = out;
+    c.engine[1] = args;
+    c.engine[2] = ctx;
+    c.out_error = kUndecided;  // nothing handled the call yet (a wrapped native: the game's native runs)
+    c.out_value = 0;
+}
+
+// A wrapped vanilla native: the global wrap dispatcher (native_wrap) and the attachments (native_attach) share one call
+// record; the game's native runs once, when nothing answered. A call that matches no attachment's filter enters no
+// managed code (the filters are compared here).
 void dispatch_wrapped(Slot& s, NativeResult* out, ArgSlice* args, NativeCtx* ctx) {
     c_native_calls.fetch_add(1, std::memory_order_relaxed);
     NativeFn orig = s.original.load(std::memory_order_acquire);
-    if (s.wrap.load(std::memory_order_relaxed) && g_wrap_fn) {
-        c_wrap.fetch_add(1, std::memory_order_relaxed);
+    const bool legacy = s.wrap.load(std::memory_order_relaxed) && g_wrap_fn;
+    const AttachSet* set = s.attach.load(std::memory_order_seq_cst);
+    if (legacy || set) {
         KilnNativeCall c;
-        std::memset(&c, 0, sizeof c);
-        c.size = sizeof c;
-        c.hash = s.hash;
-        c.argc = static_cast<uint32_t>(args->count);
-        c.args = args->data;
-        c.layout = ctx->layout;
-        c.layout_count = ctx->layout_count;
-        c.data = ctx->data;
-        c.data_size = ctx->data_size;
-        c.impact_id = ctx->impact_id;
-        c.program_id = ctx->program_id;
-        c.site = ctx->site;
-        c.self = self_of(ctx->impact_id);
-        c.engine[0] = out;
-        c.engine[1] = args;
-        c.engine[2] = ctx;
-        c.out_error = 0xFF;  // "undecided": nothing handled the call, the game's native runs
-        c.out_value = 0;
-        g_wrap_fn(&c, g_wrap_user);  // guarded by the thunk's SEH frame
-        if (!c.original_called && c.out_error == 0xFF) {
+        fill_call(c, s, out, args, ctx);
+        auto decided = [&c] { return c.original_called != 0 || c.out_error != kUndecided; };
+        auto original = [&] {
+            c.original_called = 1;
             call_fn(orig, out, args, ctx);
-        } else {
-            out->error = c.out_error;
-            out->value = c.out_value;
+            c.out_error = out->error;
+            c.out_value = out->value;
+        };
+        t_stage = KILN_NATIVE_BEFORE;
+        if (legacy) {
+            c_wrap.fetch_add(1, std::memory_order_relaxed);
+            g_wrap_fn(&c, g_wrap_user);  // guarded by the thunk's SEH frame
         }
+        if (set) {
+            uint64_t entered = 0, skipped = 0;
+            run_stages(
+                *set, ctx->program_id, ctx->site,
+                [&c, &s](const Attachment& a, int32_t stage) {
+                    if (!a.gate || !gate_enter(*a.gate)) return;  // its owner is retiring: as if it were not there
+                    t_gate = a.gate;
+                    t_stage = stage;
+                    watch(qpc(), s.name, a.gate->owner);
+                    a.fn(&c, a.user);
+                    unwatch();
+                    leave_gate();
+                },
+                original, decided, &entered, &skipped);
+            if (entered) c_attach_entered.fetch_add(entered, std::memory_order_relaxed);
+            if (skipped) c_attach_skipped.fetch_add(skipped, std::memory_order_relaxed);
+        } else if (!decided()) {
+            original();
+        }
+        t_stage = KILN_NATIVE_BEFORE;
+        out->error = c.out_error;
+        out->value = c.out_value;
     } else {
         call_fn(orig, out, args, ctx);
     }
@@ -404,12 +531,31 @@ void dispatch_signal(NativeResult* out, ArgSlice* args, NativeCtx* ctx) {
     out->value = 1;
 }
 
+// A Kiln native's typed declaration refuses this call (natives_core.h check_typed_args): the answer is set.
+bool refused_typed(const Slot& s, NativeResult* out, const ArgSlice* args, const NativeCtx* ctx) {
+    const std::vector<KilnNativeArg>* t = s.typed.load(std::memory_order_acquire);
+    if (!t || t->empty()) return false;
+    const uint8_t e = check_typed_args(t->data(), static_cast<uint32_t>(t->size()), args->data, args->count, ctx->layout,
+                                       ctx->layout_count, ctx->data_size);
+    if (!e) return false;
+    (e == kErrNoConnection ? c_typed_unconnected : c_typed_refused).fetch_add(1, std::memory_order_relaxed);
+    out->error = e;
+    out->value = 0;
+    return true;
+}
+
 void dispatch_managed(int slot, NativeResult* out, ArgSlice* args, NativeCtx* ctx) {
+    if (refused_typed(g_slots[slot], out, args, ctx)) return;
     const uint64_t key = (static_cast<uint64_t>(ctx->impact_id) << 32) | ctx->site;
     bool queued_new = false;
     uint64_t id = 0;
+    if (!bounded_lock(g_mu)) {  // the tick thread holds it (it never does during the step): wait one more step
+        out->error = 1;
+        out->value = 0;
+        return;
+    }
     {
-        std::lock_guard lock(g_mu);
+        std::lock_guard lock(g_mu, std::adopt_lock);
         auto it = g_calls.find(key);
         if (it != g_calls.end() && it->second.state == 1) {
             out->error = it->second.error;
@@ -420,13 +566,10 @@ void dispatch_managed(int slot, NativeResult* out, ArgSlice* args, NativeCtx* ct
         }
         if (it == g_calls.end()) {
             id = ++g_call_seq;
-            g_calls[key] = ManagedCall{id, slot, 0, 0, 0, g_step.load(), false};
-            g_call_key[id] = key;
             queued_new = true;
         }
     }
     if (queued_new) {
-        c_managed_calls.fetch_add(1, std::memory_order_relaxed);
         KilnAbilityEvent ev = new_event(KILN_ABILITY_EV_MANAGED_CALL);
         ev.native_hash = g_slots[slot].hash;
         ev.impact_id = ctx->impact_id;
@@ -435,12 +578,62 @@ void dispatch_managed(int slot, NativeResult* out, ArgSlice* args, NativeCtx* ct
         ev.self = self_of(ctx->impact_id);
         ev.call_id = id;
         capture_args(ev, args, ctx);
-        push_event(ev);
+        // Publish the pending call and its event together. If the bounded event-queue
+        // wait fails, leave no orphaned call: the VM retries the ECALL next step.
+        if (bounded_lock(g_mu)) {
+            std::lock_guard lock(g_mu, std::adopt_lock);
+            if (!g_calls.count(key)) {
+                g_calls[key] = ManagedCall{id, slot, 0, 0, 0, g_step.load(), false};
+                g_call_key[id] = key;
+                if (push_event(ev)) {
+                    c_managed_calls.fetch_add(1, std::memory_order_relaxed);
+                } else {
+                    g_call_key.erase(id);
+                    g_calls.erase(key);
+                }
+            }
+        }
     } else {
         c_managed_suspends.fetch_add(1, std::memory_order_relaxed);
     }
     out->error = 1;  // suspend: the same ECALL runs again next step
     out->value = 0;
+}
+
+std::atomic<uint32_t> g_slow_logged{0};
+
+
+// A sync native (since 0.2.0-dev.29): its fn answers inside the ECALL. No lock, no queue, no suspend; a fault in fn is
+// caught by the thunk's guard and answers 0x11.
+void dispatch_sync(Slot& s, NativeResult* out, ArgSlice* args, NativeCtx* ctx) {
+    const SyncBinding* b = s.sync.load(std::memory_order_acquire);
+    if (!b || !b->fn || !gate_enter(*b->gate)) {  // taken off, or its owner is retiring: no new entry
+        c_dead_calls.fetch_add(1, std::memory_order_relaxed);
+        out->error = kErrUnknownNative;
+        return;
+    }
+    t_gate = b->gate;
+    if (refused_typed(s, out, args, ctx)) {
+        leave_gate();
+        return;
+    }
+    c_sync_calls.fetch_add(1, std::memory_order_relaxed);
+    KilnNativeCall c;
+    fill_call(c, s, out, args, ctx);
+    const int64_t t0 = qpc();
+    watch(t0, s.name, b->gate->owner);
+    b->fn(&c, b->user);
+    unwatch();
+    leave_gate();
+    const int64_t dt = qpc() - t0;
+    if (over_budget(dt, g_qpf)) {
+        c_sync_slow.fetch_add(1, std::memory_order_relaxed);
+        if (g_slow_logged.fetch_add(1, std::memory_order_relaxed) < 5)
+            logw("kiln.abilities: sync native %s took %.3f ms (budget 0.2 ms): impact_simulation waits for it", s.name,
+                 g_qpf > 0 ? static_cast<double>(dt) * 1000.0 / static_cast<double>(g_qpf) : 0.0);
+    }
+    sync_result(c, &out->error, &out->value);
+    if (out->error == kErrInternal) c_sync_faults.fetch_add(1, std::memory_order_relaxed);  // fn caught its own fault
 }
 
 void dispatch_inner(int slot, NativeResult* out, ArgSlice* args, NativeCtx* ctx) {
@@ -450,8 +643,10 @@ void dispatch_inner(int slot, NativeResult* out, ArgSlice* args, NativeCtx* ctx)
         case SLOT_LOG: dispatch_log(out, args, ctx); return;
         case SLOT_SIGNAL: dispatch_signal(out, args, ctx); return;
         case SLOT_MANAGED: dispatch_managed(slot, out, args, ctx); return;
+        case SLOT_MANAGED_SYNC: dispatch_sync(s, out, args, ctx); return;
         default:
-            out->error = 0x1f;  // the interpreter's "unknown native" code: the instance stops with Error
+            c_dead_calls.fetch_add(1, std::memory_order_relaxed);
+            out->error = kErrUnknownNative;  // the interpreter's "unknown native" code: the instance stops with Error
             return;
     }
 }
@@ -467,23 +662,59 @@ int seh_dispatch(int slot, NativeResult* out, ArgSlice* args, NativeCtx* ctx) {
 
 std::atomic<uint32_t> g_faults{0};
 
+// A fault caught by a thunk's guard (natives_core.h fault_answer): the game's own function runs at most once per call.
+void on_fault(int i, NativeResult* out, ArgSlice* args, NativeCtx* ctx) {
+    unwatch();      // a callback that faulted is not inside any more
+    leave_gate();
+    const bool in_game = t_in_game;
+    t_in_game = false;
+    const uint32_t k = g_slots[i].kind.load();
+    const ThunkKind kind = k == SLOT_WRAPPED ? ThunkKind::Wrapped : k == SLOT_MANAGED_SYNC ? ThunkKind::Sync : ThunkKind::Other;
+    NativeFn orig = g_slots[i].original.load();
+    const FaultAnswer a = fault_answer(kind, in_game, t_orig_ran, orig != nullptr);
+    if (g_faults.fetch_add(1) < 5)
+        logw("kiln.abilities: native slot %d (0x%08x, %s) faulted %s", i, g_slots[i].hash, g_slots[i].name,
+             in_game ? "inside the game's native: the instance stops"
+             : a == FaultAnswer::RunOriginal ? "in Kiln's code: the game's native runs"
+             : a == FaultAnswer::KeepResult ? "in Kiln's code after the game's native ran: its result stands"
+             : a == FaultAnswer::Internal ? "in its handler: the instance stops (0x11)"
+                                          : "in Kiln's code: the instance stops");
+    switch (a) {
+        case FaultAnswer::RunOriginal: call_fn(orig, out, args, ctx); return;  // outside the guard, as vanilla runs it
+        case FaultAnswer::KeepResult: return;
+        case FaultAnswer::Internal:
+            c_sync_faults.fetch_add(1, std::memory_order_relaxed);
+            out->error = kErrInternal;
+            out->value = 0;
+            return;
+        case FaultAnswer::Unknown: out->error = kErrUnknownNative; return;
+    }
+}
+
 template <int I>
 NativeResult* __fastcall thunk(NativeResult* out, ArgSlice* args, NativeCtx* ctx) {
+    g_inflight.fetch_add(1, std::memory_order_acq_rel);
+    const int32_t outer_stage = t_stage;
+    OwnerGate* const outer_gate = t_gate;
+    const int outer_inside = t_inside;
+    t_gate = nullptr;
+    t_inside = -1;
+    const int outer_slot = t_slot;  // a game native that runs a program inside its call (nested thunks)
+    const bool outer_ran = t_orig_ran, outer_in_game = t_in_game;
+    t_slot = I;
+    t_orig_ran = false;
+    t_in_game = false;
     out->error = 0;
     out->zero = 0;
     out->value = 1;
-    if (seh_dispatch(I, out, args, ctx) != 0) {
-        // A fault inside Kiln's part of a wrapped native: run the game's own function. A fault inside the game's
-        // native (or anything else): the instance stops with Error, like an unknown native.
-        const bool in_game = t_in_game;
-        t_in_game = false;
-        if (g_faults.fetch_add(1) < 5)
-            logw("kiln.abilities: native slot %d (0x%08x) faulted %s", I, g_slots[I].hash,
-                 in_game ? "inside the game's native: the instance stops" : "in Kiln's code");
-        NativeFn orig = g_slots[I].original.load();
-        if (!in_game && g_slots[I].kind.load() == SLOT_WRAPPED && orig) return orig(out, args, ctx);
-        out->error = 0x1f;
-    }
+    if (seh_dispatch(I, out, args, ctx) != 0) on_fault(I, out, args, ctx);
+    t_stage = outer_stage;
+    t_gate = outer_gate;
+    t_inside = outer_inside;
+    t_slot = outer_slot;
+    t_orig_ran = outer_ran;
+    t_in_game = outer_in_game;
+    g_inflight.fetch_sub(1, std::memory_order_acq_rel);
     return out;
 }
 
@@ -542,8 +773,9 @@ uint32_t __fastcall hk_create(uintptr_t system, uint32_t program_id, uint32_t en
     if (!want_started && !want_hold && !want_ended && g_entity_ovr_count.load(std::memory_order_relaxed) == 0)
         return id;
     bool held = false;
+    if (!bounded_lock(g_mu)) return id;  // review P1: no unbounded wait on a job thread; this instance runs unheld
     {
-        std::lock_guard lock(g_mu);
+        std::lock_guard lock(g_mu, std::adopt_lock);
         auto it = g_entity_ovr.find(entity);
         if (it != g_entity_ovr.end()) {
             g_impact_ovr[id] = std::move(it->second);
@@ -618,8 +850,9 @@ void __fastcall hk_run(uintptr_t system, uint32_t impact_id, uintptr_t iter_ctx)
     if (g_pending.load(std::memory_order_acquire) != 0) {
         Overrides ovr;
         bool have_ovr = false;
+        if (!bounded_lock(g_mu)) return;  // review P1: no unbounded wait on a job thread; held or not, it runs next step
         {
-            std::lock_guard lock(g_mu);
+            std::lock_guard lock(g_mu, std::adopt_lock);
             if (g_held.count(impact_id) || g_canceled.count(impact_id)) return;  // not this step
             auto it = g_impact_ovr.find(impact_id);
             if (it != g_impact_ovr.end()) {
@@ -650,6 +883,157 @@ bool register_slot_in(int slot, uintptr_t registry) {  // tick thread
 
 int wrap_slot(uint32_t hash, uint32_t* argc_out = nullptr);  // g_mu held
 
+// ---- lab only: impact_simulation onto the game's workers (review P1's worker rows) ----
+// With kiln/control/impact.unpin present when the service started, on a dedicated server of the lab's build
+// (f0d824be…), each Pre clears the world's pin byte (storage + 0x3d17f8, copied from world config + 0x23; docs/re/
+// world.md "Parallel selection and affinity"): in the parallel path (a player, or kiln/control/systems.parallel's
+// forced window) CHUNKED programs then get no world-thread affinity, so a native's handler runs on a worker. Nothing
+// else ever writes it; without the file nothing is checked.
+bool g_lab_unpin = false;
+int64_t g_world_storage = -1;
+constexpr int64_t kPinByte = 0x3d17f8;  // build f0d824be (server 26430253) only
+
+void lab_unpin() {
+    if (!g_lab_unpin || g_world_storage <= 0) return;
+    const uintptr_t w = g_api->server_world();
+    if (!w) return;
+    auto* pin = reinterpret_cast<uint8_t*>(w + static_cast<uintptr_t>(g_world_storage) + kPinByte);
+    uint8_t v = 0;
+    if (!read_bytes(pin, &v, 1) || v == 0) return;
+    const uint8_t zero = 0;
+    static bool said = false;
+    if (write_bytes(pin, &zero, 1) && !said) {
+        said = true;
+        logw("kiln.abilities: LAB (kiln/control/impact.unpin): the world's pin byte was %u and is cleared: CHUNKED programs, "
+             "impact_simulation among them, can run on the game's workers in the parallel path", v);
+    }
+}
+
+// ---- the watchdog (review P1) ----
+// A handler that is still inside after a second is named once per call, from a thread of its own: while it is
+// inside, the world waits for it, so nothing on the world's thread could say why the server stopped. Started at the
+// first sync native or attachment (nothing runs for a player whose mods use neither).
+void watchdog_loop() {
+    for (;;) {
+        Sleep(250);
+        g_inside.scan(qpc(), g_qpf, [](const char* what, KilnOwner owner, int64_t inside) {
+            c_watchdog_reports.fetch_add(1, std::memory_order_relaxed);
+            logw("kiln.abilities: the handler of native %s (owner %llu) has been inside for %.1f s: impact_simulation and "
+                 "the server's step wait for it (a native handler must not block)", what ? what : "?",
+                 static_cast<unsigned long long>(owner), g_qpf > 0 ? static_cast<double>(inside) / static_cast<double>(g_qpf) : 0.0);
+        });
+    }
+}
+void start_watchdog() {
+    bool off = false;
+    if (g_qpf > 0 && g_watchdog_on.compare_exchange_strong(off, true)) std::thread(watchdog_loop).detach();
+}
+
+// The native map of a registry (keen hash map at registry + natives_map: capacity +0x10, count +0x54) has room for one
+// more key (natives_core.h registry_has_room: the game takes 128 of its 256). An unreadable map has none.
+bool registry_room(uintptr_t registry) {
+    if (!registry) return false;
+    uint64_t cap = 0;
+    uint32_t count = 0;
+    const auto* map = reinterpret_cast<const uint8_t*>(registry + E.natives_map);
+    if (!read_bytes(map + 0x10, &cap, 8) || !read_bytes(map + 0x54, &count, 4)) return false;
+    return registry_has_room(count, cap);
+}
+
+// ---- attachments (since 0.2.0-dev.29) ----
+std::vector<Attachment> g_attachments;     // every attachment, all natives (g_mu)
+std::vector<const AttachSet*> g_retired;   // sets swapped out, freed in a Pre with no thunk running (g_mu)
+uint64_t g_attach_seq = 0;                 // handles (g_mu)
+
+// Publishes the attachments of `hash` to its wrapped slot (g_mu held). No slot yet (no world): published at setup.
+void publish_set(uint32_t hash) {
+    auto it = g_slot_of.find(hash);
+    if (it == g_slot_of.end() || g_slots[it->second].kind.load() != SLOT_WRAPPED) return;
+    AttachSet built = build_set(g_attachments, hash);
+    const AttachSet* next = built.empty() ? nullptr : new AttachSet(std::move(built));
+    const AttachSet* old = g_slots[it->second].attach.exchange(next, std::memory_order_seq_cst);
+    if (old) g_retired.push_back(old);
+}
+
+// Pre: no impact_simulation slice runs, so no thunk can still read a set that was swapped out.
+void free_retired() {
+    std::vector<const AttachSet*> r;
+    std::vector<const std::vector<KilnNativeArg>*> rt;
+    std::vector<const SyncBinding*> rb;
+    {
+        std::lock_guard lock(g_mu);
+        // a deferred owner retirement finishes once its gate is quiet (review P1)
+        finish_quiet(g_deferred_owners, g_step.load(), [](KilnOwner) {}, [](OwnerGate* g, uint64_t steps) {
+            logi("kiln.abilities: owner %llu retired %llu step(s) late: its last native call left",
+                 static_cast<unsigned long long>(g->owner), static_cast<unsigned long long>(steps));
+        });
+        // a binding is freed when its owner's gate is quiet (a call that loaded it has left)
+        for (auto it = g_retired_bindings.begin(); it != g_retired_bindings.end();) {
+            if ((*it)->gate && (*it)->gate->inflight.load(std::memory_order_seq_cst) != 0) {
+                ++it;
+                continue;
+            }
+            rb.push_back(*it);
+            it = g_retired_bindings.erase(it);
+        }
+        if (g_inflight.load(std::memory_order_seq_cst) == 0) {
+            r.swap(g_retired);
+            rt.swap(g_retired_typed);
+        }
+    }
+    for (const AttachSet* p : r) delete p;
+    for (const auto* p : rt) delete p;
+    for (const SyncBinding* p : rb) delete p;
+}
+
+// The program `id` calls `hash` (at `site`, 0 = any): 1 yes, 0 no, -1 the program is not in the registry. Tick thread.
+int program_calls(uintptr_t preg, uint32_t id, uint32_t hash, uint32_t site) {
+    const uint8_t* prog = get_program(preg, id);
+    ProgramHeader h{};
+    if (!prog || !read_bytes(prog, &h, sizeof h)) return -1;
+    const std::pair<const BlobArray*, size_t> arrays[2] = {{&h.code, offsetof(ProgramHeader, code)},
+                                                           {&h.shutdown, offsetof(ProgramHeader, shutdown)}};
+    for (const auto& [arr, field] : arrays) {
+        if (!arr->count || !arr->offset || arr->count > 65535) continue;
+        std::vector<uint32_t> words(arr->count);
+        if (!read_bytes(prog + field + arr->offset, words.data(), words.size() * 4)) continue;
+        if (code_calls(words.data(), words.size(), hash, site)) return 1;
+    }
+    return 0;
+}
+
+// Once the world's programs are in (and for a new world): attachments that name a program are checked against it; one
+// whose program or site is not there stays off, with a log line. Tick thread.
+void check_attachments(uintptr_t preg) {
+    std::vector<Attachment> named;
+    {
+        std::lock_guard lock(g_mu);
+        for (const auto& a : g_attachments)
+            if (a.program) named.push_back(a);
+    }
+    std::vector<std::pair<uint64_t, int>> results;
+    for (const auto& a : named) results.emplace_back(a.id, program_calls(preg, a.program, a.hash, a.site));
+    std::lock_guard lock(g_mu);
+    std::unordered_set<uint32_t> touched;
+    for (const auto& [id, r] : results)
+        for (auto& a : g_attachments) {
+            if (a.id != id) continue;
+            const bool on = r == 1;
+            if (a.active != on) touched.insert(a.hash);
+            // said once per change (the check runs again whenever a program is registered)
+            if (!on && (!a.checked || a.active))
+                logw("kiln.abilities: attachment %llu on native 0x%08x stays off: %s 0x%08x%s", static_cast<unsigned long long>(id),
+                     a.hash, r < 0 ? "no program" : "the native is not called by program", a.program,
+                     r < 0 ? " in the ImpactRegistry" : a.site ? " at that site" : "");
+            else if (on && a.checked && !a.active)
+                logi("kiln.abilities: attachment %llu on native 0x%08x is on: program 0x%08x is in now", static_cast<unsigned long long>(id),
+                     a.hash, a.program);
+            a.active = on;
+            a.checked = true;
+        }
+    for (uint32_t h : touched) publish_set(h);
+}
+
 // Builds the vanilla native table for the captured registry and puts Kiln's slots into it. Tick thread.
 void setup_natives(uintptr_t registry) {
     std::vector<Captured> caps;
@@ -667,6 +1051,21 @@ void setup_natives(uintptr_t registry) {
             const int s = wrap_slot(h);
             if (s >= 0) g_slots[s].observe.store(true);
         }
+        // attachments made before the world had its natives: their slots now
+        std::unordered_set<uint32_t> hashes;
+        for (const auto& a : g_attachments) hashes.insert(a.hash);
+        for (uint32_t h : hashes) {
+            if (wrap_slot(h) < 0) {
+                for (auto& a : g_attachments)
+                    if (a.hash == h && a.active) {
+                        a.active = false;
+                        logw("kiln.abilities: attachment %llu stays off: 0x%08x is not a native the game registered (or no free slot)",
+                             static_cast<unsigned long long>(a.id), h);
+                    }
+                continue;
+            }
+            publish_set(h);
+        }
         for (int i = 0; i < kSlots; ++i) {
             const uint32_t k = g_slots[i].kind.load();
             if (k == SLOT_FREE || g_slots[i].registered_in == registry) continue;
@@ -679,7 +1078,15 @@ void setup_natives(uintptr_t registry) {
         }
     }
     int ok = 0, bad = 0;
-    for (int i : to_register) (register_slot_in(i, registry) ? ok : bad)++;
+    for (int i : to_register) {
+        // a wrap re-registers a key the game has; every other slot adds one, and the map keeps its last empty entry
+        if (g_slots[i].kind.load() != SLOT_WRAPPED && !registry_room(registry)) {
+            logw("kiln.abilities: native %s not registered: the native registry is full", g_slots[i].name);
+            ++bad;
+            continue;
+        }
+        (register_slot_in(i, registry) ? ok : bad)++;
+    }
     logi("kiln.abilities: native registry %p: %zu vanilla natives captured; %d Kiln slot(s) registered%s", (void*)registry,
          caps.size(), ok, bad ? " (some failed: see above)" : "");
     if (bad) logw("kiln.abilities: %d native registration(s) failed (registry full?)", bad);
@@ -711,6 +1118,21 @@ int wrap_slot(uint32_t hash, uint32_t* argc_out) {  // g_mu held; finds or creat
     g_slot_of[hash] = s;
     if (argc_out) *argc_out = argc;
     return s;
+}
+
+// What the verifier knows of `hash`'s arguments (g_mu held): a typed declaration, or "a Kiln native without types".
+TypedArgs typed_of(uint32_t hash) {
+    TypedArgs t;
+    if (g_vanilla_argc.count(hash)) return t;  // the game's own: never a mod's declaration
+    if (auto it = g_typed.find(hash); it != g_typed.end()) {
+        t.args = it->second.data();
+        t.count = static_cast<uint32_t>(it->second.size());
+        return t;
+    }
+    // declared by argc only and not registered yet (registration drops it from g_declared): the W_ARGTYPE warning. A
+    // registered native without types (Register, RegisterSync) is how managed natives always worked: no warning
+    if (g_declared.count(hash)) t.untyped_kiln = true;
+    return t;
 }
 
 int argc_of(uint32_t hash) {  // g_mu held
@@ -789,9 +1211,10 @@ KilnResult add_program(const uint8_t* blob, size_t len, KilnOwner owner, const s
     VerifyResult r;
     {
         std::lock_guard lock(g_mu);
-        r = verify_program(blob, len, [](uint32_t h) { return argc_of(h); });
+        r = verify_program(blob, len, [](uint32_t h) { return argc_of(h); }, [](uint32_t h) { return typed_of(h); });
     }
     if (out_id) *out_id = r.id;
+    for (const auto& w : r.warnings) logw("kiln.abilities: program from %s: %s", source.c_str(), w.c_str());
     if (!r.ok) {
         err = r.error;
         c_refused.fetch_add(1);
@@ -848,6 +1271,7 @@ KilnResult add_program(const uint8_t* blob, size_t len, KilnOwner owner, const s
     KProgram p{r.id, {}, mem, len, owner, reg, source};
     std::memcpy(p.guid, r.guid, 16);
     g_programs.push_back(std::move(p));
+    g_programs_added.store(true, std::memory_order_release);  // attachments naming it are checked in the next Pre
     logi("kiln.abilities: program %s (0x%08x) registered from %s: %u code words, max stack depth %d",
          guid_text(r.guid).c_str(), r.id, source.c_str(), reinterpret_cast<const ProgramHeader*>(blob)->code.count,
          r.max_depth);
@@ -1063,6 +1487,7 @@ void check_programs_ready() {
     g_programs_ready.store(true);
     if (g_have_natives && g_setup_registry) selftest_programs(preg);
     const uint32_t added = refresh_programs();
+    check_attachments(preg);
     logi("kiln.abilities: the game's ImpactRegistry holds %u programs (step %llu); %u Kiln program(s) from kiln.assets "
          "registered", count, static_cast<unsigned long long>(g_step.load()), added);
 }
@@ -1136,6 +1561,11 @@ void holds_clear();
 
 void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
     g_step.store(tick->step);
+    free_retired();
+    lab_unpin();
+    // review P1: a program registered after the readiness check (a mod's, at any time) gets its attachments checked
+    if (g_programs_ready.load() && g_programs_added.exchange(false, std::memory_order_acq_rel))
+        if (const uintptr_t preg = g_prog_registry.load()) check_attachments(preg);
     const uintptr_t world = g_api->server_world();
     if (!world) return;
     g_world.store(world);
@@ -1240,6 +1670,13 @@ void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
 void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
     if (ev->kind != KILN_WORLD_SERVER) return;
     if (ev->event == KILN_WORLD_STOPPING) {
+        // review P1: the world's state goes only with no Kiln native call inside (bounded; reported when not)
+        const int64_t end = now_ns() + kRetireWaitNs;
+        while (g_inflight.load(std::memory_order_seq_cst) != 0 && now_ns() < end) SwitchToThread();
+        if (const uint32_t n = g_inflight.load(std::memory_order_seq_cst))
+            logw("kiln.abilities: the server world stops with %u Kiln native call(s) inside: bindings and sets stay until "
+                 "they leave", n);
+        else logi("kiln.abilities: the server world stops with no Kiln native call inside");
         holds_clear();
         std::lock_guard lock(g_mu);
         g_cap_registry = 0;
@@ -1273,10 +1710,8 @@ KilnResult KILN_CALL t_status(KilnAbilitiesStatus* out) {
         std::lock_guard lock(g_mu);
         out->vanilla_natives = static_cast<uint32_t>(g_vanilla_argc.size());
         uint32_t k = 0;
-        for (auto& s : g_slots) {
-            const uint32_t kind = s.kind.load();
-            if (kind == SLOT_LOG || kind == SLOT_SIGNAL || kind == SLOT_MANAGED) ++k;
-        }
+        for (auto& s : g_slots)
+            if (kiln_kind(s.kind.load())) ++k;
         out->kiln_natives = k;
         out->programs_kiln = static_cast<uint32_t>(g_programs.size());
         out->held_now = static_cast<uint32_t>(g_held.size());
@@ -1505,10 +1940,8 @@ void fill_native(KilnNativeInfo* out, uint32_t hash, uint32_t argc, uint32_t kin
 uint32_t KILN_CALL t_native_count() {
     std::lock_guard lock(g_mu);
     uint32_t n = static_cast<uint32_t>(g_captured.size());
-    for (auto& s : g_slots) {
-        const uint32_t k = s.kind.load();
-        if (k == SLOT_LOG || k == SLOT_SIGNAL || k == SLOT_MANAGED) ++n;
-    }
+    for (auto& s : g_slots)
+        if (kiln_kind(s.kind.load())) ++n;
     return n;
 }
 
@@ -1526,10 +1959,11 @@ KilnResult KILN_CALL t_native_at(uint32_t index, KilnNativeInfo* out) {
     uint32_t i = static_cast<uint32_t>(g_captured.size());
     for (int s = 0; s < kSlots; ++s) {
         const uint32_t k = g_slots[s].kind.load();
-        if (k != SLOT_LOG && k != SLOT_SIGNAL && k != SLOT_MANAGED) continue;
+        if (!kiln_kind(k)) continue;
         if (i++ == index) {
             fill_native(out, g_slots[s].hash, g_slots[s].argc,
-                        k == SLOT_MANAGED ? KILN_NATIVE_KIND_MANAGED : KILN_NATIVE_KIND_BUILTIN,
+                        k == SLOT_MANAGED ? KILN_NATIVE_KIND_MANAGED
+                        : k == SLOT_MANAGED_SYNC ? KILN_NATIVE_KIND_SYNC : KILN_NATIVE_KIND_BUILTIN,
                         reinterpret_cast<uintptr_t>(kThunks[s]), g_slots[s].name);
             return KILN_OK;
         }
@@ -1562,63 +1996,115 @@ KilnResult KILN_CALL t_native_declare(uint32_t hash, uint32_t argc) {
     return KILN_OK;
 }
 
-bool valid_native_name(std::string_view n) {
-    const size_t dot = n.find('.');
-    if (dot == std::string_view::npos || dot == 0 || dot + 1 >= n.size()) return false;
-    for (size_t i = dot + 1; i < n.size(); ++i) {
-        const char c = n[i];
-        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_')) return false;
-    }
-    return n.size() <= 90;
+// since 0.2.0-dev.29 (review P1, see the table)
+KilnResult KILN_CALL t_native_state(uint32_t hash, uint32_t* out) {
+    if (!out) return KILN_ERR_INVALID_ARGUMENT;
+    std::lock_guard lock(g_mu);
+    *out = KILN_NATIVE_STATE_NONE;
+    auto it = g_slot_of.find(hash);
+    if (it == g_slot_of.end()) return KILN_OK;
+    const Slot& s = g_slots[it->second];
+    const uint32_t k = s.kind.load();
+    if (k == SLOT_DEAD) *out = KILN_NATIVE_STATE_DEAD;
+    else if (!kiln_kind(k)) return KILN_OK;
+    else if (!g_setup_registry) *out = KILN_NATIVE_STATE_WAITING;
+    else *out = s.registered_in == g_setup_registry ? KILN_NATIVE_STATE_LIVE : KILN_NATIVE_STATE_REFUSED;
+    return KILN_OK;
 }
 
-int add_kiln_native(KilnOwner owner, std::string_view name, uint32_t argc, uint32_t kind, uint32_t* out_hash,
-                    std::string& why) {  // tick thread or plugin main
-    const uint32_t hash = fnv1a(name.data(), name.size());
-    if (out_hash) *out_hash = hash;
-    int slot;
+KilnResult KILN_CALL t_native_attach_state(KilnHandle h, uint32_t* out) {
+    if (!out) return KILN_ERR_INVALID_ARGUMENT;
+    std::lock_guard lock(g_mu);
+    *out = KILN_NATIVE_ATTACH_GONE;
+    for (const auto& a : g_attachments)
+        if (a.id == h) *out = !a.checked ? KILN_NATIVE_ATTACH_PENDING : a.active ? KILN_NATIVE_ATTACH_ACTIVE : KILN_NATIVE_ATTACH_OFF;
+    return KILN_OK;
+}
+
+// since 0.2.0-dev.29 (see the table)
+KilnResult KILN_CALL t_native_declare_typed(uint32_t hash, uint32_t argc, const KilnNativeArg* args) {
+    if (argc > 31 || (argc && !args)) return KILN_ERR_INVALID_ARGUMENT;
     {
         std::lock_guard lock(g_mu);
-        if (g_vanilla_argc.count(hash)) {
-            why = "collides with a vanilla native";
-            return -1;
-        }
+        if (g_vanilla_argc.count(hash)) return KILN_ERR_INVALID_ARGUMENT;
         for (const auto& c : g_captured)
-            if (c.hash == hash) {
-                why = "collides with a vanilla native";
-                return -1;
-            }
+            if (c.hash == hash) return KILN_ERR_INVALID_ARGUMENT;
+        g_typed[hash].assign(args, args + argc);
+        auto it = g_slot_of.find(hash);
+        if (it == g_slot_of.end()) {
+            g_declared[hash] = argc;  // the verifier's argc until the native registers
+        } else if (mod_kind(g_slots[it->second].kind.load())) {
+            Slot& s = g_slots[it->second];
+            if (s.argc != argc)
+                logw("kiln.abilities: native %s registered with argc %u is declared with %u arguments", s.name, s.argc, argc);
+            if (const auto* old = s.typed.exchange(new std::vector<KilnNativeArg>(args, args + argc))) g_retired_typed.push_back(old);
+        }
+    }
+    if (on_tick() && t_slot < 0) retry_waiting();
+    return KILN_OK;
+}
+
+// A Kiln native in a slot (built-ins, managed, sync). Refusals set *refusal (KILN_NATIVE_REFUSED_*) and why. A new key
+// goes into the live registry now (on the tick thread); before the first world it goes in at the world's setup.
+int add_kiln_native(KilnOwner owner, std::string_view name, uint32_t argc, uint32_t kind, uint32_t* out_hash,
+                    std::string& why, uint32_t* refusal = nullptr, KilnNativeWrapFn fn = nullptr, void* user = nullptr) {
+    const uint32_t hash = fnv1a(name.data(), name.size());
+    if (out_hash) *out_hash = hash;
+    auto refuse = [&](uint32_t code, const char* text) {
+        if (refusal) *refusal = code;
+        why = text;
+        return -1;
+    };
+    int slot;
+    bool fresh = false;
+    {
+        std::lock_guard lock(g_mu);
+        if (g_vanilla_argc.count(hash)) return refuse(KILN_NATIVE_REFUSED_VANILLA, "collides with a vanilla native");
+        for (const auto& c : g_captured)
+            if (c.hash == hash) return refuse(KILN_NATIVE_REFUSED_VANILLA, "collides with a vanilla native");
         auto it = g_slot_of.find(hash);
         if (it != g_slot_of.end()) {
             Slot& s = g_slots[it->second];
-            if (s.kind.load() != SLOT_DEAD) {
-                why = "a Kiln native with this name is registered";
-                return -1;
-            }
-            slot = it->second;  // re-registering a native that was taken off: reuse its slot (same hash)
+            if (s.kind.load() != SLOT_DEAD) return refuse(KILN_NATIVE_REFUSED_TAKEN, "a Kiln native with this name is registered");
+            slot = it->second;  // re-registering a native that was taken off: reuse its slot (same hash, same key)
         } else {
             slot = alloc_slot();
-            if (slot < 0) {
-                why = "no free native slot";
-                return -1;
-            }
+            if (slot < 0) return refuse(KILN_NATIVE_REFUSED_NO_SLOT, "no free native slot (Kiln has 160)");
+            fresh = true;
         }
+        if (fresh && g_setup_registry && !registry_room(g_setup_registry))
+            return refuse(KILN_NATIVE_REFUSED_REGISTRY_FULL, "native registry full (the game takes 128 natives, 107 of them its own)");
         Slot& s = g_slots[slot];
         s.hash = hash;
+        // A revived hash with a new argc: the engine's entry must be written again (the VM pops the registry's argc).
+        // The same argc keeps the entry as it is: no registration the game could refuse once its map is full.
+        if (!fresh && s.argc != argc) s.registered_in = 0;
         s.argc = argc;
         s.owner = owner;
         s.original.store(nullptr);
         std::snprintf(s.name, sizeof s.name, "%.*s", static_cast<int>(name.size()), name.data());
-        s.kind.store(kind);
+        retire_binding(s.sync.exchange(fn ? new SyncBinding{fn, user, g_gates.of(owner)} : nullptr, std::memory_order_acq_rel));
+        if (auto t = g_typed.find(hash); t != g_typed.end()) {  // declared before it registered
+            if (const auto* old = s.typed.exchange(new std::vector<KilnNativeArg>(t->second))) g_retired_typed.push_back(old);
+        }
+        s.kind.store(kind, std::memory_order_release);
         g_slot_of[hash] = slot;
         g_declared.erase(hash);
     }
-    if (g_setup_registry && g_slots[slot].registered_in != g_setup_registry) register_slot_in(slot, g_setup_registry);
+    if (g_setup_registry && g_slots[slot].registered_in != g_setup_registry && !register_slot_in(slot, g_setup_registry)) {
+        std::lock_guard lock(g_mu);  // the game said no to the new key: give the slot back
+        Slot& s = g_slots[slot];
+        s.kind.store(fresh ? SLOT_FREE : SLOT_DEAD, std::memory_order_release);
+        retire_binding(s.sync.exchange(nullptr, std::memory_order_acq_rel));
+        s.owner = 0;
+        if (fresh) g_slot_of.erase(hash);
+        return refuse(KILN_NATIVE_REFUSED_REGISTRY_FULL, "the game's native registry refused it (full)");
+    }
     return slot;
 }
 
 KilnResult KILN_CALL t_native_register(KilnOwner owner, KilnStr name, uint32_t argc, uint32_t* out_hash) {
-    if (!on_tick()) return KILN_ERR_WRONG_THREAD;
+    if (!on_tick() || t_slot >= 0) return KILN_ERR_WRONG_THREAD;
     if (!g_have_natives) return KILN_ERR_UNAVAILABLE;
     const std::string_view n(name.ptr ? name.ptr : "", name.len);
     if (argc > 31 || !valid_native_name(n) || n.rfind("kiln.", 0) == 0) return KILN_ERR_INVALID_ARGUMENT;
@@ -1633,13 +2119,40 @@ KilnResult KILN_CALL t_native_register(KilnOwner owner, KilnStr name, uint32_t a
     return KILN_OK;
 }
 
+// since 0.2.0-dev.29: a synchronous native (see the table)
+KilnResult KILN_CALL t_native_register_sync(KilnOwner owner, KilnStr name, uint32_t argc, KilnNativeWrapFn fn, void* user,
+                                            uint32_t* out_hash, uint32_t* out_refusal) {
+    if (out_refusal) *out_refusal = KILN_NATIVE_REFUSED_NONE;
+    if (!on_tick() || t_slot >= 0) return KILN_ERR_WRONG_THREAD;
+    if (!g_have_natives) return KILN_ERR_UNAVAILABLE;
+    const std::string_view n(name.ptr ? name.ptr : "", name.ptr ? name.len : 0);
+    if (!fn || argc > 31 || !valid_native_name(n) || n.rfind("kiln.", 0) == 0) return KILN_ERR_INVALID_ARGUMENT;
+    std::string why;
+    if (add_kiln_native(owner, n, argc, SLOT_MANAGED_SYNC, out_hash, why, out_refusal, fn, user) < 0) {
+        logw("kiln.abilities: sync native %.*s refused: %s", static_cast<int>(n.size()), n.data(), why.c_str());
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
+    start_watchdog();
+    logi("kiln.abilities: sync native %.*s (0x%08x, argc %u) registered", static_cast<int>(n.size()), n.data(),
+         out_hash ? *out_hash : 0, argc);
+    retry_waiting();
+    return KILN_OK;
+}
+
+// Takes a mod's native off (g_mu held): from now on its hash answers 0x1F. On the tick thread outside a native call no
+// impact_simulation slice runs, so no call can be inside the slot's fn: the in-flight counter says so.
+void take_off(Slot& s) {
+    s.kind.store(SLOT_DEAD, std::memory_order_release);
+    retire_binding(s.sync.exchange(nullptr, std::memory_order_acq_rel));  // freed once its owner's gate is quiet
+    s.owner = 0;
+}
+
 KilnResult KILN_CALL t_native_unregister(uint32_t hash) {
-    if (!on_tick()) return KILN_ERR_WRONG_THREAD;
+    if (!on_tick() || t_slot >= 0) return KILN_ERR_WRONG_THREAD;
     std::lock_guard lock(g_mu);
     auto it = g_slot_of.find(hash);
-    if (it == g_slot_of.end() || g_slots[it->second].kind.load() != SLOT_MANAGED) return KILN_ERR_NOT_FOUND;
-    g_slots[it->second].kind.store(SLOT_DEAD);
-    g_slots[it->second].owner = 0;
+    if (it == g_slot_of.end() || !mod_kind(g_slots[it->second].kind.load())) return KILN_ERR_NOT_FOUND;
+    take_off(g_slots[it->second]);
     return KILN_OK;
 }
 
@@ -1681,33 +2194,162 @@ KilnResult KILN_CALL t_set_wrap_dispatcher(KilnNativeWrapFn fn, void* user) {
     return KILN_OK;
 }
 
+// From inside a dispatcher call only: the thunk running on this thread is the call's (no lock on the job thread). A
+// sync native has no original; the game's native never runs twice in one call (the latch).
 void KILN_CALL t_call_original(KilnNativeCall* c) {
     if (!c || c->original_called) return;
+    const int slot = t_slot;
+    if (slot < 0 || slot >= kSlots || g_slots[slot].hash != c->hash) return;
+    NativeFn orig = g_slots[slot].original.load();
+    if (!orig || t_orig_ran || t_stage == KILN_NATIVE_AFTER) return;
     auto* out = static_cast<NativeResult*>(c->engine[0]);
     auto* args = static_cast<ArgSlice*>(c->engine[1]);
     auto* ctx = static_cast<NativeCtx*>(c->engine[2]);
-    auto it_slot = -1;
-    {
-        std::lock_guard lock(g_mu);
-        auto it = g_slot_of.find(c->hash);
-        if (it != g_slot_of.end()) it_slot = it->second;
-    }
-    if (it_slot < 0) return;
-    NativeFn orig = g_slots[it_slot].original.load();
-    if (!orig) return;
     c->original_called = 1;
-    orig(out, args, ctx);
+    call_fn(orig, out, args, ctx);
     c->out_error = out->error;
     c->out_value = out->value;
 }
 
+// since 0.2.0-dev.29 (review P1): an owner's retirement closes its gate first (no new call enters its natives or
+// attachments), takes them off, then waits a bounded 2 ms (never holding g_mu) for the calls inside to leave. One still
+// inside after that keeps the owner's bindings and sets alive: the retirement is deferred, reported, and finished in a
+// later Pre when the gate is quiet (free_retired). On the tick thread in Pre or Post no impact_simulation slice runs,
+// so the wait ends at once there; the bound covers a caller that is not, and a call that never returns.
 KilnResult KILN_CALL t_release_owner(KilnOwner owner) {
-    std::lock_guard lock(g_mu);
-    for (auto& s : g_slots)
-        if (s.owner == owner && s.kind.load() == SLOT_MANAGED) {
-            s.kind.store(SLOT_DEAD);
-            s.owner = 0;
+    if (!on_tick() || t_slot >= 0) return KILN_ERR_WRONG_THREAD;  // never beside a running step, never from a call
+    OwnerGate* gate = nullptr;
+    {
+        std::lock_guard lock(g_mu);
+        gate = owner != 0 ? g_gates.find(owner) : nullptr;
+        if (gate) gate->closed.store(true, std::memory_order_seq_cst);  // admission closed first
+        for (auto& s : g_slots)
+            if (s.owner == owner && mod_kind(s.kind.load())) take_off(s);
+        std::unordered_set<uint32_t> touched;
+        for (auto it = g_attachments.begin(); it != g_attachments.end();) {
+            if (it->owner == owner && owner != 0) {
+                touched.insert(it->hash);
+                it = g_attachments.erase(it);
+            } else {
+                ++it;
+            }
         }
+        for (uint32_t h : touched) publish_set(h);
+    }
+    if (!gate) return KILN_OK;
+    if (gate_close_and_wait(*gate, kRetireWaitNs, now_ns, [] { SwitchToThread(); })) return KILN_OK;
+    std::lock_guard lock(g_mu);
+    g_deferred_owners.push_back(Deferred<KilnOwner>{gate, owner, g_step.load()});
+    c_retire_deferred.fetch_add(1, std::memory_order_relaxed);
+    logw("kiln.abilities: owner %llu retires with %u native call(s) still inside its handlers: its natives and attachments "
+         "take no new call; what they use stays until the calls leave (checked each Pre)",
+         static_cast<unsigned long long>(owner), gate->inflight.load());
+    return KILN_OK;
+}
+
+// since 0.2.0-dev.29 (see the table)
+KilnResult KILN_CALL t_native_attach(KilnOwner owner, uint32_t hash, const KilnNativeFilter* filter, int32_t stage,
+                                     int32_t priority, KilnNativeWrapFn fn, void* user, KilnHandle* out,
+                                     uint32_t* out_refusal) {
+    if (out_refusal) *out_refusal = KILN_NATIVE_REFUSED_NONE;
+    if (out) *out = 0;
+    if (!on_tick() || t_slot >= 0) return KILN_ERR_WRONG_THREAD;
+    if (!g_have_natives) return KILN_ERR_UNAVAILABLE;
+    if (!fn || !out || stage < KILN_NATIVE_BEFORE || stage > KILN_NATIVE_AFTER ||
+        (filter && (filter->size < sizeof(KilnNativeFilter) || filter->reserved != 0)))
+        return KILN_ERR_INVALID_ARGUMENT;
+    auto refuse = [&](uint32_t code) {
+        if (out_refusal) *out_refusal = code;
+        return KILN_ERR_INVALID_ARGUMENT;
+    };
+    const uint32_t program = filter ? filter->program_id : 0, site = filter ? filter->site : 0;
+    const uintptr_t preg = g_prog_registry.load();
+    const bool programs = g_programs_ready.load() && preg;
+    if (program && programs) {
+        const int r = program_calls(preg, program, hash, site);
+        if (r < 0) return refuse(KILN_NATIVE_REFUSED_PROGRAM_NOT_LOADED);
+        if (r == 0) return refuse(KILN_NATIVE_REFUSED_SITE_NOT_FOUND);
+    }
+    int slot = -1;
+    uint64_t id = 0;
+    {
+        std::lock_guard lock(g_mu);
+        if (stage == KILN_NATIVE_INSTEAD && instead_taken(g_attachments, hash, program, site))
+            return refuse(KILN_NATIVE_REFUSED_SECOND_INSTEAD);
+        if (!g_captured.empty()) {  // the world registered its natives: the hash must be one, with a slot
+            bool vanilla = false;
+            for (const auto& c : g_captured) vanilla |= c.hash == hash && c.fn;
+            if (!vanilla) return refuse(KILN_NATIVE_REFUSED_NOT_A_NATIVE);
+            slot = wrap_slot(hash);
+            if (slot < 0) return refuse(KILN_NATIVE_REFUSED_NO_SLOT);
+        }
+        Attachment a;
+        a.id = id = ++g_attach_seq;
+        a.hash = hash;
+        a.program = program;
+        a.site = site;
+        a.stage = stage;
+        a.priority = priority;
+        a.order = id;
+        a.fn = fn;
+        a.user = user;
+        a.owner = owner;
+        a.gate = g_gates.of(owner);
+        a.checked = program == 0 || programs;  // with a program filter: checked above, or when the world's programs are in
+        g_attachments.push_back(a);
+        publish_set(hash);
+    }
+    if (slot >= 0 && g_setup_registry && g_slots[slot].registered_in != g_setup_registry) register_slot_in(slot, g_setup_registry);
+    start_watchdog();
+    *out = id;
+    logi("kiln.abilities: attachment %llu: native 0x%08x, %s, program 0x%08x, site 0x%08x, priority %d%s",
+         static_cast<unsigned long long>(id), hash,
+         stage == KILN_NATIVE_BEFORE ? "Before" : stage == KILN_NATIVE_INSTEAD ? "Instead" : "After", program, site,
+         priority, slot < 0 ? " (waits for the world's natives)" : program && !programs ? " (checked when the world's programs are in)" : "");
+    return KILN_OK;
+}
+
+KilnResult KILN_CALL t_native_detach(KilnHandle h) {
+    if (!on_tick() || t_slot >= 0) return KILN_ERR_WRONG_THREAD;
+    std::lock_guard lock(g_mu);
+    for (auto it = g_attachments.begin(); it != g_attachments.end(); ++it) {
+        if (it->id != h) continue;
+        const uint32_t hash = it->hash;
+        g_attachments.erase(it);
+        publish_set(hash);
+        if (const uint32_t n = g_inflight.load())
+            logw("kiln.abilities: attachment %llu detached while %u native call(s) are in flight (expected none in Pre or Post)",
+                 static_cast<unsigned long long>(h), n);
+        return KILN_OK;
+    }
+    return KILN_ERR_NOT_FOUND;
+}
+
+KilnResult KILN_CALL t_native_counters(KilnNativeCounters* out) {
+    if (!out || out->size < offsetof(KilnNativeCounters, sync_calls)) return KILN_ERR_INVALID_ARGUMENT;
+    KilnNativeCounters c;
+    std::memset(&c, 0, sizeof c);
+    c.size = sizeof c;
+    c.inflight = g_inflight.load();
+    c.flags = g_have_natives ? KILN_NATIVE_COUNTERS_NATIVES : 0;
+    c.sync_calls = c_sync_calls.load();
+    c.sync_faults = c_sync_faults.load();
+    c.sync_slow = c_sync_slow.load();
+    c.dead_calls = c_dead_calls.load();
+    c.attach_entered = c_attach_entered.load();
+    c.attach_skipped = c_attach_skipped.load();
+    c.typed_refused = c_typed_refused.load();
+    c.typed_unconnected = c_typed_unconnected.load();
+    c.retire_deferred = c_retire_deferred.load();
+    c.watchdog_reports = c_watchdog_reports.load();
+    {
+        std::lock_guard lock(g_mu);
+        c.retire_pending = static_cast<uint32_t>(g_deferred_owners.size());
+        for (const auto& a : g_attachments) ++(!a.checked ? c.attach_pending : a.active ? c.attach_active : c.attach_off);
+    }
+    const size_t n = std::min<size_t>(out->size, sizeof c);
+    std::memcpy(reinterpret_cast<uint8_t*>(out) + 4, reinterpret_cast<const uint8_t*>(&c) + 4, n - 4);
+    if (out->size > sizeof c) std::memset(reinterpret_cast<uint8_t*>(out) + sizeof c, 0, out->size - sizeof c);
     return KILN_OK;
 }
 
@@ -2032,6 +2674,13 @@ const KilnAbilitiesApi kTable = {
     &t_attr_add,
     &t_sequence_state,
     &t_sequence_play,
+    &t_native_register_sync,
+    &t_native_counters,
+    &t_native_attach,
+    &t_native_detach,
+    &t_native_declare_typed,
+    &t_native_state,
+    &t_native_attach_state,
 };
 
 // ------------------------------------------------------------------------------------------- boot --------------
@@ -2045,9 +2694,106 @@ int64_t cst(const char* name, int64_t dflt) {
 }
 bool feat(const char* name) { return g_api->feature(KilnStr{name, std::strlen(name)}); }
 
+// ---- the mods' impact/natives.json (since 0.2.0-dev.29) ----
+std::filesystem::path utf8_path(std::string_view s) {
+    return std::filesystem::path(std::u8string_view(reinterpret_cast<const char8_t*>(s.data()), s.size()));
+}
+
+std::string read_bounded(const std::filesystem::path& file, size_t cap) {  // "" when missing, unreadable or too large
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(file, ec) || ec) return {};
+    const auto size = std::filesystem::file_size(file, ec);
+    if (ec || size > cap) return {};
+    std::ifstream in(file, std::ios::binary);
+    std::string text(static_cast<size_t>(size), '\0');
+    if (!in.read(text.data(), static_cast<std::streamsize>(text.size()))) return {};
+    return text;
+}
+
+// The folders of the mods that load: the active profile's enabled Kiln mods, then the drop-ins of kiln/mods without a
+// .disabled marker unless the profile turns drop-ins off (native/services/world/boot_programs.cpp finds
+// kiln.programs.json the same way). The id is the manifest's.
+std::vector<std::pair<std::string, std::filesystem::path>> mod_folders() {
+    namespace fs = std::filesystem;
+    std::vector<fs::path> dirs;
+    bool dropins = true;
+    const auto* profile = static_cast<const KilnProfileApi*>(g_api->service(KilnStr{KILN_PROFILE_SERVICE, sizeof KILN_PROFILE_SERVICE - 1}, 1));
+    if (profile && profile->header.size >= sizeof(KilnProfileApi)) {
+        const uint32_t mode = profile->mode();
+        if (mode == KILN_PROFILE_NO_MODS || mode == KILN_PROFILE_INVALID) return {};
+        if (mode == KILN_PROFILE_ACTIVE || mode == KILN_PROFILE_ONCE) {
+            dropins = (profile->dropins() & (1u << KILN_PROFILE_KIND_KILN)) != 0;
+            const uint32_t n = std::min<uint32_t>(profile->count(KILN_PROFILE_KIND_KILN), 1024);
+            for (uint32_t i = 0; i < n; ++i) {
+                KilnProfileMod m{};
+                m.size = sizeof m;
+                if (profile->get(KILN_PROFILE_KIND_KILN, i, &m) == KILN_OK && m.enabled && m.path.ptr)
+                    dirs.push_back(utf8_path(std::string_view(m.path.ptr, m.path.len)));
+            }
+        }
+    }
+    if (dropins) {
+        char path[4096];
+        size_t n = 0;
+        if (g_api->path(KILN_PATH_MODS, path, sizeof path, &n) == KILN_OK && n < sizeof path) {
+            std::error_code ec;
+            std::vector<fs::path> found;
+            for (auto it = fs::directory_iterator(utf8_path(std::string_view(path, n)), ec); !ec && it != fs::directory_iterator() && found.size() < 1024; it.increment(ec))
+                if (it->is_directory(ec) && !fs::exists(it->path() / L".disabled", ec)) found.push_back(it->path());
+            std::sort(found.begin(), found.end());
+            dirs.insert(dirs.end(), found.begin(), found.end());
+        }
+    }
+    std::vector<std::pair<std::string, fs::path>> out;
+    std::unordered_set<std::string> seen;
+    for (const auto& d : dirs) {
+        const std::string text = read_bounded(d / L"kiln.mod.json", 64 * 1024);
+        if (text.empty()) continue;
+        try {
+            const auto m = nlohmann::json::parse(text, nullptr, true, true);  // manifests may carry comments
+            const std::string id = m.is_object() && m.contains("id") && m["id"].is_string() ? m["id"].get<std::string>() : "";
+            if (!id.empty() && seen.insert(id).second) out.emplace_back(id, d);
+        } catch (const std::exception&) {
+            // the host says why the manifest does not load
+        }
+    }
+    return out;
+}
+
+// Before the first program is verified: every loading mod's impact/natives.json declares its natives (typed ones with
+// their argument types, older entries by argc only).
+void load_mod_natives() {
+    if (!g_have_natives) return;
+    uint32_t typed = 0, plain = 0, files = 0;
+    for (const auto& [id, dir] : mod_folders()) {
+        const auto file = dir / L"impact" / L"natives.json";
+        std::error_code ec;
+        if (!std::filesystem::exists(file, ec)) continue;
+        const std::string text = read_bounded(file, kNativesJsonBytes);
+        std::vector<std::string> notes;
+        std::vector<NativeDecl> decls;
+        try {
+            if (text.empty()) throw std::runtime_error("unreadable, or larger than 256 KiB");
+            decls = parse_natives_json(text, id, &notes);
+        } catch (const std::exception& e) {
+            logw("kiln.abilities: %s/impact/natives.json not read: %s", id.c_str(), e.what());
+            continue;
+        }
+        ++files;
+        for (const auto& n : notes) logw("kiln.abilities: %s/impact/natives.json: %s (skipped)", id.c_str(), n.c_str());
+        for (const auto& d : decls) {
+            const KilnResult rc = d.typed ? t_native_declare_typed(d.hash, d.argc, d.args.data()) : t_native_declare(d.hash, d.argc);
+            if (rc != KILN_OK) logw("kiln.abilities: %s/impact/natives.json: %s not declared (a vanilla native's hash?)", id.c_str(), d.name.c_str());
+            else (d.typed ? typed : plain)++;
+        }
+    }
+    if (files) logi("kiln.abilities: impact/natives.json of %u mod(s): %u typed and %u argc-only declaration(s)", files, typed, plain);
+}
+
 void KILN_CALL on_ready(void*) {
     g_spawn = static_cast<const KilnSpawnApi*>(g_api->service(KilnStr{KILN_SPAWN_SERVICE, sizeof KILN_SPAWN_SERVICE - 1}, 1));
     g_assets = static_cast<const KilnAssetsApi*>(g_api->service(KilnStr{KILN_ASSETS_SERVICE, sizeof KILN_ASSETS_SERVICE - 1}, 1));
+    load_mod_natives();
 }
 
 }  // namespace
@@ -2057,6 +2803,24 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
         return KILN_ERR_UNAVAILABLE;
     g_api = api;
     g_owner = owner;
+    {
+        LARGE_INTEGER f;
+        if (QueryPerformanceFrequency(&f)) g_qpf = f.QuadPart;
+    }
+    {  // lab only (see lab_unpin)
+        char path[1024];
+        size_t n = 0;
+        KilnBuildInfo bi{};
+        bi.size = sizeof bi;
+        std::error_code ec;
+        if (api->path(KILN_PATH_CONTROL, path, sizeof path, &n) == KILN_OK && n < sizeof path &&
+            std::filesystem::exists(std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(path), n)) / "impact.unpin", ec) &&
+            api->build_info(&bi) == KILN_OK && bi.side == KILN_SIDE_SERVER && std::strncmp(bi.exe_sha256, "f0d824be", 8) == 0) {
+            int64_t v = -1;
+            g_world_storage = api->constant(KilnStr{"world.storage", 13}, &v) == KILN_OK ? v : -1;
+            g_lab_unpin = g_world_storage > 0;
+        }
+    }
     info->id = KilnStr{KILN_ABILITIES_SERVICE, sizeof(KILN_ABILITIES_SERVICE) - 1};
     info->version = KilnStr{"1", 1};
     info->on_ready = &on_ready;

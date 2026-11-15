@@ -195,7 +195,7 @@ internal static class CheatsRule
             e.Has(ClientCheckTags.GuardProof) && e.Has(ClientCheckTags.Cheats) && e.Game.Side == "client" && string.Equals(e.Game.Sha256, sha256, StringComparison.OrdinalIgnoreCase) &&
             e.Kiln == kiln);
         if (newest is { Verdict: "pass" } && !newest.Assertions.Any(a => a.What == CheckRunner.DroppedAssertion && a.Ok)) return "fail";
-        return newest?.Verdict ?? "none";
+        return newest?.Counted ?? "none";
     }
 
     private static Refusal? ProofRefusal(string proof, string? sha256, string? kiln)

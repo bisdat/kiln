@@ -10,6 +10,10 @@
 //     go with it).
 //  3. The boot after the restart (the native part's mark file is there): the same per-entity wrap on fuel_setup, made
 //     again by name in a new process, is applied, filters by archetype and reads Fuel through the view.
+//  4. After the typed rows: Systems.Define (S8). OnLoad binds FuelQuery to the program kiln.world reserved at boot from
+//     kiln.programs.json (what Kiln.Sdk's KilnPrograms task writes for it); the rows check it ran for fuel_setup's entities,
+//     that a query with no reservation is Ok=false, and that its handler ran on the game's workers with the switch on. Then
+//     the INIT row: an AfterEach on fuel_setup_init (an INIT program) sees a well the test spawns.
 using System.Collections.Concurrent;
 using Kiln;
 using Kiln.Testing;
@@ -43,17 +47,30 @@ public sealed class SystemsTestMod : Mod
         AppDomain.CurrentDomain.SetData("systems-test.loaded", "yes");
         if (_reload)
         {
-            // a reload of reload-test: wraps that this instance's unload must take with it
+            // a reload of reload-test: wraps and a defined program's binding that this instance's unload must take with it
             var w = Systems.Wrap("fuel_network").Wrap;
             w?.Before((ref Slice s) => { }).AfterEach(e => { });
+            Systems.Define(FuelQuery.Key, new ProgramOptions(), (ref FuelQuery q) => { });
             return;
         }
+        if (!File.Exists(Path.Combine(KilnDir, "data", "systems-test-mark.txt")))
+        {
+            // the program of the mod's own (S8), bound in OnLoad: kiln.world reserved it at boot
+            _defined = Systems.Define(FuelQuery.Key, new ProgramOptions(), (ref FuelQuery q) =>
+            {
+                Interlocked.Increment(ref _definedCalls);
+                if (q.Context.TryGet<Ecs.Fuel>(out var fuel) && fuel.Values.Length >= 2) Interlocked.Increment(ref _definedFuel);
+                if (_defineCounting) _definedThreads.TryAdd(Environment.CurrentManagedThreadId, 0);
+            });
+        }
         if (File.Exists(Path.Combine(KilnDir, "data", "systems-test-mark.txt"))) _restart = true;  // the boot after the restart
+        _defineB = File.Exists(Control("systems-test-define-b"));  // the boot the lab reserved declaration B in
         Context.Tick.Post += OnPost;
     }
 
     private void OnPost(in TickInfo tick)
     {
+        if (_defineB) DefineBCheck(tick);  // independent of the restart/wrap machine (runs in the same boot)
         if (_restart) RestartRows(tick);
         else if (!_labDone) LabWindow(tick);
         else if (!_done) WrapRows(tick);
@@ -298,7 +315,8 @@ public sealed class SystemsTestMod : Mod
                         _writer!.State == WrapState.Removed);
                     break;
                 default:
-                    if (n >= 440 && Typed(n - 440))
+                    if (n >= 440 && _defineFrom == 0 && Typed(n - 440)) _defineFrom = n + 1;
+                    else if (_defineFrom != 0 && n >= _defineFrom && DefineRows(n - _defineFrom))
                     {
                         Log.Info($"systems-test (managed): {_pass} PASS, {_fail} FAIL");
                         _done = true;
@@ -466,6 +484,156 @@ public sealed class SystemsTestMod : Mod
         return false;
     }
 
+    // ---- 4. Systems.Define (S8) and the INIT row ----
+    private ProgramRegistration? _defined;
+    private long _definedCalls, _definedFuel, _windowCalls;
+    private volatile bool _defineCounting;
+    private readonly ConcurrentDictionary<int, byte> _definedThreads = new();
+    private ulong _defineFrom;
+    private ProgramWrap? _init;
+    private readonly ConcurrentDictionary<uint, byte> _initIds = new();
+    private Task<EntityId>? _barrel;
+
+    // True when the Define and INIT rows are done.
+    private bool DefineRows(ulong m)
+    {
+        switch (m)
+        {
+            case 0:
+            {
+                long calls = Interlocked.Read(ref _definedCalls), fuel = Interlocked.Read(ref _definedFuel);
+                Check("define: reserved at boot, bound, ran N times", _defined is { Ok: true } && calls > 0 && fuel == calls,
+                    $"{_defined?.Reason ?? "bound as " + _defined?.Key}: {calls} entity calls since OnLoad, Fuel read through the query on {fuel}");
+                var unreserved = Systems.Define(UnreservedQuery.Key, new ProgramOptions(), (ref UnreservedQuery q) => { });
+                Check("define unreserved: Ok=false", !unreserved.Ok && unreserved.Reason == "not reserved at boot: rebuild the mod and restart the server",
+                    unreserved.Reason);
+                Check("LabSystems.ForceParallel(300) for the defined program", LabSystems.ForceParallel(300));
+                return false;
+            }
+            case 10:
+                _definedThreads.Clear();
+                _windowCalls = Interlocked.Read(ref _definedCalls);
+                _defineCounting = true;
+                return false;
+            case 290:
+            {
+                _defineCounting = false;
+                LabSystems.StopParallel();
+                var calls = Interlocked.Read(ref _definedCalls) - _windowCalls;
+                Check("define (forced): its handler ran on N>1 threads", _definedThreads.Count > 1 && calls > 0 &&
+                    Interlocked.Read(ref _definedFuel) == Interlocked.Read(ref _definedCalls),
+                    $"{_definedThreads.Count} thread(s), {calls} entity calls in the window, Fuel read on every call so far");
+                _defined!.Dispose();
+                // INIT: fuel_setup_init (flags 0x8) runs for archetype groups that gained entities; a spawned well is one
+                _init = Systems.Wrap("fuel_setup_init").Wrap!;
+                _init.AfterEach(e => _initIds.TryAdd(e.Value, 0));
+                return false;
+            }
+            case 292:
+                if (_marked != 0 && World.Position(new EntityId(_marked)) is { } at && Spawn.Available)
+                    _barrel = Spawn.Entity("Prop_NPC_Water_Well_a", new WorldPosition(at.X - 4, at.Y, at.Z));
+                return false;
+            case 340:
+            {
+                var stats = _init!.Stats;
+                var id = _barrel is { IsCompletedSuccessfully: true } ? _barrel.Result.Value : 0;
+                Check("INIT wrap: fuel_setup_init AfterEach ran for a spawned barrel", id != 0 && _initIds.ContainsKey(id) && stats.Faults == 0,
+                    _barrel is null ? "not spawned (no mark row entity, or kiln.spawn is off)"
+                        : id == 0 ? $"{_barrel.Status}: {_barrel.Exception?.InnerException?.Message}"
+                        : $"well {id}: {(_initIds.ContainsKey(id) ? "seen" : "not seen")} among {_initIds.Count} entities in {stats.Slices} INIT slices");
+                _init.Dispose();
+                return false;
+            }
+            // define.reload.contract, boot A (reservation = declaration A): a mod reloaded with A unchanged binds again (the
+            // old owner drained), then a changed declaration B under the SAME key is refused with the named difference and the
+            // restart sentence, and no B handler runs (Codex's dev.29 repair). Boot B (declaration B reserved) is checked
+            // independently below (DefineBCheck). The queried declaration of each attempt is the reason it carries.
+            case 342:
+                _reContract = Systems.Define(FuelQuery.Key, new ProgramOptions(), (ref FuelQuery q) =>
+                {
+                    Interlocked.Increment(ref _reCalls);
+                    if (q.Context.TryGet<Ecs.Fuel>(out var f) && f.Values.Length >= 2) Interlocked.Increment(ref _reFuel);
+                });
+                Check("define.reload.contract: a mod reloaded with declaration A unchanged binds again (the old owner drained)",
+                    _reContract is { Ok: true }, _reContract.Reason);
+                return false;
+            case 440:
+            {
+                var reA = Interlocked.Read(ref _reCalls);
+                Check("define.reload.contract: the rebound declaration A ran, Fuel read through the query",
+                    _reContract is { Ok: true } && reA > 0 && Interlocked.Read(ref _reFuel) == reA,
+                    $"{reA} entity calls after the rebind, Fuel on {Interlocked.Read(ref _reFuel)}");
+                var bWithout = Systems.Define(FuelQuery.Key, new ProgramOptions(), (ref BWithoutQuery q) => Interlocked.Increment(ref _bCalls));
+                Check("define.reload.contract: a changed 'without' under the same key is Ok=false by the reservation comparison, names the list and says restart",
+                    bWithout is { Ok: false } &&
+                    bWithout.Reason!.StartsWith($"{FuelQuery.Key}: without differs from the boot reservation", StringComparison.Ordinal) &&
+                    bWithout.Reason.Contains("rebuild is in the game only after a server restart"), bWithout.Reason);
+                var bReadOpt = Systems.Define(FuelQuery.Key, new ProgramOptions(), (ref BReadOptQuery q) => Interlocked.Increment(ref _bCalls));
+                Check("define.reload.contract: a changed required/optional split under the same key is Ok=false",
+                    bReadOpt is { Ok: false } && (bReadOpt.Reason!.Contains("read") || bReadOpt.Reason.Contains("readOptional")) &&
+                    bReadOpt.Reason.Contains("rebuild is in the game only after a server restart"), bReadOpt.Reason);
+                var bFlags = Systems.Define(FuelQuery.Key, new ProgramOptions { Pinned = true }, (ref BFlagsQuery q) => Interlocked.Increment(ref _bCalls));
+                Check("define.reload.contract: changed flags under the same key is Ok=false",
+                    bFlags is { Ok: false } && bFlags.Reason!.Contains("flags") &&
+                    bFlags.Reason.Contains("rebuild is in the game only after a server restart"), bFlags.Reason);
+                Check("define.reload.contract: none of the refused declaration-B handlers ran", Interlocked.Read(ref _bCalls) == 0,
+                    $"{Interlocked.Read(ref _bCalls)} calls");
+                _reContract!.Dispose();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private ProgramRegistration? _reContract;
+    private long _reCalls, _reFuel, _bCalls;
+
+    // define.reload.contract, boot B: the lab reserved systems_test_fuel with declaration B (the Pinned-flag variant) and set
+    // the control file. Independent of the restart/wrap state machine: after the world is up, declaration B binds and runs,
+    // and declaration A (FuelQuery) is refused with the restart sentence. Runs in the same boot as the mark-restart rows.
+    private bool _defineB, _defineBDone;
+    private ulong _defineBFrom;
+    private ProgramRegistration? _bBound, _aRefused;
+    private long _bBoundCalls;
+
+    private void DefineBCheck(in TickInfo tick)
+    {
+        if (_defineBDone) return;
+        try
+        {
+            if (_defineBFrom == 0)
+            {
+                if (tick.Step % 25 != 0 || !File.Exists(Control("systems-native.done")) || Systems.Find("fuel_setup") is null) return;
+                _defineBFrom = tick.Step;
+                // The lab reserved declaration B as the Pinned-flag variant (valid components, unlike a 'without' of a name
+                // the build does not know): it binds here, and declaration A (no flag) is refused.
+                _bBound = Systems.Define(FuelQuery.Key, new ProgramOptions { Pinned = true }, (ref BFlagsQuery q) =>
+                {
+                    Interlocked.Increment(ref _bBoundCalls);
+                });
+                _aRefused = Systems.Define(FuelQuery.Key, new ProgramOptions(), (ref FuelQuery q) => { });
+                Check("define.reload.contract (boot B): declaration B binds to the B reservation; declaration A is refused",
+                    _bBound is { Ok: true } && _aRefused is { Ok: false } && _aRefused.Reason!.Contains("rebuild is in the game only after a server restart"),
+                    $"B: {_bBound?.Reason ?? "ok"}; A: {_aRefused?.Reason}");
+                return;
+            }
+            if (tick.Step - _defineBFrom >= 100)
+            {
+                var calls = Interlocked.Read(ref _bBoundCalls);
+                Check("define.reload.contract (boot B): after a restart with declaration B, B binds and runs on the containers",
+                    _bBound is { Ok: true } && calls > 0, $"{calls} entity calls");
+                _bBound!.Dispose();
+                _defineBDone = true;
+                Log.Info($"systems-test (define.reload.contract boot B): done");
+            }
+        }
+        catch (Exception e)
+        {
+            Check("define.reload.contract (boot B)", false, e.ToString());
+            _defineBDone = true;
+        }
+    }
+
     private static byte[] Bytes<T>(in T value) where T : unmanaged =>
         System.Runtime.InteropServices.MemoryMarshal.AsBytes(
             System.Runtime.InteropServices.MemoryMarshal.CreateReadOnlySpan(ref System.Runtime.CompilerServices.Unsafe.AsRef(in value), 1)).ToArray();
@@ -547,6 +715,48 @@ public sealed class SystemsTestMod : Mod
         try { a(); return false; }
         catch (T) { return true; }
     }
+}
+
+// Systems.Define's lab program: fuel_setup's containers again (template FuelSetup, read Fuel), a program of the mod's own.
+// kiln.programs.json beside this file is what Kiln.Sdk's KilnPrograms task writes for it (this lab mod is built without the
+// Kiln SDK, so the file is kept by hand); UnreservedQuery is not in it.
+[Query(Key = Key, Template = ["FuelSetup"], Read = ["Fuel"])]
+internal ref struct FuelQuery : IQuery<FuelQuery>
+{
+    public const string Key = "systems_test_fuel";
+    public EcsProgramContext Context;
+    public static FuelQuery Bind(EcsProgramContext context) => new() { Context = context };
+}
+
+[Query(Key = Key, Read = ["Fuel"])]
+internal ref struct UnreservedQuery : IQuery<UnreservedQuery>
+{
+    public const string Key = "systems_test_unreserved";
+    public static UnreservedQuery Bind(EcsProgramContext context) => default;
+}
+
+// define.reload.contract's "declaration B" variants: the same key as FuelQuery, each one list or flag changed from A, so
+// Define refuses them under A's boot reservation by comparing the declaration with the reserved one (the reason names the
+// first list that differs). Each is a declaration this build accepts (Shelter is a template component of the game's
+// programs), so the refusal can only be that comparison. Boot B reserves the Pinned-flag one (BFlagsQuery), which then
+// binds.
+[Query(Key = FuelQuery.Key, Template = ["FuelSetup"], Read = ["Fuel"], Without = ["Shelter"])]
+internal ref struct BWithoutQuery : IQuery<BWithoutQuery>
+{
+    public EcsProgramContext Context;
+    public static BWithoutQuery Bind(EcsProgramContext context) => new() { Context = context };
+}
+
+[Query(Key = FuelQuery.Key, Template = ["FuelSetup"], ReadOptional = ["Fuel"])]
+internal ref struct BReadOptQuery : IQuery<BReadOptQuery>
+{
+    public static BReadOptQuery Bind(EcsProgramContext context) => default;
+}
+
+[Query(Key = FuelQuery.Key, Template = ["FuelSetup"], Read = ["Fuel"], Pinned = true)]
+internal ref struct BFlagsQuery : IQuery<BFlagsQuery>
+{
+    public static BFlagsQuery Bind(EcsProgramContext context) => default;
 }
 
 // fuel_setup as a view made for another game build would see it: one write list entry renamed, so another contract.

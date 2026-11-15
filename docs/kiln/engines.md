@@ -77,6 +77,15 @@ a link, a mapped drive (Proton's `S:`) or at a drive root is accepted. Under Win
 Windows path APIs, so a Unix symlink inside the game folder counts as part of it (making one needs write access to the
 game folder, which already allows placing a DLL there); absolute, drive and `..` entries are refused before resolving.
 
+If Wine or Proton maps its own DLL of the same name in place of a chained one ([Ultimate ASI Loader next to Kiln on
+Wine](#ultimate-asi-loader-next-to-kiln-on-wine)), `kiln\logs\proxy.log` says so in place of `loaded at ...` and gives
+the override to set: `chain: chain.ini [chain]: requested <game>\xinput9_1_0.dll but another file was loaded in its
+place: Wine's own xinput9_1_0; on Wine or Proton a DLL override is needed: WINEDLLOVERRIDES="xinput9_1_0=n,b"`. For a
+`[late]` entry the same line, starting `late:`, goes to `kiln.log`. Wine's module reports the requested path all the
+same, so the check compares the loaded image with the file: the PE headers' time stamp, image size, checksum, entry
+point and section count, and Wine's builtin marker after the DOS header (`native/proxy/image_match.h`). A file or
+module header that cannot be read counts as no mismatch.
+
 ### Loading a chained DLL late (`[late]`)
 
 A DLL mod that hooks game functions (XHL-Core, Auto Loot Plus and similar closed-source mods) hooks them in its
@@ -150,8 +159,9 @@ its full path, but Wine still applies its rules for the name `xinput9_1_0`. Set 
 The launcher names both overrides when Ultimate ASI Loader is chained and reports a missing override.
 - Tested (2026-11-14, dedicated server lab under GE-Proton11-11, Kiln 0.2.0-dev.28's proxy, a test DLL of ours named
   `xinput9_1_0.dll`, not Ultimate ASI Loader itself): without the override, a DLL without version information did not
-  run. Wine loaded its own `xinput9_1_0` instead, and `proxy.log` still said `loaded at ...`, so the log does not
-  show it. With `xinput9_1_0=n,b` it ran.
+  run. Wine loaded its own `xinput9_1_0` instead, and dev.28's `proxy.log` still said `loaded at ...`. With
+  `xinput9_1_0=n,b` it ran. Since dev.29 the proxy warns ([Proxy](#proxy)); `native/proxy/tests/test-chain.sh` shows
+  the warning under GE-Proton11-11's wine without an override and under Wine 11.20 with `xinput9_1_0=b` (2026-11-15).
 - Tested on the same lab: a DLL whose version information names a company other than Microsoft ran without the
   override. GE-Proton11-11 has the rule from Wine 11.6 that prefers such DLLs. Ultimate ASI Loader's current source
   names ThirteenAG as its company, so it should load there without the override (untested with the real loader).
@@ -377,3 +387,51 @@ from falling back to data-only if their adapter fails; new aside reporting recog
 records its reason in `emlRuntimeBlocked`; kiln-eml reports `skipped`. Without a hosted or own ShroudForge runtime,
 kiln-eml independently refuses the entire runtime package. A server-only/client-only package remains subject to
 ShroudForge's existing targets check (`other-side`); patch/export-only EML packages are unchanged.
+
+### Restore the game's data
+
+For a game folder another mod loader changed before Kiln. kiln-eml then finds game data it cannot prove it wrote
+("Game data is not output Kiln's EML writer can prove it published"), leaves it and the shared backups alone, and every
+EML mod fails. The launcher's Engines view (Logs, Engines) then offers **Restore the game's data**:
+
+1. Verify the game files in Steam (the game's Properties, Installed Files, "Verify integrity of game files"). Steam
+   puts the game's own files back; it does not remove the extra ones.
+2. If Steam repaired files, start the game through Kiln once more. kiln-eml reads the game's index at a start and
+   writes what it found into `kiln/state/eml.json` (`recovery`: the index's SHA-256, the number of archive containers
+   the index refers to, and that the data is unproven); the launcher takes the list of leftover files from that and
+   refuses to plan while the index on disk is not the one that was read. EML mods may fail once more in that start.
+3. The dialog lists every file with its size. Tick "I verified the game files in Steam" and choose **Move files
+   aside**.
+
+What moves, by rename and never by copy: the containers `enshrouded_NNN.dat` numbered at or past the count the game's
+own index refers to, the shared backup pair `enshrouded.kfc.bak` and `enshrouded.kfc_resources.bak`, the backup's seal
+and Kiln's own change cache (`kiln/eml/cache/files.json`, `files.partial.json`). They go to
+`kiln/eml/displaced/restore-<time>/` under their own names, beside a `manifest.json` that records each file's path,
+size and SHA-256, the time and how far the move got. Nothing is deleted and nothing is overwritten: a name that already
+exists stops the move. The next start through Kiln makes a fresh backup from the game data as it then is. Kiln never
+copies a backup over the game's data here.
+
+**Undo move** moves the files back and stays available after the launcher was closed. It is refused when one of the
+names exists again or a moved file's content changed. A move or an undo that was interrupted (a crash, a power cut) is
+finished the next time the launcher looks at this (the Engines view, or the move itself), with the game closed; when the
+game's index changed in between, an unfinished move is undone instead.
+
+Refused, each with its sentence: the game or its server is running; kiln-eml is writing; ShroudForge is the archive
+writer of the loaded profile (its own loader is installed, or Kiln hosts it for the profile's mods: the files may then
+be ShroudForge's own; a `shroudforge/` folder left from earlier does not count); Kiln has its own record of the data it
+wrote (`kiln/eml/ownership/`: then **Restore vanilla game data** above is the way); a link anywhere on a path; nothing
+left over. A game folder whose last start reported nothing unproven is not touched at all.
+
+Not covered: a game whose data changed after Kiln had written it (Kiln's record exists but no longer matches: another
+loader ran later). That case is as before: verify in Steam, then move the files by hand.
+
+Never run on Windows or against a real game folder; the moves are tested on Linux with an interruption at every step
+(`cargo test -p kiln-manage --features full restore_data`), the dialog with `launcher/tests/restore-data.spec.ts`.
+
+Kiln no longer changes the game's five building functions merely by starting `kiln.gameplay`: a selected managed mod which references `Kiln.Gameplay` (or ships a helper with that reference) requests them during the host's pre-world preflight,
+including when it only uses crafting. Native plugins request on first use and should request at startup if they
+will later add build/break protection. A first runtime request waits for the last world's stop; build/break zones
+are refused until installation, rather than accepted without protection. This lets ShroudForge inspect the unmodified `PlaceProp` entry
+when the profile contains no such mod and no native plugin requests the group. Once those hooks are installed, ShroudForge's entity spawning still cannot find
+its prop-spawn helper through that entry; a ShroudForge-side fix is in review. A mid-install failure can also leave
+pass-through jumps in some entries; see the gameplay service's refusal status and installed-target mask.

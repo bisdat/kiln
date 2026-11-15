@@ -35,6 +35,7 @@ const std::string* game_program_intern(std::string_view name);
 
 // ---- wraps.cpp ----
 void wraps_client_ready(bool tick, bool events);  // boot: enable only with lifecycle and both subscriptions
+void wraps_define_row(bool programs);              // boot: systems.define follows kiln.world's own programs
 void wraps_init();                                       // boot: the trampoline map, capability rows
 void wraps_pre(uint32_t kind, uintptr_t world);          // that world's thread, Pre, after its directory is current
 void wraps_world_event(const KilnWorldEvent* event);     // a world of a kind starts or stops
@@ -74,5 +75,6 @@ bool seh_cas_ptr(uintptr_t address, uintptr_t expected, uintptr_t desired, uintp
 
 // ---- host tests ----
 void wraps_test_budget_ns(uint64_t ns);
+void wraps_test_archetype_gap(void (*fn)());  // a hook run between the archetype read's layout read and its coherence re-check
 uint32_t wraps_test_in_flight(int pool);  // the sum over a pool's slots
 }  // namespace kw

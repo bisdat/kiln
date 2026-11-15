@@ -595,9 +595,9 @@ variant after the other (each in its own folders, `$KILN_OUT/dotnet/bin/Kiln.Gam
 Kiln.World are built once), copies each `Kiln.Game.dll` (and its pdb) into `<host dir>/game/<variant>/`, and replaces
 `<host dir>/game/` as a whole, so a build that is no longer verified loses its folder. A variant that fails to build
 stops it with the build's error lines and the log's path (`$KILN_OUT/build-game/<variant>.log`). It reads the dumps
-and records only: no exe is read or named. On the committed dumps (game svn 1287369) it makes two 1,917,440-byte dlls,
-`client-5d9ef2f140b8` and `server-f0d824be7fcd` (the old schema-1 server dump and the client build without a dump are
-skipped). `tools/deploy-server.sh` and `tools/package/stage.sh` call it after their `Kiln.Game` build line and copy
+and records only: no exe is read or named. On the committed dumps (game svn 1287369) it makes two 3,563,520-byte dlls,
+`client-5d9ef2f140b8` and `server-f0d824be7fcd`, the program views of §4.5 included (measured 2026-11-15 on the tree of
+0.2.0-dev.29; the old schema-1 server dump and the client build without a dump are skipped). `tools/deploy-server.sh` and `tools/package/stage.sh` call it after their `Kiln.Game` build line and copy
 `host/game/` with the rest of `kiln/host/`; a failure stops the deploy, and the stage unless `--allow-missing`.
 
 The SDK carries the newest one: `pack.sh` builds `Kiln.Game` into the stage (a failed build stops the pack), and the

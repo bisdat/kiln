@@ -39,6 +39,7 @@ void gd_tick(uint64_t step);
 void gd_packs_begin();
 void gd_packs_end();
 void gd_owner_gone(KilnOwner owner);
+void gd_owner_revoked(KilnOwner owner);  // the owner is revoked (not merely reverted): since 0.2.0-dev.29
 void gd_pack_sections(KilnOwner owner, uint64_t seq_base, const gjson& doc, const std::string& source, ApplyResult* out);
 // The "add" lists of the sections, before kiln.content's own sections (items may point at clones of the same pack).
 void gd_pack_adds(KilnOwner owner, uint64_t seq_base, const gjson& doc, const std::string& source, ApplyResult* out);
@@ -243,6 +244,16 @@ void clones_packs_begin();
 void clones_packs_end();
 // The buff mirror follows the game's buff records (their layers); store_mutex held. Cheap when nothing changed.
 void buffs_sync();
+// Buff clones that answer (kiln_gamedata.h define_buff_result, buff_registration, buff_budget; since 0.2.0-dev.29).
+KilnResult define_buff_result(KilnOwner owner, const std::string& json, uint32_t timing, KilnDefinitionReply* out, std::string* report);
+KilnResult buff_receipt(const uint8_t registration_id[16], KilnDefinitionReply* out, std::string* report);
+void buff_budget(KilnCapacityInfo* out);  // out->size checked by the caller
+void clones_owner_revoked(KilnOwner owner);  // kiln.content found the owner revoked: its clones' records are reserved
+void pending_mods_changed(const std::vector<std::string>& mods);
+void pending_owner_loaded(KilnOwner owner, const std::string& mod);
+void pending_replay();   // clones_boot: the buff definitions mods stored for this start
+void pending_settle();   // after a world's load: stored definitions that settled lose their file (clone lock held)
+bool gd_ready();         // kiln.gamedata's registries are built for the current world
 // A buff's GUID (buffTypeId = FNV-1a of it): a clone's, or one the game data references. false: not known.
 bool buff_guid(uint32_t id, uint8_t out[16]);
 void buff_guid_note(const uint8_t g[16]);  // a BuffTypeReference seen in the game data (configs_scan)

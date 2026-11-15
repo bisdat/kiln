@@ -20,6 +20,7 @@
 #include "catalog.h"
 #include "game.h"
 #include "kiln_api.h"
+#include "midstep.h"
 #include "nlohmann/json.hpp"
 #include "services/kiln_saves.h"
 #include "services/kiln_spawn.h"
@@ -88,6 +89,31 @@ void copy_c(char* dst, size_t cap, const std::string& s) {
 }
 
 bool on_tick() { return g_api->on_tick_thread(); }
+
+// kiln.world's table, for its in_program (midstep.h). Looked up on the first create or destroy: kiln.world may register
+// after kiln.spawn.
+const KilnWorldApi* world_api() {
+    static std::atomic<const KilnWorldApi*> w{nullptr};
+    const KilnWorldApi* p = w.load(std::memory_order_acquire);
+    if (!p) {
+        p = static_cast<const KilnWorldApi*>(
+            g_api->service(KilnStr{KILN_WORLD_SERVICE, sizeof(KILN_WORLD_SERVICE) - 1}, KILN_WORLD_VERSION));
+        if (p) w.store(p, std::memory_order_release);
+    }
+    return p;
+}
+
+// Create and destroy: the tick thread in Pre or Post, never inside the world's step (midstep.h). A refusal is logged the
+// first time and each time the count doubles.
+KilnResult structural_call(const char* what) {
+    if (!on_tick()) return KILN_ERR_WRONG_THREAD;
+    if (structural_gate(true, world_api()) == Gate::Ok) return KILN_OK;
+    static std::atomic<uint64_t> refused{0};
+    const uint64_t n = refused.fetch_add(1) + 1;
+    if ((n & (n - 1)) == 0)
+        logw("kiln.spawn: %s refused (%llu so far): %s", what, static_cast<unsigned long long>(n), kMidStepText);
+    return KILN_ERR_WRONG_THREAD;
+}
 
 // The server steps its world while it is still loading the save ("[game_server] Switching state from Load to
 // LoadEcsScene", then "... to Run"); entities from the save exist only after that, and the loader creates entities
@@ -286,7 +312,7 @@ KilnResult do_spawn(const Resolved& t, const KilnVec3& p, float yaw_deg, int32_t
                     const KilnSpawnComponent* extra = nullptr, uint32_t extra_count = 0) {
     if (out) *out = 0;
     if (!g_ok) return KILN_ERR_UNAVAILABLE;
-    if (!on_tick()) return KILN_ERR_WRONG_THREAD;
+    if (const KilnResult gate = structural_call(pickup ? "spawn_item" : "spawn"); gate != KILN_OK) return gate;
     if (world_state() != KILN_SPAWN_WORLD_RUNNING) return KILN_ERR_UNAVAILABLE;
     if (!finite_pos(p) || !std::isfinite(yaw_deg) || level < 0 || level > 1000) return KILN_ERR_INVALID_ARGUMENT;
     if (extra_count > KILN_SPAWN_MAX_COMPONENTS || (extra_count && !extra)) return KILN_ERR_INVALID_ARGUMENT;
@@ -689,7 +715,7 @@ KilnResult i_spawn_item(uint32_t item_id, uint32_t amount, KilnVec3 position, in
 
 KilnResult i_destroy(KilnEntity entity) {
     if (!g_ok) return KILN_ERR_UNAVAILABLE;
-    if (!on_tick()) return KILN_ERR_WRONG_THREAD;
+    if (const KilnResult gate = structural_call("destroy"); gate != KILN_OK) return gate;
     if (entity >= 1 && entity <= 1023) return KILN_ERR_INVALID_ARGUMENT;
     if (!game::can_destroy()) return KILN_ERR_UNAVAILABLE;
     unsigned long fault = 0;
@@ -851,7 +877,7 @@ KilnResult KILN_CALL t_tracked_at(size_t index, KilnTrackedEntity* out) {
 KilnResult i_cleanup(KilnStr tag, KilnStr origin, KilnSpawnCleanup* out) {
     if (out && out->size < sizeof(KilnSpawnCleanup)) return KILN_ERR_INVALID_ARGUMENT;
     if (!g_ok) return KILN_ERR_UNAVAILABLE;
-    if (!on_tick()) return KILN_ERR_WRONG_THREAD;
+    if (const KilnResult gate = structural_call("cleanup"); gate != KILN_OK) return gate;
     if (!game::world_ready()) return KILN_ERR_UNAVAILABLE;
     if (!tracker::opened()) open_tracker();
     refresh_impl(true);

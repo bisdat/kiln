@@ -14,6 +14,15 @@
 #include "services/kiln_gameplay.h"
 
 namespace kg {
+bool build_request(KilnOwner owner);
+void build_lifecycle(bool available);
+void build_poll(uint32_t stopping = KILN_WORLD_KINDS);
+bool build_installed();
+uint32_t build_state();
+uint32_t build_mask();
+std::string build_reason();
+bool seh_build_target(uintptr_t target);
+
 
 extern const KilnApi* g_api;
 extern KilnOwner g_owner;

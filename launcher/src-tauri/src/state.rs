@@ -11,11 +11,18 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 /// pointer, a move here or in another launcher, a committed move waiting for the restart): the one choke point for
 /// commands and background threads.
 pub fn dirs() -> Result<DataDirs, Error> {
+    if let Some(e) = crate::snapshot::startup::refusal() { return Err(e); }
     crate::folder::current().dirs()
 }
 
 /// Closures [`blocking`] runs right now (a move waits for them to end: crate::commands::data_folder).
 static IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
+static DRAIN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static DRAINED: std::sync::Condvar = std::sync::Condvar::new();
+pub fn wait_for_writers() {
+    let mut guard = DRAIN.lock().unwrap_or_else(|e| e.into_inner());
+    while in_flight() != 0 { guard = DRAINED.wait(guard).unwrap_or_else(|e| e.into_inner()); }
+}
 
 pub fn in_flight() -> usize {
     IN_FLIGHT.load(Ordering::SeqCst)
@@ -24,7 +31,9 @@ pub fn in_flight() -> usize {
 struct Flight;
 impl Drop for Flight {
     fn drop(&mut self) {
+        let _g = DRAIN.lock().unwrap_or_else(|e| e.into_inner());
         IN_FLIGHT.fetch_sub(1, Ordering::SeqCst);
+        DRAINED.notify_all();
     }
 }
 
@@ -33,6 +42,7 @@ impl Drop for Flight {
 /// before [`dirs`]: a writer that got the folder before a move's hold is waited for, one that asks after it is refused.
 #[must_use]
 pub fn writing() -> Writing {
+    let _g = DRAIN.lock().unwrap_or_else(|e| e.into_inner());
     IN_FLIGHT.fetch_add(1, Ordering::SeqCst);
     Writing(Flight)
 }
@@ -100,9 +110,23 @@ pub fn steam_roots() -> Vec<kiln_manage::steam::SteamRoot> {
 use kiln_manage::install::InstallState;
 
 /// `install::status` (cheap: kiln-manage caches file hashes by path, size and mtime). `fresh` is kept for callers that
-/// want to say so; both paths recompute.
+/// want to say so; both paths recompute. (dev.29) With `switch_back` when the game's Kiln came with a test build of the
+/// launcher and this launcher ships an older one (after a switch back to the release: the next Play installs it).
 pub fn install_state(install: &GameInstall, _fresh: bool) -> Result<InstallState, Error> {
-    kiln_manage::install::status(&dirs()?, install)
+    let d = dirs()?;
+    let mut st = kiln_manage::install::status(&d, install)?;
+    // only a receipt a test build wrote needs the bundle list (status runs every few seconds)
+    if let Some(r) = st.receipt.as_ref().filter(|r| kiln_manage::install::installed_by_test_build(r))
+        && let Some(shipped) = crate::commands::runtime::shipped_version()
+    {
+        let side = match install.kind {
+            kiln_manage::game::GameKind::Server => kiln_manage::manifest::RunSide::Server,
+            kiln_manage::game::GameKind::Client => kiln_manage::manifest::RunSide::Client,
+        };
+        let bundles = kiln_manage::bundle::list(&d).unwrap_or_default();
+        st.switch_back = kiln_manage::install::switch_back(Some(r), side, Some(&shipped), crate::distribution::beta().is_some(), &bundles);
+    }
+    Ok(st)
 }
 
 /// Kept for callers after install/uninstall (nothing cached here any more).

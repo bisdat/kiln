@@ -89,6 +89,7 @@ struct Stage {
     uint32_t refs = 0;            // chains (published, or retired and not yet freed) that hold it
     bool logged = false;
     char detail[128]{};
+    char stop[128]{};             // the last world stop's drain, while the stage waits for the next world (PENDING)
     // stats (slice path, relaxed)
     std::atomic<uint64_t> calls{0}, entities{0}, faults{0}, overruns{0}, ns{0};
     std::atomic<uint32_t> consecutive{0};
@@ -145,6 +146,8 @@ std::atomic<uint32_t> g_external{0};  // kiln.types' external runner, as last se
 uint32_t g_external_pre = 0;          // as the last Pre saw it (g_mu): what the capability row says
 const KilnCapsApi* g_wrap_caps = nullptr;
 std::atomic<uint32_t> g_active{0}, g_pending{0};
+uintptr_t(KILN_CALL* g_world_of)(uint32_t) = nullptr;  // KilnApi.world (null on a core without it)
+std::atomic<uint32_t> g_tick_closed{0};               // pools whose admission a faulted tick closed (bit per pool)
 std::chrono::steady_clock::time_point g_next_reap{};
 
 // ---- the trampolines ----
@@ -313,15 +316,32 @@ bool kind_is(const ProgramCtx* ctx, uint32_t kind) {
     return storage && storage[L.storage_kind] == kind;
 }
 
+// The core's tick faulted: tick.cpp's disable() clears every world pointer and stops tick and world-event delivery, so
+// no STOPPING (and no drain) will come for this world. A slice that finds no world of its kind closes its pool's
+// admission for good (a faulted tick sends no STARTED to open it again) and says so once; the game's updates run
+// untouched from then on, and a stage already past call()'s gate finishes. While the tick works a wrapped slice always
+// has its world: trampolines go in only in that world's Pre, after the core set it, and STOPPING closes admission
+// before the core clears it.
+bool tick_gone(int pool) {
+    const auto world_of = g_world_of;
+    if (!world_of || world_of(g_pools[pool].kind)) return false;
+    if (!g_pools[pool].stopping.exchange(true, std::memory_order_seq_cst)) {
+        g_tick_closed.fetch_or(1u << pool);
+        KW_E("world %u: Kiln no longer knows this world (its tick hook faulted, so no world stop will be seen): wrap "
+             "admission is closed, the game's updates run untouched until a restart", g_pools[pool].kind);
+    }
+    return true;
+}
+
 void dispatch(int pool, int slot, void* raw) {
     Slot& s = g_pools[pool].slots[slot];
     s.in_flight.fetch_add(1, std::memory_order_seq_cst);
     const UpdateFn orig = s.orig.load(std::memory_order_acquire);
     const Chain* c = s.chain.load(std::memory_order_seq_cst);
     auto* ctx = static_cast<ProgramCtx*>(raw);
-    if (!c || g_pools[pool].stopping.load(std::memory_order_seq_cst) || !kind_is(ctx, g_pools[pool].kind)) {
-        // no stage left, a slot kept for a foreign swap on top, or another storage (the prediction world runs the
-        // client world's table): the game's update, untouched
+    if (!c || g_pools[pool].stopping.load(std::memory_order_seq_cst) || !kind_is(ctx, g_pools[pool].kind) || tick_gone(pool)) {
+        // no stage left, a slot kept for a foreign swap on top, another storage (the prediction world runs the client
+        // world's table) or a faulted tick: the game's update, untouched
         s.forwarded.fetch_add(1, std::memory_order_relaxed);
         if (orig) orig(raw);
     } else if (orig) {
@@ -697,6 +717,7 @@ void wraps_init() {
            L.job_entity_count >= 0 && L.job_entity_list >= 0 && L.ctx_index == offsetof(ProgramCtx, index) &&
            g_api->feature(kstr("world.programs"));
     g_wrap_caps = static_cast<const KilnCapsApi*>(g_api->service(kstr(KILN_CAPS_SERVICE), 1));
+    g_world_of = g_api->size >= offsetof(KilnApi, session) + sizeof(void*) ? g_api->world : nullptr;
     {
         uintptr_t address = 0;
         if (g_api->symbol(kstr("items/AttrChanged"), &address) == KILN_OK) g_attr_changed_fn = reinterpret_cast<AttrChangedFn>(address);
@@ -729,6 +750,17 @@ void wraps_init() {
     else
         report_row("systems.wraps.client", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING,
                "the program table or job layout did not resolve on this build (world.programs)");
+}
+
+// systems.define (Kiln.Systems' Systems.Define): a mod's [Query] program, reserved at boot from its kiln.programs.json and
+// bound by name. It is kiln.world's own program path (programs v2), so it follows whether that path hooked this build.
+void wraps_define_row(bool programs) {
+    if (programs)
+        report_row("systems.define", KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE,
+                   "a mod's own [Query] programs, reserved at boot (kiln.programs.json) and bound by Systems.Define");
+    else
+        report_row("systems.define", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING,
+                   "kiln.world's programs did not resolve or hook on this build (world.programs)");
 }
 
 void wraps_client_ready(bool tick, bool events) {
@@ -821,6 +853,7 @@ void wraps_pre(uint32_t kind, uintptr_t) {
             }
             st->state.store(KILN_WRAP_ACTIVE);
             st->index.store(ref.index);
+            st->stop[0] = 0;
             touch(st->program);
         } else if (st->remove) {
             touch(st->program);
@@ -862,7 +895,16 @@ void wraps_world_event(const KilnWorldEvent* event) {
     bool live_slots = false;
     for (int i = 0; i < kWrapSlots && !live_slots; ++i) live_slots = g_pools[pool].slots[i].state == S_LIVE;
     if (event->event == KILN_WORLD_STOPPING) {
-        // Close stage admission before restoring entries. A runner may already have fetched a trampoline.
+        // Close stage admission before anything else: call()'s gate (and dispatch) refuse once `stopping` is set, so no new
+        // stage starts after STOPPING is seen; only a stage already in flight is waited for, up to the bound. The bound
+        // keeps Kiln's own callback state alive on timeout; it cannot keep the game's world memory alive. What the game
+        // guarantees here (native/core/src/tick.cpp hk_world_destroy, STOPPING dispatched while the world is intact, before
+        // the original destructor): the SERVER world's jobs are drained first (WaitWorldJobs, kind 0), so no server-world
+        // slice runs when STOPPING arrives and this drain finds 0 in flight. The CLIENT and PREDICTION worlds get no such
+        // engine wait, so on a hosting client a client-world slice can still be finishing on a worker here; the bounded
+        // drain is the only protection, and a timeout there (a stage that outlived storage destruction) is the client-gated
+        // risk systems.wraps.client carries. A real client must show, over repeated host/leave/join, that finishing workers
+        // are quiescent at STOPPING.
         g_pools[pool].stopping.store(true, std::memory_order_seq_cst);
         for (int i = 0; i < kWrapSlots; ++i)
             if (g_pools[pool].slots[i].state == S_LIVE) restore(pool, i, true);
@@ -884,6 +926,11 @@ void wraps_world_event(const KilnWorldEvent* event) {
         if (live_slots)
             KW_I("world %u stops: its wraps are taken out and wait for the next world (drained: %u calls in flight at the "
                  "stop, %u after %lld us)", event->kind, first, remaining, static_cast<long long>(waited));
+        // What the drain found, for every stage that waits for the next world (game_wrap_info's detail while PENDING).
+        for (auto& [h, st] : g_stages)
+            if (st->pool == pool && st->state.load() == KILN_WRAP_ACTIVE && !st->remove)
+                std::snprintf(st->stop, sizeof st->stop, "world stop: %u in flight at the stop, %u after the wait (%lld us)",
+                              first, remaining, static_cast<long long>(waited));
         drop_pool(pool, true); // retired chains retain their views until their last in-flight call exits, even on timeout
     } else if (event->event == KILN_WORLD_STARTED) {
         if (live_slots) {
@@ -1034,7 +1081,9 @@ KilnResult KILN_CALL game_wrap_info(KilnHandle h, KilnGameWrapInfo* out) {
     out->gone = st.gone.load();
     out->running = st.calls_in.load(std::memory_order_seq_cst);
     std::snprintf(out->detail, sizeof out->detail, "%s",
-                  st.detail[0] ? st.detail : (out->reason ? reason_text(out->reason) : ""));
+                  st.detail[0] ? st.detail
+                  : out->state == KILN_WRAP_PENDING && st.stop[0] ? st.stop
+                  : out->reason ? reason_text(out->reason) : "");
     return KILN_OK;
 }
 
@@ -1111,14 +1160,19 @@ int32_t view_slot(Frame& f, int id, int32_t i, const View** out_view) {
 }
 
 // The entity map's own hash of an id (docs/re/spawn.md: the game's entity map find, server 0x650c50): it probes from
-// this, not from the id (the component maps' keys are hashes already and probe from them as they are).
+// this, not from the id (the component maps' keys are hashes already and probe from them as they are). The client build's
+// find (0x9b4dc0), insert, grow and removal are the server's instruction for instruction (out/06a-program-wraps/
+// client-static, 2026-11-15): removal is a backward shift with no tombstone (an emptied slot's bit is clear, its stale
+// key and record stay behind), so a probe that stops at a clear bit misses no entity, as the game's own find does.
 uint32_t entity_hash(uint32_t k) {
     uint32_t x = ((k >> 16) ^ k) * 0x45d9f3bu;
     x = ((x >> 16) ^ x) * 0x45d9f3bu;
     return (x >> 16) ^ x;
 }
 
-bool map_find_ptr(uintptr_t map, uint32_t key, uintptr_t* value) {  // the entity map: u32 keys, pointer values
+bool map_find_ptr(uintptr_t map, uint32_t key, uintptr_t* value, uint64_t* out_cap = nullptr, uint32_t* out_count = nullptr) {
+    if (out_cap) *out_cap = 0;
+    if (out_count) *out_count = 0;
     if (!map || !L.map.ok()) return false;
     uint64_t cap = 0;
     uint32_t count = 0;
@@ -1135,10 +1189,24 @@ bool map_find_ptr(uintptr_t map, uint32_t key, uintptr_t* value) {  // the entit
         uint32_t k = 0;
         if (!seh_copy(&word, reinterpret_cast<const void*>(bits + (i >> 6) * 8), 8) || !((word >> (i & 63)) & 1)) return false;
         if (!seh_copy(&k, reinterpret_cast<const void*>(keys + i * 4), 4)) return false;
-        if (k == key) return seh_copy(value, reinterpret_cast<const void*>(values + i * 8), 8);
+        if (k == key) {
+            if (out_cap) *out_cap = cap;
+            if (out_count) *out_count = count;
+            return seh_copy(value, reinterpret_cast<const void*>(values + i * 8), 8);
+        }
         i = (i + 1 == cap) ? 0 : i + 1;
     }
     return false;
+}
+// A host-test seam: called once in game_slice_archetype between the layout read and the coherence re-check, so a test can
+// change the map (a concurrent insert/erase/grow) at exactly that window. Null in production.
+std::atomic<void (*)()> g_archetype_test_gap{nullptr};
+
+// The entity map's capacity and count now, for the archetype read's coherence re-check (below).
+bool map_shape(uintptr_t map, uint64_t* cap, uint32_t* count) {
+    return map && L.map.ok() &&
+           seh_copy(count, reinterpret_cast<const void*>(map + L.map.count), 4) &&
+           seh_copy(cap, reinterpret_cast<const void*>(map + L.map.cap), 8);
 }
 }  // namespace
 
@@ -1209,11 +1277,31 @@ KilnResult KILN_CALL game_slice_archetype(KilnGameSlice* slice, uintptr_t* out_l
     if (!out_layout) return KILN_ERR_INVALID_ARGUMENT;
     if (L.storage_entities < 0 || L.entity_layout < 0 || !L.map.ok()) return KILN_ERR_UNAVAILABLE;
     if (!slice->count || !slice->entity_ids) return KILN_ERR_NOT_FOUND;
+    if (L.entity_id < 0) return KILN_ERR_UNAVAILABLE;  // a record cannot be told from a reused one
     uintptr_t storage = 0, rec = 0, layout = 0;
+    uint32_t named = 0, named2 = 0;
+    const uint32_t id = slice->entity_ids[0];
     std::memcpy(&storage, f->ctx->job, sizeof storage);
-    if (!storage || !map_find_ptr(storage + static_cast<uintptr_t>(L.storage_entities), slice->entity_ids[0], &rec) || !rec ||
-        !seh_copy(&layout, reinterpret_cast<const void*>(rec + static_cast<uintptr_t>(L.entity_layout)), 8) || !layout)
-        return KILN_ERR_UNAVAILABLE;  // nonempty slice: cannot decide, rather than silently rejecting every slice
+    if (!storage) return KILN_ERR_UNAVAILABLE;
+    const uintptr_t map = storage + static_cast<uintptr_t>(L.storage_entities);
+    // The entity map read is narrowed, not proven. The map has no lock; its records come from a pool DestroyEntity frees
+    // at once, and an insert can grow and reallocate its arrays. The map's capacity and count are read before and after,
+    // and the record's id before and after the layout read. That catches a grow, a count change, a record that names
+    // another entity; it misses an erase and an insert between the reads (same count) and a record freed and reused for
+    // the same id. (CreateEntity stores the id before the layout, server and client alike: create-server.txt /
+    // create-client.txt F+0x122f then F+0x1246 in out/06a-program-wraps/client-static; x64 keeps store order, so a new
+    // layout is never seen under a stale id.) On a server world the map is at rest while slices run: a program's
+    // structural changes go to the command buffer and are applied at the step's end (chapter 06a 4.4, 9.6). A change
+    // that is seen is transient (KILN_WORLD_ERR_CHANGED): the caller reads again or leaves the slice to the game.
+    uint64_t cap = 0, cap2 = 0;
+    uint32_t count = 0, count2 = 0;
+    if (!map_find_ptr(map, id, &rec, &cap, &count) || !rec ||
+        !seh_copy(&named, reinterpret_cast<const void*>(rec + static_cast<uintptr_t>(L.entity_id)), 4) || named != id ||
+        !seh_copy(&layout, reinterpret_cast<const void*>(rec + static_cast<uintptr_t>(L.entity_layout)), 8) || !layout ||
+        (g_archetype_test_gap.load() && (g_archetype_test_gap.load()(), false)) ||
+        !seh_copy(&named2, reinterpret_cast<const void*>(rec + static_cast<uintptr_t>(L.entity_id)), 4) || named2 != id ||
+        !map_shape(map, &cap2, &count2) || cap2 != cap || count2 != count)
+        return KILN_WORLD_ERR_CHANGED;  // nonempty slice: a change under the read, not a skip and not "unreadable here"
     *out_layout = layout;
     return KILN_OK;
 }
@@ -1288,6 +1376,7 @@ std::string module_of(uintptr_t address) {
 
 // ---- host tests ----
 void wraps_test_budget_ns(uint64_t ns) { g_budget_ns.store(ns); }
+void wraps_test_archetype_gap(void (*fn)()) { g_archetype_test_gap.store(fn); }
 uint32_t wraps_test_in_flight(int pool) {
     uint32_t n = 0;
     for (const Slot& s : g_pools[pool].slots) n += s.in_flight.load();

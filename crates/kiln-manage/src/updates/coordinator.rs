@@ -120,7 +120,8 @@ pub fn targets(dirs: &DataDirs) -> Result<Vec<Target>> {
             .then_with(|| a.imported.cmp(&b.imported)).then_with(|| j.cmp(i)));
         let Some((_, v)) = newest else { continue };
         out.push(Target {
-            library_ref: LibraryRef { kind: e.kind, id: e.id.clone(), version: v.version.clone(), hash: v.hash.clone() },
+            library_ref: crate::library::replacement_base(v.source.as_ref())
+                .unwrap_or_else(|| LibraryRef { kind: e.kind, id: e.id.clone(), version: v.version.clone(), hash: v.hash.clone() }),
             name: e.name.clone(),
             mod_id: v.manifest_id.clone().unwrap_or_else(|| e.id.clone()),
             side: v.side,

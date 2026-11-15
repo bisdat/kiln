@@ -5,6 +5,7 @@
 // resolved by the engine later, at finalize, by hash; kiln.world validates every name against the world's maps first,
 // because one unknown component or event aborts the engine's access resolution for that program half-way.
 #include <algorithm>
+#include <cstdio>
 #include <chrono>
 #include <array>
 #include <utility>
@@ -19,7 +20,13 @@
 namespace kw {
 namespace {
 
-constexpr int kMaxPrograms = 32;
+// Kiln's own quota (chapter 17.4; 32 until 0.2.0-dev.29): programs registered through kiln.world in this process, its own
+// services' and compat loaders' and the mods' together; one typed trampoline each. Not the game's limit: the world's
+// program table holds 896 (world/programs.max, read live), and every registration checks its live count first.
+constexpr int kMaxPrograms = 64;
+// Kept for Kiln's own services while mods' boot declarations reserve: the services that register later than the
+// declarations (in their on_ready, or at the first world: the tracked-write program) still find room.
+constexpr int kBuiltinHeadroom = 8;
 constexpr uint32_t kMaxIterBytes = 4096;
 constexpr uint32_t kAllowedFlags = KILN_PROGRAM_SYSTEM | KILN_PROGRAM_INIT | KILN_PROGRAM_HOST_ONLY |
                                    KILN_PROGRAM_EXCLUSIVE | KILN_PROGRAM_CHUNKED | KILN_PROGRAM_PINNED |
@@ -35,7 +42,7 @@ struct Program : ProgramLayout {  // name, lists, singleton masks, group counts:
     void* user = nullptr;
     bool internal = false;
     ProgramPrunedFn pruned = nullptr;  // set: unknown other-write names are dropped, not fatal (the write program)
-    std::string reserved_mod, reserved_key;
+    std::string reserved_mod, reserved_key, reservation; // immutable, captured before engine normalization/pruning
     EngineDesc desc{};
     int slot = -1;  // trampoline index
     std::atomic<int> state{KILN_PROGRAM_PENDING};
@@ -254,6 +261,24 @@ void register_into(uintptr_t world) {
     KW_I("world 0x%llx: %u Kiln programs; the program table holds %u of %lld",
          static_cast<unsigned long long>(world), static_cast<unsigned>(g_programs.size()), *count_at,
          static_cast<long long>(L.programs_max));
+    // the slot ledger: who holds Kiln's slots, in slot order (a service's or loader's program by its name, a mod's
+    // declarations by its mod id and how many)
+    std::string ledger;
+    uint32_t mods = 0, services = 0;
+    for (size_t i = 0; i < g_programs.size(); ++i) {
+        const Program* p = g_programs[i];
+        const bool mod = !p->reserved_mod.empty();
+        (mod ? mods : services) += 1;
+        if (mod && i > 0 && g_programs[i - 1]->reserved_mod == p->reserved_mod) continue;
+        uint32_t n = 1;
+        while (mod && i + n < g_programs.size() && g_programs[i + n]->reserved_mod == p->reserved_mod) ++n;
+        if (ledger.size() < 1500) {
+            ledger += ledger.empty() ? "" : ", ";
+            ledger += mod ? p->reserved_mod + " x" + std::to_string(n) : p->name;
+        }
+    }
+    KW_I("kiln.world program slots: %u of %d taken, %u by Kiln's services and loaders, %u by mods' declarations: %s",
+         static_cast<unsigned>(g_programs.size()), kMaxPrograms, services, mods, ledger.c_str());
 }
 
 void on_world(uintptr_t world) {
@@ -456,7 +481,8 @@ KilnResult register_program(KilnOwner owner, const KilnProgramDesc* d, KilnHandl
     std::lock_guard lock(g_mutex);
     if (g_programs.size() >= kMaxPrograms) {
         delete p;
-        KW_E("program '%s' refused: kiln.world holds %d programs at most", name.c_str(), kMaxPrograms);
+        KW_E("program '%s' refused: kiln.world holds %d programs at most (all of Kiln's services and mods together)", name.c_str(),
+             kMaxPrograms);
         return KILN_ERR_UNAVAILABLE;
     }
     for (Program* q : g_programs)
@@ -521,6 +547,25 @@ void program_set_prune(KilnHandle h, ProgramPrunedFn removed) {
 uint32_t programs_registered() {
     std::lock_guard lock(g_mutex);
     return static_cast<uint32_t>(g_programs.size());
+}
+
+uint32_t program_quota() { return kMaxPrograms; }
+
+// The slot ledger for kiln.world.budget (any thread): a slot is in active use while its program is registered or waits
+// for a world with a callback that can run (a declaration counts once a mod bound it); a refused, faulted or skipped
+// program, and a declaration no loaded mod bound, still holds its slot (the engine keeps every descriptor).
+ProgramLedger program_ledger() {
+    std::lock_guard lock(g_mutex);
+    ProgramLedger out;
+    out.taken = static_cast<uint32_t>(g_programs.size());
+    for (const Program* p : g_programs) {
+        out.descs.push_back(reinterpret_cast<uintptr_t>(&p->desc));
+        const int st = p->state.load();
+        const bool bound = p->reserved_mod.empty() || p->owner != g_owner;
+        if ((st == KILN_PROGRAM_ACTIVE || st == KILN_PROGRAM_PENDING) && bound && (p->internal || p->each || p->update)) ++out.active;
+    }
+    std::sort(out.descs.begin(), out.descs.end());
+    return out;
 }
 
 uint32_t engine_program_count(uintptr_t world) {
@@ -686,13 +731,54 @@ void programs_reap_owners() {
 }
 
 KilnResult reserve_program(const std::string& mod, const std::string& key, const KilnProgramDesc* desc) {
+    if (programs_registered() + kBuiltinHeadroom >= static_cast<uint32_t>(kMaxPrograms)) {
+        KW_E("managed program %s/%s refused: the last %d of kiln.world's %d program slots stay for Kiln's own services", mod.c_str(),
+             key.c_str(), kBuiltinHeadroom, kMaxPrograms);
+        return KILN_ERR_UNAVAILABLE;
+    }
     KilnHandle handle = 0;
     const auto result = register_program(g_owner, desc, &handle, false);
     if (result != KILN_OK) return result;
     Program* p = by_handle(handle);
+    // Copy the declaration, not the live descriptor (which the world's validation may later prune).
+    const KilnNames* lists[] = {&desc->tpl, &desc->tpl_optional, &desc->read, &desc->read_optional, &desc->write,
+        &desc->write_optional, &desc->singletons_read, &desc->singletons_write, &desc->other_tpl, &desc->other_read,
+        &desc->other_write, &desc->with, &desc->without, &desc->any_of, &desc->events_in, &desc->events_out};
+    const char* names[] = {"tpl", "tplOptional", "read", "readOptional", "write", "writeOptional", "singletonsRead",
+        "singletonsWrite", "otherTpl", "otherRead", "otherWrite", "with", "without", "anyOf", "eventsIn", "eventsOut"};
+    std::string snapshot;
+    for (size_t i=0; i<16; ++i) {
+        snapshot += names[i]; snapshot += '=';
+        for (uint32_t j=0; j<lists[i]->count; ++j) {
+            if (j) snapshot += ',';
+            snapshot += sv(lists[i]->items[j]);
+        }
+        snapshot += '\n';
+    }
+    char tail[64];
+    std::snprintf(tail, sizeof tail, "flags=%08x\ninterval=%u\n", desc->flags, p->desc.interval);
+    snapshot += tail;
+    std::lock_guard lock(g_mutex);
+    p->reservation = std::move(snapshot);
     p->reserved_mod = mod;
     p->reserved_key = key;
     return KILN_OK;
+}
+KilnResult KILN_CALL program_reservation(KilnStr mod, KilnStr key, char* text, uint32_t capacity, uint32_t* out_size) {
+    if (!out_size) return KILN_ERR_INVALID_ARGUMENT;
+    *out_size = 0;
+    if (!mod.ptr || !key.ptr) return KILN_ERR_INVALID_ARGUMENT;
+    std::lock_guard lock(g_mutex);
+    for (const Program* p : g_programs) {
+        if (p->reserved_mod != sv(mod) || p->reserved_key != sv(key)) continue;
+        *out_size = static_cast<uint32_t>(p->reservation.size());
+        if (text) {
+            if (capacity < *out_size) return KILN_ERR_BUFFER_TOO_SMALL;
+            std::memcpy(text, p->reservation.data(), *out_size);
+        }
+        return KILN_OK;
+    }
+    return KILN_ERR_NOT_FOUND;
 }
 KilnResult KILN_CALL bind_program(KilnOwner owner, KilnStr mod, KilnStr key, KilnProgramEachFn each, void* user, KilnHandle* out) {
     if (out) *out = 0;

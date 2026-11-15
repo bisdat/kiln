@@ -1,0 +1,9 @@
+{
+  "id": "roster-cap-test",
+  "name": "Kiln roster test (a roster past 64 entries: two unlock pages)",
+  "version": "0.1.0",
+  "apiVersion": "0.1",
+  "entryAssembly": "RosterCapTest.dll",
+  "side": "both",
+  "clients": "mod"
+}

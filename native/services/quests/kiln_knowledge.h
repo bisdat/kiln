@@ -31,7 +31,8 @@
  * Targets: 0 = the world map; a player entity (1..16 on a dedicated server: entity = slot + 1) = that player's map,
  * available while the player is on the server (their map is loaded): KILN_ERR_UNAVAILABLE otherwise.
  *
- * Threads: status, info, submit, result, events, last_seq, held_ops, decide, listen, settings, configure: any thread.
+ * Threads: status, info, submit, result, events, last_seq, held_ops, decide, listen, settings, configure, roster_world,
+ * roster_budget, npc_unlock_at: any thread.
  * get, list, query, resolve, name_of, catalog_*, journal_*, npc: the tick thread (KILN_ERR_WRONG_THREAD elsewhere);
  * they read game memory the knowledge program writes during the step. Results and events are produced in Post (tick
  * thread) of the step in which the game applied the change.
@@ -39,6 +40,7 @@
 #ifndef KILN_KNOWLEDGE_H
 #define KILN_KNOWLEDGE_H
 #include "kiln_api.h"
+#include "services/kiln_capacity.h" /* KilnCapacityInfo: roster_budget (since 0.2.0-dev.29) */
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -241,6 +243,12 @@ enum {
                                            operations (held_ops), distance */
     KILN_KNOW_EVENT_RESOLVED = 5,       /* a held entry was decided: request = held id, new_value = 1 applied / 0
                                            dropped, flags: 1 = by a decide() call, 0 = by the default */
+    KILN_KNOW_EVENT_ROSTER = 6,         /* since 0.2.0-dev.29: a roster entry's unlock state changed between two
+                                           published snapshots of one world (see npc_unlock_at): target = the world
+                                           kind (0 server, 2 client), npc = the world's generation, id = NpcId,
+                                           old_value / new_value = 0 locked / 1 unlocked, extra = the knowledge version
+                                           of the new snapshot, request = the snapshot's revision. A knowledge version
+                                           change alone, and a world's first snapshot, are not events. step: that world's */
 };
 
 /* KilnKnowledgeEvent.flags for DIALOGUE_HELD */
@@ -324,6 +332,53 @@ typedef struct KilnKnowledgeStatus {
                              * is in the maps; before that the maps read empty and changes wait). 0 without quests.changes */
     char reason[160];       /* why a part is off, "" when all is on */
 } KilnKnowledgeStatus;      /* 296 bytes */
+
+/* ---------------------------------------------------------------------------------------------- the roster ---- */
+/* Since 0.2.0-dev.29 (package 17c, chapter 17.3 decisions I2 and I7). The game keeps the roster's unlock states in one
+ * 64-bit value per NpcRegistry (entry 64 would share entry 0's bit); Kiln keeps a second page of 64 beside each
+ * registry when a mod's roster needs more than 64 entries (docs/re/npc-roster.md), so the roster holds 64 entries, or
+ * 128 where that page is installed. These reads answer from an immutable snapshot that each world publishes after its
+ * step (Post): any thread, never a game call on the caller's thread. The snapshot is that of the world's last completed
+ * step; a step whose registry could not be read publishes NOT_READY, never an older answer.
+ *
+ * A roster the boot build cannot hold (more than 128 entries, or more than 64 where the second page cannot be
+ * installed on this side) stops the start before any world loads, with KILN_KNOW_ROSTER_EXIT_CODE, an error line in
+ * kiln.log and kiln/state/roster-refused.json ({"refused", "why", "mods", "side", "exitCode", "pid", "utc"}; the next
+ * start moves it to roster-refused.last.json); a required boot mod's start is stopped by kiln.boot instead
+ * (KILN_BOOT_EXIT_CODE).
+ *
+ * world_kind: KILN_WORLD_SERVER (0, this process's server world, a hosting client's included) or KILN_WORLD_CLIENT
+ * (2, this process's client world). Prediction (1) and any other value: KILN_ERR_INVALID_ARGUMENT. A generation is
+ * the core session's counter of that kind (KilnSessionInfo.sessions[kind]); 0 is no token, and is
+ * KILN_ERR_INVALID_ARGUMENT when supplied. A token is process-local: never save or send it.
+ *
+ * roster_world: *out_generation = the world's token, *out_readiness = KILN_CAPACITY_VALID; or *out_generation = 0
+ *   with KILN_CAPACITY_NO_WORLD (no such world now) or KILN_CAPACITY_NOT_READY (no complete snapshot of this world
+ *   yet, or its roster is one Kiln cannot read: more entries than this side's maximum). KILN_OK in all three cases.
+ * roster_budget: the world's roster entries as a KilnCapacityInfo (world scope): capacity 64 or 128 (EXPANDED set
+ *   when the second page is installed), game_used = the entries of the collection Kiln found at boot, kiln_used =
+ *   the entries Kiln's build added, reserved = entries neither of them put there. readiness WORLD_ENDED for a token
+ *   of a world that ended (or another generation), NOT_READY before its first complete snapshot, VALID otherwise.
+ * npc_unlock_at: one NpcId's state in the world's snapshot. readiness as roster_budget, plus KILN_NPC_UNKNOWN_ID for
+ *   an id the ready snapshot does not have. unlocked and knowledge_version (the engine's u16, zero-extended) are
+ *   valid only at KILN_CAPACITY_VALID; world_kind and generation always repeat the request; revision is the
+ *   snapshot's (or the service's current one when there is none). npc_id 0: KILN_ERR_INVALID_ARGUMENT.
+ * KILN_ERR_UNAVAILABLE: the reads are off for that kind on this side (client world on a dedicated server; the NPC
+ *   registry's layout did not resolve, feature quests.npc). out->size smaller than the struct: INVALID_ARGUMENT. */
+#define KILN_NPC_UNKNOWN_ID 7u /* npc_unlock_at's readiness for an id the snapshot does not have (not a capacity readiness) */
+#define KILN_KNOW_ROSTER_EXIT_CODE 0x4B02u /* the start stopped: the mods' roster cannot be held (a Unix wrapper sees 2) */
+
+typedef struct KilnNpcUnlockReply {
+    uint32_t size;              /* set by the caller: sizeof(KilnNpcUnlockReply) */
+    uint32_t readiness;         /* KILN_CAPACITY_VALID, NO_WORLD, WORLD_ENDED, NOT_READY or KILN_NPC_UNKNOWN_ID */
+    uint32_t world_kind;        /* as requested */
+    uint32_t generation;        /* as requested */
+    uint32_t npc_id;            /* as requested */
+    uint32_t unlocked;          /* 1 / 0, only at VALID */
+    uint32_t knowledge_version; /* the snapshot's engine knowledge version (u16), only at VALID */
+    uint32_t reserved_zero;
+    uint64_t revision;          /* +32 */
+} KilnNpcUnlockReply;           /* 40 bytes */
 
 /* ---------------------------------------------------------------------------------------------- the table ----- */
 
@@ -465,7 +520,14 @@ typedef struct KilnKnowledgeApi {
     KilnResult(KILN_CALL* flame_status)(KilnFlameStatus* out);
     KilnResult(KILN_CALL* flame_set)(KilnOwner owner, uint32_t level, uint64_t* out_request);
     KilnResult(KILN_CALL* flame_result)(uint64_t request, KilnFlameResult* out);
-} KilnKnowledgeApi;
+
+    /* Appended in 0.2.0-dev.29: the roster's snapshots (see "the roster" above). Check header.size covers a member
+     * before calling it: an older kiln.knowledge has none of the three. Any thread. */
+    KilnResult(KILN_CALL* roster_world)(uint32_t world_kind, uint32_t* out_generation, uint32_t* out_readiness); /* +240 */
+    KilnResult(KILN_CALL* roster_budget)(uint32_t world_kind, uint32_t generation, KilnCapacityInfo* out);       /* +248 */
+    KilnResult(KILN_CALL* npc_unlock_at)(uint32_t world_kind, uint32_t generation, uint32_t npc_id,
+                                         KilnNpcUnlockReply* out);                                                /* +256 */
+} KilnKnowledgeApi; /* 264 bytes since 0.2.0-dev.29 (240 before) */
 
 #ifdef __cplusplus
 }

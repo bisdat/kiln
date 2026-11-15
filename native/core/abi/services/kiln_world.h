@@ -229,6 +229,12 @@ typedef struct KilnWorldStatus {
  * entry needs a restart. The program is appended after the game's own programs and conflicts with every program
  * that reads or writes one of its components, so its write is the last of the step for that component. */
 
+/* game_slice_archetype's transient refusal (since 0.2.0-dev.29; a KilnResult value of this service, the generic codes keep
+ * their meaning): the entity map changed under the read (an insert, erase or grow), or the first entity's record did not
+ * name it. Read again, or leave that slice to the game; it does not mean the build cannot read archetypes. An older
+ * kiln.world answers KILN_ERR_UNAVAILABLE in these cases. */
+#define KILN_WORLD_ERR_CHANGED 100
+
 /* KilnWorldWriteResult.status */
 enum {
     KILN_WORLD_WRITE_DONE = 0,          /* written through the game's tracked path (what that marks: the flags) */
@@ -521,7 +527,8 @@ typedef struct KilnGameWrapInfo {
     uint8_t gone;           /* 1: no call of the stage starts any more (unwrapped, released, owner revoked) */
     uint16_t reserved;
     uint32_t running;       /* calls of the stage running now (with gone: the last ones finishing) */
-    char detail[128];       /* in words, NUL-terminated: why it was refused, removed or disabled */
+    char detail[128];       /* in words, NUL-terminated: why it was refused, removed or disabled; while PENDING after a
+                               world stop (since dev.29): what the stop's drain found ("world stop: ...") */
 } KilnGameWrapInfo;
 
 /* ======================================================================================= the table ============= */
@@ -735,8 +742,14 @@ typedef struct KilnWorldApi {
      * KILN_ERR_INVALID_ARGUMENT: not a write list or name; KILN_ERR_UNAVAILABLE: no tracker on this slot or build. */
     KilnResult(KILN_CALL* game_slice_mark)(KilnGameSlice* slice, const uint64_t* iter, int32_t list, int32_t i);
     /* Inside a stage: the slice's archetype key (all its entities share one archetype): the layout of its first
-     * entity's record. KILN_ERR_NOT_FOUND for an empty slice; KILN_ERR_UNAVAILABLE when a nonempty slice's
-     * entity record or layout cannot be read (the archetype filter must turn off with a reason). */
+     * entity's record, read from the entity map. That read is narrowed, not proven: the map's capacity and count and the
+     * record's id are compared before and after the layout read, which catches a grow, a count change and a record that
+     * names another entity, but not an erase and an insert between the two reads (the count is the same) nor a record
+     * freed and reused for the same id. On a server world the map is at rest while slices run (structural changes are
+     * deferred to the step's end); a client world's off-thread create/destroy is what is left (systems.wraps.client).
+     * KILN_ERR_NOT_FOUND for an empty slice; KILN_WORLD_ERR_CHANGED (since dev.29) when a change was seen under the read
+     * or the record does not name the entity (transient: read again or leave the slice to the game); KILN_ERR_UNAVAILABLE
+     * only when this build cannot read archetypes (its entity map or record layout did not resolve). */
     KilnResult(KILN_CALL* game_slice_archetype)(KilnGameSlice* slice, uintptr_t* out_layout);
     /* Whether archetype `layout` (game_slice_archetype) has component `component_hash`: 1 yes, 0 no, -1 not known
      * (no such component in that world, no world). Any thread, while the world lives. */

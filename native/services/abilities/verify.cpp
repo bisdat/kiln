@@ -110,8 +110,42 @@ struct Arrays {
 };
 
 // One array (code or shutdown): decode, check operands and targets, then the depth over the control-flow graph.
+// The ECALL at pc of a typed Kiln native: what the pushes right before it pass (ops/pcs: the instructions so far, the
+// ECALL last). Unknown pushes end the check (the thunk checks those calls at run time).
+bool check_typed(const uint32_t* code, uint32_t pc, const char* what, const Arrays& a, const TypedArgs& t,
+                 const std::vector<uint32_t>& ops, const std::vector<uint32_t>& pcs, VerifyResult& r) {
+    const uint32_t hash = code[pc + 2];
+    for (uint32_t i = 0; i < t.count && i + 1 < ops.size(); ++i) {
+        const size_t k = ops.size() - 2 - i;  // args[0] is the last push
+        const uint32_t op = ops[k];
+        if (op != ICONST && op != ICONST0 && op != ICONST1) break;
+        const uint32_t value = op == ICONST ? code[pcs[k] + 1] : op == ICONST1 ? 1 : 0;
+        const KilnNativeArg& d = t.args[i];
+        if ((value & 0xFFFF0000u) != 0xFFFF0000u) {
+            if (d.flags & KILN_NATIVE_ARG_RAW) continue;
+            if (value == 0 && (d.flags & KILN_NATIVE_ARG_OPTIONAL)) continue;
+            r.error = value == 0 ? fmt("E_ARGTYPE: %s pc %u: native 0x%08x args[%u] is not connected, and it is not optional", what, pc, hash, i)
+                                 : fmt("E_ARGTYPE: %s pc %u: native 0x%08x args[%u] is the raw value %u where it takes a variable", what, pc, hash, i, value);
+            return false;
+        }
+        const uint32_t idx = value & 0xFFFF;
+        if (idx >= a.vars_n) {
+            r.error = fmt("E_ARGTYPE: %s pc %u: native 0x%08x args[%u]: variable handle 0x%08x out of range", what, pc, hash, i, value);
+            return false;
+        }
+        const ImpactVariable& v = a.vars[idx];
+        if ((d.type && v.type != d.type) || (d.size && v.size != d.size)) {
+            r.error = fmt("E_ARGTYPE: %s pc %u: native 0x%08x args[%u] is variable %u (type 0x%08x, %u bytes); it takes type 0x%08x (%u bytes)",
+                          what, pc, hash, i, idx, v.type, v.size, d.type, d.size);
+            return false;
+        }
+    }
+    return true;
+}
+
 bool check_code(const uint32_t* code, uint32_t n, const char* what, const Arrays& a,
-                const std::function<int(uint32_t)>& argc_of, VerifyResult& r) {
+                const std::function<int(uint32_t)>& argc_of, const std::function<TypedArgs(uint32_t)>* typed_of,
+                VerifyResult& r) {
     if (n == 0) {
         r.error = fmt("%s is empty (it must end in HALT)", what);
         return false;
@@ -141,10 +175,12 @@ bool check_code(const uint32_t* code, uint32_t n, const char* what, const Arrays
     }
     // operands
     std::vector<uint32_t> ops;  // the opcodes so far, the last one this instruction's: what a native's arguments were
+    std::vector<uint32_t> pcs;  // where each of them is (their operands)
     for (uint32_t pc = 0; pc < n; ++pc) {
         if (!start[pc]) continue;
         const uint32_t op = code[pc];
         ops.push_back(op);
+        pcs.push_back(pc);
         if (op == BR || op == BRT || op == BRF) {
             const uint32_t t = code[pc + 1];
             if (t >= n || !start[t]) {
@@ -194,6 +230,13 @@ bool check_code(const uint32_t* code, uint32_t n, const char* what, const Arrays
                         return false;
                     }
                 }
+            }
+            if (typed_of && *typed_of) {
+                const TypedArgs t = (*typed_of)(hash);
+                if (t.count && !check_typed(code, pc, what, a, t, ops, pcs, r)) return false;
+                if (!t.count && t.untyped_kiln)
+                    r.warnings.push_back(fmt("W_ARGTYPE: %s pc %u: Kiln native 0x%08x is declared without argument types: "
+                                             "they are checked only by its own registration, at run time", what, pc, hash));
             }
             if (argc_of(hash) < 0) {
                 bool seen = false;
@@ -289,6 +332,11 @@ bool array_in(const uint8_t* blob, size_t len, const BlobArray& arr, size_t elem
 }  // namespace
 
 VerifyResult verify_program(const uint8_t* blob, size_t len, const std::function<int(uint32_t)>& argc_of) {
+    return verify_program(blob, len, argc_of, std::function<TypedArgs(uint32_t)>());
+}
+
+VerifyResult verify_program(const uint8_t* blob, size_t len, const std::function<int(uint32_t)>& argc_of,
+                            const std::function<TypedArgs(uint32_t)>& typed_of) {
     VerifyResult r;
     if (!blob || len < sizeof(ProgramHeader) || len > (16u << 20)) {
         r.error = "not a keen::ImpactProgram blob (too small or too large)";
@@ -347,8 +395,8 @@ VerifyResult verify_program(const uint8_t* blob, size_t len, const std::function
         r.error = fmt("stackSize %u out of range", h->stack_size);
         return r;
     }
-    if (!check_code(a.code, a.code_n, "code", a, argc_of, r)) return r;
-    if (!check_code(a.shut, a.shut_n, "codeShutdown", a, argc_of, r)) return r;
+    if (!check_code(a.code, a.code_n, "code", a, argc_of, &typed_of, r)) return r;
+    if (!check_code(a.shut, a.shut_n, "codeShutdown", a, argc_of, &typed_of, r)) return r;
     r.ok = true;
     return r;
 }

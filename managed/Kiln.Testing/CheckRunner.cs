@@ -98,7 +98,7 @@ internal sealed class CheckRunner
 
     internal const string DroppedAssertion = "the guard dropped at least one report";
 
-    internal const int MaxLogLines = 200, MaxLogBytes = 32 * 1024, MaxLine = 1000, MaxNote = 300, MaxAssertions = 64;
+    internal const int MaxLogLines = 200, MaxLogBytes = 32 * 1024, MaxLine = 1000, MaxNote = 300, MaxAssertions = 64, MaxFailuresNamed = 3;
 
     private readonly IRunnerEnv _env;
     private readonly ConcurrentQueue<Action> _inbox = new();
@@ -267,16 +267,16 @@ internal sealed class CheckRunner
         }
         if (run.Phase == RunPhase.Confirming) return "answer the check's question first (yes or no)";
         if (run.Verdict is not null) return "this check has its verdict";
-        run.Verdict = kind switch { AnswerKind.Pass => ClientCheckVerdict.Pass, AnswerKind.Fail => ClientCheckVerdict.Fail, _ => ClientCheckVerdict.Skip };
+        var verdict = run.TakeAnswer(kind switch { AnswerKind.Pass => ClientCheckVerdict.Pass, AnswerKind.Fail => ClientCheckVerdict.Fail, _ => ClientCheckVerdict.Skip });
         run.Note = Scrubber.Line(note, MaxNote);
         run.GuardAtEnd = guardAtEnd;
         run.FinishBy = _env.Now + FinishGrace;
-        run.VerdictTcs.TrySetResult(run.Verdict.Value);
+        run.VerdictTcs.TrySetResult(verdict);
         // a verdict before the body asked for one ends the body (the player bailed out, or judged early)
         if (!run.AskedVerdict && run.Body is { IsCompleted: false }) run.Cancel();
         run.Phase = RunPhase.Finishing;
         _dirty = true;
-        Emit(Event(RunEventKind.Changed, run, $"{LedgerEntry.VerdictName(run.Verdict.Value)} given"));
+        Emit(Event(RunEventKind.Changed, run, $"{LedgerEntry.VerdictName(verdict)} given"));
         return null;
     }
 
@@ -601,7 +601,6 @@ internal sealed class CheckRunner
         RememberPlayers();
         _run = null;
         _dirty = true;
-        run.Finished = true;
         if (run.Target is not null && !ReferenceEquals(run.Target, run.Mod.Instance) && run.Target is IDisposable d)
         {
             try
@@ -615,6 +614,7 @@ internal sealed class CheckRunner
         }
         if (run.Stopped || run.Verdict is not { } verdict)
         {
+            run.SealAssertions();
             _message = $"{run.Case.Key} stopped (no entry)";
             _env.Write(LogLevel.Info, $"checks: {run.Case.Key} stopped before its verdict (no entry)");
             Emit(Event(RunEventKind.Finished, run, "stopped before its verdict: no entry"));
@@ -647,6 +647,12 @@ internal sealed class CheckRunner
                 note = (note.Length > 0 ? note + " " : "") + "[guard warning: " + warning + "]";
             }
         }
+        var assertions = run.SealAssertions();
+        if (run.PlayerAnswer == ClientCheckVerdict.Pass && run.FailureMessage is { } reason)
+        {
+            verdict = ClientCheckVerdict.Fail;
+            note = (note.Length > 0 ? note + "; " : "") + "the player answered pass; " + reason;
+        }
         var (log, dropped) = CaptureLog(run.LogMark);
         var g0 = _env.Game;
         var entry = new LedgerEntry
@@ -654,7 +660,9 @@ internal sealed class CheckRunner
             Mod = c.Mod, ModVersion = c.ModVersion, Id = c.Id, Title = c.Title, Area = c.Area, Since = c.Since, Tags = c.Tags.ToArray(),
             Kiln = g0.Kiln, Game = new LedgerGame { Side = g0.Side, Sha256 = g0.Sha256, Verified = g0.Verified },
             Session = LedgerEntry.SessionName(run.Session), Verdict = LedgerEntry.VerdictName(verdict), Note = Scrubber.Line(note, 600),
-            Time = _env.Now.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'"), Assertions = run.Assertions.Select(a => a with
+            PlayerAnswer = run.PlayerAnswer is { } answer ? LedgerEntry.VerdictName(answer) : null,
+            AssertionFailureCount = run.AssertionFailureCount,
+            Time = _env.Now.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'"), Assertions = assertions.Select(a => a with
             {
                 What = Scrubber.Line(a.What, MaxNote), Detail = a.Detail is null ? null : Scrubber.Line(a.Detail, MaxNote),
             }).ToArray(), Log = log,
@@ -663,15 +671,15 @@ internal sealed class CheckRunner
         Ledger.MergeCatalogue([LedgerCheck.Of(c)]);
         var written = Ledger.Append(entry);
         _message = written ? $"{c.Key}: {entry.Verdict} written" : $"{c.Key}: {entry.Verdict} NOT written: {Ledger.WriteError}";
+        if (run.PlayerAnswer == ClientCheckVerdict.Pass && run.FailureMessage is { } failure) _message += "; " + failure;
         _env.Write(written ? LogLevel.Info : LogLevel.Error,
             $"checks: {c.Key} {entry.Verdict.ToUpperInvariant()}{(note.Length > 0 ? ": " + note : "")}" +
-            $" ({run.Assertions.Count(a => !a.Ok)} of {run.Assertions.Count} assertion(s) failed)" + (written ? "" : $"; the ledger was not written: {Ledger.WriteError}"));
+            $" ({entry.FailedAssertions} assertion(s) failed, {assertions.Length} kept)" + (written ? "" : $"; the ledger was not written: {Ledger.WriteError}"));
         Emit(Event(RunEventKind.Finished, run, _message) with { Entry = entry });
     }
 
     /// <summary>The guard-proof check shows the guard working only when its dropped counter went up while the body ran.
-    /// When it did not, the recorded verdict is fail whatever the player answered (the one verdict the runner
-    /// overrides), and the note says why. Returns that note, or null when the counter went up.</summary>
+    /// When it did not, the recorded verdict is fail whatever the player answered, and the note says why. Returns that note, or null when the counter went up.</summary>
     private string? ProofOverride(Run run, GuardStatus? after, ClientCheckVerdict answered, string note)
     {
         long? b = run.GuardBefore?.Dropped, a = after?.Dropped;
@@ -783,7 +791,7 @@ internal sealed class CheckRunner
         _ => "finishing",
     };
 
-    private static ViewCurrent CurrentOf(Run r) => new(r.Case.Mod, r.Case.Id, r.Case.Title, r.Case.Area, PhaseName(r.Phase), r.Instruction,
+    private static ViewCurrent CurrentOf(Run r) => new(r.Case.Mod, r.Case.Id, r.Case.Title, r.Case.Area, PhaseName(r.Phase), r.PlayerAnswer == ClientCheckVerdict.Pass ? r.FailureMessage ?? r.Instruction : r.Instruction,
         r.Phase == RunPhase.Confirming ? r.Instruction : null, r.Assertions.ToArray(), LedgerEntry.SessionName(r.Session), r.Case.Cheats);
 
     /// <summary>The refusal the list shows for a check that is not running: what is known now, without touching the guard.</summary>
@@ -812,7 +820,7 @@ internal sealed class CheckRunner
             .Select(c =>
             {
                 newest.TryGetValue(c.Key, out var e);
-                return new ViewItem(c.Mod, c.Id, c.Title, c.Area, c.Tags, LedgerCheck.NeedsName(c.Needs), e?.Verdict, e?.Note,
+                return new ViewItem(c.Mod, c.Id, c.Title, c.Area, c.Tags, LedgerCheck.NeedsName(c.Needs), e?.Counted, e?.CountedNote,
                     Preview(c, session, sessionProblem, Proof), c.Confirm, c.Cheats) { Since = c.Since };
             }).ToList();
     }
@@ -882,6 +890,39 @@ internal sealed class CheckRunner
         public bool ThrowawayConfirmed { get; set; }
         public bool Finished { get; set; }
         public ClientCheckVerdict? Verdict { get; set; }
+        public ClientCheckVerdict? PlayerAnswer { get; private set; }
+        public int AssertionFailureCount { get; private set; }
+        private readonly List<string> _failed = new();
+        public string? FailureMessage
+        {
+            get
+            {
+                // the HUD line and the list's note carry this: the first few names, then how many more
+                lock (_lock) return AssertionFailureCount == 0 ? null :
+                    $"this check cannot pass: {AssertionFailureCount} assertion(s) failed: {string.Join("; ", _failed)}" +
+                    (AssertionFailureCount > _failed.Count ? $"; and {AssertionFailureCount - _failed.Count} more" : "");
+            }
+        }
+
+        public ClientCheckVerdict TakeAnswer(ClientCheckVerdict answer)
+        {
+            lock (_lock)
+            {
+                PlayerAnswer = answer;
+                Verdict = answer == ClientCheckVerdict.Pass && AssertionFailureCount > 0 ? ClientCheckVerdict.Fail : answer;
+                return Verdict.Value;
+            }
+        }
+
+        public LedgerAssertion[] SealAssertions()
+        {
+            lock (_lock)
+            {
+                Finished = true;
+                return Assertions.ToArray();
+            }
+        }
+
         public string Note { get; set; } = "";
         public GuardStatus? GuardBefore { get; set; }
         public GuardStatus? GuardAtEnd { get; set; }
@@ -914,10 +955,26 @@ internal sealed class CheckRunner
         {
             lock (_lock)
             {
-                if (Assertions.Count >= MaxAssertions) return;
-                Assertions.Add(new LedgerAssertion
+                if (Finished) return;
+                var assertion = new LedgerAssertion
                 {
                     What = _runner.Scrubber.Line(what, MaxNote), Ok = ok, Detail = detail is null ? null : _runner.Scrubber.Line(detail, MaxNote),
+                };
+                if (!ok)
+                {
+                    AssertionFailureCount++;
+                    if (_failed.Count < MaxFailuresNamed) _failed.Add(assertion.What);
+                }
+                if (Assertions.Count < MaxAssertions) Assertions.Add(assertion);
+                else if (!ok && Assertions.FindLastIndex(a => a.Ok) is var replace && replace >= 0)
+                    Assertions[replace] = assertion; // the storage cap must never hide the first failure
+            }
+            if (!ok)
+            {
+                _runner.Post(() =>
+                {
+                    if (!Finished && ReferenceEquals(_runner._run, this))
+                        _runner.Emit(_runner.Event(RunEventKind.Changed, this, FailureMessage ?? "assertion"));
                 });
             }
             _runner.MarkDirty();

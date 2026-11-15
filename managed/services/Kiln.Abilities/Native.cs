@@ -143,9 +143,94 @@ internal static unsafe class AbilitiesNative
         public delegate* unmanaged[Cdecl]<uint, uint, uint, int> SequencePlay;
     }
 
+    /// <summary>Since 0.2.0-dev.29 (appended to v1; read a member only when <see cref="Has"/> says the native table
+    /// reaches it): synchronous natives and the thunks' counters.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableV2
+    {
+        public Table V1;
+        public delegate* unmanaged[Cdecl]<ulong, NativeStr, uint, delegate* unmanaged[Cdecl]<NativeCall*, void*, void>, void*, uint*, uint*, int> NativeRegisterSync;
+        public delegate* unmanaged[Cdecl]<NativeCounters*, int> NativeCountersFn;
+        public delegate* unmanaged[Cdecl]<ulong, uint, NativeFilter*, int, int, delegate* unmanaged[Cdecl]<NativeCall*, void*, void>, void*, ulong*, uint*, int> NativeAttach;
+        public delegate* unmanaged[Cdecl]<ulong, int> NativeDetach;
+        public delegate* unmanaged[Cdecl]<uint, uint, NativeArgRaw*, int> NativeDeclareTyped;
+        public delegate* unmanaged[Cdecl]<uint, uint*, int> NativeStateFn;
+        public delegate* unmanaged[Cdecl]<ulong, uint*, int> NativeAttachStateFn;
+    }
+
+    /// <summary>KilnNativeArg (since 0.2.0-dev.29).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct NativeArgRaw
+    {
+        public uint Type;
+        public ushort Size;
+        public byte Dir, Flags;
+    }
+
+    public const byte ArgOptional = 1, ArgRaw = 2;  // KILN_NATIVE_ARG_OPTIONAL / _RAW
+
+    /// <summary>KilnNativeFilter (since 0.2.0-dev.29): 0 = any.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct NativeFilter
+    {
+        public uint Size, ProgramId, Site, Reserved;
+    }
+
+    /// <summary>KilnNativeCounters (since 0.2.0-dev.29).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct NativeCounters
+    {
+        public uint Size, Inflight, Flags, Reserved;
+        public ulong SyncCalls, SyncFaults, SyncSlow, DeadCalls, AttachEntered, AttachSkipped, TypedRefused, TypedUnconnected;
+        public ulong RetireDeferred, WatchdogReports;
+        public uint RetirePending, AttachPending, AttachActive, AttachOff;
+    }
+
+    public const uint CountersNatives = 1;  // KILN_NATIVE_COUNTERS_NATIVES: the RegisterNative hook is in
+
+    // KILN_NATIVE_REFUSED_*
+    public const uint RefusedNone = 0, RefusedRegistryFull = 1, RefusedNoSlot = 2, RefusedTaken = 3, RefusedVanilla = 4,
+        RefusedProgramNotLoaded = 5, RefusedSiteNotFound = 6, RefusedSecondInstead = 7, RefusedNotANative = 8;
+
+    /// <summary>The refusal's words (NativeResult.Reason, AttachResult.Reason).</summary>
+    public static string Refusal(uint code) => code switch
+    {
+        RefusedRegistryFull => "native registry full (the game takes 128 natives, 107 of them its own)",
+        RefusedNoSlot => "no free Kiln native slot (160)",
+        RefusedTaken => "a Kiln native with this name is registered",
+        RefusedVanilla => "the name's hash is one of the game's natives",
+        RefusedProgramNotLoaded => "program not loaded (not in the ImpactRegistry)",
+        RefusedSiteNotFound => "site not found (the program does not call this native there)",
+        RefusedSecondInstead => "a second Instead for this native, program and site",
+        RefusedNotANative => "not a native the game registered",
+        _ => $"refused ({code})",
+    };
+
     private static Table* _t;
 
     public static Table* T => _t != null ? _t : _t = Services.Get<Table>(Name, Version);
+
+    /// <summary>True when the native table reaches the member <paramref name="field"/> of <see cref="TableV2"/>.</summary>
+    public static bool Has(Table* t, string field) =>
+        t != null && t->Header.Size >= (uint)Marshal.OffsetOf<TableV2>(field) + (uint)sizeof(nint);
+
+    /// <summary>The table with the dev.29 members up to <paramref name="field"/>, or null (no kiln.abilities, or an
+    /// older one).</summary>
+    public static TableV2* V2(string field)
+    {
+        var t = T;
+        return Has(t, field) ? (TableV2*)t : null;
+    }
+
+    /// <summary>The thunks' counters, or null (no kiln.abilities, or one older than dev.29).</summary>
+    public static NativeCounters? Counters()
+    {
+        var t = V2(nameof(TableV2.NativeCountersFn));
+        if (t == null) return null;
+        NativeCounters c = default;
+        c.Size = (uint)sizeof(NativeCounters);
+        return t->NativeCountersFn(&c) == Ok ? c : null;
+    }
 
     public static Table* Require(string api)
     {

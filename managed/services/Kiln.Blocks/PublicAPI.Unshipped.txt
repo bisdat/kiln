@@ -45,3 +45,5 @@ static Kiln.Blocks.Define(string! name, Kiln.BuildingMaterialPoolBlock! block, K
 static Kiln.WorldTables.GetMaterialBudget(Kiln.WorldMaterialCategory category) -> Kiln.CapacityQueryResult!
 static Kiln.WorldTables.GetMaterialPoolRegistration(System.Guid registrationId) -> Kiln.DefinitionRegistrationResult!
 static Kiln.WorldTables.GetPoolBudget(string! pool) -> Kiln.CapacityQueryResult!
+static Kiln.Blocks.Define(string! name, Kiln.VfxBlock! block, Kiln.DefinitionRegistrationOptions! options) -> Kiln.DefinitionRegistrationResult!
+static Kiln.Blocks.GetVfxRegistration(System.Guid registrationId) -> Kiln.DefinitionRegistrationResult!

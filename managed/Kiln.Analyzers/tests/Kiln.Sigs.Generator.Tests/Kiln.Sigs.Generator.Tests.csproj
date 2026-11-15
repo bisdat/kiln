@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Tests of the Kiln.Sigs generator: the core's descriptors (sigdb/symbols/server.json, server.d/*.json) parse with no
+       problem and their output is managed/services/Kiln.Sigs/Sigs.g.cs byte for byte (KILN_SIGS_REGEN=1 rewrites it);
+       the generated shape per type kind (sret, scalar and struct returns, narrow integers, stack positions, by-value
+       structs); generated code compiled against the real Kiln.Api and Kiln.Hooks; the generator's diagnostics. -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <OutputType>Exe</OutputType>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit.v3" Version="3.1.0" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Kiln.Sigs.Generator/Kiln.Sigs.Generator.csproj" />
+    <ProjectReference Include="../../../Kiln.Api/Kiln.Api.csproj" />
+    <ProjectReference Include="../../../services/Kiln.Hooks/Kiln.Hooks.csproj" />
+    <ProjectReference Include="../../../services/Kiln.Sigs/Kiln.Sigs.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- the repository, for the core's sigdb files and the committed Kiln.Sigs source -->
+    <AssemblyMetadata Include="KilnRepo" Value="$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../../../../'))" />
+  </ItemGroup>
+</Project>

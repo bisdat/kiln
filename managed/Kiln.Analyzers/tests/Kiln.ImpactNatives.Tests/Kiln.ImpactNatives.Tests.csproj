@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Tests of the Kiln.ImpactNatives generator ([ImpactNative] methods, chapter 06c S4): the generated source of every
+       parameter kind against a committed snapshot (KILN_IMPACT_REGEN=1 rewrites it), the generated code compiled against
+       the real Kiln.Api and Kiln.Abilities, and the generator's diagnostics (KILN170 to KILN174). What the generated
+       thunks do at run time is tested in managed/tests/Kiln.Blocks.Tests (NativesGeneratedTests). -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <OutputType>Exe</OutputType>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit.v3" Version="3.1.0" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Kiln.ImpactNatives/Kiln.ImpactNatives.csproj" />
+    <ProjectReference Include="../../../Kiln.Api/Kiln.Api.csproj" />
+    <ProjectReference Include="../../../services/Kiln.Abilities/Kiln.Abilities.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="KilnImpactSnapshots" Value="$(MSBuildThisFileDirectory)Snapshots" />
+  </ItemGroup>
+</Project>

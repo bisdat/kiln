@@ -65,7 +65,12 @@ public sealed record WrapOptions
 public sealed record WrapResult<TWrap>(bool Ok, string? Reason, TWrap? Wrap) : IKilnResult where TWrap : class;
 
 /// <summary>What a stage did so far, summed over its stages.</summary>
-public sealed record WrapStats(long Slices, long Entities, double Microseconds, long Faults, long Overruns, int Threads);
+public sealed record WrapStats(long Slices, long Entities, double Microseconds, long Faults, long Overruns, int Threads)
+{
+    /// <summary>Slices a <see cref="ProgramWrap.WhenArchetype"/> filter left to the game because the entity map changed
+    /// under its archetype read three times in a row (kiln.log says so once per stage). Since 0.2.0-dev.29.</summary>
+    public long ArchetypeSkips { get; init; }
+}
 
 /// <summary>A stage was turned off: it faulted, overran its budget 10 slices in a row, threw, or native SET came.
 /// Raised on the tick thread.</summary>
@@ -86,7 +91,7 @@ public delegate void EntityHandler(EntityId entity);
 /// the game's worker threads (always in the client world, in the server world once a player is in it): no tick-thread
 /// API inside them (they throw), per-slice state only, shared state through atomics, <see cref="Slice.Post"/> for work
 /// on the tick thread. One Replace per program. Refused while native SET is loaded.</summary>
-public static unsafe class Systems
+public static unsafe partial class Systems
 {
     /// <summary>The program <paramref name="program"/> of that world's table, or null (not in that world, no world yet).</summary>
     /// <exception cref="ArgumentException"><paramref name="program"/> is null or empty.</exception>

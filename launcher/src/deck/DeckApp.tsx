@@ -7,7 +7,9 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import * as api from "../api/commands";
-import { useAppInfo, useBackendEvents, useNexusEnabled, useSettings } from "../api/hooks";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAppInfo, useBackendEvents, useDistribution, useNexusEnabled, useSettings } from "../api/hooks";
+import type { UpdateStatus } from "../api/commands";
 import { useTaskFeed, Lockup } from "../ui";
 import { useAutoDetect } from "../shell/firstRun";
 import { clock, usePlayControl } from "../shell/play";
@@ -117,6 +119,23 @@ function useALabel(): string | null {
     return () => { mo.disconnect(); document.removeEventListener("focusin", on); document.removeEventListener("focusout", out); };
   }, []);
   return label;
+}
+
+/** (dev.29) A test build is running: "Beta <n>" under the logo (Settings > Channel switches back). The Nexus build has
+ *  no self-update and calls no update command. */
+function DeckBetaMark() {
+  const qc = useQueryClient();
+  const direct = useDistribution() === "direct";
+  const up = useQuery({ queryKey: ["update_status"], queryFn: api.updateStatus, retry: false, enabled: direct });
+  useEffect(() => {
+    if (!direct) return;
+    let off: (() => void) | undefined, live = true;
+    api.onKilnEvent("kiln://update", (s: UpdateStatus) => qc.setQueryData(["update_status"], s)).then((f) => (live ? (off = f) : f()));
+    return () => { live = false; off?.(); };
+  }, [qc, direct]);
+  const s = up.data;
+  if (!direct || s?.buildChannel !== "beta") return null;
+  return <span className="deck-beta deck-word warn" data-testid="deck-beta-mark" title={`Test build ${s.beta ?? ""} of ${s.current}`}>Beta {s.beta ?? ""}</span>;
 }
 
 export default function DeckApp() {
@@ -256,7 +275,7 @@ function TopBar({ tab, tabs, goTab }: { tab: number; tabs: readonly Tab[]; goTab
   }, [tab, tabs]);
   return (
     <header className="deck-top">
-      <div className="deck-logo"><Lockup height={30} /></div>
+      <div className="deck-logo"><Lockup height={30} /><DeckBetaMark /></div>
       <nav ref={nav} className="deck-tabs" aria-label="Deck tabs" data-deck-skip="">
         <span className="deck-tab-dia" aria-hidden><i /></span>
         <button type="button" tabIndex={-1} className="deck-tab-glyph" aria-label="Previous tab" onClick={() => goTab(tab - 1)}><Glyph button="lb" style={style} size={1.6} /></button>

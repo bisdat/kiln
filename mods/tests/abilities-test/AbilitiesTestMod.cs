@@ -9,7 +9,7 @@ using Kiln;
 namespace AbilitiesTest;
 #pragma warning disable CS0618
 
-public sealed class AbilitiesTestMod : Mod
+public sealed partial class AbilitiesTestMod : Mod
 {
     private const uint ExplosionProgram = 0x7a120ee8;  // 80a2448f-…, Explosion_Player_Spell_Fireball_1's program
     private const string Explosion = "Explosion_Player_Spell_Fireball_1";
@@ -41,6 +41,8 @@ public sealed class AbilitiesTestMod : Mod
             Abilities.Natives.Register("Reload", 1, _ => 1);
             Info("reload-only: an ability, a hold filter, a wrap and a native registered");
         }
+        else if (File.Exists(Path.Combine(Context.DataDirectory, "natives-only")) && Client.IsDedicatedServer)
+            _ = RunNativesOnly();  // package 06c's rows alone (NativesV2.cs)
         else if (File.Exists(Path.Combine(Context.DataDirectory, "session-only")))
             Info("session-only (kiln/data/abilities-test/session-only): automatic suite skipped; /abt ... for the session");
         else if (Client.IsDedicatedServer) _ = Run();
@@ -274,6 +276,7 @@ public sealed class AbilitiesTestMod : Mod
             await TestAbilities(casterA, casterB);
             await TestSequence(casterA);
             await TestPlayerSequences(At(0, 40));
+            await RunNativesV2(At);
         }
         catch (Exception e)
         {
@@ -287,6 +290,36 @@ public sealed class AbilitiesTestMod : Mod
             Info($"status at the end: {Abilities.Status}");
             Info($"summary: {_pass} PASS, {_fail} FAIL");
         }
+    }
+
+    // kiln/data/abilities-test/natives-only: the world comes up, then only the rows of NativesV2.cs
+    private async Task RunNativesOnly()
+    {
+        try
+        {
+            var sw = Stopwatch.StartNew();
+            while (!Spawn.WorldRunning && sw.Elapsed.TotalSeconds < 240) await Context.Scheduler.NextTick();
+            await Steps(30);
+            while ((Abilities.Status?.ProgramsTotal ?? 0) < 571 && sw.Elapsed.TotalSeconds < 300) await Steps(10);
+            Info($"natives-only: ImpactRegistry ready after {sw.Elapsed.TotalSeconds:F1} s: {Abilities.Status}");
+            _handles.Add(Abilities.HoldPrograms(ExplosionProgram));  // as the main suite: other programs start unheld
+            var anchor = FindAnchor();
+            if (anchor is not { } a) { Fail("no anchor entity (flame altar / villager) in the world"); return; }
+            await RunNativesV2((dx, dz) => new WorldPosition(a.X + 40 + dx, a.Y + 0.5, a.Z + dz));
+        }
+        catch (Exception e)
+        {
+            Fail($"threw: {e}");
+        }
+        finally
+        {
+            foreach (var h in _handles) try { h.Dispose(); } catch { }
+            _handles.Clear();
+            foreach (var e in _spawned) try { if (Spawn.Exists(e)) Spawn.Destroy(e); } catch { }
+            Info($"status at the end: {Abilities.Status}");
+            Info($"summary: {_pass} PASS, {_fail} FAIL");
+        }
+        if (FindAnchor() is { } w) await TestWorldStopWhileInside(new WorldPosition(w.X + 40, w.Y + 0.5, w.Z + 120));
     }
 
     private WorldPosition? FindAnchor()

@@ -266,6 +266,42 @@ class LintTests(unittest.TestCase):
         rep = lint.lint(asm.assemble(txt, CAT), CAT)
         self.assertIn("E_ARG", [f.code for f in rep.errors])
 
+    def test_typed_native_mismatch_is_an_error(self):
+        # since 0.2.0-dev.29: a "sync" entry of a mod's natives.json is a typed declaration kiln.abilities enforces (it
+        # refuses the program, E_ARGTYPE), so the cook says it as an error; an argc-only entry keeps the warning
+        c = catalog.Catalog.default()
+        c.add_natives({"format": 1, "natives": [
+            {"name": "mymod.Typed", "sync": True, "args": [{"name": "out", "type": "sint32", "dir": "out", "size": 4},
+                                                         {"name": "in", "type": "sint32", "size": 4}]},
+            {"name": "mymod.Old", "argc": 2, "args": [{"name": "out", "types": ["sint32"], "dir": "out"},
+                                                      {"name": "in", "types": ["sint32"]}]},
+        ]}, "mod:test")
+        head = ".kimp 1\nprogram 0d1c2b3a-4f5e-4a6b-8c7d-9e0f1a2b3c54\nvar $o sint32\nvar $f float32\ncode:\n"
+        rep = lint.lint(asm.assemble(head + "        ecall mymod.Typed($o, $f)\n        pop\n        halt\n", c), c)
+        self.assertIn("E_ARGTYPE", [f.code for f in rep.errors])
+        rep = lint.lint(asm.assemble(head + "        ecall mymod.Old($o, $f)\n        pop\n        halt\n", c), c)
+        self.assertNotIn("E_ARGTYPE", [f.code for f in rep.errors])
+        self.assertIn("W_ARGTYPE", [f.code for f in rep.findings])
+        rep = lint.lint(asm.assemble(head + "        ecall mymod.Typed($o, $o)\n        pop\n        halt\n", c), c)
+        self.assertEqual([], [f.code for f in rep.findings if f.code.endswith("ARGTYPE")])
+
+    def test_typed_native_connection_and_size_contract(self):
+        c = catalog.Catalog.default()
+        c.add_natives({"format": 1, "natives": [
+            {"name": "mymod.Required", "sync": True, "args": [{"type": "sint32"}]},
+            {"name": "mymod.Optional", "sync": True, "args": [{"type": "sint32", "optional": True}]},
+            {"name": "mymod.Raw", "sync": True, "args": [{"type": "uint32", "raw": True}]},
+            {"name": "mymod.Sized", "sync": True, "args": [{"type": "sint32", "size": 8}]},
+        ]}, "mod:test")
+        head = ".kimp 1\nprogram 0d1c2b3a-4f5e-4a6b-8c7d-9e0f1a2b3c54\nvar $o sint32\ncode:\n"
+        for name, arg, refused in [("Required", "_", True), ("Required", "0", True),
+                                   ("Required", "7", True), ("Optional", "_", False),
+                                   ("Optional", "0", False), ("Raw", "0", False),
+                                   ("Sized", "$o", True)]:
+            with self.subTest(name=name, arg=arg):
+                rep = lint.lint(asm.assemble(head + f"        ecall mymod.{name}({arg})\n        pop\n        halt\n", c), c)
+                self.assertEqual(refused, "E_ARGTYPE" in [f.code for f in rep.errors])
+
     def test_stream_warning(self):
         rep = lint.lint(asm.assemble(SRC.replace("streams OnCollision", "streams none"), CAT), CAT)
         self.assertIn("W_STREAM", [f.code for f in rep.findings])

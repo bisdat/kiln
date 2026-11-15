@@ -226,6 +226,26 @@ fn healthy_install_finds_nothing() {
 }
 
 #[test]
+fn a_test_build_names_its_channel_and_beta_number() {
+    let f = Fx::healthy("channel");
+    let mut input = f.input();
+    input.tool = "kiln-launcher 0.2.0-dev.29 beta 3".into();
+    input.channel = Some(ReportChannel { build: "beta".into(), beta: Some(3), follows: "beta".into() });
+    let r = build(&input);
+    assert!(r.summary.contains("Channel:       Beta, test build 3 (follows Beta)"), "{}", r.summary);
+    assert!(r.short.contains("kiln-launcher 0.2.0-dev.29 beta 3;"), "{}", r.short);
+    assert!(r.short.contains("Channel: Beta, test build 3 (follows Beta)"), "{}", r.short);
+    let json: serde_json::Value = serde_json::from_str(file(&r, "report.json").unwrap()).unwrap();
+    assert_eq!(json["channel"], serde_json::json!({"build": "beta", "beta": 3, "follows": "beta"}));
+    // a release build that follows the release; no channel (kilnctl): no line
+    let words = ReportChannel { build: "dev".into(), beta: None, follows: "dev".into() }.words();
+    assert_eq!(words, "Release (follows Release)");
+    let r = build(&f.input());
+    assert!(!r.summary.contains("Channel:"), "{}", r.summary);
+    assert!(file(&r, "report.json").unwrap().contains("\"channel\": null"));
+}
+
+#[test]
 fn addon_log_is_optional_bounded_and_redacted() {
     let f = Fx::healthy("addon-log");
     let absent = build(&f.input());

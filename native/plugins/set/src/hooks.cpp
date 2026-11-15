@@ -491,7 +491,9 @@ void kset::bindHooks(const KilnApi* api, KilnOwner owner) {
     g_api = api;
     g_owner = owner;
     H = static_cast<const KilnHooksApi*>(api->service(KilnStr{KILN_HOOKS_SERVICE, sizeof(KILN_HOOKS_SERVICE) - 1}, 1));
-    if (H && H->header.size < sizeof(KilnHooksApi)) H = nullptr;
+    // The first block is what SET calls (read, scan, mid; raw_detour is checked where a rule needs it): a core whose
+    // table covers it is enough, never the whole table of the header SET was built with (kiln.hooks only appends).
+    if (H && H->header.size < offsetof(KilnHooksApi, mid) + sizeof(H->mid)) H = nullptr;
     LARGE_INTEGER f, n;
     QueryPerformanceFrequency(&f);
     QueryPerformanceCounter(&n);

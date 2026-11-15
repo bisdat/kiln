@@ -10,6 +10,7 @@ world. Since 0.2.0-dev.29.
 | `systems.wraps` | wraps work on this build; unavailable while native SET is loaded (reason `policy`) |
 | `systems.wraps.typed` | typed wraps (`Systems.Wrap<T>` with a view of Kiln.Game's `Ecs.Programs`); follows `systems.wraps` (each wrap checks its view's contract against the live descriptor) |
 | `systems.wraps.client` | wraps on the client world's programs (`WrapOptions.World = WorldKind.Client`), in a game client; `wrong-side` on a dedicated server. On since 0.2.0-dev.29 (held in dev.28), not yet confirmed in a real game: guided check `06a-wraps.client` |
+| `systems.define` | `Systems.Define`: a program of the mod's own over a `[Query]` struct, reserved at boot (kiln.world's own programs, `world.programs`) |
 | `systems.threads` | the server world's players mask can be read (what puts program slices on the game's workers) |
 | `world.systems` | the sigdb feature behind them: the program scheduler and the players mask |
 
@@ -48,7 +49,16 @@ wrap.Dispose();   // or let the mod's unload remove it
 - **Filters.** `When(info => ...)` runs on every slice (`SliceInfo`: count, step, thread, archetype key);
   `WhenArchetype(has, lacks)` decides once per archetype and world (component names as in kiln.world). One that cannot
   decide (the build gives no archetype key, a name the world has no component of) turns its stage off with the reason
-  (`Disabled`) instead of skipping every slice; an empty slice is skipped.
+  (`Disabled`) instead of skipping every slice; an empty slice is skipped. The archetype comes from the slice's first
+  entity in the game's entity map. That read is narrowed, not proven: kiln.world compares the map's size and the
+  entity's record before and after it, which catches most changes under the read but not an erase and an insert in
+  between, nor a record reused for the same id. On a server world the map does not change while programs run; on a
+  client world the network can create and destroy entities on another thread. When kiln.world sees a change, the filter
+  reads again (three reads in all), then leaves that one slice to the game: the stage stays on, `Stats.ArchetypeSkips`
+  counts it and kiln.log says so once per stage (since 0.2.0-dev.29).
+- **Creating and destroying entities.** Not from a handler: `Kiln.Spawn` refuses there (managed and native, since
+  0.2.0-dev.29 also on the world's own thread) with a message that names `Slice.Post`; post the call and it runs before
+  the next step.
 - **Lifetime.** `Wrap` is tick thread and returns at once; the stages apply in the target world's next step
   (`State` Pending → Active), again by program name in every later world of that kind, and go with `Dispose` (applied in
   the next step: no call starts after it) or when the mod unloads (the unload waits until no call of the mod's stages
@@ -69,6 +79,11 @@ task workers once one is (the client world always uses workers). So:
 - **Faults and exceptions** turn off that stage only, at once; the other stages of the wrap keep running. The wrap
   raises `Disabled` (`WrapDisabledEvent`, tick thread) with the reason, and a managed exception also counts toward the
   host's fault policy of the mod (five in 60 s disable the mod).
+
+A view stage whose directory lists/contract could not be read within the native lock's bound is suspended (`Pending`)
+with a logged reason. It retries at most once per world step, up to eight failed attempts per stage and world session.
+A successful retry resumes the same stage; after eight failed steps it is removed and raises `Disabled`. These failures
+do not count against the mod's fault policy. Cached successful lists and contracts are reused; failed reads are not cached.
 
 ## Per entity: reading and writing the program's components
 
@@ -135,7 +150,17 @@ made.Wrap!.AroundEach(
 - **The contract.** `Wrap<T>` asks kiln.world for the live descriptor's contract (`game_program_contract`) and refuses
   (`Ok = false`) when it is not the view's: on a game build whose program changed, the reason names each list that did
   (`+added -removed`), the flags or interval. A view binds an entity only on a slice of its own program whose live
-  contract is its own (asked once per world session), so a view never reads a slot of another layout.
+  contract is its own (asked once per world session).
+- **What each check covers.** Three checks stand between a view and the game's memory, each for one thing:
+  the **contract** (the FNV-1a-32 of the program's descriptor: its 21 lists in order, the masks, flags and interval) says
+  the view's positions name the program's own slots, which component sits in which slot; it says nothing about a
+  component's fields. The **layout check** (Kiln.Game's `Ecs.WhyNot<T>()`, recursive: every field, nested struct and enum
+  value of the component against the running game's type table, [typegen.md](../typegen.md)) runs before a typed
+  property hands out a reference, so a moved field or a changed nested layout refuses the access (it throws) instead of
+  reading the wrong bytes. The **reflected size** (kiln.world's slot size, `game_slice_slot`) bounds every access: a `T`
+  larger than the component is refused, and a component whose size kiln.world does not know refuses typed and untyped
+  access alike. `Attribute32` takes neither the layout check nor `T`: kiln.world checks that the slot's component is an
+  attribute and that its value block lies inside the component (`game_slice_attr_validate`) before any byte or formula.
 - **AroundEach** is a Before (capture, one `TSnap` per entity, kept for that slice on its thread) and an After (apply)
   at one priority: an onion around the higher priorities' stages. A capture that throws turns both off for good; that
   slice's snapshots are dropped and its update is the game's. Rows do not move inside a slice (structural changes wait
@@ -157,6 +182,68 @@ once), and at the next step's start Kiln raises `ComponentWrittenEvent` on the t
 step. `Result.Before` and `Result.After` span everything between those two stages, the game's own update included when
 a Before and an After both wrote. Nothing is copied or compared while nobody listens for the event. A store through a
 pointer kept past the call is neither marked nor raised. Server world only.
+
+## Programs of your own: `Systems.Define`
+
+A program the game does not have, over the entities a `[Query]` struct describes, scheduled by the game like its own:
+once per matching entity of every step, on the game's workers, after every game program it conflicts with.
+
+```csharp
+[Query(Template = ["FuelSetup"], Write = ["Fuel"], HostOnly = true)]   // the access lists, the game's names
+public ref struct Containers : IQuery<Containers>
+{
+    public EcsProgramContext Context;                                  // what the lists allow, for this entity
+    public static Containers Bind(EcsProgramContext context) => new() { Context = context };
+}
+
+public override void OnLoad()
+{
+    var r = Systems.Define("MyMod_Containers", new ProgramOptions { HostOnly = true }, (ref Containers c) =>
+    {
+        if (c.Context.TryGet<Ecs.Fuel>(out var fuel) && fuel.Values[0] < fuel.Values[1]) { /* ... */ }
+    });
+    if (!r.Ok) Log.Warn(r.Reason!);   // "not reserved at boot: rebuild the mod and restart the server"
+}
+```
+
+- **Reserved at boot.** The game registers its programs once, before the world starts, so a program of a mod must be
+  known before any managed code runs. The build does it: Kiln.Sdk's `KilnPrograms` step writes each `[Query]` struct of
+  the mod into the mod's `kiln.programs.json` (key: the attribute's `Key`, or the struct's full name with `.` and `+` as
+  `_`; the lists; the flags), and kiln.world reserves those programs when the server starts. `Define` binds the handler
+  to the reservation by that key. Entries the project's own `kiln.programs.json` declares stay; a hand-written entry
+  under a `[Query]`'s key with other lists, more than 32 programs (the boot limit per file), a bad name or a query without an entity list stops the
+  build (KILN036). A mod built without the Kiln SDK writes the file itself in the same form
+  (`schema/kiln-programs.schema.json`).
+- **Results.** `ProgramRegistration`: `Ok = false` with `"not reserved at boot: rebuild the mod and restart the server"`
+  when kiln.world reserved nothing under the key for the mod (the file is missing, or the mod was loaded after the server
+  started), or with kiln.world's refusal (another binding holds it). `ArgumentException`: the struct has no `[Query]`,
+  the key or the options are not the `[Query]`'s. Before publishing a callback, Define reads the immutable declaration
+  reserved at boot for `(mod id, key)` through `kiln.world.budget.program_reservation`. All 16 lists (including their
+  name order, required/optional split, and With/Without/AnyOf), flags and interval must match exactly. Query programs
+  currently reserve interval 1. A difference returns `Ok = false` naming the first field and saying
+  "rebuild is in the game only after a server restart: this reservation was made at boot from the earlier declaration".
+  Reloading an unchanged mod can bind again after disposal; reloading a changed declaration cannot change the snapshot.
+  A core without the reservation-query member throws `KilnUnavailableException("systems.define")`; it never binds unchecked.
+- **The handler** gets the query for one entity; the query reads and writes through `EcsProgramContext` (`TryGet`,
+  `TrySet`, `TryReadOther`, events, `QueueAdd`), as `EcsPrograms.Bind` does. Worker threads: no tick-thread API inside
+  it; a handler that throws is turned off with a line in the mod's log. `Dispose` (tick thread) unbinds it and waits
+  until no call runs; the mod's unload does too. The reservation stays, inert, until the server restarts, and a reload
+  of the mod binds it again.
+- `[ServerOnly]` (the server world, also on a host). Lab: `mods/tests/systems-test` binds one in `OnLoad`, checks it ran
+  for `fuel_setup`'s containers, that a query without a reservation is `Ok = false`, and its handler on N > 1 threads with
+  the lab parallel switch. Those rows do not establish changed-declaration refusal across reload, blocked-worker unload,
+  or hosted/client gameplay. These are requirements in the lab source, not a lab run made by this repair. Host tests
+  cover declaration equality; the changed-query reload row still needs a lab run.
+
+## Unit tests
+
+Under `dotnet test` with Kiln.TestKit the wraps run on the kit's fake of kiln.world v4: the test declares the programs
+(`kiln.Programs.Add`, or `Add<Ecs.Programs.FuelSetup>()` for a typed view) and each step runs them over the fake world's
+entities through the mod's stages, typed views and `AroundEach` included; marks and `ComponentWrittenEvent` follow.
+The fake models the 1 ms stage budget (excluding the declared original), ten consecutive overruns disabling the stage,
+and the real managed exception/mod fault policy. Not modelled: worker threads (one thread, the harness's tick thread), singleton slots, the attribute formulas,
+native faults, client worlds and `Systems.Define` (offline). The details:
+[modding/unit-tests.md](../modding/unit-tests.md#program-wraps).
 
 ## In the lab: the parallel switch
 

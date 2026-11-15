@@ -301,6 +301,16 @@ enum LibraryCmd {
     List { kind: Option<String> },
     /// Use the changed files of an entry edited in its Library folder: kind:id[@version] (the newest by default)
     TakeOver { entry: String },
+    /// Replace one native mod DLL in a profile; game follows at the next activation.
+    ReplaceDll {
+        entry: String,
+        file: PathBuf,
+        #[arg(long)]
+        profile: String,
+        /// Accept filename and detected-kind warnings.
+        #[arg(long)]
+        confirm: bool,
+    },
     /// Roll a mod in a profile back to an earlier version an update kept: kind:id[@version] (the newest kept by
     /// default); the version rolled away from is kept. The game folder follows at the profile's next activation
     Rollback {
@@ -486,6 +496,7 @@ fn dispatch(cmd: Cmd) -> anyhow::Result<i32> {
                 LibraryCmd::Import { paths } => profiles::import(paths),
                 LibraryCmd::List { kind } => profiles::list(kind),
                 LibraryCmd::TakeOver { entry } => profiles::take_over(&entry),
+                LibraryCmd::ReplaceDll { entry, file, profile, confirm } => profiles::replace_dll(&profile, &entry, &file, confirm),
                 LibraryCmd::Rollback { profile, entry } => profiles::rollback(&profile, &entry),
             };
         }

@@ -47,6 +47,10 @@
 #include <unordered_set>
 
 #include "gamedata.h"
+#include "services/kiln_capacity.h"
+#include "services/kiln_capacity_util.hpp"
+#include "services/kiln_caps.h"
+#include "services/kiln_hooks.h"
 
 // kiln.content's loca texts (newcontent.cpp): `json` = "text" or {"en": "...", "de": "..."}. Linked weakly: without
 // it (an older newcontent.cpp) the stub below answers and clones keep the base's texts.
@@ -61,7 +65,15 @@ namespace kc::gd {
 
 namespace {
 
-constexpr uint32_t kBuffRoom = 1024;  // buff clones per process (records in Kiln's copy of the collection)
+// Buff clones per process: records in Kiln's copy of the collection (chapter 17.2). Kiln's own quota, not the game's: the
+// game finds a buff by its u32 id through the collection's map, and a buff on an entity or in a save carries that id, never
+// a record index. The larger room is reserved up front at the first world; when the address space near the game's
+// collection cannot give it, the room is the fallback (0.2.0-dev.28's). Fixed for the process: a restart changes it.
+constexpr uint32_t kBuffRoomExpanded = 4096;
+constexpr uint32_t kBuffRoomFallback = 1024;
+// The most bytes one block of the copy (its records, or a header with its map) may take: sizes are computed in 64 bits
+// and checked against this before near memory is asked, so no count can wrap into a small allocation.
+constexpr uint64_t kBuffBlockMax = 64ull << 20;
 
 struct Def {
     uint32_t section = 0;
@@ -83,6 +95,10 @@ struct Def {
     bool rebuild = false;     // a placeholder taken over by its mod: build the record again from the base
     std::string mod;          // the owning mod ("pack <mod>" / "mod <mod>" owners; placeholders: the recorded mod)
     uint32_t slot = UINT32_MAX;  // buffs: the record index in Kiln's collection
+    uint32_t refusal = 0;        // buffs: why the last registration failed, as a KILN_DEFINE_* code (kiln_capacity.h); 0 = it did not
+    bool await_header = false;   // buffs: registered in a batch, waits for the batch's header (batch_finish)
+    std::array<uint8_t, 16> reg_id{};  // buffs: the registration id of the result-bearing definition it is (0: none)
+    std::set<uintptr_t> lookup_found;  // successful ordinary lookups, per live world (diagnostic snapshot)
     std::set<uintptr_t> probed;  // buffs: worlds where the game's own lookup was checked
     uint64_t version = 0;
     std::string listed;          // its entry in definitions(), as of listed_as (a fingerprint of what the entry shows)
@@ -91,15 +107,17 @@ struct Def {
 
 std::recursive_mutex g_mu;
 std::vector<Def> g_defs;
+void publish_budget();  // the buff budget and the receipts, after a change (g_mu held)
 // Bumped whenever a template clone goes into a world's table: kiln.content then resolves the item references that named
 // it before it was there (an item's equipment.placedEntity), at once instead of at its next periodic retry.
 std::atomic<uint64_t> g_template_gen{0};
 
-// Registering many at once (a world's load): the writes, the event order and the buff collection's header are done once per turn of
-// the store lock instead of once per clone (under store_mutex).
+// Registering many at once (a world's load, one section of a data pack, the content sync's definitions): the writes and the
+// event order are done once per turn of the store lock instead of once per clone, and the buff collection's header once per
+// batch (under store_mutex). A header per clone would leave one retired header per clone in near memory, none of which can
+// be freed while a reader may hold it (chapter 17.2 section 4: about 220 MB for 4,096 clones one at a time).
 bool g_batch = false;
 bool g_batch_changes = false;         // after_changes() is owed
-std::vector<size_t> g_batch_buffs;    // buff clones (g_defs indices) that wait for the header
 std::unordered_set<uint64_t> g_defs_layered;  // section << 32 | id: entries with layers of g_defs_owner in this world
 
 void changed() {
@@ -128,7 +146,8 @@ bool valid_name(const std::string& n) {
 const char* wname(uintptr_t world) { return world == g_api->world(KILN_WORLD_CLIENT) ? "client" : "server"; }
 
 std::string mod_of_label(const std::string& label) {
-    for (const char* p : {"mod ", "pack ", "boot:"})  // "boot:<mod>": the process owner of a boot generation's definitions
+    // "boot:<mod>": the process owner of a boot generation's definitions; "pending <mod>": a buff a mod stored for this start
+    for (const char* p : {"mod ", "pack ", "boot:", "pending "})
         if (label.rfind(p, 0) == 0) return label.substr(std::strlen(p));
     return {};
 }
@@ -1003,25 +1022,83 @@ void register_perk(Def& d, uintptr_t world) {
 // ---- buffs: Kiln's copy of the buff collection ------------------------------------------------------------------
 struct BuffWorld {
     uintptr_t world = 0, registry = 0, slot = 0;
+    uint32_t probes = 0, misses = 0;  // clones the game's own lookup was asked for in this world, and how many it did not find
 };
 struct BuffMirror {
     bool tried = false, ok = false;
+    bool expanded = false;      // the room is kBuffRoomExpanded (the larger reservation succeeded)
     std::string why;
     const TType* ct = nullptr;  // keen::BuffTypeCollectionResource
     uint32_t f_entries = 0, f_keys = 0, f_values = 0, f_buffs = 0;  // header field offsets
     uintptr_t coll = 0;         // the game's collection (resource data)
     uintptr_t orig = 0;         // its buffs array
     uint32_t n = 0, stride = 0, cap = 0, used = 0, buckets0 = 0;
+    uint32_t room = 0;          // clone records reserved (cap - n): kBuffRoomExpanded or kBuffRoomFallback
     uintptr_t array = 0;        // Kiln's records: n game records, then clones
     uintptr_t header = 0;       // the collection the registries read (Kiln's; 0 = none built yet)
     uint32_t header_count = 0;  // records it lists
     std::set<uintptr_t> headers;     // every header Kiln built (a registry may still point at an older one)
     std::vector<uint32_t> relocs;    // positions of the i32 self-relative offsets inside a record
     std::vector<uint32_t> ids;       // record index -> buffTypeId
+    std::unordered_map<uint32_t, uint32_t> by_id;  // buffTypeId -> record index, the game's and the clones' (ids are u32)
     std::vector<BuffWorld> worlds;
     uint64_t syncs = 0, words = 0;
+    uint64_t array_bytes = 0;        // the records' block
+    uint64_t header_bytes = 0;       // every header built, together (none is freed: a reader may still hold one)
+    uint64_t attaches = 0;           // registry pointers swapped to a new header
     bool reach_warned = false;
 } BM;
+
+// The records of Kiln's copy: n game records, then `room` clones, `stride` bytes each. False (and why) when the count
+// does not fit 32 bits (every index of the game's map is a u32) or the bytes are more than one block may take. The
+// product is taken only once the count is known to fit, so it cannot wrap 64 bits.
+bool buff_mirror_size(uint32_t n, uint32_t room, uint32_t stride, uint32_t* cap, size_t* bytes, std::string* why) {
+    if (!n || !stride || stride % 8) {
+        *why = "the buff collection's layout is not usable (" + std::to_string(n) + " records of " + std::to_string(stride) + " bytes)";
+        return false;
+    }
+    const uint64_t c = uint64_t{n} + room;
+    if (c > UINT32_MAX) {
+        *why = "the buff record count " + std::to_string(c) + " does not fit 32 bits";
+        return false;
+    }
+    const uint64_t b = c * stride;
+    if (b > kBuffBlockMax) {
+        *why = "the buff records would take " + std::to_string(b) + " bytes, over " + std::to_string(kBuffBlockMax) + " in one block";
+        return false;
+    }
+    *cap = static_cast<uint32_t>(c);
+    *bytes = static_cast<size_t>(b);
+    return true;
+}
+
+// A header listing `records` records: the collection struct (`head_size` bytes, its BlobArrays ending by `fields_end`),
+// the map's buckets ({u32 start, u32 count}: `buckets0`, doubled while the load is over 3/4, at most 2^20), its keys and its
+// values. False (and why) for a layout that does not hold together or a total over one block.
+struct BuffHeaderSize {
+    uint32_t buckets = 0;
+    uint64_t head = 0, entries = 0, keys = 0, total = 0;
+};
+bool buff_header_size(uint32_t head_size, uint32_t fields_end, uint32_t records, uint32_t buckets0, BuffHeaderSize* out,
+                      std::string* why) {
+    if (!buckets0 || (buckets0 & (buckets0 - 1)) || buckets0 > (1u << 20) || !records || fields_end > head_size) {
+        *why = "the buff collection's map layout is not usable (" + std::to_string(buckets0) + " buckets, " + std::to_string(records) +
+               " records, fields to +" + std::to_string(fields_end) + " of " + std::to_string(head_size) + ")";
+        return false;
+    }
+    uint64_t b = buckets0;
+    while (records > b / 4 * 3 && b < (1u << 20)) b <<= 1;
+    out->buckets = static_cast<uint32_t>(b);
+    out->head = (uint64_t{head_size} + 15) & ~uint64_t{15};
+    out->entries = b * 8;
+    out->keys = uint64_t{records} * 4;
+    out->total = out->head + out->entries + 2 * out->keys;  // each part is under 2^35: no wrap
+    if (out->total > kBuffBlockMax) {
+        *why = "a buff collection header for " + std::to_string(records) + " records would take " + std::to_string(out->total) + " bytes";
+        return false;
+    }
+    return true;
+}
 
 std::mutex g_bg_mu;
 std::unordered_map<uint32_t, std::array<uint8_t, 16>> g_buff_guids;  // buffTypeId -> GUID (references, clones)
@@ -1073,6 +1150,38 @@ uint32_t put_words(uintptr_t dst, const uint8_t* rec, size_t n) {
     return w;
 }
 
+// The row of the buff room (kiln.caps): pending until the first world reserves it, then available only when the
+// 4,096-clone reservation succeeded (a requested room is not an installed one). `off`: the world has no buff registry Kiln
+// can read (its reflection), so neither the room nor a registration is there. When no room at all could be reserved,
+// gamedata.buff_registration goes unavailable too (every definition would be refused); gamedata.buff_budget stays: it
+// answers NotReady.
+void report_buff_room(const char* off = nullptr) {
+    if (!g_api || !g_api->service) return;
+    const auto* caps = static_cast<const KilnCapsApi*>(g_api->service(KilnStr{KILN_CAPS_SERVICE, sizeof(KILN_CAPS_SERVICE) - 1}, 1));
+    if (!caps || !caps->report) return;
+    static constexpr char kRow[] = "gamedata.expanded_buff_room", kReg[] = "gamedata.buff_registration";
+    uint32_t state = KILN_CAP_UNAVAILABLE, reason = KILN_CAP_REASON_FAULTED;
+    std::string text;
+    if (off) {
+        text = off;
+        caps->report(g_owner, KilnStr{kReg, sizeof kReg - 1}, state, reason, KilnStr{text.data(), text.size()});
+    } else if (!BM.tried) {
+        state = KILN_CAP_PENDING, reason = KILN_CAP_REASON_SESSION;
+        text = "Kiln reserves room for " + std::to_string(kBuffRoomExpanded) + " buff clones when the first world loads";
+    } else if (BM.ok && BM.expanded) {
+        state = KILN_CAP_AVAILABLE, reason = KILN_CAP_REASON_NONE;
+        text = "room for " + std::to_string(BM.room) + " buff clones";
+    } else if (BM.ok) {
+        text = "near memory had no room for " + std::to_string(kBuffRoomExpanded) + " buff clones: the room is " + std::to_string(BM.room);
+    } else {
+        text = BM.why;
+        caps->report(g_owner, KilnStr{kReg, sizeof kReg - 1}, state, reason, KilnStr{text.data(), text.size()});
+    }
+    if (BM.ok)
+        caps->report(g_owner, KilnStr{kReg, sizeof kReg - 1}, KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, KilnStr{text.data(), 0});
+    caps->report(g_owner, KilnStr{kRow, sizeof kRow - 1}, state, reason, KilnStr{text.data(), text.size()});
+}
+
 bool mirror_init(std::string* err) {
     if (BM.ok) return true;
     if (BM.tried) {
@@ -1084,6 +1193,8 @@ bool mirror_init(std::string* err) {
         BM.why = "buff clones are not available: " + why;
         *err = BM.why;
         LOGW("gamedata: %s", BM.why.c_str());
+        report_buff_room();
+        publish_budget();
         return false;
     };
     const GRegistry& B = greg(KILN_GD_BUFFS);
@@ -1107,37 +1218,91 @@ bool mirror_init(std::string* err) {
         return fail("the buff collection is not readable");
     BM.stride = B.type->size;
     if (BM.stride % 8) return fail("a buff record is not 8-byte sized");
+    if (fid->offset + 4 > BM.stride) return fail("buffTypeId is outside the buff record");
+    {
+        std::string why;
+        BuffHeaderSize hs;
+        const uint32_t fields_end = std::max({BM.f_entries, BM.f_keys, BM.f_values, BM.f_buffs}) + 8;
+        if (!buff_header_size(BM.ct->size, fields_end, BM.n, BM.buckets0, &hs, &why)) return fail(why);
+    }
     relocs_of(B.type, 0, 0, &BM.relocs);
-    BM.cap = BM.n + kBuffRoom;
-    BM.array = reinterpret_cast<uintptr_t>(near_alloc(BM.coll, static_cast<size_t>(BM.cap) * BM.stride));
+    // The larger room first; its records are reserved now, in one block that never moves (the game may hold a pointer
+    // to any record). When near memory cannot give that block, the fallback's.
+    size_t bytes = 0;
+    for (const uint32_t room : {kBuffRoomExpanded, kBuffRoomFallback}) {
+        std::string why;
+        uint32_t cap = 0;
+        if (!buff_mirror_size(BM.n, room, BM.stride, &cap, &bytes, &why)) return fail(why);
+        BM.array = reinterpret_cast<uintptr_t>(near_alloc(BM.coll, bytes));
+        if (BM.array) {
+            BM.cap = cap, BM.room = room, BM.expanded = room == kBuffRoomExpanded;
+            break;
+        }
+        if (room == kBuffRoomExpanded)
+            LOGW("gamedata: buff clones: no memory near the buff collection for %u clones (%zu bytes); trying the %u-clone room",
+                 room, bytes, kBuffRoomFallback);
+    }
     if (!BM.array) return fail("no memory near the buff collection");
+    BM.array_bytes = bytes;
     std::vector<uint8_t> rec(BM.stride);
     BM.ids.resize(BM.n);
+    BM.by_id.clear();
     for (uint32_t i = 0; i < BM.n; ++i) {
         const uintptr_t src = BM.orig + static_cast<uintptr_t>(i) * BM.stride, dst = BM.array + static_cast<uintptr_t>(i) * BM.stride;
         if (!rd(src, rec.data(), BM.stride) || !rebase(rec.data(), src, dst)) return fail("a buff record is out of reach");
         std::memcpy(reinterpret_cast<void*>(dst), rec.data(), BM.stride);
         std::memcpy(&BM.ids[i], rec.data() + fid->offset, 4);
+        BM.by_id.emplace(BM.ids[i], i);
     }
     BM.ok = true;
-    LOGI("gamedata: buff clones: Kiln's copy of the buff collection at %p (%u game buffs, room for %u clones; %zu self-relative "
-         "offsets per %u-byte record; the game's collection %p, %u map buckets)",
-         reinterpret_cast<void*>(BM.array), BM.n, kBuffRoom, BM.relocs.size(), BM.stride, reinterpret_cast<void*>(BM.coll), BM.buckets0);
+    LOGI("gamedata: buff clones: Kiln's copy of the buff collection at %p (%u game buffs, room for %u clones%s, %zu bytes; %zu "
+         "self-relative offsets per %u-byte record; the game's collection %p, %u map buckets)",
+         reinterpret_cast<void*>(BM.array), BM.n, BM.room, BM.expanded ? "" : " (the fallback room)", bytes, BM.relocs.size(), BM.stride,
+         reinterpret_cast<void*>(BM.coll), BM.buckets0);
+    report_buff_room();
+    publish_budget();
     return true;
+}
+
+// Kiln's copy of the game's records follows them (the layers kiln.content writes there). store_mutex held.
+void sync_game_records() {
+    std::vector<uint8_t> rec(BM.stride);
+    uint32_t words = 0;
+    for (uint32_t i = 0; i < BM.n; ++i) {
+        const uintptr_t src = BM.orig + static_cast<uintptr_t>(i) * BM.stride, dst = BM.array + static_cast<uintptr_t>(i) * BM.stride;
+        if (!rd(src, rec.data(), BM.stride)) continue;
+        if (!rebase(rec.data(), src, dst)) {
+            if (!BM.reach_warned) LOGW("gamedata: buff record %u: a changed list is out of reach of Kiln's copy; it keeps the old one", i);
+            BM.reach_warned = true;
+            continue;
+        }
+        words += put_words(dst, rec.data(), BM.stride);
+    }
+    ++BM.syncs;
+    BM.words += words;
+    if (words) LOGD("gamedata: buff copy: %u word(s) followed the game's records", words);
 }
 
 // A new collection header listing n + used records, with its own map (id & (buckets - 1) -> {start, count}, keys,
 // values = record indices). Kiln's memory near the game's collection; never freed (a reader may hold an old one).
 bool build_header(std::string* err) {
-    const uint32_t T = BM.n + BM.used;
-    uint32_t B = BM.buckets0;
-    while (T > B / 4 * 3 && B < (1u << 20)) B <<= 1;
-    const size_t hsz = (BM.ct->size + 15) & ~size_t(15), esz = static_cast<size_t>(B) * 8, ksz = static_cast<size_t>(T) * 4;
-    auto* blk = static_cast<uint8_t*>(near_alloc(BM.coll, hsz + esz + 2 * ksz));
-    if (!blk) {
-        *err = "no memory near the buff collection";
+    if (BM.used > BM.room || BM.n + BM.used > BM.cap || BM.ids.size() != size_t{BM.n} + BM.used) {
+        *err = "Kiln's buff collection is inconsistent (" + std::to_string(BM.used) + " clones, room " + std::to_string(BM.room) + ")";
         return false;
     }
+    const uint32_t T = BM.n + BM.used;
+    BuffHeaderSize hs;
+    const uint32_t fields_end = std::max({BM.f_entries, BM.f_keys, BM.f_values, BM.f_buffs}) + 8;
+    if (!buff_header_size(BM.ct->size, fields_end, T, BM.buckets0, &hs, err)) return false;
+    const uint32_t B = hs.buckets;
+    const size_t hsz = static_cast<size_t>(hs.head), esz = static_cast<size_t>(hs.entries), ksz = static_cast<size_t>(hs.keys);
+    auto* blk = static_cast<uint8_t*>(near_alloc(BM.coll, static_cast<size_t>(hs.total)));
+    if (!blk) {
+        *err = "no memory near the buff collection for its header (" + std::to_string(hs.total) + " bytes)";
+        return false;
+    }
+    BM.header_bytes += hs.total;  // never freed, also when the checks below refuse it
+    if (!BM.header) sync_game_records();  // the first header: the copy follows the game's records from now on (buffs_sync)
     std::memset(blk, 0, hsz + esz + 2 * ksz);
     uint8_t* entries = blk + hsz;
     auto* keys = reinterpret_cast<uint32_t*>(blk + hsz + esz);
@@ -1171,6 +1336,18 @@ bool build_header(std::string* err) {
         *err = "Kiln's buff collection is out of reach";
         return false;
     }
+    // What the game's lookup relies on, checked before any registry reads it: every bucket's range inside the keys, and
+    // every value a record index below the count (getBuffType's `ja` lets index == count through: never emit one).
+    for (uint32_t b = 0; b < B; ++b)
+        if (uint64_t{start[b]} + count[b] > T) {
+            *err = "Kiln's buff collection map is inconsistent (bucket " + std::to_string(b) + ")";
+            return false;
+        }
+    for (uint32_t k = 0; k < T; ++k)
+        if (values[k] >= T) {
+            *err = "Kiln's buff collection map is inconsistent (value " + std::to_string(values[k]) + " of " + std::to_string(T) + ")";
+            return false;
+        }
     BM.header = reinterpret_cast<uintptr_t>(blk);
     BM.header_count = T;
     BM.headers.insert(BM.header);
@@ -1215,75 +1392,112 @@ bool buff_world(uintptr_t world, std::string* err) {
             *err = "writing the BuffRegistry faulted";
             return false;
         }
+        ++BM.attaches;
         LOGI("gamedata: the %s world's BuffRegistry (%p +0x%llx) reads Kiln's buff collection: %u buffs (%u clones)", wname(world),
              reinterpret_cast<void*>(w->registry), static_cast<unsigned long long>(w->slot - w->registry), BM.header_count, BM.used);
     }
     return true;
 }
 
-// The game's own lookup of a clone in a world (once per world): proof that getBuffType finds Kiln's record.
-void probe_buff(Def& d, uintptr_t world) {
+// The game's own lookup of a clone in a world (once per clone and world): proof that getBuffType finds Kiln's record.
+// The line is written for the first clone of a world, when `say` (the last of a batch), and for every clone it does
+// not find; at thousands of clones a line each would bury the log, so the others count in the world's probes.
+void probe_buff(Def& d, uintptr_t world, bool say = false) {
     if (!g_get_buff || d.probed.count(world)) return;
-    for (const BuffWorld& w : BM.worlds)
+    for (BuffWorld& w : BM.worlds)
         if (w.world == world) {
             d.probed.insert(world);
             const uintptr_t got = call_get_buff(fnv1a(d.guid, 16), w.registry);
+            const bool found = got == d.data;
+            if (found) d.lookup_found.insert(world); else d.lookup_found.erase(world);
+            ++w.probes;
+            if (!found) ++w.misses;
+            if (found && !say && w.probes > 1) return;
             const uintptr_t first = call_get_buff(BM.ids.empty() ? 0 : BM.ids[0], w.registry);
-            LOGI("gamedata: the game's getBuffType(0x%08x) in the %s world = %p (%s); a game buff 0x%08x = %p (%s)", fnv1a(d.guid, 16),
-                 wname(world), reinterpret_cast<void*>(got), got == d.data ? "the clone's record" : "NOT the clone's record",
-                 BM.ids.empty() ? 0 : BM.ids[0], reinterpret_cast<void*>(first), first == BM.array ? "Kiln's copy" : "the game's own");
+            if (found)
+                LOGI("gamedata: the game's getBuffType(0x%08x) in the %s world = %p (the clone's record, %u of %u); a game buff 0x%08x = %p (%s)",
+                     fnv1a(d.guid, 16), wname(world), reinterpret_cast<void*>(got), d.slot - BM.n + 1, BM.used, BM.ids.empty() ? 0 : BM.ids[0],
+                     reinterpret_cast<void*>(first), first == BM.array ? "Kiln's copy" : "the game's own");
+            else
+                LOGW("gamedata: the game's getBuffType(0x%08x) in the %s world = %p: NOT the clone's record (%s, record %u at %p); a game buff "
+                     "0x%08x = %p (%s)",
+                     fnv1a(d.guid, 16), wname(world), reinterpret_cast<void*>(got), d.name.c_str(), d.slot, reinterpret_cast<void*>(d.data),
+                     BM.ids.empty() ? 0 : BM.ids[0], reinterpret_cast<void*>(first), first == BM.array ? "Kiln's copy" : "the game's own");
         }
 }
 
-void buff_registered(Def& d, uintptr_t world);
+void buff_registered(Def& d, uintptr_t world, bool say = false);
+
+void buff_refuse(Def& d, uint32_t code, std::string why) {
+    d.state = "error", d.problem = std::move(why), d.refusal = code;
+}
+
+// A record of Kiln's copy for d: its own from an earlier registration, or the next free one. False, with d refused and
+// why, when it cannot have one: the id is 0 (the game's lookup answers nothing for it), a game buff's or another clone's
+// (the map would hold one id twice and the game would find only the first), or the room is full.
+bool take_buff_slot(Def& d, uint32_t id) {
+    char hex[16];
+    std::snprintf(hex, sizeof hex, "0x%08x", id);
+    if (!id) {
+        buff_refuse(d, KILN_DEFINE_ID_COLLISION, "the GUID's buff id is 0, which the game never finds: use another GUID");
+        return false;
+    }
+    if (auto it = BM.by_id.find(id); it != BM.by_id.end() && it->second != d.slot) {
+        if (it->second < BM.n) {
+            buff_refuse(d, KILN_DEFINE_ID_COLLISION, std::string("the GUID is a game buff's (id ") + hex + ")");
+            return false;
+        }
+        std::string other = "another clone";
+        for (const Def& x : g_defs)
+            if (&x != &d && x.section == KILN_GD_BUFFS && x.slot == it->second) other = x.name + " (" + guid_text(x.guid) + ")";
+        buff_refuse(d, KILN_DEFINE_ID_COLLISION, std::string("the buff id ") + hex + " of this GUID is " + other + "'s: use another GUID");
+        return false;
+    }
+    if (d.slot != UINT32_MAX) return true;
+    if (BM.used >= BM.room) {
+        buff_refuse(d, KILN_DEFINE_CAPACITY_EXCEEDED, "Kiln's buff collection is full (" + std::to_string(BM.room) + " clones)");
+        return false;
+    }
+    d.slot = BM.n + BM.used++;
+    BM.ids.push_back(id);
+    BM.by_id.emplace(id, d.slot);
+    return true;
+}
 
 void register_buff(Def& d, uintptr_t world) {
     GRegistry& B = greg(KILN_GD_BUFFS);
     std::string err;
     if (!B.type || !B.available) {
-        d.state = "error", d.problem = "the buff registry is not available";
+        buff_refuse(d, KILN_DEFINE_NOT_READY, "the buff registry is not available");
         return;
     }
     if (!mirror_init(&err)) {
-        d.state = "error", d.problem = err;
+        buff_refuse(d, KILN_DEFINE_NOT_READY, err);
         return;
     }
     const uint32_t id = fnv1a(d.guid, 16);
-    for (uint32_t i = 0; i < BM.n; ++i)
-        if (BM.ids[i] == id) {
-            char b[16];
-            std::snprintf(b, sizeof b, "0x%08x", id);
-            d.state = "error", d.problem = std::string("the GUID is a game buff's (id ") + b + ")";
-            return;
-        }
     if (const GEntry* n = B.lookup(d.name); n && n->id != id) {
-        d.state = "error", d.problem = "the name " + d.name + " is taken";
+        buff_refuse(d, KILN_DEFINE_NAME_TAKEN, "the name " + d.name + " is taken");
         return;
     }
     const GEntry* base = B.lookup(d.base);
     if (!base || base->id == id) {
-        d.state = "error", d.problem = "unknown base buff " + d.base;
+        buff_refuse(d, KILN_DEFINE_UNKNOWN_BASE, "unknown base buff " + d.base);
         return;
     }
-    if (d.slot == UINT32_MAX) {
-        if (BM.used >= kBuffRoom) {
-            d.state = "error", d.problem = "Kiln's buff collection is full (" + std::to_string(kBuffRoom) + " clones)";
-            return;
-        }
-        d.slot = BM.n + BM.used++;
-        BM.ids.push_back(id);
-    }
+    if (!take_buff_slot(d, id)) return;
     const uintptr_t dst = BM.array + static_cast<uintptr_t>(d.slot) * BM.stride;
     if (!d.data || d.rebuild) {
         std::vector<uint8_t> rec(BM.stride);
         const TField* fid = B.type->field("buffTypeId");
+        // a refusal from here on keeps the record it took: retained, and counted as reserved, never as free room
         if (!rd(base->addr, rec.data(), BM.stride)) {
-            d.state = "error", d.problem = "the base buff's record is not readable";
+            buff_refuse(d, KILN_DEFINE_REGISTRATION_FAILED_RETAINED, "the base buff's record is not readable");
             return;
         }
         store_originals(base->addr, BM.stride, rec.data());  // what rules changed on the base is not the clone's (see apply_fields)
         if (!rebase(rec.data(), base->addr, dst) || !fid) {
-            d.state = "error", d.problem = "the base buff's record is not readable";
+            buff_refuse(d, KILN_DEFINE_REGISTRATION_FAILED_RETAINED, "the base buff's record is out of reach of Kiln's copy");
             return;
         }
         std::memcpy(rec.data() + fid->offset, &id, 4);
@@ -1294,9 +1508,16 @@ void register_buff(Def& d, uintptr_t world) {
     }
     // in a batch, the collection's header is built and the world pointed at it once, at the end of the turn (buffs_attach)
     if (!g_batch) {
-        if (BM.header_count != BM.n + BM.used && !build_header(&err)) {
-            d.state = "error", d.problem = err;
-            return;
+        if (BM.header_count != BM.n + BM.used) {
+            if (!build_header(&err)) {
+                buff_refuse(d, KILN_DEFINE_REGISTRATION_FAILED_RETAINED, err);
+                return;
+            }
+            // one clone defined from code while a world runs: a header each (a data pack's list makes one for all of it)
+            if (BM.headers.size() <= 8 || BM.headers.size() % 256 == 0)
+                LOGI("gamedata: buff header %zu for %s (%u records): Kiln keeps %llu bytes of headers; many clones at once belong in a "
+                     "data pack or before the world loads (one header for all)",
+                     BM.headers.size(), d.name.c_str(), BM.header_count, static_cast<unsigned long long>(BM.header_bytes));
         }
         if (!buff_world(world, &err)) {
             d.state = "waiting", d.problem = err;  // clones_tick tries again
@@ -1320,42 +1541,196 @@ void register_buff(Def& d, uintptr_t world) {
     changed();
     publish_texts(d);
     if (g_batch) {
-        g_batch_buffs.push_back(static_cast<size_t>(&d - g_defs.data()));
+        d.await_header = true;
         return;
     }
     buff_registered(d, world);
 }
 
-void buff_registered(Def& d, uintptr_t world) {
-    if (d.state != "registered")
-        LOGI("gamedata: buff %s (%s, id 0x%08x, clone of %s%s): record %u of Kiln's buff collection (%p)", d.name.c_str(),
-             guid_text(d.guid).c_str(), fnv1a(d.guid, 16), d.base.c_str(), d.placeholder ? ", placeholder" : "", d.slot,
-             reinterpret_cast<void*>(d.data));
+void buff_registered(Def& d, uintptr_t world, bool say) {
+    if (d.state != "registered") {
+        // a line for each of the first clones and for the last of a batch; the rest at debug level (thousands would bury the log)
+        static uint32_t lines = 0;
+        if (say || lines < 32) {
+            ++lines;
+            LOGI("gamedata: buff %s (%s, id 0x%08x, clone of %s%s): record %u of Kiln's buff collection (%p)", d.name.c_str(),
+                 guid_text(d.guid).c_str(), fnv1a(d.guid, 16), d.base.c_str(), d.placeholder ? ", placeholder" : "", d.slot,
+                 reinterpret_cast<void*>(d.data));
+        } else {
+            LOGD("gamedata: buff %s (id 0x%08x): record %u", d.name.c_str(), fnv1a(d.guid, 16), d.slot);
+        }
+    }
     d.state = "registered";
     d.problem.clear();
-    probe_buff(d, world);
+    d.refusal = 0;
+    probe_buff(d, world, say);
 }
 
-// The end of a batch's turn: the writes and event order, then the buff collection's header with every buff clone of the turn.
-void batch_finish(uintptr_t world) {
+// The end of a batch's turn: the writes and event order; with `buffs` (the batch's last turn), the buff collection's header
+// with every buff clone the batch registered, built once, and the world's registry pointed at it once.
+void batch_finish_turn(uintptr_t world, bool buffs);
+void batch_finish(uintptr_t world, bool buffs = true) {
+    batch_finish_turn(world, buffs);
+    publish_budget();
+}
+void batch_finish_turn(uintptr_t world, bool buffs) {
     if (g_batch_changes) {
         g_batch_changes = false;
         after_changes();
     }
-    if (g_batch_buffs.empty()) return;
+    if (!buffs) return;
+    Def* last = nullptr;
+    uint32_t waiting = 0;
+    for (Def& d : g_defs)
+        if (d.await_header) last = &d, ++waiting;
+    if (!waiting) return;
     std::string err;
+    const uint64_t headers = BM.headers.size();
     const bool built = BM.header_count == BM.n + BM.used || build_header(&err);
     const bool attached = built && buff_world(world, &err);
-    for (size_t i : g_batch_buffs) {
-        Def& d = g_defs[i];
-        if (!built) d.state = "error", d.problem = err;
+    for (Def& d : g_defs) {
+        if (!d.await_header) continue;
+        d.await_header = false;
+        if (!built) buff_refuse(d, KILN_DEFINE_REGISTRATION_FAILED_RETAINED, err);
         else if (!attached) d.state = "waiting", d.problem = err;  // clones_tick tries again
         else {
             d.worlds.insert(world);
-            buff_registered(d, world);
+            buff_registered(d, world, &d == last);  // the last one's line and self-check are written
         }
     }
-    g_batch_buffs.clear();
+    if (built && !attached)
+        LOGD("gamedata: buff batch: %u clone(s) wait for the %s world's BuffRegistry: %s", waiting, wname(world), err.c_str());
+    else if (built)
+        LOGI("gamedata: buff batch: %u clone(s) in the %s world, %s header (%u records); Kiln keeps %zu header(s), %llu bytes, and "
+             "%llu bytes of records (%u of %u clone records used)",
+             waiting, wname(world), BM.headers.size() > headers ? "one new" : "the current", BM.header_count, BM.headers.size(),
+             static_cast<unsigned long long>(BM.header_bytes), static_cast<unsigned long long>(BM.array_bytes), BM.used, BM.room);
+    else
+        LOGW("gamedata: buff batch: %u clone(s) in the %s world are not registered: %s", waiting, wname(world), err.c_str());
+}
+
+// ---- the buff budget and the receipts of result-bearing definitions (chapter 17 I1, I5; since 0.2.0-dev.29) ----
+// A receipt is what one define_buff_result call was about (a mod's definition of a GUID with one content); what it says now
+// is worked out from the definition each time something changes (publish_budget), so readers on any thread only copy it.
+struct Receipt {
+    std::array<uint8_t, 16> guid{};
+    std::string mod;
+    KilnOwner owner = 0;
+    uint32_t timing = KILN_DEFINE_REQUIRE_REGISTERED;
+    bool accepted = false;      // its call stored the definition for the next start
+    bool pending_file = false;  // replayed from a pending file at this start (removed only once registered)
+    std::filesystem::path file; // that file
+    uint32_t code = 0;          // the refusal of its call when it took nothing (kept when no definition carries it)
+    std::string reason;
+    // now:
+    uint32_t disposition = KILN_DEFINITION_REFUSED, slots = 0, now_code = 0;
+    std::string now_reason;
+    uint64_t revision = 0;
+};
+constexpr size_t kReceiptsMax = 16384;  // refused receipts beyond this are forgotten first (a mod that retries forever)
+std::mutex g_rc_mu;                   // the published budget and the receipts: read on any thread, written under g_mu
+KilnCapacityInfo g_budget{};          // what buff_budget answers
+kiln::capacity::Revision g_rev;
+std::map<std::array<uint8_t, 16>, Receipt> g_receipts;
+std::set<KilnOwner> g_gone;           // owners kiln.content found revoked: their clones' records are reserved
+// Owners kiln.hooks says are retiring (a mod unloading or reloading), queued by its callback, which must not wait for
+// g_mu; taken into g_gone by the next publish_budget or clones_tick. A mod's clones have no layer of the mod's own owner
+// (their layers are the definitions owner's), so kiln.content's own probe of owners would never see it go.
+std::mutex g_retired_mu;
+std::vector<KilnOwner> g_retired;
+void KILN_CALL on_owner_retiring(KilnOwner retiring, void*) {
+    std::lock_guard lock(g_retired_mu);
+    if (g_retired.size() < 65536) g_retired.push_back(retiring);
+}
+bool take_retired() {  // g_mu held
+    std::vector<KilnOwner> r;
+    {
+        std::lock_guard lock(g_retired_mu);
+        r.swap(g_retired);
+    }
+    for (KilnOwner o : r) g_gone.insert(o);
+    return !r.empty();
+}
+
+// A clone record in active use: a loaded mod's (or Kiln's) definition with its record. Everything else that holds a
+// record (a placeholder, an orphan, a definition whose registration failed after it took one, a mod that is gone) is
+// reserved: records are never freed in a process.
+bool active_record(const Def& d) {
+    return d.section == KILN_GD_BUFFS && d.slot != UINT32_MAX && d.data && !d.orphan && !d.placeholder && d.state != "error" &&
+           !g_gone.count(d.owner);
+}
+
+// What a receipt says now, from the definition of its GUID (or none).
+void settle_receipt(const std::array<uint8_t, 16>& id, Receipt& r, const Def* d) {
+    uint32_t disp = KILN_DEFINITION_REFUSED, slots = 0, code = r.code ? r.code : KILN_DEFINE_NOT_FOUND;
+    std::string why = r.reason;
+    if (d && d->reg_id == id) {
+        const bool record = d->slot != UINT32_MAX;
+        if (record && g_gone.count(d->owner)) {
+            disp = KILN_DEFINITION_RETAINED, slots = 1, code = KILN_DEFINE_OWNER_INACTIVE;
+            why = "the mod that defined it is not loaded; its record stays until the process ends";
+        } else if (d->state == "error") {
+            disp = record ? KILN_DEFINITION_RETAINED : KILN_DEFINITION_REFUSED, slots = record ? 1u : 0u;
+            code = d->refusal ? d->refusal : KILN_DEFINE_GAME_REFUSED;
+            why = d->problem;
+        } else if (record && d->data && (d->state == "registered" || d->state == "pending")) {
+            // pending with its record: a world stopped; the record stays in Kiln's collection and the next world reads it
+            disp = KILN_DEFINITION_REGISTERED, slots = 1, code = KILN_DEFINE_NONE, why.clear();
+        } else if (record) {
+            // its record is taken and the world's registry is not there yet ("waiting"): never reported as free room
+            disp = KILN_DEFINITION_RETAINED, slots = 1, code = KILN_DEFINE_NOT_READY;
+            why = d->problem.empty() ? "its record is in Kiln's collection; the world's buff registry is not there yet" : d->problem;
+        } else if (r.accepted) {
+            disp = KILN_DEFINITION_ACCEPTED_NEXT_START, code = KILN_DEFINE_NONE, why.clear();
+        } else {
+            code = KILN_DEFINE_NOT_READY;
+            why = d->problem.empty() ? "it waits for a world" : d->problem;
+        }
+    } else if (r.accepted) {
+        disp = KILN_DEFINITION_ACCEPTED_NEXT_START, code = KILN_DEFINE_NONE, why.clear();  // its file is there for the next start
+    } else if (d && r.code == 0) {
+        code = KILN_DEFINE_SUPERSEDED, why = "a later definition of this GUID replaced it";
+    } else if (!d && r.code == 0) {
+        code = KILN_DEFINE_REMOVED, why = "the definition was removed";
+    }
+    if (code != KILN_DEFINE_NONE && why.empty()) why = "refused";
+    if (disp != r.disposition || slots != r.slots || code != r.now_code || why != r.now_reason) {
+        r.disposition = disp, r.slots = slots, r.now_code = code, r.now_reason = std::move(why);
+        r.revision = 0;  // set by publish_budget
+    }
+}
+
+// Publishes the budget and settles every receipt from what the copy holds now (g_mu held). The revision rises when a
+// count, the capacity, the readiness or a receipt changed.
+void publish_budget() {
+    take_retired();
+    KilnCapacityInfo n{};
+    n.size = sizeof n;
+    uint64_t kiln = 0;
+    std::unordered_map<std::string, const Def*> by_guid;
+    for (const Def& d : g_defs) {
+        kiln += active_record(d);
+        if (d.section == KILN_GD_BUFFS && !g_receipts.empty()) by_guid.emplace(std::string(reinterpret_cast<const char*>(d.guid), 16), &d);
+    }
+    if (BM.ok)
+        kiln::capacity::publish(&n, BM.room, 0, kiln, BM.used >= kiln ? BM.used - kiln : UINT64_MAX, kiln::capacity::Scope::process(), 0,
+                                BM.expanded);
+    else
+        kiln::capacity::not_ready(&n, KILN_CAPACITY_NOT_READY, kiln::capacity::Scope::process(), 0, false);
+    std::lock_guard lock(g_rc_mu);
+    bool receipts_changed = false;
+    for (auto& [id, r] : g_receipts) {
+        const auto it = by_guid.find(std::string(reinterpret_cast<const char*>(r.guid.data()), 16));
+        settle_receipt(id, r, it == by_guid.end() ? nullptr : it->second);
+        receipts_changed |= r.revision == 0;
+    }
+    KilnCapacityInfo old = g_budget;
+    old.revision = 0;
+    const bool same = old.size && std::memcmp(&old, &n, sizeof n) == 0;
+    n.revision = same && !receipts_changed ? g_budget.revision : g_rev.next();
+    g_budget = n;
+    for (auto& [id, r] : g_receipts)
+        if (r.revision == 0) r.revision = n.revision;
 }
 
 // Called under the clone lock. The server and hosted client consume the same item resource.
@@ -1418,22 +1793,8 @@ void register_def(Def& d, uintptr_t world) {
 
 // ---- buffs: the mirror follows the game's records; buff GUIDs ----
 void buffs_sync() {
-    if (!BM.ok || !BM.header) return;
-    std::vector<uint8_t> rec(BM.stride);
-    uint32_t words = 0;
-    for (uint32_t i = 0; i < BM.n; ++i) {
-        const uintptr_t src = BM.orig + static_cast<uintptr_t>(i) * BM.stride, dst = BM.array + static_cast<uintptr_t>(i) * BM.stride;
-        if (!rd(src, rec.data(), BM.stride)) continue;
-        if (!rebase(rec.data(), src, dst)) {
-            if (!BM.reach_warned) LOGW("gamedata: buff record %u: a changed list is out of reach of Kiln's copy; it keeps the old one", i);
-            BM.reach_warned = true;
-            continue;
-        }
-        words += put_words(dst, rec.data(), BM.stride);
-    }
-    ++BM.syncs;
-    BM.words += words;
-    if (words) LOGD("gamedata: buff copy: %u word(s) followed the game's records", words);
+    if (!BM.ok || !BM.header) return;  // no registry reads Kiln's copy yet: the first header syncs it (build_header)
+    sync_game_records();
 }
 
 void buff_guid_note(const uint8_t g[16]) {
@@ -1521,6 +1882,15 @@ void clones_boot() {
         KilnHandle h = 0;
         g_api->subscribe_world_tick(g_owner, KILN_WORLD_CLIENT, KILN_TICK_PRE, &on_client_pre, nullptr, &h);
     }
+    report_buff_room();
+    // the owners whose clones' records become reserved when they go (see g_retired)
+    if (const auto* hooks = static_cast<const KilnHooksApi*>(g_api->service(KilnStr{KILN_HOOKS_SERVICE, sizeof(KILN_HOOKS_SERVICE) - 1}, 1));
+        hooks && hooks->header.size >= offsetof(KilnHooksApi, subscribe_owner_retiring) + sizeof(void*) && hooks->subscribe_owner_retiring) {
+        KilnHandle h = 0;
+        if (hooks->subscribe_owner_retiring(g_owner, &on_owner_retiring, nullptr, &h) != KILN_OK)
+            LOGW("gamedata: kiln.hooks refused the owner-retiring subscription: a gone mod's buff clones count as in use until kiln.content sees it go");
+    }
+    pending_replay();  // freeze prior-process requests now; admit once the host supplies loaded mods
     LOGI("gamedata: template clones %s; sequence, perk and buff clones on (the game's buff lookup %s)",
          g_templates ? "on" : "OFF (gamedata.template_clones not resolved)", g_get_buff ? "resolved for the self-check" : "not resolved");
 }
@@ -1528,6 +1898,19 @@ void clones_boot() {
 // Every definition, in turns of about 10 ms of the store lock: a game thread that needs it (a drop table the game loads) waits one turn
 // at most, and each turn writes once.
 void clones_world_ready(uintptr_t world, uint32_t) {
+    {
+        // The buff room is reserved as soon as the game's collection is known, before any mod spends a slot (chapter 17.2
+        // section 5): the budget is ready before the first clone. Until a clone exists the registries read the game's own
+        // collection; the copy costs its block of near memory and nothing per step.
+        std::lock_guard l1(store_mutex());
+        std::lock_guard lock(g_mu);
+        if (const GRegistry& B = greg(KILN_GD_BUFFS); !BM.tried && B.type && B.available) {
+            std::string err;
+            mirror_init(&err);
+        } else if (!BM.tried) {
+            report_buff_room("the game's buff collection is not readable in this world (its reflection): no buff clones");
+        }
+    }
     size_t i = 0;
     for (bool more = true; more;) {
         std::lock_guard l1(store_mutex());
@@ -1538,10 +1921,13 @@ void clones_world_ready(uintptr_t world, uint32_t) {
             register_def(g_defs[i++], world);
             if (std::chrono::steady_clock::now() - t0 > std::chrono::milliseconds(10)) break;
         }
-        batch_finish(world);
-        g_batch = false;
         more = i < g_defs.size();
+        batch_finish(world, !more);  // the buff header once, after the last turn
+        g_batch = false;
     }
+    std::lock_guard l1(store_mutex());
+    std::lock_guard lock(g_mu);
+    pending_settle();
 }
 
 void clones_world_reset() {
@@ -1553,10 +1939,12 @@ void clones_world_reset() {
         d.sequence_failures.clear();
         d.worlds.clear();  // a new world may get the same address
         d.probed.clear();
+        d.lookup_found.clear();
     }
     g_seq_maps.clear();
     g_perk_maps.clear();
     BM.worlds.clear();
+    publish_budget();  // the records stay (the next world reads them): the budget changes only where a state did
 }
 
 void clones_tick(uint64_t step) {
@@ -1565,18 +1953,27 @@ void clones_tick(uint64_t step) {
     if (!w || !g_api->on_world_thread(active_kind())) return;
     std::lock_guard l1(store_mutex());
     std::lock_guard lock(g_mu);
+    g_batch = true;  // the clones that waited for the world's registries: one header, one attach
     for (Def& d : g_defs)
         if (d.state == "waiting") register_def(d, w);
         else if (d.section == KILN_GD_SEQUENCES && d.data && !d.worlds.count(w)) {
             // Complete entries/field installation too when the initial active-world attachment failed.
             register_sequence(d, w);
         }
+    batch_finish(w);
+    g_batch = false;
     if (BM.ok && BM.header) {
         std::string err;
         for (BuffWorld& x : BM.worlds)
             if (x.world == w) buff_world(w, &err);  // the registry reloaded its collection? point it back
         buffs_sync();
     }
+    bool retired = false;
+    {
+        std::lock_guard rl(g_retired_mu);
+        retired = !g_retired.empty();
+    }
+    if (retired) publish_budget();  // a mod went: its clones' records are reserved now
 }
 
 // A boot generation not published (chapter 08): owner's clones that no world registered are taken out; returns how many.
@@ -1585,8 +1982,16 @@ uint32_t clones_forget_unbound(KilnOwner owner) {
     std::lock_guard lock(g_mu);
     const size_t before = g_defs.size();
     std::erase_if(g_defs, [&](const Def& d) { return d.owner == owner && !d.data; });
+    publish_budget();
     return static_cast<uint32_t>(before - g_defs.size());
 }
+
+namespace {
+bool parse_definition(KilnOwner owner, uint32_t section, const gjson& j, const std::string& source, Def* out,
+                      std::vector<std::string>* out_notes, std::string* why);
+KilnResult define_parsed(KilnOwner owner, uint32_t section, const gjson& j, Def d, const std::vector<std::string>& notes, bool pack,
+                         gjson& r, std::string* report);
+}  // namespace
 
 KilnResult clones_define(KilnOwner owner, uint32_t section, const std::string& json, bool pack, const std::string& source,
                          std::string* report) {
@@ -1605,13 +2010,32 @@ KilnResult clones_define(KilnOwner owner, uint32_t section, const std::string& j
         return fail(std::string(section_name(section)) + ": clones of this section are not available (templates, sequences, perks, buffs)",
                     KILN_ERR_UNAVAILABLE);
     Def d;
+    std::vector<std::string> notes;
+    std::string why;
+    if (!parse_definition(owner, section, j, source, &d, &notes, &why)) return fail(why);
+    return define_parsed(owner, section, j, std::move(d), notes, pack, r, report);
+}
+
+namespace {
+// A definition object as a Def (its GUID, name, base, fields, texts, placeholder); false and why for a malformed one.
+// Nothing is changed: clones_define and define_buff_result check before they register.
+bool parse_definition(KilnOwner owner, uint32_t section, const gjson& j, const std::string& source, Def* out,
+                      std::vector<std::string>* out_notes, std::string* why) {
+    auto fail = [&](const std::string& w) {
+        *why = w;
+        return false;
+    };
+    Def& d = *out;
     d.section = section, d.owner = owner, d.source = source, d.body = j;
-    if (!guid_parse(j.value("guid", ""), d.guid)) return fail("\"guid\": a fixed GUID is required");
+    if (!j.contains("guid") || !j["guid"].is_string() || !guid_parse(j["guid"].get<std::string>(), d.guid))
+        return fail("\"guid\": a fixed GUID is required");
     bool zero = true;
     for (uint8_t b : d.guid) zero = zero && !b;
     if (zero) return fail("\"guid\": the zero GUID");
+    if (!j.contains("name") || !j["name"].is_string()) return fail("\"name\": letters, digits, _ - . (at most 128)");
     d.name = j.value("name", "");
     if (!valid_name(d.name)) return fail("\"name\": letters, digits, _ - . (at most 128)");
+    if (!j.contains("base") || !j["base"].is_string()) return fail("\"base\": the entry to clone is required");
     d.base = j.value("base", "");
     if (d.base.empty()) return fail("\"base\": the entry to clone is required");
     if (j.contains("fields")) {
@@ -1650,7 +2074,7 @@ KilnResult clones_define(KilnOwner owner, uint32_t section, const std::string& j
             }
         }
     }
-    std::vector<std::string> notes;
+    std::vector<std::string>& notes = *out_notes;
     if (!d.texts.empty() && section == KILN_GD_SEQUENCES) {
         notes.push_back("texts are for perks, buffs and templates (ignored)");
         d.texts = gjson::object();
@@ -1662,6 +2086,17 @@ KilnResult clones_define(KilnOwner owner, uint32_t section, const std::string& j
     } else {
         d.mod = mod_of_label(owner_label(owner));
     }
+    return true;
+}
+
+KilnResult define_parsed(KilnOwner owner, uint32_t section, const gjson& j, Def d, const std::vector<std::string>& notes, bool pack,
+                         gjson& r, std::string* report) {
+    const std::string source = d.source;
+    auto fail = [&](const std::string& why, KilnResult rc = KILN_ERR_INVALID_ARGUMENT) {
+        r["error"] = why;
+        *report = r.dump();
+        return rc;
+    };
     std::lock_guard l1(store_mutex());
     std::lock_guard lock(g_mu);
     if (pack) g_seen_pack.insert(guid_text(d.guid));
@@ -1699,6 +2134,7 @@ KilnResult clones_define(KilnOwner owner, uint32_t section, const std::string& j
         }
         it->owner = owner, it->source = source, it->fields = d.fields, it->body = j, it->orphan = false;
         it->texts = d.texts, it->placeholder = d.placeholder, it->mod = d.mod;
+        if (state == "redefined" || state == "restored") it->reg_id = {};  // a receipt for the old content no longer names it
         ++it->version;
     } else {
         g_defs.push_back(std::move(d));
@@ -1715,7 +2151,473 @@ KilnResult clones_define(KilnOwner owner, uint32_t section, const std::string& j
     if (!it->warnings.empty()) r["warnings"] = it->warnings;
     r["entry"] = listing(*it);  // what definitions() lists for it: the caller needs not list them all
     *report = r.dump(-1, ' ', false, gjson::error_handler_t::replace);
+    if (!g_batch && section == KILN_GD_BUFFS) publish_budget();
     return err ? KILN_ERR_INVALID_ARGUMENT : KILN_OK;
+}
+}  // namespace
+
+// ==================================================== buff clones that answer (chapter 17 I1, I5; since 0.2.0-dev.29) ===
+namespace {
+constexpr size_t kReportMax = 4096;  // a define or receipt report never needs more: the caller's room is checked first
+#ifdef _WIN32
+constexpr char kSep = '\\';
+#else
+constexpr char kSep = '/';
+#endif
+uint64_t g_receipt_seq = 0;
+std::map<std::array<uint8_t, 16>, uint64_t> g_receipt_age;  // insertion order, for forgetting old refusals
+struct PendingBootFile { kiln::capacity::PendingFile file; std::array<uint8_t,32> fingerprint; };
+bool g_pending_boot_captured = false;
+std::vector<PendingBootFile> g_pending_boot_files;
+bool g_pending_filter_known = false;
+std::set<std::string> g_pending_mods;
+std::set<std::filesystem::path> g_pending_replayed;
+std::set<KilnOwner> g_pending_standins;
+std::map<std::string, KilnOwner> g_pending_real_owners;
+std::map<std::string, KilnOwner> g_pending_owners;          // mod -> the owner of its definitions stored for this start
+
+std::filesystem::path u8path(const std::string& s) { return std::filesystem::path(std::u8string(s.begin(), s.end())); }
+
+kiln::capacity::pending_io::TrustedBase pending_base() {
+    // Called by every entry point, including early next-start writes before clones_boot in an embedding host.
+    static const bool hooked = [] {
+      kiln::capacity::pending_io::diagnostic = [](const auto& path,const auto& why) {
+        const auto bytes=path.u8string();
+        LOGW("gamedata: stored definition %s refused: %s (left in place)",
+            std::string(bytes.begin(),bytes.end()).c_str(),why.c_str());
+      };
+      return true;
+    }();
+    (void)hooked;
+    return {u8path(data_dir() + kSep + "gamedata")};
+}
+std::string pending_dir() { return data_dir() + kSep + "gamedata" + kSep + "pending"; }
+
+std::string pending_file(const std::string& mod, const uint8_t guid[16]) { return pending_dir() + kSep + mod + kSep + guid_text(guid) + ".json"; }
+
+bool mod_folder_ok(const std::string& m) {
+    if (m.empty() || m.size() > 64 || m == "." || m == "..") return false;
+    for (char c : m)
+        if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '.' || c == '_' || c == '-')) return false;
+    return true;
+}
+
+std::string uuid_text(const uint8_t id[16]) {
+    char b[40];
+    std::snprintf(b, sizeof b, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x", id[0], id[1], id[2], id[3], id[4], id[5],
+                  id[6], id[7], id[8], id[9], id[10], id[11], id[12], id[13], id[14], id[15]);
+    return b;
+}
+
+bool uuid_parse(const std::string& t, std::array<uint8_t, 16>* out) {
+    std::string h;
+    for (char c : t)
+        if (c != '-') h += c;
+    if (h.size() != 32) return false;
+    for (size_t i = 0; i < 16; ++i) {
+        unsigned v = 0;
+        if (std::sscanf(h.c_str() + 2 * i, "%2x", &v) != 1) return false;
+        (*out)[i] = static_cast<uint8_t>(v);
+    }
+    return true;
+}
+
+// {"reason": null | "...", "warnings": [...]} in at most kReportMax bytes: warnings go first, then the reason is cut.
+std::string report_json(std::string reason, std::vector<std::string> warnings) {
+    for (;;) {
+        gjson r = {{"reason", reason.empty() ? gjson(nullptr) : gjson(reason)}, {"warnings", gjson::array()}};
+        for (const std::string& w : warnings) r["warnings"].push_back(w.size() > 256 ? w.substr(0, 256) : w);
+        std::string out = r.dump(-1, ' ', false, gjson::error_handler_t::replace);
+        if (out.size() < kReportMax) return out;
+        if (!warnings.empty()) warnings.pop_back();
+        else reason = reason.substr(0, reason.size() / 2);
+    }
+}
+
+Def* buff_def(const uint8_t guid[16]) {
+    for (Def& d : g_defs)
+        if (std::memcmp(d.guid, guid, 16) == 0) return &d;
+    return nullptr;
+}
+
+void fill_reply(const std::array<uint8_t, 16>& id, const Receipt& r, KilnDefinitionReply* out) {
+    kiln::capacity::reply_init(out, KILN_DEFINITION_BUFF, id.data(), r.guid.data());
+    if (r.now_code == KILN_DEFINE_NONE) kiln::capacity::reply_ok(out, r.disposition, r.slots, r.revision);
+    else kiln::capacity::reply_refused(out, r.now_code, r.revision, r.disposition, r.slots);
+}
+
+// The world's BuffRegistry is there and holds the game's collection (or a header of Kiln's): what buff_world needs to
+// point it at Kiln's copy. Changes nothing.
+bool buff_registry_there(uintptr_t world) {
+    for (const BuffWorld& x : BM.worlds)
+        if (x.world == world) return true;
+    const uintptr_t reg = g_api->singleton(world, KilnStr{"BuffRegistry", 12});
+    if (!reg) return false;
+    for (uintptr_t off = 0; off < 0x200; off += 8) {
+        uintptr_t v = 0;
+        if (rdv(reg + off, v) && v && (v == BM.coll || BM.headers.count(v))) return true;
+    }
+    return false;
+}
+
+void forget_old_refusals() {  // g_rc_mu held
+    while (g_receipts.size() > kReceiptsMax) {
+        auto oldest = g_receipt_age.end();
+        for (auto it = g_receipt_age.begin(); it != g_receipt_age.end(); ++it) {
+            const Receipt& r = g_receipts.at(it->first);
+            if (r.disposition == KILN_DEFINITION_REFUSED && (oldest == g_receipt_age.end() || it->second < oldest->second)) oldest = it;
+        }
+        if (oldest == g_receipt_age.end()) return;
+        g_receipts.erase(oldest->first);
+        g_receipt_age.erase(oldest);
+    }
+}
+}  // namespace
+
+KilnResult define_buff_result(KilnOwner owner, const std::string& json, uint32_t timing, KilnDefinitionReply* out, std::string* report) {
+    auto bad = [&](const std::string& why) {
+        *report = report_json(why, {});
+        return KILN_ERR_INVALID_ARGUMENT;
+    };
+    if (!out || out->size < sizeof(KilnDefinitionReply)) return bad("the answer struct is missing or smaller than KilnDefinitionReply");
+    if (timing != KILN_DEFINE_REQUIRE_REGISTERED && timing != KILN_DEFINE_ALLOW_NEXT_START)
+        return bad("timing " + std::to_string(timing) + " is not REQUIRE_REGISTERED (0) or ALLOW_NEXT_START (1)");
+    const gjson j = gjson::parse(json, nullptr, false);
+    if (j.is_discarded() || !j.is_object()) return bad("a definition is a JSON object");
+    if (j.contains("placeholder")) return bad("\"placeholder\" is Kiln's own (missing content), not part of a definition");
+    Def probe;
+    std::vector<std::string> notes;
+    std::string why;
+    if (!parse_definition(owner, KILN_GD_BUFFS, j, "", &probe, &notes, &why)) return bad(why);
+    const std::string mod = probe.mod.empty() ? owner_label(owner) : probe.mod;
+    // the receipt: mod, kind, GUID and SHA-256 of the definition's canonical text (keys sorted, no spaces; it holds no path)
+    const nlohmann::json canonical = nlohmann::json::parse(json, nullptr, false);
+    std::array<uint8_t, 16> id{};
+    kiln::capacity::registration_id(mod, KILN_DEFINITION_BUFF, probe.guid, kiln::capacity::sha256(canonical.dump()).data(), id.data());
+    const uint32_t bid = fnv1a(probe.guid, 16);
+    std::lock_guard l1(store_mutex());
+    std::lock_guard lock(g_mu);
+    take_retired();  // refuse an already retiring owner before it can consume a process-lifetime record
+    const uintptr_t w = active_world();
+    if (w && !g_api->on_world_thread(active_kind())) {
+        *report = report_json("not on the thread of kiln.content's world", {});
+        return KILN_ERR_WRONG_THREAD;
+    }
+    std::array<uint8_t, 16> guid{};
+    std::memcpy(guid.data(), probe.guid, 16);
+    {
+        std::lock_guard rl(g_rc_mu);
+        Receipt& r = g_receipts[id];
+        if (!g_receipt_age.count(id)) g_receipt_age[id] = ++g_receipt_seq;
+        r.guid = guid, r.mod = mod, r.owner = owner, r.timing = timing;
+        r.code = 0, r.reason.clear();
+    }
+    uint32_t code = 0;
+    auto refuse = [&](uint32_t c, std::string text) {
+        code = c;
+        why = std::move(text);
+    };
+    Def* d = buff_def(probe.guid);
+    const bool have = d && d->reg_id == id && d->slot != UINT32_MAX && d->data && d->state != "error" && !g_gone.count(d->owner);
+    char hex[16];
+    std::snprintf(hex, sizeof hex, "0x%08x", bid);
+    if (have) {
+        // the same definition again: its answer, nothing new (no second record, no event)
+    } else if (g_gone.count(owner)) {
+        refuse(KILN_DEFINE_OWNER_INACTIVE, "the mod's owner is no longer active");
+    } else if (d && d->section != KILN_GD_BUFFS) {
+        refuse(KILN_DEFINE_ID_COLLISION, "the GUID is a " + std::string(section_name(d->section)) + " clone's");
+    } else if (d && d->data && d->base != probe.base) {
+        refuse(KILN_DEFINE_ID_COLLISION, "a registered clone cannot change its base (" + d->base + "); use a new GUID");
+    } else if (d && d->data && d->name != probe.name) {
+        refuse(KILN_DEFINE_NAME_TAKEN, "a registered clone cannot change its name (" + d->name + "); use a new GUID");
+    } else if (BM.ok && !bid) {
+        refuse(KILN_DEFINE_ID_COLLISION, "the GUID's buff id is 0, which the game never finds: use another GUID");
+    } else if (auto it = BM.ok ? BM.by_id.find(bid) : BM.by_id.end(); it != BM.by_id.end() && (!d || it->second != d->slot)) {
+        std::string other = it->second < BM.n ? std::string("a game buff") : "another clone";
+        for (const Def& x : g_defs)
+            if (x.section == KILN_GD_BUFFS && x.slot == it->second) other = x.name + " (" + guid_text(x.guid) + ")";
+        refuse(KILN_DEFINE_ID_COLLISION, std::string("the buff id ") + hex + " of this GUID is " + other + "'s: use another GUID");
+    } else if (BM.ok && (!d || d->slot == UINT32_MAX) && BM.used >= BM.room) {
+        refuse(KILN_DEFINE_CAPACITY_EXCEEDED, "Kiln's buff collection is full (" + std::to_string(BM.room) + " clones)");
+    } else if (const GRegistry& B = greg(KILN_GD_BUFFS); B.available && B.lookup(probe.name) && B.lookup(probe.name)->id != bid) {
+        refuse(KILN_DEFINE_NAME_TAKEN, "the name " + probe.name + " is taken");
+    } else if (B.available && (!B.lookup(probe.base) || B.lookup(probe.base)->id == bid)) {
+        refuse(KILN_DEFINE_UNKNOWN_BASE, "unknown base buff " + probe.base);
+    } else {
+        // only the moment can be wrong now
+        uint32_t wait = 0;
+        std::string wait_why;
+        if (!w) wait = KILN_DEFINE_NO_WORLD, wait_why = "there is no world: buff clones register in a world (its load, or later on its thread)";
+        else if (!res_ready() || !B.available || !gd_ready()) wait = KILN_DEFINE_NOT_READY, wait_why = "the world's game data is not ready yet";
+        else if (!BM.ok) wait = KILN_DEFINE_NOT_READY, wait_why = BM.why.empty() ? "Kiln's buff collection is not reserved yet" : BM.why;
+        else if (!buff_registry_there(w)) wait = KILN_DEFINE_NOT_READY, wait_why = "the world's BuffRegistry is not loaded yet";
+        if (wait && timing == KILN_DEFINE_REQUIRE_REGISTERED) {
+            refuse(wait, wait_why);
+        } else if (wait) {
+            std::string err;
+            if (!mod_folder_ok(mod)) {
+                refuse(KILN_DEFINE_STORAGE_FAILURE, "the owner has no mod id to store the definition under (" + mod + ")");
+            } else {
+                const std::string file = pending_file(mod, probe.guid);
+                const gjson doc = {{"format", 1}, {"mod", mod}, {"registrationId", uuid_text(id.data())}, {"definition", j}};
+                const std::string bytes = doc.dump(2);
+                if (bytes.size() > 65536) {
+                    refuse(KILN_DEFINE_STORAGE_FAILURE, "the stored definition exceeds the 65536-byte replay limit");
+                } else if (!kiln::capacity::pending_store_write(pending_base(), u8path(pending_dir()), u8path(file), bytes, &err)) {
+                    refuse(KILN_DEFINE_STORAGE_FAILURE, err + ": " + file);
+                } else {
+                    std::lock_guard rl(g_rc_mu);
+                    g_receipts[id].accepted = true;
+                    LOGI("gamedata: buff %s of %s (receipt %s) is stored for the next start (%s): %s", probe.name.c_str(), mod.c_str(),
+                         uuid_text(id.data()).c_str(), file.c_str(), wait_why.c_str());
+                }
+            }
+        } else {
+            std::string rep;
+            clones_define(owner, KILN_GD_BUFFS, json, false, "", &rep);
+            d = buff_def(probe.guid);
+            if (d) {
+                d->reg_id = id;
+                if (d->state == "registered") {
+                    // the game's own lookup must find the record in this world
+                    bool asked = false, found = false;
+                    if (g_get_buff)
+                        for (const BuffWorld& x : BM.worlds)
+                            if (x.world == w) asked = true, found = call_get_buff(bid, x.registry) == d->data;
+                    if (asked && !found)
+                        buff_refuse(*d, KILN_DEFINE_GAME_REFUSED, "the game's own buff lookup does not find the clone's record in this world");
+                    else if (!asked)
+                        notes.push_back("the game's buff lookup is not resolved on this build (gamedata.buff_lookup): not checked with it");
+                    std::error_code ec;
+                    if (kiln::capacity::pending_io::remove(pending_base(), u8path(pending_file(mod, probe.guid))))
+                        LOGI("gamedata: buff %s of %s is registered now: its stored definition for the next start is removed", probe.name.c_str(),
+                             mod.c_str());
+                    std::lock_guard rl(g_rc_mu);
+                    g_receipts[id].accepted = false;
+                }
+                for (const std::string& n : d->warnings) notes.push_back(n);
+            } else {
+                const gjson rj = gjson::parse(rep, nullptr, false);
+                refuse(KILN_DEFINE_GAME_REFUSED, rj.is_object() ? rj.value("error", "refused") : "refused");
+            }
+        }
+    }
+    {
+        std::lock_guard rl(g_rc_mu);
+        Receipt& r = g_receipts[id];
+        r.code = code, r.reason = code ? why : std::string();
+    }
+    publish_budget();
+    std::lock_guard rl(g_rc_mu);
+    const Receipt& r = g_receipts.at(id);
+    fill_reply(id, r, out);
+    *report = report_json(r.now_reason, notes);
+    forget_old_refusals();
+    return KILN_OK;
+}
+
+KilnResult buff_receipt(const uint8_t registration_id[16], KilnDefinitionReply* out, std::string* report) {
+    if (!out || out->size < sizeof(KilnDefinitionReply)) {
+        *report = report_json("the answer struct is missing or smaller than KilnDefinitionReply", {});
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
+    std::array<uint8_t, 16> id{};
+    if (registration_id) std::memcpy(id.data(), registration_id, 16);
+    if (id == std::array<uint8_t, 16>{}) {
+        *report = report_json("the empty registration id", {});
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
+    std::lock_guard rl(g_rc_mu);
+    const auto it = g_receipts.find(id);
+    if (it == g_receipts.end()) {
+        kiln::capacity::reply_init(out, KILN_DEFINITION_BUFF, id.data(), std::array<uint8_t, 16>{}.data());
+        kiln::capacity::reply_refused(out, KILN_DEFINE_NOT_FOUND, g_budget.revision);
+        *report = report_json("no buff definition of this process has this registration id", {});
+        return KILN_OK;
+    }
+    fill_reply(id, it->second, out);
+    *report = report_json(it->second.now_reason, {});
+    return KILN_OK;
+}
+
+void buff_budget(KilnCapacityInfo* out) {
+    const uint32_t size = out->size;
+    std::lock_guard rl(g_rc_mu);
+    if (!g_budget.size) {
+        kiln::capacity::not_ready(out, KILN_CAPACITY_NOT_READY, kiln::capacity::Scope::process(), g_rev.current(), false);
+        return;
+    }
+    *out = g_budget;
+    out->size = size;
+}
+
+// An owner kiln.content found revoked (a mod unloaded or reloaded): its clones' records stay (they cannot be freed) and
+// count as reserved until a loaded mod defines them again.
+void clones_owner_revoked(KilnOwner owner) {
+    std::lock_guard l1(store_mutex());
+    std::lock_guard lock(g_mu);
+    g_gone.insert(owner);
+    publish_budget();
+}
+
+// The definitions mods stored for this start (define_buff_result, ALLOW_NEXT_START): defined now, in mod and GUID order,
+// under an owner "pending <mod>"; they register at the first world's load like any definition and are checked as any.
+void pending_owner_loaded(KilnOwner owner, const std::string& mod) {
+    std::lock_guard l1(store_mutex());
+    std::lock_guard lock(g_mu);
+    if (take_retired()) publish_budget();
+    if (g_gone.count(owner)) return;
+    g_pending_real_owners[mod] = owner;
+    auto it = g_pending_owners.find(mod);
+    if (it == g_pending_owners.end() || it->second == owner || !g_pending_standins.count(it->second)) return;
+    const auto standin = it->second;
+    for (auto& d : g_defs) if (d.owner == standin && d.mod == mod) d.owner = owner;
+    { std::lock_guard receipts(g_rc_mu);
+      for (auto& [id,r] : g_receipts) if (r.owner == standin && r.mod == mod) r.owner = owner; }
+    g_pending_standins.erase(standin);
+    it->second = owner;
+    publish_budget();
+}
+
+void pending_mods_changed(const std::vector<std::string>& mods) {
+    {
+        std::lock_guard l1(store_mutex());
+        std::lock_guard lock(g_mu);
+        g_pending_filter_known = true;
+        g_pending_mods = {mods.begin(), mods.end()};
+        for (auto& [mod,owner] : g_pending_owners) if (!g_pending_mods.count(mod)) g_gone.insert(owner);
+        publish_budget();
+    }
+    pending_replay();
+}
+
+void pending_replay() {
+    if (!g_pending_boot_captured) {
+        g_pending_boot_captured = true;
+        kiln::capacity::PendingScan scan;
+        const auto files = kiln::capacity::pending_files_bounded(pending_base(), u8path(pending_dir()), &scan);
+        if (scan.unread) kiln::capacity::pending_io::refused(u8path(pending_dir()),
+            "pending store bound reached; at least " + std::to_string(scan.unread) + " entries left unread; enumeration stopped (4096 files / 268435456 bytes)");
+        for (const auto& file : files) {
+            std::string text;
+            if (kiln::capacity::pending_io::read(pending_base(), file.path, &text, 65536))
+                g_pending_boot_files.push_back({file, kiln::capacity::sha256(text)});
+            else kiln::capacity::pending_io::refused(file.path,"unreadable, oversized or unsafe boot pending file");
+        }
+    }
+    if (!g_pending_filter_known) return;  // no admission before the host's reliable loaded-mod list
+    for (const auto& boot : g_pending_boot_files) {
+        const auto& f = boot.file;
+        if (!g_pending_mods.count(f.mod)) {
+            kiln::capacity::pending_io::refused(f.path,"owning mod is not loaded in this profile; enable it to replay (left in place)");
+            continue;
+        }
+        if (g_pending_replayed.count(f.path)) continue;
+        auto drop = [&](const std::string& why) {
+            kiln::capacity::pending_io::refused(f.path, why);
+        };
+        std::string text;
+        if (!mod_folder_ok(f.mod) || !kiln::capacity::pending_io::read(pending_base(), f.path, &text, 65536)) {
+            kiln::capacity::pending_io::refused(f.path,"unreadable, oversized or unsafe pending file");
+            continue;
+        }
+        if (kiln::capacity::sha256(text) != boot.fingerprint) {
+            drop("changed after boot; retained for the next process start");
+            continue;
+        }
+        const gjson doc = gjson::parse(text, nullptr, false);
+        std::array<uint8_t, 16> id{};
+        if (text.size() > 65536 || doc.is_discarded() || !doc.is_object() || !doc.contains("format") || !doc["format"].is_number_integer() ||
+            doc["format"] != 1 || !doc.contains("mod") || !doc["mod"].is_string() || doc["mod"].get<std::string>() != f.mod || !doc.contains("registrationId") ||
+            !doc["registrationId"].is_string() || !uuid_parse(doc["registrationId"].get<std::string>(), &id) || !doc.contains("definition") ||
+            !doc["definition"].is_object()) {
+            drop("not a stored definition of format 1 for this folder");
+            continue;
+        }
+        uint8_t file_guid[16]{};
+        if (doc["definition"].contains("placeholder") || !doc["definition"].contains("guid") ||
+            !doc["definition"]["guid"].is_string() || !guid_parse(doc["definition"]["guid"].get<std::string>(), file_guid) ||
+            f.name != guid_text(file_guid) + ".json") {
+            drop("filename must be the definition GUID.json");
+            continue;
+        }
+        {
+            std::lock_guard l1(store_mutex());
+            std::lock_guard lock(g_mu);
+            const Def* current = buff_def(file_guid);
+            if (current && (current->mod != f.mod ||
+                nlohmann::json::parse(current->body.dump()) != nlohmann::json::parse(doc["definition"].dump()))) {
+                // Replaying after the reliable loaded list must preserve the precedence a boot replay had:
+                // this start's mod code is newer than the prior process's deferred request.
+                Receipt receipt;
+                std::memcpy(receipt.guid.data(), file_guid, 16);
+                receipt.mod = f.mod;
+                receipt.code = current->mod == f.mod ? KILN_DEFINE_SUPERSEDED : KILN_DEFINE_ID_COLLISION;
+                receipt.reason = "a current definition already owns this GUID; the stored request was not applied";
+                { std::lock_guard rl(g_rc_mu); g_receipts[id] = std::move(receipt); g_receipt_age[id] = ++g_receipt_seq; }
+                g_pending_replayed.insert(f.path);
+                drop("superseded by this start's definition; left in place");
+                continue;
+            }
+        }
+        KilnOwner& o = g_pending_owners[f.mod];
+        if (auto real = g_pending_real_owners.find(f.mod); real != g_pending_real_owners.end()) o = real->second;
+        if (!o) {
+            const std::string name = "gamedata:pending:" + f.mod;
+            o = g_api->owner_create(KilnStr{name.data(), name.size()});
+            if (o) g_pending_standins.insert(o);
+            set_owner_label(o, "pending " + f.mod);
+        }
+        std::string rep;
+        const KilnResult rc = clones_define(o, KILN_GD_BUFFS, doc["definition"].dump(), false, "stored " + f.name, &rep);
+        std::lock_guard l1(store_mutex());
+        std::lock_guard lock(g_mu);
+        Def* d = nullptr;
+        uint8_t guid[16] = {};
+        if (rc == KILN_OK && guid_parse(doc["definition"].value("guid", ""), guid)) d = buff_def(guid);
+        if (!d) {
+            const gjson rj = gjson::parse(rep, nullptr, false);
+            drop(rj.is_object() ? rj.value("error", "refused") : "refused");
+            continue;
+        }
+        d->reg_id = id;
+        g_pending_replayed.insert(f.path);
+        {
+            std::lock_guard rl(g_rc_mu);
+            Receipt& r = g_receipts[id];
+            g_receipt_age[id] = ++g_receipt_seq;
+            std::memcpy(r.guid.data(), d->guid, 16);
+            r.mod = f.mod, r.owner = o, r.timing = KILN_DEFINE_ALLOW_NEXT_START, r.accepted = true, r.pending_file = true;
+            r.file = f.path;
+        }
+        LOGI("gamedata: buff %s of %s (receipt %s), stored for this start: defined; it registers with the world's load", d->name.c_str(),
+             f.mod.c_str(), uuid_text(id.data()).c_str());
+    }
+    std::lock_guard l1(store_mutex());
+    std::lock_guard lock(g_mu);
+    publish_budget();
+}
+
+// After a world's load: a stored definition that registered or was refused there has settled; its file goes (g_mu held).
+void pending_settle() {
+    std::vector<std::filesystem::path> gone;
+    {
+        std::lock_guard rl(g_rc_mu);
+        for (auto& [id, r] : g_receipts) {
+            if (!r.pending_file) continue;
+            const bool registered = r.disposition == KILN_DEFINITION_REGISTERED;
+            const bool refused = r.now_code != KILN_DEFINE_NONE && r.now_code != KILN_DEFINE_NOT_READY;
+            if (!registered && !refused) continue;
+            LOGI("gamedata: the stored buff definition of %s (receipt %s) at this start: %s%s%s", r.mod.c_str(), uuid_text(id.data()).c_str(),
+                 registered ? "Registered" : "Refused", registered ? "" : ": ", registered ? "" : r.now_reason.c_str());
+            r.pending_file = false, r.accepted = false;
+            if (registered) gone.push_back(r.file);
+        }
+    }
+    std::error_code ec;
+    for (const auto& f : gone) kiln::capacity::pending_io::remove(pending_base(), f);
+    if (!gone.empty()) publish_budget();
 }
 
 // Each entry's text is kept with a fingerprint of what it shows (FNV-1a) and made again only when that changed: mods and tools ask for the
@@ -1753,10 +2655,19 @@ std::string clones_json() {
 
 gjson clones_status() {
     std::lock_guard lock(g_mu);
-    gjson b = {{"active", BM.ok && BM.header != 0}, {"gameBuffs", BM.n}, {"clones", BM.used}, {"room", kBuffRoom},
+    gjson b = {{"active", BM.ok && BM.header != 0}, {"gameBuffs", BM.n}, {"clones", BM.used}, {"room", BM.room}, {"expanded", BM.expanded},
+               {"headers", BM.headers.size()}, {"headerBytes", BM.header_bytes}, {"recordBytes", BM.array_bytes}, {"attaches", BM.attaches},
                {"worlds", BM.worlds.size()}, {"syncs", BM.syncs}, {"wordsFollowed", BM.words}};
+    gjson lookups = gjson::object();
+    for (const auto& d : g_defs) if (d.section == KILN_GD_BUFFS && !d.lookup_found.empty()) {
+        auto& entry = lookups[guid_text(d.guid)];
+        for (auto kind : {KILN_WORLD_SERVER, KILN_WORLD_CLIENT}) {
+            const auto world = g_api->world(kind);
+            entry[kind == KILN_WORLD_SERVER ? "server" : "client"] = world && d.lookup_found.count(world) != 0;
+        }
+    }
     if (!BM.why.empty()) b["why"] = BM.why;
-    return gjson{{"buffCopy", b}, {"perkMaps", g_perk_maps.size()}, {"texts", !g_texts_absent.load()},
+    return gjson{{"buffCopy", b}, {"buffLookups", lookups}, {"perkMaps", g_perk_maps.size()}, {"texts", !g_texts_absent.load()},
                  {"gameBuffLookup", g_get_buff != nullptr}};
 }
 
@@ -1779,6 +2690,7 @@ void clones_packs_end() {
     std::lock_guard lock(g_mu);
     for (Def& d : g_defs)
         if (owner_label(d.owner).rfind("pack ", 0) == 0) d.orphan = !g_seen_pack.count(guid_text(d.guid));
+    publish_budget();  // an orphan's record is reserved, not in use
 }
 
 void gd_pack_add(KilnOwner owner, uint32_t section, const gjson& list, const std::string& source, ApplyResult* out) {
@@ -1786,6 +2698,19 @@ void gd_pack_add(KilnOwner owner, uint32_t section, const gjson& list, const std
         out->errors.push_back(std::string(section_name(section)) + ".add: a list of definitions");
         return;
     }
+    // One batch for the list: a data pack applied while a world runs (a reload, a pack that comes later) and the content
+    // sync's definitions on a client register one by one, the buff header is built once at the end.
+    std::lock_guard l1(store_mutex());
+    std::lock_guard lock(g_mu);
+    struct Batch {
+        bool outer = !g_batch;
+        Batch() { g_batch = true; }
+        ~Batch() {
+            if (!outer) return;
+            batch_finish(active_world());
+            g_batch = false;
+        }
+    } batch;
     for (const gjson& d : list) {
         std::string rep;
         if (clones_define(owner, section, d.dump(), true, source, &rep) != KILN_OK) {

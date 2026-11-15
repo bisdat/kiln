@@ -7,6 +7,7 @@
 
 #include <cstdarg>
 #include <cstdio>
+#include <cstddef>
 #include <cstring>
 #include <string>
 
@@ -156,7 +157,11 @@ void KILN_CALL on_ready(void*) {
     }
 }
 
-static_assert(sizeof(KilnVfxPlay) == 128 && sizeof(KilnVfxInfo) == 88 && sizeof(KilnVfxStatus) == 64 && sizeof(KilnVfxApi) == 112);
+static_assert(sizeof(KilnVfxPlay) == 128 && sizeof(KilnVfxInfo) == 88 && sizeof(KilnVfxStatus) == 64);
+// v1's 13 members (112 bytes), then the resource budget's three, appended in 0.2.0-dev.29: the table grows at its end only
+static_assert(offsetof(KilnVfxApi, bind_guid) == 104 && offsetof(KilnVfxApi, resource_budget) == 112 &&
+                  offsetof(KilnVfxApi, define_vfx_result) == 120 && offsetof(KilnVfxApi, vfx_registration) == 128 && sizeof(KilnVfxApi) == 136,
+              "kiln.vfx's table grows at its end only");
 
 const KilnVfxApi kTable = {
     {sizeof(KilnVfxApi), KILN_VFX_VERSION},
@@ -173,6 +178,9 @@ const KilnVfxApi kTable = {
     &build_define_json,
     &build_status_json,
     &core_bind_guid,
+    &build_resource_budget,
+    &build_define_vfx_result,
+    &build_vfx_registration,
 };
 
 }  // namespace
@@ -230,6 +238,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     const KilnResult rc = api->register_service(owner, KilnStr{KILN_VFX_SERVICE, sizeof(KILN_VFX_SERVICE) - 1}, &kTable);
     if (rc == KILN_OK) {
         core_set_build_hooks(&build_on_update, &build_refuses, &build_one_shot_ns);
+        budget_start(api, owner);  // the rows of the appended members, with the table (before the mods load)
         info->on_ready = &on_ready;
         // Keep client file builds at start until boot staging is implemented. Server/config-off
         // cases returned above; non-client lab routes preserve their previous choice.

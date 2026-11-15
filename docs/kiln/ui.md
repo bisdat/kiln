@@ -678,3 +678,5 @@ capability rows explain the degraded state. The length and layout of the fallbac
 This mode avoids Kiln's Vulkan interception. It does not make Streamline and Kiln's drawing
 compatible. Prefer automatic drawing off for frame generation; use the force-on switch only
 when intentionally testing coexistence.
+
+The additive window size-constraints slot after v7 is described in the [UI service reference](services/ui.md).

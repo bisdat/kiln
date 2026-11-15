@@ -28,6 +28,8 @@
     <ProjectReference Include="../services/Kiln.Client/Kiln.Client.csproj" />
     <!-- The fake world (FakeWorld.cs, World/): the kit names Kiln.World's result types and resets its caches. -->
     <ProjectReference Include="../services/Kiln.World/Kiln.World.csproj" />
+    <!-- dev.29: the fake of kiln.world v4's game programs (Fakes/Systems) runs Kiln.Systems' wraps offline -->
+    <ProjectReference Include="../services/Kiln.Systems/Kiln.Systems.csproj" />
     <!-- The fakes of kiln.players and kiln.saves (Fakes/): the world and players surface names Kiln.Saves' types. -->
     <ProjectReference Include="../services/Kiln.Saves/Kiln.Saves.csproj" />
     <!-- The fake world behind Kiln.Terrain (Fakes/Terrain/): its cells are Kiln.Build's Voxel and CellBox. -->

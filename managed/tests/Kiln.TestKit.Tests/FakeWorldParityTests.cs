@@ -54,7 +54,7 @@ public sealed unsafe class FakeWorldParityTests
     public void The_kit_s_table_matches_the_header_field_for_field()
     {
         var abi = Fixture("abi.json");
-        foreach (var (native, mirror) in (ValueTuple<string, Type>[])[("KilnWorldApi", typeof(WorldAbi.Table)),
+        foreach (var (native, mirror) in (ValueTuple<string, Type>[])[("KilnWorldApiV4", typeof(WorldAbi.Table)),
                      ("KilnWorldWriteRequest", typeof(WorldAbi.WriteRequest)), ("KilnWorldWriteResult", typeof(WorldAbi.WriteResult)),
                      ("KilnWorldWriteInfo", typeof(WorldAbi.WriteInfo)), ("KilnWorldWriteStatus", typeof(WorldAbi.WriteStatus))])
         {
