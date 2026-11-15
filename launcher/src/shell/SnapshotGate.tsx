@@ -5,12 +5,18 @@ import { Button, Modal, Splash, errorText } from "../ui";
 export function SnapshotGate({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<api.SnapshotStartup | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Asked until the gate is open, then never again: "ready" is final for the session, and a status read twice a
+  // second for as long as the launcher runs is work for nothing.
   useEffect(() => {
     let live = true;
-    const read = () => api.snapshotStatus().then((s) => { if (live) setStatus(s); }, (e) => { if (live) setError(errorText(e)); });
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const stop = () => { if (timer !== undefined) { clearInterval(timer); timer = undefined; } };
+    const read = () => api.snapshotStatus().then(
+      (s) => { if (!live) return; setStatus(s); if (s.phase === "ready") stop(); },
+      (e) => { if (live) setError(errorText(e)); });
+    timer = setInterval(() => void read(), 500);
     void read();
-    const timer = setInterval(() => void read(), 500);
-    return () => { live = false; clearInterval(timer); };
+    return () => { live = false; stop(); };
   }, []);
   if (status?.phase === "ready") return <>{children}</>;
   if (status?.phase !== "blocked" && !error) return <Splash done={false} />;
