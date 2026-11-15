@@ -54,7 +54,7 @@ override Kiln.NativeResult.Equals(object? obj) -> bool
 override Kiln.NativeResult.GetHashCode() -> int
 override Kiln.NativeResult.ToString() -> string!
 static Kiln.Abilities.Natives.Attach(uint program, string! native, Kiln.NativeStage stage, Kiln.NativeWrapHandler! handler, uint site = 0, int priority = 0) -> Kiln.AttachResult!
-static Kiln.Abilities.Natives.Declare(string! fullName, params Kiln.NativeArg[]! args) -> void
+static Kiln.Abilities.Natives.DeclareTyped(string! fullName, params Kiln.NativeArg[]! args) -> void
 static Kiln.Abilities.Natives.RegisterSync(string! name, int argc, Kiln.NativeSyncHandler! handler) -> Kiln.NativeResult!
 static Kiln.AttachResult.operator !=(Kiln.AttachResult? left, Kiln.AttachResult? right) -> bool
 static Kiln.AttachResult.operator ==(Kiln.AttachResult? left, Kiln.AttachResult? right) -> bool

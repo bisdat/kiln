@@ -314,7 +314,7 @@ runtime verdict of each rule, and the C++ verifier matches all of them).
    `"sync": true` is a typed declaration: each argument's `"type"` (one impact type name, or `"any"`) and `"size"`
    (bytes; omitted = the type's known size) bind, with `"optional"` (may be 0, not connected) and `"raw"` (takes a raw
    integer). Any other entry declares the argc only, as before (its argument types stay notes for the cook). The same
-   from C#: `Abilities.Natives.Declare(fullName, params NativeArg[])`; natively `native_declare_typed`. With a typed
+   from C#: `Abilities.Natives.DeclareTyped(fullName, params NativeArg[])`; natively `native_declare_typed`. With a typed
    declaration:
    - the verifier refuses a program whose ECALL pushes (ICONST/ICONST0/ICONST1 right before it) a variable of another
      type or size, a raw value for a variable argument, or nothing for a required one: `E_ARGTYPE: code pc 4: native

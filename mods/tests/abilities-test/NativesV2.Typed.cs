@@ -60,8 +60,8 @@ public sealed partial class AbilitiesTestMod
         await Steps(1);
         var warned = KilnLogSince(log0).Split('\n').Count(l => l.Contains("W_ARGTYPE") && l.Contains("program from"));
         long calls = 0;
-        Abilities.Natives.Declare("abilities-test.NvLate", new NativeArg("sint32", NativeArgDirection.Out), new NativeArg("sint32"));
-        Abilities.Natives.Declare("abilities-test.NvLate2", new NativeArg("sint32", NativeArgDirection.Out), new NativeArg("sint32"));
+        Abilities.Natives.DeclareTyped("abilities-test.NvLate", new NativeArg("sint32", NativeArgDirection.Out), new NativeArg("sint32"));
+        Abilities.Natives.DeclareTyped("abilities-test.NvLate2", new NativeArg("sint32", NativeArgDirection.Out), new NativeArg("sint32"));
         var r1 = Abilities.Natives.RegisterSync("NvLate", 2, (ref NativeCall c) => { Interlocked.Increment(ref calls); return 1; });
         var r2 = Abilities.Natives.RegisterSync("NvLate2", 2, (ref NativeCall c) => { Interlocked.Increment(ref calls); return 1; });
         var c0 = Abilities.Natives.LabCounters;

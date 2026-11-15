@@ -195,7 +195,7 @@ public enum NativeArgDirection
     InOut = 2,
 }
 
-/// <summary>One argument of a typed native declaration (<see cref="Abilities.Natives.Declare(string, NativeArg[])"/>),
+/// <summary>One argument of a typed native declaration (<see cref="Abilities.Natives.DeclareTyped"/>),
 /// in ECALL order: argument 0 is the value the program pushes last.</summary>
 /// <param name="Type">The impact type name of the variable the program must pass: "sint32", "uint32", "float32",
 /// "bool", "Time", "ecs.EntityId", "WorldTransform", "float3", ... (the names of tools/impact/data/types.json); "any"
@@ -496,7 +496,7 @@ public static unsafe partial class Abilities
         /// 0..65535, or the hash of a vanilla native.</exception>
         /// <exception cref="KilnUnavailableException">Capability <c>abilities.natives.sync</c> is off here.</exception>
         [RequiresCapability(AbilitiesCaps.NativesSync)]
-        public static void Declare(string fullName, params NativeArg[] args)
+        public static void DeclareTyped(string fullName, params NativeArg[] args)
         {
             ArgumentException.ThrowIfNullOrEmpty(fullName);
             ArgumentNullException.ThrowIfNull(args);
@@ -523,7 +523,7 @@ public static unsafe partial class Abilities
             int rc;
             fixed (AbilitiesNative.NativeArgRaw* p = raw) rc = t->NativeDeclareTyped(AbilitiesNative.Fnv(fullName), (uint)raw.Length, p);
             if (rc == AbilitiesNative.InvalidArgument) throw new ArgumentException($"native {fullName}: refused (the hash of a vanilla native?)", nameof(fullName));
-            if (rc != AbilitiesNative.Ok) throw new InvalidOperationException($"Natives.Declare({fullName}): {AbilitiesNative.Describe(rc)}");
+            if (rc != AbilitiesNative.Ok) throw new InvalidOperationException($"Natives.DeclareTyped({fullName}): {AbilitiesNative.Describe(rc)}");
         }
 
         // The size of an impact value type by name (tools/impact/data/types.json; natives_json.h impact_type_size).
