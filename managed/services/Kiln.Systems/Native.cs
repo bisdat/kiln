@@ -83,7 +83,7 @@ internal static unsafe class SystemsNative
         public fixed byte Detail[128];
     }
 
-    // KilnWorldApi up to game_slice_attr_changed: the v3 table (header + 34 entries), v4 to wrap_original, in_program
+    // KilnWorldApi up to game_world_session: the v3 table (header + 34 entries), v4 to wrap_original, in_program
     // (0.2.0-dev.28), then the per-entity members (0.2.0-dev.29).
     [StructLayout(LayoutKind.Sequential)]
     public struct Table
@@ -108,6 +108,8 @@ internal static unsafe class SystemsNative
         public delegate* unmanaged[Cdecl]<Slice*, nuint*, int> GameSliceArchetype;
         public delegate* unmanaged[Cdecl]<uint, nuint, uint, int> GameArchetypeHas;
         public delegate* unmanaged[Cdecl]<Slice*, ulong*, int, int, int> GameSliceAttrChanged;
+        public delegate* unmanaged[Cdecl]<Slice*, ulong*, int, int, int> GameSliceAttrValidate;
+        public delegate* unmanaged[Cdecl]<uint, ulong> GameWorldSession;
     }
 
     private static Table* _table;

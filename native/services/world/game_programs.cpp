@@ -400,6 +400,10 @@ uint64_t game_programs_step(uint32_t kind) { return kind < kKinds ? g_step[kind]
 
 // ---- the table ----
 
+uint64_t KILN_CALL game_world_session(uint32_t kind) {
+    return kind < kKinds ? g_generation[kind].load(std::memory_order_acquire) : 0;
+}
+
 int32_t KILN_CALL game_program_find(uint32_t kind, KilnStr name) {
     const auto d = directory(kind);
     if (!d) return -1;

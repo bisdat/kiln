@@ -25,6 +25,7 @@
 #include <memory>
 #include <unordered_map>
 #include <utility>
+#include <thread>
 
 #include "layout.h"
 #include "services/kiln_caps.h"
@@ -37,6 +38,7 @@ namespace {
 constexpr uint32_t kOverrunsToDisable = 10;
 constexpr size_t kFinishedKept = 1024;   // removed and refused wraps kept for game_wrap_info
 constexpr uint32_t kCoolingPres = 2;     // Pres with nothing in flight before a restored slot is used again
+std::atomic<uint32_t> g_stop_wait_ms{2000};
 std::atomic<uint64_t> g_budget_ns{1000000};  // 1 ms per stage per slice
 
 thread_local bool t_in_slice = false;
@@ -50,6 +52,7 @@ struct View {
     bool ok = false;
     std::string why;
     ProgramLayout layout;
+    std::vector<uint8_t> attributes[L_COUNT];
     std::vector<uint32_t> sizes[L_COUNT];  // the reflected size of each name (0: not known)
     mutable std::atomic<int> checked{0};
     mutable std::atomic<bool> logged{false};
@@ -107,6 +110,7 @@ struct Slot {
 };
 
 struct Pool {
+    std::atomic<bool> stopping{false};
     uint32_t kind = 0;
     Slot slots[kWrapSlots];
 };
@@ -208,7 +212,7 @@ enum CallResult { CALL_RAN, CALL_FAULTED, CALL_SKIPPED };
 // One stage, through its gate. CALL_FAULTED: it faulted and is disabled from now on; CALL_SKIPPED: it is gone.
 CallResult call(Slot& s, Stage& st, KilnGameSlice& slice, Frame& f, int32_t stage) {
     st.calls_in.fetch_add(1, std::memory_order_seq_cst);
-    if (st.gone.load(std::memory_order_seq_cst)) {
+    if (st.gone.load(std::memory_order_seq_cst) || g_pools[st.pool].stopping.load(std::memory_order_seq_cst)) {
         st.calls_in.fetch_sub(1, std::memory_order_release);
         return CALL_SKIPPED;
     }
@@ -315,7 +319,7 @@ void dispatch(int pool, int slot, void* raw) {
     const UpdateFn orig = s.orig.load(std::memory_order_acquire);
     const Chain* c = s.chain.load(std::memory_order_seq_cst);
     auto* ctx = static_cast<ProgramCtx*>(raw);
-    if (!c || !kind_is(ctx, g_pools[pool].kind)) {
+    if (!c || g_pools[pool].stopping.load(std::memory_order_seq_cst) || !kind_is(ctx, g_pools[pool].kind)) {
         // no stage left, a slot kept for a foreign swap on top, or another storage (the prediction world runs the
         // client world's table): the game's update, untouched
         s.forwarded.fetch_add(1, std::memory_order_relaxed);
@@ -515,6 +519,7 @@ std::shared_ptr<const View> make_view(int pool, const ProgramRef& ref) {
     if (v->ok) {
         const KilnTypesApi* types = program_types();
         for (int id = 0; id < L_COUNT; ++id) {
+            v->attributes[id].assign(v->layout.lists[id].names.size(), 0);
             v->sizes[id].assign(v->layout.lists[id].names.size(), 0);
             if (!types || kListMap[id] == M_SINGLETON || kListMap[id] == M_EVENT) continue;
             for (size_t i = 0; i < v->layout.lists[id].names.size(); ++i) {
@@ -522,7 +527,18 @@ std::shared_ptr<const View> make_view(int pool, const ProgramRef& ref) {
                 const KilnType* t = types->type_by_name(KilnStr{q.data(), q.size()});
                 KilnTypeInfo info{};
                 info.size = sizeof info;
-                if (t && types->type_info(t, &info) == KILN_OK) v->sizes[id][i] = info.type_size;
+                if (t && types->type_info(t, &info) == KILN_OK) {
+                    v->sizes[id][i] = info.type_size;
+                    // Same bounded reflected-base walk as tracked writes' type_facts().
+                    for (unsigned depth = 0; depth < 16; ++depth) {
+                        if (sv(info.name) == "AttributeComponent") { v->attributes[id][i] = depth > 0; break; }
+                        if (!info.inner) break;
+                        const KilnType* inner = info.inner;
+                        info = KilnTypeInfo{};
+                        info.size = sizeof info;
+                        if (types->type_info(inner, &info) != KILN_OK) break;
+                    }
+                }
             }
         }
     }
@@ -731,7 +747,7 @@ const char* game_wraps_off_reason() {
 
 void wraps_pre(uint32_t kind, uintptr_t) {
     const int pool = wrap_pool(kind);
-    if (pool < 0 || !g_ok) return;
+    if (pool < 0 || !g_ok || g_pools[pool].stopping.load()) return;
     const uint32_t ext = external_runner();
     // Revoked owners (at most once a second): probed outside g_mu (post() is the core's), retired under it.
     std::vector<KilnOwner> owners, revoked;
@@ -833,16 +849,33 @@ void wraps_pre(uint32_t kind, uintptr_t) {
 void wraps_world_event(const KilnWorldEvent* event) {
     const int pool = event ? wrap_pool(event->kind) : -1;
     if (pool < 0) return;
-    std::lock_guard lock(g_mu);
+    std::unique_lock lock(g_mu);
     bool live_slots = false;
     for (int i = 0; i < kWrapSlots && !live_slots; ++i) live_slots = g_pools[pool].slots[i].state == S_LIVE;
     if (event->event == KILN_WORLD_STOPPING) {
+        // Close stage admission before restoring entries. A runner may already have fetched a trampoline.
+        g_pools[pool].stopping.store(true, std::memory_order_seq_cst);
+        for (int i = 0; i < kWrapSlots; ++i)
+            if (g_pools[pool].slots[i].state == S_LIVE) restore(pool, i, true);
+        lock.unlock(); // a finishing stage can need game_wrap_info/release's registry lock
+        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(g_stop_wait_ms.load());
+        uint32_t remaining = 0;
+        do {
+            remaining = 0;
+            for (const Slot& slot : g_pools[pool].slots) remaining += slot.in_flight.load(std::memory_order_seq_cst);
+            if (!remaining) break;
+            std::this_thread::yield();
+        } while (std::chrono::steady_clock::now() < until);
+        if (remaining) KW_E("world %u stops: wrap drain timed out with %u calls still in flight", event->kind, remaining);
+        lock.lock();
         if (live_slots) KW_I("world %u stops: its wraps are taken out and wait for the next world", event->kind);
-        drop_pool(pool, true);  // the world is still intact: the entries go back
-    } else if (event->event == KILN_WORLD_STARTED && live_slots) {
-        // a new world without a stop of the last (no world.lifecycle): its table may be gone, so nothing is written
-        KW_W("world %u: a new world without a stop of the last; its trampolines are kept, the wraps re-applied", event->kind);
-        drop_pool(pool, false);
+        drop_pool(pool, true); // retired chains retain their views until their last in-flight call exits, even on timeout
+    } else if (event->event == KILN_WORLD_STARTED) {
+        if (live_slots) {
+            KW_W("world %u: a new world without a stop of the last; its trampolines are kept, the wraps re-applied", event->kind);
+            drop_pool(pool, false);
+        }
+        g_pools[pool].stopping.store(false, std::memory_order_seq_cst);
     }
 }
 
@@ -1173,10 +1206,31 @@ int32_t KILN_CALL game_archetype_has(uint32_t kind, uintptr_t layout, uint32_t h
     return static_cast<int32_t>((word >> (type & 63)) & 1);
 }
 
+KilnResult KILN_CALL game_slice_attr_validate(KilnGameSlice* slice, const uint64_t* iter, int32_t list, int32_t i) {
+    Frame* f = frame_of(slice);
+    if (!f || !iter || iter != f->iter) return KILN_ERR_WRONG_THREAD;
+    if (list != L_WRITE && list != L_WRITE_OPT) return KILN_ERR_INVALID_ARGUMENT;
+    const View* v = nullptr;
+    const int32_t slot = view_slot(*f, list, i, &v);
+    if (slot < 0 || !v->attributes[list][i] || v->sizes[list][i] < 8) return KILN_ERR_INVALID_ARGUMENT;
+    const auto* component = reinterpret_cast<const uint8_t*>(iter[slot]);
+    uint8_t header[8]{};
+    if (!component || !seh_copy(header, component, sizeof header)) return KILN_ERR_INVALID_ARGUMENT;
+    if (!(header[6] & 1)) return KILN_OK; // not initialized: HasValues is readable, formulas still refuse it
+    uint16_t offset = 0;
+    std::memcpy(&offset, header + 4, sizeof offset);
+    const uint32_t size = v->sizes[list][i];
+    if (offset < 8 || offset % 4 || offset > size || !header[7] ||
+        static_cast<uint32_t>(header[7]) > (size - offset) / 4) return KILN_ERR_INVALID_ARGUMENT;
+    return KILN_OK;
+}
+
 KilnResult KILN_CALL game_slice_attr_changed(KilnGameSlice* slice, const uint64_t* iter, int32_t list, int32_t i) {
     Frame* f = frame_of(slice);
     if (!f || !iter || iter != f->iter) return KILN_ERR_WRONG_THREAD;
     if (list != L_WRITE && list != L_WRITE_OPT) return KILN_ERR_INVALID_ARGUMENT;
+    const auto valid = game_slice_attr_validate(slice, iter, list, i);
+    if (valid != KILN_OK) return valid;
     if (!g_attr_changed_fn) return KILN_ERR_UNAVAILABLE;
     const View* v = nullptr;
     const int32_t slot = view_slot(*f, list, i, &v);

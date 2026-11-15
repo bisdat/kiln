@@ -581,6 +581,99 @@ public sealed unsafe class SystemsTests
         Assert.Equal(WrapState.Removed, second.State);
     }
 
+    [Fact]
+    public void Attribute_refuses_a_non_attribute_before_exposing_its_bytes()
+    {
+        using var w = new FakeWorld();
+        w.FuelIsAttribute = false; // still a writable 16-byte block with byte 6 set
+        var refused = false;
+        Systems.Wrap("fuel_setup").Wrap!.BeforeEach((ref EntityView e) =>
+        {
+            try { e.Attribute("Fuel"); }
+            catch (ArgumentException) { refused = true; }
+        });
+        w.Call(w.Wraps[0]);
+        Assert.True(refused);
+        Assert.Equal(0, w.AttrCalls);
+        Assert.Empty(w.Marks);
+    }
+
+    [Fact]
+    public void A_new_session_uses_new_archetype_results_and_descriptor_slots_without_a_pending_poll()
+    {
+        using var w = new FakeWorld();
+        w.LayoutHas.Add(Hash("Fuel"));
+        var calls = 0;
+        var filter = Systems.Wrap("fuel_setup").Wrap!.WhenArchetype(["Fuel"]).Before((ref Slice s) => calls++);
+        var value = 123;
+        Systems.Wrap("fuel_setup").Wrap!.BeforeEach((ref EntityView e) => e.Write<int>("Fuel") = value);
+        ProgramWrap.Poll();
+        foreach (var x in w.Wraps) w.Call(x);
+        Assert.Equal(1, calls);
+        Assert.Equal(123, *(int*)w.Fuel);
+        // STOP/START and reapply happen between polls. The address and observed Active state are reused.
+        w.Session++;
+        w.NewDescriptor = true;
+        w.LayoutHas.Clear();
+        value = 456;
+        foreach (var x in w.Wraps) w.Call(x);
+        Assert.Equal(1, calls);
+        Assert.Equal(456, *(int*)w.Fuel);
+        Assert.Equal(7000, *(long*)w.Transform);
+        Assert.Equal(WrapState.Active, filter.State);
+    }
+
+    [Theory]
+    [InlineData(424u)]
+    [InlineData(432u)]
+    public void Older_native_tails_are_refused_before_calling_new_members(uint size)
+    {
+        using var w = new FakeWorld();
+        w.SetTableSize(size);
+        Assert.Null(Systems.Find("fuel_setup"));
+        Assert.Throws<KilnUnavailableException>(() => Systems.Wrap("fuel_setup"));
+        Assert.Empty(w.Wraps);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(12)]
+    [InlineData(65532)]
+    public void Attribute_refuses_storage_outside_the_component(int offset)
+    {
+        using var w = new FakeWorld();
+        *(ushort*)(w.Fuel + 4) = (ushort)offset; // two values in a 16-byte component
+        w.EntityIds = [101];
+        var refused = false;
+        Systems.Wrap("fuel_setup").Wrap!.BeforeEach((ref EntityView e) =>
+        {
+            try { e.Attribute("Fuel"); }
+            catch (ArgumentException) { refused = true; }
+        });
+        w.Call(w.Wraps[0]);
+        Assert.True(refused);
+        Assert.Equal(0, w.AttrCalls);
+        Assert.Empty(w.Marks);
+    }
+
+    [Fact]
+    public void Attribute_accessors_use_the_validated_storage_offset()
+    {
+        using var w = new FakeWorld();
+        *(ushort*)(w.Fuel + 4) = 12;
+        w.Fuel[7] = 1;
+        w.EntityIds = [101];
+        Systems.Wrap("fuel_setup").Wrap!.BeforeEach((ref EntityView e) =>
+        {
+            var a = e.Attribute("Fuel");
+            a.Values[0] = 500;
+            a[0] += 1;
+        });
+        w.Call(w.Wraps[0]);
+        Assert.Equal(100, *(int*)(w.Fuel + 8));
+        Assert.Equal(501, *(int*)(w.Fuel + 12));
+    }
+
     // ---- the mirrors, against the native record ----
 
     private static JsonNode Abi([CallerFilePath] string self = "")
@@ -619,6 +712,8 @@ public sealed unsafe class SystemsTests
         Assert.Equal(v4["game_archetype_has"], (int)Marshal.OffsetOf(t, "GameArchetypeHas"));
         Assert.Equal(v4["game_slice_slot"], (int)Marshal.OffsetOf(t, "GameSliceSlot"));
         Assert.Equal(v4["game_slice_mark"], (int)Marshal.OffsetOf(t, "GameSliceMark"));
+        Assert.Equal(v4["game_world_session"], (int)Marshal.OffsetOf(t, "GameWorldSession"));
+        Assert.Equal(v4["game_slice_attr_validate"], (int)Marshal.OffsetOf(t, "GameSliceAttrValidate"));
         Assert.Equal(v4["game_slice_attr_changed"], (int)Marshal.OffsetOf(t, "GameSliceAttrChanged"));
         Assert.Equal((int)abi["KilnWorldApiV4"]!["size"]!, Marshal.SizeOf(t));
     }

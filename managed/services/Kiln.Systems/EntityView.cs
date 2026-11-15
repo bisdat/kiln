@@ -76,9 +76,18 @@ public unsafe ref struct EntityView
 
     /// <summary>An attribute component the program writes (<c>"Fuel"</c>, <c>"Health"</c>, <c>"Stamina"</c>): its slots,
     /// written like <see cref="Write{T}"/>; <see cref="Attribute32.Changed"/> runs the game's formulas after a change.</summary>
-    /// <exception cref="InvalidOperationException">The program does not write it; an optional one the entity lacks.</exception>
+    /// <exception cref="ArgumentException">Not an attribute write slot, or its value storage is outside the component.</exception>
+    /// <exception cref="InvalidOperationException">Attribute validation is unavailable on this build.</exception>
     public readonly Attribute32 Attribute(string component)
     {
+        ArgumentException.ThrowIfNullOrEmpty(component);
+        var t = SystemsNative.T;
+        var at = _ctx.Lists.Find(component, write: true);
+        if (at < 0) throw new ArgumentException($"{component} is not an attribute write slot", nameof(component));
+        var rc = t == null ? SystemsNative.Unavailable : t->GameSliceAttrValidate(_slice, _iter, at >> 16, at & 0xFFFF);
+        if (rc == SystemsNative.InvalidArgument)
+            throw new ArgumentException($"{component} is not an attribute or its block is malformed", nameof(component));
+        if (rc != SystemsNative.Ok) throw new InvalidOperationException($"{component}: attribute validation unavailable ({rc})");
         var p = Need(component, true, 8, out var list, out var index, out var size);
         return new Attribute32(p, size, _slice, _iter, list, index, component);
     }
@@ -144,11 +153,13 @@ public unsafe ref struct Attribute32
     /// <summary>True when the block holds values (flag bit 0): the game skips an attribute without them.</summary>
     public readonly bool HasValues => (_p[6] & 1) != 0;
 
+    private readonly int StorageOffset => Unsafe.ReadUnaligned<ushort>(_p + 4);
+
     /// <summary>How many slots (the block's count, within the component's size).</summary>
-    public readonly int Count => Math.Max(0, Math.Min(_p[7], (_size - 8) / 4));
+    public readonly int Count => HasValues ? Math.Max(0, Math.Min(_p[7], (_size - StorageOffset) / 4)) : 0;
 
     /// <summary>The slots.</summary>
-    public readonly Span<int> Values => new(_p + 8, Count);
+    public readonly Span<int> Values => new(_p + (HasValues ? StorageOffset : 8), Count);
 
     /// <summary>Slot <paramref name="slot"/>.</summary>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="slot"/> is not below <see cref="Count"/>.</exception>
@@ -157,7 +168,7 @@ public unsafe ref struct Attribute32
         get
         {
             if ((uint)slot >= (uint)Count) throw new ArgumentOutOfRangeException(nameof(slot), $"{Component} has {Count} slots");
-            return ref ((int*)(_p + 8))[slot];
+            return ref ((int*)(_p + StorageOffset))[slot];
         }
     }
 
@@ -188,7 +199,7 @@ public unsafe ref struct Attribute32
 /// lookups of a component name in them.</summary>
 internal sealed unsafe class ProgramLists
 {
-    private static readonly ConcurrentDictionary<(WorldKind, string), ProgramLists> Cache = new();
+    private static readonly ConcurrentDictionary<(WorldKind, ulong, string), ProgramLists> Cache = new();
     private static readonly int[] ReadOrder =
     [
         SystemsNative.ListTpl, SystemsNative.ListTplOpt, SystemsNative.ListRead, SystemsNative.ListReadOpt,
@@ -213,9 +224,10 @@ internal sealed unsafe class ProgramLists
 
     internal static ProgramLists Of(SystemsNative.Table* t, WorldKind world, string program, int index)
     {
-        if (Cache.TryGetValue((world, program), out var lists)) return lists;
+        var session = t == null ? 0 : t->GameWorldSession((uint)world);
+        if (Cache.TryGetValue((world, session, program), out var lists)) return lists;
         lists = new ProgramLists(t, world, index);
-        return Cache.GetOrAdd((world, program), lists);
+        return Cache.GetOrAdd((world, session, program), lists);
     }
 
     /// <summary>Tests: forget every program.</summary>

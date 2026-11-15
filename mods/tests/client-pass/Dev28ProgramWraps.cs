@@ -81,7 +81,8 @@ public sealed partial class ClientPassMod
         c.Expect(client.Threads.Count > 1 && Interlocked.Read(ref client.OffWorldThread) > 0,
             "the client world's slices ran on the game's workers (a client world always runs its programs as tasks)", client.ToString());
         c.Expect(Interlocked.Read(ref server.Slices) > 0, "the hosted world's wrap ran", server.ToString());
-        c.Expect(disabled.IsEmpty && clientWrap.Stats.Faults == 0 && serverWrap.Stats.Faults == 0,
+        c.Expect(disabled.IsEmpty && clientWrap.Stats.Faults == 0 && serverWrap.Stats.Faults == 0 &&
+                 clientWrap.Stats.Overruns == 0 && serverWrap.Stats.Overruns == 0,
             "no stage faulted or went over its budget", disabled.IsEmpty ? "none" : string.Join("; ", disabled.Select(e => $"{e.Program}: {e.Reason}")));
         clientWrap.Dispose();
         serverWrap.Dispose();

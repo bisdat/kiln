@@ -29,6 +29,8 @@ internal sealed unsafe class FakeWorld : IDisposable
     internal nuint Layout = 0x5000;
     internal readonly HashSet<uint> LayoutHas = new();
     internal bool InRunOriginal;
+    internal ulong Session = 1;
+    internal bool NewDescriptor;
     // per-entity storage of fuel_setup's slots, row r: a Fuel attribute block {root, offset, flags, count, s32 current,
     // s32 max} (16 bytes) and a CurrentTransform (8 bytes; row 2 has none: an optional slot that is absent)
     internal readonly byte* Fuel = (byte*)NativeMemory.AllocZeroed(16 * 8);
@@ -36,6 +38,7 @@ internal sealed unsafe class FakeWorld : IDisposable
     internal readonly byte* Registry = (byte*)NativeMemory.AllocZeroed(8);
     internal readonly List<(ulong Row, int List, int Index)> Marks = new();
     internal int AttrCalls;
+    internal bool FuelIsAttribute = true;
     internal bool RefuseUnwrapInSlice;
     internal int MarkResult = SystemsNative.Ok;
     internal uint FuelSize = 16;
@@ -79,10 +82,13 @@ internal sealed unsafe class FakeWorld : IDisposable
         _table->GameSliceSlot = &Slot;
         _table->GameSliceMark = &Mark;
         _table->GameSliceAttrChanged = &AttrChanged;
+        _table->GameSliceAttrValidate = &AttrValidate;
+        _table->GameWorldSession = &WorldSession;
         for (var r = 0; r < 8; r++)
         {
             var f = Fuel + 16 * r;
             *(uint*)f = 0x05b0bf75;
+            *(ushort*)(f + 4) = 8;
             f[6] = 1;
             f[7] = 2;
             *(int*)(f + 8) = 100 * (r + 1);
@@ -135,6 +141,11 @@ internal sealed unsafe class FakeWorld : IDisposable
         }
     }
 
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static ulong WorldSession(uint kind) => F.Session;
+
+    internal void SetTableSize(uint size) => _table->Header.Size = size;
+
     private static FakeWorld F => Current!;
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
@@ -182,6 +193,12 @@ internal sealed unsafe class FakeWorld : IDisposable
             SystemsNative.ListSysRead when !F.NoRegistry => RegistryName,
             _ => null,
         };
+        if (list == SystemsNative.ListWrite && F.NewDescriptor)
+        {
+            if (capacity > 0) names[0] = TransformName;
+            if (capacity > 1) names[1] = FuelName;
+            return 2;
+        }
         if (one is null) return 0;
         if (capacity > 0) names[0] = one.Value;
         return 1;
@@ -195,9 +212,12 @@ internal sealed unsafe class FakeWorld : IDisposable
         *writable = (byte)(list is SystemsNative.ListWrite or SystemsNative.ListWriteOpt ? 1 : 0);
         switch (list)
         {
-            case SystemsNative.ListWrite when i == 0:
+            case SystemsNative.ListWrite when i == (F.NewDescriptor ? 1 : 0):
                 *size = F.FuelSize;
                 return F.Fuel + 16 * row;
+            case SystemsNative.ListWrite when F.NewDescriptor && i == 0:
+                *size = 8;
+                return F.Transform + 8 * row;
             case SystemsNative.ListReadOpt when i == 0:
                 *size = 8;
                 return row == 2 ? null : F.Transform + 8 * row;
@@ -216,6 +236,18 @@ internal sealed unsafe class FakeWorld : IDisposable
         if (F.MarkResult != SystemsNative.Ok) return F.MarkResult;
         F.Marks.Add((*iter, list, i));
         return SystemsNative.Ok;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int AttrValidate(SystemsNative.Slice* s, ulong* iter, int list, int i)
+    {
+        if (list != SystemsNative.ListWrite || i != 0 || !F.FuelIsAttribute || F.FuelSize < 8)
+            return SystemsNative.InvalidArgument;
+        var p = F.Fuel + 16 * (int)*iter;
+        if ((p[6] & 1) == 0) return SystemsNative.Ok;
+        var offset = *(ushort*)(p + 4);
+        return offset >= 8 && offset % 4 == 0 && offset <= F.FuelSize && p[7] > 0 &&
+            p[7] <= (F.FuelSize - offset) / 4 ? SystemsNative.Ok : SystemsNative.InvalidArgument;
     }
 
     // the game's formulas for Fuel: clamp the current value to the maximum

@@ -672,7 +672,9 @@ typedef struct KilnWorldApi {
      * set is left alone. Any thread outside a program update; it takes effect in the next Pre. */
     KilnResult(KILN_CALL* lab_parallel)(uint32_t on, uint32_t steps);
     /* Wraps program `index` of the live world of `world_kind` (SERVER or CLIENT) with a `stage` (KILN_WRAP_*) that
-     * calls fn(slice, user). *out = its handle. It is PENDING until the target world's next Pre, where kiln.world
+     * calls fn(slice, user). Lifetime: call game_wraps_release and wait for it before freeing anything a stage uses.
+     * Owner retirement closes admission but does not wait for an already-running stage. Poll release until
+     * out_pending is zero, outside every stage. *out = its handle. It is PENDING until the target world's next Pre, where kiln.world
      * applies it (or refuses it: game_wrap_info says why); later worlds of that kind get it again by program name.
      * Any thread outside a stage or program update. A second Replace of a program is not an error: *out is a handle
      * that is REFUSED at once (reason KILN_WRAP_REPLACE_TAKEN, detail names the owner and wrap that replace it).
@@ -744,6 +746,12 @@ typedef struct KilnWorldApi {
      * slot, not an attribute block with values, or the program does not declare impact::AttributeRegistry;
      * KILN_ERR_UNAVAILABLE: not on this build; KILN_ERR_INTERNAL: the formulas faulted. */
     KilnResult(KILN_CALL* game_slice_attr_changed)(KilnGameSlice* slice, const uint64_t* iter, int32_t list, int32_t i);
+    /* Since dev.29: inside iteration, validates reflected AttributeComponent ancestry and the block's bounds.
+     * No formula or write. INVALID_ARGUMENT for a non-attribute or malformed block. Check header.size. */
+    KilnResult(KILN_CALL* game_slice_attr_validate)(KilnGameSlice* slice, const uint64_t* iter, int32_t list, int32_t i);
+    /* Since dev.29: monotonically changing lifecycle generation for this world kind, advanced at STARTED/STOPPING.
+     * Any thread, lock-free; key per-world caches with it before reading their entries. Check header.size. */
+    uint64_t(KILN_CALL* game_world_session)(uint32_t world_kind);
 } KilnWorldApi;
 
 enum {

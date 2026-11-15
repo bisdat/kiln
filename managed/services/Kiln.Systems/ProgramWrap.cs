@@ -75,7 +75,7 @@ public sealed unsafe class ProgramWrap : IDisposable
     private sealed class ArchetypeFilter(uint[] has, uint[] lacks)
     {
         internal readonly uint[] Has = has, Lacks = lacks;
-        internal readonly System.Collections.Concurrent.ConcurrentDictionary<nint, bool> Cache = new();
+        internal readonly System.Collections.Concurrent.ConcurrentDictionary<(ulong Session, nint Layout), bool> Cache = new();
     }
     private ArchetypeFilter? _archetype;
     private bool _disposed;
@@ -293,12 +293,13 @@ public sealed unsafe class ProgramWrap : IDisposable
         if (archetype is not null)
         {
             if (layout == 0 || t == null) return false;
-            if (!archetype.Cache.TryGetValue(layout, out var ok))
+            var key = (t->GameWorldSession((uint)World), layout);
+            if (!archetype.Cache.TryGetValue(key, out var ok))
             {
                 ok = true;
                 foreach (var h in archetype.Has) ok &= t->GameArchetypeHas((uint)World, (nuint)layout, h) == 1;
                 foreach (var h in archetype.Lacks) ok &= t->GameArchetypeHas((uint)World, (nuint)layout, h) == 0;
-                archetype.Cache.TryAdd(layout, ok);
+                archetype.Cache.TryAdd(key, ok);
             }
             if (!ok) return false;
         }

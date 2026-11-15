@@ -49,7 +49,7 @@ wrap.Dispose();   // or let the mod's unload remove it
 - **Lifetime.** `Wrap` is tick thread and returns at once; the stages apply in the target world's next step
   (`State` Pending → Active), again by program name in every later world of that kind, and go with `Dispose` (applied in
   the next step: no call starts after it) or when the mod unloads (the unload waits until no call of the mod's stages
-  runs, at most 2 s). `Stats` sums calls, entities, time, faults and budget overruns over the wrap's stages.
+  runs, up to 2 s; a still-running callback remains rooted and is reaped after it finishes). `Stats` sums calls, entities, time, faults and budget overruns over the wrap's stages.
 - **Refusals.** `Ok = false`: the program is not in that world, it has no update there, native SET is loaded (it
   replaces the game's program runner, so Kiln stays out of it and takes existing wraps out). A capability that is off
   throws `KilnUnavailableException`; the prediction world has no table of its own (`ArgumentException`).
@@ -113,7 +113,9 @@ pointer kept past the call is neither marked nor raised. Server world only.
 On a dedicated server with no player every slice runs on the world's thread. `Kiln.Testing.LabSystems`
 (`KILNX001`, needs `kiln/control/systems.parallel`) forces the game's own worker split for up to 3000 steps, so a test
 can run its handlers on N > 1 threads: `LabSystems.ForceParallel(steps)`, `StopParallel()`, `Forced`, `PlayersMask`.
-`mods/tests/systems-test` runs every row serial and with the switch on.
+`mods/tests/systems-test` covers Before/After, iteration and slots in serial and forced-worker runs. Replace and INIT
+were tested serial only; the managed write-event row used forced workers. The reload sequence does not prove an unload
+interleaved with a blocked worker callback.
 
 ## Native: kiln.world v4
 
@@ -123,6 +125,11 @@ The C table appends the game-program members to kiln.world (`KILN_WORLD_VERSION 
 `game_slice_mark`, `game_slice_attr_changed`, `game_slice_archetype`, `game_archetype_has`. The header documents each
 (threads, results); `mods/tests/systems-test/native` uses all of them. A native stage's fault (SEH) is caught and turns
 that stage off; `KilnWrapStageFn` runs on the slice's thread.
+
+Native callback lifetime: call `game_wraps_release` and poll until `out_pending == 0` before freeing anything a stage
+uses (callback code, user data or other referenced state). Do this outside every stage. Owner retirement prevents new
+calls from entering; it does not wait for an already-running callback. The core retaining a plugin module does not
+keep memory the plugin frees itself alive.
 
 ## Limits
 
