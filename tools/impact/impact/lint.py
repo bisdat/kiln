@@ -39,6 +39,7 @@ Rules (docs/re/impact.md section 6 has the evidence for each):
 import collections
 
 from . import ops
+from .catalog import fnv1a32 as catalog_hash
 from .program import program_id, STREAMS
 
 
@@ -298,6 +299,24 @@ def _check_args(p, insns, k, n, cat, rep, sec):
         if a is None:
             continue
         par = n.param(ai)
+        if n.extra.get("sync") is True and par:
+            # Match the native thunk: zero is disconnected unless Raw; tagged values
+            # must have the declared type and exact size, even for Raw parameters.
+            value = 0 if a.code == 12 else 1 if a.code == 13 else a.args[0] if a.code == 11 else None
+            if value is not None:
+                mismatch = False
+                if not ops.is_handle(value):
+                    mismatch = not par.raw and not (value == 0 and par.optional)
+                elif (value & 0xFFFF) < nv:
+                    v = p.variables[value & 0xFFFF]
+                    expected = par.types[0] if len(par.types) == 1 else "any"
+                    type_info = cat.type_by_name.get(expected, {})
+                    size = par.size if par.size is not None else (type_info.get("size", 0) if expected != "any" else 0)
+                    mismatch = (expected != "any" and v.type != catalog_hash(expected)) or (size != 0 and v.size != size)
+                if mismatch:
+                    rep.add("error", "E_ARGTYPE", f"{n.name} args[{ai}] ({par.name}) does not match its typed declaration",
+                            sec, a.pc)
+                continue
         if a.code == 12 and par:
             if par.unchecked:
                 rep.add("error", "E_UNCONNECTED", f"{n.name} args[{ai}] ({par.name}) is unconnected: the native reads it with no check, "

@@ -161,17 +161,18 @@ void recount_pending() {  // g_mu held
     g_entity_ovr_count.store(static_cast<uint32_t>(g_entity_ovr.size()), std::memory_order_release);
 }
 
-void push_event(const KilnAbilityEvent& ev) {  // job threads
+bool push_event(const KilnAbilityEvent& ev) {  // job threads
     if (!bounded_lock(g_ev_mu)) {
         c_dropped.fetch_add(1, std::memory_order_relaxed);
-        return;
+        return false;
     }
     std::lock_guard lock(g_ev_mu, std::adopt_lock);
     if (g_events.size() >= kMaxEvents) {
         c_dropped.fetch_add(1, std::memory_order_relaxed);
-        return;
+        return false;
     }
     g_events.push_back(ev);
+    return true;
 }
 
 KilnAbilityEvent new_event(uint32_t kind) {
@@ -527,13 +528,10 @@ void dispatch_managed(int slot, NativeResult* out, ArgSlice* args, NativeCtx* ct
         }
         if (it == g_calls.end()) {
             id = ++g_call_seq;
-            g_calls[key] = ManagedCall{id, slot, 0, 0, 0, g_step.load(), false};
-            g_call_key[id] = key;
             queued_new = true;
         }
     }
     if (queued_new) {
-        c_managed_calls.fetch_add(1, std::memory_order_relaxed);
         KilnAbilityEvent ev = new_event(KILN_ABILITY_EV_MANAGED_CALL);
         ev.native_hash = g_slots[slot].hash;
         ev.impact_id = ctx->impact_id;
@@ -542,7 +540,21 @@ void dispatch_managed(int slot, NativeResult* out, ArgSlice* args, NativeCtx* ct
         ev.self = self_of(ctx->impact_id);
         ev.call_id = id;
         capture_args(ev, args, ctx);
-        push_event(ev);
+        // Publish the pending call and its event together. If the bounded event-queue
+        // wait fails, leave no orphaned call: the VM retries the ECALL next step.
+        if (bounded_lock(g_mu)) {
+            std::lock_guard lock(g_mu, std::adopt_lock);
+            if (!g_calls.count(key)) {
+                g_calls[key] = ManagedCall{id, slot, 0, 0, 0, g_step.load(), false};
+                g_call_key[id] = key;
+                if (push_event(ev)) {
+                    c_managed_calls.fetch_add(1, std::memory_order_relaxed);
+                } else {
+                    g_call_key.erase(id);
+                    g_calls.erase(key);
+                }
+            }
+        }
     } else {
         c_managed_suspends.fetch_add(1, std::memory_order_relaxed);
     }
@@ -636,6 +648,7 @@ void on_fault(int i, NativeResult* out, ArgSlice* args, NativeCtx* ctx) {
 template <int I>
 NativeResult* __fastcall thunk(NativeResult* out, ArgSlice* args, NativeCtx* ctx) {
     g_inflight.fetch_add(1, std::memory_order_acq_rel);
+    const int32_t outer_stage = t_stage;
     const int outer_slot = t_slot;  // a game native that runs a program inside its call (nested thunks)
     const bool outer_ran = t_orig_ran, outer_in_game = t_in_game;
     t_slot = I;
@@ -645,6 +658,7 @@ NativeResult* __fastcall thunk(NativeResult* out, ArgSlice* args, NativeCtx* ctx
     out->zero = 0;
     out->value = 1;
     if (seh_dispatch(I, out, args, ctx) != 0) on_fault(I, out, args, ctx);
+    t_stage = outer_stage;
     t_slot = outer_slot;
     t_orig_ran = outer_ran;
     t_in_game = outer_in_game;
@@ -1349,8 +1363,8 @@ void check_programs_ready() {
     if (!ready) return;
     g_programs_ready.store(true);
     if (g_have_natives && g_setup_registry) selftest_programs(preg);
-    check_attachments(preg);
     const uint32_t added = refresh_programs();
+    check_attachments(preg);
     logi("kiln.abilities: the game's ImpactRegistry holds %u programs (step %llu); %u Kiln program(s) from kiln.assets "
          "registered", count, static_cast<unsigned long long>(g_step.load()), added);
 }
@@ -1904,6 +1918,8 @@ int add_kiln_native(KilnOwner owner, std::string_view name, uint32_t argc, uint3
         Slot& s = g_slots[slot];
         s.hash = hash;
         s.argc = argc;
+        // A revived hash may have a new argc: update the engine entry as well as our slot.
+        s.registered_in = 0;
         s.owner = owner;
         s.original.store(nullptr);
         std::snprintf(s.name, sizeof s.name, "%.*s", static_cast<int>(name.size()), name.data());
@@ -1916,15 +1932,14 @@ int add_kiln_native(KilnOwner owner, std::string_view name, uint32_t argc, uint3
         g_slot_of[hash] = slot;
         g_declared.erase(hash);
     }
-    if (g_setup_registry && g_slots[slot].registered_in != g_setup_registry && !register_slot_in(slot, g_setup_registry) &&
-        fresh) {
+    if (g_setup_registry && g_slots[slot].registered_in != g_setup_registry && !register_slot_in(slot, g_setup_registry)) {
         std::lock_guard lock(g_mu);  // the game said no to the new key: give the slot back
         Slot& s = g_slots[slot];
-        s.kind.store(SLOT_FREE, std::memory_order_release);
+        s.kind.store(fresh ? SLOT_FREE : SLOT_DEAD, std::memory_order_release);
         s.sync_fn.store(nullptr);
         s.sync_user.store(nullptr);
         s.owner = 0;
-        g_slot_of.erase(hash);
+        if (fresh) g_slot_of.erase(hash);
         return refuse(KILN_NATIVE_REFUSED_REGISTRY_FULL, "the game's native registry refused it (full)");
     }
     return slot;
