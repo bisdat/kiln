@@ -2273,6 +2273,7 @@ KilnResult define_buff_result(KilnOwner owner, const std::string& json, uint32_t
     const uint32_t bid = fnv1a(probe.guid, 16);
     std::lock_guard l1(store_mutex());
     std::lock_guard lock(g_mu);
+    take_retired();  // refuse an already retiring owner before it can consume a process-lifetime record
     const uintptr_t w = active_world();
     if (w && !g_api->on_world_thread(active_kind())) {
         *report = report_json("not on the thread of kiln.content's world", {});
@@ -2336,7 +2337,10 @@ KilnResult define_buff_result(KilnOwner owner, const std::string& json, uint32_t
             } else {
                 const std::string file = pending_file(mod, probe.guid);
                 const gjson doc = {{"format", 1}, {"mod", mod}, {"registrationId", uuid_text(id.data())}, {"definition", j}};
-                if (!kiln::capacity::write_atomic(u8path(file), doc.dump(2))) {
+                const std::string bytes = doc.dump(2);
+                if (bytes.size() > 65536) {
+                    refuse(KILN_DEFINE_STORAGE_FAILURE, "the stored definition exceeds the 65536-byte replay limit");
+                } else if (!kiln::capacity::write_atomic(u8path(file), bytes)) {
                     refuse(KILN_DEFINE_STORAGE_FAILURE, "could not write " + file);
                 } else {
                     std::lock_guard rl(g_rc_mu);
@@ -2449,8 +2453,8 @@ void pending_replay() {
         text.resize(static_cast<size_t>(std::max<std::streamsize>(in.gcount(), 0)));
         const gjson doc = gjson::parse(text, nullptr, false);
         std::array<uint8_t, 16> id{};
-        if (text.size() > 65536 || doc.is_discarded() || !doc.is_object() || doc.value("format", 0) != 1 || !doc.contains("mod") ||
-            !doc["mod"].is_string() || doc["mod"].get<std::string>() != f.mod || !doc.contains("registrationId") ||
+        if (text.size() > 65536 || doc.is_discarded() || !doc.is_object() || !doc.contains("format") || !doc["format"].is_number_integer() ||
+            doc["format"] != 1 || !doc.contains("mod") || !doc["mod"].is_string() || doc["mod"].get<std::string>() != f.mod || !doc.contains("registrationId") ||
             !doc["registrationId"].is_string() || !uuid_parse(doc["registrationId"].get<std::string>(), &id) || !doc.contains("definition") ||
             !doc["definition"].is_object()) {
             drop("not a stored definition of format 1 for this folder");

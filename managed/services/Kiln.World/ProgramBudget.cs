@@ -126,7 +126,7 @@ public static unsafe partial class World
     /// <param name="kind">The server world (default) or the client world.</param>
     /// <exception cref="ArgumentException"><paramref name="kind"/> is not Server or Client.</exception>
     /// <exception cref="KilnUnavailableException"><c>world.program_budget</c>: kiln.world.budget is not here (kiln.world
-    /// is missing or older than 0.2.0-dev.29, or programs are off on this build).</exception>
+    /// is missing or older than 0.2.0-dev.29). Programs off on this build return <c>NotReady</c>.</exception>
     [AnyThread]
     [RequiresCapability(ProgramBudgetNative.Capability)]
     public static ProgramBudgetResult GetProgramBudget(CapacityWorldKind kind = CapacityWorldKind.Server)

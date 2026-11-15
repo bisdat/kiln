@@ -529,6 +529,9 @@ void test_results() {
           "RequireRegistered with no world: refused NoWorld, nothing taken: " + why(a));
     check(!fs::exists(kc::data_dir() + "/gamedata/pending"), "and no file written");
     check(g_defs.empty(), "and no definition kept");
+    a = define(5, with(def(10), "description", std::string(70000, 'x')), KILN_DEFINE_ALLOW_NEXT_START);
+    check(!a.r.ok && a.r.reason_code == KILN_DEFINE_STORAGE_FAILURE,
+          "a pending definition over the replay limit is refused before accepting it");
     a = define(5, def(2), KILN_DEFINE_ALLOW_NEXT_START);
     check(a.rc == KILN_OK && a.r.ok && a.r.disposition == KILN_DEFINITION_ACCEPTED_NEXT_START && a.r.slots_consumed == 0,
           "AllowNextStart with no world: accepted for the next start, no slot");
@@ -604,6 +607,12 @@ void test_results() {
     check(define(7, with(def(3), "fields", {{"defaultLifeTime", 9}}), KILN_DEFINE_REQUIRE_REGISTERED).r.ok && budget().kiln_used == 1,
           "the reloaded mod's definition takes it back");
 
+    const uint32_t used_before_retire = BM.used;
+    on_owner_retiring(8, nullptr);
+    a = define(8, def(9), KILN_DEFINE_REQUIRE_REGISTERED);
+    check(!a.r.ok && a.r.reason_code == KILN_DEFINE_OWNER_INACTIVE && BM.used == used_before_retire,
+          "retiring notice before Define: refuse without spending an immortal record");
+
     // full: CapacityExceeded before anything is taken, also for AllowNextStart
     BM.used = BM.room;
     a = define(7, def(8), KILN_DEFINE_ALLOW_NEXT_START);
@@ -626,7 +635,12 @@ void test_results() {
     make_world();
     g_fake_api.owner_create = [](KilnStr) -> KilnOwner { return 77; };
     kc::g_test_world = 0;
-    pending_replay();
+    const auto malformed = u8path(pending_dir()) / "test" / "malformed.json";
+    fs::create_directories(malformed.parent_path());
+    { std::ofstream out(malformed); out << R"({"format":"wrong"})"; }
+    bool replay_threw = false;
+    try { pending_replay(); } catch (const std::exception&) { replay_threw = true; }
+    check(!replay_threw && !fs::exists(malformed), "malformed pending field types are refused without throwing at boot");
     check(g_defs.size() == 1 && g_defs[0].name == "Result_2" && g_defs[0].state != "registered", "the next start defines the stored clone before the world");
     check(receipt(stored).r.disposition == KILN_DEFINITION_ACCEPTED_NEXT_START, "its receipt: still AcceptedNextStart before the world");
     kc::g_test_world = 0x7000;
