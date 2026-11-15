@@ -198,6 +198,7 @@ internal static class NetEngine
         }
         foreach (var (k, v) in WorldTablesGate.Properties()) d[k] = v;
         foreach (var (k, v) in PlayerGraphGate.Properties()) d[k] = v;
+        foreach (var (k, v) in BootGate.Properties()) d[k] = v;  // nothing without a boot generation
         return d;
     }
 
@@ -458,11 +459,24 @@ internal static class NetEngine
         var missing = new List<string>();
         var extra = new List<string>();
         var clientMods = hello.Mods.GroupBy(m => m.Id).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        // Boot content (BootGate): a mod both have in the same version whose generations committed other content (settings read in
+        // OnBoot, or files) is another mod for this client, so it takes a version difference's path through the policy below.
+        var serverBoot = BootGate.Own();
+        var clientBoot = BootGate.Decode(hello.Properties.GetValueOrDefault(BootGate.Key));
+        var bootDiffers = new Dictionary<string, (string Id, string Version, string Name)>(StringComparer.Ordinal);
         foreach (var m in RequiredServerMods())
         {
             if (!clientMods.TryGetValue(m.Id, out var cm) || cm.Side == ModSide.Client) missing.Add($"{m.Id} {m.Version} (missing)");
             else if (!_config.VersionsMatch(m.Version, cm.Version)) missing.Add($"{m.Id} {m.Version} (client has {cm.Version})");
+            else if (string.Equals(m.Version, cm.Version, StringComparison.Ordinal) && BootGate.Differs(m.Id, serverBoot, clientBoot))
+            {
+                var detail = BootGate.Detail(m.Id, m.Version);
+                missing.Add(detail);
+                bootDiffers[detail] = (m.Id, m.Version, ModName(m.Id));
+            }
         }
+        var bootNotes = BootGate.LeftOut(serverBoot, clientBoot);
+        var bootNote = bootNotes.Count > 0 ? " (boot: " + string.Join("; ", bootNotes.Take(4)) + ")" : "";
         var serverIds = LocalMods(client: false).Select(m => m.Id).ToHashSet(StringComparer.Ordinal);
         foreach (var cm in hello.Mods)
             if (cm.Side == ModSide.Both && !serverIds.Contains(cm.Id)) extra.Add($"{cm.Id} {cm.Version}");
@@ -487,7 +501,7 @@ internal static class NetEngine
                 refusedFor = missing.Where(m => lacking.Any(id => m.StartsWith(id + " ", StringComparison.Ordinal))).ToList();
             }
         }
-        var reason = refuse ? "This server requires mods you do not have: " + string.Join(", ", refusedFor.Take(8)) : "";
+        var reason = refuse ? RefusalReason(refusedFor, bootDiffers) : "";
         // Different material ids show the wrong walls whatever the mod lists say. modSync off is the operator's own call.
         if (_config.ModSync != ModSyncPolicy.Off && WorldTablesGate.Difference(hello.Properties) is { } tables)
         {
@@ -524,7 +538,7 @@ internal static class NetEngine
         var warnings = new List<string>();
         if (_config.ModSync != ModSyncPolicy.Off)
         {
-            warnings.AddRange(missing.Select(m => "server mod not on this client: " + m));
+            warnings.AddRange(missing.Select(m => bootDiffers.TryGetValue(m, out var b) ? BootGate.Warning(b.Name, b.Id, b.Version) : "server mod not on this client: " + m));
             warnings.AddRange(extra.Select(m => "client mod not on the server: " + m));
         }
         p.Warnings = warnings;
@@ -533,7 +547,7 @@ internal static class NetEngine
             p.State = NetPeerState.Rejected;
             SendFrame(p.Id, EncodeRejectAdvertised(new Wire.Reject(reason, refusedFor)), p);
             p.KickAt = DateTime.UtcNow.AddSeconds(1.5);
-            Log(LogLevel.Warn, $"refusing {p.Name} (Kiln {hello.KilnVersion}): {string.Join("; ", refusedFor)}");
+            Log(LogLevel.Warn, $"refusing {p.Name} (Kiln {hello.KilnVersion}): {string.Join("; ", refusedFor)}{bootNote}");
             return;
         }
         p.State = NetPeerState.Ready;
@@ -546,8 +560,31 @@ internal static class NetEngine
         if (!localMachine && VanillaGate.AwaitsDefinitions(NetNative.ReadGate().KilnTemplates, p.HasChannel(ContentChannel))) p.DefinitionsSince = DateTime.UtcNow;
         else Clear(p);
         Log(LogLevel.Info, $"{p.Name} (0x{p.Id:x}) joined with Kiln {hello.KilnVersion}: {hello.Mods.Count} mod(s), " +
-                           $"{p.Channels.Count} shared channel(s){(warnings.Count > 0 ? $", {warnings.Count} warning(s): " + string.Join("; ", warnings.Take(4)) : "")}");
+                           $"{p.Channels.Count} shared channel(s){(warnings.Count > 0 ? $", {warnings.Count} warning(s): " + string.Join("; ", warnings.Take(4)) : "")}{bootNote}");
         if (Events.HasSubscribers<NetPeerReadyEvent>()) Events.Post(new NetPeerReadyEvent(p));
+    }
+
+    /// <summary>A refused hello's reason: the mods it lacks as before, then, for a mod whose boot content differs, what to do about it
+    /// (BootGate.Reason). Without such a mod the text is the one it always was.</summary>
+    private static string RefusalReason(IReadOnlyList<string> refusedFor, IReadOnlyDictionary<string, (string Id, string Version, string Name)> boot)
+    {
+        if (!refusedFor.Any(boot.ContainsKey)) return "This server requires mods you do not have: " + string.Join(", ", refusedFor.Take(8));
+        var lacking = refusedFor.Where(d => !boot.ContainsKey(d)).ToList();
+        var text = BootGate.Reason(refusedFor.Where(boot.ContainsKey).Select(d => boot[d].Name).ToList());
+        return lacking.Count > 0 ? "This server requires mods you do not have: " + string.Join(", ", lacking.Take(8)) + ". " + text : text;
+    }
+
+    /// <summary>A loaded mod's name for a player (its id when it has none).</summary>
+    private static string ModName(string id)
+    {
+        try
+        {
+            return Mods.All.FirstOrDefault(m => m.Id == id)?.Name is { Length: > 0 } name ? name : id;
+        }
+        catch (Exception)
+        {
+            return id;
+        }
     }
 
     private static void RemapServerChannels(NetPeer p)
