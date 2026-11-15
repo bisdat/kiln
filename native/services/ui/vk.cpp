@@ -887,9 +887,9 @@ VkResult VKAPI_CALL hk_present(VkQueue queue, const VkPresentInfoKHR* info) {
         if (imgui_ready()) input_capture_changed();
         return R.present.load()(queue, info);
     }
-    // the crash guard watches the overlay's first draw of this process even when its start already counted as fine
-    static std::atomic<bool> first_draw{true};
-    if (first_draw.exchange(false, std::memory_order_relaxed)) overlay_guard_first_draw();
+    // the crash guard watches the overlay's first draw attempt of this process (its resources and ImGui are made there,
+    // also when the frame turns out empty), also when the start already counted as fine; one atomic read after that
+    overlay_guard_first_draw();
     const uint64_t t0 = GetTickCount64();
     VkSemaphore wait = VK_NULL_HANDLE;
     bool faulted = false;

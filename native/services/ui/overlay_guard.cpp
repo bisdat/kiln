@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include <windows.h>
 #include <filesystem>
+#include <atomic>
 #include <mutex>
 #include "services/kiln_caps.h"
 #include "ui.h"
@@ -10,7 +11,10 @@ namespace {
 std::mutex mu;
 overlay_guard::Record record;
 std::wstring path;
-bool active = false, said_error = false, began_written = false, idle_done = false, rearmed = false;
+bool active = false, said_error = false, began_written = false, idle_done = false;
+// set (under mu) by the overlay's first draw attempt of this process, before any of its work: from then on only the
+// presented frame (or a normal exit) completes the start, never the idle timer
+std::atomic<bool> draw_seen{false};
 HANDLE ran_timer = nullptr, idle_timer = nullptr;
 uint64_t presents_at_swapchain = 0;
 // How long a guarded start (overlay off) must run before the next start may try the overlay again.
@@ -83,7 +87,9 @@ VOID CALLBACK ran_fine(PVOID, BOOLEAN) {
 VOID CALLBACK idle_proof(PVOID, BOOLEAN) {
     try {
         std::lock_guard<std::mutex> lock(mu);
-        if (!active || record.phase != overlay_guard::Phase::trying || record.stage != overlay_guard::Stage::swapchain) return;
+        if (!active || draw_seen.load() || record.phase != overlay_guard::Phase::trying ||
+            record.stage != overlay_guard::Stage::swapchain)
+            return;
         const uint64_t presented = vk_presents() - presents_at_swapchain;
         if (presented < kIdleProofPresents) {
             logf(KILN_LOG_INFO, "ui: overlay crash guard: only %llu frames presented in %u s since the swapchain; the start is still being watched",
@@ -176,12 +182,14 @@ void overlay_guard_stage(overlay_guard::Stage stage) noexcept {
     } catch (...) { error(); }
 }
 void overlay_guard_first_draw() noexcept {
+    if (draw_seen.load(std::memory_order_relaxed)) return;  // every later draw: one atomic read
     try {
         std::lock_guard<std::mutex> lock(mu);
-        if (!active || !idle_done || rearmed || record.phase != overlay_guard::Phase::complete) return;
-        rearmed = true;
+        if (draw_seen.exchange(true)) return;
+        if (!active || !idle_done || record.phase != overlay_guard::Phase::complete) return;
         record = overlay_guard::rearm(record);
         save();
+        logf(KILN_LOG_INFO, "ui: overlay crash guard: the overlay's first draw; watched until its frame is presented");
     } catch (...) { error(); }
 }
 void overlay_guard_exit() noexcept {
