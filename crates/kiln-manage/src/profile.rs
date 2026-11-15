@@ -1626,6 +1626,7 @@ pub fn activate(dirs: &DataDirs, profile_id: &str, install: &GameInstall) -> Res
     file.mods = render(dirs, &profile, install, mode)?.mods;
     let pj = install.path.join(crate::paths::game::PROFILE);
     crate::util::write_json_atomic(&pj, &file)?;
+    crate::kept::crash_point(crate::kept::Step::GameProfileWritten);
     remove_if_there(&install.path.join(crate::paths::game::CHAIN_ONCE))?;
     remove_if_there(&install.path.join(crate::paths::game::PROFILE_ONCE))?;
     let a = Activation {

@@ -475,6 +475,14 @@ companion; cleanup needs that flag to accept such a copy, a copy without it is c
 XHL-Core's copy in `kiln/chain/<library id>/` (XHL-Core under its own name, core.md "Profiles and activation") has an
 entry too, without a marker file: `files` lists exactly the files Kiln wrote there, and Kiln replaces or removes one
 only while it still holds those bytes; what XHL-Core writes next to it (its log) stays.
+**Publication journal (dev.29):** before a copy is replaced, `kiln/state/placement-journal.json` records the
+publication durably (`[{path, from: marker | null, to: <the receipt it publishes>, parked: <where the old copy waits> |
+null}]`, the last one per path; it stays until that path's receipt moves on). Every placement and cleanup reads it
+first, under the placement lock: a publication stopped after the new copy was published, whose marker and Library
+files are exactly what `to` names, gets that receipt; one stopped after the old copy was parked gets the old copy back
+where it was; a finished one loses its leftover `.kiln-place-<hex>` folder. A receipt that moved on, or a copy that is
+neither, ends the record and nothing is touched: a mismatch is never settled by trusting a receipt. A launcher before
+dev.29 ignores the file.
 The marker alone is advisory: marker-only older copies and player-modified folders are left untouched. The
 upgrade inventory excludes only ShroudForge's mutable enabled switch and setting values. Deactivate/uninstall cleanup
 additionally requires the exact extension text to match; old receipts without it conservatively retain SF copies.

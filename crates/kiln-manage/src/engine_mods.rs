@@ -695,6 +695,102 @@ fn save_placements(game: &Path, entries: &[Placement]) -> Result<()> {
     crate::util::rename_replace(&staged, &file)
 }
 
+/// `<game>/kiln/state/placement-journal.json`: the last publication Kiln began at each placed path ([`Publication`]).
+fn journal_file(game: &Path) -> PathBuf {
+    game.join("kiln/state/placement-journal.json")
+}
+
+/// One publication of a copy ([`copy_in_with`]), written durably before the old copy is parked: where, the marker of
+/// the copy it replaces, the receipt it publishes, and where the old copy is parked until that receipt is written.
+/// It stays after the publication (the record of the last one at that path), until the path's receipt moves on.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Publication {
+    path: PathBuf,
+    #[serde(default)]
+    from: Option<Marker>,
+    to: Placement,
+    #[serde(default)]
+    parked: Option<PathBuf>,
+}
+
+fn publications(game: &Path) -> Vec<Publication> {
+    let file = journal_file(game);
+    if refuse_symlink_path(game, &file).is_err() { return Vec::new(); }
+    crate::util::read_json::<Vec<Publication>>(&file).ok().flatten().unwrap_or_default()
+}
+
+fn save_publications(game: &Path, all: &[Publication]) -> Result<()> {
+    let file = journal_file(game);
+    refuse_symlink_path(game, &file)?;
+    let parent = file.parent().expect("journal parent");
+    std::fs::create_dir_all(parent).map_err(io_at(parent, "creating"))?;
+    let mut text = serde_json::to_string_pretty(all)?;
+    text.push('\n');
+    crate::util::write_atomic_durable_exclusive(&file, text.as_bytes())
+}
+
+/// Records the publication `p` (replacing the last one at its path) before anything of it happens.
+fn begin_publication(game: &Path, p: Publication) -> Result<()> {
+    let mut all = publications(game);
+    all.retain(|x| x.path != p.path);
+    all.push(p);
+    save_publications(game, &all)
+}
+
+/// The temporary folder a publication parked the old copy in (`<parent>/.kiln-place-<hex>/old`), deleted once the
+/// publication is finished; only that shape of folder, beside the copy, never through a link.
+fn drop_parked(game: &Path, p: &Publication) -> bool {
+    let Some(parked) = &p.parked else { return false };
+    let Some(dir) = parked.parent() else { return false };
+    let ours = dir.file_name().is_some_and(|n| n.to_string_lossy().starts_with(".kiln-place-")) && dir.parent() == p.path.parent();
+    if !ours || refuse_symlink_path(game, dir).is_err() || !dir.is_dir() { return false; }
+    std::fs::remove_dir_all(dir).is_ok()
+}
+
+/// What a stop inside a publication left ([`copy_in_with`]), before anything looks at the copies ([`place`],
+/// [`unplace`]). By the journal and the receipt at each path: a publication whose receipt is written only loses its
+/// parked old copy; one stopped after the new copy was published (its marker and every Library file exactly what the
+/// journal says it published) gets that receipt now; one stopped after the old copy was parked and before the new one
+/// was published gets the old copy back where it was. A receipt that moved on, or a copy that is neither, ends the
+/// record and nothing is touched: a mismatch is never resolved by trusting a receipt (`owned` still refuses it).
+fn recover_publications(game: &Path, receipts: &mut Vec<Placement>) -> Result<()> {
+    let all = publications(game);
+    if all.is_empty() { return Ok(()); }
+    let (mut keep, mut changed, mut receipts_changed) = (Vec::new(), false, false);
+    for mut p in all {
+        if refuse_symlink_path(game, &p.path).is_err() { changed = true; continue; }
+        let current = receipts.iter().find(|r| r.path == p.path);
+        if current.is_some_and(|r| r.marker == p.to.marker && r.files == p.to.files) {
+            if drop_parked(game, &p) { p.parked = None; changed = true; }
+            keep.push(p);
+            continue;
+        }
+        changed = true;
+        if current.map(|r| r.marker.clone()) != p.from { continue; } // the receipt moved on: nothing of this to finish
+        let published = p.path.is_dir() && marker(&p.path).as_ref() == Some(&p.to.marker)
+            && player_entries(&p.path, p.to.marker.kind, &current_receipt(&p.path, &p.to)).ok().flatten().is_some();
+        if published {
+            receipts.retain(|r| r.path != p.path);
+            receipts.push(p.to.clone());
+            receipts_changed = true;
+            drop_parked(game, &p);
+            p.parked = None;
+            keep.push(p);
+            continue;
+        }
+        if std::fs::symlink_metadata(&p.path).is_err() && p.from.is_some()
+            && let Some(parked) = p.parked.clone()
+            && refuse_symlink_path(game, &parked).is_ok() && parked.is_dir() && marker(&parked) == p.from
+        {
+            std::fs::rename(&parked, &p.path).map_err(io_at(&p.path, "putting the parked copy back"))?;
+            drop_parked(game, &p);
+        }
+    }
+    if receipts_changed { save_placements(game, receipts)?; }
+    if changed { save_publications(game, &keep)?; }
+    Ok(())
+}
+
 /// A temporary file of a marker write of Kiln's, at the top of a folder: `<marker>.tmp` ([`crate::util::write_atomic`],
 /// what a write that failed before its rename left) or `.<marker>.<hex>.kiln-tmp` ([`crate::util::write_atomic_exclusive`]).
 /// Never the player's: not part of a folder's inventory, and [`adopt`] clears it.
@@ -1284,7 +1380,12 @@ fn copy_in_with(roots: Roots, src: &Path, dst: &Path, m: &Marker, kept: &[(Strin
     }
     let old = tmp.path().join("old");
     let replaced = dst.exists();
+    // the intent first, durably: a stop from here on is finished or put back before the next placement looks at the
+    // copies (recover_publications)
+    begin_publication(roots.game, Publication { path: dst.to_path_buf(), from: if replaced { marker(dst) } else { None },
+        to: receipt.clone(), parked: replaced.then(|| old.clone()) })?;
     if replaced { std::fs::rename(dst, &old).map_err(io_at(dst, "parking old mod"))?; }
+    if crate::kept::stop_here(crate::kept::Step::Parked) { std::mem::forget(tmp); panic!("injected crash at Parked"); }
     if let Err(e) = rename_in(&staged, dst) {
         if replaced {
             if let Err(e) = std::fs::rename(&old, dst) {
@@ -1293,6 +1394,7 @@ fn copy_in_with(roots: Roots, src: &Path, dst: &Path, m: &Marker, kept: &[(Strin
         }
         return Err(io_at(dst, "placing")(e));
     }
+    if crate::kept::stop_here(crate::kept::Step::Published) { std::mem::forget(tmp); panic!("injected crash at Published"); }
     if let Err(error) = persist(&receipt) {
         if let Err(e) = std::fs::rename(dst, &staged) {
             return Err(preserve_recovery(tmp, io_at(dst, "rolling back new mod")(e)));
@@ -1304,6 +1406,7 @@ fn copy_in_with(roots: Roots, src: &Path, dst: &Path, m: &Marker, kept: &[(Strin
         }
         return Err(error);
     }
+    if crate::kept::stop_here(crate::kept::Step::ReceiptSaved) { std::mem::forget(tmp); panic!("injected crash at ReceiptSaved"); }
     let said = match (carry, done) {
         (Some(c), Some(done)) => carried(roots.game, m.kind, key, &c, &done, dst)?,
         _ => None,
@@ -1410,6 +1513,7 @@ pub fn unplace(dirs: &DataDirs, game_dir: &Path) -> Result<PlacementCleanup> {
     if !file.try_exists().map_err(io_at(&file, "inspecting"))? { return Ok(PlacementCleanup::default()); }
     let _lock = engine_lock(game_dir, &game_dir.join("kiln/state"))?;
     let mut receipts = placements(game_dir)?;
+    recover_publications(game_dir, &mut receipts)?;
     let mut report = PlacementCleanup::default();
     for receipt in receipts.clone() {
         let dst = &receipt.path;
@@ -1950,6 +2054,8 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
     let _lock = engine_lock(game_dir, &game_dir.join("kiln/state"))?;
     let mut rep = PlaceReport::default();
     let mut receipts = placements(game_dir)?;
+    // a publication a stop left half done is finished or put back first
+    recover_publications(game_dir, &mut receipts)?;
     let roots = Roots { data: &dirs.root, game: game_dir };
     for kind in [ModKind::ShroudForge, ModKind::Set] {
         let list = profile.mods.list(kind);

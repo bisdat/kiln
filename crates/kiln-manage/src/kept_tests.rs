@@ -440,3 +440,42 @@ fn review_stop_between_placement_and_receipt_must_finish_the_restore() {
     w.next_start();
     assert_settings(&w, "1.0.0", OLD);
 }
+
+/// Kiln's temporary folders of a placement beside the mod's copy (`.kiln-place-<hex>`).
+fn place_leftovers(w: &World) -> Vec<String> {
+    std::fs::read_dir(w.g.path.join("greeneye")).into_iter().flatten().flatten().map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with(".kiln-place-")).collect()
+}
+
+/// The placement that follows a roll back, stopped after the old copy is parked, after the new one is published, after
+/// its receipt, and after the game's profile.json: the next start finishes it (or puts the parked copy back and places
+/// again), and the rolled back version has the settings it had, never the newer version's.
+#[test]
+fn a_placement_stopped_at_any_step_ends_with_the_rolled_back_settings() {
+    for step in [Step::Parked, Step::Published, Step::ReceiptSaved, Step::GameProfileWritten] {
+        let w = World::updated(&format!("place-{step:?}"));
+        w.rollback().unwrap();
+        crash_at(step, || { let _ = crate::profile::refresh_active(&w.dirs, &w.g); });
+        recover_touches_only_kept(&w);
+        w.next_start();
+        assert_settings(&w, "1.0.0", OLD);
+        assert!(place_leftovers(&w).is_empty(), "{step:?}: {:?}", place_leftovers(&w));
+        assert!(pending_restores(&w.dirs, ModKind::Greeneye, "worstmap").is_empty(), "{step:?}");
+        w.tidy_on_disk();
+    }
+}
+
+/// An update's placement stopped after the new copy is published: the next start gives it its receipt, and the new
+/// version runs with the settings carried over (as every update does), the old one kept with them.
+#[test]
+fn an_update_placement_stopped_after_its_publish_is_finished() {
+    let w = world("update-publish");
+    w.drop_in(&w.g, "1.0.0");
+    w.write(&w.g, "1");
+    crash_at(Step::Published, || { w.drop_in(&w.g, "2.0.0"); });
+    w.next_start();
+    assert_settings(&w, "2.0.0", OLD);
+    assert_eq!(w.kept(), ["1.0.0"]);
+    assert!(place_leftovers(&w).is_empty());
+    w.tidy_on_disk();
+}

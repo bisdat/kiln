@@ -268,6 +268,14 @@ pub(crate) enum Step {
     BeforeCommit,
     /// A restore wrote its first file into the game folder.
     RestoreFile,
+    /// Placement (`engine_mods`): the old copy is parked, the new one not published yet.
+    Parked,
+    /// Placement: the new copy is published, its receipt not written yet.
+    Published,
+    /// Placement: the receipt is written, the parked copy not deleted yet.
+    ReceiptSaved,
+    /// Activation (`profile`): the game's `kiln/profile.json` is written, the activation record not yet.
+    GameProfileWritten,
 }
 
 #[cfg(test)]
@@ -281,16 +289,30 @@ pub(crate) mod hooks {
 }
 
 #[cfg(test)]
-fn crash_point(step: Step) {
-    if hooks::STOP_AT.with(|s| s.get()) == Some(step) {
-        hooks::STOP_AT.with(|s| s.set(None));
+pub(crate) fn crash_point(step: Step) {
+    if stop_here(step) {
         panic!("injected crash at {step:?}");
     }
 }
 
 #[cfg(not(test))]
 #[inline]
-fn crash_point(_: Step) {}
+pub(crate) fn crash_point(_: Step) {}
+
+/// Does a test stop the work on this thread at `step` (once)? The caller then panics as a crash would, after it let go
+/// of what a crash would not clean up (a temporary folder's drop).
+#[cfg(test)]
+pub(crate) fn stop_here(step: Step) -> bool {
+    let stop = hooks::STOP_AT.with(|s| s.get()) == Some(step);
+    if stop { hooks::STOP_AT.with(|s| s.set(None)); }
+    stop
+}
+
+#[cfg(not(test))]
+#[inline]
+pub(crate) fn stop_here(_: Step) -> bool {
+    false
+}
 
 // ------------------------------------------------------------------------------------------------ settings and disk
 
