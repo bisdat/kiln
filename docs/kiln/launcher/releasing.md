@@ -487,6 +487,42 @@ Each release:
    uploads the Nexus build (nexus/), never the direct one. When an upload fails half way (a storage error), run it
    again with `--only` naming the kinds that are still missing: a kind that went up must not be uploaded twice.
 
+### Cutting a beta (a test build for the Discord testers)
+A test build is a release folder of its own, built from a pushed commit like a release, that moves only the beta
+channel. Nothing of it announces a release: no Nexus Mods build or upload, no notes page or download page entry, no
+dev or stable manifest, no `updates-dev`, never GitHub's "latest", no SDK upload, no API record promotion.
+1. Commit and push. `VERSION` stays `X.Y.Z-dev`; the test build carries the version of the release it leads to:
+   `V=$(tools/release/version.sh dev)` (the number the final build will have, or the one planned for it) and the next
+   beta number `B` (1 for the first test build of `V`, then 2, ...; never reuse one).
+2. `tools/release/release.sh $V --beta $B` → `~/Kiln-release/kiln-$V-beta.$B/`. All checks must say PASS (a test
+   build's checks: the folder has no nexus/ and only the beta channel's manifests, its files are signed for
+   `$V+beta.$B`). The launcher has `KILN_LAUNCHER_CHANNEL=beta`, `KILN_LAUNCHER_BETA=$B` baked in (`build.rs`); its
+   README.txt and RELEASE-NOTES.md say "test build". Try the AppImage: the header says "Beta $B".
+3. `tools/release/github-draft.sh ~/Kiln-release/kiln-$V-beta.$B` → a draft pre-release `v$V-beta.$B` ("Kiln $V beta
+   $B (test build)"), without the SDK files and the samples. `--dry-run` shows the command and the staged files.
+4. `tools/release/publish.sh ~/Kiln-release/kiln-$V-beta.$B --host <the web server's ssh name>` (try `--dry-run`
+   first: it prints every remote command and runs none): `downloads/$V-beta.$B/` and `updates/beta/latest.json` on
+   frostdev.io, the draft published as a pre-release, the `updates-beta` pointer (created the first time). It refuses
+   `--nexus` and a folder with another channel's manifest.
+5. Tell the testers (the owner's channel on Discord; nothing in the tooling announces). Launchers following the beta
+   see it at their next check.
+6. **The first beta** (test build 1 of 0.2.0-dev.29): players on 0.2.0-dev.28 have no Beta choice, so the first beta is
+   a download link: `https://frostdev.io/kiln/downloads/0.2.0-dev.29-beta.1/` (or the GitHub pre-release). Installed
+   by hand over 0.2.0-dev.28 (the AppImage replaced, the setup run), it stays on the beta channel by itself (baked in),
+   takes the copy from before the beta at its first start, and can switch back to the release in one click. From
+   0.2.0-dev.29 on, the switch is in every launcher: Settings > Updates > Channel.
+7. **The final build:** `release.sh $V` as always. It also writes `updates/frostdev.io/beta/latest.json`, and
+   publish.sh moves the beta channel to it too, so every tester is offered the final build; it leaves the beta channel
+   alone when frostdev.io's beta manifest already names a newer test build (of the next version), or with
+   `--no-beta-channel`. GitHub's `updates-beta` follows the same rule.
+8. **A bad test build:** publish the next beta number. Testers on the bad one are offered it; a switch back to the
+   release always works.
+
+Tests: `python3 -I tools/release/test_beta.py` (the build order, beta manifests, release.sh's `--beta`/`--channel`
+handling, github-draft.sh and publish.sh dry runs on made-up folders signed with a throwaway key: a test build moves
+only the beta channel and publishes no SDK, a release moves dev and beta, a file signed for another build is refused),
+`tools/release/e2e-update.sh --only beta` (below).
+
 **Trial runs of the working tree.** `--worktree` builds the working tree (uncommitted and untracked files too)
 instead of a commit, for test runs only: it needs an explicit `--out` that is not a release folder
 (`tools/release/release.sh $V --worktree --out ~/Kiln-release/trial/kiln-$V --no-nexus`); without one, or with
@@ -579,7 +615,14 @@ publishing status.
 - `tools/release/e2e-update.sh`: two real AppImages (`0.2.0-dev.1001`, `0.2.0-dev.1002`) built with the QA features
   `dev-eval,update-test-feeds`, signed with a key made for the test, served by two local HTTP servers; scenarios:
   frostdev.io serves it, frostdev.io is down, frostdev.io serves a changed file, both serve a changed file. Each runs
-  on its own X display with its own HOME, data dir and dbus session.
+  on its own X display with its own HOME, data dir and dbus session. `--only beta` (dev.29): a third AppImage, test
+  build 1 of `0.2.0-dev.1003` (baked beta, signed for `0.2.0-dev.1003+beta.1`), on the feeds' beta channel: the
+  release build chooses Beta in Settings, switches and restarts into the test build (the copy from before the beta is
+  taken), then the Beta mark switches back to the older release with the copy put back; the AppImage's sha256 and the
+  settings are checked at each step. It runs no game process.
+- `bun x playwright test tests/beta.spec.ts` (browser mock): the channel names, both switches (Cancel, Switch now,
+  Restart now, the restore choice), nothing to switch to, an install that cannot replace itself, the Beta mark, the
+  Deck's Channel row and mark, the Play page's notices, and the Nexus build's link to the download page.
 - Test feeds: debug builds and builds with the `update-test-feeds` feature read `KILN_UPDATE_FEEDS`
   (`name=url;name=url`, `{channel}` in the URL) and take it only when every URL is on the loopback interface. Release
   builds never read it. Plain http needs `plugins.updater.dangerousInsecureTransportProtocol` in a QA build's config.

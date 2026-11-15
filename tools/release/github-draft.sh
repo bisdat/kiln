@@ -12,6 +12,9 @@
 #   INSTALL-RUNTIME.txt, THIRD-PARTY-NOTICES.txt, SHA256SUMS.
 # Never nexus/: the Nexus Mods build of the launcher (no self-update) goes only to Nexus Mods (nexus.py). GitHub gets
 # the direct build, which updates itself.
+# A test build (release.sh --beta N; its manifest's version is X.Y.Z-dev.N+beta.B): the draft is the pre-release
+# v<version>-beta.<n>, titled as a test build, without the SDK (nupkgs, kiln, the vsix: a test build's SDK carries the
+# release's version and must never reach a NuGet cache) and without the samples.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo_dir=$(cd "$here/../.." && pwd)
@@ -27,13 +30,20 @@ while (($#)); do
 done
 [[ -d $dir ]] || { echo "usage: $0 RELEASE_DIR [--repo OWNER/NAME] [--target COMMIT] [--dry-run]" >&2; exit 2; }
 version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$dir/updates/github/latest.json")
+# a test build's id X.Y.Z-dev.N+beta.B: its name (tag, title) is X.Y.Z-dev.N-beta.B, the files keep X.Y.Z-dev.N
+beta=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("kiln", {}).get("beta") or "")' "$dir/updates/github/latest.json")
+name=$version
+if [[ -n $beta ]]; then
+  [[ $version == *"+beta.$beta" ]] || { echo "the manifest's version $version does not name beta $beta" >&2; exit 1; }
+  version=${version%%+*} name=$version-beta.$beta
+fi
 built=$(sed -n 's/.*from commit \([0-9a-f]\{7,40\}\).*/\1/p' "$dir/README.txt" | head -1)
 [[ -n $built ]] || { echo "$dir was not built from a commit (a test build of a working tree?): not for GitHub" >&2; exit 1; }
 target=${target:-$(git -C "$repo_dir" rev-parse --verify "$built^{commit}")}
 [[ $(git -C "$repo_dir" rev-parse --short=7 "$target") == "$built" ]] || { echo "--target $target is not the commit $built the folder was built from" >&2; exit 1; }
 python3 "$here/lib/release.py" sums "$dir" --check
-tag=v$version
-pre=(); [[ $version == *-* ]] && pre=(--prerelease)
+tag=v$name
+pre=(); [[ $version == *-* || -n $beta ]] && pre=(--prerelease)
 
 stage=$dir.github
 rm -rf "$stage" && mkdir -p "$stage"
@@ -45,7 +55,7 @@ put() {
   ln "$1" "$stage/$2" 2>/dev/null || cp "$1" "$stage/$2"
 }
 # the direct build only (linux/, windows/); nexus/ stays out
-for f in "$dir"/linux/* "$dir"/windows/*; do put "$f" "$(basename "$f")"; done
+for f in "$dir"/linux/* "$dir"/windows/*; do [[ -e $f ]] || continue; put "$f" "$(basename "$f")"; done
 put "$dir/updates/github/latest.json" latest.json
 put "$dir/runtime/kiln-runtime-$version.zip" "kiln-runtime-$version.zip"
 put "$dir/runtime/INSTALL-RUNTIME.txt" INSTALL-RUNTIME.txt
@@ -58,27 +68,34 @@ if ((${#units[@]})); then
   tar --sort=name --owner=0 --group=0 --numeric-owner --mode=0644 --mtime="@$(git -C "$repo_dir" log -1 --format=%ct "$target")" \
     -C "$dir/runtime" -cf - "${units[@]}" | gzip -n >"$stage/kiln-systemd-units-$version.tar.gz"
 fi
-put "$dir/runtime/kilnctl" "kilnctl-$version-linux-x86_64"
-put "$dir/sdk/kiln" "kiln-$version-linux-x86_64"
-[[ -f $dir/runtime/kilnctl.exe ]] && put "$dir/runtime/kilnctl.exe" "kilnctl-$version-windows-x86_64.exe"
-[[ -f $dir/sdk/kiln.exe ]] && put "$dir/sdk/kiln.exe" "kiln-$version-windows-x86_64.exe"
-for f in "$dir"/sdk/*.nupkg "$dir"/sdk/*.vsix "$dir"/source/*; do put "$f" "$(basename "$f")"; done
-reserve_asset "kiln-samples-$version.zip"
-(cd "$dir" && zip -qr -X "$stage/kiln-samples-$version.zip" samples)
+put "$dir/runtime/kilnctl" "kilnctl-$name-linux-x86_64"
+[[ -f $dir/runtime/kilnctl.exe ]] && put "$dir/runtime/kilnctl.exe" "kilnctl-$name-windows-x86_64.exe"
+if [[ -z $beta ]]; then
+  put "$dir/sdk/kiln" "kiln-$version-linux-x86_64"
+  [[ -f $dir/sdk/kiln.exe ]] && put "$dir/sdk/kiln.exe" "kiln-$version-windows-x86_64.exe"
+  for f in "$dir"/sdk/*.nupkg "$dir"/sdk/*.vsix; do put "$f" "$(basename "$f")"; done
+  reserve_asset "kiln-samples-$version.zip"
+  (cd "$dir" && zip -qr -X "$stage/kiln-samples-$version.zip" samples)
+fi
+for f in "$dir"/source/*; do put "$f" "$(basename "$f")"; done
 for f in README.txt THIRD-PARTY-NOTICES.txt; do put "$dir/$f" "$f"; done
 reserve_asset SHA256SUMS
 (cd "$stage" && sha256sum -- * >SHA256SUMS)
 echo "staged $(ls "$stage" | wc -l) files in $stage"
 
+title="Kiln $version"
+[[ -n $beta ]] && title="Kiln $version beta $beta (test build)"
+cmd=(gh release create "$tag" --repo "$gh_repo" --draft "${pre[@]}" --target "$target" --title "$title"
+  --notes-file "$dir/RELEASE-NOTES.md")
+if ((dry)); then
+  # a dry run asks GitHub nothing
+  printf 'would run: %q ' "${cmd[@]}"; echo "$stage/*"
+  exit 0
+fi
 if gh release view "$tag" --repo "$gh_repo" >/dev/null 2>&1; then
   echo "$gh_repo already has a release $tag; delete the draft first if you mean to replace it" >&2
   exit 1
 fi
-cmd=(gh release create "$tag" --repo "$gh_repo" --draft "${pre[@]}" --target "$target" --title "Kiln $version"
-  --notes-file "$dir/RELEASE-NOTES.md")
-if ((dry)); then
-  printf 'would run: %q ' "${cmd[@]}"; echo "$stage/*"
-  exit 0
-fi
+
 "${cmd[@]}" "$stage"/*
 echo "draft $tag created on $gh_repo (not published): gh release view $tag --repo $gh_repo --web"
