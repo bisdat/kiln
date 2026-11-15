@@ -252,6 +252,7 @@ pub fn start(app: AppHandle) {
                         native: mtime(&g.path.join(gp::NATIVE_JSON)),
                         progress: mtime(&g.path.join(kiln_manage::start_progress::PROGRESS_JSON)),
                     };
+                    crate::commands::launch::observe_stop(g, now.pid);
                     if now.pid.is_none() {
                         follow_profile(&app, g, &mut profiles);
                     }
