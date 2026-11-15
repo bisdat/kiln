@@ -130,7 +130,10 @@ struct PoolDefinition {
     std::vector<PoolEntry> entries;
     std::set<std::string> dependencies;
 };
-struct PoolGameMaterial { uint32_t item = 0; bool roof = false; };
+struct PoolGameMaterial { uint32_t item = 0; bool roof = false; bool ambiguous = false; };
+// An item of the game that places a voxel material (its voxel reference is set): its debug name, its ItemId and the
+// cell it places (building cells 128..255).
+struct GameBlockItem { std::string debug_name; uint32_t item_id = 0; int cell = -1; };
 struct ModFile {
     std::string mod, dir, file, clients;
     std::vector<PoolDefinition> pools;
@@ -236,11 +239,16 @@ std::string handshake_hash(const std::vector<Placed>& placed, const std::vector<
                            const std::vector<MaterialPool>& pools, const std::vector<Shape>& shapes);
 
 struct PoolResolution {
-    bool arguments_invalid = false;
+    bool arguments_invalid = false;  // the author's own mistake (a duplicate, a roof disagreement): a bad argument
+    std::string argument_reason;     // the first such, naming the entries
     std::vector<MaterialPool> pools;
     std::set<Guid> grouped;
     std::vector<std::string> errors;
 };
+// What a pool entry's "gameMaterial" names: a game building material (the material_name of the item that places it)
+// -> that block item, with the material's roof flag from its registry config.
+std::map<std::string, PoolGameMaterial> pool_game_materials(const std::vector<GameBlockItem>& items, const Bytes& registry,
+                                                              const RegistryInfo& info, const Layouts& L);
 PoolResolution resolve_pools(const std::vector<PoolDefinition>& definitions, const std::vector<Material>& materials,
                              const std::map<std::string, PoolGameMaterial>& game);
 void bind_shape_pools(std::vector<Shape>* shapes, const std::vector<PoolDefinition>& definitions,

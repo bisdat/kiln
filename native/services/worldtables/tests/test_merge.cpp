@@ -424,6 +424,62 @@ void pool_admission_test() {
     check("pool-admission.invalid-entry-still-partitions",!invalid.errors.empty() && r.pools.empty() && r.grouped.count(ice.guid));
 }
 
+// A pool's "gameMaterial" is the block item the build menu lists for that material, not its registry config's
+// materialItem: that field is the material's loot (Rough Wood's is Wood Logs, Rough Stone's the Stone terrain item),
+// which several materials share. On the 26430253 server the old catalog put Wood Logs and the Stone terrain item in
+// the lab's pools and refused the 64-entry pool for a duplicate. Every building config of this registry has the same
+// materialItem, as the game's sharing ones do.
+void pool_game_catalog_test() {
+    const Layouts L = layouts();
+    Bytes reg = registry({129, 130, 131}, -1);
+    RegistryInfo info;
+    std::string why;
+    check("pool-catalog.registry-reads", read_registry(reg, L, &info, &why) && info.building_at.size() == 3, why);
+    reg[info.building_at.at(131) + L.building.roof] = 1;
+    Guid loot;
+    std::memcpy(loot.b.data(), reg.data() + info.building_at.at(129) + L.building.item, 16);
+    const std::vector<GameBlockItem> items{{"Block_T1_Alpha_CRAFTING", 1001, 129}, {"Block_T2_Beta_REWARD", 1002, 130},
+                                           {"Block_Roof_T1_Gamma", 1003, 131}, {"Material_T1_Logs", 1004, -1},
+                                           {"Build_TerrainMaterial_T1_Stone", 1005, 2}};
+    auto game = pool_game_materials(items, reg, info, L);
+    const auto item = [&](const char* n) { return game.count(n) ? game[n].item : 0u; };
+    check("pool-catalog.own-block-item", item("Alpha") == 1001 && item("Beta") == 1002 && item("RoofGamma") == 1003,
+          std::to_string(item("Alpha")) + " " + std::to_string(item("Beta")) + " " + std::to_string(item("RoofGamma")));
+    check("pool-catalog.not-the-loot-item", item("Alpha") != item_id_of(loot) && item("Beta") != item_id_of(loot));
+    check("pool-catalog.roof-from-registry", game.count("RoofGamma") && game["RoofGamma"].roof && game.count("Alpha") && !game["Alpha"].roof);
+    check("pool-catalog.only-building-materials", !game.count("TerrainStone") && !game.count("Logs") && game.size() == 3);
+    ModFile mf;
+    mf.mod = "catalog";
+    mf.clients = "mod";
+    read_blocks(parse_relaxed(R"({"buildingMaterialPools":{"two":{"name":"Two","materials":[{"gameMaterial":"Alpha"},{"gameMaterial":"Beta"}]}}})"), &mf);
+    auto r = resolve_pools(mf.pools, {}, game);
+    check("pool-catalog.sharing-loot-is-no-duplicate", r.pools.size() == 1 && r.pools[0].items == std::vector<uint32_t>{1001, 1002},
+          r.errors.empty() ? "" : r.errors[0]);
+    // a duplicate is the author's: the reason names both entries, not "malformed"
+    ModFile dup;
+    dup.mod = "catalog";
+    dup.clients = "mod";
+    read_blocks(parse_relaxed(R"({"buildingMaterialPools":{"dup":{"name":"Dup","materials":[{"gameMaterial":"Beta"},{"gameMaterial":"Alpha"},{"gameMaterial":"Alpha"}]}}})"), &dup);
+    r = resolve_pools(dup.pools, {}, game);
+    const std::string named = "materials[1] (gameMaterial Alpha) and materials[2] (gameMaterial Alpha) are the same building item 1001";
+    check("pool-catalog.duplicate-names-both-entries", r.pools.empty() && r.arguments_invalid && r.argument_reason.find(named) != std::string::npos &&
+                                                           r.errors.size() == 1 && r.errors[0].find(named) != std::string::npos,
+          r.argument_reason);
+    dup.pools[0].entries = {{"", "Alpha"}, {"", "RoofGamma"}};
+    r = resolve_pools(dup.pools, {}, game);
+    check("pool-catalog.roof-names-the-entry", r.pools.empty() && r.arguments_invalid &&
+                                                   r.argument_reason.find("materials[1] (gameMaterial RoofGamma) is a roof material") != std::string::npos,
+          r.argument_reason);
+    auto twice = items;
+    twice.push_back({"Block_T3_Alpha_REWARD", 1006, 129});
+    game = pool_game_materials(twice, reg, info, L);
+    dup.pools[0].entries = {{"", "Alpha"}};
+    r = resolve_pools(dup.pools, {}, game);
+    check("pool-catalog.two-block-items-of-one-name-refused", r.pools.empty() && !r.arguments_invalid && r.errors.size() == 1 &&
+                                                                  r.errors[0].find("Alpha is placed by more than one block item") != std::string::npos,
+          r.errors.empty() ? "" : r.errors[0]);
+}
+
 void pool_reflection_test() {
     for (bool client:{false,true}) {
         Bytes image(16384,0); image[0]='M';image[1]='Z';wr<uint32_t>(image,0x3c,0x100);
@@ -832,6 +888,24 @@ int main(int argc, char** argv) {
         array_at(np, L.pools, L.pool_stride, &pools);
         array_at(np, static_cast<uint32_t>(pools.base - np.data()) + L.pool_materials, 4, &items);
         check("game.new-reads-back", gi.building_at.count(213) && items.count == 62 && rd<uint32_t>(np, items.base - np.data() + 61 * 4) == nm.item_id);
+        // the game's own building configs share loot items (materialItem): two that do still resolve to their own block items
+        RegistryInfo own;
+        read_registry(greg, L, &own, &why);
+        std::map<std::string, std::vector<int>> by_loot;
+        for (const auto& [cell, at] : own.building_at) {
+            Guid g;
+            std::memcpy(g.b.data(), greg.data() + at + L.building.item, 16);
+            if (!g.zero()) by_loot[g.text()].push_back(cell);
+        }
+        std::vector<int> pair;
+        for (const auto& [loot, cells] : by_loot)
+            if (cells.size() > 1 && pair.empty()) pair = {cells[0], cells[1]};
+        check("game.pool-catalog-loot-shared", pair.size() == 2, std::to_string(by_loot.size()) + " distinct loot items");
+        if (pair.size() == 2) {
+            auto game = pool_game_materials({{"Block_T1_Left_CRAFTING", 7001, pair[0]}, {"Block_T1_Right_CRAFTING", 7002, pair[1]}}, greg, own, L);
+            check("game.pool-catalog-own-items", game.count("Left") && game["Left"].item == 7001 && game.count("Right") && game["Right"].item == 7002,
+                  "cells " + std::to_string(pair[0]) + " and " + std::to_string(pair[1]));
+        }
     }
     if(argc>=5) {
         const Bytes game=read(argv[2]); Layouts C=layouts();C.pool_id=4;C.pool_slot=0;
@@ -851,6 +925,7 @@ int main(int argc, char** argv) {
     }
     custom_pools_test();
     pool_admission_test();
+    pool_game_catalog_test();
     pool_reflection_test();
     custom_pool_hash_test();
     pool_registration_test();

@@ -490,6 +490,7 @@ struct Output {
 struct GameNames {
     std::map<std::string, int> material;    // material name -> cell id
     std::map<std::string, Guid> item;       // item debug name -> GUID
+    std::vector<GameBlockItem> blocks;      // the items that place a material: what a pool's gameMaterial names
     bool read = false;
 };
 GameNames g_names;
@@ -524,6 +525,7 @@ void read_names() {
         if (vox.zero()) continue;
         const std::string material = material_name(name);
         if (!material.empty()) g_names.material.emplace(material, b[I.voxel_id]);
+        g_names.blocks.push_back({name, item_id_of(g), b[I.voxel_id]});
     }
 }
 
@@ -722,13 +724,7 @@ void go_off(const std::string& why) {
 // Only a custom pool needs this catalog. A first late definition builds it lazily.
 void read_pool_catalog(const Bytes& registry,const RegistryInfo& info) {
     read_names();
-    const auto& L=g_layouts;
-    for(const auto& [name,cell]:g_names.material) {
-        const auto it=info.building_at.find(cell);if(it==info.building_at.end())continue;
-        const size_t rec=it->second;
-        Guid item;std::memcpy(item.b.data(),registry.data()+rec+L.building.item,16);
-        g_game_pool_materials[name]={item.zero()?0:item_id_of(item),registry[rec+L.building.roof]!=0};
-    }
+    g_game_pool_materials=pool_game_materials(g_names.blocks,registry,info,g_layouts);
     g_game_pool_materials_read=true;
 }
 bool ensure_pool_catalog() {
@@ -1147,7 +1143,7 @@ void merge_locked() {
     }
     if (g_placed.size() > building_n)
         WT_I("worldtables: terrain: %zu live and %zu kept material(s) of room for %zu", tlive_n, g_placed.size() - building_n - tlive_n, g_terrain_room);
-    else
+    else if (!any)
         WT_I("worldtables: nothing to change: the game's %zu tables are served as they are (registry fnv %s); hash %s", outputs.size(), hex64(fnv64(outputs[0].game)).c_str(), g_hash.c_str());
 }
 
@@ -1409,7 +1405,7 @@ PoolAdmission pool_admission(const PoolDefinition& definition) {
     if(!ensure_pool_catalog())return {KILN_DEFINE_NOT_READY,false,"the building material catalog could not be read"};
     std::vector<Material> materials;for(const auto& p:g_placed)if(p.m.live)materials.push_back(p.m);
     auto resolved=resolve_pools({definition},materials,g_game_pool_materials);
-    if(resolved.arguments_invalid)return {KILN_DEFINE_UNKNOWN_BASE,true,"duplicate resolved item or roof disagreement"};
+    if(resolved.arguments_invalid)return {KILN_DEFINE_UNKNOWN_BASE,true,resolved.argument_reason};
     if(!resolved.errors.empty())return {KILN_DEFINE_UNKNOWN_BASE,false,resolved.errors.front()};
     for(const auto& [name,id]:g_pool_original_ids)if(id==item_id_of(definition.guid))return {KILN_DEFINE_ID_COLLISION,false,"pool id belongs to an existing registry row"};
     for(const auto& p:g_custom_pools) {

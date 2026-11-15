@@ -1105,6 +1105,24 @@ bool pool_ref(const std::string& text, const std::string& owner, const std::stri
     return text==(mod==owner?key:mod+":"+key) || text==mod+":"+key;
 }
 }
+std::map<std::string, PoolGameMaterial> pool_game_materials(const std::vector<GameBlockItem>& items, const Bytes& registry,
+                                                              const RegistryInfo& info, const Layouts& L) {
+    // The member is the item that places the material: the one the game's own build-menu pools list. Not the config's
+    // materialItem: that is the material's loot (Wood Logs for Rough Wood, the Stone terrain item for Rough Stone), and
+    // materials share it.
+    std::map<std::string, PoolGameMaterial> out;
+    for (const auto& it : items) {
+        const std::string name = material_name(it.debug_name);
+        if (name.empty() || !it.item_id) continue;
+        const auto at = info.building_at.find(it.cell);
+        if (at == info.building_at.end()) continue;
+        const PoolGameMaterial m{it.item_id, registry[at->second + L.building.roof] != 0};
+        const auto [have, fresh] = out.emplace(name, m);
+        // two block items of one name: neither is chosen behind the author's back
+        if (!fresh && have->second.item != m.item) have->second = {0, m.roof, true};
+    }
+    return out;
+}
 PoolResolution resolve_pools(const std::vector<PoolDefinition>& definitions, const std::vector<Material>& materials,
                              const std::map<std::string, PoolGameMaterial>& game) {
     PoolResolution r;
@@ -1113,9 +1131,20 @@ PoolResolution resolve_pools(const std::vector<PoolDefinition>& definitions, con
     for(const auto& d:definitions) {
         MaterialPool p{d.guid,d.mod+":"+d.block,d.roof,{}};
         bool ok=d.valid && !d.guid.zero() && d.entries.size()>=1 && d.entries.size()<=64 && counts[item_id_of(d.guid)]==1;
-        std::set<uint32_t> members;
-        std::string why=ok?"":(counts[item_id_of(d.guid)]>1?"pool id collision":"invalid definition");
-        for(const auto& e:d.entries) {
+        std::map<uint32_t,size_t> members;  // item -> the entry that named it first
+        std::vector<std::string> problems;  // all of them, in entry order: an author fixes a file once
+        if(!ok) problems.push_back(counts[item_id_of(d.guid)]>1?"pool id collision":"invalid definition");
+        const auto entry=[&](size_t i){
+            const auto& e=d.entries[i];
+            return "materials["+std::to_string(i)+"] ("+(e.material.empty()?"gameMaterial "+e.game_material:"material "+e.material)+")";
+        };
+        const auto argument=[&](const std::string& text){
+            ok=false; problems.push_back(text);
+            if(!r.arguments_invalid) r.argument_reason="block buildingMaterialPool "+d.block+" (mod "+d.mod+"): "+text;
+            r.arguments_invalid=true;
+        };
+        for(size_t i=0;i<d.entries.size();++i) {
+            const auto& e=d.entries[i];
             uint32_t item=0; bool roof=false;
             if(!e.material.empty()) {
                 const Material* found=nullptr;
@@ -1124,22 +1153,31 @@ PoolResolution resolve_pools(const std::vector<PoolDefinition>& definitions, con
                     if(!m.terrain) r.grouped.insert(m.guid);
                     found=&m; break;
                 }
-                if(!found || !found->live || found->terrain || !found->item || !found->item_id) { ok=false; why="unknown material, absent mod or missing building item: "+e.material; }
-                else if(found->mod!=d.mod && !d.dependencies.count(found->mod)) { ok=false; why="material requires enabled declared dependency: "+found->mod; }
+                if(!found || !found->live || found->terrain || !found->item || !found->item_id) { ok=false; problems.push_back("unknown material, absent mod or missing building item: "+e.material); }
+                else if(found->mod!=d.mod && !d.dependencies.count(found->mod)) { ok=false; problems.push_back("material requires enabled declared dependency: "+found->mod); }
                 else { item=found->item_id; roof=found->roof; }
             } else {
                 auto it=game.find(e.game_material);
-                if(it==game.end() || !it->second.item) { ok=false; why="unknown game building material or missing block item: "+e.game_material; }
+                if(it!=game.end() && it->second.ambiguous) { ok=false; problems.push_back("game building material "+e.game_material+" is placed by more than one block item"); }
+                else if(it==game.end() || !it->second.item) { ok=false; problems.push_back("unknown game building material or missing block item: "+e.game_material); }
                 else { item=it->second.item; roof=it->second.roof; }
             }
-            if(!e.material.empty() && !e.game_material.empty()) { ok=false; why="entry takes exactly one material kind"; }
-            if(item && roof!=d.roof) { ok=false; r.arguments_invalid=true; why="roof disagreement"; }
-            if(item && !members.insert(item).second) { ok=false; r.arguments_invalid=true; why="duplicate resolved item id"; }
+            if(!e.material.empty() && !e.game_material.empty()) { ok=false; problems.push_back("entry takes exactly one material kind"); }
+            if(item && roof!=d.roof) argument(entry(i)+(roof?" is a roof material and the pool is not a roof pool":" is not a roof material and the pool is a roof pool"));
+            if(item) {
+                const auto [first,fresh]=members.emplace(item,i);
+                if(!fresh) argument(entry(first->second)+" and "+entry(i)+" are the same building item "+std::to_string(item));
+            }
             p.items.push_back(item);
         }
-        if(!ids.insert(item_id_of(d.guid)).second) { ok=false; why="pool id collision"; }
+        if(!ids.insert(item_id_of(d.guid)).second) { ok=false; problems.push_back("pool id collision"); }
         if(ok) r.pools.push_back(std::move(p));
-        else r.errors.push_back("block buildingMaterialPool "+d.block+" (mod "+d.mod+"): refused: "+why);
+        else {
+            std::string why;
+            for(size_t i=0;i<problems.size() && i<4;++i) why+=(i?"; ":"")+problems[i];
+            if(problems.size()>4) why+="; and "+std::to_string(problems.size()-4)+" more";
+            r.errors.push_back("block buildingMaterialPool "+d.block+" (mod "+d.mod+"): refused: "+why);
+        }
     }
     return r;
 }
