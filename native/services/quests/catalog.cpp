@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <bit>
 #include <cctype>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <mutex>
@@ -383,7 +384,9 @@ bool catalog_resolve_line(const std::string& name, uint32_t* out_id) {
     if (!end || *end) return false;
     const auto* GD = static_cast<const KilnGamedataApi*>(g_api->service(kstr(KILN_GAMEDATA_SERVICE), 1));
     uint32_t id = 0;
-    if (GD && GD->header.size >= sizeof(KilnGamedataApi)) {
+    // the members used here (find, fields) are from the table's first version: a kiln.content older than this build,
+    // whose table is shorter than today's, still answers
+    if (GD && GD->header.size >= offsetof(KilnGamedataApi, fields) + sizeof(GD->fields)) {
         KilnGdEntry e{};
         e.size = sizeof e;
         if (GD->find(KILN_GD_TEMPLATES, KilnStr{tmpl.data(), tmpl.size()}, &e) == KILN_OK) {
