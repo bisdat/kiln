@@ -65,6 +65,9 @@ int main(int argc, char** argv) {
           "hk_world_destroy calls WaitWorldJobs for waits_before_stop kinds before any STOPPING");
     check(body.find("kind == KILN_WORLD_SERVER && g_wait_jobs") == std::string::npos,
           "hk_world_destroy no longer waits for the server world only");
+    const auto entering = body.find("waiting for world jobs before STOPPING");
+    check(entering != std::string::npos && entering < call,
+          "the log identifies an engine wait even if it never returns");
     std::printf("tick drain: %s %d checks, %d failures\n", failures ? "FAIL" : "PASS", checks, failures);
     return failures ? 1 : 0;
 }

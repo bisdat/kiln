@@ -17,6 +17,7 @@ std::atomic<uint64_t> g_internal_runs{0};
 std::atomic<bool> g_world_live{false};
 thread_local bool t_in_program=false;
 void logf(int,const char*,...) {}
+StopDrain world_stop_drain(uint32_t, uint32_t) { return {false, "bounded wait only"}; }
 uint32_t fnv1a(std::string_view value,uint32_t hash) { for (unsigned char c:value) hash=(hash^c)*16777619u;return hash; }
 uint32_t component_hash(std::string_view value) { return fnv1a(value); }
 std::map<uint32_t,uint16_t> known_components;  // component hash -> the engine's type index

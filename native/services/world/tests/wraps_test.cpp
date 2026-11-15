@@ -58,6 +58,12 @@ bool seh_copy(void* to, const void* from, size_t size) {
     return true;
 }
 // A "fault" in a stage is a thrown int here; kiln.world's frames see the same: the guard returns false.
+void runner_scope(uintptr_t* slot, uintptr_t record, void (*body)(void*), void* context) {
+    const auto outer = std::exchange(*slot, record);
+    try { body(context); }
+    catch (...) { *slot = outer; throw; }
+    *slot = outer;
+}
 bool seh_wrap_stage(KilnWrapStageFn f, KilnGameSlice* slice, void* user, unsigned long* code) {
     try {
         f(slice, user);
@@ -191,7 +197,8 @@ KilnOwnerRetiringFn g_retiring_fn = nullptr;
 void* g_retiring_user = nullptr;
 KilnOwner g_retiring_observer = 0;
 constexpr uintptr_t kRunner = 0x14064ac00;  // types/ProgramRunner, as sigdb resolves it
-KilnMidFn g_mid_fn = nullptr;
+KilnTypedFn g_mid_fn = nullptr;
+thread_local const std::function<void()>* g_runner_body = nullptr;
 void* g_mid_user = nullptr;
 uintptr_t g_mid_target = 0;
 int g_mid_calls = 0;
@@ -207,11 +214,11 @@ KilnHooksApi g_fake_hooks = [] {
     h.unsubscribe_owner_retiring = [](KilnHandle) -> KilnResult { return KILN_OK; };
     // the checked mid link kiln.world puts on types/ProgramRunner's entry (world.slice_record): recorded, so a test can run
     // it as the runner would; g_mid_rc != OK refuses it as an unchecked thread would
-    h.mid2_checked = [](KilnOwner, uintptr_t target, const KilnHookOrder*, KilnMidFn fn, void* user, KilnHandle* out,
-                        uint32_t* unchecked) -> KilnResult {
+    h.call_original_frame = [](KilnCallFrame*) -> KilnResult { if (g_runner_body) (*g_runner_body)(); return KILN_OK; };
+    h.detour_typed_checked = [](KilnOwner, uintptr_t target, const KilnHookOrder*, const KilnSig* sig, KilnTypedFn fn, void* user, KilnHandle* out) -> KilnResult {
+        if (!sig || sig->argc != 4 || sig->ret_kind != KILN_SIG_VOID) return KILN_ERR_INVALID_ARGUMENT;
         ++g_mid_calls;
         if (g_mid_rc != KILN_OK) {
-            if (unchecked) *unchecked = 2;
             return g_mid_rc;
         }
         g_mid_fn = fn, g_mid_user = user, g_mid_target = target;
@@ -1283,6 +1290,14 @@ void tick_fault_closes_admission() {
     const auto bad = g_bad_index.load();
     const int logged = logs_with("wrap admission is closed");
     const uintptr_t live = g_live_world[0];
+    const auto saved_caps = g_wrap_caps;
+    static uint32_t fault_row = KILN_CAP_AVAILABLE, fault_reason = 0;
+    auto caps = g_stop_caps;
+    caps.report = [](KilnOwner, KilnStr name, uint32_t state, uint32_t reason, KilnStr) -> KilnResult {
+        if (std::string_view(name.ptr, name.len) == "systems.wraps") { fault_row = state; fault_reason = reason; }
+        return KILN_OK;
+    };
+    g_wrap_caps = &caps;
     g_live_world[0] = 0;  // disable(): Kiln no longer knows the world, and no STOPPING follows
     run_slice(wentry(1), j);
     run_slice(wentry(1), j);
@@ -1290,6 +1305,9 @@ void tick_fault_closes_admission() {
           "tick fault: no stage starts once the world is unknown; the game's update runs untouched");
     check(logs_with("wrap admission is closed") == logged + 1 && logs_with("its tick hook faulted") >= 1,
           "tick fault: the closed admission is logged once for the world kind");
+    check(fault_row == KILN_CAP_UNAVAILABLE && fault_reason == KILN_CAP_REASON_FAULTED,
+          "tick fault: the wrap capability stops advertising runnable callbacks when admission closes");
+    g_wrap_caps = saved_caps;
     g_live_world[0] = live;
     run_slice(wentry(1), j);
     check(g_fault_calls.load() == 1, "tick fault: admission stays closed (a faulted tick sends no STARTED)");
@@ -1461,6 +1479,13 @@ void record_link_refused() {
           "slice record: the feature resolved; no link before a stage asks for an archetype");
     wpre();
     check(g_mid_calls == 0, "slice record: no link is put in while nobody asked");
+    g_record_wanted = true;
+    g_record_wait = 1;
+    g_record_busy = true; // another world's Pre is still publishing the spacing counter
+    record_install();
+    check(g_record_wait.load() == 1, "slice record: a competing Pre cannot decrement the retry clock outside its install gate");
+    g_record_busy = false;
+    g_record_wait = 0;
     g_mid_rc = KILN_HOOKS_ERR_UNCHECKED;
     g_record_wanted = true;  // what a stage's first archetype read sets
     wpre();
@@ -1812,17 +1837,24 @@ void per_entity() {
             std::memcpy(srec + 0x28, &first, 4);
             std::memcpy(srec + 0x2C, &end, 4);
         };
-        // ProgramRunner(storage, slice record, ...): its entry runs the link with rdx = the record, then the slice
+        auto runner_call = [&](uintptr_t record, const std::function<void()>& body) {
+            KilnCallFrame frame{};
+            frame.gpr[1] = record;
+            const auto outer = g_runner_body;
+            g_runner_body = &body;
+            try { g_mid_fn(&frame, g_mid_user); }
+            catch (...) { g_runner_body = outer; throw; }
+            g_runner_body = outer;
+        };
         auto via_runner = [&](uint32_t first, KilnResult* rc) {
-            KilnRegisters regs{};
-            regs.rdx = reinterpret_cast<uintptr_t>(srec);
-            g_mid_fn(&regs, g_mid_user);
-            return archetype_of(first, rc);
+            uintptr_t result = 0;
+            runner_call(reinterpret_cast<uintptr_t>(srec), [&] { result = archetype_of(first, rc); });
+            return result;
         };
         const auto rl = reinterpret_cast<uintptr_t>(rec_layout);
-        const uint64_t from_rec = g_arch_record.load(), mism = g_arch_mismatch.load();
+        const uint64_t from_rec = g_arch_record[0].load(), mism = g_arch_mismatch[0].load();
         set_rec(wentry(0), 5, 8);  // 3 rows: the job's count
-        check(via_runner(ids[2], &rc) == rl && rc == KILN_OK && g_arch_record.load() == from_rec + 1,
+        check(via_runner(ids[2], &rc) == rl && rc == KILN_OK && g_arch_record[0].load() == from_rec + 1,
               "slice record: the layout comes from the slice record the runner recorded, not from the entity map");
         wraps_test_archetype_gap(+[] { uint32_t c = g_m2count + 1; std::memcpy(reinterpret_cast<void*>(g_m2 + 0x54), &c, 4); });
         check(via_runner(ids[2], &rc) == rl && rc == KILN_OK,
@@ -1832,10 +1864,10 @@ void per_entity() {
         check(archetype_of(ids[2], &rc) == reinterpret_cast<uintptr_t>(lay[2]) && rc == KILN_OK,
               "slice record: taken and cleared by the trampoline: a later slice with no record of its own reads the map");
         set_rec(wentry(1), 5, 8);
-        check(via_runner(ids[2], &rc) == reinterpret_cast<uintptr_t>(lay[2]) && rc == KILN_OK && g_arch_mismatch.load() == mism + 1,
+        check(via_runner(ids[2], &rc) == reinterpret_cast<uintptr_t>(lay[2]) && rc == KILN_OK && g_arch_mismatch[0].load() == mism + 1,
               "slice record: a record of another program's entry is not trusted (the map answers)");
         set_rec(wentry(0), 5, 9);
-        check(via_runner(ids[2], &rc) == reinterpret_cast<uintptr_t>(lay[2]) && rc == KILN_OK && g_arch_mismatch.load() == mism + 2,
+        check(via_runner(ids[2], &rc) == reinterpret_cast<uintptr_t>(lay[2]) && rc == KILN_OK && g_arch_mismatch[0].load() == mism + 2,
               "slice record: a record whose rows are not the job's count is not trusted (the map answers)");
         set_rec(wentry(0), 5, 8);
         const int64_t saved_entities = L.storage_entities;
@@ -1845,6 +1877,39 @@ void per_entity() {
         check(archetype_of(ids[2], &rc) == 0 && rc == KILN_WORLD_ERR_CHANGED,
               "slice record: there, a slice with no record is left to the game (transient), not turned off");
         L.storage_entities = saved_entities;
+        runner_call(reinterpret_cast<uintptr_t>(srec), [] {});
+        check(archetype_of(ids[2], &rc) == reinterpret_cast<uintptr_t>(lay[2]) && rc == KILN_OK,
+              "slice record: a runner skipped by a downstream hook leaves no stale same-program/count capture");
+        try { runner_call(reinterpret_cast<uintptr_t>(srec), [] { throw 17; }); } catch (int) {}
+        check(archetype_of(ids[2], &rc) == reinterpret_cast<uintptr_t>(lay[2]),
+              "slice record: unwinding a runner clears its capture before an unrelated trampoline");
+        alignas(16) uint8_t inner[0x38];
+        std::memcpy(inner, srec, sizeof inner);
+        const auto other_layout = reinterpret_cast<uintptr_t>(lay[2]);
+        std::memcpy(inner + 0x18, &other_layout, 8);
+        uintptr_t nested_result = 0;
+        runner_call(reinterpret_cast<uintptr_t>(srec), [&] {
+            runner_call(reinterpret_cast<uintptr_t>(inner), [] {});
+            nested_result = archetype_of(ids[2], &rc);
+        });
+        check(nested_result == rl, "slice record: a nested skipped runner restores the outer runner's capture");
+        Job client_job(3, KILN_WORLD_CLIENT);
+        client_job.ids[0] = ids[2];
+        std::memcpy(client_job.bytes, &s2, 8);
+        ProgramCtx client_ctx{client_job.bytes, 0, 0};
+        Frame client_frame{}; client_frame.ctx = &client_ctx; client_frame.count = 3;
+        KilnGameSlice client_slice{}; client_slice.size = sizeof client_slice; client_slice.world_kind = KILN_WORLD_CLIENT;
+        client_slice.count = 3; client_slice.entity_ids = client_job.ids; client_slice.internal = &client_frame;
+        t_frame = &client_frame; t_in_slice = true;
+        uintptr_t client_layout = 0;
+        check(game_slice_archetype(&client_slice, &client_layout) == KILN_WORLD_ERR_CHANGED && !client_layout,
+              "client archetype: a missing runner capture leaves the slice to the game instead of trusting the unproven map");
+        g_record_gaveup = true;
+        check(game_slice_archetype(&client_slice, &client_layout) == KILN_ERR_UNAVAILABLE && !client_layout,
+              "client archetype: exhausted checked installs refuse the filter instead of enabling an unsafe fallback");
+        g_record_gaveup = false;
+        t_frame = nullptr; t_in_slice = false;
+
     }
     KilnGameSlice outside{};
     outside.size = sizeof outside;
@@ -2265,6 +2330,33 @@ void directory_read_in_stage() {
 }
 }  // namespace
 
+void archetype_stop_counts_per_world() {
+    world_event(KILN_WORLD_STOPPING, KILN_WORLD_SERVER);
+    world_event(KILN_WORLD_STOPPING, KILN_WORLD_CLIENT); // discard earlier tests' counts
+    uint8_t record[0x38]{};
+    uintptr_t entry = 0xAA00, layout = 0xBB00, out = 0;
+    uint32_t end = 1, entity = 17;
+    std::memcpy(record + L.slice_entry, &entry, 8);
+    std::memcpy(record + L.slice_layout, &layout, 8);
+    std::memcpy(record + L.slice_end, &end, 4);
+    Frame f{}; f.entry = entry; f.record = reinterpret_cast<uintptr_t>(record); f.count = 1;
+    KilnGameSlice slice{}; slice.size = sizeof slice; slice.internal = &f; slice.count = 1; slice.entity_ids = &entity;
+    t_frame = &f; t_in_slice = true;
+    slice.world_kind = KILN_WORLD_SERVER;
+    check(game_slice_archetype(&slice, &out) == KILN_OK, "count sources: server slice reads its record");
+    slice.world_kind = KILN_WORLD_CLIENT;
+    check(game_slice_archetype(&slice, &out) == KILN_OK, "count sources: client slice reads its record");
+    t_frame = nullptr; t_in_slice = false;
+    const int server = logs_with("world 0 stops: WhenArchetype read 1 slices");
+    const int client = logs_with("world 2 stops: WhenArchetype read 1 slices");
+    world_event(KILN_WORLD_STOPPING, KILN_WORLD_SERVER);
+    check(logs_with("world 0 stops: WhenArchetype read 1 slices") == server + 1,
+          "count sources: server stop reports only server reads");
+    world_event(KILN_WORLD_STOPPING, KILN_WORLD_CLIENT);
+    check(logs_with("world 2 stops: WhenArchetype read 1 slices") == client + 1,
+          "count sources: server stop did not steal the client world's proof counters");
+}
+
 int main(int argc, char** argv) {
     fake_api();
     layout();
@@ -2295,6 +2387,7 @@ int main(int argc, char** argv) {
     directory_read_in_stage();
     stress_steps();
     stress_overlap();
+    archetype_stop_counts_per_world();
     if (argc > 1) abi(argv[1]);
     else check(false, "pass tests/abi.json");
     std::printf("world game programs: %s %d checks, %d failures\n", failures ? "FAIL" : "PASS", checks, failures);

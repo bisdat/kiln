@@ -29,6 +29,8 @@ std::atomic<uintptr_t> g_world{0};
 std::atomic<uint64_t> g_internal_runs{0};
 std::atomic<bool> g_world_live{false};
 thread_local bool t_in_program = false;
+bool drain_engine = false;
+StopDrain world_stop_drain(uint32_t, uint32_t) { return {drain_engine, drain_engine ? "the engine drains the world's jobs first (world.stop_drain.client)" : "a bounded wait only"}; }
 std::vector<std::string> logged;
 std::mutex log_mu;
 void logf(int, const char* fmt, ...) {
@@ -600,7 +602,12 @@ int main(int argc, char** argv) {
     });
     while (!slow.inside.load()) std::this_thread::yield();
     const auto t0 = std::chrono::steady_clock::now();
+    drain_engine = true;
     client_stops(client.at());
+    check(log_count("client-table call(s) were in flight although the engine drains") == 1,
+          "client-table stop logs a nonzero initial count against the engine guarantee even if the bounded net drains it");
+    check(log_count("world.stop_drain.client") >= 1, "client-table stop reports the same engine guarantee as wraps");
+    drain_engine = false;
     const auto waited = std::chrono::steady_clock::now() - t0;
     worker.join();
     check(waited >= std::chrono::milliseconds(40), "the client world's stop waits for a client call in flight on a worker");

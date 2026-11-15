@@ -1623,8 +1623,8 @@ void programs_client_pre(const KilnTickInfo*) {
 // call inside goes back to PENDING for the next client world (a FAULTED one stays so until it is bound again); bindings
 // stay. A side with a call still inside after the wait is never reset or reopened: it is refused for good, its session
 // cleared (that late call can no longer write its state), and the process latch is set (nothing registers again; the
-// row says so). The core does not wait for a client world's jobs before this event (it does for the server world): the
-// bounded wait and the latch are the only guard until it does. The row says whether a world runs.
+// row says so). world_stop_drain reports the core's per-kind guarantee; the bounded wait remains a safety net even
+// when the core drained the engine queue. A nonzero initial count then contradicts that guarantee and is an error.
 void programs_world_event(const KilnWorldEvent* e) {
     if (!e || e->kind != KILN_WORLD_CLIENT || !g_client_on.load()) return;
     if (e->event == KILN_WORLD_STARTED) {
@@ -1632,6 +1632,7 @@ void programs_world_event(const KilnWorldEvent* e) {
         return;
     }
     if (e->event != KILN_WORLD_STOPPING) return;
+    const auto drain = world_stop_drain(e->kind, g_table_stop_wait_ms.load()); // before taking kiln.world's locks
     if (g_side_programs.load()) {
         g_table_stopping.store(true, std::memory_order_seq_cst);
         g_table_live.store(false);
@@ -1648,6 +1649,8 @@ void programs_world_event(const KilnWorldEvent* e) {
         };
         const auto t0 = std::chrono::steady_clock::now();
         const uint32_t first = running();
+        if (first && drain.engine)
+            KW_E("client world stops: %u client-table call(s) were in flight although %s", first, drain.text.c_str());
         uint32_t left = first;
         while (left && std::chrono::steady_clock::now() < t0 + std::chrono::milliseconds(g_table_stop_wait_ms.load())) {
             std::this_thread::yield();
@@ -1692,7 +1695,7 @@ void programs_world_event(const KilnWorldEvent* e) {
             }
         }
         KW_I("client world stops: %u Kiln client-table registration(s) closed for the next client world (%u call(s) running at the "
-             "stop, %u after %lld us%s)", closed, first, left, static_cast<long long>(waited),
+             "stop, %u after %lld us; %s%s)", closed, first, left, static_cast<long long>(waited), drain.text.c_str(),
              stuck ? "; client-world programs are off until the game restarts" : "");
     }
     if (g_latched.load()) report_latch();
