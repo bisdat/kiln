@@ -16,6 +16,7 @@
 #include "engine.h"
 #include "equip.h"
 #include "instances.h"
+#include "setplan.h"
 #include "setsnap.h"
 #include "setsvc.h"
 #include "services/kiln_decisions.h"
@@ -28,6 +29,12 @@ namespace kitems {
 static_assert(sizeof(KilnSetSnapshotV1) == 256 && offsetof(KilnSetSnapshotV1, identity) == 48 &&
                   offsetof(KilnSetSnapshotV1, refusal) == 88 && offsetof(KilnSetSnapshotV1, reason) == 96,
               "KilnSetSnapshotV1: the chapter's 88 bytes, then the refusal tail (the managed mirror depends on it)");
+static_assert(sizeof(KilnSetStepV1) == 40 && offsetof(KilnSetStepV1, instance_stamp) == 16 && offsetof(KilnSetStepV1, count) == 32,
+              "KilnSetStepV1 layout");
+static_assert(sizeof(KilnSetPlanV1) == 5408 && offsetof(KilnSetPlanV1, valid_through_step) == 24 && offsetof(KilnSetPlanV1, reason) == 32 &&
+                  offsetof(KilnSetPlanV1, steps) == 288,
+              "KilnSetPlanV1 layout");
+KilnResult items_item_info(uint32_t id, KilnItemInfo* out);  // items.cpp
 static_assert(sizeof(KilnSetStatusV1) == 208 && offsetof(KilnSetStatusV1, captured) == 16 && offsetof(KilnSetStatusV1, detail) == 48,
               "KilnSetStatusV1 layout");
 
@@ -125,12 +132,12 @@ bool resolve_layout(SetLayout* L, char* why, size_t cap) {
     if (!need(sel, "equipment", 160, &L->sel_equipment) || !need(sel, "actionbarEntityIds", 8, &L->sel_actionbar)) return fail("SlotSelection");
     L->sel_size = type_size(t, sel);
     // the 20 slots in EquipmentSlot's order (SlotSelection.equipment: 0-16, HookShot, Glider, Backpack)
-    static const char* const kSlots[kEquipSlots] = {"vanityHead", "vanityUpperBody", "vanityArms", "vanityLowerBody", "vanityFeet",
+    static const char* const kSlots[sets::kEquipSlots] = {"vanityHead", "vanityUpperBody", "vanityArms", "vanityLowerBody", "vanityFeet",
                                                      "armourHead", "armourUpperBody", "armourArms", "armourLowerBody", "armourFeet",
                                                      "ring0", "ring1", "rangedWeapon", "shield", "arrow", "spell", "fishingBait",
                                                      "hookShot", "glider", "backpack"};
     const KilnType* eq = ty("keen::ecs::EquipmentSlotData");
-    for (uint32_t i = 0; i < kEquipSlots; ++i) {
+    for (uint32_t i = 0; i < sets::kEquipSlots; ++i) {
         uint32_t at = 0;
         if (!need(eq, kSlots[i], 8, &at) || at != i * 8) return fail("SlotSelection.equipment (its 20 slots in order)");
     }
@@ -374,6 +381,80 @@ KilnResult sets_status(KilnSetStatusV1* out) {
     std::lock_guard lock(g_mu);
     out->snapshots = static_cast<uint32_t>(g_store.size());
     out->captured = g_captured;
+    return KILN_OK;
+}
+
+// ---- planning ----
+
+namespace {
+uint8_t slot_type_of_item(uint32_t item, void*) {
+    KilnItemInfo info{};
+    info.size = sizeof info;
+    return items_item_info(item, &info) == KILN_OK ? info.equip_slot : 0;  // unknown: the game's equip decides
+}
+
+const char* find_text(SnapStore::Find f) {
+    switch (f) {
+        case SnapStore::Find::Ok: return "";
+        case SnapStore::Find::Unknown: return "the snapshot is unknown (never taken, used by an apply, released, or the world stopped)";
+        case SnapStore::Find::OtherOwner: return "the snapshot is another owner's";
+        case SnapStore::Find::Expired: return "the snapshot expired (250 steps after it was taken)";
+        case SnapStore::Find::OtherWorld: return "the snapshot is of another server world";
+        case SnapStore::Find::StampsReset: return "the item stamps were reset since the snapshot (the engine's id counter went down)";
+    }
+    return "the snapshot cannot be used";
+}
+}  // namespace
+
+PlanOptions sets_plan_options() { return PlanOptions{}; }
+
+void sets_fill_plan(const SetPlan& p, uint64_t valid_through, KilnSetPlanV1* out) {
+    out->status = p.status == SetPlan::Planned ? KILN_SET_PLAN_PLANNED : p.status == SetPlan::NoChange ? KILN_SET_PLAN_NO_CHANGE : KILN_SET_PLAN_REFUSED;
+    out->refusal = p.refusal;
+    out->failed_entry = p.failed_entry;
+    out->required_free_slots = p.required_free;
+    out->valid_through_step = valid_through;
+    std::snprintf(out->reason, sizeof out->reason, "%s", p.reason);
+    out->step_count = static_cast<uint32_t>(std::min<size_t>(p.steps.size(), KILN_SET_MAX_STEPS));
+    for (uint32_t i = 0; i < out->step_count; ++i) {
+        const PlanStep& s = p.steps[i];
+        KilnSetStepV1& o = out->steps[i];
+        o.index = i;
+        o.op = static_cast<uint8_t>(s.op);
+        o.equipment_slot = s.game_slot;
+        o.entry = s.entry;
+        o.kind = s.kind;
+        o.item_id = s.item;
+        o.item_entity = s.pide;
+        o.instance_stamp = s.stamp;
+        o.source_slot = s.op == OpKind::Equip ? s.source : 0;
+        o.count = s.count;
+    }
+}
+
+KilnResult sets_plan(KilnOwner owner, uint64_t token, const KilnSetOpV1* entries, uint32_t count, KilnSetPlanV1* out) {
+    if (!out || out->size < sizeof(KilnSetPlanV1)) return KILN_ERR_INVALID_ARGUMENT;
+    char why[160] = "";
+    if (!valid_entries(entries, count, why, sizeof why)) return KILN_ERR_INVALID_ARGUMENT;
+    std::memset(out, 0, sizeof *out);
+    out->size = sizeof *out;
+    out->failed_entry = UINT32_MAX;
+    if (!sets_available(why, sizeof why)) return KILN_ERR_UNAVAILABLE;
+    KilnWindowStateV1 w{};
+    w.size = sizeof w;
+    if (sets_clock()->get(&w) != KILN_OK) return KILN_ERR_UNAVAILABLE;
+    SnapStore::Find f = SnapStore::Find::Unknown;
+    SetModel model;
+    SnapPrefix prefix;
+    uint64_t captured = 0;
+    if (!sets_peek_model(token, owner, w.world_epoch, w.step, &f, &model, &prefix, &captured)) {
+        out->status = KILN_SET_PLAN_STALE;
+        out->refusal = KILN_SET_REFUSAL_STALE;
+        std::snprintf(out->reason, sizeof out->reason, "%s", find_text(f));
+        return KILN_OK;
+    }
+    const SetPlan p = plan_set(model, entries, count, sets_plan_options(), &slot_type_of_item, nullptr);
+    sets_fill_plan(p, captured + SnapStore::kTtl, out);
     return KILN_OK;
 }
 

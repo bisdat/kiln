@@ -353,6 +353,7 @@ static Kiln.InstanceEquipment.operator ==(Kiln.InstanceEquipment? left, Kiln.Ins
 static Kiln.InventorySnapshotToken.operator !=(Kiln.InventorySnapshotToken left, Kiln.InventorySnapshotToken right) -> bool
 static Kiln.InventorySnapshotToken.operator ==(Kiln.InventorySnapshotToken left, Kiln.InventorySnapshotToken right) -> bool
 static Kiln.Items.CaptureSet(Kiln.EntityId player) -> Kiln.EquipmentSetCaptureResult!
+static Kiln.Items.PlanSet(Kiln.EntityId player, Kiln.EquipmentSet! set) -> Kiln.EquipmentSetPlanResult!
 static Kiln.SetEquipmentChange.operator !=(Kiln.SetEquipmentChange? left, Kiln.SetEquipmentChange? right) -> bool
 static Kiln.SetEquipmentChange.operator ==(Kiln.SetEquipmentChange? left, Kiln.SetEquipmentChange? right) -> bool
 static Kiln.SingleEquipmentChange.operator !=(Kiln.SingleEquipmentChange? left, Kiln.SingleEquipmentChange? right) -> bool

@@ -476,6 +476,32 @@ internal static unsafe class ItemsNative
         public fixed byte Detail[160];
     }
 
+    // KilnSetPlanV1.status, KilnSetStepV1.op
+    public const uint SetPlanPlanned = 0, SetPlanNoChange = 1, SetPlanStale = 4, SetPlanRefused = 5;
+    public const byte SetStepEquip = 1, SetStepUnequip = 2;
+    public const int SetMaxSteps = 128;
+
+    /// <summary><c>KilnSetStepV1</c>, 40 bytes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SetStep
+    {
+        public uint Index;
+        public byte Op, EquipmentSlot, Entry, Kind;
+        public uint ItemId, ItemEntity;
+        public ulong InstanceStamp, SourceSlot;
+        public uint Count, Reserved;
+    }
+
+    /// <summary><c>KilnSetPlanV1</c>, 5408 bytes (128 steps).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SetPlan
+    {
+        public uint Size, Status, Refusal, FailedEntry, StepCount, RequiredFreeSlots;
+        public ulong ValidThroughStep;
+        public fixed byte Reason[256];
+        public fixed byte Steps[SetMaxSteps * 40];
+    }
+
     /// <summary>The v6 table: v5 followed by the equipment-set functions. Read a member only when the header's size covers
     /// it (<see cref="HasV6"/>).</summary>
     [StructLayout(LayoutKind.Sequential)]
@@ -485,6 +511,7 @@ internal static unsafe class ItemsNative
         public delegate* unmanaged[Cdecl]<ulong, uint, SetSnapshot*, int> SetCapture;
         public delegate* unmanaged[Cdecl]<ulong, ulong, int> SetRelease;
         public delegate* unmanaged[Cdecl]<SetStatus*, int> GetSetStatus;
+        public delegate* unmanaged[Cdecl]<ulong, ulong, EquipDecisions.SetOp*, uint, SetPlan*, int> SetPlanOf;
     }
 
     /// <summary>True when a table of <paramref name="size"/> bytes has the v6 member that ends at <paramref name="end"/>.</summary>
@@ -498,5 +525,5 @@ internal static unsafe class ItemsNative
     }
 
     // KilnResult
-    public const int Ok = 0, InvalidArgument = 1, NotFound = 2, Unavailable = 3, WrongThread = 4, BufferTooSmall = 5;
+    public const int Ok = 0, InvalidArgument = 1, NotFound = 2, Unavailable = 3, WrongThread = 4, BufferTooSmall = 5, InternalError = 7;
 }

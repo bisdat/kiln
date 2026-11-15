@@ -409,7 +409,7 @@ void reuse_tests() {
 
 int main() {
     static_assert(sizeof(KilnItemsInstance) == 88 && offsetof(KilnItemsApi, read_instances) == 200 &&
-                      offsetof(KilnItemsApi, equip) == 224 && offsetof(KilnItemsApi, set_capture) == 240 && sizeof(KilnItemsApi) == 264,
+                      offsetof(KilnItemsApi, equip) == 224 && offsetof(KilnItemsApi, set_capture) == 240 && sizeof(KilnItemsApi) == 272,
                   "v4 appends after peek_result, v5 (equip) after v4, v6 (sets) after v5; the instance record is 88 bytes");
     setup_engine();
     table_tests();

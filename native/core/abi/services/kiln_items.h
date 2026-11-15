@@ -699,6 +699,18 @@ typedef struct KilnItemsEquipStatus {
 #define KILN_SET_REFUSAL_SHAPE 3u       /* the inventory tree is beyond the bounds (64 setups, depth 3, 32 inventories), links
                                            back into itself or names an entity that cannot be read */
 #define KILN_SET_REFUSAL_BUDGET 4u      /* 256 snapshots live, or 16 of this owner */
+#define KILN_SET_REFUSAL_STALE 5u       /* the snapshot is unknown, used, expired, another owner's or another world's, or from
+                                           before a reset of the item stamps */
+#define KILN_SET_REFUSAL_NOT_HERE 6u    /* a selected item or stack is not where the set says, or not the player's */
+#define KILN_SET_REFUSAL_SLOT_TYPE 7u   /* an item does not fit its equipment slot */
+#define KILN_SET_REFUSAL_NO_ROOM 8u     /* an unequip needs a free Generic slot and there is none */
+#define KILN_SET_REFUSAL_CYCLE 9u       /* items move between equipment slots in a cycle: refused until the rollback matrix
+                                           passes (UnsupportedCycle) */
+#define KILN_SET_REFUSAL_BACKPACK 10u   /* the backpack would change (its contents move with it): refused until the rollback
+                                           matrix passes */
+#define KILN_SET_REFUSAL_LOCKED 11u     /* an item is worn in a slot the set leaves as it is */
+#define KILN_SET_REFUSAL_MERGE 12u      /* a stack of the item type its slot already holds (the game could merge them) */
+#define KILN_SET_REFUSAL_TOO_MANY_STEPS 13u /* more than 128 steps */
 
 typedef struct KilnSetSnapshotV1 {
     uint32_t size;               /* in: sizeof the caller's struct (at least the chapter's 88 bytes, up to `reason`) */
@@ -713,6 +725,48 @@ typedef struct KilnSetSnapshotV1 {
     uint32_t reserved;
     char reason[160];            /* NUL-terminated; "" when captured */
 } KilnSetSnapshotV1;
+
+/* Planning (set_plan). The planner works on a snapshot (it does not take it): the game's equip and unequip calls in the
+ * order one transaction would run them, or a refusal before anything is touched. Advisory for a caller: equip_set plans
+ * again from its own snapshot and trusts no step a caller sends. Order: targets whose item is in a non-equipment slot,
+ * in numeric slot order (equip: a swap, the slot's old stack goes to the source slot); then targets to be emptied
+ * (unequip: into the first free slot of a top-level Generic link); a cycle (an item worn in one named slot and asked
+ * for in another) is refused (CYCLE). Each source is found again by its item entity after the steps before it. */
+
+/* KilnSetPlanV1.status */
+#define KILN_SET_PLAN_PLANNED 0u
+#define KILN_SET_PLAN_NO_CHANGE 1u /* every entry holds already (or no entries): no step */
+#define KILN_SET_PLAN_STALE 4u     /* the snapshot cannot be used (refusal STALE) */
+#define KILN_SET_PLAN_REFUSED 5u   /* refusal and failed_entry say why */
+
+#define KILN_SET_STEP_EQUIP 1u
+#define KILN_SET_STEP_UNEQUIP 2u
+
+typedef struct KilnSetStepV1 {
+    uint32_t index;
+    uint8_t op;             /* KILN_SET_STEP_* */
+    uint8_t equipment_slot; /* keen::EquipmentSlot */
+    uint8_t entry;          /* the request entry it serves; 0xFF: a temporary unequip that frees a slot for a cycle */
+    uint8_t kind;           /* what goes in: 0 nothing (an unequip), 1 an item entity, 2 a plain stack */
+    uint32_t item_id, item_entity;
+    uint64_t instance_stamp;
+    uint64_t source_slot;   /* an equip: where the stack is when the step runs (as planned) */
+    uint32_t count, reserved;
+} KilnSetStepV1;
+
+#define KILN_SET_MAX_STEPS 128u
+
+typedef struct KilnSetPlanV1 {
+    uint32_t size;                 /* in: sizeof(KilnSetPlanV1) */
+    uint32_t status;               /* KILN_SET_PLAN_* */
+    uint32_t refusal;              /* KILN_SET_REFUSAL_* */
+    uint32_t failed_entry;         /* the entry the refusal is about; UINT32_MAX for none */
+    uint32_t step_count;
+    uint32_t required_free_slots;  /* the most free Generic slots the steps use at one time */
+    uint64_t valid_through_step;   /* the snapshot's captured_step + 250 */
+    char reason[256];              /* NUL-terminated; "" when planned */
+    KilnSetStepV1 steps[KILN_SET_MAX_STEPS];
+} KilnSetPlanV1;
 
 typedef struct KilnSetStatusV1 {
     uint32_t size;          /* in: sizeof(KilnSetStatusV1) */
@@ -884,6 +938,12 @@ typedef struct KilnItemsApi {
     KilnResult(KILN_CALL* set_release_snapshot)(KilnOwner owner, uint64_t token);
     /* The state of equipment sets. Any thread. */
     KilnResult(KILN_CALL* set_status)(KilnSetStatusV1* out);
+    /* Plans `count` entries (KilnSetOpV1, kiln_decisions.h; omitted slots stay as they are) against the snapshot `token`
+     * of `owner` (see "Planning"; the snapshot is not taken). KILN_OK: *out has the plan or the refusal.
+     * KILN_ERR_INVALID_ARGUMENT: out NULL or too small, or malformed entries (more than 20, a slot that is no equipment
+     * slot or named twice, an item selected twice, an item without its entity, id or stamp, a stack without its item,
+     * slot or count, non-zero reserved fields). KILN_ERR_UNAVAILABLE: sets are off. Any thread. */
+    KilnResult(KILN_CALL* set_plan)(KilnOwner owner, uint64_t token, const KilnSetOpV1* entries, uint32_t count, KilnSetPlanV1* out);
 } KilnItemsApi;
 
 #ifdef __cplusplus

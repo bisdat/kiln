@@ -339,4 +339,51 @@ public sealed unsafe class EquipmentSetTests
         Assert.Null(outside);
         Assert.Contains("not one of the player's inventories", why2);
     }
+
+    // ---- the plan's wire (S3) ----
+
+    [Fact]
+    public void ThePlanMirrorsMatchTheHeader()
+    {
+        Assert.Equal(40, sizeof(ItemsNative.SetStep));
+        Assert.Equal(16, (int)Marshal.OffsetOf<ItemsNative.SetStep>(nameof(ItemsNative.SetStep.InstanceStamp)));
+        Assert.Equal(5408, sizeof(ItemsNative.SetPlan));
+        Assert.Equal(24, (int)Marshal.OffsetOf<ItemsNative.SetPlan>(nameof(ItemsNative.SetPlan.ValidThroughStep)));
+        Assert.Equal(288, (int)Marshal.OffsetOf<ItemsNative.SetPlan>(nameof(ItemsNative.SetPlan.Steps)));
+        Assert.Equal(264, (int)Marshal.OffsetOf<ItemsNative.TableV6>(nameof(ItemsNative.TableV6.SetPlanOf)));
+        Assert.Equal(40, sizeof(EquipDecisions.SetOp));
+    }
+
+    [Fact]
+    public void TheEntriesGoOnTheWireAsTheyAre()
+    {
+        var ring = Ref(5002, 0x4623bcb0, 1002);
+        var src = SlotId.Of(new EntityId(2001), 5);
+        var ops = Items.OpsOf([E(EquipmentSlot.Ring1, new InstanceEquipment(ring)), E(EquipmentSlot.Arrow, new StackEquipment(new ItemId(88), src, 30)),
+            E(EquipmentSlot.Backpack, new EmptyEquipment())]);
+        Assert.Equal((40u, (byte)11, (byte)1, 5002u, 0x4623bcb0u, 1002UL, 0UL), (ops[0].Size, ops[0].EquipmentSlot, ops[0].Kind, ops[0].ItemEntity, ops[0].ItemId, ops[0].InstanceStamp, ops[0].SourceSlot));
+        Assert.Equal(((byte)14, (byte)2, 88u, 30u, src.Value, 0u), (ops[1].EquipmentSlot, ops[1].Kind, ops[1].ItemId, ops[1].ExpectedCount, ops[1].SourceSlot, ops[1].ItemEntity));
+        Assert.Equal(((byte)23, (byte)0, 0u, 0u), (ops[2].EquipmentSlot, ops[2].Kind, ops[2].ItemId, ops[2].ExpectedCount));
+    }
+
+    [Fact]
+    public void AStepComesBackAsTheSelectionItPuts()
+    {
+        var equip = new ItemsNative.SetStep { Index = 1, Op = ItemsNative.SetStepEquip, EquipmentSlot = 10, Entry = 0, Kind = 1, ItemId = 0x4623bcb0, ItemEntity = 5002, InstanceStamp = 1002, SourceSlot = SlotId.Of(new EntityId(2001), 2).Value, Count = 1 };
+        Assert.Equal(new EquipmentSetStep(1, EquipmentSlot.Ring0, new InstanceEquipment(Ref(5002, 0x4623bcb0, 1002))), Items.StepOf(equip));
+        var stack = equip with { Kind = 2, ItemId = 88, ItemEntity = 0, InstanceStamp = 0, EquipmentSlot = 14, Count = 30 };
+        Assert.Equal(new EquipmentSetStep(1, EquipmentSlot.Arrow, new StackEquipment(new ItemId(88), SlotId.Of(new EntityId(2001), 2), 30)), Items.StepOf(stack));
+        var off = new ItemsNative.SetStep { Index = 0, Op = ItemsNative.SetStepUnequip, EquipmentSlot = 23, Entry = 0xFF, ItemId = 5, ItemEntity = 5009 };
+        Assert.Equal(new EquipmentSetStep(0, EquipmentSlot.Backpack, new EmptyEquipment()), Items.StepOf(off));
+        Assert.Throws<InvalidOperationException>(() => Items.StepOf(off with { EquipmentSlot = 17 }));
+    }
+
+    [Theory]
+    [InlineData(8u, "NoRoom: no free slot")]
+    [InlineData(9u, "UnsupportedCycle: no free slot")]
+    [InlineData(4u, "SnapshotBudgetExceeded: no free slot")]
+    [InlineData(5u, "StaleSnapshot: no free slot")]
+    [InlineData(10u, "UnsupportedBackpack: no free slot")]
+    [InlineData(99u, "Refused: no free slot")]
+    public void ARefusalStartsWithItsCode(uint code, string text) => Assert.Equal(text, Items.ReasonOf(code, "no free slot"));
 }

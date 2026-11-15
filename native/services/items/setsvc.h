@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "setplan.h"
 #include "setsnap.h"
 #include "services/kiln_decisions.h"
 #include "services/kiln_window_clock.h"
@@ -34,5 +35,10 @@ SetCounters& set_counters();
 sets::SnapStore::Find sets_take(uint64_t token, KilnOwner owner, uint64_t epoch, uint64_t now, sets::SnapEntry* out);
 bool sets_peek_model(uint64_t token, KilnOwner owner, uint64_t epoch, uint64_t now, sets::SnapStore::Find* f, sets::SetModel* model,
                      sets::SnapPrefix* prefix, uint64_t* captured_step);
+
+// The planner's options (setplan.h): cycles and backpack changes stay refused until the rollback matrix passed.
+sets::PlanOptions sets_plan_options();
+// A plan as the ABI has it (KilnSetPlanV1's status, refusal, steps).
+void sets_fill_plan(const sets::SetPlan& p, uint64_t valid_through, KilnSetPlanV1* out);
 
 }  // namespace kitems

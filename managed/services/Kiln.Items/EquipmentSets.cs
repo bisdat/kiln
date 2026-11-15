@@ -148,12 +148,14 @@ public sealed record EquipmentSetResult(EquipmentSetStatus Status, string? Reaso
 
 /// <summary>A plan's snapshot: released once (Dispose) or used up once (an accepted apply), whichever comes first. The
 /// release runs on any thread (kiln.items' set_release_snapshot is any-thread).</summary>
-internal sealed class EquipmentSetLease(ulong token, ulong owner, Action<ulong, ulong>? release)
+internal sealed class EquipmentSetLease(ulong token, ulong owner, Action<ulong, ulong>? release, ulong validThrough = ulong.MaxValue)
 {
     private int _state;  // 0 held, 1 released, 2 used
 
     internal ulong Token => token;
     internal ulong Owner => owner;
+    /// <summary>The last step kiln.items keeps the snapshot (it is gone natively after that).</summary>
+    internal ulong ValidThrough => validThrough;
     internal bool Held => Volatile.Read(ref _state) == 0;
 
     /// <summary>Dispose: gives the snapshot back to kiln.items unless it was used or released already.</summary>

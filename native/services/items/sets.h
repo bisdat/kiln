@@ -20,6 +20,7 @@ uintptr_t items_server_world();
 KilnResult sets_capture(KilnOwner owner, uint32_t player, KilnSetSnapshotV1* out);
 KilnResult sets_release(KilnOwner owner, uint64_t token);
 KilnResult sets_status(KilnSetStatusV1* out);
+KilnResult sets_plan(KilnOwner owner, uint64_t token, const KilnSetOpV1* entries, uint32_t count, KilnSetPlanV1* out);
 
 // Tick thread, Pre: expiry, and a reset of the item stamps forgets every snapshot.
 void sets_pre(uint64_t step);
