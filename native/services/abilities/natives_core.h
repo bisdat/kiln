@@ -6,7 +6,10 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <cstdio>
 #include <memory>
+#include <mutex>
+#include <string>
 #include <unordered_map>
 #include <string_view>
 #include <vector>
@@ -25,8 +28,13 @@ constexpr uint8_t kUndecided = 0xFF;        // KilnNativeCall.out_error before a
 
 // "<modid>.<Name>": a non-empty mod id, a dot, Name in [A-Za-z0-9_], 90 bytes at most.
 inline bool valid_native_name(std::string_view n) {
-    const size_t dot = n.find('.');
+    const size_t dot = n.rfind('.');
     if (dot == std::string_view::npos || dot == 0 || dot + 1 >= n.size()) return false;
+    // Mod ids may contain dots; only the suffix is the native's Name.
+    for (size_t i = 0; i < dot; ++i) {
+        const char c = n[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-')) return false;
+    }
     for (size_t i = dot + 1; i < n.size(); ++i) {
         const char c = n[i];
         if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_')) return false;
@@ -261,7 +269,8 @@ size_t finish_quiet(std::vector<Deferred<Payload>>& list, uint64_t step, Release
 // Records are claimed by CAS at entry and released at exit; the watchdog thread only reads them.
 struct InsideRecord {
     std::atomic<int64_t> since{0};       // 0 = free; else the entry time (the caller's clock)
-    std::atomic<const char*> what{nullptr};
+    std::mutex mu;  // protects a copied name and record reuse; claim/scan never wait
+    char what[96]{};
     std::atomic<KilnOwner> owner{0};
     std::atomic<bool> reported{false};
 };
@@ -271,9 +280,11 @@ struct InsideTable {
     // A free record for this call, or -1 when all are taken (the call is then not watched).
     int claim(int64_t now, const char* what, KilnOwner owner) {
         for (size_t i = 0; i < N; ++i) {
+            std::unique_lock lock(rec[i].mu, std::try_to_lock);
+            if (!lock.owns_lock()) continue;
             int64_t free = 0;
             if (rec[i].since.compare_exchange_strong(free, -1, std::memory_order_acq_rel)) {
-                rec[i].what.store(what, std::memory_order_relaxed);
+                std::snprintf(rec[i].what, sizeof rec[i].what, "%s", what ? what : "?");
                 rec[i].owner.store(owner, std::memory_order_relaxed);
                 rec[i].reported.store(false, std::memory_order_relaxed);
                 rec[i].since.store(now, std::memory_order_release);
@@ -290,9 +301,15 @@ struct InsideTable {
     size_t scan(int64_t now, int64_t limit, Report&& report) {
         size_t n = 0;
         for (size_t i = 0; i < N; ++i) {
+            std::unique_lock lock(rec[i].mu, std::try_to_lock);
+            if (!lock.owns_lock()) continue;
             const int64_t s = rec[i].since.load(std::memory_order_acquire);
             if (s <= 0 || now - s < limit || rec[i].reported.exchange(true, std::memory_order_acq_rel)) continue;
-            report(rec[i].what.load(std::memory_order_relaxed), rec[i].owner.load(std::memory_order_relaxed), now - s);
+            char what[96];
+            std::memcpy(what, rec[i].what, sizeof what);
+            const auto owner = rec[i].owner.load(std::memory_order_relaxed);
+            lock.unlock();  // logging may block: do not keep the record locked
+            report(what, owner, now - s);
             ++n;
         }
         return n;
@@ -305,6 +322,7 @@ struct SyncBinding {
     KilnNativeWrapFn fn = nullptr;
     void* user = nullptr;
     OwnerGate* gate = nullptr;
+    std::string name;  // immutable across same-slot reloads
 };
 
 // One gate per owner, made on its first registration and never freed (an owner id is never reused: a mod's reload

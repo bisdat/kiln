@@ -30,7 +30,7 @@ def _data_dir():
         return DATA
     alt = Path(os.environ.get("KILN_OUT") or (Path(__file__).resolve().parents[3] / ".out/impact")) / "impact-data"
     return alt if (alt / "natives.json").exists() else DATA
-NAME_RX = re.compile(r"^[A-Za-z0-9_\-]+\.[A-Za-z0-9_]+$")
+NAME_RX = re.compile(r"^[a-z0-9_.\-]+\.[A-Za-z0-9_]+$")
 
 
 class CatalogError(Exception):

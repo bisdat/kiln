@@ -324,7 +324,9 @@ typedef struct KilnAbilitiesApi {
     KilnResult(KILN_CALL* set_wrap_dispatcher)(KilnNativeWrapFn fn, void* user);
     /* job thread, from the dispatcher only: runs the game's native with the current args; sets out_error/out_value. */
     void(KILN_CALL* call_original)(KilnNativeCall* call);
-    /* tick. Drops every managed native of `owner`. */
+    /* tick, outside a native call. Closes owner admission and drops its natives and attachments.
+     * Waits at most 2 ms; KILN_OK does not mean an earlier callback returned. Caller-owned fn/user resources must
+     * remain valid until its in-flight callbacks return (deferred retirements are reported by native_counters). */
     KilnResult(KILN_CALL* release_owner)(KilnOwner owner);
 
     /* ---- attributes (tick) ----
@@ -353,7 +355,7 @@ typedef struct KilnAbilitiesApi {
      * has no original (call_original does nothing); its out_error/out_value are the result (out_error left at 0xFF:
      * error 0, value 0). A fault in `fn` answers 0x11 (the instance stops with Error, the game goes on). `fn` must not
      * block and must not call tick-only functions. native_unregister / release_owner take it off like a managed native:
-     * from then on the hash answers 0x1F. `fn` and `user` must stay valid until then.
+     * from then on the hash answers 0x1F. `fn` and `user` must stay valid until every in-flight call returns, including after removal.
      * KILN_OK: *out_hash set. INVALID_ARGUMENT: a bad name, argc or fn (*out_refusal 0), or a refusal (*out_refusal is
      * KILN_NATIVE_REFUSED_*). UNAVAILABLE: no natives on this build. */
     KilnResult(KILN_CALL* native_register_sync)(KilnOwner owner, KilnStr name, uint32_t argc, KilnNativeWrapFn fn,

@@ -606,7 +606,7 @@ std::atomic<uint32_t> g_slow_logged{0};
 // A sync native (since 0.2.0-dev.29): its fn answers inside the ECALL. No lock, no queue, no suspend; a fault in fn is
 // caught by the thunk's guard and answers 0x11.
 void dispatch_sync(Slot& s, NativeResult* out, ArgSlice* args, NativeCtx* ctx) {
-    const SyncBinding* b = s.sync.load(std::memory_order_acquire);
+    const SyncBinding* b = s.sync.load(std::memory_order_seq_cst);
     if (!b || !b->fn || !gate_enter(*b->gate)) {  // taken off, or its owner is retiring: no new entry
         c_dead_calls.fetch_add(1, std::memory_order_relaxed);
         out->error = kErrUnknownNative;
@@ -621,7 +621,7 @@ void dispatch_sync(Slot& s, NativeResult* out, ArgSlice* args, NativeCtx* ctx) {
     KilnNativeCall c;
     fill_call(c, s, out, args, ctx);
     const int64_t t0 = qpc();
-    watch(t0, s.name, b->gate->owner);
+    watch(t0, b->name.c_str(), b->gate->owner);
     b->fn(&c, b->user);
     unwatch();
     leave_gate();
@@ -629,7 +629,7 @@ void dispatch_sync(Slot& s, NativeResult* out, ArgSlice* args, NativeCtx* ctx) {
     if (over_budget(dt, g_qpf)) {
         c_sync_slow.fetch_add(1, std::memory_order_relaxed);
         if (g_slow_logged.fetch_add(1, std::memory_order_relaxed) < 5)
-            logw("kiln.abilities: sync native %s took %.3f ms (budget 0.2 ms): impact_simulation waits for it", s.name,
+            logw("kiln.abilities: sync native %s took %.3f ms (budget 0.2 ms): impact_simulation waits for it", b->name.c_str(),
                  g_qpf > 0 ? static_cast<double>(dt) * 1000.0 / static_cast<double>(g_qpf) : 0.0);
     }
     sync_result(c, &out->error, &out->value);
@@ -693,7 +693,7 @@ void on_fault(int i, NativeResult* out, ArgSlice* args, NativeCtx* ctx) {
 
 template <int I>
 NativeResult* __fastcall thunk(NativeResult* out, ArgSlice* args, NativeCtx* ctx) {
-    g_inflight.fetch_add(1, std::memory_order_acq_rel);
+    g_inflight.fetch_add(1, std::memory_order_seq_cst);
     const int32_t outer_stage = t_stage;
     OwnerGate* const outer_gate = t_gate;
     const int outer_inside = t_inside;
@@ -714,7 +714,7 @@ NativeResult* __fastcall thunk(NativeResult* out, ArgSlice* args, NativeCtx* ctx
     t_slot = outer_slot;
     t_orig_ran = outer_ran;
     t_in_game = outer_in_game;
-    g_inflight.fetch_sub(1, std::memory_order_acq_rel);
+    g_inflight.fetch_sub(1, std::memory_order_seq_cst);
     return out;
 }
 
@@ -913,9 +913,12 @@ void lab_unpin() {
 // A handler that is still inside after a second is named once per call, from a thread of its own: while it is
 // inside, the world waits for it, so nothing on the world's thread could say why the server stopped. Started at the
 // first sync native or attachment (nothing runs for a player whose mods use neither).
+void KILN_CALL stop_watchdog(void*) { g_watchdog_on.store(false, std::memory_order_release); }
+
 void watchdog_loop() {
-    for (;;) {
+    while (g_watchdog_on.load(std::memory_order_acquire)) {
         Sleep(250);
+        if (!g_watchdog_on.load(std::memory_order_acquire)) break;
         g_inside.scan(qpc(), g_qpf, [](const char* what, KilnOwner owner, int64_t inside) {
             c_watchdog_reports.fetch_add(1, std::memory_order_relaxed);
             logw("kiln.abilities: the handler of native %s (owner %llu) has been inside for %.1f s: impact_simulation and "
@@ -967,9 +970,11 @@ void free_retired() {
             logi("kiln.abilities: owner %llu retired %llu step(s) late: its last native call left",
                  static_cast<unsigned long long>(g->owner), static_cast<unsigned long long>(steps));
         });
-        // a binding is freed when its owner's gate is quiet (a call that loaded it has left)
+        // A reader increments g_inflight before loading the binding, before entering its owner gate.
+        // Keep the binding through that admission window as well as through the callback.
         for (auto it = g_retired_bindings.begin(); it != g_retired_bindings.end();) {
-            if ((*it)->gate && (*it)->gate->inflight.load(std::memory_order_seq_cst) != 0) {
+            if (g_inflight.load(std::memory_order_seq_cst) != 0 ||
+                ((*it)->gate && (*it)->gate->inflight.load(std::memory_order_seq_cst) != 0)) {
                 ++it;
                 continue;
             }
@@ -2075,15 +2080,15 @@ int add_kiln_native(KilnOwner owner, std::string_view name, uint32_t argc, uint3
         if (fresh && g_setup_registry && !registry_room(g_setup_registry))
             return refuse(KILN_NATIVE_REFUSED_REGISTRY_FULL, "native registry full (the game takes 128 natives, 107 of them its own)");
         Slot& s = g_slots[slot];
-        s.hash = hash;
+        if (fresh) s.hash = hash;
         // A revived hash with a new argc: the engine's entry must be written again (the VM pops the registry's argc).
         // The same argc keeps the entry as it is: no registration the game could refuse once its map is full.
         if (!fresh && s.argc != argc) s.registered_in = 0;
         s.argc = argc;
         s.owner = owner;
         s.original.store(nullptr);
-        std::snprintf(s.name, sizeof s.name, "%.*s", static_cast<int>(name.size()), name.data());
-        retire_binding(s.sync.exchange(fn ? new SyncBinding{fn, user, g_gates.of(owner)} : nullptr, std::memory_order_acq_rel));
+        if (fresh) std::snprintf(s.name, sizeof s.name, "%.*s", static_cast<int>(name.size()), name.data());
+        retire_binding(s.sync.exchange(fn ? new SyncBinding{fn, user, g_gates.of(owner), std::string(name)} : nullptr, std::memory_order_seq_cst));
         if (auto t = g_typed.find(hash); t != g_typed.end()) {  // declared before it registered
             if (const auto* old = s.typed.exchange(new std::vector<KilnNativeArg>(t->second))) g_retired_typed.push_back(old);
         }
@@ -2095,7 +2100,7 @@ int add_kiln_native(KilnOwner owner, std::string_view name, uint32_t argc, uint3
         std::lock_guard lock(g_mu);  // the game said no to the new key: give the slot back
         Slot& s = g_slots[slot];
         s.kind.store(fresh ? SLOT_FREE : SLOT_DEAD, std::memory_order_release);
-        retire_binding(s.sync.exchange(nullptr, std::memory_order_acq_rel));
+        retire_binding(s.sync.exchange(nullptr, std::memory_order_seq_cst));
         s.owner = 0;
         if (fresh) g_slot_of.erase(hash);
         return refuse(KILN_NATIVE_REFUSED_REGISTRY_FULL, "the game's native registry refused it (full)");
@@ -2143,7 +2148,7 @@ KilnResult KILN_CALL t_native_register_sync(KilnOwner owner, KilnStr name, uint3
 // impact_simulation slice runs, so no call can be inside the slot's fn: the in-flight counter says so.
 void take_off(Slot& s) {
     s.kind.store(SLOT_DEAD, std::memory_order_release);
-    retire_binding(s.sync.exchange(nullptr, std::memory_order_acq_rel));  // freed once its owner's gate is quiet
+    retire_binding(s.sync.exchange(nullptr, std::memory_order_seq_cst));  // freed once its owner's gate is quiet
     s.owner = 0;
 }
 
@@ -2824,6 +2829,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     info->id = KilnStr{KILN_ABILITIES_SERVICE, sizeof(KILN_ABILITIES_SERVICE) - 1};
     info->version = KilnStr{"1", 1};
     info->on_ready = &on_ready;
+    info->on_unload = &stop_watchdog;
 
     E.get_component = reinterpret_cast<Engine::GetComponentFn>(sym("GetComponent"));
     E.name_cap = cst("abilities/natives.name_cap", 0x20);
