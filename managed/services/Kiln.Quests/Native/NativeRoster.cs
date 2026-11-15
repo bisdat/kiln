@@ -95,7 +95,8 @@ public static partial class NativeQuests
 
     /// <summary>
     /// The unlock state of the roster entry <paramref name="npcId"/> in the server world <paramref name="serverWorld"/>
-    /// names, from that world's last snapshot (one completed step old at most). Entries 64 and up answer from Kiln's
+    /// names, from the snapshot of that world's last completed step (a step whose registry could not be read answers
+    /// <c>NotReady</c>, never an older state). Entries 64 and up answer from Kiln's
     /// second page (where it is installed), never from the game's value (which would be another entry's bit). A stopped
     /// world answers <c>WorldEnded</c>, never the next world's state. Any thread.
     /// </summary>
