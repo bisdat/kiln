@@ -285,6 +285,12 @@ keep memory the plugin frees itself alive.
   prediction world has no table of its own: it runs the client world's, and its slices reach the game's update untouched.
   A wrap belongs to one world: it is applied in that world's own step, taken out when that world stops, and applied again
   by name in the next world of that kind.
+- A world's stop: kiln.world closes the stages' admission and waits up to 2 s for a call in flight. The game itself lets
+  no program slice outlive the step that ran it (its program stepper waits for the world's task queue before it
+  returns), and the core runs the game's WaitWorldJobs on the server and the client world before their stop (since
+  0.2.0-dev.29; the prediction world stops with the client world). The capability rows `world.stop_drain.server`,
+  `.client` and `.prediction` say which guarantee a process has; `systems.wraps` and `systems.wraps.client` name it,
+  and so does kiln.log at each stop. Without WaitWorldJobs on a build, the 2 s wait is all there is.
 - Refused while native SET is loaded.
 - Typed views exist for the game build Kiln was made for; on another build a changed program's typed wrap is refused
   (its contract), untyped wraps go on. No typed property for `Dynamic*` components, singletons and other-entity lists;

@@ -77,5 +77,4 @@ bool seh_cas_ptr(uintptr_t address, uintptr_t expected, uintptr_t desired, uintp
 void wraps_test_budget_ns(uint64_t ns);
 void wraps_test_archetype_gap(void (*fn)());  // a hook run between the archetype read's layout read and its coherence re-check
 uint32_t wraps_test_in_flight(int pool);  // the sum over a pool's slots
-void wraps_test_runner_record(uintptr_t record);  // what the ProgramRunner link records on this thread (rdx at its entry)
 }  // namespace kw

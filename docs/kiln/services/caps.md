@@ -88,6 +88,14 @@ Opening the remaining 20 is an owner decision, not a real-game confirmation; the
 - Every sigdb feature, source `sigdb`. An unavailable one says `symbol-missing` with the symbol, `policy` in safe idle,
   or `faulted` for the `tick*` features and `world.lifecycle` when their hook is not installed or faulted.
 - Every in-core service and every published service, `kiln.<service>`, with `v<n>` as text.
+- `world.stop_drain.server`, `world.stop_drain.client`, `world.stop_drain.prediction` (since 0.2.0-dev.29): what the core
+  guarantees about a world kind's jobs when it dispatches that world's `KILN_WORLD_STOPPING`. Available: drained by the
+  engine (the core runs the game's WaitWorldJobs on the server and the client world before their STOPPING; the
+  prediction world stops with the client world, after that wait). Unavailable: `symbol-missing` "bounded wait only"
+  (WaitWorldJobs did not resolve: a subscriber's own bounded wait is all there is), `faulted` or `symbol-missing` "no
+  world stop is seen" (the tick or world-destroy hook is not there), `wrong-side` for the client kinds in a dedicated
+  server, `policy` in safe idle. They follow a hook that faults later, as the `tick*` rows do. kiln.world names the row
+  in its wrap capability texts and at each stop.
 - Every service DLL that did not load, as `kiln.<stem>`, with `service-missing` or `faulted`.
 - Kiln's managed layer adds `identity.entities` and `identity.players` ([modding/contract.md](../modding/contract.md)):
   pending until a service registers a source, then available. The sources (Kiln.Players, Kiln.Items, Kiln.Spawn)

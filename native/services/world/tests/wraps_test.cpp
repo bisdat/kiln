@@ -232,6 +232,32 @@ void fake_api() {
     g_api = &g_fake;
 }
 
+// The core's world.stop_drain.<kind> rows as kiln.caps answers them (since dev.29): g_drain[kind] = 1 available
+// ("drained by the engine"), 0 unavailable (a bounded wait only), -1 no row (an older core).
+int g_drain[KILN_WORLD_KINDS] = {-1, -1, -1};
+KilnResult KILN_CALL fake_caps_find(KilnStr name, KilnCapRow* out) {
+    static const char* kNames[KILN_WORLD_KINDS] = {"world.stop_drain.server", "world.stop_drain.prediction",
+                                                  "world.stop_drain.client"};
+    for (uint32_t k = 0; k < KILN_WORLD_KINDS; ++k) {
+        if (std::string_view(name.ptr, name.len) != kNames[k] || g_drain[k] < 0) continue;
+        static const char kOn[] = "drained by the engine: WaitWorldJobs on the world before STOPPING";
+        static const char kOff[] = "bounded wait only: tick.wait_jobs did not resolve";
+        out->state = g_drain[k] ? KILN_CAP_AVAILABLE : KILN_CAP_UNAVAILABLE;
+        out->reason = g_drain[k] ? KILN_CAP_REASON_NONE : KILN_CAP_REASON_SYMBOL_MISSING;
+        out->name = name;
+        out->text = g_drain[k] ? KilnStr{kOn, sizeof kOn - 1} : KilnStr{kOff, sizeof kOff - 1};
+        return KILN_OK;
+    }
+    return KILN_ERR_NOT_FOUND;
+}
+KilnCapsApi g_stop_caps = [] {
+    KilnCapsApi c{};
+    c.header = {sizeof c, 1};
+    c.report = [](KilnOwner, KilnStr, uint32_t, uint32_t, KilnStr) -> KilnResult { return KILN_OK; };
+    c.find = &fake_caps_find;
+    return c;
+}();
+
 // A client without the destroy hook cannot retire wraps when its world disappears.
 void client_lifecycle_row() {
     KilnCapsApi caps{};
@@ -263,8 +289,20 @@ void client_lifecycle_row() {
     check(state == KILN_CAP_UNAVAILABLE, "client tick subscription failure keeps wraps off");
     wraps_client_ready(true, false);
     check(state == KILN_CAP_UNAVAILABLE, "world event subscription failure keeps wraps off");
+    caps.find = &fake_caps_find;
+    g_drain[KILN_WORLD_CLIENT] = 1;
     wraps_client_ready(true, true);
     check(state == KILN_CAP_AVAILABLE, "native client wraps available with lifecycle and both subscriptions");
+    check(detail.find("at a world stop the engine drains the world's jobs first (world.stop_drain.client)") != std::string::npos,
+          "the client wrap row says the core drains the client world's jobs before its stop");
+    g_drain[KILN_WORLD_CLIENT] = 0;
+    wraps_client_ready(true, true);
+    check(state == KILN_CAP_AVAILABLE &&
+              detail.find("at a world stop a bounded wait (2000 ms) only (world.stop_drain.client: bounded wait only") !=
+                  std::string::npos,
+          "without the engine's drain the client wrap row says the stop has a bounded wait only");
+    g_drain[KILN_WORLD_CLIENT] = 1;
+    wraps_client_ready(true, true);
     check(typed_state == wraps_state && wraps_state != 99, "systems.wraps.typed is reported with systems.wraps");
     g_fake_external.store(1);
     wraps_pre(KILN_WORLD_CLIENT, 0);
@@ -281,6 +319,8 @@ void client_lifecycle_row() {
           "systems.define follows kiln.world's own programs (off when they did not hook, on when they did)");
     g_side = KILN_SIDE_SERVER;
     fake_api();
+    g_wrap_caps = nullptr;  // `caps` goes with this frame; the next wraps_init looks kiln.caps up again
+    g_drain[KILN_WORLD_CLIENT] = -1;
 }
 
 void layout() {
@@ -1150,6 +1190,9 @@ void stopping_under_load() {
     const auto trampoline = reinterpret_cast<UpdateFn>(update_of(wentry(1)));
     std::thread worker([&] { Job j(3); run_slice(wentry(1), j); });
     while (!b.entered.load()) std::this_thread::yield();
+    g_wrap_caps = &g_stop_caps;  // the core says the engine drained the server world's jobs (and yet a call is in flight)
+    g_drain[KILN_WORLD_SERVER] = 1;
+    const int contradictions = logs_with("wrap calls were in flight although the engine drains");
     std::atomic<bool> stopped{false};
     std::thread stopper([&] { world_event(KILN_WORLD_STOPPING, KILN_WORLD_SERVER); stopped = true; });
     auto& entry = *reinterpret_cast<uintptr_t*>(wentry(1) + kEntryUpdateAt);
@@ -1168,6 +1211,12 @@ void stopping_under_load() {
           "blocked stage finishes normally; stop drains and returns it to pending");
     check(std::string(winfo(b.h).detail).rfind("world stop: 1 in flight at the stop, 0 after the wait (", 0) == 0,
           "a stage back in PENDING says what the stop's drain found (1 call in flight at the stop, none after the wait)");
+    check(std::string(winfo(b.h).detail).find("; drained by the engine") != std::string::npos &&
+              logs_with("the engine drains the world's jobs first (world.stop_drain.server)") >= 1,
+          "the stage's detail and the stop line say the core's guarantee (world.stop_drain.server)");
+    check(logs_with("1 wrap calls were in flight although the engine drains") == contradictions + 1,
+          "a call in flight at a stop the engine drained is logged as an error");
+    g_drain[KILN_WORLD_SERVER] = 0;
     game_program_unwrap(b.h);
     check(std::string(winfo(b.h).detail) == "unwrapped", "once removed its detail is the removal's again");
     world_event(KILN_WORLD_STARTED, KILN_WORLD_SERVER);
@@ -1189,8 +1238,9 @@ void stopping_timeout() {
     world_event(KILN_WORLD_STOPPING, KILN_WORLD_SERVER);
     check(g_stop_timeout_logs.load() == logs + 1 && winfo(h).running == 1 && !g_retired.empty(),
           "bounded stop logs once and retains the chain while a callback still runs");
-    check(std::string(winfo(h).detail).rfind("world stop: 1 in flight at the stop, 1 after the wait (", 0) == 0,
-          "a timed-out drain says so in the waiting stage's detail (1 call still in flight after the wait)");
+    check(std::string(winfo(h).detail).rfind("world stop: 1 in flight at the stop, 1 after the wait (", 0) == 0 &&
+              std::string(winfo(h).detail).find("; bounded wait only") != std::string::npos,
+          "a timed-out drain says so in the waiting stage's detail (1 call still in flight after the wait; bounded wait only)");
     b.release = true;
     worker.join();
     game_program_unwrap(h);
@@ -1198,6 +1248,8 @@ void stopping_timeout() {
     world_event(KILN_WORLD_STARTED, KILN_WORLD_SERVER);
     wpre();
     check(g_retired.empty(), "timed-out stop's chain is reclaimed only after its callback exits");
+    g_wrap_caps = nullptr;
+    g_drain[KILN_WORLD_SERVER] = -1;
 }
 
 // The core's tick faulted (tick.cpp disable(): every world pointer cleared, no STOPPING will come): a slice that finds no

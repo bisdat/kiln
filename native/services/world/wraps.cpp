@@ -412,6 +412,33 @@ uint32_t external_runner() {
 // Kiln checked against the live descriptor's contract (game_program_contract), which needs nothing more of the build.
 constexpr const char* kTypedText = "typed program views: each wrap checks the view's contract against the live descriptor";
 
+// The core's guarantee about a world kind's jobs at its STOPPING (since 0.2.0-dev.29: the rows world.stop_drain.<kind>,
+// native/core/src/tick_drain.h). Read without g_mu held: kiln.caps may call its subscribers on this thread.
+struct DrainRow {
+    bool engine = false;
+    std::string text;  // for a capability text and the stop line
+};
+DrainRow drain_row(uint32_t kind) {
+    static constexpr const char* kName[KILN_WORLD_KINDS] = {"world.stop_drain.server", "world.stop_drain.prediction",
+                                                           "world.stop_drain.client"};
+    DrainRow d;
+    if (kind >= KILN_WORLD_KINDS) return d;
+    KilnCapRow row{};
+    row.size = sizeof row;
+    if (!g_wrap_caps || !g_wrap_caps->find || g_wrap_caps->find(kstr(kName[kind]), &row) != KILN_OK) {
+        d.text = std::string("a bounded wait (") + std::to_string(g_stop_wait_ms.load()) + " ms) only: this core has no " +
+                 kName[kind] + " row";
+        return d;
+    }
+    d.engine = row.state == KILN_CAP_AVAILABLE;
+    if (d.engine) d.text = std::string("the engine drains the world's jobs first (") + kName[kind] + ")";
+    else
+        d.text = std::string("a bounded wait (") + std::to_string(g_stop_wait_ms.load()) + " ms) only (" + kName[kind] + ": " +
+                 std::string(row.text.ptr ? row.text.ptr : "", row.text.len) + ")";
+    return d;
+}
+std::string wraps_text(const char* what, uint32_t kind) { return std::string(what) + "; at a world stop " + drain_row(kind).text; }
+
 void report_row(const char* name, uint32_t state, uint32_t reason, const char* text) {
     if (g_wrap_caps && g_wrap_caps->report)
         g_wrap_caps->report(g_owner, KilnStr{name, std::strlen(name)}, state, reason, KilnStr{text, std::strlen(text)});
@@ -764,7 +791,8 @@ void wraps_init() {
     if (!g_retiring_subscribed)
         KW_W("wraps: kiln.hooks has no owner cleanup here; a revoked owner's wraps are found once a second");
     if (g_ok) {
-        report_row("systems.wraps", KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, "Before, After and Replace on the game's programs");
+        report_row("systems.wraps", KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE,
+                   wraps_text("Before, After and Replace on the game's programs", KILN_WORLD_SERVER).c_str());
         report_row("systems.wraps.typed", KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, kTypedText);
     } else {
         report_row("systems.wraps", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING,
@@ -807,7 +835,7 @@ void wraps_client_ready(bool tick, bool events) {
         report_row("systems.wraps.client", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY, game_wraps_off_reason());
     else
         report_row("systems.wraps.client", KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE,
-                   "native Before, After and Replace on the client world's programs");
+                   wraps_text("native Before, After and Replace on the client world's programs", KILN_WORLD_CLIENT).c_str());
 }
 
 const char* game_wraps_off_reason() {
@@ -950,30 +978,35 @@ void wraps_pre(uint32_t kind, uintptr_t) {
     trim_finished();
     count_states();
     }
-    if (row.set) {
-        report_row("systems.wraps", row.state, row.reason, row.text);
-        report_row("systems.wraps.typed", row.state, row.reason, row.state == KILN_CAP_AVAILABLE ? kTypedText : row.text);
-        if (g_client_ready) report_row("systems.wraps.client", row.state, row.reason, row.text);
+    if (row.set) {  // g_mu released: drain_row asks kiln.caps
+        const bool on = row.state == KILN_CAP_AVAILABLE;
+        const std::string server = on ? wraps_text(row.text, KILN_WORLD_SERVER) : row.text;
+        const std::string client =
+            on ? wraps_text("native Before, After and Replace on the client world's programs", KILN_WORLD_CLIENT) : row.text;
+        report_row("systems.wraps", row.state, row.reason, server.c_str());
+        report_row("systems.wraps.typed", row.state, row.reason, on ? kTypedText : row.text);
+        if (g_client_ready) report_row("systems.wraps.client", row.state, row.reason, client.c_str());
     }
 }
 
 void wraps_world_event(const KilnWorldEvent* event) {
     const int pool = event ? wrap_pool(event->kind) : -1;
     if (pool < 0) return;
+    const DrainRow drain = event->event == KILN_WORLD_STOPPING ? drain_row(event->kind) : DrainRow{};
     std::unique_lock lock(g_mu);
     bool live_slots = false;
     for (int i = 0; i < kWrapSlots && !live_slots; ++i) live_slots = g_pools[pool].slots[i].state == S_LIVE;
     if (event->event == KILN_WORLD_STOPPING) {
         // Close stage admission before anything else: call()'s gate (and dispatch) refuse once `stopping` is set, so no new
         // stage starts after STOPPING is seen; only a stage already in flight is waited for, up to the bound. The bound
-        // keeps Kiln's own callback state alive on timeout; it cannot keep the game's world memory alive. What the game
-        // guarantees here (native/core/src/tick.cpp hk_world_destroy, STOPPING dispatched while the world is intact, before
-        // the original destructor): the SERVER world's jobs are drained first (WaitWorldJobs, kind 0), so no server-world
-        // slice runs when STOPPING arrives and this drain finds 0 in flight. The CLIENT and PREDICTION worlds get no such
-        // engine wait, so on a hosting client a client-world slice can still be finishing on a worker here; the bounded
-        // drain is the only protection, and a timeout there (a stage that outlived storage destruction) is the client-gated
-        // risk systems.wraps.client carries. A real client must show, over repeated host/leave/join, that finishing workers
-        // are quiescent at STOPPING.
+        // keeps Kiln's own callback state alive on timeout; it cannot keep the game's world memory alive. What the core
+        // guarantees here is its row world.stop_drain.<kind> (native/core/src/tick_drain.h): STOPPING is dispatched from
+        // hk_world_destroy while the world is intact, before the original destructor, and since 0.2.0-dev.29 after the
+        // engine's WaitWorldJobs on the server and the client world (the prediction world stops with the client world,
+        // after that wait). The game itself already lets no program slice outlive StepPrograms (it waits for the world's
+        // queue before it returns), and destroys a world on the thread that steps it; so with the engine's drain this
+        // drain finds 0 in flight, and a count above 0 there is logged as an error. Without it (tick.wait_jobs did not
+        // resolve) the bounded drain is the only protection; the stop line and the stages' detail say which it was.
         g_pools[pool].stopping.store(true, std::memory_order_seq_cst);
         for (int i = 0; i < kWrapSlots; ++i)
             if (g_pools[pool].slots[i].state == S_LIVE) restore(pool, i, true);
@@ -991,6 +1024,8 @@ void wraps_world_event(const KilnWorldEvent* event) {
         } while (std::chrono::steady_clock::now() < until);
         const auto waited = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
         if (remaining) KW_E("world %u stops: wrap drain timed out with %u calls still in flight", event->kind, remaining);
+        if (first && drain.engine)
+            KW_E("world %u stops: %u wrap calls were in flight although %s", event->kind, first, drain.text.c_str());
         if (const uint64_t rec = g_arch_record.exchange(0), map = g_arch_map.exchange(0), bad = g_arch_mismatch.exchange(0);
             rec || map || bad)
             KW_I("world %u stops: WhenArchetype read %llu slices from the engine's slice record and %llu from the entity map "
@@ -999,12 +1034,14 @@ void wraps_world_event(const KilnWorldEvent* event) {
         lock.lock();
         if (live_slots)
             KW_I("world %u stops: its wraps are taken out and wait for the next world (drained: %u calls in flight at the "
-                 "stop, %u after %lld us)", event->kind, first, remaining, static_cast<long long>(waited));
+                 "stop, %u after %lld us; %s)", event->kind, first, remaining, static_cast<long long>(waited),
+                 drain.text.c_str());
         // What the drain found, for every stage that waits for the next world (game_wrap_info's detail while PENDING).
         for (auto& [h, st] : g_stages)
             if (st->pool == pool && st->state.load() == KILN_WRAP_ACTIVE && !st->remove)
-                std::snprintf(st->stop, sizeof st->stop, "world stop: %u in flight at the stop, %u after the wait (%lld us)",
-                              first, remaining, static_cast<long long>(waited));
+                std::snprintf(st->stop, sizeof st->stop, "world stop: %u in flight at the stop, %u after the wait (%lld us); %s",
+                              first, remaining, static_cast<long long>(waited),
+                              drain.engine ? "drained by the engine" : "bounded wait only");
         drop_pool(pool, true); // retired chains retain their views until their last in-flight call exits, even on timeout
     } else if (event->event == KILN_WORLD_STARTED) {
         if (live_slots) {
