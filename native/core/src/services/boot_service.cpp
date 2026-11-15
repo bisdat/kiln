@@ -1071,16 +1071,15 @@ void decide(bool hooks, const std::string& safe_idle) {
     if (!g_self) g_self = reg::owner_create("kiln.boot");
     const bool client = image().side == KILN_SIDE_CLIENT;
     const std::string idle = "safe idle: " + safe_idle;
-    // The rows that do not depend on the decision first: the decision reads mods.boot.client. On a client both rows say
-    // what this build can do; the gate list is empty since 0.2.0-dev.29. Boot VFX is open but unconfirmed by
-    // 08-boot.first-start-definitions; 08-loader-order still covers both loader orders.
+    // The decision reads mods.boot.client, so publish it first. Staged VFX/materials
+    // are absent in this release; that informational row must not gate ordinary boot mods.
     std::vector<Row> rows = {{"mods.boot.phase", KILN_CAP_PENDING, KILN_CAP_REASON_SESSION, "no boot-author frame is open"},
                              game_data_row(hooks, idle)};
     if (client) {
         rows.push_back({"mods.boot.client", KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE,
                         "boot mods on a game client, for the hosted world and the client"});
-        rows.push_back({"mods.boot.vfx", KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE,
-                        "the vfx collector cooks staged VFX and materials on the client"});
+        rows.push_back({"mods.boot.vfx", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_MISSING,
+                        "not in this build: a client builds VFX and material files at start; staging them into a boot generation comes later"});
     } else {
         rows.push_back({"mods.boot.client", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_WRONG_SIDE,
                         "boot mods on a game client (hosted and joined); a dedicated server's are mods.boot"});

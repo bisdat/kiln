@@ -1804,11 +1804,44 @@ void patch_value_cases() {
     pass_line("BOOT-PATCH-VALUES rejects reversed bounds and invalid flag shifts", f0);
 }
 
+// An unavailable staged-VFX row is informational: ordinary/required boot mods still publish.
+void vfx_row_cases() {
+    t_case = "vfx-row";
+    const int f0 = t_fail;
+    for (const auto side : {KILN_SIDE_CLIENT, KILN_SIDE_SERVER}) {
+        for (const bool required : {false, true}) {
+            reset_boot();
+            t_image.side = side;
+            t_config.clr = true;
+            profile_with({{"a", required ? json("required") : json(true), true, "both"}});
+            server_rows(true);
+            kiln::boot_svc::decide(true, "");
+            CHECK(shown("mods.boot.vfx") && shown("mods.boot.vfx")->state == KILN_CAP_UNAVAILABLE);
+            CHECK(shown("mods.boot.vfx")->reason == (side == KILN_SIDE_CLIENT ?
+                  KILN_CAP_REASON_SERVICE_MISSING : KILN_CAP_REASON_WRONG_SIDE));
+            CHECK(std::string(shown("mods.boot.vfx")->text.ptr, shown("mods.boot.vfx")->text.len) ==
+                  (side == KILN_SIDE_CLIENT ?
+                   "not in this build: a client builds VFX and material files at start; staging them into a boot generation comes later" :
+                   "a dedicated server renders no VFX: its vfx collector prepares an empty plan"));
+            CHECK(kiln::boot_svc::g_deferred);
+            for (int i = 0; i < 7; ++i)
+                B.collector(50 + i, ks(kiln::boot_svc::kCollectors[i]), &fake_prepare, &t_fake[i]);
+            kiln::boot_svc::bound();
+            run_authors({required ? "a!" : "a"});
+            const auto c = commit_with(envelope({required ? "a!" : "a"}));
+            CHECK(c.status == KILN_BOOT_STATUS_PUBLISHED);
+            CHECK(kiln::boot_svc::after_clr(true, &fake_write_state, nullptr) && t_exits.empty() && t_held.empty());
+        }
+    }
+    pass_line("BOOT-VFX-ROW unavailable staged VFX does not refuse optional/required client/server boot", f0);
+}
+
 int main(int argc, char** argv) {
     t_root = fs::path(argc > 1 ? argv[1] : ".") / "boot-service-test";
     fs::remove_all(t_root);
     fs::create_directories(t_root);
     t_paths.mods = t_root / "no-dropins";
+    vfx_row_cases();
     decision_cases();
     patch_value_cases();
     staging_cases();

@@ -65,11 +65,11 @@ void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
 void KILN_CALL on_sim_tick(const KilnTickInfo*, void*) { sim_update(); }
 
 // ---- the boot generation's vfx collector (chapter 08) ----
-// Where nothing is built from a boot generation (a dedicated server, kiln.vfx off by its config, a client while the client gate holds
-// mods.boot.vfx under a configured hold; none ships in dev.29), the collector still answers: an empty plan, and staged VFX and materials named in a warning. Elsewhere the build that
-// on_ready runs without a boot profile runs in prepare, after OnBoot, before the game's entry point.
+// Client files stay in on_ready in this release, independently of the capability gate. The
+// empty collector checks those failures and warns/refuses staged content. Dedicated-server
+// and config-off collectors retain their existing behavior. Prepare builds remain for labs.
 bool g_boot_build = false;
-bool g_held_build = false;
+bool g_held_build = false;  // files built at start, outside the boot generation (not a gate hold)
 // Written by on_ready, read by prepare after load_plugins returns (core/src/boot.cpp).
 std::vector<BuildFailure> g_held_failures;
 struct BootPlan {
@@ -80,17 +80,15 @@ void KILN_CALL destroy_boot(const void* p) {
     if (plan->built) build_forget();
     delete plan;
 }
-// Why a process builds no VFX in its boot generation. A dedicated server renders none: a mod's VFX and materials are built by each
-// player's game (with the same boot mod), so nothing of a required mod is missing here. On a game client the user turned kiln.vfx off
-// (then a required mod's VFX and materials, files or staged, cannot be applied: refused) or a future configured hold closes mods.boot.vfx
-// (none ships in dev.29; on_ready builds the files as before, so failed files and staged VFX/materials of a required mod are refused).
+// Servers render none. Config-off clients refuse required content; ordinary clients build
+// files first, then this collector refuses failed required files or unsupported staged content.
 struct EmptyWhy {
     const char* why;
     bool server, all_off;
 };
 EmptyWhy g_empty_off{"kiln.vfx is off by kiln/config/vfx.json", false, true};
 EmptyWhy g_empty_server{"a dedicated server renders no VFX", true, false};
-EmptyWhy g_empty_held{"mods.boot.vfx is held until the client checks pass (08-boot.first-start-definitions)", false, false};
+EmptyWhy g_empty_held{"in this release a client builds VFX and material files at start, outside the boot generation; VFX or materials staged into a boot generation are not built yet", false, false};
 
 KilnResult KILN_CALL prepare_empty(void* user, const KilnBootPrepareInputV1* in, KilnBootPreparedV1* out, KilnBootIssueV1* issue) {
     const EmptyWhy& e = *static_cast<const EmptyWhy*>(user);
@@ -149,8 +147,8 @@ bool vfx_held(const KilnApi* api) {
     return kiln_caps_held(caps, KilnStr{"mods.boot.vfx", 13}) != 0;
 }
 
-// Before the game's entry point: mods' VFX have to be served before the game enumerates its VFX resources. A boot profile builds them in
-// the boot generation's prepare instead.
+// Before the game's entry point: ordinary client files are served before resource enumeration,
+// including with a boot profile. Retain failures for the required-participant check in prepare.
 void KILN_CALL on_ready(void*) {
     if (!g_boot_build) {
         g_held_failures.clear();
@@ -233,11 +231,11 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     if (rc == KILN_OK) {
         core_set_build_hooks(&build_on_update, &build_refuses, &build_one_shot_ns);
         info->on_ready = &on_ready;
-        // a boot profile: the build moves into the boot generation's prepare, unless the client gate holds mods.boot.vfx (then on_ready builds
-        // the mods' files as before and staged VFX are left out with a warning)
-        if (vfx_held(api)) {
-            g_held_build = true;
-            kiln::boot::collect(api, owner, "vfx", &prepare_empty, &g_empty_held);
+        // Keep client file builds at start until boot staging is implemented. Server/config-off
+        // cases returned above; non-client lab routes preserve their previous choice.
+        if (!boot_builds_in_prepare(api->side(), vfx_held(api))) {
+            // No boot profile: leave even failure collection out of the ordinary on_ready build.
+            g_held_build = kiln::boot::collect(api, owner, "vfx", &prepare_empty, &g_empty_held);
         } else
             g_boot_build = kiln::boot::collect(api, owner, "vfx", &prepare_build, nullptr);
         if (g_boot_build) KV_I("vfx: boot profile: mods' VFX and materials are built with the boot generation");

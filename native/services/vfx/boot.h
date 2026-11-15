@@ -17,7 +17,7 @@ struct Input;  // kiln_boot_collector.hpp
 namespace kvx {
 
 // on_ready of the service: the fingerprint, the budget, then every mod in the load order. Nothing here can abort the game: a problem turns
-// a block, a mod or all Kiln VFX off with a log line. The held collector retains `failures` for its later prepare;
+// a block, a mod or all Kiln VFX off with a log line. The client file-build collector retains `failures` for its later prepare;
 // only that prepare has the input identifying required participants.
 // `boot`: a boot generation's prepare input (chapter 08; kiln_boot_collector.hpp): excluded mods are left out, its vfx documents read.
 void build_on_ready(const KilnApi* api, KilnOwner self, const kiln::boot::Input* boot = nullptr,

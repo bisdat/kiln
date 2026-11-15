@@ -750,7 +750,7 @@ void build_on_ready(const KilnApi* api, KilnOwner self, const kiln::boot::Input*
     // start); another mod's are off with the lines below, as they always were
     const auto refuse_required = [&](bool vfx, bool materials, const std::string& why) {
         if (!boot) {
-            // The held build (no boot input yet): every mod's file with such a section is noted, as required_vfx_content finds
+            // The on_ready file build (no boot input yet): every mod's file with such a section is noted, as required_vfx_content finds
             // them; the collector's prepare refuses the ones of a required participant (held.h).
             if (failures) {
                 const fs::path pending = to_path(api_path(KILN_PATH_DATA)) / L"vfx" / L"pending";

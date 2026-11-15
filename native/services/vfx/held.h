@@ -3,6 +3,12 @@
 #include "kiln_boot_collector.hpp"
 
 namespace kvx {
+// This release has no public boot staging for VFX/materials. Keep ordinary client files in
+// on_ready; changing the client predicate here re-enables prepare builds once staging exists.
+// Non-client lab routes retain their previous gate-dependent choice; real servers exit earlier.
+inline bool boot_builds_in_prepare(uint32_t side, bool held) {
+    return side != KILN_SIDE_CLIENT && !held;
+}
 struct BuildFailure {
     std::string mod, kind, key, reason;
 };
@@ -17,9 +23,9 @@ inline void record_cook_failures(std::vector<BuildFailure>* failures,
         }
 }
 // The on_ready build has no boot input. Prepare applies the generation's required/excluded policy later.
-inline bool held_build_refusal(bool held, const std::vector<BuildFailure>& failures, const kiln::boot::Input& input,
+inline bool held_build_refusal(bool built_on_ready, const std::vector<BuildFailure>& failures, const kiln::boot::Input& input,
                                KilnBootPreparedV1* out, KilnBootIssueV1* issue) {
-    if (held)
+    if (built_on_ready)
         for (const auto& f : failures)
             if (!input.out(f.mod) && input.strict(f.mod)) {
                 kiln::boot::refuse(out, issue, f.mod, f.kind, f.key, f.reason);
