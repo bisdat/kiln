@@ -1918,7 +1918,7 @@ export const COMMANDS = [
   "runtime_list", "runtime_import", "runtime_status", "runtime_install", "runtime_uninstall", "runtime_rollback", "runtime_classify",
   "profile_list", "profile_get", "profile_create", "profile_save", "profile_delete", "profile_resolve", "profile_activate",
   "profile_deactivate", "profile_active", "activation_notices", "notices_unseen", "notices_shown",
-  "library_list", "library_detect", "library_import", "library_remove", "library_remove_many", "library_unused", "library_users", "library_lint", "library_take_over", "library_rollback",
+  "library_list", "library_detect", "library_import", "library_remove", "library_remove_many", "library_unused", "library_users", "library_lint", "library_take_over", "library_rollback", "library_replace_dll",
   "config_list", "config_read", "config_set", "config_write", "config_reset", "config_native_state", "config_native_set",
   "launch_play", "launch_state", "launch_prestart", "launch_begin", "launch_progress", "launch_end",
   "logs_list", "logs_read", "logs_follow", "logs_unfollow", "logs_crash_reports",
