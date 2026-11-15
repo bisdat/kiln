@@ -3,9 +3,14 @@ use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, io::Read, path::Path};
 
 pub const LIMIT: u64 = 256 * 1024;
+/// The codes Kiln's deliberate stops end the process with (Windows; a Linux parent under Wine sees the low byte):
+/// kiln.boot's required boot mod, kiln.knowledge's roster, kiln.knowledge's whole build of the mods' NPCs and quests.
+pub const BOOT_MOD_EXIT_CODE: u32 = 19201;
+pub const ROSTER_EXIT_CODE: u32 = 19202;
+pub const CONTENT_EXIT_CODE: u32 = 19203;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum StopKind { Roster, BootMod }
+pub enum StopKind { Roster, BootMod, Content }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -78,24 +83,29 @@ pub fn failed_identity(game: &Path, asked_ms: i64, now_ms: i64) -> Option<StartI
     Some(StartIdentity { pid: Some(u32::try_from(v["pid"].as_u64()?).ok()?), began_ms, ended_ms: Some(now_ms) })
 }
 
+/// kiln.knowledge's own state file of a stop (`roster-refused.json`, `content-refused.json`: one shape, its code and
+/// status fixed per file), written before kiln.boot's files; the only evidence beside an older core.
+fn refused(state: &Path, file: &str, kind: StopKind, code: u32, start: &StartIdentity, names: &BTreeMap<String, String>) -> Option<StoppedStart> {
+    let v = json(&state.join(file), Some(start))?;
+    let parsed = (|| {
+        let (pid, utc) = belongs(&v, "utc", start)?;
+        if v["refused"] != true || v["exitCode"] != code || v["unixExitStatus"] != code & 0xff
+            || v["restart"] != false || !matches!(v["side"].as_str(), Some("client" | "server"))
+            || !v["bootStop"].is_boolean() { return None; }
+        let mods: Vec<String> = serde_json::from_value(v["mods"].clone()).ok()?;
+        let reason = v["why"].as_str()?.to_string();
+        if reason.trim().is_empty() { return None; }
+        Some(StoppedStart { kind, reason, names: resolve(&mods, names), mods, advice: v["advice"].as_str()?.into(), utc, exit_code: code, pid })
+    })();
+    if parsed.is_none() { eprintln!("stopped start: ignoring stale or invalid {file}"); }
+    parsed
+}
+
 pub fn read(game: &Path, start: &StartIdentity, names: &BTreeMap<String, String>) -> Option<StoppedStart> {
     let state = game.join("kiln/state");
     // .last is deliberately not read: it describes the preceding start.
-    if let Some(v) = json(&state.join("roster-refused.json"), Some(start)) {
-        let parsed = (|| {
-            let (pid, utc) = belongs(&v, "utc", start)?;
-            if v["refused"] != true || v["exitCode"] != 19202 || v["unixExitStatus"] != 2
-                || v["restart"] != false || !matches!(v["side"].as_str(), Some("client" | "server"))
-                || !v["bootStop"].is_boolean() { return None; }
-            let mods: Vec<String> = serde_json::from_value(v["mods"].clone()).ok()?;
-            let reason = v["why"].as_str()?.to_string();
-            if reason.trim().is_empty() { return None; }
-            Some(StoppedStart { kind: StopKind::Roster, reason, names: resolve(&mods, names), mods,
-                advice: v["advice"].as_str()?.into(), utc, exit_code: 19202, pid })
-        })();
-        if parsed.is_some() { return parsed; }
-        eprintln!("stopped start: ignoring stale or invalid roster-refused.json");
-    }
+    if let Some(s) = refused(&state, "roster-refused.json", StopKind::Roster, ROSTER_EXIT_CODE, start, names) { return Some(s); }
+    if let Some(s) = refused(&state, "content-refused.json", StopKind::Content, CONTENT_EXIT_CODE, start, names) { return Some(s); }
     let v = json(&state.join("boot.json"), Some(start))?;
     let (pid, utc) = belongs(&v, "written", start)?;
     let b = &v["boot"];
@@ -105,14 +115,18 @@ pub fn read(game: &Path, start: &StartIdentity, names: &BTreeMap<String, String>
     let (reason, mods) = if stop.is_object() {
         if stop["code"].as_u64()? != u64::from(code) || !stop["by"].is_string() { return None; }
         (stop["reason"].as_str()?.to_string(), serde_json::from_value::<Vec<String>>(stop["mods"].clone()).ok()?)
-    } else if code == 19201 {
+    } else if code == BOOT_MOD_EXIT_CODE {
         let mods = b["owners"].as_array().into_iter().flatten().filter(|o| matches!(o["state"].as_str(), Some("excluded-callback" | "excluded-dependency" | "rejected-prepare" | "generation-aborted" | "activation-fault")))
             .filter_map(|o| o["id"].as_str().map(str::to_string)).collect();
         (b["reason"].as_str()?.to_string(), mods)
     } else { return None; };
     if reason.trim().is_empty() { return None; }
-    Some(StoppedStart { kind: if code == 19202 { StopKind::Roster } else { StopKind::BootMod }, reason,
-        names: resolve(&mods, names), mods, advice: "Check these mods for updates or switch one off before starting again.".into(), utc, exit_code: code, pid })
+    let (kind, advice) = match code {
+        ROSTER_EXIT_CODE => (StopKind::Roster, "Check these mods for updates or switch one off before starting again."),
+        CONTENT_EXIT_CODE => (StopKind::Content, "Remove or update these mods, then start again. If it still stops, send kiln/logs/kiln.log (the support report has it) to the mods' authors or to Kiln."),
+        _ => (StopKind::BootMod, "Check these mods for updates or switch one off before starting again."),
+    };
+    Some(StoppedStart { kind, reason, names: resolve(&mods, names), mods, advice: advice.into(), utc, exit_code: code, pid })
 }
 fn resolve(ids: &[String], names: &BTreeMap<String, String>) -> Vec<String> {
     ids.iter().map(|id| names.get(id).unwrap_or(id).clone()).collect()
@@ -176,6 +190,40 @@ mod tests {
             assert!(boot_state(t.path()).is_none());
             assert!(read(t.path(), &s, &BTreeMap::new()).is_some());
         }
+    }
+    // 0.2.0-dev.29 contentstop: the whole build of the mods' native quests and NPCs failed (19203, Wine status 3)
+    fn content(v: &serde_json::Value) -> serde_json::Value {
+        let mut c = v.clone();
+        c["why"] = "the build of the mods' native quests failed: boom".into();
+        c["exitCode"] = 19203.into(); c["unixExitStatus"] = 3.into(); c["advice"] = "Remove or update the mods named here".into();
+        c
+    }
+    #[test] fn content_stop_file_names_the_mods_and_its_kind() {
+        let (t, s, v) = fixture(); let p = t.path().join("kiln/state/content-refused.json");
+        std::fs::write(&p, serde_json::to_vec(&content(&v)).unwrap()).unwrap();
+        let r = read(t.path(), &s, &BTreeMap::from([("a".into(), "A mod".into())])).expect("content-refused.json is a stop");
+        assert_eq!(serde_json::to_value(&r.kind).unwrap(), "content");
+        assert_eq!((r.exit_code, r.names.clone(), r.advice.as_str()), (19203, vec!["A mod".to_string()], "Remove or update the mods named here"));
+        assert!(r.reason.contains("native quests failed"));
+        // the roster's code or status in this file is not this stop; the .last file describes the preceding start
+        for (k, bad) in [("exitCode", serde_json::json!(19202)), ("unixExitStatus", serde_json::json!(2))] {
+            let mut c = content(&v); c[k] = bad;
+            std::fs::write(&p, serde_json::to_vec(&c).unwrap()).unwrap();
+            assert!(read(t.path(), &s, &BTreeMap::new()).is_none());
+        }
+        std::fs::remove_file(&p).unwrap();
+        std::fs::write(p.with_file_name("content-refused.last.json"), serde_json::to_vec(&content(&v)).unwrap()).unwrap();
+        assert!(read(t.path(), &s, &BTreeMap::new()).is_none());
+    }
+    #[test] fn content_stop_from_boot_json_alone() {
+        let (t, s, _) = fixture(); let p = t.path().join("kiln/state/boot.json");
+        let v = serde_json::json!({"format":1,"pid":42,"written":"2026-11-15T12:00:01Z","boot":{"exitCode":19203,"reason":"x","owners":[],
+            "stop":{"code":19203,"reason":"kiln.knowledge: the mods' native quests, knowledge and NPCs could not be built at all (boom); mods: b","by":"kiln-quests","mods":["b"]}}});
+        std::fs::write(&p, serde_json::to_vec(&v).unwrap()).unwrap();
+        let r = read(t.path(), &s, &BTreeMap::new()).unwrap();
+        assert_eq!(serde_json::to_value(&r.kind).unwrap(), "content");
+        assert_eq!((r.exit_code, r.mods.clone()), (19203, vec!["b".to_string()]));
+        assert!(r.advice.contains("kiln.log"), "{}", r.advice);
     }
     #[test] fn required_boot_mod_and_service_stop() {
         let (t, s, _) = fixture(); let p = t.path().join("kiln/state/boot.json");

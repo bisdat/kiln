@@ -1,0 +1,10 @@
+{
+  "id": "cs-broken",
+  "name": "content-stop lab: a mod whose own native content has an error",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "side": "both",
+  "clients": "mod",
+  "advanced": true,
+  "description": "A fixture of mods/tests/content-stop-test (lab.sh): a knowledge object of a type that does not exist, so the build leaves this mod out and serves the others. Data only."
+}

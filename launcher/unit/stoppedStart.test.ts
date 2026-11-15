@@ -8,6 +8,12 @@ test("stop identity includes time to distinguish a reused pid", () => {
   expect(stopSentence(stop)).toContain("Survivors roster than the game can hold: A");
   expect(stopSentence({ ...stop, kind: "boot-mod" })).toBe("128 entries (A)");
 });
+test("the content stop names the mods; its reason and advice are shown beside it", () => {
+  const content: StoppedStart = { ...stop, kind: "content", reason: "kiln.assets refused the built GameKnowledgeResource", exitCode: 19203 };
+  expect(stopSentence(content)).toBe("Kiln could not build the NPCs and quests of these mods, so no world was loaded: A");
+  expect(stopSentence({ ...content, names: [] })).toBe("Kiln could not build the NPCs and quests of the mods, so no world was loaded.");
+  expect(stopSentence(content)).not.toContain(content.reason);  // the notice shows the reason in its own line
+});
 test("the existing mods filter selects all named ids exactly, including punctuation", () => {
   const ids = ["a", "b,c", "c:d"];
   expect(stopIds(stopFilter(ids))).toEqual(ids);
@@ -19,8 +25,9 @@ test("the existing mods filter selects all named ids exactly, including punctuat
 
 import { mockStoppedFile, readMockStop } from "../src/api/mockStoppedStart";
 test("reading rules: current roster and required mod, unknown, malformed, stale, quit, and bounded input", () => {
-  for (const kind of ["roster", "boot-mod"] as const)
+  for (const kind of ["roster", "boot-mod", "content"] as const)
     expect(readMockStop(mockStoppedFile(kind, 42, 1000), 42, 900, 1100)?.kind).toBe(kind);
+  expect(readMockStop(mockStoppedFile("content", 42, 1000), 42, 900, 1100)?.exitCode).toBe(19203);
   for (const kind of ["unknown", "garbled", "stale", "quit"] as const)
     expect(readMockStop(mockStoppedFile(kind, 42, 1000), 42, 900, 1100)).toBeNull();
   const file = mockStoppedFile("roster", 42, 1000);

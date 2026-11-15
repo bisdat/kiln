@@ -760,7 +760,7 @@ export interface NativeJson {
   }[];
 }
 export interface StoppedStart {
-  kind: "roster" | "boot-mod"; reason: string; mods: string[]; names: string[]; advice: string; utc: string; exitCode: number; pid: number;
+  kind: "roster" | "boot-mod" | "content"; reason: string; mods: string[]; names: string[]; advice: string; utc: string; exitCode: number; pid: number;
 }
 export interface BootState {
   stoppedStart?: StoppedStart | null;

@@ -1876,6 +1876,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     info->on_ready = &on_ready;
     if (!load_layout()) return KILN_ERR_UNAVAILABLE;
     install_hooks();
+    start_stop_main();    // the state file of a start an earlier stop ended moves aside
     roster_main();        // before the build can ask for the roster's maximum
     native_pack_install();
     std::string dir = api_path(KILN_PATH_CONFIG);
