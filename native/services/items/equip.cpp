@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <memory>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
@@ -24,6 +25,9 @@
 #include "engine.h"
 #include "equip_logic.h"
 #include "instances.h"
+#include "setexec.h"
+#include "setorder.h"
+#include "setsvc.h"
 #include "services/kiln_players.h"
 #include "services/kiln_types.h"
 #include "xfer.h"
@@ -67,6 +71,56 @@ struct Callback {
     void* user;
     KilnOwner owner;
 };
+
+// ---- v6: equipment sets (chapter 10). Queued in the same program as single equips, under the same lock, FIFO by ticket
+// with them for one player; at most one set per player and step, each in a transaction of its own. ----
+enum class SetPhase : uint8_t {
+    Queued,    // submitted; its decision is filed at the next Pre
+    Deciding,  // a PlayerEquippingEvent decision (kiln.decisions kind 18) is open
+    Ready,     // allowed: runs in the program of the step whose Pre verified the session
+};
+struct SetRequest {
+    uint64_t ticket = 0;
+    KilnOwner submitter = 0;  // who called equip_set (0: Kiln's managed bridge)
+    KilnOwner origin = 0;     // the snapshot's owner (the bridge forwards the asking mod's)
+    uint64_t submitted = 0;
+    bool session = false;     // a player slot id: the request runs only for this session
+    uint32_t handle = 0;
+    uint64_t joined_step = 0;
+    uint64_t verified_step = 0;
+    SetPhase phase = SetPhase::Queued;
+    uint64_t decision = 0;        // kiln.decisions' request id (0: none filed)
+    uint64_t decision_epoch = 0;
+    bool decided = false;         // the decision's sink was told
+    uint32_t verdict = 0;         // KILN_DECISION_* terminal status
+    bool canceled = false;        // set_cancel: ends Dropped before it runs
+    sets::SetJob job;
+    sets::SnapPrefix captured;    // the snapshot's prefix (the identity checked again in Pre)
+    sets::SetModel model;         // the snapshot's model (the before values of a result that never ran)
+    uint64_t valid_through = 0;
+    uint64_t token = 0;           // the snapshot's token (the decision names it)
+    KilnSetDoneV1 done = nullptr; // runs once; cancel() clears it
+    void* user = nullptr;
+};
+struct SetFinished {
+    SetRequest req;
+    sets::SetOutcome out;
+    uint64_t step = 0;
+    uint32_t thread = 0, world_thread = 0;  // where the program ran it (0: it never ran)
+};
+std::vector<SetRequest> g_sets;          // under g_mu
+std::vector<SetFinished> g_sets_done;    // under g_mu: run in the program, completed in the next Pre
+std::atomic<uint32_t> g_sets_ready{0};   // sets in phase Ready (each's fast check)
+std::atomic<uint32_t> g_sets_live{0};    // queued + finished, not delivered (equip_pre's fast check)
+
+// Under g_mu, after every change of g_sets or g_sets_done.
+void recount_ready() {
+    uint32_t n = 0;
+    for (const SetRequest& r : g_sets) n += r.phase == SetPhase::Ready;
+    g_sets_ready.store(n, std::memory_order_release);
+    g_sets_live.store(static_cast<uint32_t>(g_sets.size() + g_sets_done.size()), std::memory_order_release);
+    set_counters().pending.store(static_cast<uint32_t>(g_sets.size()));
+}
 
 const KilnWorldApi* g_w = nullptr;
 KilnHandle g_handle = 0;
@@ -178,7 +232,7 @@ void set_detail(const char* s) {
 
 void broken(const char* why) {
     if (g_state.exchange(KILN_ITEMS_PROGRAM_BROKEN) != KILN_ITEMS_PROGRAM_BROKEN)
-        LOGE("equip is off until the server restarts: %s", why);
+        LOGE("equip is off until the server, or the hosting player's game, restarts (other item calls still run): %s", why);
     set_detail(why);
 }
 
@@ -245,10 +299,13 @@ bool has_free_generic(const Access& a, KilnEntity p) {
     return false;
 }
 
+}  // namespace
+
 // The setup block equipment_actions builds for its transaction (0x144950): flags 4 (an unequip that finds no room
 // sends the player InventoryFull), the context, item and balancing registries, the accessors, InventoryFull's sender,
-// the player as operator; no attribute registry, no Fuel, no PickupEvent, no knowledge queue.
-void fill_equip_setup(const Access& a, KilnEntity player, bool dry, uint8_t* s) {
+// the player as operator; no attribute registry, no Fuel, no PickupEvent, no knowledge queue. A set's transaction
+// (setexec.cpp) is set up the same way.
+void equip_setup_block(const Access& a, KilnEntity player, bool dry, uint8_t* s) {
     std::memset(s, 0, kSetupBlock);
     s[0x00] = dry ? 0 : 0x04;
     auto put = [s](int off, const void* v) { std::memcpy(s + off, &v, 8); };
@@ -266,6 +323,10 @@ void fill_equip_setup(const Access& a, KilnEntity player, bool dry, uint8_t* s) 
     put(0xA8, a.ev_full);
     std::memcpy(s + E.setup_operator, &player, 4);
 }
+
+namespace {
+
+void fill_equip_setup(const Access& a, KilnEntity player, bool dry, uint8_t* s) { equip_setup_block(a, player, dry, s); }
 
 void fail(KilnItemsEquipResult* res, int32_t status, const char* fmt, uint32_t x = 0, uint32_t y = 0) {
     res->status = status;
@@ -396,25 +457,99 @@ bool dead_now(const uint64_t* it, bool* dead) {
     }
 }
 
+// One set inside the program (worker-eligible). Its outcome is completed in the next Pre.
+void run_set(const Access& a, uint64_t* it, KilnEntity player, SetRequest&& set, const char* off_why, uint64_t step) {
+    SetFinished f;
+    f.step = step;
+    f.thread = GetCurrentThreadId();
+    if (const KilnWindowClockApiV1* c = sets_clock()) {
+        KilnWindowStateV1 w{};
+        w.size = sizeof w;
+        if (c->get(&w) == KILN_OK) f.world_thread = w.world_thread;
+    }
+    bool dead = false;
+    if (g_state.load() != KILN_ITEMS_PROGRAM_RUNNING) {
+        f.out.status = sets::SetStatus::Unavailable;
+        std::snprintf(f.out.reason, sizeof f.out.reason, "%s", off_why && off_why[0] ? off_why : "equip is off (see kiln.log)");
+    } else if (!dead_now(it, &dead)) {
+        // a fault before the transaction: reported as every fault is (the faulted event, kiln.log, sets and equips off)
+        f.out.status = sets::SetStatus::InvariantFailure;
+        f.out.engine_fault = true;
+        f.out.seh = true;
+        std::snprintf(f.out.reason, sizeof f.out.reason,
+                      "the game faulted reading the player's Actor before the transaction opened: nothing was changed; sets and equips are off "
+                      "until the server, or the hosting player's game, restarts; other item calls still run");
+    } else if (dead) {
+        f.out.status = sets::SetStatus::Refused;
+        std::snprintf(f.out.reason, sizeof f.out.reason, "the player is dead");
+    } else {
+        NoteLease note;  // 07 S7: the set's writes, for a component watch
+        if (note_wanted()) note.begin(a, &player, 1);
+        set_run(a, player, g_tx, set.job, &f.out);
+        if (note && !f.out.engine_fault) note.end(a);
+    }
+    if (f.out.engine_fault && !f.out.seh && sets_lab_matrix()) {
+        // lab only (kiln/data/kiln.items/sets-matrix): a mismatch is reported but sets stay on, so one boot maps every form
+        LOGW("equipment set ticket %llu: lab matrix: a state mismatch is reported, sets stay on (never on a player's server)",
+             static_cast<unsigned long long>(set.ticket));
+    } else if (f.out.engine_fault) {
+        // the game faulted inside the set's reads or transaction, or the state after it is neither asked nor as before:
+        // sets go off, and equip too (the same functions and the same transaction buffer; nothing is repaired or rolled
+        // back after a fault). kiln.log names the player and the step; the capability row keeps the reason until the
+        // server restarts.
+        char at[40] = "";
+        if (f.out.failed_operation != UINT32_MAX) std::snprintf(at, sizeof at, ", at its step %u", f.out.failed_operation);
+        LOGE("equipment set ticket %llu: player %u, server step %llu%s: %s%s", static_cast<unsigned long long>(set.ticket), player,
+             static_cast<unsigned long long>(step), at, f.out.seh ? "THE GAME FAULTED: " : "", f.out.reason);
+        char b[160];
+        if (f.out.seh)
+            std::snprintf(b, sizeof b, "player %u, set %llu, server step %llu%s: the game faulted%s", player, static_cast<unsigned long long>(set.ticket),
+                          static_cast<unsigned long long>(step), at, (f.out.flags & sets::kResultMayHaveMutated) ? "; the inventory may be in an unknown state" : "");
+        else
+            std::snprintf(b, sizeof b, "player %u, set %llu, server step %llu: %s", player, static_cast<unsigned long long>(set.ticket),
+                          static_cast<unsigned long long>(step), f.out.reason);
+        sets_break(b);
+        broken("an equipment set's transaction faulted or failed its check (see kiln.log)");
+    }
+    if (f.out.status == sets::SetStatus::InvariantFailure) set_counters().invariants.fetch_add(1);
+    f.req = std::move(set);
+    std::lock_guard lock(g_mu);
+    g_sets_done.push_back(std::move(f));
+    recount_ready();
+}
+
 // kiln.world calls this once per player character per step (each mode: `ctx` iterates that entity).
 void KILN_CALL each(KilnProgramCtx* ctx, uint64_t* it, KilnEntity player, void*) {
-    if (g_pending_n.load(std::memory_order_acquire) == 0) return;
+    if (g_pending_n.load(std::memory_order_acquire) == 0 && g_sets_ready.load(std::memory_order_acquire) == 0) return;
     Request batch[kPerPlayerStep];
     uint32_t n = 0;
+    SetRequest set;
+    bool have_set = false;
     {
         std::lock_guard lock(g_mu);
         const uint64_t now_step = current_step();
-        for (auto i = g_pending.begin(); i != g_pending.end() && n < kPerPlayerStep;) {
-            if (i->r.player == player && i->verified_step == now_step) {
+        // the player's queue, single equips and sets together; what this update runs is setorder.h's run_now: FIFO by
+        // ticket, at most kPerPlayerStep single equips and one set, nothing past a request that cannot run now
+        std::vector<sets::Queued> mine;
+        for (const Request& q : g_pending)
+            if (q.r.player == player) mine.push_back({q.ticket, false, q.verified_step == now_step});
+        for (const SetRequest& r : g_sets)
+            if (r.job.player == player) mine.push_back({r.ticket, true, r.phase == SetPhase::Ready && r.verified_step == now_step});
+        for (const uint64_t t : sets::run_now(std::move(mine), kPerPlayerStep)) {
+            if (auto i = std::find_if(g_pending.begin(), g_pending.end(), [t](const Request& q) { return q.ticket == t; }); i != g_pending.end()) {
                 batch[n++] = *i;
-                i = g_pending.erase(i);
-            } else {
-                ++i;
+                g_pending.erase(i);
+            } else if (auto k = std::find_if(g_sets.begin(), g_sets.end(), [t](const SetRequest& r) { return r.ticket == t; }); k != g_sets.end()) {
+                set = std::move(*k);
+                g_sets.erase(k);
+                have_set = true;
+                recount_ready();
             }
         }
         g_pending_n.store(static_cast<uint32_t>(g_pending.size()), std::memory_order_release);
     }
-    if (n == 0) return;
+    if (n == 0 && !have_set) return;
+    std::sort(batch, batch + n, [](const Request& x, const Request& y) { return x.ticket < y.ticket; });
     const uint64_t step = current_step();
     unsigned long code = 0;
     Access a{};
@@ -437,6 +572,11 @@ void KILN_CALL each(KilnProgramCtx* ctx, uint64_t* it, KilnEntity player, void*)
         LOGI("program %s runs: accessors verified against the world's component map (player %u)", kProgram, player);
     }
     for (uint32_t i = 0; i < n; ++i) {
+        // FIFO with the player's single requests: the set runs at its place in ticket order
+        if (have_set && set.ticket < batch[i].ticket) {
+            run_set(a, it, player, std::move(set), why, step);
+            have_set = false;
+        }
         KilnItemsEquipResult res = result_of(batch[i], step);
         bool dead = false;
         if (g_state.load() == KILN_ITEMS_PROGRAM_RUNNING && !dead_now(it, &dead)) {
@@ -450,19 +590,26 @@ void KILN_CALL each(KilnProgramCtx* ctx, uint64_t* it, KilnEntity player, void*)
             // the game's equip has no such check; a dead character's inventory is being moved to its tombstone
             res.status = KILN_ITEMS_REFUSED;
             std::snprintf(res.message, sizeof res.message, "the player is dead");
-        } else if (!run_equip(a, player, batch[i].r, g_tx, &res, &code)) {
-            abandon_tx(g_tx);
-            res.status = KILN_ITEMS_UNAVAILABLE;
-            std::snprintf(res.message, sizeof res.message, "the game's equip faulted (0x%08lx)", code);
-            char b[160];
-            std::snprintf(b, sizeof b, "the game's %s faulted (0x%08lx) for player %u",
-                          (batch[i].r.flags & KILN_ITEMS_EQUIP_UNEQUIP) ? "unequip" : "equip", code, player);
-            broken(b);
+        } else {
+            NoteLease note;  // 07 S7: what a component watch is told (only while something is watched)
+            if (note_wanted()) note.begin(a, &player, 1);
+            if (!run_equip(a, player, batch[i].r, g_tx, &res, &code)) {
+                abandon_tx(g_tx);
+                res.status = KILN_ITEMS_UNAVAILABLE;
+                std::snprintf(res.message, sizeof res.message, "the game's equip faulted (0x%08lx)", code);
+                char b[160];
+                std::snprintf(b, sizeof b, "the game's %s faulted (0x%08lx) for player %u",
+                              (batch[i].r.flags & KILN_ITEMS_EQUIP_UNEQUIP) ? "unequip" : "equip", code, player);
+                broken(b);
+            } else if (note) {
+                note.end(a);
+            }
         }
         if (res.status == KILN_ITEMS_DONE && !(res.flags & KILN_ITEMS_EQUIP_DRY_RUN)) g_changed.fetch_add(1);
         else if (res.status != KILN_ITEMS_DONE) g_refused.fetch_add(1);
         finish(res);
     }
+    if (have_set) run_set(a, it, player, std::move(set), why, step);
 }
 
 // ---- tick thread ----
@@ -484,6 +631,280 @@ bool guarded_done(KilnItemsEquipDoneFn fn, const KilnItemsEquipResult* r, void* 
     } __except (*code = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
+}
+
+// ---- v6: equipment sets in Pre ----
+constexpr uint32_t kMaxSets = 256;  // sets queued or deciding (each holds a copied snapshot)
+
+bool guarded_set_done(KilnSetDoneV1 fn, const KilnSetResultV1* r, void* user, unsigned long* code) {
+    __try {
+        fn(r, user);
+        return true;
+    } __except (*code = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+SetFinished ended(SetRequest&& r, sets::SetStatus status, uint32_t refusal, const char* why, uint64_t step) {
+    SetFinished f;
+    f.out.status = status;
+    f.out.refusal = refusal;
+    if (r.job.flags & sets::kRequestDryRun) f.out.flags |= sets::kResultDryRun;
+    std::snprintf(f.out.reason, sizeof f.out.reason, "%s", why);
+    f.step = step;
+    f.req = std::move(r);
+    return f;
+}
+
+void fill_value(const sets::SlotValue& v, KilnSetSlotValueV1* o) {
+    o->item_id = v.item;
+    o->item_entity = v.pide;
+    o->count = v.count;
+    o->instance_stamp = v.stamp;
+    o->inventory_slot = v.slot;
+}
+
+void fill_result(const SetFinished& f, KilnSetResultV1* out) {
+    std::memset(out, 0, sizeof *out);
+    out->size = sizeof *out;
+    out->status = static_cast<uint32_t>(f.out.status);
+    out->game_error = f.out.game_error;
+    out->failed_operation = f.out.failed_operation;
+    out->ticket = f.req.ticket;
+    out->decision_id = f.req.decision;
+    out->world_epoch = f.req.captured.world_epoch;
+    out->applied_step = f.step;
+    out->player = f.req.job.player;
+    out->flags = f.out.flags | ((f.req.job.flags & sets::kRequestDryRun) ? KILN_SET_RESULT_DRY_RUN : 0u);
+    out->refusal = f.out.refusal;
+    std::snprintf(out->reason, sizeof out->reason, "%s", f.out.reason);
+    out->change_count = static_cast<uint32_t>(std::min<size_t>(f.out.changes.size(), sets::kSelectionSlots));
+    for (uint32_t i = 0; i < out->change_count; ++i) {
+        KilnSetChangeV1& c = out->changes[i];
+        c.size = sizeof c;
+        c.equipment_slot = f.out.changes[i].game_slot;
+        fill_value(f.out.changes[i].before, &c.before);
+        fill_value(f.out.changes[i].after, &c.after);
+    }
+}
+
+// Calls each finished set's callback once (tick thread; outside the lock) and logs it.
+void deliver_sets(std::vector<SetFinished>& done) {
+    for (SetFinished& f : done) {
+        KilnSetResultV1 r;
+        fill_result(f, &r);
+        const bool ok = f.out.status == sets::SetStatus::Done || f.out.status == sets::SetStatus::NoChange ||
+                        f.out.status == sets::SetStatus::Simulated;
+        if (f.out.status == sets::SetStatus::Done) set_counters().done.fetch_add(1);
+        else if (!ok) set_counters().refused.fetch_add(1);
+        char where[96] = "not run in the program";
+        if (f.thread)
+            std::snprintf(where, sizeof where, "ran on thread %lu (%s)", static_cast<unsigned long>(f.thread),
+                          f.thread == f.world_thread ? "the world thread" : f.world_thread ? "a worker, not the world thread" : "world thread unknown");
+        items_log(f.out.status == sets::SetStatus::InvariantFailure ? KILN_LOG_ERROR : KILN_LOG_INFO,
+                  "equipment set ticket %llu%s: player %u, %u entr%s -> status %u (%u step(s), %u change(s), decision %llu, game error 0x%02x, %s)%s%s",
+                  static_cast<unsigned long long>(r.ticket), (r.flags & KILN_SET_RESULT_DRY_RUN) ? " (dry run)" : "", r.player, f.req.job.count,
+                  f.req.job.count == 1 ? "y" : "ies", r.status, f.out.steps, r.change_count, static_cast<unsigned long long>(r.decision_id),
+                  r.game_error, where, r.reason[0] ? ": " : "", r.reason);
+        for (uint32_t i = 0; i < r.change_count; ++i) {
+            const KilnSetChangeV1& c = r.changes[i];
+            items_log(KILN_LOG_INFO, "  equipment set ticket %llu: slot %u: 0x%08x#%u x%u in %u:%u -> 0x%08x#%u x%u in %u:%u",
+                      static_cast<unsigned long long>(r.ticket), c.equipment_slot, c.before.item_id, c.before.item_entity, c.before.count,
+                      KILN_SLOT_INVENTORY(c.before.inventory_slot), KILN_SLOT_INDEX(c.before.inventory_slot), c.after.item_id, c.after.item_entity,
+                      c.after.count, KILN_SLOT_INVENTORY(c.after.inventory_slot), KILN_SLOT_INDEX(c.after.inventory_slot));
+        }
+        unsigned long code = 0;
+        if (f.req.done && !guarded_set_done(f.req.done, &r, f.req.user, &code))
+            LOGE("an equipment set callback (submitter %llu) faulted (0x%08lx); ignored", static_cast<unsigned long long>(f.req.submitter), code);
+    }
+    done.clear();
+}
+
+// kiln.decisions tells the end of a set's decision (Pre or a window call, world thread, outside its lock).
+void KILN_CALL set_sink(const KilnDecisionOutcomeV1* o, void* user) {
+    if (!o) return;
+    const uint64_t ticket = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(user));
+    std::lock_guard lock(g_mu);
+    for (SetRequest& r : g_sets)
+        if (r.ticket == ticket && r.phase == SetPhase::Deciding && r.decision == o->request_id) {
+            r.decided = true;
+            r.verdict = o->status;
+            return;
+        }
+}
+
+bool same_key(const KilnEventEntityKey& a, const KilnEventEntityKey& b) { return std::memcmp(&a, &b, sizeof a) == 0; }
+
+// The sets' part of equip_pre: ends what has to end, files decisions, verifies the session of what may run this step.
+// `blocked`: per player, the ticket after which its single equips wait this step (setorder.h singles_wait_from: FIFO).
+// `timed_out`: per player, the lowest ticket of a set that ended this Pre because it did not run within 250 steps (a single
+// equip after it that times out too waited behind it).
+void sets_in_pre(uint64_t step, int state, std::vector<SetFinished>* out, std::vector<std::pair<KilnEntity, uint64_t>>* blocked,
+                 std::vector<std::pair<KilnEntity, uint64_t>>* timed_out) {
+    if (g_sets_live.load(std::memory_order_acquire) == 0) return;  // no set: nothing to do (and no lock taken)
+    const bool off = state == KILN_ITEMS_PROGRAM_NONE || state == KILN_ITEMS_PROGRAM_BROKEN || sets_broken();
+    const KilnDecisionsApiV1* d = sets_decisions();
+    const bool stopped = !d || (d->header.size >= offsetof(KilnDecisionsApiV1, is_stopped) + sizeof(void*) && d->is_stopped && d->is_stopped());
+    struct Check {
+        uint64_t ticket;
+        KilnEntity player;
+        bool session;
+        uint32_t handle;
+        KilnEventEntityKey identity;
+        SetPhase phase;
+        KilnDecisionRequestV1 req;
+        // the outcome of the checks
+        int end = -1;  // a sets::SetStatus to end with, or -1
+        uint32_t refusal = 0;
+        char why[160] = "";
+        SetPhase next;
+        uint64_t decision = 0;
+    };
+    std::vector<Check> checks;
+    {
+        std::lock_guard lock(g_mu);
+        for (SetFinished& f : g_sets_done) out->push_back(std::move(f));  // ran in the program last step, or ended at submission
+        g_sets_done.clear();
+        for (auto i = g_sets.begin(); i != g_sets.end();) {
+            SetRequest& r = *i;
+            const char* why = nullptr;
+            sets::SetStatus st = sets::SetStatus::Dropped;
+            uint32_t refusal = 0;
+            if (off) why = "equipment sets are off (see kiln.log)", st = sets::SetStatus::Unavailable;
+            else if (r.canceled) why = "canceled before it ran (the asking mod unloaded, or set_cancel)";
+            else if (step > r.submitted + kTimeoutSteps) {
+                why = "the set did not run within 250 steps";
+                timed_out->emplace_back(r.job.player, r.ticket);
+            }
+            else if (r.phase == SetPhase::Deciding && r.decided) {
+                switch (r.verdict) {
+                    case KILN_DECISION_PREVENTED: why = "a PlayerEquippingEvent handler canceled the set", st = sets::SetStatus::Canceled; break;
+                    case KILN_DECISION_WORLD_ENDED: why = "the server world stopped"; break;
+                    case KILN_DECISION_STALE_ENTITY:
+                    case KILN_DECISION_SOURCE_CHANGED:
+                        why = "the player was gone or changed before the decision ended", st = sets::SetStatus::StaleSnapshot,
+                        refusal = KILN_SET_REFUSAL_STALE;
+                        break;
+                    default: r.phase = SetPhase::Ready; break;  // allowed; released at its deadline, a full queue: fail open
+                }
+            } else if (r.phase == SetPhase::Deciding && stopped) {
+                r.phase = SetPhase::Ready;  // kiln.decisions stopped: its sink is never told, the set goes on (fail open)
+            }
+            if (why) {
+                out->push_back(ended(std::move(r), st, refusal, why, step));
+                i = g_sets.erase(i);
+                continue;
+            }
+            Check c{};
+            c.ticket = r.ticket;
+            c.player = r.job.player;
+            c.session = r.session;
+            c.handle = r.handle;
+            c.identity = r.captured.identity;
+            c.phase = c.next = r.phase;
+            if (r.phase == SetPhase::Queued) {
+                KilnDecisionRequestV1& q = c.req;
+                q.size = sizeof q;
+                q.version = 1;
+                q.kind = KILN_DECISION_EQUIP_SET;
+                q.payload_bytes = sizeof(KilnSetDecisionRequestV1);
+                q.subject = r.captured.identity;
+                q.actor = r.captured.identity;
+                q.flags = (r.job.flags & sets::kRequestDryRun) ? KILN_DECISION_FLAG_DRY_RUN : 0;
+                q.payload.set.items_ticket = r.ticket;
+                q.payload.set.snapshot_token = r.token;
+                q.payload.set.count = r.job.count;
+                q.payload.set.flags = (r.job.flags & sets::kRequestDryRun) ? 1u : 0u;
+                for (uint32_t k = 0; k < r.job.count; ++k) q.payload.set.entries[k] = r.job.entries[k];
+            }
+            checks.push_back(c);
+            ++i;
+        }
+        recount_ready();
+    }
+    // the session and the identity, read now; the decisions filed (no lock held: a sink may run inside enqueue_native)
+    for (Check& c : checks) {
+        if (c.session) {
+            bool readable = false;
+            if (!session_still(c.player, c.handle, &readable)) {
+                c.end = static_cast<int>(readable || c.handle == 0 ? sets::SetStatus::StaleSnapshot : sets::SetStatus::Refused);
+                c.refusal = KILN_SET_REFUSAL_STALE;
+                std::snprintf(c.why, sizeof c.why, readable || c.handle == 0 ? "player %u's session ended (left the game); the id may be another player's now"
+                                                                              : "player %u's session cannot be read now (no player records on this build): refused",
+                              c.player);
+                continue;
+            }
+        }
+        if (d && !stopped) {
+            KilnEventEntityKey now{};
+            double at[3] = {};
+            uint32_t has = 0;
+            const KilnResult rc = d->resolve_entity(c.player, &now, at, &has);
+            if (rc == KILN_OK && !same_key(now, c.identity)) {
+                c.end = static_cast<int>(sets::SetStatus::StaleSnapshot);
+                c.refusal = KILN_SET_REFUSAL_STALE;
+                std::snprintf(c.why, sizeof c.why, "player %u is another session or life than the snapshot's", c.player);
+                continue;
+            }
+            if (rc == KILN_ERR_NOT_FOUND) {
+                c.end = static_cast<int>(sets::SetStatus::StaleSnapshot);
+                c.refusal = KILN_SET_REFUSAL_STALE;
+                std::snprintf(c.why, sizeof c.why, "player %u is not in the world any more", c.player);
+                continue;
+            }
+        }
+        if (c.phase != SetPhase::Queued) continue;
+        if (!d || stopped) {
+            c.next = SetPhase::Ready;  // no kiln.decisions: nobody can veto (fail open)
+            continue;
+        }
+        uint64_t id = 0;
+        const KilnResult rc = d->enqueue_native(items_owner(), &c.req, &set_sink, reinterpret_cast<void*>(static_cast<uintptr_t>(c.ticket)), &id);
+        if (rc == KILN_OK) {
+            c.next = SetPhase::Deciding;
+            c.decision = id;
+        } else if (rc != KILN_ERR_WRONG_THREAD) {
+            // no consumer attached (nobody decides), a full queue (told QUEUE_DROPPED), anything else: the set goes on
+            c.next = SetPhase::Ready;
+            c.decision = rc == KILN_ERR_BUFFER_TOO_SMALL ? id : 0;
+            if (rc != KILN_ERR_UNAVAILABLE && rc != KILN_ERR_BUFFER_TOO_SMALL)
+                LOGW("equipment set ticket %llu: kiln.decisions refused its decision (%d); it goes on undecided", static_cast<unsigned long long>(c.ticket), rc);
+        }
+    }
+    std::lock_guard lock(g_mu);
+    for (const Check& c : checks)
+        for (auto i = g_sets.begin(); i != g_sets.end(); ++i) {
+            if (i->ticket != c.ticket) continue;
+            if (c.end >= 0) {
+                out->push_back(ended(std::move(*i), static_cast<sets::SetStatus>(c.end), c.refusal, c.why, step));
+                g_sets.erase(i);
+                break;
+            }
+            if (i->phase == SetPhase::Queued && c.next != SetPhase::Queued) {
+                i->phase = c.next;
+                i->decision = c.decision;
+            }
+            if (i->phase == SetPhase::Ready) i->verified_step = step;  // its program runs this step
+            break;
+        }
+    // FIFO per player (setorder.h): only the player's oldest set can run this step; every other set holds back the
+    // single equips after it
+    std::vector<KilnEntity> players;
+    for (const SetRequest& r : g_sets)
+        if (std::find(players.begin(), players.end(), r.job.player) == players.end()) players.push_back(r.job.player);
+    for (KilnEntity p : players) {
+        std::vector<sets::PendingSet> mine;
+        for (const SetRequest& r : g_sets)
+            if (r.job.player == p) mine.push_back({r.ticket, r.phase == SetPhase::Ready && r.verified_step == step});
+        if (const uint64_t from = sets::singles_wait_from(mine); from != UINT64_MAX) blocked->emplace_back(p, from);
+    }
+    recount_ready();
+}
+
+uint64_t blocking_ticket(const std::vector<std::pair<KilnEntity, uint64_t>>& blocked, KilnEntity player) {
+    for (const auto& b : blocked)
+        if (b.first == player) return b.second;
+    return UINT64_MAX;
 }
 
 void poll_program() {
@@ -570,6 +991,11 @@ void equip_register(const KilnWorldApi* w) {
 void equip_pre(uintptr_t world, uint64_t step) {
     poll_program();
     const int state = g_state.load();
+    // v6: sets first, so a single request queued after a set of the same player waits for it (FIFO)
+    std::vector<SetFinished> sets_done;
+    std::vector<std::pair<KilnEntity, uint64_t>> blocked, timed_out;
+    sets_in_pre(step, state, &sets_done, &blocked, &timed_out);
+    deliver_sets(sets_done);
     std::vector<KilnItemsEquipResult> ended;
     std::vector<std::pair<uint64_t, KilnEntity>> check;
     {
@@ -579,8 +1005,14 @@ void equip_pre(uintptr_t world, uint64_t step) {
             const bool stale = step > i->submitted + kTimeoutSteps;
             if (off || stale) {
                 KilnItemsEquipResult r = result_of(*i, step);
+                // a single equip that waited behind an equipment set of its player (one still waiting, or one that timed out in
+                // this Pre) says so: the program did not fail to run it, the set before it held it back
+                const bool behind = !off && (i->ticket > blocking_ticket(blocked, i->r.player) || i->ticket > blocking_ticket(timed_out, i->r.player));
                 fail(&r, off ? KILN_ITEMS_UNAVAILABLE : KILN_ITEMS_DROPPED,
-                     off ? "equip is off (see kiln.log)" : "kiln_items_equip did not run for player %u for 10 s", i->r.player);
+                     off      ? "equip is off (see kiln.log)"
+                     : behind ? "waited 250 steps behind an equipment set of player %u that did not run (FIFO): not run"
+                              : "kiln_items_equip did not run for player %u for 10 s",
+                     i->r.player);
                 ended.push_back(r);
                 i = g_pending.erase(i);
                 continue;
@@ -601,6 +1033,10 @@ void equip_pre(uintptr_t world, uint64_t step) {
                     i = g_pending.erase(i);
                     continue;
                 }
+            }
+            if (i->ticket > blocking_ticket(blocked, i->r.player)) {  // an older set of the player runs first
+                ++i;
+                continue;
             }
             i->verified_step = step;
             check.emplace_back(i->ticket, i->r.player);
@@ -666,6 +1102,7 @@ void equip_pre(uintptr_t world, uint64_t step) {
 }
 
 void equip_world_closed() {
+    std::vector<SetFinished> sets_done;
     {
         std::lock_guard lock(g_mu);
         const uint64_t step = current_step();
@@ -676,7 +1113,14 @@ void equip_world_closed() {
         }
         g_pending.clear();
         g_pending_n.store(0, std::memory_order_release);
+        // v6: every set ends now (no later Pre may come): what ran is reported as it ran, the rest Dropped
+        for (SetFinished& f : g_sets_done) sets_done.push_back(std::move(f));
+        g_sets_done.clear();
+        for (SetRequest& r : g_sets) sets_done.push_back(ended(std::move(r), sets::SetStatus::Dropped, 0, "the server world stopped (WorldEnded)", step));
+        g_sets.clear();
+        recount_ready();
     }
+    deliver_sets(sets_done);
     int expected = KILN_ITEMS_PROGRAM_RUNNING;
     if (g_state.compare_exchange_strong(expected, KILN_ITEMS_PROGRAM_ACTIVE))
         set_detail("program registered, not run yet in this world");
@@ -737,13 +1181,107 @@ KilnResult equip_status(KilnItemsEquipStatus* out) {
 
 bool equip_cancel(uint64_t ticket) {
     std::lock_guard lock(g_mu);
-    return g_callbacks.erase(ticket) != 0;
+    if (g_callbacks.erase(ticket) != 0) return true;
+    // v6: a set's callback (the set itself goes on, as for v1's cancel)
+    for (SetRequest& r : g_sets)
+        if (r.ticket == ticket) return r.done = nullptr, true;
+    for (SetFinished& f : g_sets_done)
+        if (f.req.ticket == ticket) return f.req.done = nullptr, true;
+    return false;
 }
 
 void equip_cancel_owner(KilnOwner owner) {
     std::lock_guard lock(g_mu);
     for (auto it = g_callbacks.begin(); it != g_callbacks.end();)
         it = it->second.owner == owner ? g_callbacks.erase(it) : std::next(it);
+    // v6: a revocable native owner's queued sets and callbacks go (owner 0, Kiln's bridge, is never revoked here)
+    if (owner == 0) return;
+    g_sets.erase(std::remove_if(g_sets.begin(), g_sets.end(), [owner](const SetRequest& r) { return r.submitter == owner; }), g_sets.end());
+    for (SetFinished& f : g_sets_done)
+        if (f.req.submitter == owner) f.req.done = nullptr;
+    recount_ready();
+}
+
+KilnResult equip_set_cancel(uint64_t ticket) {
+    std::lock_guard lock(g_mu);
+    for (SetRequest& r : g_sets)
+        if (r.ticket == ticket && !r.canceled) return r.canceled = true, KILN_OK;
+    return KILN_ERR_NOT_FOUND;  // unknown, ran already, or running now: a commit is never undone
+}
+
+KilnResult equip_set_submit(KilnOwner owner, const KilnSetRequestV1* r, KilnSetDoneV1 done, void* user, uint64_t* out_ticket) {
+    if (out_ticket) *out_ticket = 0;
+    const uint32_t lab_flags = KILN_SET_REQUEST_LAB_FAIL_STEP | KILN_SET_REQUEST_LAB_GUARD_BIT | KILN_SET_REQUEST_LAB_COMMIT_ANYWAY |
+                               KILN_SET_REQUEST_LAB_FAKE_MISMATCH | 0x00FF0000u;
+    const uint32_t allowed = KILN_SET_REQUEST_DRY_RUN | (sets_lab() ? lab_flags : 0u);
+    if (!r || r->size < sizeof(KilnSetRequestV1) || r->player == 0 || (r->flags & ~allowed)) return KILN_ERR_INVALID_ARGUMENT;
+    char why[160] = "";
+    if (!sets::valid_entries(r->entries, r->count, why, sizeof why)) return KILN_ERR_INVALID_ARGUMENT;
+    // the snapshot's owner: Kiln's bridge (owner 0) names the asking mod; anyone else names 0 (itself) or itself
+    KilnOwner origin = r->origin_owner;
+    if (owner != 0) {
+        if (origin != 0 && origin != owner) return KILN_ERR_INVALID_ARGUMENT;
+        origin = owner;
+    }
+    const int state = g_state.load();
+    if (!E.equip_ok || !g_w || !g_tx || !g_players || state == KILN_ITEMS_PROGRAM_NONE || state == KILN_ITEMS_PROGRAM_BROKEN ||
+        here_now() != EquipHere::Yes || !sets_available(why, sizeof why))
+        return KILN_ERR_UNAVAILABLE;
+    KilnWindowStateV1 w{};
+    w.size = sizeof w;
+    if (sets_clock()->get(&w) != KILN_OK || w.world_epoch == 0) return KILN_ERR_UNAVAILABLE;
+    if (std::memcmp(w.process_session, r->process_session, 16) != 0) return KILN_ERR_NOT_FOUND;  // before the token is looked up
+    {
+        std::lock_guard lock(g_mu);
+        if (g_sets.size() >= kMaxSets) return KILN_ERR_BUFFER_TOO_SMALL;  // before the snapshot is taken: it stays usable
+    }
+    sets::SnapEntry snap;
+    const sets::SnapStore::Find f = sets_take_for(r->snapshot_token, origin, r->player, w.world_epoch, w.step, &snap);
+    if (f == sets::SnapStore::Find::OtherPlayer) return KILN_ERR_INVALID_ARGUMENT;
+    if (f != sets::SnapStore::Find::Ok) return KILN_ERR_NOT_FOUND;
+    SetRequest q;
+    q.ticket = items_next_ticket();
+    q.submitter = owner;
+    q.origin = origin;
+    q.submitted = current_step();
+    q.token = r->snapshot_token;
+    q.done = done;
+    q.user = user;
+    if (slot_player(r->player)) {
+        q.session = true;  // no player in game with the id: the next Pre ends it
+        session_of(r->player, &q.handle, &q.joined_step);
+    }
+    q.job.ticket = q.ticket;
+    q.job.player = r->player;
+    q.job.flags = (r->flags & KILN_SET_REQUEST_DRY_RUN) ? sets::kRequestDryRun : 0;
+    q.job.count = r->count;
+    for (uint32_t i = 0; i < r->count; ++i) q.job.entries[i] = r->entries[i];
+    if (r->flags & KILN_SET_REQUEST_LAB_FAIL_STEP) q.job.lab.fail_step = static_cast<int>((r->flags >> 16) & 0xFFu);
+    q.job.lab.guard_bit = (r->flags & KILN_SET_REQUEST_LAB_GUARD_BIT) != 0;
+    q.job.lab.commit_anyway = (r->flags & KILN_SET_REQUEST_LAB_COMMIT_ANYWAY) != 0;
+    q.job.lab.fake_mismatch = (r->flags & KILN_SET_REQUEST_LAB_FAKE_MISMATCH) != 0;
+    if (q.job.lab.any()) LOGW("equipment set ticket %llu: lab faults injected (flags 0x%08x)", static_cast<unsigned long long>(q.ticket), r->flags);
+    q.job.prefix = snap.prefix;
+    q.job.baseline = std::move(snap.bytes);
+    q.captured = snap.prefix;
+    q.model = std::move(snap.model);
+    q.valid_through = snap.captured_step + sets::SnapStore::kTtl;
+    // planned at once: a set that changes nothing, or that the planner refuses, ends without a decision or a transaction
+    const sets::SetPlan plan = sets::plan_set(q.model, q.job.entries, q.job.count, sets_plan_options(), &sets_slot_type, nullptr);
+    const uint64_t ticket = q.ticket;
+    {
+        std::lock_guard lock(g_mu);
+        if (plan.status == sets::SetPlan::NoChange) {
+            g_sets_done.push_back(ended(std::move(q), sets::SetStatus::NoChange, 0, "", current_step()));
+        } else if (plan.status != sets::SetPlan::Planned) {
+            g_sets_done.push_back(ended(std::move(q), sets::SetStatus::Refused, plan.refusal, plan.reason, current_step()));
+        } else {
+            g_sets.push_back(std::move(q));
+        }
+        recount_ready();
+    }
+    if (out_ticket) *out_ticket = ticket;
+    return KILN_OK;
 }
 
 }  // namespace kitems

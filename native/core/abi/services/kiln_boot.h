@@ -6,8 +6,8 @@
  *
  * Deferred mode. The core decides it once, before the service DLLs load (kiln_plugin_main): it is on when hooks are
  * on, .NET is on, an enabled Kiln mod of this side has "boot": true or "boot": "required" in its kiln.mod.json, the
- * row "mods.boot" is available and, on a game client, the row "mods.boot.client" is available too (the client gate
- * holds it until the guided client checks pass). Without deferred mode nothing changes: collector() and the staging
+ * row "mods.boot" is available and, on a game client, the row "mods.boot.client" is available too (open since
+ * 0.2.0-dev.29; held in 0.2.0-dev.28). Without deferred mode nothing changes: collector() and the staging
  * calls answer KILN_ERR_UNAVAILABLE and every collector keeps its on_ready path.
  *
  * The phase, in order (one process, one generation; every step on the boot thread, before the game's entry point):
@@ -146,6 +146,7 @@ enum {
     KILN_BOOT_ISSUE_NOT_COMMITTED = 8,        /* .NET or Kiln.Host never committed the generation */
     KILN_BOOT_ISSUE_WRONG_ROLE = 9,           /* lowered content needs a role the mod does not have */
     KILN_BOOT_ISSUE_ACTIVATION_FAULT = 10,    /* a consumer faulted binding published content */
+    KILN_BOOT_ISSUE_START_STOPPED = 11,       /* since 0.2.0-dev.29: a service stopped the start (stop_start) */
 };
 #define KILN_BOOT_ISSUE_SHADOWED_BY_FILE (KILN_BOOT_ISSUE_WARNING | 1u) /* a file definition won over staged code */
 
@@ -256,6 +257,35 @@ typedef struct KilnBootApiV1 {
      * KILN_ERR_UNAVAILABLE: no deferred mode, or nothing is published yet. KILN_ERR_INVALID_ARGUMENT: the caller is not
      * a registered collector's owner, an unknown mod, an empty reason. */
     KilnResult(KILN_CALL* activation_fault)(KilnOwner collector, KilnStr mod_id, KilnStr kind, KilnStr key, KilnStr reason);
+
+    /* Appended (0.2.0-dev.29); check header.size before calling. A START-TIME call: a service found that this start
+     * must not go on, because the content a saved world needs cannot be built, so no world may load (kiln.knowledge: a
+     * roster the game cannot hold). It works with a deferred generation or without one, inside a collector's prepare
+     * (before the game's entry point) or after it (the game's resource start), and only until the first world: while
+     * any core world (prediction included) is present, or once one has run in this process (KilnSessionInfo.sessions),
+     * it answers KILN_ERR_UNAVAILABLE and does nothing (ending the process could lose play). That check is a sample,
+     * not a lock: a world whose first step is under way at that moment is not seen yet, so call it only where no world
+     * can be starting (the boot thread, ResourceInit).
+     * In this order: one issue of code KILN_BOOT_ISSUE_START_STOPPED, phase "stop", per mod in `mods` (comma-separated
+     * ids; empty: one issue that names no mod); the stop line "boot: the start stops (exit code 0x<code>): <reason>" in
+     * kiln.log; the files the launcher reads (progress.json state "failed" with `reason`; boot.json, whose "boot" section
+     * has "stop": {"code", "reason", "by", "mods"} and "exitCode": code), then a wait of a second at most per file until
+     * another reader could see that text in progress.json, boot.json and kiln.log (best effort, not a flush of every
+     * file to the disk; at a bound it goes on and logs which file it did not see); then `before_exit(user)` when not
+     * NULL (a game client's message to the player: it should return by itself, e.g. a message box with a timeout; a
+     * fault in it is contained); then the process ends with `exit_code` without any DLL's detach code. If the files or
+     * before_exit block, a 65-second bound ends the process anyway. Does not return.
+     * A Unix wrapper (Wine) sees the low byte of exit_code: give a code whose low byte says what it is
+     * (KILN_BOOT_EXIT_CODE ends in 1, kiln.knowledge's KILN_KNOW_ROSTER_EXIT_CODE in 2 and KILN_KNOW_CONTENT_EXIT_CODE
+     * in 3; all collide with ordinary statuses 1, 2 and 3, see docs/kiln/dedicated-servers.md), and say in `reason` that
+     * restarting does not help.
+     * KILN_ERR_UNAVAILABLE: a world is present or has run (nothing happens), or a stop is under way already (the
+     * process is about to end). KILN_ERR_INVALID_ARGUMENT: caller 0, an empty reason, exit_code 0 (nothing happens).
+     * Mixed versions: a caller beside an older kiln.boot finds no member (header.size) and must end the start itself, as
+     * kiln.knowledge does (its state file, log line, message, exit; no boot.json stop record, no progress.json
+     * "failed"); an older service that does not know this call is not made to stop by a newer kiln.boot. */
+    KilnResult(KILN_CALL* stop_start)(KilnOwner caller, KilnStr mods, KilnStr reason, uint32_t exit_code,
+                                      void(KILN_CALL* before_exit)(void* user), void* user);
 } KilnBootApiV1;
 
 #pragma pack(pop)

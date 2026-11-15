@@ -1,1 +1,52 @@
 #nullable enable
+Kiln.EffectBlock.Run.get -> Kiln.NativeRef?
+Kiln.EffectBlock.Run.init -> void
+Kiln.BuildingMaterialPoolBlock
+Kiln.BuildingMaterialPoolBlock.<Clone>$() -> Kiln.BuildingMaterialPoolBlock!
+Kiln.BuildingMaterialPoolBlock.BuildingMaterialPoolBlock() -> void
+Kiln.BuildingMaterialPoolBlock.Equals(Kiln.BuildingMaterialPoolBlock? other) -> bool
+Kiln.BuildingMaterialPoolBlock.Name.get -> string!
+Kiln.BuildingMaterialPoolBlock.Name.init -> void
+Kiln.BuildingMaterialPoolBlock.Materials.get -> System.Collections.Generic.IReadOnlyList<Kiln.BuildingMaterialPoolEntry!>!
+Kiln.BuildingMaterialPoolBlock.Materials.init -> void
+Kiln.BuildingMaterialPoolBlock.Roof.get -> bool
+Kiln.BuildingMaterialPoolBlock.Roof.init -> void
+Kiln.BuildingMaterialPoolBlock.Was.get -> string?
+Kiln.BuildingMaterialPoolBlock.Was.init -> void
+Kiln.BuildingMaterialPoolEntry
+Kiln.BuildingMaterialPoolEntry.<Clone>$() -> Kiln.BuildingMaterialPoolEntry!
+Kiln.BuildingMaterialPoolEntry.BuildingMaterialPoolEntry(Kiln.PartRef<Kiln.BuildingMaterialBlock!>? Material = null, string? GameMaterial = null) -> void
+Kiln.BuildingMaterialPoolEntry.Deconstruct(out Kiln.PartRef<Kiln.BuildingMaterialBlock!>? Material, out string? GameMaterial) -> void
+Kiln.BuildingMaterialPoolEntry.Equals(Kiln.BuildingMaterialPoolEntry? other) -> bool
+Kiln.BuildingMaterialPoolEntry.Material.get -> Kiln.PartRef<Kiln.BuildingMaterialBlock!>?
+Kiln.BuildingMaterialPoolEntry.Material.init -> void
+Kiln.BuildingMaterialPoolEntry.GameMaterial.get -> string?
+Kiln.BuildingMaterialPoolEntry.GameMaterial.init -> void
+Kiln.BlueprintBlock.MaterialPool.get -> Kiln.PartRef<Kiln.BuildingMaterialPoolBlock!>?
+Kiln.BlueprintBlock.MaterialPool.init -> void
+override Kiln.BuildingMaterialPoolBlock.Equals(object? obj) -> bool
+override Kiln.BuildingMaterialPoolBlock.GetHashCode() -> int
+override Kiln.BuildingMaterialPoolBlock.ToString() -> string!
+override Kiln.BuildingMaterialPoolEntry.Equals(object? obj) -> bool
+override Kiln.BuildingMaterialPoolEntry.GetHashCode() -> int
+override Kiln.BuildingMaterialPoolEntry.ToString() -> string!
+static Kiln.BuildingMaterialPoolBlock.operator !=(Kiln.BuildingMaterialPoolBlock? left, Kiln.BuildingMaterialPoolBlock? right) -> bool
+static Kiln.BuildingMaterialPoolBlock.operator ==(Kiln.BuildingMaterialPoolBlock? left, Kiln.BuildingMaterialPoolBlock? right) -> bool
+static Kiln.BuildingMaterialPoolEntry.operator !=(Kiln.BuildingMaterialPoolEntry? left, Kiln.BuildingMaterialPoolEntry? right) -> bool
+static Kiln.BuildingMaterialPoolEntry.operator ==(Kiln.BuildingMaterialPoolEntry? left, Kiln.BuildingMaterialPoolEntry? right) -> bool
+Kiln.MaterialTableChangedEvent
+Kiln.MaterialTableChangedEvent.Deferred.get -> bool
+Kiln.MaterialTableChangedEvent.Groups.get -> System.Collections.Generic.IReadOnlyList<System.Guid>!
+Kiln.MaterialTableChangedEvent.Materials.get -> System.Collections.Generic.IReadOnlyList<System.Guid>!
+Kiln.MaterialTableChangedEvent.NewHash.get -> string!
+Kiln.MaterialTableChangedEvent.OldHash.get -> string!
+Kiln.WorldMaterialCategory
+Kiln.WorldMaterialCategory.Building = 0 -> Kiln.WorldMaterialCategory
+Kiln.WorldMaterialCategory.Terrain = 1 -> Kiln.WorldMaterialCategory
+static Kiln.Blocks.Define(string! name, Kiln.BuildingMaterialPoolBlock! block, Kiln.DefinitionRegistrationOptions! options) -> Kiln.DefinitionRegistrationResult!
+static Kiln.WorldTables.GetMaterialBudget(Kiln.WorldMaterialCategory category) -> Kiln.CapacityQueryResult!
+static Kiln.WorldTables.GetMaterialPoolRegistration(System.Guid registrationId) -> Kiln.DefinitionRegistrationResult!
+static Kiln.WorldTables.GetPoolBudget(string! pool) -> Kiln.CapacityQueryResult!
+static Kiln.Blocks.Define(string! name, Kiln.VfxBlock! block, Kiln.DefinitionRegistrationOptions! options) -> Kiln.DefinitionRegistrationResult!
+static Kiln.Blocks.GetVfxRegistration(System.Guid registrationId) -> Kiln.DefinitionRegistrationResult!
+static Kiln.WorldTables.RemoveStoredMaterialPool(string! pool) -> bool

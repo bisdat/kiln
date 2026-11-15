@@ -1,3 +1,4 @@
+#pragma warning disable KILNX028
 // SPDX-License-Identifier: MIT
 // kiln.worldtables from C#: what the boot merge made of every mod's material blocks. native/core/abi/services/kiln_worldtables.h.
 using System.Runtime.InteropServices;
@@ -19,7 +20,7 @@ public sealed record WorldMaterial(int CellId, Guid Guid, string Mod, string Blo
 }
 
 /// <summary>The game's shared building-material tables, merged from every enabled mod at boot. docs/kiln/services/worldtables.md.</summary>
-public static class WorldTables
+public static partial class WorldTables
 {
     /// <summary>The merged tables are served, or there was nothing to change. False: this build doesn't resolve, or the service is off, and the game's tables are untouched.</summary>
     public static bool Available => WorldTablesNative.State is WorldTablesNative.Merged or WorldTablesNative.Untouched;
@@ -33,7 +34,7 @@ public static class WorldTables
         _ => "off",
     };
 
-    /// <summary>What a client and a server have to agree on: 16 hex digits over the live materials' ids and GUIDs.</summary>
+    /// <summary>What a client and a server have to agree on: 16 hex digits covering live materials, crafting props and, when present, custom pools and shape bindings.</summary>
     public static string Hash => WorldTablesNative.Hash();
 
     /// <summary>Every material in the tables: the building materials, then the terrain ones, live ones first in each.</summary>
@@ -68,13 +69,13 @@ public static class WorldTables
 /// <param name="ItemId">The item that places it.</param>
 public sealed record WorldCraftingProp(Guid Guid, uint Id, int Index, uint ItemId, string Mod, string Block);
 
-internal static unsafe class WorldTablesNative
+internal static unsafe partial class WorldTablesNative
 {
     public const string Name = "kiln.worldtables";
     public const uint Version = 1;
     public const int Off = 0, Waiting = 1, Untouched = 2, Merged = 3;
     public const string EmptyHash = "0000000000000000";
-    private const int Ok = 0, BufferTooSmall = 7;
+    private const int Ok = 0, BufferTooSmall = 5;
 
     [StructLayout(LayoutKind.Sequential)]
     public struct Str
@@ -114,6 +115,10 @@ internal static unsafe class WorldTablesNative
         public delegate* unmanaged[Cdecl]<uint> CraftingPropCount;
         public delegate* unmanaged[Cdecl]<uint, CraftingProp*, int> CraftingPropAt;
         public delegate* unmanaged[Cdecl]<byte*, int> CraftingPropIndex;
+        public delegate* unmanaged[Cdecl]<uint,KilnCapacityInfo*,int> MaterialBudget;
+        public delegate* unmanaged[Cdecl]<Str,KilnCapacityInfo*,int> PoolBudget;
+        public delegate* unmanaged[Cdecl]<ulong,Str,Str,uint,KilnDefinitionReply*,byte*,nuint,nuint*,int> DefinePoolResult;
+        public delegate* unmanaged[Cdecl]<ulong,byte*,KilnDefinitionReply*,byte*,nuint,nuint*,int> PoolRegistration;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -143,9 +148,36 @@ internal static unsafe class WorldTablesNative
             _looked = true;
             var t = (Table*)BlocksBridge.ServiceTable(Name, Version);
             // the size says which functions a table has; an older one is treated as absent
-            _table = t != null && t->Size >= (uint)sizeof(Table) ? t : null;
+            _table = t != null && t->Size >= 144 ? t : null;
             return _table;
         }
+    }
+
+    internal static bool Baking;
+    private static readonly Dictionary<string,System.Text.Json.Nodes.JsonObject> Baked = new(StringComparer.Ordinal);
+    internal static void ForgetBaked(string mod) => Baked.Remove(mod);
+    internal static System.Text.Json.Nodes.JsonObject? BakedDocument(string mod) => Baked.TryGetValue(mod,out var doc)?(System.Text.Json.Nodes.JsonObject)doc.DeepClone():null;
+    // What define_json reports as a block's kind, by section; parts (strengths, surfaces) are kept and not reported.
+    private static readonly Dictionary<string,string> BakeKinds=new(StringComparer.Ordinal) {
+        ["buildingMaterials"]="buildingMaterial",["buildingMaterialPools"]="buildingMaterialPool",["blueprints"]="blueprint",
+        ["terrainMaterials"]="terrainMaterial",["materialTweaks"]="materialTweak",["craftingProps"]="craftingProp"};
+    private static readonly HashSet<string> NotSections=new(StringComparer.Ordinal) {"format","mod","dir","clients","comment"};
+    private static string RecordBake(string document)
+    {
+        var doc=System.Text.Json.Nodes.JsonNode.Parse(document)!.AsObject();
+        var mod=(string)doc["mod"]!;
+        if(!Baked.TryGetValue(mod,out var into)) Baked[mod]=into=new() {["format"]=1};
+        var blocks=new System.Text.Json.Nodes.JsonArray();
+        // every section the document has: a section the bake did not know would otherwise be lost from blocks.tables.json
+        foreach(var (section,node) in doc) {
+            if(NotSections.Contains(section) || node is not System.Text.Json.Nodes.JsonObject definitions) continue;
+            if(into[section] is not System.Text.Json.Nodes.JsonObject target) into[section]=target=new();
+            foreach(var (key,value) in definitions) {
+                target[key]=value?.DeepClone();
+                if(BakeKinds.TryGetValue(section,out var kind)) blocks.Add(new System.Text.Json.Nodes.JsonObject {["name"]=key,["kind"]=kind,["status"]="pending"});
+            }
+        }
+        return new System.Text.Json.Nodes.JsonObject {["blocks"]=blocks,["errors"]=new System.Text.Json.Nodes.JsonArray()}.ToJsonString();
     }
 
     /// <summary>Tests without a game: what kiln.worldtables' define_json and crafting_prop_index would answer.</summary>
@@ -236,26 +268,44 @@ internal static unsafe class WorldTablesNative
 
     private delegate int Reader(byte* buffer, nuint capacity, nuint* length);
 
+    // Any size: ask for the length first, then read; a text that grew in between is asked for again (a few times, as
+    // long as it keeps growing). Only a text that will not settle reads as "".
     private static string Read(Reader read)
     {
-        var buffer = new byte[16384];
-        for (var i = 0; i < 2; i++)
+        nuint want = 0;
+        int rc;
+        rc = read(null, 0, &want);
+        for (var i = 0; i < 8; i++)
         {
+            if (want > (64u << 20)) break;
+            var buffer = new byte[(int)want + 1];
             nuint n = 0;
-            int rc;
             fixed (byte* p = buffer) rc = read(p, (nuint)buffer.Length, &n);
-            if ((int)n < buffer.Length) return Encoding.UTF8.GetString(buffer, 0, (int)n);
-            buffer = new byte[(int)n + 1];
-            _ = rc;
+            if (n < (nuint)buffer.Length) return Encoding.UTF8.GetString(buffer, 0, (int)n);
+            want = n;
         }
+        _ = rc;
         return "";
     }
+
+    /// <summary>The service's own revision, rising with every change to its tables, registrations or budgets (the budgets'
+    /// <c>revision</c>): one call, no allocation. 0 when this table has no budgets.</summary>
+    internal static ulong Revision()
+    {
+        var t = T;
+        if (t == null || !WorldTablesNative.HasAppend(t->Size, 144) || t->MaterialBudget == null) return 0;
+        var info = new KilnCapacityInfo { Size = (uint)sizeof(KilnCapacityInfo) };
+        return t->MaterialBudget(0, &info) == Ok ? info.Revision : 0;
+    }
+    /// <summary>Both budget members are here (the observer reads them without counting as a mod's use).</summary>
+    internal static bool BudgetsReadable => T is var t && t != null && HasAppend(t->Size, 152) && t->MaterialBudget != null && t->PoolBudget != null;
 
     public static string StatusJson() => T == null ? "{\"state\":\"off\"}" : Read((b, c, n) => T->Status(b, c, n));
 
     /// <summary>The native report on a definition. Null: the service isn't here.</summary>
     public static string? DefineJson(string document)
     {
+        if(Baking) return RecordBake(document);
         if (TestDefine != null) return TestDefine(document);
         var t = T;
         if (t == null) return null;

@@ -12,12 +12,15 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../Kiln.Host/Kiln.Host.csproj" />
+    <ProjectReference Include="../../services/Kiln.Rules/Kiln.Rules.csproj" />
     <!-- Shared service assemblies live next to Kiln.Host (kiln/host on a server): Hello uses Kiln.Example. -->
     <ProjectReference Include="../../services/Kiln.Example/Kiln.Example.csproj" />
     <!-- Kiln.Game (the real one, newest server dump) next to Kiln.Host, as in kiln/host: GameTypesTests checks layout stamps against it. -->
     <ProjectReference Include="../../Kiln.Game/Kiln.Game.csproj" />
     <!-- Kiln.Blocks next to Kiln.Host, as in kiln/host: BootConfigTests' boot mod stages a definition with BootDefinitions. -->
     <ProjectReference Include="../../services/Kiln.Blocks/Kiln.Blocks.csproj" />
+    <!-- Kiln.Abilities next to Kiln.Host: NativeAdmissionOrderTests drives its sync-native dispatcher during an unload. -->
+    <ProjectReference Include="../../services/Kiln.Abilities/Kiln.Abilities.csproj" />
     <!-- Sample mods the tests install into a temporary kiln/mods (built, never referenced). -->
     <KilnSample Include="../../../mods/samples/Hello/Hello.csproj" />
     <KilnSample Include="../../../mods/samples/SampleLib/SampleLib.csproj" />

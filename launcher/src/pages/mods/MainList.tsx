@@ -3,10 +3,12 @@
 // configs, the version, its folder, remove). A mod found in the game folder is a row with its state and its fix, no
 // switch. Above the list: the filter (with many mods), Notes (what the last activation said about mod folders, when it
 // said something), Load order, Engines and Add mods. It scrolls inside the page.
+import { SfSelfHostedNotice } from "../../components/SfSelfHostedNotice";
+import { ShroudlinkNotice } from "../../components/ShroudlinkNotice";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, MoreHorizontal } from "lucide-react";
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useSearchParams, Link } from "react-router-dom";
 import * as api from "../../api/commands";
 import type { AddReport, GameInstall, ModKind } from "../../api/commands";
 import { qk, useNexusEnabled } from "../../api/hooks";
@@ -22,6 +24,8 @@ import { bulkPlan, filterRows, kindsOf, type ModRow } from "../../shell/mods";
 import { notifyAdd } from "../../shell/notices";
 import { checkNow, noticeable, statusOf, UpdateBadge, UpdateSourceModal, useModUpdates } from "../../shell/modUpdates";
 import { NOT_REMOVABLE, removable, removeMany, removeMod, useRemoveCheck, useRemoveMany, withoutRows, type RemoveTarget } from "../../shell/removeMod";
+import { canReplaceDll, replacementLabel } from "../../shell/replaceDll";
+import { otherVersions, rollBack, rollbackTargets } from "../../shell/rollback";
 import { NONE, all as selectAll, ownerOf, pick as pickSelected, pruneSelection, range as selectRange, setSelection, toggle as toggleSelected, useOwnedSelection } from "../../shell/selection";
 import type { useMods } from "../../shell/useMods";
 import { withDropin } from "../profiles/dropins";
@@ -41,7 +45,8 @@ export function MainList({ game, mods, running }: { game: GameInstall; mods: Mod
   const qc = useQueryClient();
   const nexus = useNexusEnabled();
   const addMods = useAddMods();
-  const [text, setText] = useState("");
+  const [params] = useSearchParams();
+  const [text, setText] = useState(params.get("filter") ?? "");
   const [kind, setKind] = useState<ModKind | "">("");
   const [settings, setSettings] = useState<{ kind: ModKind; id: string; name: string } | null>(null);
   const [configs, setConfigs] = useState<string | null>(null);
@@ -51,18 +56,47 @@ export function MainList({ game, mods, running }: { game: GameInstall; mods: Mod
   const updates = useModUpdates();
   const [checking, setChecking] = useState(false);
   const [source, setSource] = useState<{ kind: ModKind; id: string; name: string } | null>(null);
+  const [replaceConfirm, setReplaceConfirm] = useState<{ message: string; run: () => Promise<void> } | null>(null);
   const pid = mods.profileId;
+  // " (replaced DLL, 15 Nov)" after the version of a build a DLL replacement made
+  const replacedNote = (r: ModRow) => {
+    const label = replacementLabel(r.lib?.versions.find((v) => v.version === r.entry?.version && v.hash === r.entry?.hash));
+    return label ? ` (${label})` : "";
+  };
+  const replaceDll = async (r: ModRow) => {
+    if (!pid || !r.kind || !r.entry) return;
+    try {
+      const paths = await pickPaths({ multiple: false, filters: [{ name: "Windows DLL", extensions: ["dll"] }], title: "Replace DLL" });
+      if (!paths?.length || !(await mods.edit.flush())) return;
+      const entry = { kind: r.kind, id: r.id, version: r.entry.version, hash: r.entry.hash };
+      const run = async (confirmed: boolean) => {
+        setBusy(r.key);
+        try {
+          const result = await api.libraryReplaceDll(pid, entry, paths[0], confirmed);
+          await Promise.all([qc.invalidateQueries({ queryKey: ["library_list"] }), qc.invalidateQueries({ queryKey: qk.profile(pid) }),
+            qc.invalidateQueries({ queryKey: ["profile_resolve"] }), qc.invalidateQueries({ queryKey: ["found_scan"] })]);
+          toast.ok(`Replaced DLL of ${r.name}`, result.notices.join(" ") || undefined);
+        } catch (e) {
+          const err = e as { message?: string; detail?: { replaceDllConfirmation?: boolean } };
+          if (!confirmed && err.detail?.replaceDllConfirmation) setReplaceConfirm({ message: err.message ?? "Confirm replacement?", run: () => run(true) });
+          else toast.error(e, `Could not replace DLL of ${r.name}`);
+        } finally { setBusy(null); }
+      };
+      await run(false);
+    } catch (e) { toast.error(e, "Could not open DLL"); }
+  };
   const cfg = useQuery({ queryKey: qk.configs({ profile: pid ?? "" }), queryFn: () => api.configList({ profile: pid! }), enabled: !!pid });
   const withConfig = new Set((cfg.data ?? []).map((f) => f.mod).filter(Boolean) as string[]);
   // the mods the launcher cooks for this game (models, animations, sounds made from the game): "Cook again" in their menu
   const cook = useQuery({ queryKey: ["cook_plan", game.id], queryFn: () => api.cookPlan(game.id) });
   const cookable = new Map((cook.data ?? []).map((j) => [j.id, j]));
   const kinds = kindsOf(mods.rows);
-  const many = mods.rows.length > FILTER_FROM;
+  const many = !!text || mods.rows.length > FILTER_FROM;
   const shown = filterRows(mods.rows, many ? text : "", many ? kind : "");
   const loaded = !!mods.profile;
   const check = useRemoveCheck(rm, pid);
 
+  useEffect(() => { setText(params.get("filter") ?? ""); }, [params]);
   // All on / All off: the rows shown now (the filter narrows them), one save, Undo in the toast
   const filtered = shown.length !== mods.rows.length;
   const planOn = bulkPlan(shown, true);
@@ -128,6 +162,12 @@ export function MainList({ game, mods, running }: { game: GameInstall; mods: Mod
   const skipRemove = picked.length - toRemove.length;
   const [removing, setRemoving] = useState<ModRow[] | null>(null);
   const check2 = useRemoveMany(removing ?? [], pid, !!removing);
+  // Profile-local controls end at the identity change, never at a later data refresh.
+  useLayoutEffect(() => {
+    setText(params.get("filter") ?? ""); setKind("");
+    setSettings(null); setConfigs(null); setRm(null); setRemoving(null);
+    setSource(null); setReplaceConfirm(null);
+  }, [game.id, pid]);
   const skipLine = (p: ReturnType<typeof bulkPlan>) => (p.left.length ? ` ${p.left.length} skipped: ${[...new Set(p.left.map((l) => l.why))].join("; ")}.` : "");
   const selTitle = (on: boolean) => {
     const p = on ? selOn : selOff;
@@ -188,11 +228,15 @@ export function MainList({ game, mods, running }: { game: GameInstall; mods: Mod
     return [
       ...(r.changed ? [{ label: USE_CHANGED, disabled: running || !!busy, onSelect: () => void takeChanged(r) }] : []),
       ...sw,
+      ...(canReplaceDll(r.kind, !!r.lib, !!r.entry && !!pid) ? [{ label: "Replace DLL…", disabled: !!busy || !api.isTauri(), onSelect: () => void replaceDll(r) }] : []),
       ...(r.kind && r.entry && SETTINGS_KINDS.includes(r.kind) ? [{ label: "Settings", onSelect: () => setSettings({ kind: r.kind!, id: r.id, name: r.name }) }] : []),
       ...(withConfig.has(r.id) ? [{ label: "Configs", onSelect: () => setConfigs(r.id) }] : []),
       ...(r.kind === "kiln" && r.on && cookable.has(r.id) ? [{ label: "Cook again", disabled: running,
         onSelect: () => void cookAgain(game.id, r.id, r.name).then(() => qc.invalidateQueries({ queryKey: ["cook_plan"] })) }] : []),
-      ...versions.filter((v) => v.version !== cur).map((v) => ({ label: `Use ${v.version}`, disabled: !loaded, onSelect: () => mods.setVersion(r, v.version, v.hash) })),
+      ...otherVersions(r.lib, cur).map((v) => ({ label: `Use ${v.version}`, disabled: !loaded, onSelect: () => mods.setVersion(r, v.version, v.hash) })),
+      // an earlier version an update kept, with its settings (shell/rollback.ts)
+      ...(r.kind && r.entry && pid ? rollbackTargets(r.lib, r.entry, pid).map((v) => ({ label: `Roll back to ${v.version}${v.version === r.entry!.version ? " (earlier build)" : ""}`, disabled: !!busy,
+        onSelect: () => void rollBack(qc, game.id, pid, r.kind!, r.id, r.name, v, mods.edit.flush) })) : []),
       ...(folder ? [{ label: "Open folder", onSelect: () => api.appOpenPath(folder).catch((e) => toast.error(e)) }] : []),
       ...(r.kind && r.lib ? [{ label: "Updates…", onSelect: () => setSource({ kind: r.kind!, id: r.id, name: r.name }) }] : []),
       ...(versions.length > 1 ? versions.filter((v) => v.version !== r.entry?.version).map((v) => ({ label: `Remove ${v.version}`, danger: true, disabled: running, onSelect: () => setRm({ row: r, version: v.version }) })) : []),
@@ -203,10 +247,12 @@ export function MainList({ game, mods, running }: { game: GameInstall; mods: Mod
   const foundStart = shown.findIndex((r) => r.found);
   return (
     <div className={"k-mods" + (mods.rows.length ? "" : " empty") + (selecting ? " selecting" : "")} onKeyDown={keys}>
+      <SfSelfHostedNotice profile={mods.profile} found={mods.found.data} />
+      <ShroudlinkNotice game={game} mods={mods} />
       <div className="k-mods-bar">
         {many && (
           <>
-            <WellInput label="Filter" compact value={text} onChange={(e) => setText(e.target.value)} wellStyle={{ flex: "1 1 130px", maxWidth: 250 }}
+            <WellInput label="Filter" compact value={text} onChange={(e) => setText(e.target.value)} onClear={() => setText("")} wellStyle={{ flex: "1 1 130px", maxWidth: 250 }}
               note={text || kind ? `${shown.length}/${mods.rows.length}` : undefined} />
             {kinds.length > 1 && (
               <Select aria-label="Kind" className="k-mods-kind" value={kind} onChange={(v) => setKind(v as ModKind | "")}
@@ -233,6 +279,10 @@ export function MainList({ game, mods, running }: { game: GameInstall; mods: Mod
         {nexus && <Link className="k-link" to="/catalog">Catalog</Link>}
         <button type="button" className="k-link" disabled={!api.isTauri()} title={api.isTauri() ? "A zip, 7z, rar or DLL of any kind (a folder: drop it on the window)" : "Needs the desktop app: drop a file instead"} onClick={() => void pick()}>Add mods</button>
       </div>
+      <Modal open={!!replaceConfirm} title="Replace DLL?" onClose={() => setReplaceConfirm(null)}
+        footer={<><Button variant="ghost" onClick={() => setReplaceConfirm(null)}>Cancel</Button><Button onClick={() => {
+          const pending = replaceConfirm; setReplaceConfirm(null); void pending?.run();
+        }}>Replace DLL</Button></>}><p>{replaceConfirm?.message}</p></Modal>
       {selecting && (
         <div className="k-mods-selbar" role="toolbar" aria-label="Selected mods">
           <span className="k-mods-selbar-count" aria-live="polite">{picked.length} selected</span>
@@ -290,8 +340,8 @@ export function MainList({ game, mods, running }: { game: GameInstall; mods: Mod
                 )}
               </span>
               <span className="k-mod-kind">{r.kind && <Badge tone={KIND_TONE[r.kind]} title={KIND_NAME[r.kind]}>{KIND_SHORT[r.kind]}</Badge>}</span>
-              <span className="k-mono k-mod-ver" title={(r.lib?.versions.length ?? 0) > 1 ? `${r.lib!.versions.length} versions in the library` : r.version ?? undefined}>{r.version ?? ""}</span>
-              <Menu label={`More for ${r.name}`} icon={<MoreHorizontal />} size="s" items={menu(r)} />
+              <span className="k-mono k-mod-ver" title={(r.lib?.versions.length ?? 0) > 1 ? `${r.lib!.versions.length} versions in the library` : r.version ?? undefined}>{r.version ?? ""}{replacedNote(r)}</span>
+              <Menu key={pid} label={`More for ${r.name}`} icon={<MoreHorizontal />} size="s" items={menu(r)} />
             </li>
           ))}
           {!shown.length && <li className="k-mods-none">No mod matches that.</li>}

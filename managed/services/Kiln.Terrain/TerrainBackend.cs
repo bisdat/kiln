@@ -9,6 +9,13 @@ internal interface ITerrainBackend
     string Mod { get; }
     /// <summary>The world runs (its save is loaded, so the ledger is this world's).</summary>
     bool WorldRunning { get; }
+    bool CanWaitForWorld => true;
+    string? PersistenceFailure => null;
+    bool NewWorldSession => false;
+    ulong? BudgetStep => null;
+    bool TryReserveBudget(long read, long write) => true;
+    void ChargeBudget(double milliseconds) { }
+    double BudgetMilliseconds => System.Diagnostics.Stopwatch.GetTimestamp() * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
     string? WorldId { get; }
     /// <summary>Grid size in cells (x, z), or null while unknown.</summary>
     (int X, int Z)? GridCells { get; }
@@ -44,12 +51,29 @@ internal interface ITerrainBackend
     void AfterNextSave(Action<string, uint> action) { }
 }
 
-internal sealed class BuildTerrainBackend(ModContext mod) : ITerrainBackend
+internal sealed class BuildTerrainBackend(ModContext mod, TerrainWorkBudget budget) : ITerrainBackend
 {
+    public BuildTerrainBackend(ModContext mod) : this(mod, Terrain.WorkBudget) { }
     public string Mod => mod.Info.Id;
     private readonly long _session = Lifecycle.ServerSession;
     public bool WorldRunning => mod.Alive && _session == Lifecycle.ServerSession && Lifecycle.Phase is not (ServerPhase.Stopping or ServerPhase.Idle) &&
-        (Spawn.Available ? Spawn.WorldRunning : Build.Grid is not null);
+        Saves.WorldDataReady && (Spawn.Available ? Spawn.WorldRunning : Build.Status?.World == true);
+    public bool CanWaitForWorld => mod.Alive && _session == Lifecycle.ServerSession &&
+        Lifecycle.Phase is not (ServerPhase.Stopping or ServerPhase.Idle);
+    public bool NewWorldSession => SavesRuntime.NewWorldSession;
+    public ulong? BudgetStep => ServiceTick.Step;
+    public bool TryReserveBudget(long read, long write) => TerrainNativeBudget.Reserve(read, write);
+    public void ChargeBudget(double milliseconds) => TerrainNativeBudget.Charge(milliseconds);
+    public string? PersistenceFailure => PersistenceReason();
+    internal static string? PersistenceReason()
+    {
+        var status = Build.Status;
+        if (status is { Persist: true, Write: true })
+            return SavesRuntime.TerrainPersistenceFailure ??
+                (TerrainNativeBudget.Available ? null : "kiln.build lacks the shared terrain/recovery budget extension");
+        return string.IsNullOrWhiteSpace(status?.Detail)
+            ? "persistent terrain writes require world.lifecycle and a world-stop subscription" : status.Detail;
+    }
     public DataMatch LoadedData => WorldData.Loaded;
     // A new world's GUID can be assigned by its first save. Its process session is stable across that save,
     // and WorldRunning invalidates this backend when the session ends. WorldData selects the persistent GUID.
@@ -57,10 +81,27 @@ internal sealed class BuildTerrainBackend(ModContext mod) : ITerrainBackend
     public (int X, int Z)? GridCells => Build.Grid is { } g ? (g.CellsX, g.CellsZ) : null;
     public string KilnVersion => Game.KilnVersion;
     public async Task NextTick() => await mod.Scheduler.NextTick();
-    public Task<bool> Load(CellBox box, TimeSpan timeout) => Build.Load(box, timeout);
+    public async Task<bool> Load(CellBox box, TimeSpan timeout)
+    {
+        var until = DateTime.UtcNow + timeout;
+        // Ready can read one cell per missing tile. Native validates tile edges >= 8 cells.
+        var probes = ((box.SizeX + 7) / 8 + 1) * ((box.SizeZ + 7) / 8 + 1);
+        while (WorldRunning)
+        {
+            if (!await budget.Acquire(this, probes, 0) || !WorldRunning) return false;
+            var started = ((ITerrainBackend)this).BudgetMilliseconds;
+            bool loaded;
+            try { loaded = Build.IsLoaded(box); }
+            finally { budget.Charge(this, started); }
+            if (loaded) return true;
+            if (DateTime.UtcNow >= until) return false;
+            await NextTick();
+        }
+        return false;
+    }
     public bool TryRead(CellBox box, out Voxel[] cells) => Build.TryRead(box, out cells);
 
-    public async Task<BuildResult> Write(CellBox box, Voxel[] cells, bool[] mask, bool inBases, bool transient, string label, TimeSpan timeout, bool dryRun = false,
+    public Task<BuildResult> Write(CellBox box, Voxel[] cells, bool[] mask, bool inBases, bool transient, string label, TimeSpan timeout, bool dryRun = false,
         Voxel[]? expected = null)
     {
         var flags = BuildFlags.None;
@@ -68,15 +109,20 @@ internal sealed class BuildTerrainBackend(ModContext mod) : ITerrainBackend
         if (transient) flags |= BuildFlags.Transient;
         if (dryRun) flags |= BuildFlags.DryRun;
         // no journal: an overlay is not a session edit to undo, and its cells would sit in the journal twice
-        if (!await Build.Load(box, timeout) || !WorldRunning)
-            return new BuildResult(0, 0, false, false, box, 0, BuildRefusal.NotLoaded);
+        if (!WorldRunning || !Build.IsLoaded(box))
+            return Task.FromResult(new BuildResult(0, 0, false, false, box, 0, BuildRefusal.NotLoaded));
         var options = new BuildOptions { Flags = flags, Journal = false, Label = label, LoadTimeout = timeout };
-        return expected is null ? Build.Write(box, cells, options, mask) : Build.WriteIfUnchanged(box, cells, expected, options, mask);
+        return Task.FromResult(expected is null ? Build.Write(box, cells, options, mask) : Build.WriteIfUnchanged(box, cells, expected, options, mask));
     }
 
     public TerrainBook Book()
     {
-        if (!WorldData.Contains(TerrainBook.Key)) return WorldData.Get<TerrainBook>(TerrainBook.Key);
+        if (!WorldData.Contains(TerrainBook.Key))
+        {
+            var created = TerrainBook.Create(NewWorldSession);
+            WorldData.Set(TerrainBook.Key, created); // mark its origin at creation, even if sampling later declines a plan
+            return created;
+        }
         if (!WorldData.TryGet<TerrainBook>(TerrainBook.Key, out var book))
             throw new InvalidDataException("terrain ledger is null; stored data was kept");
         return book;

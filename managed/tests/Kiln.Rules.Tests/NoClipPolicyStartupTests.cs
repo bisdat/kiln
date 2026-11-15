@@ -55,6 +55,12 @@ public sealed class NoClipPolicyStartupTests
     public void PolicyAndCallbackBelongToKilnAndSurviveFullStartupAndWorldClosing() =>
         Isolated(nameof(NoClipPolicyStartupScenario.ModAndWorldLifetime));
 
+    // dev.29: the game's build hooks install on first use. A rule set asks for building events only when it keeps builds
+    // outside bases, and where they are not produced that one rule is not kept while every other rule still applies.
+    [Fact]
+    public void OnlyKeepBuildsOutsideBasesAsksForBuildingEventsAndTheirAbsenceBreaksNothing() =>
+        Isolated(nameof(NoClipPolicyStartupScenario.BuildEventsOnDemand));
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -177,6 +183,28 @@ public static class NoClipPolicyStartupScenario
             Assert.True(RulesRuntime.Limits.AllowNoClip);
             Assert.Equal("client", NoClip.Set(ada.Entity, true).Reason);
         });
+    }
+
+    public static void BuildEventsOnDemand()
+    {
+        using var kiln = new KilnHarness();
+        kiln.Boot();
+        var ada = kiln.Players.Join("Ada");
+        kiln.Run(() =>
+        {
+            using var plain = rulesapi::Kiln.Rules.Apply(RuleScope.Everyone, new PlayerRules { FlyAnywhere = true });
+            Assert.True(plain.Active);
+        });
+        kiln.Step(3);
+        kiln.Run(() => Assert.False(Events.HasSubscribers<BuildEvent>()));
+        kiln.Run(() =>
+        {
+            // The test kit produces no BuildEvent (gameplay.build unavailable): asking for it must not throw.
+            using var keep = rulesapi::Kiln.Rules.Apply(ada.Entity, new PlayerRules { BuildOutsideBases = true, KeepBuildsOutsideBases = true });
+            Assert.True(keep.Active);
+        });
+        kiln.Step(3);
+        kiln.Run(() => Assert.False(Events.HasSubscribers<BuildEvent>()));
     }
 
     public static void JoinedClient(bool localAllows)

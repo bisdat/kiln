@@ -25,6 +25,7 @@ internal static unsafe class FakeUiTable
 {
     public static UiNative.Table4* Table;
     public static bool MenuOpen;
+    public static string StatusError = "";
     /// <summary>What the next text field call does to its buffer (null: nothing), and the item state it reports after.</summary>
     public static Func<string, string?>? Type;
     public static UiNative.Item Item;
@@ -67,6 +68,8 @@ internal static unsafe class FakeUiTable
         *s = default;
         s->Size = (uint)sizeof(UiNative.Status);
         s->MenuOpen = MenuOpen ? (byte)1 : (byte)0;
+        var error = Encoding.UTF8.GetBytes(StatusError);
+        for (var i = 0; i < Math.Min(error.Length, 127); ++i) s->Error[i] = error[i];
         return 0;
     }
 
@@ -339,6 +342,7 @@ internal static unsafe class FakeUiTable
 
     public static void Free()
     {
+        StatusError = "";
         if (Table != null) NativeMemory.Free(Table);
         Table = null;
     }

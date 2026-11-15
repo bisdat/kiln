@@ -20,6 +20,71 @@ public sealed class BakedModTests
     private static JsonObject Read(string relative) =>
         (JsonObject)JsonNode.Parse(File.ReadAllText(Path.Combine(ModFolder, relative)))!;
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void World_tables_from_OnLoad_are_baked_only_with_explicit_opt_in(bool worldTables)
+    {
+        var folder=Directory.CreateTempSubdirectory("kiln-pool-bake-mod-").FullName;
+        try {
+            var assembly=typeof(PoolBakeMod).Assembly.Location;
+            File.Copy(assembly,Path.Combine(folder,Path.GetFileName(assembly)));
+            // The test assembly is the mod's entry. Its xunit references stay private to its load context.
+            foreach(var file in Directory.GetFiles(Path.GetDirectoryName(assembly)!,"*.dll"))
+                if(!Path.GetFileName(file).StartsWith("Kiln.",StringComparison.Ordinal))File.Copy(file,Path.Combine(folder,Path.GetFileName(file)),true);
+            File.WriteAllText(Path.Combine(folder,"kiln.mod.json"),new JsonObject {
+                ["id"]="pool-bake-runtime",["version"]="1.0.0",["apiVersion"]=Mods.RuntimeApiVersion,["side"]="both",["clients"]="mod",
+                ["entryAssembly"]=Path.GetFileName(assembly),["entryType"]=typeof(PoolBakeMod).FullName
+            }.ToJsonString());
+            var result=Baker.Run(folder,new BakeOptions { WorldTables=worldTables });
+            Assert.Empty(result.Warnings);
+            if(!worldTables) {
+                Assert.False(File.Exists(Path.Combine(folder,"blocks.tables.json")));
+                Assert.Contains(result.Notes,n=>n.Contains("KilnBakeWorldTables=true",StringComparison.Ordinal));
+                return;
+            }
+            var tables=JsonNode.Parse(File.ReadAllText(Path.Combine(folder,"blocks.tables.json")))!;
+            Assert.Equal("Baked Ice",(string?)tables["buildingMaterials"]!["ice"]!["name"]);
+            Assert.Equal("pool-bake-runtime:ice",(string?)tables["buildingMaterialPools"]!["walls"]!["materials"]![0]!["material"]);
+            Assert.Equal("pool-bake-runtime:walls",(string?)tables["blueprints"]!["shape"]!["materialPool"]);
+            Assert.False(Directory.Exists(Path.Combine(folder,"data")));
+            var withoutTables=Baker.Run(folder,new BakeOptions());
+            Assert.Contains("blocks.tables.json",withoutTables.Removed);
+            Assert.False(File.Exists(Path.Combine(folder,"blocks.tables.json")));
+        } finally {Directory.Delete(folder,true);}
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Disabling_the_bake_cleans_world_tables_by_marker(bool authored)
+    {
+        var folder=Directory.CreateTempSubdirectory("kiln-table-clean-").FullName;
+        try {
+            var path=Path.Combine(folder,"blocks.tables.json");
+            File.WriteAllText(path,new JsonObject { ["format"]=1,["comment"]=authored?"author":Baker.Comment,["buildingMaterials"]=new JsonObject() }.ToJsonString());
+            var removed=Kiln.Sdk.BakedOutputs.Clean(folder,"test");
+            Assert.Equal(authored,File.Exists(path));
+            Assert.Equal(authored?Array.Empty<string>():["blocks.tables.json"],removed);
+        } finally {Directory.Delete(folder,true);}
+    }
+
+    [Fact]
+    public void Material_pool_bake_writes_only_the_designated_artifact()
+    {
+        var folder=Directory.CreateTempSubdirectory("kiln-pool-bake-").FullName;
+        WorldTablesNative.ForgetBaked("pool-bake"); WorldTablesNative.Baking=true;
+        try {
+            var report=WorldTablesNative.DefineJson("""{"format":1,"mod":"pool-bake","buildingMaterialPools":{"walls":{"name":"Walls","materials":[{"gameMaterial":"WoodRough"}]}}}""");
+            Assert.Contains("pending",report!);
+            Assert.DoesNotContain("registered",report!);
+            Baker.Put(folder,"blocks.tables.json",Baker.TablesDocument("pool-bake"),"world tables",new BakeResult(),new BakeOptions());
+            Assert.Equal(["blocks.tables.json"],Directory.GetFiles(folder,"*",SearchOption.AllDirectories).Select(Path.GetFileName));
+            var doc=JsonNode.Parse(File.ReadAllText(Path.Combine(folder,"blocks.tables.json")))!;
+            Assert.Equal("WoodRough",(string?)doc["buildingMaterialPools"]!["walls"]!["materials"]![0]!["gameMaterial"]);
+        } finally {WorldTablesNative.Baking=false;WorldTablesNative.ForgetBaked("pool-bake");Directory.Delete(folder,true);}
+    }
+
     [Fact]
     public void TheBuildBakedEachKindIntoTheModFolder()
     {
@@ -400,5 +465,16 @@ public sealed class BootBakeTests
         {
             Directory.Delete(dir, true);
         }
+    }
+}
+
+// Loaded in the ordinary mod ALC by Baker.Run, not invoked directly by the test.
+public sealed class PoolBakeMod:Mod
+{
+    public override void OnLoad()
+    {
+        Blocks.Define("ice",new BuildingMaterialBlock{Name="Baked Ice"});
+        var pool=Blocks.Define("walls",new BuildingMaterialPoolBlock{Name="Baked Walls",Materials=[new(Material:"ice"),new(GameMaterial:"WoodRough")]});
+        Blocks.Define("shape",new BlueprintBlock{Name="Baked Shape",Cells=[["##"]],MaterialPool=pool});
     }
 }

@@ -575,3 +575,305 @@ fn a_settings_metadata_edit_in_kilns_eml_copy_survives_an_update_and_stopping_th
         assert!(retained.contains(&copy) && edited(&copy), "{how:?}: the player's edit is gone: retained {retained:?}, removed {removed:?}");
     }
 }
+
+/// Auto Loot Plus `version` as its author ships it (a dinput8.dll beside `mods/auto-loot-plus`, no extended.mod.json),
+/// in the Library: its EML part.
+fn alp_at(s: &Setup, version: &str) -> LibraryRef {
+    let d = s.t.0.join(format!("pkg/AutoLootPlus {version}"));
+    put(&d, "dinput8.dll", &build_test_dll(&["DirectInput8Create"], b"auto-loot-plus.log\0dinput8-chain.ini\0[Chain]\0mods\\auto-loot-plus\\config.txt"));
+    put(&d, "mods/auto-loot-plus/mod.json", format!(r#"{{"id":"auto-loot-plus","name":"Auto Loot Plus","version":"{version}","capabilities":["patch"]}}"#).as_bytes());
+    put(&d, "mods/auto-loot-plus/src/mod.lua", format!("-- {version}").as_bytes());
+    put(&d, "mods/auto-loot-plus/config.txt", b"radius=15");
+    let r = library::import(&s.dirs, &[d], &mut NoProgress).unwrap();
+    r.imported.iter().chain(&r.existing).find(|x| x.kind == ModKind::Eml).cloned().expect("the EML part")
+}
+
+/// ShroudForge's config as ShroudForge leaves it after a start: `paths.mods` as it writes it, from a canonical path.
+fn sf_config(game: &Path, mods: &str) {
+    put(game, "shroudforge/config/modloader-config.json", serde_json::json!({ "paths": { "mods": mods } }).to_string().as_bytes());
+}
+
+/// The file Kiln writes into its EML copy when the copy has none (ShroudForge's own `ensure_eml_extension`), switched on.
+fn kilns_switch() -> serde_json::Value {
+    serde_json::json!({"$schema": "https://bonsaibauer.github.io/shroudforge/schemas/extended.mod.schema.json",
+        "schemaVersion": 1, "enabled": true, "targets": ["client", "server"], "launcher": "EML", "settings": {}})
+}
+
+/// Nexus report (2026-11-14, Windows, dev.28): Auto Loot Plus and Endless Chests carry a dinput8.dll, so Kiln copies their
+/// EML part to `<game>\mods\<folder>`; ShroudForge, which Kiln hosts for the profile's ShroudForge mods, writes its
+/// `paths.mods` as `\\?\C:\…\mods` at every start, Kiln compared that with `C:\…\mods`, and the copies never got
+/// ShroudForge's switch. The comparison itself is Windows' (winpath::windows_below, tested on every system). Here the
+/// same spellings as a Linux launcher meets them under Proton (the Z: drive, the verbatim prefix, another case): the
+/// copy gets the switch with each, and the folder ShroudForge reads is `mods` in the launcher's note.
+#[test]
+fn a_game_folder_copy_gets_shroudforges_switch_however_shroudforge_spells_its_folder() {
+    let z = |dir: &Path| format!("Z:{}", dir.display().to_string().replace('/', "\\"));
+    let spellings: [(&str, fn(&str) -> String); 4] = [
+        ("relative", |_| "mods".into()),
+        ("z", |game_z| format!(r"{game_z}\mods")),
+        ("verbatim", |game_z| format!(r"\\?\{game_z}\mods")),
+        ("case", |game_z| format!(r"\\?\{}\MODS", game_z.to_uppercase())),
+    ];
+    for (tag, spell) in spellings {
+        let s = setup(&format!("spell-{tag}"));
+        // ShroudForge names its folder from a canonical path, so the folder is there
+        std::fs::create_dir_all(s.game.join("mods")).unwrap();
+        sf_config(&s.game, &spell(&z(&s.game)));
+        assert_eq!(shroudforge::mods_dir(&s.game), s.game.join("mods"), "{tag}");
+        let alp = alp_at(&s, "1.1.8");
+        let p = s.profile(vec![pm(&alp, true)]);
+        let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+        let copy = s.game.join("mods/auto-loot-plus");
+        assert!(rep.placed.contains(&"eml:auto-loot-plus".to_string()) && rep.warnings.is_empty() && rep.retained.is_empty(), "{tag}: {rep:?}");
+        let ext: serde_json::Value = serde_json::from_str(&ext_of(&copy).unwrap_or_else(|| panic!("{tag}: no switch in Kiln's copy"))).unwrap();
+        assert_eq!(ext, kilns_switch(), "{tag}");
+        let note = rep.own_loaders.iter().find(|n| n.loader.kind == ModKind::Eml).expect("ShroudForge runs the EML mods");
+        assert!(note.loader.folder == "mods" && note.copied == ["auto-loot-plus"] && note.off.is_empty() && note.own.is_empty(), "{tag}: {note:?}");
+    }
+}
+
+/// The workaround posted on Nexus for 0.2.0-dev.28 (the game closed, this file put by hand into each copy).
+const HAND_SWITCH: &str = r#"{"schemaVersion":1,"enabled":true,"launcher":"EML"}"#;
+
+/// The EML entries of a report list (the profile's ShroudForge mod is placed beside them).
+fn eml(list: &[String]) -> Vec<&str> {
+    list.iter().map(String::as_str).filter(|t| t.starts_with("eml:")).collect()
+}
+
+/// Every file named extended.mod.json under `dir`.
+fn ext_files_under(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let p = e.path();
+        if p.is_dir() { out.extend(ext_files_under(&p)); } else if p.file_name().is_some_and(|n| n == "extended.mod.json") { out.push(p); }
+    }
+    out
+}
+
+/// A copy dev.28 left without ShroudForge's switch, with the switch the player then made by hand: the fixed build takes it
+/// for the switch Kiln writes itself (it says the same). No error and nothing doubled; Kiln keeps managing the switch;
+/// the file is never the player's setting: an update replaces the copy as usual and puts Kiln's own switch in, and
+/// stopping the mod keeps nothing of it.
+#[test]
+fn a_switch_made_by_hand_in_kilns_copy_is_taken_as_kilns_own() {
+    let s = setup("hand-switch");
+    let alp = alp_at(&s, "1.1.8");
+    // dev.28 on Windows: Kiln's copy without the switch (here: placed while the profile had no ShroudForge mod)
+    let mut p = s.profile(vec![pm(&alp, true)]);
+    p.mods.shroudforge.clear();
+    engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+    let copy = s.game.join("mods/auto-loot-plus");
+    assert!(ext_of(&copy).is_none());
+    put(&copy, "extended.mod.json", HAND_SWITCH.as_bytes());
+    std::fs::write(copy.join("config.txt"), b"radius=42").unwrap(); // the DLL's own setting
+    // the fixed build, ShroudForge hosted again: kept, on, nothing to say
+    p.mods.shroudforge = vec![pm(&s.sf, true)];
+    let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+    assert!(eml(&rep.kept) == ["eml:auto-loot-plus"] && eml(&rep.placed).is_empty() && rep.switched.is_empty(), "{rep:?}");
+    assert!(rep.changed.is_empty() && rep.retained.is_empty() && rep.warnings.is_empty() && rep.own.is_empty() && rep.kept_files.is_empty(), "{rep:?}");
+    assert_eq!(ext_of(&copy).as_deref(), Some(HAND_SWITCH), "it already says what Kiln's file says");
+    let note = rep.own_loaders.iter().find(|n| n.loader.kind == ModKind::Eml).unwrap();
+    assert!(note.copied == ["auto-loot-plus"] && note.off.is_empty() && note.own.is_empty() && note.own_off.is_empty(), "{note:?}");
+    // Kiln manages that switch: off in the game, on again at the next Play (the profile is the switch)
+    shroudforge::set_enabled(&copy, false).unwrap();
+    let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+    assert!(eml(&rep.switched) == ["eml:auto-loot-plus"] && rep.retained.is_empty() && rep.kept_files.is_empty(), "{rep:?}");
+    assert!(shroudforge::read_mod(&copy).unwrap().enabled);
+    // the next version replaces the copy as usual: the DLL's setting goes over, the switch is Kiln's own file
+    p.mods.eml = vec![pm(&alp_at(&s, "1.1.9"), true)];
+    let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+    assert!(eml(&rep.placed) == ["eml:auto-loot-plus"] && rep.retained.is_empty() && rep.changed.is_empty(), "{rep:?}");
+    assert_eq!(std::fs::read(copy.join("src/mod.lua")).unwrap(), b"-- 1.1.9");
+    assert_eq!(std::fs::read(copy.join("config.txt")).unwrap(), b"radius=42");
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&ext_of(&copy).unwrap()).unwrap(), kilns_switch());
+    assert!(!rep.kept_files.iter().any(|k| k.contains("extended.mod.json")), "{rep:?}");
+    // stopping the mod: the copy goes, the DLL's setting waits for it, nothing of the switch is kept
+    p.mods.eml[0].enabled = false;
+    let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+    assert!(eml(&rep.removed) == ["eml:auto-loot-plus"] && !copy.exists() && rep.retained.is_empty(), "{rep:?}");
+    assert!(!rep.kept_files.iter().any(|k| k.contains("extended.mod.json")), "{rep:?}");
+    assert_eq!(ext_files_under(&s.game.join("kiln")), Vec::<PathBuf>::new());
+}
+
+/// The same file when the next Play is also the mod's update: not carried to the new version as a setting of the
+/// player's (it would stand in for Kiln's switch, and for a file the new version ships).
+#[test]
+fn a_switch_made_by_hand_is_not_carried_into_the_next_version() {
+    let s = setup("hand-switch-update");
+    let mut p = s.profile(vec![pm(&alp_at(&s, "1.1.8"), true)]);
+    p.mods.shroudforge.clear();
+    engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+    let copy = s.game.join("mods/auto-loot-plus");
+    put(&copy, "extended.mod.json", HAND_SWITCH.as_bytes());
+    p.mods.shroudforge = vec![pm(&s.sf, true)];
+    p.mods.eml = vec![pm(&alp_at(&s, "1.1.9"), true)];
+    let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+    assert!(eml(&rep.placed) == ["eml:auto-loot-plus"] && rep.retained.is_empty() && rep.warnings.is_empty(), "{rep:?}");
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&ext_of(&copy).unwrap()).unwrap(), kilns_switch());
+    assert!(!rep.kept_files.iter().any(|k| k.contains("extended.mod.json")), "{rep:?}");
+    // and a hand-made file with something of the player's in it (a target they chose) stays the player's, as before
+    let s = setup("hand-switch-targets");
+    let mut p = s.profile(vec![pm(&alp_at(&s, "1.1.8"), true)]);
+    p.mods.shroudforge.clear();
+    engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+    let copy = s.game.join("mods/auto-loot-plus");
+    let theirs = r#"{"schemaVersion":1,"enabled":true,"launcher":"EML","targets":["client"]}"#;
+    put(&copy, "extended.mod.json", theirs.as_bytes());
+    p.mods.shroudforge = vec![pm(&s.sf, true)];
+    p.mods.eml = vec![pm(&alp_at(&s, "1.1.9"), true)];
+    engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+    assert_eq!(ext_of(&copy).as_deref(), Some(theirs));
+}
+
+#[test]
+fn runtime_eml_alone_hosts_and_gets_a_switch() {
+    let s = setup("runtime-alone");
+    let src = legacy(&s.t.0, "quiver", "0.8.2");
+    put(&src, "mod.json", br#"{"id":"quiver","name":"Quiver","version":"0.8.2","capabilities":["patch","runtime-register-dll"]}"#);
+    let r = import(&s.dirs, &src, ModKind::Eml, "quiver");
+    let mut p = s.profile(vec![pm(&r, true)]);
+    p.mods.shroudforge.clear();
+    let view = own_loaders::ProfileView::of_profile(&p).with_library(&s.dirs, &p);
+    assert!(own_loaders::shroudforge_runs_eml(&own_loaders::find(&s.game, Some(&view))));
+    engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+    assert!(shroudforge::read_mod(&s.game.join("mods/quiver")).unwrap().enabled);
+    let install = runtime_install(&s.game);
+    let rendered = profile::render(&s.dirs, &p, &install, kiln_manage::game::PathMode::Native).unwrap();
+    assert_eq!(rendered.eml_runtime, ["quiver"]);
+    assert!(rendered.eml_runtime_blocked.is_empty());
+    assert!(!rendered.mods.eml[0].enabled, "older kiln-eml must never fall back to data-only");
+    assert!(rendered.mods.shroudforge.iter().any(|m| m.id == "quiver" && m.enabled), "older adapter hosting signal");
+    let file_view = own_loaders::ProfileView::of_file(&rendered);
+    assert!(own_loaders::shroudforge_runs_eml(&own_loaders::find(&s.game, Some(&file_view))));
+}
+
+fn runtime_install(game: &Path) -> kiln_manage::game::GameInstall {
+    use kiln_manage::game::*;
+    GameInstall { id: "test".into(), kind: GameKind::Client, path: game.into(), exe: "enshrouded.exe".into(),
+        app_id: kiln_manage::CLIENT_APP_ID, library: None, platform: Platform::Proton, prefix: None,
+        build_id: None, exe_sha256: None, steam_flavor: None, path_mode: PathMode::Native, source: "manual".into() }
+}
+
+#[test]
+fn runtime_eml_missing_component_is_disabled_and_not_placed() {
+    let s = setup("runtime-missing");
+    std::fs::remove_file(s.game.join("kiln/plugins/shroudforge/shroudforge-runtime.dll")).unwrap();
+    let src = legacy(&s.t.0, "quiver", "0.8.2");
+    put(&src, "mod.json", br#"{"id":"quiver","name":"Quiver","version":"0.8.2","capabilities":["patch","runtime"]}"#);
+    put(&src, "native-plugin.ini", b"test");
+    let r = import(&s.dirs, &src, ModKind::Eml, "quiver");
+    let mut p = s.profile(vec![pm(&r, true)]);
+    p.mods.shroudforge.clear();
+    let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+    assert!(!s.game.join("mods/quiver").exists());
+    assert!(rep.warnings.iter().any(|w| w.contains("needs ShroudForge's runtime")), "{rep:?}");
+    let rendered = profile::render(&s.dirs, &p, &runtime_install(&s.game), kiln_manage::game::PathMode::Native).unwrap();
+    assert!(!rendered.mods.eml[0].enabled);
+    assert!(rendered.eml_runtime_blocked["quiver"].contains("component is missing"));
+}
+
+fn runtime_eml(s: &Setup, capability: &str) -> profile::Profile {
+    let src = legacy(&s.t.0, "quiver", "0.8.2");
+    put(&src, "mod.json", format!(r#"{{"id":"quiver","name":"Quiver","version":"0.8.2","capabilities":["patch","{capability}"]}}"#).as_bytes());
+    let r = import(&s.dirs, &src, ModKind::Eml, "quiver");
+    let mut p = s.profile(vec![pm(&r, true)]);
+    p.mods.shroudforge.clear();
+    p
+}
+
+fn assert_runtime_eml_refused<T: std::fmt::Debug>(result: kiln_manage::Result<T>, loader: &str) {
+    let err = result.expect_err("a standalone EML loader prevents ShroudForge from starting the runtime");
+    assert_eq!(err.code, kiln_manage::ErrorCode::Refused, "{err:?}");
+    for text in ["quiver", "ShroudForge", "EML", loader, "Switch those mods off", "remove that loader", "activate"] {
+        assert!(err.message.contains(text), "missing {text:?}: {}", err.message);
+    }
+}
+
+#[test]
+fn runtime_eml_refuses_render_and_placement_with_each_standalone_loader_route() {
+    for capability in ["runtime", "runtime-register-dll"] {
+        for route in ["proxy", "chain", "emf-chain"] {
+            let s = setup(&format!("runtime-refuse-{capability}-{route}"));
+            let p = runtime_eml(&s, capability);
+            let loader = match route {
+                "proxy" => { eml_loader(&s.game); "dbghelp.dll" },
+                "chain" => {
+                    put(&s.game, "kiln/chain/eml.dll", &build_test_dll(&[], b"EML_LOG_FILE_PATH"));
+                    put(&s.game, "kiln/chain.ini", b"[chain]\nchain\\eml.dll\n");
+                    "kiln/chain/eml.dll"
+                },
+                _ => {
+                    put(&s.game, "loaders/eml.dll", &build_test_dll(&[], b"EML_LOG_FILE_PATH"));
+                    put(&s.game, "dinput8-chain.ini", b"[EMF]\nloaders\\eml.dll\n");
+                    "loaders/eml.dll"
+                },
+            };
+            assert_runtime_eml_refused(engine_mods::place(&s.dirs, &p, &s.game), loader);
+            assert_runtime_eml_refused(profile::render(&s.dirs, &p, &runtime_install(&s.game), kiln_manage::game::PathMode::Native), loader);
+            assert!(!s.game.join("mods").exists(), "refuse before placing any engine package");
+            assert!(!s.game.join("kiln/state/library-placements.json").exists());
+        }
+    }
+}
+
+#[test]
+fn runtime_eml_refuses_activation_before_placing_packages() {
+    let s = setup("runtime-refuse-activate");
+    let p = runtime_eml(&s, "runtime-register-dll");
+    let p = profile::save(&s.dirs, &p).unwrap();
+    eml_loader(&s.game);
+    assert_runtime_eml_refused(profile::activate(&s.dirs, &p.id, &runtime_install(&s.game)), "dbghelp.dll");
+    assert!(!s.game.join("mods").exists());
+    assert!(!s.game.join("kiln/profile.json").exists());
+    assert!(!s.game.join("kiln/chain.ini").exists());
+}
+
+#[test]
+fn runtime_eml_refuses_play_if_a_standalone_loader_appears_after_activation() {
+    use kiln_manage::launch::{self, LaunchMode, LaunchRequest};
+    let s = setup("runtime-refuse-play");
+    let p = runtime_eml(&s, "runtime");
+    let p = profile::save(&s.dirs, &p).unwrap();
+    let install = runtime_install(&s.game);
+    profile::activate(&s.dirs, &p.id, &install).unwrap();
+    let before = std::fs::read(s.game.join("kiln/profile.json")).unwrap();
+    std::fs::remove_dir_all(s.game.join("mods")).unwrap();
+    eml_loader(&s.game);
+    let request = LaunchRequest { mode: LaunchMode::Profile, profile_id: None, skip_backup: true };
+    assert_runtime_eml_refused(launch::play_with(&s.dirs, &install, &request, Some(&[]), &|_| panic!("Steam must not be asked")), "dbghelp.dll");
+    assert!(!s.game.join("mods").exists(), "Play must not republish to the standalone loader");
+    assert_eq!(std::fs::read(s.game.join("kiln/profile.json")).unwrap(), before);
+}
+
+#[test]
+fn runtime_eml_refuses_play_once_with_the_loader_conflict_message() {
+    use kiln_manage::launch::{self, LaunchMode, LaunchRequest};
+    let s = setup("runtime-refuse-once");
+    let p = runtime_eml(&s, "runtime-register-dll");
+    let p = profile::save(&s.dirs, &p).unwrap();
+    eml_loader(&s.game);
+    let request = LaunchRequest { mode: LaunchMode::Once, profile_id: Some(p.id), skip_backup: true };
+    assert_runtime_eml_refused(launch::play_with(&s.dirs, &runtime_install(&s.game), &request, Some(&[]), &|_| panic!("Steam must not be asked")), "dbghelp.dll");
+    assert!(!s.game.join("mods").exists());
+    assert!(!s.game.join("kiln/profile.once.json").exists());
+    assert!(!s.game.join("kiln/play-once.ini").exists());
+}
+
+#[test]
+fn patch_only_eml_and_disabled_runtime_eml_keep_standalone_loader_behavior() {
+    let s = setup("runtime-refuse-controls");
+    let mut p = runtime_eml(&s, "runtime");
+    p.mods.eml[0].enabled = false;
+    let patch = import(&s.dirs, &legacy(&s.t.0, "more-gliders", "0.2.2"), ModKind::Eml, "more-gliders");
+    p.mods.eml.push(pm(&patch, true));
+    let p = profile::save(&s.dirs, &p).unwrap();
+    eml_loader(&s.game);
+    profile::activate(&s.dirs, &p.id, &runtime_install(&s.game)).unwrap();
+    assert!(s.game.join("mods/more-gliders/src/mod.lua").is_file());
+    assert!(!s.game.join("mods/quiver").exists());
+    let file = profile::read_game_profile(&s.game).unwrap().unwrap();
+    assert!(file.eml_runtime.is_empty());
+    assert!(file.mods.eml.iter().any(|m| m.id == "more-gliders" && m.enabled));
+    assert!(file.mods.shroudforge.is_empty());
+    assert!(ext_of(&s.game.join("mods/more-gliders")).is_none());
+}

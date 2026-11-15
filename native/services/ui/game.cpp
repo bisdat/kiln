@@ -26,12 +26,12 @@
 
 #include "kiln_hook.hpp"
 #include "menu_rows.h"
-#include "menu_scroll.h"
 #include "menu_site.h"
 #include "ui.h"
 
 namespace kui {
 namespace {
+std::string g_native_mods_status; // stable before menu hooks are installed
 
 // ---- layout (sigdb) ----
 struct Layout {
@@ -265,18 +265,16 @@ std::vector<Entry> visible_of(uint32_t menu) {
     return out;
 }
 
-// The entries one menu draws in this builder call: Kiln's own Mods entry always, the mods' as the mode says
-// (menu_rows.h). AUTO draws every one exactly when this call of the pause menu's builder is wrapped in the scroll view
-// (menu_scroll.cpp decided it at the column's open site, before the Settings entry): one decision per builder call,
-// whatever changed in between.
-std::vector<Entry> entries_of(uint32_t menu) {
-    const bool wrapped = menu == KILN_UI_MENU_PAUSE && scroll_wrapped_now();
-    return menu_rows::pick(visible_of(menu), g_shown.load(std::memory_order_relaxed), is_builtin, wrapped);
-}
+// Can this menu scroll in this process (menu_rows.h's `scrolls`)? Only the pause menu, while menu_scroll.cpp is on.
+// Since dev.29 the pause menu is wrapped by the rows' height (menu_scroll.h), so AUTO draws every mod's row whether
+// this call is wrapped or not: the rows must not change with the wrap, or the height read in one state would not hold
+// in the other (wrapped: every row, too tall; unwrapped: the rule few, fits; and back).
+bool scrolls(uint32_t menu) { return menu == KILN_UI_MENU_PAUSE && scroll_on(); }
 
-// For the Mods page's list (any thread): whether the pause menu would be wrapped with these rows.
-bool scrolls(uint32_t menu, uint32_t mode, size_t rows) {
-    return menu == KILN_UI_MENU_PAUSE && scroll_on() && menu_scroll::wants(mode, rows);
+// The entries one menu draws in this builder call: Kiln's own Mods entry always, the mods' as the mode says
+// (menu_rows.h).
+std::vector<Entry> entries_of(uint32_t menu) {
+    return menu_rows::pick(visible_of(menu), g_shown.load(std::memory_order_relaxed), is_builtin, scrolls(menu));
 }
 
 void activated(KilnHandle h) {
@@ -344,16 +342,24 @@ bool __fastcall hk_main_entry(void* state, const MainDesc* d) {
         page_main_menu_drawn(state);  // a menu-key request for the main-menu page is served here (menu_page.cpp)
         for (const Entry& e : entries_of(KILN_UI_MENU_MAIN)) {
             MainDesc c = *d;  // the Settings entry's option bytes: same style, same behaviour
-            c.text = GameText{e.text->c_str(), e.text->size(), e.fnv};
+            // Full page contents require ImGui. Keep the same native row/slot and
+            // toggle its status caption, never an empty Credits page or extra row.
+            // With the drawing on, the row's own text and its hash as they were made (nothing changes for a normal start).
+            if (!overlay_drawing_on() && g_menu_open.load() && e.handle == g_builtin[0])
+                c.text = GameText{g_native_mods_status.c_str(), g_native_mods_status.size(),
+                                  fnv64(g_native_mods_status.data(), g_native_mods_status.size())};
+            else
+                c.text = GameText{e.text->c_str(), e.text->size(), e.fnv};
             g_draws.fetch_add(1, std::memory_order_relaxed);
             if (!g_main_hook.call<bool>(state, &c)) continue;
             // Kiln's own MODS entry: the game's own page switch, here as the game does for its entries (menu_page.cpp)
-            if (e.handle == g_builtin[0] && page_open_from_entry(state)) {
+            if (e.handle == g_builtin[0] && overlay_drawing_on() && page_open_from_entry(state)) {
                 g_clicks.fetch_add(1, std::memory_order_relaxed);
                 continue;
             }
             activated(e.handle);
         }
+
     }
     return g_main_hook.call<bool>(state, d);
 }
@@ -361,14 +367,25 @@ bool __fastcall hk_main_entry(void* state, const MainDesc* d) {
 bool __fastcall hk_sys_entry(const GameText* t, uint8_t p2, uint8_t attention) {
     const uintptr_t ret = g_sys_hook.caller();  // the game's call site, read before the original
     if (t && ret == L.sys_ret) {
+        uint32_t rows = 0;
         for (const Entry& e : entries_of(KILN_UI_MENU_PAUSE)) {
-            const GameText c{e.text->c_str(), e.text->size(), e.fnv};
+            ++rows;
+            const bool status_row = !overlay_drawing_on() && g_menu_open.load() && e.handle == g_builtin[1];
+            const GameText c = status_row
+                ? GameText{g_native_mods_status.c_str(), g_native_mods_status.size(),
+                           fnv64(g_native_mods_status.data(), g_native_mods_status.size())}
+                : GameText{e.text->c_str(), e.text->size(), e.fnv};
             g_draws.fetch_add(1, std::memory_order_relaxed);
             if (g_sys_hook.call<bool>(&c, p2, static_cast<uint8_t>((e.flags & KILN_UI_ENTRY_ATTENTION) ? 1 : 0)))
                 activated(e.handle);
         }
+        scroll_rows_drawn(rows);  // Kiln's rows count among the pause menu's entries (menu_scroll.cpp)
     }
-    return g_sys_hook.call<bool>(t, p2, attention);
+    // the scrolling pause menu's height probes: before the menu's first entry and after its last (menu_scroll.cpp)
+    scroll_entry_next();
+    const bool chosen = g_sys_hook.call<bool>(t, p2, attention);
+    scroll_entry_drawn(chosen);
+    return chosen;
 }
 
 void* __fastcall hk_craft(uint64_t packed, int32_t select) {
@@ -385,6 +402,7 @@ void* __fastcall hk_craft(uint64_t packed, int32_t select) {
 }
 
 void after_frame(uintptr_t sys10) {
+    if (!overlay_drawing_on()) input_poll_window();
     ++g_frame_no;
     g_frames.store(g_frame_no, std::memory_order_relaxed);
     page_after_frame(sys10, g_frame_no);
@@ -486,7 +504,7 @@ void KILN_CALL on_craftmenu(const KilnCraftMenuInfo* info, void*) {
 // Kiln's own "Mods" entry in both menus: opens the Kiln menu (works without the managed host). In the main menu with
 // feature ui.menu_page and a host, the entry hook opens the game page instead and this is not called.
 void KILN_CALL on_builtin(KilnHandle, void*) {
-    g_menu_open = true;
+    g_menu_open = overlay_drawing_on() ? true : !g_menu_open.load();
     logf(KILN_LOG_DEBUG, "ui: Kiln menu opened from the game's menu");
 }
 KilnResult game_menu_add_impl(KilnOwner owner, uint32_t menu, int32_t order, KilnStr text, KilnUiMenuFn fn, void* user, KilnHandle* out);
@@ -505,6 +523,7 @@ bool feat(const char* n) { return g_api->feature(KilnStr{n, std::strlen(n)}); }
 }  // namespace
 
 bool game_install() {
+    if (!overlay_drawing_on()) g_native_mods_status = "Mods: " + g_overlay_reason;
     uintptr_t frame_fn = 0, main_fn = 0, sys_fn = 0, craft_fn = 0;
     L.screens = feat("ui.screens") && sym("ui/GameUiFrame", &frame_fn) && cst("ui/sys.data", &L.sys_data) &&
                 cst("ui/state.ui_state", &L.state_ui) && cst("ui/state.play", &L.state_play) &&
@@ -694,7 +713,7 @@ uint32_t game_menu_entries(KilnUiMenuEntry* out, uint32_t capacity) {
         o.text_len = e.text ? static_cast<uint32_t>(e.text->size()) : 0;
         o.flags = e.flags;
         o.order = e.order;
-        o.drawn = visible(e) && e.menu < 3 && menu_rows::draws_mods(mode, shown[e.menu], scrolls(e.menu, mode, shown[e.menu])) ? 1u : 0u;
+        o.drawn = visible(e) && e.menu < 3 && menu_rows::draws_mods(mode, shown[e.menu], scrolls(e.menu)) ? 1u : 0u;
     }
     return static_cast<uint32_t>(mods.size());
 }

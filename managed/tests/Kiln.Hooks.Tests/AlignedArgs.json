@@ -1,0 +1,45 @@
+{
+  "structs": {
+    "Aligned12": {
+      "size": 12,
+      "align": 16
+    },
+    "Aligned16": {
+      "size": 16,
+      "align": 16
+    },
+    "Aligned24": {
+      "size": 24,
+      "align": 16
+    }
+  },
+  "sigs": {
+    "alignment/F12": {
+      "args": [
+        {
+          "name": "value",
+          "type": "Aligned12"
+        }
+      ],
+      "invoke": "any"
+    },
+    "alignment/F16": {
+      "args": [
+        {
+          "name": "value",
+          "type": "Aligned16"
+        }
+      ],
+      "invoke": "any"
+    },
+    "alignment/F24": {
+      "args": [
+        {
+          "name": "value",
+          "type": "Aligned24"
+        }
+      ],
+      "invoke": "any"
+    }
+  }
+}

@@ -24,7 +24,7 @@ pub struct LibraryRef {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportSource {
-    /// "file" | "folder" | "modpack"
+    /// "file" | "folder" | "modpack" | "replaced-dll" (from: JSON of the original release LibraryRef)
     #[serde(rename = "type")]
     pub kind: String,
     pub from: String,
@@ -51,6 +51,10 @@ pub struct LibraryVersion {
     /// ([`changed_on_disk`]).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub changed: bool,
+    /// (dev.29) An earlier version an update replaced, kept for a roll back ([`crate::kept`]): when, by which version,
+    /// and the settings kept with it. Kept versions come after the others in [`LibraryEntry::versions`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kept: Option<crate::kept::KeptInfo>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -746,8 +750,7 @@ fn only_settings(dir: &Path) -> bool {
         let low = e.file_name().to_string_lossy().to_ascii_lowercase();
         if low.starts_with('.') { continue; }
         if MOD_MANIFESTS.contains(&low.as_str()) { return false; }
-        let ext = low.rsplit_once('.').map(|(_, x)| x).unwrap_or("");
-        if !e.path().is_file() || !matches!(ext, "txt" | "ini" | "cfg" | "json" | "toml" | "yaml" | "yml") { return false; }
+        if !e.path().is_file() || !crate::settings_files::is_settings_extension(&low) { return false; }
         any = true;
     }
     any
@@ -1099,17 +1102,19 @@ pub fn commit_folder(dirs: &DataDirs, prepared: &Path, rec: ImportRecord, report
         // An entry imported before Kiln knew its package's DLL reads it in the game folder learns that now (the same
         // archive dropped again); the content and everything else in the record stay.
         if rec.game_folder.is_some() && old.game_folder.is_none() {
-            crate::util::write_json_atomic(&record_path(&folder), &ImportRecord { game_folder: rec.game_folder.clone(), ..old })?;
+            crate::durable::flush_contents(&folder)?;
+            crate::durable::json(&record_path(&folder), &ImportRecord { game_folder: rec.game_folder.clone(), ..old }, &[folder.clone()])?;
         }
         report.existing.push(r);
         return Ok(());
     }
     if let Some(p) = folder.parent() {
-        std::fs::create_dir_all(p).map_err(io(p, "creating"))?;
+        crate::durable::ensure_dir(p)?;
     }
     let _ = std::fs::remove_dir_all(&folder); // a half import without its record
-    std::fs::rename(prepared, &folder).map_err(io(&folder, "moving into the library"))?;
-    crate::util::write_json_atomic(&record_path(&folder), &rec)?;
+    crate::durable::flush_contents(prepared)?;
+    crate::durable::rename_dir(prepared, &folder)?;
+    crate::durable::json(&record_path(&folder), &rec, &[folder.clone()])?;
     report.imported.push(r);
     Ok(())
 }
@@ -1917,6 +1922,8 @@ pub fn list(dirs: &DataDirs, kind: Option<ModKind>) -> Result<Vec<LibraryEntry>>
         None => ModKind::ALL.to_vec(),
     };
     let mut out: Vec<LibraryEntry> = Vec::new();
+    // the earlier versions kept for a roll back (crate::kept): listed after the others, so nothing picks one by default
+    let kept = crate::kept::info(dirs);
     for k in kinds {
         let mut by_id: std::collections::BTreeMap<String, Vec<(PathBuf, ImportRecord)>> = Default::default();
         for (folder, rec) in records(dirs, k) {
@@ -1928,29 +1935,29 @@ pub fn list(dirs: &DataDirs, kind: Option<ModKind>) -> Result<Vec<LibraryEntry>>
             by_id.entry(rec.id.clone()).or_default().push((folder, rec));
         }
         for (id, mut versions) in by_id {
-            versions.sort_by(|a, b| crate::bundle::compare_versions(&b.1.version, &a.1.version).then_with(|| b.1.imported.cmp(&a.1.imported)));
+            let is_kept = |rec: &ImportRecord| kept.contains_key(&crate::kept::info_key(k, &id, &rec.hash));
+            versions.sort_by(|a, b| is_kept(&a.1).cmp(&is_kept(&b.1))
+                .then_with(|| crate::bundle::compare_versions(&b.1.version, &a.1.version)).then_with(|| b.1.imported.cmp(&a.1.imported)));
             let name = versions.first().and_then(|v| v.1.name.clone()).unwrap_or_else(|| id.clone());
-            out.push(LibraryEntry {
-                kind: k,
-                id,
-                name,
-                versions: versions
-                    .into_iter()
-                    .map(|(folder, r)| LibraryVersion {
-                        changed: changed_on_disk(&folder, &r),
-                        manifest: read_manifest_json(k, &folder),
-                        manifest_id: r.manifest_id,
-                        version: r.version,
-                        hash: r.hash,
-                        folder,
-                        imported: r.imported,
-                        side: r.side,
-                        clients: r.clients,
-                        size: r.size,
-                        source: r.source,
-                    })
-                    .collect(),
-            });
+            let kept_of = |hash: &str| kept.get(&crate::kept::info_key(k, &id, hash)).cloned();
+            let versions = versions
+                .into_iter()
+                .map(|(folder, r)| LibraryVersion {
+                    kept: kept_of(&r.hash),
+                    changed: changed_on_disk(&folder, &r),
+                    manifest: read_manifest_json(k, &folder),
+                    manifest_id: r.manifest_id,
+                    version: r.version,
+                    hash: r.hash,
+                    folder,
+                    imported: r.imported,
+                    side: r.side,
+                    clients: r.clients,
+                    size: r.size,
+                    source: r.source,
+                })
+                .collect();
+            out.push(LibraryEntry { kind: k, id, name, versions });
         }
     }
     Ok(out)
@@ -1962,6 +1969,101 @@ pub fn record(dirs: &DataDirs, r: &LibraryRef) -> Result<ImportRecord> {
     crate::util::read_json::<ImportRecord>(&record_path(&folder))?
         .filter(|rec| rec.format == 1 && rec.kind == r.kind && rec.id == r.id && rec.version == r.version && rec.hash == r.hash)
         .ok_or_else(|| Error::not_found(format!("{} {} {} is not in the library", r.kind.as_str(), r.id, r.version)))
+}
+
+/// The real release a local DLL replacement was based on. Local builds keep the release's version line,
+/// but must never acquire a provider receipt claiming these patched bytes came from that provider.
+pub(crate) fn replacement_base(source: Option<&ImportSource>) -> Option<LibraryRef> {
+    source.filter(|s| s.kind == "replaced-dll").and_then(|s| serde_json::from_str(&s.from).ok())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplacedDll {
+    pub entry: LibraryRef,
+    pub notices: Vec<String>,
+}
+
+/// Replace one DLL of a native Library mod, retaining its identity and profile position. `confirmed` acknowledges
+/// the filename/kind warnings returned with `detail.replaceDllConfirmation`. Uses the ordinary kept transaction.
+pub fn replace_dll(dirs: &DataDirs, profile_id: &str, from: &LibraryRef, file: &Path, confirmed: bool) -> Result<ReplacedDll> {
+    let _one = crate::quick::lock(dirs)?;
+    if from.kind != ModKind::Native {
+        return Err(Error::invalid("Replace DLL is available for native DLL mods only."));
+    }
+    crate::quick::validate_import_path(file)?;
+    if !file.is_file() || !file.extension().is_some_and(|x| x.eq_ignore_ascii_case("dll")) {
+        return Err(Error::invalid("Choose one .dll file."));
+    }
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    std::fs::File::open(file)?.take(crate::quick::MAX_IMPORT_FILE + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > crate::quick::MAX_IMPORT_FILE { return Err(Error::invalid("DLL is too large (limit: 512 MiB).")); }
+    if !crate::pe::is_pe64_dll(&bytes) { return Err(Error::invalid("Choose a 64-bit Windows DLL.")); }
+    let folder = path_of(dirs, from)?;
+    crate::quick::validate_import_path(&folder)?;
+    let mut rec = record(dirs, from)?;
+    if recorded_hash(&folder, &rec)? != from.hash { return Err(changed_error(from, &folder)); }
+    let mut dlls = Vec::new();
+    let mut pending = vec![folder.clone()];
+    while let Some(dir) = pending.pop() {
+        for e in std::fs::read_dir(dir)? {
+            let e = e?;
+            if e.file_name().to_string_lossy().starts_with('.') { continue; }
+            if e.file_type()?.is_dir() { pending.push(e.path()); }
+            else if e.path().extension().is_some_and(|x| x.eq_ignore_ascii_case("dll")) { dlls.push(e.path()); }
+        }
+    }
+    dlls.sort();
+    let name = file_name(file);
+    let matching: Vec<_> = dlls.iter().filter(|p| file_name(p).eq_ignore_ascii_case(&name)).collect();
+    let target = match matching.as_slice() {
+        [one] => (*one).clone(),
+        [] if dlls.len() == 1 => dlls[0].clone(),
+        _ => return Err(Error::invalid(format!("Choose a DLL matching exactly one file in this package: {}.",
+            dlls.iter().map(|p| p.strip_prefix(&folder).unwrap().display().to_string()).collect::<Vec<_>>().join(", ")))),
+    };
+    let rel = target.strip_prefix(&folder).map_err(|_| Error::invalid("DLL escapes its package."))?;
+    let mut warnings = Vec::new();
+    let old_name = file_name(&target);
+    if !old_name.eq_ignore_ascii_case(&name) {
+        warnings.push(format!("Replace `{old_name}` with `{name}`? The file keeps the name `{old_name}`."));
+    }
+    // Inspect the replacement under its final name as detection also uses proxy filenames.
+    let tmp = TempDir::new(&dirs.library(), "replace-dll")?;
+    let size = copy_mod_tree(&folder, tmp.path())?;
+    let old_size = std::fs::metadata(tmp.path().join(rel))?.len();
+    std::fs::write(tmp.path().join(rel), &bytes)?;
+    crate::quick::validate_import_path(tmp.path())?;
+    let old = detect_dll(&target);
+    let new = detect_dll(&tmp.path().join(rel));
+    if old.kind != new.kind || old.engine != new.engine {
+        warnings.push(format!("This DLL looks like a different kind of component: {} Previously: {} Confirm replacement?", new.reason, old.reason));
+    }
+    if !warnings.is_empty() && !confirmed {
+        let mut e = Error::new(ErrorCode::Refused, warnings.join(" "));
+        e.detail = Some(serde_json::json!({"replaceDllConfirmation": true}));
+        return Err(e);
+    }
+    let mut p = crate::profile::get(dirs, profile_id)?;
+    let i = p.mods.list(from.kind).iter().position(|m| m.id == from.id && m.version == from.version && m.hash == from.hash)
+        .ok_or_else(|| Error::new(ErrorCode::Conflict, "The mod changed in this profile. Reload it first."))?;
+    let before = p.mods.list(from.kind)[i].clone();
+    rec.source = Some(ImportSource { kind: "replaced-dll".into(), from: serde_json::to_string(&replacement_base(rec.source.as_ref()).unwrap_or_else(|| from.clone()))? });
+    rec.imported = crate::util::now_rfc3339();
+    rec.hash = recorded_hash(tmp.path(), &rec)?;
+    rec.size = size - old_size + bytes.len() as u64;
+    if rec.hash == from.hash { return Ok(ReplacedDll { entry: from.clone(), notices: vec!["The DLL is unchanged.".into()] }); }
+    let next = LibraryRef { hash: rec.hash.clone(), ..from.clone() };
+    commit_folder(dirs, tmp.path(), rec, &mut ImportReport::default())?;
+    let after = crate::profile::ProfileMod { hash: next.hash.clone(), ..before.clone() };
+    p.mods.list_mut(from.kind)[i] = after.clone();
+    let kept = crate::kept::prepare(dirs, &p, None, &[(from.kind, before, after)]);
+    if let Some(why) = kept.failure() { return Err(Error::new(ErrorCode::Io, format!("DLL not replaced in profile: {why}"))); }
+    if let Err(e) = crate::profile::save(dirs, &p) { kept.abort(); return Err(e); }
+    let mut notices = kept.commit();
+    if crate::kept::keep_count(dirs) == 0 { notices.push("No earlier versions are kept for rollback in Settings; the old build remains in the Library.".into()); }
+    Ok(ReplacedDll { entry: next, notices })
 }
 
 /// What lists library versions: the launcher's profiles, and the profile files the known games hold now (the game
@@ -1997,6 +2099,19 @@ impl Usage {
         for e in std::fs::read_dir(dirs.profiles()).into_iter().flatten().flatten() {
             let Ok(Some(p)) = crate::util::read_json::<crate::profile::Profile>(&e.path().join("meta.json")) else { continue };
             profiles.push((p.id, p.mods));
+        }
+        // A profile offered for restoration still needs its Library packages,
+        // including switched-off entries. Pin until this snapshot is replaced.
+        let saved = dirs.root.join("snapshots/before-beta/profiles");
+        if crate::engine_mods::refuse_symlink_path(&dirs.root, &saved).is_ok() {
+            for e in std::fs::read_dir(&saved).into_iter().flatten().flatten() {
+                let meta = e.path().join("meta.json");
+                if !e.file_type().is_ok_and(|t| t.is_dir())
+                    || crate::engine_mods::refuse_symlink_path(&dirs.root, &meta).is_err() { continue; }
+                if let Ok(Some(p)) = crate::util::read_json::<crate::profile::Profile>(&meta) {
+                    profiles.push((format!("{} (before beta)", p.id), p.mods));
+                }
+            }
         }
         let mut games = Vec::new();
         let now = crate::util::now_unix();
@@ -2072,18 +2187,19 @@ impl ActiveFile {
     }
 }
 
-/// Profiles (their ids) that list this entry, and the games whose active or play-once profile file points at it
+/// Profiles (their ids, including `<id> (before beta)` for saved profiles) that list this entry, and the games whose active or play-once profile file points at it
 /// (`<profile> (active in <game folder>)`): the game reads those files, whatever the profile says now.
 pub fn users(dirs: &DataDirs, r: &LibraryRef) -> Vec<String> {
     Usage::read(dirs).users(dirs, r)
 }
 
-/// Every version of the library that no profile and no known game's profile file lists: what "Clean up" may remove.
+/// Every version of the library that no live or saved pre-beta profile and no known game's profile file lists: what "Clean up" may remove.
+/// An earlier version kept for a roll back ([`crate::kept`]) is not: it is removed on its own (the Library's kept list).
 pub fn unused(dirs: &DataDirs) -> Result<Vec<LibraryRef>> {
     let usage = Usage::read(dirs);
     let mut out = Vec::new();
     for e in list(dirs, None)? {
-        for v in e.versions {
+        for v in e.versions.into_iter().filter(|v| v.kept.is_none()) {
             let r = LibraryRef { kind: e.kind, id: e.id.clone(), version: v.version, hash: v.hash };
             if usage.users(dirs, &r).is_empty() {
                 out.push(r);
@@ -2243,6 +2359,8 @@ impl Guard {
             return Err(io(folder, "removing the record of")(e));
         }
         let _ = std::fs::remove_file(taken_over_path(folder));
+        // no longer kept for a roll back: its settings copy goes too
+        crate::kept::forget(dirs, r);
         let rest = std::fs::remove_dir_all(&aside).err().map(|_| aside);
         if let Some(parent) = folder.parent() {
             let _ = std::fs::remove_dir(parent);

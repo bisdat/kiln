@@ -157,6 +157,15 @@ class LinuxReleaseTests(unittest.TestCase):
         self.assertTrue(self.updater_check(marker + "frostdev.io/kiln/updates".encode("utf-16le")))
         self.assertTrue(self.updater_check(b"\x7fELF" + release.BUILD_MARKERS["direct"], absent=False))
 
+    def test_updater_scan_knows_the_beta_feed(self):
+        # dev.29: the beta channel's GitHub feed is one of the self-update's strings: never in the Nexus build, and a
+        # direct build without it is missing part of its self-update
+        marker = b"\x7fELF" + bytes(60) + release.BUILD_MARKERS["nexus"]
+        problems = self.updater_check(marker + b"/releases/download/updates-beta/latest.json")
+        self.assertTrue(any("the GitHub beta update feed" in p for p in problems), problems)
+        problems = self.updater_check(b"\x7fELF" + release.BUILD_MARKERS["direct"], absent=False)
+        self.assertTrue(any("lacks the GitHub beta update feed" in p for p in problems), problems)
+
     def test_nexus_upload_gate_rejects_a_direct_build_even_in_nexus_folder(self):
         spec = importlib.util.spec_from_file_location("nexus_gate", HERE / "nexus.py")
         nexus = importlib.util.module_from_spec(spec)
@@ -484,7 +493,7 @@ if sys.argv[1] == "run":
         # Exercise release.sh's actual Linux wrapper through run.sh and a fake Docker client.
         # No release, signing environment, image build or provider request is involved.
         env = self.mock_docker()
-        env.update(KILN_NEXUS_ENABLED="0", KILN_NEXUS_OAUTH_CLIENT_ID="unit-test-registration",
+        env.update(KILN_LAUNCHER_BASE_RELEASE="0.2.0-dev.28", KILN_NEXUS_ENABLED="0", KILN_NEXUS_OAUTH_CLIENT_ID="unit-test-registration",
                    KILN_NEXUS_OAUTH_REDIRECT_URI="http://127.0.0.1:8089/callback",
                    KILN_LINUX_IMAGE="sha256:" + "a" * 64)
         wrapper = re.search(r"^  linux\(\) \{\n.*?^  \}", (HERE / "release.sh").read_text(), re.M | re.S)
@@ -499,6 +508,7 @@ if sys.argv[1] == "run":
         self.assertEqual(r.returncode, 0, r.stderr)
         run = next(json.loads(line) for line in self.calls.read_text().splitlines() if json.loads(line)[0] == "run")
         forwarded = [run[i + 1] for i, arg in enumerate(run[:-1]) if arg == "-e"]
+        self.assertIn("KILN_LAUNCHER_BASE_RELEASE", forwarded)
         self.assertIn("KILN_NEXUS_ENABLED", forwarded)
         self.assertIn("KILN_NEXUS_OAUTH_CLIENT_ID", forwarded)
         self.assertIn("KILN_NEXUS_OAUTH_REDIRECT_URI", forwarded)

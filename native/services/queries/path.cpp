@@ -220,7 +220,7 @@ void path_resolve() {
     QueryPerformanceFrequency(&f);
     g_qpc_ns = 1e9 / static_cast<double>(f.QuadPart);
     const char* why = nullptr;
-    if (!g_api->feature || !g_api->feature(KQP_STR(kPathFeature))) why = "the feature did not resolve on this game build (or is held)";
+    if (!g_api->feature || !g_api->feature(KQP_STR(kPathFeature))) why = "the feature is unavailable on this game build";
     else if (!g_grid_ok.load()) why = "the voxel grid it checks endpoints against did not resolve";
     else if (g_api->symbol(KQP_STR("queries/PathQueryDefaults"), &g_defaults) != KILN_OK || g_api->symbol(KQP_STR("queries/CreatePathQuery"), &g_create) != KILN_OK ||
              g_api->symbol(KQP_STR("queries/GetPathQueryResult"), &g_result) != KILN_OK || g_api->symbol(KQP_STR("queries/DestroyPathQuery"), &g_destroy) != KILN_OK ||

@@ -334,6 +334,7 @@ void probe_owners() {
             drops_drop_owner(o);
 #if KC_GAMEDATA
             gd_owner_gone(o);
+            gd_owner_revoked(o);
 #endif
             std::string err;
             store_flush(&err);
@@ -918,11 +919,16 @@ KilnResult KILN_CALL t_pack_mods(KilnStr text) {
         }
         if (s.find('[') == std::string::npos) return KILN_ERR_INVALID_ARGUMENT;
     }
-    std::lock_guard lock(g_filter_mu);
-    if (have == g_have_filter && ids == g_filter) return KILN_OK;
-    g_have_filter = have;
-    g_filter = std::move(ids);
-    if (g_ready.load()) g_filter_changed.store(true);
+    {
+        std::lock_guard lock(g_filter_mu);
+        if (have == g_have_filter && ids == g_filter) return KILN_OK;
+        g_have_filter = have;
+        g_filter = ids;
+        if (g_ready.load()) g_filter_changed.store(true);
+    }
+#if KC_GAMEDATA
+    if (have) gd::pending_mods_changed(ids);
+#endif
     return KILN_OK;
 }
 
@@ -957,7 +963,11 @@ KilnResult KILN_CALL t_definitions(char* buf, size_t cap, size_t* len) {
 
 KilnResult KILN_CALL t_label_owner(KilnOwner owner, KilnStr label) {
     if (!label.ptr || !label.len) return KILN_ERR_INVALID_ARGUMENT;
-    set_owner_label(owner, str(label));
+    const std::string name = str(label);
+    set_owner_label(owner, name);
+#if KC_GAMEDATA
+    if (name.rfind("mod ", 0) == 0) gd::pending_owner_loaded(owner, name.substr(4));
+#endif
     return KILN_OK;
 }
 

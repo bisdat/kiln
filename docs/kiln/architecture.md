@@ -1,5 +1,8 @@
 # Kiln architecture
 
+The client gate list is empty in 0.2.0-dev.29: every capability held in dev.28 is open, subject to its normal dependencies and side restrictions. The remaining 20 have not been confirmed in a real game; the [client pass](client-pass.md) records that confirmation work.
+
+
 ```
 enshrouded_server.exe / enshrouded.exe
  └─ imports DINPUT8 ──► <game>/dinput8.dll              native/proxy  (forwards to system dinput8)
@@ -39,7 +42,7 @@ enshrouded_server.exe / enshrouded.exe
    **The boot phase** (since 0.2.0-dev.28; [modding/onboot.md](modding/onboot.md), [services/boot.md](services/boot.md))
    sits inside this step. kiln.boot decides once, before the service DLLs load, whether this process has a boot
    generation (hooks and .NET on, an enabled mod of this side with `"boot"`, `mods.boot` available; on a game client
-   also `mods.boot.client`, held in this build). If it does, the seven collectors (assets, worldtables, content,
+   also `mods.boot.client`). If it does, the seven collectors (assets, worldtables, content,
    skills, knowledge, vfx, patches) register in `kiln_plugin_main` or `on_ready` and keep their definitions back
    instead of loading them there; registration closes once every `on_ready` ran. Inside the .NET start, `Kiln.Host`
    runs each boot mod's `OnBoot` on a throwaway copy, lowers what it staged, and commits: kiln.boot prepares every
@@ -70,7 +73,10 @@ per step. Per step:
 - **Post** (only while someone subscribed): `WaitWorldJobs(world)`, then Post subscribers. The server's SimStep
   returns with grid and range-query jobs still running; touching entities before the wait races them (EMF notes).
 
-Kiln writes `kiln/logs/tick-stats.jsonl` every 60 s: step time, Kiln's own Pre/Post time, interval, subscribers.
+Kiln writes `kiln/logs/tick-stats.jsonl` every 60 s: step time, Kiln's own Pre/Post time, interval, subscribers. Since
+0.2.0-dev.29 each line also carries `post_parts` (the game's job wait, the window services' end and each Post
+subscriber by owner), `pre_parts` (the eight slowest Pre subscribers) and `worst` (the window's slowest step taken
+apart); a support report keeps the last 1 MiB of the file.
 
 ## C ABI (`native/core/abi/kiln_api.h`, ABI 1)
 One append-only table: log, build info, features, paths, owners, tick subscribe/post, game-log mirror, and an unstable

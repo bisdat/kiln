@@ -1,0 +1,31 @@
+{
+  "raw": "{\n  \"id\": \"writer\", \"version\": \"1.0.0\", \"apiVersion\": \"0.2\", \"entryAssembly\": \"Writer.dll\",\n  // the component types the mod writes through kiln.world (Kiln.Sdk adds what the code names)\n  \"writes\": [\"Fuel\"]\n}",
+  "expect": {
+    "ok": true,
+    "manifest": {
+      "id": "writer",
+      "name": "writer",
+      "version": "1.0.0",
+      "parsedVersion": "1.0.0",
+      "apiVersion": "0.2",
+      "entryAssembly": "Writer.dll",
+      "entryType": null,
+      "side": "server",
+      "clients": "none",
+      "authors": [],
+      "description": "",
+      "license": null,
+      "url": null,
+      "dependencies": [],
+      "loadBefore": [],
+      "loadAfter": [],
+      "incompatible": [],
+      "features": [],
+      "exports": [],
+      "advanced": false,
+      "tests": null,
+      "kilnBuild": null,
+      "warnings": []
+    }
+  }
+}

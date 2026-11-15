@@ -71,6 +71,19 @@ public static partial class Blocks
     /// see <see cref="TableBlockHandle{T}.Status"/>. One in a data file's "buildingMaterials" section is there at once.</summary>
     public static TableBlockHandle<BuildingMaterialBlock> Define(string name, BuildingMaterialBlock block) => (TableBlockHandle<BuildingMaterialBlock>)Define<BuildingMaterialBlock>(name, block);
 
+    /// <summary>Returns whether a pool is in the served boot table, durably accepted for the next start, or refused.
+    /// RequireRegistered never writes pending storage. AcceptedNextStart consumes zero current entries and is rechecked at boot.</summary>
+    [TickThreadOnly,RequiresCapability("worldtables.material_pools")]
+#pragma warning disable KILNX028
+    public static DefinitionRegistrationResult Define(string name,BuildingMaterialPoolBlock block,DefinitionRegistrationOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(block);ArgumentNullException.ThrowIfNull(options);
+        if(BootFrame.Current is {} boot)throw new InvalidOperationException($"PhaseClosed: Blocks.Define is refused inside {boot.ModId}'s OnBoot; stage the block instead");
+        Game.AssertTickThread();
+        return Compiler.DefinePoolResult(CallerMod(),name,block,options);
+    }
+#pragma warning restore KILNX028
+
     /// <summary>Defines a new terrain material as the calling mod's. The game reads its material tables once at start, so one new to this game is there from the next start;
     /// see <see cref="TableBlockHandle{T}.Status"/>. One in a data file's "terrainMaterials" section is there at once.</summary>
     public static TableBlockHandle<TerrainMaterialBlock> Define(string name, TerrainMaterialBlock block) => (TableBlockHandle<TerrainMaterialBlock>)Define<TerrainMaterialBlock>(name, block);
@@ -165,6 +178,75 @@ public static partial class Blocks
         BlocksStartup.ReadData(m);
         return m;
     }
+
+    // ---- a VFX defined with an answer (since 0.2.0-dev.29; package 17a S2, chapter 17.1 §5 and I1) ----------------------------
+
+    /// <summary>
+    /// Client: defines a VFX as the calling mod's and says what became of it: registered in this process, accepted for the next
+    /// start, or refused with a code and a reason (the two-argument <see cref="Define(string, VfxBlock)"/> gives a handle whose
+    /// <see cref="VfxBlockHandle.Status"/> says less). The game lists its VFX once, before any mod loads, so a VFX registers in this
+    /// process only when this start built that block with this content (from the mod's blocks files, its baked file, or a
+    /// definition stored at an earlier start): <see cref="DefinitionRegistrationState.Registered"/>, 1 slot, once kiln.vfx has read
+    /// the game's VFX table (at the first update of a client world) and found it there with the bytes Kiln served.
+    /// <para><see cref="DefinitionTiming.RequireRegistered"/>: registered now, or refused with nothing stored: <c>RegistryClosed</c>
+    /// (a new VFX, or a changed one), <c>NotReady</c> (built at this start, the table not read yet: ask
+    /// <see cref="GetVfxRegistration"/> later), <c>GameRefused</c> (the game's table does not have it, or holds other data under
+    /// its GUID), <c>CapacityExceeded</c>, <c>OwnerInactive</c>.</para>
+    /// <para><see cref="DefinitionTiming.AllowNextStart"/>: registered when it is; otherwise, when only the moment stands in the way,
+    /// the block is stored for the next start (<see cref="DefinitionRegistrationState.AcceptedNextStart"/>, no slot taken now) and
+    /// that start builds it before the game lists its VFX, checking it again. A new VFX that would not fit (what the game's table
+    /// holds, the new VFX accepted in this process, and this one, over the capacity <see cref="Vfx.ResourceBudget"/> reads) is
+    /// refused <c>CapacityExceeded</c>, never stored. <c>StorageFailure</c> when it cannot be stored.</para>
+    /// <para>The same definition again answers the same; its <see cref="DefinitionRegistrationResult.RegistrationId"/> reads the
+    /// answer later. A change is posted as <see cref="DefinitionRegistrationChangedEvent"/> (and <see cref="CapacityChangedEvent"/>
+    /// for the budget) at a later step while something listens. When the answer is Registered or AcceptedNextStart the block is
+    /// the mod's as with the two-argument overload (other blocks and <see cref="Find"/> name it); a refusal leaves nothing.
+    /// Client only: a dedicated server has no VFX (the two-argument overload and data files work on both sides). Not run in a
+    /// game client yet (guided checks <c>17-vfx-budget.before</c> / <c>17-vfx-budget.after</c>).</para>
+    /// </summary>
+    /// <param name="name">The block's name: letters, digits, '-', '_' and '.'.</param>
+    /// <param name="block">The VFX.</param>
+    /// <param name="options">What the call may settle for.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="block"/> or <paramref name="options"/> is null.</exception>
+    /// <exception cref="ArgumentException">An unknown timing.</exception>
+    /// <exception cref="BlockError">The block is wrong (the builder's rules, as for a blocks file): nothing was stored.</exception>
+    /// <exception cref="KilnUnavailableException"><c>blocks.vfx_registration</c>: no kiln.vfx here (a dedicated server), one older
+    /// than 0.2.0-dev.29, or one that cannot check a registration on this game build or session.</exception>
+    [ClientOnly]
+    [TickThreadOnly]
+    [RequiresCapability(VfxCaps.RegistrationRow)]
+    public static DefinitionRegistrationResult Define(string name, VfxBlock block, DefinitionRegistrationOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(block);
+        var timing = DefinitionRegistration.Timing(options, nameof(options));
+        Services.RequireTickThread("Blocks.Define(string, VfxBlock, DefinitionRegistrationOptions)");
+        if (BootFrame.Current is { } boot)
+            throw new InvalidOperationException($"PhaseClosed: Blocks.Define is refused inside {boot.ModId}'s OnBoot");
+        if (!VfxDefinitions.CanDefine) throw VfxDefinitions.Off("Blocks.Define(name, VfxBlock, options)");
+        return Compiler.DefineVfxWithAnswer(CallerMod(), name, block, timing);
+    }
+
+    /// <summary>Client: what became of a VFX definition since its <see cref="Define(string, VfxBlock, DefinitionRegistrationOptions)"/>
+    /// call, by its <see cref="DefinitionRegistrationResult.RegistrationId"/>: registered once kiln.vfx read the game's table, kept
+    /// for a mod that is no longer loaded (<see cref="DefinitionRegistrationState.Retained"/>, <c>OwnerInactive</c>, its slot still
+    /// taken), superseded by a later definition of the block, stored for the next start. A definition stored at an earlier start
+    /// is known again at this one, and says what this start made of it. <c>NotFound</c> for an id this process does not know. Any
+    /// thread; it copies service state without waiting for the game or reading game memory. The defining overload can
+    /// synchronously write a pending file when accepting for the next start; that I/O holds no snapshot lock.</summary>
+    /// <exception cref="ArgumentException">The empty GUID.</exception>
+    /// <exception cref="KilnUnavailableException"><c>blocks.vfx_registration</c>, as for the define.</exception>
+    [ClientOnly]
+    [AnyThread]
+    [RequiresCapability(VfxCaps.RegistrationRow)]
+    public static DefinitionRegistrationResult GetVfxRegistration(Guid registrationId)
+    {
+        DefinitionRegistration.CheckId(registrationId, nameof(registrationId));
+        var a = VfxDefinitions.Receipt(registrationId);
+        if (a.Rc == VfxNative.InvalidArgument) throw new ArgumentException(a.Reason ?? "not a registration id", nameof(registrationId));
+        if (a.Rc == VfxNative.Unavailable) throw VfxCaps.Off(VfxCaps.RegistrationRow, a.Reason ?? "kiln.vfx's result-bearing definitions are off");
+        if (a.Rc != VfxNative.Ok) throw new InvalidOperationException($"Blocks.GetVfxRegistration: kiln.vfx answered {a.Rc}");
+        return DefinitionRegistration.ToResult(a.Reply, a.Report);
+    }
 }
 
 /// <summary>What one mod defined.</summary>
@@ -191,6 +273,12 @@ internal sealed class ModBlocks(string id, ulong owner)
     public bool DataLoaded;
     public readonly HashSet<string> Compiling = new();
     public string? ManifestClients;
+    /// <summary>The mod's folder while its OnBoot definitions lower (BootLowering.LowerOwner): no loaded mod lists the mod yet, so the
+    /// files its blocks name are read against the folder the boot phase gives. Null on every other ledger.</summary>
+    public string? BootDirectory;
+    /// <summary>The folder a block's file of mod <paramref name="mod"/> is read against: the boot phase's for this ledger's own mod while its
+    /// OnBoot definitions lower, else the loaded mod's (empty when no loaded mod is <paramref name="mod"/>).</summary>
+    public string DirectoryOf(string mod) => BootDirectory is { Length: > 0 } dir && mod == Id ? dir : BlocksBridge.ModDirectory(mod);
     /// <summary>The owner is the mod's own, not one of Kiln's for a mod with only data files.</summary>
     public bool OwnedByMod;
     /// <summary>Set on the isolated ledger of a kind's plan (Kinds/KindTransaction.cs): the consumer's real ledger, whose blocks

@@ -365,6 +365,8 @@ void test_a_world_without_identity_unbinds() {
     bool pending = false;
     check(!journaled(s, {64, 0, 0}) && journaled(s, {0, 0, 0}, &cells, &pending) && cells == 10 && pending,
           "world A's journal holds its own cells only, pending when A is loaded again");
+    j.bind(W);
+    check(j.pending_blocks() == 1, "rehosting the same world reloads the previous session's cells as pending");
 }
 
 }  // namespace

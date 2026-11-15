@@ -22,6 +22,11 @@ std::string lower(std::string s) {
     for (char& c : s) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
     return s;
 }
+// What resolve() reaches on the host: no game memory (rd refuses), no assets service, no schema fields.
+uint32_t fnv1a(const void* data, size_t n) { uint32_t h=2166136261u; for(size_t i=0;i<n;++i)h=(h^static_cast<const uint8_t*>(data)[i])*16777619u; return h; }
+bool rd(uintptr_t, void*, size_t) { return false; }
+const KilnAssetsApi* assets_api() { return nullptr; }
+const Field* Schema::find(const std::string&) const { return nullptr; }
 // Host fixture GUID decoder (same Windows byte layout as game.cpp; no game memory involved).
 bool guid_parse(const std::string& s, uint8_t out[16]) {
     unsigned a, b, c, d[8];
@@ -42,6 +47,67 @@ int checks = 0;
 void check(bool yes, const char* name) {
     if (!yes) throw std::runtime_error(name);
     ++checks;
+}
+KilnWorldTablesApi tables{};
+std::string pool_status;
+void table_references() {
+    using namespace kc;
+    KilnApi api{};api.service=[](KilnStr name,uint32_t)->const void* {
+        return std::string(name.ptr,name.len)==KILN_WORLDTABLES_SERVICE?&tables:nullptr;
+    };g_api=&api;
+    tables.header={144,1};tables.state=[]()->int32_t{return KILN_WT_MERGED;};
+    tables.material_id=[](const uint8_t*)->int32_t{return 213;};
+    tables.status_json=[](char* out,size_t capacity,size_t* count)->KilnResult {
+        *count=pool_status.size();if(!out || capacity<=*count)return KILN_ERR_BUFFER_TOO_SMALL;
+        std::memcpy(out,pool_status.c_str(),pool_status.size()+1);return KILN_OK;
+    };
+    uint8_t guid[16];guid_parse("11111111-2222-4333-8444-555555555555",guid);
+    pool_status=R"({"state":"merged","customPools":[{"guid":"11111111-2222-4333-8444-555555555555"}],"shapeBindings":[{"item":"22222222-2222-4222-8222-222222222222","pool":"11111111-2222-4333-8444-555555555555"}]})";
+    uint8_t shape[16];guid_parse("22222222-2222-4222-8222-222222222222",shape);
+    check(world_material(guid),"old worldtables prefix still admits material references");
+    check(world_pool(guid,shape),"served custom pool admits its 16-byte GUID for the shape bound to it");
+    guid[0]^=1;check(!world_pool(guid,shape),"unknown pool GUID is refused");guid[0]^=1;
+    tables.header.size=offsetof(KilnWorldTablesApi,status_json);check(!world_pool(guid,shape),"short table never calls status_json");
+    tables.header.size=144;pool_status=R"({"state":"off","customPools":[{"guid":"11111111-2222-4333-8444-555555555555"}]})";
+    check(!world_pool(guid,shape),"off tables cannot authorize pool references");
+    pool_status=R"({"state":"merged","customPools":[{"guid":42}]})";check(!world_pool(guid,shape),"malformed snapshot refuses without throwing");
+    tables.status_json=nullptr;check(!world_pool(guid,shape),"missing member refuses without a null call");
+    tables.header.size=offsetof(KilnWorldTablesApi,material_id);check(!world_material(guid),"short material table refuses before call");
+    g_api=nullptr;
+}
+// Item 11: a mod's pool GUID on an item's equipment.voxelBlueprintMaterialPool only for the shape worldtables bound to it
+// (its own mod's or a dependency's pool, roof agreeing; and that binding is in the handshake hash): not for a vanilla shape,
+// another mod's item, or a roof shape on a wall pool.
+void pool_references_need_their_binding() {
+    using namespace kc;
+    KilnApi api{};api.service=[](KilnStr name,uint32_t)->const void* {
+        return std::string(name.ptr,name.len)==KILN_WORLDTABLES_SERVICE?&tables:nullptr;
+    };g_api=&api;
+    tables.header={sizeof(KilnWorldTablesApi),1};tables.state=[]()->int32_t{return KILN_WT_MERGED;};
+    tables.status_json=[](char* out,size_t capacity,size_t* count)->KilnResult {
+        *count=pool_status.size();if(!out || capacity<=*count)return KILN_ERR_BUFFER_TOO_SMALL;
+        std::memcpy(out,pool_status.c_str(),pool_status.size()+1);return KILN_OK;
+    };
+    pool_status=R"({"state":"merged","customPools":[{"guid":"11111111-2222-4333-8444-555555555555"}],)"
+                R"("shapeBindings":[{"item":"22222222-2222-4222-8222-222222222222","pool":"11111111-2222-4333-8444-555555555555"}]})";
+    Schema s;Field f;f.path="equipment.voxelBlueprintMaterialPool";f.type_name="keen::ObjectReference<keen::VoxelBlueprintMaterialPool>";f.bytes=16;
+    Pools p;uint8_t out[16];std::string why;
+    const ItemFind none=[](const std::string&)->uintptr_t{return 0;};
+    check(!resolve(s,f,"11111111-2222-4333-8444-555555555555",none,p,out,nullptr,nullptr,&why),"a served pool outside a shape bound to it is refused");
+    check(why.find("material pool")!=std::string::npos && why.find("bound")!=std::string::npos,"and the refusal says it is a mod's pool the item is not bound to");
+    uint8_t shape[16],other[16];guid_parse("22222222-2222-4222-8222-222222222222",shape);guid_parse("33333333-3333-4333-8333-333333333333",other);
+    set_kitbash_item(shape);
+    check(resolve(s,f,"11111111-2222-4333-8444-555555555555",none,p,out,nullptr,nullptr,&why),"the shape bound to the pool takes it");
+    set_kitbash_item(other);
+    check(!resolve(s,f,"11111111-2222-4333-8444-555555555555",none,p,out,nullptr,nullptr,&why),"another item (a vanilla shape, another mod's) does not");
+    uint8_t pool[16];guid_parse("11111111-2222-4333-8444-555555555555",pool);
+    p.by_type[f.type_name].insert(gof(pool)); // a previous bound shape now uses it in the loaded item registry
+    check(!resolve(s,f,"11111111-2222-4333-8444-555555555555",none,p,out,nullptr,nullptr,&why),"a loaded shape's pool cannot bypass another item's binding check");
+    set_kitbash_item(shape);
+    check(resolve(s,f,"11111111-2222-4333-8444-555555555555",none,p,out,nullptr,nullptr,&why),"a cached pool still works on its bound shape");
+    set_kitbash_item(nullptr);
+    check(!resolve(s,f,"11111111-2222-4333-8444-555555555555",none,p,out,nullptr,nullptr,&why),"a cached pool cannot be assigned by a game-item rule");
+    g_api=nullptr;
 }
 void malformed_entries() {
     using namespace kc;
@@ -138,6 +204,8 @@ void own_mod_models(const std::filesystem::path& root) {
 
 int main(int argc, char** argv) {
     try {
+        table_references();
+    pool_references_need_their_binding();
         malformed_entries();
         if (argc != 2) throw std::runtime_error("provide a new fixture directory");
         own_mod_models(argv[1]);

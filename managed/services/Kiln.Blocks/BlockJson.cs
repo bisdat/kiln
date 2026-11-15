@@ -16,7 +16,7 @@ internal static class BlockJson
         ReadCommentHandling = JsonCommentHandling.Skip,
         AllowTrailingCommas = true,
         AllowOutOfOrderMetadataProperties = true,
-        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase), new Vec3Converter() },
+        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase), new Vec3Converter(), new NativeRefJsonConverter() },
     };
 
     /// <summary>The strict options every block is read with (Kinds/KindJson.cs clones them per registered kind).</summary>

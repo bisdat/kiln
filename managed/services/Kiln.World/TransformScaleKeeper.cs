@@ -3,10 +3,13 @@
 // save does not keep it: a placed prop is saved without the scale of its CurrentTransform and comes back at its
 // template's (lab: docs/re/world.md "Transform scale and the save"). So Kiln keeps it beside the save, in kiln.saves'
 // entity attachments under the scope "kiln:world" (template + position at the save, as a mod's EntityData), and sets it
-// again through the same tracked write when kiln.saves matches the loaded entity: on a dedicated server in the first
-// second the world runs, before a player can be in it. The value is set again in the context of the mod that set it,
-// and only while that mod is loaded and lists CurrentTransform under "writes": a removed mod's scales go with it (the
-// record stays, so the scale comes back with the mod). Setting the scale the entity had before Kiln's first write (its
+// again through the same tracked write only after a unique positional match and a live SpawnTime check.
+// Loaded entities have no SpawnTime: equal absent values require a fresh positional uniqueness check. Ambiguity
+// waits for an explicit mod write or normal expiry; destroyed/replaced entities lose the record. Timing and visibility to a joined
+// player have not been verified. The value is set again in the context of the mod that set it,
+// and only while that mod is loaded and lists CurrentTransform under "writes": removing the mod prevents replay on
+// the next load, but does not restore a scale already written in this session (the record stays for reinstall).
+// Setting the scale the entity had before Kiln's first write (its
 // game scale) forgets the record. Guide: docs/kiln/services/world.md "Transform scale".
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -14,6 +17,10 @@ using System.Text.Json.Serialization;
 
 namespace Kiln;
 
+/// <summary>Keeps scales beside the save. Automatic replay requires one candidate in the saved radius and an unchanged
+/// optional SpawnTime since attachment (including absent == absent). Loaded entities have none: use checks positional
+/// uniqueness again, which is positional identity, not proof. Ambiguity stays waiting until explicit SetTransformScale
+/// or normal missed-session expiry; destroyed/replaced records are dropped. Other scopes keep their default policy.</summary>
 internal static class TransformScaleKeeper
 {
     internal const string Scope = "kiln:world";
@@ -33,6 +40,7 @@ internal static class TransformScaleKeeper
     }
 
     private static readonly Dictionary<uint, Waiting> ToApply = new();
+    private static readonly HashSet<string> IdentityNotes = new(StringComparer.Ordinal);
     private static readonly HashSet<uint> Applied = new();  // entities whose kept scale this session wrote or set again
     private static bool _registered, _ticking, _recording;
     private static int _notTheEntity;  // waiting scales dropped because their id named another entity (tests, diagnostics)
@@ -57,13 +65,14 @@ internal static class TransformScaleKeeper
     /// that never scales anything does not get a sidecar for it.</summary>
     internal static void Start()
     {
+        ServiceEntityData.UseStrict(Scope); // before Saves can claim legacy records on its first pump
         if (_ticking) return;
         _ticking = true;
         ServiceTick.Add("kiln.world transform scale keeper", static (in TickInfo t) =>
         {
             if (t.Step % CheckEverySteps != 0) return;
             if (!_registered && CanSetAny()) Register();
-            if (ToApply.Count > 0) ApplyWaiting();
+            if (_registered) ApplyWaiting();
         });
     }
 
@@ -73,6 +82,7 @@ internal static class TransformScaleKeeper
 
     private static ServiceEntityData.IStore? Register()
     {
+        ServiceEntityData.UseStrict(Scope);
         var store = ServiceEntityData.Ensure();
         if (store is null || _registered) return store;
         _registered = true;
@@ -81,8 +91,8 @@ internal static class TransformScaleKeeper
     }
 
     /// <summary>After a committed <see cref="World.SetTransformScale"/> (tick thread, the mod's context): records the scale
-    /// for the next start, or forgets it when it is the game's own. True when the scale the entity has now is the one it
-    /// will have after a save and restart; false when it is for this session only (Kiln's own tools, an entity the save
+    /// for the next start, or forgets it when it is the game's own. True when replay was recorded or the original scale restored,
+    /// without guaranteeing future identity or size; false when it is for this session only (Kiln's own tools, an entity the save
     /// does not keep, kiln.saves off).</summary>
     internal static bool Record(EntityId entity, Scale3? before, Scale3 now, string? modId)
     {
@@ -134,6 +144,7 @@ internal static class TransformScaleKeeper
     {
         ToApply.Clear();
         Applied.Clear();
+        IdentityNotes.Clear();
     }
 
     internal static void ApplyWaiting()
@@ -142,8 +153,11 @@ internal static class TransformScaleKeeper
         {
             var entity = new EntityId(id);
             // the id may have been handed out again since the match: only the entity the kept record is on gets it
-            if (ServiceEntityData.Store is not { } store || !store.Holds(entity, Scope, Key))
+            var store = ServiceEntityData.Store;
+            if (store is null || !store.Holds(entity, Scope, Key))
             {
+                if (store is not null && store.Replays(Scope, Key).Any(r => r.Entity == entity && r.Reason is not null))
+                    continue; // retained and reported below; an explicit mod write can resolve it
                 ToApply.Remove(id);
                 _notTheEntity++;
                 Backend.Current.Log(0, LogLevel.Info, $"kiln.world: the transform scale {w.Saved.Scale} kept for entity {entity} is dropped: " +
@@ -176,7 +190,21 @@ internal static class TransformScaleKeeper
             ToApply.Remove(id);
             ModInvoke.Run(mod, () => _ = SetAgain(entity, w.Saved), "kiln.world: setting a kept transform scale again");
         }
+        // Said once per record and world, and only for a refused identity: a record whose entity has only not loaded
+        // yet is the ordinary case at every start (lab: the line came ten seconds before the match) and is not a finding.
+        foreach (var record in WaitingScales(null, refusedOnly: true))
+        {
+            var warning = $"mod '{record.Mod}', template {record.Template}, position {record.Position}, scale {record.Scale}: kept, not re-applied: {record.Reason}";
+            if (IdentityNotes.Add(warning)) Backend.Current.Log(0, LogLevel.Info, "kiln.world: " + warning);
+        }
     }
+
+    /// <summary>Waiting identity diagnostics, including unresolved records with no live entity. Not a write result.</summary>
+    internal static IReadOnlyList<WaitingTransformScale> WaitingScales(string? modId = null, bool refusedOnly = false) =>
+        ServiceEntityData.Store?.Replays(Scope, Key)
+            .Where(r => r.Reason is not null && (!refusedOnly || r.Refused) && Parse(r.Json) is { } saved && (modId is null || saved.Mod == modId))
+            .Select(r => new WaitingTransformScale(Parse(r.Json)!.Mod, r.Template, r.Position, Parse(r.Json)!.Scale, r.Reason!))
+            .ToList() ?? [];
 
     private static async Task SetAgain(EntityId entity, Saved saved)
     {
@@ -205,6 +233,7 @@ internal static class TransformScaleKeeper
         foreach (var id in Applied.ToList())
         {
             var e = new EntityId(id);
+            if (!store.Holds(e, Scope, Key)) continue;
             if (Parse(store.Get(e, Scope, Key)) is not { } saved) continue;
             if (World.ReadBytes(e, TransformScale.Component) is not { } bytes || bytes.Length < layout.Offset + 12) continue;
             var now = MemoryMarshal.Read<Scale3>(bytes.AsSpan(layout.Offset));

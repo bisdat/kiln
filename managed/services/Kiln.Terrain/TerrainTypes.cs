@@ -73,10 +73,24 @@ public sealed record TerrainPatch(string Id, int Version, CellBox Region, Terrai
     public string ToJson() => TerrainJson.Write(this);
 }
 
+/// <summary>The explicit decision for a kept plan whose ownership history is unknown.</summary>
+public enum TerrainInstallChoice
+{
+    /// <summary>Use history/proof when present; otherwise sample addressed cells before deciding whether to install or adopt.</summary>
+    Automatic = 0,
+    /// <summary>Record current cells without writing. Original terrain cannot be restored.</summary>
+    Adopt = 1,
+    /// <summary>Install over current cells, accepting possible refill of player edits.</summary>
+    InstallAnyway = 2,
+}
+
 /// <summary>How <see cref="Terrain.Apply"/> runs.</summary>
 public sealed class TerrainApplyOptions
 {
-    /// <summary>Cells written per tick at most (one batch a tick): 512 to 262,144. Default 32,768.</summary>
+    /// <summary>Unknown-history decision. Default Automatic samples unproven existing worlds; at least 25% exact matches requires adoption unless all match.</summary>
+    public TerrainInstallChoice InstallChoice { get; init; }
+    /// <summary>Per-call ceiling: 512 to 262,144, default 32,768. Cannot raise the shared host budget (4,096 writes,
+    /// 32,768 reads, 2 ms cooperative admission per step; 512-cell work units).</summary>
     public int CellsPerTick { get; init; } = 32768;
 
     /// <summary>Write inside player bases too. Default false: a block in a base is left alone and listed as a
@@ -110,6 +124,10 @@ public enum TerrainState
     Partial = 3,
     /// <summary>Nothing was written.</summary>
     Refused = 4,
+    /// <summary>Missing history and at least 25% (but not all) addressed cells match: choose Adopt or InstallAnyway. Nothing written.</summary>
+    NeedsAdoption = 5,
+    /// <summary>Current cells recorded without writing; original terrain cannot be restored.</summary>
+    Adopted = 6,
 }
 
 /// <summary>Why a block was not written.</summary>
@@ -132,7 +150,13 @@ public sealed record TerrainConflict(TerrainConflictKind Kind, CellBox Block, st
 /// <param name="ChangedCells">Cells whose value changed, in the batches that were written.</param>
 /// <param name="Batches">Batches written to the world by this call.</param>
 public sealed record TerrainResult(bool Ok, string? Reason, TerrainState State, string Plan, int Version, long ChangedCells,
-    int Batches, IReadOnlyList<TerrainConflict> Conflicts) : IKilnResult;
+    int Batches, IReadOnlyList<TerrainConflict> Conflicts) : IKilnResult
+{
+    /// <summary>Exact-match fraction of addressed cells when the initial decision used terrain sampling; otherwise null.</summary>
+    public double? PresenceShare { get; init; }
+    /// <summary>The initial automatic installation used the below-bound presence heuristic without history/proof.</summary>
+    public bool InstalledWithoutProof { get; init; }
+}
 
 /// <summary>What <see cref="Terrain.Inspect"/> found. Nothing was written.</summary>
 /// <param name="Box">The patch's region.</param>
@@ -143,14 +167,26 @@ public sealed record TerrainResult(bool Ok, string? Reason, TerrainState State, 
 /// <param name="Would">How an apply would end now.</param>
 /// <param name="Conflicts">The blocks an apply would leave alone.</param>
 public sealed record TerrainPlanReport(bool Ok, string? Reason, CellBox Box, long Cells, int Blocks, int Batches,
-    long EstimatedBytes, TerrainState Would, IReadOnlyList<TerrainConflict> Conflicts) : IKilnResult;
+    long EstimatedBytes, TerrainState Would, IReadOnlyList<TerrainConflict> Conflicts) : IKilnResult
+{
+    /// <summary>Exact-match fraction measured for the automatic first-install decision; otherwise null.</summary>
+    public double? PresenceShare { get; init; }
+}
 
 /// <summary>A kept plan of the calling mod in this world (<see cref="Terrain.Applied"/>).</summary>
 /// <param name="Complete">False while an apply is under way or was interrupted.</param>
 /// <param name="Blocks">Blocks the plan owns.</param>
 /// <param name="GivenUp">Blocks the plan gave up after a conflict.</param>
 public sealed record TerrainPlanInfo(string Plan, int Version, CellBox Region, bool Complete, int Blocks, int GivenUp,
-    DateTimeOffset AppliedAt);
+    DateTimeOffset AppliedAt)
+{
+    /// <summary>The plan adopted current terrain; its original terrain cannot be restored.</summary>
+    public bool Adopted { get; init; }
+    /// <summary>The initial installation's measured exact-match fraction, retained in the ledger; otherwise null.</summary>
+    public double? PresenceShare { get; init; }
+    /// <summary>The initial automatic installation lacked history/proof and was admitted below the presence bound.</summary>
+    public bool InstalledWithoutProof { get; init; }
+}
 
 /// <summary>One batch of an overlay reached the world.</summary>
 /// <remarks>Tick thread, after the write and the ledger update. A refusal raises nothing.</remarks>

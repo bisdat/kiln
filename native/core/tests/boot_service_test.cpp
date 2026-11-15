@@ -48,6 +48,8 @@ KilnOwner t_next_owner = 100;
 kiln::Config t_config;
 kiln::ImageInfo t_image;
 kiln::Paths t_paths;
+uintptr_t t_worlds[KILN_WORLD_KINDS]{};
+uint32_t t_sessions[KILN_WORLD_KINDS]{};  // tick::session's worlds per kind since boot
 kiln::profile::State t_profile;
 uint32_t t_dropins = 1u << KILN_PROFILE_KIND_KILN;
 
@@ -128,6 +130,15 @@ std::string owner_name(KilnOwner owner) {
     return it == t_owners.end() ? "(revoked)" : it->second;
 }
 }  // namespace reg
+namespace worldinfo {
+uintptr_t world(uint32_t kind) { return kind < KILN_WORLD_KINDS ? t_worlds[kind] : 0; }
+}
+namespace tick {
+KilnResult session(KilnSessionInfo* out) {
+    for (uint32_t k = 0; k < KILN_WORLD_KINDS; ++k) out->sessions[k] = t_sessions[k];
+    return KILN_OK;
+}
+}
 namespace profile {
 const State& state() { return t_profile; }
 bool dropins(uint32_t kind) { return (t_dropins & (1u << kind)) != 0; }
@@ -165,9 +176,19 @@ std::vector<uint32_t> t_late_exits;  // the stop after the entry point ends the 
 void fake_exit_late(uint32_t code) { t_late_exits.push_back(code); }
 std::vector<std::string> t_held;  // write_state's last lines
 void fake_write_state(void*, const std::string& last) { t_held.push_back(last); }
+std::vector<std::string> t_events;  // "prepare:<c>", "destroy:<c>:<round>", the stop's steps
+std::vector<std::string> t_stops;  // the stop writer's (last line, why), and the order of the stop's steps
+void fake_stop_state(void*, const std::string& last, const std::string& why, uint32_t) {
+    t_stops.push_back(last + " | " + why);
+    t_events.push_back("stop-state");
+}
+void KILN_CALL fake_before_exit(void* user) {
+    ++*static_cast<int*>(user);
+    t_events.push_back("before-exit");
+}
 
 // ---- seven fake collectors ----
-enum class Do { Ok, Refuse, RefuseNobody, Error, OkNoPlan, Throw, Warn, OkWithError };
+enum class Do { Ok, Refuse, RefuseNobody, Error, OkNoPlan, Throw, Warn, OkWithError, StopStart };
 struct Fake {
     int index = 0;
     Do act = Do::Ok;
@@ -177,7 +198,6 @@ struct Fake {
     std::vector<json> seen;  // the IR of each call
 };
 Fake t_fake[7];
-std::vector<std::string> t_events;  // "prepare:<c>", "destroy:<c>:<round>"
 struct Plan {
     int collector, round;
 };
@@ -224,6 +244,15 @@ KilnResult KILN_CALL fake_prepare(void* user, const KilnBootPrepareInputV1* in, 
             std::snprintf(issue->key, sizeof issue->key, "bad-item");
             std::snprintf(issue->reason, sizeof issue->reason, "over the item table's capacity");
             return KILN_OK;
+        case Do::StopStart: {  // a collector that finds in its prepare that the start must stop (kiln.knowledge's roster)
+            const std::string why = "kiln.knowledge: the roster holds at most 128 NPCs";
+            const KilnResult r = B.stop_start(50 + f.index, ks(f.blame), ks(why), 0x4B02u, nullptr, nullptr);
+            t_events.push_back(r == KILN_OK ? "stop-returned" : "stop-refused");
+            out->ok = 1;  // the host test's exit adapter returned: go on as if nothing happened
+            out->plan = plan();
+            out->destroy = &destroy_plan;
+            return KILN_OK;
+        }
         case Do::Error: return KILN_ERR_INTERNAL;
         case Do::OkNoPlan: out->ok = 1; return KILN_OK;
         case Do::Throw: throw std::runtime_error("collector fault");
@@ -253,6 +282,13 @@ void reset_boot() {
     g_self = 0;
     g_exit_code = 0;
     g_late_hold = nullptr;
+    g_stop = Stop{};
+    g_stopping = false;
+    g_stop_timeout = std::chrono::milliseconds(65000);
+    for (auto& w : t_worlds) w = 0;
+    for (auto& n : t_sessions) n = 0;
+    g_stop_state = nullptr;
+    t_stops.clear();
     g_exit = &fake_exit;
     g_exit_late = &fake_exit_late;
     t_late_exits.clear();
@@ -1042,6 +1078,144 @@ void activation_fault_cases() {
     pass_line("BOOT-ACTIVATION-FAULT required transitive dependent stops the start", f1);
 }
 
+// kiln.boot stop_start (0.2.0-dev.29): a service stops the start the same way with a boot generation or without one,
+// inside a collector's prepare or after the publication: one issue per mod, the stop line, the launcher's files, the
+// caller's last word, then the late exit with the caller's code (never 0x4B01 for it, never "the start goes on").
+void stop_start_safety_cases() {
+    using namespace kiln::boot_svc;
+    CHECK(sizeof(KilnBootApiV1) == 104);
+    CHECK(offsetof(KilnBootApiV1, stop_start) == 96);
+    t_case = "stop-start-live-world";
+    reset_boot();
+    for (uint32_t kind = 0; kind < KILN_WORLD_KINDS; ++kind) {
+        t_worlds[kind] = 0x1000;
+        CHECK(B.stop_start(5, ks("a"), ks("must preserve unsaved play"), 0x4B02u, nullptr, nullptr) == KILN_ERR_UNAVAILABLE);
+        CHECK(!g_stopping && t_late_exits.empty() && g_issues.empty());
+        t_worlds[kind] = 0;
+    }
+    // review round 3: once a world has run in this process (none present now: a client back at its main menu), the
+    // start phase is over: refused too
+    for (uint32_t kind = 0; kind < KILN_WORLD_KINDS; ++kind) {
+        t_sessions[kind] = 1;
+        CHECK(B.stop_start(5, ks("a"), ks("the start phase is over"), 0x4B02u, nullptr, nullptr) == KILN_ERR_UNAVAILABLE);
+        CHECK(!g_stopping && t_late_exits.empty() && g_issues.empty());
+        t_sessions[kind] = 0;
+    }
+    reset_boot();
+    t_case = "stop-start-callback-fault";
+    bool escaped = false;
+    try {
+        B.stop_start(5, ks("a"), ks("callback fault must not cancel stop"), 0x4B02u,
+                     [](void*) { throw std::runtime_error("callback failed"); }, nullptr);
+    } catch (...) { escaped = true; }
+    CHECK(!escaped);
+    CHECK(t_late_exits == std::vector<uint32_t>{0x4B02u});
+    reset_boot();
+    t_case = "stop-start-two-callers";
+    std::atomic<bool> writing{false}, second_done{false};
+    struct Race { std::atomic<bool>* writing; std::atomic<bool>* second_done; } race{&writing, &second_done};
+    stop_writer([](void* user, const std::string&, const std::string&, uint32_t) {
+        auto& r = *static_cast<Race*>(user);
+        *r.writing = true;
+        while (!r.second_done->load()) std::this_thread::yield();
+    }, &race);
+    KilnResult loser = KILN_OK;
+    std::thread second([&] {
+        while (!writing.load()) std::this_thread::yield();
+        loser = B.stop_start(6, ks("b"), ks("second caller"), 0x4B03u, nullptr, nullptr);
+        second_done = true;
+    });
+    CHECK(B.stop_start(5, ks("a"), ks("first caller"), 0x4B02u,
+                      [](void* user) { *static_cast<KilnResult*>(user) = B.stop_start(5, ks("a"), ks("reentrant"), 0x4B04u, nullptr, nullptr); },
+                      &loser) == KILN_OK);
+    second.join();
+    CHECK(loser == KILN_ERR_UNAVAILABLE);
+    CHECK(t_late_exits == std::vector<uint32_t>{0x4B02u});
+    reset_boot();
+    t_case = "stop-start-callback-block";
+    g_stop_timeout = std::chrono::milliseconds(10);
+    static std::atomic<bool> timed_out{false};
+    timed_out = false;
+    g_exit_late = [](uint32_t) { timed_out = true; };
+    CHECK(B.stop_start(5, ks("a"), ks("blocked callback must not cancel stop"), 0x4B02u,
+                      [](void*) { while (!timed_out.load()) std::this_thread::yield(); }, nullptr) == KILN_OK);
+    CHECK(timed_out);
+    reset_boot();
+    t_case = "stop-start-writer-fault";
+    stop_writer([](void*, const std::string&, const std::string&, uint32_t) { throw std::runtime_error("disk"); }, nullptr);
+    CHECK(B.stop_start(5, ks("a"), ks("disk failed"), 0x4B02u, nullptr, nullptr) == KILN_OK);
+    CHECK(t_late_exits == std::vector<uint32_t>{0x4B02u});
+}
+
+void stop_start_cases() {
+    using namespace kiln::boot_svc;
+    t_case = "stop-start-plain";
+    const int f0 = t_fail;
+    reset_boot();
+    t_image.side = KILN_SIDE_SERVER;
+    profile_with({});
+    kiln::boot_svc::decide(true, "");  // no boot mod: no deferred generation
+    stop_writer(&fake_stop_state, nullptr);
+    int said = 0;
+    // nothing happens for a bad call
+    CHECK(B.stop_start(0, ks("a"), ks("why"), 0x4B02u, nullptr, nullptr) == KILN_ERR_INVALID_ARGUMENT);
+    CHECK(B.stop_start(5, ks("a"), ks(""), 0x4B02u, nullptr, nullptr) == KILN_ERR_INVALID_ARGUMENT);
+    CHECK(B.stop_start(5, ks("a"), ks("why"), 0, nullptr, nullptr) == KILN_ERR_INVALID_ARGUMENT);
+    CHECK(t_late_exits.empty() && t_stops.empty() && g_issues.empty());
+    CHECK(B.stop_start(5, ks("roster-cap-test, other"), ks("kiln.knowledge: too many NPCs. Do not restart"), 0x4B02u, &fake_before_exit,
+                       &said) == KILN_OK);
+    CHECK(t_late_exits == std::vector<uint32_t>{0x4B02u} && t_exits.empty());  // the caller's code, the late way, once
+    CHECK(said == 1 && t_events == (std::vector<std::string>{"stop-state", "before-exit"}));  // the files before the message
+    CHECK(t_stops.size() == 1 && t_stops[0].find("boot: the start stops (exit code 0x4B02): kiln.knowledge: too many NPCs") == 0 &&
+          t_stops[0].find("| kiln.knowledge: too many NPCs. Do not restart") != std::string::npos);
+    json rep = report();
+    CHECK(rep["exitCode"] == 0x4B02 && rep["status"].is_null() && rep["stop"]["code"] == 0x4B02 &&
+          rep["stop"]["mods"] == json::array({"roster-cap-test", "other"}) && rep["stop"]["reason"] == "kiln.knowledge: too many NPCs. Do not restart");
+    int stopped = 0;
+    for (const auto& i : rep["issues"]) stopped += i["code"] == "StartStopped" && i["phase"] == "stop";
+    CHECK(stopped == 2);
+    // a second stop while the first ends the process: refused, nothing more
+    CHECK(B.stop_start(5, ks(""), ks("again"), 0x4B03u, nullptr, nullptr) == KILN_ERR_UNAVAILABLE && t_late_exits.size() == 1);
+    pass_line("BOOT-STOP-START without a boot generation (issues, stop line, files, then the message, exit 0x4B02 once)", f0);
+
+    t_case = "stop-start-prepare";
+    const int f1 = t_fail;
+    deferred_with({"opt", "req!"});
+    stop_writer(&fake_stop_state, nullptr);
+    run_authors({"opt", "req!"});
+    t_fake[4].act = Do::StopStart;  // the knowledge collector
+    t_fake[4].blame = "opt";
+    commit_with(envelope({"opt", "req!"}));
+    // during PREPARING (activation_fault answers UNAVAILABLE there): the stop happens all the same
+    CHECK(t_late_exits == std::vector<uint32_t>{0x4B02u} && t_exits.empty() && t_stops.size() == 1);
+    CHECK(std::find(t_events.begin(), t_events.end(), "stop-returned") != t_events.end());
+    rep = report();
+    CHECK(rep["stop"]["code"] == 0x4B02 && rep["stop"]["mods"] == json::array({"opt"}) && rep["exitCode"] == 0x4B02);
+    pass_line("BOOT-STOP-START inside a collector's prepare (a not required mod: still stopped, 0x4B02)", f1);
+
+    t_case = "stop-start-published";
+    const int f2 = t_fail;
+    deferred_with({"opt", "req!"});
+    stop_writer(&fake_stop_state, nullptr);
+    run_authors({"opt", "req!"});
+    CHECK(commit_with(envelope({"opt", "req!"})).status == KILN_BOOT_STATUS_PUBLISHED);
+    CHECK(kiln::boot_svc::after_clr(true, &fake_write_state, nullptr) && t_exits.empty());
+    late_hold(&fake_write_state, nullptr);
+    for (const char* who : {"req", "opt"}) {  // a required mod and one that is not: the same stop, the same code
+        g_stopping = false;
+        g_exit_code = 0;
+        t_late_exits.clear();
+        t_stops.clear();
+        t_held.clear();
+        CHECK(B.stop_start(5, ks(who), ks("kiln.knowledge: too many NPCs"), 0x4B02u, nullptr, nullptr) == KILN_OK);
+        CHECK(t_late_exits == std::vector<uint32_t>{0x4B02u} && t_stops.size() == 1 && t_held.empty());  // never 0x4B01
+    }
+    bool gone_on = false;
+    for (const auto& l : t_log) gone_on |= l.find("the start goes on without it") != std::string::npos;
+    CHECK(!gone_on);
+    pass_line("BOOT-STOP-START after the publication (required and not: exit 0x4B02, never 'the start goes on')", f2);
+}
+
 // A boot mod that ran no OnBoot and is in no envelope (blocks files only) takes part all the same: a collector can refuse
 // it by name (dropped, not an abort), the collectors get its process owner, and "required" holds for it.
 void files_only_cases() {
@@ -1804,11 +1978,44 @@ void patch_value_cases() {
     pass_line("BOOT-PATCH-VALUES rejects reversed bounds and invalid flag shifts", f0);
 }
 
+// An unavailable staged-VFX row is informational: ordinary/required boot mods still publish.
+void vfx_row_cases() {
+    t_case = "vfx-row";
+    const int f0 = t_fail;
+    for (const auto side : {KILN_SIDE_CLIENT, KILN_SIDE_SERVER}) {
+        for (const bool required : {false, true}) {
+            reset_boot();
+            t_image.side = side;
+            t_config.clr = true;
+            profile_with({{"a", required ? json("required") : json(true), true, "both"}});
+            server_rows(true);
+            kiln::boot_svc::decide(true, "");
+            CHECK(shown("mods.boot.vfx") && shown("mods.boot.vfx")->state == KILN_CAP_UNAVAILABLE);
+            CHECK(shown("mods.boot.vfx")->reason == (side == KILN_SIDE_CLIENT ?
+                  KILN_CAP_REASON_SERVICE_MISSING : KILN_CAP_REASON_WRONG_SIDE));
+            CHECK(std::string(shown("mods.boot.vfx")->text.ptr, shown("mods.boot.vfx")->text.len) ==
+                  (side == KILN_SIDE_CLIENT ?
+                   "not in this build: a client builds VFX and material files at start; staging them into a boot generation comes later" :
+                   "a dedicated server renders no VFX: its vfx collector prepares an empty plan"));
+            CHECK(kiln::boot_svc::g_deferred);
+            for (int i = 0; i < 7; ++i)
+                B.collector(50 + i, ks(kiln::boot_svc::kCollectors[i]), &fake_prepare, &t_fake[i]);
+            kiln::boot_svc::bound();
+            run_authors({required ? "a!" : "a"});
+            const auto c = commit_with(envelope({required ? "a!" : "a"}));
+            CHECK(c.status == KILN_BOOT_STATUS_PUBLISHED);
+            CHECK(kiln::boot_svc::after_clr(true, &fake_write_state, nullptr) && t_exits.empty() && t_held.empty());
+        }
+    }
+    pass_line("BOOT-VFX-ROW unavailable staged VFX does not refuse optional/required client/server boot", f0);
+}
+
 int main(int argc, char** argv) {
     t_root = fs::path(argc > 1 ? argv[1] : ".") / "boot-service-test";
     fs::remove_all(t_root);
     fs::create_directories(t_root);
     t_paths.mods = t_root / "no-dropins";
+    vfx_row_cases();
     decision_cases();
     patch_value_cases();
     staging_cases();
@@ -1824,6 +2031,8 @@ int main(int argc, char** argv) {
     warning_case();
     missing_collector_cases();
     activation_fault_cases();
+    stop_start_safety_cases();
+    stop_start_cases();
     files_only_cases();
     strict_cases();
     patch_jsonc_cases();

@@ -12,6 +12,7 @@ namespace Kiln.Host;
 /// <summary>What the mod manager needs from its host (the native core, or a test fake).</summary>
 internal interface IHostServices
 {
+    nint Service(string name, uint minVersion) => 0;
     ulong OwnerCreate(string id);
     void OwnerRevoke(ulong owner);
     void Log(LogLevel level, string text);
@@ -64,7 +65,7 @@ internal sealed class ModManagerOptions
 /// <summary>One collectible context per loaded mod instance. Assemblies load from bytes, so the files on disk stay
 /// free to be replaced while the mod runs. Resolution order: Kiln.Api, Kiln's shared assemblies (kiln/host/Kiln.*),
 /// assemblies exported by the mod's dependencies (loaded in their contexts, so types are shared), the mod's folder.</summary>
-internal sealed class ModLoadContext(string id, string directory, Func<AssemblyName, Assembly?>? exports = null)
+internal sealed class ModLoadContext(string id, string directory, Func<AssemblyName, Assembly?>? exports = null, Action<Assembly>? loaded = null)
     : AssemblyLoadContext("kiln-mod:" + id, isCollectible: true)
 {
     private static readonly Assembly ApiAssembly = typeof(Kiln.Mod).Assembly;
@@ -83,9 +84,11 @@ internal sealed class ModLoadContext(string id, string directory, Func<AssemblyN
             if (Find(name) is { } existing) return existing;
             using var image = new MemoryStream(File.ReadAllBytes(path));
             var pdb = System.IO.Path.ChangeExtension(path, ".pdb");
-            if (!File.Exists(pdb)) return LoadFromStream(image);
-            using var symbols = new MemoryStream(File.ReadAllBytes(pdb));
-            return LoadFromStream(image, symbols);
+            Assembly assembly;
+            if (!File.Exists(pdb)) assembly = LoadFromStream(image);
+            else { using var symbols = new MemoryStream(File.ReadAllBytes(pdb)); assembly = LoadFromStream(image, symbols); }
+            loaded?.Invoke(assembly);
+            return assembly;
         }
     }
 
@@ -146,6 +149,7 @@ internal sealed class LoadedMod
     public bool Disabled;
     public bool Loaded;  // OnLoad returned
     public long PreTicks, PostTicks, MaxTicks, Calls;  // since the last stats line
+    public long PreMaxTicks, PostMaxTicks;              // since the last stats line: the longest Pre and the longest Post apart
     public long TotalPreTicks, TotalPostTicks, TotalMaxTicks, TotalCalls;  // since load
     public readonly Queue<double> FaultTimes = new();
     public DateTime? LastFault;
@@ -398,6 +402,16 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
             SetRecord(c, ModState.Pending, null);
             PublishSnapshot(writeFile: false);  // a mod's OnLoad sees the mods loaded before it in Mods.All
             var sw = Stopwatch.StartNew();
+            // A retained dependency is alive for its old callers, not a provider for a new load. Otherwise that new
+            // dependent would escape the cascade already waiting and keep using the dependency after disposal.
+            var retiringDependency = DependencyClosure(m).FirstOrDefault(UnloadWaiting);
+            if (retiringDependency is not null)
+            {
+                var why = $"dependency {retiringDependency} is unloading; wait for its retirement before loading {m.Id}";
+                SetRecord(c, ModState.Failed, why);
+                _host.Log(LogLevel.Warn, $"mod {m.Id} not loaded: {why}");
+                continue;
+            }
             if (!LoadCore(c.Directory, m, out var error))
             {
                 SetRecord(c, ModState.Failed, error);
@@ -490,10 +504,18 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
             return false;
         }
         var dependencies = DependencyClosure(manifest);
-        var alc = new ModLoadContext(manifest.Id, directory, dependencies.Count > 0 ? name => ResolveExport(dependencies, name) : null);
         ulong owner = 0;
+        uint gameplayRequested = 0;
+        var alc = new ModLoadContext(manifest.Id, directory, dependencies.Count > 0 ? name => ResolveExport(dependencies, name) : null,
+            loaded: assembly => {
+                var demand=GameplayBuildDemand.GroupsFor(assembly) & ~gameplayRequested;
+                if (demand!=0) {
+                    gameplayRequested |= demand; GameplayBuildDemand.Request(_host, owner,demand);
+                }
+            });
         try
         {
+            owner = _host.OwnerCreate("mod:" + manifest.Id);
             Kiln.Mod instance;
             if (!manifest.HasCode)
                 instance = new DataOnlyMod();  // no entryAssembly: a mod of data (content packs, assets), with nothing to run
@@ -507,7 +529,6 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
                 if (!type.IsSubclassOf(typeof(Kiln.Mod))) throw new InvalidDataException($"{type} does not derive from Kiln.Mod");
                 instance = (Kiln.Mod)Activator.CreateInstance(type)!;
             }
-            owner = _host.OwnerCreate("mod:" + manifest.Id);
             var context = HostAccess.CreateContext(Info(manifest, directory), owner, System.IO.Path.Combine(_dataDirectory, manifest.Id));
             HostAccess.Bind(instance, context);
             var mod = new LoadedMod
@@ -620,6 +641,99 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
     [MethodImpl(MethodImplOptions.NoInlining)]
     private WeakReference UnloadOne(LoadedMod mod, ModState state, string? reason)
     {
+        // services close what calls into the mod from other threads first (its natives), so OnUnload runs alone; while
+        // a call they let in is still inside, OnUnload and the disposal wait for it (a later Pre)
+        if (WaitsForQuiet(mod, () => FinishUnload(mod, state, reason), "unload")) return new WeakReference(mod.Context);
+        return FinishUnload(mod, state, reason);
+    }
+
+    // ---- unloads that wait for a call into the mod's code from another thread ----
+    // ModContext.UnloadStarting: a service whose calls into the mod run on the game's threads (kiln.abilities' natives)
+    // closes them at the start of the unload and says when one is still inside after its bounded wait. OnUnload and the
+    // disposal then run in a later Pre, once nothing is inside: never forced (kiln.abilities' watchdog names a call
+    // inside for over a second). The mod keeps its place meanwhile (the same id cannot load twice); a reload's load waits
+    // with it. A mod whose dependent still waits waits too (the call inside the dependent may use the dependency's code
+    // or state), so the deferred unloads keep the order of ordinary ones: dependents first. At shutdown what still waits
+    // after ShutdownWait is skipped (its OnUnload and disposal), in that order, never forced.
+
+    private sealed record WaitingUnload(LoadedMod Mod, Action Finish, long Since, string What);
+
+    private readonly List<WaitingUnload> _waitingUnloads = [];
+    private readonly List<(HashSet<string> Ids, Action Then)> _afterUnloads = [];
+
+    /// <summary>How long the shutdown waits for a call still inside a mod's code before it skips that mod's OnUnload.</summary>
+    internal static TimeSpan ShutdownWait = TimeSpan.FromSeconds(5);
+
+    /// <summary>Whether mod <paramref name="id"/>'s unload waits for a call inside its code.</summary>
+    internal bool UnloadWaiting(string id) => _waitingUnloads.Exists(w => w.Mod.Id == id);
+
+    private bool WaitsForQuiet(LoadedMod mod, Action finish, string what)
+    {
+        var waiting = _waitingUnloads.FindIndex(w => ReferenceEquals(w.Mod, mod));
+        if (waiting >= 0)
+        {
+            // An unload/reload requested during a deferred disable must still remove the old context.
+            if (what == "unload" && _waitingUnloads[waiting].What == "disable")
+                _waitingUnloads[waiting] = _waitingUnloads[waiting] with { Finish = finish, What = what };
+            return true;
+        }
+        var inside = mod.ModContext.BeginUnload();  // its own admission closes now in any case
+        var waits = WaitsFor(mod, inside);
+        if (waits is null) return false;
+        _waitingUnloads.Add(new WaitingUnload(mod, finish, Stopwatch.GetTimestamp(), what));
+        _host.Log(LogLevel.Warn, $"mod {mod.Id}: its {what} waits: {waits}; OnUnload and the disposal run when that is over");
+        return true;
+    }
+
+    // What mod's unload still waits for, or null: a call inside its own code (`inside`, the unload steps' answer), and
+    // the waiting unloads of mods that depend on it, directly or through another.
+    private string? WaitsFor(LoadedMod mod, string? inside)
+    {
+        var dependents = Dependents(mod.Id).Where(d => _waitingUnloads.Exists(w => ReferenceEquals(w.Mod, d))).Select(d => d.Id).ToList();
+        var deps = dependents.Count switch
+        {
+            0 => null,
+            1 => $"its dependent {dependents[0]} still waits",
+            _ => $"its dependents {string.Join(", ", dependents)} still wait",
+        };
+        return inside is null ? deps : deps is null ? inside : $"{inside}; {deps}";
+    }
+
+    // Pre: the waiting unloads whose calls left go on, then what waited for them (a reload's load).
+    private void FinishWaitingUnloads()
+    {
+        if (_waitingUnloads.Count == 0) return;
+        var done = false;
+        // dependents were added first: one pass in order finishes a dependent before its dependency; passes repeat
+        // while one goes on
+        for (var progress = true; progress;)
+        {
+            progress = false;
+            for (var i = 0; i < _waitingUnloads.Count; i++)
+            {
+                var w = _waitingUnloads[i];
+                if (WaitsFor(w.Mod, w.Mod.ModContext.UnloadWaitsFor()) is not null) continue;
+                _waitingUnloads.RemoveAt(i--);
+                _host.Log(LogLevel.Info, $"mod {w.Mod.Id}: what its {w.What} waited for is over after {Stopwatch.GetElapsedTime(w.Since).TotalSeconds:0.0} s: it goes on");
+                w.Finish();
+                done = progress = true;
+            }
+        }
+        if (!done) return;
+        UnloadCaches.Clear(_host.Log);
+        PublishSnapshot();
+        for (var i = 0; i < _afterUnloads.Count; i++)
+        {
+            var (ids, then) = _afterUnloads[i];
+            if (ids.Any(UnloadWaiting)) continue;
+            _afterUnloads.RemoveAt(i--);
+            then();
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private WeakReference FinishUnload(LoadedMod mod, ModState state, string? reason)
+    {
         if (mod.Loaded && !mod.Disabled) Invoke(mod, static m => m.Instance.OnUnload(), "OnUnload");
         mod.ModContext.Retire();
         foreach (var other in _mods)
@@ -646,7 +760,22 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
     public void UnloadAll(string reason)
     {
         ChangeNoticeQueue.FlushFinal(reason);
-        for (var i = _mods.Count - 1; i >= 0; i--) UnloadOne(_mods[i], ModState.Unloaded, reason);
+        _afterUnloads.Clear();  // shutdown must never resume a previously queued reload
+        for (var i = _mods.Count - 1; i >= 0; i--)
+            UnloadOne(_mods[i], ModState.Unloaded, reason);  // also upgrade a waiting disable to a full unload
+        // no Pre follows: wait here for the calls still inside, then skip what still waits (never forced)
+        var sw = Stopwatch.StartNew();
+        while (_waitingUnloads.Count > 0 && sw.Elapsed < ShutdownWait)
+        {
+            FinishWaitingUnloads();
+            if (_waitingUnloads.Count > 0) Thread.Sleep(1);
+        }
+        // dependents first (the order they began to wait in), each with what it still waits for
+        foreach (var w in _waitingUnloads)
+            _host.Log(LogLevel.Error, $"mod {w.Mod.Id}: its OnUnload and disposal are skipped at {reason}: " +
+                                      $"{WaitsFor(w.Mod, w.Mod.ModContext.UnloadWaitsFor()) ?? "a call"} after {sw.Elapsed.TotalSeconds:0.0} s");
+        _waitingUnloads.Clear();
+        _afterUnloads.Clear();
         ChangeNoticeQueue.FlushFinal(reason);  // what the unloads' writes left waiting: no step follows for it either
         UnloadCaches.Clear(_host.Log);
         PublishSnapshot();
@@ -688,8 +817,22 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
             cascade.AddRange(dependents.Select(d => d.Id));
             mod = null;
             Unload(id, ModState.Unloaded, "reloading", out _, out _);
+            var waiting = new HashSet<string>(cascade.Prepend(id).Where(UnloadWaiting), StringComparer.Ordinal);
+            if (waiting.Count > 0)
+            {
+                // the new load waits for the old one's unload: same id, same folder
+                var dirs = directories.ToList();
+                _afterUnloads.Add((waiting, () => FinishReload(id, dirs, cascade)));
+                return new ModOperationResult(true, $"reloading {id}: its unload waits for a call still inside " +
+                    $"{string.Join(", ", waiting)}; it loads again when that call leaves", [id, .. cascade]);
+            }
         }
         else directories.Add(record!.Directory);
+        return FinishReload(id, directories, cascade);
+    }
+
+    private ModOperationResult FinishReload(string id, List<string> directories, List<string> cascade)
+    {
         foreach (var f in FailedDependents([id, .. cascade]))
             if (!directories.Contains(f.Directory))
                 directories.Add(f.Directory);
@@ -800,6 +943,7 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
     public void Pre(in TickInfo tick, IReadOnlyList<(LogLevel Level, string Text)> gameLines)
     {
         while (_unobserved.TryDequeue(out var lost)) AttributeUnobserved(lost);
+        FinishWaitingUnloads();
         foreach (var mod in _mods)
         {
             if (mod.Disabled) continue;
@@ -883,10 +1027,12 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
         {
             if (m.Calls == 0) continue;
             double ms(long ticks) => ticks * 1000.0 / Stopwatch.Frequency;
+            // "max Z ms (pre A / post B)": one field for readers that know only "max Z ms" (no ", " inside)
             yield return $"{m.Id}: pre {ms(m.PreTicks) / m.Calls:F4} ms/step, post {ms(m.PostTicks) / m.Calls:F4} ms/step, " +
-                         $"max {ms(m.MaxTicks):F3} ms, {ms(m.PreTicks + m.PostTicks) / seconds:F3} ms/s, faults {m.Faults}" +
+                         $"max {ms(m.MaxTicks):F3} ms (pre {ms(m.PreMaxTicks):F3} / post {ms(m.PostMaxTicks):F3}), " +
+                         $"{ms(m.PreTicks + m.PostTicks) / seconds:F3} ms/s, faults {m.Faults}" +
                          (m.Disabled ? " (disabled)" : "");
-            m.PreTicks = m.PostTicks = m.MaxTicks = m.Calls = 0;
+            m.PreTicks = m.PostTicks = m.MaxTicks = m.PreMaxTicks = m.PostMaxTicks = m.Calls = 0;
         }
     }
 
@@ -921,11 +1067,13 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
             mod.TotalPreTicks += ticks;
             mod.Calls++;
             mod.TotalCalls++;
+            if (ticks > mod.PreMaxTicks) mod.PreMaxTicks = ticks;
         }
         else
         {
             mod.PostTicks += ticks;
             mod.TotalPostTicks += ticks;
+            if (ticks > mod.PostMaxTicks) mod.PostMaxTicks = ticks;
         }
         if (ticks > mod.MaxTicks) mod.MaxTicks = ticks;
         if (ticks > mod.TotalMaxTicks) mod.TotalMaxTicks = ticks;
@@ -983,8 +1131,11 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
     {
         var policy = _options.Faults;
         mod.Disabled = true;
-        mod.ModContext.Retire();
-        _host.OwnerRevoke(mod.Owner);
+        if (!WaitsForQuiet(mod, () => { mod.ModContext.Retire(); _host.OwnerRevoke(mod.Owner); }, "disable"))
+        {
+            mod.ModContext.Retire();
+            _host.OwnerRevoke(mod.Owner);
+        }
         var window = policy.WindowSeconds > 0 ? $" within {policy.WindowSeconds:0.#} s" : "";
         if (RecordById(mod.Id) is { } r)
         {

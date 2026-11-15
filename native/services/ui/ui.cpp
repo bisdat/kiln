@@ -20,10 +20,12 @@
 #include "key_names.h"
 #include "safetyhook.hpp"
 #include "services/kiln_progress.h"
+#include "services/kiln_caps.h"
 #include "services/kiln_render.h"
 #include "ui.h"
 #include "load_hook.h"
 #include "slider.h"
+#include "overlay_guard_runtime.h"
 #include "draw_slots.h"
 
 namespace kui {
@@ -67,8 +69,8 @@ std::unordered_map<KilnHandle, std::shared_ptr<CallbackLifetime>> g_retiring_sub
 // thread may hold the loader lock. Neither call waits for another thread: each lets one thread work and the others pass.
 void after_library_load() {
     // every load: vulkan-1.dll present and our hooks not in its code (first load, or a reload) -> (re)install
-    if (GetModuleHandleW(L"vulkan-1.dll")) vk_install();
-    input_hook_xinput();
+    if (overlay_drawing_on() && GetModuleHandleW(L"vulkan-1.dll")) vk_install();
+    if (overlay_drawing_on()) input_hook_xinput();
 }
 
 // Calls a native frame callback under a fault guard (the game's render thread must survive a bad subscriber).
@@ -142,6 +144,9 @@ bool imgui_create(HWND hwnd, float dpi) {
     io.IniFilename = g_ini_path.empty() ? nullptr : g_ini_path.c_str();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad | ImGuiConfigFlags_NoMouseCursorChange;
     io.MouseDrawCursor = false;
+    // By default ImGui opens a "conflicting ID" popup for programmers over the game when two items share an id, in Kiln's
+    // own pages or in a mod's window. Players cannot act on it: off (ImGui's advice for non-programmer builds).
+    io.ConfigDebugHighlightIdConflicts = false;
     if (!ImGui_ImplWin32_Init(hwnd)) {
         set_error("ImGui Win32 backend failed");
         ImGui::DestroyContext();
@@ -234,7 +239,7 @@ bool dispatch_key(const KilnUiKey& key, bool mouse) {
     // punctuation key is the key at its place on any layout (key_names.h), as for Kiln.Ui's bindings
     if (key.down && !key.repeat && !key.text_input && keys::matches(g_menu_vk.load(), key.vk, key.scan) &&
         key.mods == g_menu_mods.load()) {
-        if (page_menu_key()) return true;
+        if (overlay_drawing_on() && page_menu_key()) return true;
         g_menu_open = !g_menu_open.load();
         logf(KILN_LOG_DEBUG, "ui: Kiln menu %s", g_menu_open ? "open" : "closed");
         return true;
@@ -263,7 +268,7 @@ KilnResult KILN_CALL t_status(KilnUiStatus* out) {
     if (!out || out->size < sizeof(KilnUiStatus)) return KILN_ERR_INVALID_ARGUMENT;
     std::memset(out, 0, sizeof *out);
     out->size = sizeof *out;
-    vk_status(out);
+    if (overlay_drawing_on()) vk_status(out);
     out->window = input_attached() ? 1 : 0;
     out->menu_open = g_menu_open.load() || page_active() ? 1 : 0;  // the Kiln menu shows, in either host
     out->capturing = capturing() ? 1 : 0;
@@ -272,7 +277,7 @@ KilnResult KILN_CALL t_status(KilnUiStatus* out) {
         out->subscribers = static_cast<uint32_t>(g_frame_subs.size() + keys_count());
     }
     std::lock_guard<std::mutex> lk(g_err_mu);
-    std::snprintf(out->error, sizeof out->error, "%s", g_error);
+    std::snprintf(out->error, sizeof out->error, "%s", overlay_drawing_on() ? g_error : g_overlay_reason.c_str());
     return KILN_OK;
 }
 
@@ -368,8 +373,8 @@ void per_caller(PerCaller& pc, std::atomic<uint32_t>& published, void* ret, uint
     published.store(static_cast<uint32_t>(std::min<uint64_t>(sum, UINT32_MAX)));
 }
 
-void KILN_CALL t_set_demand(uint32_t n) { per_caller(g_demand_by, g_demand, _ReturnAddress(), n); }
-void KILN_CALL t_set_capture(uint32_t n) { per_caller(g_capture_by, g_interactive, _ReturnAddress(), n); }
+void KILN_CALL t_set_demand(uint32_t n) { if (!overlay_drawing_on()) return; per_caller(g_demand_by, g_demand, _ReturnAddress(), n); }
+void KILN_CALL t_set_capture(uint32_t n) { if (!overlay_drawing_on()) return; per_caller(g_capture_by, g_interactive, _ReturnAddress(), n); }
 void KILN_CALL t_set_menu(int32_t open) {
     // the game page counts as the Kiln menu: closing (or toggling) the menu leaves it; opening keeps it
     if (page_active()) {
@@ -395,16 +400,17 @@ KilnResult KILN_CALL t_menu_add(KilnOwner o, uint32_t menu, int32_t order, KilnS
     return game_menu_add(o, menu, order, text, fn, u, out);
 }
 KilnResult KILN_CALL t_menu_set(KilnHandle e, KilnStr text, uint32_t flags) { return game_menu_set(e, text, flags); }
-KilnHandle KILN_CALL t_image_load(KilnOwner o, const void* png, size_t len) { return image_load(o, png, len); }
+KilnHandle KILN_CALL t_image_load(KilnOwner o, const void* png, size_t len) { if (!overlay_drawing_on()) return 0; return image_load(o, png, len); }
 bool KILN_CALL t_image_size(KilnHandle h, uint32_t* w, uint32_t* hh) { return image_size(h, w, hh); }
 void KILN_CALL t_image_free(KilnHandle h) { image_free(h); }
-void KILN_CALL t_set_hover_capture(uint32_t n) { g_hover_panels = n; }
+void KILN_CALL t_set_hover_capture(uint32_t n) { if (overlay_drawing_on()) g_hover_panels = n; }
 KilnResult KILN_CALL t_wheel_open(KilnOwner o, const KilnUiWheel* def, KilnUiWheelFn fn, void* user, KilnHandle* out) {
     return wheel_open(o, def, fn, user, out);
 }
 KilnResult KILN_CALL t_wheel_close(KilnHandle h) { return wheel_close(h); }
 bool KILN_CALL t_wheel_active() { return wheel_active(); }
 KilnResult KILN_CALL t_subscribe_pre_overlay(KilnOwner, KilnUiPreOverlayFn fn, KilnUiSwapchainGoneFn gone, void* user, KilnHandle* out) {
+    if (!overlay_drawing_on()) return KILN_ERR_UNAVAILABLE;
     return vk_subscribe_pre_overlay(fn, gone, user, out);
 }
 
@@ -451,9 +457,11 @@ static_assert(offsetof(KilnUiApi, subscribe_window_input) == offsetof(KilnUiApi,
 static_assert(offsetof(KilnUiApi, menu_shown) == offsetof(KilnUiApi, subscribe_window_input) + sizeof(void*) &&
                   offsetof(KilnUiApi, menu_scroll) == offsetof(KilnUiApi, menu_shown) + 3 * sizeof(void*),
               "kiln.ui v6 appends menu_shown, menu_entries, menu_activate, menu_scroll after subscribe_window_input");
-static_assert(offsetof(KilnUiApi, subscribe_key_ex) == offsetof(KilnUiApi, menu_scroll) + sizeof(void*) &&
-                  sizeof(KilnUiApi) == offsetof(KilnUiApi, subscribe_key_ex) + sizeof(void*),
+static_assert(offsetof(KilnUiApi, subscribe_key_ex) == offsetof(KilnUiApi, menu_scroll) + sizeof(void*),
               "kiln.ui v7 appends subscribe_key_ex after menu_scroll (UiNative.Table7)");
+static_assert(offsetof(KilnUiApi, set_next_window_size_constraints) == offsetof(KilnUiApi, subscribe_key_ex) + sizeof(void*) &&
+                  sizeof(KilnUiApi) == offsetof(KilnUiApi, set_next_window_size_constraints) + sizeof(void*),
+              "kiln.ui appends size constraints after subscribe_key_ex");
 static_assert(sizeof(KilnUiMenuEntry) == 40 && offsetof(KilnUiMenuEntry, entry) == 8 && offsetof(KilnUiMenuEntry, text) == 16 &&
                   offsetof(KilnUiMenuEntry, drawn) == 36,
               "KilnUiMenuEntry layout (UiNative.MenuEntryInfo)");
@@ -497,6 +505,7 @@ const KilnUiApi kTable = {
     &t_menu_shown, &t_menu_entries, &t_menu_activate, &t_menu_scroll,
     // v7
     &t_subscribe_key_ex,
+    &t_set_next_window_size_constraints,
 };
 
 std::string api_path(int kind) {
@@ -539,6 +548,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
         logf(KILN_LOG_INFO, "ui: disabled by KILN_UI_DISABLE=1");
         return KILN_ERR_UNAVAILABLE;
     }
+    overlay_guard_start();
     try {
         const std::string data = api_path(KILN_PATH_DATA);
         if (!data.empty()) {
@@ -553,8 +563,14 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     const bool game = game_install();
     render_install();  // kiln.render's camera (screen drawing works without it)
     info->on_ready = [](void*) { game_ready(); };
+    // the process exits with code 0 (kiln_api.h on_unload: under Wine, and on Windows where kiln.json turns it on): the
+    // scrolling pause menu's crash guard knows the game did not end in its calls (menu_scroll.cpp)
+    if (info->size >= offsetof(KilnPluginInfo, on_unload) + sizeof(info->on_unload))
+        info->on_unload = [](void*) { scroll_exit(); };
     // the cursor import slots are patched once vulkan-1.dll loads (vk_install), long after the exe's own start-up code
-    if (GetModuleHandleW(L"vulkan-1.dll")) {
+    if (!overlay_drawing_on()) {
+        // No Vulkan load observer, exports, objects or pre-overlay callbacks in this mode.
+    } else if (GetModuleHandleW(L"vulkan-1.dll")) {
         vk_install();
     } else {
         if (!load_hook::install(&after_library_load)) {
@@ -565,5 +581,14 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     }
     if (game) api->register_service(owner, KilnStr{KILN_UI_TICK_SERVICE, sizeof(KILN_UI_TICK_SERVICE) - 1}, &kTickTable);
     api->register_service(owner, KilnStr{KILN_RENDER_SERVICE, sizeof(KILN_RENDER_SERVICE) - 1}, render_table());
-    return api->register_service(owner, KilnStr{KILN_UI_SERVICE, sizeof(KILN_UI_SERVICE) - 1}, &kTable);
+    const auto result = api->register_service(owner, KilnStr{KILN_UI_SERVICE, sizeof(KILN_UI_SERVICE) - 1}, &kTable);
+    if (!overlay_drawing_on()) {
+        const auto* caps = static_cast<const KilnCapsApi*>(api->service(KilnStr{KILN_CAPS_SERVICE, sizeof(KILN_CAPS_SERVICE)-1}, 1));
+        if (caps && caps->report) {
+            for (const char* name : {"ui.windows", "ui.draw", "ui.menu_page", "render.draw", "kiln.screen"})
+                caps->report(owner, KilnStr{name, std::strlen(name)}, KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY,
+                             KilnStr{g_overlay_reason.data(), g_overlay_reason.size()});
+        }
+    }
+    return result;
 }

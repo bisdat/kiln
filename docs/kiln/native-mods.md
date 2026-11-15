@@ -85,6 +85,15 @@ __declspec(dllexport) int KILN_CALL kiln_native_init(const KilnNativeContext* ct
 - `api->service(KilnStr{"kiln.profile", 12}, 1)` answers in every phase, safe idle included.
 Sample: `native/samples/native-mod/` (phase boot). Template for tests: `native/samples/native-test/`.
 
+**Service headers, one name per struct.** `services/kiln_world.h` and `services/kiln_abilities.h` each had a struct named
+`KilnProgramInfo` (a Kiln ECS program's state; an Impact program in the ImpactRegistry), so no translation unit could
+include both. Since 0.2.0-dev.29 they are `KilnWorldProgramInfo` (kiln.world's `program_info`) and
+`KilnImpactProgramInfo` (kiln.abilities' `program_info`), with the same layouts. Write those names. `KilnProgramInfo`
+still compiles as an alias of the struct of whichever of the two headers comes first in the file
+(`KILN_PROGRAM_INFO_ALIAS` is 1 for kiln_world.h's, 2 for kiln_abilities.h's), so code that includes one header keeps
+building; in a file with both, the old name means the first header's struct. `native/core/tests/test-abi-headers.sh`
+compiles both orders (C and C++).
+
 ## At exit: `on_unload` (plugins only, not native mods)
 A native mod gets no call at exit. A plugin (`kiln_plugin_main`, `kiln_api.h`) may set `KilnPluginInfo.on_unload`:
 Kiln calls it once when the game process exits normally with code 0, at the process's exit call: after the game saved,

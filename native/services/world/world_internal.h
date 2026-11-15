@@ -130,8 +130,12 @@ struct Layout {
     int64_t reg_components = -1, reg_templates = -1, reg_singletons = -1, reg_events = -1;  // map bases in the registry
     MapFields map;
     int64_t storage_entities = -1, entity_layout = -1;
+    int64_t entity_id = -1;  // u32 entity id in an entity record (spawn/record.id): a record names the entity it is of
     int64_t tp_applied = -1, tp_find_ground = -1, tp_target_entity = -1, tp_add_size = -1, tp_remove_size = -1;
     int64_t actor_state = -1;
+    // the engine's slice record that types/ProgramRunner runs (world.slice_record): its program-table entry, archetype
+    // layout and first/end rows
+    int64_t slice_entry = -1, slice_layout = -1, slice_first = -1, slice_end = -1;
 };
 extern Layout L;
 
@@ -146,6 +150,21 @@ extern std::atomic<uintptr_t> g_world;         // server world (set by the progr
 extern std::atomic<uint64_t> g_internal_runs;  // updates of kiln.world's own program
 extern std::atomic<bool> g_world_live;         // our program ran during the previous step
 extern thread_local bool t_in_program;         // inside a Kiln program update on this thread
+
+// The one question every KILN_WORLD_STOPPING handler of kiln.world asks (the wrap drain, the client-world programs' stop):
+// were this world kind's jobs drained by the engine before STOPPING, or is there only the handler's own bounded wait?
+// The core answers it with its capability rows world.stop_drain.server / .client / .prediction (since 0.2.0-dev.29,
+// native/core/src/tick_drain.h): available = the core ran the game's WaitWorldJobs on the world (the prediction world:
+// on the client world it stops with) before dispatching STOPPING. engine is false for an unavailable row and for a core
+// without the rows. text: a few words for a log line or a capability text ("the engine drains the world's jobs first
+// (world.stop_drain.client)" / "a bounded wait (2000 ms) only (...)"); wait_ms is the handler's own bound, for the
+// words only. Any thread. Call it without kiln.world's own locks held: kiln.caps may call its subscribers on this
+// thread.
+struct StopDrain {
+    bool engine = false;
+    std::string text;
+};
+StopDrain world_stop_drain(uint32_t kind, uint32_t wait_ms);
 
 inline uintptr_t registry_of(uintptr_t world) {
     return *reinterpret_cast<const uintptr_t*>(world + L.world_storage);
@@ -162,6 +181,7 @@ bool seh_each(KilnProgramEachFn fn, KilnProgramCtx* ctx, uint64_t* iter, KilnEnt
 bool seh_update(KilnProgramUpdateFn fn, KilnProgramCtx* ctx, void* user, unsigned long* code);
 bool seh_teleport_cb(KilnTeleportFn fn, const KilnTeleportResult* r, void* user, unsigned long* code);
 bool seh_register_program(RegisterProgramFn fn, uintptr_t world, const EngineDesc* d, bool* ok, unsigned long* code);
+bool seh_call(void (*fn)(void*), void* ctx, unsigned long* code);  // fn(ctx) under the structured-exception guard
 bool seh_iter_begin(void* ctx, void* iter, uint32_t size, unsigned long* code);
 bool seh_iter_next(void* ctx, void* iter, uint32_t size, bool* more, unsigned long* code);
 bool seh_get_component(uintptr_t world, uint32_t hash, uint32_t entity, Slice* out);
@@ -177,6 +197,13 @@ KilnResult register_program(KilnOwner owner, const KilnProgramDesc* desc, KilnHa
 int32_t program_slot(KilnHandle h, int32_t kind, KilnStr name);
 KilnResult program_info(KilnHandle h, KilnProgramInfo* out);
 uint32_t programs_registered();
+uint32_t program_quota();  // kiln.world's own quota of programs (64 since 0.2.0-dev.29)
+struct ProgramLedger {
+    uint32_t taken = 0, active = 0;  // slots held; of them, in active use
+    std::vector<uintptr_t> descs;    // the descriptors of Kiln's programs (sorted): its entries in a world's table
+};
+ProgramLedger program_ledger();
+bool program_budget_register();  // kiln.world.budget (program_budget.cpp), after kiln.world's own table
 uint32_t engine_program_count(uintptr_t world);
 KilnResult iter_begin(KilnProgramCtx* ctx, uint64_t* iter, uint32_t size);
 bool iter_next(KilnProgramCtx* ctx, uint64_t* iter, uint32_t size);
@@ -192,6 +219,7 @@ void* write_other(KilnProgramCtx* ctx, uint64_t accessor, KilnEntity entity, uin
 KilnResult unregister_program(KilnHandle program);
 void programs_reap_owners();
 void boot_programs_init();
+KilnResult KILN_CALL program_reservation(KilnStr mod, KilnStr key, char* text, uint32_t capacity, uint32_t* out_size);
 KilnResult reserve_program(const std::string& mod, const std::string& key, const KilnProgramDesc* desc);
 KilnResult KILN_CALL bind_program(KilnOwner owner, KilnStr mod, KilnStr key, KilnProgramEachFn each, void* user, KilnHandle* out);
 uint32_t KILN_CALL program_capabilities();
@@ -203,6 +231,24 @@ const KilnTypesApi* program_types();  // kiln.types, or null
 // `removed`), instead of being refused whole. Before the first server world registers.
 using ProgramPrunedFn = void (*)(std::string_view name);
 void program_set_prune(KilnHandle program, ProgramPrunedFn removed);
+
+// ---- programs.cpp: Kiln programs in a client's client world and prediction storage (since 0.2.0-dev.29) ----
+// Which worlds a program is for (a boot reservation's "world"): bit (1 << KILN_WORLD_*).
+constexpr uint32_t kWorldBitServer = 1u << KILN_WORLD_SERVER, kWorldBitPrediction = 1u << KILN_WORLD_PREDICTION,
+                   kWorldBitClient = 1u << KILN_WORLD_CLIENT;
+// boot: world.programs.client's inputs (a client, the RegisterAllPrograms hook, the maps, world.lifecycle, the client
+// world's tick and world events); reports the row. Before boot_programs_init (its reservations need to know).
+void programs_client_init(bool client_tick, bool world_events);
+bool programs_client_on();                                // world.programs.client is available
+bool in_client_program();  // a Kiln client or prediction program's call runs on this thread (0.2.0-dev.29)
+void programs_client_pre(const KilnTickInfo* tick);       // the client world's Pre (main thread)
+void programs_world_event(const KilnWorldEvent* event);   // a world starts or stops
+KilnResult reserve_program_world(const std::string& mod, const std::string& key, const KilnProgramDesc* desc, uint32_t worlds, uint32_t declared_worlds = 0);
+KilnResult KILN_CALL register_program_world(KilnOwner owner, uint32_t kind, const KilnProgramDesc* desc, KilnHandle* out);
+KilnResult KILN_CALL program_world_state(KilnHandle program, uint32_t kind, int32_t* state, KilnStr* reason);
+KilnResult KILN_CALL bind_program_world(KilnOwner owner, KilnStr mod, KilnStr key, uint32_t kind, KilnProgramEachFn each,
+                                        KilnProgramUpdateFn update, void* user, KilnHandle* out);
+KilnResult KILN_CALL unbind_program_world(KilnHandle binding);
 
 // ---- writes.cpp: tracked writes (kiln.world v3) ----
 bool writes_available();
@@ -261,6 +307,8 @@ int32_t KILN_CALL game_program_find(uint32_t kind, KilnStr name);
 KilnResult KILN_CALL game_program_info(uint32_t kind, int32_t index, KilnGameProgramInfo* out);
 KilnResult KILN_CALL game_programs_status(KilnGameProgramsStatus* out);
 KilnResult KILN_CALL lab_parallel(uint32_t on, uint32_t steps);
+void game_programs_test_hold_directory_lock(bool hold);  // tests: hold the lock a directory read takes
+uint64_t game_programs_test_directory_bypasses();
 void game_programs_test_setup(uintptr_t image_lo, uintptr_t image_hi, bool table_ok, int64_t players_mask,
                               bool switch_enabled);  // host tests only
 

@@ -25,8 +25,11 @@
 #include <memory>
 #include <unordered_map>
 #include <utility>
+#include <thread>
 
+#include "layout.h"
 #include "services/kiln_caps.h"
+#include "services/kiln_hooks.h"
 #include "wraps.h"
 
 namespace kw {
@@ -35,16 +38,32 @@ namespace {
 constexpr uint32_t kOverrunsToDisable = 10;
 constexpr size_t kFinishedKept = 1024;   // removed and refused wraps kept for game_wrap_info
 constexpr uint32_t kCoolingPres = 2;     // Pres with nothing in flight before a restored slot is used again
+std::atomic<uint32_t> g_stop_wait_ms{2000};
 std::atomic<uint64_t> g_budget_ns{1000000};  // 1 ms per stage per slice
 
 thread_local bool t_in_slice = false;
 
 struct Stage;
+
+// A wrapped program's iterator view in the current world (layout.h's algorithm on its descriptor, by type index),
+// made in Pre with the program's first chain and shared by its later chains. checked: the first slice compares it
+// with the engine's counts (0 not yet, 1 equal, 2 different: no slot from it).
+struct View {
+    bool ok = false;
+    std::string why;
+    ProgramLayout layout;
+    std::vector<uint8_t> attributes[L_COUNT];
+    std::vector<uint32_t> sizes[L_COUNT];  // the reflected size of each name (0: not known)
+    mutable std::atomic<int> checked{0};
+    mutable std::atomic<bool> logged{false};
+};
+
 struct Chain {  // immutable once published
     std::vector<Stage*> before, after;  // in call order
     Stage* replace = nullptr;
     const std::string* program = nullptr;
     int32_t index = -1;
+    std::shared_ptr<const View> view;
 };
 
 struct Stage {
@@ -70,6 +89,7 @@ struct Stage {
     uint32_t refs = 0;            // chains (published, or retired and not yet freed) that hold it
     bool logged = false;
     char detail[128]{};
+    char stop[128]{};             // the last world stop's drain, while the stage waits for the next world (PENDING)
     // stats (slice path, relaxed)
     std::atomic<uint64_t> calls{0}, entities{0}, faults{0}, overruns{0}, ns{0};
     std::atomic<uint32_t> consecutive{0};
@@ -91,15 +111,18 @@ struct Slot {
 };
 
 struct Pool {
+    std::atomic<bool> stopping{false};
     uint32_t kind = 0;
     Slot slots[kWrapSlots];
 };
 Pool g_pools[kWrapPools];
 
-// Per pool and program (g_mu): the slot it holds in the current world, and what earlier slots of this world counted.
+// Per pool and program (g_mu): the slot it holds in the current world, what earlier slots of this world counted, and
+// its view (made once per world).
 struct Prog {
     int slot = -1;
     uint64_t slices = 0, entities = 0, forwarded = 0, faults = 0;
+    std::shared_ptr<const View> view;
 };
 
 struct Retired {
@@ -114,11 +137,40 @@ std::map<std::pair<int, const std::string*>, Prog> g_progs;
 std::vector<Retired> g_retired;
 KilnHandle g_next = 1;
 uint64_t g_seq = 0;
+bool g_client_ready = false;         // lifecycle and both client subscriptions succeeded
 bool g_ok = false;                    // the layout wraps need resolved
+bool g_counts_ok = false;             // the job's group counts resolved (per-entity iteration and slots)
+using AttrChangedFn = void (*)(void* component, void* registry);
+AttrChangedFn g_attr_changed_fn = nullptr;  // the game's attribute formulas (items/AttrChanged)
 std::atomic<uint32_t> g_external{0};  // kiln.types' external runner, as last seen
 uint32_t g_external_pre = 0;          // as the last Pre saw it (g_mu): what the capability row says
 const KilnCapsApi* g_wrap_caps = nullptr;
 std::atomic<uint32_t> g_active{0}, g_pending{0};
+uintptr_t(KILN_CALL* g_world_of)(uint32_t) = nullptr;  // KilnApi.world (null on a core without it)
+std::atomic<uint32_t> g_tick_closed{0};               // pools whose admission a faulted tick closed (bit per pool)
+
+// The archetype's scheduler-stable source (feature world.slice_record, since 0.2.0-dev.29). ProgramRunner (rdx = the
+// engine's slice record) reads the program's table entry from that record and calls entry+0x28, the update or a
+// trampoline: so a trampoline entered by the runner runs inside the runner call whose record is the slice's own. A
+// checked typed link scopes the record to the runner continuation: normal return, a downstream skip and exception
+// unwind restore the outer capture. Dispatch consumes it once; nested runner calls cannot steal the outer record.
+// The record's layout is the one the runner gave the column setup for this slice. The link is installed lazily in Pre;
+// until then, and wherever its descriptor/checked install is refused, only server slices use the narrowed map fallback.
+constexpr uint32_t kRecordAttempts = 8;   // checked installs tried, kRecordSpacing Pres apart
+constexpr uint32_t kRecordSpacing = 16;
+thread_local uintptr_t t_runner_record = 0;
+std::atomic<bool> g_record_live{false}, g_record_wanted{false}, g_record_gaveup{false}, g_record_busy{false};
+bool g_record_ok = false;                    // the feature, its constants, the runner and kiln.hooks' detour_typed_checked
+uintptr_t g_runner = 0;                      // types/ProgramRunner
+const KilnHooksApi* g_hooks_api = nullptr;
+std::atomic<uint32_t> g_record_attempts{0}, g_record_wait{0};
+std::atomic<uint64_t> g_arch_record[kWrapPools]{}, g_arch_map[kWrapPools]{}, g_arch_mismatch[kWrapPools]{};
+uintptr_t KILN_CALL runner_entry(KilnCallFrame* frame, void*) {
+    runner_scope(&t_runner_record, frame->gpr[1], +[](void* p) {
+        g_hooks_api->call_original_frame(static_cast<KilnCallFrame*>(p));
+    }, frame);
+    return KILN_TYPED_SKIP; // the continuation has already run, including its return fields
+}
 std::chrono::steady_clock::time_point g_next_reap{};
 
 // ---- the trampolines ----
@@ -160,6 +212,12 @@ struct Frame {
     int32_t stage;
     bool original_called;
     uint64_t original_ns;  // the game's update inside game_slice_run_original: not charged to the Replace
+    const Chain* chain;
+    uint64_t* iter;        // inside game_slice_iterate: the iterator, positioned on `entity`
+    KilnEntity entity;
+    uint64_t marked;       // write slots marked for `entity` (bit = position in the WRITE group)
+    uintptr_t entry;       // the program-table entry the trampoline stands in
+    uintptr_t record;      // the engine's slice record the runner link recorded (0: none)
 };
 thread_local Frame* t_frame = nullptr;
 
@@ -182,7 +240,7 @@ enum CallResult { CALL_RAN, CALL_FAULTED, CALL_SKIPPED };
 // One stage, through its gate. CALL_FAULTED: it faulted and is disabled from now on; CALL_SKIPPED: it is gone.
 CallResult call(Slot& s, Stage& st, KilnGameSlice& slice, Frame& f, int32_t stage) {
     st.calls_in.fetch_add(1, std::memory_order_seq_cst);
-    if (st.gone.load(std::memory_order_seq_cst)) {
+    if (st.gone.load(std::memory_order_seq_cst) || g_pools[st.pool].stopping.load(std::memory_order_seq_cst)) {
         st.calls_in.fetch_sub(1, std::memory_order_release);
         return CALL_SKIPPED;
     }
@@ -231,14 +289,14 @@ void finish_index(ProgramCtx* ctx, uint32_t count) {
     if (ctx->index != 0 && ctx->index < count) ctx->index = count;
 }
 
-void run(int pool, Slot& s, const Chain& c, ProgramCtx* ctx, UpdateFn orig) {
+void run(int pool, Slot& s, const Chain& c, ProgramCtx* ctx, UpdateFn orig, uintptr_t record) {
     const uint32_t kind = g_pools[pool].kind;
     uint64_t count64 = 0;
     std::memcpy(&count64, ctx->job + L.job_entity_count, 8);
     const uint32_t count = count64 > UINT32_MAX ? UINT32_MAX : static_cast<uint32_t>(count64);
     s.slices.fetch_add(1, std::memory_order_relaxed);
     s.entities.fetch_add(count, std::memory_order_relaxed);
-    Frame f{orig, ctx, count, -1, false, 0};
+    Frame f{orig, ctx, count, -1, false, 0, &c, nullptr, 0, 0, s.entry.load(std::memory_order_relaxed), record};
     KilnGameSlice slice{};
     slice.size = sizeof slice;
     slice.world_kind = kind;
@@ -283,19 +341,47 @@ bool kind_is(const ProgramCtx* ctx, uint32_t kind) {
     return storage && storage[L.storage_kind] == kind;
 }
 
+// The core's tick faulted: tick.cpp's disable() clears every world pointer and stops tick and world-event delivery, so
+// no STOPPING (and no drain) will come for this world. A slice that finds no world of its kind closes its pool's
+// admission for good (a faulted tick sends no STARTED to open it again) and says so once; the game's updates run
+// untouched from then on, and a stage already past call()'s gate finishes. While the tick works a wrapped slice always
+// has its world: trampolines go in only in that world's Pre, after the core set it, and STOPPING closes admission
+// before the core clears it.
+void report_row(const char* name, uint32_t state, uint32_t reason, const char* text);
+
+bool tick_gone(int pool) {
+    const auto world_of = g_world_of;
+    if (!world_of || world_of(g_pools[pool].kind)) return false;
+    if (!g_pools[pool].stopping.exchange(true, std::memory_order_seq_cst)) {
+        g_tick_closed.fetch_or(1u << pool);
+        KW_E("world %u: Kiln no longer knows this world (its tick hook faulted, so no world stop will be seen): wrap "
+             "admission is closed, the game's updates run untouched until a restart", g_pools[pool].kind);
+        // No registry lock is held; kiln.caps permits reports and notifications on this thread.
+        const char* why = "the tick hook faulted: wrap admission is closed until a restart";
+        if (g_pools[pool].kind == KILN_WORLD_CLIENT)
+            report_row("systems.wraps.client", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_FAULTED, why);
+        else {
+            report_row("systems.wraps", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_FAULTED, why);
+            report_row("systems.wraps.typed", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_FAULTED, why);
+        }
+    }
+    return true;
+}
+
 void dispatch(int pool, int slot, void* raw) {
     Slot& s = g_pools[pool].slots[slot];
     s.in_flight.fetch_add(1, std::memory_order_seq_cst);
     const UpdateFn orig = s.orig.load(std::memory_order_acquire);
     const Chain* c = s.chain.load(std::memory_order_seq_cst);
     auto* ctx = static_cast<ProgramCtx*>(raw);
-    if (!c || !kind_is(ctx, g_pools[pool].kind)) {
-        // no stage left, a slot kept for a foreign swap on top, or another storage (the prediction world runs the
-        // client world's table): the game's update, untouched
+    const uintptr_t record = g_record_live.load(std::memory_order_relaxed) ? std::exchange(t_runner_record, 0) : 0;
+    if (!c || g_pools[pool].stopping.load(std::memory_order_seq_cst) || !kind_is(ctx, g_pools[pool].kind) || tick_gone(pool)) {
+        // no stage left, a slot kept for a foreign swap on top, another storage (the prediction world runs the client
+        // world's table) or a faulted tick: the game's update, untouched
         s.forwarded.fetch_add(1, std::memory_order_relaxed);
         if (orig) orig(raw);
     } else if (orig) {
-        run(pool, s, *c, ctx, orig);
+        run(pool, s, *c, ctx, orig, record);
     }
     s.in_flight.fetch_sub(1, std::memory_order_release);
 }
@@ -335,6 +421,15 @@ uint32_t external_runner() {
     g_external.store(v, std::memory_order_relaxed);
     return v;
 }
+
+// systems.wraps.typed (Kiln.Systems' Systems.Wrap<T>) follows systems.wraps: a typed wrap is an untyped one whose view
+// Kiln checked against the live descriptor's contract (game_program_contract), which needs nothing more of the build.
+constexpr const char* kTypedText = "typed program views: each wrap checks the view's contract against the live descriptor";
+
+// The core's guarantee about a world kind's jobs at its STOPPING: world_stop_drain (world_internal.h, defined below).
+using DrainRow = StopDrain;
+DrainRow drain_row(uint32_t kind) { return world_stop_drain(kind, g_stop_wait_ms.load()); }
+std::string wraps_text(const char* what, uint32_t kind) { return std::string(what) + "; at a world stop " + drain_row(kind).text; }
 
 void report_row(const char* name, uint32_t state, uint32_t reason, const char* text) {
     if (g_wrap_caps && g_wrap_caps->report)
@@ -463,7 +558,7 @@ Chain* build_chain(int pool, const std::string* name, int32_t index) {
     auto first = [](const Stage* a, const Stage* b) { return a->priority != b->priority ? a->priority > b->priority : a->seq < b->seq; };
     std::sort(befores.begin(), befores.end(), first);
     std::sort(afters.begin(), afters.end(), [&](const Stage* a, const Stage* b) { return first(b, a); });
-    auto* c = new Chain{std::move(befores), std::move(afters), replace, name, index};
+    auto* c = new Chain{std::move(befores), std::move(afters), replace, name, index, nullptr};
     for (Stage* st : c->before) ++st->refs;
     for (Stage* st : c->after) ++st->refs;
     if (c->replace) ++c->replace->refs;
@@ -481,11 +576,49 @@ std::string module_of(uintptr_t address);  // below (Windows: the DLL that holds
 
 // A program's chain after this Pre's changes: installs the trampoline for its first stage, restores the update after
 // its last. Stages are ACTIVE (or not) already.
+std::shared_ptr<const View> make_view(int pool, const ProgramRef& ref) {
+    auto v = std::make_shared<View>();
+    const uintptr_t world = g_api->size >= offsetof(KilnApi, session) + sizeof(void*) ? g_api->world(g_pools[pool].kind)
+                                                                                       : g_world.load();
+    v->ok = world && game_layout(reinterpret_cast<const EngineDesc*>(ref.desc), world, v->layout, v->why);
+    if (v->ok) {
+        const KilnTypesApi* types = program_types();
+        for (int id = 0; id < L_COUNT; ++id) {
+            v->attributes[id].assign(v->layout.lists[id].names.size(), 0);
+            v->sizes[id].assign(v->layout.lists[id].names.size(), 0);
+            if (!types || kListMap[id] == M_SINGLETON || kListMap[id] == M_EVENT) continue;
+            for (size_t i = 0; i < v->layout.lists[id].names.size(); ++i) {
+                const std::string q = qualified(v->layout.lists[id].names[i]);
+                const KilnType* t = types->type_by_name(KilnStr{q.data(), q.size()});
+                KilnTypeInfo info{};
+                info.size = sizeof info;
+                if (t && types->type_info(t, &info) == KILN_OK) {
+                    v->sizes[id][i] = info.type_size;
+                    // Same bounded reflected-base walk as tracked writes' type_facts().
+                    for (unsigned depth = 0; depth < 16; ++depth) {
+                        if (sv(info.name) == "AttributeComponent") { v->attributes[id][i] = depth > 0; break; }
+                        if (!info.inner) break;
+                        const KilnType* inner = info.inner;
+                        info = KilnTypeInfo{};
+                        info.size = sizeof info;
+                        if (types->type_info(inner, &info) != KILN_OK) break;
+                    }
+                }
+            }
+        }
+    }
+    return v;
+}
+
 void settle(int pool, const std::string* name) {
     Prog& p = prog(pool, name);
     ProgramRef ref;
     const bool here = game_program_lookup(g_pools[pool].kind, *name, &ref);
     Chain* c = here ? build_chain(pool, name, ref.index) : nullptr;
+    if (c) {
+        if (!p.view) p.view = make_view(pool, ref);
+        c->view = p.view;
+    }
     if (p.slot >= 0) {
         if (c) publish(pool, p.slot, c);
         else restore(pool, p.slot, true);
@@ -547,15 +680,31 @@ void log_disabled(Stage& st) {
          st.program->c_str(), st.kind, static_cast<unsigned long long>(st.owner), st.detail);
 }
 
-// The core has no owner-liveness query: a post to a revoked owner fails. Probed at most once a second, so a revoked
-// owner's stages can run up to a second longer. To be replaced by kiln.hooks' subscribe_owner_retiring (03-camera S1,
-// row hooks.owner_cleanup) once that is on integration: then the stages go before the owner's code does.
+// A revoked owner's stages go at once through kiln.hooks' owner cleanup (subscribe_owner_retiring, row
+// hooks.owner_cleanup). Only where kiln.hooks lacks it (an older core) is the old probe used: the core has no
+// owner-liveness query, a post to a revoked owner fails; probed at most once a second, so there a revoked owner's
+// stages can run up to a second longer.
+bool g_retiring_subscribed = false;
 bool owner_revoked(KilnOwner owner) { return g_api->post(owner, [](void*) {}, nullptr) == KILN_ERR_REVOKED; }
 
 // Takes a stage out (g_mu): no call of it starts from here on; the next Pre removes it from its chain.
 void retire_stage(Stage& st, uint32_t reason) {
     if (!st.remove) st.remove = true, st.remove_reason = reason;
     st.gone.store(true, std::memory_order_seq_cst);
+}
+
+// kiln.hooks' owner cleanup: on the thread that revoked the owner, no core lock held. Nothing here waits for a stage
+// or calls game code: the stages are marked gone (a running one finishes, none starts) and their chains drop them in
+// the next Pre of their world.
+void KILN_CALL on_owner_retiring(KilnOwner retiring, void*) {
+    std::lock_guard lock(g_mu);
+    for (auto& [h, st] : g_stages) {
+        if (st->owner != retiring) continue;
+        const uint32_t s = st->state.load();
+        if (s == KILN_WRAP_PENDING) finish(*st, KILN_WRAP_REMOVED, KILN_WRAP_OWNER_GONE);
+        else if (s == KILN_WRAP_ACTIVE) retire_stage(*st, KILN_WRAP_OWNER_GONE);
+    }
+    count_states();
 }
 
 // Every stage of a pool back to PENDING (re-applied by name in the next world) or finished; slots restored (the world
@@ -595,29 +744,90 @@ uint32_t KILN_CALL in_program() {
 }
 
 void wraps_init() {
+    g_client_ready = false;
     g_by_address.clear();
     for (int p = 0; p < kWrapPools; ++p)
         for (int i = 0; i < kWrapSlots; ++i) g_by_address.push_back({reinterpret_cast<uintptr_t>(kTramps[p][i]), p, i});
     std::sort(g_by_address.begin(), g_by_address.end(), [](const TrampAt& a, const TrampAt& b) { return a.address < b.address; });
+    g_counts_ok = L.job_tpl_count >= 0 && L.job_read_count >= 0 && L.job_write_count >= 0 && L.job_singletons >= 0 &&
+                  L.singletons_count >= 0 && L.job_other_tpl_count >= 0 && L.job_other_count >= 0 &&
+                  L.job_events_in_count >= 0 && L.job_events_out_count >= 0;
     g_pools[0].kind = KILN_WORLD_SERVER;
     g_pools[1].kind = KILN_WORLD_CLIENT;
     g_ok = L.programs_table >= 0 && L.programs_count >= 0 && L.programs_stride > 0 && L.storage_kind >= 0 &&
            L.job_entity_count >= 0 && L.job_entity_list >= 0 && L.ctx_index == offsetof(ProgramCtx, index) &&
            g_api->feature(kstr("world.programs"));
     g_wrap_caps = static_cast<const KilnCapsApi*>(g_api->service(kstr(KILN_CAPS_SERVICE), 1));
-    if (g_ok)
-        report_row("systems.wraps", KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, "Before, After and Replace on the game's programs");
-    else
+    g_world_of = g_api->size >= offsetof(KilnApi, session) + sizeof(void*) ? g_api->world : nullptr;
+    {
+        uintptr_t address = 0;
+        if (g_api->symbol(kstr("items/AttrChanged"), &address) == KILN_OK) g_attr_changed_fn = reinterpret_cast<AttrChangedFn>(address);
+    }
+    const auto* hooks = static_cast<const KilnHooksApi*>(g_api->service(kstr(KILN_HOOKS_SERVICE), KILN_HOOKS_VERSION));
+    g_hooks_api = hooks && hooks->header.size >= offsetof(KilnHooksApi, detour_typed_checked) + sizeof(void*) && hooks->detour_typed_checked && hooks->call_original_frame
+                      ? hooks : nullptr;
+    g_runner = 0;
+    g_record_ok = g_hooks_api && L.slice_entry >= 0 && L.slice_layout >= 0 && L.slice_first >= 0 && L.slice_end >= 0 &&
+                  g_api->feature(kstr("world.slice_record")) &&
+                  g_api->symbol(kstr("types/ProgramRunner"), &g_runner) == KILN_OK && g_runner;
+    g_record_live = g_record_wanted = g_record_gaveup = g_record_busy = false;
+    g_record_attempts = 0;
+    g_record_wait = 0;
+    if (!g_record_ok)
+        KW_I("wraps: no slice-record link here (world.slice_record or kiln.hooks' detour_typed_checked is missing); WhenArchetype "
+             "uses the server entity-map fallback (narrowed, not proven); client filters are unavailable");
+    KilnHandle retiring = 0;
+    g_retiring_subscribed = hooks && hooks->header.size >= offsetof(KilnHooksApi, unsubscribe_owner_retiring) + sizeof(void*) &&
+                            hooks->subscribe_owner_retiring &&
+                            hooks->subscribe_owner_retiring(g_owner, &on_owner_retiring, nullptr, &retiring) == KILN_OK;
+    if (!g_retiring_subscribed)
+        KW_W("wraps: kiln.hooks has no owner cleanup here; a revoked owner's wraps are found once a second");
+    if (g_ok) {
+        report_row("systems.wraps", KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE,
+                   wraps_text("Before, After and Replace on the game's programs", KILN_WORLD_SERVER).c_str());
+        report_row("systems.wraps.typed", KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, kTypedText);
+    } else {
         report_row("systems.wraps", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING,
                "the program table or job layout did not resolve on this build (world.programs)");
+        report_row("systems.wraps.typed", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING,
+               "the program table or job layout did not resolve on this build (world.programs)");
+    }
     const bool client = g_api->size >= offsetof(KilnApi, session) + sizeof(void*) && g_api->side() == KILN_SIDE_CLIENT;
     if (!client)
         report_row("systems.wraps.client", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_WRONG_SIDE, "a client world runs only in the game client");
+    else if (!g_api->feature(kstr("world.lifecycle")))
+        report_row("systems.wraps.client", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING,
+                   "client wraps need world.lifecycle to retire destroyed program tables");
     else if (g_ok)
-        report_row("systems.wraps.client", KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, "wraps on the client world's programs");
+        report_row("systems.wraps.client", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_OLDER,
+                   "client wrap tick and world-stop subscriptions are not ready");
     else
         report_row("systems.wraps.client", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING,
                "the program table or job layout did not resolve on this build (world.programs)");
+}
+
+// systems.define (Kiln.Systems' Systems.Define): a mod's [Query] program, reserved at boot from its kiln.programs.json and
+// bound by name. It is kiln.world's own program path (programs v2), so it follows whether that path hooked this build.
+void wraps_define_row(bool programs) {
+    if (programs)
+        report_row("systems.define", KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE,
+                   "a mod's own [Query] programs, reserved at boot (kiln.programs.json) and bound by Systems.Define");
+    else
+        report_row("systems.define", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING,
+                   "kiln.world's programs did not resolve or hook on this build (world.programs)");
+}
+
+void wraps_client_ready(bool tick, bool events) {
+    if (g_api->side() != KILN_SIDE_CLIENT || !g_ok || !g_api->feature(kstr("world.lifecycle"))) return;
+    g_client_ready = tick && events;
+    if (!g_client_ready)
+        report_row("systems.wraps.client", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_FAULTED,
+                   "client wrap tick or world-stop subscription failed");
+    else if (external_runner())
+        report_row("systems.wraps.client", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY, game_wraps_off_reason());
+    else
+        report_row("systems.wraps.client", KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE,
+                   wraps_text("native Before, After and Replace on the client world's programs", KILN_WORLD_CLIENT).c_str());
 }
 
 const char* game_wraps_off_reason() {
@@ -629,16 +839,78 @@ const char* game_wraps_off_reason() {
     }
 }
 
+StopDrain world_stop_drain(uint32_t kind, uint32_t wait_ms) {
+    static constexpr const char* kName[KILN_WORLD_KINDS] = {"world.stop_drain.server", "world.stop_drain.prediction",
+                                                           "world.stop_drain.client"};
+    StopDrain d;
+    if (kind >= KILN_WORLD_KINDS) return d;
+    const KilnCapsApi* caps = g_wrap_caps ? g_wrap_caps : static_cast<const KilnCapsApi*>(g_api->service(kstr(KILN_CAPS_SERVICE), 1));
+    KilnCapRow row{};
+    row.size = sizeof row;
+    const std::string bound = "a bounded wait (" + std::to_string(wait_ms) + " ms) only";
+    if (!caps || caps->header.size < offsetof(KilnCapsApi, find) + sizeof(void*) || !caps->find ||
+        caps->find(kstr(kName[kind]), &row) != KILN_OK) {
+        d.text = bound + ": this core has no " + kName[kind] + " row";
+        return d;
+    }
+    d.engine = row.state == KILN_CAP_AVAILABLE;
+    d.text = d.engine ? std::string("the engine drains the world's jobs first (") + kName[kind] + ")"
+                      : bound + " (" + kName[kind] + ": " + std::string(row.text.ptr ? row.text.ptr : "", row.text.len) + ")";
+    return d;
+}
+
+// The runner link, once a stage asked for an archetype: tried in a Pre (the checked typed install checks the
+// other threads), kRecordSpacing Pres apart, kRecordAttempts times at most; one Pre thread at a time.
+void record_install() {
+    if (!g_record_ok || !g_record_wanted.load(std::memory_order_relaxed) || g_record_live.load() || g_record_gaveup.load())
+        return;
+    if (g_record_busy.exchange(true)) return;
+    // Server and client Pres can overlap. Serialize the spacing decrement too: two readers of 1 must not
+    // fetch_sub it to UINT_MAX, and a Pre that passed the first test before another installed must recheck.
+    if (g_record_live.load() || g_record_gaveup.load()) { g_record_busy.store(false); return; }
+    if (g_record_wait.load() > 0) {
+        g_record_wait.fetch_sub(1);
+        g_record_busy.store(false);
+        return;
+    }
+    const uint32_t attempt = g_record_attempts.fetch_add(1) + 1;
+    KilnHookOrder order{};
+    order.size = sizeof order;
+    order.priority = 1000;  // before the other links: every runner call records its slice before anything can skip it
+    order.label = kstr("world/slice-record");
+    KilnHandle handle = 0;
+    const KilnSigArg args[] = {{kstr("storage"), KILN_SIG_PTR, 0}, {kstr("slice"), KILN_SIG_PTR, 0},
+                               {kstr("index"), KILN_SIG_U64, 0}, {kstr("worker"), KILN_SIG_U64, 0}};
+    KilnSig sig{};
+    sig.size = sizeof sig; sig.argc = 4; sig.args = args; sig.ret_kind = KILN_SIG_VOID;
+    const KilnResult rc = g_hooks_api->detour_typed_checked(g_owner, g_runner, &order, &sig, &runner_entry, nullptr, &handle);
+    if (rc == KILN_OK) {
+        g_record_live.store(true);
+        KW_I("wraps: WhenArchetype reads each slice's archetype from the engine's slice record (a scoped checked link on "
+             "types/ProgramRunner, attempt %u); only server slices retain the entity-map fallback", attempt);
+    } else if (attempt >= kRecordAttempts) {
+        g_record_gaveup.store(true);
+        KW_W("wraps: the slice-record link on types/ProgramRunner was refused %u times (last %d); "
+             "WhenArchetype keeps the server entity-map fallback (narrowed, not proven); client filters are unavailable", attempt, rc);
+    } else {
+        g_record_wait.store(kRecordSpacing);
+        KW_I("wraps: the slice-record link on types/ProgramRunner was refused (%d); tried again "
+             "in %u Pres", rc, kRecordSpacing);
+    }
+    g_record_busy.store(false);
+}
+
 void wraps_pre(uint32_t kind, uintptr_t) {
     const int pool = wrap_pool(kind);
-    if (pool < 0 || !g_ok) return;
+    if (pool < 0 || !g_ok || g_pools[pool].stopping.load()) return;
+    record_install();
     const uint32_t ext = external_runner();
     // Revoked owners (at most once a second): probed outside g_mu (post() is the core's), retired under it.
     std::vector<KilnOwner> owners, revoked;
     {
         std::lock_guard lock(g_mu);
         const auto now = std::chrono::steady_clock::now();
-        if (now >= g_next_reap) {
+        if (!g_retiring_subscribed && now >= g_next_reap) {
             g_next_reap = now + std::chrono::seconds(1);
             for (auto& [h, st] : g_stages)
                 if ((st->state.load() == KILN_WRAP_PENDING || st->state.load() == KILN_WRAP_ACTIVE) && !st->remove &&
@@ -697,6 +969,7 @@ void wraps_pre(uint32_t kind, uintptr_t) {
             }
             st->state.store(KILN_WRAP_ACTIVE);
             st->index.store(ref.index);
+            st->stop[0] = 0;
             touch(st->program);
         } else if (st->remove) {
             touch(st->program);
@@ -707,6 +980,12 @@ void wraps_pre(uint32_t kind, uintptr_t) {
         }
     }
     for (const std::string* name : touched) settle(pool, name);
+    for (auto& [key, pr] : g_progs)
+        if (key.first == pool && pr.view && pr.view->checked.load() == 2 && !pr.view->logged.exchange(true))
+            KW_E("wraps: %s: the engine's iterator counts differ from kiln.world's view of its descriptor; its slots are "
+                 "off (iteration and entity ids still work)", key.second->c_str());
+        else if (key.first == pool && pr.view && !pr.view->ok && !pr.view->logged.exchange(true))
+            KW_I("wraps: %s has no slot view: %s", key.second->c_str(), pr.view->why.c_str());
     reap_retired();
     // Restored slots cool for kCoolingPres Pres with nothing in flight before they are used again.
     for (int i = 0; i < kWrapSlots; ++i) {
@@ -718,22 +997,77 @@ void wraps_pre(uint32_t kind, uintptr_t) {
     trim_finished();
     count_states();
     }
-    if (row.set) report_row("systems.wraps", row.state, row.reason, row.text);
+    if (row.set) {  // g_mu released: drain_row asks kiln.caps
+        const bool on = row.state == KILN_CAP_AVAILABLE;
+        const std::string server = on ? wraps_text(row.text, KILN_WORLD_SERVER) : row.text;
+        const std::string client =
+            on ? wraps_text("native Before, After and Replace on the client world's programs", KILN_WORLD_CLIENT) : row.text;
+        report_row("systems.wraps", row.state, row.reason, server.c_str());
+        report_row("systems.wraps.typed", row.state, row.reason, on ? kTypedText : row.text);
+        if (g_client_ready) report_row("systems.wraps.client", row.state, row.reason, client.c_str());
+    }
 }
 
 void wraps_world_event(const KilnWorldEvent* event) {
     const int pool = event ? wrap_pool(event->kind) : -1;
     if (pool < 0) return;
-    std::lock_guard lock(g_mu);
+    const DrainRow drain = event->event == KILN_WORLD_STOPPING ? drain_row(event->kind) : DrainRow{};
+    std::unique_lock lock(g_mu);
     bool live_slots = false;
     for (int i = 0; i < kWrapSlots && !live_slots; ++i) live_slots = g_pools[pool].slots[i].state == S_LIVE;
     if (event->event == KILN_WORLD_STOPPING) {
-        if (live_slots) KW_I("world %u stops: its wraps are taken out and wait for the next world", event->kind);
-        drop_pool(pool, true);  // the world is still intact: the entries go back
-    } else if (event->event == KILN_WORLD_STARTED && live_slots) {
-        // a new world without a stop of the last (no world.lifecycle): its table may be gone, so nothing is written
-        KW_W("world %u: a new world without a stop of the last; its trampolines are kept, the wraps re-applied", event->kind);
-        drop_pool(pool, false);
+        // Close stage admission before anything else: call()'s gate (and dispatch) refuse once `stopping` is set, so no new
+        // stage starts after STOPPING is seen; only a stage already in flight is waited for, up to the bound. The bound
+        // keeps Kiln's own callback state alive on timeout; it cannot keep the game's world memory alive. What the core
+        // guarantees here is its row world.stop_drain.<kind> (native/core/src/tick_drain.h): STOPPING is dispatched from
+        // hk_world_destroy while the world is intact, before the original destructor, and since 0.2.0-dev.29 after the
+        // engine's WaitWorldJobs on the server and the client world (the prediction world stops with the client world,
+        // after that wait). The game itself already lets no program slice outlive StepPrograms (it waits for the world's
+        // queue before it returns), and destroys a world on the thread that steps it; so with the engine's drain this
+        // drain finds 0 in flight, and a count above 0 there is logged as an error. Without it (tick.wait_jobs did not
+        // resolve) the bounded drain is the only protection; the stop line and the stages' detail say which it was.
+        g_pools[pool].stopping.store(true, std::memory_order_seq_cst);
+        for (int i = 0; i < kWrapSlots; ++i)
+            if (g_pools[pool].slots[i].state == S_LIVE) restore(pool, i, true);
+        lock.unlock(); // a finishing stage can need game_wrap_info/release's registry lock
+        const auto t0 = std::chrono::steady_clock::now();
+        const auto until = t0 + std::chrono::milliseconds(g_stop_wait_ms.load());
+        uint32_t remaining = 0, first = 0;
+        bool counted = false;
+        do {
+            remaining = 0;
+            for (const Slot& slot : g_pools[pool].slots) remaining += slot.in_flight.load(std::memory_order_seq_cst);
+            if (!counted) first = remaining, counted = true;
+            if (!remaining) break;
+            std::this_thread::yield();
+        } while (std::chrono::steady_clock::now() < until);
+        const auto waited = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
+        if (remaining) KW_E("world %u stops: wrap drain timed out with %u calls still in flight", event->kind, remaining);
+        if (first && drain.engine)
+            KW_E("world %u stops: %u wrap calls were in flight although %s", event->kind, first, drain.text.c_str());
+        if (const uint64_t rec = g_arch_record[pool].exchange(0), map = g_arch_map[pool].exchange(0), bad = g_arch_mismatch[pool].exchange(0);
+            rec || map || bad)
+            KW_I("world %u stops: WhenArchetype read %llu slices from the engine's slice record and %llu from the entity map "
+                 "(%llu records did not match their trampoline)", event->kind, static_cast<unsigned long long>(rec),
+                 static_cast<unsigned long long>(map), static_cast<unsigned long long>(bad));
+        lock.lock();
+        if (live_slots)
+            KW_I("world %u stops: its wraps are taken out and wait for the next world (drained: %u calls in flight at the "
+                 "stop, %u after %lld us; %s)", event->kind, first, remaining, static_cast<long long>(waited),
+                 drain.text.c_str());
+        // What the drain found, for every stage that waits for the next world (game_wrap_info's detail while PENDING).
+        for (auto& [h, st] : g_stages)
+            if (st->pool == pool && st->state.load() == KILN_WRAP_ACTIVE && !st->remove)
+                std::snprintf(st->stop, sizeof st->stop, "world stop: %u in flight at the stop, %u after the wait (%lld us); %s",
+                              first, remaining, static_cast<long long>(waited),
+                              drain.engine ? "drained by the engine" : "bounded wait only");
+        drop_pool(pool, true); // retired chains retain their views until their last in-flight call exits, even on timeout
+    } else if (event->event == KILN_WORLD_STARTED) {
+        if (live_slots) {
+            KW_W("world %u: a new world without a stop of the last; its trampolines are kept, the wraps re-applied", event->kind);
+            drop_pool(pool, false);
+        }
+        g_pools[pool].stopping.store(false, std::memory_order_seq_cst);
     }
 }
 
@@ -877,7 +1211,9 @@ KilnResult KILN_CALL game_wrap_info(KilnHandle h, KilnGameWrapInfo* out) {
     out->gone = st.gone.load();
     out->running = st.calls_in.load(std::memory_order_seq_cst);
     std::snprintf(out->detail, sizeof out->detail, "%s",
-                  st.detail[0] ? st.detail : (out->reason ? reason_text(out->reason) : ""));
+                  st.detail[0] ? st.detail
+                  : out->state == KILN_WRAP_PENDING && st.stop[0] ? st.stop
+                  : out->reason ? reason_text(out->reason) : "");
     return KILN_OK;
 }
 
@@ -928,6 +1264,260 @@ uint64_t KILN_CALL wrap_original(uintptr_t entry) {
     return orig == cur ? 0 : orig;
 }
 
+// ---- per entity inside a stage (S4) ----
+
+namespace {
+constexpr uint32_t kMaxIter = 4096;  // bytes; programs.cpp's bound for Kiln's own iterators
+
+Frame* frame_of(const KilnGameSlice* slice) {
+    Frame* f = t_frame;
+    return t_in_slice && f && slice && slice->size >= sizeof(KilnGameSlice) && slice->internal == f ? f : nullptr;
+}
+
+// The slot of name `i` of list `id` in the program's view, or -1 (no view, a mismatch with the engine's counts).
+int32_t view_slot(Frame& f, int id, int32_t i, const View** out_view) {
+    const View* v = f.chain ? f.chain->view.get() : nullptr;
+    if (!g_counts_ok || !v || !v->ok || id < 0 || id >= L_COUNT || i < 0 || static_cast<size_t>(i) >= v->layout.lists[id].slot.size())
+        return -1;
+    int checked = v->checked.load(std::memory_order_relaxed);
+    if (checked == 0) {
+        checked = same_counts(v->layout, job_counts(f.ctx->job)) ? 1 : 2;
+        v->checked.store(checked, std::memory_order_relaxed);
+    }
+    if (checked != 1) return -1;
+    if (out_view) *out_view = v;
+    return v->layout.lists[id].slot[static_cast<size_t>(i)];
+}
+
+// The entity map's own hash of an id (docs/re/spawn.md: the game's entity map find, server 0x650c50): it probes from
+// this, not from the id (the component maps' keys are hashes already and probe from them as they are). The client build's
+// find (0x9b4dc0), insert, grow and removal are the server's instruction for instruction (out/06a-program-wraps/
+// client-static, 2026-11-15): removal is a backward shift with no tombstone (an emptied slot's bit is clear, its stale
+// key and record stay behind), so a probe that stops at a clear bit misses no entity, as the game's own find does.
+uint32_t entity_hash(uint32_t k) {
+    uint32_t x = ((k >> 16) ^ k) * 0x45d9f3bu;
+    x = ((x >> 16) ^ x) * 0x45d9f3bu;
+    return (x >> 16) ^ x;
+}
+
+bool map_find_ptr(uintptr_t map, uint32_t key, uintptr_t* value, uint64_t* out_cap = nullptr, uint32_t* out_count = nullptr) {
+    if (out_cap) *out_cap = 0;
+    if (out_count) *out_count = 0;
+    if (!map || !L.map.ok()) return false;
+    uint64_t cap = 0;
+    uint32_t count = 0;
+    uintptr_t bits = 0, keys = 0, values = 0;
+    if (!seh_copy(&count, reinterpret_cast<const void*>(map + L.map.count), 4) || !count ||
+        !seh_copy(&cap, reinterpret_cast<const void*>(map + L.map.cap), 8) || !cap || (cap & (cap - 1)) ||
+        !seh_copy(&bits, reinterpret_cast<const void*>(map + L.map.bits), 8) ||
+        !seh_copy(&keys, reinterpret_cast<const void*>(map + L.map.keys), 8) ||
+        !seh_copy(&values, reinterpret_cast<const void*>(map + L.map.values), 8) || !bits || !keys || !values)
+        return false;
+    uint64_t i = entity_hash(key) & (cap - 1);
+    for (uint64_t probes = 0; probes < cap; ++probes) {
+        uint64_t word = 0;
+        uint32_t k = 0;
+        if (!seh_copy(&word, reinterpret_cast<const void*>(bits + (i >> 6) * 8), 8) || !((word >> (i & 63)) & 1)) return false;
+        if (!seh_copy(&k, reinterpret_cast<const void*>(keys + i * 4), 4)) return false;
+        if (k == key) {
+            if (out_cap) *out_cap = cap;
+            if (out_count) *out_count = count;
+            return seh_copy(value, reinterpret_cast<const void*>(values + i * 8), 8);
+        }
+        i = (i + 1 == cap) ? 0 : i + 1;
+    }
+    return false;
+}
+// A host-test seam: called once in game_slice_archetype between the layout read and the coherence re-check, so a test can
+// change the map (a concurrent insert/erase/grow) at exactly that window. Null in production.
+std::atomic<void (*)()> g_archetype_test_gap{nullptr};
+
+// The entity map's capacity and count now, for the archetype read's coherence re-check (below).
+bool map_shape(uintptr_t map, uint64_t* cap, uint32_t* count) {
+    return map && L.map.ok() &&
+           seh_copy(count, reinterpret_cast<const void*>(map + L.map.count), 4) &&
+           seh_copy(cap, reinterpret_cast<const void*>(map + L.map.cap), 8);
+}
+}  // namespace
+
+KilnResult KILN_CALL game_slice_iterate(KilnGameSlice* slice, KilnSliceEntityFn each, void* user) {
+    Frame* f = frame_of(slice);
+    if (!f) return KILN_ERR_WRONG_THREAD;
+    if (!each) return KILN_ERR_INVALID_ARGUMENT;
+    if (f->iter) return KILN_ERR_WRONG_THREAD;  // already inside an iteration of this slice
+    if (!g_counts_ok || !fn.iter_begin || !fn.iter_next || !fn.current_entity) return KILN_ERR_UNAVAILABLE;
+    const uint32_t size = job_counts(f->ctx->job).iter_size();
+    if (size > kMaxIter) return KILN_ERR_BUFFER_TOO_SMALL;
+    alignas(16) uint64_t it[kMaxIter / 8 + 2];
+    const uint32_t saved = f->ctx->index;
+    f->ctx->index = 0;
+    fn.iter_begin(f->ctx, it, size);
+    f->iter = it;
+    for (uint32_t row = 0; fn.iter_next(f->ctx, it, size); ++row) {
+        uint32_t e = 0;
+        fn.current_entity(f->ctx, &e);
+        f->entity = e;
+        f->marked = 0;
+        if (each(it, row, e, user)) break;
+    }
+    f->iter = nullptr;
+    f->entity = 0;
+    f->ctx->index = saved;  // as the stage found it: the update (or the runner) sees the slice it expects
+    return KILN_OK;
+}
+
+void* KILN_CALL game_slice_slot(KilnGameSlice* slice, const uint64_t* iter, int32_t list, int32_t i, uint32_t* size,
+                                uint8_t* writable) {
+    if (size) *size = 0;
+    if (writable) *writable = 0;
+    Frame* f = frame_of(slice);
+    if (!f || !iter || iter != f->iter) return nullptr;
+    const View* v = nullptr;
+    const int32_t slot = view_slot(*f, list, i, &v);
+    if (slot < 0) return nullptr;
+    if (size) *size = v->sizes[list][static_cast<size_t>(i)];
+    if (writable) *writable = list == L_WRITE || list == L_WRITE_OPT;
+    return reinterpret_cast<void*>(iter[slot]);
+}
+
+KilnResult KILN_CALL game_slice_mark(KilnGameSlice* slice, const uint64_t* iter, int32_t list, int32_t i) {
+    Frame* f = frame_of(slice);
+    if (!f || !iter || iter != f->iter) return KILN_ERR_WRONG_THREAD;
+    if (list != L_WRITE && list != L_WRITE_OPT) return KILN_ERR_INVALID_ARGUMENT;
+    const View* v = nullptr;
+    const int32_t slot = view_slot(*f, list, i, &v);
+    if (slot < 0) return KILN_ERR_INVALID_ARGUMENT;
+    const uint64_t* rec = iter + slot;
+    if (!F.write || !fn.mark_written || !rec[5]) return KILN_ERR_UNAVAILABLE;
+    const uint32_t bit = (static_cast<uint32_t>(slot) - (1 + v->layout.T + v->layout.R)) / 6;
+    if (bit < 64) {
+        if (f->marked >> bit & 1) return KILN_OK;  // once per entity and component
+        f->marked |= uint64_t{1} << bit;
+    }
+    if (!rec[0]) return KILN_ERR_INVALID_ARGUMENT;  // an optional component the entity lacks
+    fn.mark_written(reinterpret_cast<void*>(rec[5]), reinterpret_cast<void*>(rec[1]), reinterpret_cast<void*>(rec[2]),
+                    reinterpret_cast<void*>(rec[3]), static_cast<uint16_t>(rec[4]), static_cast<uint8_t>(rec[4] >> 16));
+    return KILN_OK;
+}
+
+KilnResult KILN_CALL game_slice_archetype(KilnGameSlice* slice, uintptr_t* out_layout) {
+    if (out_layout) *out_layout = 0;
+    Frame* f = frame_of(slice);
+    if (!f) return KILN_ERR_WRONG_THREAD;
+    if (!out_layout) return KILN_ERR_INVALID_ARGUMENT;
+    const int pool = wrap_pool(slice->world_kind);
+    if (pool < 0) return KILN_ERR_INVALID_ARGUMENT;
+    // Client network/replication mutation is not excluded by the map's count/id checks. Only the server's
+    // quiescent-step fallback is retained; a client without a current runner capture skips or refuses the filter.
+    const bool map_ok = slice->world_kind == KILN_WORLD_SERVER &&
+                        L.storage_entities >= 0 && L.entity_layout >= 0 && L.map.ok() && L.entity_id >= 0;
+    if (!map_ok && !g_record_ok) return KILN_ERR_UNAVAILABLE;  // neither source on this build
+    if (!slice->count || !slice->entity_ids) return KILN_ERR_NOT_FOUND;
+    // The engine's own slice record (see g_record_live), trusted only when it is this trampoline's: the runner called the
+    // entry it names, and its rows are the job's count.
+    if (const uintptr_t r = f->record) {
+        uintptr_t entry = 0, slice_layout = 0;
+        uint32_t first = 0, end = 0;
+        if (seh_copy(&entry, reinterpret_cast<const void*>(r + static_cast<uintptr_t>(L.slice_entry)), 8) && entry == f->entry &&
+            seh_copy(&first, reinterpret_cast<const void*>(r + static_cast<uintptr_t>(L.slice_first)), 4) &&
+            seh_copy(&end, reinterpret_cast<const void*>(r + static_cast<uintptr_t>(L.slice_end)), 4) && end >= first &&
+            end - first == f->count &&
+            seh_copy(&slice_layout, reinterpret_cast<const void*>(r + static_cast<uintptr_t>(L.slice_layout)), 8) && slice_layout) {
+            g_arch_record[pool].fetch_add(1, std::memory_order_relaxed);
+            *out_layout = slice_layout;
+            return KILN_OK;
+        }
+        g_arch_mismatch[pool].fetch_add(1, std::memory_order_relaxed);
+    } else if (g_record_ok && !g_record_live.load(std::memory_order_relaxed)) {
+        g_record_wanted.store(true, std::memory_order_relaxed);  // the next Pre installs the runner link
+    }
+    // The link is coming (or was refused): without a readable map, a slice is left to the game until it is there.
+    if (!map_ok) return g_record_gaveup.load() ? KILN_ERR_UNAVAILABLE : KILN_WORLD_ERR_CHANGED;
+    uintptr_t storage = 0, rec = 0, layout = 0;
+    uint32_t named = 0, named2 = 0;
+    const uint32_t id = slice->entity_ids[0];
+    std::memcpy(&storage, f->ctx->job, sizeof storage);
+    if (!storage) return KILN_ERR_UNAVAILABLE;
+    const uintptr_t map = storage + static_cast<uintptr_t>(L.storage_entities);
+    // The entity map read is narrowed, not proven. The map has no lock; its records come from a pool DestroyEntity frees
+    // at once, and an insert can grow and reallocate its arrays. The map's capacity and count are read before and after,
+    // and the record's id before and after the layout read. That catches a grow, a count change, a record that names
+    // another entity; it misses an erase and an insert between the reads (same count) and a record freed and reused for
+    // the same id. (CreateEntity stores the id before the layout, server and client alike: create-server.txt /
+    // create-client.txt F+0x122f then F+0x1246 in out/06a-program-wraps/client-static; x64 keeps store order, so a new
+    // layout is never seen under a stale id.) On a server world the map is at rest while slices run: a program's
+    // structural changes go to the command buffer and are applied at the step's end (chapter 06a 4.4, 9.6). A change
+    // that is seen is transient (KILN_WORLD_ERR_CHANGED): the caller reads again or leaves the slice to the game.
+    uint64_t cap = 0, cap2 = 0;
+    uint32_t count = 0, count2 = 0;
+    if (!map_find_ptr(map, id, &rec, &cap, &count) || !rec ||
+        !seh_copy(&named, reinterpret_cast<const void*>(rec + static_cast<uintptr_t>(L.entity_id)), 4) || named != id ||
+        !seh_copy(&layout, reinterpret_cast<const void*>(rec + static_cast<uintptr_t>(L.entity_layout)), 8) || !layout ||
+        (g_archetype_test_gap.load() && (g_archetype_test_gap.load()(), false)) ||
+        !seh_copy(&named2, reinterpret_cast<const void*>(rec + static_cast<uintptr_t>(L.entity_id)), 4) || named2 != id ||
+        !map_shape(map, &cap2, &count2) || cap2 != cap || count2 != count)
+        return KILN_WORLD_ERR_CHANGED;  // nonempty slice: a change under the read, not a skip and not "unreadable here"
+    g_arch_map[pool].fetch_add(1, std::memory_order_relaxed);
+    *out_layout = layout;
+    return KILN_OK;
+}
+
+int32_t KILN_CALL game_archetype_has(uint32_t kind, uintptr_t layout, uint32_t hash) {
+    if (!layout || wrap_pool(kind) < 0 || L.reg_components < 0) return -1;
+    const uintptr_t world = g_api->size >= offsetof(KilnApi, session) + sizeof(void*) ? g_api->world(kind) : g_world.load();
+    if (!world) return -1;
+    uint16_t type = 0;
+    if (!map_find_u16(registry_of(world) + static_cast<uintptr_t>(L.reg_components), hash, &type)) return -1;
+    uint64_t word = 0;
+    if (!seh_copy(&word, reinterpret_cast<const void*>(layout + (type >> 6) * 8), 8)) return -1;
+    return static_cast<int32_t>((word >> (type & 63)) & 1);
+}
+
+KilnResult KILN_CALL game_slice_attr_validate(KilnGameSlice* slice, const uint64_t* iter, int32_t list, int32_t i) {
+    Frame* f = frame_of(slice);
+    if (!f || !iter || iter != f->iter) return KILN_ERR_WRONG_THREAD;
+    if (list != L_WRITE && list != L_WRITE_OPT) return KILN_ERR_INVALID_ARGUMENT;
+    const View* v = nullptr;
+    const int32_t slot = view_slot(*f, list, i, &v);
+    if (slot < 0 || !v->attributes[list][i] || v->sizes[list][i] < 8) return KILN_ERR_INVALID_ARGUMENT;
+    const auto* component = reinterpret_cast<const uint8_t*>(iter[slot]);
+    uint8_t header[8]{};
+    if (!component || !seh_copy(header, component, sizeof header)) return KILN_ERR_INVALID_ARGUMENT;
+    if (!(header[6] & 1)) return KILN_OK; // not initialized: HasValues is readable, formulas still refuse it
+    uint16_t offset = 0;
+    std::memcpy(&offset, header + 4, sizeof offset);
+    const uint32_t size = v->sizes[list][i];
+    if (offset < 8 || offset % 4 || offset > size || !header[7] ||
+        static_cast<uint32_t>(header[7]) > (size - offset) / 4) return KILN_ERR_INVALID_ARGUMENT;
+    return KILN_OK;
+}
+
+KilnResult KILN_CALL game_slice_attr_changed(KilnGameSlice* slice, const uint64_t* iter, int32_t list, int32_t i) {
+    Frame* f = frame_of(slice);
+    if (!f || !iter || iter != f->iter) return KILN_ERR_WRONG_THREAD;
+    if (list != L_WRITE && list != L_WRITE_OPT) return KILN_ERR_INVALID_ARGUMENT;
+    const auto valid = game_slice_attr_validate(slice, iter, list, i);
+    if (valid != KILN_OK) return valid;
+    if (!g_attr_changed_fn) return KILN_ERR_UNAVAILABLE;
+    const View* v = nullptr;
+    const int32_t slot = view_slot(*f, list, i, &v);
+    if (slot < 0) return KILN_ERR_INVALID_ARGUMENT;
+    auto* component = reinterpret_cast<uint8_t*>(iter[slot]);
+    if (!component) return KILN_ERR_INVALID_ARGUMENT;
+    void* registry = nullptr;
+    for (int id : {L_SREAD, L_SWRITE}) {
+        const auto& names = v->layout.lists[id].names;
+        for (size_t k = 0; k < names.size(); ++k)
+            if (names[k] == "impact::AttributeRegistry" && v->layout.lists[id].slot[k] >= 0)
+                registry = reinterpret_cast<void*>(iter[v->layout.lists[id].slot[k]]);
+    }
+    uint8_t flags = 0;
+    if (!registry || !seh_copy(&flags, component + 6, 1) || !(flags & 1)) return KILN_ERR_INVALID_ARGUMENT;
+    unsigned long code = 0;
+    return seh_attr_changed(reinterpret_cast<void (*)(void*, void*)>(g_attr_changed_fn), component, registry, &code)
+               ? KILN_OK : KILN_ERR_INTERNAL;
+}
+
 // ---- platform ----
 namespace {
 std::string module_of(uintptr_t address) {
@@ -942,6 +1532,7 @@ std::string module_of(uintptr_t address) {
 
 // ---- host tests ----
 void wraps_test_budget_ns(uint64_t ns) { g_budget_ns.store(ns); }
+void wraps_test_archetype_gap(void (*fn)()) { g_archetype_test_gap.store(fn); }
 uint32_t wraps_test_in_flight(int pool) {
     uint32_t n = 0;
     for (const Slot& s : g_pools[pool].slots) n += s.in_flight.load();

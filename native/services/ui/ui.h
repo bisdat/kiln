@@ -9,6 +9,7 @@
 #include <mutex>
 
 #include "kiln_api.h"
+#include "overlay_mode.h"
 #include "services/kiln_ui.h"
 
 namespace kui {
@@ -64,13 +65,13 @@ extern std::atomic<bool> g_wheel_active;     // a radial wheel is open (wheel.cp
 extern std::atomic<bool> g_page_capture;     // the Kiln page in the game's main menu is opening or shown (menu_page.cpp)
 inline bool wheel_active() { return g_wheel_active.load(std::memory_order_relaxed); }
 inline bool capturing() {
-    return g_menu_open.load(std::memory_order_relaxed) || g_page_capture.load(std::memory_order_relaxed) ||
-           g_interactive.load(std::memory_order_relaxed) > 0 || wheel_active();
+    return overlay_drawing_on() && (g_menu_open.load(std::memory_order_relaxed) || g_page_capture.load(std::memory_order_relaxed) ||
+           g_interactive.load(std::memory_order_relaxed) > 0 || wheel_active());
 }
 // Something to draw this frame. The native fallback menu counts too.
 extern std::atomic<uint32_t> g_render_demand;  // kiln.render acquire_frames handles (render.cpp)
 inline bool want_draw() {
-    return capturing() || g_demand.load(std::memory_order_relaxed) > 0 || g_render_demand.load(std::memory_order_relaxed) > 0;
+    return overlay_drawing_on() && (capturing() || g_demand.load(std::memory_order_relaxed) > 0 || g_render_demand.load(std::memory_order_relaxed) > 0);
 }
 bool in_frame();  // the calling thread is inside the overlay frame's callbacks (drawing calls work)
 
@@ -81,6 +82,7 @@ extern std::atomic<uint32_t> g_hover_panels; // Kiln panels that take the mouse 
 // ---- input.cpp ----
 void input_install_iat();       // SetCursorPos / ClipCursor slots of the game exe (plugin main)
 void input_hook_xinput();      // after XInput loads: idle pad for the game while Kiln has the input
+void input_poll_window();       // drawing off: discover this process's game window without Vulkan
 void input_attach(HWND hwnd);   // subclasses the window (idempotent; re-subclasses when the game replaced its WndProc)
 bool input_attached();
 void input_replay();            // render thread, before ImGui::NewFrame: feeds queued window messages to ImGui
@@ -138,8 +140,12 @@ size_t game_pause_mods_rows();                                             // vi
 bool scroll_install(bool system_menu_hooked);  // game_install, after the SystemMenuEntry hook
 uint32_t scroll_status();                      // KILN_UI_SCROLL_*
 bool scroll_on();                              // the pause menu can scroll in this process now
-bool scroll_wrapped_now();                     // UI thread: this pause-menu builder call is wrapped (open site to close site)
-void scroll_after_frame(uint64_t frame);       // UI thread, after each UI frame: the crash guard's trial
+void scroll_entry_next();                      // UI thread, before each call of the game's entry renderer: the top probe
+void scroll_entry_drawn(bool chosen);          // UI thread, after each call of the game's entry renderer (`chosen`: it
+                                               // returned true): the end probe, Quit chosen
+void scroll_rows_drawn(uint32_t n);            // UI thread: Kiln drew n rows of its own in the pause menu (Settings' call)
+void scroll_after_frame(uint64_t frame);       // UI thread, after each UI frame: the frame count, the crash guard
+void scroll_exit();                            // on_unload (the process exits with code 0): the crash guard's marker goes
 bool game_unsubscribe(KilnHandle h);
 void game_status_line(char* out, size_t cap);
 

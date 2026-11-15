@@ -9,7 +9,8 @@ first start; Kiln keeps it, and the game has it from the next start (data files 
 together with every mod's files and handed to the game in one piece, before the game reads any of it. The first start
 has it, with the same ids as a definition made in `OnLoad`.
 
-Since 0.2.0-dev.28, on dedicated servers. The native side is kiln.boot ([../services/boot.md](../services/boot.md)).
+Since 0.2.0-dev.28 on dedicated servers, and since 0.2.0-dev.29 in a player's game too (a hosted world, and a game
+that joins a server). The native side is kiln.boot ([../services/boot.md](../services/boot.md)).
 
 ## Turning it on
 Add `boot` to `kiln.mod.json` ([manifest.md](manifest.md#boot-content-boot-since-020-dev28)):
@@ -41,8 +42,8 @@ public override void OnBoot(BootContext boot) { ... }
   a static survives: hand everything over by staging it. What `OnBoot` read (`boot.GameData`) cannot be handed to
   `OnLoad` in memory either: write what you need later into a file of your mod's data folder (`Context.DataDirectory`
   is the same folder in `OnBoot` and in `OnLoad`; create it first), or read it again through the run-time services.
-- `boot.ModId`, `boot.Generation` (the process's boot generation), `boot.Roles` (where the mod runs: a dedicated
-  server in this build) and `boot.GameData` (the game's data, read only, below).
+- `boot.ModId`, `boot.Generation` (the process's boot generation), `boot.Roles` (where the mod runs: `DedicatedServer`,
+  or in a player's game `HostedServer` and `Client` together) and `boot.GameData` (the game's data, read only, below).
 
 **What you may do:** stage definitions with `BootDefinitions.For(boot)` (Kiln.Blocks), read `boot.GameData`, log
 (`Log`), read your mod's own files (the folder is `Context.Info.Directory`).
@@ -87,6 +88,19 @@ that names it.
 **A data file wins.** If your `blocks/*.json` defines the same kind and name, the file's block is used and the staged
 one is dropped, with a warning (`ShadowedByFile`) in kiln.log and `state/boot.json`.
 
+**Icons and other files.** A PNG icon of a boot definition is a file of your mod's folder with a relative path, as in
+`OnLoad`: an item's `Visual = new VisualBlock { Icon = "icons/token.png" }`, a status's or a game-tree talent's `Icon`
+(ship the file with the mod, and set `"clients": "mod"`). The boot generation names an item's or a game-tree talent's
+file by its full, link-resolved path in the mod's folder, as a definition made in `OnLoad` does, so the first start shows it. Since 0.2.0-dev.29: before, a boot-staged
+item or talent kept its starter's icon (kiln.log: `cannot open ...\kiln\icons/token.png`). A status's icon is served when
+the game's content is ready, as for `OnLoad`. A missing file, or a path that leaves the folder (`..`, a link out of it),
+costs only the icon: the starter's stays. The refusal is retained in `state/boot.json`, even if the mod never loads;
+kiln.log says why once when the mod loads, with the line `OnLoad` would
+give (`blocks: <id>: block item token, visual.icon: ...; the base icon stays`); the SDK's bake warns with it (KILN030).
+At the join an icon counts by its place in the folder (`$mod/icons/token.png`), so a player whose game is in another
+folder matches the server. The other fields of the boot kinds name no file: a model is a GUID or `item:<name>`, a
+sound or a VFX a name.
+
 ## Reading the game's data
 `boot.GameData.Read(key)` reads one record of the game's data as shipped, from a snapshot made before the start
 ([boot-snapshot.md](boot-snapshot.md)): `item:<debugName>`, `template:<debugName>`, `skill:0x<8 hex digits>`,
@@ -104,6 +118,17 @@ and writes nothing. Register the same config again in `OnLoad`; that registratio
 the running mod see the same values. Writes, `Reload`, a `Changed` handler and `RegisterWorld` are refused in `OnBoot`
 ("… is not available in OnBoot (it runs before the game's first tick); call it in OnLoad"). Details and an example:
 [config.md](../config.md#in-modonboot).
+
+**Settings and the join** (since 0.2.0-dev.29). Each process makes its boot content from its own settings, once, and
+nothing syncs it later: a server and a player with other settings of your mod have other game data. So the join
+compares it. For each boot mod with side `both`, both sides fingerprint what their generation committed (the staged
+definitions as lowered, and the mod's resource patches, also those of its `blocks/*.json`), and the server treats a
+difference like a version difference of the mod: refused under `modSync: refuse`, a warning under `warn` or the default, no comparison under `off`, with a message
+that tells the player to use the server's settings and restart ([../network.md](../network.md#boot-content-at-the-join)).
+Read in `OnBoot` only settings a server and its players share (balance values the server sets for everyone), and say on
+your mod's page that players take the server's. A setting that may differ per player belongs in `OnLoad`. Stage the same
+content for every role as well: content that depends on `boot.Roles` differs between a player's game and a dedicated
+server, and the join counts that as a difference.
 
 ## When a mod fails
 - **`OnBoot` throws**, or a staged definition does not compile: the mod is out. None of its definitions and none of its
@@ -189,14 +214,19 @@ restart.
 ## Where it runs
 - **Dedicated servers.** The phase runs when hooks and .NET are on, an enabled mod of the server says `boot`, and
   `mods.boot` is available.
-- **Game clients** hold `mods.boot.client` in this build, until its guided client checks pass. On a game client a mod
-  with `boot` does not load (`RestartRequiredBoot: ... this process ran no boot phase`). `"preview": true` in
-  `kiln/kiln.json` lifts the hold, for testing.
+- **Game clients** (a world a player hosts, and a player's game that joins a server) run it the same way since
+  0.2.0-dev.29: the rows `mods.boot.client` and `mods.boot.resource_patches` are open. In 0.2.0-dev.28 they were held
+  and a boot mod did not load on a client without `"preview"` in `kiln/kiln.json`. A client builds every mod's VFX
+  and material files at start, before the game's entry point and outside the boot generation, as it always did.
+  Staging VFX or materials into a boot generation is not in this build (`mods.boot.vfx` reads unavailable, "not in
+  this build", on a client). One of a required mod's blocks files left out, a VFX or material error of the cook,
+  or a game build Kiln's VFX or materials cannot be built for still stops the start; the stop line names the file and
+  why. An optional boot mod and a mod without `boot` lose only that file, with a line in kiln.log.
 - A server where the phase does not run (safe idle, .NET off) does not load boot mods either. The row `mods.boot.phase`
   says why.
 
 An enabled mod with `"boot": "required"` stops the start with 0x4B01 if the boot route is unavailable, including a
-held client gate. No world or save is loaded without its required content.
+capability hold if one is added in a future release (this release holds none). No world or save is loaded without its required content.
 
 ## Testing
 Unit tests of `OnBoot` without a game: the test kit's boot runner, `KilnHarness.BootPhase` ([unit-tests.md](unit-tests.md#boot-phase-since-020-dev28)).

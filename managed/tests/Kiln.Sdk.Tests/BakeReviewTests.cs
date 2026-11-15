@@ -362,7 +362,7 @@ public sealed class BakeTargetsTests
     {
         using var s = new Stub();
         var mods = Path.Combine(s.Dir, "server-mods");
-        foreach (var f in new[] { "quests/generated/stub.json", "skills/stub.generated.json", "blocks/generated/stub.json", "quests/generated/authors.json" })
+        foreach (var f in new[] { "quests/generated/stub.json", "skills/stub.generated.json", "blocks/generated/stub.json", "blocks.tables.json", "quests/generated/authors.json" })
         {
             var p = Path.Combine(mods, "stub", f);
             Directory.CreateDirectory(Path.GetDirectoryName(p)!);
@@ -373,6 +373,7 @@ public sealed class BakeTargetsTests
         Assert.Equal(["authors.json"], Directory.GetFiles(Path.Combine(mods, "stub", "quests", "generated")).Select(Path.GetFileName));
         Assert.False(File.Exists(Path.Combine(mods, "stub", "skills", "stub.generated.json")));
         Assert.False(File.Exists(Path.Combine(mods, "stub", "blocks", "generated", "stub.json")));
+        Assert.False(File.Exists(Path.Combine(mods, "stub", "blocks.tables.json")));
     }
 
     [Fact]
@@ -389,11 +390,15 @@ public sealed class BakeTargetsTests
         var config = Path.Combine(s.Obj, "kiln.bake.config");
         Assert.Equal(0, s.MsBuild("-t:_KilnBakeConfig", "-p:KilnBakeSteps=10").Code);
         var first = File.ReadAllText(config);
+        Assert.Contains("worldtables=false",first);
         var at = File.GetLastWriteTimeUtc(config);
         Assert.Equal(0, s.MsBuild("-t:_KilnBakeConfig", "-p:KilnBakeSteps=10").Code);
         Assert.Equal(at, File.GetLastWriteTimeUtc(config));  // the same settings: untouched, so not a reason to bake
         Assert.Equal(0, s.MsBuild("-t:_KilnBakeConfig", "-p:KilnBakeSteps=30").Code);
         Assert.NotEqual(first, File.ReadAllText(config));  // a KilnBake input: changed settings bake again
+        Assert.Equal(0,s.MsBuild("-t:_KilnBakeConfig","-p:KilnBakeSteps=10","-p:KilnBakeWorldTables=true").Code);
+        Assert.Contains("worldtables=true",File.ReadAllText(config));
+        Assert.NotEqual(first,File.ReadAllText(config));
     }
 
     [Fact]

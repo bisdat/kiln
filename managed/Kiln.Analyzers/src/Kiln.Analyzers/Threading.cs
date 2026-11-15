@@ -110,6 +110,7 @@ internal sealed class ThreadClassifier
             var c = a.AttributeClass;
             if (c is null) continue;
             var ns = c.ContainingNamespace?.ToDisplayString();
+            if (c.Name == "ImpactNativeAttribute" && ns == "Kiln") return new ThreadContext(ThreadKind.Off, "an [ImpactNative] handler (the simulation thread or a worker)");
             if (c.Name == "SubscribeAttribute" && ns == "Kiln") return new ThreadContext(ThreadKind.Tick, "the tick thread (a [Subscribe] handler)");
             if (c.Name == "KilnTestAttribute" && ns == "Kiln.Testing") return new ThreadContext(ThreadKind.Tick, "the tick thread (a [KilnTest] method)");
         }

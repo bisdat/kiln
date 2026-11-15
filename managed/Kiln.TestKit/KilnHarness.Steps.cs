@@ -224,6 +224,7 @@ public sealed partial class KilnHarness
     private void LoadMods(ulong step)
     {
         Lifecycle.Phase = ServerPhase.Booting;
+        ServiceTick.StartEarlyServices();  // as Kiln.Host: rows a mod reads in OnLoad are decided before it does
         _mods.LoadAll();
         Lifecycle.ModsLoaded = true;
         var all = Mods.All;

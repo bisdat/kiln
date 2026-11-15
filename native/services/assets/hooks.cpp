@@ -26,6 +26,7 @@
 #include <cstdio>
 
 #include "assets.h"
+#include "vfx_preflight.h"
 #include "kiln_hook.hpp"
 
 namespace ka {
@@ -67,10 +68,25 @@ bool rd(uintptr_t a, void* out, size_t n) {
     }
 }
 
+bool copy_vfx_keys(const uint8_t* keys, uint64_t count, std::vector<Key>* out) {
+    out->clear();
+    if (count > kVfxMaxListedKeys || (count && !keys)) return false;
+    try {
+        std::vector<uint8_t> raw(static_cast<size_t>(count) * 32);
+        if (count && !rd(reinterpret_cast<uintptr_t>(keys), raw.data(), raw.size())) return false;
+        out->resize(static_cast<size_t>(count));
+        for (size_t i = 0; i < count; ++i) {
+            std::memcpy(&(*out)[i], raw.data() + i * 32, sizeof(Key));
+            if ((*out)[i].type != kVfxType) { out->clear(); return false; }
+        }
+        return true;
+    } catch (...) { out->clear(); return false; }
+}
+
 void note_S(uintptr_t S) {
     uintptr_t cur = g_S.load(std::memory_order_relaxed);
     if (cur == S || !S) return;
-    if (cur == 0 && g_S.compare_exchange_strong(cur, S)) {
+    if (cur == 0 && store_note_resource_system(S)) {
         LOGI("assets: resource service at %p (first seen in a lookup)", reinterpret_cast<void*>(S));
         on_resource_system_ready(S);
     }
@@ -80,8 +96,7 @@ void note_S(uintptr_t S) {
 char __fastcall hk_init(uintptr_t S, void* cfg) {
     const char ok = h_init.call<char>(S, cfg);
     if (ok) {
-        uintptr_t cur = 0;
-        if (g_S.compare_exchange_strong(cur, S)) {
+        if (store_note_resource_system(S)) {
             LOGI("assets: resource service %p initialized", reinterpret_cast<void*>(S));
             on_resource_system_ready(S);
         }
@@ -140,6 +155,53 @@ KeyOfResult* __fastcall hk_key_of(KeyOfResult* out, uintptr_t S, uint32_t h) {
 
 TypeList* __fastcall hk_by_type(TypeList* out, uintptr_t S, uint32_t type, uint32_t* opt) {
     TypeList* r = orig_by_type(out, S, type, opt);
+    if (type == kVfxType) {
+        // Other loaders may change their enumeration without changing our snapshot generation. Recheck the
+        // actual originals on every VFX enumeration, and preserve them if we cannot safely add our keys.
+        std::vector<ResourceRegistration> omitted;
+        const char* why = nullptr;
+        {
+            ReadGuard g;
+            const ResView* s = g_res.load(std::memory_order_acquire);
+            if (!s || !s->any_new()) return r;
+            std::vector<Key> original, added, merged;
+            try {
+                s->new_keys(type, &added);
+                if (out->error || !copy_vfx_keys(out->keys, out->count, &original)) {
+                    why = "original VFX type enumeration unreadable or unsupported";
+                    vfx_omitted(*s, added, {}, &omitted);
+                } else {
+                    std::lock_guard lock(s->merged_mu);
+                    const uint32_t capacity = vfx_capacity();
+                    if (auto it = s->merged.find(type); it != s->merged.end() && s->vfx_capacity == capacity && s->vfx_original == original) {
+                        out->keys = it->second->data();
+                        out->count = it->second->size() / 32;
+                        return r;
+                    }
+                    if (!vfx_merge(original, added, capacity, &merged)) {
+                        why = "actual merged VFX enumeration exceeds capacity";
+                        vfx_omitted(*s, added, merged, &omitted);
+                    }
+                    if (added.empty() && original.size() == merged.size()) return r;
+                    auto v = std::make_unique<std::vector<uint8_t>>(merged.size() * 32, 0);
+                    for (size_t i = 0; i < merged.size(); ++i) std::memcpy(v->data() + i * 32, &merged[i], sizeof(Key));
+                    s->merged[type] = v.get();
+                    s->vfx_original = std::move(original);
+                    s->vfx_capacity = capacity;
+                    out->keys = v->data();
+                    out->count = merged.size();
+                    v.release();  // the game retains these lists
+                }
+            } catch (...) {
+                why = "merged VFX enumeration could not be built";
+                // The original list is still returned. Capture what did not reach it, if allocation permits.
+                try { vfx_omitted(*s, added, original, &omitted); } catch (...) {}
+            }
+        }
+        // Taking the store lock inside the reader/merged mutex can deadlock a snapshot publisher.
+        if (why) report_vfx_omissions(omitted, why);
+        return r;
+    }
     ReadGuard g;
     const ResView* s = g_res.load(std::memory_order_acquire);
     if (!s || !s->any_new()) return r;
@@ -577,6 +639,12 @@ bool game_type_list(uintptr_t S, uint32_t type, const uint8_t** keys, uint64_t* 
     return r.error == 0;
 }
 
+bool game_vfx_keys(uintptr_t S, std::vector<Key>* out) {
+    const uint8_t* keys = nullptr;
+    uint64_t count = 0;
+    return game_type_list(S, kVfxType, &keys, &count) && copy_vfx_keys(keys, count, out);
+}
+
 bool game_key_of(uintptr_t S, uint32_t handle, Key* out) {
     if (!g_res_on || !S || !handle) return false;
     KeyOfResult r{};
@@ -626,10 +694,8 @@ GameIndex game_index_keys(std::vector<HashK>* out, size_t max_keys, uint64_t* to
         *why = "the content hooks are off";
         return GameIndex::unsupported;
     }
-    if (!g_game_map.load()) {
-        GameBlob unused;
-        (void)game_blob_find(HashK{}, &unused);  // fetches the index as a blob read would
-    }
+    // Any-thread catalog queries only observe the index published by the game's content hook.
+    // Do not run game_blob_find's lazy accessor on the caller's thread while loading may still own the reader.
     const void* m = g_game_map.load();
     if (!m) {
         *why = "the game has not opened its content index yet";

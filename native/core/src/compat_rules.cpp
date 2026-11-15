@@ -106,7 +106,7 @@ bool parse_rule(const json& j, const char* source, Rule* r, std::string* why) {
     }
     for (const auto& [key, v] : j.items()) {
         (void)v;
-        if (key != "id" && key != "when" && key != "action" && key != "subject" && key != "message") {
+        if (key != "id" && key != "when" && key != "action" && key != "subject" && key != "target" && key != "message") {
             *why = "unknown key \"" + key + "\"";
             return false;
         }
@@ -133,12 +133,12 @@ bool parse_rule(const json& j, const char* source, Rule* r, std::string* why) {
         }
     }
     if (!j.contains("action") || !j["action"].is_string()) {
-        *why = "\"action\" must be warn, late or disable";
+        *why = "\"action\" must be warn, late, disable or before";
         return false;
     }
     r->action = j["action"].get<std::string>();
-    if (r->action != "warn" && r->action != "late" && r->action != "disable") {
-        *why = "\"action\" must be warn, late or disable";
+    if (r->action != "warn" && r->action != "late" && r->action != "disable" && r->action != "before") {
+        *why = "\"action\" must be warn, late, disable or before";
         return false;
     }
     if (j.contains("message")) {
@@ -158,6 +158,18 @@ bool parse_rule(const json& j, const char* source, Rule* r, std::string* why) {
     }
     if (r->action != "warn" && !r->has_subject) {
         *why = "action " + r->action + " needs a \"subject\"";
+        return false;
+    }
+    if (j.contains("target")) {
+        if (r->action != "before") {
+            *why = "a \"target\" belongs to action before only";
+            return false;
+        }
+        if (!parse_matcher(j["target"], &r->target, why)) return false;
+        r->has_target = true;
+    }
+    if (r->action == "before" && !r->has_target) {
+        *why = "action before needs a \"target\"";
         return false;
     }
     return true;

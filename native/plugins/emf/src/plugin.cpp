@@ -172,6 +172,7 @@ void KILN_CALL on_world_event(const KilnWorldEvent* e, void*) {
         events_world_stopping();
         components_world_stopping();
     }
+    if (e->kind == KILN_WORLD_CLIENT) events_world_stopping(EMF_WORLD_CLIENT);  // the client world's relays (0.2.0-dev.29)
     windows_world_stopping(static_cast<uint8_t>(e->kind));
 }
 

@@ -10,7 +10,7 @@
 //! - [`write_zip`] (feature `zip`) writes the zip.
 //!
 //! Layout of the zip: `summary.txt` (for a forum post), `report.json` (findings and failed sections), `game/<path>`
-//! (tails of kiln.log, proxy.log, eml.log, shroudlink_client.log, the newest crash report; `kiln/state/*.json`, `kiln/profile.json`,
+//! (tails of kiln.log, proxy.log, eml.log, tick-stats.jsonl, shroudlink_client.log, the newest crash report; `kiln/state/*.json`, `kiln/profile.json`,
 //! `kiln/chain.ini`, `kiln/kiln.json`, `kiln/.install.json`), `greeneye-mods/<id>/<game|library>/*.log|*.status` (tails of each Greeneye
 //! mod's own log and status files, with Greeneye Loader's logs under `game/`), `launcher/launcher.log` (tail), `listings/*.txt` (names,
 //! sizes and times of the game folder's top level, `kiln/` two levels deep, each engine's mods folder).
@@ -32,6 +32,9 @@ use std::time::SystemTime;
 pub const KILN_LOG_MAX: u64 = 1 << 20;
 /// Tail of proxy.log, eml.log, shroudlink_client.log, launcher.log.
 pub const SMALL_LOG_MAX: u64 = 192 * 1024;
+/// Tail of tick-stats.jsonl (one line a minute per world, about 2 KiB each since 0.2.0-dev.29: about 3 hours of a hosted
+/// session with three worlds, 8 of a dedicated server).
+pub const TICK_STATS_MAX: u64 = 1024 * 1024;
 /// The newest crash report.
 pub const CRASH_MAX: u64 = 64 * 1024;
 /// One Greeneye log or status file (Greeneye Loader's loader.log, a Greeneye mod's own log in its folder).
@@ -469,8 +472,38 @@ pub struct ReportInput {
     pub roots: Option<Vec<SteamRoot>>,
     /// Extra facts for summary.txt (kilnctl: the instance's Wine runner).
     pub facts: Vec<(String, String)>,
+    /// (dev.29) The launcher's update channel: summary.txt, the short summary and report.json say it (a tester's report
+    /// says which test build). None: not a launcher (kilnctl) or not known.
+    pub channel: Option<ReportChannel>,
     /// Default [`Redactor::current`].
     pub redactor: Option<Redactor>,
+}
+
+/// The launcher's channel for a report: the channel its build belongs to, its beta number (a test build), and the
+/// channel it follows (the setting).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportChannel {
+    /// "stable", "dev" or "beta".
+    pub build: String,
+    pub beta: Option<u32>,
+    pub follows: String,
+}
+
+impl ReportChannel {
+    /// "Beta, test build 3 (follows Beta)", "Release (follows Release)".
+    pub fn words(&self) -> String {
+        let name = |c: &str| match c {
+            "beta" => "Beta",
+            "stable" => "Stable",
+            _ => "Release",
+        };
+        let build = match self.beta {
+            Some(n) => format!("{}, test build {n}", name(&self.build)),
+            None => name(&self.build).to_string(),
+        };
+        format!("{build} (follows {})", name(&self.follows))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -486,7 +519,7 @@ pub enum Level {
 #[serde(rename_all = "camelCase")]
 pub struct Finding {
     /// Stable name: `not-installed`, `proxy-not-kiln`, `files-missing`, `files-changed`, `not-loaded`,
-    /// `proton-override`, `unknown-build`, `safe-idle`, `own-loader`, `loader-in-folder`, `unlisted-mods`,
+    /// `proton-override`, `proton-chained-override`, `unknown-build`, `safe-idle`, `own-loader`, `loader-in-folder`, `unlisted-mods`,
     /// `mod-failed`, `hosted-mods`, `hosted-off`, `crash`, `profile-invalid`, `newer-mods`, `no-game`, `sf-startup-failed`.
     pub id: String,
     pub level: Level,
@@ -949,6 +982,9 @@ pub fn build(input: &ReportInput) -> Report {
     let _ = writeln!(sys, "OS:            {}{}", os.name, os.kernel.as_deref().map(|k| format!(" (kernel {k})")).unwrap_or_default());
     let _ = writeln!(sys, "Steam Deck:    {}{}", if deck { "yes" } else { "no" },
         if os.deck_signals.is_empty() { String::new() } else { format!(" ({})", os.deck_signals.join(", ")) });
+    if let Some(c) = &input.channel {
+        let _ = writeln!(sys, "{:<15}{}", "Channel:", c.words());
+    }
     for (k, v) in &input.facts {
         let _ = writeln!(sys, "{:<15}{v}", format!("{k}:"));
     }
@@ -985,8 +1021,12 @@ pub fn build(input: &ReportInput) -> Report {
             facts.proton = tool.or(version);
         }
         if let Some(lo) = crate::game::launch_options_info(i, &roots) {
-            let _ = writeln!(g, "Launch opts:   {} (dinput8 override: {})", lo.value.as_deref().unwrap_or("(none)"), if lo.has_dll_override { "yes" } else { "no" });
+            let _ = writeln!(g, "Launch opts:   {} (dinput8 override: {}; chained xinput9_1_0 override missing: {})", lo.value.as_deref().unwrap_or("(none)"), if lo.has_dll_override { "yes" } else { "no" }, if lo.chained_override_missing { "yes" } else { "no" });
             facts.override_missing = !lo.has_dll_override;
+            if lo.chained_override_missing {
+                cx.find("proton-chained-override", Level::Warning, format!("Ultimate ASI Loader is chained as xinput9_1_0.dll and neither Steam's launch options nor the prefix registry sets xinput9_1_0 to native first: under Valve's Proton, Wine loads its own xinput9_1_0 instead and the loader with its .asi plugins does not start (GE-Proton loads it without). Set: {}", lo.advice.as_deref().unwrap_or(crate::game::CHAINED_DLL_OVERRIDE_ADVICE)));
+            }
+            facts.override_advice = lo.advice;
         }
         let running = crate::proc::find_game(i).ok().flatten();
         facts.running = running.is_some();
@@ -1115,6 +1155,17 @@ pub fn build(input: &ReportInput) -> Report {
         }
     }
     check_unlisted(&mut cx, install.as_ref(), dirs.as_ref(), profile.as_ref());
+    if let (Some(g), Some(p)) = (install.as_ref(), profile.as_ref()) {
+        let fallback = DataDirs::at(g.path.join("kiln/report-no-library"));
+        match crate::compat::shroudlink_report_missing(dirs.as_ref().unwrap_or(&fallback), g, p) {
+            Ok(true) => {
+                let mods = p.mods.shroudlink.iter().filter(|m| m.enabled).map(|m| m.id.clone()).collect::<Vec<_>>();
+                cx.find("shroudlink-client-addon", Level::Info, shroudlink_finding_text(p.name.as_deref().unwrap_or(&p.id), &mods));
+            }
+            Err(e) => cx.err("shroudlink-client-addon", &e.message),
+            _ => {}
+        }
+    }
 
     // ---- the last start
     let mut ls = String::new();
@@ -1358,6 +1409,9 @@ pub fn build(input: &ReportInput) -> Report {
     }
     let proxy_log = cx.add_tail(crate::paths::game::PROXY_LOG, SMALL_LOG_MAX);
     cx.add_tail("kiln/logs/eml.log", SMALL_LOG_MAX);
+    // Kiln's per-minute step times of each world (core/src/tick.cpp; rewritten at every game start): whether a slow
+    // session was slow inside the steps, between them (saves), or in Kiln's own Pre / Post (GitHub issue 39)
+    cx.add_tail("kiln/logs/tick-stats.jsonl", TICK_STATS_MAX);
     // Native UI initialization and later player-menu visibility are separate addon paths; kiln.log alone cannot
     // distinguish them. Read only this bounded log, not the addon's key bindings or per-server mod settings.
     cx.add_tail("shroudlink_client.log", SMALL_LOG_MAX);
@@ -1449,6 +1503,7 @@ struct Facts {
     kiln: Option<String>,
     proton: Option<String>,
     override_missing: bool,
+    override_advice: Option<String>,
     running: bool,
     profile: Option<String>,
     profile_broken: bool,
@@ -1670,7 +1725,7 @@ fn check_not_loaded(cx: &mut Ctx, install: Option<&GameInstall>, dirs: Option<&D
     }
     let proton = i.platform == Platform::Proton;
     let why = if proton && facts.override_missing {
-        format!(" Under Proton the game loads Kiln's dinput8.dll only with this in Steam's launch options for Enshrouded: {}", crate::game::DLL_OVERRIDE_ADVICE)
+        format!(" Under Proton the game loads Kiln's dinput8.dll only with this in Steam's launch options for Enshrouded: {}", facts.override_advice.as_deref().unwrap_or(crate::game::DLL_OVERRIDE_ADVICE))
     } else if proton {
         " Check Steam's launch options for Enshrouded (WINEDLLOVERRIDES) and the Proton version.".to_string()
     } else {
@@ -1701,7 +1756,7 @@ fn check_not_loaded(cx: &mut Ctx, install: Option<&GameInstall>, dirs: Option<&D
         said = true;
     }
     if !said && proton && facts.override_missing {
-        cx.find("proton-override", Level::Warning, format!("Steam's launch options for Enshrouded have no dinput8 override: under Proton Kiln may not load. Set: {}", crate::game::DLL_OVERRIDE_ADVICE));
+        cx.find("proton-override", Level::Warning, format!("Steam's launch options for Enshrouded have no dinput8 override: under Proton Kiln may not load. Set: {}", facts.override_advice.as_deref().unwrap_or(crate::game::DLL_OVERRIDE_ADVICE)));
     }
 }
 
@@ -1744,6 +1799,9 @@ fn finish(mut cx: Ctx, mut s: String, sys: String, body: String, input: &ReportI
     let mut short = String::new();
     let _ = writeln!(short, "Kiln support report, {}", rfc(now));
     let _ = writeln!(short, "{tool}; Kiln in the game: {}", facts.kiln.as_deref().unwrap_or("not installed"));
+    if let Some(c) = &input.channel {
+        let _ = writeln!(short, "Channel: {}", c.words());
+    }
     let os = os_info();
     let _ = writeln!(short, "OS: {}{}; Steam Deck: {}", os.name, facts.proton.as_deref().map(|p| format!("; Proton: {p}")).unwrap_or_default(),
         if input.deck.unwrap_or(os.deck) { "yes" } else { "no" });
@@ -1772,7 +1830,7 @@ fn finish(mut cx: Ctx, mut s: String, sys: String, body: String, input: &ReportI
 
     let mut report = Report { written: rfc(now), summary, short, findings: cx.findings, errors: cx.errors, files: Vec::new() };
     let json = serde_json::to_vec_pretty(&serde_json::json!({
-        "format": 1, "written": report.written, "tool": redact(tool, cx.red), "findings": report.findings, "errors": report.errors,
+        "format": 1, "written": report.written, "tool": redact(tool, cx.red), "channel": input.channel, "findings": report.findings, "errors": report.errors,
     }))
     .unwrap_or_default();
     let mut files = vec![("summary.txt".to_string(), report.summary.clone().into_bytes()), ("report.json".to_string(), json)];
@@ -1829,3 +1887,17 @@ pub fn write_zip(report: &Report, out: &Path) -> crate::Result<u64> {
 #[cfg(test)]
 #[path = "report_tests.rs"]
 mod tests;
+
+fn shroudlink_finding_text(profile: &str, mods: &[String]) -> String {
+    format!("Profile '{profile}' enables Shroudlink mods: {}. Shroudlink's MODS tab comes from its client addon, which this profile does not load. Your Shroudlink mods still run; switch the addon on to get the tab.", mods.join(", "))
+}
+
+#[cfg(test)]
+mod shroudlink_notice_tests {
+    #[test]
+    fn finding_names_profile_and_mods() {
+        let text = super::shroudlink_finding_text("test", &["assistants".into(), "expeditions".into()]);
+        assert!(text.contains("Profile 'test'") && text.contains("assistants, expeditions"));
+        assert!(text.contains("MODS tab") && text.contains("mods still run"));
+    }
+}

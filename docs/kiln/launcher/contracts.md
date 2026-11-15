@@ -47,9 +47,11 @@ Machine-readable copies:
 | `<game>/kiln/state/boot.json` | kiln-core | launcher | `state-boot.schema.json`, `examples/state-boot.json` |
 | `<game>/kiln/state/progress.json` | kiln-core (dev.27; services, plugins and Kiln.Host report through kiln.progress v2) | launcher, server operators | `state-progress.schema.json`, `examples/state-progress.json`; section "Start progress" below |
 | `<game>/kiln/state/mods.json` | Kiln.Host | launcher | `state-mods.schema.json`, `examples/state-mods.json` |
+| `<game>/kiln/state/roster-refused.json` (`.last.json` after the next start) | kiln.knowledge (0.2.0-dev.29), when the mods' NPC roster stops the start | launcher, server operators | `state-roster-refused.schema.json`, `examples/state-roster-refused.json`; section 5.9 |
+| `<game>/kiln/state/content-refused.json` (`.last.json` after the next start) | kiln.knowledge (0.2.0-dev.29), when the whole build of the mods' native quests and NPCs failed and stops the start | launcher, server operators | `state-content-refused.schema.json`, `examples/state-content-refused.json`; section 5.9 |
 | `<game>/kiln/state/native.json` | native loader (core) | launcher | `state-native.schema.json`, `examples/state-native.json` |
 | `<game>/kiln/state/hooks.json` | kiln-core (kiln.hooks v2, compat report) | launcher | `hooks-state.schema.json`, `examples/hooks-state.json`, `fixtures/hooks-state/` |
-| `<game>/kiln/compat-rules.json`, `<configDir>/compat-rules.json` | Kiln (shipped, may be missing) / the player | kiln-core, launcher | `compat-rules.schema.json`, `examples/compat-rules.json`, `fixtures/compat-rules/cases.json` |
+| `<game>/kiln/compat-rules.json`, `<configDir>/compat-rules.json` | Kiln (shipped in the runtime's `core` component since dev.29, from `native/core/compat-rules.json`; replaced by every update; may be missing on an older install) / the player | kiln-core, launcher | `compat-rules.schema.json`, `examples/compat-rules.json`, `fixtures/compat-rules/cases.json` |
 | `<game>/kiln/state/emf.json` | kiln-emf | launcher | format in `docs/re/emf-compat.md` |
 | `<game>/kiln/state/last-server.json` | Kiln.Network (client) | launcher | `state-last-server.schema.json`, `examples/state-last-server.json` |
 | `<server>/kiln/data/kiln-admin/endpoint.json` | Kiln.Admin | launcher, kilnctl | `admin-endpoint.schema.json`, `examples/admin-endpoint.json` |
@@ -72,7 +74,8 @@ or state and at most every 250 ms for a change of label, detail or count (the la
 thread of its own (nothing in the game waits for the disk, and no write comes from a per-frame hook). Fields:
 `format` 1, `pid`, `kiln` (with the build stamp), `side`, `started` (UTC, milliseconds), `atMs`, `state`
 (`booting`, `loading`, `ready`, `idle`, `failed`), `plan`, `steps` (`id`, `label`, `detail`, `done`/`total`, `ms`,
-`tookMs`, `parts`), `why`. A stale file is told by `pid` and `started`, as for boot.json; nothing deletes it, and it
+`tookMs`, `parts`), `why`, and (0.2.0-dev.29) `worldMs`: when the game's first world began, ms since `started`, written
+at once (absent before). A stale file is told by `pid` and `started`, as for boot.json; nothing deletes it, and it
 is not written again after `ready`, `idle` or `failed`. boot.json is unchanged.
 
 | Step | What Kiln does there | Detail, count |
@@ -91,9 +94,11 @@ is not written again after `ready`, `idle` or `failed`. boot.json is unchanged.
 
 `ready`: once step `game` has begun (the mods are loaded and their content applied) and the side's signal has come,
 in whichever order (a signal that comes first is remembered): a client's when kiln-ui sees the main menu's builder run
-(or the first in-game frame); a server's at Kiln.Host's ServerStarted (what `kilnctl run --wait` waits for), or
-without .NET the server world's first step. A step begins when the one before it ends, so in a final state the steps' `tookMs` add up to
-`atMs`.
+(or the first in-game frame), or (0.2.0-dev.29) when its first world begins, so a start whose menu mark never comes
+(another mod's hook over the menu) still ends, and kiln.log says the mark had not come; a server's at Kiln.Host's
+ServerStarted (what `kilnctl run --wait` waits for), or without .NET the server world's first step. A step begins when
+the one before it ends, so in a final state the steps' `tookMs` add up to `atMs`. The launcher takes a client whose file
+has `worldMs` and has said nothing for 60 s for a start that is over (the player is in a world), not for a silent one.
 
 Shared definitions (ids, semver, kdh1, game paths): `schema/common.schema.json`. Validate every example with
 `bun run check:schemas` in `launcher/`.
@@ -109,6 +114,8 @@ Root: `$KILN_DATA_DIR`, else the folder the pointer `data-folder.json` in the de
 | `settings.json` | launcher settings (`LauncherSettings`, section 9) |
 | `library/<kind>/<id>/<version>+<hash8>/` | immutable library entries; kind `kiln`, `native`, `plugin`, `emf`, or another engine's (`eml`, `shroudforge`, `set`, `greeneye`, `flame`, `shroudtopia`, `enshwick`, `shroudlink`, `ember`), see 5.1; hash8 = the first 8 hex chars of the folder's hash: its kdh1, for a Kiln mod its identity (5.11: kdh1 without what a cook left in `assets/cooked`, so an entry cooked in place is still the entry that was imported); of the DLL's sha256 for a plugin, whose folder holds the one DLL |
 | `library/<kind>/<id>/<version>+<hash8>.json` | import record next to the folder: `{format, kind, id, version, hash, imported, source:{type,from}, size, name?, side?, clients?, file?, manifestId?}`. `manifestId` (dev.22): an engine mod whose own manifest id is no Kiln id (`Hoarders Helper`, `antisocialian's tweaks`) is filed under a Kiln id made from it (`hoarders-helper`) and keeps its own id here; the files in the folder are the author's, byte for byte, because the engine plugin reads that manifest and reports its state rows (`kiln/state/<engine>.json`) under it. Rows that carry a `path` match their profile entry by it; the mod manager (`ModCatalog`) also matches a row by the slug of its id. Two manifest ids with one slug get a short hash added to the second one's id |
+| `library/kiln-kept.json` | (dev.29) the earlier versions an update kept for a roll back (`kiln_manage::kept`; `kiln-kept.schema.json`, `examples/kiln-kept.json`): per mod (`kind`, `id`) the kept entries, newest first (`version`, `hash`, `kept` time, `replacedBy`, `profile`: the profile whose change left it, and the `settings` kept with it: their folder `dir`, the files copied and their bytes, ShroudForge setting values, the game folder they came from), at most `keepVersions` (`settings.json`, default 1, at most 5; 0 keeps none), and `restores`: the settings a roll back left for its version's next placement, one per profile, in the game folder they came from (`preimages`: `files[gameRelativePath]` and `values[copyRelativePath][settingKey]` each hold `{before: sha256 | null, snapshot: sha256}`; `null` means absent; hashes of values use their serialized JSON. These guards are captured in the first durable restore record before settings writes. Each attempt settles matching snapshot content, writes only matching preimage content, and preserves/notes everything else. A missing preimage block is a legacy record: differing current content is preserved and settled, never overwritten. If both the preimage and current state are absent, retry writes the snapshot; a later deletion is preserved when the preimage was present. `applied`: its files and values are settled, restored content is flushed, and only the record is left to drop; a restore is marked so, then dropped, so a stop between the two never puts the files back again over a later change). `pending`: the record of a change written with the new state before its profile is saved (the profile, each mod's version before and after, each touched mod's state before, and `profileBefore`: the prior profile mod entries, including removals). **Recovery:** the file is written in one durable write (`util::write_atomic_durable_exclusive`, through the one seam `kiln_manage::durable`) only after what it names is flushed (a settings copy's files and folders, the name of its folder, the folders above it; for a commit, the profile's `meta.json` and its folder; for a restore marked done, the restored files and the folder entries naming them), under `library/kiln-kept.lock`, held from before the profile save until the record is dropped; at every later look under that lock (the launcher's start, every change, every placement) a `pending` change is undone when its touched profile entries still match `profileBefore` (legacy records compare the replaced versions), else finished; an entry whose Library entry is gone is dropped, and a missing settings copy is dropped with a note, a kept entry its own profile uses again is dropped, and every folder below `library/kiln-kept/` the file does not name is deleted (never through a link). Nothing else is touched by it. A kept entry is an ordinary Library entry (folder and record): a launcher before dev.29 does not read this file, lists a kept entry as another version of the mod ("Use <version>") and its Clean up may remove it; dev.29 then forgets it. An unreadable, malformed, or newer-format index is left untouched and its settings copies are not swept. Entries owned by a profile whose file is demonstrably absent are dropped. A file of another format is left as it is and nothing is kept |
+| `library/kiln-kept/<kind>/<id>/<dir>/` | (dev.29) one settings copy, `<dir>` = `<version>+<hash8>.<12 hex>` (a new copy always gets a new folder; it is made in `.stage-<12 hex>` beside it and renamed once whole): each file at its path relative to the game folder (`greeneye/worstmap/minimap_config.ini`), copied from Kiln's game-folder copies of the version (`kiln/state/library-placements.json`) at the update: the files not as Kiln placed them (changed or added since) that are settings files or logs (`txt`, `ini`, `cfg`, `json`, `toml`, `yaml`, `yml`, `log`) and no manifest (`mod.json`, `extended.mod.json`, `native-plugin.ini`, the other engines' manifests at the top), never Lua, `src/` or anything else (scripts, DLLs), at most 16 MiB each and 64 MiB per version. Deleted once `kiln-kept.json` no longer names it |
 | `profiles/<pid>/meta.json` | the profile definition (`kiln_manage::profile::Profile`; dev.21 adds `late`: native mod ids whose dllmain DLLs go to chain.ini `[late]`, left out when empty; dev.22 adds `dropinsEngines: true`: `dropins` names the engine kinds too, profiles.md "Drop-in folders") |
 | `profiles/<pid>/config/` | the profile's mod configs (its `configDir`), with `.schema/`, `native.json` and the player's `compat-rules.json` |
 | `profiles/<pid>/data/` | per-mod data when the profile chooses `dataDir: profile` |
@@ -470,6 +477,33 @@ companion; cleanup needs that flag to accept such a copy, a copy without it is c
 XHL-Core's copy in `kiln/chain/<library id>/` (XHL-Core under its own name, core.md "Profiles and activation") has an
 entry too, without a marker file: `files` lists exactly the files Kiln wrote there, and Kiln replaces or removes one
 only while it still holds those bytes; what XHL-Core writes next to it (its log) stays.
+**Publication journal (dev.29):** before a copy is replaced, `kiln/state/placement-journal.json` records the
+publication durably (`[{path, from: marker | null, to: <the receipt it publishes>, parked: <where the old copy waits> |
+null}]`, the last one per path; it stays until that path's receipt moves on). Every placement and cleanup reads it
+first, under the placement lock. Malformed or unreadable journals stop placement with an error and are left
+unchanged. Every record's destination, receipt path, marker identity, and parked sibling path are validated before
+recovery mutates anything. A publication replacing a currently receipted copy gets its new receipt only while the
+published marker and Library file hashes match `to`; first publications without an old receipt remain unowned.
+A stop after parking puts the old copy back with a directory rename. Parked trees are removed only after receipt
+publication and verification that the replacement still exists and matches; a missing replacement with an old copy
+is preserved and reported. Completed records for a moved game's old root are retained without accessing those paths.
+A receipt that moved on or a changed published copy is not adopted. A launcher before dev.29 ignores the file.
+**Durability order:** an imported Library tree is flushed (files, then directories), durably renamed, then its
+import record is replaced durably. A staged game copy (including carried settings) is flushed before its intent,
+park, publish and receipt; both source and destination directory entries of these renames are flushed on Unix,
+and Windows uses the write-through rename. The game's profile.json follows placement/restore, then its advisory
+activation record; both use durable exclusive replacement. A rename can have happened even when its flush returns
+an error: recovery staging is retained instead of deleted. These are software-order guarantees, not power-cut tests.
+Unchanged ownership verification refuses a short/missing code file; it does not silently claim a damaged tree.
+For a damaged Library entry, import/hash validation fails and re-import/repair can be needed. For a damaged game
+copy, placement may retain/refuse it rather than overwrite player files; retry is automatic only when the journal
+can still verify a published replacement or put back its parked predecessor. An interrupted first publication
+without a receipt remains unowned. The activation record is advisory: failure leaves the durable game profile as
+truth and the next refresh recomputes status. Windows directory creation/flush behavior, per-value process crashes
+and concurrent activations have not been hardware/stress validated. Copy-mode fallback/config delivery, chain.ini,
+explicit adoption/removal and identity migrations retain their existing protocols and are outside this replacement
+transaction: a cut can leave stale metadata/partial delivery; verification can retain/refuse it, so manual repair
+may be needed instead of automatic replay.
 The marker alone is advisory: marker-only older copies and player-modified folders are left untouched. The
 upgrade inventory excludes only ShroudForge's mutable enabled switch and setting values. Deactivate/uninstall cleanup
 additionally requires the exact extension text to match; old receipts without it conservatively retain SF copies.
@@ -565,7 +599,10 @@ Grammar (same dialect as 5.2):
   and kiln.log note it). The core does not load a late DLL of a native mod that
   is disabled, on the other side or refused by `native.policy`, and it says `already-loaded` for a DLL that was in the
   process before the late phase (EMF's loader starts the DLLs of `dinput8-chain.ini` itself). The launcher keeps an entry in its own section and adds the same path to
-  `[late]`; a `;` line in front (`; kiln rule <id>`) is a comment like any other.
+  `[late]`; a `;` line in front (`; kiln rule <id>`) is a comment like any other. A compat rule that keeps an entry
+  early (dev.29 `before`: it must load before another DLL, whose entry the rule puts in `[late]`) writes the player's own
+  `[late]` line for it as `; kiln rule <id> off: <line>`, and a profile's late switch for such a `[profile]` entry is not
+  written; the next activation without the rule puts both back. An older proxy reads both as it reads every comment.
 - One DLL per line. A `key = value` line counts by its value. Only values ending in `.dll` (case-insensitive) count;
   other lines are ignored.
 - Paths: absolute (`Z:\…` under Proton, real paths on Windows, UNC) or relative to `<game>/kiln/`; `/` is read as `\`.
@@ -783,6 +820,54 @@ All written atomically; a file whose `pid` is not a live process is stale.
   when another loader had started the DLL before the late phase, so `[late]` moved nothing),
   `services[]` (`name@version`), `plugins[]` (`{file, id, version, status, error}`), `native{loaded, failed, pending}`,
   `clr{started, error}`, `errors[]`.
+- `boot.json` `boot.stop` (0.2.0-dev.29, kiln.boot `stop_start`): `{code, reason, by, mods[]}` when a service ended the
+  start on purpose (with or without a boot generation), else null; `boot.exitCode` is then that code. kiln.knowledge's
+  roster uses code 19202 (0x4B02), its whole build of the mods' native quests and NPCs that failed 19203 (0x4B03): show
+  `reason` and do not restart (below). progress.json says `state` `failed` with the same reason.
+- `roster-refused.json` (kiln.knowledge, 0.2.0-dev.29; `state-roster-refused.schema.json`): the mods' NPC roster cannot
+  be held on this side (more than 128 entries, or more than 64 where the second unlock page cannot be installed), so the
+  start stopped before any world loaded and the process ended with 19202 (0x4B02; a Linux parent under Wine sees 2).
+  Written first, before kiln.log's line, before kiln.boot writes boot.json and progress.json and before the game
+  client's message box, so it is there even when the player ends the game while the message is open. Fields:
+  `format` 1, `refused` true, `why` (the build's refusal, word for word: show it), `mods[]` (the mods that add roster
+  NPCs: the ones to remove or update), `side` (`client`|`server`), `exitCode` 19202, `unixExitStatus` 2, `restart`
+  false (a restart stops the same way: never restart on it), `advice` (what to do, as in kiln.log), `bootStop` (true:
+  kiln.boot ended the start, so boot.json `boot.stop` and progress.json say the same; false: an older core, only this
+  file and kiln.log), `pid`, `utc`. The next start moves it to `roster-refused.last.json`: a launcher that shows why the
+  last start ended reads that one after a new start, and `roster-refused.json` right after the exit. A launcher shows
+  `why` and the `mods` after the game exits with 19202, and offers to disable those mods.
+- `content-refused.json` (kiln.knowledge, 0.2.0-dev.29; `state-content-refused.schema.json`): the whole build of the
+  mods' native quests, knowledge and NPCs failed, so nothing of it is served (reading the mods' files failed in a way
+  that is no one mod's, the build threw, the shared resources did not build, kiln.assets refused the built pack or is not there, the hook on the game's
+  resource start is not there), while at least one enabled mod ships such content; the start stopped before any world
+  loaded and the process ended with 19203 (0x4B03; a Linux parent under Wine sees 3). One mod's own errors never write
+  it. The same fields, order of writing and `.last.json` rule as `roster-refused.json`, with `exitCode` 19203,
+  `unixExitStatus` 3, `why` (what failed, word for word: show it), `mods[]` (the mods whose content was not served: the
+  ones to remove or update) and `advice` (remove or update them; send kiln.log if it still stops). A launcher shows
+  `why` and the `mods` after the game exits with 19203, and offers to disable those mods.
+- Launcher stopped-start notice (dev.29): `kiln_manage::stopped_start::read` reads `roster-refused.json` first,
+  then `content-refused.json`, then `boot.json` (`boot.stop`, or the older required-boot-mod exit 19201). The kind is
+  `roster` (19202), `content` (19203) or `boot-mod` (anything else); the notice shows a sentence of its own for
+  `roster` and `content` with the reason under it, and the reason with the names for `boot-mod`. Each read is capped at 256 KiB;
+  missing, invalid and unknown-format evidence produces no notice (invalid files are logged). It never changes
+  Kiln's files and does not read `.last.json` as a new stop. The command `launch_state.stoppedStart` returns the
+  kind, reason, mod ids and available Library display names, advice, UTC, exit code and runtime pid.
+  The watcher and command retain the observed process start, including external Steam starts, and inspect the
+  evidence while it runs (including progress `failed`) and after exit. The embedded time must lie between that
+  process start (rounded down to its timestamp's whole second) and the observation of exit; the file mtime must
+  also be at least the process start. Windows requires the process pid; Proton uses the process time because
+  its host pid differs from the Windows pid, then pins the runtime pid when a stop is accepted. No observed
+  process identity means no notice: an old stop is never inferred from exit code alone.
+  For a process that stops between polls, format-1 failed `progress.json` may supply the runtime pid and start
+  time instead, but only if both its embedded start time and mtime are after this launcher's request. The stop
+  must then match that runtime pid and time window.
+  Desktop Play and Deck Home keep the notice until Dismiss, launcher Play or a running process whose timestamp proves it started after the refusal. Missing, invalid or indistinguishable timestamps keep the notice. Host and runtime pids are not compared to retire it under Proton. The launcher stores the notice
+  and dismissed `(game, pid, UTC, exitCode)` in its own browser storage, so reload/restart cannot resurrect a
+  dismissed stop. Review these mods opens the existing mod list's exact-id filter. Ordinary quits produce none.
+  `kilnctl run` uses the same bounded reader within its foreground-run time interval and prints the reason and
+  advice before returning the original exit status. Detached `start` includes those lines in its existing failure
+  log tail. `status` labels the last stopped start from kilnctl's own `<run log stem>.stopped-start.json` receipt;
+  `run` clears this receipt before another start. This receipt is outside Kiln's state files.
 - `mods.json` (Kiln.Host, after every resolve/load/unload/reload; `generation` grows): `pid`, `written`, `generation`,
   `side`, `api`, `profile{id, generation, mode}`, `mods[]` (`{id, version, name, folder, source: profile|dropin, state:
   pending|loaded|disabled|failed|skipped|unloaded, reason, loadIndex, side, clients, faults}`).
@@ -991,13 +1076,17 @@ Deactivate: move `profile.json` to `kiln/backups/profile-<ts>.json`, clear `[pro
    replacing another version of the same id, or switching a disabled entry on (`changes`, with what each replaced).
 5. "My mods": `profile::create`, `dropins` every kind (what the legacy layout loaded still loads), activated
    (activation flow). A failed activation removes it.
-6. Save the profile, then `profile::refresh_active` writes `profile.json` again (not while the game runs: Play does it
-   before the next start). When that write fails, the profile change is undone (a "My mods" made for it is removed)
+6. Save the profile; each entry that replaced another version of the same mod keeps that version for a roll back (dev.29,
+   `kiln_manage::kept`: with a copy of the settings its game-folder copies hold now, before the placement below carries
+   them over; `keepVersions` in `settings.json`; not when the Library's disk would then have less free than
+   `data_folder::needed_bytes` asks for: `notices` says so). Then `profile::refresh_active` writes `profile.json` again
+   (not while the game runs: Play does it before the next start). When that write fails, the profile change is undone (a "My mods" made for it is removed)
    and the task fails; the library keeps what it imported.
 7. `missing`: what the added Kiln mods (non-optional `dependencies`, not `kiln`) and native mods (`requires`) need and
    the profile lacks (enabled, any version).
 Undo is `profile_revert(profileId, changes)`: each changed entry goes back (removed when it was new), newest first; an
-entry changed since is left alone; then `profile.json` is written again where the profile is active.
+entry changed since is left alone; then `profile.json` is written again where the profile is active. An entry that goes
+back to another version is kept the same way (dev.29), and a kept version that comes back gets its settings back.
 `profile_ensure_default(gameId)` is step 2 and 5 alone (Play runs it after it installed Kiln; it also turns the
 remembered profile back on, so a reinstall brings the player's profile back before any drop).
 
@@ -1117,16 +1206,17 @@ Shared types (TypeScript names, defined in `commands.ts`; Rust in kiln-manage un
 | profile | `activation_notices` | - | `Activation[]`: the re-applies' activations the window has not shown yet, oldest first; each is returned once (`kiln://activation`) |
 | profile | `notices_unseen` | gameId, lines: `{text: string, safety?: boolean}[]` | `string[]` (dev.26): the `text`s to raise now: those not reported closed by the player before for this game (`installs/<id>.notices-seen.json`, section 3); asking remembers nothing. With `LauncherSettings.modFolderNotes` off only `safety` lines are considered (a retained folder with `mayRun` and `off`, a sentence of `Activation.safetyNotes`). Refused while the data folder is held, like every command not listed open (`src-tauri/src/folder.rs`) |
 | profile | `notices_shown` | gameId, lines: string[] | `null` (dev.26): the player closed the notice that said these `text`s (its close button or one of its buttons on the desktop, OK or B on the Deck's notice dialog; being on screen is not enough): from now on `notices_unseen` leaves them out. Not retried when it fails (the sentence comes again later). Refused while the data folder is held |
-| library | `library_list` | kind: ModKind \| null | `LibraryEntry[]` (a version's `changed: true` (dev.27): its files were changed in its folder since the import, looked at cheaply: the entry is hashed only when its manifest or folder is newer than its record; `library_take_over` uses the changed files) |
+| library | `library_list` | kind: ModKind \| null | `LibraryEntry[]` (a version's `changed: true` (dev.27): its files were changed in its folder since the import, looked at cheaply: the entry is hashed only when its manifest or folder is newer than its record; `library_take_over` uses the changed files. A version's `kept` (dev.29, absent otherwise): `KeptInfo {kept: RFC 3339, replacedBy?: version, settings: string[] (relative to the game folder), settingsSize: number, profiles?: string[] (the profiles whose change kept it: only they roll back to it; absent: any)}`, an earlier version an update kept for a roll back; kept versions come after the others in `versions`, so `versions[0]` is the newest one that is not kept unless only kept ones are left) |
 | library | `library_detect` | path: string | `Detected` |
 | library | `library_import` | paths: string[] | `TaskId` -> `ImportReport` |
 | library | `library_add_to_profile` | gameId, profileId, entries: LibraryRef[] | `AddReport` (the entries into the profile the player picked after an add said `libraryOnly`; Undo is `profile_revert`) |
 | library | `library_remove` | entry: LibraryRef, force: boolean, shown?: string[] \| null | null (`game_running` while a game runs, or a server whose `profile.json` points into the library, even with `force`; `conflict` while `library_users` lists it, unless `force`. With `shown` (the `library_users` answer a dialog named): `conflict` when it lists anything not in `shown`, whatever `force` says) |
 | library | `library_remove_many` | entries: LibraryRef[], force: boolean | `RemoveReport` {removed: LibraryRef[], failed: {entry: LibraryRef, error: KilnError}[]} (Clean up: one look at the running processes and the profiles for the batch; `game_running` for the whole batch, nothing removed, as `library_remove`; otherwise each version not removed is in `failed`) |
-| library | `library_unused` | | `LibraryRef[]` (in no profile, no known game's `profile.json`, and no `profile.once.json` while the game's `play-once.ini` asks for it) |
+| library | `library_unused` | | `LibraryRef[]` (in no profile, no known game's `profile.json`, and no `profile.once.json` while the game's `play-once.ini` asks for it; never a version kept for a roll back (dev.29): it is removed on its own, `library_remove`) |
 | library | `library_users` | entry: LibraryRef | `string[]` (profile ids, then `<profile> (active in <game folder>)` / `(play-once in <game folder>)`: what `library_remove` refuses over without `force`) |
 | library | `library_lint` | entry: LibraryRef \| null, profileId: ProfileId \| null | `LintReport` (`schema/lint-report.schema.json`) |
 | library | `library_take_over` | entry: LibraryRef | `TakenOver` {from: LibraryRef, to: LibraryRef, name} ("Use the changed files": an entry whose files the player changed in its folder, `LibraryVersion.changed` or a refusal's `detail.libraryChanged`, moves to its new hash with a record read from its manifest again; profiles that listed it list the new entry, the move is kept as `migrate_identities` keeps one, and active games get their `profile.json` written again. `game_running` while a game, or a server that may read the entry, runs; `refused` when the folder is no longer a mod of its kind or its manifest gives another id; `to == from` when nothing was changed) |
+| library | `library_rollback` | gameId: string \| null, profileId, kind: ModKind, id: string, to: VersionRef \| null | `RollbackReport` {profileId, profileName, kind, id, name, from: VersionRef, to: VersionRef, changes: ProfileChange[], kept: boolean, settings: string[], notices: string[]} (dev.29, "Roll back to <version>": in the profile (the game's active one), the mod's entry becomes its kept version `to` (`VersionRef {version, hash}`; null: the newest kept one), switched on or off as it was; the version rolled away from becomes the kept one (`kept`), with its settings as its game-folder copies hold them now, unless `keepVersions` is 0 or the disk check refuses (`notices` say so). The roll back writes only the profile and `library/kiln-kept.json`; then, as after `profile_save`, `profile.json` is written again where the profile is active and the game is not running, and that placement (`profile::activate` / `refresh_active`, else Play's) puts the kept `settings` back into the mod's copy, once. Undo is `profile_revert(profileId, changes)`, which keeps the version it leaves the same way. `not_found` when the profile does not list the mod or the version is not kept) |
 | config | `config_list` | target: ConfigTarget | `ConfigFileInfo[]` |
 | config | `config_read` | target, file: string | `ConfigDocument` |
 | config | `config_set` | target, file, path: string, value: unknown | `ConfigDocument` |
@@ -1204,15 +1294,16 @@ Shared types (TypeScript names, defined in `commands.ts`; Rust in kiln-manage un
 | update | `update_status` | - | `UpdateStatus` |
 | update | `update_check` | - | `UpdateStatus` (asks the sources now) |
 | update | `update_install` | - | `TaskId` -> `UpdateStatus` (download, verify; the AppImage is put in place; `unsupported` for a .deb, .rpm or development build) |
+| update | `update_switch` | channel: `stable` \| `dev` \| `beta`, restore?: bool | `TaskId` -> `UpdateStatus` (dev.29: the channel switch the player started, after saving `updateChannel`: the channel's newest build downloaded, verified and put in place like an update; back from a test build to the release line also an older one, to the beta only a newer one; `not_found` when the channel has no other build; `restore`: the restart puts the "before beta" copy back first; `unsupported` as for `update_install`) |
 | update | `update_restart` | - | null (restarts into the update that is ready; Windows: runs its installer; returns only on failure) |
 | update | `update_skip` | version: string \| null | `UpdateStatus` (null: un-skips) |
 | update | `update_ack` | - | `UpdateStatus` (clears `justUpdated`) |
 
 The Nexus Mods build (`AppInfo.distribution` "nexus", built without the `self-update` feature; [releasing.md](releasing.md)
-"The two builds") has the same six commands with no self-update behind them: `update_status`, `update_check`,
+"The two builds") has the same seven commands with no self-update behind them: `update_status`, `update_check`,
 `update_skip` and `update_ack` return the same `UpdateStatus` with `phase: "disabled"`, `distribution: "nexus"`,
-`auto: false`, `install.inPlace: false` and `page` = the Kiln page on Nexus Mods, and change nothing; `update_install`
-and `update_restart` reject with `unsupported` (detail: that page). Nothing in that build reads the network for updates
+`auto: false`, `install.inPlace: false` and `page` = the Kiln page on Nexus Mods, and change nothing; `update_install`,
+`update_switch` and `update_restart` reject with `unsupported` (detail: that page). Nothing in that build reads the network for updates
 or emits `kiln://update`; its UI calls none of these commands.
 | library | `library_add` | gameId, paths: string[] | `TaskId` -> `AddReport` (import + add to the game's active profile + write profile.json, section 7 "Add a mod"; rejects at once with `unsupported` when the game has no `kiln/`) |
 | profile | `profile_revert` | profileId, changes: ProfileChange[] | `Profile` (undoes a `library_add`; profile.json follows where the profile is active, as after `profile_save`) |
@@ -1240,7 +1331,7 @@ or emits `kiln://update`; its UI calls none of these commands.
 | engines | `engine_adopt_folder` | kind: ModKind, id, profileId, gameId | `Adopted {kind, id, version, path, renamedFrom?, already?, settingsKept?}`. "Let Kiln manage this folder" (dev.27, `engine_mods::adopt`): the player's own ShroudForge folder that serves the profile entry becomes Kiln's placement (marker, receipt, inventory), as if activation had copied it there. Only on the player's request, never by itself. Refuses: `unsupported` for another kind; `not_found` when the entry is not in the profile or no folder of the player's holds it; `game_running`; `conflict` unless the profile is the one the game uses; `refused` with the folder's path and the first file that differs when its files are not byte for byte the Library entry's (the switch and the setting values in `extended.mod.json` may differ and stay; a link, a file of the player's, a changed setting description or range, or a second folder with the same package are refused), and for a copy of Kiln's own whose files changed; `hash_mismatch` when the Library entry changed on disk. Nothing in the folder is rewritten: it gets the marker file `.kiln-library.json` and, when it had another name, the name `<id>` (`renamedFrom`). `already`: it was Kiln's, nothing changed. `settingsKept`: the settings whose values are the player's. The next activation switches it as the profile says and updates it; the launcher runs `profile_activate` right after, which also refreshes the notes |
 | engines | `eml_backup` | gameId | `EmlBackup[] {file, backup, patched}` (EML's `<exe>.kfc.bak` next to each `.kfc`; `patched`: they differ; read/hash errors and symlinks are refused) |
 | engines | `eml_restore` | gameId | Legacy `string[]` signature; always `refused` for direct restoration (`game_running` takes precedence while running). Disable EML mods and launch updated Kiln for ownership-aware archive-writer restoration; shared backups alone prove no ownership. |
-| compat | `chain_view` | profileId, gameId | `ChainView {entries: ChainViewEntry[], rules: CompatRuleResult[], ruleErrors, session \| null, overlaps: ChainOverlap[], active, current, error}` (the profile's chain entries with their `[late]` state and who set it (`lateBy`: `player`, `profile` or `rule:<id>`; a `[late]` line that a rule wrote into chain.ini, marked `; kiln rule <id>`, is that rule's even when it is another profile's; `gated`: shroudlink's client addon, by its exports, as a [chain] proxy or a profile native: no late switch is offered and `chain_set_late` refuses late for it, only switching it back), the compat rules evaluated over the profile, and the overlaps of the game's last `state/hooks.json` mapped to chain entries and Library items; `session` null: no hooks.json yet) |
+| compat | `chain_view` | profileId, gameId | `ChainView {entries: ChainViewEntry[], rules: CompatRuleResult[], ruleErrors, session \| null, overlaps: ChainOverlap[], active, current, error}` (the profile's chain entries with their `[late]` state and who set it (`lateBy`: `player`, `profile` or `rule:<id>`; a `[late]` line that a rule wrote into chain.ini, marked `; kiln rule <id>`, is that rule's even when it is another profile's; dev.29 `earlyBy`: `rule:<id>` when a `before` rule keeps the entry loading first, so its switch is the rule's (`late` false) and `lateBy` is the rule's for the DLL it loads after; a rule result of action `before` carries `early` (the entries it keeps first) besides `targets` (the ones it loads late), and `warning` when it fired but could not order them (nothing moved); `gated`: shroudlink's client addon, by its exports, as a [chain] proxy or a profile native: no late switch is offered and `chain_set_late` refuses late for it, only switching it back), the compat rules evaluated over the profile, and the overlaps of the game's last `state/hooks.json` mapped to chain entries and Library items; `session` null: no hooks.json yet) |
 | compat | `chain_set_late` | profileId, gameId, path: string, late: boolean | `ChainView` (a `[profile]` entry changes the profile's late list, saved and re-applied where it is active; a `[chain]` entry changes the game's `chain.ini [late]` for every profile and is refused with `game_running` while the game runs; `not_found` when `path` is not in the profile's chain) |
 | found | `found_scan` | gameId, profileId | `FoundReport {gameId, profileId, kilnInstalled, mods: FoundMod[], loaders: OwnLoader[], unreadable: {path, reason}[], truncated}`; `FoundMod {kind: ModKind \| null, name, id, version, path (relative to the game, '/'), state: "loads"\|"off"\|"inProfile"\|"cannotRun", via?: "kiln"\|"ownLoader", reason, fix?: "dropins"\|"add", profileMod?}`, `OwnLoader {engine, name, kinds, file}` (mods in the game folder Kiln did not put there and whether they load with that profile: profiles.md "Mods in the game folder"; never fails over a missing or unreadable folder) |
 | found | `found_add` | gameId, profileId, path | `TaskId` -> `AddReport` (imports a `found_scan` entry into the Library and adds it to the profile, enabled; through `library_add`'s flow when the profile is active in the game; a refusal is in `import.skipped`; the player's folder stays) |
@@ -1276,7 +1367,11 @@ a dropped mod goes through `library_add`; off: `library_import` only), uiMode?: 
 in; absent or auto: the Deck UI when `AppInfo.deck.detected`; [deck.md](deck.md)), modFolderNotes: boolean (dev.26,
 default true: "Show notes about mod folders"; off: an activation raises none of its notices except the first of a folder
 that may still run although its mod is off; [app.md](app.md) "Notices about mod folders"), modUpdatesDaily: boolean
-(dev.28, default false: "Check for mod updates once a day"; [catalog.md](catalog.md) "Update notices")}` (`checkUpdates`, never used, is gone;
+(dev.28, default false: "Check for mod updates once a day"; [catalog.md](catalog.md) "Update notices"), keepVersions:
+number (dev.29, default 1, 0 to 5: "Earlier versions to keep", how many of a mod's earlier versions an update keeps for a
+roll back with their settings; `app_settings_set` refuses more than 5 and trims what is kept to the new count; a
+launcher before dev.29 drops the field when it saves its settings, and dev.29 then keeps 1; [catalog.md](catalog.md)
+"Rolling back an update")}` (`checkUpdates`, never used, is gone;
 readers ignore it), `UpdateStatus` (`launcher/src-tauri/src/selfupdate/mod.rs`; [releasing.md](releasing.md); `distribution`
 "direct", or in the Nexus build "nexus" with `phase: "disabled"`, `commands/update.rs`),
 `Task {id, kind (the command), title, state: 'queued'|'running'|'done'|'failed'|'canceled', progress: number|null,
@@ -1469,3 +1564,31 @@ kilnctl is built on the crate; it also has `bundle`, `client`, `admin` and `depl
   `/logs`, `/saves`, `/editor`, `/settings`, `/about`; Servers `/servers/:id/{overview,logs,ticks,settings,configs,mods,
   backups,modpack}`; Admin `/servers/:id/admin/{players,map,zones,items,spawn,world,combat,creatures,gamedata,permissions,
   content,saves,crashes}` (`admin/configs`, `admin/mods` and `admin/console` redirect to the merged server pages).
+
+Library usage includes saved profiles under `snapshots/before-beta/profiles/`, named `<id> (before beta)`. Clean up
+and ordinary removal protect their packages until the snapshot is replaced, including disabled entries. Saved
+profiles and metadata files are never read through symlinks. Explicit forced removal still honors its existing
+confirmation. Restore preflights saved profile references against present Library records and paths before any
+replacement, also when recovering a staged restore. A legacy launcher can still remove these packages; restore then
+refuses and names what to reimport.
+
+The beta copy includes launcher settings and profile metadata. It excludes `library/kiln-kept.json` and its
+settings folders. Restore and recovery skip that journal even in older copies and restore stages, leaving its live
+payload and ownership together.
+
+A release launcher selects only its shipped runtime for automatic game updates, comparing bundle version and
+creation time. Cached test runtimes remain available for explicit selection on Runtime. Without a shipped runtime a
+release offers no automatic game update. Test launchers keep the existing cached-bundle update behavior.
+
+Capture, startup recovery and restore upgrade the existing data-folder lock to exclusive access. Another launcher
+using that folder causes a clear refusal. A blocked restore retains exclusivity; a completed startup or a return to
+the original session downgrades to shared access. Restart handoff keeps exclusivity until the process releases the
+lock. An identical startup with no beta work may share the folder. An upgrade refusal returns to the session only
+after shared access is reacquired. A lock error holds local writers behind the recovery gate until restart.
+
+Beta startup gate commands: `snapshot_status` returns `{ phase: "preparing" | "blocked" | "ready", reasons: string[], canContinue: boolean }`; `snapshot_continue` takes no arguments and records an explicit decision to continue without a complete pre-beta copy. Neither bypasses an unfinished restore journal. `UpdateStatus.restoreRequested` records the accepted restore choice, and `beforeBetaWarning` carries persisted opt-out reasons.
+
+ShroudForge hosting: the existing `kiln/state/shroudforge.json` carries `mode: "self-hosted"` and additive
+`loaderFile` (the module path observed by the adapter; bootstrap preferred, runtime fallback). Older records may lack
+`loaderFile`. `engine_status.state` preserves this last-start evidence. Current `ownLoader.file` / `found_scan.loaders`
+come from disk detection and decide the next-start warning; historical state never resurrects a removed loader.

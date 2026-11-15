@@ -21,6 +21,7 @@ come with code fixes.
 | [KILN106](#kiln106) | warning | thread, timer, watcher, socket or subscription never released | lifecycle.md "What a mod must still release itself" |
 | [KILN107](#kiln107) | **error** | advanced API (hooks, symbols, memory) without `KilnAdvanced` | `HooksGate.RequireAdvanced` (generated table) |
 | [KILN108](#kiln108) | warning | Kiln service used but not listed in `KilnServices` | mdk.md |
+| [KILN109](#kiln109) | warning | client-world `EcsPrograms.TryBind` called off the game's main thread (since 0.2.0-dev.29) | services/world.md |
 | [KILN120](#kiln120) | warning | a Kiln result (`IKilnResult`) thrown away | contract.md, "The error rule" |
 | [KILN121](#kiln121) | warning | a `[RequiresCapability]` member used with nothing that asks for its row | contract.md; the attributes and the guard table (generated) |
 | [KILN194](#kiln194) | **error** | a path string the game doesn't have | the local catalog |
@@ -35,8 +36,15 @@ come with code fixes.
 
 Other KILN codes:
 - **KILN0xx** come from the SDK's MSBuild task (manifest checks, mdk.md), except KILN034 and KILN035 above: Roslyn rules
-  of Mod.OnBoot, numbered as the design of the boot phase names them (the MSBuild codes stop at KILN032).
+  of Mod.OnBoot, numbered as the design of the boot phase names them (the MSBuild codes are KILN001 to KILN032, and
+  KILN036 since 0.2.0-dev.29: a `[Query]` struct kiln.world cannot reserve, from the `KilnPrograms` step,
+  [services/systems.md](../services/systems.md#programs-of-your-own-systemsdefine)).
 - **KILN190** to **KILN193**, **KILN198** are the game-id generator's notes (catalogs.md).
+- **KILN170** to **KILN174** are the `[ImpactNative]` generator's (Kiln.ImpactNatives, [impact.md](impact.md), since
+  0.2.0-dev.29): see [below](#kiln170). **KILN036** (error) and **KILN037** (warning) come from its build task, which
+  writes the generated typed entries into the output's `impact/natives.json`: KILN036 when the assembly, kiln.mod.json or
+  natives.json cannot be read or written, KILN037 when a hand-written entry of the same name is replaced.
+- **KILN180** to **KILN182** are the typed-hook generator's warnings (Kiln.Sigs, [../services/hooks.md](../services/hooks.md#typed-hooks-and-calls-detour_typed-kilnsigs-since-020-dev29)): a descriptor of the mod's sigdb fragment it cannot use (KILN180, with the reason: an unknown type, a struct return over 8 bytes without `sret`, more than 20 positions, two descriptions of one symbol that differ, two symbols with one class name), descriptors in a project without Kiln.Hooks (KILN181), a sigdb file that is not JSON (KILN182). A descriptor it reports is not generated.
 - **KL** codes are the data-file linter's (`kiln lint`).
 
 ## How it ships
@@ -363,6 +371,18 @@ Kiln only gates kiln.hooks, and mods never see game pointers without it.
 
 **Fix.** Add the property, or the manifest key. No code fix: the project file is not a source file.
 
+<a id="kiln109"></a>
+## KILN109: client-world API called off the game's main thread
+`EcsPrograms.TryBind(key, callback, WorldKind.Client)` (and `WorldKind.Prediction`) binds a program of this player's client
+world, which kiln.world takes only on the game's main thread: in `OnLoad` (a client mod loads in the main menu, on that
+thread) or in `Client.Post` work. Elsewhere it throws `InvalidOperationException`. The rule reports the call in code that
+runs off the game's threads (`Task.Run`, threads, timers, thread-pool callbacks, after `await ...ConfigureAwait(false)`),
+when the world is a constant. Not reported: the tick thread (in `OnLoad` it is the main thread), though on a host the
+server's tick thread (`Scheduler.Post`, a reload's `OnLoad`) is not the main thread: there, too, post it with
+`Client.Post`. A world argument that is not a constant (a variable, a field, a parameter) is not seen: the rule cannot
+tell a client bind from a server one there and does not report it; off the game's threads KILN101 reports such a call
+as it does a server bind (whose thread is the tick thread), and at run time the call throws off its world's thread. [services/world.md](../services/world.md#client-world-programs-since-020-dev29).
+
 <a id="kiln108"></a>
 ## KILN108: Kiln service not listed in KilnServices
 **What.** The code uses a type or member of a Kiln service assembly, but the project's `KilnServices` does not
@@ -522,6 +542,10 @@ pass settles it). `[Experimental("KILNX002")]`; today the achievement guard (`St
 ---
 
 <a id="kiln194"></a>
+## KILN180, KILN181, KILN182: Typed-hook descriptors
+<a id="kiln180"></a><a id="kiln181"></a><a id="kiln182"></a>
+The Kiln.Sigs generator turns each `sig` descriptor of a mod's `sigdb/server.json` and `sigdb/client.json` into a class (services/hooks.md). It warns and leaves a descriptor out when kiln.hooks would refuse it as malformed (KILN180), when the project describes functions but does not reference Kiln.Hooks (KILN181: add `Hooks` to `KilnServices`), and when a sigdb file does not parse (KILN182). Fix the descriptor; `tools/sigport/sigdb_check.py --fptool` checks it against the exe.
+
 ## KILN194: No such field in the game
 **What.** A constant path string given to `GameDataEntry` or `ContentEntry` (`Get`, `Original`, `GetNumber`, `GetJson`, `GetRef`, `Set`,
 `SetJson`, `Reset`, `Fields`), or a key of a definition's `Fields`, that the game doesn't have:
@@ -702,3 +726,17 @@ nothing to act on.
 KILN121 knows `OnBoot`: `Mod.OnBoot` is marked `[RequiresCapability("mods.boot")]`, and an override has the rows of what
 it overrides, so `BootDefinitions.For(boot)` in `OnBoot` needs no check. `boot.GameData.Read` still asks for
 `mods.boot.game_data`, which is off where no snapshot of this game build was made.
+
+<a id="kiln170"></a><a id="kiln171"></a><a id="kiln172"></a><a id="kiln173"></a><a id="kiln174"></a>
+## KILN170 to KILN174: an `[ImpactNative]` method the generator cannot make
+**What.** Errors with the method's location: KILN170 for the method itself (not static, generic, async, private or in a
+private or generic type, or a name that is not `[A-Za-z0-9_]` of 1 to 60 characters), KILN171 for a parameter of a type
+no native takes (or a `NativeContext` by `ref`/`out`, or `[Raw]` on anything but `uint`), KILN172 for a return type other
+than `bool`, `byte` or `void`, KILN173 for one name on two methods. KILN174 (warning): the project has `[ImpactNative]`
+methods but no Kiln.Abilities with `ImpactNativeAccess` (0.2.0-dev.29 or newer, `Abilities` in `KilnServices`).
+
+**Why.** The generator writes the native's thunk, registration and typed declaration from the method's signature. A
+shape it cannot turn into the impact types of the call is not generated at all, so nothing half-works at run time.
+
+**Fix.** Make the method `static` and at least `internal`, use the types of [impact.md](impact.md) ("`[ImpactNative]`
+methods"), give other results back through `ref` or `out` parameters, and give each native its own name.

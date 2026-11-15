@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Kiln.ImpactNatives: a C# source generator (IIncrementalGenerator) that turns a mod's [ImpactNative] methods into
+       synchronous Impact natives (chapter 06c §4, §7.2, §9.5): per method a typed thunk, its registration at the mod's
+       load, a NativeRef in the namespace's Natives class and the impact/natives.json entry (an assembly attribute the
+       SDK's KilnImpactNatives task writes out). Compiler-only references (netstandard2.0), no runtime dependencies.
+       Shipped in the Kiln.Sdk package (analyzers/dotnet/cs/) and wired by managed/Kiln.Sdk/Sdk/Kiln.ImpactNatives.targets. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>Kiln.ImpactNatives</AssemblyName>
+    <RootNamespace>Kiln.ImpactNatives</RootNamespace>
+    <IsRoslynComponent>true</IsRoslynComponent>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    <IsPackable>false</IsPackable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);RS2008</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" PrivateAssets="all" />
+    <InternalsVisibleTo Include="Kiln.ImpactNatives.Tests" />
+  </ItemGroup>
+</Project>

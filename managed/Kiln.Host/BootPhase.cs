@@ -424,6 +424,34 @@ internal static unsafe class BootPhase
             }
             BootGeneration.Record(gen, reports, committed);
             BootGeneration.ReadState = CurrentReport;
+            PublishFingerprints(gen);
+        }
+
+        // What each side-both boot mod committed, for the join (BootFingerprint.cs, Kiln.Network's BootGate): its envelope documents and
+        // its blocks files' resource patches. A mod left out has none; one that cannot be hashed is not compared.
+        private void PublishFingerprints(ulong gen)
+        {
+            var fingerprints = new Dictionary<string, string?>(StringComparer.Ordinal);
+            foreach (var (id, a) in _authors)
+            {
+                if (a.Manifest.Side != ManifestSide.Both) continue;  // a client-only or server-only mod is not compared at the join
+                if (a.State != BootModState.Committed)
+                {
+                    fingerprints[id] = null;
+                    continue;
+                }
+                try
+                {
+                    var fp = BootFingerprint.Of(id, a.Directory, _collectors);
+                    fingerprints[id] = fp;
+                    log(LogLevel.Info, $"boot: {id}: boot content {fp[..16]} (the join compares it with the other side's)");
+                }
+                catch (Exception e)
+                {
+                    log(LogLevel.Warn, $"boot: {id}: its boot content has no fingerprint ({e.GetType().Name}: {e.Message}); it is not compared at the join");
+                }
+            }
+            BootFingerprint.Publish(gen, fingerprints);
         }
 
         private BootModReport CurrentReport(BootModReport report)
@@ -458,7 +486,7 @@ internal static unsafe class BootPhase
     internal static string CodeName(uint code) => code switch
     {
         1 => "DuplicateDefinition", 2 => "CallbackFailed", 3 => "Dependency", 4 => "PrepareRefused", 5 => "CollectorFault", 6 => "CollectorMissing",
-        7 => "GenerationAborted", 8 => "NotCommitted", 9 => "WrongRole", 10 => "ActivationFault", 0x80000001u => "ShadowedByFile",
+        7 => "GenerationAborted", 8 => "NotCommitted", 9 => "WrongRole", 10 => "ActivationFault", 11 => "StartStopped", 0x80000001u => "ShadowedByFile",
         _ => $"0x{code:x8}",
     };
 
@@ -627,7 +655,13 @@ internal sealed partial class ModManager
     {
         why = "";
         if (!manifest.HasCode) return true;  // a data-only boot mod: its files only
-        var alc = new ModLoadContext(manifest.Id, directory);
+        uint gameplayRequested = 0;
+        var alc = new ModLoadContext(manifest.Id, directory, loaded: assembly => {
+            var demand=GameplayBuildDemand.GroupsFor(assembly) & ~gameplayRequested;
+            if (demand!=0) {
+                gameplayRequested |= demand; GameplayBuildDemand.Request(_host, owner,demand);
+            }
+        });
         try
         {
             var assembly = alc.LoadFile(System.IO.Path.Combine(directory, manifest.EntryAssembly));

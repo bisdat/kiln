@@ -625,6 +625,16 @@ fn engine_lock(managed: &Path, root: &Path) -> Result<std::fs::File> {
     Ok(lock)
 }
 
+// The parent of an EML copy and the folder ShroudForge reads. The platform is explicit so host tests
+// exercise the Windows decision used by placement, without a Windows filesystem.
+fn sf_reads_parent(parent: &Path, root: &Path, windows: bool) -> bool {
+    if windows {
+        crate::winpath::windows_same_folder(&parent.to_string_lossy(), &root.to_string_lossy())
+    } else {
+        crate::winpath::same_folder(parent, root)
+    }
+}
+
 fn placements_file(game: &Path) -> PathBuf {
     game.join("kiln/state/library-placements.json")
 }
@@ -632,7 +642,33 @@ fn placements_file(game: &Path) -> PathBuf {
 fn placements(game: &Path) -> Result<Vec<Placement>> {
     let file = placements_file(game);
     refuse_symlink_path(game, &file)?;
-    Ok(crate::util::read_json(&file)?.unwrap_or_default())
+    let mut entries: Vec<Placement> = crate::util::read_json(&file)?.unwrap_or_default();
+    // A copy placed in ShroudForge's mods folder while a launcher on Windows read its `paths.mods` with Windows'
+    // verbatim prefix (`\\?\C:\…\mods`, before 0.2.0-dev.29): the same folder, now named without it
+    // (sf_paths::windows_folder), so its receipt still names the copy. Of two receipts that then name one folder the
+    // later one is current (put_placement appends).
+    for r in &mut entries {
+        if let Some(s) = r.path.to_str().filter(|s| s.starts_with(r"\\?\")) {
+            let plain = crate::winpath::plain_path(s);
+            if plain.len() != s.len() { r.path = PathBuf::from(plain.into_owned()); }
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut kept: Vec<Placement> = entries.into_iter().rev().filter(|r| seen.insert(r.path.clone())).collect();
+    kept.reverse();
+    Ok(kept)
+}
+
+// Keep the spelling dev.28 keys its own-loader receipts by. DLL companion receipts are
+// keyed by the game folder instead, so they must not acquire ShroudForge's spelling.
+#[cfg(any(windows, test))]
+fn compatible_receipt_path(path: &str, kind: ModKind, game_folder: bool, sf_root: &str) -> String {
+    if !game_folder && matches!(kind, ModKind::ShroudForge | ModKind::Eml) {
+        if let Some(rest) = crate::winpath::windows_below(sf_root, path).filter(|rest| rest.len() == 1) {
+            return format!("{}\\{}", sf_root.trim_end_matches(['\\', '/']), rest[0]);
+        }
+    }
+    path.to_owned()
 }
 
 fn save_placements(game: &Path, entries: &[Placement]) -> Result<()> {
@@ -641,11 +677,183 @@ fn save_placements(game: &Path, entries: &[Placement]) -> Result<()> {
     let file = placements_file(game);
     refuse_symlink_path(game, &file)?;
     let parent = file.parent().expect("receipt parent");
-    std::fs::create_dir_all(parent).map_err(io_at(parent, "creating"))?;
-    let tmp = crate::library::TempDir::new(parent, "receipt")?;
-    let staged = tmp.path().join("receipt.json");
-    crate::util::write_json_atomic(&staged, &entries)?;
-    crate::util::rename_replace(&staged, &file)
+    crate::durable::ensure_dir(parent)?;
+    #[cfg(windows)]
+    let compatible: Vec<Placement> = {
+        let root = crate::sf_paths::legacy_mods_directory(game);
+        entries.iter().cloned().map(|mut r| {
+            r.path = PathBuf::from(compatible_receipt_path(&r.path.to_string_lossy(), r.marker.kind,
+                r.game_folder, &root.to_string_lossy()));
+            r
+        }).collect()
+    };
+    #[cfg(windows)]
+    let entries = compatible.as_slice();
+    crate::durable::json(&file, &entries, &entries.iter().map(|r| r.path.clone()).collect::<Vec<_>>())
+}
+
+/// `<game>/kiln/state/placement-journal.json`: the last publication Kiln began at each placed path ([`Publication`]).
+fn journal_file(game: &Path) -> PathBuf {
+    game.join("kiln/state/placement-journal.json")
+}
+
+/// One publication of a copy ([`copy_in_with`]), written durably before the old copy is parked: where, the marker of
+/// the copy it replaces, the receipt it publishes, and where the old copy is parked until that receipt is written.
+/// It stays after the publication (the record of the last one at that path), until the path's receipt moves on.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Publication {
+    path: PathBuf,
+    #[serde(default)]
+    from: Option<Marker>,
+    to: Placement,
+    #[serde(default)]
+    parked: Option<PathBuf>,
+}
+
+fn publications(game: &Path) -> Result<Vec<Publication>> {
+    let file = journal_file(game);
+    refuse_symlink_path(game, &file)?;
+    crate::util::read_json::<Vec<Publication>>(&file)
+        .map(|v| v.unwrap_or_default())
+        .map_err(|e| Error::new(e.code, format!("{}: publication recovery left the game unchanged: {}", file.display(), e.message)))
+}
+
+fn save_publications(game: &Path, all: &[Publication]) -> Result<()> {
+    let file = journal_file(game);
+    refuse_symlink_path(game, &file)?;
+    let parent = file.parent().expect("journal parent");
+    crate::durable::ensure_dir(parent)?;
+    let mut text = serde_json::to_string_pretty(all)?;
+    text.push('\n');
+    crate::durable::journal(&file, text.as_bytes(), &[], 0, 0)
+}
+
+/// Records the publication `p` (replacing the last one at its path) before anything of it happens.
+fn begin_publication(game: &Path, p: Publication) -> Result<()> {
+    let mut all = publications(game)?;
+    all.retain(|x| x.path != p.path);
+    all.push(p);
+    save_publications(game, &all)
+}
+
+/// A game-side journal is untrusted input: it can name only a real placement and its sibling staging tree.
+fn validate_publication(game: &Path, p: &Publication) -> Result<()> {
+    if p.path != p.to.path { return Err(Error::invalid("publication and receipt paths differ")); }
+    if p.to.marker.format != 1 || !crate::manifest::is_mod_id(&p.to.marker.id)
+        || p.from.as_ref().is_some_and(|f| f.format != 1 || f.kind != p.to.marker.kind || f.id != p.to.marker.id) {
+        return Err(Error::invalid("publication markers do not identify the same mod"));
+    }
+    check_placement_path(game, &p.to)?;
+    if !p.path.file_name().and_then(|n| n.to_str()).is_some_and(is_game_folder_name) {
+        return Err(Error::invalid("unsafe publication folder name"));
+    }
+    refuse_symlink_path(game, &p.path)?;
+    if let Some(parked) = &p.parked {
+        let dir = parked.parent().ok_or_else(|| Error::invalid("parked copy without parent"))?;
+        let tag = dir.file_name().and_then(|n| n.to_str()).and_then(|n| n.strip_prefix(".kiln-place-"));
+        if parked.file_name().is_none_or(|n| n != "old") || dir.parent() != p.path.parent()
+            || !tag.is_some_and(|t| t.len() == 12 && t.bytes().all(|b| b.is_ascii_hexdigit())) {
+            return Err(Error::invalid("unsafe parked publication path"));
+        }
+        refuse_symlink_path(game, parked)?;
+    }
+    Ok(())
+}
+
+/// The temporary folder a publication parked the old copy in (`<parent>/.kiln-place-<hex>/old`), deleted once the
+/// publication is finished; only that shape of folder, beside the copy, never through a link.
+fn drop_parked(game: &Path, p: &Publication) -> bool {
+    let Some(parked) = &p.parked else { return false };
+    let Some(dir) = parked.parent() else { return false };
+    let ours = dir.file_name().is_some_and(|n| n.to_string_lossy().starts_with(".kiln-place-")) && dir.parent() == p.path.parent();
+    if !ours || validate_publication(game, p).is_err() || !dir.is_dir() { return false; }
+    // A saved receipt alone does not prove the replacement survived. Never discard the only old tree.
+    if !p.path.is_dir() || marker(&p.path).as_ref() != Some(&p.to.marker)
+        || player_entries(&p.path, p.to.marker.kind, &current_receipt(&p.path, &p.to)).ok().flatten().is_none()
+        || marker(parked) != p.from { return false; }
+    std::fs::remove_dir_all(dir).is_ok()
+}
+
+/// What a stop inside a publication left ([`copy_in_with`]), before anything looks at the copies ([`place`],
+/// [`unplace`]). By the journal and the receipt at each path: a publication whose receipt is written only loses its
+/// parked old copy; one stopped after the new copy was published (its marker and every Library file exactly what the
+/// journal says it published, and it replaced a copy whose receipt is still the current one) gets that receipt now;
+/// one stopped after the old copy was parked and before the new one was published gets the old copy back where it was.
+/// A folder without a receipt is never adopted (a first placement stopped before its receipt stays the player's, as
+/// before). A receipt that moved on, or a copy that is neither, ends the
+/// record and nothing is touched: a mismatch is never resolved by trusting a receipt (`owned` still refuses it).
+fn recover_publications(game: &Path, receipts: &mut Vec<Placement>) -> Result<Vec<String>> {
+    let all = publications(game)?;
+    // A moved install can retain completed records keyed by its old absolute root. Never inspect or mutate
+    // those paths; retain the record and report it, as with its old delivery receipts.
+    let moved = |p: &Publication| !p.path.starts_with(game) && check_placement_path(game, &p.to).is_err()
+        && receipts.iter().any(|r| r.path == p.path && r.marker == p.to.marker && r.files == p.to.files);
+    let mut untouched = Vec::new();
+    let mut notes = Vec::new();
+    for p in &all {
+        if moved(p) {
+            untouched.push(p.path.clone());
+            notes.push(format!("{}: completed placement journal belongs to another game path (the game moved?); left untouched", p.path.display()));
+        } else if let Err(e) = validate_publication(game, p) {
+            if e.code != ErrorCode::Refused { return Err(e); }
+            // A linked/changed placement remains player-owned. Leave its journal entry and let normal
+            // placement/cleanup produce the existing retained-folder report instead of aborting unrelated mods.
+            untouched.push(p.path.clone());
+            notes.push(format!("{}: publication recovery left this folder untouched: {}", p.path.display(), e.message));
+        }
+    }
+    if all.is_empty() { return Ok(Vec::new()); }
+    let (mut keep, mut changed, mut receipts_changed) = (Vec::new(), false, false);
+    for mut p in all {
+        if untouched.contains(&p.path) { keep.push(p); continue; }
+        if refuse_symlink_path(game, &p.path).is_err() { changed = true; continue; }
+        let current = receipts.iter().find(|r| r.path == p.path);
+        if current.is_some_and(|r| r.marker == p.to.marker && r.files == p.to.files) {
+            if !p.path.is_dir() && p.parked.as_ref().is_some_and(|old| old.is_dir()) {
+                return Err(Error::new(ErrorCode::Refused, format!("{}: published copy is missing; preserved its parked old copy for recovery", p.path.display())));
+            }
+            if drop_parked(game, &p) { p.parked = None; changed = true; }
+            keep.push(p);
+            continue;
+        }
+        changed = true;
+        if current.map(|r| r.marker.clone()) != p.from { continue; } // the receipt moved on: nothing of this to finish
+        // only a publication that replaced a copy Kiln held (its receipt still the current one): a folder without a
+        // receipt (a first placement stopped before its receipt, or one whose receipt is gone) is never adopted
+        let published = p.from.is_some() && p.path.is_dir() && marker(&p.path).as_ref() == Some(&p.to.marker)
+            && player_entries(&p.path, p.to.marker.kind, &current_receipt(&p.path, &p.to)).ok().flatten().is_some();
+        if published {
+            receipts.retain(|r| r.path != p.path);
+            receipts.push(p.to.clone());
+            receipts_changed = true;
+            keep.push(p);
+            continue;
+        }
+        if std::fs::symlink_metadata(&p.path).is_err() && p.from.is_some()
+            && let Some(parked) = p.parked.clone()
+            && refuse_symlink_path(game, &parked).is_ok() && parked.is_dir() && marker(&parked) == p.from
+        {
+            crate::durable::rename_dir(&parked, &p.path)?;
+            // The old copy is home. Remove only the verified unused staged replacement, then an empty container.
+            let dir = parked.parent().expect("validated parent");
+            let new = dir.join("new");
+            if marker(&new).as_ref() == Some(&p.to.marker)
+                && player_entries(&new, p.to.marker.kind, &current_receipt(&new, &p.to)).ok().flatten().is_some() {
+                refuse_symlink_path(game, &new)?;
+                let _ = std::fs::remove_dir_all(&new);
+            }
+            let _ = std::fs::remove_dir(dir);
+        }
+    }
+    if receipts_changed {
+        save_placements(game, receipts)?;
+        for p in &mut keep {
+            if drop_parked(game, p) { p.parked = None; }
+        }
+    }
+    if changed { save_publications(game, &keep)?; }
+    Ok(notes)
 }
 
 /// A temporary file of a marker write of Kiln's, at the top of a folder: `<marker>.tmp` ([`crate::util::write_atomic`],
@@ -734,6 +942,34 @@ fn current_receipt(dst: &Path, r: &Placement) -> Placement {
     r
 }
 
+/// `text` is ShroudForge's switch for an EML package and nothing of the player's: a JSON object with `launcher: "EML"`,
+/// `schemaVersion` 1 and a boolean `enabled`, beside at most what ShroudForge's own `ensure_eml_extension` writes with
+/// its defaults (`$schema`, `targets` ["client", "server"], an empty `settings`). The workaround posted on Nexus for
+/// 0.2.0-dev.28, which had players put `{"schemaVersion":1,"enabled":true,"launcher":"EML"}` by hand into Kiln's
+/// game-folder copies that Kiln left without the switch, makes one.
+fn bare_eml_switch(text: &str) -> bool {
+    let Ok(serde_json::Value::Object(o)) = serde_json::from_str::<serde_json::Value>(text) else { return false };
+    o.get("launcher").and_then(|v| v.as_str()) == Some("EML")
+        && o.get("schemaVersion").and_then(|v| v.as_f64()) == Some(1.0)
+        && o.get("enabled").is_some_and(serde_json::Value::is_boolean)
+        && o.iter().all(|(k, v)| match k.as_str() {
+            "launcher" | "schemaVersion" | "enabled" | "$schema" => true,
+            "targets" => *v == serde_json::json!(["client", "server"]),
+            "settings" => v.as_object().is_some_and(|m| m.is_empty()),
+            _ => false,
+        })
+}
+
+/// The `extended.mod.json` in Kiln's EML copy `dst` is a switch Kiln did not write but takes as its own: its receipt
+/// (`r`, as [`current_receipt`] reads it) records no such file, and the file is ShroudForge's switch and nothing more
+/// ([`bare_eml_switch`]). It is the file Kiln writes there itself, so it is no setting of the player's: not carried to the
+/// next version, not set aside when the mod stops, and the next switch Kiln sets records it ([`switch_eml_copy`]).
+fn adopted_switch(dst: &Path, r: &Placement) -> bool {
+    const EXT: &str = "extended.mod.json";
+    r.marker.kind == ModKind::Eml && r.extension.is_none() && !r.files.contains_key(EXT)
+        && std::fs::read_to_string(dst.join(EXT)).is_ok_and(|t| bare_eml_switch(&t))
+}
+
 /// The settings of a ShroudForge `extended.mod.json` text by key (`settings.<key>`: its metadata and, with `values`, its
 /// value; a shorthand value counts as a value); None when it is no JSON object.
 fn sf_settings_in(text: &str, values: bool) -> Option<std::collections::BTreeMap<String, serde_json::Value>> {
@@ -802,14 +1038,17 @@ fn switch_eml_copy(game: &Path, receipts: &mut Vec<Placement>, dst: &Path, on: b
     refuse_symlink_path(game, &dst.join("extended.mod.json.tmp"))?;
     refuse_symlink_path(game, &ext)?;
     let m = crate::shroudforge::read_mod(dst)?;
-    if m.extended && m.enabled == on && m.repair.is_empty() { return Ok(false); }
-    let before = if m.extended { Some(std::fs::read_to_string(&ext).map_err(io_at(&ext, "reading"))?) } else { None };
+    let write = !(m.extended && m.enabled == on && m.repair.is_empty());
     let index = receipts.iter().position(|r| r.path == dst);
+    // a switch made by hand that Kiln takes as its own is recorded even when it already says `on`
+    let adopt = m.extended && index.is_some_and(|i| adopted_switch(dst, &current_receipt(dst, &receipts[i])));
+    if !write && !adopt { return Ok(false); }
+    let before = if m.extended { Some(std::fs::read_to_string(&ext).map_err(io_at(&ext, "reading"))?) } else { None };
     let ours = index.map(|i| current_receipt(dst, &receipts[i])).filter(|r| match &before {
-        Some(text) => r.extension.as_deref() == Some(text.as_str()),
+        Some(text) => r.extension.as_deref() == Some(text.as_str()) || adopt,
         None => !r.files.contains_key("extended.mod.json"),
     });
-    crate::shroudforge::set_enabled(dst, on)?;
+    if write { crate::shroudforge::set_enabled(dst, on)?; }
     if let (Some(i), Some(mut receipt)) = (index, ours) {
         let mut next = receipts.clone();
         let saved = (|| {
@@ -820,6 +1059,7 @@ fn switch_eml_copy(game: &Path, receipts: &mut Vec<Placement>, dst: &Path, on: b
         })();
         if let Err(e) = saved {
             let back = match &before {
+                _ if !write => Ok(()),
                 Some(text) => crate::util::write_atomic_exclusive(&ext, text.as_bytes()),
                 None => std::fs::remove_file(&ext).map_err(io_at(&ext, "removing")),
             };
@@ -830,7 +1070,7 @@ fn switch_eml_copy(game: &Path, receipts: &mut Vec<Placement>, dst: &Path, on: b
         }
         *receipts = next;
     }
-    Ok(true)
+    Ok(write)
 }
 
 /// [`switch_eml_copy`] for a copy activation keeps or has just placed: a copy whose switch changed is in
@@ -1116,10 +1356,10 @@ fn copy_in(roots: Roots, src: &Path, dst: &Path, m: &Marker, kept: &[(String, se
 }
 
 /// The last step of publishing a staged copy (tests make it fail).
-fn rename_in(staged: &Path, dst: &Path) -> std::io::Result<()> {
+fn rename_in(staged: &Path, dst: &Path) -> Result<()> {
     #[cfg(test)]
-    if tests::FAIL_RENAME_IN.with(|f| f.replace(false)) { return Err(std::io::Error::other("injected rename failure")); }
-    std::fs::rename(staged, dst)
+    if tests::FAIL_RENAME_IN.with(|f| f.replace(false)) { return Err(Error::new(ErrorCode::Io, "placing: injected rename failure")); }
+    crate::durable::rename_dir(staged, dst).map_err(|e| Error::new(e.code, format!("placing {}: {}", dst.display(), e.message)))
 }
 
 /// Shared placement transaction. Both generic player files (`carry`) and native game-folder settings (`settings`)
@@ -1147,7 +1387,7 @@ fn copy_in_with(roots: Roots, src: &Path, dst: &Path, m: &Marker, kept: &[(Strin
     }
     let source_hash = crate::hash::dirhash(src)?;
     let parent = dst.parent().ok_or_else(|| Error::invalid("no mod parent"))?;
-    std::fs::create_dir_all(parent).map_err(io_at(parent, "creating"))?;
+    crate::durable::ensure_dir(parent)?;
     let tmp = crate::library::TempDir::new(parent, "kiln-place")?;
     let staged = tmp.path().join("new");
     crate::library::copy_mod_tree(src, &staged)?;
@@ -1195,33 +1435,52 @@ fn copy_in_with(roots: Roots, src: &Path, dst: &Path, m: &Marker, kept: &[(Strin
     };
     for (rel, bytes) in settings {
         crate::bundle::safe_rel_path(rel)?;
+        // ShroudForge's switch and nothing more, kept from an earlier copy (a stash of 0.2.0-dev.28 holds the one made by
+        // hand): the switch is Kiln's to write (above, or switch_eml_copy), never the player's setting
+        if m.kind == ModKind::Eml && rel == "extended.mod.json" && std::str::from_utf8(bytes).is_ok_and(bare_eml_switch) { continue; }
         let to = staged.join(rel);
         refuse_symlink_path(&staged, &to)?;
         if let Some(p) = to.parent() { std::fs::create_dir_all(p).map_err(io_at(p, "creating"))?; }
         std::fs::write(&to, bytes).map_err(io_at(&to, "writing"))?;
     }
+    crate::durable::flush_contents(&staged)?;
+    crate::durable::flush_dir(tmp.path())?;
     let old = tmp.path().join("old");
     let replaced = dst.exists();
-    if replaced { std::fs::rename(dst, &old).map_err(io_at(dst, "parking old mod"))?; }
+    // the intent first, durably: a stop from here on is finished or put back before the next placement looks at the
+    // copies (recover_publications)
+    begin_publication(roots.game, Publication { path: dst.to_path_buf(), from: if replaced { marker(dst) } else { None },
+        to: receipt.clone(), parked: replaced.then(|| old.clone()) })?;
+    if replaced && let Err(e) = crate::durable::rename_dir(dst, &old) {
+        return Err(preserve_recovery(tmp, e));
+    }
+    if crate::kept::stop_here(crate::kept::Step::Parked) { std::mem::forget(tmp); panic!("injected crash at Parked"); }
     if let Err(e) = rename_in(&staged, dst) {
+        // A rename can succeed before its flush fails. Preserve both trees and its journal in that case.
+        if dst.exists() && !staged.exists() { return Err(preserve_recovery(tmp, e)); }
         if replaced {
-            if let Err(e) = std::fs::rename(&old, dst) {
-                return Err(preserve_recovery(tmp, io_at(dst, "restoring old mod")(e)));
+            if let Err(e) = crate::durable::rename_dir(&old, dst) {
+                return Err(preserve_recovery(tmp, e));
             }
         }
-        return Err(io_at(dst, "placing")(e));
+        return Err(e);
     }
+    if crate::kept::stop_here(crate::kept::Step::Published) { std::mem::forget(tmp); panic!("injected crash at Published"); }
     if let Err(error) = persist(&receipt) {
-        if let Err(e) = std::fs::rename(dst, &staged) {
-            return Err(preserve_recovery(tmp, io_at(dst, "rolling back new mod")(e)));
+        if placements(roots.game).is_ok_and(|rs| rs.iter().any(|r| r.path == receipt.path && r.marker == receipt.marker && r.files == receipt.files)) {
+            return Err(preserve_recovery(tmp, error));
+        }
+        if let Err(e) = crate::durable::rename_dir(dst, &staged) {
+            return Err(preserve_recovery(tmp, e));
         }
         if replaced {
-            if let Err(e) = std::fs::rename(&old, dst) {
-                return Err(preserve_recovery(tmp, io_at(dst, "restoring old mod")(e)));
+            if let Err(e) = crate::durable::rename_dir(&old, dst) {
+                return Err(preserve_recovery(tmp, e));
             }
         }
         return Err(error);
     }
+    if crate::kept::stop_here(crate::kept::Step::ReceiptSaved) { std::mem::forget(tmp); panic!("injected crash at ReceiptSaved"); }
     let said = match (carry, done) {
         (Some(c), Some(done)) => carried(roots.game, m.kind, key, &c, &done, dst)?,
         _ => None,
@@ -1328,7 +1587,8 @@ pub fn unplace(dirs: &DataDirs, game_dir: &Path) -> Result<PlacementCleanup> {
     if !file.try_exists().map_err(io_at(&file, "inspecting"))? { return Ok(PlacementCleanup::default()); }
     let _lock = engine_lock(game_dir, &game_dir.join("kiln/state"))?;
     let mut receipts = placements(game_dir)?;
-    let mut report = PlacementCleanup::default();
+    let notes = recover_publications(game_dir, &mut receipts)?;
+    let mut report = PlacementCleanup { kept_files: notes, ..PlacementCleanup::default() };
     for receipt in receipts.clone() {
         let dst = &receipt.path;
         let kind = receipt.marker.kind;
@@ -1755,6 +2015,7 @@ pub(crate) fn same_mod_elsewhere(root: &Path, kind: ModKind, src: &Path, dst: &P
 pub fn place(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Path) -> Result<PlaceReport> {
     let view = crate::own_loaders::ProfileView::of_profile(profile).with_library(dirs, profile);
     let loaders = crate::own_loaders::find(game_dir, Some(&view));
+    crate::own_loaders::check_runtime_eml_loader(&loaders, &view.eml_runtime)?;
     let mut rep = place_with(dirs, profile, game_dir, &loaders)?;
     rep.own_loaders = crate::own_loaders::notes(game_dir, &loaders, Some(&view));
     Ok(rep)
@@ -1868,6 +2129,8 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
     let _lock = engine_lock(game_dir, &game_dir.join("kiln/state"))?;
     let mut rep = PlaceReport::default();
     let mut receipts = placements(game_dir)?;
+    // a publication a stop left half done is finished or put back first
+    rep.warnings.extend(recover_publications(game_dir, &mut receipts)?);
     let roots = Roots { data: &dirs.root, game: game_dir };
     for kind in [ModKind::ShroudForge, ModKind::Set] {
         let list = profile.mods.list(kind);
@@ -2037,15 +2300,21 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
         // folder configured elsewhere) are not its.
         let sf_root = (kind == ModKind::Eml && crate::own_loaders::shroudforge_runs_eml(loaders))
             .then(|| crate::shroudforge::mods_dir(game_dir));
-        let sf_reads = |dst: &Path| sf_root.as_ref().is_some_and(|r| dst.parent() == Some(r.as_path()));
+        // (the same folder as Windows names it: ShroudForge spells its folder `\\?\C:\…\mods` there, Kiln the game's `C:\…`)
+        let sf_reads = |dst: &Path| sf_root.as_ref().is_some_and(|r| dst.parent().is_some_and(|p| sf_reads_parent(p, r, cfg!(windows))));
         let server = game_dir.join(crate::game::SERVER_EXE).is_file();
         // Where each enabled mod goes: `<game>/mods/<folder>` for an EML mod a native DLL reads there (always, with or
         // without EML's own loader), else the own loader's folder while that loader is installed.
         let mut targets: Vec<(&crate::profile::ProfileMod, PathBuf, PathBuf, bool)> = Vec::new();
         for m in list.iter().filter(|m| m.enabled) {
-            if kind != ModKind::Native && root.is_none() && game_folder_of(dirs, kind, m).is_none() { continue; }
             let src = crate::library::path_of(dirs, &crate::library::LibraryRef {
                 kind, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() })?;
+            if kind == ModKind::Eml && crate::own_loaders::eml_needs_runtime(&src)
+                && !crate::own_loaders::shroudforge_runs_eml(loaders) {
+                rep.warnings.push(format!("{}: needs ShroudForge's runtime, which is not available; its data was not applied, so the game is as without the mod. Install the ShroudForge component and activate again", tag(&m.id)));
+                continue;
+            }
+            if kind != ModKind::Native && root.is_none() && game_folder_of(dirs, kind, m).is_none() { continue; }
             if kind == ModKind::Native {
                 for folder in crate::library::native_settings_dirs(&src) {
                     let dst = game_dir.join(EML_GAME_MODS).join(folder.file_name().expect("settings folder"));
@@ -2595,7 +2864,10 @@ fn settings_changed(game: &Path, receipts: &[Placement], dst: &Path, kind: ModKi
     }
     let now = placement_files(dst, kind)?;
     let (mut settings, mut added, mut code) = (Vec::new(), Vec::new(), Vec::new());
-    for (rel, _) in now.iter().filter(|(rel, hash)| !rel.ends_with('/') && receipt.files.get(*rel) != Some(*hash)) {
+    // ShroudForge's switch made by hand in a copy Kiln left without it: Kiln's own file, not a setting of the player's
+    let adopted = adopted_switch(dst, receipt);
+    for (rel, _) in now.iter().filter(|(rel, hash)| !rel.ends_with('/') && receipt.files.get(*rel) != Some(*hash)
+        && !(adopted && rel.as_str() == "extended.mod.json")) {
         if is_game_settings_file(rel) {
             settings.push(rel.clone());
         } else if !receipt.files.contains_key(rel) && !is_game_code(rel) {
@@ -2621,9 +2893,8 @@ fn is_game_code(rel: &str) -> bool {
 /// A file a mod's DLL (or the player) may have written as settings: not the manifest, the Lua, code or the plugin ini.
 fn is_game_settings_file(rel: &str) -> bool {
     let low = rel.to_ascii_lowercase();
-    let ext = low.rsplit_once('.').map(|(_, x)| x).unwrap_or("");
     !(low == "mod.json" || low == MARKER || low == XHL_PLUGIN_INI || low.starts_with("src/"))
-        && matches!(ext, "txt" | "ini" | "cfg" | "json" | "toml" | "yaml" | "yml")
+        && crate::settings_files::is_settings_extension(&low)
 }
 
 fn read_settings(dir: &Path, changed: &[String]) -> Result<Vec<(String, Vec<u8>)>> {
@@ -3470,6 +3741,54 @@ mod tests {
         pub(super) static FAIL_SAVE_PLACEMENTS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
         /// [`adopt`] on this thread stops before this step, as a crash would (a panic: nothing is taken back).
         pub(super) static STOP_ADOPT_BEFORE: std::cell::Cell<Option<AdoptStep>> = const { std::cell::Cell::new(None) };
+    }
+
+    #[test]
+    fn receipts_keep_the_older_launchers_shroudforge_spelling_on_disk() {
+        let root = r"\\?\C:\Game\mods";
+        for kind in [ModKind::ShroudForge, ModKind::Eml] {
+            assert_eq!(compatible_receipt_path(r"C:\Game\mods\sample", kind, false, root),
+                r"\\?\C:\Game\mods\sample");
+        }
+        assert_eq!(compatible_receipt_path(r"C:\Game\mods\sample", ModKind::Eml, true, root), r"C:\Game\mods\sample");
+        assert_eq!(compatible_receipt_path(r"C:\Game\mods2\sample", ModKind::Eml, false, root), r"C:\Game\mods2\sample");
+    }
+
+    #[test]
+    fn sf_reads_parent_uses_windows_comparison_only_on_windows() {
+        let plain = Path::new(r"C:\Games\Enshrouded\mods");
+        let sf = Path::new(r"\\?\c:\games\enshrouded\MODS");
+        assert!(sf_reads_parent(plain, sf, true));
+        assert_eq!(sf_reads_parent(plain, sf, false), cfg!(windows));
+        assert!(!sf_reads_parent(Path::new(r"C:\Games\Enshrouded\mods2"), sf, true));
+    }
+
+    /// Receipts a launcher on Windows wrote while it read ShroudForge's `paths.mods` with the verbatim prefix (before
+    /// 0.2.0-dev.29) name their copies by the plain spelling the launcher uses now (sf_paths::native_folder), so the
+    /// copies stay Kiln's; of two receipts that then name one folder the later one counts. Windows' strings, read on
+    /// any system.
+    #[test]
+    fn receipts_written_with_the_verbatim_prefix_name_their_copies_as_the_launcher_does_now() {
+        let t = std::env::temp_dir().join(format!("km-receipts-verbatim-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&t);
+        let game = t.join("game");
+        let receipt = |path: &str, version: &str| serde_json::json!({"path": path, "files": {},
+            "marker": {"format": 1, "kind": "shroudforge", "id": "bigstacks", "version": version, "hash": "kdh1:aa"}});
+        let mods = r"C:\Games\Enshrouded\mods";
+        let list = serde_json::json!([
+            receipt(&format!(r"{mods}\bigstacks"), "1.0.0"),
+            receipt(&format!(r"\\?\{mods}\bigstacks"), "1.1.0"),
+            receipt(&format!(r"\\?\{mods}\more-gliders"), "1.0.0"),
+            receipt(r"\\?\Volume{1b3}\mods\x", "1.0.0"),
+            receipt("/home/u/game/mods/flat", "1.0.0"),
+        ]);
+        std::fs::create_dir_all(game.join("kiln/state")).unwrap();
+        std::fs::write(placements_file(&game), serde_json::to_vec(&list).unwrap()).unwrap();
+        let got: Vec<(String, String)> = placements(&game).unwrap().into_iter()
+            .map(|r| (r.path.to_string_lossy().into_owned(), r.marker.version)).collect();
+        assert_eq!(got, [(format!(r"{mods}\bigstacks"), "1.1.0".to_string()), (format!(r"{mods}\more-gliders"), "1.0.0".into()),
+            (r"\\?\Volume{1b3}\mods\x".into(), "1.0.0".into()), ("/home/u/game/mods/flat".into(), "1.0.0".into())]);
+        let _ = std::fs::remove_dir_all(&t);
     }
 
     /// A ShroudForge package `id` with one setting, as a mod author ships it.

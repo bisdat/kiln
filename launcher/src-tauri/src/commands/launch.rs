@@ -14,6 +14,7 @@ use tauri::AppHandle;
 #[serde(rename_all = "camelCase")]
 pub struct BootState {
     pub boot: Option<kiln_manage::state::BootJson>,
+    pub stopped_start: Option<kiln_manage::stopped_start::StoppedStart>,
     pub mods: Option<kiln_manage::state::ModsJson>,
     pub native: Option<kiln_manage::state::NativeJson>,
     /// boot.json is not from the game process that runs now (`launch::boot_is_current`).
@@ -124,7 +125,12 @@ pub async fn launch_play(app: AppHandle, game_id: String, request: LaunchRequest
         };
         match &r {
             // the start's mod set, as the launch record has it
-            Ok(_) => {
+            Ok(res) => {
+                // the active profile written again before the start (profile::refresh_active): what it kept and noted
+                if let Some(a) = &res.activation {
+                    crate::commands::app::launcher_log("profile", &format!("{} written again before the start ({})", a.profile_id, g.path.display()));
+                    crate::commands::profile::log_notes(a);
+                }
                 let fp = kiln_manage::launch::last_launch(&dirs, &g).ok().flatten().map(|l| l.fingerprint);
                 track(&id, |t| t.fingerprint = fp.or(t.fingerprint.take()));
             }
@@ -180,11 +186,13 @@ fn runtime_version(g: &kiln_manage::game::GameInstall) -> Option<String> {
 pub async fn launch_begin(game_id: String, mode: kiln_manage::launch::LaunchMode) -> Result<(), Error> {
     blocking(move || {
         use kiln_manage::launch::LaunchMode;
+        STOPS.lock().unwrap_or_else(|e| e.into_inner()).remove(&game_id);
         if mode == LaunchMode::Vanilla {
             forget(&game_id);
             return Ok(());
         }
         let g = crate::state::game(&game_id)?;
+        STOPS.lock().unwrap_or_else(|e| e.into_inner()).remove(&game_id);
         let at = now_ms();
         let cook = (mode == LaunchMode::Profile).then(|| {
             kiln_manage::cook::plan(&g).unwrap_or_default().into_iter().filter(|j| j.reason.is_some())
@@ -280,13 +288,15 @@ pub async fn launch_prestart(game_id: String) -> Result<Option<kiln_manage::pres
 pub async fn launch_state(game_id: String) -> Result<BootState, Error> {
     blocking(move || {
         let g = crate::state::game(&game_id)?;
-        let boot = kiln_manage::state::read_boot(&g.path)?;
+        let boot = kiln_manage::stopped_start::boot_state(&g.path);
         let mods = kiln_manage::state::read_mods(&g.path)?;
         let native = kiln_manage::state::read_native(&g.path)?;
         // under Proton the pid in boot.json is the game's Windows pid: boot_is_current compares write and start times
         let stale = boot.as_ref().is_some_and(|b| !kiln_manage::launch::boot_is_current(&g, b));
         let log = boot.as_ref().and_then(|b| log_errors(&g.path, b));
-        Ok(BootState { boot, mods, native, stale, log })
+        observe_stop(&g, kiln_manage::proc::find_game(&g).ok().flatten().map(|p| p.pid));
+        let stopped_start = STOPS.lock().unwrap_or_else(|e| e.into_inner()).get(&game_id).and_then(|s| s.result.clone());
+        Ok(BootState { boot, mods, native, stale, log, stopped_start })
     })
     .await
 }
@@ -340,5 +350,80 @@ mod tests {
         put(&logs.join("kiln.log"), &format!("{start}[E 02:10:00.000] [kiln] cannot parse the game image\n"), t0 + Duration::from_secs(130));
         assert!(log_errors(&game, &boot).is_none());
         let _ = std::fs::remove_dir_all(&game);
+    }
+}
+
+// Retain the process identity through exit: state_file_is_current requires a live process and cannot be used then.
+#[derive(Default)]
+struct StopRun {
+    identity: Option<kiln_manage::stopped_start::StartIdentity>,
+    result: Option<kiln_manage::stopped_start::StoppedStart>,
+}
+static STOPS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, StopRun>>> = std::sync::LazyLock::new(Default::default);
+
+fn adopt_stop_process(run: &mut StopRun, pid: u32, at: i64, began: Option<i64>) {
+    if began.is_none_or(|b| at >= b - 1000)
+        && run.identity.as_ref().is_none_or(|i| i.began_ms != at)
+    {
+        *run = StopRun { identity: Some(kiln_manage::stopped_start::StartIdentity {
+            pid: cfg!(windows).then_some(pid), began_ms: at, ended_ms: None,
+        }), result: None };
+    }
+}
+
+pub(crate) fn observe_stop(g: &kiln_manage::game::GameInstall, pid: Option<u32>) {
+    use kiln_manage::{stopped_start as ss, start_progress as sp};
+    let began = STARTS.lock().unwrap_or_else(|e| e.into_inner()).get(&g.id).filter(|s| s.asked).map(|s| s.began + s.steps.iter().find(|step| step.id == "steam").map_or(0, |step| step.ms as i64));
+    let mut all = STOPS.lock().unwrap_or_else(|e| e.into_inner());
+    let run = all.entry(g.id.clone()).or_default();
+    if let Some(pid) = pid {
+        if let Some(at) = kiln_manage::proc::start_time(pid).map(sp::unix_ms) {
+            adopt_stop_process(run, pid, at, began);
+        }
+    } else if let Some(i) = &mut run.identity {
+        i.ended_ms.get_or_insert_with(now_ms);
+    }
+    if run.identity.is_none() && let Some(asked) = began {
+        run.identity = ss::failed_identity(&g.path, asked, now_ms());
+    }
+    let Some(identity) = &mut run.identity else { return };
+    if run.result.is_some() { return; }
+    if pid.is_some() && let Some((progress, _)) = sp::read_progress(g) {
+        identity.pid = Some(progress.pid);
+    }
+    // A stop is final even while the client's message box is still open. Only deliberate stop evidence qualifies.
+    if let Some(mut stop) = ss::read(&g.path, identity, &Default::default()) {
+        if let Ok(d) = dirs() && let Ok(entries) = kiln_manage::library::list(&d, Some(kiln_manage::manifest::ModKind::Kiln)) {
+            for (id, name) in stop.mods.iter().zip(stop.names.iter_mut()) {
+                if let Some(e) = entries.iter().find(|e| &e.id == id) { *name = e.name.clone(); }
+            }
+        }
+        identity.pid = Some(stop.pid);
+        crate::commands::app::launcher_log("stopped start", &format!("{}: {}", g.id, stop.reason));
+        run.result = Some(stop);
+    }
+}
+
+#[cfg(test)]
+mod stop_process_tests {
+    use super::*;
+    #[test]
+    fn a_later_external_process_replaces_the_refused_run_without_a_launcher_request() {
+        let stop = kiln_manage::stopped_start::StoppedStart {
+            kind: kiln_manage::stopped_start::StopKind::Roster, reason: "full".into(), mods: vec![], names: vec![], advice: "switch one off".into(),
+            utc: "2026-11-15T12:00:00Z".into(), exit_code: 19202, pid: 42,
+        };
+        let mut run = StopRun { identity: Some(kiln_manage::stopped_start::StartIdentity {
+            pid: Some(42), began_ms: 1000, ended_ms: Some(1500),
+        }), result: Some(stop.clone()) };
+        adopt_stop_process(&mut run, 9000, 2000, None);
+        assert_eq!(run.identity.as_ref().unwrap().began_ms, 2000);
+        assert!(run.result.is_none(), "old refusal must not be returned for the later Steam process");
+        run.result = Some(stop.clone());
+        adopt_stop_process(&mut run, 42, 2000, None);
+        assert_eq!(run.result, Some(stop), "the refused process with its message box still open keeps its notice");
+        let mut fresh = StopRun::default();
+        adopt_stop_process(&mut fresh, 9000, 3000, None);
+        assert_eq!(fresh.identity.unwrap().began_ms, 3000, "reopening during a Steam start adopts its identity");
     }
 }

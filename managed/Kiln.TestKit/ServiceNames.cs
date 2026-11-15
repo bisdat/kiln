@@ -11,6 +11,7 @@ internal static class ServiceNames
     [
         "kiln.abilities",
         "kiln.assets",
+        "kiln.assets.vfx",
         "kiln.audio",
         "kiln.boot",
         "kiln.build",
@@ -19,10 +20,12 @@ internal static class ServiceNames
         "kiln.chat",
         "kiln.client",
         "kiln.combat",
+        "kiln.component_changes",
         "kiln.content",
         "kiln.craftmenu",
         "kiln.creature_control",
         "kiln.creatures",
+        "kiln.decisions",
         "kiln.eml",
         "kiln.example",
         "kiln.flame",
@@ -59,7 +62,9 @@ internal static class ServiceNames
         "kiln.ui.tick",
         "kiln.ui.values",
         "kiln.vfx",
+        "kiln.window_clock",
         "kiln.world",
+        "kiln.world.budget",
         "kiln.worldtables",
     ];
 

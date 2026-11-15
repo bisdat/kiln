@@ -74,19 +74,46 @@ public class RoundTripTests
     }
 
     [Fact]
-    public void The_fixture_variant_compiles_the_program_descriptors_of_the_made_up_catalog()
+    public void The_fixture_variant_compiles_the_program_views_of_the_made_up_catalog()
     {
         var asm = Lanterns;
         var glow = asm.GetType("Kiln.Ecs+Programs+LanternGlow")!;
-        object? F(string n) => glow.GetField(n, BindingFlags.Public | BindingFlags.Static)!.GetValue(null);
-        Assert.Equal("lantern_glow", F("Name"));
-        Assert.Equal(["Kiln.Ecs+Lantern"], ((Type[])F("Tpl")!).Select(t => t.FullName));
-        Assert.Equal(["Kiln.Ecs+Gauges", "Kiln.Ecs+Comet"], ((Type[])F("Read")!).Select(t => t.FullName));
-        Assert.Equal(["Kiln.Ecs+Warmth"], ((Type[])F("Write")!).Select(t => t.FullName));
-        Assert.Equal(["light_cache"], (string[])F("SysRead")!);
-        Assert.Equal(["Kiln.Ecs+LanternLit"], ((Type[])F("EventsOut")!).Select(t => t.FullName));
-        Assert.NotNull(asm.GetType("Kiln.Ecs+Programs+Program7"));
-        Assert.Null(GenRepo.GameAssembly.GetType("Kiln.Ecs+Programs"));  // the shipped build has no catalog
+        Assert.True(glow.IsValueType && glow.IsByRefLike, "a view is a ref struct");
+        // a static of a ref struct cannot be invoked through reflection; a delegate to its getter can be made
+        object? S(Type t, string n)
+        {
+            var get = t.GetProperty(n, BindingFlags.Public | BindingFlags.Static)!.GetMethod!;
+            return get.ReturnType == typeof(uint) ? ((Func<uint>)Delegate.CreateDelegate(typeof(Func<uint>), get))()
+                : ((Func<string>)Delegate.CreateDelegate(typeof(Func<string>), get))();
+        }
+        Assert.Equal("lantern_glow", S(glow, "Name"));
+        Assert.Equal(0xA3816D17u, S(glow, "Contract"));
+        Assert.StartsWith("tpl=Lantern\ntpl_opt=Unlit\nread=Gauges,Comet\nwrite=Warmth\n", (string)S(glow, "Lists")!);
+        string Prop(Type t, string n) => t.GetProperty(n, BindingFlags.Public | BindingFlags.Instance)!.PropertyType.ToString();
+        Assert.Equal("Kiln.Ecs+Lantern&", Prop(glow, "Lantern"));          // ref readonly
+        Assert.Equal("System.Boolean", Prop(glow, "HasUnlit"));
+        Assert.Equal("Kiln.Ecs+Comet&", Prop(glow, "Comet"));
+        Assert.Equal("Kiln.Ecs+Warmth&", Prop(glow, "Warmth"));            // a float meter: a plain write
+        Assert.Contains(glow.GetInterfaces(), i => i.IsGenericType && i.GetGenericTypeDefinition().FullName == "Kiln.IGameProgram`1");
+        var torch = asm.GetType("Kiln.Ecs+Programs+TorchBurn")!;
+        Assert.Null(torch.GetProperty("Torch"));                            // not in the dump: no property
+        Assert.NotNull(torch.GetProperty("Warmth"));
+        Assert.Null(asm.GetType("Kiln.Ecs+Programs+WorldScan"));            // all_read: no view
+    }
+
+    [Fact]
+    public void The_shipped_Kiln_Game_has_the_views_of_its_dumps_program_catalog()
+    {
+        var setup = GenRepo.GameAssembly.GetType("Kiln.Ecs+Programs+FuelSetup");
+        Assert.NotNull(setup);
+        Assert.Equal("fuel_setup", Kiln.Ecs.Programs.FuelSetup.Name);
+        Assert.Equal(0xE4713C0Bu, Kiln.Ecs.Programs.FuelSetup.Contract);    // sigdb/programs/server/f0d824be...json
+        Assert.Equal("Kiln.Attribute32", setup!.GetProperty("Fuel")!.PropertyType.FullName);
+        Assert.NotNull(setup.GetProperty("FuelValues"));
+        Assert.NotNull(setup.GetProperty("FuelSetupComponent"));
+        Assert.Null(setup.GetProperty("DynamicFuelSetup"));                // no layout in the dump
+        Assert.Null(GenRepo.GameAssembly.GetType("Kiln.Ecs+Programs+NpcBed"));  // other_write_unser: no view
+        Assert.Equal(802, GenRepo.GameAssembly.GetType("Kiln.Ecs+Programs")!.GetNestedTypes().Length);
     }
 
     [Fact]

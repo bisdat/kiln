@@ -78,6 +78,8 @@
         },
         "session": {"enum": ["hosted", "joined", "server"]},
         "verdict": {"enum": ["pass", "fail", "skip"]},
+        "playerAnswer": {"enum": ["pass", "fail", "skip"], "description": "Original player answer; absent for older records and self-skip."},
+        "assertionFailureCount": {"type": "integer", "minimum": 0, "default": 0, "description": "Total failed requirements, including failures beyond the 64 stored assertion rows. Older records use their assertion rows."},
         "note": {"type": "string", "maxLength": 600, "description": "The player's one line (fail, skip), scrubbed; a guard warning is appended here. Empty when none."},
         "time": {"$ref": "common.schema.json#/$defs/time"},
         "assertions": {

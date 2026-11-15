@@ -14,6 +14,28 @@
 #include "services/kiln_gameplay.h"
 
 namespace kg {
+std::recursive_mutex& hooks_publication();
+bool hooks_request(uint32_t groups, KilnOwner owner);
+bool hooks_installed(uint32_t group);
+void hooks_poll();
+// A no-world moment (a client's menu frame): groups refused during play for unchecked threads go in now.
+void hooks_poll_no_world();
+// Asks for hooks_poll_no_world calls at no-world moments (the UI tick of a game client); false where the process has
+// none (a dedicated server: the next server start). gameplay.cpp.
+bool hooks_watch_no_world(bool on);
+void hooks_init_control();
+void hooks_world_started(bool world_notification=false);
+bool hooks_interest(uint32_t mask, KilnOwner owner);
+bool hooks_denies(uint32_t denies, KilnOwner owner);
+void hooks_status(KilnGameplayStatus* status);
+
+bool build_request(KilnOwner owner);
+bool build_installed();
+uint32_t build_state();
+uint32_t build_mask();
+std::string build_reason();
+bool seh_build_target(uintptr_t target);
+
 
 extern const KilnApi* g_api;
 extern KilnOwner g_owner;

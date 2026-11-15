@@ -26,13 +26,14 @@ export function oneActivation<T>(gameId: string, run: () => Promise<T>): Promise
   return p;
 }
 
-/** Told after a profile was loaded or unloaded in a game (profile_activate, profile_deactivate succeeded): what
- *  belongs to the profile that was loaded before (the mods list's selection) ends there. */
-const switched = new Set<(gameId: string) => void>();
-export function onProfileSwitch(f: (gameId: string) => void): () => void {
+/** Told when the visible active identity changes, and after profile_activate/profile_deactivate succeeds: what
+ *  belongs to an earlier profile ends there. The target identity lets a late completion preserve
+ *  state already made in the new profile. Omitted identity explicitly resets all profile state. */
+const switched = new Set<(gameId: string, profileId?: string | null) => void>();
+export function onProfileSwitch(f: (gameId: string, profileId?: string | null) => void): () => void {
   switched.add(f);
   return () => { switched.delete(f); };
 }
-export function profileSwitched(gameId: string): void {
-  switched.forEach((f) => f(gameId));
+export function profileSwitched(gameId: string, profileId?: string | null): void {
+  switched.forEach((f) => f(gameId, profileId));
 }

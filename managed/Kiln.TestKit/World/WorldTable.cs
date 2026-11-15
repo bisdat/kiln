@@ -1,18 +1,20 @@
 // SPDX-License-Identifier: MIT
-// The fake kiln.world (native/core/abi/services/kiln_world.h, v3) under the real Kiln.World: entity access and tracked
-// writes answer from the running harness's FakeWorld; programs and teleport are not modelled and say so.
+// The fake kiln.world (native/core/abi/services/kiln_world.h, v4) under the real Kiln.World and Kiln.Systems: entity
+// access and tracked writes answer from the running harness's FakeWorld, the game's programs and wraps on them from
+// Fakes/Systems (SystemsFake); Kiln's own programs and teleport are not modelled and say so.
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 
 namespace Kiln.TestKit;
 
-/// <summary>Mirror of <c>kiln_world.h</c> v3. Its sizes are pinned by tests to the header's numbers (the native host test
-/// asserts the same ones) and to Kiln.World's own private mirrors.</summary>
+/// <summary>Mirror of <c>kiln_world.h</c> v4 (v3's tracked writes, then the game-program members Kiln.Systems uses). Its
+/// sizes are pinned by tests to the header's numbers (native/services/world/tests/abi.json, which the native host test
+/// asserts) and to Kiln.World's and Kiln.Systems' own private mirrors.</summary>
 internal static unsafe class WorldAbi
 {
     public const string Service = "kiln.world";
-    public const uint Version = 3;
+    public const uint Version = 4;
     public const uint CapTrackedWrites = 1u << 3;
 
     // KilnWorldWriteResult.status
@@ -162,6 +164,36 @@ internal static unsafe class WorldAbi
         public delegate* unmanaged[Cdecl]<NativeStr, uint, WriteInfo*, int> WriteInfoOf;
         public delegate* unmanaged[Cdecl]<WriteStatus*, int> GetWriteStatus;
         public delegate* unmanaged[Cdecl]<ulong, NativeStr, NativeStr*, uint, int> WriteDeclare;
+        // v4: the game's programs (Fakes/Systems/SystemsTable.cs), in SystemsNative.Table's order and types
+        public delegate* unmanaged[Cdecl]<uint, NativeStr, int> GameProgramFind;
+        public delegate* unmanaged[Cdecl]<uint, int, SystemsNative.ProgramInfo*, int> GameProgramInfo;
+        public delegate* unmanaged[Cdecl]<SystemsNative.ProgramsStatus*, int> GameProgramsStatus;
+        public delegate* unmanaged[Cdecl]<uint, uint, int> LabParallel;
+        public delegate* unmanaged[Cdecl]<ulong, uint, int, int, int, delegate* unmanaged[Cdecl]<SystemsNative.Slice*, void*, void>, void*, ulong*, int> GameProgramWrap;
+        public delegate* unmanaged[Cdecl]<ulong, int> GameProgramUnwrap;
+        public delegate* unmanaged[Cdecl]<ulong, SystemsNative.WrapInfo*, int> GameWrapInfo;
+        public delegate* unmanaged[Cdecl]<ulong, uint*, int> GameWrapsRelease;
+        public delegate* unmanaged[Cdecl]<SystemsNative.Slice*, int> GameSliceRunOriginal;
+        public delegate* unmanaged[Cdecl]<nuint, ulong> WrapOriginal;
+        public delegate* unmanaged[Cdecl]<uint> InProgram;
+        public delegate* unmanaged[Cdecl]<uint, int, int, NativeStr*, uint, int> GameProgramList;
+        public delegate* unmanaged[Cdecl]<SystemsNative.Slice*, delegate* unmanaged[Cdecl]<ulong*, uint, uint, void*, uint>, void*, int> GameSliceIterate;
+        public delegate* unmanaged[Cdecl]<SystemsNative.Slice*, ulong*, int, int, uint*, byte*, void*> GameSliceSlot;
+        public delegate* unmanaged[Cdecl]<SystemsNative.Slice*, ulong*, int, int, int> GameSliceMark;
+        public delegate* unmanaged[Cdecl]<SystemsNative.Slice*, nuint*, int> GameSliceArchetype;
+        public delegate* unmanaged[Cdecl]<uint, nuint, uint, int> GameArchetypeHas;
+        public delegate* unmanaged[Cdecl]<SystemsNative.Slice*, ulong*, int, int, int> GameSliceAttrChanged;
+        public delegate* unmanaged[Cdecl]<SystemsNative.Slice*, ulong*, int, int, int> GameSliceAttrValidate;
+        public delegate* unmanaged[Cdecl]<uint, ulong> GameWorldSession;
+        public delegate* unmanaged[Cdecl]<uint, int, uint*, byte*, uint, uint*, int> GameProgramContract;
+        // since 0.2.0-dev.29 (06c S5): foreign views, for native services (kiln.abilities' natives); no managed caller
+        public nint ForeignLayout, ForeignSlot, ForeignCheck, ForeignRead, ForeignWrite, ForeignAttrChanged;
+        // since 0.2.0-dev.29 (496..520, after the foreign views): Kiln programs in a client's worlds. The kit fakes a
+        // server world only: no.
+        public delegate* unmanaged[Cdecl]<ulong, uint, void*, ulong*, int> RegisterProgramWorld;
+        public delegate* unmanaged[Cdecl]<ulong, uint, int*, NativeStr*, int> ProgramWorldState;
+        public delegate* unmanaged[Cdecl]<ulong, NativeStr, NativeStr, uint, void*, void*, void*, ulong*, int> BindProgramWorld;
+        public delegate* unmanaged[Cdecl]<ulong, int> UnbindProgramWorld;
     }
 
     /// <summary>FNV-1a-32 of "keen::ecs::" + name (the name as given when it contains "::"): the engine's component hash.</summary>
@@ -229,6 +261,11 @@ internal static unsafe class WorldTable
         t->WriteInfoOf = &WriteInfoOf;
         t->GetWriteStatus = &GetWriteStatus;
         t->WriteDeclare = &WriteDeclare;
+        SystemsTable.Fill(t);  // v4: the game's programs
+        t->RegisterProgramWorld = &RegisterProgramWorld;
+        t->ProgramWorldState = &ProgramWorldState;
+        t->BindProgramWorld = &BindProgramWorld;
+        t->UnbindProgramWorld = &UnbindProgramWorld;
         _table = t;
         return (nint)t;
     }
@@ -307,6 +344,27 @@ internal static unsafe class WorldTable
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int ProgramEmit(void* ctx, NativeStr name, void* data, uint size) => FakeTables.WrongThread;
+
+    // ---- Kiln programs in a client's worlds (0.2.0-dev.29): the kit has no client world, so kiln.world's own "no" ----
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int RegisterProgramWorld(ulong owner, uint kind, void* desc, ulong* handle)
+    {
+        if (handle != null) *handle = 0;
+        return FakeTables.Unavailable;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int ProgramWorldState(ulong program, uint kind, int* state, NativeStr* reason) => FakeTables.NotFound;
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int BindProgramWorld(ulong owner, NativeStr mod, NativeStr key, uint kind, void* each, void* update, void* user, ulong* handle)
+    {
+        if (handle != null) *handle = 0;
+        return FakeTables.Unavailable;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int UnbindProgramWorld(ulong binding) => FakeTables.NotFound;
 
     // Only tracked writes of the capability word: no write_other inside a program, no events, no bind.
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]

@@ -127,7 +127,9 @@ using var sub = Events.On<ComponentWrittenEvent>(e => Log.Info($"{e.Component} o
   `Faulted` and is logged for the mod.
 - **Events.** `ComponentWrittenEvent` is posted on the tick thread for every write a mod made through these calls
   that changed bytes (not for `Unchanged`, not for a refusal), with the result; it is an `IEntityEvent`, so
-  `EventFilter.ForEntity` works. A change the game makes itself raises nothing.
+  `EventFilter.ForEntity` works. A change the game makes itself raises nothing. To be told of every net change of
+  named components, whoever made it, watch them: `ComponentChanges.Watch` (since 0.2.0-dev.29; a tracked write shows
+  there with `Origin = Kiln` and the mod's id: [decisions.md](decisions.md#named-component-watches-componentchanges-since-020-dev29)).
 - **Which world, which entity.** A write belongs to the server world that runs when you call: one made before the
   first world exists answers `Dropped`, and one that has not run when a hosted game opens another world answers
   `Dropped` too. It also carries its entity's generation, the entity's `SpawnTime` (the entities the game or Kiln.Spawn
@@ -177,10 +179,10 @@ Events.On<EntityScaleChangedEvent>(e => Log.Info(e.ToString()));
 - **What it is not.** The rendered transform only: colliders, attachments and `ScaleComponent` keep their size, and
   nothing is promised about physics. A creature's uniform size is `CreatureRef.Scale` (unchanged). What a player sees,
   and what a vanilla player sees, is check `13-world.transform-scale` of the guided game test; until it has run the docs
-  claim the tracked write and its readback only. `world.transform_scale` stays held on both sides until that check
-  confirms what a player sees; the client-pass profile's `"preview": true` opens it for testing.
+  claim the tracked write and its readback only. `world.transform_scale` is on on both sides since 0.2.0-dev.29;
+  that check still has not confirmed what a player sees.
 - **When the row is decided.** Kiln.World starts right before the mods load, so a mod's `OnLoad` reads
-  `world.transform_scale` (and `world.tracked_writes`) already decided: available, held by the gate, or off with its
+  `world.transform_scale` (and `world.tracked_writes`) already decided: available or off with its
   reason. While kiln.types is there but the game has not filled its type table yet, the row is `Pending` ("waits for the
   game's type table") and is decided within 25 steps of the table filling; on a dedicated server the table is filled
   before the mods load.
@@ -194,24 +196,31 @@ Events.On<EntityScaleChangedEvent>(e => Log.Info(e.ToString()));
   nothing. ShroudForge's own Lua setter, hosted unchanged, keeps its broader rule.
 - **The answer** is the tracked write's: `Before` and `Now` are the 12 bytes the write read and left in the step it ran
   (null on a refusal), `Kept` is the readback one step later where the game writes the type too, `SaveTracked` and
-  `ReplicationTracked` are the game's own per-type bits from the same answer, and `Persisted` says whether the entity has
-  this scale again after a save and restart (below).
-- **Across a save and restart** (since the dev.28 fix round). The game's save does not keep a transform scale: a placed
-  chest scaled with a tracked write, marked for the save, came back at 1, 1, 1 (lab, build f0d824be; the save's record of
-  a placed prop has no scale, [docs/re/world.md](../../re/world.md#transform-scale-and-the-save)). So Kiln keeps it beside
-  the save, in kiln.saves' entity attachments (the bundle `entity/kiln:world`; the entity is known again by its template
-  and its position at the save, as [`EntityData`](saves.md) is), and sets it again through the same tracked write when
-  kiln.saves matches the loaded entity: on the test server about one second after the game loaded the world (what a
-  player who joins sees is check `13-world.transform-scale`); an entity that loads later gets it within about 5 s. `Persisted == true`: kept (or set back to the game's
-  own scale, which the game brings back itself: setting the scale the entity had before Kiln's first write forgets the
-  record). `false`: this session only: an entity the save does not keep (most enemies, loot pickups), a write made outside
-  a mod, or kiln.saves is off. The scale is set again in the name of the mod that set it last, only while that mod is
-  loaded and lists `CurrentTransform` under `"writes"`: remove the mod and its props keep the game's size (the record
-  stays, so they get it back with the mod); kiln.log says why one was not set again. Setting it again is a normal
-  `SetTransformScale`, so an `EntityScaleChangedEvent` is posted for it. A scale the game or another tool changed after
-  Kiln's write is kept as the entity has it at the save.
+  `ReplicationTracked` are the game's own per-type bits from the same answer, and `Persisted` says whether replay was recorded (or the original scale restored): recorded, not replayed. `World.GetWaitingTransformScales()` (tick thread) lists your kept scales that are not on an entity now, each with mod, template, position, scale and the reason.
+- **Across a save and restart.** The tested placed chest reloaded at 1, 1, 1 without Kiln replay despite being marked for saving ([lab evidence](../../re/world.md#transform-scale-and-the-save)); this does not establish how players, NPCs, mounts or other entity families save scale. Kiln records scale beside the save in kiln.saves' `entity/kiln:world` attachments and reapplies it through a tracked write when exactly one loaded entity of the template is at the saved position (lab, 0.2.0-dev.29: a placed chest's scale came back after a restart and was forgotten after its restore). Replay is asynchronous, with no promise that it finishes before players arrive. It runs in the last setting mod's name while that mod is loaded and declares `CurrentTransform` under `"writes"`. Restoring the original scale removes the record; removing a mod skips future replay but keeps the record for reinstall. A later save refreshes the recorded scale from the live component while the entity is still the one the record is on.
+- **Limits: size and entity type.** Every finite positive factor is accepted, from subnormal values through `float.MaxValue`, on any entity with writable `CurrentTransform`, including players, occupied mounts and physics bodies. There is no safe size range or entity-family allowlist. Extreme scales can overflow or degenerate downstream calculations; safety for those entities has not been established. Colliders, interaction components, attachments, `ScaleComponent` and building voxels are not resized. Dirty tracking does not prove that a vanilla viewer receives or renders the scale.
+- **Limits: replay identity and removal.** A kept scale is reapplied by template and position, not a durable entity identity. Since 0.2.0-dev.29 it is reapplied only when Kiln can tell the entity: after a restart exactly one entity of the template may be within 0.5 m (static) or 16 m (mobile) of the saved position. With two or more (two identical chests side by side, two NPCs of one kind in a camp) nothing is scaled: the record waits with the reason, kiln.log names it once, and it keeps waiting, also after a neighbour leaves, until your mod calls `SetTransformScale` on the entity it means (find it with the record's template and position) or three sessions pass without that, after which the record is dropped. While the game runs, an entity made again under the same id is told apart by its `SpawnTime` (an entity loaded from a save has none, one spawned in the session has one); where both have none, the entity must still be the only candidate at the recorded place when the scale is set. A destroyed entity's record is dropped. This is still positional identity: one entity alone at the place of another of the same template is taken for it. Removing a mod from a running world does not restore its live scales; restore them explicitly before unloading if needed. Removing the mod before the next load prevents replay, but does not prove every entity family returns to its original size in a vanilla game.
 - **Capabilities:** `world.transform_scale` (Kiln.World's row: the layout) and `world.tracked_writes`; either off throws
   `KilnUnavailableException` naming it.
+
+### Program budget
+`World.GetProgramBudget(kind = CapacityWorldKind.Server)` (since 0.2.0-dev.29; any thread; both sides) answers how much
+room is left for world programs, as a `ProgramBudgetResult`: `KilnSlots` (process-wide: Kiln's own 64 slots for its
+services, compat loaders and mods together; `KilnUsed` the programs that run or wait for a world, `Reserved` the slots of
+programs that cannot run: refused, faulted, a declaration no loaded mod bound; a slot is never freed in a process) and
+`EngineSlots` (the world's own table of 896: `GameUsed` the game's programs, `KilnUsed` those Kiln registered there,
+`Reserved` another loader's direct registrations), one revision for both; `PerFileMax` (32 declarations in a
+`kiln.programs.json`) and `AccessLimits` (8, 42, 64, 64, 9, 92, 24 and 4,096 iterator bytes) are always filled. It is
+counted from what kiln.world keeps (its slot ledger, and its directory of the world's table read in the world's own
+step once the table is final), never from game memory, and nothing runs for it while nobody asks. `Ok` is false with
+`NoWorld` when there is no world of that kind (the client world on a dedicated server), with `NotReady` while a world's
+table is not read yet (its `World` token is set then) or on a build where programs are off; then both budgets are 0. A
+budget read before the world starts is not a promise: registration still checks the live table at the world's start.
+The prediction world is not a kind of its own here (`ArgumentException`). Without kiln.world.budget (an older kiln.world)
+it throws `KilnUnavailableException("world.program_budget")`. A change posts `CapacityChangedEvent` (`Quota`
+`world.program_budget`) at the next step, measured separately for Server and Client every 25 steps while something listens; switching query kinds does not itself report a change. Native code: the table
+`kiln.world.budget` (`native/core/abi/services/kiln_world_budget.h`), a table of its own next to kiln.world.
+`World.Status` stays what it was (a legacy diagnostic).
 
 ### Entity sets
 `World.Query(with…)` and `World.Query(with, without)` give an `EntitySet`: the entities that have every component of
@@ -231,6 +240,100 @@ and `Refresh` throw `KilnUnavailableException("world.find")` (`World.Find` keeps
 
 The Lua version writes the `Teleport` component's fields of an entity that has none: that path never adds the
 component. kiln.world adds it the way the game does (a kind-3 record from a program).
+
+### Client world programs (since 0.2.0-dev.29)
+A game client runs a **client world** (the local player, the camera, what this player sees; it steps on the game's main
+thread and runs its programs' slices as tasks on the game's workers) and, inside it, the **prediction storage** (it runs
+the client world's table every prediction step on the main thread). A `client` or `both` mod can run a program of its own
+in either. It runs in this player's process only: no other player and no vanilla client sees what it does, so it is for
+presentation; a program that must change what others see belongs in the server world.
+
+- **Declare** it in the mod's `kiln.programs.json` with `"world"`: `"client"`, `"both"` (one program in each world: a
+  server side and a client side, each bound on its own) or `"prediction"` (the client world's table without the client
+  flag, which the client world skips and the prediction storage runs). A file without `"world"` means the server world,
+  as before. A client or prediction entry without `"flags"` is `SYSTEM`; `hostOnly` is a server program's flag (refused
+  for `client` and `prediction`; a `both` entry keeps it on its server side). kiln.world reads the file at the game's
+  start (from every enabled `client` and `both` mod; a `server` mod's client entries are not taken), so a changed file
+  needs a restart of the game.
+- **Bind** it with `EcsPrograms.TryBind(key, callback, WorldKind.Client)` (or `WorldKind.Prediction`) on the game's main
+  thread: in `OnLoad`, which runs there for a client mod in the main menu, or through `Client.Post` (a host's reload
+  runs `OnLoad` on its server thread). The answer is an `EcsProgramBinding`: `Ok` with its `Handle`; `Ok = false` with a
+  `Reason` and no handle when nothing was bound (not reserved for that world, another binding holds it); `Ok = false`
+  with a handle when only the client world that runs now refused the program (it runs in a later client world that takes
+  it), and also when a client world runs that registered before the program existed (`Reason` "registered from the next
+  client world"). `KilnUnavailableException` when `world.programs.client` is off. A declaration changed since the game
+  started (its lists, flags or `"world"`) is refused until a restart. `EcsPrograms.Bind` and `TryBind(…, Server)` keep
+  the server world's tick-thread rule.
+- **Each client world anew.** kiln.world registers every client and prediction declaration into each client world at
+  its `RegisterAllPrograms` (hosted and joined alike), after the game's own programs, so it runs after every client
+  program it conflicts with. Its names are checked against **that** world's maps first: a name the client world lacks
+  refuses it there only, with the name (`EcsProgramRefusedEvent` for a world after the bind, also when the mod's callback
+  threw there: the binding then stays off, and the event comes again in each later client world; `kiln.log`:
+  `program … refused for the client world: …`). Registered: `program kiln_managed_… registered into the client world as #N`. At the client
+  world's first step kiln.log lists its event types (`client world 0x… event map (question 4): …`; a host's server world's
+  too) while such a program exists.
+- **Threads.** The callback runs on the game's workers or the main thread, several slices at once: no tick-thread API in
+  it, UI work through `Client.Post`; `EcsProgramContext.World` says which world it is in. kiln.spawn's create and
+  destroy (spawn, spawn_item, destroy, cleanup) refuse inside it, as inside any Kiln program or wrap stage: post them. A client world's entity ids are
+  its own: the same number can name another entity in the server world.
+- **Stop and unload.** When the client world stops (leaving to the menu, joining elsewhere) no call starts, a slice
+  already running stops before its next entity (your callback is not called for the rest of it), and inside a callback
+  that still runs kiln.world's helpers refuse (iteration, the current entity, the command buffer, other-entity reads,
+  events); the running callbacks are waited for, 2 s at most; each registration waits for the next client world, and
+  the binding stays and runs again there. A slice is also checked against the world it belongs to: a job of an earlier
+  client world that starts late is refused (`kiln.log`: `a slice of another world … was refused`). Since 0.2.0-dev.29 the
+  core runs the game's WaitWorldJobs on the client world before its stop (capability `world.stop_drain.client`; kiln.log
+  `tick: client world 0x…: its jobs are drained by the engine (WaitWorldJobs, T us) before STOPPING`), and the game lets no
+  slice outlive the step that ran it: no callback is inside at the stop, and the stop line says `(0 call(s) running at the
+  stop, 0 after … us; the engine drains the world's jobs first (world.stop_drain.client))`. The per-entity check, the
+  slice's world and the 2 s wait stay as a safety net for a core without that row and for a drain that did not hold:
+  a callback inside at the stop although the engine drained is an error (`… were inside although …`) and latches; so
+  does one still running after the 2 s (kiln.log `client world stops: N call(s) of Kiln programs still running after …
+  us; their bindings are kept`): every client and prediction program is refused with that reason, no client-world
+  program registers again until the game restarts and `world.programs.client` goes unavailable (faulted) with the
+  reason. Without the drain such a late callback may still read the world the game is destroying. The same latch follows a fault in the engine's
+  RegisterProgram for a client world, or a table that does not add up after it: the programs registered before it in
+  that world stay in the game's table but no longer run, and say so. `EcsProgramRefusedEvent` follows in each later
+  client world, and `TryBind` throws `KilnUnavailableException` with the reason.
+- **Disposing** the handle, or the mod's unload, unbinds: from then on no call of it starts once kiln.world has seen it
+  close. A dispose made inside a call of the program itself, or one that finds a call still running (a host unloading
+  the mod from its server thread while a client step runs it), is finished later: Kiln retries on its service tick and
+  keeps the callback, its mod's context and its assembly alive until the last call has returned. Your `OnUnload` runs
+  before that: do not free what a running callback still uses.
+- **Writes** through `TryWrite` change this player's client world only: in a client or prediction program it does not
+  mark the write for the game's save or replication (it does in the server world), as the game's own client programs
+  write what they draw; native `mark_written` is a no-op there. `TryWriteOther` answers false there: kiln.world's
+  `write_other` refuses it in a client program. Not because of the save (per the notes the game's WriteOther marks only a
+  server-world block) but because the other-entity path of a client job has not been read in a client run; the foreign
+  views' `foreign_write` and `foreign_attr_changed` refuse from a client program too. A `TryWrite` raises `ClientComponentWrittenEvent` (Kiln.World; entity,
+  component, the bytes before and after, `Writer` `"<modid>/program:<key>"`) while it has listeners. Whether every game
+  version leaves such an unmarked write alone has not been run in a game: guided check `programs.client-visual`.
+  `World.Write` has no client world.
+- **Events.** `EcsProgramRefusedEvent` and `ClientComponentWrittenEvent` arrive on the game's main thread, in the client
+  world's next Pre (on a host too, never on the server's tick), where a handler may touch the client world; one of a
+  client world that ended first is not delivered. Only Kiln raises them.
+- **Room.** The same 64 Kiln program slots as the server world's programs (a `both` program takes one), and the client
+  table's 896 (checked before and after each registration; `World.GetProgramBudget(CapacityWorldKind.Client)` counts Kiln's
+  entries there).
+- **Capability** `world.programs.client`: on in a game client whose build resolved kiln.world's program registration,
+  the name maps and `world.lifecycle`, with the client world's tick; the text says "waiting for a world" in the menu and "a
+  client world runs" in game, with the stop's guarantee ("at a world stop the engine drains the world's jobs first
+  (world.stop_drain.client)", or a bounded wait only); `wrong-side` on a dedicated server; unavailable (faulted) for the
+  rest of the process after the latch above.
+- **What every player pays.** With no client declaration in any mod: at the game's start kiln.world reads the
+  `kiln.programs.json` of each enabled `client` and `both` mod that has one; each client world's RegisterAllPrograms
+  runs kiln.world's existing hook, which registers nothing and logs its old line; each client Pre enters kiln.world's
+  client handler, whose program part is one atomic load; each client world's start and stop reports the row's text to
+  kiln.caps. Nothing is added to the game's tables and the server world's programs dispatch as before. Once a client
+  declaration was accepted at the start (or a native service registered one) every client world registers it, also
+  after its mod unloaded (inert): the slot and that cost stay for the process.
+- Not yet run in a game client: guided checks `programs.client-baseline`, `14-client-world-programs`,
+  `programs.client-joined`, `14-q4`, `programs.client-emf`, `programs.client-visual`, `programs.client-persistence`,
+  `programs.client-rejoin`, `programs.client-delayed-stop`, `programs.client-exit`
+  (mods/tests/client-pass, with the fixture mods/tests/client-programs-fixture and the EMF probe mods/tests/emf-client-test).
+- Native code: `register_program_world`, `program_world_state`, `bind_program_world` and `unbind_program_world` at the
+  end of the kiln.world table (offsets 496 to 520, after the foreign views at 448 to 488; the table is 528 bytes;
+  [kiln_world.h](../../../native/core/abi/services/kiln_world.h)).
 
 ## Native (other services)
 
@@ -272,8 +375,12 @@ if (W->register_program(owner, &d, &g_prog) == KILN_OK)
 ```
 
 - **When**: `kiln_plugin_main` or `on_ready` only. kiln.world registers everything right after the game's
-  `RegisterAllPrograms` (before the world finalizes; ~79 free slots of 896; kiln.world holds 32 at most). Later calls
-  return `KILN_ERR_UNAVAILABLE`.
+  `RegisterAllPrograms` (before the world finalizes; ~79 free slots of 896; kiln.world holds 64 at most since 0.2.0-dev.29, 32 before: its own
+  quota, for every service and mod together). Every registration checks the world table's live count against its 896
+  first and refuses the program before calling the game when the table is full, and checks that the count rose after
+  the game's `RegisterProgram` returned (a descriptor the engine answers "true" for without registering it is refused).
+  Mods' declarations (`kiln.programs.json`, at most 32 per file) leave the last 8 of the 64 to Kiln's services. Later
+  calls return `KILN_ERR_UNAVAILABLE`.
 - **Names** are checked against the world's maps at that moment; one unknown component/event → the program is
   `KILN_PROGRAM_REFUSED` (logged: `program X refused: read: unknown component 'Y'`). A singleton that is not registered
   yet only warns; if it is still missing when the world starts, the engine skips the program (`KILN_PROGRAM_SKIPPED`).
@@ -299,6 +406,22 @@ Tick thread (Pre/Post) or inside your program: `component(e, hash, &size)`, `exi
 `find(hash, buf, cap, &count)` (KILN_ERR_BUFFER_TOO_SMALL with the full count when `cap` is short),
 `entity_count`. `teleport(owner, &req, &id)` from any thread; the callback runs once, on the tick thread in Pre.
 `teleport_cancel(id)` drops the callback. `status(&s)` tells what works.
+
+### Foreign views: another service's code inside a game program (since 0.2.0-dev.29)
+For native code that runs inside one of the game's programs and holds its iterator (kiln.abilities' natives get
+impact_simulation's at NativeCtx+0x30): `foreign_layout(world_kind, "impact_simulation", &layout)` (tick thread, once per
+world session) computes the program's iterator layout with the wraps' view algorithm over its live descriptor;
+`foreign_slot` names a qword; inside the update `foreign_check(layout, iter, counts)` compares the job's group counts with
+the view (use nothing of the view on an iterator that fails it); `foreign_read` / `foreign_write` give another entity's
+component through the program's own other_read / other_write accessor with the job's storage, tracker and write flag (the
+tracked-write path: saved and replicated); every access checks the session, the job's counts, the storage's registry,
+the requested name against its hash entry and the live accessor's type; `foreign_attr_changed` runs the attribute
+formulas with the program's `impact::AttributeRegistry`, only for the block the same thread just wrote through
+`foreign_write`. Explicit arguments, no thread-local state. What these helpers do not give: exclusion between two
+threads on one entity (a caller must know its program's slices run one after another: kiln.abilities requires
+impact_simulation's pin to the world's thread), a rollback of a write that faulted (SEH contains it), a generation for
+an entity id (a reused id names its current occupant), or a check of a caller's struct beyond its size. Host tests:
+`tests/wraps_test.cpp` (`foreign:` rows).
 
 ### Is this thread inside a program? (since 0.2.0-dev.28)
 `in_program()`, appended after `wrap_original` (version stays 4: check `header.size` first), answers 1 while the

@@ -118,8 +118,15 @@ void guard_refused(const uint8_t guid[16], const char* where);
 // The VFX builder (boot.cpp) plugs in here. `update` runs at the top of every FxController update. `refuses` says a registered VFX must not
 // play after all: its GUID then counts as unknown, in the queue and in the guard. `one_shot_ns` is how long a built one-shot runs, which the
 // builder knows exactly; 0 for anything else, which keeps one_shot_ns(VfxLengths)'s rule. Any of them may be null.
-void core_set_build_hooks(void (*update)(), bool (*refuses)(const uint8_t guid[16]), int64_t (*one_shot_ns)(const uint8_t guid[16]));
+void core_set_build_hooks(void (*update)(void*), bool (*refuses)(const uint8_t guid[16]), int64_t (*one_shot_ns)(const uint8_t guid[16]));
 bool core_build_refuses(const uint8_t guid[16]);
+
+// ---- what the resource budget reads of the VFX system (package 17a S2; ledger.h, docs/re/vfx.md 4.3) ----
+struct Registry {
+    uint64_t count = 0, slots = 0;  // the GUID map's entries and slots
+    uint32_t limit = 0;             // the count limit it enforces: registering one more is fatal in the game
+    uint32_t init_state = 0;        // VfxInitResources' state byte: 0 enlist, 1 waiting for mesh and curve data, 2 ready
+};
 
 // ---- what the queue needs from the game; all called inside an FxController update, with Kiln's lock held ----
 
@@ -149,6 +156,15 @@ public:
     virtual bool entity_position(const Frame& f, uint32_t entity, KilnVec3* out) = 0;
     virtual uint32_t create_direct(const Frame& f, const uint8_t guid[16]) = 0;  // the game's RenderCreateVfx, returns the instance
     virtual void preload(const Frame& f, const uint8_t guid[16]) = 0;
+    // The registry's numbers (fxc may be null: the last system seen), read without a game call. false: not known (no system yet,
+    // its layout constants did not resolve, a read faulted). Game memory: on the FxController update thread only (boot.cpp's
+    // build_on_update). Not inside the queue's lock.
+    virtual bool registry(void* fxc, Registry* out) = 0;
+    // nullptr when this build can read the registry; else the first constant that did not resolve or why the layout is not the
+    // expected one (the capability row vfx.budget says it).
+    virtual const char* registry_missing() const = 0;
+    // nullptr when read_resource can compare a resource's bytes on this build (blocks.vfx_registration needs it); else why not.
+    virtual const char* bytes_missing() const = 0;
 };
 
 void core_set_game(Game* game);

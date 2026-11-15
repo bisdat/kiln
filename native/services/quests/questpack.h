@@ -31,6 +31,10 @@ struct GameData {
     std::function<bool(const Guid&, uint32_t type, const uint8_t** data, size_t* len)> read;
     // template name -> GUID (false: unknown). Names resolve in the same data the game loads.
     std::function<bool(const std::string& name, Guid* out)> template_by_name;
+    // The roster's maximum on this side (since 0.2.0-dev.29): asked only when the mods' NPCs and the collection's own
+    // entries together are more than kMaxNpcs, with that total. Returns kMaxNpcs or kMaxNpcsPaged; `why` says why it is
+    // kMaxNpcs (the build's refusal carries it). Not set: kMaxNpcs.
+    std::function<uint32_t(uint32_t needed, std::string* why)> roster_max;
 };
 
 struct TemplateOut {
@@ -54,6 +58,16 @@ struct PackOut {
     std::vector<TemplateOut> templates;
     std::vector<TextOut> texts;
     std::vector<std::string> content_items, content_recipes;  // definitions for kiln.content's define()
+    // The roster as built (since 0.2.0-dev.29; empty when no mod adds an NPC): the collection's NpcIds before the
+    // build (sorted), the ids the build added (sorted), and the maximum it was built against.
+    std::vector<uint32_t> roster_boot_ids, roster_kiln_ids;
+    uint32_t roster_max = kMaxNpcs;
+    // The roster could not be held (more entries than roster_max): the build failed with roster_refusal, and the
+    // start must stop before any world loads (native_pack.cpp; a world without these mods' data drops their progress).
+    // roster_mods: the mods that add roster entries.
+    bool roster_refused = false;
+    std::string roster_refusal;
+    std::vector<std::string> roster_mods;
     ojson manifest;            // what Kiln.Quests/Native needs at run time (schema: npcs.md)
 };
 

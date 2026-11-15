@@ -491,7 +491,7 @@ fn run_now() {
             candidates.extend(kept);
         }
     }
-    let (mods, entries) = discover::resolve(&candidates);
+    let (mods, mut entries) = discover::resolve(&candidates);
     let (export, export_dir) = eml_json(&game);
     if let Some(d) = &export_dir {
         let _ = std::fs::create_dir_all(d);
@@ -509,6 +509,9 @@ fn run_now() {
         export_dir,
         skip_cache: false,
     };
+    if let Some(p) = profile() {
+        discover::apply_runtime_blocks(&unsafe { (p.json)().to_string() }, &kiln, &mut entries, &runner::runtime_unavailable(&cfg));
+    }
     tracing::debug!(candidates = candidates.len(), run = mods.len(), dropins, profile_note, "kiln-eml discovery");
     let out = runner::run(&cfg, mods, entries);
     for m in &out.mods {

@@ -1849,3 +1849,64 @@ fn sf_restore_activation_never_changes_a_players_own_sf_package_even_when_profil
     install::uninstall_report(&dirs, &gi, &mut NoProgress).unwrap();
     assert_eq!(std::fs::read(own.join("extended.mod.json")).unwrap(), before);
 }
+
+#[test]
+fn kiln_from_a_test_build_goes_back_with_the_launcher() {
+    // dev.29: the beta's launcher installed its newer Kiln; the player switched the launcher back to the release, whose
+    // own Kiln is older. Its next Play puts it in (InstallState.switch_back); the install is the ordinary one.
+    let t = tmp("switchback");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let release = bundle::create(&stage(&t.0, "a", false), &t.0.join("out"), &opts(1_793_793_600, "f1ad110")).unwrap();
+    let beta = bundle::create(&stage(&t.0, "b", false), &t.0.join("out"), &opts(1_793_793_600 + 3600, "8d20598")).unwrap();
+    let r = bundle::import(&dirs, &release).unwrap();
+    let b = bundle::import(&dirs, &beta).unwrap();
+    let game = t.0.join("Enshrouded");
+    put(&game, "enshrouded.exe", b"MZ");
+    let inst = client(&game);
+    let by_beta = InstallOptions { installer: Some("kiln-launcher 0.2.0-dev beta 3".into()), ..Default::default() };
+    install::install(&dirs, &inst, &beta, &by_beta, &mut NoProgress).unwrap();
+    let st = install::status(&dirs, &inst).unwrap();
+    assert_eq!(st.upgrade_available, None, "the older Kiln is no update");
+    assert_eq!(st.switch_back, None, "kiln-manage alone does not know the launcher's runtime");
+    let receipt = st.receipt.as_ref().unwrap();
+    assert!(install::installed_by_test_build(receipt));
+    let list = bundle::list(&dirs).unwrap();
+    let back = install::switch_back(Some(receipt), kiln_manage::manifest::RunSide::Client, Some(&r.version), false, &list);
+    assert_eq!(back, Some(install::SwitchBack { from: b.version.clone(), to: r.version.clone() }));
+    // a test build of the launcher keeps what the game has; the same Kiln is nothing to do; no receipt, nothing
+    assert_eq!(install::switch_back(Some(receipt), kiln_manage::manifest::RunSide::Client, Some(&r.version), true, &list), None);
+    assert_eq!(install::switch_back(Some(receipt), kiln_manage::manifest::RunSide::Client, Some(&b.version), false, &list), None);
+    assert_eq!(install::switch_back(None, kiln_manage::manifest::RunSide::Client, Some(&r.version), false, &list), None);
+    assert_eq!(install::switch_back(Some(receipt), kiln_manage::manifest::RunSide::Client, None, false, &list), None);
+    // the launcher's runtime must be one this side can take
+    assert_eq!(install::switch_back(Some(receipt), kiln_manage::manifest::RunSide::Server, Some(&r.version), false, &[]), None);
+
+    // the existing install path puts the older Kiln in, with its receipt; then there is nothing to switch back
+    let by_release = InstallOptions { installer: Some("kiln-launcher 0.2.0-dev".into()), ..Default::default() };
+    install::install(&dirs, &inst, &release, &by_release, &mut NoProgress).unwrap();
+    let st = install::status(&dirs, &inst).unwrap();
+    let receipt = st.receipt.as_ref().unwrap();
+    assert_eq!(receipt.runtime.version, r.version);
+    assert!(!install::installed_by_test_build(receipt));
+    assert_eq!(install::switch_back(Some(receipt), kiln_manage::manifest::RunSide::Client, Some(&r.version), false, &list), None);
+    assert_eq!(st.upgrade_available.as_deref(), Some(b.version.as_str()), "the beta's Kiln is newer: offered as before, to a tester");
+    // a release launcher whose own Kiln is newer than the beta's Kiln in the game: the ordinary update, no switch back
+    install::install(&dirs, &inst, &beta, &by_beta, &mut NoProgress).unwrap();
+    let receipt = install::status(&dirs, &inst).unwrap().receipt.unwrap();
+    assert_eq!(install::switch_back(Some(&receipt), kiln_manage::manifest::RunSide::Client, Some(&b.version), false, &list), None);
+}
+
+#[test]
+fn only_a_launcher_test_build_counts_as_one() {
+    let receipt = |installer: Option<&str>| install::InstallReceipt {
+        format: 1, install_id: "x".into(), installed: "2026-11-15T00:00:00Z".into(), updated: None, installer: installer.map(String::from),
+        runtime: install::ReceiptRuntime { version: "0.2.0-dev+20261115.0000000".into(), sha256: None, components: vec![], deselected: None },
+        side: kiln_manage::manifest::RunSide::Client, platform: None, game: None, files: vec![], replaced: vec![],
+    };
+    assert!(install::installed_by_test_build(&receipt(Some("kiln-launcher 0.2.0-dev beta 3"))));
+    assert!(install::installed_by_test_build(&receipt(Some("kiln-launcher 0.2.0-dev.29 beta 12"))));
+    for i in [None, Some("kiln-launcher 0.2.0-dev"), Some("kilnctl 0.2.0-dev beta 3"), Some("kiln-manage 0.2.0-dev"), Some("kiln-launcher 0.2.0-dev beta"),
+              Some("kiln-launcher 0.2.0-dev beta x"), Some("kiln-launcher 0.2.0-dev beta 3 extra"), Some("kiln-launcher 0.2.0-dev+beta.3")] {
+        assert!(!install::installed_by_test_build(&receipt(i)), "{i:?}");
+    }
+}

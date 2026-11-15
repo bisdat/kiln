@@ -21,6 +21,8 @@
 // count, owner and label equal a revoked link's revives that link (same slot, same stubs, a new handle) instead of
 // taking a new slot; see revive() for why a call still in flight through the old incarnation stays correct.
 #include "hooks_chain.h"
+#include "hooks_patch_policy.h"
+#include "hooks_typed_result.h"
 
 #include <windows.h>
 
@@ -39,6 +41,7 @@
 #include <string>
 #include <vector>
 
+#include "../hook_owner.h"
 #include "../log.h"
 #include "nlohmann/json.hpp"
 #include "safetyhook.hpp"
@@ -88,6 +91,7 @@ struct Link {
     uint32_t slot = 0;
     void* fn = nullptr;
     void* user = nullptr;
+    uint32_t sret_size = 0;                  // immutable across this link incarnation
     uint32_t arg_count = 0;                  // typed: the stack arguments forwarded (positions beyond the fourth)
     uint8_t* entry = nullptr;                // what the previous link / head cell jumps to
     uint8_t* cont = nullptr;                 // continuation stub (raw, structured, v1); null for mid
@@ -653,6 +657,20 @@ std::string target_label(Target& t) {
     return name;
 }
 
+// g_mutex held. The target's live links as "<label> (<owner>)", for the lines about another module's hook on it: they
+// name the hook and who placed it, not the sigdb name of the address (hook_owner.h). The target's label when none is live.
+std::string links_text(Target& t) {
+    std::vector<std::string> seen;
+    std::string out;
+    for (Link* l : t.order) {
+        const std::string one = hook_link_text(l->label.empty() ? target_label(t) : l->label, l->owner_name);
+        if (std::find(seen.begin(), seen.end(), one) != seen.end()) continue;
+        seen.push_back(one);
+        out += (out.empty() ? "" : ", ") + one;
+    }
+    return out.empty() ? target_label(t) : out;
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // Writing the detour (the first link on a target)
 //
@@ -735,6 +753,7 @@ bool make_patch(const Target& t, PatchBytes& out) {
 
 struct Stopped {
     HANDLE h = nullptr;
+    bool unknown_id = false;
     bool skip = false;  // the calling thread: listed (its handle is closed with the others) but never stopped
     bool suspended = false;
     bool has_rip = false;
@@ -742,7 +761,7 @@ struct Stopped {
 };
 
 constexpr DWORD kThreadAccess = THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_SET_CONTEXT |
-                                THREAD_QUERY_LIMITED_INFORMATION;
+                                THREAD_QUERY_LIMITED_INFORMATION | SYNCHRONIZE;
 
 // Every thread of the process, opened (not stopped yet), through ntdll's NtGetNextThread: one cheap call per thread (a
 // Toolhelp snapshot costs several milliseconds under Wine). False: not available here, nothing is left open.
@@ -764,6 +783,7 @@ bool open_threads_nt(std::vector<Stopped>& out) {
         Stopped st;
         st.h = prev = h;  // `prev` stays open: it is the cursor for the next call, and we close it with the rest
         const DWORD id = GetThreadId(h);
+        st.unknown_id = id == 0;
         st.skip = id == 0 || id == me;  // a thread whose id we cannot read is never stopped: it might be this one
         out.push_back(st);
     }
@@ -774,7 +794,7 @@ bool open_threads_nt(std::vector<Stopped>& out) {
 }
 
 // The same through a Toolhelp snapshot. False: no list.
-bool open_threads_toolhelp(std::vector<Stopped>& out, size_t& unopened) {
+bool open_threads_toolhelp(std::vector<Stopped>& out, size_t& unopened, bool checked = false) {
     const HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
     if (snap == INVALID_HANDLE_VALUE) return false;
     THREADENTRY32 te{};
@@ -791,7 +811,13 @@ bool open_threads_toolhelp(std::vector<Stopped>& out, size_t& unopened) {
         st.h = h;
         out.push_back(st);
     }
+    const DWORD error = GetLastError();
     CloseHandle(snap);
+    if (checked && error != ERROR_NO_MORE_FILES) {
+        for (auto& t : out) CloseHandle(t.h);
+        out.clear();
+        return false;
+    }
     return true;
 }
 
@@ -799,6 +825,13 @@ struct FreezeReport {
     size_t threads = 0;   // other threads listed and opened (candidates for stopping)
     size_t stopped = 0;   // of those, the ones SuspendThread really stopped
     size_t unopened = 0, unstopped = 0, in_range = 0, moved = 0, no_context = 0;
+    size_t exited = 0;    // listed, could not be stopped, and its thread object is signalled
+    // the first threads that stayed unchecked, for the log line written after everything runs again
+    struct Unchecked { DWORD tid, error, exit_code; bool no_id; } why[4] = {};
+    size_t why_n = 0;
+    void note(DWORD tid, DWORD error, DWORD exit_code, bool no_id) {
+        if (why_n < 4) why[why_n++] = {tid, error, exit_code, no_id};
+    }
     double stopped_ms = 0;  // how long the other threads stood still
     double list_ms = 0;     // listing and opening them first (they still run)
     bool written = false;
@@ -806,14 +839,30 @@ struct FreezeReport {
 
 // Nothing in here may allocate, log, lock or throw: other threads are stopped.
 void write_with_threads_stopped(std::vector<Stopped>& th, uintptr_t addr, const PatchBytes& pb, const IpMap* map,
-                                uintptr_t tramp, FreezeReport& rep) {
+                                uintptr_t tramp, FreezeReport& rep, uint32_t* unchecked = nullptr) {
     LARGE_INTEGER t0, t1, freq;
     QueryPerformanceFrequency(&freq);
     QueryPerformanceCounter(&t0);
     for (Stopped& s : th) {
-        s.suspended = !s.skip && SuspendThread(s.h) != static_cast<DWORD>(-1);
-        if (s.suspended) ++rep.stopped;
-        if (!s.skip && !s.suspended) ++rep.unstopped;
+        // Only a signalled thread object proves termination. An exit status alone is not a wait:
+        // termination may be asynchronous, and 259 is also a legitimate final exit code.
+        DWORD code = STILL_ACTIVE;
+        if (s.unknown_id) {  // its id could not be read, so it is never stopped (it might be this thread)
+            const DWORD wait = WaitForSingleObject(s.h, 0);
+            const DWORD error = wait == WAIT_FAILED ? GetLastError() : ERROR_SUCCESS;
+            if (wait == WAIT_OBJECT_0) { ++rep.exited; continue; }
+            GetExitCodeThread(s.h, &code);  // diagnostic only
+            if (unchecked) { ++rep.no_context; rep.note(0, error, code, true); }
+            continue;
+        }
+        if (s.skip) continue;  // the calling thread
+        s.suspended = SuspendThread(s.h) != static_cast<DWORD>(-1);
+        if (s.suspended) { ++rep.stopped; continue; }
+        const DWORD error = GetLastError();
+        if (WaitForSingleObject(s.h, 0) == WAIT_OBJECT_0) { ++rep.exited; continue; }
+        GetExitCodeThread(s.h, &code);  // diagnostic only
+        ++rep.unstopped;
+        rep.note(GetThreadId(s.h), error, code, false);
     }
     alignas(16) CONTEXT ctx;
     for (Stopped& s : th) {
@@ -824,6 +873,18 @@ void write_with_threads_stopped(std::vector<Stopped>& th, uintptr_t addr, const 
             s.rip = static_cast<uintptr_t>(ctx.Rip);
         } else {
             ++rep.no_context;
+        }
+    }
+    if (unchecked) {
+        size_t in_bytes = 0;
+        for (const auto& s : th)
+            if (s.has_rip && s.rip > addr && s.rip < addr + pb.len) ++in_bytes;
+        *unchecked = static_cast<uint32_t>(rep.unopened + rep.unstopped + rep.no_context + in_bytes);
+        // Strict callers refuse BEFORE changing bytes or any thread context.
+        if (!checked_patch_allowed(rep.unopened + rep.unstopped + rep.no_context, in_bytes)) {
+            rep.in_range = in_bytes;  // for the refusal's log line (nothing was moved)
+            for (auto& s : th) if (s.suspended) ResumeThread(s.h);
+            return;
         }
     }
     DWORD old = 0;
@@ -856,7 +917,7 @@ void write_with_threads_stopped(std::vector<Stopped>& th, uintptr_t addr, const 
 
 // g_mutex held. Writes the detour over the function's first bytes with the other threads stopped. False: could not (the
 // caller falls back to safetyhook's enable()); nothing was written then.
-bool enable_detour(Target& t, FreezeReport& rep) {
+bool enable_detour(Target& t, FreezeReport& rep, uint32_t* unchecked = nullptr) {
     PatchBytes pb;
     if (!make_patch(t, pb)) return false;
     IpMap map;
@@ -866,11 +927,11 @@ bool enable_detour(Target& t, FreezeReport& rep) {
     LARGE_INTEGER l0, l1, freq;
     QueryPerformanceFrequency(&freq);
     QueryPerformanceCounter(&l0);
-    if (!open_threads_nt(th) && !open_threads_toolhelp(th, rep.unopened)) return false;
+    if (!open_threads_nt(th) && !open_threads_toolhelp(th, rep.unopened, unchecked != nullptr)) { if (unchecked) *unchecked = 1; return false; }
     QueryPerformanceCounter(&l1);
     rep.list_ms = 1000.0 * static_cast<double>(l1.QuadPart - l0.QuadPart) / static_cast<double>(freq.QuadPart);
     for (const Stopped& s : th) rep.threads += s.skip ? 0 : 1;
-    write_with_threads_stopped(th, t.addr, pb, have_map ? &map : nullptr, t.trampoline, rep);
+    write_with_threads_stopped(th, t.addr, pb, have_map ? &map : nullptr, t.trampoline, rep, unchecked);
     for (Stopped& s : th) CloseHandle(s.h);
     return rep.written;
 }
@@ -880,7 +941,7 @@ bool enable_detour(Target& t, FreezeReport& rep) {
 
 // g_mutex held. Finds or creates the target: entry stub, head cell, the one safetyhook inline detour. *refused_quietly
 // is set when the address was refused before with the same bytes (nothing allocated, nothing logged).
-Target* target_for(uintptr_t addr, bool* refused_quietly) {
+Target* target_for(uintptr_t addr, bool* refused_quietly, uint32_t* unchecked = nullptr) {
     State& s = S();
     if (auto it = s.by_addr.find(addr); it != s.by_addr.end()) return it->second;
     if (auto it = s.refused.find(addr); it != s.refused.end()) {
@@ -977,11 +1038,12 @@ Target* target_for(uintptr_t addr, bool* refused_quietly) {
     t->trampoline = t->hook.target_address() ? t->hook.trampoline().address() : 0;
     t->head->store(t->trampoline, std::memory_order_release);
     FreezeReport rep;
-    if (enable_detour(*t, rep)) {
+    if (enable_detour(*t, rep, unchecked)) {
         KLOG_D("hooks: detour on rva %s written with %zu other thread(s) stopped (of %zu listed) for %.2f ms, %.2f ms to "
-               "list and open them (%zu not openable, %zu moved out of the replaced bytes, %zu without a context)",
+               "list and open them (%zu not openable, %zu moved out of the replaced bytes, %zu without a context, %zu "
+               "ended)",
                hex(rva_of(addr)).c_str(), rep.stopped, rep.threads, rep.stopped_ms, rep.list_ms, rep.unopened, rep.moved,
-               rep.no_context);
+               rep.no_context, rep.exited);
         if (rep.stopped_ms > 50)
             KLOG_W("hooks: the other threads stood still for %.1f ms while the detour on rva %s was written",
                    rep.stopped_ms, hex(rva_of(addr)).c_str());
@@ -996,6 +1058,24 @@ Target* target_for(uintptr_t addr, bool* refused_quietly) {
             KLOG_E("hooks: %zu thread(s) paused inside the first bytes of rva %s could not be moved; they may crash when they "
                    "run on", rep.in_range - rep.moved, hex(rva_of(addr)).c_str());
     } else {
+        if (unchecked) {  // a checked installation never falls back to an unchecked patch
+            if (rep.why_n)
+                KLOG_W("hooks: rva %s: checked installation refused, nothing written: %zu thread(s) could not be checked "
+                       "(%zu not opened, %zu not stopped, %zu without an id or a context; %zu ended ones not counted); the "
+                       "first: thread %lu, stop error %lu, exit code %lu%s",
+                       hex(rva_of(addr)).c_str(), rep.unopened + rep.unstopped + rep.no_context, rep.unopened, rep.unstopped,
+                       rep.no_context, rep.exited, static_cast<unsigned long>(rep.why[0].tid),
+                       static_cast<unsigned long>(rep.why[0].error), static_cast<unsigned long>(rep.why[0].exit_code),
+                       rep.why[0].no_id ? " (its id could not be read)" : "");
+            else if (rep.in_range || rep.no_context || rep.unopened)
+                KLOG_W("hooks: rva %s: checked installation refused, nothing written: %zu thread(s) paused inside the bytes "
+                       "to replace, %zu stopped one(s) without a context, %zu not opened",
+                       hex(rva_of(addr)).c_str(), rep.in_range, rep.no_context, rep.unopened);
+            else
+                KLOG_W("hooks: rva %s: checked installation refused, nothing written: %s", hex(rva_of(addr)).c_str(),
+                       *unchecked ? "the process's threads could not be listed" : "the detour's bytes could not be prepared");
+            return fail(false);
+        }
         // No thread list, or a trampoline of a shape we don't know: safetyhook's own way (page trap, no thread stops).
         KLOG_W("hooks: rva %s: could not stop the other threads; using safetyhook's enable", hex(rva_of(addr)).c_str());
         if (!t->hook.enable()) {
@@ -1058,7 +1138,8 @@ void note_slot_use() {
 //    place: no recursion, no second run. If the old and new links are otherwise equal, the old one is simply kept
 //    (revived in place).
 KilnResult install(Kind kind, KilnOwner owner, uintptr_t addr, const Order& order, void* fn, void* user,
-                   uint32_t arg_count, void** original, KilnHandle* out) {
+                   uint32_t arg_count, void** original, KilnHandle* out, uint32_t* unchecked = nullptr,
+                   uint32_t sret_size = 0) {
     State& s = S();
     if (!fn || !addr) return KILN_ERR_INVALID_ARGUMENT;
     if (!s.ready) return KILN_ERR_UNAVAILABLE;
@@ -1066,7 +1147,7 @@ KilnResult install(Kind kind, KilnOwner owner, uintptr_t addr, const Order& orde
     const bool had_target = s.by_addr.count(addr) != 0;
     if (!had_target && s.next_link >= kMaxLinks) return KILN_ERR_UNAVAILABLE;  // a new target has nothing to revive
     bool quiet = false;
-    Target* t = target_for(addr, &quiet);
+    Target* t = target_for(addr, &quiet, unchecked);
     if (!t) return KILN_ERR_UNAVAILABLE;
     normalize(*t);
     const std::string owner_name =
@@ -1077,7 +1158,7 @@ KilnResult install(Kind kind, KilnOwner owner, uintptr_t addr, const Order& orde
         label = sym.empty() ? owner_name + "@" + hex(rva_of(addr)) : sym;
     }
     auto same = [&](const Link* x) {
-        return x->kind == kind && x->fn == fn && x->user == user && x->arg_count == arg_count && x->owner == owner &&
+        return x->kind == kind && x->fn == fn && x->user == user && x->arg_count == arg_count && x->sret_size == sret_size && x->owner == owner &&
                x->label == label;
     };
     Link* replaced = nullptr;
@@ -1122,6 +1203,7 @@ KilnResult install(Kind kind, KilnOwner owner, uintptr_t addr, const Order& orde
         made->fn = fn;
         made->user = user;
         made->arg_count = arg_count;
+        made->sret_size = sret_size;
         index = s.next_link;
     }
     // ---- from here nothing fails before the publish ----
@@ -1214,10 +1296,10 @@ KilnResult install(Kind kind, KilnOwner owner, uintptr_t addr, const Order& orde
                link->owner_name.c_str(), t->order.size(), had_target ? "" : ", new detour", how);
     if (!had_target && t->before_present) {
         if (!t->before.module.empty() || t->before.address)
-            KLOG_I("hooks: %s chained over %s", target_label(*t).c_str(), dest_text(t->before).c_str());
+            KLOG_I("hooks: %s chained over %s", links_text(*t).c_str(), dest_text(t->before).c_str());
         else
             KLOG_I("hooks: %s: the bytes at rva %s differ from the exe file's (patched in place by someone else)",
-                   target_label(*t).c_str(), hex(rva_of(addr)).c_str());
+                   links_text(*t).c_str(), hex(rva_of(addr)).c_str());
     }
     notify_changed();
     return KILN_OK;
@@ -1276,14 +1358,17 @@ KilnResult install_v1(KilnOwner owner, uintptr_t target, int32_t priority, KilnD
     return install(Kind::V1, owner, target, o, reinterpret_cast<void*>(fn), user, 4, nullptr, out);
 }
 KilnResult install_mid(KilnOwner owner, uintptr_t target, const Order& order, KilnMidFn fn, void* user,
-                       KilnHandle* out) {
-    return install(Kind::Mid, owner, target, order, reinterpret_cast<void*>(fn), user, 0, nullptr, out);
+                       KilnHandle* out, uint32_t* unchecked) {
+    if (unchecked) *unchecked = 0;
+    return install(Kind::Mid, owner, target, order, reinterpret_cast<void*>(fn), user, 0, nullptr, out, unchecked);
 }
 
 KilnResult install_typed(KilnOwner owner, uintptr_t target, const Order& order, uint32_t nstack, KilnTypedFn fn,
-                         void* user, KilnHandle* out) {
+                         void* user, KilnHandle* out, uint32_t sret_size, uint32_t* unchecked) {
+    if (unchecked) *unchecked = 0;
     if (nstack + 4 > KILN_SIG_MAX_ARGS) return KILN_ERR_INVALID_ARGUMENT;
-    return install(Kind::Typed, owner, target, order, reinterpret_cast<void*>(fn), user, nstack, nullptr, out);
+    return install(Kind::Typed, owner, target, order, reinterpret_cast<void*>(fn), user, nstack, nullptr, out, unchecked,
+                   sret_size);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -1370,22 +1455,19 @@ extern "C" uintptr_t kiln_hk_structured_dispatch(const uintptr_t* regs, const ui
 namespace kiln::hooks::chain {
 namespace {
 
-struct TypedState {
+struct TypedState : TypedResult {
     uint32_t magic = kTypedMagic;
     Link* link = nullptr;
-    bool in_original = false;  // read by the SEH filter: a fault in the rest of the chain is not this handler's
-    bool called = false;       // the once-only latch of call_original_frame
-    uint64_t rax = 0;          // the original's result, as it returned (what a handler that faults afterwards yields)
-    uint8_t xmm0[16] = {};
+    bool in_original = false;
+
 };
 
 void typed_rest(KilnCallFrame* frame, TypedState* st) {
-    st->called = true;
-    st->in_original = true;
-    kiln_hk_call_frame(st->link->cont, frame, st->link->arg_count);
-    st->in_original = false;
-    st->rax = frame->rax;
-    std::memcpy(st->xmm0, frame->xmm0r, 16);
+    st->original(*frame, [&] {
+        st->in_original = true;
+        kiln_hk_call_frame(st->link->cont, frame, st->link->arg_count);
+        st->in_original = false;
+    });
 }
 
 }  // namespace
@@ -1405,6 +1487,12 @@ extern "C" void kiln_hk_typed_dispatch(KilnCallFrame* frame, void* lp) {
     auto* link = static_cast<Link*>(lp);
     TypedState st;
     st.link = link;
+    try {
+        st.prepare(link->sret_size ? reinterpret_cast<void*>(frame->gpr[0]) : nullptr, link->sret_size);
+    } catch (...) { // allocation failed before any handler ran: pass straight through, with no snapshot needed
+        kiln_hk_call_frame(link->cont, frame, link->arg_count);
+        return;
+    }
     if (!link->live.load(std::memory_order_acquire)) {  // revoked or disabled: just forward
         typed_rest(frame, &st);
         return;
@@ -1425,8 +1513,7 @@ extern "C" void kiln_hk_typed_dispatch(KilnCallFrame* frame, void* lp) {
                link->label.c_str(), static_cast<unsigned long long>(link->h()), link->owner_name.c_str(), code);
         if (S().env.changed) S().env.changed();
         if (st.called) {  // the original ran once: the caller gets what it returned, whatever the handler wrote since
-            frame->rax = st.rax;
-            std::memcpy(frame->xmm0r, st.xmm0, 16);
+            st.restore(*frame);
             return;
         }
         verdict = KILN_TYPED_CONTINUE;  // a handler that faulted decides nothing: the original runs
@@ -1563,18 +1650,18 @@ size_t check_foreign() {
             changed = true;
             if (t->over.own)
                 KLOG_I("hooks: %s (a Kiln module) also hooks %s and sits in front of the registry's detour; both run",
-                       dest_text(t->over).c_str(), target_label(*t).c_str());
+                       dest_text(t->over).c_str(), links_text(*t).c_str());
             else if (!t->over.module.empty())
                 KLOG_W("hooks: %s hooked over Kiln's %s (Kiln's detour stays armed; it is reached through their jump)",
-                       dest_text(t->over).c_str(), target_label(*t).c_str());
+                       dest_text(t->over).c_str(), links_text(*t).c_str());
             else
-                KLOG_W("hooks: something patched over Kiln's %s at rva %s (%s)", target_label(*t).c_str(),
+                KLOG_W("hooks: something patched over Kiln's %s at rva %s (%s)", links_text(*t).c_str(),
                        hex(rva_of(t->addr)).c_str(), dest_text(t->over).c_str());
         } else if (!differs && t->over_present) {
             t->over_present = false;
             t->over = {};
             changed = true;
-            KLOG_I("hooks: Kiln's detour on %s is no longer hooked over", target_label(*t).c_str());
+            KLOG_I("hooks: Kiln's detour on %s is no longer hooked over", links_text(*t).c_str());
         }
         over += t->over_present && !t->over.own;
     }

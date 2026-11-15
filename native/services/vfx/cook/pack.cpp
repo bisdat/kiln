@@ -66,7 +66,7 @@ void add_resource(CookResult& r, Shared& sh, const Guid& g, uint32_t type, Bytes
     // A second replacement of the same game material is kept on standby (kiln.vfx serves it if the first one's mod unloads); anything else
     // under a GUID that is taken is dropped.
     if (!fresh && !override) return;
-    r.resources.push_back({g, type, std::move(data), what, override, override ? mod : std::string(), !fresh});
+    r.resources.push_back({g, type, std::move(data), what, override, mod, !fresh});
 }
 
 }  // namespace
@@ -679,7 +679,8 @@ CookResult cook_mods(const std::vector<ModInput>& mods, const CookOptions& opt) 
             add_blob(out, shared, t.hash, t.blob.data(), t.blob.size(), mod.id + " texture " + key);
             add_resource(out, shared, t.guid, kTypeTexture, std::move(t.resource), mod.id + " texture " + key);
         }
-        for (size_t i = 0; i < built_vfx.size(); ++i) add_resource(out, shared, built_vfx[i].first, kTypeVfx, std::move(built_vfx[i].second), vfx_names[i]);
+        for (size_t i = 0; i < built_vfx.size(); ++i)
+            add_resource(out, shared, built_vfx[i].first, kTypeVfx, std::move(built_vfx[i].second), vfx_names[i], false, mod.id);
         for (BuiltBlock& b : built_blocks) out.blocks.push_back(std::move(b));
         finish();
     }

@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Kiln.Sigs.Generator: a C# source generator (IIncrementalGenerator) that turns the `sig` descriptors of a mod's sigdb
+       fragment (sigdb/server.json, sigdb/client.json) into typed hooks and calls: one class per described game function
+       with Detour, Call and Invoke (chapter 06b §9.3, docs/kiln/services/hooks.md "Typed hooks"). The emitter also writes
+       Kiln.Sigs (managed/services/Kiln.Sigs/Sigs.g.cs, the core's descriptors; a test keeps it equal). Compiler-only
+       references (netstandard2.0), no runtime dependencies. Shipped in the Kiln.Sdk package (analyzers/dotnet/cs/) and
+       wired by managed/Kiln.Sdk/Sdk/Kiln.Sigs.targets. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>Kiln.Sigs.Generator</AssemblyName>
+    <RootNamespace>Kiln.Sigs.Generator</RootNamespace>
+    <IsRoslynComponent>true</IsRoslynComponent>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    <IsPackable>false</IsPackable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);RS2008</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" PrivateAssets="all" />
+    <!-- the JSON reader of the game-id generator (same repository, MIT) -->
+    <Compile Include="../Kiln.GameIds/MiniJson.cs" Link="MiniJson.cs" />
+    <InternalsVisibleTo Include="Kiln.Sigs.Generator.Tests" />
+  </ItemGroup>
+</Project>

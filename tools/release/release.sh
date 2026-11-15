@@ -1,11 +1,23 @@
 #!/usr/bin/env bash
 # Builds a complete Kiln release folder from a clean export of one commit, checks it, and stops: publishing is a
 # separate, manual step (tools/release/github-draft.sh, tools/release/publish.sh; docs/kiln/launcher/releasing.md).
-#   tools/release/release.sh VERSION [--commit REV] [--out DIR] [--work DIR] [--notes FILE] [--worktree]
+#   tools/release/release.sh VERSION [--beta N] [--commit REV] [--out DIR] [--work DIR] [--notes FILE] [--worktree]
 #                                    [--skip-windows] [--no-checks] [--force] [--host-build] [--no-nexus]
 # VERSION: X.Y.Z (stable) or X.Y.Z-dev.N (dev) for this tree's VERSION (tools/release/version.sh prints one).
+# --beta N (or --channel beta --beta N): test build N of VERSION for the beta channel (docs/kiln/launcher/releasing.md,
+#   "Test builds", "Cutting a beta"): the launcher keeps VERSION and has the channel and N baked in
+#   (KILN_LAUNCHER_CHANNEL=beta, KILN_LAUNCHER_BETA=N); its files are named and signed for the build id
+#   VERSION+beta.N; the folder is kiln-VERSION-beta.N with only updates/frostdev.io/beta/latest.json and
+#   updates/github/latest.json (for updates-beta), never a dev or stable manifest. No Nexus Mods build, no Nexus dry
+#   run, no API record promotion; github-draft.sh and publish.sh know such a folder by its manifest.
+# --channel dev|stable: must fit VERSION (the channel always follows it); a release also writes the beta channel's
+#   manifest (the release is the newest build a tester can have too; publish.sh moves it only when no newer test build
+#   is out).
 # --commit: what to build (default HEAD); exported with `git archive`, so uncommitted work never gets in.
-# --worktree: test runs only: export the working tree (tracked and untracked, not ignored) instead of a commit.
+# --worktree: test runs only: export the working tree (tracked and untracked, not ignored) instead of a commit. It needs
+#   an explicit --out that is not a release folder (~/Kiln-release/kiln-*, ~/Kiln-release; e.g. ~/Kiln-release/trial/
+#   kiln-VERSION), else it is refused before anything is done; its README.txt says "a test build", the Nexus dry run
+#   is skipped, and github-draft.sh, publish.sh and nexus.py --publish refuse such a folder (not built from a commit).
 # --out: the release folder (default ~/Kiln-release/kiln-VERSION). --work: build dir (default <repo>/.out/release-work;
 #   a fixed path, so later runs reuse the compiler caches). --notes: release notes (Markdown); default: the commit
 #   subjects since the previous v* tag.
@@ -59,7 +71,7 @@ repo=$(cd "$here/../.." && pwd)
 lib=$here/lib
 source "$here/linux-build/paths.sh"
 
-version="" commit=HEAD out="" work="" notes="" worktree=0 skip_windows=0 checks=1 force=0 host_build=0 nexus=1
+version="" commit=HEAD out="" work="" notes="" worktree=0 skip_windows=0 checks=1 force=0 host_build=0 nexus=1 beta="" want_channel=""
 while (($#)); do
   case $1 in
     --commit) commit=$2; shift 2 ;;
@@ -72,15 +84,52 @@ while (($#)); do
     --force) force=1; shift ;;
     --host-build) host_build=1; shift ;;
     --no-nexus) nexus=0; shift ;;
+    --beta) beta=$2; shift 2 ;;
+    --channel) want_channel=$2; shift 2 ;;
     -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
     -*) echo "unknown option $1" >&2; exit 2 ;;
     *) [[ -z $version ]] || { echo "one version only" >&2; exit 2; }; version=$1; shift ;;
   esac
 done
 [[ -n $version ]] || { echo "usage: $0 VERSION [options] (tools/release/version.sh dev|stable prints one)" >&2; exit 2; }
+# --worktree only in a run that is plainly a test: an explicit --out that is not a release folder (~/Kiln-release/kiln-*,
+# the default --out, or ~/Kiln-release itself), checked before anything else is done. A real run passed it once
+# (0.2.0-dev.28) and its README.txt said "a test build".
+if ((worktree)); then
+  releases=$(realpath -m "$HOME/Kiln-release")
+  if [[ -z $out ]]; then
+    echo "release: --worktree is for test runs only and needs --out DIR, not a release folder (e.g. --out $releases/trial/kiln-$version): a test build of the working tree, never published. A release builds a commit: drop --worktree" >&2
+    exit 2
+  fi
+  # Keep the spelling too: a release folder may itself be a symlink to storage elsewhere.
+  for candidate in "$(realpath -ms -- "$out")" "$(realpath -m -- "$out")"; do
+    case $candidate in
+      "$HOME/Kiln-release"|"$HOME/Kiln-release"/kiln-*|"$releases"|"$releases"/kiln-*) echo "release: --worktree is for test runs only: --out $out is a release folder ($releases/kiln-*); give a test folder (e.g. $releases/trial/kiln-$version), or drop --worktree for a release" >&2; exit 2 ;;
+    esac
+  done
+fi
 "$here/version.sh" check "$version"
 case $version in *-*) channel=dev ;; *) channel=stable ;; esac
-out=$(realpath -m "${out:-$HOME/Kiln-release/kiln-$version}")
+# a test build (--beta N): name = the folder's, the files', the tag's and the download path's; build_id = what its
+# files are signed for and its manifest announces; the launcher itself keeps $version (releasing.md, "Test builds")
+case $want_channel in
+  ""|beta) ;;
+  dev|stable) [[ $want_channel == "$channel" ]] || { echo "release: --channel $want_channel does not fit $version (a $channel version)" >&2; exit 2; } ;;
+  *) echo "release: --channel is stable, dev or beta, not '$want_channel'" >&2; exit 2 ;;
+esac
+[[ $want_channel != beta || -n $beta ]] || { echo "release: --channel beta needs --beta N (the test build's number)" >&2; exit 2; }
+[[ -z $beta || $want_channel == "" || $want_channel == beta ]] || { echo "release: --beta is for the beta channel" >&2; exit 2; }
+name=$version build_id=$version
+if [[ -n $beta ]]; then
+  [[ $beta =~ ^[1-9][0-9]{0,8}$ ]] || { echo "release: --beta takes the test build's number (1, 2, ...), not '$beta'" >&2; exit 2; }
+  channel=beta name=$version-beta.$beta build_id=$version+beta.$beta nexus=0
+fi
+# baked into the launcher by build.rs (empty: the channel follows the version); never inherited from the caller
+export KILN_LAUNCHER_CHANNEL=${beta:+beta} KILN_LAUNCHER_BETA=$beta KILN_LAUNCHER_BASE_RELEASE=""
+# the Nexus Mods build: never for a test build (test builds go to frostdev.io and GitHub only)
+nexus_build=1
+[[ $channel == beta ]] && nexus_build=0
+out=$(realpath -m "${out:-$HOME/Kiln-release/kiln-$name}")
 work=$(realpath -m "${work:-$repo/.out/release-work}")
 (( $(id -u) != 0 )) || { echo "release: run as the release owner, not root" >&2; exit 1; }
 safe_dir "$out"
@@ -146,14 +195,24 @@ tar --sort=name --owner=0 --group=0 --numeric-owner --mode='u=rwX,go=rX' --mtime
 [[ $(sed 's/[-+].*//' "$src/VERSION") == "${version%%-*}" ]] || die "VERSION in the export is $(cat "$src/VERSION"), not for $version"
 # The API gate (tools/release/api-gate.sh), before any build: no line of a PublicAPI.Shipped.txt removed since the
 # previous v* release, and new API only with a raised API version (Kiln.Mods.ApiVersion), so a mod can ask for it.
+previous_release() {
+  local ref=$1 channel=$2
+  [[ $channel == beta ]] || ref=$ref^
+  git -C "$repo" describe --tags --abbrev=0 --match 'v*' --exclude 'v*-beta.*' "$ref" 2>/dev/null || true
+}
 if ((worktree)); then
   gate_new=(--worktree)
-  prev=$(git -C "$repo" describe --tags --abbrev=0 --match 'v*' HEAD 2>/dev/null || true)
+  prev=$(git -C "$repo" describe --tags --abbrev=0 --match 'v*' --exclude 'v*-beta.*' HEAD 2>/dev/null || true)
 else
   # GitHub makes the v* tags when a release is published: fetch them, or the gate and the notes start too early
   git -C "$repo" fetch -q --tags origin 2>/dev/null || note "release: could not fetch tags; the API gate and the notes may start too early"
   gate_new=("$full")
-  prev=$(git -C "$repo" describe --tags --abbrev=0 --match 'v*' "$full^" 2>/dev/null || true)
+  # a test build's tag (v<version>-beta.<n>) is no release: the gate and the notes start at the release before
+  prev=$(previous_release "$full" "$channel")
+fi
+if [[ $channel == beta ]]; then
+  KILN_LAUNCHER_BASE_RELEASE=$(python3 "$lib/release.py" beta-floor "$prev" "$build_id") || die "cannot determine the release this beta is cut over; fetch release tags first"
+  export KILN_LAUNCHER_BASE_RELEASE
 fi
 if [[ -z $prev ]]; then
   note "WARNING: no previous v* tag: the API gate has nothing to compare with (removed API and the API version are not checked)"
@@ -292,7 +351,8 @@ else
       --mount "$src" --mount "$work" --ro "$here" \
       --env KILN_GIT --env SOURCE_DATE_EPOCH --env KILN_OUT --env CARGO_TARGET_DIR --env KILN_SDK_VERSION --env CARGO_ENCODED_RUSTFLAGS \
       --env KILN_NEXUS_ENABLED --env KILN_NEXUS_OAUTH_CLIENT_ID --env KILN_NEXUS_OAUTH_REDIRECT_URI \
-      --env KILN_RELEASE_BUILD --env KILN_COOK_HELPERS --env ContinuousIntegrationBuild --env NO_STRIP -- "$@"
+      --env KILN_RELEASE_BUILD --env KILN_COOK_HELPERS --env ContinuousIntegrationBuild --env NO_STRIP \
+      --env KILN_LAUNCHER_CHANNEL --env KILN_LAUNCHER_BETA --env KILN_LAUNCHER_BASE_RELEASE -- "$@"
   }
   step "Linux build image (Ubuntu 22.04, glibc $glibc_max)"
   image=$("$here/linux-build/image.sh" 2>>"$log") || { tail -40 "$log" >&2; die "the Linux build image did not build"; }
@@ -438,14 +498,17 @@ fi
 # programs that update themselves, so it has no self-update feature (cargo --no-default-features: no updater plugin, no
 # update feeds) and no updater key in its config (launcher/src-tauri/tauri.nexus.conf.json); it is never signed for
 # the updater and has no manifest. The bundle folders are emptied first: the direct build's files must not be taken.
+nexus_appimage="" nexus_deb="" nexus_setup=""
+if ((nexus_build)); then
 step "launcher: Nexus Mods build, Linux (no self-update)"
 rm -rf "$lin_target/release/bundle"
+# no test build in the Nexus build (KILN_LAUNCHER_CHANNEL is empty here: test builds have no Nexus build)
 (cd "$src" && quiet linux tools/launcher/build-linux.sh --nexus --bundles appimage,deb --runtime "$runtime_zip" --version "$version" \
   --config "$(resources "$notices")")
 nexus_appimage=$(ls -t "$KILN_OUT"/bundles/linux-nexus/*.AppImage | head -1)
 nexus_deb=$(ls -t "$KILN_OUT"/bundles/linux-nexus/*.deb | head -1)
-nexus_setup=""
-if ((!skip_windows)); then
+fi
+if ((nexus_build && !skip_windows)); then
   step "launcher: Nexus Mods build, Windows (no self-update)"
   rm -rf "$CARGO_TARGET_DIR/$win/release/bundle"
   (cd "$src" && quiet low tools/launcher/build-windows.sh --nexus "${wargs[@]}")
@@ -503,7 +566,8 @@ note "sample mods: $(ls "$work"/samples/*.zip 2>/dev/null | wc -l) zips"
 # ---------------------------------------------------------------- 7. the folder
 step "assemble $out"
 mkdir -p "$out"/{linux,windows,runtime,sdk,samples,updates,source}
-A=kiln-launcher_${version}_amd64.AppImage D=kiln-launcher_${version}_amd64.deb R=kiln-launcher-${version}.x86_64.rpm S=kiln-launcher_${version}_x64-setup.exe
+# a test build's launcher files carry its name (kiln-launcher_0.2.0-dev.29-beta.3_amd64.AppImage): a tester sees which
+A=kiln-launcher_${name}_amd64.AppImage D=kiln-launcher_${name}_amd64.deb R=kiln-launcher-${name}.x86_64.rpm S=kiln-launcher_${name}_x64-setup.exe
 cp "$appimage" "$out/linux/$A" && chmod 755 "$out/linux/$A"
 cp "$deb" "$out/linux/$D"
 [[ -n $rpm ]] && cp "$rpm" "$out/linux/$R"
@@ -532,22 +596,25 @@ fi
 # the SDK's nupkgs as a static NuGet v3 feed in sdk/feed/ (lib/feed.py), for dotnet new install and a mod's
 # nuget.config once the folder is served: its index names absolute URLs, by default where publish.sh would put it
 # (downloads/<version>/sdk/feed/); publish.sh uploads sdk/feed/ (and sdk/api/) only with --sdk-site
-feed_url=${KILN_FEED_URL:-https://frostdev.io/kiln/downloads/$version/sdk/feed/}
+feed_url=${KILN_FEED_URL:-https://frostdev.io/kiln/downloads/$name/sdk/feed/}
 python3 -I "$lib/feed.py" build --out "$out/sdk/feed" --base-url "$feed_url" "$out/sdk" | tee -a "$log"
 cp "$work"/samples/*.zip "$out/samples/" 2>/dev/null || true
 cp "$src/LICENSE" "$src/CREDITS.md" "$notices" "$out/"
 cp "$work/source/"*.tar.gz "$out/source/"
-# the Nexus Mods build (nexus.py uploads these; never GitHub or frostdev.io)
-mkdir -p "$out/nexus/linux"
-cp "$nexus_appimage" "$out/nexus/linux/$A" && chmod 755 "$out/nexus/linux/$A"
-cp "$nexus_deb" "$out/nexus/linux/$D"
-[[ -n $nexus_setup ]] && mkdir -p "$out/nexus/windows" && cp "$nexus_setup" "$out/nexus/windows/$S"
+# the Nexus Mods build (nexus.py uploads these; never GitHub or frostdev.io); none for a test build
+if ((nexus_build)); then
+  mkdir -p "$out/nexus/linux"
+  cp "$nexus_appimage" "$out/nexus/linux/$A" && chmod 755 "$out/nexus/linux/$A"
+  cp "$nexus_deb" "$out/nexus/linux/$D"
+  [[ -n $nexus_setup ]] && mkdir -p "$out/nexus/windows" && cp "$nexus_setup" "$out/nexus/windows/$S"
+fi
 
 # release notes
 if [[ -n $notes ]]; then cp "$notes" "$out/RELEASE-NOTES.md"; else
   {
-    echo "# Kiln $version"
+    echo "# Kiln $name"
     echo
+    [[ $channel == beta ]] && { echo "Test build $beta of $version, for the beta channel: for testers, not a release."; echo; }
     if ((worktree)); then echo "Test build of the working tree at $KILN_GIT."; else
       # $prev: the previous v* tag, found (after fetching the tags) for the API gate in 1.
       echo "Changes since ${prev:-the start of the project}:"
@@ -569,26 +636,33 @@ updater_files=("$out/linux/$A")
 [[ -n $setup ]] && updater_files+=("$out/windows/$S")
 for f in "${updater_files[@]}"; do
   (set +x; cd "$src/launcher" && TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(cat "$pass_file")" \
-    bun x tauri signer sign -f "$key" --app-version "$version" "$f" >/dev/null 2>&1) || die "signing $f failed"
+    bun x tauri signer sign -f "$key" --app-version "$build_id" "$f" >/dev/null 2>&1) || die "signing $f failed"
   note "signed $(basename "$f")"
 done
 step "update manifests"
-fd=https://frostdev.io/kiln/downloads/$version
-gh=https://github.com/frostdev-ops/kiln/releases/download/v$version
+fd=https://frostdev.io/kiln/downloads/$name
+gh=https://github.com/frostdev-ops/kiln/releases/download/v$name
 manifest() { # base-url layout(folders|flat) out channel
-  local base=$1 flat=$2 dest=$3 ch=$4 e=()
+  local base=$1 flat=$2 dest=$3 ch=$4 e=() b=()
+  [[ $channel == beta ]] && b=(--beta "$beta" --base-release "$KILN_LAUNCHER_BASE_RELEASE")
   local la="linux/$A" ws="windows/$S"
   [[ $flat == flat ]] && la=$A ws=$S
   e+=(--entry "linux-x86_64-appimage,linux-x86_64=$base/$la|$out/linux/$A.sig|$out/linux/$A")
   [[ -n $setup ]] && e+=(--entry "windows-x86_64-nsis,windows-x86_64=$base/$ws|$out/windows/$S.sig|$out/windows/$S")
-  python3 "$lib/release.py" manifest --version "$version" --channel "$ch" --notes "$short" --runtime "$runtime_version" \
+  python3 "$lib/release.py" manifest --version "$build_id" --channel "$ch" "${b[@]}" --notes "$short" --runtime "$runtime_version" \
     --date "$(date -u -d "@$SOURCE_DATE_EPOCH" +%Y-%m-%dT%H:%M:%SZ)" "${e[@]}" --out "$dest"
 }
+# a test build writes the beta channel's manifests only: never dev or stable
 manifest "$fd" folders "$out/updates/frostdev.io/$channel/latest.json" "$channel"
 manifest "$gh" flat "$out/updates/github/latest.json" "$channel"
 if [[ $channel == stable ]]; then
   # a release is also the newest build of the dev channel (dev builds of the next version replace it)
   manifest "$fd" folders "$out/updates/frostdev.io/dev/latest.json" dev
+fi
+if [[ $channel != beta ]]; then
+  # ...and of the beta channel: a tester is offered the final build (publish.sh moves the beta channel to it only when
+  # no newer test build is out)
+  manifest "$fd" folders "$out/updates/frostdev.io/beta/latest.json" beta
 fi
 
 # ---------------------------------------------------------------- 9. README, sums
@@ -599,9 +673,9 @@ smart="           Windows SmartScreen may warn that the publisher is unknown: th
 rpm_line=""
 [[ -n $rpm ]] && rpm_line=$'\n'"           or linux/$R (Fedora, openSUSE)"
 fill() { # template out: @KEY@ from the R_KEY variables
-  R_VERSION=$version R_CHANNEL=$channel R_DATE=$date_iso R_SOURCE="$built_from" R_RUNTIME_VERSION=$runtime_version \
+  R_VERSION=$name R_CHANNEL=$channel R_DATE=$date_iso R_SOURCE="$built_from" R_RUNTIME_VERSION=$runtime_version R_TESTBUILD=$testbuild \
   R_SDK_VERSION=$sdk_version R_APPIMAGE=$A R_DEB=$D R_SETUP=$S R_VSIX=$(basename "$vsix") R_RPM_LINE=$rpm_line \
-  R_SMARTSCREEN=$smart R_RULE=$(printf '=%.0s' $(seq 1 $((5 + ${#version})))) python3 - "$1" "$2" <<'PY'
+  R_SMARTSCREEN=$smart R_RULE=$(printf '=%.0s' $(seq 1 $((5 + ${#name})))) python3 - "$1" "$2" <<'PY'
 import os, sys
 t = open(sys.argv[1], encoding="utf-8").read()
 for k, v in os.environ.items():
@@ -610,11 +684,20 @@ for k, v in os.environ.items():
 open(sys.argv[2], "w", encoding="utf-8").write(t)
 PY
 }
+# a test build says so at the top of README.txt
+testbuild=""
+[[ $channel == beta ]] && testbuild="
+This is test build $beta of $version, for the beta channel: for testers, not a release. In the launcher, Settings >
+Updates > Channel switches back to the release (also Beta $beta in the header). A world played with a test build may
+not load the same way on the release; servers and players must run the same build to play together.
+"
 fill "$here/templates/INSTALL-RUNTIME.txt" "$out/runtime/INSTALL-RUNTIME.txt"
 # the Nexus build's README (in its Nexus zips): no self-update; the files' SHA256 in it (the zips carry no SHA256SUMS)
 export R_NEXUS_SUMS
-R_NEXUS_SUMS=$(cd "$out/nexus" && for f in linux/* windows/*; do [[ -f $f ]] && printf '  %s  %s\n' "$(sha256sum <"$f" | cut -d' ' -f1)" "${f#*/}"; done; true)
-fill "$here/templates/README-nexus.txt" "$out/nexus/README.txt"
+if ((nexus_build)); then
+  R_NEXUS_SUMS=$(cd "$out/nexus" && for f in linux/* windows/*; do [[ -f $f ]] && printf '  %s  %s\n' "$(sha256sum <"$f" | cut -d' ' -f1)" "${f#*/}"; done; true)
+  fill "$here/templates/README-nexus.txt" "$out/nexus/README.txt"
+fi
 unset R_NEXUS_SUMS
 fill "$here/templates/README.txt" "$out/README.txt.tmp"
 # the file list: the downloads, not nexus/ (its own README) or sdk/api/ and sdk/feed/ (built, not published by default)
@@ -662,6 +745,8 @@ fi
 api_moved=0
 if ((worktree)); then
   note "API record: a test build of the working tree; the Unshipped.txt lines stay"
+elif [[ $channel == beta ]]; then
+  note "API record: a test build ($name) ships no API; the Unshipped.txt lines stay for the release"
 elif ((!checks)) || printf '%s\n' "${results[@]}" | grep -q '^FAIL'; then
   note "API record: not promoted (the checks failed or did not run); after a good release run tools/release/api-gate.sh promote"
 else
@@ -673,12 +758,30 @@ else
   fi
 fi
 
-# Nexus Mods: what would go up (GET calls only); the upload itself is publish.sh --nexus or nexus.py --publish
-if ((nexus)) && [[ -f $HOME/.config/kiln-release/nexus.env ]]; then
+# Nexus Mods: what would go up (GET calls only); the upload itself is publish.sh --nexus or nexus.py --publish. Never
+# for a test build of the working tree (nothing of it goes up)
+if ((nexus)) && ((!worktree)) && [[ -f $HOME/.config/kiln-release/nexus.env ]]; then
   step "Nexus Mods (dry run)"
   python3 -I "$here/nexus.py" "$out" --work "$work/nexus" | tee -a "$log" || note "the Nexus dry run failed (the release is fine)"
 fi
 
+# the closing text: what to do next, never a publish step for a test build of the working tree
+if ((worktree)); then
+  closing="Test build ${name:-$version} of the working tree is in $out (log: $log). It is never published: github-draft.sh,
+publish.sh and nexus.py --publish refuse it. A release builds a commit: tools/release/release.sh $version (no --worktree)."
+elif [[ ${channel:-} == beta ]]; then
+  closing="Test build $beta of $version (beta channel) is in $out (log: $log). Nothing is published.
+Next (by hand, see docs/kiln/launcher/releasing.md, \"Cutting a beta\"):
+  tools/release/github-draft.sh $out        a DRAFT GitHub pre-release v$name (no SDK files)
+  tools/release/publish.sh $out --host H    frostdev.io downloads/$name and updates/beta, the updates-beta pointer;
+                                            never the dev or stable channel, never Nexus Mods"
+else
+  closing="Release $version is in $out (log: $log). Nothing is published.
+Next (by hand, see docs/kiln/launcher/releasing.md):
+  tools/release/github-draft.sh $out        a DRAFT GitHub release with the files (needs the commit pushed)
+  tools/release/publish.sh $out             publish: the GitHub release, the dev and beta channel pointers, frostdev.io
+  python3 -I tools/release/nexus.py $out    Nexus Mods (dry run; --publish uploads): the nexus/ build, no self-update"
+fi
 step "done"
 du -sh "$out" | tee -a "$log"
 # sdk/api/ and sdk/feed/ (many files each) as one row each in this local build listing only
@@ -686,11 +789,7 @@ du -sh "$out" | tee -a "$log"
   for d in sdk/api sdk/feed; do [[ -d $d ]] && printf '%10s  %s/ (%s files)\n' "$(du -sh "$d" | cut -f1)" "$d" "$(find "$d" -type f | wc -l)"; done; true) | tee -a "$log"
 cat <<EOF | tee -a "$log"
 
-Release $version is in $out (log: $log). Nothing is published.
-Next (by hand, see docs/kiln/launcher/releasing.md):
-  tools/release/github-draft.sh $out        a DRAFT GitHub release with the files (needs the commit pushed)
-  tools/release/publish.sh $out             publish: the GitHub release, the dev channel pointer, frostdev.io
-  python3 -I tools/release/nexus.py $out    Nexus Mods (dry run; --publish uploads): the nexus/ build, no self-update
+$closing
 EOF
 if ((!api_compat)); then
   note "WARNING: the SDK was NOT compared with the last release (KILN_API_BASELINE was not set): see the warning at the start."

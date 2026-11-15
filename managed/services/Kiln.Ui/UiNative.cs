@@ -276,6 +276,24 @@ internal static unsafe class UiNative
         public delegate* unmanaged[Cdecl]<ulong, delegate* unmanaged[Cdecl]<Key*, void*, byte>, void*, uint, ulong*, int> SubscribeKeyEx;
     }
 
+    // Additive tail after v7; the window-position/size helpers remain internal to Kiln.Ui.
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableConstraints
+    {
+        public Table7 Base;
+        public delegate* unmanaged[Cdecl]<float, float, float, float, void> SetNextWindowSizeConstraints;
+    }
+
+    public static delegate* unmanaged[Cdecl]<float, float, float, float, void> WindowConstraintsSlot
+    {
+        get
+        {
+            var t = T;
+            if (t == null || t->Header.Size < (uint)(sizeof(Table7) + sizeof(void*))) return null;
+            return ((TableConstraints*)t)->SetNextWindowSizeConstraints;
+        }
+    }
+
     /// <summary>KILN_UI_KEYS_MOUSE (kiln_ui.h v7).</summary>
     public const uint KeysMouse = 1;
 
@@ -422,6 +440,18 @@ internal static unsafe class UiNative
         Status s = default;
         s.Size = (uint)sizeof(Status);
         return T->Status(&s) == Ok ? s : null;
+    }
+
+    // status.error is also the native service's degraded-state surface. An absent
+    // device during ordinary startup must never be mistaken for drawing switched off.
+    internal static string? DrawingOffReason
+    {
+        get
+        {
+            if (ReadStatus() is not { } status) return null;
+            var text = ErrorText(status);
+            return text.StartsWith("the overlay's drawing is off:", StringComparison.Ordinal) ? text : null;
+        }
     }
 
     public static string KeyName(uint vk)

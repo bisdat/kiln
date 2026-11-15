@@ -65,6 +65,7 @@ public sealed class DataClientsTests
     // (section, one block, what it asks: null = nothing more than "none")
     public static TheoryData<string, string, string?> Kinds() => new()
     {
+        { "buildingMaterialPools", """{ "name": "Walls", "materials": [{"gameMaterial":"WoodRough"}] }""", "mod" },
         // kiln: a definition Kiln clients get from the server
         { "statuses", """{ "name": "Burn", "seconds": 4 }""", "kiln" },
         { "spells", """{ "name": "Bolt", "cast": { "manaCost": 5 }, "delivery": { "type": "projectile" } }""", "kiln" },

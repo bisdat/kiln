@@ -228,6 +228,11 @@
 .k-well > .k-label { flex: none; font-size: 15px; }
 .k-well input { flex: 1; min-width: 0; width: 100%; border: 0; background: none; outline: 0; color: var(--k-text-0); font-family: var(--k-font-mono); font-stretch: 90%; font-size: 15px; }
 .k-well-note { flex: none; font-size: 15px; color: var(--k-text-2); }
+/* a filter box's clear button (WellInput onClear): the toast's round ghost X, at the well's end */
+.k-well-clear { flex: none; display: grid; place-items: center; width: 24px; height: 24px; margin-right: -4px; padding: 0; border: 0;
+  border-radius: 50%; background: none; color: var(--k-text-2); cursor: pointer; transition: color .15s, background .15s; }
+.k-well-clear:hover { color: var(--k-text-0); background: var(--k-warm-2); }
+.k-well-clear svg { width: 15px; height: 15px; }
 .k-slider-row { display: flex; gap: 12px; align-items: center; }
 .k-slider-row .k-input { width: 92px; flex: none; }
 .k-range { flex: 1; appearance: none; height: 4px; border-radius: 2px; min-width: 80px; background-color: var(--k-bg-3);

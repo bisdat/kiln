@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "comment": "content-stop-test: native content that builds; its summary line in kiln.log says it was served",
+  "knowledge": {
+    "cs_met": { "scope": "world" },
+    "cs_count": { "scope": "player", "type": "counter" }
+  },
+  "npcs": {
+    "cs_keeper": {
+      "template": "Townsfolk_Male_villager_01_GuntherGaleforth",
+      "clone": { "guid": "f6305d96-2105-4ab4-a294-538e3e752645", "name": "Kiln_ContentStop_Keeper" },
+      "names": { "en": "Keeper (content-stop lab)" }
+    }
+  },
+  "quests": {
+    "cs_quest": {
+      "name": "Content-stop lab quest",
+      "scope": "world",
+      "journal": "native",
+      "steps": [ { "id": "only", "text": "Wait", "objective": { "custom": "cs_signal" } } ]
+    }
+  }
+}

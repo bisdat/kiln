@@ -95,3 +95,10 @@ test("Undo right after the action keeps nothing", () => {
   expect(revertBulk(after, plan.change, new Set())).toBe(0);
   expect(after.mods).toEqual(p.mods);
 });
+
+test("All on does not select a kept version when it is the only version left", () => {
+  const e = lib("greeneye", "map");
+  e.versions[0].kept = { kept: "2026-11-14T00:00:00Z", settings: [], settingsSize: 0 };
+  const rows = buildRows(inputs({ library: [e], profile: profile({}) }));
+  expect(bulkPlan(rows, true).change).toEqual([]);
+});

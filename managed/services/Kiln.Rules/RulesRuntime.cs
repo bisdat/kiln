@@ -111,15 +111,6 @@ internal static unsafe class RulesRuntime
         RulesPresets.WriteDefaults();
         RulesNet.Start();
         ServiceTick.Add("kiln rules", Tick);
-        Events.On<BuildEvent>(OnBuild, EventPriority.Monitor);
-        try
-        {
-            Gameplay.Enable();  // BuildEvent comes from kiln.gameplay's listener (KeepBuildsOutsideBases)
-        }
-        catch (Exception e) when (e is FileNotFoundException or TypeLoadException)
-        {
-            Log(LogLevel.Warn, $"Kiln.Gameplay unavailable: builds outside bases are not kept ({e.Message})");
-        }
         Events.On<ServerStoppingEvent>(_ => WorldClosing(), EventPriority.Lowest);
         Events.On<NetPeerReadyEvent>(e =>
         {
@@ -127,6 +118,29 @@ internal static unsafe class RulesRuntime
                 if (PlayersByEntity.TryGetValue(e.Peer.Player, out var s)) s.ClientSent = false;
         });
         Log(LogLevel.Info, $"Kiln.Rules up: {Describe(Rules.Status())}");
+    }
+
+    // BuildEvent makes kiln.gameplay install the game's five build hooks (on first use since 0.2.0-dev.29), and only a
+    // rule set that keeps builds outside bases needs it: asked once, when such rules first take effect, never at start.
+    // Where building events are not produced here, those builds are not kept and every other rule still applies.
+    private static bool _buildEventsAsked;
+
+    private static void WantBuildEvents()
+    {
+        if (_buildEventsAsked) return;
+        _buildEventsAsked = true;
+        AsKiln(() =>
+        {
+            try
+            {
+                Gameplay.Enable();  // BuildEvent comes from kiln.gameplay's listener
+                Events.On<BuildEvent>(OnBuild, EventPriority.Monitor);
+            }
+            catch (Exception e) when (e is KilnUnavailableException or FileNotFoundException or TypeLoadException)
+            {
+                Log(LogLevel.Warn, $"builds outside bases are not kept: {e.Message}");
+            }
+        });
     }
 
     private static string Describe(RulesStatus? s) => s is null
@@ -389,6 +403,7 @@ internal static unsafe class RulesRuntime
             }
             var before = s.Effective;
             s.Effective = eff;
+            if (eff.KeepBuildsOutsideBases) WantBuildEvents();
             Apply(s, before);
             if (s.Clip is not null) ended.Add(s);
             if (Events.HasSubscribers<PlayerRulesChangedEvent>()) Events.Post(new PlayerRulesChangedEvent(before, eff));

@@ -20,7 +20,11 @@
 //
 // Rows of the tick hook: the hook can fault at run time (tick::installed() / tick::lifecycle() turn false) and tick.cpp
 // does not say so. Registry calls, KilnApi.feature() answering false, and the writer (at least once a second while
-// hooks are on) compare the bits with what the rows were built from and rebuild the tick rows when they moved.
+// hooks are on) compare the bits with what the rows were built from and rebuild the tick rows when they moved. The
+// rows world.stop_drain.server / .client / .prediction (since 0.2.0-dev.29) are derived from the same bits and
+// tick.wait_jobs: what the core guarantees about a world kind's jobs when it dispatches that world's STOPPING
+// (tick_drain.h). Available: drained by the engine; unavailable with the reason: a bounded wait only, no stop at all, or
+// no such world in this process.
 //
 // The client gate (gates.h): for every capability held until its game test the core's own report is "unavailable,
 // policy, game test pending: <check ids>", whatever the name is otherwise (a sigdb feature, a service's row, a managed
@@ -385,6 +389,41 @@ void set_feature_locked(const std::string& f, std::vector<Event>& ev) {
     set_core_locked(f, kFeature, v.state, v.reason, v.text, "sigdb", 0, ev);
 }
 
+// world.stop_drain.<kind>: the core's guarantee about a world kind's jobs at its STOPPING (tick::stop_drain).
+constexpr const char* kDrainRow[KILN_WORLD_KINDS] = {"world.stop_drain.server", "world.stop_drain.prediction",
+                                                     "world.stop_drain.client"};
+Verdict drain_verdict(uint32_t kind) {
+    if (!g_hooks) return {KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY, g_safe_idle};
+    switch (tick::stop_drain(kind)) {
+        case tick::StopDrain::Engine:
+            return {KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE,
+                    kind == KILN_WORLD_PREDICTION
+                        ? "drained by the engine: it stops with the client world, after WaitWorldJobs on the client world; "
+                          "its own slices run inline on the destroying thread"
+                        : "drained by the engine: WaitWorldJobs on the world before STOPPING (no job of it runs then)"};
+        case tick::StopDrain::Bounded:
+            return {KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING,
+                    "bounded wait only: tick.wait_jobs did not resolve, so STOPPING comes without the engine's wait; a "
+                    "subscriber's own bounded wait is all there is"};
+        case tick::StopDrain::NoWorld:
+            return {KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_WRONG_SIDE, "a client or prediction world runs only in the game client"};
+        case tick::StopDrain::None:
+        default:
+            return {KILN_CAP_UNAVAILABLE,
+                    static_cast<uint32_t>(sigdb::feature("tick") && sigdb::feature("world.lifecycle")
+                                              ? KILN_CAP_REASON_FAULTED
+                                              : KILN_CAP_REASON_SYMBOL_MISSING),
+                    "no world stop is seen: the tick hook or the world-destroy hook (world.lifecycle) is not installed, or "
+                    "faulted; kiln.log says why"};
+    }
+}
+void set_drain_rows_locked(std::vector<Event>& ev) {
+    for (uint32_t k = 0; k < KILN_WORLD_KINDS; ++k) {
+        const Verdict v = drain_verdict(k);
+        set_core_locked(kDrainRow[k], kFeature, v.state, v.reason, v.text, "core", 0, ev);
+    }
+}
+
 // The tick hook faulted (or came back) since the rows were built: its rows follow.
 void refresh_tick() {
     if (!g_rows_built.load(std::memory_order_acquire) || !g_hooks) return;
@@ -394,6 +433,7 @@ void refresh_tick() {
         g_tick_seen.store(bits, std::memory_order_release);
         for (const std::string& f : g_feature_names)
             if (is_tick_feature(f)) set_feature_locked(f, ev);
+        set_drain_rows_locked(ev);
         return 0;
     });
 }
@@ -522,7 +562,8 @@ KilnResult KILN_CALL c_report(KilnOwner owner, KilnStr name, uint32_t state, uin
             if (it != g_names.end()) {
                 // a name the core reports itself is static; the client gate's report does not make it so
                 const Report* core = core_report(it->second);
-                if (state == KILN_CAP_PENDING && core && core->kind != kGate) return KILN_ERR_INVALID_ARGUMENT;
+                if (state == KILN_CAP_PENDING && core && core->kind != kGate &&
+                    n != "events.death" && n != "events.pickup") return KILN_ERR_INVALID_ARGUMENT;
                 for (Report& r : it->second.reports)
                     if (r.owner == owner) mine = &r;
             }
@@ -785,6 +826,7 @@ void core_rows(bool hooks, bool verified, const std::string& safe_idle) {
         }
         g_tick_seen.store(tick_bits(), std::memory_order_release);
         for (const std::string& f : g_feature_names) set_feature_locked(f, ev);
+        set_drain_rows_locked(ev);
         for (const Svc& s : services) {
             if (!name_ok(s.name)) continue;
             const std::string v = "v" + std::to_string(s.version);

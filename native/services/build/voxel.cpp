@@ -8,11 +8,13 @@
 //    cuts the box into 8x8x8 blocks and commits each through the store commit (build/StoreCommit): the same sink the
 //    game's building and terraforming kernels use, which tracks changes per peer (replication) and for the save.
 // Everything here runs on the tick thread (no world job runs in Pre/Post).
+#ifndef KILN_VOXEL_HOST_TEST
 #include <windows.h>
 
 #include <algorithm>
 
 #include "internal.h"
+#endif
 
 namespace kb {
 namespace {
@@ -20,6 +22,7 @@ namespace {
 VoxelWorld g_vox;
 uintptr_t g_failed_world = 0;  // a world whose voxel interface did not check out (logged once)
 
+#ifndef KILN_VOXEL_HOST_TEST
 double now_ms() {
     LARGE_INTEGER f, c;
     QueryPerformanceFrequency(&f);
@@ -91,8 +94,10 @@ bool resolve(uintptr_t w, VoxelWorld* v) {
     return true;
 }
 
+#endif
 }  // namespace
 
+#ifndef KILN_VOXEL_HOST_TEST
 bool box_ok(const int32_t origin[3], const uint32_t dims[3], uint64_t* count) {
     if (!origin || !dims) return false;
     uint64_t n = 1;
@@ -105,6 +110,12 @@ bool box_ok(const int32_t origin[3], const uint32_t dims[3], uint64_t* count) {
     }
     if (count) *count = n;
     return true;
+}
+
+#endif
+void vox_world_closed() {
+    g_vox = VoxelWorld{};
+    g_failed_world = 0;
 }
 
 const VoxelWorld* vox() {
@@ -132,6 +143,7 @@ const VoxelWorld* vox() {
     return &g_vox;
 }
 
+#ifndef KILN_VOXEL_HOST_TEST
 KilnResult vox_grid(KilnBuildGrid* out) {
     if (!out || out->size < sizeof(KilnBuildGrid)) return KILN_ERR_INVALID_ARGUMENT;
     if (!tick_thread()) return KILN_ERR_WRONG_THREAD;
@@ -244,7 +256,7 @@ KilnResult vox_write(const KilnBuildWrite* w, KilnBuildResult* result, uint32_t 
     const bool transient = (w->flags & KILN_BUILD_F_TRANSIENT) != 0;
     if (transient && (w->flags & KILN_BUILD_F_UNLOADED)) return done(KILN_ERR_INVALID_ARGUMENT);
     if (!tick_thread()) return done(KILN_ERR_WRONG_THREAD);
-    if (!F.write) return done(KILN_ERR_UNAVAILABLE);
+    if (!F.write || !regions_lifecycle_safe() || (!transient && !F.persist)) return done(KILN_ERR_UNAVAILABLE);
     const VoxelWorld* v = vox();
     if (!v || !world_running()) return done(KILN_ERR_UNAVAILABLE);
 
@@ -400,4 +412,5 @@ bool vox_commit_block(const VoxelWorld& v, const int32_t borg[3], KilnVoxel* cel
     return false;
 }
 
+#endif
 }  // namespace kb

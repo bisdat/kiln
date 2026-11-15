@@ -82,6 +82,7 @@ first). `mods/samples/build.sh` builds the loader samples (`SampleLib`, `SampleC
 | `SampleFaulty` | the fault policy: throws every 25 steps while `kiln/data/sample-faulty/fault` exists; a `missing-member` file makes it fail at load like a mod built for a newer Kiln |
 | `resolver/*` | manifest-only fixtures: missing dependency, cycle, a dependent of a cycle, version mismatch, incompatible, client-only, feature, API, bad manifest |
 | `HookSample` | `advanced` mods (kiln.hooks): a detour that counts calls of the game's `GetComponent`, a mid hook reading a register, a reversible byte patch, a mod-shipped symbol fragment |
+| `TypedHookVolume` | typed hooks (`Kiln.Sigs`, since 0.2.0-dev.29): a hook of the game's `GetItemVolume` that lets the game answer and doubles the volume it gave (a watering can takes twice the water); built, not run in a game (guided check `06b-typed-hooks.client`) |
 | `EngineRoom` | The advanced tier's managed side in one admin command: `/engine systems` and `/engine profile` list and measure the game's systems (`GameSystems`), `/engine watch <system>` counts one system's runs through `GameSystems.Hook` (callbacks on the game's worker threads), `/engine stack <item> <count>` changes one field of an item's resource as a claim (`ReflectedResources.FindByField`, `Set`), `/engine claims` and `/engine undo` show and give back claims (`Overrides.Active`, `Claim`, `RestoreAll`); what to do when a game update renames something |
 | `WorldPrograms` | an ECS program declared in `kiln.programs.json` and bound with `EcsPrograms.Bind`, emitting and reading a game event |
 | `LightsOut` | tracked world writes: `/lights off` puts out every lantern, torch and candle with `World.Update<Ecs.ServerToggleState>`, and a restart keeps them out; the build fills `"writes"` |
@@ -107,6 +108,7 @@ first). `mods/samples/build.sh` builds the loader samples (`SampleLib`, `SampleC
 | `CreatureAi` | npc-ai: who fights whom (Vukahs and Scavengers feud, a warden that hunts Scavengers, a ranger that fights for players) and rules beyond the game's kinds |
 | `FireNova` | kiln.abilities: a key ability (G or `/nova`) with mana and cooldown, a ring of the game's Fireball explosions; Fireball damage doubled at night |
 | `ImpactSample` | Impact programs: a heal-over-time buff written from scratch, a Fireball that chains to a second enemy, a managed Kiln native |
+| `FrostMark` | a same-step native from a plain static method (`[ImpactNative]`, since 0.2.0-dev.29): a sword with an additional hit effect (Ice 10, besides the weapon's own strike) that runs `Frost.OnHit` first (`EffectBlock.Run`), which reads the target's Health and makes that additional hit 1.5 times as hard below a quarter of it; an attachment that counts the Fireball explosion's `applyDamage` calls (`/frostmark`); guided check `06c-impact-damage` |
 | `SkillTreeSample` | kiln.skills: two nodes in the game's own skill tree and a Kiln talent tree, "Ember Arts", from `skills/sample.json` |
 | `NpcSample` | a friendly NPC (Tobin, a fisher clone with its own name, dialogue and roster entry), a voiced quest in the game's journal, a trade; a creature whose brain walks a route from `Queries.FindPath` (`PathWalker.cs`) |
 | `quests-sample` | a quest chain in the game's own UI from one file, `quests/sample.json`: the Warden, his topics and voice, journal, HUD and map markers; one more quest in C# |
@@ -140,9 +142,11 @@ first). `mods/samples/build.sh` builds the loader samples (`SampleLib`, `SampleC
 | `BlobCatalog` | `Assets.OpenBlobCatalog`: `/blobs` counts the content blobs the game serves by where they come from, lists the ones mods registered, and writes the first entries as JSON |
 | `TransformScale` | `World.SetTransformScale`: `/tscale <entity> <x> <y> <z>` draws an entity larger or smaller on each axis (the drawn size only, not collision) |
 
-Templates: `kiln new --list` shows all 31 with their options. Block templates: `kiln-spell`, `kiln-item-blocks`,
+Templates: `kiln new --list` shows all 34 with their options. Block templates: `kiln-spell`, `kiln-item-blocks`,
 `kiln-ability-blocks`, `kiln-creature-blocks`, `kiln-world-blocks`, `kiln-npc`, `kiln-quest`, `kiln-body`, `kiln-vfx`,
 `kiln-cosmetic`, `kiln-building-material` and `kiln-screen-effect`. Code templates for one topic each: `kiln-events`,
-`kiln-saved-data`, `kiln-rules`, `kiln-network`, and for the advanced tier `kiln-hooks`, `kiln-shader` and `kiln-world-program`. The others: `kiln-mod`, `kiln-test`, `kiln-unit-test`,
+`kiln-saved-data`, `kiln-rules`, `kiln-network`, `kiln-system-wrap` (a typed wrap of one of the game's own programs), and for
+the advanced tier `kiln-hooks`, `kiln-shader`, `kiln-world-program` and `kiln-client-program` (a program in this player's
+client world, since 0.2.0-dev.29). The others: `kiln-mod`, `kiln-test`, `kiln-unit-test`,
 `kiln-datapack`, `kiln-items`, `kiln-ability`, `kiln-creature`, `kiln-talents`, `kiln-ui`, `kiln-model`, `kiln-sound`,
 `kiln-native` and `kiln-service` (a service inside the Kiln repository). See [mdk.md](mdk.md).

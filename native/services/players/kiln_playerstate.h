@@ -226,6 +226,18 @@ typedef struct KilnPlayerStateApi {
      * no camera yet (the camera still at the world's origin, or a zero orientation). KILN_ERR_UNAVAILABLE: the camera
      * field did not resolve (status aim 0). */
     KilnResult(KILN_CALL* aim)(KilnEntity entity, KilnPlayerAim* out);
+
+    /* ---- since 0.2.0-dev.29: check header.size ----
+     * A selective hold (kiln.decisions' typed equipment verdict): `owner`'s lease on the listed players x the listed
+     * action indices (client_action_info indices; action_count 0: every action of those players). Renewed every Pre
+     * like client_action_hold, and ended by itself after the same 8 steps without a call; entity_count 0 ends it now.
+     * One lease per owner (a call replaces the owner's last one); the legacy client_action_hold stays its own wildcard
+     * lease beside them. An action is held when any lease covers (player, action), once per (player, action, version),
+     * and listed by client_action_held as before: an equipment listener no longer delays unrelated client actions by
+     * a step. At most 1024 players and 64 indices per lease, 32 owners. Server world, Pre. KILN_ERR_UNAVAILABLE: the
+     * hold point did not resolve on this build (status client_hold 0). */
+    KilnResult(KILN_CALL* client_action_interest)(KilnOwner owner, const KilnEntity* entities, uint32_t entity_count,
+                                                  const uint32_t* action_indices, uint32_t action_count);
 } KilnPlayerStateApi;
 
 #ifdef __cplusplus

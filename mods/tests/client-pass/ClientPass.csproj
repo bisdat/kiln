@@ -35,7 +35,17 @@
     <ProjectReference Include="../../../managed/services/Kiln.Build/Kiln.Build.csproj" Private="false" ExcludeAssets="runtime" />
     <ProjectReference Include="../../../managed/services/Kiln.Creatures/Kiln.Creatures.csproj" Private="false" ExcludeAssets="runtime" />
     <ProjectReference Include="../../../managed/services/Kiln.Combat/Kiln.Combat.csproj" Private="false" ExcludeAssets="runtime" />
+    <!-- 07-cancelable-events: ItemPickingUpEvent, Gameplay.Protect (Dev28Events.cs) -->
+    <ProjectReference Include="../../../managed/services/Kiln.Gameplay/Kiln.Gameplay.csproj" Private="false" ExcludeAssets="runtime" />
+    <ProjectReference Include="../../../managed/services/Kiln.Systems/Kiln.Systems.csproj" Private="false" ExcludeAssets="runtime" />
+    <!-- 17-roster-client: the roster's snapshots and budget (NativeQuests), the fixture's knowledge (Dev2817cRoster.cs) -->
+    <ProjectReference Include="../../../managed/services/Kiln.Quests/Kiln.Quests.csproj" Private="false" ExcludeAssets="runtime" />
+    <!-- 06a-wraps.waterworks: the typed program view Ecs.Programs.FuelSetup and Ecs.Get -->
+    <ProjectReference Include="../../../managed/Kiln.Game/Kiln.Game.csproj" Private="false" ExcludeAssets="runtime" />
     <None Include="kiln.mod.json" CopyToOutputDirectory="PreserveNewest" />
+    <Compile Include="../material-pools-test/PoolProof.cs" Link="MaterialPools/PoolProof.cs" />
+    <!-- 06a-define.hosted's boot reservation (ClientPassFuelQuery, Dev28ProgramWraps.cs) -->
+    <None Include="kiln.programs.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="rows.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

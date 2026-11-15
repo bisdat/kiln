@@ -400,9 +400,28 @@ runner path. Dead RunSlice recorded zero calls in dedicated and hosted probes. I
 ProgramRunner and `entry+0x28` (e.g. 41 `init_spawn_time` slices in the dedicated census). [static] [lab] [seen]
 
 `R=*(Storage+0)=world+0x928`; table `R+0x745a28=world+0x746350`, u16 count `R+0xe16628=world+0xe16f50`.
-Entry `+0x28` is fetched anew per slice. Slice is 0x38 B: entry pointer `+0x10`, archetype group `+0x20`, first/end
-rows u32 `+0x28/+0x2c`. Job J: Storage `+0`, command buffer `+8`, entity list `+0x830` (16 B/entry), count `+0x838`.
+Entry `+0x28` is fetched anew per slice. Slice is 0x38 B: entry pointer `+0x10`, archetype layout `+0x18` (the archetype
+object, bitset at +0, the same object as an entity record's `world/entity.layout`; ProgramRunner passes it to the column
+setup S `0x629570` / C `0x98d6e0`), archetype group `+0x20`, first/end rows u32 `+0x28/+0x2c` (end - first = the job's
+count). ProgramRunner's rdx is this record, and the update call reads `[[rdi+0x10]+0x28]` from it (S `0x64b169`), so the
+update runs inside the runner call of its own record: kiln.world's `world.slice_record` (sigdb
+`@world/ProgramRunner.slice` / `.layout`, dev.29) keeps rdx for WhenArchetype with a typed link around the runner: the
+record is set for exactly the one continuation call (the single update call at F+0x571, the return at F+0x5b6) and the
+outer value is restored when it returns, is skipped by a later hook or unwinds (Windows `__finally`), so it never
+outlives the runner call it came from; a trampoline takes it once. [static] Job J: Storage `+0`, command buffer `+8`, entity list `+0x830` (16 B/entry), count `+0x838`.
 Task: Storage `+0`, slices `+8`, slice index u32 `+0x10`, worker value u32 `+0x14`. [static] [lab]
+
+### World stop and the world's jobs [static]
+
+Each world has its own TaskQueue at `world+0xe17960` (`world.jobs`), made in WorldCreate's constructor (C `0x983a5b`).
+StepPrograms waits for the whole queue before its only return whenever it ran slices as tasks (`WaitTaskGroup` at
+S `0x64a516` / C `0x9ae686`); RunInitPrograms and the serial path run ProgramRunner inline. So no program slice of a world
+outlives the StepPrograms call that ran it, on every kind. WorldDestroy does not wait: after its teardown has begun it
+hands the queue to the release (S `0x5d6510` / C `0x8eb7d0`), which only checks idleness and logs `[task] TaskQueue '%s'
+is not idle during destroy!`. A world is destroyed on the thread that steps it (GameServer thread; main thread for the
+client world). WaitWorldJobs (`mov rcx,[world+0xe17960]; jmp WaitTaskGroup`) is called by the game only at the end of the
+GameServer update; the core calls it on the server and (since 0.2.0-dev.29) the client world before their STOPPING
+(capability rows `world.stop_drain.*`). Listings: out/06a-program-wraps/client-static/r8.
 
 ### Parallel selection and affinity [static] [lab] [seen]
 

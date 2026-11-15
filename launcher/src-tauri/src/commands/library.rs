@@ -118,6 +118,25 @@ pub async fn library_take_over(app: AppHandle, entry: LibraryRef) -> Result<Take
     Ok(done)
 }
 
+/// "Roll back to <version>" (kiln_manage::kept::rollback): in the profile `profile_id` (the game's active one), the mod
+/// `kind`/`id` uses its kept version `to` (null: the newest kept one) instead of its current entry. An ordinary profile
+/// change: like profile_save, the game's profile.json is written again where the profile is active and the game is not
+/// running (that placement puts the kept settings back into the mod's game-folder copy), and its Undo is profile_revert
+/// with the result's `changes`. The version rolled away from becomes the kept one.
+#[tauri::command]
+pub async fn library_rollback(app: AppHandle, game_id: Option<String>, profile_id: String, kind: ModKind, id: String,
+                              to: Option<kiln_manage::kept::VersionRef>) -> Result<kiln_manage::kept::RollbackReport, Error> {
+    let (r, applied) = blocking(move || {
+        let d = dirs()?;
+        let g = game_id.as_deref().and_then(|g| crate::state::game(g).ok());
+        let r = kiln_manage::kept::rollback(&d, g.as_ref(), &profile_id, kind, &id, to.as_ref())?;
+        let applied = super::profile::reapply_where_active(&d, &r.profile_id);
+        Ok((r, applied))
+    }).await?;
+    super::profile::announce_applied(&app, applied);
+    Ok(r)
+}
+
 /// "Clean up": removes the versions with one look at the running processes and what lists them. Refuses (game_running)
 /// the whole batch while a game runs, or a server may read one of them; otherwise reports each version not removed.
 #[tauri::command]
@@ -155,4 +174,16 @@ pub async fn library_lint(entry: Option<LibraryRef>, profile_id: Option<String>)
         }
     })
     .await
+}
+
+/// Local native DLL replacement: ordinary profile retention, then the update placement path.
+#[tauri::command]
+pub async fn library_replace_dll(app: AppHandle, profile_id: String, entry: LibraryRef, path: String, confirmed: bool) -> Result<library::ReplacedDll, Error> {
+    let (r, applied) = blocking(move || {
+        let d = dirs()?;
+        let r = library::replace_dll(&d, &profile_id, &entry, std::path::Path::new(&path), confirmed)?;
+        Ok((r, super::profile::reapply_where_active(&d, &profile_id)))
+    }).await?;
+    super::profile::announce_applied(&app, applied);
+    Ok(r)
 }

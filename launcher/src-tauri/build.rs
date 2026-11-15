@@ -5,6 +5,51 @@ use std::path::Path;
 #[path = "../../crates/kiln-manage/src/nexus/oauth/registration.rs"]
 mod oauth_registration;
 
+/// The channel and beta number a build is made for (docs/kiln/launcher/releasing.md, "Test builds"):
+/// `KILN_LAUNCHER_CHANNEL` (empty or unset: the channel follows the version; `stable`, `dev` or `beta`) and, for `beta`
+/// only, `KILN_LAUNCHER_BETA` (the beta number, 1 or more). Baked into the binary as `KILN_LAUNCHER_BUILD_CHANNEL` and
+/// `KILN_LAUNCHER_BUILD_BETA` (selfupdate/feed.rs reads them with `env!`). Anything else stops the build.
+fn bake_channel() {
+    for name in ["KILN_LAUNCHER_CHANNEL", "KILN_LAUNCHER_BETA"] {
+        println!("cargo:rerun-if-env-changed={name}");
+    }
+    let channel = std::env::var("KILN_LAUNCHER_CHANNEL").unwrap_or_default();
+    let beta = std::env::var("KILN_LAUNCHER_BETA").unwrap_or_default();
+    let channel = channel.trim();
+    let beta = beta.trim();
+    if !matches!(channel, "" | "stable" | "dev" | "beta") {
+        panic!("KILN_LAUNCHER_CHANNEL must be empty, stable, dev or beta, not {channel:?}");
+    }
+    match (channel, beta) {
+        ("beta", b) if !b.is_empty() && !b.starts_with('0') && b.len() <= 9 && b.bytes().all(|c| c.is_ascii_digit()) => {}
+        ("beta", b) => panic!("KILN_LAUNCHER_CHANNEL=beta needs KILN_LAUNCHER_BETA, the beta number (1, 2, ...), not {b:?}"),
+        (_, "") => {}
+        (c, b) => panic!("KILN_LAUNCHER_BETA={b} is only for KILN_LAUNCHER_CHANNEL=beta (it is {c:?})"),
+    }
+    println!("cargo:rerun-if-env-changed=KILN_LAUNCHER_BASE_RELEASE");
+    let base = std::env::var("KILN_LAUNCHER_BASE_RELEASE").unwrap_or_default();
+    if !base.is_empty() {
+        let floor = semver::Version::parse(&base).expect("KILN_LAUNCHER_BASE_RELEASE must be a version");
+        // The version this build is made as: a release build passes it to Tauri as a config override
+        // (tools/launcher/build-linux.sh --version V, TAURI_CONFIG {"version": V}); the crate's own version is the
+        // tree's placeholder (0.2.0-dev), which sorts below every release.
+        println!("cargo:rerun-if-env-changed=TAURI_CONFIG");
+        let current = std::env::var("TAURI_CONFIG")
+            .ok()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .and_then(|c| c.get("version").and_then(|v| v.as_str()).map(str::to_owned))
+            .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_owned());
+        let current = semver::Version::parse(&current).unwrap_or_else(|e| panic!("this build's version {current:?} is not a version: {e}"));
+        assert!(
+            floor.build.is_empty() && !floor.pre.as_str().contains("beta") && floor.cmp_precedence(&current).is_lt(),
+            "KILN_LAUNCHER_BASE_RELEASE={base} must be a release that precedes this test build's version {current}"
+        );
+    }
+    println!("cargo:rustc-env=KILN_LAUNCHER_BUILD_BASE_RELEASE={base}");
+    println!("cargo:rustc-env=KILN_LAUNCHER_BUILD_CHANNEL={channel}");
+    println!("cargo:rustc-env=KILN_LAUNCHER_BUILD_BETA={beta}");
+}
+
 fn main() {
     for name in ["KILN_NEXUS_ENABLED", "KILN_RELEASE_BUILD", "KILN_NEXUS_OAUTH_CLIENT_ID", "KILN_NEXUS_OAUTH_REDIRECT_URI"] {
         println!("cargo:rerun-if-env-changed={name}");
@@ -30,6 +75,7 @@ fn main() {
     } else if config.get("plugins").and_then(|p| p.get("updater")).is_some_and(|v| v.is_null()) {
         panic!("The Nexus Tauri config requires --no-default-features and no self-update feature");
     }
+    bake_channel();
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     // KILN_GIT names the commit when there is no .git (a release builds from a `git archive` export)
     let commit = std::env::var("KILN_GIT").ok().filter(|c| !c.trim().is_empty()).unwrap_or_else(|| {

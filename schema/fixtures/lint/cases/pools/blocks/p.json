@@ -1,0 +1,16 @@
+{
+  "format": 1,
+  "buildingMaterials": {"ice": {"name": "Ice"}, "slate": {"name": "Slate Roof", "roof": true}},
+  "buildingMaterialPools": {
+    "walls": {"name": "Walls", "materials": [{"material": "ice"}, {"material": "frost:snow"}, {"material": "other:mud"}, {"material": "nothere"}, {"material": "slate"}, {"gameMaterial": "TerrainStone"}, {"gameMaterial": "RoofStraw"}, {"material": "ice"}, {"gameMaterial": "WoodRough"}]},
+    "roofs": {"name": "Roofs", "roof": true, "materials": [{"material": "slate"}, {"gameMaterial": "RoofStraw"}]},
+    "empty": {"name": "Empty", "materials": []}
+  },
+  "blueprints": {
+    "wall": {"name": "Wall", "cells": [["##"]], "materialPool": "walls"},
+    "roof-on-walls": {"name": "Roof", "roof": true, "cells": [["##"]], "materialPool": "walls"},
+    "nopool": {"name": "Nopool", "cells": [["##"]], "materialPool": "missing"},
+    "foreign": {"name": "Foreign", "cells": [["##"]], "materialPool": "other:walls"},
+    "dependency": {"name": "Dependency", "cells": [["##"]], "materialPool": "frost:walls"}
+  }
+}

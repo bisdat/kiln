@@ -64,7 +64,7 @@ export function LogsFor({ target, folder, embedded, tabs: wanted = ["kiln", "gam
                 <button type="button" className={paused ? "" : "on"} aria-pressed={!paused} onClick={() => setPaused(false)}>Follow</button>
                 <button type="button" className={paused ? "on" : ""} aria-pressed={paused} onClick={() => setPaused(true)}>Pause</button>
               </div>
-              <WellInput label="Filter" compact value={filter} onChange={(e) => setFilter(e.target.value)} wellStyle={{ flex: "1 1 140px", marginLeft: "auto" }} />
+              <WellInput label="Filter" compact value={filter} onChange={(e) => setFilter(e.target.value)} onClear={() => setFilter("")} wellStyle={{ flex: "1 1 140px", marginLeft: "auto" }} />
             </div>
             {file ? <FollowedLog key={file.name} target={target} file={file.name} filter={filter} paused={paused} /> : <EmptyState title="Not written yet. It appears after the next start." />}
           </>

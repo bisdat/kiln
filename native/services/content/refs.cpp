@@ -159,7 +159,43 @@ bool asset_served(const std::string& ref_type, const uint8_t g[16]) {
 // A building material a mod made: its GUID is in kiln.worldtables' merged tables, and has no resource of its own.
 bool world_material(const uint8_t g[16]) {
     const auto* t = static_cast<const KilnWorldTablesApi*>(g_api->service(KilnStr{KILN_WORLDTABLES_SERVICE, std::strlen(KILN_WORLDTABLES_SERVICE)}, KILN_WORLDTABLES_VERSION));
-    return t && t->header.size >= sizeof(KilnWorldTablesApi) && t->material_id(g) >= 0;
+    return t && t->header.size >= offsetof(KilnWorldTablesApi,material_id)+sizeof(t->material_id) && t->material_id && t->material_id(g)>=0;
+}
+
+thread_local const uint8_t* t_kitbash_item = nullptr;  // the item being kitbashed: its GUID (newcontent.cpp)
+
+// A mod's material pool GUID (a row worldtables appended at boot) on an item's equipment.voxelBlueprintMaterialPool is
+// admitted only for the item worldtables bound to it: a mod's shape on its own or a declared dependency's pool, roof
+// agreeing (bind_shape_pools), and that binding is in the handshake hash. Never a vanilla shape, another mod's item, or an
+// edit outside a definition's kitbash. A refused or deferred pool is not a custom pool at all.
+enum class PoolUse { NotCustom, Bound, Unbound, Unknown };
+PoolUse pool_use(const uint8_t pool[16], const uint8_t* item) {
+    const auto* t=static_cast<const KilnWorldTablesApi*>(g_api->service(KilnStr{KILN_WORLDTABLES_SERVICE,std::strlen(KILN_WORLDTABLES_SERVICE)},KILN_WORLDTABLES_VERSION));
+    if(!t || t->header.size<offsetof(KilnWorldTablesApi,status_json)+sizeof(t->status_json) || !t->status_json)return PoolUse::Unknown;
+    std::vector<char> buffer(4096);
+    for(int attempt=0;attempt<4;++attempt) {
+        size_t length=0;const auto rc=t->status_json(buffer.data(),buffer.size(),&length);
+        if(rc==KILN_ERR_BUFFER_TOO_SMALL && length<(16u<<20)){buffer.resize(length+1);continue;}
+        if(rc!=KILN_OK || length>=buffer.size())return PoolUse::Unknown;
+        try {
+            const auto doc=json::parse(buffer.data(),buffer.data()+length);
+            if(!doc.is_object() || (doc.value("state","")!="merged" && doc.value("state","")!="untouched") || !doc.contains("customPools") || !doc["customPools"].is_array())return PoolUse::Unknown;
+            const auto same=[](const json& v,const uint8_t* g){uint8_t c[16];return v.is_string() && guid_parse(v.get<std::string>(),c) && std::memcmp(g,c,16)==0;};
+            bool custom=false;
+            for(const auto& row:doc["customPools"])custom=custom || (row.is_object() && row.contains("guid") && same(row["guid"],pool));
+            if(!custom)return PoolUse::NotCustom;
+            if(!item || !doc.contains("shapeBindings") || !doc["shapeBindings"].is_array())return PoolUse::Unbound;
+            for(const auto& b:doc["shapeBindings"])
+                if(b.is_object() && b.contains("item") && b.contains("pool") && same(b["item"],item) && same(b["pool"],pool))return PoolUse::Bound;
+            return PoolUse::Unbound;
+        } catch(const json::exception&) {return PoolUse::Unknown;}
+    }
+    return PoolUse::Unknown;
+}
+bool world_pool(const uint8_t pool[16], const uint8_t* item) { return pool_use(pool,item)==PoolUse::Bound; }
+const char* const kPoolField = "equipment.voxelBlueprintMaterialPool";
+std::string unbound_pool(const Field& f, const std::string& spec) {
+    return f.path+": "+spec+" is a mod's material pool, and this item is not the shape it is bound to (a blueprint's materialPool binds its own shape; a vanilla shape keeps its pool)";
 }
 
 std::string type_short(const std::string& t) {
@@ -312,12 +348,27 @@ bool resolve(const Schema& s, const Field& f, const std::string& spec, const Ite
             *why = spec + ": not readable";
             return false;
         }
+        // copied from another item: a mod's pool still goes only to the shape bound to it
+        if (f.path == kPoolField && pool_use(out, t_kitbash_item) == PoolUse::Unbound) {
+            *why = unbound_pool(f, spec);
+            return false;
+        }
         if (from_item) *from_item = a, *from_field = src;
         return true;
     }
     if (spec.size() != 36 || !guid_parse(lower(spec), out)) {
         *why = f.path + ": \"" + spec + "\" is not a GUID, \"item:<name>\" or \"none\"";
         return false;
+    }
+    // Do this before the loaded-reference and assets allowlists: after a bound shape has been cloned, its pool is
+    // present in those lists too. Seeing it on that shape does not authorize another item to take it.
+    if (f.path == kPoolField && f.type_name == "keen::ObjectReference<keen::VoxelBlueprintMaterialPool>") {
+        const PoolUse use = pool_use(out, t_kitbash_item);
+        if (use == PoolUse::Bound) return true;
+        if (use == PoolUse::Unbound) {
+            *why = unbound_pool(f, spec);
+            return false;
+        }
     }
     const G g = gof(out);
     if (f.type_name == "keen::ObjectReference<keen::ItemInfo>" && p.item_guids.count(g)) return true;
@@ -636,5 +687,6 @@ std::string refs_info_json(const Schema& s, const std::vector<uintptr_t>& items)
 
 // newcontent.cpp: the mod whose definition the next kitbash calls on this thread work for (null: none, as for a game item's rule).
 void set_kitbash_mod(const std::string* mod) { t_kitbash_mod = mod; }
+void set_kitbash_item(const uint8_t* guid) { t_kitbash_item = guid; }
 
 }  // namespace kc

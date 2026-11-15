@@ -144,8 +144,8 @@ for a mod without boot content.
 - **Restarts.** A boot mod loads only with its boot content in this process. Enabled after the start, left out by a
   failure, or changed since (any file in its folder but what Kiln writes there, or a setting read in `OnBoot`; see
   [onboot.md](onboot.md)): it does not load, and kiln.log says `RestartRequiredBoot: ...`. Restart the server.
-- Dedicated servers only in this build: on a game client a mod with `boot` does not load while `mods.boot.client` is
-  held. A server without the boot phase (safe idle, .NET off) does not load it either.
+- Dedicated servers and game clients (a hosted world, and a player's game that joins a server; clients since
+  0.2.0-dev.29). A process without the boot phase (safe idle, .NET off) does not load a mod with `boot`.
 - In a Kiln.Sdk project, `<KilnBoot>true</KilnBoot>` (or `required`) writes the key into the generated `kiln.mod.json`;
   a `kiln.mod.json` of your own beside the project with the key works too.
 

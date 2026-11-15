@@ -1,3 +1,4 @@
+import { StoppedStartNotice } from "../shell/StoppedStartNotice";
 // / Play: in front of the stage. The game's name, one live sentence (how many mods are on, over every kind, and only the
 // exceptions a player must know), "Just once" (vanilla, without mods), the list of every mod with a switch
 // (pages/mods/MainList.tsx), the boot stages while the game starts, four facts, and the game folder. The mouth
@@ -19,6 +20,8 @@ import { clock, usePlayControl, type PlayControl } from "../shell/play";
 import { isDefaultProfile, useMods } from "../shell/useMods";
 import { MainList } from "./mods/MainList";
 import { StartProgress } from "../shell/StartPanel";
+import { channelNotice } from "../api/channel";
+import { useUpdate } from "../api/update";
 import { ArchText, Banner, Button, Cones, Field, KeyValue, Modal, PathPicker, TaskProgress, errorText, toast } from "../ui";
 
 /** Windows (WebView2): path examples in Windows form. */
@@ -144,6 +147,7 @@ function PlayFor({ game, ctl }: { game: GameInstall; ctl: PlayControl }) {
   const change = useRuntimeChanges((x) => x.last[game.id]);
   // the build date tells two dev builds apart; an update that is ready or failed is said next to it
   const kilnNote = change?.state === "failed" ? { text: "update failed", tone: "err", title: `${change.what} failed: ${change.error?.message ?? ""}` }
+    : rt?.switchBack ? { text: "from the beta", tone: "warn", title: `Play installs Kiln ${rt.switchBack.to} first (this launcher's)` }
     : rt?.upgradeAvailable ? { text: "update ready", tone: "warn", title: `${rt.upgradeAvailable} is ready to install` } : null;
   const build = game.buildId ? `build ${game.buildId}${boot?.exe?.verified ? ", verified" : ""}` : "build unknown";
   // only a profile other than the default is named on the main screen
@@ -168,6 +172,7 @@ function PlayFor({ game, ctl }: { game: GameInstall; ctl: PlayControl }) {
             <Link className="k-link k-hero-profile" to="/settings#profiles">No profile loaded</Link>
           )}
         </div>
+        <StoppedStartNotice ctl={ctl} />
         <Banners game={game} ctl={ctl} pending={pending.data ?? null} onOffer={() => setOfferOpen(true)} boot={fresh ? boot : null} />
         <h1 className="k-hero-name"><span className="k-title static">Enshrouded</span></h1>
         {ctl.timeline ? (
@@ -251,6 +256,7 @@ function Banners({ game, ctl, pending, onOffer, boot }: { game: GameInstall; ctl
   const nav = useNavigate();
   const status = useGameStatus(game.id);
   const change = useRuntimeChanges((x) => x.last[game.id]);
+  const update = useUpdate();
   const s = status.data;
   const out = [];
   if (pending?.outcome === "rejected") {
@@ -276,6 +282,16 @@ function Banners({ game, ctl, pending, onOffer, boot }: { game: GameInstall; ctl
     );
   }
   if (s?.steamUpdating) out.push(<Banner key="upd" tone="warn" title="Updating">Steam is updating Enshrouded. Play waits until it is done.</Banner>);
+  // (dev.29) the game's Kiln and the launcher's channel differ: Kiln from a test build after a switch back (Play puts the
+  // launcher's own in first: shell/play.ts), or a test build of the launcher with the release's Kiln in the game
+  const channel = channelNotice(s?.runtime, update?.buildChannel === "beta", kilnLabel);
+  if (channel) {
+    out.push(
+      <Banner key="channel" tone="warn" title={s?.runtime.switchBack ? "Kiln from the beta" : "Kiln from the release"} actions={!s?.runtime.switchBack ? <Button size="s" onClick={() => nav("/runtime")}>Runtime</Button> : undefined}>
+        <span data-testid="channel-notice">{channel}</span>
+      </Banner>,
+    );
+  }
   // a mod built against a newer Kiln may use something this game's Kiln doesn't have yet: it fails to load until Kiln is updated
   const newer = s?.runtime.installed ? s.newerMods ?? [] : [];
   if (newer.length) {
@@ -286,9 +302,9 @@ function Banners({ game, ctl, pending, onOffer, boot }: { game: GameInstall; ctl
     );
   }
   const advice = s?.runtime.installed && ctl.view.phase !== "vanilla" ? s.launchOptions?.advice : null;
-  if (advice && !s?.launchOptions?.hasDllOverride) {
+  if (advice && (!s?.launchOptions?.hasDllOverride || s.launchOptions.chainedOverrideMissing)) {
     out.push(
-      <Banner key="adv" tone="warn" title={ctl.kilnMissing ? "Kiln is not loading" : ctl.stuck ? "Kiln did not start" : "One Steam setting"}
+      <Banner key="adv" tone="warn" title={s?.launchOptions?.hasDllOverride && s.launchOptions.chainedOverrideMissing ? "One Steam setting for Ultimate ASI Loader" : ctl.kilnMissing ? "Kiln is not loading" : ctl.stuck ? "Kiln did not start" : "One Steam setting"}
         actions={<Button size="s" onClick={async () => {
           try {
             if (!navigator.clipboard) throw new Error("Clipboard unavailable");
@@ -296,7 +312,8 @@ function Banners({ game, ctl, pending, onOffer, boot }: { game: GameInstall; ctl
             toast.ok("Copied", "Paste it into Steam's launch options.");
           } catch (e) { toast.error(e, "Could not copy the launch option"); }
         }}>Copy</Button>}>
-        {ctl.stuck && "The game started without Kiln, so mods and \"Without mods\" can't apply. Close it, then set "}
+        {!s?.launchOptions?.hasDllOverride && ctl.stuck && "The game started without Kiln, so mods and \"Without mods\" can't apply. Close it, then set "}
+        {s?.launchOptions?.hasDllOverride && s.launchOptions.chainedOverrideMissing && "Kiln loads, but Ultimate ASI Loader and its .asi plugins may not start under Valve’s Proton. "}
         Steam, Enshrouded, Properties, Launch options: <span className="k-mono">{advice}</span>
       </Banner>,
     );

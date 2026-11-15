@@ -169,8 +169,9 @@ byte[]? bytes = Assets.ReadBlob(hash);                     // the bytes the game
 - **JSON.** `JsonSerializer.Serialize(info)` / `(entry)` writes the shape of
   [`schema/blob-catalog.schema.json`](../../../schema/blob-catalog.schema.json) (uint64 fields as decimal strings).
 - **Capability** `assets.blob_catalog` (Kiln.Assets' row): kiln.assets' table has the catalog and its content hooks are
-  on. In a game client it is held by the client gate until check `13-assets.catalog-client` passes; on a server it is
-  open (lab-proven).
+  on. It is open on servers and in every game since 0.2.0-dev.29 (lab-proven on a server).
+  Check `13-assets.catalog-client` still has not confirmed it in a real game client.
+- **Cost and lifecycle limits.** Opening a catalog synchronously copies and sorts metadata and can block its caller; prefer a worker thread for opening. Snapshot budgets exclude temporary merge and sorting memory. The native index pointer is kept for the process; its validity across hosted leave/join/reload remains unconfirmed, even though each completed snapshot owns its copies.
 - Registrations made through `AddBlob` and `OverrideBlob` are tagged `Managed` (a kiln.assets older than 0.2.0-dev.28
   records them as native). Which bytes are served did not change.
 

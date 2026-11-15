@@ -1,0 +1,99 @@
+{
+  "format": 1,
+  "natives": [
+    {
+      "name": "fixture-blocks-run.OnHit",
+      "hash": "0x4ce1b2c3",
+      "argc": 3,
+      "sync": true,
+      "args": [
+        {
+          "name": "target",
+          "type": "ecs.EntityId",
+          "dir": "in",
+          "size": 4
+        },
+        {
+          "name": "attacker",
+          "type": "ecs.EntityId",
+          "dir": "in",
+          "size": 4
+        },
+        {
+          "name": "attackMod",
+          "type": "float32",
+          "dir": "inout",
+          "size": 4
+        }
+      ]
+    },
+    {
+      "name": "fixture-blocks-run.Odd",
+      "hash": "0x11678280",
+      "argc": 2,
+      "sync": true,
+      "args": [
+        {
+          "name": "target",
+          "type": "ecs.EntityId",
+          "dir": "in",
+          "size": 4
+        },
+        {
+          "name": "victim",
+          "type": "ecs.EntityId",
+          "dir": "in",
+          "size": 4
+        }
+      ]
+    },
+    {
+      "name": "fixture-blocks-run.Soft",
+      "hash": "0x5a1d0dfb",
+      "argc": 2,
+      "sync": true,
+      "args": [
+        {
+          "name": "target",
+          "type": "ecs.EntityId",
+          "dir": "in",
+          "size": 4
+        },
+        {
+          "name": "damage",
+          "type": "impact.DamageSetup",
+          "dir": "inout",
+          "size": 52,
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "fixture-blocks-run.Later",
+      "hash": "0x50d4a66b",
+      "argc": 1,
+      "args": [
+        {
+          "name": "target",
+          "type": "ecs.EntityId",
+          "dir": "in",
+          "size": 4
+        }
+      ]
+    },
+    {
+      "name": "fixture-blocks-run.Miscount",
+      "hash": "0x27f5a409",
+      "argc": 2,
+      "sync": true,
+      "args": [
+        {
+          "name": "target",
+          "type": "ecs.EntityId",
+          "dir": "in",
+          "size": 4
+        }
+      ]
+    }
+  ]
+}

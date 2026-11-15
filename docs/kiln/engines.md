@@ -41,7 +41,8 @@ Kiln owns only `dinput8.dll`.
 
 - `kiln`: replaced (backup). `notdll`: refused.
 - `shroudforge`: refused unless "switch from ShroudForge". Then only ShroudForge's `dinput8.dll` goes to the backup.
-  Its `dbghelp.dll`, `winmm.dll` and `shroudforge/` stay, and Kiln's ShroudForge plugin drives the installed runtime.
+  Its `dbghelp.dll`, `winmm.dll` and `shroudforge/` stay. If its own loader still starts, ShroudForge hosts itself;
+  otherwise Kiln's ShroudForge plugin hosts the selected runtime. See ShroudForge self-hosting below.
 - Every other kind: chained. The installer moves the DLL to `kiln/chain/<word>-dinput8.dll` and adds it to
   `chain.ini [chain]`. Occupied chain names always get a numbered suffix, even for identical bytes, directories or
   dangling links. Ultimate ASI Loader runs only under names it knows, so it is chained as `xinput9_1_0.dll` next
@@ -62,7 +63,11 @@ Kiln owns only `dinput8.dll`.
 The proxy reads `dinput8-chain.ini` `[Chain]` and `[EMF]` (the DLLs EMF 0.5's installer renamed) in file order. A
 comment may follow a name after a space or tab (`mymod.dll ; my mod`, also `#`), and a name may stand in double quotes,
 as EMF's shared spec for the file says (`docs/modding/dinput8-chain.md` in matenm/emf-enshrouded); Kiln's own
-`kiln\chain.ini` keeps its stricter rules ([contracts](launcher/contracts.md) 5.3). Both sections
+`kiln\chain.ini` keeps its stricter rules ([contracts](launcher/contracts.md) 5.3).
+A line of `[Chain]`, `[EMF]` or before any section that names something other than a `.dll` is skipped and named in
+`kiln\logs\proxy.log`; a `key = value` line whose value is no `.dll` is another tool's setting and is ignored without a
+line, as other tools' sections are.
+Both sections
 use EMF's rules: relative paths inside the game folder only (including the final target of directory links), at most
 256 entries across both sections, dedupe by canonical path. Files above 256 KiB are ignored. One overflow entry is
 reported as refused; further entries are discarded. EMF's loader is accepted by its exports even without its marker,
@@ -72,6 +77,15 @@ Containment compares the final path of the DLL with the final path of the game f
 a link, a mapped drive (Proton's `S:`) or at a drive root is accepted. Under Wine/Proton, Unix symlinks are invisible to
 Windows path APIs, so a Unix symlink inside the game folder counts as part of it (making one needs write access to the
 game folder, which already allows placing a DLL there); absolute, drive and `..` entries are refused before resolving.
+
+If Wine or Proton maps its own DLL of the same name in place of a chained one ([Ultimate ASI Loader next to Kiln on
+Wine](#ultimate-asi-loader-next-to-kiln-on-wine)), `kiln\logs\proxy.log` says so in place of `loaded at ...` and gives
+the override to set: `chain: chain.ini [chain]: requested <game>\xinput9_1_0.dll but another file was loaded in its
+place: Wine's own xinput9_1_0; on Wine or Proton a DLL override is needed: WINEDLLOVERRIDES="xinput9_1_0=n,b"`. For a
+`[late]` entry the same line, starting `late:`, goes to `kiln.log`. Wine's module reports the requested path all the
+same, so the check compares the loaded image with the file: the PE headers' time stamp, image size, checksum, entry
+point and section count, and Wine's builtin marker after the DOS header (`native/proxy/image_match.h`). A file or
+module header that cannot be read counts as no mismatch.
 
 ### Loading a chained DLL late (`[late]`)
 
@@ -110,6 +124,52 @@ What `[late]` cannot do:
 - **A disabled mod.** A native mod's DLL in `[late]` loads only when the mod does (see
   [native-mods.md](native-mods.md#switches-and-policy)).
 
+### DLLs that must hook the game's imports first
+
+Some DLL mods change the game's import table in their `DllMain`, and only where a slot still holds the real system
+function. Two of them in one chain then depend on their order: Auto Loot Plus redirects the game's `GetProcAddress`
+import (its F8 menu) but skips a slot someone redirected already, and Ultimate ASI Loader redirects that import when it
+loads and puts it back only when the game first calls it, after Kiln's entry gate. The order is the phases': the proxy
+loads `[chain]`, then `dinput8-chain.ini`, then `[profile]`, and the late phase loads its DLLs in the same list order
+after all of them. A `[profile]` DLL (Auto Loot Plus from the Library) therefore loads before a `[chain]` one (Ultimate
+ASI Loader, where the installer put it) only when the `[chain]` one is late and the `[profile]` one is not. A compat rule
+with the action `before` says which DLL must come first, and the launcher writes that into chain.ini whatever the two
+switches say; Kiln ships the rule for this pair. The proxy's own order is not changed for this: reordering lines inside
+a phase would be new behaviour in the DLL every player's game loads first, and the phases already express it. Details,
+matching and limits: [engines/README.md](engines/README.md#closed-source-dll-mods).
+
+## Linux: Wine, Proton and other launchers
+
+Wine has its own `dinput8.dll` and `xinput9_1_0.dll`. For a DLL of the same name in the game folder, Wine decides by
+the file name, not by the path, which one runs: the DLL overrides, else its built-in default. Setting a name to
+"native, builtin" (`n,b`) makes the game folder's file win.
+
+### Starting the game from Bottles, Lutris or plain Wine
+Kiln is `dinput8.dll` in the game folder. A start that does not go through Steam with Proton needs `dinput8` set to
+native, builtin: `WINEDLLOVERRIDES="dinput8=n,b"`, or `dinput8` as "native, builtin" in the runner's DLL overrides
+(`winecfg`, Libraries tab). Without it the game starts without Kiln, and `kiln/logs/proxy.log` is not written.
+- Proton 10 and 11 build their `dinput8` with Wine's "prefer native" flag, so Steam starts need no launch option
+  there (tested with GE-Proton11-11, [client.md](client.md); Valve's builds read from their source). Proton 9 and
+  upstream Wine do not have that flag (read from their source). The override does no harm where it is not needed.
+- Untested: Bottles' and Lutris' own runners. Keep the override.
+
+### Ultimate ASI Loader next to Kiln on Wine
+Kiln chains Ultimate ASI Loader as `xinput9_1_0.dll` in the game folder ([Installer](#installer)). Kiln loads it by
+its full path, but Wine still applies its rules for the name `xinput9_1_0`. Set it to native, builtin as well:
+`WINEDLLOVERRIDES="dinput8,xinput9_1_0=n,b"` (Steam: `WINEDLLOVERRIDES="dinput8,xinput9_1_0=n,b" %command%`).
+The launcher names both overrides when Ultimate ASI Loader is chained and reports a missing override.
+- Tested (2026-11-14, dedicated server lab under GE-Proton11-11, Kiln 0.2.0-dev.28's proxy, a test DLL of ours named
+  `xinput9_1_0.dll`, not Ultimate ASI Loader itself): without the override, a DLL without version information did not
+  run. Wine loaded its own `xinput9_1_0` instead, and dev.28's `proxy.log` still said `loaded at ...`. With
+  `xinput9_1_0=n,b` it ran. Since dev.29 the proxy warns ([Proxy](#proxy)); `native/proxy/tests/test-chain.sh` shows
+  the warning under GE-Proton11-11's wine without an override and under Wine 11.20 with `xinput9_1_0=b` (2026-11-15).
+- Tested on the same lab: a DLL whose version information names a company other than Microsoft ran without the
+  override. GE-Proton11-11 has the rule from Wine 11.6 that prefers such DLLs. Ultimate ASI Loader's current source
+  names ThirteenAG as its company, so it should load there without the override (untested with the real loader).
+- Read from the source, untested: Valve's Proton has neither the flag nor the rule for `xinput9_1_0`, so it needs the
+  override. Upstream Wine has the rule since 11.6, and since 11.7 it also prefers a DLL without version information.
+- Untested: the game client, Bottles' and Lutris' runners. The override is the safe setting everywhere.
+
 ## Library kinds
 
 `library::detect` reports these kinds besides Kiln's own. Each has `engine` set and a reason a player can read.
@@ -136,6 +196,22 @@ A kind without a loader is skipped on import with its reason. It is never import
 An unreadable/unknown `mod.json` or incomplete Lua package stays one skipped item: its helper DLLs are never
 imported separately. Standalone DLLs without package metadata retain the existing bare-DLL import flow. These are
 Library import rules; a runtime plugin may already run an engine's mods placed in its game-folder layout manually.
+
+### ShroudForge self-hosting
+
+ShroudForge can also host itself. If its own proxy loads, Kiln's adapter steps aside and ShroudForge reads its own
+mods folder. Profile switches still update copies Kiln manages. Folders you installed yourself keep their own switches.
+
+Engines shows **own loader installed: <file>** when disk detection finds a loader. Mods on desktop and Deck names the
+detected loader when the loaded profile contains ShroudForge mods, including switched off entries. This says the file
+is installed. It does not prove it loaded. Remove that file to let Kiln's adapter host ShroudForge.
+For ShroudForge's `dinput8.dll`, **Let Kiln manage ShroudForge** opens Runtime's existing **Switch from ShroudForge**
+confirmation. That operation backs up only `dinput8.dll`: other SF proxies must be removed separately.
+Under Proton a proxy still needs its DLL override to actually load; disk detection is a warning before Play, not proof
+of execution. The adapter confirms actual self-hosting in `kiln/state/shroudforge.json` (`mode: self-hosted`,
+`loaderFile`) and in one INFO log line. Disk detection is refreshed while Mods is open. If the file was removed since
+that record, the warning clears and Engines labels the record as the last start; it does not predict self-hosting.
+
 ShroudForge installation detection classifies `dbghelp.dll` and `winmm.dll` before calling them SF's helpers.
 
 ## Adding support for an engine's mods
@@ -317,3 +393,91 @@ engines' mods") and 5.8.
   `required[]`, each with its `kind` (`AdvertiseEngines.cs`), so a joining player's launcher learns what the server
   runs. The HELLO check still covers Kiln mods only: clients don't announce other engines' mods.
 - **Licences.** The launcher (MIT) only copies files. It never links or runs EML's GPL code or any other engine's code.
+
+An enabled EML package declaring `runtime` or `runtime-register-dll` also requires hosted ShroudForge, even without
+an enabled ShroudForge mod. The launcher uses the shared package reader and writes `emlRuntime` (package ids) into
+`kiln/profile.json`; the adapter reads that additive field, defaulting to empty. The launcher places EML packages in
+ShroudForge's mods folder with their `extended.mod.json` switches on. A compatibility entry in `mods.shroudforge`
+lets older adapters make the same hosting decision. Runtime EML entries are disabled on the kiln-eml route even
+when delegated: ShroudForge reads its placed copy and switch independently. This prevents older kiln-eml runners
+from falling back to data-only if their adapter fails; new aside reporting recognizes `emlRuntime` delegation. Missing/off ShroudForge disables the runtime EML entry and
+records its reason in `emlRuntimeBlocked`; kiln-eml reports `skipped`. Without a hosted or own ShroudForge runtime,
+kiln-eml independently refuses the entire runtime package. A server-only/client-only package remains subject to
+ShroudForge's existing targets check (`other-side`); patch/export-only EML packages are unchanged.
+
+Activation and Play refuse a profile with enabled runtime EML packages while EML's standalone loader is detected in a
+game-folder proxy slot or an active DLL chain. That loader prevents Kiln from starting the ShroudForge runtime those
+packages need. The refusal names the packages and loader before any engine packages are placed. Switch those packages
+off, or remove the standalone EML loader from the game folder or its DLL chain, then activate the profile again. This
+also applies under Wine or Proton when the proxy has no DLL override. Patch-only profiles and disabled runtime
+packages keep their existing behavior. The refusal does not remove packages already placed or repair game data another
+loader changed.
+
+### Restore the game's data
+
+For a game folder another mod loader changed before Kiln. kiln-eml then finds game data it cannot prove it wrote
+("Game data is not output Kiln's EML writer can prove it published"), leaves it and the shared backups alone, and every
+EML mod fails. The launcher's Engines view (Logs, Engines) then offers **Restore the game's data**:
+
+1. Verify the game files in Steam (the game's Properties, Installed Files, "Verify integrity of game files"). Steam
+   puts the game's own files back; it does not remove the extra ones.
+2. If Steam repaired files, start the game through Kiln once more. kiln-eml reads the game's index at a start and
+   writes what it found into `kiln/state/eml.json` (`recovery`: the index's SHA-256, the number of archive containers
+   the index refers to, and that the data is unproven); the launcher takes the list of leftover files from that and
+   refuses to plan while the index on disk is not the one that was read. EML mods may fail once more in that start.
+3. The dialog lists every file with its size. Tick "I verified the game files in Steam" and choose **Move files
+   aside**.
+
+What moves, by rename and never by copy: the containers `enshrouded_NNN.dat` numbered at or past the count the game's
+own index refers to, the shared backup pair `enshrouded.kfc.bak` and `enshrouded.kfc_resources.bak`, the backup's seal
+and Kiln's own change cache (`kiln/eml/cache/files.json`, `files.partial.json`). They go to
+`kiln/eml/displaced/restore-<time>/` under their own names, beside a `manifest.json` that records each file's path,
+size and SHA-256, the time and how far the move got. Nothing is deleted and nothing is overwritten: a name that already
+exists stops the move. The next start through Kiln makes a fresh backup from the game data as it then is. Kiln never
+copies a backup over the game's data here.
+
+**Undo move** moves the files back and stays available after the launcher was closed. It is refused when one of the
+names exists again or a moved file's content changed. A move or an undo that was interrupted (a crash, a power cut) is
+finished the next time the launcher looks at this (the Engines view, or the move itself), with the game closed; when the
+game's index changed in between, an unfinished move is undone instead.
+
+Refused, each with its sentence: the game or its server is running; kiln-eml is writing; ShroudForge is the archive
+writer of the loaded profile (its own loader is installed, or Kiln hosts it for the profile's mods: the files may then
+be ShroudForge's own; a `shroudforge/` folder left from earlier does not count); Kiln has its own record of the data it
+wrote (`kiln/eml/ownership/`: then **Restore vanilla game data** above is the way); a link anywhere on a path; nothing
+left over. A game folder whose last start reported nothing unproven is not touched at all.
+
+Not covered: a game whose data changed after Kiln had written it (Kiln's record exists but no longer matches: another
+loader ran later). That case is as before: verify in Steam, then move the files by hand.
+
+Never run on Windows or against a real game folder; the moves are tested on Linux with an interruption at every step
+(`cargo test -p kiln-manage --features full restore_data`), the dialog with `launcher/tests/restore-data.spec.ts`.
+
+Kiln no longer changes the game's five building functions merely by starting `kiln.gameplay`: a selected managed mod
+which references `Kiln.Gameplay` (or ships a helper with that reference) requests them during the host's pre-world
+preflight, including when it only uses crafting. Native plugins request on first use and should request at startup if
+they will later add build/break protection. A first runtime request uses checked safe-Pre installation; build/break
+zones are refused until installation, rather than accepted without protection. This lets ShroudForge inspect the
+unmodified `PlaceProp` entry when the profile contains no such mod and no native plugin requests the group. Once those
+hooks are installed (a typed link writes the same registry entry jump as a raw one), ShroudForge's entity spawning
+still cannot find its prop-spawn helper through that entry unless it can read the game's original code. The
+ShroudForge Kiln ships (frostdev-ops/shroudforge#2, merge 4a4e81eb) trusts the game's file as this process's image
+when the only differences are function-entry detours (whose targets may be any executable memory), jumps inside
+functions in the exact forms safetyhook and Kiln write, at original instruction boundaries and bounded, ShroudForge's
+own recorded main-menu call sites, and an image moved by address randomisation once its relocations, checked against
+the loaded image, are applied. A function is still read through the file only when its own difference is an entry
+detour. kiln.log has one line either way: `executable file accepted (load delta ...) beside N entry detour(s), M
+interior jump(s) and K own patch(es)` or `executable file refused: <reason> (RVA ...); live-only resolution`. Not seen
+in a game yet. A mid-install failure can also leave pass-through jumps in some entries; see the gameplay service's
+refusal status and installed-target mask.
+
+### Shroudlink client addon
+
+Shroudlink packages run in Kiln's `kiln-shroudlink` server core. The in-game MODS tab next to Skills is drawn by
+Shroudlink's separate client addon. Import the addon from the Shroudlink download into the Library as a native mod and
+switch it on in the client profile.
+
+On desktop and Steam Deck, the mods list explains when a client profile enables Shroudlink mods without loading the
+addon: the mods still run, but the tab needs the addon. If an addon is in the Library, **Switch addon on** enables it
+in that profile. Otherwise the notice names the Shroudlink download. Support reports include an informational finding
+naming the profile and enabled mods. Dedicated-server installs do not need the client addon and show no notice.

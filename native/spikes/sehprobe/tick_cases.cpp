@@ -22,6 +22,16 @@ const Paths& paths() { static Paths p; return p; }
 namespace progress_state {
 void mark(uint32_t) {}  // progress.json's writer is not part of this probe
 }  // namespace progress_state
+namespace window_clock {
+// kiln.window_clock (package 07) is not part of this probe: no window service, so nothing to begin or end
+void world_started() {}
+void pre(uint64_t) {}
+void begin() {}
+bool wants_end() { return false; }
+void end() {}
+void stopping() {}
+void stopped() {}
+}  // namespace window_clock
 namespace log {
 void writef(int, const char*, const char* fmt, ...) {
     if (strstr(fmt, "disabled")) ++disabled_logs;

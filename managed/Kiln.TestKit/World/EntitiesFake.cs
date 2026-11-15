@@ -197,6 +197,16 @@ internal sealed unsafe class EntitiesFake : IDisposable
         return _entities[entity] = new Entity { Player = player };
     }
 
+    /// <summary>The component hashes the live entity has now (sorted), or null when it is not in the world: what the fake
+    /// of the game's programs (Fakes/Systems) matches a program's lists against and keys an archetype by.</summary>
+    public uint[]? ComponentsOf(uint entity) => Live(entity) is { } e ? [.. e.Components.Keys.Order()] : null;
+
+    /// <summary>Whether <paramref name="hash"/> is an attribute component (the test set it so, or Kiln.Game's types say).</summary>
+    public bool IsAttributeComponent(uint hash) => _attributes.Contains(hash) || TypesFake.IsAttribute(hash);
+
+    /// <summary>Whether this world knows a component type of <paramref name="hash"/> (Kiln.Game's types, or one the test set).</summary>
+    public bool KnowsComponent(uint hash) => TypesFake.IsComponent(hash) || _names.ContainsKey(hash);
+
     public Slot? Block(uint entity, uint hash) =>
         Live(entity) is { } e && e.Components.TryGetValue(hash, out var slot) ? slot : null;
 
@@ -653,9 +663,11 @@ internal sealed unsafe class EntitiesFake : IDisposable
                 return Fail(WorldAbi.Refused, $"{name} is an attribute: its first {WorldAbi.AttributeHeader} bytes (group, values offset, flags, count) are the " +
                                               "game's and cannot change; change the values of a copy read from the entity (World.Update)");
         }
+        var whole = now.ToArray();  // the whole component before, for a component watch (07 S7)
         next.CopyTo(range);  // the game's attribute formulas (a clamp to the maximum) do not run offline
         job.After = range.ToArray();
         job.Status = WorldAbi.Done;
+        ComponentChangesFake.NoteWrite(_harness, job.Entity, name, whole, now.ToArray(), job.Mod);  // kiln.world's token
         return (job.Flags & WorldAbi.Verify) != 0 && job.Writers > 0;
     }
 

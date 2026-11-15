@@ -30,7 +30,7 @@ def _data_dir():
         return DATA
     alt = Path(os.environ.get("KILN_OUT") or (Path(__file__).resolve().parents[3] / ".out/impact")) / "impact-data"
     return alt if (alt / "natives.json").exists() else DATA
-NAME_RX = re.compile(r"^[A-Za-z0-9_\-]+\.[A-Za-z0-9_]+$")
+NAME_RX = re.compile(r"^[a-z0-9_.\-]+\.[A-Za-z0-9_]+$")
 
 
 class CatalogError(Exception):
@@ -44,10 +44,11 @@ def _h(x):
 
 
 class Param:
-    __slots__ = ("name", "types", "dir", "doc", "optional", "raw", "unchecked", "always")
+    __slots__ = ("name", "types", "dir", "doc", "optional", "raw", "unchecked", "always", "size")
 
-    def __init__(self, name, types=(), dir="in", doc="", optional=False, raw=False, unchecked=False, always=False):
+    def __init__(self, name, types=(), dir="in", doc="", optional=False, raw=False, unchecked=False, always=False, size=None):
         self.name, self.types, self.dir, self.doc, self.optional = name, list(types), dir, doc, optional
+        self.size = size
         self.raw = raw  # the native accepts a raw integer here (not only a variable handle)
         self.unchecked = unchecked  # the native reads it without a null check: unconnected, it faults and the process dies
         self.always = always  # every vanilla call connects it
@@ -60,7 +61,7 @@ class Param:
         ev = d.get("evidence") or {}
         always = d.get("dir", "in") == "in" and ev.get("unconnected") == 0 and ev.get("connected", 0) > 0
         return cls(d.get("name", ""), t, d.get("dir", "in"), d.get("doc", ""), bool(d.get("optional", False)),
-                   bool(d.get("raw", False)), bool(d.get("unchecked", False)), always)
+                   bool(d.get("raw", False)), bool(d.get("unchecked", False)), always, d.get("size"))
 
 
 class Native:

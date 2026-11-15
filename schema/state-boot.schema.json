@@ -344,10 +344,21 @@
         "deferred": { "type": "boolean", "description": "The boot phase ran in this process (an enabled boot mod, hooks and .NET on, mods.boot available)." },
         "reason": { "type": "string", "description": "Why the phase is on or off, in plain words." },
         "bootMods": { "type": "array", "items": { "type": "string" }, "description": "The boot mods of the profile scan, \"<id>\" or \"<id> (required)\"." },
-        "status": { "enum": ["collecting", "preparing", "published", "aborted", "activation-fault", null] },
+        "status": { "enum": ["collecting", "preparing", "published", "aborted", "activation-fault", null], "description": "The phase where it ended; null without a boot generation (also when a service's stop_start ended the start)." },
         "generation": { "type": ["integer", "null"], "description": "1 when the phase ran (one generation per process), else null." },
         "published": { "type": "boolean" },
-        "exitCode": { "type": ["integer", "null"], "description": "19201 (0x4B01) when the start stopped, else null." },
+        "exitCode": { "type": ["integer", "null"], "description": "The code the process ended with when the start stopped: 19201 (0x4B01) for kiln.boot's own stop, a service's code for a stop_start (19202, 0x4B02: kiln.knowledge's roster); else null." },
+        "stop": {
+          "type": ["object", "null"],
+          "description": "Since 0.2.0-dev.29: a service stopped the start (kiln.boot stop_start), with a boot generation or without one; null otherwise (older cores do not write the key).",
+          "required": ["code", "reason", "by", "mods"],
+          "properties": {
+            "code": { "type": "integer", "description": "The exit code (19202 for the roster); a Linux parent under Wine sees its low byte." },
+            "reason": { "type": "string", "description": "What stopped it and what to do, for the player (kiln.knowledge: the refusal, the mods, do not restart)." },
+            "by": { "type": "string", "description": "The service that stopped it (\"service:kiln-quests.dll\")." },
+            "mods": { "type": "array", "items": { "type": "string" }, "description": "The mods it names." }
+          }
+        },
         "collectors": { "type": "array", "items": { "type": "string" }, "description": "The collectors registered: assets, worldtables, content, skills, knowledge, vfx, patches." },
         "owners": {
           "type": "array",

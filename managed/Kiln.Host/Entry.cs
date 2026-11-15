@@ -314,6 +314,7 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
         }
         // Mod.OnBoot's generation (kiln.boot, chapter 08): in a boot profile Kiln.Host commits it here, on the boot thread, before the tick
         // subscriptions and the game's entry point (BootPhase.cs)
+        host._mods.PrepareGameplayHooks();
         BootPhase.Run(host.Service, host._owner, host._mods, host.Log);
         AppDomain.CurrentDomain.UnhandledException += (_, e) => host.Unhandled(e.ExceptionObject as Exception, e.IsTerminating);
         TaskScheduler.UnobservedTaskException += (_, e) =>

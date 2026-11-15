@@ -93,8 +93,10 @@
     <_KilnService Include="$([MSBuild]::Unescape($(KilnServices.Replace(',', ';'))))" Exclude="Testing" />
     <!-- Game is not under managed/services in the repository (managed/Kiln.Game); in the package it is kiln/lib like the rest -->
     <_KilnRepoService Include="@(_KilnService)" Exclude="Game" />
-    <!-- Kiln.Game compiles against Kiln.World: a direct, compile-only reference, so the transitive one is not copied -->
+    <!-- Kiln.Game compiles against Kiln.World and Kiln.Systems (its typed program views): direct, compile-only
+         references, so the transitive ones are not copied -->
     <_KilnRepoService Include="World" Condition="'$(_KilnWantsGame)' == 'true' and !$(_KilnServiceList.Contains(';World;'))" />
+    <_KilnRepoService Include="Systems" Condition="'$(_KilnWantsGame)' == 'true' and !$(_KilnServiceList.Contains(';Systems;'))" />
   </ItemGroup>
 
   <!-- Kiln.Api and the services come from kiln/host at run time: compile against them, never ship them. -->
@@ -179,6 +181,16 @@
       <_KilnWritesGame Include="@(ReferencePath->WithMetadataValue('Filename','Kiln.Game'))" />
     </ItemGroup>
     <KilnWrites AssemblyPath="$(TargetPath)" GameReference="@(_KilnWritesGame->'%(FullPath)')" ManifestPath="$(OutDir)kiln.mod.json" />
+  </Target>
+
+  <!-- kiln.programs.json in the output: one entry per [Query] struct of the mod's code (Kiln.Systems' Systems.Define), so
+       kiln.world reserves the mod's own programs before the world starts (docs/kiln/services/systems.md, "Programs of your
+       own"). The entries of the project's own kiln.programs.json stay. KilnPrograms=false turns it off. Error KILN036: a
+       [Query] kiln.world cannot reserve; error KILN031: an unreadable input. -->
+  <UsingTask TaskName="Kiln.Sdk.KilnPrograms" AssemblyFile="$(_KilnTasksDir)Kiln.Sdk.Tasks.dll" Condition="'$(KilnRepoMode)' != 'true'" />
+  <UsingTask TaskName="Kiln.Sdk.KilnPrograms" AssemblyFile="$(_KilnTasksDir)Kiln.Sdk.Tasks.dll" TaskFactory="TaskHostFactory" Condition="'$(KilnRepoMode)' == 'true'" />
+  <Target Name="KilnPrograms" AfterTargets="KilnManifest" Condition="'$(KilnManifest)' != 'false' and '$(KilnPrograms)' != 'false'">
+    <KilnPrograms AssemblyPath="$(TargetPath)" ProgramsPath="$(OutDir)kiln.programs.json" SourcePath="$(MSBuildProjectDirectory)/kiln.programs.json" />
   </Target>
 
   <!-- The files of the mod folder: the output folder without what kiln/host provides or the loader ignores. -->

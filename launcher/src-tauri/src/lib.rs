@@ -21,6 +21,7 @@ pub mod selftest;
 /// The self-update: only in direct builds (feature `self-update`); the Nexus Mods build compiles none of it.
 #[cfg(feature = "self-update")]
 pub mod selfupdate;
+pub mod snapshot;
 pub mod state;
 pub mod watch;
 
@@ -57,6 +58,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(gated(tauri::generate_handler![
+            commands::snapshot::snapshot_status,
+            commands::snapshot::snapshot_continue,
             commands::app::app_info,
             commands::app::app_settings_get,
             commands::app::app_settings_set,
@@ -98,6 +101,8 @@ pub fn run() {
             commands::library::library_users,
             commands::library::library_lint,
             commands::library::library_take_over,
+            commands::library::library_rollback,
+            commands::library::library_replace_dll,
             commands::config::config_list,
             commands::config::config_read,
             commands::config::config_set,
@@ -175,6 +180,7 @@ pub fn run() {
             commands::update::update_status,
             commands::update::update_check,
             commands::update::update_install,
+            commands::update::update_switch,
             commands::update::update_restart,
             commands::update::update_skip,
             commands::update::update_ack,
@@ -205,8 +211,13 @@ pub fn run() {
             commands::engines::engine_adopt_folder,
             commands::engines::eml_backup,
             commands::engines::eml_restore,
+            commands::engines::eml_data_plan,
+            commands::engines::eml_data_apply,
+            commands::engines::eml_data_undo,
+            commands::engines::eml_data_latest,
             commands::compat::chain_view,
             commands::compat::chain_set_late,
+            commands::compat::shroudlink_notice,
             commands::found::found_scan,
             commands::found::found_add,
             commands::cook::cook_plan,
@@ -241,9 +252,29 @@ pub fn run() {
 /// the modpack watcher, Nexus (its instance lock, inbox and leftovers), the self-update's first check. Run once, when the
 /// folder is free (commands/data_folder.rs `start`).
 fn after_folder(app: &tauri::AppHandle) {
+    let f = folder::current();
+    let Ok(found) = f.located() else { return };
+    let version = app.package_info().version.to_string();
+    if let Err(e) = snapshot::startup::start(&found.dirs.root, &version, snapshot_channel(&version), distribution::beta()) {
+        eprintln!("beta copy: {}", e.message);
+        return;
+    }
+    after_snapshot(app);
+}
+
+pub(crate) fn snapshot_channel(version: &str) -> &str {
+    let baked = env!("KILN_LAUNCHER_BUILD_CHANNEL");
+    if !baked.is_empty() { baked } else if version.contains('-') { "dev" } else { "stable" }
+}
+
+pub(crate) fn after_snapshot(app: &tauri::AppHandle) {
     // the installed runtime's and the bundles' sha256s from the last run (a start does not hash 1.5 GB again)
     if let Ok(d) = state::dirs() {
         kiln_manage::filecache::persist_at(&state::file_hashes(&d));
+        // kept versions (kiln_manage::kept): a change a stop left half done is finished or undone before anything uses them
+        for line in kiln_manage::kept::recover(&d) {
+            commands::app::launcher_log("library", &line);
+        }
     }
     watch::start(app.clone());
     let shipped = app.clone();

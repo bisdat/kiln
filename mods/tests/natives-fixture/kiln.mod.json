@@ -1,0 +1,10 @@
+{
+  "id": "natives-fixture",
+  "name": "Guided-check fixture: a synchronous native and a program that calls it (06c-natives.joined)",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "NativesFixture.dll",
+  "side": "server",
+  "advanced": true,
+  "description": "For the client-pass profile: the guided check 06c-natives.joined runs its program next to a joined player."
+}

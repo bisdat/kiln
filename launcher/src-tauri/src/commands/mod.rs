@@ -2,6 +2,7 @@
 //! list in lib.rs and `COMMANDS` in launcher/src/api/commands.ts are the same (tested).
 
 pub mod app;
+pub mod snapshot;
 pub mod game;
 pub mod runtime;
 pub mod profile;
@@ -29,6 +30,8 @@ pub type TaskId = String;
 
 /// Every command name, in contracts.md order.
 pub const NAMES: &[&str] = &[
+    "snapshot_status",
+    "snapshot_continue",
     "app_info",
     "app_settings_get",
     "app_settings_set",
@@ -70,6 +73,8 @@ pub const NAMES: &[&str] = &[
     "library_users",
     "library_lint",
     "library_take_over",
+    "library_rollback",
+    "library_replace_dll",
     "config_list",
     "config_read",
     "config_set",
@@ -147,6 +152,7 @@ pub const NAMES: &[&str] = &[
     "update_status",
     "update_check",
     "update_install",
+    "update_switch",
     "update_restart",
     "update_skip",
     "update_ack",
@@ -177,8 +183,13 @@ pub const NAMES: &[&str] = &[
     "engine_adopt_folder",
     "eml_backup",
     "eml_restore",
+    "eml_data_plan",
+    "eml_data_apply",
+    "eml_data_undo",
+    "eml_data_latest",
     "chain_view",
     "chain_set_late",
+    "shroudlink_notice",
     "found_scan",
     "found_add",
     "cook_plan",

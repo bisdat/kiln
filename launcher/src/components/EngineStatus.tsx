@@ -6,6 +6,7 @@ import type { EngineStatus, GameId, Json, ModKind } from "../api/commands";
 import { useActiveProfile, usePoll, useProfile } from "../api/hooks";
 import { KIND_NAME, KIND_SHORT, KIND_TONE, MOD_KINDS } from "../api/kinds";
 import { Badge, Banner, EmptyState, Skeleton, errorText, type Tone } from "../ui";
+import { RestoreDataOffer } from "./RestoreDataOffer";
 
 type Obj = Record<string, Json>;
 const isObj = (v: unknown): v is Obj => !!v && typeof v === "object" && !Array.isArray(v);
@@ -73,7 +74,9 @@ export function EngineStatusList({ gameId }: { gameId: GameId }) {
 }
 
 export function EngineRow({ s }: { s: EngineStatus }) {
-  const word = headline(s.state);
+  const selfFile = s.kind === "shroudforge" ? s.ownLoader?.file : null;
+  const word = selfFile ? `own loader installed: ${selfFile}` : s.kind === "shroudforge" && isObj(s.state) && s.state.mode === "self-hosted"
+    ? "Last start: self-hosted (loader no longer detected)" : headline(s.state);
   const reason = s.prerequisite?.text ?? s.error ?? (isObj(s.state) ? str(s.state.reason) ?? str(s.state.error) : null);
   const mods = modLines(s.state);
   const effects = s.kind === "shroudforge" ? s.effects : null;
@@ -85,7 +88,7 @@ export function EngineRow({ s }: { s: EngineStatus }) {
       <Badge tone={KIND_TONE[s.kind]} title={KIND_NAME[s.kind]}>{KIND_SHORT[s.kind]}</Badge>
       <span className="k-mono k-muted">{s.plugin}</span>
       <span className="k-spacer" />
-      {s.prerequisite ? <span className={`k-word-sm k-tone-${s.prerequisite.available ? "info" : "warn"}`}>{s.prerequisite.available ? "Host recognized (not verified)" : "Requires XHL-Core"}</span> : s.error ? <span className="k-word-sm k-tone-err">Unreadable</span> : s.state === null ? <span className="k-hint">{current ? "Runtime report available" : "Not run yet"}</span> : (
+      {s.prerequisite ? <span className={`k-word-sm k-tone-${s.prerequisite.available ? "info" : "warn"}`}>{s.prerequisite.available ? "Host recognized (not verified)" : "Requires XHL-Core"}</span> : s.error ? <span className="k-word-sm k-tone-err">Unreadable</span> : s.state === null && !selfFile ? <span className="k-hint">{current ? "Runtime report available" : "Not run yet"}</span> : (
         <>
           {word && <span className={`k-word-sm k-tone-${toneOf(word)}`}>{word}</span>}
           {mods.length > 0 && <span className="k-hint">{mods.length} mod{mods.length === 1 ? "" : "s"}</span>}
@@ -141,6 +144,10 @@ export function EngineRow({ s }: { s: EngineStatus }) {
  *    game folder (unproven data, extra containers, recovery files with their sizes, containers moved to
  *    kiln/eml/displaced/). Shown as written, whatever the backup comparison says and whether or not an EML mod is on. */
 export function RestoreVanillaOffer({ gameId }: { gameId: GameId }) {
+  return <><RestoreDataOffer key={gameId} gameId={gameId} /><VanillaOffer gameId={gameId} /></>;
+}
+
+function VanillaOffer({ gameId }: { gameId: GameId }) {
   const backup = useQuery({ queryKey: ["eml_backup", gameId], queryFn: () => api.emlBackup(gameId) });
   const engines = useQuery({ queryKey: engineStatusKey(gameId), queryFn: () => api.engineStatus(gameId) });
   const active = useActiveProfile(gameId);

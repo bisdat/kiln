@@ -45,8 +45,8 @@ skeleton's bind pose outside the arm. This form, on the game's clips, has not be
 
 **Follow-ups:** the Parrying Blade (C# only) is the same blade with two routes on its block: a parried blow leads to the weapon's own parry,
 and the light attack while blocking to its first swing. A weapon with follow-ups applies all its moves at once or none; the sample logs what
-`WeaponMovesApplicationChangedEvent` says. The capability `blocks.move_followups` is switched off until its game test has passed, and the
-sample leaves the Parrying Blade out while it is (`"preview": ["blocks.move_followups"]` in `kiln.json` switches it on to try it). Not seen
+`WeaponMovesApplicationChangedEvent` says. The capability `blocks.move_followups` is on on both sides since 0.2.0-dev.29, so the
+sample includes the Parrying Blade when its dependencies are available. Checks `16c-b` and `16c-d` have not confirmed it
 in a game client.
 
 Docs: `docs/kiln/modding/item-blocks.md` ("Moves", "Follow-ups", "Parts"), `docs/kiln/modding/animations.md` ("`clips`", "Retargeting", "Player states").

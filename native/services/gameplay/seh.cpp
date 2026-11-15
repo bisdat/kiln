@@ -6,6 +6,16 @@
 #include "internal.h"
 
 namespace kg {
+bool seh_build_target(uintptr_t target) {
+    MEMORY_BASIC_INFORMATION m{};
+    if (!VirtualQuery(reinterpret_cast<void*>(target), &m, sizeof m) || m.State != MEM_COMMIT ||
+        (m.Protect & (PAGE_GUARD | PAGE_NOACCESS)) ||
+        !(m.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) ||
+        target + 16 < target || target + 16 > reinterpret_cast<uintptr_t>(m.BaseAddress) + m.RegionSize) return false;
+    __try { volatile const uint8_t* p = reinterpret_cast<const uint8_t*>(target); for (int i=0; i<16; ++i) (void)p[i]; return true; }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+
 
 bool seh_call(WalkFn f, void* ctx, unsigned long* code) {
     __try {

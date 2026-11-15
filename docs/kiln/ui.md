@@ -50,25 +50,46 @@ e.Visible = false;       // hide for now; e.Text = "…" relabels; e.Dispose() r
 - The game's menus do not scroll: every entry before Settings pushes the game's own entries down, and with enough of
   them Quit leaves the screen. So the player's Kiln setting `modEntries` (`kiln/config/menus-client.json`, on the
   Mods page under **Kiln settings**) decides when mods' entries are drawn: `Auto` (the default: every one in the pause
-  menu where it scrolls, below; otherwise as `Few`), `Few` (a menu draws them while it has at most 3 visible ones, else
-  none of them), `Always` (every one, as before 0.2.0-dev.27) or `Never`.
-- **The pause menu scrolls (an experiment, feature `ui.menu_scroll`).** With more than 3 mods' entries kiln.ui wraps
-  the pause menu's column in the game's own scroll view (the one the credits use: mouse wheel, clipping, following the
-  keyboard and gamepad focus); with fewer it draws the menu exactly as the game does. Begin and end sit at the
-  column's own open and close in the game's builder (`native/services/ui/menu_scroll.h`). A crash guard writes
-  `kiln/state/menu-scroll.trying` before the first scrolled frame of a start and removes it once the scrolled menu has
-  drawn 48 frames in that process (a wrong nesting would have ended the game by then; quitting afterwards is fine); a
-  start that finds it (or cannot read it) keeps scrolling off (`kiln/state/menu-scroll.off`, naming the Kiln version
-  and game build, written before the marker goes; another version or build tries once more; delete the file to try
-  again) and tells the player with a toast. A fault in Kiln's own calls closes what it opened, in order, and turns
-  scrolling off; when even that fails the game ends on purpose with a kiln.log line, rather than a moment later in its
-  own menu code. kiln.log says when it is on (`ui: the pause menu can scroll`, `ui: the pause menu scrolls: ...`
-  with the sizes it saw) and when it switched itself off and why. The main menu does not scroll. Kiln's
-  own **Mods** entry is always drawn. Every mod's entry of the menu the player can open where they are (the main
-  menu, or the pause menu in a world) is listed on the Mods page under **Menu entries**; choosing one there closes the
-  Kiln menu and runs the entry's `onClick` exactly as the menu would (on the UI thread after the next frame). Nothing
-  changes for a mod: `Ui.Menus.Add` returns the entry as before, whether a menu draws it or not. The 3 is a guess
-  (no row height is known for a 1080p screen); the guided client check `MenuRowsLeaveQuitOnScreen` asks for it.
+  menu while it can scroll, below, wrapped or not; otherwise as `Few`), `Few` (a menu draws them while it has at most
+  3 visible ones, else none of them), `Always` (every one, as before 0.2.0-dev.27) or `Never`.
+- **The pause menu scrolls (an experiment, feature `ui.menu_scroll`).** When its entries (the game's, Kiln's and the
+  mods', from the first to Quit) are taller than the menu's column at this resolution and UI scale, kiln.ui wraps the
+  column in the game's own scroll view (the one the credits use: mouse wheel, clipping, following the keyboard and
+  gamepad focus); when they fit it draws the menu exactly as the game does. This holds in every `modEntries` mode:
+  with SET and Kiln, the game's 13 entries plus Kiln's Mods, Creative and SET tools already put Quit below a 1280x720
+  or 1920x1080 screen. The height comes from the game's own layout: Kiln opens and closes empty frames of no size
+  before the menu's first entry, right after it (one row's height) and after its last, and decides for the next
+  frames (the layout read is two frames old). A bottom frame below the column is not laid out where it is drawn (the
+  owner's 1920x1080 dev build read 978 of 1020 with Quit below the screen), so it counts only when it is at least the
+  entries' count times a row; else the entries' count times a row decides, and the old count rule may wrap too. The
+  menu leans to scrolling: it wraps when the entries are taller than the column minus one row, and unwraps only 12 UI
+  units below that (a row is about 60), so it never flips back and forth; two readings that disagree keep it a scroll
+  view for the rest of the game. The game's own spacer and build number below Quit do not count. Until a height has
+  been read (the first frames of a game, or a game build where it never reads) it scrolls once it has more than 3
+  mods' entries, as dev.27 and dev.28 did. Begin and end sit at the column's own
+  open and close in the game's builder (`native/services/ui/menu_scroll.h`). A crash guard keeps
+  `kiln/state/menu-scroll.trying` on the disk while Kiln's calls in the menu (the height frames, the scroll view) run
+  and have not yet drawn 48 frames each in that start (a wrong nesting would have ended the game by then). The frames
+  add up over the start's openings of the menu: the marker goes 8 frames after the menu closes, at the end of the frame
+  in which the player chose Quit to Desktop, when the game destroys a world in order, and at an exit with code 0, and
+  it is written again at the next opening until the 48 are reached. A world stop during a UI frame clears it once
+  that frame finishes. A failed deletion is retried every 8 UI frames and at orderly world stops or exit; a new trial
+  cancels the pending deletion before its calls. So only a game that ends in (or within a few
+  frames of) Kiln's calls leaves it; a start that finds it (or cannot read it) keeps scrolling and the height frames
+  off (`kiln/state/menu-scroll.off`, naming the Kiln version and game build, written before the marker goes;
+  another version or build tries once more; delete the file to try again) and tells the player with a toast. A fault
+  in Kiln's own calls closes what it opened, in order, and turns scrolling off; when even that fails the game ends on
+  purpose with a kiln.log line, rather than a moment later in its own menu code. kiln.log says when it is on
+  (`ui: the pause menu can scroll`), what it read (`ui: the pause menu's entries: <entries> of <space> UI units`,
+  then each change: `... are taller than its space ...: it scrolls`, `... fit its space ...: drawn as the game draws
+  it`), the scroll view's sizes (`ui: the pause menu scrolls: ...`) and when it switched itself off and why. The main
+  menu does not scroll. Kiln's own **Mods** entry is always drawn. Every mod's entry of the menu the player can open
+  where they are (the main menu, or the pause menu in a world) is listed on the Mods page under **Menu entries**;
+  choosing one there closes the Kiln menu and runs the entry's `onClick` exactly as the menu would (on the UI thread
+  after the next frame). Nothing changes for a mod: `Ui.Menus.Add` returns the entry as before, whether a menu draws
+  it or not. `Few`'s 3 is the setting's limit, not a measured fit: the pause menu does not depend on it, and the main
+  menu (which does not scroll) can still lose its last entries on a small screen; the guided client check
+  `MenuRowsLeaveQuitOnScreen` asks how many entries fit before Quit leaves the screen.
 
 ### Which screen is open
 ```csharp
@@ -150,7 +171,7 @@ server keeps the real values (no healing, no spending, no capacity); a player wi
 see the game unchanged. Native: in-core `kiln.ui.values` (`native/core/abi/services/kiln_ui_values.h`). Sample:
 `mods/samples/ValueBars`. Guided checks: `05a-c1` to `05a-c5` in `mods/tests/client-pass/Dev28ValuesUi.cs`.
 
-| Member | Draws | Current / Max | Edit | Row (held until) |
+| Member | Draws | Current / Max | Edit | Row (guided check) |
 |---|---|---|---|---|
 | `ItemBar(item, provider)` | detail view number and bar, its label | what the game prints (water: **charges**; at most 2,147,483,647) | fraction, numbers, label | `ui.values.detail` (`05a-c1`) |
 | `SlotBar(item, provider)` | the slot bar (only its fraction shows) | raw fuel units | fraction, numbers | `ui.values.slot` (`05a-c1`) |
@@ -159,9 +180,11 @@ see the game unchanged. Native: in-core `kiln.ui.values` (`native/core/abi/servi
 | `TooltipLines(item, provider)`, `OpenTooltipDetails()`, `CloseTooltipDetails()` | lines in Kiln's Item details window | – | up to 16 lines per detail view | `ui.values.tooltip_lines` (`05a-c4-viewer`) |
 | `Slots()`, `SubscribeSlots(onFrame)` | (reads) the slots of the last completed UI frame | – | – | `ui.slots.inspect` (`05a-c5`) |
 
-`item` is an `ItemId`, `default` for every item. Every row is off on a server, on a build where its game code did not
-resolve, and **until its guided check passed** (the client gate: [services/caps.md](services/caps.md#the-client-gate-dev28));
-the pass and a preview profile switch them on.
+`item` is an `ItemId`, `default` for every item. Every row is off on a server and on a build where its game code did not
+resolve. They are on in every game since 0.2.0-dev.29, subject to their dependencies, but none has been confirmed
+in a real game by the checks above ([services/caps.md](services/caps.md#the-client-gate-dev28)).
+
+These six rows exist only on a game client, never on a dedicated server. Their hooks install on first use by a mod (including a slot snapshot read), then remain installed for the process. They require the measured client build 26430625 (SHA `5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77`); after a game update they are off until Kiln is updated. Slot collection continues after its last consumer leaves. Providers run synchronously with no enforced time budget: a slow or hanging provider can freeze the game.
 
 **A provider** (`UiBarProvider`) gets the context, the item (`UiItemView`) and the value as the earlier providers left
 it, and answers `UiProviderDecision.Pass`, `.Replace(new UiBarEdit(...))` (only its non-null fields change) or
@@ -590,7 +613,7 @@ tables in the same header.
   there, its gamepad hook. The game's own load runs first and under no lock of Kiln's, so loads on several threads
   never wait for each other because of Kiln, and a load that fails keeps its error (`native/services/ui/load_hook.h`;
   `native/services/ui/tests/test-load-hook-wine.sh` runs the hook in a Windows process under Wine, no game).
-- `KILN_UI_DISABLE=1` turns the overlay off (the service is then unavailable). It also turns off the progress window of the
+- `KILN_UI_DISABLE=1` turns the whole UI service off (the service is then unavailable). It also turns off the progress window of the
   early step (`kiln.progress`, [eml.md](eml.md#what-you-see-while-it-runs)).
 - The game-UI hooks cost one check per UI frame and per menu-entry call (a return-address compare); entries draw only
   while their menu is open. `KILN_NO_MENU_LOAD=1` keeps the mods' load at the first world step.
@@ -610,3 +633,71 @@ Kiln.Ui follows [the API contract](modding/contract.md) as far as it applies. It
   `[AnyThread]`, as their docs said.
 - **Events.** `Ui.Screens.Changed` (the game's UI thread, at once) and `ScreenChangedEvent` (the bus, tick thread, one
   step later) are two deliveries of one native callback, not two sources; both stay.
+
+## Overlay startup crash guard
+
+Before Vulkan hooks are installed, Kiln flushes a versioned record to
+`kiln/state/overlay-start.guard`. It records hooks installed, instance seen, device seen,
+swapchain created, and completes after the first successful present with the overlay drawn.
+A game that ends before that frame, however it ends, counts as an interrupted attempt (closing
+the game while it is still loading does too: the cost is one start without the overlay).
+
+On the next start only overlay drawing steps aside. Keys, native game-menu rows and
+`kiln.ui.tick` remain available. The drawing capability rows in
+`kiln/state/capabilities.json` carry the reason. The log says:
+
+> ui: the game closed during the last start while Kiln's overlay was starting (stage: instance seen); the overlay's drawing stays off for this start; key bindings and the Mods menu still work
+
+The stage varies. When detected it adds:
+“NVIDIA Streamline (a frame generation mod) is installed; it wraps the same graphics calls”.
+This is a likely conflict, not proof of the crash's cause.
+
+Once a guarded start has run for a minute, the next start tries the overlay again once
+(the log says so; automatic Streamline protection still takes precedence). A second interrupted attempt at the same stage keeps it off. To re-enable it, close the
+game and delete `kiln/state/overlay-start.guard`. Removing a detected graphics wrapper
+also permits a new attempt: the guard compares presence of `sl.interposer.dll`,
+`nvngx_dlss.dll`, `dxgi.dll`, `ReShade64.dll`, `opengl32.dll`, and `powrprof.dll`
+directly in the game folder or its `Streamline/` folder. Loaded Streamline, DLSS and
+ReShade also count; loaded Windows system copies of dxgi/opengl32/powrprof do not. It does not scan arbitrary
+subfolders. Unknown/unreadable records permit normal startup. File errors are logged once
+and do not prevent startup. This guard does not make Streamline and the overlay compatible.
+
+
+## Frame generation mods and drawing off
+
+When `sl.interposer.dll` is loaded, or installed directly next to the game or under
+`Streamline/`, Kiln automatically disables its Vulkan overlay drawing before installing
+any Vulkan hooks. No first crash is needed. The log explains the choice and the override.
+
+- `KILN_UI_OVERLAY=0`: drawing off; keep keys, native menu rows, game UI state and UI ticks.
+- `KILN_UI_OVERLAY=1`: try drawing even with Streamline or a guarded/locked record. This
+  can crash; the crash guard still records this attempt.
+- Unset (or another value): automatic choice, including crash-guard protection.
+- `KILN_UI_DISABLE=1`: turn the whole UI service off; wins over both overlay switches.
+
+These are environment switches. kiln.ui does not read a kiln.json setting for them.
+For Steam, set the variable in the game's launch environment using your platform's usual
+method, and remove the old `KILN_UI_DISABLE=1` workaround to keep keys and menus.
+
+Drawing off preserves the game's Mods entry and mods' native menu rows, including scrolling,
+keyboard/mouse/wheel bindings and native input subscriptions, game screen/language/crafting
+state, camera reads/projection and `kiln.ui.tick`. Mod loading and audio's UI-frame drain
+can therefore run at the menu. Input discovery finds the process's visible game window
+without a Vulkan surface. An invisible window, wheel or screen never captures the game.
+
+Windows and full mod screens stay closed; their Show/Open calls do not throw. The reason
+is in `Ui.Status.Error` and the unavailable `ui.windows` row. HUDs, toasts, draw callbacks,
+render-frame drawing, images, radial wheels and swapchain screen effects cannot draw.
+`ui.draw`, `render.draw` and `kiln.screen` report unavailable with the same reason;
+`kiln.ui` and `kiln.render` remain available. The camera hook is independent of drawing.
+
+The existing full Mods page uses ImGui even though it occupies the game's Credits page
+slot. In drawing-off mode the Mods action instead toggles its native menu caption to show the drawing-off reason; it does not open an empty page or take input. Full mod-manager tabs and config
+windows need drawing; `ui.menu_page` reports unavailable. This fallback status and the
+capability rows explain the degraded state. The length and layout of the fallback caption need a real-game check.
+
+This mode avoids Kiln's Vulkan interception. It does not make Streamline and Kiln's drawing
+compatible. Prefer automatic drawing off for frame generation; use the force-on switch only
+when intentionally testing coexistence.
+
+The additive window size-constraints slot after v7 is described in the [UI service reference](services/ui.md).

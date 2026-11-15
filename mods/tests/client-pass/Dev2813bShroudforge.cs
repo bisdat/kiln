@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // 0.2.0-dev.28, package 13b-shroudforge (chapter 13 §13b): the C# equivalents of ShroudForge's rows. Orders 3800-3899.
-//   13-assets.catalog-client   the content blob catalog in a game client (holds assets.blob_catalog on the client side)
-//   13-world.transform-scale   a transform-scale write as players see and touch it (holds world.transform_scale)
+//   13-assets.catalog-client   the content blob catalog in a game client (assets.blob_catalog is open since dev.29; client acceptance unconfirmed)
+//   13-world.transform-scale   a transform-scale write as players see and touch it (world.transform_scale is open since dev.29; player-visible behavior unconfirmed)
 // The pack does not reference Kiln.Assets (ClientPass.csproj is not this package's file), so the catalog is reached through
 // the shared Kiln.Assets assembly the host has loaded, by name: the same calls a mod makes.
 using System.Reflection;

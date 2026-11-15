@@ -123,7 +123,7 @@ like `kiln.example`: `native/services/weather/`, `native/core/abi/services/kiln_
 | `kiln-ability` | An ability; `--impact` adds an Impact program | both, none | `ability tpl-ability:blast registered` |
 | `kiln-quest` | A quest chain with its giver and conversation from building blocks, in C# and `blocks/*.json` | both, mod | `quest tpl-quest:road-work defined (Player, 1 steps, journal Native, owner tpl-quest)`, `quest tpl-quest:lost-crates defined (Player, 2 steps, …)` |
 | `kiln-ui` | A game UI overlay (`--blocks true`: as blocks in `blocks/ui.json`, [ui-blocks.md](ui-blocks.md)) | client, mod | Correctly skipped by a server (`side` client). A client check is manual |
-| `kiln-native` | A C++ mod, `CMakeLists.txt` + `native.json` | both | `native mod tpl-native 0.1.0 loaded (boot, … kiln_native_init ok)` |
+| `kiln-native` | A C++ mod, `CMakeLists.txt` + `native.json` ([native-mods.md](../native-mods.md); with kiln.world and kiln.abilities' headers, write `KilnWorldProgramInfo` / `KilnImpactProgramInfo`) | both | `native mod tpl-native 0.1.0 loaded (boot, … kiln_native_init ok)` |
 | `kiln-model` | A glTF model with `assets/cook.json` | both, mod | `PASS TplModel_Blade.iconModel = …`, 3 references |
 | `kiln-sound` | Sounds and cues, `audio/`, `assets/cook.json` | both, mod | `sound chime: … (new)`, `cue chime: … (new)` |
 | `kiln-talents` | A talent tree, `skills/`, `icons/` | both, mod | `tree tpl-talents:talents registered (2 nodes…)` |
@@ -144,6 +144,7 @@ like `kiln.example`: `native/services/weather/`, `native/core/abi/services/kiln_
 | `kiln-screen-effect` | Screen effects as blocks: a tint while a status lasts, a flash where a spell lands | both, kiln | Created from the packed SDK and built; what the screen shows needs a client |
 | `kiln-hooks` | Advanced: a detour on a function of the game itself with Kiln.Hooks, which counts calls and runs the original (`KilnAdvanced`) | server, none | Created from the packed SDK and built; not run in a lab (the sample `HookSample` is) |
 | `kiln-shader` | Advanced: a particle effect moved by the mod's own shader hooks (`shaders/swirl.hlsl`, the built `shaders/build/swirl.spv`, `blocks/vfx.json`) | both, mod | Created from the packed SDK and built, the built module arrives in the mod folder unchanged; what it draws needs a client |
+| `kiln-system-wrap` | Your code around one of the game's own ECS programs: a typed wrap of `fuel_setup` (`Systems.Wrap<Ecs.Programs.FuelSetup>`, `AroundEach`) that makes wells refill faster, on the game's worker threads ([services/systems.md](../services/systems.md)) | server, none | Not yet created from the packed SDK; the same wrap is the sample `WaterWorks` (built in the tree) and the lab row "AroundEach fuel_setup scale x4" of `mods/tests/systems-test` |
 | `kiln-world-program` | Advanced: a program of the mod's own in the game's scheduler (`kiln.programs.json` declares it, `EcsPrograms.Bind` gives it its code on the game's worker threads, the tick thread reads what it counted; `/census`) | server, none | Created from the packed SDK and built, `kiln.programs.json` arrives in the mod folder; run on a test server, where `/census` counted the world's entities with health |
 
 ### Block templates

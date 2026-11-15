@@ -7,7 +7,10 @@ spawns creatures, plays an effect, sets the time), tells you what to do and what
 by itself, and asks one yes/no question. You answer with a key. Every answer is written to a file, so a pass leaves a
 record that a script turns into a summary.
 
-The pass covers the lines of the status page that wait for a game test: the 18 rows of "Built, game test pending", the
+The pass confirms behavior in the real game; it no longer opens capabilities. All 22 holds from 0.2.0-dev.28
+are gone in 0.2.0-dev.29, and the remaining 20 capabilities are on but unconfirmed. The gate mechanism remains
+([caps](services/caps.md#the-client-gate-dev28)); its list is empty, so no `"preview"` setting is needed.
+The pass covers the release’s "On, not yet confirmed in a real game" entries, the
 dev.22 and dev.21 client checklists (11 items each), and two lines new in 0.2.0-dev.26 (the achievement guard, and
 Kiln's unload when the game quits). `mods/tests/client-pass/rows.json` maps each line to its checks.
 
@@ -48,6 +51,7 @@ assets built first: their descriptions say so).
 | `menu-many-test` | `mods/tests/menu-many-test` | many pause-menu entries (`menu.rows-quit`, `menu.scroll`); its setting `Entries` (0 to 24) takes a new number without a restart |
 | `weapon-moves-test` | `mods/tests/weapon-moves-test` (run `build-assets.py` first) | moves and held models with moving parts (`blocks.moves-*`, `blocks.held-animated`); `blocks.held-animated-two-players` needs a joined dedicated server |
 | `cosmetic-sample` | `mods/samples/CosmeticSample` | session 2 only: the hood and the cape |
+| `roster-cap-fixture` | `mods/tests/roster-cap-fixture` (data only) | `17-roster-client`: 93 new roster NPCs, so the roster holds 128; it changes the Survivors directory of every world it is in, so load it for that check. `17-roster.refused-start`: the same fixture with `kiln/control/roster.fail-install`, a start that must stop before any world |
 
 **Frameworks profile** (sessions 3 to 5): `client-pass` and one mod of each framework you have: an EML mod, a
 ShroudForge mod (one that writes its own settings helps `launcher.kept-mod-files`), a Greeneye mod, Flame (Creative

@@ -97,7 +97,9 @@ runtime opens assemblies through it, and every managed load then fails with `0x8
 | `client install ZIP`, `client uninstall` `[--dir D] [--real]` | `bundle install/uninstall` for the client; without `--dir` the Steam client folder, which needs `--real` |
 | `client activate PROFILE \| --deactivate [--dir D] [--real]` | Profile activation: `kiln/profile.json`, chain.ini `[profile]`, `<configDir>/native.json` (Z: or copy mode) |
 | `client play-once vanilla\|no-mods\|profile\|clear [--profile P] [--dir D] [--real]` | Writes `kiln/play-once.ini` for the next start (profile: also `kiln/profile.once.json` + `kiln/chain/once.ini`). Never starts the game and never touches Steam's config |
-| `library import PATH...`, `library list [KIND]` | The launcher's content-addressed mod library (`$KILN_DATA_DIR`, else `~/.local/share/kiln`) |
+| `library import PATH...`, `library list [KIND]` | The launcher's content-addressed mod library (`$KILN_DATA_DIR`, else `~/.local/share/kiln`); `list` marks an earlier version an update kept "(kept for a roll back)" |
+| `library rollback P kind:id[@version]` | (dev.29) Puts the earlier version an update kept back into profile P (the newest kept one unless named), as the launcher's "Roll back to" does; the version rolled away from is kept. Saves the profile only: the game's `kiln/profile.json` and the mod's settings in the game folder follow at its next activation ([launcher/catalog.md](launcher/catalog.md), "Rolling back an update") |
+| `library replace-dll native:ID FILE --profile P [--confirm]` | (dev.29) Makes a new Library build of a native DLL mod with one DLL swapped, as the launcher's "Replace DLL…" does; the build before it is kept for a roll back. `--confirm` accepts the two questions (another file name; another kind of DLL). Saves the profile only: the game folder follows at the profile's next activation ([launcher/catalog.md](launcher/catalog.md), "Replace DLL…") |
 | `profile create NAME [--copy-from P]`, `profile add P kind:id[@version]... [--disabled]`, `profile show P [--side S]` | Launcher profiles; `show` prints the resolved load order |
 
 ### Preflight checks
@@ -140,7 +142,10 @@ start (adds `gameSettings`). kilnctl never edits an existing file; change the po
 Files in `runner/systemd/`:
 - `kiln@.service`: `ExecStartPre=%h/.local/bin/kilnctl preflight %i`, `ExecStart=%h/.local/bin/kilnctl run %i`,
   `Type=exec`, `KillSignal=SIGINT`, `KillMode=mixed` (only kilnctl gets SIGINT; whatever is left after it exits is
-  SIGKILLed), `TimeoutStopSec=90`, `Restart=on-failure`, `RestartSec=15`, at most 5 starts in 10 minutes.
+  SIGKILLed), `TimeoutStopSec=90`, `Restart=on-failure`, `RestartSec=15`, at most 5 starts in 10 minutes, and
+  `RestartPreventExitStatus=1 2 3`: exit status 1 (kiln.boot stopped the start, 0x4B01), 2 (the NPC roster cannot be
+  held, 0x4B02) and 3 (the mods' NPCs and quests could not be built at all, 0x4B03) mean the mod list cannot run, so
+  the unit stays down until it is fixed (`kilnctl run` passes the server's status on; Wine gives the low byte).
 - `kiln-backup@.service` + `kiln-backup@.timer`: `kilnctl backup %i` daily (randomised by 30 min, `Persistent=true`).
 
 A release ships the three units next to kilnctl (`runtime/`; on GitHub as `kiln-systemd-units-<version>.tar.gz`):
@@ -171,6 +176,12 @@ start limit.
 unverified build it ports Kiln's symbols (`tools/sigport/port.py`), boots the lab gate and marks the build verified on
 green, else leaves `NEXT.txt` + `symbols.patch` for a human and the server starts in safe idle. Record a gate baseline
 once: `kilnctl gate <name> --baseline`. See docs/kiln/sigport.md.
+
+`NEXT.txt` also lists the port's descriptor reviews (`sig needs review: <symbol>: was [...], is [...]`, from
+sigport's report): a described game function whose code reads other argument positions on the new build, or whose
+descriptor the core would refuse there. They do not stop a mark, and a review line turns nothing off by itself: only
+a descriptor the core refuses on the new build keeps that function's typed hooks and calls off (its `sig/<symbol>`
+row) until it is fixed; review the others before relying on them ([sigport.md](sigport.md#descriptors-across-a-port)).
 
 ## Files kilnctl writes
 | Path | What |

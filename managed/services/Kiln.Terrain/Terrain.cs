@@ -4,18 +4,20 @@ namespace Kiln;
 
 /// <summary>
 /// Bounded terrain overlays: a mod declares a patch of ground (an ore vein, a mound, a tunnel) and Kiln applies it once
-/// per world over several ticks, remembers which 8-cell blocks the plan owns and at which version, and never writes
-/// over what someone changed afterwards. The cells are ordinary <see cref="Build"/> edits: the game saves them and
+/// per world over several ticks and remembers which 8-cell blocks the plan owns and at which version. Recorded
+/// plans protect player edits; missing history uses a presence heuristic that can miss a heavily excavated overlay.
+/// The cells are ordinary <see cref="Build"/> edits: the game saves them and
 /// sends them to every client, also to players without mods.
 /// </summary>
 /// <remarks>
 /// <para>Server side, tick thread, from mod code. Game materials only (terrain 1 to 116, building blocks 128 to 212).</para>
 /// <para><b>Removing a plan does not restore the ground.</b> A saved edit hides the terrain under it for good and
-/// nothing can delete it: <see cref="Forget"/> ends the plan's ownership, the cells stay.</para>
+/// nothing can delete it: <see cref="Forget(string)"/> ends the plan's ownership, the cells stay.</para>
 /// </remarks>
 public static class Terrain
 {
     private static readonly TerrainSession Session = new();
+    internal static TerrainWorkBudget WorkBudget => Session.Budget;
 
     /// <summary>For tests and the test kit: the world behind the calls. Null = Kiln.Build and Kiln.Saves.</summary>
     internal static Func<ITerrainBackend>? BackendFactory;
@@ -81,7 +83,7 @@ public static class Terrain
     /// all-or-nothing: a cancel or a failure leaves the batches already written in the world, and the result counts
     /// them.</summary>
     /// <returns><see cref="TerrainResult.Ok"/> for <see cref="TerrainState.Completed"/> and
-    /// <see cref="TerrainState.AlreadyApplied"/>; otherwise the reason, and the blocks left alone.</returns>
+    /// <see cref="TerrainState.AlreadyApplied"/> or <see cref="TerrainState.Adopted"/>; otherwise the reason, and the blocks left alone.</returns>
     /// <exception cref="ArgumentException">The patch or the options are not valid (empty, too big, outside the grid, a
     /// height that is not a number, a palette number with no entry, a bad id).</exception>
     /// <exception cref="KilnUnavailableException"><c>terrain.overlays</c> is off.</exception>
@@ -95,7 +97,7 @@ public static class Terrain
     }
 
     /// <summary>A dry run of <paramref name="patch"/>: its size, what an <see cref="Apply"/> would do now and the
-    /// blocks it would leave alone. Writes nothing and records nothing.</summary>
+    /// blocks it would leave alone. Writes no cells or plan receipt; a missing ledger is created with its provenance.</summary>
     /// <returns><see cref="TerrainPlanReport.Ok"/> false when the world is not running or the tiles did not load.</returns>
     /// <exception cref="ArgumentException">As <see cref="Apply"/>.</exception>
     /// <exception cref="KilnUnavailableException"><c>kiln.terrain</c> is off, or the world cannot be read.</exception>
@@ -140,6 +142,18 @@ public static class Terrain
         return new TerrainEngine(Backend("Terrain.Forget"), Session, null).Forget(id);
     }
 
+    /// <summary>Forget ownership, or explicitly refuse terrain restoration (original cells are not stored).</summary>
+    [ServerOnly]
+    [TickThreadOnly]
+    [RequiresCapability("terrain.overlays")]
+    public static TerrainResult Forget(string id, bool restoreTerrain)
+    {
+        if (!TerrainPlan.ValidId(id)) throw new ArgumentException("invalid plan id", nameof(id));
+        TerrainCaps.Require(TerrainCaps.Overlays);
+        Services.RequireTickThread("Terrain.Forget");
+        return new TerrainEngine(Backend("Terrain.Forget"), Session, null).Forget(id, restoreTerrain);
+    }
+
     private static (TerrainEngine, TerrainPlan, TerrainApplyOptions, int) Begin(TerrainPatch patch, TerrainApplyOptions? options, string capability, string api)
     {
         var o = options ?? new TerrainApplyOptions();
@@ -161,7 +175,7 @@ public static class Terrain
             _session = Lifecycle.ServerSession;
         }
         Watch(mod);
-        return new BuildTerrainBackend(mod);
+        return new BuildTerrainBackend(mod, Session.Budget);
     }
 
     private static void Raise(TerrainChangedEvent e)

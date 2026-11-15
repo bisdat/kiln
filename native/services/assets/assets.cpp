@@ -40,9 +40,22 @@ struct PendingIcon {
 std::vector<PendingIcon> g_pending_icons;
 std::mutex g_pending_mu;
 // A boot generation's owners of required participants (g_pending_mu): a texture or icon of theirs queued until S appears that then
-// fails stops the start (kiln.boot activation_fault; a game client only, a dedicated server queues none).
+// fails stops the start. Also resolves raw resources' late omission provenance (including dedicated servers).
 std::map<KilnOwner, std::string> g_boot_required_owner;
 }  // namespace
+
+void report_resource_omission(const ResourceOmission& omission) {
+    std::string mod = omission.mod;
+    if (mod.empty()) {
+        std::lock_guard lock(g_pending_mu);
+        if (const auto it = g_boot_required_owner.find(omission.owner); it != g_boot_required_owner.end()) mod = it->second;
+    }
+    const std::string key = key_str(omission.key);
+    LOGW("assets: mod %s owner %llu resource %s refused: %s", mod.empty() ? "<unknown>" : mod.c_str(),
+         static_cast<unsigned long long>(omission.owner), key.c_str(), omission.why.c_str());
+    if (!mod.empty())
+        kiln::boot::activation_fault(g_api, g_self, mod, "assets", key, "kiln.assets: " + omission.why);
+}
 
 namespace {
 
@@ -468,14 +481,18 @@ KilnResult load_manifest(KilnOwner owner, const std::string& mod_dir, std::strin
             k.part = e.value("part", 0);
             const std::string mode = e.value("mode", "any");
             uint32_t flags = mode == "override" ? KILN_ASSET_PUT_OVERRIDE : mode == "new" ? KILN_ASSET_PUT_NEW : 0;
-            if (op_resource_put(owner, &k, bytes.data(), bytes.size(), flags) == KILN_OK) {
+            const KilnResult put = op_resource_put(owner, &k, bytes.data(), bytes.size(), flags);
+            if (put == KILN_OK) {
                 ++res;
             } else {
                 Key kk;
                 std::memcpy(kk.g, k.guid, 16);
                 kk.type = k.type;
                 kk.part = k.part;
-                fail(player_graph_key(kk) ? "resource " + file + ": refused: " + key_str(kk) +
+                fail(k.type == 0xe64ee036u && put == KILN_ERR_UNAVAILABLE
+                         ? "resource " + file + ": VFX preflight refused " + key_str(kk) +
+                               ": capacity exhausted or original census/enumeration unavailable (see assets log)"
+                         : player_graph_key(kk) ? "resource " + file + ": refused: " + key_str(kk) +
                                                 " is the player's animation graph, reserved for kiln.playeranim (add player animation states in"
                                                 " assets/player-states.json instead)"
                                           : "resource " + file + ": put failed");
@@ -859,17 +876,22 @@ const KilnAssetsApi kTable = {
     &t_cat_open, &t_cat_read, &t_cat_close,
 };
 
+const KilnAssetsVfxApi kVfxTable = {
+    {sizeof(KilnAssetsVfxApi), KILN_ASSETS_VFX_VERSION}, &op_vfx_budget, &op_vfx_set_capacity, &op_vfx_resource_put,
+};
+
 // ---- control commands: kiln/control/assets.cmd -> assets.result.json (handled by the core's console) ------------
 // We expose "assets dump <spec>" / "assets status" through a tick task that polls the control folder ourselves is
 // heavy; instead the managed Kiln.Assets exposes Assets.Dump via the table. A native console command would need a
 // core hook we do not own, so the dump is reachable through C# and through the table's dump() for the models worker.
 
 void KILN_CALL on_ready(void*) {
+    const bool boot_profile = kiln::boot::collect(g_api, g_self, "assets", &prepare_boot, nullptr);
     // The resource system may already be up (services load after the game's early init on the client); try to bind.
     if (uintptr_t S = g_S.load()) on_resource_system_ready(S);
     // Load every mod's assets.json now, before the UI builds, so boot-time icons are served from the first frame. A boot
     // profile (chapter 08) loads them in kiln.boot's prepare instead, after OnBoot, still before the game's entry point.
-    if (kiln::boot::collect(g_api, g_self, "assets", &prepare_boot, nullptr))
+    if (boot_profile)
         LOGI("assets: boot profile: the mods' assets.json load with the boot generation");
     else
         load_profile_manifests();
@@ -898,6 +920,19 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     KilnBuildInfo bi{sizeof bi};
     api->build_info(&bi);
     g_client = bi.side == KILN_SIDE_CLIENT;
+    // Census only the original metadata; loader additions are accounted again against the actual type
+    // enumeration at bind/list time. Never read the executable or infer a larger capacity from options.
+    const std::string game_dir = api_path(KILN_PATH_GAME);
+    fs::path archive = game_dir.empty() ? fs::path{} : fs::path(widen(game_dir)) / (g_client ? L"enshrouded.kfc" : L"enshrouded_server.kfc");
+    fs::path original = archive;
+    original += L".bak";
+    std::error_code ec;
+    if (!game_dir.empty() && (fs::exists(original, ec) || ec)) archive = original;
+    int64_t capacity = 0;
+    constexpr char cap_name[] = "caps/vfx.map_limit_request";
+    if (api->constant(KilnStr{cap_name, sizeof cap_name - 1}, &capacity) != KILN_OK || capacity <= 0 || capacity > (1 << 20))
+        capacity = 2048;
+    vfx_preflight_start(archive.wstring(), static_cast<uint32_t>(capacity));
     if (!bi.hooks_enabled) {
         LOGI("assets: hooks disabled (safe idle); service unavailable");
         // still publish the table so managed code sees "unavailable" cleanly via each op's checks
@@ -913,5 +948,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
             LOGW("assets: resources unavailable: %s", why.c_str());
         }
     }
-    return api->register_service(owner, KilnStr{KILN_ASSETS_SERVICE, sizeof(KILN_ASSETS_SERVICE) - 1}, &kTable);
+    KilnResult rc = api->register_service(owner, KilnStr{KILN_ASSETS_SERVICE, sizeof(KILN_ASSETS_SERVICE) - 1}, &kTable);
+    if (rc != KILN_OK) return rc;
+    return api->register_service(owner, KilnStr{KILN_ASSETS_VFX_SERVICE, sizeof(KILN_ASSETS_VFX_SERVICE) - 1}, &kVfxTable);
 }

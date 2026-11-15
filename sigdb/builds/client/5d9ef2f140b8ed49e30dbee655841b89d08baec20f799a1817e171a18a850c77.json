@@ -9,12 +9,13 @@
   "verified": true,
   "note": "runtime-verified through Steam (GE-Proton11-11), policy any, core + every service + kiln-emf + probe + ui-test + menubuttons: side client, sigdb 306/306 symbols, 434/434 constants (client.d composed), SimStep + WorldDestroy hooked, boot complete, 0 errors; main menu entries Kiln / ui-test / Mods (the Kiln sample screen opened); hosted a LOCAL world offline (saves: world loaded: slot 0x0002 (world1.ksd)): server world 60 steps/s on the GameServer thread, client and prediction worlds on the main thread, local player 1; ui-test all checks PASS (screens MainMenu/Loading/InGame/PauseMenu/Map/Crafting, menu entries chosen, crafting state), Kiln crafting tabs and subcategories shown, Insert overlay; tick cost as on ce6fdba6 (server step p50 2.5 ms, Kiln Pre 0.037 ms; client 1.2 ms); back to the menu (worlds stopping, shutdown save), clean quit (Shutdown 'Steam'). Not covered: joining a remote server, service write paths on the client. Added in dev.22 from static analysis only (resolved offline with sigdb_check.py, not yet seen running): ui.menu_page, ui.menu_page_sound, ui.error_popup (ui/PreGameCredits, ui/PreGameCreditsRet, ui/UiPlaySound and their constants). Levels (record 2, refreshed offline on 2026-11-11, no client run): lab = the names the boot above resolved, as its record listed them (199 named symbols, 434 constants, 106 features), each resolving to the same value today; every service loaded in that boot, but only ui-test ran, so lab here means loaded with Kiln's checks passing, not that the service test mods ran on the client. static = everything else, resolved offline only: the 186 @ probes (the boot's record did not list probes), the dev.22 ui names above, and every name declared since (the services audio, characters, emf-net, npcai, pacing, progression, quests, render, rules, skills, types and vfx, and new names of combat, creatures, gamedata, items, net, players, time and ui): 158 symbols, 210 constants and 70 features. sigdb now declares 543 symbols (441 defined, 102 captured), 644 constants (595 defined, 49 captured) and 176 features; all of them resolve offline on this exe.",
   "declared": {
-    "symbols": 661,
-    "constants": 753,
-    "features": 201
+    "symbols": 695,
+    "constants": 785,
+    "features": 213
   },
   "features": {
     "abilities.attributes": true,
+    "abilities.ecs_pin": true,
     "abilities.instances": true,
     "abilities.natives": true,
     "abilities.programs": true,
@@ -30,6 +31,7 @@
     "build.read": true,
     "build.write": true,
     "build.zones": true,
+    "caps.vfx.expansion_sites": true,
     "characters.id": true,
     "chat.players": true,
     "chat.receive": true,
@@ -67,6 +69,13 @@
     "creatures.slots": true,
     "creatures.table": true,
     "emf.attributes": true,
+    "events.build": true,
+    "events.component_net": true,
+    "events.death": true,
+    "events.equip": true,
+    "events.observe_marks": true,
+    "events.pickup": true,
+    "events.thread_report": true,
     "gamedata.buff_lookup": true,
     "gamedata.template_clones": true,
     "gameplay.build": true,
@@ -83,6 +92,7 @@
     "hooks.typed": true,
     "items.catalog": true,
     "items.equip": true,
+    "items.equip_sets": true,
     "items.fuel": true,
     "items.instances": true,
     "items.move": true,
@@ -131,6 +141,7 @@
     "quests.journal": true,
     "quests.knowledge": true,
     "quests.npc": true,
+    "quests.npc_pages": true,
     "render.camera": true,
     "repl.client": true,
     "repl.observe": true,
@@ -212,6 +223,7 @@
     "world.programs": true,
     "world.queue": true,
     "world.read_other": true,
+    "world.slice_record": true,
     "world.systems": true,
     "world.teleport": true,
     "world.write": true
@@ -232,6 +244,7 @@
     "abilities/CreateInstance": "0x123cfc0",
     "abilities/GetProgram": "0x123c090",
     "abilities/InstanceLookup": "0x123c400",
+    "abilities/ParallelAffinity": "0x9ae45b",
     "abilities/RegisterNative": "0x123fc90",
     "abilities/RunImpact": "0x1245000",
     "abilities/TriggerSequence": "0x219a30",
@@ -270,6 +283,16 @@
     "build/VoxelTileReady": "0x10bc130",
     "build/VoxelWrite": "0x10bb030",
     "build/voxel.base_size": "0x13d47a0",
+    "caps/VfxCreateSystem": "0x198590",
+    "caps/VfxInitResources": "0x1b0ed0",
+    "caps/VfxMapAllocate": "0x196ab0",
+    "caps/VfxMapReserveSite": "0x199563",
+    "caps/VfxPendingResize": "0x437b0",
+    "caps/VfxPendingResizeSite": "0x1996e2",
+    "caps/VfxRegisterGuid": "0x1981d0",
+    "caps/VfxTableAliasCopy": "0x199729",
+    "caps/VfxTableAllocationSite": "0x19959c",
+    "caps/VfxTableInitLoop": "0x1995d1",
     "chat/ChatLogAdd": "0xe6e1c0",
     "chat/MarkSent": "0xea7b40",
     "chat/ReceiveAddLine": "0xe620ca",
@@ -339,6 +362,15 @@
     "emf/ServerWorldSetup": "0x49be10",
     "emf/UiFrame": "0xda2100",
     "emf/WriteOther": "0x9b2930",
+    "events/BuildFinish": "0x4930d0",
+    "events/DeathBoundary": "0x277a1a",
+    "events/DeathNextEntity": "0x277e30",
+    "events/LootPickupProgram": "0x407f00",
+    "events/LootRangeProgram": "0x407d50",
+    "events/MarkIteratorWritten": "0x9d3150",
+    "events/MarkRecordWritten": "0x9d3280",
+    "events/PickupInRange": "0x3fb900",
+    "events/PickupToInventory": "0x3fbd70",
     "gamedata/GetBuffType": "0xe8c5c0",
     "gamedata/RegisterTemplateInfo": "0x9cb220",
     "gameplay/CraftRecipe": "0x478680",
@@ -478,6 +510,9 @@
     "quests/KnowledgeApplyOp": "0x121b0e0",
     "quests/KnowledgeApplyQueue": "0x121b2a0",
     "quests/KnowledgeInputPush": "0x41be46",
+    "quests/NpcEvalUnlocks": "0xf0c510",
+    "quests/NpcFind": "0xe97c70",
+    "quests/NpcIsUnlocked": "0xea4cb0",
     "quests/NpcRegistryNpcs": "0xe97ce0",
     "quests/NpcRegistrySetUnlocks": "0xec4800",
     "quests/NpcRegistryVersion": "0xe97cd0",
@@ -653,6 +688,7 @@
     "abilities/actor.trigger_counter": "0x178",
     "abilities/actor.trigger_size": "0x170",
     "abilities/actor.trigger_type": "0x20",
+    "abilities/impact.pin": "0x3d17f8",
     "abilities/inst.entity": "0x8",
     "abilities/inst.flags": "0x1f2",
     "abilities/inst.program": "0x4",
@@ -718,6 +754,21 @@
     "build/zone.abandoned": "0x46",
     "build/zone.entity": "0x40",
     "build/zone.stride": "0x48",
+    "caps/vfx.alias": "0x2118",
+    "caps/vfx.alias_capacity": "0x2120",
+    "caps/vfx.init_state": "0x2138",
+    "caps/vfx.map": "0x1bd8",
+    "caps/vfx.map_limit_relative": "0x50",
+    "caps/vfx.map_limit_request": "0x800",
+    "caps/vfx.pending": "0x20f8",
+    "caps/vfx.pending_bits": "0x800",
+    "caps/vfx.pending_count": "0x2100",
+    "caps/vfx.table": "0x1c38",
+    "caps/vfx.table_bytes": "0x60000",
+    "caps/vfx.table_capacity": "0x800",
+    "caps/vfx.table_capacity_offset": "0x1c40",
+    "caps/vfx.table_init_count": "0x800",
+    "caps/vfx.table_stride": "0xc0",
     "characters/rec.character": "0x50",
     "chat/gs.chat": "0x60",
     "chat/gs.player_stride": "0x148",
@@ -859,6 +910,7 @@
     "creatures/type.kind": "0x4c",
     "creatures/type.qname": "0x20",
     "creatures/type.size": "0x40",
+    "events/storage.players_mask": "0x7ddc0a",
     "gamedata/buffreg.collection": "0x20",
     "gamedata/tarr.cap": "0x10",
     "gamedata/tarr.count": "0x8",
@@ -926,7 +978,9 @@
     "items/strings.count": "0x1e4",
     "items/strings.keys": "0x1b8",
     "items/strings.values": "0x1d0",
+    "items/tx.empty_state": "0xa0",
     "items/tx.flags": "0xb0",
+    "items/tx.guard_flags": "0xb0",
     "items/tx.operator": "0xe0",
     "items/tx.ops": "0xf0",
     "items/tx.ops_inline": "0x118",
@@ -935,6 +989,7 @@
     "items/tx.result": "0x71a8",
     "items/tx.touched": "0x7140",
     "items/tx.touched_capacity": "0x10",
+    "items/tx.touched_count": "0x7148",
     "items/tx.touched_inline": "0x7168",
     "items/world.program_count": "0xe16f50",
     "items/world.program_stride": "0x1f28",
@@ -1066,7 +1121,14 @@
     "quests/list.capacity": "0x10",
     "quests/list.count": "0x8",
     "quests/list.entry": "0x10",
+    "quests/npc.stride": "0x88",
     "quests/npcdialog.resource": "0x14",
+    "quests/npceval.error": "0x1",
+    "quests/npcfind.npcs": "0x20",
+    "quests/npcquery.invalid": "0x1",
+    "quests/npcquery.state": "0x98",
+    "quests/npcreg.map": "0x38",
+    "quests/npcreg.mask": "0xa0",
     "quests/npcreg.npcs": "0x20",
     "quests/npcreg.state": "0x98",
     "quests/npcreg.version": "0x90",
@@ -1394,6 +1456,11 @@
     "world/registry.singletons.values": "0x745a10",
     "world/registry.templates": "0x30",
     "world/singletons.count": "0x400",
+    "world/slice.end": "0x2c",
+    "world/slice.entry": "0x10",
+    "world/slice.first": "0x28",
+    "world/slice.group": "0x20",
+    "world/slice.layout": "0x18",
     "world/storage.entities": "0x148",
     "world/storage.entities.cap": "0x158",
     "world/storage.entities.values": "0x188",
@@ -1463,6 +1530,7 @@
         "abilities/CreateInstance": "lab",
         "abilities/GetProgram": "lab",
         "abilities/InstanceLookup": "lab",
+        "abilities/ParallelAffinity": "static",
         "abilities/RegisterNative": "lab",
         "abilities/RunImpact": "lab",
         "abilities/TriggerSequence": "lab"
@@ -1472,6 +1540,7 @@
         "abilities/actor.trigger_counter": "lab",
         "abilities/actor.trigger_size": "lab",
         "abilities/actor.trigger_type": "lab",
+        "abilities/impact.pin": "static",
         "abilities/inst.entity": "lab",
         "abilities/inst.flags": "lab",
         "abilities/inst.program": "lab",
@@ -1487,6 +1556,7 @@
       },
       "features": {
         "abilities.attributes": "lab",
+        "abilities.ecs_pin": "static",
         "abilities.instances": "lab",
         "abilities.natives": "lab",
         "abilities.programs": "lab",
@@ -2124,14 +2194,22 @@
       "date": "2026-11-13",
       "evidence": "resolved offline (tools/sigport/build_record.py)",
       "symbols": {
+        "@world/ProgramRunner.layout": "static",
+        "@world/ProgramRunner.slice": "static",
         "world/RunInitPrograms": "static",
         "world/SliceTaskFn": "static",
         "world/StepPrograms": "static"
       },
       "constants": {
+        "world/slice.end": "static",
+        "world/slice.entry": "static",
+        "world/slice.first": "static",
+        "world/slice.group": "static",
+        "world/slice.layout": "static",
         "world/storage.players_mask": "static"
       },
       "features": {
+        "world.slice_record": "static",
         "world.systems": "static"
       }
     },
@@ -2149,6 +2227,38 @@
         "hooks.typed": "static",
         "items.volume": "static",
         "weather.sample": "static"
+      }
+    },
+    "dev28-07-cancelable-events": {
+      "level": "static",
+      "date": "2026-11-13",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "@events/DeathNext": "static",
+        "@events/ManualPickupCall": "static",
+        "@events/PlayerMask": "static",
+        "@events/RangePickupCall": "static",
+        "events/BuildFinish": "static",
+        "events/DeathBoundary": "static",
+        "events/DeathNextEntity": "static",
+        "events/LootPickupProgram": "static",
+        "events/LootRangeProgram": "static",
+        "events/MarkIteratorWritten": "static",
+        "events/MarkRecordWritten": "static",
+        "events/PickupInRange": "static",
+        "events/PickupToInventory": "static"
+      },
+      "constants": {
+        "events/storage.players_mask": "static"
+      },
+      "features": {
+        "events.build": "static",
+        "events.component_net": "static",
+        "events.death": "static",
+        "events.equip": "static",
+        "events.observe_marks": "static",
+        "events.pickup": "static",
+        "events.thread_report": "static"
       }
     },
     "dev28-08-onboot": {
@@ -2242,6 +2352,85 @@
       },
       "features": {
         "items.tool_wear_debit": "static"
+      }
+    },
+    "dev29-10-equipment-sets": {
+      "level": "static",
+      "date": "2026-11-15",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "@items/CommitGuards": "static"
+      },
+      "constants": {
+        "items/tx.empty_state": "static",
+        "items/tx.guard_flags": "static",
+        "items/tx.touched_count": "static"
+      },
+      "features": {
+        "items.equip_sets": "static"
+      }
+    },
+    "dev29-17a-vfx-cap": {
+      "level": "static",
+      "date": "2026-11-15",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "@caps/VfxInitResources.state": "static",
+        "@caps/VfxMapCountLimit": "static",
+        "@caps/VfxTableInitLoop.stride": "static",
+        "caps/VfxCreateSystem": "static",
+        "caps/VfxInitResources": "static",
+        "caps/VfxMapAllocate": "static",
+        "caps/VfxMapReserveSite": "static",
+        "caps/VfxPendingResize": "static",
+        "caps/VfxPendingResizeSite": "static",
+        "caps/VfxRegisterGuid": "static",
+        "caps/VfxTableAliasCopy": "static",
+        "caps/VfxTableAllocationSite": "static",
+        "caps/VfxTableInitLoop": "static"
+      },
+      "constants": {
+        "caps/vfx.alias": "static",
+        "caps/vfx.alias_capacity": "static",
+        "caps/vfx.init_state": "static",
+        "caps/vfx.map": "static",
+        "caps/vfx.map_limit_relative": "static",
+        "caps/vfx.map_limit_request": "static",
+        "caps/vfx.pending": "static",
+        "caps/vfx.pending_bits": "static",
+        "caps/vfx.pending_count": "static",
+        "caps/vfx.table": "static",
+        "caps/vfx.table_bytes": "static",
+        "caps/vfx.table_capacity": "static",
+        "caps/vfx.table_capacity_offset": "static",
+        "caps/vfx.table_init_count": "static",
+        "caps/vfx.table_stride": "static"
+      },
+      "features": {
+        "caps.vfx.expansion_sites": "static"
+      }
+    },
+    "dev29-17c-roster-cap": {
+      "level": "static",
+      "date": "2026-11-15",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "@quests/NpcPages.fields": "static",
+        "quests/NpcEvalUnlocks": "static",
+        "quests/NpcFind": "static",
+        "quests/NpcIsUnlocked": "static"
+      },
+      "constants": {
+        "quests/npc.stride": "static",
+        "quests/npceval.error": "static",
+        "quests/npcfind.npcs": "static",
+        "quests/npcquery.invalid": "static",
+        "quests/npcquery.state": "static",
+        "quests/npcreg.map": "static",
+        "quests/npcreg.mask": "static"
+      },
+      "features": {
+        "quests.npc_pages": "static"
       }
     },
     "emf": {

@@ -61,11 +61,17 @@ public sealed record EntityScaleResult(EntityId Entity, Scale3? Before, Scale3 R
     /// <summary>True when the scale changed (<see cref="WorldWriteStatus.Written"/> and another value than before).</summary>
     public bool Changed => WorldWriteStatus == WorldWriteStatus.Written && Before is { } b && Now is { } n && b != n;
 
-    /// <summary>Whether the entity has this scale again after a save and restart. The game's save does not keep a
-    /// transform scale, so Kiln keeps it beside the save (kiln.saves' entity attachments) and sets it again, in the
-    /// setting mod's name, when the loaded entity is matched. True: kept (or the game's own scale, which the game brings
+    /// <summary>Whether Kiln recorded this scale for replay after a save and restart. The tested placed prop's game save
+    /// omits transform scale; other entity families' serializers are not established by that test. Kiln keeps it beside
+    /// the save (kiln.saves' entity attachments) and sets it again, in the
+    /// setting mod's name, after a unique positional match and equal optional SpawnTime values (loaded entities have none).
+    /// When both are absent, use rechecks positional uniqueness; this is positional identity, not proof. Ambiguity stays
+    /// waiting until explicit reapplication or ordinary missed-session expiry; use World.GetWaitingTransformScales to
+    /// inspect it and SetTransformScale to explicitly choose the entity. True: kept (or the game's own scale, which the game brings
     /// back itself); false: this session only (an entity the save does not keep, such as most enemies, or kiln.saves is
-    /// off); null when nothing was set (<see cref="Ok"/> false). Since 0.2.0-dev.28.</summary>
+    /// off); null when nothing was set (<see cref="Ok"/> false). Matching uses template and position, not a durable
+    /// game entity identity. Unloading the mod does not restore an already written scale in the running world;
+    /// restore <see cref="Before"/> explicitly before unloading. Since 0.2.0-dev.28.</summary>
     public bool? Persisted { get; init; }
 }
 
@@ -104,8 +110,29 @@ public sealed class EntityScaleChangedEvent : KilnEvent, IEntityEvent
     public override string ToString() => $"scale of {Entity}: {Before} -> {Now}{(ModId is null ? "" : " by " + ModId)}";
 }
 
+/// <summary>A kept transform scale currently waiting for positional identity. Loaded entities have no SpawnTime;
+/// unique template/position matching is a heuristic, not proof of an incarnation. Ambiguity remains waiting until
+/// explicit reapplication or the normal three missed-session expiry.</summary>
+/// <param name="Mod">The mod that last set the scale.</param>
+/// <param name="Template">The recorded entity template, if known.</param>
+/// <param name="Position">The recorded place used for matching.</param>
+/// <param name="Scale">The scale kept for replay.</param>
+/// <param name="Reason">Why this record is waiting.</param>
+public sealed record WaitingTransformScale(string Mod, Guid? Template, WorldPosition Position, Scale3 Scale, string Reason);
+
 public static unsafe partial class World
 {
+    /// <summary>Kept scales waiting for the calling mod (all mods in service context), on the tick thread. Use the
+    /// template and position to find the intended entity and SetTransformScale to explicitly choose it. Equal absent
+    /// SpawnTime values permit replay only with a current unique positional match; this is positional identity, not
+    /// proof. Ambiguity remains waiting until explicit reapplication or normal missed-session expiry.</summary>
+    [TickThreadOnly]
+    public static IReadOnlyList<WaitingTransformScale> GetWaitingTransformScales()
+    {
+        Services.RequireTickThread("World.GetWaitingTransformScales");
+        return TransformScaleKeeper.WaitingScales(ModContext.CurrentMod?.Info.Id);
+    }
+
     /// <summary>The capability of <see cref="SetTransformScale"/>: <c>world.transform_scale</c>.</summary>
     public const string TransformScaleCapability = TransformScale.Capability;
 
@@ -125,7 +152,8 @@ public static unsafe partial class World
     /// false with the reason when the game did not take it (no such entity, not listed, the entity went).</returns>
     /// <exception cref="ArgumentException"><paramref name="entity"/> is none, or a factor is not finite or not above 0.</exception>
     /// <exception cref="KilnUnavailableException"><c>world.transform_scale</c> is off (this build's transform has no scale of
-    /// an accepted shape, kiln.types is not running, or this is a game client), or <c>world.tracked_writes</c> is off.</exception>
+    /// an accepted shape or kiln.types is not running), or <c>world.tracked_writes</c> is off. Writes require a server
+    /// world, including a hosted world's server; a joined client cannot submit a server write.</exception>
     /// <exception cref="InvalidOperationException">Not on the tick thread, or inside a world program's update.</exception>
     [ServerOnly]
     [TickThreadOnly]

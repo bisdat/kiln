@@ -1,5 +1,8 @@
 # Writing a Kiln service
 
+No capability ships held by the client gate in 0.2.0-dev.29. Open rows still depend on their services, signatures and side; the [guided checks](../client-pass.md) remain the record of real-game behavior not yet confirmed.
+
+
 A service is one capability (teleport, items, chat, ...) with three layers. Which services and features a build has
 available is generated from a boot's `capabilities.json`: [../status.generated.md](../status.generated.md). The template is `example`:
 
@@ -63,6 +66,13 @@ row above and grows its own page.
 | [terrain.md](terrain.md) | `Kiln.Terrain`: bounded terrain overlays (a vein, a mound, a tunnel) applied once per world with a ledger of owned blocks; managed only, over kiln.build |
 | [boot.md](boot.md) | kiln.boot (in-core): `Mod.OnBoot`'s one generation per process; the table, the collector contract (bind, prepare, destroy), `activation_fault`, exit code 0x4B01, `state/boot.json` |
 | [creature-control.md](creature-control.md) | kiln.creature_control / CreatureControl: the one broker that owns a controlled creature body's AI-off layer and SteeringAgent; leases for pets, mounts, vehicles and NPC brains |
+| [systems.md](systems.md) | `Kiln.Systems` / kiln.world v4: Before, After and Replace on the game's own ECS programs, per slice or per entity; entity views, write events, attribute formulas |
+
+### Service pages added in dev.29
+
+| Page | What |
+|---|---|
+| [decisions.md](decisions.md) | kiln.decisions / kiln.window_clock: refusing a death (`EntityDyingEvent`), a walk-over pickup (`ItemPickingUpEvent`) and an equipment input (`PlayerEquippingEvent`), each ending in one `DecisionCompletedEvent`; the native death guard and the native adapters' verdict route |
 
 ## Native rules
 - `kiln_plugin_main(api, owner, info)`: check `api->abi_version == KILN_ABI_VERSION`, resolve symbols with

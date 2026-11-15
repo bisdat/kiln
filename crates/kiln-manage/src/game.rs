@@ -70,6 +70,9 @@ pub struct LaunchOptionsInfo {
     pub value: Option<String>,
     /// Under Proton: WINEDLLOVERRIDES has dinput8=n,b (or the prefix's registry override is set).
     pub has_dll_override: bool,
+    /// Ultimate ASI Loader is chained under Proton without its native-first override.
+    #[serde(default)]
+    pub chained_override_missing: bool,
     /// What the user should change, e.g. `WINEDLLOVERRIDES="dinput8=n,b" %command%`.
     pub advice: Option<String>,
 }
@@ -117,6 +120,8 @@ pub const CLIENT_EXE: &str = "enshrouded.exe";
 pub const SERVER_EXE: &str = "enshrouded_server.exe";
 /// What a Proton launch needs so the game loads Kiln's proxy (shown, never written: Kiln never edits Steam's config).
 pub const DLL_OVERRIDE_ADVICE: &str = "WINEDLLOVERRIDES=\"dinput8=n,b\" %command%";
+/// Proton advice when Ultimate ASI Loader is chained next to the game.
+pub const CHAINED_DLL_OVERRIDE_ADVICE: &str = "WINEDLLOVERRIDES=\"dinput8,xinput9_1_0=n,b\" %command%";
 
 /// `<data>/installs/<installId>.json`: the launcher's record of a game install.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -432,6 +437,13 @@ pub fn overrides_in_launch_options(options: &str) -> Option<String> {
 
 /// `WINEDLLOVERRIDES` text loads dinput8 native first (`dinput8=n,b`, `dinput8=native`, later entries win).
 pub fn overrides_dinput8_native(overrides: &str) -> bool {
+    overrides_native(overrides, "dinput8")
+}
+
+/// Native-first load order for a DLL name; explicit entries beat the wildcard, later entries win.
+pub fn overrides_native(overrides: &str, name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    let name = name.strip_suffix(".dll").unwrap_or(&name);
     let (mut explicit, mut wildcard): (Option<String>, Option<String>) = (None, None);
     for entry in overrides.split(';') {
         let Some((dlls, m)) = entry.split_once('=') else { continue };
@@ -439,7 +451,7 @@ pub fn overrides_dinput8_native(overrides: &str) -> bool {
         for dll in dlls.split(',') {
             let d = dll.trim().to_ascii_lowercase();
             match d.strip_suffix(".dll").unwrap_or(&d) {
-                "dinput8" => explicit = Some(m.clone()),
+                d if d == name => explicit = Some(m.clone()),
                 "*" => wildcard = Some(m.clone()),
                 _ => {}
             }
@@ -450,6 +462,13 @@ pub fn overrides_dinput8_native(overrides: &str) -> bool {
 
 /// A prefix's user.reg has `[Software\\Wine\\DllOverrides]` `"dinput8"="native..."` (or `"*dinput8"`).
 pub fn user_reg_dinput8_native(user_reg: &str) -> bool {
+    user_reg_native(user_reg, "dinput8")
+}
+
+/// A DLL override in the prefix registry, including Wine's optional leading `*`.
+pub fn user_reg_native(user_reg: &str, name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    let name = name.strip_suffix(".dll").unwrap_or(&name);
     let mut inside = false;
     let mut native = false;
     for l in user_reg.lines() {
@@ -463,7 +482,8 @@ pub fn user_reg_dinput8_native(user_reg: &str) -> bool {
         }
         let Some((k, v)) = l.split_once('=') else { continue };
         let k = k.trim().trim_matches('"').to_ascii_lowercase();
-        if k == "dinput8" || k == "*dinput8" {
+        let k = k.strip_prefix('*').unwrap_or(&k);
+        if k.strip_suffix(".dll").unwrap_or(k) == name {
             let v = v.trim().trim_matches('"').to_ascii_lowercase();
             native = v.split(',').next().is_some_and(|f| f == "native" || f == "n");
         }
@@ -485,14 +505,26 @@ pub fn launch_options_info(install: &GameInstall, roots: &[SteamRoot]) -> Option
         .flat_map(|r| steam::launch_options(r, install.app_id).unwrap_or_default())
         .map(|o| o.value)
         .next();
-    let from_options = value.as_deref().and_then(overrides_in_launch_options).is_some_and(|o| overrides_dinput8_native(&o));
-    let from_prefix = install
-        .prefix
-        .as_deref()
-        .and_then(|p| std::fs::read(p.join("user.reg")).ok())
-        .is_some_and(|b| user_reg_dinput8_native(&String::from_utf8_lossy(&b)));
-    let has = from_options || from_prefix;
-    Some(LaunchOptionsInfo { value, has_dll_override: has, advice: (!has).then(|| DLL_OVERRIDE_ADVICE.to_string()) })
+    let overrides = value.as_deref().and_then(overrides_in_launch_options);
+    let registry = install.prefix.as_deref().and_then(|p| std::fs::read(p.join("user.reg")).ok());
+    let native = |name| {
+        overrides.as_deref().is_some_and(|o| overrides_native(o, name))
+            || registry.as_deref().is_some_and(|b| user_reg_native(&String::from_utf8_lossy(b), name))
+    };
+    let chained = crate::chain::read(&install.path).is_ok_and(|ini| ini.chain.iter().any(|e| {
+        e.status == crate::chain::EntryStatus::Ok
+            && e.path.rsplit('\\').next().is_some_and(|n| n.eq_ignore_ascii_case(crate::install::ASI_LOADER_NAME))
+    })) && std::fs::read_dir(&install.path).is_ok_and(|entries| entries.flatten().any(|e| {
+        e.file_name().to_string_lossy().eq_ignore_ascii_case(crate::install::ASI_LOADER_NAME) && e.path().is_file()
+    }));
+    let has = native("dinput8");
+    let chained_override_missing = chained && !native("xinput9_1_0");
+    Some(LaunchOptionsInfo {
+        value,
+        has_dll_override: has,
+        chained_override_missing,
+        advice: (!has || chained_override_missing).then(|| if chained { CHAINED_DLL_OVERRIDE_ADVICE } else { DLL_OVERRIDE_ADVICE }.to_string()),
+    })
 }
 
 fn fallback_install_state(install: &GameInstall) -> crate::install::InstallState {
@@ -506,6 +538,7 @@ fn fallback_install_state(install: &GameInstall) -> crate::install::InstallState
         modified: Vec::new(),
         upgrade_available: None,
         missing_parts: Vec::new(),
+        switch_back: None,
     }
 }
 
@@ -557,4 +590,40 @@ pub fn status(dirs: &crate::paths::DataDirs, install: &GameInstall) -> Result<Ga
 /// Steam), Native on Windows, else Copy.
 pub fn path_mode(install: &GameInstall, dirs: &crate::paths::DataDirs) -> Result<PathMode> {
     Ok(path_mode_for(install.platform, install.steam_flavor, install.prefix.as_deref(), &dirs.root))
+}
+
+#[cfg(test)]
+mod override_tests {
+    use super::*;
+
+    #[test]
+    fn named_native_overrides() {
+        for name in ["dinput8", "xinput9_1_0", "XINPUT9_1_0.DLL"] {
+            assert!(overrides_native("DINPUT8.dll,XInput9_1_0.DLL=n,b", name));
+            assert!(overrides_native("*=native,builtin", name));
+        }
+        assert!(overrides_native("dinput8=n,b;xinput9_1_0=b", "dinput8"));
+        assert!(!overrides_native("dinput8=n,b;xinput9_1_0=b", "xinput9_1_0"));
+        assert!(!overrides_native("*=n;xinput9_1_0=b,n", "xinput9_1_0"));
+        assert!(!overrides_native("xinput9_1_0=n;xinput9_1_0=b", "xinput9_1_0"));
+        assert!(overrides_native("xinput9_1_0=b;xinput9_1_0=n", "xinput9_1_0"));
+        assert!(!overrides_native("dinput8=n,b", "xinput9_1_0"));
+    }
+
+    #[test]
+    fn named_registry_overrides() {
+        let reg = "[Software\\\\Wine\\\\DllOverrides]\n\"xinput9_1_0\"=\"native,builtin\"\n";
+        assert!(user_reg_native(reg, "xinput9_1_0"));
+        assert!(!user_reg_dinput8_native(reg));
+        assert!(user_reg_native(&reg.replace("xinput9_1_0", "*XINPUT9_1_0.DLL"), "xinput9_1_0.dll"));
+        assert!(!user_reg_native(&reg.replace("native,builtin", "builtin,native"), "xinput9_1_0"));
+        assert!(!user_reg_native(&reg.replace("DllOverrides", "Other"), "xinput9_1_0"));
+        assert!(!user_reg_native(&format!("{reg}\"xinput9_1_0\"=\"builtin\"\n"), "xinput9_1_0"));
+    }
+
+    #[test]
+    fn older_launch_options_info_defaults_chained_flag() {
+        let info: LaunchOptionsInfo = serde_json::from_str(r#"{"value":null,"hasDllOverride":false,"advice":null}"#).unwrap();
+        assert!(!info.chained_override_missing);
+    }
 }

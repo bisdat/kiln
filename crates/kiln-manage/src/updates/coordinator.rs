@@ -110,13 +110,18 @@ fn authored(kind: ModKind, folder: &std::path::Path) -> Option<UpdatesSpec> {
     crate::manifest::parse_updates(&root).0
 }
 
-/// The installed mods: the newest version of every library entry.
+/// The installed mods: the newest version of every library entry. Also when that is an earlier version's newer one kept
+/// for a roll back (crate::kept, listed after the others): the version a player rolled back from is not offered as an
+/// update again.
 pub fn targets(dirs: &DataDirs) -> Result<Vec<Target>> {
     let mut out = Vec::new();
     for e in crate::library::list(dirs, None)? {
-        let Some(v) = e.versions.first() else { continue };
+        let newest = e.versions.iter().enumerate().max_by(|(i, a), (j, b)| crate::bundle::compare_versions(&a.version, &b.version)
+            .then_with(|| a.imported.cmp(&b.imported)).then_with(|| j.cmp(i)));
+        let Some((_, v)) = newest else { continue };
         out.push(Target {
-            library_ref: LibraryRef { kind: e.kind, id: e.id.clone(), version: v.version.clone(), hash: v.hash.clone() },
+            library_ref: crate::library::replacement_base(v.source.as_ref())
+                .unwrap_or_else(|| LibraryRef { kind: e.kind, id: e.id.clone(), version: v.version.clone(), hash: v.hash.clone() }),
             name: e.name.clone(),
             mod_id: v.manifest_id.clone().unwrap_or_else(|| e.id.clone()),
             side: v.side,

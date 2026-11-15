@@ -75,6 +75,11 @@ html[data-covered] .k-app ::-webkit-scrollbar, html[data-covered] [data-deck-scr
 .k-head-link.on { color: var(--k-bright); }
 .k-head-state { min-width: 92px; text-align: right; font-family: var(--k-font-label); font-weight: 500; letter-spacing: .012em; font-size: 17px; white-space: nowrap; transition: opacity .4s; }
 .k-mock-flag { font-family: var(--k-font-label); font-weight: 500; font-size: 15px; color: var(--k-gold-400); }
+/* (dev.29) a test build is running (shell/ChannelSwitch.tsx): its beta number, one click back to the release */
+.k-beta-flag { font-family: var(--k-font-label); font-weight: 500; font-size: 15px; color: var(--k-gold-400); white-space: nowrap;
+  background: none; border: 1px solid var(--k-line-strong); border-radius: var(--k-radius-s, 4px); padding: 1px 8px; cursor: pointer; }
+.k-beta-flag:hover { color: var(--k-text-0); }
+.k-beta-flag:focus-visible { outline: 2px solid var(--k-gold-400); outline-offset: 2px; }
 @media (max-width: 1180px) {
   .k-head { padding-left: 28px; gap: 18px; }
   .k-logo { width: 31px; }
@@ -196,6 +201,11 @@ html[data-covered] .k-app ::-webkit-scrollbar, html[data-covered] [data-deck-scr
 .k-remove-list { max-height: 240px; overflow-y: auto; margin: 8px 0 0; padding: 0 0 0 18px; text-align: left; }
 .k-remove-list li { margin: 2px 0; }
 .k-remove-list .k-muted { font-size: 14.5px; }
+/* Settings > Library: the earlier versions kept for a roll back (components/LibrarySettings.tsx) */
+.k-kept-list { list-style: none; margin: 8px 0 0; padding: 0; max-height: 240px; overflow-y: auto; }
+.k-kept-row { display: flex; align-items: center; gap: 10px; padding: 3px 0; }
+.k-kept-row .k-kept-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.k-kept-row .k-muted { flex: 1 1 auto; font-size: 14.5px; }
 .k-mod:hover { background: rgba(255, 150, 80, .05); }
 .k-mod.first-found { margin-top: 6px; border-top: 1px solid var(--k-line); padding-top: 8px; }
 .k-mod-text { display: flex; flex-direction: column; min-width: 0; gap: 0; }

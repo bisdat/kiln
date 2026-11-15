@@ -3,16 +3,18 @@
 // that has something to cook again ("Cook again", shell/cook.ts), and a mod found in the game folder says its state, A
 // doing its one fix. The count covers every kind. Saves right away; the game's profile.json follows (applies at the
 // next start while the game runs). Profiles are in the desktop UI's Settings.
+import { SfSelfHostedNotice } from "../../components/SfSelfHostedNotice";
+import { ShroudlinkNotice } from "../../components/ShroudlinkNotice";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import * as api from "../../api/commands";
 import type { AddReport } from "../../api/commands";
 import { qk, useGame, useGameStatus } from "../../api/hooks";
 import { KIND_SHORT } from "../../api/kinds";
 import { cookAgain } from "../../shell/cook";
 import { useEnsureProfile } from "../../shell/firstRun";
-import { bulkPlan, type ModRow } from "../../shell/mods";
+import { filterRows, bulkPlan, type ModRow } from "../../shell/mods";
 import { notifyAdd } from "../../shell/notices";
 import { NOT_REMOVABLE, removable, removeMany, removeMod, useRemoveCheck, useRemoveMany, withoutRows, type RemoveTarget } from "../../shell/removeMod";
 import { NONE, ownerOf, pick as pickSelected, pruneSelection, setSelection, toggle as toggleSelected, useOwnedSelection } from "../../shell/selection";
@@ -26,6 +28,7 @@ import type { DeckAction } from "../layers";
 export default function Mods() {
   const qc = useQueryClient();
   const nav = useNavigate();
+  const [params] = useSearchParams();
   const { game } = useGame();
   const status = useGameStatus(game?.id);
   const mods = useMods(game);
@@ -82,6 +85,9 @@ export default function Mods() {
   const [selMenu, setSelMenu] = useState(false);
   const [removingMany, setRemovingMany] = useState<ModRow[] | null>(null);
   const many = useRemoveMany(removingMany ?? [], mods.profileId, !!removingMany);
+  useLayoutEffect(() => {
+    setFocus(null); setSelMenu(false); setRemoving(null); setRemovingMany(null);
+  }, [gid, mods.profileId]);
   const live = useRef(mods);
   live.current = mods;
   const switchPicked = (on: boolean) => {
@@ -136,6 +142,9 @@ export default function Mods() {
 
   return (
     <Screen name="mods" title="Mods" say={say} actions={actions}>
+      <SfSelfHostedNotice profile={mods.profile} found={mods.found.data} />
+      <ShroudlinkNotice game={game} mods={mods} deck />
+      {params.has("filter") && <DeckButton id="clear-filter" onClick={() => nav("/deck/mods")}>Show all mods</DeckButton>}
       {!game ? (
         <DeckButton id="go-home" onClick={() => nav("/deck")}>Home</DeckButton>
       ) : status.data && !installed ? (
@@ -144,7 +153,7 @@ export default function Mods() {
         <DeckButton id="go-add" primary onClick={() => nav("/deck/add")}>Add mods</DeckButton>
       ) : (
         <div className="deck-list deck-scroll" role="list" aria-label="Mods">
-          {mods.rows.map((r) => r.found ? (
+          {filterRows(mods.rows, params.get("filter") ?? "", "").map((r) => r.found ? (
             <Row key={r.key} id={`found-${r.found.path}`} title={sel.keys.includes(r.key) ? `✓ ${r.name}` : r.name} sub={sub(r)} end={word(r)} dim={r.found.state !== "loads"}
               a={r.found.fix === "dropins" && r.found.kind ? `Load ${KIND_SHORT[r.found.kind]} mods` : r.found.fix === "add" ? "Add" : "-"}
               disabled={!r.found.fix || !loaded || !!busy} onFocus={() => setFocus(r)} onClick={() => void fix(r)}

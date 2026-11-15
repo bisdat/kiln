@@ -69,6 +69,23 @@ inline bool activation_fault(const KilnApi* api, KilnOwner collector, const std:
                                KilnStr{key.data(), key.size()}, KilnStr{reason.data(), reason.size()}) == KILN_OK;
 }
 
+// kiln.boot's stop_start (0.2.0-dev.29) is there: a service may stop the start through it.
+inline bool can_stop_start(const KilnApi* api) {
+    const KilnBootApiV1* b = table(api);
+    return b && b->header.size >= offsetof(KilnBootApiV1, stop_start) + sizeof(void*) && b->stop_start;
+}
+
+// Stops the start through kiln.boot (kiln_boot.h stop_start: the issue per mod, the stop line, boot.json and
+// progress.json "failed", `before_exit`, then the process ends with `code`). Does not return when it works. false:
+// this kiln.boot has no such call, a stop is under way already, or a world is present. Never use a direct-exit
+// fallback while a world is present: the shared call refuses it to preserve unsaved play.
+inline bool stop_start(const KilnApi* api, KilnOwner caller, const std::string& mods_csv, const std::string& reason, uint32_t code,
+                       void(KILN_CALL* before_exit)(void*) = nullptr, void* user = nullptr) {
+    if (!can_stop_start(api)) return false;
+    return table(api)->stop_start(caller, KilnStr{mods_csv.data(), mods_csv.size()}, KilnStr{reason.data(), reason.size()}, code,
+                                  before_exit, user) == KILN_OK;
+}
+
 struct Doc {
     std::string owner, key;
     nlohmann::json document;

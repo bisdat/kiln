@@ -28,12 +28,19 @@ public sealed class TablesTests
     public void Advanced_members(string id) => Assert.Contains(id, KilnApis.Advanced);
 
     [Fact]
+    public void Material_pool_result_define_is_in_the_generated_tick_thread_table()
+    {
+        Assert.Contains("M:Kiln.Blocks.Define(System.String,Kiln.BuildingMaterialPoolBlock,Kiln.DefinitionRegistrationOptions)",KilnApis.TickThread);
+    }
+
+    [Fact]
     public void Advanced_members_are_behind_a_gate()
     {
         // The services with an advanced gate: Kiln.Hooks (HooksGate), Kiln.Abilities (AbilitiesGate), Kiln.Creatures
         // (CreaturesGate). A new type here means a new gated entry point: check that it is meant to be advanced.
+        // TypedHooks (dev.29): the runtime of typed hooks and calls under the generated Kiln.Sigs classes.
         Assert.All(KilnApis.Advanced, id => Assert.Matches(
-            @"^M:Kiln\.(Hooks|Symbols|Memory|Constants|OriginalCode|Keep|Abilities\.Programs|NativeCall|Is|Act|Arsenals)\.", id));
+            @"^M:Kiln\.(Hooks|TypedHooks|Symbols|Memory|Constants|OriginalCode|Keep|Abilities\.Programs|NativeCall|Is|Act|Arsenals)\.", id));
     }
 
     [Theory]

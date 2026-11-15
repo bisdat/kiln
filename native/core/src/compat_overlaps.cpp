@@ -5,6 +5,7 @@
 #include <cctype>
 
 #include "compat.h"
+#include "hook_owner.h"
 
 namespace kiln::compat {
 namespace {
@@ -71,6 +72,18 @@ std::string why_not_late(const ChainRow* row, const std::string& module) {
 }
 
 std::string hex_text(const ojson& v) { return v.is_string() ? v.get<std::string>() : std::string(); }
+
+// A target's Kiln links as "<label> (<owner>)", as kiln.log's "chained over" line names them (hook_owner.h): the hook and
+// who placed it, not the sigdb name of the address. `fallback` (the target's label) stands in for a link without one.
+std::string links_text(const ojson& t, const std::string& fallback) {
+    std::vector<std::string> v;
+    if (t.contains("links") && t["links"].is_array())
+        for (const auto& l : t["links"]) {
+            const std::string label = json_text(l, "label");
+            add_unique(v, kiln::hook_link_text(label.empty() ? fallback : label, json_text(l, "owner")));
+        }
+    return v.empty() ? fallback : join(v);
+}
 
 std::string module_at(const ojson& f) {
     const std::string module = json_text(f, "module");
@@ -193,9 +206,9 @@ ojson compute_overlaps(const ojson& map, const std::vector<ChainRow>& chain, con
             o["fix"] = fix;
             o["chainEntry"] = chain_entry_json(row);
             std::string msg;
-            const std::string who = join(owners);
+            const std::string hooks = links_text(t, label);
             if (before) {
-                msg = module_at(f) + " hooked " + label + " before " + who + "; Kiln chained over it. ";
+                msg = module_at(f) + " hooked the function before Kiln did; Kiln's " + hooks + " chained over it. ";
                 if (std::string(fix) == "late")
                     msg += "Load " + module + " late (kiln/chain.ini [late], or the launcher's \"Load after Kiln and ShroudForge\"): "
                            "Kiln then hooks first and " + module + " hooks over it.";
@@ -204,7 +217,7 @@ ojson compute_overlaps(const ojson& map, const std::vector<ChainRow>& chain, con
                 else
                     msg += why_not_late(row, module) + " Add a rule to compat-rules.json or switch one side off.";
             } else {
-                msg = module_at(f) + " hooked over Kiln's " + label + " (" + who + "). Kiln's detour stays armed behind their jump; "
+                msg = module_at(f) + " hooked over Kiln's " + hooks + ". Kiln's detour stays armed behind their jump; "
                       "nothing to fix unless a feature misbehaves.";
             }
             o["message"] = msg;
@@ -266,11 +279,72 @@ bool subject_rows(const Rule& r, const std::vector<ChainRow>& rows, std::vector<
     return any;
 }
 
+// The rows a matcher names, for `before` (including unsuccessful loads): a module by file name,
+// an engine or a mod by what the row knows of its DLL. A symbol names no row.
+std::vector<size_t> rows_of(const Matcher& m, const std::vector<ChainRow>& rows) {
+    std::vector<size_t> out;
+    for (size_t i = 0; i < rows.size(); ++i) {
+        const ChainRow& row = rows[i];
+        // the row as the facts of one DLL: matched as the rules match a start (kiln:, native: and plugin: name one mod)
+        Facts one;
+        one.modules.push_back(row.file);
+        if (!row.engine.empty()) one.engines.push_back(row.engine);
+        if (!row.mod.empty()) one.mods.push_back(row.mod);
+        if (m.kind != Matcher::Kind::Symbol && present(m, one)) out.push_back(i);
+    }
+    return out;
+}
+
+std::string files_of(const std::vector<size_t>& at, const std::vector<ChainRow>& rows) {
+    std::string out;
+    for (size_t i : at) out += (out.empty() ? "" : ", ") + rows[i].file;
+    return out;
+}
+
+// dev.29: did every subject row load before every target row? A late row (that the late phase loaded) comes after every
+// early one; within a phase the rows load in list order.
+Outcome before_outcome(const Rule& r, const std::vector<ChainRow>& rows) {
+    Outcome o;
+    const std::vector<size_t> first = rows_of(r.subject, rows), last = rows_of(r.target, rows);
+    if (first.empty() || last.empty()) {
+        o.applied = false;
+        o.note = "rule " + r.id + ": no chain entry of this start is " + matcher_text(first.empty() ? r.subject : r.target) +
+                 ", so the order cannot be checked";
+        return o;
+    }
+    for (const auto& side : {first, last}) {
+        for (size_t i : side) {
+            const ChainRow& row = rows[i];
+            if (row.status != "loaded" || row.late_ignored) {
+                o.applied = false;
+                o.note = "rule " + r.id + ": cannot establish load order for " + row.file +
+                         " (" + row.status + "); subject " + matcher_text(r.subject) +
+                         ", target " + matcher_text(r.target);
+                return o;
+            }
+        }
+    }
+    auto when = [&](size_t i) { return std::make_pair(rows[i].late && !rows[i].late_ignored ? 1 : 0, i); };
+    bool held = true;
+    for (size_t a : first)
+        for (size_t b : last)
+            if (!(when(a) < when(b))) held = false;
+    if (held) {
+        o.note = files_of(first, rows) + " loaded before " + files_of(last, rows);
+    } else {
+        o.applied = false;
+        o.note = "rule " + r.id + " asks " + files_of(first, rows) + " to load before " + files_of(last, rows) +
+                 ", but it did not this start; activate the profile again in the launcher (it writes chain.ini [late])";
+    }
+    return o;
+}
+
 }  // namespace
 
 Outcome outcome_of(const Rule& r, const std::vector<ChainRow>& rows, const Facts& facts, const RuleContext& ctx) {
     Outcome o;
     if (r.action == "warn") return o;
+    if (r.action == "before") return before_outcome(r, rows);
     const std::string what = matcher_text(r.subject);
     if (r.action == "late") {
         if (r.subject.kind != Matcher::Kind::Module) {

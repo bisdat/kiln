@@ -4,6 +4,7 @@
        Kiln.Build, the ledger through Kiln.Saves' WorldData. Deployed to kiln/host/ and shared by every mod. -->
   <PropertyGroup>
     <RootNamespace>Kiln</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591;CS1573</NoWarn>
   </PropertyGroup>

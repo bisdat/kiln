@@ -266,7 +266,7 @@ A strength field left out stays what it was: the game material's own, or for a n
 - **Unbreakable** takes no damage from anything, tools, explosions or enemies, and can't be dismantled. The game's TNT removes 504 of 729 cells of Rough Stone; with `Unbreakable`, none.
 - **Bases aren't a shelter.** A player's own digging is held to their base permissions, but an explosion or an enemy with no player behind it digs a base as far as its numbers reach. Hardness is what protects walls.
 - **When.** The game reads these tables once at start. A block in `blocks/*.json` is in them from the first start. One defined in C# is kept and is there from the next start: its handle's `Status` says `Pending`, then `Registered`. A C# block taken out of the code still applies for one more start.
-- **How many.** A material is a byte in a cell, so the game has room for 49 new building materials, for every mod together. The build menu is tighter: a player's game lists at most 64 materials for the game's walls and has 61 of its own, so **3 new wall materials** fit across all mods (roofs: 50; placeable terrain: 8). A 65th stops the player's game, so Kiln refuses the material past the room by name, in sorted GUID order, before it takes an id; one a world already has walls of is kept as an absent mod's is, so they stay. Ids are refused past 49 the same way (KL330 says so before you ship; KL331 warns at 5 in one mod). An id may change between sessions: worlds follow the material's GUID, which comes from your mod id and the block's name. Rename with `Was`.
+- **How many.** Custom pools below provide an alternative selector only for opt-in new shapes. A material is a byte in a cell, so the game has room for 49 new building materials, for every mod together. The build menu is tighter: a player's game lists at most 64 materials for the game's walls and has 61 of its own, so **3 new wall materials** fit across all mods (roofs: 50; placeable terrain: 8). A 65th stops the player's game, so Kiln refuses the material past the room by name, in sorted GUID order, before it takes an id; one a world already has walls of is kept as an absent mod's is, so they stay. Ids are refused past 49 the same way (KL330 says so before you ship; KL331 warns at 5 in one mod). An id may change between sessions: worlds follow the material's GUID, which comes from your mod id and the block's name. Rename with `Was`.
 - **A mod taken away.** Each world remembers the materials it ran with. When their mod is absent, Kiln keeps them in the tables, so the walls stay, dig as before and draw the shader's fallback; enable the mod again and they're as they were. `WorldTables.Forget(guid)` lets one go. A world opened in a game without Kiln loses them: the game turns cells it doesn't know into air.
 - **What digging gives back.** As the game's own blocks: the first of its recipe's `Needs`, at the recipe's ratio (Rough Stone is made 100 from 2 stone, and 50 dug give a stone back). `Drops` and `ItemsPerBlocks` say otherwise; `Drops = StrengthBlock.OwnBlock` (`"drops": "block"`) gives its own block item back, one per block. Without a recipe it gives what its starting material gives.
 - **Its look.** `Surface`, below. Without one a new material looks like the game's Rough Stone.
@@ -329,7 +329,7 @@ PNGs are in your mod's folder, a power of two on both sides, 4 to 4096; maps of 
 A mistake names the block and the field, on every side: `block buildingMaterial moss-brick (mod x), surface.side.tint: "#12345" is not a colour: "#rrggbb"`. A wrong surface refuses its block. A PNG that is missing or the wrong size is a client's to find: the material then looks like Rough Stone, and kiln.log says why. `kiln lint` says so first ([KL333](lint.md#kl333-surface-texture), KL501, KL503), and also when a map's channels or colour space aren't what it's read as.
 
 ### Shapes
-A shape of your own for every building material: it is listed beside the game's walls and floors and takes every material they take.
+A shape of your own: by default it uses the same wall/roof pool as the game's shapes. Set `MaterialPool` to opt only the new shape into a custom building-material pool.
 ```csharp
 string[] Row(string cells) => [cells];
 Blocks.Define("arched-window", new BlueprintBlock
@@ -348,6 +348,31 @@ Blocks.Define("arched-window", new BlueprintBlock
 **In a bag.** The game shows every shape item in an inventory as its Construction Hammer (name, text and the "Blueprints" line), whoever made it: its own shapes never sit in one. A shape a `Recipe` makes shows its own name in build mode.
 
 A shape is an entry in a table every shape shares, merged at each game's start like the materials' tables, so every player needs the mod (`clients: mod`). Kiln makes its blueprint item, the table entry with its cells, and the model the client draws under the cursor (one of the item's own, so the ghost is the shape, not the wall it starts from). The game reads the table once at start: a shape from a data file is there from the first start; one defined in C# is kept and is there from the next start (`Status` says `Pending`, then `Registered`). The item's id comes from the mod and the block's name, so a placed shape's item stays the same across restarts.
+
+### Custom pools for new shapes (dev.29)
+
+A `BuildingMaterialPoolBlock` groups 1..64 distinct building-material block items. `BlueprintBlock.MaterialPool` names it; a wall/roof shape and every member must agree on `Roof`. Use named material references or handles, and stable `GameMaterials` names for game entries. A cross-mod reference requires an enabled declared dependency. The pool and shape spend no additional material IDs. Both sides require `clients: mod`.
+
+```json
+{
+  "format": 1,
+  "buildingMaterials": {"ice": {"name": "Ice Block"}, "frost_stone": {"name": "Frost Stone Block"}},
+  "buildingMaterialPools": {
+    "cold_walls": {"name": "Cold Walls", "materials": [{"material": "ice"}, {"material": "frost_stone"}]}
+  },
+  "blueprints": {"cold_wall": {"name": "Cold Wall", "cells": [["########"]], "materialPool": "cold_walls"}}
+}
+```
+
+Only the opted-in shape uses that group. Existing walls still have room for three extra items, roofs 50, terrain eight. An accepted pool's own mod materials (and a declared dependency's) are not appended to the game's lists as well; a refused pool leaves every material in them. Invalid groups refuse dependent shapes; they do not redirect them to a vanilla pool. A material may remain registered for scripted Build. Game materials remain in their original pool, and one mod material shared across groups uses one material ID.
+
+Pool GUIDs use `BlockIds.Derive(mod, "materialpool", Was ?? key)`. Use Was to preserve identity on a rename. Entries retain declared order; a `gameMaterial` entry is the block item the game's build menu lists for that material. Duplicate resolved item IDs, roof mismatch, malformed entries and 65 entries are rejected before serving; the error names the entries (`materials[1] (gameMaterial WoodRough) and materials[2] (gameMaterial WoodRough) are the same building item ...`). Missing mods, dependencies, game names or block items are named refusals. Terrain selector groups are not supported.
+
+Read budgets with `WorldTables.GetMaterialBudget(WorldMaterialCategory.Building)` and `GetPoolBudget("mod:key")`. The explicit-options `Blocks.Define(name, pool, options)` returns Registered, AcceptedNextStart or Refused. RequireRegistered never writes pending storage. Registered means the identical definition is in the immutable boot table; AcceptedNextStart has zero live slots and is rechecked on the next process start. Query the receipt with `GetMaterialPoolRegistration`. A successful result also makes the named block available for a blueprint reference. See [worldtables.md](../services/worldtables.md#custom-building-material-pools-dev29) for accounting, errors, events and storage.
+
+With `<KilnBakeWorldTables>true</KilnBakeWorldTables>`, the SDK bakes these declarations to `blocks.tables.json` (off by default to preserve runtime-dependent C# declarations) without writing a game profile or pretending the game registered them. No-pool profiles retain their old hash. Pool membership order and shape bindings are hashed so peers must agree before custom data streams.
+
+**Not run in a game or lab for this package:** appended registry ingestion, exact selector contents/order, first/last selection, preview, count/cost, placed surface, mined loot, restart/rejoin and a second hosted world. These paths ship enabled; `17-material-pools` records those outstanding checks. Use disposable worlds: as with other custom materials, opening their cells without Kiln can turn them into air.
 
 ### Terrain materials
 Ground, rock and ore of your own. Sample: `mods/samples/TerrainSample` (C#, and `blocks/twins.json` as data; the admin commands `/glacier-vein` and `/snow-mound` put some on the ground 6 m east of you, or at `x y z` from a server console, and fail when no cell changed).

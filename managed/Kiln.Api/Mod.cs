@@ -184,6 +184,64 @@ public sealed class ModContext
         return System.Runtime.Loader.AssemblyLoadContext.GetLoadContext(assembly) is { } alc && ByLoadContext.TryGetValue(alc, out var mod) ? mod : null;
     }
 
+    /// <summary>Runs when the mod's unload begins, before its OnUnload (and before <see cref="Retiring"/>): services
+    /// that call into the mod's code from other threads stop letting new calls in here and wait a bounded time for the
+    /// calls inside (kiln.abilities' sync natives and attachments). A step returns null when no call it let in is still
+    /// inside, else what is (the host then defers OnUnload and the disposal until it is null: <see cref="UnloadWaitsFor"/>
+    /// asks the same steps again, which only look). A throwing step is logged and counts as nothing inside; it stops
+    /// neither the unload nor the other steps. Tick thread.</summary>
+    internal event Func<string?>? UnloadStarting;
+
+    private int _unloadStarted;
+    internal bool Unloading => Volatile.Read(ref _unloadStarted) != 0;
+    private Func<string?>[] _unloadSteps = [];
+
+    /// <summary>Begins the unload (once per context): runs the <see cref="UnloadStarting"/> steps. Null when nothing is
+    /// inside the mod's code from another thread any more, else what is. The host calls it before OnUnload; Retire
+    /// calls it too, for an unload without OnUnload (a harness that gave up its tick thread).</summary>
+    internal string? BeginUnload()
+    {
+        if (Interlocked.Exchange(ref _unloadStarted, 1) != 0) return UnloadWaitsFor();
+        _unloadSteps = UnloadStarting is { } starting ? Array.ConvertAll(starting.GetInvocationList(), d => (Func<string?>)d) : [];
+        UnloadStarting = null;
+        return AskUnloadSteps();
+    }
+
+    /// <summary>What the unload still waits for (null: nothing): the steps again, after <see cref="BeginUnload"/>.</summary>
+    internal string? UnloadWaitsFor() => Volatile.Read(ref _unloadStarted) == 0 ? null : AskUnloadSteps();
+
+    private string? AskUnloadSteps()
+    {
+        var waiting = Ask(_unloadSteps);
+        // A service may subscribe from another service's start step. Run those additions too,
+        // before the host can decide that disposal is safe, and retain them for later polls.
+        while (UnloadStarting is { } added)
+        {
+            UnloadStarting = null;
+            var steps = Array.ConvertAll(added.GetInvocationList(), d => (Func<string?>)d);
+            _unloadSteps = [.. _unloadSteps, .. steps];
+            if (Ask(steps) is { } more) waiting = waiting is null ? more : waiting + "; " + more;
+        }
+        return waiting;
+    }
+
+    private string? Ask(Func<string?>[] steps)
+    {
+        List<string>? inside = null;
+        foreach (var step in steps)
+        {
+            string? what;
+            try { what = step(); }
+            catch (Exception e)
+            {
+                Log.Warn($"a service's step at the start of this mod's unload threw: {e.GetType().Name}: {e.Message}");
+                what = null;
+            }
+            if (what is not null) (inside ??= []).Add(what);
+        }
+        return inside is null ? null : string.Join("; ", inside);
+    }
+
     /// <summary>Runs when the mod unloads, after OnUnload: services drop per-mod state (pending requests,
     /// callbacks) here so the mod's load context can be collected.</summary>
     internal event Action? Retiring;
@@ -193,6 +251,7 @@ public sealed class ModContext
 
     internal void Retire()
     {
+        if (Volatile.Read(ref _unloadStarted) == 0) BeginUnload();  // the host began it before OnUnload, as a rule
         lock (LiveGate)
         {
             if (!Alive) return;

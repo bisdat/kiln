@@ -10,12 +10,16 @@ export const ACTIVE = new Set(["launcher", "waiting", "booting", "loading"]);
  *  browser tests set a shorter one before the page loads, `window.__kilnSteamWaitMs`). */
 export const STEAM_WAIT_MS: number = (globalThis as { __kilnSteamWaitMs?: number }).__kilnSteamWaitMs ?? 5 * 60_000;
 
-/** The sentence of a start Kiln has said nothing about for 60 s (120 s in the early plugins). */
+/** The sentence of a start Kiln has said nothing about for 60 s (120 s in the early plugins). A client in its world is
+ *  not given one: the launcher takes that start for over (kiln_manage::start_progress, phase ready). */
 export function quietText(t: StartTimeline): string {
   const s = t.running != null ? t.steps[t.running] : null;
   const secs = Math.round((t.quietMs ?? 0) / 1000);
   // a client that loads its mods only at the first world waits at `mods` with nothing done: the game is at its menu
   if (s?.id === "mods" && !s.done) return "The game is waiting at its menu: Kiln loads the mods when the game asks for them (on some PCs only once a world loads).";
+  // Kiln's part is done (the last step): the game still loads, or its menu drew and Kiln did not see it (another mod's
+  // hook over the menu); the start ends at the first world then
+  if (s?.id === "game") return "Kiln has loaded the mods. The game is still loading, or it is at its menu and Kiln did not see the menu appear; this goes away once you load a world.";
   return `Kiln has said nothing for ${secs} s${s ? ` (last: ${s.label})` : ""}. A step can be slow on a busy PC; if the game does not move, close it and save a support report on the Logs page.`;
 }
 /** The timeline is shown in place of the boot stages (a dev.26 runtime's `legacy` and the end states are not). */

@@ -172,7 +172,19 @@ pub fn without_profile_copies(candidates: Vec<Candidate>, profile: &[(String, bo
 /// runs a package only while its switch is on and on the sides it targets ([`shroudforge_switch`]): a package there it
 /// has off is `off-in-shroudforge`, one for the other side `other-side`.
 pub fn aside_entries(profile_json: &str, kiln_dir: &Utf8Path, roots: &[Utf8PathBuf], who: &str, shroudforge: Option<bool>) -> Vec<Entry> {
-    let ids = profile_ids(profile_json);
+    let mut ids = profile_ids(profile_json);
+    // These entries are intentionally off on the kiln-eml route, including for older runners. SF's own switch
+    // runs the package; report that delegation truthfully only while SF actually owns this start.
+    if shroudforge.is_some() {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(profile_json) {
+            if let Some(required) = v.get("emlRuntime").and_then(|v| v.as_array()) {
+                for (id, enabled) in &mut ids {
+                    if required.iter().any(|r| r.as_str() == Some(id.as_str()))
+                        && v.get("emlRuntimeBlocked").and_then(|v| v.get(id.as_str())).is_none() { *enabled = true; }
+                }
+            }
+        }
+    }
     let paths = profile_candidates(profile_json, kiln_dir);
     let folder = roots.first().map(|r| r.to_string()).unwrap_or_else(|| "mods".into());
     ids.into_iter().enumerate().map(|(i, (id, enabled))| {
@@ -180,7 +192,7 @@ pub fn aside_entries(profile_json: &str, kiln_dir: &Utf8Path, roots: &[Utf8PathB
         // `<root>/<id>`, or the entry's own path when the launcher placed it in that folder under the name a native
         // DLL looks for (`mods/XHL-Auto-Loot` for the Library id `xhl-auto-loot`)
         let own_path = paths.get(i).map(|c| c.path.clone())
-            .filter(|p| p.parent().is_some_and(|parent| roots.iter().any(|r| relative_under(parent, r).is_some_and(|rel| rel.as_str().is_empty()))));
+            .filter(|p| p.parent().is_some_and(|parent| roots.iter().any(|r| is_root(parent, r))));
         let copy = roots.iter().map(|r| r.join(&id)).chain(own_path).find(|d| kiln_copy_of(d).is_some_and(|m| m == id));
         let wanted = paths.get(i).and_then(|c| classify(&c.path).ok()).map(|m| m.id).unwrap_or_else(|| id.clone());
         let manual = if copy.is_none() {
@@ -222,6 +234,38 @@ pub fn aside_entries(profile_json: &str, kiln_dir: &Utf8Path, roots: &[Utf8PathB
         Entry { id: Some(id), version: None, name: None, source: "profile".into(),
             path: own.map(|c| c.to_string()).unwrap_or(path), state: state.into(), reason: Some(reason), capabilities: Vec::new() }
     }).collect()
+}
+
+/// Is `dir` the loader's folder `root`, as the game's process names folders? On Windows (the game, also under Wine)
+/// by Windows' rules ([`windows_same_folder`]), elsewhere (kiln-eml-run on Linux) part by part.
+fn is_root(dir: &Utf8Path, root: &Utf8Path) -> bool {
+    if cfg!(windows) { windows_same_folder(dir.as_str(), root.as_str()) } else { relative_under(dir, root).is_some_and(|rest| rest.as_str().is_empty()) }
+}
+
+/// Two spellings of one folder, told apart as Windows tells them: not by the verbatim prefix, the separator, an empty
+/// or `.` part, or case. ShroudForge writes its `paths.mods` from a canonical path, `\\?\C:\…\mods` on Windows
+/// (`//?/C:/…/mods` once plugin.rs `loader_roots` turned its `\` into `/`), while the launcher names its game-folder copies
+/// from the game folder, `C:\…\mods\<folder>` (a player's Nexus report, 2026-11-14: kiln-eml took Kiln's copy there for
+/// a folder of the player's). Strings in, so a test checks it on any system.
+fn windows_same_folder(a: &str, b: &str) -> bool {
+    fn key(p: &str) -> (usize, Vec<String>) {
+        let mut p = p.replace('/', "\\");
+        // `\\?\C:\x` names `C:\x`, `\\?\UNC\host\share` names `\\host\share`; other verbatim paths have no other name
+        // Literal trailing dots/spaces need the extended namespace; an ordinary Win32 path
+        // would trim them. Keep that namespace in the key instead of aliasing another folder.
+        let literal = p.split('\\').any(|name| name.ends_with('.') || name.ends_with(' '));
+        if let Some(rest) = p.strip_prefix(r"\\?\UNC\").filter(|_| !literal) {
+            p = format!(r"\\{rest}");
+        } else if let Some(rest) = p.strip_prefix(r"\\?\").filter(|r| !literal && r.as_bytes().get(1) == Some(&b':')) {
+            p = rest.to_owned();
+        }
+        let rooted = p.bytes().take_while(|&c| c == b'\\').count().min(2)
+            + usize::from(p.as_bytes().get(1) == Some(&b':') && p.as_bytes().get(2) == Some(&b'\\')) * 3;
+        // Windows' ordinal case-blind comparison: one upper-case character for each
+        let fold = |s: &str| s.chars().map(|c| { let mut u = c.to_uppercase(); if u.len() == 1 { u.next().unwrap_or(c) } else { c } }).collect::<String>();
+        (rooted, p.split('\\').filter(|s| !s.is_empty() && *s != ".").map(fold).collect())
+    }
+    key(a) == key(b)
 }
 
 /// Why ShroudForge does not run a package ([`shroudforge_switch`]).
@@ -585,6 +629,28 @@ pub fn resolve(candidates: &[Candidate]) -> (Vec<Utf8PathBuf>, Vec<Entry>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ShroudForge's `paths.mods` on Windows after its first start, as loader_roots reads it (`//?/C:/…/mods`), and the
+    /// folder of the launcher's game-folder copy (`C:\…\mods`): one folder.
+    #[test]
+    fn windows_folders_compare_without_the_verbatim_prefix_or_case() {
+        let mods = r"C:\Program Files (x86)\Steam\steamapps\common\Enshrouded\mods";
+        assert!(windows_same_folder(&format!(r"\\?\{mods}").replace('\\', "/"), mods), "the verbatim prefix");
+        assert!(windows_same_folder(&format!(r"\\?\{mods}"), &mods.replace('\\', "/")));
+        assert!(windows_same_folder(&mods.to_uppercase(), &format!("{mods}\\")), "case, a trailing separator");
+        assert!(windows_same_folder(r"D:\Spiele\Ä", r"d:\spiele\ä\."), "non-ASCII case");
+        assert!(windows_same_folder(r"\\?\UNC\nas\share\mods", r"\\NAS\share\mods"), "a network folder");
+        assert!(!windows_same_folder(mods, &format!("{mods}-other")), "a sibling");
+        assert!(!windows_same_folder(r"\\?\Volume{1}\mods", r"Volume{1}\mods"), "a volume path has no other spelling");
+        assert!(!windows_same_folder(r"\mods", "mods"), "rooted is not relative");
+    }
+
+    #[test]
+    fn windows_verbatim_literal_names_are_not_plain_names() {
+        assert!(!windows_same_folder(r"\\?\C:\Game.\mods", r"C:\Game.\mods"));
+        assert!(!windows_same_folder(r"\\?\UNC\nas\share\Game \mods", r"\\nas\share\Game \mods"));
+        assert!(!windows_same_folder("C:", r"C:\"));
+    }
 
     fn tmp(name: &str) -> Utf8PathBuf {
         let d = Utf8PathBuf::from_path_buf(std::env::temp_dir()).unwrap().join(format!("kiln-eml-test-{name}-{}", std::process::id()));
@@ -1012,4 +1078,66 @@ mod tests {
         std::fs::remove_dir_all(d).unwrap();
     }
 
+}
+
+/// The launcher deliberately disabled these entries because their required engine is unavailable.
+pub fn apply_runtime_blocks(json: &str, kiln: &Utf8Path, entries: &mut [Entry], unavailable: &str) {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else { return };
+    let blocked = v.get("emlRuntimeBlocked").and_then(|v| v.as_object());
+    for ((id, _), candidate) in profile_ids(json).into_iter().zip(profile_candidates(json, kiln)) {
+        if candidate.enabled { continue; }
+        let delegated = v.get("emlRuntime").and_then(|v| v.as_array()).is_some_and(|a| a.iter().any(|v| v.as_str() == Some(id.as_str())));
+        let fallback = format!("needs ShroudForge's runtime, which is not running: {unavailable}; its data was not applied, so the game is as without the mod");
+        if let Some(reason) = blocked.and_then(|b| b.get(&id)).and_then(|v| v.as_str()).or_else(|| delegated.then_some(fallback.as_str())) {
+            for e in entries.iter_mut().filter(|e| e.source == "profile" && e.path == candidate.path.as_str()) {
+                e.id = Some(id.clone());
+                e.state = "skipped".into();
+                e.reason = Some(reason.into());
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod runtime_block_tests {
+    use super::*;
+    #[test]
+    fn unavailable_runtime_reason_survives_a_missing_placement() {
+        let json = r#"{"mods":{"eml":[{"id":"quiver","path":"missing","enabled":false}]},"emlRuntimeBlocked":{"quiver":"needs ShroudForge's runtime: component missing"}}"#;
+        let kiln = Utf8Path::new("/nonexistent-kiln-runtime-test");
+        let (mods, mut entries) = resolve(&profile_candidates(json, kiln));
+        assert!(mods.is_empty());
+        apply_runtime_blocks(json, kiln, &mut entries, "not hosted");
+        assert_eq!(entries[0].id.as_deref(), Some("quiver"));
+        assert_eq!(entries[0].state, "skipped");
+        assert!(entries[0].reason.as_deref().unwrap().contains("component missing"));
+    }
+}
+
+#[cfg(test)]
+mod runtime_delegation_tests {
+    use super::*;
+    #[test]
+    fn delegated_entry_is_off_for_old_runners_but_reported_under_shroudforge() {
+        let root = Utf8PathBuf::from_path_buf(std::env::temp_dir().join(format!("eml-delegated-{}", std::process::id()))).unwrap();
+        let dir = root.join("quiver");
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(dir.join("mod.json"), r#"{"id":"quiver","name":"Q","version":"1.0.0","capabilities":["runtime"]}"#).unwrap();
+        std::fs::write(dir.join("src/mod.lua"), "return {}").unwrap();
+        std::fs::write(dir.join("extended.mod.json"), r#"{"schemaVersion":1,"launcher":"EML","enabled":true,"targets":["client"]}"#).unwrap();
+        std::fs::write(dir.join(".kiln-library.json"), r#"{"format":1,"kind":"eml","id":"quiver","version":"1.0.0","hash":"h"}"#).unwrap();
+        let json = serde_json::json!({"mods":{"eml":[{"id":"quiver","path":dir.as_str(),"enabled":false}]},"emlRuntime":["quiver"]}).to_string();
+        let candidates = profile_candidates(&json, &root);
+        assert!(!candidates[0].enabled);
+        let (mods, mut fallback) = resolve(&candidates);
+        assert!(mods.is_empty());
+        apply_runtime_blocks(&json, &root, &mut fallback, "adapter failed before reservation");
+        assert_eq!(fallback[0].state, "skipped");
+        assert!(fallback[0].reason.as_deref().unwrap().contains("adapter failed before reservation"));
+        let rows = aside_entries(&json, &root, &[root.clone()], "ShroudForge (hosted by Kiln)", Some(false));
+        assert_eq!(rows[0].state, "own-loader", "{rows:?}");
+        let rows = aside_entries(&json, &root, &[root.clone()], "ShroudForge (hosted by Kiln)", Some(true));
+        assert_eq!(rows[0].state, "other-side", "{rows:?}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

@@ -6,6 +6,7 @@
 // u16 players mask at storage + world/storage.players_mask, read by StepPrograms' prologue (sigdb feature
 // world.systems; chapter 06a section 2.4: bit (id - 1) mod 16 per live player entity, non-zero = parallel).
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <memory>
 #include <unordered_map>
@@ -16,6 +17,7 @@
 #include <windows.h>
 #endif
 
+#include "layout.h"
 #include "services/kiln_caps.h"
 #include "wraps.h"
 
@@ -35,7 +37,11 @@ struct Entry {
     const std::string* name = nullptr;  // interned: valid for the life of the process
     uint32_t desc_flags = 0, entry_flags = 0, flags = 0;
     uintptr_t entry = 0, desc = 0, update = 0;
+    std::vector<const std::string*> lists[KILN_GAME_LISTS];  // the descriptor's names, interned
 };
+static_assert(int{KILN_GAME_LISTS} == int{L_COUNT} && int{KILN_GAME_LIST_EVENTS_OUT} == int{L_EOUT} &&
+                  int{KILN_GAME_LIST_SYS_READ} == int{L_SREAD} && int{KILN_GAME_LIST_WRITE} == int{L_WRITE},
+              "the ABI's list ids are layout.h's");
 
 struct Directory {
     uint32_t kind = 0;
@@ -54,8 +60,12 @@ int64_t g_name_at = kEntryName;
 uintptr_t g_image_lo = 0, g_image_hi = 0;
 const KilnCapsApi* g_caps = nullptr;
 
-std::mutex g_dir_mu;  // the directories and the name pool; never taken on a slice path
+std::mutex g_dir_mu;  // the name pool and the directory builders (Pre, world events); never taken on a slice path
+// g_dir only. Its holders copy or swap one pointer and do nothing else under it (a replaced directory is released after
+// the unlock), so a reader waits for a pointer copy at most; inside a stage it is acquired with a bound (directory()).
+std::mutex g_ptr_mu;
 std::shared_ptr<const Directory> g_dir[kKinds];
+std::atomic<uint64_t> g_dir_bypasses{0};  // reads inside a stage that gave up after the bound
 std::unordered_set<std::string> g_names;
 std::atomic<uint64_t> g_generation[kKinds];  // bumped by every start and stop of a world of that kind
 std::atomic<uint32_t> g_world_tid[kKinds];
@@ -107,10 +117,36 @@ void report(const char* name, uint32_t state, uint32_t reason, const char* text)
     g_caps->report(g_owner, KilnStr{name, std::strlen(name)}, state, reason, KilnStr{text, std::strlen(text)});
 }
 
+// The world kind's directory. Inside a stage (the game's worker, or the world thread inside its step) the pointer lock is
+// taken as decisions' BoundedMutex does (native/services/decisions/bounded_mutex.h): tries for at most 2 ms, then the read
+// reports no directory (the caller's result says not found, the managed side does not cache it) rather than waiting
+// without end inside the game's step. Elsewhere it is an ordinary lock: its holders only copy a pointer.
 std::shared_ptr<const Directory> directory(uint32_t kind) {
     if (kind >= kKinds) return nullptr;
-    std::lock_guard lock(g_dir_mu);
-    return g_dir[kind];
+    if (!t_in_program && !game_in_slice()) {
+        std::lock_guard lock(g_ptr_mu);
+        return g_dir[kind];
+    }
+    const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(2);
+    for (unsigned n = 0; n < 4096; ++n) {
+        if (g_ptr_mu.try_lock()) {
+            std::shared_ptr<const Directory> d = g_dir[kind];
+            g_ptr_mu.unlock();
+            return d;
+        }
+        if (std::chrono::steady_clock::now() >= end) break;
+        std::this_thread::yield();
+    }
+    g_dir_bypasses.fetch_add(1, std::memory_order_relaxed);
+    return nullptr;
+}
+
+void publish_directory(uint32_t kind, std::shared_ptr<const Directory> d) {
+    {
+        std::lock_guard lock(g_ptr_mu);
+        g_dir[kind].swap(d);
+    }
+    // the replaced directory (in d) is released here, outside the pointer lock
 }
 
 // Reads the table of `world` (its thread, Pre: the table is final once the world finalized its programs).
@@ -142,6 +178,18 @@ std::shared_ptr<Directory> read_table(uint32_t kind, uintptr_t world, uint16_t c
             std::snprintf(name, sizeof name, "#%u", static_cast<unsigned>(i));
         e.name = intern(std::string_view(name, std::strlen(name)));
         if (e.desc) seh_copy(&e.desc_flags, reinterpret_cast<const void*>(e.desc + offsetof(EngineDesc, flags)), 4);
+        {
+            ProgramLayout names;
+            bool no_view = false;
+            std::string why;
+            if (e.desc && read_desc(reinterpret_cast<const EngineDesc*>(e.desc), names, &no_view, why)) {
+                for (int id = 0; id < L_COUNT; ++id)
+                    for (const std::string& n : names.lists[id].names) e.lists[id].push_back(intern(n));
+                if (no_view) e.flags |= KILN_GAME_PROGRAM_NO_VIEW;
+            } else {
+                e.flags |= KILN_GAME_PROGRAM_NO_VIEW;
+            }
+        }
         if (in_image(e.desc)) e.flags |= KILN_GAME_PROGRAM_GAME;
         if (!e.update) e.flags |= KILN_GAME_PROGRAM_NO_UPDATE;
         if (e.flags & KILN_GAME_PROGRAM_GAME) {
@@ -165,14 +213,10 @@ void ensure_directory(uint32_t kind, uintptr_t world) {
     auto d = read_table(kind, world, count);
     KW_I("world %u 0x%llx: program directory, %u programs (%u of the game's, %u of them with no update in this world)",
          kind, static_cast<unsigned long long>(world), static_cast<unsigned>(d->entries.size()), d->game, d->no_update);
-    std::lock_guard lock(g_dir_mu);
-    g_dir[kind] = std::move(d);
+    publish_directory(kind, std::move(d));
 }
 
-void drop_directory(uint32_t kind) {
-    std::lock_guard lock(g_dir_mu);
-    g_dir[kind].reset();
-}
+void drop_directory(uint32_t kind) { publish_directory(kind, nullptr); }
 
 // ---- the players mask and the lab switch (server world's Pre) ----
 
@@ -383,6 +427,10 @@ uint64_t game_programs_step(uint32_t kind) { return kind < kKinds ? g_step[kind]
 
 // ---- the table ----
 
+uint64_t KILN_CALL game_world_session(uint32_t kind) {
+    return kind < kKinds ? g_generation[kind].load(std::memory_order_acquire) : 0;
+}
+
 int32_t KILN_CALL game_program_find(uint32_t kind, KilnStr name) {
     const auto d = directory(kind);
     if (!d) return -1;
@@ -408,6 +456,35 @@ KilnResult KILN_CALL game_program_info(uint32_t kind, int32_t index, KilnGamePro
     out->flags = e.flags;
     game_program_wrap_stats(kind, e.name, out);
     return KILN_OK;
+}
+
+KilnResult KILN_CALL game_program_contract(uint32_t kind, int32_t index, uint32_t* out_contract, char* text, uint32_t capacity,
+                                           uint32_t* out_size) {
+    if (out_size) *out_size = 0;
+    if (text && capacity) text[0] = 0;
+    if (!out_contract) return KILN_ERR_INVALID_ARGUMENT;
+    *out_contract = 0;
+    const auto d = directory(kind);
+    if (!d || index < 0 || static_cast<size_t>(index) >= d->entries.size()) return KILN_ERR_NOT_FOUND;
+    std::string body, why;
+    if (!contract_text(reinterpret_cast<const EngineDesc*>(d->entries[static_cast<size_t>(index)].desc), body, why))
+        return KILN_ERR_UNAVAILABLE;
+    *out_contract = fnv1a(body);
+    if (out_size) *out_size = static_cast<uint32_t>(body.size());
+    if (text && capacity) {
+        const size_t n = std::min<size_t>(body.size(), capacity - 1);
+        std::memcpy(text, body.data(), n);
+        text[n] = 0;
+    }
+    return KILN_OK;
+}
+
+int32_t KILN_CALL game_program_list(uint32_t kind, int32_t index, int32_t list, KilnStr* names, uint32_t capacity) {
+    const auto d = directory(kind);
+    if (!d || index < 0 || static_cast<size_t>(index) >= d->entries.size() || list < 0 || list >= KILN_GAME_LISTS) return -1;
+    const auto& v = d->entries[static_cast<size_t>(index)].lists[list];
+    for (uint32_t i = 0; names && i < capacity && i < v.size(); ++i) names[i] = kstr(*v[i]);
+    return static_cast<int32_t>(v.size());
 }
 
 KilnResult KILN_CALL game_programs_status(KilnGameProgramsStatus* out) {
@@ -446,6 +523,12 @@ KilnResult KILN_CALL lab_parallel(uint32_t on, uint32_t steps) {
 }
 
 // ---- tests ----
+void game_programs_test_hold_directory_lock(bool hold) {
+    if (hold) g_ptr_mu.lock();
+    else g_ptr_mu.unlock();
+}
+uint64_t game_programs_test_directory_bypasses() { return g_dir_bypasses.load(); }
+
 void game_programs_test_setup(uintptr_t image_lo, uintptr_t image_hi, bool table_ok, int64_t players_mask, bool switch_enabled) {
     g_image_lo = image_lo;
     g_image_hi = image_hi;

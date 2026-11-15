@@ -2,7 +2,7 @@
 // (src/api/mockProgress.ts: the owner's start of 13 Nov, the port of kiln_manage::start_progress::estimate).
 import { expect, test } from "bun:test";
 import type { StartStep, StartTimeline } from "../src/api/commands";
-import { aboutText, startWords, stepLine, tookText } from "../src/shell/startProgress";
+import { aboutText, quietText, startWords, stepLine, tookText } from "../src/shell/startProgress";
 import { clearStartHistory, endAt, estimate, mockBegin, mockProgress, ownerScript, setStartScript, type KeptStart, type StepNow } from "../src/api/mockProgress";
 import shared from "../../crates/kiln-manage/tests/start-progress/estimate-cases.json";
 
@@ -90,4 +90,19 @@ test("the mock's estimate gives what kiln_manage's gives in every shared case (n
     expect({ name: c.name, leftMs: e.leftMs, slow: e.slow, starts: e.starts, same: e.same, stepsDone: e.stepsDone, usual: e.usual })
       .toEqual({ name: c.name, ...c.expect });
   }
+});
+
+test("a silent start names its step; at the last step it says the game is loading or at its menu", () => {
+  const quiet = (s: StartStep): StartTimeline => ({
+    phase: "quiet", started: "2026-11-14T18:09:00.000Z", atMs: 5_200_000, quietMs: 5_183_000, launcher: true, steps: [s], running: 0,
+    estimate: { leftMs: null, starts: 0, same: false, slow: null, fraction: 0.9, byTime: false, stepsDone: 12, stepsPlanned: 15, usual: [] },
+  });
+  // a step that never ends is said with its name
+  expect(quietText(quiet(step({ id: "content", label: "Applying the mods' content", done: 3, total: 198 }))))
+    .toBe("Kiln has said nothing for 5183 s (last: Applying the mods' content). A step can be slow on a busy PC; if the game does not move, close it and save a support report on the Logs page.");
+  // Kiln's part is over and the menu's mark has not come (a Nexus report, 2026-11-14): no "close it", and when it ends
+  const game = quietText(quiet(step({ id: "game", label: "The game is loading" })));
+  expect(game).toBe("Kiln has loaded the mods. The game is still loading, or it is at its menu and Kiln did not see the menu appear; this goes away once you load a world.");
+  // the mods that load at the first world, as before
+  expect(quietText(quiet(step({ id: "mods", label: "Waiting for the game to load the mods" })))).toMatch(/^The game is waiting at its menu/);
 });

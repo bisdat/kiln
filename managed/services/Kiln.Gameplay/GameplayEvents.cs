@@ -85,6 +85,7 @@ public enum CraftResult
 /// phase of the same step. Forge's ItemCraftedEvent, fired for failures too: check <see cref="Succeeded"/>.</summary>
 public sealed class ItemCraftedEvent : GameplayEvent
 {
+    static ItemCraftedEvent() => Gameplay.RegisterHookEvent(typeof(ItemCraftedEvent),2,"gameplay.craft");
     public EntityId Operator { get; internal init; }
     public EntityId Station { get; internal init; }
     public uint RecipeId { get; internal init; }
@@ -181,8 +182,17 @@ public enum BuildOutcome
 /// Post phase: the operation already ran (or was refused) inside the step on a game worker thread, where no mod code
 /// can run. To refuse edits use <see cref="Gameplay.Protect"/> zones, which the game's building code consults
 /// synchronously; this event then reports <see cref="BuildOutcome.DeniedByZone"/>.</summary>
+/// <remarks>Managed mods referencing Kiln.Gameplay request the five building detours at host startup, even for
+/// crafting-only use. Native plugins request them at startup if they will later add build/break denies. With no worlds this
+/// happens immediately. Interest first seen while any world runs waits for checked installation at safe Pre ticks; the shared
+/// budget is two targets per Pre (five building targets need three Pres when alone). Earlier operations are not replayed. Check capability <c>gameplay.build_hooks</c> for the
+/// waiting/refusal reason. Unsubscribing leaves installed hooks in place, passing through without listeners or zones.
+/// Terraforming uses its separate hook.</remarks>
 public sealed class BuildEvent : GameplayEvent
 {
+    static unsafe BuildEvent() => EventProducers.Register(typeof(BuildEvent),
+        GameplayNative.RequestBuild(GameplayNative.T) != null ? "gameplay.build_hooks" : "gameplay.build",
+        Gameplay.PrepareBuildEvents, allowPending: true);
     public BuildKind Kind { get; internal init; }
     public EntityId Player { get; internal init; }
     /// <summary>Block / prop item (place), material item (dismantle); 0 for terraforming.</summary>
@@ -235,6 +245,7 @@ public sealed class TeleportedEvent : GameplayEvent
 /// <see cref="GameplayActions.Spawn"/> zone arrive already canceled with <see cref="Entity"/> none.</summary>
 public sealed class NaturalSpawnEvent : GameplayCancelableEvent
 {
+    static NaturalSpawnEvent() => Gameplay.RegisterHookEvent(typeof(NaturalSpawnEvent),8,"gameplay.spawn");
     public EntityId Entity { get; internal init; }
     public Guid Template { get; internal init; }
     public WorldPosition Position { get; internal init; }
@@ -311,6 +322,7 @@ internal struct TemplateLookup
 /// (weakspots, links) of a creature you keep can break it.</remarks>
 public sealed class EntityJoinLevelEvent : GameplayCancelableEvent, IEntityLifecycleEvent
 {
+    static EntityJoinLevelEvent() => Gameplay.RegisterHookEvent(typeof(EntityJoinLevelEvent),16,"gameplay.entity_events");
     private TemplateLookup _t;
     public EntityId Entity { get; internal init; }
     public Guid? Template { get; internal init; }
@@ -328,6 +340,7 @@ public sealed class EntityJoinLevelEvent : GameplayCancelableEvent, IEntityLifec
 /// bulk removal when the world shuts down.</summary>
 public sealed class EntityLeaveLevelEvent : GameplayEvent, IEntityLifecycleEvent
 {
+    static EntityLeaveLevelEvent() => Gameplay.RegisterHookEvent(typeof(EntityLeaveLevelEvent),16,"gameplay.entity_events");
     private TemplateLookup _t;
     public EntityId Entity { get; internal init; }
     public Guid? Template { get; internal init; }

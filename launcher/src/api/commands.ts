@@ -116,7 +116,7 @@ export interface LauncherSettings {
   savesKeep: number;
   /** Check for launcher updates at the start and every 6 hours (default on). */
   updateCheck: boolean;
-  /** Absent or null: the channel of the running build (a dev build follows dev). */
+  /** Absent or null: the channel of the running build (a dev build follows dev, a test build beta). */
   updateChannel?: UpdateChannel | null;
   /** The WebGL fire on Play (default on); off draws the plain Play button. */
   animatedFire?: boolean;
@@ -130,7 +130,12 @@ export interface LauncherSettings {
   modFolderNotes?: boolean;
   /** "Check for mod updates once a day" (default off; api/updates.ts). */
   modUpdatesDaily?: boolean;
+  /** (dev.29) "Earlier versions to keep": how many earlier versions of a mod an update keeps for a roll back, with
+   *  their settings (0 to KEEP_MAX; default 1; absent from an older backend). */
+  keepVersions?: number;
 }
+/** The most `keepVersions` may be (kiln_manage::kept::KEEP_MAX). */
+export const KEEP_MAX = 5;
 export type TaskState = "queued" | "running" | "done" | "failed" | "canceled";
 export interface Task<R = unknown> {
   id: TaskId;
@@ -168,6 +173,7 @@ export interface GameInstall {
 export interface LaunchOptionsInfo {
   value: string | null;
   hasDllOverride: boolean;
+  chainedOverrideMissing?: boolean;
   advice: string | null;
 }
 export interface GameStatus {
@@ -285,6 +291,10 @@ export interface InstallState {
   /** Parts absent from the receipt that a reinstall adds: defaults not turned off, plus required dependencies.
    *  Absent from older backends. */
   missingParts?: string[];
+  /** (dev.29) The game's Kiln came with a test build of the launcher (its receipt's installer says beta) and this
+   *  launcher ships an older one: after a switch back to the release, the next Play installs `to` (the launcher's own)
+   *  in place of `from`. Absent from older backends and from kilnctl. */
+  switchBack?: { from: string; to: string } | null;
 }
 
 // profiles
@@ -441,7 +451,7 @@ export interface LibraryVersion {
   side: Side | null;
   clients: Clients | null;
   size: number;
-  source: { type: "file" | "folder" | "modpack"; from: string } | null;
+  source: { type: "file" | "folder" | "modpack" | "replaced-dll"; from: string } | null;
   /** The id the mod's own manifest gives, when the Library id is not that (an engine mod such as "Hoarders Helper":
    *  the Library id is its Kiln-id slug). Engine plugins report their state rows under this id. */
   manifestId: string | null;
@@ -449,6 +459,38 @@ export interface LibraryVersion {
   /** Its files were changed in its folder since Kiln imported them (a player edited its mod.json): Play refuses it as
    *  it is until libraryTakeOver makes the changed files the mod's entry. Absent: not changed. */
   changed?: boolean;
+  /** (dev.29) An earlier version an update replaced, kept for a roll back (kiln_manage::kept::KeptInfo). Kept versions
+   *  come after the others in `versions`, so `versions[0]` is never one unless nothing else is left. */
+  kept?: KeptInfo | null;
+}
+export interface KeptInfo {
+  /** When it was kept (RFC 3339 UTC). */
+  kept: string;
+  /** The version that took its place then. */
+  replacedBy?: string | null;
+  /** The settings files kept with it (relative to the game folder) and their bytes. */
+  settings: string[];
+  settingsSize: number;
+  /** The profiles whose change kept it: only they roll back to it (absent or empty: any). */
+  profiles?: string[];
+}
+/** A version of one mod (kiln_manage::kept::VersionRef). */
+export interface VersionRef { version: string; hash: string }
+/** library_rollback (kiln_manage::kept::RollbackReport): what the roll back changed in the profile (`changes`: what
+ *  profile_revert puts back), whether the version rolled away from is kept now, the settings files that go back into
+ *  the mod's game-folder copy at its next placement, and sentences for the player. */
+export interface RollbackReport {
+  profileId: string;
+  profileName: string;
+  kind: ModKind;
+  id: string;
+  name: string;
+  from: VersionRef;
+  to: VersionRef;
+  changes: ProfileChange[];
+  kept: boolean;
+  settings: string[];
+  notices: string[];
 }
 /** library_take_over (kiln_manage::library::TakenOver): the entry as it was, the entry its changed files are now
  *  (`from` again when nothing was changed), the mod's name as its manifest gives it now, and a note when the folder
@@ -717,7 +759,11 @@ export interface NativeJson {
     init?: { export?: string; result?: number | null; fault?: string | null; ms?: number } | null;
   }[];
 }
+export interface StoppedStart {
+  kind: "roster" | "boot-mod" | "content"; reason: string; mods: string[]; names: string[]; advice: string; utc: string; exitCode: number; pid: number;
+}
 export interface BootState {
+  stoppedStart?: StoppedStart | null;
   boot: BootJson | null;
   mods: ModsJson | null;
   native: NativeJson | null;
@@ -1099,7 +1145,9 @@ export const appAssetsImport = (kind: "editor" | "admin", from: string | null = 
 // update.rs: the launcher's self-update (frostdev.io, then GitHub; signed). Changes arrive as kiln://update.
 // The Nexus Mods build has the same commands without a self-update: phase "disabled", install/restart reject with
 // `unsupported`, nothing is fetched (and the UI calls none of them there: api/distribution.ts).
-export type UpdateChannel = "stable" | "dev";
+/** "dev" is the public release line while there is no stable release ("Release" in the UI); "beta" (dev.29) are test
+ *  builds of the next release (api/channel.ts). */
+export type UpdateChannel = "stable" | "dev" | "beta";
 export type UpdatePhase = "idle" | "checking" | "upToDate" | "available" | "skipped" | "failed" | "downloading" | "ready" | "disabled";
 export type UpdateInstallKind = "appimage" | "nsis" | "msi" | "deb" | "rpm" | "unbundled";
 export interface UpdateFailure { source: string; step: "manifest" | "download" | "signature" | "hash"; message: string }
@@ -1128,6 +1176,29 @@ export interface UpdateStatus {
   justUpdated: { from: string; to: string; at: string; source: string; notes: string | null } | null;
   taskId: TaskId | null;
   error: KilnError | null;
+  /** (dev.29) The channel this build belongs to: a test build's is "beta" (baked in when it was built), else the
+   *  channel of its version. Absent from an older backend: the version's. */
+  buildChannel?: UpdateChannel;
+  /** (dev.29) This test build's beta number (null: not a test build). */
+  beta?: number | null;
+  /** (dev.29) The channel switch the player started (update_switch) while it downloads or waits for the restart. */
+  switching?: UpdateChannel | null;
+  restoreRequested?: boolean;
+  beforeBetaWarning?: string[];
+  /** (dev.29) The copy of settings and profiles taken before the first start of a test build: a switch back can put
+   *  it back (update_switch `restore`). */
+  beforeBeta?: BeforeBeta | null;
+}
+/** selfupdate/snapshot.rs: what a "before beta" copy holds. */
+export interface BeforeBeta {
+  /** When it was taken (RFC 3339). */
+  taken: string;
+  /** The launcher that wrote the files last before the test build (its version, "" when not known). */
+  from: string;
+  /** The test build that took it. */
+  by: string;
+  /** Files in it (settings.json, each profile's meta.json, the Library's kiln-kept.json). */
+  files: string[];
 }
 /** Guard the command boundary as well as the UI: even a stale callback or a directly mounted hook cannot invoke
  *  an updater command in the Nexus build. Failure to read the distribution also fails closed. */
@@ -1145,6 +1216,10 @@ export const updateRestart = () => selfUpdateCall<null>("update_restart");
 /** null: un-skips. */
 export const updateSkip = (version: string | null) => selfUpdateCall<UpdateStatus>("update_skip", { version });
 export const updateAck = () => selfUpdateCall<UpdateStatus>("update_ack");
+/** (dev.29) A channel switch the player asked for: downloads and installs the newest build of `channel` (on the way
+ *  back from a test build also an older one), then "Restart now" (updateRestart) runs it. `restore`: the restart puts
+ *  the "before beta" copy back first (status.beforeBeta). Task result: UpdateStatus. */
+export const updateSwitch = (channel: UpdateChannel, restore = false) => selfUpdateCall<TaskId>("update_switch", { channel, restore });
 
 // game.rs
 export const gameList = () => call<GameInstall[]>("game_list");
@@ -1200,9 +1275,9 @@ export const profileResolve = (profileId: ProfileId, side: RunSide, gameId: Game
   call<ResolvePreview>("profile_resolve", { profileId, side, gameId });
 /** One activation per game at a time (./oneActivation.ts): a second one while the first runs is refused (`busy`). */
 export const profileActivate = (profileId: ProfileId, gameId: GameId) =>
-  oneActivation(gameId, () => call<Activation>("profile_activate", { profileId, gameId })).then((r) => { profileSwitched(gameId); return r; });
+  oneActivation(gameId, () => call<Activation>("profile_activate", { profileId, gameId })).then((r) => { profileSwitched(gameId, profileId); return r; });
 export const profileDeactivate = (gameId: GameId) =>
-  oneActivation(gameId, () => call<PlacementCleanup>("profile_deactivate", { gameId })).then((r) => { profileSwitched(gameId); return r; });
+  oneActivation(gameId, () => call<PlacementCleanup>("profile_deactivate", { gameId })).then((r) => { profileSwitched(gameId, null); return r; });
 export const profileActive = (gameId: GameId) => call<Activation | null>("profile_active", { gameId });
 /** The activations of re-applies the window has not shown yet (after a profile edit, a change outside the launcher, the
  *  watcher's start-up pass); each is returned once. Taken when `kiln://activation` arrives and once at start. */
@@ -1325,6 +1400,22 @@ export const engineOwnFolders = (profileId: ProfileId, gameId: GameId) => call<O
 export const engineAdoptFolder = (kind: ModKind, id: string, profileId: ProfileId, gameId: GameId) =>
   call<Adopted>("engine_adopt_folder", { kind, id, profileId, gameId });
 export const emlBackup = (gameId: GameId) => call<EmlBackup[]>("eml_backup", { gameId });
+/** One file "Restore the game's data" moves: its path in the game folder, size and SHA-256. */
+export interface DataRestoreEntry { from: string; size: number; sha256: string }
+/** What would be moved: the leftover containers past the game's own count, the shared backup pair, its seal and
+ *  Kiln's change cache. `fingerprint` covers the state and every file; apply takes it, so only what was shown moves. */
+export interface DataRestorePlan { fingerprint: string; files: DataRestoreEntry[] }
+/** A move that was made: the folder under kiln/eml/displaced/ and the files in it. */
+export interface DataRestoreMoved { folder: string; files: DataRestoreEntry[] }
+/** The plan for this game, or a refusal with its reason (nothing unproven, the game runs, ShroudForge is the writer,
+ *  the game's index changed since the last start, nothing left over). Finishes a move that was interrupted. */
+export const emlDataPlan = (gameId: GameId) => call<DataRestorePlan>("eml_data_plan", { gameId });
+/** Moves the plan's files aside. `verified`: the player confirmed Steam's file check. Never deletes or overwrites. */
+export const emlDataApply = (gameId: GameId, fingerprint: string, verified: boolean) => call<DataRestoreMoved>("eml_data_apply", { gameId, fingerprint, verified });
+/** Moves a folder's files back; refused when one of the names exists again. */
+export const emlDataUndo = (gameId: GameId, folder: string) => call<DataRestoreMoved>("eml_data_undo", { gameId, folder });
+/** The newest move that was not undone (kept across launcher starts, so Undo stays), or null. */
+export const emlDataLatest = (gameId: GameId) => call<DataRestoreMoved | null>("eml_data_latest", { gameId });
 /** Legacy command: refuses direct shared-backup restores; updated Kiln's archive writer verifies ownership on launch. */
 export const emlRestore = (gameId: GameId) => call<string[]>("eml_restore", { gameId });
 
@@ -1345,6 +1436,9 @@ export interface ChainViewEntry {
   lateBy: string | null;
   /** "rule:<id>" when a compat rule switches it off. */
   offBy: string | null;
+  /** dev.29: "rule:<id>" when a `before` rule keeps it loading first (in the proxy) whatever its late switch says; the
+   *  switch is the rule's while the rule applies (`late` is false). Absent from an older backend. */
+  earlyBy?: string | null;
   /** EMF's loader: it starts EMF itself, which Kiln's EMF support has to see when it starts, so Kiln always loads it
    *  first and the late switch is not offered. */
   loader: boolean;
@@ -1352,7 +1446,8 @@ export interface ChainViewEntry {
    *  so it is never switched late; one already late (an older Kiln allowed it) can be switched back. */
   gated?: boolean;
 }
-export type RuleAction = "warn" | "late" | "disable";
+/** before (dev.29): the rule's subject loads before its target (the target late, the subject early). */
+export type RuleAction = "warn" | "late" | "disable" | "before";
 export interface CompatRuleResult {
   id: string;
   source: "kiln" | "user";
@@ -1360,8 +1455,14 @@ export interface CompatRuleResult {
   message: string;
   fired: boolean;
   applied: boolean;
+  /** The chain entries it moves late or switches off (before: the ones that load after). */
   targets: string[];
+  /** before: the chain entries it keeps loading first. */
+  early?: string[];
   note?: string;
+  /** before: both sides are there but the order cannot be made (a DLL that never loads late, a cycle, another rule):
+   *  nothing was moved. Shown as a warning. */
+  warning?: string;
 }
 export type OverlapKind = "foreign-before" | "foreign-over" | "refused" | "other";
 export interface ChainOverlap {
@@ -1529,6 +1630,15 @@ export const libraryUsers = (entry: LibraryRef) => call<string[]>("library_users
  *  that listed it lists that one, and the games where such a profile is active get it written again. Rejects with
  *  game_running while a game, or a server that may read the entry, runs. */
 export const libraryTakeOver = (entry: LibraryRef) => call<TakenOver>("library_take_over", { entry });
+/** "Replace DLL…": a new Library build of a native mod with one DLL swapped; the build before it is kept. A refusal
+ *  with `detail.replaceDllConfirmation` is a question (another file name, another kind of DLL): ask, then call again
+ *  with `confirmed`. */
+export const libraryReplaceDll = (profileId: string, entry: LibraryRef, path: string, confirmed = false) =>
+  call<{ entry: LibraryRef; notices: string[] }>("library_replace_dll", { profileId, entry, path, confirmed });
+
+/** "Roll back to <version>": the kept version `to` (null: the newest kept one) replaces the mod's entry in the profile. */
+export const libraryRollback = (gameId: GameId | null, profileId: string, kind: ModKind, id: string, to: VersionRef | null) =>
+  call<RollbackReport>("library_rollback", { gameId, profileId, kind, id, to });
 /** One entry (with profileId: checked against the profile's other mods), or a whole profile (entry null). */
 export const libraryLint = (entry: LibraryRef | null, profileId: ProfileId | null = null) => call<LintReport>("library_lint", { entry, profileId });
 
@@ -1840,12 +1950,13 @@ export const dataFolderRestart = () => call<null>("data_folder_restart");
 
 /** Every command name (the Rust side registers the same list; mock.ts answers or rejects each). */
 export const COMMANDS = [
+  "snapshot_status", "snapshot_continue",
   "app_info", "app_settings_get", "app_settings_set", "app_open_path", "app_open_url", "task_list", "task_get", "task_cancel",
   "game_list", "game_detect", "game_add", "game_remove", "game_status",
   "runtime_list", "runtime_import", "runtime_status", "runtime_install", "runtime_uninstall", "runtime_rollback", "runtime_classify",
   "profile_list", "profile_get", "profile_create", "profile_save", "profile_delete", "profile_resolve", "profile_activate",
   "profile_deactivate", "profile_active", "activation_notices", "notices_unseen", "notices_shown",
-  "library_list", "library_detect", "library_import", "library_remove", "library_remove_many", "library_unused", "library_users", "library_lint", "library_take_over",
+  "library_list", "library_detect", "library_import", "library_remove", "library_remove_many", "library_unused", "library_users", "library_lint", "library_take_over", "library_rollback", "library_replace_dll",
   "config_list", "config_read", "config_set", "config_write", "config_reset", "config_native_state", "config_native_set",
   "launch_play", "launch_state", "launch_prestart", "launch_begin", "launch_progress", "launch_end",
   "logs_list", "logs_read", "logs_follow", "logs_unfollow", "logs_crash_reports",
@@ -1862,12 +1973,12 @@ export const COMMANDS = [
   "config_kiln_read", "config_kiln_set", "config_kiln_reset",
   "app_assets_status", "app_assets_import",
   "server_console_open", "server_console_close",
-  "update_status", "update_check", "update_install", "update_restart", "update_skip", "update_ack",
+  "update_status", "update_check", "update_install", "update_switch", "update_restart", "update_skip", "update_ack",
   "library_add", "library_add_to_profile", "profile_revert", "profile_ensure_default",
   "deck_browse", "deck_gamepad", "deck_fullscreen", "deck_quit",
   "nexus_account", "nexus_sign_in", "nexus_sign_out", "nexus_search", "nexus_mod", "nexus_installed", "nexus_download", "nexus_links", "nexus_link_install", "nexus_link_dismiss", "nexus_handler_status", "nexus_handler_set",
-  "engine_settings_get", "engine_settings_set", "engine_status", "engine_own_folders", "engine_adopt_folder", "eml_backup", "eml_restore",
-  "chain_view", "chain_set_late",
+  "engine_settings_get", "engine_settings_set", "engine_status", "engine_own_folders", "engine_adopt_folder", "eml_backup", "eml_restore", "eml_data_plan", "eml_data_apply", "eml_data_undo", "eml_data_latest",
+  "chain_view", "chain_set_late", "shroudlink_notice",
   "found_scan", "found_add",
   "cook_plan", "cook_run", "boot_snapshot_run",
   "report_save", "report_summary",
@@ -1906,3 +2017,10 @@ export async function onKilnEvent<E extends KilnEventName>(name: E, handler: (pa
   if (isTauri()) return tauriListen<KilnEvents[E]>(name, (e) => handler(e.payload));
   return (await loadMock()).mockListen(name, handler as (payload: unknown) => void);
 }
+
+export interface SnapshotStartup { phase: "preparing" | "blocked" | "ready"; reasons: string[]; canContinue?: boolean }
+export const snapshotStatus = () => call<SnapshotStartup>("snapshot_status");
+export const snapshotContinue = () => call<null>("snapshot_continue");
+
+export interface ShroudlinkNotice { mods: string[]; addons: LibraryRef[] }
+export const shroudlinkNotice = (profile: Profile, gameId: GameId) => call<ShroudlinkNotice | null>("shroudlink_notice", { profile, gameId });
