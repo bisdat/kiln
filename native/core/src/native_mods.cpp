@@ -11,6 +11,7 @@
 #include <regex>
 #include <set>
 
+#include "../../proxy/image_match.h"
 #include "api.h"
 #include "chain_status.h"
 #include "config.h"
@@ -134,6 +135,33 @@ std::wstring final_path(const fs::path& p) {
     if (buf.rfind(L"\\\\?\\UNC\\", 0) == 0) buf = L"\\\\" + buf.substr(8);
     else if (buf.rfind(L"\\\\?\\", 0) == 0) buf = buf.substr(4);
     return lower(buf);
+}
+
+// chain.ini [late]: the proxy's check after its loads (proxy/image_match.h), with the proxy's wording. The warning when
+// module `h` is not the file at `path` (Wine's builtin of the same name mapped in its place, which still reports the
+// asked path), else empty: only a proven mismatch counts, a file or module header that cannot be read is none.
+// `shown`: the path as the proxy listed it; `canon`: its final_path().
+std::string swap_warning(const fs::path& path, const std::string& shown, const std::wstring& canon, HMODULE h) {
+    namespace im = kiln::image_match;
+    const im::Id loaded = im::module_headers(h);
+    if (!loaded.ok) return {};
+    HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                           FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return {};
+    unsigned char head[4096];
+    DWORD got = 0;
+    const BOOL ok = ReadFile(f, head, sizeof head, &got, nullptr);
+    CloseHandle(f);
+    if (!ok || !im::mismatch(loaded, im::read(head, got))) return {};
+    std::wstring reported(4096, L'\0');
+    const DWORD n = GetModuleFileNameW(h, reported.data(), static_cast<DWORD>(reported.size()));
+    reported.resize(n < reported.size() ? n : 0);
+    const bool another = !reported.empty() && final_path(fs::path(reported)) != canon;
+    const std::string rep = to_utf8(reported);
+    std::string out(2 * shown.size() + rep.size() + 256, '\0');
+    if (!im::warning(out.data(), out.size(), "late: ", shown.c_str(), im::instead(another, loaded), rep.c_str())) return {};
+    out.resize(std::char_traits<char>::length(out.c_str()));
+    return out;
 }
 
 // ---- SEH guards: no objects with destructors in these frames ----
@@ -958,7 +986,10 @@ void run_late() {
         l.module = h;
         l.row.status = "loaded";
         g_loaded_paths.insert(l.canon);
-        KLOG_I("late: %s loaded at %p (%.1f ms)", l.row.path.c_str(), static_cast<void*>(h), l.row.ms);
+        if (const std::string swap = swap_warning(path, l.row.path, l.canon, h); !swap.empty())
+            ::kiln::log::write(KILN_LOG_WARN, "kiln", swap);  // longer than writef's buffer can be
+        else
+            KLOG_I("late: %s loaded at %p (%.1f ms)", l.row.path.c_str(), static_cast<void*>(h), l.row.ms);
     }
     // A dllmain native mod whose DLL was late finishes here.
     for (Mod& m : g_mods) {

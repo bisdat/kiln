@@ -77,6 +77,15 @@ a link, a mapped drive (Proton's `S:`) or at a drive root is accepted. Under Win
 Windows path APIs, so a Unix symlink inside the game folder counts as part of it (making one needs write access to the
 game folder, which already allows placing a DLL there); absolute, drive and `..` entries are refused before resolving.
 
+If Wine or Proton maps its own DLL of the same name in place of a chained one ([Ultimate ASI Loader next to Kiln on
+Wine](#ultimate-asi-loader-next-to-kiln-on-wine)), `kiln\logs\proxy.log` says so in place of `loaded at ...` and gives
+the override to set: `chain: chain.ini [chain]: requested <game>\xinput9_1_0.dll but another file was loaded in its
+place: Wine's own xinput9_1_0; on Wine or Proton a DLL override is needed: WINEDLLOVERRIDES="xinput9_1_0=n,b"`. For a
+`[late]` entry the same line, starting `late:`, goes to `kiln.log`. Wine's module reports the requested path all the
+same, so the check compares the loaded image with the file: the PE headers' time stamp, image size, checksum, entry
+point and section count, and Wine's builtin marker after the DOS header (`native/proxy/image_match.h`). A file or
+module header that cannot be read counts as no mismatch.
+
 ### Loading a chained DLL late (`[late]`)
 
 A DLL mod that hooks game functions (XHL-Core, Auto Loot Plus and similar closed-source mods) hooks them in its
@@ -150,8 +159,9 @@ its full path, but Wine still applies its rules for the name `xinput9_1_0`. Set 
 The launcher names both overrides when Ultimate ASI Loader is chained and reports a missing override.
 - Tested (2026-11-14, dedicated server lab under GE-Proton11-11, Kiln 0.2.0-dev.28's proxy, a test DLL of ours named
   `xinput9_1_0.dll`, not Ultimate ASI Loader itself): without the override, a DLL without version information did not
-  run. Wine loaded its own `xinput9_1_0` instead, and `proxy.log` still said `loaded at ...`, so the log does not
-  show it. With `xinput9_1_0=n,b` it ran.
+  run. Wine loaded its own `xinput9_1_0` instead, and dev.28's `proxy.log` still said `loaded at ...`. With
+  `xinput9_1_0=n,b` it ran. Since dev.29 the proxy warns ([Proxy](#proxy)); `native/proxy/tests/test-chain.sh` shows
+  the warning under GE-Proton11-11's wine without an override and under Wine 11.20 with `xinput9_1_0=b` (2026-11-15).
 - Tested on the same lab: a DLL whose version information names a company other than Microsoft ran without the
   override. GE-Proton11-11 has the rule from Wine 11.6 that prefers such DLLs. Ultimate ASI Loader's current source
   names ThirteenAG as its company, so it should load there without the override (untested with the real loader).

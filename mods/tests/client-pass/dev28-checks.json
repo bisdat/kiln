@@ -581,6 +581,36 @@
    "state": "open"
   },
   {
+   "id": "10-items.equip-set.observer",
+   "title": "A second player sees the atomic set swap",
+   "chapter": "10",
+   "packages": [
+    "10-equipment-sets"
+   ],
+   "state": "open",
+   "added": "10-equipment-sets (dev.29 review: the second observer split out of 10-items.equip-set)"
+  },
+  {
+   "id": "10-items.equip-set.persist",
+   "title": "A set's result is saved with the character (part 1: apply)",
+   "chapter": "10",
+   "packages": [
+    "10-equipment-sets"
+   ],
+   "state": "open",
+   "added": "10-equipment-sets (dev.29: a save and reload the lab cannot show)"
+  },
+  {
+   "id": "10-items.equip-set.persist.after",
+   "title": "A set's result is saved with the character (part 2: after a reload)",
+   "chapter": "10",
+   "packages": [
+    "10-equipment-sets"
+   ],
+   "state": "open",
+   "added": "10-equipment-sets (dev.29: a save and reload the lab cannot show)"
+  },
+  {
    "id": "11-h1",
    "title": "Host's own replication route",
    "chapter": "11",

@@ -26,6 +26,7 @@
 #include "equip_logic.h"
 #include "instances.h"
 #include "setexec.h"
+#include "setorder.h"
 #include "setsvc.h"
 #include "services/kiln_players.h"
 #include "services/kiln_types.h"
@@ -492,8 +493,21 @@ void run_set(const Access& a, uint64_t* it, KilnEntity player, SetRequest&& set,
              static_cast<unsigned long long>(set.ticket));
     } else if (f.out.engine_fault) {
         // the game faulted inside the set's reads or transaction, or the state after it is neither asked nor as before:
-        // sets go off, and equip too (the same functions and the same transaction buffer; nothing is repaired)
-        sets_break(f.out.reason);
+        // sets go off, and equip too (the same functions and the same transaction buffer; nothing is repaired or rolled
+        // back after a fault). kiln.log names the player and the step; the capability row keeps the reason until the
+        // server restarts.
+        char at[40] = "";
+        if (f.out.failed_operation != UINT32_MAX) std::snprintf(at, sizeof at, ", at its step %u", f.out.failed_operation);
+        LOGE("equipment set ticket %llu: player %u, server step %llu%s: %s%s", static_cast<unsigned long long>(set.ticket), player,
+             static_cast<unsigned long long>(step), at, f.out.seh ? "THE GAME FAULTED: " : "", f.out.reason);
+        char b[160];
+        if (f.out.seh)
+            std::snprintf(b, sizeof b, "player %u, set %llu, server step %llu%s: the game faulted%s", player, static_cast<unsigned long long>(set.ticket),
+                          static_cast<unsigned long long>(step), at, (f.out.flags & sets::kResultMayHaveMutated) ? "; the inventory may be in an unknown state" : "");
+        else
+            std::snprintf(b, sizeof b, "player %u, set %llu, server step %llu: %s", player, static_cast<unsigned long long>(set.ticket),
+                          static_cast<unsigned long long>(step), f.out.reason);
+        sets_break(b);
         broken("an equipment set's transaction faulted or failed its check (see kiln.log)");
     }
     if (f.out.status == sets::SetStatus::InvariantFailure) set_counters().invariants.fetch_add(1);
@@ -513,28 +527,25 @@ void KILN_CALL each(KilnProgramCtx* ctx, uint64_t* it, KilnEntity player, void*)
     {
         std::lock_guard lock(g_mu);
         const uint64_t now_step = current_step();
-        for (auto i = g_pending.begin(); i != g_pending.end() && n < kPerPlayerStep;) {
-            if (i->r.player == player && i->verified_step == now_step) {
+        // the player's queue, single equips and sets together; what this update runs is setorder.h's run_now: FIFO by
+        // ticket, at most kPerPlayerStep single equips and one set, nothing past a request that cannot run now
+        std::vector<sets::Queued> mine;
+        for (const Request& q : g_pending)
+            if (q.r.player == player) mine.push_back({q.ticket, false, q.verified_step == now_step});
+        for (const SetRequest& r : g_sets)
+            if (r.job.player == player) mine.push_back({r.ticket, true, r.phase == SetPhase::Ready && r.verified_step == now_step});
+        for (const uint64_t t : sets::run_now(std::move(mine), kPerPlayerStep)) {
+            if (auto i = std::find_if(g_pending.begin(), g_pending.end(), [t](const Request& q) { return q.ticket == t; }); i != g_pending.end()) {
                 batch[n++] = *i;
-                i = g_pending.erase(i);
-            } else {
-                ++i;
-            }
-        }
-        g_pending_n.store(static_cast<uint32_t>(g_pending.size()), std::memory_order_release);
-        if (g_sets_ready.load(std::memory_order_relaxed)) {  // the player's oldest ready set (one per step)
-            auto best = g_sets.end();
-            for (auto i = g_sets.begin(); i != g_sets.end(); ++i)
-                if (i->job.player == player && i->phase == SetPhase::Ready && i->verified_step == now_step &&
-                    (best == g_sets.end() || i->ticket < best->ticket))
-                    best = i;
-            if (best != g_sets.end()) {
-                set = std::move(*best);
-                g_sets.erase(best);
+                g_pending.erase(i);
+            } else if (auto k = std::find_if(g_sets.begin(), g_sets.end(), [t](const SetRequest& r) { return r.ticket == t; }); k != g_sets.end()) {
+                set = std::move(*k);
+                g_sets.erase(k);
                 have_set = true;
                 recount_ready();
             }
         }
+        g_pending_n.store(static_cast<uint32_t>(g_pending.size()), std::memory_order_release);
     }
     if (n == 0 && !have_set) return;
     std::sort(batch, batch + n, [](const Request& x, const Request& y) { return x.ticket < y.ticket; });
@@ -727,7 +738,7 @@ void KILN_CALL set_sink(const KilnDecisionOutcomeV1* o, void* user) {
 bool same_key(const KilnEventEntityKey& a, const KilnEventEntityKey& b) { return std::memcmp(&a, &b, sizeof a) == 0; }
 
 // The sets' part of equip_pre: ends what has to end, files decisions, verifies the session of what may run this step.
-// `blocked`: per player, the lowest ticket of a set that does not run this step (a single equip after it waits: FIFO).
+// `blocked`: per player, the ticket after which its single equips wait this step (setorder.h singles_wait_from: FIFO).
 void sets_in_pre(uint64_t step, int state, std::vector<SetFinished>* out, std::vector<std::pair<KilnEntity, uint64_t>>* blocked) {
     if (g_sets_live.load(std::memory_order_acquire) == 0) return;  // no set: nothing to do (and no lock taken)
     const bool off = state == KILN_ITEMS_PROGRAM_NONE || state == KILN_ITEMS_PROGRAM_BROKEN || sets_broken();
@@ -872,15 +883,16 @@ void sets_in_pre(uint64_t step, int state, std::vector<SetFinished>* out, std::v
             if (i->phase == SetPhase::Ready) i->verified_step = step;  // its program runs this step
             break;
         }
-    for (const SetRequest& r : g_sets) {
-        if (r.phase == SetPhase::Ready && r.verified_step == step) continue;
-        bool have = false;
-        for (auto& b : *blocked)
-            if (b.first == r.job.player) {
-                b.second = std::min(b.second, r.ticket);
-                have = true;
-            }
-        if (!have) blocked->emplace_back(r.job.player, r.ticket);
+    // FIFO per player (setorder.h): only the player's oldest set can run this step; every other set holds back the
+    // single equips after it
+    std::vector<KilnEntity> players;
+    for (const SetRequest& r : g_sets)
+        if (std::find(players.begin(), players.end(), r.job.player) == players.end()) players.push_back(r.job.player);
+    for (KilnEntity p : players) {
+        std::vector<sets::PendingSet> mine;
+        for (const SetRequest& r : g_sets)
+            if (r.job.player == p) mine.push_back({r.ticket, r.phase == SetPhase::Ready && r.verified_step == step});
+        if (const uint64_t from = sets::singles_wait_from(mine); from != UINT64_MAX) blocked->emplace_back(p, from);
     }
     recount_ready();
 }
