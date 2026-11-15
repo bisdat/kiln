@@ -120,6 +120,25 @@ public sealed class EquipDecisionsTests : IDisposable
         Assert.False(Assert.Single(kiln.Decisions.Model.Answers).Allow);
     }
 
+    // The item left the inventory while the input was held (between the step that held it and the Pre of its
+    // decision): the typed event describes what the slot holds now, which is what the game acts on when the input is
+    // released (it checks the slot again and equips nothing from an empty one), never the stack that is gone.
+    [Fact]
+    public void An_item_that_left_while_its_input_was_held_is_described_as_gone()
+    {
+        using var kiln = Started(out var p, out var arrows, out var inv);
+        var seen = new List<PlayerEquippingEvent>();
+        _subs.Add(Events.On<PlayerEquippingEvent>(seen.Add, EventFilter.ForEntity(p)));
+        kiln.Step();
+        var source = inv.Slots.First(s => s.Item == arrows).Slot;
+        inv.Clear();  // the arrows went (dropped, used, moved) while kiln.playerstate held the input
+        var (id, cancel, filed) = Held(kiln, p, EquipDecisions.ChangeAction, Change(source, 8, 14, 0));
+        Assert.True(filed && !cancel);  // allowed: the input goes back to the game as the client sent it
+        var single = Assert.IsType<SingleEquipmentChange>(Assert.Single(seen).Change);
+        Assert.IsType<EmptyEquipment>(single.Selection);  // not the arrows that are gone
+        Assert.Equal(DecisionTerminal.Allowed, Single(id).Status);
+    }
+
     [Fact]
     public void A_generic_veto_stays_a_veto_whatever_the_typed_handlers_do()
     {

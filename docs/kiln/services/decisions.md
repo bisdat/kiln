@@ -106,6 +106,10 @@ and `AppliedHealth`.
 - `SetEquipmentChange` is the shape of a Kiln set request (kind 18, which kiln.items files through `enqueue_native`):
   one decision for the whole set. This release declares its records only; no set operation of Kiln files one yet.
 - Only these inputs wait the step; a player's other client actions do not, while only a typed listener holds.
+- A held input belongs to the player who sent it: if they leave (and another player gets the same entity id), or the
+  world stops, before the answer is carried out, nothing is applied to anyone. An item that left the inventory while
+  the input was held is described as what the slot holds now (`EmptyEquipment`); an allow gives the input back to the
+  game as sent, which checks the slot again.
 - Not covered: equipment the game changes by itself (autoequip when an item is made or picked up, its set swap program
   called from elsewhere).
 
