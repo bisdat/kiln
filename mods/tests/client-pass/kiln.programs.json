@@ -9,6 +9,29 @@
         "Fuel"
       ],
       "flags": []
+    },
+    "client_pass_cw_system": {
+      "world": "client"
+    },
+    "client_pass_cw_entities": {
+      "world": "client",
+      "read": [
+        "RenderTransform"
+      ],
+      "flags": []
+    },
+    "client_pass_cw_both": {
+      "world": "both"
+    },
+    "client_pass_cw_prediction": {
+      "world": "prediction"
+    },
+    "client_pass_cw_refused": {
+      "world": "client",
+      "read": [
+        "KilnClientPassNoSuchComponent"
+      ],
+      "flags": []
     }
   }
 }

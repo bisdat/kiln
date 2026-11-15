@@ -1,4 +1,12 @@
 #nullable enable
+Kiln.ClientComponentWrittenEvent
+Kiln.ClientComponentWrittenEvent.After.get -> System.ReadOnlyMemory<byte>
+Kiln.ClientComponentWrittenEvent.Before.get -> System.ReadOnlyMemory<byte>
+Kiln.ClientComponentWrittenEvent.Component.get -> string!
+Kiln.ClientComponentWrittenEvent.Entity.get -> Kiln.EntityId
+Kiln.ClientComponentWrittenEvent.Involves(Kiln.EntityId entity) -> bool
+Kiln.ClientComponentWrittenEvent.World.get -> Kiln.WorldKind
+Kiln.ClientComponentWrittenEvent.Writer.get -> string!
 Kiln.ComponentWrittenEvent.Writer.get -> string?
 Kiln.ComponentWrittenEvent.Writers.get -> System.Collections.Generic.IReadOnlyList<string!>!
 static Kiln.World.GetWaitingTransformScales() -> System.Collections.Generic.IReadOnlyList<Kiln.WaitingTransformScale!>!

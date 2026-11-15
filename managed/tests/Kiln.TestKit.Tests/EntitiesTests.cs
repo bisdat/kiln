@@ -29,10 +29,12 @@ public sealed class EntitiesTests
     [Fact]
     public void The_kit_s_mirror_of_the_table_has_the_header_s_sizes_and_Kiln_World_s()
     {
-        // v4 since 0.2.0-dev.29 (the game-program members, Fakes/Systems); Kiln.World reads the v3 prefix
-        Assert.Equal(448, Unsafe.SizeOf<WorldAbi.Table>());
+        // v4 since 0.2.0-dev.29 (the game-program members, Fakes/Systems, then the client-world members at 448..472);
+        // Kiln.World reads the v3 prefix, Kiln.Systems the 448 bytes up to game_program_contract
+        Assert.Equal(480, Unsafe.SizeOf<WorldAbi.Table>());
         Assert.Equal(Unsafe.SizeOf<WorldWritesTable>(), (int)Marshal.OffsetOf<WorldAbi.Table>(nameof(WorldAbi.Table.GameProgramFind)));
-        Assert.Equal(Unsafe.SizeOf<SystemsNative.Table>(), Unsafe.SizeOf<WorldAbi.Table>());
+        Assert.Equal(Unsafe.SizeOf<SystemsNative.Table>(), (int)Marshal.OffsetOf<WorldAbi.Table>(nameof(WorldAbi.Table.RegisterProgramWorld)));
+        Assert.Equal(472, (int)Marshal.OffsetOf<WorldAbi.Table>(nameof(WorldAbi.Table.UnbindProgramWorld)));
         Assert.Equal((72, 80, 256, 72), (Unsafe.SizeOf<WorldAbi.WriteRequest>(), Unsafe.SizeOf<WorldAbi.WriteResult>(), Unsafe.SizeOf<WorldAbi.WriteInfo>(), Unsafe.SizeOf<WorldAbi.WriteStatus>()));
         Assert.Equal((Unsafe.SizeOf<WriteRequestNative>(), Unsafe.SizeOf<WriteResultNative>(), Unsafe.SizeOf<WriteInfoNative>(), Unsafe.SizeOf<WriteStatusNative>()),
             (Unsafe.SizeOf<WorldAbi.WriteRequest>(), Unsafe.SizeOf<WorldAbi.WriteResult>(), Unsafe.SizeOf<WorldAbi.WriteInfo>(), Unsafe.SizeOf<WorldAbi.WriteStatus>()));

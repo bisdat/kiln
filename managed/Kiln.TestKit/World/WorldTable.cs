@@ -186,6 +186,11 @@ internal static unsafe class WorldAbi
         public delegate* unmanaged[Cdecl]<SystemsNative.Slice*, ulong*, int, int, int> GameSliceAttrValidate;
         public delegate* unmanaged[Cdecl]<uint, ulong> GameWorldSession;
         public delegate* unmanaged[Cdecl]<uint, int, uint*, byte*, uint, uint*, int> GameProgramContract;
+        // since 0.2.0-dev.29 (448..472): Kiln programs in a client's worlds. The kit fakes a server world only: no.
+        public delegate* unmanaged[Cdecl]<ulong, uint, void*, ulong*, int> RegisterProgramWorld;
+        public delegate* unmanaged[Cdecl]<ulong, uint, int*, NativeStr*, int> ProgramWorldState;
+        public delegate* unmanaged[Cdecl]<ulong, NativeStr, NativeStr, uint, void*, void*, void*, ulong*, int> BindProgramWorld;
+        public delegate* unmanaged[Cdecl]<ulong, int> UnbindProgramWorld;
     }
 
     /// <summary>FNV-1a-32 of "keen::ecs::" + name (the name as given when it contains "::"): the engine's component hash.</summary>
@@ -254,6 +259,10 @@ internal static unsafe class WorldTable
         t->GetWriteStatus = &GetWriteStatus;
         t->WriteDeclare = &WriteDeclare;
         SystemsTable.Fill(t);  // v4: the game's programs
+        t->RegisterProgramWorld = &RegisterProgramWorld;
+        t->ProgramWorldState = &ProgramWorldState;
+        t->BindProgramWorld = &BindProgramWorld;
+        t->UnbindProgramWorld = &UnbindProgramWorld;
         _table = t;
         return (nint)t;
     }
@@ -332,6 +341,27 @@ internal static unsafe class WorldTable
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int ProgramEmit(void* ctx, NativeStr name, void* data, uint size) => FakeTables.WrongThread;
+
+    // ---- Kiln programs in a client's worlds (0.2.0-dev.29): the kit has no client world, so kiln.world's own "no" ----
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int RegisterProgramWorld(ulong owner, uint kind, void* desc, ulong* handle)
+    {
+        if (handle != null) *handle = 0;
+        return FakeTables.Unavailable;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int ProgramWorldState(ulong program, uint kind, int* state, NativeStr* reason) => FakeTables.NotFound;
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int BindProgramWorld(ulong owner, NativeStr mod, NativeStr key, uint kind, void* each, void* update, void* user, ulong* handle)
+    {
+        if (handle != null) *handle = 0;
+        return FakeTables.Unavailable;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int UnbindProgramWorld(ulong binding) => FakeTables.NotFound;
 
     // Only tracked writes of the capability word: no write_other inside a program, no events, no bind.
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]

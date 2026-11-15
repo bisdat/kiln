@@ -81,6 +81,11 @@ restart the server, then reload code. Editing the file while the server runs doe
 
 ## Hooks around game systems
 
+A program of the mod's own can also run in this player's **client world** or **prediction storage** (since
+0.2.0-dev.29): `"world": "client"`, `"both"` or `"prediction"` in `kiln.programs.json`, bound with
+`EcsPrograms.TryBind(key, callback, WorldKind.Client)` on the game's main thread; see
+[services/world.md](../services/world.md#client-world-programs-since-020-dev29) (template `kiln-client-program`).
+
 `systems.wraps.client` is open since 0.2.0-dev.29. Managed callers select `WrapOptions.World = WorldKind.Client`; native plugins can select the client world too, when symbols and lifecycle support resolve and no conflicting runtime disables wraps. Native callers must release and drain before freeing callback memory. The implemented `06a-wraps.client` guided check counts callbacks and filtered admissions on workers; real-game confirmation is still pending.
 
 ```csharp

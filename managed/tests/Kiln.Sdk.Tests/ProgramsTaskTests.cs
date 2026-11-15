@@ -124,6 +124,35 @@ public class ProgramsTaskTests
     }
 
     [Fact]
+    public void A_hand_written_world_is_kept_checked_and_a_Query_key_stays_the_server_worlds()
+    {
+        // "world" (0.2.0-dev.29): client, both and prediction entries stay as written; a file without it is unchanged
+        const string own = """{ "format": 1, "programs": { "pin": { "world": "client", "read": ["RenderTransform"], "flags": [] },""" +
+                           """ "relay": { "world": "both", "flags": ["system", "hostOnly"] }, "plain": { "otherRead": ["Health"] } } }""";
+        var kept = KilnPrograms.Merge(own, KilnPrograms.Find(Self));
+        Assert.Empty(kept.Problems);
+        var programs = JsonNode.Parse(kept.Text)!["programs"]!.AsObject();
+        Assert.Equal("client", (string)programs["pin"]!["world"]!);
+        Assert.Equal("both", (string)programs["relay"]!["world"]!);
+        Assert.Null(programs["plain"]!["world"]);
+        // what kiln.world refuses at the game's start is a build error now
+        Assert.Contains(KilnPrograms.Merge("""{ "format": 1, "programs": { "a": { "world": "Client" } } }""", []).Problems,
+            p => p.Contains("\"world\" is \"server\", \"client\", \"both\" or \"prediction\""));
+        Assert.Contains(KilnPrograms.Merge("""{ "format": 1, "programs": { "a": { "world": "prediction", "flags": ["system", "hostOnly"] } } }""", []).Problems,
+            p => p.Contains("hostOnly is for server programs"));
+        // a [Query]'s key by hand with "world": "server" says what the [Query] says; any other world does not
+        var wells = KilnPrograms.Entry(KilnPrograms.Find(Self).Single(q => q.Key == "sdk_wells"));
+        var server = (JsonObject)wells.DeepClone();
+        server["world"] = "server";
+        var withServer = new JsonObject { ["format"] = 1, ["programs"] = new JsonObject { ["sdk_wells"] = server } };
+        Assert.Empty(KilnPrograms.Merge(withServer.ToJsonString(), KilnPrograms.Find(Self)).Problems);
+        var client = (JsonObject)wells.DeepClone();
+        client["world"] = "client";
+        var withClient = new JsonObject { ["format"] = 1, ["programs"] = new JsonObject { ["sdk_wells"] = client } };
+        Assert.Contains(KilnPrograms.Merge(withClient.ToJsonString(), KilnPrograms.Find(Self)).Problems, p => p.Contains("lists, flags or world"));
+    }
+
+    [Fact]
     public void Each_Query_struct_becomes_one_kiln_programs_json_entry_under_the_key_Define_binds()
     {
         var found = KilnPrograms.Find(Self).OrderBy(q => q.Key, StringComparer.Ordinal).ToList();
