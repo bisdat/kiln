@@ -632,6 +632,7 @@ public static unsafe class ComponentChanges
             uint required = 0;
             var rc = t->ReadEvents(_owner, batch, records, count, (uint)stride, &required);
             if (rc != ComponentChangesNative.Ok) return;  // nothing consumed: the same batch at the next Pre
+            count = Math.Min(count, required); // ended watches can shrink even a frozen batch between begin and read
             _deliveredBatch = batch;  // an ack that fails brings the same batch again: its handlers do not run twice
             var raw = Events.HasSubscribers<ComponentValueChangedEvent>();
             var typed = Events.HasSubscribers<AttributeValueChangedEvent>();
@@ -735,6 +736,8 @@ public static unsafe class ComponentChanges
         ArgumentOutOfRangeException.ThrowIfGreaterThan(steps, 10);
         if (!Game.IsTickThread || !File.Exists(Path.Combine(KilnPaths.Control, "watches.lab"))) return false;
         _labHold = steps;
+        Backend.Current.Log(0, LogLevel.Warn, $"LAB: component watch delivery held for {steps} Pre step(s); " +
+            "watches.lab is present: this can suspend every watch when the two-frame queue overflows");
         return true;
     }
 

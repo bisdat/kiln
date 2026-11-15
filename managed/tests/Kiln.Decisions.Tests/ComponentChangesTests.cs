@@ -69,6 +69,48 @@ public sealed unsafe class ComponentChangesTests : IDisposable
         });
     }
 
+    private static ComponentWatch? _endDuringRead;
+    private static delegate* unmanaged[Cdecl]<ulong, ulong, N.Change*, uint, uint, uint*, int> _originalRead;
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
+    private static int ReadAfterEnd(ulong owner, ulong batch, N.Change* records, uint capacity, uint stride, uint* required)
+    {
+        _endDuringRead?.Dispose();
+        _endDuringRead = null;
+        return _originalRead(owner, batch, records, capacity, stride, required);
+    }
+
+    [Fact]
+    public void A_frozen_batch_that_shrinks_does_not_deliver_the_old_buffer_tail()
+    {
+        using var kiln = Started();
+        var e = With(kiln, ("Health", Bytes(1)));
+        var f = With(kiln, ("Health", Bytes(1)));
+        var ended = Watch(kiln, new(ComponentWatchScope.Entities, [e], ObservedComponents.Health)).Watch!;
+        Watch(kiln, new(ComponentWatchScope.Entities, [f], ObservedComponents.Health));
+        kiln.Step(2);
+        var buffer = GC.AllocateArray<byte>(2 * sizeof(N.Change), pinned: true);
+        fixed (byte* p = buffer)
+        {
+            var tail = (N.Change*)p + 1;
+            tail->Size = (uint)sizeof(N.Change); tail->Version = 1; tail->Component = 1;
+            tail->Entity.Entity = e.Value; tail->WatchCount = 1; tail->Watches[0] = ended.Id;
+        }
+        typeof(ComponentChanges).GetField("_buffer", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!
+            .SetValue(null, buffer);
+        var table = ComponentChanges.Table();
+        _originalRead = table->ReadEvents;
+        _endDuringRead = ended;
+        table->ReadEvents = &ReadAfterEnd;
+        try
+        {
+            kiln.Entities.SetBytes(e, "Health", Bytes(2)); kiln.Entities.SetBytes(f, "Health", Bytes(2));
+            kiln.Step(2);
+            Assert.Equal(f, Assert.Single(_changes).Entity);
+        }
+        finally { table->ReadEvents = _originalRead; _endDuringRead = null; }
+    }
+
     [Fact]
     public void Idle_wrap_tracking_does_not_wait_for_registry_locks()
     {
@@ -342,6 +384,7 @@ public sealed unsafe class ComponentChangesTests : IDisposable
         File.WriteAllText(Path.Combine(kiln.ControlDirectory, "watches.lab"), "");
         kiln.Call(() => held = ComponentChanges.LabHoldDelivery(3));
         Assert.True(held);
+        Assert.True(kiln.HasLog("LAB: component watch delivery held"));
         kiln.Entities.SetBytes(e, "Health", Bytes(2));
         kiln.Step(3);
         Assert.Empty(_changes);  // held: still in the service's queue
