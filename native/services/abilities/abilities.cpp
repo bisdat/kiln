@@ -47,7 +47,7 @@ static_assert(offsetof(KilnAbilitiesApi, sequence_play) == 232 && offsetof(KilnA
               offsetof(KilnAbilitiesApi, native_counters) == 248 && offsetof(KilnAbilitiesApi, native_attach) == 256 &&
               offsetof(KilnAbilitiesApi, native_detach) == 264 && offsetof(KilnAbilitiesApi, native_declare_typed) == 272 &&
               offsetof(KilnAbilitiesApi, native_state) == 280 && offsetof(KilnAbilitiesApi, native_attach_state) == 288 &&
-              sizeof(KilnAbilitiesApi) == 296 && sizeof(KilnNativeCounters) == 112 && sizeof(KilnNativeFilter) == 16 &&
+              sizeof(KilnAbilitiesApi) == 296 && sizeof(KilnNativeCounters) == 120 && sizeof(KilnNativeFilter) == 16 &&
               sizeof(KilnNativeArg) == 8);
 
 namespace {
@@ -760,9 +760,13 @@ uint64_t __fastcall hk_register(uintptr_t registry, uint32_t hash, NativeFn fn, 
     return r;
 }
 
+bool lab_lockhold_armed();  // lab only (below, with lab_lockhold)
+void lab_hold_lock_now();
+
 uint32_t __fastcall hk_create(uintptr_t system, uint32_t program_id, uint32_t entity) {
     const uint32_t id = g_h_create.call<uint32_t>(system, program_id, entity);
     if (!id) return id;
+    if (lab_lockhold_armed()) lab_hold_lock_now();
     g_system.store(system, std::memory_order_relaxed);
     if (c_created.fetch_add(1, std::memory_order_relaxed) == 0 || g_first_instance.load(std::memory_order_relaxed) == 0)
         g_first_instance.store(id, std::memory_order_relaxed);
@@ -890,6 +894,41 @@ int wrap_slot(uint32_t hash, uint32_t* argc_out = nullptr);  // g_mu held
 // forced window) CHUNKED programs then get no world-thread affinity, so a native's handler runs on a worker. Nothing
 // else ever writes it; without the file nothing is checked.
 bool g_lab_unpin = false;
+std::filesystem::path g_lab_lockhold;  // lab only: kiln/control/impact.lockhold at start (see lab_lockhold)
+bool g_lab_lockhold_on = false;
+std::atomic<int> g_lockhold_armed{0};
+
+// Lab only (review round 2): with kiln/control/impact.lockhold present at start, a file impact.lockhold.now (its text: the
+// milliseconds, at most 2000) arms a hold: the next createImpactInstance visit starts a thread that holds g_mu that long,
+// so that visit and the step's later createImpactInstance / runImpact visits meet a held lock and take their bounded
+// give-up paths (lock_bypass). In the step itself: the tick thread would wait for the lock in Pre or Post instead.
+void lab_lockhold() {
+    if (!g_lab_lockhold_on) return;
+    std::error_code ec;
+    const auto now = g_lab_lockhold / "impact.lockhold.now";
+    if (!std::filesystem::exists(now, ec)) return;
+    int ms = 200;
+    {
+        std::ifstream in(now);
+        in >> ms;
+    }
+    std::filesystem::remove(now, ec);
+    g_lockhold_armed.store(std::clamp(ms, 1, 2000));
+    logi("kiln.abilities: LAB (kiln/control/impact.lockhold): the next instance's creation holds Kiln's lock for %d ms", ms);
+}
+bool lab_lockhold_armed() { return g_lab_lockhold_on && g_lockhold_armed.load(std::memory_order_relaxed) > 0; }
+void lab_hold_lock_now() {  // a job thread, inside the step
+    const int ms = g_lockhold_armed.exchange(0);
+    if (ms <= 0) return;
+    std::atomic<bool> held{false};
+    std::thread([ms, &held] {
+        std::lock_guard lock(g_mu);
+        held.store(true);
+        Sleep(static_cast<DWORD>(ms));
+    }).detach();
+    while (!held.load()) SwitchToThread();  // `held` is not touched once it is true
+    logw("kiln.abilities: LAB (kiln/control/impact.lockhold): Kiln's lock is held for %d ms by a thread of its own", ms);
+}
 int64_t g_world_storage = -1;
 constexpr int64_t kPinByte = 0x3d17f8;  // build f0d824be (server 26430253) only
 
@@ -1568,6 +1607,7 @@ void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
     g_step.store(tick->step);
     free_retired();
     lab_unpin();
+    lab_lockhold();
     // review P1: a program registered after the readiness check (a mod's, at any time) gets its attachments checked
     if (g_programs_ready.load() && g_programs_added.exchange(false, std::memory_order_acq_rel))
         if (const uintptr_t preg = g_prog_registry.load()) check_attachments(preg);
@@ -2347,6 +2387,7 @@ KilnResult KILN_CALL t_native_counters(KilnNativeCounters* out) {
     c.typed_unconnected = c_typed_unconnected.load();
     c.retire_deferred = c_retire_deferred.load();
     c.watchdog_reports = c_watchdog_reports.load();
+    c.lock_bypass = c_lock_bypass.load();
     {
         std::lock_guard lock(g_mu);
         c.retire_pending = static_cast<uint32_t>(g_deferred_owners.size());
@@ -2824,6 +2865,14 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
             int64_t v = -1;
             g_world_storage = api->constant(KilnStr{"world.storage", 13}, &v) == KILN_OK ? v : -1;
             g_lab_unpin = g_world_storage > 0;
+        }
+        if (api->path(KILN_PATH_CONTROL, path, sizeof path, &n) == KILN_OK && n < sizeof path) {
+            const auto control = std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(path), n));
+            if (std::filesystem::exists(control / "impact.lockhold", ec) && api->build_info(&bi) == KILN_OK && bi.side == KILN_SIDE_SERVER)
+            {
+                g_lab_lockhold = control;
+                g_lab_lockhold_on = true;
+            }
         }
     }
     info->id = KilnStr{KILN_ABILITIES_SERVICE, sizeof(KILN_ABILITIES_SERVICE) - 1};

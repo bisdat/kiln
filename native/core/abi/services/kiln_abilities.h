@@ -263,6 +263,8 @@ typedef struct KilnNativeCounters {
     uint32_t attach_pending;  /* attachments now (KILN_NATIVE_ATTACH_*): program and site not checked yet, */
     uint32_t attach_active;   /* checked and taking calls, */
     uint32_t attach_off;      /* off: program not loaded or not calling the native there (checked again on new programs) */
+    uint64_t lock_bypass;     /* hook visits (createImpactInstance, runImpact, managed calls, events) that gave up on
+                                 Kiln's lock after its bound and took the path that needs none */
 } KilnNativeCounters;
 enum {
     KILN_NATIVE_COUNTERS_NATIVES = 1u << 0, /* the RegisterNative hook is in: Kiln natives can be registered */

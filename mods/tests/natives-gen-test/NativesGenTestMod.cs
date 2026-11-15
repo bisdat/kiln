@@ -50,6 +50,24 @@ public static class GenNatives
         return 1;
     }
 
+    // review round 2: two writable TimeSpan arguments naming one variable share one copy (2 s + 1 s + 1 s = 4 s)
+    [ImpactNative("Alias")]
+    public static void Alias(ref TimeSpan a, ref TimeSpan b)
+    {
+        a += TimeSpan.FromSeconds(1);
+        b += TimeSpan.FromSeconds(1);
+    }
+
+    // review round 2: a generated method that throws: its changed TimeSpan is written back, the call answers 0x11
+    internal static int ThrowCalls;
+    [ImpactNative("Throws")]
+    public static bool Throws(ref TimeSpan t)
+    {
+        ThrowCalls++;
+        t = TimeSpan.FromSeconds(5);
+        throw new InvalidOperationException("natives-gen-test: Throws throws on purpose");
+    }
+
     [ImpactNative("Check")]
     public static bool Check(int s, float f, bool b, TimeSpan t, EntityId e, Vector3 v)
     {
@@ -178,6 +196,39 @@ public sealed class NativesGenTestMod : Mod
             Check(GenNatives.SumCalls - s0 == 5 && sig is { AsInt: 10 } && st is not null && sig.Step == st.Step,
                 $"a loop over 5 targets with a generated native finishes in 1 step: {GenNatives.SumCalls - s0} call(s), sum {sig?.AsInt}, started {st?.Step}, signal {sig?.Step}");
 
+            // aliased TimeSpan refs: Alias($t, $t), then kiln.Signal($t, 0x71): 4 s
+            const uint hT = 0xFFFF0000;
+            var aliasGuid = new Guid("06c0a5e0-0000-4000-8000-000000000005");
+            Abilities.Programs.Register(Program(aliasGuid,
+                [11, hT, 11, hT, 19, 0x06c0a551, Natives.Alias.HashFor(Context.Info.Id), 27, 11, 0x71, 11, hT, 19, 0x06c0a552, Fnv("kiln.Signal"), 27, 30],
+                [("T::value", Time, 8, BitConverter.GetBytes(2_000_000_000L))]));
+            _signals.Clear();
+            var e5 = await Abilities.RunProgram(aliasGuid, P(12));
+            _spawned.Add(e5);
+            await Steps(6);
+            var sig5 = _signals.FirstOrDefault(s => s.Impact.Self == e5 && s.Tag == 0x71);
+            var ns5 = sig5 is { Value.Length: >= 8 } ? BitConverter.ToInt64(sig5.Value) : -1;
+            Check(ns5 == 4_000_000_000L, $"two ref TimeSpan arguments naming one variable share it: 2 s + 1 s + 1 s = {ns5} ns");
+
+            // a throwing generated method: Throws($t) answers 0x11, the instance stops, $t holds the 5 s it wrote
+            var throwGuid = new Guid("06c0a5e0-0000-4000-8000-000000000006");
+            Abilities.Programs.Register(Program(throwGuid,
+                [11, hT, 19, 0x06c0a561, Natives.Throws.HashFor(Context.Info.Id), 27, 11, 0x72, 11, hT, 19, 0x06c0a562, Fnv("kiln.Signal"), 27, 30],
+                [("T::value", Time, 8, BitConverter.GetBytes(1_000_000_000L))]));
+            _signals.Clear();
+            _started.Clear();
+            var t0c = GenNatives.ThrowCalls;
+            var e6 = await Abilities.RunProgram(throwGuid, P(15));
+            _spawned.Add(e6);
+            await Steps(6);
+            var st6 = _started.FirstOrDefault(s => s.Impact.Self == e6);
+            var inst = st6 is null ? null : Abilities.Instance(st6.Impact.ImpactId);
+            var tv = inst?.Find("T::value") is { } v && inst.Read(v) is { Length: 8 } bytes ? BitConverter.ToInt64(bytes) : -1;
+            var logged = LogHas("abilities: sync native natives-gen-test.Throws threw: InvalidOperationException: natives-gen-test: Throws throws on purpose");
+            Check(GenNatives.ThrowCalls - t0c == 1 && !_signals.Any(s => s.Impact.Self == e6) && tv == 5_000_000_000L && logged,
+                $"a generated method that throws: the call answers 0x11 (no signal after it), the TimeSpan it changed is kept ({tv} ns), " +
+                $"the exception is in kiln.log under the mod ({(logged ? "found" : "NOT found")}); instance flags {inst?.Flags}");
+
             // round trip: Round reads the initial values and writes new ones, Check reads them back
             uint[] push = [11, 0xFFFF0005, 11, 0xFFFF0004, 11, 0xFFFF0003, 11, 0xFFFF0002, 11, 0xFFFF0001, 11, 0xFFFF0000];
             var roundGuid = new Guid("06c0a5e0-0000-4000-8000-000000000003");
@@ -203,6 +254,18 @@ public sealed class NativesGenTestMod : Mod
             foreach (var e in _spawned) try { if (Spawn.Exists(e)) Spawn.Destroy(e); } catch { }
             Log.Info($"natives-gen-test: INFO summary: {_pass} PASS, {_fail} FAIL");
         }
+    }
+
+    private bool LogHas(string text)
+    {
+        var log = Path.GetFullPath(Path.Combine(Context.DataDirectory, "..", "..", "logs", "kiln.log"));
+        try
+        {
+            using var f = new FileStream(log, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var r = new StreamReader(f);
+            return r.ReadToEnd().Contains(text, StringComparison.Ordinal);
+        }
+        catch (IOException) { return false; }
     }
 
     private void Check(bool ok, string what) { if (ok) { _pass++; Log.Info($"natives-gen-test: PASS {what}"); } else { _fail++; Log.Error($"natives-gen-test: FAIL {what}"); } }

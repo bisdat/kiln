@@ -513,6 +513,12 @@ public static unsafe partial class Abilities
         public static (ulong Deferred, uint PendingCore, int PendingManaged, ulong Watchdog)? LabRetire =>
             AbilitiesNative.Counters() is { } c ? (c.RetireDeferred, c.RetirePending, AbilitiesDispatch.DeferredCount, c.WatchdogReports) : null;
 
+        /// <summary>Lab use: hook visits that gave up on kiln.abilities' lock after its bound (createImpactInstance,
+        /// runImpact, managed calls, events), or null without the counter.</summary>
+        [System.Diagnostics.CodeAnalysis.Experimental("KILNX001")]
+        [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+        public static ulong? LabLockBypass => AbilitiesNative.Counters() is { } c ? c.LockBypass : null;
+
         // natives_core.h valid_native_name: "<modid>.<Name>", Name [A-Za-z0-9_], 90 bytes at most
         internal static bool ValidName(string full)
         {

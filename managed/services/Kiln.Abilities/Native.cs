@@ -184,6 +184,7 @@ internal static unsafe class AbilitiesNative
         public ulong SyncCalls, SyncFaults, SyncSlow, DeadCalls, AttachEntered, AttachSkipped, TypedRefused, TypedUnconnected;
         public ulong RetireDeferred, WatchdogReports;
         public uint RetirePending, AttachPending, AttachActive, AttachOff;
+        public ulong LockBypass;
     }
 
     public const uint CountersNatives = 1;  // KILN_NATIVE_COUNTERS_NATIVES: the RegisterNative hook is in

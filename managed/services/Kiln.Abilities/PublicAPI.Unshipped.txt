@@ -111,6 +111,7 @@ Kiln.RawAttribute
 Kiln.RawAttribute.RawAttribute() -> void
 [KILNX001]static Kiln.Abilities.Natives.LabCounters.get -> (ulong SyncCalls, ulong SyncFaults, ulong SyncSlow, ulong DeadCalls, uint Inflight, ulong AttachEntered, ulong AttachSkipped, ulong TypedRefused, ulong TypedUnconnected)?
 [KILNX001]static Kiln.Abilities.Natives.LabRetire.get -> (ulong Deferred, uint PendingCore, int PendingManaged, ulong Watchdog)?
+[KILNX001]static Kiln.Abilities.Natives.LabLockBypass.get -> ulong?
 override Kiln.AttachResult.Equals(object? obj) -> bool
 override Kiln.AttachResult.GetHashCode() -> int
 override Kiln.AttachResult.ToString() -> string!
