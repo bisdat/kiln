@@ -70,6 +70,66 @@ public sealed unsafe class ComponentChangesTests : IDisposable
     }
 
     [Fact]
+    public void Idle_wrap_tracking_does_not_wait_for_registry_locks()
+    {
+        using var kiln = Started();
+        var dictionary = ComponentChanges.Registry;
+        var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var tables = dictionary.GetType().GetField("_tables", flags)!.GetValue(dictionary)!;
+        var locks = (object[])tables.GetType().GetField("_locks", flags)!.GetValue(tables)!;
+        Task<bool> reader;
+        bool completed;
+        lock (locks[0])
+        {
+            reader = Task.Run(() => ComponentChanges.Watching);
+            completed = reader.Wait(TimeSpan.FromSeconds(1));
+        }
+        Assert.False(reader.GetAwaiter().GetResult());
+        Assert.True(completed, "Watching waited for ConcurrentDictionary's lock on the idle path");
+    }
+
+    [Fact]
+    public void Handlers_can_change_watches_and_throw_without_stopping_delivery()
+    {
+        using var kiln = Started();
+        var e = With(kiln, ("Health", Bytes(1)));
+        var first = Watch(kiln, new(ComponentWatchScope.Entities, [e], ObservedComponents.Health)).Watch!;
+        ComponentWatch? next = null;
+        var called = false;
+        _subs.Add(Events.On<ComponentValueChangedEvent>(_ =>
+        {
+            if (called) return;
+            called = true;
+            first.Dispose();
+            Assert.False(ComponentChanges.Resume(first).Ok);
+            next = ComponentChanges.Watch(new(ComponentWatchScope.Entities, [e], ObservedComponents.Health)).Watch;
+            throw new InvalidOperationException("test handler fault");
+        }));
+        kiln.Step();
+        kiln.Entities.SetBytes(e, "Health", Bytes(2));
+        kiln.Step(2);
+        Assert.True(called);
+        Assert.NotNull(next);
+        Assert.Equal(ComponentWatchState.Disposed, first.State);
+        Assert.NotEmpty(_changes);
+        next!.Dispose();
+    }
+
+    [Fact]
+    public void Prefix_record_does_not_publish_unwritten_typed_tail()
+    {
+        using var kiln = Started();
+        kiln.Call(() =>
+        {
+            var r = new N.Change { Size = N.ChangeV1Size, Version = 1, Component = 1,
+                Attribute = 1, ValueBefore = 1, ValueAfter = 9 };
+            ComponentChanges.Post(&r, raw: true, typed: true);
+        });
+        Assert.Single(_changes);
+        Assert.Empty(_attributes);
+    }
+
+    [Fact]
     public void The_native_mirrors_have_the_header_s_sizes()
     {
         // native/services/decisions/tests/contract_test.cpp pins the same numbers
@@ -79,6 +139,7 @@ public sealed unsafe class ComponentChangesTests : IDisposable
         Assert.Equal(1768, (int)Marshal.OffsetOf<N.Change>(nameof(N.Change.WorldKind)));
         Assert.Equal(1776, (int)Marshal.OffsetOf<N.Change>(nameof(N.Change.ValueBefore)));
         Assert.Equal(1792, (int)Marshal.OffsetOf<N.Change>(nameof(N.Change.SinceStep)));
+        Assert.Equal((uint)Marshal.OffsetOf<N.Change>(nameof(N.Change.SinceStep)), N.TypedEnd);
         Assert.Equal(1640, (int)Marshal.OffsetOf<N.Change>("SourceMod"));
         Assert.Equal(112, sizeof(N.KnownWrite));
         Assert.Equal(96, (int)Marshal.OffsetOf<N.KnownWrite>(nameof(N.KnownWrite.SourceMod)));

@@ -502,7 +502,6 @@ internal sealed unsafe class ComponentChangesModel
                 want.Bytes = want.Present ? bytes : null;
             }
         }
-        foreach (var e in _linked.Where(x => x.Value.Seen + 2 < step).Select(x => x.Key).ToList()) _linked.Remove(e);
         return true;
     }
 
@@ -698,6 +697,9 @@ internal sealed unsafe class ComponentChangesModel
             pr.PrevRoots = [];
         }
         _pairs = next;
+        foreach (var entity in _linked.Keys.ToArray())
+            if (!_pairs.Values.Any(pr => pr.Key.Entity == entity && pr.Key.LifeSerial == _linked[entity].Serial))
+                _linked.Remove(entity);
     }
 
     private void Baseline(Pair pr, Want want, ulong step)
@@ -738,6 +740,31 @@ internal sealed unsafe class ComponentChangesModel
     // window_end: compare every pair
     private void End(ulong step)
     {
+        var live = _pairs.Where(x => Read(x.Value.Key.Entity, x.Value.Component, out _)).Select(x => x.Key).ToHashSet();
+        if (live.Count > MaxPairs)
+        {
+            var accepted = new HashSet<ulong>();
+            foreach (var w in _watches.Where(w => w.Status == 0))
+            {
+                var added = _pairs.Where(x => live.Contains(x.Key) && !accepted.Contains(x.Key) && x.Value.Watches.Contains(w.Id))
+                    .Select(x => x.Key).ToArray();
+                if (accepted.Count + added.Length > MaxPairs) Suspend(w, 1, "it would take the watched pairs past 4096");
+                else accepted.UnionWith(added);
+            }
+        }
+        foreach (var pr in _pairs.Values)
+        {
+            if ((pr.Key.LifeSerial & (1UL << 63)) != 0) continue;
+            var known = Key(pr.Key.Entity, out var key, out var exists);
+            if (!exists || (known && SameLife(key, pr.Key))) continue;
+            foreach (var wid in pr.Watches)
+                if (_watches.Find(w => w.Id == wid) is { Status: 0 } w)
+                    Suspend(w, 2, $"entity {pr.Key.Entity} is another entity now (or has no identity)");
+        }
+        bool Inactive(ulong wid) => !_watches.Any(w => w.Id == wid && w.Status == 0);
+        foreach (var pr in _pairs.Values) pr.Watches.RemoveAll(Inactive);
+        foreach (var change in _pending) change.Watches.RemoveAll(Inactive);
+        _pending.RemoveAll(change => change.Watches.Count == 0);
         var frame = _pending;
         _pending = [];
         foreach (var pr in _pairs.Values)
