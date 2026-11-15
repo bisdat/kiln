@@ -493,7 +493,7 @@ if sys.argv[1] == "run":
         # Exercise release.sh's actual Linux wrapper through run.sh and a fake Docker client.
         # No release, signing environment, image build or provider request is involved.
         env = self.mock_docker()
-        env.update(KILN_NEXUS_ENABLED="0", KILN_NEXUS_OAUTH_CLIENT_ID="unit-test-registration",
+        env.update(KILN_LAUNCHER_BASE_RELEASE="0.2.0-dev.28", KILN_NEXUS_ENABLED="0", KILN_NEXUS_OAUTH_CLIENT_ID="unit-test-registration",
                    KILN_NEXUS_OAUTH_REDIRECT_URI="http://127.0.0.1:8089/callback",
                    KILN_LINUX_IMAGE="sha256:" + "a" * 64)
         wrapper = re.search(r"^  linux\(\) \{\n.*?^  \}", (HERE / "release.sh").read_text(), re.M | re.S)
@@ -508,6 +508,7 @@ if sys.argv[1] == "run":
         self.assertEqual(r.returncode, 0, r.stderr)
         run = next(json.loads(line) for line in self.calls.read_text().splitlines() if json.loads(line)[0] == "run")
         forwarded = [run[i + 1] for i, arg in enumerate(run[:-1]) if arg == "-e"]
+        self.assertIn("KILN_LAUNCHER_BASE_RELEASE", forwarded)
         self.assertIn("KILN_NEXUS_ENABLED", forwarded)
         self.assertIn("KILN_NEXUS_OAUTH_CLIENT_ID", forwarded)
         self.assertIn("KILN_NEXUS_OAUTH_REDIRECT_URI", forwarded)

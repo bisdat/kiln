@@ -197,7 +197,7 @@ Direct builds only (the Nexus Mods build has none, above).
 What a test build writes that a release build reads, and what the release does with it. "dev.28" is the release a
 first tester goes back to; the same rules hold for any release from dev.29 on, which also knows test builds. The copy
 (`<data>/snapshots/before-beta/`, `launcher/src-tauri/src/snapshot.rs`) is taken at the first start of a test build
-after a release build, before that start writes anything; a switch back offers to put it back ("Put back my profiles
+after a release build, before settings, profiles, kept-version recovery, updater state or background watchers may write. Every copied file is flushed before the staged folder is published; the build marker is written last. A failed copy or marker holds the launcher behind a blocking notice listing the reason and omitted files. The player may quit, or explicitly continue without a restore copy; that decision and its reasons are recorded in the marker and shown by the switch dialog. A completed copy survives a failed marker write and is reused, never replaced with beta-modified files. A switch back offers to put a whole copy back ("Put back my profiles
 and settings from before the beta"), at Restart now, before the release starts. No file a test build of dev.29 writes
 has a new format number, and no file the release reads became strict (checked against `2301cc5f`, the dev.28 release:
 `git diff 2301cc5f -- crates/kiln-manage/src launcher/src-tauri/src` adds `deny_unknown_fields` only to files that are
@@ -225,7 +225,7 @@ Tests: `launcher/src-tauri/src/snapshot/tests.rs` (`cargo test -p kiln-launcher 
 formats, a test build's own writes (settings, a profile save, a new profile, kept versions, a mod), dev.28's settings
 reader and channel rule on the result, a second test build keeping the first copy, the restore byte for byte with
 what the beta added left in place, a new copy after a switch back, no copy for a release build or an empty folder,
-and a changed `snapshot.json` that cannot write outside the data folder.
+and a changed `snapshot.json` with textual traversal paths. Restore also rejects existing symlinks below the data root; concurrent path swaps are not covered by that test. Interrupted restores keep a flushed staging set and journal under `snapshots/restore-beta/`; a launcher from dev.29 onward completes the entire restore before writers start. Dev.28 ignores this inert directory: if it is launched manually after an interruption it may see a mixture of old and restored files. Quit it and start the beta again to finish recovery before editing profiles or settings.
 
 ### Manifest (`latest.json`)
 Tauri's static format, plus fields the updater ignores:
@@ -512,9 +512,7 @@ dev or stable manifest, no `updates-dev`, never GitHub's "latest", no SDK upload
    takes the copy from before the beta at its first start, and can switch back to the release in one click. From
    0.2.0-dev.29 on, the switch is in every launcher: Settings > Updates > Channel.
 7. **The final build:** `release.sh $V` as always. It also writes `updates/frostdev.io/beta/latest.json`, and
-   publish.sh moves the beta channel to it too, so every tester is offered the final build; it leaves the beta channel
-   alone when frostdev.io's beta manifest already names a newer test build (of the next version), or with
-   `--no-beta-channel`. GitHub's `updates-beta` follows the same rule.
+   publish.sh moves the beta channel to it only after reading and comparing both frostdev.io and GitHub beta manifests. A newer build on either host, an unreadable manifest or an invalid version preserves both beta pointers and produces a closing warning; the release itself still publishes. `--no-beta-channel` always preserves Beta. `--force-beta-channel` explicitly overrides missing/newer live evidence (unless `--no-beta-channel` is also supplied). These checks precede either pointer update; they do not serialize concurrent publishing processes.
 8. **A bad test build:** publish the next beta number. Testers on the bad one are offered it; a switch back to the
    release always works.
 
@@ -626,3 +624,10 @@ publishing status.
 - Test feeds: debug builds and builds with the `update-test-feeds` feature read `KILN_UPDATE_FEEDS`
   (`name=url;name=url`, `{channel}` in the URL) and take it only when every URL is on the loopback interface. Release
   builds never read it. Plain http needs `plugins.updater.dangerousInsecureTransportProtocol` in a QA build's config.
+
+### Beta rollback floor and startup commands
+A published beta bakes `KILN_LAUNCHER_BASE_RELEASE`, derived from the same previous non-beta release tag used for notes/API checks. A missing or invalid tag stops the beta cut. The manifest's `kiln.baseRelease` is informational; the binary's baked value is authoritative. A downward switch refuses builds below this floor; a local beta without a floor links to downloads instead. The newer acceptable release advertised by the two feeds is the only version eligible for download; verification failure never falls back to a lower version.
+
+`snapshot_status` returns `{phase, reasons, canContinue}` while data writers are held; `snapshot_continue` records an explicit opt-out after a failed first-beta copy. Recovery of an existing restore journal cannot be skipped. `UpdateStatus.restoreRequested` is the accepted backend choice, retained when the dialog closes; `beforeBetaWarning` lists a recorded opt-out's reasons. The dialogs direct beta users to install its game runtime on Runtime, and explicitly explain the manual runtime reinstall for dev.28.
+
+A planned switch records an intent, not proof that the release ran. A release from dev.29 onward acknowledges its actual start before any writer runs; only then may the next beta capture a new copy. Dev.28 cannot acknowledge this marker, so re-entering Beta after it conservatively retains the earlier complete copy (the restore choice displays its original date). This also prevents a canceled Windows installer followed by a different beta from replacing the original copy with beta data.

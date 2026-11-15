@@ -64,6 +64,8 @@ def cmd_manifest(a):
     }
     if beta is not None:
         m["kiln"]["beta"] = beta
+    if getattr(a, "base_release", None):
+        m["kiln"]["baseRelease"] = beta_floor(a.base_release, a.version)
     if a.runtime:
         m["kiln"]["runtime"] = a.runtime
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
@@ -128,6 +130,13 @@ def build_order(a, b):
     if bb is None:
         return -1
     return -1 if ba < bb else 1
+
+
+def beta_floor(tag, build_id):
+    base = tag.removeprefix("v")
+    if not _SEMVER.fullmatch(base) or "beta" in base or "+" in base or build_order(base, build_id) >= 0:
+        raise ValueError(f"cannot determine a release floor from {tag!r} for {build_id}")
+    return base
 
 
 def cmd_order(a):
@@ -851,6 +860,7 @@ def main():
     m = sub.add_parser("manifest")
     m.add_argument("--version", required=True)
     m.add_argument("--channel", required=True, choices=["stable", "dev", "beta"])
+    m.add_argument("--base-release")
     m.add_argument("--beta", type=int, help="a test build's beta number (the version must end in +beta.N)")
     m.add_argument("--notes")
     m.add_argument("--date")
@@ -859,6 +869,10 @@ def main():
     m.add_argument("--entry", action="append", required=True)
     m.add_argument("--out", required=True)
     m.set_defaults(fn=cmd_manifest)
+    f = sub.add_parser("beta-floor")
+    f.add_argument("tag")
+    f.add_argument("build_id")
+    f.set_defaults(fn=lambda a: print(beta_floor(a.tag, a.build_id)))
     o = sub.add_parser("order")
     o.add_argument("a")
     o.add_argument("b")

@@ -128,6 +128,10 @@ impl Build {
     /// May `channel` offer this build? Stable: a release without a pre-release part; dev (the release line): no test
     /// build; beta: test builds and releases (a tester is offered the final build).
     pub fn on(&self, channel: Channel) -> bool {
+        // Reserved beta metadata with an invalid number is never a release.
+        if self.beta.is_none() && (self.version.build == "beta" || self.version.build.starts_with("beta.")) {
+            return false;
+        }
         match channel {
             Channel::Stable => !self.version.is_prerelease() && self.beta.is_none(),
             Channel::Dev => self.beta.is_none(),
@@ -231,17 +235,33 @@ pub fn accepts(current: &str, remote: &str, channel: Channel) -> bool {
 
 /// Is `remote` what a channel switch the player started installs, for a launcher at `current` going to `target`?
 /// A build `target` may offer ([`Build::on`]), and: to the beta, only a newer one (a test build older than the
-/// release one runs is no test build of anything to come); back to the release line (stable, dev), any other build,
-/// also an older one. Only the switch ([`super::switch`]) asks this, never a background check or an Update.
+/// release one runs is no test build of anything to come); back from a test build to the release line (stable, dev),
+/// also an older one. A release build can only move forward. Only the switch ([`super::switch`]) asks this, never a background check or an Update.
 pub fn switch_accepts(current: &str, remote: &str, target: Channel) -> bool {
+    switch_accepts_with_floor(current, remote, target, baked_base_release())
+}
+
+pub fn baked_base_release() -> Option<&'static str> {
+    let base = env!("KILN_LAUNCHER_BUILD_BASE_RELEASE");
+    (!base.is_empty()).then_some(base)
+}
+
+pub fn switch_accepts_with_floor(current: &str, remote: &str, target: Channel, floor: Option<&str>) -> bool {
     let (Some(cur), Some(rem)) = (Build::parse(current), Build::parse(remote)) else { return false };
     if !rem.on(target) {
         return false;
     }
     match target {
         Channel::Beta => rem.order(&cur) == Ordering::Greater,
-        Channel::Stable | Channel::Dev => rem.order(&cur) != Ordering::Equal,
+        Channel::Stable | Channel::Dev => rem.order(&cur) == Ordering::Greater || (cur.beta.is_some() && rem.order(&cur) == Ordering::Less
+            && floor.and_then(Build::parse).is_some_and(|base| base.beta.is_none() && base.version.build.is_empty() && rem.order(&base) != Ordering::Less)),
     }
+}
+
+/// Select the newest offered release. A failed verification must not fall back below it.
+pub fn newest_release<'a>(versions: impl IntoIterator<Item = &'a str>) -> Option<String> {
+    versions.into_iter().filter_map(|id| Build::parse(id).filter(|b| b.beta.is_none()).map(|b| (id, b)))
+        .max_by(|a, b| a.1.order(&b.1)).map(|(id, _)| id.to_string())
 }
 
 /// The Kiln fields of a manifest (all optional).
@@ -261,6 +281,8 @@ pub struct KilnFields {
     /// (dev.29) A test build's beta number (also in the manifest's `version`, `+beta.<n>`, which is what counts).
     #[serde(default)]
     pub beta: Option<u32>,
+    #[serde(default)]
+    pub base_release: Option<String>,
 }
 
 /// `kiln` from a manifest; a newer `format` than 1 is read as far as it goes.
@@ -293,6 +315,39 @@ pub fn short_notes(notes: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn malformed_beta_ids_are_never_release_candidates() {
+        for id in ["0.2.0-dev.29+beta.0", "0.2.0-dev.29+beta.x", "0.2.0-dev.29+beta.03", "0.2.0-dev.29+beta"] {
+            for ch in [Channel::Dev, Channel::Stable, Channel::Beta] {
+                assert!(!accepts("0.2.0-dev.28", id, ch), "{id} on {ch:?}");
+                assert!(!switch_accepts("0.2.0-dev.30+beta.1", id, ch), "{id} switch to {ch:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_release_cannot_use_switch_to_rollback_another_release() {
+        assert!(!switch_accepts("0.2.0-dev.29", "0.2.0-dev.28", Channel::Dev));
+        assert!(!switch_accepts("0.2.1", "0.2.0", Channel::Stable));
+    }
+
+    #[test]
+    fn rollback_floor_allows_a_stable_release_above_its_dev_base() {
+        assert!(switch_accepts_with_floor("0.3.0-dev.1+beta.1", "0.2.0", Channel::Stable, Some("0.2.0-dev.29")));
+        assert!(!switch_accepts_with_floor("0.3.0-dev.1+beta.1", "0.1.0", Channel::Stable, Some("0.2.0-dev.29")));
+    }
+
+    #[test]
+    fn rollback_floor_and_source_disagreement() {
+        let cur = "0.2.0-dev.29+beta.2";
+        assert!(switch_accepts_with_floor(cur, "0.2.0-dev.28", Channel::Dev, Some("0.2.0-dev.28")));
+        assert!(!switch_accepts_with_floor(cur, "0.2.0-dev.27", Channel::Dev, Some("0.2.0-dev.28")));
+        assert!(!switch_accepts_with_floor(cur, "0.2.0-dev.28", Channel::Dev, None));
+        for versions in [["0.2.0-dev.27", "0.2.0-dev.28"], ["0.2.0-dev.28", "0.2.0-dev.27"]] {
+            assert_eq!(newest_release(versions), Some("0.2.0-dev.28".into()));
+        }
+    }
 
     #[test]
     fn sources_are_frostdev_then_github() {
@@ -408,7 +463,7 @@ mod tests {
     #[test]
     fn a_switch_goes_down_only_back_to_the_release() {
         // back from a test build: the release line's newest, also when it is older, never a test build
-        assert!(switch_accepts("0.2.0-dev.29+beta.2", "0.2.0-dev.28", Channel::Dev));
+        assert!(switch_accepts_with_floor("0.2.0-dev.29+beta.2", "0.2.0-dev.28", Channel::Dev, Some("0.2.0-dev.28")));
         assert!(switch_accepts("0.2.0-dev.29+beta.2", "0.2.0-dev.29", Channel::Dev));
         assert!(!switch_accepts("0.2.0-dev.29+beta.2", "0.2.0-dev.29+beta.1", Channel::Dev));
         assert!(!switch_accepts("0.2.0-dev.28", "0.2.0-dev.28", Channel::Dev), "nothing to switch to");

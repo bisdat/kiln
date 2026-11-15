@@ -71,8 +71,13 @@ pub async fn runtime_status(game_id: String) -> Result<InstallState, Error> {
 
 /// The receipt's `installer`: `kiln-launcher <version>`, and (dev.29) ` beta <n>` from a test build, so a release
 /// launcher knows the game's Kiln came with one (kiln_manage::install::installed_by_test_build).
-fn installer() -> Option<String> {
-    Some(installer_name(env!("CARGO_PKG_VERSION"), crate::distribution::beta()))
+/// A manually selected different runtime gets the ordinary installer name.
+fn installer(version: &str) -> Option<String> {
+    Some(installer_for_runtime(env!("CARGO_PKG_VERSION"), crate::distribution::beta(), shipped_version().as_deref(), version))
+}
+
+fn installer_for_runtime(version: &str, beta: Option<u32>, shipped: Option<&str>, runtime: &str) -> String {
+    installer_name(version, beta.filter(|_| shipped == Some(runtime)))
 }
 
 fn installer_name(version: &str, beta: Option<u32>) -> String {
@@ -192,7 +197,7 @@ pub async fn runtime_install(app: AppHandle, game_id: String, version: String, o
         crate::state::refuse_running(&g)?;
         let d = dirs()?;
         let mut options = options;
-        options.installer = options.installer.or_else(installer);
+        options.installer = options.installer.or_else(|| installer(&b.version));
         let r = install::install_report(&d, &g, &b.file, &options, p);
         after_change(&a, &game_id);
         let (r, report) = r?;
@@ -240,7 +245,7 @@ pub async fn runtime_rollback(app: AppHandle, game_id: String, version: String) 
         let b = bundle::find(&d, &version)?;
         // the player's parts carry over by install::resolve_components (an older bundle without some of them leaves
         // them out instead of failing; their opt-outs stay recorded)
-        let options = InstallOptions { components: None, switch_from_shroudforge: false, installer: installer() };
+        let options = InstallOptions { components: None, switch_from_shroudforge: false, installer: installer(&version) };
         let r = install::install_report(&d, &g, &b.file, &options, p);
         after_change(&a, &game_id);
         let (r, report) = r?;
@@ -262,6 +267,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn manually_selected_runtime_is_not_marked_as_the_betas_runtime() {
+        let tag = |shipped, runtime| installer_for_runtime("0.2.0-dev.29", Some(1), shipped, runtime);
+        assert_eq!(tag(Some("beta-runtime"), "beta-runtime"), "kiln-launcher 0.2.0-dev.29 beta 1");
+        assert_eq!(tag(Some("beta-runtime"), "newer-release"), "kiln-launcher 0.2.0-dev.29");
+        assert_eq!(tag(None, "manual-runtime"), "kiln-launcher 0.2.0-dev.29");
+    }
+
+    #[test]
     fn a_test_build_names_itself_in_the_receipt() {
         let r = |installer: String| InstallReceipt {
             format: 1, install_id: "x".into(), installed: "2026-11-15T00:00:00Z".into(), updated: None, installer: Some(installer),
@@ -273,6 +286,6 @@ mod tests {
         assert!(install::installed_by_test_build(&r(installer_name("0.2.0-dev", Some(3)))));
         assert!(!install::installed_by_test_build(&r(installer_name("0.2.0-dev", None))));
         // this test binary is no test build
-        assert_eq!(installer().as_deref(), Some(concat!("kiln-launcher ", env!("CARGO_PKG_VERSION"))));
+        assert_eq!(installer("any-runtime").as_deref(), Some(concat!("kiln-launcher ", env!("CARGO_PKG_VERSION"))));
     }
 }

@@ -805,6 +805,8 @@ type Handler = (args: Record<string, unknown>) => unknown;
 const S = (v: unknown) => String(v ?? "");
 
 const handlers: Record<string, Handler> = {
+  snapshot_status: () => ({ phase: "ready", reasons: [] }),
+  snapshot_continue: () => null,
   // app
   app_info: (): AppInfo => ({ version: "0.2.0-dev", kiln: "0.2.0-dev", platform: "linux", arch: "x86_64", dataDir: mockDataDir(), commit: "0f1ffa6", mock: true,
     noWebgl: render.mode === "software", distribution: MOCK_DISTRIBUTION, nexusEnabled: NEXUS_MOCK_ENABLED, render: { ...render } }),

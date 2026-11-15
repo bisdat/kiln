@@ -142,6 +142,8 @@ pub struct UpdateStatus {
     pub beta: Option<u32>,
     /// (dev.29) The channel a switch the player started goes to, while it downloads or waits for the restart.
     pub switching: Option<Channel>,
+    pub restore_requested: bool,
+    pub before_beta_warning: Vec<String>,
     /// (dev.29) A test build: the copy of settings and profiles from before the beta (crate::snapshot), which a switch
     /// back can put back (`update_switch` with `restore`).
     pub before_beta: Option<crate::snapshot::Info>,
@@ -232,6 +234,8 @@ fn initial_status(current: &str, install: InstallInfo) -> UpdateStatus {
         build_channel: Channel::of_build(current),
         beta: feed::baked_beta(),
         switching: None,
+        restore_requested: false,
+        before_beta_warning: vec![],
         before_beta: None,
         auto: true,
         install,
@@ -259,7 +263,10 @@ fn settings(current: &str) -> (bool, Channel) {
 pub fn status() -> UpdateStatus {
     // only a test build offers to put the copy back (a small file, read when asked)
     let before = feed::baked_beta().and_then(|_| crate::state::dirs().ok()).and_then(|d| crate::snapshot::info(&d.root));
+    let warning = crate::state::dirs().ok().map(|d| crate::snapshot::without_restore(&d.root)).unwrap_or_default();
     let mut g = state();
+    g.status.restore_requested = g.restore;
+    g.status.before_beta_warning = warning;
     let (auto, channel) = settings(&g.status.current);
     g.status.auto = auto;
     g.status.channel = channel;
@@ -269,25 +276,29 @@ pub fn status() -> UpdateStatus {
 
 /// Before the restart into a switch's build: a switch back to the release line records it (the next test build takes a
 /// new copy), and when the player asked, the copy from before the beta goes back (crate::snapshot). What fails here is
-/// logged; the restart goes on.
-fn before_switch_restart(ready: &Ready) {
+/// returned; the restart waits until the requested restore succeeds.
+fn before_switch_restart(ready: &Ready) -> Result<Option<crate::snapshot::startup::Freeze>, Error> {
     let (switching, restore) = {
         let g = state();
         (g.status.switching, g.restore)
     };
-    let Some(target) = switching.filter(|c| *c != Channel::Beta) else { return };
-    let _writing = crate::state::writing();
-    let Ok(d) = crate::state::dirs() else { return };
+    let Some(target) = switching.filter(|c| *c != Channel::Beta) else { return Ok(None) };
+    let d = crate::state::dirs()?;
+    let freeze = crate::snapshot::startup::freeze()?;
+    if let Err(e) = prepare_switch_restart(&d.root, &ready.version, target, restore) {
+        if d.root.join("snapshots/restore-beta/journal.json").exists() { freeze.keep_blocked(&e); }
+        return Err(e);
+    }
+    Ok(Some(freeze))
+}
+
+fn prepare_switch_restart(root: &std::path::Path, version: &str, target: Channel, restore: bool) -> Result<(), Error> {
     if restore {
-        match crate::snapshot::restore(&d.root, Some(target.as_str())) {
-            Ok(files) => log(&format!("put back the copy from before the beta: {}", files.join(", "))),
-            Err(e) => log(&format!("could not put back the copy from before the beta: {}", e.message)),
-        }
+        let files = crate::snapshot::restore(root, Some(target.as_str()))?;
+        log(&format!("put back the copy from before the beta: {}", files.join(", ")));
     }
-    let to = feed::Build::parse(&ready.version).map(|b| { let mut v = b.version; v.build.clear(); v.to_string() }).unwrap_or_else(|| ready.version.clone());
-    if let Err(e) = crate::snapshot::left_beta(&d.root, &to, target.as_str()) {
-        log(&format!("cannot record the switch back: {}", e.message));
-    }
+    let to = feed::Build::parse(version).map(|b| { let mut v = b.version; v.build.clear(); v.to_string() }).unwrap_or_else(|| version.into());
+    crate::snapshot::plan_leave_beta(root, &to, target.as_str())
 }
 
 fn emit<R: Runtime>(app: &AppHandle<R>) {
@@ -391,28 +402,38 @@ pub struct Want {
     pub channel: Channel,
     pub rule: Rule,
     pub current: String,
+    pub base_release: Option<String>,
 }
 
 impl Want {
     pub fn update(channel: Channel, current: String) -> Want {
-        Want { channel, rule: Rule::Update, current }
+        Want { channel, rule: Rule::Update, current, base_release: None }
     }
 
     pub fn switch(channel: Channel, current: String) -> Want {
-        Want { channel, rule: Rule::Switch, current }
+        Want { channel, rule: Rule::Switch, current, base_release: feed::baked_base_release().map(String::from) }
     }
 
     /// Does the manifest's build count?
     pub fn takes(&self, remote: &str) -> bool {
         match self.rule {
             Rule::Update => feed::accepts(&self.current, remote, self.channel),
-            Rule::Switch => feed::switch_accepts(&self.current, remote, self.channel),
+            Rule::Switch => feed::switch_accepts_with_floor(&self.current, remote, self.channel, self.base_release.as_deref()),
         }
+    }
+
+    pub fn switch_with_base(channel: Channel, current: String, base: &str) -> Want {
+        Want { base_release: Some(base.into()), ..Self::switch(channel, current) }
+    }
+
+    fn release_switch(&self) -> bool {
+        self.rule == Rule::Switch && self.channel != Channel::Beta && feed::Build::parse(&self.current).is_some_and(|b| b.beta.is_some())
     }
 
     fn nothing(&self) -> &'static str {
         match self.rule {
             Rule::Update => "it offers no newer version",
+            Rule::Switch if self.release_switch() => "The feed offers an older release than this test build came from, or this local test build has no base release. Use the download page: https://frostdev.io/kiln",
             Rule::Switch => "it offers no other build to switch to",
         }
     }
@@ -546,6 +567,28 @@ pub async fn acquire_for<R: Runtime>(
     want: &Want,
     progress: Arc<Mutex<Option<DownloadProgress>>>,
 ) -> (Option<(String, Acquired)>, Vec<Failure>) {
+    if want.release_switch() {
+        // Inspect both manifests before fetching. Never fall back to an older artifact
+        // after the newest advertised release fails signature/hash/download checks.
+        let mut offers = Vec::new();
+        let mut failures = Vec::new();
+        for src in sources {
+            match check_source_for(app, src, want).await {
+                Ok(Some(update)) => offers.push((src.clone(), update)),
+                Ok(None) => failures.push(failure(src, (Step::Manifest, want.nothing().into()))),
+                Err(e) => failures.push(e),
+            }
+        }
+        let (got, download_failures) = acquire_release_offers(offers, |u: &Update| u.version.as_str(), |src, update| {
+            let progress = progress.clone();
+            async move {
+                let bytes = fetch(&update, &src, &progress).await?;
+                Ok(Acquired { update, bytes })
+            }
+        }).await;
+        failures.extend(download_failures);
+        return (got, failures);
+    }
     try_sources(sources, |src| {
         let app = app.clone();
         let progress = progress.clone();
@@ -559,6 +602,18 @@ pub async fn acquire_for<R: Runtime>(
         }
     })
     .await
+}
+
+async fn acquire_release_offers<T, U, V, F, Fut>(offers: Vec<(Source, T)>, version: V, mut fetch: F) -> (Option<(String, U)>, Vec<Failure>)
+where V: Fn(&T) -> &str, F: FnMut(Source, T) -> Fut, Fut: std::future::Future<Output = Result<U, Failure>> {
+    let newest = feed::newest_release(offers.iter().map(|(_, value)| version(value)));
+    let mut failures = Vec::new();
+    for (source, update) in offers {
+        if Some(version(&update)) != newest.as_deref() { continue; }
+        let name = source.name.clone();
+        match fetch(source, update).await { Ok(value) => return (Some((name, value)), failures), Err(e) => failures.push(e) }
+    }
+    (None, failures)
 }
 
 fn summary(failures: &[Failure]) -> String {
@@ -684,6 +739,7 @@ fn begin(switching: Option<Channel>, restore: bool) -> Result<(), Error> {
     g.status.failures.clear();
     g.status.switching = switching;
     g.restore = restore && switching.is_some();
+    g.status.restore_requested = g.restore;
     Ok(())
 }
 
@@ -764,7 +820,7 @@ fn run_install(app: &AppHandle, p: &mut dyn kiln_manage::task::Progress, switchi
         let what = if switching.is_some() { "switch" } else { "install" };
         log(&format!("{what} failed: {}", summary(&failures)));
         let e = if code == ErrorCode::NotFound {
-            Error::new(code, "That channel has no other build for this launcher: you have its newest one, or a newer one.").with_detail(summary(&failures))
+            Error::new(code, if want.release_switch() { want.nothing() } else { "That channel has no other build for this launcher: you have its newest one, or a newer one." }).with_detail(summary(&failures))
         } else {
             Error::new(code, "The update could not be downloaded and verified from any source.").with_detail(summary(&failures))
         };
@@ -821,7 +877,12 @@ pub fn restart(app: &AppHandle) -> Result<(), Error> {
     let Some(ready) = ready.filter(|_| phase == Phase::Ready) else {
         return Err(Error::new(ErrorCode::Conflict, "No update is ready."));
     };
-    before_switch_restart(&ready);
+    if !ready.installed {
+        let current = state().status.current.clone();
+        let notes = state().pending.as_ref().and_then(|(u, _)| u.body.as_deref().map(|n| feed::short_notes(n, NOTES_MAX)));
+        save_store(|s| s.updated = Some(Updated { from: feed::this_build(&current), to: ready.version.clone(), at: kiln_manage::util::now_rfc3339(), source: ready.source.clone(), notes }));
+    }
+    let freeze = before_switch_restart(&ready)?;
     if ready.installed {
         log(&format!("restarting into {}", ready.version));
         // from here on this process writes nothing more into a game folder: the new launcher takes over
@@ -832,19 +893,10 @@ pub fn restart(app: &AppHandle) -> Result<(), Error> {
     let Some((update, bytes)) = pending else {
         return Err(Error::new(ErrorCode::Conflict, "The downloaded update is gone; check again."));
     };
-    let current = state().status.current.clone();
-    save_store(|s| {
-        s.updated = Some(Updated {
-            from: feed::this_build(&current),
-            to: update.version.clone(),
-            at: kiln_manage::util::now_rfc3339(),
-            source: ready.source.clone(),
-            notes: update.body.as_deref().map(|n| feed::short_notes(n, NOTES_MAX)),
-        })
-    });
     log(&format!("running the installer of {}", update.version));
     // returns only when the installer could not be started
     let r = update.install(&bytes);
+    drop(freeze);
     save_store(|s| s.updated = None);
     let e = r.err().map(|e| describe(&e, Step::Download).1).unwrap_or_else(|| "the installer did not start".into());
     log(&format!("installer of {} failed: {e}", update.version));

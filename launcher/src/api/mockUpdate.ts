@@ -132,6 +132,7 @@ export function updateMockHandlers(emit: Emit, distribution: Distribution = "dir
       if (!known(channel)) throw { code: "invalid_argument", message: `no channel ${String(a.channel)}` } satisfies KilnError;
       switchCalls.push({ channel, restore: !!a.restore });
       restoreOnRestart = !!a.restore;
+      status.restoreRequested = restoreOnRestart;
       return install(channel);
     },
     update_restart: () => {
@@ -147,6 +148,7 @@ export function updateMockHandlers(emit: Emit, distribution: Distribution = "dir
         : {};
       put({ justUpdated: { from, to, at: now(), source: status.ready.source, notes: status.available?.notes ?? null }, current: b.version, phase: "upToDate", available: null, ready: null, taskId: null, switching: null, ...build });
       restoreOnRestart = false;
+      status.restoreRequested = false;
       return null;
     },
     update_skip: (a) => {

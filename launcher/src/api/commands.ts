@@ -1179,6 +1179,8 @@ export interface UpdateStatus {
   beta?: number | null;
   /** (dev.29) The channel switch the player started (update_switch) while it downloads or waits for the restart. */
   switching?: UpdateChannel | null;
+  restoreRequested?: boolean;
+  beforeBetaWarning?: string[];
   /** (dev.29) The copy of settings and profiles taken before the first start of a test build: a switch back can put
    *  it back (update_switch `restore`). */
   beforeBeta?: BeforeBeta | null;
@@ -1944,6 +1946,7 @@ export const dataFolderRestart = () => call<null>("data_folder_restart");
 
 /** Every command name (the Rust side registers the same list; mock.ts answers or rejects each). */
 export const COMMANDS = [
+  "snapshot_status", "snapshot_continue",
   "app_info", "app_settings_get", "app_settings_set", "app_open_path", "app_open_url", "task_list", "task_get", "task_cancel",
   "game_list", "game_detect", "game_add", "game_remove", "game_status",
   "runtime_list", "runtime_import", "runtime_status", "runtime_install", "runtime_uninstall", "runtime_rollback", "runtime_classify",
@@ -2010,3 +2013,7 @@ export async function onKilnEvent<E extends KilnEventName>(name: E, handler: (pa
   if (isTauri()) return tauriListen<KilnEvents[E]>(name, (e) => handler(e.payload));
   return (await loadMock()).mockListen(name, handler as (payload: unknown) => void);
 }
+
+export interface SnapshotStartup { phase: "preparing" | "blocked" | "ready"; reasons: string[]; canContinue?: boolean }
+export const snapshotStatus = () => call<SnapshotStartup>("snapshot_status");
+export const snapshotContinue = () => call<null>("snapshot_continue");

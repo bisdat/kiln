@@ -12,6 +12,7 @@
 #   release when a newer dev build is out.
 # --no-beta-channel: a release normally also becomes the beta channel's newest build (testers are offered the final
 #   build), unless the beta channel already names a newer test build (read back from frostdev.io first); skip it.
+# --force-beta-channel: explicitly replace both beta pointers even when live evidence is missing or newer.
 # --dry-run: checks the folder and prints every remote command instead of running it (no ssh, rsync, gh or curl).
 # A test build (release.sh --beta N): only the beta channel moves: downloads/<version>-beta.<n>/, updates/beta/ on
 #   frostdev.io, the draft v<version>-beta.<n> published as a pre-release (never "latest"), the updates-beta pointer
@@ -29,7 +30,7 @@
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo_dir=$(cd "$here/../.." && pwd)
-dir="" gh_repo=frostdev-ops/kiln host=${KILN_RELEASE_HOST:-} yes=0 dev_channel=1 beta_channel=1 nexus=0 sdk_site=0 dry=0
+dir="" gh_repo=frostdev-ops/kiln host=${KILN_RELEASE_HOST:-} yes=0 dev_channel=1 beta_channel=1 nexus=0 sdk_site=0 dry=0 force_beta=0
 while (($#)); do
   case $1 in
     --repo) gh_repo=$2; shift 2 ;;
@@ -37,6 +38,7 @@ while (($#)); do
     --yes) yes=1; shift ;;
     --no-dev-channel) dev_channel=0; shift ;;
     --no-beta-channel) beta_channel=0; shift ;;
+    --force-beta-channel) force_beta=1; shift ;;
     --dry-run) dry=1; yes=1; shift ;;
     --nexus) nexus=1; shift ;;
     --sdk-site) sdk_site=1; shift ;;
@@ -99,18 +101,34 @@ fi
 
 # the channels this folder moves: a test build only beta; a release its own, dev for a stable one (unless
 # --no-dev-channel), and beta unless --no-beta-channel or the beta channel names a newer test build already
-beta_newer() { # is the live beta manifest's build newer than this release? (unreadable: no)
-  ((dry)) && { echo "would read: https://frostdev.io/kiln/updates/beta/latest.json" >&2; return 1; }
-  local live
-  live=$(curl -fsS "https://frostdev.io/kiln/updates/beta/latest.json" 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])' 2>/dev/null) || return 1
-  [[ $(python3 "$here/lib/release.py" order "$live" "$build_id") == 1 ]] && { echo "the beta channel names $live, newer than $build_id: it stays" >&2; return 0; }
-  return 1
-}
+beta_move=1 beta_warning=""
+if [[ $channel != beta ]]; then
+  beta_move=0
+  if ((beta_channel)); then
+    if ((dry)); then
+      echo "would read both beta pointers before either pointer moves (frostdev.io and GitHub)"
+      beta_move=1
+    else
+      fd_live=$(mktemp) gh_live=$(mktemp)
+      # Fetch both before either host is changed. A failed fetch is an unreadable manifest,
+      # never evidence that the beta channel is older.
+      curl -fLsS --connect-timeout 15 --max-time 60 "https://frostdev.io/kiln/updates/beta/latest.json" >"$fd_live" || : >"$fd_live"
+      curl -fLsS --connect-timeout 15 --max-time 60 "https://github.com/$gh_repo/releases/download/updates-beta/latest.json" >"$gh_live" || : >"$gh_live"
+      guard_args=()
+      ((force_beta)) && guard_args+=(--force)
+      if beta_warning=$(python3 "$here/lib/beta_guard.py" "$build_id" "$fd_live" "$gh_live" "${guard_args[@]}"); then beta_move=1; else beta_warning=${beta_warning:-"WARNING: BETA CHANNEL NOT MOVED: decision helper failed."}; fi
+      rm -f "$fd_live" "$gh_live"
+      echo "$beta_warning" >&2
+    fi
+  else
+    beta_warning="Beta channel stays: --no-beta-channel."
+  fi
+fi
 channels=()
 for f in "$dir"/updates/frostdev.io/*/latest.json; do
   ch=$(basename "$(dirname "$f")")
   case $ch in
-    beta) [[ $channel == beta ]] || { ((beta_channel)) && ! beta_newer; } || continue ;;
+    beta) ((beta_move)) || continue ;;
     dev) [[ $channel == stable && $dev_channel == 0 ]] && continue ;;
   esac
   channels+=("$ch")
@@ -174,4 +192,8 @@ if ((nexus)); then
   if ask "Upload these files to Nexus Mods and post the changelog?"; then
     python3 -I "$here/nexus.py" "$dir" --publish
   fi
+fi
+
+if [[ -n $beta_warning ]]; then
+  printf '\n== Beta channel publication decision\n%s\n' "$beta_warning" >&2
 fi

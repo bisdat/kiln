@@ -24,3 +24,17 @@ describe("channel names", () => {
     }
   });
 });
+
+import { acceptedRestore, switchWords } from "../src/api/channel";
+
+test("switch instructions say how to install the game runtime and handle dev.28", () => {
+  expect(switchWords("to-beta").say.join(" ")).toContain("Runtime");
+  expect(switchWords("back", "0.2.0-dev.28").say.join(" ")).toContain("Runtime");
+  expect(switchWords("back", "0.2.0-dev.29").say.join(" ")).toContain("next Play");
+});
+
+test("reopening Ready renders the backend's accepted restore choice", () => {
+  expect(acceptedRestore({ phase: "ready", restoreRequested: true }, false)).toBe(true);
+  expect(acceptedRestore({ phase: "ready", restoreRequested: false }, true)).toBe(false);
+  expect(acceptedRestore({ phase: "idle", restoreRequested: false }, true)).toBe(true);
+});

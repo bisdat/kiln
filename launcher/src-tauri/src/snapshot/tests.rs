@@ -190,7 +190,7 @@ fn release_builds_and_empty_folders_take_no_copy() {
     let root = &t.0;
     // a fresh data folder: nothing to copy, the build is recorded
     assert_eq!(at_start(root, "0.2.0-dev.29", "beta", Some(1)).unwrap(), None);
-    assert_eq!(read_last(root).unwrap(), LastBuild { format: 1, version: "0.2.0-dev.29".into(), channel: "beta".into(), beta: Some(1) });
+    assert_eq!(read_last(root).unwrap(), LastBuild { format: 1, version: "0.2.0-dev.29".into(), channel: "beta".into(), beta: Some(1), without_restore: vec![], pending_release: false, copy_complete: Some(false) });
     assert_eq!(super::info(root), None);
     // a release build never takes one
     dev28_folder(root);
@@ -234,4 +234,134 @@ fn a_restored_choice_of_the_beta_says_the_release() {
     assert_eq!(serde_json::from_str::<serde_json::Value>(&read(root, "settings.json")).unwrap()["updateChannel"], "stable");
     restore(root, None).unwrap();
     assert_eq!(serde_json::from_str::<serde_json::Value>(&read(root, "settings.json")).unwrap()["updateChannel"], "beta");
+}
+
+#[test]
+fn incomplete_copy_does_not_partly_restore() {
+    let t = tmp("incomplete");
+    dev28_folder(&t.0);
+    take(&t.0, "28", "29+beta.1").unwrap();
+    put(&t.0, "profiles/ember-run/meta.json", "beta profile");
+    std::fs::remove_file(t.0.join(DIR).join("settings.json")).unwrap();
+    assert!(restore(&t.0, Some("dev")).is_err());
+    assert_eq!(read(&t.0, "profiles/ember-run/meta.json"), "beta profile");
+}
+
+#[cfg(unix)]
+#[test]
+fn restore_refuses_a_profile_parent_symlink() {
+    let t = tmp("symlink");
+    let root = t.0.join("data");
+    dev28_folder(&root);
+    take(&root, "28", "29+beta.1").unwrap();
+    let outside = t.0.join("outside");
+    std::fs::rename(root.join("profiles/ember-run"), &outside).unwrap();
+    put(&outside, "meta.json", "outside profile");
+    std::os::unix::fs::symlink(&outside, root.join("profiles/ember-run")).unwrap();
+    assert!(restore(&root, Some("dev")).is_err());
+    assert_eq!(read(&outside, "meta.json"), "outside profile");
+}
+
+#[test]
+fn failed_marker_never_replaces_a_whole_copy_with_beta_data() {
+    let t = tmp("marker-retry");
+    dev28_folder(&t.0);
+    put(&t.0, "state", "not a directory");
+    assert!(at_start(&t.0, "0.2.0-dev.29", "beta", Some(1)).is_err());
+    put(&t.0, "settings.json", "beta data");
+    std::fs::remove_file(t.0.join("state")).unwrap();
+    at_start(&t.0, "0.2.0-dev.29", "beta", Some(1)).unwrap();
+    assert_eq!(read(&t.0.join(DIR), "settings.json"), DEV28_SETTINGS);
+}
+
+#[test]
+fn oversized_and_symlinked_entries_are_reported_not_silently_skipped() {
+    let t = tmp("omissions");
+    dev28_folder(&t.0);
+    std::fs::OpenOptions::new().write(true).open(t.0.join("settings.json")).unwrap().set_len(MAX_FILE + 1).unwrap();
+    let e = take(&t.0, "28", "29+beta.1").unwrap_err();
+    assert!(e.message.contains("settings.json"));
+    assert!(info(&t.0).is_none());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlinked_profile_is_an_explicit_copy_failure() {
+    let t = tmp("profile-link");
+    dev28_folder(&t.0);
+    std::os::unix::fs::symlink(t.0.join("profiles/ember-run"), t.0.join("profiles/linked")).unwrap();
+    let e = take(&t.0, "28", "29+beta.1").unwrap_err();
+    assert!(e.message.contains("linked"));
+}
+
+#[test]
+fn opting_out_records_each_reason_and_hides_the_copy() {
+    let t = tmp("opt-out");
+    dev28_folder(&t.0);
+    take(&t.0, "28", "29+beta.1").unwrap();
+    continue_without_restore(&t.0, "29", "beta", Some(1), vec!["profiles/x: unreadable".into(), "settings.json: too large".into()]).unwrap();
+    assert_eq!(without_restore(&t.0).len(), 2);
+    assert!(info(&t.0).is_none());
+    at_start(&t.0, "29", "beta", Some(2)).unwrap();
+    assert_eq!(without_restore(&t.0).len(), 2);
+}
+
+#[test]
+fn interrupted_restore_finishes_as_one_transaction_on_next_start() {
+    for step in 0..13 {
+        let t = tmp(&format!("restore-crash-{step}"));
+        dev28_folder(&t.0);
+        take(&t.0, "28", "29+beta.1").unwrap();
+        put(&t.0, "settings.json", "{\"savesKeep\":3}");
+        put(&t.0, "profiles/ember-run/meta.json", "beta profile");
+        RESTORE_FAIL.with(|f| f.set(Some(step)));
+        let result = restore(&t.0, Some("dev"));
+        assert_eq!(result.is_err(), step < 12, "failure hook {step}");
+        RESTORE_FAIL.with(|f| f.set(None));
+        recover_restore(&t.0).unwrap();
+        let settings = read(&t.0, "settings.json");
+        let profile = read(&t.0, "profiles/ember-run/meta.json");
+        assert!((settings == DEV28_SETTINGS && profile == DEV28_PROFILE)
+            || (settings == "{\"savesKeep\":3}" && profile == "beta profile"), "mixed files at interruption {step}");
+    }
+}
+
+#[test]
+fn an_unacknowledged_release_restart_cannot_replace_the_original_copy() {
+    let t = tmp("unacknowledged");
+    dev28_folder(&t.0);
+    at_start(&t.0, "0.2.0-dev.29", "beta", Some(1)).unwrap();
+    put(&t.0, "settings.json", "beta data");
+    plan_leave_beta(&t.0, "0.2.0-dev.28", "dev").unwrap();
+    at_start(&t.0, "0.2.0-dev.29", "beta", Some(2)).unwrap();
+    assert_eq!(read(&t.0.join(DIR), "settings.json"), DEV28_SETTINGS);
+    // A release that knows the marker acknowledges that it really ran. Only
+    // that acknowledgement permits the next beta to capture the release's edits.
+    at_start(&t.0, "0.2.0-dev.29", "dev", None).unwrap();
+    put(&t.0, "settings.json", "release edits");
+    at_start(&t.0, "0.2.0-dev.30", "beta", Some(1)).unwrap();
+    assert_eq!(read(&t.0.join(DIR), "settings.json"), "release edits");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_profile_path_that_restore_cannot_use_is_reported_before_copying() {
+    let t = tmp("unrestorable-path");
+    dev28_folder(&t.0);
+    put(&t.0, "profiles/a\\b/meta.json", DEV28_PROFILE);
+    let err = take(&t.0, "28", "29+beta.1").unwrap_err();
+    assert!(err.message.contains("a\\b"));
+    assert!(info(&t.0).is_none());
+}
+
+#[test]
+fn an_empty_new_release_baseline_never_offers_an_older_cycles_copy() {
+    let t = tmp("empty-new-cycle");
+    dev28_folder(&t.0);
+    at_start(&t.0, "0.2.0-dev.29", "beta", Some(1)).unwrap();
+    at_start(&t.0, "0.2.0-dev.29", "dev", None).unwrap();
+    std::fs::remove_file(t.0.join("settings.json")).unwrap();
+    std::fs::remove_dir_all(t.0.join("profiles")).unwrap();
+    assert!(at_start(&t.0, "0.2.0-dev.30", "beta", Some(1)).unwrap().is_none());
+    assert!(info(&t.0).is_none());
 }
