@@ -17,6 +17,7 @@
 
 #include "backends/imgui_impl_win32.h"
 #include "imgui.h"
+#include "key_names.h"
 #include "safetyhook.hpp"
 #include "services/kiln_progress.h"
 #include "services/kiln_render.h"
@@ -141,6 +142,9 @@ bool imgui_create(HWND hwnd, float dpi) {
     io.IniFilename = g_ini_path.empty() ? nullptr : g_ini_path.c_str();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad | ImGuiConfigFlags_NoMouseCursorChange;
     io.MouseDrawCursor = false;
+    // By default ImGui opens a "conflicting ID" popup for programmers over the game when two items share an id, in Kiln's
+    // own pages or in a mod's window. Players cannot act on it: off (ImGui's advice for non-programmer builds).
+    io.ConfigDebugHighlightIdConflicts = false;
     if (!ImGui_ImplWin32_Init(hwnd)) {
         set_error("ImGui Win32 backend failed");
         ImGui::DestroyContext();
@@ -229,8 +233,10 @@ bool build_frame(float width, float height, float dpi) {
 }
 
 bool dispatch_key(const KilnUiKey& key, bool mouse) {
-    // the menu key first (works without the managed host); in the main menu it opens or leaves the game page
-    if (key.down && !key.repeat && !key.text_input && key.vk == g_menu_vk.load() && key.mods == g_menu_mods.load()) {
+    // the menu key first (works without the managed host); in the main menu it opens or leaves the game page. A
+    // punctuation key is the key at its place on any layout (key_names.h), as for Kiln.Ui's bindings
+    if (key.down && !key.repeat && !key.text_input && keys::matches(g_menu_vk.load(), key.vk, key.scan) &&
+        key.mods == g_menu_mods.load()) {
         if (page_menu_key()) return true;
         g_menu_open = !g_menu_open.load();
         logf(KILN_LOG_DEBUG, "ui: Kiln menu %s", g_menu_open ? "open" : "closed");

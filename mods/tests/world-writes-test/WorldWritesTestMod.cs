@@ -322,6 +322,7 @@ public sealed partial class WorldWritesTestMod : Mod
             return;
         }
 
+        await ScaleAfterForget(chest, st);  // 0.2.0-dev.28 fix round (ScaleVector.cs)
         Check(FuelUnits(can) == 4321, $"Fuel kept the tracked write across the save and restart: {FuelUnits(can)} (written 4321)");
         var lost = FuelUnits(control) == 1000;
         Check(lost, $"the raw Fuel control was {(lost ? "lost: the save skipped the untracked write" : "NOT lost")}: {FuelUnits(control)} (raw 3000, saved before it 1000)");

@@ -9,7 +9,7 @@ import * as api from "../api/commands";
 import type { GameInstall, LaunchMode, StartTimeline } from "../api/commands";
 import { invalidateGame, useActiveProfile, useGame, useGameStatus, useLaunchState, useProfiles, useRuntimeChanges, useStartTimeline } from "../api/hooks";
 import { toast } from "../ui";
-import { cookBeforePlay } from "./cook";
+import { bootSnapshotBeforeOnce, cookBeforePlay, cookingNotice } from "./cook";
 import { notifyLibraryChanged } from "./libraryChanged";
 import { gameState, playState, runStarted, type GameStateView } from "./gameState";
 import { notifyActivation, notifyActivationOf } from "./notices";
@@ -27,6 +27,11 @@ interface LaunchMemo {
   process: Record<string, string>;
 }
 export const useLaunchMemo = create<LaunchMemo>(() => ({ at: {}, mode: {}, since: {}, process: {} }));
+
+/** A start this launcher asked Steam for (Play, a modpack offer's Launch): the window follows it until the game runs. */
+export function rememberLaunch(gameId: string, mode: LaunchMode) {
+  useLaunchMemo.setState((m) => ({ at: { ...m.at, [gameId]: playNow() }, mode: { ...m.mode, [gameId]: mode } }));
+}
 
 export interface PlayControl {
   game: GameInstall | null;
@@ -100,19 +105,20 @@ export function usePlayControl(): PlayControl {
     : state.kilnMissing && spoke ? gameState(game ? s : null, launchState.data, false, now) : state.view;
   const launch = useMutation({
     mutationKey: ["launch_play"],
-    // Mods with a cook recipe are cooked first when they need it (a start with mods only). A cook never stops the
-    // start: what could not be cooked is said in a notice, and the game starts all the same.
+    // Mods with a cook recipe are cooked first when they need it (a start with the profile only), then the boot
+    // game-data step runs (also for a single start with another profile). Neither stops the start: what could not be
+    // done is said in a notice, and the game starts all the same.
     // the game travels with the request: TanStack gives a pending mutation the options of the latest render, so a
     // closure's game id may be another game's by the time the request ends (another one selected meanwhile)
     mutationFn: async ({ gameId, req }: { gameId: string; req: api.LaunchRequest }) => {
       // the start is timed from here: its own steps (cook, profile, Steam), then what the game's Kiln says
       await api.launchBegin(gameId, req.mode).catch(() => {});
       void qc.invalidateQueries({ queryKey: ["launch_progress", gameId] });
-      if (req.mode === "profile") await cookBeforePlay(gameId, (jobs) => toast.info(jobs.length === 1 ? `Cooking ${jobs[0].name}` : `Cooking ${jobs.length} mods`, "Making their models, animations and sounds from your game, then the game starts."));
+      await beforeStart(gameId, req);
       return api.launchPlay(gameId, req);
     },
     onSuccess: (r, { gameId }) => {
-      useLaunchMemo.setState((m) => ({ at: { ...m.at, [gameId]: playNow() }, mode: { ...m.mode, [gameId]: r.mode } }));
+      rememberLaunch(gameId, r.mode);
       invalidateGame(qc, gameId);
       toast.ok(r.mode === "vanilla" ? "Starting vanilla" : r.mode === "no-mods" ? "Starting without mods" : "Starting", r.backup ? "Saves backed up first." : "Through Steam.");
       notifyActivation(r.activation);
@@ -171,6 +177,15 @@ export function usePlayControl(): PlayControl {
     profileName: activeProfile?.name ?? null,
     play: (mode, profileId) => launch.mutate({ gameId: id, req: { mode, profileId: profileId ?? null } }),
   };
+}
+
+/** What a start does before launch_play, by its mode: with the profile, its cook and then the boot game-data step
+ *  (cook_run); a single start with another profile (`once`), only the boot game-data step for that profile's mods
+ *  (boot_snapshot_run: it cooks nothing); vanilla and without mods, nothing. Resolves whatever happened: neither step
+ *  stops a start. */
+export async function beforeStart(gameId: string, req: api.LaunchRequest): Promise<void> {
+  if (req.mode === "profile") await cookBeforePlay(gameId, cookingNotice);
+  else if (req.mode === "once" && req.profileId) await bootSnapshotBeforeOnce(gameId, req.profileId);
 }
 
 /** "03:12", "1:04:09". */

@@ -128,11 +128,11 @@ fn validate_zip(path: &Path) -> Result<()> {
 
 /// Serialize quick operations across threads and launcher processes. Keep the lock file: unlinking a held lock
 /// would let another process lock a different inode. Profile/game writes themselves use atomic replacement.
-fn lock(dirs: &DataDirs) -> Result<std::fs::File> {
+fn lock(dirs: &DataDirs) -> Result<crate::util::LockedFile> {
     std::fs::create_dir_all(&dirs.root)?;
     let f = std::fs::OpenOptions::new().create(true).truncate(false).read(true).write(true).open(dirs.root.join("quick.lock"))?;
     f.lock()?;
-    Ok(f)
+    Ok(crate::util::LockedFile(f))
 }
 
 fn has_profiles(dirs: &DataDirs) -> Result<bool> {

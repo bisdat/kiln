@@ -32,6 +32,7 @@ constexpr uint32_t GD_KIND_BASE = 16;  // store slot kinds >= this are gamedata'
 
 // ---- hooks called by kiln.content (content.cpp, packs.cpp, store.cpp) ------------------------------------------
 void gd_boot();
+void gd_boot_patches_bind();  // the boot generation's resource patches (gamedata_bootpatch.cpp): collector "patches"
 void gd_world_ready(uintptr_t world, uint32_t kind);
 void gd_world_reset();
 void gd_tick(uint64_t step);
@@ -232,6 +233,7 @@ void clones_world_ready(uintptr_t world, uint32_t kind);
 void clones_world_reset();
 void clones_tick(uint64_t step);
 uint32_t clones_forget_unbound(KilnOwner owner);  // a boot generation not published (chapter 08): owner's unregistered clones out
+void clones_boot_failed(std::vector<BootFailed>* out);  // a boot generation's clones ("boot:<mod>") a world refused (store_mutex held)
 KilnResult clones_define(KilnOwner owner, uint32_t section, const std::string& json, bool pack, const std::string& source,
                          std::string* report);
 std::string clones_json();

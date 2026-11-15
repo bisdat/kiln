@@ -27,3 +27,6 @@ capability only when the row is not held (`kiln_caps_held` in `kiln_caps.h`, `Ca
 `"preview": true`.
 
 To open a capability for good once its checks have passed: remove its entry here, in the commit that records the pass.
+The owner may also open one on a live test of their own instead of the guided check; the commit then says what was
+run and which of the entry's checks were not (0.2.0-dev.29: `mods.boot.client` and `mods.boot.resource_patches`, on a
+hosted game with a resource-patch mod; `08-loader-order` was not played).

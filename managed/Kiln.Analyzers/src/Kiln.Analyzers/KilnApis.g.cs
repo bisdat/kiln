@@ -77,6 +77,7 @@ internal static partial class KilnApis
         "M:Kiln.Bans.Add(Kiln.PlayerRef,System.String,System.Nullable{System.TimeSpan})", // Bans.Add(PlayerRef, string, TimeSpan?): Game.AssertTickThread
         "M:Kiln.Bans.Add(System.UInt64,System.String,System.Nullable{System.TimeSpan})", // Bans.Add(ulong, string, TimeSpan?): Game.AssertTickThread
         "M:Kiln.Bans.Remove(System.UInt64)", // Bans.Remove(ulong): Game.AssertTickThread
+        "M:Kiln.Blocks.Apply(Kiln.BlockPlan)", // Blocks.Apply(BlockPlan): Services.RequireTickThread
         "M:Kiln.Boss.KilledBy(Kiln.Player)", // Boss.KilledBy(Player): via ProgressFact.Holds(EntityId)
         "M:Kiln.Boss.get_Killed", // Boss.Killed.get: via ProgressFact.Holds(EntityId)
         "M:Kiln.Build.Add(Kiln.BuildShape,System.Byte,Kiln.BuildOptions)", // Build.Add(BuildShape, byte, BuildOptions?): via Build.RunShape(ShapeOp, BuildShape, byte, byte, double, float, int, BuildOptions?)
@@ -111,6 +112,7 @@ internal static partial class KilnApis
         "M:Kiln.Build.UndoEntry(System.Int64,System.Nullable{System.TimeSpan})", // Build.UndoEntry(long, TimeSpan?): via Build.Ensure(string)
         "M:Kiln.Build.Write(Kiln.CellBox,System.ReadOnlySpan{Kiln.Voxel},Kiln.BuildOptions,System.ReadOnlySpan{System.Boolean})", // Build.Write(CellBox, ReadOnlySpan<Voxel>, BuildOptions?, ReadOnlySpan<bool>): via Build.Ensure(string)
         "M:Kiln.Build.WriteAsync(Kiln.CellBox,Kiln.Voxel[],Kiln.BuildOptions,System.Boolean[])", // Build.WriteAsync(CellBox, Voxel[], BuildOptions?, bool[]?): via Build.Load(CellBox, TimeSpan?)
+        "M:Kiln.Build.WriteIfUnchanged(Kiln.CellBox,System.ReadOnlySpan{Kiln.Voxel},System.ReadOnlySpan{Kiln.Voxel},Kiln.BuildOptions,System.ReadOnlySpan{System.Boolean})", // Build.WriteIfUnchanged(CellBox, ReadOnlySpan<Voxel>, ReadOnlySpan<Voxel>, BuildOptions?, ReadOnlySpan<bool>): via Build.Ensure(string)
         "M:Kiln.Build.get_Bases", // Build.Bases.get: via Build.Require(string)
         "M:Kiln.Build.get_Grid", // Build.Grid.get: via Build.Require(string)
         "M:Kiln.CharacterData.Carried.Contains(Kiln.CharacterKey,System.String)", // CharacterData.Carried.Contains(CharacterKey, string): via CharacterStore.Contains(string, CharacterKey, string, string)
@@ -150,7 +152,7 @@ internal static partial class KilnApis
         "M:Kiln.Config.Register``1(Kiln.ConfigKind,System.String)", // Config.Register<T>(ConfigKind, string?): Game.AssertTickThread
         "M:Kiln.ConfigFile.Reload", // ConfigFile.Reload(): Game.AssertTickThread
         "M:Kiln.ConfigFile.Save", // ConfigFile.Save(): Game.AssertTickThread
-        "M:Kiln.ConfigFile.Set(System.String,System.Object)", // ConfigFile.Set(string, object?): via ConfigFile.TrySet(string, object?, out string)
+        "M:Kiln.ConfigFile.Set(System.String,System.Object)", // ConfigFile.Set(string, object?): Game.AssertTickThread
         "M:Kiln.ConfigFile.TrySet(System.String,System.Object,System.String@)", // ConfigFile.TrySet(string, object?, out string): Game.AssertTickThread
         "M:Kiln.ConfigSync.CheckRoundTrip(Kiln.ConfigFile)", // ConfigSync.CheckRoundTrip(ConfigFile): Game.AssertTickThread
         "M:Kiln.Content.Apply(System.String,System.String)", // Content.Apply(string, string?): via Content.ApplyAs(ulong, string, string)
@@ -264,6 +266,7 @@ internal static partial class KilnApis
         "M:Kiln.Creatures.RefreshCopies(Kiln.EntityId)", // Creatures.RefreshCopies(EntityId): via Creatures.Tick(string)
         "M:Kiln.Creatures.Spawn(System.String,Kiln.WorldPosition,System.Single,Kiln.CreatureSpawnOptions)", // Creatures.Spawn(string, WorldPosition, float, CreatureSpawnOptions?): Services.RequireTickThread
         "M:Kiln.Decisions.LabDecide(Kiln.EntityId,System.Nullable{System.Boolean})", // Decisions.LabDecide(EntityId, bool?): via DecisionBroker.LabDecide(EntityId, bool?, out int)
+        "M:Kiln.Decisions.ReevaluatePickup(Kiln.EntityId,Kiln.EntityId)", // Decisions.ReevaluatePickup(EntityId, EntityId): Services.RequireTickThread
         "M:Kiln.Dialogues.ApplyOption(Kiln.EntityId,Kiln.EntityId,System.String,System.String,System.Int32)", // Dialogues.ApplyOption(EntityId, EntityId, string, string, int): Game.AssertTickThread
         "M:Kiln.Dialogues.Choose(Kiln.QuestHolder,System.Int64,System.Int32)", // Dialogues.Choose(QuestHolder, long, int): Game.AssertTickThread
         "M:Kiln.Dialogues.Close(Kiln.QuestHolder)", // Dialogues.Close(QuestHolder): Game.AssertTickThread
@@ -391,6 +394,7 @@ internal static partial class KilnApis
         "M:Kiln.Items.MoveAll(Kiln.EntityId,Kiln.EntityId,Kiln.MoveOptions)", // Items.MoveAll(EntityId, EntityId, MoveOptions): via Items.SubmitMove(ItemsNative.MoveRequest, string, bool)
         "M:Kiln.Items.QuickStack(Kiln.EntityId,Kiln.EntityId,Kiln.MoveOptions)", // Items.QuickStack(EntityId, EntityId, MoveOptions): via Items.SubmitMove(ItemsNative.MoveRequest, string, bool)
         "M:Kiln.Items.Read(Kiln.EntityId)", // Items.Read(EntityId): via Items.Require(string)
+        "M:Kiln.Items.SetToolWearPerDebit(Kiln.ItemId,System.Int32)", // Items.SetToolWearPerDebit(ItemId, int): Services.RequireTickThread
         "M:Kiln.Items.Take(Kiln.EntityId,Kiln.ItemId,System.Int32,System.Nullable{Kiln.SlotId},System.Boolean,System.Nullable{Kiln.EntityId},System.Boolean)", // Items.Take(EntityId, ItemId, int, SlotId?, bool, EntityId?, bool): via Items.Submit(bool, ItemsNative.Request, string)
         "M:Kiln.Items.TakeSlot(Kiln.EntityId,Kiln.InventorySlot,System.Boolean)", // Items.TakeSlot(EntityId, InventorySlot, bool): via Items.Take(EntityId, ItemId, int, SlotId?, bool, EntityId?, bool)
         "M:Kiln.Items.Unequip(Kiln.EntityId,Kiln.EquipmentSlot,Kiln.EquipOptions)", // Items.Unequip(EntityId, EquipmentSlot, EquipOptions): Services.RequireTickThread
@@ -484,7 +488,7 @@ internal static partial class KilnApis
         "M:Kiln.Progression.Diagnostics.ProbeAttributes(System.Boolean,System.UInt32[],System.UInt32,System.UInt32)", // Progression.Diagnostics.ProbeAttributes(bool, uint[], uint, uint): Services.RequireTickThread
         "M:Kiln.Progression.Diagnostics.Simulate(System.Collections.Generic.IReadOnlyList{System.ValueTuple{Kiln.Progression.Diagnostics.SimOp,System.UInt32}})", // Progression.Diagnostics.Simulate(IReadOnlyList<(Progression.Diagnostics.SimOp Op, uint Node)>): Services.RequireTickThread
         "M:Kiln.Progression.UnlockedNodes(Kiln.EntityId)", // Progression.UnlockedNodes(EntityId): Services.RequireTickThread
-        "M:Kiln.Queries.CanReach(Kiln.QueryPathRequest,System.Threading.CancellationToken)", // Queries.CanReach(QueryPathRequest, CancellationToken): via Queries.Submit(QueryPathRequest, string, string)
+        "M:Kiln.Queries.CanReach(Kiln.QueryPathRequest,System.Threading.CancellationToken)", // Queries.CanReach(QueryPathRequest, CancellationToken): Services.RequireTickThread
         "M:Kiln.Queries.CancelPath(System.UInt64)", // Queries.CancelPath(ulong): Services.RequireTickThread
         "M:Kiln.Queries.EntitiesInBox(Kiln.WorldPosition,Kiln.WorldPosition,Kiln.EntityId,System.Int32)", // Queries.EntitiesInBox(WorldPosition, WorldPosition, EntityId, int): via Queries.Overlap(QueriesNative.EntityRequest, WorldPosition, int, string)
         "M:Kiln.Queries.EntitiesInSphere(Kiln.WorldPosition,System.Double,Kiln.EntityId,System.Int32)", // Queries.EntitiesInSphere(WorldPosition, double, EntityId, int): via Queries.Overlap(QueriesNative.EntityRequest, WorldPosition, int, string)
@@ -626,6 +630,7 @@ internal static partial class KilnApis
         "M:Kiln.Time.get_Weather", // Time.Weather.get: Services.RequireTickThread
         "M:Kiln.Time.get_WeatherPhenomena", // Time.WeatherPhenomena.get: Services.RequireTickThread
         "M:Kiln.Time.set_OfDay(System.Double)", // Time.OfDay.set: via Time.Set(double, TimeSetMode)
+        "M:Kiln.ToolWearRule.Dispose", // ToolWearRule.Dispose(): via Items.ToolWear.Remove(ToolWearRule, bool)
         "M:Kiln.Vfx.PlayAt(Kiln.VfxId,Kiln.WorldPosition,System.Nullable{System.Numerics.Quaternion},System.Single,Kiln.VfxParams,System.Nullable{System.TimeSpan},System.Single)", // Vfx.PlayAt(VfxId, WorldPosition, Quaternion?, float, VfxParams?, TimeSpan?, float): via VfxRelay.Play(byte, Guid, WorldPosition, Quaternion?, float, EntityId, Slot, Offset, long, VfxParams?, float, EntityId)
         "M:Kiln.Vfx.PlayFor(Kiln.EntityId,Kiln.VfxId,Kiln.WorldPosition,Kiln.VfxParams,System.Nullable{System.TimeSpan})", // Vfx.PlayFor(EntityId, VfxId, WorldPosition, VfxParams?, TimeSpan?): via VfxRelay.Play(byte, Guid, WorldPosition, Quaternion?, float, EntityId, Slot, Offset, long, VfxParams?, float, EntityId)
         "M:Kiln.Vfx.PlayOn(Kiln.VfxId,Kiln.EntityId,Kiln.Slot,Kiln.Offset,Kiln.VfxParams,System.Nullable{System.TimeSpan},System.Single)", // Vfx.PlayOn(VfxId, EntityId, Slot, Offset, VfxParams?, TimeSpan?, float): Services.RequireTickThread
@@ -771,7 +776,7 @@ internal static partial class KilnApis
         "P:Kiln.PlayerStates.Available=kiln.playerstate", // returns false first when the table of kiln.playerstate is null
         "P:Kiln.Players.Available=kiln.players", // T != null: Services.Get("kiln.players")
         "P:Kiln.Progression.Available=kiln.progression", // T != null: Services.Get("kiln.progression")
-        "P:Kiln.ReflectedResources.Available=kiln.assets,kiln.types", // via Kiln.GameTypes.Available; via Kiln.ResourceStore.Available
+        "P:Kiln.ReflectedResources.Available=assets.resources,kiln.assets,kiln.types", // via Kiln.GameTypes.Available; via Kiln.ResourceStore.Available
         "P:Kiln.Render.Available=kiln.ui", // via Kiln.UiNative.Available
         "P:Kiln.Rules.Available=kiln.rules", // RulesNative.T != null: Services.Get("kiln.rules")
         "P:Kiln.Saves.Available=kiln.saves", // SavesNative.T != null: Services.Get("kiln.saves")
@@ -830,5 +835,23 @@ internal static partial class KilnApis
         "Ui",
         "Vfx",
         "World",
+    };
+
+    /// <summary>Documentation ids of public members with a boot path of their own (`if (Game.InBoot) return ...`): they work
+    /// in Mod.OnBoot even when they need the tick thread otherwise, so KILN035 leaves them alone (KILN101 does not).</summary>
+    internal static readonly string[] BootWorks =
+    {
+        "M:Kiln.Config.Register``1(Kiln.ConfigKind,System.String)", // Config.Register<T>(ConfigKind, string?): if (Game.InBoot) return
+    };
+
+    /// <summary>Documentation ids of public members Kiln refuses in Mod.OnBoot (`if (Game.InBoot) throw ...`, directly or
+    /// through a call): KILN035 in boot code, whichever thread they otherwise allow.</summary>
+    internal static readonly string[] BootRefused =
+    {
+        "M:Kiln.ConfigFile.Reload", // ConfigFile.Reload(): if (Game.InBoot) throw
+        "M:Kiln.ConfigFile.Save", // ConfigFile.Save(): if (Game.InBoot) throw
+        "M:Kiln.ConfigFile.Set(System.String,System.Object)", // ConfigFile.Set(string, object?): if (Game.InBoot) throw
+        "M:Kiln.ConfigFile.TrySet(System.String,System.Object,System.String@)", // ConfigFile.TrySet(string, object?, out string): if (Game.InBoot) throw
+        "M:Kiln.ConfigFile.add_Changed(System.Action{Kiln.ConfigChangedEvent})", // ConfigFile.Changed.add: if (Game.InBoot) throw
     };
 }

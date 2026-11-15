@@ -4,7 +4,8 @@
 //   src/pages/servers/ServerLayout.tsx  default export: a layout with <Outlet/> around every /servers/:id/* page
 //   src/pages/servers/ModpackOffer.tsx  default export: the modpack consent modal Play opens (see PlayPage)
 import { lazy, Suspense, type ComponentType } from "react";
-import { Navigate, Outlet, Route, Routes } from "react-router-dom";
+import { Navigate, Outlet, Route, Routes, useParams } from "react-router-dom";
+import { ADMIN_MERGED } from "./shell/serverNav";
 import { AppShell } from "./shell/AppShell";
 import { NotFound } from "./shell/NotFound";
 import { ServersIndex } from "./shell/ServersIndex";
@@ -46,6 +47,12 @@ const slot = (name: string, fallback: ComponentType): ComponentType => {
   const load = slots[`./pages/servers/${name}.tsx`];
   return load ? lazy(load) : fallback;
 };
+/** An old admin route of a server merged into one of the server's own pages (ADMIN_MERGED). */
+function ServerRedirect({ to }: { to: string }) {
+  const { id = "" } = useParams();
+  return <Navigate to={`/servers/${encodeURIComponent(id)}/${to}`} replace />;
+}
+
 const ServersPage = slot("ServersPage", ServersIndex);
 const ServerLayout = slot("ServerLayout", Outlet);
 
@@ -74,6 +81,8 @@ export default function App() {
         <Route path="settings" element={<SettingsPage />} />
         <Route path="about" element={<AboutPage />} />
         <Route path="servers" element={<ServersPage />} />
+        {/* outside the server's layout and the lazy admin pages: the redirect is the router's alone */}
+        {ADMIN_MERGED.map(([from, to]) => <Route key={from} path={`servers/:id/admin/${from}`} element={<ServerRedirect to={to} />} />)}
         <Route path="servers/:id" element={<ServerLayout />}>
           <Route index element={<Navigate to="overview" replace />} />
           <Route path="overview" element={<ServerOverviewPage />} />

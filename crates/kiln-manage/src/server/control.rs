@@ -48,13 +48,13 @@ fn save_engine_copies(server: &Path, copies: &EngineCopies) -> Result<()> {
     std::fs::rename(&tmp, &file).map_err(crate::util::io_at(&file, "saving receipt"))
 }
 
-fn server_library_lock(server: &Path) -> Result<std::fs::File> {
+fn server_library_lock(server: &Path) -> Result<crate::util::LockedFile> {
     let path = server.join("kiln/state/server-library.lock");
     crate::engine_mods::refuse_symlink_path(server, &path)?;
     std::fs::create_dir_all(path.parent().expect("lock parent"))?;
     let file = std::fs::OpenOptions::new().create(true).truncate(false).read(true).write(true).open(path)?;
     file.lock()?;
-    Ok(file)
+    Ok(crate::util::LockedFile(file))
 }
 
 // Include hidden files and empty directories too. SF's mutable setting values and enabled switch are omitted.

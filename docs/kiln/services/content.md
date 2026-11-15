@@ -140,6 +140,18 @@ c->subscribe_ready(owner, on_content_ready, NULL, &handle);   /* tick thread, af
 `reset`, `stacks` / `set_stacks`, `apply_json`, `revert_owner`, `dump`, `reload_packs`, `report`, `subscribe_ready` /
 `unsubscribe_ready`, `stack_guard`, `label_owner`, `pack_mods`. Every field: the header.
 
+**Content transactions** (appended to the table in 0.2.0-dev.28; check `header.size`): `txn_begin(owner, &txn)` sets
+every layer of one owner aside; what the owner then applies (`apply_json`, `set`, `reset`) can be kept with
+`txn_end(txn, 0, ...)` or taken back whole with `txn_end(txn, 1, ...)`. A rollback puts the owner's layers back exactly
+as they were (layers written since come off, layers taken off come back in their order, with the sequence and program
+ids that follow a reference), writes them, and reads every touched field back from memory. When one does not read
+back, every layer of the owner is taken off (as `revert_owner`, fail closed) and the result is `KILN_ERR_REVOKED`. The
+report is `{"outcome": "committed" | "restored" | "revoked" | "cancelled", "fields": n, "error"?}`; `cancelled`
+(`KILN_ERR_NOT_FOUND`) means the owner's layers were taken off while it was open (revert, the owner going, the world's
+reset), so nothing is put back. One open transaction per owner, at most 64 open, tick thread. Field rules only: a
+document's `add` lists, drop rules, options and other services' sections are not covered. Kiln.Blocks' routed weapons
+use it (item-blocks.md, "Follow-ups"); mods do not call it. Host test: `native/services/content/tests/txn_test.sh`.
+
 ## How it runs
 - At boot: symbols, the DefaultInventoryAcquire hook (drop tables). In Pre, every 4 steps until ready: the world's
   `g38_items::ItemRegistry` is done loading (`+0x320` = 0, count stable), the recipe resource is in; then layouts from
@@ -365,6 +377,19 @@ if (c->header.version >= 3 &&
 c->definitions(buf, cap, &len);   /* JSON array: kind, guid, id, name, base, owner, source, state, worlds, … */
 ```
 `define` / `definitions` work from any thread.
+
+### Boot generations (since 0.2.0-dev.28)
+With a boot mod on a dedicated server ([../modding/onboot.md](../modding/onboot.md)) kiln.content runs two of kiln.boot's
+collectors; both prepare before the game's entry point:
+- **`content`** takes the documents Kiln.Blocks lowered from the boot mods' staged definitions: `define` (a new item
+  or recipe, the JSON of `NewContent`) and `clone` (a template, sequence, perk or buff clone). Each is defined under
+  the mod's process owner (`boot:<mod>`) with the GUIDs a runtime `Define` gives, and reaches the game as any
+  definition does (below). A definition it refuses leaves the whole mod out; if the
+  generation is not published, every definition of it is taken out again. kiln.content reads no definition files of
+  its own at boot, so this collector has nothing to prepare without such documents; data packs and pack documents are
+  applied at world load as before.
+- **`patches`**, the last collector, checks the boot mods' resource patches (from `blocks/*.json` and from `OnBoot`)
+  and writes them when the game's resource service comes up ([../modding/resource-patches.md](../modding/resource-patches.md)).
 
 ### Lifecycle
 - **Registration time**: a definition made before the world loads waits; when a world's item and recipe registries

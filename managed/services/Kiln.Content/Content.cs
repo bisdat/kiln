@@ -148,7 +148,11 @@ public static unsafe partial class Content
         ApplyAs(Owner(), json, source ?? $"mod {ModContext.CurrentMod!.Info.Id}");
 
     /// <summary>Applies a data-pack document as a given owner's layers (Kiln.Blocks: a data-only mod's blocks).</summary>
-    internal static ContentReport ApplyAs(ulong owner, string json, string src)
+    internal static ContentReport ApplyAs(ulong owner, string json, string src) => ApplyAs(owner, json, src, notify: true);
+
+    /// <summary>As <see cref="ApplyAs(ulong, string, string)"/>; <paramref name="notify"/> false: no <see cref="ContentChangedEvent"/> now
+    /// (an open <see cref="ContentTransaction"/> posts one when it commits).</summary>
+    internal static ContentReport ApplyAs(ulong owner, string json, string src, bool notify)
     {
         var t = Require("Content.Apply");
         // Applying twice is not the same as applying once, so the report gets one chance: room for a thousand errors. Most reports are short, and the buffer is shared.
@@ -173,7 +177,7 @@ public static unsafe partial class Content
         var report = ParseReport(text, rc == ContentNative.InvalidArgument ? "not a data-pack document (JSON object)" : null,
             cut: len >= cap);
         // native says Ok also for a document whose every section was refused: an event only when something changed
-        if (rc == ContentNative.Ok && report.Applied > 0) Changed(ContentChange.Applied, null, src);
+        if (notify && rc == ContentNative.Ok && report.Applied > 0) Changed(ContentChange.Applied, null, src);
         return report;
     }
 

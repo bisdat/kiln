@@ -197,6 +197,7 @@ void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
     try {
         selftest_pre(tick ? tick->step : g_steps);
         if (g_steps % 24 == 0) regions_flush();
+        transient_pre(g_steps);
     } catch (...) {
     }
 }
