@@ -659,18 +659,16 @@ fn game_rel(game: &Path, copy: &Path) -> Option<String> {
     (!rel.is_empty() && crate::bundle::safe_rel_path(&rel).is_ok()).then_some(rel)
 }
 
-/// What a settings copy never holds and a restore never writes: anything but a settings file or a log (`txt`, `ini`,
-/// `cfg`, `json`, `toml`, `yaml`, `yml`, `log`: the extensions `engine_mods::is_game_settings_file` calls settings, and
-/// logs, in which mods keep data too: The Worst Map Mod's `unlock_map_markers.log`, Creative Mode's `logs/`), Lua and
+/// What a settings copy never holds and a restore never writes: anything but a settings file or a log (by its
+/// extension, [`crate::settings_files`]: the list placement calls settings, and logs, in which mods keep data too), Lua and
 /// everything under `src/`, the manifests at the top of a copy (`mod.json`, `kiln.mod.json`, `native.json`,
 /// `flame.json`, `pack.toml`, `init.lua`, `extended.mod.json`, `native-plugin.ini`, `shroudtopia.json`: the Library's
 /// files, which placement treats as code), Kiln's marker and temporary files. Unknown extensions (scripts, DLLs, data
 /// of unknown kind) are never restored: they stay as the newer version left them.
 fn not_settings(rel: &str) -> bool {
     let low = rel.to_ascii_lowercase();
-    let ext = low.rsplit_once('.').map(|(_, x)| x).unwrap_or("");
     let top = !low.contains('/');
-    low.starts_with("src/") || !matches!(ext, "txt" | "ini" | "cfg" | "json" | "toml" | "yaml" | "yml" | "log")
+    low.starts_with("src/") || !(crate::settings_files::is_settings_extension(&low) || crate::settings_files::is_log(&low))
         || (top && (matches!(low.as_str(), "mod.json" | "kiln.mod.json" | "native.json" | "flame.json" | "pack.toml" | "init.lua"
             | "extended.mod.json" | "native-plugin.ini" | "shroudtopia.json") || low.starts_with(crate::engine_mods::MARKER)))
         || low.ends_with(".kiln-tmp")
@@ -1207,6 +1205,18 @@ mod tests {
         }
         for rel in ["native-plugin.ini", "XHL-Auto-Loot.dll", "src/autosmash_program.lua", "mod.json", "flame.json", "creative.dll",
                     "kiln.mod.json", "native.json", "pack.toml", "shroudtopia.json", "cache.dat", "save.bin"] {
+            assert!(not_settings(rel), "{rel}");
+        }
+    }
+
+    /// A kept version holds exactly the settings files of the one list (and logs), in any folder of the copy.
+    #[test]
+    fn kept_settings_follow_the_one_list() {
+        for ext in crate::settings_files::SETTINGS_EXTENSIONS.iter().chain(&crate::settings_files::LOG_EXTENSIONS) {
+            assert!(!not_settings(&format!("data/x.{ext}")), "{ext}");
+            assert!(!not_settings(&format!("X.{}", ext.to_ascii_uppercase())), "{ext}");
+        }
+        for rel in ["x.bat", "x.cmd", "x.ps1", "x.sh", "x.dll", "x.exe", "x.asi", "x.lua", "x.dat", "x"] {
             assert!(not_settings(rel), "{rel}");
         }
     }

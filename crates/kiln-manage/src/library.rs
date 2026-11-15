@@ -750,8 +750,7 @@ fn only_settings(dir: &Path) -> bool {
         let low = e.file_name().to_string_lossy().to_ascii_lowercase();
         if low.starts_with('.') { continue; }
         if MOD_MANIFESTS.contains(&low.as_str()) { return false; }
-        let ext = low.rsplit_once('.').map(|(_, x)| x).unwrap_or("");
-        if !e.path().is_file() || !matches!(ext, "txt" | "ini" | "cfg" | "json" | "toml" | "yaml" | "yml") { return false; }
+        if !e.path().is_file() || !crate::settings_files::is_settings_extension(&low) { return false; }
         any = true;
     }
     any

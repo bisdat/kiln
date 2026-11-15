@@ -2621,9 +2621,8 @@ fn is_game_code(rel: &str) -> bool {
 /// A file a mod's DLL (or the player) may have written as settings: not the manifest, the Lua, code or the plugin ini.
 fn is_game_settings_file(rel: &str) -> bool {
     let low = rel.to_ascii_lowercase();
-    let ext = low.rsplit_once('.').map(|(_, x)| x).unwrap_or("");
     !(low == "mod.json" || low == MARKER || low == XHL_PLUGIN_INI || low.starts_with("src/"))
-        && matches!(ext, "txt" | "ini" | "cfg" | "json" | "toml" | "yaml" | "yml")
+        && crate::settings_files::is_settings_extension(&low)
 }
 
 fn read_settings(dir: &Path, changed: &[String]) -> Result<Vec<(String, Vec<u8>)>> {
