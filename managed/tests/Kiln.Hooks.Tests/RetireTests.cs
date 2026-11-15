@@ -118,18 +118,19 @@ public sealed class RetireTests : IDisposable
             handler.Start();
             Assert.True(entered.Wait(TimeSpan.FromSeconds(5)));
 
-            var sawRevoke = false;
+            var sawUnload = false;
             FakeRegistry.DuringRevokeOwner = revoking.Set;
             FakeRegistry.DuringInstall = () =>
             {
                 FakeRegistry.DuringInstall = null;
                 retire = new Thread(() => TestMods.Retire(mod));
                 retire.Start();
-                sawRevoke = revoking.Wait(TimeSpan.FromSeconds(5));
+                sawUnload = SpinWait.SpinUntil(() => TestMods.IsUnloading(mod), 5000);
             };
             Assert.Throws<InvalidOperationException>(() => TestMods.As(mod,
                 () => HooksApi.Detour(Address + 16, PassThrough)));
-            Assert.True(sawRevoke);
+            Assert.True(sawUnload);
+            Assert.True(revoking.Wait(TimeSpan.FromSeconds(5)));
             Assert.True(SpinWait.SpinUntil(() => !HooksApi.Detours.Values.Any(r => r.Mod == mod), 5000));
             // Forget has run, but the second handler still owns the original tracker's InFlight count.
             Assert.False(retire!.Join(100), "retire skipped the in-flight handler drain");
@@ -161,15 +162,14 @@ public sealed class RetireTests : IDisposable
         FakeRegistry.DuringInstall = () =>
         {
             FakeRegistry.DuringInstall = null;
-            // the unload runs on the tick thread while another thread of the mod is inside Hooks.Detour; wait until it
-            // has marked the context retired (its Kiln.Hooks cleanup then waits for this install to finish)
+            // Admission closes before retirement now; Forget waits for this native install to finish.
             retire = new Thread(() => TestMods.Retire(mod));
             retire.Start();
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            while (TestMods.IsAlive(mod) && sw.ElapsedMilliseconds < 5000) Thread.Yield();
+            while (!TestMods.IsUnloading(mod) && sw.ElapsedMilliseconds < 5000) Thread.Yield();
         };
         var e = Assert.Throws<InvalidOperationException>(() => TestMods.As(mod, () => HooksApi.Detour(Address, PassThrough)));
-        Assert.Contains("has unloaded", e.Message);
+        Assert.Contains("unloading", e.Message);
         Assert.True(retire!.Join(5000));
         AssertNothingLeft(mod);
     }

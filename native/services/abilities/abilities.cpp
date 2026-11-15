@@ -1921,6 +1921,13 @@ void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
             logw("kiln.abilities: the server world stops with %u Kiln native call(s) inside: bindings and sets stay until "
                  "they leave", n);
         else logi("kiln.abilities: the server world stops with no Kiln native call inside");
+        // Jobs have drained: no final-step event may be delivered in the next world. Do not nest this lock with g_mu
+        // (managed-call producers can enqueue while holding g_mu).
+        {
+            std::lock_guard event_lock(g_ev_mu);
+            g_events.clear();
+        }
+        g_batch.clear();
         holds_clear();
         g_ecs.store(nullptr, std::memory_order_release);  // the next world gets a view of its own
         g_ecs_state.store(KILN_NATIVE_ECS_PENDING);

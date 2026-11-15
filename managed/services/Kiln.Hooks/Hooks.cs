@@ -238,7 +238,7 @@ public static unsafe class Hooks
     {
         lock (HooksGate.Lifecycle)
         {
-            if (!mod.Alive) throw HooksGate.Retired(api, mod);
+            HooksGate.RequireOpen(api, mod);
             var inFlight = HooksGate.Current(mod).InFlight;  // joins the context's cleanups (Track)
             // The cookie is the native link's user pointer. The same mod re-installing on the same address gets a cookie
             // a revoked link of it already carries, so the registry revives that link instead of taking a new slot.
@@ -254,13 +254,13 @@ public static unsafe class Hooks
                 return (null, rc);
             }
             reg.Native = native;
-            if (!mod.Alive)
+            if (!mod.Alive || mod.Unloading)
             {
                 Drop(reg);
                 if (HooksNative.T != null) HooksNative.T->Revoke(native);
                 HookCookies.Return(cookie);
                 HooksGate.Untrack(mod);
-                throw HooksGate.Retired(api, mod);
+                throw !mod.Alive ? HooksGate.Retired(api, mod) : HooksGate.Unloading(api, mod);
             }
             return (new HookHandle(cookie, native, reg.Install), HooksNative.Ok);
         }

@@ -180,6 +180,46 @@ public sealed unsafe class EcsProgramsClientTests : KilnTest
         Assert.Contains("\"world\": \"prediction\"", wrong.Reason);
     }
 
+    [Theory]
+    [InlineData(WorldKind.Client, "pin")]
+    [InlineData(WorldKind.Prediction, "predicted")]
+    [InlineData(WorldKind.Server, "server_only")]
+    public void Declared_access_uses_the_program_slot_while_state_and_unbind_keep_the_binding_handle(WorldKind world, string key)
+    {
+        var mod = NewMod("pinner");
+        ulong previous = 0;
+        for (var generation = 0; generation < 2; ++generation)
+        {
+            var completed = 0;
+            var result = As(mod, () => EcsPrograms.TryBind(key, c =>
+            {
+                // No managed slot-cache seeding: this crosses the real Resolve -> ProgramSlot boundary.
+                Assert.Equal(world == WorldKind.Server, c.TryWriteOther(new EntityId(7), "Health", 23));
+                completed++;
+            }, world));
+            Assert.True(result.Ok, result.Reason);
+            var binding = (EcsPrograms.Binding)result.Handle!;
+            var fullHandle = binding.Handle;
+            if (world != WorldKind.Server)
+            {
+                Assert.True(fullHandle > 64);
+                Assert.NotEqual(previous, fullHandle);
+                Assert.Equal(1, binding.WorldState().State);  // must still use the encoded handle
+            }
+            _native.SlotHandles.Clear();
+            _native.Run(key);
+            _native.Run(key);
+            Assert.Equal(2, completed);  // an undeclared-access exception would permanently fault the callback
+            Assert.False(binding.Failed);
+            Assert.Equal([FakeClientWorld.ProgramSlots[key]], _native.SlotHandles);  // resolved once, then cached
+            binding.Dispose();  // fake unbind accepts only the original full handle
+            Assert.False(_native.Bound.ContainsKey(key));
+            Assert.False(binding.Root.IsAllocated);
+            previous = fullHandle;
+            _native.Session += 2;  // leave/rejoin, then bind again with a fresh generation
+        }
+    }
+
     [Fact]
     public void Off_where_the_row_is_off_and_on_an_older_kiln_world()
     {
@@ -505,7 +545,10 @@ public sealed unsafe class EcsProgramsClientTests : KilnTest
         internal string? Latched;  // kiln.world's process latch: binds answer KILN_ERR_UNAVAILABLE, handle 0's state REFUSED
         internal ulong Session = 2;
         internal int Unbinds;
-        private ulong _next = 0x1000;
+        private ulong _next;
+        internal readonly List<ulong> SlotHandles = [];
+        internal static readonly Dictionary<string, ulong> ProgramSlots =
+            new() { ["pin"] = 1, ["lacking"] = 2, ["predicted"] = 3, ["server_only"] = 4 };
 
         // (key, world) pairs kiln.world reserved at boot
         private static readonly HashSet<(string, uint)> Reserved =
@@ -560,7 +603,13 @@ public sealed unsafe class EcsProgramsClientTests : KilnTest
         private static ulong WorldSession(uint kind) => kind == 2 ? Current!.Session : 0;
 
         [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-        private static int Slot(ulong handle, int kind, NativeStr name) => (kind, name.ToString()) switch { (6, "Health") => 1, _ => -1 };
+        private static int Slot(ulong handle, int kind, NativeStr name)
+        {
+            Current!.SlotHandles.Add(handle);
+            // Production by_handle accepts only a registered program's slot+1, never a world binding handle.
+            if (handle == 0 || handle > (ulong)ProgramSlots.Count) return -1;
+            return (kind, name.ToString()) switch { (6, "Health") => 1, _ => -1 };
+        }
 
         [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
         private static void* WriteOther(void* ctx, ulong accessor, uint entity, uint* size)
@@ -579,7 +628,7 @@ public sealed unsafe class EcsProgramsClientTests : KilnTest
             if (self.Bound.ContainsKey(k)) return 1;
             self.Bound[k] = ((nint)each, (nint)user);
             self.BoundWorld[k] = 0;
-            *handle = ++self._next;
+            *handle = ProgramSlots[k];
             self._handles[*handle] = k;
             return 0;
         }
@@ -606,7 +655,7 @@ public sealed unsafe class EcsProgramsClientTests : KilnTest
             if (each == null || update != null) return 1;
             self.Bound[k] = ((nint)each, (nint)user);
             self.BoundWorld[k] = kind;
-            *handle = (++self._next << 12) | ((ulong)kind << 8) | 1;
+            *handle = (++self._next << 12) | ((ulong)kind << 8) | ProgramSlots[k];
             self._handles[*handle] = k;
             return 0;
         }
