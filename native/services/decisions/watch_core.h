@@ -581,12 +581,67 @@ public:
         tokens_in_interval_ = 0;
         for (auto& [id, pr] : next) tokens_in_interval_ += pr.tokens.size();
         pairs_ = std::move(next);
+        // A linked life lasts only while at least one ready watch reaches it.
+        std::erase_if(linked_, [&](const auto& entry) {
+            for (uint32_t c : {KILN_WATCH_FUEL, KILN_WATCH_INVENTORY}) {
+                const auto at = pairs_.find(pair_id(entry.first, c));
+                if (at != pairs_.end() && at->second.key.life_serial == entry.second.serial) return false;
+            }
+            return true;
+        });
         present_ = present;
     }
 
     void window_end(uint64_t epoch, uint64_t step) {
         std::lock_guard lock(m_);
         if (!on() || stopped() || epoch != epoch_) return;
+        // Components absent at the last compare can appear during Sim. Enforce the
+        // present-pair budget before emitting their first change, not one window later.
+        uint32_t present_upper = 0;
+        uint8_t probe[KILN_WATCH_MAX_BYTES];
+        for (const auto& [id, pr] : pairs_) {
+            uint32_t size = 0;
+            if (pr.present || (p_->read(pr.key.entity, pr.component, probe, &size) && size >= 1 && size <= KILN_WATCH_MAX_BYTES))
+                ++present_upper;
+        }
+        if (present_upper > KILN_WATCH_MAX_PAIRS) {
+            // Account for components that disappeared too, so an exchange at the bound fits.
+            std::unordered_set<uint64_t> live;
+            for (const auto& [id, pr] : pairs_) {
+                uint32_t size = 0;
+                if (p_->read(pr.key.entity, pr.component, probe, &size) && size >= 1 && size <= KILN_WATCH_MAX_BYTES) live.insert(id);
+            }
+            std::unordered_set<uint64_t> accepted;
+            for (Watch& w : watches_) {
+                if (w.status != KILN_WATCH_READY) continue;
+                std::vector<uint64_t> added;
+                for (const auto& [id, pr] : pairs_)
+                    if (live.count(id) && !accepted.count(id) &&
+                        std::find(pr.watches.begin(), pr.watches.end(), w.id) != pr.watches.end()) added.push_back(id);
+                if (accepted.size() + added.size() > KILN_WATCH_MAX_PAIRS)
+                    suspend(w, KILN_WATCH_SUSPENDED_BUDGET, "it would take the watched pairs past 4096");
+                else accepted.insert(added.begin(), added.end());
+            }
+        }
+        // A root can be destroyed and its id reused inside Sim, after window_begin checked it.
+        // Never label the replacement's bytes with the old life. An absent root can still
+        // report its component disappearing; a live root without matching identity cannot.
+        for (const auto& [id, pr] : pairs_) {
+            if (pr.key.life_serial & kLinkedSerialBit) continue;
+            KilnEventEntityKey key{};
+            bool exists = false;
+            const bool known = p_->key(pr.key.entity, &key, &exists);
+            if (!exists || (known && same_life(key, pr.key))) continue;
+            for (uint64_t wid : pr.watches)
+                if (Watch* w = find(wid); w && w->status == KILN_WATCH_READY)
+                    suspend(*w, KILN_WATCH_SUSPENDED_METADATA, "entity " + std::to_string(pr.key.entity) +
+                            " is another entity now (or has no identity)");
+        }
+        auto inactive = [&](uint64_t wid) { const Watch* w = find(wid); return !w || w->status != KILN_WATCH_READY; };
+        for (auto& [id, pr] : pairs_)
+            std::erase_if(pr.watches, inactive);
+        for (Change& c : pending_) std::erase_if(c.watches, inactive);
+        std::erase_if(pending_, [](const Change& c) { return c.watches.empty(); });
         const bool lost = lost_.exchange(false);
         std::vector<Change> frame = std::move(pending_);
         pending_.clear();
@@ -990,8 +1045,6 @@ private:
             }
             if (want.present) ++plan->present;
         }
-        // linked lives not reached any more are forgotten: a return later is a new life
-        for (auto it = linked_.begin(); it != linked_.end();) it = it->second.seen + 2 < step ? linked_.erase(it) : std::next(it);
         return true;
     }
     static void add(Plan* plan, const KilnEventEntityKey& key, uint32_t component, uint32_t root) {
@@ -1144,8 +1197,14 @@ private:
             if (b == 0) return false;
             const size_t len = b < 0x80 ? 1 : (b >> 5) == 6 ? 2 : (b >> 4) == 14 ? 3 : (b >> 3) == 30 ? 4 : 0;
             if (len == 0 || i + len > n) return false;
-            for (size_t k = 1; k < len; ++k)
-                if ((static_cast<uint8_t>(s[i + k]) >> 6) != 2) return false;
+            uint32_t scalar = b & (len == 1 ? 0x7fu : len == 2 ? 0x1fu : len == 3 ? 0x0fu : 0x07u);
+            for (size_t k = 1; k < len; ++k) {
+                const auto next = static_cast<uint8_t>(s[i + k]);
+                if ((next >> 6) != 2) return false;
+                scalar = (scalar << 6) | (next & 0x3f);
+            }
+            if ((len == 2 && scalar < 0x80) || (len == 3 && scalar < 0x800) || (len == 4 && scalar < 0x10000) ||
+                scalar > 0x10ffff || (scalar >= 0xd800 && scalar <= 0xdfff)) return false;
             i += len;
         }
         return true;

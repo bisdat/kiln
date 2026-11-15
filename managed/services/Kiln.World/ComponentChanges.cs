@@ -189,7 +189,8 @@ public sealed class ComponentWatch : IDisposable
 /// <summary>A watched component changed (<see cref="ComponentChanges.Watch"/>): its bytes before and after the step's
 /// interval (from one compare to the next: the simulation and the Post and Pre around it), posted in the next Pre.
 /// A net change: a value that changed and came back inside one interval raises nothing. One event per entity and
-/// component, whatever number of watches cover it. Handlers only ever see pairs some watch covers; subscribing alone
+/// component per compare interval, whatever number of watches cover it. Adding an overlapping watch can split a step
+/// into two intervals with different baselines and watch ids. Handlers only ever see pairs some watch covers; subscribing alone
 /// watches nothing. Since 0.2.0-dev.29.</summary>
 [ServerOnly, TickThreadOnly]
 public sealed class ComponentValueChangedEvent : KilnEvent, IEntityEvent
@@ -228,10 +229,10 @@ public sealed class ComponentValueChangedEvent : KilnEvent, IEntityEvent
     /// <summary>The component's short name: Health, Stamina, Mana, Fuel, Inventory or SlotSelection.</summary>
     public string Component { get; }
 
-    /// <summary>The bytes before (a copy); empty when the component was absent.</summary>
+    /// <summary>The bytes before (a copy); empty when the component was absent or larger than 256 bytes.</summary>
     public ReadOnlyMemory<byte> Before { get; }
 
-    /// <summary>The bytes after (a copy); empty when the component is absent now.</summary>
+    /// <summary>The bytes after (a copy); empty when the component is absent now or larger than 256 bytes.</summary>
     public ReadOnlyMemory<byte> After { get; }
 
     /// <summary>The step whose compare saw it.</summary>
@@ -241,7 +242,7 @@ public sealed class ComponentValueChangedEvent : KilnEvent, IEntityEvent
     public ChangeOrigin Origin { get; }
 
     /// <summary>The reporting sources (a mod's id, or a Kiln service such as <c>kiln.combat</c>), several joined by
-    /// <c>", "</c>; null when none reported.</summary>
+    /// <c>", "</c>; the native list may be truncated to 127 bytes; null when none reported.</summary>
     public string? SourceMod { get; }
 
     /// <summary>The operation tokens of the writes Kiln's writers reported in the interval (at most 32).</summary>
@@ -367,6 +368,7 @@ public static unsafe class ComponentChanges
         var watch = new ComponentWatch(st.WatchId, owner, mod, request, (int)st.Pairs);
         watch.Update(st.Status, null, st.LastCompleteStep, (int)st.Pairs);
         Registry[watch.Id] = watch;
+        Interlocked.Increment(ref _watchCount);
         if (mod is not null)
             lock (Mods)
                 if (Mods.Add(mod)) mod.Retiring += () => Release(mod);
@@ -461,6 +463,7 @@ public static unsafe class ComponentChanges
     private static ulong _owner;
     private static bool _attached;
     private static int _registered;
+    private static int _watchCount;
     private static IDisposable? _tick;
     private static int _tickGeneration = -1;
     private static ulong _deliveredBatch;
@@ -491,6 +494,7 @@ public static unsafe class ComponentChanges
                 _owner = 0;
                 _attached = false;
                 _deliveredBatch = 0;
+                Interlocked.Exchange(ref _watchCount, 0);
                 Registry.Clear();  // the watches of another process (a test's last harness)
                 lock (Mods) Mods.Clear();
             }
@@ -567,7 +571,7 @@ public static unsafe class ComponentChanges
 
     internal static void Forget(ComponentWatch watch, bool remove)
     {
-        Registry.TryRemove(watch.Id, out _);
+        if (Registry.TryRemove(watch.Id, out _)) Interlocked.Decrement(ref _watchCount);
         if (!remove) return;
         var t = (ComponentChangesNative.Table*)Volatile.Read(ref _table);
         if (t != null) t->Remove(watch.Owner, watch.Id);  // any thread: it only takes the service's lock
@@ -579,7 +583,7 @@ public static unsafe class ComponentChanges
     /// while no watch exists.</summary>
     internal static void Pump(ulong step)
     {
-        if (Registry.IsEmpty && _deliveredBatch == 0) return;
+        if (!Watching && _deliveredBatch == 0) return;
         var t = Table();
         if (t == null || !Bind(t)) return;
         Poll(t);
@@ -599,7 +603,7 @@ public static unsafe class ComponentChanges
                 : rc == ComponentChangesNative.NotFound ? "the watch ended" : ComponentChangesNative.Text(st.Reason, 192);
             if (w.Update(st.Status, reason, st.LastCompleteStep, (int)st.Pairs) && Events.HasSubscribers<ComponentWatchStateChangedEvent>())
                 Events.Post(new ComponentWatchStateChangedEvent(w.Id, (ComponentWatchState)st.Status, reason, st.LastCompleteStep));
-            if (st.Status == (uint)ComponentWatchState.Disposed) Registry.TryRemove(w.Id, out _);
+            if (st.Status == (uint)ComponentWatchState.Disposed) Forget(w, remove: false);
         }
     }
 
@@ -631,12 +635,12 @@ public static unsafe class ComponentChanges
         if (t->AckEvents(_owner, batch) == ComponentChangesNative.Ok) _deliveredBatch = 0;
     }
 
-    private static void Post(ComponentChangesNative.Change* r, bool raw, bool typed)
+    internal static void Post(ComponentChangesNative.Change* r, bool raw, bool typed)
     {
         var e = ToEvent(r);
         if (e is null) return;
         if (raw) Events.Post(e);
-        if (typed && r->Attribute is >= 1 and <= 4 && (r->ValueBefore != r->ValueAfter || r->MaximumBefore != r->MaximumAfter))
+        if (typed && r->Size >= ComponentChangesNative.TypedEnd && r->Attribute is >= 1 and <= 4 && (r->ValueBefore != r->ValueAfter || r->MaximumBefore != r->MaximumAfter))
             Events.Post(new AttributeValueChangedEvent(e, (ObservedAttribute)r->Attribute, r->ValueBefore, r->ValueAfter, r->MaximumBefore,
                 r->MaximumAfter));
     }
@@ -658,15 +662,15 @@ public static unsafe class ComponentChanges
 
     // ----------------------------------------------------------------------------------- what Kiln's writers tell ----
 
-    /// <summary>Whether any watch exists in this process (any thread, lock free): Kiln's managed writers keep the bytes
+    /// <summary>Whether any managed watch exists in this process (any thread, lock free): Kiln's managed writers keep the bytes
     /// a watch needs only then.</summary>
-    internal static bool Watching => !Registry.IsEmpty;
+    internal static bool Watching => Volatile.Read(ref _watchCount) > 0;
 
     /// <summary>A program wrap's stage changed a component through an entity view (Kiln.Systems): the whole component
     /// before and after, the wrap's mod. Any thread (slice threads, workers too); cheap when nothing is watched.</summary>
     internal static void NoteWrapWrite(uint entity, string component, ReadOnlySpan<byte> before, ReadOnlySpan<byte> after, string modId)
     {
-        if (Registry.IsEmpty) return;
+        if (!Watching) return;
         var t = (ComponentChangesNative.Table*)Volatile.Read(ref _table);
         var owner = _owner;
         if (t == null || owner == 0 || before.Length != after.Length || before.Length is 0 or > 256 || string.IsNullOrEmpty(modId)) return;
@@ -735,6 +739,7 @@ public static unsafe class ComponentChanges
             _tick = null;
             _tickGeneration = -1;
             Registry.Clear();
+            Interlocked.Exchange(ref _watchCount, 0);
             lock (Mods) Mods.Clear();
         }
     }
@@ -748,6 +753,7 @@ internal static unsafe class ComponentChangesNative
     public const uint Version = 1;
     public const int Ok = 0, InvalidArgument = 1, NotFound = 2, Unavailable = 3, WrongThread = 4, BufferTooSmall = 5;
     public const int MaxWatches = 32, MaxPairs = 4096, MaxRoots = 128;
+    public const uint TypedEnd = 1792; // end of the appended typed values, before SinceStep
     public const uint ChangeV1Size = 1768;  // the S1 prefix; the service writes 1808 (the appended fields)
     public static readonly uint V1Size = (uint)(sizeof(ServiceHeader) + 13 * sizeof(nint));
     public static readonly uint CountersEnd = (uint)(sizeof(ServiceHeader) + 16 * sizeof(nint));

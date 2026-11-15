@@ -552,6 +552,101 @@ static void test_lives() {
     CHECK(status_of(g, gid, &st) == KILN_WATCH_SUSPENDED_METADATA && std::strstr(st.reason, "gone"));
 }
 
+static void test_tree_exact_bounds() {
+    World w;
+    std::vector<uint32_t> leaves;
+    std::string why;
+    w.link(1, {{2, 5}}); w.link(2, {{3, 5}}); w.link(3, {{4, 5}}); w.link(4, {{5, 4}});
+    CHECK(walk_tree(w, 1, &leaves, &why) && leaves.size() == 1); // depth exactly 3
+    std::vector<std::pair<uint32_t, uint8_t>> root;
+    uint32_t id = 100;
+    for (uint32_t k = 0; k < 16; ++k) {
+        root.push_back({10 + k, 5});
+        std::vector<std::pair<uint32_t, uint8_t>> children;
+        for (uint32_t j = 0; j < (k == 15 ? 2u : 3u); ++j) {
+            children.push_back({id, 5}); w.link(id++, {});
+        }
+        w.link(10 + k, children);
+    }
+    w.link(1, root);
+    CHECK(walk_tree(w, 1, &leaves, &why)); // 1 + 16 + 47 == 64 setups
+    w.link(25, {{145, 5}, {146, 5}, {147, 5}}); w.link(147, {});
+    CHECK(!walk_tree(w, 1, &leaves, &why) && why.find("64") != std::string::npos);
+    std::vector<std::pair<uint32_t, uint8_t>> a, b;
+    for (uint32_t k = 0; k < 16; ++k) { a.push_back({200 + k, 4}); b.push_back({300 + k, 4}); }
+    w.link(1, {{2, 5}, {3, 5}}); w.link(2, a); w.link(3, b);
+    CHECK(walk_tree(w, 1, &leaves, &why) && leaves.size() == 32);
+}
+
+static void test_invalid_unicode_sources() {
+    for (const char* source : {"\xc0\xaf", "\xed\xa0\x80", "\xf4\x90\x80\x80"}) {
+        Run r;
+        r.w.entity(2000); r.w.put(2000, 1, bytes40(1));
+        r.watch({2000}, 1); r.tick();
+        r.tick([&] { r.write(2000, 1, bytes40(1), bytes40(2), source); r.w.put(2000, 1, bytes40(2)); });
+        auto ch = r.drain();
+        CHECK(ch.size() == 1 && ch[0].origin == KILN_CHANGE_ORIGIN_UNKNOWN);
+    }
+}
+
+static void test_link_reentry() {
+    Run r;
+    r.w.entity(5);
+    r.w.link(5, {{7001, 4}});
+    r.w.stacks(7001, {{13, 1, 8001}});
+    r.w.put(8001, 4, bytes40(1));
+    r.watch({5}, bit(4), 1);
+    r.tick();
+    r.tick([&] { r.w.put(8001, 4, bytes40(2)); });
+    auto first = r.drain();
+    r.w.stacks(7001, {});
+    r.tick(); // observed outside every tree
+    r.w.stacks(7001, {{13, 1, 8001}});
+    r.tick();
+    r.tick([&] { r.w.put(8001, 4, bytes40(3)); });
+    auto again = r.drain();
+    CHECK(first.size() == 1 && again.size() == 1 && first[0].entity.life_serial != again[0].entity.life_serial);
+}
+
+static void test_observation_limits() {
+    Run r;
+    r.w.entity(2000);
+    auto a = bytes40(1), b = bytes40(2), c = bytes40(3);
+    r.w.put(2000, 1, a);
+    r.watch({2000}, 1);
+    r.tick();
+    // Names are owned by the token even when the writer unloads before delivery.
+    r.tick([&] {
+        std::string name = "unloaded-mod";
+        r.write(2000, 1, a, b, name.c_str());
+        name.assign("xxxxxxxxxxxx");
+        // An unreported writer overwrites b with c and restores b: net attribution only.
+        r.w.put(2000, 1, c);
+        r.w.put(2000, 1, b);
+    });
+    auto ch = r.drain();
+    CHECK(ch.size() == 1 && ch[0].origin == KILN_CHANGE_ORIGIN_KILN &&
+          std::strcmp(ch[0].source_mod, "unloaded-mod") == 0);
+    // A rolled back operation has no net bytes and must not invent an event.
+    r.tick([&] { r.w.put(2000, 1, c); r.w.put(2000, 1, b); });
+    CHECK(r.drain().empty());
+    // The next unrelated change cannot inherit that operation's attribution.
+    r.tick([&] { r.w.put(2000, 1, a); });
+    ch = r.drain();
+    CHECK(ch.size() == 1 && ch[0].origin == KILN_CHANGE_ORIGIN_UNKNOWN);
+}
+
+static void test_reuse_during_sim() {
+    Run r;
+    r.w.entity(2000, 1000);
+    r.w.put(2000, 1, bytes40(1));
+    const auto id = r.watch({2000}, 1);
+    r.tick();
+    r.tick([&] { r.w.entity(2000, 2000); r.w.put(2000, 1, bytes40(9)); });
+    CHECK(r.drain().empty());
+    CHECK(status_of(r, id) == KILN_WATCH_SUSPENDED_METADATA);
+}
+
 static void test_world_stop() {
     Run r;
     r.w.entity(2000);
@@ -792,8 +887,9 @@ static void test_steady() {
     n.size = sizeof n;
     r.c.counters(&n);
     CHECK(n.present_pairs == 4096);
-    r.tick([&] { r.w.put(20000, KILN_WATCH_MANA, bytes40(2)); });  // 4097 present: reported once, then over budget
-    r.drain();
+    r.tick([&] { r.w.put(20000, KILN_WATCH_MANA, bytes40(2)); });  // 4097 present: suspend before reporting
+    CHECK(r.drain().empty());  // growth is refused before this compare, not the following one
+    CHECK(status_of(r, late) == KILN_WATCH_SUSPENDED_BUDGET);
     r.tick();
     KilnComponentWatchStatusV1 st{};
     CHECK(status_of(r, late, &st) == KILN_WATCH_SUSPENDED_BUDGET && std::strstr(st.reason, "4096"));
@@ -891,6 +987,11 @@ int main() {
     test_batches();
     test_queue_overflow();
     test_lives();
+    test_reuse_during_sim();
+    test_observation_limits();
+    test_link_reentry();
+    test_invalid_unicode_sources();
+    test_tree_exact_bounds();
     test_world_stop();
     test_owners();
     test_ended_watch_records();
