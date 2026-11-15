@@ -4,7 +4,7 @@ Kiln @VERSION@
 Kiln is a mod framework and launcher for Enshrouded: C# and native mods, mod profiles, local dedicated servers and
 their administration. Built @DATE@ from @SOURCE@ (@CHANNEL@ channel). Kiln is MIT licensed (LICENSE);
 third-party licences are in THIRD-PARTY-NOTICES.txt; CREDITS.md says whose work Kiln builds on.
-
+@TESTBUILD@
 Enshrouded is a trademark of Keen Games GmbH. Kiln is not affiliated with or endorsed by Keen Games.
 
 
@@ -58,7 +58,7 @@ match its built-in key. The .sig files next to the AppImage and the setup progra
 
 Updates: the launcher checks frostdev.io (GitHub Releases if that fails) at start and every 6 hours. A check
 downloads one small file; nothing about you or your PC is sent. Settings > Updates turns it off or picks the
-channel (stable or dev).
+channel: Release, or Beta (test builds of the next release, for testers; switching either way takes one click).
 
 
 Files

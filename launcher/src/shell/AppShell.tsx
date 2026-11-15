@@ -12,6 +12,7 @@ import { mockFallbackActive, useMockFallback } from "../api/fallback";
 import { Lockup, Skeleton, Splash, TaskTray, Toaster, useRowContextMenu, useTaskFeed } from "../ui";
 import { GameArtAuto } from "../components/GameArt";
 import { UpdateTray } from "./UpdateNotice";
+import { BetaMark, ChannelSwitchDialog } from "./ChannelSwitch";
 import { RouteErrorBoundary } from "./ErrorBoundary";
 import { DataFolderNotice } from "./DataFolderGate";
 import { NAV_MAIN, NAV_SIDE, navFor } from "./nav";
@@ -86,6 +87,7 @@ function Header({ isPlay, ctl }: { isPlay: boolean; ctl: PlayControl }) {
           <NavLink key={n.to} to={n.to} className={({ isActive }) => "k-head-link" + (isActive ? " on" : "")}>{n.label}</NavLink>
         ))}
         {mock && <span className="k-mock-flag" title={info.data?.mock ? "Browser mock" : `Mock data for: ${fallback.join(", ")}`}>Mock</span>}
+        {info.data?.distribution !== "nexus" && <BetaMark />}
         <span role="status" aria-live={t ? "off" : undefined} className={`k-head-state k-tone-${tone}${t ? " k-head-start" : ""}`} style={{ opacity: isPlay ? 0 : 1 }}
           title={tw ? `${tw.line}. ${tw.left}` : v.detail ?? undefined} data-testid="head-state">{word}</span>
       </div>
@@ -206,6 +208,7 @@ export function AppShell() {
       <GameArtAuto />
       <DropAnywhere add={(p) => void addMods(p)} />
       <InstallKilnModal onAdd={(p, g) => void addMods(p, g)} />
+      <ChannelSwitchDialog />
       <ModpackDropOffer />
       <ImportDetails />
       <PickProfile />

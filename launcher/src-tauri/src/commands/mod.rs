@@ -2,6 +2,7 @@
 //! list in lib.rs and `COMMANDS` in launcher/src/api/commands.ts are the same (tested).
 
 pub mod app;
+pub mod snapshot;
 pub mod game;
 pub mod runtime;
 pub mod profile;
@@ -29,6 +30,8 @@ pub type TaskId = String;
 
 /// Every command name, in contracts.md order.
 pub const NAMES: &[&str] = &[
+    "snapshot_status",
+    "snapshot_continue",
     "app_info",
     "app_settings_get",
     "app_settings_set",
@@ -149,6 +152,7 @@ pub const NAMES: &[&str] = &[
     "update_status",
     "update_check",
     "update_install",
+    "update_switch",
     "update_restart",
     "update_skip",
     "update_ack",
