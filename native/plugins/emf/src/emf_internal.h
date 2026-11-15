@@ -254,7 +254,8 @@ void components_after_step(EmfWorld* w, uint8_t kind);
 void windows_after_step(EmfWorld* w, uint8_t kind);
 void windows_world_stopping(uint8_t kind);
 void windows_world_started(uint8_t kind);
-void events_world_stopping();
+void events_world_stopping();               // the server world's
+void events_world_stopping(uint8_t kind);   // that world kind's (EMF_WORLD_SERVER / EMF_WORLD_CLIENT)
 void events_shutdown();
 void program_hooks_shutdown();
 void keep_adapter_mapped();

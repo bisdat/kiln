@@ -578,6 +578,41 @@ void internal_update(ProgramCtx* ctx) {
 
 }  // namespace
 
+// The event types of a world's event map, by name, into kiln.log (chapter 14 question 4: which event types a client
+// world has, for on_event and events_in there). Only while a mod declares a client-table program: the client world's at
+// its first Pre, a host's server world's at its first live step, each on its own thread. Names come from kiln.types
+// (by hash); a hash it does not know is written as #<hash>.
+void dump_event_map(const char* what, uintptr_t world) {
+    const uintptr_t map = world ? map_base(registry_of(world), M_EVENT) : 0;
+    if (!map) {
+        KW_I("%s 0x%llx: its event map cannot be read on this build (world.names.events)", what, static_cast<unsigned long long>(world));
+        return;
+    }
+    const KilnTypesApi* types = program_types();
+    std::vector<std::string> names;
+    map_each_u16(map, [&](uint32_t hash, uint16_t) {
+        KilnTypeInfo info{};
+        info.size = sizeof info;
+        const KilnType* t = types && types->type_by_hash ? types->type_by_hash(hash) : nullptr;
+        if (t && types->type_info(t, &info) == KILN_OK && info.name.len) {
+            names.emplace_back(info.name.ptr, info.name.len);
+        } else {
+            char b[16];
+            std::snprintf(b, sizeof b, "#%08x", hash);
+            names.emplace_back(b);
+        }
+    });
+    std::sort(names.begin(), names.end());
+    std::vector<std::string> lines(1);
+    for (const std::string& n : names) {
+        if (lines.back().size() + n.size() > 800) lines.emplace_back();
+        lines.back() += (lines.back().empty() ? "" : ", ") + n;
+    }
+    for (size_t i = 0; i < lines.size(); ++i)
+        KW_I("%s 0x%llx event map (question 4): %u event types [%u/%u]: %s", what, static_cast<unsigned long long>(world),
+             static_cast<unsigned>(names.size()), static_cast<unsigned>(i + 1), static_cast<unsigned>(lines.size()), lines[i].c_str());
+}
+
 bool programs_init() {
     if (!F.programs) return false;
     g_hook.install(g_api, g_owner, fn.register_all, reinterpret_cast<void*>(&hk_register_all), "world/RegisterAllPrograms");
@@ -602,6 +637,7 @@ void programs_after_first_step(uintptr_t world) {
                  p->name.c_str(), flags);
         }
     }
+    if (g_side_programs.load()) dump_event_map("server world", world);  // a host with client programs (chapter 14 Q4)
 }
 
 namespace {
@@ -1354,6 +1390,7 @@ KilnResult KILN_CALL unbind_program_world(KilnHandle h) {
 void programs_client_pre(const KilnTickInfo*) {
     if (!g_side_programs.load(std::memory_order_relaxed)) return;
     if (g_skip_check.exchange(false)) {  // the first Pre after the world finalized: programs the engine skips
+        dump_event_map("client world", g_api->world(KILN_WORLD_CLIENT));
         std::lock_guard lock(g_mutex);
         for (Program* p : g_programs)
             for (uint32_t kind = 1; kind < KILN_WORLD_KINDS; ++kind) {

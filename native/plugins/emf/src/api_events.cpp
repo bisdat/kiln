@@ -10,11 +10,17 @@
 //    on the job in the events-out slot (as kiln.gameplay does). kiln.world v2 resolves every events-in slot and
 //    exposes tracked other-entity writes using the original program descriptor and its job tracker.
 // Everything is registered in on_ready, after every emf_mod_load, before the server world sets up its programs.
+//  - EMF_WORLD_CLIENT (since 0.2.0-dev.29, chapter 14): a game client's client world, through kiln.world's
+//    register_program_world: the programs and one relay per event type of that world ("emf_evc_<Event>"), registered
+//    into every client world (host or joined); a relay's copies go to the mods after the client world's step, on the
+//    main thread. Refused at the call, as before, where there is no client world (a dedicated server) or
+//    world.programs.client is not available.
 #include <intrin.h>
 
 #include <map>
 
 #include "emf_internal.h"
+#include "services/kiln_caps.h"
 
 namespace kemf {
 
@@ -43,7 +49,26 @@ struct EventType {
     uint64_t seen = 0;
 };
 std::mutex g_ev_mutex;
-std::map<std::string, std::unique_ptr<EventType>> g_events;
+std::map<std::string, std::unique_ptr<EventType>> g_events;         // the server world's
+std::map<std::string, std::unique_ptr<EventType>> g_client_events;  // the client world's (since 0.2.0-dev.29)
+std::map<std::string, std::unique_ptr<EventType>>& events_of(uint8_t kind) {  // g_ev_mutex held
+    return kind == EMF_WORLD_CLIENT ? g_client_events : g_events;
+}
+
+// Whether Kiln can run an EMF program in the client world here: a game client whose kiln.world has the client-world
+// members and reports world.programs.client available (its inputs resolved). Else *why says what is missing.
+bool client_world_programs(std::string* why) {
+    if (g_side != KILN_SIDE_CLIENT) return *why = "a dedicated server has no client world", false;
+    if (!S.world || S.world->header.size < offsetof(KilnWorldApi, unbind_program_world) + sizeof(void*) ||
+        !S.world->register_program_world || !S.world->unbind_program_world)
+        return *why = "this kiln.world registers programs in the server world only (an older Kiln core)", false;
+    const auto* caps = g_api->service ? static_cast<const KilnCapsApi*>(g_api->service(kstr(KILN_CAPS_SERVICE), 1)) : nullptr;
+    KilnCapRow row{};
+    row.size = sizeof row;
+    if (!caps || caps->find(kstr("world.programs.client"), &row) != KILN_OK || row.state != KILN_CAP_AVAILABLE)
+        return *why = "capability world.programs.client is not available (kiln.log says why)", false;
+    return true;
+}
 
 struct Queue {
     int64_t first = -1, blocks = -1, count = -1, next = -1, shift = -1;
@@ -133,16 +158,20 @@ bool api_on_event(uint8_t kind, const char* name, uint32_t expected_size, EmfWor
     if (!m) m = caller_mod(_ReturnAddress());
     if (!name || !*name || !cb) return refuse(m, "on_event", "no event name or callback"), false;
     if (kind != EMF_WORLD_SERVER) {
-        unsupported(m, "on_event (client world)", "kiln.world registers programs in the server world only");
-        return false;
+        std::string why = "Kiln runs EMF programs in the server and client worlds";
+        if (kind != EMF_WORLD_CLIENT || !client_world_programs(&why)) {
+            unsupported(m, kind == EMF_WORLD_CLIENT ? "on_event (client world)" : "on_event (prediction world)", why.c_str());
+            return false;
+        }
     }
     if (g_ready_done) return refuse(m, "on_event", "the worlds are set up: call it from emf_mod_load"), false;
     if (!S.world) return unsupported(m, "on_event", "kiln.world is not available"), false;
     std::lock_guard lock(g_ev_mutex);
-    auto& t = g_events[name];
+    auto& events = events_of(kind);
+    auto& t = events[name];
     if (!t) {
-        if (g_events.size() > 24) {
-            g_events.erase(name);
+        if (events.size() > 24) {
+            events.erase(name);
             return refuse(m, "on_event", "24 event types are already registered"), false;
         }
         t = std::make_unique<EventType>();
@@ -231,8 +260,12 @@ bool add_program(Mod* m, const char* name, uint8_t kind, EmfProgramCallback fn, 
     const char* fnname = def ? "register_program_def" : "register_program";
     if (!name || !*name || !fn) return refuse(m, fnname, "no name or callback"), false;
     if (kind != EMF_WORLD_SERVER) {
-        unsupported(m, (std::string(fnname) + " (client world)").c_str(), "kiln.world registers programs in the server world only");
-        return false;
+        std::string why = "Kiln runs EMF programs in the server and client worlds";
+        if (kind != EMF_WORLD_CLIENT || !client_world_programs(&why)) {
+            unsupported(m, (std::string(fnname) + (kind == EMF_WORLD_CLIENT ? " (client world)" : " (prediction world)")).c_str(),
+                        why.c_str());
+            return false;
+        }
     }
     if (g_ready_done) return refuse(m, fnname, "the worlds are set up: call it from emf_mod_load"), false;
     if (!S.world) return unsupported(m, fnname, "kiln.world is not available"), false;
@@ -444,35 +477,42 @@ void events_on_ready() {
     Q.ok = Q.first >= 0 && Q.blocks >= 0 && Q.count >= 0 && Q.next >= 0 && Q.shift > 4 && Q.shift < 20;
     if (!S.world) return;
     std::lock_guard lock(g_ev_mutex);
-    for (auto& [name, t] : g_events) {
+    for (const uint8_t kind : {uint8_t{EMF_WORLD_SERVER}, uint8_t{EMF_WORLD_CLIENT}})
+    for (auto& [name, t] : events_of(kind)) {
         if (!Q.ok) {
             for (auto& r : t->regs) unsupported(r->mod, "on_event", "the event queue layout is not resolved on this build");
             continue;
         }
-        const std::string pname = "emf_ev_" + name;
+        // one relay program per event type per world kind (the client world's: kiln.world registers it into every
+        // client world; a client program is never HOST_ONLY)
+        const bool client = kind == EMF_WORLD_CLIENT;
+        const std::string pname = (client ? "emf_evc_" : "emf_ev_") + name;
         const KilnStr ev[] = {kstr(t->name)};
         KilnProgramDesc d{};
         d.size = sizeof d;
-        d.flags = KILN_PROGRAM_SYSTEM | KILN_PROGRAM_HOST_ONLY;
+        d.flags = client ? KILN_PROGRAM_SYSTEM : KILN_PROGRAM_SYSTEM | KILN_PROGRAM_HOST_ONLY;
         d.name = kstr(pname);
         d.each = &event_each;
         d.user = t.get();
         d.events_in = KilnNames{ev, 1, 0};
-        if (S.world->register_program(g_owner, &d, &t->program) != KILN_OK) {
+        const KilnResult rc = client ? S.world->register_program_world(g_owner, KILN_WORLD_CLIENT, &d, &t->program)
+                                     : S.world->register_program(g_owner, &d, &t->program);
+        if (rc != KILN_OK) {
             for (auto& r : t->regs) refuse(r->mod, "on_event", ("kiln.world refused the program for " + name).c_str());
             continue;
         }
         t->slot = S.world->program_slot(t->program, KILN_SLOT_EVENT_IN, ev[0]);
-        logf(KILN_LOG_INFO, "on_event %s: program %s registered (%zu registration(s), queue slot %d)", name.c_str(), pname.c_str(),
-             t->regs.size(), t->slot);
+        logf(KILN_LOG_INFO, "on_event %s: program %s registered%s (%zu registration(s), queue slot %d)", name.c_str(), pname.c_str(),
+             client ? " for the client world" : "", t->regs.size(), t->slot);
     }
     std::lock_guard plock(g_prog_mutex);
     for (auto& p : g_progs) {
         const auto ein = kstrs(p->events_in), eout = kstrs(p->events_out), sg = kstrs(p->singletons),
                    orr = kstrs(p->other_read), owr = kstrs(p->other_write);
+        const bool client = p->kind == EMF_WORLD_CLIENT;
         KilnProgramDesc d{};
         d.size = sizeof d;
-        d.flags = KILN_PROGRAM_SYSTEM | KILN_PROGRAM_HOST_ONLY;
+        d.flags = client ? KILN_PROGRAM_SYSTEM : KILN_PROGRAM_SYSTEM | KILN_PROGRAM_HOST_ONLY;  // EMF's kFlagClient / kFlagNotPredicted
         d.name = kstr(p->name);
         d.each = &prog_each;
         d.user = p.get();
@@ -481,22 +521,27 @@ void events_on_ready() {
         d.singletons_read = KilnNames{sg.data(), static_cast<uint32_t>(sg.size()), 0};
         d.other_read = KilnNames{orr.data(), static_cast<uint32_t>(orr.size()), 0};
         d.other_write = KilnNames{owr.data(), static_cast<uint32_t>(owr.size()), 0};
-        if (S.world->register_program(p->mod ? p->mod->owner : g_owner, &d, &p->handle) != KILN_OK) {
+        const KilnOwner owner = p->mod ? p->mod->owner : g_owner;
+        const KilnResult rc = client ? S.world->register_program_world(owner, KILN_WORLD_CLIENT, &d, &p->handle)
+                                     : S.world->register_program(owner, &d, &p->handle);
+        if (rc != KILN_OK) {
             refuse(p->mod, "register_program", ("kiln.world refused program " + p->name).c_str());
             p->dead = true;
             continue;
         }
-        mod_logf(p->mod, KILN_LOG_INFO, "program %s registered through kiln.world (%zu event(s) in, %zu singleton(s), %zu other-read)",
-                 p->name.c_str(), p->events_in.size(), p->singletons.size(), p->other_read.size());
+        mod_logf(p->mod, KILN_LOG_INFO, "program %s registered through kiln.world%s (%zu event(s) in, %zu singleton(s), %zu other-read)",
+                 p->name.c_str(), client ? " for the client world" : "", p->events_in.size(), p->singletons.size(), p->other_read.size());
     }
 }
 
+// After a world's step, on its thread (the server world: the tick thread; the client world: the main thread): every
+// copy its relays made during the step goes to each registration of that world kind.
 void events_after_step(EmfWorld* w, uint8_t kind) {
-    if (kind != EMF_WORLD_SERVER) return;
+    if (kind != EMF_WORLD_SERVER && kind != EMF_WORLD_CLIENT) return;
     std::vector<EventType*> types;
     {
         std::lock_guard lock(g_ev_mutex);
-        for (auto& [n, t] : g_events) types.push_back(t.get());
+        for (auto& [n, t] : events_of(kind)) types.push_back(t.get());
     }
     for (EventType* t : types) {
         std::vector<uint8_t> buf;
@@ -533,9 +578,11 @@ void events_after_step(EmfWorld* w, uint8_t kind) {
     }
 }
 
-void events_world_stopping() {
+void events_world_stopping() { events_world_stopping(EMF_WORLD_SERVER); }
+
+void events_world_stopping(uint8_t kind) {  // copies of the stopping world's events are never delivered to the next one
     std::lock_guard lock(g_ev_mutex);
-    for (auto& [name, t] : g_events) {
+    for (auto& [name, t] : events_of(kind)) {
         std::lock_guard queue_lock(t->mu);
         t->buffer.clear();
     }
@@ -545,15 +592,24 @@ void events_shutdown() {
     const bool can_remove = S.world && S.world->header.size >= offsetof(KilnWorldApi,unregister_program)+sizeof(S.world->unregister_program)
         && S.world->unregister_program;
     bool drained = can_remove;
+    // a client-world program's handle goes to unbind_program_world (unregister_program is the server world's)
+    const bool can_unbind = S.world && S.world->header.size >= offsetof(KilnWorldApi, unbind_program_world) + sizeof(void*) &&
+                            S.world->unbind_program_world;
+    auto remove = [&](KilnHandle h, bool client) {
+        if (!h) return true;
+        if (client) return can_unbind && S.world->unbind_program_world(h) == KILN_OK;
+        return can_remove && S.world->unregister_program(h) == KILN_OK;
+    };
     { std::lock_guard lock(g_prog_mutex);
       for (auto& program : g_progs) {
           program->dead = true;
-          if (program->handle && (!can_remove || S.world->unregister_program(program->handle) != KILN_OK)) drained=false;
+          if (!remove(program->handle, program->kind == EMF_WORLD_CLIENT)) drained=false;
       } }
     { std::lock_guard lock(g_ev_mutex);
-      for (auto& [name,event] : g_events) {
+      for (const uint8_t kind : {uint8_t{EMF_WORLD_SERVER}, uint8_t{EMF_WORLD_CLIENT}})
+      for (auto& [name,event] : events_of(kind)) {
           for (auto& registration : event->regs) registration->dead=true;
-          if (event->program && (!can_remove || S.world->unregister_program(event->program) != KILN_OK)) drained=false;
+          if (!remove(event->program, kind == EMF_WORLD_CLIENT)) drained=false;
       } }
     if (!drained) keep_adapter_mapped();
 }

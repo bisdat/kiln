@@ -53,6 +53,10 @@ bool map_find_u16(uintptr_t map, uint32_t key, uint16_t* value) {
     if (value) *value = at->second;
     return true;
 }
+void map_each_u16(uintptr_t map, const std::function<void(uint32_t, uint16_t)>& fn) {
+    for (const auto& [k, v] : maps)
+        if (k.first == map) fn(k.second, v);
+}
 void teleport_in_program(KilnProgramCtx*) {}
 void writes_world_changing() {}
 void writes_before_world(uintptr_t) {}
@@ -245,6 +249,7 @@ void client_stops(uintptr_t world) { world_event(KILN_WORLD_STOPPING, KILN_WORLD
 
 // The fake core: one main thread; post_world refuses a revoked owner; the side and features of a game client.
 std::thread::id g_main;
+uintptr_t g_client_world = 0;  // what the fake core's world(KILN_WORLD_CLIENT) answers
 std::atomic<int> g_revoked{0};
 uint32_t g_side = KILN_SIDE_CLIENT;
 }  // namespace
@@ -277,6 +282,7 @@ int main(int argc, char** argv) {
     api.side = [] { return g_side; };
     api.feature = [](KilnStr n) { return sv(n) == "world.lifecycle"; };
     api.service = [](KilnStr, uint32_t) -> const void* { return nullptr; };
+    api.world = [](uint32_t kind) -> uintptr_t { return kind == KILN_WORLD_CLIENT ? g_client_world : 0; };
     g_api = &api;
     g_faulting = &fault_each;
     g_main = std::this_thread::get_id();
@@ -397,7 +403,19 @@ int main(int argc, char** argv) {
           "a both reservation naming a component only the server world has");
     check(reserve_program_world("writer", "entity", &entity, kWorldBitServer | kWorldBitClient) == KILN_OK,
           "an entity program for both worlds");
-    check(programs_registered() == 6 && g_side_programs.load() == 5, "six reservations take six slots; five have a client-table side");
+    // events: a name only the server world's event map has, and one only the client world's has (question 4)
+    server.know_event("ServerEvent", 3);
+    client.know_event("ClientEvent", 5);
+    client2.know_event("ClientEvent", 5);
+    const KilnStr server_event[] = {kstr("ServerEvent")}, client_event[] = {kstr("ClientEvent")};
+    KilnProgramDesc on_server_event = system_desc("kiln_managed_events");
+    on_server_event.events_in = KilnNames{server_event, 1, 0};
+    KilnProgramDesc on_client_event = system_desc("kiln_managed_client_events");
+    on_client_event.events_in = KilnNames{client_event, 1, 0};
+    check(reserve_program_world("writer", "events", &on_server_event, kWorldBitServer | kWorldBitClient) == KILN_OK &&
+              reserve_program_world("writer", "client_events", &on_client_event, kWorldBitClient) == KILN_OK,
+          "two event programs");
+    check(programs_registered() == 8 && g_side_programs.load() == 7, "eight reservations take eight slots; seven have a client-table side");
     Program* p_both = g_programs[0];
     Program* p_client = g_programs[1];
     Program* p_pred = g_programs[3];
@@ -444,8 +462,9 @@ int main(int argc, char** argv) {
     // The host's worlds register: the server world first, then the client world, each against its own maps.
     on_world(server.at());
     check(state_of(1, KILN_WORLD_SERVER) == KILN_PROGRAM_ACTIVE && state_of(5, KILN_WORLD_SERVER) == KILN_PROGRAM_ACTIVE &&
-              server.count() == 758 + 4, "the server world registers the four server sides, no client or prediction one");
+              server.count() == 758 + 5, "the server world registers the five server sides, no client or prediction one");
     on_world(client.at());
+    g_client_world = client.at();
     check(state_of(1, KILN_WORLD_CLIENT) == KILN_PROGRAM_ACTIVE && state_of(2, KILN_WORLD_CLIENT) == KILN_PROGRAM_ACTIVE &&
               state_of(4, KILN_WORLD_PREDICTION) == KILN_PROGRAM_ACTIVE && state_of(6, KILN_WORLD_CLIENT) == KILN_PROGRAM_ACTIVE,
           "the client world registers the client and prediction sides into its table");
@@ -454,8 +473,14 @@ int main(int argc, char** argv) {
           "a name on the server map and not on the client map is refused for the client world only, with the name");
     check(logged_has("program kiln_managed_client registered into the client world as #"),
           "kiln.log: \"program <id> registered into the client world as #N\" (the guided check's line)");
-    check(client.count() == 817 + 4 && client.entry_desc(817) == reinterpret_cast<uintptr_t>(&p_both->side[KILN_WORLD_CLIENT].desc),
-          "the client table got four entries after the game's 817, each pointing at its client-side descriptor");
+    check(client.count() == 817 + 5 && client.entry_desc(817) == reinterpret_cast<uintptr_t>(&p_both->side[KILN_WORLD_CLIENT].desc),
+          "the client table got five entries after the game's 817, each pointing at its client-side descriptor");
+    check(state_of(7, KILN_WORLD_SERVER) == KILN_PROGRAM_ACTIVE && state_of(7, KILN_WORLD_CLIENT, &why) == KILN_PROGRAM_REFUSED &&
+              why == "events_in: unknown event 'ServerEvent'",
+          "a server-only event name is refused for the client world only, with the name");
+    check(state_of(8, KILN_WORLD_CLIENT) == KILN_PROGRAM_ACTIVE, "an event the client world has: registered there");
+    programs_client_pre(nullptr);  // the client world's first Pre: its event map into kiln.log (question 4)
+    check(logged_has("event map (question 4): 1 event types [1/1]: #"), "kiln.log lists the client world's event types");
     check(p_both->side[KILN_WORLD_CLIENT].engine_id.load() == 818 && p_both->engine_id.load() == 759,
           "the two entries of a both program have each table's own id");
 
@@ -489,7 +514,7 @@ int main(int argc, char** argv) {
     late.each = &probe_each;
     late.user = &late_probe;
     KilnHandle hl = 0;
-    check(register_program_world(21, KILN_WORLD_CLIENT, &late, &hl) == KILN_OK && hl == 7 &&
+    check(register_program_world(21, KILN_WORLD_CLIENT, &late, &hl) == KILN_OK && hl == 9 &&
               state_of(hl, KILN_WORLD_CLIENT, &why) == KILN_PROGRAM_PENDING && why == "registered from the next client world",
           "accepted while a client world runs: PENDING, \"registered from the next client world\"");
     check(state_of(hl, KILN_WORLD_SERVER) == -1, "a client program is not for the server world");
@@ -548,10 +573,10 @@ int main(int argc, char** argv) {
     client.make(KILN_WORLD_CLIENT, 817);  // the allocator gave the same address again (seen in client sessions)
     on_world(client.at());
     check(state_of(2, KILN_WORLD_CLIENT) == KILN_PROGRAM_ACTIVE && state_of(hl, KILN_WORLD_CLIENT) == KILN_PROGRAM_ACTIVE &&
-              client.count() == 817 + 5, "a second client world registers again, the late program too");
+              client.count() == 817 + 6, "a second client world registers again, the late program too");
     check(state_of(1, KILN_WORLD_CLIENT) == KILN_PROGRAM_FAULTED, "a side that faulted in the first world stays off in the second");
     slice(p_client, stale);
-    slice(g_programs[6], stale);
+    slice(g_programs[8], stale);
     check(slow.calls[KILN_WORLD_CLIENT].load() == slow_calls + 1 && late_probe.calls[KILN_WORLD_CLIENT].load() == 1,
           "a binding made before runs in the second world, and the late program runs there");
     KilnHandle rebound = 0;
@@ -643,21 +668,21 @@ int main(int argc, char** argv) {
     check(std::binary_search(ledger.descs.begin(), ledger.descs.end(), client.entry_desc(817)) &&
               std::binary_search(ledger.descs.begin(), ledger.descs.end(), reinterpret_cast<uintptr_t>(&p_both->desc)),
           "the ledger lists the client-table descriptors next to the server ones");
-    check(ledger.taken == 7, "a both program holds one slot of the 64 (seven programs, seven slots)");
+    check(ledger.taken == 9, "a both program holds one slot of the 64 (nine programs, nine slots)");
 
     // ---- the client world's table is full: the live count is checked before each registration ----
     client_stops(client.at());
     client.make(KILN_WORLD_CLIENT, 894);
     on_world(client.at());
     int active = 0, full = 0;
-    for (KilnHandle i = 1; i <= 7; ++i)
+    for (KilnHandle i = 1; i <= 9; ++i)
         for (uint32_t k : {uint32_t{KILN_WORLD_CLIENT}, uint32_t{KILN_WORLD_PREDICTION}}) {
             std::string w;
             const int st = state_of(i, k, &w);
             if (st == KILN_PROGRAM_ACTIVE) ++active;
             if (st == KILN_PROGRAM_REFUSED && w.find("full") != std::string::npos) ++full;
         }
-    check(client.count() == 896 && active == 2 && full == 3, "894 of 896: two register, three are refused before the game is called");
+    check(client.count() == 896 && active == 2 && full == 4, "894 of 896: two register, four are refused before the game is called");
 
     // ---- stop: nothing of a stopped world is reachable; the reason says why ----
     client_stops(client.at());
