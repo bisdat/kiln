@@ -39,6 +39,21 @@ inline Record finish(Record r) {
     else if (r.phase == Phase::trying) { r.phase = Phase::complete; r.failures = 0; }
     return r;
 }
+// A start that has not drawn yet is fine too when the game kept presenting through Kiln's hooks for a while after
+// its swapchain, or exited normally (code 0): the overlay draws only once something is open (Kiln's menu, a mod's
+// window), and a session that never opened one is not a death at the overlay's start. Only a trying record changes,
+// and its failure history stays (only a drawn frame clears it): a real death at the first draw after an earlier one at
+// the same stage still locks.
+inline Record idle(Record r) {
+    if (r.phase == Phase::trying) r.phase = Phase::complete;
+    return r;
+}
+// The first draw of a process whose start idle() completed: a death before that frame is presented is a death at
+// the overlay's start again (stage: swapchain created), so it arms the record once more until the frame is presented.
+inline Record rearm(Record r) {
+    if (r.phase == Phase::complete) { r.phase = Phase::trying; r.stage = Stage::swapchain; }
+    return r;
+}
 inline std::string encode(const Record& r) {
     return "1 " + std::to_string(unsigned(r.phase)) + " " + std::to_string(unsigned(r.stage)) + " " +
         std::to_string(unsigned(r.failed_stage)) + " " + std::to_string(r.failures) + " " + r.modules + "\n";

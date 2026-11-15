@@ -887,6 +887,9 @@ VkResult VKAPI_CALL hk_present(VkQueue queue, const VkPresentInfoKHR* info) {
         if (imgui_ready()) input_capture_changed();
         return R.present.load()(queue, info);
     }
+    // the crash guard watches the overlay's first draw of this process even when its start already counted as fine
+    static std::atomic<bool> first_draw{true};
+    if (first_draw.exchange(false, std::memory_order_relaxed)) overlay_guard_first_draw();
     const uint64_t t0 = GetTickCount64();
     VkSemaphore wait = VK_NULL_HANDLE;
     bool faulted = false;
@@ -1286,6 +1289,8 @@ bool vk_unsubscribe(KilnHandle handle) {
 
 void vk_set_pre_overlay_demand(uint32_t count) { if (!overlay_drawing_on()) return; g_pre_demand.store(count, std::memory_order_relaxed); }
 void vk_add_swapchain_usage(uint32_t usage) { if (!overlay_drawing_on()) return; g_extra_usage.fetch_or(usage); }
+
+uint64_t vk_presents() { return g_presents.load(std::memory_order_relaxed); }
 
 void vk_status(KilnUiStatus* out) {
     if (!overlay_drawing_on()) return;

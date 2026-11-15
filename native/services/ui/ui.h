@@ -189,6 +189,7 @@ const void* render_table();            // the KilnRenderApi
 // ---- vk.cpp ----
 bool vk_install();  // called once vulkan-1.dll is loaded (from the LoadLibraryExW hook)
 void vk_status(KilnUiStatus* out);
+uint64_t vk_presents();  // frames the game presented through Kiln's present hook (the overlay crash guard)
 KilnResult vk_subscribe_pre_overlay(KilnUiPreOverlayFn fn, KilnUiSwapchainGoneFn gone, void* user, KilnHandle* out);
 bool vk_unsubscribe(KilnHandle handle);
 void vk_set_pre_overlay_demand(uint32_t count);

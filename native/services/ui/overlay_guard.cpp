@@ -10,10 +10,15 @@ namespace {
 std::mutex mu;
 overlay_guard::Record record;
 std::wstring path;
-bool active = false, said_error = false, began_written = false;
-HANDLE ran_timer = nullptr;
+bool active = false, said_error = false, began_written = false, idle_done = false, rearmed = false;
+HANDLE ran_timer = nullptr, idle_timer = nullptr;
+uint64_t presents_at_swapchain = 0;
 // How long a guarded start (overlay off) must run before the next start may try the overlay again.
 constexpr DWORD kRanFineMs = 60'000;
+// How long the game must keep presenting through Kiln's hooks after its swapchain, with nothing drawn yet, for the start
+// to count as fine (overlay_guard::idle), and how many frames it must present in that time (not hung).
+constexpr DWORD kIdleProofMs = 30'000;
+constexpr uint64_t kIdleProofPresents = 60;
 void error() {
     if (!said_error) {
         said_error = true;
@@ -70,6 +75,26 @@ VOID CALLBACK ran_fine(PVOID, BOOLEAN) {
         save();
         active = false;
         logf(KILN_LOG_INFO, "ui: overlay crash guard: the game ran a minute without the overlay; the next start tries the overlay again");
+    } catch (...) { error(); }
+}
+// Nothing has been drawn yet (the overlay draws once Kiln's menu or a mod's window is open), but the game has kept
+// presenting through Kiln's hooks since its swapchain: the start did not die at the overlay. The first draw arms the
+// record again (overlay_guard_first_draw).
+VOID CALLBACK idle_proof(PVOID, BOOLEAN) {
+    try {
+        std::lock_guard<std::mutex> lock(mu);
+        if (!active || record.phase != overlay_guard::Phase::trying || record.stage != overlay_guard::Stage::swapchain) return;
+        const uint64_t presented = vk_presents() - presents_at_swapchain;
+        if (presented < kIdleProofPresents) {
+            logf(KILN_LOG_INFO, "ui: overlay crash guard: only %llu frames presented in %u s since the swapchain; the start is still being watched",
+                 static_cast<unsigned long long>(presented), unsigned(kIdleProofMs / 1000));
+            return;
+        }
+        record = overlay_guard::idle(record);
+        idle_done = true;
+        save();
+        logf(KILN_LOG_INFO, "ui: overlay crash guard: the game presented %llu frames through Kiln's hooks with nothing drawn yet; the start counts as fine, and the first draw is watched when it comes",
+             static_cast<unsigned long long>(presented));
     } catch (...) { error(); }
 }
 
@@ -140,8 +165,33 @@ void overlay_guard_stage(overlay_guard::Stage stage) noexcept {
             record = overlay_guard::finish(record);
             active = false;
             logf(KILN_LOG_INFO, "ui: overlay crash guard complete: first frame presented with overlay drawn");
+        } else if (stage == overlay_guard::Stage::swapchain && !idle_timer) {
+            presents_at_swapchain = vk_presents();
+            if (!CreateTimerQueueTimer(&idle_timer, nullptr, &idle_proof, nullptr, kIdleProofMs, 0, WT_EXECUTEONLYONCE)) {
+                idle_timer = nullptr;
+                logf(KILN_LOG_WARN, "ui: overlay crash guard: no timer; until the overlay's first frame or a normal exit, a closed game counts as an interrupted overlay start");
+            }
         }
         save();
+    } catch (...) { error(); }
+}
+void overlay_guard_first_draw() noexcept {
+    try {
+        std::lock_guard<std::mutex> lock(mu);
+        if (!active || !idle_done || rearmed || record.phase != overlay_guard::Phase::complete) return;
+        rearmed = true;
+        record = overlay_guard::rearm(record);
+        save();
+    } catch (...) { error(); }
+}
+void overlay_guard_exit() noexcept {
+    try {
+        std::lock_guard<std::mutex> lock(mu);
+        if (!active || record.phase != overlay_guard::Phase::trying) return;
+        record = overlay_guard::idle(record);
+        active = false;
+        save();
+        logf(KILN_LOG_INFO, "ui: overlay crash guard: the game exits normally; the overlay's start counts as fine");
     } catch (...) { error(); }
 }
 }
