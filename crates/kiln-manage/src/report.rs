@@ -1152,6 +1152,17 @@ pub fn build(input: &ReportInput) -> Report {
         }
     }
     check_unlisted(&mut cx, install.as_ref(), dirs.as_ref(), profile.as_ref());
+    if let (Some(g), Some(p)) = (install.as_ref(), profile.as_ref()) {
+        let fallback = DataDirs::at(g.path.join("kiln/report-no-library"));
+        match crate::compat::shroudlink_report_missing(dirs.as_ref().unwrap_or(&fallback), g, p) {
+            Ok(true) => {
+                let mods = p.mods.shroudlink.iter().filter(|m| m.enabled).map(|m| m.id.clone()).collect::<Vec<_>>();
+                cx.find("shroudlink-client-addon", Level::Info, shroudlink_finding_text(p.name.as_deref().unwrap_or(&p.id), &mods));
+            }
+            Err(e) => cx.err("shroudlink-client-addon", &e.message),
+            _ => {}
+        }
+    }
 
     // ---- the last start
     let mut ls = String::new();
@@ -1870,3 +1881,17 @@ pub fn write_zip(report: &Report, out: &Path) -> crate::Result<u64> {
 #[cfg(test)]
 #[path = "report_tests.rs"]
 mod tests;
+
+fn shroudlink_finding_text(profile: &str, mods: &[String]) -> String {
+    format!("Profile '{profile}' enables Shroudlink mods: {}. Shroudlink's MODS tab comes from its client addon, which this profile does not load. Your Shroudlink mods still run; switch the addon on to get the tab.", mods.join(", "))
+}
+
+#[cfg(test)]
+mod shroudlink_notice_tests {
+    #[test]
+    fn finding_names_profile_and_mods() {
+        let text = super::shroudlink_finding_text("test", &["assistants".into(), "expeditions".into()]);
+        assert!(text.contains("Profile 'test'") && text.contains("assistants, expeditions"));
+        assert!(text.contains("MODS tab") && text.contains("mods still run"));
+    }
+}

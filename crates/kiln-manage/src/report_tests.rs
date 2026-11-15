@@ -975,3 +975,27 @@ fn chained_loader_override_finding() {
     input.install.as_mut().unwrap().platform = Platform::Windows;
     assert!(!ids(&build(&input)).contains(&"proton-chained-override"));
 }
+
+#[test]
+fn shroudlink_addon_finding_is_one_info_and_client_only() {
+    let fx = Fx::new("sl-addon-hint");
+    fx.w("enshrouded.exe", b"fixture only");
+    fx.profile(serde_json::json!(false), serde_json::json!({"shroudlink":[
+        {"id":"assistants","path":"sl/assistants"}, {"id":"expeditions","path":"sl/expeditions"}
+    ]}));
+    let input = fx.input();
+    let report = build(&input);
+    let findings = report.findings.iter().filter(|f| f.id == "shroudlink-client-addon").collect::<Vec<_>>();
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0].level, Level::Info);
+    assert!(findings[0].text.contains("My mods") && findings[0].text.contains("assistants, expeditions"));
+    let mut server = input.clone();
+    server.install.as_mut().unwrap().kind = GameKind::Server;
+    assert!(!build(&server).findings.iter().any(|f| f.id == "shroudlink-client-addon"));
+    fx.profile(serde_json::json!(false), serde_json::json!({"shroudlink":[{"id":"assistants","path":"sl","enabled":false}]}));
+    assert!(!build(&input).findings.iter().any(|f| f.id == "shroudlink-client-addon"));
+    fx.profile(serde_json::json!(false), serde_json::json!({"shroudlink":[{"id":"assistants","path":"sl"}]}));
+    fx.w("kiln/chain/renamed.dll", crate::pe::build_test_dll(&["DirectInput8Create", "shroudlink_shutdown"], b""));
+    fx.w("kiln/chain.ini", "[chain]\nchain\\renamed.dll\n");
+    assert!(!build(&input).findings.iter().any(|f| f.id == "shroudlink-client-addon"));
+}
