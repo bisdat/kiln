@@ -854,11 +854,28 @@ PacksReport apply_all_packs(const std::vector<PackFile>& files) {
 }
 
 std::string apply_result_json(const ApplyResult& r) {
-    json j = {{"applied", r.applied}, {"errors", r.errors}, {"warnings", r.warnings}};
-    json c = json::array();
-    for (const Conflict& x : store_conflicts())
-        c.push_back({{"field", x.what}, {"winner", x.winner}, {"winnerValue", x.winner_value}, {"loser", x.loser}, {"loserValue", x.loser_value}});
-    j["conflicts"] = c;
+    // ApplyJson has already mutated the store: it cannot be retried as a report-size query. Keep this report below
+    // the sync client's 64 KiB buffer even for a full buff room (or arbitrarily long diagnostic text).
+    const auto conflicts = store_conflicts();
+    json j = {{"applied", r.applied}, {"errors", json::array()}, {"warnings", json::array()}, {"conflicts", json::array()},
+              {"errorCount", r.errors.size()}, {"warningCount", r.warnings.size()}, {"conflictCount", conflicts.size()}};
+    auto message = [](const std::string& text) {
+        // Bound encoded JSON bytes, including escapes. Replacement keeps a cut UTF-8 sequence well formed.
+        std::string encoded = json(text).dump(-1, ' ', false, json::error_handler_t::replace);
+        if (encoded.size() > 1024) encoded = json(text.substr(0, 128) + " ... [truncated]").dump(-1, ' ', false, json::error_handler_t::replace);
+        return json::parse(encoded);
+    };
+    constexpr size_t limit = 8;
+    for (size_t i = 0; i < std::min(limit, r.errors.size()); ++i) j["errors"].push_back(message(r.errors[i]));
+    for (size_t i = 0; i < std::min(limit, r.warnings.size()); ++i) j["warnings"].push_back(message(r.warnings[i]));
+    for (size_t i = 0; i < std::min(limit, conflicts.size()); ++i) {
+        const auto& x = conflicts[i];
+        j["conflicts"].push_back({{"field", message(x.what)}, {"winner", message(x.winner)}, {"winnerValue", message(x.winner_value)},
+                                  {"loser", message(x.loser)}, {"loserValue", message(x.loser_value)}});
+    }
+    // At most 56 encoded messages of <= 1024 bytes, plus fixed keys/counts: comfortably below 64 KiB.
+    j["more"] = r.errors.size() + r.warnings.size() + conflicts.size() -
+                j["errors"].size() - j["warnings"].size() - j["conflicts"].size();
     return j.dump();
 }
 

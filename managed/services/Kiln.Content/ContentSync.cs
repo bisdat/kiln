@@ -239,6 +239,7 @@ public static unsafe class ContentSync
         return Content.Buffs.Definitions().Count != 0;
     }
 
+    internal static TimeSpan ContentAdmissionDeadline => NetAdmission.MaxDeadline;
     private static IDisposable? _contentAdmission;
     private static readonly Dictionary<uint, AdmissionHold> ContentHolds = new();
     private static void EnsureContentAdmission()
@@ -249,7 +250,7 @@ public static unsafe class ContentSync
         {
             if (!peer.HasChannel(ChannelName) || !RequiresBuffAdmission()) return null;
             if (ContentHolds.Remove(peer.Id, out var previous)) previous.End();
-            var hold = NetAdmission.HoldPeer(peer, "kiln.content", "Waiting for this game's content and added-buff capacity check", TimeSpan.FromSeconds(120));
+            var hold = NetAdmission.HoldPeer(peer, "kiln.content", "Waiting for this game's content and added-buff capacity check", ContentAdmissionDeadline);
             ContentHolds[peer.Id] = hold;
             return hold;
         });
@@ -831,7 +832,8 @@ public static unsafe class ContentSync
         _appliedState = stateId;
         _appliedGeneration = Content.Status()?.Generation ?? generation;
         var ms = (uint)sw.ElapsedMilliseconds;
-        var ok = ApplySucceeded(rc, errors);
+        var ack = MakeApplyAck(stateId, rc, applied, reset, errors, ms);
+        var ok = ack.Result == 0;
         var examples = Examples(server, 4);
         Log(errors.Count == 0 && ok ? LogLevel.Info : LogLevel.Warn,
             $"content state {stateId:x8} applied: {applied} change(s) from the server ({fields} sent{(reset > 0 ? $", {reset} local-only change(s) put back" : "")}), " +
@@ -840,8 +842,7 @@ public static unsafe class ContentSync
         _status = new ContentSyncStatus(ok ? ContentSyncState.Applied : ContentSyncState.Failed, stateId, (int)fields, applied, reset,
             errors.Count, Encoding.UTF8.GetByteCount(json), compressed, DateTime.UtcNow,
             ok ? $"{applied} change(s) from the server" : ContentNative.Message(rc));
-        _channel?.SendToServer(new AckMsg(stateId, ok ? (byte)0 : (byte)1, (uint)applied, (uint)reset, (uint)errors.Count, ms,
-            string.Join("; ", errors.Take(4))));
+        _channel?.SendToServer(ack);
         if (Events.HasSubscribers<ContentSyncedEvent>()) Events.Post(new ContentSyncedEvent(false, applied, reset, errors, stateId));
     }
 
@@ -1081,7 +1082,11 @@ public static unsafe class ContentSync
         return null;
     }
 
-    private static (int Applied, List<string> Errors, int Rc) ApplyJson(string json, string source)
+    internal static AckMsg MakeApplyAck(uint stateId, int rc, int applied, int reset, IReadOnlyList<string> errors, uint millis) =>
+        new(stateId, ApplySucceeded(rc, errors) ? (byte)0 : (byte)1, (uint)applied, (uint)reset, (uint)errors.Count, millis,
+            string.Join("; ", errors.Take(4)));
+
+    internal static (int Applied, List<string> Errors, int Rc) ApplyJson(string json, string source)
     {
         var t = Content.Require("ContentSync.Apply");
         const int cap = 1 << 16;

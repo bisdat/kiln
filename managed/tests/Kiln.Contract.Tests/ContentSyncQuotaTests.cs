@@ -35,6 +35,10 @@ public sealed class ContentSyncQuotaTests
 public sealed class ContentAdmissionStartTests : FakeTableTest
 {
     [Fact]
+    public void The_content_hold_deadline_is_accepted_by_the_admission_controller() =>
+        Assert.InRange(ContentSync.ContentAdmissionDeadline, TimeSpan.FromTicks(1), NetAdmission.MaxDeadline);
+
+    [Fact]
     public void An_absent_native_server_role_does_not_cache_a_noop_admission_registration()
     {
         Assert.True(ContentSync.ServerRole);
@@ -43,5 +47,45 @@ public sealed class ContentAdmissionStartTests : FakeTableTest
         var flags = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;
         typeof(ContentSync).GetMethod("EnsureContentAdmission", flags)!.Invoke(null, null);
         Assert.Null(typeof(ContentSync).GetField("_contentAdmission", flags)!.GetValue(null));
+    }
+}
+
+// The native serializer's full-room and omission bounds are tested by apply_report_test.cpp. This exercises its
+// summary through the real managed ApplyJson consumer and the acknowledgement used by the sync send path.
+public sealed unsafe class ContentSyncFullRoomTests : FakeTableTest
+{
+    private static int _mode, _received, _calls;
+    [System.Runtime.InteropServices.UnmanagedCallersOnly(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
+    private static int Apply(ulong owner, NativeStr document, NativeStr source, byte* report, nuint cap, nuint* len)
+    {
+        _calls++;
+        _received=JsonNode.Parse(document.ToString())!["buffs"]!["add"]!.AsArray().Count;
+        var text = _mode == 2 ? "{invalid" : System.Text.Json.JsonSerializer.Serialize(new {
+            applied = _mode == 1 ? 4095 : 4096,
+            errors = _mode == 1 ? new[] { "CapsBuff_4095: CapacityExceeded: no added-buff room" } : Array.Empty<string>(),
+            warnings = Enumerable.Repeat("clone unchanged",8).ToArray(),errorCount = _mode == 1 ? 1 : 0,
+            warningCount = 4096,conflictCount = 0,more = 4088 });
+        var bytes=System.Text.Encoding.UTF8.GetBytes(text);
+        bytes.AsSpan(0,Math.Min(bytes.Length,(int)cap-1)).CopyTo(new Span<byte>(report,(int)cap));
+        *len=(nuint)bytes.Length;return 0;
+    }
+    [Theory]
+    [InlineData(0)] [InlineData(1)] [InlineData(2)]
+    public void A_full_room_acknowledges_only_complete_success_and_preserves_the_refusal(int mode)
+    {
+        var table=Alloc<ContentNative.Table>();
+        table->Header=new ServiceHeader {Size=(uint)sizeof(ContentNative.Table),Version=4};table->ApplyJson=&Apply;
+        Swap(typeof(Content),"_table",Box(table));
+        var adds=new JsonArray(Enumerable.Range(0,4096).Select(i=>(JsonNode)new JsonObject { ["guid"]=Guid.NewGuid().ToString(),["name"]=$"CapsBuff_{i:D4}" }).ToArray());
+        var document=new JsonObject {["buffs"]=new JsonObject {["add"]=adds}}.ToJsonString();
+        _mode=mode;_calls=0;
+        var r=ContentSync.ApplyJson(document,"full-room test");
+        var ack=ContentSync.MakeApplyAck(123,r.Rc,r.Applied,0,r.Errors,1);
+        Assert.Equal(4096,_received);Assert.Equal(1,_calls); // no size-query re-application
+        Assert.Equal(mode==0?(byte)0:(byte)1,ack.Result);
+        Assert.Equal(123u,ack.StateId);
+        if(mode==0) {Assert.Equal(4096u,ack.Applied);Assert.Equal(0u,ack.Errors);}
+        if(mode==1) Assert.Contains("CapsBuff_4095: CapacityExceeded",ack.Detail);
+        if(mode==2) Assert.Contains("incomplete or invalid",ack.Detail);
     }
 }

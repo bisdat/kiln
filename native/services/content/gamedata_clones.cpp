@@ -1864,10 +1864,6 @@ void KILN_CALL on_client_pre(const KilnTickInfo* tick, void*) {
 }  // namespace
 
 void clones_boot() {
-    kiln::capacity::pending_io::diagnostic = [](const auto& path, const auto& why) {
-        LOGW("gamedata: stored definition %s refused: %s (left in place)", path.string().c_str(), why.c_str());
-    };
-
     g_defs_owner = g_api->owner_create(KilnStr{"gamedata:definitions", 20});
     set_owner_label(g_defs_owner, "gamedata definitions");
     uintptr_t fn = 0;
@@ -2182,6 +2178,19 @@ std::map<std::string, KilnOwner> g_pending_owners;          // mod -> the owner 
 
 std::filesystem::path u8path(const std::string& s) { return std::filesystem::path(std::u8string(s.begin(), s.end())); }
 
+kiln::capacity::pending_io::TrustedBase pending_base() {
+    // Called by every entry point, including early next-start writes before clones_boot in an embedding host.
+    static const bool hooked = [] {
+      kiln::capacity::pending_io::diagnostic = [](const auto& path,const auto& why) {
+        const auto bytes=path.u8string();
+        LOGW("gamedata: stored definition %s refused: %s (left in place)",
+            std::string(bytes.begin(),bytes.end()).c_str(),why.c_str());
+      };
+      return true;
+    }();
+    (void)hooked;
+    return {u8path(data_dir() + kSep + "gamedata")};
+}
 std::string pending_dir() { return data_dir() + kSep + "gamedata" + kSep + "pending"; }
 
 std::string pending_file(const std::string& mod, const uint8_t guid[16]) { return pending_dir() + kSep + mod + kSep + guid_text(guid) + ".json"; }
@@ -2355,7 +2364,7 @@ KilnResult define_buff_result(KilnOwner owner, const std::string& json, uint32_t
                 const std::string bytes = doc.dump(2);
                 if (bytes.size() > 65536) {
                     refuse(KILN_DEFINE_STORAGE_FAILURE, "the stored definition exceeds the 65536-byte replay limit");
-                } else if (!kiln::capacity::pending_store_write(u8path(pending_dir()), u8path(file), bytes, &err)) {
+                } else if (!kiln::capacity::pending_store_write(pending_base(), u8path(pending_dir()), u8path(file), bytes, &err)) {
                     refuse(KILN_DEFINE_STORAGE_FAILURE, err + ": " + file);
                 } else {
                     std::lock_guard rl(g_rc_mu);
@@ -2381,7 +2390,7 @@ KilnResult define_buff_result(KilnOwner owner, const std::string& json, uint32_t
                     else if (!asked)
                         notes.push_back("the game's buff lookup is not resolved on this build (gamedata.buff_lookup): not checked with it");
                     std::error_code ec;
-                    if (kiln::capacity::pending_io::remove(u8path(pending_file(mod, probe.guid))))
+                    if (kiln::capacity::pending_io::remove(pending_base(), u8path(pending_file(mod, probe.guid))))
                         LOGI("gamedata: buff %s of %s is registered now: its stored definition for the next start is removed", probe.name.c_str(),
                              mod.c_str());
                     std::lock_guard rl(g_rc_mu);
@@ -2487,12 +2496,12 @@ void pending_replay() {
     if (!g_pending_boot_captured) {
         g_pending_boot_captured = true;
         kiln::capacity::PendingScan scan;
-        const auto files = kiln::capacity::pending_files_bounded(u8path(pending_dir()), &scan);
+        const auto files = kiln::capacity::pending_files_bounded(pending_base(), u8path(pending_dir()), &scan);
         if (scan.unread) kiln::capacity::pending_io::refused(u8path(pending_dir()),
             "pending store bound reached; at least " + std::to_string(scan.unread) + " entries left unread; enumeration stopped (4096 files / 268435456 bytes)");
         for (const auto& file : files) {
             std::string text;
-            if (kiln::capacity::pending_io::read(file.path, &text, 65536))
+            if (kiln::capacity::pending_io::read(pending_base(), file.path, &text, 65536))
                 g_pending_boot_files.push_back({file, kiln::capacity::sha256(text)});
             else kiln::capacity::pending_io::refused(file.path,"unreadable, oversized or unsafe boot pending file");
         }
@@ -2509,7 +2518,7 @@ void pending_replay() {
             kiln::capacity::pending_io::refused(f.path, why);
         };
         std::string text;
-        if (!mod_folder_ok(f.mod) || !kiln::capacity::pending_io::read(f.path, &text, 65536)) {
+        if (!mod_folder_ok(f.mod) || !kiln::capacity::pending_io::read(pending_base(), f.path, &text, 65536)) {
             kiln::capacity::pending_io::refused(f.path,"unreadable, oversized or unsafe pending file");
             continue;
         }
@@ -2607,7 +2616,7 @@ void pending_settle() {
         }
     }
     std::error_code ec;
-    for (const auto& f : gone) kiln::capacity::pending_io::remove(f);
+    for (const auto& f : gone) kiln::capacity::pending_io::remove(pending_base(), f);
     if (!gone.empty()) publish_budget();
 }
 
