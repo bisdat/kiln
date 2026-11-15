@@ -10,6 +10,10 @@ reads answer from the snapshot of the game's files that the launcher's Play step
 game build. Without one, `mods.boot.game_data` is off, the first read throws, and this mod is left out of the boot generation by
 name (its runtime instance is refused until a restart); other mods are not affected.
 
+The Boot Token has an icon of its own, `icons/token.png` (a wooden token with a frost mark): a PNG of the mod's folder with a
+relative path, as for an item defined in `OnLoad`. The boot generation names it by its full path in the folder, so the first start
+shows it (since 0.2.0-dev.29; dev.28 left a boot-staged item with its starter's icon, the bones'). It needs `"clients": "mod"`.
+
 It also stages one **resource patch** (`friction-mark`): the first terrain config's `frictionFactor` in the game's terraforming
 registry (`keen::TerraformingEfficiencyRegistryResource` 15506ca1-f0b2-8a43-a087-75a7c83d5596), 1.0 in the game, 0.999 here. Nobody
 can see a 0.1 % change; it is there so a start can read the patched value back (`OnLoad` logs it once the content is ready, and the

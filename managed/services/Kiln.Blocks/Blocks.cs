@@ -191,6 +191,12 @@ internal sealed class ModBlocks(string id, ulong owner)
     public bool DataLoaded;
     public readonly HashSet<string> Compiling = new();
     public string? ManifestClients;
+    /// <summary>The mod's folder while its OnBoot definitions lower (BootLowering.LowerOwner): no loaded mod lists the mod yet, so the
+    /// files its blocks name are read against the folder the boot phase gives. Null on every other ledger.</summary>
+    public string? BootDirectory;
+    /// <summary>The folder a block's file of mod <paramref name="mod"/> is read against: the boot phase's for this ledger's own mod while its
+    /// OnBoot definitions lower, else the loaded mod's (empty when no loaded mod is <paramref name="mod"/>).</summary>
+    public string DirectoryOf(string mod) => BootDirectory is { Length: > 0 } dir && mod == Id ? dir : BlocksBridge.ModDirectory(mod);
     /// <summary>The owner is the mod's own, not one of Kiln's for a mod with only data files.</summary>
     public bool OwnedByMod;
     /// <summary>Set on the isolated ledger of a kind's plan (Kinds/KindTransaction.cs): the consumer's real ledger, whose blocks

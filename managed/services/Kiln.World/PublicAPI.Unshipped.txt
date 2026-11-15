@@ -1,1 +1,24 @@
 #nullable enable
+Kiln.ComponentWrittenEvent.Writer.get -> string?
+Kiln.ComponentWrittenEvent.Writers.get -> System.Collections.Generic.IReadOnlyList<string!>!
+static Kiln.World.GetWaitingTransformScales() -> System.Collections.Generic.IReadOnlyList<Kiln.WaitingTransformScale!>!
+Kiln.WaitingTransformScale
+Kiln.WaitingTransformScale.WaitingTransformScale(string! Mod, System.Guid? Template, Kiln.WorldPosition Position, Kiln.Scale3 Scale, string! Reason) -> void
+Kiln.WaitingTransformScale.<Clone>$() -> Kiln.WaitingTransformScale!
+Kiln.WaitingTransformScale.Deconstruct(out string! Mod, out System.Guid? Template, out Kiln.WorldPosition Position, out Kiln.Scale3 Scale, out string! Reason) -> void
+Kiln.WaitingTransformScale.Equals(Kiln.WaitingTransformScale? other) -> bool
+Kiln.WaitingTransformScale.Mod.get -> string!
+Kiln.WaitingTransformScale.Mod.init -> void
+Kiln.WaitingTransformScale.Template.get -> System.Guid?
+Kiln.WaitingTransformScale.Template.init -> void
+Kiln.WaitingTransformScale.Position.get -> Kiln.WorldPosition
+Kiln.WaitingTransformScale.Position.init -> void
+Kiln.WaitingTransformScale.Scale.get -> Kiln.Scale3
+Kiln.WaitingTransformScale.Scale.init -> void
+Kiln.WaitingTransformScale.Reason.get -> string!
+Kiln.WaitingTransformScale.Reason.init -> void
+override Kiln.WaitingTransformScale.Equals(object? obj) -> bool
+override Kiln.WaitingTransformScale.GetHashCode() -> int
+override Kiln.WaitingTransformScale.ToString() -> string!
+static Kiln.WaitingTransformScale.operator !=(Kiln.WaitingTransformScale? left, Kiln.WaitingTransformScale? right) -> bool
+static Kiln.WaitingTransformScale.operator ==(Kiln.WaitingTransformScale? left, Kiln.WaitingTransformScale? right) -> bool

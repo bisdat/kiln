@@ -107,6 +107,8 @@ public static class Game
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]  // frame 1 is the caller
     public static void AssertTickThread()
     {
+        if (SliceGuard.Depth > 0)
+            throw new InvalidOperationException("This cannot run in a program wrap's handler (it runs inside the world's step); use slice.Post.");
         if (IsTickThread) return;
         throw new InvalidOperationException(InBoot ? NotInBoot(CallerName()) : "This must run on the tick thread; use Scheduler.Post.");
     }
@@ -114,6 +116,8 @@ public static class Game
     /// <summary>As <see cref="AssertTickThread()"/>, naming <paramref name="member"/> in OnBoot.</summary>
     internal static void AssertTickThread(string member)
     {
+        if (SliceGuard.Depth > 0)
+            throw new InvalidOperationException($"{member} cannot run in a program wrap's handler (it runs inside the world's step); use slice.Post.");
         if (IsTickThread) return;
         throw new InvalidOperationException(InBoot ? NotInBoot(member) : "This must run on the tick thread; use Scheduler.Post.");
     }

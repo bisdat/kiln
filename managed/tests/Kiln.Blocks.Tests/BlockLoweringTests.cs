@@ -5,6 +5,7 @@ using Xunit;
 
 namespace Kiln.BlockTests;
 
+[Collection("item icons")]
 public sealed class BlockLoweringTests
 {
     private static JsonObject Lower<T>(T b) where T : class, IBlock =>
@@ -50,12 +51,32 @@ public sealed class BlockLoweringTests
     public void Colliders_reject_non_finite_centers() =>
         Assert.Equal("collider.center", Assert.Throws<BlockError>(() => Prop(1, float.NaN)).Field);
 
+    private sealed class SoundMods(string directory) : IModsBackend
+    {
+        public IReadOnlyList<ModEntry> All => [new("other-mod", "Other", "1", directory, ModSide.Both, ModState.Loaded, null, [], 0, null)];
+        public ModSide Side => ModSide.Server;
+        public ModEntry? Get(string id) => All.FirstOrDefault(m => m.Id == id);
+        public ModStats Stats(string id) => default;
+        public bool Send(ModContext? sender, string targetId, string method, object? payload) => false;
+        public Task<ModOperationResult> Request(ModOperation op, string arg) => throw new NotSupportedException();
+        public void Request(ModOperation op, string arg, Action<ModOperationResult> done, ModContext? caller) => throw new NotSupportedException();
+    }
+
     [Fact]
     public void Sound_handles_keep_their_identity_in_another_mod()
     {
-        var h = Compiler.Lower(new ModBlocks("other-mod", 1) { ManifestClients = "mod" }, "hum", new SoundBlock { Clips = ["audio/a.wav"] }).Handle;
-        SoundRef sound = (BlockHandle<SoundBlock>)h;
-        Assert.Equal(h.Guid.ToString(), sound.Value);
+        var dir = Directory.CreateTempSubdirectory("kiln-sound-ref-").FullName;
+        var previous = ModsBackend.Current;
+        try
+        {
+            ModsBackend.Current = new SoundMods(dir);
+            Directory.CreateDirectory(Path.Combine(dir, "audio"));
+            File.WriteAllBytes(Path.Combine(dir, "audio", "a.wav"), []);
+            var h = Compiler.Lower(new ModBlocks("other-mod", 1) { ManifestClients = "mod" }, "hum", new SoundBlock { Clips = ["audio/a.wav"] }).Handle;
+            SoundRef sound = (BlockHandle<SoundBlock>)h;
+            Assert.Equal(h.Guid.ToString(), sound.Value);
+        }
+        finally { ModsBackend.Current = previous; Directory.Delete(dir, true); }
     }
 
     [Fact]

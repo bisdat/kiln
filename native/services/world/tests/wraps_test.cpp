@@ -5,6 +5,7 @@
 // budgets, owners, two stress rows on 8 threads), in_program on the threads inside and outside, and the v4 ABI layout
 // (tests/abi.json).
 #include "../game_programs.cpp"
+#include "../layout.cpp"
 #include "../wraps.cpp"
 #include <barrier>
 
@@ -28,7 +29,9 @@ std::atomic<uintptr_t> g_world{0};
 std::atomic<uint64_t> g_internal_runs{0};
 std::atomic<bool> g_world_live{false};
 thread_local bool t_in_program = false;
+std::atomic<int> g_stop_timeout_logs{0};
 void logf(int, const char* fmt, ...) {
+    if (std::strstr(fmt, "wrap drain timed out")) ++g_stop_timeout_logs;
     if (!std::getenv("KILN_TEST_LOG")) return;
     va_list ap;
     va_start(ap, fmt);
@@ -57,16 +60,50 @@ bool seh_cas_ptr(uintptr_t address, uintptr_t expected, uintptr_t desired, uintp
     *seen = expected;
     return true;
 }
+bool seh_attr_changed(void (*f)(void*, void*), void* component, void* registry, unsigned long* code) {
+    try {
+        f(component, registry);
+        return true;
+    } catch (int) {
+        *code = 0xC0000005u;
+        return false;
+    }
+}
 // kiln.types with only what kiln.world asks of it here: whether native SET owns the program runner.
 std::atomic<uint32_t> g_fake_external{0};
+// kiln.types: the external runner, and the reflected sizes of a few components (a type handle is its size).
 const KilnTypesApi* program_types() {
     static KilnTypesApi t = [] {
         KilnTypesApi v{};
         v.header = {sizeof(KilnTypesApi), KILN_TYPES_VERSION};
         v.external_runner = [] { return g_fake_external.load(); };
+        v.type_by_name = [](KilnStr n) -> const KilnType* {
+            const std::string s(n.ptr, n.len);
+            const uintptr_t size = s == "keen::ecs::Fuel" ? 16 : s == "keen::ecs::DynamicFuelSetup" ? 24 :
+                                   s == "keen::ecs::CurrentTransform" ? 48 : 0;
+            return reinterpret_cast<const KilnType*>(size);
+        };
+        v.type_info = [](const KilnType* type, KilnTypeInfo* out) -> KilnResult {
+            out->type_size = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(type));
+            out->name = reinterpret_cast<uintptr_t>(type) == 1 ? kstr("AttributeComponent") : kstr("Fixture");
+            out->inner = reinterpret_cast<uintptr_t>(type) == 16 ? reinterpret_cast<const KilnType*>(1) : nullptr;
+            return KILN_OK;
+        };
         return v;
     }();
     return &t;
+}
+uint32_t fnv1a(std::string_view value, uint32_t hash) {
+    for (unsigned char c : value) hash = (hash ^ c) * 16777619u;
+    return hash;
+}
+// The world's component/template/event maps: one hash -> type index map for all of them.
+std::map<uint32_t, uint16_t> g_type_index;
+bool map_find_u16(uintptr_t, uint32_t key, uint16_t* value) {
+    const auto it = g_type_index.find(key);
+    if (it == g_type_index.end()) return false;
+    if (value) *value = it->second;
+    return true;
 }
 }  // namespace kw
 
@@ -121,6 +158,22 @@ uint16_t mask() {
 }
 void set_mask(uint16_t m) { std::memcpy(g_world_mem + kStorage + kMask, &m, 2); }
 
+// kiln.hooks with only its owner cleanup: the test calls the observer as the core would when it revokes an owner.
+bool g_hooks_on = true;
+KilnOwnerRetiringFn g_retiring_fn = nullptr;
+void* g_retiring_user = nullptr;
+KilnOwner g_retiring_observer = 0;
+KilnHooksApi g_fake_hooks = [] {
+    KilnHooksApi h{};
+    h.header = {sizeof(KilnHooksApi), KILN_HOOKS_VERSION};
+    h.subscribe_owner_retiring = [](KilnOwner observer, KilnOwnerRetiringFn fn, void* user, KilnHandle* out) -> KilnResult {
+        g_retiring_observer = observer, g_retiring_fn = fn, g_retiring_user = user;
+        if (out) *out = 1;
+        return KILN_OK;
+    };
+    h.unsubscribe_owner_retiring = [](KilnHandle) -> KilnResult { return KILN_OK; };
+    return h;
+}();
 KilnApi g_fake{};
 void fake_api() {
     g_fake.size = sizeof(KilnApi);
@@ -136,8 +189,11 @@ void fake_api() {
     g_fake.world = [](uint32_t kind) { return kind < KILN_WORLD_KINDS ? g_live_world[kind] : uintptr_t{0}; };
     g_fake.server_world = [] { return g_live_world[0]; };
     g_fake.side = [] { return g_side; };
-    g_fake.service = [](KilnStr, uint32_t) -> const void* { return nullptr; };
+    g_fake.service = [](KilnStr name, uint32_t) -> const void* {
+        return g_hooks_on && std::string(name.ptr, name.len) == KILN_HOOKS_SERVICE ? &g_fake_hooks : nullptr;
+    };
     g_fake.path = [](int32_t, char*, size_t, size_t*) -> KilnResult { return KILN_ERR_UNAVAILABLE; };
+    g_fake.symbol = [](KilnStr, uintptr_t*) -> KilnResult { return KILN_ERR_NOT_FOUND; };
     g_api = &g_fake;
 }
 
@@ -192,6 +248,22 @@ void layout() {
     L.entry_id = 8;
     L.job_entity_count = 0x838;
     L.job_entity_list = 0x830;
+    // the job's group counts (chapter 06a 2.3) and the maps per-entity work reads
+    L.job_tpl_count = 0x4B0;
+    L.job_read_count = 0x4B8;
+    L.job_write_count = 0x4BA;
+    L.job_singletons = 0xC0;
+    L.singletons_count = 0x400;
+    L.job_other_tpl_count = 0x7F8;
+    L.job_other_count = 0x7A8;
+    L.job_events_in_count = 0x1A8;
+    L.job_events_out_count = 0x1B0;
+    L.reg_components = 0x10;
+    L.reg_templates = 0x20;
+    L.storage_entities = 0x40;
+    L.entity_layout = 0x18;
+    L.map = MapFields{0x08, 0x10, 0x28, 0x40, 0x54};
+    F.write = true;
 }
 
 KilnTickInfo tick(uint64_t step) {
@@ -913,15 +985,39 @@ void wraps_owners() {
     check(game_wraps_release(40, &pending) == KILN_OK && pending == 0 && winfo(a).state == KILN_WRAP_REMOVED &&
               winfo(b).state == KILN_WRAP_REMOVED && update_of(wentry(0)) == reinterpret_cast<uintptr_t>(kWUpdates[0]),
           "after the Pre nothing of the owner can run");
-    // a revoked owner's wraps go in a Pre (at most once a second)
-    g_fake.post = [](KilnOwner owner, KilnTaskFn, void*) -> KilnResult { return owner == 41 ? KILN_ERR_REVOKED : KILN_OK; };
+    // a revoked owner, told by kiln.hooks' owner cleanup: its stages are gone at once (no Pre, no probe), out of the
+    // chain in the next Pre; a pending one is removed at once
+    check(g_retiring_subscribed && g_retiring_fn && g_retiring_observer == g_owner, "kiln.world subscribes to owner cleanup");
     const KilnHandle d = wrap(41, "fuel_setup", KILN_WRAP_BEFORE, 0, &st_trace, nullptr);
     wpre();
-    g_next_reap = {};
+    const KilnHandle e = wrap(41, "fuel_network", KILN_WRAP_AFTER, 0, &st_trace, nullptr);
+    g_retiring_fn(41, g_retiring_user);
+    {
+        Job job(10);
+        g_trace.clear();
+        g_tracing = true;
+        run_slice(wentry(0), job);
+        g_tracing = false;
+        check(winfo(d).gone == 1 && winfo(e).state == KILN_WRAP_REMOVED && winfo(e).reason == KILN_WRAP_OWNER_GONE &&
+                  g_trace == std::vector<std::string>({"orig"}),
+              "a retiring owner's stages are gone at once: not called before the Pre, its pending wrap removed");
+    }
+    wpre();
+    check(winfo(d).state == KILN_WRAP_REMOVED && winfo(d).reason == KILN_WRAP_OWNER_GONE, "and out of the chain in the Pre");
+    // without kiln.hooks' owner cleanup (an older core): the probe, once a second
+    g_hooks_on = false;
+    wraps_init();
+    check(!g_retiring_subscribed, "no owner cleanup: kiln.world falls back to the probe");
+    g_fake.post = [](KilnOwner owner, KilnTaskFn, void*) -> KilnResult { return owner == 42 ? KILN_ERR_REVOKED : KILN_OK; };
+    const KilnHandle f = wrap(42, "fuel_setup", KILN_WRAP_BEFORE, 0, &st_trace, nullptr);
     wpre();
     g_next_reap = {};
     wpre();
-    check(winfo(d).state == KILN_WRAP_REMOVED && winfo(d).reason == KILN_WRAP_OWNER_GONE, "a revoked owner's wraps are removed");
+    g_next_reap = {};
+    wpre();
+    check(winfo(f).state == KILN_WRAP_REMOVED && winfo(f).reason == KILN_WRAP_OWNER_GONE, "the probe finds a revoked owner's wraps");
+    g_hooks_on = true;
+    wraps_init();
 }
 
 // No call starts into a released owner's stages, also while its world keeps stepping (no Pre in between); a call that
@@ -982,6 +1078,422 @@ void release_under_load() {
     wpre();
     check(wraps_test_in_flight(0) == 0 && update_of(wentry(1)) == reinterpret_cast<uintptr_t>(kWUpdates[1]),
           "in-flight 0 and the update back after the Pre");
+}
+
+// STOPPING must wait for an entered stage without holding the registry lock it may need.
+void stopping_under_load() {
+    wworld(0);
+    world_event(KILN_WORLD_STARTED, KILN_WORLD_SERVER);
+    wpre();
+    struct Blocked { std::atomic<bool> entered{false}, release{false}; std::atomic<int> calls{0}; KilnHandle h = 0; } b;
+    b.h = wrap(91, "fuel_network", KILN_WRAP_BEFORE, 0, [](KilnGameSlice*, void* user) {
+        auto& b = *static_cast<Blocked*>(user);
+        ++b.calls;
+        b.entered = true;
+        while (!b.release.load()) std::this_thread::yield();
+        KilnGameWrapInfo info{};
+        info.size = sizeof info;
+        game_wrap_info(b.h, &info); // needs g_mu: STOPPING must not hold it while waiting
+    }, &b);
+    wpre();
+    const auto trampoline = reinterpret_cast<UpdateFn>(update_of(wentry(1)));
+    std::thread worker([&] { Job j(3); run_slice(wentry(1), j); });
+    while (!b.entered.load()) std::this_thread::yield();
+    std::atomic<bool> stopped{false};
+    std::thread stopper([&] { world_event(KILN_WORLD_STOPPING, KILN_WORLD_SERVER); stopped = true; });
+    auto& entry = *reinterpret_cast<uintptr_t*>(wentry(1) + kEntryUpdateAt);
+    while (std::atomic_ref<uintptr_t>(entry).load() == reinterpret_cast<uintptr_t>(trampoline)) std::this_thread::yield();
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    check(!stopped.load(), "STOPPING waits for a blocked stage before releasing world state");
+    // A runner that already fetched the old pointer still forwards after STOPPING.
+    Job late(3);
+    ProgramCtx ctx{late.bytes, 0, 0};
+    trampoline(&ctx);
+    check(b.calls.load() == 1, "a late trampoline entry after STOPPING starts no stage");
+    b.release = true;
+    worker.join();
+    stopper.join();
+    check(stopped.load() && wraps_test_in_flight(0) == 0 && winfo(b.h).state == KILN_WRAP_PENDING,
+          "blocked stage finishes normally; stop drains and returns it to pending");
+    game_program_unwrap(b.h);
+    world_event(KILN_WORLD_STARTED, KILN_WORLD_SERVER);
+    wpre();
+}
+
+void stopping_timeout() {
+    struct Blocked { std::atomic<bool> entered{false}, release{false}; } b;
+    const auto h = wrap(93, "fuel_network", KILN_WRAP_BEFORE, 0, [](KilnGameSlice*, void* user) {
+        auto& b = *static_cast<Blocked*>(user);
+        b.entered = true;
+        while (!b.release.load()) std::this_thread::yield();
+    }, &b);
+    wpre();
+    std::thread worker([&] { Job j(3); run_slice(wentry(1), j); });
+    while (!b.entered.load()) std::this_thread::yield();
+    g_stop_wait_ms = 10; // same production branch, a short test bound
+    const auto logs = g_stop_timeout_logs.load();
+    world_event(KILN_WORLD_STOPPING, KILN_WORLD_SERVER);
+    check(g_stop_timeout_logs.load() == logs + 1 && winfo(h).running == 1 && !g_retired.empty(),
+          "bounded stop logs once and retains the chain while a callback still runs");
+    b.release = true;
+    worker.join();
+    game_program_unwrap(h);
+    g_stop_wait_ms = 2000;
+    world_event(KILN_WORLD_STARTED, KILN_WORLD_SERVER);
+    wpre();
+    check(g_retired.empty(), "timed-out stop's chain is reclaimed only after its callback exits");
+}
+
+void retirement_under_load() {
+    struct Blocked { std::atomic<bool> entered{false}, release{false}; std::atomic<int> calls{0}, exits{0}; } b;
+    const KilnHandle h = wrap(92, "fuel_network", KILN_WRAP_BEFORE, 0, [](KilnGameSlice*, void* user) {
+        auto& b = *static_cast<Blocked*>(user);
+        ++b.calls;
+        b.entered = true;
+        while (!b.release.load()) std::this_thread::yield();
+        ++b.exits;
+    }, &b);
+    wpre();
+    std::thread worker([&] { Job j(3); run_slice(wentry(1), j); });
+    while (!b.entered.load()) std::this_thread::yield();
+    g_retiring_fn(92, g_retiring_user); // synchronous admission closure, never a synchronous drain
+    Job later(3);
+    for (int i = 0; i < 20; ++i) run_slice(wentry(1), later);
+    check(b.calls.load() == 1 && b.exits.load() == 0 && winfo(h).running == 1,
+          "owner retirement starts no new callback while the existing one is blocked");
+    b.release = true;
+    worker.join();
+    uint32_t pending = 99;
+    game_wraps_release(92, &pending);
+    check(b.exits.load() == 1 && pending == 0, "retired callback finishes normally before its user data can be freed");
+    wpre();
+}
+
+// ---- per entity (S4) ----
+// The fake engine's iterator for fuel_setup: [ctx][T FuelSetup][R CurrentTransform][W DynamicFuelSetup x6][W Fuel x6]
+// (type indices FuelSetup 3, CurrentTransform 5, DynamicFuelSetup 10, Fuel 20: the WRITE group is NOT descriptor
+// order, which lists Fuel first). Each slot of row r points at base(slot) + 64 r; a write record's tracker is rec[5].
+constexpr uint32_t kRowStride = 64;
+uintptr_t g_slot_override[32];  // a slot whose rows point into real memory (base + 64 r)
+uintptr_t slot_base(int slot) {
+    return g_slot_override[slot] ? g_slot_override[slot] : 0x7000000ull + 0x10000ull * static_cast<unsigned>(slot);
+}
+std::atomic<int> g_marks{0};
+std::atomic<uint64_t> g_mark_rec{0};
+void fake_iter_begin(void*, void* iter, uint32_t size) {
+    std::memset(iter, 0, size);
+}
+bool fake_iter_next(void* raw, void* iter, uint32_t size) {
+    auto* ctx = static_cast<ProgramCtx*>(raw);
+    uint64_t count = 0;
+    std::memcpy(&count, ctx->job + 0x838, 8);
+    if (ctx->index >= count) return false;
+    auto* it = static_cast<uint64_t*>(iter);
+    const uint32_t r = ctx->index;
+    for (uint32_t k = 1; k < size / 8; ++k) it[k] = slot_base(static_cast<int>(k)) + uint64_t{kRowStride} * r;
+    it[3 + 5] = 0xAA00 + 3;  // trackers of the two write records
+    it[9 + 5] = 0xAA00 + 9;
+    if (g_slot_override[15]) it[15] = g_slot_override[15];  // the singleton: one object, not per row
+    ctx->index = r + 1;
+    return true;
+}
+uint32_t* fake_current_entity(void* raw, uint32_t* out) {
+    auto* ctx = static_cast<ProgramCtx*>(raw);
+    const uint32_t* ids = nullptr;
+    std::memcpy(&ids, ctx->job + 0x830, sizeof ids);
+    *out = ctx->index ? ids[(ctx->index - 1) * 4] : 0;
+    return out;
+}
+void fake_mark(void* tracker, void*, void*, void*, uint16_t, uint8_t) {
+    g_marks.fetch_add(1);
+    g_mark_rec = reinterpret_cast<uintptr_t>(tracker);
+}
+
+// The game's attribute formulas: a Fuel block {u32 root; u16 offset; u8 flags; u8 count; s32 current; s32 max} is clamped.
+std::atomic<int> g_attr_calls{0};
+uintptr_t g_attr_registry = 0;
+void fake_attr_changed(void* component, void* registry) {
+    g_attr_calls.fetch_add(1);
+    g_attr_registry = reinterpret_cast<uintptr_t>(registry);
+    auto* c = static_cast<uint8_t*>(component);
+    int32_t cur = 0, max = 0;
+    std::memcpy(&cur, c + 8, 4);
+    std::memcpy(&max, c + 12, 4);
+    if (cur > max) std::memcpy(c + 8, &max, 4);
+}
+std::vector<KilnResult> g_attr_rcs;
+uint32_t KILN_CALL each_attr(uint64_t* iter, uint32_t row, KilnEntity, void* user) {
+    auto* sl = static_cast<KilnGameSlice*>(user);
+    if (row != 0) return 1;
+    auto* fuel = static_cast<uint8_t*>(game_slice_slot(sl, iter, KILN_GAME_LIST_WRITE, 0, nullptr, nullptr));
+    if (!fuel) {
+        g_attr_rcs.push_back(-1);
+        return 1;
+    }
+    const int32_t over = 5000;
+    std::memcpy(fuel + 8, &over, 4);
+    g_attr_rcs.push_back(game_slice_attr_changed(sl, iter, KILN_GAME_LIST_WRITE, 0));
+    g_attr_rcs.push_back(game_slice_attr_changed(sl, iter, KILN_GAME_LIST_READ_OPT, 0));
+    return 1;
+}
+void KILN_CALL st_attr(KilnGameSlice* s, void*) { game_slice_iterate(s, &each_attr, s); }
+
+// fuel_setup's descriptor lists (names as the engine stores them)
+NameRef g_fs_sread[] = {{"impact::AttributeRegistry", 25}};
+NameRef g_fs_tpl[] = {{"FuelSetup", 9}}, g_fs_ropt[] = {{"CurrentTransform", 16}},
+        g_fs_write[] = {{"Fuel", 4}, {"DynamicFuelSetup", 16}}, g_unser[] = {{"Health", 6}};
+void counts(Job& j, uint8_t t, uint16_t r, uint16_t w) {
+    j.bytes[0x4B0] = t;
+    std::memcpy(j.bytes + 0x4B8, &r, 2);
+    std::memcpy(j.bytes + 0x4BA, &w, 2);
+}
+
+struct Seen {
+    std::vector<uint32_t> ids;
+    std::vector<uint32_t> rows;
+    uint32_t count = 0;
+    std::vector<KilnResult> rcs;
+    uintptr_t fuel = 0, dfs = 0, ct = 0, tpl = 0, archetype = 0;
+    uint32_t fuel_size = 0, ct_size = 0;
+    uint8_t fuel_writable = 9, ct_writable = 9;
+    bool slot_outside = true;
+    uint32_t index_after = 99;
+};
+Seen g_seen4;
+uint32_t KILN_CALL each_record(uint64_t* iter, uint32_t row, KilnEntity e, void* user) {
+    auto* sl = static_cast<KilnGameSlice*>(user);
+    g_seen4.ids.push_back(e);
+    g_seen4.rows.push_back(row);
+    if (row == 1) {
+        uint32_t size = 0;
+        uint8_t w = 0;
+        g_seen4.fuel = reinterpret_cast<uintptr_t>(game_slice_slot(sl, iter, KILN_GAME_LIST_WRITE, 0, &size, &w));
+        g_seen4.fuel_size = size, g_seen4.fuel_writable = w;
+        g_seen4.dfs = reinterpret_cast<uintptr_t>(game_slice_slot(sl, iter, KILN_GAME_LIST_WRITE, 1, nullptr, nullptr));
+        g_seen4.ct = reinterpret_cast<uintptr_t>(game_slice_slot(sl, iter, KILN_GAME_LIST_READ_OPT, 0, &size, &w));
+        g_seen4.ct_size = size, g_seen4.ct_writable = w;
+        g_seen4.tpl = reinterpret_cast<uintptr_t>(game_slice_slot(sl, iter, KILN_GAME_LIST_TPL, 0, nullptr, nullptr));
+        g_seen4.rcs.push_back(game_slice_mark(sl, iter, KILN_GAME_LIST_WRITE, 0));
+        g_seen4.rcs.push_back(game_slice_mark(sl, iter, KILN_GAME_LIST_WRITE, 0));  // once per entity and component
+        g_seen4.rcs.push_back(game_slice_mark(sl, iter, KILN_GAME_LIST_READ_OPT, 0));
+        g_seen4.rcs.push_back(game_slice_mark(sl, iter, KILN_GAME_LIST_WRITE, 5));
+        g_seen4.rcs.push_back(game_slice_iterate(sl, &each_record, sl));  // no iteration inside an iteration
+    }
+    if (row == 2) g_seen4.rcs.push_back(game_slice_mark(sl, iter, KILN_GAME_LIST_WRITE, 0));  // the next entity
+    return 0;
+}
+void KILN_CALL st_iterate(KilnGameSlice* s, void*) {
+    g_seen4.count = s->count;
+    uint64_t dummy[4] = {};
+    g_seen4.slot_outside = game_slice_slot(s, dummy, KILN_GAME_LIST_WRITE, 0, nullptr, nullptr) == nullptr &&
+                           game_slice_mark(s, dummy, KILN_GAME_LIST_WRITE, 0) == KILN_ERR_WRONG_THREAD;
+    g_seen4.rcs.push_back(game_slice_iterate(s, &each_record, s));
+    g_seen4.index_after = reinterpret_cast<ProgramCtx*>(s->program_ctx)->index;
+    game_slice_archetype(s, &g_seen4.archetype);
+}
+uint32_t KILN_CALL each_stop(uint64_t*, uint32_t row, KilnEntity, void*) { return row == 2; }
+void KILN_CALL st_iterate_after(KilnGameSlice* s, void*) {
+    g_seen4.rcs.push_back(game_slice_iterate(s, &each_stop, nullptr));
+    g_seen4.index_after = reinterpret_cast<ProgramCtx*>(s->program_ctx)->index;
+}
+
+void per_entity() {
+    fn.iter_begin = &fake_iter_begin;
+    fn.iter_next = &fake_iter_next;
+    fn.current_entity = &fake_current_entity;
+    fn.mark_written = &fake_mark;
+    g_type_index = {{fnv1a("FuelSetup", fnv1a("keen::ecs::")), 3}, {fnv1a("CurrentTransform", fnv1a("keen::ecs::")), 5},
+                    {fnv1a("DynamicFuelSetup", fnv1a("keen::ecs::")), 10}, {fnv1a("Fuel", fnv1a("keen::ecs::")), 20},
+                    {fnv1a("Health", fnv1a("keen::ecs::")), 30}};
+    // the next world: fuel_setup with its lists, despawn_link with other_write_unser (no view)
+    world_event(KILN_WORLD_STOPPING, KILN_WORLD_SERVER);
+    wworld(0);
+    g_wdesc[0].tpl = {g_fs_tpl, 1};
+    g_wdesc[0].read_opt = {g_fs_ropt, 1};
+    g_wdesc[0].write = {g_fs_write, 2};
+    g_wdesc[4].other_write_unser = {g_unser, 1};
+    static uintptr_t registry[8]{};
+    std::memcpy(g_wworld + kStorage, &registry, 0);
+    const auto reg = reinterpret_cast<uintptr_t>(registry);
+    std::memcpy(g_wworld + kStorage, &reg, 8);
+    world_event(KILN_WORLD_STARTED, KILN_WORLD_SERVER);
+    wpre();
+    KilnStr names[4];
+    check(game_program_list(KILN_WORLD_SERVER, 0, KILN_GAME_LIST_WRITE, names, 4) == 2 && sv(names[0]) == "Fuel" &&
+              sv(names[1]) == "DynamicFuelSetup" && game_program_list(KILN_WORLD_SERVER, 0, KILN_GAME_LIST_READ, names, 4) == 0 &&
+              game_program_list(KILN_WORLD_SERVER, 0, 16, names, 4) == -1 && game_program_list(KILN_WORLD_SERVER, 99, 0, names, 4) == -1,
+          "program list: the descriptor's names in descriptor order");
+    KilnGameProgramInfo pi{};
+    pi.size = sizeof pi;
+    game_program_info(KILN_WORLD_SERVER, 4, &pi);
+    check((pi.flags & KILN_GAME_PROGRAM_NO_VIEW) != 0, "a program with other_write_unser has no view (flag)");
+
+    // the slice's archetype: the entity map holds entity 100 -> a record whose layout has bits 5 and 20
+    alignas(16) static uint64_t layout_bits[2] = {(1ull << 5) | (1ull << 20), 0};
+    alignas(16) static uint8_t record[0x20]{};
+    const auto lb = reinterpret_cast<uintptr_t>(layout_bits);
+    std::memcpy(record + 0x18, &lb, 8);
+    static uint64_t bits[1] = {0};
+    static uint32_t keys[8]{};
+    static uint64_t values[8]{};
+    keys[100 & 7] = 100;
+    values[100 & 7] = reinterpret_cast<uintptr_t>(record);
+    bits[0] = 1ull << (100 & 7);
+    alignas(16) static uint8_t storage[0x200]{};
+    storage[8] = KILN_WORLD_SERVER;
+    uint8_t* map = storage + 0x40;
+    const uint64_t cap = 8;
+    const uint32_t mcount = 1;
+    const auto pb = reinterpret_cast<uintptr_t>(bits), pk = reinterpret_cast<uintptr_t>(keys), pv = reinterpret_cast<uintptr_t>(values);
+    std::memcpy(map + 0x08, &pb, 8);
+    std::memcpy(map + 0x10, &cap, 8);
+    std::memcpy(map + 0x28, &pk, 8);
+    std::memcpy(map + 0x40, &pv, 8);
+    std::memcpy(map + 0x54, &mcount, 4);
+
+    Job job(5);
+    counts(job, 1, 1, 2);
+    uint8_t* st = storage;
+    std::memcpy(job.bytes, &st, 8);
+    const KilnHandle it = wrap(90, "fuel_setup", KILN_WRAP_BEFORE, 0, &st_iterate, nullptr);
+    wpre();
+    const uint64_t runs = g_original_runs[0].load(), mid = g_mid_start.load(), bad = g_bad_index.load();
+    run_slice(wentry(0), job);
+    check(g_seen4.rcs.size() == 7 && g_seen4.rcs[6] == KILN_OK && g_seen4.count == 5 && g_seen4.ids.size() == 5,
+          "iterate: every entity of the slice, once");
+    bool same = true;
+    for (uint32_t r = 0; r < g_seen4.ids.size(); ++r) same &= g_seen4.ids[r] == job.ids[r * 4] && g_seen4.rows[r] == r;
+    check(same, "iterate: per-entity ids equal the job's id list, in row order");
+    check(g_seen4.index_after == 0 && g_original_runs[0].load() == runs + 1 && g_mid_start.load() == mid &&
+              g_bad_index.load() == bad,
+          "iterate in a Before: the index is 0 again, the update runs over the whole slice");
+    check(g_seen4.fuel == slot_base(9) + kRowStride && g_seen4.dfs == slot_base(3) + kRowStride &&
+              g_seen4.ct == slot_base(2) + kRowStride && g_seen4.tpl == slot_base(1) + kRowStride,
+          "slots: by type index, not descriptor order (Fuel is write[0] and the second write record)");
+    check(g_seen4.fuel_size == 16 && g_seen4.fuel_writable == 1 && g_seen4.ct_size == 48 && g_seen4.ct_writable == 0,
+          "slots: reflected sizes, writable only for the write lists");
+    check(g_seen4.rcs[0] == KILN_OK && g_seen4.rcs[1] == KILN_OK && g_seen4.rcs[2] == KILN_ERR_INVALID_ARGUMENT &&
+              g_seen4.rcs[3] == KILN_ERR_INVALID_ARGUMENT && g_seen4.rcs[4] == KILN_ERR_WRONG_THREAD &&
+              g_seen4.rcs[5] == KILN_OK && g_marks.load() == 2 && g_mark_rec.load() == 0xAA00 + 9,
+          "mark: once per entity and component (the Fuel record's tracker), refused for a read list, a name past the "
+          "list, and a nested iteration");
+    check(g_seen4.slot_outside, "slot and mark outside an iteration are refused");
+    check(g_seen4.archetype == lb && game_archetype_has(KILN_WORLD_SERVER, lb, fnv1a("Fuel", fnv1a("keen::ecs::"))) == 1 &&
+              game_archetype_has(KILN_WORLD_SERVER, lb, fnv1a("DynamicFuelSetup", fnv1a("keen::ecs::"))) == 0 &&
+              game_archetype_has(KILN_WORLD_SERVER, lb, 0x12345678) == -1,
+          "archetype: the first entity's layout; membership by the layout's type bits");
+    KilnGameSlice outside{};
+    outside.size = sizeof outside;
+    uintptr_t lay = 0;
+    check(game_slice_iterate(&outside, &each_record, nullptr) == KILN_ERR_WRONG_THREAD &&
+              game_slice_archetype(&outside, &lay) == KILN_ERR_WRONG_THREAD,
+          "iterate and archetype outside a stage are refused");
+    game_program_unwrap(it);
+    // an After that stops early leaves the index as the update left it
+    const KilnHandle after = wrap(90, "fuel_setup", KILN_WRAP_AFTER, 0, &st_iterate_after, nullptr);
+    wpre();
+    g_seen4.rcs.clear();
+    run_slice(wentry(0), job);
+    check(g_seen4.rcs.size() == 1 && g_seen4.rcs[0] == KILN_OK && g_seen4.index_after == 5 && g_bad_index.load() == bad,
+          "iterate in an After, stopped at row 2: the index is the update's (the count) again");
+    // a job whose counts differ from the view: no slot (and kiln.log once)
+    game_program_unwrap(after);
+    wpre();
+    world_event(KILN_WORLD_STOPPING, KILN_WORLD_SERVER);
+    world_event(KILN_WORLD_STARTED, KILN_WORLD_SERVER);
+    wpre();
+    g_seen4 = Seen{};
+    const KilnHandle it2 = wrap(90, "fuel_setup", KILN_WRAP_BEFORE, 0, &st_iterate, nullptr);
+    wpre();
+    Job other(5);
+    counts(other, 1, 1, 3);  // three write records in the engine's job: the view has two
+    run_slice(wentry(0), other);
+    check(g_seen4.ids.size() == 5 && g_seen4.fuel == 0 && g_seen4.ct == 0, "counts that differ from the view: iteration "
+          "works, no slot");
+    game_program_unwrap(it2);
+    wpre();
+    // a program with no view: iterate works, no slot
+    g_seen4 = Seen{};
+    const KilnHandle nv = wrap(90, "despawn_link", KILN_WRAP_BEFORE, 0, &st_iterate, nullptr);
+    wpre();
+    run_slice(wentry(4), job);
+    check(g_seen4.ids.size() == 5 && g_seen4.fuel == 0, "a NO_VIEW program: iteration works, no slot");
+    game_program_unwrap(nv);
+    wpre();
+    // Attribute formulas: the program declares impact::AttributeRegistry; the Fuel block is clamped by them
+    world_event(KILN_WORLD_STOPPING, KILN_WORLD_SERVER);
+    g_wdesc[0].sys_read = {g_fs_sread, 1};
+    g_type_index[fnv1a("impact::AttributeRegistry")] = 1;
+    F.singletons = true;
+    world_event(KILN_WORLD_STARTED, KILN_WORLD_SERVER);
+    wpre();
+    alignas(16) static uint8_t fuel_block[64 * 8]{};
+    fuel_block[4] = 8;
+    fuel_block[7] = 2;
+    fuel_block[6] = 1;  // the block's "has values" flag
+    const int32_t max = 1280;
+    std::memcpy(fuel_block + 12, &max, 4);
+    alignas(16) static uint8_t registry_obj[16]{};
+    alignas(16) static uint8_t singletons[0x401]{};
+    singletons[0x400] = 1;
+    g_slot_override[9] = reinterpret_cast<uintptr_t>(fuel_block);
+    g_slot_override[15] = reinterpret_cast<uintptr_t>(registry_obj);
+    Job attr_job(2);
+    counts(attr_job, 1, 1, 2);
+    uint8_t* sp = singletons;
+    std::memcpy(attr_job.bytes + 0xC0, &sp, 8);
+    const KilnHandle at = wrap(90, "fuel_setup", KILN_WRAP_BEFORE, 0, &st_attr, nullptr);
+    wpre();
+    check(game_slice_attr_changed(nullptr, nullptr, KILN_GAME_LIST_WRITE, 0) == KILN_ERR_WRONG_THREAD,
+          "attribute formulas outside a stage are refused");
+    fn.iter_begin = &fake_iter_begin;
+    g_attr_changed_fn = &fake_attr_changed;
+    run_slice(wentry(0), attr_job);
+    int32_t cur = 0;
+    std::memcpy(&cur, fuel_block + 8, 4);
+    check(g_attr_rcs.size() == 2 && g_attr_rcs[0] == KILN_OK && g_attr_rcs[1] == KILN_ERR_INVALID_ARGUMENT &&
+              g_attr_calls.load() == 1 && cur == 1280 && g_attr_registry == reinterpret_cast<uintptr_t>(registry_obj),
+          "attribute formulas: run with the program's AttributeRegistry, clamp the written Fuel to its max; refused "
+          "for a read list");
+    fuel_block[7] = 3; // reflected Fuel is 16 bytes: at most two values
+    const auto formula_calls = g_attr_calls.load();
+    run_slice(wentry(0), attr_job);
+    check(g_attr_rcs[g_attr_rcs.size() - 2] == KILN_ERR_INVALID_ARGUMENT && g_attr_calls.load() == formula_calls,
+          "attribute value count outside reflected block never reaches formulas");
+    fuel_block[7] = 2;
+    fuel_block[4] = 0xFC; // storage offset itself must also be inside the reflected block
+    const auto offset_calls = g_attr_calls.load();
+    run_slice(wentry(0), attr_job);
+    check(g_attr_rcs[g_attr_rcs.size() - 2] == KILN_ERR_INVALID_ARGUMENT && g_attr_calls.load() == offset_calls,
+          "attribute storage offset outside reflected block never reaches formulas");
+    fuel_block[4] = 8;
+    // A non-attribute write slot with a plausible block must never reach AttrChanged.
+    alignas(16) static uint8_t non_attribute[64 * 8]{};
+    non_attribute[6] = 1;
+    non_attribute[7] = 2;
+    g_slot_override[3] = reinterpret_cast<uintptr_t>(non_attribute);
+    KilnSliceEntityFn invalid_attribute = [](uint64_t* iter, uint32_t row, KilnEntity, void* user) -> uint32_t {
+        if (row) return 1;
+        auto* sl = static_cast<KilnGameSlice*>(user);
+        const auto before = g_attr_calls.load();
+        check(game_slice_attr_changed(sl, iter, KILN_GAME_LIST_WRITE, 1) == KILN_ERR_INVALID_ARGUMENT &&
+                  g_attr_calls.load() == before, "non-attribute write slot never reaches formulas");
+        return 1;
+    };
+    game_program_unwrap(at);
+    wpre();
+    const KilnHandle invalid_at = wrap(90, "fuel_setup", KILN_WRAP_BEFORE, 0,
+        [](KilnGameSlice* sl, void* u) { game_slice_iterate(sl, *static_cast<KilnSliceEntityFn*>(u), sl); }, &invalid_attribute);
+    wpre();
+    run_slice(wentry(0), attr_job);
+    game_program_unwrap(invalid_at);
+    wpre();
+    g_slot_override[3] = 0;
+    game_program_unwrap(at);
+    wpre();
+    g_slot_override[9] = g_slot_override[15] = 0;
+    g_wdesc[0].sys_read = NameListE{};
+    g_wdesc[0].tpl = g_wdesc[0].read_opt = g_wdesc[0].write = g_wdesc[4].other_write_unser = NameListE{};
 }
 
 // Stress, as the engine runs it: Pre on the main thread (4 wraps on entity programs come and go every 50 steps), then
@@ -1117,7 +1629,9 @@ void abi(const char* path) {
         F(KilnWorldApi, game_program_find); F(KilnWorldApi, game_program_info); F(KilnWorldApi, game_programs_status);
         F(KilnWorldApi, lab_parallel); F(KilnWorldApi, game_program_wrap); F(KilnWorldApi, game_program_unwrap);
         F(KilnWorldApi, game_wrap_info); F(KilnWorldApi, game_wraps_release); F(KilnWorldApi, game_slice_run_original);
-        F(KilnWorldApi, wrap_original); F(KilnWorldApi, in_program);
+        F(KilnWorldApi, wrap_original); F(KilnWorldApi, in_program); F(KilnWorldApi, game_program_list);
+        F(KilnWorldApi, game_slice_iterate); F(KilnWorldApi, game_slice_slot); F(KilnWorldApi, game_slice_mark);
+        F(KilnWorldApi, game_slice_archetype); F(KilnWorldApi, game_archetype_has); F(KilnWorldApi, game_slice_attr_changed); F(KilnWorldApi, game_slice_attr_validate); F(KilnWorldApi, game_world_session);
     }
     {
         auto& l = list("KilnGameSlice", sizeof(KilnGameSlice));
@@ -1181,6 +1695,17 @@ int main(int argc, char** argv) {
     wraps_native_set();
     wraps_owners();
     release_under_load();
+    const auto old_session = game_world_session(KILN_WORLD_SERVER);
+    const auto client_session = game_world_session(KILN_WORLD_CLIENT);
+    world_event(KILN_WORLD_STOPPING, KILN_WORLD_SERVER);
+    world_event(KILN_WORLD_STARTED, KILN_WORLD_SERVER);
+    check(game_world_session(KILN_WORLD_SERVER) > old_session && game_world_session(KILN_WORLD_CLIENT) == client_session,
+          "session advances across stop/start without polling; the other world kind is unchanged");
+    wpre();
+    stopping_under_load();
+    stopping_timeout();
+    retirement_under_load();
+    per_entity();
     stress_steps();
     stress_overlap();
     if (argc > 1) abi(argv[1]);

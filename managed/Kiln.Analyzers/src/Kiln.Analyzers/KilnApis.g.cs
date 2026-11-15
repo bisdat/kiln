@@ -480,6 +480,14 @@ internal static partial class KilnApis
         "M:Kiln.Players.Diagnostics.ProbePosition(Kiln.EntityId)", // Players.Diagnostics.ProbePosition(EntityId): Services.RequireTickThread
         "M:Kiln.Players.Diagnostics.RawSlot(System.Int32)", // Players.Diagnostics.RawSlot(int): Services.RequireTickThread
         "M:Kiln.Players.Kick(Kiln.PlayerRef,System.String)", // Players.Kick(PlayerRef, string): Game.AssertTickThread
+        "M:Kiln.ProgramWrap.After(Kiln.SliceHandler,System.Nullable{System.Int32})", // ProgramWrap.After(SliceHandler, int?): via ProgramWrap.Add(WrapStage, SliceHandler?, Delegate?, int?)
+        "M:Kiln.ProgramWrap.AfterEach(Kiln.EntityHandler,System.Nullable{System.Int32})", // ProgramWrap.AfterEach(EntityHandler, int?): via ProgramWrap.Add(WrapStage, SliceHandler?, Delegate?, int?)
+        "M:Kiln.ProgramWrap.AfterEach(Kiln.EntityViewHandler,System.Nullable{System.Int32})", // ProgramWrap.AfterEach(EntityViewHandler, int?): via ProgramWrap.Add(WrapStage, SliceHandler?, Delegate?, int?)
+        "M:Kiln.ProgramWrap.Before(Kiln.SliceHandler,System.Nullable{System.Int32})", // ProgramWrap.Before(SliceHandler, int?): via ProgramWrap.Add(WrapStage, SliceHandler?, Delegate?, int?)
+        "M:Kiln.ProgramWrap.BeforeEach(Kiln.EntityHandler,System.Nullable{System.Int32})", // ProgramWrap.BeforeEach(EntityHandler, int?): via ProgramWrap.Add(WrapStage, SliceHandler?, Delegate?, int?)
+        "M:Kiln.ProgramWrap.BeforeEach(Kiln.EntityViewHandler,System.Nullable{System.Int32})", // ProgramWrap.BeforeEach(EntityViewHandler, int?): via ProgramWrap.Add(WrapStage, SliceHandler?, Delegate?, int?)
+        "M:Kiln.ProgramWrap.Dispose", // ProgramWrap.Dispose(): Services.RequireTickThread
+        "M:Kiln.ProgramWrap.Replace(Kiln.SliceHandler)", // ProgramWrap.Replace(SliceHandler): Services.RequireTickThread
         "M:Kiln.ProgressFact.Holds(Kiln.EntityId)", // ProgressFact.Holds(EntityId): Services.RequireTickThread
         "M:Kiln.ProgressFact.Holds(Kiln.Player)", // ProgressFact.Holds(Player): via ProgressFact.Holds(EntityId)
         "M:Kiln.Progression.Diagnostics.ExperienceForLevel(System.Int32)", // Progression.Diagnostics.ExperienceForLevel(int): Services.RequireTickThread
@@ -609,6 +617,7 @@ internal static partial class KilnApis
         "M:Kiln.Spire.get_Unlocked", // Spire.Unlocked.get: via ProgressFact.Holds(EntityId)
         "M:Kiln.Survivor.RescuedFor(Kiln.Player)", // Survivor.RescuedFor(Player): via ProgressFact.Holds(EntityId)
         "M:Kiln.Survivor.get_Rescued", // Survivor.Rescued.get: via ProgressFact.Holds(EntityId)
+        "M:Kiln.Systems.Wrap(System.String,Kiln.WrapOptions)", // Systems.Wrap(string, WrapOptions?): Services.RequireTickThread
         "M:Kiln.Teleport.To(Kiln.EntityId,Kiln.WorldPosition,Kiln.TeleportOptions)", // Teleport.To(EntityId, WorldPosition, TeleportOptions?): via Teleport.Start(EntityId, WorldPosition, EntityId, TeleportOptions)
         "M:Kiln.Teleport.ToEntity(Kiln.EntityId,Kiln.EntityId,System.Double,Kiln.TeleportOptions)", // Teleport.ToEntity(EntityId, EntityId, double, TeleportOptions?): Services.RequireTickThread
         "M:Kiln.Teleport.ToSpawnPoint(Kiln.EntityId,Kiln.EntityId,Kiln.TeleportOptions)", // Teleport.ToSpawnPoint(EntityId, EntityId, TeleportOptions?): via Teleport.Start(EntityId, WorldPosition, EntityId, TeleportOptions)
@@ -647,6 +656,7 @@ internal static partial class KilnApis
         "M:Kiln.World.ComponentSize(Kiln.EntityId,System.String)", // World.ComponentSize(EntityId, string): via World.Tick(string)
         "M:Kiln.World.Exists(Kiln.EntityId)", // World.Exists(EntityId): via World.Tick(string)
         "M:Kiln.World.Find(System.String)", // World.Find(string): via World.Tick(string)
+        "M:Kiln.World.GetWaitingTransformScales", // World.GetWaitingTransformScales(): Services.RequireTickThread
         "M:Kiln.World.Has(Kiln.EntityId,System.String)", // World.Has(EntityId, string): via World.Tick(string)
         "M:Kiln.World.Position(Kiln.EntityId)", // World.Position(EntityId): via World.TryGetPosition(EntityId, out WorldPosition)
         "M:Kiln.World.Query(System.Collections.Generic.IEnumerable{System.String},System.Collections.Generic.IEnumerable{System.String})", // World.Query(IEnumerable<string>, IEnumerable<string>?): via EntitySet.Refresh()
@@ -828,6 +838,7 @@ internal static partial class KilnApis
         "Settings",
         "Skills",
         "Spawn",
+        "Systems",
         "Terrain",
         "Time",
         "Ui",
