@@ -398,7 +398,7 @@ fn going_down_to_the_release_happens_only_as_the_switch_the_player_started() {
     assert_eq!(failures[0].message, "it offers no newer version");
     assert_eq!(f.hits("/files/kiln.AppImage"), 0);
     // the switch back: the older release, downloaded and verified (signature, signed version, sha256)
-    let (got, failures) = run(acquire_for(app.handle(), &[f.source("frostdev.io")], &Want::switch(Channel::Dev, cur()), Arc::new(Mutex::new(None))));
+    let (got, failures) = run(acquire_for(app.handle(), &[f.source("frostdev.io")], &Want::switch_with_base(Channel::Dev, cur(), "0.2.0-dev.2"), Arc::new(Mutex::new(None))));
     assert!(failures.is_empty(), "{failures:?}");
     let (source, acq) = got.unwrap();
     assert_eq!((source.as_str(), acq.update.version.as_str(), acq.bytes.as_slice()), ("frostdev.io", "0.2.0-dev.2", PAYLOAD));
@@ -412,16 +412,16 @@ fn a_switch_uses_both_sources_and_every_check_of_an_update() {
     let g = channel_feed(&[("dev", "0.2.0-dev.2", "0.2.0-dev.2", None)]);
     // frostdev.io lists a wrong sha256: GitHub's copy is taken
     let f = channel_feed(&[("dev", "0.2.0-dev.2", "0.2.0-dev.2", Some(&"0".repeat(64)))]);
-    let (got, failures) = run(acquire_for(app.handle(), &[f.source("frostdev.io"), g.source("GitHub")], &Want::switch(Channel::Dev, cur()), Arc::new(Mutex::new(None))));
+    let (got, failures) = run(acquire_for(app.handle(), &[f.source("frostdev.io"), g.source("GitHub")], &Want::switch_with_base(Channel::Dev, cur(), "0.2.0-dev.2"), Arc::new(Mutex::new(None))));
     assert_eq!(got.unwrap().0, "GitHub");
     assert_eq!(steps(&failures), [("frostdev.io", Step::Hash)]);
     // frostdev.io is down: GitHub
-    let (got, failures) = run(acquire_for(app.handle(), &[dead_source("frostdev.io"), g.source("GitHub")], &Want::switch(Channel::Dev, cur()), Arc::new(Mutex::new(None))));
+    let (got, failures) = run(acquire_for(app.handle(), &[dead_source("frostdev.io"), g.source("GitHub")], &Want::switch_with_base(Channel::Dev, cur(), "0.2.0-dev.2"), Arc::new(Mutex::new(None))));
     assert_eq!(got.unwrap().0, "GitHub");
     assert_eq!(steps(&failures), [("frostdev.io", Step::Manifest)]);
     // a file signed for another build is refused on a switch too
     let bad = channel_feed(&[("dev", "0.2.0-dev.2", "0.2.0-dev.3+beta.1", None)]);
-    let (got, failures) = run(acquire_for(app.handle(), &[bad.source("frostdev.io")], &Want::switch(Channel::Dev, cur()), Arc::new(Mutex::new(None))));
+    let (got, failures) = run(acquire_for(app.handle(), &[bad.source("frostdev.io")], &Want::switch_with_base(Channel::Dev, cur(), "0.2.0-dev.2"), Arc::new(Mutex::new(None))));
     assert!(got.is_none());
     assert_eq!(steps(&failures), [("frostdev.io", Step::Signature)]);
 }
@@ -451,4 +451,36 @@ fn failed_restore_does_not_mark_the_beta_as_left() {
     assert!(result.is_err());
     assert!(!root.join(crate::snapshot::LAST_BUILD).exists());
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn release_selection_never_falls_back_below_the_newest_offer() {
+    let sources = feed::release_sources();
+    for order in [["0.2.0-dev.2", "0.2.0-dev.3"], ["0.2.0-dev.3", "0.2.0-dev.2"]] {
+        let attempted = Arc::new(Mutex::new(Vec::new()));
+        let seen = attempted.clone();
+        let offers = sources.iter().cloned().zip(order.map(String::from)).collect();
+        let (got, _) = run(acquire_release_offers(offers, |v: &String| v.as_str(), move |source, version| {
+            seen.lock().unwrap().push(version.clone());
+            async move {
+                if version == "0.2.0-dev.3" { Err(failure(&source, (Step::Signature, "bad signature".into()))) }
+                else { Ok(version) }
+            }
+        }));
+        assert!(got.is_none());
+        assert_eq!(*attempted.lock().unwrap(), ["0.2.0-dev.3"]);
+    }
+}
+
+#[test]
+fn accepted_restore_choice_is_in_every_status_after_reopening() {
+    struct Reset(Option<Inner>);
+    impl Drop for Reset { fn drop(&mut self) { *state() = self.0.take().unwrap(); } }
+    let install = kind::InstallInfo { kind: kind::Kind::Appimage, in_place: true, reason: None };
+    let original = std::mem::replace(&mut *state(), Inner { status: initial_status("0.2.0-dev.29", install), pending: None, busy: false, restore: false });
+    let _reset = Reset(Some(original));
+    begin(Some(Channel::Dev), true).unwrap();
+    for _ in 0..2 {
+        assert_eq!(serde_json::to_value(status()).unwrap()["restoreRequested"], true);
+    }
 }

@@ -68,7 +68,7 @@ build() { # version runtime out [beta number: a test build]
   if ((rebuild)) || [[ ! -f $out ]]; then
     say "building AppImage $v${b:+ (test build $b)}"
     rm -f "$CARGO_TARGET_DIR/release/bundle/appimage/"*.AppImage
-    KILN_LAUNCHER_CHANNEL=${b:+beta} KILN_LAUNCHER_BETA=$b low "$repo/tools/launcher/build-linux.sh" --bundles appimage --runtime "$rt" --version "$v" \
+    KILN_LAUNCHER_CHANNEL=${b:+beta} KILN_LAUNCHER_BETA=$b KILN_LAUNCHER_BASE_RELEASE=${b:+$NEW} low "$repo/tools/launcher/build-linux.sh" --bundles appimage --runtime "$rt" --version "$v" \
       --features dev-eval,update-test-feeds --config "$qa_config" >"$W/build-$v.log" 2>&1 \
       || { tail -30 "$W/build-$v.log"; exit 1; }
     cp -f "$(ls -t "$CARGO_TARGET_DIR/release/bundle/appimage/"*.AppImage | head -1)" "$out"

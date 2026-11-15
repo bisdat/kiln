@@ -26,6 +26,14 @@ fn bake_channel() {
         (_, "") => {}
         (c, b) => panic!("KILN_LAUNCHER_BETA={b} is only for KILN_LAUNCHER_CHANNEL=beta (it is {c:?})"),
     }
+    println!("cargo:rerun-if-env-changed=KILN_LAUNCHER_BASE_RELEASE");
+    let base = std::env::var("KILN_LAUNCHER_BASE_RELEASE").unwrap_or_default();
+    if !base.is_empty() {
+        let floor = semver::Version::parse(&base).expect("KILN_LAUNCHER_BASE_RELEASE must be a version");
+        let current = semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
+        assert!(floor.build.is_empty() && !floor.pre.as_str().contains("beta") && floor.cmp_precedence(&current).is_lt(), "base release must precede this beta");
+    }
+    println!("cargo:rustc-env=KILN_LAUNCHER_BUILD_BASE_RELEASE={base}");
     println!("cargo:rustc-env=KILN_LAUNCHER_BUILD_CHANNEL={channel}");
     println!("cargo:rustc-env=KILN_LAUNCHER_BUILD_BETA={beta}");
 }

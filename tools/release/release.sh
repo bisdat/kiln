@@ -125,7 +125,7 @@ if [[ -n $beta ]]; then
   channel=beta name=$version-beta.$beta build_id=$version+beta.$beta nexus=0
 fi
 # baked into the launcher by build.rs (empty: the channel follows the version); never inherited from the caller
-export KILN_LAUNCHER_CHANNEL=${beta:+beta} KILN_LAUNCHER_BETA=$beta
+export KILN_LAUNCHER_CHANNEL=${beta:+beta} KILN_LAUNCHER_BETA=$beta KILN_LAUNCHER_BASE_RELEASE=""
 # the Nexus Mods build: never for a test build (test builds go to frostdev.io and GitHub only)
 nexus_build=1
 [[ $channel == beta ]] && nexus_build=0
@@ -195,6 +195,11 @@ tar --sort=name --owner=0 --group=0 --numeric-owner --mode='u=rwX,go=rX' --mtime
 [[ $(sed 's/[-+].*//' "$src/VERSION") == "${version%%-*}" ]] || die "VERSION in the export is $(cat "$src/VERSION"), not for $version"
 # The API gate (tools/release/api-gate.sh), before any build: no line of a PublicAPI.Shipped.txt removed since the
 # previous v* release, and new API only with a raised API version (Kiln.Mods.ApiVersion), so a mod can ask for it.
+previous_release() {
+  local ref=$1 channel=$2
+  [[ $channel == beta ]] || ref=$ref^
+  git -C "$repo" describe --tags --abbrev=0 --match 'v*' --exclude 'v*-beta.*' "$ref" 2>/dev/null || true
+}
 if ((worktree)); then
   gate_new=(--worktree)
   prev=$(git -C "$repo" describe --tags --abbrev=0 --match 'v*' --exclude 'v*-beta.*' HEAD 2>/dev/null || true)
@@ -203,7 +208,11 @@ else
   git -C "$repo" fetch -q --tags origin 2>/dev/null || note "release: could not fetch tags; the API gate and the notes may start too early"
   gate_new=("$full")
   # a test build's tag (v<version>-beta.<n>) is no release: the gate and the notes start at the release before
-  prev=$(git -C "$repo" describe --tags --abbrev=0 --match 'v*' --exclude 'v*-beta.*' "$full^" 2>/dev/null || true)
+  prev=$(previous_release "$full" "$channel")
+fi
+if [[ $channel == beta ]]; then
+  KILN_LAUNCHER_BASE_RELEASE=$(python3 "$lib/release.py" beta-floor "$prev" "$build_id") || die "cannot determine the release this beta is cut over; fetch release tags first"
+  export KILN_LAUNCHER_BASE_RELEASE
 fi
 if [[ -z $prev ]]; then
   note "WARNING: no previous v* tag: the API gate has nothing to compare with (removed API and the API version are not checked)"
@@ -343,7 +352,7 @@ else
       --env KILN_GIT --env SOURCE_DATE_EPOCH --env KILN_OUT --env CARGO_TARGET_DIR --env KILN_SDK_VERSION --env CARGO_ENCODED_RUSTFLAGS \
       --env KILN_NEXUS_ENABLED --env KILN_NEXUS_OAUTH_CLIENT_ID --env KILN_NEXUS_OAUTH_REDIRECT_URI \
       --env KILN_RELEASE_BUILD --env KILN_COOK_HELPERS --env ContinuousIntegrationBuild --env NO_STRIP \
-      --env KILN_LAUNCHER_CHANNEL --env KILN_LAUNCHER_BETA -- "$@"
+      --env KILN_LAUNCHER_CHANNEL --env KILN_LAUNCHER_BETA --env KILN_LAUNCHER_BASE_RELEASE -- "$@"
   }
   step "Linux build image (Ubuntu 22.04, glibc $glibc_max)"
   image=$("$here/linux-build/image.sh" 2>>"$log") || { tail -40 "$log" >&2; die "the Linux build image did not build"; }
@@ -635,7 +644,7 @@ fd=https://frostdev.io/kiln/downloads/$name
 gh=https://github.com/frostdev-ops/kiln/releases/download/v$name
 manifest() { # base-url layout(folders|flat) out channel
   local base=$1 flat=$2 dest=$3 ch=$4 e=() b=()
-  [[ $channel == beta ]] && b=(--beta "$beta")
+  [[ $channel == beta ]] && b=(--beta "$beta" --base-release "$KILN_LAUNCHER_BASE_RELEASE")
   local la="linux/$A" ws="windows/$S"
   [[ $flat == flat ]] && la=$A ws=$S
   e+=(--entry "linux-x86_64-appimage,linux-x86_64=$base/$la|$out/linux/$A.sig|$out/linux/$A")

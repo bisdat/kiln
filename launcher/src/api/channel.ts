@@ -62,12 +62,12 @@ export function switchKind(s: { buildChannel?: UpdateChannel | null }, target: U
 export const WORLD_WARNING = "A world you play with a test build may not load the same way on the release, and servers and players must run the same build to play together.";
 
 /** The switch dialog's words (desktop and Deck). */
-export function switchWords(kind: SwitchKind): { title: string; say: string[]; confirm: string; task: string } {
+export function switchWords(kind: SwitchKind, targetVersion?: string): { title: string; say: string[]; confirm: string; task: string } {
   return kind === "to-beta"
     ? {
       title: "Switch to the beta?",
       say: [
-        "Test builds of the next release, for testing with the Kiln Discord. The launcher installs the newest one and restarts; Kiln in your game follows at the next Play.",
+        "Test builds of the next release, for testing with the Kiln Discord. The launcher installs the newest one and restarts. To test its Kiln in your game, install it on the Runtime page.",
         "You can switch back to the release here at any time.",
         WORLD_WARNING,
       ],
@@ -77,7 +77,7 @@ export function switchWords(kind: SwitchKind): { title: string; say: string[]; c
     : {
       title: "Switch back to the release?",
       say: [
-        "The launcher installs the newest release and restarts, also when it is older than this test build. Kiln in your game goes back with it at the next Play.",
+        `The launcher installs the newest release and restarts, also when it is older than this test build. ${releaseRuntimeAdvice(targetVersion)}`,
         WORLD_WARNING,
       ],
       confirm: "Switch back",
@@ -104,4 +104,15 @@ export function channelNotice(rt: { installed: boolean; upgradeAvailable: string
   if (rt.switchBack) return `This game has Kiln ${label(rt.switchBack.from)} from a test build; Play puts this launcher's Kiln ${label(rt.switchBack.to)} in first.`;
   if (betaLauncher && rt.upgradeAvailable) return `This launcher is a test build; this game still has the release's Kiln. Install Kiln ${label(rt.upgradeAvailable)} on Runtime to test it.`;
   return null;
+}
+
+export function acceptedRestore(s: { phase: string; restoreRequested?: boolean }, local = false): boolean {
+  return s.phase === "ready" || s.phase === "downloading" ? s.restoreRequested === true : local;
+}
+
+export function releaseRuntimeAdvice(target?: string): string {
+  if (!target) return "Releases before 0.2.0-dev.29 leave the test build's Kiln in your game: reinstall the release's Kiln on the Runtime page. Newer releases put their own Kiln in at the next Play.";
+  const v = /^(\d+)\.(\d+)\.(\d+)(?:-dev\.(\d+))?$/.exec(parseBuild(target).version);
+  const automatic = v && (Number(v[1]) > 0 || Number(v[2]) > 2 || (Number(v[2]) === 2 && (Number(v[3]) > 0 || (Number(v[3]) === 0 && (v[4] === undefined || Number(v[4]) >= 29)))));
+  return automatic ? "Kiln in your game goes back with it at the next Play." : "This release leaves the test build's Kiln in your game. Reinstall the release's Kiln on the Runtime page.";
 }

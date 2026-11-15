@@ -11,7 +11,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import * as api from "../../api/commands";
 import type { UiMode, UpdateChannel, UpdateStatus } from "../../api/commands";
-import { RELEASE_CHANNEL, buildLabel, channelName, channelWord, restoreWords, switchKind, switchWords } from "../../api/channel";
+import { RELEASE_CHANNEL, acceptedRestore, buildLabel, channelName, channelWord, restoreWords, switchKind, switchWords } from "../../api/channel";
 import { DIRECT_DOWNLOAD_PAGE, NEXUS_PAGE } from "../../api/distribution";
 import { runSwitch } from "../../shell/ChannelSwitch";
 import { useActiveProfile, useAppInfo, useDistribution, useGame, useGameStatus, useNexusEnabled, useProfiles, useSettings } from "../../api/hooks";
@@ -193,7 +193,7 @@ export default function Settings() {
 function DeckSwitchDialog({ s, target, onClose }: { s: UpdateStatus; target: UpdateChannel; onClose: () => void }) {
   const qc = useQueryClient();
   const kind = switchKind(s, target)!;
-  const w = switchWords(kind);
+  const w = switchWords(kind, s.ready?.version);
   const [busy, setBusy] = useState(false);
   const ready = s.phase === "ready" && s.switching === target && s.ready;
   const downloading = busy || (s.phase === "downloading" && s.switching === target);
@@ -215,7 +215,9 @@ function DeckSwitchDialog({ s, target, onClose }: { s: UpdateStatus; target: Upd
   return (
     <Dialog name="channel-switch" title={ready ? `Ready: ${buildLabel(s.ready!.version)}` : w.title} wide onClose={onClose} locked={downloading} buttons={buttons}>
       <div className="deck-scroll" data-testid={`deck-switch-${kind}`}>
-        {ready ? <p>Restart now to run it.</p> : w.say.map((line) => <p key={line}>{line}</p>)}
+        {ready && <p>{acceptedRestore(s) ? "Your profiles and settings from before the beta go back before the restart." : "Your current profiles and settings stay."}</p>}
+        {!!s.beforeBetaWarning?.length && <p>No complete copy from before the beta: {s.beforeBetaWarning.join("; ")}</p>}
+        {w.say.map((line) => <p key={line}>{line}</p>)}
         {!ready && r && <p className="deck-note">{r.hint}</p>}
         {downloading && <p className="deck-note">Downloading…</p>}
       </div>

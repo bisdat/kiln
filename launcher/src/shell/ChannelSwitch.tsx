@@ -10,7 +10,7 @@ import { useState } from "react";
 import { create } from "zustand";
 import * as api from "../api/commands";
 import type { UpdateChannel, UpdateStatus } from "../api/commands";
-import { RELEASE_CHANNEL, buildLabel, restoreWords, switchKind, switchWords } from "../api/channel";
+import { RELEASE_CHANNEL, acceptedRestore, buildLabel, restoreWords, switchKind, switchWords } from "../api/channel";
 import { useUpdate } from "../api/update";
 import { saveSettings } from "../deck/mode";
 import { Button, Modal, ProgressBar, Toggle, toast, waitTask } from "../ui";
@@ -59,7 +59,7 @@ export function ChannelSwitchDialog() {
 
 function SwitchDialog({ s, target, kind, onClose }: { s: UpdateStatus; target: UpdateChannel; kind: "to-beta" | "back"; onClose: () => void }) {
   const qc = useQueryClient();
-  const w = switchWords(kind);
+  const w = switchWords(kind, s.ready?.version);
   const [busy, setBusy] = useState(false);
   const [restore, setRestore] = useState(false);
   const [restarting, setRestarting] = useState(false);
@@ -71,8 +71,9 @@ function SwitchDialog({ s, target, kind, onClose }: { s: UpdateStatus; target: U
   };
   const restart = async () => {
     setRestarting(true);
-    try { await api.updateRestart(); } catch { toast.error({ code: "internal", message: "Restart failed" }); setRestarting(false); }
+    try { await api.updateRestart(); } catch (e) { toast.error(e, "Restart failed"); setRestarting(false); }
   };
+  const willRestore = acceptedRestore(s, restore);
   const r = s.beforeBeta ? restoreWords(s.beforeBeta.taken) : null;
   const footer = ready ? (
     <><Button variant="ghost" onClick={onClose}>Later</Button><Button variant="primary" loading={restarting} onClick={restart}>Restart now</Button></>
@@ -85,15 +86,16 @@ function SwitchDialog({ s, target, kind, onClose }: { s: UpdateStatus; target: U
   return (
     <Modal open onClose={onClose} title={ready ? `Ready: ${buildLabel(s.ready!.version)}` : w.title} width={520} locked={busy || downloading} footer={footer}>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }} data-testid={`switch-${kind}`}>
+        {!!s.beforeBetaWarning?.length && <p role="alert">No complete copy from before the beta: {s.beforeBetaWarning.join("; ")}</p>}
         {ready ? (
-          <span>{kind === "back" ? "The release is in place." : "The test build is in place."} Restart now to run it{kind === "back" && restore && s.beforeBeta ? "; your profiles and settings from before the beta go back first" : ""}.</span>
+          <span>{s.ready?.installed ? (kind === "back" ? "The release is in place." : "The test build is in place.") : "The build is verified and ready to install."} Restart now to run it{kind === "back" && willRestore ? "; your profiles and settings from before the beta go back first" : ""}. {kind === "back" ? w.say[0] : "Install the test build’s Kiln on the Runtime page to use it in your game."}</span>
         ) : (
           <>
             {kind === "back" && s.beta ? <span className="k-hint">This is test build {s.beta} of {s.current}.</span> : null}
             {w.say.map((line) => <span key={line}>{line}</span>)}
             {!s.install.inPlace && <span className="k-hint">{s.install.reason} The download page has the build; the launcher follows its channel from now on.</span>}
             {kind === "back" && r && s.install.inPlace && (
-              <Toggle checked={restore} onChange={setRestore} label={r.label} hint={r.hint} disabled={busy || downloading} />
+              <Toggle checked={willRestore} onChange={setRestore} label={r.label} hint={r.hint} disabled={busy || downloading} />
             )}
             {downloading && <ProgressBar value={s.progress?.total ? s.progress.received / s.progress.total : null} />}
           </>

@@ -128,6 +128,8 @@ mod imp {
         pub beta: Option<u32>,
         /// (dev.29) Always null: no switch.
         pub switching: Option<()>,
+        pub restore_requested: bool,
+        pub before_beta_warning: Vec<String>,
         /// (dev.29) Always null: no copy from before a beta to put back.
         pub before_beta: Option<()>,
         pub auto: bool,
@@ -169,6 +171,8 @@ mod imp {
             build_channel: if pre { "dev" } else { "stable" },
             beta: None,
             switching: None,
+            restore_requested: false,
+            before_beta_warning: vec![],
             before_beta: None,
             auto: false,
             install: Install { kind: bundle_kind(), in_place: false, reason: Some(NO_SELF_UPDATE) },

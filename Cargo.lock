@@ -2017,6 +2017,7 @@ dependencies = [
  "evdev",
  "kiln-manage",
  "libc",
+ "semver",
  "serde",
  "serde_json",
  "sevenz-rust2",

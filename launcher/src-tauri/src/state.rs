@@ -11,11 +11,18 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 /// pointer, a move here or in another launcher, a committed move waiting for the restart): the one choke point for
 /// commands and background threads.
 pub fn dirs() -> Result<DataDirs, Error> {
+    if let Some(e) = crate::snapshot::startup::refusal() { return Err(e); }
     crate::folder::current().dirs()
 }
 
 /// Closures [`blocking`] runs right now (a move waits for them to end: crate::commands::data_folder).
 static IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
+static DRAIN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static DRAINED: std::sync::Condvar = std::sync::Condvar::new();
+pub fn wait_for_writers() {
+    let mut guard = DRAIN.lock().unwrap_or_else(|e| e.into_inner());
+    while in_flight() != 0 { guard = DRAINED.wait(guard).unwrap_or_else(|e| e.into_inner()); }
+}
 
 pub fn in_flight() -> usize {
     IN_FLIGHT.load(Ordering::SeqCst)
@@ -24,7 +31,9 @@ pub fn in_flight() -> usize {
 struct Flight;
 impl Drop for Flight {
     fn drop(&mut self) {
+        let _g = DRAIN.lock().unwrap_or_else(|e| e.into_inner());
         IN_FLIGHT.fetch_sub(1, Ordering::SeqCst);
+        DRAINED.notify_all();
     }
 }
 
@@ -33,6 +42,7 @@ impl Drop for Flight {
 /// before [`dirs`]: a writer that got the folder before a move's hold is waited for, one that asks after it is refused.
 #[must_use]
 pub fn writing() -> Writing {
+    let _g = DRAIN.lock().unwrap_or_else(|e| e.into_inner());
     IN_FLIGHT.fetch_add(1, Ordering::SeqCst);
     Writing(Flight)
 }
