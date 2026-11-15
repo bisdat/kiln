@@ -148,6 +148,25 @@ const KilnCapsApi* g_wrap_caps = nullptr;
 std::atomic<uint32_t> g_active{0}, g_pending{0};
 uintptr_t(KILN_CALL* g_world_of)(uint32_t) = nullptr;  // KilnApi.world (null on a core without it)
 std::atomic<uint32_t> g_tick_closed{0};               // pools whose admission a faulted tick closed (bit per pool)
+
+// The archetype's scheduler-stable source (feature world.slice_record, since 0.2.0-dev.29). ProgramRunner (rdx = the
+// engine's slice record) reads the program's table entry from that record and calls entry+0x28, the update or a
+// trampoline: so a trampoline entered by the runner runs inside the runner call whose record is the slice's own. A mid
+// link on the runner's first instruction records rdx on the thread; dispatch takes it (and clears it) before any stage
+// runs, and game_slice_archetype trusts it only when its entry is the trampoline's own and its rows are the job's count.
+// The record's layout is the one the runner gave the column setup for this slice. The link goes in in a Pre once a
+// stage first asks for an archetype (mid2_checked: no patch where kiln.types' runner detour is there already, else a
+// checked one); until then, and wherever it cannot be had, the entity-map read below is the fallback.
+constexpr uint32_t kRecordAttempts = 8;   // checked installs tried, kRecordSpacing Pres apart
+constexpr uint32_t kRecordSpacing = 16;
+thread_local uintptr_t t_runner_record = 0;
+std::atomic<bool> g_record_live{false}, g_record_wanted{false}, g_record_gaveup{false}, g_record_busy{false};
+bool g_record_ok = false;                    // the feature, its constants, the runner and kiln.hooks' mid2_checked
+uintptr_t g_runner = 0;                      // types/ProgramRunner
+const KilnHooksApi* g_hooks_api = nullptr;
+std::atomic<uint32_t> g_record_attempts{0}, g_record_wait{0};
+std::atomic<uint64_t> g_arch_record{0}, g_arch_map{0}, g_arch_mismatch{0};
+void KILN_CALL runner_entry(KilnRegisters* regs, void*) { t_runner_record = regs->rdx; }
 std::chrono::steady_clock::time_point g_next_reap{};
 
 // ---- the trampolines ----
@@ -193,6 +212,8 @@ struct Frame {
     uint64_t* iter;        // inside game_slice_iterate: the iterator, positioned on `entity`
     KilnEntity entity;
     uint64_t marked;       // write slots marked for `entity` (bit = position in the WRITE group)
+    uintptr_t entry;       // the program-table entry the trampoline stands in
+    uintptr_t record;      // the engine's slice record the runner link recorded (0: none)
 };
 thread_local Frame* t_frame = nullptr;
 
@@ -264,14 +285,14 @@ void finish_index(ProgramCtx* ctx, uint32_t count) {
     if (ctx->index != 0 && ctx->index < count) ctx->index = count;
 }
 
-void run(int pool, Slot& s, const Chain& c, ProgramCtx* ctx, UpdateFn orig) {
+void run(int pool, Slot& s, const Chain& c, ProgramCtx* ctx, UpdateFn orig, uintptr_t record) {
     const uint32_t kind = g_pools[pool].kind;
     uint64_t count64 = 0;
     std::memcpy(&count64, ctx->job + L.job_entity_count, 8);
     const uint32_t count = count64 > UINT32_MAX ? UINT32_MAX : static_cast<uint32_t>(count64);
     s.slices.fetch_add(1, std::memory_order_relaxed);
     s.entities.fetch_add(count, std::memory_order_relaxed);
-    Frame f{orig, ctx, count, -1, false, 0, &c, nullptr, 0, 0};
+    Frame f{orig, ctx, count, -1, false, 0, &c, nullptr, 0, 0, s.entry.load(std::memory_order_relaxed), record};
     KilnGameSlice slice{};
     slice.size = sizeof slice;
     slice.world_kind = kind;
@@ -339,13 +360,14 @@ void dispatch(int pool, int slot, void* raw) {
     const UpdateFn orig = s.orig.load(std::memory_order_acquire);
     const Chain* c = s.chain.load(std::memory_order_seq_cst);
     auto* ctx = static_cast<ProgramCtx*>(raw);
+    const uintptr_t record = g_record_live.load(std::memory_order_relaxed) ? std::exchange(t_runner_record, 0) : 0;
     if (!c || g_pools[pool].stopping.load(std::memory_order_seq_cst) || !kind_is(ctx, g_pools[pool].kind) || tick_gone(pool)) {
         // no stage left, a slot kept for a foreign swap on top, another storage (the prediction world runs the client
         // world's table) or a faulted tick: the game's update, untouched
         s.forwarded.fetch_add(1, std::memory_order_relaxed);
         if (orig) orig(raw);
     } else if (orig) {
-        run(pool, s, *c, ctx, orig);
+        run(pool, s, *c, ctx, orig, record);
     }
     s.in_flight.fetch_sub(1, std::memory_order_release);
 }
@@ -723,6 +745,18 @@ void wraps_init() {
         if (g_api->symbol(kstr("items/AttrChanged"), &address) == KILN_OK) g_attr_changed_fn = reinterpret_cast<AttrChangedFn>(address);
     }
     const auto* hooks = static_cast<const KilnHooksApi*>(g_api->service(kstr(KILN_HOOKS_SERVICE), KILN_HOOKS_VERSION));
+    g_hooks_api = hooks && hooks->header.size >= offsetof(KilnHooksApi, mid2_checked) + sizeof(void*) && hooks->mid2_checked
+                      ? hooks : nullptr;
+    g_runner = 0;
+    g_record_ok = g_hooks_api && L.slice_entry >= 0 && L.slice_layout >= 0 && L.slice_first >= 0 && L.slice_end >= 0 &&
+                  g_api->feature(kstr("world.slice_record")) &&
+                  g_api->symbol(kstr("types/ProgramRunner"), &g_runner) == KILN_OK && g_runner;
+    g_record_live = g_record_wanted = g_record_gaveup = g_record_busy = false;
+    g_record_attempts = 0;
+    g_record_wait = 0;
+    if (!g_record_ok)
+        KW_I("wraps: no slice-record link here (world.slice_record or kiln.hooks' mid2_checked is missing); WhenArchetype "
+             "reads the entity map (narrowed, not proven)");
     KilnHandle retiring = 0;
     g_retiring_subscribed = hooks && hooks->header.size >= offsetof(KilnHooksApi, unsubscribe_owner_retiring) + sizeof(void*) &&
                             hooks->subscribe_owner_retiring &&
@@ -785,9 +819,44 @@ const char* game_wraps_off_reason() {
     }
 }
 
+// The runner link, once a stage asked for an archetype: tried in a Pre (no slice of this world runs; mid2_checked checks the
+// other threads), kRecordSpacing Pres apart, kRecordAttempts times at most; one Pre thread at a time.
+void record_install() {
+    if (!g_record_ok || !g_record_wanted.load(std::memory_order_relaxed) || g_record_live.load() || g_record_gaveup.load())
+        return;
+    if (g_record_wait.load() > 0) {
+        g_record_wait.fetch_sub(1);
+        return;
+    }
+    if (g_record_busy.exchange(true)) return;
+    const uint32_t attempt = g_record_attempts.fetch_add(1) + 1;
+    KilnHookOrder order{};
+    order.size = sizeof order;
+    order.priority = 1000;  // before the other links: every runner call records its slice before anything can skip it
+    order.label = kstr("world/slice-record");
+    KilnHandle handle = 0;
+    uint32_t unchecked = 0;
+    const KilnResult rc = g_hooks_api->mid2_checked(g_owner, g_runner, &order, &runner_entry, nullptr, &handle, &unchecked);
+    if (rc == KILN_OK) {
+        g_record_live.store(true);
+        KW_I("wraps: WhenArchetype reads each slice's archetype from the engine's slice record (a mid link on "
+             "types/ProgramRunner, attempt %u); the entity-map read stays the fallback", attempt);
+    } else if (attempt >= kRecordAttempts) {
+        g_record_gaveup.store(true);
+        KW_W("wraps: the slice-record link on types/ProgramRunner was refused %u times (last %d, %u threads unchecked); "
+             "WhenArchetype keeps the entity-map read (narrowed, not proven)", attempt, rc, unchecked);
+    } else {
+        g_record_wait.store(kRecordSpacing);
+        KW_I("wraps: the slice-record link on types/ProgramRunner was refused (%d, %u threads unchecked); tried again "
+             "in %u Pres", rc, unchecked, kRecordSpacing);
+    }
+    g_record_busy.store(false);
+}
+
 void wraps_pre(uint32_t kind, uintptr_t) {
     const int pool = wrap_pool(kind);
     if (pool < 0 || !g_ok || g_pools[pool].stopping.load()) return;
+    record_install();
     const uint32_t ext = external_runner();
     // Revoked owners (at most once a second): probed outside g_mu (post() is the core's), retired under it.
     std::vector<KilnOwner> owners, revoked;
@@ -922,6 +991,11 @@ void wraps_world_event(const KilnWorldEvent* event) {
         } while (std::chrono::steady_clock::now() < until);
         const auto waited = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
         if (remaining) KW_E("world %u stops: wrap drain timed out with %u calls still in flight", event->kind, remaining);
+        if (const uint64_t rec = g_arch_record.exchange(0), map = g_arch_map.exchange(0), bad = g_arch_mismatch.exchange(0);
+            rec || map || bad)
+            KW_I("world %u stops: WhenArchetype read %llu slices from the engine's slice record and %llu from the entity map "
+                 "(%llu records did not match their trampoline)", event->kind, static_cast<unsigned long long>(rec),
+                 static_cast<unsigned long long>(map), static_cast<unsigned long long>(bad));
         lock.lock();
         if (live_slots)
             KW_I("world %u stops: its wraps are taken out and wait for the next world (drained: %u calls in flight at the "
@@ -1275,9 +1349,29 @@ KilnResult KILN_CALL game_slice_archetype(KilnGameSlice* slice, uintptr_t* out_l
     Frame* f = frame_of(slice);
     if (!f) return KILN_ERR_WRONG_THREAD;
     if (!out_layout) return KILN_ERR_INVALID_ARGUMENT;
-    if (L.storage_entities < 0 || L.entity_layout < 0 || !L.map.ok()) return KILN_ERR_UNAVAILABLE;
+    const bool map_ok = L.storage_entities >= 0 && L.entity_layout >= 0 && L.map.ok() && L.entity_id >= 0;
+    if (!map_ok && !g_record_ok) return KILN_ERR_UNAVAILABLE;  // neither source on this build
     if (!slice->count || !slice->entity_ids) return KILN_ERR_NOT_FOUND;
-    if (L.entity_id < 0) return KILN_ERR_UNAVAILABLE;  // a record cannot be told from a reused one
+    // The engine's own slice record (see g_record_live), trusted only when it is this trampoline's: the runner called the
+    // entry it names, and its rows are the job's count.
+    if (const uintptr_t r = f->record) {
+        uintptr_t entry = 0, slice_layout = 0;
+        uint32_t first = 0, end = 0;
+        if (seh_copy(&entry, reinterpret_cast<const void*>(r + static_cast<uintptr_t>(L.slice_entry)), 8) && entry == f->entry &&
+            seh_copy(&first, reinterpret_cast<const void*>(r + static_cast<uintptr_t>(L.slice_first)), 4) &&
+            seh_copy(&end, reinterpret_cast<const void*>(r + static_cast<uintptr_t>(L.slice_end)), 4) && end >= first &&
+            end - first == f->count &&
+            seh_copy(&slice_layout, reinterpret_cast<const void*>(r + static_cast<uintptr_t>(L.slice_layout)), 8) && slice_layout) {
+            g_arch_record.fetch_add(1, std::memory_order_relaxed);
+            *out_layout = slice_layout;
+            return KILN_OK;
+        }
+        g_arch_mismatch.fetch_add(1, std::memory_order_relaxed);
+    } else if (g_record_ok && !g_record_live.load(std::memory_order_relaxed)) {
+        g_record_wanted.store(true, std::memory_order_relaxed);  // the next Pre installs the runner link
+    }
+    // The link is coming (or was refused): without a readable map, a slice is left to the game until it is there.
+    if (!map_ok) return g_record_gaveup.load() ? KILN_ERR_UNAVAILABLE : KILN_WORLD_ERR_CHANGED;
     uintptr_t storage = 0, rec = 0, layout = 0;
     uint32_t named = 0, named2 = 0;
     const uint32_t id = slice->entity_ids[0];
@@ -1302,6 +1396,7 @@ KilnResult KILN_CALL game_slice_archetype(KilnGameSlice* slice, uintptr_t* out_l
         !seh_copy(&named2, reinterpret_cast<const void*>(rec + static_cast<uintptr_t>(L.entity_id)), 4) || named2 != id ||
         !map_shape(map, &cap2, &count2) || cap2 != cap || count2 != count)
         return KILN_WORLD_ERR_CHANGED;  // nonempty slice: a change under the read, not a skip and not "unreadable here"
+    g_arch_map.fetch_add(1, std::memory_order_relaxed);
     *out_layout = layout;
     return KILN_OK;
 }

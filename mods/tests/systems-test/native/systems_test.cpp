@@ -28,6 +28,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -637,8 +638,135 @@ void entity_phase(uint64_t n) {
     }
 }
 
+// ---- archetype cost (dev.29, boot B, before the managed rows start): what WhenArchetype's slice-record link and one
+// archetype-reading stage cost a step. A census wraps every game program with a counting Before for 60 steps and keeps
+// the busiest; then three phases of kCostSteps steps each: P0 no wrap and no link (nothing asked for an archetype in this
+// process yet), P1 a Before on the busiest program that reads its slice's archetype every slice (its first read puts
+// kiln.world's mid link on types/ProgramRunner in the next Pre), P2 that wrap gone, the link still there. A step's time is
+// this plugin's Pre to its Post (the game's step and the other subscribers between, the same in every phase).
+constexpr uint64_t kCostSteps = 1800;
+struct CensusWrap {
+    KilnHandle handle = 0;
+    std::string name;
+    Seen seen;
+};
+struct {
+    std::deque<CensusWrap> census;
+    std::string busy;
+    uint64_t busy_slices = 0;
+    KilnHandle wrap = 0;
+    int phase = -1;  // the phase whose steps are timed now (0..2), -1 none
+    LARGE_INTEGER pre{};
+    bool pre_set = false;
+    std::vector<float> step_us[3];
+    std::mutex mu;
+    std::vector<float> call_ns;   // game_slice_archetype, P1
+    uint64_t calls = 0, ok = 0, other = 0;
+} g_cost;
+double qpc_us(LARGE_INTEGER a, LARGE_INTEGER b) {
+    static LARGE_INTEGER f{};
+    if (!f.QuadPart) QueryPerformanceFrequency(&f);
+    return static_cast<double>(b.QuadPart - a.QuadPart) * 1e6 / static_cast<double>(f.QuadPart);
+}
+float pct(std::vector<float> v, double q) {
+    if (v.empty()) return -1;
+    std::sort(v.begin(), v.end());
+    return v[std::min(v.size() - 1, static_cast<size_t>(q * static_cast<double>(v.size())))];
+}
+void KILN_CALL st_count(KilnGameSlice*, void* user) { static_cast<Seen*>(user)->slices.fetch_add(1, std::memory_order_relaxed); }
+void KILN_CALL st_archetype_cost(KilnGameSlice* s, void*) {
+    LARGE_INTEGER a{}, b{};
+    uintptr_t layout = 0;
+    QueryPerformanceCounter(&a);
+    const KilnResult rc = W->game_slice_archetype(s, &layout);
+    QueryPerformanceCounter(&b);
+    std::lock_guard lock(g_cost.mu);
+    ++g_cost.calls;
+    if (rc == KILN_OK) ++g_cost.ok;
+    else ++g_cost.other;
+    if (g_cost.call_ns.size() < 200000) g_cost.call_ns.push_back(static_cast<float>(qpc_us(a, b) * 1000.0));
+}
+void KILN_CALL on_post(const KilnTickInfo*, void*) {
+    if (g_cost.phase < 0 || !g_cost.pre_set) return;
+    LARGE_INTEGER now{};
+    QueryPerformanceCounter(&now);
+    g_cost.step_us[g_cost.phase].push_back(static_cast<float>(qpc_us(g_cost.pre, now)));
+    g_cost.pre_set = false;
+}
+// n counts from the restart boot's start; the mark row ran at 10. True when the phase is over.
+bool cost_phase(uint64_t n) {
+    auto& c = g_cost;
+    const uint64_t p0 = 100, p1 = p0 + kCostSteps + 20, p2 = p1 + kCostSteps + 20, end = p2 + kCostSteps + 20;
+    if (n == 20) {
+        KilnGameProgramsStatus st{};
+        st.size = sizeof st;
+        W->game_programs_status(&st);
+        for (uint32_t i = 0; i < st.programs[KILN_WORLD_SERVER]; ++i) {
+            KilnGameProgramInfo pi{};
+            pi.size = sizeof pi;
+            if (W->game_program_info(KILN_WORLD_SERVER, static_cast<int32_t>(i), &pi) != KILN_OK) continue;
+            if (!(pi.flags & KILN_GAME_PROGRAM_GAME) || (pi.flags & KILN_GAME_PROGRAM_NO_UPDATE)) continue;
+            auto& w = c.census.emplace_back();
+            w.name.assign(pi.name.ptr, pi.name.len);
+            if (W->game_program_wrap(g_owner, KILN_WORLD_SERVER, static_cast<int32_t>(i), KILN_WRAP_BEFORE, 0, &st_count,
+                                     &w.seen, &w.handle) != KILN_OK)
+                w.handle = 0;
+        }
+        say("cost: a census of %zu game programs for 60 steps", c.census.size());
+    } else if (n == 80) {
+        for (auto& w : c.census) {
+            if (w.seen.slices.load() > c.busy_slices) c.busy_slices = w.seen.slices.load(), c.busy = w.name;
+            if (w.handle) W->game_program_unwrap(w.handle);
+        }
+        say("cost: the busiest program is %s (%llu slices in 60 steps)", c.busy.c_str(),
+            static_cast<unsigned long long>(c.busy_slices));
+    } else if (n == p0) {
+        c.phase = 0;
+    } else if (n == p1 - 20) {
+        c.phase = -1;
+        if (!c.busy.empty()) c.wrap = wrap(c.busy.c_str(), KILN_WRAP_BEFORE, &st_archetype_cost, nullptr);
+    } else if (n == p1) {
+        c.phase = 1;
+    } else if (n == p2 - 20) {
+        c.phase = -1;
+        if (c.wrap) W->game_program_unwrap(c.wrap);
+    } else if (n == p2) {
+        c.phase = 2;
+    } else if (n == end) {
+        c.phase = -1;
+        std::vector<float> calls;
+        {
+            std::lock_guard lock(c.mu);
+            calls = c.call_ns;
+        }
+        const size_t head = std::min<size_t>(calls.size(), static_cast<size_t>(c.busy_slices / 60 + 1));
+        const std::vector<float> first(calls.begin(), calls.begin() + static_cast<ptrdiff_t>(head)),
+            later(calls.begin() + static_cast<ptrdiff_t>(head), calls.end());
+        row(c.busy_slices > 0 && c.calls > 0 && c.other == 0 && c.step_us[0].size() >= kCostSteps / 2 &&
+                c.step_us[1].size() >= kCostSteps / 2 && c.step_us[2].size() >= kCostSteps / 2,
+            "archetype cost: %s (%llu slices in 60 steps); step us p50/p99: P0 no link %.1f/%.1f (%zu steps), P1 link + one "
+            "archetype stage %.1f/%.1f (%zu), P2 link only %.1f/%.1f (%zu); game_slice_archetype ns p50/p99: first step "
+            "(the map) %.0f/%.0f (%zu calls), later (the slice record) %.0f/%.0f (%zu calls); %llu of %llu OK",
+            c.busy.c_str(), static_cast<unsigned long long>(c.busy_slices), pct(c.step_us[0], 0.5), pct(c.step_us[0], 0.99),
+            c.step_us[0].size(), pct(c.step_us[1], 0.5), pct(c.step_us[1], 0.99), c.step_us[1].size(),
+            pct(c.step_us[2], 0.5), pct(c.step_us[2], 0.99), c.step_us[2].size(), pct(first, 0.5), pct(first, 0.99),
+            first.size(), pct(later, 0.5), pct(later, 0.99), later.size(), static_cast<unsigned long long>(c.ok),
+            static_cast<unsigned long long>(c.calls));
+        return true;
+    }
+    return false;
+}
+
 // The boot after the restart: the written well, found by its position, holds the written value (plus what it filled).
 void restart_phase(uint64_t n) {
+    if (n > 10) {
+        if (cost_phase(n)) {
+            g_done = true;
+            say("done, %d PASS, %d FAIL", g_pass, g_fail);
+            announce_done();
+        }
+        return;
+    }
     if (n != 10) return;
     stop_wrap_make();
     const uint32_t hash = W->component_hash(ks("Fuel"));
@@ -665,9 +793,8 @@ void restart_phase(uint64_t n) {
     std::string p = state_path();
     wchar_t w[1100];
     if (MultiByteToWideChar(CP_UTF8, 0, p.c_str(), -1, w, 1100) > 0) DeleteFileW(w);
-    g_done = true;
-    say("done, %d PASS, %d FAIL", g_pass, g_fail);
-    announce_done();
+    say("restart row done; the archetype cost phases follow (about %llu steps)",
+        static_cast<unsigned long long>(3 * kCostSteps + 200));
 }
 
 // ---- S3: kiln.types under wraps ----
@@ -875,6 +1002,10 @@ void wraps_phase(uint64_t n) {
 }
 
 void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
+    if (g_cost.phase >= 0) {
+        QueryPerformanceCounter(&g_cost.pre);
+        g_cost.pre_set = true;
+    }
     if (g_done || !W) return;
     g_tick_tid = GetCurrentThreadId();
     if (!g_restart.after_restart && !g_w.init.handle && status().directory[KILN_WORLD_SERVER]) {
@@ -983,5 +1114,6 @@ extern "C" __declspec(dllexport) KilnResult KILN_CALL kiln_plugin_main(const Kil
         };
     KilnHandle h = 0;
     api->subscribe_tick(owner, KILN_TICK_PRE, &on_pre, nullptr, &h);
+    api->subscribe_tick(owner, KILN_TICK_POST, &on_post, nullptr, &h);
     return KILN_OK;
 }

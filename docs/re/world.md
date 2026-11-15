@@ -400,8 +400,12 @@ runner path. Dead RunSlice recorded zero calls in dedicated and hosted probes. I
 ProgramRunner and `entry+0x28` (e.g. 41 `init_spawn_time` slices in the dedicated census). [static] [lab] [seen]
 
 `R=*(Storage+0)=world+0x928`; table `R+0x745a28=world+0x746350`, u16 count `R+0xe16628=world+0xe16f50`.
-Entry `+0x28` is fetched anew per slice. Slice is 0x38 B: entry pointer `+0x10`, archetype group `+0x20`, first/end
-rows u32 `+0x28/+0x2c`. Job J: Storage `+0`, command buffer `+8`, entity list `+0x830` (16 B/entry), count `+0x838`.
+Entry `+0x28` is fetched anew per slice. Slice is 0x38 B: entry pointer `+0x10`, archetype layout `+0x18` (the archetype
+object, bitset at +0, the same object as an entity record's `world/entity.layout`; ProgramRunner passes it to the column
+setup S `0x629570` / C `0x98d6e0`), archetype group `+0x20`, first/end rows u32 `+0x28/+0x2c` (end - first = the job's
+count). ProgramRunner's rdx is this record, and the update call reads `[[rdi+0x10]+0x28]` from it (S `0x64b169`), so the
+update runs inside the runner call of its own record: kiln.world's `world.slice_record` (sigdb
+`@world/ProgramRunner.slice` / `.layout`, dev.29) records rdx at the runner's entry for WhenArchetype. [static] Job J: Storage `+0`, command buffer `+8`, entity list `+0x830` (16 B/entry), count `+0x838`.
 Task: Storage `+0`, slices `+8`, slice index u32 `+0x10`, worker value u32 `+0x14`. [static] [lab]
 
 ### Parallel selection and affinity [static] [lab] [seen]

@@ -133,6 +133,9 @@ struct Layout {
     int64_t entity_id = -1;  // u32 entity id in an entity record (spawn/record.id): a record names the entity it is of
     int64_t tp_applied = -1, tp_find_ground = -1, tp_target_entity = -1, tp_add_size = -1, tp_remove_size = -1;
     int64_t actor_state = -1;
+    // the engine's slice record that types/ProgramRunner runs (world.slice_record): its program-table entry, archetype
+    // layout and first/end rows
+    int64_t slice_entry = -1, slice_layout = -1, slice_first = -1, slice_end = -1;
 };
 extern Layout L;
 

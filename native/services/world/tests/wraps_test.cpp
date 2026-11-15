@@ -175,6 +175,12 @@ bool g_hooks_on = true;
 KilnOwnerRetiringFn g_retiring_fn = nullptr;
 void* g_retiring_user = nullptr;
 KilnOwner g_retiring_observer = 0;
+constexpr uintptr_t kRunner = 0x14064ac00;  // types/ProgramRunner, as sigdb resolves it
+KilnMidFn g_mid_fn = nullptr;
+void* g_mid_user = nullptr;
+uintptr_t g_mid_target = 0;
+int g_mid_calls = 0;
+KilnResult g_mid_rc = KILN_OK;
 KilnHooksApi g_fake_hooks = [] {
     KilnHooksApi h{};
     h.header = {sizeof(KilnHooksApi), KILN_HOOKS_VERSION};
@@ -184,6 +190,19 @@ KilnHooksApi g_fake_hooks = [] {
         return KILN_OK;
     };
     h.unsubscribe_owner_retiring = [](KilnHandle) -> KilnResult { return KILN_OK; };
+    // the checked mid link kiln.world puts on types/ProgramRunner's entry (world.slice_record): recorded, so a test can run
+    // it as the runner would; g_mid_rc != OK refuses it as an unchecked thread would
+    h.mid2_checked = [](KilnOwner, uintptr_t target, const KilnHookOrder*, KilnMidFn fn, void* user, KilnHandle* out,
+                        uint32_t* unchecked) -> KilnResult {
+        ++g_mid_calls;
+        if (g_mid_rc != KILN_OK) {
+            if (unchecked) *unchecked = 2;
+            return g_mid_rc;
+        }
+        g_mid_fn = fn, g_mid_user = user, g_mid_target = target;
+        if (out) *out = 7;
+        return KILN_OK;
+    };
     return h;
 }();
 KilnApi g_fake{};
@@ -205,7 +224,11 @@ void fake_api() {
         return g_hooks_on && std::string(name.ptr, name.len) == KILN_HOOKS_SERVICE ? &g_fake_hooks : nullptr;
     };
     g_fake.path = [](int32_t, char*, size_t, size_t*) -> KilnResult { return KILN_ERR_UNAVAILABLE; };
-    g_fake.symbol = [](KilnStr, uintptr_t*) -> KilnResult { return KILN_ERR_NOT_FOUND; };
+    g_fake.symbol = [](KilnStr name, uintptr_t* out) -> KilnResult {
+        if (std::string(name.ptr, name.len) != "types/ProgramRunner") return KILN_ERR_NOT_FOUND;
+        *out = kRunner;
+        return KILN_OK;
+    };
     g_api = &g_fake;
 }
 
@@ -287,6 +310,10 @@ void layout() {
     L.entity_layout = 0x18;
     L.entity_id = 0x10;
     L.map = MapFields{0x08, 0x10, 0x28, 0x40, 0x54};
+    L.slice_entry = 0x10;  // the engine's slice record (world.slice_record)
+    L.slice_layout = 0x18;
+    L.slice_first = 0x28;
+    L.slice_end = 0x2C;
     F.write = true;
 }
 
@@ -1360,6 +1387,34 @@ void KILN_CALL st_iterate_after(KilnGameSlice* s, void*) {
     g_seen4.index_after = reinterpret_cast<ProgramCtx*>(s->program_ctx)->index;
 }
 
+// The runner link is installed with mid2_checked, which refuses while a thread cannot be checked: tried again
+// kRecordSpacing Pres later, kRecordAttempts times at most, then WhenArchetype keeps the entity-map read and says so.
+void record_link_refused() {
+    check(g_record_ok && !g_record_live.load() && !g_record_wanted.load(),
+          "slice record: the feature resolved; no link before a stage asks for an archetype");
+    wpre();
+    check(g_mid_calls == 0, "slice record: no link is put in while nobody asked");
+    g_mid_rc = KILN_HOOKS_ERR_UNCHECKED;
+    g_record_wanted = true;  // what a stage's first archetype read sets
+    wpre();
+    check(g_mid_calls == 1 && !g_record_live.load() && logs_with("tried again in 16 Pres") == 1,
+          "slice record: a refused link is said and not live");
+    for (int i = 0; i < 16; ++i) wpre();
+    check(g_mid_calls == 1, "slice record: no second try within 16 Pres");
+    wpre();
+    check(g_mid_calls == 2, "slice record: the second try comes 16 Pres later");
+    for (int i = 0; i < 8 * 17; ++i) wpre();
+    check(g_mid_calls == 8 && g_record_gaveup.load() && logs_with("was refused 8 times") == 1,
+          "slice record: after 8 refusals it gives up and says WhenArchetype keeps the entity-map read");
+    // as before the row: the next stage that asks puts the link in at once
+    g_record_gaveup = false;
+    g_record_attempts = 0;
+    g_record_wait = 0;
+    g_record_wanted = false;
+    g_mid_rc = KILN_OK;
+    g_mid_calls = 0;
+}
+
 void per_entity() {
     fn.iter_begin = &fake_iter_begin;
     fn.iter_next = &fake_iter_next;
@@ -1647,8 +1702,12 @@ void per_entity() {
         std::memcpy(recs[1] + 0x10, &ids[1], 4);
         const int64_t saved = L.entity_id;
         L.entity_id = -1;
+        check(archetype_of(ids[1], &rc) == 0 && rc == KILN_WORLD_ERR_CHANGED,
+              "archetype: without the record's id offset the map's layout is not trusted; the slice-record link is coming");
+        g_record_ok = false;
         check(archetype_of(ids[1], &rc) == 0 && rc == KILN_ERR_UNAVAILABLE,
-              "archetype: without the record's id offset the layout is not trusted (this build cannot read archetypes)");
+              "archetype: with neither the record's id offset nor the slice record, this build cannot read archetypes");
+        g_record_ok = true;
         L.entity_id = saved;
         // A concurrent map mutation during the archetype read (a grow, or an insert/erase) is detected: the test seam
         // changes the map between the layout read and the coherence re-check, and the read turns undecidable instead of
@@ -1670,6 +1729,55 @@ void per_entity() {
         wraps_test_archetype_gap(nullptr);
         check(archetype_of(ids[2], &rc) == reinterpret_cast<uintptr_t>(lay[2]) && rc == KILN_OK,
               "archetype: decides again once the map is steady under the read");
+
+        // The scheduler-stable source: the engine's slice record that ProgramRunner runs. The archetype reads above asked
+        // for it, so the next Pre put the link on the runner's entry; from then on a slice whose runner recorded its
+        // record reads the layout from there, checked against the trampoline's entry and the job's count.
+        wpre();
+        check(g_record_live.load() && g_mid_fn && g_mid_target == kRunner && g_mid_calls == 1,
+              "slice record: the first archetype read put the mid link on types/ProgramRunner in the next Pre");
+        alignas(16) static uint64_t rec_layout[2] = {1ull << 4, 0};
+        alignas(16) static uint8_t srec[0x38]{};
+        auto set_rec = [&](uintptr_t entry, uint32_t first, uint32_t end) {
+            const auto lp = reinterpret_cast<uintptr_t>(rec_layout);
+            std::memcpy(srec + 0x10, &entry, 8);
+            std::memcpy(srec + 0x18, &lp, 8);
+            std::memcpy(srec + 0x28, &first, 4);
+            std::memcpy(srec + 0x2C, &end, 4);
+        };
+        // ProgramRunner(storage, slice record, ...): its entry runs the link with rdx = the record, then the slice
+        auto via_runner = [&](uint32_t first, KilnResult* rc) {
+            KilnRegisters regs{};
+            regs.rdx = reinterpret_cast<uintptr_t>(srec);
+            g_mid_fn(&regs, g_mid_user);
+            return archetype_of(first, rc);
+        };
+        const auto rl = reinterpret_cast<uintptr_t>(rec_layout);
+        const uint64_t from_rec = g_arch_record.load(), mism = g_arch_mismatch.load();
+        set_rec(wentry(0), 5, 8);  // 3 rows: the job's count
+        check(via_runner(ids[2], &rc) == rl && rc == KILN_OK && g_arch_record.load() == from_rec + 1,
+              "slice record: the layout comes from the slice record the runner recorded, not from the entity map");
+        wraps_test_archetype_gap(+[] { uint32_t c = g_m2count + 1; std::memcpy(reinterpret_cast<void*>(g_m2 + 0x54), &c, 4); });
+        check(via_runner(ids[2], &rc) == rl && rc == KILN_OK,
+              "slice record: a map that changes meanwhile does not matter to it");
+        std::memcpy(m2 + 0x54, &mcount, 4);
+        wraps_test_archetype_gap(nullptr);
+        check(archetype_of(ids[2], &rc) == reinterpret_cast<uintptr_t>(lay[2]) && rc == KILN_OK,
+              "slice record: taken and cleared by the trampoline: a later slice with no record of its own reads the map");
+        set_rec(wentry(1), 5, 8);
+        check(via_runner(ids[2], &rc) == reinterpret_cast<uintptr_t>(lay[2]) && rc == KILN_OK && g_arch_mismatch.load() == mism + 1,
+              "slice record: a record of another program's entry is not trusted (the map answers)");
+        set_rec(wentry(0), 5, 9);
+        check(via_runner(ids[2], &rc) == reinterpret_cast<uintptr_t>(lay[2]) && rc == KILN_OK && g_arch_mismatch.load() == mism + 2,
+              "slice record: a record whose rows are not the job's count is not trusted (the map answers)");
+        set_rec(wentry(0), 5, 8);
+        const int64_t saved_entities = L.storage_entities;
+        L.storage_entities = -1;
+        check(via_runner(ids[2], &rc) == rl && rc == KILN_OK,
+              "slice record: decides on a build whose entity map did not resolve");
+        check(archetype_of(ids[2], &rc) == 0 && rc == KILN_WORLD_ERR_CHANGED,
+              "slice record: there, a slice with no record is left to the game (transient), not turned off");
+        L.storage_entities = saved_entities;
     }
     KilnGameSlice outside{};
     outside.size = sizeof outside;
@@ -2029,6 +2137,7 @@ int main(int argc, char** argv) {
     stopping_timeout();
     tick_fault_closes_admission();
     retirement_under_load();
+    record_link_refused();
     per_entity();
     directory_read_in_stage();
     stress_steps();
