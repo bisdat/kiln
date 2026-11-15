@@ -17,8 +17,8 @@ internal static class BlockCapabilities
         ? new Row(CapabilityState.Available, CapabilityReason.None, null)
         : new Row(CapabilityState.Unavailable, CapabilityReason.ServiceMissing, "kiln.gamedata is not loaded: a move is a sequence clone with rules, and the item's slots are item data");
 
-    /// <summary>The follow-ups' row (a weapon's moves applied as one generation), from whether kiln.gamedata is here. Pure. The client gate holds the row
-    /// until its game checks (16c-b, 16c-d) have passed; kiln.caps then answers for it whatever is reported here.</summary>
+    /// <summary>The follow-ups' row (a weapon's moves applied as one generation), from whether kiln.gamedata is here. Pure. The row is on on both sides since 0.2.0-dev.29;
+    /// game checks 16c-b and 16c-d remain unconfirmed.</summary>
     internal static Row FollowUpsRow(bool gamedata) => gamedata
         ? new Row(CapabilityState.Available, CapabilityReason.None, null)
         : new Row(CapabilityState.Unavailable, CapabilityReason.ServiceMissing, "kiln.gamedata is not loaded: a routed move is a sequence clone with rules, and the switch is item data");

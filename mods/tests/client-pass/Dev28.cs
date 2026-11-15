@@ -17,8 +17,8 @@ namespace ClientPass;
 //   - it starts with `if (!await Need(c, "<fixture mod id>")) return;` when it uses a fixture or sample mod, so a
 //     missing mod ends the check as skipped (c.Skip: the player cannot pass it);
 //   - when the capability it tests is held by the client gate (native/core/gates), it starts with
-//     `if (!await NeedOpen(c, "<capability>")) return;`: the pass runs with "preview": true in kiln.json, and a check
-//     that ran against a capability still switched off would test nothing.
+//     `if (!await NeedOpen(c, "<capability>")) return;`: "preview": true in kiln.json can lift a configured hold.
+//     No holds ship in 0.2.0-dev.29; these checks confirm behavior without a preview setting.
 public sealed partial class ClientPassMod
 {
     private const string Dev28 = "0.2.0-dev.28";

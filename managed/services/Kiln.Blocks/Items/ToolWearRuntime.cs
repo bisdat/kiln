@@ -33,7 +33,7 @@ internal static class ToolWearRuntime
 
     /// <summary>A server world may run in this process: a dedicated server, or a game that hosts (tests set it).</summary>
     internal static Func<bool> ServerHere = () => !BlocksBridge.IsClient || Client.IsHosting;
-    /// <summary>The capability is held by the client gate here (a hosted game before its game test): the intent waits, it is no error (tests set it).</summary>
+    /// <summary>If a capability hold is configured (none ships in 0.2.0-dev.29): the intent waits, it is no error (tests set it).</summary>
     internal static Func<bool> Held = () => Capabilities.IsHeld(Capability);
     /// <summary>Sets the rule as the mod's (tests set it).</summary>
     internal static Func<ModBlocks, uint, int, ToolWearResult> Set = (mod, item, cost) => Items.ToolWear.Set(new ItemId(item), cost, null, mod.Owner, mod.Id);
@@ -91,7 +91,7 @@ internal static class ToolWearRuntime
         if (todo.Count == 0 || !ServerHere()) return;      // a joined game: nothing to rule, nothing to say
         if (Held())
         {
-            // switched off until its game test: said once per block, as information; the intent waits ("preview" lifts the gate)
+            // A configured hold: said once per block, as information; the intent waits ("preview" lifts it). No holds ship in dev.29.
             foreach (var i in todo.Where(i => !i.Said))
             {
                 i.Said = true;

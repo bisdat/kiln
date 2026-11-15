@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Kiln.Terrain in the capability registry (docs/kiln/services/caps.md). The library has no native table: its rows say
-// whether what it is built on is there. terrain.overlays is in the client gate's list for the client side
-// (native/core/gates/dev28-19f-terrain.json): on a client that hosts a world it is held until its game test.
+// whether what it is built on is there. terrain.overlays is on in hosted worlds since 0.2.0-dev.29;
+// check 19f-overlay-client still has not confirmed it in a real game.
 namespace Kiln;
 
 internal static class TerrainCaps

@@ -88,7 +88,7 @@ public readonly record struct Capability(
     /// <summary>The capability is built but held back until it has been tested in a real game: it is
     /// <see cref="CapabilityState.Unavailable"/> for <see cref="CapabilityReason.Policy"/> and
     /// <see cref="ReasonText"/> begins with <c>game test pending:</c> followed by the guided checks that open it.
-    /// <c>"preview"</c> in <c>kiln.json</c> (true, or a list of names) switches such a capability on before then.</summary>
+    /// <c>"preview"</c> in <c>kiln.json</c> (true, or a list of names) switches such a capability on before then. The list is empty in 0.2.0-dev.29.</summary>
     public bool IsHeld => State == CapabilityState.Unavailable && Reason == CapabilityReason.Policy &&
                           ReasonText is not null && ReasonText.StartsWith(Capabilities.HeldText, StringComparison.Ordinal);
 }

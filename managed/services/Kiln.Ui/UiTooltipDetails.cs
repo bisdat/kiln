@@ -2,7 +2,7 @@
 // Ui.Values.TooltipLines and Kiln's "Item details" window (chapter 05a §5.5): extra text for an item, collected while
 // the game draws the item's detail view, shown in a separate, explicitly opened window with its own wrapping and
 // scrolling. Nothing is drawn into the game's tooltip (the game's own layout neither wraps nor makes room for added
-// lines). Capability ui.values.tooltip_lines, held until check 05a-c4-viewer.
+// lines). Capability ui.values.tooltip_lines, on since 0.2.0-dev.29; check 05a-c4-viewer remains unconfirmed.
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;

@@ -5,8 +5,8 @@ using static Kiln.Testing.ClientCheckTags;
 
 namespace ClientPass;
 
-// 01-world-queries (chapter 01): Kiln.Queries in the server world of a game that hosts. The four queries.* rows are held on
-// a game client until 01-queries.voxel-ray-hosted passes (native/core/gates/dev28-01-world-queries.json). Orders 2000-2099.
+// 01-world-queries (chapter 01): Kiln.Queries in the server world of a game that hosts. The four queries.* rows are on in hosted
+// worlds since 0.2.0-dev.29; 01-queries.voxel-ray-hosted remains unconfirmed in a real game. Orders 2000-2099.
 public sealed partial class ClientPassMod
 {
     private const string QueriesArea = "World queries";
@@ -148,7 +148,7 @@ public sealed partial class ClientPassMod
     }
 
     // ---- 02-pathfinding (chapter 02): the game's path search in a hosted world. queries.path and queries.reachability are
-    // held on a game client until 02-queries.path-hosted passes (native/core/gates/dev28-02-pathfinding.json). Orders 2100-2199.
+    // on in hosted worlds since 0.2.0-dev.29; 02-queries.path-hosted remains unconfirmed in a real game. Orders 2100-2199.
 
     private static async Task<QueryPathResult> QueriesPath(CheckContext c, QueryPathRequest request)
     {

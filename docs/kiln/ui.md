@@ -150,7 +150,7 @@ server keeps the real values (no healing, no spending, no capacity); a player wi
 see the game unchanged. Native: in-core `kiln.ui.values` (`native/core/abi/services/kiln_ui_values.h`). Sample:
 `mods/samples/ValueBars`. Guided checks: `05a-c1` to `05a-c5` in `mods/tests/client-pass/Dev28ValuesUi.cs`.
 
-| Member | Draws | Current / Max | Edit | Row (held until) |
+| Member | Draws | Current / Max | Edit | Row (guided check) |
 |---|---|---|---|---|
 | `ItemBar(item, provider)` | detail view number and bar, its label | what the game prints (water: **charges**; at most 2,147,483,647) | fraction, numbers, label | `ui.values.detail` (`05a-c1`) |
 | `SlotBar(item, provider)` | the slot bar (only its fraction shows) | raw fuel units | fraction, numbers | `ui.values.slot` (`05a-c1`) |
@@ -159,9 +159,11 @@ see the game unchanged. Native: in-core `kiln.ui.values` (`native/core/abi/servi
 | `TooltipLines(item, provider)`, `OpenTooltipDetails()`, `CloseTooltipDetails()` | lines in Kiln's Item details window | – | up to 16 lines per detail view | `ui.values.tooltip_lines` (`05a-c4-viewer`) |
 | `Slots()`, `SubscribeSlots(onFrame)` | (reads) the slots of the last completed UI frame | – | – | `ui.slots.inspect` (`05a-c5`) |
 
-`item` is an `ItemId`, `default` for every item. Every row is off on a server, on a build where its game code did not
-resolve, and **until its guided check passed** (the client gate: [services/caps.md](services/caps.md#the-client-gate-dev28));
-the pass and a preview profile switch them on.
+`item` is an `ItemId`, `default` for every item. Every row is off on a server and on a build where its game code did not
+resolve. They are on in every game since 0.2.0-dev.29, subject to their dependencies, but none has been confirmed
+in a real game by the checks above ([services/caps.md](services/caps.md#the-client-gate-dev28)).
+
+These six rows exist only on a game client, never on a dedicated server. Their hooks install on first use by a mod (including a slot snapshot read), then remain installed for the process. They require the measured client build 26430625 (SHA `5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77`); after a game update they are off until Kiln is updated. Slot collection continues after its last consumer leaves. Providers run synchronously with no enforced time budget: a slow or hanging provider can freeze the game.
 
 **A provider** (`UiBarProvider`) gets the context, the item (`UiItemView`) and the value as the earlier providers left
 it, and answers `UiProviderDecision.Pass`, `.Replace(new UiBarEdit(...))` (only its non-null fields change) or

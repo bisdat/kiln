@@ -192,18 +192,17 @@ restart.
   `mods.boot` is available.
 - **Game clients** (a world a player hosts, and a player's game that joins a server) run it the same way since
   0.2.0-dev.29: the rows `mods.boot.client` and `mods.boot.resource_patches` are open. In 0.2.0-dev.28 they were held
-  and a boot mod did not load on a client without `"preview"` in `kiln/kiln.json`. Still held on a client:
-  `mods.boot.vfx`. While it is held, a boot mod's VFX and material files are built as every mod's are (before the
-  game's entry point, outside the boot generation). What stops the start for a `"required"` mod is the same as with the
-  row open: one of its blocks files left out, a VFX or material error of the cook, or a game build Kiln's VFX or
-  materials cannot be built for; the stop line names the file and why. An optional boot mod and a mod without `boot`
-  lose only that file, with a line in kiln.log. VFX or materials staged into a boot generation are refused for a
-  required mod and left out with a warning otherwise (no public API stages them in this release).
+  and a boot mod did not load on a client without `"preview"` in `kiln/kiln.json`. `mods.boot.vfx` is also open now:
+  a client with any boot mod builds all mods' VFX and material files with the boot generation, after `OnBoot` and before
+  the game's entry point. One of a required mod's blocks files left out, a VFX or material error of the cook,
+  or a game build Kiln's VFX or materials cannot be built for stops the start; the stop line names the file and why.
+  An optional boot mod and a mod without `boot` lose only that file, with a line in kiln.log.
+  Guided check `08-boot.first-start-definitions` has not confirmed boot VFX in a real game.
 - A server where the phase does not run (safe idle, .NET off) does not load boot mods either. The row `mods.boot.phase`
   says why.
 
 An enabled mod with `"boot": "required"` stops the start with 0x4B01 if the boot route is unavailable, including a
-held client gate. No world or save is loaded without its required content.
+capability hold if one is added in a future release (this release holds none). No world or save is loaded without its required content.
 
 ## Testing
 Unit tests of `OnBoot` without a game: the test kit's boot runner, `KilnHarness.BootPhase` ([unit-tests.md](unit-tests.md#boot-phase-since-020-dev28)).

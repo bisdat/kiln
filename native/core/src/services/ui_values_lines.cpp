@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // kiln.ui.values: tooltip lines for Kiln's details window (chapter 05a §4.4, §5.1, §5.2, §5.5; capability
-// ui.values.tooltip_lines, held until check 05a-c4-viewer). Nothing is drawn into the game's tooltip: session 6 showed
+// ui.values.tooltip_lines, on since 0.2.0-dev.29; check 05a-c4-viewer unconfirmed). Nothing is drawn into the game's tooltip: session 6 showed
 // that native lines at the detail view's content merge point neither wrap nor reserve space.
 //
 //   raw link on ui/ItemDetail (void(detail, u8))   copies the 0x48-byte ItemView prefix of ItemDetail's own record (its

@@ -66,7 +66,7 @@ void KILN_CALL on_sim_tick(const KilnTickInfo*, void*) { sim_update(); }
 
 // ---- the boot generation's vfx collector (chapter 08) ----
 // Where nothing is built from a boot generation (a dedicated server, kiln.vfx off by its config, a client while the client gate holds
-// mods.boot.vfx), the collector still answers: an empty plan, and staged VFX and materials named in a warning. Elsewhere the build that
+// mods.boot.vfx under a configured hold; none ships in dev.29), the collector still answers: an empty plan, and staged VFX and materials named in a warning. Elsewhere the build that
 // on_ready runs without a boot profile runs in prepare, after OnBoot, before the game's entry point.
 bool g_boot_build = false;
 bool g_held_build = false;
@@ -82,8 +82,8 @@ void KILN_CALL destroy_boot(const void* p) {
 }
 // Why a process builds no VFX in its boot generation. A dedicated server renders none: a mod's VFX and materials are built by each
 // player's game (with the same boot mod), so nothing of a required mod is missing here. On a game client the user turned kiln.vfx off
-// (then a required mod's VFX and materials, files or staged, cannot be applied: refused) or the client gate holds mods.boot.vfx
-// (on_ready builds the files as before, so failed files and staged VFX/materials of a required mod are refused).
+// (then a required mod's VFX and materials, files or staged, cannot be applied: refused) or a future configured hold closes mods.boot.vfx
+// (none ships in dev.29; on_ready builds the files as before, so failed files and staged VFX/materials of a required mod are refused).
 struct EmptyWhy {
     const char* why;
     bool server, all_off;

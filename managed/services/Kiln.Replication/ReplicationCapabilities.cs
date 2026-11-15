@@ -11,8 +11,8 @@ internal static class ReplicationCaps
     /// <summary>sigdb: what the server sends each peer (server side, also a hosted world).</summary>
     public const string Observe = "repl.observe";
 
-    /// <summary>sigdb (client exe): what a Kiln client receives. Held by the client gate until the guided check
-    /// 11-repl.receive-watch has passed; kiln.repl has no receive side yet in this version.</summary>
+    /// <summary>sigdb (client exe): what a Kiln client receives. The gate is open since 0.2.0-dev.29, but
+    /// kiln.repl still lowers this row because its receive side is not built. Check 11-repl.receive-watch remains unconfirmed.</summary>
     public const string Client = "repl.client";
 
     /// <summary>sigdb: the loopback harness (<see cref="ReplicationLab"/>); lab servers only: kiln.json's policy "any"

@@ -5,7 +5,7 @@
 //
 // Client only: on a dedicated server init() says no (there is no game UI to hook). On the client nothing is hooked at
 // boot: each kind installs its links when the first provider of that kind registers and kiln.caps shows the kind's row
-// available and not held by the client gate, so a row held until the owner's client pass never reaches game code.
+// available and not held by the client gate, so a configured hold prevents game access. No holds ship in 0.2.0-dev.29.
 #include <cstddef>
 #include <cstring>
 #include <string>
@@ -37,8 +37,7 @@ std::atomic<const KilnUiApi*> g_ui{nullptr};
 
 const KilnCapsApi* caps() { return static_cast<const KilnCapsApi*>(svc::find(KILN_CAPS_SERVICE, 1)); }
 
-// A kind's hooks go in only when the client gate does not hold its row (native/core/gates/dev28-05a-value-providers
-// .json) and the row is available (its sigdb feature resolved, nobody reported it off).
+// A kind's hooks go in only when the client gate does not hold its row (native/core/gates; empty since 0.2.0-dev.29) and the row is available (its sigdb feature resolved, nobody reported it off).
 bool row_available(const char* name) {
     const KilnCapsApi* c = caps();
     const KilnStr n{name, std::strlen(name)};

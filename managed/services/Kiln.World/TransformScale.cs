@@ -61,11 +61,11 @@ public sealed record EntityScaleResult(EntityId Entity, Scale3? Before, Scale3 R
     /// <summary>True when the scale changed (<see cref="WorldWriteStatus.Written"/> and another value than before).</summary>
     public bool Changed => WorldWriteStatus == WorldWriteStatus.Written && Before is { } b && Now is { } n && b != n;
 
-    /// <summary>Whether the entity has this scale again after a save and restart. The game's save does not keep a
-    /// transform scale, so Kiln keeps it beside the save (kiln.saves' entity attachments) and sets it again, in the
-    /// setting mod's name, when the loaded entity is matched. True: kept (or the game's own scale, which the game brings
-    /// back itself); false: this session only (an entity the save does not keep, such as most enemies, or kiln.saves is
-    /// off); null when nothing was set (<see cref="Ok"/> false). Since 0.2.0-dev.28.</summary>
+    /// <summary>Whether replay was recorded (or the original scale restored), not a guarantee of the entity's future size.
+    /// The tested chest did not save transform scale itself; other entity families remain unconfirmed. Kiln stores replay
+    /// beside the save and matches by template and position, so an identical nearby entity can receive the wrong scale.
+    /// Replay needs the setting mod loaded with its write declaration. Removing a mod does not restore live scales.
+    /// False: session only; null when nothing was set (<see cref="Ok"/> false). Since 0.2.0-dev.28.</summary>
     public bool? Persisted { get; init; }
 }
 
@@ -125,7 +125,7 @@ public static unsafe partial class World
     /// false with the reason when the game did not take it (no such entity, not listed, the entity went).</returns>
     /// <exception cref="ArgumentException"><paramref name="entity"/> is none, or a factor is not finite or not above 0.</exception>
     /// <exception cref="KilnUnavailableException"><c>world.transform_scale</c> is off (this build's transform has no scale of
-    /// an accepted shape, kiln.types is not running, or this is a game client), or <c>world.tracked_writes</c> is off.</exception>
+    /// an accepted shape, kiln.types is not running, or no authoritative server world is running), or <c>world.tracked_writes</c> is off; hosting clients are supported.</exception>
     /// <exception cref="InvalidOperationException">Not on the tick thread, or inside a world program's update.</exception>
     [ServerOnly]
     [TickThreadOnly]

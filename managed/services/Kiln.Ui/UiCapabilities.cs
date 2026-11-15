@@ -22,8 +22,8 @@ internal static unsafe class UiCaps
         "ui.language",
     ];
 
-    /// <summary>kiln.ui.values' sigdb features (in-core, client only; each held by the client gate until its check
-    /// passed): Ui.Values' rows.</summary>
+    /// <summary>kiln.ui.values' sigdb features (in-core, client only; on since 0.2.0-dev.29, still
+    /// unconfirmed by their real-game checks; measured client build required, hooks install on first use): Ui.Values' rows.</summary>
     public static readonly string[] ValueFeatures =
     [
         "ui.values.detail", "ui.values.slot", "ui.values.held", "ui.values.hud", "ui.values.tooltip_lines",

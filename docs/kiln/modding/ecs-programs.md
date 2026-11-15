@@ -76,6 +76,8 @@ restart the server, then reload code. Editing the file while the server runs doe
 
 ## Hooks around game systems
 
+`systems.wraps.client` is open since 0.2.0-dev.29: a native plugin can target the client world’s programs when symbols and world lifecycle support are available and no conflicting runtime disables wraps. There is no managed client-wrap API in this tree. Native callers must release and drain wraps before freeing callback memory; automatic owner retirement is unfinished. `06a-wraps.client` remains a catalog entry without an implemented guided check or real-game confirmation.
+
 ```csharp
 hook = GameSystems.Hook("combat_experience_source",
     before: () => Interlocked.Increment(ref beforeCount),
