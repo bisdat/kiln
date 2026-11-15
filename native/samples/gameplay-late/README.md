@@ -1,15 +1,16 @@
 # gameplay-late: first demand in a running world
 
 A native `kiln_plugin_main` lab plugin. It obtains the gameplay table but requests/subscribes to nothing at load.
-It reads one atomic-renamed command per server Pre from `kiln/control/gameplay-late.cmd`. It needs
+It reads one atomic-renamed command per server Pre from `kiln/control/gameplay-late.command` (not a `*.cmd` file:
+Kiln.Host's control reader takes every `*.cmd` in that folder as one of its own commands). It needs
 `kiln/control/gameplay-late.lab` **before load**. The service's separate failure control also needs
 `kiln/control/gameplay.lab` **before service load**. Never put these markers in a player's installation.
 
 Build only the two targets, serially, from the worktree (do not execute the DLLs):
 
 ```sh
-export KILN_OUT=/home/jame/Work/kiln-codex/d29-lazybuild/build
-/home/jame/Work/kiln-codex/slot bash native/build.sh kiln-gameplay kiln-gameplay-late
+export KILN_OUT=<your build dir>
+native/build.sh kiln-gameplay kiln-gameplay-late
 ```
 
 With the lab stopped, stage the reviewed DLLs:
@@ -37,7 +38,7 @@ touch "$LAB/kiln/control/gameplay-late.lab"
 rm -f "$LAB/kiln/control/gameplay.unchecked"
 send() {
   printf '%s\n' "$*" > "$LAB/kiln/control/gameplay-late.tmp"
-  mv "$LAB/kiln/control/gameplay-late.tmp" "$LAB/kiln/control/gameplay-late.cmd"
+  mv "$LAB/kiln/control/gameplay-late.tmp" "$LAB/kiln/control/gameplay-late.command"
 }
 ```
 
@@ -68,6 +69,16 @@ For every group requested, require the service lines:
 And the fixture line:
 
 - `gameplay-late: PASS <group> waiting then installed after <n> Pre(s)`
+
+Each write while the world runs is timed by the service, one line per target (the installer stops the game's other
+threads while it writes):
+
+- `kiln.gameplay: <target> went in during play: the installer call took <ms> ms on the world's thread (write <k> in this Pre)`
+
+and the fixture prints the step intervals around it (`gameplay-late: step interval before the command: median ...`, then
+`gameplay-late: step <n> interval <ms> ms` for every step while a group waits and three after). The service's Pre runs
+before the fixture's, so a write in step N shows in the interval of step N+1. `log_level` `debug` in `kiln/kiln.json`
+adds kiln.hooks' own line with the time the other threads stood still.
 
 Craft/spawn normally need one eligible Pre, entities one (two targets), build three. BUILD also requests terraform;
 when terraform was idle, six combined targets still need three Pres. Concurrent all-group ordinary demand needs

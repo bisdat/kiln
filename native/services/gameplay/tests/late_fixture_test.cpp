@@ -35,9 +35,14 @@ int main() {
     api.path=[](int32_t,char* out,size_t cap,size_t* n)->KilnResult { *n=path.size(); if(cap<*n) return KILN_ERR_BUFFER_TOO_SMALL; std::memcpy(out,path.data(),*n); return KILN_OK; };
     api.subscribe_tick=[](KilnOwner,int32_t,KilnTickFn,void*,KilnHandle* h)->KilnResult { *h=1; return KILN_OK; };
     KilnPluginInfo info{}; CHECK(kiln_plugin_main(&api,77,&info)==KILN_OK); info.on_ready(nullptr); CHECK(demands==0);
-    auto send=[&](const char* cmd) { std::ofstream(root / "gameplay-late.cmd") << cmd << '\n'; late::pre(nullptr,nullptr); };
+    // Kiln.Host's control reader owns every *.cmd in this folder: the fixture must leave such a file alone.
+    std::ofstream(root / "gameplay-late.cmd") << "craft\n"; late::pre(nullptr,nullptr);
+    CHECK(demands==0); CHECK(std::filesystem::exists(root / "gameplay-late.cmd")); std::filesystem::remove(root / "gameplay-late.cmd");
+    auto send=[&](const char* cmd) { std::ofstream(root / "gameplay-late.command") << cmd << '\n'; late::pre(nullptr,nullptr); };
     send("craft"); CHECK(demands==1); CHECK(has("state 0 targets 0 -> state 2")); CHECK(!has("PASS craft waiting then installed"));
-    snapshot.hook_groups[0].state=1; late::pre(nullptr,nullptr); CHECK(has("PASS craft waiting then installed after 1 Pre(s)"));
+    snapshot.hook_groups[0].state=1; KilnTickInfo tick{}; tick.size=sizeof tick; tick.step=41; tick.wall_delta_ms=93.5;
+    late::pre(&tick,nullptr); CHECK(has("PASS craft waiting then installed after 1 Pre(s)"));
+    CHECK(has("gameplay-late: step 41 interval 93.5 ms"));
     KilnGameplayEvent ev{}; ev.kind=KILN_GAMEPLAY_CRAFTED; late::event(&ev,nullptr); send("verify craft"); CHECK(has("PASS no event before installation, 1 after"));
     send("zone build 1 2 3"); CHECK(snapshot.zones==0); CHECK(has("PASS pending zone refused without storage"));
     snapshot.build_hook_state=1; snapshot.build_hook_mask=31; late::pre(nullptr,nullptr); CHECK(snapshot.zones==1);

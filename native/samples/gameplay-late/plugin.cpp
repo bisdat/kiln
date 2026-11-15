@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <bit>
 #include <cstdarg>
+#include <cstddef>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -48,7 +49,9 @@ uint32_t KILN_CALL event(KilnGameplayEvent* e,void*) {
             if(e->kind==KILN_GAMEPLAY_ENTITY_JOINED) ++joined;
             if(e->kind==KILN_GAMEPLAY_ENTITY_LEFT) ++left;
         } else ++progress[i].early;
-        log("gameplay-late: event %s kind %u op %u actor %u target %u flags %u zone %u",names[i],e->kind,e->op,e->actor,e->target,e->flags,e->zone);
+        log("gameplay-late: event %s kind %u op %u actor %u target %u id %08x id2 %08x result %d flags %u zone %u at (%.1f, %.1f, %.1f) guid %02x%02x%02x%02x... outputs %u",
+            names[i],e->kind,e->op,e->actor,e->target,e->id,e->id2,e->result,e->flags,e->zone,e->position.x,e->position.y,e->position.z,
+            e->guid[0],e->guid[1],e->guid[2],e->guid[3],e->output_count);
         if(i==3 && replacement_pending && (e->flags & KILN_GAMEPLAY_F_REPLACED) &&
            std::equal(std::begin(replacement_to),std::end(replacement_to),e->guid)) {
             log("gameplay-late: PASS replacement kept pending, active after (real replaced spawn %u)",e->actor); replacement_pending=false;
@@ -149,17 +152,34 @@ void command(const std::string& text) {
     }
     log("gameplay-late: FAIL unknown command %s",text.c_str());
 }
-void KILN_CALL pre(const KilnTickInfo*,void*) {
+// Step intervals around a late install: kiln.gameplay's Pre runs before this one, so a write in step N shows in the
+// interval this Pre reads at step N+1. The median of the steps before the command is the baseline.
+std::array<double,64> intervals{}; unsigned interval_n=0; int trace=0;
+void baseline() {
+    const unsigned n=std::min<unsigned>(interval_n,static_cast<unsigned>(intervals.size()));
+    if(!n) return;
+    std::array<double,64> v=intervals; std::sort(v.begin(),v.begin()+n);
+    log("gameplay-late: step interval before the command: median %.1f ms, max %.1f ms over %u steps",v[n/2],v[n-1],n);
+}
+void KILN_CALL pre(const KilnTickInfo* tick,void*) {
     if(!enabled || !gameplay) return;
     ++pres;
-    // Commands are atomic-renamed by the coordinator. Bound input; consume once on the tick thread.
-    std::ifstream file(control / "gameplay-late.cmd");
+    const double interval=tick && tick->size>=offsetof(KilnTickInfo,wall_delta_ms)+sizeof(double) ? tick->wall_delta_ms : 0;
+    if(trace>0) { --trace; log("gameplay-late: step %llu interval %.1f ms",static_cast<unsigned long long>(tick ? tick->step : pres),interval); }
+    // Commands are atomic-renamed by the coordinator. Bound input; consume once on the tick thread. Not a *.cmd file:
+    // Kiln.Host's control reader takes every *.cmd in this folder as one of its own commands.
+    std::ifstream file(control / "gameplay-late.command");
     if(file) {
         char line[513]{}; file.getline(line,sizeof line); const bool valid=!file.fail(); file.close();
-        std::error_code ec; std::filesystem::remove(control / "gameplay-late.cmd",ec);
+        std::error_code ec; std::filesystem::remove(control / "gameplay-late.command",ec);
+        baseline(); trace=3;
         if(valid) command(line); else log("gameplay-late: FAIL command exceeds 511 bytes");
     }
+    if(interval>0) { intervals[interval_n++ % intervals.size()]=interval; }
     KilnGameplayStatus s{}; if(!status(s)) return;
+    bool open=false;
+    for(int i=0;i<5;++i) open |= progress[i].active && !progress[i].done;
+    if(open) trace=3;  // every step while a group waits, and three more after the last install
     for(int i=0;i<5;++i) {
         auto& p=progress[i]; auto g=group(s,i); if(!p.active || p.done) continue;
         p.waiting |= g.state==2;
