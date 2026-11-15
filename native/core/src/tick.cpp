@@ -457,6 +457,8 @@ void __fastcall hk_world_destroy(uintptr_t world) {
             // next wait on that queue the same way. Safe early and twice (EMF notes).
             if (waits_before_stop(kind) && g_wait_jobs) {
                 const double w0 = now_ms();
+                KLOG_I("tick: %s world 0x%llx: waiting for world jobs before STOPPING (WaitWorldJobs)",
+                       kKindName[kind], static_cast<unsigned long long>(world));
                 g_wait_jobs(world);
                 KLOG_I("tick: %s world 0x%llx: its jobs are drained by the engine (WaitWorldJobs, %.0f us) before STOPPING",
                        kKindName[kind], static_cast<unsigned long long>(world), (now_ms() - w0) * 1000.0);

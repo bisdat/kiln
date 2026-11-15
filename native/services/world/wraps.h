@@ -77,6 +77,9 @@ KilnResult KILN_CALL game_slice_attr_validate(KilnGameSlice* slice, const uint64
 KilnResult KILN_CALL game_slice_attr_changed(KilnGameSlice* slice, const uint64_t* iter, int32_t list, int32_t i);
 int32_t KILN_CALL game_program_list(uint32_t world_kind, int32_t index, int32_t list, KilnStr* names, uint32_t capacity);
 
+// Scoped TLS lifetime around a runner continuation, also on SEH/C++ unwind. Does not catch the game's exception.
+void runner_scope(uintptr_t* slot, uintptr_t record, void (*body)(void*), void* context);
+
 // ---- seh.cpp ----
 bool seh_wrap_stage(KilnWrapStageFn fn, KilnGameSlice* slice, void* user, unsigned long* code);
 // compare-exchange of a table entry's update pointer; false when the address faulted (*seen untouched)
