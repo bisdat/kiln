@@ -239,7 +239,7 @@ public static unsafe partial class Items
         }
         (CapabilityState, CapabilityReason, string) now = Capabilities.Get(Caps.Equip) is { State: CapabilityState.Unavailable, Reason: CapabilityReason.Session } equip
             ? (CapabilityState.Unavailable, CapabilityReason.Session, $"needs {Caps.Equip}: {equip.ReasonText}")
-            : (CapabilityState.Available, CapabilityReason.None, "");
+            : (CapabilityState.Available, CapabilityReason.None, s.Detail);  // which components a rollback is compared over, once a set ran
         if (now == _setsSession) return;
         _setsSession = now;
         Capabilities.Report(Caps.EquipSets, now.Item1, now.Item2, now.Item3);

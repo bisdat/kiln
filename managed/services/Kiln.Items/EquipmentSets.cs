@@ -99,9 +99,11 @@ public enum EquipmentSetStatus
     CommitRolledBack = 6,
     /// <summary>Never ran: the server world stopped, the asking mod unloaded first, or the request waited 250 steps.</summary>
     Dropped = 7,
-    /// <summary>After the transaction the inventory was neither as asked nor as before (or the game faulted inside it):
-    /// something may have changed (<see cref="EquipmentSetResult.MayHaveMutated"/>). Equipment sets are switched off
-    /// until the server restarts, and <see cref="EquipmentSetFaultedEvent"/> is posted.</summary>
+    /// <summary>After the transaction the inventory was neither as asked nor as before, or the game faulted in the set's
+    /// reads or inside its transaction: something may have changed when <see cref="EquipmentSetResult.MayHaveMutated"/> is
+    /// set (a fault in a read before the transaction changed nothing). Equipment sets and single equips are switched off
+    /// until the server, or the hosting player's game, restarts (other item calls still run), and
+    /// <see cref="EquipmentSetFaultedEvent"/> is posted.</summary>
     InvariantFailure = 8,
     /// <summary>Equipment sets went off after the call was accepted.</summary>
     Unavailable = 9,
@@ -185,12 +187,13 @@ public sealed class EquipmentSetChangedEvent : KilnEvent, IEntityEvent
 }
 
 /// <summary>
-/// A set's transaction left the inventory neither as asked nor as before, or the game faulted inside it
-/// (<see cref="EquipmentSetStatus.InvariantFailure"/>): something may have changed, and equipment sets and single equips
-/// are off until the server restarts (the capability row <c>items.equip_sets</c> keeps the reason, and kiln.log names
-/// the player and the step). After a fault nothing is rolled back or repaired: when
-/// <see cref="EquipmentSetResult.MayHaveMutated"/> is set, the player's inventory may be in an unknown state, and the
-/// result's reason says so. Posted once, on the tick thread, with the set's result. Not the opposite of
+/// A set's transaction left the inventory neither as asked nor as before, or the game faulted in the set's reads or
+/// inside its transaction (<see cref="EquipmentSetStatus.InvariantFailure"/>): equipment sets and single equips are off
+/// until the server, or the hosting player's game, restarts (the capability row <c>items.equip_sets</c> keeps the
+/// reason, and kiln.log names the player and the step). Moves, gives, takes and fuel writes stay on: the player can still
+/// move their own items by hand, and those calls are no riskier than that. After a fault nothing is rolled back or
+/// repaired: when <see cref="EquipmentSetResult.MayHaveMutated"/> is set, the player's inventory may be in an unknown
+/// state, and the result's reason says so; without it (a fault in a read before the transaction) nothing was changed. Posted once, on the tick thread, with the set's result. Not the opposite of
 /// <see cref="EquipmentSetChangedEvent"/>: when the changes that could still be read are known, that event is posted
 /// for the same ticket as well (both, in that order). Capability <c>items.equip_sets</c>. Since 0.2.0-dev.29.
 /// </summary>
