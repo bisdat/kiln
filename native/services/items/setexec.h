@@ -19,6 +19,11 @@
 //   CommitCalled -> snapshot       CommitRolledBack (the commit rolled back by itself)
 //   anything else, a mismatch after a rollback, a fault: InvariantFailure (MayHaveMutated), the capability goes off; no
 //   engine call repairs anything after a fault.
+// "As it was" after a rollback is two comparisons: the canonical snapshot (what a set selects) and every byte of the
+// seven components the program declares, of every entity of the player's tree (SetEngine::full), read before the
+// transaction opened and again after the rollback, in the same program update. An engine fault after the transaction
+// opened is not rolled back: the game's own rollback replays a record of operations that a fault may have left half
+// written, so after a fault the inventory may be in an unknown state, and the result says so (docs/kiln/services/items.md).
 #pragma once
 #include <tuple>
 #include <cstdint>
@@ -98,7 +103,15 @@ public:
     virtual bool commit() = 0;
     virtual bool rollback() = 0;
     virtual bool free_arrays() = 0;
+    // Every byte of the seven components kiln_items_equip declares (kFullParts) of every entity of `m`: the player, its
+    // InventorySetup nodes, its inventories and its item entities, each as {u32 entity, u8 part, u32 size, the bytes}. The
+    // canonical snapshot reads only the fields that decide what a set selects; a rollback must give back all of these
+    // (fuel, ItemState's level, rarity and damage, the action bars' selection, the empty states, ...).
+    virtual bool full(const SetModel& m, std::vector<uint8_t>* out) = 0;
 };
+
+// The parts of SetEngine::full in its records' order (kiln.items' Acc order: setexec.cpp checks it).
+inline constexpr const char* kFullParts[7] = {"Fuel", "Inventory", "InventoryEmptyState", "InventorySetup", "ItemState", "OwnerRelationship", "SlotSelection"};
 
 namespace exec_detail {
 
@@ -129,7 +142,10 @@ inline std::vector<SlotChange> deltas(const SetModel& before, const SetModel& af
 }
 
 // Equipping relocates whole stacks; it must preserve every stack and instance identity, the inventory
-// topology and the action bars. Contained slots may move, but must still name the actual stack.
+// topology and the action bars. Contained slots may move, but must still name the actual stack. An item's
+// OwnerRelationship names the inventory that holds it (the lab on server 26430253: the backpack's, an equipment page's),
+// so it moves with the item: an owner that named the item's inventory names its new one after the commit, and an owner
+// that named anything else stays what it was.
 inline bool conserved(const SetModel& before, const SetModel& after) {
     auto stacks = [](const SetModel& m) {
         std::vector<std::tuple<uint32_t, uint32_t, uint32_t>> out;
@@ -143,17 +159,45 @@ inline bool conserved(const SetModel& before, const SetModel& after) {
     for (const auto& r : after.items) {
         const Stack* s = after.stack_of(r.pide);
         if (!s || (r.has_state && r.contained != s->slot)) return false;
+        const ItemRec* b = before.item(r.pide);
+        const Stack* bs = before.stack_of(r.pide);
+        if (!b || !bs || b->has_owner != r.has_owner) return false;
+        if (r.has_owner && r.owner != (b->owner == KILN_SLOT_INVENTORY(bs->slot) ? KILN_SLOT_INVENTORY(s->slot) : b->owner)) return false;
     }
     auto stable = [](SetModel m) {
         for (auto& leaf : m.leaves)
             for (auto& s : leaf.s) s.item = s.count = s.pide = 0;
-        for (auto& r : m.items) r.contained = 0;
+        for (auto& r : m.items) r.contained = 0, r.owner = 0;  // both checked above, against where the item lies now
         for (auto& e : m.equipment) e = 0;
         std::vector<uint8_t> bytes;
         encode(SnapPrefix{}, m, &bytes);
         return bytes;
     };
     return stable(before) == stable(after);
+}
+
+// Whether two SetEngine::full reads are the same bytes; if not, the first difference in `why`.
+inline bool same_full(const std::vector<uint8_t>& a, const std::vector<uint8_t>& b, char* why, size_t cap) {
+    if (a == b) return true;
+    size_t i = 0;
+    while (i + 9 <= a.size() && i + 9 <= b.size()) {
+        uint32_t ea = 0, eb = 0, sa = 0, sb = 0;
+        std::memcpy(&ea, &a[i], 4), std::memcpy(&eb, &b[i], 4), std::memcpy(&sa, &a[i + 5], 4), std::memcpy(&sb, &b[i + 5], 4);
+        const uint8_t part = a[i + 4];
+        const char* name = part < 7 ? kFullParts[part] : "a component";
+        if (ea != eb || part != b[i + 4] || sa != sb || i + 9 + sa > a.size() || i + 9 + sb > b.size()) {
+            std::snprintf(why, cap, "%s of entity %u is %s after it (size %u, was %u)", name, ea, sb == 0 ? "gone" : "not the same record", sb, sa);
+            return false;
+        }
+        for (uint32_t k = 0; k < sa; ++k)
+            if (a[i + 9 + k] != b[i + 9 + k]) {
+                std::snprintf(why, cap, "%s of entity %u differs at byte %u (0x%02x, was 0x%02x)", name, ea, k, b[i + 9 + k], a[i + 9 + k]);
+                return false;
+            }
+        i += 9 + sa;
+    }
+    std::snprintf(why, cap, "the component bytes differ in length (%zu, were %zu)", b.size(), a.size());
+    return false;
 }
 
 // Whether `after` is what the request asked: each named slot holds its selection; every slot the request leaves out holds
@@ -192,17 +236,22 @@ inline SetOutcome execute(SetEngine& g, const SetJob& job, const PlanOptions& op
     SetOutcome o;
     const bool dry = (job.flags & kRequestDryRun) != 0;
     if (dry) o.flags |= kResultDryRun;
-    // a fault: nothing is known after it, nothing is repaired; the capability goes off
+    // a fault: nothing is known after it, nothing is repaired or rolled back; the capability goes off
+    uint32_t at_step = UINT32_MAX, of_steps = 0;  // the step being staged when the game faulted (UINT32_MAX: none)
     auto fault = [&](const char* where, bool tx_open, bool commit_called) {
         o.status = SetStatus::InvariantFailure;
         o.engine_fault = true;
         o.seh = true;
         if (tx_open) o.flags |= kResultMayHaveMutated;
-        (void)commit_called;
+        if (commit_called) o.flags |= kResultCommitted;
+        o.failed_operation = at_step;
         o.changes.clear();
-        std::snprintf(o.reason, sizeof o.reason, "the game faulted %s%s", where,
-                      tx_open ? ": the inventory may have changed; equipment sets are off until the server restarts"
-                              : ": nothing was changed; equipment sets are off until the server restarts");
+        char at[48] = "";
+        if (at_step != UINT32_MAX) std::snprintf(at, sizeof at, " at step %u of %u", at_step, of_steps);
+        std::snprintf(o.reason, sizeof o.reason, "the game faulted %s%s%s", where, at,
+                      tx_open ? ": the inventory may be in an unknown state (nothing rolled back or repaired); equipment sets and single equips are "
+                                "off until the server restarts"
+                              : ": nothing was changed; equipment sets and single equips are off until the server restarts");
         return o;
     };
 
@@ -246,12 +295,24 @@ inline SetOutcome execute(SetEngine& g, const SetJob& job, const PlanOptions& op
                 if (const Stack* st2 = now.stack_at(KILN_SLOT_ID(now.nodes.front().link_entity[k], i)); st2 && is_empty(*st2)) lab_empty = st2->slot;
         }
 
+    // every byte of the program's components before anything is staged: a rollback must give back all of them
+    std::vector<uint8_t> whole;
+    if (!g.full(now, &whole)) {
+        o.status = SetStatus::Unavailable;
+        o.engine_fault = true;
+        o.seh = true;
+        std::snprintf(o.reason, sizeof o.reason, "reading the player's components inside the program faulted: nothing was changed; equipment sets are off until the server restarts");
+        return o;
+    }
+
     // ---- Validated -> TxOpen ----
     if (!g.tx_open(dry)) return fault("setting up the transaction", true, false);
     bool refused = false;
+    of_steps = static_cast<uint32_t>(plan.steps.size());
     for (uint32_t i = 0; i < plan.steps.size(); ++i) {
         const PlanStep& s = plan.steps[i];
         uint8_t err = 0;
+        at_step = i;
         if (static_cast<int>(i) == job.lab.fail_step && lab_empty) {  // lab: a real refusal of the game at this step
             if (!g.equip(lab_empty, s.game_slot, &err)) return fault("in its equip (lab refusal)", true, false);
             if (err == 0) err = 0xEE;  // the game took it: report it as a refusal all the same (the rollback undoes it)
@@ -281,6 +342,7 @@ inline SetOutcome execute(SetEngine& g, const SetJob& job, const PlanOptions& op
             break;
         }
     }
+    at_step = UINT32_MAX;
     bool would = false;
     if (!refused && !dry && (job.lab.guard_bit || job.lab.commit_anyway) && !g.force_guard_bit())
         return fault("setting the commit's rollback bit (lab)", true, false);
@@ -299,19 +361,25 @@ inline SetOutcome execute(SetEngine& g, const SetJob& job, const PlanOptions& op
         SetModel back;
         SnapStatus bst = SnapStatus::Ok;
         if (!g.read(&back, &bst)) return fault("reading the inventory after the rollback", true, false);
-        std::vector<uint8_t> after;
+        std::vector<uint8_t> after, whole_after;
         if (bst == SnapStatus::Ok) encode(job.prefix, back, &after);
         const bool restored = bst == SnapStatus::Ok && after == job.baseline;
+        if (restored && !g.full(now, &whole_after)) return fault("reading the components after the rollback", true, false);
+        char differs[160] = "";
+        const bool intact = restored && same_full(whole, whole_after, differs, sizeof differs);
         if (!g.free_arrays()) return fault("freeing the transaction", true, false);
-        if (!restored) {
+        if (!intact) {
             o.status = SetStatus::InvariantFailure;
             o.engine_fault = true;
             o.flags |= kResultMayHaveMutated;
             if (bst == SnapStatus::Ok) o.changes = deltas(now, back);
             char was[256];
             std::snprintf(was, sizeof was, "%s", o.reason);
-            std::snprintf(o.reason, sizeof o.reason, "after the rollback the inventory is not as it was (%s)%s%s", dry ? "a dry run" : "a refusal",
-                          was[0] ? ": " : "", was);
+            if (restored)  // every slot as it was, an item's or an inventory's own bytes not
+                std::snprintf(o.reason, sizeof o.reason, "after the rollback (%s) %s%s%s", dry ? "a dry run" : "a refusal", differs, was[0] ? "; " : "", was);
+            else
+                std::snprintf(o.reason, sizeof o.reason, "after the rollback the inventory is not as it was (%s)%s%s", dry ? "a dry run" : "a refusal",
+                              was[0] ? ": " : "", was);
             return o;
         }
         o.status = refused ? SetStatus::Refused : SetStatus::Simulated;
@@ -336,8 +404,18 @@ inline SetOutcome execute(SetEngine& g, const SetJob& job, const PlanOptions& op
     std::vector<uint8_t> after;
     if (dst == SnapStatus::Ok) encode(job.prefix, done, &after);
     if (dst == SnapStatus::Ok && after == job.baseline) {
-        o.status = SetStatus::CommitRolledBack;
-        std::snprintf(o.reason, sizeof o.reason, "the game's commit rolled the transaction back by itself; the inventory is as it was");
+        std::vector<uint8_t> whole_after;
+        if (!g.full(now, &whole_after)) return fault("reading the components after the commit", true, true);
+        char differs[160] = "";
+        if (same_full(whole, whole_after, differs, sizeof differs)) {
+            o.status = SetStatus::CommitRolledBack;
+            std::snprintf(o.reason, sizeof o.reason, "the game's commit rolled the transaction back by itself; the inventory is as it was");
+            return o;
+        }
+        o.status = SetStatus::InvariantFailure;
+        o.engine_fault = true;
+        o.flags |= kResultMayHaveMutated | kResultCommitted;
+        std::snprintf(o.reason, sizeof o.reason, "the game's commit rolled the transaction back by itself, but %s", differs);
         return o;
     }
     o.status = SetStatus::InvariantFailure;

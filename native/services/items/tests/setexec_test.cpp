@@ -9,6 +9,7 @@
 // (mods/tests/equipment-sets-test).
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <vector>
 
 #include "../setexec.h"
@@ -48,15 +49,24 @@ struct FakeGame final : SetEngine {
     int tx_opens = 0, commits = 0, rollbacks = 0, frees = 0, steps = 0;
     bool rollback_after_commit = false;
     int corrupt_commit = 0;
+    // an item's own bytes outside the canonical snapshot (fuel, ItemState's level, rarity and damage, the rest of the
+    // seven components the program declares): a rollback that restores every slot but changes one of these
+    std::map<uint32_t, std::vector<uint8_t>> own;
+    bool rollback_damages = false;
+    int fulls = 0;
 
     bool enter() {
         if (faulted) ++calls_after_fault;
         if (calls++ == fault_call) return faulted = true, false;
         return true;
     }
+    bool owner_is_inventory = false;  // as the game: OwnerRelationship names the inventory that holds the item
     void sync_items() {  // ItemState.containedInSlotId follows the stacks (the fake keeps them consistent)
         for (ItemRec& r : live.items)
-            if (const Stack* s = live.stack_of(r.pide)) r.contained = s->slot;
+            if (const Stack* s = live.stack_of(r.pide)) {
+                r.contained = s->slot;
+                if (owner_is_inventory) r.owner = KILN_SLOT_INVENTORY(s->slot);
+            }
     }
     Stack& at(uint64_t s) { return const_cast<Stack&>(*live.stack_at(s)); }
 
@@ -66,7 +76,9 @@ struct FakeGame final : SetEngine {
         *st = SnapStatus::Ok;
         return true;
     }
+    long tx_open_call = -1;  // the index of the tx_open call
     bool tx_open(bool) override {
+        tx_open_call = calls;
         if (!enter()) return false;
         ++tx_opens;
         open = true;
@@ -129,10 +141,30 @@ struct FakeGame final : SetEngine {
         commit_rolls_back = true;  // as the game's commit does with the bit set
         return true;
     }
+    bool full(const SetModel& m, std::vector<uint8_t>* out) override {
+        if (!enter()) return false;
+        ++fulls;
+        out->clear();
+        // records as the game adapter writes them: {u32 entity, u8 part, u32 size, bytes}; the slots as one record of the
+        // player, each item's own bytes as its ItemState (part 4)
+        auto record = [out](uint32_t e, uint8_t part, const std::vector<uint8_t>& b) {
+            const uint32_t n = static_cast<uint32_t>(b.size());
+            out->insert(out->end(), reinterpret_cast<const uint8_t*>(&e), reinterpret_cast<const uint8_t*>(&e) + 4);
+            out->push_back(part);
+            out->insert(out->end(), reinterpret_cast<const uint8_t*>(&n), reinterpret_cast<const uint8_t*>(&n) + 4);
+            out->insert(out->end(), b.begin(), b.end());
+        };
+        std::vector<uint8_t> slots;
+        encode(SnapPrefix{}, live, &slots);
+        record(m.player, 1, slots);
+        for (const ItemRec& r : m.items) record(r.pide, 4, own[r.pide]);
+        return true;
+    }
     void restore() {
         const SetModel keep = before_tx;
         live.leaves = keep.leaves;
         if (rollback_leaks) at(slot(G2, 7)).item = 5, at(slot(G2, 7)).count = 1;  // something outside the rollback
+        if (rollback_damages) own[5002][1] ^= 0x20;  // ring B's level byte: every slot as it was, the item not
         sync_items();
         open = false;
     }
@@ -148,6 +180,9 @@ struct FakeGame final : SetEngine {
         if (corrupt_commit == 3) live.items[0].owner = 99;
         if (corrupt_commit == 4) live.items[0].contained = slot(G2, 7);
         if (corrupt_commit == 5) live.actionbar[0] = 999;
+        if (corrupt_commit == 6)
+            for (ItemRec& r : live.items)
+                if (r.pide == 5002) r.owner = G1;
         open = false;
         return true;
     }
@@ -203,6 +238,7 @@ FakeGame world() {
     m.equipment[selection_index(kArrow)] = page_slot(selection_index(kArrow));
     put(slot(G1, 5), Bolts, 30, 0);
     std::sort(m.items.begin(), m.items.end(), [](const ItemRec& a, const ItemRec& b) { return a.pide < b.pide; });
+    for (const ItemRec& r : m.items) g.own[r.pide] = {static_cast<uint8_t>(r.pide), 17, 3, 0x40, 0, 0, 0x7f, 1};  // level 17, rarity 3, fuel ...
     return g;
 }
 
@@ -292,6 +328,34 @@ int main() {
               "correct equipment with corrupt inventory/identity/selection: fault, never repair a closed transaction");
     }
 
+    // OwnerRelationship as the game keeps it (lab, server 26430253: the inventory entity that holds the item, the backpack's
+    // or an equipment page's): it moves with the item, and a set that moves items is Done; an owner that does not follow is not
+    {
+        auto owned = [] {
+            FakeGame g = world();
+            g.owner_is_inventory = true;
+            g.sync_items();
+            return g;
+        };
+        FakeGame g = owned();
+        const SetOutcome o = execute(g, job(g, {op(kRing0, 1, 5002, RingB)}), PlanOptions{}, nullptr, nullptr);
+        check(o.status == SetStatus::Done && rules(g), "a swap whose items' owners follow their inventories (as the game's): Done");
+        FakeGame h = owned();
+        const SetOutcome o3 = execute(h, job(h, three()), PlanOptions{}, nullptr, nullptr);
+        check(o3.status == SetStatus::Done && o3.changes.size() == 3 && rules(h), "three slots with owners following their inventories: Done");
+        FakeGame r = owned();
+        const SetOutcome orm = execute(r, job(r, {op(kRing0, 0)}), PlanOptions{}, nullptr, nullptr);
+        check(orm.status == SetStatus::Done && rules(r), "a removal with the owner following the ring into the backpack: Done");
+        FakeGame c = owned();
+        c.corrupt_commit = 6;  // the moved ring's owner left at the backpack although it lies in an equipment page now
+        const SetOutcome oc = execute(c, job(c, {op(kRing0, 1, 5002, RingB)}), PlanOptions{}, nullptr, nullptr);
+        check(oc.status == SetStatus::InvariantFailure && (oc.flags & kResultCommitted) && rules(c), "an owner that does not follow its item's inventory: InvariantFailure");
+        FakeGame d = owned();
+        d.corrupt_commit = 3;  // an owner set to an entity that is no inventory of it
+        const SetOutcome od = execute(d, job(d, {op(kRing0, 1, 5002, RingB)}), PlanOptions{}, nullptr, nullptr);
+        check(od.status == SetStatus::InvariantFailure && rules(d), "an owner changed to an unrelated entity: InvariantFailure");
+    }
+
     // ---- no transaction ----
     {
         FakeGame g = world();
@@ -377,8 +441,10 @@ int main() {
             FakeGame g = world();
             g.fault_call = n;
             const SetOutcome o = execute(g, job(g, three()), PlanOptions{}, nullptr, nullptr);
-            const bool ok = o.engine_fault && (o.status == SetStatus::InvariantFailure || (n == 0 && o.status == SetStatus::Unavailable)) &&
-                            g.calls_after_fault == 0 && rules(g) && (n == 0 || (o.flags & kResultMayHaveMutated));
+            // before the transaction opened (the reads): Unavailable, nothing changed; after it: InvariantFailure, MayHaveMutated
+            const bool ok = o.engine_fault && g.calls_after_fault == 0 && rules(g) &&
+                            (n < probe.tx_open_call ? o.status == SetStatus::Unavailable && !(o.flags & kResultMayHaveMutated)
+                                                    : o.status == SetStatus::InvariantFailure && (o.flags & kResultMayHaveMutated));
             if (!ok) std::printf("     fault at call %ld of %ld: status %u flags %u after %ld\n", n, total, static_cast<unsigned>(o.status), o.flags, g.calls_after_fault);
             all = all && ok;
         }
@@ -393,9 +459,47 @@ int main() {
             FakeGame g = world();
             g.fault_call = n;
             const SetOutcome o = execute(g, job(g, three(), kRequestDryRun), PlanOptions{}, nullptr, nullptr);
-            dry_all = dry_all && o.engine_fault && o.status == SetStatus::InvariantFailure && (o.flags & kResultDryRun) && g.calls_after_fault == 0 && rules(g);
+            dry_all = dry_all && o.engine_fault && (o.flags & kResultDryRun) && g.calls_after_fault == 0 && rules(g) &&
+                      (n < d.tx_open_call ? o.status == SetStatus::Unavailable : o.status == SetStatus::InvariantFailure);
         }
         check(dry_all, "a fault at each engine call of a dry run: InvariantFailure, DryRun kept, no call after it");
+    }
+
+    // ---- an item's own bytes: a rollback that restores every slot but changes fuel, a level or a perk byte ----
+    {
+        for (int k = 0; k < 3; ++k) {
+            FakeGame g = world();
+            g.fail_step = k;
+            g.rollback_damages = true;
+            const SetOutcome o = execute(g, job(g, three()), PlanOptions{}, nullptr, nullptr);
+            char what[200];
+            std::snprintf(what, sizeof what, "a refusal at step %d whose rollback restores every slot but not an item's own bytes: InvariantFailure, MayHaveMutated, "
+                          "not committed (%s)", k, o.reason);
+            check(o.status == SetStatus::InvariantFailure && o.engine_fault && !o.seh && (o.flags & kResultMayHaveMutated) && !(o.flags & kResultCommitted) &&
+                      g.rollbacks == 1 && g.frees == 1 && g.fulls == 2 && std::strstr(o.reason, "ItemState") && rules(g),
+                  what);
+        }
+        FakeGame d = world();
+        d.rollback_damages = true;
+        const SetOutcome od = execute(d, job(d, three(), kRequestDryRun), PlanOptions{}, nullptr, nullptr);
+        check(od.status == SetStatus::InvariantFailure && (od.flags & kResultDryRun) && (od.flags & kResultMayHaveMutated) && d.rollbacks == 1 && rules(d),
+              "a dry run whose rollback damages an item's own bytes: InvariantFailure, DryRun kept");
+        FakeGame c = world();
+        c.commit_rolls_back = true;
+        c.rollback_damages = true;
+        const SetOutcome oc = execute(c, job(c, three()), PlanOptions{}, nullptr, nullptr);
+        check(oc.status == SetStatus::InvariantFailure && (oc.flags & kResultCommitted) && (oc.flags & kResultMayHaveMutated) && c.commits == 1 &&
+                  c.rollbacks == 0 && rules(c),
+              "a commit that rolled back by itself but damaged an item's own bytes: InvariantFailure, committed, no second rollback");
+        FakeGame u = world();
+        u.fail_step = 1;
+        const SetOutcome ou = execute(u, job(u, three()), PlanOptions{}, nullptr, nullptr);
+        check(ou.status == SetStatus::Refused && u.fulls == 2, "an undamaged rollback: Refused, the full bytes read before the transaction and after the rollback");
+        FakeGame f = world();
+        f.fault_call = 1;  // the full read before the transaction
+        const SetOutcome of = execute(f, job(f, three()), PlanOptions{}, nullptr, nullptr);
+        check(of.status == SetStatus::Unavailable && of.engine_fault && f.tx_opens == 0 && !(of.flags & kResultMayHaveMutated) && rules(f),
+              "a fault reading the full bytes before the transaction: Unavailable, nothing opened, sets off");
     }
 
     // ---- the lab's faults (a real run injects them; here the fake answers as the game would) ----
