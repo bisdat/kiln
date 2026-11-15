@@ -163,6 +163,7 @@ bool seh_each(KilnProgramEachFn fn, KilnProgramCtx* ctx, uint64_t* iter, KilnEnt
 bool seh_update(KilnProgramUpdateFn fn, KilnProgramCtx* ctx, void* user, unsigned long* code);
 bool seh_teleport_cb(KilnTeleportFn fn, const KilnTeleportResult* r, void* user, unsigned long* code);
 bool seh_register_program(RegisterProgramFn fn, uintptr_t world, const EngineDesc* d, bool* ok, unsigned long* code);
+bool seh_call(void (*fn)(void*), void* ctx, unsigned long* code);  // fn(ctx) under the structured-exception guard
 bool seh_iter_begin(void* ctx, void* iter, uint32_t size, unsigned long* code);
 bool seh_iter_next(void* ctx, void* iter, uint32_t size, bool* more, unsigned long* code);
 bool seh_get_component(uintptr_t world, uint32_t hash, uint32_t entity, Slice* out);

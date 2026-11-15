@@ -55,6 +55,7 @@ bool seh_register_program(RegisterProgramFn,uintptr_t world,const EngineDesc* d,
     std::memcpy(reinterpret_cast<void*>(entry+L.entry_id),&id,2);
     ++*count;*ok=true;return true;
 }
+bool seh_call(void (*f)(void*),void* c,unsigned long*) { f(c);return true; }
 bool seh_iter_begin(void* ctx,void* iter,uint32_t size,unsigned long*) { fn.iter_begin(ctx,iter,size);return true; }
 bool seh_iter_next(void* ctx,void* iter,uint32_t size,bool* more,unsigned long*) { *more=fn.iter_next(ctx,iter,size);return true; }
 bool seh_read_u64(uintptr_t address,uint64_t* value) { std::memcpy(value,reinterpret_cast<void*>(address),8);return true; }

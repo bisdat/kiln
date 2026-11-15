@@ -792,8 +792,19 @@ typedef struct KilnWorldApi {
      * KILN_ERR_UNAVAILABLE for the client and prediction kinds.
      *
      * A world stop (KILN_WORLD_STOPPING of the client world) closes every client-table program: no call starts, the
-     * running ones finish (waited for, bounded), and each registration goes back to PENDING for the next client world.
-     * Bindings stay: a bound callback runs again in the next client world that accepts the program.
+     * running ones are waited for (2 s at most) and each registration goes back to PENDING for the next client world.
+     * Bindings stay: a bound callback runs again in the next client world that accepts the program. The core does not
+     * wait for a client world's jobs before that event (it does for the server world): when a call is still running
+     * after the wait, its program is refused for good (that late call can no longer change its state) and a process
+     * latch is set: no client-world program registers again until the game restarts, and world.programs.client goes
+     * unavailable (reason faulted) saying why. The same latch follows a fault in the engine's RegisterProgram (or in
+     * Kiln's reads of the client world's maps and table around it) or a table that does not add up after it; what was
+     * registered before stays as it is (the engine's table is never undone).
+     *
+     * Writes there are this player's local state. write_other answers NULL inside a client or prediction program (the
+     * game's other-entity write marks the change for the save and replication through the job's tracker); mark_written
+     * still calls the engine's MarkWritten if you ask, but only static evidence says a client job's tracker takes it:
+     * Kiln.Api's TryWrite does not call it there.
      *
      * Handles: register_program_world gives a program handle (as register_program: program_slot and program_info
      * take it; program_info answers for the server world). bind_program_world gives a binding handle for

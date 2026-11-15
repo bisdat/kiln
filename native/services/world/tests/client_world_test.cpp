@@ -66,17 +66,37 @@ thread_local bool t_in_stage = false;
 bool game_in_slice() { return t_in_stage; }
 uint32_t current_thread_id() { return static_cast<uint32_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()) | 1u); }
 KilnProgramEachFn g_faulting = nullptr;  // the fake SEH answers a fault for this callback, as for an access violation
+KilnProgramEachFn g_faulting2 = nullptr; // ... and for this one (it runs first: a call that faults on its way out)
 bool seh_each(KilnProgramEachFn f, KilnProgramCtx* ctx, uint64_t* iter, KilnEntity e, void* user, unsigned long* code) {
-    if (!f || f == g_faulting) return *code = 0xC0000005, false;
+    if (!f) return *code = 0xC0000005, false;
     f(ctx, iter, e, user);
+    if (f == g_faulting || f == g_faulting2) return *code = 0xC0000005, false;
     return true;
 }
 bool seh_update(KilnProgramUpdateFn f, KilnProgramCtx* ctx, void* user, unsigned long*) {
     f(ctx, user);
     return true;
 }
-bool seh_register_program(RegisterProgramFn, uintptr_t world, const EngineDesc* d, bool* ok, unsigned long*) {
+// The fake engine misbehaves on demand: faults inside RegisterProgram for one program name, or adds two entries for one
+// (a table that does not add up afterwards). seh_call fails once when asked (a raw read that faulted).
+std::string engine_fault_name, engine_double_name;
+int engine_calls = 0;
+bool fail_seh_call = false;
+bool seh_call(void (*f)(void*), void* c, unsigned long* code) {
+    if (fail_seh_call) {
+        fail_seh_call = false;
+        *code = 0xC0000005;
+        return false;
+    }
+    f(c);
+    return true;
+}
+bool seh_register_program(RegisterProgramFn, uintptr_t world, const EngineDesc* d, bool* ok, unsigned long* code) {
+    ++engine_calls;
     auto* count = reinterpret_cast<uint16_t*>(world + L.programs_count);
+    const std::string name(d->name.s, d->name.n);
+    if (name == engine_fault_name) return *code = 0xC0000005, false;
+    if (name == engine_double_name) ++*count;
     if (*count >= L.programs_max) return *ok = false, true;
     const uintptr_t entry = world + L.programs_table + static_cast<uintptr_t>(*count) * L.programs_stride;
     std::memcpy(reinterpret_cast<void*>(entry), &d, 8);
@@ -206,6 +226,7 @@ void KILN_CALL probe_each(KilnProgramCtx* ctx, uint64_t*, KilnEntity e, void* us
     }
 }
 void KILN_CALL fault_each(KilnProgramCtx*, uint64_t*, KilnEntity, void*) {}
+void KILN_CALL slow_fault_each(KilnProgramCtx* ctx, uint64_t* it, KilnEntity e, void* user) { probe_each(ctx, it, e, user); }
 
 std::vector<std::string> g_names;
 KilnProgramDesc system_desc(const std::string& name, uint32_t flags = KILN_PROGRAM_SYSTEM) {
@@ -249,6 +270,33 @@ void client_stops(uintptr_t world) { world_event(KILN_WORLD_STOPPING, KILN_WORLD
 
 // The fake core: one main thread; post_world refuses a revoked owner; the side and features of a game client.
 std::thread::id g_main;
+// kiln.caps' report, recorded: the last report of world.programs.client
+struct Row {
+    uint32_t state = 99, reason = 0;
+    std::string text;
+    int reports = 0;
+} g_row;
+const KilnCapsApi* caps_fake() {
+    static KilnCapsApi caps{};
+    caps.header.size = sizeof caps;
+    caps.report = [](KilnOwner, KilnStr name, uint32_t state, uint32_t reason, KilnStr text) -> KilnResult {
+        if (sv(name) == "world.programs.client") g_row = {state, reason, std::string(sv(text)), g_row.reports + 1};
+        return KILN_OK;
+    };
+    return &caps;
+}
+void unlatch() {  // tests only: the latch is for the process
+    g_latched = false;
+    g_latch_reason = nullptr;
+    g_latch_unreported = false;
+    g_table_stopping = false;
+}
+int log_count(const char* text) {
+    std::lock_guard lock(log_mu);
+    int n = 0;
+    for (const auto& l : logged) n += l.find(text) != std::string::npos;
+    return n;
+}
 uintptr_t g_client_world = 0;  // what the fake core's world(KILN_WORLD_CLIENT) answers
 std::atomic<int> g_revoked{0};
 uint32_t g_side = KILN_SIDE_CLIENT;
@@ -281,10 +329,11 @@ int main(int argc, char** argv) {
     api.on_world_thread = [](uint32_t) { return std::this_thread::get_id() == g_main; };
     api.side = [] { return g_side; };
     api.feature = [](KilnStr n) { return sv(n) == "world.lifecycle"; };
-    api.service = [](KilnStr, uint32_t) -> const void* { return nullptr; };
+    api.service = [](KilnStr name, uint32_t) -> const void* { return sv(name) == KILN_CAPS_SERVICE ? caps_fake() : nullptr; };
     api.world = [](uint32_t kind) -> uintptr_t { return kind == KILN_WORLD_CLIENT ? g_client_world : 0; };
     g_api = &api;
     g_faulting = &fault_each;
+    g_faulting2 = &slow_fault_each;
     g_main = std::this_thread::get_id();
 
     F.programs = F.queue = F.write = F.read_other = F.names = F.singletons = F.events = true;
@@ -701,6 +750,131 @@ int main(int argc, char** argv) {
     client_stops(client.at());
     check(!g_table_live.load() && g_table_stopping.load(), "after the stop no client-table call starts until the next world");
     check(state_of(2, KILN_WORLD_CLIENT, &why) == KILN_PROGRAM_PENDING && why == "waiting for a client world", "and the reason says so");
+
+    // ==== the package's review (P1): a call still inside when its client world is destroyed, a fault in registration ====
+    reset_programs();
+    unlatch();
+    auto reserve_client = [&](const char* key, const char* name) {
+        g_names.push_back(name);
+        KilnProgramDesc d = system_desc(name);
+        return reserve_program_world("writer", key, &d, kWorldBitClient, kWorldBitClient);
+    };
+    check(reserve_client("p1", "kiln_r_p1") == KILN_OK && reserve_client("p2", "kiln_r_p2") == KILN_OK &&
+              reserve_client("p3", "kiln_r_p3") == KILN_OK, "three client reservations");
+    Program* r1 = g_programs[0];
+    Program* r3 = g_programs[2];
+
+    // (1) the stop's bounded wait ends with a call still inside: latched for the process, that side never PENDING, the next
+    // world registers nothing, and the late call's fault on its way out changes nothing
+    g_table_stop_wait_ms = 50;
+    client.make(KILN_WORLD_CLIENT, 817);
+    on_world(client.at());
+    check(state_of(1, KILN_WORLD_CLIENT) == KILN_PROGRAM_ACTIVE && g_row.state == KILN_CAP_AVAILABLE, "registered; the row is available");
+    Probe lateProbe;
+    lateProbe.hold_ms = 300;
+    KilnHandle hlate = 0;
+    check(bind_program_world(30, kstr("writer"), kstr("p1"), KILN_WORLD_CLIENT, &slow_fault_each, nullptr, &lateProbe, &hlate) == KILN_OK,
+          "a callback that runs long, then faults on its way out");
+    std::thread lingering([&] {
+        Job j(client.storage(), {});
+        slice(r1, j);
+    });
+    while (!lateProbe.inside.load()) std::this_thread::yield();
+    client_stops(client.at());
+    check(g_latched.load() && log_count("client world stops: 1 call(s) of Kiln programs still running after") == 1,
+          "a call still inside after the wait: the review's line, and the process latch");
+    std::string w1;
+    check(state_of(1, KILN_WORLD_CLIENT, &w1) == KILN_PROGRAM_REFUSED && w1 == "a call of it was still running when the client world stopped",
+          "that side is refused for good, never reset to PENDING");
+    check(state_of(2, KILN_WORLD_CLIENT, &w1) == KILN_PROGRAM_REFUSED && w1.find("off until the game restarts") != std::string::npos,
+          "the others say the process latch");
+    check(g_row.state == KILN_CAP_UNAVAILABLE && g_row.reason == KILN_CAP_REASON_FAULTED && g_row.text.find("still running") != std::string::npos,
+          "world.programs.client goes unavailable (faulted) with the reason");
+    client.make(KILN_WORLD_CLIENT, 817);  // the next client world, at the same address
+    on_world(client.at());
+    check(client.count() == 817 && state_of(1, KILN_WORLD_CLIENT) == KILN_PROGRAM_REFUSED,
+          "the next client world registers nothing while the old call is still inside");
+    lingering.join();  // the old call returns now, after the next world was set up, and its callback faults
+    check(state_of(1, KILN_WORLD_CLIENT, &w1) == KILN_PROGRAM_REFUSED && w1 == "a call of it was still running when the client world stopped" &&
+              r1->side[KILN_WORLD_CLIENT].calls_in.load() == 0,
+          "the old call's fault on its way out changes nothing of the side (its session was cleared)");
+    KilnProgramDesc after_latch = system_desc("kiln_r_after");
+    after_latch.each = &probe_each;
+    KilnHandle hx = 0;
+    check(register_program_world(31, KILN_WORLD_CLIENT, &after_latch, &hx) == KILN_ERR_UNAVAILABLE &&
+              bind_program_world(31, kstr("writer"), kstr("p2"), KILN_WORLD_CLIENT, &probe_each, nullptr, &lateProbe, &hx) == KILN_ERR_UNAVAILABLE,
+          "after the latch nothing registers or binds for the client world in this process");
+    const int rows = g_row.reports;
+    world_event(KILN_WORLD_STARTED, KILN_WORLD_CLIENT, client.at());
+    client_stops(client.at());
+    check(g_row.reports == rows && g_row.state == KILN_CAP_UNAVAILABLE, "later starts and stops do not report the row available again");
+    check(log_count("client-world programs are off until the game restarts:") == 1, "kiln.log says it once");
+
+    // (1b) a late call of a stopped world cannot run in the next world's registration either (the session gate)
+    unlatch();
+    for (Program* p : g_programs)
+        for (Side& sd : p->side) sd.state.store(KILN_PROGRAM_PENDING), sd.reason.store(nullptr);
+    client.make(KILN_WORLD_CLIENT, 817);
+    on_world(client.at());
+    Probe gate;
+    KilnHandle hg = 0;
+    check(unbind_program_world(hlate) == KILN_OK &&
+              bind_program_world(32, kstr("writer"), kstr("p2"), KILN_WORLD_CLIENT, &probe_each, nullptr, &gate, &hg) == KILN_OK, "bound again");
+    const uint64_t old_session = g_programs[1]->side[KILN_WORLD_CLIENT].session.load();
+    client.make(KILN_WORLD_CLIENT, 817);
+    on_world(client.at());  // another registration without a stop seen in between (no world.lifecycle line)
+    check(g_programs[1]->side[KILN_WORLD_CLIENT].session.load() != old_session && g_programs[1]->side[KILN_WORLD_CLIENT].session.load() != 0,
+          "each client world's registration is a session of its own");
+
+    // (2) a fault in the engine's RegisterProgram: what registered stays, nothing more is attempted, the row says why
+    unlatch();
+    client_stops(client.at());
+    unlatch();
+    client.make(KILN_WORLD_CLIENT, 817);
+    engine_fault_name = "kiln_r_p2";
+    engine_calls = 0;
+    on_world(client.at());
+    engine_fault_name.clear();
+    check(state_of(1, KILN_WORLD_CLIENT) == KILN_PROGRAM_ACTIVE && client.count() == 818,
+          "the program registered before the fault is left as it is (the engine's table is not undone)");
+    check(state_of(2, KILN_WORLD_CLIENT, &w1) == KILN_PROGRAM_REFUSED && w1.find("RegisterProgram faulted") != std::string::npos,
+          "the faulting one is refused with the fault");
+    check(state_of(3, KILN_WORLD_CLIENT, &w1) == KILN_PROGRAM_REFUSED && w1.find("off until the game restarts") != std::string::npos &&
+              engine_calls == 2, "the next one is not attempted (two engine calls, not three)");
+    check(g_latched.load() && g_row.state == KILN_CAP_UNAVAILABLE && g_row.reason == KILN_CAP_REASON_FAULTED &&
+              g_row.text.find("RegisterProgram faulted") != std::string::npos, "the row goes unavailable with the reason");
+    check(log_count("client-world programs are off until the game restarts: the engine's RegisterProgram faulted") == 1, "kiln.log once");
+    client_stops(client.at());
+    client.make(KILN_WORLD_CLIENT, 817);
+    engine_calls = 0;
+    on_world(client.at());
+    check(engine_calls == 0 && client.count() == 817, "a later client world: no registration is attempted");
+
+    // (2b) a table that does not add up after RegisterProgram (two entries for one call)
+    unlatch();
+    client_stops(client.at());
+    unlatch();
+    client.make(KILN_WORLD_CLIENT, 817);
+    engine_double_name = "kiln_r_p1";
+    engine_calls = 0;
+    on_world(client.at());
+    engine_double_name.clear();
+    check(state_of(1, KILN_WORLD_CLIENT, &w1) == KILN_PROGRAM_REFUSED && w1.find("does not add up") != std::string::npos &&
+              g_latched.load() && engine_calls == 1, "a count that does not add up: refused, latched, nothing more attempted");
+
+    // (2c) a fault in Kiln's own raw reads around the call (the maps, the count): latched as well
+    unlatch();
+    client_stops(client.at());
+    unlatch();
+    client.make(KILN_WORLD_CLIENT, 817);
+    fail_seh_call = true;
+    engine_calls = 0;
+    on_world(client.at());
+    check(state_of(1, KILN_WORLD_CLIENT, &w1) == KILN_PROGRAM_REFUSED && w1.find("reading the client world's maps or program table faulted") != std::string::npos &&
+              g_latched.load() && engine_calls == 0 && r3->side[KILN_WORLD_CLIENT].state.load() == KILN_PROGRAM_REFUSED,
+          "a raw read that faulted: refused, latched, the engine never called");
+    unlatch();
+    g_table_stop_wait_ms = 2000;
 
     reset_programs();
     std::printf("client world programs: %s %d checks, %d failures\n", failures ? "FAIL" : "PASS", checks, failures);
