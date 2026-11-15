@@ -135,6 +135,10 @@
         },
         "settings": {
           "$ref": "#/$defs/settings"
+        },
+        "applied": {
+          "type": "boolean",
+          "description": "Its files are back and flushed; only the record is left to drop (the next look drops it without putting the files back again)."
         }
       }
     },

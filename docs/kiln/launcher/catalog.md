@@ -229,7 +229,15 @@ ShroudForge, SET, Greeneye, Flame, XHL and the other loaders' mods.
   back into your profile in place of the one you have now, switched on or off as it was. It is a profile change like
   any other: the toast has **Undo**, and nothing is downloaded. When Kiln next writes your profile into the game (at
   once when the game is closed, else at the next Play), the old version goes into the game folder with the settings it
-  had before the update, not the newer version's.
+  had before the update, not the newer version's. Two cases where the settings do not come back: the mod's copy in
+  the game folder is not Kiln's to replace any more (you changed its code there: Kiln leaves that folder alone and says
+  so), or the game folder moved since the update (the roll back says so; the settings wait for the folder they were
+  kept in).
+- **If Kiln stops half-way** (the launcher closed or crashed, a full disk, a write that failed) during an update, a roll
+  back, its Undo or the placement in the game folder, the next start finishes it or puts it back as it was: the mod
+  ends with all of its old settings or all of the new ones, never a mix. Each step is tested that way. Against a power
+  cut, Kiln writes each of its records only after what the record names is on the disk (flushed); that is the order
+  it keeps, but no test can cut the power, so it is not proven on real hardware.
 - **Roll back twice.** The version you rolled back from is kept now, so its menu offers **Roll back to** it again,
   with the settings it had when you left it.
 - **How many are kept.** Settings, Launcher, **Earlier versions to keep**: 1 by default (the last one), up to 5 per mod,

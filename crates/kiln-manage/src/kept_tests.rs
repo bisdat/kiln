@@ -107,15 +107,22 @@ impl World {
         kept_versions(&self.dirs, ModKind::Greeneye, "worstmap").into_iter().map(|v| v.version).collect()
     }
     /// Every file below the game folder and the Library entries, with its bytes.
+    /// Every file and folder of the test's world (the data folder, the games, the sources) but the kept versions' own
+    /// (`library/kiln-kept/`, `kiln-kept.json` and its lock), with each file's bytes; links are listed, never followed.
     fn outside_kept(&self) -> BTreeMap<String, Vec<u8>> {
+        let lib = self.dirs.library();
+        let skip = [lib.join(SETTINGS_DIR), lib.join(STATE_FILE), lib.join(LOCK_FILE)];
         let mut out = BTreeMap::new();
-        for root in [self.g.path.clone(), self.dirs.library().join("greeneye")] {
-            let mut stack = vec![root.clone()];
-            while let Some(d) = stack.pop() {
-                for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
-                    let p = e.path();
-                    if p.is_dir() { stack.push(p); } else { out.insert(p.display().to_string(), std::fs::read(&p).unwrap_or_default()); }
-                }
+        let mut stack = vec![self.root.clone()];
+        while let Some(d) = stack.pop() {
+            for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+                let p = e.path();
+                if skip.contains(&p) { continue; }
+                let meta = std::fs::symlink_metadata(&p).unwrap();
+                let key = p.display().to_string();
+                if meta.file_type().is_symlink() { out.insert(key, std::fs::read_link(&p).unwrap().display().to_string().into_bytes()); }
+                else if meta.is_dir() { out.insert(format!("{key}/"), Vec::new()); stack.push(p); }
+                else { out.insert(key, std::fs::read(&p).unwrap_or_default()); }
             }
         }
         out
@@ -263,18 +270,36 @@ fn a_restore_stopped_half_way_is_finished_by_the_next_placement() {
 }
 
 #[test]
-fn a_restore_whose_record_cannot_be_cleared_is_done_again_without_harm() {
+fn a_restore_whose_done_mark_cannot_be_written_is_done_again_without_harm() {
     let w = World::updated("restore-fail");
     w.rollback().unwrap();
-    fail_nth_save(1);
+    fail_nth_save(1); // the write that marks the restore done
     let a = crate::profile::refresh_active(&w.dirs, &w.g).unwrap();
     assert!(a.is_some_and(|a| a.kept_files.iter().any(|l| l.contains("tries again at the next start"))));
     assert_settings(&w, "1.0.0", OLD);
-    // the player changes a setting before the next start: the restore, done again, puts back the same old bytes
+    assert_eq!(pending_restores(&w.dirs, ModKind::Greeneye, "worstmap").iter().filter(|r| !r.applied).count(), 1, "not marked done");
+    // done again at the next placement: the same old bytes, nothing else
     w.next_start();
     assert_settings(&w, "1.0.0", OLD);
     assert!(pending_restores(&w.dirs, ModKind::Greeneye, "worstmap").is_empty());
     w.tidy_on_disk();
+}
+
+/// The restore is marked done, and dropping its record fails: the player changes a setting before the next start,
+/// and the next start drops the record without putting the old settings back over that change.
+#[test]
+fn a_restore_whose_record_cannot_be_dropped_keeps_the_players_later_change() {
+    let w = World::updated("restore-drop-fail");
+    w.rollback().unwrap();
+    fail_nth_save(2); // the done mark is written, the drop fails
+    let a = crate::profile::refresh_active(&w.dirs, &w.g).unwrap();
+    assert_settings(&w, "1.0.0", OLD);
+    put(&w.g.path, A, b"zoom=7"); // the player's change
+    w.next_start();
+    assert_settings(&w, "1.0.0", ("zoom=7", "chests=1"));
+    assert!(pending_restores(&w.dirs, ModKind::Greeneye, "worstmap").is_empty());
+    w.tidy_on_disk();
+    assert!(a.is_some_and(|a| a.kept_files.iter().any(|l| l.contains("tidies the settings it put back at its next start"))));
 }
 
 #[test]
@@ -535,4 +560,59 @@ fn every_record_is_written_after_what_it_names_is_flushed() {
     }
     assert!(commits >= 2, "the update and the roll back commit after their profile save ({commits})");
     assert_eq!(cleared, 1, "the restore is marked done once");
+}
+
+/// The game folder moved (a Steam library moved) between the update and the roll back: the roll back says that the
+/// settings wait for the folder they were kept in, and the placement in the new folder says it too, and leaves them.
+#[test]
+fn a_roll_back_after_the_game_folder_moved_says_where_its_settings_wait() {
+    let w = World::updated("moved");
+    let old = w.g.path.clone();
+    let moved = w.root.join("moved-game");
+    std::fs::rename(&old, &moved).unwrap();
+    let g = GameInstall { path: moved.clone(), ..w.g.clone() };
+    crate::game::write_record(&w.dirs, &g, None).unwrap();
+    let r = rollback(&w.dirs, Some(&g), &w.pid(&g), ModKind::Greeneye, "worstmap", None).unwrap();
+    assert!(r.notices.iter().any(|n| n.contains(&old.display().to_string()) && n.contains("go back only there")), "{:?}", r.notices);
+    let a = crate::profile::refresh_active(&w.dirs, &g).unwrap().unwrap();
+    assert!(a.kept_files.iter().any(|l| l.contains(&old.display().to_string()) && l.contains("not a game folder Kiln knows")), "{:?}", a.kept_files);
+    assert_eq!(std::fs::read_to_string(moved.join(A)).unwrap(), "zoom=9", "the settings it has stay");
+    assert_eq!(pending_restores(&w.dirs, ModKind::Greeneye, "worstmap").len(), 1, "they wait for their folder");
+}
+
+/// A settings copy's tag comes from the OS's random source only: when it fails, the version is not kept (no name made
+/// of anything guessable), and the update goes on.
+#[test]
+fn a_settings_copy_is_never_named_by_a_guessable_tag() {
+    let w = world("tags-rng");
+    w.drop_in(&w.g, "1.0.0");
+    w.write(&w.g, "1");
+    hooks::TAGS.with(|t| *t.borrow_mut() = vec![None]);
+    let up = w.drop_in(&w.g, "2.0.0");
+    hooks::TAGS.with(|t| t.borrow_mut().clear());
+    assert!(up.notices.iter().any(|n| n.contains("was not kept for a roll back") && n.contains("random source")), "{:?}", up.notices);
+    assert_eq!(w.version_in(&w.g), "2.0.0", "the update itself goes on");
+    assert!(w.kept().is_empty());
+    w.tidy_on_disk();
+}
+
+/// A tag already taken (by a staging folder, or by a copy) is never reused: the staging folder is made exclusively,
+/// and a new tag is drawn.
+#[test]
+fn a_settings_copy_never_takes_a_taken_name() {
+    let w = World::updated("tags-taken");
+    let dir = w.dirs.library().join(SETTINGS_DIR).join("greeneye/worstmap");
+    std::fs::create_dir_all(dir.join(".stage-aaaaaaaaaaaa")).unwrap();
+    let two = crate::library::list(&w.dirs, Some(ModKind::Greeneye)).unwrap()[0].versions.iter().find(|v| v.version == "2.0.0").cloned().unwrap();
+    std::fs::create_dir_all(dir.join(format!("2.0.0+{}.bbbbbbbbbbbb", crate::hash::hash8(&two.hash).unwrap()))).unwrap();
+    // drawn in this order: aaaa (its staging folder is taken), bbbb (its copy is taken), cccc, then the change's id
+    hooks::TAGS.with(|t| *t.borrow_mut() = vec![Some("0123456789ab".into()), Some("cccccccccccc".into()), Some("bbbbbbbbbbbb".into()), Some("aaaaaaaaaaaa".into())]);
+    w.rollback().unwrap();
+    hooks::TAGS.with(|t| t.borrow_mut().clear());
+    let st = load(&w.dirs).unwrap();
+    let kept_two = st.mods[0].kept.iter().find(|v| v.version == "2.0.0").expect("2.0.0 kept");
+    assert!(kept_two.settings.dir.as_deref().is_some_and(|d| d.ends_with(".cccccccccccc")), "{:?}", kept_two.settings.dir);
+    w.next_start();
+    assert_settings(&w, "1.0.0", OLD);
+    w.tidy_on_disk();
 }

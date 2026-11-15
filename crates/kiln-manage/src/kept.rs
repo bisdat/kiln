@@ -142,6 +142,10 @@ pub struct PendingRestore {
     /// The profile that rolled back: only its placement takes or applies them.
     pub profile: String,
     pub settings: KeptSettings,
+    /// Its files are back and flushed: only the record is left to drop (a stop before the drop never puts the files
+    /// back again over what the player changed since).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub applied: bool,
 }
 
 /// What is kept of one mod.
@@ -283,6 +287,8 @@ pub(crate) mod hooks {
     std::thread_local! {
         /// The change on this thread stops at this step.
         pub static STOP_AT: std::cell::Cell<Option<super::Step>> = const { std::cell::Cell::new(None) };
+        /// The tags `hex12` hands out next on this thread, last first (`None`: the random source fails).
+        pub static TAGS: std::cell::RefCell<Vec<Option<String>>> = const { std::cell::RefCell::new(Vec::new()) };
         /// The n-th write of the state file from now on this thread fails (0: none).
         pub static FAIL_SAVE: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
     }
@@ -361,8 +367,31 @@ fn mib(bytes: u64) -> String {
     format!("{:.0} MiB", bytes as f64 / (1024.0 * 1024.0))
 }
 
-fn hex12() -> String {
-    crate::util::random_bytes::<6>().map(|b| crate::hash::hex(&b)).unwrap_or_else(|_| format!("{:012x}", std::process::id()))
+/// 12 random hex characters (a settings copy's tag, a change's id). No fallback: without the OS's random source no
+/// unpredictable name can be made, and the copy is not kept.
+fn hex12() -> Result<String> {
+    #[cfg(test)]
+    if let Some(t) = hooks::TAGS.with(|t| t.borrow_mut().pop()) {
+        return t.ok_or_else(|| Error::new(ErrorCode::Io, "injected random source failure"));
+    }
+    crate::util::random_bytes::<6>().map(|b| crate::hash::hex(&b))
+}
+
+/// A new staging folder in `parent` (`.stage-<tag>`), made exclusively, whose tag no settings copy there has yet
+/// (`<version>+<hash8>.<tag>`): tried again with a new tag when either is taken. -> (the folder, its tag).
+fn new_stage(parent: &Path, version: &str, h8: &str) -> Result<(PathBuf, String)> {
+    std::fs::create_dir_all(parent).map_err(crate::util::io_at(parent, "creating"))?;
+    for _ in 0..16 {
+        let tag = hex12()?;
+        if std::fs::symlink_metadata(parent.join(format!("{version}+{h8}.{tag}"))).is_ok() { continue; }
+        let stage = parent.join(format!("{STAGE}{tag}"));
+        match std::fs::create_dir(&stage) {
+            Ok(()) => return Ok((stage, tag)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(crate::util::io_at(&stage, "creating")(e)),
+        }
+    }
+    Err(Error::new(ErrorCode::Io, format!("{}: no free name for a settings copy", parent.display())))
 }
 
 // ------------------------------------------------------------------------------------------------ the state file
@@ -407,7 +436,7 @@ fn save(dirs: &DataDirs, st: &KeptState) -> Result<()> {
             if let Some(d) = &s.dir && let Ok(p) = copy_dir(dirs, m.kind, &m.id, d) && !names.contains(&p) { names.push(p); }
         }
     }
-    let restores = st.mods.iter().map(|m| m.restores.len()).sum();
+    let restores = st.mods.iter().map(|m| m.restores.iter().filter(|r| !r.applied).count()).sum();
     crate::durable::journal(&state_path(dirs), text.as_bytes(), &names, st.pending.len(), restores)
 }
 
@@ -462,6 +491,8 @@ pub(crate) fn reconcile(dirs: &DataDirs, st: &mut KeptState, notes: &mut Vec<Str
         // 2. gone from the Library (removed by hand, by an older launcher, taken over)
         m.kept.retain(|v| entry_exists(dirs, kind, &id, &v.version, &v.hash));
         m.restores.retain(|r| entry_exists(dirs, kind, &id, &r.version, &r.hash));
+        // a restore done, whose record a stop or a failed write left: dropped now
+        m.restores.retain(|r| !r.applied);
         // 3. without its settings copy
         m.kept.retain(|v| {
             let there = copy_there(dirs, kind, &id, &v.settings);
@@ -744,9 +775,8 @@ fn take_settings(dirs: &DataDirs, games: &[PathBuf], kind: ModKind, id: &str, v:
         .map(|r| r.size).unwrap_or(0);
     if let Some(why) = disk_refusal(dirs, version_size, 1) { return Err(why); }
     let parent = mod_dir(dirs, kind, id).map_err(|e| e.message)?;
-    let tag = hex12();
-    let stage = parent.join(format!("{STAGE}{tag}"));
     let h8 = crate::hash::hash8(&v.hash).unwrap_or("00000000");
+    let (stage, tag) = new_stage(&parent, &v.version, h8).map_err(|e| e.message)?;
     let name = format!("{}+{h8}.{tag}", v.version);
     let mut out = KeptSettings::default();
     let copied = (|| -> std::result::Result<(), String> {
@@ -955,7 +985,14 @@ pub(crate) fn prepare(dirs: &DataDirs, profile: &Profile, game: Option<&Path>, c
         if fixed && save(dirs, &st).is_ok() { sweep(dirs, &st); }
         return Prepared::none(dirs, notices);
     }
-    let id = hex12();
+    let id = match hex12() {
+        Ok(id) => id,
+        Err(e) => {
+            // nothing names the copies this change made: they go, and the state stays as it was
+            sweep(dirs, &original);
+            return Prepared::failed(dirs, e.message);
+        }
+    };
     st.pending.push(KeptTxn {
         id: id.clone(), profile: profile.id.clone(), started: crate::util::now_rfc3339(),
         changes: changes.iter().map(|(kind, a, b)| TxnChange { kind: *kind, id: a.id.clone(), from: VersionRef::of(a), to: VersionRef::of(b) }).collect(),
@@ -979,7 +1016,7 @@ fn follow_one(dirs: &DataDirs, st: &mut KeptState, profile_id: &str, games: &[Pa
     let m = mod_of(st, kind, &from.id);
     // this profile's roll back to `from` that was never placed: the settings waiting for it are still the ones it has
     let mut from_settings = None;
-    if let Some(i) = m.restores.iter().position(|r| r.profile == profile_id && r.version == from.version && r.hash == from.hash) {
+    if let Some(i) = m.restores.iter().position(|r| r.profile == profile_id && r.version == from.version && r.hash == from.hash && !r.applied) {
         from_settings = Some(m.restores.remove(i).settings);
     }
     // a version this profile kept comes back: its settings wait for its next placement in this profile (one restore per
@@ -988,7 +1025,7 @@ fn follow_one(dirs: &DataDirs, st: &mut KeptState, profile_id: &str, games: &[Pa
         let v = m.kept.remove(i);
         m.restores.retain(|r| r.profile != profile_id);
         if !v.settings.is_empty() {
-            m.restores.push(PendingRestore { version: v.version, hash: v.hash, profile: profile_id.to_string(), settings: v.settings });
+            m.restores.push(PendingRestore { version: v.version, hash: v.hash, profile: profile_id.to_string(), settings: v.settings, applied: false });
         }
     }
     // the version left is kept
@@ -1075,6 +1112,9 @@ pub fn rollback(dirs: &DataDirs, game: Option<&crate::game::GameInstall>, profil
     };
     let after = ProfileMod { id: id.to_string(), version: pick.version.clone(), hash: pick.hash.clone(), enabled: before.enabled };
     let settings = pick.settings.files.clone();
+    // settings kept in a game folder this profile does not run in now (it moved): said, they wait for that folder
+    let moved = pick.settings.game.clone().filter(|g| !pick.settings.is_empty()
+        && !active_games(dirs, profile_id, game.map(|g| g.path.as_path())).iter().any(|a| same_game_path(a, Path::new(g))));
     p.mods.list_mut(kind)[i] = after.clone();
     let prepared = prepare(dirs, &p, game.map(|g| g.path.as_path()), &[(kind, before.clone(), after.clone())]);
     // without its record the rolled back version would get the newer version's settings: nothing changes then
@@ -1094,6 +1134,10 @@ pub fn rollback(dirs: &DataDirs, game: Option<&crate::game::GameInstall>, profil
     if keep_count(dirs) == 0 {
         notices.push(format!("{name} {} is not kept (Settings keeps no earlier versions): it stays in your Library as an earlier version.", before.version));
     }
+    if let Some(g) = moved {
+        notices.push(format!("{name} {}: its settings were kept in {g}, a game folder this profile does not run in now (did it move?). They go back only there; here it starts with the settings it has.",
+            pick.version));
+    }
     Ok(RollbackReport {
         profile_id: saved.id.clone(), profile_name: saved.name.clone(), kind, id: id.to_string(), name,
         from: VersionRef::of(&before), to: VersionRef::of(&after),
@@ -1106,7 +1150,7 @@ pub fn rollback(dirs: &DataDirs, game: Option<&crate::game::GameInstall>, profil
 
 /// Is `game` the game folder a restore's settings came from (any, when it does not say)?
 fn same_game(r: &PendingRestore, game: &Path) -> bool {
-    r.settings.game.as_deref().is_none_or(|g| crate::steam::same_path(&crate::steam::canon(Path::new(g)), &crate::steam::canon(game)))
+    r.settings.game.as_deref().is_none_or(|g| same_game_path(Path::new(g), game))
 }
 
 /// After `engine_mods::place` placed `profile` in `game`: the settings a roll back of this profile kept, in this game,
@@ -1118,25 +1162,54 @@ fn same_game(r: &PendingRestore, game: &Path) -> bool {
 /// and other games' restores are left alone. -> one sentence per mod restored, and one per file not put back.
 pub fn restore_after_place(dirs: &DataDirs, profile: &Profile, game: &Path) -> Vec<String> {
     if nothing_kept(dirs) { return Vec::new(); }
+    let known: Vec<PathBuf> = crate::game::known(dirs).unwrap_or_default().into_iter().map(|g| g.path).collect();
+    // 1. the files back and flushed, the restore marked done in one durable write
     let done = update(dirs, |st, notes| {
+        let mut any = false;
         for m in &mut st.mods {
             let (kind, id) = (m.kind, m.id.clone());
             let mut waiting = Vec::new();
-            for r in std::mem::take(&mut m.restores) {
-                if r.profile != profile.id || !same_game(&r, game) { waiting.push(r); continue; }
+            for mut r in std::mem::take(&mut m.restores) {
+                if r.profile != profile.id || r.applied { waiting.push(r); continue; }
+                if !same_game(&r, game) {
+                    // its game folder moved (a Steam library moved, the game installed again elsewhere): it waits there
+                    if let Some(g) = r.settings.game.as_deref().filter(|g| !known.iter().any(|k| same_game_path(k, Path::new(g)))) {
+                        notes.push(moved_note(kind, &id, &r.version, g));
+                    }
+                    waiting.push(r);
+                    continue;
+                }
                 if !lists(profile, kind, &id, &r.version, &r.hash) { continue; } // the profile moved on: dropped
                 let copies = copies_of(game, kind, &id, &r.version, &r.hash);
                 if copies.is_empty() { waiting.push(r); continue; }
-                if !apply_restore(dirs, game, kind, &id, &r, &copies, notes) { waiting.push(r); }
+                if apply_restore(dirs, game, kind, &id, &r, &copies, notes) { r.applied = true; any = true; }
+                waiting.push(r);
             }
             m.restores = waiting;
         }
+        any
     });
-    match done {
-        Ok(Some((_, notes))) => notes,
-        Ok(None) => Vec::new(),
-        Err(e) => vec![format!("Kiln could not put back the settings of a rolled back mod: {} (it tries again at the next start)", e.message)],
+    let (any, mut notes) = match done {
+        Ok(Some((any, notes))) => (any, notes),
+        Ok(None) => return Vec::new(),
+        Err(e) => return vec![format!("Kiln could not put back the settings of a rolled back mod: {} (it tries again at the next start)", e.message)],
+    };
+    // 2. the records of the restores done dropped (a stop or failure here: the next look drops them, nothing is put
+    // back again)
+    if any && let Err(e) = update(dirs, |_, _| ()) {
+        notes.push(format!("Kiln tidies the settings it put back at its next start: {}", e.message));
     }
+    notes
+}
+
+fn same_game_path(a: &Path, b: &Path) -> bool {
+    crate::steam::same_path(&crate::steam::canon(a), &crate::steam::canon(b))
+}
+
+/// The note of a restore that waits for a game folder Kiln no longer knows.
+fn moved_note(kind: ModKind, id: &str, version: &str, game: &str) -> String {
+    format!("{}:{id}: the settings version {version} had before the update were kept in {game}, which is not a game folder Kiln knows now (it moved?); they go back only there, so this copy keeps the settings it has",
+        kind.as_str())
 }
 
 /// Puts one restore's files and values back. -> true when it is done (false: try again at the next placement).
@@ -1404,7 +1477,7 @@ mod tests {
         let m = KeptMod { kind: ModKind::Greeneye, id: "m".into(),
             kept: vec![KeptVersion { version: "1.0.0".into(), hash: "kdh1:00".into(), kept: "t".into(), replaced_by: Some(v.clone()),
                 profile: Some("p".into()), settings: settings.clone() }],
-            restores: vec![PendingRestore { version: "1.0.0".into(), hash: "kdh1:00".into(), profile: "p".into(), settings }] };
+            restores: vec![PendingRestore { version: "1.0.0".into(), hash: "kdh1:00".into(), profile: "p".into(), settings, applied: true }] };
         let st = KeptState { format: 1, mods: vec![m.clone()], pending: vec![KeptTxn { id: "0123456789ab".into(), profile: "p".into(), started: "t".into(),
             changes: vec![TxnChange { kind: ModKind::Greeneye, id: "m".into(), from: v.clone(), to: v.clone() }], before: vec![m], profile_before: Some(crate::profile::ProfileMods::default()) }] };
         let json = serde_json::to_value(&st).unwrap();
