@@ -32,6 +32,10 @@ internal sealed class BakeOptions
 
     /// <summary>Make no files, say what would be written (tests and --check).</summary>
     public bool DryRun { get; init; }
+
+    /// <summary>Opt into freezing this build's C# world-table declarations as boot data. Off for existing mods whose
+    /// declarations may depend on the running game's configuration, world or available services.</summary>
+    public bool WorldTables { get; init; }
 }
 
 internal static class Baker
@@ -128,7 +132,9 @@ internal static class Baker
             quests = QuestsDocument(id);
             skills = SkillsDocument(id, result);
             vfx = VfxDocument(id, folder);
-            tables = TablesDocument(id);
+            tables = options.WorldTables ? TablesDocument(id) : null;
+            if (!options.WorldTables && WorldTablesNative.BakedDocument(id) is not null)
+                result.Notes.Add("C# world-table blocks keep their runtime next-start behavior; set KilnBakeWorldTables=true only for definitions independent of runtime conditions");
         }
         finally
         {

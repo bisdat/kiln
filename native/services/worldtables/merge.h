@@ -163,7 +163,8 @@ struct Allocation {
     std::vector<std::string> refused;
     size_t room = 0;
 };
-Allocation allocate(std::vector<Material> live, std::vector<Material> kept, const std::vector<int>& free_ids, const std::vector<int>& deprecated);
+Allocation allocate(std::vector<Material> live, std::vector<Material> kept, const std::vector<int>& free_ids, const std::vector<int>& deprecated,
+                    const std::vector<Material>& remembered = {});
 
 // What client and server have to agree on: 16 hex digits over the live materials' ids and GUIDs.
 std::string handshake_hash(const std::vector<Placed>& placed);
@@ -256,9 +257,14 @@ void bind_shape_pools(std::vector<Shape>* shapes, const std::vector<PoolDefiniti
 // The custom-pool writer's checks of the game's own pool table, run before any material is fitted: "" when the
 // accepted pools can be written into these bytes, else why not. The writer runs the same checks.
 std::string check_custom_pools(const Bytes& game, const Layouts& L, const std::vector<MaterialPool>& groups);
-// A game build whose pool table fails those checks keeps every mod material and shape: its pools are refused, each
-// by name with the reason, and nothing is grouped, so the ordinary merge serves the rest.
+// A game build whose pool table fails those checks refuses its pools by name and groups nothing. Materials return to
+// ordinary selector fitting; shapes bound to a refused pool are refused too.
 void admit_custom_pools(const Bytes& game, const Layouts& L, PoolResolution* r);
+void refuse_custom_pools(PoolResolution* r, const std::string& reason);
+// Allocation can refuse a member after reference resolution. Remove those pools and restore grouping to the surviving
+// pools only; true means selector fitting and allocation must be repeated before publishing any resource.
+bool retain_allocated_pools(PoolResolution* r, const std::vector<Material>& materials, const std::vector<Placed>& placed,
+                            const std::map<std::string, PoolGameMaterial>& game);
 // Budgets from what the game's own bytes held before Kiln's merge (no vanilla constants). capacity 0: unknown.
 struct BudgetCounts { uint32_t capacity = 0, game = 0, kiln = 0, reserved = 0; bool ready = false; };
 BudgetCounts material_budget_counts(uint32_t category, uint32_t game_used, uint64_t live, uint64_t retained);
@@ -269,7 +275,7 @@ bool stored_file_goes(const std::string& stem, const std::string& block, bool ow
 // The note for a stored file whose mod is not loaded: kept, not unsafe.
 std::string kept_file_text(const std::string& path);
 // Transactional custom-row writer: failure leaves *out unchanged. Grouped mod materials are
-// excluded from vanilla auto-append even when their group failed admission.
+// excluded from vanilla auto-append only while an accepted group contains them.
 bool merge_pools(const Bytes& game, const Layouts& L, const std::vector<Placed>& placed,
                  const std::vector<MaterialPool>& groups, Bytes* out, std::string* why,
                  const std::set<Guid>& grouped = {});

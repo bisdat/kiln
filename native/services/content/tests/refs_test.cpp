@@ -100,7 +100,13 @@ void pool_references_need_their_binding() {
     check(resolve(s,f,"11111111-2222-4333-8444-555555555555",none,p,out,nullptr,nullptr,&why),"the shape bound to the pool takes it");
     set_kitbash_item(other);
     check(!resolve(s,f,"11111111-2222-4333-8444-555555555555",none,p,out,nullptr,nullptr,&why),"another item (a vanilla shape, another mod's) does not");
+    uint8_t pool[16];guid_parse("11111111-2222-4333-8444-555555555555",pool);
+    p.by_type[f.type_name].insert(gof(pool)); // a previous bound shape now uses it in the loaded item registry
+    check(!resolve(s,f,"11111111-2222-4333-8444-555555555555",none,p,out,nullptr,nullptr,&why),"a loaded shape's pool cannot bypass another item's binding check");
+    set_kitbash_item(shape);
+    check(resolve(s,f,"11111111-2222-4333-8444-555555555555",none,p,out,nullptr,nullptr,&why),"a cached pool still works on its bound shape");
     set_kitbash_item(nullptr);
+    check(!resolve(s,f,"11111111-2222-4333-8444-555555555555",none,p,out,nullptr,nullptr,&why),"a cached pool cannot be assigned by a game-item rule");
     g_api=nullptr;
 }
 void malformed_entries() {

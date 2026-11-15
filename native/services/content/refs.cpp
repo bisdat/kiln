@@ -360,6 +360,16 @@ bool resolve(const Schema& s, const Field& f, const std::string& spec, const Ite
         *why = f.path + ": \"" + spec + "\" is not a GUID, \"item:<name>\" or \"none\"";
         return false;
     }
+    // Do this before the loaded-reference and assets allowlists: after a bound shape has been cloned, its pool is
+    // present in those lists too. Seeing it on that shape does not authorize another item to take it.
+    if (f.path == kPoolField && f.type_name == "keen::ObjectReference<keen::VoxelBlueprintMaterialPool>") {
+        const PoolUse use = pool_use(out, t_kitbash_item);
+        if (use == PoolUse::Bound) return true;
+        if (use == PoolUse::Unbound) {
+            *why = unbound_pool(f, spec);
+            return false;
+        }
+    }
     const G g = gof(out);
     if (f.type_name == "keen::ObjectReference<keen::ItemInfo>" && p.item_guids.count(g)) return true;
     if (auto it = p.by_type.find(f.type_name); it != p.by_type.end() && it->second.count(g)) return true;
@@ -375,14 +385,6 @@ bool resolve(const Schema& s, const Field& f, const std::string& spec, const Ite
     static const bool server = GetModuleHandleA("enshrouded_server.exe") != nullptr;
     if (server && f.type_name == "keen::ObjectReference<keen::Model>" && declared_by_own_mod(out)) return true;
     if (f.path == "equipment.voxelData.placeVoxelMaterial" && world_material(out)) return true;
-    if (f.path == kPoolField && f.type_name == "keen::ObjectReference<keen::VoxelBlueprintMaterialPool>") {
-        const PoolUse use = pool_use(out, t_kitbash_item);
-        if (use == PoolUse::Bound) return true;
-        if (use == PoolUse::Unbound) {
-            *why = unbound_pool(f, spec);
-            return false;
-        }
-    }
     *why = f.path + ": " + spec + " is not a " + type_short(f.type_name) + " the game has loaded (no loaded item uses it" +
            (f.type_name == "keen::ecs::TemplateReference" ? ", it is not a loaded template" : "") +
            ", and no mod serves it through kiln.assets)";

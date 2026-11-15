@@ -166,6 +166,16 @@ public sealed class BakeCleanTargetsTests
     }
 
     [Fact]
+    public void TurnedOffRemovesAWorldTableArtifactWithoutOtherOutputsOrBookkeeping()
+    {
+        using var s = new Stub();
+        s.Baked("blocks.tables.json");
+        var (code, output) = s.MsBuild("-t:_KilnBakeOff", "-p:KilnBake=false");
+        Assert.True(code == 0, output);
+        Assert.False(File.Exists(Path.Combine(s.Out,"blocks.tables.json")));
+    }
+
+    [Fact]
     public void TurnedOffWithoutBookkeepingStillRemovesWhatTheSdkWrote()
     {
         using var s = new Stub();

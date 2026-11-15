@@ -70,6 +70,16 @@ public class WorldTablesGateTests
     }
 
     [Fact]
+    public void ACurrentPeerWithoutPoolsStillNamesTheServersMissingPools()
+    {
+        var properties = WorldTablesGate.Properties(); // no native worldtables service in this test
+        Assert.True(properties.ContainsKey(WorldTablesGate.KeyPools));
+        Assert.Equal("", properties[WorldTablesGate.KeyPools]);
+        Assert.Contains("you don't have the material pool mp-fixture:four",
+            WorldTablesGate.Describe(Server, SameIds, ServerPools, properties[WorldTablesGate.KeyPools]));
+    }
+
+    [Fact]
     public void APoolDigestFollowsOrderRoofAndBinding()
     {
         var g = "d484d837-f2d9-5cef-a617-196245f5db4c";

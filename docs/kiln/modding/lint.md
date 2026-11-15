@@ -640,7 +640,8 @@ Fix: keep a mod's materials few, or say on its page how many it takes.
 
 ### KL332 material-reference
 Warning (needs the catalog). A `materialTweaks` block's `material`, or a `buildingMaterialPools` entry's `gameMaterial`, that is not a game material: the block is refused at boot. Names come from the item that places the material
-(`StoneRough`, `WoodFancy`, `TerrainStone`); `Cell<id>` and the material's GUID work too.
+(`StoneRough`, `WoodFancy`, `TerrainStone`). A tweak also accepts `Cell<id>` or the material's GUID; a pool's `gameMaterial`
+requires the building-material catalog name and cannot name terrain.
 ```text
 blocks/tweaks.json:2:27: warning KL332: "StoneRuogh" is not a game material the catalog knows; a block that names one is refused at boot; did you mean "StoneRough"?
 ```

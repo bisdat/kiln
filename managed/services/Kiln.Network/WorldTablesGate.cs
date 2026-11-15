@@ -76,7 +76,8 @@ internal static unsafe class WorldTablesGate
         var d = new Dictionary<string, string>(StringComparer.Ordinal) { [KeyHash] = OwnHash() };
         var live = Live();
         if (live.Count > 0) d[KeyIds] = string.Join(',', live.Select(m => $"{m.Id}={m.Guid}"));
-        if (Pools() is { Count: > 0 } pools) d[KeyPools] = string.Join(',', pools.Select(p => $"{p.Key}={p.Value}"));
+        // Empty is a current peer with no pools. Absent is an older peer that cannot describe them.
+        d[KeyPools] = string.Join(',', Pools().OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => $"{p.Key}={p.Value}"));
         return d;
     }
 

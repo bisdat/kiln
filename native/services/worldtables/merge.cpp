@@ -558,7 +558,28 @@ void read_shape(const std::string& name, const ojson& j, const ModFile& mf, Shap
 }
 
 // ---- ids ---------------------------------------------------------------------------------------------------------
-Allocation allocate(std::vector<Material> live, std::vector<Material> kept, const std::vector<int>& free_ids, const std::vector<int>& deprecated) {
+Allocation allocate(std::vector<Material> live, std::vector<Material> kept, const std::vector<int>& free_ids, const std::vector<int>& deprecated,
+                    const std::vector<Material>& remembered) {
+    if (!remembered.empty()) {
+        std::vector<std::string> retained;
+        for (;;) {
+            auto a = allocate(live, kept, free_ids, deprecated);
+            bool changed = false;
+            std::erase_if(live, [&](const Material& m) {
+                const auto old = std::find_if(remembered.begin(), remembered.end(), [&](const Material& k) { return !k.terrain && k.guid == m.guid; });
+                if (old == remembered.end() || std::any_of(a.placed.begin(), a.placed.end(), [&](const Placed& p) { return p.m.guid == m.guid; })) return false;
+                auto k = *old;k.live = false;k.item = false;
+                kept.push_back(std::move(k));
+                retained.push_back("block buildingMaterial " + m.block + " (mod " + m.mod + "): refused: no material id remains; a world has cells of it, so it is kept as an absent mod's material is");
+                changed = true;
+                return true;
+            });
+            if (!changed) {
+                a.refused.insert(a.refused.end(), retained.begin(), retained.end());
+                return a;
+            }
+        }
+    }
     Allocation a;
     auto by_guid = [](const Material& x, const Material& y) { return x.guid.text() < y.guid.text(); };
     std::sort(live.begin(), live.end(), by_guid);
@@ -1325,13 +1346,38 @@ void admit_custom_pools(const Bytes& game, const Layouts& L, PoolResolution* r) 
     if (r->pools.empty()) return;
     const std::string why = check_custom_pools(game, L, r->pools);
     if (why.empty()) return;
+    refuse_custom_pools(r, "this game build's material pool table fails a check of the pool writer (" + why + ")");
+}
+void refuse_custom_pools(PoolResolution* r, const std::string& reason) {
     for (const auto& p : r->pools) {
         const auto colon = p.name.find(':');
-        r->errors.push_back("block buildingMaterialPool " + p.name.substr(colon + 1) + " (mod " + p.name.substr(0, colon) + "): refused: this game build's material pool table fails a check of the pool writer (" +
-                            why + "); every material and shape is kept, without the pool");
+        r->errors.push_back("block buildingMaterialPool " + p.name.substr(colon + 1) + " (mod " + p.name.substr(0, colon) + "): refused: " +
+                            reason + "; materials use the ordinary selectors; shapes bound to this pool are refused");
     }
     r->pools.clear();
     r->grouped.clear();
+}
+
+bool retain_allocated_pools(PoolResolution* r, const std::vector<Material>& materials, const std::vector<Placed>& placed,
+                            const std::map<std::string, PoolGameMaterial>& game) {
+    std::set<uint32_t> live_items;
+    for (const auto& p : placed) if (p.m.live && p.m.item) live_items.insert(p.m.item_id);
+    for (const auto& [name, m] : game) if (m.item) live_items.insert(m.item);
+    const auto before = r->pools.size();
+    std::erase_if(r->pools, [&](const auto& p) {
+        if (std::all_of(p.items.begin(), p.items.end(), [&](uint32_t i) { return live_items.count(i); })) return false;
+        const auto colon = p.name.find(':');
+        r->errors.push_back("block buildingMaterialPool " + p.name.substr(colon + 1) + " (mod " + p.name.substr(0, colon) + "): refused: a member did not receive a material id");
+        return true;
+    });
+    if (r->pools.size() == before) return false;
+    std::set<uint32_t> members;
+    for (const auto& p : r->pools) members.insert(p.items.begin(), p.items.end());
+    std::set<Guid> grouped;
+    for (const auto& m : materials)
+        if (r->grouped.count(m.guid) && members.count(m.item_id)) grouped.insert(m.guid);
+    r->grouped = std::move(grouped);
+    return true;
 }
 
 // Budgets from what the game's own bytes held before Kiln's merge: a game update that adds materials or pool
@@ -1350,8 +1396,8 @@ BudgetCounts pool_budget_counts(const std::string&, uint32_t original, uint32_t 
     if (b.ready) b.game = original, b.kiln = served - original;
     return b;
 }
-bool stored_file_goes(const std::string&, const std::string& block, bool owner_loaded, const std::set<std::string>& defined) {
-    return owner_loaded && !defined.count(block);
+bool stored_file_goes(const std::string& stem, const std::string& block, bool owner_loaded, const std::set<std::string>& defined) {
+    return owner_loaded && !defined.count(stem.rfind("@pool-",0)==0?"@pool/"+block:block);
 }
 std::string kept_file_text(const std::string& path) {
     return "stored definition " + path + " kept: its mod is not loaded in this profile, so nothing of it is applied; it applies again when the mod is";

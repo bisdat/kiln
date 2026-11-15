@@ -511,6 +511,31 @@ void pool_grouping_test() {
     check("pool-group.dependency-accepted-groups",r.pools.size()==1 && r.grouped.count(foreign.guid));
     bad[0].roof=true; r=resolve_pools(bad,{foreign},game);
     check("pool-group.dependency-refused-groups-nothing",r.pools.empty() && r.grouped.empty());
+
+    r=resolve_pools(mf.pools,{ice},game);
+    refuse_custom_pools(&r,"unsupported reflected pool layout");
+    check("pool-group.unsupported-layout-groups-nothing",r.pools.empty() && r.grouped.empty() && r.errors.size()==1);
+
+    // Both mod members resolve, but the material namespace fits only one. Rejecting the pool must restore the
+    // ordinary selector fitting before its members are served, including any member shared with a surviving pool.
+    auto snow=material("pools","snow");
+    bad=mf.pools;bad[0].entries={{"ice",""},{"snow",""}};
+    r=resolve_pools(bad,{ice,snow},game);
+    auto allocation=allocate({ice,snow},{},{213},{});
+    check("pool-group.id-exhaustion-refuses-pool",retain_allocated_pools(&r,{ice,snow},allocation.placed,game) && r.pools.empty() && r.grouped.empty());
+    std::vector<Material> fallback{ice,snow}, held;std::vector<std::string> refused;
+    fit_pools(&fallback,{{kWallPool,63}},{},&held,&refused,r.grouped);
+    check("pool-group.id-exhaustion-refits-defaults",fallback.size()==1 && refused.size()==1);
+    auto shared=mf.pools[0];shared.block="shared";shared.guid=derive_guid("pools","materialpool","shared");shared.entries={{allocation.placed[0].m.block,""}};
+    r=resolve_pools({bad[0],shared},{ice,snow},game);
+    check("pool-group.id-exhaustion-keeps-shared-grouping",retain_allocated_pools(&r,{ice,snow},allocation.placed,game) && r.pools.size()==1 && r.grouped==std::set<Guid>{allocation.placed[0].m.guid});
+
+    // A grouped material can outgrow the shared cell namespace on a later start. A live declaration that no longer
+    // fits must still retain a world's cells, just as a selector-refused or absent material does.
+    auto remembered=allocation.placed[0].m.guid==ice.guid?snow:ice;
+    remembered.live=false;remembered.item=false;
+    allocation=allocate({ice,snow},{},{213},{},{remembered});
+    check("pool-group.id-exhaustion-preserves-world-material",allocation.placed.size()==1 && allocation.placed[0].m.guid==remembered.guid && !allocation.placed[0].m.live && !allocation.placed[0].m.item);
 }
 
 // Item 8: one cause, one sentence, the entry or reference named; every problem kept.
@@ -571,7 +596,8 @@ void budget_counts_test() {
 // Item 1 and 12: the automatic prune, the note for a mod that is not loaded, an owner's liveness.
 void stored_files_test() {
     check("prune.pool-not-defined-again-goes",stored_file_goes("@pool-x","late",true,{}));
-    check("prune.pool-defined-again-stays",!stored_file_goes("@pool-x","late",true,{"late"}));
+    check("prune.pool-defined-again-stays",!stored_file_goes("@pool-x","late",true,{"@pool/late"}));
+    check("prune.another-block-kind-does-not-keep-pool",stored_file_goes("@pool-x","late",true,{"late"}));
     check("prune.kept-block-not-defined-goes",stored_file_goes("tough","tough",true,{}));
     check("prune.mod-not-loaded-keeps-every-file",!stored_file_goes("@pool-x","late",false,{}) && !stored_file_goes("tough","tough",false,{}));
     const auto kept=kept_file_text("pending/m/@pool-a.json");
@@ -657,6 +683,11 @@ void pool_registration_test() {
     check("pool-receipt.retained",retained.reply.disposition==KILN_DEFINITION_RETAINED && retained.reply.slots_consumed==2);
     auto registered=ledger.commit(ledger.prepare(def,KILN_DEFINE_REQUIRE_REGISTERED,true),persist);
     check("pool-receipt.served-slots",registered.reply.ok && registered.reply.slots_consumed==2 && registered.reply.disposition==KILN_DEFINITION_REGISTERED && writes==2);
+    std::map<Guid,std::string> pruned{{def.guid,def.mod}};
+    int restored_writes=0;const auto restore=[&](const PoolReceipt&){++restored_writes;return true;};
+    check("pool-receipt.restore-failure-keeps-retry",!restore_pruned_pool(pruned,registered,[](const PoolReceipt&){return false;}) && pruned.count(def.guid));
+    check("pool-receipt.restore-defined-again",restore_pruned_pool(pruned,registered,restore) && pruned.empty() && restored_writes==1);
+    check("pool-receipt.restore-idempotent",restore_pruned_pool(pruned,registered,restore) && restored_writes==1);
     check("pool-receipt.query",ledger.query(registered.id).reply.snapshot_revision==registered.reply.snapshot_revision);
     ledger.owner_inactive(def.guid);
     check("pool-receipt.owner-retained",ledger.query(registered.id).reply.disposition==KILN_DEFINITION_RETAINED && ledger.query(registered.id).reply.slots_consumed==2 && ledger.query(registered.id).reply.reason_code==KILN_DEFINE_OWNER_INACTIVE);

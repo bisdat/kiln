@@ -10,6 +10,7 @@ defines into the mod. The first start then has it too, on the server and on ever
 | Quests, quest NPCs, dialogues shown by the game | `Quests.Define`, `Quests.DefineNpc`, `QuestBlock` and `DialogueBlock` in C# | `quests/generated/<id>.json` | kiln.quests' start-up build ([quests.md](quests.md)) |
 | Nodes in the game's skill tree | `GameTree.Define` / `GameTree.DefineJson` | `skills/<id>.generated.json` (`"gameTree"`) | kiln.skills ([../services/skills.md](../services/skills.md), part A) |
 | VFX and materials | `Blocks.Define(name, VfxBlock)` / `MaterialBlock` | `blocks/generated/<id>.json` | kiln.vfx ([vfx.md](vfx.md), [materials.md](materials.md)) |
+| World-table blocks (explicit opt-in) | C# building/terrain materials, tweaks, blueprints, crafting props and material pools, with `KilnBakeWorldTables=true` | `blocks.tables.json` | kiln.worldtables ([../services/worldtables.md](../services/worldtables.md)) |
 | World programs | nothing to bake: they are declared in `kiln.programs.json`, which the SDK already copies | | kiln.world ([ecs-programs.md](ecs-programs.md)) |
 | Affix kinds and pools | nothing to bake: they are Kiln's own, not the game's, and defined when the mod loads (`Blocks.Define`, `Affixes.Define`, `blocks/*.json`) | | Kiln.Blocks ([affixes.md](affixes.md)) |
 
@@ -26,6 +27,7 @@ the files into the output folder, so `KilnDeploy` and `KilnPack` ship them.
 <PropertyGroup>
   <KilnBake>false</KilnBake>                          <!-- no bake: the next start, as before -->
   <KilnBakeSteps>30</KilnBakeSteps>                   <!-- define something in a later step? run longer (default 10) -->
+  <KilnBakeWorldTables>true</KilnBakeWorldTables>     <!-- opt in only for world-table definitions independent of runtime conditions -->
   <KilnBakeTimeoutSeconds>300</KilnBakeTimeoutSeconds> <!-- the whole bake's deadline (default 120) -->
 </PropertyGroup>
 ```
@@ -40,7 +42,7 @@ the files into the output folder, so `KilnDeploy` and `KilnPack` ship them.
   - the bake is turned off (`KilnBake=false`);
   - the file is named for another mod id (left from a rename).
 
-  `KilnDeploy` also removes the three files from the deployed folder before it copies, so one the output folder no
+  `KilnDeploy` also removes the baked output paths from the deployed folder before it copies, so one the output folder no
   longer has does not stay on the server. What goes is told by the file's own marker, not by a list, so an author's file
   now at a path an earlier bake wrote stays, and nothing is left when the build's bookkeeping is gone.
 - **A mod that does not load without the game** is not baked. A build line says so (`Kiln.Sdk.Bake: <id>: not baked:
@@ -51,7 +53,7 @@ the files into the output folder, so `KilnDeploy` and `KilnPack` ship them.
   the process removes it at its own deadline, and the build removes it again by marker after any failure.
   A thread the mod leaves running does not keep the bake alive: the process ends when the bake is done.
 - **It bakes again** when the mod, its data files (every `None` or `Content` item copied to the output, `PreserveNewest`
-  or `Always`), the SDK, `KilnBakeSteps` or `KilnBakeTimeoutSeconds` change, or a file the last bake wrote is gone from
+  or `Always`), the SDK, `KilnBakeSteps`, `KilnBakeWorldTables` or `KilnBakeTimeoutSeconds` change, or a file the last bake wrote is gone from
   the output folder.
 - **An IDE's design-time build never bakes**, so it never runs the mod's code.
 - **The mod's code runs with invariant globalization**, as Kiln.Host does in the game. The files are the same on every
@@ -127,9 +129,12 @@ Each refusal is a line in kiln.log (`vfx: <id>: blocks/<file>: not read: ...`), 
 - **A client-only mod** (`"side": "client"`): the harness is a server.
 - **A mod whose required dependency is not there**, since the harness loads this mod only. **Definitions made after the
   first steps:** raise `KilnBakeSteps`.
-- **NPC blocks from code** (`kiln/data/kiln-quests/native/<id>.blocks.json`), **C# world-table blocks** (material tweaks,
-  building and terrain materials) and **crafting props from C#** keep their next-start rule. Their data-file forms are there
-  at once.
+- **NPC blocks from code** (`kiln/data/kiln-quests/native/<id>.blocks.json`) keep their next-start rule.
+- **C# world-table blocks** keep their next-start rule by default. `KilnBakeWorldTables=true` opts into recording every
+  world-table section from the offline run, including crafting props, pools, strengths and surfaces. Use it only when
+  those definitions do not depend on runtime settings, the world, available services or client/server conditions: the
+  baked definitions win at every start, even if the runtime code changes or omits them. Data files and `OnBoot` are
+  first-start routes without running `OnLoad` in the bake. Turning this option off removes an earlier SDK artifact.
 
 ## Checked
 - `managed/tests/Kiln.Sdk.Tests` (25 tests):
