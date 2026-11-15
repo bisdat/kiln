@@ -41,7 +41,8 @@ struct PlanStep {
     uint8_t entry = 0xFF;     // the request entry it serves; 0xFF: a temporary unequip (a cycle's free slot)
     uint8_t kind = 0;         // what goes in: 0 empty (unequip), 1 an item entity, 2 a plain stack
     uint32_t item = 0, pide = 0, stamp = 0, count = 0;
-    uint64_t source = 0;      // equip: where the stack is when the step runs (as planned)
+    uint64_t source = 0;      // equip: where the stack is when the step runs (as planned); unequip: the slot id the
+                              // selection names for the equipment slot
 };
 
 struct PlanOptions {
@@ -57,7 +58,7 @@ struct SetPlan {
     char reason[256] = "";
     std::vector<PlanStep> steps;
     // per entry, filled for the executor's checks after the commit
-    bool satisfied[kEquipSlots] = {};
+    bool satisfied[kSelectionSlots] = {};
 };
 
 // What an item type's EquipmentSlotType is (ItemInfo +0x104; 0 = unknown, the check is then the game's).
@@ -75,7 +76,7 @@ struct Token {
 
 struct Staged {
     std::vector<std::pair<uint64_t, Token>> bag;  // every non-equipment slot of the player, in link order then index
-    Token eq[kEquipSlots];                         // what each equipment slot holds
+    Token eq[kSelectionSlots];                         // what each equipment slot holds
     std::vector<uint64_t> generic;                 // slots of top-level Generic links, in order (where an unequip goes)
 
     Token* at(uint64_t slot) {
@@ -86,7 +87,7 @@ struct Staged {
     // where `t` is: a bag slot (>0) or equipment index (via *eq_index), 0 when nowhere
     uint64_t find(const Token& t, int* eq_index) {
         *eq_index = -1;
-        for (uint32_t i = 0; i < kEquipSlots; ++i)
+        for (uint32_t i = 0; i < kSelectionSlots; ++i)
             if (!eq[i].empty() && eq[i].same(t)) return (*eq_index = static_cast<int>(i)), 0;
         for (auto& b : bag)
             if (!b.second.empty() && b.second.same(t)) return b.first;
@@ -134,7 +135,7 @@ inline SetPlan plan_set(const SetModel& m, const KilnSetOpV1* entries, uint32_t 
     // the staged state: equipment, every other slot of the player's inventories, the Generic slots an unequip fills
     Staged st;
     std::vector<uint64_t> equipped_slots;
-    for (uint32_t i = 0; i < kEquipSlots; ++i) {
+    for (uint32_t i = 0; i < kSelectionSlots; ++i) {
         const uint64_t at = m.equipment[i];
         if (!at) continue;
         const Stack* s = m.stack_at(at);
@@ -167,7 +168,7 @@ inline SetPlan plan_set(const SetModel& m, const KilnSetOpV1* entries, uint32_t 
         uint8_t kind = 0;
         Token token;
         uint32_t entry = 0, stamp = 0;
-    } want[kEquipSlots];
+    } want[kSelectionSlots];
     for (uint32_t e = 0; e < count; ++e) {
         const KilnSetOpV1& op = entries[e];
         const int x = selection_index(op.equipment_slot);
@@ -227,16 +228,16 @@ inline SetPlan plan_set(const SetModel& m, const KilnSetOpV1* entries, uint32_t 
                           "changing the backpack moves its contents: Kiln refuses it in a set until its rollback matrix has passed");
     }
 
-    bool open[kEquipSlots] = {};
+    bool open[kSelectionSlots] = {};
     uint32_t left = 0;
-    for (uint32_t x = 0; x < kEquipSlots; ++x)
+    for (uint32_t x = 0; x < kSelectionSlots; ++x)
         if (want[x].named && !p.satisfied[x]) open[x] = true, ++left;
     if (left == 0) return p;  // NoChange: nothing to run
 
     const uint32_t free_at_start = st.free_count();
     uint32_t low = free_at_start;
     auto note_free = [&] { low = std::min(low, st.free_count()); };
-    bool filled_after_empty[kEquipSlots] = {};  // emptied by a step, so a later fill is a cycle's
+    bool filled_after_empty[kSelectionSlots] = {};  // emptied by a step, so a later fill is a cycle's
     auto equip = [&](uint32_t x, uint64_t from, uint8_t kind, uint32_t entry, uint32_t stamp) {
         Token* t = st.at(from);
         PlanStep s;
@@ -261,6 +262,7 @@ inline SetPlan plan_set(const SetModel& m, const KilnSetOpV1* entries, uint32_t 
         s.game_slot = game_slot_of(static_cast<int>(x));
         s.entry = static_cast<uint8_t>(entry);
         s.kind = 0;
+        s.source = m.equipment[x];  // the slot id the selection names (the game's unequip gets it; filled slots are never unequipped)
         s.item = st.eq[x].item;
         s.pide = st.eq[x].pide;
         s.count = st.eq[x].count;
@@ -274,7 +276,7 @@ inline SetPlan plan_set(const SetModel& m, const KilnSetOpV1* entries, uint32_t 
         if (p.steps.size() >= kMaxSteps) KSET_REFUSE(KILN_SET_REFUSAL_TOO_MANY_STEPS, UINT32_MAX, "the set needs more than %u steps", kMaxSteps);
         bool progress = false;
         // A: equips from a non-equipment slot, in slot order
-        for (uint32_t x = 0; x < kEquipSlots; ++x) {
+        for (uint32_t x = 0; x < kSelectionSlots; ++x) {
             if (!open[x] || want[x].kind == 0) continue;
             int y = -1;
             const uint64_t at = st.find(want[x].token, &y);
@@ -286,7 +288,7 @@ inline SetPlan plan_set(const SetModel& m, const KilnSetOpV1* entries, uint32_t 
         }
         if (progress) continue;
         // B: removals, one at a time (each takes a free slot; what came off may be wanted: A again)
-        for (uint32_t x = 0; x < kEquipSlots && !progress; ++x) {
+        for (uint32_t x = 0; x < kSelectionSlots && !progress; ++x) {
             if (!open[x] || want[x].kind != 0) continue;
             const uint64_t g = st.free_generic();
             if (!g) KSET_REFUSE(KILN_SET_REFUSAL_NO_ROOM, want[x].entry, "equipment slot %u comes off, and the backpack has no free slot", game_slot_of(static_cast<int>(x)));
@@ -295,7 +297,7 @@ inline SetPlan plan_set(const SetModel& m, const KilnSetOpV1* entries, uint32_t 
         }
         if (progress) continue;
         // C: a cycle: an item worn in one named slot and asked for in another
-        for (uint32_t x = 0; x < kEquipSlots && !progress; ++x) {
+        for (uint32_t x = 0; x < kSelectionSlots && !progress; ++x) {
             if (!open[x]) continue;
             int y = -1;
             st.find(want[x].token, &y);
@@ -318,8 +320,8 @@ inline SetPlan plan_set(const SetModel& m, const KilnSetOpV1* entries, uint32_t 
 
 // The entries a caller sent, as the C ABI allows them (kiln_items.h "equipment sets"). False with the reason.
 inline bool valid_entries(const KilnSetOpV1* e, uint32_t count, char* why, size_t cap) {
-    if (count > kEquipSlots || (count && !e)) return std::snprintf(why, cap, "a set has at most 20 entries"), false;
-    bool slot_seen[kEquipSlots] = {};
+    if (count > kSelectionSlots || (count && !e)) return std::snprintf(why, cap, "a set has at most 20 entries"), false;
+    bool slot_seen[kSelectionSlots] = {};
     for (uint32_t i = 0; i < count; ++i) {
         const KilnSetOpV1& op = e[i];
         if (op.size != sizeof(KilnSetOpV1) || op.reserved || op.reserved2) return std::snprintf(why, cap, "entry %u: bad size or reserved fields", i), false;

@@ -318,4 +318,14 @@ struct MoveJob {
 };
 bool run_move(const Access& a, const MoveJob& job, uint8_t* tx, KilnItemsMoveResult* res, unsigned long* code);
 
+// ---- equipment sets (v6, setexec.cpp) ----
+namespace sets {
+struct SetJob;
+struct SetOutcome;
+}  // namespace sets
+// Runs one set inside kiln_items_equip's update of `player` (the program's accessors in `a`, its transaction buffer
+// `tx`): the snapshot checked again, the plan, one transaction and its terminal state (setexec.h). Every game call is
+// guarded; a fault ends it with out->engine_fault set.
+void set_run(const Access& a, KilnEntity player, uint8_t* tx, const sets::SetJob& job, sets::SetOutcome* out);
+
 }  // namespace kitems

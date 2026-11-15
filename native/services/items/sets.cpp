@@ -132,12 +132,12 @@ bool resolve_layout(SetLayout* L, char* why, size_t cap) {
     if (!need(sel, "equipment", 160, &L->sel_equipment) || !need(sel, "actionbarEntityIds", 8, &L->sel_actionbar)) return fail("SlotSelection");
     L->sel_size = type_size(t, sel);
     // the 20 slots in EquipmentSlot's order (SlotSelection.equipment: 0-16, HookShot, Glider, Backpack)
-    static const char* const kSlots[sets::kEquipSlots] = {"vanityHead", "vanityUpperBody", "vanityArms", "vanityLowerBody", "vanityFeet",
+    static const char* const kSlots[sets::kSelectionSlots] = {"vanityHead", "vanityUpperBody", "vanityArms", "vanityLowerBody", "vanityFeet",
                                                      "armourHead", "armourUpperBody", "armourArms", "armourLowerBody", "armourFeet",
                                                      "ring0", "ring1", "rangedWeapon", "shield", "arrow", "spell", "fishingBait",
                                                      "hookShot", "glider", "backpack"};
     const KilnType* eq = ty("keen::ecs::EquipmentSlotData");
-    for (uint32_t i = 0; i < sets::kEquipSlots; ++i) {
+    for (uint32_t i = 0; i < sets::kSelectionSlots; ++i) {
         uint32_t at = 0;
         if (!need(eq, kSlots[i], 8, &at) || at != i * 8) return fail("SlotSelection.equipment (its 20 slots in order)");
     }

@@ -28,4 +28,9 @@ KilnResult equip_status(KilnItemsEquipStatus* out);
 bool equip_cancel(uint64_t ticket);    // drops the callback; false: not an equip ticket
 void equip_cancel_owner(KilnOwner owner);
 
+struct Access;
+// The setup block of an equip transaction as the game's equipment_actions builds it (s: kSetupBlock bytes). A set's
+// transaction uses the same (setexec.cpp).
+void equip_setup_block(const Access& a, KilnEntity player, bool dry, uint8_t* s);
+
 }  // namespace kitems

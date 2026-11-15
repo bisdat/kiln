@@ -127,7 +127,7 @@ SnapStatus read_model(SnapReader& r, const SetLayout& L, uint32_t player, SetMod
     if (m->nodes[0].initialized == 0) return SnapStatus::NotInitialized;
     const uint8_t* sel = r.get(Part::Selection, player);
     if (!sel) return SnapStatus::NoSelection;
-    for (uint32_t i = 0; i < kEquipSlots; ++i) m->equipment[i] = slot_id(sel + L.sel_equipment + i * L.slot_size, L);
+    for (uint32_t i = 0; i < kSelectionSlots; ++i) m->equipment[i] = slot_id(sel + L.sel_equipment + i * L.slot_size, L);
     m->actionbar[0] = rd<uint32_t>(sel, L.sel_actionbar);
     m->actionbar[1] = rd<uint32_t>(sel, L.sel_actionbar + 4);
     if (m->actionbar[0] == 0) return SnapStatus::NotPlayer;  // a player's selection always has its first action-bar page

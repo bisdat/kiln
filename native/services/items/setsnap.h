@@ -35,7 +35,7 @@ constexpr uint32_t kSchema = 1;
 constexpr uint32_t kMaxNodes = 64;   // InventorySetup nodes (the root and the Virtual ones it reaches)
 constexpr uint32_t kMaxDepth = 3;    // a Virtual link inside a node of depth 3 is refused
 constexpr uint32_t kMaxLeaves = 32;  // leaf inventories (KILN_ITEMS_MAX_INVENTORIES)
-constexpr uint32_t kEquipSlots = 20; // SlotSelection.equipment
+constexpr uint32_t kSelectionSlots = 20; // SlotSelection.equipment
 constexpr uint8_t kCatGeneric = 4, kCatVirtual = 5, kCatEquipment = 2;
 
 // Where the fields are in this build's components (kiln.types; sets.cpp resolves and checks them). The defaults are the
@@ -89,7 +89,7 @@ struct SetModel {
     uint32_t player = 0;
     std::vector<NodeRec> nodes;    // nodes[0] is the root; depth-first in link order
     std::vector<LeafRec> leaves;   // ascending entity
-    uint64_t equipment[kEquipSlots] = {};
+    uint64_t equipment[kSelectionSlots] = {};
     uint32_t actionbar[2] = {};
     std::vector<ItemRec> items;    // ascending pide
 
