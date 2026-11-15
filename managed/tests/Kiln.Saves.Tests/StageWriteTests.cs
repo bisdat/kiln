@@ -100,6 +100,78 @@ public sealed class StageWriteTests : IDisposable
         Assert.True(File.Exists(Pending(2)));                                   // a crash after the world write finds it
     }
 
+    private sealed class Capture : IKilnBackend
+    {
+        public readonly List<(LogLevel Level, string Text)> Lines = [];
+        public string Version => "test";
+        public bool IsTickThread => true;
+        public bool HasFeature(string name) => false;
+        public nint Service(string name, uint minVersion) => 0;
+        public void Log(ulong owner, LogLevel level, string text)
+        {
+            lock (Lines) Lines.Add((level, text));
+        }
+
+        public (LogLevel Level, string Text) Single(string start)
+        {
+            lock (Lines) return Assert.Single(Lines, l => l.Text.StartsWith(start, StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public void TheTimingLevelIsInfoAbove250Ms()
+    {
+        Assert.Equal(250, WorldStore.SlowMs);
+        Assert.Equal(LogLevel.Debug, WorldStore.TimingLevel(250));
+        Assert.Equal(LogLevel.Info, WorldStore.TimingLevel(250.1));
+    }
+
+    [Fact]
+    public void ASlowStagingOrCommitLogsAtInfoWithItsForcedWritesTimedApart()
+    {
+        var backend = Backend.Current;
+        var slow = WorldStore.SlowMs;
+        var log = new Capture();
+        try
+        {
+            Backend.Current = log;
+            WorldStore.SlowMs = double.MaxValue;                                 // fast: Debug, as before
+            FiveBundles(1);
+            Store.Stage(1, SaveReason.Autosave, late: false);
+            Store.Commit(1, 1001, SaveReason.Autosave);
+            var staged = log.Single("Kiln.Saves: staged mod data generation 1 ");
+            Assert.Equal(LogLevel.Debug, staged.Level);
+            Assert.Contains("5 bundles, 5 new blobs", staged.Text);
+            Assert.Matches(@" in \d+\.\d ms \(6 files written: \d+\.\d ms forcing to disk, \d+\.\d ms renaming\)$", staged.Text);
+            var confirmed = log.Single("Kiln.Saves: confirmed mod data generation 1 ");
+            Assert.Equal(LogLevel.Debug, confirmed.Level);
+            Assert.Matches(@"^Kiln\.Saves: confirmed mod data generation 1 \(autosave\) in \d+\.\d ms \(1 file written: \d+\.\d ms forcing to disk, \d+\.\d ms renaming; pruning \d+\.\d ms\)$", confirmed.Text);
+
+            WorldStore.SlowMs = 0;                                               // every staging and commit is slow now
+            Store.GetBundleRaw("world/mod-0", "mod-0").Keys["state"].Json = "{\"v\":7}";
+            Store.Stage(2, SaveReason.Autosave, late: false);
+            Store.Stage(2, SaveReason.Autosave, late: false, snapshot: true);
+            Store.Commit(2, 1002, SaveReason.Autosave);
+            staged = log.Single("Kiln.Saves: staged mod data generation 2 (autosave)");
+            Assert.Equal(LogLevel.Info, staged.Level);
+            Assert.Contains("5 bundles, 1 new blobs", staged.Text);
+            Assert.Contains("(2 files written: ", staged.Text);
+            var snapshot = log.Single("Kiln.Saves: staged mod data generation 2 (autosave, snapshot staging)");
+            Assert.Equal(LogLevel.Info, snapshot.Level);
+            Assert.Contains("manifest unchanged: nothing written", snapshot.Text);
+            Assert.EndsWith("(no file written)", snapshot.Text);
+            confirmed = log.Single("Kiln.Saves: confirmed mod data generation 2 ");
+            Assert.Equal(LogLevel.Info, confirmed.Level);
+            Assert.Contains("(1 file written: ", confirmed.Text);
+            Assert.DoesNotContain("pruning", confirmed.Text);                    // the store prunes at commits 1, 11, 21, ...
+        }
+        finally
+        {
+            Backend.Current = backend;
+            WorldStore.SlowMs = slow;
+        }
+    }
+
     [Fact]
     public void KillNineAfterTheWorldWriteOfAnUnchangedSaveLoadsItsStagedGeneration()
     {

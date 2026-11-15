@@ -411,19 +411,20 @@ internal sealed unsafe class WorldStore
         var entries = new SortedDictionary<string, (string sha, int size)>(StringComparer.Ordinal);
         int fresh = 0;
         long bytes = 0;
+        var disk = new DiskTime();
         foreach (var b in _bundles.Values)
         {
             if (b.Keys.Count == 0) continue;
             var opts = _json.GetValueOrDefault(b.Mod);
             var data = Serialize(b, opts);
-            Put(b.Scope, data, entries, ref fresh, ref bytes);
+            Put(b.Scope, data, entries, ref fresh, ref bytes, ref disk);
         }
         ServiceEntityData.RaiseStaging();  // Kiln services refresh their values on entities (Kiln.World's transform scale)
         foreach (var (mod, data) in Entities.Stage(_json))
-            Put("entity/" + mod, data, entries, ref fresh, ref bytes);
+            Put("entity/" + mod, data, entries, ref fresh, ref bytes, ref disk);
         // Settled: nothing simulates between this read and the game's snapshot (the snapshot staging, a shutdown save).
         foreach (var (scope, data) in Instances.Stage(gen, _json, settled: !late && (snapshot || reason == SaveReason.Shutdown)))
-            Put(scope, data, entries, ref fresh, ref bytes);
+            Put(scope, data, entries, ref fresh, ref bytes, ref disk);
         var man = new JsonObject
         {
             ["format"] = 1,
@@ -447,14 +448,33 @@ internal sealed unsafe class WorldStore
         var unchanged = _staged is { } last && last.Path == path && last.Content == content && File.Exists(path);
         if (!unchanged)
         {
-            WriteAtomic(path, Encoding.UTF8.GetBytes(man.ToJsonString()));
+            WriteAtomic(path, Encoding.UTF8.GetBytes(man.ToJsonString()), ref disk);
             _staged = (path, content);
         }
         Generation = gen;
-        SavesRuntime.Log(late ? LogLevel.Warn : LogLevel.Debug,
+        var ms = sw.Elapsed.TotalMilliseconds;
+        SavesRuntime.Log(late ? LogLevel.Warn : TimingLevel(ms),
             $"Kiln.Saves: staged mod data generation {gen} ({Saves.Text(reason)}{(late ? ", late: after the world write" : "")}" +
             $"{(snapshot ? ", snapshot staging" : "")}): {entries.Count} bundles, {fresh} new blobs ({bytes} bytes)" +
-            $"{(unchanged ? ", manifest unchanged: nothing written" : "")} in {sw.Elapsed.TotalMilliseconds:F1} ms");
+            $"{(unchanged ? ", manifest unchanged: nothing written" : "")} in {ms:F1} ms ({disk.Text})");
+    }
+
+    /// <summary>A staging or a commit that takes longer than this logs at Info, not Debug (issue #39: on a hard drive a
+    /// forced write held the server for seconds at each autosave, and only a debug log said so).</summary>
+    internal static double SlowMs = 250;
+
+    internal static LogLevel TimingLevel(double ms) => ms > SlowMs ? LogLevel.Info : LogLevel.Debug;
+
+    /// <summary>What a staging or a commit spent on its files: forcing them to disk (<c>Flush(flushToDisk: true)</c>, the
+    /// part a busy hard drive can hold for seconds) and renaming them into place.</summary>
+    internal struct DiskTime
+    {
+        public int Files;
+        public double FlushMs, RenameMs;
+
+        public readonly string Text => Files == 0
+            ? "no file written"
+            : $"{Files} file{(Files == 1 ? "" : "s")} written: {FlushMs:F1} ms forcing to disk, {RenameMs:F1} ms renaming";
     }
 
     /// <summary>What a pending manifest says apart from its creation time.</summary>
@@ -465,14 +485,14 @@ internal sealed unsafe class WorldStore
         return copy.ToJsonString();
     }
 
-    private void Put(string scope, byte[] data, SortedDictionary<string, (string, int)> entries, ref int fresh, ref long bytes)
+    private void Put(string scope, byte[] data, SortedDictionary<string, (string, int)> entries, ref int fresh, ref long bytes, ref DiskTime disk)
     {
         var sha = Convert.ToHexStringLower(SHA256.HashData(data));
         var path = BlobPath(sha);
         if (!File.Exists(path))
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            WriteAtomic(path, data);
+            WriteAtomic(path, data, ref disk);
             fresh++;
             bytes += data.Length;
         }
@@ -516,17 +536,19 @@ internal sealed unsafe class WorldStore
     {
         EnsureOpen();
         if (Root == null || rev == 0) return;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         if (unix == 0 && ReadHeader(SavesRuntime.WorldFile) is { } h && h.Revision == rev) unix = h.Unix;
         var pending = PendingPath(rev);
         if (!File.Exists(pending)) Stage(rev, reason, late: true);  // the save began before Kiln.Saves was started
         if (!File.Exists(pending)) return;
+        var disk = new DiskTime();
         try
         {
             var man = JsonNode.Parse(File.ReadAllBytes(pending))!.AsObject();
             man["state"] = "committed";
             man["worldUnix"] = unix;
             man["committedUnixMs"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            WriteAtomic(CommittedPath(rev, unix), Encoding.UTF8.GetBytes(man.ToJsonString()));
+            WriteAtomic(CommittedPath(rev, unix), Encoding.UTF8.GetBytes(man.ToJsonString()), ref disk);
             File.Delete(pending);
         }
         catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException)
@@ -538,7 +560,16 @@ internal sealed unsafe class WorldStore
         Match = DataMatch.Exact;
         _loadedRevision = rev;
         _loadedUnix = unix;
-        if (++_commits % 10 == 1) Prune();
+        double pruneMs = -1;
+        if (++_commits % 10 == 1)
+        {
+            var p = System.Diagnostics.Stopwatch.StartNew();
+            Prune();
+            pruneMs = p.Elapsed.TotalMilliseconds;
+        }
+        var ms = sw.Elapsed.TotalMilliseconds;
+        SavesRuntime.Log(TimingLevel(ms), $"Kiln.Saves: confirmed mod data generation {rev} ({Saves.Text(reason)}) in {ms:F1} ms " +
+                                          $"({disk.Text}{(pruneMs >= 0 ? $"; pruning {pruneMs:F1} ms" : "")})");
     }
 
     // ---- files ----
@@ -569,13 +600,27 @@ internal sealed unsafe class WorldStore
 
     internal static void WriteAtomic(string path, byte[] data)
     {
+        var disk = new DiskTime();
+        WriteAtomic(path, data, ref disk);
+    }
+
+    /// <summary>Writes <paramref name="data"/> to a temp name, forces it to disk and renames it into place; the time of the
+    /// last two steps goes into <paramref name="disk"/>.</summary>
+    internal static void WriteAtomic(string path, byte[] data, ref DiskTime disk)
+    {
         var tmp = $"{path}.tmp-{Environment.ProcessId}-{Interlocked.Increment(ref _tmpCounter)}";
+        long t;
         using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16))
         {
             fs.Write(data);
+            t = System.Diagnostics.Stopwatch.GetTimestamp();
             fs.Flush(flushToDisk: true);
+            disk.FlushMs += System.Diagnostics.Stopwatch.GetElapsedTime(t).TotalMilliseconds;
         }
+        t = System.Diagnostics.Stopwatch.GetTimestamp();
         File.Move(tmp, path, overwrite: true);
+        disk.RenameMs += System.Diagnostics.Stopwatch.GetElapsedTime(t).TotalMilliseconds;
+        disk.Files++;
         Interlocked.Increment(ref FilesWritten);
     }
 
