@@ -365,3 +365,14 @@ engines' mods") and 5.8.
   `required[]`, each with its `kind` (`AdvertiseEngines.cs`), so a joining player's launcher learns what the server
   runs. The HELLO check still covers Kiln mods only: clients don't announce other engines' mods.
 - **Licences.** The launcher (MIT) only copies files. It never links or runs EML's GPL code or any other engine's code.
+
+An enabled EML package declaring `runtime` or `runtime-register-dll` also requires hosted ShroudForge, even without
+an enabled ShroudForge mod. The launcher uses the shared package reader and writes `emlRuntime` (package ids) into
+`kiln/profile.json`; the adapter reads that additive field, defaulting to empty. The launcher places EML packages in
+ShroudForge's mods folder with their `extended.mod.json` switches on. A compatibility entry in `mods.shroudforge`
+lets older adapters make the same hosting decision. Runtime EML entries are disabled on the kiln-eml route even
+when delegated: ShroudForge reads its placed copy and switch independently. This prevents older kiln-eml runners
+from falling back to data-only if their adapter fails; new aside reporting recognizes `emlRuntime` delegation. Missing/off ShroudForge disables the runtime EML entry and
+records its reason in `emlRuntimeBlocked`; kiln-eml reports `skipped`. Without a hosted or own ShroudForge runtime,
+kiln-eml independently refuses the entire runtime package. A server-only/client-only package remains subject to
+ShroudForge's existing targets check (`other-side`); patch/export-only EML packages are unchanged.
