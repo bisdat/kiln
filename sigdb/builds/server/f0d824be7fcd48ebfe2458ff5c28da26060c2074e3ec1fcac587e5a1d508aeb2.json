@@ -9,9 +9,9 @@
   "verified": true,
   "note": "runtime-verified in labs on this exe, 2026-11-11, Kiln 0.2.0-dev+20261112.68988ae, policy any, standard lab save copied fresh for each group, one group per boot (or per run of boots): the running core resolved sigdb 447/447 symbols (355 defined, 92 captured), 542/542 constants (493 defined, 49 captured) and 146/146 features, each to the same value as the offline resolve (compared per name from sigdb-report.json); base world 24/0, players 30/0, chat+time 50/0, hooks 17/0, content 33/0, newcontent 24/0; api 74/0; settings 70/0; items 95/0 (kiln.items self-test on); combat 203/0 (watch-all); spawn 57/0 over 3 boots; gameplay 48/0; creatures 63/0; assets 17/0; rules 53/0; pacing 21/0; types 32/0 + types-peer 8/0; progression 45/0 (no player); net 168/0 with nettest 95 PASS, 0 FAIL; quests 188/0 over 3 boots; skills 124/0 over 2 boots; characters 53/0 over 3 boots; gamedata 71/0 over 2 boots (reload, restart); saves 54/0 over 8 boots (SIGINT, kill -9 x3, restore, game backup); build 79/0 over 4 boots; placeholder 34/0 over 4 boots (kill -9). Failing, so their names stay static: abilities 70/3, 70/3, 71/2 over three runs (the bow shot is refused by the core's PlaySequence guard every time, the Greet emote ran 73/66/79 steps of the 80 the test wants, the staff cast 38/35 then passed, the PC under heavy load); npcai 25/6 twice (force ready unavailable on four spawned creatures, the peacekeeper's relations not applied). Not run: emf (its probe needs third-party EMF mods). Levels: lab 1093 names in 24 services, static 42 (abilities, npcai, emf). With this record under verified-only: build verified, SimStep hooked, every server service loaded (27; audio, screen, ui and vfx skipped as client-only), 0 error lines.",
   "declared": {
-    "symbols": 538,
-    "constants": 612,
-    "features": 170
+    "symbols": 542,
+    "constants": 619,
+    "features": 171
   },
   "features": {
     "abilities.attributes": true,
@@ -124,6 +124,7 @@
     "quests.journal": true,
     "quests.knowledge": true,
     "quests.npc": true,
+    "quests.npc_pages": true,
     "repl.loopback": true,
     "repl.observe": true,
     "rules.consume": true,
@@ -429,6 +430,9 @@
     "quests/KnowledgeApplyOp": "0x9a0670",
     "quests/KnowledgeApplyQueue": "0x9a0830",
     "quests/KnowledgeInputPush": "0x1bc216",
+    "quests/NpcEvalUnlocks": "0xa2ef90",
+    "quests/NpcFind": "0x93eeb0",
+    "quests/NpcIsUnlocked": "0x94bf00",
     "quests/NpcRegistryNpcs": "0x93ef20",
     "quests/NpcRegistrySetUnlocks": "0x96c6a0",
     "quests/NpcRegistryVersion": "0x93ef10",
@@ -921,7 +925,14 @@
     "quests/list.capacity": "0x10",
     "quests/list.count": "0x8",
     "quests/list.entry": "0x10",
+    "quests/npc.stride": "0x88",
     "quests/npcdialog.resource": "0x14",
+    "quests/npceval.error": "0x1",
+    "quests/npcfind.npcs": "0x20",
+    "quests/npcquery.invalid": "0x1",
+    "quests/npcquery.state": "0x98",
+    "quests/npcreg.map": "0x38",
+    "quests/npcreg.mask": "0xa0",
     "quests/npcreg.npcs": "0x20",
     "quests/npcreg.state": "0x98",
     "quests/npcreg.version": "0x90",
@@ -1868,6 +1879,29 @@
       },
       "features": {
         "items.tool_wear_debit": "static"
+      }
+    },
+    "dev29-17c-roster-cap": {
+      "level": "static",
+      "date": "2026-11-15",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "@quests/NpcPages.fields": "static",
+        "quests/NpcEvalUnlocks": "static",
+        "quests/NpcFind": "static",
+        "quests/NpcIsUnlocked": "static"
+      },
+      "constants": {
+        "quests/npc.stride": "static",
+        "quests/npceval.error": "static",
+        "quests/npcfind.npcs": "static",
+        "quests/npcquery.invalid": "static",
+        "quests/npcquery.state": "static",
+        "quests/npcreg.map": "static",
+        "quests/npcreg.mask": "static"
+      },
+      "features": {
+        "quests.npc_pages": "static"
       }
     },
     "emf": {
