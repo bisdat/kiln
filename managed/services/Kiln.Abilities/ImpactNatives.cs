@@ -102,7 +102,8 @@ public readonly ref struct NativeContext
     /// <summary>Reads component <typeparamref name="T"/> of another entity (or the instance's own) through
     /// impact_simulation's own accessors (its other_read and other_write lists, the job's storage), inside this call
     /// (since 0.2.0-dev.29). False, with no access, for a type the program does not declare for other entities, an
-    /// entity without it, or <c>abilities.natives.ecs</c> off in this world.</summary>
+    /// entity without it, or <c>abilities.natives.ecs</c> off in this world: it is on only while impact_simulation runs
+    /// serially on the server world's thread (the game's default pin), so no two calls touch one entity at once.</summary>
     [AnyThread]
     public bool TryRead<T>(EntityId entity, out T value) where T : unmanaged, IGameComponent<T> => NativeEcs.TryRead(_call, entity, out value);
 
@@ -114,7 +115,9 @@ public readonly ref struct NativeContext
     /// <c>"&lt;modid&gt;/native:&lt;name&gt;"</c>. Since 0.2.0-dev.29. False, with no access, for a type not in the
     /// program's other_write list, an entity without it, or <c>abilities.natives.ecs</c> off in this world.
     /// Attribute headers must match the current component. A fault closes the bridge for this world;
-    /// writes already made are not rolled back.</summary>
+    /// writes already made are not rolled back. On only while impact_simulation runs serially on the server world's thread
+    /// (<c>abilities.natives.ecs</c>); entity ids carry no generation (a reused id names its current occupant); use the
+    /// generated <c>Ecs.*</c> types (a hand-written one is checked only for its size).</summary>
     [AnyThread]
     public bool TryWrite<T>(EntityId entity, in T value) where T : unmanaged, IGameComponent<T> => NativeEcs.TryWrite(_call, entity, in value);
 

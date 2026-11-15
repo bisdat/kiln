@@ -938,14 +938,14 @@ void lab_hold_lock_now() {  // a job thread, inside the step
     while (!held.load()) SwitchToThread();  // `held` is not touched once it is true
     logw("kiln.abilities: LAB (kiln/control/impact.lockhold): Kiln's lock is held for %d ms by a thread of its own", ms);
 }
-int64_t g_world_storage = -1;
-constexpr int64_t kPinByte = 0x3d17f8;  // build f0d824be (server 26430253) only
+int64_t g_world_storage = -1;  // sigdb world.storage
+int64_t g_pin_off = -1;        // sigdb abilities/impact.pin (feature abilities.ecs_pin): the pin byte in the world's storage
 
 void lab_unpin() {
-    if (!g_lab_unpin || g_world_storage <= 0) return;
+    if (!g_lab_unpin || g_world_storage <= 0 || g_pin_off <= 0) return;
     const uintptr_t w = g_api->server_world();
     if (!w) return;
-    auto* pin = reinterpret_cast<uint8_t*>(w + static_cast<uintptr_t>(g_world_storage) + kPinByte);
+    auto* pin = reinterpret_cast<uint8_t*>(w + static_cast<uintptr_t>(g_world_storage) + static_cast<uintptr_t>(g_pin_off));
     uint8_t v = 0;
     if (!read_bytes(pin, &v, 1) || v == 0) return;
     const uint8_t zero = 0;
@@ -1021,6 +1021,27 @@ void ecs_pre() {
     g_ecs.store(v, std::memory_order_release);
 }
 
+// The serial condition now (ecs_serial): the world's pin byte and the calling thread.
+uint32_t ecs_serial_now() {
+    const uintptr_t w = g_api->server_world();
+    uint8_t pin = 0;
+    const bool known = g_world_storage > 0 && g_pin_off > 0 && w &&
+                       read_bytes(reinterpret_cast<const void*>(w + static_cast<uintptr_t>(g_world_storage) + static_cast<uintptr_t>(g_pin_off)), &pin, 1);
+    return ecs_serial(known, pin, on_tick());
+}
+
+const char* ecs_reason_text(uint32_t reason) {
+    switch (reason) {
+        case KILN_NATIVE_ECS_REASON_COUNTS: return "the job's group counts are not kiln.world's view";
+        case KILN_NATIVE_ECS_REASON_REGISTRY: return "the iterator's impact::ImpactSystem qword is not the captured registry";
+        case KILN_NATIVE_ECS_REASON_NOT_SERIAL:
+            return "impact_simulation does not run serially on the world's thread here (its pin is clear, or a call came on another "
+                   "thread): two slices could touch one entity at once";
+        case KILN_NATIVE_ECS_REASON_PIN_UNKNOWN: return "the world's pin of impact_simulation to its thread cannot be read on this build";
+        default: return "see above";
+    }
+}
+
 // The first Kiln native call of each view (any thread inside impact_simulation): the self-check.
 void ecs_first(const NativeCtx* ctx) {
     const EcsView* v = g_ecs.load(std::memory_order_acquire);
@@ -1032,7 +1053,11 @@ void ecs_first(const NativeCtx* ctx) {
     if (iter && v->system_slot > 0) read_bytes(iter + v->system_slot, &at, 8);
     // the registry Kiln's natives went into at the world's setup (one of those the RegisterNative hook captured)
     const auto registry = static_cast<uint64_t>(g_native_registry.load(std::memory_order_relaxed));
-    const uint32_t reason = ecs_verdict(counts_ok, v->system_slot, at, registry);
+    uint32_t reason = ecs_verdict(counts_ok, v->system_slot, at, registry);
+    const uint32_t serial = ecs_serial_now();
+    if (reason == KILN_NATIVE_ECS_REASON_NONE) reason = serial;
+    logi("kiln.abilities: NativeContext self-check: impact_simulation serial on the world's thread: %s",
+         serial == KILN_NATIVE_ECS_REASON_NONE ? "yes (the pin is set, the call is on the world's thread)" : ecs_reason_text(serial));
     logi("kiln.abilities: NativeContext self-check, first native call in this world: the job's group counts are %s the "
          "view's (tpl %u, read %u, write %u, singletons %u, other_tpl %u, other %u, events %u/%u)",
          counts_ok ? "" : "NOT", job[0], job[1], job[2], job[3], job[4], job[5], job[6], job[7]);
@@ -1044,9 +1069,7 @@ void ecs_first(const NativeCtx* ctx) {
         logi("kiln.abilities: NativeContext's reads and writes of other entities are on in this world (abilities.natives.ecs)");
     } else {
         ecs_off(reason);
-        logw("kiln.abilities: NativeContext's reads and writes of other entities are off in this world: %s",
-             reason == KILN_NATIVE_ECS_REASON_COUNTS ? "the job's group counts are not kiln.world's view"
-                                                     : "the iterator's impact::ImpactSystem qword is not the captured registry");
+        logw("kiln.abilities: NativeContext's reads and writes of other entities are off for this world: %s", ecs_reason_text(reason));
     }
 }
 
@@ -1056,6 +1079,13 @@ const EcsView* ecs_for(const KilnNativeCall* call, const uint64_t** iter) {
     const EcsView* v = g_ecs.load(std::memory_order_acquire);
     const auto* ctx = static_cast<const NativeCtx*>(call->engine[2]);
     if (!v || !ctx || ctx != t_ctx || !ctx->iter_ctx || g_ecs_checked.load(std::memory_order_acquire) != v) return nullptr;
+    // the serial condition at every access: a cleared pin or a call off the world's thread switches it off for the world
+    if (const uint32_t serial = ecs_serial_now(); serial != KILN_NATIVE_ECS_REASON_NONE) {
+        g_ecs_reason.store(serial);
+        if (g_ecs_state.exchange(KILN_NATIVE_ECS_OFF) != KILN_NATIVE_ECS_OFF)
+            logw("kiln.abilities: NativeContext's reads and writes of other entities are off for this world: %s", ecs_reason_text(serial));
+        return nullptr;
+    }
     *iter = reinterpret_cast<const uint64_t*>(ctx->iter_ctx);
     return v;
 }
@@ -3038,11 +3068,8 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
         std::error_code ec;
         if (api->path(KILN_PATH_CONTROL, path, sizeof path, &n) == KILN_OK && n < sizeof path &&
             std::filesystem::exists(std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(path), n)) / "impact.unpin", ec) &&
-            api->build_info(&bi) == KILN_OK && bi.side == KILN_SIDE_SERVER && std::strncmp(bi.exe_sha256, "f0d824be", 8) == 0) {
-            int64_t v = -1;
-            g_world_storage = api->constant(KilnStr{"world.storage", 13}, &v) == KILN_OK ? v : -1;
-            g_lab_unpin = g_world_storage > 0;
-        }
+            api->build_info(&bi) == KILN_OK && bi.side == KILN_SIDE_SERVER)
+            g_lab_unpin = true;  // with the pin resolved (below)
         if (api->path(KILN_PATH_CONTROL, path, sizeof path, &n) == KILN_OK && n < sizeof path) {
             const auto control = std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(path), n));
             if (std::filesystem::exists(control / "impact.lockhold", ec) && api->build_info(&bi) == KILN_OK && bi.side == KILN_SIDE_SERVER)
@@ -3051,6 +3078,13 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
                 g_lab_lockhold_on = true;
             }
         }
+    }
+    {  // the ECS bridge's serial condition and the lab's unpin: the pin byte through sigdb (feature abilities.ecs_pin)
+        int64_t v = -1;
+        g_world_storage = api->constant(KilnStr{"world.storage", 13}, &v) == KILN_OK ? v : -1;
+        v = -1;
+        g_pin_off = api->feature(KilnStr{"abilities.ecs_pin", 17}) && api->constant(KilnStr{"abilities/impact.pin", 20}, &v) == KILN_OK ? v : -1;
+        if (g_world_storage <= 0 || g_pin_off <= 0) g_lab_unpin = false;
     }
     info->id = KilnStr{KILN_ABILITIES_SERVICE, sizeof(KILN_ABILITIES_SERVICE) - 1};
     info->version = KilnStr{"1", 1};

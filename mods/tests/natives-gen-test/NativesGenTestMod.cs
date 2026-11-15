@@ -73,12 +73,15 @@ public static class GenNatives
     internal static int HurtCalls, HurtBefore = -1;
     internal static bool HurtRead, HurtWrite1, HurtWrite2, UndeclaredRead = true;
     internal static EntityId HurtRoot;
-    internal static int HurtThread;
+    internal static int HurtThread, PostThread;
+    internal static readonly System.Collections.Concurrent.ConcurrentBag<int> BridgeThreads = new();
     [ImpactNative("Hurt")]
     public static bool Hurt(in NativeContext ctx, EntityId target)
     {
         HurtCalls++;
         HurtThread = Environment.CurrentManagedThreadId;
+        BridgeThreads.Add(HurtThread);
+        ctx.Post(() => PostThread = Environment.CurrentManagedThreadId);  // runs on the mod's tick, later
         HurtRoot = ctx.Root;
         UndeclaredRead = ctx.TryRead<Ecs.ScaleComponent>(target, out _);
         HurtRead = ctx.TryRead<Ecs.Health>(target, out var h);
@@ -91,12 +94,31 @@ public static class GenNatives
         return true;
     }
 
+    // Review round 3: an attribute's TryWrite keeps the eight-byte header and runs the game's formulas: Health's current
+    // set past its maximum ([7]) comes back clamped to it
+    internal static byte[] HeaderBefore = [], HeaderAfter = [];
+    internal static int OverMax = -1, OverRead = -1;
+    [ImpactNative("Overheal")]
+    public static bool Overheal(in NativeContext ctx, EntityId target)
+    {
+        BridgeThreads.Add(Environment.CurrentManagedThreadId);
+        if (!ctx.TryRead<Ecs.Health>(target, out var h)) return false;
+        HeaderBefore = System.Runtime.InteropServices.MemoryMarshal.AsBytes(new ReadOnlySpan<Ecs.Health>(in h))[..8].ToArray();
+        OverMax = h.Values[7];
+        h.Values[0] = OverMax + 100;
+        if (!ctx.TryWrite(target, in h) || !ctx.TryRead<Ecs.Health>(target, out var a)) return false;
+        HeaderAfter = System.Runtime.InteropServices.MemoryMarshal.AsBytes(new ReadOnlySpan<Ecs.Health>(in a))[..8].ToArray();
+        OverRead = a.Values[0];
+        return true;
+    }
+
     // S7: a saved prop's CurrentTransform (a wall torch of the base; the save tracks the component) 1/16 m up through the
     // bridge: the save keeps it across a restart. Position y is fixed point 32.32 at bytes 8..16.
     internal static long NudgeAfter = long.MinValue;
     [ImpactNative("Nudge")]
     public static bool Nudge(in NativeContext ctx, EntityId target)
     {
+        BridgeThreads.Add(Environment.CurrentManagedThreadId);
         if (!ctx.TryRead<Ecs.CurrentTransform>(target, out var c)) return false;
         var bytes = System.Runtime.InteropServices.MemoryMarshal.AsBytes(new Span<Ecs.CurrentTransform>(ref c));
         System.Buffers.Binary.BinaryPrimitives.WriteInt64LittleEndian(bytes[8..], System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(bytes[8..]) + (1L << 28));
@@ -161,8 +183,11 @@ public sealed class NativesGenTestMod : Mod
 
     private async Task Steps(int n) { for (var i = 0; i < n; i++) await Context.Scheduler.NextTick(); }
 
+    private int _tickThread;
+
     private async Task Run()
     {
+        _tickThread = Environment.CurrentManagedThreadId;
         try
         {
             Check(!_registeredAtOnLoad && _onLoadRefusal?.Contains("E_ARGTYPE") == true,
@@ -353,6 +378,18 @@ public sealed class NativesGenTestMod : Mod
               BitConverter.ToInt32(mine[0].Result.Before.Span[8..]) == start && BitConverter.ToInt32(mine[0].Result.After.Span[8..]) == start - 7,
             $"one ComponentWrittenEvent per entity and component per step, on the tick thread: {mine.Count} event(s), writer " +
             $"{mine.FirstOrDefault()?.Writer}, before {start}, after {start - 7}");
+        await Steps(2);
+        Check(GenNatives.PostThread == _tickThread, $"NativeContext.Post runs on the owning mod's tick: thread {GenNatives.PostThread} (tick {_tickThread})");
+        // an attribute's header stays, and the formulas clamp what the native wrote past the maximum
+        var overGuid = new Guid("06c0a5e0-0000-4000-8000-000000000009");
+        Abilities.Programs.Register(Program(overGuid, [11, hT, 19, 0x06c0a591, Natives.Overheal.HashFor(Context.Info.Id), 27, 30],
+            [("Target::value", EntityIdType, 4, BitConverter.GetBytes(vukah.Value))]));
+        _spawned.Add(await Abilities.RunProgram(overGuid, p with { X = p.X + 5 }));
+        await Steps(6);
+        Check(GenNatives.HeaderBefore.Length == 8 && GenNatives.HeaderBefore.AsSpan().SequenceEqual(GenNatives.HeaderAfter) &&
+              GenNatives.OverMax > 0 && GenNatives.OverRead == GenNatives.OverMax && HealthOf(vukah) == GenNatives.OverMax,
+            $"TryWrite of an attribute keeps its header ({Convert.ToHexString(GenNatives.HeaderBefore)} -> {Convert.ToHexString(GenNatives.HeaderAfter)}) " +
+            $"and the game's formulas run: Health set to {GenNatives.OverMax + 100} reads {GenNatives.OverRead} (maximum {GenNatives.OverMax})");
         var st = _started.FirstOrDefault(s => s.Impact.Self == e);
         Check(st is not null && GenNatives.HurtRoot == vukah && st.Impact.Root == vukah,
             $"NativeContext.Root is the instance's hierarchy root, as ImpactRef.Root reads it: {GenNatives.HurtRoot} / {st?.Impact.Root} (root {vukah})");
@@ -380,6 +417,10 @@ public sealed class NativesGenTestMod : Mod
             }
         }
         else Fail("no saved wall torch (Prop_Torch01_Wall_On_Craftable) in this world for the restart row");
+        var threads = GenNatives.BridgeThreads.Distinct().ToList();
+        Check(threads.Count > 0 && threads.All(t => t == _tickThread) && Capabilities.Get("abilities.natives.ecs").State == CapabilityState.Available,
+            $"with the world's pin set (the game's default) every bridged call ran on the world's thread: {GenNatives.BridgeThreads.Count} call(s) on thread(s) " +
+            $"{string.Join(",", threads)} (the world's: {_tickThread}); abilities.natives.ecs {Capabilities.Get("abilities.natives.ecs").State}");
     }
 
     private void Info(string what) => Log.Info($"natives-gen-test: INFO {what}");

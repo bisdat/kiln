@@ -262,6 +262,10 @@ enum {
     KILN_NATIVE_ECS_REASON_COUNTS = 3,       /* the job's group counts are not the view's */
     KILN_NATIVE_ECS_REASON_REGISTRY = 4,     /* the iterator's impact::ImpactSystem qword is not the captured registry */
     KILN_NATIVE_ECS_REASON_FAULT = 5,        /* foreign access faulted or its live view guard failed */
+    KILN_NATIVE_ECS_REASON_NOT_SERIAL = 6,   /* impact_simulation does not run serially on the world's thread in this world:
+                                                the world's pin of CHUNKED programs to it is clear, or a call came on another
+                                                thread (two slices could touch one entity at once) */
+    KILN_NATIVE_ECS_REASON_PIN_UNKNOWN = 7,  /* the pin cannot be read on this build (sigdb abilities.ecs_pin unresolved) */
 };
 
 /* since 0.2.0-dev.29 (native_counters). Reads every field the caller's size covers. */

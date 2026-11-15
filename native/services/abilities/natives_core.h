@@ -356,4 +356,15 @@ inline uint32_t ecs_verdict(bool counts_ok, int32_t system_slot, uint64_t at_slo
     return KILN_NATIVE_ECS_REASON_NONE;
 }
 
+// The bridge's serial condition (review round 3): impact_simulation runs its slices one after another on the world's
+// thread, so no two calls can touch one entity at once. It holds while the world's pin byte (storage +
+// abilities/impact.pin, copied from world config +0x23: CHUNKED programs get affinity 1, the world thread) is set and
+// the call runs on the world's thread; it cannot be known on a build where sigdb does not resolve the pin. Checked at
+// the self-check and at every access. A reason, or NONE.
+inline uint32_t ecs_serial(bool pin_known, uint8_t pin, bool on_world_thread) {
+    if (!pin_known) return KILN_NATIVE_ECS_REASON_PIN_UNKNOWN;
+    if (pin == 0 || !on_world_thread) return KILN_NATIVE_ECS_REASON_NOT_SERIAL;
+    return KILN_NATIVE_ECS_REASON_NONE;
+}
+
 }  // namespace kab

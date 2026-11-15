@@ -37,8 +37,11 @@ internal static class AbilitiesCaps
 
     /// <summary>Managed, session (since 0.2.0-dev.29): a native's call reads and writes other entities through
     /// impact_simulation's own accessors (<see cref="NativeContext.TryRead{T}"/>, <see cref="NativeContext.TryWrite{T}"/>,
-    /// <see cref="NativeContext.Root"/>). Pending until the first Kiln native call of a server world checked its
-    /// iterator against kiln.world's view; off in a world where that check failed (the natives still run).</summary>
+    /// <see cref="NativeContext.Root"/>). Its condition: impact_simulation runs serially on the server world's thread (the
+    /// world's pin byte, read through sigdb feature <c>abilities.ecs_pin</c>, is set, and every call comes on that thread),
+    /// so no two calls touch one entity at once. Pending until the first Kiln native call of a server world checked its
+    /// iterator against kiln.world's view and that condition; off for the rest of a world where either fails (the natives
+    /// still run).</summary>
     public const string NativesEcs = "abilities.natives.ecs";
 
     // Reported at the service's start, again under a new registry binding (the test kit's), and every 25 steps (about
@@ -148,7 +151,13 @@ internal static class AbilitiesCaps
                     "needs a kiln.world with foreign views (0.2.0-dev.29)"),
                 AbilitiesNative.EcsReasonLayout => (CapabilityState.Unavailable, CapabilityReason.Faulted,
                     "kiln.world could not compute impact_simulation's view in this world (see kiln.log)"),
-                5 => (CapabilityState.Unavailable, CapabilityReason.Faulted, "a foreign ECS access failed; the bridge is off for this world (a write may have begun)"),
+                AbilitiesNative.EcsReasonFault => (CapabilityState.Unavailable, CapabilityReason.Faulted,
+                    "a foreign ECS access failed; the bridge is off for this world (a write may have begun)"),
+                AbilitiesNative.EcsReasonNotSerial => (CapabilityState.Unavailable, CapabilityReason.Faulted,
+                    "impact_simulation does not run serially on the world's thread in this world (its pin is clear, or a call came on " +
+                    "another thread): two calls could touch one entity at once"),
+                AbilitiesNative.EcsReasonPinUnknown => (CapabilityState.Unavailable, CapabilityReason.SymbolMissing,
+                    "the world's pin of impact_simulation to its thread cannot be read on this build (sigdb abilities.ecs_pin)"),
                 AbilitiesNative.EcsReasonCounts => (CapabilityState.Unavailable, CapabilityReason.Faulted,
                     "the first native call's job counts are not kiln.world's view of impact_simulation in this world"),
                 _ => (CapabilityState.Unavailable, CapabilityReason.Faulted,

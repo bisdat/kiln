@@ -248,7 +248,9 @@ destroyed before the first run). Keys: a variable alias or debug name of the pro
   left, never forced, and a reload's new load waits with them. A mod it depends on waits with it (`its dependent <id>
   still waits`): the deferred unloads keep the order of ordinary ones, dependents first. At shutdown the host waits 5 s,
   then skips the `OnUnload` and disposal of what still waits, dependents first, each named with what it waits for,
-  rather than run them under the call. What the native side retires (bindings, attachment
+  rather than run them under the call. A waiting unload is not a pause: ticks, events and scheduled work still reach
+  the mod while it waits; a shutdown that skips `OnUnload` also skips the disposal, so data a mod writes only in
+  `OnUnload` may not be written; an `UnloadStarting` step (a service's) that never returns blocks the unload. What the native side retires (bindings, attachment
   sets) also stays until the calls leave. On a server none of this waits in practice: the unload runs in Pre or Post,
   when no `impact_simulation` slice runs. From then on its hash answers 0x1F. A game-state limit is `Ok = false`
   (registry full, Kiln's native slots used up, the name taken or a vanilla native's), a bad name or argc
@@ -305,12 +307,28 @@ destroyed before the first run). Keys: a variable alias or debug name of the pro
   `"<modid>/native:<name>"`. The first Kiln native call of each server world checks its iterator against kiln.world's
   view of impact_simulation: kiln.log `impact_simulation's view (kiln.world, session N): ctx + tpl 1, read 6, write 1,
   singletons 21, other_tpl 4, other 93, events 2/14 (...); impact::ImpactSystem at qword 34 (+0x110)`, then the job's
-  counts and the registry at that qword; a mismatch turns the bridge off for that world (the natives still run). The
-  calls' data expires when the call returns. Lab (`mods/tests/natives-gen-test`): `PASS the self-check of the first
+  counts and the registry at that qword; a mismatch turns the bridge off for that world (the natives still run).
+  **Its condition: impact_simulation runs serially on the server world's thread.** The game pins CHUNKED programs to the
+  world's thread while a byte of the world's storage is set (copied from the world's config; it is set on every
+  observed dedicated server, host and client); kiln.abilities reads that byte through sigdb (feature
+  `abilities.ecs_pin`: the scheduler's compare at `storage + abilities/impact.pin`, 0x3d17f8 on both shipped
+  executables) at the self-check and at every access, together with the calling thread. A cleared pin (the lab's
+  `kiln/control/impact.unpin`, or a game update that unpins it) or a call off the world's thread switches the bridge off
+  for that world (`impact_simulation does not run serially on the world's thread`, said once), and a build where sigdb
+  does not resolve the pin has it off (`symbol-missing`); same-step natives go on either way. With the slices one after
+  another on one thread, no two calls touch one entity at once; two workers on one entity are not handled, and need
+  this condition. Limits that stay: a write that faults can already have changed state (the guard contains the fault, it
+  does not roll it back; the bridge is then off for the world); the write-event queue holds 65,536 and an overflow means
+  later writes raise no event (the writes stand); entity ids carry no generation (a reused id names its current
+  occupant); a hand-written projection is checked only for its size (use the generated `Ecs.*` types); an attribute's
+  eight-byte header cannot be changed (`TryWrite` answers false). The calls' data expires when the call returns. Lab (`mods/tests/natives-gen-test`): `PASS the self-check of the first
   native call`, `PASS TryWrite<Health> inside the native's call is seen by World.TryRead`, `PASS TryRead of a type
   impact_simulation does not declare for other entities returns false with no access`, `PASS one ComponentWrittenEvent
   per entity and component per step, on the tick thread`, `PASS NativeContext.Root is the instance's hierarchy root, as
-  ImpactRef.Root reads it`, and across a restart (a wall torch of the base, CurrentTransform 1/16 m up through a native)
+  ImpactRef.Root reads it`, `PASS NativeContext.Post runs on the owning mod's tick`, `PASS TryWrite of an attribute keeps
+  its header ... and the game's formulas run: Health set to <max + 100> reads <max>`, `PASS with the world's pin set (the
+  game's default) every bridged call ran on the world's thread`; in abilities-test with `impact.unpin`: `PASS with the
+  pin cleared, the ECS bridge is off for this world: 0 of 12 TryRead(s) answered ..., 1 kiln.log line(s) saying so`; and across a restart (a wall torch of the base, CurrentTransform 1/16 m up through a native)
   `PASS after a restart, the CurrentTransform a native wrote through impact_simulation is in the save`. What the save
   keeps is the game's choice per component (`World.WriteInfo<T>().SaveTracked`: `CurrentTransform`, `Level`, `Fuel` yes;
   `Health`, `Comfort` no on a dedicated server): a write of an untracked component lasts until the world reloads.

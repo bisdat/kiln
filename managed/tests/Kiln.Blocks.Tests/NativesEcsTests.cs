@@ -197,6 +197,11 @@ public sealed unsafe class NativesEcsTests
         Assert.Equal((CapabilityState.Unavailable, CapabilityReason.Faulted), (counts.State, counts.Reason));
         Assert.Contains("job counts", counts.Text);
         Assert.Contains("native registry", AbilitiesCaps.DecideEcs(true, true, AbilitiesNative.EcsOff, AbilitiesNative.EcsReasonRegistry, CapabilityState.Available).Text);
+        var serial = AbilitiesCaps.DecideEcs(true, true, AbilitiesNative.EcsOff, AbilitiesNative.EcsReasonNotSerial, CapabilityState.Available);
+        Assert.Equal(CapabilityState.Unavailable, serial.State);
+        Assert.Contains("does not run serially on the world's thread", serial.Text);
+        Assert.Equal(CapabilityReason.SymbolMissing,
+            AbilitiesCaps.DecideEcs(true, true, AbilitiesNative.EcsOff, AbilitiesNative.EcsReasonPinUnknown, CapabilityState.Available).Reason);
         Assert.Equal(CapabilityReason.ServiceOlder, AbilitiesCaps.DecideEcs(true, false, null, 0, CapabilityState.Available).Reason);
         Assert.Equal(CapabilityState.Unavailable, AbilitiesCaps.DecideEcs(true, true, AbilitiesNative.EcsOn, 0, CapabilityState.Unavailable).State);
         Assert.Equal(CapabilityReason.ServiceMissing, AbilitiesCaps.DecideEcs(false, false, null, 0, CapabilityState.Available).Reason);

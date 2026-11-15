@@ -422,6 +422,11 @@ static void ecs() {
     CHECK(ecs_verdict(true, 34, 0x2000, 0x1000) == KILN_NATIVE_ECS_REASON_REGISTRY);
     CHECK(ecs_verdict(true, -1, 0x1000, 0x1000) == KILN_NATIVE_ECS_REASON_REGISTRY);  // no impact::ImpactSystem in the view
     CHECK(ecs_verdict(true, 34, 0, 0) == KILN_NATIVE_ECS_REASON_REGISTRY);            // no registry captured
+    // the serial condition: the pin set and the call on the world's thread; nothing else
+    CHECK(ecs_serial(true, 1, true) == KILN_NATIVE_ECS_REASON_NONE);
+    CHECK(ecs_serial(true, 0, true) == KILN_NATIVE_ECS_REASON_NOT_SERIAL);   // the lab's impact.unpin, or a game that unpins
+    CHECK(ecs_serial(true, 1, false) == KILN_NATIVE_ECS_REASON_NOT_SERIAL);  // a call on a worker
+    CHECK(ecs_serial(false, 1, true) == KILN_NATIVE_ECS_REASON_PIN_UNKNOWN); // sigdb does not resolve the pin on this build
 }
 
 static void watchdog() {

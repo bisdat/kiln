@@ -318,9 +318,14 @@ world session) computes the program's iterator layout with the wraps' view algor
 `foreign_slot` names a qword; inside the update `foreign_check(layout, iter, counts)` compares the job's group counts with
 the view (use nothing of the view on an iterator that fails it); `foreign_read` / `foreign_write` give another entity's
 component through the program's own other_read / other_write accessor with the job's storage, tracker and write flag (the
-tracked-write path: saved and replicated), each accessor checked once against the world's component map;
-`foreign_attr_changed` runs the attribute formulas with the program's `impact::AttributeRegistry`. Explicit arguments,
-no thread-local state, any thread inside the update. Host tests: `tests/wraps_test.cpp` (`foreign:` rows).
+tracked-write path: saved and replicated); every access checks the session, the job's counts, the storage's registry,
+the requested name against its hash entry and the live accessor's type; `foreign_attr_changed` runs the attribute
+formulas with the program's `impact::AttributeRegistry`, only for the block the same thread just wrote through
+`foreign_write`. Explicit arguments, no thread-local state. What these helpers do not give: exclusion between two
+threads on one entity (a caller must know its program's slices run one after another: kiln.abilities requires
+impact_simulation's pin to the world's thread), a rollback of a write that faulted (SEH contains it), a generation for
+an entity id (a reused id names its current occupant), or a check of a caller's struct beyond its size. Host tests:
+`tests/wraps_test.cpp` (`foreign:` rows).
 
 ### Is this thread inside a program? (since 0.2.0-dev.28)
 `in_program()`, appended after `wrap_original` (version stays 4: check `header.size` first), answers 1 while the
