@@ -18,10 +18,17 @@
  *  - Signatures missing on this build (features vfx.guard, vfx.play): the service is not registered, or play returns 0. A
  *    fault in a game call turns kiln.vfx off for the session with an error line.
  * Owners
- *  - The service cannot see owner_revoke: call stop_owner when an owner goes away (Kiln.Vfx does for mods). */
+ *  - The service cannot see owner_revoke: call stop_owner when an owner goes away (Kiln.Vfx does for mods).
+ * The resource budget (since 0.2.0-dev.29, members after bind_guid; chapter 17.1 §5, I1, I5)
+ *  - The game's VFX system holds a fixed number of VFX resources (its count limit: 2,048 on client 26430625, of which the
+ *    game's own 1,575 leave 473 for mods). resource_budget reads it, define_vfx_result defines a VFX with an answer
+ *    (registered in this process, accepted for the next start, or refused with a code) and vfx_registration reads that
+ *    answer again by its registration id. Shapes: kiln_capacity.h. Nothing of it changes the game: the count limit is
+ *    the game's own (a larger table is chapter 17.1 §4, not this). */
 #ifndef KILN_VFX_H
 #define KILN_VFX_H
 #include "../kiln_api.h"
+#include "kiln_capacity.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -162,6 +169,52 @@ typedef struct KilnVfxApi {
     KilnResult(KILN_CALL* build_status)(char* buf, size_t cap, size_t* out_len); /* JSON: what was built, the budget, the fingerprint */
     /* The GUID of a play made with KILN_VFX_WAIT_GUID. All zero: no such VFX, the entry fails as unknown. */
     KilnResult(KILN_CALL* bind_guid)(KilnVfx vfx, const uint8_t guid[16]);
+
+    /* ---- the resource budget: appended since 0.2.0-dev.29 (version stays 1). Check header.size covers a member ---- */
+    /* The VFX resources of the game's VFX system (process scope; units: resource records). capacity = the count limit the
+     * game enforces, read from its VFX system (sys + caps/vfx.map + caps/vfx.map_limit_relative); game_used = the game's
+     * own VfxResources (counted in its archive); kiln_used = Kiln's VFX of loaded mods that are in the game's table with
+     * the bytes Kiln served; reserved = the rest of the table: Kiln's VFX of a mod that is no longer loaded (they stay for
+     * the process), and resources of other loaders (the table's count less the game's and Kiln's). readiness NOT_READY
+     * until kiln.vfx read the table at an FxController update of a client world with the system's state ready (2);
+     * ACCOUNTING_MISMATCH when the counts do not add up; UNKNOWN_EXTERNAL when the game's own count could not be read
+     * from its archive. A snapshot the update thread keeps: never a read of game memory. Any thread.
+     * KILN_ERR_INVALID_ARGUMENT: out NULL or out->size too small. KILN_ERR_UNAVAILABLE: this build cannot read the count
+     * limit (capability vfx.budget). */
+    KilnResult(KILN_CALL* resource_budget)(KilnCapacityInfo* out);
+    /* Defines one VFX block of a mod with an answer. name: the block's name (letters, digits, '-', '_', '.'; at most
+     * 128). typed_vfx_json: {"format": 1, "mod": "<mod id>", "dir": "<the mod's folder>", "block": {<one VfxBlock, as in
+     * a blocks file's "vfx" section>}}; the same validation and builder as a blocks file (docs/kiln/services/vfx-cook.md).
+     * The game lists its VFX once, before any mod loads, so a definition registers in this process only when the block
+     * is one the start built with this same content:
+     *  - REGISTERED (slots_consumed 1): the system's state is 2, its GUID map has the GUID (a read of the map, never
+     *    vfx/Resolve, which would acquire it) and the table's resource holds the bytes Kiln served.
+     *  - timing KILN_DEFINE_REQUIRE_REGISTERED and not registered: refused, nothing written. REGISTRY_CLOSED (a new GUID,
+     *    or a content the start did not build), NOT_READY (built at this start, the table not read yet: the first
+     *    FxController update of a client world reads it), GAME_REFUSED (not in the game's table, or other bytes there),
+     *    OWNER_INACTIVE, ID_COLLISION (the GUID is another mod's built VFX), CAPACITY_EXCEEDED.
+     *  - A call refused for its owner, a collision, the capacity or storage answers that refusal; a VFX the definition still
+     *    occupies in the game's table is RETAINED with its slot (never reported free).
+     *  - timing KILN_DEFINE_ALLOW_NEXT_START: when only the moment stands in the way, the block is written (atomically)
+     *    to <kiln>/data/vfx/pending/<mod>/<name>.json with its registration id, and the next start builds it before the
+     *    game lists its VFX (ACCEPTED_NEXT_START, slots_consumed 0; STORAGE_FAILURE when it cannot be written). A new GUID
+     *    that would not fit (the game's, Kiln's and other resources now, the new ones accepted in this process, and this
+     *    one, over the capacity) is CAPACITY_EXCEEDED, never accepted. The next start checks every stored block again.
+     * The same definition again answers the same and writes nothing new. report: {"reason": null | "...", "warnings":
+     * [...]}, at most 4096 bytes: with less room KILN_ERR_BUFFER_TOO_SMALL before anything is read (*out_len 4096).
+     * KILN_ERR_INVALID_ARGUMENT: not such a document, a bad name, a block the builder refuses (the report says why), a bad
+     * timing, out NULL or too small; nothing was changed. KILN_ERR_UNAVAILABLE: capability blocks.vfx_registration is
+     * off. Any thread (Kiln.Blocks calls it on the tick thread); never a game call. */
+    KilnResult(KILN_CALL* define_vfx_result)(KilnOwner owner, KilnStr name, KilnStr typed_vfx_json, uint32_t timing,
+                                             KilnDefinitionReply* out, char* report, size_t capacity, size_t* out_len);
+    /* The answer for registration_id now: what became of the definition since its call (registered once the table was
+     * read, kept for a mod that is no longer loaded: RETAINED with OWNER_INACTIVE, superseded by a later definition of
+     * the block, stored for the next start). A definition stored at an earlier start is known again at this one: its
+     * receipt says what this start made of it. ok = 0 with NOT_FOUND for an id this process does not know. owner may
+     * be 0. report and its room as define_vfx_result. Any thread. KILN_ERR_INVALID_ARGUMENT: registration_id NULL or all
+     * zero, out NULL or too small. KILN_ERR_UNAVAILABLE: capability blocks.vfx_registration is off. */
+    KilnResult(KILN_CALL* vfx_registration)(KilnOwner owner, const uint8_t registration_id[16], KilnDefinitionReply* out,
+                                            char* report, size_t capacity, size_t* out_len);
 } KilnVfxApi;
 
 #ifdef __cplusplus

@@ -218,6 +218,14 @@ int main(int argc, char** argv) {
     KilnVfxStatus s1 = status();
     check((s1.flags & KILN_VFX_SIM) && (s1.flags & KILN_VFX_HAS_GUARD) && (s1.flags & KILN_VFX_HAS_PLAY) && s1.registered == kSimKnown, "sim: status");
     check(core_is_registered(known) == 1 && core_is_registered(unknown) == 0, "is_registered: known and unknown");
+    {
+        // the resource budget's reading (package 17a S2): the limit is half the slots, as the game's reserve makes 2 x the request
+        Registry reg;
+        check(sim_game()->registry(nullptr, &reg) && reg.count == kSimKnown && reg.slots == s1.map_capacity && reg.limit * 2ull == reg.slots &&
+                  reg.init_state == 2,
+              "sim: the registry reads count, slots, limit and state 2");
+        check(!sim_game()->registry_missing() && !sim_game()->bytes_missing(), "sim: the budget's reads are there");
+    }
 
     // ---- how long a one-shot runs ----
     VfxLengths len;

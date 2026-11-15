@@ -379,6 +379,44 @@ public static unsafe class Vfx
             (s.Flags & VfxNative.Sim) != 0, s.Registered, s.MapCapacity, (int)s.Thread, s.Live, s.Played, s.Failed, s.Refused, s.Updates, relay, VfxRelay.Sent, VfxRelay.ReceivedCount);
     }
 
+    /// <summary>
+    /// Client: the game's VFX resources for this process, all mods together (chapter 17's budget). The game's VFX system holds a
+    /// fixed number of them, and registering one more than that aborts the game, so Kiln refuses a mod that would not fit.
+    /// <see cref="CapacityInfo.Capacity"/> is that number as kiln.vfx reads it from the game's own table (2,048 on the game client
+    /// 26430625); <see cref="CapacityInfo.GameUsed"/> the game's own VFX (1,575 there, counted in its archive);
+    /// <see cref="CapacityInfo.KilnUsed"/> Kiln's VFX of loaded mods that the game's table holds with the bytes Kiln served;
+    /// <see cref="CapacityInfo.Reserved"/> the rest of the table: VFX of a mod that is no longer loaded (they stay until the
+    /// process ends) and other loaders' resources. <see cref="CapacityInfo.Available"/> is what is left for new VFX, which the
+    /// game lists once per start: a new one is there from the next start (<c>Blocks.Define(name, VfxBlock, options)</c>).
+    /// <para>Ready once kiln.vfx has read the table, at the first update of a client world (the main menu has none); before that
+    /// <c>NotReady</c>, with no counts: nothing is assumed. <c>UnknownExternalUsage</c> when the game's own count could not be
+    /// read from its archive, <c>AccountingMismatch</c> when the table's counts do not add up. A change posts
+    /// <see cref="CapacityChangedEvent"/> (<c>Quota</c> <c>vfx.budget</c>) at a later step while something listens.</para>
+    /// <para>A snapshot kiln.vfx keeps: any thread, never a read of the game's memory. Not run in a game client yet (guided check
+    /// <c>17-vfx-budget</c>).</para>
+    /// </summary>
+    /// <exception cref="KilnUnavailableException"><c>vfx.budget</c>: no kiln.vfx here (a dedicated server has no VFX), one older
+    /// than 0.2.0-dev.29, or one that cannot read the game's VFX table on this game build.</exception>
+    [ClientOnly]
+    [AnyThread]
+    [RequiresCapability(VfxCaps.BudgetRow)]
+    public static CapacityQueryResult ResourceBudget
+    {
+        get
+        {
+            var t = VfxNative.Has(VfxNative.Member.ResourceBudget);
+            if (t == null)
+                throw VfxCaps.Off(VfxCaps.BudgetRow, VfxNative.T == null
+                    ? "kiln.vfx is not here (a dedicated server has no VFX)"
+                    : "this kiln.vfx has no resource budget (update Kiln)");
+            var n = KilnCapacityInfo.New();
+            var rc = t->ResourceBudget(&n);
+            if (rc == VfxNative.Unavailable) throw VfxCaps.Off(VfxCaps.BudgetRow, "kiln.vfx cannot read the game's VFX table on this game build");
+            if (rc != VfxNative.Ok) throw new InvalidOperationException($"Vfx.ResourceBudget: kiln.vfx answered {rc}");
+            return VfxBudgetWatch.Seen(CapacityMapping.ToResult(n));
+        }
+    }
+
     /// <summary>Diagnostics as JSON (status and recent handles, client).</summary>
     [AnyThread]
     public static string StatusJson()

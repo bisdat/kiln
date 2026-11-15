@@ -1124,6 +1124,19 @@
    "state": "open"
   },
   {
+   "id": "17-vfx-budget",
+   "title": "The VFX budget, and VFX defined with an answer: registered at the next start and played",
+   "chapter": "17",
+   "packages": [
+    "17b-kiln-quotas",
+    "17a-vfx-cap",
+    "17c-roster-cap",
+    "17d-material-pools"
+   ],
+   "state": "open",
+   "added": "17a-vfx-cap S2 (dev.29): Vfx.ResourceBudget, Blocks.Define(name, VfxBlock, options)"
+  },
+  {
    "id": "17-buffs-client",
    "title": "Large buff pack UI and sync",
    "chapter": "17",
