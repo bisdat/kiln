@@ -533,10 +533,12 @@ void stop_wrap_make() {
 void KILN_CALL on_unload(void*) {
     if (!W || !g_stop.handle) return;
     const KilnGameWrapInfo i = winfo(g_stop.handle);
-    const uint64_t slices = g_stop.seen.slices.load();
+    const uint64_t slices = g_stop.seen.slices.load(), worker = g_stop.seen.worker.load();
+    const int threads = g_stop.seen.threads.count();
     row(i.state == KILN_WRAP_PENDING && i.running == 0 && !i.gone && slices > 0 && i.faults == 0,
-        "stop: a wrap applied when the world stopped went back to PENDING with 0 calls running (state %u, running %u, "
-        "%llu slices ran in it before the stop)", i.state, i.running, static_cast<unsigned long long>(slices));
+        "stop: a wrap applied when the world stopped went back to PENDING with 0 calls running, every in-flight stage drained "
+        "(state %u, running %u, %llu slices ran in it before the stop on %d thread(s), %llu off the tick thread)",
+        i.state, i.running, static_cast<unsigned long long>(slices), threads, static_cast<unsigned long long>(worker));
     say("stop row done, %d PASS, %d FAIL in all", g_pass, g_fail);
 }
 
