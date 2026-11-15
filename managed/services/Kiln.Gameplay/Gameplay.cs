@@ -394,11 +394,19 @@ public static unsafe partial class Gameplay
         return w;
     }
 
-    /// <summary>True when the entity lifecycle events work on this build (capability <c>gameplay.entity_events</c>).</summary>
+    /// <summary>True when this build can provide entity lifecycle events (capability <c>gameplay.entity_events</c>).
+    /// Requests the hooks on demand; in a running world delivery begins after their safe Pre installation.</summary>
     [AnyThread]
     public static bool EntityEventsAvailable
     {
-        get { Used(); return GameplayNative.EntityFilter(GameplayNative.T) != null && Status is { EntityHooks: true }; }
+        get {
+            Used();
+            var t = GameplayNative.T;
+            if (GameplayNative.EntityFilter(t) == null) return false;
+            // Availability is also queried before subscribing. An idle installed flag must not disable the source.
+            if (GameplayNative.RequestHooks(t) != null) return PrepareHookEvents(16) == null;
+            return Status is { EntityHooks: true };
+        }
     }
 
     // Once per step (tick): tell the native hooks which categories to record.
