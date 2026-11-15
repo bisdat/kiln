@@ -10,6 +10,7 @@ import { NeedsOp, playerName, round1, steamIdError, useServerId, withAdmin } fro
 import { OfflineNote } from "../ConnectionBar";
 import { knownPlayers, useHistory } from "../history";
 import type { GameplayStatus, PermissionsModel, Zone } from "../types";
+import { zoneHookNotices } from "../zoneHookState";
 import { ACTIONS, ACTION_HINT, ACTION_LABEL, blankZone, useMapFocus, useZoneDraft, zoneArgs, type ZoneForm } from "../zones";
 import { MoreHorizontal } from "lucide-react";
 import { Banner, Button, Field, Menu, NameId, Page, PageHeader, Select, SplitPage, Table, TextInput, Toggle, confirm, fmtPos, toastError, toastOk } from "../ui";
@@ -49,15 +50,14 @@ function ZonesPage() {
   };
   const g = gp.data;
   const edit = (z: Zone) => setForm({ name: z.name, x: String(z.pos.x), y: String(z.pos.y), z: String(z.pos.z), radius: String(z.radius), deny: [...z.deny], owners: [...z.owners], allowAdmins: z.allowAdmins, editing: true });
-  const hooks = ([["buildHooks", "building"], ["terraformHook", "digging"], ["intercept", "opening and looting"], ["craftHook", "crafting"], ["spawnHook", "enemy spawns"]] as const);
-  const off = g?.available ? hooks.filter(([k]) => !g[k]).map(([, l]) => l) : [];
+  const notices = zoneHookNotices(g);
   return (
     <Page fill>
       <PageHeader title="Protection zones" sub={`Only owners may build, dig, open, loot or craft inside. Zones are spheres and take effect at once.${g?.available ? ` ${g.denied ?? 0} refused so far.` : ""}`} />
       <OfflineNote />
       <NeedsOp ops={["zones_list", "zones_add", "zones_remove"]} what="Protection zones">
         {g && !g.available ? <Banner tone="warn" title="Not available">kiln.gameplay didn't start on this server build.</Banner> : null}
-        {off.length ? <Banner tone="warn" title="Partly off">This server build does not refuse {off.join(", ")}.</Banner> : null}
+        {notices.length ? <Banner tone="warn" title="Protection status">{notices.join(" ")}</Banner> : null}
         <SplitPage form aside={<ZoneFormCard form={form} setForm={setForm} players={players} names={names} onSave={save} saving={add.isPending} />}>
           <Table
             aria-label="Zones"

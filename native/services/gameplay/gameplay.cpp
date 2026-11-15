@@ -8,6 +8,7 @@
 #include <cstdio>
 
 #include "internal.h"
+#include "services/kiln_ui.h"
 #include "services/kiln_players.h"
 #include "services/kiln_spawn.h"
 #include "services/kiln_world.h"
@@ -183,6 +184,10 @@ KilnResult KILN_CALL t_watch(KilnEntity e, bool on) {
 KilnResult KILN_CALL t_status(KilnGameplayStatus* out) {
     // Callers built before the entity fields existed pass the shorter size; they get the fields they know.
     if (!out || out->size < offsetof(KilnGameplayStatus, entity_hooks)) return KILN_ERR_INVALID_ARGUMENT;
+    // Before the new Host's announcement, a status probe is a legacy consumer (including old OnBoot code).
+    // Serve it conservatively now, so old callers do not disable themselves on a lazy false flag. A modern Host
+    // announces before scanning; its readonly status probes keep idle groups untouched.
+    hooks_world_started();
     std::lock_guard publication(hooks_publication());
     KilnGameplayStatus s{};
     s.size = sizeof s;
@@ -253,7 +258,7 @@ static_assert(offsetof(KilnGameplayApi, request_build) == 8 + 15 * sizeof(void*)
               "request_build remains the 16th member; request_hooks is appended last");
 
 KilnResult KILN_CALL t_request_hooks(KilnOwner owner,uint32_t groups) {
-    if(!groups || (groups & ~KILN_GAMEPLAY_HOOK_ALL)) return KILN_ERR_INVALID_ARGUMENT;
+    if(groups & ~KILN_GAMEPLAY_HOOK_ALL) return KILN_ERR_INVALID_ARGUMENT;
     return hooks_request(groups,owner) ? KILN_OK : KILN_ERR_UNAVAILABLE;
 }
 
@@ -280,7 +285,7 @@ const KilnGameplayApi kTable = {
 
 KilnHandle g_pre = 0, g_post = 0, g_late_pre = 0, g_build_world = 0;
 void KILN_CALL on_build_world(const KilnWorldEvent* e, void*) {
-    if (e->event == KILN_WORLD_STOPPING) build_poll(e->kind);
+    if (e->event == KILN_WORLD_STARTED) hooks_world_started(true);
 }
 
 void KILN_CALL on_client_hooks_pre(const KilnTickInfo*,void*) { hooks_poll(); }
@@ -319,7 +324,6 @@ void tick_subscribers() {
 
 void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
     (void)tick;
-    build_poll();
     g_in_sim.store(false, std::memory_order_release);
     static bool had_world = false;
     if (!world()) {
@@ -336,7 +340,6 @@ void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
         g_late_pre = 0;
     tick_subscribers();
     hooks_poll();
-    build_poll();
     g_in_step.store(false, std::memory_order_relaxed);
     zones_refresh();
     declined_check("next Pre");
@@ -350,7 +353,6 @@ void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
 
 void KILN_CALL on_post(const KilnTickInfo* tick, void*) {
     (void)tick;
-    build_poll();
     g_in_sim.store(false, std::memory_order_release);
     g_in_step.store(false, std::memory_order_relaxed);
     if (!world()) return;
@@ -436,7 +438,26 @@ void resolve() {
     cst("gameplay/teleport.target_entity", &L.tp_target_entity);
 }
 
+const KilnUiTickApi* g_compat_ui=nullptr;
+KilnHandle g_compat_menu=0;
+void KILN_CALL on_compat_menu(uint64_t,void*) {
+    // on_ready precedes CLR startup. The first game UI frame is after CLR returned and before Host's menu loader,
+    // since our subscription was registered first. No additional UI hook is installed by subscribing here.
+    hooks_world_started();
+    g_compat_ui->unsubscribe(g_compat_menu);
+    g_compat_menu=0;
+}
+// A group refused for unchecked threads during play goes in at the next no-world moment: a client's menu frame.
+KilnHandle g_no_world=0;
+void KILN_CALL on_no_world_frame(uint64_t,void*) {
+    if(g_compat_ui->in_menu && !g_compat_ui->in_menu()) return;  // a world steps: not now
+    hooks_poll_no_world();
+}
 void KILN_CALL on_ready(void*) {
+    g_compat_ui=static_cast<const KilnUiTickApi*>(g_api->service(kstr(KILN_UI_TICK_SERVICE),1));
+    if(g_compat_ui && g_compat_ui->header.size>=sizeof(KilnUiTickApi) && g_compat_ui->subscribe && g_compat_ui->unsubscribe)
+        g_compat_ui->subscribe(g_owner,&on_compat_menu,nullptr,&g_compat_menu);
+
     const auto* players = static_cast<const KilnPlayersApi*>(
         g_api->service(KilnStr{KILN_PLAYERS_SERVICE, sizeof(KILN_PLAYERS_SERVICE) - 1}, 1));
     zones_set_players_service(players);
@@ -451,6 +472,14 @@ void KILN_CALL on_ready(void*) {
 }
 
 }  // namespace
+
+bool hooks_watch_no_world(bool on) {
+    if(!g_compat_ui || g_compat_ui->header.size<sizeof(KilnUiTickApi) || !g_compat_ui->subscribe || !g_compat_ui->unsubscribe)
+        return false;  // no UI tick (a dedicated server): nothing to wait for in this process
+    if(on && !g_no_world && g_compat_ui->subscribe(g_owner,&on_no_world_frame,nullptr,&g_no_world)!=KILN_OK) g_no_world=0;
+    if(!on && g_no_world) { g_compat_ui->unsubscribe(g_no_world); g_no_world=0; }
+    return !on || g_no_world!=0;
+}
 }  // namespace kg
 
 extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api, KilnOwner owner, KilnPluginInfo* info) {
@@ -467,7 +496,10 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     const bool entity_hooks = entities_install();
     KilnHandle client_hooks=0;
     api->subscribe_world_tick(owner,KILN_WORLD_CLIENT,KILN_TICK_PRE,&on_client_hooks_pre,nullptr,&client_hooks);
-    build_lifecycle(api->subscribe_world(owner, &on_build_world, nullptr, &g_build_world) == KILN_OK);
+    if (api->subscribe_world(owner, &on_build_world, nullptr, &g_build_world) != KILN_OK) {
+        KG_E("kiln.gameplay: cannot observe first world for host compatibility");
+        return KILN_ERR_UNAVAILABLE;
+    }
     if (api->subscribe_tick(owner, KILN_TICK_PRE, &on_pre, nullptr, &g_pre) != KILN_OK ||
         api->subscribe_tick(owner, KILN_TICK_POST, &on_post, nullptr, &g_post) != KILN_OK) {
         KG_E("kiln.gameplay: no tick subscription; the service is unavailable");

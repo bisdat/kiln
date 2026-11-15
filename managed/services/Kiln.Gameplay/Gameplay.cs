@@ -166,7 +166,7 @@ public static unsafe partial class Gameplay
 
     /// <summary>Adds a protection zone, owned by the calling mod (removed when it unloads). Tick thread.</summary>
     /// <exception cref="KilnUnavailableException">A build/break deny cannot be enforced yet. Names
-    /// <c>gameplay.build_hooks</c>; a request first made during a running world begins protection in the next world.
+    /// <c>gameplay.build_hooks</c>; a request first made during a running world waits for checked installation at safe Pre ticks.
     /// The zone is not stored and no deny bits are silently removed.</exception>
     [TickThreadOnly]
     [RequiresCapability("kiln.gameplay")]
@@ -245,8 +245,17 @@ public static unsafe partial class Gameplay
         status.Size = (uint)sizeof(GameplayNative.Status);
         var waiting = t != null && t->Status(&status) == Ok && status.Size >= 648 &&
                       status.BuildHookState == 2;
+        // Round 2/3 native tables can still wait for world stop (including the older 144-byte table).
+        // Keep their actual policy in the error; table size alone cannot distinguish that build from this one.
+        var reason = System.Text.Encoding.UTF8.GetString(new ReadOnlySpan<byte>(status.BuildHookReason, 512));
+        if (reason.IndexOf('\0') is var end and >= 0) reason = reason[..end];
+        var legacyWait = GameplayNative.RequestHooks(t) == null || reason.Contains("world to stop", StringComparison.Ordinal);
+        // Refused three times for threads Kiln could not check while a world ran: it waits for a moment no world runs.
+        var noWorldWait = reason.Contains("next no-world moment", StringComparison.Ordinal);
         throw ServiceCaps.Unavailable("gameplay.build_hooks", waiting
-            ? "build protection begins with the next world: this mod asked for it while a world was running"
+            ? legacyWait ? "build protection begins with the next world: this mod asked for it while a world was running"
+            : noWorldWait ? "build protection waits for the next no-world moment: " + reason
+                          : "build protection is waiting for checked installation at a safe Pre"
             : "build protection is unavailable: " + Capabilities.Get("gameplay.build_hooks").ReasonText);
     }
 
