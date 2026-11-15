@@ -32,29 +32,46 @@ void check(bool ok, const char* what) {
 // model: only the screenshot's cut Quit and the first try's view constrain them; the decision does not use them).
 struct Look {
     float col_y = 30, space = 1020;
-    float pitch = 60, gaps = 120;
+    float pitch = 60, gap1 = 80, gap2 = 40;  // a row; the gaps before the second group (6 rows) and the last (2 rows)
     float trailing = 109;   // below Quit, in the column (not wrapped)
     float view_fixed = 87;  // the column's fixed children beside Kiln's view (wrapped)
     float build = 22;       // the build number, inside Kiln's stack when wrapped
     Look scaled(float s) const {  // every length times s (pixels of another resolution, or another UI scale)
         Look k = *this;
-        k.col_y *= s, k.space *= s, k.pitch *= s, k.gaps *= s, k.trailing *= s, k.view_fixed *= s, k.build *= s;
+        k.col_y *= s, k.space *= s, k.pitch *= s, k.gap1 *= s, k.gap2 *= s, k.trailing *= s, k.view_fixed *= s,
+            k.build *= s;
         return k;
     }
 };
+// The owner's dev build at 1920x1080 (2026-11-15 screenshot, 1 unit a pixel): rows every 60 from 30, gaps 50 + 25.
+Look look_1080() {
+    Look k;
+    k.gap1 = 50, k.gap2 = 25;
+    return k;
+}
 
 struct Tree {  // what one builder call built
     bool wrapped = false, probed = false;
     int rows = 0;
 };
-struct Laid {  // its layout: the column's and the two probes' rectangles (the probe before the first row, after the last)
-    float col[4] = {}, top[4] = {}, end[4] = {};
+struct Laid {  // its layout: the column's and the three probes' rectangles (before the first row, after it, after the last)
+    float col[4] = {}, top[4] = {}, first[4] = {}, end[4] = {};
 };
 
-float rows_height(const Look& k, int rows) { return static_cast<float>(rows) * k.pitch + k.gaps; }
+float rows_height(const Look& k, int rows) { return static_cast<float>(rows) * k.pitch + k.gap1 + k.gap2; }
 
-// `relative`: the game's rectangles relative to their parent instead of absolute (the probes are siblings either way)
-Laid lay_out(const Look& k, const Tree& t, float offset, bool relative = false) {
+// The top of row i (from 0) below the first row's top: the second group (6 rows) and the last (2 rows) after a gap.
+float row_top(const Look& k, int rows, int i) {
+    float y = static_cast<float>(i) * k.pitch;
+    if (i >= rows - 8) y += k.gap1;
+    if (i >= rows - 2) y += k.gap2;
+    return y;
+}
+
+// `relative`: the game's rectangles relative to their parent instead of absolute (the probes are siblings either way).
+// `cull`: what the owner's dev build showed: not wrapped, what lies below the column is not laid out where it is drawn;
+// the probe after Quit reads the top of the first row that ends below the column (978 of 1020 in his kiln.log).
+Laid lay_out(const Look& k, const Tree& t, float offset, bool relative = false, bool cull = false) {
     Laid l;
     const float rows_h = rows_height(k, t.rows);
     const float col[4] = {40, k.col_y, 420, k.space};
@@ -74,16 +91,24 @@ Laid lay_out(const Look& k, const Tree& t, float offset, bool relative = false) 
         parent_y = view_y - off;
         l.top[1] = parent_y;
     }
+    l.first[1] = l.top[1] + k.pitch;
     l.end[1] = l.top[1] + rows_h;
-    if (relative) l.top[1] -= parent_y, l.end[1] -= parent_y;
-    l.top[0] = l.end[0] = relative ? 0 : 40;
+    if (cull && !t.wrapped)
+        for (int i = 0; i < t.rows; ++i)
+            if (l.top[1] + row_top(k, t.rows, i) + k.pitch > k.col_y + k.space) {
+                l.end[1] = l.top[1] + row_top(k, t.rows, i);
+                break;
+            }
+    if (relative) l.top[1] -= parent_y, l.first[1] -= parent_y, l.end[1] -= parent_y;
+    l.top[0] = l.first[0] = l.end[0] = relative ? 0 : 40;
     return l;
 }
 
 // One process's pause menu over frames, with the hooks' glue as menu_scroll.cpp and game.cpp have it: the decision at
-// the open site (wants), every mod's row in AUTO while the menu can scroll, the probes before the first entry and
-// after the entry that was last in the previous call (none in the first call), and at the close site the rectangles
-// of the previous frame's layout (a node made anew, or one whose tree changed, reads zero: it was not laid out).
+// the open site (wants), every mod's row in AUTO while the menu can scroll, the probes before the first entry, after it
+// and after the entry that was last in the previous call (none in the first call), the rows drawn (the renderer's
+// calls and Kiln's rows), and at the close site the rectangles of the previous frame's layout (a node made anew, or
+// one whose tree changed, reads zero: it was not laid out).
 struct Sim {
     Look look;
     uint32_t mode = rows::show_auto;
@@ -99,6 +124,7 @@ struct Sim {
     float offset = 0;      // the wheel's scroll offset (wrapped)
     bool broken_probe = false;   // a build where the probes never read (always zero)
     bool relative = false;       // the game's rectangles relative to their parent
+    bool cull = false;           // rows below the column not laid out (the owner's dev build)
     float wrapped_probe_scale = 1;  // a layout that disagrees with the model when wrapped (oscillation test)
     uint64_t frame_no = 0;
 
@@ -119,13 +145,17 @@ struct Sim {
         if (have_prev) std::memcpy(r.col, prev_laid.col, sizeof r.col);  // the game's own column: always there
         if (have_prev && prev.wrapped == t.wrapped && prev.probed && t.probed && !broken_probe) {
             std::memcpy(r.top, prev_laid.top, sizeof r.top);
+            std::memcpy(r.first, prev_laid.first, sizeof r.first);
             std::memcpy(r.end, prev_laid.end, sizeof r.end);
         }
-        measure(d, w, probed, frame_no, r.col, r.top, r.end);
+        measure(d, w, probed, frame_no, r.col, r.top, r.first, r.end, static_cast<uint32_t>(t.rows));
         prev = t;
-        prev_laid = lay_out(look, t, offset, relative);
-        if (t.wrapped && wrapped_probe_scale != 1)
-            prev_laid.end[1] = prev_laid.top[1] + (prev_laid.end[1] - prev_laid.top[1]) * wrapped_probe_scale;
+        prev_laid = lay_out(look, t, offset, relative, cull);
+        if (t.wrapped && wrapped_probe_scale != 1) {
+            Laid& l = prev_laid;
+            l.first[1] = l.top[1] + (l.first[1] - l.top[1]) * wrapped_probe_scale;
+            l.end[1] = l.top[1] + (l.end[1] - l.top[1]) * wrapped_probe_scale;
+        }
         have_prev = true;
     }
     void run(int n) {
@@ -140,7 +170,7 @@ struct Sim {
 // Where Quit must end up: wrapped when the rows are taller than the column, drawn as the game draws it when they fit.
 bool quit_reachable(const Sim& s) {
     const float rows_h = rows_height(s.look, s.rows_drawn());
-    return s.wrapped || rows_h <= s.look.space + kOver;
+    return s.wrapped || rows_h <= s.look.space;
 }
 
 std::string label(const char* res, int extra, size_t mods, uint32_t mode, const char* what) {
@@ -196,6 +226,42 @@ int main() {
         at_close(p);
     }
 
+    // ---- the owner's dev build at 1920x1080, hosted (2026-11-15, kiln-devbuild.log line 917): 17 rows (the game's 14
+    // with Your Server Permissions, SET tools, Creative, Mods), gaps 50 + 25, column 30..1050. The bottom probe after
+    // Quit read 978 (the top of Return to Main Menu): Quit starts below the column, and its position (and the probe's
+    // after it) is not the one drawn. Quit was below the screen and the menu did not scroll ----
+    {
+        // his reading as the close site had it: column at 30, 1020 tall; the top probe at 30, the first row 60; the
+        // bottom probe at 1008 (978 below the top)
+        Decider d;
+        const float col[4] = {40, 30, 420, 1020}, top[4] = {40, 30, 0, 0}, first[4] = {40, 90, 0, 0};
+        const float end[4] = {40, 1008, 0, 0};
+        for (uint64_t f = 1; f <= 10; ++f) measure(d, false, true, f, col, top, first, end, 17);
+        check(wants(d.fit, rows::show_auto, 2), "owner 1080p dev build: 17 rows, Quit below the screen: wrapped");
+        check(d.fit.known && !d.fit.proven, "978 is less than 17 rows of 60: the bottom probe is not after Quit");
+        // the same menu over frames, rows below the column not laid out as in his build, and with them laid out
+        for (const bool cull : {true, false}) {
+            Sim s;
+            s.look = look_1080();
+            s.game_rows = 14;  // with Your Server Permissions (a hosted world)
+            s.mods = 2;        // SET tools, Creative; and Kiln's Mods: 17 rows, 1095 UI units
+            s.cull = cull;
+            s.run(300);
+            check(s.wrapped && quit_reachable(s), cull ? "owner 1080p, his layout: wrapped, Quit reachable"
+                                                       : "owner 1080p, rows laid out: wrapped, Quit reachable");
+            check(s.flips == 1, "one change, from the count rule's no");
+            s.closed(100);
+            s.run(1);
+            check(s.wrapped, "reopened: wrapped from its first frame");
+        }
+        // unhosted (16 rows, no Your Server Permissions) in his layout: Quit's bottom 1065 is below the column (1050)
+        Sim u;
+        u.look = look_1080();
+        u.mods = 2;
+        u.cull = true;
+        u.run(300);
+        check(u.wrapped && quit_reachable(u), "owner 1080p unhosted, 16 rows, his layout: wrapped");
+    }
     // ---- dev.29: wrapped by height ----
     // The owner's menu (2026-11-15, 1280x720): the game's 13 entries, Kiln's Mods, Creative (Kiln.Rules: a mods' row
     // to the native side) and SET tools: 16 rows, 2 of them mods' rows. Quit to Desktop was cut; the count rule never
@@ -232,15 +298,18 @@ int main() {
             size_t mods;
             bool wrap;  // expected
         };
-        // extra 1: Kiln's Mods only (rows 960 of 1020: fits, as the game draws it); 2: and Creative (rows 1020 of 1020:
-        // Quit's bottom on the column's: fits); 3: the owner's (1080); 4+: past the column (and past kFew from 5 on)
-        const Case cases[] = {{1, 0, false}, {2, 1, false}, {3, 2, true}, {4, 3, true}, {8, 7, true}, {20, 19, true}};
+        // extra 1: Kiln's Mods only (rows 960 of 1020: one row of room, at the limit: drawn as the game draws it); 2: and
+        // Creative (rows 1020 of 1020: Quit's bottom on the column's: within one row of it, wrapped); 3: the owner's
+        // (1080); 4+: past the column (and past kFew from 5 on). Each also with the rows below the column not laid out.
+        const Case cases[] = {{1, 0, false}, {2, 1, true}, {3, 2, true}, {4, 3, true}, {8, 7, true}, {20, 19, true}};
         for (const Res& r : all)
             for (const Case& c : cases)
                 for (const uint32_t mode : {rows::show_auto, rows::show_always})
-                    for (const bool pixels : {false, true}) {
+                    for (const bool pixels : {false, true})
+                    for (const bool cull : {false, true}) {
                         Sim s;
                         s.look = pixels ? Look{}.scaled(r.height / 1080.0f) : Look{};
+                        s.cull = cull;
                         s.mode = mode;
                         s.mods = c.mods;
                         s.run(400);
@@ -275,12 +344,13 @@ int main() {
     for (const float scale : {0.8f, 0.9f, 1.1f, 1.25f, 1.4f})
         for (const size_t mods : {size_t{0}, size_t{1}, size_t{2}, size_t{4}, size_t{10}}) {
             Sim s;
-            s.look.pitch *= scale, s.look.gaps *= scale, s.look.trailing *= scale, s.look.build *= scale;
+            s.look.pitch *= scale, s.look.gap1 *= scale, s.look.gap2 *= scale, s.look.trailing *= scale,
+                s.look.build *= scale;
             s.mods = mods;
             s.run(300);
-            const float rows_h = rows_height(s.look, s.rows_drawn());
+            const float rows_h = rows_height(s.look, s.rows_drawn()), limit = s.look.space - s.look.pitch;
             const bool start = wants(rows::show_auto, mods);  // the count rule decided the first frames
-            const bool expect = rows_h > s.look.space + kOver ? true : rows_h + kRoom < s.look.space ? false : start;
+            const bool expect = rows_h > limit + kOver ? true : rows_h + kRoom < limit ? false : start;
             char b[128];
             std::snprintf(b, sizeof b, "UI scale %.2f, %zu mods' rows (rows %.0f of %.0f): decided by height", scale, mods,
                           rows_h, s.look.space);
@@ -302,15 +372,19 @@ int main() {
         check(s.wrapped && s.flips == flips, "the menu opened again: wrapped from its first frame (the decision is kept)");
         s.run(500);
         check(s.flips == flips, "and stays so");
-        // a row less (Creative hidden): 15 rows, Quit's bottom on the column's: in the band, stays wrapped
+        // a row less (Creative hidden): 15 rows, Quit's bottom on the column's: still past the limit, stays wrapped
         s.mods = 1;
         s.run(300);
-        check(s.wrapped && s.flips == flips, "15 rows, in the hysteresis band: stays wrapped");
-        // two rows less: 14 rows fit with room: unwrapped once, then stays
+        check(s.wrapped && s.flips == flips, "15 rows, past the space minus a row: stays wrapped");
+        // two rows less: 14 rows, at the limit: in the band, stays wrapped
         s.mods = 0;
         s.run(300);
-        check(!s.wrapped && s.flips == flips + 1, "14 rows: unwrapped once");
-        s.mods = 2;
+        check(s.wrapped && s.flips == flips, "14 rows, in the hysteresis band: stays wrapped");
+        // a game entry less too: 13 rows fit with room: unwrapped once, then stays
+        s.game_rows = 12;
+        s.run(300);
+        check(!s.wrapped && s.flips == flips + 1, "13 rows: unwrapped once");
+        s.game_rows = 13, s.mods = 2;
         s.run(300);
         check(s.wrapped && s.flips == flips + 2, "16 rows again: wrapped once more (a change of the rows, not an oscillation)");
     }
@@ -325,36 +399,45 @@ int main() {
         check(s.flips <= 2, "at most two changes before the lock");
     }
     {
-        // in the band between kRoom and kOver nothing changes, from either side
+        // the limit is the space minus one row; in the band between kRoom below it and kOver above it nothing changes
         Fit f;
-        check(fit_step(f, false, 1020.5f, 1020, 10) == Change::none && f.known && !f.wrap, "not wrapped, in the band: stays");
+        check(fit_step(f, false, 960.0f, 1020, 60, 10) == Change::none && f.known && !f.wrap, "not wrapped, at the limit: stays");
         Fit g;
-        check(fit_step(g, true, 1010.0f, 1020, 10) == Change::none && g.known && g.wrap, "wrapped, in the band: stays");
+        check(fit_step(g, true, 950.0f, 1020, 60, 10) == Change::none && g.known && g.wrap, "wrapped, in the band: stays");
         Fit h;
-        check(fit_step(h, false, 1080, 1020, 10) == Change::wrap && h.wrap, "past the column: wrap");
-        check(fit_step(h, true, 900, 1020, 300) == Change::unwrap && !h.wrap, "fits with room later: unwrap");
-        check(fit_step(h, false, 1080, 1020, 330) == Change::lock && h.wrap && h.locked, "back within kFlipWindow: lock");
-        check(fit_step(h, true, 500, 1020, 9000) == Change::none && h.wrap, "locked: wrapped whatever it reads");
+        check(fit_step(h, false, 961, 1020, 60, 10) == Change::wrap && h.wrap, "past the space minus a row: wrap");
+        check(fit_step(h, true, 900, 1020, 60, 300) == Change::unwrap && !h.wrap, "fits with room later: unwrap");
+        check(fit_step(h, false, 1080, 1020, 60, 330) == Change::lock && h.wrap && h.locked, "back within kFlipWindow: lock");
+        check(fit_step(h, true, 500, 1020, 60, 9000) == Change::none && h.wrap, "locked: wrapped whatever it reads");
     }
     // ---- the fallback: no reading ----
     {
         Decider d;
         const float col[4] = {40, 30, 420, 1020}, none[4] = {}, nan[4] = {0, std::numeric_limits<float>::quiet_NaN(), 0, 0};
-        for (uint64_t f = 1; f <= 10; ++f) measure(d, false, true, f, col, none, none);
-        check(!d.fit.known, "a probe that reads zero is no height");
-        for (uint64_t f = 11; f <= 20; ++f) measure(d, false, true, f, col, none, nan);
-        check(!d.fit.known, "nor one that reads NaN");
-        for (uint64_t f = 21; f <= 30; ++f) measure(d, false, false, f, col, none, none);
-        check(!d.fit.known, "nor a call without the probe");
+        const float flat[4] = {40, 30, 420, 0};
+        for (uint64_t f = 1; f <= 10; ++f) measure(d, false, true, f, col, nan, nan, nan, 16);
+        check(!d.fit.known, "a top probe that reads NaN is no height");
+        for (uint64_t f = 11; f <= 20; ++f) measure(d, false, false, f, col, none, none, none, 16);
+        check(!d.fit.known, "nor a call without the probes");
+        for (uint64_t f = 21; f <= 30; ++f) measure(d, false, true, f, flat, none, none, none, 16);
+        check(!d.fit.known, "nor a column of no height");
         check(!wants(d.fit, rows::show_auto, 3) && wants(d.fit, rows::show_auto, 4) && wants(d.fit, rows::show_always, 4) &&
                   !wants(d.fit, rows::show_few, 12),
               "nothing read: the count rule (more than kFew mods' rows in ALWAYS and AUTO)");
-        // a build where the probe never reads: the count rule for the whole process
+        // probes that read zero (never laid out): the rows' count times a 60-unit row, and the count rule's yes besides
+        Decider e;
+        for (uint64_t f = 1; f <= 10; ++f) measure(e, false, true, f, col, none, none, none, 13);
+        check(e.fit.known && !e.fit.wrap && !e.fit.proven, "probes reading zero, 13 rows: 780 of 1020, not wrapped");
+        check(!wants(e.fit, rows::show_auto, 3) && wants(e.fit, rows::show_auto, 4), "not proven: the count rule may still wrap");
+        Decider g;
+        for (uint64_t f = 1; f <= 10; ++f) measure(g, false, true, f, col, none, none, none, 17);
+        check(g.fit.wrap && wants(g.fit, rows::show_auto, 0), "probes reading zero, 17 rows: 1020 of 1020, wrapped");
+        // a build where the probes never read: the rows' count decides with the count rule
         Sim s;
         s.broken_probe = true;
         s.mods = 2;
         s.run(300);
-        check(!s.wrapped && !s.d.fit.known, "probe unreadable, 2 mods' rows: not wrapped (the count rule)");
+        check(!s.wrapped && s.d.fit.known && !s.d.fit.proven, "probes unreadable, 16 rows: 960, at the limit: not wrapped");
         Sim t;
         t.broken_probe = true;
         t.mods = 4;
@@ -371,16 +454,24 @@ int main() {
         check(!fresh(t, true, false, 9) && !fresh(t, true, true, 10), "a call without the probe starts again");
     }
     {
-        // heights from rectangles: the rows from the first probe's top to the second's, the space the column's height
-        const float col[4] = {40, 30, 420, 1020}, top[4] = {40, 30, 0, 0}, end[4] = {40, 1110, 0, 0};
-        const float top_w[4] = {40, -200, 0, 0}, end_w[4] = {40, 880, 0, 0};  // wrapped, scrolled by 231
-        const Heights a = heights(col, top, end), b = heights(col, top_w, end_w);
-        check(a.ok && a.rows == 1080 && a.space == 1020, "not wrapped: end.y - top.y");
-        check(b.ok && b.rows == 1080 && b.space == 1020, "wrapped and scrolled: the same");
-        const float flat[4] = {40, 30, 420, 0}, zero[4] = {};
-        check(!heights(flat, top, end).ok, "a column of no height is no reading");
-        check(!heights(col, zero, zero).ok, "probes never laid out (zero) are no reading");
-        check(!heights(col, end, top).ok, "the end above the top is no reading");
+        // heights from rectangles: a row from the top probe to the one after the first entry, the rows to the bottom
+        // probe when that is at least the rows' count of rows, the space the column's height
+        const float col[4] = {40, 30, 420, 1020}, top[4] = {40, 30, 0, 0}, first[4] = {40, 90, 0, 0};
+        const float end[4] = {40, 1110, 0, 0};
+        const float top_w[4] = {40, -200, 0, 0}, first_w[4] = {40, -140, 0, 0}, end_w[4] = {40, 880, 0, 0};  // scrolled
+        const Heights a = heights(col, top, first, end, 17), b = heights(col, top_w, first_w, end_w, 17);
+        check(a.ok && a.proven && a.rows == 1080 && a.space == 1020 && a.pitch == 60, "not wrapped: end.y - top.y");
+        check(b.ok && b.proven && b.rows == 1080 && b.space == 1020, "wrapped and scrolled: the same");
+        const float flat[4] = {40, 30, 420, 0}, zero[4] = {}, owner[4] = {40, 1008, 0, 0};
+        check(!heights(flat, top, first, end, 17).ok, "a column of no height is no reading");
+        check(!heights(col, top, first, end, 0).ok, "no entries: no reading");
+        const Heights z = heights(col, zero, zero, zero, 17);
+        check(z.ok && !z.proven && z.pitch == kRowFallback && z.rows == 1020, "probes never laid out: 17 rows of 60");
+        const Heights o = heights(col, top, first, owner, 17);
+        check(o.ok && !o.proven && o.measured == 978 && o.rows == 1020, "the owner's 978: not proven, 17 rows of 60 decide");
+        const Heights up = heights(col, end, first, top, 17);
+        check(up.ok && !up.proven && up.measured == 0 && up.rows == 1020,
+              "the end above the top is no reading of the rows: 17 rows of 60 decide");
     }
     // the game's rectangles relative to their parents instead of absolute: the same decisions
     for (const size_t mods : {size_t{0}, size_t{1}, size_t{2}, size_t{4}, size_t{19}}) {

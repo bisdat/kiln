@@ -367,7 +367,9 @@ bool __fastcall hk_main_entry(void* state, const MainDesc* d) {
 bool __fastcall hk_sys_entry(const GameText* t, uint8_t p2, uint8_t attention) {
     const uintptr_t ret = g_sys_hook.caller();  // the game's call site, read before the original
     if (t && ret == L.sys_ret) {
+        uint32_t rows = 0;
         for (const Entry& e : entries_of(KILN_UI_MENU_PAUSE)) {
+            ++rows;
             const bool status_row = !overlay_drawing_on() && g_menu_open.load() && e.handle == g_builtin[1];
             const GameText c = status_row
                 ? GameText{g_native_mods_status.c_str(), g_native_mods_status.size(),
@@ -377,6 +379,7 @@ bool __fastcall hk_sys_entry(const GameText* t, uint8_t p2, uint8_t attention) {
             if (g_sys_hook.call<bool>(&c, p2, static_cast<uint8_t>((e.flags & KILN_UI_ENTRY_ATTENTION) ? 1 : 0)))
                 activated(e.handle);
         }
+        scroll_rows_drawn(rows);  // Kiln's rows count among the pause menu's entries (menu_scroll.cpp)
     }
     // the scrolling pause menu's height probes: before the menu's first entry and after its last (menu_scroll.cpp)
     scroll_entry_next();

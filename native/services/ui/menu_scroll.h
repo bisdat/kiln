@@ -86,27 +86,44 @@ constexpr bool wants(uint32_t mode, size_t mods_rows) {
 //    siblings: the same number whether the game's rectangles are absolute or relative to their parent, with any
 //    scroll offset, wrapped or not.
 // So both states read the same height for the same rows (the rows do not change with the wrap: AUTO draws every row
-// while the menu can scroll), and the decision is: rows taller than the space by more than kOver: wrap; shorter by
-// more than kRoom: unwrap; in between: as it is (hysteresis). The game's own spacer and build number below Quit do not
-// count: a menu whose Quit is on the screen is drawn as the game draws it.
-inline constexpr float kOver = 1.0f;    // rows taller than the space by more than this: wrap
-inline constexpr float kRoom = 12.0f;   // rows shorter than the space by more than this: unwrap
+// while the menu can scroll). The game's own spacer and build number below Quit do not count.
+//
+// The owner's dev build (2026-11-15, 1920x1080, hosted, 17 rows) read 978 of 1020 and did not scroll, with Quit below
+// the screen: the probe after Quit (which starts below the column) read the top of Return to Main Menu. The entry hook
+// sees every entry (Return to Main Menu and Quit are the builder's last two calls of the renderer, 0x140cd69b2 and
+// 0x140cd6a0d on 26430625), so the probe was after Quit: what lies below the column is not laid out where it is drawn,
+// or not at all. So the bottom probe is believed only where it can be checked:
+//  - a third probe right after the first entry gives one row's height (the pitch), near the top where the layout is
+//    whole; the rows are at least (entries drawn) x pitch (the game's renderer calls plus Kiln's rows; the gaps between
+//    the groups only add);
+//  - the bottom probe's reading counts when it is at least that (minus half a row): "proven". Else the rows are the
+//    count times the pitch, and the count rule may still wrap (wants: either one).
+// And the decision leans to scrolling (a menu that fits but scrolls costs nothing; a cut one loses Quit): wrap when the
+// rows are taller than the space minus one row; unwrap only kRoom below that; in between: as it is (hysteresis). A
+// bottom probe that reads the top of the first row ending below the column (the owner's case) reads more than the space
+// minus one row: it wraps too.
+inline constexpr float kOver = 0.0f;    // rows taller than (space - one row) by more than this: wrap
+inline constexpr float kTiny = 1.0f;    // a height below this is no reading
+inline constexpr float kRoom = 12.0f;   // rows shorter than (space - one row) by more than this: unwrap
+inline constexpr float kRowFallback = 60.0f;  // a row (UI units, the owner's 1080p screenshot) when no pitch reads
 inline constexpr uint32_t kSettle = 2;  // builder calls in a row before a reading counts: the third reads a laid-out tree
 inline constexpr uint64_t kFlipWindow = 120;  // UI frames: a decision that flips back sooner is an oscillation
 
 struct Fit {
     bool known = false;   // a reading decided (else the count rule)
     bool wrap = false;    // the decision once known
+    bool proven = false;  // the last reading's bottom was checked against the rows' count (else the count rule may wrap)
     bool locked = false;  // it flipped back within kFlipWindow frames: wrapped for the rest of the process
     uint32_t flips = 0;
     uint64_t flipped_at = 0;  // the UI frame of the last change
 };
 
 // Wrap the pause menu's column in this builder call?
-// By height once a reading decided; the count rule until then (the first frames of a process, or a build where the
-// probe reads nothing plausible).
+// By height once a reading decided (with the count rule's yes besides while the bottom is not proven); the count rule
+// until then (the first frames of a process, or a build where the probes read nothing plausible).
 constexpr bool wants(const Fit& f, uint32_t mode, size_t mods_rows) {
-    return f.known ? f.wrap : wants(mode, mods_rows);
+    if (!f.known) return wants(mode, mods_rows);
+    return f.wrap || (!f.proven && wants(mode, mods_rows));
 }
 
 // Consecutive builder calls with the probe in the same state (wrapped or not), on consecutive UI frames: a reading is
@@ -127,10 +144,15 @@ constexpr bool fresh(Track& t, bool wrapped, bool probed, uint64_t frame) {
     return t.run > kSettle;
 }
 
-// One reading from the rectangles (x, y, w, h): the column's and the two probes'.
+// One reading from the rectangles (x, y, w, h): the column's and the three probes' (before the first entry, after it,
+// after the last), and `entries`: the rows the builder call drew (the renderer's calls and Kiln's rows).
 struct Heights {
-    bool ok = false;
-    float rows = 0, space = 0;
+    bool ok = false;      // the column and the first row read: a decision can be made
+    bool proven = false;  // the bottom probe's reading is at least the rows' count times the pitch
+    float rows = 0;       // the height decided with: the bottom probe's when proven, else entries x pitch
+    float space = 0;      // the column's height
+    float pitch = 0;      // one row (the first entry's), or kRowFallback
+    float measured = 0;   // the bottom probe's reading (0: none)
 };
 
 inline bool finite4(const float r[4]) {
@@ -139,24 +161,37 @@ inline bool finite4(const float r[4]) {
     return true;
 }
 
-inline Heights heights(const float col[4], const float top[4], const float end[4]) {
+inline Heights heights(const float col[4], const float top[4], const float first[4], const float end[4],
+                       uint32_t entries) {
     Heights h;
-    if (!finite4(col) || !finite4(top) || !finite4(end) || col[3] <= 0.0f) return h;
+    if (!finite4(col) || col[3] <= 0.0f || !finite4(top) || entries == 0) return h;
     h.space = col[3];
-    h.rows = end[1] - top[1];
-    h.ok = h.rows > kOver && h.rows < 100000.0f;  // probes never laid out read 0: not a height
+    // one row: the first entry's height; a reading that is no row's (never laid out, absurd) leaves the fallback
+    const float pitch = finite4(first) ? first[1] - top[1] : 0.0f;
+    const bool pitch_ok = pitch > kTiny && pitch < h.space / 2;
+    h.pitch = pitch_ok ? pitch : kRowFallback;
+    const float least = static_cast<float>(entries) * h.pitch;  // the rows are at least this tall
+    if (finite4(end)) {
+        const float m = end[1] - top[1];
+        if (m > kTiny && m < 100000.0f) h.measured = m;
+    }
+    h.proven = pitch_ok && h.measured > 0.0f && h.measured + h.pitch / 2 >= least;
+    h.rows = h.proven ? h.measured : least > h.measured ? least : h.measured;
+    h.ok = true;
     return h;
 }
 
 enum class Change { none, wrap, unwrap, lock };
 
-// A trusted reading in UI frame `frame` of a builder call that was `wrapped`: the decision for the next calls. A change
-// that comes back within kFlipWindow frames of the one before means two readings disagree (the layout is not as
-// analysed): wrapped for the rest of the process, the safe side (Quit reachable either way).
-constexpr Change fit_step(Fit& f, bool wrapped, float rows, float space, uint64_t frame) {
+// A trusted reading in UI frame `frame` of a builder call that was `wrapped`: the decision for the next calls (`pitch`:
+// one row; the limit is the space minus one row). A change that comes back within kFlipWindow frames of the one
+// before means two readings disagree (the layout is not as analysed): wrapped for the rest of the process, the safe
+// side (Quit reachable either way).
+constexpr Change fit_step(Fit& f, bool wrapped, float rows, float space, float pitch, uint64_t frame) {
+    const float limit = space - pitch;
     bool want = wrapped;  // in the band: as it is
-    if (f.locked || rows > space + kOver) want = true;
-    else if (rows + kRoom < space) want = false;
+    if (f.locked || rows > limit + kOver) want = true;
+    else if (rows + kRoom < limit) want = false;
     f.known = true;
     f.wrap = want;
     if (want == wrapped) return Change::none;
@@ -182,14 +217,16 @@ struct Measured {
     Change change = Change::none;
 };
 
-// `probed`: both probes were placed in this call, the second after its last entry.
+// `probed`: the probes were placed in this call, the last after its last entry; `entries`: the rows it drew.
 inline Measured measure(Decider& d, bool wrapped, bool probed, uint64_t frame, const float col[4], const float top[4],
-                        const float end[4]) {
+                        const float first[4], const float end[4], uint32_t entries) {
     Measured m;
     if (!fresh(d.track, wrapped, probed, frame)) return m;
     m.trusted = true;
-    m.h = heights(col, top, end);
-    if (m.h.ok) m.change = fit_step(d.fit, wrapped, m.h.rows, m.h.space, frame);
+    m.h = heights(col, top, first, end, entries);
+    if (!m.h.ok) return m;
+    d.fit.proven = m.h.proven;
+    m.change = fit_step(d.fit, wrapped, m.h.rows, m.h.space, m.h.pitch, frame);
     return m;
 }
 

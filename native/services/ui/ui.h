@@ -143,6 +143,7 @@ bool scroll_on();                              // the pause menu can scroll in t
 void scroll_entry_next();                      // UI thread, before each call of the game's entry renderer: the top probe
 void scroll_entry_drawn(bool chosen);          // UI thread, after each call of the game's entry renderer (`chosen`: it
                                                // returned true): the end probe, Quit chosen
+void scroll_rows_drawn(uint32_t n);            // UI thread: Kiln drew n rows of its own in the pause menu (Settings' call)
 void scroll_after_frame(uint64_t frame);       // UI thread, after each UI frame: the frame count, the crash guard
 void scroll_exit();                            // on_unload (the process exits with code 0): the crash guard's marker goes
 bool game_unsubscribe(KilnHandle h);
