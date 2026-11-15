@@ -22,8 +22,9 @@ public sealed partial class AbilitiesTestMod
     private async Task TestAttachExplosion(int pass, string tag, WorldPosition p)
     {
         long calls = 0;
+        var selves = new System.Collections.Concurrent.ConcurrentQueue<EntityId>();  // the guided check 06c-natives.joined binds calls to explosions by it
         var attach = Abilities.Natives.Attach(ExplosionProgram, "getTransform", NativeStage.Before,
-            (ref NativeCall c) => Interlocked.Increment(ref calls), site: ExplosionGetTransformSite);
+            (ref NativeCall c) => { Interlocked.Increment(ref calls); selves.Enqueue(c.Self); }, site: ExplosionGetTransformSite);
         Check(attach.Ok, $"{tag}: Attach(0x{ExplosionProgram:x8}, getTransform, site 0x{ExplosionGetTransformSite:x8}): {attach.Reason ?? "ok"}");
         if (!attach.Ok) return;
         const uint hSelf = 0xFFFF0000, hT = 0xFFFF0001, hPos = 0xFFFF0002;
@@ -47,9 +48,10 @@ public sealed partial class AbilitiesTestMod
         var fromKiln = Abilities.Programs.Info(ExplosionProgram)?.FromKiln;
         var entered = (c1?.AttachEntered ?? 0) - (c0?.AttachEntered ?? 0);
         var skipped = (c1?.AttachSkipped ?? 0) - (c0?.AttachSkipped ?? 0);
-        Check(Interlocked.Read(ref calls) == 1 && fromKiln == false,
+        var seen = selves.ToArray();
+        Check(Interlocked.Read(ref calls) == 1 && fromKiln == false && seen is [var s1] && s1 == e1,
             $"{tag}: Attach(0x{ExplosionProgram:x8}, \"getTransform\", site 0x{ExplosionGetTransformSite:x8}): {Interlocked.Read(ref calls)} call per cast, " +
-            $"0 for other programs (program 0x{other:x8} called getTransform too), FromKiln {fromKiln}");
+            $"from that explosion (call's Self {string.Join(", ", seen)}, RunImpact gave {e1}), 0 for other programs (program 0x{other:x8} called getTransform too), FromKiln {fromKiln}");
         Check((long)entered == Interlocked.Read(ref calls) && skipped >= 1,
             $"{tag}: the thunk counter shows 0 managed transitions for non-matching calls: {entered} entered (= the handler's " +
             $"{Interlocked.Read(ref calls)}), {skipped} filtered out in native code");

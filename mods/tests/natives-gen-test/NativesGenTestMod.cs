@@ -68,9 +68,21 @@ public sealed class NativesGenTestMod : Mod
     private readonly List<ImpactSignalEvent> _signals = new();
     private readonly List<ImpactStartedEvent> _started = new();
     private readonly List<EntityId> _spawned = new();
+    private static readonly Guid LateProgram = new("06c0a5e0-0000-4000-8000-000000000004");  // registered after the world
+    private NativeAttachment? _onCooked, _onLate;
+    private NativeAttachmentState _cookedAtLoad, _lateAtLoad;
+    private long _cookedCalls, _lateCalls;
 
     public override void OnLoad()
     {
+        // review fix 4 and P1 item 3: attachments made before the world, to the cooked program (kiln.assets puts it in when
+        // the world's programs are) and to one this mod registers later; their state says where each stands
+        var a = Abilities.Natives.Attach(Abilities.Programs.IdOf(TwiceProgram), "getSelf", NativeStage.Before, (ref NativeCall c) => Interlocked.Increment(ref _cookedCalls));
+        var b = Abilities.Natives.Attach(Abilities.Programs.IdOf(LateProgram), "getSelf", NativeStage.Before, (ref NativeCall c) => Interlocked.Increment(ref _lateCalls));
+        _onCooked = a.Handle;
+        _onLate = b.Handle;
+        _cookedAtLoad = _onCooked?.State ?? NativeAttachmentState.Gone;
+        _lateAtLoad = _onLate?.State ?? NativeAttachmentState.Gone;
         // OnLoad runs before the mod's first tick, where Kiln registers its generated natives: only impact/natives.json
         // (read when kiln.abilities started) knows Twice's types now
         _registeredAtOnLoad = Natives.Twice.Registration is not null;
@@ -124,6 +136,30 @@ public sealed class NativesGenTestMod : Mod
             var sig = _signals.FirstOrDefault(s => s.Impact.Self == e1);
             Check(cooked is { FromKiln: true } && sig is { Tag: 0x6E, AsInt: 42 } && st is not null && sig.Step == st.Step && GenNatives.TwiceCalls - t0 == 1,
                 $"the cooked program calling the generated Twice answers in its start step: signal {sig?.AsInt} tag 0x{sig?.Tag:x} at step {sig?.Step}, started {st?.Step} ({cooked})");
+            Check(_cookedAtLoad == NativeAttachmentState.Pending && _onCooked?.State == NativeAttachmentState.Active && Interlocked.Read(ref _cookedCalls) == 1,
+                $"an attachment made before the world to the cooked program: {_cookedAtLoad} at load, {_onCooked?.State} once the world's programs are in, " +
+                $"{Interlocked.Read(ref _cookedCalls)} call when it ran");
+
+            // an attachment to a program that is registered only now: off at the readiness check, active after it went in
+            var lateBefore = _onLate?.State;
+            var statusBefore = Abilities.Status;
+            Abilities.Programs.Register(Program(LateProgram, [11, 0xFFFF0000, 19, 0x06c0a531, 0x01d09759, 27, 30],
+                [("Self::value", EntityIdType, 4, new byte[4])]));
+            await Steps(2);
+            var lateAfter = _onLate?.State;
+            var statusAfter = Abilities.Status;
+            var e4 = await Abilities.RunProgram(LateProgram, P(9));
+            _spawned.Add(e4);
+            await Steps(4);
+            Check(_lateAtLoad == NativeAttachmentState.Pending && lateBefore == NativeAttachmentState.Off && lateAfter == NativeAttachmentState.Active &&
+                  Interlocked.Read(ref _lateCalls) == 1,
+                $"an attachment to a program registered after the readiness check: {_lateAtLoad} at load, {lateBefore} at readiness, {lateAfter} " +
+                $"once the program went in, {Interlocked.Read(ref _lateCalls)} call when it ran");
+            // this mod's two attachments are the lab's only ones that name a program (run it alone)
+            Check(statusBefore is { AttachmentsOff: 1, AttachmentsPending: 0 } && statusAfter is { AttachmentsOff: 0, AttachmentsPending: 0 } &&
+                  statusAfter.AttachmentsActive == statusBefore.AttachmentsActive + 1,
+                $"Abilities.Status counts the attachments' states: off {statusBefore?.AttachmentsOff} -> {statusAfter?.AttachmentsOff}, " +
+                $"active {statusBefore?.AttachmentsActive} -> {statusAfter?.AttachmentsActive}, pending {statusAfter?.AttachmentsPending}");
 
             // a loop over 5 with Sum5, all in the start step
             const uint hSum = 0xFFFF0000, hI = 0xFFFF0001;

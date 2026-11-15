@@ -7,8 +7,11 @@ streams none
 
 var $out sint32
 var $in  sint32 = 21
+var $self ecs.EntityId
 
 code:
+        ecall getSelf($self)
+        pop
         ecall natives-gen-test.Twice($out, $in)
         pop
         ecall kiln.Signal($out, 0x6E)

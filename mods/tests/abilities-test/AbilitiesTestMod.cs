@@ -319,6 +319,7 @@ public sealed partial class AbilitiesTestMod : Mod
             Info($"status at the end: {Abilities.Status}");
             Info($"summary: {_pass} PASS, {_fail} FAIL");
         }
+        if (FindAnchor() is { } w) await TestWorldStopWhileInside(new WorldPosition(w.X + 40, w.Y + 0.5, w.Z + 120));
     }
 
     private WorldPosition? FindAnchor()
