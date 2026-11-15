@@ -57,3 +57,14 @@ Path(sys.argv[2]).write_text(s[s.index("void watchdog_loop()"):s.index("void sta
 PYCODE
 g++ "${flags[@]}" -I"$out" "$here/watchdog_test.cpp" -o "$out/watchdog_test"
 "$out/watchdog_test"
+
+python3 - "$here/../abilities.cpp" "$out/ecs_under_test.h" <<'PYCODE'
+from pathlib import Path
+import sys
+s = Path(sys.argv[1]).read_text()
+start = s.index("bool world_foreign()")
+prefix = s[start:s.index("\n}\n", start) + 3]
+Path(sys.argv[2]).write_text(prefix + s[s.index("const EcsView* ecs_for("):s.index("// ---- the watchdog")])
+PYCODE
+g++ "${flags[@]}" -I"$out" "$here/ecs_test.cpp" -o "$out/ecs_test"
+"$out/ecs_test"

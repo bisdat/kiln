@@ -657,7 +657,14 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
 
     private bool WaitsForQuiet(LoadedMod mod, Action finish, string what)
     {
-        if (_waitingUnloads.Exists(w => ReferenceEquals(w.Mod, mod))) return true;
+        var waiting = _waitingUnloads.FindIndex(w => ReferenceEquals(w.Mod, mod));
+        if (waiting >= 0)
+        {
+            // An unload/reload requested during a deferred disable must still remove the old context.
+            if (what == "unload" && _waitingUnloads[waiting].What == "disable")
+                _waitingUnloads[waiting] = _waitingUnloads[waiting] with { Finish = finish, What = what };
+            return true;
+        }
         var inside = mod.ModContext.BeginUnload();  // its own admission closes now in any case
         var waits = WaitsFor(mod, inside);
         if (waits is null) return false;
@@ -741,8 +748,9 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
     public void UnloadAll(string reason)
     {
         ChangeNoticeQueue.FlushFinal(reason);
+        _afterUnloads.Clear();  // shutdown must never resume a previously queued reload
         for (var i = _mods.Count - 1; i >= 0; i--)
-            if (!UnloadWaiting(_mods[i].Id)) UnloadOne(_mods[i], ModState.Unloaded, reason);
+            UnloadOne(_mods[i], ModState.Unloaded, reason);  // also upgrade a waiting disable to a full unload
         // no Pre follows: wait here for the calls still inside, then skip what still waits (never forced)
         var sw = Stopwatch.StartNew();
         while (_waitingUnloads.Count > 0 && sw.Elapsed < ShutdownWait)

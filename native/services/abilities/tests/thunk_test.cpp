@@ -8,6 +8,7 @@ struct NativeResult { uint8_t error; uint32_t zero; uint8_t value; };
 struct ArgSlice {};
 struct NativeCtx {};
 std::atomic<uint32_t> g_inflight{0};
+thread_local NativeCtx* t_ctx = nullptr;
 thread_local int t_slot = -1;
 thread_local bool t_orig_ran = false, t_in_game = false;
 thread_local int32_t t_stage = 0;

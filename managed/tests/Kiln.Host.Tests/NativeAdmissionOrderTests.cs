@@ -26,6 +26,97 @@ public sealed unsafe class NativeAdmissionOrderTests : ModsFixture
     }
 
     [Fact]
+    public void An_unload_upgrades_a_waiting_disable_to_a_full_unload()
+    {
+        InstallHello();
+        var host = new FakeHost();
+        using var mods = NewManager(host);
+        mods.LoadAll();
+        var old = mods.Find("hello")!;
+        bool held = true;
+        old.ModContext.UnloadStarting += () => held ? "fixture call" : null;
+        typeof(ModManager).GetMethod("Disable", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(mods, [old, "fixture", new InvalidOperationException("fixture fault")]);
+        mods.Unload("hello", out _);
+        held = false;
+        mods.Pre(Tick(1), []);
+        Assert.Null(mods.Find("hello"));
+    }
+
+    [Fact]
+    public void Shutdown_fully_unloads_a_mod_whose_disable_was_waiting()
+    {
+        InstallHello();
+        var host = new FakeHost();
+        using var mods = NewManager(host);
+        mods.LoadAll();
+        var old = mods.Find("hello")!;
+        bool held = true;
+        old.ModContext.UnloadStarting += () => held ? "fixture call" : null;
+        typeof(ModManager).GetMethod("Disable", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(mods, [old, "fixture", new InvalidOperationException("fixture fault")]);
+        held = false;
+        mods.UnloadAll("test shutdown");
+        Assert.Null(mods.Find("hello"));
+        Assert.Empty(mods.Mods);
+    }
+
+    [Fact]
+    public void An_unload_step_added_by_another_step_is_not_lost()
+    {
+        InstallHello();
+        var host = new FakeHost();
+        using var mods = NewManager(host);
+        mods.LoadAll();
+        var ctx = mods.Find("hello")!.ModContext;
+        bool held = true;
+        ctx.UnloadStarting += () =>
+        {
+            ctx.UnloadStarting += () => held ? "late service call" : null;
+            return null;
+        };
+        mods.Unload("hello", out _);
+        Assert.NotNull(mods.Find("hello"));
+        Assert.False(host.Has("goodbye"));
+        held = false;
+        mods.Pre(Tick(1), []);
+        Assert.Null(mods.Find("hello"));
+    }
+
+    [Fact]
+    public void Shutdown_does_not_resume_a_queued_reload()
+    {
+        InstallHello();
+        var host = new FakeHost();
+        using var mods = NewManager(host);
+        mods.LoadAll();
+        bool held = true;
+        mods.Find("hello")!.ModContext.UnloadStarting += () => held ? "fixture call" : null;
+        Assert.True(mods.ReloadCore("hello").Ok);
+        held = false;
+        mods.UnloadAll("test shutdown");
+        Assert.Null(mods.Find("hello"));
+        Assert.Empty(mods.Mods);
+    }
+
+    [Fact]
+    public void Repeated_reload_requests_keep_only_one_replacement()
+    {
+        InstallHello();
+        var host = new FakeHost();
+        using var mods = NewManager(host);
+        mods.LoadAll();
+        bool held = true;
+        mods.Find("hello")!.ModContext.UnloadStarting += () => held ? "fixture call" : null;
+        Assert.True(mods.ReloadCore("hello").Ok);
+        Assert.True(mods.ReloadCore("hello").Ok);
+        held = false;
+        mods.Pre(Tick(1), []);
+        Assert.Single(mods.Mods);
+        mods.UnloadAll("test cleanup");
+    }
+
+    [Fact]
     public void A_handler_inside_when_the_unload_begins_leaves_before_OnUnload_runs()
     {
         InstallHello();

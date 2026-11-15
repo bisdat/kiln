@@ -112,7 +112,9 @@ public readonly ref struct NativeContext
     /// game's formulas (read it, change its values, write it back). A change raises one
     /// <c>ComponentWrittenEvent</c> per entity and component per step on the tick thread, its <c>Writer</c>
     /// <c>"&lt;modid&gt;/native:&lt;name&gt;"</c>. Since 0.2.0-dev.29. False, with no access, for a type not in the
-    /// program's other_write list, an entity without it, or <c>abilities.natives.ecs</c> off in this world.</summary>
+    /// program's other_write list, an entity without it, or <c>abilities.natives.ecs</c> off in this world.
+    /// Attribute headers must match the current component. A fault closes the bridge for this world;
+    /// writes already made are not rolled back.</summary>
     [AnyThread]
     public bool TryWrite<T>(EntityId entity, in T value) where T : unmanaged, IGameComponent<T> => NativeEcs.TryWrite(_call, entity, in value);
 
