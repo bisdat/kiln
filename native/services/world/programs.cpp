@@ -1295,8 +1295,18 @@ void programs_client_init(bool client_tick, bool world_events) {
 
 bool programs_client_on() { return g_client_on.load(); }
 
-KilnResult reserve_program_world(const std::string& mod, const std::string& key, const KilnProgramDesc* desc, uint32_t worlds) {
-    if (worlds == kWorldBitServer) return reserve_program(mod, key, desc);
+KilnResult reserve_program_world(const std::string& mod, const std::string& key, const KilnProgramDesc* desc, uint32_t worlds, uint32_t declared_worlds) {
+    if (!declared_worlds) declared_worlds = worlds;
+    if (worlds == kWorldBitServer) {
+        const auto result = reserve_program(mod, key, desc);
+        if (result == KILN_OK && declared_worlds != worlds) {
+            std::lock_guard lock(g_mutex);
+            for (Program* p : g_programs)
+                if (p->reserved_mod == mod && p->reserved_key == key)
+                    p->reservation = reservation_text(desc, 1, declared_worlds);
+        }
+        return result;
+    }
     if (!worlds || (worlds & ~(kWorldBitServer | kWorldBitClient | kWorldBitPrediction))) return KILN_ERR_INVALID_ARGUMENT;
     if (!g_client_on.load()) return KILN_ERR_UNAVAILABLE;
     if (programs_registered() + kBuiltinHeadroom >= static_cast<uint32_t>(kMaxPrograms)) {
@@ -1307,7 +1317,7 @@ KilnResult reserve_program_world(const std::string& mod, const std::string& key,
     KilnHandle handle = 0;
     const auto result = register_program_in(g_owner, desc, &handle, false, worlds);
     if (result != KILN_OK) return result;
-    std::string snapshot = reservation_text(desc, 1, worlds);  // the interval every Kiln program gets
+    std::string snapshot = reservation_text(desc, 1, declared_worlds);  // the interval every Kiln program gets
     std::lock_guard lock(g_mutex);
     Program* p = g_programs[handle - 1];
     p->reservation = std::move(snapshot);

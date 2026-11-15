@@ -57,6 +57,17 @@ public sealed unsafe class EcsProgramsClientTests : KilnTest
     }
 
     [Fact]
+    public void A_program_waiting_for_the_next_world_is_not_running_in_this_one()
+    {
+        _native.States["pin"] = (0, "registered from the next client world");
+        var r = As(NewMod("pinner"), () => EcsPrograms.TryBind("pin", _ => { }, WorldKind.Client));
+        Assert.False(r.Ok);
+        Assert.Contains("next client world", r.Reason);
+        Assert.NotNull(r.Handle);
+        r.Handle.Dispose();
+    }
+
+    [Fact]
     public void Off_the_main_thread_a_client_bind_throws_and_roots_nothing()
     {
         _native.MainThread = false;
@@ -124,8 +135,12 @@ public sealed unsafe class EcsProgramsClientTests : KilnTest
         binding.Dispose();
         Assert.True(binding.Root.IsAllocated);  // a running call holds it: never freed
         Assert.True(Backend.Logged("still running when it was unbound"));
-        binding.Dispose();  // a second dispose does nothing more
-        Assert.Equal(1, _native.Unbinds);
+        _native.CallRunning = false;
+        Step(2);
+        Assert.False(binding.Root.IsAllocated);
+        Assert.Equal(2, _native.Unbinds);
+        binding.Dispose();
+        Assert.Equal(2, _native.Unbinds);
     }
 
     [Fact]
@@ -409,9 +424,11 @@ public sealed unsafe class EcsProgramsClientTests : KilnTest
         {
             var self = Current!;
             self.Unbinds++;
-            if (!self._handles.Remove(handle, out var k)) return 2;
+            if (!self._handles.TryGetValue(handle, out var k)) return 2;
             self.Bound.Remove(k);
-            return self.CallRunning ? 4 : 0;  // WRONG_THREAD: closed, a call still runs
+            if (self.CallRunning) return 4;
+            self._handles.Remove(handle);
+            return 0;  // WRONG_THREAD: closed, a call still runs
         }
 
         [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]

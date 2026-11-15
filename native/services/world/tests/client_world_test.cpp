@@ -684,6 +684,19 @@ int main(int argc, char** argv) {
         }
     check(client.count() == 896 && active == 2 && full == 4, "894 of 896: two register, four are refused before the game is called");
 
+    // A side-client mod or dedicated process filters a declared "both" to one world.
+    // The boot identity must still compare equal to the original file on reload.
+    auto filtered = both;
+    filtered.name = kstr("filtered_both");
+    check(reserve_program_world("filtered", "both", &filtered, kWorldBitClient,
+                                kWorldBitServer | kWorldBitClient) == KILN_OK,
+          "a filtered both declaration reserves its available side");
+    uint32_t snapshot_size = 0;
+    program_reservation(kstr("filtered"), kstr("both"), nullptr, 0, &snapshot_size);
+    std::string snapshot(snapshot_size, '\0');
+    program_reservation(kstr("filtered"), kstr("both"), snapshot.data(), snapshot_size, &snapshot_size);
+    check(snapshot.ends_with("world=both\n"), "boot identity preserves the declared world after side filtering");
+
     // ---- stop: nothing of a stopped world is reachable; the reason says why ----
     client_stops(client.at());
     check(!g_table_live.load() && g_table_stopping.load(), "after the stop no client-table call starts until the next world");
