@@ -9,6 +9,7 @@ internal interface ITerrainBackend
     string Mod { get; }
     /// <summary>The world runs (its save is loaded, so the ledger is this world's).</summary>
     bool WorldRunning { get; }
+    bool CanWaitForWorld => true;
     string? WorldId { get; }
     /// <summary>Grid size in cells (x, z), or null while unknown.</summary>
     (int X, int Z)? GridCells { get; }
@@ -50,6 +51,8 @@ internal sealed class BuildTerrainBackend(ModContext mod) : ITerrainBackend
     private readonly long _session = Lifecycle.ServerSession;
     public bool WorldRunning => mod.Alive && _session == Lifecycle.ServerSession && Lifecycle.Phase is not (ServerPhase.Stopping or ServerPhase.Idle) &&
         (Spawn.Available ? Spawn.WorldRunning : Build.Grid is not null);
+    public bool CanWaitForWorld => mod.Alive && _session == Lifecycle.ServerSession &&
+        Lifecycle.Phase is not (ServerPhase.Stopping or ServerPhase.Idle);
     public DataMatch LoadedData => WorldData.Loaded;
     // A new world's GUID can be assigned by its first save. Its process session is stable across that save,
     // and WorldRunning invalidates this backend when the session ends. WorldData selects the persistent GUID.

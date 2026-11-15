@@ -5,7 +5,14 @@
 #include <fstream>
 #include <string>
 #include <unistd.h>
+#define KILN_CALL
+struct KilnWorldEvent { int kind, event; };
+constexpr int KILN_WORLD_SERVER = 1, KILN_WORLD_STOPPING = 2;
 namespace kb {
+int voxel_closes = 0, transient_closes = 0;
+void vox_world_closed() { ++voxel_closes; }
+void transient_world_closed() { ++transient_closes; }
+
 struct { bool persist = true; } F;
 std::string identity;
 std::string current_world() { return identity; }
@@ -66,6 +73,10 @@ int main() {
     bind(""); keep(128); kb::close_locked();  // a world closed before its first save
     bind("A");
     check(kb::g_chunks.count({4,0,0}) == 0, "an unidentified world's close discards only its pending chunks");
+    KilnWorldEvent stop{KILN_WORLD_SERVER, KILN_WORLD_STOPPING};
+    kb::on_world(&stop, nullptr);
+    check(kb::voxel_closes == 1, "world stop invalidates cached voxel pointers even if the next world reuses its address");
+    check(kb::transient_closes == 1, "world stop unbinds the journal even when no menu server tick occurs");
     std::filesystem::remove_all(dir);
     std::printf("regions: %d passed, %d failed\n", passed, failed);
     return failed ? 1 : 0;

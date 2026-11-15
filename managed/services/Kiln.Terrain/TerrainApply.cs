@@ -439,6 +439,12 @@ internal sealed class TerrainEngine(ITerrainBackend backend, TerrainSession sess
 
     private bool TryBook([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out TerrainBook? book, out string? error)
     {
+        if (!backend.WorldRunning)
+        {
+            book = null;
+            error = "the world is not running";
+            return false;
+        }
         try
         {
             book = backend.Book(); // opens this world's sidecar before its match is inspected
@@ -463,7 +469,7 @@ internal sealed class TerrainEngine(ITerrainBackend backend, TerrainSession sess
         var until = DateTime.UtcNow + WorldWait;
         while (!backend.WorldRunning)
         {
-            if (cancel.IsCancellationRequested || DateTime.UtcNow > until) return false;
+            if (!backend.CanWaitForWorld || cancel.IsCancellationRequested || DateTime.UtcNow > until) return false;
             await backend.NextTick();
         }
         return true;
