@@ -1132,7 +1132,9 @@ uint32_t entity_hash(uint32_t k) {
     return (x >> 16) ^ x;
 }
 
-bool map_find_ptr(uintptr_t map, uint32_t key, uintptr_t* value) {  // the entity map: u32 keys, pointer values
+bool map_find_ptr(uintptr_t map, uint32_t key, uintptr_t* value, uint64_t* out_cap = nullptr, uint32_t* out_count = nullptr) {
+    if (out_cap) *out_cap = 0;
+    if (out_count) *out_count = 0;
     if (!map || !L.map.ok()) return false;
     uint64_t cap = 0;
     uint32_t count = 0;
@@ -1149,10 +1151,24 @@ bool map_find_ptr(uintptr_t map, uint32_t key, uintptr_t* value) {  // the entit
         uint32_t k = 0;
         if (!seh_copy(&word, reinterpret_cast<const void*>(bits + (i >> 6) * 8), 8) || !((word >> (i & 63)) & 1)) return false;
         if (!seh_copy(&k, reinterpret_cast<const void*>(keys + i * 4), 4)) return false;
-        if (k == key) return seh_copy(value, reinterpret_cast<const void*>(values + i * 8), 8);
+        if (k == key) {
+            if (out_cap) *out_cap = cap;
+            if (out_count) *out_count = count;
+            return seh_copy(value, reinterpret_cast<const void*>(values + i * 8), 8);
+        }
         i = (i + 1 == cap) ? 0 : i + 1;
     }
     return false;
+}
+// A host-test seam: called once in game_slice_archetype between the layout read and the coherence re-check, so a test can
+// change the map (a concurrent insert/erase/grow) at exactly that window. Null in production.
+std::atomic<void (*)()> g_archetype_test_gap{nullptr};
+
+// The entity map's capacity and count now, for the archetype read's coherence re-check (below).
+bool map_shape(uintptr_t map, uint64_t* cap, uint32_t* count) {
+    return map && L.map.ok() &&
+           seh_copy(count, reinterpret_cast<const void*>(map + L.map.count), 4) &&
+           seh_copy(cap, reinterpret_cast<const void*>(map + L.map.cap), 8);
 }
 }  // namespace
 
@@ -1225,16 +1241,31 @@ KilnResult KILN_CALL game_slice_archetype(KilnGameSlice* slice, uintptr_t* out_l
     if (!slice->count || !slice->entity_ids) return KILN_ERR_NOT_FOUND;
     if (L.entity_id < 0) return KILN_ERR_UNAVAILABLE;  // a record cannot be told from a reused one
     uintptr_t storage = 0, rec = 0, layout = 0;
-    uint32_t named = 0;
+    uint32_t named = 0, named2 = 0;
     const uint32_t id = slice->entity_ids[0];
     std::memcpy(&storage, f->ctx->job, sizeof storage);
-    // The map has no lock and its records come from a pool that DestroyEntity frees at once (the erase, server 0x685650 /
-    // client 0x9e96b0): a record is trusted only when it still names the entity asked for (CreateEntity writes the id at
-    // record+0x10 on both builds); a record the pool gave to another entity is a miss, not that entity's archetype.
-    if (!storage || !map_find_ptr(storage + static_cast<uintptr_t>(L.storage_entities), id, &rec) || !rec ||
+    const uintptr_t map = storage + static_cast<uintptr_t>(L.storage_entities);
+    // No scheduler-stable archetype reaches a program's update. The game hands the update only ctx = {J, index}; the
+    // engine's slice record carries the layout at +0x18 and the archetype group at +0x20, and ProgramRunner passes both to
+    // its column setup, but stores neither pointer into J (out/06a-program-wraps/client-static/r5: runner-server.txt,
+    // colsetup-server.txt). So the archetype is read from the entity map, which has no lock. Its records come from a pool
+    // DestroyEntity frees at once, and an insert can grow and reallocate the arrays. On a server world this is safe while
+    // slices run: a program's structural changes are deferred to the command buffer and applied at the step's end (chapter
+    // 06a 4.4, 9.6), not during StepPrograms; the entity map is at rest. What static reading cannot exclude is a mutation
+    // from another thread (a client world's network/replication create-destroy): so the read is made coherent and detects
+    // it. The map's capacity and count are read before and after, the record's id before and after the layout read; any
+    // change (a grow that moved the arrays, a concurrent insert/erase, a record freed or reused under the id) makes the
+    // archetype undecidable, so the filter turns off with its reason instead of trusting a torn or wrong read.
+    uint64_t cap = 0, cap2 = 0;
+    uint32_t count = 0, count2 = 0;
+    if (!storage ||
+        !map_find_ptr(map, id, &rec, &cap, &count) || !rec ||
         !seh_copy(&named, reinterpret_cast<const void*>(rec + static_cast<uintptr_t>(L.entity_id)), 4) || named != id ||
-        !seh_copy(&layout, reinterpret_cast<const void*>(rec + static_cast<uintptr_t>(L.entity_layout)), 8) || !layout)
-        return KILN_ERR_UNAVAILABLE;  // nonempty slice: cannot decide, rather than silently rejecting every slice
+        !seh_copy(&layout, reinterpret_cast<const void*>(rec + static_cast<uintptr_t>(L.entity_layout)), 8) || !layout ||
+        (g_archetype_test_gap.load() && (g_archetype_test_gap.load()(), false)) ||
+        !seh_copy(&named2, reinterpret_cast<const void*>(rec + static_cast<uintptr_t>(L.entity_id)), 4) || named2 != id ||
+        !map_shape(map, &cap2, &count2) || cap2 != cap || count2 != count)
+        return KILN_ERR_UNAVAILABLE;  // nonempty slice: cannot decide (undecidable or a concurrent map mutation), not a skip
     *out_layout = layout;
     return KILN_OK;
 }
@@ -1309,6 +1340,7 @@ std::string module_of(uintptr_t address) {
 
 // ---- host tests ----
 void wraps_test_budget_ns(uint64_t ns) { g_budget_ns.store(ns); }
+void wraps_test_archetype_gap(void (*fn)()) { g_archetype_test_gap.store(fn); }
 uint32_t wraps_test_in_flight(int pool) {
     uint32_t n = 0;
     for (const Slot& s : g_pools[pool].slots) n += s.in_flight.load();
