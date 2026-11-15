@@ -125,6 +125,7 @@ bool resolve() {
     L.reg_templates = cst("world/registry.templates");
     L.storage_entities = cst("world/storage.entities");
     L.entity_layout = cst("world/entity.layout");
+    L.entity_id = cst("spawn/record.id");  // spawn's declaration (CreateEntity writes it at +0x10 on both builds)
     L.tp_applied = cst("world/teleport.applied");
     L.tp_find_ground = cst("world/teleport.find_ground");
     L.tp_target_entity = cst("world/teleport.target_entity");
