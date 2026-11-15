@@ -4,6 +4,7 @@
 // program once per archetype of the fake world's matching entities at the start of every step, through its stages in
 // kiln.world's order. The table's functions are SystemsTable.cs; kiln.world's table itself is World/WorldTable.cs.
 using System.Runtime.InteropServices;
+using System.Diagnostics;
 using System.Text;
 
 namespace Kiln.TestKit;
@@ -18,6 +19,7 @@ internal sealed class SystemsFake : IKitFake
     {
         // the table is World/WorldTable.cs's (kiln.world v4): SystemsTable.Fill put the game-program members in it
         FakeTables.Features([WrapsRow, TypedRow]);
+        WorldBudgetTable.Register();
         FakeTables.Offline("systems.define", "the test kit has no boot reservations (kiln.programs.json): Systems.Define needs a server");
         FakeTables.Offline("systems.wraps.client", "the test kit fakes a server world only");
         FakeTables.Offline("systems.threads", "the test kit runs every slice on its tick thread: no players mask, no workers");
@@ -45,8 +47,8 @@ internal sealed class SystemsFake : IKitFake
             "and with components (of the types the world knows; template data is not matched), on the tick thread: " +
             "Befores high priority first, then the Replace or the declared update, then the Afters in reverse. Per-entity stages iterate the slice and read " +
             "and write the entities' components in the fake world; marks are recorded (KilnHarness.Programs.Marks), WhenArchetype decides by the entity's " +
-            "component set, the contract is FNV-1a-32 of the lists. Not modelled: the game's workers and its scheduling order between programs, " +
-            "singleton slots (empty), attribute formulas (Changed() validates and changes nothing), budgets and native faults, client and prediction " +
+            "component set, the contract is FNV-1a-32 of the lists. The 1 ms stage budget excludes the original; ten consecutive overruns disable it. Managed faults use the real mod policy. Not modelled: the game's workers and its scheduling order between programs, " +
+            "singleton slots (empty), attribute formulas (Changed() validates and changes nothing), native faults, client and prediction " +
             "worlds, boot reservations (systems.define offline), native SET."));
 }
 
@@ -84,6 +86,9 @@ internal sealed unsafe class SystemsState
         public uint State = SystemsNative.Pending, Reason;
         public bool RemoveQueued, Gone;
         public long Calls, Entities;
+        public ulong Overruns, TotalNs;
+        public int Consecutive;
+        public uint Disabled;
         public string Detail = "";
     }
 
@@ -96,6 +101,7 @@ internal sealed unsafe class SystemsState
         public ulong* Iter;
         public int Row = -1;
         public bool OriginalCalled;
+        public long OriginalTicks;
         public readonly HashSet<(uint, uint)> Marked = [];
         public ulong Step;
     }
@@ -112,6 +118,7 @@ internal sealed unsafe class SystemsState
     private ulong _next = 1;
     private int _order;
 
+    internal Func<long> Timestamp = Stopwatch.GetTimestamp; // a controlled clock in the fake's own regression tests
     public ulong Session { get; private set; }
 
     public void Begin() => Session = (ulong)Interlocked.Increment(ref _sessions);
@@ -387,7 +394,7 @@ internal sealed unsafe class SystemsState
         Stage? replace;
         lock (_lock)
         {
-            var live = _stages.Values.Where(s => s.Program == p.Index && !s.Gone && s.State == SystemsNative.Active).ToList();
+            var live = _stages.Values.Where(s => s.Program == p.Index && !s.Gone && s.Disabled == 0 && s.State == SystemsNative.Active).ToList();
             befores = [.. live.Where(s => s.Kind == SystemsNative.Before).OrderByDescending(s => s.Priority).ThenBy(s => s.Order)];
             afters = [.. live.Where(s => s.Kind == SystemsNative.After).OrderBy(s => s.Priority).ThenByDescending(s => s.Order)];
             replace = live.FirstOrDefault(s => s.Kind == SystemsNative.Replace);
@@ -428,18 +435,29 @@ internal sealed unsafe class SystemsState
 
     private void Call(Frame f, Stage st)
     {
-        if (st.Gone) return;
+        if (st.Gone || st.Disabled != 0) return;
         f.Slice->Stage = st.Kind;
         f.OriginalCalled = false;
         f.Marked.Clear();
         var outer = Current;
         Current = f;
+        var original = f.OriginalTicks;
+        var start = Timestamp();
         try { st.Fn(f.Slice, st.User); }
         finally { Current = outer; }
+        var ticks = Math.Max(0, Timestamp() - start - (f.OriginalTicks - original));
+        var ns = (ulong)(ticks * (1_000_000_000.0 / Stopwatch.Frequency));
         lock (_lock)
         {
             st.Calls++;
             st.Entities += f.Ids.Length;
+            st.TotalNs += ns;
+            if (ns > 1_000_000)
+            {
+                st.Overruns++;
+                if (++st.Consecutive >= 10) st.Disabled = SystemsNative.ReasonBudget;
+            }
+            else st.Consecutive = 0;
         }
     }
 
@@ -447,7 +465,9 @@ internal sealed unsafe class SystemsState
     {
         f.OriginalCalled = true;
         lock (_lock) f.Program.Updates++;
-        f.Program.Update?.Invoke(new FakeProgramSlice(f.Program.Name, [.. f.Ids.Select(i => new EntityId(i))], f.Step));
+        var start = Timestamp();
+        try { f.Program.Update?.Invoke(new FakeProgramSlice(f.Program.Name, [.. f.Ids.Select(i => new EntityId(i))], f.Step)); }
+        finally { f.OriginalTicks += Timestamp() - start; }
     }
 
     internal string ListName(Program p, int list, int i) => list is >= 0 and < 16 && i >= 0 && i < p.Names[list].Length ? p.Names[list][i] : "";

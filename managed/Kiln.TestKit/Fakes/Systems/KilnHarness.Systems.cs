@@ -13,9 +13,9 @@ public sealed partial class KilnHarness
 }
 
 /// <summary>A fake program's descriptor lists: the game's component names (<c>"Fuel"</c>), singletons with their namespace.
-/// An entity is in the program's slices when it has every <see cref="Template"/>, <see cref="Read"/>, <see cref="Write"/>
-/// and <see cref="With"/> component, none of <see cref="Without"/>, and one of <see cref="AnyOf"/> when it is not empty
-/// (template data is a component of the entity in the fake world).</summary>
+/// An entity is in the program's slices when it has every known <see cref="Read"/>, <see cref="Write"/> and
+/// <see cref="With"/> component, none of <see cref="Without"/>, and one of <see cref="AnyOf"/> when it is not empty.
+/// Template data and component names whose type the fake world does not know are not matched as required components.</summary>
 public sealed record FakeProgramLists
 {
     /// <summary>tpl.</summary>
