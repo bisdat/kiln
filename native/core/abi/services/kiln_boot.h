@@ -267,10 +267,12 @@ typedef struct KilnBootApiV1 {
      * in kiln.log; the files the launcher reads (progress.json state "failed" with `reason`; boot.json, whose "boot"
      * section has "stop": {"code", "reason", "by", "mods"} and "exitCode": code), waited for on disk; then
      * `before_exit(user)` when not NULL (a game client's message to the player: it must return, and should return by
-     * itself, e.g. a message box with a timeout); then the process ends with `exit_code` without any DLL's detach code.
+     * itself, e.g. a message box with a timeout); callback faults are contained, and a 65-second overall deadline
+     * terminates even if the state writer or callback blocks; then the process ends with `exit_code` without any DLL's detach code.
      * Does not return. A Unix wrapper (Wine) sees the low byte of exit_code: give a code whose low byte says what it is
      * (KILN_BOOT_EXIT_CODE ends in 1, kiln.knowledge's KILN_KNOW_ROSTER_EXIT_CODE in 2), and say in `reason` that
      * restarting does not help. KILN_ERR_UNAVAILABLE: a stop is under way already (the process is about to end).
+     * A call while any core world is present is refused with KILN_ERR_UNAVAILABLE, without stop side effects.
      * KILN_ERR_INVALID_ARGUMENT: caller 0, an empty reason, exit_code 0 (nothing happens). */
     KilnResult(KILN_CALL* stop_start)(KilnOwner caller, KilnStr mods, KilnStr reason, uint32_t exit_code,
                                       void(KILN_CALL* before_exit)(void* user), void* user);
