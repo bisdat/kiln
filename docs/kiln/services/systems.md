@@ -136,7 +136,17 @@ made.Wrap!.AroundEach(
 - **The contract.** `Wrap<T>` asks kiln.world for the live descriptor's contract (`game_program_contract`) and refuses
   (`Ok = false`) when it is not the view's: on a game build whose program changed, the reason names each list that did
   (`+added -removed`), the flags or interval. A view binds an entity only on a slice of its own program whose live
-  contract is its own (asked once per world session), so a view never reads a slot of another layout.
+  contract is its own (asked once per world session).
+- **What each check covers.** Three checks stand between a view and the game's memory, each for one thing:
+  the **contract** (the FNV-1a-32 of the program's descriptor: its 21 lists in order, the masks, flags and interval) says
+  the view's positions name the program's own slots, which component sits in which slot; it says nothing about a
+  component's fields. The **layout check** (Kiln.Game's `Ecs.WhyNot<T>()`, recursive: every field, nested struct and enum
+  value of the component against the running game's type table, [typegen.md](../typegen.md)) runs before a typed
+  property hands out a reference, so a moved field or a changed nested layout refuses the access (it throws) instead of
+  reading the wrong bytes. The **reflected size** (kiln.world's slot size, `game_slice_slot`) bounds every access: a `T`
+  larger than the component is refused, and a component whose size kiln.world does not know refuses typed and untyped
+  access alike. `Attribute32` takes neither the layout check nor `T`: kiln.world checks that the slot's component is an
+  attribute and that its value block lies inside the component (`game_slice_attr_validate`) before any byte or formula.
 - **AroundEach** is a Before (capture, one `TSnap` per entity, kept for that slice on its thread) and an After (apply)
   at one priority: an onion around the higher priorities' stages. A capture that throws turns both off for good; that
   slice's snapshots are dropped and its update is the game's. Rows do not move inside a slice (structural changes wait
