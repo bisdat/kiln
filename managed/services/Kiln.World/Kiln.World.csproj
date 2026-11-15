@@ -22,5 +22,7 @@
     <!-- NativeContext's writes of other entities raise the same ComponentWrittenEvent (06c S5) -->
     <InternalsVisibleTo Include="Kiln.Abilities" />
     <InternalsVisibleTo Include="Kiln.Systems.Tests" />
+    <!-- dev.29 07 S7: the component watches' native mirrors and consumer, tested with the decisions -->
+    <InternalsVisibleTo Include="Kiln.Decisions.Tests" />
   </ItemGroup>
 </Project>

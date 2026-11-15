@@ -81,3 +81,116 @@ static Kiln.ProgramAccessLimits.operator ==(Kiln.ProgramAccessLimits? left, Kiln
 static Kiln.ProgramBudgetResult.operator !=(Kiln.ProgramBudgetResult? left, Kiln.ProgramBudgetResult? right) -> bool
 static Kiln.ProgramBudgetResult.operator ==(Kiln.ProgramBudgetResult? left, Kiln.ProgramBudgetResult? right) -> bool
 static Kiln.World.GetProgramBudget(Kiln.CapacityWorldKind kind = Kiln.CapacityWorldKind.Server) -> Kiln.ProgramBudgetResult!
+Kiln.AttributeValueChangedEvent
+Kiln.AttributeValueChangedEvent.After.get -> int
+Kiln.AttributeValueChangedEvent.Attribute.get -> Kiln.ObservedAttribute
+Kiln.AttributeValueChangedEvent.AttributeValueChangedEvent(Kiln.ComponentValueChangedEvent! change, Kiln.ObservedAttribute attribute, int before, int after, int maximumBefore, int maximumAfter) -> void
+Kiln.AttributeValueChangedEvent.Before.get -> int
+Kiln.AttributeValueChangedEvent.Change.get -> Kiln.ComponentValueChangedEvent!
+Kiln.AttributeValueChangedEvent.Involves(Kiln.EntityId entity) -> bool
+Kiln.AttributeValueChangedEvent.MaximumAfter.get -> int
+Kiln.AttributeValueChangedEvent.MaximumBefore.get -> int
+Kiln.ChangeOrigin
+Kiln.ChangeOrigin.Game = 1 -> Kiln.ChangeOrigin
+Kiln.ChangeOrigin.Kiln = 2 -> Kiln.ChangeOrigin
+Kiln.ChangeOrigin.Mixed = 3 -> Kiln.ChangeOrigin
+Kiln.ChangeOrigin.Unknown = 0 -> Kiln.ChangeOrigin
+Kiln.ComponentChanges
+Kiln.ComponentValueChangedEvent
+Kiln.ComponentValueChangedEvent.After.get -> System.ReadOnlyMemory<byte>
+Kiln.ComponentValueChangedEvent.Before.get -> System.ReadOnlyMemory<byte>
+Kiln.ComponentValueChangedEvent.Component.get -> string!
+Kiln.ComponentValueChangedEvent.ComponentValueChangedEvent(Kiln.EventEntityKey key, string! component, byte[]! before, byte[]! after, ulong step, Kiln.ChangeOrigin origin, string? sourceMod, System.Collections.Generic.IEnumerable<ulong>! tokens, System.Collections.Generic.IEnumerable<Kiln.EntityId>! roots, System.Collections.Generic.IEnumerable<ulong>! watches) -> void
+Kiln.ComponentValueChangedEvent.Entity.get -> Kiln.EntityId
+Kiln.ComponentValueChangedEvent.Involves(Kiln.EntityId entity) -> bool
+Kiln.ComponentValueChangedEvent.IsPresent.get -> bool
+Kiln.ComponentValueChangedEvent.Key.get -> Kiln.EventEntityKey
+Kiln.ComponentValueChangedEvent.OperationTokens.get -> System.Collections.Generic.IReadOnlyList<ulong>!
+Kiln.ComponentValueChangedEvent.Origin.get -> Kiln.ChangeOrigin
+Kiln.ComponentValueChangedEvent.RootEntities.get -> System.Collections.Generic.IReadOnlyList<Kiln.EntityId>!
+Kiln.ComponentValueChangedEvent.SourceMod.get -> string?
+Kiln.ComponentValueChangedEvent.Step.get -> ulong
+Kiln.ComponentValueChangedEvent.WasPresent.get -> bool
+Kiln.ComponentValueChangedEvent.WatchIds.get -> System.Collections.Generic.IReadOnlyList<ulong>!
+Kiln.ComponentValueChangedEvent.World.get -> Kiln.WorldKind
+Kiln.ComponentWatch
+Kiln.ComponentWatch.Dispose() -> void
+Kiln.ComponentWatch.Id.get -> ulong
+Kiln.ComponentWatch.LastCompleteStep.get -> ulong
+Kiln.ComponentWatch.Pairs.get -> int
+Kiln.ComponentWatch.Reason.get -> string?
+Kiln.ComponentWatch.Request.get -> Kiln.ComponentWatchRequest!
+Kiln.ComponentWatch.State.get -> Kiln.ComponentWatchState
+Kiln.ComponentWatch.World.get -> Kiln.WorldKind
+Kiln.ComponentWatchExpansion
+Kiln.ComponentWatchExpansion.None = 0 -> Kiln.ComponentWatchExpansion
+Kiln.ComponentWatchExpansion.PlayerInventoryAndItems = 1 -> Kiln.ComponentWatchExpansion
+Kiln.ComponentWatchRequest
+Kiln.ComponentWatchRequest.<Clone>$() -> Kiln.ComponentWatchRequest!
+Kiln.ComponentWatchRequest.ComponentWatchRequest(Kiln.ComponentWatchScope Scope, System.Collections.Generic.IReadOnlyList<Kiln.EntityId>! Entities, Kiln.ObservedComponents Components, Kiln.ComponentWatchExpansion Expansion = Kiln.ComponentWatchExpansion.None) -> void
+Kiln.ComponentWatchRequest.Components.get -> Kiln.ObservedComponents
+Kiln.ComponentWatchRequest.Components.init -> void
+Kiln.ComponentWatchRequest.Deconstruct(out Kiln.ComponentWatchScope Scope, out System.Collections.Generic.IReadOnlyList<Kiln.EntityId>! Entities, out Kiln.ObservedComponents Components, out Kiln.ComponentWatchExpansion Expansion) -> void
+Kiln.ComponentWatchRequest.Entities.get -> System.Collections.Generic.IReadOnlyList<Kiln.EntityId>!
+Kiln.ComponentWatchRequest.Entities.init -> void
+Kiln.ComponentWatchRequest.Equals(Kiln.ComponentWatchRequest? other) -> bool
+Kiln.ComponentWatchRequest.Expansion.get -> Kiln.ComponentWatchExpansion
+Kiln.ComponentWatchRequest.Expansion.init -> void
+Kiln.ComponentWatchRequest.Scope.get -> Kiln.ComponentWatchScope
+Kiln.ComponentWatchRequest.Scope.init -> void
+Kiln.ComponentWatchResult
+Kiln.ComponentWatchResult.<Clone>$() -> Kiln.ComponentWatchResult!
+Kiln.ComponentWatchResult.ComponentWatchResult(bool Ok, string? Reason, Kiln.ComponentWatch? Watch, int Pairs) -> void
+Kiln.ComponentWatchResult.Deconstruct(out bool Ok, out string? Reason, out Kiln.ComponentWatch? Watch, out int Pairs) -> void
+Kiln.ComponentWatchResult.Equals(Kiln.ComponentWatchResult? other) -> bool
+Kiln.ComponentWatchResult.Ok.get -> bool
+Kiln.ComponentWatchResult.Ok.init -> void
+Kiln.ComponentWatchResult.Pairs.get -> int
+Kiln.ComponentWatchResult.Pairs.init -> void
+Kiln.ComponentWatchResult.Reason.get -> string?
+Kiln.ComponentWatchResult.Reason.init -> void
+Kiln.ComponentWatchResult.Watch.get -> Kiln.ComponentWatch?
+Kiln.ComponentWatchResult.Watch.init -> void
+Kiln.ComponentWatchScope
+Kiln.ComponentWatchScope.Entities = 0 -> Kiln.ComponentWatchScope
+Kiln.ComponentWatchScope.Players = 1 -> Kiln.ComponentWatchScope
+Kiln.ComponentWatchState
+Kiln.ComponentWatchState.Disposed = 3 -> Kiln.ComponentWatchState
+Kiln.ComponentWatchState.Ready = 0 -> Kiln.ComponentWatchState
+Kiln.ComponentWatchState.SuspendedBudget = 1 -> Kiln.ComponentWatchState
+Kiln.ComponentWatchState.SuspendedMetadata = 2 -> Kiln.ComponentWatchState
+Kiln.ComponentWatchStateChangedEvent
+Kiln.ComponentWatchStateChangedEvent.ComponentWatchStateChangedEvent(ulong watchId, Kiln.ComponentWatchState state, string? reason, ulong lastCompleteStep) -> void
+Kiln.ComponentWatchStateChangedEvent.LastCompleteStep.get -> ulong
+Kiln.ComponentWatchStateChangedEvent.Reason.get -> string?
+Kiln.ComponentWatchStateChangedEvent.State.get -> Kiln.ComponentWatchState
+Kiln.ComponentWatchStateChangedEvent.WatchId.get -> ulong
+Kiln.ObservedAttribute
+Kiln.ObservedAttribute.Fuel = 4 -> Kiln.ObservedAttribute
+Kiln.ObservedAttribute.Health = 1 -> Kiln.ObservedAttribute
+Kiln.ObservedAttribute.Mana = 3 -> Kiln.ObservedAttribute
+Kiln.ObservedAttribute.Stamina = 2 -> Kiln.ObservedAttribute
+Kiln.ObservedComponents
+Kiln.ObservedComponents.All = Kiln.ObservedComponents.Health | Kiln.ObservedComponents.Stamina | Kiln.ObservedComponents.Mana | Kiln.ObservedComponents.Fuel | Kiln.ObservedComponents.Inventory | Kiln.ObservedComponents.SlotSelection -> Kiln.ObservedComponents
+Kiln.ObservedComponents.Fuel = 8 -> Kiln.ObservedComponents
+Kiln.ObservedComponents.Health = 1 -> Kiln.ObservedComponents
+Kiln.ObservedComponents.Inventory = 16 -> Kiln.ObservedComponents
+Kiln.ObservedComponents.Mana = 4 -> Kiln.ObservedComponents
+Kiln.ObservedComponents.None = 0 -> Kiln.ObservedComponents
+Kiln.ObservedComponents.SlotSelection = 32 -> Kiln.ObservedComponents
+Kiln.ObservedComponents.Stamina = 2 -> Kiln.ObservedComponents
+const Kiln.ComponentChanges.Capability = "events.component_net" -> string!
+override Kiln.ComponentWatchRequest.Equals(object? obj) -> bool
+override Kiln.ComponentWatchRequest.GetHashCode() -> int
+override Kiln.ComponentWatchRequest.ToString() -> string!
+override Kiln.ComponentWatchResult.Equals(object? obj) -> bool
+override Kiln.ComponentWatchResult.GetHashCode() -> int
+override Kiln.ComponentWatchResult.ToString() -> string!
+static Kiln.ComponentChanges.Resume(Kiln.ComponentWatch! watch) -> Kiln.ComponentWatchResult!
+static Kiln.ComponentChanges.Watch(Kiln.ComponentWatchRequest! request) -> Kiln.ComponentWatchResult!
+static Kiln.ComponentWatchRequest.operator !=(Kiln.ComponentWatchRequest? left, Kiln.ComponentWatchRequest? right) -> bool
+static Kiln.ComponentWatchRequest.operator ==(Kiln.ComponentWatchRequest? left, Kiln.ComponentWatchRequest? right) -> bool
+static Kiln.ComponentWatchResult.operator !=(Kiln.ComponentWatchResult? left, Kiln.ComponentWatchResult? right) -> bool
+static Kiln.ComponentWatchResult.operator ==(Kiln.ComponentWatchResult? left, Kiln.ComponentWatchResult? right) -> bool
+[KILNX001]static Kiln.ComponentChanges.LabCounters() -> string?
+[KILNX001]static Kiln.ComponentChanges.LabHoldDelivery(int steps) -> bool

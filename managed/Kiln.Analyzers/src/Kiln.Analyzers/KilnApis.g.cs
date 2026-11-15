@@ -151,6 +151,8 @@ internal static partial class KilnApis
         "M:Kiln.Combat.TryGetHealth(Kiln.EntityId,Kiln.Health@)", // Combat.TryGetHealth(EntityId, out Health): Services.RequireTickThread
         "M:Kiln.CommandContext.Reply(System.String)", // CommandContext.Reply(string): via Chat.Tell(EntityId, string)
         "M:Kiln.Commands.Execute(Kiln.CommandSource,System.String)", // Commands.Execute(CommandSource, string): Services.RequireTickThread
+        "M:Kiln.ComponentChanges.Resume(Kiln.ComponentWatch)", // ComponentChanges.Resume(ComponentWatch): Services.RequireTickThread
+        "M:Kiln.ComponentChanges.Watch(Kiln.ComponentWatchRequest)", // ComponentChanges.Watch(ComponentWatchRequest): Services.RequireTickThread
         "M:Kiln.Config.RegisterWorld``1(System.String)", // Config.RegisterWorld<T>(string?): Game.AssertTickThread
         "M:Kiln.Config.Register``1(Kiln.ConfigKind,System.String)", // Config.Register<T>(ConfigKind, string?): Game.AssertTickThread
         "M:Kiln.ConfigFile.Reload", // ConfigFile.Reload(): Game.AssertTickThread
