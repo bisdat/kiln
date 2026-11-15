@@ -24,15 +24,23 @@ public sealed class FrostMarkMod : Mod
 
     public override void OnLoad()
     {
-        // the sword's own hits (a weapon's OnHit needs no enhancement unlocked; a PerkBlock's OnHit takes the same effect)
-        Blocks.Define("frostmark-sword", new WeaponBlock
+        // the sword's own hits (a weapon's OnHit needs no enhancement unlocked; a PerkBlock's OnHit takes the same effect).
+        // Where the game's resources are not there (a unit test's harness), the native and the attachment still are.
+        try
         {
-            Name = "Frost Mark Sword",
-            Description = "Hits on a badly hurt enemy bite half again as deep.",
-            Class = WeaponClass.Sword,
-            Stats = new WeaponStats { Level = 5, Power = 20, Rarity = Rarity.Uncommon },
-            OnHit = [new EffectBlock { Run = Natives.OnHit, Damage = Damage.Ice(10), Flinch = Flinch.None }],
-        });
+            Blocks.Define("frostmark-sword", new WeaponBlock
+            {
+                Name = "Frost Mark Sword",
+                Description = "Hits on a badly hurt enemy bite half again as deep.",
+                Class = WeaponClass.Sword,
+                Stats = new WeaponStats { Level = 5, Power = 20, Rarity = Rarity.Uncommon },
+                OnHit = [new EffectBlock { Run = Natives.OnHit, Damage = Damage.Ice(10), Flinch = Flinch.None }],
+            });
+        }
+        catch (KilnUnavailableException e)
+        {
+            Log.Info($"frostmark: no sword here: {e.Message}");
+        }
         // an attachment to one call site of a vanilla program: the Fireball explosion's applyDamage, counted
         // (in OnLoad the capability rows may not be reported yet: ask by trying, and catch what says it is off here)
         try

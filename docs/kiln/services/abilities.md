@@ -594,4 +594,6 @@ events, as dev.27's buff work set them).
   dispatched waits for the next step, and an impact change that waited goes out only while the instance is the one
   written ([contract](../modding/contract.md#3-change-events)).
 - **Not done in dev.27:** `PlaySequence` keeps its `bool`.
-- Tested offline: `managed/tests/Kiln.Contract.Tests/Group8ContractTests.cs` and the conformance rules.
+- Tested offline: `managed/tests/Kiln.Contract.Tests/Group8ContractTests.cs` and the conformance rules; the natives
+  (sync natives, `[ImpactNative]`, attachments, typed declarations, the ECS bridge) on Kiln.TestKit's fake kiln.abilities
+  in `managed/tests/Kiln.TestKit.Tests/ImpactNativesFakeTests.cs` (docs/kiln/modding/unit-tests.md#impact-natives).

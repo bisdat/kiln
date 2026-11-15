@@ -1,8 +1,74 @@
 #nullable enable
+Kiln.TestKit.FakeEcall
+Kiln.TestKit.FakeEcall.Deconstruct(out string! Native, out uint Site) -> void
+Kiln.TestKit.FakeEcall.Equals(Kiln.TestKit.FakeEcall other) -> bool
+Kiln.TestKit.FakeEcall.FakeEcall() -> void
+Kiln.TestKit.FakeEcall.FakeEcall(string! Native, uint Site) -> void
+Kiln.TestKit.FakeEcall.Native.get -> string!
+Kiln.TestKit.FakeEcall.Native.init -> void
+Kiln.TestKit.FakeEcall.Site.get -> uint
+Kiln.TestKit.FakeEcall.Site.init -> void
+Kiln.TestKit.FakeGameNativeCall
+Kiln.TestKit.FakeGameNativeCall.ArgCount.get -> int
+Kiln.TestKit.FakeGameNativeCall.Bytes(int index) -> System.Span<byte>
+Kiln.TestKit.FakeGameNativeCall.FakeGameNativeCall() -> void
+Kiln.TestKit.FakeGameNativeCall.Get<T>(int index) -> T
+Kiln.TestKit.FakeGameNativeCall.Program.get -> uint
+Kiln.TestKit.FakeGameNativeCall.Set<T>(int index, T value) -> bool
+Kiln.TestKit.FakeGameNativeCall.Site.get -> uint
+Kiln.TestKit.FakeGameNativeHandler
+Kiln.TestKit.FakeImpactArg
+Kiln.TestKit.FakeImpactCall
+Kiln.TestKit.FakeImpactCall.Args.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeImpactArg!>!
+Kiln.TestKit.FakeImpactCall.FakeImpactCall(string! native, params Kiln.TestKit.FakeImpactArg![]! args) -> void
+Kiln.TestKit.FakeImpactCall.ImpactId.get -> uint
+Kiln.TestKit.FakeImpactCall.ImpactId.init -> void
+Kiln.TestKit.FakeImpactCall.Native.get -> string!
+Kiln.TestKit.FakeImpactCall.Program.get -> uint
+Kiln.TestKit.FakeImpactCall.Program.init -> void
+Kiln.TestKit.FakeImpactCall.Self.get -> Kiln.EntityId
+Kiln.TestKit.FakeImpactCall.Self.init -> void
+Kiln.TestKit.FakeImpactCall.Site.get -> uint
+Kiln.TestKit.FakeImpactCall.Site.init -> void
+Kiln.TestKit.FakeImpactCallRecord
+Kiln.TestKit.FakeImpactCallRecord.<Clone>$() -> Kiln.TestKit.FakeImpactCallRecord!
+Kiln.TestKit.FakeImpactCallRecord.Deconstruct(out ulong Step, out string! Native, out uint Hash, out uint Program, out uint Site, out byte Error, out byte Value, out int Handlers) -> void
+Kiln.TestKit.FakeImpactCallRecord.Equals(Kiln.TestKit.FakeImpactCallRecord? other) -> bool
+Kiln.TestKit.FakeImpactCallRecord.Error.get -> byte
+Kiln.TestKit.FakeImpactCallRecord.Error.init -> void
+Kiln.TestKit.FakeImpactCallRecord.FakeImpactCallRecord(ulong Step, string! Native, uint Hash, uint Program, uint Site, byte Error, byte Value, int Handlers) -> void
+Kiln.TestKit.FakeImpactCallRecord.Handlers.get -> int
+Kiln.TestKit.FakeImpactCallRecord.Handlers.init -> void
+Kiln.TestKit.FakeImpactCallRecord.Hash.get -> uint
+Kiln.TestKit.FakeImpactCallRecord.Hash.init -> void
+Kiln.TestKit.FakeImpactCallRecord.Native.get -> string!
+Kiln.TestKit.FakeImpactCallRecord.Native.init -> void
+Kiln.TestKit.FakeImpactCallRecord.Program.get -> uint
+Kiln.TestKit.FakeImpactCallRecord.Program.init -> void
+Kiln.TestKit.FakeImpactCallRecord.Site.get -> uint
+Kiln.TestKit.FakeImpactCallRecord.Site.init -> void
+Kiln.TestKit.FakeImpactCallRecord.Step.get -> ulong
+Kiln.TestKit.FakeImpactCallRecord.Step.init -> void
+Kiln.TestKit.FakeImpactCallRecord.Value.get -> byte
+Kiln.TestKit.FakeImpactCallRecord.Value.init -> void
+Kiln.TestKit.FakeImpactResult
+Kiln.TestKit.FakeImpactResult.Arg<T>(int index) -> T
+Kiln.TestKit.FakeImpactResult.Bytes(int index) -> System.ReadOnlySpan<byte>
+Kiln.TestKit.FakeImpactResult.Error.get -> byte
+Kiln.TestKit.FakeImpactResult.Handlers.get -> int
+Kiln.TestKit.FakeImpactResult.OriginalCalled.get -> bool
+Kiln.TestKit.FakeImpactResult.Value.get -> byte
 Kiln.TestKit.HarnessDecisions
 Kiln.TestKit.HarnessDecisions.Active.get -> int
 Kiln.TestKit.HarnessDecisions.Outcomes.get -> System.Collections.Generic.IReadOnlyList<Kiln.DecisionResult!>!
 Kiln.TestKit.HarnessDecisions.RestartWorld() -> void
+Kiln.TestKit.HarnessImpactNatives
+Kiln.TestKit.HarnessImpactNatives.AddProgram(uint program, params Kiln.TestKit.FakeEcall[]! calls) -> void
+Kiln.TestKit.HarnessImpactNatives.Call(Kiln.TestKit.FakeImpactCall! call) -> Kiln.TestKit.FakeImpactResult!
+Kiln.TestKit.HarnessImpactNatives.Calls.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeImpactCallRecord!>!
+Kiln.TestKit.HarnessImpactNatives.OtherRead.get -> System.Collections.Generic.ISet<string!>!
+Kiln.TestKit.HarnessImpactNatives.OtherWrite.get -> System.Collections.Generic.ISet<string!>!
+Kiln.TestKit.HarnessImpactNatives.SetGameNative(string! native, Kiln.TestKit.FakeGameNativeHandler? handler = null) -> void
 Kiln.TestKit.KilnHarness.Decisions.get -> Kiln.TestKit.HarnessDecisions!
 Kiln.TestKit.FakeProgramLists
 Kiln.TestKit.FakeProgramLists.AnyOf.get -> System.Collections.Generic.IReadOnlyList<string!>!
@@ -74,7 +140,14 @@ Kiln.TestKit.HarnessPrograms.Add<T>(System.Action<Kiln.TestKit.FakeProgramSlice!
 Kiln.TestKit.HarnessPrograms.Marks.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeProgramMark>!
 Kiln.TestKit.HarnessPrograms.Names.get -> System.Collections.Generic.IReadOnlyList<string!>!
 Kiln.TestKit.HarnessPrograms.Updates(string! program) -> int
+Kiln.TestKit.KilnHarness.ImpactNatives.get -> Kiln.TestKit.HarnessImpactNatives!
 Kiln.TestKit.KilnHarness.Programs.get -> Kiln.TestKit.HarnessPrograms!
+~override Kiln.TestKit.FakeEcall.Equals(object obj) -> bool
+override Kiln.TestKit.FakeEcall.GetHashCode() -> int
+~override Kiln.TestKit.FakeEcall.ToString() -> string
+override Kiln.TestKit.FakeImpactCallRecord.Equals(object? obj) -> bool
+override Kiln.TestKit.FakeImpactCallRecord.GetHashCode() -> int
+override Kiln.TestKit.FakeImpactCallRecord.ToString() -> string!
 override Kiln.TestKit.FakeProgramLists.Equals(object? obj) -> bool
 override Kiln.TestKit.FakeProgramLists.GetHashCode() -> int
 override Kiln.TestKit.FakeProgramLists.ToString() -> string!
@@ -84,9 +157,25 @@ override Kiln.TestKit.FakeProgramMark.GetHashCode() -> int
 override Kiln.TestKit.FakeProgramSlice.Equals(object? obj) -> bool
 override Kiln.TestKit.FakeProgramSlice.GetHashCode() -> int
 override Kiln.TestKit.FakeProgramSlice.ToString() -> string!
+static Kiln.TestKit.FakeEcall.operator !=(Kiln.TestKit.FakeEcall left, Kiln.TestKit.FakeEcall right) -> bool
+static Kiln.TestKit.FakeEcall.operator ==(Kiln.TestKit.FakeEcall left, Kiln.TestKit.FakeEcall right) -> bool
+static Kiln.TestKit.FakeImpactArg.Bool(bool value) -> Kiln.TestKit.FakeImpactArg!
+static Kiln.TestKit.FakeImpactArg.Entity(Kiln.EntityId value) -> Kiln.TestKit.FakeImpactArg!
+static Kiln.TestKit.FakeImpactArg.Float(float value) -> Kiln.TestKit.FakeImpactArg!
+static Kiln.TestKit.FakeImpactArg.Int(int value) -> Kiln.TestKit.FakeImpactArg!
+static Kiln.TestKit.FakeImpactArg.Literal(uint value) -> Kiln.TestKit.FakeImpactArg!
+static Kiln.TestKit.FakeImpactArg.NotConnected.get -> Kiln.TestKit.FakeImpactArg!
+static Kiln.TestKit.FakeImpactArg.Time(System.TimeSpan value) -> Kiln.TestKit.FakeImpactArg!
+static Kiln.TestKit.FakeImpactArg.UInt(uint value) -> Kiln.TestKit.FakeImpactArg!
+static Kiln.TestKit.FakeImpactArg.Variable(string! type, System.ReadOnlySpan<byte> bytes) -> Kiln.TestKit.FakeImpactArg!
+static Kiln.TestKit.FakeImpactArg.Variable<T>(string! type, T value) -> Kiln.TestKit.FakeImpactArg!
+static Kiln.TestKit.FakeImpactArg.Vector(System.Numerics.Vector3 value) -> Kiln.TestKit.FakeImpactArg!
+static Kiln.TestKit.FakeImpactCallRecord.operator !=(Kiln.TestKit.FakeImpactCallRecord? left, Kiln.TestKit.FakeImpactCallRecord? right) -> bool
+static Kiln.TestKit.FakeImpactCallRecord.operator ==(Kiln.TestKit.FakeImpactCallRecord? left, Kiln.TestKit.FakeImpactCallRecord? right) -> bool
 static Kiln.TestKit.FakeProgramLists.operator !=(Kiln.TestKit.FakeProgramLists? left, Kiln.TestKit.FakeProgramLists? right) -> bool
 static Kiln.TestKit.FakeProgramLists.operator ==(Kiln.TestKit.FakeProgramLists? left, Kiln.TestKit.FakeProgramLists? right) -> bool
 static Kiln.TestKit.FakeProgramMark.operator !=(Kiln.TestKit.FakeProgramMark left, Kiln.TestKit.FakeProgramMark right) -> bool
 static Kiln.TestKit.FakeProgramMark.operator ==(Kiln.TestKit.FakeProgramMark left, Kiln.TestKit.FakeProgramMark right) -> bool
 static Kiln.TestKit.FakeProgramSlice.operator !=(Kiln.TestKit.FakeProgramSlice? left, Kiln.TestKit.FakeProgramSlice? right) -> bool
 static Kiln.TestKit.FakeProgramSlice.operator ==(Kiln.TestKit.FakeProgramSlice? left, Kiln.TestKit.FakeProgramSlice? right) -> bool
+virtual Kiln.TestKit.FakeGameNativeHandler.Invoke(Kiln.TestKit.FakeGameNativeCall call) -> byte

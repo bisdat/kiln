@@ -445,6 +445,9 @@ again:  pop
 ## Testing
 - **Offline:** `impact.py lint`, `impact.py cook`, and `python3 -m unittest discover -s tools/impact/tests` (synthetic
   only).
+- **Your natives in a unit test** (since 0.2.0-dev.29): Kiln.TestKit's fake kiln.abilities runs a mod's `[ImpactNative]`
+  methods, `RegisterSync` natives and attachments, and the test makes the ECALLs (`kiln.ImpactNatives.Call`):
+  docs/kiln/modding/unit-tests.md#impact-natives. `ImpactNativesFakeTests` runs FrostMark that way.
 - **Local check against the installed game:** `impact.py roundtrip`. Every vanilla program must round-trip, and
   listings go to `$KILN_OUT/dis/` (do not commit them).
 - **Lab, no player needed:** `tools/impact/lab/run.sh <lab>` cooks a boot-time override of the Fireball explosion
