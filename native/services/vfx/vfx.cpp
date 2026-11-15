@@ -60,7 +60,10 @@ Config read_config() {
 }
 
 void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
-    if (ev && ev->event == KILN_WORLD_STOPPING && ev->kind == KILN_WORLD_CLIENT) core_world_ended();
+    if (ev && ev->event == KILN_WORLD_STOPPING && ev->kind == KILN_WORLD_CLIENT) {
+        build_world_ended();
+        core_world_ended();
+    }
 }
 
 void KILN_CALL on_sim_tick(const KilnTickInfo*, void*) { sim_update(); }

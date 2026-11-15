@@ -395,3 +395,13 @@ class GateGenerator(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class VfxRestartProof(unittest.TestCase):
+    def test_vfx_restart_has_separate_nonfinal_and_final_catalog_entries(self):
+        pack = REPO / "mods" / "tests" / "client-pass"
+        index = {r["id"] for r in plan.read_index(str(pack / "dev28-checks.json"))}
+        releases = plan.read_releases(str(pack / "dev28-releases.json"))
+        for cid in ("17-vfx-budget.before", "17-vfx-budget.after"):
+            self.assertIn(cid, index)
+            self.assertEqual(releases["owners"].get(cid), "17a-vfx-cap")
+        self.assertNotIn("17-vfx-budget", index, "an old first-start Pass cannot settle the restart proof")

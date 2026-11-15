@@ -189,7 +189,7 @@ public static partial class Blocks
     /// for the budget) at a later step while something listens. When the answer is Registered or AcceptedNextStart the block is
     /// the mod's as with the two-argument overload (other blocks and <see cref="Find"/> name it); a refusal leaves nothing.
     /// Client only: a dedicated server has no VFX (the two-argument overload and data files work on both sides). Not run in a
-    /// game client yet (guided check <c>17-vfx-budget</c>).</para>
+    /// game client yet (guided checks <c>17-vfx-budget.before</c> / <c>17-vfx-budget.after</c>).</para>
     /// </summary>
     /// <param name="name">The block's name: letters, digits, '-', '_' and '.'.</param>
     /// <param name="block">The VFX.</param>
@@ -218,7 +218,8 @@ public static partial class Blocks
     /// for a mod that is no longer loaded (<see cref="DefinitionRegistrationState.Retained"/>, <c>OwnerInactive</c>, its slot still
     /// taken), superseded by a later definition of the block, stored for the next start. A definition stored at an earlier start
     /// is known again at this one, and says what this start made of it. <c>NotFound</c> for an id this process does not know. Any
-    /// thread; it never waits and never reads the game's memory.</summary>
+    /// thread; it copies service state without waiting for the game or reading game memory. The defining overload can
+    /// synchronously write a pending file when accepting for the next start; that I/O holds no snapshot lock.</summary>
     /// <exception cref="ArgumentException">The empty GUID.</exception>
     /// <exception cref="KilnUnavailableException"><c>blocks.vfx_registration</c>, as for the define.</exception>
     [ClientOnly]

@@ -31,7 +31,8 @@ void build_forget();
 
 // The checks that need the game's resident resources: the shader binding list and that what was served is what the game sees. Call it from
 // the FxController update, before the queue runs. Cheap after its one run.
-void build_on_update();
+void build_on_update(void* fxc);
+void build_world_ended();
 
 // True when this GUID is a Kiln VFX that was turned off after it was registered (a binding list the modules were not made for). The guard
 // treats it as unknown.
