@@ -147,10 +147,15 @@ The process then exits with a code that says so; restarting gives the same stop,
 | 0x4B02 (19202) | 2 | kiln.knowledge: the mods' NPC roster cannot be held | `kiln/state/roster-refused.json`, `boot.json` `boot.stop` |
 
 - **systemd**: the `kiln@.service` unit from the release has `RestartPreventExitStatus=1 2`. A unit of your own that has
-  `Restart=on-failure` or `Restart=always` needs that line too.
+  `Restart=on-failure` or `Restart=always` needs that line too. Under Wine these two statuses are not Kiln's alone: any
+  other failure that exits with 1 or 2 (a Wine or kilnctl error, a crash that happens to end so) also keeps the unit
+  down instead of restarting it. So after a stop, read the last lines of `kiln/logs/kiln.log` (and
+  `kiln/state/roster-refused.json` or `boot.json` `boot.stop`) before you conclude it was Kiln's: neither status alone
+  proves it.
 - **A hosting panel or a script that restarts a crashed server** (Pterodactyl and the like, a `while true` loop): tell
   it that exit status 1 or 2 (19201 or 19202 on Windows) is a configuration error, not a crash: no restart, show the last
-  `kiln.log` line to whoever runs the server.
+  `kiln.log` line to whoever runs the server. The same caveat: on Linux an unrelated failure with status 1 or 2 is kept
+  down too, so the panel should show the log rather than assume. On Windows the whole code (19201, 19202) is Kiln's.
 - Kiln's own tools never restart on it: `kilnctl run` passes the status on and starts nothing again, `kilnctl start`
   waits for the world and reports the failed start, and the Kiln Launcher restarts a server only when you press Restart.
 

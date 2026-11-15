@@ -26,12 +26,13 @@ engine's, [docs/kiln/modding/quests.md](../modding/quests.md).
   (`mods/tests/roster-cap-test/lab.sh`, nine boots on one save: 64, 65, 128 and a restart; 129, 65 with the hooks not
   installed, and 129 in a boot generation with the mod not required and required: all four stopped at the start through
   kiln.boot's stop with exit status 2, boot.json `boot.stop` and progress.json `failed`, the save byte for byte the
-  same and the knowledge set before them still there after; a page dropped and computed again on a checked context;
+  same and the knowledge set before them still there after; a page dropped and computed again on a checked context (a dedicated server);
   `roster.no-pages` ignored without `roster.lab`; the negative control without the page, whose two page-2 assertions
   failed as they must). There the roster's programs ran on the world's thread, also with kiln.world's
   parallel switch on, so a run of the hooks on the game's workers (a server with players) is written for but not
   seen; a hosting game's two worlds and a game client's stopped start are not seen yet (guided checks
-  `17-roster-client`, `17-roster.refused-start`). See [The roster's size](#the-rosters-size-since-020-dev29).
+  `17-roster-client`, `17-roster.refused-start`). A lost page is computed again on a dedicated server only; a game
+  client keeps such NPCs until the game's next evaluation. See [The roster's size](#the-rosters-size-since-020-dev29).
 
 ## What needs what
 
@@ -285,13 +286,25 @@ start or inside a boot generation's prepare (a game client whose resources were 
    world was loaded and no save was opened … Do not restart the game or the server: the next start stops the same way
    … Fix the mod list …",
 3. kiln.boot's stop (`stop_start`): its line "boot: the start stops (exit code 0x4B02): kiln.knowledge: …",
-   `progress.json` `failed` with the reason and `boot.json` `boot.stop` (`code`, `reason`, `by`, `mods`),
+   `progress.json` `failed` with the reason and `boot.json` `boot.stop` (`code`, `reason`, `by`, `mods`); it then
+   waits, a second at most per file, until another reader could see that text in `progress.json`, `boot.json` and
+   `kiln.log` (best effort, not a flush of every file to the disk; at a bound it goes on and logs which file it did not
+   see),
 4. on a game client a message box with the reason, owned by the game's window, which closes by itself after 60
-   seconds (the files and the line are on disk before it opens, so a player who ends the game meanwhile still has
-   them),
-5. the process ends with exit code 0x4B02 (`KILN_KNOW_ROSTER_EXIT_CODE`, 19202; a Linux parent under Wine sees 2).
+   seconds (the steps above come first, so a player who ends the game meanwhile still has the file and the line),
+5. the process ends with exit code 0x4B02 (`KILN_KNOW_ROSTER_EXIT_CODE`, 19202; a Linux parent under Wine sees 2). If
+   writing the files or the message blocks, kiln.boot's 65-second bound ends the process anyway.
 
-This covers a dedicated server, a player who hosts and a player who joins (the client stops at its own start).
+Seen on the lab's dedicated server, with and without a boot generation (the 129 and 65-refused boots and the two
+boot-mod boots): steps 1 to 3 and 5, the save byte for byte unchanged. Not seen on a game client yet: the message box,
+a player who hosts, a player who joins (guided check `17-roster.refused-start`). The stop is a start-time act only:
+kiln.boot refuses it once a world is present or has run in this process (ending the process then could lose play);
+kiln.knowledge then logs that the start could not be stopped and goes on without the mods' native data.
+
+Mixed versions: this kiln.knowledge beside an older kiln.boot without `stop_start` stops by itself (steps 1, 2, 4 and
+5, no `boot.json` stop record and no `progress.json` "failed"). An older kiln.knowledge (0.2.0-dev.28 and before)
+cannot be made to stop at all, whatever the core: it refuses the roster at 64 and loads the world without the mods'
+native data. Run Kiln as one matched bundle (core and services of one release), on the server and in every game.
 **Never restart on it**: the next start stops the same way. The release's systemd unit has
 `RestartPreventExitStatus=1 2`; a hosting panel or a restart script must treat exit status 2 (19202 on Windows) as a
 configuration error ([dedicated-servers.md](../dedicated-servers.md#when-kiln-stops-the-start-no-restart-loop)).
@@ -306,27 +319,31 @@ other's alone). An evaluation that was running when its world stopped attaches n
 world's memory to find out who owns a registry.
 
 **"Kept".** An entry at index 64 or more is never answered from the game's value. When its page cannot answer (no page
-for the cache, a page that no longer matches it, a registry no live world bound, a world that stopped or a value that
-changed while the answer was read, a busy lock, a missing page that is not computed again for want of a checked
-context, and a registry whose fields cannot be read or that cannot place the entry, which may then be at 64 or more),
+for the cache, a page that no longer matches it or a cache the loader reset to "not computed", a registry no live
+world bound, a world that stopped or a value that changed while the answer was read, a busy lock, a missing page that
+is not computed again for want of a checked context, and a registry whose fields cannot be read or that cannot place
+the entry, which may then be at 64 or more),
 the hook gives the game's own "cache invalid" answer, which its only caller (`unique_npc_spawns`, the one-per-world
 rule) treats like an unlocked NPC: it is kept, not destroyed. Each cause is counted in the world's stop line in
 `kiln.log` ("kept N: no page, stale, unowned, moved, busy, no checked context, unreadable"). The Survivors directory
 never reads the value: it evaluates each entry's own requirement.
 
 **A lost page.** A page that is missing for a computed cache (a setter that did not pair with its evaluation, a busy
-lock, a registry bound late) would otherwise stay missing until the knowledge changes. Kiln computes it again before
-the world's next step: the game's evaluator on the knowledge context the game itself passed when it last evaluated that
-world's registry, and only while that context is the world's `G38Knowledge` singleton read at that moment (a temporary
-the game passed, or a knowledge object replaced since, would be a stale pointer: then nothing is computed and the
-page's ids stay "kept", counted as "no checked context", until the game's own next evaluation attaches a page). The
-result is kept only when it agrees with the game's cache (page 0 and the version); twice per cache at most ("roster:
-the server world's second page was missing for its cache (version …): computed again at the step's start"). On the
-lab's dedicated server the context the game passed was the world's `G38Knowledge` ("the server world's evaluator
-context is its G38Knowledge singleton"); on a game client that is guided check `17-roster-client`, which fails on "is
-NOT".
+lock, a registry bound late) would otherwise stay missing until the knowledge changes. **On a dedicated server** Kiln
+computes it again before the world's next step: the game's evaluator on the knowledge context the game itself passed
+when it last evaluated that world's registry, and only while that context is the world's `G38Knowledge` singleton read
+at that moment (a temporary the game passed, or a knowledge object replaced since, would be a stale pointer: then
+nothing is computed and the page's ids stay "kept", counted as "no checked context", until the game's own next
+evaluation attaches a page). The result is kept only when it agrees with the game's cache (page 0 and the version);
+twice per cache at most ("roster: the server world's second page was missing for its cache (version …): computed again
+at the step's start"). On the lab's dedicated server the context the game passed was the world's `G38Knowledge` ("the
+server world's evaluator context is its G38Knowledge singleton"). **In a game client nothing is computed again**, for
+its own client world and for a world it hosts alike: the client executable's evaluator has not been walked or run
+outside its program, so a missing page there stays "kept" until the game's own next evaluation of that world attaches
+one (when the knowledge next changes). Guided check `17-roster-client` still records each world's context line (it
+fails on "is NOT"), the evidence a later client recomputation would need.
 
-What the reading of the code could not settle about that call: the game calls `NpcEvalUnlocks` only inside the update
+What the reading of the code could not settle about the dedicated server's call: the game calls `NpcEvalUnlocks` only inside the update
 of its `npc_unlock_state_server` / `npc_unlock_state_client` program (which reads `G38Knowledge` and writes
 `NpcRegistry`); Kiln calls it from the world's Pre, outside any program, on the world's thread, when no program of
 that world runs. Statically (server `0xa2ef90` and its query evaluators to depth 4, 23 functions) the evaluator writes
@@ -337,8 +354,14 @@ way. Kiln catches a fault in the call (SEH) and keeps nothing of it; what a faul
 leave behind (a callee's own state the walk did not see) is not known: none has been seen (lab: "recovery failed 0").
 
 **Saves and other versions.** Nothing of the pages is saved: the game saves knowledge (the mods' unlock objects among
-it) and the NPC entities; the value and the pages are computed again from knowledge after every start. A world saved
-with 128 entries and loaded:
+it) and the NPC entities; the value and the pages are computed again from knowledge after every start.
+
+While a world's page is missing, its locked NPCs at index 64 or more are "kept", and a save taken then holds them: the
+game's save snapshots the world after its step ([docs/re/saves.md](../../re/saves.md)), and a shutdown can take its last snapshot without
+another evaluation of the roster, so a world can be saved with a locked page-2 NPC present. After the next load, the
+first cleanup once a page exists again removes it, as the game removes any locked unique NPC. "Kept" never removes
+anything, and it unlocks nothing. On a game client a page can stay missing until the knowledge next changes (above),
+so such an NPC can stay longer there. A world saved with 128 entries and loaded:
 
 - with Kiln and the same mods: as before the restart (lab: an entry on page 2 unlocked before a restart is unlocked
   after it).
