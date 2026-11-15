@@ -168,6 +168,7 @@ export interface GameInstall {
 export interface LaunchOptionsInfo {
   value: string | null;
   hasDllOverride: boolean;
+  chainedOverrideMissing?: boolean;
   advice: string | null;
 }
 export interface GameStatus {

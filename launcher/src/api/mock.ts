@@ -490,8 +490,9 @@ function status(gameId: string): GameStatus {
     id: g.id, running: !!r, pid: r?.pid ?? null, started: r ? new Date(r.at - (noProxy ? 31_000 : 0)).toISOString() : null, steamUpdating: false, runtime: withMissing(runtime[gameId] ?? { installed: false, receipt: null, proxy: null, modified: [], upgradeAvailable: null }, g.kind),
     activeProfile: otherFolder[gameId] ? null : activations[gameId]?.profileId ?? null,
     ...(otherFolder[gameId] ? { otherFolderProfile: otherFolder[gameId]! } : {}), playOncePending: !!r && r.mode !== "profile" && (noProxy || Date.now() - r.at < 2500),
-    boot: bootFor(gameId), launchOptions: noProxy ? { value: null, hasDllOverride: false, advice: 'WINEDLLOVERRIDES="dinput8=n,b" %command%' }
-      : { value: 'WINEDLLOVERRIDES="dinput8=n,b" %command%', hasDllOverride: true, advice: null },
+    boot: bootFor(gameId), launchOptions: noProxy ? { value: null, hasDllOverride: false, chainedOverrideMissing: false, advice: 'WINEDLLOVERRIDES="dinput8=n,b" %command%' }
+      : { value: 'WINEDLLOVERRIDES="dinput8=n,b" %command%', hasDllOverride: true, chainedOverrideMissing: MODE === "chained-override",
+          advice: MODE === "chained-override" ? 'WINEDLLOVERRIDES="dinput8,xinput9_1_0=n,b" %command%' : null },
     newerMods: newerMods[gameId] ?? [],
   };
 }

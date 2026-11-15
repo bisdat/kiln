@@ -925,3 +925,33 @@ fn a_default_account_name_is_not_a_secret() {
     let text = "Steam Deck: yes\nZ:\\home\\deck\\.local\\share\\kiln\\library\n/home/deck/.steam steamdeck";
     assert_eq!(redact(text, &r), "Steam Deck: yes\n<home>\\.local\\share\\kiln\\library\n<home>/.steam steamdeck");
 }
+
+#[test]
+fn chained_loader_override_finding() {
+    let f = Fx::healthy("chained-override");
+    let mut input = f.input();
+    input.install = Some(f.install(Platform::Proton));
+    let r = build(&input);
+    assert!(!ids(&r).contains(&"proton-chained-override"));
+    assert!(finding(&r, "proton-override").text.contains(crate::game::DLL_OVERRIDE_ADVICE));
+    f.w("kiln/chain.ini", "[chain]\n..\\xinput9_1_0.dll\n");
+    f.w("xinput9_1_0.dll", "fixture");
+    let r = build(&input);
+    assert!(r.summary.contains("dinput8 override: no; chained xinput9_1_0 override missing: yes"));
+    let n = finding(&r, "proton-chained-override");
+    assert_eq!(n.level, Level::Warning);
+    assert!(n.text.contains("Ultimate ASI Loader") && n.text.contains(".asi plugins"));
+    assert!(!n.text.contains("Kiln may not load"));
+    assert!(finding(&r, "proton-override").text.contains("dinput8,xinput9_1_0=n,b"));
+    let prefix = f.root.join("pfx");
+    std::fs::create_dir_all(&prefix).unwrap();
+    std::fs::write(prefix.join("user.reg"), "[Software\\\\Wine\\\\DllOverrides]\n\"dinput8\"=\"native,builtin\"\n").unwrap();
+    input.install.as_mut().unwrap().prefix = Some(prefix.clone());
+    let r = build(&input);
+    assert!(!ids(&r).contains(&"proton-override"));
+    assert!(ids(&r).contains(&"proton-chained-override"));
+    std::fs::write(prefix.join("user.reg"), "[Software\\\\Wine\\\\DllOverrides]\n\"dinput8\"=\"native,builtin\"\n\"xinput9_1_0\"=\"native,builtin\"\n").unwrap();
+    assert!(!ids(&build(&input)).contains(&"proton-chained-override"));
+    input.install.as_mut().unwrap().platform = Platform::Windows;
+    assert!(!ids(&build(&input)).contains(&"proton-chained-override"));
+}

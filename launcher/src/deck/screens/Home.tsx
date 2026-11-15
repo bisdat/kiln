@@ -83,7 +83,7 @@ export default function Home() {
   else if (!rt.installed) kilnWord = { text: kiln.shroudforge ? "ShroudForge is in this game" : "Kiln not installed", tone: "warn" };
   else if (rt.upgradeAvailable) kilnWord = { text: `Kiln ${kilnLabel(kilnVer ?? "")} · update ready`, tone: "warn" };
   else kilnWord = { text: `Kiln ${kilnLabel(kilnVer ?? "")}`, tone: "ok" };
-  const advice = rt?.installed && s?.launchOptions?.advice && (ctl.stuck || !s.launchOptions.hasDllOverride);
+  const advice = rt?.installed && s?.launchOptions?.advice && (!s.launchOptions.hasDllOverride || s.launchOptions.chainedOverrideMissing);
 
   const actions: DeckAction[] = [];
   if (game && rt?.installed) actions.push({ button: "x", label: "Play once", run: () => setOpen("once"), disabled: !ctl.canPlay || kiln.installing });
@@ -114,7 +114,7 @@ export default function Home() {
             <DeckButton id="install" onClick={() => setOpen("install")}>Install Kiln</DeckButton>
           )}
           {game && rt?.installed && rt.upgradeAvailable && <DeckButton id="update" disabled={!ctl.canPlay || kiln.installing} onClick={() => setOpen("update")}>Update Kiln</DeckButton>}
-          {(advice || (ctl.stuck && rt?.installed)) && <DeckButton id="steam-setting" a="How" onClick={() => nav("/deck/help")}>{ctl.stuck ? "Kiln is not loading" : "One Steam setting"}</DeckButton>}
+          {(advice || (ctl.stuck && rt?.installed)) && <DeckButton id="steam-setting" a="How" onClick={() => nav("/deck/help")}>{s?.launchOptions?.hasDllOverride && s.launchOptions.chainedOverrideMissing ? "One Steam setting for Ultimate ASI Loader" : ctl.stuck ? "Kiln is not loading" : "One Steam setting"}</DeckButton>}
           {change?.state === "failed" && <DeckButton id="kiln-failed" onClick={() => nav("/deck/kiln")}>Kiln</DeckButton>}
         </div>
       </div>

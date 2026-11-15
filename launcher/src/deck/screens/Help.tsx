@@ -13,7 +13,7 @@ export default function Help() {
   const style = useGlyphStyle();
   const lo = status.data?.launchOptions ?? null;
   const option = lo?.advice ?? LAUNCH_OPTION;
-  const state = !lo ? null : lo.hasDllOverride ? { tone: "ok" as const, text: "Already set" }
+  const state = !lo ? null : lo.chainedOverrideMissing ? { tone: "warn" as const, text: lo.hasDllOverride ? "Add xinput9_1_0" : "Needed for this game" } : lo.hasDllOverride ? { tone: "ok" as const, text: "Already set" }
     : lo.advice ? { tone: "warn" as const, text: "Needed for this game" } : { tone: "ok" as const, text: "Not needed with your Proton" };
   const controls: [PadButton | "dpad" | "stick-l" | "stick-r", string][] = [
     ["dpad", "Move"], ["stick-l", "Move"], ["a", "Select"], ["b", "Back"], ["x", "Screen's action"], ["y", "Screen's action"],
@@ -24,7 +24,7 @@ export default function Help() {
       <div className="deck-scroll deck-help-body">
         <section className="deck-block" tabIndex={0} data-deck-id="help-steam" data-deck-a="-" aria-labelledby="h-steam">
           <h2 id="h-steam">One Steam setting {state && <Word tone={state.tone}>{state.text}</Word>}</h2>
-          <p>If Kiln does not load with your Proton build, add this to Enshrouded's launch options. GE-Proton 11-11 and newer, and some recent Valve builds, load it without this setting.</p>
+          <p>{lo?.chainedOverrideMissing ? "Ultimate ASI Loader and its .asi plugins may not start under Valve’s Proton without xinput9_1_0 set to native, builtin. Add the full option below; GE-Proton loads the loader without it." : <>If Kiln does not load with your Proton build, add this to Enshrouded's launch options. GE-Proton 11-11 and newer, and some recent Valve builds, load it without this setting.</>}</p>
           <p className="deck-code" data-testid="deck-launch-option">{option}</p>
           <ol>
             <li>Press the <b>Steam</b> button, open <b>Library</b>.</li>
