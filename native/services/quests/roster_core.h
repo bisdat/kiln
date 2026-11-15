@@ -241,7 +241,9 @@ private:
 class Sidecars {
 public:
     static constexpr uint32_t kSlots = 8;  // a hosting client has two registries; a few spare for replaced ones
-    enum class Bit { Unlocked, Locked, NoPage, Stale, Busy, Unowned, Moved };
+    // NoContext: no page, and it is not computed again because the context the game passed is not (or no longer)
+    // the world's G38Knowledge; Unreadable: the registry's fields could not be read (or the entry not placed)
+    enum class Bit { Unlocked, Locked, NoPage, Stale, Busy, Unowned, Moved, NoContext, Unreadable };
     enum class Attach { Attached, Busy, Unowned, Old };
     enum class Owner { Found, None, Busy };
 
@@ -304,6 +306,19 @@ public:
         lock_.unlock();
         return c;
     }
+    // The context a recomputation may use: the one the game passed for this world, only while it is the world's
+    // G38Knowledge `singleton` read by the caller now. Otherwise 0, and until the game's next evaluation attaches a
+    // page the world's missing page answers NoContext (its own cause of "kept").
+    uintptr_t checked_context(uint32_t kind, uint32_t session, uintptr_t singleton) {
+        if (!valid_kind(kind) || !lock_.try_for()) return 0;
+        uintptr_t c = 0;
+        if (bound_[kind].session == session) {
+            if (bound_[kind].ctx && bound_[kind].ctx == singleton) c = bound_[kind].ctx;
+            else bound_[kind].unchecked = true;
+        }
+        lock_.unlock();
+        return c;
+    }
 
     // After the game's SetUnlocks wrote (mask0, version) for `registry`: keep the pages with it, for the world that owns
     // it now, and only when that world did not stop since the evaluation began.
@@ -321,6 +336,7 @@ public:
             return Attach::Old;
         }
         if (p.ctx) bound_[kind].ctx = p.ctx;
+        bound_[kind].unchecked = false;
         Sidecar* s = find_or_claim(kind, bound_[kind].session, registry);
         s->registry = registry;
         s->kind = kind;
@@ -353,9 +369,11 @@ public:
         } else if (const Sidecar* s = find(kind, session, registry)) {
             if (live.status != 0 || s->version != live.version || s->masks[0] != live.payload || s->span_ptr != live.span_ptr ||
                 s->count != live.count || index >= s->count)
-                b = Bit::Stale;
+                b = bound_[kind].unchecked ? Bit::NoContext : Bit::Stale;
             else
                 b = ((s->masks[index / kPage] >> (index % kPage)) & 1) ? Bit::Unlocked : Bit::Locked;
+        } else if (bound_[kind].unchecked) {
+            b = Bit::NoContext;
         }
         lock_.unlock();
         return b;
@@ -412,6 +430,7 @@ private:
         uint32_t session = 0;
         uintptr_t registry = 0;
         uintptr_t ctx = 0;
+        bool unchecked = false;  // a recomputation was refused for want of a checked context (checked_context)
     };
     void lock_blocking() const {
         while (!lock_.try_for()) {
@@ -452,7 +471,8 @@ private:
 // `read_live(LiveCache*)` reads the registry's fields (false: unreadable); `index_of(const LiveCache&, uint64_t*)` the
 // id's index in that collection (false: not one of its entries). A first read only sorts the query (a page-0 entry, an
 // unknown id, a cache the game itself calls invalid: the game answers; no lock is taken). For an entry of page 2 the
-// order makes a read unable to span a world's end: the owner (kind, session), the fields again (they must be the
+// order makes a read unable to span a world's end (a first read that fails, or an entry it cannot place, is Kept:
+// Unreadable): the owner (kind, session), the fields again (they must be the
 // first read's), the page (which checks the owner again under the lock), then the fields and the owner once more;
 // anything that moved in between and the answer is not given (Moved).
 struct QueryAnswer {
@@ -466,7 +486,14 @@ QueryAnswer page_query(const Sidecars& sc, uintptr_t registry, ReadLive&& read_l
     QueryAnswer a;
     LiveCache live;
     uint64_t index = 0;
-    if (!read_live(&live) || !index_of(live, &index) || index < kPage || live.status != 0) return a;
+    if (!read_live(&live) || !index_of(live, &index)) {
+        // the id is in the game's map but its place cannot be told: it may be at 64 or more, where the game's own
+        // query would read another entry's bit (and could destroy an unlocked NPC): kept
+        a.kind = QueryAnswer::Kind::Kept;
+        a.why = Sidecars::Bit::Unreadable;
+        return a;
+    }
+    if (index < kPage || live.status != 0) return a;
     a.kind = QueryAnswer::Kind::Kept;
     uint32_t kind = kKindUnknown, session = 0;
     const Sidecars::Owner o = sc.owner(registry, &kind, &session);
