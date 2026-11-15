@@ -206,6 +206,15 @@ public override void OnLoad()
   for `fuel_setup`'s containers, that a query without a reservation is `Ok = false`, and its handler on N > 1 threads with
   the lab parallel switch.
 
+## Unit tests
+
+Under `dotnet test` with Kiln.TestKit the wraps run on the kit's fake of kiln.world v4: the test declares the programs
+(`kiln.Programs.Add`, or `Add<Ecs.Programs.FuelSetup>()` for a typed view) and each step runs them over the fake world's
+entities through the mod's stages, typed views and `AroundEach` included; marks and `ComponentWrittenEvent` follow.
+Not modelled: worker threads (one thread, the harness's tick thread), singleton slots, the attribute formulas,
+budgets and native faults, client worlds and `Systems.Define` (offline). The details:
+[modding/unit-tests.md](../modding/unit-tests.md#program-wraps).
+
 ## In the lab: the parallel switch
 
 On a dedicated server with no player every slice runs on the world's thread. `Kiln.Testing.LabSystems`
