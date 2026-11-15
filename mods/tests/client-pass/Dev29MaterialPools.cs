@@ -35,7 +35,7 @@ public sealed partial class ClientPassMod
             c.Expect(p.GetProperty("format").GetInt32()==1 && p.GetProperty("complete").GetBoolean() && required.All(ran.Contains),"all coordinator lab cases passed, including refusals before streaming");
             c.Expect(p.GetProperty("hash").GetString()==WorldTables.Hash,"the lab proof is for this exact material/pool/binding profile",WorldTables.Hash);
             var kiln=p.TryGetProperty("kiln",out var k)?k.GetString():null;
-            c.Expect(kiln==Game.KilnVersion,"the lab proof is for this Kiln build",$"proof {kiln ?? "(none)"}, this game {Game.KilnVersion}");
+            c.Expect(kiln==PoolProof.KilnBuild,"the lab proof is for this Kiln build",$"proof {kiln ?? "(none)"}, this game {PoolProof.KilnBuild}");
         } catch(Exception e){c.Expect(false,"the coordinator's complete lab-proof.json is installed in mp-fixture",e.Message);}
         c.Instruct("Use disposable characters and a disposable world. Do this on a hosting client AND a client joined to the coordinator's server (record each session). " +
             "Craft the three Pool blocks from rough stone (one rough-stone block makes ten); prepare Rough Wood and Mycelium blocks too. " +

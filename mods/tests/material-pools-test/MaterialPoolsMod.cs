@@ -61,7 +61,7 @@ public sealed class MaterialPoolsMod:Mod
             }
         } catch(Exception e){Check("completed-without-exception",false,e.Message);}
         var status=WorldTables.StatusJson();File.WriteAllText(Path.Combine(Context.DataDirectory,"served.json"),status);
-        var result=new {mode=Mode,hash=WorldTables.Hash,passed=_passed,failed=_failed,kiln=Game.KilnVersion};
+        var result=new {mode=Mode,hash=WorldTables.Hash,passed=_passed,failed=_failed,kiln=PoolProof.KilnBuild};
         var path=Path.Combine(Context.DataDirectory,"result.json");File.WriteAllText(path+".tmp",JsonSerializer.Serialize(result));File.Move(path+".tmp",path,true);
         Context.Log.Info($"mp: DONE {Mode} {_passed.Count} passed {_failed} failed hash {WorldTables.Hash}");
     }

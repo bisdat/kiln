@@ -34,6 +34,9 @@ internal static class PoolProof
         if(keys.Length!=1)throw new InvalidDataException($"expected one {type}, got {keys.Length}");
         return Assets.ReadResource(keys[0])??throw new InvalidDataException("served resource unavailable: "+type);
     }
+    // The running Kiln build, as Kiln.Api carries it (0.2.0-dev+<day>.<commit>): the lab proof records it, the guided check compares it.
+    internal static string KilnBuild=>typeof(Kiln.Mod).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyMetadataAttribute),false)
+        .Cast<System.Reflection.AssemblyMetadataAttribute>().FirstOrDefault(a=>a.Key=="Kiln.Build")?.Value??Game.KilnVersion;
     internal static string Ids(IEnumerable<uint> ids)=>"["+string.Join(",",ids)+"]";
     internal static string Budget(CapacityQueryResult b)=>$"ok {b.Ok} {b.Budget.Readiness}: capacity {b.Budget.Capacity}, game {b.Budget.GameUsed}, kiln {b.Budget.KilnUsed}, reserved {b.Budget.Reserved}, available {b.Budget.Available?.ToString()??"-"}";
     // Every row says what it read; a FAIL row also says what it expected. Detail goes to the log, never into the verdict.
