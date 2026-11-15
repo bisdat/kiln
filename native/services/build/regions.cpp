@@ -6,19 +6,28 @@
 // (docs/re/build.md). Kiln remembers the 16 m chunks its own writes touched and appends boxes covering them to that
 // list, so the game's own save keeps Kiln's edits outside bases too. The chunk set lives in
 // kiln/data/kiln.build/regions/<world GUID>.json, written atomically when it changes.
+#ifndef KILN_REGIONS_HOST_TEST
 #include <windows.h>
+#endif
 
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <cstdint>
+#include <cstdlib>
+#include <mutex>
+#include <vector>
 #include <filesystem>
 #include <fstream>
 #include <map>
 #include <set>
 #include <sstream>
 
+#ifndef KILN_REGIONS_HOST_TEST
 #include "internal.h"
 #include "kiln_hook.hpp"
 #include "services/kiln_saves.h"
+#endif
 
 namespace kb {
 namespace {
@@ -29,7 +38,9 @@ struct Box {
     int32_t lo[3], hi[3];  // chunk coordinates, inclusive
 };
 
+#ifndef KILN_REGIONS_HOST_TEST
 kiln::RawHook g_hook;
+#endif
 std::mutex g_mu;
 std::set<std::array<int32_t, 3>> g_chunks;  // Kiln-kept chunks (cell coordinates / 32)
 std::string g_world;                         // world GUID text the set belongs to ("" = unknown yet)
@@ -39,9 +50,12 @@ std::vector<Box> g_boxes;   // boxes over g_chunks, recomputed when the set chan
 bool g_boxes_stale = true;
 size_t g_last_logged = ~size_t{0};
 std::filesystem::path g_file;
+#ifndef KILN_REGIONS_HOST_TEST
 const KilnSavesApi* g_saves = nullptr;
+#endif
 std::atomic<uint64_t> g_saves_seen{0}, g_boxes_added{0};
 
+#ifndef KILN_REGIONS_HOST_TEST
 std::string guid_text(const uint8_t g[16]) {
     char b[40];
     // Windows GUID text: first three groups little-endian
@@ -57,6 +71,8 @@ std::string current_world() {
     if (g_saves->status(&st) != KILN_OK || !st.has_guid) return "";
     return guid_text(st.world_guid);
 }
+
+#endif
 
 // One file per world: kiln/data/kiln.build/regions/<world GUID>.json (a game client hosts several worlds).
 void read_file_locked() {
@@ -101,15 +117,44 @@ void save_locked() {
         f.flush();
         if (!f) return;
     }
+#ifdef KILN_REGIONS_HOST_TEST
+    std::filesystem::rename(tmp, g_file, ec);
+    if (ec) return;
+#else
     if (!MoveFileExW(tmp.c_str(), g_file.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) return;
+#endif
     g_dirty = false;
 }
+
+// End a session even if it never acquired an identity. Never carry its pending chunks into another world.
+void close_locked() {
+    save_locked();  // same best-effort atomic flush used on a known-identity switch
+    g_chunks.clear();
+    g_world.clear();
+    g_file.clear();
+    g_dirty = false;
+    g_boxes.clear();
+    g_boxes_stale = true;
+    g_last_logged = ~size_t{0};
+}
+
+#ifndef KILN_REGIONS_HOST_TEST
+void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
+    if (ev->kind != KILN_WORLD_SERVER || ev->event != KILN_WORLD_STOPPING) return;
+    std::lock_guard lock(g_mu);
+    close_locked();  // independent of the order kiln.saves receives the same event
+}
+#endif
 
 // Binds the set to the running world (kiln.saves' GUID): a different world saves the old set and loads its own.
 // Chunks kept before the GUID is known (a brand-new world before its first save) move into the world's set.
 void load_locked() {
     const std::string w = current_world();
-    if (w.empty() || w == g_world) return;
+    if (w == g_world) return;
+    if (w.empty()) {
+        close_locked();
+        return;
+    }
     std::set<std::array<int32_t, 3>> pending;
     if (g_world.empty()) pending.swap(g_chunks);
     else save_locked();
@@ -182,6 +227,7 @@ std::vector<Box> boxes_locked() {
     return runs;
 }
 
+#ifndef KILN_REGIONS_HOST_TEST
 struct GameArray {
     uint8_t* data;
     uint64_t count;
@@ -271,8 +317,11 @@ uint8_t* __fastcall hk_save_regions(uint8_t* result, GameArray* list, uintptr_t 
     return r;
 }
 
+#endif
+
 }  // namespace
 
+#ifndef KILN_REGIONS_HOST_TEST
 bool regions_install() {
     if (!F.persist) return false;
     char buf[1024];
@@ -290,9 +339,14 @@ bool regions_install() {
 
 void regions_ready() {
     g_saves = static_cast<const KilnSavesApi*>(g_api->service(kstr(KILN_SAVES_SERVICE), 1));
+    KilnHandle h{};
+    if (g_api->subscribe_world(g_owner, &on_world, nullptr, &h) != KILN_OK)
+        KB_W("save regions: world-close subscription failed");
     std::lock_guard lock(g_mu);
     load_locked();
 }
+
+#endif
 
 void regions_keep(const int32_t origin[3], const uint32_t dims[3]) {
     if (!F.persist) return;
@@ -335,6 +389,7 @@ void regions_flush() {
     if (g_dirty) save_locked();
 }
 
+#ifndef KILN_REGIONS_HOST_TEST
 std::string regions_world() { return current_world(); }
 
 bool regions_saves_written(uint64_t* written) {
@@ -345,6 +400,8 @@ bool regions_saves_written(uint64_t* written) {
     *written = st.written;
     return true;
 }
+
+#endif
 
 void regions_status(uint64_t* chunks, uint64_t* saves, uint64_t* boxes) {
     std::lock_guard lock(g_mu);
