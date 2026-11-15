@@ -631,14 +631,10 @@ public:
             bool exists = false;
             const bool known = p_->key(r.entity, &key, &exists);
             if (!exists || (known && same_life(key, r.key))) continue;
-            for (uint32_t c = KILN_WATCH_HEALTH; c <= KILN_WATCH_SLOT_SELECTION; ++c) {
-                const auto at = pairs_.find(pair_id(r.entity, c));
-                if (at == pairs_.end()) continue;
-                for (uint64_t wid : at->second.watches)
-                    if (Watch* w = find(wid); w && w->status == KILN_WATCH_READY)
-                        suspend(*w, KILN_WATCH_SUSPENDED_METADATA, "entity " + std::to_string(r.entity) +
-                                " is another entity now (or has no identity)");
-            }
+            for (uint64_t wid : r.watches)
+                if (Watch* w = find(wid); w && w->status == KILN_WATCH_READY)
+                    suspend(*w, KILN_WATCH_SUSPENDED_METADATA, "entity " + std::to_string(r.entity) +
+                            " is another entity now (or has no identity)");
         }
         // Components absent at the last compare can appear during Sim: past 4096 present pairs, the watches that bring
         // them over are suspended (in the order they were made, a shared pair counted once) before anything is emitted.
@@ -811,7 +807,7 @@ private:
         KilnOwner owner = 0;
         uint32_t scope = 0, components = 0, expansion = 0, status = KILN_WATCH_READY, pairs = 0;
         std::vector<uint32_t> roots;
-        std::vector<KilnEventEntityKey> root_keys;
+        std::vector<KilnEventEntityKey> root_keys, sampled_roots;
         std::string reason;
         uint64_t last_complete_step = 0, epoch = 0, session = 0;
         bool fresh = true;
@@ -843,6 +839,7 @@ private:
     struct RootLife {
         uint32_t entity = 0;
         KilnEventEntityKey key{};
+        std::vector<uint64_t> watches;
     };
     struct Want {
         KilnEventEntityKey key{};
@@ -920,8 +917,8 @@ private:
         count_.store(static_cast<uint32_t>(watches_.size()));
         replan_ = true;
         // what it was told and nobody has read goes with it: no later watch (its mod loaded again) is told of a change
-        // from before it existed, and a record names only watches that are still there. A batch already frozen is left
-        // as it is (a read of it gives the same records until it is acked).
+        // from before it existed, and a record names only watches that are still there. Frozen batches can shrink;
+        // read_events reports their current count. Their id stays valid until ack (also when all records were purged).
         auto purge = [id](std::vector<Change>& v) {
             for (Change& c : v) c.watches.erase(std::remove(c.watches.begin(), c.watches.end(), id), c.watches.end());
             v.erase(std::remove_if(v.begin(), v.end(), [](const Change& c) { return c.watches.empty(); }), v.end());
@@ -936,6 +933,8 @@ private:
             }
         }
         purge(pending_);
+        purge(batch_);
+        if (batch_.empty()) batch_frames_ = 0; // no retained data may reserve queue capacity after its watches end
         if (watches_.empty()) {  // nothing watched: nothing kept (no window call comes to clear it)
             pairs_.clear();
             linked_.clear();
@@ -954,11 +953,18 @@ private:
         for (const auto& [id, pr] : pairs_) {
             const uint32_t s = slot_of(pr.key.entity);
             filter_next_[s >> 3] |= static_cast<uint64_t>(bit(pr.component)) << ((s & 7u) * 8u);
-            if (!(pr.key.life_serial & kLinkedSerialBit)) root_lives_.push_back(RootLife{pr.key.entity, pr.key});
+
         }
-        std::sort(root_lives_.begin(), root_lives_.end(), [](const RootLife& a, const RootLife& b) { return a.entity < b.entity; });
-        root_lives_.erase(std::unique(root_lives_.begin(), root_lives_.end(), [](const RootLife& a, const RootLife& b) { return a.entity == b.entity; }),
-                          root_lives_.end());
+        // Roots need identity checks even when only their linked Inventory/Fuel is watched.
+        std::unordered_map<uint32_t, size_t> root_at;
+        for (const Watch& w : watches_) {
+            if (w.status != KILN_WATCH_READY) continue;
+            for (const auto& key : w.sampled_roots) {
+                const auto [at, inserted] = root_at.try_emplace(key.entity, root_lives_.size());
+                if (inserted) root_lives_.push_back(RootLife{key.entity, key, {w.id}});
+                else root_lives_[at->second].watches.push_back(w.id);
+            }
+        }
         for (size_t i = 0; i < filter_next_.size(); ++i) {
             const uint64_t want = filter_next_[i];
             if (filter_[i].load(std::memory_order_relaxed) == want) continue;
@@ -1058,6 +1064,8 @@ private:
                 if (p_->key(ids[i], &k, &exists)) roots.emplace_back(ids[i], k);  // a player without a session yet: next step
             }
         }
+        w.sampled_roots.clear();
+        for (const auto& [root, key] : roots) w.sampled_roots.push_back(key);
         const uint32_t root_mask = w.expansion == KILN_WATCH_EXPAND_INVENTORY
                                        ? w.components & ~(bit(KILN_WATCH_INVENTORY) | bit(KILN_WATCH_FUEL))
                                        : w.components;

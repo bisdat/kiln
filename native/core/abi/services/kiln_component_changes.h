@@ -40,8 +40,11 @@
  * token was lost; Unknown (0) when there is no token or a token's source is not valid. Game (1) is never emitted by v1:
  * a change without a token may be the game's, another loader's mod or raw memory, and Kiln cannot tell them apart.
  *
- * Events are read with the same freeze / read / ack batch rules as kiln.decisions (kiln_decisions.h). The queue holds
- * at most two frames (a frame: the records of one window_end, at most 4096). When a third would be needed (the
+ * Events are read with freeze / read / ack batches. An ended watch is removed even from a frozen batch: it can shrink
+ * between begin and read; use read_events' required count after success. The batch id remains valid until ack.
+ * The queue holds
+ * at most two frames (a frame: the records of one window_end, including interval splits and presence exchanges).
+ * The present-pair budget is not a per-frame record limit. When a third frame would be needed (the
  * consumer did not read), the frame is dropped, every ready watch is suspended (status 1, LastCompleteStep the last
  * queued step) and counters().queue_overflows counts it: a change is never dropped silently.
  *
