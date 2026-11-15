@@ -15,18 +15,23 @@ public sealed class GameplayDemandMod : Mod
 public sealed unsafe class GameplayDemandTests : ModsFixture
 {
     private static FakeHost? _host;
-    private static int _requests;
+    private static int _requests; private static uint _groups;
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int RequestGroups(ulong owner,uint groups) { ++_requests; _groups=groups; _host!.Log(LogLevel.Info,$"gameplay-demand-request:{owner}"); return 0; }
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int Request(ulong owner) { ++_requests; _host!.Log(LogLevel.Info, $"gameplay-demand-request:{owner}"); return 0; }
 
     [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public void Loaded_assembly_requests_in_its_owner_name_before_OnLoad_only_if_it_references_gameplay(bool gameplay)
+    [InlineData(true,136)]
+    [InlineData(false,136)]
+    [InlineData(true,144)]
+    [InlineData(false,144)]
+    public void Loaded_assembly_requests_in_its_owner_name_before_OnLoad_only_if_it_references_gameplay(bool gameplay,int size)
     {
-        var host=new FakeHost(); _host=host; _requests=0;
-        var table=(byte*)NativeMemory.AllocZeroed(136); *(uint*)table=136; *(uint*)(table+4)=1;
+        var host=new FakeHost(); _host=host; _requests=0; _groups=0;
+        var table=(byte*)NativeMemory.AllocZeroed((nuint)size); *(uint*)table=(uint)size; *(uint*)(table+4)=1;
         *(nint*)(table+128)=(nint)(delegate* unmanaged[Cdecl]<ulong,int>)&Request;
+        if(size==144) *(nint*)(table+136)=(nint)(delegate* unmanaged[Cdecl]<ulong,uint,int>)&RequestGroups;
         host.Services["kiln.gameplay"]=(nint)table;
         try {
             if(gameplay) {
@@ -35,6 +40,7 @@ public sealed unsafe class GameplayDemandTests : ModsFixture
             } else InstallHello();
             using var mods=NewManager(host); mods.LoadAll();
             Assert.Equal(gameplay ? 1 : 0,_requests);
+            Assert.Equal(gameplay && size==144 ? 31u : 0u,_groups);
             if(gameplay) {
                 Assert.True(host.Has($"gameplay-demand-request:{mods.Find("demand")!.Owner}"),host.Dump());
                 Assert.True(host.Lines.FindIndex(x=>x.Contains("gameplay-demand-request:")) < host.Lines.FindIndex(x=>x.Contains("gameplay-demand-onload")),host.Dump());
@@ -82,6 +88,36 @@ public sealed unsafe class GameplayDemandTests : ModsFixture
             Assert.True(host.Lines.FindIndex(x=>x.Contains("gameplay-demand-request:")) < host.Lines.FindIndex(x=>x.Contains("gameplay-demand-onboot")));
             mods.LoadAll(); Assert.Equal(2,_requests);
         } finally { NativeMemory.Free(table); _host=null; }
+    }
+
+    [Theory]
+    [InlineData(typeof(Creatures),8u)] [InlineData(typeof(Rules),5u)] [InlineData(typeof(Quests),7u)] [InlineData(typeof(BootDefinitions),15u)]
+    public void Shared_facade_references_count_their_indirect_gameplay_consumers(Type facade,uint expected)
+    {
+        var a=System.Reflection.Emit.AssemblyBuilder.DefineDynamicAssembly(new System.Reflection.AssemblyName("FacadeProbe"+Guid.NewGuid().ToString("N")),System.Reflection.Emit.AssemblyBuilderAccess.RunAndCollect);
+        var type=a.DefineDynamicModule("main").DefineType("Probe");
+        var method=type.DefineMethod("Reference",System.Reflection.MethodAttributes.Public|System.Reflection.MethodAttributes.Static,facade,Type.EmptyTypes);
+        var il=method.GetILGenerator(); il.Emit(System.Reflection.Emit.OpCodes.Ldnull); il.Emit(System.Reflection.Emit.OpCodes.Ret); type.CreateType();
+        var demand=GameplayBuildDemand.GroupsFor(a); Assert.Equal(expected,demand);
+        var host=new FakeHost(); _host=host; _groups=0;
+        var table=(byte*)NativeMemory.AllocZeroed(144); *(uint*)table=144; *(uint*)(table+4)=1;
+        *(nint*)(table+136)=(nint)(delegate* unmanaged[Cdecl]<ulong,uint,int>)&RequestGroups;
+        host.Services["kiln.gameplay"]=(nint)table;
+        try { GameplayBuildDemand.Request(host,77,demand); Assert.Equal(expected,_groups); }
+        finally { NativeMemory.Free(table); _host=null; }
+    }
+
+    [Fact]
+    public void Data_only_blocks_prearm_their_declarative_gameplay_consumers()
+    {
+        var host=new FakeHost(); _host=host; _groups=0;
+        var dir=WriteManifest("data", """{"id":"data","version":"1.0.0","apiVersion":"0.2"}""");
+        Directory.CreateDirectory(Path.Combine(dir,"blocks"));
+        var table=(byte*)NativeMemory.AllocZeroed(144); *(uint*)table=144; *(uint*)(table+4)=1;
+        *(nint*)(table+136)=(nint)(delegate* unmanaged[Cdecl]<ulong,uint,int>)&RequestGroups;
+        host.Services["kiln.gameplay"]=(nint)table;
+        try { using var mods=NewManager(host); mods.PrepareGameplayHooks(); Assert.Equal(15u,_groups); }
+        finally { NativeMemory.Free(table); _host=null; }
     }
 
 }

@@ -240,4 +240,58 @@ later target nevertheless fails, earlier raw detours remain physically installed
 revoking a raw link would retain its jump too. No event or Build/Break denial is produced by that partial group.
 Status reports refusal and the mask (bits 0..4: PlaceBlueprint, PlaceProp, DismantleBlock, DismantleBlock2, PickUpProp).
 This physical partial-install state was also possible with the previous startup installation. It is refused for the
-process without repeated attempts. Terraforming, craft and natural-spawn hooks remain separate startup hooks.
+process without repeated attempts. Terraforming, craft, natural-spawn and entity lifecycle hooks have separate first-use groups (below).
+
+### Craft, terraform, natural-spawn and entity hook demand
+
+`kiln.gameplay` installs none of its game detours merely by starting. The host's existing admitted-mod pre-world
+reference pass now requests all groups for a mod referencing `Kiln.Gameplay`, including shipped helper references
+and crafting-only use. References to the consuming facades also pre-arm their dependencies: `Kiln.Creatures`
+requests natural-spawn hooks for variants, `Kiln.Rules` requests build/terraform for its monitor, and `Kiln.Quests`
+requests craft/build/terraform for objectives. `Kiln.Blocks` references and admitted packs with a `blocks/` folder
+pre-arm build/craft/terraform/spawn for declarative NPC variants and objectives, including data-only packs. Other facades do not count merely because a shared service exists.
+Native plugins can request selected groups with the appended, size-checked
+`request_hooks(owner, groups)` (build=1, craft=2, terraform=4, natural spawn=8, entities=16). The existing
+`request_build(owner)` and its offset remain unchanged. Teleport watchers use components, not entity hooks.
+
+| Group / session row | Demand |
+| --- | --- |
+| `gameplay.craft_hooks` | ItemCraftedEvent; native CRAFTED interest |
+| `gameplay.terraform_hooks` | BuildEvent's Terraform operations; native BUILD interest; DENY_TERRAFORM zones |
+| `gameplay.spawn_hooks` | NaturalSpawnEvent / native SPAWN interest; positive natural-spawn replacements; DENY_SPAWN zones |
+| `gameplay.entities_hooks` | EntityJoinLevelEvent, EntityLeaveLevelEvent, WatchEntities, nonzero native entity_filter |
+
+The four new groups install immediately with no world, or through kiln.hooks' checked typed installer at the next
+safe authoritative/joined-client Pre. They preserve the existing observer bodies, labels, priority, original-chain
+continuations, calling thread and Post dispatch order. Explicit owner edges retain gameplay's old position before
+SET/ShroudForge and NPC lifetime observers, after the creatures lifetime observer; EMF's higher priority and rules'
+existing before-gameplay edge remain effective. Each Pre attempts at most two targets across the groups;
+a simultaneous first request for all four can need three Pre passes. An unchecked-thread refusal retries on later
+safe Pre passes, at most three attempts per target, then refuses once with a reason. A signature refusal is final.
+No unchecked fallback is used. Old cores lacking checked typed installation are explicitly refused.
+
+Group rows show resolved/unused, waiting, installed or refused; appended native status fields include state,
+installed-target count and reason. Existing CraftHook, TerraformHook, SpawnHook and EntityHooks booleans mean fully
+installed. The existing static `gameplay.spawn_replace` and `gameplay.entity_events` capabilities stay available
+while resolved, so dev.28 manifest requirements do not prevent preflight; the new session rows carry installation
+progress. Permanent failures lower the legacy aliases too. Older native tables retain their old startup behavior
+under the new managed facade; older managed readers ignore the appended fields.
+
+A late event subscription is accepted while pending; the native waiting line states that earlier operations are
+not replayed, and its group row and "installed on first use" line announce delivery start. Direct managed event
+subscriptions use EventProducers and throw the named unavailable exception on refusal. Zones are refused while pending rather than silently failing to enforce. Positive spawn-replacement registrations
+are retained while pending, with the group warning/row announcing that rules begin after installation; this lets
+creature variants keep their registration instead of permanently skipping it after a transient wait. A later
+permanent refusal lowers the group and static replacement alias and logs its reason; pending rules remain inert
+and can be disposed/cleared normally. A registration made after permanent refusal is rejected. Removing zones/rules, unsubscribing, or disposing a watcher never removes hooks: continuations and
+in-flight calls remain valid, with the existing idle/pass-through behavior, and future consumers avoid another patch.
+
+The entity pair is one group because the category filter and lifecycle stream serve both operations. If its second
+installation fails, the first stays physically installed but passes through without capturing events. A partial
+group never publishes events. Clearing entity_filter or a spawn rule does not constitute new demand.
+
+The five building-piece detours retain their earlier no-world/last-stop policy. Terraforming has its own safe-Pre
+activation, so a mid-world BuildEvent subscription may begin receiving Terraform events before building-piece
+events. CraftEvent interception and DENY_CRAFT zones do not need CraftRecipe; ItemCraftedEvent does.
+Other services' own detours, such as creatures/npcai DestroyEntity observers and rules' TerraformImpact link,
+remain independent; the absence of gameplay demand does not remove those services' links.
