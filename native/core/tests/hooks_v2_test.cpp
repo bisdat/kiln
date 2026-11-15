@@ -1069,9 +1069,8 @@ void test_foreign() {
         check(A->raw_detour(6, reinterpret_cast<uintptr_t>(f), &o, reinterpret_cast<void*>(fn), reinterpret_cast<void**>(&orig), &h) == KILN_OK,
               "Kiln hooks a function that starts with a foreign jmp");
         check(reinterpret_cast<int (*)(int)>(f)(41) == 42 && take_order() == "KF", "both run: Kiln, then the other engine, then the original once");
-        check(log_has("t/fb chained over " + exe_name_lower()) || log_has("chained over " + exe_name_lower()) ||
-                  log_has("chained over hooks_v2_test.exe"),
-              "kiln.log: \"<label> chained over <module>+0x...\"");
+        check(log_has("hooks: t/fb (test) chained over " + exe_name_lower()) || log_has("hooks: t/fb (test) chained over hooks_v2_test.exe"),
+              "kiln.log: \"<label> (<owner>) chained over <module>+0x...\" (the hook and its owner, GitHub issue 39)");
         const auto ch = chain::chain_of(reinterpret_cast<uintptr_t>(f));
         check(ch.size() == 1, "one link on the target");
         bool found = false;
@@ -1098,7 +1097,7 @@ void test_foreign() {
         check(reinterpret_cast<int (*)(int)>(f)(41) == 42 && take_order() == "FK", "both run: the other engine, then Kiln, then the original once");
         const size_t over = chain::check_foreign();
         check(over == 1, "check_foreign: one target hooked over", std::to_string(over));
-        check(log_has("hooked over Kiln's t/fo") || log_has("hooked over Kiln's"), "kiln.log: \"<module> hooked over Kiln's <label>\"");
+        check(log_has("hooked over Kiln's t/fo (test)"), "kiln.log: \"<module> hooked over Kiln's <label> (<owner>)\"");
         KilnHooksStats st{};
         st.size = sizeof st;
         A->stats(&st);
