@@ -242,6 +242,19 @@ enum {
     KILN_NATIVE_ATTACH_ACTIVE = 2,
     KILN_NATIVE_ATTACH_OFF = 3,     /* its program is not loaded or does not call the native (at that site) */
 };
+/* KilnNativeCounters.ecs_state (since 0.2.0-dev.29): the ECS bridge of Kiln natives' calls (native_ecs_read/write) */
+enum {
+    KILN_NATIVE_ECS_PENDING = 0, /* no server world's view yet, or its first call has not been checked */
+    KILN_NATIVE_ECS_ON = 1,      /* checked in this world: the calls' iterator is impact_simulation's as kiln.world sees it */
+    KILN_NATIVE_ECS_OFF = 2,     /* off in this world: ecs_reason says why (natives still run) */
+};
+enum {
+    KILN_NATIVE_ECS_REASON_NONE = 0,
+    KILN_NATIVE_ECS_REASON_NO_WORLD_API = 1, /* no kiln.world with foreign views (0.2.0-dev.29) */
+    KILN_NATIVE_ECS_REASON_LAYOUT = 2,       /* kiln.world could not compute impact_simulation's view (kiln.log) */
+    KILN_NATIVE_ECS_REASON_COUNTS = 3,       /* the job's group counts are not the view's */
+    KILN_NATIVE_ECS_REASON_REGISTRY = 4,     /* the iterator's impact::ImpactSystem qword is not the captured registry */
+};
 
 /* since 0.2.0-dev.29 (native_counters). Reads every field the caller's size covers. */
 typedef struct KilnNativeCounters {
@@ -263,6 +276,10 @@ typedef struct KilnNativeCounters {
     uint32_t attach_pending;  /* attachments now (KILN_NATIVE_ATTACH_*): program and site not checked yet, */
     uint32_t attach_active;   /* checked and taking calls, */
     uint32_t attach_off;      /* off: program not loaded or not calling the native there (checked again on new programs) */
+    uint64_t lock_bypass;     /* hook visits (createImpactInstance, runImpact, managed calls, events) that gave up on
+                                 Kiln's lock after its bound and took the path that needs none */
+    uint32_t ecs_state;       /* KILN_NATIVE_ECS_* of the live server world */
+    uint32_t ecs_reason;      /* KILN_NATIVE_ECS_REASON_* when OFF */
 } KilnNativeCounters;
 enum {
     KILN_NATIVE_COUNTERS_NATIVES = 1u << 0, /* the RegisterNative hook is in: Kiln natives can be registered */
@@ -324,7 +341,9 @@ typedef struct KilnAbilitiesApi {
     KilnResult(KILN_CALL* set_wrap_dispatcher)(KilnNativeWrapFn fn, void* user);
     /* job thread, from the dispatcher only: runs the game's native with the current args; sets out_error/out_value. */
     void(KILN_CALL* call_original)(KilnNativeCall* call);
-    /* tick. Drops every managed native of `owner`. */
+    /* tick, outside a native call. Closes owner admission and drops its natives and attachments.
+     * Waits at most 2 ms; KILN_OK does not mean an earlier callback returned. Caller-owned fn/user resources must
+     * remain valid until its in-flight callbacks return (deferred retirements are reported by native_counters). */
     KilnResult(KILN_CALL* release_owner)(KilnOwner owner);
 
     /* ---- attributes (tick) ----
@@ -353,7 +372,7 @@ typedef struct KilnAbilitiesApi {
      * has no original (call_original does nothing); its out_error/out_value are the result (out_error left at 0xFF:
      * error 0, value 0). A fault in `fn` answers 0x11 (the instance stops with Error, the game goes on). `fn` must not
      * block and must not call tick-only functions. native_unregister / release_owner take it off like a managed native:
-     * from then on the hash answers 0x1F. `fn` and `user` must stay valid until then.
+     * from then on the hash answers 0x1F. `fn` and `user` must stay valid until every in-flight call returns, including after removal.
      * KILN_OK: *out_hash set. INVALID_ARGUMENT: a bad name, argc or fn (*out_refusal 0), or a refusal (*out_refusal is
      * KILN_NATIVE_REFUSED_*). UNAVAILABLE: no natives on this build. */
     KilnResult(KILN_CALL* native_register_sync)(KilnOwner owner, KilnStr name, uint32_t argc, KilnNativeWrapFn fn,
@@ -396,7 +415,24 @@ typedef struct KilnAbilitiesApi {
      * later: checked in the Pre after it goes in), then ACTIVE or OFF. */
     KilnResult(KILN_CALL* native_state)(uint32_t hash, uint32_t* out_state);
     KilnResult(KILN_CALL* native_attach_state)(KilnHandle attachment, uint32_t* out_state);
+
+    /* ---- since 0.2.0-dev.29: the ECS bridge (chapter 06c 9.1), check header.size ----
+     * Inside a sync native's or an attachment's callback (`call` as it got it): component `component` (short name:
+     * "Health") of entity `entity`, through impact_simulation's own other_read / other_write accessors (kiln.world's
+     * foreign view; the job's storage and tracker). native_ecs_read copies the component's first `size` bytes (at
+     * most its size) into `out`. KILN_ERR_NOT_FOUND: the program does not declare that component for other entities, or
+     * the entity has none; KILN_ERR_INVALID_ARGUMENT: `size` is over the component's (for a write: not its size); KILN_ERR_UNAVAILABLE: the bridge is not on in this
+     * world (KilnNativeCounters.ecs_state), or not inside a call. */
+    KilnResult(KILN_CALL* native_ecs_read)(const KilnNativeCall* call, KilnStr component, uint32_t entity, void* out,
+                                           uint32_t size);
+    /* The same through the other_write accessor with the job's tracker (saved and replicated like the game's own
+     * writes): `before` (optional, size bytes) gets the bytes before, then `value` is written; with
+     * KILN_NATIVE_ECS_ATTRIBUTE in `flags` the game's attribute formulas run after it (an attribute block with values);
+     * `after` (optional) gets the bytes after. KILN_ERR_NOT_FOUND also for a component only in other_read. */
+    KilnResult(KILN_CALL* native_ecs_write)(KilnNativeCall* call, KilnStr component, uint32_t entity, const void* value,
+                                            uint32_t size, uint32_t flags, void* before, void* after);
 } KilnAbilitiesApi;
+enum { KILN_NATIVE_ECS_ATTRIBUTE = 1u << 0 };
 
 /* sequence_play() trigger (keen::actor::ActionSequenceTrigger) */
 enum {

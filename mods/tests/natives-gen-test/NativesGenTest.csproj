@@ -11,7 +11,7 @@
     <KilnModId>natives-gen-test</KilnModId>
     <KilnModName>kiln.abilities [ImpactNative] lab test</KilnModName>
     <Version>0.1.0</Version>
-    <KilnServices>Abilities;Spawn;Client</KilnServices>
+    <KilnServices>Abilities;Spawn;Client;World;Game</KilnServices>
     <KilnSide>server</KilnSide>
     <KilnAdvanced>true</KilnAdvanced>
     <NoWarn>$(NoWarn);KILNX001</NoWarn>

@@ -1164,8 +1164,21 @@
    "state": "open"
   },
   {
-   "id": "17-vfx-budget",
-   "title": "The VFX budget, and VFX defined with an answer: registered at the next start and played",
+   "id": "17-vfx-budget.before",
+   "title": "VFX restart proof (1 of 2): record accepted definitions, then restart",
+   "chapter": "17",
+   "packages": [
+    "17b-kiln-quotas",
+    "17a-vfx-cap",
+    "17c-roster-cap",
+    "17d-material-pools"
+   ],
+   "state": "open",
+   "added": "17a-vfx-cap S2 (dev.29): Vfx.ResourceBudget, Blocks.Define(name, VfxBlock, options)"
+  },
+  {
+   "id": "17-vfx-budget.after",
+   "title": "VFX restart proof (2 of 2): exact registrations and visible bursts",
    "chapter": "17",
    "packages": [
     "17b-kiln-quotas",

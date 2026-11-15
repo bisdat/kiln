@@ -93,7 +93,7 @@
     ["failed", 56],
     ["updates", 64]
   ] },
-  "KilnWorldApiV4": { "size": 448, "fields": [
+  "KilnWorldApiV4": { "size": 496, "fields": [
     ["header", 0],
     ["register_program", 8],
     ["program_slot", 16],
@@ -148,7 +148,13 @@
     ["game_archetype_has", 408],
     ["game_slice_attr_changed", 416],
     ["game_slice_attr_validate", 424],
-    ["game_world_session", 432], ["game_program_contract", 440]
+    ["game_world_session", 432], ["game_program_contract", 440],
+    ["foreign_layout", 448], ["foreign_slot", 456], ["foreign_check", 464], ["foreign_read", 472],
+    ["foreign_write", 480], ["foreign_attr_changed", 488]
+  ] },
+  "KilnForeignLayout": { "size": 192, "fields": [
+    ["size", 0], ["world_kind", 4], ["session", 8], ["program", 16], ["iter_size", 20], ["counts", 24],
+    ["handle", 56], ["why", 64]
   ] },
   "KilnGameProgramInfo": { "size": 88, "fields": [
     ["size", 0],

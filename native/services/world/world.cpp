@@ -354,6 +354,12 @@ const KilnWorldApi kTable = {
     &game_slice_attr_validate,
     &game_world_session,
     &game_program_contract,
+    &foreign_layout,
+    &foreign_slot,
+    &foreign_check,
+    &foreign_read,
+    &foreign_write,
+    &foreign_attr_changed,
 };
 
 void KILN_CALL on_client_pre(const KilnTickInfo* tick, void*) { game_programs_pre(KILN_WORLD_CLIENT, tick); }

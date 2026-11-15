@@ -218,7 +218,7 @@ table is not read yet (its `World` token is set then) or on a build where progra
 budget read before the world starts is not a promise: registration still checks the live table at the world's start.
 The prediction world is not a kind of its own here (`ArgumentException`). Without kiln.world.budget (an older kiln.world)
 it throws `KilnUnavailableException("world.program_budget")`. A change posts `CapacityChangedEvent` (`Quota`
-`world.program_budget`) at the next step, measured every 25 steps while something listens. Native code: the table
+`world.program_budget`) at the next step, measured separately for Server and Client every 25 steps while something listens; switching query kinds does not itself report a change. Native code: the table
 `kiln.world.budget` (`native/core/abi/services/kiln_world_budget.h`), a table of its own next to kiln.world.
 `World.Status` stays what it was (a legacy diagnostic).
 
@@ -312,6 +312,17 @@ Tick thread (Pre/Post) or inside your program: `component(e, hash, &size)`, `exi
 `find(hash, buf, cap, &count)` (KILN_ERR_BUFFER_TOO_SMALL with the full count when `cap` is short),
 `entity_count`. `teleport(owner, &req, &id)` from any thread; the callback runs once, on the tick thread in Pre.
 `teleport_cancel(id)` drops the callback. `status(&s)` tells what works.
+
+### Foreign views: another service's code inside a game program (since 0.2.0-dev.29)
+For native code that runs inside one of the game's programs and holds its iterator (kiln.abilities' natives get
+impact_simulation's at NativeCtx+0x30): `foreign_layout(world_kind, "impact_simulation", &layout)` (tick thread, once per
+world session) computes the program's iterator layout with the wraps' view algorithm over its live descriptor;
+`foreign_slot` names a qword; inside the update `foreign_check(layout, iter, counts)` compares the job's group counts with
+the view (use nothing of the view on an iterator that fails it); `foreign_read` / `foreign_write` give another entity's
+component through the program's own other_read / other_write accessor with the job's storage, tracker and write flag (the
+tracked-write path: saved and replicated), each accessor checked once against the world's component map;
+`foreign_attr_changed` runs the attribute formulas with the program's `impact::AttributeRegistry`. Explicit arguments,
+no thread-local state, any thread inside the update. Host tests: `tests/wraps_test.cpp` (`foreign:` rows).
 
 ### Is this thread inside a program? (since 0.2.0-dev.28)
 `in_program()`, appended after `wrap_original` (version stays 4: check `header.size` first), answers 1 while the

@@ -309,3 +309,5 @@ override Kiln.ProgramOptions.ToString() -> string!
 static Kiln.ProgramOptions.operator !=(Kiln.ProgramOptions? left, Kiln.ProgramOptions? right) -> bool
 static Kiln.ProgramOptions.operator ==(Kiln.ProgramOptions? left, Kiln.ProgramOptions? right) -> bool
 static Kiln.Systems.Define<T>(string! key, Kiln.ProgramOptions! options, Kiln.EntityHandler<T>! each) -> Kiln.ProgramRegistration!
+Kiln.WrapStats.ArchetypeSkips.get -> long
+Kiln.WrapStats.ArchetypeSkips.init -> void

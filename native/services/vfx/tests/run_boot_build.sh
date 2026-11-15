@@ -23,5 +23,17 @@ def between(a, b): return a + s.split(a, 1)[1].split(b, 1)[0]
 PY
 c++ -std=c++23 -O0 -g0 -Wall -Wextra -fsanitize=address,undefined -pthread \
  -I"$root/native/third_party" -I"$root/native/core/abi" -I"$out" \
- "$here/test_boot_build.cpp" "$here/../cook/contenthash.cpp" "$here/../cook/ids.cpp" "$here/../ledger.cpp" -o "$out/test_boot_build"
+ "$here/test_boot_build.cpp" "$here/../cook/contenthash.cpp" "$here/../cook/ids.cpp" "$here/../ledger.cpp" "$here/../pending_cleanup.cpp" -o "$out/test_boot_build"
 "$out/test_boot_build"
+python3 - "$root" "$out" <<'PY'
+import os,sys
+from pathlib import Path
+root,out=map(Path,sys.argv[1:])
+s=Path(os.environ.get('VFX_LEGACY_SOURCE',root/'native/services/vfx/boot.cpp')).read_text()
+a=s.index('            const auto keep = ')
+b=s.index('            if (rc == KILN_OK',a)
+(out/'legacy_keep.inc').write_text(s[a:b])
+PY
+c++ -std=c++23 -O0 -g0 -Wall -Wextra -fsanitize=address,undefined -pthread -I"$root/native/third_party" -I"$out" \
+ "$here/test_legacy_pending.cpp" -o "$out/test_legacy_pending"
+"$out/test_legacy_pending"

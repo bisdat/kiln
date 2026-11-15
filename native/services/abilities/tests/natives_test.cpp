@@ -28,6 +28,7 @@ static int g_failed = 0, g_passed = 0;
 
 static void names() {
     CHECK(valid_native_name("mymod.OnHit"));
+    CHECK(valid_native_name("my.mod.OnHit"));
     CHECK(valid_native_name("a.b"));
     CHECK(valid_native_name("my-mod.On_Hit2"));
     CHECK(!valid_native_name("OnHit"));
@@ -414,7 +415,23 @@ static void gates() {
     }
 }
 
+// The ECS bridge's self-check (chapter 06c 9.1): counts first, then the registry qword at a real slot.
+static void ecs() {
+    CHECK(ecs_verdict(true, 34, 0x1000, 0x1000) == KILN_NATIVE_ECS_REASON_NONE);
+    CHECK(ecs_verdict(false, 34, 0x1000, 0x1000) == KILN_NATIVE_ECS_REASON_COUNTS);
+    CHECK(ecs_verdict(true, 34, 0x2000, 0x1000) == KILN_NATIVE_ECS_REASON_REGISTRY);
+    CHECK(ecs_verdict(true, -1, 0x1000, 0x1000) == KILN_NATIVE_ECS_REASON_REGISTRY);  // no impact::ImpactSystem in the view
+    CHECK(ecs_verdict(true, 34, 0, 0) == KILN_NATIVE_ECS_REASON_REGISTRY);            // no registry captured
+}
+
 static void watchdog() {
+    InsideTable<1> owned;
+    char mutable_name[] = "mod.Original";
+    owned.claim(1, mutable_name, 1);
+    mutable_name[4] = 'X';
+    std::string original;
+    owned.scan(100, 1, [&](const char* what, KilnOwner, int64_t) { original = what; });
+    CHECK(original == "mod.Original");
     InsideTable<4> t;
     const int a = t.claim(100, "mod.Hang", 9);
     const int b = t.claim(150, "mod.Quick", 9);
@@ -433,6 +450,7 @@ static void watchdog() {
 int main() {
     names();
     gates();
+    ecs();
     watchdog();
     typed();
     natives_json();

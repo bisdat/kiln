@@ -365,6 +365,11 @@ class PatchTests(unittest.TestCase):
 
 
 class CatalogTests(unittest.TestCase):
+    def test_dotted_mod_id(self):
+        c = catalog.Catalog.default()
+        c.add_natives({"natives": [{"name": "my.mod.OnHit", "argc": 0}]}, "mod:test")
+        self.assertEqual([], c.problems)
+
     def test_vanilla(self):
         self.assertEqual(len(CAT.natives), 107 + 2)
         n = CAT.native("applyDamage")
