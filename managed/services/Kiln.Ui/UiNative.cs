@@ -424,6 +424,18 @@ internal static unsafe class UiNative
         return T->Status(&s) == Ok ? s : null;
     }
 
+    // status.error is also the native service's degraded-state surface. An absent
+    // device during ordinary startup must never be mistaken for drawing switched off.
+    internal static string? DrawingOffReason
+    {
+        get
+        {
+            if (ReadStatus() is not { } status) return null;
+            var text = ErrorText(status);
+            return text.StartsWith("the overlay's drawing is off:", StringComparison.Ordinal) ? text : null;
+        }
+    }
+
     public static string KeyName(uint vk)
     {
         if (T == null) return $"Key{vk}";

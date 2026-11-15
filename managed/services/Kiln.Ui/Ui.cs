@@ -384,7 +384,7 @@ public sealed class UiWindow : IDisposable
         Options = options;
         Owner = owner;
         Key = $"{title}###kiln.w{Interlocked.Increment(ref _ids)}";
-        _open = options.StartOpen;
+        _open = options.StartOpen && UiNative.DrawingOffReason == null;
     }
 
     public string Title { get; }
@@ -402,6 +402,7 @@ public sealed class UiWindow : IDisposable
         get => _open;
         set
         {
+            if (value && UiNative.DrawingOffReason != null) return;
             if (_open == value) return;
             _open = value;
             UiEngine.Recount();

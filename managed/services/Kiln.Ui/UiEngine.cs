@@ -101,10 +101,11 @@ internal static unsafe class UiEngine
             Log(LogLevel.Info, "kiln.ui is not available here (dedicated server, or no overlay on this build)");
             return;
         }
+        if (UiNative.DrawingOffReason is { } reason) Log(LogLevel.Info, reason);
         KeyBindings.Load();
         ApplyMenuKey(KeyBindings.MenuKey);
         // the game page needs the layout calls (v3) for the page itself and v4 for the page state
-        _pageHost = UiNative.T3 != null && GamePageHost.Claim();
+        _pageHost = UiNative.DrawingOffReason == null && UiNative.T3 != null && GamePageHost.Claim();
         var page = _pageHost ? GamePageHost.Read() : null;
         Ui.Screens.Start();
         RefusalNotice.Start();
