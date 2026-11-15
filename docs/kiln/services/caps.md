@@ -258,7 +258,7 @@ every row. Nothing in the launcher reads it yet; `tools/docs-site/status-tables.
 Rows a dev.28 package adds, by service. The "Held by" column names no holds in this release:
 all holds were removed in 0.2.0-dev.29. Guided checks confirm behavior; they no longer open these rows.
 
-The six `ui.values.*` / `ui.slots.inspect` rows below are client-only and require measured client build 26430625; a game update leaves them off until Kiln is updated. Hooks install on first use, including a slot read. Tool-wear hooks install on the first valid rule, rather than at startup. `mods.boot.vfx` being available does not establish successful VFX initialization or late activation.
+The six `ui.values.*` / `ui.slots.inspect` rows below are client-only and require measured client build 26430625; a game update leaves them off until Kiln is updated. Hooks install on first use, including a slot read. Tool-wear hooks install on the first valid rule, rather than at startup. `mods.boot.vfx` is not in this build on a client (its row reads unavailable, `service-missing`): VFX and material files are built at start.
 
 | Row | Kind | Reported by | Held by | What it says |
 |---|---|---|---|---|
@@ -298,7 +298,7 @@ The six `ui.values.*` / `ui.slots.inspect` rows below are client-only and requir
 | `mods.boot.phase` | service row (session) | kiln.boot | - | Informational: `available` while a boot mod's OnBoot frame is open (the text names it), `pending` while the generation collects, `unavailable` (`policy`) once the phase is over or when this process has none (the text says why: safe idle, .NET off, no boot mod, or a configured client hold; this release holds none) |
 | `mods.boot.game_data` | service row | kiln.boot, at its start | - | `BootContext.GameData.Read` has a game-data snapshot of exactly this game build ([../modding/boot-gamedata.md](../modding/boot-gamedata.md)); `service-missing` with the command that makes one otherwise, `policy` in safe idle |
 | `mods.boot.client` | service row | kiln.boot, at its start | — | Boot mods on a game client (the hosted world and the client); `wrong-side` on a dedicated server, whose boot mods are `mods.boot` |
-| `mods.boot.vfx` | service row | kiln.boot, at its start | — | The vfx collector cooks VFX and materials into a client's boot generation; `wrong-side` on a dedicated server (it renders none: an empty plan) |
+| `mods.boot.vfx` | service row | kiln.boot, at its start | — | Staging VFX and materials into a client's boot generation. Not in this build: `unavailable` (`service-missing`) on a client, where VFX and material files are built at start; `wrong-side` on a dedicated server (it renders none: an empty plan) |
 | `mods.boot.resource_patches` | native, static | kiln.content, at its start (and again with a note when a write of this start was not applied) | — | Fields of a game resource stated as resource patches (a boot mod's `OnBoot` or its blocks files) are written before the game reads its resources. Off without a boot phase in this process, and where kiln.assets' resources are off |
 | `kiln.ui.values` | service row | core | — | the in-core service is here (client only; on a server its init says no) |
 | `ui.values.detail` | sigdb feature (client), static | core (sigdb); kiln.ui.values lowers it (`faulted`) when its hook cannot be installed | — | providers can replace the item detail view's number, bar and label |

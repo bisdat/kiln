@@ -203,12 +203,12 @@ restart.
   `mods.boot` is available.
 - **Game clients** (a world a player hosts, and a player's game that joins a server) run it the same way since
   0.2.0-dev.29: the rows `mods.boot.client` and `mods.boot.resource_patches` are open. In 0.2.0-dev.28 they were held
-  and a boot mod did not load on a client without `"preview"` in `kiln/kiln.json`. `mods.boot.vfx` is also open now:
-  a client with any boot mod builds all mods' VFX and material files with the boot generation, after `OnBoot` and before
-  the game's entry point. One of a required mod's blocks files left out, a VFX or material error of the cook,
-  or a game build Kiln's VFX or materials cannot be built for stops the start; the stop line names the file and why.
-  An optional boot mod and a mod without `boot` lose only that file, with a line in kiln.log.
-  Guided check `08-boot.first-start-definitions` has not confirmed boot VFX in a real game.
+  and a boot mod did not load on a client without `"preview"` in `kiln/kiln.json`. A client builds every mod's VFX
+  and material files at start, before the game's entry point and outside the boot generation, as it always did.
+  Staging VFX or materials into a boot generation is not in this build (`mods.boot.vfx` reads unavailable, "not in
+  this build", on a client). One of a required mod's blocks files left out, a VFX or material error of the cook,
+  or a game build Kiln's VFX or materials cannot be built for still stops the start; the stop line names the file and
+  why. An optional boot mod and a mod without `boot` lose only that file, with a line in kiln.log.
 - A server where the phase does not run (safe idle, .NET off) does not load boot mods either. The row `mods.boot.phase`
   says why.
 
