@@ -28,6 +28,7 @@ A mod's blocks: spells, weapons, wands, armor, items, stations, statuses, effect
 | `behaviours` | object |  | Behaviours: attacks, rules, a brain. |
 | `blueprints` | object |  | New shapes for the game's building materials, half a metre a cell: a table each game merges at its start, so needs "clients": "mod". |
 | `bodies` | object |  | Bodies, for creatures and NPCs to name. |
+| `buildingMaterialPools` | object |  |  |
 | `buildingMaterials` | object |  | New building materials: an id and a GUID in the game's tables, and a block item. 49 fit across all mods. Needs "clients": "mod". |
 | `comforts` | object |  | Parts: what the game's comfort counts. |
 | `containers` | object |  | Things that hold items, as the game's chests do: a lid, sounds and upgrades from the game's small chest. |
@@ -408,6 +409,7 @@ A new shape on the game's building materials: beside the walls and floors in the
 | `cells` | array of array of string | yes | Layers from the bottom up; in a layer, rows from the back to the front; in a row, # a cell and . or a space none. Half a metre a cell, 32 at most each way. min items 1 max items 32 |
 | `cost` | integer |  | Obsolete and not used: a placement takes one block of the chosen material per cell it fills, as the game's own shapes do. min 1 max 9999 |
 | `description` | string |  |  |
+| `materialPool` | string |  | min length 1 |
 | `name` | string | yes | min length 1 |
 | `recipe` | [recipe](#recipe) |  |  |
 | `roof` | boolean |  | A roof shape: it cycles through the roof materials. |
@@ -452,6 +454,15 @@ A new building material.
 | `strength` | [strengthRef](#strengthref) |  |  |
 | `surface` | [buildingSurfaceRef](#buildingsurfaceref) |  | How it looks. Without one, like the game's Rough Stone. |
 | `was` | string |  | The block's old name, after a rename: the material's id comes from it, so its walls stay in every world. |
+
+## buildingMaterialPool
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `materials` | array of object or object | yes | min items 1 max items 64 |
+| `name` | string | yes | min length 1 |
+| `roof` | boolean |  |  |
+| `was` | string |  | min length 1 |
 
 ## buildingSurface
 
@@ -728,7 +739,7 @@ What happens. Parts run in this order: chance decides, area, spawns, vfx, sound,
 | `on` | `"target"` \| `"caster"` |  | Who it is for: what the trigger gives it (default), or the caster, whoever wields the weapon or cast the spell. |
 | `removes` | array of [statusRef](#statusref) |  | Statuses taken off the target: blocks by name, or the game's by their 0x id. |
 | `restores` | object |  | Given back to the target. Less than 0 takes it away. A target without that attribute gets nothing. |
-| `run` | string |  | A mod's [ImpactNative] method, "<modid>.<Name>", called first when the effect happens, with its parameters bound by name (self, target, attacker, caster, position, attackMod, damage); when it returns false the rest of the effect, then included, does not happen. Its parameters come from that mod's impact/natives.json (kiln lint KL340). Pattern `^[a-z0-9][a-z0-9._-]*\.[A-Za-z0-9_]+$`. |
+| `run` | string |  | A mod's [ImpactNative] method, "<modid>.<Name>", called first when the effect happens, with its parameters bound by name (self, target, attacker, caster, position, attackMod, damage); when it returns false the rest of the effect, then included, does not happen. Its parameters come from that mod's impact/natives.json (kiln lint KL340). max length 90 Pattern `^[a-z0-9][a-z0-9._-]*\.[A-Za-z0-9_]+$`. |
 | `screen` | [screenRef](#screenref) |  | A full-screen effect for the target, when it is a player, or for the players near the place. It needs seconds. |
 | `sound` | string |  | A sound at the target or the place: a cue of this mod (needs clients: mod), "other-mod:name", or a cue's GUID. min length 1 |
 | `spawns` | string |  | Spawned at the target or the place: a game template's name, or a template's GUID. min length 1 |
