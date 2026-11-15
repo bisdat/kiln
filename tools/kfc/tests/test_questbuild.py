@@ -626,6 +626,53 @@ class RoundTrip(unittest.TestCase):
         self.assertIn("\"name\" is required", text)
         self.assertIn("No_Such_Template", text)
 
+    def roster(self, n, roster_max=None, name="rostermod"):
+        mod = self.work / f"{name}{n}"
+        (mod / "quests").mkdir(parents=True, exist_ok=True)
+        (mod / "kiln.mod.json").write_text(json.dumps({"id": name}))
+        npcs = {f"r{i:03d}": {"template": "Townsfolk_Female_villager_01_HannahReed",
+                              "clone": {"guid": str(uuid.uuid5(uuid.NAMESPACE_URL, f"{name}:{i}")), "name": f"Kiln_RosterT_{i:03d}"},
+                              "roster": {"unlock": f"k{i}"}} for i in range(n)}
+        (mod / "quests/r.json").write_text(json.dumps({"format": 1, "knowledge": {f"k{i}": {"scope": "world"} for i in range(n)},
+                                                       "npcs": npcs}))
+        out = self.work / f"{name}{n}out"
+        cmd = [str(self.exe), "--res", str(self.work / "res"), "--names", str(self.work / "names.json"), "--out", str(out), "--mod", str(mod)]
+        if roster_max:
+            cmd += ["--roster-max", str(roster_max)]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        return r, json.loads((out / "summary.json").read_text())
+
+    def test_roster_refusal_is_flagged_for_the_start_stop(self):
+        vanilla = len(self.dec.decode("keen::NpcCollection", self.vanilla[GUID_NPCS])["npcs"])
+        # the roster fits: no refusal
+        r, s = self.roster(64 - vanilla)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse(s["rosterRefused"])
+        # one more than 64 where the second page is not available: refused, flagged, the mod named
+        r, s = self.roster(65 - vanilla)
+        self.assertEqual(r.returncode, 1)
+        self.assertTrue(s["rosterRefused"])
+        self.assertEqual(s["rosterMods"], ["rostermod"])
+        self.assertIn("the roster holds at most 64 NPCs", s["rosterRefusal"])
+        self.assertFalse(s["any"])
+        # 128 with the second page: built; 129: refused at 128
+        r, s = self.roster(128 - vanilla, 128)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse(s["rosterRefused"])
+        self.assertEqual(s["rosterMax"], 128)
+        r, s = self.roster(129 - vanilla, 128)
+        self.assertTrue(s["rosterRefused"])
+        self.assertIn("the roster holds at most 128 NPCs", s["rosterRefusal"])
+        # another build error (a template that is not there) is not a roster refusal
+        bad = self.work / "badroster"
+        (bad / "quests").mkdir(parents=True, exist_ok=True)
+        (bad / "kiln.mod.json").write_text(json.dumps({"id": "badroster"}))
+        (bad / "quests/x.json").write_text(json.dumps({"format": 1, "npcs": {"n": {"template": "No_Such_Template", "clone": True}}}))
+        out = self.work / "badrosterout"
+        subprocess.run([str(self.exe), "--res", str(self.work / "res"), "--names", str(self.work / "names.json"), "--out", str(out),
+                        "--mod", str(bad)], capture_output=True, text=True)
+        self.assertFalse(json.loads((out / "summary.json").read_text())["rosterRefused"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -62,6 +62,12 @@ struct PackOut {
     // build (sorted), the ids the build added (sorted), and the maximum it was built against.
     std::vector<uint32_t> roster_boot_ids, roster_kiln_ids;
     uint32_t roster_max = kMaxNpcs;
+    // The roster could not be held (more entries than roster_max): the build failed with roster_refusal, and the
+    // start must stop before any world loads (native_pack.cpp; a world without these mods' data drops their progress).
+    // roster_mods: the mods that add roster entries.
+    bool roster_refused = false;
+    std::string roster_refusal;
+    std::vector<std::string> roster_mods;
     ojson manifest;            // what Kiln.Quests/Native needs at run time (schema: npcs.md)
 };
 
