@@ -145,6 +145,14 @@ test.describe("Deck mode", () => {
     await expect(page.getByTestId("deck-beta-mark")).toHaveCount(0);
   });
 
+  test("Deck Home: the game's Kiln from the beta, and Play puts the launcher's in first", async ({ page }) => {
+    await page.goto("/?deck=steamdeck#/deck");
+    await expect(page.locator('[data-deck-screen="home"]')).toBeVisible();
+    await page.evaluate(() => (window as unknown as { __kilnMock: { setSwitchBack: (a: string, b: string) => void } }).__kilnMock
+      .setSwitchBack("0.2.1-dev+20261115.b3e7a11", "0.2.0-dev+20261104.0f1ffa6"));
+    await expect(page.locator('[data-deck-screen="home"]')).toContainText("from the beta, Play installs");
+  });
+
   test("Nexus build: Deck Settings says where test builds are and switches nothing", async ({ page }) => {
     await page.goto("/?dist=nexus&deck=steamdeck#/deck/settings");
     await expect(page.locator('[data-deck-id="set-channel"]')).toHaveCount(0);
@@ -175,6 +183,12 @@ test("back on the release, the Play page says the game's Kiln is the beta's and 
   const notice = page.getByTestId("channel-notice");
   await expect(notice).toContainText("This game has Kiln 0.2.1-dev (20261115) from a test build; Play puts this launcher's Kiln 0.2.0-dev (20261104) in first.");
   await expect(page.getByRole("button", { name: "from the beta" })).toBeVisible();
+  // the notice after the restart into the release says it too, and offers the launcher's Kiln (Update game)
+  await mock(page, "justUpdated", "0.2.0-dev.43+beta.1");
+  const updated = page.getByRole("dialog", { name: "Updated to 0.2.0-dev.42" });
+  await expect(updated.getByTestId("switch-back-runtime")).toContainText("This game has Kiln 0.2.1-dev+20261115.b3e7a11 from the test build; this installs Kiln 0.2.0-dev+20261104.0f1ffa6.");
+  await expect(updated.getByRole("button", { name: "Update game" })).toBeEnabled();
+  await updated.getByRole("button", { name: "Later" }).click();
   await shot(page, "beta-play-switch-back");
   await page.getByRole("button", { name: /^Play / }).first().click();
   await expect.poll(() => game(page, "installs")).toEqual(["0.2.0-dev+20261104.0f1ffa6"]);

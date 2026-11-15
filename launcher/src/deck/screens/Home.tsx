@@ -81,6 +81,8 @@ export default function Home() {
   else if (change?.state === "failed") kilnWord = { text: `${change.what} failed`, tone: "err" };
   else if (!rt) kilnWord = { text: "Checking", tone: "idle" };
   else if (!rt.installed) kilnWord = { text: kiln.shroudforge ? "ShroudForge is in this game" : "Kiln not installed", tone: "warn" };
+  // (dev.29) the game's Kiln came with a test build; Play puts this launcher's own in first (shell/play.ts)
+  else if (rt.switchBack) kilnWord = { text: `Kiln ${kilnLabel(kilnVer ?? "")} · from the beta, Play installs ${kilnLabel(rt.switchBack.to)}`, tone: "warn" };
   else if (rt.upgradeAvailable) kilnWord = { text: `Kiln ${kilnLabel(kilnVer ?? "")} · update ready`, tone: "warn" };
   else kilnWord = { text: `Kiln ${kilnLabel(kilnVer ?? "")}`, tone: "ok" };
   const advice = rt?.installed && s?.launchOptions?.advice && (ctl.stuck || !s.launchOptions.hasDllOverride);
