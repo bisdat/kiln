@@ -379,6 +379,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     wraps_init();
     const bool hooked = programs_init();
     if (!hooked) F.programs = F.teleport = false;
+    wraps_define_row(F.programs);
     if (hooked) {
         // kiln.world's own program: no entity query, no access; pushes teleport records and proves the world runs.
         KilnProgramDesc d{};

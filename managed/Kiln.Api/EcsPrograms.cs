@@ -32,6 +32,18 @@ public static unsafe class EcsPrograms
         if (!mod.Alive) throw new InvalidOperationException("the mod is unloading");
         var table = Table;
         if (table == null || (table->Capabilities() & 4) == 0) throw new NotSupportedException("kiln.world programs v2 is unavailable");
+        var result = TryBind(mod, key, callback, table, out var binding);
+        if (result != 0)
+            throw new InvalidOperationException($"cannot bind ECS program '{key}' ({result}); declare it in kiln.programs.json before starting the server");
+        return binding!;
+    }
+
+    /// <summary>Binds <paramref name="key"/> of <paramref name="mod"/> to <paramref name="callback"/>: kiln.world's result
+    /// (0, or 2 = KILN_ERR_NOT_FOUND when the mod has no boot reservation under that key) and, on 0, the binding. Tick
+    /// thread; the caller checked the mod and the table (Kiln.Systems' Systems.Define tells a missing reservation apart).</summary>
+    internal static int TryBind(ModContext mod, string key, EcsProgramCallback callback, EcsWorldTable* table, out Binding? bound)
+    {
+        bound = null;
         var binding = new Binding(mod, key, callback, table);
         binding.Root = GCHandle.Alloc(binding);
         var idBytes = Encoding.UTF8.GetBytes(mod.Info.Id);
@@ -45,11 +57,12 @@ public static unsafe class EcsPrograms
         if (result != 0)
         {
             binding.Root.Free();
-            throw new InvalidOperationException($"cannot bind ECS program '{key}' ({result}); declare it in kiln.programs.json before starting the server");
+            return result;
         }
         binding.Handle = handle;
         mod.Retiring += binding.Dispose;
-        return binding;
+        bound = binding;
+        return 0;
     }
 
     internal sealed class Binding(ModContext mod, string key, EcsProgramCallback callback, EcsWorldTable* table) : IDisposable

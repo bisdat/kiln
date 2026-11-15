@@ -731,6 +731,17 @@ void wraps_init() {
                "the program table or job layout did not resolve on this build (world.programs)");
 }
 
+// systems.define (Kiln.Systems' Systems.Define): a mod's [Query] program, reserved at boot from its kiln.programs.json and
+// bound by name. It is kiln.world's own program path (programs v2), so it follows whether that path hooked this build.
+void wraps_define_row(bool programs) {
+    if (programs)
+        report_row("systems.define", KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE,
+                   "a mod's own [Query] programs, reserved at boot (kiln.programs.json) and bound by Systems.Define");
+    else
+        report_row("systems.define", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING,
+                   "kiln.world's programs did not resolve or hook on this build (world.programs)");
+}
+
 void wraps_client_ready(bool tick, bool events) {
     if (g_api->side() != KILN_SIDE_CLIENT || !g_ok || !g_api->feature(kstr("world.lifecycle"))) return;
     g_client_ready = tick && events;

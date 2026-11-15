@@ -201,7 +201,7 @@ void fake_api() {
 void client_lifecycle_row() {
     KilnCapsApi caps{};
     caps.header = {sizeof caps, 1};
-    static uint32_t state, wraps_state = 99, typed_state = 99;
+    static uint32_t state, wraps_state = 99, typed_state = 99, define_state = 99;
     static std::string detail;
     caps.report = [](KilnOwner, KilnStr name, uint32_t value, uint32_t, KilnStr text) -> KilnResult {
         if (std::string_view(name.ptr, name.len) == "systems.wraps.client") {
@@ -210,6 +210,7 @@ void client_lifecycle_row() {
         }
         if (std::string_view(name.ptr, name.len) == "systems.wraps") wraps_state = value;
         if (std::string_view(name.ptr, name.len) == "systems.wraps.typed") typed_state = value;
+        if (std::string_view(name.ptr, name.len) == "systems.define") define_state = value;
         return KILN_OK;
     };
     static const KilnCapsApi* table;
@@ -238,6 +239,11 @@ void client_lifecycle_row() {
     wraps_pre(KILN_WORLD_CLIENT, 0);
     check(state == KILN_CAP_AVAILABLE, "client wrap row recovers when native SET leaves");
     check(typed_state == wraps_state, "the typed wrap row follows systems.wraps back");
+    wraps_define_row(false);
+    const uint32_t define_off = define_state;
+    wraps_define_row(true);
+    check(define_off == KILN_CAP_UNAVAILABLE && define_state == KILN_CAP_AVAILABLE,
+          "systems.define follows kiln.world's own programs (off when they did not hook, on when they did)");
     g_side = KILN_SIDE_SERVER;
     fake_api();
 }

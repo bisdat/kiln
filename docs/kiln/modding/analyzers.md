@@ -35,7 +35,9 @@ come with code fixes.
 
 Other KILN codes:
 - **KILN0xx** come from the SDK's MSBuild task (manifest checks, mdk.md), except KILN034 and KILN035 above: Roslyn rules
-  of Mod.OnBoot, numbered as the design of the boot phase names them (the MSBuild codes stop at KILN032).
+  of Mod.OnBoot, numbered as the design of the boot phase names them (the MSBuild codes are KILN001 to KILN032, and
+  KILN036 since 0.2.0-dev.29: a `[Query]` struct kiln.world cannot reserve, from the `KilnPrograms` step,
+  [services/systems.md](../services/systems.md#programs-of-your-own-systemsdefine)).
 - **KILN190** to **KILN193**, **KILN198** are the game-id generator's notes (catalogs.md).
 - **KL** codes are the data-file linter's (`kiln lint`).
 

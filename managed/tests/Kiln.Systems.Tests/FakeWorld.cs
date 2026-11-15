@@ -50,6 +50,13 @@ internal sealed unsafe class FakeWorld : IDisposable
     // kiln.world's directory read inside a step gave up after its bound (another thread held the directory's lock):
     // game_program_list answers -1 and game_program_contract NOT_FOUND for an existing program
     internal bool DirectoryBusy;
+    // kiln.world's boot reservations (programs v2, what Systems.Define binds): (mod id, key) reserved at boot, the names of
+    // each slot kind (KILN_SLOT_*) the reserved program has, the bound callback, unbinds
+    internal readonly HashSet<(string Mod, string Key)> Reserved = new();
+    internal readonly Dictionary<int, string[]> ReservedSlots = new();
+    internal delegate* unmanaged[Cdecl]<void*, ulong*, uint, void*, void> Bound;
+    internal void* BoundUser;
+    internal int Unbinds, BindResult = SystemsNative.Ok;
     // game_program_contract of fuel_setup: the live descriptor's contract and its text (chapter 06a 9.7)
     internal const uint FuelContract = 0xC0FFEE01;
     internal const string FuelTail = "sys_read_opt=0000000000000000\nsys_write_opt=0000000000000000\nsys_write_parallel=0000000000000000\nflags=00000000\ninterval=1\n";
@@ -107,6 +114,11 @@ internal sealed unsafe class FakeWorld : IDisposable
         _table->GameSliceAttrValidate = &AttrValidate;
         _table->GameWorldSession = &WorldSession;
         _table->GameProgramContract = &Contract;
+        var ecs = (EcsWorldTable*)_table;  // the v2 members of the same table: boot reservations
+        ecs->Capabilities = &EcsCaps;
+        ecs->Bind = &EcsBind;
+        ecs->Unregister = &EcsUnregister;
+        ecs->Prefix.ProgramSlot = (void*)(delegate* unmanaged[Cdecl]<ulong, int, NativeStr, int>)&EcsSlot;
         for (var r = 0; r < 8; r++)
         {
             var f = Fuel + 16 * r;
@@ -217,6 +229,46 @@ internal sealed unsafe class FakeWorld : IDisposable
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static ulong WorldSession(uint kind) => F.Session;
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static uint EcsCaps() => 4;  // KILN_WORLD_CAP_BIND_PROGRAM
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int EcsBind(ulong owner, NativeStr mod, NativeStr key, delegate* unmanaged[Cdecl]<void*, ulong*, uint, void*, void> each,
+        void* user, ulong* handle)
+    {
+        *handle = 0;
+        if (F.BindResult != SystemsNative.Ok) return F.BindResult;
+        if (!F.Reserved.Contains((mod.ToString(), key.ToString()))) return SystemsNative.NotFound;
+        F.Bound = each;
+        F.BoundUser = user;
+        *handle = 77;
+        return SystemsNative.Ok;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int EcsUnregister(ulong handle)
+    {
+        F.Unbinds++;
+        F.Bound = null;
+        return SystemsNative.Ok;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int EcsSlot(ulong handle, int kind, NativeStr name)
+    {
+        if (handle != 77 || !F.ReservedSlots.TryGetValue(kind, out var names)) return -1;
+        var at = Array.IndexOf(names, name.ToString());
+        return at < 0 ? -1 : 1 + 10 * kind + at;
+    }
+
+    /// <summary>Runs the bound defined program for each of <see cref="EntityIds"/>, as kiln.world's program does.</summary>
+    internal void RunDefined()
+    {
+        ulong* iter = stackalloc ulong[64];
+        foreach (var e in EntityIds)
+            if (Bound != null) Bound((void*)0x6160, iter, e, BoundUser);
+    }
 
     internal void SetTableSize(uint size) => _table->Header.Size = size;
 

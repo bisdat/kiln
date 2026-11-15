@@ -10,6 +10,7 @@ world. Since 0.2.0-dev.29.
 | `systems.wraps` | wraps work on this build; unavailable while native SET is loaded (reason `policy`) |
 | `systems.wraps.typed` | typed wraps (`Systems.Wrap<T>` with a view of Kiln.Game's `Ecs.Programs`); follows `systems.wraps` (each wrap checks its view's contract against the live descriptor) |
 | `systems.wraps.client` | wraps on the client world's programs (`WrapOptions.World = WorldKind.Client`), in a game client; `wrong-side` on a dedicated server. On since 0.2.0-dev.29 (held in dev.28), not yet confirmed in a real game: guided check `06a-wraps.client` |
+| `systems.define` | `Systems.Define`: a program of the mod's own over a `[Query]` struct, reserved at boot (kiln.world's own programs, `world.programs`) |
 | `systems.threads` | the server world's players mask can be read (what puts program slices on the game's workers) |
 | `world.systems` | the sigdb feature behind them: the program scheduler and the players mask |
 
@@ -157,6 +158,53 @@ once), and at the next step's start Kiln raises `ComponentWrittenEvent` on the t
 step. `Result.Before` and `Result.After` span everything between those two stages, the game's own update included when
 a Before and an After both wrote. Nothing is copied or compared while nobody listens for the event. A store through a
 pointer kept past the call is neither marked nor raised. Server world only.
+
+## Programs of your own: `Systems.Define`
+
+A program the game does not have, over the entities a `[Query]` struct describes, scheduled by the game like its own:
+once per matching entity of every step, on the game's workers, after every game program it conflicts with.
+
+```csharp
+[Query(Template = ["FuelSetup"], Write = ["Fuel"], HostOnly = true)]   // the access lists, the game's names
+public ref struct Containers : IQuery<Containers>
+{
+    public EcsProgramContext Context;                                  // what the lists allow, for this entity
+    public static Containers Bind(EcsProgramContext context) => new() { Context = context };
+}
+
+public override void OnLoad()
+{
+    var r = Systems.Define("MyMod_Containers", new ProgramOptions { HostOnly = true }, (ref Containers c) =>
+    {
+        if (c.Context.TryGet<Ecs.Fuel>(out var fuel) && fuel.Values[0] < fuel.Values[1]) { /* ... */ }
+    });
+    if (!r.Ok) Log.Warn(r.Reason!);   // "not reserved at boot: rebuild the mod and restart the server"
+}
+```
+
+- **Reserved at boot.** The game registers its programs once, before the world starts, so a program of a mod must be
+  known before any managed code runs. The build does it: Kiln.Sdk's `KilnPrograms` step writes each `[Query]` struct of
+  the mod into the mod's `kiln.programs.json` (key: the attribute's `Key`, or the struct's full name with `.` and `+` as
+  `_`; the lists; the flags), and kiln.world reserves those programs when the server starts. `Define` binds the handler
+  to the reservation by that key. Entries the project's own `kiln.programs.json` declares stay; a hand-written entry
+  under a `[Query]`'s key with other lists, more than 8 programs, a bad name or a query without an entity list stops the
+  build (KILN036). A mod built without the Kiln SDK writes the file itself in the same form
+  (`schema/kiln-programs.schema.json`).
+- **Results.** `ProgramRegistration`: `Ok = false` with `"not reserved at boot: rebuild the mod and restart the server"`
+  when kiln.world reserved nothing under the key for the mod (the file is missing, or the mod was loaded after the server
+  started), or with kiln.world's refusal (another binding holds it). `ArgumentException`: the struct has no `[Query]`,
+  the key or the options are not the `[Query]`'s, or a name the iterator gives a slot (templates, reads, writes,
+  singletons, other-entity and event lists) is not in the running reservation: a mod built from other sources than the
+  one the server reserved. The filters (`With`, `Without`, `AnyOf`) and the flags are checked against the `[Query]`
+  only. `KilnUnavailableException("systems.define")` when kiln.world's programs did not resolve on the build.
+- **The handler** gets the query for one entity; the query reads and writes through `EcsProgramContext` (`TryGet`,
+  `TrySet`, `TryReadOther`, events, `QueueAdd`), as `EcsPrograms.Bind` does. Worker threads: no tick-thread API inside
+  it; a handler that throws is turned off with a line in the mod's log. `Dispose` (tick thread) unbinds it and waits
+  until no call runs; the mod's unload does too. The reservation stays, inert, until the server restarts, and a reload
+  of the mod binds it again.
+- `[ServerOnly]` (the server world, also on a host). Lab: `mods/tests/systems-test` binds one in `OnLoad`, checks it ran
+  for `fuel_setup`'s containers, that a query without a reservation is `Ok = false`, and its handler on N > 1 threads with
+  the lab parallel switch.
 
 ## In the lab: the parallel switch
 

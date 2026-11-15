@@ -2,7 +2,9 @@
 
 An ECS program runs inside the game's scheduler on a worker thread. Declare its access in `kiln.programs.json`, next
 to `kiln.mod.json`. The native world service reads this file before the server creates its scheduler. Bind the callback
-in your normal `OnLoad`. `Kiln.Sdk` copies the file and includes it in `KilnPack` and `KilnDeploy`.
+in your normal `OnLoad`. `Kiln.Sdk` copies the file and includes it in `KilnPack` and `KilnDeploy`. Since
+0.2.0-dev.29 the typed way is `Systems.Define` over a `[Query]` struct: the build writes its entry into
+`kiln.programs.json` for you ([../services/systems.md](../services/systems.md#programs-of-your-own-systemsdefine)).
 
 ```json
 {
