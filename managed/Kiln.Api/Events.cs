@@ -208,7 +208,7 @@ public static class Events
 
     /// <summary>Subscribes <paramref name="handler"/> to <typeparamref name="T"/> and every event derived from it.</summary>
     /// <exception cref="KilnUnavailableException"><typeparamref name="T"/> is an event that needs a capability which
-    /// is off here (the cancelable decisions of 0.2.0-dev.28, such as a death that can be refused): the exception names
+    /// is off here (the cancelable decisions of 0.2.0-dev.29, such as a death that can be refused): the exception names
     /// it, and nothing was subscribed. Check <see cref="Capabilities.Is"/> first. A handler for a base class
     /// (<see cref="KilnEvent"/>, <see cref="CancelableEvent"/>) never throws this: it receives what is produced here.</exception>
     public static EventSubscription On<T>(Action<T> handler, EventPriority priority = EventPriority.Normal,
@@ -688,7 +688,7 @@ public static class Events
     }
 }
 
-/// <summary>Which capability an event type needs to be produced at all (since 0.2.0-dev.28). A service whose event is a
+/// <summary>Which capability an event type needs to be produced at all (since 0.2.0-dev.29). A service whose event is a
 /// decision (a death, a pickup, an equipment change a handler may refuse) registers the event's type here, from the
 /// type's static constructor or from the service's start. <c>Events.On</c> then refuses a subscription to that type
 /// while the capability is off, with a <see cref="KilnUnavailableException"/> that names it: a mod that asks for

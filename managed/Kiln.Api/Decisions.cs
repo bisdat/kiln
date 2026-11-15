@@ -6,7 +6,7 @@ namespace Kiln;
 
 /// <summary>Names one decision (a held action a mod may allow or refuse) for as long as the process runs:
 /// the server world's epoch and the request's number in it. The same id is on the cancelable event, on the typed
-/// event of the same action and on the <see cref="DecisionCompletedEvent"/> that ends it. Since 0.2.0-dev.28.</summary>
+/// event of the same action and on the <see cref="DecisionCompletedEvent"/> that ends it. Since 0.2.0-dev.29.</summary>
 /// <param name="WorldEpoch">Counts the server worlds of this process, from 1. Not saved.</param>
 /// <param name="Request">The request's number, never 0, never reused in this process.</param>
 public readonly record struct DecisionId(ulong WorldEpoch, ulong Request);
@@ -14,7 +14,7 @@ public readonly record struct DecisionId(ulong WorldEpoch, ulong Request);
 /// <summary>Which life of an entity id an event is about. Entity ids are reused; this key tells one user of an id
 /// from the next: the entity's spawn time where it has one, the player's session for a player, and a serial Kiln
 /// gives every life it sees. Sampled before the step's simulation, so it is the entity as it was when the step
-/// began. Since 0.2.0-dev.28.</summary>
+/// began. Since 0.2.0-dev.29.</summary>
 /// <param name="Entity">The entity id.</param>
 /// <param name="HasSpawnTime">False for a player that is told apart by its session alone; then
 /// <paramref name="SpawnTime"/> is 0 and means nothing.</param>
@@ -27,7 +27,7 @@ public readonly record struct EventEntityKey(uint Entity, bool HasSpawnTime, ulo
 
 /// <summary>How a decision ended. <see cref="Allowed"/>, <see cref="Prevented"/> and <see cref="AlreadyAlive"/> are
 /// the outcomes a handler asked for or can live with (<see cref="DecisionResult.Ok"/>); every other one says that the
-/// decision did not take effect, and why. Since 0.2.0-dev.28.</summary>
+/// decision did not take effect, and why. Since 0.2.0-dev.29.</summary>
 public enum DecisionTerminal
 {
     /// <summary>No handler canceled: the action was released to the game (which may still not carry it out).</summary>
@@ -57,7 +57,7 @@ public enum DecisionTerminal
 /// <summary>The end of one decision. <see cref="Ok"/> is true for <see cref="DecisionTerminal.Allowed"/>,
 /// <see cref="DecisionTerminal.Prevented"/> and <see cref="DecisionTerminal.AlreadyAlive"/>; otherwise
 /// <see cref="Reason"/> says why the decision did not take effect. The health fields are set for a death decision
-/// whose health was read, null otherwise. Since 0.2.0-dev.28.</summary>
+/// whose health was read, null otherwise. Since 0.2.0-dev.29.</summary>
 /// <param name="Id">The decision.</param>
 /// <param name="Status">How it ended.</param>
 /// <param name="Subject">The entity the action was about (the dying entity, the item on the ground, the player).</param>
@@ -74,7 +74,7 @@ public sealed record DecisionResult(DecisionId Id, DecisionTerminal Status, Enti
 }
 
 /// <summary>Posted once for every decision when it has ended, in the Pre of a later step than the one that held the
-/// action: whatever the handlers of the cancelable event said, this is what came of it. Since 0.2.0-dev.28.</summary>
+/// action: whatever the handlers of the cancelable event said, this is what came of it. Since 0.2.0-dev.29.</summary>
 [ServerOnly, TickThreadOnly]
 public sealed class DecisionCompletedEvent(DecisionResult result) : KilnEvent, IEntityEvent
 {
@@ -85,7 +85,7 @@ public sealed class DecisionCompletedEvent(DecisionResult result) : KilnEvent, I
     public bool Involves(EntityId entity) => !entity.IsNone && (entity == Result.Subject || entity == Result.Actor);
 }
 
-/// <summary>What <see cref="Decisions.ReevaluatePickup"/> did. Since 0.2.0-dev.28.</summary>
+/// <summary>What <see cref="Decisions.ReevaluatePickup"/> did. Since 0.2.0-dev.29.</summary>
 /// <param name="Ok">True when at least one exposure was reopened.</param>
 /// <param name="Reason"><c>NoActiveExposure</c> when the pair had none (no pickup was held for it, or the receiver
 /// left the item's range, or its decision is still open); null when <see cref="Ok"/>.</param>
@@ -94,7 +94,7 @@ public sealed record PickupReevaluationResult(bool Ok, string? Reason, int Expos
 
 /// <summary>Decisions: things the game is about to do that a mod may refuse (a death, a walk-over pickup, an equipment
 /// change). The events themselves are in the service that owns them (<c>EntityDyingEvent</c> in Kiln.Combat, ...); each
-/// carries a <see cref="DecisionId"/> and ends in one <see cref="DecisionCompletedEvent"/>. Since 0.2.0-dev.28.</summary>
+/// carries a <see cref="DecisionId"/> and ends in one <see cref="DecisionCompletedEvent"/>. Since 0.2.0-dev.29.</summary>
 public static class Decisions
 {
     private const string LabUrl = "https://github.com/frostdev-ops/kiln/blob/main/docs/kiln/modding/analyzers.md#kilnx001";

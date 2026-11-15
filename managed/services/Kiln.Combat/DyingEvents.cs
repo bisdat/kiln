@@ -28,7 +28,7 @@ namespace Kiln;
 /// without a filter (also one for a base class such as <see cref="KilnEvent"/>) holds every death in the world.</para>
 /// <para>Capability <c>events.death</c>: held until its guided client check (<c>07-events.decision-rollback</c>) has
 /// passed; while it is off, <c>Events.On&lt;EntityDyingEvent&gt;</c> throws <see cref="KilnUnavailableException"/>
-/// naming it. Since 0.2.0-dev.28.</para>
+/// naming it. Since 0.2.0-dev.29.</para>
 /// </remarks>
 [ServerOnly, TickThreadOnly]
 public sealed class EntityDyingEvent : CancelableEvent, IEntityEvent

@@ -308,3 +308,20 @@ a held row reads `unavailable`, `policy`, `game test pending: <ids>` until then.
 | `net.admission` | service row, static | Kiln.Network, at its start | — | the admission controller decides joins in this process: a server role, kiln.net and `net.gate`. Services that register requirements (mandatory protocols, holds, vanilla conditions) check it; `wrong-side` on a client that only joins |
 | `net.disconnect` | sigdb feature (dedicated server), static | core (sigdb); Kiln.Network lowers it when kiln.net is missing | — | kiln.net can end a refused client the game's login failure cannot reach (not on the build, or it faulted) with the game's own session kick, which closes the connection about a second later ([network.md](../network.md#admission)). Off (a hosted world, or the symbol did not resolve): such a client stays connected but blocked, with no world data, until it leaves |
 | `items.tool_wear_debit` | sigdb feature | core (sigdb); kiln-items.dll lowers it (its guards, a hook fault: `faulted`) | client: `16b-g` | `Items.SetToolWearPerDebit`, `ToolBlock.WearPerDebit`: a cost per game debit of an axe or pickaxe ([items.md](items.md#tool-wear-per-debit-since-020-dev28)); off on a build whose frames are not approved |
+
+## Rows added in dev.29
+Rows a dev.29 package adds, by service (as in "Rows added in dev.28" above).
+
+| Row | Kind | Reported by | Held until | What it says |
+|---|---|---|---|---|
+| `kiln.decisions` | service | core; kiln-decisions.dll lowers it (`service-missing`) without `tick.wait_jobs`, kiln.window_clock or kiln.world | - | the decision broker is here ([decisions.md](decisions.md)) |
+| `kiln.window_clock` | service (in-core) | core | - | the step's phase, world epoch and process session ([decisions.md](decisions.md)) |
+| `events.death` | sigdb feature, static | core (sigdb); kiln.decisions lowers it (`faulted`, `service-missing`) when its hook could not go in or kiln.combat is missing | `07-events.decision-rollback` | `EntityDyingEvent`: a death from health can be refused |
+| `events.pickup` | sigdb feature, static | core (sigdb); kiln.decisions lowers it (`faulted`) when its hook could not go in | `07-events.decision-rollback` | `ItemPickingUpEvent`, `Decisions.ReevaluatePickup`: a walk-over pickup can be refused |
+| `events.equip` | sigdb feature, static | core (sigdb: the game's EquipItem, UnequipItem); Kiln.Players lowers it (`service-older`, `symbol-missing`) when kiln.playerstate cannot hold an equipment input alone | - | `PlayerEquippingEvent`: one verdict with `PlayerClientActionEvent` for a player's equipment input |
+| `decisions.native_guards` | service row | kiln.decisions at its start | - (follows `events.death`'s hook) | `set_death_guard`: a native plugin can keep an entity's death from running (19d pets) |
+| `events.build.pieces` | service row | kiln.decisions at its start | - | always `unavailable` in 0.2.0-dev.29: player build pieces are not cancelable yet (07 S0/S9) |
+| `events.build.terraform` | service row | kiln.decisions at its start | - | always `unavailable`: managed terraform cancel is not part of V1 |
+| `events.component_net` | sigdb feature, lowered | core (sigdb); kiln.decisions lowers it (`service-missing`) | - | always `unavailable` in 0.2.0-dev.29: named component watches (kiln.component_changes, 07 S7) are not built yet |
+| `events.component_writes.exact` | service row | kiln.decisions at its start | - | reserved: always `unavailable`, no feed of every component store is promised |
+| `events.thread_report`, `events.build`, `events.observe_marks` | sigdb features, static | core (sigdb) | - | dependency rows of chapter 07's signatures (the players mask, the building primitives, the mark functions); they claim no capability of their own |

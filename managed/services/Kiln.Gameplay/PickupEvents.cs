@@ -29,7 +29,7 @@ namespace Kiln;
 /// (<see cref="EventFilter.ForEntity(EntityId)"/>); a handler without a filter holds every walk-over pickup.</para>
 /// <para>Capability <c>events.pickup</c>: held until its guided client check (<c>07-events.decision-rollback</c>) has
 /// passed; while it is off, <c>Events.On&lt;ItemPickingUpEvent&gt;</c> throws <see cref="KilnUnavailableException"/>
-/// naming it. Since 0.2.0-dev.28.</para>
+/// naming it. Since 0.2.0-dev.29.</para>
 /// </remarks>
 [ServerOnly, TickThreadOnly]
 public sealed class ItemPickingUpEvent : CancelableEvent, IEntityEvent

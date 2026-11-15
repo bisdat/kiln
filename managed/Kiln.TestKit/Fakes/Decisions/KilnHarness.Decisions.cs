@@ -6,13 +6,13 @@ public sealed partial class KilnHarness
     private HarnessDecisions? _decisions;
 
     /// <summary>The kit's fake kiln.decisions of this harness: how the decisions mods were asked about ended. Since
-    /// 0.2.0-dev.28.</summary>
+    /// 0.2.0-dev.29.</summary>
     public HarnessDecisions Decisions => _decisions ??= new HarnessDecisions(this);
 }
 
 /// <summary>
 /// The fake kiln.decisions of a harness (<see cref="KilnHarness.Decisions"/>): Kiln's own dispatcher of decisions runs
-/// on it. Since 0.2.0-dev.28.
+/// on it. Since 0.2.0-dev.29.
 /// </summary>
 /// <remarks>
 /// <para><b>Modelled.</b> The service's broker: every decision has an id, is delivered to the handlers once in the Pre

@@ -367,6 +367,19 @@ void KILN_CALL on_ready(void*) {
         if (!pickup_producer::installed() &&
             (pickup_producer::why_not_reason() == KILN_CAP_REASON_FAULTED || pickup_producer::why_not_reason() == KILN_CAP_REASON_SERVICE_MISSING))
             g_caps->report(g_owner, ks("events.pickup"), KILN_CAP_UNAVAILABLE, pickup_producer::why_not_reason(), ks(pickup_producer::why_not()));
+        // The rows of chapter 07 that this build does not have (0.2.0-dev.29), so none of them reads on: player build
+        // pieces wait for their replay gate (07 S0/S9, after 06a's program wraps), managed terraforming is out of V1
+        // (owner decision 10), the component watches (07 S7, kiln.component_changes) are not built yet, and an
+        // every-store feed is not promised at all. events.component_net is also a sigdb feature whose symbols resolve:
+        // lowered here, never raised.
+        g_caps->report(g_owner, ks("events.build.pieces"), KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_MISSING,
+                       ks("player build pieces are not cancelable in this build (their replay gate has not passed)"));
+        g_caps->report(g_owner, ks("events.build.terraform"), KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_MISSING,
+                       ks("not implemented: managed terraform cancel is not part of V1 (Gameplay.Protect's native policy still applies)"));
+        g_caps->report(g_owner, ks("events.component_net"), KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_MISSING,
+                       ks("kiln.component_changes (named component watches) is not in this build"));
+        g_caps->report(g_owner, ks("events.component_writes.exact"), KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_MISSING,
+                       ks("reserved: Kiln promises no feed of every component store"));
     }
 }
 

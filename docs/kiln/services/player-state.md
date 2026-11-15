@@ -168,3 +168,10 @@ Health and the other vitals are `NetworkPlayerAttributes`, updated once per step
 - A state a new build adds fires `PlayerStateChangedEvent` with a raw id: `(PlayerStateId)0x0140` and `e.Name` the game's name. `PlayerStates.All` lists it with `NamedByKiln == false`.
 - A state a new build drops reads as unknown.
 - Regenerate the constants: `python3 tools/typegen/playerstates.py --exe <enshrouded.exe> managed/services/Kiln.Players/PlayerStateIds.g.cs`. `--check` lists what changed first.
+
+## One verdict with the typed equipment event (since 0.2.0-dev.29)
+For `changeEquipmentAction` and `swapEquipmentSetAction`, while a `PlayerEquippingEvent` handler (Kiln.Items) listens,
+`PlayerClientActionEvent.DecisionId` names the decision the input is part of: the typed event follows with the same id,
+starts with this event's vote, and the input is canceled when either canceled (answered to the game once). A typed
+listener alone holds only those two inputs (kiln.playerstate `client_action_interest`), so the player's other client
+actions do not wait a step for it. [decisions.md](decisions.md#equipment).

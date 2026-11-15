@@ -302,3 +302,12 @@ with the game's resource when `KILN_GAME_DIR` and `KILN_SERVER_EXE` are set): `n
 - Tested offline (`managed/tests/Kiln.Contract.Tests/Group7ContractTests.cs`): rows, exceptions, attributes,
   `HitResult` as a kiln result, and the writes with subscribers on a fake kiln.combat table. No lab run in dev.27 has
   watched `CombatChangedEvent` against a real kiln.combat.
+
+## Refusing a death (since 0.2.0-dev.29)
+`EntityDyingEvent`: an entity whose health reached 0 is held at the game's death boundary and posted in a later Pre;
+cancel it to keep the entity alive at `SurvivalHealth` (1 by default, clamped to its maximum, written with
+`Combat.SetHealth`'s own setter and told once to `CombatChangedEvent` with origin `kiln.decisions`). The decision ends in
+one `DecisionCompletedEvent`: `Prevented`, `Allowed` (the game lets it die), `AlreadyAlive` (a heal in a handler wins,
+nothing is written), or `NoPositiveRange`, `WriteRefused`, `SourceChanged`, `StaleEntity`, `TimeoutReleased`. Only
+deaths from health; not damage cancellation (refuse the hit in `EntityHurtEvent`). Capability `events.death`, held
+until its game test. [decisions.md](decisions.md).
