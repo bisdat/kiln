@@ -29,12 +29,14 @@ static void spit(const fs::path& p, const void* d, size_t n) {
 int main(int argc, char** argv) {
     fs::path res, names, out;
     std::vector<fs::path> mod_dirs;
+    uint32_t roster_max = 0;  // --roster-max 128: as a side where the roster's second page installs (default 64)
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         if (a == "--res") res = argv[++i];
         else if (a == "--names") names = argv[++i];
         else if (a == "--out") out = argv[++i];
         else if (a == "--mod") mod_dirs.push_back(argv[++i]);
+        else if (a == "--roster-max") roster_max = static_cast<uint32_t>(std::stoul(argv[++i]));
         else if (a == "--parse-blocks") {
             const std::string text((std::istreambuf_iterator<char>(std::cin)), std::istreambuf_iterator<char>());
             const ojson parsed = parse_blocks_json(text);
@@ -79,6 +81,7 @@ int main(int argc, char** argv) {
         *o = it->second;
         return true;
     };
+    if (roster_max) game.roster_max = [roster_max](uint32_t, std::string*) { return roster_max; };
     std::vector<ModInput> mods;
     for (const fs::path& d : mod_dirs) {
         ModInput m;
@@ -110,7 +113,8 @@ int main(int argc, char** argv) {
     spit(out / "journal.bin", p.res_journal.data(), p.res_journal.size());
     spit(out / "npcs.bin", p.res_npcs.data(), p.res_npcs.size());
     ojson summary = {{"ok", p.ok}, {"any", p.any}, {"errors", p.errors}, {"warnings", p.warnings}, {"manifest", p.manifest},
-                     {"contentItems", p.content_items}, {"contentRecipes", p.content_recipes}};
+                     {"contentItems", p.content_items}, {"contentRecipes", p.content_recipes}, {"rosterMax", p.roster_max},
+                     {"rosterRefused", p.roster_refused}, {"rosterRefusal", p.roster_refusal}, {"rosterMods", p.roster_mods}};
     ojson tpl = ojson::array();
     for (const TemplateOut& t : p.templates) {
         spit(out / ("template." + guid_text(t.guid) + ".bin"), t.data.data(), t.data.size());

@@ -140,7 +140,9 @@ PageOutcome eval_pages(Result16* out, void* ctx, uint16_t* seen, const Span& spa
 // One thread's paged evaluations waiting for their SetUnlocks (the program calls Eval, then SetUnlocks with Eval's
 // page-0 payload and version, on one thread). A scoped stack, so a nested evaluation pairs with its own setter.
 struct Pending {
-    uint64_t epoch = 1;  // sidecar lifecycle at Eval entry; a stop invalidates pending work on every thread
+    uint64_t epochs[3] = {};  // every world kind's lifecycle epoch when Eval began (Sidecars::epochs): an evaluation
+                              // its own world stopped during is never attached (another world's stop does not matter)
+    uintptr_t ctx = 0;        // the knowledge context the game passed to its evaluator (what a recomputation uses)
     uintptr_t span_ptr = 0;
     uint64_t count = 0;
     uint32_t pages = 0;
@@ -187,16 +189,19 @@ struct LiveCache {
     uint64_t payload = 0;   // +0xa0
     uintptr_t span_ptr = 0; // the collection's entries
     uint64_t count = 0;
+    bool operator==(const LiveCache&) const = default;
 };
 
+// One world's second page. A page belongs to the world that owned the registry when it was attached, from that moment:
+// (kind, session, registry) is its key, and only that world's stop removes it.
 struct Sidecar {
     uintptr_t registry = 0;
     uintptr_t span_ptr = 0;
     uint64_t count = 0;
     uint16_t version = 0;
     uint64_t masks[kPages] = {};
-    uint32_t kind = kKindUnknown;  // the world this registry is the NpcRegistry of, once a Post saw it
-    uint32_t generation = 0;
+    uint32_t kind = kKindUnknown;  // the world kind it was attached for
+    uint32_t generation = 0;       // that world's core session (KilnSessionInfo.sessions[kind])
     uint64_t serial = 0;           // rises with every attach
 };
 
@@ -223,32 +228,112 @@ private:
     std::atomic<uint64_t> busy_{0};
 };
 
+// The second pages and which live world owns which registry.
+//
+// Ownership: each world binds its own NpcRegistry on its own thread (its STARTED event and its Pre: the world is alive
+// and nothing of its step runs), as (kind, session). Nothing here ever reads a registry: a hook compares the pointer the
+// game passed it with the bound ones, so a registry belongs to the world whose update runs the producer. A world's stop
+// unbinds it on the destroying thread, removes the pages of that session only, and advances that kind's epoch, so an
+// evaluation its world stopped during is not attached afterwards (Pending::epochs).
+//
+// Reads that borrow the game's registry (the IsUnlocked hook) go: owner (kind, session) first, the registry's fields,
+// the page, then the owner and the fields again (Moved when anything changed in between: the answer is discarded).
 class Sidecars {
 public:
     static constexpr uint32_t kSlots = 8;  // a hosting client has two registries; a few spare for replaced ones
-    enum class Bit { Unlocked, Locked, NoPage, Stale, Busy };
+    enum class Bit { Unlocked, Locked, NoPage, Stale, Busy, Unowned, Moved };
+    enum class Attach { Attached, Busy, Unowned, Old };
+    enum class Owner { Found, None, Busy };
 
-    uint64_t epoch() const { return epoch_.load(std::memory_order_acquire); }
+    uint64_t epoch(uint32_t kind) const { return valid_kind(kind) ? epoch_[kind].load(std::memory_order_acquire) : 0; }
+    void epochs(uint64_t out[3]) const {
+        for (uint32_t k = 0; k < 3; ++k) out[k] = epoch_[k].load(std::memory_order_acquire);
+    }
 
-    // After SetUnlocks: attach only work from the current lifecycle. The epoch check shares the stop lock,
-    // so an evaluator already in flight at stop cannot repopulate the cleared sidecar. Busy or old: skip.
-    bool attach(uintptr_t registry, const Pending& p) {
-        if (!lock_.try_for()) return false;
-        if (p.epoch != epoch()) {
-            lock_.unlock();
-            return false;
+    // World `kind` of session `session` owns `registry` (0: its registry is not known yet). On that world's thread.
+    // Another session of the kind than the bound one: the old session's pages go (a stop that was not seen).
+    // A session that already stopped is never bound again (false).
+    bool bind(uint32_t kind, uint32_t session, uintptr_t registry) {
+        if (!valid_kind(kind) || !session) return false;
+        lock_blocking();
+        bool ok = session > stopped_[kind];
+        Bound& b = bound_[kind];
+        if (ok && (b.session != session || b.registry != registry)) {
+            if (b.session != session) {
+                if (b.session) {  // a stop that was not seen (no world.lifecycle): as unbind would have done
+                    epoch_[kind].fetch_add(1, std::memory_order_acq_rel);
+                    stopped_[kind] = std::max(stopped_[kind], b.session);
+                }
+                drop_locked(kind, b.session, true);
+                b = Bound{};
+            } else {
+                drop_locked(kind, session, false);  // the world has another registry now: the old one's pages go
+                b.ctx = 0;                          // and the context is learnt again from the game's next evaluation
+            }
+            b.session = session;
+            b.registry = registry;
         }
-        Sidecar* s = find_or_claim(registry);
+        lock_.unlock();
+        return ok;
+    }
+    // World `kind` of session `session` stops (or stopped): its pages go, its binding goes, its epoch moves. Blocking:
+    // on the destroying thread or a world's thread, never from a hook.
+    void unbind(uint32_t kind, uint32_t session) {
+        if (!valid_kind(kind)) return;
+        lock_blocking();
+        epoch_[kind].fetch_add(1, std::memory_order_acq_rel);
+        drop_locked(kind, session, false);
+        if (bound_[kind].session == session || session == 0) bound_[kind] = Bound{};
+        stopped_[kind] = std::max(stopped_[kind], session);
+        lock_.unlock();
+    }
+    // The live world whose registry this is. None: no world bound it (an unknown or stale address).
+    Owner owner(uintptr_t registry, uint32_t* kind, uint32_t* session) const {
+        if (!registry) return Owner::None;
+        if (!lock_.try_for()) return Owner::Busy;
+        Owner o = Owner::None;
+        for (uint32_t k = 0; k < 3 && o == Owner::None; ++k)
+            if (bound_[k].session && bound_[k].registry == registry) *kind = k, *session = bound_[k].session, o = Owner::Found;
+        lock_.unlock();
+        return o;
+    }
+    // The knowledge context the game passed when it last evaluated world (kind, session)'s registry (0: none seen yet).
+    uintptr_t context(uint32_t kind, uint32_t session) const {
+        if (!valid_kind(kind) || !lock_.try_for()) return 0;
+        const uintptr_t c = bound_[kind].session == session ? bound_[kind].ctx : 0;
+        lock_.unlock();
+        return c;
+    }
+
+    // After the game's SetUnlocks wrote (mask0, version) for `registry`: keep the pages with it, for the world that owns
+    // it now, and only when that world did not stop since the evaluation began.
+    Attach attach(uintptr_t registry, const Pending& p) {
+        if (!lock_.try_for()) return Attach::Busy;
+        uint32_t kind = kKindUnknown;
+        for (uint32_t k = 0; k < 3; ++k)
+            if (bound_[k].session && bound_[k].registry == registry) kind = k;
+        if (kind == kKindUnknown) {
+            lock_.unlock();
+            return Attach::Unowned;
+        }
+        if (p.epochs[kind] != epoch_[kind].load(std::memory_order_acquire)) {
+            lock_.unlock();
+            return Attach::Old;
+        }
+        if (p.ctx) bound_[kind].ctx = p.ctx;
+        Sidecar* s = find_or_claim(kind, bound_[kind].session, registry);
         s->registry = registry;
+        s->kind = kind;
+        s->generation = bound_[kind].session;
         s->span_ptr = p.span_ptr;
         s->count = p.count;
         s->version = p.version;
         for (uint32_t i = 0; i < kPages; ++i) s->masks[i] = i < p.pages ? p.masks[i] : 0;
         s->serial = ++serial_;
         lock_.unlock();
-        return true;
+        return Attach::Attached;
     }
-    // A SetUnlocks without a paged evaluation: the registry's extra page is gone.
+    // A SetUnlocks without a paged evaluation: the registry's extra page is gone (whoever owned it).
     bool invalidate(uintptr_t registry) {
         if (!lock_.try_for()) return false;
         for (Sidecar& s : s_)
@@ -256,56 +341,60 @@ public:
         lock_.unlock();
         return true;
     }
-    // The state of entry `index` (64 or more) of `registry` whose cache holds `live` now.
-    Bit bit(uintptr_t registry, const LiveCache& live, uint64_t index) const {
+    // The state of entry `index` (64 or more) of `registry`, for a reader that found it owned by (kind, session) and took
+    // `live` from it. Moved: the owner is not (kind, session) any more.
+    Bit bit(uintptr_t registry, const LiveCache& live, uint64_t index, uint32_t kind, uint32_t session) const {
         if (index < kPage || index >= kExpanded) return Bit::NoPage;
+        if (!valid_kind(kind)) return Bit::Unowned;
         if (!lock_.try_for()) return Bit::Busy;
         Bit b = Bit::NoPage;
-        for (const Sidecar& s : s_) {
-            if (s.registry != registry) continue;
-            if (live.status != 0 || s.version != live.version || s.masks[0] != live.payload || s.span_ptr != live.span_ptr ||
-                s.count != live.count || index >= s.count)
+        if (bound_[kind].session != session || bound_[kind].registry != registry) {
+            b = Bit::Moved;
+        } else if (const Sidecar* s = find(kind, session, registry)) {
+            if (live.status != 0 || s->version != live.version || s->masks[0] != live.payload || s->span_ptr != live.span_ptr ||
+                s->count != live.count || index >= s->count)
                 b = Bit::Stale;
             else
-                b = ((s.masks[index / kPage] >> (index % kPage)) & 1) ? Bit::Unlocked : Bit::Locked;
-            break;
+                b = ((s->masks[index / kPage] >> (index % kPage)) & 1) ? Bit::Unlocked : Bit::Locked;
         }
         lock_.unlock();
         return b;
     }
-    // A copy of the registry's sidecar when it matches `live` (for a snapshot), else false.
-    bool read(uintptr_t registry, const LiveCache& live, Sidecar* out) const {
-        if (!lock_.try_for()) return false;
+    // A copy of world (kind, session)'s page for `registry` when it matches `live` (a snapshot), else false.
+    bool read(uint32_t kind, uint32_t session, uintptr_t registry, const LiveCache& live, Sidecar* out) const {
+        if (!valid_kind(kind) || !lock_.try_for()) return false;
         bool ok = false;
-        for (const Sidecar& s : s_)
-            if (s.registry == registry && live.status == 0 && s.version == live.version && s.masks[0] == live.payload &&
-                s.span_ptr == live.span_ptr && s.count == live.count) {
-                *out = s;
-                ok = true;
-                break;
-            }
+        if (bound_[kind].session == session && bound_[kind].registry == registry)
+            if (const Sidecar* s = find(kind, session, registry))
+                if (live.status == 0 && s->version == live.version && s->masks[0] == live.payload && s->span_ptr == live.span_ptr &&
+                    s->count == live.count) {
+                    *out = *s;
+                    ok = true;
+                }
         lock_.unlock();
         return ok;
     }
-    // A Post saw `registry` as the NpcRegistry of world (kind, generation).
-    void adopt(uintptr_t registry, uint32_t kind, uint32_t generation) {
-        if (!lock_.try_for()) return;
-        for (Sidecar& s : s_)
-            if (s.registry == registry) s.kind = kind, s.generation = generation;
-        lock_.unlock();
+    // True when world (kind, session)'s registry, holding `live`, has more than 64 entries, a computed cache and no page
+    // that matches it: a lost page, to be computed again at that world's next safe point.
+    bool wants_page(uint32_t kind, uint32_t session, uintptr_t registry, const LiveCache& live) const {
+        if (live.status != 0 || live.count <= kPage || live.count > kExpanded) return false;
+        Sidecar s;
+        return !read(kind, session, registry, live, &s);
     }
-    // A world of `kind` stops: the pages of its registries go, and those of registries no world was seen to own.
-    // Blocking: called on a world's thread or the destroying thread, never from a hook.
-    void drop_world(uint32_t kind) {
+    // Lab: forget world kind's page as if it had been lost (kiln/control/roster.drop-page).
+    void drop_page(uint32_t kind) {
         lock_blocking();
-        epoch_.fetch_add(1, std::memory_order_release);
         for (Sidecar& s : s_)
-            if (s.kind == kind || s.kind == kKindUnknown) s = Sidecar{};
+            if (s.kind == kind) s = Sidecar{};
         lock_.unlock();
     }
     void drop_all() {
         lock_blocking();
-        epoch_.fetch_add(1, std::memory_order_release);
+        for (uint32_t k = 0; k < 3; ++k) {
+            epoch_[k].fetch_add(1, std::memory_order_acq_rel);
+            stopped_[k] = std::max(stopped_[k], bound_[k].session);
+            bound_[k] = Bound{};
+        }
         for (Sidecar& s : s_) s = Sidecar{};
         lock_.unlock();
     }
@@ -319,14 +408,28 @@ public:
     }
 
 private:
+    struct Bound {
+        uint32_t session = 0;
+        uintptr_t registry = 0;
+        uintptr_t ctx = 0;
+    };
     void lock_blocking() const {
         while (!lock_.try_for()) {
         }
     }
-
-    Sidecar* find_or_claim(uintptr_t registry) {
+    // the pages of (kind, session); `older_too`: and of every other session of the kind
+    void drop_locked(uint32_t kind, uint32_t session, bool older_too) {
         for (Sidecar& s : s_)
-            if (s.registry == registry) return &s;
+            if (s.registry && s.kind == kind && (s.generation == session || older_too || session == 0)) s = Sidecar{};
+    }
+    const Sidecar* find(uint32_t kind, uint32_t session, uintptr_t registry) const {
+        for (const Sidecar& s : s_)
+            if (s.registry == registry && s.kind == kind && s.generation == session) return &s;
+        return nullptr;
+    }
+    Sidecar* find_or_claim(uint32_t kind, uint32_t session, uintptr_t registry) {
+        for (Sidecar& s : s_)
+            if (s.registry == registry && s.kind == kind && s.generation == session) return &s;
         for (Sidecar& s : s_)
             if (s.registry == 0) return &s;
         // full: replace the oldest (a registry no longer written)
@@ -337,11 +440,80 @@ private:
         return oldest;
     }
 
-    std::atomic<uint64_t> epoch_{1};
+    std::atomic<uint64_t> epoch_[3] = {1, 1, 1};
+    Bound bound_[3];
+    uint32_t stopped_[3] = {};  // per kind, the newest session seen to stop
     mutable BoundedLock lock_;
     std::array<Sidecar, kSlots> s_{};
     uint64_t serial_ = 0;
 };
+
+// The IsUnlocked hook's answer for one id (any thread: the game's reader runs on a worker on a dedicated server).
+// `read_live(LiveCache*)` reads the registry's fields (false: unreadable); `index_of(const LiveCache&, uint64_t*)` the
+// id's index in that collection (false: not one of its entries). A first read only sorts the query (a page-0 entry, an
+// unknown id, a cache the game itself calls invalid: the game answers; no lock is taken). For an entry of page 2 the
+// order makes a read unable to span a world's end: the owner (kind, session), the fields again (they must be the
+// first read's), the page (which checks the owner again under the lock), then the fields and the owner once more;
+// anything that moved in between and the answer is not given (Moved).
+struct QueryAnswer {
+    enum class Kind { Game, Page, Kept };
+    Kind kind = Kind::Game;  // Game: the game's own call answers; Page: from the page; Kept: the game's "cache invalid"
+    bool unlocked = false;
+    Sidecars::Bit why = Sidecars::Bit::NoPage;
+};
+template <class ReadLive, class IndexOf>
+QueryAnswer page_query(const Sidecars& sc, uintptr_t registry, ReadLive&& read_live, IndexOf&& index_of) {
+    QueryAnswer a;
+    LiveCache live;
+    uint64_t index = 0;
+    if (!read_live(&live) || !index_of(live, &index) || index < kPage || live.status != 0) return a;
+    a.kind = QueryAnswer::Kind::Kept;
+    uint32_t kind = kKindUnknown, session = 0;
+    const Sidecars::Owner o = sc.owner(registry, &kind, &session);
+    if (o != Sidecars::Owner::Found) {
+        a.why = o == Sidecars::Owner::Busy ? Sidecars::Bit::Busy : Sidecars::Bit::Unowned;
+        return a;
+    }
+    LiveCache now;
+    if (!read_live(&now) || !(now == live)) {
+        a.why = Sidecars::Bit::Moved;
+        return a;
+    }
+    a.why = sc.bit(registry, live, index, kind, session);
+    if (a.why != Sidecars::Bit::Unlocked && a.why != Sidecars::Bit::Locked) return a;
+    LiveCache again;
+    uint32_t k2 = kKindUnknown, s2 = 0;
+    if (!read_live(&again) || !(again == live) || sc.owner(registry, &k2, &s2) != Sidecars::Owner::Found || k2 != kind ||
+        s2 != session) {
+        a.why = Sidecars::Bit::Moved;
+        return a;
+    }
+    a.kind = QueryAnswer::Kind::Page;
+    a.unlocked = a.why == Sidecars::Bit::Unlocked;
+    return a;
+}
+
+// A lost page computed again on its world's thread at a safe point (its Pre: nothing of its step runs), with the game's
+// evaluator `eval` on the world's knowledge context, consistent with what the game's cache holds now: true and *out
+// (its epochs left to the caller, taken before this call) when every page answered at the cache's version and page 0
+// equals the cache's value; false otherwise (the knowledge moved: the producer computes in the step anyway).
+template <class Eval>
+bool recompute(const LiveCache& live, const Span& span, uint64_t stride, uint8_t error_status, void* ctx, Eval&& eval,
+               Pending* out) {
+    if (live.status != 0 || live.count <= kPage || live.count > kExpanded || span.count != live.count || span.ptr != live.span_ptr)
+        return false;
+    Result16 r{};
+    uint16_t seen = static_cast<uint16_t>(live.version ^ 0x8000u);  // not the cache's version: the evaluator computes
+    const PageOutcome o = eval_pages(&r, ctx, &seen, span, stride, error_status, eval);
+    if (!o.complete || o.version != live.version || o.masks[0] != live.payload) return false;
+    out->ctx = reinterpret_cast<uintptr_t>(ctx);
+    out->span_ptr = span.ptr;
+    out->count = span.count;
+    out->pages = o.pages;
+    for (uint32_t i = 0; i < kPages; ++i) out->masks[i] = o.masks[i];
+    out->version = o.version;
+    return true;
+}
 
 // ---------------------------------------------------------------------------------------------- snapshots ------
 struct Entry {
@@ -388,6 +560,14 @@ inline Snapshot make_snapshot(uint32_t kind, uint32_t generation, const LiveCach
         else ++s.reserved;
     }
     std::sort(s.by_id.begin(), s.by_id.end(), [](const Entry& a, const Entry& b) { return a.npc_id < b.npc_id; });
+    return s;
+}
+
+// The snapshot of a world whose registry could not be read this step: no answer (never the last ready one).
+inline Snapshot unreadable_snapshot(uint32_t kind, uint32_t generation) {
+    Snapshot s;
+    s.kind = kind;
+    s.generation = generation;
     return s;
 }
 
