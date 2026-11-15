@@ -209,12 +209,11 @@ Events.On<AttributeValueChangedEvent>(e => Log.Info($"{e.Attribute}: {e.Before} 
   (overlapping watches count a pair once; an absent component is not counted, but it is still read every step); 128
   roots for any one pair. They are the process's, shared by every mod: there is no per-mod share or reservation, first
   come first served (one mod can take all 32 watches or all 4096 pairs), and the earlier watch wins when they grow;
-  `Status` and the service's row show what is held. A `Watch` that would exceed them answers `Ok = false` with the
+  each watch's `State` and `Pairs` show what it holds. A `Watch` that would exceed them answers `Ok = false` with the
   reason and no watch. A watch that grows past them later (a player joins, an inventory is linked, an absent component
   appears in the simulation) is suspended whole before anything of that step is emitted for it (`SuspendedBudget`),
   with `LastCompleteStep`; one whose root is gone or is another entity now is suspended the same way
-  (`SuspendedMetadata`). Either raises
-  `ComponentWatchStateChangedEvent` in the next Pre. `ComponentChanges.Resume` starts it again from scratch (the same
+  (`SuspendedMetadata`). Either raises `ComponentWatchStateChangedEvent` in the next Pre. `ComponentChanges.Resume` starts it again from scratch (the same
   lives, the budgets again; no change from while it was suspended is reported).
 - **The queue.** At most two steps' changes wait for the managed consumer (which reads every Pre). A third step's
   are not queued: every ready watch is suspended (`SuspendedBudget`, "the change queue is full") and the service
@@ -225,14 +224,20 @@ Events.On<AttributeValueChangedEvent>(e => Log.Info($"{e.Attribute}: {e.Before} 
 - **Cost.** While no watch exists the core makes neither window call for it and no step waits for the world's jobs on
   its account; a Kiln writer's check is a few lock-free loads (the table, the service's on, stopped and watch-count
   flags) before it copies anything; nothing is allocated. With watches: the service reads every watched pair, present
-  or absent, once per step after the world's jobs, and asks each root's identity once; at a window's start it checks
+  or absent, once per step after the world's jobs, and asks each root's identity at both windows; at a window's start it checks
   the roots and links and, when they changed, plans the pairs again (new pairs read once more, a pair a new watch joins
   compared once more for the split); the exceptional recount when pairs appear past 4096 walks the watches again. A
   Kiln writer copies the bytes before its write only for an entity whose component the service may watch (a lock-free
   filter of the watched pairs: an unrelated watch costs a writer one more load); kiln.items still walks the inventory
   tree of the holder it changes (link ids only) to ask that filter for each entity in it. Every player of a server pays
   for the watches of every mod on it: the budgets bound the pairs, not the time, and not the time handlers take. Lab
-  (dedicated server, no player, build 26430253, 2026-11-15): see below.
+  (`component-watch-test`, dedicated server, no player, build 26430253, 2026-11-15, three runs on a shared, loaded
+  machine; the last 1024 steps of each): 32 watches holding 4096 present pairs (4240 in all): window_begin p50
+  0.33-0.39 ms, p99 0.46-1.73 ms, max 0.58-4.3 ms; window_end p50 0.68-1.08 ms, p99 1.2-4.1 ms, max 2.5-5.5 ms.
+  8 watches on 1221 entities, 3860 pairs, none present: begin p50 0.53-0.66 ms, p99 0.80-2.6 ms; end p50
+  0.62-0.98 ms, p99 1.1-3.2 ms (an absent pair costs a read like a present one, and every root is asked its identity
+  twice a step). A kiln.items give or take job's note, p50 (p99): no watch 0.1 µs (0.7); a watch on another entity
+  0.3-0.5 µs (2.3-3.4), nothing copied; a watch on the holder 0.9-1.2 µs (6.0-6.7), nine or ten components copied a job.
 
 The capability is `events.component_net`; `Watch` and `Resume` throw `KilnUnavailableException` naming it while it is
 off, and so does `Events.On` for the three events. The test kit fakes the service rule for rule

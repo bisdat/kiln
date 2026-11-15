@@ -584,9 +584,14 @@ public sealed partial class ComponentWatchTestMod : Mod
                 sum += x.Pairs;
             }
         var need = 4096 - sum;
-        // the rest exactly: a chest given `need` pouches, watched for Fuel only (one pair a pouch); and one more chest with
-        // one pouch for the refusal
-        var filler = need > 0 ? (await Chests(1, new WorldPosition(at.X + 40, at.Y, at.Z + 40), Math.Min(24, need))).FirstOrDefault() : default;
+        // the rest exactly: two chests given `need` pouches between them (each keeps free slots for WATCH-GROWTH), watched
+        // for Fuel only (one pair a pouch); and one more chest with one pouch for the refusal
+        var fillers = new List<EntityId>();
+        if (need > 0)
+        {
+            fillers.AddRange(await Chests(1, new WorldPosition(at.X + 40, at.Y, at.Z + 40), Math.Min(24, need - need / 2)));
+            if (need / 2 > 0) fillers.AddRange(await Chests(1, new WorldPosition(at.X + 40, at.Y, at.Z + 44), Math.Min(24, need / 2)));
+        }
         var extra = (await Chests(1, new WorldPosition(at.X + 44, at.Y, at.Z + 40), 1)).FirstOrDefault();
         await Wait(10);
         Log.Info($"{Id}: {all.Count} roots probed ({all.Sum(x => x.Pairs)} pairs), {chosen.Count} chosen ({sum} pairs), {need} left for a filler chest");
@@ -601,9 +606,9 @@ public sealed partial class ComponentWatchTestMod : Mod
                 if (r.Ok) { watches.Add(r.Watch!); total += r.Pairs; }
                 else Log.Warn($"{Id}: a group of roots was refused: {r.Reason}");
             }
-            if (!filler.IsNone)
+            if (fillers.Count > 0)
             {
-                var r = ComponentChanges.Watch(new(ComponentWatchScope.Entities, [filler], ObservedComponents.Fuel, ComponentWatchExpansion.PlayerInventoryAndItems));
+                var r = ComponentChanges.Watch(new(ComponentWatchScope.Entities, fillers.ToArray(), ObservedComponents.Fuel, ComponentWatchExpansion.PlayerInventoryAndItems));
                 if (r.Ok) { watches.Add(r.Watch!); total += r.Pairs; }
                 else Log.Warn($"{Id}: the filler chest was refused: {r.Reason}");
             }

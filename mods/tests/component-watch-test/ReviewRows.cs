@@ -245,9 +245,12 @@ public sealed partial class ComponentWatchTestMod
             var done = await Items.EquipSet(p, set);
             await Wait(4);
             var mine = _changes.Where(c => c.WatchIds.Contains(w.Watch.Id)).ToArray();
-            Check(done.Status == EquipmentSetStatus.Done && mine.Length >= 1 && mine.All(c => c.Origin is ChangeOrigin.Kiln or ChangeOrigin.Mixed) &&
-                  mine.Any(c => c.SourceMod == "kiln.items"),
-                $"WATCH-SET-ROLLBACK path=commit status={done.Status}: {mine.Length} change(s), kiln.items' writes: {string.Join(" ", mine.Select(Rec))}");
+            // the commit's step: kiln.items' writes; the game may touch SlotSelection again in a later step (Unknown)
+            var first = mine.Length == 0 ? 0 : mine.Min(c => c.Step);
+            var commit = mine.Where(c => c.Step == first).ToArray();
+            Check(done.Status == EquipmentSetStatus.Done && commit.Length >= 1 && commit.All(c => c.Origin is ChangeOrigin.Kiln && c.SourceMod == "kiln.items"),
+                $"WATCH-SET-ROLLBACK path=commit status={done.Status}: {commit.Length} change(s) in the commit's step, all kiln.items' writes " +
+                $"({mine.Length - commit.Length} later, the game's: {string.Join(", ", mine.Except(commit).Select(c => $"{c.Component} {c.Origin}"))}): {string.Join(" ", mine.Select(Rec))}");
         }
         finally
         {
@@ -355,7 +358,8 @@ public sealed partial class ComponentWatchTestMod
         foreach (var w in watches.Where(w => w.State == ComponentWatchState.Ready && w.Request.Expansion == ComponentWatchExpansion.PlayerInventoryAndItems &&
                                              (w.Request.Components & ObservedComponents.Fuel) != 0))
         {
-            root = w.Request.Entities.FirstOrDefault(e => Items.Read(e)?.Slots.Any(s => s.IsEmpty && !s.IsEquipped) == true);
+            // a chest (the stand-ins' bags are full of pouches; their free slots are equipment slots)
+            root = w.Request.Entities.FirstOrDefault(e => chests.Contains(e) && Items.Read(e)?.Slots.Any(s => s.IsEmpty) == true);
             if (root.IsNone) continue;
             offender = w;
             break;

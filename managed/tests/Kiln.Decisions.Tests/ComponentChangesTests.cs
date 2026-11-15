@@ -330,6 +330,27 @@ public sealed unsafe class ComponentChangesTests : IDisposable
     }
 
     [Fact]
+    public void The_lab_delivery_hold_needs_its_control_file_and_only_delays_the_changes()
+    {
+        using var kiln = Started();
+        var e = With(kiln, ("Health", Bytes(1)));
+        var r = Watch(kiln, new(ComponentWatchScope.Entities, [e], ObservedComponents.Health));
+        kiln.Step(2);
+        bool? held = null;
+        kiln.Call(() => held = ComponentChanges.LabHoldDelivery(2));
+        Assert.False(held);  // no kiln/control/watches.lab
+        File.WriteAllText(Path.Combine(kiln.ControlDirectory, "watches.lab"), "");
+        kiln.Call(() => held = ComponentChanges.LabHoldDelivery(3));
+        Assert.True(held);
+        kiln.Entities.SetBytes(e, "Health", Bytes(2));
+        kiln.Step(3);
+        Assert.Empty(_changes);  // held: still in the service's queue
+        kiln.Step(2);
+        Assert.Single(_changes);  // then delivered, once
+        Assert.Equal(ComponentWatchState.Ready, r.Watch!.State);
+    }
+
+    [Fact]
     public void A_root_that_goes_is_suspended_whole_and_says_why()
     {
         using var kiln = Started();
