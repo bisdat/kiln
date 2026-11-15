@@ -178,6 +178,9 @@ public sealed unsafe class BlobCatalogTests : KilnTest
     [Fact]
     public void An_older_kiln_assets_has_no_catalog_and_blobs_still_register()
     {
+        // Exercise replacement after the full table's rows have been cached, whatever the test order.
+        Assets.Rows.Ensure();
+        Assert.True(Capabilities.Is(Cap));
         _service.Dispose();
         var size = Marshal.SizeOf<AssetsNative.Table>();  // the v1 table without the 0.2.0-dev.28 slots
         var older = (AssetsNative.Table*)NativeMemory.AllocZeroed((nuint)size);
@@ -187,6 +190,7 @@ public sealed unsafe class BlobCatalogTests : KilnTest
             older->Header.Size = (uint)size;
             _service = new(Backend.Tables, "kiln.assets", (nint)older);
             ResetAssets();
+            Assets.Rows.Refresh();  // replacing a table also invalidates its separately cached capability rows
             var mod = NewMod("old-table");
             var e = Assert.Throws<KilnUnavailableException>(() => As(mod, () => Assets.OpenBlobCatalog()));
             Assert.Equal(Cap, e.Capability);
@@ -208,11 +212,15 @@ public sealed unsafe class BlobCatalogTests : KilnTest
     [Fact]
     public void A_missing_service_names_the_catalog_capability()
     {
+        Assets.Rows.Ensure();
+        Assert.True(Capabilities.Is(Cap));
         _service.Dispose();
         ResetAssets();
+        Assets.Rows.Refresh();
         var mod = NewMod("missing-catalog");
         var e = Assert.Throws<KilnUnavailableException>(() => As(mod, () => Assets.OpenBlobCatalog()));
         Assert.Equal(Cap, e.Capability);
+        Assert.Equal(CapabilityReason.ServiceMissing, Capabilities.Get(Cap).Reason);
         var read = Assert.Throws<KilnUnavailableException>(() => Assets.ReadBlob(Hash("5-00000001-00000002-00000003")));
         Assert.Equal("assets.content", read.Capability);
     }
