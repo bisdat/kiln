@@ -8,11 +8,12 @@
 // resource service's slots (key -> handle -> data), which kiln.assets answers: the registries keep the handle and ask
 // for the data when their world loads (docs/re/quests.md, "R4").
 //
-// When the WHOLE build fails, so that nothing of the mods' native content is served (reading their files fails, the
-// build throws, the shared resources do not build, kiln.assets refuses the pack or is not there, the hook on
-// ResourceInit is not there), the start stops before any world loads (refuse_start, StartStop::Content), as long as an
-// enabled mod ships such content: a world loaded without it drops the mods' progress at its next save. One mod's own
-// errors (its manifest entry ok: false) leave that mod out, and the start goes on (docs/kiln/services/npcs.md).
+// When the WHOLE build fails, so that nothing of the mods' native content is served (reading the mods' files fails in
+// a way that is no one mod's, the build throws, the shared resources do not build, kiln.assets refuses the pack or is
+// not there, the hook on ResourceInit is not there), the start stops before any world loads (refuse_start,
+// StartStop::Content), as long as an enabled mod ships such content: a world loaded without it drops the mods'
+// progress at its next save. One mod's own errors (its manifest entry ok: false, a file of its own that throws when
+// read) leave that mod out, and the start goes on (docs/kiln/services/npcs.md).
 #include <windows.h>
 
 #include <algorithm>
@@ -51,12 +52,12 @@ kiln::RawHook g_init_hook;
 const KilnAssetsApi* A = nullptr;
 
 // kiln/control/knowledge.fail-build (labs and tests only, never needed in play; read once at the start, loud while
-// present): one kind of whole-build failure without a broken game. Its first word: read (reading the mods' files
-// throws), compile (the build throws), shared (the build cannot read the game's GameKnowledgeResource, so the shared
-// resources do not build), assets (the built pack is not given to kiln.assets, as when it refuses), hook (the hook on
-// ResourceInit is not installed), late (the build serves as usual; 30 steps after the server world's first one the
-// stop is asked for, which must not end the process). Each stops the start only when a mod ships such content, as the
-// real failure does.
+// present): one kind of whole-build failure without a broken game. Its first word: read (the read throws after every
+// mod was read, so no one mod's), compile (the build throws), shared (the build cannot read the game's
+// GameKnowledgeResource, so the shared resources do not build), assets (the built pack is not given to kiln.assets, as
+// when it refuses), hook (the hook on ResourceInit is not installed), late (the build serves as usual; 30 steps after
+// the server world's first one the stop is asked for, which must not end the process). Each stops the start only when
+// a mod ships such content, as the real failure does.
 enum class Fail : uint8_t { None, Read, Compile, Shared, Assets, Hook, Late };
 Fail g_fail = Fail::None;
 const std::string kFailSwitch = "lab switch kiln/control/knowledge.fail-build";
@@ -237,10 +238,13 @@ bool ships(const qb::ModInput& m) {
     return false;
 }
 
-// `reading`: the id of the mod being read once it has files of such content (a throw names it).
-void collect_mods(std::vector<qb::ModInput>* mods, bool client, const kiln::boot::Input* boot = nullptr, std::string* reading = nullptr) {
+// One mod's files that throw when read (a kiln.mod.json field of the wrong type, say) are that mod's error: it is left out
+// and named, the others are read; a required boot participant is refused through kiln.boot by name. What can still throw
+// out of here is no one mod's: listing the profile's mods or the mods folder (an allocation failure, a path that does
+// not convert), and the lab switch "read": the whole read failed then.
+void collect_mods(std::vector<qb::ModInput>* mods, bool client, const kiln::boot::Input* boot = nullptr) {
+    std::string current;  // the id of the mod being read, once its kiln.mod.json said it
     auto one = [&](const std::string& dir) {
-        if (reading) reading->clear();
         std::error_code ec;
         const fs::path base(widen(dir));
         const fs::path qdir = base / L"quests";
@@ -252,6 +256,7 @@ void collect_mods(std::vector<qb::ModInput>* mods, bool client, const kiln::boot
         // a required participant prepares strictly (kiln_boot_collector.hpp, entry_error): a file of its own that cannot be read or is not
         // JSON refuses it; another mod's is logged and skipped as it always was
         const std::string mod_id = mf["id"].get<std::string>();
+        current = mod_id;
         const auto strict = [&](const std::string& key, const std::string& why) {
             kiln::boot::entry_error(boot, mod_id, "knowledge", key, "kiln.knowledge: " + key + ": " + why);
         };
@@ -338,7 +343,6 @@ void collect_mods(std::vector<qb::ModInput>* mods, bool client, const kiln::boot
         if (!fs::is_directory(qdir, ec) && !fs::exists(code, ec) && !fs::exists(npc_blocks, ec) && block_npcs.empty() && block_quests.empty() &&
             boot_docs.empty())
             return;
-        if (reading) *reading = mf["id"].get<std::string>();
         const std::string side = mf.value("side", "both");
         if ((side == "server" && client) || (side == "client" && !client)) return;
         qb::ModInput m;
@@ -401,8 +405,23 @@ void collect_mods(std::vector<qb::ModInput>* mods, bool client, const kiln::boot
         const qb::ojson cook = qb::ojson::parse(read_file(base / L"assets" / L"cook.json"), nullptr, false, true);
         if (!cook.is_discarded() && cook.is_object()) m.guid_namespace = cook.value("guidNamespace", "");
         else if (fs::exists(base / L"assets" / L"cook.json", ec)) strict("assets/cook.json", "not valid JSON (its \"guidNamespace\" names the mod's GUIDs)");
-        if (g_fail == Fail::Read && ships(m)) throw std::runtime_error(kFailSwitch + ": read");
         mods->push_back(std::move(m));
+    };
+    const auto read_one = [&](const std::string& dir) {
+        current.clear();
+        try {
+            one(dir);
+        } catch (const kiln::boot::Refusal&) {
+            throw;  // a required participant's own file: kiln.boot refuses that mod (prepare_boot)
+        } catch (const std::exception& e) {
+            if (current.empty()) {
+                const std::u8string u = fs::path(widen(dir)).filename().u8string();
+                current = std::string(u.begin(), u.end());
+            }
+            KW("native: %s: reading its files failed (%s): its quests, dialogues and NPCs are not built; the other mods' are",
+               current.c_str(), e.what());
+            kiln::boot::entry_error(boot, current, "knowledge", "", std::string("kiln.knowledge: reading its files failed (") + e.what() + ")");
+        }
     };
     const auto* prof = static_cast<const KilnProfileApi*>(g_api->service(KilnStr{"kiln.profile", 12}, 1));
     bool scan_dropins = true;
@@ -410,7 +429,7 @@ void collect_mods(std::vector<qb::ModInput>* mods, bool client, const kiln::boot
         const uint32_t n = prof->count(KILN_PROFILE_KIND_KILN);
         for (uint32_t i = 0; i < n; ++i) {
             KilnProfileMod m{sizeof m};
-            if (prof->get(KILN_PROFILE_KIND_KILN, i, &m) == KILN_OK && m.enabled) one(std::string(m.path.ptr, m.path.len));
+            if (prof->get(KILN_PROFILE_KIND_KILN, i, &m) == KILN_OK && m.enabled) read_one(std::string(m.path.ptr, m.path.len));
         }
         if (prof->mode() == KILN_PROFILE_ACTIVE || prof->mode() == KILN_PROFILE_ONCE)
             scan_dropins = (prof->dropins() & (1u << KILN_PROFILE_KIND_KILN)) != 0;
@@ -424,9 +443,11 @@ void collect_mods(std::vector<qb::ModInput>* mods, bool client, const kiln::boot
         std::sort(dirs.begin(), dirs.end());
         for (const fs::path& d : dirs) {
             const std::u8string u = d.u8string();
-            one(std::string(u.begin(), u.end()));
+            read_one(std::string(u.begin(), u.end()));
         }
     }
+    // the lab switch: a read that fails after every mod was read, so no one mod's (only when a mod ships such content)
+    if (g_fail == Fail::Read && std::any_of(mods->begin(), mods->end(), ships)) throw std::runtime_error(kFailSwitch + ": read");
 }
 
 bool put_resource(const char* what, const qb::Guid& g, uint32_t type, const qb::Bytes& data, uint32_t flags) {
@@ -492,17 +513,13 @@ bool client_side() {
     return bi.side == KILN_SIDE_CLIENT;
 }
 // Without a boot generation, for a stop that comes instead of the build: the mods that ship such content (a read that
-// throws keeps the mods read before it and names the one it was reading).
+// throws keeps the mods read before it).
 std::vector<std::string> shipping_now() {
     std::vector<qb::ModInput> mods;
-    std::string reading;
     try {
-        collect_mods(&mods, client_side(), nullptr, &reading);
+        collect_mods(&mods, client_side());
     } catch (const std::exception& e) {
         KW("native: reading the mods' quest files failed: %s", e.what());
-        std::vector<std::string> ids = shipping(mods);
-        if (!reading.empty() && std::find(ids.begin(), ids.end(), reading) == ids.end()) ids.push_back(reading);
-        return ids;
     }
     return shipping(mods);
 }
@@ -529,15 +546,12 @@ void build_locked(const std::vector<qb::ModInput>* prepared = nullptr, const std
         mods = plan->mods;
         required = &plan->required;
     } else {
-        std::string reading;
         try {
-            collect_mods(&mods, client, nullptr, &reading);  // the mods' files: nothing they hold may throw out of the game's resource init
+            collect_mods(&mods, client);  // the mods' files: nothing they hold may throw out of the game's resource init
         } catch (const std::exception& e) {
             KW("native: reading the mods' quest files failed: %s", e.what());
-            // nothing is built: the whole build failed (the mods read before the throw and the one it was reading)
-            std::vector<std::string> who = shipping(mods);
-            if (!reading.empty() && std::find(who.begin(), who.end(), reading) == who.end()) who.push_back(reading);
-            whole_stop(stop, std::string("reading the mods' quest files failed: ") + e.what(), who);
+            // a throw no one mod's (one mod's is caught for that mod): nothing is built, the whole build failed
+            whole_stop(stop, std::string("reading the mods' quest files failed: ") + e.what(), shipping(mods));
             return;
         }
     }
@@ -707,7 +721,8 @@ Fail read_fail_switch() {
         Fail fail;
         const char* does;
     } kWords[] = {
-        {"read", Fail::Read, "reading the mods' quest files throws, so the start stops when a mod ships native quests or NPCs"},
+        {"read", Fail::Read, "reading the mods' quest files throws after every mod was read (no one mod's error), so the start "
+                             "stops when a mod ships native quests or NPCs"},
         {"compile", Fail::Compile, "the build of the mods' native quests throws, so the start stops when a mod ships them"},
         {"shared", Fail::Shared, "the build cannot read the game's GameKnowledgeResource, so the shared resources do not build "
                                  "and the start stops when a mod ships native quests or NPCs"},

@@ -355,11 +355,12 @@ typedef struct KilnKnowledgeStatus {
  *
  * Since 0.2.0-dev.29 the start stops the same way when the WHOLE build of the mods' native quests, knowledge and NPCs
  * fails and nothing of it is served, while at least one enabled mod ships such content: reading the mods' files
- * failed, the build threw, the shared resources did not build (the manifest's "failed"), kiln.assets refused the built
+ * failed in a way that is no one mod's, the build threw, the shared resources did not build (the manifest's "failed"), kiln.assets refused the built
  * pack or is not there, or the hook on the game's resource start (assets/ResourceInit) is not there. Its state file is
  * kiln/state/content-refused.json (schema/state-content-refused.schema.json; moved to content-refused.last.json at the
  * next start), its exit code KILN_KNOW_CONTENT_EXIT_CODE (a Linux parent under Wine sees 3). One mod's own errors
- * never stop the start: that mod is loaded without its native content, as before.
+ * never stop the start, a file of its own that throws when read included: that mod is loaded without its native
+ * content, as before.
  *
  * world_kind: KILN_WORLD_SERVER (0, this process's server world, a hosting client's included) or KILN_WORLD_CLIENT
  * (2, this process's client world). Prediction (1) and any other value: KILN_ERR_INVALID_ARGUMENT. A generation is

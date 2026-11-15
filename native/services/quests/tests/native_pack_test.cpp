@@ -373,14 +373,61 @@ void empty_input_never_stops() {
     CHECK(t_stops.empty());
 }
 
-void whole_read() {
-    start("reading the mods' files throws (a manifest field of the wrong type): the start stops");
+// One mod's files that throw when read are that mod's error: it is left out and named, every other mod is read, built
+// and served; a required boot participant is refused through kiln.boot by name (coordinator, 2026-11-15).
+void one_mods_read() {
+    start("one mod's files throw when read (a manifest field of the wrong type): only that mod is left out, named");
     mod("alpha", kGood);
     mod("beta", kGood, ",\"side\":5");  // nlohmann's value() throws on it
+    mod("gamma", kGood);
     boot_and_resource_init();
-    CHECK(content_stop({"alpha", "beta"}, "reading the mods' quest files failed"));
-    CHECK(t_puts.empty());
+    CHECK(t_stops.empty());
+    CHECK(t_puts.size() == 2);
+    CHECK(logged("native: beta: reading its files failed ([json.exception.type_error.302]"));
+    CHECK(g_names.count("alpha:k1") == 1 && g_names.count("gamma:k1") == 1 && g_names.count("beta:k1") == 0);
+    CHECK(kiln::qb::t_compiles == 1);
     dump();
+
+    const auto prepare = [](const std::string& env, KilnBootPreparedV1* out, KilnBootIssueV1* issue) {
+        KilnBootPrepareInputV1 in{sizeof in, KILN_BOOT_VERSION, 1, KilnStr{env.data(), env.size()}};
+        return t_prepare && t_prepare(nullptr, &in, out, issue) == KILN_OK;
+    };
+    start("boot generation: an optional mod whose files throw is left out, the others are prepared");
+    mod("alpha", kGood);
+    mod("beta", kGood, ",\"side\":5");
+    t_boot = true;
+    native_pack_install();
+    native_pack_boot();
+    {
+        KilnBootPreparedV1 out{sizeof out};
+        KilnBootIssueV1 issue{sizeof issue};
+        CHECK(prepare(R"({"owners":[{"id":"alpha","owner":11},{"id":"beta","owner":12}]})", &out, &issue));
+        CHECK(out.ok == 1 && out.plan);
+        const auto* plan = static_cast<const BootPlan*>(out.plan);
+        CHECK(plan && plan->mods.size() == 1 && plan->mods[0].id == "alpha");
+        CHECK(logged("native: beta: reading its files failed"));
+        CHECK(t_stops.empty());
+        if (out.ok && out.destroy) out.destroy(out.plan);
+    }
+    start("boot generation: a required mod whose files throw is refused through kiln.boot, by name");
+    mod("alpha", kGood);
+    mod("beta", kGood, ",\"side\":5");
+    t_boot = true;
+    native_pack_install();
+    native_pack_boot();
+    {
+        KilnBootPreparedV1 out{sizeof out};
+        KilnBootIssueV1 issue{sizeof issue};
+        CHECK(prepare(R"({"owners":[{"id":"alpha","owner":11},{"id":"beta","owner":12,"required":true}]})", &out, &issue));
+        CHECK(out.ok == 0 && std::string(issue.mod_id) == "beta" && std::string(issue.kind) == "knowledge");
+        CHECK(std::string(issue.reason).find("reading its files failed") != std::string::npos);
+        CHECK(t_stops.empty());
+    }
+    dump();
+}
+
+// A read that fails but is no one mod's (the switch throws after every mod was read): the whole read failed.
+void whole_read() {
     start("lab switch read: the start stops");
     mod("alpha", kGood);
     lab_switch("read");
@@ -657,6 +704,7 @@ int main(int argc, char** argv) {
     g_api = &t_api;
     served_and_single_mod_errors();
     empty_input_never_stops();
+    one_mods_read();
     whole_read();
     whole_compile();
     whole_shared();
