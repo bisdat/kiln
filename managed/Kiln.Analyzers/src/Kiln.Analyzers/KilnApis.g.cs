@@ -647,6 +647,7 @@ internal static partial class KilnApis
         "M:Kiln.World.ComponentSize(Kiln.EntityId,System.String)", // World.ComponentSize(EntityId, string): via World.Tick(string)
         "M:Kiln.World.Exists(Kiln.EntityId)", // World.Exists(EntityId): via World.Tick(string)
         "M:Kiln.World.Find(System.String)", // World.Find(string): via World.Tick(string)
+        "M:Kiln.World.GetWaitingTransformScales", // World.GetWaitingTransformScales(): Services.RequireTickThread
         "M:Kiln.World.Has(Kiln.EntityId,System.String)", // World.Has(EntityId, string): via World.Tick(string)
         "M:Kiln.World.Position(Kiln.EntityId)", // World.Position(EntityId): via World.TryGetPosition(EntityId, out WorldPosition)
         "M:Kiln.World.Query(System.Collections.Generic.IEnumerable{System.String},System.Collections.Generic.IEnumerable{System.String})", // World.Query(IEnumerable<string>, IEnumerable<string>?): via EntitySet.Refresh()
