@@ -155,3 +155,16 @@ pub fn show(profile: &str, side: &str) -> Result<i32> {
     }
     Ok(0)
 }
+
+pub fn replace_dll(profile: &str, spec: &str, file: &std::path::Path, confirmed: bool) -> Result<i32> {
+    let dirs = data_dirs()?;
+    let Some((kind, id)) = spec.split_once(':') else { bail!("{spec:?}: use native:id") };
+    let kind = parse_kind(kind)?;
+    let p = kiln_manage::profile::get(&dirs, profile).km()?;
+    let Some(m) = p.mods.list(kind).iter().find(|m| m.id == id) else { bail!("{spec}: not in profile {profile}") };
+    let from = kiln_manage::library::LibraryRef { kind, id: id.into(), version: m.version.clone(), hash: m.hash.clone() };
+    let r = kiln_manage::library::replace_dll(&dirs, profile, &from, file, confirmed).km()?;
+    println!("{} {}: {} ({}) — game follows at next activation", kind.as_str(), id, r.entry.version, r.entry.hash);
+    for notice in r.notices { println!("  {notice}"); }
+    Ok(0)
+}

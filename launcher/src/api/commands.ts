@@ -447,7 +447,7 @@ export interface LibraryVersion {
   side: Side | null;
   clients: Clients | null;
   size: number;
-  source: { type: "file" | "folder" | "modpack"; from: string } | null;
+  source: { type: "file" | "folder" | "modpack" | "replaced-dll"; from: string } | null;
   /** The id the mod's own manifest gives, when the Library id is not that (an engine mod such as "Hoarders Helper":
    *  the Library id is its Kiln-id slug). Engine plugins report their state rows under this id. */
   manifestId: string | null;
@@ -1577,6 +1577,12 @@ export const libraryUsers = (entry: LibraryRef) => call<string[]>("library_users
  *  that listed it lists that one, and the games where such a profile is active get it written again. Rejects with
  *  game_running while a game, or a server that may read the entry, runs. */
 export const libraryTakeOver = (entry: LibraryRef) => call<TakenOver>("library_take_over", { entry });
+/** "Replace DLL…": a new Library build of a native mod with one DLL swapped; the build before it is kept. A refusal
+ *  with `detail.replaceDllConfirmation` is a question (another file name, another kind of DLL): ask, then call again
+ *  with `confirmed`. */
+export const libraryReplaceDll = (profileId: string, entry: LibraryRef, path: string, confirmed = false) =>
+  call<{ entry: LibraryRef; notices: string[] }>("library_replace_dll", { profileId, entry, path, confirmed });
+
 /** "Roll back to <version>": the kept version `to` (null: the newest kept one) replaces the mod's entry in the profile. */
 export const libraryRollback = (gameId: GameId | null, profileId: string, kind: ModKind, id: string, to: VersionRef | null) =>
   call<RollbackReport>("library_rollback", { gameId, profileId, kind, id, to });
