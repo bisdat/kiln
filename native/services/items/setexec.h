@@ -20,6 +20,7 @@
 //   anything else, a mismatch after a rollback, a fault: InvariantFailure (MayHaveMutated), the capability goes off; no
 //   engine call repairs anything after a fault.
 #pragma once
+#include <tuple>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -127,6 +128,34 @@ inline std::vector<SlotChange> deltas(const SetModel& before, const SetModel& af
     return out;
 }
 
+// Equipping relocates whole stacks; it must preserve every stack and instance identity, the inventory
+// topology and the action bars. Contained slots may move, but must still name the actual stack.
+inline bool conserved(const SetModel& before, const SetModel& after) {
+    auto stacks = [](const SetModel& m) {
+        std::vector<std::tuple<uint32_t, uint32_t, uint32_t>> out;
+        for (const auto& leaf : m.leaves)
+            for (const auto& s : leaf.s)
+                if (!is_empty(s)) out.emplace_back(s.item, s.count, s.pide);
+        std::sort(out.begin(), out.end());
+        return out;
+    };
+    if (stacks(before) != stacks(after)) return false;
+    for (const auto& r : after.items) {
+        const Stack* s = after.stack_of(r.pide);
+        if (!s || (r.has_state && r.contained != s->slot)) return false;
+    }
+    auto stable = [](SetModel m) {
+        for (auto& leaf : m.leaves)
+            for (auto& s : leaf.s) s.item = s.count = s.pide = 0;
+        for (auto& r : m.items) r.contained = 0;
+        for (auto& e : m.equipment) e = 0;
+        std::vector<uint8_t> bytes;
+        encode(SnapPrefix{}, m, &bytes);
+        return bytes;
+    };
+    return stable(before) == stable(after);
+}
+
 // Whether `after` is what the request asked: each named slot holds its selection; every slot the request leaves out holds
 // what it held before (its slot id and its stack). Why not, in `why`.
 inline bool desired(const SetModel& before, const SetModel& after, const KilnSetOpV1* e, uint32_t count, char* why, size_t cap) {
@@ -150,6 +179,8 @@ inline bool desired(const SetModel& before, const SetModel& after, const KilnSet
     for (uint32_t x = 0; x < kSelectionSlots; ++x)
         if (!named[x] && !(value_at(before, x) == value_at(after, x)))
             return std::snprintf(why, cap, "equipment slot %u changed although the set leaves it out", game_slot_of(static_cast<int>(x))), false;
+    if (!conserved(before, after))
+        return std::snprintf(why, cap, "the inventory stacks, instance membership, topology or action bars changed unexpectedly"), false;
     return true;
 }
 
