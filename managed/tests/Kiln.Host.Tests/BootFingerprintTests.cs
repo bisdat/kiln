@@ -34,6 +34,16 @@ public sealed class PatchBootMod : Kiln.Mod
     }
 }
 
+/// <summary>A boot mod whose item has a PNG icon of its folder: the boot lowering commits it as the file's full path, as a run-time define names it.</summary>
+public sealed class IconBootMod : Kiln.Mod
+{
+    public override void OnBoot(BootContext boot)
+    {
+        var staged = BootDefinitions.For(boot).Define("token", new ItemBlock { Name = "Token", Visual = new VisualBlock { Icon = "icons/token.png" } });
+        if (!staged.Ok) throw new InvalidOperationException(staged.Reason);
+    }
+}
+
 [Collection("boot generation")]  // BootGeneration, Capabilities and Config are process-wide
 public sealed class BootFingerprintTests : ModsFixture
 {
@@ -354,6 +364,61 @@ public sealed class BootFingerprintTests : ModsFixture
             Assert.Matches("^[0-9a-f]{64}$", seven);
             Assert.Equal(seven, Run(7));
             Assert.NotEqual(seven, Run(9));
+        }
+        finally
+        {
+            Config.Reset();
+            Capabilities.Reset();
+            KilnPaths.Root = root;
+            KilnPaths.Config = null!;
+        }
+    }
+
+    private const string IconMod = """
+        { "id": "icon-boot", "name": "Icon Boot", "version": "1.0.0", "apiVersion": "0.2", "side": "both", "clients": "mod", "boot": true,
+          "entryAssembly": "Kiln.Host.Tests.dll", "entryType": "Kiln.Host.Tests.IconBootMod" }
+        """;
+
+    [Fact]
+    public void A_committed_icons_full_path_counts_as_its_place_in_the_mods_folder_in_another_folder_and_through_a_link()
+    {
+        // two machines: the mod in kiln/mods, and the mod in a library elsewhere that kiln/mods reaches through a link. The boot lowering
+        // names the icon by its full, link-resolved path (BlockFiles.InMod), which differs; what is hashed does not (the lab switch's dump)
+        var root = KilnPaths.Root;
+        KilnPaths.Root = Root;
+        KilnPaths.Config = null!;
+        _states = new(StringComparer.Ordinal);
+        Capabilities.Report("mods.boot", CapabilityState.Available, CapabilityReason.None);
+        Directory.CreateDirectory(KilnPaths.Control);
+        File.WriteAllText(Path.Combine(KilnPaths.Control, BootFingerprint.DumpSwitch), "");
+        string Install(string dir)
+        {
+            Directory.CreateDirectory(Path.Combine(dir, "icons"));
+            File.WriteAllText(Path.Combine(dir, Manifest.FileName), IconMod);
+            File.Copy(Path.Combine(AppContext.BaseDirectory, "Kiln.Host.Tests.dll"), Path.Combine(dir, "Kiln.Host.Tests.dll"));
+            File.WriteAllBytes(Path.Combine(dir, "icons", "token.png"), [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+            return dir;
+        }
+        (string Fingerprint, string Hashed) Run()
+        {
+            var host = new FakeHost();
+            var current = Start(host);
+            Assert.True(current.TryGetValue("icon-boot", out var fp), host.Dump());
+            Assert.Matches("^[0-9a-f]{64}$", fp);
+            return (fp!, File.ReadAllText(Path.Combine(KilnPaths.State, "boot-fingerprints", "icon-boot.txt")));
+        }
+        try
+        {
+            var plain = Install(Path.Combine(ModsDir, "icon-boot"));
+            var (a, hashedA) = Run();
+            Directory.Delete(plain, recursive: true);
+            var library = Install(Path.Combine(Root, "library", "icon-boot"));
+            Directory.CreateSymbolicLink(Path.Combine(ModsDir, "icon-boot"), library);
+            var (b, hashedB) = Run();
+            Assert.Contains("\"icon\":\"$mod/icons/token.png\"", hashedA);
+            Assert.DoesNotContain(BootFingerprint.NormalizeRoot(Root), hashedA, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(hashedA, hashedB);
+            Assert.Equal(a, b);
         }
         finally
         {
