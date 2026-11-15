@@ -28,5 +28,7 @@
     <None Include="blocks/**" CopyToOutputDirectory="PreserveNewest" />
     <!-- On purpose not in blocks/ in the repository: these are wrong, and the repository's mods must pass the schemas. -->
     <None Include="fixtures/broken.json" Link="blocks/broken.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- 06c last read: two declarations an effect's "run" refuses at load (a parameter of the wrong size; not "sync": true) -->
+    <None Include="fixtures/natives.json" Link="impact/natives.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

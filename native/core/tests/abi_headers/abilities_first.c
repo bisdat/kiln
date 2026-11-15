@@ -13,5 +13,8 @@ void kiln_abi_headers_abilities_first(KilnWorldApi* w, KilnAbilitiesApi* a) {
     w->program_info = world_info;
     a->program_info = impact_info;
     old_name.size = sizeof old_name;
+    struct KilnProgramInfo old_tag; /* C consumers also used the public struct tag. */
+    old_tag.size = sizeof old_tag;
+    (void)old_tag;
     (void)old_name;
 }

@@ -148,6 +148,8 @@ typedef struct KilnWorldProgramInfo {
 #ifndef KILN_PROGRAM_INFO_ALIAS
 #define KILN_PROGRAM_INFO_ALIAS 1 /* 1: KilnProgramInfo is kiln_world.h's, 2: kiln_abilities.h's */
 typedef KilnWorldProgramInfo KilnProgramInfo;
+/* Preserve both the old typedef spelling and `struct KilnProgramInfo` source compatibility. */
+#define KilnProgramInfo KilnWorldProgramInfo
 #endif
 
 /* ======================================================================================= entities ============== */

@@ -18,7 +18,7 @@ internal sealed class AbilitiesFake : IKitFake
     public void Register()
     {
         KitBackend.Instance.RegisterTable(AbilitiesAbi.Service, AbilitiesTable.Create());
-        FakeTables.Features([AbilitiesAbi.NativesFeature]);
+        FakeTables.Features([AbilitiesAbi.NativesFeature, "abilities.ecs_pin"]);
         foreach (var row in AbilitiesAbi.OfflineFeatures)
             FakeTables.Offline(row, "the test kit's fake of kiln.abilities has its natives only (no programs, instances, attributes or sequences)");
     }
@@ -42,7 +42,8 @@ internal sealed class AbilitiesFake : IKitFake
         "(AddProgram): Attach refuses as the service does (program not loaded, site not found, a second Instead, not a native), " +
         "and one made before the world is Pending, then Active or Off. NativeContext's TryRead and TryWrite reach the fake " +
         "world's components of impact_simulation's other_read and other_write lists (this build's, or the test's), on from " +
-        "the first Kiln native call. KilnHarness.ImpactNatives.Calls records each call. Offline: the Impact programs " +
+        "the first Kiln native call while the simulated serial condition holds (ImpactNatives.Serial); an unknown pin or " +
+        "lost serial condition closes it for the world. KilnHarness.ImpactNatives.Calls records each call. Offline: the Impact programs " +
         "themselves (nothing runs a program's code: a test makes the calls), program registration, instances, attributes " +
         "(no formulas: a written attribute is stored as written), sequences, buffs, the suspending natives of Register, " +
         "the watchdog and the 0.2 ms budget"));
@@ -113,6 +114,8 @@ internal sealed unsafe class AbilitiesModel
     private readonly object _lock = new();
     private KilnHarness? _harness;
     private bool _nativesIn, _programsIn, _ecsOn;
+    private uint _ecsReason;
+    public bool Serial { get; set; } = true;
     private ulong _step, _attachSeq;
     private readonly List<Native> _natives = [];
     private readonly List<Attachment> _attachments = [];
@@ -556,7 +559,8 @@ internal sealed unsafe class AbilitiesModel
             k.AttachPending = (uint)_attachments.Count(a => !a.Checked);
             k.AttachActive = (uint)_attachments.Count(a => a.Checked && a.Active);
             k.AttachOff = (uint)_attachments.Count(a => a.Checked && !a.Active);
-            k.EcsState = _ecsOn ? AbilitiesAbi.EcsOn : AbilitiesAbi.EcsPending;
+            k.EcsState = _ecsReason != 0 ? AbilitiesAbi.EcsOff : _ecsOn ? AbilitiesAbi.EcsOn : AbilitiesAbi.EcsPending;
+            k.EcsReason = _ecsReason;
         }
         // as the native service: the members the caller's size reaches
         var n = Math.Min(c->Size, (uint)sizeof(AbilitiesAbi.NativeCounters));
@@ -677,7 +681,7 @@ internal sealed unsafe class AbilitiesModel
                 game = _game.GetValueOrDefault(c->Hash);
                 set = [.. _attachments.Where(a => a.Hash == c->Hash)];
                 // the self-check of the first Kiln native call of the server world
-                if (_programsIn && !_ecsOn && (kiln is not null || set.Count > 0))
+                if (_programsIn && !_ecsOn && _ecsReason == 0 && (kiln is not null || set.Count > 0) && CheckSerial())
                 {
                     _ecsOn = true;
                     Log(LogLevel.Info, "kiln.abilities: NativeContext's reads and writes of other entities are on in this world (abilities.natives.ecs)");
@@ -838,8 +842,21 @@ internal sealed unsafe class AbilitiesModel
 
     // ---- the ECS bridge (native_ecs_read / native_ecs_write) on the fake world's components ----
 
+    private bool CheckSerial()
+    {
+        if (_ecsReason != 0) return false;
+        var reason = FakeTables.Off("abilities.ecs_pin") ? 7u : Serial ? 0u : 6u;
+        if (reason == 0) return true;
+        _ecsReason = reason;
+        _ecsOn = false;
+        Log(LogLevel.Warn, "kiln.abilities: NativeContext's reads and writes of other entities are off for this world: " +
+            (reason == 7 ? "the world's pin of impact_simulation to its thread cannot be read on this build" :
+                "impact_simulation does not run serially on the world's thread here"));
+        return false;
+    }
+
     private bool EcsHere(AbilitiesAbi.NativeCall* call) =>
-        _scope is { } s && s.Call == call && call != null && ReferenceEquals(s.Model, this) && _ecsOn && !FakeTables.Off(AbilitiesAbi.EcsRow);
+        _scope is { } s && s.Call == call && call != null && ReferenceEquals(s.Model, this) && _ecsOn && CheckSerial() && !FakeTables.Off(AbilitiesAbi.EcsRow);
 
     public int EcsRead(AbilitiesAbi.NativeCall* call, string component, uint entity, byte* o, uint size)
     {

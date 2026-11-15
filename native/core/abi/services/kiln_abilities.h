@@ -165,6 +165,8 @@ typedef struct KilnImpactProgramInfo {
 #ifndef KILN_PROGRAM_INFO_ALIAS
 #define KILN_PROGRAM_INFO_ALIAS 2 /* 1: KilnProgramInfo is kiln_world.h's, 2: kiln_abilities.h's */
 typedef KilnImpactProgramInfo KilnProgramInfo;
+/* Preserve both the old typedef spelling and `struct KilnProgramInfo` source compatibility. */
+#define KilnProgramInfo KilnImpactProgramInfo
 #endif
 
 /* A managed native call or a sync wrapper call (job thread): the native context, typed access through the

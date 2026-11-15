@@ -660,14 +660,18 @@ Fix: resize or re-save the image: colour maps (albedo, emissive) in sRGB, data m
 ### KL340 run-binding
 An effect's `"run": "<modid>.<Name>"` (since 0.2.0-dev.29) whose native, as this mod's `impact/natives.json` declares it, has a
 parameter Kiln.Blocks cannot bind: its parameters are bound by name (`self`, `target`, `attacker`, `caster`, `position`, `attackMod`,
-`damage`), and a required `attackMod` or `damage` needs an effect that deals damage (`damage` or `knockback`). Kiln.Blocks refuses
-the same at build time. Another mod's native, and a native this mod's files do not declare yet (the build writes the
+`damage`), a required `damage` needs an effect with `damage` and a required `attackMod` one with `damage` or a `knockback` other
+than `none`, a parameter's type and byte size must be its binding's (`ecs.EntityId` 4, `float3` 12, `float32` 4,
+`impact.DamageSetup` 52), and the declaration must be `"sync": true` with an `argc` equal to its named parameters. Kiln.Blocks
+refuses the same when it loads the block. Another mod's native, and a native this mod's files do not declare yet (the build writes the
 `[ImpactNative]` entries into the output's `impact/natives.json`: lint the built mod), are not checked.
 ```text
 blocks/run.json:5:26: error KL340: run fixture-blocks-run.OnHit: parameter 'attackMod' has nothing to bind to: this effect deals no damage (give it damage, or make the parameter Optional)
 blocks/run.json:6:25: error KL340: run fixture-blocks-run.Odd: parameter 'victim' names nothing a run native gets; its parameters are named self, target, attacker, caster, position, attackMod, damage
+blocks/run.json:9:23: error KL340: run fixture-blocks-run.Later: its declaration is not "sync": true; a native that answers a step later cannot run inside the effect
 ```
-Fix: rename the method's parameter to a binding, make it `Optional<T>`, or give the effect what it binds.
+Fix: rename the method's parameter to a binding, give it the binding's type, make it `Optional<T>`, or give the effect what it
+binds; declare the native through `[ImpactNative]` (the build writes `"sync": true` and the argc).
 
 ### KL401 unknown-reference
 Warning by default; an error where the reader refuses the file or the node (game-tree links, a talent node's `requires`).

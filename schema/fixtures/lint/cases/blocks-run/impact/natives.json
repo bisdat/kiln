@@ -67,6 +67,33 @@
           "optional": true
         }
       ]
+    },
+    {
+      "name": "fixture-blocks-run.Later",
+      "hash": "0x50d4a66b",
+      "argc": 1,
+      "args": [
+        {
+          "name": "target",
+          "type": "ecs.EntityId",
+          "dir": "in",
+          "size": 4
+        }
+      ]
+    },
+    {
+      "name": "fixture-blocks-run.Miscount",
+      "hash": "0x27f5a409",
+      "argc": 2,
+      "sync": true,
+      "args": [
+        {
+          "name": "target",
+          "type": "ecs.EntityId",
+          "dir": "in",
+          "size": 4
+        }
+      ]
     }
   ]
 }
