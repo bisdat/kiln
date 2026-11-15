@@ -150,12 +150,14 @@ change of its own (never the boot thread's live frame), so a stop from any threa
 Mixed versions: a service beside an older kiln.boot without the member (it checks `header.size`) ends the start by
 itself (kiln.knowledge: its state file, log line, message and exit, without boot.json's stop record or progress.json
 `failed`); an older service that does not know the call cannot be made to stop by a newer kiln.boot. The only user is
-kiln.knowledge's roster (0x4B02, [npcs.md](npcs.md)).
+kiln.knowledge: its roster that cannot be held (0x4B02) and the whole build of the mods' native quests and NPCs that
+failed (0x4B03, since 0.2.0-dev.29) ([npcs.md](npcs.md#when-the-whole-build-fails-since-020-dev29)).
 
 ## The exit code
 `KILN_BOOT_EXIT_CODE` is 0x4B01 (19201). A start that kiln.boot stops ends with it, before the game's entry point or
 at an activation fault of a required mod; `boot.json` says `"exitCode": 19201`. A service's `stop_start` ends with the
-service's own code instead (19202 for the roster), and `boot.json` says that one. Neither may be restarted on: see
+service's own code instead (19202 for the roster, 19203 for the mods' NPCs and quests that could not be built), and
+`boot.json` says that one. Neither may be restarted on: see
 [dedicated-servers.md](../dedicated-servers.md#when-kiln-stops-the-start-no-restart-loop). Under Wine the Linux parent gets only
 the low byte as the exit status: 1. Seen on a test server (the lab's wrapper writes it to `kiln/state/exit-code.txt`):
 1 for a stop before the entry point (a required mod's patch of an unknown type) and for one after it (a required mod's

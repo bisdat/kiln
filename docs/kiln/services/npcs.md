@@ -15,7 +15,7 @@ engine's, [docs/kiln/modding/quests.md](../modding/quests.md).
 | Villagers | `managed/services/Kiln.Creatures/Villagers.cs` + `kiln.creatures.npc_command` |
 | Format | `schema/kiln-quests.schema.json`, lint rules KL210, KL312 |
 | Samples | `mods/samples/quests-sample/` (the Warden's chain), `mods/samples/NpcSample/` (Tobin: voice-over, roster, a trade, a summon tool) |
-| Tests | `tools/kfc/tests/test_questbuild.py` (offline, on the client's own data), `mods/tests/quest-native-test/` (lab) |
+| Tests | `tools/kfc/tests/test_questbuild.py` (offline, on the client's own data), `mods/tests/quest-native-test/` (lab), `native/services/quests/tests/run.sh` (host: the boot build's stops), `mods/tests/content-stop-test/` (lab: a whole build that fails) |
 
 ## Status
 
@@ -33,6 +33,15 @@ engine's, [docs/kiln/modding/quests.md](../modding/quests.md).
   seen; a hosting game's two worlds and a game client's stopped start are not seen yet (guided checks
   `17-roster-client`, `17-roster.refused-start`). A lost page is computed again on a dedicated server only; a game
   client keeps such NPCs until the game's next evaluation. See [The roster's size](#the-rosters-size-since-020-dev29).
+- **A whole build that fails stops the start** (since 0.2.0-dev.29): lab-tested on the dedicated server without a player
+  (`mods/tests/content-stop-test/lab.sh`, twelve boots on one save): a normal start served the fixture's knowledge,
+  quest and clone; each kind of whole failure forced by the lab switch (`read`, `compile`, `shared`, `assets`, `hook`,
+  and `compile` and `hook` in a boot generation, the last inside the knowledge collector's prepare) stopped before any
+  world with exit status 3, the stop line, `content-refused.json`, `boot.json` `boot.stop` and progress.json `failed`,
+  the save byte for byte the same; a mod with its own error beside a good one was named and left out while the good one
+  was served; `late` logged that the start could not be stopped and the server ran on; a mod with no native content
+  and the switch on did not stop. A game client's stop (its message box) is not seen yet. See
+  [When the whole build fails](#when-the-whole-build-fails-since-020-dev29).
 
 ## What needs what
 
@@ -175,6 +184,7 @@ new options at the end of a node.
   knowledge: native: 2 mod(s): 48 new knowledge object(s), 3 quest(s), 2 NPC(s) in the roster, 6 template(s), 0 text(s); GameKnowledgeResource 1509084 bytes served by kiln.assets
   ```
   An error in one mod leaves out that mod's native data and logs why (`knowledge: native: <mod>: …`); the others build.
+  When the whole build fails, so that nothing is served, the start stops instead ([below](#when-the-whole-build-fails-since-020-dev29)).
 - **Changes need a restart**: resources are read once per process. `Quests.Reload()` reloads the engine's quests, not these.
 - **At run time** (`NativeQuests`, started by the engine, server side):
   - mirrors the engine's state into the knowledge above: at every change, at a join, after a reset, and every 2 s whatever differs;
@@ -309,7 +319,7 @@ Mixed versions: this kiln.knowledge beside an older kiln.boot without `stop_star
 cannot be made to stop at all, whatever the core: it refuses the roster at 64 and loads the world without the mods'
 native data. Run Kiln as one matched bundle (core and services of one release), on the server and in every game.
 **Never restart on it**: the next start stops the same way. The release's systemd unit has
-`RestartPreventExitStatus=1 2`; a hosting panel or a restart script must treat exit status 2 (19202 on Windows) as a
+`RestartPreventExitStatus=1 2 3`; a hosting panel or a restart script must treat exit status 2 (19202 on Windows) as a
 configuration error ([dedicated-servers.md](../dedicated-servers.md#when-kiln-stops-the-start-no-restart-loop)).
 
 `npcs.expanded_roster` says which: available "installed" once the page is in, available "ready" while it could go in
@@ -411,6 +421,52 @@ A token is the world's kind and the core session's counter of that kind: a read 
 answers `WorldEnded`, never the next world's state; never save or send one. Rows: `npcs.roster_read` (server world),
 `npcs.client_roster_read` (a game client), `npcs.roster_budget`, `npcs.expanded_roster`. C:
 `kiln.knowledge.roster_world`, `roster_budget`, `npc_unlock_at` ([knowledge.md](knowledge.md#c)).
+
+## When the whole build fails (since 0.2.0-dev.29)
+
+The boot build serves one shared pack for every mod: the game's knowledge, journal and NPC collection, rebuilt with all
+of the mods' entries. When that whole build fails, nothing of any mod's native quests, knowledge or NPCs is served, and
+a world loaded so drops all of that progress at its next save. So the start stops before any world loads, the same way
+the roster's stop does (the steps above), with its own exit code and file:
+
+| | The roster cannot be held | The whole build failed |
+|---|---|---|
+| Exit code | 0x4B02 (19202), Wine status 2 | 0x4B03 (19203, `KILN_KNOW_CONTENT_EXIT_CODE`), Wine status 3 |
+| State file | `kiln/state/roster-refused.json` | `kiln/state/content-refused.json` (same fields; [launcher/contracts.md](../launcher/contracts.md)) |
+| kiln.log | `roster: the start is stopped (pid …, exit code 0x4B02): …` | `native: the start is stopped (pid …, exit code 0x4B03): the mods' native quests, knowledge and NPCs could not be built at all (<what failed>); mods: …` |
+| Message title (game client) | Kiln: the NPC roster is too long | Kiln: the mods' NPCs and quests could not be built |
+| What to do | remove these mods, or update Kiln | remove or update the mods named; if it still stops, send `kiln/logs/kiln.log` to the mods' authors or to Kiln |
+
+What counts as the whole build failing, and what does not:
+
+| Case | Stops the start | Why |
+|---|---|---|
+| Reading the mods' files throws (a `kiln.mod.json` field of the wrong type, such as `"side": 5`) | yes, naming the mods read so far and the one being read | nothing is built. Inside a boot generation this is the knowledge collector's refusal, which kiln.boot already stops with 0x4B01 |
+| The build throws | yes, naming the mods that ship such content | nothing is built |
+| The shared resources do not build (the manifest's `failed`: the game's knowledge, journal or NPC collection missing or damaged, two mods defining one clone, a template the game does not have) | yes, naming the mods the build was to serve | nothing is served |
+| kiln.assets refuses the built knowledge, journal, NPC collection or a template, or kiln.assets is not there | yes, naming the mods the build was to serve | the shared pack is not served as it was built |
+| The hook on the game's resource start (`assets/ResourceInit`) is not resolved or cannot be installed | yes, at Kiln's start (or in a boot generation's prepare), naming the mods that ship such content | nothing would ever build the pack (a game client whose resources were up before Kiln builds at once and does not stop) |
+| One mod's own errors (its entry `ok: false`, its files skipped) | **no**: that mod loads without its native content, the log names it, the others are served | as before; a required boot mod is still refused by kiln.boot (0x4B01) |
+| No enabled mod ships native quests, knowledge or NPCs (no files, or files with none) | **no** | nothing to lose |
+| The roster cannot be held | as the roster (0x4B02), not as this stop | the more precise reason |
+
+The stop is a start-time act only, as the roster's: once a world is present or has run in this process, kiln.log says
+`native: the start could NOT be stopped: …` and the process goes on without the mods' native data. A required boot mod
+whose content the failed build left out is also reported to kiln.boot (0x4B01) afterwards, but the stop above comes
+first. Never restart on exit status 3 either: the next start stops the same way.
+
+**Lab switch** `kiln/control/knowledge.fail-build` (read once at the start, a warning at every start while it is there;
+never needed in play): its first word forces one kind of whole failure without a broken game: `read` (reading the
+mods' files throws), `compile` (the build throws), `shared` (the build cannot read the game's
+`GameKnowledgeResource`), `assets` (the built pack is not given to kiln.assets), `hook` (the hook on `ResourceInit` is
+not installed), or `late` (the build serves as usual; 30 steps after the server world's first one the stop is asked
+for, which must log that it could not be stopped and must not end the process). Each stops only when a mod ships such
+content, as the real failure does. Another word is ignored with a warning.
+
+Tested: host, `native/services/quests/tests/run.sh` (`native_pack_test.cpp`: native_pack.cpp with fake Kiln
+services and a fake build: every case above by its real cause and by the switch, with and without a boot generation,
+and the texts of both stops). Lab: `mods/tests/content-stop-test/lab.sh` (a dedicated server: a normal start, each
+switch, one broken mod beside a good one, `late`, and no content with the switch on).
 
 ## API
 

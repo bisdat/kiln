@@ -276,8 +276,9 @@ typedef struct KilnBootApiV1 {
      * fault in it is contained); then the process ends with `exit_code` without any DLL's detach code. If the files or
      * before_exit block, a 65-second bound ends the process anyway. Does not return.
      * A Unix wrapper (Wine) sees the low byte of exit_code: give a code whose low byte says what it is
-     * (KILN_BOOT_EXIT_CODE ends in 1, kiln.knowledge's KILN_KNOW_ROSTER_EXIT_CODE in 2; both collide with ordinary
-     * statuses 1 and 2, see docs/kiln/dedicated-servers.md), and say in `reason` that restarting does not help.
+     * (KILN_BOOT_EXIT_CODE ends in 1, kiln.knowledge's KILN_KNOW_ROSTER_EXIT_CODE in 2 and KILN_KNOW_CONTENT_EXIT_CODE
+     * in 3; all collide with ordinary statuses 1, 2 and 3, see docs/kiln/dedicated-servers.md), and say in `reason` that
+     * restarting does not help.
      * KILN_ERR_UNAVAILABLE: a world is present or has run (nothing happens), or a stop is under way already (the
      * process is about to end). KILN_ERR_INVALID_ARGUMENT: caller 0, an empty reason, exit_code 0 (nothing happens).
      * Mixed versions: a caller beside an older kiln.boot finds no member (header.size) and must end the start itself, as
