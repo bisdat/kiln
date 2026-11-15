@@ -43,6 +43,12 @@ public static unsafe partial class Items
         /// Kiln.Items lowers it when the table is older, kiln.world is missing, or kiln.items turned equip off.</summary>
         public const string Equip = "items.equip";
 
+        /// <summary>sigdb: equipment sets (kiln.items v6, <see cref="Items.CaptureSet"/>): the equip functions and the
+        /// commit's own rollback guards; Kiln.Items lowers it when the table is older, equip or item instances are off,
+        /// kiln.decisions or kiln.window_clock are missing, this build's component layouts differ, or kiln.items switched
+        /// sets off after an invariant failure.</summary>
+        public const string EquipSets = "items.equip_sets";
+
         /// <summary>sigdb: what one of the game's wear debits costs a tool (<see cref="Items.SetToolWearPerDebit"/>); kiln.items lowers it when
         /// its guards do not pass, Kiln.Items when the kiln.toolwear table is not here.</summary>
         public const string ToolWear = "items.tool_wear_debit";
@@ -75,7 +81,7 @@ public static unsafe partial class Items
         {
             var (reason, text) = Cause(CapabilityReason.ServiceMissing, "kiln.items is not loaded", Caps.Service);
             Capabilities.Report(Caps.ResultPeek, CapabilityState.Unavailable, reason, text);
-            foreach (var name in (string[])[Caps.Fuel, Caps.Move, Caps.Names, Caps.Transfer, Caps.Moves, Caps.Instances, Caps.Equip, Caps.GearOptions, Caps.ToolWear]) Lower(name, reason, text);
+            foreach (var name in (string[])[Caps.Fuel, Caps.Move, Caps.Names, Caps.Transfer, Caps.Moves, Caps.Instances, Caps.Equip, Caps.EquipSets, Caps.GearOptions, Caps.ToolWear]) Lower(name, reason, text);
             return;
         }
         // equip (v5): kiln.items decides it at its start (the symbols, kiln.world, the program's registration)
@@ -88,6 +94,20 @@ public static unsafe partial class Items
                 break;
             case (EquipVerdict.Off, var text):
                 Off(Caps.Equip, text, Caps.Transaction, Caps.Read);
+                break;
+        }
+        // equipment sets (v6): kiln.items decides what it can at its start (the feature, its layouts, kiln.decisions);
+        // the session follows items.equip's row (RefreshEquipSets)
+        var v6 = V6;
+        var sets = v6 == null ? null : SetStatusOf(v6);
+        switch (DecideEquipSets(t->Header.Version, v6 != null, sets?.Available ?? false, sets?.Detail ?? ""))
+        {
+            case (EquipSetsVerdict.NoV6, var text):
+                Lower(Caps.EquipSets, CapabilityReason.ServiceOlder, text);
+                break;
+            case (EquipSetsVerdict.Off, var text):
+                _setsOff = true;
+                Off(Caps.EquipSets, text, Caps.Equip, Caps.Instances, Caps.Transaction, Caps.Read);
                 break;
         }
         var older = $"kiln.items v{t->Header.Version} has no {{0}} (update Kiln)";
@@ -123,6 +143,7 @@ public static unsafe partial class Items
                 if (step % 25 != 0) return;
                 RefreshMoves();
                 RefreshEquip();
+                RefreshEquipSets();
             });
         }
         // tool wear (dev.28): its own table, published by the same DLL
@@ -176,6 +197,52 @@ public static unsafe partial class Items
         : !available && !detail.StartsWith(NoServerWorld, StringComparison.Ordinal)
             ? (EquipVerdict.Off, detail.Length > 0 ? detail : "kiln.items turned equip off (see kiln.log)")
         : (EquipVerdict.On, "");
+
+    internal enum EquipSetsVerdict
+    {
+        /// <summary>On: the sigdb row stands.</summary>
+        On,
+        /// <summary>No kiln.items table: lowered with the other rows.</summary>
+        NoTable,
+        /// <summary>A table without v6: lowered, service-older.</summary>
+        NoV6,
+        /// <summary>v6, but kiln.items says sets cannot run (the feature, equip or item instances off, kiln.decisions or
+        /// kiln.window_clock missing, the layouts differ, switched off after a fault): off, with its detail.</summary>
+        Off,
+    }
+
+    /// <summary>What <c>items.equip_sets</c> becomes, from what kiln.items has: the table's version (null: no table),
+    /// whether it has v6, its set status' available flag and detail. Pure, so every branch is tested without the native
+    /// table.</summary>
+    internal static (EquipSetsVerdict Verdict, string Text) DecideEquipSets(uint? tableVersion, bool v6, bool available, string detail) =>
+        tableVersion is not { } version ? (EquipSetsVerdict.NoTable, "kiln.items is not loaded")
+        : !v6 ? (EquipSetsVerdict.NoV6, $"kiln.items v{version} has no equipment sets (update Kiln)")
+        : !available ? (EquipSetsVerdict.Off, detail.Length > 0 ? detail : "kiln.items turned equipment sets off (see kiln.log)")
+        : (EquipSetsVerdict.On, "");
+
+    // items.equip_sets every 25 steps: off for good once kiln.items switched sets off (an invariant failure: until the
+    // server restarts); for the session like items.equip (a client that joined another machine's world has no server
+    // world: a set would never run), and on again when items.equip is. Never raised above the core's sigdb verdict.
+    private static bool _setsOff;
+    private static (CapabilityState, CapabilityReason, string) _setsSession = (CapabilityState.Available, CapabilityReason.None, "");
+
+    internal static void RefreshEquipSets()
+    {
+        var t = V6;
+        if (_setsOff || t == null || SetStatusOf(t) is not { } s) return;
+        if (!s.Available)  // kiln.items' set status leaves the session out: anything it says is off stays off
+        {
+            _setsOff = true;
+            Off(Caps.EquipSets, s.Detail, Caps.Equip, Caps.Instances, Caps.Transaction, Caps.Read);
+            return;
+        }
+        (CapabilityState, CapabilityReason, string) now = Capabilities.Get(Caps.Equip) is { State: CapabilityState.Unavailable, Reason: CapabilityReason.Session } equip
+            ? (CapabilityState.Unavailable, CapabilityReason.Session, $"needs {Caps.Equip}: {equip.ReasonText}")
+            : (CapabilityState.Available, CapabilityReason.None, "");
+        if (now == _setsSession) return;
+        _setsSession = now;
+        Capabilities.Report(Caps.EquipSets, now.Item1, now.Item2, now.Item3);
+    }
 
     // items.moves follows the kiln_items program: available while moves run, pending while it waits for a server world
     // (and again after one closed), unavailable when it broke or moves are off on this build.

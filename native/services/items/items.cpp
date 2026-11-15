@@ -31,6 +31,7 @@
 #include "moves.h"
 #include "names.h"
 #include "pide.h"
+#include "sets.h"
 #include "toolwear.h"
 #include "wear.h"
 #include "kiln_api.h"
@@ -66,8 +67,10 @@ static_assert(sizeof(KilnItemsTransferEvent) == 32 && sizeof(KilnItemsTransferRu
 static_assert(offsetof(KilnItemsApi, peek_result) == 192 && offsetof(KilnItemsApi, read_instances) == 200 &&
               offsetof(KilnItemsApi, instances_status) == 216);
 // v5 (0.2.0-dev.27) appends equip and equip_status after instances_status.
-static_assert(offsetof(KilnItemsApi, equip) == 224 && offsetof(KilnItemsApi, equip_status) == 232 &&
-              sizeof(KilnItemsApi) == 240);
+static_assert(offsetof(KilnItemsApi, equip) == 224 && offsetof(KilnItemsApi, equip_status) == 232);
+// v6 (0.2.0-dev.29) appends the equipment sets after equip_status; a v5 reader's table ends at 240.
+static_assert(offsetof(KilnItemsApi, set_capture) == 240 && offsetof(KilnItemsApi, set_release_snapshot) == 248 &&
+              offsetof(KilnItemsApi, set_status) == 256 && sizeof(KilnItemsApi) == 264);
 static_assert(sizeof(KilnItemsEquipRequest) == 32 && offsetof(KilnItemsEquipRequest, slot) == 16 &&
               offsetof(KilnItemsEquipRequest, pide) == 24);
 static_assert(sizeof(KilnItemsEquipResult) == 256 && offsetof(KilnItemsEquipResult, item) == 32 &&
@@ -1020,6 +1023,7 @@ void drop_world(const char* why) {
     instances_world_reset();  // v4: entity ids start again in the next world: every stamp is forgotten
     toolwear::world_reset();  // its queued records name entities of the world that went
     equip_world_closed();     // v5: waiting equips end as dropped
+    sets_world_closed();      // v6: every set snapshot named this world
     int expected = KILN_ITEMS_PROGRAM_RUNNING;
     if (g_program.compare_exchange_strong(expected, KILN_ITEMS_PROGRAM_ACTIVE))
         set_detail("program registered, not run yet in this world");
@@ -1055,6 +1059,7 @@ void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
         toolwear::verify_programs(g_api->service(KilnStr{KILN_WORLD_SERVICE, std::strlen(KILN_WORLD_SERVICE)}, 1));
     expire();
     deliver();
+    sets_pre(tick->step);  // v6: snapshot expiry and stamp resets, before equip_pre hands requests to the program
     equip_pre(g_world.load() ? g_world.load() : g_api->server_world(), tick->step);  // v5
     xfer_deliver();
     selftest_pre(tick->step);
@@ -1315,6 +1320,7 @@ void KILN_CALL t_cancel_owner(KilnOwner owner) {
                                            before - g_keeps.size(), before - g_keeps.size() == 1 ? "y" : "ies");
     }
     equip_cancel_owner(owner);
+    sets_cancel_owner(owner);  // v6: the owner's snapshots
     // Draining a running transfer callback must not hold the request mutex: that callback may queue a request.
     xfer_end_owner(owner);
 }
@@ -1521,6 +1527,13 @@ KilnResult KILN_CALL t_equip(KilnOwner owner, const KilnItemsEquipRequest* r, Ki
 }
 KilnResult KILN_CALL t_equip_status(KilnItemsEquipStatus* out) { return equip_status(out); }
 
+// ---- v6: equipment sets (sets.cpp) ----
+KilnResult KILN_CALL t_set_capture(KilnOwner owner, uint32_t player, KilnSetSnapshotV1* out) {
+    return sets_capture(owner, player, out);
+}
+KilnResult KILN_CALL t_set_release(KilnOwner owner, uint64_t token) { return sets_release(owner, token); }
+KilnResult KILN_CALL t_set_status(KilnSetStatusV1* out) { return sets_status(out); }
+
 const KilnItemsApi kTable = {
     {sizeof(KilnItemsApi), KILN_ITEMS_VERSION},
     &t_give, &t_take, &t_cancel, &t_cancel_owner, &t_read, &t_find,
@@ -1530,6 +1543,7 @@ const KilnItemsApi kTable = {
     &t_peek_result,
     &t_read_instances, &t_read_holder, &t_instances_status,
     &t_equip, &t_equip_status,
+    &t_set_capture, &t_set_release, &t_set_status,
 };
 
 // ============================================================================================= self-test =======
@@ -1924,17 +1938,32 @@ void resolve() {
     // v5 (docs/re/items.md section 16): the game's equip and unequip; they also need kiln.world (equip.cpp)
     E.equip_ok = E.tx_ok && E.read_ok && feat("items.equip") && sym("items/EquipItem", &E.equip_item) &&
                  sym("items/UnequipItem", &E.unequip_item);
+    // v6 (chapter 10): equipment sets stage many equips on one transaction and must know when the commit would roll back
+    // by itself. Its three guards are captured from the commit's first bytes and must agree with the transaction layout
+    // sigdb already has: the flags byte is tx.flags, the touched count follows the touched array's pointer.
+    {
+        int64_t flags = 0, touched = 0;
+        E.sets_ok = E.equip_ok && E.instances_ok && feat("items.equip_sets") && cst("items/tx.guard_flags", &E.tx_guard_flags) &&
+                    cst("items/tx.empty_state", &E.tx_empty_state) && cst("items/tx.touched_count", &E.tx_touched_count) &&
+                    cst("items/tx.flags", &flags) && cst("items/tx.touched", &touched) && E.tx_guard_flags == flags &&
+                    E.tx_touched_count == touched + 8 && E.tx_empty_state > 0 && E.tx_empty_state < 0x100 &&
+                    (E.tx_empty_state & 7) == 0 && E.tx_touched_count + 8 <= E.tx_size;
+        if (!E.sets_ok && E.equip_ok && feat("items.equip_sets"))
+            LOGW("equipment sets off: the commit's guards (0x%llx, 0x%llx, 0x%llx) do not agree with the transaction layout",
+                 static_cast<unsigned long long>(E.tx_guard_flags), static_cast<unsigned long long>(E.tx_empty_state),
+                 static_cast<unsigned long long>(E.tx_touched_count));
+    }
     if (E.tx_ok) {
         g_tx = static_cast<uint8_t*>(VirtualAlloc(nullptr, static_cast<SIZE_T>(E.tx_size), MEM_COMMIT | MEM_RESERVE,
                                                   PAGE_READWRITE));
         if (!g_tx) E.tx_ok = false;
     }
     LOGI("resolved: transaction %s (tx %lld bytes), read %s, catalog %s, scan %s, own program registration %s, recipe path %s, "
-         "tracked Fuel writes %s, moves %s, transfer hooks %s, container names %s, item instances %s, equip %s",
+         "tracked Fuel writes %s, moves %s, transfer hooks %s, container names %s, item instances %s, equip %s, equipment sets %s",
          E.tx_ok ? "on" : "OFF", static_cast<long long>(E.tx_size), E.read_ok ? "on" : "OFF",
          E.catalog_ok ? "on" : "OFF", E.scan_ok ? "on" : "OFF", E.program_ok ? "possible" : "OFF",
          E.recipe_apply ? "on" : "OFF", E.fuel_ok ? "on" : "OFF", E.move_ok ? "on" : "OFF", E.transfer_ok ? "possible" : "OFF",
-         E.names_ok ? "on" : "OFF", E.instances_ok ? "on" : "OFF", E.equip_ok ? "possible" : "OFF");
+         E.names_ok ? "on" : "OFF", E.instances_ok ? "on" : "OFF", E.equip_ok ? "possible" : "OFF", E.sets_ok ? "possible" : "OFF");
     // dev.28 (chapter 16b): the durability debit's functions and frames; needs the attribute lookup and the item reads
     E.wear_ok = wear::resolve(g_api, g_owner);  // resolve also lowers the row when an item-service prerequisite is off
     // Prepare availability; the first valid tool-wear rule request installs the hooks.
@@ -1993,6 +2022,7 @@ KilnResult items_item_info(uint32_t id, KilnItemInfo* out) { return t_item_info(
 const KilnApi* items_api() { return g_api; }
 KilnOwner items_owner() { return g_owner; }
 uint64_t current_step() { return g_step.load(std::memory_order_relaxed); }
+uintptr_t items_server_world() { return g_world.load() ? g_world.load() : g_api->server_world(); }
 uint64_t items_next_ticket() { return g_next_ticket.fetch_add(1); }
 }  // namespace kitems
 
@@ -2001,7 +2031,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     g_api = api;
     g_owner = owner;
     info->id = KilnStr{kName, std::strlen(kName)};
-    info->version = KilnStr{"5", 1};
+    info->version = KilnStr{"6", 1};
     info->on_ready = &on_ready;
     resolve();
     selftest_init();

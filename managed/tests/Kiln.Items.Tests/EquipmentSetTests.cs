@@ -4,12 +4,13 @@
 // with a set is the lab test (mods/tests/equipment-sets-test); the native snapshot, planner and executor have their host
 // tests (native/services/items/tests).
 using System.Collections.ObjectModel;
+using System.Runtime.InteropServices;
 using Kiln;
 using Xunit;
 
 namespace Kiln.ItemsTests;
 
-public sealed class EquipmentSetTests
+public sealed unsafe class EquipmentSetTests
 {
     private static readonly Guid Session = Guid.Parse("01234567-89ab-4cde-8123-0123456789ab");
     private static readonly EventEntityKey Player = new(1, true, 123, 9, 4, 20);
@@ -276,5 +277,66 @@ public sealed class EquipmentSetTests
         new EquipmentSetPlan(new EntityId(1), Sample(), default, 0, [], 0).Dispose();
         // a release that throws is swallowed (the snapshot expires by itself)
         new EquipmentSetLease(1, 1, (_, _) => throw new InvalidOperationException()).Release();
+    }
+
+    // ---- the native mirrors (kiln_items.h v6; sets.cpp static_asserts the same) ----
+
+    [Fact]
+    public void TheV6MirrorsMatchTheHeader()
+    {
+        Assert.Equal(256, sizeof(ItemsNative.SetSnapshot));
+        Assert.Equal(48, (int)Marshal.OffsetOf<ItemsNative.SetSnapshot>(nameof(ItemsNative.SetSnapshot.Identity)));
+        Assert.Equal(88, (int)Marshal.OffsetOf<ItemsNative.SetSnapshot>(nameof(ItemsNative.SetSnapshot.Refusal)));
+        Assert.Equal(208, sizeof(ItemsNative.SetStatus));
+        Assert.Equal(16, (int)Marshal.OffsetOf<ItemsNative.SetStatus>(nameof(ItemsNative.SetStatus.Captured)));
+        // v5 ends at 240 (equip_status at 232); v6 appends after it, so a v5 table is never read as v6
+        Assert.Equal(240, sizeof(ItemsNative.TableV5));
+        Assert.Equal(240, (int)Marshal.OffsetOf<ItemsNative.TableV6>(nameof(ItemsNative.TableV6.SetCapture)));
+        Assert.Equal(248, (int)Marshal.OffsetOf<ItemsNative.TableV6>(nameof(ItemsNative.TableV6.SetRelease)));
+        Assert.Equal(256, (int)Marshal.OffsetOf<ItemsNative.TableV6>(nameof(ItemsNative.TableV6.GetSetStatus)));
+    }
+
+    [Fact]
+    public void TheSetsCapabilityVerdictFollowsTheTable()
+    {
+        Assert.Equal(Items.EquipSetsVerdict.NoTable, Items.DecideEquipSets(null, false, false, "").Verdict);
+        var older = Items.DecideEquipSets(5, false, false, "");
+        Assert.Equal(Items.EquipSetsVerdict.NoV6, older.Verdict);
+        Assert.Contains("v5 has no equipment sets", older.Text);
+        var off = Items.DecideEquipSets(6, true, false, "kiln.decisions is not here, or too old for a native set decision (enqueue_native)");
+        Assert.Equal(Items.EquipSetsVerdict.Off, off.Verdict);
+        Assert.Contains("kiln.decisions", off.Text);
+        Assert.Contains("see kiln.log", Items.DecideEquipSets(6, true, false, "").Text);
+        Assert.Equal(Items.EquipSetsVerdict.On, Items.DecideEquipSets(6, true, true, "").Verdict);
+    }
+
+    private static InventorySlot Slot(SlotId at, uint item, int count, uint pide = 0) =>
+        new(at, new ItemId(item), count, new EntityId(pide), 0, null, InventoryCategory.Equipment, 2, pide != 0, true, false, 0);
+
+    [Fact]
+    public void ACaptureNamesWhatEachSlotHolds()
+    {
+        var ring = SlotId.Of(new EntityId(2003), 0);
+        var arrows = SlotId.Of(new EntityId(2003), 4);
+        var empty = SlotId.Of(new EntityId(2003), 5);
+        var bare = SlotId.Of(new EntityId(2003), 6);
+        var r = Ref(5001, 0x79442800, 11);
+        var slots = new List<InventorySlot>
+        {
+            Slot(ring, 0x79442800, 1, 5001) with { Ref = r },
+            Slot(arrows, 77, 40),
+            Slot(empty, 0, 0),
+            Slot(bare, 0x4623bcb0, 1, 5002),  // an item entity without a stamp (items.instances gave none)
+        };
+        Assert.IsType<EmptyEquipment>(Items.SelectionAt(default, slots).Selection);
+        Assert.Equal(new InstanceEquipment(r), Items.SelectionAt(ring, slots).Selection);
+        Assert.Equal(new StackEquipment(new ItemId(77), arrows, 40), Items.SelectionAt(arrows, slots).Selection);
+        Assert.IsType<EmptyEquipment>(Items.SelectionAt(empty, slots).Selection);
+        var (none, why) = Items.SelectionAt(bare, slots);
+        Assert.Null(none);
+        Assert.Contains("no stamp", why);
+        var (outside, why2) = Items.SelectionAt(SlotId.Of(new EntityId(9999), 0), slots);
+        Assert.Null(outside);
+        Assert.Contains("not one of the player's inventories", why2);
     }
 }
