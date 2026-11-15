@@ -1101,6 +1101,14 @@ int32_t view_slot(Frame& f, int id, int32_t i, const View** out_view) {
     return v->layout.lists[id].slot[static_cast<size_t>(i)];
 }
 
+// The entity map's own hash of an id (docs/re/spawn.md: the game's entity map find, server 0x650c50): it probes from
+// this, not from the id (the component maps' keys are hashes already and probe from them as they are).
+uint32_t entity_hash(uint32_t k) {
+    uint32_t x = ((k >> 16) ^ k) * 0x45d9f3bu;
+    x = ((x >> 16) ^ x) * 0x45d9f3bu;
+    return (x >> 16) ^ x;
+}
+
 bool map_find_ptr(uintptr_t map, uint32_t key, uintptr_t* value) {  // the entity map: u32 keys, pointer values
     if (!map || !L.map.ok()) return false;
     uint64_t cap = 0;
@@ -1112,7 +1120,7 @@ bool map_find_ptr(uintptr_t map, uint32_t key, uintptr_t* value) {  // the entit
         !seh_copy(&keys, reinterpret_cast<const void*>(map + L.map.keys), 8) ||
         !seh_copy(&values, reinterpret_cast<const void*>(map + L.map.values), 8) || !bits || !keys || !values)
         return false;
-    uint64_t i = key & (cap - 1);
+    uint64_t i = entity_hash(key) & (cap - 1);
     for (uint64_t probes = 0; probes < cap; ++probes) {
         uint64_t word = 0;
         uint32_t k = 0;

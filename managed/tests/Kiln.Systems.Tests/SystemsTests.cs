@@ -533,6 +533,43 @@ public sealed unsafe class SystemsTests
         Assert.Equal(new SliceInfo("fuel_setup", WorldKind.Server, 3, 77, false, 0x7000), info);
     }
 
+    [Theory]
+    [InlineData("unavailable")]
+    [InlineData("unknown")]
+    public void WhenArchetype_that_cannot_decide_turns_its_stage_off_instead_of_skipping_every_slice(string why)
+    {
+        using var w = new FakeWorld();
+        var ran = 0;
+        var disabled = new List<WrapDisabledEvent>();
+        var wrap = Systems.Wrap("fuel_setup").Wrap!.WhenArchetype(["Fuel", "Fule"]).Before((ref Slice s) => ran++);
+        wrap.Disabled += disabled.Add;
+        w.LayoutHas.Add(Hash("Fuel"));
+        if (why == "unavailable") w.ArchetypeResult = SystemsNative.Unavailable;  // a build whose entity map did not resolve
+        else w.UnknownComponents.Add(Hash("Fule"));                             // a name this world has no component of
+        w.Call(w.Wraps[0]);
+        Assert.Equal(0, ran);
+        var e = Assert.Single(disabled);
+        Assert.Contains(why == "unavailable" ? "cannot read a slice's archetype" : "Fule is not a component of this world", e.Reason);
+        Assert.True(w.Wraps[0].Gone);
+        Assert.Equal(0, wrap.Stats.Faults);  // not the mod's fault: no count for its policy
+    }
+
+    [Fact]
+    public void An_empty_slice_or_an_entity_the_map_lacks_only_skips_that_slice()
+    {
+        using var w = new FakeWorld();
+        var ran = 0;
+        var wrap = Systems.Wrap("fuel_setup").Wrap!.WhenArchetype(["Fuel"]).Before((ref Slice s) => ran++);
+        w.LayoutHas.Add(Hash("Fuel"));
+        w.ArchetypeResult = SystemsNative.NotFound;
+        w.Call(w.Wraps[0]);
+        Assert.Equal(0, ran);
+        Assert.False(w.Wraps[0].Gone);
+        w.ArchetypeResult = SystemsNative.Ok;
+        w.Call(w.Wraps[0]);
+        Assert.Equal(1, ran);
+    }
+
     [Fact]
     public void WhenArchetype_publishes_both_lists_and_its_cache_together()
     {

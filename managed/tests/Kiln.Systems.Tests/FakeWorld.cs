@@ -45,6 +45,8 @@ internal sealed unsafe class FakeWorld : IDisposable
     internal bool NoRegistry;  // fuel_setup does not declare impact::AttributeRegistry
     internal ulong StepNow = 77;  // the step a fake slice says
     internal int IterateResult = SystemsNative.Ok;  // what game_slice_iterate answers (Unavailable: a build that cannot iterate)
+    internal int ArchetypeResult = SystemsNative.Ok;  // what game_slice_archetype answers
+    internal readonly HashSet<uint> UnknownComponents = new();  // game_archetype_has answers -1 for these
     private readonly SystemsNative.Table* _table;
     private readonly nint[] _names;
 
@@ -340,10 +342,11 @@ internal sealed unsafe class FakeWorld : IDisposable
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int Archetype(SystemsNative.Slice* s, nuint* out_)
     {
-        *out_ = F.Layout;
-        return SystemsNative.Ok;
+        *out_ = F.ArchetypeResult == SystemsNative.Ok ? F.Layout : 0;
+        return F.ArchetypeResult;
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-    private static int Has(uint kind, nuint layout, uint hash) => layout == F.Layout ? (F.LayoutHas.Contains(hash) ? 1 : 0) : -1;
+    private static int Has(uint kind, nuint layout, uint hash) =>
+        layout != F.Layout || F.UnknownComponents.Contains(hash) ? -1 : F.LayoutHas.Contains(hash) ? 1 : 0;
 }

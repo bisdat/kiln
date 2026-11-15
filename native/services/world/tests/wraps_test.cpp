@@ -1382,6 +1382,33 @@ void per_entity() {
               game_archetype_has(KILN_WORLD_SERVER, lb, fnv1a("DynamicFuelSetup", fnv1a("keen::ecs::"))) == 0 &&
               game_archetype_has(KILN_WORLD_SERVER, lb, 0x12345678) == -1,
           "archetype: the first entity's layout; membership by the layout's type bits");
+    {
+        // The entity map hashes its keys (docs/re/spawn.md: the game's entity map find, 0x650c50, linear probing from
+        // the hash): entity 101 sits in the slot of its hash (3), not of its id (5). Entity 100's hash is 4, its id's too.
+        auto entity_hash = [](uint32_t k) {
+            uint32_t x = ((k >> 16) ^ k) * 0x45d9f3bu;
+            x = ((x >> 16) ^ x) * 0x45d9f3bu;
+            return (x >> 16) ^ x;
+        };
+        alignas(16) static uint64_t layout2[2] = {1ull << 5, 0};
+        alignas(16) static uint8_t record2[0x20]{};
+        const auto lb2 = reinterpret_cast<uintptr_t>(layout2);
+        std::memcpy(record2 + 0x18, &lb2, 8);
+        const uint32_t at = entity_hash(101) & 7;
+        keys[at] = 101;
+        values[at] = reinterpret_cast<uintptr_t>(record2);
+        bits[0] |= 1ull << at;
+        const uint32_t count2 = 2;
+        std::memcpy(map + 0x54, &count2, 4);
+        Job j2(5);
+        j2.ids[0] = 101;
+        counts(j2, 1, 1, 2);
+        std::memcpy(j2.bytes, &st, 8);
+        g_seen4 = Seen{};
+        run_slice(wentry(0), j2);
+        check(at == 3 && g_seen4.archetype == lb2,
+              "archetype: the first entity is found in the entity map's slot of its id's hash, as the game finds it");
+    }
     KilnGameSlice outside{};
     outside.size = sizeof outside;
     uintptr_t lay = 0;
