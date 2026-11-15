@@ -23,10 +23,13 @@ engine's, [docs/kiln/modding/quests.md](../modding/quests.md).
 - **Seen in a real client** (joined to a lab): Tobin's topics in the game's NPC menu, his greeting's voice-over, his quest in the game's journal.
 - **Not seen yet**: map markers, notifications, the tracked-quest HUD, step counters, the NPC directory, the summon tool and beds. See "Manual test".
 - **A roster over 64 entries** (since 0.2.0-dev.29): lab-tested on the dedicated server without a player
-  (`mods/tests/roster-cap-test/lab.sh`: 64, 65, 128 and 129 entries, the lab switch, a restart); there the roster's
-  programs ran on the world's thread, also with kiln.world's parallel switch on, so a run of the hooks on the game's
-  workers (a server with players) is written for but not seen; on a game client not seen yet (guided check
-  `17-roster-client`). See [The roster's size](#the-rosters-size-since-020-dev29).
+  (`mods/tests/roster-cap-test/lab.sh`, seven boots on one save: 64, 65, 128 and a restart; 129 and 65 with the hooks
+  not installed, both stopped at the start with the save byte for byte the same and the knowledge set before them
+  still there after; a page dropped and computed again; the negative control without the page, whose two page-2
+  assertions failed as they must). There the roster's programs ran on the world's thread, also with kiln.world's
+  parallel switch on, so a run of the hooks on the game's workers (a server with players) is written for but not
+  seen; a hosting game's two worlds and a game client's stopped start are not seen yet (guided checks
+  `17-roster-client`, `17-roster.refused-start`). See [The roster's size](#the-rosters-size-since-020-dev29).
 
 ## What needs what
 
