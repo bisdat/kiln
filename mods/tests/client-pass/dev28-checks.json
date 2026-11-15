@@ -536,6 +536,26 @@
    "state": "open"
   },
   {
+   "id": "07-watch.hosted",
+   "title": "Component watches follow a real player",
+   "chapter": "07",
+   "packages": [
+    "07-cancelable-events"
+   ],
+   "state": "open",
+   "added": "07-cancelable-events S7 (dev.29)"
+  },
+  {
+   "id": "07-watch.joined",
+   "title": "A joined client and the main menu cannot watch",
+   "chapter": "07",
+   "packages": [
+    "07-cancelable-events"
+   ],
+   "state": "open",
+   "added": "07-cancelable-events S7 (dev.29 review)"
+  },
+  {
    "id": "08-boot.first-start-definitions",
    "title": "First-start content and rehosting",
    "chapter": "08",
@@ -1019,6 +1039,86 @@
     "14-client-world-programs"
    ],
    "state": "open"
+  },
+  {
+   "id": "programs.client-baseline",
+   "title": "No client declaration: the client worlds get nothing of Kiln's programs",
+   "chapter": "14",
+   "packages": [
+    "14-client-world-programs"
+   ],
+   "state": "open",
+   "added": "14-client-world-programs (dev.29 review rounds)"
+  },
+  {
+   "id": "programs.client-joined",
+   "title": "A joined client: the client programs and the prediction storage's",
+   "chapter": "14",
+   "packages": [
+    "14-client-world-programs"
+   ],
+   "state": "open",
+   "added": "14-client-world-programs (dev.29 review rounds)"
+  },
+  {
+   "id": "programs.client-emf",
+   "title": "EMF programs and on_event in the client world",
+   "chapter": "14",
+   "packages": [
+    "14-client-world-programs"
+   ],
+   "state": "open",
+   "added": "14-client-world-programs (dev.29 review rounds)"
+  },
+  {
+   "id": "programs.client-visual",
+   "title": "A client program draws a barrel 1 m higher in this game only",
+   "chapter": "14",
+   "packages": [
+    "14-client-world-programs"
+   ],
+   "state": "open",
+   "added": "14-client-world-programs (dev.29 review rounds)"
+  },
+  {
+   "id": "programs.client-persistence",
+   "title": "A client program's write is not saved: the barrel after a save and a reload",
+   "chapter": "14",
+   "packages": [
+    "14-client-world-programs"
+   ],
+   "state": "open",
+   "added": "14-client-world-programs (dev.29 review rounds)"
+  },
+  {
+   "id": "programs.client-rejoin",
+   "title": "Client programs through leaving, joining again, an unload and a load",
+   "chapter": "14",
+   "packages": [
+    "14-client-world-programs"
+   ],
+   "state": "open",
+   "added": "14-client-world-programs (dev.29 review rounds)"
+  },
+  {
+   "id": "programs.client-delayed-stop",
+   "title": "A client world stops while a delayed callback is inside",
+   "chapter": "14",
+   "packages": [
+    "14-client-world-programs"
+   ],
+   "state": "open",
+   "added": "14-client-world-programs (dev.29 review rounds)"
+  },
+  {
+   "id": "programs.client-exit",
+   "title": "The last start's exit with client programs running",
+   "chapter": "14",
+   "packages": [
+    "14-client-world-programs"
+   ],
+   "state": "open",
+   "added": "14-client-world-programs (dev.29 review rounds)"
   },
   {
    "id": "15-m5",
