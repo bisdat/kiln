@@ -534,6 +534,21 @@ int main(int argc, char** argv) {
         check(!fp::compiled_matches(c, loaded, &reason), "compiled stack/argument count differs");
         c.argc = 1; c.ret_kind = KILN_SIG_S32;
         check(!fp::compiled_matches(c, loaded, &reason), "compiled return class differs");
+        // kiln_hooks.h: a scalar's size is "the kind's own size or 0", so 0 is the same descriptor
+        c.ret_kind = KILN_SIG_F32; c.ret_size = 0; arg.size = 0;
+        check(fp::compiled_matches(c, loaded, &reason), "a scalar argument and return of size 0 equal their kind's size", reason);
+        arg.size = 8;
+        check(!fp::compiled_matches(c, loaded, &reason), "a scalar argument of another non-zero size is refused");
+        arg.size = 4; c.ret_size = 2;
+        check(!fp::compiled_matches(c, loaded, &reason), "a scalar return of another non-zero size is refused");
+        // a by-value struct's size is the struct's: never implied
+        fp::Sig byval;
+        byval.args.push_back({"v", "Vec3", KILN_SIG_BYVAL, 12});
+        KilnSigArg bv{{nullptr, 0}, KILN_SIG_BYVAL, 12};
+        KilnSig cb{}; cb.size = sizeof cb; cb.argc = 1; cb.args = &bv;
+        check(fp::compiled_matches(cb, byval, &reason), "a by-value struct of the loaded size matches");
+        bv.size = 16;
+        check(!fp::compiled_matches(cb, byval, &reason), "a by-value struct of another size is refused");
     }
     test_check();
     test_parse();
