@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <cassert>
+#include <algorithm>
 #include <cstdio>
 #include "../held.h"
 #ifdef HELD_COOK_TEST
@@ -56,6 +57,9 @@ int main() {
     mod.documents.emplace_back("blocks/valid.json", R"({"format":1,"vfx":{"ok":{"particles":[{"burst":1}]}}})");
     const auto valid = kvb::cook_mods({mod}, {});
     assert(valid.errors.empty() && valid.blocks.size() == 1);
+    assert(std::count_if(valid.resources.begin(), valid.resources.end(), [](const kvb::ServedResource& resource) {
+        return resource.type == kvb::kTypeVfx && resource.mod == "mod";
+    }) == 1);
     std::vector<kvx::BuildFailure> failures;
     kvx::record_cook_failures(&failures, valid.mod_errors);
     run(true, failures, true, false, false);

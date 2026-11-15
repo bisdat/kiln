@@ -36,6 +36,7 @@
 #include "ledger.h"
 #include "resource_read.h"
 #include "services/kiln_assets.h"
+#include "services/kiln_assets_vfx.h"
 #include "services/kiln_capacity_util.hpp"
 #include "services/kiln_caps.h"
 #include "services/kiln_profile.h"
@@ -712,7 +713,10 @@ uint32_t reskin_release_locked(const std::string& mod) {
 }
 
 // Serves the result. false: something can't be served, and then no VFX is registered, since a VFX with a missing blob is fatal.
-bool serve(const kvb::CookResult& r, const kiln::boot::Input* boot = nullptr) {
+bool serve(const kvb::CookResult& r, const kiln::boot::Input* boot = nullptr, std::vector<BuildFailure>* failures = nullptr) {
+    const auto* vfx = g_api->service ? static_cast<const KilnAssetsVfxApi*>(
+        g_api->service(KilnStr{KILN_ASSETS_VFX_SERVICE, sizeof(KILN_ASSETS_VFX_SERVICE) - 1}, 1)) : nullptr;
+    if (vfx && vfx->header.size < sizeof(KilnAssetsVfxApi)) vfx = nullptr;
     for (const kvb::ServedBlob& b : r.blobs) {
         KilnContentHash h{b.hash.size, b.hash.h0, b.hash.h1, b.hash.h2};
         const KilnResult rc = g_assets->blob_override(g_self, &h, b.data.data(), b.data.size());
@@ -766,9 +770,13 @@ bool serve(const kvb::CookResult& r, const kiln::boot::Input* boot = nullptr) {
         KilnAssetKey k{};
         std::memcpy(k.guid, s.guid.b, 16);
         k.type = s.type;
-        const KilnResult rc = g_assets->resource_put(g_self, &k, s.data.data(), s.data.size(), KILN_ASSET_PUT_NEW);
+        const KilnResult rc = vfx && vfx->resource_put
+            ? vfx->resource_put(g_self, KilnStr{s.mod.data(), s.mod.size()}, &k, s.data.data(), s.data.size(), KILN_ASSET_PUT_NEW)
+            : g_assets->resource_put(g_self, &k, s.data.data(), s.data.size(), KILN_ASSET_PUT_NEW);
         if (rc != KILN_OK) {
             KV_E("vfx: %s: kiln.assets refused it (%d): this VFX is not registered", s.what.c_str(), static_cast<int>(rc));
+            if (failures && !s.mod.empty())
+                failures->push_back({s.mod, "vfx", s.what, "kiln.assets refused the VFX resource " + s.what + "; see kiln.log"});
             if (boot) return false;  // ordinary on_ready keeps its per-VFX fallback
         }
     }
@@ -998,6 +1006,29 @@ void build_on_ready(const KilnApi* api, KilnOwner self, const kiln::boot::Input*
         if (!diff.empty()) refuse_required(true, false, "this game build changed what Kiln's particle modules are written for (kiln.log says what)");
         if (!material_diff.empty()) refuse_required(false, true, "this game build changed what Kiln's materials are written for (kiln.log says what)");
         g_game = counts_from_game(&lb.b.game_counted);
+        std::string vfx_admission_error;
+        // In an ordinary start the assets manifests have been read by now. In a boot generation
+        // their collector may register more afterward. The asset store enforces the same limit
+        // at each resource_put, including calls made after this snapshot.
+        if (api->side() == KILN_SIDE_CLIENT && core_game() && !core_game()->is_sim()) {
+            const auto* budget_api = static_cast<const KilnAssetsVfxApi*>(
+                api->service(KilnStr{KILN_ASSETS_VFX_SERVICE, sizeof(KILN_ASSETS_VFX_SERVICE) - 1}, 1));
+            KilnAssetsVfxBudget budget{};
+            budget.size = sizeof budget;
+            if (!budget_api || budget_api->header.size < sizeof(KilnAssetsVfxApi) || !budget_api->budget ||
+                budget_api->budget(&budget) != KILN_OK || !budget.capacity ||
+                budget.game > budget.capacity || budget.reserved > budget.capacity - budget.game) {
+                vfx_admission_error = "the shared VFX resource count is unavailable; new VFX cannot be admitted";
+                lb.off = vfx_admission_error;
+                KV_W("vfx: %s", vfx_admission_error.c_str());
+                refuse_required(true, false, vfx_admission_error);
+            } else {
+                g_game.vfx = budget.game;
+                lb.b.game_counted = true;
+                lb.b.reserved = budget.reserved;
+                lb.b.admission = budget.capacity;
+            }
+        }
         lb.b.game_vfx = g_game.vfx;
         if (!read_game_materials(to_path(api_path(KILN_PATH_GAME)) / L"enshrouded.kfc", &g_game_materials))
             KV_W("vfx: original material keys could not be read: material replacements are refused this session");
@@ -1018,12 +1049,13 @@ void build_on_ready(const KilnApi* api, KilnOwner self, const kiln::boot::Input*
         }
         kvb::CookOptions opt;
         opt.game = g_game;
+        opt.game.vfx += lb.b.reserved;
         opt.capacity.vfx = lb.b.admission;  // the game's own count limit where its code says it (the budget reads the live one)
         opt.game_has_material = [](const kvb::Guid& g) { return g_game_materials.count(g) != 0; };
         opt.read_file = &read_all;
         opt.cache = disk_cache();
         opt.game_has_blob = game_has_blob;
-        opt.skip_vfx = !diff.empty();
+        opt.skip_vfx = !diff.empty() || !vfx_admission_error.empty();
         opt.skip_materials = !material_diff.empty();
         shader_switches(&opt);
         const char* fingerprint = diff.empty() && material_diff.empty() ? "ok" : "changed";
@@ -1143,7 +1175,7 @@ void build_on_ready(const KilnApi* api, KilnOwner self, const kiln::boot::Input*
             if (r.mods_with_vfx) KV_W("vfx: no Kiln VFX or materials built from %u mod(s) with such blocks", r.mods_with_vfx);
             return;
         }
-        if (!serve(r, boot)) {
+        if (!serve(r, boot, failures)) {
             build_forget();
             set_status(fingerprint, "kiln.assets refused a part: nothing registered", &r);
             refuse_required(true, true, "kiln.assets refused part of the built VFX or materials");
@@ -1191,8 +1223,8 @@ void build_on_ready(const KilnApi* api, KilnOwner self, const kiln::boot::Input*
         if (r.blocks.empty()) return;
         g_late_done.store(false);
         if (r.mod_modules) KV_I("vfx: %u particle shader(s) of mods passed their checks and are served (kiln/config/vfx.json \"shaders\": false turns them off)", r.mod_modules);
-        KV_I("vfx: built %u Kiln VFX in %llu ms: VFX %u+%u of %u, meshes %u+%u of %u (%llu of %llu bytes free), sounds %u+%u of %u, curves %u+%u of %u; fingerprint ok",
-             r.used_vfx, static_cast<unsigned long long>(GetTickCount64() - t0), g_game.vfx, r.used_vfx, cap.vfx, g_game.meshes, r.used_meshes, cap.meshes,
+        KV_I("vfx: built %u Kiln VFX in %llu ms: VFX %u game + %u external + %u cooked of %u, meshes %u+%u of %u (%llu of %llu bytes free), sounds %u+%u of %u, curves %u+%u of %u; fingerprint ok",
+             r.used_vfx, static_cast<unsigned long long>(GetTickCount64() - t0), g_game.vfx, lb.b.reserved, r.used_vfx, cap.vfx, g_game.meshes, r.used_meshes, cap.meshes,
              static_cast<unsigned long long>(cap.mesh_bytes - g_game.mesh_bytes - r.used_mesh_bytes), static_cast<unsigned long long>(cap.mesh_bytes), g_game.sounds,
              r.used_sounds, cap.sounds, g_game.curves, r.used_curves, cap.curves);
     } catch (const kiln::boot::Refusal&) {

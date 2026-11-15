@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
+#include <map>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -16,9 +17,35 @@
 #include "assets.h"
 #include "services/kiln_hooks.h"
 
+#ifdef KILN_ASSETS_OMISSION_REPORT_TEST
+// Core-side seam for the extracted production assets collector reporter.
+namespace kiln::boot {
+struct OmissionFault { std::string mod, kind, key, why; };
+std::vector<OmissionFault> g_faults;
+std::function<void()> g_fault_reported;
+bool activation_fault(const KilnApi*, KilnOwner, const std::string& mod, const std::string& kind,
+                      const std::string& key, const std::string& why) {
+    g_faults.push_back({mod, kind, key, why});
+    if (g_fault_reported) g_fault_reported();
+    return true;
+}
+}  // namespace kiln::boot
+#endif
+
 // ---- the game side, faked at the narrowest seam: the calls of the game's own functions and the feature switches --------------------
 namespace ka {
 std::atomic<uintptr_t> g_S{0};
+#ifdef KILN_ASSETS_OMISSION_REPORT_TEST
+std::mutex g_pending_mu;
+std::map<KilnOwner, std::string> g_boot_required_owner;
+#include "resource_omission.inc"
+#else
+// assets.cpp is not part of the host store target. Preserve its diagnostic at this reporter seam.
+void report_resource_omission(const ResourceOmission& r) {
+    LOGW("assets: mod %s owner %llu resource %s refused: %s", r.mod.empty() ? "<unknown>" : r.mod.c_str(),
+         static_cast<unsigned long long>(r.owner), key_str(r.key).c_str(), r.why.c_str());
+}
+#endif
 namespace {
 struct GameRes {
     uint32_t handle;
@@ -77,8 +104,9 @@ GameIndex game_index_keys(std::vector<HashK>* out, size_t max_keys, uint64_t* to
 }
 bool content_on() { return false; }
 bool ui_on() { return g_fake_ui; }
+bool g_fake_vfx_readable = true, g_fake_lookup_missing = false;
 uint32_t game_handle(uintptr_t S, const Key& k) {  // as hooks.cpp: nothing before the resource system is up
-    if (!S) return 0;
+    if (!S || g_fake_lookup_missing) return 0;
     const auto it = g_game.find(k);
     return it == g_game.end() ? 0 : it->second.handle;
 }
@@ -91,10 +119,29 @@ bool game_data(uintptr_t S, uint32_t handle, DataSpan* out) {
         }
     return false;
 }
-bool game_type_list(uintptr_t, uint32_t, const uint8_t** keys, uint64_t* count) {
-    *keys = nullptr;
-    *count = 0;
-    return false;
+bool game_type_list(uintptr_t S, uint32_t type, const uint8_t** keys, uint64_t* count) {
+    thread_local std::vector<uint8_t> raw;
+    raw.clear();
+    if (S)
+        for (const auto& [k, r] : g_game) {
+            (void)r;
+            if (k.type != type) continue;
+            const size_t at = raw.size();
+            raw.resize(at + 32, 0);
+            std::memcpy(raw.data() + at, &k, sizeof k);
+        }
+    *keys = raw.data();
+    *count = raw.size() / 32;
+    return S != 0;
+}
+bool game_vfx_keys(uintptr_t S, std::vector<Key>* out) {
+    out->clear();
+    if (!S || !g_fake_vfx_readable) return false;
+    for (const auto& [k, r] : g_game) {
+        (void)r;
+        if (k.type == 0xe64ee036u) out->push_back(k);
+    }
+    return true;
 }
 bool game_blob_find(const HashK&, GameBlob*) { return false; }
 std::string game_container_path(uint16_t) { return {}; }
@@ -106,7 +153,8 @@ namespace {
 using namespace ka;
 
 std::vector<std::string> g_log;
-void KILN_CALL log_line(KilnOwner, int32_t, KilnStr s) { g_log.emplace_back(s.ptr, s.len); }
+std::mutex g_log_mu;
+void KILN_CALL log_line(KilnOwner, int32_t, KilnStr s) { std::lock_guard lock(g_log_mu); g_log.emplace_back(s.ptr, s.len); }
 
 int g_pass = 0, g_fail = 0;
 void check(bool ok, const std::string& what) {

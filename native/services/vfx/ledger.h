@@ -55,6 +55,7 @@ struct Boot {
                                 // cannot be told from the game's)
     std::vector<BuiltVfx> built;
     std::vector<Stored> stored;
+    uint32_t reserved = 0;       // external VFX keys admitted by kiln.assets before the cooker started
 };
 
 // What a Kiln VFX is in the game's table.
