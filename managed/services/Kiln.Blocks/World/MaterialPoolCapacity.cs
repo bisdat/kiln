@@ -36,6 +36,19 @@ public static partial class WorldTables
         if(registrationId==Guid.Empty)throw new ArgumentException("An empty registration ID is invalid.",nameof(registrationId));
         var result=WorldTablesNative.Registration(registrationId);WorldTablesEvents.Enable();return result;
     }
+    /// <summary>Removes the stored definition of one material pool, <c>"mod:key"</c>: what a <c>Blocks.Define</c> with
+    /// <see cref="DefinitionTiming.AllowNextStart"/> kept for the next start. From the next start the pool is no longer served
+    /// (its shapes are refused with it). The pool served now stays until the restart: boot rows don't change in a session. Kiln
+    /// removes a stored pool by itself when its mod was loaded and no longer defined it by the time the world ran; a mod that
+    /// is not loaded keeps its stored pools. False: nothing of that name is stored.</summary>
+    /// <exception cref="ArgumentException">Not a pool's <c>mod:key</c>.</exception>
+    [AnyThread,RequiresCapability("worldtables.material_pools")]
+    public static bool RemoveStoredMaterialPool(string pool)
+    {
+        if(pool is null || pool.Split(':') is not [var mod,var key] || !MaterialPoolValidation.Valid(mod) || !MaterialPoolValidation.Valid(key))
+            throw new ArgumentException("Expected a pool's mod:key.",nameof(pool));
+        return WorldTablesNative.RemoveStoredPool(mod,key);
+    }
     internal static bool PoolName(string? text)=>text is {Length:>0} && text.Split(':') is var parts && parts.Length<=2 && parts.All(p=>MaterialPoolValidation.Valid(p));
 }
 
@@ -88,6 +101,18 @@ internal static unsafe partial class WorldTablesNative
         var t=RequireAppend(152,"worldtables.budgets");var reply=KilnCapacityInfo.New();var bytes=Encoding.UTF8.GetBytes(pool);
         fixed(byte* p=bytes)ResultCode(t->PoolBudget(new Str {Ptr=p,Len=(nuint)bytes.Length},&reply),"worldtables.budgets");
         return CapacityMapping.ToResult(reply);
+    }
+    internal static bool RemoveStoredPool(string mod,string key)
+    {
+        const string capability="worldtables.material_pools";
+        var t=RequireAppend(160,capability);
+        if(t->PrunePending==null)throw ServiceCaps.Unavailable(capability,"this worldtables table cannot remove stored definitions");
+        var m=Encoding.UTF8.GetBytes(mod);var list=Encoding.UTF8.GetBytes(new JsonObject{["removePools"]=new JsonArray(key)}.ToJsonString());
+        int rc;
+        fixed(byte* pm=m,pl=list)rc=t->PrunePending(new Str{Ptr=pm,Len=(nuint)m.Length},new Str{Ptr=pl,Len=(nuint)list.Length});
+        if(rc==2)return false;
+        ResultCode(rc,capability);
+        return true;
     }
     internal static DefinitionRegistrationResult DefinePool(ulong owner,string name,string document,DefinitionTiming timing)=>PoolCall(owner,name,document,timing,Guid.Empty);
     internal static void AdoptRegistration(Guid id,ulong owner)=>_ = PoolCall(owner,"","",DefinitionTiming.RequireRegistered,id);

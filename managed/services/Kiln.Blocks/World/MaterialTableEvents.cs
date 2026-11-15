@@ -24,8 +24,10 @@ public sealed class MaterialTableChangedEvent : KilnEvent
     public bool Deferred {get;}
 }
 
-// Snapshots only: no game-memory walk. A server mod carries Post; joined clients use kiln.client's own Post.
+// Snapshots only: no game-memory walk. A server mod carries Post; a client uses kiln.client's own Post only (never both).
 // Custom boot rows need owner observation even without an API call; other observers start on pool/budget/event use.
+// Per tick: one read of the service's state and revision (no allocation). The status is read and parsed only when
+// those change, or once when the mods have loaded (boot rows are adopted by their loaded mods then).
 internal static unsafe class WorldTablesEvents
 {
     [StructLayout(LayoutKind.Sequential)] private struct ClientPrefix
@@ -45,7 +47,8 @@ internal static unsafe class WorldTablesEvents
     private static string _hash=WorldTablesNative.EmptyHash;
     private static ClientPrefix* _client;
     private static ulong _clientHandle,_owner;
-    private static bool _faulted;
+    private static (int State,ulong Revision,bool ModsLoaded) _seen=(int.MinValue,0,false);
+    private static (int State,ulong Revision,bool ModsLoaded)? _faultedAt;
     // Start ownership observation for boot rows even when their mod never calls a pool API.
     // One bounded metadata snapshot decides this; no custom pool leaves no continuing pool observer.
     internal static void WatchBoot()
@@ -74,7 +77,6 @@ internal static unsafe class WorldTablesEvents
     internal static void Enable()
     {
         lock(Gate) {
-            _tick??=ServiceTick.Add("worldtables changes",static(in TickInfo _)=>Attach());
             if(_clientHandle==0 && Mods.Side==ModSide.Client) {
                 _client=(ClientPrefix*)BlocksBridge.ServiceTable("kiln.client",1);
                 if(_client!=null && _client->Size>=32 && _client->Subscribe!=null) {
@@ -82,20 +84,26 @@ internal static unsafe class WorldTablesEvents
                     if(_owner!=0){ulong handle=0;if(_client->Subscribe(_owner,1,&ClientPost,null,&handle)==0)_clientHandle=handle;}
                 }
             }
+            // A client polls from kiln.client's Post alone: a mod's Post as well would poll twice a step. Elsewhere a loaded
+            // mod's Post carries it; until one is there, Kiln's service tick looks for one (and stops once it rides).
+            if(_clientHandle!=0 || _rider is {Alive:true})return;
+            _tick??=ServiceTick.Add("worldtables changes",static(in TickInfo _)=>Attach());
         }
         if(Game.IsTickThread)Attach();
     }
     private static void Attach()
     {
+        lock(Gate) { if(_clientHandle!=0 || _rider is {Alive:true})return; }
         var current=ModContext.CurrentMod;
         var candidates=current is {Alive:true}?new[]{current}:Mods.All.Where(m=>m.IsLoaded && m.Info!=null).Select(m=>ModContext.FindLive(m.Info!)).Where(m=>m is {Alive:true}).ToArray();
         lock(Gate) {
-            if(_rider is {Alive:true})return;
+            if(_clientHandle!=0 || _rider is {Alive:true})return;
             if(_rider!=null)_rider.Tick.Post-=ServerPost;
             _rider=candidates.FirstOrDefault();
             if(_rider is {} rider) {
                 rider.Tick.Post+=ServerPost;
-                rider.Retiring+=()=>{lock(Gate){if(ReferenceEquals(_rider,rider)){rider.Tick.Post-=ServerPost;_rider=null;}}};
+                _tick?.Dispose();_tick=null;
+                rider.Retiring+=()=>{lock(Gate){if(ReferenceEquals(_rider,rider)){rider.Tick.Post-=ServerPost;_rider=null;_tick??=ServiceTick.Add("worldtables changes",static(in TickInfo _)=>Attach());}}};
             }
         }
     }
@@ -104,10 +112,12 @@ internal static unsafe class WorldTablesEvents
     private static void ClientPost(void* tick,void* user)=>Poll();
     internal static void Poll()
     {
+        var key=(WorldTablesNative.State,WorldTablesNative.Revision(),Lifecycle.ModsLoaded);
         lock(Gate) {
-            if(_faulted)return;
+            if(key==_seen || key==_faultedAt)return;
             try {
-                var doc=JsonNode.Parse(WorldTables.StatusJson()) as JsonObject;
+                var doc=JsonNode.Parse(WorldTablesNative.StatusJson()) as JsonObject;
+                _seen=key;_faultedAt=null;
                 if(doc is null || (string?)doc["state"] is not ("merged" or "untouched"))return;
                 var hash=(string?)doc["hash"]??WorldTablesNative.EmptyHash;
                 var groups=(doc["customPools"] as JsonArray??[]).Select(n=>Guid.Parse((string)n!["guid"]!)).ToArray();
@@ -130,13 +140,17 @@ internal static unsafe class WorldTablesEvents
                     if(Events.HasSubscribers<DefinitionRegistrationChangedEvent>())Events.Post(new DefinitionRegistrationChangedEvent((string)n["mod"]!,now,before?.State,before?.SlotsConsumed??0,null));
                     if(state==DefinitionRegistrationState.AcceptedNextStart && DeferredSeen.Add(id) && Events.HasSubscribers<MaterialTableChangedEvent>())Events.Post(new MaterialTableChangedEvent(hash,hash,[now.Definition],[],true));
                 }
-                {
-                    Observe("building",WorldTables.GetMaterialBudget(WorldMaterialCategory.Building).Budget);
-                    Observe("terrain",WorldTables.GetMaterialBudget(WorldMaterialCategory.Terrain).Budget);
-                    foreach(var n in doc["pools"] as JsonArray??[]) {var name=(string)n!["name"]!;Observe("pool/"+name,WorldTables.GetPoolBudget(name).Budget);}
-                    foreach(var n in doc["customPools"] as JsonArray??[]) {var name=(string)n!["name"]!;Observe("pool/"+name,WorldTables.GetPoolBudget(name).Budget);}
-                }
-            } catch(Exception e) {_faulted=true;BlocksBridge.Log(LogLevel.Error,"worldtables change notifications stopped: "+e.Message);}
+                // the snapshots themselves, without Enable(): this is the observer
+                if(WorldTablesNative.BudgetsReadable) try {
+                    Observe("building",WorldTablesNative.MaterialBudget(WorldMaterialCategory.Building).Budget);
+                    Observe("terrain",WorldTablesNative.MaterialBudget(WorldMaterialCategory.Terrain).Budget);
+                    foreach(var n in doc["pools"] as JsonArray??[]) {var name=(string)n!["name"]!;Observe("pool/"+name,WorldTablesNative.PoolBudget(name).Budget);}
+                    foreach(var n in doc["customPools"] as JsonArray??[]) {var name=(string)n!["name"]!;Observe("pool/"+name,WorldTablesNative.PoolBudget(name).Budget);}
+                } catch(KilnUnavailableException) {}  // budgets off on this build: the capability rows say why
+            } catch(Exception e) {
+                // the next change reads again: a status caught mid-change, or a bad answer, is not the end of notifications
+                _faultedAt=key;BlocksBridge.Log(LogLevel.Error,"worldtables change notifications missed a change (they read again at the next one): "+e.Message);
+            }
         }
     }
     private static void Observe(string name,CapacityInfo current)
@@ -151,7 +165,7 @@ internal static unsafe class WorldTablesEvents
             if(_rider!=null)_rider.Tick.Post-=ServerPost;_rider=null;
             _tick?.Dispose();_tick=null;_bootProbe?.Dispose();_bootProbe=null;_bootChecked=false;
             if(_clientHandle!=0 && _client!=null && _client->Unsubscribe!=null)_client->Unsubscribe(_clientHandle);
-            _clientHandle=0;_client=null;_owner=0;_faulted=false;
+            _clientHandle=0;_client=null;_owner=0;_seen=(int.MinValue,0,false);_faultedAt=null;
             Receipts.Clear();Budgets.Clear();DeferredSeen.Clear();Adopted.Clear();_hash=WorldTablesNative.EmptyHash;
         }
     }
