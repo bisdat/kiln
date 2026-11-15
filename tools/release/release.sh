@@ -551,17 +551,19 @@ with zipfile.ZipFile(os.path.join(dest, f"{mid}-{ver}.zip"), "w", zipfile.ZIP_DE
             z.write(os.path.join(d, n), f"{mid}/{rel}")
 PY
 }
+# (the loop's variable is not `name`: that is the release's name, used for the files and links below)
 for proj in "$src"/mods/samples/*/*.csproj; do
-  name=$(basename "$proj" .csproj)
+  sample=$(basename "$proj" .csproj)
   if grep -q 'Sdk="Kiln.Sdk' "$proj"; then
     low dotnet build "$proj" -c Release --artifacts-path "$KILN_OUT/dotnet" -v q -nologo -t:KilnPack \
-      -p:KilnPackageOutputPath="$work/samples/" >>"$log" 2>&1 || skipped_samples+=("$name")
+      -p:KilnPackageOutputPath="$work/samples/" >>"$log" 2>&1 || skipped_samples+=("$sample")
   else
     rc=0; pack_folder "$proj" || rc=$?
-    ((rc == 2)) && not_mods+=("$name")
-    ((rc == 1)) && skipped_samples+=("$name")
+    ((rc == 2)) && not_mods+=("$sample")
+    ((rc == 1)) && skipped_samples+=("$sample")
   fi
 done
+[[ $name == "$version" || $name == "$version-beta.$beta" ]] || die "the release's name changed to '$name' during the build (a step overwrote it)"
 note "sample mods: $(ls "$work"/samples/*.zip 2>/dev/null | wc -l) zips"
 ((${#not_mods[@]})) && note "sample projects that are no mod (no kiln.mod.json, not zipped): ${not_mods[*]}"
 ((${#skipped_samples[@]})) && note "samples that did not build (left out): ${skipped_samples[*]}"
