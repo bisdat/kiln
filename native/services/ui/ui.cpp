@@ -457,9 +457,11 @@ static_assert(offsetof(KilnUiApi, subscribe_window_input) == offsetof(KilnUiApi,
 static_assert(offsetof(KilnUiApi, menu_shown) == offsetof(KilnUiApi, subscribe_window_input) + sizeof(void*) &&
                   offsetof(KilnUiApi, menu_scroll) == offsetof(KilnUiApi, menu_shown) + 3 * sizeof(void*),
               "kiln.ui v6 appends menu_shown, menu_entries, menu_activate, menu_scroll after subscribe_window_input");
-static_assert(offsetof(KilnUiApi, subscribe_key_ex) == offsetof(KilnUiApi, menu_scroll) + sizeof(void*) &&
-                  sizeof(KilnUiApi) == offsetof(KilnUiApi, subscribe_key_ex) + sizeof(void*),
+static_assert(offsetof(KilnUiApi, subscribe_key_ex) == offsetof(KilnUiApi, menu_scroll) + sizeof(void*),
               "kiln.ui v7 appends subscribe_key_ex after menu_scroll (UiNative.Table7)");
+static_assert(offsetof(KilnUiApi, set_next_window_size_constraints) == offsetof(KilnUiApi, subscribe_key_ex) + sizeof(void*) &&
+                  sizeof(KilnUiApi) == offsetof(KilnUiApi, set_next_window_size_constraints) + sizeof(void*),
+              "kiln.ui appends size constraints after subscribe_key_ex");
 static_assert(sizeof(KilnUiMenuEntry) == 40 && offsetof(KilnUiMenuEntry, entry) == 8 && offsetof(KilnUiMenuEntry, text) == 16 &&
                   offsetof(KilnUiMenuEntry, drawn) == 36,
               "KilnUiMenuEntry layout (UiNative.MenuEntryInfo)");
@@ -503,6 +505,7 @@ const KilnUiApi kTable = {
     &t_menu_shown, &t_menu_entries, &t_menu_activate, &t_menu_scroll,
     // v7
     &t_subscribe_key_ex,
+    &t_set_next_window_size_constraints,
 };
 
 std::string api_path(int kind) {
