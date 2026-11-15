@@ -138,7 +138,10 @@
         },
         "applied": {
           "type": "boolean",
-          "description": "Its files are back and flushed; only the record is left to drop (the next look drops it without putting the files back again)."
+          "description": "Its files and values are settled, and restored content is flushed; only the record is left to drop (the next look drops it without putting the files back again)."
+        },
+        "preimages": {
+          "$ref": "#/$defs/preimages"
         }
       }
     },
@@ -248,6 +251,52 @@
         "profileBefore": {
           "type": "object",
           "description": "Profile mods before the save; recovery compares the touched entries, including removals."
+        }
+      }
+    },
+    "restoreGuard": {
+      "type": "object",
+      "required": [
+        "before",
+        "snapshot"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "before": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "SHA-256 before restoration; null means absent."
+        },
+        "snapshot": {
+          "type": "string",
+          "description": "SHA-256 of the desired file bytes or serialized JSON value."
+        }
+      }
+    },
+    "preimages": {
+      "type": "object",
+      "required": [
+        "files",
+        "values"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "files": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/restoreGuard"
+          }
+        },
+        "values": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/$defs/restoreGuard"
+            }
+          }
         }
       }
     }

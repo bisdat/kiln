@@ -779,15 +779,16 @@ pub fn create(dirs: &DataDirs, name: &str, copy_from: Option<&str>) -> Result<Pr
     check_profile(&p)?;
     let dir = dirs.profile(&id);
     for d in ["config", "data"] {
-        std::fs::create_dir_all(dir.join(d)).map_err(io_at(&dir, "creating"))?;
+        crate::durable::ensure_dir(&dir.join(d))?;
     }
     if let Some(s) = &src {
         let from = dirs.profile(&s.id).join("config");
         if from.is_dir() {
             crate::util::copy_tree(&from, &dir.join("config"))?;
+            crate::durable::flush_contents(&dir.join("config"))?;
         }
     }
-    crate::util::write_json_atomic(&meta_path(dirs, &id), &p)?;
+    crate::durable::json(&meta_path(dirs, &id), &p, &[dir.join("config"), dir.join("data")])?;
     Ok(p)
 }
 
@@ -1628,7 +1629,13 @@ pub fn activate(dirs: &DataDirs, profile_id: &str, install: &GameInstall) -> Res
     // (engine_mods::game_path_of)
     file.mods = render(dirs, &profile, install, mode)?.mods;
     let pj = install.path.join(crate::paths::game::PROFILE);
-    crate::util::write_json_atomic(&pj, &file)?;
+    // Preserve the legacy writer's conflict check: a directory in its staging slot may belong to another
+    // launcher/recovery. The durable writer uses exclusive random temps and never truncates that path.
+    let legacy_stage = crate::util::with_suffix(&pj, ".tmp");
+    if std::fs::symlink_metadata(&legacy_stage).is_ok_and(|m| m.is_dir()) {
+        return Err(Error::new(ErrorCode::Io, format!("{}: legacy profile staging path is a directory", legacy_stage.display())));
+    }
+    crate::durable::json(&pj, &file, &[])?;
     crate::kept::crash_point(crate::kept::Step::GameProfileWritten);
     remove_if_there(&install.path.join(crate::paths::game::CHAIN_ONCE))?;
     remove_if_there(&install.path.join(crate::paths::game::PROFILE_ONCE))?;
@@ -1648,7 +1655,7 @@ pub fn activate(dirs: &DataDirs, profile_id: &str, install: &GameInstall) -> Res
         retained: placed.retained,
         safety_notes: placed.safety_notes,
     };
-    let _ = crate::util::write_json_atomic(&activation_record(dirs, install), &a);
+    let _ = crate::durable::json(&activation_record(dirs, install), &a, &[pj.clone()]);
     Ok(a)
 }
 

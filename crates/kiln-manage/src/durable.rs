@@ -1,7 +1,7 @@
-//! Ordered durability for the records Kiln recovers from (kept versions' `kiln-kept.json`, a profile's `meta.json`,
-//! the placement journal): a record is written only after what it names is on disk (file contents and the directory
-//! entries that name them), so a power cut never leaves a record pointing at something the disk lost. Every flush and
-//! every durable record goes through this one seam; tests record their order ([`recording`]).
+//! Ordered durability for Library imports, kept snapshots, placed-copy publication and profile records.
+//! Callers flush content and directory names before acknowledging their records. Publication intents describe
+//! pending work; committed receipts follow durable publication. The recorder checks software ordering, not real
+//! power cuts, Windows hardware persistence, or atomicity of concurrent full activations.
 //!
 //! Unix: a file is flushed with `fsync`, a folder's entries with an `fsync` of the folder. Windows has no folder flush
 //! of that kind: a rename is made durable by `MoveFileExW` with `MOVEFILE_WRITE_THROUGH` (files:
@@ -19,6 +19,7 @@ pub(crate) enum Event {
     File(PathBuf),
     /// A folder's entries were flushed.
     Dir(PathBuf),
+    Rename { from: PathBuf, to: PathBuf },
     /// A durable record was written: what it names (folders it depends on), its pending changes and restores.
     Journal { path: PathBuf, names: Vec<PathBuf>, pending: usize, restores: usize },
 }
@@ -44,7 +45,11 @@ fn note(e: Event) {
 
 /// Flushes a file's contents.
 pub(crate) fn flush_file(path: &Path) -> Result<()> {
-    std::fs::File::open(path).and_then(|f| f.sync_all()).map_err(io_at(path, "flushing"))?;
+    #[cfg(windows)]
+    let file = std::fs::OpenOptions::new().read(true).write(true).open(path);
+    #[cfg(not(windows))]
+    let file = std::fs::File::open(path);
+    file.and_then(|f| f.sync_all()).map_err(io_at(path, "flushing"))?;
     #[cfg(test)]
     note(Event::File(path.to_path_buf()));
     Ok(())
@@ -80,6 +85,44 @@ pub(crate) fn flush_tree(root: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Creates missing directories, flushing their entries and the first existing ancestor.
+pub(crate) fn ensure_dir(path: &Path) -> Result<()> {
+    let mut flush = Vec::new();
+    for dir in path.ancestors() {
+        flush.push(dir.to_path_buf());
+        match std::fs::symlink_metadata(dir) {
+            Ok(_) => break,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+            Err(e) => return Err(e.into()),
+        }
+    }
+    std::fs::create_dir_all(path).map_err(io_at(path, "creating"))?;
+    for dir in flush { flush_dir(&dir)?; }
+    Ok(())
+}
+
+/// Makes copied bytes and their directory tree durable before an import/placement record can name them.
+pub(crate) fn flush_contents(root: &Path) -> Result<()> {
+    crate::engine_mods::refuse_symlink_path(root, root)?;
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).map_err(io_at(&dir, "reading"))? {
+            let path = entry?.path();
+            let meta = std::fs::symlink_metadata(&path)?;
+            if crate::quick::import_is_link(&meta) { return Err(crate::Error::invalid("link in durable tree")); }
+            if meta.is_dir() { stack.push(path); } else if meta.is_file() { flush_file(&path)?; }
+        }
+    }
+    flush_tree(root)
+}
+
+pub(crate) fn json<T: serde::Serialize>(path: &Path, value: &T, names: &[PathBuf]) -> Result<()> {
+    ensure_dir(path.parent().ok_or_else(|| crate::Error::invalid("record without parent"))?)?;
+    let mut bytes = serde_json::to_vec_pretty(value)?;
+    bytes.push(b'\n');
+    journal(path, &bytes, names, 0, 0)
+}
+
 /// Renames a folder durably: Unix `rename` and a flush of the folder that holds the new name; Windows `MoveFileExW`
 /// with `MOVEFILE_WRITE_THROUGH`.
 pub(crate) fn rename_dir(from: &Path, to: &Path) -> Result<()> {
@@ -97,6 +140,9 @@ pub(crate) fn rename_dir(from: &Path, to: &Path) -> Result<()> {
     #[cfg(not(windows))]
     std::fs::rename(from, to).map_err(io_at(to, "renaming to"))?;
     if let Some(parent) = to.parent() { flush_dir(parent)?; }
+    if from.parent() != to.parent() && let Some(parent) = from.parent() { flush_dir(parent)?; }
+    #[cfg(test)]
+    note(Event::Rename { from: from.to_path_buf(), to: to.to_path_buf() });
     Ok(())
 }
 

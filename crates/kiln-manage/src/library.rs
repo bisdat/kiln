@@ -1102,17 +1102,19 @@ pub fn commit_folder(dirs: &DataDirs, prepared: &Path, rec: ImportRecord, report
         // An entry imported before Kiln knew its package's DLL reads it in the game folder learns that now (the same
         // archive dropped again); the content and everything else in the record stay.
         if rec.game_folder.is_some() && old.game_folder.is_none() {
-            crate::util::write_json_atomic(&record_path(&folder), &ImportRecord { game_folder: rec.game_folder.clone(), ..old })?;
+            crate::durable::flush_contents(&folder)?;
+            crate::durable::json(&record_path(&folder), &ImportRecord { game_folder: rec.game_folder.clone(), ..old }, &[folder.clone()])?;
         }
         report.existing.push(r);
         return Ok(());
     }
     if let Some(p) = folder.parent() {
-        std::fs::create_dir_all(p).map_err(io(p, "creating"))?;
+        crate::durable::ensure_dir(p)?;
     }
     let _ = std::fs::remove_dir_all(&folder); // a half import without its record
-    std::fs::rename(prepared, &folder).map_err(io(&folder, "moving into the library"))?;
-    crate::util::write_json_atomic(&record_path(&folder), &rec)?;
+    crate::durable::flush_contents(prepared)?;
+    crate::durable::rename_dir(prepared, &folder)?;
+    crate::durable::json(&record_path(&folder), &rec, &[folder.clone()])?;
     report.imported.push(r);
     Ok(())
 }

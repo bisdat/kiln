@@ -509,7 +509,7 @@ fn an_update_placement_stopped_after_its_publish_is_finished() {
 /// a kept-state record is written only after every settings folder it names (and the folder holding that name) was
 /// flushed; the record that drops a change's pending entry only after the profile's meta.json and its folder were
 /// flushed; the record that marks a restore done only after the restored files and their folders were flushed. A test
-/// cannot cut the power on Linux: this is what makes a power cut leave either the old or the new state.
+/// cannot cut the power: it checks the production call order, not hardware persistence.
 #[test]
 fn every_record_is_written_after_what_it_names_is_flushed() {
     use crate::durable::Event;
@@ -615,4 +615,225 @@ fn a_settings_copy_never_takes_a_taken_name() {
     w.next_start();
     assert_settings(&w, "1.0.0", OLD);
     w.tidy_on_disk();
+}
+
+#[test]
+fn review_publication_never_moves_a_parked_path_outside_the_game() {
+    let w = World::updated("journal-outside");
+    let receipt: serde_json::Value = crate::util::read_json::<serde_json::Value>(&w.g.path.join("kiln/state/library-placements.json")).unwrap().unwrap();
+    let external = w.root.join("player-backup");
+    std::fs::rename(w.g.path.join(MAP), &external).unwrap();
+    let mut to = receipt[0].clone();
+    to["marker"]["version"] = "3.0.0".into();
+    let journal = serde_json::json!([{"path": w.g.path.join(MAP), "from": receipt[0]["marker"], "to": to, "parked": external}]);
+    crate::util::write_json_atomic(&w.g.path.join("kiln/state/placement-journal.json"), &journal).unwrap();
+    let _ = crate::engine_mods::place(&w.dirs, &crate::profile::get(&w.dirs, &w.pid(&w.g)).unwrap(), &w.g.path);
+    assert!(external.join("map.dll").is_file(), "recovery moved a player folder outside the game");
+}
+
+#[test]
+fn review_publication_never_deletes_an_unverified_sibling() {
+    let w = World::updated("journal-delete");
+    let receipts: serde_json::Value = crate::util::read_json(&w.g.path.join("kiln/state/library-placements.json")).unwrap().unwrap();
+    let sibling = w.g.path.join("greeneye/.kiln-place-player");
+    put(&sibling, "precious.txt", b"player data");
+    let journal = serde_json::json!([{"path": w.g.path.join(MAP), "from": receipts[0]["marker"], "to": receipts[0], "parked": sibling.join("old")}]);
+    crate::util::write_json_atomic(&w.g.path.join("kiln/state/placement-journal.json"), &journal).unwrap();
+    let p = crate::profile::get(&w.dirs, &w.pid(&w.g)).unwrap();
+    assert!(crate::engine_mods::place(&w.dirs, &p, &w.g.path).is_err());
+    assert!(sibling.join("precious.txt").is_file(), "a journal is not authority to delete a sibling folder");
+}
+
+#[test]
+fn review_publication_keeps_the_only_remaining_old_copy() {
+    let w = World::updated("journal-only-copy");
+    w.rollback().unwrap();
+    crash_at(Step::ReceiptSaved, || { let _ = crate::profile::refresh_active(&w.dirs, &w.g); });
+    let journal: serde_json::Value = crate::util::read_json(&w.g.path.join("kiln/state/placement-journal.json")).unwrap().unwrap();
+    let parked = PathBuf::from(journal[0]["parked"].as_str().unwrap());
+    std::fs::remove_dir_all(w.g.path.join(MAP)).unwrap();
+    let p = crate::profile::get(&w.dirs, &w.pid(&w.g)).unwrap();
+    let _ = crate::engine_mods::place(&w.dirs, &p, &w.g.path);
+    assert!(parked.join("map.dll").is_file(), "recovery deleted the only remaining old copy");
+}
+
+#[test]
+fn review_unreadable_publication_journal_blocks_mutation_and_is_reported() {
+    let w = World::updated("journal-corrupt");
+    let journal = w.g.path.join("kiln/state/placement-journal.json");
+    std::fs::write(&journal, b"[{").unwrap();
+    let p = crate::profile::get(&w.dirs, &w.pid(&w.g)).unwrap();
+    assert!(crate::engine_mods::place(&w.dirs, &p, &w.g.path).is_err());
+    assert_eq!(std::fs::read(&journal).unwrap(), b"[{");
+}
+
+#[test]
+fn review_equal_restore_bytes_are_flushed_before_the_done_mark() {
+    let w = World::updated("restore-equal-durability");
+    w.rollback().unwrap();
+    let p = crate::profile::get(&w.dirs, &w.pid(&w.g)).unwrap();
+    crate::engine_mods::place(&w.dirs, &p, &w.g.path).unwrap();
+    w.write(&w.g, "1"); // matching bytes can have been written without a directory flush
+    let (_, events) = crate::durable::recording(|| restore_after_place(&w.dirs, &p, &w.g.path));
+    for rel in [A, B] {
+        assert!(events.contains(&crate::durable::Event::File(w.g.path.join(rel))), "matching {rel} was marked done without flushing: {events:?}");
+    }
+}
+
+#[test]
+fn review_shroudforge_values_are_flushed_before_the_done_mark() {
+    let w = world("restore-sf-durability");
+    let copy = w.g.path.join("mods/sfpack");
+    put(&copy, "mod.json", br#"{"id":"sfpack","name":"SF Pack","version":"1.0.0"}"#);
+    put(&copy, "extended.mod.json", br#"{"schemaVersion":1,"launcher":"SF","enabled":true,"targets":["client","server"],"settings":{"speed":{"label":"Speed","control":"slider","min":1,"max":10,"value":3}}}"#);
+    let mut r: PendingRestore = serde_json::from_value(serde_json::json!({"version":"1.0.0","hash":format!("kdh1:{}", "0".repeat(64)),"profile":"p","settings":{"size":0,"values":{"mods/sfpack":{"speed":7}}}})).unwrap();
+    r.preimages = Some(capture_preimages(&w.dirs, ModKind::ShroudForge, "sfpack", &KeptSettings { game: Some(w.g.path.display().to_string()), ..r.settings.clone() }).unwrap());
+    let placed = PlacedCopy { path: copy.clone(), marker: crate::engine_mods::Marker { format:1, kind: ModKind::ShroudForge, id:"sfpack".into(), version:r.version.clone(), hash:r.hash.clone() }, files: BTreeMap::new() };
+    let (done, events) = crate::durable::recording(|| apply_restore(&w.dirs, &w.g.path, ModKind::ShroudForge, "sfpack", &r, &[(placed, "mods/sfpack".into())], &mut Vec::new()));
+    assert!(done);
+    assert_eq!(crate::shroudforge::read_mod(&copy).unwrap().settings[0].value, 7);
+    assert!(events.contains(&crate::durable::Event::File(copy.join("extended.mod.json"))), "SF values were marked done without a flush: {events:?}");
+}
+
+#[test]
+fn review_failed_done_mark_must_not_erase_a_later_player_edit() {
+    let w = World::updated("restore-mark-later-edit");
+    w.rollback().unwrap();
+    fail_nth_save(1);
+    crate::profile::refresh_active(&w.dirs, &w.g).unwrap();
+    assert_settings(&w, "1.0.0", OLD);
+    put(&w.g.path, A, b"zoom=7");
+    w.next_start();
+    assert_settings(&w, "1.0.0", ("zoom=7", "chests=1"));
+}
+
+#[test]
+fn review_replay_preserves_an_edit_to_a_file_not_yet_restored() {
+    let w = World::updated("preimage-unwritten-edit");
+    w.rollback().unwrap();
+    crash_at(Step::RestoreFile, || { let _ = crate::profile::refresh_active(&w.dirs, &w.g); });
+    // The first file in snapshot order is B; A has not been restored yet.
+    assert_eq!(std::fs::read_to_string(w.g.path.join(A)).unwrap(), "zoom=9");
+    put(&w.g.path, A, b"zoom=7");
+    let p = crate::profile::get(&w.dirs, &w.pid(&w.g)).unwrap();
+    let notes = restore_after_place(&w.dirs, &p, &w.g.path);
+    assert_settings(&w, "1.0.0", ("zoom=7", "chests=1"));
+    assert!(notes.iter().any(|n| n.contains(A) && n.contains("later change")), "{notes:?}");
+}
+
+#[test]
+fn review_replay_preserves_a_players_deletion_after_restore() {
+    let w = World::updated("preimage-deletion");
+    w.rollback().unwrap();
+    fail_nth_save(1);
+    crate::profile::refresh_active(&w.dirs, &w.g).unwrap();
+    std::fs::remove_file(w.g.path.join(A)).unwrap();
+    w.next_start();
+    assert!(!w.g.path.join(A).exists(), "a later deletion must stay deleted");
+}
+
+#[test]
+fn review_durable_records_follow_import_placement_and_game_records() {
+    use crate::durable::Event;
+    let w = world("all-record-order");
+    let (_, events) = crate::durable::recording(|| { w.drop_in(&w.g, "1.0.0"); });
+    let rec = crate::library::list(&w.dirs, Some(ModKind::Greeneye)).unwrap()[0].versions[0].clone();
+    let published = |target: &Path| events.iter().enumerate().find_map(|(i, e)| match e {
+        Event::Rename { from, to } if to == target => Some((i, from.clone())), _ => None,
+    }).expect("publication must use durable rename");
+    let (import_at, import_stage) = published(&rec.folder);
+    assert!(events[..import_at].contains(&Event::File(import_stage.join("map.dll"))), "Library bytes must be flushed before their durable rename");
+    let record = PathBuf::from(format!("{}.json", rec.folder.display()));
+    let imported_record_at = events.iter().position(|e| matches!(e, Event::Journal { path, .. } if *path == record)).expect("durable import record");
+    assert!(imported_record_at > import_at);
+    let (place_at, place_stage) = published(&w.g.path.join(MAP));
+    assert!(events[..place_at].contains(&Event::File(place_stage.join("map.dll"))), "placed bytes must be flushed before publication");
+    let mut previous = place_at;
+    for record in [w.g.path.join("kiln/state/library-placements.json"), w.g.path.join("kiln/profile.json"), w.dirs.root.join(format!("installs/{}.active.json", w.g.id))] {
+        let at = events.iter().enumerate().skip(previous + 1).find_map(|(i, e)| matches!(e, Event::Journal { path, .. } if *path == record).then_some(i)).expect("record must use durability seam after the files it names");
+        assert!(at > previous, "receipt, profile and activation records must follow publication in order");
+        previous = at;
+    }
+
+}
+
+#[test]
+fn review_replayed_shroudforge_value_preserves_a_later_edit() {
+    let w = world("preimage-sf");
+    let src = w.root.join("src/sfpack");
+    let manifest = |v: &str| format!(r#"{{"id":"sfpack","name":"SF Pack","version":"{v}"}}"#);
+    put(&src, "mod.json", manifest("1.0.0").as_bytes());
+    put(&src, "extended.mod.json", br#"{"schemaVersion":1,"launcher":"SF","enabled":true,"targets":["client","server"],"settings":{"speed":{"label":"Speed","control":"slider","min":1,"max":10,"value":3}}}"#);
+    put(&src, "src/mod.lua", b"return {}");
+    let add = || crate::quick::add_with(&w.dirs, &w.g, &[src.clone()], false, &mut NoProgress).unwrap();
+    add();
+    let copy = crate::shroudforge::mods_dir(&w.g.path).join("sfpack");
+    crate::shroudforge::set_setting(&copy, "speed", &serde_json::json!(7)).unwrap();
+    put(&src, "mod.json", manifest("2.0.0").as_bytes());
+    add();
+    crate::shroudforge::set_setting(&copy, "speed", &serde_json::json!(9)).unwrap();
+    rollback(&w.dirs, Some(&w.g), &w.pid(&w.g), ModKind::ShroudForge, "sfpack", None).unwrap();
+    fail_nth_save(1);
+    crate::profile::refresh_active(&w.dirs, &w.g).unwrap();
+    assert_eq!(crate::shroudforge::read_mod(&copy).unwrap().settings[0].value, 7);
+    crate::shroudforge::set_setting(&copy, "speed", &serde_json::json!(5)).unwrap();
+    w.next_start();
+    assert_eq!(crate::shroudforge::read_mod(&copy).unwrap().settings[0].value, 5);
+}
+
+#[test]
+fn review_legacy_restore_preserves_differing_files_without_guessing() {
+    let w = World::updated("legacy-preimages");
+    w.rollback().unwrap();
+    let mut st = load(&w.dirs).unwrap();
+    st.mods[0].restores[0].preimages = None;
+    save(&w.dirs, &st).unwrap();
+    let p = crate::profile::get(&w.dirs, &w.pid(&w.g)).unwrap();
+    crate::engine_mods::place(&w.dirs, &p, &w.g.path).unwrap();
+    let notes = restore_after_place(&w.dirs, &p, &w.g.path);
+    assert_settings(&w, "1.0.0", NEW);
+    assert!(notes.iter().any(|n| n.contains("legacy restore") && n.contains(A)), "{notes:?}");
+    assert!(pending_restores(&w.dirs, ModKind::Greeneye, "worstmap").is_empty());
+}
+
+#[test]
+fn review_absent_preimage_permits_first_restore_and_an_unacknowledged_retry() {
+    let w = World::updated("absent-preimage");
+    std::fs::remove_file(w.g.path.join(A)).unwrap();
+    w.rollback().unwrap();
+    let pending = pending_restores(&w.dirs, ModKind::Greeneye, "worstmap");
+    assert_eq!(pending[0].preimages.as_ref().unwrap().files[A].before, None);
+    fail_nth_save(1);
+    crate::profile::refresh_active(&w.dirs, &w.g).unwrap();
+    assert_eq!(std::fs::read_to_string(w.g.path.join(A)).unwrap(), "zoom=1");
+    std::fs::remove_file(w.g.path.join(A)).unwrap();
+    w.next_start();
+    assert_eq!(std::fs::read_to_string(w.g.path.join(A)).unwrap(), "zoom=1", "absence equals the recorded preimage, so the required rule treats it as not yet restored");
+}
+
+#[cfg(unix)]
+#[test]
+fn review_half_restore_replay_does_not_replace_the_completed_file() {
+    use std::os::unix::fs::MetadataExt;
+    let w = World::updated("half-restore-inode");
+    w.rollback().unwrap();
+    crash_at(Step::RestoreFile, || { let _ = crate::profile::refresh_active(&w.dirs, &w.g); });
+    let completed = std::fs::metadata(w.g.path.join(B)).unwrap().ino();
+    w.next_start();
+    assert_settings(&w, "1.0.0", OLD);
+    assert_eq!(std::fs::metadata(w.g.path.join(B)).unwrap().ino(), completed);
+}
+
+#[test]
+fn review_park_and_recovery_put_back_use_the_durable_seam() {
+    use crate::durable::Event;
+    let w = World::updated("park-order");
+    w.rollback().unwrap();
+    let (_, park_events) = crate::durable::recording(|| crash_at(Step::Parked, || { let _ = crate::profile::refresh_active(&w.dirs, &w.g); }));
+    let parked = park_events.iter().find_map(|e| match e {
+        Event::Rename { from, to } if *from == w.g.path.join(MAP) && to.file_name().is_some_and(|n| n == "old") => Some(to.clone()), _ => None,
+    }).expect("the park must be durable");
+    let (_, recovery_events) = crate::durable::recording(|| w.next_start());
+    assert!(recovery_events.contains(&Event::Rename { from: parked, to: w.g.path.join(MAP) }), "put-back must be durable: {recovery_events:?}");
+    assert_settings(&w, "1.0.0", OLD);
 }

@@ -132,6 +132,21 @@ impl KeptVersion {
     }
 }
 
+/// Hashes captured before restoration: `None` is an absent file or setting value.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreGuard {
+    pub before: Option<String>,
+    pub snapshot: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestorePreimages {
+    pub files: BTreeMap<String, RestoreGuard>,
+    pub values: BTreeMap<String, BTreeMap<String, RestoreGuard>>,
+}
+
 /// Settings waiting for the next placement of a version a roll back put into a profile ([`restore_after_place`]), in
 /// the game folder they came from (`settings.game`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -142,7 +157,9 @@ pub struct PendingRestore {
     /// The profile that rolled back: only its placement takes or applies them.
     pub profile: String,
     pub settings: KeptSettings,
-    /// Its files are back and flushed: only the record is left to drop (a stop before the drop never puts the files
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preimages: Option<RestorePreimages>,
+    /// Its files/values are settled and restored content flushed: only the record is left to drop (a stop never puts them
     /// back again over what the player changed since).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub applied: bool,
@@ -973,7 +990,10 @@ pub(crate) fn prepare(dirs: &DataDirs, profile: &Profile, game: Option<&Path>, c
     let before: Vec<KeptMod> = touched.iter()
         .map(|(k, id)| st.mods.iter().find(|m| m.kind == *k && m.id == *id).cloned().unwrap_or_else(|| KeptMod::empty(*k, id))).collect();
     for (kind, from, to) in &changes {
-        follow_one(dirs, &mut st, &profile.id, &games, keep, *kind, from, to, &mut notices);
+        if let Err(e) = follow_one(dirs, &mut st, &profile.id, &games, keep, *kind, from, to, &mut notices) {
+            sweep(dirs, &original);
+            return Prepared::failed(dirs, e.message);
+        }
     }
     // a removal of the mod (or another version picked by hand) cancels this profile's restore it no longer asks for
     for m in &mut st.mods {
@@ -1010,7 +1030,7 @@ pub(crate) fn prepare(dirs: &DataDirs, profile: &Profile, game: Option<&Path>, c
 
 #[allow(clippy::too_many_arguments)]
 fn follow_one(dirs: &DataDirs, st: &mut KeptState, profile_id: &str, games: &[PathBuf], keep: usize, kind: ModKind,
-              from: &ProfileMod, to: &ProfileMod, notices: &mut Vec<String>) {
+              from: &ProfileMod, to: &ProfileMod, notices: &mut Vec<String>) -> Result<()> {
     let name = shown(dirs, kind, from);
     let (from_v, to_v) = (VersionRef::of(from), VersionRef::of(to));
     let m = mod_of(st, kind, &from.id);
@@ -1025,7 +1045,7 @@ fn follow_one(dirs: &DataDirs, st: &mut KeptState, profile_id: &str, games: &[Pa
         let v = m.kept.remove(i);
         m.restores.retain(|r| r.profile != profile_id);
         if !v.settings.is_empty() {
-            m.restores.push(PendingRestore { version: v.version, hash: v.hash, profile: profile_id.to_string(), settings: v.settings, applied: false });
+            m.restores.push(PendingRestore { version: v.version, hash: v.hash, profile: profile_id.to_string(), preimages: Some(capture_preimages(dirs, kind, &from.id, &v.settings)?), settings: v.settings, applied: false });
         }
     }
     // the version left is kept
@@ -1055,6 +1075,7 @@ fn follow_one(dirs: &DataDirs, st: &mut KeptState, profile_id: &str, games: &[Pa
         }
     }
     truncate_per_profile(&mut m.kept, keep);
+    Ok(())
 }
 
 /// [`prepare`] for the changes of an add or its Undo ([`ProfileChange`]: `before` -> `after`, or back with `undo`).
@@ -1212,6 +1233,51 @@ fn moved_note(kind: ModKind, id: &str, version: &str, game: &str) -> String {
         kind.as_str())
 }
 
+fn file_image(game: &Path, path: &Path) -> Result<Option<String>> {
+    crate::engine_mods::refuse_symlink_path(game, path)?;
+    match std::fs::metadata(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e.into()),
+        Ok(_) => Ok(Some(crate::hash::sha256_hex(&read_bounded(path)?))),
+    }
+}
+
+fn value_image(value: &serde_json::Value) -> String {
+    crate::hash::sha256_hex(&serde_json::to_vec(value).expect("JSON value serializes"))
+}
+
+fn capture_preimages(dirs: &DataDirs, kind: ModKind, id: &str, settings: &KeptSettings) -> Result<RestorePreimages> {
+    let mut images = RestorePreimages::default();
+    let game = settings.game.as_deref().map(Path::new).ok_or_else(|| Error::invalid("restore settings have no source game"))?;
+    if !settings.files.is_empty() {
+        let root = copy_dir(dirs, kind, id, settings.dir.as_deref().ok_or_else(|| Error::invalid("restore has no snapshot directory"))?)?;
+        for rel in &settings.files {
+            crate::bundle::safe_rel_path(rel)?;
+            let source = root.join(rel);
+            crate::engine_mods::refuse_symlink_path(&dirs.root, &source)?;
+            images.files.insert(rel.clone(), RestoreGuard { before: file_image(game, &game.join(rel))?,
+                snapshot: crate::hash::sha256_hex(&read_bounded(&source)?) });
+        }
+    }
+    for (rel, values) in &settings.values {
+        crate::bundle::safe_rel_path(rel)?;
+        let copy = game.join(rel);
+        crate::engine_mods::refuse_symlink_path(game, &copy.join("extended.mod.json"))?;
+        let now = if copy.join("extended.mod.json").try_exists()? { Some(crate::shroudforge::read_mod(&copy)?) } else { None };
+        let mut guards = BTreeMap::new();
+        for (key, target) in values {
+            guards.insert(key.clone(), RestoreGuard { before: now.as_ref().and_then(|m| m.settings.iter().find(|s| s.key == *key)).map(|s| value_image(&s.value)), snapshot: value_image(target) });
+        }
+        images.values.insert(rel.clone(), guards);
+    }
+    Ok(images)
+}
+
+// A missing guard is an unshipped legacy record: matching bytes are settled, everything else is preserved.
+fn may_restore(guard: Option<&RestoreGuard>, current: &Option<String>, snapshot: &str) -> bool {
+    guard.is_some_and(|g| g.snapshot == snapshot && g.before == *current)
+}
+
 /// Puts one restore's files and values back. -> true when it is done (false: try again at the next placement).
 fn apply_restore(dirs: &DataDirs, game: &Path, kind: ModKind, id: &str, r: &PendingRestore, copies: &[(PlacedCopy, String)], notes: &mut Vec<String>) -> bool {
     let tag = format!("{}:{id}", kind.as_str());
@@ -1222,6 +1288,7 @@ fn apply_restore(dirs: &DataDirs, game: &Path, kind: ModKind, id: &str, r: &Pend
     };
     let mut again = false;
     let mut back = Vec::new();
+    let mut preserved = Vec::new();
     for rel in &r.settings.files {
         let Some(dir) = &dir else { break };
         if crate::bundle::safe_rel_path(rel).is_err() { continue; }
@@ -1231,10 +1298,23 @@ fn apply_restore(dirs: &DataDirs, game: &Path, kind: ModKind, id: &str, r: &Pend
         };
         // the file and the name it has in its folder are flushed before the state may say it is back
         let to = copy.path.join(&rel[c.len() + 1..]);
-        let written = put_back(game, &copy.path, &rel[c.len() + 1..], dir, &dir.join(rel)).and_then(|w| {
-            if w { crate::durable::flush_file(&to)?; if let Some(p) = to.parent() { crate::durable::flush_dir(p)?; } }
-            Ok(w)
-        });
+        let written = (|| -> Result<bool> {
+            crate::engine_mods::refuse_symlink_path(dir, &dir.join(rel))?;
+            let snapshot = crate::hash::sha256_hex(&read_bounded(&dir.join(rel))?);
+            let current = file_image(game, &to)?;
+            let guard = r.preimages.as_ref().and_then(|p| p.files.get(rel));
+            if current.as_deref() == Some(&snapshot) {
+                flush_restored_path(game, &to)?;
+                return Ok(false);
+            }
+            if !may_restore(guard, &current, &snapshot) {
+                preserved.push(rel.clone());
+                return Ok(false);
+            }
+            let changed = put_back(game, &copy.path, &rel[c.len() + 1..], dir, &dir.join(rel))?;
+            flush_restored_path(game, &to)?;
+            Ok(changed)
+        })();
         match written {
             Ok(true) => { back.push(rel.clone()); crash_point(Step::RestoreFile); }
             Ok(false) => {}
@@ -1252,7 +1332,14 @@ fn apply_restore(dirs: &DataDirs, game: &Path, kind: ModKind, id: &str, r: &Pend
         }
         let Ok(now) = crate::shroudforge::read_mod(&copy.path) else { continue };
         for (key, value) in values {
-            if now.settings.iter().any(|s| s.key == *key && s.value != *value) {
+            let current = now.settings.iter().find(|s| s.key == *key).map(|s| value_image(&s.value));
+            let target = value_image(value);
+            if current.as_deref() != Some(&target) {
+                let guard = r.preimages.as_ref().and_then(|p| p.values.get(rel_copy)).and_then(|v| v.get(key));
+                if !may_restore(guard, &current, &target) {
+                    preserved.push(format!("{rel_copy} setting {key}"));
+                    continue;
+                }
                 match crate::shroudforge::set_setting(&copy.path, key, value) {
                     Ok(_) => back.push(format!("{rel_copy} setting {key}")),
                     Err(e) if e.code == ErrorCode::InvalidArgument => notes.push(format!("{tag}: its setting {key} was not put back to {value}: {}", e.message)),
@@ -1260,11 +1347,29 @@ fn apply_restore(dirs: &DataDirs, game: &Path, kind: ModKind, id: &str, r: &Pend
                 }
             }
         }
+        // Re-flush the file and ancestor names, including values already equal on a replay, before acknowledging it.
+        if let Err(e) = flush_restored_path(game, &file) {
+            again = true;
+            notes.push(format!("{tag}: its setting values are not durable yet ({}); Kiln tries again", e.message));
+        }
+    }
+    if !preserved.is_empty() {
+        let legacy = if r.preimages.is_none() { " (legacy restore has no preimages)" } else { "" };
+        notes.push(format!("{tag}: kept the player's later change in {}{legacy}", preserved.join(", ")));
     }
     if !back.is_empty() {
         notes.push(format!("{tag}: version {} has the settings it had before the update again ({})", r.version, back.join(", ")));
     }
     !again
+}
+
+fn flush_restored_path(game: &Path, file: &Path) -> Result<()> {
+    crate::engine_mods::refuse_symlink_path(game, file)?;
+    crate::durable::flush_file(file)?;
+    for parent in file.ancestors().skip(1).take_while(|p| p.starts_with(game)) {
+        crate::durable::flush_dir(parent)?;
+    }
+    Ok(())
 }
 
 /// Writes the kept file `from` as `rel` in the copy `copy` (in `game`) unless it holds those bytes already. Never a
@@ -1284,7 +1389,7 @@ fn put_back(game: &Path, copy: &Path, rel: &str, source_root: &Path, from: &Path
         crate::engine_mods::refuse_symlink_path(game, parent)?;
         std::fs::create_dir_all(parent).map_err(crate::util::io_at(parent, "creating"))?;
     }
-    crate::util::write_atomic_exclusive(&to, &bytes)?;
+    crate::durable::replace(&to, &bytes)?;
     Ok(true)
 }
 
@@ -1477,7 +1582,7 @@ mod tests {
         let m = KeptMod { kind: ModKind::Greeneye, id: "m".into(),
             kept: vec![KeptVersion { version: "1.0.0".into(), hash: "kdh1:00".into(), kept: "t".into(), replaced_by: Some(v.clone()),
                 profile: Some("p".into()), settings: settings.clone() }],
-            restores: vec![PendingRestore { version: "1.0.0".into(), hash: "kdh1:00".into(), profile: "p".into(), settings, applied: true }] };
+            restores: vec![PendingRestore { version: "1.0.0".into(), hash: "kdh1:00".into(), profile: "p".into(), settings, preimages: Some(RestorePreimages::default()), applied: true }] };
         let st = KeptState { format: 1, mods: vec![m.clone()], pending: vec![KeptTxn { id: "0123456789ab".into(), profile: "p".into(), started: "t".into(),
             changes: vec![TxnChange { kind: ModKind::Greeneye, id: "m".into(), from: v.clone(), to: v.clone() }], before: vec![m], profile_before: Some(crate::profile::ProfileMods::default()) }] };
         let json = serde_json::to_value(&st).unwrap();

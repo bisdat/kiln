@@ -677,9 +677,7 @@ fn save_placements(game: &Path, entries: &[Placement]) -> Result<()> {
     let file = placements_file(game);
     refuse_symlink_path(game, &file)?;
     let parent = file.parent().expect("receipt parent");
-    std::fs::create_dir_all(parent).map_err(io_at(parent, "creating"))?;
-    let tmp = crate::library::TempDir::new(parent, "receipt")?;
-    let staged = tmp.path().join("receipt.json");
+    crate::durable::ensure_dir(parent)?;
     #[cfg(windows)]
     let compatible: Vec<Placement> = {
         let root = crate::sf_paths::legacy_mods_directory(game);
@@ -691,8 +689,7 @@ fn save_placements(game: &Path, entries: &[Placement]) -> Result<()> {
     };
     #[cfg(windows)]
     let entries = compatible.as_slice();
-    crate::util::write_json_atomic(&staged, &entries)?;
-    crate::util::rename_replace(&staged, &file)
+    crate::durable::json(&file, &entries, &entries.iter().map(|r| r.path.clone()).collect::<Vec<_>>())
 }
 
 /// `<game>/kiln/state/placement-journal.json`: the last publication Kiln began at each placed path ([`Publication`]).
@@ -704,6 +701,7 @@ fn journal_file(game: &Path) -> PathBuf {
 /// the copy it replaces, the receipt it publishes, and where the old copy is parked until that receipt is written.
 /// It stays after the publication (the record of the last one at that path), until the path's receipt moves on.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Publication {
     path: PathBuf,
     #[serde(default)]
@@ -713,17 +711,19 @@ struct Publication {
     parked: Option<PathBuf>,
 }
 
-fn publications(game: &Path) -> Vec<Publication> {
+fn publications(game: &Path) -> Result<Vec<Publication>> {
     let file = journal_file(game);
-    if refuse_symlink_path(game, &file).is_err() { return Vec::new(); }
-    crate::util::read_json::<Vec<Publication>>(&file).ok().flatten().unwrap_or_default()
+    refuse_symlink_path(game, &file)?;
+    crate::util::read_json::<Vec<Publication>>(&file)
+        .map(|v| v.unwrap_or_default())
+        .map_err(|e| Error::new(e.code, format!("{}: publication recovery left the game unchanged: {}", file.display(), e.message)))
 }
 
 fn save_publications(game: &Path, all: &[Publication]) -> Result<()> {
     let file = journal_file(game);
     refuse_symlink_path(game, &file)?;
     let parent = file.parent().expect("journal parent");
-    std::fs::create_dir_all(parent).map_err(io_at(parent, "creating"))?;
+    crate::durable::ensure_dir(parent)?;
     let mut text = serde_json::to_string_pretty(all)?;
     text.push('\n');
     crate::durable::journal(&file, text.as_bytes(), &[], 0, 0)
@@ -731,10 +731,34 @@ fn save_publications(game: &Path, all: &[Publication]) -> Result<()> {
 
 /// Records the publication `p` (replacing the last one at its path) before anything of it happens.
 fn begin_publication(game: &Path, p: Publication) -> Result<()> {
-    let mut all = publications(game);
+    let mut all = publications(game)?;
     all.retain(|x| x.path != p.path);
     all.push(p);
     save_publications(game, &all)
+}
+
+/// A game-side journal is untrusted input: it can name only a real placement and its sibling staging tree.
+fn validate_publication(game: &Path, p: &Publication) -> Result<()> {
+    if p.path != p.to.path { return Err(Error::invalid("publication and receipt paths differ")); }
+    if p.to.marker.format != 1 || !crate::manifest::is_mod_id(&p.to.marker.id)
+        || p.from.as_ref().is_some_and(|f| f.format != 1 || f.kind != p.to.marker.kind || f.id != p.to.marker.id) {
+        return Err(Error::invalid("publication markers do not identify the same mod"));
+    }
+    check_placement_path(game, &p.to)?;
+    if !p.path.file_name().and_then(|n| n.to_str()).is_some_and(is_game_folder_name) {
+        return Err(Error::invalid("unsafe publication folder name"));
+    }
+    refuse_symlink_path(game, &p.path)?;
+    if let Some(parked) = &p.parked {
+        let dir = parked.parent().ok_or_else(|| Error::invalid("parked copy without parent"))?;
+        let tag = dir.file_name().and_then(|n| n.to_str()).and_then(|n| n.strip_prefix(".kiln-place-"));
+        if parked.file_name().is_none_or(|n| n != "old") || dir.parent() != p.path.parent()
+            || !tag.is_some_and(|t| t.len() == 12 && t.bytes().all(|b| b.is_ascii_hexdigit())) {
+            return Err(Error::invalid("unsafe parked publication path"));
+        }
+        refuse_symlink_path(game, parked)?;
+    }
+    Ok(())
 }
 
 /// The temporary folder a publication parked the old copy in (`<parent>/.kiln-place-<hex>/old`), deleted once the
@@ -743,7 +767,11 @@ fn drop_parked(game: &Path, p: &Publication) -> bool {
     let Some(parked) = &p.parked else { return false };
     let Some(dir) = parked.parent() else { return false };
     let ours = dir.file_name().is_some_and(|n| n.to_string_lossy().starts_with(".kiln-place-")) && dir.parent() == p.path.parent();
-    if !ours || refuse_symlink_path(game, dir).is_err() || !dir.is_dir() { return false; }
+    if !ours || validate_publication(game, p).is_err() || !dir.is_dir() { return false; }
+    // A saved receipt alone does not prove the replacement survived. Never discard the only old tree.
+    if !p.path.is_dir() || marker(&p.path).as_ref() != Some(&p.to.marker)
+        || player_entries(&p.path, p.to.marker.kind, &current_receipt(&p.path, &p.to)).ok().flatten().is_none()
+        || marker(parked) != p.from { return false; }
     std::fs::remove_dir_all(dir).is_ok()
 }
 
@@ -755,14 +783,36 @@ fn drop_parked(game: &Path, p: &Publication) -> bool {
 /// A folder without a receipt is never adopted (a first placement stopped before its receipt stays the player's, as
 /// before). A receipt that moved on, or a copy that is neither, ends the
 /// record and nothing is touched: a mismatch is never resolved by trusting a receipt (`owned` still refuses it).
-fn recover_publications(game: &Path, receipts: &mut Vec<Placement>) -> Result<()> {
-    let all = publications(game);
-    if all.is_empty() { return Ok(()); }
+fn recover_publications(game: &Path, receipts: &mut Vec<Placement>) -> Result<Vec<String>> {
+    let all = publications(game)?;
+    // A moved install can retain completed records keyed by its old absolute root. Never inspect or mutate
+    // those paths; retain the record and report it, as with its old delivery receipts.
+    let moved = |p: &Publication| !p.path.starts_with(game) && check_placement_path(game, &p.to).is_err()
+        && receipts.iter().any(|r| r.path == p.path && r.marker == p.to.marker && r.files == p.to.files);
+    let mut untouched = Vec::new();
+    let mut notes = Vec::new();
+    for p in &all {
+        if moved(p) {
+            untouched.push(p.path.clone());
+            notes.push(format!("{}: completed placement journal belongs to another game path (the game moved?); left untouched", p.path.display()));
+        } else if let Err(e) = validate_publication(game, p) {
+            if e.code != ErrorCode::Refused { return Err(e); }
+            // A linked/changed placement remains player-owned. Leave its journal entry and let normal
+            // placement/cleanup produce the existing retained-folder report instead of aborting unrelated mods.
+            untouched.push(p.path.clone());
+            notes.push(format!("{}: publication recovery left this folder untouched: {}", p.path.display(), e.message));
+        }
+    }
+    if all.is_empty() { return Ok(Vec::new()); }
     let (mut keep, mut changed, mut receipts_changed) = (Vec::new(), false, false);
     for mut p in all {
+        if untouched.contains(&p.path) { keep.push(p); continue; }
         if refuse_symlink_path(game, &p.path).is_err() { changed = true; continue; }
         let current = receipts.iter().find(|r| r.path == p.path);
         if current.is_some_and(|r| r.marker == p.to.marker && r.files == p.to.files) {
+            if !p.path.is_dir() && p.parked.as_ref().is_some_and(|old| old.is_dir()) {
+                return Err(Error::new(ErrorCode::Refused, format!("{}: published copy is missing; preserved its parked old copy for recovery", p.path.display())));
+            }
             if drop_parked(game, &p) { p.parked = None; changed = true; }
             keep.push(p);
             continue;
@@ -777,8 +827,6 @@ fn recover_publications(game: &Path, receipts: &mut Vec<Placement>) -> Result<()
             receipts.retain(|r| r.path != p.path);
             receipts.push(p.to.clone());
             receipts_changed = true;
-            drop_parked(game, &p);
-            p.parked = None;
             keep.push(p);
             continue;
         }
@@ -786,13 +834,26 @@ fn recover_publications(game: &Path, receipts: &mut Vec<Placement>) -> Result<()
             && let Some(parked) = p.parked.clone()
             && refuse_symlink_path(game, &parked).is_ok() && parked.is_dir() && marker(&parked) == p.from
         {
-            std::fs::rename(&parked, &p.path).map_err(io_at(&p.path, "putting the parked copy back"))?;
-            drop_parked(game, &p);
+            crate::durable::rename_dir(&parked, &p.path)?;
+            // The old copy is home. Remove only the verified unused staged replacement, then an empty container.
+            let dir = parked.parent().expect("validated parent");
+            let new = dir.join("new");
+            if marker(&new).as_ref() == Some(&p.to.marker)
+                && player_entries(&new, p.to.marker.kind, &current_receipt(&new, &p.to)).ok().flatten().is_some() {
+                refuse_symlink_path(game, &new)?;
+                let _ = std::fs::remove_dir_all(&new);
+            }
+            let _ = std::fs::remove_dir(dir);
         }
     }
-    if receipts_changed { save_placements(game, receipts)?; }
+    if receipts_changed {
+        save_placements(game, receipts)?;
+        for p in &mut keep {
+            if drop_parked(game, p) { p.parked = None; }
+        }
+    }
     if changed { save_publications(game, &keep)?; }
-    Ok(())
+    Ok(notes)
 }
 
 /// A temporary file of a marker write of Kiln's, at the top of a folder: `<marker>.tmp` ([`crate::util::write_atomic`],
@@ -1295,10 +1356,10 @@ fn copy_in(roots: Roots, src: &Path, dst: &Path, m: &Marker, kept: &[(String, se
 }
 
 /// The last step of publishing a staged copy (tests make it fail).
-fn rename_in(staged: &Path, dst: &Path) -> std::io::Result<()> {
+fn rename_in(staged: &Path, dst: &Path) -> Result<()> {
     #[cfg(test)]
-    if tests::FAIL_RENAME_IN.with(|f| f.replace(false)) { return Err(std::io::Error::other("injected rename failure")); }
-    std::fs::rename(staged, dst)
+    if tests::FAIL_RENAME_IN.with(|f| f.replace(false)) { return Err(Error::new(ErrorCode::Io, "placing: injected rename failure")); }
+    crate::durable::rename_dir(staged, dst).map_err(|e| Error::new(e.code, format!("placing {}: {}", dst.display(), e.message)))
 }
 
 /// Shared placement transaction. Both generic player files (`carry`) and native game-folder settings (`settings`)
@@ -1326,7 +1387,7 @@ fn copy_in_with(roots: Roots, src: &Path, dst: &Path, m: &Marker, kept: &[(Strin
     }
     let source_hash = crate::hash::dirhash(src)?;
     let parent = dst.parent().ok_or_else(|| Error::invalid("no mod parent"))?;
-    std::fs::create_dir_all(parent).map_err(io_at(parent, "creating"))?;
+    crate::durable::ensure_dir(parent)?;
     let tmp = crate::library::TempDir::new(parent, "kiln-place")?;
     let staged = tmp.path().join("new");
     crate::library::copy_mod_tree(src, &staged)?;
@@ -1382,30 +1443,39 @@ fn copy_in_with(roots: Roots, src: &Path, dst: &Path, m: &Marker, kept: &[(Strin
         if let Some(p) = to.parent() { std::fs::create_dir_all(p).map_err(io_at(p, "creating"))?; }
         std::fs::write(&to, bytes).map_err(io_at(&to, "writing"))?;
     }
+    crate::durable::flush_contents(&staged)?;
+    crate::durable::flush_dir(tmp.path())?;
     let old = tmp.path().join("old");
     let replaced = dst.exists();
     // the intent first, durably: a stop from here on is finished or put back before the next placement looks at the
     // copies (recover_publications)
     begin_publication(roots.game, Publication { path: dst.to_path_buf(), from: if replaced { marker(dst) } else { None },
         to: receipt.clone(), parked: replaced.then(|| old.clone()) })?;
-    if replaced { std::fs::rename(dst, &old).map_err(io_at(dst, "parking old mod"))?; }
+    if replaced && let Err(e) = crate::durable::rename_dir(dst, &old) {
+        return Err(preserve_recovery(tmp, e));
+    }
     if crate::kept::stop_here(crate::kept::Step::Parked) { std::mem::forget(tmp); panic!("injected crash at Parked"); }
     if let Err(e) = rename_in(&staged, dst) {
+        // A rename can succeed before its flush fails. Preserve both trees and its journal in that case.
+        if dst.exists() && !staged.exists() { return Err(preserve_recovery(tmp, e)); }
         if replaced {
-            if let Err(e) = std::fs::rename(&old, dst) {
-                return Err(preserve_recovery(tmp, io_at(dst, "restoring old mod")(e)));
+            if let Err(e) = crate::durable::rename_dir(&old, dst) {
+                return Err(preserve_recovery(tmp, e));
             }
         }
-        return Err(io_at(dst, "placing")(e));
+        return Err(e);
     }
     if crate::kept::stop_here(crate::kept::Step::Published) { std::mem::forget(tmp); panic!("injected crash at Published"); }
     if let Err(error) = persist(&receipt) {
-        if let Err(e) = std::fs::rename(dst, &staged) {
-            return Err(preserve_recovery(tmp, io_at(dst, "rolling back new mod")(e)));
+        if placements(roots.game).is_ok_and(|rs| rs.iter().any(|r| r.path == receipt.path && r.marker == receipt.marker && r.files == receipt.files)) {
+            return Err(preserve_recovery(tmp, error));
+        }
+        if let Err(e) = crate::durable::rename_dir(dst, &staged) {
+            return Err(preserve_recovery(tmp, e));
         }
         if replaced {
-            if let Err(e) = std::fs::rename(&old, dst) {
-                return Err(preserve_recovery(tmp, io_at(dst, "restoring old mod")(e)));
+            if let Err(e) = crate::durable::rename_dir(&old, dst) {
+                return Err(preserve_recovery(tmp, e));
             }
         }
         return Err(error);
@@ -1517,8 +1587,8 @@ pub fn unplace(dirs: &DataDirs, game_dir: &Path) -> Result<PlacementCleanup> {
     if !file.try_exists().map_err(io_at(&file, "inspecting"))? { return Ok(PlacementCleanup::default()); }
     let _lock = engine_lock(game_dir, &game_dir.join("kiln/state"))?;
     let mut receipts = placements(game_dir)?;
-    recover_publications(game_dir, &mut receipts)?;
-    let mut report = PlacementCleanup::default();
+    let notes = recover_publications(game_dir, &mut receipts)?;
+    let mut report = PlacementCleanup { kept_files: notes, ..PlacementCleanup::default() };
     for receipt in receipts.clone() {
         let dst = &receipt.path;
         let kind = receipt.marker.kind;
@@ -2059,7 +2129,7 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
     let mut rep = PlaceReport::default();
     let mut receipts = placements(game_dir)?;
     // a publication a stop left half done is finished or put back first
-    recover_publications(game_dir, &mut receipts)?;
+    rep.warnings.extend(recover_publications(game_dir, &mut receipts)?);
     let roots = Roots { data: &dirs.root, game: game_dir };
     for kind in [ModKind::ShroudForge, ModKind::Set] {
         let list = profile.mods.list(kind);

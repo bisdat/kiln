@@ -229,15 +229,26 @@ ShroudForge, SET, Greeneye, Flame, XHL and the other loaders' mods.
   back into your profile in place of the one you have now, switched on or off as it was. It is a profile change like
   any other: the toast has **Undo**, and nothing is downloaded. When Kiln next writes your profile into the game (at
   once when the game is closed, else at the next Play), the old version goes into the game folder with the settings it
-  had before the update, not the newer version's. Two cases where the settings do not come back: the mod's copy in
+  had before the update, subject to the later-change rule below. Settings can also stay as they are when the mod's copy in
   the game folder is not Kiln's to replace any more (you changed its code there: Kiln leaves that folder alone and says
   so), or the game folder moved since the update (the roll back says so; the settings wait for the folder they were
   kept in).
-- **If Kiln stops half-way** (the launcher closed or crashed, a full disk, a write that failed) during an update, a roll
-  back, its Undo or the placement in the game folder, the next start finishes it or puts it back as it was: the mod
-  ends with all of its old settings or all of the new ones, never a mix. Each step is tested that way. Against a power
-  cut, Kiln writes each of its records only after what the record names is on the disk (flushed); that is the order
-  it keeps, but no test can cut the power, so it is not proven on real hardware.
+- **If Kiln stops half-way**, recovery is tested before and after the profile save, while replacing an owned mod
+  copy, and during settings restoration. Each restore records hashes of the current files and ShroudForge values
+  before writing any settings. On every attempt, a value already equal to the snapshot stays; a value still equal
+  to its recorded preimage is restored; any other value stays as the player's later change, with a note naming it.
+  The done mark is then written and dropped separately, so a failed acknowledgement does not reset later edits.
+  A deletion stays deleted when the preimage was a file. If the preimage was already absent, absence still means
+  “not restored yet” and a retry can recreate the snapshot file. Legacy pending restores without preimages never
+  overwrite differing content: current content stays, the restore settles, and a note explains why.
+  Changed code, an unreadable publication journal, or a missing replacement with a parked old copy requires
+  attention; Kiln preserves those folders. A first placement stopped before its receipt remains an unowned folder.
+  Library import files, settings snapshots, placed-copy files, receipt publication, profile/activation records and
+  replacement park/publish/put-back renames now use the ordered durability seam. This checks software ordering,
+  not real power cuts or Windows hardware. Copy-mode fallback/config delivery, chain.ini, explicit adoption and
+  removal use their existing protocols: a cut can leave a partial fallback/config or stale chain; verification may
+  retain/refuse a damaged copy or create another fallback, and manual repair can be needed. They are not covered
+  by the replacement journal's automatic-retry guarantee. Two simultaneous full activations are not proven atomic.
 - **Roll back twice.** The version you rolled back from is kept now, so its menu offers **Roll back to** it again,
   with the settings it had when you left it.
 - **How many are kept.** Settings, Launcher, **Earlier versions to keep**: 1 by default (the last one), up to 5 per mod,
