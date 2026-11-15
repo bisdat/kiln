@@ -376,8 +376,11 @@ internal static partial class KilnApis
         "M:Kiln.ItemInstanceDataExtensions.TryGet``1(Kiln.ItemInstanceRef,Kiln.InstanceKey{``0},``0@)", // ItemInstanceDataExtensions.TryGet<T>(ItemInstanceRef, InstanceKey<T>, out T?): via InstanceData.Use<T>(string, InstanceKey<T>)
         "M:Kiln.ItemInstanceExtensions.Location(Kiln.ItemInstanceRef)", // ItemInstanceExtensions.Location(ItemInstanceRef): Services.RequireTickThread
         "M:Kiln.ItemInstanceRef.get_IsAlive", // ItemInstanceRef.IsAlive.get: via EntityRef.IsAlive.get
+        "M:Kiln.Items.CaptureSet(Kiln.EntityId)", // Items.CaptureSet(EntityId): Services.RequireTickThread
         "M:Kiln.Items.ContainerName(Kiln.EntityId)", // Items.ContainerName(EntityId): via Items.Require3(string, string)
         "M:Kiln.Items.Equip(Kiln.EntityId,Kiln.SlotId,System.Nullable{Kiln.EquipmentSlot},Kiln.EquipOptions,Kiln.EntityId)", // Items.Equip(EntityId, SlotId, EquipmentSlot?, EquipOptions, EntityId): Services.RequireTickThread
+        "M:Kiln.Items.EquipSet(Kiln.EntityId,Kiln.EquipmentSet,Kiln.EquipOptions)", // Items.EquipSet(EntityId, EquipmentSet, EquipOptions): via Items.ApplySet(EntityId, EquipmentSet, EquipOptions, LabSetFault, int, string)
+        "M:Kiln.Items.EquipSet(Kiln.EquipmentSetPlan,Kiln.EquipOptions)", // Items.EquipSet(EquipmentSetPlan, EquipOptions): Services.RequireTickThread
         "M:Kiln.Items.Equipped(Kiln.EntityId,Kiln.EquipmentSlot)", // Items.Equipped(EntityId, EquipmentSlot): Services.RequireTickThread
         "M:Kiln.Items.FindInventories(Kiln.InventoryKinds)", // Items.FindInventories(InventoryKinds): via Items.Require(string)
         "M:Kiln.Items.Fuel.Add(Kiln.EntityId,System.Int32,System.Boolean)", // Items.Fuel.Add(EntityId, int, bool): via Items.Fuel.Submit(EntityId, uint, int, ItemId, bool, int)
@@ -393,10 +396,12 @@ internal static partial class KilnApis
         "M:Kiln.Items.Give(Kiln.EntityId,System.String,System.Int32,System.Nullable{Kiln.Gear},Kiln.GiveOptions)", // Items.Give(EntityId, string, int, Gear?, GiveOptions): via Items.Give(EntityId, ItemId, int, Gear?, GiveOptions, SlotId?)
         "M:Kiln.Items.GiveRecipeResult(Kiln.EntityId,System.UInt32,System.Int32,Kiln.GiveOptions)", // Items.GiveRecipeResult(EntityId, uint, int, GiveOptions): via Items.Submit(bool, ItemsNative.Request, string)
         "M:Kiln.Items.Held(Kiln.EntityId)", // Items.Held(EntityId): Services.RequireTickThread
+        "M:Kiln.Items.LabEquipSet(Kiln.EntityId,Kiln.EquipmentSet,Kiln.LabSetFault,System.Int32,Kiln.EquipOptions)", // Items.LabEquipSet(EntityId, EquipmentSet, LabSetFault, int, EquipOptions): via Items.ApplySet(EntityId, EquipmentSet, EquipOptions, LabSetFault, int, string)
         "M:Kiln.Items.LabFollow(Kiln.ItemInstanceRef,System.Action{Kiln.ItemLocation,System.UInt64})", // Items.LabFollow(ItemInstanceRef, Action<ItemLocation, ulong>?): via ItemInstances.Follow(ItemInstanceRef)
         "M:Kiln.Items.LabMoveUnseen(Kiln.EntityId,Kiln.SlotId,Kiln.EntityId)", // Items.LabMoveUnseen(EntityId, SlotId, EntityId): via Items.SubmitMove(ItemsNative.MoveRequest, string, bool)
         "M:Kiln.Items.Move(Kiln.EntityId,Kiln.SlotId,Kiln.EntityId,System.Int32,Kiln.MoveOptions,System.Nullable{Kiln.SlotId})", // Items.Move(EntityId, SlotId, EntityId, int, MoveOptions, SlotId?): via Items.SubmitMove(ItemsNative.MoveRequest, string, bool)
         "M:Kiln.Items.MoveAll(Kiln.EntityId,Kiln.EntityId,Kiln.MoveOptions)", // Items.MoveAll(EntityId, EntityId, MoveOptions): via Items.SubmitMove(ItemsNative.MoveRequest, string, bool)
+        "M:Kiln.Items.PlanSet(Kiln.EntityId,Kiln.EquipmentSet)", // Items.PlanSet(EntityId, EquipmentSet): Services.RequireTickThread
         "M:Kiln.Items.QuickStack(Kiln.EntityId,Kiln.EntityId,Kiln.MoveOptions)", // Items.QuickStack(EntityId, EntityId, MoveOptions): via Items.SubmitMove(ItemsNative.MoveRequest, string, bool)
         "M:Kiln.Items.Read(Kiln.EntityId)", // Items.Read(EntityId): via Items.Require(string)
         "M:Kiln.Items.SetToolWearPerDebit(Kiln.ItemId,System.Int32)", // Items.SetToolWearPerDebit(ItemId, int): Services.RequireTickThread

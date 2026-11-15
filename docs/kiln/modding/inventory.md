@@ -323,6 +323,23 @@ Lab `dev20-wp13` (a copy of the user's world, no player, game build 26430253, Wi
 
 Unit tests are not game evidence. Only a joined player can show the rest:
 
+## Equipment sets: for this session only
+`Items.CaptureSet`, `PlanSet` and `EquipSet` change a player's 20 equipment slots in one transaction (every slot or none;
+[services/items.md](../services/items.md#equipment-sets-v6-since-020-dev29)). A set is scoped to this process, this
+server world and this session of the player: keep it in memory, forget a player's sets when they leave, and do not save
+it. After a restart, in another world or after a rejoin it comes back `StaleSnapshot` and nothing changes; Kiln never
+re-resolves an old set onto items that look the same. The sample `mods/samples/equipment-sets` keeps a dictionary per
+player:
+
+```csharp
+private readonly Dictionary<EntityId, Dictionary<string, EquipmentSet>> _sets = [];
+public override void OnLoad() => Events.On<PlayerLeftEvent>(e => _sets.Remove(e.Player.Entity));
+public override void OnUnload() => _sets.Clear();   // nothing for the next world or start
+```
+
+For a loadout that survives a restart, keep item types (as the Loadouts sample does with `Items.Equip`) or data on the
+items themselves (`InstanceData`), and build a fresh set from what the player has when they ask.
+
 ## Client checklist (needs a player)
 
 1. Hold R with a chest in reach: stacks the chest already has go in. With a keep rule on a slot of your backpack, that slot stays.
