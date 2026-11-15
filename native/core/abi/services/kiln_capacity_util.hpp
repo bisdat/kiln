@@ -276,7 +276,7 @@ inline std::vector<PendingFile> pending_files_bounded(const pending_io::TrustedB
         }, &stopped, &fuel)) {stats->complete=false;stopped=true;return;}
         if (!folder.visit([&](const auto& name) {
             if (name.extension()==".tmp") return;
-            if (!pending_io::component(name.string())) {
+            if (!pending_io::file_component(name.string())) {
                 pending_io::refused(dir/mod/name,"invalid pending filename"); return;
             }
             const int kind=folder.regular(name);

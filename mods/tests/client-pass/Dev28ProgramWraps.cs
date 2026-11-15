@@ -25,6 +25,7 @@
 // when it never ran on one), and that nothing calls it after Dispose. The player judges whether the game ran as before.
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 using Kiln;
 using Kiln.Testing;
 using static Kiln.Testing.ClientCheckTags;
@@ -95,10 +96,11 @@ public sealed partial class ClientPassMod
         serverWrap.Before((ref Slice s) => server.Add(ref s));
         serverWrap.Disabled += e => disabled.Enqueue(e);
         // The archetype filter on a client: render_transform reads CurrentTransform and runs without StaticTransform, so every
-        // slice it runs passes this filter. Its first read comes from the client world's entity map; it puts kiln.world's
-        // slice-record link on the program runner, and from the next step on each slice's archetype is read from the
-        // engine's own slice record on the game's workers. A slice it cannot decide turns the wrap off with a reason (a
-        // Disabled event below); a change under a map read leaves that slice to the game (Stats.ArchetypeSkips).
+        // slice it runs passes this filter. A client slice never reads the entity map: the first read asks for kiln.world's
+        // scoped slice-record link around the program runner and that slice is left to the game (Stats.ArchetypeSkips)
+        // until the link is in, a Pre later; from then on each slice's archetype comes from the engine's own slice record on
+        // the game's workers. A build where the link cannot be had turns the wrap off with the reason (a Disabled event
+        // below).
         var archetype = new WrapCount();
         var w3 = Systems.Wrap("render_transform", new WrapOptions { World = WorldKind.Client });
         if (!c.Expect(w3.Ok && w3.Wrap is not null, "a second wrap of render_transform, with an archetype filter", w3.Ok ? "made" : w3.Reason))
@@ -318,6 +320,176 @@ public sealed partial class ClientPassMod
 #pragma warning disable KILNX001
     private static int LabSystemsMask() => LabSystems.PlayersMask ?? 0xFFFF;
 #pragma warning restore KILNX001
+
+    // ---- 06a-wraps.client-stop and 06a-wraps.client-exit: a stop with wraps registered (Codex's closing read, "Real-client
+    // evidence required"). 06a-wraps.client disposes its own wraps, so it cannot show a world stopping under an active wrap.
+    // These keep a client-world wrap with an archetype filter (render_transform) and a hosted-world wrap (is_actor_in_shape)
+    // registered from their first run until the game exits: they go back to Pending at each stop and are applied again by
+    // name in the next world. The checks then read kiln.log (and kiln.prev.log for the exit) and require, at every client
+    // world stop after they were made, the core's and kiln.world's lines in the review's order.
+    private static ProgramWrap? _stopClient, _stopServer;
+    private static readonly WrapCount StopClientCount = new(), StopServerCount = new();
+    private static readonly ConcurrentQueue<WrapDisabledEvent> StopDisabled = new();
+    private const string StopMarker = "client-pass: 06a-wraps.client-stop: wraps registered for the stop proof";
+
+    private void MakeStopWraps(CheckContext c)
+    {
+        var w1 = Systems.Wrap("render_transform", new WrapOptions { World = WorldKind.Client });
+        var w2 = Systems.Wrap("is_actor_in_shape");
+        if (!c.Expect(w1.Ok && w2.Ok, "the stop proof's wraps (client render_transform with WhenArchetype, hosted is_actor_in_shape)",
+                w1.Ok ? w2.Reason ?? "made" : w1.Reason))
+            return;
+        _stopClient = w1.Wrap!;
+        _stopClient.WhenArchetype(has: ["CurrentTransform"], lacks: ["StaticTransform"]).Before((ref Slice s) => StopClientCount.Add(ref s));
+        _stopClient.Disabled += e => StopDisabled.Enqueue(e);
+        _stopServer = w2.Wrap!;
+        _stopServer.Before((ref Slice s) => StopServerCount.Add(ref s));
+        _stopServer.Disabled += e => StopDisabled.Enqueue(e);
+        c.Log.Info(StopMarker);  // not disposed: they stay registered through leave, rejoin and exit
+    }
+
+    // The ordered lines of one client world stop, from its "stopping" line on (Codex's list). Null when all are there.
+    private static string? StopSequence(string[] log, int at, bool wrapsLive)
+    {
+        var world = Regex.Match(log[at], @"tick: client world (0x[0-9a-f]+) stopping \(session (\d+)");
+        if (!world.Success) return "not a client world's stopping line";
+        var w = world.Groups[1].Value;
+        var want = new List<(string Text, bool Required)>
+        {
+            ($"tick: client world {w}: waiting for world jobs before STOPPING (WaitWorldJobs)", true),
+            ($"tick: client world {w}: its jobs are drained by the engine (WaitWorldJobs, ", true),
+            ("tick: prediction world 0x", false),  // only if the prediction world started
+            ("world 2 stops: WhenArchetype read ", false),
+            ("world 2 stops: its wraps are taken out and wait for the next world (drained: 0 calls in flight at the stop, 0 after ", wrapsLive),
+        };
+        // the sequence ends where the next client world starts (or the log ends)
+        var next = Array.FindIndex(log, at + 1, l => l.Contains("tick: client world 0x", StringComparison.Ordinal) && l.Contains(" started (session ", StringComparison.Ordinal));
+        var i = at + 1;
+        foreach (var (text, required) in want)
+        {
+            var found = i < log.Length ? Array.FindIndex(log, i, l => l.Contains(text, StringComparison.Ordinal)) : -1;
+            if (found < 0 || (next >= 0 && found > next))
+            {
+                if (required) return $"missing in order: \"{text}\"";
+                continue;
+            }
+            if (text.StartsWith("world 2 stops: WhenArchetype", StringComparison.Ordinal) &&
+                !Regex.IsMatch(log[found], @"read [1-9]\d* slices from the engine's slice record and 0 from the entity map \(0 records did not match"))
+                return $"the read counts: {log[found].Trim()}";
+            if (text.StartsWith("world 2 stops: its wraps", StringComparison.Ordinal) &&
+                !log[found].Contains("the engine drains the world's jobs first (world.stop_drain.client)", StringComparison.Ordinal))
+                return $"the stop line does not name the engine's drain: {log[found].Trim()}";
+            i = found + 1;
+        }
+        return null;
+    }
+
+    // What no stop proof may show (the review's list); the link's own fault line is checked apart.
+    private static readonly string[] StopForbidden =
+    [
+        "STOPPING without the engine's wait", "wrap drain timed out", "wrap calls were in flight although",
+        "its tick hook faulted", "tick: exception in",
+    ];
+
+    private static void StopChecks(CheckContext c, string[] log, int from, string what)
+    {
+        var lines = log.Skip(from).ToArray();
+        c.Expect(lines.Any(l => l.Contains("hooks: typed link \"world/slice-record\" on rva ", StringComparison.Ordinal)) ||
+                 log.Take(from).Any(l => l.Contains("hooks: typed link \"world/slice-record\" on rva ", StringComparison.Ordinal)),
+            $"{what}: the scoped link is on the runner (hooks: typed link \"world/slice-record\" on rva ...)", "");
+        c.Expect(log.Any(l => l.Contains("WhenArchetype reads each slice's archetype from the engine's slice record (a scoped checked link", StringComparison.Ordinal)),
+            $"{what}: kiln.world's scoped success line", "");
+        foreach (var bad in StopForbidden)
+        {
+            var hit = lines.FirstOrDefault(l => l.Contains(bad, StringComparison.Ordinal));
+            c.Expect(hit is null, $"{what}: no \"{bad}\" line", hit?.Trim() ?? "none");
+        }
+        var fault = lines.FirstOrDefault(l => l.Contains("typed link \"world/slice-record\"", StringComparison.Ordinal) && l.Contains("faulted", StringComparison.Ordinal));
+        c.Expect(fault is null, $"{what}: the slice-record link never faulted", fault?.Trim() ?? "none");
+        var waits = lines.Count(l => l.Contains("waiting for world jobs before STOPPING (WaitWorldJobs)", StringComparison.Ordinal));
+        var dones = lines.Count(l => l.Contains("its jobs are drained by the engine (WaitWorldJobs, ", StringComparison.Ordinal));
+        c.Expect(waits == dones, $"{what}: every wait for a world's jobs returned (no unmatched wait line)", $"{waits} wait(s), {dones} completion(s)");
+    }
+
+    [ClientCheck("06a-wraps.client-stop", "Program wraps in a game client: the stops of worlds with wraps registered", Area = "Systems",
+        Since = Dev29, Needs = ClientCheckNeeds.Hosted, Order = ProgramWrapsOrder + 5)]
+    public async Task ProgramWrapsClientStop(CheckContext c)
+    {
+        if (!await NeedOpen(c, "systems.wraps", "systems.wraps.client") || !await NeedPlayer(c)) return;
+        if (BootLog(c, "kiln.log") is not { } log)
+        {
+            await c.Verdict();
+            return;
+        }
+        var from = Array.FindIndex(log, l => l.Contains(StopMarker, StringComparison.Ordinal));
+        if (_stopClient is null || from < 0)
+        {
+            MakeStopWraps(c);
+            c.Instruct("Two wraps are registered now and stay so until the game exits. Walk for 10 s, then: leave to the main " +
+                       "menu, host this world again, walk 10 s; leave again and join a server (a friend's or a Kiln lab) for 10 s, " +
+                       "leave, host again, walk 10 s; then run this check again. Later, exit the game from a world (Quit to desktop) " +
+                       "and run 06a-wraps.client-exit after the next start.");
+            await c.Skip("the stop proof's wraps are registered now; leave and rejoin as said, then run this check again");
+            return;
+        }
+        var stops = Enumerable.Range(from, log.Length - from)
+            .Where(i => log[i].Contains("tick: client world 0x", StringComparison.Ordinal) && log[i].Contains(" stopping (session ", StringComparison.Ordinal))
+            .ToList();
+        var starts = log.Skip(from).Where(l => l.Contains("tick: client world 0x", StringComparison.Ordinal) && l.Contains(" started (session ", StringComparison.Ordinal)).ToList();
+        if (stops.Count < 2 || starts.Count < 2)
+        {
+            await c.Skip($"{stops.Count} client world stop(s) and {starts.Count} start(s) since the wraps were made; leave and rejoin twice");
+            return;
+        }
+        foreach (var i in stops)
+            c.Expect(StopSequence(log, i, wrapsLive: true) is null, $"the stop at \"{log[i].Trim()}\" has the review's lines in order",
+                StopSequence(log, i, wrapsLive: true) ?? "all there");
+        var sessions = starts.Select(l => Regex.Match(l, @"\(session (\d+)")).Where(m => m.Success).Select(m => uint.Parse(m.Groups[1].Value)).ToList();
+        c.Expect(sessions.Zip(sessions.Skip(1)).All(p => p.Second > p.First), "each rejoin is a new client world session", string.Join(", ", sessions));
+        StopChecks(c, log, from, "leave and rejoin");
+        if (GameOwnLog(c) is { } game)
+            c.Expect(!game.Any(l => l.Contains(QueueNotIdle, StringComparison.Ordinal)), "the game's own log never says \"[task] TaskQueue '…' is not idle during destroy!\"",
+                game.FirstOrDefault(l => l.Contains(QueueNotIdle, StringComparison.Ordinal)) ?? "none");
+        // fresh callbacks in this world (the wraps were applied again by name)
+        var before = (Interlocked.Read(ref StopClientCount.Slices), Interlocked.Read(ref StopServerCount.Slices));
+        c.Instruct("Walk and turn around for about 15 seconds.");
+        await c.Delay(TimeSpan.FromSeconds(15));
+        var after = (Interlocked.Read(ref StopClientCount.Slices), Interlocked.Read(ref StopServerCount.Slices));
+        c.Log.Info($"client-pass: 06a-wraps.client-stop render_transform {StopClientCount}; stats {_stopClient.Stats}; is_actor_in_shape {StopServerCount}");
+        c.Expect(_stopClient.State == WrapState.Active && _stopServer!.State == WrapState.Active && after.Item1 > before.Item1 && after.Item2 > before.Item2,
+            "both wraps were applied again in this world and run (fresh callbacks)", $"client {before.Item1} -> {after.Item1}, hosted {before.Item2} -> {after.Item2}");
+        c.Expect(StopDisabled.IsEmpty && _stopClient.Stats.Faults == 0 && _stopServer.Stats.Faults == 0 && _stopClient.Stats.Overruns == 0,
+            "no stage faulted, went over its budget or was turned off", StopDisabled.IsEmpty ? "none" : string.Join("; ", StopDisabled.Select(e => $"{e.Program}: {e.Reason}")));
+        c.Instruct("Through leaving, joining and hosting again: did the game run as before, models drawn where they belong, no " +
+                   "hang at a leave? Pass if it did.");
+        await c.Verdict();
+    }
+
+    [ClientCheck("06a-wraps.client-exit", "Program wraps in a game client: the exit of a world with wraps registered", Area = "Systems",
+        Since = Dev29, Needs = ClientCheckNeeds.Hosted, Order = ProgramWrapsOrder + 6)]
+    public async Task ProgramWrapsClientExit(CheckContext c)
+    {
+        if (!await NeedOpen(c, "systems.wraps", "systems.wraps.client") || !await NeedPlayer(c)) return;
+        if (BootLog(c, "kiln.prev.log") is not { } prev || Array.FindLastIndex(prev, l => l.Contains(StopMarker, StringComparison.Ordinal)) is var from && from < 0)
+        {
+            c.Instruct("Run 06a-wraps.client-stop in a hosted world, then exit the game from that world (Quit to desktop). Start the " +
+                       "game again, host a world and run this check (it reads kiln.prev.log, the last start's log).");
+            await c.Skip("the last start did not register the stop proof's wraps");
+            return;
+        }
+        var last = Array.FindLastIndex(prev, l => l.Contains("tick: client world 0x", StringComparison.Ordinal) && l.Contains(" stopping (session ", StringComparison.Ordinal));
+        c.Expect(last > from, "the last start's client world stopped at the exit, after the wraps were made", last >= 0 ? prev[last].Trim() : "no stop");
+        if (last > from)
+            c.Expect(StopSequence(prev, last, wrapsLive: true) is null, "the exit's client world stop has the review's lines in order",
+                StopSequence(prev, last, wrapsLive: true) ?? "all there");
+        var server = Array.FindLastIndex(prev, l => l.Contains("tick: server world 0x", StringComparison.Ordinal) && l.Contains(" stopping (session ", StringComparison.Ordinal));
+        c.Expect(server > from && prev.Skip(server).Any(l => l.Contains("tick: server world 0x", StringComparison.Ordinal) && l.Contains("its jobs are drained by the engine (WaitWorldJobs, ", StringComparison.Ordinal)) &&
+                 prev.Skip(server).Any(l => l.Contains("world 0 stops: its wraps are taken out", StringComparison.Ordinal) && l.Contains("(world.stop_drain.server)", StringComparison.Ordinal)),
+            "the hosted world's stop at the exit: the engine's drain, then kiln.world's stop line naming it", server >= 0 ? prev[server].Trim() : "no stop");
+        StopChecks(c, prev, from, "the last start, up to its exit");
+        c.Instruct("Did the game close normally at that exit (no crash report, no hang)? Pass if it did.");
+        await c.Verdict();
+    }
 }
 
 // 06a-define.hosted's program: the hosted world's water containers (template FuelSetup, read Fuel). kiln.programs.json beside

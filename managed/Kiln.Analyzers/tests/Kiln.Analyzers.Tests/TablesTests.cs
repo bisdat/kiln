@@ -28,6 +28,12 @@ public sealed class TablesTests
     public void Advanced_members(string id) => Assert.Contains(id, KilnApis.Advanced);
 
     [Fact]
+    public void Material_pool_result_define_is_in_the_generated_tick_thread_table()
+    {
+        Assert.Contains("M:Kiln.Blocks.Define(System.String,Kiln.BuildingMaterialPoolBlock,Kiln.DefinitionRegistrationOptions)",KilnApis.TickThread);
+    }
+
+    [Fact]
     public void Advanced_members_are_behind_a_gate()
     {
         // The services with an advanced gate: Kiln.Hooks (HooksGate), Kiln.Abilities (AbilitiesGate), Kiln.Creatures

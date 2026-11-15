@@ -3,9 +3,10 @@
 // configs, the version, its folder, remove). A mod found in the game folder is a row with its state and its fix, no
 // switch. Above the list: the filter (with many mods), Notes (what the last activation said about mod folders, when it
 // said something), Load order, Engines and Add mods. It scrolls inside the page.
+import { SfSelfHostedNotice } from "../../components/SfSelfHostedNotice";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, MoreHorizontal } from "lucide-react";
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useSearchParams, Link } from "react-router-dom";
 import * as api from "../../api/commands";
 import type { AddReport, GameInstall, ModKind } from "../../api/commands";
@@ -160,6 +161,12 @@ export function MainList({ game, mods, running }: { game: GameInstall; mods: Mod
   const skipRemove = picked.length - toRemove.length;
   const [removing, setRemoving] = useState<ModRow[] | null>(null);
   const check2 = useRemoveMany(removing ?? [], pid, !!removing);
+  // Profile-local controls end at the identity change, never at a later data refresh.
+  useLayoutEffect(() => {
+    setText(params.get("filter") ?? ""); setKind("");
+    setSettings(null); setConfigs(null); setRm(null); setRemoving(null);
+    setSource(null); setReplaceConfirm(null);
+  }, [game.id, pid]);
   const skipLine = (p: ReturnType<typeof bulkPlan>) => (p.left.length ? ` ${p.left.length} skipped: ${[...new Set(p.left.map((l) => l.why))].join("; ")}.` : "");
   const selTitle = (on: boolean) => {
     const p = on ? selOn : selOff;
@@ -239,6 +246,7 @@ export function MainList({ game, mods, running }: { game: GameInstall; mods: Mod
   const foundStart = shown.findIndex((r) => r.found);
   return (
     <div className={"k-mods" + (mods.rows.length ? "" : " empty") + (selecting ? " selecting" : "")} onKeyDown={keys}>
+      <SfSelfHostedNotice profile={mods.profile} found={mods.found.data} />
       <div className="k-mods-bar">
         {many && (
           <>
@@ -331,7 +339,7 @@ export function MainList({ game, mods, running }: { game: GameInstall; mods: Mod
               </span>
               <span className="k-mod-kind">{r.kind && <Badge tone={KIND_TONE[r.kind]} title={KIND_NAME[r.kind]}>{KIND_SHORT[r.kind]}</Badge>}</span>
               <span className="k-mono k-mod-ver" title={(r.lib?.versions.length ?? 0) > 1 ? `${r.lib!.versions.length} versions in the library` : r.version ?? undefined}>{r.version ?? ""}{replacedNote(r)}</span>
-              <Menu label={`More for ${r.name}`} icon={<MoreHorizontal />} size="s" items={menu(r)} />
+              <Menu key={pid} label={`More for ${r.name}`} icon={<MoreHorizontal />} size="s" items={menu(r)} />
             </li>
           ))}
           {!shown.length && <li className="k-mods-none">No mod matches that.</li>}

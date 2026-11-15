@@ -768,17 +768,14 @@ typedef struct KilnWorldApi {
      * KILN_ERR_INVALID_ARGUMENT: not a write list or name; KILN_ERR_UNAVAILABLE: no tracker on this slot or build. */
     KilnResult(KILN_CALL* game_slice_mark)(KilnGameSlice* slice, const uint64_t* iter, int32_t list, int32_t i);
     /* Inside a stage: the slice's archetype key (all its entities share one archetype). Since dev.29 it is the layout in
-     * the engine's own slice record, the one ProgramRunner set the slice's columns up from (world.slice_record: a mid
-     * link on the runner's entry, put in in the Pre after the first call; checked against the trampoline's entry and the
-     * job's count). Until that link is in, or without it, it is the layout of the first entity's record, read from the
-     * entity map. That read is narrowed, not proven: the map's capacity and count and the
-     * record's id are compared before and after the layout read, which catches a grow, a count change and a record that
-     * names another entity, but not an erase and an insert between the two reads (the count is the same) nor a record
-     * freed and reused for the same id. On a server world the map is at rest while slices run (structural changes are
-     * deferred to the step's end); a client world's off-thread create/destroy is what is left (systems.wraps.client).
-     * KILN_ERR_NOT_FOUND for an empty slice; KILN_WORLD_ERR_CHANGED (since dev.29) when a change was seen under the read
-     * or the record does not name the entity (transient: read again or leave the slice to the game); KILN_ERR_UNAVAILABLE
-     * only when this build cannot read archetypes (its entity map or record layout did not resolve). */
+     * the engine's own slice record, the one ProgramRunner set the slice's columns up from (world.slice_record: a
+     * scoped checked typed link on the runner, installed lazily in Pre; checked against the trampoline entry and row
+     * count). The capture lasts only for that runner continuation and is consumed once; nested calls restore it.
+     * Server slices can fall back to the first entity's record in the entity map, at rest during the server step.
+     * Its count/id rechecks narrow races but do not prove lifetime against arbitrary external mutation. Client slices
+     * never use that unproven map fallback: a missing/mismatched capture is CHANGED, an unavailable/exhausted install
+     * is UNAVAILABLE. CHANGED is transient: read again or leave only that slice to the game (the original still runs).
+     * KILN_ERR_NOT_FOUND for an empty slice; KILN_ERR_UNAVAILABLE when this build cannot safely read this kind. */
     KilnResult(KILN_CALL* game_slice_archetype)(KilnGameSlice* slice, uintptr_t* out_layout);
     /* Whether archetype `layout` (game_slice_archetype) has component `component_hash`: 1 yes, 0 no, -1 not known
      * (no such component in that world, no world). Any thread, while the world lives. */

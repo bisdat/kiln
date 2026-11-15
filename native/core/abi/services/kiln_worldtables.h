@@ -18,6 +18,7 @@
 #ifndef KILN_WORLDTABLES_H
 #define KILN_WORLDTABLES_H
 #include "../kiln_api.h"
+#include "kiln_capacity.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -88,8 +89,8 @@ typedef struct KilnWorldTablesApi {
 
     int32_t(KILN_CALL* state)(void); /* KILN_WT_* */
 
-    /* What client and server have to agree on: 16 hex digits over the live materials' ids and GUIDs. The same text for
-     * every install with no live material, including one with the service off. */
+    /* What client and server have to agree on: materials, crafting props and optional custom pools/bindings.
+     * No custom pools preserves the pre-dev.29 hash byte for byte. An off service returns the empty hash. */
     KilnStr(KILN_CALL* table_hash)(void);
 
     /* Every material in the tables: the building materials, then the terrain ones (cell_id < 128), live ones first in each. 0 before the merge. */
@@ -134,6 +135,21 @@ typedef struct KilnWorldTablesApi {
     KilnResult(KILN_CALL* crafting_prop_at)(uint32_t index, KilnWtCraftingProp* out);
     /* The place (bit) of a crafting prop's GUID, or -1: not in the table. Added v1 (appended). */
     int32_t(KILN_CALL* crafting_prop_index)(const uint8_t guid[16]);
+    /* dev.29 appends. Check header.size through the specific member before use. Process snapshots, any thread. */
+    KilnResult(KILN_CALL* material_budget)(uint32_t category, KilnCapacityInfo* out);
+    KilnResult(KILN_CALL* pool_budget)(KilnStr pool_name, KilnCapacityInfo* out);
+    /* Same writer document as define_json, with one buildingMaterialPools entry named by name.
+     * Probe/grow is mutation-free. Registered means an identical row in the served boot table.
+     * AllowNextStart atomically persists one definition+receipt envelope, consuming zero live entries.
+     * KILN_ERR_INVALID_ARGUMENT: the document is wrong; for the author's own mistake (two entries that are one building
+     * item, a roof disagreement) report holds the reason naming the entries (out_len its length). */
+    KilnResult(KILN_CALL* define_pool_result)(KilnOwner owner, KilnStr name, KilnStr typed_pool_json, uint32_t timing,
+        KilnDefinitionReply* out, char* report, size_t capacity, size_t* out_len);
+    /* owner=0 is a pure any-thread query. Internal host observation on Post may supply the exact loaded
+     * owner's token to adopt a previously unowned boot receipt; it cannot reactivate a retired real owner.
+     * Buffer probes never adopt. The record shape is the shared buff/VFX KilnDefinitionReply. */
+    KilnResult(KILN_CALL* pool_registration)(KilnOwner owner, const uint8_t registration_id[16], KilnDefinitionReply* out,
+        char* report, size_t capacity, size_t* out_len);
 } KilnWorldTablesApi;
 
 #ifdef __cplusplus

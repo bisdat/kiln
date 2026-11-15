@@ -51,14 +51,22 @@ wrap.Dispose();   // or let the mod's unload remove it
   decide (the build gives no archetype key, a name the world has no component of) turns its stage off with the reason
   (`Disabled`) instead of skipping every slice; an empty slice is skipped. Since 0.2.0-dev.29 kiln.world reads the
   archetype from the engine's own record of the slice, the one the game's program runner set the slice's columns up
-  from: the first archetype read puts a link on the runner (kiln.log: "WhenArchetype reads each slice's archetype from
-  the engine's slice record"), and from the next step on every slice reads it there. Until then, and on a build where
-  that link cannot be had, the archetype comes from the slice's first entity in the game's entity map. That read is
-  narrowed, not proven: kiln.world compares the map's size and the entity's record before and after it, which catches
-  most changes under the read but not an erase and an insert in between, nor a record reused for the same id. On a
-  server world the map does not change while programs run; on a client world the network can create and destroy
-  entities on another thread. When kiln.world sees a change, the filter reads again (three reads in all), then leaves
-  that one slice to the game: the stage stays on, `Stats.ArchetypeSkips` counts it and kiln.log says so once per stage.
+  from. The first archetype read asks for a link around the runner, put in in a later Pre with the checked install (it
+  checks the game's other threads; refused, it is tried again 16 steps later, eight times at most). The link keeps the
+  slice's record for exactly that runner call: when the call returns, is skipped by another hook or unwinds, the record
+  is gone, so a later slice can never read an earlier slice's archetype (kiln.log: "WhenArchetype reads each slice's
+  archetype from the engine's slice record (a scoped checked link on types/ProgramRunner ...)").
+  - **Server world:** until the link is in, or where it cannot be had, the archetype comes from the slice's first entity
+    in the game's entity map. That read is narrowed, not proven: kiln.world compares the map's size and the entity's
+    record before and after it, which catches most changes under the read but not an erase and an insert in between,
+    nor a record reused for the same id; it relies on the game deferring structural changes to the step's end.
+  - **Client world:** never from the entity map (the network can create and destroy entities on another thread).
+    While the link is not in yet, or a slice has no record of its own, the filter leaves that slice to the game; where
+    the build has no slice record or eight installs failed, the filter cannot decide and its stage goes off with the
+    reason.
+  - A transient answer (a change under a server map read, a client slice without its record) is read again (three reads
+    in all), then that one slice is left to the game: the stage stays on, `Stats.ArchetypeSkips` counts it and kiln.log
+    says so once per stage.
 - **Creating and destroying entities.** Not from a handler: `Kiln.Spawn` refuses there (managed and native, since
   0.2.0-dev.29 also on the world's own thread) with a message that names `Slice.Post`; post the call and it runs before
   the next step. (A `GameSystems.Hook` callback is not a handler: there such a call still goes through, as in
@@ -286,12 +294,20 @@ keep memory the plugin frees itself alive.
   prediction world has no table of its own: it runs the client world's, and its slices reach the game's update untouched.
   A wrap belongs to one world: it is applied in that world's own step, taken out when that world stops, and applied again
   by name in the next world of that kind.
-- A world's stop: kiln.world closes the stages' admission and waits up to 2 s for a call in flight. The game itself lets
-  no program slice outlive the step that ran it (its program stepper waits for the world's task queue before it
-  returns), and the core runs the game's WaitWorldJobs on the server and the client world before their stop (since
-  0.2.0-dev.29; the prediction world stops with the client world). The capability rows `world.stop_drain.server`,
-  `.client` and `.prediction` say which guarantee a process has; `systems.wraps` and `systems.wraps.client` name it,
-  and so does kiln.log at each stop. Without WaitWorldJobs on a build, the 2 s wait is all there is.
+- A world's stop: kiln.world closes the stages' admission and waits up to 2 s for a call in flight. Which guarantee a stop
+  has is the core's capability row `world.stop_drain.server`, `.client` or `.prediction` (`systems.wraps` and
+  `systems.wraps.client` name it, and so does kiln.log at each stop):
+  - **Drained by the engine** (the row is available; the supported builds, with a working tick): the game itself lets no
+    program slice outlive the step that ran it (its program stepper waits for the world's task queue before it
+    returns), and the core runs the game's WaitWorldJobs on the server and the client world before their stop (the
+    prediction world stops with the client world, after that wait). No stage is running then; a call found in flight is
+    logged as an error. kiln.log names the wait before it starts, says so every so often while it lasts, and gives its
+    time when it returns.
+  - **A bounded wait only** (the row is unavailable: WaitWorldJobs did not resolve on the build): the 2 s wait is all
+    there is. It keeps Kiln's own state alive for a call still running after it, not the game's world: a stage still
+    running then can outlive the world's memory.
+  - **No stop at all** (the tick hook faulted): no stop event comes; wraps close at their next slice and the game's
+    updates run untouched.
 - Refused while native SET is loaded.
 - Typed views exist for the game build Kiln was made for; on another build a changed program's typed wrap is refused
   (its contract), untyped wraps go on. No typed property for `Dynamic*` components, singletons and other-entity lists;

@@ -43,6 +43,32 @@ void check(bool yes, const char* name) {
     if (!yes) throw std::runtime_error(name);
     ++checks;
 }
+KilnWorldTablesApi tables{};
+std::string pool_status;
+void table_references() {
+    using namespace kc;
+    KilnApi api{};api.service=[](KilnStr name,uint32_t)->const void* {
+        return std::string(name.ptr,name.len)==KILN_WORLDTABLES_SERVICE?&tables:nullptr;
+    };g_api=&api;
+    tables.header={144,1};tables.state=[]()->int32_t{return KILN_WT_MERGED;};
+    tables.material_id=[](const uint8_t*)->int32_t{return 213;};
+    tables.status_json=[](char* out,size_t capacity,size_t* count)->KilnResult {
+        *count=pool_status.size();if(!out || capacity<=*count)return KILN_ERR_BUFFER_TOO_SMALL;
+        std::memcpy(out,pool_status.c_str(),pool_status.size()+1);return KILN_OK;
+    };
+    uint8_t guid[16];guid_parse("11111111-2222-4333-8444-555555555555",guid);
+    pool_status=R"({"state":"merged","customPools":[{"guid":"11111111-2222-4333-8444-555555555555"}]})";
+    check(world_material(guid),"old worldtables prefix still admits material references");
+    check(world_pool(guid),"served custom pool admits its 16-byte GUID");
+    guid[0]^=1;check(!world_pool(guid),"unknown pool GUID is refused");guid[0]^=1;
+    tables.header.size=offsetof(KilnWorldTablesApi,status_json);check(!world_pool(guid),"short table never calls status_json");
+    tables.header.size=144;pool_status=R"({"state":"off","customPools":[{"guid":"11111111-2222-4333-8444-555555555555"}]})";
+    check(!world_pool(guid),"off tables cannot authorize pool references");
+    pool_status=R"({"state":"merged","customPools":[{"guid":42}]})";check(!world_pool(guid),"malformed snapshot refuses without throwing");
+    tables.status_json=nullptr;check(!world_pool(guid),"missing member refuses without a null call");
+    tables.header.size=offsetof(KilnWorldTablesApi,material_id);check(!world_material(guid),"short material table refuses before call");
+    g_api=nullptr;
+}
 void malformed_entries() {
     using namespace kc;
     for (const char* key : {"kind", "type", "guid"}) {
@@ -138,6 +164,7 @@ void own_mod_models(const std::filesystem::path& root) {
 
 int main(int argc, char** argv) {
     try {
+        table_references();
         malformed_entries();
         if (argc != 2) throw std::runtime_error("provide a new fixture directory");
         own_mod_models(argv[1]);

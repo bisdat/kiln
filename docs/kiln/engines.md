@@ -41,7 +41,8 @@ Kiln owns only `dinput8.dll`.
 
 - `kiln`: replaced (backup). `notdll`: refused.
 - `shroudforge`: refused unless "switch from ShroudForge". Then only ShroudForge's `dinput8.dll` goes to the backup.
-  Its `dbghelp.dll`, `winmm.dll` and `shroudforge/` stay, and Kiln's ShroudForge plugin drives the installed runtime.
+  Its `dbghelp.dll`, `winmm.dll` and `shroudforge/` stay. If its own loader still starts, ShroudForge hosts itself;
+  otherwise Kiln's ShroudForge plugin hosts the selected runtime. See ShroudForge self-hosting below.
 - Every other kind: chained. The installer moves the DLL to `kiln/chain/<word>-dinput8.dll` and adds it to
   `chain.ini [chain]`. Occupied chain names always get a numbered suffix, even for identical bytes, directories or
   dangling links. Ultimate ASI Loader runs only under names it knows, so it is chained as `xinput9_1_0.dll` next
@@ -195,6 +196,22 @@ A kind without a loader is skipped on import with its reason. It is never import
 An unreadable/unknown `mod.json` or incomplete Lua package stays one skipped item: its helper DLLs are never
 imported separately. Standalone DLLs without package metadata retain the existing bare-DLL import flow. These are
 Library import rules; a runtime plugin may already run an engine's mods placed in its game-folder layout manually.
+
+### ShroudForge self-hosting
+
+ShroudForge can also host itself: its own proxy in the game folder starts it, and Kiln's adapter stands aside
+before consulting the profile. ShroudForge scans its own mods folder; the profile's ShroudForge switches do not
+decide that start. Kiln still writes managed packages' switches during activation; self-hosting does not undo those writes.
+
+Engines shows **runs itself: <file>**, and Mods (desktop and Deck) names the detected loader when the loaded profile
+contains ShroudForge mods, including switched-off entries. Remove that file to let Kiln's adapter host ShroudForge.
+For ShroudForge's `dinput8.dll`, **Let Kiln manage ShroudForge** opens Runtime's existing **Switch from ShroudForge**
+confirmation. That operation backs up only `dinput8.dll`: other SF proxies must be removed separately.
+Under Proton a proxy still needs its DLL override to actually load; disk detection is a warning before Play, not proof
+of execution. The adapter confirms actual self-hosting in `kiln/state/shroudforge.json` (`mode: self-hosted`,
+`loaderFile`) and in one INFO log line. Disk detection is refreshed while Mods is open. If the file was removed since
+that record, the warning clears and Engines labels the record as the last start; it does not predict self-hosting.
+
 ShroudForge installation detection classifies `dbghelp.dll` and `winmm.dll` before calling them SF's helpers.
 
 ## Adding support for an engine's mods

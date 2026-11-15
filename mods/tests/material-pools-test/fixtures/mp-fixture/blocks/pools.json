@@ -1,0 +1,367 @@
+{
+  "format": 1,
+  "buildingMaterials": {
+    "ice": {
+      "name": "Pool Ice Block",
+      "strength": {
+        "drops": "block",
+        "itemsPerBlocks": 1
+      },
+      "surface": {
+        "side": {
+          "tint": "#80dfff"
+        },
+        "top": {
+          "tint": "#80dfff"
+        },
+        "bottom": {
+          "tint": "#80dfff"
+        }
+      },
+      "recipe": {
+        "needs": {
+          "Block_T1_Stone_Rough_CRAFTING": 1
+        },
+        "makes": 10
+      }
+    },
+    "frost": {
+      "name": "Pool Frost Block",
+      "strength": {
+        "drops": "block",
+        "itemsPerBlocks": 1
+      },
+      "surface": {
+        "side": {
+          "tint": "#e0faff"
+        },
+        "top": {
+          "tint": "#e0faff"
+        },
+        "bottom": {
+          "tint": "#e0faff"
+        }
+      },
+      "recipe": {
+        "needs": {
+          "Block_T1_Stone_Rough_CRAFTING": 1
+        },
+        "makes": 10
+      }
+    },
+    "slate": {
+      "name": "Pool Slate Block",
+      "strength": {
+        "drops": "block",
+        "itemsPerBlocks": 1
+      },
+      "surface": {
+        "side": {
+          "tint": "#404060"
+        },
+        "top": {
+          "tint": "#404060"
+        },
+        "bottom": {
+          "tint": "#404060"
+        }
+      },
+      "recipe": {
+        "needs": {
+          "Block_T1_Stone_Rough_CRAFTING": 1
+        },
+        "makes": 10
+      }
+    }
+  },
+  "buildingMaterialPools": {
+    "four": {
+      "name": "Four Walls",
+      "materials": [
+        {
+          "material": "ice"
+        },
+        {
+          "material": "frost"
+        },
+        {
+          "material": "slate"
+        },
+        {
+          "gameMaterial": "WoodRough"
+        }
+      ]
+    },
+    "shared": {
+      "name": "Shared Ice",
+      "materials": [
+        {
+          "material": "ice"
+        },
+        {
+          "gameMaterial": "StoneRough"
+        }
+      ]
+    },
+    "full": {
+      "name": "Full 64",
+      "materials": [
+        {
+          "gameMaterial": "StoneMycelium"
+        },
+        {
+          "gameMaterial": "DungeonMarbleHallowHalls"
+        },
+        {
+          "gameMaterial": "GreenGlowHallowHallsCairn"
+        },
+        {
+          "gameMaterial": "HollowHallsStoneHallowHalls"
+        },
+        {
+          "gameMaterial": "YellowGlowMemorialHall"
+        },
+        {
+          "gameMaterial": "StoneStarMaterial"
+        },
+        {
+          "gameMaterial": "DungeonHollowHallsDecoration"
+        },
+        {
+          "gameMaterial": "LoamFiredBricks"
+        },
+        {
+          "gameMaterial": "WoodDeadwood"
+        },
+        {
+          "gameMaterial": "WoodPalmwood"
+        },
+        {
+          "gameMaterial": "WoodTarredWood"
+        },
+        {
+          "gameMaterial": "DungeonStoneCatacombs"
+        },
+        {
+          "gameMaterial": "SandStoneSandstonePlastered01"
+        },
+        {
+          "gameMaterial": "SandstoneRough"
+        },
+        {
+          "gameMaterial": "SandStoneSandstoneFancy"
+        },
+        {
+          "gameMaterial": "StoneHighlyPolished"
+        },
+        {
+          "gameMaterial": "DungeonSandstoneTemple"
+        },
+        {
+          "gameMaterial": "DungeonStoneWellWall"
+        },
+        {
+          "gameMaterial": "StoneCastleWall"
+        },
+        {
+          "gameMaterial": "StoneCityWall"
+        },
+        {
+          "gameMaterial": "StoneRough"
+        },
+        {
+          "gameMaterial": "WoodRough"
+        },
+        {
+          "gameMaterial": "StoneNation01Basement"
+        },
+        {
+          "gameMaterial": "WoodTimberframe"
+        },
+        {
+          "gameMaterial": "WoodDeepforestWoodPlanks"
+        },
+        {
+          "gameMaterial": "StoneNation01Citywall01"
+        },
+        {
+          "gameMaterial": "StoneNation01ShedBasement"
+        },
+        {
+          "gameMaterial": "DungeonFancy"
+        },
+        {
+          "gameMaterial": "StoneBrittleMixedSizes"
+        },
+        {
+          "gameMaterial": "WoodFancy"
+        },
+        {
+          "gameMaterial": "StoneFancy"
+        },
+        {
+          "gameMaterial": "StoneAncientSunkenCity"
+        },
+        {
+          "gameMaterial": "StoneAncientDungeonBasalt"
+        },
+        {
+          "gameMaterial": "SandStonePolished"
+        },
+        {
+          "gameMaterial": "MetalSheets"
+        },
+        {
+          "gameMaterial": "MetalBronze"
+        },
+        {
+          "gameMaterial": "MetalCopper"
+        },
+        {
+          "gameMaterial": "MetalIron"
+        },
+        {
+          "gameMaterial": "FlintstoneRough"
+        },
+        {
+          "gameMaterial": "GlowDirtBlue"
+        },
+        {
+          "gameMaterial": "Bones"
+        },
+        {
+          "gameMaterial": "GlowDirtGreen"
+        },
+        {
+          "gameMaterial": "GlowDirtWarmWhite"
+        },
+        {
+          "gameMaterial": "WoodTimberframeBrick"
+        },
+        {
+          "gameMaterial": "StoneObsidianPolished"
+        },
+        {
+          "gameMaterial": "WoodPine"
+        },
+        {
+          "gameMaterial": "StoneGranitePolished"
+        },
+        {
+          "gameMaterial": "StoneGranite"
+        },
+        {
+          "gameMaterial": "StoneVukahDungeonWall"
+        },
+        {
+          "gameMaterial": "StoneVukahPlaitedWalll"
+        },
+        {
+          "gameMaterial": "StoneShelllimeCastleWallFoundation"
+        },
+        {
+          "gameMaterial": "StoneShelllimeLizardTemple"
+        },
+        {
+          "gameMaterial": "WoodBamboo"
+        },
+        {
+          "gameMaterial": "WoodPalmwoodShelllimePirateBay"
+        },
+        {
+          "gameMaterial": "StoneShelllimePirateBayWall"
+        },
+        {
+          "gameMaterial": "FabricCastleCarpet"
+        },
+        {
+          "gameMaterial": "StoneAncientMoonstone"
+        },
+        {
+          "gameMaterial": "YellowGlowAncientEnergy"
+        },
+        {
+          "gameMaterial": "AncientGrayStone"
+        },
+        {
+          "gameMaterial": "DarkCirclesAncient"
+        },
+        {
+          "gameMaterial": "FullGoldAncient"
+        },
+        {
+          "material": "ice"
+        },
+        {
+          "material": "frost"
+        },
+        {
+          "material": "slate"
+        }
+      ]
+    },
+    "roof": {
+      "name": "Plant Roof",
+      "roof": true,
+      "materials": [
+        {
+          "gameMaterial": "RoofPlantFibre"
+        }
+      ]
+    }
+  },
+  "blueprints": {
+    "four_shape": {
+      "name": "Pool Four Wall",
+      "roof": false,
+      "cells": [
+        [
+          "##"
+        ],
+        [
+          "#."
+        ]
+      ],
+      "materialPool": "four"
+    },
+    "shared_shape": {
+      "name": "Pool Shared Wall",
+      "roof": false,
+      "cells": [
+        [
+          "##"
+        ],
+        [
+          "#."
+        ]
+      ],
+      "materialPool": "shared"
+    },
+    "full_shape": {
+      "name": "Pool Full Wall",
+      "roof": false,
+      "cells": [
+        [
+          "##"
+        ],
+        [
+          "#."
+        ]
+      ],
+      "materialPool": "full"
+    },
+    "roof_shape": {
+      "name": "Pool Roof",
+      "roof": true,
+      "cells": [
+        [
+          "##"
+        ],
+        [
+          "#."
+        ]
+      ],
+      "materialPool": "roof"
+    }
+  }
+}

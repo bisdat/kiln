@@ -15,6 +15,9 @@
     <InternalsVisibleTo Include="BlocksTest" />
     <InternalsVisibleTo Include="BlocksAbilitiesTest" />
     <InternalsVisibleTo Include="Kiln.Blocks.Tests" />
+    <InternalsVisibleTo Include="Kiln.Sdk.Bake" />
+    <InternalsVisibleTo Include="Kiln.Sdk.Tests" />
+    <InternalsVisibleTo Include="Kiln.TestKit" />
     <InternalsVisibleTo Include="FurnitureTest" />
     <InternalsVisibleTo Include="KindsFaultTest" />
     <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />
