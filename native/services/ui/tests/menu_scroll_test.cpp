@@ -448,7 +448,7 @@ int main() {
         for (int k = 0; k < 100; ++k) check(!guard_step(g, Try::probe), "probed calls do not pass the wrap's trial");
         for (uint32_t k = 1; k < kTrialFrames; ++k) check(!guard_step(g, Try::wrap), "fewer wrapped calls keep it");
         check(guard_step(g, Try::wrap) && !g.on_disk, "the 48th wrapped call: it goes");
-        check(!guard_begin(g, Try::wrap) && !guard_begin(g, Try::probe), "nothing begins twice");
+        check(!guard_begin(g, Try::wrap) && !guard_begin(g, Try::probe), "kinds that passed write nothing any more");
         // a wrap that begins during the probe's trial: the marker (already there) stays until both passed
         Guard h;
         check(guard_begin(h, Try::probe), "probe: marker");
@@ -467,6 +467,129 @@ int main() {
         // a game that ended while the marker was there: the next start reads it and stays off (as before)
         check(decide(File::read, File::absent, std::string{}, "v", "b") == Start::off_after_crash,
               "a crash during either trial: off at the next start");
+    }
+    // ---- the guard over a whole process: only a crash in (or right after) Kiln's calls leaves the marker ----
+    {
+        // menu_scroll.cpp's glue on a fake disk: the marker written before a call, cleared where the guard says
+        struct Proc {
+            Guard g;
+            bool trying = false;         // kiln/state/menu-scroll.trying on the disk
+            bool clear_pending = false;  // guard_step passed: after_frame deletes it
+            void call(Try k) {
+                if (guard_begin(g, k)) trying = true;
+            }
+            void frame_end() {  // scroll_after_frame
+                if (clear_pending) trying = false, clear_pending = false;
+                if (guard_frame(g)) trying = false;
+            }
+            // one UI frame with the pause menu open: both probes, the scroll view when wrapped, the close site
+            void menu(bool wrapped = false, bool quit_chosen = false) {
+                call(Try::probe), call(Try::probe);
+                if (wrapped) call(Try::wrap);
+                if (quit_chosen) guard_leaving(g);
+                if (guard_step(g, Try::probe)) clear_pending = true;
+                if (wrapped && guard_step(g, Try::wrap)) clear_pending = true;
+                frame_end();
+            }
+            void plain(int n) {  // UI frames without the pause menu (the game, the main menu, loading)
+                for (int i = 0; i < n; ++i) frame_end();
+            }
+            void world_stops() {
+                if (guard_world_stops(g)) trying = false;
+            }
+            void exit_clean() {
+                if (guard_exit(g)) trying = false;
+            }
+            // the next start's reading of the disk
+            Start next_start() const {
+                return decide(trying ? File::read : File::absent, File::absent, std::string{}, "v", "b");
+            }
+        };
+        {
+            Proc p;  // the coordinator's case: open, 10 frames, close, a clean exit
+            for (int i = 0; i < 10; ++i) p.menu();
+            check(p.trying, "10 frames into the trial: the marker is there");
+            p.plain(2);
+            p.exit_clean();
+            check(!p.trying && p.next_start() == Start::try_it, "open, 10 frames, close, clean exit: no off record");
+        }
+        {
+            Proc p;  // the same, killed right after closing (no exit call, no world stop, as on native Windows)
+            for (int i = 0; i < 10; ++i) p.menu();
+            p.plain(kIdleFrames);
+            check(!p.trying && p.next_start() == Start::try_it,
+                  "open, 10 frames, close: cleared kIdleFrames frames later, whatever ends the game afterwards");
+            for (int i = 0; i < 30; ++i) p.menu();
+            check(p.trying && !p.g.trial[0].done, "the next opening writes it again: the trial goes on (40 of 48)");
+            for (int i = 0; i < 8; ++i) p.menu();
+            check(!p.trying && p.g.trial[0].done, "48 probed frames over two openings: the trial passed, cleared");
+            p.menu();
+            check(!p.trying, "a passed trial writes nothing at later openings");
+        }
+        {
+            Proc p;  // the coordinator's other case: a crash inside a probe
+            p.call(Try::probe);
+            check(p.trying && p.next_start() == Start::off_after_crash, "a crash inside the first probe: off record");
+            Proc q;
+            for (int i = 0; i < 20; ++i) q.menu();
+            q.plain(1);
+            q.call(Try::probe);  // the next opening's first probe faults
+            check(q.trying && q.next_start() == Start::off_after_crash, "a crash in a probe of a later frame: off record");
+            Proc r;
+            for (int i = 0; i < 20; ++i) r.menu();
+            r.plain(kIdleFrames);
+            r.call(Try::probe);  // the next opening's first probe faults, after the marker had gone
+            check(r.trying && r.next_start() == Start::off_after_crash, "a crash at the next opening: written again, off record");
+        }
+        {
+            Proc p;  // a crash in the frames right after Kiln's calls (the layout or the drawing of their frame)
+            for (int i = 0; i < 5; ++i) p.menu();
+            p.plain(kIdleFrames - 1);
+            check(p.trying && p.next_start() == Start::off_after_crash, "within kIdleFrames of the calls: still a crash");
+        }
+        {
+            Proc p;  // Esc, then Quit to Desktop within the trial, and the process ends right after that frame
+            for (int i = 0; i < 6; ++i) p.menu();
+            p.menu(false, true);
+            check(!p.trying && p.next_start() == Start::try_it, "Quit chosen in the 7th frame: cleared at the frame's end");
+            Proc q;  // Quit in the menu's very first frame (a frame nothing has drawn yet): not cleared by it
+            q.menu(false, true);
+            check(q.trying, "Quit in the first frame of the calls: the marker stays until another rule clears it");
+            q.world_stops();
+            check(!q.trying && q.next_start() == Start::try_it, "the game destroys its world on the way out: cleared");
+        }
+        {
+            Proc p;  // the world is destroyed while a frame with Kiln's calls is not finished: that frame's end decides
+            p.call(Try::probe);
+            p.world_stops();
+            check(p.trying, "a world stop during a frame with Kiln's calls does not clear it");
+            p.exit_clean();
+            check(!p.trying, "an exit with code 0 does");
+        }
+        {
+            Proc p;  // the wrap's trial: begun after the probe's passed, counted over openings, a crash in it is an off record
+            for (int i = 0; i < 48; ++i) p.menu();
+            check(!p.trying, "probe passed");
+            for (int i = 0; i < 30; ++i) p.menu(true);
+            check(p.trying, "the first wrap writes the marker again");
+            p.plain(kIdleFrames);
+            check(!p.trying, "the menu closed: cleared");
+            p.menu(true);
+            check(p.trying, "reopened: written again");
+            for (int i = 0; i < 17; ++i) p.menu(true);
+            check(!p.trying && p.g.trial[1].done, "48 wrapped frames over two openings: passed, cleared");
+            Proc q;
+            for (int i = 0; i < 48; ++i) q.menu();
+            q.call(Try::probe), q.call(Try::probe), q.call(Try::wrap);  // the first begin faults
+            check(q.trying && q.next_start() == Start::off_after_crash, "a crash at the first wrap: off record");
+        }
+        {
+            // the limit, said plainly: a process that ends hard within kIdleFrames of Kiln's calls, with no world
+            // stop and no exit call between (TerminateProcess, another program's crash), cannot be told from a crash
+            Proc p;
+            for (int i = 0; i < 10; ++i) p.menu();
+            check(p.next_start() == Start::off_after_crash, "a hard end inside the menu's frames counts as a crash");
+        }
     }
     {
         // review of 235bcebb: after a begin, every way out closes what was opened, innermost first

@@ -141,8 +141,10 @@ bool scroll_install(bool system_menu_hooked);  // game_install, after the System
 uint32_t scroll_status();                      // KILN_UI_SCROLL_*
 bool scroll_on();                              // the pause menu can scroll in this process now
 void scroll_entry_next();                      // UI thread, before each call of the game's entry renderer: the top probe
-void scroll_entry_drawn();                     // UI thread, after each call of the game's entry renderer: the end probe
-void scroll_after_frame(uint64_t frame);       // UI thread, after each UI frame: the frame count, the crash guard's trial
+void scroll_entry_drawn(bool chosen);          // UI thread, after each call of the game's entry renderer (`chosen`: it
+                                               // returned true): the end probe, Quit chosen
+void scroll_after_frame(uint64_t frame);       // UI thread, after each UI frame: the frame count, the crash guard
+void scroll_exit();                            // on_unload (the process exits with code 0): the crash guard's marker goes
 bool game_unsubscribe(KilnHandle h);
 void game_status_line(char* out, size_t cap);
 

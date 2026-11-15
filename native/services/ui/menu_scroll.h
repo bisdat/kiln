@@ -16,13 +16,14 @@
 //   taller than the column (read from the game's layout: "wrap by height" below), the case where Quit leaves the
 //   screen. Until a height is read (the first frames; a build where it never reads) the count rule decides: more mods'
 //   rows than menu_rows.h's kFew in the modes that draw them all.
-// - A crash guard: before Kiln's first call in the game's menu in a process (the height probe, or the first begin) a
-//   "trying" marker is written; it goes once the builder has run to its close site kTrialFrames times with each kind
-//   of Kiln's calls begun in this process (Guard; a wrong nesting is fatal within the first frames; no wall-clock
-//   time, no "then closed": a player who presses Quit afterwards does not count as a crash). A start that finds it
-//   (the game ended while trying) turns it into an "off" record naming the Kiln version and the game build it
-//   happened with: scrolling (and its probe) stays off on every start with that version and build; another version or
-//   build tries once more. Deleting the file tries again. A marker that exists but cannot be read counts as there (off).
+// - A crash guard: while Kiln's calls in the game's menu (the height probes, the scroll view) run and have not passed
+//   their trial of kTrialFrames builder calls in this process, a "trying" marker is on the disk (a wrong nesting is
+//   fatal within the first frames; no wall-clock time). It goes when the trials pass, when the menu has been closed
+//   for a few frames or Quit was chosen (the trial goes on at the next opening), and when the game ends in order (a
+//   world destroyed, the exit with code 0): Guard below. A start that finds it (the game ended in or right after
+//   Kiln's calls) turns it into an "off" record naming the Kiln version and the game build it happened with:
+//   scrolling (and its probes) stays off on every start with that version and build; another version or build tries
+//   once more. Deleting the file tries again. A marker that exists but cannot be read counts as there (off).
 // - After a begin that succeeded, every way out closes what was opened, in order (Nest, unwind_order); when even that
 //   faults, nesting cannot be restored and the process ends on purpose (the marker is on the disk: the next start
 //   stays off) rather than handing the game a column it would fail on.
@@ -280,26 +281,40 @@ constexpr bool trial_step(Trial& t) {
     return true;
 }
 
-// Since dev.29 the guard covers two kinds of Kiln's calls in the game's menu: the height probe (every pause-menu frame
+// Since dev.29 the guard covers two kinds of Kiln's calls in the game's menu: the height probes (every pause-menu frame
 // while scrolling is on) and the scroll view (only where the menu is wrapped). Each kind has its own trial of
-// kTrialFrames builder calls that reached their close site. The marker is on the disk from Kiln's first call of a kind
-// in this process until every kind begun so far has passed its trial; a kind that begins after the marker went (the
-// first wrap, long after the probe's trial) writes it again. So a crash while either is being tried keeps scrolling
-// off at the next start, as before.
+// kTrialFrames builder calls that reached their close site, counted over the whole process (every opening of the menu
+// adds to it). The marker is on the disk only while Kiln's calls of a kind that has not passed run: it is written
+// before such a call when it is not there, and it goes
+//  - when every kind begun so far has passed its trial (guard_step);
+//  - when no such call ran for kIdleFrames UI frames (the menu closed: guard_frame), or at the end of the frame in which
+//    the player chose the menu's last entry, Quit, when the frame before already drew the same calls (guard_leaving):
+//    the calls are not running any more; the next opening writes it again and the trial goes on;
+//  - when a world is being destroyed between frames (guard_world_stops) or the process exits with code 0
+//    (guard_exit): the game ends its session in order, which a crash in Kiln's calls never reaches.
+// So only a game that ends while Kiln's calls run, or within kIdleFrames frames of them with nothing orderly in
+// between, leaves the marker: the next start keeps scrolling off, as before.
 enum class Try : uint8_t { probe = 0, wrap = 1 };
+
+inline constexpr uint32_t kIdleFrames = 8;  // UI frames without Kiln's calls: the frames they were in are drawn
 
 struct Guard {
     Trial trial[2];
     bool begun[2] = {false, false};
-    bool on_disk = false;  // the marker is (being) written and not cleared
+    bool on_disk = false;   // the marker is (being) written and not cleared
+    bool busy = false;      // Kiln's calls of a kind that has not passed ran in this UI frame
+    bool was_busy = false;  // and in the frame before
+    bool leaving = false;   // the player chose the menu's last entry (Quit) in this frame
+    uint32_t idle = 0;      // UI frames without such calls, while the marker is on the disk
 };
 
-// Before Kiln's first call of kind `k` in this process: true when the marker must be written now (the caller writes it
-// before the call; when that fails, scrolling goes off).
+// Before Kiln's call of kind `k` (every one): true when the marker must be written now (the caller writes it before
+// the call; when that fails, scrolling goes off).
 constexpr bool guard_begin(Guard& g, Try k) {
     const int i = static_cast<int>(k);
-    if (g.begun[i]) return false;
     g.begun[i] = true;
+    if (g.trial[i].done) return false;
+    g.busy = true;
     if (g.on_disk) return false;
     g.on_disk = true;
     return true;
@@ -314,6 +329,47 @@ constexpr bool guard_step(Guard& g, Try k) {
     if (!g.on_disk) return false;
     for (int j = 0; j < 2; ++j)
         if (g.begun[j] && !g.trial[j].done) return false;
+    g.on_disk = false;
+    return true;
+}
+
+// The player chose the menu's last entry (Quit to Desktop) in this frame.
+constexpr void guard_leaving(Guard& g) { g.leaving = true; }
+
+// After each UI frame: true when the marker may go (the menu closed kIdleFrames frames ago, or Quit was chosen in a
+// frame whose calls the frame before had already drawn).
+constexpr bool guard_frame(Guard& g) {
+    const bool busy = g.busy, was = g.was_busy, leaving = g.leaving;
+    g.was_busy = busy;
+    g.busy = g.leaving = false;
+    if (!g.on_disk) {
+        g.idle = 0;
+        return false;
+    }
+    if (busy) {
+        g.idle = 0;
+        if (!(leaving && was)) return false;
+        g.on_disk = false;
+        return true;
+    }
+    if (++g.idle < kIdleFrames) return false;
+    g.on_disk = false;
+    g.idle = 0;
+    return true;
+}
+
+// A world is being destroyed (KILN_WORLD_STOPPING): true when the marker may go. Not while a frame with Kiln's calls
+// is unfinished (that frame's end decides).
+constexpr bool guard_world_stops(Guard& g) {
+    if (!g.on_disk || g.busy) return false;
+    g.on_disk = false;
+    g.idle = 0;
+    return true;
+}
+
+// The process exits with code 0 (on_unload): true when the marker may go.
+constexpr bool guard_exit(Guard& g) {
+    if (!g.on_disk) return false;
     g.on_disk = false;
     return true;
 }

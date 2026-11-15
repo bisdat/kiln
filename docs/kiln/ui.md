@@ -65,12 +65,14 @@ e.Visible = false;       // hide for now; e.Text = "…" relabels; e.Dispose() r
   The game's own spacer and build number below Quit do not count: a menu whose Quit is on the screen is drawn as the
   game draws it. Until a height has been read (the first frames of a game, or a game build where it never reads)
   it scrolls once it has more than 3 mods' entries, as dev.27 and dev.28 did. Begin and end sit at the column's own
-  open and close in the game's builder (`native/services/ui/menu_scroll.h`). A crash guard writes
-  `kiln/state/menu-scroll.trying` before Kiln's first call in the menu in a start (the height frame at the first
-  pause menu, or the first scrolled frame, whichever comes first, and again for a first scrolled frame after it went)
-  and removes it once each of the two has drawn 48 frames in that process (a wrong nesting would have ended the game
-  by then; quitting afterwards is fine); a start that finds it (or cannot read it) keeps scrolling and the height
-  frame off (`kiln/state/menu-scroll.off`, naming the Kiln version and game build, written before the marker goes;
+  open and close in the game's builder (`native/services/ui/menu_scroll.h`). A crash guard keeps
+  `kiln/state/menu-scroll.trying` on the disk while Kiln's calls in the menu (the height frames, the scroll view) run
+  and have not yet drawn 48 frames each in that start (a wrong nesting would have ended the game by then). The frames
+  add up over the start's openings of the menu: the marker goes 8 frames after the menu closes, at the end of the frame
+  in which the player chose Quit to Desktop, when the game destroys a world in order, and at an exit with code 0, and
+  it is written again at the next opening until the 48 are reached. So only a game that ends in (or within a few
+  frames of) Kiln's calls leaves it; a start that finds it (or cannot read it) keeps scrolling and the height frames
+  off (`kiln/state/menu-scroll.off`, naming the Kiln version and game build, written before the marker goes;
   another version or build tries once more; delete the file to try again) and tells the player with a toast. A fault
   in Kiln's own calls closes what it opened, in order, and turns scrolling off; when even that fails the game ends on
   purpose with a kiln.log line, rather than a moment later in its own menu code. kiln.log says when it is on

@@ -381,7 +381,7 @@ bool __fastcall hk_sys_entry(const GameText* t, uint8_t p2, uint8_t attention) {
     // the scrolling pause menu's height probes: before the menu's first entry and after its last (menu_scroll.cpp)
     scroll_entry_next();
     const bool chosen = g_sys_hook.call<bool>(t, p2, attention);
-    scroll_entry_drawn();
+    scroll_entry_drawn(chosen);
     return chosen;
 }
 

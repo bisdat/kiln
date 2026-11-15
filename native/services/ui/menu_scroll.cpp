@@ -22,6 +22,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <utility>
 
@@ -90,7 +91,10 @@ std::atomic<uint32_t> g_status{KILN_UI_SCROLL_UNAVAILABLE};
 menu_scroll::Pair g_pair;  // UI thread
 bool g_broken = false;     // a step faulted: no more begins in this process
 menu_scroll::Nest g_nest;  // what the current builder call's begin opened (UI thread)
-menu_scroll::Guard g_guard;               // UI thread: the crash guard's trials (the probe, the scroll view)
+// The crash guard (menu_scroll::Guard) and its marker file: the UI thread, a world's destroying thread and the exit
+// call's thread (on_unload) use them, under g_guard_mu.
+std::mutex g_guard_mu;
+menu_scroll::Guard g_guard;
 std::atomic<bool> g_clear_marker{false};  // the trials passed: after_frame removes the marker
 uint32_t g_scrolled_frames = 0;
 // the decision by height (UI thread)
@@ -309,6 +313,19 @@ bool write_marker() {
     return write_file(g_trying, menu_scroll::marker_text(kiln, build));
 }
 
+// Before Kiln's call of kind `k` in the menu: the marker on the disk when that kind has not passed its trial. False
+// when it had to be written and could not (scrolling goes off).
+bool arm(menu_scroll::Try k) {
+    std::lock_guard lk(g_guard_mu);
+    return !menu_scroll::guard_begin(g_guard, k) || write_marker();
+}
+
+// The marker goes where the guard says, off the UI thread too (a world's destroying thread, the exit call).
+void clear_marker(const char* why) {
+    if (DeleteFileW(g_trying.c_str()) || GetLastError() == ERROR_FILE_NOT_FOUND)
+        logf(KILN_LOG_INFO, "ui: the pause menu's crash guard is cleared: %s", why);
+}
+
 void on_open(KilnRegisters& r) {
     g_in_call = false;
     g_entries_now = 0;
@@ -327,7 +344,7 @@ void on_open(KilnRegisters& r) {
     default:
         break;
     }
-    if (menu_scroll::guard_begin(g_guard, menu_scroll::Try::wrap) && !write_marker()) {
+    if (!arm(menu_scroll::Try::wrap)) {
         g_pair.open = false;
         turn_off(KILN_UI_SCROLL_OFF_FAULTED, "its crash guard could not write kiln/state/menu-scroll.trying");
         return;
@@ -348,7 +365,7 @@ void on_open(KilnRegisters& r) {
 // (menu_scroll.h "wrap by height"). The same calls as Kiln's own stack in the scroll view. False when it was not placed
 // (scrolling went off).
 bool place_probe(uint8_t* b) {
-    if (menu_scroll::guard_begin(g_guard, menu_scroll::Try::probe) && !write_marker()) {
+    if (!arm(menu_scroll::Try::probe)) {
         turn_off(KILN_UI_SCROLL_OFF_FAULTED, "its crash guard could not write kiln/state/menu-scroll.trying");
         return false;
     }
@@ -459,8 +476,11 @@ void on_close(KilnRegisters& r) {
     const bool probed = top && probe_after != 0 && probe_after == entries;  // the end probe after this call's last entry
     if (in_call) g_entries_last = entries;
     // the crash guard's trials: builder calls with Kiln's calls in them that ran to their close site
-    if (top && menu_scroll::guard_step(g_guard, menu_scroll::Try::probe)) g_clear_marker = true;
-    if (wrapped && menu_scroll::guard_step(g_guard, menu_scroll::Try::wrap)) g_clear_marker = true;
+    {
+        std::lock_guard lk(g_guard_mu);
+        if (top && menu_scroll::guard_step(g_guard, menu_scroll::Try::probe)) g_clear_marker = true;
+        if (wrapped && menu_scroll::guard_step(g_guard, menu_scroll::Try::wrap)) g_clear_marker = true;
+    }
     auto* column = reinterpret_cast<uint8_t*>(r.rbp + static_cast<intptr_t>(F.column));
     if (wrapped) wrapped_frames(column);
     if (in_call && g_on.load(std::memory_order_relaxed) && !g_broken) decide(column, wrapped, probed);
@@ -481,6 +501,14 @@ std::string state_dir() {
     size_t n = 0;
     if (g_api->path(KILN_PATH_STATE, b, sizeof b, &n) != KILN_OK || n == 0 || n >= sizeof b) return {};
     return std::string(b, n);
+}
+
+// A world is being destroyed (Return to Main Menu, Quit to Desktop, a lost connection): the game ends its session in
+// order, which a crash in Kiln's calls never reaches. Any thread (the destroying one).
+void KILN_CALL on_world(const KilnWorldEvent* e, void*) {
+    if (!e || e->size < offsetof(KilnWorldEvent, event) + sizeof(e->event) || e->event != KILN_WORLD_STOPPING) return;
+    std::lock_guard lk(g_guard_mu);
+    if (menu_scroll::guard_world_stops(g_guard)) clear_marker("a world is being destroyed in order");
 }
 
 }  // namespace
@@ -583,6 +611,11 @@ bool scroll_install(bool system_menu_hooked) {
         report(KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_FAULTED, "its hooks could not be installed");
         return false;
     }
+    // the crash guard's orderly ends besides the frames: a world destroyed in order (feature world.lifecycle; without it
+    // no event comes) and the exit with code 0 (scroll_exit, kiln.ui's on_unload)
+    KilnHandle world_sub = 0;
+    if (g_api->subscribe_world(g_owner, &on_world, nullptr, &world_sub) != KILN_OK)
+        logf(KILN_LOG_INFO, "ui: the pause menu's crash guard gets no world events (it clears its marker as the frames go)");
     g_status = KILN_UI_SCROLL_ON;
     g_on = true;
     logf(KILN_LOG_INFO, "ui: the pause menu can scroll (experiment): it does when its entries are taller than its space "
@@ -601,19 +634,35 @@ void scroll_entry_next() {
     g_top_placed = place_probe(g_probe_top);
 }
 
-void scroll_entry_drawn() {
+void scroll_entry_drawn(bool chosen) {
     if (!g_in_call) return;
     const uint32_t n = ++g_entries_now;
+    if (chosen && n == g_entries_last) {  // the menu's last entry, Quit to Desktop: the game is about to end in order
+        std::lock_guard lk(g_guard_mu);
+        menu_scroll::guard_leaving(g_guard);
+    }
     if (!g_top_placed || n != g_entries_last || g_probe_after || g_broken || !g_on.load(std::memory_order_relaxed)) return;
     if (place_probe(g_probe_end)) g_probe_after = n;
 }
 
 void scroll_after_frame(uint64_t frame) {
     g_frames_done = frame;
-    if (!g_clear_marker.exchange(false)) return;
-    if (DeleteFileW(g_trying.c_str()) || GetLastError() == ERROR_FILE_NOT_FOUND)
-        logf(KILN_LOG_INFO, "ui: the scrolling pause menu drew %u frames without trouble: its crash guard is cleared",
-             menu_scroll::kTrialFrames);
+    if (g_trying.empty()) return;  // not installed
+    std::lock_guard lk(g_guard_mu);
+    if (g_clear_marker.exchange(false)) {
+        char why[96];
+        std::snprintf(why, sizeof why, "the menu drew %u frames of Kiln's calls without trouble", menu_scroll::kTrialFrames);
+        clear_marker(why);
+    }
+    if (menu_scroll::guard_frame(g_guard))
+        clear_marker("the pause menu closed (or Quit was chosen) before its trial ended; the trial goes on at the next "
+                     "opening");
+}
+
+void scroll_exit() {
+    if (g_trying.empty()) return;
+    std::lock_guard lk(g_guard_mu);
+    if (menu_scroll::guard_exit(g_guard)) clear_marker("the game exits normally");
 }
 
 }  // namespace kui
