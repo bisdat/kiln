@@ -184,6 +184,9 @@ pub struct KeptTxn {
     pub changes: Vec<TxnChange>,
     /// The state each touched mod had before (an empty one: it had none).
     pub before: Vec<KeptMod>,
+    /// Profile entries before the save, including removals which have no version-to-version change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_before: Option<crate::profile::ProfileMods>,
 }
 
 /// `<library>/kiln-kept.json`.
@@ -360,10 +363,10 @@ fn lock(dirs: &DataDirs) -> Result<crate::util::LockedFile> {
 fn load(dirs: &DataDirs) -> Option<KeptState> {
     match crate::util::read_json::<serde_json::Value>(&state_path(dirs)) {
         Ok(None) => Some(KeptState::default()),
-        Ok(Some(v)) if v.get("format").and_then(serde_json::Value::as_u64) == Some(1) => Some(serde_json::from_value(v).unwrap_or_default()),
+        Ok(Some(v)) if v.get("format").and_then(serde_json::Value::as_u64) == Some(1) => if v.get("mods").is_some_and(serde_json::Value::is_array) { serde_json::from_value(v).ok() } else { None },
         Ok(Some(_)) => None,
-        // unreadable: started again (what it named are ordinary Library entries; their copies are swept)
-        Err(_) => Some(KeptState::default()),
+        // An unreadable index is not evidence that its settings copies are unreferenced.
+        Err(_) => None,
     }
 }
 
@@ -375,7 +378,7 @@ fn save(dirs: &DataDirs, st: &KeptState) -> Result<()> {
     }
     let mut text = serde_json::to_string_pretty(st)?;
     text.push('\n');
-    crate::util::write_atomic_durable(&state_path(dirs), text.as_bytes())
+    crate::util::write_atomic_durable_exclusive(&state_path(dirs), text.as_bytes())
 }
 
 fn entry_exists(dirs: &DataDirs, kind: ModKind, id: &str, version: &str, hash: &str) -> bool {
@@ -406,8 +409,13 @@ pub(crate) fn reconcile(dirs: &DataDirs, st: &mut KeptState, notes: &mut Vec<Str
     for t in std::mem::take(&mut st.pending) {
         changed = true;
         let p = profile(&t.profile);
-        let undone = !t.changes.is_empty()
-            && p.as_ref().is_some_and(|p| t.changes.iter().all(|c| lists(p, c.kind, &c.id, &c.from.version, &c.from.hash)));
+        let undone = p.as_ref().is_some_and(|p| match &t.profile_before {
+            Some(before) => t.before.iter().all(|m| {
+                p.mods.list(m.kind).iter().find(|e| e.id == m.id)
+                    == before.list(m.kind).iter().find(|e| e.id == m.id)
+            }),
+            None => !t.changes.is_empty() && t.changes.iter().all(|c| lists(p, c.kind, &c.id, &c.from.version, &c.from.hash)),
+        });
         if undone {
             for b in t.before { put_mod(st, b); }
         }
@@ -415,8 +423,13 @@ pub(crate) fn reconcile(dirs: &DataDirs, st: &mut KeptState, notes: &mut Vec<Str
     for m in &mut st.mods {
         let (kind, id) = (m.kind, m.id.clone());
         let label = |version: &str| format!("{} {id} {version}", kind.as_str());
-        // 2. gone from the Library (removed by hand, by an older launcher, taken over)
         let before = (m.kept.len(), m.restores.len());
+        // A deleted profile cannot ask for these again. Preserve unreadable profiles: absence must be proven.
+        let deleted = |pid: &str| matches!(std::fs::symlink_metadata(dirs.profile(pid).join("meta.json")),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound);
+        m.kept.retain(|v| !v.profile.as_deref().is_some_and(&deleted));
+        m.restores.retain(|r| !deleted(&r.profile));
+        // 2. gone from the Library (removed by hand, by an older launcher, taken over)
         m.kept.retain(|v| entry_exists(dirs, kind, &id, &v.version, &v.hash));
         m.restores.retain(|r| entry_exists(dirs, kind, &id, &r.version, &r.hash));
         // 3. without its settings copy
@@ -878,7 +891,7 @@ pub(crate) fn prepare(dirs: &DataDirs, profile: &Profile, game: Option<&Path>, c
         Err(e) => return Prepared::failed(dirs, e.message),
     };
     let Some(mut st) = load(dirs) else {
-        return Prepared::failed(dirs, "its list of them (library/kiln-kept.json) is of a newer Kiln".into());
+        return Prepared::failed(dirs, "its list of them (library/kiln-kept.json) is unreadable, invalid, or of a newer Kiln".into());
     };
     let mut notices = Vec::new();
     let fixed = reconcile(dirs, &mut st, &mut notices);
@@ -911,6 +924,7 @@ pub(crate) fn prepare(dirs: &DataDirs, profile: &Profile, game: Option<&Path>, c
         id: id.clone(), profile: profile.id.clone(), started: crate::util::now_rfc3339(),
         changes: changes.iter().map(|(kind, a, b)| TxnChange { kind: *kind, id: a.id.clone(), from: VersionRef::of(a), to: VersionRef::of(b) }).collect(),
         before,
+        profile_before: crate::profile::get(dirs, &profile.id).ok().map(|p| p.mods),
     });
     if let Err(e) = save(dirs, &st) {
         // nothing names the copies this change made: they go, and the state stays as it was
@@ -1350,7 +1364,7 @@ mod tests {
                 profile: Some("p".into()), settings: settings.clone() }],
             restores: vec![PendingRestore { version: "1.0.0".into(), hash: "kdh1:00".into(), profile: "p".into(), settings }] };
         let st = KeptState { format: 1, mods: vec![m.clone()], pending: vec![KeptTxn { id: "0123456789ab".into(), profile: "p".into(), started: "t".into(),
-            changes: vec![TxnChange { kind: ModKind::Greeneye, id: "m".into(), from: v.clone(), to: v.clone() }], before: vec![m] }] };
+            changes: vec![TxnChange { kind: ModKind::Greeneye, id: "m".into(), from: v.clone(), to: v.clone() }], before: vec![m], profile_before: Some(crate::profile::ProfileMods::default()) }] };
         let json = serde_json::to_value(&st).unwrap();
         assert_eq!(keys(&schema), written(&json));
         assert_eq!(keys(&schema["$defs"]["mod"]), written(&json["mods"][0]));

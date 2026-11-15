@@ -240,6 +240,10 @@
             "$ref": "#/$defs/mod"
           },
           "description": "The state each touched mod had before (an empty one: none): what an undo puts back."
+        },
+        "profileBefore": {
+          "type": "object",
+          "description": "Profile mods before the save; recovery compares the touched entries, including removals."
         }
       }
     }

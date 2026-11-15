@@ -375,3 +375,68 @@ fn a_restore_belongs_to_its_profile_and_its_game() {
     assert!(pending_restores(&w.dirs, ModKind::Greeneye, "worstmap").is_empty());
     w.tidy_on_disk();
 }
+
+#[test]
+fn review_corrupt_state_never_sweeps_settings_copies() {
+    for (tag, bytes) in [("truncated", "{\"format\":1,"), ("invalid-shape", "{\"format\":1,\"mods\":false}")] {
+        let w = World::updated(tag);
+        let before = load(&w.dirs).unwrap();
+        let copy = copy_dir(&w.dirs, ModKind::Greeneye, "worstmap", before.mods[0].kept[0].settings.dir.as_deref().unwrap()).unwrap();
+        std::fs::write(state_path(&w.dirs), bytes).unwrap();
+        recover(&w.dirs);
+        assert!(copy.join(A).is_file(), "{tag}: recovery deleted a backup it could not read");
+        assert_eq!(std::fs::read_to_string(state_path(&w.dirs)).unwrap(), bytes);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn review_state_save_never_follows_its_temporary_link() {
+    let w = World::updated("state-link");
+    let outside = w.root.join("precious");
+    std::fs::write(&outside, b"precious").unwrap();
+    std::os::unix::fs::symlink(&outside, w.dirs.library().join("kiln-kept.json.tmp")).unwrap();
+    save(&w.dirs, &load(&w.dirs).unwrap()).unwrap();
+    assert_eq!(std::fs::read(&outside).unwrap(), b"precious");
+}
+
+#[test]
+fn review_canceling_a_restore_before_profile_save_recovers_the_restore() {
+    let w = World::updated("cancel-restore");
+    w.rollback().unwrap();
+    let before = crate::profile::get(&w.dirs, &w.pid(&w.g)).unwrap();
+    let mut after = before.clone();
+    after.mods.greeneye.clear();
+    crash_at(Step::IndexWritten, || { let _ = prepare_saved(&w.dirs, &before, &after); });
+    w.next_start();
+    assert_settings(&w, "1.0.0", OLD);
+}
+
+#[test]
+fn review_deleted_profiles_do_not_keep_unreachable_snapshots_forever() {
+    let w = World::updated("deleted-profile");
+    let pid = w.pid(&w.g);
+    w.rollback().unwrap(); // both a kept version and a waiting restore
+    crate::profile::delete(&w.dirs, &pid).unwrap();
+    recover(&w.dirs);
+    let st = load(&w.dirs).unwrap();
+    assert!(st.mods.is_empty(), "deleted profile retains unreachable backups: {st:?}");
+}
+
+/// Disk state at a process stop after copy_in_with publishes the replacement folder but before
+/// persist publishes its receipt. Keep the parked old tree as a real process stop would.
+#[test]
+fn review_stop_between_placement_and_receipt_must_finish_the_restore() {
+    let w = World::updated("placement-receipt-gap");
+    w.rollback().unwrap();
+    let receipt_path = w.g.path.join("kiln/state/library-placements.json");
+    let old_receipt = std::fs::read(&receipt_path).unwrap();
+    let old_tree = w.g.path.join("greeneye/.kiln-place-review/old");
+    crate::library::copy_mod_tree(&w.g.path.join(MAP), &old_tree).unwrap();
+    let p = crate::profile::get(&w.dirs, &w.pid(&w.g)).unwrap();
+    crate::engine_mods::place(&w.dirs, &p, &w.g.path).unwrap();
+    // No kept restore has run. The new tree is published, but the on-disk receipt is still the old one.
+    std::fs::write(&receipt_path, old_receipt).unwrap();
+    w.next_start();
+    assert_settings(&w, "1.0.0", OLD);
+}
