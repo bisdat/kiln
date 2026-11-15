@@ -1,1 +1,5 @@
 #nullable enable
+Kiln.WorldKind
+Kiln.WorldKind.Client = 2 -> Kiln.WorldKind
+Kiln.WorldKind.Prediction = 1 -> Kiln.WorldKind
+Kiln.WorldKind.Server = 0 -> Kiln.WorldKind

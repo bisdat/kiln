@@ -17,5 +17,8 @@
     <InternalsVisibleTo Include="Kiln.TestKit.Tests" />
     <!-- the contract tests: the rows' names -->
     <InternalsVisibleTo Include="Kiln.Contract.Tests" />
+    <!-- dev.28 06a: a program wrap's writes raise ComponentWrittenEvent (ComponentWrittenEvent.FromWrap) -->
+    <InternalsVisibleTo Include="Kiln.Systems" />
+    <InternalsVisibleTo Include="Kiln.Systems.Tests" />
   </ItemGroup>
 </Project>

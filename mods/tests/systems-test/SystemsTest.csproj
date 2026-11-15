@@ -1,8 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Lab test of the game-program surface (chapter 06a; docs in native/core/abi/services/kiln_world.h v4 until
-       Kiln.Systems has its page). Player-free. The managed part checks Kiln.Testing.LabSystems (the lab parallel
-       switch); the native part (native/, kiln-systems-test.dll in kiln/plugins) checks kiln.world's C table. Both print
-       PASS/FAIL lines to kiln.log; the lab needs kiln/control/systems.parallel. -->
+  <!-- Lab test of the game-program surface (chapter 06a; docs/kiln/services/systems.md). Player-free. The managed
+       part checks Kiln.Testing.LabSystems (the lab parallel switch) and Kiln.Systems; the native part (native/,
+       kiln-systems-test.dll in kiln/plugins) checks kiln.world's C table. Both print PASS/FAIL lines to kiln.log; the
+       lab needs kiln/control/systems.parallel. -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
@@ -16,7 +16,10 @@
   <ItemGroup>
     <ProjectReference Include="../../../managed/Kiln.Api/Kiln.Api.csproj" Private="false" ExcludeAssets="runtime" />
     <ProjectReference Include="../../../managed/Kiln.Testing/Kiln.Testing.csproj" Private="false" ExcludeAssets="runtime" />
+    <ProjectReference Include="../../../managed/services/Kiln.Systems/Kiln.Systems.csproj" Private="false" ExcludeAssets="runtime" />
+    <!-- ComponentWrittenEvent: a wrap's writes through entity views -->
+    <ProjectReference Include="../../../managed/services/Kiln.World/Kiln.World.csproj" Private="false" ExcludeAssets="runtime" />
     <None Include="kiln.mod.json" CopyToOutputDirectory="PreserveNewest" />
-    <Compile Remove="native/**" />
+    <Compile Remove="native/**;Peer/**" />
   </ItemGroup>
 </Project>
