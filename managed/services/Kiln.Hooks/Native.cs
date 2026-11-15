@@ -73,6 +73,7 @@ internal static unsafe class HooksNative
 
     // ---- typed links (kiln_hooks.h "typed links", since 0.2.0-dev.28) ----
     public const int SigMismatch = 100, SigUnknown = 101;  // KILN_HOOKS_ERR_SIG_MISMATCH / _UNKNOWN
+    public const int Unchecked = 102;                       // KILN_HOOKS_ERR_UNCHECKED (detour_typed_checked, dev.29)
     public const nuint TypedContinue = 0, TypedSkip = 1;    // KILN_TYPED_CONTINUE / KILN_TYPED_SKIP
     public const int MaxPositions = 20;                    // KILN_SIG_MAX_ARGS: 4 registers + 16 stack slots
 
@@ -145,7 +146,17 @@ internal static unsafe class HooksNative
         public delegate* unmanaged[Cdecl]<NativeStr, nuint, ulong, SigRaw*, int> ValidateTyped;
         public delegate* unmanaged[Cdecl]<NativeStr, nuint*, ulong*, int> SigStatus;
         public delegate* unmanaged[Cdecl]<uint> InstallReady;
+        // detour_typed_checked (dev.29): detour_typed with package 07's checked patch policy; same arguments
+        public delegate* unmanaged[Cdecl]<ulong, nuint, OrderRaw*, SigRaw*, delegate* unmanaged[Cdecl]<CallFrame*, void*, nuint>, void*, ulong*, int> DetourTypedChecked;
     }
+
+    /// <summary>header.size that covers detour_typed_checked (offset 288).</summary>
+    public const uint CheckedInstallSize = 296;
+
+    /// <summary>The table with detour_typed_checked, or null on a core without it (older than 0.2.0-dev.29): managed code
+    /// then refuses a typed hook rather than patch through the unchecked detour_typed. Never cached.</summary>
+    public static CheckedTable* CheckedInstall => T != null && T->Header.Size >= CheckedInstallSize &&
+        ((CheckedTable*)T)->DetourTypedChecked != null ? (CheckedTable*)T : null;
 
     public static CheckedTable* Checked => T != null && T->Header.Size >= 280 &&
         ((CheckedTable*)T)->ValidateTyped != null && ((CheckedTable*)T)->SigStatus != null ? (CheckedTable*)T : null;
@@ -227,6 +238,7 @@ internal static unsafe class HooksNative
         BufferTooSmall => "buffer too small",
         SigMismatch => "the descriptor does not fit the function's code",
         SigUnknown => "the function's code could not be followed far enough to check the descriptor",
+        Unchecked => "a thread could not be checked before the first detour on the target was written (nothing was written)",
         _ => $"error {rc}",
     };
 

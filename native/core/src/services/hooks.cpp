@@ -31,6 +31,7 @@
 #include "../sigdb.h"
 #include "../tick.h"
 #include "hooks_chain.h"
+#include "hooks_patch_policy.h"
 #include "hooks_fingerprint.h"
 #include "hooks_internal.h"
 #include "service.h"
@@ -366,15 +367,32 @@ uint32_t KILN_CALL h_typed_install_ready() {
     return 1;
 }
 
-KilnResult KILN_CALL h_detour_typed(KilnOwner owner, uintptr_t target, const KilnHookOrder* order, const KilnSig* sig,
-                                    KilnTypedFn fn, void* user, KilnHandle* out) {
+// detour_typed and detour_typed_checked: the same descriptor check and link; `unchecked` (the checked member) gives the
+// first patch of a target mid2_checked's policy (hooks_chain.cpp, write_with_threads_stopped). Runs under the caller's
+// guard.
+KilnResult detour_typed_impl(KilnOwner owner, uintptr_t target, const KilnHookOrder* order, const KilnSig* sig,
+                             KilnTypedFn fn, void* user, KilnHandle* out, uint32_t* unchecked) {
     const int positions = sig_positions(sig);
     if (!fn || positions < 0 || !valid_target(target)) return KILN_ERR_INVALID_ARGUMENT;
     const uint32_t nstack = positions > 4 ? static_cast<uint32_t>(positions - 4) : 0;
-    KILN_GUARD("detour_typed", KILN_ERR_INTERNAL, {
-        const KilnResult checked = typed_check(target, sig, order);
-        if (checked != KILN_OK) return checked;
-        return chain::install_typed(owner, target, order_of(order), nstack, fn, user, out, sig->sret ? sig->ret_size : 0);
+    const KilnResult checked = typed_check(target, sig, order);
+    if (checked != KILN_OK) return checked;
+    return chain::install_typed(owner, target, order_of(order), nstack, fn, user, out, sig->sret ? sig->ret_size : 0,
+                                unchecked);
+}
+
+KilnResult KILN_CALL h_detour_typed(KilnOwner owner, uintptr_t target, const KilnHookOrder* order, const KilnSig* sig,
+                                    KilnTypedFn fn, void* user, KilnHandle* out) {
+    KILN_GUARD("detour_typed", KILN_ERR_INTERNAL,
+               return detour_typed_impl(owner, target, order, sig, fn, user, out, nullptr););
+}
+
+KilnResult KILN_CALL h_detour_typed_checked(KilnOwner owner, uintptr_t target, const KilnHookOrder* order,
+                                            const KilnSig* sig, KilnTypedFn fn, void* user, KilnHandle* out) {
+    KILN_GUARD("detour_typed_checked", KILN_ERR_INTERNAL, {
+        uint32_t unchecked = 0;
+        const KilnResult rc = detour_typed_impl(owner, target, order, sig, fn, user, out, &unchecked);
+        return chain::checked_install_result(rc, unchecked);  // `unchecked` read after the installation ran
     });
 }
 
@@ -584,6 +602,8 @@ const KilnHooksApi kTable = {
     &h_validate_typed,
     &h_sig_status,
     &h_typed_install_ready,
+    // checked typed installation (dev.29)
+    &h_detour_typed_checked,
 };
 
 std::mutex g_ready_mutex;

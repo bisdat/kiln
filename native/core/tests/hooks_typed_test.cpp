@@ -337,6 +337,7 @@ TG_PLAIN(5)
 TG_PLAIN(6)
 TG_PLAIN(7)
 int tg_asm_home(int);
+int tg_asm_checked(int);
 uint64_t kiln_home_call(void* fn, int x);
 }
 #pragma code_seg()
@@ -345,6 +346,14 @@ uint64_t kiln_home_call(void* fn, int x);
 // kiln_home_call(fn, x): fills its outgoing home space with a pattern, calls fn(x), and returns 0xBADBAD when any of
 // the four slots changed (somebody between the caller and a function that keeps its hands off wrote there), else
 // fn's result.
+// tg_asm_checked: the same `int f(int x)` = x + 1, a target of its own for the checked installation (a thread is parked
+// at offset 1, after push rbx: inside the bytes the first detour replaces).
+__asm__(".intel_syntax noprefix\n.section .game,\"xr\"\n"
+        ".globl tg_asm_checked\n.def tg_asm_checked; .scl 2; .type 32; .endef\ntg_asm_checked:\n"
+        "  push rbx\n  sub rsp, 0x20\n  mov eax, ecx\n  add eax, 1\n  add rsp, 0x20\n  pop rbx\n  ret\n"
+        "  int3\n  int3\n  int3\n  int3\n  int3\n  int3\n  int3\n  int3\n  int3\n  int3\n  int3\n  int3\n  int3\n  int3\n"
+        "  int3\n  int3\n  int3\n  int3\n  int3\n  int3\n  int3\n  int3\n  int3\n  int3\n  int3\n  int3\n  int3\n  int3\n"
+        ".text\n");
 __asm__(".intel_syntax noprefix\n.section .game,\"xr\"\n"
         ".globl tg_asm_home\n.def tg_asm_home; .scl 2; .type 32; .endef\ntg_asm_home:\n"
         "  push rbx\n  sub rsp, 0x20\n  mov eax, ecx\n  add eax, 1\n  add rsp, 0x20\n  pop rbx\n  ret\n"
@@ -1024,6 +1033,86 @@ void test_home_space() {
     A->revoke_owner(6);
 }
 
+// ---- the checked installation (detour_typed_checked, since 0.2.0-dev.29) ----
+std::atomic<int> g_checked_calls{0};
+uintptr_t KILN_CALL checked_handler(KilnCallFrame* f, void*) {
+    g_checked_calls.fetch_add(1);
+    A->call_original_frame(f);
+    f->rax += 100;
+    return KILN_TYPED_CONTINUE;
+}
+
+// A thread that never ran, its instruction pointer set to `at` (as hooks_v2_test's parked threads): it stays suspended.
+HANDLE park_at(uintptr_t at) {
+    HANDLE h = CreateThread(nullptr, 0, [](LPVOID) -> DWORD { return 0; }, nullptr, CREATE_SUSPENDED, nullptr);
+    if (!h) return nullptr;
+    CONTEXT c{};
+    c.ContextFlags = CONTEXT_CONTROL;
+    if (!GetThreadContext(h, &c)) return TerminateThread(h, 1), CloseHandle(h), nullptr;
+    c.Rip = at;
+    if (!SetThreadContext(h, &c)) return TerminateThread(h, 1), CloseHandle(h), nullptr;
+    CONTEXT back{};
+    back.ContextFlags = CONTEXT_CONTROL;
+    if (!GetThreadContext(h, &back) || back.Rip != at) return TerminateThread(h, 1), CloseHandle(h), nullptr;
+    return h;
+}
+
+void test_checked_install() {
+    std::puts("-- detour_typed_checked: the first detour is written only when every thread is checked and none is inside");
+    check(offsetof(KilnHooksApi, detour_typed_checked) == 288 && sizeof(KilnHooksApi) == 296 && A->detour_typed_checked &&
+              A->header.size >= offsetof(KilnHooksApi, detour_typed_checked) + sizeof(void*),
+          "the table carries detour_typed_checked at 288 (296 bytes)");
+    const uintptr_t t = T(&tg_asm_checked);
+    const KilnSigArg args[] = {arg("x", KILN_SIG_S32)};
+    const KilnSigArg wrong[] = {arg("x", KILN_SIG_F64)};
+    const KilnSig sig = sig_of(args, 1, KILN_SIG_S32), bad = sig_of(wrong, 1, KILN_SIG_S32);
+    const auto o = ord(0, "t/checked");
+    uint8_t before[16], now[16];
+    std::memcpy(before, reinterpret_cast<const void*>(t), sizeof before);
+    HANDLE parked = park_at(t + 1);
+    check(parked != nullptr, "a thread is parked inside the first bytes (offset 1)");
+    if (!parked) return;
+    const size_t refusals = log_count("checked installation refused, nothing written");
+    KilnHandle h = 0;
+    const KilnResult rc = A->detour_typed_checked(6, t, &o, &sig, &checked_handler, nullptr, &h);
+    std::memcpy(now, reinterpret_cast<const void*>(t), sizeof now);
+    CONTEXT c{};
+    c.ContextFlags = CONTEXT_CONTROL;
+    const bool still = GetThreadContext(parked, &c) && c.Rip == t + 1;
+    check(rc == KILN_HOOKS_ERR_UNCHECKED && h == 0, "refused with KILN_HOOKS_ERR_UNCHECKED", "rc " + std::to_string(rc));
+    check(!std::memcmp(before, now, sizeof now) && still && chain::chain_of(t).empty(),
+          "nothing was written: the function's bytes, the parked thread's rip and the chain are as before");
+    check(log_count("checked installation refused, nothing written: 1 thread(s) paused inside the bytes") == refusals + 1,
+          "kiln.log says why");
+    check(tg_asm_checked(41) == 42 && g_checked_calls == 0, "the function runs unhooked");
+    check(A->detour_typed_checked(6, t, &o, &bad, &checked_handler, nullptr, &h) == KILN_HOOKS_ERR_SIG_MISMATCH && h == 0 &&
+              refusal().find("descriptor arg 1 'x' is xmm0") == 0,
+          "the descriptor is checked first, as detour_typed does: a wrong one is a mismatch, not a thread refusal", refusal());
+    // the parked thread ends: its object is signalled, so it no longer counts (package 07's ended-thread rule)
+    TerminateThread(parked, 0);
+    check(WaitForSingleObject(parked, 10000) == WAIT_OBJECT_0, "the parked thread ended");
+    CloseHandle(parked);
+    const size_t writes = log_count(" written with ");
+    check(A->detour_typed_checked(6, t, &o, &sig, &checked_handler, nullptr, &h) == KILN_OK && h != 0,
+          "with no thread inside, the checked installation goes in");
+    check(log_count(" written with ") == writes + 1, "...with one patch written");
+    const int one = tg_asm_checked(41);
+    check(one == 142 && g_checked_calls == 1, "the typed handler runs (the original once, its result + 100)",
+          std::to_string(one) + ", " + std::to_string(g_checked_calls.load()) + " handler call(s)");
+    // a target that has its detour needs no patch: the checked member joins its chain without stopping a thread
+    const auto o2 = ord(1, "t/checked-2");
+    KilnHandle h2 = 0;
+    check(A->detour_typed_checked(6, t, &o2, &sig, &checked_handler, nullptr, &h2) == KILN_OK && h2 != 0 &&
+              log_count(" written with ") == writes + 1,
+          "a second checked link on the hooked target writes no patch");
+    const int two = tg_asm_checked(41);
+    check(two == 242 && g_checked_calls == 3, "both checked links run",
+          std::to_string(two) + ", " + std::to_string(g_checked_calls.load()) + " handler call(s)");
+    check(log_count("checked installation refused, nothing written") == refusals + 1, "no further refusal");
+    A->revoke_owner(6);
+    check(tg_asm_checked(41) == 42, "after the revoke the function is itself again");
+}
+
 // ---- threads ----
 std::atomic<uint64_t> g_hot_handler{0}, g_hot_churn{0}, g_hot_bad{0};
 uintptr_t KILN_CALL hot_handler(KilnCallFrame* f, void*) {
@@ -1136,8 +1225,7 @@ int main(int, char**) {
           "the service table carries the five typed entries", "size " + std::to_string(A->header.size));
     check(offsetof(KilnHooksApi, mid2_checked) == 256 && offsetof(KilnHooksApi, validate_typed) == 264 &&
               offsetof(KilnHooksApi, sig_status) == 272 && offsetof(KilnHooksApi, typed_install_ready) == 280 &&
-              sizeof(KilnHooksApi) == 288 && A->mid2_checked && A->validate_typed && A->sig_status &&
-              A->typed_install_ready,
+              A->mid2_checked && A->validate_typed && A->sig_status && A->typed_install_ready,
           "package 07's mid2_checked holds 256 and the typed safety extension follows it");
 
     test_call_with_frame();
@@ -1150,6 +1238,7 @@ int main(int, char**) {
     test_narrow_and_f64();
     test_exceptions();
     test_home_space();
+    test_checked_install();
     test_threads();
 
     {

@@ -22,6 +22,9 @@ internal static unsafe class FakeTyped
     public static int ResolverResult;
     public static ulong ResolverRevision = 1;
     public static int Refuse;              // the result of the next detour_typed (0: it installs)
+    public static int UncheckedFor;        // detour_typed_checked answers KILN_HOOKS_ERR_UNCHECKED this many times first
+    public static int CheckedCalls;        // calls of detour_typed_checked (dev.29)
+    public static int PlainCalls;          // calls of detour_typed (the unchecked member: managed code must not use it)
     public static string RefusalText = "";  // what typed_refusal says after a refusal
     public static bool RefuseCallOriginal;  // call_original_frame answers KILN_ERR_INVALID_ARGUMENT
     public static int OriginalCalls;
@@ -51,6 +54,9 @@ internal static unsafe class FakeTyped
         Functions.Clear();
         SymbolTable.Clear();
         Refuse = 0;
+        UncheckedFor = 0;
+        CheckedCalls = 0;
+        PlainCalls = 0;
         RefusalText = "";
         RefuseCallOriginal = false;
         OriginalCalls = 0;
@@ -69,6 +75,7 @@ internal static unsafe class FakeTyped
         *(nint*)&c->ValidateTyped = (nint)(delegate* unmanaged[Cdecl]<FakeRegistry.NativeText, nuint, ulong, SigText*, int>)&Validate;
         *(nint*)&c->SigStatus = (nint)(delegate* unmanaged[Cdecl]<FakeRegistry.NativeText, nuint*, ulong*, int>)&Status;
         c->InstallReady = &ReadInstallReady;
+        *(nint*)&c->DetourTypedChecked = (nint)(delegate* unmanaged[Cdecl]<ulong, nuint, OrderText*, SigText*, nint, void*, ulong*, int>)&DetourTypedChecked;
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
@@ -135,6 +142,26 @@ internal static unsafe class FakeTyped
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     static int DetourTyped(ulong owner, nuint address, OrderText* order, SigText* sig, nint fn, void* user, ulong* handle)
+    {
+        PlainCalls++;
+        return Install(owner, address, order, sig, fn, user, handle);
+    }
+
+    // detour_typed_checked: the descriptor first (Refuse), then the thread check of the first patch (UncheckedFor)
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    static int DetourTypedChecked(ulong owner, nuint address, OrderText* order, SigText* sig, nint fn, void* user, ulong* handle)
+    {
+        CheckedCalls++;
+        if (Refuse == 0 && UncheckedFor > 0)
+        {
+            UncheckedFor--;
+            _refusal = "";
+            return HooksNative.Unchecked;
+        }
+        return Install(owner, address, order, sig, fn, user, handle);
+    }
+
+    static int Install(ulong owner, nuint address, OrderText* order, SigText* sig, nint fn, void* user, ulong* handle)
     {
         var kinds = new uint[sig->Argc];
         var sizes = new uint[sig->Argc];

@@ -376,10 +376,129 @@ public sealed unsafe class TypedHookTests : IDisposable
     public void TheCheckedTableAppendsToTheOldTypedPrefix()
     {
         Assert.Equal(240, sizeof(HooksNative.TypedTable));
-        Assert.Equal(288, sizeof(HooksNative.CheckedTable));
+        Assert.Equal(296, sizeof(HooksNative.CheckedTable));
+        Assert.Equal(256, (int)System.Runtime.InteropServices.Marshal.OffsetOf<HooksNative.CheckedTable>("Mid2Checked"));
         Assert.Equal(264, (int)System.Runtime.InteropServices.Marshal.OffsetOf<HooksNative.CheckedTable>("ValidateTyped"));
         Assert.Equal(272, (int)System.Runtime.InteropServices.Marshal.OffsetOf<HooksNative.CheckedTable>("SigStatus"));
         Assert.Equal(280, (int)System.Runtime.InteropServices.Marshal.OffsetOf<HooksNative.CheckedTable>("InstallReady"));
+        Assert.Equal(288, (int)System.Runtime.InteropServices.Marshal.OffsetOf<HooksNative.CheckedTable>("DetourTypedChecked"));
+    }
+
+    // ---- the checked installation (kiln.hooks detour_typed_checked, since 0.2.0-dev.29) ----
+
+    [Fact]
+    public void ATypedDetourIsInstalledThroughTheCheckedMemberOnly()
+    {
+        var result = TestMods.As(Mod(), () => TypedHooks.Detour(Six, _ => { }));
+        Assert.True(result.Ok);
+        Assert.Equal(HookRegistrationState.Installed, result.Handle!.State);
+        Assert.Equal(1, FakeTyped.CheckedCalls);
+        Assert.Equal(0, FakeTyped.PlainCalls);  // never the unchecked detour_typed
+        result.Handle.Remove();
+    }
+
+    [Theory]
+    [InlineData(288u, false)]  // a core with the timing query but without detour_typed_checked
+    [InlineData(296u, true)]   // a table that is long enough but whose member is null
+    public void ACoreWithoutTheCheckedMemberRefusesTheDetourWithAReason(uint size, bool nullMember)
+    {
+        *(uint*)HooksNative.T = size;
+        var c = (HooksNative.CheckedTable*)HooksNative.T;
+        var member = c->DetourTypedChecked;
+        if (nullMember) c->DetourTypedChecked = null;
+        try
+        {
+            var mod = Mod();
+            var events = new List<HookRefusedEvent>();
+            using var subscription = TestMods.As(mod, () => Events.On<HookRefusedEvent>(e => events.Add(e)));
+            var result = TestMods.As(mod, () => TypedHooks.Detour(Six, _ => { }));
+            Assert.False(result.Ok);
+            Assert.Null(result.Handle);
+            Assert.Contains("checked typed installation", result.Reason);
+            Assert.Equal(0, FakeTyped.PlainCalls);  // no fallback to the unchecked member
+            Assert.Equal(0, FakeTyped.CheckedCalls);
+            Assert.Empty(FakeRegistry.Live);
+            Assert.Equal(result.Reason, Assert.Single(events).Reason);
+            TestMods.Retire(mod);
+        }
+        finally { c->DetourTypedChecked = member; }
+    }
+
+    [Theory]
+    [InlineData(true)]   // asked for where it can install now (Pre, or no world): the first attempt is immediate
+    [InlineData(false)]  // asked for during a step: pending first, every attempt at a later safe tick
+    public void AThreadRefusalIsTriedAgainAtLaterSafeTicksAndThenInstalls(bool now)
+    {
+        FakeTyped.InstallReady = now ? 1u : 0u;
+        FakeTyped.UncheckedFor = TypedHooks.CheckedInstallAttempts - 1;  // refused for the threads until the last attempt
+        var mod = Mod();
+        var events = 0;
+        using var subscription = TestMods.As(mod, () => Events.On<HookRefusedEvent>(_ => events++));
+        var result = TestMods.As(mod, () => TypedHooks.Detour(Six, _ => { }));
+        Assert.True(result.Ok);
+        Assert.True(result.Pending);
+        Assert.Equal(now ? 1 : 0, FakeTyped.CheckedCalls);
+        FakeTyped.InstallReady = 1;
+        for (var drained = 0; drained < TypedHooks.CheckedInstallAttempts && result.Handle!.State == HookRegistrationState.Pending; drained++)
+            TestMods.DrainPending(mod);  // one attempt per safe tick
+        Assert.Equal(HookRegistrationState.Installed, result.Handle!.State);
+        Assert.Equal(TypedHooks.CheckedInstallAttempts, FakeTyped.CheckedCalls);
+        Assert.Equal(0, FakeTyped.PlainCalls);
+        Assert.Single(FakeRegistry.Live);
+        Assert.Equal(0, events);  // the attempts that were refused for the threads are not refusals of the hook
+        Assert.Null(result.Handle.Reason);
+        result.Handle.Remove();
+        Assert.Empty(FakeRegistry.Live);
+        TestMods.Retire(mod);
+    }
+
+    [Fact]
+    public void AThreadRefusalIsReportedOnceAfterTheLastAttempt()
+    {
+        FakeTyped.UncheckedFor = 1000;
+        var mod = Mod();
+        var events = new List<HookRefusedEvent>();
+        using var subscription = TestMods.As(mod, () => Events.On<HookRefusedEvent>(e => events.Add(e)));
+        var result = TestMods.As(mod, () => TypedHooks.Detour(Six, _ => { }));
+        Assert.True(result.Pending);
+        for (var i = 0; i < TypedHooks.CheckedInstallAttempts + 3; i++) TestMods.DrainPending(mod);
+        Assert.Equal(TypedHooks.CheckedInstallAttempts, FakeTyped.CheckedCalls);  // bounded: no attempt after the last
+        Assert.Equal(HookRegistrationState.Refused, result.Handle!.State);
+        Assert.Contains("could not check every thread", result.Handle.Reason);
+        Assert.Contains($"{TypedHooks.CheckedInstallAttempts} attempts", result.Handle.Reason);
+        var e = Assert.Single(events);
+        Assert.Equal(Six.Symbol, e.Symbol);
+        Assert.Equal(result.Handle.Reason, e.Reason);
+        Assert.Empty(FakeRegistry.Live);
+        Assert.Equal(0, FakeTyped.PlainCalls);
+        TestMods.Retire(mod);
+    }
+
+    [Fact]
+    public void RemovingAHookWhileItsAttemptsRepeatStopsThem()
+    {
+        FakeTyped.UncheckedFor = 1000;
+        var mod = Mod();
+        var result = TestMods.As(mod, () => TypedHooks.Detour(Six, _ => { }));
+        TestMods.DrainPending(mod);
+        Assert.Equal(2, FakeTyped.CheckedCalls);
+        result.Handle!.Remove();
+        for (var i = 0; i < TypedHooks.CheckedInstallAttempts; i++) TestMods.DrainPending(mod);
+        Assert.Equal(2, FakeTyped.CheckedCalls);
+        Assert.Equal(HookRegistrationState.Removed, result.Handle.State);
+        Assert.Empty(FakeRegistry.Live);
+        TestMods.Retire(mod);
+    }
+
+    [Fact]
+    public void ADescriptorRefusalIsNotRetried()
+    {
+        FakeTyped.Refuse = HooksNative.SigMismatch;
+        FakeTyped.RefusalText = "descriptor arg 2 'b' is rdx";
+        var result = TestMods.As(Mod(), () => TypedHooks.Detour(Six, _ => { }));
+        Assert.False(result.Ok);
+        Assert.Equal("descriptor arg 2 'b' is rdx", result.Reason);
+        Assert.Equal(1, FakeTyped.CheckedCalls);
     }
 
     [Theory]

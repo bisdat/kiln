@@ -867,6 +867,7 @@ void write_with_threads_stopped(std::vector<Stopped>& th, uintptr_t addr, const 
         *unchecked = static_cast<uint32_t>(rep.unopened + rep.unstopped + rep.no_context + in_bytes);
         // Strict callers refuse BEFORE changing bytes or any thread context.
         if (!checked_patch_allowed(rep.unopened + rep.unstopped + rep.no_context, in_bytes)) {
+            rep.in_range = in_bytes;  // for the refusal's log line (nothing was moved)
             for (auto& s : th) if (s.suspended) ResumeThread(s.h);
             return;
         }
@@ -1051,6 +1052,13 @@ Target* target_for(uintptr_t addr, bool* refused_quietly, uint32_t* unchecked = 
                        rep.no_context, rep.exited, static_cast<unsigned long>(rep.why[0].tid),
                        static_cast<unsigned long>(rep.why[0].error), static_cast<unsigned long>(rep.why[0].exit_code),
                        rep.why[0].no_id ? " (its id could not be read)" : "");
+            else if (rep.in_range || rep.no_context || rep.unopened)
+                KLOG_W("hooks: rva %s: checked installation refused, nothing written: %zu thread(s) paused inside the bytes "
+                       "to replace, %zu stopped one(s) without a context, %zu not opened",
+                       hex(rva_of(addr)).c_str(), rep.in_range, rep.no_context, rep.unopened);
+            else
+                KLOG_W("hooks: rva %s: checked installation refused, nothing written: %s", hex(rva_of(addr)).c_str(),
+                       *unchecked ? "the process's threads could not be listed" : "the detour's bytes could not be prepared");
             return fail(false);
         }
         // No thread list, or a trampoline of a shape we don't know: safetyhook's own way (page trap, no thread stops).
@@ -1341,9 +1349,11 @@ KilnResult install_mid(KilnOwner owner, uintptr_t target, const Order& order, Ki
 }
 
 KilnResult install_typed(KilnOwner owner, uintptr_t target, const Order& order, uint32_t nstack, KilnTypedFn fn,
-                         void* user, KilnHandle* out, uint32_t sret_size) {
+                         void* user, KilnHandle* out, uint32_t sret_size, uint32_t* unchecked) {
+    if (unchecked) *unchecked = 0;
     if (nstack + 4 > KILN_SIG_MAX_ARGS) return KILN_ERR_INVALID_ARGUMENT;
-    return install(Kind::Typed, owner, target, order, reinterpret_cast<void*>(fn), user, nstack, nullptr, out, nullptr, sret_size);
+    return install(Kind::Typed, owner, target, order, reinterpret_cast<void*>(fn), user, nstack, nullptr, out, unchecked,
+                   sret_size);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

@@ -24,9 +24,11 @@ public sealed record HookResult(bool Ok, string? Reason, HookHandle? Handle) : I
     public bool Pending => Handle?.State == HookRegistrationState.Pending;
 }
 
-/// <summary>A typed hook was refused (<see cref="HookResult.Ok"/> false): a game update changed the function, or its
-/// symbol no longer resolves. Posted on the tick thread (queued for the next step when the hook was asked for on
-/// another thread), only while something subscribes. For status pages and diagnostics mods; nothing to cancel.</summary>
+/// <summary>A typed hook was refused (<see cref="HookResult.Ok"/> false, or later on a pending request's handle): a game
+/// update changed the function, its symbol no longer resolves, or kiln.hooks could not check every thread of the game
+/// before writing the first detour on the function, in three attempts at safe ticks. Posted once per refused request, on
+/// the tick thread (queued for the next step when the hook was asked for on another thread), only while something
+/// subscribes. For status pages and diagnostics mods; nothing to cancel.</summary>
 public sealed class HookRefusedEvent : KilnEvent
 {
     internal HookRefusedEvent(string modId, string symbol, string reason)
@@ -303,6 +305,11 @@ public static unsafe class TypedHooks
     }
     private static readonly ConditionalWeakTable<SigDescriptor, Validation> Validations = new();
 
+    /// <summary>How often a typed hook is tried when kiln.hooks could not check every thread before the first detour on
+    /// its target (KILN_HOOKS_ERR_UNCHECKED; nothing was written): the first attempt and two more, each at a later safe
+    /// tick. Then the hook is refused once (<see cref="HookRefusedEvent"/>, <see cref="HookHandle.State"/> Refused).</summary>
+    internal const int CheckedInstallAttempts = 3;
+
     // Whether a described symbol's row is on (seam: unit tests replace it). Core symbols have a kiln.caps row
     // "sig/<symbol>"; a mod's own fragment has none, so its status is queried from the current native resolver.
     internal static Func<string, bool> SigRowOn = DefaultSigRowOn;
@@ -333,33 +340,49 @@ public static unsafe class TypedHooks
         var mod = HooksGate.RequireAdvanced(api);
         if (*(uint*)t < 288 || ((HooksNative.CheckedTable*)t)->InstallReady == null)
             return Refused(mod, sig.Symbol, "this core has no safe typed installation timing query");
-        if (!CanInstallNow())
+        // no fallback to the unchecked detour_typed: a core without the checked member refuses
+        if (HooksNative.CheckedInstall == null) return Refused(mod, sig.Symbol, NoCheckedInstall);
+        if (!CanInstallNow()) return Pend(api, sig, handler, priority, mod, 0);
+        // null: kiln.hooks could not check every thread before the first patch; tried again at a later safe tick
+        return InstallNow(sig, handler, priority, mod, 1) ?? Pend(api, sig, handler, priority, mod, 1);
+    }
+
+    private const string NoCheckedInstall = "this core's kiln.hooks has no checked typed installation (detour_typed_checked, " +
+        "0.2.0-dev.29): a typed hook is not patched in without checking the game's threads";
+
+    // A request that installs at a later safe tick (the server world's Pre, or a joined client's): accepted now (Ok,
+    // Pending), completed on its handle. `attempts`: the attempts already made (a refusal for the threads, see
+    // CheckedInstallAttempts).
+    private static HookResult Pend(string api, SigDescriptor sig, SigHandler handler, int priority, ModContext mod, int attempts)
+    {
+        lock (HooksGate.Lifecycle)
         {
-            lock (HooksGate.Lifecycle)
+            if (!mod.Alive) throw HooksGate.Retired(api, mod);
+            var pending = HookHandle.NewPending();
+            HooksGate.Track(mod);
+            mod.Retiring += pending.Remove;
+            void InstallPending()
             {
-                if (!mod.Alive) throw HooksGate.Retired(api, mod);
-                var pending = HookHandle.NewPending();
-                HooksGate.Track(mod);
-                mod.Retiring += pending.Remove;
-                void InstallPending()
+                if (!mod.Alive || pending.State == HookRegistrationState.Removed) return;
+                if (!CanInstallNow()) { mod.Scheduler.Post(InstallPending); return; }
+                try
                 {
-                    if (!mod.Alive || pending.State == HookRegistrationState.Removed) return;
-                    if (!CanInstallNow()) { mod.Scheduler.Post(InstallPending); return; }
-                    try { pending.Complete(InstallNow(sig, handler, priority, mod)); }
-                    catch (Exception e) { pending.Complete(Refused(mod, sig.Symbol, e.Message)); }
+                    var result = InstallNow(sig, handler, priority, mod, ++attempts);
+                    if (result == null) { mod.Scheduler.Post(InstallPending); return; }  // the next safe tick
+                    pending.Complete(result);
                 }
-                mod.Scheduler.Post(InstallPending);
-                // Retirement can take its cleanup list before Track attaches the first callback.
-                if (!mod.Alive)
-                {
-                    pending.Remove();
-                    HooksGate.Untrack(mod);
-                    throw HooksGate.Retired(api, mod);
-                }
-                return new HookResult(true, null, pending);
+                catch (Exception e) { pending.Complete(Refused(mod, sig.Symbol, e.Message)); }
             }
+            mod.Scheduler.Post(InstallPending);
+            // Retirement can take its cleanup list before Track attaches the first callback.
+            if (!mod.Alive)
+            {
+                pending.Remove();
+                HooksGate.Untrack(mod);
+                throw HooksGate.Retired(api, mod);
+            }
+            return new HookResult(true, null, pending);
         }
-        return InstallNow(sig, handler, priority, mod);
     }
 
     private static bool CanInstallNow()
@@ -369,7 +392,9 @@ public static unsafe class TypedHooks
             ((HooksNative.CheckedTable*)t)->InstallReady() != 0;
     }
 
-    private static HookResult InstallNow(SigDescriptor sig, SigHandler handler, int priority, ModContext mod)
+    // Attempt `attempt` (1-based) of the installation: the result, or null when kiln.hooks could not check every thread
+    // before the first detour on the target (nothing written) and an attempt is left (CheckedInstallAttempts).
+    private static HookResult? InstallNow(SigDescriptor sig, SigHandler handler, int priority, ModContext mod, int attempt)
     {
         var api = sig.Symbol + ".Detour";
         var t = HooksNative.RequireTyped(api);
@@ -390,12 +415,25 @@ public static unsafe class TypedHooks
             mod.Log.Info($"hooks: typed hook on {sig.Symbol} (priority {priority})");
             return new HookResult(true, null, handle);
         }
+        if (rc == HooksNative.Unchecked)
+        {
+            if (attempt < CheckedInstallAttempts)
+            {
+                mod.Log.Info($"hooks: typed hook on {sig.Symbol}: kiln.hooks could not check every thread before writing its " +
+                             $"first detour (nothing was written); trying again at the next safe tick (attempt {attempt} of {CheckedInstallAttempts})");
+                return null;
+            }
+            return Refused(mod, sig.Symbol, $"kiln.hooks could not check every thread before writing the first detour on " +
+                $"{sig.Symbol} in {CheckedInstallAttempts} attempts at safe ticks; nothing was written (kiln.log names the threads)");
+        }
         return rc switch
         {
+            NoCheckedMember => Refused(mod, sig.Symbol, NoCheckedInstall),
             HooksNative.InvalidArgument => throw new ArgumentException($"{api}: kiln.hooks refused the descriptor as malformed (see kiln.log)", nameof(sig)),
             HooksNative.SigMismatch or HooksNative.SigUnknown => Refused(mod, sig.Symbol,
                 refusal.Length > 0 ? refusal : HooksNative.Describe(rc)),
-            HooksNative.Unavailable => Refused(mod, sig.Symbol, "kiln.hooks cannot hook another address (its target cap is reached)"),
+            HooksNative.Unavailable => Refused(mod, sig.Symbol, "kiln.hooks could not hook the address (its target cap is reached, " +
+                "or the first detour on it could not be prepared; see kiln.log)"),
             _ => Refused(mod, sig.Symbol, $"kiln.hooks refused the hook: {HooksNative.Describe(rc)}"),
         };
     }
@@ -437,7 +475,7 @@ public static unsafe class TypedHooks
                 if (native == null)
                     return HooksNative.Checked->ValidateTyped(order.Label, address, revision, &raw);
                 // kiln.hooks copies the label and reads the descriptor during the call only: the pins end here
-                return InstallAtSafePoint(t, owner, address, &order, &raw, cookie, native);
+                return InstallAtSafePoint(owner, address, &order, &raw, cookie, native);
             }
         }
         finally
@@ -447,12 +485,18 @@ public static unsafe class TypedHooks
         }
     }
 
-    // Integration seam for package 07: its mid2_checked only accepts a KilnMidFn and CANNOT install a typed link.
-    // Coordinator: expose the same checked target policy as detour_typed_checked, then switch ONLY this call to it,
-    // with a header.size check. Do not substitute mid2_checked: the handler ABI is different.
-    internal static int InstallAtSafePoint(HooksNative.TypedTable* t, ulong owner, nuint address,
-        HooksNative.OrderRaw* order, HooksNative.SigRaw* sig, long cookie, ulong* native) =>
-        t->DetourTyped(owner, address, order, sig, &Dispatch, (void*)(nint)cookie, native);
+    // InstallAtSafePoint's answer on a core without detour_typed_checked (managed only; no native code uses it).
+    private const int NoCheckedMember = -1;
+
+    // The one native installation of a typed hook: detour_typed_checked, package 07's checked patch policy (the first
+    // detour on a target is written only when every thread is checked and none is inside its bytes). A core without the
+    // member refuses: never the unchecked detour_typed.
+    internal static int InstallAtSafePoint(ulong owner, nuint address, HooksNative.OrderRaw* order, HooksNative.SigRaw* sig,
+        long cookie, ulong* native)
+    {
+        var c = HooksNative.CheckedInstall;
+        return c == null ? NoCheckedMember : c->DetourTypedChecked(owner, address, order, sig, &Dispatch, (void*)(nint)cookie, native);
+    }
 
     private static HookResult Refused(ModContext mod, string symbol, string reason)
     {
