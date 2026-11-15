@@ -1363,6 +1363,22 @@ export const engineOwnFolders = (profileId: ProfileId, gameId: GameId) => call<O
 export const engineAdoptFolder = (kind: ModKind, id: string, profileId: ProfileId, gameId: GameId) =>
   call<Adopted>("engine_adopt_folder", { kind, id, profileId, gameId });
 export const emlBackup = (gameId: GameId) => call<EmlBackup[]>("eml_backup", { gameId });
+/** One file "Restore the game's data" moves: its path in the game folder, size and SHA-256. */
+export interface DataRestoreEntry { from: string; size: number; sha256: string }
+/** What would be moved: the leftover containers past the game's own count, the shared backup pair, its seal and
+ *  Kiln's change cache. `fingerprint` covers the state and every file; apply takes it, so only what was shown moves. */
+export interface DataRestorePlan { fingerprint: string; files: DataRestoreEntry[] }
+/** A move that was made: the folder under kiln/eml/displaced/ and the files in it. */
+export interface DataRestoreMoved { folder: string; files: DataRestoreEntry[] }
+/** The plan for this game, or a refusal with its reason (nothing unproven, the game runs, ShroudForge is the writer,
+ *  the game's index changed since the last start, nothing left over). Finishes a move that was interrupted. */
+export const emlDataPlan = (gameId: GameId) => call<DataRestorePlan>("eml_data_plan", { gameId });
+/** Moves the plan's files aside. `verified`: the player confirmed Steam's file check. Never deletes or overwrites. */
+export const emlDataApply = (gameId: GameId, fingerprint: string, verified: boolean) => call<DataRestoreMoved>("eml_data_apply", { gameId, fingerprint, verified });
+/** Moves a folder's files back; refused when one of the names exists again. */
+export const emlDataUndo = (gameId: GameId, folder: string) => call<DataRestoreMoved>("eml_data_undo", { gameId, folder });
+/** The newest move that was not undone (kept across launcher starts, so Undo stays), or null. */
+export const emlDataLatest = (gameId: GameId) => call<DataRestoreMoved | null>("eml_data_latest", { gameId });
 /** Legacy command: refuses direct shared-backup restores; updated Kiln's archive writer verifies ownership on launch. */
 export const emlRestore = (gameId: GameId) => call<string[]>("eml_restore", { gameId });
 
@@ -1917,7 +1933,7 @@ export const COMMANDS = [
   "library_add", "library_add_to_profile", "profile_revert", "profile_ensure_default",
   "deck_browse", "deck_gamepad", "deck_fullscreen", "deck_quit",
   "nexus_account", "nexus_sign_in", "nexus_sign_out", "nexus_search", "nexus_mod", "nexus_installed", "nexus_download", "nexus_links", "nexus_link_install", "nexus_link_dismiss", "nexus_handler_status", "nexus_handler_set",
-  "engine_settings_get", "engine_settings_set", "engine_status", "engine_own_folders", "engine_adopt_folder", "eml_backup", "eml_restore",
+  "engine_settings_get", "engine_settings_set", "engine_status", "engine_own_folders", "engine_adopt_folder", "eml_backup", "eml_restore", "eml_data_plan", "eml_data_apply", "eml_data_undo", "eml_data_latest",
   "chain_view", "chain_set_late",
   "found_scan", "found_add",
   "cook_plan", "cook_run", "boot_snapshot_run",
