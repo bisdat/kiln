@@ -231,6 +231,21 @@ destroyed before the first run). Keys: a variable alias or debug name of the pro
   ECALL re-runs in the next step. Lab: `native Double(21) on impact 50331651 … site 0x7e570001` then `kiln.Log: … Out::value
   = 42` and `kiln.Signal tag 7 value 42`. A handler that throws completes the call with error 0x11 (the instance
   stops). `Abilities.Natives.Declare(fullName, argc)` lets a program that calls it pass the verifier first.
+- **Synchronous natives** (since 0.2.0-dev.29, capability `abilities.natives.sync`, server only):
+  `Abilities.Natives.RegisterSync(name, argc, handler)` → `NativeResult { Ok, Reason, Hash }`. The handler
+  (`NativeSyncHandler`: `byte (ref NativeCall call)`) runs inside the program's ECALL, in the same simulation step, on
+  the thread that runs `impact_simulation` (the server world's thread on a dedicated server, also in the lab's
+  forced-parallel window); its return value is what the ECALL pushes. It reads and writes the arguments through the
+  call (`GetU32/SetU32`, `GetFloat/SetFloat`, `VariableType`; `Bytes` for advanced mods); `CallOriginal()` throws
+  (there is none). No tick-thread API in it, no blocking: a handler over 0.2 ms is logged (the first call of each
+  handler is, while .NET compiles it). An exception answers 0x11 (that instance stops with Error). When the mod
+  unloads the native is taken off in that Pre: from then on its hash answers 0x1F. A game-state limit is `Ok = false`
+  (registry full, Kiln's native slots used up, the name taken or a vanilla native's), a bad name or argc
+  `ArgumentException`, the capability off `KilnUnavailableException`. Lab (`natives-only`): `PASS pass 1: sync native:
+  a program's signal arrives in its start step (0 steps; the suspending native: 1)`, `PASS ... a loop over 5 targets
+  with a sync native finishes in 1 step: 5 call(s), sum 10`, `PASS ... unload during a running cast: 0 calls after the
+  Pre that removed it`, `PASS registry full is Ok=false after 14 more sync native(s)`. `Register` (one step later, on
+  the tick thread) stays the tool for slow work and tick-thread API.
 - **Built-ins**: `kiln.Log(value)` (one kiln.log line) and `kiln.Signal(value, tag)` → `ImpactSignalEvent`
   (`Tag`, `Value`, `AsInt/AsFloat/AsEntity`, `Impact`, `Site`). Neither suspends.
 - **Programs**: ship them as kiln.assets resources (`assets/assets.json`, kind `resource`, type
@@ -323,7 +338,10 @@ Kiln.Abilities; it gets every event of the previous step in Pre as an array of 6
 its interest mask, `KILN_ABILITY_INTEREST_HOLD` for holds), `hold_filter`, `instance_vars/read/write/info`,
 `entity_overrides` (config overrides for the next instance on an entity: by config id, name hash or index),
 `program_count/info/vars/register/refresh`, `native_count/at/find/declare/register/unregister/complete/wrap/observe`,
-`set_wrap_dispatcher`, `call_original`, `release_owner`, `attr_get/attr_add`, `sequence_state`, `sequence_play`.
+`set_wrap_dispatcher`, `call_original`, `release_owner`, `attr_get/attr_add`, `sequence_state`, `sequence_play`;
+appended in 0.2.0-dev.29 (check `header.size`): `native_register_sync` (a native answered inside the call by its own
+`fn`, refusals as `KILN_NATIVE_REFUSED_*`) and `native_counters` (`KilnNativeCounters`: calls in flight, sync calls,
+faults, calls over budget, calls of a removed native).
 
 How it hooks (all fail soft; `kiln.abilities: natives on, programs on, instances on, attributes on, sequences on`):
 - `registerNative` (0x996b80) is detoured at boot to capture the game's 107 natives per registry; at the server
@@ -338,9 +356,16 @@ How it hooks (all fail soft; `kiln.abilities: natives on, programs on, instances
 
 ## Costs and limits
 - Without subscribers the hot paths are one atomic load each (createImpactInstance, runImpact, the three wrapped
-  natives).
+  natives); since 0.2.0-dev.29 every native thunk also counts itself in and out (two atomic adds).
+- The game's native registry takes 128 natives (half its capacity of 256; measured in the lab on server 26430253),
+  107 of them its own: Kiln's built-ins and every mod's `Register`/`RegisterSync` natives share the other 21 (wraps of
+  vanilla natives need none). A refused registration says so (`Ok = false`, "native registry full"). A native that was
+  taken off keeps its entry for the rest of the process (its hash answers 0x1F); registering the same name again
+  reuses it.
 - A hold delays the first run of the held programs' new instances by one step; a managed native delays its ECALL by
-  one step per call (a loop over 5 targets takes 5 steps); fire-and-forget work belongs in `kiln.Signal`.
+  one step per call (a loop over 5 targets takes 5 steps; a synchronous native: all in one step); fire-and-forget work
+  belongs in `kiln.Signal`.
+- A synchronous native's handler holds up `impact_simulation`, and with it the server's step, for as long as it runs.
 - Programs are verified, never trusted: see the contract. A program is copied into memory that is never freed
   (running instances read their code live).
 - Vanilla clients: tooltips and local prediction stay vanilla (a tweaked mana cost or damage shows vanilla numbers in
@@ -355,7 +380,10 @@ mkdir -p ~/srv/enshrouded/labs/<lab>/kiln/data/kiln.abilities && touch ~/srv/ens
 tools/lab/lab.sh start <lab>
 grep -a abilities-test ~/srv/enshrouded/labs/<lab>/kiln/logs/kiln.log    # ... summary: 73 PASS, 0 FAIL
 ```
-It spawns Vukahs and explosions 40+ m from the copied world's flame altar and removes them.
+It spawns Vukahs and explosions 40+ m from the copied world's flame altar and removes them. The natives v2 rows
+(`NativesV2*.cs`, package 06c) run at the end, or alone with `kiln/data/abilities-test/natives-only`; with
+`kiln/control/systems.parallel` they run a second time inside a forced-parallel window, and the unload row needs
+`mods/tests/natives-helper` deployed (built like abilities-test).
 
 The key path without a client: with `"labPort"` in the lab's `kiln/config/network.json`, a fake Kiln client
 (tools/nettest's `Client`) that sends `CastRequest("firenova:fire-nova")` on `kiln:abilities` gets

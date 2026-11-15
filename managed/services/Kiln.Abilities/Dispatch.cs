@@ -320,6 +320,97 @@ internal static unsafe class AbilitiesDispatch
         }
     }
 
+    // ----------------------------------------------------------------------------------------------- sync natives -
+    // A synchronous native (RegisterSync) hands the core one static dispatcher and an id, never a GCHandle: the entry
+    // lives in this table, a removed id answers 0x1F, and nothing has to be freed after the core let go of it.
+
+    internal sealed class SyncEntry
+    {
+        public required long Id;
+        public required string Name;
+        public required NativeSyncHandler Handler;
+        public required ModContext? Mod;
+        public required bool RawAllowed;
+        public uint Hash;
+        public int Faults;
+        public volatile bool Active = true;
+    }
+
+    private static readonly ConcurrentDictionary<long, SyncEntry> Syncs = new();
+    private static long _syncIds;
+
+    internal static delegate* unmanaged[Cdecl]<AbilitiesNative.NativeCall*, void*, void> SyncDispatcher => &SyncDispatch;
+
+    internal static SyncEntry AddSync(string name, NativeSyncHandler handler, ModContext? mod)
+    {
+        var e = new SyncEntry
+        {
+            Id = Interlocked.Increment(ref _syncIds), Name = name, Handler = handler, Mod = mod,
+            RawAllowed = mod is { Info.Advanced: true },
+        };
+        Syncs[e.Id] = e;
+        return e;
+    }
+
+    internal static void RemoveSync(SyncEntry e)
+    {
+        e.Active = false;
+        Syncs.TryRemove(e.Id, out _);
+    }
+
+    // The mod's sync natives (mod unload): off here first (a call that comes now answers 0x1F), then in the core, which
+    // marks the slot dead on the tick thread outside the step (no call can be inside the handler then).
+    internal static void RemoveSyncs(ModContext mod)
+    {
+        foreach (var kv in Syncs)
+        {
+            if (!ReferenceEquals(kv.Value.Mod, mod)) continue;
+            RemoveSync(kv.Value);
+            if (kv.Value.Hash != 0 && AbilitiesNative.T is var t && t != null && Game.IsTickThread) t->NativeUnregister(kv.Value.Hash);
+        }
+    }
+
+    internal static int SyncCount(ModContext? mod) => Syncs.Values.Count(e => ReferenceEquals(e.Mod, mod));
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static void SyncDispatch(AbilitiesNative.NativeCall* c, void* user)
+    {
+        Interlocked.Increment(ref InFlight.Value);
+        var outer = ModContext.CurrentMod;
+        try
+        {
+            if (!Syncs.TryGetValue((long)user, out var e) || !e.Active || e.Mod is { Alive: false })
+            {
+                c->OutError = 0x1F;  // taken off: the instance stops with Error, as for an unknown native
+                return;
+            }
+            ModContext.CurrentMod = e.Mod;
+            try
+            {
+                var call = new NativeCall(c, e.Mod, e.RawAllowed, sync: true);
+                var value = e.Handler(ref call);
+                c->OutError = 0;
+                c->OutValue = value;
+            }
+            catch (Exception ex)
+            {
+                c->OutError = 0x11;  // keen::ErrorId Internal: the instance stops with Error, the game goes on
+                c->OutValue = 0;
+                if (Interlocked.Increment(ref e.Faults) <= 3)
+                    e.Mod?.Log.Error($"abilities: sync native {e.Name} threw: {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+        catch
+        {
+            c->OutError = 0x11;  // never throw into native code
+        }
+        finally
+        {
+            ModContext.CurrentMod = outer;
+            Interlocked.Decrement(ref InFlight.Value);
+        }
+    }
+
     // ----------------------------------------------------------------------------------------------- hold filter --
 
     private sealed class HoldFilter(ModContext? mod, uint[] ids) : IDisposable

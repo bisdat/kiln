@@ -146,6 +146,7 @@ enum {
     KILN_NATIVE_KIND_WRAPPED = 1, /* a vanilla native Kiln wraps (observe / managed wrappers); the game's fn below */
     KILN_NATIVE_KIND_BUILTIN = 2, /* kiln.Log, kiln.Signal */
     KILN_NATIVE_KIND_MANAGED = 3, /* registered through native_register (answers in the next step) */
+    KILN_NATIVE_KIND_SYNC = 4,    /* since 0.2.0-dev.29: registered through native_register_sync (answers inside the call) */
 };
 
 /* A program in the ImpactRegistry (program_info). */
@@ -185,6 +186,31 @@ typedef struct KilnNativeCall {
 /* Sync wrapper dispatcher (managed Kiln.Abilities): runs on the job thread that runs the native. It may change
  * variables, call call_original(call) (at most once), and sets out_error/out_value. Returns nothing. */
 typedef void(KILN_CALL* KilnNativeWrapFn)(KilnNativeCall* call, void* user);
+
+/* since 0.2.0-dev.29: why native_register_sync (and native_attach) said no */
+enum {
+    KILN_NATIVE_REFUSED_NONE = 0,
+    KILN_NATIVE_REFUSED_REGISTRY_FULL = 1, /* the server world's native registry has no room: the game takes 128 keys
+                                              (half its capacity of 256), 107 of them its own; a wrap needs none */
+    KILN_NATIVE_REFUSED_NO_SLOT = 2,       /* Kiln's 160 native thunks are in use (wraps, built-ins, mods' natives) */
+    KILN_NATIVE_REFUSED_TAKEN = 3,         /* a live Kiln native has this name */
+    KILN_NATIVE_REFUSED_VANILLA = 4,       /* the name's hash is one of the game's natives */
+};
+
+/* since 0.2.0-dev.29 (native_counters). Reads every field the caller's size covers. */
+typedef struct KilnNativeCounters {
+    uint32_t size;            /* set by the caller */
+    uint32_t inflight;        /* calls inside a Kiln native thunk right now (0 in Pre and Post) */
+    uint32_t flags;           /* KILN_NATIVE_COUNTERS_* */
+    uint32_t reserved;
+    uint64_t sync_calls;      /* sync native calls that reached their fn */
+    uint64_t sync_faults;     /* of those, fn faulted (answered 0x11) */
+    uint64_t sync_slow;       /* of those, fn took longer than the 0.2 ms budget (logged, not cut off) */
+    uint64_t dead_calls;      /* calls of a Kiln native that was taken off (answered 0x1F) */
+} KilnNativeCounters;
+enum {
+    KILN_NATIVE_COUNTERS_NATIVES = 1u << 0, /* the RegisterNative hook is in: Kiln natives can be registered */
+};
 
 typedef struct KilnAbilitiesApi {
     KilnServiceHeader header; /* { sizeof(KilnAbilitiesApi), KILN_ABILITIES_VERSION } */
@@ -263,6 +289,21 @@ typedef struct KilnAbilitiesApi {
      * system takes it in its next step. NOT_FOUND: no ActorInput on the entity, or the sequence is unknown.
      * trigger may carry KILN_SEQUENCE_FLAG_HOLD; older services answer INVALID_ARGUMENT. */
     KilnResult(KILN_CALL* sequence_play)(KilnEntity entity, uint32_t sequence_id, uint32_t trigger);
+
+    /* ---- since 0.2.0-dev.29: synchronous natives (check header.size before use) ----
+     * tick, and not from inside a native call (WRONG_THREAD there). A Kiln native `name` (full "<modid>.<Name>", hash =
+     * FNV-1a-32 of it, argc 0..31) answered inside the program's ECALL, in the same simulation step: `fn` runs on the
+     * thread that runs impact_simulation (the server world's thread on a dedicated server) with a KilnNativeCall that
+     * has no original (call_original does nothing); its out_error/out_value are the result (out_error left at 0xFF:
+     * error 0, value 0). A fault in `fn` answers 0x11 (the instance stops with Error, the game goes on). `fn` must not
+     * block and must not call tick-only functions. native_unregister / release_owner take it off like a managed native:
+     * from then on the hash answers 0x1F. `fn` and `user` must stay valid until then.
+     * KILN_OK: *out_hash set. INVALID_ARGUMENT: a bad name, argc or fn (*out_refusal 0), or a refusal (*out_refusal is
+     * KILN_NATIVE_REFUSED_*). UNAVAILABLE: no natives on this build. */
+    KilnResult(KILN_CALL* native_register_sync)(KilnOwner owner, KilnStr name, uint32_t argc, KilnNativeWrapFn fn,
+                                                void* user, uint32_t* out_hash, uint32_t* out_refusal);
+    /* any thread. Counters of the native thunks (KilnNativeCounters; set out->size first). */
+    KilnResult(KILN_CALL* native_counters)(KilnNativeCounters* out);
 } KilnAbilitiesApi;
 
 /* sequence_play() trigger (keen::actor::ActionSequenceTrigger) */

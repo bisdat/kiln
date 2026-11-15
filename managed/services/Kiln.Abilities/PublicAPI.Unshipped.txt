@@ -1,1 +1,21 @@
 #nullable enable
+Kiln.NativeResult
+Kiln.NativeResult.<Clone>$() -> Kiln.NativeResult!
+Kiln.NativeResult.Deconstruct(out bool Ok, out string? Reason, out uint Hash) -> void
+Kiln.NativeResult.Equals(Kiln.NativeResult? other) -> bool
+Kiln.NativeResult.Hash.get -> uint
+Kiln.NativeResult.Hash.init -> void
+Kiln.NativeResult.NativeResult(bool Ok, string? Reason, uint Hash) -> void
+Kiln.NativeResult.Ok.get -> bool
+Kiln.NativeResult.Ok.init -> void
+Kiln.NativeResult.Reason.get -> string?
+Kiln.NativeResult.Reason.init -> void
+Kiln.NativeSyncHandler
+[KILNX001]static Kiln.Abilities.Natives.LabCounters.get -> (ulong SyncCalls, ulong SyncFaults, ulong SyncSlow, ulong DeadCalls, uint Inflight)?
+override Kiln.NativeResult.Equals(object? obj) -> bool
+override Kiln.NativeResult.GetHashCode() -> int
+override Kiln.NativeResult.ToString() -> string!
+static Kiln.Abilities.Natives.RegisterSync(string! name, int argc, Kiln.NativeSyncHandler! handler) -> Kiln.NativeResult!
+static Kiln.NativeResult.operator !=(Kiln.NativeResult? left, Kiln.NativeResult? right) -> bool
+static Kiln.NativeResult.operator ==(Kiln.NativeResult? left, Kiln.NativeResult? right) -> bool
+virtual Kiln.NativeSyncHandler.Invoke(ref Kiln.NativeCall call) -> byte

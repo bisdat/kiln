@@ -87,12 +87,15 @@ public unsafe ref struct NativeCall
     // registered outside any mod.
     private readonly ModContext? _owner;
     private readonly bool _raw;
+    // A call of a synchronous Kiln native (RegisterSync): there is no game function to call.
+    private readonly bool _sync;
 
-    internal NativeCall(AbilitiesNative.NativeCall* c, ModContext? owner, bool raw)
+    internal NativeCall(AbilitiesNative.NativeCall* c, ModContext? owner, bool raw, bool sync = false)
     {
         _c = c;
         _owner = owner;
         _raw = raw;
+        _sync = sync;
     }
 
     public uint Native => _c->Hash;
@@ -149,7 +152,13 @@ public unsafe ref struct NativeCall
     public bool SetU32(int i, uint v) => BytesCore(i) is { Length: 4 } b && BitConverter.TryWriteBytes(b, v);
 
     /// <summary>Runs the game's native now with the current arguments (once).</summary>
-    public void CallOriginal() { if (_c->OriginalCalled == 0) AbilitiesNative.T->CallOriginal(_c); }
+    /// <exception cref="InvalidOperationException">The call is one of a synchronous Kiln native
+    /// (<see cref="Abilities.Natives.RegisterSync"/>): there is no game function to run.</exception>
+    public void CallOriginal()
+    {
+        if (_sync) throw new InvalidOperationException("a synchronous Kiln native has no original to call");
+        if (_c->OriginalCalled == 0) AbilitiesNative.T->CallOriginal(_c);
+    }
 
     /// <summary>The native does not run; the program gets <paramref name="value"/>.</summary>
     public void Return(byte value) { _c->OutError = 0; _c->OutValue = value; }
@@ -159,6 +168,21 @@ public unsafe ref struct NativeCall
 }
 
 public delegate void NativeWrapHandler(ref NativeCall call);
+
+/// <summary>A synchronous Kiln native (<see cref="Abilities.Natives.RegisterSync"/>): runs inside the program's ECALL,
+/// on the thread that runs the game's Impact programs, and returns the value the ECALL pushes (0..255). Read and write
+/// the arguments through <paramref name="call"/>; there is no original (<see cref="NativeCall.CallOriginal"/> throws).
+/// An exception answers 0x11 (the program instance stops with Error; the game goes on).</summary>
+[AnyThread]
+public delegate byte NativeSyncHandler(ref NativeCall call);
+
+/// <summary>What <see cref="Abilities.Natives.RegisterSync"/> did: <see cref="Ok"/> with the native's
+/// <see cref="Hash"/>, or the game-state limit that refused it (<see cref="Reason"/>: the native registry is full, Kiln's
+/// native slots are used up, the name is taken or is a vanilla native's).</summary>
+/// <param name="Ok">The native is registered.</param>
+/// <param name="Reason">Why not; null when <paramref name="Ok"/>.</param>
+/// <param name="Hash">FNV-1a-32 of the full name (what a program's ECALL names), also when refused.</param>
+public sealed record NativeResult(bool Ok, string? Reason, uint Hash) : IKilnResult;
 
 /// <summary>A synchronous applyDamage call (job thread): change it before the game applies it, or cancel it.</summary>
 public unsafe ref struct DamageCall
@@ -278,6 +302,86 @@ public static unsafe partial class Abilities
             return hash;
         }
 
+        /// <summary>Registers a synchronous native "&lt;modid&gt;.<paramref name="name"/>" (hash = FNV-1a-32 of the full
+        /// name): <paramref name="handler"/> runs inside the program's ECALL, in the same simulation step, and its return
+        /// value is what the ECALL pushes. Use it for quick work on the call's own arguments; <see cref="Register"/> (a
+        /// handler on the tick thread, one step later) stays the tool for slow work or tick-thread API.
+        /// </summary>
+        /// <remarks>The handler runs on the thread that runs the game's Impact programs (the server world's thread on a
+        /// dedicated server; never the tick thread's Pre or Post), so it calls no tick-thread API and does not block:
+        /// queue other work with <c>Context.Scheduler.Post</c>. A handler over 0.2 ms is logged (the whole server step
+        /// waits for it). The native ends when the mod unloads: from then on programs that call it stop with Error 0x1F.
+        /// A program can call it once it is registered; programs registered earlier wait for it.</remarks>
+        /// <param name="name">Name, or the full "&lt;modid&gt;.&lt;Name&gt;" (the mod's own id); Name is
+        /// [A-Za-z0-9_].</param>
+        /// <param name="argc">Values the ECALL pops, 0..31.</param>
+        /// <param name="handler">The native.</param>
+        /// <returns>Ok, or <c>Ok = false</c> when a game-state limit refused it (see <see cref="NativeResult"/>).</returns>
+        /// <exception cref="ArgumentException">A bad name or argc, a full name with another mod's id, a null
+        /// handler.</exception>
+        /// <exception cref="InvalidOperationException">Not called from a mod, or not on the tick thread.</exception>
+        /// <exception cref="KilnUnavailableException">Capability <c>abilities.natives.sync</c> is off here.</exception>
+        [ServerOnly]
+        [TickThreadOnly]
+        [RequiresCapability(AbilitiesCaps.NativesSync)]
+        public static NativeResult RegisterSync(string name, int argc, NativeSyncHandler handler)
+        {
+            ArgumentException.ThrowIfNullOrEmpty(name);
+            ArgumentNullException.ThrowIfNull(handler);
+            if (argc is < 0 or > 31) throw new ArgumentOutOfRangeException(nameof(argc), argc, "argc is 0..31");
+            Game.AssertTickThread();
+            var mod = ModContext.CurrentMod ?? throw new InvalidOperationException("Natives.RegisterSync must be called from a mod");
+            var full = name.Contains('.') ? name : $"{mod.Info.Id}.{name}";
+            if (!full.StartsWith(mod.Info.Id + ".", StringComparison.Ordinal))
+                throw new ArgumentException($"native {full}: a mod registers natives under its own id ({mod.Info.Id}.<Name>)", nameof(name));
+            if (!ValidName(full)) throw new ArgumentException($"native {full}: Name must be [A-Za-z0-9_], 90 bytes in all", nameof(name));
+            AbilitiesCaps.Require(AbilitiesCaps.NativesSync);
+            var t = AbilitiesNative.V2(nameof(AbilitiesNative.TableV2.NativeRegisterSync));
+            if (t == null) throw new KilnUnavailableException(AbilitiesCaps.NativesSync, "kiln.abilities is older than 0.2.0-dev.29");
+            AbilitiesDispatch.Ensure();
+            var entry = AbilitiesDispatch.AddSync(full, handler, mod);
+            var bytes = Encoding.UTF8.GetBytes(full);
+            uint hash = 0, refusal = 0;
+            int rc;
+            fixed (byte* p = bytes)
+                rc = t->NativeRegisterSync(mod.Owner, new NativeStr { Ptr = p, Len = (nuint)bytes.Length }, (uint)argc,
+                    AbilitiesDispatch.SyncDispatcher, (void*)entry.Id, &hash, &refusal);
+            if (rc != AbilitiesNative.Ok)
+            {
+                AbilitiesDispatch.RemoveSync(entry);
+                if (rc == AbilitiesNative.InvalidArgument && refusal != AbilitiesNative.RefusedNone)
+                {
+                    mod.Log.Warn($"abilities: sync native {full} refused: {AbilitiesNative.Refusal(refusal)}");
+                    return new NativeResult(false, AbilitiesNative.Refusal(refusal), hash != 0 ? hash : AbilitiesNative.Fnv(full));
+                }
+                if (rc == AbilitiesNative.Unavailable) throw new KilnUnavailableException(AbilitiesCaps.NativesSync, "kiln.abilities has no natives on this build");
+                if (rc == AbilitiesNative.WrongThread) throw new InvalidOperationException("Natives.RegisterSync: not on the tick thread (or inside a native call)");
+                throw new ArgumentException($"native {full}: {AbilitiesNative.Describe(rc)}", nameof(name));
+            }
+            entry.Hash = hash;
+            Names[hash] = full;
+            AbilitiesDispatch.Watch(mod);
+            mod.Log.Info($"abilities: sync native {full} (0x{hash:x8}, argc {argc}) registered");
+            return new NativeResult(true, null, hash);
+        }
+
+        // natives_core.h valid_native_name: "<modid>.<Name>", Name [A-Za-z0-9_], 90 bytes at most
+        internal static bool ValidName(string full)
+        {
+            var dot = full.IndexOf('.');
+            if (dot <= 0 || dot + 1 >= full.Length || Encoding.UTF8.GetByteCount(full) > 90) return false;
+            for (var i = dot + 1; i < full.Length; i++)
+                if (!char.IsAsciiLetterOrDigit(full[i]) && full[i] != '_') return false;
+            return true;
+        }
+
+        /// <summary>Lab use: the native thunks' counters (sync calls, faults, calls over budget, calls of a removed
+        /// native), or null without a dev.29 kiln.abilities.</summary>
+        [System.Diagnostics.CodeAnalysis.Experimental("KILNX001")]
+        [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+        public static (ulong SyncCalls, ulong SyncFaults, ulong SyncSlow, ulong DeadCalls, uint Inflight)? LabCounters =>
+            AbilitiesNative.Counters() is { } c ? (c.SyncCalls, c.SyncFaults, c.SyncSlow, c.DeadCalls, c.Inflight) : null;
+
         /// <summary>Declares a native from a mod's impact/natives.json before it is registered, so programs that call
         /// it pass the verifier now. Any thread.</summary>
         [RequiresCapability(AbilitiesCaps.Service)]
@@ -299,6 +403,7 @@ public static unsafe partial class Abilities
             foreach (var kv in ManagedNatives)
                 if (ReferenceEquals(kv.Value.Mod, mod) && ManagedNatives.TryRemove(kv.Key, out _))
                     if (AbilitiesNative.T is var t && t != null && Game.IsTickThread) t->NativeUnregister(kv.Key);
+            AbilitiesDispatch.RemoveSyncs(mod);
         }
 
         /// <summary>Observes a vanilla native: its calls arrive as <see cref="ImpactNativeEvent"/> (applyDamage,
