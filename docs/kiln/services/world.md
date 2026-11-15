@@ -239,6 +239,83 @@ and `Refresh` throw `KilnUnavailableException("world.find")` (`World.Find` keeps
 The Lua version writes the `Teleport` component's fields of an entity that has none: that path never adds the
 component. kiln.world adds it the way the game does (a kind-3 record from a program).
 
+### Client world programs (since 0.2.0-dev.29)
+A game client runs a **client world** (the local player, the camera, what this player sees; it steps on the game's main
+thread and runs its programs' slices as tasks on the game's workers) and, inside it, the **prediction storage** (it runs
+the client world's table every prediction step on the main thread). A `client` or `both` mod can run a program of its own
+in either. It runs in this player's process only: no other player and no vanilla client sees what it does, so it is for
+presentation; a program that must change what others see belongs in the server world.
+
+- **Declare** it in the mod's `kiln.programs.json` with `"world"`: `"client"`, `"both"` (one program in each world: a
+  server side and a client side, each bound on its own) or `"prediction"` (the client world's table without the client
+  flag, which the client world skips and the prediction storage runs). A file without `"world"` means the server world,
+  as before. A client or prediction entry without `"flags"` is `SYSTEM`; `hostOnly` is a server program's flag (refused
+  for `client` and `prediction`; a `both` entry keeps it on its server side). kiln.world reads the file at the game's
+  start (from every enabled `client` and `both` mod; a `server` mod's client entries are not taken), so a changed file
+  needs a restart of the game.
+- **Bind** it with `EcsPrograms.TryBind(key, callback, WorldKind.Client)` (or `WorldKind.Prediction`) on the game's main
+  thread: in `OnLoad`, which runs there for a client mod in the main menu, or through `Client.Post` (a host's reload
+  runs `OnLoad` on its server thread). The answer is an `EcsProgramBinding`: `Ok` with its `Handle`; `Ok = false` with a
+  `Reason` and no handle when nothing was bound (not reserved for that world, another binding holds it); `Ok = false`
+  with a handle when only the client world that runs now refused the program (it runs in a later client world that takes
+  it), and also when a client world runs that registered before the program existed (`Reason` "registered from the next
+  client world"). `KilnUnavailableException` when `world.programs.client` is off. A declaration changed since the game
+  started (its lists, flags or `"world"`) is refused until a restart. `EcsPrograms.Bind` and `TryBind(…, Server)` keep
+  the server world's tick-thread rule.
+- **Each client world anew.** kiln.world registers every client and prediction declaration into each client world at
+  its `RegisterAllPrograms` (hosted and joined alike), after the game's own programs, so it runs after every client
+  program it conflicts with. Its names are checked against **that** world's maps first: a name the client world lacks
+  refuses it there only, with the name (`EcsProgramRefusedEvent` for a world after the bind, also when the mod's callback
+  threw there; `kiln.log`: `program … refused for the client world: …`). Registered: `program kiln_managed_… registered into the client world as #N`. At the client
+  world's first step kiln.log lists its event types (`client world 0x… event map (question 4): …`; a host's server world's
+  too) while such a program exists.
+- **Threads.** The callback runs on the game's workers or the main thread, several slices at once: no tick-thread API in
+  it, UI work through `Client.Post`; `EcsProgramContext.World` says which world it is in. A client world's entity ids are
+  its own: the same number can name another entity in the server world.
+- **Stop and unload.** When the client world stops (leaving to the menu, joining elsewhere) no call starts and the
+  running ones are waited for, 2 s at most; each registration with no call inside waits for the next client world, and
+  the binding stays and runs again there. The core waits for a client world's jobs before it destroys the world only
+  where it says so (not yet in this core): when a call is still running after the 2 s, kiln.log says `client world
+  stops: N call(s) of Kiln programs still running after … us; their bindings are kept`, that program is off for good,
+  no client-world program registers again until the game restarts and `world.programs.client` goes unavailable
+  (faulted) with the reason. That late call may still read the world the game is destroying. The same latch follows a
+  fault in the engine's RegisterProgram for a client world, or a table that does not add up after it.
+- **Disposing** the handle, or the mod's unload, unbinds: from then on no call of it starts once kiln.world has seen it
+  close. A dispose made inside a call of the program itself, or one that finds a call still running (a host unloading
+  the mod from its server thread while a client step runs it), is finished later: Kiln retries on its service tick and
+  keeps the callback, its mod's context and its assembly alive until the last call has returned. Your `OnUnload` runs
+  before that: do not free what a running callback still uses.
+- **Writes** through `TryWrite` change this player's client world only: in a client or prediction program it does not
+  mark the write for the game's save or replication (it does in the server world), as the game's own client programs
+  write what they draw. `TryWriteOther` answers false there (the game's other-entity write marks the change; kiln.world's
+  `write_other` refuses it in a client program). A `TryWrite` raises `ClientComponentWrittenEvent` (Kiln.World; entity,
+  component, the bytes before and after, `Writer` `"<modid>/program:<key>"`) while it has listeners. Whether every game
+  version leaves such an unmarked write alone has not been run in a game: guided check `programs.client-visual`.
+  `World.Write` has no client world.
+- **Events.** `EcsProgramRefusedEvent` and `ClientComponentWrittenEvent` arrive on the game's main thread, in the client
+  world's next Pre (on a host too, never on the server's tick), where a handler may touch the client world; one of a
+  client world that ended first is not delivered. Only Kiln raises them.
+- **Room.** The same 64 Kiln program slots as the server world's programs (a `both` program takes one), and the client
+  table's 896 (checked before and after each registration; `World.GetProgramBudget(CapacityWorldKind.Client)` counts Kiln's
+  entries there).
+- **Capability** `world.programs.client`: on in a game client whose build resolved kiln.world's program registration,
+  the name maps and `world.lifecycle`, with the client world's tick; the text says "waiting for a world" in the menu and "a
+  client world runs" in game; `wrong-side` on a dedicated server; unavailable (faulted) for the rest of the process after
+  the latch above.
+- **What every player pays.** With no client declaration in any mod: at the game's start kiln.world reads the
+  `kiln.programs.json` of each enabled `client` and `both` mod that has one; each client world's RegisterAllPrograms
+  runs kiln.world's existing hook, which registers nothing and logs its old line; each client Pre enters kiln.world's
+  client handler, whose program part is one atomic load; each client world's start and stop reports the row's text to
+  kiln.caps. Nothing is added to the game's tables and the server world's programs dispatch as before. Once a client
+  declaration was accepted at the start (or a native service registered one) every client world registers it, also
+  after its mod unloaded (inert): the slot and that cost stay for the process.
+- Not yet run in a game client: guided checks `programs.client-baseline`, `14-client-world-programs`,
+  `programs.client-joined`, `14-q4`, `programs.client-emf`, `programs.client-visual`, `programs.client-rejoin`
+  (mods/tests/client-pass, with the fixture mods/tests/client-programs-fixture and the EMF probe mods/tests/emf-client-test).
+- Native code: `register_program_world`, `program_world_state`, `bind_program_world` and `unbind_program_world` at the
+  end of the kiln.world table (offsets 496 to 520, after the foreign views at 448 to 488; the table is 528 bytes;
+  [kiln_world.h](../../../native/core/abi/services/kiln_world.h)).
+
 ## Native (other services)
 
 Look the table up in `on_ready` (services load in file-name order, so `kiln.world` may not exist yet in your

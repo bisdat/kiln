@@ -277,6 +277,7 @@ internal static partial class KilnApis
         "M:Kiln.Dialogues.Talk(Kiln.QuestHolder,System.String)", // Dialogues.Talk(QuestHolder, string?): Game.AssertTickThread
         "M:Kiln.Dialogues.View(Kiln.QuestHolder)", // Dialogues.View(QuestHolder): Game.AssertTickThread
         "M:Kiln.EcsPrograms.Bind(System.String,Kiln.EcsProgramCallback)", // EcsPrograms.Bind(string, EcsProgramCallback): Services.RequireTickThread
+        "M:Kiln.EcsPrograms.TryBind(System.String,Kiln.EcsProgramCallback,Kiln.WorldKind)", // EcsPrograms.TryBind(string, EcsProgramCallback, WorldKind): Services.RequireTickThread
         "M:Kiln.EntityData.Clear(Kiln.EntityId)", // EntityData.Clear(EntityId): via EntityData.Keys(EntityId, string, bool)
         "M:Kiln.EntityData.Get``1(Kiln.EntityId,System.String)", // EntityData.Get<T>(EntityId, string): via PlayerData.Get<T>(ulong, string)
         "M:Kiln.EntityData.Has(Kiln.EntityId,System.String)", // EntityData.Has(EntityId, string): via PlayerData.Contains(ulong, string)

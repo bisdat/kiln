@@ -360,10 +360,25 @@ const KilnWorldApi kTable = {
     &foreign_read,
     &foreign_write,
     &foreign_attr_changed,
+    // since 0.2.0-dev.29: Kiln programs in a client's client world and prediction storage (chapter 14), at 496..520
+    // (after 06c's foreign views)
+    &register_program_world,
+    &program_world_state,
+    &bind_program_world,
+    &unbind_program_world,
 };
+static_assert(sizeof(KilnWorldApi) == 528 && offsetof(KilnWorldApi, foreign_attr_changed) == 488 &&
+                  offsetof(KilnWorldApi, register_program_world) == 496 && offsetof(KilnWorldApi, unbind_program_world) == 520,
+              "kiln.world's table: the client-world members append at 496, after the foreign views");
 
-void KILN_CALL on_client_pre(const KilnTickInfo* tick, void*) { game_programs_pre(KILN_WORLD_CLIENT, tick); }
-void KILN_CALL on_world_event(const KilnWorldEvent* event, void*) { game_programs_world_event(event); }
+void KILN_CALL on_client_pre(const KilnTickInfo* tick, void*) {
+    game_programs_pre(KILN_WORLD_CLIENT, tick);
+    programs_client_pre(tick);
+}
+void KILN_CALL on_world_event(const KilnWorldEvent* event, void*) {
+    game_programs_world_event(event);
+    programs_world_event(event);
+}
 
 }  // namespace
 }  // namespace kw
@@ -407,6 +422,9 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
             client_tick = api->subscribe_world_tick(owner, KILN_WORLD_CLIENT, KILN_TICK_PRE, &on_client_pre, nullptr, &h) == KILN_OK;
         const bool events = api->subscribe_world(owner, &on_world_event, nullptr, &h) == KILN_OK;
         wraps_client_ready(client_tick, events);
+        programs_client_init(client_tick, events);  // world.programs.client: before on_ready's reservations
+    } else {
+        programs_client_init(false, false);
     }
     game_programs_init();
     KW_I("kiln.world: programs %s, entities %s, find %s, names %s (singletons %s, events %s), queue %s, "

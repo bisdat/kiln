@@ -56,13 +56,13 @@ than EMF's minimum is refused untouched, as in EMF. v41's `EmfMoveOrder.stuck_se
 | `on_tick`, `run_on_world` (1) | Post of each world's step | `TickEvents` / `Scheduler` | full | probe |
 | `resolve`, `hook` (1) | EMF signature name → Kiln sigdb (`sigdb/symbols/*.d/emf.json`) | `Kiln.Hooks` | full | probe |
 | `hook_program` (1) | `kiln.types` runner pre/post callbacks | `GameSystems.Hook(name, before, after)` | full | host; server probe |
-| `register_program`, `register_program_def` (2/16) | `kiln.world` programs, server world | `Kiln.Api` ECS programs | partial: server world only | probe |
+| `register_program`, `register_program_def` (2/16) | `kiln.world` programs: server world; `EMF_WORLD_CLIENT` through `register_program_world` (since 0.2.0-dev.29, host tests only) | `Kiln.Api` ECS programs | partial: the client world is built and not yet run in a real game (guided check `programs.client-emf`); refused at the call on a dedicated server, as before | probe |
 | `spawn`, `destroy` (2) | `kiln.spawn` | `Kiln.Spawn` | full | probe |
 | `spawn_ex` (12) | `kiln.spawn` components copied into the spawn request | `SpawnOptions.Components`, `SpawnComponent.Of` | full | host; server probe |
 | `on_save`, `on_load` (2) | `kiln.saves` events | `Kiln.Saves` events | full | probe |
 | `emit_event` (3) | the game's emitter (as `kiln.gameplay`) | `Kiln.Gameplay` | full | probe |
 | `read_events` (3) | `kiln.world` programs v2, multiple event inputs | `Kiln.Api` ECS programs with multiple event inputs | full | host; server probe |
-| `on_event` (4) | one `kiln.world` program per event type | `Events.On<T>` (service events) | partial: server world only | probe |
+| `on_event` (4) | one `kiln.world` program per event type and world kind (`emf_ev_<Event>`, client world `emf_evc_<Event>`, delivered after that world's step on its thread) | `Events.On<T>` (service events) | partial: the client world is built and not yet run in a real game (guided check `programs.client-emf`) | probe |
 | `for_each_item`, `find_item`, `item_info` (5) | `kiln.items` catalog | `Kiln.Items` | full | probe |
 | `give_item` (5) | `kiln.spawn` pickup | `Kiln.Items` | full | probe |
 | `register_command`, `command_reply` (6) | players' chat (`kiln.chat`) + `emf/commands.txt` | `Kiln.Chat` commands | full | probe, lab-mod |
@@ -146,7 +146,7 @@ Kiln the functions of the last rows below return what EMF's Lua guide documents 
 | `emf.notify`, `emf.hud` | `notify`, `hud_set` | partial (as C) |
 | `emf.on_tick` | `on_tick` | full |
 | `emf.bus.subscribe/publish/unsubscribe` | the Lua host itself (`run_on_world`) | full |
-| `emf.on_event`, `emf.emits`, `emf.emit` | `on_event`, `register_program_def`, `emit_event` | partial: server world only |
+| `emf.on_event`, `emf.emits`, `emf.emit` | `on_event`, `register_program_def`, `emit_event` | partial: the client world is built and not yet run in a real game |
 | `emf.command`, `emf.reply`, `emf.sender` | `register_command_ex`, `command_reply`, `command_sender` | full |
 | `emf.local_player`, `emf.session`, `emf.session_token`, `emf.time_of_day` | worlds, session, singleton | full |
 | `emf.on_world_data`, `emf.save_world_data` | `on_save` / `on_load` | full |

@@ -1996,7 +1996,8 @@ void abi(const char* path) {
     };
 #define F(S, f) l.push_back(nlohmann::json::array({#f, offsetof(S, f)}))
     {
-        auto& l = list("KilnWorldApiV4", sizeof(KilnWorldApi));
+        // the v4 table up to the foreign views (0.2.0-dev.29's client-world members after them: client_world_test.cpp)
+        auto& l = list("KilnWorldApiV4", offsetof(KilnWorldApi, foreign_attr_changed) + sizeof(void*));
         F(KilnWorldApi, header); F(KilnWorldApi, register_program); F(KilnWorldApi, program_slot); F(KilnWorldApi, program_info);
         F(KilnWorldApi, iter_begin); F(KilnWorldApi, iter_next); F(KilnWorldApi, current_entity); F(KilnWorldApi, command_buffer);
         F(KilnWorldApi, queue_push); F(KilnWorldApi, queue_add); F(KilnWorldApi, queue_remove); F(KilnWorldApi, mark_written);
