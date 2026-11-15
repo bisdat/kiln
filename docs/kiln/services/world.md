@@ -201,6 +201,25 @@ Events.On<EntityScaleChangedEvent>(e => Log.Info(e.ToString()));
 - **Capabilities:** `world.transform_scale` (Kiln.World's row: the layout) and `world.tracked_writes`; either off throws
   `KilnUnavailableException` naming it.
 
+### Program budget
+`World.GetProgramBudget(kind = CapacityWorldKind.Server)` (since 0.2.0-dev.29; any thread; both sides) answers how much
+room is left for world programs, as a `ProgramBudgetResult`: `KilnSlots` (process-wide: Kiln's own 64 slots for its
+services, compat loaders and mods together; `KilnUsed` the programs that run or wait for a world, `Reserved` the slots of
+programs that cannot run: refused, faulted, a declaration no loaded mod bound; a slot is never freed in a process) and
+`EngineSlots` (the world's own table of 896: `GameUsed` the game's programs, `KilnUsed` those Kiln registered there,
+`Reserved` another loader's direct registrations), one revision for both; `PerFileMax` (32 declarations in a
+`kiln.programs.json`) and `AccessLimits` (8, 42, 64, 64, 9, 92, 24 and 4,096 iterator bytes) are always filled. It is
+counted from what kiln.world keeps (its slot ledger, and its directory of the world's table read in the world's own
+step once the table is final), never from game memory, and nothing runs for it while nobody asks. `Ok` is false with
+`NoWorld` when there is no world of that kind (the client world on a dedicated server), with `NotReady` while a world's
+table is not read yet (its `World` token is set then) or on a build where programs are off; then both budgets are 0. A
+budget read before the world starts is not a promise: registration still checks the live table at the world's start.
+The prediction world is not a kind of its own here (`ArgumentException`). Without kiln.world.budget (an older kiln.world)
+it throws `KilnUnavailableException("world.program_budget")`. A change posts `CapacityChangedEvent` (`Quota`
+`world.program_budget`) at the next step, measured every 25 steps while something listens. Native code: the table
+`kiln.world.budget` (`native/core/abi/services/kiln_world_budget.h`), a table of its own next to kiln.world.
+`World.Status` stays what it was (a legacy diagnostic).
+
 ### Entity sets
 `World.Query(with…)` and `World.Query(with, without)` give an `EntitySet`: the entities that have every component of
 one list and none of the other, read at that moment (`Query<T>()`, `Query<T1, T2>()` take generated types). A set is a

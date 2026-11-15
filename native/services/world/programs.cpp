@@ -545,6 +545,23 @@ uint32_t programs_registered() {
 
 uint32_t program_quota() { return kMaxPrograms; }
 
+// The slot ledger for kiln.world.budget (any thread): a slot is in active use while its program is registered or waits
+// for a world with a callback that can run (a declaration counts once a mod bound it); a refused, faulted or skipped
+// program, and a declaration no loaded mod bound, still holds its slot (the engine keeps every descriptor).
+ProgramLedger program_ledger() {
+    std::lock_guard lock(g_mutex);
+    ProgramLedger out;
+    out.taken = static_cast<uint32_t>(g_programs.size());
+    for (const Program* p : g_programs) {
+        out.descs.push_back(reinterpret_cast<uintptr_t>(&p->desc));
+        const int st = p->state.load();
+        const bool bound = p->reserved_mod.empty() || p->owner != g_owner;
+        if ((st == KILN_PROGRAM_ACTIVE || st == KILN_PROGRAM_PENDING) && bound && (p->internal || p->each || p->update)) ++out.active;
+    }
+    std::sort(out.descs.begin(), out.descs.end());
+    return out;
+}
+
 uint32_t engine_program_count(uintptr_t world) {
     if (!world || L.programs_count < 0) return 0;
     return *reinterpret_cast<const uint16_t*>(world + L.programs_count);

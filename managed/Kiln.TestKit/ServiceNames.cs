@@ -60,6 +60,7 @@ internal static class ServiceNames
         "kiln.ui.values",
         "kiln.vfx",
         "kiln.world",
+        "kiln.world.budget",
         "kiln.worldtables",
     ];
 

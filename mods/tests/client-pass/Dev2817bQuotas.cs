@@ -4,7 +4,10 @@
 // fixture mod gamedata-caps (mods/tests/gamedata-test/Caps: 4,097 buff clones, so the room is full) in the hosted
 // world; it checks what the code can see (the room, the first and last clone registered, the game's lookup) and asks
 // the player what only a player sees: the first and the last clone on the buff bar with their duration, after a rejoin
-// and in a second world.
+// and in a second world. 17-programs-vanilla: kiln.world's 64 program slots (32 before) with a game client without Kiln
+// joined: more server-only programs change no protocol; the fixture mods world-programs-quota-a and -b (64 declarations)
+// fill the slots, the check moves the player with a teleport (a replicated change) and asks whether the game stayed well.
+// It confirms nothing is held (the quota ships on); it needs a second Steam account or a second person.
 using Kiln;
 using Kiln.Testing;
 
@@ -51,6 +54,28 @@ public sealed partial class ClientPassMod
                    "Then leave the world and host it again (or save and reload), and run the check list's next step; " +
                    "finally host a second world with the same mods and look at a buff of the mod there too. Pass when " +
                    "the icons and their times showed each time and nothing looked out of place.");
+        await c.Verdict();
+    }
+
+    [ClientCheck("17-programs-vanilla", "More than 32 of Kiln's world programs on a server, a player without Kiln joined",
+        Area = "Limits", Since = Dev29, Tags = [VanillaClient], Needs = ClientCheckNeeds.Joined, Order = QuotasOrder + 1)]
+    public async Task ProgramsVanilla(CheckContext c)
+    {
+        if (!await Need(c, "world-programs-quota-a", "world-programs-quota-b") || !await NeedPlayer(c)) return;
+        var budget = World.GetProgramBudget();
+        c.Log.Info($"client-pass: 17-programs-vanilla budget Kiln {budget.KilnSlots}, engine {budget.EngineSlots}");
+        var taken = budget.KilnSlots.KilnUsed + budget.KilnSlots.Reserved;
+        c.Expect(budget.Ok && taken > 32, "the server runs more of Kiln's programs than the old room of 32",
+            budget.Ok ? $"{taken} of {budget.KilnSlots.Capacity} slots, the world's table {budget.EngineSlots.GameUsed + budget.EngineSlots.KilnUsed + budget.EngineSlots.Reserved} of {budget.EngineSlots.Capacity}" : budget.Reason);
+        if (Ahead(c, 4) is { } there)
+        {
+            var moved = await Teleport.To(c.Player, there);
+            c.Expect(moved.Ok, "the player was moved 4 m forward (a replicated change)", moved.ToString());
+        }
+        c.Instruct($"This check is for a player whose game runs without Kiln. The server runs {taken} of Kiln's world programs " +
+                   "(the most it held before was 32). You were just moved about 4 metres forward. Walk around for a minute, open " +
+                   "your inventory, pick something up. Pass when you were moved, nothing disconnected you, and the game behaved " +
+                   "as on a server without mods.");
         await c.Verdict();
     }
 }

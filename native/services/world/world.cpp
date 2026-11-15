@@ -406,5 +406,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
          F.singletons ? "on" : "off", F.events ? "on" : "off", F.queue ? "on" : "off", F.write ? "on" : "off",
          F.read_other ? "on" : "off", F.teleport ? "on" : "off", F.dead ? "on" : "off", writes_available() ? "on" : "off");
     if (!F.entities && !F.programs) return KILN_ERR_UNAVAILABLE;  // nothing works on this build
-    return api->register_service(owner, KilnStr{KILN_WORLD_SERVICE, sizeof(KILN_WORLD_SERVICE) - 1}, &kTable);
+    const KilnResult rc = api->register_service(owner, KilnStr{KILN_WORLD_SERVICE, sizeof(KILN_WORLD_SERVICE) - 1}, &kTable);
+    if (rc == KILN_OK) program_budget_register();  // kiln.world.budget: a table of its own (since 0.2.0-dev.29)
+    return rc;
 }

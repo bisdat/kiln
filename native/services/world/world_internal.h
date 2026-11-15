@@ -178,6 +178,12 @@ int32_t program_slot(KilnHandle h, int32_t kind, KilnStr name);
 KilnResult program_info(KilnHandle h, KilnProgramInfo* out);
 uint32_t programs_registered();
 uint32_t program_quota();  // kiln.world's own quota of programs (64 since 0.2.0-dev.29)
+struct ProgramLedger {
+    uint32_t taken = 0, active = 0;  // slots held; of them, in active use
+    std::vector<uintptr_t> descs;    // the descriptors of Kiln's programs (sorted): its entries in a world's table
+};
+ProgramLedger program_ledger();
+bool program_budget_register();  // kiln.world.budget (program_budget.cpp), after kiln.world's own table
 uint32_t engine_program_count(uintptr_t world);
 KilnResult iter_begin(KilnProgramCtx* ctx, uint64_t* iter, uint32_t size);
 bool iter_next(KilnProgramCtx* ctx, uint64_t* iter, uint32_t size);

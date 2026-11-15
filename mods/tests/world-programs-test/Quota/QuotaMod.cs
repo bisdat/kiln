@@ -59,6 +59,21 @@ public sealed class QuotaMod : Mod
             Log.Info($"{Me}: World.Status kiln programs {s.KilnPrograms}, engine {s.EnginePrograms} of {s.EngineMax}");
 #if QUOTA_A
             Check(_bound.Count == 32 && _refused == 0, $"a file of 32 declarations: {_bound.Count} bound, {_refused} refused");
+            // S6: the program budget for the server world, and for a client world a dedicated server does not have
+            var budget = World.GetProgramBudget();
+            var k = budget.KilnSlots;
+            var e = budget.EngineSlots;
+            Log.Info($"{Me}: program budget: Ok={budget.Ok} World={budget.World} KilnSlots {k.Capacity} used {k.KilnUsed} reserved {k.Reserved} " +
+                     $"available {k.Available} expanded {k.Expanded}; EngineSlots {e.Capacity} game {e.GameUsed} kiln {e.KilnUsed} " +
+                     $"other {e.Reserved} available {e.Available}; per file {budget.PerFileMax}; revision {k.Revision}/{e.Revision}");
+            Check(budget.Ok && k.Capacity == 64 && k.Expanded && k.KilnUsed + k.Reserved == (uint)s.KilnPrograms && e.Capacity == (uint)s.EngineMax &&
+                  e.GameUsed + e.KilnUsed + e.Reserved == (uint)s.EnginePrograms && e.KilnUsed > 0 && budget.PerFileMax == 32 &&
+                  budget.AccessLimits.IteratorBytes == 4096,
+                $"program budget: KilnSlots {k.Capacity} (Kiln {k.KilnUsed}, reserved {k.Reserved}) = World.Status {s.KilnPrograms}; " +
+                $"EngineSlots {e.Capacity} (game {e.GameUsed}, Kiln {e.KilnUsed}, other {e.Reserved}) = World.Status {s.EnginePrograms} of {s.EngineMax}");
+            var client = World.GetProgramBudget(CapacityWorldKind.Client);
+            Check(!client.Ok && client.Reason == "NoWorld" && client.World is null && client.KilnSlots.Available is null,
+                $"the client kind on a dedicated server: Ok={client.Ok} Reason={client.Reason}");
 #else
             Check(s.KilnPrograms <= 64 && _bound.Count + _refused == 32,
                 $"64 declarations from two mods: kiln.world holds {s.KilnPrograms} of 64 programs; this mod's {_refused} beyond the mods' share are refused, not bound");
