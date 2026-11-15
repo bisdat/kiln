@@ -1,10 +1,19 @@
-import { beforeEach, expect, mock, test } from "bun:test";
+import { afterAll, beforeEach, expect, mock, test } from "bun:test";
 
 let distribution: "direct" | "nexus" | undefined = "nexus";
 let infoFails = false;
 const invoked: string[] = [];
+// bun keeps a replaced module for the whole test process, and runs the files in the folder's own order: every test
+// file after this one would get this stand-in's answers ({} for any command). So the stand-in answers only while this
+// file's tests run, and hands every call to the real mock afterwards. The real functions are taken before the
+// replacement: the module's own bindings point at the stand-in once it is in place.
+const real = { ...(await import("../src/api/mock")) };
+let standIn = true;
+afterAll(() => { standIn = false; });
 mock.module("../src/api/mock", () => ({
-  mockInvoke: async (command: string) => {
+  ...real,
+  mockInvoke: async (command: string, args: Record<string, unknown>) => {
+    if (!standIn) return real.mockInvoke(command, args);
     if (command === "app_info") {
       if (infoFails) throw { code: "io", message: "IPC unavailable" };
       return { distribution };
@@ -12,7 +21,7 @@ mock.module("../src/api/mock", () => ({
     invoked.push(command);
     return {};
   },
-  mockListen: async () => () => {},
+  mockListen: async (name: string, handler: (payload: unknown) => void) => (standIn ? () => {} : real.mockListen(name, handler)),
 }));
 const api = await import("../src/api/commands");
 const operations = [api.updateStatus, api.updateCheck, api.updateInstall, api.updateRestart, () => api.updateSkip(null), api.updateAck];
