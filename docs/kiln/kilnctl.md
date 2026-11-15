@@ -175,8 +175,9 @@ once: `kilnctl gate <name> --baseline`. See docs/kiln/sigport.md.
 
 `NEXT.txt` also lists the port's descriptor reviews (`sig needs review: <symbol>: was [...], is [...]`, from
 sigport's report): a described game function whose code reads other argument positions on the new build, or whose
-descriptor the core would refuse there. They do not stop a mark: the symbols port, and only that function's typed
-hooks and calls stay off until its descriptor is fixed ([sigport.md](sigport.md#descriptors-across-a-port)).
+descriptor the core would refuse there. They do not stop a mark, and a review line turns nothing off by itself: only
+a descriptor the core refuses on the new build keeps that function's typed hooks and calls off (its `sig/<symbol>`
+row) until it is fixed; review the others before relying on them ([sigport.md](sigport.md#descriptors-across-a-port)).
 
 ## Files kilnctl writes
 | Path | What |

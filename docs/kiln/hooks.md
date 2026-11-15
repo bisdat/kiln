@@ -87,7 +87,10 @@ public override void OnLoad()
 `Hooks.Detour` sees the first four integer arguments. For floats, stack arguments and struct returns, use the typed
 classes of `Kiln.Sigs` (`KilnServices` `Hooks;Sigs`): `Kiln.Sigs.Time.SetTimeScale.Detour((ref SetTimeScale.Call c) =>
 ...)` and `...Invoke(...)`, generated from sigdb descriptors that the core checks against the function's code at load.
-A mod's own fragment can describe its own functions. See [services/hooks.md](services/hooks.md#typed-hooks-and-calls-detour_typed-kilnsigs-since-020-dev29).
+A mod's own fragment can describe its own functions. `Detour` returns a `HookResult`: asked for during a step, the hook
+goes in at the next safe tick (`Pending`, then the handle's `State` says `Installed` or `Refused` with its `Reason`);
+the first detour on a function is written only when Kiln could check every thread of the game, and it is tried at
+three safe ticks before it is refused. See [services/hooks.md](services/hooks.md#typed-hooks-and-calls-detour_typed-kilnsigs-since-020-dev29).
 
 ## Threads and the open original
 - A detour/mid handler runs on **whatever thread the target runs on** — often the tick thread, but the game's job

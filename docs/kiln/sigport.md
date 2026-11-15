@@ -250,9 +250,10 @@ sigs      10 descriptor(s) checked on the new code; 1 need review
           reads [rcx, xmm1, r8, stack+0x28], the descriptor's fingerprint says [rcx, xmm1, r8] (the function changed: review the descriptor))
 ```
 
-A review does not make the port incomplete: the symbol resolves, only the typed hooks and calls of that function stay
-off on the new build (the core turns `sig/<symbol>` off) until a human fixes the descriptor (its `args` and `abi`;
-`sigdb_check.py --fptool` prints the new `abi`). `report.json` has each descriptor's fingerprints and verdict under
+A review does not make the port incomplete: the symbol resolves. When the core refuses the descriptor on the new build
+(a mismatch, as above), that function's typed hooks and calls stay off (the core turns `sig/<symbol>` off) until a
+human fixes the descriptor (its `args` and `abi`; `sigdb_check.py --fptool` prints the new `abi`). A review of changed
+code whose descriptor still fits turns nothing off: review it before relying on the function's typed hooks. `report.json` has each descriptor's fingerprints and verdict under
 `"sigs"`.
 
 `abifp.py <exe> <rva>...` prints fingerprints the way `kiln-fptool` does. The two passes are kept equal by a shared

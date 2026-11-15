@@ -234,7 +234,16 @@ which the core checks against the function's code when it loads: a descriptor th
 once (the rest of the chain and the function; a second call does nothing), set the return fields, and return
 `KILN_TYPED_SKIP` (the function does not run) or `KILN_TYPED_CONTINUE` (when it did not call the original, the original
 runs after it). `call_with_frame(fn, frame, nstack)` is a direct call. A native mod that relies on a described
-signature checks `api->feature("sig/<symbol>")` first.
+signature checks `api->feature("sig/<symbol>")` first. A scalar argument's or return's `size` may be 0 (the kind's own
+size); a by-value struct's is its size.
+
+`detour_typed_checked` (since 0.2.0-dev.29, offset 288; check `header.size`) takes the same arguments and makes the same
+link with `mid2_checked`'s patch policy: the descriptor is checked first, then the first detour on a target is written
+only when every other thread of the process could be stopped and checked and none stands inside the bytes it replaces.
+Otherwise nothing is written, there is no fallback to an unchecked patch, and the result is `KILN_HOOKS_ERR_UNCHECKED`
+(102): a later attempt may succeed, and kiln.log says which threads (`checked installation refused, nothing written:
+...`). A target that already has its detour needs no patch, so a further link goes in as with `detour_typed`. Managed
+typed hooks use only this member.
 
 **C#** (`KilnServices` `Hooks;Sigs`, advanced mods only): one generated class per descriptor,
 `Kiln.Sigs.<Area>.<Name>` (the area is the symbol's part before `/` in Pascal case; `Core` for a symbol without one).
@@ -286,11 +295,18 @@ if (Capabilities.Is("hooks.typed") && Capabilities.Is(GetItemVolume.Capability))
   a fault inside the game's function is the game's.
 - **Faults**: a handler that throws is caught in Kiln's dispatcher (logged on the mod's log, three times per install):
   when it had called the original, the caller gets the original's result (whatever the handler wrote since), else the
-  original runs with the arguments as the handler left them. The native guard disables a faulting link and restores
-  the original's complete result, including its struct-return buffer; snapshot storage is allocated before entering
-  the handler. A fault before CallOriginal forwards the call once. A fault while the original runs is the game's.
-  Windows SEH unwinding across a managed transition still needs the explicit before/after AV lab probes; ordinary
-  managed exceptions and the portable snapshot tests do not prove that boundary.
+  original runs with the arguments as the handler left them. That holds for a managed exception and for a write to the
+  null page in the handler's own code (the runtime raises `NullReferenceException`; lab: `{18,1}`, the original once,
+  the process went on). It does **not** hold for any other access violation in a managed handler: one in its own code
+  above 64 KiB (`AccessViolationException`) or in native code it calls (a P/Invoke, an `Invoke` of a game function with
+  a bad argument) ends the process. .NET 10 fails fast before Kiln's native guard sees it (lab, Wine, both before and
+  after `CallOriginal`: `Fatal error. 0xC0000005` or `Fatal error. System.AccessViolationException`, exit code 5). This
+  is the runtime's rule for all managed code, not only typed hooks (`Hooks.Detour` and `Hooks.Mid` handlers, a tick
+  handler). With the runtime's `legacyCorruptedStateExceptionsPolicy` the dispatcher receives such a fault as an
+  exception and the rule holds (lab, measured); Kiln does not switch it on. A native typed handler's fault is caught by
+  the native guard, which disables the link and restores the original's complete result, its struct-return buffer
+  included (Wine: 24- and 128-byte structs); snapshot storage is allocated before the handler runs. A fault while the
+  original runs is the game's.
 - **Threads**: the handler runs on the thread that calls the function, game worker threads too; it runs as its mod
   (gated calls work), and the mod's unload waits for handlers in flight (one second, then the unload goes on and the
   mod's fragment stays until the last one returns).
@@ -307,25 +323,35 @@ if (Capabilities.Is("hooks.typed") && Capabilities.Is(GetItemVolume.Capability))
   wrong descriptions can still agree. Review the native function's meanings for each executable after an update.
 - **Installation timing**: a request outside a safe Pre point while worlds run is accepted with `HookResult.Pending`
   true and a handle whose `State` is `Pending`. The host drains it in the next authoritative Pre (joined clients use
-  client Pre). With no world, or in that Pre, it installs immediately. A late refusal changes `Handle.State` to
-  `Refused`, sets its `Reason`, and posts `HookRefusedEvent` once; removing a pending handle cancels it.
-  The coordinator must connect `TypedHooks.InstallAtSafePoint` to package 07's checked typed installation policy;
-  its `mid2_checked` accepts a different handler ABI and cannot be substituted directly.
-- **Cost per call** (lab, Wine, server f0d824be, 2026-11-14): a managed typed pass-through hook adds 47 ns to a call
-  of GetItemVolume (best of three rounds of 10^6 calls through `Invoke`: 158 ns without the hook, 205 ns with it).
-  This is a historical measurement before the descriptor validation and complete-result snapshot repairs; remeasure
-  the current build before using it to budget a hot function.
+  client Pre). With no world, or in that Pre, it installs immediately. The installation is `detour_typed_checked`
+  (above): the server world's Pre stops the simulation's workers, not a hosting client's render or network threads, so
+  the first patch of a function is written only with every thread checked. When kiln.hooks could not check every
+  thread (nothing written), the request stays `Pending` and is tried again at the next safe tick, three attempts in
+  all; then it is refused. kiln.decisions, the other checked installer, makes one attempt and refuses its kind for the
+  process; a typed hook gets two more because what makes the check fail (a thread caught inside the 5 to 14 bytes, a
+  thread that is ending) is usually gone a step later, while a thread Kiln cannot open or stop stays, and every attempt
+  stops the whole process for a moment. A late refusal (also a descriptor or symbol refusal at the pending attempt)
+  changes `Handle.State` to `Refused`, sets its `Reason`, and posts `HookRefusedEvent` once; the attempts before the
+  last are only logged on the mod's log. Removing a pending handle cancels it. A core without `detour_typed_checked`
+  refuses every typed `Detour` with the reason (no unchecked fallback).
+- **Cost per call** (lab, Wine, server f0d824be, 2026-11-15, the PC busy with other builds): `Invoke` of
+  GetItemVolume takes 634 ns (best of three rounds of 10^6 calls; 158 ns on 2026-11-14, before `Invoke` checked its
+  descriptor against the resolver's on every call), and a managed typed pass-through hook adds 10 ns to it (47 ns
+  measured on 2026-11-14). A hot function hooked by several mods costs the sum of their handlers.
 - **What it costs a player whose mods use none**: nothing is hooked and nothing runs per call. The core checks the
   ten descriptors once when sigdb loads (a decode of up to 300 instructions each, from the exe file's bytes).
-- **What has run**: unit tests of both halves, and `mods/tests/hooks-typed-test` on a dedicated server (lab, Wine,
-  player-free): typed links from a native plugin at boot (RegisterNative, 113 calls, argc from the caller's stack equal
-  to the game's natives for all of them), managed hooks and direct calls of GetItemVolume and SetTimeScale, a managed
-  hook of AttrChanged on six worker threads with the lab parallel switch, a mod's own descriptor, and 20 hot reloads
-  with nothing leaked. The other seven classes are generated and compiled and their descriptors fit both exes, but
-  their hooks and calls have not run in a lab. The
-  native typed link once on the client exe (a research session). A typed hook of a managed mod in a real game client
-  has not run (guided check `06b-typed-hooks.client`), and no lab row had a player, so the effect of a changed
-  GetItemVolume on a real fuel transfer has not been seen.
+- **What has run**: unit tests of both halves; the Wine suites (the thunk, the state machine, struct results restored
+  after a native fault, `detour_typed_checked` refusing with a thread parked in the bytes); and
+  `mods/tests/hooks-typed-test` on a dedicated server (lab, Wine, player-free, 0.2.0-dev.29 on 2026-11-15): typed links
+  from a native plugin at boot (RegisterNative, 113 calls, argc from the caller's stack equal to the game's natives for
+  all of them), managed hooks installed through the checked member (no refusal) and direct calls of GetItemVolume and
+  SetTimeScale, a managed hook of AttrChanged on three worker threads with the lab parallel switch, a mod's own
+  descriptor, and 20 hot reloads with nothing leaked. The other seven classes are generated and compiled and their
+  descriptors fit both exes, but their hooks and calls have not run in a lab. The native typed link ran once on the
+  client exe (a research session). A typed hook of a managed mod in a real game client has not run (guided check
+  `06b-typed-hooks.client`): not its checked installation while the game renders, not with a second player joined, not
+  across leaving and rejoining a world; and no lab row had a player, so the effect of a changed GetItemVolume on a real
+  fuel transfer has not been seen.
 
 ## Threads
 
@@ -343,7 +369,9 @@ if (Capabilities.Is("hooks.typed") && Capabilities.Is(GetItemVolume.Capability))
   middle of the replaced bytes, or a call made from inside them that has not returned yet (the 5 to 14 bytes at the
   target: choose a hook address that nothing jumps or returns into). If Kiln cannot list the threads, or the
   trampoline has a shape it does not know, it logs a warning and falls back to safetyhook's own enable, with the old
-  race; a thread it cannot open or stop keeps running and is counted in a warning. A mod that places its own safetyhook
+  race; a thread it cannot open or stop keeps running and is counted in a warning. The checked members
+  (`mid2_checked`, `detour_typed_checked`, every managed typed hook) never fall back: they write nothing and refuse
+  instead. A mod that places its own safetyhook
   hook on game code has the old race too. Two hook libraries that stop threads (Kiln and a MinHook-based DLL mod, say)
   must not install at the same instant from two threads: each could stop the other.
 - Stack arguments, rcx/rdx/r8/r9, xmm0-3 and the flags reach your handler as the game left them. Handlers are called with the
@@ -402,6 +430,14 @@ are not counted per call. Structured and mid dispatches are counted by each thre
   run per call), revival, an invalid UTF-8 label and a throwing map extension, a refused target. It runs twice, with
   the caller table in the TEB's TLS slots and in the expansion slots, then once in `slots` mode (every link slot used) and
   once in `targets` mode (every target slot used, a new address refused, a hooked one still takes links).
+- `native/core/tests/test-hooks-typed.sh` (Wine, no game): the typed link kind (the T3 set of sret, f64, eight stack
+  arguments, narrow integers, mixed positions; the call state machine, faults before and after `CallOriginal`, a
+  24- and a 128-byte struct return restored whole after a faulting handler, eight callers while a ninth installs and
+  revokes) and `detour_typed_checked` (a thread parked inside the bytes: refused with `KILN_HOOKS_ERR_UNCHECKED`,
+  nothing written; with the thread gone it installs; a second link writes no patch).
+- `native/core/tests/test-hooks-checked-patch.sh`, `test-hooks-thread-stop.sh`, `test-hooks-typed-result.sh`,
+  `test-hooks-fingerprint.sh` (host): the checked patch policy and the typed result code, the thread-stop loop, the
+  complete-result snapshot, the fingerprint pass and the compiled-against-loaded descriptor comparison.
 - `native/spikes/hookchain/run.sh`: how safetyhook chains with another engine's jump.
 - `native/spikes/hooksv2/foreign_stub.cpp` builds `foreign-stub.dll`, a stand-in for another engine for lab servers:
   chain it from `kiln/chain.ini` and give it `foreign-stub.ini` (`before=<rva,...>` hooks at load, before Kiln looks;
