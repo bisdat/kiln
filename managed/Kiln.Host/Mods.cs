@@ -149,6 +149,7 @@ internal sealed class LoadedMod
     public bool Disabled;
     public bool Loaded;  // OnLoad returned
     public long PreTicks, PostTicks, MaxTicks, Calls;  // since the last stats line
+    public long PreMaxTicks, PostMaxTicks;              // since the last stats line: the longest Pre and the longest Post apart
     public long TotalPreTicks, TotalPostTicks, TotalMaxTicks, TotalCalls;  // since load
     public readonly Queue<double> FaultTimes = new();
     public DateTime? LastFault;
@@ -1026,10 +1027,12 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
         {
             if (m.Calls == 0) continue;
             double ms(long ticks) => ticks * 1000.0 / Stopwatch.Frequency;
+            // "max Z ms (pre A / post B)": one field for readers that know only "max Z ms" (no ", " inside)
             yield return $"{m.Id}: pre {ms(m.PreTicks) / m.Calls:F4} ms/step, post {ms(m.PostTicks) / m.Calls:F4} ms/step, " +
-                         $"max {ms(m.MaxTicks):F3} ms, {ms(m.PreTicks + m.PostTicks) / seconds:F3} ms/s, faults {m.Faults}" +
+                         $"max {ms(m.MaxTicks):F3} ms (pre {ms(m.PreMaxTicks):F3} / post {ms(m.PostMaxTicks):F3}), " +
+                         $"{ms(m.PreTicks + m.PostTicks) / seconds:F3} ms/s, faults {m.Faults}" +
                          (m.Disabled ? " (disabled)" : "");
-            m.PreTicks = m.PostTicks = m.MaxTicks = m.Calls = 0;
+            m.PreTicks = m.PostTicks = m.MaxTicks = m.PreMaxTicks = m.PostMaxTicks = m.Calls = 0;
         }
     }
 
@@ -1064,11 +1067,13 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
             mod.TotalPreTicks += ticks;
             mod.Calls++;
             mod.TotalCalls++;
+            if (ticks > mod.PreMaxTicks) mod.PreMaxTicks = ticks;
         }
         else
         {
             mod.PostTicks += ticks;
             mod.TotalPostTicks += ticks;
+            if (ticks > mod.PostMaxTicks) mod.PostMaxTicks = ticks;
         }
         if (ticks > mod.MaxTicks) mod.MaxTicks = ticks;
         if (ticks > mod.TotalMaxTicks) mod.TotalMaxTicks = ticks;
