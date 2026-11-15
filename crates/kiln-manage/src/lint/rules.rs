@@ -1659,30 +1659,46 @@ fn natives(out: &mut Out, m: &LMod, f: &LFile) {
 fn run_bindings(out: &mut Out, m: &LMod) {
     const BINDINGS: &[&str] = &["self", "target", "attacker", "caster", "position", "attackMod", "damage"];
     // name -> [(parameter, optional)] from this mod's impact/natives.json
-    let mut declared: HashMap<String, Vec<(String, bool)>> = HashMap::new();
+    let mut declared: HashMap<String, Vec<(String, bool, String, f64)>> = HashMap::new();
     for f in m.files.iter().filter(|f| f.kind == "natives") {
         for n in f.root.as_ref().and_then(|r| r.get("natives")).and_then(Node::as_array).into_iter().flatten() {
             let Some(name) = n.get("name").and_then(Node::as_str) else { continue };
             let args = n.get("args").and_then(Node::as_array).into_iter().flatten()
-                .filter_map(|a| Some((a.get("name")?.as_str()?.to_string(), a.get("optional").and_then(|o| o.as_bool()).unwrap_or(false))))
+                .filter_map(|a| Some((a.get("name")?.as_str()?.to_string(), a.get("optional").and_then(|o| o.as_bool()).unwrap_or(false),
+                    a.get("type").and_then(Node::as_str).unwrap_or("any").to_string(), a.get("size").and_then(Node::as_f64).unwrap_or(0.0))))
                 .collect();
             declared.insert(name.to_string(), args);
         }
     }
-    fn walk(out: &mut Out, file: &str, node: &Node, declared: &HashMap<String, Vec<(String, bool)>>) {
+    fn walk(out: &mut Out, file: &str, node: &Node, declared: &HashMap<String, Vec<(String, bool, String, f64)>>) {
         if let Some(members) = node.as_object() {
             if let Some(run) = node.get("run")
                 && let Some(full) = run.as_str()
                 && let Some(params) = declared.get(full)
             {
-                let hits = node.get("damage").is_some() || node.get("knockback").is_some();
-                for (p, optional) in params {
+                let damage = node.get("damage").is_some();
+                let hits = damage || node.get("knockback").and_then(Node::as_str).is_some_and(|k| k != "none");
+                for (p, optional, ty, size) in params {
                     if !BINDINGS.contains(&p.as_str()) {
                         out.push(Diagnostic::new(file, codes::RUN_BINDING, run.span, &format!(
                             "run {full}: parameter '{p}' names nothing a run native gets; its parameters are named {}", BINDINGS.join(", "))));
-                    } else if !optional && !hits && (p == "attackMod" || p == "damage") {
+                    } else if !optional && ((p == "attackMod" && !hits) || (p == "damage" && !damage)) {
                         out.push(Diagnostic::new(file, codes::RUN_BINDING, run.span, &format!(
                             "run {full}: parameter '{p}' has nothing to bind to: this effect deals no damage (give it damage, or make the parameter Optional)")));
+                    } else if (p != "attackMod" || hits) && (p != "damage" || damage) {
+                        let (want, bytes) = match p.as_str() {
+                            "position" => ("float3", 12.0),
+                            "attackMod" => ("float32", 4.0),
+                            "damage" => ("impact.DamageSetup", 52.0),
+                            _ => ("ecs.EntityId", 4.0),
+                        };
+                        if ty != "any" && ty != want {
+                            out.push(Diagnostic::new(file, codes::RUN_BINDING, run.span, &format!(
+                                "run {full}: parameter '{p}' is {ty}; what it binds to is {want}")));
+                        } else if *size != 0.0 && *size != bytes {
+                            out.push(Diagnostic::new(file, codes::RUN_BINDING, run.span, &format!(
+                                "run {full}: parameter '{p}' has size {size}; what it binds to has size {bytes}")));
+                        }
                     }
                 }
             }

@@ -303,6 +303,31 @@ public sealed unsafe class NativeAdmissionOrderTests : ModsFixture
     }
 
     [Fact]
+    public void A_new_load_cannot_bind_to_a_dependency_whose_unload_is_waiting()
+    {
+        InstallLibSet();
+        var host = new FakeHost();
+        using var mods = NewManager(host);
+        mods.LoadAll();
+        bool held = true;
+        mods.Find("sample-consumer")!.ModContext.UnloadStarting += () => held ? "fixture call" : null;
+        try
+        {
+            Assert.True(mods.Unload("sample-lib", out _));
+            Assert.Null(mods.Find("sample-tests"));
+            Assert.False(mods.TryLoad(Path.Combine(ModsDir, "sample-tests"), out var error));
+            Assert.Contains("unloading", error);
+            Assert.Null(mods.Find("sample-tests"));
+        }
+        finally
+        {
+            held = false;
+            mods.Pre(Tick(1), []);
+            mods.UnloadAll("fixture cleanup");
+        }
+    }
+
+    [Fact]
     public void At_shutdown_what_still_waits_is_skipped_in_order_and_named()
     {
         InstallLibSet();

@@ -401,6 +401,16 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
             SetRecord(c, ModState.Pending, null);
             PublishSnapshot(writeFile: false);  // a mod's OnLoad sees the mods loaded before it in Mods.All
             var sw = Stopwatch.StartNew();
+            // A retained dependency is alive for its old callers, not a provider for a new load. Otherwise that new
+            // dependent would escape the cascade already waiting and keep using the dependency after disposal.
+            var retiringDependency = DependencyClosure(m).FirstOrDefault(UnloadWaiting);
+            if (retiringDependency is not null)
+            {
+                var why = $"dependency {retiringDependency} is unloading; wait for its retirement before loading {m.Id}";
+                SetRecord(c, ModState.Failed, why);
+                _host.Log(LogLevel.Warn, $"mod {m.Id} not loaded: {why}");
+                continue;
+            }
             if (!LoadCore(c.Directory, m, out var error))
             {
                 SetRecord(c, ModState.Failed, error);
