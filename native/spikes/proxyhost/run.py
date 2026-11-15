@@ -47,9 +47,11 @@ def winpath(p):
 
 def env():
     e = dict(os.environ)
-    e.update(WINEPREFIX=PFX, WINEDEBUG="-all", WINEDLLOVERRIDES="mscoree=;mshtml=;dinput8=n,b")
+    e.update(WINEPREFIX=PFX, WINEDEBUG="-all", WINEDLLOVERRIDES="mscoree=;mshtml=;winedbg.exe=d;dinput8=n,b")
+    # No window on the desktop this runs from: no X display, and a Wayland display name that does not exist (an unset
+    # WAYLAND_DISPLAY means the session's own, wayland-0); winedbg.exe=d keeps a crash from opening the debugger.
     e.pop("DISPLAY", None)
-    e.pop("WAYLAND_DISPLAY", None)
+    e["WAYLAND_DISPLAY"] = "kiln-no-display"
     e.pop("KILN_DISABLE", None)
     e.pop("KILN_CORE", None)
     return e
@@ -1004,7 +1006,7 @@ def s_late_swap_realcore():
         g.dll("chain-c", "xinput1_3.dll")
         json.dump(profile, open(os.path.join(g.kiln, "profile.json"), "w"))
         g.write("kiln/chain.ini", "[chain]\n..\\xinput9_1_0.dll\n..\\xinput1_3.dll\n[late]\n..\\xinput9_1_0.dll\n")
-        g.run({"WINEDLLOVERRIDES": f"mscoree=;mshtml=;dinput8=n,b;xinput9_1_0={order};xinput1_3={order}"})
+        g.run({"WINEDLLOVERRIDES": f"mscoree=;mshtml=;winedbg.exe=d;dinput8=n,b;xinput9_1_0={order};xinput1_3={order}"})
         print(f"[late swap, xinput9_1_0={order} xinput1_3={order}] rc {g.rc}")
         log = kiln_log(g)
         late_swapped, proxy_swapped = not has(g.lines, "dll chain-b attach"), not has(g.lines, "dll chain-c attach")

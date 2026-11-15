@@ -50,7 +50,7 @@ direct, RIP-relative and data reference to the functions above, plus the holders
 |---|---|---|---|---|
 | `npc_unlock_state_server` (write) | server | update `0x1fa330`: version getter `0x1fa349`, span `0x1fa360`, Eval `0x1fa384`, SetUnlocks `0x1fa3a3` | computes the cache, stores it when Eval says status 0 | entry i lands on bit i & 63 |
 | `npc_unlock_state_server` / `npc_unlock_state_client` (write) | client | `0x45fb10` / `0x45fa90`, byte-identical bodies; Eval `0x45fb64`/`0x45fae4`, SetUnlocks `0x45fb83`/`0x45fb03` | the same, for the hosted server world's and the client world's own registry | the same |
-| `unique_npc_spawns` (read) | server, client | `0x1fb0f0` (body `0x1fb124`), IsUnlocked `0x1fb279`; client `0x4627d0` (body `0x462804`), IsUnlocked `0x462959` | for each entity with ActiveNpcStateSaved: NpcId = FNV-1a of its template GUID; IsUnlocked; status 0 and locked (and no debug override) destroys it; status not 0 is treated as unlocked (kept, subject to the base's duplicate check) | reads bit index & 63: a page-2 NPC takes a page-1 NPC's state (an unlocked one can be destroyed) |
+| `unique_npc_spawns` (read) | server, client | `0x1fb0f0` (body `0x1fb124`), IsUnlocked `0x1fb279`; client `0x4627d0` (body `0x462804`), IsUnlocked `0x462959` | for each entity with ActiveNpcStateSaved: NpcId = FNV-1a of its template GUID; IsUnlocked; status 0 and locked (and no debug override) destroys it; status not 0 is treated as unlocked (kept, subject to the base's duplicate check) | reads bit index & 63: a page-2 NPC takes another entry's bit. Without paging that bit is entries i and i + 64 OR-ed (a locked NPC can be kept: the lab's negative control shows it); with page 0 computed from entries 0 to 63 only and no query hook, an unlocked page-2 NPC would read its page-1 partner's state and could be destroyed |
 | `player_assign_npc` (read) | server, client | `0xc4170`; client `0x2d81d0` | item map only (`0x92ff80`, client `0xe88db0`: ItemId to NpcId) | no index involved |
 | `actor_spawn_entity` (read) | server, client | `0x454f0`, `NpcFind` at `0x447cd`; client `0x228130`, `NpcFind` at `0x22740d` | entry by id (map +0x38, index × 0x88) | u64 index, no 64-limit |
 | `server_cursor_no_prediction` (read) | server, client | `0x9cbd0` (`NpcFind` through `0x1ee6e0`, `0x1ee530`); client `0x297840` (`0x450e30`, `0x450c80`) | entry by id | no 64-limit |
@@ -72,7 +72,10 @@ Whole-image census (both exes), for an inlined or indirect reader the table coul
 
 ## Verdict
 
-**Safe on both executables for a second page kept beside the registry**, with these hooks: `NpcEvalUnlocks` (page the
+**Static verdict, consumers only: no reader of the value in either executable escapes a second page kept beside the
+registry**, with these hooks (this reads the code; it says nothing about the lifecycle: which world owns a registry,
+world stops, the loader's reset, worker threads. Those are the service's design, its host tests, the lab and the
+guided checks: [services/npcs.md](../kiln/services/npcs.md#the-rosters-size-since-020-dev29)): `NpcEvalUnlocks` (page the
 span into runs of at most 64 entries, call the game's evaluator once per page), `NpcRegistrySetUnlocks` (attach the
 extra pages to the registry it writes, same thread), `NpcIsUnlocked` (answer an id whose index is 64 or more from the
 registry's extra pages, or fail closed with the game's own "cache invalid" status 1, which `unique_npc_spawns` treats

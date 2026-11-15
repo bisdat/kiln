@@ -1201,6 +1201,15 @@
    "state": "open"
   },
   {
+   "id": "17-roster.refused-start",
+   "title": "A roster the client cannot hold stops its start before any world",
+   "chapter": "17",
+   "packages": [
+    "17c-roster-cap"
+   ],
+   "state": "open"
+  },
+  {
    "id": "17-programs-vanilla",
    "title": "Server-only programs with a vanilla peer",
    "chapter": "17",

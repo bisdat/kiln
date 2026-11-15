@@ -89,8 +89,17 @@ void add_name(const std::string& name, const KilnKnowledgeName& n) {
 void build_npcs(uintptr_t npcreg) {
     uintptr_t field = 0, base = 0;
     uint32_t n = 0;
-    if (!npcreg || o_npcs < 0 || !rd(npcreg + o_npcs, &field) || !field || !blob(field, &base, &n) || !base || n > 4096)
+    if (!npcreg || o_npcs < 0 || !rd(npcreg + o_npcs, &field) || !field || !blob(field, &base, &n) || !base) return;
+    if (n > 4096) {  // a corruption guard, never a capacity: named, not an empty roster that looks fine
+        static uint32_t said = 0;
+        if (said != n) {
+            said = n;
+            KE("catalog: the NpcRegistry's collection reads %u entries (more than 4096): damaged, or not the game's layout; the roster "
+               "is not listed and no unlock state is answered", n);
+            knowledge_reason("the NPC roster is damaged (" + std::to_string(n) + " entries, more than 4096): not listed");
+        }
         return;
+    }
     for (uint32_t i = 0; i < n; ++i) {
         const uintptr_t e = base + i * 136u;
         CatNpc c;
@@ -282,9 +291,14 @@ void catalog_build(uintptr_t npcreg, uintptr_t journal) {
     KI("catalog: %zu NPCs (%zu with an unlock requirement; NpcRegistry: %d unlocked, version %u), %zu quests (%zu steps), "
        "%zu named queries, %zu names",
        g_npcs.size(), unlocks, unlocked, ver, g_quests.size(), steps, g_queries.size(), g_names.size());
-    if (g_npcs.size() > roster_limit())
-        KW("catalog: the roster has %zu entries, more than this side's maximum %u (an unsupported roster: another loader's collection?); "
-           "the unlock states past the game's 64 are not answered", g_npcs.size(), roster_limit());
+    if (g_npcs.size() > roster_limit()) {
+        // listed, but no entry's state is answered (unlocked 0xff, Unlocked null), not even below 64: the game's value then
+        // holds two entries in a bit
+        KE("catalog: unsupported roster: %zu entries, more than this side's maximum %u (another loader's collection?); the entries are "
+           "listed, no unlock state is answered", g_npcs.size(), roster_limit());
+        knowledge_reason("unsupported roster: " + std::to_string(g_npcs.size()) + " entries, more than this side's maximum " +
+                         std::to_string(roster_limit()) + ": no unlock state is answered");
+    }
 }
 
 void catalog_clear() {
