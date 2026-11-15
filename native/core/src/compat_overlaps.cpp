@@ -5,6 +5,7 @@
 #include <cctype>
 
 #include "compat.h"
+#include "hook_owner.h"
 
 namespace kiln::compat {
 namespace {
@@ -71,6 +72,18 @@ std::string why_not_late(const ChainRow* row, const std::string& module) {
 }
 
 std::string hex_text(const ojson& v) { return v.is_string() ? v.get<std::string>() : std::string(); }
+
+// A target's Kiln links as "<label> (<owner>)", as kiln.log's "chained over" line names them (hook_owner.h): the hook and
+// who placed it, not the sigdb name of the address. `fallback` (the target's label) stands in for a link without one.
+std::string links_text(const ojson& t, const std::string& fallback) {
+    std::vector<std::string> v;
+    if (t.contains("links") && t["links"].is_array())
+        for (const auto& l : t["links"]) {
+            const std::string label = json_text(l, "label");
+            add_unique(v, kiln::hook_link_text(label.empty() ? fallback : label, json_text(l, "owner")));
+        }
+    return v.empty() ? fallback : join(v);
+}
 
 std::string module_at(const ojson& f) {
     const std::string module = json_text(f, "module");
@@ -193,9 +206,9 @@ ojson compute_overlaps(const ojson& map, const std::vector<ChainRow>& chain, con
             o["fix"] = fix;
             o["chainEntry"] = chain_entry_json(row);
             std::string msg;
-            const std::string who = join(owners);
+            const std::string hooks = links_text(t, label);
             if (before) {
-                msg = module_at(f) + " hooked " + label + " before " + who + "; Kiln chained over it. ";
+                msg = module_at(f) + " hooked the function before Kiln did; Kiln's " + hooks + " chained over it. ";
                 if (std::string(fix) == "late")
                     msg += "Load " + module + " late (kiln/chain.ini [late], or the launcher's \"Load after Kiln and ShroudForge\"): "
                            "Kiln then hooks first and " + module + " hooks over it.";
@@ -204,7 +217,7 @@ ojson compute_overlaps(const ojson& map, const std::vector<ChainRow>& chain, con
                 else
                     msg += why_not_late(row, module) + " Add a rule to compat-rules.json or switch one side off.";
             } else {
-                msg = module_at(f) + " hooked over Kiln's " + label + " (" + who + "). Kiln's detour stays armed behind their jump; "
+                msg = module_at(f) + " hooked over Kiln's " + hooks + ". Kiln's detour stays armed behind their jump; "
                       "nothing to fix unless a feature misbehaves.";
             }
             o["message"] = msg;

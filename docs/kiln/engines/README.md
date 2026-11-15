@@ -228,12 +228,14 @@ Kiln notices when it hooks a function that already starts with someone else's ju
 file's) and says so, in kiln.log and in `state/hooks.json`:
 
 ```
-[kiln] hooks: chat/ChatLogAdd chained over enshwick.dll+0x11ea80
+[kiln] hooks: chat/ChatLogAdd (kiln-chat) chained over enshwick.dll+0x11ea80
 ```
+
+The line names Kiln's hooks on that function with their owners (`<label> (<owner>)`).
 
 Mid hooks behave the same way. When another engine hooks **over** Kiln's detour, its jump now starts the call and Kiln's
 detour is reached through it. After boot and at the first world (never per frame) Kiln checks every target and logs
-`hooks: <module> hooked over Kiln's <label>`; `hooks.json` records it as `foreignOver`. Kiln never removes the other
+`hooks: <module> hooked over Kiln's <label> (<owner>)`; `hooks.json` records it as `foreignOver`. Kiln never removes the other
 module's jump and never unhooks its own detours (an empty chain calls the real function), so the order in which engines
 start does not make Kiln undo another engine's hook. Enshwick's decoder relocates Kiln's `jmp` when Kiln hooks first.
 `native/spikes/hookchain/run.sh` and `native/core/tests/test-hooks-v2.sh` (Wine, no game) check these cases with a
@@ -288,7 +290,7 @@ foreign module's hook and a Kiln-hosted link (Kiln, ShroudForge, an EMF mod) mee
 `state/hooks.json` lists them under `overlaps` and kiln.log warns once for each, naming both sides and the fix:
 
 ```
-[W] [kiln] compat: overlap: xhl-core.dll+0x11ea80 hooked chat/ChatLogAdd before chat, emf; Kiln chained over it. Load xhl-core.dll late (kiln/chain.ini [late], or the launcher's "Load after Kiln and ShroudForge"): Kiln then hooks first and xhl-core.dll hooks over it.
+[W] [kiln] compat: overlap: xhl-core.dll+0x11ea80 hooked the function before Kiln did; Kiln's chat/ChatLogAdd (kiln-chat), emf/ChatLogAdd (kiln-emf) chained over it. Load xhl-core.dll late (kiln/chain.ini [late], or the launcher's "Load after Kiln and ShroudForge"): Kiln then hooks first and xhl-core.dll hooks over it.
 ```
 
 The launcher shows the last session's overlaps on the profile's native page with a one-click "load late". ShroudForge's

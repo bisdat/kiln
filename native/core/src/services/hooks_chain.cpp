@@ -41,6 +41,7 @@
 #include <string>
 #include <vector>
 
+#include "../hook_owner.h"
 #include "../log.h"
 #include "nlohmann/json.hpp"
 #include "safetyhook.hpp"
@@ -654,6 +655,20 @@ std::string target_label(Target& t) {
     if (name.empty()) name = "rva " + hex(rva_of(t.addr));
     t.label_cache = name;
     return name;
+}
+
+// g_mutex held. The target's live links as "<label> (<owner>)", for the lines about another module's hook on it: they
+// name the hook and who placed it, not the sigdb name of the address (hook_owner.h). The target's label when none is live.
+std::string links_text(Target& t) {
+    std::vector<std::string> seen;
+    std::string out;
+    for (Link* l : t.order) {
+        const std::string one = hook_link_text(l->label.empty() ? target_label(t) : l->label, l->owner_name);
+        if (std::find(seen.begin(), seen.end(), one) != seen.end()) continue;
+        seen.push_back(one);
+        out += (out.empty() ? "" : ", ") + one;
+    }
+    return out.empty() ? target_label(t) : out;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -1281,10 +1296,10 @@ KilnResult install(Kind kind, KilnOwner owner, uintptr_t addr, const Order& orde
                link->owner_name.c_str(), t->order.size(), had_target ? "" : ", new detour", how);
     if (!had_target && t->before_present) {
         if (!t->before.module.empty() || t->before.address)
-            KLOG_I("hooks: %s chained over %s", target_label(*t).c_str(), dest_text(t->before).c_str());
+            KLOG_I("hooks: %s chained over %s", links_text(*t).c_str(), dest_text(t->before).c_str());
         else
             KLOG_I("hooks: %s: the bytes at rva %s differ from the exe file's (patched in place by someone else)",
-                   target_label(*t).c_str(), hex(rva_of(addr)).c_str());
+                   links_text(*t).c_str(), hex(rva_of(addr)).c_str());
     }
     notify_changed();
     return KILN_OK;
@@ -1635,18 +1650,18 @@ size_t check_foreign() {
             changed = true;
             if (t->over.own)
                 KLOG_I("hooks: %s (a Kiln module) also hooks %s and sits in front of the registry's detour; both run",
-                       dest_text(t->over).c_str(), target_label(*t).c_str());
+                       dest_text(t->over).c_str(), links_text(*t).c_str());
             else if (!t->over.module.empty())
                 KLOG_W("hooks: %s hooked over Kiln's %s (Kiln's detour stays armed; it is reached through their jump)",
-                       dest_text(t->over).c_str(), target_label(*t).c_str());
+                       dest_text(t->over).c_str(), links_text(*t).c_str());
             else
-                KLOG_W("hooks: something patched over Kiln's %s at rva %s (%s)", target_label(*t).c_str(),
+                KLOG_W("hooks: something patched over Kiln's %s at rva %s (%s)", links_text(*t).c_str(),
                        hex(rva_of(t->addr)).c_str(), dest_text(t->over).c_str());
         } else if (!differs && t->over_present) {
             t->over_present = false;
             t->over = {};
             changed = true;
-            KLOG_I("hooks: Kiln's detour on %s is no longer hooked over", target_label(*t).c_str());
+            KLOG_I("hooks: Kiln's detour on %s is no longer hooked over", links_text(*t).c_str());
         }
         over += t->over_present && !t->over.own;
     }
