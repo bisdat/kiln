@@ -29,8 +29,10 @@
 #include "nlohmann/json.hpp"
 #include "kiln_hook.hpp"
 #include "natives_core.h"
+#include "natives_json.h"
 #include "services/kiln_abilities.h"
 #include "services/kiln_assets.h"
+#include "services/kiln_profile.h"
 #include "services/kiln_spawn.h"
 #include "verify.h"
 
@@ -42,8 +44,9 @@ static_assert(sizeof(KilnAbilityEvent) == 640 && sizeof(KilnImpactVar) == 88 && 
 // since 0.2.0-dev.29: the table's tail (append only) and the counters
 static_assert(offsetof(KilnAbilitiesApi, sequence_play) == 232 && offsetof(KilnAbilitiesApi, native_register_sync) == 240 &&
               offsetof(KilnAbilitiesApi, native_counters) == 248 && offsetof(KilnAbilitiesApi, native_attach) == 256 &&
-              offsetof(KilnAbilitiesApi, native_detach) == 264 && sizeof(KilnAbilitiesApi) == 272 &&
-              sizeof(KilnNativeCounters) == 64 && sizeof(KilnNativeFilter) == 16);
+              offsetof(KilnAbilitiesApi, native_detach) == 264 && offsetof(KilnAbilitiesApi, native_declare_typed) == 272 &&
+              sizeof(KilnAbilitiesApi) == 280 && sizeof(KilnNativeCounters) == 80 && sizeof(KilnNativeFilter) == 16 &&
+              sizeof(KilnNativeArg) == 8);
 
 namespace {
 
@@ -101,7 +104,7 @@ std::atomic<uint64_t> c_created{0}, c_held{0}, c_ovr_applied{0}, c_ovr_mismatch{
 
 // since 0.2.0-dev.29: the native thunks' own counters (native_counters)
 std::atomic<uint64_t> c_sync_calls{0}, c_sync_faults{0}, c_sync_slow{0}, c_dead_calls{0}, c_lock_bypass{0},
-    c_attach_entered{0}, c_attach_skipped{0};
+    c_attach_entered{0}, c_attach_skipped{0}, c_typed_refused{0}, c_typed_unconnected{0};
 std::atomic<uint32_t> g_inflight{0};  // calls inside a Kiln thunk right now
 
 int64_t g_qpf = 0;  // QueryPerformanceFrequency, set at init
@@ -219,6 +222,9 @@ struct Slot {
     // SLOT_WRAPPED: the attachments of this native (natives_core.h), an immutable set swapped on the tick thread; an
     // old set is freed in a later Pre when no thunk runs (g_retired)
     std::atomic<const AttachSet*> attach{nullptr};
+    // a Kiln native's typed declaration (native_declare_typed), checked before its handler sees a call; swapped like
+    // `attach`
+    std::atomic<const std::vector<KilnNativeArg>*> typed{nullptr};
 };
 constexpr int kSlots = 160;
 Slot g_slots[kSlots];
@@ -226,6 +232,8 @@ Slot g_slots[kSlots];
 std::unordered_map<uint32_t, int> g_slot_of;          // hash -> slot (g_mu)
 std::unordered_map<uint32_t, uint32_t> g_vanilla_argc; // hash -> argc, the game's own natives (g_mu)
 std::unordered_map<uint32_t, uint32_t> g_declared;     // hash -> argc, from natives.json (g_mu)
+std::unordered_map<uint32_t, std::vector<KilnNativeArg>> g_typed;  // hash -> typed declaration (g_mu; since dev.29)
+std::vector<const std::vector<KilnNativeArg>*> g_retired_typed;   // swapped out, freed in a Pre (g_mu)
 
 KilnNativeWrapFn g_wrap_fn = nullptr;
 void* g_wrap_user = nullptr;
@@ -484,7 +492,21 @@ void dispatch_signal(NativeResult* out, ArgSlice* args, NativeCtx* ctx) {
     out->value = 1;
 }
 
+// A Kiln native's typed declaration refuses this call (natives_core.h check_typed_args): the answer is set.
+bool refused_typed(const Slot& s, NativeResult* out, const ArgSlice* args, const NativeCtx* ctx) {
+    const std::vector<KilnNativeArg>* t = s.typed.load(std::memory_order_acquire);
+    if (!t || t->empty()) return false;
+    const uint8_t e = check_typed_args(t->data(), static_cast<uint32_t>(t->size()), args->data, args->count, ctx->layout,
+                                       ctx->layout_count, ctx->data_size);
+    if (!e) return false;
+    (e == kErrNoConnection ? c_typed_unconnected : c_typed_refused).fetch_add(1, std::memory_order_relaxed);
+    out->error = e;
+    out->value = 0;
+    return true;
+}
+
 void dispatch_managed(int slot, NativeResult* out, ArgSlice* args, NativeCtx* ctx) {
+    if (refused_typed(g_slots[slot], out, args, ctx)) return;
     const uint64_t key = (static_cast<uint64_t>(ctx->impact_id) << 32) | ctx->site;
     bool queued_new = false;
     uint64_t id = 0;
@@ -530,6 +552,7 @@ void dispatch_managed(int slot, NativeResult* out, ArgSlice* args, NativeCtx* ct
 
 std::atomic<uint32_t> g_slow_logged{0};
 
+
 // A sync native (since 0.2.0-dev.29): its fn answers inside the ECALL. No lock, no queue, no suspend; a fault in fn is
 // caught by the thunk's guard and answers 0x11.
 void dispatch_sync(Slot& s, NativeResult* out, ArgSlice* args, NativeCtx* ctx) {
@@ -540,6 +563,7 @@ void dispatch_sync(Slot& s, NativeResult* out, ArgSlice* args, NativeCtx* ctx) {
         out->error = kErrUnknownNative;
         return;
     }
+    if (refused_typed(s, out, args, ctx)) return;
     c_sync_calls.fetch_add(1, std::memory_order_relaxed);
     KilnNativeCall c;
     fill_call(c, s, out, args, ctx);
@@ -820,12 +844,15 @@ void publish_set(uint32_t hash) {
 // Pre: no impact_simulation slice runs, so no thunk can still read a set that was swapped out.
 void free_retired() {
     std::vector<const AttachSet*> r;
+    std::vector<const std::vector<KilnNativeArg>*> rt;
     {
         std::lock_guard lock(g_mu);
-        if (g_retired.empty() || g_inflight.load(std::memory_order_seq_cst) != 0) return;
+        if ((g_retired.empty() && g_retired_typed.empty()) || g_inflight.load(std::memory_order_seq_cst) != 0) return;
         r.swap(g_retired);
+        rt.swap(g_retired_typed);
     }
     for (const AttachSet* p : r) delete p;
+    for (const auto* p : rt) delete p;
 }
 
 // The program `id` calls `hash` (at `site`, 0 = any): 1 yes, 0 no, -1 the program is not in the registry. Tick thread.
@@ -957,6 +984,21 @@ int wrap_slot(uint32_t hash, uint32_t* argc_out) {  // g_mu held; finds or creat
     return s;
 }
 
+// What the verifier knows of `hash`'s arguments (g_mu held): a typed declaration, or "a Kiln native without types".
+TypedArgs typed_of(uint32_t hash) {
+    TypedArgs t;
+    if (g_vanilla_argc.count(hash)) return t;  // the game's own: never a mod's declaration
+    if (auto it = g_typed.find(hash); it != g_typed.end()) {
+        t.args = it->second.data();
+        t.count = static_cast<uint32_t>(it->second.size());
+        return t;
+    }
+    // declared by argc only and not registered yet (registration drops it from g_declared): the W_ARGTYPE warning. A
+    // registered native without types (Register, RegisterSync) is how managed natives always worked: no warning
+    if (g_declared.count(hash)) t.untyped_kiln = true;
+    return t;
+}
+
 int argc_of(uint32_t hash) {  // g_mu held
     if (auto it = g_vanilla_argc.find(hash); it != g_vanilla_argc.end()) return static_cast<int>(it->second);
     if (auto it = g_slot_of.find(hash); it != g_slot_of.end()) {
@@ -1033,9 +1075,10 @@ KilnResult add_program(const uint8_t* blob, size_t len, KilnOwner owner, const s
     VerifyResult r;
     {
         std::lock_guard lock(g_mu);
-        r = verify_program(blob, len, [](uint32_t h) { return argc_of(h); });
+        r = verify_program(blob, len, [](uint32_t h) { return argc_of(h); }, [](uint32_t h) { return typed_of(h); });
     }
     if (out_id) *out_id = r.id;
+    for (const auto& w : r.warnings) logw("kiln.abilities: program from %s: %s", source.c_str(), w.c_str());
     if (!r.ok) {
         err = r.error;
         c_refused.fetch_add(1);
@@ -1805,6 +1848,29 @@ KilnResult KILN_CALL t_native_declare(uint32_t hash, uint32_t argc) {
     return KILN_OK;
 }
 
+// since 0.2.0-dev.29 (see the table)
+KilnResult KILN_CALL t_native_declare_typed(uint32_t hash, uint32_t argc, const KilnNativeArg* args) {
+    if (argc > 31 || (argc && !args)) return KILN_ERR_INVALID_ARGUMENT;
+    {
+        std::lock_guard lock(g_mu);
+        if (g_vanilla_argc.count(hash)) return KILN_ERR_INVALID_ARGUMENT;
+        for (const auto& c : g_captured)
+            if (c.hash == hash) return KILN_ERR_INVALID_ARGUMENT;
+        g_typed[hash].assign(args, args + argc);
+        auto it = g_slot_of.find(hash);
+        if (it == g_slot_of.end()) {
+            g_declared[hash] = argc;  // the verifier's argc until the native registers
+        } else if (mod_kind(g_slots[it->second].kind.load())) {
+            Slot& s = g_slots[it->second];
+            if (s.argc != argc)
+                logw("kiln.abilities: native %s registered with argc %u is declared with %u arguments", s.name, s.argc, argc);
+            if (const auto* old = s.typed.exchange(new std::vector<KilnNativeArg>(args, args + argc))) g_retired_typed.push_back(old);
+        }
+    }
+    if (on_tick() && t_slot < 0) retry_waiting();
+    return KILN_OK;
+}
+
 // A Kiln native in a slot (built-ins, managed, sync). Refusals set *refusal (KILN_NATIVE_REFUSED_*) and why. A new key
 // goes into the live registry now (on the tick thread); before the first world it goes in at the world's setup.
 int add_kiln_native(KilnOwner owner, std::string_view name, uint32_t argc, uint32_t kind, uint32_t* out_hash,
@@ -1843,6 +1909,9 @@ int add_kiln_native(KilnOwner owner, std::string_view name, uint32_t argc, uint3
         std::snprintf(s.name, sizeof s.name, "%.*s", static_cast<int>(name.size()), name.data());
         s.sync_fn.store(fn, std::memory_order_release);
         s.sync_user.store(user, std::memory_order_release);
+        if (auto t = g_typed.find(hash); t != g_typed.end()) {  // declared before it registered
+            if (const auto* old = s.typed.exchange(new std::vector<KilnNativeArg>(t->second))) g_retired_typed.push_back(old);
+        }
         s.kind.store(kind, std::memory_order_release);
         g_slot_of[hash] = slot;
         g_declared.erase(hash);
@@ -2078,6 +2147,8 @@ KilnResult KILN_CALL t_native_counters(KilnNativeCounters* out) {
     c.dead_calls = c_dead_calls.load();
     c.attach_entered = c_attach_entered.load();
     c.attach_skipped = c_attach_skipped.load();
+    c.typed_refused = c_typed_refused.load();
+    c.typed_unconnected = c_typed_unconnected.load();
     const size_t n = std::min<size_t>(out->size, sizeof c);
     std::memcpy(reinterpret_cast<uint8_t*>(out) + 4, reinterpret_cast<const uint8_t*>(&c) + 4, n - 4);
     if (out->size > sizeof c) std::memset(reinterpret_cast<uint8_t*>(out) + sizeof c, 0, out->size - sizeof c);
@@ -2409,6 +2480,7 @@ const KilnAbilitiesApi kTable = {
     &t_native_counters,
     &t_native_attach,
     &t_native_detach,
+    &t_native_declare_typed,
 };
 
 // ------------------------------------------------------------------------------------------- boot --------------
@@ -2422,9 +2494,106 @@ int64_t cst(const char* name, int64_t dflt) {
 }
 bool feat(const char* name) { return g_api->feature(KilnStr{name, std::strlen(name)}); }
 
+// ---- the mods' impact/natives.json (since 0.2.0-dev.29) ----
+std::filesystem::path utf8_path(std::string_view s) {
+    return std::filesystem::path(std::u8string_view(reinterpret_cast<const char8_t*>(s.data()), s.size()));
+}
+
+std::string read_bounded(const std::filesystem::path& file, size_t cap) {  // "" when missing, unreadable or too large
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(file, ec) || ec) return {};
+    const auto size = std::filesystem::file_size(file, ec);
+    if (ec || size > cap) return {};
+    std::ifstream in(file, std::ios::binary);
+    std::string text(static_cast<size_t>(size), '\0');
+    if (!in.read(text.data(), static_cast<std::streamsize>(text.size()))) return {};
+    return text;
+}
+
+// The folders of the mods that load: the active profile's enabled Kiln mods, then the drop-ins of kiln/mods without a
+// .disabled marker unless the profile turns drop-ins off (native/services/world/boot_programs.cpp finds
+// kiln.programs.json the same way). The id is the manifest's.
+std::vector<std::pair<std::string, std::filesystem::path>> mod_folders() {
+    namespace fs = std::filesystem;
+    std::vector<fs::path> dirs;
+    bool dropins = true;
+    const auto* profile = static_cast<const KilnProfileApi*>(g_api->service(KilnStr{KILN_PROFILE_SERVICE, sizeof KILN_PROFILE_SERVICE - 1}, 1));
+    if (profile && profile->header.size >= sizeof(KilnProfileApi)) {
+        const uint32_t mode = profile->mode();
+        if (mode == KILN_PROFILE_NO_MODS || mode == KILN_PROFILE_INVALID) return {};
+        if (mode == KILN_PROFILE_ACTIVE || mode == KILN_PROFILE_ONCE) {
+            dropins = (profile->dropins() & (1u << KILN_PROFILE_KIND_KILN)) != 0;
+            const uint32_t n = std::min<uint32_t>(profile->count(KILN_PROFILE_KIND_KILN), 1024);
+            for (uint32_t i = 0; i < n; ++i) {
+                KilnProfileMod m{};
+                m.size = sizeof m;
+                if (profile->get(KILN_PROFILE_KIND_KILN, i, &m) == KILN_OK && m.enabled && m.path.ptr)
+                    dirs.push_back(utf8_path(std::string_view(m.path.ptr, m.path.len)));
+            }
+        }
+    }
+    if (dropins) {
+        char path[4096];
+        size_t n = 0;
+        if (g_api->path(KILN_PATH_MODS, path, sizeof path, &n) == KILN_OK && n < sizeof path) {
+            std::error_code ec;
+            std::vector<fs::path> found;
+            for (auto it = fs::directory_iterator(utf8_path(std::string_view(path, n)), ec); !ec && it != fs::directory_iterator() && found.size() < 1024; it.increment(ec))
+                if (it->is_directory(ec) && !fs::exists(it->path() / L".disabled", ec)) found.push_back(it->path());
+            std::sort(found.begin(), found.end());
+            dirs.insert(dirs.end(), found.begin(), found.end());
+        }
+    }
+    std::vector<std::pair<std::string, fs::path>> out;
+    std::unordered_set<std::string> seen;
+    for (const auto& d : dirs) {
+        const std::string text = read_bounded(d / L"kiln.mod.json", 64 * 1024);
+        if (text.empty()) continue;
+        try {
+            const auto m = nlohmann::json::parse(text, nullptr, true, true);  // manifests may carry comments
+            const std::string id = m.is_object() && m.contains("id") && m["id"].is_string() ? m["id"].get<std::string>() : "";
+            if (!id.empty() && seen.insert(id).second) out.emplace_back(id, d);
+        } catch (const std::exception&) {
+            // the host says why the manifest does not load
+        }
+    }
+    return out;
+}
+
+// Before the first program is verified: every loading mod's impact/natives.json declares its natives (typed ones with
+// their argument types, older entries by argc only).
+void load_mod_natives() {
+    if (!g_have_natives) return;
+    uint32_t typed = 0, plain = 0, files = 0;
+    for (const auto& [id, dir] : mod_folders()) {
+        const auto file = dir / L"impact" / L"natives.json";
+        std::error_code ec;
+        if (!std::filesystem::exists(file, ec)) continue;
+        const std::string text = read_bounded(file, kNativesJsonBytes);
+        std::vector<std::string> notes;
+        std::vector<NativeDecl> decls;
+        try {
+            if (text.empty()) throw std::runtime_error("unreadable, or larger than 256 KiB");
+            decls = parse_natives_json(text, id, &notes);
+        } catch (const std::exception& e) {
+            logw("kiln.abilities: %s/impact/natives.json not read: %s", id.c_str(), e.what());
+            continue;
+        }
+        ++files;
+        for (const auto& n : notes) logw("kiln.abilities: %s/impact/natives.json: %s (skipped)", id.c_str(), n.c_str());
+        for (const auto& d : decls) {
+            const KilnResult rc = d.typed ? t_native_declare_typed(d.hash, d.argc, d.args.data()) : t_native_declare(d.hash, d.argc);
+            if (rc != KILN_OK) logw("kiln.abilities: %s/impact/natives.json: %s not declared (a vanilla native's hash?)", id.c_str(), d.name.c_str());
+            else (d.typed ? typed : plain)++;
+        }
+    }
+    if (files) logi("kiln.abilities: impact/natives.json of %u mod(s): %u typed and %u argc-only declaration(s)", files, typed, plain);
+}
+
 void KILN_CALL on_ready(void*) {
     g_spawn = static_cast<const KilnSpawnApi*>(g_api->service(KilnStr{KILN_SPAWN_SERVICE, sizeof KILN_SPAWN_SERVICE - 1}, 1));
     g_assets = static_cast<const KilnAssetsApi*>(g_api->service(KilnStr{KILN_ASSETS_SERVICE, sizeof KILN_ASSETS_SERVICE - 1}, 1));
+    load_mod_natives();
 }
 
 }  // namespace

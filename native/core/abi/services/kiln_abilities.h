@@ -216,6 +216,18 @@ enum {
                                 call_original does nothing here */
 };
 
+/* since 0.2.0-dev.29: one argument of a typed native declaration (native_declare_typed). args[0] is the value pushed
+ * last before the ECALL. */
+typedef struct KilnNativeArg {
+    uint32_t type;  /* the variable's type hash (FNV-1a-32 of the impact type name: KILN_IMPACT_TYPE_*, ecs.EntityId
+                       0x737c8f86, WorldTransform 0x9493a8c5, ...); 0 = any type */
+    uint16_t size;  /* the variable's size in bytes; 0 = any size */
+    uint8_t dir;    /* KILN_NATIVE_ARG_IN / OUT / INOUT (what the native does with it; checked alike) */
+    uint8_t flags;  /* KILN_NATIVE_ARG_OPTIONAL: may be not connected (0); KILN_NATIVE_ARG_RAW: takes a raw integer */
+} KilnNativeArg;
+enum { KILN_NATIVE_ARG_IN = 0, KILN_NATIVE_ARG_OUT = 1, KILN_NATIVE_ARG_INOUT = 2 };
+enum { KILN_NATIVE_ARG_OPTIONAL = 1u << 0, KILN_NATIVE_ARG_RAW = 1u << 1 };
+
 /* since 0.2.0-dev.29 (native_counters). Reads every field the caller's size covers. */
 typedef struct KilnNativeCounters {
     uint32_t size;            /* set by the caller */
@@ -228,6 +240,8 @@ typedef struct KilnNativeCounters {
     uint64_t dead_calls;      /* calls of a Kiln native that was taken off (answered 0x1F) */
     uint64_t attach_entered;  /* attachment callbacks entered (their filter matched) */
     uint64_t attach_skipped;  /* attachment filters that did not match a call: no callback, no managed code */
+    uint64_t typed_refused;   /* calls a typed declaration refused with 0x2C (type, size, a raw value, bounds) */
+    uint64_t typed_unconnected; /* calls it refused with 0x18 (a required argument not connected) */
 } KilnNativeCounters;
 enum {
     KILN_NATIVE_COUNTERS_NATIVES = 1u << 0, /* the RegisterNative hook is in: Kiln natives can be registered */
@@ -343,6 +357,16 @@ typedef struct KilnAbilitiesApi {
     /* tick, not from inside a native call. From the next call on `fn` is not called; `fn`/`user` may go once this
      * returns (no call is in flight on the tick thread outside the step). NOT_FOUND: no such attachment. */
     KilnResult(KILN_CALL* native_detach)(KilnHandle attachment);
+
+    /* ---- since 0.2.0-dev.29: typed declarations (check header.size before use) ----
+     * any thread. Declares Kiln native `hash` with `argc` arguments and the type and size of each (args[0..argc), see
+     * KilnNativeArg), replacing an earlier declaration. kiln.abilities reads the "sync" entries of every mod's
+     * impact/natives.json this way when it starts. The verifier refuses a program that pushes a variable of another
+     * type or size, a raw value for a variable argument, or nothing for a required one (E_ARGTYPE). Every call of a
+     * Kiln native (sync or managed) with a typed declaration is checked before its handler runs: 0x2C for another
+     * type or size, a raw value or an index out of bounds, 0x18 for a required argument not connected.
+     * INVALID_ARGUMENT: argc over 31, args NULL with argc > 0, or a vanilla native's hash. */
+    KilnResult(KILN_CALL* native_declare_typed)(uint32_t hash, uint32_t argc, const KilnNativeArg* args);
 } KilnAbilitiesApi;
 
 /* sequence_play() trigger (keen::actor::ActionSequenceTrigger) */

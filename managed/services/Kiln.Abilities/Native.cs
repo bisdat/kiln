@@ -153,7 +153,19 @@ internal static unsafe class AbilitiesNative
         public delegate* unmanaged[Cdecl]<NativeCounters*, int> NativeCountersFn;
         public delegate* unmanaged[Cdecl]<ulong, uint, NativeFilter*, int, int, delegate* unmanaged[Cdecl]<NativeCall*, void*, void>, void*, ulong*, uint*, int> NativeAttach;
         public delegate* unmanaged[Cdecl]<ulong, int> NativeDetach;
+        public delegate* unmanaged[Cdecl]<uint, uint, NativeArgRaw*, int> NativeDeclareTyped;
     }
+
+    /// <summary>KilnNativeArg (since 0.2.0-dev.29).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct NativeArgRaw
+    {
+        public uint Type;
+        public ushort Size;
+        public byte Dir, Flags;
+    }
+
+    public const byte ArgOptional = 1, ArgRaw = 2;  // KILN_NATIVE_ARG_OPTIONAL / _RAW
 
     /// <summary>KilnNativeFilter (since 0.2.0-dev.29): 0 = any.</summary>
     [StructLayout(LayoutKind.Sequential)]
@@ -167,7 +179,7 @@ internal static unsafe class AbilitiesNative
     public struct NativeCounters
     {
         public uint Size, Inflight, Flags, Reserved;
-        public ulong SyncCalls, SyncFaults, SyncSlow, DeadCalls, AttachEntered, AttachSkipped;
+        public ulong SyncCalls, SyncFaults, SyncSlow, DeadCalls, AttachEntered, AttachSkipped, TypedRefused, TypedUnconnected;
     }
 
     public const uint CountersNatives = 1;  // KILN_NATIVE_COUNTERS_NATIVES: the RegisterNative hook is in

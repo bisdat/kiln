@@ -32,9 +32,14 @@ public sealed partial class AbilitiesTestMod
             if (!Kiln.Mods.All.Any(m => m.Id == "natives-helper" && m.IsLoaded) && Kiln.Mods.All.Any(m => m.Id == "natives-helper"))
                 Info($"natives v2: natives-helper loaded again: {await Kiln.Mods.LoadAsync("natives-helper")}");
             await NativesV2Pass(2, at);
+            await TestTypedNatives(at(40, 60));  // once per process (the declarations stay): inside the window
             LabSystems.StopParallel();
         }
-        else Info("natives v2: no kiln/control/systems.parallel: serial pass only");
+        else
+        {
+            Info("natives v2: no kiln/control/systems.parallel: serial pass only");
+            await TestTypedNatives(at(40, 60));
+        }
         await TestRegistryFull();  // last: the natives it adds stay in this world's registry
     }
 

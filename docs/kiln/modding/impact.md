@@ -236,6 +236,15 @@ kiln.abilities states the same contract from the runtime side in docs/kiln/servi
   ```
   The C# side registers the same name, e.g. `Abilities.Natives.Register("Chill", argc: 2, handler)`; a name without
   the `<modid>.` prefix gets the calling mod's id.
+  A synchronous native (`Abilities.Natives.RegisterSync`, since 0.2.0-dev.29) answers inside the call. Its entry says
+  `"sync": true`, and then its argument types bind: one `"type"` per argument (or `"any"`) and its `"size"`; the cook
+  and kiln.abilities refuse a program that passes another type (`E_ARGTYPE`), and kiln.abilities checks every call
+  (0x2C, 0x18 for a required argument left unconnected). An entry without `"sync"` declares the argc only, as before:
+  ```json
+  { "name": "mymod.OnHit", "sync": true, "args": [
+      { "name": "target", "type": "ecs.EntityId", "size": 4 },
+      { "name": "attackMod", "type": "float32", "dir": "inout", "size": 4 } ] }
+  ```
 - **Built-ins** (mod id `kiln`; neither suspends; both push 1):
   - `kiln.Log(value)` (`0xc0b137a7`): writes a kiln.log line with the program, instance, entity, site and the value
     (typed by its variable, or a raw integer).

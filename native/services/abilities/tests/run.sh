@@ -7,6 +7,6 @@ here=$(cd "$(dirname "$0")" && pwd)
 out=${KILN_OUT:?set KILN_OUT}/abilities-host-test
 mkdir -p "$out"
 flags=(-std=c++20 -O1 -g -pthread -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=undefined
-       -I"$here/.." -I"$here/../../../core/abi")
-g++ "${flags[@]}" "$here/natives_test.cpp" -o "$out/natives_test"
+       -D__fastcall= -I"$here/.." -I"$here/../../../core/abi" -I"$here/../../../third_party")
+g++ "${flags[@]}" "$here/natives_test.cpp" "$here/../verify.cpp" -o "$out/natives_test"
 "$out/natives_test"

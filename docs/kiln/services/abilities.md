@@ -307,6 +307,27 @@ runtime verdict of each rule, and the C++ verifier matches all of them).
 
    Managed (C#) natives run on the tick thread: their ECALL suspends (result byte 1) and re-runs the next step, which
    then pushes the handler's value (`"suspends": true` in natives.json; the result is only valid after the resume).
+
+   **Typed declarations** (since 0.2.0-dev.29). kiln.abilities reads every loading mod's `impact/natives.json` when it
+   starts (the profile's enabled Kiln mods and the drop-ins of kiln/mods without `.disabled`; kiln.log: `impact/
+   natives.json of N mod(s): T typed and A argc-only declaration(s)`), before any program is verified. An entry with
+   `"sync": true` is a typed declaration: each argument's `"type"` (one impact type name, or `"any"`) and `"size"`
+   (bytes; omitted = the type's known size) bind, with `"optional"` (may be 0, not connected) and `"raw"` (takes a raw
+   integer). Any other entry declares the argc only, as before (its argument types stay notes for the cook). The same
+   from C#: `Abilities.Natives.Declare(fullName, params NativeArg[])`; natively `native_declare_typed`. With a typed
+   declaration:
+   - the verifier refuses a program whose ECALL pushes (ICONST/ICONST0/ICONST1 right before it) a variable of another
+     type or size, a raw value for a variable argument, or nothing for a required one: `E_ARGTYPE: code pc 4: native
+     0x0d6eb872 args[1] is variable 2 (type 0xe89f7410, 4 bytes); it takes type 0x9859f31e (4 bytes)`. A call of a
+     native declared by argc only and not registered yet passes with a `W_ARGTYPE` warning in kiln.log;
+   - every call (sync or managed) is checked before its handler runs: another type or size, a raw value, a handle
+     out of the layout or the data: 0x2C; a required argument not connected: 0x18 (the instance stops with Error; the
+     handler is not called). This also covers programs registered before the declaration.
+   - the cook (`tools/impact`) reports the same type mismatch as an error (`E_ARGTYPE`) instead of `W_ARGTYPE`.
+   Lab: `PASS a program passing float32 to an int parameter is refused at registration (E_ARGTYPE)`, `PASS an
+   argc-only declaration still warns`, `PASS ... and answers 0x2C at run time once the native is typed: 1 call refused
+   0x2C (float32 for int), 1 refused 0x18 (not connected), 0 handler call(s)`, `PASS types
+   sint32/float32/bool/Time/EntityId/WorldTransform round trip`.
 3. **Arguments.** ECALL pops `argc` (≤ 31) values; `args[0]` = the top of the stack (the last value pushed), which is
    the game's own convention (applyDamage `args[0]` = wasBlocked output, `args[1]` = root attacker, `args[2]` =
    target). A value is a variable handle `0xFFFF0000 | index` (resolved through the native context's
@@ -328,7 +349,7 @@ runtime verdict of each rule, and the C++ verifier matches all of them).
      sint32 `0x9859f31e`, float32 `0xe89f7410`, bool `0xc894953d`, Time `0xdfe4e404`; COPY operands are variable name
      hashes of two present variables of the same type; variable `offsetInBytes + size` inside `data`;
    - every ECALL hash is a vanilla native, a live Kiln native or one declared in a loaded mod's `impact/natives.json`,
-     with the matching argc (the blob carries no argc);
+     with the matching argc (the blob carries no argc); a typed declaration's argument types and sizes (above);
    - every ECALL site that calls a query native (forEachEntityWithFactionInRange `0x19143416`, destroyFactionQuery
      `0x93e40aa9`, forEachPlayerInRange `0xa8787e70`, destroyPlayerQuery `0x22a62ea4`, entityInRangeWithFaction
      `0x61946152`) is listed in `queryCallIds` (createImpactInstance preallocates query state only for those sites);
@@ -360,9 +381,9 @@ its interest mask, `KILN_ABILITY_INTEREST_HOLD` for holds), `hold_filter`, `inst
 `set_wrap_dispatcher`, `call_original`, `release_owner`, `attr_get/attr_add`, `sequence_state`, `sequence_play`;
 appended in 0.2.0-dev.29 (check `header.size`): `native_register_sync` (a native answered inside the call by its own
 `fn`, refusals as `KILN_NATIVE_REFUSED_*`), `native_counters` (`KilnNativeCounters`: calls in flight, sync calls,
-faults, calls over budget, calls of a removed native, attachment callbacks entered and filters that skipped a call),
-`native_attach` / `native_detach` (one callback per attachment, `KilnNativeFilter`, stages `KILN_NATIVE_BEFORE /
-INSTEAD / AFTER`).
+faults, calls over budget, calls of a removed native, attachment callbacks entered and filters that skipped a call,
+calls a typed declaration refused), `native_attach` / `native_detach` (one callback per attachment,
+`KilnNativeFilter`, stages `KILN_NATIVE_BEFORE / INSTEAD / AFTER`), `native_declare_typed` (`KilnNativeArg`).
 
 How it hooks (all fail soft; `kiln.abilities: natives on, programs on, instances on, attributes on, sequences on`):
 - `registerNative` (0x996b80) is detoured at boot to capture the game's 107 natives per registry; at the server

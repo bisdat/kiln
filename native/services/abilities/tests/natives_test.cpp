@@ -3,9 +3,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include <vector>
 
 #include "natives_core.h"
+#include "natives_json.h"
+#include "verify.h"
 
 using namespace kab;
 
@@ -182,8 +185,168 @@ static void sites() {
     CHECK(!code_calls(cut, 2, 0, 0x1234));
 }
 
+// A program's variable table (24-byte ImpactVariable entries) and its data size, for the typed checks.
+struct Layout {
+    std::vector<uint8_t> bytes;
+    uint64_t data = 0;
+    void add(uint32_t type, uint16_t size) {
+        ImpactVariable v{};
+        v.type = type;
+        v.size = size;
+        v.offset = static_cast<uint16_t>(data);
+        data += size;
+        const auto* p = reinterpret_cast<const uint8_t*>(&v);
+        bytes.insert(bytes.end(), p, p + sizeof v);
+    }
+    uint64_t count() const { return bytes.size() / sizeof(ImpactVariable); }
+};
+
+constexpr uint32_t kSint = 0x9859f31eu, kFloat = 0xe89f7410u, kEntity = 0x737c8f86u;
+
+static void typed() {
+    Layout l;
+    l.add(kSint, 4);   // 0
+    l.add(kFloat, 4);  // 1
+    l.add(kEntity, 4); // 2
+    const KilnNativeArg decl[3] = {{kSint, 4, KILN_NATIVE_ARG_OUT, 0}, {kFloat, 4, KILN_NATIVE_ARG_IN, KILN_NATIVE_ARG_OPTIONAL},
+                                   {0, 0, KILN_NATIVE_ARG_IN, KILN_NATIVE_ARG_RAW}};
+    auto check = [&](std::vector<uint32_t> args, uint64_t data = 0) {
+        return check_typed_args(decl, 3, args.data(), args.size(), l.bytes.data(), l.count(), data ? data : l.data);
+    };
+    CHECK(check({0xFFFF0000u, 0xFFFF0001u, 5}) == 0);
+    CHECK(check({0xFFFF0001u, 0xFFFF0001u, 5}) == kErrTypeMismatch);   // a float32 for the sint32
+    CHECK(check({0xFFFF0000u, 0xFFFF0000u, 5}) == kErrTypeMismatch);   // a sint32 for the float32
+    CHECK(check({0xFFFF0000u, 0, 5}) == 0);                            // Optional<float>: not connected
+    CHECK(check({0, 0xFFFF0001u, 5}) == kErrNoConnection);             // a required one not connected
+    CHECK(check({7, 0xFFFF0001u, 5}) == kErrTypeMismatch);             // a raw value for a variable parameter
+    CHECK(check({0xFFFF0000u, 0xFFFF0001u, 0}) == 0);                  // [Raw]: 0 is a value
+    CHECK(check({0xFFFF0000u, 0xFFFF0001u, 0xFFFF0002u}) == 0);        // [Raw], type any: a variable is fine too
+    CHECK(check({0xFFFF0009u, 0xFFFF0001u, 5}) == kErrTypeMismatch);   // an index past the layout
+    CHECK(check({0xFFFF0000u, 0xFFFF0001u, 5}, 6) == kErrTypeMismatch); // the variable past the data
+    CHECK(check({0xFFFF0000u, 0xFFFF0001u}) == kErrTypeMismatch);      // fewer arguments than declared
+    // a size mismatch with the same type hash
+    Layout w;
+    w.add(kSint, 8);
+    const uint32_t one[1] = {0xFFFF0000u};
+    CHECK(check_typed_args(decl, 1, one, 1, w.bytes.data(), w.count(), w.data) == kErrTypeMismatch);
+}
+
+static void natives_json() {
+    std::vector<std::string> notes;
+    const char* text = R"({"format": 1, "natives": [
+      {"name": "mymod.OnHit", "sync": true, "args": [
+        {"name": "target", "type": "ecs.EntityId"},
+        {"name": "attackMod", "type": "float32", "dir": "inout", "size": 4},
+        {"name": "tag", "types": ["uint32"], "raw": true},
+        {"name": "maybe", "type": "Time", "optional": true}]},
+      {"name": "mymod.Old", "argc": 2, "args": [{"name": "x", "types": ["sint32", "float32"]}]},
+      {"name": "other.Thing", "argc": 1},
+      {"name": "mymod.Bad", "hash": "0x1234"},
+      {"name": "mymod.Short", "sync": true, "argc": 2, "args": [{"type": "sint32"}]}
+    ]})";
+    const auto d = parse_natives_json(text, "mymod", &notes);
+    CHECK(d.size() == 2);
+    CHECK(notes.size() == 3);
+    if (d.size() == 2) {
+        CHECK(d[0].name == "mymod.OnHit" && d[0].typed && d[0].argc == 4 && d[0].hash == fnv1a_text("mymod.OnHit"));
+        CHECK(d[0].args.size() == 4);
+        if (d[0].args.size() == 4) {
+            CHECK(d[0].args[0].type == kEntity && d[0].args[0].size == 4 && d[0].args[0].dir == KILN_NATIVE_ARG_IN);
+            CHECK(d[0].args[1].type == kFloat && d[0].args[1].dir == KILN_NATIVE_ARG_INOUT);
+            CHECK(d[0].args[2].type == 0x32940becu && (d[0].args[2].flags & KILN_NATIVE_ARG_RAW));
+            CHECK(d[0].args[3].type == 0xdfe4e404u && d[0].args[3].size == 8 && (d[0].args[3].flags & KILN_NATIVE_ARG_OPTIONAL));
+        }
+        CHECK(d[1].name == "mymod.Old" && !d[1].typed && d[1].argc == 2 && d[1].args.empty());  // argc only: as before
+    }
+    bool threw = false;
+    try { parse_natives_json(R"({"format": 2, "natives": []})", "mymod", nullptr); } catch (const std::exception&) { threw = true; }
+    CHECK(threw);
+    threw = false;
+    try { parse_natives_json("not json", "mymod", nullptr); } catch (const std::exception&) { threw = true; }
+    CHECK(threw);
+    CHECK(parse_natives_json(R"({"comment": "nothing"})", "mymod", nullptr).empty());
+}
+
+// keen::ImpactProgram blob (as mods/tests/abilities-test's ProgramBuilder writes it)
+static std::vector<uint8_t> program(const std::vector<uint32_t>& code, const std::vector<std::pair<uint32_t, uint16_t>>& vars) {
+    const uint8_t guid[16] = {6, 0xc, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+    const size_t codeOff = 64, shutOff = codeOff + code.size() * 4, layOff = shutOff + 4, dataOff = layOff + vars.size() * 24;
+    size_t data = 0;
+    for (auto& v : vars) data += v.second;
+    std::vector<uint8_t> b((dataOff + data + 3) & ~size_t(3));
+    const uint32_t id = fnv1a(guid, 16);
+    std::memcpy(b.data(), &id, 4);
+    std::memcpy(b.data() + 4, guid, 16);
+    const uint16_t stack = 256;
+    std::memcpy(b.data() + 0x14, &stack, 2);
+    auto arr = [&](size_t field, size_t target, uint32_t count) {
+        const int32_t off = count ? static_cast<int32_t>(target - field) : 0;
+        std::memcpy(b.data() + field, &off, 4);
+        std::memcpy(b.data() + field + 4, &count, 4);
+    };
+    arr(0x18, codeOff, static_cast<uint32_t>(code.size()));
+    arr(0x20, shutOff, 1);
+    arr(0x28, layOff, static_cast<uint32_t>(vars.size()));
+    arr(0x30, dataOff, static_cast<uint32_t>(data));
+    std::memcpy(b.data() + codeOff, code.data(), code.size() * 4);
+    const uint32_t halt = 30;
+    std::memcpy(b.data() + shutOff, &halt, 4);
+    uint16_t at = 0;
+    for (size_t i = 0; i < vars.size(); ++i) {
+        ImpactVariable v{};
+        v.type = vars[i].first;
+        v.size = vars[i].second;
+        v.offset = at;
+        at = static_cast<uint16_t>(at + v.size);
+        std::memcpy(b.data() + layOff + i * 24, &v, 24);
+    }
+    return b;
+}
+
+static void verifier() {
+    constexpr uint32_t kTyped = 0x11112222u, kOld = 0x33334444u;
+    const KilnNativeArg decl[2] = {{kSint, 4, KILN_NATIVE_ARG_OUT, 0}, {kSint, 4, KILN_NATIVE_ARG_IN, 0}};
+    auto argc = [&](uint32_t h) { return h == kTyped || h == kOld ? 2 : -1; };
+    auto typed_of = [&](uint32_t h) {
+        TypedArgs t;
+        if (h == kTyped) { t.args = decl; t.count = 2; }
+        if (h == kOld) t.untyped_kiln = true;
+        return t;
+    };
+    // Out = native(args[0] = Out (sint32), args[1] = In); POP; HALT
+    auto calling = [&](uint32_t hash, uint32_t in_handle) {
+        return program({11, in_handle, 11, 0xFFFF0000u, 19, 0x77, hash, 27, 30}, {{kSint, 4}, {kSint, 4}, {kFloat, 4}});
+    };
+    auto good = calling(kTyped, 0xFFFF0001u);
+    auto r = verify_program(good.data(), good.size(), argc, typed_of);
+    CHECK(r.ok && r.warnings.empty());
+    auto bad = calling(kTyped, 0xFFFF0002u);  // a float32 for an int parameter
+    r = verify_program(bad.data(), bad.size(), argc, typed_of);
+    CHECK(!r.ok && r.error.rfind("E_ARGTYPE: code pc 4: native 0x11112222 args[1] is variable 2 (type 0xe89f7410", 0) == 0);
+    auto raw = calling(kTyped, 9);  // a raw value
+    r = verify_program(raw.data(), raw.size(), argc, typed_of);
+    CHECK(!r.ok && r.error.find("raw value 9") != std::string::npos);
+    auto none = program({12, 11, 0xFFFF0000u, 19, 0x77, kTyped, 27, 30}, {{kSint, 4}});  // ICONST0: not connected
+    r = verify_program(none.data(), none.size(), argc, typed_of);
+    CHECK(!r.ok && r.error.find("not connected") != std::string::npos);
+    // an argc-only Kiln native: accepted, with the warning
+    auto old = calling(kOld, 0xFFFF0002u);
+    r = verify_program(old.data(), old.size(), argc, typed_of);
+    CHECK(r.ok && r.warnings.size() == 1 && r.warnings[0].rfind("W_ARGTYPE", 0) == 0);
+    // pushes the verifier cannot see (GLOAD) are left to the thunk
+    auto unseen = program({22, 0xFFFF0001u, 11, 0xFFFF0000u, 19, 0x77, kTyped, 27, 30}, {{kSint, 4}, {kSint, 4}});
+    r = verify_program(unseen.data(), unseen.size(), argc, typed_of);
+    CHECK(r.ok);
+    // without typed_of (the old entry point): as before
+    r = verify_program(bad.data(), bad.size(), argc);
+    CHECK(r.ok);
+}
+
 int main() {
     names();
+    typed();
+    natives_json();
+    verifier();
     stages();
     filters();
     sites();

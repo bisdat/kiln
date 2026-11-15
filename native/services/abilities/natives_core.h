@@ -4,9 +4,11 @@
 #pragma once
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <string_view>
 #include <vector>
 
+#include "engine.h"
 #include "services/kiln_abilities.h"
 
 namespace kab {
@@ -135,6 +137,36 @@ void run_stages(const AttachSet& set, uint32_t program, uint32_t site, Enter&& e
         ++*entered;
         enter(a, KILN_NATIVE_AFTER);
     }
+}
+
+// ------------------------------------------------------------------------------------------- typed arguments ----
+// since 0.2.0-dev.29: the per-call check of a typed declaration (native_declare_typed), before the native's handler
+// sees the call. args[i]: a variable handle 0xFFFF0000|index, 0 (not connected) or a raw value. layout: the program's
+// ImpactVariable entries (24 B each), data_size: the instance data's bytes. Answers 0, kErrTypeMismatch (another
+// type or size, a raw value for a variable parameter, a handle out of range) or kErrNoConnection (a required argument
+// not connected).
+inline uint8_t check_typed_args(const KilnNativeArg* decl, uint32_t n, const uint32_t* args, uint64_t argc,
+                                const uint8_t* layout, uint64_t layout_count, uint64_t data_size) {
+    if (argc < n || (n && !args)) return kErrTypeMismatch;
+    for (uint32_t i = 0; i < n; ++i) {
+        const uint32_t h = args[i];
+        const KilnNativeArg& d = decl[i];
+        if ((h & 0xFFFF0000u) != 0xFFFF0000u) {
+            if (d.flags & KILN_NATIVE_ARG_RAW) continue;  // [Raw] uint: a literal (0 included)
+            if (h == 0) {
+                if (d.flags & KILN_NATIVE_ARG_OPTIONAL) continue;
+                return kErrNoConnection;
+            }
+            return kErrTypeMismatch;  // an untagged literal for a variable parameter
+        }
+        const uint32_t idx = h & 0xFFFFu;
+        if (idx >= layout_count || !layout) return kErrTypeMismatch;
+        ImpactVariable v;
+        std::memcpy(&v, layout + static_cast<size_t>(idx) * sizeof(ImpactVariable), sizeof v);
+        if ((d.type && v.type != d.type) || (d.size && v.size != d.size)) return kErrTypeMismatch;
+        if (static_cast<uint64_t>(v.offset) + v.size > data_size) return kErrTypeMismatch;
+    }
+    return 0;
 }
 
 // Impact bytecode: words of operands after an opcode (the verifier's table, verify.cpp).

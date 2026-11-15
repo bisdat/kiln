@@ -184,6 +184,30 @@ public delegate byte NativeSyncHandler(ref NativeCall call);
 /// <param name="Hash">FNV-1a-32 of the full name (what a program's ECALL names), also when refused.</param>
 public sealed record NativeResult(bool Ok, string? Reason, uint Hash) : IKilnResult;
 
+/// <summary>What a native does with an argument (<see cref="NativeArg"/>).</summary>
+public enum NativeArgDirection
+{
+    /// <summary>Reads it.</summary>
+    In = 0,
+    /// <summary>Writes it (an out variable: what the native gives back).</summary>
+    Out = 1,
+    /// <summary>Reads and writes it.</summary>
+    InOut = 2,
+}
+
+/// <summary>One argument of a typed native declaration (<see cref="Abilities.Natives.Declare(string, NativeArg[])"/>),
+/// in ECALL order: argument 0 is the value the program pushes last.</summary>
+/// <param name="Type">The impact type name of the variable the program must pass: "sint32", "uint32", "float32",
+/// "bool", "Time", "ecs.EntityId", "WorldTransform", "float3", ... (the names of tools/impact/data/types.json); "any"
+/// for any type.</param>
+/// <param name="Direction">What the native does with it (documentation; every argument is checked alike).</param>
+/// <param name="Optional">The program may leave it not connected (0).</param>
+/// <param name="Raw">It takes a raw integer the program pushes (a literal), not only a variable.</param>
+/// <param name="Size">The variable's size in bytes; 0 = the size of <paramref name="Type"/> when Kiln knows it, else
+/// any.</param>
+public readonly record struct NativeArg(string Type, NativeArgDirection Direction = NativeArgDirection.In, bool Optional = false,
+    bool Raw = false, int Size = 0);
+
 /// <summary>Where an attached handler runs in a native call (<see cref="Abilities.Natives.Attach"/>).</summary>
 public enum NativeStage
 {
@@ -404,9 +428,9 @@ public static unsafe partial class Abilities
         /// kiln.abilities.</summary>
         [System.Diagnostics.CodeAnalysis.Experimental("KILNX001")]
         [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
-        public static (ulong SyncCalls, ulong SyncFaults, ulong SyncSlow, ulong DeadCalls, uint Inflight, ulong AttachEntered, ulong AttachSkipped)? LabCounters =>
+        public static (ulong SyncCalls, ulong SyncFaults, ulong SyncSlow, ulong DeadCalls, uint Inflight, ulong AttachEntered, ulong AttachSkipped, ulong TypedRefused, ulong TypedUnconnected)? LabCounters =>
             AbilitiesNative.Counters() is { } c
-                ? (c.SyncCalls, c.SyncFaults, c.SyncSlow, c.DeadCalls, c.Inflight, c.AttachEntered, c.AttachSkipped)
+                ? (c.SyncCalls, c.SyncFaults, c.SyncSlow, c.DeadCalls, c.Inflight, c.AttachEntered, c.AttachSkipped, c.TypedRefused, c.TypedUnconnected)
                 : null;
 
         /// <summary>Attaches <paramref name="handler"/> to the calls of the game's native <paramref name="native"/> made
@@ -458,6 +482,63 @@ public static unsafe partial class Abilities
                 return native.Length is > 2 and <= 10 && native.Skip(2).All(char.IsAsciiHexDigit);
             return char.IsAsciiLetter(native[0]) && native.All(c => char.IsAsciiLetterOrDigit(c) || c == '_');
         }
+
+        /// <summary>Declares Kiln native <paramref name="fullName"/> with the type of each argument (since 0.2.0-dev.29;
+        /// what a <c>"sync": true</c> entry of a mod's impact/natives.json declares when Kiln starts), replacing an earlier
+        /// declaration. A program registered from then on that passes a variable of another type or size, a raw value
+        /// for a variable argument, or nothing for a required one is refused (<c>E_ARGTYPE</c>, an
+        /// <see cref="ArgumentException"/> from <see cref="Programs"/>' Register). Every call of the native, also by a
+        /// program registered earlier, is checked before its handler runs: a mismatch answers 0x2C, a required argument
+        /// not connected 0x18 (the instance stops with Error; the handler is not called). Any thread.</summary>
+        /// <param name="fullName">"&lt;modid&gt;.&lt;Name&gt;".</param>
+        /// <param name="args">The arguments, argument 0 first (the last value the program pushes); at most 31.</param>
+        /// <exception cref="ArgumentException">A bad name, more than 31 arguments, an empty type, a size outside
+        /// 0..65535, or the hash of a vanilla native.</exception>
+        /// <exception cref="KilnUnavailableException">Capability <c>abilities.natives.sync</c> is off here.</exception>
+        [RequiresCapability(AbilitiesCaps.NativesSync)]
+        public static void Declare(string fullName, params NativeArg[] args)
+        {
+            ArgumentException.ThrowIfNullOrEmpty(fullName);
+            ArgumentNullException.ThrowIfNull(args);
+            if (!ValidName(fullName)) throw new ArgumentException($"native {fullName}: \"<modid>.<Name>\", Name [A-Za-z0-9_]", nameof(fullName));
+            if (args.Length > 31) throw new ArgumentException($"native {fullName}: at most 31 arguments", nameof(args));
+            var raw = new AbilitiesNative.NativeArgRaw[args.Length];
+            for (var i = 0; i < args.Length; i++)
+            {
+                var a = args[i];
+                if (string.IsNullOrEmpty(a.Type)) throw new ArgumentException($"native {fullName}: argument {i} has no type", nameof(args));
+                if (a.Size is < 0 or > 0xFFFF) throw new ArgumentException($"native {fullName}: argument {i}'s size {a.Size} is not 0..65535", nameof(args));
+                var any = a.Type == "any";
+                raw[i] = new AbilitiesNative.NativeArgRaw
+                {
+                    Type = any ? 0 : AbilitiesNative.Fnv(a.Type),
+                    Size = (ushort)(a.Size != 0 ? a.Size : any ? 0 : ImpactTypeSize(a.Type)),
+                    Dir = (byte)a.Direction,
+                    Flags = (byte)((a.Optional ? AbilitiesNative.ArgOptional : 0) | (a.Raw ? AbilitiesNative.ArgRaw : 0)),
+                };
+            }
+            AbilitiesCaps.Require(AbilitiesCaps.NativesSync);
+            var t = AbilitiesNative.V2(nameof(AbilitiesNative.TableV2.NativeDeclareTyped));
+            if (t == null) throw new KilnUnavailableException(AbilitiesCaps.NativesSync, "kiln.abilities is older than 0.2.0-dev.29");
+            int rc;
+            fixed (AbilitiesNative.NativeArgRaw* p = raw) rc = t->NativeDeclareTyped(AbilitiesNative.Fnv(fullName), (uint)raw.Length, p);
+            if (rc == AbilitiesNative.InvalidArgument) throw new ArgumentException($"native {fullName}: refused (the hash of a vanilla native?)", nameof(fullName));
+            if (rc != AbilitiesNative.Ok) throw new InvalidOperationException($"Natives.Declare({fullName}): {AbilitiesNative.Describe(rc)}");
+        }
+
+        // The size of an impact value type by name (tools/impact/data/types.json; natives_json.h impact_type_size).
+        internal static int ImpactTypeSize(string type) => type switch
+        {
+            "sint32" or "uint32" or "float32" or "ecs.EntityId" => 4,
+            "bool" or "uint8" or "sint8" => 1,
+            "uint16" or "sint16" => 2,
+            "Time" or "uint64" or "sint64" or "float2" => 8,
+            "float3" => 12,
+            "float4" => 16,
+            "impact.DamageSetup" => 52,
+            "WorldTransform" => 56,
+            _ => 0,
+        };
 
         /// <summary>Declares a native from a mod's impact/natives.json before it is registered, so programs that call
         /// it pass the verifier now. Any thread.</summary>

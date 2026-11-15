@@ -118,6 +118,7 @@ public sealed unsafe class NativesAttachTests
         Assert.Equal(1, (int)NativeStage.Instead);
         Assert.Equal(2, (int)NativeStage.After);
         Assert.Equal(16, sizeof(AbilitiesNative.NativeFilter));
-        Assert.Equal(64, sizeof(AbilitiesNative.NativeCounters));  // KilnNativeCounters as of the attachments
+        Assert.Equal(80, sizeof(AbilitiesNative.NativeCounters));  // KilnNativeCounters as of the typed declarations
+        Assert.Equal(8, sizeof(AbilitiesNative.NativeArgRaw));
     }
 }
