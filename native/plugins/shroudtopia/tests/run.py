@@ -47,12 +47,16 @@ using DWORD=unsigned;
 template<class F> bool guarded(F f, DWORD*) { f(); return true; }
 void set_current_mod(const std::string&) {}
 std::string fault_text(DWORD) { return "fault"; }
-void loader_log(int, const std::string&) {}
+constexpr const char* kShroudtopiaVersion="0.1.1";
+std::vector<std::string> g_lines;  // what the loader logged, warnings marked
+void loader_log(int level, const std::string& s) { g_lines.push_back((level==KILN_LOG_WARN?"W ":"I ")+s); }
 struct ModContext { std::set<void*> loadedMods; } ctx, *g_ctx=&ctx;
 struct Mod {
  bool loaded=false, active=false;
- void Load(ModContext*) {} void Activate(ModContext*) {active=true;}
- void Update(ModContext*) {} void Deactivate(ModContext*) {active=false;}
+ bool keeps_flag=true;  // false: a mod that never writes its own `active` field
+ int activations=0, deactivations=0, updates=0;
+ void Load(ModContext*) {} void Activate(ModContext*) {++activations; if (keeps_flag) active=true;}
+ void Update(ModContext*) {++updates;} void Deactivate(ModContext*) {++deactivations; if (keeps_flag) active=false;}
 };
 '''
 main = r'''
@@ -117,6 +121,44 @@ int main(int argc, char** argv) {
  kcompat::write_file_atomic(file,fresh.dump()); kcompat::fail_write=true; ensure(); kcompat::fail_write=false;
  kcompat::read_file(file,&text);
  check(json::parse(text)==fresh && config::mod_get("Another Name","active").is_null(),"failed save does not activate in memory");
+ // A mod that never writes its own `active` field (x-01 task 9b: "Activating:" every half second, "inactive" for good).
+ // Shroudtopia's loader calls Activate on every update for such a mod; so does Kiln, but it says so once and does not
+ // call the mod switched off.
+ {
+  auto lines=[&](const char* part) { int n=0; for (auto& l : g_lines) if (l.find(part)!=std::string::npos) ++n; return n; };
+  json on=base; on["mods"]["Flagless"]={{"active",true}};
+  kcompat::write_file_atomic(file,on.dump()); config::init(file,file.parent_path()/"absent.json");
+  auto q=std::make_unique<Loaded>(); mod=Mod{}; mod.keeps_flag=false;
+  q->mod=&mod; q->name="Flagless"; q->id="flagless"; q->origin="profile"; q->client=true; q->target="0.2.1";
+  g_mods.clear(); g_mods.push_back(std::move(q)); g_lines.clear();
+  for (int i=0;i<3;++i) update_mods();
+  Loaded& f=*g_mods[0];
+  check(mod.activations==3 && mod.updates==3,"a mod that leaves its flag off is activated and updated on every cycle, as upstream");
+  check(lines("Activating: Flagless")==1,"'Activating' is logged once, not once per cycle");
+  check(lines("W Flagless: switched on, but the mod does not report itself active")==1,"one warning says why");
+  check(f.status=="activating","switched on and not reporting active reads 'activating', not 'inactive'");
+  check(f.reason.find("does not report itself active")!=std::string::npos && f.reason.find("targets Shroudtopia 0.2.1")!=std::string::npos,
+        "the reason names the flag and the unknown target version");
+  check(known_target("0.1.1") && known_target("0.0.3") && known_target("1.0") && known_target("") && !known_target("0.2.1") && !known_target("2.0"),
+        "known Shroudtopia interface versions");
+  mod.keeps_flag=true; update_mods();
+  check(f.status=="active" && f.reason.empty() && mod.activations==4 && lines("Activating: Flagless")==1,"once the mod reports active: 'active', the reason is gone");
+  update_mods(); check(mod.activations==4,"an active mod is not activated again");
+  // Switched off while it never reported active: no Deactivate (as upstream), plain 'inactive'.
+  mod=Mod{}; mod.keeps_flag=false; f.active=false; f.activate_repeats=false; f.reason.clear(); g_lines.clear();
+  update_mods(); check(f.status=="activating","again not reporting");
+  on["mods"]["Flagless"]["active"]=false; kcompat::write_file_atomic(file,on.dump()); config::reload_if_changed(); update_mods();
+  check(f.status=="inactive" && f.reason.empty() && mod.deactivations==0,"switched off: 'inactive', no reason, no Deactivate for a mod that never reported active");
+  // A mod that sets the flag in Activate and leaves it on after Deactivate: Deactivate every cycle, said once.
+  on["mods"]["Flagless"]["active"]=true; kcompat::write_file_atomic(file,on.dump()); config::reload_if_changed();
+  mod=Mod{}; update_mods(); check(f.status=="active","a flag-keeping mod is active");
+  mod.keeps_flag=false; g_lines.clear();
+  on["mods"]["Flagless"]["active"]=false; kcompat::write_file_atomic(file,on.dump()); config::reload_if_changed();
+  for (int i=0;i<3;++i) update_mods();
+  check(mod.deactivations==3 && lines("Deactivating: Flagless")==1 && lines("W Flagless: switched off, but the mod leaves its own 'active' flag on")==1,
+        "a mod that leaves its flag on is deactivated on every cycle, said once");
+  check(f.status=="active","and it still reads as the mod reports itself");
+ }
  std::cout<<checks-failures<<"/"<<checks<<" checks passed\n"; return failures?1:0;
 }
 '''
