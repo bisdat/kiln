@@ -57,14 +57,16 @@ e.Visible = false;       // hide for now; e.Text = "…" relabels; e.Dispose() r
   column in the game's own scroll view (the one the credits use: mouse wheel, clipping, following the keyboard and
   gamepad focus); when they fit it draws the menu exactly as the game does. This holds in every `modEntries` mode:
   with SET and Kiln, the game's 13 entries plus Kiln's Mods, Creative and SET tools already put Quit below a 1280x720
-  or 1920x1080 screen. The height comes from the game's own layout: right after the menu's last entry Kiln opens and
-  closes an empty frame of no size (its top is the entries' bottom), compares that with the column's height, and
-  decides for the next frames (the layout read is two frames old). The same height is read wrapped or not, and the
-  menu changes only when the entries are taller than the column, or shorter by 12 UI units (a row is about 60), so it
-  never flips back and forth; two readings that disagree keep it a scroll view for the rest of the game.
-  The game's own spacer and build number below Quit do not count: a menu whose Quit is on the screen is drawn as the
-  game draws it. Until a height has been read (the first frames of a game, or a game build where it never reads)
-  it scrolls once it has more than 3 mods' entries, as dev.27 and dev.28 did. Begin and end sit at the column's own
+  or 1920x1080 screen. The height comes from the game's own layout: Kiln opens and closes empty frames of no size
+  before the menu's first entry, right after it (one row's height) and after its last, and decides for the next
+  frames (the layout read is two frames old). A bottom frame below the column is not laid out where it is drawn (the
+  owner's 1920x1080 dev build read 978 of 1020 with Quit below the screen), so it counts only when it is at least the
+  entries' count times a row; else the entries' count times a row decides, and the old count rule may wrap too. The
+  menu leans to scrolling: it wraps when the entries are taller than the column minus one row, and unwraps only 12 UI
+  units below that (a row is about 60), so it never flips back and forth; two readings that disagree keep it a scroll
+  view for the rest of the game. The game's own spacer and build number below Quit do not count. Until a height has
+  been read (the first frames of a game, or a game build where it never reads) it scrolls once it has more than 3
+  mods' entries, as dev.27 and dev.28 did. Begin and end sit at the column's own
   open and close in the game's builder (`native/services/ui/menu_scroll.h`). A crash guard keeps
   `kiln/state/menu-scroll.trying` on the disk while Kiln's calls in the menu (the height frames, the scroll view) run
   and have not yet drawn 48 frames each in that start (a wrong nesting would have ended the game by then). The frames

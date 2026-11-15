@@ -79,8 +79,9 @@ alignas(16) uint8_t g_layout[0x800];
 alignas(16) uint8_t g_params[0x200];
 alignas(16) uint8_t g_inner[0x80];
 alignas(16) uint8_t g_bar[0x100];
-alignas(16) uint8_t g_probe_top[0x80];  // the height probes' frame builders (the node at +8): before the first entry,
-alignas(16) uint8_t g_probe_end[0x80];  // after the last
+alignas(16) uint8_t g_probe_top[0x80];    // the height probes' frame builders (the node at +8): before the first entry,
+alignas(16) uint8_t g_probe_first[0x80];  // after the first (one row's height),
+alignas(16) uint8_t g_probe_end[0x80];    // after the last
 void* g_state = nullptr;  // this call's 4-byte state block: the scroll offset (a float; ScrollLayoutEnd reads it)
 float g_last_offset = 0.0f;
 int g_offset_lines = 0;   // kiln.log lines about the offset moving (the first few only)
@@ -104,6 +105,8 @@ bool g_in_call = false;           // between the column's open and close sites o
 uint32_t g_entries_now = 0;       // the entry renderer's calls in this builder call so far
 uint32_t g_entries_last = 0;      // in the last builder call (the end probe goes after the call with this number)
 bool g_top_placed = false;        // the top probe went before this builder call's first entry
+bool g_first_placed = false;      // the second probe went right after its first entry
+uint32_t g_kiln_rows = 0;         // Kiln's own rows drawn in this builder call (inside the Settings entry's call)
 uint32_t g_probe_after = 0;       // the end probe went after this call in this builder call (0: no end probe)
 uint64_t g_frames_done = 0;       // UI frames finished (scroll_after_frame)
 int g_fit_lines = 0;              // kiln.log lines about the decision (a few only)
@@ -339,7 +342,8 @@ void clear_marker(const char* why) {
 void on_open(KilnRegisters& r) {
     g_in_call = false;
     g_entries_now = 0;
-    g_top_placed = false;
+    g_top_placed = g_first_placed = false;
+    g_kiln_rows = 0;
     g_probe_after = 0;
     if (!g_on.load(std::memory_order_relaxed) || g_broken) return;
     const bool want = menu_scroll::wants(g_decider.fit, game_menu_mode(), game_pause_mods_rows());
@@ -394,14 +398,16 @@ bool place_probe(uint8_t* b) {
 }
 
 // The trusted readings of the heights: the decision for the next builder calls, said in kiln.log.
-void decide(uint8_t* column, bool wrapped, bool probed) {
-    float col[4], top[4] = {NAN, NAN, NAN, NAN}, end[4] = {NAN, NAN, NAN, NAN};
+void decide(uint8_t* column, bool wrapped, bool probed, uint32_t entries) {
+    float col[4], top[4] = {NAN, NAN, NAN, NAN}, first[4] = {NAN, NAN, NAN, NAN}, end[4] = {NAN, NAN, NAN, NAN};
     rect_of(*reinterpret_cast<void**>(column + (F.column_node - F.column)), col);
     if (probed) {
         rect_of(*reinterpret_cast<void**>(g_probe_top + 8), top);
+        rect_of(*reinterpret_cast<void**>(g_probe_first + 8), first);
         rect_of(*reinterpret_cast<void**>(g_probe_end + 8), end);
     }
-    const menu_scroll::Measured m = menu_scroll::measure(g_decider, wrapped, probed, g_frames_done + 1, col, top, end);
+    const menu_scroll::Measured m =
+        menu_scroll::measure(g_decider, wrapped, probed, g_frames_done + 1, col, top, first, end, entries);
     if (!m.trusted) return;
     if (!m.h.ok) {
         if (++g_unreadable == 3)
@@ -415,6 +421,10 @@ void decide(uint8_t* column, bool wrapped, bool probed) {
     if ((m.change == menu_scroll::Change::none && g_fit_lines > 0) || g_fit_lines >= 12) return;
     ++g_fit_lines;
     const float rows = m.h.rows, space = m.h.space;
+    logf(KILN_LOG_INFO, "ui: the pause menu's height: %u entries, a row %.0f, bottom probe %.0f (%s), column %.0f; "
+                        "it scrolls past %.0f UI units", entries, m.h.pitch, m.h.measured,
+         m.h.proven ? "after the last entry" : "not after the last entry: the entries' count decides, or the count rule",
+         space, space - m.h.pitch);
     switch (m.change) {
     case menu_scroll::Change::wrap:
         logf(KILN_LOG_INFO, "ui: the pause menu's entries are taller than its space (%.0f of %.0f UI units): it scrolls",
@@ -482,8 +492,10 @@ void on_close(KilnRegisters& r) {
     const bool in_call = std::exchange(g_in_call, false);
     const uint32_t entries = std::exchange(g_entries_now, 0u);
     const bool top = std::exchange(g_top_placed, false);
+    const bool first = std::exchange(g_first_placed, false);
+    const uint32_t kiln_rows = std::exchange(g_kiln_rows, 0u);
     const uint32_t probe_after = std::exchange(g_probe_after, 0u);
-    const bool probed = top && probe_after != 0 && probe_after == entries;  // the end probe after this call's last entry
+    const bool probed = top && first && probe_after != 0 && probe_after == entries;  // the end probe after the last entry
     if (in_call) g_entries_last = entries;
     // the crash guard's trials: builder calls with Kiln's calls in them that ran to their close site
     {
@@ -493,7 +505,7 @@ void on_close(KilnRegisters& r) {
     }
     auto* column = reinterpret_cast<uint8_t*>(r.rbp + static_cast<intptr_t>(F.column));
     if (wrapped) wrapped_frames(column);
-    if (in_call && g_on.load(std::memory_order_relaxed) && !g_broken) decide(column, wrapped, probed);
+    if (in_call && g_on.load(std::memory_order_relaxed) && !g_broken) decide(column, wrapped, probed, entries + kiln_rows);
 }
 
 bool sym(const char* n, uintptr_t* out) { return g_api->symbol(KilnStr{n, std::strlen(n)}, out) == KILN_OK && *out; }
@@ -653,8 +665,14 @@ void scroll_entry_drawn(bool chosen) {
         std::lock_guard lk(g_guard_mu);
         menu_scroll::guard_leaving(g_guard);
     }
-    if (!g_top_placed || n != g_entries_last || g_probe_after || g_broken || !g_on.load(std::memory_order_relaxed)) return;
+    if (!g_top_placed || g_broken || !g_on.load(std::memory_order_relaxed)) return;
+    if (n == 1 && !g_first_placed) g_first_placed = place_probe(g_probe_first);  // one row below the top probe
+    if (n != g_entries_last || g_probe_after || g_broken || !g_on.load(std::memory_order_relaxed)) return;
     if (place_probe(g_probe_end)) g_probe_after = n;
+}
+
+void scroll_rows_drawn(uint32_t n) {
+    if (g_in_call) g_kiln_rows += n;
 }
 
 void scroll_after_frame(uint64_t frame) {
