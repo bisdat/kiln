@@ -389,6 +389,14 @@ Each release:
    uploads the Nexus build (nexus/), never the direct one. When an upload fails half way (a storage error), run it
    again with `--only` naming the kinds that are still missing: a kind that went up must not be uploaded twice.
 
+**Trial runs of the working tree.** `--worktree` builds the working tree (uncommitted and untracked files too)
+instead of a commit, for test runs only: it needs an explicit `--out` that is not a release folder
+(`tools/release/release.sh $V --worktree --out ~/Kiln-release/trial/kiln-$V --no-nexus`); without one, or with
+`~/Kiln-release/kiln-*` or `~/Kiln-release` itself, release.sh stops before doing anything. Its README.txt says "a test build", it skips the Nexus dry
+run, and github-draft.sh, publish.sh and `nexus.py --publish` refuse such a folder (its README.txt names no commit).
+A release is always built from a commit: no `--worktree` (0.2.0-dev.28's real run had it, and its README.txt had to be
+corrected by hand). Tests: `python3 -I tools/release/test_worktree_guard.py`.
+
 **Trial runs and the NuGet cache.** NuGet keeps a package by id and version for good and never looks at its source
 again. release.sh therefore restores into a private package cache, `<work>/nuget-packages` (or
 `KILN_RELEASE_NUGET_PACKAGES`), never `~/.nuget/packages`, and removes the `kiln.*` packages of the version it builds

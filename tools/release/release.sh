@@ -5,7 +5,10 @@
 #                                    [--skip-windows] [--no-checks] [--force] [--host-build] [--no-nexus]
 # VERSION: X.Y.Z (stable) or X.Y.Z-dev.N (dev) for this tree's VERSION (tools/release/version.sh prints one).
 # --commit: what to build (default HEAD); exported with `git archive`, so uncommitted work never gets in.
-# --worktree: test runs only: export the working tree (tracked and untracked, not ignored) instead of a commit.
+# --worktree: test runs only: export the working tree (tracked and untracked, not ignored) instead of a commit. It needs
+#   an explicit --out that is not a release folder (~/Kiln-release/kiln-*, ~/Kiln-release; e.g. ~/Kiln-release/trial/
+#   kiln-VERSION), else it is refused before anything is done; its README.txt says "a test build", the Nexus dry run
+#   is skipped, and github-draft.sh, publish.sh and nexus.py --publish refuse such a folder (not built from a commit).
 # --out: the release folder (default ~/Kiln-release/kiln-VERSION). --work: build dir (default <repo>/.out/release-work;
 #   a fixed path, so later runs reuse the compiler caches). --notes: release notes (Markdown); default: the commit
 #   subjects since the previous v* tag.
@@ -78,6 +81,19 @@ while (($#)); do
   esac
 done
 [[ -n $version ]] || { echo "usage: $0 VERSION [options] (tools/release/version.sh dev|stable prints one)" >&2; exit 2; }
+# --worktree only in a run that is plainly a test: an explicit --out that is not a release folder (~/Kiln-release/kiln-*,
+# the default --out, or ~/Kiln-release itself), checked before anything else is done. A real run passed it once
+# (0.2.0-dev.28) and its README.txt said "a test build".
+if ((worktree)); then
+  releases=$(realpath -m "$HOME/Kiln-release")
+  if [[ -z $out ]]; then
+    echo "release: --worktree is for test runs only and needs --out DIR, not a release folder (e.g. --out $releases/trial/kiln-$version): a test build of the working tree, never published. A release builds a commit: drop --worktree" >&2
+    exit 2
+  fi
+  case $(realpath -m "$out") in
+    "$releases"|"$releases"/kiln-*) echo "release: --worktree is for test runs only: --out $out is a release folder ($releases/kiln-*); give a test folder (e.g. $releases/trial/kiln-$version), or drop --worktree for a release" >&2; exit 2 ;;
+  esac
+fi
 "$here/version.sh" check "$version"
 case $version in *-*) channel=dev ;; *) channel=stable ;; esac
 out=$(realpath -m "${out:-$HOME/Kiln-release/kiln-$version}")
@@ -673,12 +689,24 @@ else
   fi
 fi
 
-# Nexus Mods: what would go up (GET calls only); the upload itself is publish.sh --nexus or nexus.py --publish
-if ((nexus)) && [[ -f $HOME/.config/kiln-release/nexus.env ]]; then
+# Nexus Mods: what would go up (GET calls only); the upload itself is publish.sh --nexus or nexus.py --publish. Never
+# for a test build of the working tree (nothing of it goes up)
+if ((nexus)) && ((!worktree)) && [[ -f $HOME/.config/kiln-release/nexus.env ]]; then
   step "Nexus Mods (dry run)"
   python3 -I "$here/nexus.py" "$out" --work "$work/nexus" | tee -a "$log" || note "the Nexus dry run failed (the release is fine)"
 fi
 
+# the closing text: what to do next, never a publish step for a test build of the working tree
+if ((worktree)); then
+  closing="Test build $version of the working tree is in $out (log: $log). It is never published: github-draft.sh,
+publish.sh and nexus.py --publish refuse it. A release builds a commit: tools/release/release.sh $version (no --worktree)."
+else
+  closing="Release $version is in $out (log: $log). Nothing is published.
+Next (by hand, see docs/kiln/launcher/releasing.md):
+  tools/release/github-draft.sh $out        a DRAFT GitHub release with the files (needs the commit pushed)
+  tools/release/publish.sh $out             publish: the GitHub release, the dev channel pointer, frostdev.io
+  python3 -I tools/release/nexus.py $out    Nexus Mods (dry run; --publish uploads): the nexus/ build, no self-update"
+fi
 step "done"
 du -sh "$out" | tee -a "$log"
 # sdk/api/ and sdk/feed/ (many files each) as one row each in this local build listing only
@@ -686,11 +714,7 @@ du -sh "$out" | tee -a "$log"
   for d in sdk/api sdk/feed; do [[ -d $d ]] && printf '%10s  %s/ (%s files)\n' "$(du -sh "$d" | cut -f1)" "$d" "$(find "$d" -type f | wc -l)"; done; true) | tee -a "$log"
 cat <<EOF | tee -a "$log"
 
-Release $version is in $out (log: $log). Nothing is published.
-Next (by hand, see docs/kiln/launcher/releasing.md):
-  tools/release/github-draft.sh $out        a DRAFT GitHub release with the files (needs the commit pushed)
-  tools/release/publish.sh $out             publish: the GitHub release, the dev channel pointer, frostdev.io
-  python3 -I tools/release/nexus.py $out    Nexus Mods (dry run; --publish uploads): the nexus/ build, no self-update
+$closing
 EOF
 if ((!api_compat)); then
   note "WARNING: the SDK was NOT compared with the last release (KILN_API_BASELINE was not set): see the warning at the start."
