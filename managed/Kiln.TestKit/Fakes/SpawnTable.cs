@@ -158,12 +158,15 @@ internal static unsafe class SpawnTable
 
     private static SpawnFake? Fake => FakeTables.Active(SpawnAbi.Service)?.SpawnFake;
 
-    // The tick functions: off the tick thread WRONG_THREAD, with no harness (or switched off) UNAVAILABLE.
-    private static int Tick(out SpawnFake fake)
+    // The tick functions: off the tick thread WRONG_THREAD, with no harness (or switched off) UNAVAILABLE. `structural`
+    // (create, destroy, cleanup): also WRONG_THREAD inside the world's step (a wrap stage or a Kiln program of the kit's
+    // systems fake), as kiln.spawn refuses them while kiln.world's in_program answers 1 (since 0.2.0-dev.29).
+    private static int Tick(out SpawnFake fake, bool structural = false)
     {
         fake = null!;
         if (Fake is not { } f) return FakeTables.Unavailable;
         if (!FakeTables.OnTickThread) return FakeTables.WrongThread;
+        if (structural && SystemsState.Current is not null) return FakeTables.WrongThread;
         fake = f;
         return FakeTables.Ok;
     }
@@ -175,7 +178,7 @@ internal static unsafe class SpawnTable
         {
             if (out_ != null) *out_ = 0;
             if (req == null || req->Size < SpawnAbi.RequestV1Size) return FakeTables.InvalidArgument;
-            var rc = Tick(out var f);
+            var rc = Tick(out var f, structural: true);
             if (rc != FakeTables.Ok) return rc;
             var guid = SpawnAbi.ReadGuid(&req->Template);
             var name = req->TemplateName.ToString();
@@ -196,7 +199,7 @@ internal static unsafe class SpawnTable
         try
         {
             if (out_ != null) *out_ = 0;
-            var rc = Tick(out var f);
+            var rc = Tick(out var f, structural: true);
             if (rc != FakeTables.Ok) return rc;
             if (itemId == 0 || amount == 0 || amount > 65535) return FakeTables.InvalidArgument;
             var t = tag.ToString();
@@ -216,7 +219,7 @@ internal static unsafe class SpawnTable
     {
         try
         {
-            var rc = Tick(out var f);
+            var rc = Tick(out var f, structural: true);
             return rc != FakeTables.Ok ? rc : f.Destroy(entity);
         }
         catch
@@ -363,7 +366,7 @@ internal static unsafe class SpawnTable
     {
         try
         {
-            var rc = Tick(out var f);
+            var rc = Tick(out var f, structural: true);
             if (rc != FakeTables.Ok) return rc;
             var (destroyed, missing, kept) = f.Cleanup(tag.ToString(), origin.ToString());
             if (out_ != null)

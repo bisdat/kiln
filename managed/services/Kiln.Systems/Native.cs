@@ -13,6 +13,7 @@ internal static unsafe class SystemsNative
     // KilnResult
     public const int Ok = 0, InvalidArgument = 1, NotFound = 2, Unavailable = 3, WrongThread = 4, BufferTooSmall = 5,
         Internal = 7;
+    public const int Changed = 100;  // KILN_WORLD_ERR_CHANGED (since 0.2.0-dev.29): game_slice_archetype saw the map change
 
     // KILN_WRAP_* stages, states and reasons
     public const int Before = 0, Replace = 1, After = 2;

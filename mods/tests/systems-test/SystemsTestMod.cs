@@ -564,8 +564,9 @@ public sealed class SystemsTestMod : Mod
                     _reContract is { Ok: true } && reA > 0 && Interlocked.Read(ref _reFuel) == reA,
                     $"{reA} entity calls after the rebind, Fuel on {Interlocked.Read(ref _reFuel)}");
                 var bWithout = Systems.Define(FuelQuery.Key, new ProgramOptions(), (ref BWithoutQuery q) => Interlocked.Increment(ref _bCalls));
-                Check("define.reload.contract: a changed 'without' under the same key is Ok=false, names the list and says restart",
-                    bWithout is { Ok: false } && bWithout.Reason!.Contains("without") &&
+                Check("define.reload.contract: a changed 'without' under the same key is Ok=false by the reservation comparison, names the list and says restart",
+                    bWithout is { Ok: false } &&
+                    bWithout.Reason!.StartsWith($"{FuelQuery.Key}: without differs from the boot reservation", StringComparison.Ordinal) &&
                     bWithout.Reason.Contains("rebuild is in the game only after a server restart"), bWithout.Reason);
                 var bReadOpt = Systems.Define(FuelQuery.Key, new ProgramOptions(), (ref BReadOptQuery q) => Interlocked.Increment(ref _bCalls));
                 Check("define.reload.contract: a changed required/optional split under the same key is Ok=false",
@@ -735,8 +736,11 @@ internal ref struct UnreservedQuery : IQuery<UnreservedQuery>
 }
 
 // define.reload.contract's "declaration B" variants: the same key as FuelQuery, each one list or flag changed from A, so
-// Define refuses them under A's boot reservation (and boot B reserves the WITHOUT one, which then binds).
-[Query(Key = FuelQuery.Key, Template = ["FuelSetup"], Read = ["Fuel"], Without = ["DynamicShelter"])]
+// Define refuses them under A's boot reservation by comparing the declaration with the reserved one (the reason names the
+// first list that differs). Each is a declaration this build accepts (Shelter is a template component of the game's
+// programs), so the refusal can only be that comparison. Boot B reserves the Pinned-flag one (BFlagsQuery), which then
+// binds.
+[Query(Key = FuelQuery.Key, Template = ["FuelSetup"], Read = ["Fuel"], Without = ["Shelter"])]
 internal ref struct BWithoutQuery : IQuery<BWithoutQuery>
 {
     public EcsProgramContext Context;

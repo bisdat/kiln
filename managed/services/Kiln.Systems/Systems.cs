@@ -65,7 +65,12 @@ public sealed record WrapOptions
 public sealed record WrapResult<TWrap>(bool Ok, string? Reason, TWrap? Wrap) : IKilnResult where TWrap : class;
 
 /// <summary>What a stage did so far, summed over its stages.</summary>
-public sealed record WrapStats(long Slices, long Entities, double Microseconds, long Faults, long Overruns, int Threads);
+public sealed record WrapStats(long Slices, long Entities, double Microseconds, long Faults, long Overruns, int Threads)
+{
+    /// <summary>Slices a <see cref="ProgramWrap.WhenArchetype"/> filter left to the game because the entity map changed
+    /// under its archetype read three times in a row (kiln.log says so once per stage). Since 0.2.0-dev.29.</summary>
+    public long ArchetypeSkips { get; init; }
+}
 
 /// <summary>A stage was turned off: it faulted, overran its budget 10 slices in a row, threw, or native SET came.
 /// Raised on the tick thread.</summary>

@@ -838,7 +838,11 @@ public static unsafe partial class Spawn
         throw rc switch
         {
             Unavailable => ServiceCaps.Unavailable(capability, $"kiln.spawn: {what}: unavailable (the world is not running yet, or not on this build)"),
-            WrongThread => new InvalidOperationException($"kiln.spawn: {what}: not on the tick thread"),
+            // On the tick thread kiln.spawn refuses create and destroy only inside the world's step (since 0.2.0-dev.29).
+            WrongThread => new InvalidOperationException(Game.IsTickThread
+                ? $"kiln.spawn: {what}: refused inside the world's step (a wrap stage, a Kiln program or a system callback), " +
+                  "where the entity map must not change; post it (slice.Post in a wrap stage, or Scheduler.Post) so it runs after the step"
+                : $"kiln.spawn: {what}: not on the tick thread"),
             NotFound => new SpawnException($"kiln.spawn: {what}: unknown template or entity", rc),
             InvalidArgument => new SpawnException($"kiln.spawn: {what}: invalid argument", rc),
             _ => new SpawnException($"kiln.spawn: {what}: refused by the game (see kiln.log)", rc),

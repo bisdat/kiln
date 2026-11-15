@@ -89,6 +89,7 @@ struct Stage {
     uint32_t refs = 0;            // chains (published, or retired and not yet freed) that hold it
     bool logged = false;
     char detail[128]{};
+    char stop[128]{};             // the last world stop's drain, while the stage waits for the next world (PENDING)
     // stats (slice path, relaxed)
     std::atomic<uint64_t> calls{0}, entities{0}, faults{0}, overruns{0}, ns{0};
     std::atomic<uint32_t> consecutive{0};
@@ -145,6 +146,8 @@ std::atomic<uint32_t> g_external{0};  // kiln.types' external runner, as last se
 uint32_t g_external_pre = 0;          // as the last Pre saw it (g_mu): what the capability row says
 const KilnCapsApi* g_wrap_caps = nullptr;
 std::atomic<uint32_t> g_active{0}, g_pending{0};
+uintptr_t(KILN_CALL* g_world_of)(uint32_t) = nullptr;  // KilnApi.world (null on a core without it)
+std::atomic<uint32_t> g_tick_closed{0};               // pools whose admission a faulted tick closed (bit per pool)
 std::chrono::steady_clock::time_point g_next_reap{};
 
 // ---- the trampolines ----
@@ -313,15 +316,32 @@ bool kind_is(const ProgramCtx* ctx, uint32_t kind) {
     return storage && storage[L.storage_kind] == kind;
 }
 
+// The core's tick faulted: tick.cpp's disable() clears every world pointer and stops tick and world-event delivery, so
+// no STOPPING (and no drain) will come for this world. A slice that finds no world of its kind closes its pool's
+// admission for good (a faulted tick sends no STARTED to open it again) and says so once; the game's updates run
+// untouched from then on, and a stage already past call()'s gate finishes. While the tick works a wrapped slice always
+// has its world: trampolines go in only in that world's Pre, after the core set it, and STOPPING closes admission
+// before the core clears it.
+bool tick_gone(int pool) {
+    const auto world_of = g_world_of;
+    if (!world_of || world_of(g_pools[pool].kind)) return false;
+    if (!g_pools[pool].stopping.exchange(true, std::memory_order_seq_cst)) {
+        g_tick_closed.fetch_or(1u << pool);
+        KW_E("world %u: Kiln no longer knows this world (its tick hook faulted, so no world stop will be seen): wrap "
+             "admission is closed, the game's updates run untouched until a restart", g_pools[pool].kind);
+    }
+    return true;
+}
+
 void dispatch(int pool, int slot, void* raw) {
     Slot& s = g_pools[pool].slots[slot];
     s.in_flight.fetch_add(1, std::memory_order_seq_cst);
     const UpdateFn orig = s.orig.load(std::memory_order_acquire);
     const Chain* c = s.chain.load(std::memory_order_seq_cst);
     auto* ctx = static_cast<ProgramCtx*>(raw);
-    if (!c || g_pools[pool].stopping.load(std::memory_order_seq_cst) || !kind_is(ctx, g_pools[pool].kind)) {
-        // no stage left, a slot kept for a foreign swap on top, or another storage (the prediction world runs the
-        // client world's table): the game's update, untouched
+    if (!c || g_pools[pool].stopping.load(std::memory_order_seq_cst) || !kind_is(ctx, g_pools[pool].kind) || tick_gone(pool)) {
+        // no stage left, a slot kept for a foreign swap on top, another storage (the prediction world runs the client
+        // world's table) or a faulted tick: the game's update, untouched
         s.forwarded.fetch_add(1, std::memory_order_relaxed);
         if (orig) orig(raw);
     } else if (orig) {
@@ -697,6 +717,7 @@ void wraps_init() {
            L.job_entity_count >= 0 && L.job_entity_list >= 0 && L.ctx_index == offsetof(ProgramCtx, index) &&
            g_api->feature(kstr("world.programs"));
     g_wrap_caps = static_cast<const KilnCapsApi*>(g_api->service(kstr(KILN_CAPS_SERVICE), 1));
+    g_world_of = g_api->size >= offsetof(KilnApi, session) + sizeof(void*) ? g_api->world : nullptr;
     {
         uintptr_t address = 0;
         if (g_api->symbol(kstr("items/AttrChanged"), &address) == KILN_OK) g_attr_changed_fn = reinterpret_cast<AttrChangedFn>(address);
@@ -832,6 +853,7 @@ void wraps_pre(uint32_t kind, uintptr_t) {
             }
             st->state.store(KILN_WRAP_ACTIVE);
             st->index.store(ref.index);
+            st->stop[0] = 0;
             touch(st->program);
         } else if (st->remove) {
             touch(st->program);
@@ -904,6 +926,11 @@ void wraps_world_event(const KilnWorldEvent* event) {
         if (live_slots)
             KW_I("world %u stops: its wraps are taken out and wait for the next world (drained: %u calls in flight at the "
                  "stop, %u after %lld us)", event->kind, first, remaining, static_cast<long long>(waited));
+        // What the drain found, for every stage that waits for the next world (game_wrap_info's detail while PENDING).
+        for (auto& [h, st] : g_stages)
+            if (st->pool == pool && st->state.load() == KILN_WRAP_ACTIVE && !st->remove)
+                std::snprintf(st->stop, sizeof st->stop, "world stop: %u in flight at the stop, %u after the wait (%lld us)",
+                              first, remaining, static_cast<long long>(waited));
         drop_pool(pool, true); // retired chains retain their views until their last in-flight call exits, even on timeout
     } else if (event->event == KILN_WORLD_STARTED) {
         if (live_slots) {
@@ -1054,7 +1081,9 @@ KilnResult KILN_CALL game_wrap_info(KilnHandle h, KilnGameWrapInfo* out) {
     out->gone = st.gone.load();
     out->running = st.calls_in.load(std::memory_order_seq_cst);
     std::snprintf(out->detail, sizeof out->detail, "%s",
-                  st.detail[0] ? st.detail : (out->reason ? reason_text(out->reason) : ""));
+                  st.detail[0] ? st.detail
+                  : out->state == KILN_WRAP_PENDING && st.stop[0] ? st.stop
+                  : out->reason ? reason_text(out->reason) : "");
     return KILN_OK;
 }
 
@@ -1253,28 +1282,26 @@ KilnResult KILN_CALL game_slice_archetype(KilnGameSlice* slice, uintptr_t* out_l
     uint32_t named = 0, named2 = 0;
     const uint32_t id = slice->entity_ids[0];
     std::memcpy(&storage, f->ctx->job, sizeof storage);
+    if (!storage) return KILN_ERR_UNAVAILABLE;
     const uintptr_t map = storage + static_cast<uintptr_t>(L.storage_entities);
-    // No scheduler-stable archetype reaches a program's update. The game hands the update only ctx = {J, index}; the
-    // engine's slice record carries the layout at +0x18 and the archetype group at +0x20, and ProgramRunner passes both to
-    // its column setup, but stores neither pointer into J (out/06a-program-wraps/client-static/r5: runner-server.txt,
-    // colsetup-server.txt). So the archetype is read from the entity map, which has no lock. Its records come from a pool
-    // DestroyEntity frees at once, and an insert can grow and reallocate the arrays. On a server world this is safe while
-    // slices run: a program's structural changes are deferred to the command buffer and applied at the step's end (chapter
-    // 06a 4.4, 9.6), not during StepPrograms; the entity map is at rest. What static reading cannot exclude is a mutation
-    // from another thread (a client world's network/replication create-destroy): so the read is made coherent and detects
-    // it. The map's capacity and count are read before and after, the record's id before and after the layout read; any
-    // change (a grow that moved the arrays, a concurrent insert/erase, a record freed or reused under the id) makes the
-    // archetype undecidable, so the filter turns off with its reason instead of trusting a torn or wrong read.
+    // The entity map read is narrowed, not proven. The map has no lock; its records come from a pool DestroyEntity frees
+    // at once, and an insert can grow and reallocate its arrays. The map's capacity and count are read before and after,
+    // and the record's id before and after the layout read. That catches a grow, a count change, a record that names
+    // another entity; it misses an erase and an insert between the reads (same count) and a record freed and reused for
+    // the same id. (CreateEntity stores the id before the layout, server and client alike: create-server.txt /
+    // create-client.txt F+0x122f then F+0x1246 in out/06a-program-wraps/client-static; x64 keeps store order, so a new
+    // layout is never seen under a stale id.) On a server world the map is at rest while slices run: a program's
+    // structural changes go to the command buffer and are applied at the step's end (chapter 06a 4.4, 9.6). A change
+    // that is seen is transient (KILN_WORLD_ERR_CHANGED): the caller reads again or leaves the slice to the game.
     uint64_t cap = 0, cap2 = 0;
     uint32_t count = 0, count2 = 0;
-    if (!storage ||
-        !map_find_ptr(map, id, &rec, &cap, &count) || !rec ||
+    if (!map_find_ptr(map, id, &rec, &cap, &count) || !rec ||
         !seh_copy(&named, reinterpret_cast<const void*>(rec + static_cast<uintptr_t>(L.entity_id)), 4) || named != id ||
         !seh_copy(&layout, reinterpret_cast<const void*>(rec + static_cast<uintptr_t>(L.entity_layout)), 8) || !layout ||
         (g_archetype_test_gap.load() && (g_archetype_test_gap.load()(), false)) ||
         !seh_copy(&named2, reinterpret_cast<const void*>(rec + static_cast<uintptr_t>(L.entity_id)), 4) || named2 != id ||
         !map_shape(map, &cap2, &count2) || cap2 != cap || count2 != count)
-        return KILN_ERR_UNAVAILABLE;  // nonempty slice: cannot decide (undecidable or a concurrent map mutation), not a skip
+        return KILN_WORLD_ERR_CHANGED;  // nonempty slice: a change under the read, not a skip and not "unreadable here"
     *out_layout = layout;
     return KILN_OK;
 }
