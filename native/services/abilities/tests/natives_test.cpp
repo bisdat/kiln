@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <vector>
 
 #include "natives_core.h"
 
@@ -87,8 +88,105 @@ static void budget() {
     CHECK(!over_budget(1'000'000, 0));  // no frequency: never
 }
 
+static Attachment att(uint64_t id, int32_t stage, int32_t priority, uint32_t program = 0, uint32_t site = 0, uint32_t hash = 7) {
+    Attachment a;
+    a.id = id;
+    a.order = id;
+    a.hash = hash;
+    a.stage = stage;
+    a.priority = priority;
+    a.program = program;
+    a.site = site;
+    return a;
+}
+
+static void stages() {
+    // registration order: After, Instead, Before 5, Before 10, Before 10 (tie), an other native's Before
+    std::vector<Attachment> all = {att(1, KILN_NATIVE_AFTER, 0),  att(2, KILN_NATIVE_INSTEAD, 0), att(3, KILN_NATIVE_BEFORE, 5),
+                                   att(4, KILN_NATIVE_BEFORE, 10), att(5, KILN_NATIVE_BEFORE, 10), att(6, KILN_NATIVE_BEFORE, 1, 0, 0, 8),
+                                   att(7, KILN_NATIVE_AFTER, -3)};
+    const AttachSet set = build_set(all, 7);
+    CHECK(set.before.size() == 3 && set.instead.size() == 1 && set.after.size() == 2);
+    std::vector<uint64_t> order;
+    bool answered = false, ran = false;
+    uint64_t entered = 0, skipped = 0;
+    run_stages(set, 0x11, 0x22, [&](const Attachment& a, int32_t) { order.push_back(a.id); if (a.stage == KILN_NATIVE_INSTEAD) answered = true; },
+               [&] { ran = true; }, [&] { return answered || ran; }, &entered, &skipped);
+    // Before high to low (ties by registration), the Instead, After low to high; the Instead answered: no original
+    CHECK((order == std::vector<uint64_t>{4, 5, 3, 2, 7, 1}));
+    CHECK(!ran && entered == 6 && skipped == 0);
+
+    // a Before that answers: no Instead, no original, the After still runs
+    order.clear();
+    answered = ran = false;
+    run_stages(set, 0x11, 0x22, [&](const Attachment& a, int32_t) { order.push_back(a.id); if (a.id == 5) answered = true; },
+               [&] { ran = true; }, [&] { return answered || ran; }, &entered, &skipped);
+    CHECK((order == std::vector<uint64_t>{4, 5, 3, 7, 1}) && !ran);
+
+    // nothing answers: the original runs once, between the stages
+    order.clear();
+    answered = ran = false;
+    int originals = 0;
+    run_stages(set, 0x11, 0x22, [&](const Attachment& a, int32_t) { order.push_back(a.id); },
+               [&] { ran = true; ++originals; order.push_back(99); }, [&] { return answered || ran; }, &entered, &skipped);
+    CHECK((order == std::vector<uint64_t>{4, 5, 3, 2, 99, 7, 1}) && originals == 1);
+}
+
+static void filters() {
+    std::vector<Attachment> all = {att(1, KILN_NATIVE_BEFORE, 0, 0xAAAA, 0x1), att(2, KILN_NATIVE_BEFORE, 0, 0xAAAA),
+                                   att(3, KILN_NATIVE_BEFORE, 0, 0, 0x2), att(4, KILN_NATIVE_INSTEAD, 0, 0xBBBB)};
+    const AttachSet set = build_set(all, 7);
+    std::vector<uint64_t> order;
+    uint64_t entered = 0, skipped = 0;
+    bool ran = false;
+    auto call = [&](uint32_t program, uint32_t site) {
+        order.clear();
+        entered = skipped = 0;
+        ran = false;
+        run_stages(set, program, site, [&](const Attachment& a, int32_t) { order.push_back(a.id); }, [&] { ran = true; },
+                   [&] { return ran; }, &entered, &skipped);
+    };
+    call(0xAAAA, 0x1);
+    CHECK((order == std::vector<uint64_t>{1, 2}) && entered == 2 && skipped == 2 && ran);
+    call(0xCCCC, 0x9);  // matches nothing: no handler entered, every filter counted as skipped
+    CHECK(order.empty() && entered == 0 && skipped == 4 && ran);
+    call(0xBBBB, 0x2);
+    CHECK((order == std::vector<uint64_t>{3, 4}));
+    // an attachment whose program was not found stays off
+    all[1].active = false;
+    const AttachSet off = build_set(all, 7);
+    order.clear();
+    run_stages(off, 0xAAAA, 0x5, [&](const Attachment& a, int32_t) { order.push_back(a.id); }, [&] {}, [] { return false; },
+               &entered, &skipped);
+    CHECK(order.empty());
+    // one Instead per (native, program, site)
+    CHECK(instead_taken(all, 7, 0xBBBB, 0));
+    CHECK(!instead_taken(all, 7, 0xBBBB, 0x3));
+    CHECK(!instead_taken(all, 8, 0xBBBB, 0));
+    CHECK(build_set(all, 9).empty());
+}
+
+static void sites() {
+    // ICONST h; ECALL site hash; POP; BR 0 with an operand that looks like ECALL; HALT
+    const uint32_t code[] = {11, 0xFFFF0000u, 19, 0x1234, 0xa18f5959u, 27, 11, 19, 8, 0, 30};
+    CHECK(code_calls(code, 11, 0xa18f5959u, 0x1234));
+    CHECK(code_calls(code, 11, 0xa18f5959u, 0));
+    CHECK(!code_calls(code, 11, 0xa18f5959u, 0x9999));
+    CHECK(!code_calls(code, 11, 0x01d09759u, 0));
+    // the ECALL-looking operand of ICONST (19 at index 7) is not an instruction
+    const uint32_t tricky[] = {11, 19, 11, 0x1234, 30};
+    CHECK(!code_calls(tricky, 5, 0x1234, 0));
+    const uint32_t bad[] = {99, 19, 1, 2};
+    CHECK(!code_calls(bad, 4, 2, 1));
+    const uint32_t cut[] = {19, 0x1234};  // operands run past the end
+    CHECK(!code_calls(cut, 2, 0, 0x1234));
+}
+
 int main() {
     names();
+    stages();
+    filters();
+    sites();
     room();
     results();
     faults();

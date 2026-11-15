@@ -30,6 +30,11 @@ internal static class AbilitiesCaps
     /// dedicated server's; a game client has no signatures for it).</summary>
     public const string NativesSync = "abilities.natives.sync";
 
+    /// <summary>Managed, static (since 0.2.0-dev.29): handlers attached to a vanilla native's calls in one program at one
+    /// call site, filtered before managed code runs (<see cref="Abilities.Natives.Attach"/>). Needs what
+    /// <see cref="NativesSync"/> needs.</summary>
+    public const string NativesAttach = "abilities.natives.attach";
+
     // Reported at the service's start, again under a new registry binding (the test kit's), and every 25 steps (about
     // once a second): abilities.buffs follows the server world (its registries come with it; a client hosts after its
     // mods loaded). ServiceCaps writes a row only when it changed.
@@ -87,11 +92,14 @@ internal static class AbilitiesCaps
             var sync = DecideNatives(t != null, counters is { } c ? (c.Flags & AbilitiesNative.CountersNatives) != 0 : null,
                 AbilitiesNative.Has(t, nameof(AbilitiesNative.TableV2.NativeRegisterSync)), Row("abilities.natives"), "synchronous natives");
             ServiceCaps.Report(NativesSync, sync.State, sync.Reason, sync.Text);
+            var attach = DecideNatives(t != null, counters is { } k ? (k.Flags & AbilitiesNative.CountersNatives) != 0 : null,
+                AbilitiesNative.Has(t, nameof(AbilitiesNative.TableV2.NativeDetach)), Row("abilities.natives"), "attachments");
+            ServiceCaps.Report(NativesAttach, attach.State, attach.Reason, attach.Text);
         }
         catch (Exception e) when (e is ArgumentException or InvalidOperationException or TypeInitializationException
                                       or FileNotFoundException or FileLoadException)
         {
-            ModLog.Warn($"kiln.abilities: {NativesSync} was not reported: {e.Message}");
+            ModLog.Warn($"kiln.abilities: {NativesSync} / {NativesAttach} were not reported: {e.Message}");
         }
     }
 

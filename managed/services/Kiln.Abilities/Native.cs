@@ -151,6 +151,15 @@ internal static unsafe class AbilitiesNative
         public Table V1;
         public delegate* unmanaged[Cdecl]<ulong, NativeStr, uint, delegate* unmanaged[Cdecl]<NativeCall*, void*, void>, void*, uint*, uint*, int> NativeRegisterSync;
         public delegate* unmanaged[Cdecl]<NativeCounters*, int> NativeCountersFn;
+        public delegate* unmanaged[Cdecl]<ulong, uint, NativeFilter*, int, int, delegate* unmanaged[Cdecl]<NativeCall*, void*, void>, void*, ulong*, uint*, int> NativeAttach;
+        public delegate* unmanaged[Cdecl]<ulong, int> NativeDetach;
+    }
+
+    /// <summary>KilnNativeFilter (since 0.2.0-dev.29): 0 = any.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct NativeFilter
+    {
+        public uint Size, ProgramId, Site, Reserved;
     }
 
     /// <summary>KilnNativeCounters (since 0.2.0-dev.29).</summary>
@@ -158,13 +167,14 @@ internal static unsafe class AbilitiesNative
     public struct NativeCounters
     {
         public uint Size, Inflight, Flags, Reserved;
-        public ulong SyncCalls, SyncFaults, SyncSlow, DeadCalls;
+        public ulong SyncCalls, SyncFaults, SyncSlow, DeadCalls, AttachEntered, AttachSkipped;
     }
 
     public const uint CountersNatives = 1;  // KILN_NATIVE_COUNTERS_NATIVES: the RegisterNative hook is in
 
     // KILN_NATIVE_REFUSED_*
-    public const uint RefusedNone = 0, RefusedRegistryFull = 1, RefusedNoSlot = 2, RefusedTaken = 3, RefusedVanilla = 4;
+    public const uint RefusedNone = 0, RefusedRegistryFull = 1, RefusedNoSlot = 2, RefusedTaken = 3, RefusedVanilla = 4,
+        RefusedProgramNotLoaded = 5, RefusedSiteNotFound = 6, RefusedSecondInstead = 7, RefusedNotANative = 8;
 
     /// <summary>The refusal's words (NativeResult.Reason, AttachResult.Reason).</summary>
     public static string Refusal(uint code) => code switch
@@ -173,6 +183,10 @@ internal static unsafe class AbilitiesNative
         RefusedNoSlot => "no free Kiln native slot (160)",
         RefusedTaken => "a Kiln native with this name is registered",
         RefusedVanilla => "the name's hash is one of the game's natives",
+        RefusedProgramNotLoaded => "program not loaded (not in the ImpactRegistry)",
+        RefusedSiteNotFound => "site not found (the program does not call this native there)",
+        RefusedSecondInstead => "a second Instead for this native, program and site",
+        RefusedNotANative => "not a native the game registered",
         _ => $"refused ({code})",
     };
 

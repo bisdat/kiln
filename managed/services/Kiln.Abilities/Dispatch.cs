@@ -78,6 +78,14 @@ internal static unsafe class AbilitiesDispatch
         }
         try
         {
+            DrainDetaches();
+        }
+        catch (Exception e)
+        {
+            ModLog.Error($"abilities: detaching threw: {e}");
+        }
+        try
+        {
             Step++;
             Tick?.Invoke(Step);
         }
@@ -226,6 +234,16 @@ internal static unsafe class AbilitiesDispatch
         Ensure();
         var t = AbilitiesNative.Require("Abilities.Natives.Wrap");
         var mod = ModContext.CurrentMod;
+        // since 0.2.0-dev.29: a wrap is a Before attachment that takes every call, at its priority (the same order as
+        // the global dispatcher's); an older kiln.abilities keeps the global dispatcher
+        if (AbilitiesNative.V2(nameof(AbilitiesNative.TableV2.NativeDetach)) != null)
+        {
+            var r = Attach(hash, 0, 0, NativeStage.Before, priority, handler, mod, wrap: true);
+            if (!r.Ok) throw new InvalidOperationException($"Natives.Wrap(0x{hash:x8}): {r.Reason} (not a vanilla native?)");
+            if (mod is not null) Watch(mod);
+            mod?.Log.Info($"abilities: wraps native {Abilities.Natives.NameOf(hash)} (job thread)");
+            return r.Handle!;
+        }
         var e = Insert(hash, handler, priority, mod);
         var rc = t->NativeWrap(hash, 1);
         if (rc != AbilitiesNative.Ok)
@@ -276,6 +294,132 @@ internal static unsafe class AbilitiesDispatch
         foreach (var kv in Wraps)
             foreach (var e in kv.Value)
                 if (ReferenceEquals(e.Mod, mod)) RemoveWrap(e);
+        foreach (var kv in Attaches)
+            if (ReferenceEquals(kv.Value.Mod, mod)) Detach(kv.Value);
+    }
+
+    // ----------------------------------------------------------------------------------------------- attachments --
+    // since 0.2.0-dev.29: one native attachment per handler (Natives.Attach, and Natives.Wrap / OnDamage as Before
+    // attachments on every call). The core gets a static dispatcher and an id (no GCHandle): a detached id answers
+    // nothing (the call goes on as if the handler were not there), and nothing has to be freed after the core let go.
+
+    internal sealed class AttachEntry
+    {
+        public required long Id;
+        public required uint Hash;
+        public required NativeStage Stage;
+        public required NativeWrapHandler Handler;
+        public required ModContext? Mod;
+        public required bool RawAllowed;
+        public required bool Wrap;  // Natives.Wrap / OnDamage: its log line names a wrap
+        public ulong Native;        // the core's handle
+        public int Faults;
+        public volatile bool Active = true;
+    }
+
+    private sealed class AttachHandle(AttachEntry e) : IDisposable
+    {
+        public void Dispose() => Detach(e);
+    }
+
+    private static readonly ConcurrentDictionary<long, AttachEntry> Attaches = new();
+    private static readonly ConcurrentQueue<ulong> PendingDetach = new();
+    private static long _attachIds;
+
+    internal static delegate* unmanaged[Cdecl]<AbilitiesNative.NativeCall*, void*, void> AttachDispatcher => &AttachDispatch;
+
+    // tick thread
+    internal static AttachResult Attach(uint hash, uint program, uint site, NativeStage stage, int priority,
+        NativeWrapHandler handler, ModContext? mod, bool wrap = false)
+    {
+        var t = AbilitiesNative.V2(nameof(AbilitiesNative.TableV2.NativeDetach));
+        if (t == null) throw new KilnUnavailableException(AbilitiesCaps.NativesAttach, "kiln.abilities is older than 0.2.0-dev.29");
+        Ensure();
+        var e = InsertAttach(hash, stage, handler, mod, wrap);
+        var filter = new AbilitiesNative.NativeFilter { Size = (uint)sizeof(AbilitiesNative.NativeFilter), ProgramId = program, Site = site };
+        ulong handle = 0;
+        uint refusal = 0;
+        var rc = t->NativeAttach(mod?.Owner ?? 0, hash, &filter, (int)stage, priority, AttachDispatcher, (void*)e.Id, &handle, &refusal);
+        if (rc != AbilitiesNative.Ok)
+        {
+            e.Active = false;
+            Attaches.TryRemove(e.Id, out _);
+            if (rc == AbilitiesNative.InvalidArgument && refusal != AbilitiesNative.RefusedNone)
+                return new AttachResult(false, AbilitiesNative.Refusal(refusal), null);
+            if (rc == AbilitiesNative.Unavailable) throw new KilnUnavailableException(AbilitiesCaps.NativesAttach, "kiln.abilities has no natives on this build");
+            if (rc == AbilitiesNative.WrongThread) throw new InvalidOperationException("Natives.Attach: not on the tick thread (or inside a native call)");
+            throw new ArgumentException($"Natives.Attach(0x{hash:x8}): {AbilitiesNative.Describe(rc)}");
+        }
+        e.Native = handle;
+        if (mod is not null) Watch(mod);
+        if (!wrap)
+            mod?.Log.Info($"abilities: {stage} attached to native {Abilities.Natives.NameOf(hash)} (program 0x{program:x8}, site 0x{site:x8}, priority {priority})");
+        return new AttachResult(true, null, new AttachHandle(e));
+    }
+
+    // Puts the handler in the table the dispatcher reads (the core is asked by Attach; tests call this directly). The
+    // registering mod is known here, so NativeCall.Bytes' answer for it is decided here.
+    internal static AttachEntry InsertAttach(uint hash, NativeStage stage, NativeWrapHandler handler, ModContext? mod, bool wrap = false)
+    {
+        var e = new AttachEntry
+        {
+            Id = Interlocked.Increment(ref _attachIds), Hash = hash, Stage = stage, Handler = handler, Mod = mod,
+            RawAllowed = mod is { Info.Advanced: true }, Wrap = wrap,
+        };
+        Attaches[e.Id] = e;
+        return e;
+    }
+
+    // Off at once (a call that comes now runs no handler); the core lets go on the tick thread outside a native call,
+    // else in the next Pre.
+    internal static void Detach(AttachEntry e)
+    {
+        e.Active = false;
+        if (!Attaches.TryRemove(e.Id, out _) || e.Native == 0) return;
+        var t = AbilitiesNative.V2(nameof(AbilitiesNative.TableV2.NativeDetach));
+        if (t == null) return;
+        if (!Game.IsTickThread || t->NativeDetach(e.Native) == AbilitiesNative.WrongThread) PendingDetach.Enqueue(e.Native);
+    }
+
+    private static void DrainDetaches()
+    {
+        if (PendingDetach.IsEmpty) return;
+        var t = AbilitiesNative.V2(nameof(AbilitiesNative.TableV2.NativeDetach));
+        while (PendingDetach.TryDequeue(out var h))
+            if (t != null) t->NativeDetach(h);
+    }
+
+    internal static int AttachCount(ModContext? mod) => Attaches.Values.Count(e => ReferenceEquals(e.Mod, mod));
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static void AttachDispatch(AbilitiesNative.NativeCall* c, void* user)
+    {
+        Interlocked.Increment(ref InFlight.Value);
+        var outer = ModContext.CurrentMod;
+        try
+        {
+            if (!Attaches.TryGetValue((long)user, out var e) || !e.Active || e.Mod is { Alive: false }) return;  // as if absent
+            ModContext.CurrentMod = e.Mod;
+            try
+            {
+                var call = new NativeCall(c, e.Mod, e.RawAllowed);
+                e.Handler(ref call);
+            }
+            catch (Exception ex)
+            {
+                if (Interlocked.Increment(ref e.Faults) <= 3)
+                    e.Mod?.Log.Error($"abilities: {(e.Wrap ? "wrap" : e.Stage + " attachment")} of {Abilities.Natives.CachedName(e.Hash)} threw: {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+        catch
+        {
+            // never throw into native code
+        }
+        finally
+        {
+            ModContext.CurrentMod = outer;
+            Interlocked.Decrement(ref InFlight.Value);
+        }
     }
 
     // Waits for job threads still inside a handler (they cannot enter removed ones any more).

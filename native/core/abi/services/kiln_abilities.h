@@ -195,6 +195,25 @@ enum {
     KILN_NATIVE_REFUSED_NO_SLOT = 2,       /* Kiln's 160 native thunks are in use (wraps, built-ins, mods' natives) */
     KILN_NATIVE_REFUSED_TAKEN = 3,         /* a live Kiln native has this name */
     KILN_NATIVE_REFUSED_VANILLA = 4,       /* the name's hash is one of the game's natives */
+    KILN_NATIVE_REFUSED_PROGRAM_NOT_LOADED = 5, /* native_attach: the filter's program is not in the ImpactRegistry */
+    KILN_NATIVE_REFUSED_SITE_NOT_FOUND = 6,     /* native_attach: that program does not call the native (at that site) */
+    KILN_NATIVE_REFUSED_SECOND_INSTEAD = 7,     /* native_attach: an Instead for this native, program and site exists */
+    KILN_NATIVE_REFUSED_NOT_A_NATIVE = 8,       /* native_attach: not a native the game registered */
+};
+
+/* since 0.2.0-dev.29: which calls an attachment gets (0 = any). The thunk compares it before any handler runs. */
+typedef struct KilnNativeFilter {
+    uint32_t size;       /* sizeof(KilnNativeFilter) */
+    uint32_t program_id; /* the calling program (FNV-1a-32 of its GUID); 0 = every program */
+    uint32_t site;       /* the ECALL's call-site id in that program; 0 = every site */
+    uint32_t reserved;   /* 0 */
+} KilnNativeFilter;
+enum {
+    KILN_NATIVE_BEFORE = 0,  /* before the game's native: may change arguments, call_original, or answer (out_error) */
+    KILN_NATIVE_INSTEAD = 1, /* runs when no Before answered; one per (native, program, site); answers, else the game's
+                                native runs */
+    KILN_NATIVE_AFTER = 2,   /* after the native ran (or a handler answered): may read outputs and change the answer;
+                                call_original does nothing here */
 };
 
 /* since 0.2.0-dev.29 (native_counters). Reads every field the caller's size covers. */
@@ -207,6 +226,8 @@ typedef struct KilnNativeCounters {
     uint64_t sync_faults;     /* of those, fn faulted (answered 0x11) */
     uint64_t sync_slow;       /* of those, fn took longer than the 0.2 ms budget (logged, not cut off) */
     uint64_t dead_calls;      /* calls of a Kiln native that was taken off (answered 0x1F) */
+    uint64_t attach_entered;  /* attachment callbacks entered (their filter matched) */
+    uint64_t attach_skipped;  /* attachment filters that did not match a call: no callback, no managed code */
 } KilnNativeCounters;
 enum {
     KILN_NATIVE_COUNTERS_NATIVES = 1u << 0, /* the RegisterNative hook is in: Kiln natives can be registered */
@@ -304,6 +325,24 @@ typedef struct KilnAbilitiesApi {
                                                 void* user, uint32_t* out_hash, uint32_t* out_refusal);
     /* any thread. Counters of the native thunks (KilnNativeCounters; set out->size first). */
     KilnResult(KILN_CALL* native_counters)(KilnNativeCounters* out);
+
+    /* ---- since 0.2.0-dev.29: attachments (check header.size before use) ----
+     * tick, not from inside a native call. Attaches `fn` to the calls of the game's native `hash` that pass `filter`
+     * (NULL = every call), at `stage` (KILN_NATIVE_*) and `priority` (Before and Instead high first, After low first;
+     * ties in registration order). The program is the game's own: nothing is cloned or rewritten. `fn` runs inside the
+     * call on the thread that runs impact_simulation, with the call record every stage of this call shares (a Before
+     * may answer or call_original; the game's native runs at most once). A fault in Kiln's part runs the game's native
+     * if it has not run yet. With a program in the filter and the world's programs loaded, the program must call the
+     * native (at the site): else a refusal. Before the world has its natives or programs, the attachment waits; one
+     * that does not fit them then is logged and stays off. *out: the handle for native_detach; release_owner drops
+     * an owner's. INVALID_ARGUMENT: a bad stage, filter or fn, or a refusal (*out_refusal: KILN_NATIVE_REFUSED_*).
+     * UNAVAILABLE: no natives on this build. */
+    KilnResult(KILN_CALL* native_attach)(KilnOwner owner, uint32_t hash, const KilnNativeFilter* filter, int32_t stage,
+                                         int32_t priority, KilnNativeWrapFn fn, void* user, KilnHandle* out,
+                                         uint32_t* out_refusal);
+    /* tick, not from inside a native call. From the next call on `fn` is not called; `fn`/`user` may go once this
+     * returns (no call is in flight on the tick thread outside the step). NOT_FOUND: no such attachment. */
+    KilnResult(KILN_CALL* native_detach)(KilnHandle attachment);
 } KilnAbilitiesApi;
 
 /* sequence_play() trigger (keen::actor::ActionSequenceTrigger) */

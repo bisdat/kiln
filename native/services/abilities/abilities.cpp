@@ -41,8 +41,9 @@ static_assert(sizeof(KilnAbilityEvent) == 640 && sizeof(KilnImpactVar) == 88 && 
               sizeof(KilnAbilitiesStatus) == 160);
 // since 0.2.0-dev.29: the table's tail (append only) and the counters
 static_assert(offsetof(KilnAbilitiesApi, sequence_play) == 232 && offsetof(KilnAbilitiesApi, native_register_sync) == 240 &&
-              offsetof(KilnAbilitiesApi, native_counters) == 248 && sizeof(KilnAbilitiesApi) == 256 &&
-              sizeof(KilnNativeCounters) == 48);
+              offsetof(KilnAbilitiesApi, native_counters) == 248 && offsetof(KilnAbilitiesApi, native_attach) == 256 &&
+              offsetof(KilnAbilitiesApi, native_detach) == 264 && sizeof(KilnAbilitiesApi) == 272 &&
+              sizeof(KilnNativeCounters) == 64 && sizeof(KilnNativeFilter) == 16);
 
 namespace {
 
@@ -99,7 +100,8 @@ std::atomic<uint64_t> c_created{0}, c_held{0}, c_ovr_applied{0}, c_ovr_mismatch{
     c_refused{0};
 
 // since 0.2.0-dev.29: the native thunks' own counters (native_counters)
-std::atomic<uint64_t> c_sync_calls{0}, c_sync_faults{0}, c_sync_slow{0}, c_dead_calls{0}, c_lock_bypass{0};
+std::atomic<uint64_t> c_sync_calls{0}, c_sync_faults{0}, c_sync_slow{0}, c_dead_calls{0}, c_lock_bypass{0},
+    c_attach_entered{0}, c_attach_skipped{0};
 std::atomic<uint32_t> g_inflight{0};  // calls inside a Kiln thunk right now
 
 int64_t g_qpf = 0;  // QueryPerformanceFrequency, set at init
@@ -214,6 +216,9 @@ struct Slot {
     // SLOT_MANAGED_SYNC: the native's own fn, stored before `kind` is published (release) and read after it (acquire)
     std::atomic<KilnNativeWrapFn> sync_fn{nullptr};
     std::atomic<void*> sync_user{nullptr};
+    // SLOT_WRAPPED: the attachments of this native (natives_core.h), an immutable set swapped on the tick thread; an
+    // old set is freed in a later Pre when no thunk runs (g_retired)
+    std::atomic<const AttachSet*> attach{nullptr};
 };
 constexpr int kSlots = 160;
 Slot g_slots[kSlots];
@@ -290,6 +295,7 @@ void capture_args(KilnAbilityEvent& ev, const ArgSlice* args, const NativeCtx* c
 thread_local bool t_in_game = false;   // inside the game's own native (a fault there is not retried)
 thread_local int t_slot = -1;          // the slot whose thunk runs on this thread now (call_original; no registration)
 thread_local bool t_orig_ran = false;  // the game's native ran in this call: it never runs a second time (the latch)
+thread_local int32_t t_stage = KILN_NATIVE_BEFORE;  // the attachment stage running on this thread (call_original)
 NativeResult* call_fn(NativeFn fn, NativeResult* out, ArgSlice* args, NativeCtx* ctx) {
     t_orig_ran = true;
     t_in_game = true;
@@ -320,20 +326,46 @@ void fill_call(KilnNativeCall& c, const Slot& s, NativeResult* out, ArgSlice* ar
     c.out_value = 0;
 }
 
+// A wrapped vanilla native: the global wrap dispatcher (native_wrap) and the attachments (native_attach) share one call
+// record; the game's native runs once, when nothing answered. A call that matches no attachment's filter enters no
+// managed code (the filters are compared here).
 void dispatch_wrapped(Slot& s, NativeResult* out, ArgSlice* args, NativeCtx* ctx) {
     c_native_calls.fetch_add(1, std::memory_order_relaxed);
     NativeFn orig = s.original.load(std::memory_order_acquire);
-    if (s.wrap.load(std::memory_order_relaxed) && g_wrap_fn) {
-        c_wrap.fetch_add(1, std::memory_order_relaxed);
+    const bool legacy = s.wrap.load(std::memory_order_relaxed) && g_wrap_fn;
+    const AttachSet* set = s.attach.load(std::memory_order_seq_cst);
+    if (legacy || set) {
         KilnNativeCall c;
         fill_call(c, s, out, args, ctx);
-        g_wrap_fn(&c, g_wrap_user);  // guarded by the thunk's SEH frame
-        if (!c.original_called && c.out_error == 0xFF) {
+        auto decided = [&c] { return c.original_called != 0 || c.out_error != kUndecided; };
+        auto original = [&] {
+            c.original_called = 1;
             call_fn(orig, out, args, ctx);
-        } else {
-            out->error = c.out_error;
-            out->value = c.out_value;
+            c.out_error = out->error;
+            c.out_value = out->value;
+        };
+        t_stage = KILN_NATIVE_BEFORE;
+        if (legacy) {
+            c_wrap.fetch_add(1, std::memory_order_relaxed);
+            g_wrap_fn(&c, g_wrap_user);  // guarded by the thunk's SEH frame
         }
+        if (set) {
+            uint64_t entered = 0, skipped = 0;
+            run_stages(
+                *set, ctx->program_id, ctx->site,
+                [&c](const Attachment& a, int32_t stage) {
+                    t_stage = stage;
+                    a.fn(&c, a.user);
+                },
+                original, decided, &entered, &skipped);
+            if (entered) c_attach_entered.fetch_add(entered, std::memory_order_relaxed);
+            if (skipped) c_attach_skipped.fetch_add(skipped, std::memory_order_relaxed);
+        } else if (!decided()) {
+            original();
+        }
+        t_stage = KILN_NATIVE_BEFORE;
+        out->error = c.out_error;
+        out->value = c.out_value;
     } else {
         call_fn(orig, out, args, ctx);
     }
@@ -770,6 +802,75 @@ bool registry_room(uintptr_t registry) {
     return registry_has_room(count, cap);
 }
 
+// ---- attachments (since 0.2.0-dev.29) ----
+std::vector<Attachment> g_attachments;     // every attachment, all natives (g_mu)
+std::vector<const AttachSet*> g_retired;   // sets swapped out, freed in a Pre with no thunk running (g_mu)
+uint64_t g_attach_seq = 0;                 // handles (g_mu)
+
+// Publishes the attachments of `hash` to its wrapped slot (g_mu held). No slot yet (no world): published at setup.
+void publish_set(uint32_t hash) {
+    auto it = g_slot_of.find(hash);
+    if (it == g_slot_of.end() || g_slots[it->second].kind.load() != SLOT_WRAPPED) return;
+    AttachSet built = build_set(g_attachments, hash);
+    const AttachSet* next = built.empty() ? nullptr : new AttachSet(std::move(built));
+    const AttachSet* old = g_slots[it->second].attach.exchange(next, std::memory_order_seq_cst);
+    if (old) g_retired.push_back(old);
+}
+
+// Pre: no impact_simulation slice runs, so no thunk can still read a set that was swapped out.
+void free_retired() {
+    std::vector<const AttachSet*> r;
+    {
+        std::lock_guard lock(g_mu);
+        if (g_retired.empty() || g_inflight.load(std::memory_order_seq_cst) != 0) return;
+        r.swap(g_retired);
+    }
+    for (const AttachSet* p : r) delete p;
+}
+
+// The program `id` calls `hash` (at `site`, 0 = any): 1 yes, 0 no, -1 the program is not in the registry. Tick thread.
+int program_calls(uintptr_t preg, uint32_t id, uint32_t hash, uint32_t site) {
+    const uint8_t* prog = get_program(preg, id);
+    ProgramHeader h{};
+    if (!prog || !read_bytes(prog, &h, sizeof h)) return -1;
+    const std::pair<const BlobArray*, size_t> arrays[2] = {{&h.code, offsetof(ProgramHeader, code)},
+                                                           {&h.shutdown, offsetof(ProgramHeader, shutdown)}};
+    for (const auto& [arr, field] : arrays) {
+        if (!arr->count || !arr->offset || arr->count > 65535) continue;
+        std::vector<uint32_t> words(arr->count);
+        if (!read_bytes(prog + field + arr->offset, words.data(), words.size() * 4)) continue;
+        if (code_calls(words.data(), words.size(), hash, site)) return 1;
+    }
+    return 0;
+}
+
+// Once the world's programs are in (and for a new world): attachments that name a program are checked against it; one
+// whose program or site is not there stays off, with a log line. Tick thread.
+void check_attachments(uintptr_t preg) {
+    std::vector<Attachment> named;
+    {
+        std::lock_guard lock(g_mu);
+        for (const auto& a : g_attachments)
+            if (a.program) named.push_back(a);
+    }
+    std::vector<std::pair<uint64_t, int>> results;
+    for (const auto& a : named) results.emplace_back(a.id, program_calls(preg, a.program, a.hash, a.site));
+    std::lock_guard lock(g_mu);
+    std::unordered_set<uint32_t> touched;
+    for (const auto& [id, r] : results)
+        for (auto& a : g_attachments) {
+            if (a.id != id) continue;
+            const bool on = r == 1;
+            if (a.active != on) touched.insert(a.hash);
+            if (!on)
+                logw("kiln.abilities: attachment %llu on native 0x%08x stays off: %s 0x%08x%s", static_cast<unsigned long long>(id),
+                     a.hash, r < 0 ? "no program" : "the native is not called by program", a.program,
+                     r < 0 ? " in the ImpactRegistry" : a.site ? " at that site" : "");
+            a.active = on;
+        }
+    for (uint32_t h : touched) publish_set(h);
+}
+
 // Builds the vanilla native table for the captured registry and puts Kiln's slots into it. Tick thread.
 void setup_natives(uintptr_t registry) {
     std::vector<Captured> caps;
@@ -786,6 +887,21 @@ void setup_natives(uintptr_t registry) {
         for (uint32_t h : {KILN_NATIVE_APPLY_DAMAGE, KILN_NATIVE_APPLY_BUFF, KILN_NATIVE_SPAWN_ENTITY}) {
             const int s = wrap_slot(h);
             if (s >= 0) g_slots[s].observe.store(true);
+        }
+        // attachments made before the world had its natives: their slots now
+        std::unordered_set<uint32_t> hashes;
+        for (const auto& a : g_attachments) hashes.insert(a.hash);
+        for (uint32_t h : hashes) {
+            if (wrap_slot(h) < 0) {
+                for (auto& a : g_attachments)
+                    if (a.hash == h && a.active) {
+                        a.active = false;
+                        logw("kiln.abilities: attachment %llu stays off: 0x%08x is not a native the game registered (or no free slot)",
+                             static_cast<unsigned long long>(a.id), h);
+                    }
+                continue;
+            }
+            publish_set(h);
         }
         for (int i = 0; i < kSlots; ++i) {
             const uint32_t k = g_slots[i].kind.load();
@@ -1190,6 +1306,7 @@ void check_programs_ready() {
     if (!ready) return;
     g_programs_ready.store(true);
     if (g_have_natives && g_setup_registry) selftest_programs(preg);
+    check_attachments(preg);
     const uint32_t added = refresh_programs();
     logi("kiln.abilities: the game's ImpactRegistry holds %u programs (step %llu); %u Kiln program(s) from kiln.assets "
          "registered", count, static_cast<unsigned long long>(g_step.load()), added);
@@ -1264,6 +1381,7 @@ void holds_clear();
 
 void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
     g_step.store(tick->step);
+    free_retired();
     const uintptr_t world = g_api->server_world();
     if (!world) return;
     g_world.store(world);
@@ -1844,7 +1962,7 @@ void KILN_CALL t_call_original(KilnNativeCall* c) {
     const int slot = t_slot;
     if (slot < 0 || slot >= kSlots || g_slots[slot].hash != c->hash) return;
     NativeFn orig = g_slots[slot].original.load();
-    if (!orig || t_orig_ran) return;
+    if (!orig || t_orig_ran || t_stage == KILN_NATIVE_AFTER) return;
     auto* out = static_cast<NativeResult*>(c->engine[0]);
     auto* args = static_cast<ArgSlice*>(c->engine[1]);
     auto* ctx = static_cast<NativeCtx*>(c->engine[2]);
@@ -1859,7 +1977,92 @@ KilnResult KILN_CALL t_release_owner(KilnOwner owner) {
     std::lock_guard lock(g_mu);
     for (auto& s : g_slots)
         if (s.owner == owner && mod_kind(s.kind.load())) take_off(s);
+    std::unordered_set<uint32_t> touched;
+    for (auto it = g_attachments.begin(); it != g_attachments.end();) {
+        if (it->owner == owner && owner != 0) {
+            touched.insert(it->hash);
+            it = g_attachments.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    for (uint32_t h : touched) publish_set(h);
     return KILN_OK;
+}
+
+// since 0.2.0-dev.29 (see the table)
+KilnResult KILN_CALL t_native_attach(KilnOwner owner, uint32_t hash, const KilnNativeFilter* filter, int32_t stage,
+                                     int32_t priority, KilnNativeWrapFn fn, void* user, KilnHandle* out,
+                                     uint32_t* out_refusal) {
+    if (out_refusal) *out_refusal = KILN_NATIVE_REFUSED_NONE;
+    if (out) *out = 0;
+    if (!on_tick() || t_slot >= 0) return KILN_ERR_WRONG_THREAD;
+    if (!g_have_natives) return KILN_ERR_UNAVAILABLE;
+    if (!fn || !out || stage < KILN_NATIVE_BEFORE || stage > KILN_NATIVE_AFTER ||
+        (filter && (filter->size < sizeof(KilnNativeFilter) || filter->reserved != 0)))
+        return KILN_ERR_INVALID_ARGUMENT;
+    auto refuse = [&](uint32_t code) {
+        if (out_refusal) *out_refusal = code;
+        return KILN_ERR_INVALID_ARGUMENT;
+    };
+    const uint32_t program = filter ? filter->program_id : 0, site = filter ? filter->site : 0;
+    const uintptr_t preg = g_prog_registry.load();
+    const bool programs = g_programs_ready.load() && preg;
+    if (program && programs) {
+        const int r = program_calls(preg, program, hash, site);
+        if (r < 0) return refuse(KILN_NATIVE_REFUSED_PROGRAM_NOT_LOADED);
+        if (r == 0) return refuse(KILN_NATIVE_REFUSED_SITE_NOT_FOUND);
+    }
+    int slot = -1;
+    uint64_t id = 0;
+    {
+        std::lock_guard lock(g_mu);
+        if (stage == KILN_NATIVE_INSTEAD && instead_taken(g_attachments, hash, program, site))
+            return refuse(KILN_NATIVE_REFUSED_SECOND_INSTEAD);
+        if (!g_captured.empty()) {  // the world registered its natives: the hash must be one, with a slot
+            bool vanilla = false;
+            for (const auto& c : g_captured) vanilla |= c.hash == hash && c.fn;
+            if (!vanilla) return refuse(KILN_NATIVE_REFUSED_NOT_A_NATIVE);
+            slot = wrap_slot(hash);
+            if (slot < 0) return refuse(KILN_NATIVE_REFUSED_NO_SLOT);
+        }
+        Attachment a;
+        a.id = id = ++g_attach_seq;
+        a.hash = hash;
+        a.program = program;
+        a.site = site;
+        a.stage = stage;
+        a.priority = priority;
+        a.order = id;
+        a.fn = fn;
+        a.user = user;
+        a.owner = owner;
+        g_attachments.push_back(a);
+        publish_set(hash);
+    }
+    if (slot >= 0 && g_setup_registry && g_slots[slot].registered_in != g_setup_registry) register_slot_in(slot, g_setup_registry);
+    *out = id;
+    logi("kiln.abilities: attachment %llu: native 0x%08x, %s, program 0x%08x, site 0x%08x, priority %d%s",
+         static_cast<unsigned long long>(id), hash,
+         stage == KILN_NATIVE_BEFORE ? "Before" : stage == KILN_NATIVE_INSTEAD ? "Instead" : "After", program, site,
+         priority, slot < 0 ? " (waits for the world's natives)" : program && !programs ? " (checked when the world's programs are in)" : "");
+    return KILN_OK;
+}
+
+KilnResult KILN_CALL t_native_detach(KilnHandle h) {
+    if (!on_tick() || t_slot >= 0) return KILN_ERR_WRONG_THREAD;
+    std::lock_guard lock(g_mu);
+    for (auto it = g_attachments.begin(); it != g_attachments.end(); ++it) {
+        if (it->id != h) continue;
+        const uint32_t hash = it->hash;
+        g_attachments.erase(it);
+        publish_set(hash);
+        if (const uint32_t n = g_inflight.load())
+            logw("kiln.abilities: attachment %llu detached while %u native call(s) are in flight (expected none in Pre or Post)",
+                 static_cast<unsigned long long>(h), n);
+        return KILN_OK;
+    }
+    return KILN_ERR_NOT_FOUND;
 }
 
 KilnResult KILN_CALL t_native_counters(KilnNativeCounters* out) {
@@ -1873,6 +2076,8 @@ KilnResult KILN_CALL t_native_counters(KilnNativeCounters* out) {
     c.sync_faults = c_sync_faults.load();
     c.sync_slow = c_sync_slow.load();
     c.dead_calls = c_dead_calls.load();
+    c.attach_entered = c_attach_entered.load();
+    c.attach_skipped = c_attach_skipped.load();
     const size_t n = std::min<size_t>(out->size, sizeof c);
     std::memcpy(reinterpret_cast<uint8_t*>(out) + 4, reinterpret_cast<const uint8_t*>(&c) + 4, n - 4);
     if (out->size > sizeof c) std::memset(reinterpret_cast<uint8_t*>(out) + sizeof c, 0, out->size - sizeof c);
@@ -2202,6 +2407,8 @@ const KilnAbilitiesApi kTable = {
     &t_sequence_play,
     &t_native_register_sync,
     &t_native_counters,
+    &t_native_attach,
+    &t_native_detach,
 };
 
 // ------------------------------------------------------------------------------------------- boot --------------

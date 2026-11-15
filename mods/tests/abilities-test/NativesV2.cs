@@ -15,6 +15,7 @@ public sealed partial class AbilitiesTestMod
     private uint _nvSync, _nvSusp, _nvAccum, _nvWait;
     private long _nvSyncCalls, _nvSyncOffTick, _nvAccumCalls;
     private int _nvTick;
+    private long _nvWaitCalls;  // tick thread
 
     private async Task RunNativesV2(Func<double, double, WorldPosition> at)
     {
@@ -40,7 +41,7 @@ public sealed partial class AbilitiesTestMod
     private void RegisterNativesV2()
     {
         _nvSusp = Abilities.Natives.Register("NvSusp", 2, call => { call.SetInt(0, call.GetInt(1) * 2); return 1; });
-        _nvWait = Abilities.Natives.Register("NvWait", 1, _ => 1);  // paces a loop: one step per call
+        _nvWait = Abilities.Natives.Register("NvWait", 1, _ => { _nvWaitCalls++; return 1; });  // paces a loop: one step per call
         var sync = Abilities.Natives.RegisterSync("NvSync", 2, (ref NativeCall c) =>
         {
             Interlocked.Increment(ref _nvSyncCalls);
@@ -73,6 +74,8 @@ public sealed partial class AbilitiesTestMod
         await TestSyncSameStep(pass, tag, at(20, 60 + pass * 8));
         await TestSyncLoop(pass, tag, at(24, 60 + pass * 8));
         await TestUnloadDuringCast(pass, tag, at(28, 60 + pass * 8));
+        if (Capabilities.Is("abilities.natives.attach")) await TestAttachments(pass, tag, at(32, 60 + pass * 8));
+        else Fail($"{tag}: abilities.natives.attach is off: {Capabilities.Why("abilities.natives.attach")}");
         var c = Abilities.Natives.LabCounters;
         Check(c is { Inflight: 0 }, $"{tag}: the in-flight counter is 0 in Pre ({c})");
     }

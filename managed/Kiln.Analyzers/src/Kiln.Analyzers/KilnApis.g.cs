@@ -16,6 +16,7 @@ internal static partial class KilnApis
         "M:Kiln.Abilities.BuffsOf(Kiln.EntityId)", // Abilities.BuffsOf(EntityId): Game.AssertTickThread
         "M:Kiln.Abilities.Cast(Kiln.EntityId,System.String,Kiln.CastOrigin)", // Abilities.Cast(EntityId, string, CastOrigin): via AbilityRegistry.CastNow(EntityId, string, CastOrigin)
         "M:Kiln.Abilities.Instance(System.UInt32)", // Abilities.Instance(uint): Game.AssertTickThread
+        "M:Kiln.Abilities.Natives.Attach(System.UInt32,System.String,Kiln.NativeStage,Kiln.NativeWrapHandler,System.UInt32,System.Int32)", // Abilities.Natives.Attach(uint, string, NativeStage, NativeWrapHandler, uint, int): Game.AssertTickThread
         "M:Kiln.Abilities.Natives.Register(System.String,System.Int32,Kiln.NativeHandler)", // Abilities.Natives.Register(string, int, NativeHandler): Game.AssertTickThread
         "M:Kiln.Abilities.Natives.RegisterSync(System.String,System.Int32,Kiln.NativeSyncHandler)", // Abilities.Natives.RegisterSync(string, int, NativeSyncHandler): Game.AssertTickThread
         "M:Kiln.Abilities.Natives.Wrap(System.String,Kiln.NativeWrapHandler,System.Int32)", // Abilities.Natives.Wrap(string, NativeWrapHandler, int): via AbilitiesDispatch.AddWrap(uint, NativeWrapHandler, int)

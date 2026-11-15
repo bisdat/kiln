@@ -184,6 +184,30 @@ public delegate byte NativeSyncHandler(ref NativeCall call);
 /// <param name="Hash">FNV-1a-32 of the full name (what a program's ECALL names), also when refused.</param>
 public sealed record NativeResult(bool Ok, string? Reason, uint Hash) : IKilnResult;
 
+/// <summary>Where an attached handler runs in a native call (<see cref="Abilities.Natives.Attach"/>).</summary>
+public enum NativeStage
+{
+    /// <summary>Before the game's native: change the arguments, run it now (<see cref="NativeCall.CallOriginal"/>), or
+    /// answer for it (<see cref="NativeCall.Return"/>). Every matching Before runs, highest priority first.</summary>
+    Before = 0,
+
+    /// <summary>In place of the game's native, when no Before answered: answer with <see cref="NativeCall.Return"/>
+    /// (else the game's native runs). One per native, program and site.</summary>
+    Instead = 1,
+
+    /// <summary>After the game's native ran (or a handler answered): read its outputs, change the answer.
+    /// <see cref="NativeCall.CallOriginal"/> does nothing here. Lowest priority first.</summary>
+    After = 2,
+}
+
+/// <summary>What <see cref="Abilities.Natives.Attach"/> did: <see cref="Ok"/> with the <see cref="Handle"/> that
+/// detaches it, or why not (<see cref="Reason"/>: program not loaded, site not found, a second Instead, no free native
+/// slot).</summary>
+/// <param name="Ok">The handler is attached.</param>
+/// <param name="Reason">Why not; null when <paramref name="Ok"/>.</param>
+/// <param name="Handle">Dispose to detach (also when the mod unloads); null when not <paramref name="Ok"/>.</param>
+public sealed record AttachResult(bool Ok, string? Reason, IDisposable? Handle) : IKilnResult;
+
 /// <summary>A synchronous applyDamage call (job thread): change it before the game applies it, or cancel it.</summary>
 public unsafe ref struct DamageCall
 {
@@ -376,11 +400,64 @@ public static unsafe partial class Abilities
         }
 
         /// <summary>Lab use: the native thunks' counters (sync calls, faults, calls over budget, calls of a removed
-        /// native), or null without a dev.29 kiln.abilities.</summary>
+        /// native, attachment callbacks entered and filters that skipped a call), or null without a dev.29
+        /// kiln.abilities.</summary>
         [System.Diagnostics.CodeAnalysis.Experimental("KILNX001")]
         [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
-        public static (ulong SyncCalls, ulong SyncFaults, ulong SyncSlow, ulong DeadCalls, uint Inflight)? LabCounters =>
-            AbilitiesNative.Counters() is { } c ? (c.SyncCalls, c.SyncFaults, c.SyncSlow, c.DeadCalls, c.Inflight) : null;
+        public static (ulong SyncCalls, ulong SyncFaults, ulong SyncSlow, ulong DeadCalls, uint Inflight, ulong AttachEntered, ulong AttachSkipped)? LabCounters =>
+            AbilitiesNative.Counters() is { } c
+                ? (c.SyncCalls, c.SyncFaults, c.SyncSlow, c.DeadCalls, c.Inflight, c.AttachEntered, c.AttachSkipped)
+                : null;
+
+        /// <summary>Attaches <paramref name="handler"/> to the calls of the game's native <paramref name="native"/> made
+        /// by program <paramref name="program"/> (at call site <paramref name="site"/>), at <paramref name="stage"/>,
+        /// without cloning the program: the program in the registry stays the game's own. The filter is compared in
+        /// native code, so the calls of other programs and sites never enter managed code. The handler runs inside the
+        /// call on the thread that runs the game's Impact programs (see <see cref="NativeCall"/> for the rules). Dispose
+        /// <see cref="AttachResult.Handle"/> to detach it; it also ends when the mod unloads.</summary>
+        /// <remarks>Attached before the server world has loaded its programs, the program and site are checked when it
+        /// has: one that is not there is logged and the handler stays off. A game update that rebuilds a program
+        /// changes its site ids: the attachment then reports "site not found".</remarks>
+        /// <param name="program">The calling program's id (FNV-1a-32 of its GUID); 0 = every program.</param>
+        /// <param name="native">The game's native: its node name ("getTransform", "applyDamage") or "0x" and its
+        /// hash.</param>
+        /// <param name="stage">Before, Instead or After the game's native.</param>
+        /// <param name="handler">The handler.</param>
+        /// <param name="site">The ECALL's call-site id in that program; 0 = every site.</param>
+        /// <param name="priority">Before and Instead: highest first; After: lowest first; ties in registration order.</param>
+        /// <returns>Ok with the handle, or <c>Ok = false</c> and why (see <see cref="AttachResult"/>).</returns>
+        /// <exception cref="ArgumentException">A native name that is neither a node name nor "0x" and a hash, a null
+        /// handler, an unknown stage.</exception>
+        /// <exception cref="InvalidOperationException">Not called from a mod, or not on the tick thread.</exception>
+        /// <exception cref="KilnUnavailableException">Capability <c>abilities.natives.attach</c> is off here.</exception>
+        [ServerOnly]
+        [TickThreadOnly]
+        [RequiresCapability(AbilitiesCaps.NativesAttach)]
+        public static AttachResult Attach(uint program, string native, NativeStage stage, NativeWrapHandler handler,
+            uint site = 0, int priority = 0)
+        {
+            ArgumentException.ThrowIfNullOrEmpty(native);
+            ArgumentNullException.ThrowIfNull(handler);
+            if (!Enum.IsDefined(stage)) throw new ArgumentOutOfRangeException(nameof(stage), stage, "Before, Instead or After");
+            if (!NativeNameFormat(native))
+                throw new ArgumentException($"native '{native}': a node name ([A-Za-z][A-Za-z0-9_]*) or 0x and a hash", nameof(native));
+            Game.AssertTickThread();
+            var mod = ModContext.CurrentMod ?? throw new InvalidOperationException("Natives.Attach must be called from a mod");
+            AbilitiesCaps.Require(AbilitiesCaps.NativesAttach);
+            if (AbilitiesNative.V2(nameof(AbilitiesNative.TableV2.NativeDetach)) == null)
+                throw new KilnUnavailableException(AbilitiesCaps.NativesAttach, "kiln.abilities is older than 0.2.0-dev.29");
+            return AbilitiesDispatch.Attach(Resolve(native), program, site, stage, priority, handler, mod);
+        }
+
+        // a name known already, else the hash: no lookup in the core (a job thread's log line)
+        internal static string CachedName(uint hash) => Names.TryGetValue(hash, out var n) ? n : $"0x{hash:x8}";
+
+        internal static bool NativeNameFormat(string native)
+        {
+            if (native.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+                return native.Length is > 2 and <= 10 && native.Skip(2).All(char.IsAsciiHexDigit);
+            return char.IsAsciiLetter(native[0]) && native.All(c => char.IsAsciiLetterOrDigit(c) || c == '_');
+        }
 
         /// <summary>Declares a native from a mod's impact/natives.json before it is registered, so programs that call
         /// it pass the verifier now. Any thread.</summary>

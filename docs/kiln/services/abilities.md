@@ -246,6 +246,25 @@ destroyed before the first run). Keys: a variable alias or debug name of the pro
   with a sync native finishes in 1 step: 5 call(s), sum 10`, `PASS ... unload during a running cast: 0 calls after the
   Pre that removed it`, `PASS registry full is Ok=false after 14 more sync native(s)`. `Register` (one step later, on
   the tick thread) stays the tool for slow work and tick-thread API.
+- **Attachments to the game's programs** (since 0.2.0-dev.29, capability `abilities.natives.attach`, server only):
+  `Abilities.Natives.Attach(program, "getTransform", NativeStage.Before | Instead | After, handler, site, priority)` →
+  `AttachResult { Ok, Reason, Handle }` hooks one vanilla native's calls in one program (at one call site) without
+  cloning the program: the registry keeps the game's own (`Programs.Info(id).FromKiln` stays false). The filter
+  (program, site; 0 = any) is compared in native code, so other programs' calls never enter managed code. Every
+  matching Before runs (highest priority first) and may change arguments, `CallOriginal()` or `Return`; then, if none
+  answered, the one Instead for that native, program and site; then, if still undecided, the game's native, once; then
+  every After (lowest first; `CallOriginal()` does nothing there). The stages share one call record. Dispose the
+  handle to detach (from that Pre on the handler gets no call); a mod's attachments end when it unloads. `Ok = false`:
+  program not loaded, site not found, a second Instead, no free Kiln slot. Attached before the world has loaded its
+  programs, the program and site are checked then; one that is not there is logged and stays off. A game update that
+  rebuilds a program changes its sites ("site not found"). `Natives.Wrap` and `OnDamage` are Before attachments on
+  every call now (same order and behaviour; with an older kiln-abilities.dll they keep the global dispatcher). Only
+  calls of a native are reachable: a point between two natives, or a program rewritten in memory, are not (they need
+  registration of vanilla program ids, which `program_register` refuses). Lab: `PASS pass 1: Attach(0x7a120ee8,
+  "getTransform", site 0xfcce4e0a): 1 call per cast, 0 for other programs ..., FromKiln False`, `PASS ... the thunk
+  counter shows 0 managed transitions for non-matching calls`, `PASS ... stage order: Before x2, Instead, After, in
+  recorded order`, `PASS ... a second Instead is refused`, `PASS ... site not found is Ok=false`, `PASS ... detach during
+  a running cast: 0 calls after the Pre that removed it`.
 - **Built-ins**: `kiln.Log(value)` (one kiln.log line) and `kiln.Signal(value, tag)` → `ImpactSignalEvent`
   (`Tag`, `Value`, `AsInt/AsFloat/AsEntity`, `Impact`, `Site`). Neither suspends.
 - **Programs**: ship them as kiln.assets resources (`assets/assets.json`, kind `resource`, type
@@ -340,8 +359,10 @@ its interest mask, `KILN_ABILITY_INTEREST_HOLD` for holds), `hold_filter`, `inst
 `program_count/info/vars/register/refresh`, `native_count/at/find/declare/register/unregister/complete/wrap/observe`,
 `set_wrap_dispatcher`, `call_original`, `release_owner`, `attr_get/attr_add`, `sequence_state`, `sequence_play`;
 appended in 0.2.0-dev.29 (check `header.size`): `native_register_sync` (a native answered inside the call by its own
-`fn`, refusals as `KILN_NATIVE_REFUSED_*`) and `native_counters` (`KilnNativeCounters`: calls in flight, sync calls,
-faults, calls over budget, calls of a removed native).
+`fn`, refusals as `KILN_NATIVE_REFUSED_*`), `native_counters` (`KilnNativeCounters`: calls in flight, sync calls,
+faults, calls over budget, calls of a removed native, attachment callbacks entered and filters that skipped a call),
+`native_attach` / `native_detach` (one callback per attachment, `KilnNativeFilter`, stages `KILN_NATIVE_BEFORE /
+INSTEAD / AFTER`).
 
 How it hooks (all fail soft; `kiln.abilities: natives on, programs on, instances on, attributes on, sequences on`):
 - `registerNative` (0x996b80) is detoured at boot to capture the game's 107 natives per registry; at the server
