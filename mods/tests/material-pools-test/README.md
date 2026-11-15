@@ -1,6 +1,6 @@
 # Material pools: coordinator run
 
-This fixture has been built and host-tested, **never run on a server or in a game**. It ships enabled when the executable's reflection resolves. No preview setting or gate entry is needed. A byte dump or TestKit result is not proof that the build menu consumed it.
+The lab part runs on dedicated servers: all 15 cases passed on server build 26430253 (2026-11-15). **A game client has never run it**: the build menu, previews, placement and joins are the guided check's (below). It ships enabled when the executable's reflection resolves. No preview setting or gate entry is needed. A byte dump or TestKit result is not proof that the build menu consumed it.
 
 Use two **new, disposable** labs copied from the same test save. The mod selects clear cells inside the supplied base box (default corners `(3006, 902.6, 1530)` and `(3042, 906.6, 1570)`). It reads every proposed box and completes selection before its first write; occupied candidates are skipped. Each chosen box is logged as `mp: selected cells X Y Z SizeX SizeY SizeZ`. No space produces `mp: FAIL completed-without-exception: base has no room ...; nothing written` and no write. The main run writes three small kept cubes there and requests a real game save. The boundary run writes one cube and retains 49 definitions in its own world ledger. Never use a player's save. The runner refuses pre-existing worldtables ledgers and unrelated mods; it stops each lab before copying files. It never clears a world ledger to manufacture free capacity.
 
