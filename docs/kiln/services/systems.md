@@ -61,7 +61,8 @@ wrap.Dispose();   // or let the mod's unload remove it
   that one slice to the game: the stage stays on, `Stats.ArchetypeSkips` counts it and kiln.log says so once per stage.
 - **Creating and destroying entities.** Not from a handler: `Kiln.Spawn` refuses there (managed and native, since
   0.2.0-dev.29 also on the world's own thread) with a message that names `Slice.Post`; post the call and it runs before
-  the next step.
+  the next step. (A `GameSystems.Hook` callback is not a handler: there such a call still goes through, as in
+  0.2.0-dev.28, with a warning.)
 - **Lifetime.** `Wrap` is tick thread and returns at once; the stages apply in the target world's next step
   (`State` Pending → Active), again by program name in every later world of that kind, and go with `Dispose` (applied in
   the next step: no call starts after it) or when the mod unloads (the unload waits until no call of the mod's stages
