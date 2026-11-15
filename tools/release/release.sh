@@ -90,9 +90,12 @@ if ((worktree)); then
     echo "release: --worktree is for test runs only and needs --out DIR, not a release folder (e.g. --out $releases/trial/kiln-$version): a test build of the working tree, never published. A release builds a commit: drop --worktree" >&2
     exit 2
   fi
-  case $(realpath -m "$out") in
-    "$releases"|"$releases"/kiln-*) echo "release: --worktree is for test runs only: --out $out is a release folder ($releases/kiln-*); give a test folder (e.g. $releases/trial/kiln-$version), or drop --worktree for a release" >&2; exit 2 ;;
-  esac
+  # Keep the spelling too: a release folder may itself be a symlink to storage elsewhere.
+  for candidate in "$(realpath -ms -- "$out")" "$(realpath -m -- "$out")"; do
+    case $candidate in
+      "$HOME/Kiln-release"|"$HOME/Kiln-release"/kiln-*|"$releases"|"$releases"/kiln-*) echo "release: --worktree is for test runs only: --out $out is a release folder ($releases/kiln-*); give a test folder (e.g. $releases/trial/kiln-$version), or drop --worktree for a release" >&2; exit 2 ;;
+    esac
+  done
 fi
 "$here/version.sh" check "$version"
 case $version in *-*) channel=dev ;; *) channel=stable ;; esac

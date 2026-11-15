@@ -53,7 +53,8 @@ class WorktreeGuard(unittest.TestCase):
     def test_worktree_into_the_release_folder_is_refused(self):
         releases = self.home / "Kiln-release"
         (self.root / "link").symlink_to(releases, target_is_directory=True)
-        for out in (releases / f"kiln-{self.version}", releases, releases / "kiln-x" / "sub", releases / "kiln-x.github",
+        for out in (releases / f"kiln-{self.version}", releases, releases / "kiln-x" / "sub", releases / "kiln-x.github", releases / "kiln-x.nexus",
+                    str(releases / "kiln-x") + "/", releases / "trial" / ".." / "kiln-x",
                     self.root / "link" / "kiln-x", Path("home/Kiln-release/kiln-rel")):  # the last: relative to the cwd
             with self.subTest(out=str(out)):
                 r = self.release("--worktree", "--out", out)
@@ -62,12 +63,45 @@ class WorktreeGuard(unittest.TestCase):
                 self.assertIn("is a release folder", r.stderr)
                 self.assertNothingMade()
 
+    def test_release_folder_symlink_to_elsewhere_is_still_refused(self):
+        releases = self.home / "Kiln-release"
+        releases.mkdir()
+        target = self.root / "existing-release"
+        target.mkdir()
+        link = releases / "kiln-existing"
+        link.symlink_to(target, target_is_directory=True)
+        for out in (link, link / "sub"):
+            with self.subTest(out=str(out)):
+                r = self.release("--worktree", "--out", out, "--force")
+                self.assertEqual(r.returncode, 2, r.stderr)
+                self.assertIn(REFUSED, r.stderr)
+                self.assertNotIn(NO_KEY, r.stderr)
+                self.assertFalse(self.work.exists())
+                self.assertEqual(list(target.iterdir()), [])
+
     def test_the_order_of_the_flags_does_not_matter(self):
         r = subprocess.run(["bash", str(HERE / "release.sh"), "--worktree", "--out", str(self.home / "Kiln-release" / f"kiln-{self.version}"),
                             self.version], env={"PATH": os.environ["PATH"], "HOME": str(self.home)}, cwd=self.root,
                            capture_output=True, text=True, timeout=60)
         self.assertEqual(r.returncode, 2, r.stderr)
         self.assertIn(REFUSED, r.stderr)
+
+    def test_parser_variants_cannot_bypass_the_guard(self):
+        release = self.home / "Kiln-release" / "kiln-x"
+        for args in (("--worktree", "--worktree", "--out", release),
+                     ("--out", self.root / "trial", "--out", release, "--worktree")):
+            with self.subTest(args=args):
+                r = self.release(*args)
+                self.assertEqual(r.returncode, 2, r.stderr)
+                self.assertIn(REFUSED, r.stderr)
+                self.assertNothingMade()
+        # Neither --out=DIR nor -- is supported by this parser; both fail closed.
+        for args in (("--worktree", f"--out={release}"), ("--", "--worktree")):
+            with self.subTest(args=args):
+                r = self.release(*args)
+                self.assertEqual(r.returncode, 2, r.stderr)
+                self.assertIn("unknown option", r.stderr)
+                self.assertNothingMade()
 
     def test_a_trial_with_its_own_out_still_runs(self):
         # dev.28's trial went to ~/Kiln-release/trial/kiln-0.2.0-dev.28: a test folder, not a release folder
