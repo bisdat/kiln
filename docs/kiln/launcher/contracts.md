@@ -72,7 +72,8 @@ or state and at most every 250 ms for a change of label, detail or count (the la
 thread of its own (nothing in the game waits for the disk, and no write comes from a per-frame hook). Fields:
 `format` 1, `pid`, `kiln` (with the build stamp), `side`, `started` (UTC, milliseconds), `atMs`, `state`
 (`booting`, `loading`, `ready`, `idle`, `failed`), `plan`, `steps` (`id`, `label`, `detail`, `done`/`total`, `ms`,
-`tookMs`, `parts`), `why`. A stale file is told by `pid` and `started`, as for boot.json; nothing deletes it, and it
+`tookMs`, `parts`), `why`, and (0.2.0-dev.29) `worldMs`: when the game's first world began, ms since `started`, written
+at once (absent before). A stale file is told by `pid` and `started`, as for boot.json; nothing deletes it, and it
 is not written again after `ready`, `idle` or `failed`. boot.json is unchanged.
 
 | Step | What Kiln does there | Detail, count |
@@ -91,9 +92,11 @@ is not written again after `ready`, `idle` or `failed`. boot.json is unchanged.
 
 `ready`: once step `game` has begun (the mods are loaded and their content applied) and the side's signal has come,
 in whichever order (a signal that comes first is remembered): a client's when kiln-ui sees the main menu's builder run
-(or the first in-game frame); a server's at Kiln.Host's ServerStarted (what `kilnctl run --wait` waits for), or
-without .NET the server world's first step. A step begins when the one before it ends, so in a final state the steps' `tookMs` add up to
-`atMs`.
+(or the first in-game frame), or (0.2.0-dev.29) when its first world begins, so a start whose menu mark never comes
+(another mod's hook over the menu) still ends, and kiln.log says the mark had not come; a server's at Kiln.Host's
+ServerStarted (what `kilnctl run --wait` waits for), or without .NET the server world's first step. A step begins when
+the one before it ends, so in a final state the steps' `tookMs` add up to `atMs`. The launcher takes a client whose file
+has `worldMs` and has said nothing for 60 s for a start that is over (the player is in a world), not for a silent one.
 
 Shared definitions (ids, semver, kdh1, game paths): `schema/common.schema.json`. Validate every example with
 `bun run check:schemas` in `launcher/`.

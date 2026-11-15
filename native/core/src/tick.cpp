@@ -213,10 +213,10 @@ void begin_world(uint32_t kind, uintptr_t world) {
     g_kind_thread[kind].store(GetCurrentThreadId());
     if (kind == KILN_WORLD_SERVER) g_thread.store(GetCurrentThreadId());
     g_generation.fetch_add(1);
-    if (kind == KILN_WORLD_SERVER && session == 1) {
-        KLOG_I("tick: first server-world step on thread %lu", GetCurrentThreadId());
-        progress_state::mark(3);  // progress.json: a dedicated server without .NET is ready here (progress_file.h, Mark)
-    }
+    if (kind == KILN_WORLD_SERVER && session == 1) KLOG_I("tick: first server-world step on thread %lu", GetCurrentThreadId());
+    // progress.json: the game's first world (any kind): a dedicated server without .NET is ready here, and so is a client
+    // whose main menu mark never came (progress_file.h, Mark::world_started; later worlds change nothing)
+    if (session == 1) progress_state::mark(3);
     KLOG_I("tick: %s world 0x%llx started (session %u, thread %lu%s)", kKindName[kind],
            static_cast<unsigned long long>(world), session, GetCurrentThreadId(),
            old ? "; the previous one stopped without a destroy event" : "");

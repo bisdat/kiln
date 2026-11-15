@@ -180,7 +180,7 @@ pub fn aside_entries(profile_json: &str, kiln_dir: &Utf8Path, roots: &[Utf8PathB
         // `<root>/<id>`, or the entry's own path when the launcher placed it in that folder under the name a native
         // DLL looks for (`mods/XHL-Auto-Loot` for the Library id `xhl-auto-loot`)
         let own_path = paths.get(i).map(|c| c.path.clone())
-            .filter(|p| p.parent().is_some_and(|parent| roots.iter().any(|r| relative_under(parent, r).is_some_and(|rel| rel.as_str().is_empty()))));
+            .filter(|p| p.parent().is_some_and(|parent| roots.iter().any(|r| is_root(parent, r))));
         let copy = roots.iter().map(|r| r.join(&id)).chain(own_path).find(|d| kiln_copy_of(d).is_some_and(|m| m == id));
         let wanted = paths.get(i).and_then(|c| classify(&c.path).ok()).map(|m| m.id).unwrap_or_else(|| id.clone());
         let manual = if copy.is_none() {
@@ -222,6 +222,38 @@ pub fn aside_entries(profile_json: &str, kiln_dir: &Utf8Path, roots: &[Utf8PathB
         Entry { id: Some(id), version: None, name: None, source: "profile".into(),
             path: own.map(|c| c.to_string()).unwrap_or(path), state: state.into(), reason: Some(reason), capabilities: Vec::new() }
     }).collect()
+}
+
+/// Is `dir` the loader's folder `root`, as the game's process names folders? On Windows (the game, also under Wine)
+/// by Windows' rules ([`windows_same_folder`]), elsewhere (kiln-eml-run on Linux) part by part.
+fn is_root(dir: &Utf8Path, root: &Utf8Path) -> bool {
+    if cfg!(windows) { windows_same_folder(dir.as_str(), root.as_str()) } else { relative_under(dir, root).is_some_and(|rest| rest.as_str().is_empty()) }
+}
+
+/// Two spellings of one folder, told apart as Windows tells them: not by the verbatim prefix, the separator, an empty
+/// or `.` part, or case. ShroudForge writes its `paths.mods` from a canonical path, `\\?\C:\…\mods` on Windows
+/// (`//?/C:/…/mods` once plugin.rs `loader_roots` turned its `\` into `/`), while the launcher names its game-folder copies
+/// from the game folder, `C:\…\mods\<folder>` (a player's Nexus report, 2026-11-14: kiln-eml took Kiln's copy there for
+/// a folder of the player's). Strings in, so a test checks it on any system.
+fn windows_same_folder(a: &str, b: &str) -> bool {
+    fn key(p: &str) -> (usize, Vec<String>) {
+        let mut p = p.replace('/', "\\");
+        // `\\?\C:\x` names `C:\x`, `\\?\UNC\host\share` names `\\host\share`; other verbatim paths have no other name
+        // Literal trailing dots/spaces need the extended namespace; an ordinary Win32 path
+        // would trim them. Keep that namespace in the key instead of aliasing another folder.
+        let literal = p.split('\\').any(|name| name.ends_with('.') || name.ends_with(' '));
+        if let Some(rest) = p.strip_prefix(r"\\?\UNC\").filter(|_| !literal) {
+            p = format!(r"\\{rest}");
+        } else if let Some(rest) = p.strip_prefix(r"\\?\").filter(|r| !literal && r.as_bytes().get(1) == Some(&b':')) {
+            p = rest.to_owned();
+        }
+        let rooted = p.bytes().take_while(|&c| c == b'\\').count().min(2)
+            + usize::from(p.as_bytes().get(1) == Some(&b':') && p.as_bytes().get(2) == Some(&b'\\')) * 3;
+        // Windows' ordinal case-blind comparison: one upper-case character for each
+        let fold = |s: &str| s.chars().map(|c| { let mut u = c.to_uppercase(); if u.len() == 1 { u.next().unwrap_or(c) } else { c } }).collect::<String>();
+        (rooted, p.split('\\').filter(|s| !s.is_empty() && *s != ".").map(fold).collect())
+    }
+    key(a) == key(b)
 }
 
 /// Why ShroudForge does not run a package ([`shroudforge_switch`]).
@@ -585,6 +617,28 @@ pub fn resolve(candidates: &[Candidate]) -> (Vec<Utf8PathBuf>, Vec<Entry>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ShroudForge's `paths.mods` on Windows after its first start, as loader_roots reads it (`//?/C:/…/mods`), and the
+    /// folder of the launcher's game-folder copy (`C:\…\mods`): one folder.
+    #[test]
+    fn windows_folders_compare_without_the_verbatim_prefix_or_case() {
+        let mods = r"C:\Program Files (x86)\Steam\steamapps\common\Enshrouded\mods";
+        assert!(windows_same_folder(&format!(r"\\?\{mods}").replace('\\', "/"), mods), "the verbatim prefix");
+        assert!(windows_same_folder(&format!(r"\\?\{mods}"), &mods.replace('\\', "/")));
+        assert!(windows_same_folder(&mods.to_uppercase(), &format!("{mods}\\")), "case, a trailing separator");
+        assert!(windows_same_folder(r"D:\Spiele\Ä", r"d:\spiele\ä\."), "non-ASCII case");
+        assert!(windows_same_folder(r"\\?\UNC\nas\share\mods", r"\\NAS\share\mods"), "a network folder");
+        assert!(!windows_same_folder(mods, &format!("{mods}-other")), "a sibling");
+        assert!(!windows_same_folder(r"\\?\Volume{1}\mods", r"Volume{1}\mods"), "a volume path has no other spelling");
+        assert!(!windows_same_folder(r"\mods", "mods"), "rooted is not relative");
+    }
+
+    #[test]
+    fn windows_verbatim_literal_names_are_not_plain_names() {
+        assert!(!windows_same_folder(r"\\?\C:\Game.\mods", r"C:\Game.\mods"));
+        assert!(!windows_same_folder(r"\\?\UNC\nas\share\Game \mods", r"\\nas\share\Game \mods"));
+        assert!(!windows_same_folder("C:", r"C:\"));
+    }
 
     fn tmp(name: &str) -> Utf8PathBuf {
         let d = Utf8PathBuf::from_path_buf(std::env::temp_dir()).unwrap().join(format!("kiln-eml-test-{name}-{}", std::process::id()));

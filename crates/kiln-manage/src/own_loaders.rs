@@ -73,12 +73,17 @@ impl OwnLoader {
     }
 }
 
+/// ShroudForge's mods folder as [`OwnLoader::folder`] says it: relative to the game folder ('/' separated) when it is
+/// there, compared as the launcher's system compares folders (on Windows ShroudForge spells it with the verbatim prefix
+/// and maybe another case, `\\?\C:\…\mods`: still `mods`), else the whole path.
+fn sf_folder(game_dir: &Path) -> String {
+    let dir = crate::shroudforge::mods_dir(game_dir);
+    crate::winpath::relative_folder(game_dir, &dir).unwrap_or_else(|| dir.display().to_string())
+}
+
 /// The kinds a proxy classification runs, with the folder its loader reads and how Kiln delivers the profile's mods.
 fn kinds_of(kind: ProxyKind, game_dir: &Path) -> Vec<(ModKind, String, Delivery)> {
-    let sf_mods = || {
-        let dir = crate::shroudforge::mods_dir(game_dir);
-        dir.strip_prefix(game_dir).map(|p| p.to_string_lossy().replace('\\', "/")).unwrap_or_else(|_| dir.display().to_string())
-    };
+    let sf_mods = || sf_folder(game_dir);
     match kind {
         ProxyKind::Eml => vec![(ModKind::Eml, "mods".into(), Delivery::Placed)],
         // ShroudForge's loader carries EML: it runs its own packages and the EML mods in its mods folder
@@ -174,9 +179,7 @@ pub fn find(game_dir: &Path, profile: Option<&ProfileView>) -> Vec<OwnLoader> {
     // EML mods for the loader that runs them (`sf_paths::adapter_hosts_dropins`).
     let hosts = profile.is_some_and(|p| p.enabled(ModKind::ShroudForge).next().is_some() || (p.dropins_shroudforge && crate::sf_paths::adapter_hosts_dropins(game_dir)));
     if hosts && runtime && game_dir.join(plugin).is_file() {
-        let dir = crate::shroudforge::mods_dir(game_dir);
-        let folder = dir.strip_prefix(game_dir).map(|p| p.to_string_lossy().replace('\\', "/")).unwrap_or_else(|_| dir.display().to_string());
-        out.push(OwnLoader { kind: ModKind::Eml, engine: Engine::ShroudForge, file: plugin.into(), via: Via::HostedShroudForge, folder,
+        out.push(OwnLoader { kind: ModKind::Eml, engine: Engine::ShroudForge, file: plugin.into(), via: Via::HostedShroudForge, folder: sf_folder(game_dir),
             delivery: Delivery::Placed });
     }
     out
