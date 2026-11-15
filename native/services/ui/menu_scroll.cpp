@@ -95,7 +95,8 @@ menu_scroll::Nest g_nest;  // what the current builder call's begin opened (UI t
 // call's thread (on_unload) use them, under g_guard_mu.
 std::mutex g_guard_mu;
 menu_scroll::Guard g_guard;
-std::atomic<bool> g_clear_marker{false};  // the trials passed: after_frame removes the marker
+std::atomic<bool> g_clear_marker{false};  // deletion pending (also after a failed DeleteFileW); under g_guard_mu
+uint32_t g_clear_retry = 0;              // UI frames until retrying a failed deletion; under g_guard_mu
 uint32_t g_scrolled_frames = 0;
 // the decision by height (UI thread)
 menu_scroll::Decider g_decider;
@@ -317,12 +318,21 @@ bool write_marker() {
 // when it had to be written and could not (scrolling goes off).
 bool arm(menu_scroll::Try k) {
     std::lock_guard lk(g_guard_mu);
-    return !menu_scroll::guard_begin(g_guard, k) || write_marker();
+    if (!menu_scroll::guard_begin(g_guard, k)) return true;
+    // A new trial needs the marker again. A deletion queued by an earlier trial or idle frame must not remove it.
+    g_clear_marker = false;
+    g_clear_retry = 0;
+    return write_marker();
 }
 
 // The marker goes where the guard says, off the UI thread too (a world's destroying thread, the exit call).
 void clear_marker(const char* why) {
-    if (DeleteFileW(g_trying.c_str()) || GetLastError() == ERROR_FILE_NOT_FOUND)
+    const bool deleted = DeleteFileW(g_trying.c_str());
+    const DWORD error = deleted ? 0 : GetLastError();
+    const bool gone = deleted || error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND;
+    g_clear_marker = !gone;
+    g_clear_retry = gone ? 0 : menu_scroll::kIdleFrames;
+    if (gone)
         logf(KILN_LOG_INFO, "ui: the pause menu's crash guard is cleared: %s", why);
 }
 
@@ -508,7 +518,9 @@ std::string state_dir() {
 void KILN_CALL on_world(const KilnWorldEvent* e, void*) {
     if (!e || e->size < offsetof(KilnWorldEvent, event) + sizeof(e->event) || e->event != KILN_WORLD_STOPPING) return;
     std::lock_guard lk(g_guard_mu);
-    if (menu_scroll::guard_world_stops(g_guard)) clear_marker("a world is being destroyed in order");
+    const bool clear = menu_scroll::guard_world_stops(g_guard);
+    if (clear || (g_clear_marker && !g_guard.on_disk && !g_guard.busy))
+        clear_marker("a world is being destroyed in order");
 }
 
 }  // namespace
@@ -649,20 +661,18 @@ void scroll_after_frame(uint64_t frame) {
     g_frames_done = frame;
     if (g_trying.empty()) return;  // not installed
     std::lock_guard lk(g_guard_mu);
-    if (g_clear_marker.exchange(false)) {
-        char why[96];
-        std::snprintf(why, sizeof why, "the menu drew %u frames of Kiln's calls without trouble", menu_scroll::kTrialFrames);
-        clear_marker(why);
-    }
     if (menu_scroll::guard_frame(g_guard))
-        clear_marker("the pause menu closed (or Quit was chosen) before its trial ended; the trial goes on at the next "
-                     "opening");
+        clear_marker("the pause menu closed, Quit was chosen, or an orderly world stop finished its UI frame; the trial "
+                     "goes on at the next opening");
+    else if (g_clear_marker && (g_clear_retry == 0 || --g_clear_retry == 0))
+        clear_marker("the completed trial or orderly menu frame no longer needs its marker");
 }
 
 void scroll_exit() {
     if (g_trying.empty()) return;
     std::lock_guard lk(g_guard_mu);
-    if (menu_scroll::guard_exit(g_guard)) clear_marker("the game exits normally");
+    const bool clear = menu_scroll::guard_exit(g_guard);
+    if (clear || g_clear_marker) clear_marker("the game exits normally");
 }
 
 }  // namespace kui

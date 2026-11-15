@@ -290,7 +290,7 @@ constexpr bool trial_step(Trial& t) {
 //  - when no such call ran for kIdleFrames UI frames (the menu closed: guard_frame), or at the end of the frame in which
 //    the player chose the menu's last entry, Quit, when the frame before already drew the same calls (guard_leaving):
 //    the calls are not running any more; the next opening writes it again and the trial goes on;
-//  - when a world is being destroyed between frames (guard_world_stops) or the process exits with code 0
+//  - when a world is being destroyed (guard_world_stops; at frame end if a frame is still running), or exits with code 0
 //    (guard_exit): the game ends its session in order, which a crash in Kiln's calls never reaches.
 // So only a game that ends while Kiln's calls run, or within kIdleFrames frames of them with nothing orderly in
 // between, leaves the marker: the next start keeps scrolling off, as before.
@@ -305,6 +305,7 @@ struct Guard {
     bool busy = false;      // Kiln's calls of a kind that has not passed ran in this UI frame
     bool was_busy = false;  // and in the frame before
     bool leaving = false;   // the player chose the menu's last entry (Quit) in this frame
+    bool world_stopped = false;  // an orderly world stop during this frame: clear once the frame completes
     uint32_t idle = 0;      // UI frames without such calls, while the marker is on the disk
 };
 
@@ -337,18 +338,19 @@ constexpr bool guard_step(Guard& g, Try k) {
 constexpr void guard_leaving(Guard& g) { g.leaving = true; }
 
 // After each UI frame: true when the marker may go (the menu closed kIdleFrames frames ago, or Quit was chosen in a
-// frame whose calls the frame before had already drawn).
+// frame whose calls the frame before had already drawn, or an orderly world stop during the completed frame).
 constexpr bool guard_frame(Guard& g) {
     const bool busy = g.busy, was = g.was_busy, leaving = g.leaving;
+    const bool world_stopped = g.world_stopped;
     g.was_busy = busy;
-    g.busy = g.leaving = false;
+    g.busy = g.leaving = g.world_stopped = false;
     if (!g.on_disk) {
         g.idle = 0;
         return false;
     }
     if (busy) {
         g.idle = 0;
-        if (!(leaving && was)) return false;
+        if (!world_stopped && !(leaving && was)) return false;
         g.on_disk = false;
         return true;
     }
@@ -359,9 +361,13 @@ constexpr bool guard_frame(Guard& g) {
 }
 
 // A world is being destroyed (KILN_WORLD_STOPPING): true when the marker may go. Not while a frame with Kiln's calls
-// is unfinished (that frame's end decides).
+// is unfinished: remember it until that frame finishes, so a quick orderly quit needs no further frames or exit hook.
 constexpr bool guard_world_stops(Guard& g) {
-    if (!g.on_disk || g.busy) return false;
+    if (!g.on_disk) return false;
+    if (g.busy) {
+        g.world_stopped = true;
+        return false;
+    }
     g.on_disk = false;
     g.idle = 0;
     return true;

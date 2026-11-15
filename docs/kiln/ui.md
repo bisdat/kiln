@@ -70,7 +70,9 @@ e.Visible = false;       // hide for now; e.Text = "…" relabels; e.Dispose() r
   and have not yet drawn 48 frames each in that start (a wrong nesting would have ended the game by then). The frames
   add up over the start's openings of the menu: the marker goes 8 frames after the menu closes, at the end of the frame
   in which the player chose Quit to Desktop, when the game destroys a world in order, and at an exit with code 0, and
-  it is written again at the next opening until the 48 are reached. So only a game that ends in (or within a few
+  it is written again at the next opening until the 48 are reached. A world stop during a UI frame clears it once
+  that frame finishes. A failed deletion is retried every 8 UI frames and at orderly world stops or exit; a new trial
+  cancels the pending deletion before its calls. So only a game that ends in (or within a few
   frames of) Kiln's calls leaves it; a start that finds it (or cannot read it) keeps scrolling and the height frames
   off (`kiln/state/menu-scroll.off`, naming the Kiln version and game build, written before the marker goes;
   another version or build tries once more; delete the file to try again) and tells the player with a toast. A fault
