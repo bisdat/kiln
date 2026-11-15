@@ -72,6 +72,7 @@ std::vector<Tweak> g_tweaks;
 std::vector<Material> g_live;
 std::vector<Material> g_kept_read;
 std::vector<std::string> g_errors;
+std::set<std::string> g_logged_errors;  // of g_errors, what was logged when it happened (the pending store's refusals)
 std::map<std::string, std::string> g_boot_definitions;  // "<mod>/<kind>/<block>" -> the normal form the merge read
 std::set<std::string> g_from_code;                       // "<mod>/<block>": read from what code kept in an earlier run
 std::map<std::string, fs::path> g_pending_dirs;          // mod id -> its folder of blocks kept from code
@@ -212,9 +213,9 @@ std::vector<std::string> mod_folders() {
 kiln::capacity::pending_io::TrustedBase pending_base() {
     static const bool hooked=[] {
         kiln::capacity::pending_io::diagnostic=[](const auto& path,const auto& why) {
-            const auto detail=why.rfind("unsafe: ",0)==0 || why.rfind("unavailable: ",0)==0?why:"unsafe: "+why;
-            const auto message="stored definition "+to_utf8(path)+" refused: "+detail+" (left in place)";
-            WT_W("worldtables: %s",message.c_str());g_errors.push_back(message);
+            const auto message=stored_refusal_text(to_utf8(path),why);
+            // said now (the store is read before the merge, and also after it); the merge's error list does not repeat it
+            WT_W("worldtables: %s",message.c_str());g_errors.push_back(message);g_logged_errors.insert(message);
         };return true;
     }();
     (void)hooked;return {data_dir()};
@@ -1173,7 +1174,7 @@ void KILN_CALL on_resources_ready(void*) {
         } catch (const std::exception& e) {
             go_off(std::string("the merge failed: ") + e.what());
         }
-        for (const std::string& e : g_errors) WT_E("worldtables: %s", e.c_str());
+        for (const std::string& e : merge_error_lines(g_errors, g_logged_errors)) WT_E("worldtables: %s", e.c_str());
         write_status();
         if (g_state.load() != KILN_WT_OFF) writers = g_writers;
         std::set<std::string> said;
@@ -1902,7 +1903,7 @@ void forget_locked() {
     g_boot_definitions.clear();
     g_from_code.clear();
     g_pending_dirs.clear();
-    g_errors.clear();
+    g_errors.clear();g_logged_errors.clear();
     g_boot_required.clear();
 }
 void KILN_CALL destroy_boot(const void* p) {

@@ -301,5 +301,10 @@ std::string handshake_hash(const std::vector<Placed>& placed, const std::vector<
 // "Block_T1_Wood_Rough_CRAFTING" -> "WoodRough", "Block_Roof_T1_PlantFibre" -> "RoofPlantFibre",
 // "Build_TerrainMaterial_T1_Stone" -> "TerrainStone". Any id also answers to "Cell<id>".
 std::string material_name(const std::string& item_debug_name);
+// A stored definition the pending store refused (kiln_pending_io's diagnostic): the line a player reads.
+std::string stored_refusal_text(const std::string& path, const std::string& why);
+// The merge's error list as it logs it: what was already logged when it happened (the store's refusals) is not
+// repeated, so a refused file is named once.
+std::vector<std::string> merge_error_lines(const std::vector<std::string>& errors, const std::set<std::string>& logged);
 
 }  // namespace kwt

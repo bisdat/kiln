@@ -1429,6 +1429,17 @@ std::string material_name(const std::string& item_debug_name) {
     return out;
 }
 
+std::string stored_refusal_text(const std::string& path, const std::string& why) {
+    const auto detail = why.rfind("unsafe: ", 0) == 0 || why.rfind("unavailable: ", 0) == 0 ? why : "unsafe: " + why;
+    return "stored definition " + path + " refused: " + detail + (detail.find("left in place") == std::string::npos ? " (left in place)" : "");
+}
+std::vector<std::string> merge_error_lines(const std::vector<std::string>& errors, const std::set<std::string>& logged) {
+    std::vector<std::string> out;
+    for (const auto& e : errors)
+        if (!logged.count(e)) out.push_back(e);
+    return out;
+}
+
 bool base64_decode(const std::string& text, Bytes* out) {
     out->clear();
     uint32_t acc = 0;

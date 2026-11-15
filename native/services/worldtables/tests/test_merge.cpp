@@ -480,6 +480,19 @@ void pool_game_catalog_test() {
           r.errors.empty() ? "" : r.errors[0]);
 }
 
+// The lab's pending-inactive case (server 26430253): a disabled mod's pool envelope was named twice, a warning when the
+// store was read and the same text again as an error when the merge logged its error list; and "left in place" twice.
+void stored_refusal_once_test() {
+    const std::string text = stored_refusal_text("pending/m/@pool-a.json", "unsafe: owning mod is not loaded in this profile; left in place");
+    check("stored-refusal.left-in-place-once", text.find("left in place") == text.rfind("left in place"), text);
+    check("stored-refusal.unsafe-prefix", stored_refusal_text("p", "invalid pending filename") == "stored definition p refused: unsafe: invalid pending filename (left in place)",
+          stored_refusal_text("p", "invalid pending filename"));
+    const std::vector<std::string> errors{"block buildingMaterialPool x (mod m): refused: unknown", text};
+    const auto lines = merge_error_lines(errors, {text});
+    check("stored-refusal.named-once", lines == std::vector<std::string>{errors[0]}, std::to_string(lines.size()) + " line(s)");
+    check("stored-refusal.others-logged", merge_error_lines(errors, {}) == errors);
+}
+
 void pool_reflection_test() {
     for (bool client:{false,true}) {
         Bytes image(16384,0); image[0]='M';image[1]='Z';wr<uint32_t>(image,0x3c,0x100);
@@ -926,6 +939,7 @@ int main(int argc, char** argv) {
     custom_pools_test();
     pool_admission_test();
     pool_game_catalog_test();
+    stored_refusal_once_test();
     pool_reflection_test();
     custom_pool_hash_test();
     pool_registration_test();
