@@ -430,6 +430,7 @@ void check_and_load() {
             H.logf(KILN_LOG_WARN, "%s targets Shroudtopia %s; this is %s", m->name.c_str(), m->target.c_str(), kShroudtopiaVersion);
         loader_log(KILN_LOG_INFO, "Registered mod: " + m->name + " " + m->version + " by " + m->author + " (" + m->origin + ", " +
                                       path_utf8(c.dll) + ")");
+        config::ensure_profile_entry(m->name, m->origin == "profile");
         g_ctx->registeredMods[path_utf8(c.dll)] = inst;  // as Shroudtopia: keyed by the DLL path (only this thread writes)
         std::lock_guard lock(g_mu);
         g_mods.push_back(std::move(m));

@@ -35,6 +35,8 @@ nlohmann::json get(const char* key);                       // top-level value, n
 nlohmann::json mod_get(const char* mod, const char* key);  // mods.<mod>.<key>, null when absent
 // The "shroudtopia": {"default": {...}} block of a mod.json: written as mods.<id> the first time the id is seen.
 void apply_manifest_defaults(const std::string& id, const nlohmann::json& manifest);
+// Only registered, enabled profile candidates get a missing entry; existing entries are never changed.
+void ensure_profile_entry(const std::string& name, bool profile_enabled);
 std::filesystem::path file();
 }  // namespace config
 

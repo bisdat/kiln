@@ -882,6 +882,11 @@ internal static class ModCatalog
                     help = $"{EngineName(kind)}'s own loader runs the {EngineName(kind)} mods this start and reads only its own folder. Activate the profile again in the Kiln launcher (it copies the mod there), then start the game again.";
                 else if (line.State == "off-in-shroudforge")
                     help = OffInShroudForgeHelp;
+                else if (kind == "shroudtopia" && !aside && line.State == "inactive")
+                {
+                    reason = "Switched off in Shroudtopia's settings.";
+                    help = $"In shroudtopia/shroudtopia.json in the profile's config folder, set active to true in the mods entry named \"{line.Name ?? line.Id}\" (the name in kiln.log's Registered mod line). Save the file; Shroudtopia reads it again while the game runs.";
+                }
                 else if (state == ModRunState.Failed)
                     help = $"Read the reason above. Update the mod in the Kiln launcher, then start the game again. kiln/logs/kiln.log has the {EngineName(kind)} lines.";
                 var (mname, mversion) = line.Name is null ? Manifest(line.Folder) : (line.Name, null);
