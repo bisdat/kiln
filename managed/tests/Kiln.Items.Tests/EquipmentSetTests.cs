@@ -6,6 +6,7 @@
 using System.Collections.ObjectModel;
 using System.Runtime.InteropServices;
 using Kiln;
+using Kiln.TestKit;
 using Xunit;
 
 namespace Kiln.ItemsTests;
@@ -386,4 +387,155 @@ public sealed unsafe class EquipmentSetTests
     [InlineData(10u, "UnsupportedBackpack: no free slot")]
     [InlineData(99u, "Refused: no free slot")]
     public void ARefusalStartsWithItsCode(uint code, string text) => Assert.Equal(text, Items.ReasonOf(code, "no free slot"));
+
+    // ---- applying (S5): the result, the completion and its events, the one decision, the heartbeat ----
+
+    [Fact]
+    public void TheApplyMirrorsMatchTheHeader()
+    {
+        Assert.Equal(56, sizeof(ItemsNative.SetRequest));
+        Assert.Equal(40, (int)Marshal.OffsetOf<ItemsNative.SetRequest>("ProcessSession"));
+        Assert.Equal(32, sizeof(ItemsNative.SetSlotValue));
+        Assert.Equal(72, sizeof(ItemsNative.SetChange));
+        Assert.Equal(1760, sizeof(ItemsNative.SetResult));
+        Assert.Equal(64, (int)Marshal.OffsetOf<ItemsNative.SetResult>("Reason"));
+        Assert.Equal(320, (int)Marshal.OffsetOf<ItemsNative.SetResult>("Changes"));
+        Assert.Equal(824, sizeof(ItemsNative.SetDecisionPayload));
+        Assert.Equal(272, (int)Marshal.OffsetOf<ItemsNative.TableV6>(nameof(ItemsNative.TableV6.EquipSet)));
+        Assert.Equal(280, (int)Marshal.OffsetOf<ItemsNative.TableV6>(nameof(ItemsNative.TableV6.SetCancel)));
+        Assert.Equal(288, sizeof(ItemsNative.TableV6));
+    }
+
+    private static ItemsNative.SetResult NativeResult(uint status, uint flags, string reason = "", uint refusal = 0, uint failed = uint.MaxValue)
+    {
+        var n = new ItemsNative.SetResult
+        {
+            Size = (uint)sizeof(ItemsNative.SetResult), Status = status, Ticket = 12, DecisionId = 5, WorldEpoch = 7, AppliedStep = 900,
+            Player = 1, Flags = flags, Refusal = refusal, FailedOperation = failed, GameError = failed == uint.MaxValue ? 0u : 0x11u,
+        };
+        var bytes = System.Text.Encoding.UTF8.GetBytes(reason);
+        for (var i = 0; i < bytes.Length && i < 255; i++) n.Reason[i] = bytes[i];
+        return n;
+    }
+
+    [Fact]
+    public void ANativeResultBecomesTheOneErrorRulesResult()
+    {
+        var n = NativeResult(0, ItemsNative.SetResultCommitted);
+        n.ChangeCount = 1;
+        var c = (ItemsNative.SetChange*)n.Changes;
+        c[0] = new ItemsNative.SetChange
+        {
+            Size = 72, EquipmentSlot = 10,
+            Before = new ItemsNative.SetSlotValue { ItemId = 0x79442800, ItemEntity = 5001, Count = 1, InstanceStamp = 1001, InventorySlot = SlotId.Of(new EntityId(2003), 0).Value },
+            After = new ItemsNative.SetSlotValue { ItemId = 0x4623bcb0, ItemEntity = 5002, Count = 1, InstanceStamp = 1002, InventorySlot = SlotId.Of(new EntityId(2003), 0).Value },
+        };
+        var done = Items.ToSetResult(n);
+        Assert.True(done.Ok);
+        Assert.Null(done.Reason);
+        Assert.True(done.Committed && !done.MayHaveMutated && !done.DryRun);
+        Assert.Equal(new DecisionId(7, 5), done.Decision);
+        Assert.Null(done.FailedOperation);
+        var change = Assert.Single(done.Changes);
+        Assert.Equal(EquipmentSlot.Ring0, change.Slot);
+        Assert.Equal(Ref(5001, 0x79442800, 1001), change.Before.Instance);
+        Assert.Equal(Ref(5002, 0x4623bcb0, 1002), change.After.Instance);
+
+        var refused = Items.ToSetResult(NativeResult(5, ItemsNative.SetResultDryRun, "step 1 (equip into equipment slot 11): the game refused it (error 0x11)", failed: 1));
+        Assert.False(refused.Ok);
+        Assert.True(refused.DryRun);
+        Assert.Equal(1, refused.FailedOperation);
+        Assert.Equal(0x11, refused.GameError);
+        Assert.StartsWith("Refused: step 1", refused.Reason);
+        Assert.StartsWith("NoRoom: ", Items.ToSetResult(NativeResult(5, 0, "no free slot", refusal: 8)).Reason);
+        Assert.StartsWith("StaleSnapshot: ", Items.ToSetResult(NativeResult(4, 0, "the inventory changed")).Reason);
+        var fault = Items.ToSetResult(NativeResult(8, ItemsNative.SetResultMayHaveMutated | ItemsNative.SetResultCommitted, "after the commit ..."));
+        Assert.True(fault is { Ok: false, MayHaveMutated: true, Committed: true, Status: EquipmentSetStatus.InvariantFailure });
+        Assert.StartsWith("InvariantFailure: after the commit", fault.Reason);
+        Assert.Null(Items.ToSetResult(NativeResult(1, 0) with { DecisionId = 0 }).Decision);  // no decision filed (NoChange)
+        Assert.Equal(EquipmentSetStatus.InvariantFailure, Items.ToSetResult(NativeResult(42, 0)).Status);  // a status of a later service: not Ok
+    }
+
+    private static EquipmentSetEntry[] OneRing() => [E(EquipmentSlot.Ring0, new InstanceEquipment(Ref(5002, 0x4623bcb0, 1002)))];
+
+    [Fact]
+    public void ACompletionPostsTheEventsAndCompletesTheTaskOnce()
+    {
+        Items.ResetSetsForTests();
+        try
+        {
+            using var kiln = new KilnHarness();
+            kiln.Step(2);
+            var changed = new List<EquipmentSetChangedEvent>();
+            var faulted = new List<EquipmentSetFaultedEvent>();
+            using var a = Events.On<EquipmentSetChangedEvent>(changed.Add);
+            using var b = Events.On<EquipmentSetFaultedEvent>(faulted.Add);
+            var v = new EquipmentSlotValue(new ItemId(1), ItemInstanceRef.None, SlotId.Of(new EntityId(2003), 0), 1);
+            var tcs = new TaskCompletionSource<EquipmentSetResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var key = Items.TrackSet(tcs, null, new EntityId(1), Scope, OneRing(), false, 41, 7, 0, 12);
+            var done = new EquipmentSetResult(EquipmentSetStatus.Done, null, new EntityId(1), 12, null, false, true, false, null, 0,
+                [new EquipmentSlotChange(EquipmentSlot.Ring0, v, v with { Item = new ItemId(2) })]);
+            kiln.Run(() => Items.CompleteSet(key, done));
+            kiln.Run(() => Items.CompleteSet(key, done));  // a second report of the same key does nothing to the task
+            Assert.Same(done, tcs.Task.Result);
+            Assert.Equal(2, changed.Count);  // the events are the native facts: each report is posted, the task once
+            Assert.Equal((12UL, EquipmentSetStatus.Done), (changed[0].Ticket, changed[0].Outcome));
+            Assert.True(changed[0].Involves(new EntityId(1)) && !changed[0].Involves(EntityId.None) && !changed[0].Involves(new EntityId(2)));
+            Assert.Empty(faulted);
+            Assert.Equal(0, Items.SetsPending);
+
+            // a dry run and a refusal post nothing
+            var t2 = new TaskCompletionSource<EquipmentSetResult>();
+            var k2 = Items.TrackSet(t2, null, new EntityId(1), Scope, OneRing(), true, 42, 7, 0, 13);
+            kiln.Run(() => Items.CompleteSet(k2, EquipmentSetResult.NotRun(EquipmentSetStatus.Simulated, "", new EntityId(1), true, 13)));
+            Assert.Equal(2, changed.Count);
+
+            // a mod that unloaded: the events still come, its task does not complete
+            var t3 = new TaskCompletionSource<EquipmentSetResult>();
+            var k3 = Items.TrackSet(t3, null, new EntityId(1), Scope, OneRing(), false, 43, 7, 0, 14);
+            Items.RetireSetForTests(k3);
+            kiln.Run(() => Items.CompleteSet(k3, done with { Ticket = 14 }));
+            Assert.Equal(3, changed.Count);
+            Assert.False(t3.Task.IsCompleted);
+
+            // an invariant failure: the faulted event, the changes that could be read, and the row goes off
+            var t4 = new TaskCompletionSource<EquipmentSetResult>();
+            var k4 = Items.TrackSet(t4, null, new EntityId(1), Scope, OneRing(), false, 44, 7, 0, 15);
+            var bad = done with { Status = EquipmentSetStatus.InvariantFailure, Reason = "InvariantFailure: after the commit", MayHaveMutated = true, Ticket = 15 };
+            kiln.Run(() => Items.CompleteSet(k4, bad));
+            Assert.Same(bad, Assert.Single(faulted).Result);
+            Assert.Equal(EquipmentSetStatus.InvariantFailure, changed[^1].Outcome);
+            Assert.Equal(CapabilityState.Unavailable, Capabilities.Get("items.equip_sets").State);
+        }
+        finally
+        {
+            Items.ResetSetsForTests();
+        }
+    }
+
+    [Fact]
+    public void ALostResultEndsTheTaskAndSwitchesSetsOff()
+    {
+        Items.ResetSetsForTests();
+        try
+        {
+            using var kiln = new KilnHarness();
+            kiln.Step(2);
+            var tcs = new TaskCompletionSource<EquipmentSetResult>();
+            Items.TrackSet(tcs, null, new EntityId(1), Scope, OneRing(), false, 41, 7, 100, 12);
+            var young = new TaskCompletionSource<EquipmentSetResult>();
+            Items.TrackSet(young, null, new EntityId(1), Scope, OneRing(), false, 42, 7, 400, 13);
+            kiln.Run(() => Items.SetHeartbeat(100 + Items.SetHeartbeatSteps + 1));
+            Assert.True(tcs.Task.IsCompleted);
+            Assert.Equal(EquipmentSetStatus.Dropped, tcs.Task.Result.Status);
+            Assert.False(young.Task.IsCompleted);  // still within its time
+            Assert.Equal(1, Items.SetsPending);
+            Assert.Equal(CapabilityState.Unavailable, Capabilities.Get("items.equip_sets").State);
+        }
+        finally
+        {
+            Items.ResetSetsForTests();
+        }
+    }
+
 }

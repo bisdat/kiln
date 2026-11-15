@@ -99,6 +99,15 @@ bool g_guards(const uint8_t* tx, bool* would) {
     }
 }
 
+bool g_set_bit(uint8_t* tx) {
+    __try {
+        tx[E.tx_guard_flags] |= 0x40;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 bool g_tx(uint8_t* tx, int which) {
     __try {
         if (which == 0) E.commit(tx);
@@ -131,6 +140,7 @@ public:
         return true;
     }
     bool guards(bool* would) override { return g_guards(tx_, would); }
+    bool force_guard_bit() override { return g_set_bit(tx_); }
     bool commit() override { return g_tx(tx_, 0); }
     bool rollback() override { return g_tx(tx_, 1); }
     bool free_arrays() override { return g_tx(tx_, 2); }

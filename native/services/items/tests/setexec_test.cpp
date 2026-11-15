@@ -118,7 +118,14 @@ struct FakeGame final : SetEngine {
     }
     bool guards(bool* would) override {
         if (!enter()) return false;
-        *would = guards_roll_back;
+        *would = guards_roll_back || bit_set;
+        return true;
+    }
+    bool bit_set = false;
+    bool force_guard_bit() override {
+        if (!enter()) return false;
+        bit_set = true;
+        commit_rolls_back = true;  // as the game's commit does with the bit set
         return true;
     }
     void restore() {
@@ -373,6 +380,33 @@ int main() {
             dry_all = dry_all && o.engine_fault && o.status == SetStatus::InvariantFailure && (o.flags & kResultDryRun) && g.calls_after_fault == 0 && rules(g);
         }
         check(dry_all, "a fault at each engine call of a dry run: InvariantFailure, DryRun kept, no call after it");
+    }
+
+    // ---- the lab's faults (a real run injects them; here the fake answers as the game would) ----
+    {
+        FakeGame g = world();
+        SetJob j = job(g, three());
+        j.lab.fail_step = 1;
+        const std::vector<uint8_t> was = bytes(g);
+        const SetOutcome o = execute(g, j, PlanOptions{}, nullptr, nullptr);
+        check(o.status == SetStatus::Refused && o.failed_operation == 1 && g.rollbacks == 1 && g.commits == 0 && bytes(g) == was && rules(g),
+              "lab: a refusal at step 1 (an empty source): Refused at 1, rolled back");
+        FakeGame b = world();
+        SetJob jb = job(b, three());
+        jb.lab.guard_bit = true;
+        const SetOutcome ob = execute(b, jb, PlanOptions{}, nullptr, nullptr);
+        check(ob.status == SetStatus::Refused && b.commits == 0 && b.rollbacks == 1 && rules(b), "lab: the commit's bit set: refused before the commit");
+        FakeGame c = world();
+        SetJob jc = job(c, three());
+        jc.lab.commit_anyway = true;
+        const SetOutcome oc = execute(c, jc, PlanOptions{}, nullptr, nullptr);
+        check(oc.status == SetStatus::CommitRolledBack && c.commits == 1 && c.rollbacks == 0 && rules(c), "lab: the bit set and committed anyway: CommitRolledBack");
+        FakeGame m = world();
+        SetJob jm = job(m, three());
+        jm.lab.fake_mismatch = true;
+        const SetOutcome om = execute(m, jm, PlanOptions{}, nullptr, nullptr);
+        check(om.status == SetStatus::InvariantFailure && om.engine_fault && (om.flags & kResultCommitted) && !om.changes.empty() && m.rollbacks == 0 && rules(m),
+              "lab: a faked mismatch after the commit: InvariantFailure with the real deltas, no rollback");
     }
 
     std::printf("%s: %d failure(s)\n", failures ? "FAIL" : "PASS", failures);

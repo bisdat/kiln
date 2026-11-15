@@ -61,6 +61,15 @@ struct SetOutcome {
     std::vector<SlotChange> changes;
 };
 
+// Lab only (kiln/data/kiln.items/sets-lab at start; never on a player's server): faults injected into a real run.
+struct SetLabFaults {
+    int fail_step = -1;          // the game's equip at this step is called with an empty source: a real refusal mid-way
+    bool guard_bit = false;      // set the commit's own rollback bit (0x40) before the guard check: refused before commit
+    bool commit_anyway = false;  // set it and skip the guard: the game's commit rolls back by itself
+    bool fake_mismatch = false;  // after the commit, read the request as unmet: InvariantFailure (sets go off)
+    bool any() const { return fail_step >= 0 || guard_bit || commit_anyway || fake_mismatch; }
+};
+
 // One set request as the program sees it: everything copied in Pre, no game pointer.
 struct SetJob {
     uint64_t ticket = 0;
@@ -70,6 +79,7 @@ struct SetJob {
     KilnSetOpV1 entries[kSelectionSlots] = {};
     SnapPrefix prefix;
     std::vector<uint8_t> baseline;  // the snapshot's canonical bytes
+    SetLabFaults lab;
 };
 
 // The game, for one program update of the player. false: the call faulted (nothing about the state is known after it).
@@ -82,6 +92,7 @@ public:
     virtual bool unequip(uint64_t equipped, uint8_t game_slot, uint8_t* error) = 0;  // equipped: the selection's slot id
     virtual bool locate(uint32_t pide, uint64_t* slot) = 0;  // the staged slot of an item entity; 0 when not found
     virtual bool guards(bool* commit_would_roll_back) = 0;
+    virtual bool force_guard_bit() = 0;  // lab only: sets the commit's rollback bit (0x40) of the open transaction
     virtual bool commit() = 0;
     virtual bool rollback() = 0;
     virtual bool free_arrays() = 0;
@@ -188,13 +199,25 @@ inline SetOutcome execute(SetEngine& g, const SetJob& job, const PlanOptions& op
         return o;
     }
 
+    // lab: an empty slot to call the game's equip with (the last free Generic slot: an unequip fills the first)
+    uint64_t lab_empty = 0;
+    if (job.lab.fail_step >= 0)
+        for (uint32_t k = 0; k < now.nodes.front().link_count; ++k) {
+            if (now.nodes.front().link_cat[k] != kCatGeneric) continue;
+            for (uint32_t i = 0; i < kSlotsPerPage; ++i)
+                if (const Stack* st2 = now.stack_at(KILN_SLOT_ID(now.nodes.front().link_entity[k], i)); st2 && is_empty(*st2)) lab_empty = st2->slot;
+        }
+
     // ---- Validated -> TxOpen ----
     if (!g.tx_open(dry)) return fault("setting up the transaction", true, false);
     bool refused = false;
     for (uint32_t i = 0; i < plan.steps.size(); ++i) {
         const PlanStep& s = plan.steps[i];
         uint8_t err = 0;
-        if (s.op == OpKind::Equip) {
+        if (static_cast<int>(i) == job.lab.fail_step && lab_empty) {  // lab: a real refusal of the game at this step
+            if (!g.equip(lab_empty, s.game_slot, &err)) return fault("in its equip (lab refusal)", true, false);
+            if (err == 0) err = 0xEE;  // the game took it: report it as a refusal all the same (the rollback undoes it)
+        } else if (s.op == OpKind::Equip) {
             uint64_t from = s.source;
             if (s.pide) {  // an item entity: where the steps before put it, never the request's slot
                 if (!g.locate(s.pide, &from)) return fault("looking for an item inside the transaction", true, false);
@@ -221,7 +244,9 @@ inline SetOutcome execute(SetEngine& g, const SetJob& job, const PlanOptions& op
         }
     }
     bool would = false;
-    if (!refused && !dry) {
+    if (!refused && !dry && (job.lab.guard_bit || job.lab.commit_anyway) && !g.force_guard_bit())
+        return fault("setting the commit's rollback bit (lab)", true, false);
+    if (!refused && !dry && !job.lab.commit_anyway) {
         if (!g.guards(&would)) return fault("reading the transaction's guards", true, false);
         if (would) {
             refused = true;
@@ -262,7 +287,9 @@ inline SetOutcome execute(SetEngine& g, const SetJob& job, const PlanOptions& op
     SnapStatus dst = SnapStatus::Ok;
     if (!g.read(&done, &dst)) return fault("reading the inventory after the commit", true, true);
     char why[160] = "";
-    if (dst == SnapStatus::Ok && desired(now, done, job.entries, job.count, why, sizeof why)) {
+    const bool met = dst == SnapStatus::Ok && desired(now, done, job.entries, job.count, why, sizeof why);
+    if (met && job.lab.fake_mismatch) std::snprintf(why, sizeof why, "a mismatch faked by the lab");
+    if (met && !job.lab.fake_mismatch) {
         o.status = SetStatus::Done;
         o.flags |= kResultCommitted;
         o.changes = deltas(now, done);

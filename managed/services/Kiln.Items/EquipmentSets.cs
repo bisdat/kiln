@@ -101,7 +101,7 @@ public enum EquipmentSetStatus
     Dropped = 7,
     /// <summary>After the transaction the inventory was neither as asked nor as before (or the game faulted inside it):
     /// something may have changed (<see cref="EquipmentSetResult.MayHaveMutated"/>). Equipment sets are switched off
-    /// until the server restarts, and <c>EquipmentSetFaultedEvent</c> is posted.</summary>
+    /// until the server restarts, and <see cref="EquipmentSetFaultedEvent"/> is posted.</summary>
     InvariantFailure = 8,
     /// <summary>Equipment sets went off after the call was accepted.</summary>
     Unavailable = 9,
@@ -144,6 +144,60 @@ public sealed record EquipmentSetResult(EquipmentSetStatus Status, string? Reaso
     internal static EquipmentSetResult NotRun(EquipmentSetStatus status, string reason, EntityId player, bool dryRun, ulong ticket = 0,
         DecisionId? decision = null) =>
         new(status, reason, player, ticket, decision, dryRun, false, false, null, 0, []);
+}
+
+/// <summary>
+/// A set changed a player's equipment: posted once per committed set (Kiln's <c>Items.EquipSet</c>), on the tick thread
+/// in the Pre its result arrives in, before the asking mod's task continues; also when that mod unloaded first. One event
+/// for the whole set, with one change per slot that really changed. <see cref="Outcome"/> is
+/// <see cref="EquipmentSetStatus.Done"/>, or <see cref="EquipmentSetStatus.InvariantFailure"/> when the transaction left
+/// the inventory neither as asked nor as before and these are the changes that could still be read. Not for a dry run,
+/// a refusal or a cancel. Not cancelable (it already happened). Capability <c>items.equip_sets</c>. Since
+/// 0.2.0-dev.29.
+/// </summary>
+[ServerOnly, TickThreadOnly]
+public sealed class EquipmentSetChangedEvent : KilnEvent, IEntityEvent
+{
+    /// <summary>Makes the event (Kiln posts it; a mod has no reason to).</summary>
+    public EquipmentSetChangedEvent(EntityId player, ulong ticket, EquipmentSetStatus outcome, IEnumerable<EquipmentSlotChange> changes)
+    {
+        ArgumentNullException.ThrowIfNull(changes);
+        Player = player;
+        Ticket = ticket;
+        Outcome = outcome;
+        Changes = Array.AsReadOnly(changes.ToArray());
+    }
+
+    /// <summary>The player.</summary>
+    public EntityId Player { get; }
+
+    /// <summary>kiln.items' ticket of the set (<see cref="EquipmentSetResult.Ticket"/>).</summary>
+    public ulong Ticket { get; }
+
+    /// <summary>Done, or InvariantFailure (see the class).</summary>
+    public EquipmentSetStatus Outcome { get; }
+
+    /// <summary>The slots that changed, one each.</summary>
+    public IReadOnlyList<EquipmentSlotChange> Changes { get; }
+
+    /// <summary>Whether the event is about <paramref name="entity"/>: the player.</summary>
+    public bool Involves(EntityId entity) => !entity.IsNone && entity == Player;
+}
+
+/// <summary>
+/// A set's transaction left the inventory neither as asked nor as before, or the game faulted inside it
+/// (<see cref="EquipmentSetStatus.InvariantFailure"/>): something may have changed, and equipment sets are off until
+/// the server restarts. Posted once, on the tick thread, with the set's result; the changes that could still be read
+/// come as an <see cref="EquipmentSetChangedEvent"/> as well. Capability <c>items.equip_sets</c>. Since 0.2.0-dev.29.
+/// </summary>
+[ServerOnly, TickThreadOnly]
+public sealed class EquipmentSetFaultedEvent(EquipmentSetResult result) : KilnEvent, IEntityEvent
+{
+    /// <summary>The set's result (Status InvariantFailure, MayHaveMutated).</summary>
+    public EquipmentSetResult Result { get; } = result ?? throw new ArgumentNullException(nameof(result));
+
+    /// <summary>Whether the event is about <paramref name="entity"/>: the player.</summary>
+    public bool Involves(EntityId entity) => !entity.IsNone && entity == Result.Player;
 }
 
 /// <summary>A plan's snapshot: released once (Dispose) or used up once (an accepted apply), whichever comes first. The

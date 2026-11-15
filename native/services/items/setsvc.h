@@ -33,11 +33,19 @@ SetCounters& set_counters();
 
 // The store under its lock (sets.cpp). take moves a snapshot out (an accepted set); peek_model copies one (a plan).
 sets::SnapStore::Find sets_take(uint64_t token, KilnOwner owner, uint64_t epoch, uint64_t now, sets::SnapEntry* out);
+// take, for `player` only: another player's snapshot is OtherPlayer and stays where it is.
+sets::SnapStore::Find sets_take_for(uint64_t token, KilnOwner owner, uint32_t player, uint64_t epoch, uint64_t now, sets::SnapEntry* out);
+// An item type's EquipmentSlotType from the catalog (0: unknown; the game's equip decides).
+uint8_t sets_slot_type(uint32_t item, void*);
 bool sets_peek_model(uint64_t token, KilnOwner owner, uint64_t epoch, uint64_t now, sets::SnapStore::Find* f, sets::SetModel* model,
                      sets::SnapPrefix* prefix, uint64_t* captured_step);
 
-// The planner's options (setplan.h): cycles and backpack changes stay refused until the rollback matrix passed.
+// The planner's options (setplan.h): cycles and backpack changes stay refused until the rollback matrix passed (a lab
+// turns them on with kiln/data/kiln.items/sets-cycles and sets-backpack, read at start).
 sets::PlanOptions sets_plan_options();
+// The lab switches, read once at start (kiln/data/kiln.items/sets-lab: fault injection on set requests).
+void sets_lab_init();
+bool sets_lab();
 // A plan as the ABI has it (KilnSetPlanV1's status, refusal, steps).
 void sets_fill_plan(const sets::SetPlan& p, uint64_t valid_through, KilnSetPlanV1* out);
 

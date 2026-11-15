@@ -32,6 +32,7 @@
 #include "names.h"
 #include "pide.h"
 #include "sets.h"
+#include "setsvc.h"
 #include "toolwear.h"
 #include "wear.h"
 #include "kiln_api.h"
@@ -70,7 +71,12 @@ static_assert(offsetof(KilnItemsApi, peek_result) == 192 && offsetof(KilnItemsAp
 static_assert(offsetof(KilnItemsApi, equip) == 224 && offsetof(KilnItemsApi, equip_status) == 232);
 // v6 (0.2.0-dev.29) appends the equipment sets after equip_status; a v5 reader's table ends at 240.
 static_assert(offsetof(KilnItemsApi, set_capture) == 240 && offsetof(KilnItemsApi, set_release_snapshot) == 248 &&
-              offsetof(KilnItemsApi, set_status) == 256 && offsetof(KilnItemsApi, set_plan) == 264 && sizeof(KilnItemsApi) == 272);
+              offsetof(KilnItemsApi, set_status) == 256 && offsetof(KilnItemsApi, set_plan) == 264 &&
+              offsetof(KilnItemsApi, equip_set) == 272 && offsetof(KilnItemsApi, set_cancel) == 280 && sizeof(KilnItemsApi) == 288);
+static_assert(sizeof(KilnSetRequestV1) == 56 && offsetof(KilnSetRequestV1, entries) == 16 && offsetof(KilnSetRequestV1, process_session) == 40);
+static_assert(sizeof(KilnSetSlotValueV1) == 32 && sizeof(KilnSetChangeV1) == 72);
+static_assert(sizeof(KilnSetResultV1) == 1760 && offsetof(KilnSetResultV1, ticket) == 16 && offsetof(KilnSetResultV1, player) == 48 &&
+              offsetof(KilnSetResultV1, reason) == 64 && offsetof(KilnSetResultV1, changes) == 320);
 static_assert(sizeof(KilnItemsEquipRequest) == 32 && offsetof(KilnItemsEquipRequest, slot) == 16 &&
               offsetof(KilnItemsEquipRequest, pide) == 24);
 static_assert(sizeof(KilnItemsEquipResult) == 256 && offsetof(KilnItemsEquipResult, item) == 32 &&
@@ -1536,6 +1542,10 @@ KilnResult KILN_CALL t_set_status(KilnSetStatusV1* out) { return sets_status(out
 KilnResult KILN_CALL t_set_plan(KilnOwner owner, uint64_t token, const KilnSetOpV1* entries, uint32_t count, KilnSetPlanV1* out) {
     return sets_plan(owner, token, entries, count, out);
 }
+KilnResult KILN_CALL t_equip_set(KilnOwner owner, const KilnSetRequestV1* r, KilnSetDoneV1 done, void* user, uint64_t* ticket) {
+    return equip_set_submit(owner, r, done, user, ticket);
+}
+KilnResult KILN_CALL t_set_cancel(uint64_t ticket) { return equip_set_cancel(ticket); }
 
 const KilnItemsApi kTable = {
     {sizeof(KilnItemsApi), KILN_ITEMS_VERSION},
@@ -1546,7 +1556,7 @@ const KilnItemsApi kTable = {
     &t_peek_result,
     &t_read_instances, &t_read_holder, &t_instances_status,
     &t_equip, &t_equip_status,
-    &t_set_capture, &t_set_release, &t_set_status, &t_set_plan,
+    &t_set_capture, &t_set_release, &t_set_status, &t_set_plan, &t_equip_set, &t_set_cancel,
 };
 
 // ============================================================================================= self-test =======
@@ -2038,6 +2048,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     info->on_ready = &on_ready;
     resolve();
     selftest_init();
+    sets_lab_init();  // v6: the equipment sets' lab switches (kiln/data/kiln.items/sets-*), read once
     KilnHandle h = 0;
     if (!cst("storage.kind", &g_storage_kind)) g_storage_kind = -1;
     api->subscribe_world(owner, &on_world, nullptr, &h);

@@ -155,7 +155,7 @@ public:
     // Drops expired snapshots first (`now`), then stores `e` under a new token (*token).
     Put put(SnapEntry&& e, uint64_t now, uint64_t* token);
 
-    enum class Find { Ok, Unknown, OtherOwner, Expired, OtherWorld, StampsReset };
+    enum class Find { Ok, Unknown, OtherOwner, Expired, OtherWorld, StampsReset, OtherPlayer };
     // The snapshot `token` for `owner` in world `epoch` with stamp epoch `stamp_epoch` at step `now`. Ok: *out points at
     // it (valid until the next call). An expired one is removed and reported Expired; one of another world or stamp
     // epoch is removed and reported so.

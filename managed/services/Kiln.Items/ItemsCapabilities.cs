@@ -144,6 +144,7 @@ public static unsafe partial class Items
                 RefreshMoves();
                 RefreshEquip();
                 RefreshEquipSets();
+                SetHeartbeat(step);
             });
         }
         // tool wear (dev.28): its own table, published by the same DLL

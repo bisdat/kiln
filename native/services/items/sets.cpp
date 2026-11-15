@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <mutex>
 #include <vector>
 
@@ -387,11 +388,16 @@ KilnResult sets_status(KilnSetStatusV1* out) {
 // ---- planning ----
 
 namespace {
-uint8_t slot_type_of_item(uint32_t item, void*) {
+uint8_t slot_type_of_item(uint32_t item, void* ctx) { return sets_slot_type(item, ctx); }
+}  // namespace
+
+uint8_t sets_slot_type(uint32_t item, void*) {
     KilnItemInfo info{};
     info.size = sizeof info;
     return items_item_info(item, &info) == KILN_OK ? info.equip_slot : 0;  // unknown: the game's equip decides
 }
+
+namespace {
 
 const char* find_text(SnapStore::Find f) {
     switch (f) {
@@ -401,12 +407,34 @@ const char* find_text(SnapStore::Find f) {
         case SnapStore::Find::Expired: return "the snapshot expired (250 steps after it was taken)";
         case SnapStore::Find::OtherWorld: return "the snapshot is of another server world";
         case SnapStore::Find::StampsReset: return "the item stamps were reset since the snapshot (the engine's id counter went down)";
+        case SnapStore::Find::OtherPlayer: return "the snapshot is another player's";
     }
     return "the snapshot cannot be used";
 }
 }  // namespace
 
-PlanOptions sets_plan_options() { return PlanOptions{}; }
+namespace {
+bool g_lab = false;
+PlanOptions g_plan_options;
+}  // namespace
+
+void sets_lab_init() {
+    char buf[1024];
+    size_t len = 0;
+    if (items_api()->path(KILN_PATH_DATA, buf, sizeof buf, &len) != KILN_OK) return;
+    std::error_code ec;
+    const std::filesystem::path dir = std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(buf), len)) / "kiln.items";
+    g_lab = std::filesystem::exists(dir / "sets-lab", ec);
+    g_plan_options.cycles = std::filesystem::exists(dir / "sets-cycles", ec);
+    g_plan_options.backpack = std::filesystem::exists(dir / "sets-backpack", ec);
+    if (g_lab || g_plan_options.cycles || g_plan_options.backpack)
+        LOGW("equipment sets: lab switches%s%s%s (kiln/data/kiln.items): never on a player's server", g_lab ? " sets-lab (fault injection)" : "",
+             g_plan_options.cycles ? " sets-cycles" : "", g_plan_options.backpack ? " sets-backpack" : "");
+}
+
+bool sets_lab() { return g_lab; }
+
+PlanOptions sets_plan_options() { return g_plan_options; }
 
 void sets_fill_plan(const SetPlan& p, uint64_t valid_through, KilnSetPlanV1* out) {
     out->status = p.status == SetPlan::Planned ? KILN_SET_PLAN_PLANNED : p.status == SetPlan::NoChange ? KILN_SET_PLAN_NO_CHANGE : KILN_SET_PLAN_REFUSED;
@@ -493,6 +521,16 @@ void sets_cancel_owner(KilnOwner owner) {
 SnapStore::Find sets_take(uint64_t token, KilnOwner owner, uint64_t epoch, uint64_t now, SnapEntry* out) {
     std::lock_guard lock(g_mu);
     const SnapStore::Find f = g_store.take(token, owner, epoch, instances_epoch(), now, out);
+    g_live.store(static_cast<uint32_t>(g_store.size()));
+    return f;
+}
+
+SnapStore::Find sets_take_for(uint64_t token, KilnOwner owner, uint32_t player, uint64_t epoch, uint64_t now, SnapEntry* out) {
+    std::lock_guard lock(g_mu);
+    const SnapEntry* e = nullptr;
+    SnapStore::Find f = g_store.peek(token, owner, epoch, instances_epoch(), now, &e);
+    if (f == SnapStore::Find::Ok && e->prefix.player != player) f = SnapStore::Find::OtherPlayer;
+    else if (f == SnapStore::Find::Ok) f = g_store.take(token, owner, epoch, instances_epoch(), now, out);
     g_live.store(static_cast<uint32_t>(g_store.size()));
     return f;
 }

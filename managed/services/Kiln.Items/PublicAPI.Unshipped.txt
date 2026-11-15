@@ -58,6 +58,13 @@ Kiln.EquipmentSetCaptureResult.Reason.get -> string?
 Kiln.EquipmentSetCaptureResult.Reason.init -> void
 Kiln.EquipmentSetCaptureResult.Set.get -> Kiln.EquipmentSet?
 Kiln.EquipmentSetCaptureResult.Set.init -> void
+Kiln.EquipmentSetChangedEvent
+Kiln.EquipmentSetChangedEvent.Changes.get -> System.Collections.Generic.IReadOnlyList<Kiln.EquipmentSlotChange!>!
+Kiln.EquipmentSetChangedEvent.EquipmentSetChangedEvent(Kiln.EntityId player, ulong ticket, Kiln.EquipmentSetStatus outcome, System.Collections.Generic.IEnumerable<Kiln.EquipmentSlotChange!>! changes) -> void
+Kiln.EquipmentSetChangedEvent.Involves(Kiln.EntityId entity) -> bool
+Kiln.EquipmentSetChangedEvent.Outcome.get -> Kiln.EquipmentSetStatus
+Kiln.EquipmentSetChangedEvent.Player.get -> Kiln.EntityId
+Kiln.EquipmentSetChangedEvent.Ticket.get -> ulong
 Kiln.EquipmentSetEntry
 Kiln.EquipmentSetEntry.<Clone>$() -> Kiln.EquipmentSetEntry!
 Kiln.EquipmentSetEntry.Deconstruct(out Kiln.EquipmentSlot Slot, out Kiln.EquipmentSetSelection! Selection) -> void
@@ -67,6 +74,10 @@ Kiln.EquipmentSetEntry.Selection.get -> Kiln.EquipmentSetSelection!
 Kiln.EquipmentSetEntry.Selection.init -> void
 Kiln.EquipmentSetEntry.Slot.get -> Kiln.EquipmentSlot
 Kiln.EquipmentSetEntry.Slot.init -> void
+Kiln.EquipmentSetFaultedEvent
+Kiln.EquipmentSetFaultedEvent.EquipmentSetFaultedEvent(Kiln.EquipmentSetResult! result) -> void
+Kiln.EquipmentSetFaultedEvent.Involves(Kiln.EntityId entity) -> bool
+Kiln.EquipmentSetFaultedEvent.Result.get -> Kiln.EquipmentSetResult!
 Kiln.EquipmentSetJson
 Kiln.EquipmentSetPlan
 Kiln.EquipmentSetPlan.<Clone>$() -> Kiln.EquipmentSetPlan!
@@ -243,6 +254,14 @@ Kiln.StackEquipment.Item.init -> void
 Kiln.StackEquipment.Source.get -> Kiln.SlotId
 Kiln.StackEquipment.Source.init -> void
 Kiln.StackEquipment.StackEquipment(Kiln.ItemId Item, Kiln.SlotId Source, int ExpectedCount) -> void
+[KILNX001]Kiln.LabSetFault
+[KILNX001]Kiln.LabSetFault.CancelAtOnce = 5 -> Kiln.LabSetFault
+[KILNX001]Kiln.LabSetFault.CommitAnyway = 3 -> Kiln.LabSetFault
+[KILNX001]Kiln.LabSetFault.FakeMismatch = 4 -> Kiln.LabSetFault
+[KILNX001]Kiln.LabSetFault.GuardBit = 2 -> Kiln.LabSetFault
+[KILNX001]Kiln.LabSetFault.None = 0 -> Kiln.LabSetFault
+[KILNX001]Kiln.LabSetFault.RefuseStep = 1 -> Kiln.LabSetFault
+[KILNX001]static Kiln.Items.LabEquipSet(Kiln.EntityId player, Kiln.EquipmentSet! set, Kiln.LabSetFault fault, int step = 0, Kiln.EquipOptions options = Kiln.EquipOptions.None) -> System.Threading.Tasks.Task<Kiln.EquipmentSetResult!>!
 abstract Kiln.EquipmentChange.<Clone>$() -> Kiln.EquipmentChange!
 abstract Kiln.EquipmentSetSelection.<Clone>$() -> Kiln.EquipmentSetSelection!
 const Kiln.EquipmentSetJson.Schema = 1 -> int
@@ -353,6 +372,8 @@ static Kiln.InstanceEquipment.operator ==(Kiln.InstanceEquipment? left, Kiln.Ins
 static Kiln.InventorySnapshotToken.operator !=(Kiln.InventorySnapshotToken left, Kiln.InventorySnapshotToken right) -> bool
 static Kiln.InventorySnapshotToken.operator ==(Kiln.InventorySnapshotToken left, Kiln.InventorySnapshotToken right) -> bool
 static Kiln.Items.CaptureSet(Kiln.EntityId player) -> Kiln.EquipmentSetCaptureResult!
+static Kiln.Items.EquipSet(Kiln.EntityId player, Kiln.EquipmentSet! set, Kiln.EquipOptions options = Kiln.EquipOptions.None) -> System.Threading.Tasks.Task<Kiln.EquipmentSetResult!>!
+static Kiln.Items.EquipSet(Kiln.EquipmentSetPlan! plan, Kiln.EquipOptions options = Kiln.EquipOptions.None) -> System.Threading.Tasks.Task<Kiln.EquipmentSetResult!>!
 static Kiln.Items.PlanSet(Kiln.EntityId player, Kiln.EquipmentSet! set) -> Kiln.EquipmentSetPlanResult!
 static Kiln.SetEquipmentChange.operator !=(Kiln.SetEquipmentChange? left, Kiln.SetEquipmentChange? right) -> bool
 static Kiln.SetEquipmentChange.operator ==(Kiln.SetEquipmentChange? left, Kiln.SetEquipmentChange? right) -> bool

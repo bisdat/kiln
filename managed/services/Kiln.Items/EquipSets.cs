@@ -1,8 +1,37 @@
 // SPDX-License-Identifier: MIT
 // Equipment sets on the managed side: kiln.items v6 (native/core/abi/services/kiln_items.h "equipment sets"; chapter 10
 // of the dev.28 dossier). CaptureSet reads a player's 20 equipment slots; the native snapshot (set_capture) is what a
-// plan and an apply are checked against. Capability items.equip_sets.
+// plan and an apply are checked against; EquipSet submits one set as one transaction through Kiln's own owner (0) and
+// names the asking mod as the snapshot's owner, so a commit is reported (EquipmentSetChangedEvent) even when that mod
+// unloads first. Capability items.equip_sets.
+using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
+#pragma warning disable KILNX001  // LabEquipSet and its LabSetFault are this file's own lab members
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+
 namespace Kiln;
+
+/// <summary>Lab only: a fault injected into a real run of an equipment set (<see cref="Items.LabEquipSet"/>). Needs
+/// <c>kiln/data/kiln.items/sets-lab</c> when the server starts; never on a player's server.</summary>
+[Experimental("KILNX001", UrlFormat = "https://github.com/frostdev-ops/kiln/blob/main/docs/kiln/modding/analyzers.md#kilnx001")]
+[EditorBrowsable(EditorBrowsableState.Never)]
+public enum LabSetFault
+{
+    /// <summary>No fault.</summary>
+    None = 0,
+    /// <summary>The game's equip at the given step is called with an empty source slot: a real refusal mid-way.</summary>
+    RefuseStep = 1,
+    /// <summary>The commit's own rollback bit (0x40) is set after the steps: refused before the commit.</summary>
+    GuardBit = 2,
+    /// <summary>The bit is set and the commit is called anyway: the game's commit rolls back by itself.</summary>
+    CommitAnyway = 3,
+    /// <summary>After the commit the request is read as unmet: InvariantFailure (equipment sets go off until the server
+    /// restarts).</summary>
+    FakeMismatch = 4,
+    /// <summary>The set is canceled right after it was queued (set_cancel, as when the asking mod unloads).</summary>
+    CancelAtOnce = 5,
+}
 
 public static unsafe partial class Items
 {
@@ -134,6 +163,410 @@ public static unsafe partial class Items
             new InventorySnapshotToken(snap.Token, snap.WorldEpoch, player), plan.ValidThroughStep, steps, (int)plan.RequiredFreeSlots) { Lease = lease });
     }
 
+    /// <summary>
+    /// Changes <paramref name="player"/>'s equipment to <paramref name="set"/> in one inventory transaction: every slot
+    /// the set names changes, or none does. Slots the set leaves out stay as they are; <see cref="EmptyEquipment"/> takes
+    /// off what a slot holds (into a free backpack slot). Takes a snapshot now and plans from it (as
+    /// <see cref="PlanSet"/>); the transaction runs a step or two later inside the server's own equip program, after one
+    /// <see cref="PlayerEquippingEvent"/> for the whole set (<see cref="SetEquipmentChange"/>): a handler that cancels it
+    /// stops it. The change reaches the player as their own equips do.
+    /// </summary>
+    /// <param name="player">The player character (the set's own player).</param>
+    /// <param name="set">The set (from <see cref="CaptureSet"/>, a subset of one, or one built with its scope).</param>
+    /// <param name="options"><see cref="EquipOptions.DryRun"/>: run the transaction and roll it back; nothing changes.</param>
+    /// <returns>Completes on the tick thread with the result, once. <see cref="EquipmentSetResult.Ok"/> for Done, NoChange
+    /// and Simulated; anything else changed nothing, except <see cref="EquipmentSetStatus.InvariantFailure"/>
+    /// (<see cref="EquipmentSetResult.MayHaveMutated"/>, and equipment sets go off until the server restarts). A stale
+    /// scope or snapshot, a full budget or queue and a refusal of the planner or the game are results, not exceptions.</returns>
+    /// <remarks>Order: FIFO with the player's single <see cref="Equip"/> and <see cref="Unequip"/> requests, at most one set
+    /// per player and step. A set that did not run within 250 steps ends <see cref="EquipmentSetStatus.Dropped"/>, as does
+    /// a set whose server world stops, or whose mod unloads before it ran (a set that already ran is still reported).
+    /// The player's hotbar, main hand and building materials are never part of a set. Sets are for the current session
+    /// only: nothing is saved, and a set of another session is refused.</remarks>
+    /// <exception cref="ArgumentException"><paramref name="player"/> is none or not the set's player, unknown options, or
+    /// the set breaks the rules of a set.</exception>
+    /// <exception cref="InvalidOperationException">Not on the tick thread, inside the server world's step, or the calling
+    /// mod is unloading.</exception>
+    /// <exception cref="KilnUnavailableException">The capability <c>items.equip_sets</c> is off.</exception>
+    /// <example><code>
+    /// EquipmentSetResult r = await Items.EquipSet(player, sets["night"]);
+    /// if (!r.Ok) Log.Info($"not applied: {r.Status} {r.Reason}");
+    /// </code></example>
+    [ServerOnly]
+    [TickThreadOnly]
+    [RequiresCapability(Caps.EquipSets)]
+    public static Task<EquipmentSetResult> EquipSet(EntityId player, EquipmentSet set, EquipOptions options = EquipOptions.None) =>
+        ApplySet(player, set, options, LabSetFault.None, 0, "Items.EquipSet");
+
+    /// <summary>Lab only: <see cref="EquipSet(EntityId, EquipmentSet, EquipOptions)"/> with a fault injected into the real
+    /// run (<see cref="LabSetFault"/>). Throws <see cref="ArgumentException"/> unless <c>kiln/data/kiln.items/sets-lab</c>
+    /// existed when the server started.</summary>
+    [Experimental("KILNX001", UrlFormat = "https://github.com/frostdev-ops/kiln/blob/main/docs/kiln/modding/analyzers.md#kilnx001")]
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    [ServerOnly]
+    [TickThreadOnly]
+    public static Task<EquipmentSetResult> LabEquipSet(EntityId player, EquipmentSet set, LabSetFault fault, int step = 0, EquipOptions options = EquipOptions.None)
+    {
+        if (!Enum.IsDefined(fault)) throw new ArgumentException($"unknown fault {fault}", nameof(fault));
+        if (step is < 0 or > 255) throw new ArgumentOutOfRangeException(nameof(step));
+        return ApplySet(player, set, options, fault, step, "Items.LabEquipSet");
+    }
+
+    private static Task<EquipmentSetResult> ApplySet(EntityId player, EquipmentSet set, EquipOptions options, LabSetFault fault, int step, string api)
+    {
+        Services.RequireTickThread(api);
+        if (player.IsNone) throw new ArgumentException("no player", nameof(player));
+        var entries = EquipmentSetRules.Check(set, nameof(set));
+        if (set.Scope.Player.Entity != player.Value) throw new ArgumentException($"the set is player {set.Scope.Player.Entity}'s, not {player}'s", nameof(set));
+        CheckOptions(options);
+        var dry = options.HasFlag(EquipOptions.DryRun);
+        var t = RequireSets();
+        var w = WindowNow("Items.EquipSet");
+        var mod = ModContext.CurrentMod;
+        if (mod is { Alive: false }) throw new InvalidOperationException("the mod is unloading");
+        var owner = mod?.Owner ?? 0;
+        var snap = Snapshot(t, owner, player, set.Scope, w, api);
+        if (!snap.Ok) return Task.FromResult(EquipmentSetResult.NotRun(snap.Status, snap.Reason!, player, dry));
+        var lab = fault switch
+        {
+            LabSetFault.RefuseStep => ItemsNative.SetRequestLabFailStep | (uint)step << 16,
+            LabSetFault.GuardBit => ItemsNative.SetRequestLabGuardBit,
+            LabSetFault.CommitAnyway => ItemsNative.SetRequestLabCommitAnyway,
+            LabSetFault.FakeMismatch => ItemsNative.SetRequestLabFakeMismatch,
+            _ => 0u,
+        };
+        return SubmitSet(t, owner, mod, player, set.Scope, entries, snap.Token, snap.WorldEpoch, dry, null, w, lab, fault == LabSetFault.CancelAtOnce);
+    }
+
+    /// <summary>
+    /// Applies a plan of <see cref="PlanSet"/>: the set it was made for, checked against the snapshot it holds (anything
+    /// that changed the inventory since: <see cref="EquipmentSetStatus.StaleSnapshot"/>, nothing changed). The plan is
+    /// used up (a plan applies once); its steps are not replayed, the transaction plans again from the snapshot.
+    /// Otherwise as <see cref="EquipSet(EntityId, EquipmentSet, EquipOptions)"/>.
+    /// </summary>
+    /// <param name="plan">The plan (of the calling mod).</param>
+    /// <param name="options"><see cref="EquipOptions.DryRun"/>: run the transaction and roll it back.</param>
+    /// <returns>As the other overload; a plan applied or disposed before is <see cref="EquipmentSetStatus.StaleSnapshot"/>.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="plan"/> is null.</exception>
+    /// <exception cref="ArgumentException">The plan's set breaks the rules of a set, its player is not the set's, it is
+    /// another mod's plan, or unknown options.</exception>
+    /// <exception cref="InvalidOperationException">Not on the tick thread, inside the server world's step, or the calling
+    /// mod is unloading.</exception>
+    /// <exception cref="KilnUnavailableException">The capability <c>items.equip_sets</c> is off.</exception>
+    [ServerOnly]
+    [TickThreadOnly]
+    [RequiresCapability(Caps.EquipSets)]
+    public static Task<EquipmentSetResult> EquipSet(EquipmentSetPlan plan, EquipOptions options = EquipOptions.None)
+    {
+        Services.RequireTickThread("Items.EquipSet");
+        ArgumentNullException.ThrowIfNull(plan);
+        var entries = EquipmentSetRules.Check(plan.Set, nameof(plan));
+        if (plan.Player.IsNone || plan.Set.Scope.Player.Entity != plan.Player.Value)
+            throw new ArgumentException($"the plan is for player {plan.Player}, its set for {plan.Set.Scope.Player.Entity}", nameof(plan));
+        CheckOptions(options);
+        var dry = options.HasFlag(EquipOptions.DryRun);
+        var t = RequireSets();
+        var w = WindowNow("Items.EquipSet");
+        var mod = ModContext.CurrentMod;
+        if (mod is { Alive: false }) throw new InvalidOperationException("the mod is unloading");
+        var owner = mod?.Owner ?? 0;
+        if (plan.Lease is { } lease && lease.Owner != owner) throw new ArgumentException("the plan is another mod's", nameof(plan));
+        var rc = DecisionBroker.ResolveEntity(plan.Player, out var key, out _);
+        if (rc == DecisionsNative.WrongThread) throw new InvalidOperationException("Items.EquipSet: the server world is inside its step (call it in Pre or Post)");
+        var stale = rc != DecisionsNative.Ok ? $"no player {plan.Player} in the world with an identity kiln.decisions can tell apart (the player left)"
+            : EquipmentSetRules.Stale(plan.Set.Scope, w.ProcessSession, w.WorldEpoch, key);
+        if (stale is not null) return Task.FromResult(EquipmentSetResult.NotRun(EquipmentSetStatus.StaleSnapshot, "StaleSnapshot: " + stale, plan.Player, dry));
+        if (plan.Lease is { } held && !held.TryUse())
+            return Task.FromResult(EquipmentSetResult.NotRun(EquipmentSetStatus.StaleSnapshot, "StaleSnapshot: the plan was applied or disposed already (plan again)", plan.Player, dry));
+        return SubmitSet(t, owner, mod, plan.Player, plan.Set.Scope, entries, plan.Snapshot.Value, plan.Snapshot.WorldEpoch, dry, plan.Lease, w);
+    }
+
+    // ---- the bridge: one pending entry per accepted set, under a key that is never reused ----
+
+    private sealed class PendingSet(TaskCompletionSource<EquipmentSetResult> tcs, ModContext? mod, EntityId player, EquipmentSetScope scope,
+        EquipmentSetEntry[] entries, bool dry, ulong token, ulong epoch, ulong step)
+    {
+        public readonly TaskCompletionSource<EquipmentSetResult> Tcs = tcs;
+        public readonly ModContext? Mod = mod;
+        public readonly EntityId Player = player;
+        public readonly EquipmentSetScope Scope = scope;
+        public readonly EquipmentSetEntry[] Entries = entries;
+        public readonly bool DryRun = dry;
+        public readonly ulong Token = token, WorldEpoch = epoch, SubmittedStep = step;
+        public ulong Ticket;
+        public bool Retired;
+    }
+
+    private static readonly object SetGate = new();
+    private static readonly Dictionary<long, PendingSet> SetsInFlight = new();
+    private static readonly HashSet<ModContext> SetsWatched = new();
+    private static long _nextSet;
+
+    /// <summary>How long Kiln.Items waits for kiln.items' result past its own 250-step limit before it ends the task by
+    /// itself and switches sets off (a lost result must not hang a mod).</summary>
+    internal const ulong SetHeartbeatSteps = 400;
+
+    private static Task<EquipmentSetResult> SubmitSet(ItemsNative.TableV6* t, ulong owner, ModContext? mod, EntityId player, EquipmentSetScope scope,
+        EquipmentSetEntry[] entries, ulong token, ulong epoch, bool dry, EquipmentSetLease? lease, WindowState w, uint lab = 0, bool cancelAtOnce = false)
+    {
+        EnsureSetDecisions();
+        var ops = OpsOf(entries);
+        var tcs = new TaskCompletionSource<EquipmentSetResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var key = TrackSet(tcs, mod, player, scope, entries, dry, token, epoch, w.Step);
+        var req = new ItemsNative.SetRequest
+        {
+            Size = (uint)sizeof(ItemsNative.SetRequest),
+            Player = player.Value,
+            Flags = (dry ? ItemsNative.SetRequestDryRun : 0) | lab,
+            Count = (uint)ops.Length,
+            SnapshotToken = token,
+            OriginOwner = owner,
+        };
+        w.ProcessSession.TryWriteBytes(new Span<byte>(req.ProcessSession, 16));
+        ulong ticket = 0;
+        int rc;
+        fixed (EquipDecisions.SetOp* e = ops)
+        {
+            req.Entries = e;
+            // owner 0: Kiln's own, so the asking mod's unload does not erase the report of a set already asked for
+            rc = t->EquipSet(0, &req, &OnSetDone, (void*)key, &ticket);
+        }
+        if (rc == ItemsNative.Ok)
+        {
+            lock (SetGate)
+                if (SetsInFlight.TryGetValue(key, out var p)) p.Ticket = ticket;
+            if (cancelAtOnce) t->SetCancel(ticket);  // lab: as a mod's unload does
+            return tcs.Task;
+        }
+        lock (SetGate) SetsInFlight.Remove(key);
+        // not taken: give the snapshot back (a plan's stays usable when the call was refused before it was looked up)
+        if (rc is ItemsNative.BufferTooSmall or ItemsNative.InvalidArgument or ItemsNative.Unavailable && lease != null) lease.Unuse();
+        else ReleaseSnapshot(owner, token);
+        return rc switch
+        {
+            ItemsNative.NotFound => Task.FromResult(EquipmentSetResult.NotRun(EquipmentSetStatus.StaleSnapshot,
+                "StaleSnapshot: the snapshot is gone (used, expired, released, another world or process) or the scope is another process's", player, dry)),
+            ItemsNative.BufferTooSmall => Task.FromResult(EquipmentSetResult.NotRun(EquipmentSetStatus.Refused, "Refused: 256 sets are waiting: try again in a step", player, dry)),
+            ItemsNative.InvalidArgument => throw new ArgumentException("Items.EquipSet: kiln.items refused the set's arguments"),
+            _ => throw new KilnUnavailableException(Caps.EquipSets, SetStatusOf(t)?.Detail is { Length: > 0 } d ? d : $"kiln.items refused the set (error {rc})"),
+        };
+    }
+
+    /// <summary>A set in flight, by the key its native request carries (never reused in the process).</summary>
+    internal static long TrackSet(TaskCompletionSource<EquipmentSetResult> tcs, ModContext? mod, EntityId player, EquipmentSetScope scope,
+        EquipmentSetEntry[] entries, bool dry, ulong token, ulong epoch, ulong step, ulong ticket = 0)
+    {
+        lock (SetGate)
+        {
+            var key = ++_nextSet;
+            SetsInFlight[key] = new PendingSet(tcs, mod, player, scope, entries, dry, token, epoch, step) { Ticket = ticket };
+            if (mod != null && SetsWatched.Add(mod)) mod.Retiring += () => RetireSets(mod);
+            return key;
+        }
+    }
+
+    /// <summary>Sets in flight (tests).</summary>
+    internal static int SetsPending
+    {
+        get
+        {
+            lock (SetGate) return SetsInFlight.Count;
+        }
+    }
+
+    // The mod unloads: its sets that did not start end Dropped (kiln.items keeps the callback, the result still comes and
+    // is reported); its tasks are left alone (their continuations are the unloaded mod's code).
+    private static void RetireSets(ModContext mod)
+    {
+        List<ulong> tickets = [];
+        lock (SetGate)
+        {
+            SetsWatched.Remove(mod);
+            foreach (var p in SetsInFlight.Values)
+                if (p.Mod == mod)
+                {
+                    p.Retired = true;
+                    if (p.Ticket != 0) tickets.Add(p.Ticket);
+                }
+        }
+        var t = V6;
+        if (t == null) return;
+        foreach (var ticket in tickets) t->SetCancel(ticket);  // NotFound: it already ran or is running; its result is reported
+    }
+
+    /// <summary>A native result arrived (tick thread, Pre, or the world's stop): the events hear of every committed
+    /// change, the asking mod's task when it is still loaded.</summary>
+    internal static void CompleteSet(long key, EquipmentSetResult result)
+    {
+        PendingSet? p;
+        lock (SetGate) SetsInFlight.Remove(key, out p);
+        if (result.Status == EquipmentSetStatus.InvariantFailure) SetsFaulted(result.Reason);
+        try
+        {
+            // native-owned facts: posted also when the asking mod unloaded; on the thread that stops the world they come at
+            // the start of the next step
+            var tick = Game.IsTickThread;
+            void Send(KilnEvent ev)
+            {
+                if (tick) Events.Post(ev);
+                else Events.Enqueue(ev);
+            }
+            if (result.Changes.Count > 0 && Events.HasSubscribers<EquipmentSetChangedEvent>())
+                Send(new EquipmentSetChangedEvent(result.Player, result.Ticket, result.Status, result.Changes));
+            if (result.Status == EquipmentSetStatus.InvariantFailure && Events.HasSubscribers<EquipmentSetFaultedEvent>())
+                Send(new EquipmentSetFaultedEvent(result));
+        }
+        catch (Exception e)
+        {
+            Backend.Current.Log(0, LogLevel.Error, $"kiln.items: posting an equipment set's events failed: {e.Message}");
+        }
+        if (p is { Retired: false }) p.Tcs.TrySetResult(result);  // the task completes whatever the events did
+    }
+
+    /// <summary>The managed result of a native one (pure: the unit tests build native results by hand).</summary>
+    internal static EquipmentSetResult ToSetResult(in ItemsNative.SetResult n)
+    {
+        var status = n.Status <= (uint)EquipmentSetStatus.Unavailable ? (EquipmentSetStatus)n.Status : EquipmentSetStatus.InvariantFailure;
+        string text;
+        fixed (byte* r = n.Reason) text = ItemsNative.Text(r, 256);
+        var ok = status is EquipmentSetStatus.Done or EquipmentSetStatus.NoChange or EquipmentSetStatus.Simulated;
+        var reason = ok ? null
+            : status is EquipmentSetStatus.Refused or EquipmentSetStatus.StaleSnapshot ? ReasonOf(n.Refusal != 0 ? n.Refusal : status == EquipmentSetStatus.StaleSnapshot ? 5u : 0u, text)
+            : text.Length > 0 ? $"{status}: {text}" : status.ToString();
+        var changes = new EquipmentSlotChange[Math.Min(n.ChangeCount, 20)];
+        fixed (byte* c = n.Changes)
+            for (var i = 0; i < changes.Length; i++)
+            {
+                var raw = ((ItemsNative.SetChange*)c)[i];
+                if (SlotOfGame((byte)raw.EquipmentSlot) is not { } slot) continue;
+                changes[i] = new EquipmentSlotChange(slot, ValueOf(raw.Before), ValueOf(raw.After));
+            }
+        return new EquipmentSetResult(status, reason, new EntityId(n.Player), n.Ticket, n.DecisionId != 0 ? new DecisionId(n.WorldEpoch, n.DecisionId) : null,
+            (n.Flags & ItemsNative.SetResultDryRun) != 0, (n.Flags & ItemsNative.SetResultCommitted) != 0, (n.Flags & ItemsNative.SetResultMayHaveMutated) != 0,
+            n.FailedOperation == uint.MaxValue ? null : (int)n.FailedOperation, (int)n.GameError, changes.Where(x => x is not null).ToArray());
+    }
+
+    private static EquipmentSlotValue ValueOf(in ItemsNative.SetSlotValue v) =>
+        new(new ItemId(v.ItemId), ItemRefs.Of(v.ItemEntity, v.ItemId, (uint)v.InstanceStamp), new SlotId(v.InventorySlot), (int)v.Count);
+
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+    private static void OnSetDone(ItemsNative.SetResult* r, void* user)
+    {
+        var outer = ModContext.CurrentMod;
+        ModContext.CurrentMod = null;  // Kiln's own code: the events set each handler's mod, the task its awaiter's
+        try
+        {
+            CompleteSet((long)user, ToSetResult(*r));
+        }
+        catch (Exception e)
+        {
+            // never let an exception cross into native code
+            try { Backend.Current.Log(0, LogLevel.Error, $"kiln.items: completing an equipment set failed: {e}"); } catch { }
+        }
+        finally
+        {
+            ModContext.CurrentMod = outer;
+        }
+    }
+
+    // An invariant failure (or a lost result): kiln.items switched sets off; the row follows now, not in 25 steps.
+    private static void SetsFaulted(string? why)
+    {
+        _setsOff = true;
+        Off(Caps.EquipSets, why ?? "an equipment set failed its check", Caps.Equip, Caps.Instances, Caps.Transaction, Caps.Read);
+    }
+
+    // Every 25 steps (the capability tick): a set kiln.items never answered past its own limit ends here, once.
+    internal static void SetHeartbeat(ulong step)
+    {
+        List<(long Key, PendingSet P)> lost = [];
+        lock (SetGate)
+            foreach (var (k, p) in SetsInFlight)
+                if (p.Ticket != 0 && step > p.SubmittedStep + SetHeartbeatSteps) lost.Add((k, p));
+        if (lost.Count == 0) return;
+        SetsFaulted($"kiln.items never reported {lost.Count} equipment set(s) within {SetHeartbeatSteps} steps");
+        foreach (var (k, p) in lost)
+            CompleteSet(k, EquipmentSetResult.NotRun(EquipmentSetStatus.Dropped, $"Dropped: kiln.items never reported the set within {SetHeartbeatSteps} steps",
+                p.Player, p.DryRun, p.Ticket));
+    }
+
+    // ---- the decision: one PlayerEquippingEvent per set (kiln.decisions kind 18, filed by kiln.items in Pre) ----
+
+    private static int _setDecisions;
+
+    internal static void EnsureSetDecisions()
+    {
+        if (Interlocked.Exchange(ref _setDecisions, 1) == 0) DecisionBroker.Register(SetDecisionProducer.Instance);
+    }
+
+    /// <summary>Test hook: the kind-18 producer goes away, the sets' row state and the pending sets are forgotten.</summary>
+    internal static void ResetSetsForTests()
+    {
+        DecisionBroker.Unregister(SetDecisionProducer.Instance);
+        Volatile.Write(ref _setDecisions, 0);
+        _setsOff = false;
+        _setsSession = (CapabilityState.Available, CapabilityReason.None, "");
+        lock (SetGate)
+        {
+            SetsInFlight.Clear();
+            SetsWatched.Clear();
+        }
+    }
+
+    /// <summary>Test hook: the set under <paramref name="key"/> belongs to a mod that unloaded (its task is left alone).</summary>
+    internal static void RetireSetForTests(long key)
+    {
+        lock (SetGate)
+            if (SetsInFlight.TryGetValue(key, out var p)) p.Retired = true;
+    }
+
+    /// <summary>The <see cref="SetEquipmentChange"/> of a kind-18 request: the set Kiln.Items submitted under that ticket,
+    /// or (a native caller's set) the set the payload names.</summary>
+    internal static SetEquipmentChange SetChangeOf(DecisionRequest request, in ItemsNative.SetDecisionPayload payload)
+    {
+        lock (SetGate)
+            foreach (var p in SetsInFlight.Values)
+                if (p.Ticket == payload.ItemsTicket)
+                    return new SetEquipmentChange(p.Ticket, new InventorySnapshotToken(p.Token, p.WorldEpoch, p.Player), new EquipmentSet(p.Scope, p.Entries), p.DryRun);
+        var entries = new List<EquipmentSetEntry>();
+        fixed (byte* e = payload.Entries)
+            for (var i = 0; i < Math.Min(payload.Count, 20u); i++)
+            {
+                var op = ((EquipDecisions.SetOp*)e)[i];
+                if (SlotOfGame(op.EquipmentSlot) is not { } slot) continue;
+                EquipmentSetSelection sel = op.Kind switch
+                {
+                    1 => new InstanceEquipment(ItemRefs.Of(op.ItemEntity, op.ItemId, (uint)op.InstanceStamp)),
+                    2 => new StackEquipment(new ItemId(op.ItemId), new SlotId(op.SourceSlot), (int)op.ExpectedCount),
+                    _ => new EmptyEquipment(),
+                };
+                entries.Add(new EquipmentSetEntry(slot, sel));
+            }
+        var session = DecisionBroker.Window()?.ProcessSession ?? Guid.Empty;
+        var player = new EntityId(request.Subject.Entity);
+        return new SetEquipmentChange(payload.ItemsTicket, new InventorySnapshotToken(payload.SnapshotToken, request.Id.WorldEpoch, player),
+            new EquipmentSet(new EquipmentSetScope(session, request.Id.WorldEpoch, request.Subject), entries), (payload.Flags & 1) != 0);
+    }
+
+    /// <summary>Kind 18 for the managed dispatcher: one <see cref="PlayerEquippingEvent"/> per set, its verdict the set's.
+    /// It registers no event type: subscribing to <see cref="PlayerEquippingEvent"/> stays 07's <c>events.equip</c>.</summary>
+    internal sealed class SetDecisionProducer : DecisionProducer
+    {
+        internal static readonly SetDecisionProducer Instance = new();
+        public override uint Kind => DecisionsNative.KindEquipSet;
+        public override string Capability => Caps.EquipSets;
+        public override IReadOnlyList<Type> EventTypes { get; } = [];
+        public override DecisionInterest Interest() => DecisionInterest.Nothing;  // kiln.items files every set itself
+
+        public override DecisionVerdict Decide(DecisionRequest request)
+        {
+            if (!Events.HasSubscribers<PlayerEquippingEvent>()) return DecisionVerdict.Allowed;
+            var payload = request.Read<ItemsNative.SetDecisionPayload>();
+            var e = Events.Post(new PlayerEquippingEvent(request.Id, request.Subject, SetChangeOf(request, payload), false, null));
+            return e.Canceled ? DecisionVerdict.Canceled() : DecisionVerdict.Allowed;
+        }
+    }
+
     /// <summary>What an equipment slot that points at <paramref name="at"/> holds, from a read of the player's inventory
     /// (pure: the unit tests build the slots by hand). Null with the reason when it cannot be named.</summary>
     internal static (EquipmentSetSelection? Selection, string? Why) SelectionAt(SlotId at, IReadOnlyList<InventorySlot> slots)
@@ -180,7 +613,8 @@ public static unsafe partial class Items
     }
 
     // A snapshot for a set: the scope checked against now, then kiln.items' set_capture. Not Ok: the reason (nothing held).
-    internal readonly record struct Snap(bool Ok, string? Reason, ulong Token, ulong WorldEpoch, ulong CapturedStep);
+    internal readonly record struct Snap(bool Ok, string? Reason, ulong Token, ulong WorldEpoch, ulong CapturedStep,
+        EquipmentSetStatus Status = EquipmentSetStatus.StaleSnapshot);
 
     internal static Snap Snapshot(ItemsNative.TableV6* t, ulong owner, EntityId player, EquipmentSetScope scope, WindowState w, string api)
     {
@@ -212,7 +646,8 @@ public static unsafe partial class Items
         }
     }
 
-    private static Snap Refused(string reason) => new(false, reason, 0, 0, 0);
+    private static Snap Refused(string reason) =>
+        new(false, reason, 0, 0, 0, reason.StartsWith("StaleSnapshot", StringComparison.Ordinal) ? EquipmentSetStatus.StaleSnapshot : EquipmentSetStatus.Refused);
 
     /// <summary>A refusal's code name and text: <c>NoRoom: ...</c>.</summary>
     internal static string ReasonOf(uint refusal, string text)
