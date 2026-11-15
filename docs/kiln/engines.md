@@ -452,3 +452,14 @@ are refused until installation, rather than accepted without protection. This le
 when the profile contains no such mod and no native plugin requests the group. Once those hooks are installed, ShroudForge's entity spawning still cannot find
 its prop-spawn helper through that entry; a ShroudForge-side fix is in review. A mid-install failure can also leave
 pass-through jumps in some entries; see the gameplay service's refusal status and installed-target mask.
+
+### Shroudlink client addon
+
+Shroudlink packages run in Kiln's `kiln-shroudlink` server core. The in-game MODS tab next to Skills is drawn by
+Shroudlink's separate client addon. Import the addon from the Shroudlink download into the Library as a native mod and
+switch it on in the client profile.
+
+On desktop and Steam Deck, the mods list explains when a client profile enables Shroudlink mods without loading the
+addon: the mods still run, but the tab needs the addon. If an addon is in the Library, **Switch addon on** enables it
+in that profile. Otherwise the notice names the Shroudlink download. Support reports include an informational finding
+naming the profile and enabled mods. Dedicated-server installs do not need the client addon and show no notice.

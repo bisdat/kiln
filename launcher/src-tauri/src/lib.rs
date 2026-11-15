@@ -217,6 +217,7 @@ pub fn run() {
             commands::engines::eml_data_latest,
             commands::compat::chain_view,
             commands::compat::chain_set_late,
+            commands::compat::shroudlink_notice,
             commands::found::found_scan,
             commands::found::found_add,
             commands::cook::cook_plan,

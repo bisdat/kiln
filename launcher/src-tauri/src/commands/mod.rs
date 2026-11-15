@@ -189,6 +189,7 @@ pub const NAMES: &[&str] = &[
     "eml_data_latest",
     "chain_view",
     "chain_set_late",
+    "shroudlink_notice",
     "found_scan",
     "found_add",
     "cook_plan",
