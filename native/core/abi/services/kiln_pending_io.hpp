@@ -40,6 +40,9 @@ inline bool component(const std::string& s) {
     if(stem=="CON"||stem=="PRN"||stem=="AUX"||stem=="NUL" || (stem.size()==4&&(stem.substr(0,3)=="COM"||stem.substr(0,3)=="LPT")&&stem[3]>='1'&&stem[3]<='9')) return false;
     return true;
 }
+// A file's name in a store. worldtables names its pool envelopes "@pool-<guid>.json": that prefix is a file name's only
+// (never a folder's, so not a mod's or one on the way to the store) and once; the rest keeps the component rule.
+inline bool file_component(const std::string& s) {return component(s) || (s.rfind("@pool-",0)==0 && component(s.substr(6)));}
 inline std::function<void(const fs::path&, const std::string&)> diagnostic;
 inline void refused(const fs::path& p,const std::string& why) {
     static std::mutex mu; static std::set<fs::path> seen;
@@ -280,11 +283,11 @@ struct Directory {
 
 };
 inline bool read(const TrustedBase& base,const fs::path& file,std::string* out,size_t limit) {
-    Directory d;return d.open(base,file.parent_path())&&component(file.filename().string())&&d.read(file.filename(),out,limit);
+    Directory d;return d.open(base,file.parent_path())&&file_component(file.filename().string())&&d.read(file.filename(),out,limit);
 }
 inline bool read(const fs::path& file,std::string* out,size_t limit) {return read(TrustedBase{file.parent_path()},file,out,limit);}
 inline bool remove(const TrustedBase& base,const fs::path& file) {
-    Directory d;return d.open(base,file.parent_path())&&component(file.filename().string())&&d.remove(file.filename());
+    Directory d;return d.open(base,file.parent_path())&&file_component(file.filename().string())&&d.remove(file.filename());
 }
 inline bool remove(const fs::path& file) {return remove(TrustedBase{file.parent_path()},file);}
 inline bool write_atomic(const TrustedBase& base,const fs::path& file,std::string_view bytes) {

@@ -478,7 +478,8 @@
    "packages": [
     "06b-typed-hooks"
    ],
-   "state": "open"
+   "state": "open",
+   "deferred": "optional diagnostic that opens nothing: it needs a mod that links rules/TerrainDamage with a pass-through typed hook, and the check pack has no such fixture; 06b-typed-hooks.client covers a typed hook running in a real game"
   },
   {
    "id": "06c-impact-thread",
@@ -1356,7 +1357,8 @@
     "17c-roster-cap",
     "17d-material-pools"
    ],
-   "state": "open"
+   "state": "open",
+   "deferred": "belongs to the optional world-local material allocation, which is not built in this release: a mod's material pools are added once at boot and stay for the whole run; 17-material-pools covers them"
   },
   {
    "id": "18-c18.1",
@@ -1716,6 +1718,26 @@
    ],
    "state": "open",
    "added": "06a-program-wraps (dev.29 S8)"
+  },
+  {
+   "id": "06a-wraps.client-stop",
+   "title": "Client-world wraps registered through leave and rejoin: the stop lines in order",
+   "chapter": "06a",
+   "packages": [
+    "06a-program-wraps"
+   ],
+   "state": "open",
+   "added": "06a-program-wraps"
+  },
+  {
+   "id": "06a-wraps.client-exit",
+   "title": "Client-world wraps registered at the game's exit: the exit's stop lines in order",
+   "chapter": "06a",
+   "packages": [
+    "06a-program-wraps"
+   ],
+   "state": "open",
+   "added": "06a-program-wraps"
   },
   {
    "id": "00-sigdb.in-place-patches",

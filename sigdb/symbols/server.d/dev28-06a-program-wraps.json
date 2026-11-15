@@ -77,7 +77,7 @@
       ]
     },
     "world.slice_record": {
-      "comment": "kiln.world's archetype source for a wrap stage (0.2.0-dev.29): a mid link on types/ProgramRunner's first instruction records the engine's slice record on the thread; a stage reads the slice's layout from it, checked against the entry and row count the trampoline ran with. Installed when a stage first asks for its slice's archetype.",
+      "comment": "kiln.world's archetype source for a wrap stage (0.2.0-dev.29): a checked typed link around types/ProgramRunner keeps the engine's slice record (rdx) on the thread for exactly that runner call (restored on return, a skip by a later hook and unwind); a stage reads the slice's layout from it, checked against the entry and row count the trampoline ran with. Installed when a stage first asks for its slice's archetype.",
       "symbols": [
         "types/ProgramRunner",
         "@world/ProgramRunner.slice",

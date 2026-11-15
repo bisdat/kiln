@@ -58,6 +58,18 @@ Kiln.TestKit.FakeImpactResult.Error.get -> byte
 Kiln.TestKit.FakeImpactResult.Handlers.get -> int
 Kiln.TestKit.FakeImpactResult.OriginalCalled.get -> bool
 Kiln.TestKit.FakeImpactResult.Value.get -> byte
+Kiln.TestKit.HarnessWorldTables
+Kiln.TestKit.HarnessWorldTables.Dependency(string! mod, string! dependency) -> void
+Kiln.TestKit.HarnessWorldTables.GameMaterial(string! name, uint item, bool roof = false, bool terrain = false) -> void
+Kiln.TestKit.HarnessWorldTables.Material(string! mod, string! key, uint item, bool roof = false, bool live = true, bool terrain = false) -> void
+Kiln.TestKit.HarnessWorldTables.PendingCount.get -> int
+Kiln.TestKit.HarnessWorldTables.Readiness.get -> Kiln.CapacityReadiness
+Kiln.TestKit.HarnessWorldTables.Readiness.set -> void
+Kiln.TestKit.HarnessWorldTables.ReservePoolId(uint id) -> void
+Kiln.TestKit.HarnessWorldTables.ServePool(string! mod, string! key, Kiln.BuildingMaterialPoolBlock! block) -> void
+Kiln.TestKit.HarnessWorldTables.StorageFails.get -> bool
+Kiln.TestKit.HarnessWorldTables.StorageFails.set -> void
+Kiln.TestKit.KilnHarness.WorldTables.get -> Kiln.TestKit.HarnessWorldTables!
 Kiln.TestKit.FakeProgramLists
 Kiln.TestKit.FakeProgramLists.<Clone>$() -> Kiln.TestKit.FakeProgramLists!
 Kiln.TestKit.FakeProgramLists.AnyOf.get -> System.Collections.Generic.IReadOnlyList<string!>!

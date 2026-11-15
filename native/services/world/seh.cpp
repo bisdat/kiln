@@ -7,6 +7,14 @@
 
 namespace kw {
 
+void runner_scope(uintptr_t* slot, uintptr_t record, void (*body)(void*), void* context) {
+    const uintptr_t outer = *slot;
+    *slot = record;
+    __try { body(context); }
+    __finally { *slot = outer; }
+}
+
+
 bool seh_each(KilnProgramEachFn fn, KilnProgramCtx* ctx, uint64_t* iter, KilnEntity e, void* user,
               unsigned long* code) {
     __try {

@@ -17,6 +17,9 @@ struct ItemLayout {
 
 // Fills the layouts from the image at `image_base`. test_missing: a field to pretend is gone, for the fail-safe test.
 bool read_layouts(const uint8_t* image_base, size_t image_size, const std::string& test_missing, Layouts* L, ItemLayout* I, std::string* why);
+// Custom-pool fields are resolved from this executable, independently of base material support.
+bool read_pool_layout(const uint8_t* image_base, size_t image_size, const std::string& test_missing,
+                      Layouts* L, uint32_t* item_pool, std::string* why);
 // The preview model's layout (keen::VoxelModelResource). false: shapes get no preview on this build; the rest is unaffected.
 bool read_model_layout(const uint8_t* image_base, size_t image_size, ModelLayout* M, std::string* why);
 // Where the game's table of crafting props is (merge.h CraftingPropLayout). false: crafting props are left out on this build; the rest is unaffected.

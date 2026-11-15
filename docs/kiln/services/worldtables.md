@@ -9,7 +9,7 @@ reads the game's own bytes once, applies every enabled mod's entries, and serves
 |---|---|
 | C table | `native/core/abi/services/kiln_worldtables.h` (`kiln.worldtables` v1) |
 | Native | `native/services/worldtables/` → `kiln/services/kiln-worldtables.dll`. `merge.cpp` and `terrain.cpp` are portable: ids, the handshake hash, and writers over a resource's bytes |
-| Managed | `managed/services/Kiln.Blocks/World/` (`MaterialTweakBlock`, `BuildingMaterialBlock`, `TerrainMaterialBlock`, `StrengthBlock`, `WorldTables`; `SurfaceBlock` is kiln.surfaces') |
+| Managed | `managed/services/Kiln.Blocks/World/` (`MaterialTweakBlock`, `BuildingMaterialBlock`, `BuildingMaterialPoolBlock`, `TerrainMaterialBlock`, `StrengthBlock`, `WorldTables`; `SurfaceBlock` is kiln.surfaces') |
 | Handshake | `managed/services/Kiln.Network/WorldTablesGate.cs` |
 | Crafting props | `merge.cpp` (`read_crafting_props`, `allocate_crafting_props`, `merge_crafting_props`), `reflect.cpp` (`read_crafting_prop_layout`), `native/services/content/newcontent.cpp` (a recipe's `props`) |
 | Lint | KL330 material-budget, KL331 material-count, KL332 material-reference; KL201 for a material in a mod that doesn't say `clients: "mod"` |
@@ -19,7 +19,7 @@ reads the game's own bytes once, applies every enabled mod's entries, and serves
 ## What it changes
 - `MaterialTweakBlock` changes a game material's strength in place: hardness, health, the tool class modifier, the loot item and rate. Only the registry
   changes. The dig rate is the server's, so a tweak asks nothing of players' games.
-- `BuildingMaterialBlock` adds a material: an id and a GUID in every world's GUID table, a registry config, its block item in the default or roof pool, and
+- `BuildingMaterialBlock` adds a material: an id and a GUID in every world's GUID table, a registry config, its block item in the default or roof pool unless explicitly grouped in a custom pool, and
   the item's blueprint entry. Kiln.Blocks makes the block item: a clone of a game block with the material's id and GUID in `equipment.voxelData`.
   Every player needs the mod (`clients: "mod"`), because cells reach players as ids.
 - Digging a new material gives back what the game's own blocks give: the registry's loot item and rate are its recipe's first input at the recipe's
@@ -35,7 +35,7 @@ reads the game's own bytes once, applies every enabled mod's entries, and serves
   `keen::VoxelModelResource` of the shape: one byte per cell, the material it's drawn in until a player picks one, `0x12` (a wall's) or `0x08` (a
   roof's) as in the game's own shapes; the client draws it under the cursor. The game's 4 m door wall and 2 m flat roof written as cells give their
   table entries and models byte for byte (host test; the door wall in the lab too). An item id the table already has is refused by name. Shapes take
-  no ids of their own, so they're not in the handshake hash; their mod's `clients: "mod"` makes every player have them.
+  no material ids of their own. Custom pool memberships and blueprint-to-pool bindings enter a versioned hash extension; unpooled profiles retain the old hash. Their mod's `clients: "mod"` also makes every player have the package.
 - A placement takes one block of the chosen material per cell it fills; cells already built are skipped and cost nothing
   ([docs/re/building.md](../../re/building.md) 1.2).
 - A table with nothing to change is served as the game has it. With no mod, every table is the game's to the byte (the lab compares them).
@@ -217,3 +217,34 @@ what an id with no layers draws (a client that lacks the look tables' entries). 
 game's 222 layers (2 free) and texture layers past 499 (269 free), cooked as kiln.surfaces cooks building maps; past 224 layers the buffers have to grow,
 which needs the shaders read and a GPU check (M). New terrain in the world's own generation isn't built either: the world is baked tiles, so it takes a
 cooker for the tile format or a hook where tiles are read (L, docs/re/building.md 1.6).
+
+
+## Custom building-material pools (dev.29)
+
+`BuildingMaterialPoolBlock` defines 1..64 distinct resolved building-material item IDs, in selector order. Each entry sets exactly one of `Material` (a named same-mod or `other-mod:key` building-material reference) and `GameMaterial` (a stable building-material catalog name). A `GameMaterial` entry is the block item that places that material, the one the game's own build menu lists for it (`WoodRough` is Rough Wood Block), not the material's loot item (Wood Logs), which several materials share. Cross-mod references need an enabled declared dependency. A missing material/mod/item is refused; duplicate resolved IDs, malformed entries, over 64 entries and roof disagreements are argument errors, and the `ArgumentException` names the entries (`materials[20] (gameMaterial StoneRough) and materials[38] (gameMaterial StoneRough) are the same building item 2175686957`). Terrain materials and deprecated game slots without block items cannot be selectable entries.
+
+`BlueprintBlock.MaterialPool` opts only that new shape into a pool. Its item carries the pool's 16-byte GUID through `Draft.Refs["equipment.voxelBlueprintMaterialPool"]`; the shape-table writer does not create that item. The native item reference validator accepts that GUID only when worldtables reports its committed row; an unknown or deferred pool is not authorized. A refused pool refuses dependent blueprints. No fallback changes a vanilla or foreign shape. A mod material explicitly mentioned by a custom group is excluded from automatic wall/roof appending, even if that group is refused; its material ID can remain available for scripted Build. Game-name members remain in their original vanilla pools. Sharing one material across groups consumes one material ID and one entry in each group.
+
+Rows are appended at boot, sorted by pool GUID; members retain declared order. Their ID is FNV-1a over the GUID's 16 game-order bytes. Both relative fields are rebased and the equipment slot is copied from the matching wall/roof row. Reflection is read from the executable actually running; an unsupported field or reference size makes `worldtables.material_pools` unavailable with its reason on that side. There is no UI hook, pagination, widened cell ID or world-local ID allocator.
+
+`WorldTables.GetMaterialBudget(WorldMaterialCategory.Building/Terrain)` and `GetPoolBudget(name)` read immutable process snapshots under `worldtables.budgets`. Current baseline capacities/game usage are 128/79 and 127/116; the 49 building slots comprise 43 unused and six deprecated reusable slots. Every pool has capacity 64. Built-in usage is 61 walls, 14 roofs, 56 terrain and five overgrowth entries. A new pool has GameUsed=0 and KilnUsed equal to its served membership count, including entries naming game materials. Retained occupancy is Reserved. A startup metadata check enables owner observation when custom boot rows exist. A replayed receipt is adopted by the exact loaded ModContext without another Define or pool API call. A profile with no custom rows leaves no continuing pool observer. A reload cannot automatically take a retired real owner's row: it must define the row again. An unloaded owner cannot unregister an engine boot row: its receipt becomes Retained at Post and its pool entries remain Reserved until restart. Unknown pools return NotFound with zero counts and Available=null; temporary unreadiness also returns zero counts. Uncertain external material occupancy is not reported as free room. These snapshots are not per-world and Expanded stays false.
+
+```csharp
+#pragma warning disable KILNX028 // shared dev.28 capacity/registration types
+var result = Blocks.Define("walls", new BuildingMaterialPoolBlock {
+    Name = "Cold Walls", Materials = [new(Material: "ice"), new(GameMaterial: "WoodRough")]
+}, new DefinitionRegistrationOptions(DefinitionTiming.AllowNextStart));
+var receipt = WorldTables.GetMaterialPoolRegistration(result.RegistrationId);
+```
+
+The explicit-options overload is synchronous and requires `worldtables.material_pools`. Registered means an identical canonical definition is already in the served boot table, with SlotsConsumed equal to its entry count; it does not mean the menu drew it. A new/changed late definition with RequireRegistered returns RegistryClosed and writes nothing. AllowNextStart may persist AcceptedNextStart with zero live slots. Known missing bases, collisions and capacity refusal do not become successful deferred requests. The definition and stable receipt ID are one checksummed envelope in profile-local `worldtables/pending/<mod>/@pool-<definition-guid>.json`, written through a flushed temporary file and atomic rename. Boot refuses and reports a torn envelope, rechecks admission and exposes the new receipt outcome. An identical repeat does not charge or write again. Explicit pruning may remove a deferred definition; the legacy startup prune does not discard durable pool envelopes before async mod code can confirm them. A live boot table cannot be unregistered mid-process.
+
+The SDK records world-material, pool, tweak and blueprint declarations in `blocks.tables.json`; offline recording reports pending/refused, never a live game registration, and writes no real game profile. Data files are the direct first-start route. Registration and capacity notices are deferred to Post; an accepted next-start definition changes no live counts. `MaterialTableChangedEvent` distinguishes deferred definitions from applied hash changes with `Deferred` and old/new hashes. Events carry copied immutable data and no game pointers.
+
+Stored requests use the shared bounded pending store below the service's trusted `kiln/data/worldtables` folder. Only descendants are walked without following links; player-managed installation ancestors remain supported. Writes flush before rename. Limits are 4,096 files, 65,536 bytes per complete envelope, 268,435,456 bytes total, and bounded directory inspection; oversized requests fail at write time. A missing store is empty and silent. Unsafe/unavailable files are named once and left in place.
+
+The process freezes the boot file set and SHA-256 fingerprints before managed mod code runs. Replay uses the enabled profile, executable side and accepted boot-generation filter before reading any pool definition. Disabled, removed or excluded mods do not replay; changed/new files wait for another process. Authored/OnBoot definitions take precedence over older pending requests, whose receipts become Superseded. Pool rows publish once at boot, before ordinary OnLoad; newer OnLoad definitions are next-start requests and cannot rewrite a served row. Successful pool envelopes remain durable boot input across subsequent restarts (unlike a dynamic buff clone's settled request); automatic pruning preserves them, and explicit pruning removes them through the guarded store helper.
+
+Canonical pool GUID/id, ordered item IDs and blueprint-to-pool bindings enter the handshake under `kiln.materialpools.v1`. The existing network gate consumes that hash before custom block/template streams. No custom pools preserves the existing fixture hash `78445d0c05b1c25e` exactly; package matching still applies independently.
+
+**Verification boundary:** these paths ship enabled when their inputs resolve. Native sanitizer tests use synthetic resources and original resource bytes from both executables; managed tests use a scriptable fake. This package has not run in a dedicated lab or a real client. Registry ingestion, exact menu contents/order, preview, cost, surface/loot, restart/rejoin and real peer refusal remain the coordinator's lab and `17-material-pools` guided check. Do not treat a fake or served byte dump as proof of those outcomes.

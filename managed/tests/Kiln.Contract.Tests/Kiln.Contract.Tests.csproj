@@ -52,6 +52,7 @@
     <ProjectReference Include="../../services/Kiln.CreatureControl/Kiln.CreatureControl.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="../../../mods/tests/material-pools-test/PoolGround.cs" Link="Fixtures/PoolGround.cs" />
     <Compile Include="../../../mods/tests/world-programs-test/Quota/QuotaMod.cs" Link="Fixtures/QuotaMod.cs" />
   </ItemGroup>
   <ItemGroup>

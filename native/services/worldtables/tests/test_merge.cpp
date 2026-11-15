@@ -11,6 +11,14 @@
 
 #include "merge.h"
 #include "terrain.h"
+#include "reflect.h"
+#include "pool_registration.h"
+#include "../../../core/abi/services/kiln_worldtables.h"
+static_assert(offsetof(KilnWorldTablesApi,material_budget)==144);
+static_assert(offsetof(KilnWorldTablesApi,pool_budget)==152);
+static_assert(offsetof(KilnWorldTablesApi,define_pool_result)==160);
+static_assert(offsetof(KilnWorldTablesApi,pool_registration)==168);
+static_assert(sizeof(KilnWorldTablesApi)==176);
 
 using namespace kwt;
 
@@ -301,6 +309,279 @@ void crafting_props_test() {
     }
 }
 
+// Custom rows preserve the original payload and rebase both self-relative fields.
+void custom_pools_test() {
+    Layouts L = layouts();
+    L.pool_id = 4; L.pool_slot = 0;
+    Bytes game = pool_registry({{kWallPool, 61}, {kRoofPool, 14}, {"TerrainMaterials", 56}, {"OvergrowthMaterials", 5}});
+    for (size_t i = 0; i < 4; ++i) {
+        wr<uint32_t>(game, 8 + i * 24, 100 + i);
+        wr<uint32_t>(game, 12 + i * 24, 200 + i);
+    }
+    MaterialPool a{derive_guid("test", "materialpool", "a"), "test:a", false, {10, 11, 12, 13}};
+    MaterialPool b{derive_guid("test", "materialpool", "b"), "test:b", true, {13, 14}};
+    Bytes out, reverse; std::string why;
+    check("custom.empty-identical", merge_pools(game, L, {}, {}, &out, &why) && out == game, why);
+    check("custom.two-rows", merge_pools(game, L, {}, {a,b}, &out, &why) && pool_size(out, "test:a") == 4 && pool_size(out, "test:b") == 2, why);
+    check("custom.canonical-guid-order", merge_pools(game, L, {}, {b,a}, &reverse, &why) && out == reverse, why);
+    check("custom.original-payload-unchanged", out.size() > game.size() && std::equal(game.begin()+8, game.end(), out.begin()+8));
+    ArrayView rows; bool valid = array_at(out, 0, 24, &rows) && rows.count == 6;
+    bool preserved = valid, appended = valid;
+    if (valid) {
+        for (size_t i = 0; i < 4; ++i) {
+            size_t rec = size_t(rows.base-out.data()) + i*24;
+            ArrayView items;
+            preserved &= array_at(out, uint32_t(rec+8), 4, &items) && items.count == (i==0?61:i==1?14:i==2?56:5);
+            preserved &= rd<uint32_t>(out, rec) == 100+i && rd<uint32_t>(out, rec+4) == 200+i;
+            preserved &= items.count && rd<uint32_t>(out, size_t(items.base-out.data())) == 0x1000u*(i+1);
+        }
+        std::vector<MaterialPool> sorted{a,b};
+        std::sort(sorted.begin(), sorted.end(), [](const auto& x,const auto& y){ return x.guid.text()<y.guid.text(); });
+        for (size_t i=0;i<2;++i) {
+            const auto& p=sorted[i]; size_t rec=size_t(rows.base-out.data())+(4+i)*24; ArrayView items;
+            appended &= rd<uint32_t>(out,rec)==(p.roof?101u:100u) && rd<uint32_t>(out,rec+4)==item_id_of(p.guid);
+            appended &= array_at(out,uint32_t(rec+8),4,&items) && items.count==p.items.size();
+            if (items.count==p.items.size()) appended &= std::memcmp(items.base,p.items.data(),p.items.size()*4)==0;
+        }
+    }
+    check("custom.vanilla-references-rebased", preserved);
+    check("custom.slot-id-member-order", appended);
+    auto extra=material("test","vanilla");
+    auto placed_extra=allocate({extra},{},{213},{}).placed;
+    check("custom.rebases-updated-vanilla-list",merge_pools(game,L,placed_extra,{a},&out,&why) && pool_size(out,kWallPool)==62,why);
+    ArrayView updated_rows, updated_items;
+    bool updated=array_at(out,0,24,&updated_rows) && updated_rows.count==5;
+    if(updated) updated=array_at(out,uint32_t(updated_rows.base-out.data()+8),4,&updated_items) && updated_items.count==62;
+    if(updated) updated=rd<uint32_t>(out,size_t(updated_items.base-out.data())+61*4)==extra.item_id;
+    check("custom.updated-vanilla-item-survives-rebase",updated);
+    a.items.clear(); for(uint32_t i=1;i<=64;++i) a.items.push_back(i);
+    check("custom.accept-64", merge_pools(game,L,{}, {a}, &out,&why) && pool_size(out,"test:a")==64,why);
+    a.items.push_back(65); out={99};
+    check("custom.refuse-65-atomic", !merge_pools(game,L,{}, {a}, &out,&why) && out==Bytes{99},why);
+    a.items={1,1};
+    check("custom.refuse-duplicate-item", !merge_pools(game,L,{}, {a}, &out,&why),why);
+    a.items={0};
+    check("custom.refuse-null-item", !merge_pools(game,L,{}, {a}, &out,&why),why);
+    a.items={};
+    check("custom.refuse-empty", !merge_pools(game,L,{}, {a}, &out,&why),why);
+    a.items={1}; b.guid=a.guid;
+    check("custom.refuse-id-collision", !merge_pools(game,L,{}, {a,b}, &out,&why),why);
+    wr<uint32_t>(game,12,item_id_of(a.guid));
+    check("custom.refuse-foreign-id", !merge_pools(game,L,{}, {a}, &out,&why),why);
+    wr<uint32_t>(game,12,200); a.guid={};
+    check("custom.refuse-null-guid", !merge_pools(game,L,{}, {a}, &out,&why),why);
+    a.guid=derive_guid("test","materialpool","a");
+    Layouts missing=L; missing.pool_id=UINT32_MAX;
+    check("custom.refuse-missing-layout", !merge_pools(game,missing,{}, {a}, &out,&why),why);
+    Bytes malformed=game; wr<uint32_t>(malformed,20,65);
+    check("custom.refuse-existing-65", !merge_pools(malformed,L,{}, {a}, &out,&why),why);
+    malformed=game; wr<int32_t>(malformed,24,INT32_MAX);
+    check("custom.refuse-broken-name", !merge_pools(malformed,L,{}, {a}, &out,&why),why);
+    std::vector<Material> live; for(int i=0;i<4;++i) live.push_back(material("test", "m"+std::to_string(i)));
+    std::set<Guid> grouped; for(const auto& m:live) grouped.insert(m.guid);
+    std::vector<Material> held; std::vector<std::string> refused;
+    fit_pools(&live,{{kWallPool,61}}, {}, &held,&refused,grouped);
+    check("custom.grouped-materials-skip-default-fit",live.size()==4 && refused.empty());
+    auto placed=allocate(live,{}, {213,214,215,216},{}).placed;
+    check("custom.grouped-materials-skip-default-writer",merge_pools(game,L,placed,{},&out,&why,grouped) && out==game,why);
+}
+
+void pool_admission_test() {
+    ModFile mf; mf.mod="pools"; mf.clients="mod";
+    auto doc=parse_relaxed(R"({"buildingMaterialPools":{"walls":{"name":"Walls","materials":[{"material":"ice"},{"gameMaterial":"WoodRough"}]}},"blueprints":{"shape":{"name":"Shape","cells":[["#"]],"materialPool":"walls"}}})");
+    read_blocks(doc,&mf);
+    check("pool-admission.read",mf.errors.empty() && mf.pools.size()==1 && mf.shapes.size()==1);
+    auto ice=material("pools","ice");
+    std::map<std::string,PoolGameMaterial> game{{"WoodRough",{900,false}}};
+    auto r=resolve_pools(mf.pools,{ice},game);
+    check("pool-admission.resolve",r.pools.size()==1 && r.pools[0].items==std::vector<uint32_t>{ice.item_id,900} && r.grouped.count(ice.guid));
+    check("pool-admission.late-vanilla-room-excludes-grouped",pool_of(ice,r.grouped).empty() && pool_of(material("another","new"),r.grouped)==kWallPool);
+    std::vector<std::string> errors; auto shapes=mf.shapes;
+    bind_shape_pools(&shapes,mf.pools,r.pools,&errors);
+    check("pool-admission.bind",shapes.size()==1 && shapes[0].pool==mf.pools[0].guid && errors.empty());
+    auto bad=mf.pools; bad[0].entries.push_back({"ice",""});
+    r=resolve_pools(bad,{ice},game);
+    check("pool-admission.duplicate-refused-and-partitioned",r.pools.empty() && r.grouped.count(ice.guid) && !r.errors.empty());
+    shapes=mf.shapes; bind_shape_pools(&shapes,bad,r.pools,&errors);
+    check("pool-admission.dependent-shape-refused",shapes.empty());
+    bad=mf.pools; bad[0].roof=true; r=resolve_pools(bad,{ice},game);
+    check("pool-admission.roof-refused",r.pools.empty() && !r.errors.empty());
+    bad=mf.pools; bad[0].entries={{"other:ice",""}};
+    auto foreign=ice; foreign.mod="other";
+    r=resolve_pools(bad,{foreign},game);
+    check("pool-admission.dependency-required",r.pools.empty());
+    bad[0].dependencies.insert("other"); r=resolve_pools(bad,{foreign},game);
+    check("pool-admission.dependency-enabled",r.pools.size()==1 && r.grouped.count(foreign.guid));
+    r=resolve_pools(bad,{},game);
+    check("pool-admission.absent-mod-refused",r.pools.empty());
+    bad=mf.pools; bad[0].entries={{"","Unknown"}}; r=resolve_pools(bad,{ice},game);
+    check("pool-admission.unknown-game-refused",r.pools.empty());
+    bad[0].entries={{"","WoodRough"}}; r=resolve_pools(bad,{ice},{{"WoodRough",{0,false}}});
+    check("pool-admission.missing-item-refused",r.pools.empty());
+    ModFile invalid; invalid.mod="pools"; invalid.clients="mod";
+    read_blocks(parse_relaxed(R"({"buildingMaterialPools":{"bad":{"name":"Bad","materials":[{"material":"ice","gameMaterial":"WoodRough"}]}}})"),&invalid);
+    r=resolve_pools(invalid.pools,{ice},game);
+    check("pool-admission.invalid-entry-still-partitions",!invalid.errors.empty() && r.pools.empty() && r.grouped.count(ice.guid));
+}
+
+// A pool's "gameMaterial" is the block item the build menu lists for that material, not its registry config's
+// materialItem: that field is the material's loot (Rough Wood's is Wood Logs, Rough Stone's the Stone terrain item),
+// which several materials share. On the 26430253 server the old catalog put Wood Logs and the Stone terrain item in
+// the lab's pools and refused the 64-entry pool for a duplicate. Every building config of this registry has the same
+// materialItem, as the game's sharing ones do.
+void pool_game_catalog_test() {
+    const Layouts L = layouts();
+    Bytes reg = registry({129, 130, 131}, -1);
+    RegistryInfo info;
+    std::string why;
+    check("pool-catalog.registry-reads", read_registry(reg, L, &info, &why) && info.building_at.size() == 3, why);
+    reg[info.building_at.at(131) + L.building.roof] = 1;
+    Guid loot;
+    std::memcpy(loot.b.data(), reg.data() + info.building_at.at(129) + L.building.item, 16);
+    const std::vector<GameBlockItem> items{{"Block_T1_Alpha_CRAFTING", 1001, 129}, {"Block_T2_Beta_REWARD", 1002, 130},
+                                           {"Block_Roof_T1_Gamma", 1003, 131}, {"Material_T1_Logs", 1004, -1},
+                                           {"Build_TerrainMaterial_T1_Stone", 1005, 2}};
+    auto game = pool_game_materials(items, reg, info, L);
+    const auto item = [&](const char* n) { return game.count(n) ? game[n].item : 0u; };
+    check("pool-catalog.own-block-item", item("Alpha") == 1001 && item("Beta") == 1002 && item("RoofGamma") == 1003,
+          std::to_string(item("Alpha")) + " " + std::to_string(item("Beta")) + " " + std::to_string(item("RoofGamma")));
+    check("pool-catalog.not-the-loot-item", item("Alpha") != item_id_of(loot) && item("Beta") != item_id_of(loot));
+    check("pool-catalog.roof-from-registry", game.count("RoofGamma") && game["RoofGamma"].roof && game.count("Alpha") && !game["Alpha"].roof);
+    check("pool-catalog.only-building-materials", !game.count("TerrainStone") && !game.count("Logs") && game.size() == 3);
+    ModFile mf;
+    mf.mod = "catalog";
+    mf.clients = "mod";
+    read_blocks(parse_relaxed(R"({"buildingMaterialPools":{"two":{"name":"Two","materials":[{"gameMaterial":"Alpha"},{"gameMaterial":"Beta"}]}}})"), &mf);
+    auto r = resolve_pools(mf.pools, {}, game);
+    check("pool-catalog.sharing-loot-is-no-duplicate", r.pools.size() == 1 && r.pools[0].items == std::vector<uint32_t>{1001, 1002},
+          r.errors.empty() ? "" : r.errors[0]);
+    // a duplicate is the author's: the reason names both entries, not "malformed"
+    ModFile dup;
+    dup.mod = "catalog";
+    dup.clients = "mod";
+    read_blocks(parse_relaxed(R"({"buildingMaterialPools":{"dup":{"name":"Dup","materials":[{"gameMaterial":"Beta"},{"gameMaterial":"Alpha"},{"gameMaterial":"Alpha"}]}}})"), &dup);
+    r = resolve_pools(dup.pools, {}, game);
+    const std::string named = "materials[1] (gameMaterial Alpha) and materials[2] (gameMaterial Alpha) are the same building item 1001";
+    check("pool-catalog.duplicate-names-both-entries", r.pools.empty() && r.arguments_invalid && r.argument_reason.find(named) != std::string::npos &&
+                                                           r.errors.size() == 1 && r.errors[0].find(named) != std::string::npos,
+          r.argument_reason);
+    dup.pools[0].entries = {{"", "Alpha"}, {"", "RoofGamma"}};
+    r = resolve_pools(dup.pools, {}, game);
+    check("pool-catalog.roof-names-the-entry", r.pools.empty() && r.arguments_invalid &&
+                                                   r.argument_reason.find("materials[1] (gameMaterial RoofGamma) is a roof material") != std::string::npos,
+          r.argument_reason);
+    auto twice = items;
+    twice.push_back({"Block_T3_Alpha_REWARD", 1006, 129});
+    game = pool_game_materials(twice, reg, info, L);
+    dup.pools[0].entries = {{"", "Alpha"}};
+    r = resolve_pools(dup.pools, {}, game);
+    check("pool-catalog.two-block-items-of-one-name-refused", r.pools.empty() && !r.arguments_invalid && r.errors.size() == 1 &&
+                                                                  r.errors[0].find("Alpha is placed by more than one block item") != std::string::npos,
+          r.errors.empty() ? "" : r.errors[0]);
+}
+
+// The lab's pending-inactive case (server 26430253): a disabled mod's pool envelope was named twice, a warning when the
+// store was read and the same text again as an error when the merge logged its error list; and "left in place" twice.
+void stored_refusal_once_test() {
+    const std::string text = stored_refusal_text("pending/m/@pool-a.json", "unsafe: owning mod is not loaded in this profile; left in place");
+    check("stored-refusal.left-in-place-once", text.find("left in place") == text.rfind("left in place"), text);
+    check("stored-refusal.unsafe-prefix", stored_refusal_text("p", "invalid pending filename") == "stored definition p refused: unsafe: invalid pending filename (left in place)",
+          stored_refusal_text("p", "invalid pending filename"));
+    const std::vector<std::string> errors{"block buildingMaterialPool x (mod m): refused: unknown", text};
+    const auto lines = merge_error_lines(errors, {text});
+    check("stored-refusal.named-once", lines == std::vector<std::string>{errors[0]}, std::to_string(lines.size()) + " line(s)");
+    check("stored-refusal.others-logged", merge_error_lines(errors, {}) == errors);
+}
+
+void pool_reflection_test() {
+    for (bool client:{false,true}) {
+        Bytes image(16384,0); image[0]='M';image[1]='Z';wr<uint32_t>(image,0x3c,0x100);
+        wr<uint16_t>(image,0x106,1);wr<uint16_t>(image,0x114,0);
+        std::memcpy(image.data()+0x118,".rdata",6);wr<uint32_t>(image,0x120,12000);wr<uint32_t>(image,0x124,0x400);
+        size_t strings=0x2000,fields=0x1000;
+        auto text=[&](size_t at,const std::string& value) {wr<uint64_t>(image,at,reinterpret_cast<uint64_t>(image.data()+strings));wr<uint64_t>(image,at+8,value.size());std::memcpy(image.data()+strings,value.data(),value.size());strings+=value.size()+1;};
+        auto record=[&](size_t at,const std::string& name,uint32_t size,std::vector<std::tuple<std::string,uint32_t,size_t>> fs) {
+            text(at+0x20,name);wr<uint32_t>(image,at+0x40,size);wr<uint32_t>(image,at+0x50,fnv1a(name.data(),name.size()));
+            wr<uint32_t>(image,at+0x48,fs.size());wr<uint64_t>(image,at+0x58,reinterpret_cast<uint64_t>(image.data()+fields));
+            for(auto [key,offset,type]:fs) {text(fields,key);wr<uint64_t>(image,fields+0x18,offset);if(type)wr<uint64_t>(image,fields+0x10,reinterpret_cast<uint64_t>(image.data()+type));fields+=0x30;}
+        };
+        record(0x800,"keen::VoxelBlueprintMaterialPool",24,{{"equipmentSlot",0,0},{"poolId",4,0},{"materials",8,0},{"debugName",16,0}});
+        record(0x880,"keen::VoxelBlueprintMaterialPoolRegistryResource",8,{{"materialPools",0,0}});
+        const uint32_t equipment=client?256:192,ref=client?120:88;
+        record(0x900,"keen::ItemInfo",1536,{{"equipment",equipment,0x980}});
+        record(0x980,"keen::Equipment",1024,{{"voxelBlueprintMaterialPool",ref,0xa00}});
+        record(0xa00,"keen::PoolReference",16,{});
+        Layouts layout;uint32_t item_ref=0;std::string why;
+        check(client?"pool-reflection.client-own-offset":"pool-reflection.server-own-offset",read_pool_layout(image.data(),image.size(),"",&layout,&item_ref,&why) && item_ref==equipment+ref && layout.pool_id==4 && layout.pool_slot==0,why);
+        check(client?"pool-reflection.client-missing-ref":"pool-reflection.server-missing-id",!read_pool_layout(image.data(),image.size(),client?"voxelBlueprintMaterialPool":"poolId",&layout,&item_ref,&why) && item_ref==UINT32_MAX && layout.pool_id==UINT32_MAX && why.find(client?"voxelBlueprintMaterialPool":"poolId")!=std::string::npos,why);
+    }
+}
+
+void custom_pool_hash_test() {
+    auto placed=allocate({material("m","c"),material("m","a"),material("m","b")},{},{213,214,215},{129,131}).placed;
+    check("pool-hash.no-pool-fixed-golden",handshake_hash(placed,{}, {}, {})=="78445d0c05b1c25e");
+    MaterialPool a{derive_guid("p","materialpool","a"),"p:a",false,{1,2,3}};
+    MaterialPool b{derive_guid("p","materialpool","b"),"p:b",false,{3,4}};
+    Shape sh;sh.item=derive_guid("p","item","shape");sh.pool=a.guid;
+    auto hash=handshake_hash(placed,{}, {a,b}, {sh});
+    check("pool-hash.extends-table",hash!="78445d0c05b1c25e");
+    check("pool-hash.group-order-canonical",hash==handshake_hash(placed,{}, {b,a}, {sh}));
+    auto reordered=a;std::swap(reordered.items[0],reordered.items[1]);
+    check("pool-hash.member-order",hash!=handshake_hash(placed,{}, {reordered,b}, {sh}));
+    auto bound=sh;bound.pool=b.guid;
+    check("pool-hash.binding",hash!=handshake_hash(placed,{}, {a,b}, {bound}));
+    check("pool-hash.added-group",hash!=handshake_hash(placed,{}, {a}, {sh}));
+    auto id=a;id.guid=derive_guid("p","materialpool","other");
+    check("pool-hash.guid-and-id",hash!=handshake_hash(placed,{}, {id,b}, {sh}));
+}
+
+void pool_registration_test() {
+    check("pool-receipt.auto-prune-preserves-durable-pool",!pool_prune_allowed("@pool-a",false) && pool_prune_allowed("@pool-a",true) && pool_prune_allowed("legacy-block",false));
+    auto digest=pool_sha256("abc");
+    check("pool-receipt.sha256",pool_hex(digest.data(),digest.size())=="ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    ModFile mf;mf.mod="p";mf.clients="mod";
+    read_blocks(parse_relaxed(R"({"buildingMaterialPools":{"walls":{"name":"Walls","materials":[{"gameMaterial":"WoodRough"},{"gameMaterial":"StoneRough"}]}}})"),&mf);
+    auto def=mf.pools[0];PoolRegistrations ledger;int writes=0;
+    auto persist=[&](const PoolReceipt&){++writes;return true;};
+    auto preview=ledger.prepare(def,KILN_DEFINE_ALLOW_NEXT_START,false);
+    check("pool-receipt.probe-no-mutation",ledger.receipts.empty() && ledger.revision==1 && writes==0);
+    const auto served_preview=ledger.prepare(def,KILN_DEFINE_REQUIRE_REGISTERED,true);
+    check("pool-receipt.probe-owner-race-size",pool_define_report_size(served_preview)>=ledger.prepare(def,KILN_DEFINE_REQUIRE_REGISTERED,true,KILN_DEFINE_OWNER_INACTIVE,"owner is no longer active").report().size());
+    auto refused=ledger.commit(ledger.prepare(def,KILN_DEFINE_REQUIRE_REGISTERED,false),persist);
+    check("pool-receipt.require-no-write",!refused.reply.ok && refused.reply.reason_code==KILN_DEFINE_REGISTRY_CLOSED && writes==0);
+    auto pending=ledger.commit(preview,persist);
+    check("pool-receipt.accepted-zero-slots",pending.reply.ok && pending.reply.disposition==KILN_DEFINITION_ACCEPTED_NEXT_START && pending.reply.slots_consumed==0 && writes==1);
+    auto repeat=ledger.commit(ledger.prepare(def,KILN_DEFINE_ALLOW_NEXT_START,false),persist);
+    check("pool-receipt.idempotent",repeat.id==pending.id && repeat.reply.snapshot_revision==pending.reply.snapshot_revision && writes==1);
+    PoolDefinition replay;std::string why;
+    check("pool-receipt.envelope-replay",pool_envelope(parse_relaxed(pending.envelope()),"p",&replay,&why) && replay.guid==def.guid && replay.definition==def.definition,why);
+    auto torn=parse_relaxed(pending.envelope());torn["canonical"]["materials"][0]["gameMaterial"]="Changed";
+    check("pool-receipt.torn-envelope-refused",!pool_envelope(torn,"p",&replay,&why),why);
+    check("pool-receipt.owner-envelope-refused",!pool_envelope(parse_relaxed(pending.envelope()),"other",&replay,&why),why);
+    const auto strict=ledger.commit(ledger.prepare(def,KILN_DEFINE_REQUIRE_REGISTERED,false),persist);
+    check("pool-receipt.strict-preserves-pending",!strict.reply.ok && ledger.query(pending.id).reply.disposition==KILN_DEFINITION_ACCEPTED_NEXT_START && writes==1);
+    auto next=def;next.definition+=" ";
+    auto replaced=ledger.commit(ledger.prepare(next,KILN_DEFINE_ALLOW_NEXT_START,false),persist);
+    check("pool-receipt.superseded",ledger.query(pending.id).reply.reason_code==KILN_DEFINE_SUPERSEDED && replaced.reply.ok && writes==2);
+    ledger.remove_pending(next.guid);
+    check("pool-receipt.pruned",ledger.query(replaced.id).reply.reason_code==KILN_DEFINE_REMOVED && ledger.query(replaced.id).reply.slots_consumed==0);
+    auto retained=ledger.prepare(def,KILN_DEFINE_REQUIRE_REGISTERED,true,KILN_DEFINE_OWNER_INACTIVE,"owner inactive");
+    check("pool-receipt.retained",retained.reply.disposition==KILN_DEFINITION_RETAINED && retained.reply.slots_consumed==2);
+    auto registered=ledger.commit(ledger.prepare(def,KILN_DEFINE_REQUIRE_REGISTERED,true),persist);
+    check("pool-receipt.served-slots",registered.reply.ok && registered.reply.slots_consumed==2 && registered.reply.disposition==KILN_DEFINITION_REGISTERED && writes==2);
+    check("pool-receipt.query",ledger.query(registered.id).reply.snapshot_revision==registered.reply.snapshot_revision);
+    ledger.owner_inactive(def.guid);
+    check("pool-receipt.owner-retained",ledger.query(registered.id).reply.disposition==KILN_DEFINITION_RETAINED && ledger.query(registered.id).reply.slots_consumed==2 && ledger.query(registered.id).reply.reason_code==KILN_DEFINE_OWNER_INACTIVE);
+
+    std::array<uint8_t,16> absent{};absent[0]=4;
+    check("pool-receipt.unknown",ledger.query(absent).reply.reason_code==KILN_DEFINE_NOT_FOUND);
+    auto changed=def;changed.definition+=" ";
+    auto fail=ledger.commit(ledger.prepare(changed,KILN_DEFINE_ALLOW_NEXT_START,false),[](const PoolReceipt&){return false;});
+    check("pool-receipt.storage-failure",!fail.reply.ok && fail.reply.reason_code==KILN_DEFINE_STORAGE_FAILURE && fail.reply.slots_consumed==0);
+    auto capacity=ledger.commit(ledger.prepare(def,KILN_DEFINE_ALLOW_NEXT_START,false,KILN_DEFINE_CAPACITY_EXCEEDED,"full"),persist);
+    check("pool-receipt.capacity-never-deferred",!capacity.reply.ok && capacity.reply.reason_code==KILN_DEFINE_CAPACITY_EXCEEDED && writes==2);
+}
+
 int main(int argc, char** argv) {
     // ids follow Kiln.Blocks' BlockIds.Derive (the same GUID on every machine)
     check("guid.derive", derive_guid("wt-mat-a", "material", "brick-a").text() == "0bc0dd61-53c2-5d22-926f-005393ba84b7", derive_guid("wt-mat-a", "material", "brick-a").text());
@@ -336,6 +617,7 @@ int main(int argc, char** argv) {
     // the hash: live materials only, and the same text for none
     a = allocate(live, {kept}, free_ids, deprecated);
     const std::string h = handshake_hash(a.placed);
+    check("hash.pre-pool-golden", h == "78445d0c05b1c25e", h);
     Allocation without = allocate(live, {}, free_ids, deprecated);
     check("hash.kept-not-in-it", h == handshake_hash(without.placed) && h != kEmptyHash);
     check("hash.empty", handshake_hash({}) == kEmptyHash);
@@ -619,7 +901,48 @@ int main(int argc, char** argv) {
         array_at(np, L.pools, L.pool_stride, &pools);
         array_at(np, static_cast<uint32_t>(pools.base - np.data()) + L.pool_materials, 4, &items);
         check("game.new-reads-back", gi.building_at.count(213) && items.count == 62 && rd<uint32_t>(np, items.base - np.data() + 61 * 4) == nm.item_id);
+        // the game's own building configs share loot items (materialItem): two that do still resolve to their own block items
+        RegistryInfo own;
+        read_registry(greg, L, &own, &why);
+        std::map<std::string, std::vector<int>> by_loot;
+        for (const auto& [cell, at] : own.building_at) {
+            Guid g;
+            std::memcpy(g.b.data(), greg.data() + at + L.building.item, 16);
+            if (!g.zero()) by_loot[g.text()].push_back(cell);
+        }
+        std::vector<int> pair;
+        for (const auto& [loot, cells] : by_loot)
+            if (cells.size() > 1 && pair.empty()) pair = {cells[0], cells[1]};
+        check("game.pool-catalog-loot-shared", pair.size() == 2, std::to_string(by_loot.size()) + " distinct loot items");
+        if (pair.size() == 2) {
+            auto game = pool_game_materials({{"Block_T1_Left_CRAFTING", 7001, pair[0]}, {"Block_T1_Right_CRAFTING", 7002, pair[1]}}, greg, own, L);
+            check("game.pool-catalog-own-items", game.count("Left") && game["Left"].item == 7001 && game.count("Right") && game["Right"].item == 7002,
+                  "cells " + std::to_string(pair[0]) + " and " + std::to_string(pair[1]));
+        }
     }
+    if(argc>=5) {
+        const Bytes game=read(argv[2]); Layouts C=layouts();C.pool_id=4;C.pool_slot=0;
+        ArrayView rows,items;bool readable=array_at(game,C.pools,C.pool_stride,&rows) && rows.count && array_at(game,uint32_t(rows.base-game.data()+C.pool_materials),4,&items);
+        check("game.custom-pool-source",readable && items.count==61);
+        if(readable && items.count==61) {
+            MaterialPool pool{derive_guid("pool-host-test","materialpool","full"),"pool-host-test:full",false,{}};
+            for(uint32_t i=0;i<items.count;++i)pool.items.push_back(rd<uint32_t>(game,size_t(items.base-game.data())+i*4));
+            auto live=std::vector<Material>{material("pool-host-test","a"),material("pool-host-test","b"),material("pool-host-test","c")};
+            auto allocated=allocate(live,{}, {213,214,215},{});std::set<Guid> grouped;
+            for(const auto& p:allocated.placed){pool.items.push_back(p.m.item_id);grouped.insert(p.m.guid);}
+            Bytes merged;std::string why;
+            bool ok=merge_pools(game,C,allocated.placed,{pool},&merged,&why,grouped);
+            check("game.custom-pool-64",ok && pool_size(merged,pool.name)==64 && pool_size(merged,kWallPool)==61,why);
+            check("game.custom-pool-keeps-vanilla-payload",ok && merged.size()>game.size() && std::equal(game.begin()+8,game.end(),merged.begin()+8));
+        }
+    }
+    custom_pools_test();
+    pool_admission_test();
+    pool_game_catalog_test();
+    stored_refusal_once_test();
+    pool_reflection_test();
+    custom_pool_hash_test();
+    pool_registration_test();
     jsonc_test();
     crafting_props_test();
     std::printf("%d passed, %d failed\n", g_passed, g_failed);
