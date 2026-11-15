@@ -47,6 +47,7 @@ Machine-readable copies:
 | `<game>/kiln/state/boot.json` | kiln-core | launcher | `state-boot.schema.json`, `examples/state-boot.json` |
 | `<game>/kiln/state/progress.json` | kiln-core (dev.27; services, plugins and Kiln.Host report through kiln.progress v2) | launcher, server operators | `state-progress.schema.json`, `examples/state-progress.json`; section "Start progress" below |
 | `<game>/kiln/state/mods.json` | Kiln.Host | launcher | `state-mods.schema.json`, `examples/state-mods.json` |
+| `<game>/kiln/state/roster-refused.json` (`.last.json` after the next start) | kiln.knowledge (0.2.0-dev.29), when the mods' NPC roster stops the start | launcher, server operators | `state-roster-refused.schema.json`, `examples/state-roster-refused.json`; section 5.9 |
 | `<game>/kiln/state/native.json` | native loader (core) | launcher | `state-native.schema.json`, `examples/state-native.json` |
 | `<game>/kiln/state/hooks.json` | kiln-core (kiln.hooks v2, compat report) | launcher | `hooks-state.schema.json`, `examples/hooks-state.json`, `fixtures/hooks-state/` |
 | `<game>/kiln/compat-rules.json`, `<configDir>/compat-rules.json` | Kiln (shipped in the runtime's `core` component since dev.29, from `native/core/compat-rules.json`; replaced by every update; may be missing on an older install) / the player | kiln-core, launcher | `compat-rules.schema.json`, `examples/compat-rules.json`, `fixtures/compat-rules/cases.json` |
@@ -818,6 +819,22 @@ All written atomically; a file whose `pid` is not a live process is stale.
   when another loader had started the DLL before the late phase, so `[late]` moved nothing),
   `services[]` (`name@version`), `plugins[]` (`{file, id, version, status, error}`), `native{loaded, failed, pending}`,
   `clr{started, error}`, `errors[]`.
+- `boot.json` `boot.stop` (0.2.0-dev.29, kiln.boot `stop_start`): `{code, reason, by, mods[]}` when a service ended the
+  start on purpose (with or without a boot generation), else null; `boot.exitCode` is then that code. kiln.knowledge's
+  roster uses code 19202 (0x4B02): show `reason` and do not restart (below). progress.json says `state` `failed` with
+  the same reason.
+- `roster-refused.json` (kiln.knowledge, 0.2.0-dev.29; `state-roster-refused.schema.json`): the mods' NPC roster cannot
+  be held on this side (more than 128 entries, or more than 64 where the second unlock page cannot be installed), so the
+  start stopped before any world loaded and the process ended with 19202 (0x4B02; a Linux parent under Wine sees 2).
+  Written first, before kiln.log's line, before kiln.boot writes boot.json and progress.json and before the game
+  client's message box, so it is there even when the player ends the game while the message is open. Fields:
+  `format` 1, `refused` true, `why` (the build's refusal, word for word: show it), `mods[]` (the mods that add roster
+  NPCs: the ones to remove or update), `side` (`client`|`server`), `exitCode` 19202, `unixExitStatus` 2, `restart`
+  false (a restart stops the same way: never restart on it), `advice` (what to do, as in kiln.log), `bootStop` (true:
+  kiln.boot ended the start, so boot.json `boot.stop` and progress.json say the same; false: an older core, only this
+  file and kiln.log), `pid`, `utc`. The next start moves it to `roster-refused.last.json`: a launcher that shows why the
+  last start ended reads that one after a new start, and `roster-refused.json` right after the exit. A launcher shows
+  `why` and the `mods` after the game exits with 19202, and offers to disable those mods.
 - `mods.json` (Kiln.Host, after every resolve/load/unload/reload; `generation` grows): `pid`, `written`, `generation`,
   `side`, `api`, `profile{id, generation, mode}`, `mods[]` (`{id, version, name, folder, source: profile|dropin, state:
   pending|loaded|disabled|failed|skipped|unloaded, reason, loadIndex, side, clients, faults}`).

@@ -4,6 +4,7 @@
 //   byte scans (foreign_scan.h), sigdb, hooks,
 //   in-core services, service DLLs + plugins, native mods "boot", native "world" armed, .NET host, chain DLLs named in
 //   chain.ini [late], state/boot.json, state/hooks.json.
+#include <atomic>
 #include <cstring>
 #include <optional>
 #include <string>
@@ -50,6 +51,7 @@ void bound();
 bool after_clr(bool clr_started, void (*write_state)(void* user, const std::string& last_line), void* user);
 nlohmann::json report();
 void late_hold(void (*write_state)(void* user, const std::string& last_line), void* user);
+void stop_writer(void (*write_state)(void* user, const std::string& last_line, const std::string& why), void* user);
 }  // namespace kiln::boot_svc
 
 namespace kiln {
@@ -470,6 +472,22 @@ void late_hold_boot(void*, const std::string& last_line) {
     wait_for_file_text(paths().logs / L"kiln.log", last_line);
 }
 
+// A service's stop (kiln.boot stop_start: kiln.knowledge's roster that cannot be held), before or after the game's
+// entry point: the same files as hold_boot and late_hold_boot, from boot()'s facts while it runs and from the facts it
+// ended with afterwards.
+std::atomic<BootFacts*> g_stop_facts{nullptr};
+std::atomic<bool> g_stop_before_entry{true};
+void stop_state(void*, const std::string& last_line, const std::string& why) {
+    progress_state::failed(why);
+    if (BootFacts* f = g_stop_facts.load()) {
+        f->errors.push_back(why);
+        write_boot_json(*f);
+    }
+    if (g_stop_before_entry.load()) caps::boot_complete();  // capabilities.json is not written yet before the entry point
+    wait_for_file_text(paths().state / L"progress.json", "\"failed\"");
+    wait_for_file_text(paths().logs / L"kiln.log", last_line);
+}
+
 void boot() {
     snapshot_entry();  // before anything loads a DLL
     init_paths();
@@ -563,6 +581,13 @@ void boot() {
     // is published after OnBoot: decided here, so the collectors know it in kiln_plugin_main and on_ready.
     boot_svc::decide(hooks, f.safe_idle);
 
+    // a service may stop the start from here on (kiln.boot stop_start): its files come from these facts until boot ends
+    g_stop_facts.store(&f);
+    struct StopFactsScope {  // boot() left early (host tests, an exception): no stop may write a dead frame's facts
+        BootFacts* mine;
+        ~StopFactsScope() { g_stop_facts.compare_exchange_strong(mine, nullptr); }
+    } stop_scope{&f};
+    boot_svc::stop_writer(&stop_state, nullptr);
     if (hooks) load_plugins();  // kiln/services/*.dll, then plugins (profile-aware), then on_ready
     else progress_state::step("plugins");
     if (hooks) boot_svc::bound();  // every on_ready ran: the collectors are registered
@@ -589,6 +614,8 @@ void boot() {
     write_boot_json(f);
     g_late_facts = new BootFacts(f);  // never freed: kiln.boot may need it at any later moment
     boot_svc::late_hold(&late_hold_boot, nullptr);
+    g_stop_facts.store(g_late_facts);  // a later stop (the game's resource start) writes from the facts boot ended with
+    g_stop_before_entry.store(false);
     caps::boot_complete();  // capabilities.json, then a write after each change (at most one a second)
     hooks::boot_complete();  // state/hooks.json + the foreign-hook check (kiln.hooks v2)
     compat::boot_done();

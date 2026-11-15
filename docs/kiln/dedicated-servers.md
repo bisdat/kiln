@@ -131,8 +131,28 @@ Open `kiln/logs/kiln.log` after the server has started.
 | `safe idle: build ... is not verified ... the game runs vanilla` | this Kiln doesn't know the build: normal hooks and managed mods stay off under the default policy (see [Game updates](#game-updates)) |
 | `safe idle: no symbol definitions` | the server's symbol definitions are missing or could not be resolved |
 | no kiln.log | `dinput8.dll` wasn't loaded: wrong folder, or Wine without the setting |
+| `roster: the start is stopped (pid …, exit code 0x4B02): …` | the mods add more NPCs to the roster than this server can hold, so Kiln ended the start before the world loaded (the save is untouched). **Do not restart: it stops the same way.** Remove the mods the line names (or update Kiln), then start again. `kiln/state/roster-refused.json` says the same |
+| `boot: the start stops … (exit code 0x4B01): …` | a mod whose boot content is required could not be applied; the same rule: fix the mod list, do not restart |
 
 On Linux, `kilnctl status myserver` shows the same build line.
+
+### When Kiln stops the start: no restart loop
+
+Kiln ends a start on purpose, before any world loads, when the mod list cannot run without losing a world's progress.
+The process then exits with a code that says so; restarting gives the same stop, every time:
+
+| Exit code (Windows) | Seen by a Linux parent (Wine) | Why | Says more |
+|---|---|---|---|
+| 0x4B01 (19201) | 1 | kiln.boot: a required boot mod's content could not be applied | `kiln/state/boot.json` `boot` |
+| 0x4B02 (19202) | 2 | kiln.knowledge: the mods' NPC roster cannot be held | `kiln/state/roster-refused.json`, `boot.json` `boot.stop` |
+
+- **systemd**: the `kiln@.service` unit from the release has `RestartPreventExitStatus=1 2`. A unit of your own that has
+  `Restart=on-failure` or `Restart=always` needs that line too.
+- **A hosting panel or a script that restarts a crashed server** (Pterodactyl and the like, a `while true` loop): tell
+  it that exit status 1 or 2 (19201 or 19202 on Windows) is a configuration error, not a crash: no restart, show the last
+  `kiln.log` line to whoever runs the server.
+- Kiln's own tools never restart on it: `kilnctl run` passes the status on and starts nothing again, `kilnctl start`
+  waits for the world and reports the failed start, and the Kiln Launcher restarts a server only when you press Restart.
 
 ### What a slow start is doing
 

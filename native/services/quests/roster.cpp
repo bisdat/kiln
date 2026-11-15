@@ -87,14 +87,16 @@ std::atomic<bool> g_wanted{false};
 std::atomic<uint64_t> c_paged{0}, c_attached{0}, c_unpaired{0}, c_answered{0}, c_closed{0}, c_faults{0}, c_off_tick{0};
 // why an attach did not happen, why a query was kept, what the recovery did, failed registry reads
 std::atomic<uint64_t> c_att_unowned{0}, c_att_old{0}, c_att_busy{0};
-std::atomic<uint64_t> c_kept_nopage{0}, c_kept_stale{0}, c_kept_unowned{0}, c_kept_moved{0}, c_kept_busy{0};
+std::atomic<uint64_t> c_kept_nopage{0}, c_kept_stale{0}, c_kept_unowned{0}, c_kept_moved{0}, c_kept_busy{0}, c_kept_noctx{0},
+    c_kept_unreadable{0};
 std::atomic<uint64_t> c_recovered{0}, c_recover_failed{0}, c_recover_noctx{0}, c_unreadable{0};
 std::atomic<bool> g_said_eval_off{false}, g_said_query_off{false};
 std::atomic<int> g_ctx_is_singleton[3] = {-1, -1, -1};  // per kind: the game's context is the world's G38Knowledge
 
 // kiln/control switches, read once at the start and logged at every start while present (labs; never needed in play):
 //   roster.fail-install  the hooks are not installed (as a failed installation): a roster past 64 stops the start
-//   roster.no-pages      NEGATIVE CONTROL: the build takes 128 without the second page, no hook (page-2 states are wrong)
+//   roster.no-pages      NEGATIVE CONTROL, only together with roster.lab: the build takes 128 without the second page, no
+//                        hook (page-2 states are wrong); alone it is ignored, with a warning
 //   roster.lab           lab diagnostics: an attach line per page, and roster.drop-page (polled) drops a world's page
 bool g_ctl_fail_install = false, g_ctl_no_pages = false, g_ctl_lab = false;
 
@@ -216,6 +218,8 @@ uint8_t* hk_query(uint8_t* out, uintptr_t reg, uint32_t id) {
             case Sidecars::Bit::Unowned: c_kept_unowned.fetch_add(1, std::memory_order_relaxed); break;
             case Sidecars::Bit::Moved: c_kept_moved.fetch_add(1, std::memory_order_relaxed); break;
             case Sidecars::Bit::Busy: c_kept_busy.fetch_add(1, std::memory_order_relaxed); break;
+            case Sidecars::Bit::NoContext: c_kept_noctx.fetch_add(1, std::memory_order_relaxed); break;
+            case Sidecars::Bit::Unreadable: c_kept_unreadable.fetch_add(1, std::memory_order_relaxed); break;
             default: c_kept_nopage.fetch_add(1, std::memory_order_relaxed); break;
         }
     }
@@ -361,10 +365,15 @@ void recover(uint32_t kind, WorldSeen& w) {
     if (!(live == w.tried)) w.tried = live, w.tries = 0;
     if (w.tries >= 2) return;  // this cache was tried: the producer's next evaluation (a knowledge change) attaches
     ++w.tries;
-    uintptr_t ctx = g_sidecars.context(kind, w.session);
-    if (!ctx && g_ctx_is_singleton[kind].load() == 1) ctx = w.knowledge;  // the game passes that one (seen in this process)
+    // only the context the game itself passed for this world, and only while it is the world's G38Knowledge now (a
+    // temporary the game passed, or a world whose knowledge object changed, would be a stale pointer): otherwise the
+    // page stays missing and its ids are kept, counted as "no checked context"
+    const uintptr_t ctx = g_sidecars.checked_context(kind, w.session, g_api->singleton(w.world, kstr("G38Knowledge")));
     if (!ctx) {
-        c_recover_noctx.fetch_add(1, std::memory_order_relaxed);
+        if (c_recover_noctx.fetch_add(1, std::memory_order_relaxed) < 4)
+            KW("roster: the %s world's second page is missing and is not computed again: the knowledge context the game passed is not "
+               "the world's G38Knowledge now (or none was passed yet); its ids past 63 are kept until the game evaluates them",
+               kind_name(kind));
         return;
     }
     Pending p;
@@ -466,6 +475,33 @@ void want() {
     if (!g_wanted.exchange(true, std::memory_order_acq_rel)) KI("roster: a mod reads the roster: each world publishes its snapshot after its step");
 }
 
+// The player's message when the roster stops a game client's start: owned by the game's window when it has one, so it
+// is not lost behind it, and closed by itself after 60 s so a game behind a fullscreen or Wayland window does not look
+// hung (the reason is on disk before it opens).
+struct StopBox {
+    std::wstring text;
+};
+BOOL CALLBACK find_game_window(HWND h, LPARAM out) {
+    DWORD pid = 0;
+    GetWindowThreadProcessId(h, &pid);
+    if (pid != GetCurrentProcessId() || !IsWindowVisible(h) || GetWindow(h, GW_OWNER)) return TRUE;
+    *reinterpret_cast<HWND*>(out) = h;
+    return FALSE;
+}
+void KILN_CALL show_box(void* user) {
+    using TimeoutBox = int(WINAPI*)(HWND, LPCWSTR, LPCWSTR, UINT, WORD, DWORD);
+    const HMODULE u32 = GetModuleHandleW(L"user32.dll");
+    const auto fn = u32 ? reinterpret_cast<TimeoutBox>(reinterpret_cast<void*>(GetProcAddress(u32, "MessageBoxTimeoutW"))) : nullptr;
+    if (!fn) {
+        KW("roster: no message box with a timeout on this system (user32 MessageBoxTimeoutW): the reason is in kiln.log only");
+        return;
+    }
+    HWND owner = nullptr;
+    EnumWindows(&find_game_window, reinterpret_cast<LPARAM>(&owner));
+    fn(owner, static_cast<const StopBox*>(user)->text.c_str(), L"Kiln: the NPC roster is too long",
+       MB_OK | MB_ICONERROR | MB_TOPMOST | MB_SETFOREGROUND, 0, 60000);
+}
+
 }  // namespace
 
 // ============================================================================================= the service ======
@@ -505,8 +541,13 @@ void roster_main() {
     }
     // the switches, loud at every start while present
     g_ctl_fail_install = control_file("roster.fail-install");
-    g_ctl_no_pages = control_file("roster.no-pages");
     g_ctl_lab = control_file("roster.lab");
+    g_ctl_no_pages = control_file("roster.no-pages");
+    if (g_ctl_no_pages && !g_ctl_lab) {
+        g_ctl_no_pages = false;
+        KW("roster: kiln/control/roster.no-pages is present but IGNORED: the negative control runs only in a lab, with "
+           "kiln/control/roster.lab too; delete the file");
+    }
     if (g_ctl_fail_install)
         KW("roster: LAB SWITCH kiln/control/roster.fail-install is present: the second unlock page is not installed, so a roster of "
            "more than 64 entries stops the start; delete the file to play");
@@ -612,15 +653,17 @@ void roster_world_event(const KilnWorldEvent* e) {
     g_sidecars.unbind(e->kind, e->session);  // this world's pages only; the other world's stay
     if (g_limit.expanded() || g_wanted.load())
         KI("roster: the %s world stopped: its snapshots and second pages are gone (paged %llu, attached %llu, not attached: unowned %llu, "
-           "old %llu, busy %llu; unpaired %llu, answered %llu, kept %llu: no page %llu, stale %llu, unowned %llu, moved %llu, busy %llu; "
-           "recovered %llu, recovery failed %llu, without a context %llu; unreadable %llu; off the tick thread %llu, lock busy %llu)",
+           "old %llu, busy %llu; unpaired %llu, answered %llu, kept %llu: no page %llu, stale %llu, unowned %llu, moved %llu, busy %llu, "
+           "no checked context %llu, unreadable %llu; recovered %llu, recovery failed %llu, without a checked context %llu; snapshot reads "
+           "failed %llu; off the tick thread %llu, lock busy %llu)",
            kind_name(e->kind), static_cast<unsigned long long>(c_paged.load()), static_cast<unsigned long long>(c_attached.load()),
            static_cast<unsigned long long>(c_att_unowned.load()), static_cast<unsigned long long>(c_att_old.load()),
            static_cast<unsigned long long>(c_att_busy.load()), static_cast<unsigned long long>(c_unpaired.load()),
            static_cast<unsigned long long>(c_answered.load()), static_cast<unsigned long long>(c_closed.load()),
            static_cast<unsigned long long>(c_kept_nopage.load()), static_cast<unsigned long long>(c_kept_stale.load()),
            static_cast<unsigned long long>(c_kept_unowned.load()), static_cast<unsigned long long>(c_kept_moved.load()),
-           static_cast<unsigned long long>(c_kept_busy.load()), static_cast<unsigned long long>(c_recovered.load()),
+           static_cast<unsigned long long>(c_kept_busy.load()), static_cast<unsigned long long>(c_kept_noctx.load()),
+           static_cast<unsigned long long>(c_kept_unreadable.load()), static_cast<unsigned long long>(c_recovered.load()),
            static_cast<unsigned long long>(c_recover_failed.load()), static_cast<unsigned long long>(c_recover_noctx.load()),
            static_cast<unsigned long long>(c_unreadable.load()), static_cast<unsigned long long>(c_off_tick.load()),
            static_cast<unsigned long long>(g_sidecars.busy()));
@@ -648,24 +691,37 @@ bool npc_unlock_pages(uintptr_t registry, uint64_t pages[2], uint32_t* npages, u
 }
 
 void roster_refuse_start(const std::string& why, const std::vector<std::string>& mods) {
-    std::string list;
-    for (const std::string& m : mods) list += (list.empty() ? "" : ", ") + m;
+    std::string list, csv;
+    for (const std::string& m : mods) list += (list.empty() ? "" : ", ") + m, csv += (csv.empty() ? "" : ",") + m;
     if (list.empty()) list = "(none named)";
+    const bool by_boot = kiln::boot::can_stop_start(g_api);
     char head[96];
     std::snprintf(head, sizeof head, "roster: the start is stopped (pid %lu, exit code 0x%X): ", GetCurrentProcessId(),
                   KILN_KNOW_ROSTER_EXIT_CODE);
+    const std::string advice = "Do not restart the game or the server: the next start stops the same way (a dedicated server under "
+                               "Wine exits with status 2; a supervisor must not restart on it). Fix the mod list: remove these mods, or "
+                               "run a Kiln and game build where the roster's second unlock page installs";
     const std::string line = std::string(head) + why + "; mods: " + list +
                              ". No world was loaded and no save was opened: a world without these mods' NPCs and knowledge would drop "
-                             "their progress at its next save. Remove the mods, or run a Kiln and game build where the roster's "
-                             "second unlock page installs (kiln/state/roster-refused.json)";
-    KE("%s", line.c_str());
-    // what a launcher reads
+                             "their progress at its next save. " + advice + " (kiln/state/roster-refused.json)";
+    // first the file a launcher reads and the log line: nothing below may keep them from the disk (a player who ends
+    // the game while its message is open still has the reason)
     SYSTEMTIME st{};
     GetSystemTime(&st);
     char utc[32];
     std::snprintf(utc, sizeof utc, "%04u-%02u-%02uT%02u:%02u:%02uZ", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
-    nlohmann::json j = {{"refused", true}, {"why", why}, {"mods", mods}, {"side", g_client ? "client" : "server"},
-                        {"exitCode", KILN_KNOW_ROSTER_EXIT_CODE}, {"pid", GetCurrentProcessId()}, {"utc", utc}};
+    nlohmann::json j = {{"format", 1},
+                        {"refused", true},
+                        {"why", why},
+                        {"mods", mods},
+                        {"side", g_client ? "client" : "server"},
+                        {"exitCode", KILN_KNOW_ROSTER_EXIT_CODE},
+                        {"unixExitStatus", KILN_KNOW_ROSTER_EXIT_CODE & 0xff},
+                        {"restart", false},
+                        {"advice", advice},
+                        {"bootStop", by_boot},
+                        {"pid", GetCurrentProcessId()},
+                        {"utc", utc}};
     const std::string doc = j.dump(1) + "\n";
     const std::wstring state = kiln_path(KILN_PATH_STATE, "roster-refused.json");
     if (!state.empty()) {
@@ -677,17 +733,20 @@ void roster_refuse_start(const std::string& why, const std::vector<std::string>&
             CloseHandle(f);
         }
     }
-    // a required boot mod: kiln.boot stops the start here with its own state files (it does not return); otherwise (no
-    // deferred generation, or a mod that is not required) the call records the issue and this function stops the start
-    for (const std::string& m : mods) kiln::boot::activation_fault(g_api, g_owner, m, "knowledge", "roster", "kiln.knowledge: " + why);
-    if (g_client) {
-        const std::wstring text = wide("Kiln stopped the game's start.\n\n" + why + "\n\nMods: " + list +
-                                       "\n\nNo world was loaded and no save was opened, so nothing of your progress was lost. Remove "
-                                       "these mods, or update Kiln.\n\nkiln/logs/kiln.log and kiln/state/roster-refused.json say more.");
-        MessageBoxW(nullptr, text.c_str(), L"Kiln: the NPC roster is too long", MB_OK | MB_ICONERROR | MB_TOPMOST | MB_SETFOREGROUND);
-    }
-    // the log line on disk before the process ends (the log writer is another thread)
-    const std::wstring log = kiln_path(KILN_PATH_LOGS, "kiln.log");
+    KE("%s", line.c_str());
+    // kiln.boot ends the start the same way with a boot generation or without one, before the game's entry point (a
+    // boot generation's prepare) or after it (the game's resource start): its stop line, progress.json "failed",
+    // boot.json "boot"."stop", then the message on a client, then exit 0x4B02 (it does not return)
+    StopBox box;
+    box.text = wide("Kiln stopped the game's start.\n\n" + why + "\n\nMods: " + list +
+                    "\n\nNo world was loaded and no save was opened, so nothing of your progress was lost. Starting again stops "
+                    "the same way: remove these mods, or update Kiln.\n\nkiln/logs/kiln.log and kiln/state/roster-refused.json "
+                    "say more. This message closes by itself after 60 seconds.");
+    kiln::boot::stop_start(g_api, g_owner, csv, "kiln.knowledge: " + why + "; mods: " + list + ". " + advice, KILN_KNOW_ROSTER_EXIT_CODE,
+                           g_client ? &show_box : nullptr, &box);
+    // without kiln.boot's call (or a stop already under way): the same by hand
+    if (g_client) show_box(&box);
+    const std::wstring log = kiln_path(KILN_PATH_LOGS, "kiln.log");  // the log line on disk first (its writer is a thread)
     const ULONGLONG until = GetTickCount64() + 1500;
     std::string tail(65536, '\0');
     while (!log.empty() && GetTickCount64() < until) {
