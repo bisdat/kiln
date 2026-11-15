@@ -285,6 +285,10 @@ typedef struct KilnGameplayStatus {
     uint8_t discard;        /* 1: discard actions are read from PlayerInput */
     uint8_t reserved9[7];
     uint64_t discards_seen, discards_canceled;
+    /* Appended: build_hooks remains boolean. Bits 0..4: blueprint, prop, dismantle, dismantle2, pickup.
+     * State 0: idle/resolved, 1: installed, 2: waiting for stop, 3: refused (reason includes partial mask). */
+    uint32_t build_hook_state, build_hook_mask;
+    char build_hook_reason[512];
 } KilnGameplayStatus;
 
 /* component_change ops */
@@ -349,6 +353,9 @@ typedef struct KilnGameplayApi {
      * world goes away. */
     KilnResult(KILN_CALL* component_change)(KilnOwner owner, KilnEntity entity, uint32_t hash, const void* data,
                                             uint32_t size, uint32_t op);
+    /* First-use build interest, AnyThread. OK includes waiting for world stop (see gameplay.build_hooks).
+     * UNAVAILABLE: refused for this process. Appended in dev.29: check header.size. */
+    KilnResult(KILN_CALL* request_build)(KilnOwner owner);
 } KilnGameplayApi;
 
 #ifdef __cplusplus

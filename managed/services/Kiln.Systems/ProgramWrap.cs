@@ -445,7 +445,49 @@ internal sealed unsafe class ManagedStage
 
     internal bool PerEntity => Each is not null || View is not null;
 
-    internal WrapState State => _state;
+    internal WrapState State => _directorySuspended ? WrapState.Pending : _state;
+    private readonly object _directoryGate = new();
+    private volatile bool _directorySuspended;
+    private ulong _directorySession = ulong.MaxValue, _directoryStep;
+    private int _directoryAttempts;
+    private volatile bool _directoryReady;
+
+    private bool DirectoryReady(SystemsNative.Table* t, SystemsNative.Slice* s)
+    {
+        var session = t->GameWorldSession((uint)Wrap.World);
+        // Successful lists are session-cached: concurrent steady-state slices need no retry gate at all.
+        if (Volatile.Read(ref _directorySession) == session && _directoryReady) return true;
+        // No worker waits for another worker performing the bounded directory reads.
+        if (!Monitor.TryEnter(_directoryGate)) return false;
+        try
+        {
+            if (_directorySession != session)
+            {
+                _directoryReady = false; _directoryAttempts = 0;
+                Volatile.Write(ref _directorySession, session);
+            }
+            if (_directoryReady) return true;
+            if (_directoryAttempts != 0 && _directoryStep == s->Step) return false;
+            _directoryStep = s->Step;
+            var lists = ProgramLists.Of(t, Wrap.World, Wrap.Program, s->ProgramIndex);
+            if (lists.Complete && (lists.Contract is not null || !lists.ContractUnread))
+            {
+                _directoryReady = true; _directorySuspended = false; Detail = null;
+                return true;
+            }
+            _directorySuspended = true;
+            Detail = $"program directory unavailable: suspended ({++_directoryAttempts}/8 attempts; retry next step)";
+            if (_directoryAttempts == 1) Wrap.Mod?.Log.Warn(Detail);
+            if (_directoryAttempts >= 8)
+            {
+                _directorySuspended = false;
+                Off($"program directory unavailable after 8 attempts on separate steps: {Wrap.Program}");
+            }
+            return false;
+        }
+        finally { Monitor.Exit(_directoryGate); }
+    }
+
 
     internal void Refuse(string why)
     {
@@ -637,6 +679,7 @@ internal sealed unsafe class ManagedStage
     {
         var t = SystemsNative.T;
         if (t == null) return;
+        if (View is not null && !DirectoryReady(t, s)) return;
         var around = Around;
         if (around is not null && !around.Begin(Kind, s)) return;  // an After whose Before kept nothing of this slice
         var outerEach = _each;

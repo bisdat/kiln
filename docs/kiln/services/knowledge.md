@@ -164,9 +164,10 @@ uint8_t holds; KilnKnowledgeQuery q = n.query; K->query(player, &q, KILN_KNOW_MO
 | `submit(owner, &request, &id)`, `grant`, `revoke`, `result(id)` | any | `KilnKnowledgeRequest {op GRANT/REVOKE/SET, target, id, value, callback}`; the callback runs on the tick thread (Post of the apply step); the last 256 results are kept |
 | `query(target, &q, mode, &out)` | tick | the game's evaluator; INVALID_ARGUMENT: a player query for the world |
 | `resolve(name)`, `name_of(id, kind)`, `catalog_count/at`, `journal_quest/step`, `npc` | tick | catalog |
-| `events(after, out, cap, &n)`, `last_seq` | any | ring of 4,096 `KilnKnowledgeEvent` (64 B): CHANGED, DIALOGUE, CLIENT, DIALOGUE_HELD, RESOLVED |
+| `events(after, out, cap, &n)`, `last_seq` | any | ring of 4,096 `KilnKnowledgeEvent` (64 B): CHANGED, DIALOGUE, CLIENT, DIALOGUE_HELD, RESOLVED, ROSTER (since 0.2.0-dev.29: a roster entry's unlock state between two snapshots of one world; target = world kind, npc = generation, id = NpcId, old/new 0/1, extra = knowledge version, request = revision) |
 | `held_ops(held)`, `decide(held, ALLOW/DENY/DEFAULT)`, `listen(kinds)` | any | holds (Kiln.Quests' pump uses them) |
 | `settings`, `configure`, `allow(ids, n)` | any | security settings (configure lasts until the file changes) |
+| `roster_world(kind, &gen, &readiness)` (+240), `roster_budget(kind, gen, &info)` (+248), `npc_unlock_at(kind, gen, id, &reply)` (+256) | any | appended in 0.2.0-dev.29 (table 264 B; check `header.size`): the roster's snapshots per world, kind 0 server / 2 client, a token = the core session's counter of that kind; `KilnCapacityInfo`, `KilnNpcUnlockReply` (40 B), readiness `KILN_NPC_UNKNOWN_ID` (7). See [npcs.md](npcs.md#the-rosters-size-since-020-dev29) |
 
 ## Security (opt-in; `kiln/config/knowledge.json`)
 ```jsonc

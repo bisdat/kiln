@@ -57,7 +57,7 @@ internal static unsafe class ProgramBudgetNative
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    public struct Table
+    public struct Table // 16-byte budget-only prefix; reservation readers check the appended member at +16 separately
     {
         public ServiceHeader Header;
         public delegate* unmanaged[Cdecl]<uint, Reply*, int> ProgramBudget;

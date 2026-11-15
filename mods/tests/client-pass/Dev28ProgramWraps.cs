@@ -4,8 +4,9 @@
 // it wraps the client world's render_transform (a client program: no update in the server exe) and the hosted server
 // world's is_actor_in_shape with a Before each that only counts, then asserts what the code can see: each wrap reached
 // its own world's slices (the prediction world, which runs the client world's table, is forwarded untouched), the client
-// world's slices ran on the game's workers, no stage faulted or went over its budget, and both wraps are gone after
-// Dispose. What only a player can judge is asked: that the game looked and ran as before while they were on. The joined
+// world's slices ran on the game's workers, a third wrap with an archetype filter (WhenArchetype: the client world's
+// entity map, read on the workers while entities come and go) decided its slices, no stage faulted or went over its
+// budget, and the wraps are gone after Dispose. What only a player can judge is asked: that the game looked and ran as before while they were on. The joined
 // half (a client joined to a dedicated server) is not here: a joined check's body runs on the server.
 //
 // 06a-wraps.waterworks: the product proof (chapter 06a 6, 9.13) in a hosted world with a second player in it, where the
@@ -14,6 +15,11 @@
 // program's own slices can show: its slices ran on the game's workers (fails when the wrap never ran on one), the game's
 // own fills were seen in fuel_setup's update and the doubled water is what GetComponent reads afterwards. The player
 // judges what they see: a well's water bar refilling faster while the wrap is on.
+//
+// 06a-define.hosted: Systems.Define (S8) in a hosted world with a second player. kiln.world reserved the pass's own program
+// (ClientPassFuelQuery, from this mod's kiln.programs.json) when the game started its hosted world; the check binds it,
+// asserts it ran for the hosted world's water containers with Fuel read through the query on the game's workers (fails
+// when it never ran on one), and that nothing calls it after Dispose. The player judges whether the game ran as before.
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using Kiln;
@@ -78,23 +84,47 @@ public sealed partial class ClientPassMod
         c.OnEnd(() => serverWrap.Dispose());
         serverWrap.Before((ref Slice s) => server.Add(ref s));
         serverWrap.Disabled += e => disabled.Enqueue(e);
+        // The archetype filter on a client: render_transform reads CurrentTransform and runs without StaticTransform, so every
+        // slice it runs passes this filter; deciding it reads each slice's first entity in the client world's entity map
+        // (statically the server's map, out/06a-program-wraps/client-static) on the game's workers. A slice it cannot
+        // decide turns the wrap off with a reason (a Disabled event below).
+        var archetype = new WrapCount();
+        var w3 = Systems.Wrap("render_transform", new WrapOptions { World = WorldKind.Client });
+        if (!c.Expect(w3.Ok && w3.Wrap is not null, "a second wrap of render_transform, with an archetype filter", w3.Ok ? "made" : w3.Reason))
+        {
+            await c.Verdict();
+            return;
+        }
+        var archetypeWrap = w3.Wrap!;
+        c.OnEnd(() => archetypeWrap.Dispose());
+        archetypeWrap.WhenArchetype(has: ["CurrentTransform"], lacks: ["StaticTransform"])
+            .Before((ref Slice s) => archetype.Add(ref s));
+        archetypeWrap.Disabled += e => disabled.Enqueue(e);
         c.Instruct("Two of the game's own programs are wrapped now: the one that places every model where it is drawn (client " +
                    "world) and one that tracks who stands in which area (your hosted world). The wraps only count. Walk and " +
                    "turn around for about 30 seconds, near creatures or other players if you can.");
         await c.Delay(TimeSpan.FromSeconds(30));
         c.Log.Info($"client-pass: 06a-wraps.client render_transform (client world): {client}; stats {clientWrap.Stats}");
         c.Log.Info($"client-pass: 06a-wraps.client is_actor_in_shape (hosted world): {server}; stats {serverWrap.Stats}");
+        c.Log.Info($"client-pass: 06a-wraps.client render_transform with WhenArchetype (client world): {archetype}; stats {archetypeWrap.Stats}");
         c.Expect(clientWrap.State == WrapState.Active && serverWrap.State == WrapState.Active, "both wraps are active",
             $"client {clientWrap.State}, hosted {serverWrap.State}");
         c.Expect(Interlocked.Read(ref client.Slices) > 0, "the client world's wrap ran", client.ToString());
         c.Expect(client.Threads.Count > 1 && Interlocked.Read(ref client.OffWorldThread) > 0,
             "the client world's slices ran on the game's workers (a client world always runs its programs as tasks)", client.ToString());
         c.Expect(Interlocked.Read(ref server.Slices) > 0, "the hosted world's wrap ran", server.ToString());
-        c.Expect(disabled.IsEmpty && clientWrap.Stats.Faults == 0 && serverWrap.Stats.Faults == 0 &&
-                 clientWrap.Stats.Overruns == 0 && serverWrap.Stats.Overruns == 0,
+        var all = Interlocked.Read(ref client.Slices);
+        var admitted = Interlocked.Read(ref archetype.Slices);
+        c.Expect(archetypeWrap.State == WrapState.Active && admitted > 0 && admitted * 100 >= all * 95 &&
+                 Interlocked.Read(ref archetype.OffWorldThread) > 0,
+            "the archetype filter decided the client world's slices on the workers (every render_transform slice passes it)",
+            $"{admitted} of {all} slices admitted, {Interlocked.Read(ref archetype.OffWorldThread)} off the world's thread; {archetypeWrap.State}");
+        c.Expect(disabled.IsEmpty && clientWrap.Stats.Faults == 0 && serverWrap.Stats.Faults == 0 && archetypeWrap.Stats.Faults == 0 &&
+                 clientWrap.Stats.Overruns == 0 && serverWrap.Stats.Overruns == 0 && archetypeWrap.Stats.Overruns == 0,
             "no stage faulted or went over its budget", disabled.IsEmpty ? "none" : string.Join("; ", disabled.Select(e => $"{e.Program}: {e.Reason}")));
         clientWrap.Dispose();
         serverWrap.Dispose();
+        archetypeWrap.Dispose();
         await c.Ticks(10);
         var before = (Interlocked.Read(ref client.Slices), Interlocked.Read(ref server.Slices));
         await c.Ticks(25);
@@ -133,6 +163,48 @@ public sealed partial class ClientPassMod
             }
             catch (Exception) { return "?"; }
         }
+    }
+
+    [ClientCheck("06a-define.hosted", "A program of a mod's own (Systems.Define) in a hosted world with a second player", Area = "Systems",
+        Since = Dev29, Tags = [TwoPlayers], Needs = ClientCheckNeeds.Hosted, Order = ProgramWrapsOrder + 2)]
+    public async Task ProgramDefineHosted(CheckContext c)
+    {
+        if (!await NeedOpen(c, "systems.define") || !await NeedPlayer(c)) return;
+        if (!Capabilities.Is("systems.define"))
+        {
+            await c.Skip($"systems.define is unavailable: {Capabilities.Why("systems.define")}");
+            return;
+        }
+        long calls = 0, fuel = 0;
+        var threads = new ConcurrentDictionary<string, byte>();
+        var made = Systems.Define(ClientPassFuelQuery.Key, new ProgramOptions(), (ref ClientPassFuelQuery q) =>
+        {
+            Interlocked.Increment(ref calls);
+            if (q.Context.TryGet<Ecs.Fuel>(out _)) Interlocked.Increment(ref fuel);
+            threads.TryAdd(Waterworks.ThreadName(), 0);
+        });
+        if (!c.Expect(made.Ok, "the program kiln.world reserved at boot from client-pass's kiln.programs.json is bound", made.Reason ?? made.Key))
+        {
+            await c.Verdict();
+            return;
+        }
+        c.OnEnd(() => made.Dispose());
+        c.Instruct("A program of the pass's own now runs over your hosted world's water containers (barrels, wells, cans) and " +
+                   "only counts them. Keep the second player in the world and stay near a few containers for about 30 seconds.");
+        await c.Delay(TimeSpan.FromSeconds(30));
+        var seen = $"{Interlocked.Read(ref calls)} entity calls, Fuel read on {Interlocked.Read(ref fuel)}, threads {string.Join(", ", threads.Keys.Order())}";
+        c.Log.Info($"client-pass: 06a-define.hosted client_pass_fuel: {seen}");
+        c.Expect(Interlocked.Read(ref calls) > 0 && Interlocked.Read(ref fuel) == Interlocked.Read(ref calls),
+            "it ran for the hosted world's containers and read their Fuel through the query", seen);
+        c.Expect(threads.Keys.Any(n => n.Contains("Task-Default", StringComparison.Ordinal)),
+            "it ran on the game's workers (Task-Default), as the game runs its own entity programs with a player in the world", seen);
+        made.Dispose();
+        var before = Interlocked.Read(ref calls);
+        await c.Ticks(25);
+        c.Expect(Interlocked.Read(ref calls) == before, "nothing calls it after Dispose (25 steps)",
+            $"{before} then {Interlocked.Read(ref calls)}");
+        c.Instruct("While it ran: did the game run as before (no stutter or freeze that the game does not have otherwise)?");
+        await c.Verdict();
     }
 
     [ClientCheck("06a-wraps.waterworks", "Program wraps with a second player: a well refills twice as fast", Area = "Systems",
@@ -234,4 +306,14 @@ public sealed partial class ClientPassMod
 #pragma warning disable KILNX001
     private static int LabSystemsMask() => LabSystems.PlayersMask ?? 0xFFFF;
 #pragma warning restore KILNX001
+}
+
+// 06a-define.hosted's program: the hosted world's water containers (template FuelSetup, read Fuel). kiln.programs.json beside
+// this file reserves it (what Kiln.Sdk's KilnPrograms task writes for it; this mod is built without the Kiln SDK).
+[Query(Key = Key, Template = ["FuelSetup"], Read = ["Fuel"])]
+internal ref struct ClientPassFuelQuery : IQuery<ClientPassFuelQuery>
+{
+    public const string Key = "client_pass_fuel";
+    public EcsProgramContext Context;
+    public static ClientPassFuelQuery Bind(EcsProgramContext context) => new() { Context = context };
 }

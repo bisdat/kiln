@@ -10,6 +10,10 @@
 //     go with it).
 //  3. The boot after the restart (the native part's mark file is there): the same per-entity wrap on fuel_setup, made
 //     again by name in a new process, is applied, filters by archetype and reads Fuel through the view.
+//  4. After the typed rows: Systems.Define (S8). OnLoad binds FuelQuery to the program kiln.world reserved at boot from
+//     kiln.programs.json (what Kiln.Sdk's KilnPrograms task writes for it); the rows check it ran for fuel_setup's entities,
+//     that a query with no reservation is Ok=false, and that its handler ran on the game's workers with the switch on. Then
+//     the INIT row: an AfterEach on fuel_setup_init (an INIT program) sees a well the test spawns.
 using System.Collections.Concurrent;
 using Kiln;
 using Kiln.Testing;
@@ -43,10 +47,21 @@ public sealed class SystemsTestMod : Mod
         AppDomain.CurrentDomain.SetData("systems-test.loaded", "yes");
         if (_reload)
         {
-            // a reload of reload-test: wraps that this instance's unload must take with it
+            // a reload of reload-test: wraps and a defined program's binding that this instance's unload must take with it
             var w = Systems.Wrap("fuel_network").Wrap;
             w?.Before((ref Slice s) => { }).AfterEach(e => { });
+            Systems.Define(FuelQuery.Key, new ProgramOptions(), (ref FuelQuery q) => { });
             return;
+        }
+        if (!File.Exists(Path.Combine(KilnDir, "data", "systems-test-mark.txt")))
+        {
+            // the program of the mod's own (S8), bound in OnLoad: kiln.world reserved it at boot
+            _defined = Systems.Define(FuelQuery.Key, new ProgramOptions(), (ref FuelQuery q) =>
+            {
+                Interlocked.Increment(ref _definedCalls);
+                if (q.Context.TryGet<Ecs.Fuel>(out var fuel) && fuel.Values.Length >= 2) Interlocked.Increment(ref _definedFuel);
+                if (_defineCounting) _definedThreads.TryAdd(Environment.CurrentManagedThreadId, 0);
+            });
         }
         if (File.Exists(Path.Combine(KilnDir, "data", "systems-test-mark.txt"))) _restart = true;  // the boot after the restart
         Context.Tick.Post += OnPost;
@@ -298,7 +313,8 @@ public sealed class SystemsTestMod : Mod
                         _writer!.State == WrapState.Removed);
                     break;
                 default:
-                    if (n >= 440 && Typed(n - 440))
+                    if (n >= 440 && _defineFrom == 0 && Typed(n - 440)) _defineFrom = n + 1;
+                    else if (_defineFrom != 0 && n >= _defineFrom && DefineRows(n - _defineFrom))
                     {
                         Log.Info($"systems-test (managed): {_pass} PASS, {_fail} FAIL");
                         _done = true;
@@ -466,6 +482,70 @@ public sealed class SystemsTestMod : Mod
         return false;
     }
 
+    // ---- 4. Systems.Define (S8) and the INIT row ----
+    private ProgramRegistration? _defined;
+    private long _definedCalls, _definedFuel, _windowCalls;
+    private volatile bool _defineCounting;
+    private readonly ConcurrentDictionary<int, byte> _definedThreads = new();
+    private ulong _defineFrom;
+    private ProgramWrap? _init;
+    private readonly ConcurrentDictionary<uint, byte> _initIds = new();
+    private Task<EntityId>? _barrel;
+
+    // True when the Define and INIT rows are done.
+    private bool DefineRows(ulong m)
+    {
+        switch (m)
+        {
+            case 0:
+            {
+                long calls = Interlocked.Read(ref _definedCalls), fuel = Interlocked.Read(ref _definedFuel);
+                Check("define: reserved at boot, bound, ran N times", _defined is { Ok: true } && calls > 0 && fuel == calls,
+                    $"{_defined?.Reason ?? "bound as " + _defined?.Key}: {calls} entity calls since OnLoad, Fuel read through the query on {fuel}");
+                var unreserved = Systems.Define(UnreservedQuery.Key, new ProgramOptions(), (ref UnreservedQuery q) => { });
+                Check("define unreserved: Ok=false", !unreserved.Ok && unreserved.Reason == "not reserved at boot: rebuild the mod and restart the server",
+                    unreserved.Reason);
+                Check("LabSystems.ForceParallel(300) for the defined program", LabSystems.ForceParallel(300));
+                return false;
+            }
+            case 10:
+                _definedThreads.Clear();
+                _windowCalls = Interlocked.Read(ref _definedCalls);
+                _defineCounting = true;
+                return false;
+            case 290:
+            {
+                _defineCounting = false;
+                LabSystems.StopParallel();
+                var calls = Interlocked.Read(ref _definedCalls) - _windowCalls;
+                Check("define (forced): its handler ran on N>1 threads", _definedThreads.Count > 1 && calls > 0 &&
+                    Interlocked.Read(ref _definedFuel) == Interlocked.Read(ref _definedCalls),
+                    $"{_definedThreads.Count} thread(s), {calls} entity calls in the window, Fuel read on every call so far");
+                _defined!.Dispose();
+                // INIT: fuel_setup_init (flags 0x8) runs for archetype groups that gained entities; a spawned well is one
+                _init = Systems.Wrap("fuel_setup_init").Wrap!;
+                _init.AfterEach(e => _initIds.TryAdd(e.Value, 0));
+                return false;
+            }
+            case 292:
+                if (_marked != 0 && World.Position(new EntityId(_marked)) is { } at && Spawn.Available)
+                    _barrel = Spawn.Entity("Prop_NPC_Water_Well_a", new WorldPosition(at.X - 4, at.Y, at.Z));
+                return false;
+            case 340:
+            {
+                var stats = _init!.Stats;
+                var id = _barrel is { IsCompletedSuccessfully: true } ? _barrel.Result.Value : 0;
+                Check("INIT wrap: fuel_setup_init AfterEach ran for a spawned barrel", id != 0 && _initIds.ContainsKey(id) && stats.Faults == 0,
+                    _barrel is null ? "not spawned (no mark row entity, or kiln.spawn is off)"
+                        : id == 0 ? $"{_barrel.Status}: {_barrel.Exception?.InnerException?.Message}"
+                        : $"well {id}: {(_initIds.ContainsKey(id) ? "seen" : "not seen")} among {_initIds.Count} entities in {stats.Slices} INIT slices");
+                _init.Dispose();
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static byte[] Bytes<T>(in T value) where T : unmanaged =>
         System.Runtime.InteropServices.MemoryMarshal.AsBytes(
             System.Runtime.InteropServices.MemoryMarshal.CreateReadOnlySpan(ref System.Runtime.CompilerServices.Unsafe.AsRef(in value), 1)).ToArray();
@@ -547,6 +627,24 @@ public sealed class SystemsTestMod : Mod
         try { a(); return false; }
         catch (T) { return true; }
     }
+}
+
+// Systems.Define's lab program: fuel_setup's containers again (template FuelSetup, read Fuel), a program of the mod's own.
+// kiln.programs.json beside this file is what Kiln.Sdk's KilnPrograms task writes for it (this lab mod is built without the
+// Kiln SDK, so the file is kept by hand); UnreservedQuery is not in it.
+[Query(Key = Key, Template = ["FuelSetup"], Read = ["Fuel"])]
+internal ref struct FuelQuery : IQuery<FuelQuery>
+{
+    public const string Key = "systems_test_fuel";
+    public EcsProgramContext Context;
+    public static FuelQuery Bind(EcsProgramContext context) => new() { Context = context };
+}
+
+[Query(Key = Key, Read = ["Fuel"])]
+internal ref struct UnreservedQuery : IQuery<UnreservedQuery>
+{
+    public const string Key = "systems_test_unreserved";
+    public static UnreservedQuery Bind(EcsProgramContext context) => default;
 }
 
 // fuel_setup as a view made for another game build would see it: one write list entry renamed, so another contract.

@@ -4,3 +4,89 @@ Kiln.TestKit.HarnessDecisions.Active.get -> int
 Kiln.TestKit.HarnessDecisions.Outcomes.get -> System.Collections.Generic.IReadOnlyList<Kiln.DecisionResult!>!
 Kiln.TestKit.HarnessDecisions.RestartWorld() -> void
 Kiln.TestKit.KilnHarness.Decisions.get -> Kiln.TestKit.HarnessDecisions!
+Kiln.TestKit.FakeProgramLists
+Kiln.TestKit.FakeProgramLists.AnyOf.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.FakeProgramLists.AnyOf.init -> void
+Kiln.TestKit.FakeProgramLists.<Clone>$() -> Kiln.TestKit.FakeProgramLists!
+Kiln.TestKit.FakeProgramLists.Equals(Kiln.TestKit.FakeProgramLists? other) -> bool
+Kiln.TestKit.FakeProgramLists.EventsIn.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.FakeProgramLists.EventsIn.init -> void
+Kiln.TestKit.FakeProgramLists.EventsOut.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.FakeProgramLists.EventsOut.init -> void
+Kiln.TestKit.FakeProgramLists.FakeProgramLists() -> void
+Kiln.TestKit.FakeProgramLists.Flags.get -> uint
+Kiln.TestKit.FakeProgramLists.Flags.init -> void
+Kiln.TestKit.FakeProgramLists.Interval.get -> uint
+Kiln.TestKit.FakeProgramLists.Interval.init -> void
+Kiln.TestKit.FakeProgramLists.OtherRead.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.FakeProgramLists.OtherRead.init -> void
+Kiln.TestKit.FakeProgramLists.OtherTemplate.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.FakeProgramLists.OtherTemplate.init -> void
+Kiln.TestKit.FakeProgramLists.OtherWrite.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.FakeProgramLists.OtherWrite.init -> void
+Kiln.TestKit.FakeProgramLists.Read.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.FakeProgramLists.Read.init -> void
+Kiln.TestKit.FakeProgramLists.ReadOptional.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.FakeProgramLists.ReadOptional.init -> void
+Kiln.TestKit.FakeProgramLists.SingletonsRead.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.FakeProgramLists.SingletonsRead.init -> void
+Kiln.TestKit.FakeProgramLists.SingletonsWrite.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.FakeProgramLists.SingletonsWrite.init -> void
+Kiln.TestKit.FakeProgramLists.Template.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.FakeProgramLists.Template.init -> void
+Kiln.TestKit.FakeProgramLists.TemplateOptional.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.FakeProgramLists.TemplateOptional.init -> void
+Kiln.TestKit.FakeProgramLists.With.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.FakeProgramLists.With.init -> void
+Kiln.TestKit.FakeProgramLists.Without.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.FakeProgramLists.Without.init -> void
+Kiln.TestKit.FakeProgramLists.Write.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.FakeProgramLists.Write.init -> void
+Kiln.TestKit.FakeProgramLists.WriteOptional.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.FakeProgramLists.WriteOptional.init -> void
+Kiln.TestKit.FakeProgramMark
+Kiln.TestKit.FakeProgramMark.Component.get -> string!
+Kiln.TestKit.FakeProgramMark.Component.init -> void
+Kiln.TestKit.FakeProgramMark.Deconstruct(out string! Program, out Kiln.EntityId Entity, out string! Component, out ulong Step) -> void
+Kiln.TestKit.FakeProgramMark.Entity.get -> Kiln.EntityId
+Kiln.TestKit.FakeProgramMark.Entity.init -> void
+Kiln.TestKit.FakeProgramMark.Equals(Kiln.TestKit.FakeProgramMark other) -> bool
+Kiln.TestKit.FakeProgramMark.FakeProgramMark(string! Program, Kiln.EntityId Entity, string! Component, ulong Step) -> void
+Kiln.TestKit.FakeProgramMark.FakeProgramMark() -> void
+Kiln.TestKit.FakeProgramMark.Program.get -> string!
+Kiln.TestKit.FakeProgramMark.Program.init -> void
+Kiln.TestKit.FakeProgramMark.Step.get -> ulong
+Kiln.TestKit.FakeProgramMark.Step.init -> void
+Kiln.TestKit.FakeProgramSlice
+Kiln.TestKit.FakeProgramSlice.<Clone>$() -> Kiln.TestKit.FakeProgramSlice!
+Kiln.TestKit.FakeProgramSlice.Deconstruct(out string! Program, out System.Collections.Generic.IReadOnlyList<Kiln.EntityId>! Entities, out ulong Step) -> void
+Kiln.TestKit.FakeProgramSlice.Entities.get -> System.Collections.Generic.IReadOnlyList<Kiln.EntityId>!
+Kiln.TestKit.FakeProgramSlice.Entities.init -> void
+Kiln.TestKit.FakeProgramSlice.Equals(Kiln.TestKit.FakeProgramSlice? other) -> bool
+Kiln.TestKit.FakeProgramSlice.FakeProgramSlice(string! Program, System.Collections.Generic.IReadOnlyList<Kiln.EntityId>! Entities, ulong Step) -> void
+Kiln.TestKit.FakeProgramSlice.Program.get -> string!
+Kiln.TestKit.FakeProgramSlice.Program.init -> void
+Kiln.TestKit.FakeProgramSlice.Step.get -> ulong
+Kiln.TestKit.FakeProgramSlice.Step.init -> void
+Kiln.TestKit.HarnessPrograms
+Kiln.TestKit.HarnessPrograms.Add(string! name, Kiln.TestKit.FakeProgramLists! lists, System.Action<Kiln.TestKit.FakeProgramSlice!>? update = null) -> void
+Kiln.TestKit.HarnessPrograms.Add<T>(System.Action<Kiln.TestKit.FakeProgramSlice!>? update = null) -> void
+Kiln.TestKit.HarnessPrograms.Marks.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeProgramMark>!
+Kiln.TestKit.HarnessPrograms.Names.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.HarnessPrograms.Updates(string! program) -> int
+Kiln.TestKit.KilnHarness.Programs.get -> Kiln.TestKit.HarnessPrograms!
+override Kiln.TestKit.FakeProgramLists.Equals(object? obj) -> bool
+override Kiln.TestKit.FakeProgramLists.GetHashCode() -> int
+override Kiln.TestKit.FakeProgramLists.ToString() -> string!
+~override Kiln.TestKit.FakeProgramMark.Equals(object obj) -> bool
+override Kiln.TestKit.FakeProgramMark.GetHashCode() -> int
+~override Kiln.TestKit.FakeProgramMark.ToString() -> string
+override Kiln.TestKit.FakeProgramSlice.Equals(object? obj) -> bool
+override Kiln.TestKit.FakeProgramSlice.GetHashCode() -> int
+override Kiln.TestKit.FakeProgramSlice.ToString() -> string!
+static Kiln.TestKit.FakeProgramLists.operator !=(Kiln.TestKit.FakeProgramLists? left, Kiln.TestKit.FakeProgramLists? right) -> bool
+static Kiln.TestKit.FakeProgramLists.operator ==(Kiln.TestKit.FakeProgramLists? left, Kiln.TestKit.FakeProgramLists? right) -> bool
+static Kiln.TestKit.FakeProgramMark.operator !=(Kiln.TestKit.FakeProgramMark left, Kiln.TestKit.FakeProgramMark right) -> bool
+static Kiln.TestKit.FakeProgramMark.operator ==(Kiln.TestKit.FakeProgramMark left, Kiln.TestKit.FakeProgramMark right) -> bool
+static Kiln.TestKit.FakeProgramSlice.operator !=(Kiln.TestKit.FakeProgramSlice? left, Kiln.TestKit.FakeProgramSlice? right) -> bool
+static Kiln.TestKit.FakeProgramSlice.operator ==(Kiln.TestKit.FakeProgramSlice? left, Kiln.TestKit.FakeProgramSlice? right) -> bool

@@ -1,0 +1,6 @@
+{
+  "format": 1,
+  "side": "client",
+  "extends": "server.d/dev29-17c-roster-cap.json",
+  "comment": "Client 26430625 (enshrouded.exe 5d9ef2f1): the four functions are common to the server world and the client world of this exe (npc_unlock_state_server 0x45fa90 and npc_unlock_state_client 0x45fb10 are byte-identical bodies that both call NpcEvalUnlocks 0xf0c510 and NpcRegistrySetUnlocks 0xec4800; NpcIsUnlocked 0xea4cb0, NpcFind 0xe97c70), and every pattern of server.d/dev29-17c-roster-cap.json matches once here with the same captures (npcreg.mask 0xa0, npcreg.map 0x38, npc.stride 0x88, npceval.error 1, npcquery.invalid 1, npcquery.state 0x98, npcfind.npcs 0x20), checked with tools/sigport/sigdb_check.py sigdb/symbols/client.json <client exe>. Nothing is overridden: this file says that the client was checked, and it is where a client-only port of a pattern goes. The audit (docs/re/npc-roster.md) is per exe."
+}

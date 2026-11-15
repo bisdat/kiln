@@ -49,6 +49,8 @@ public sealed class VfxTestMod : Mod
         Check(VfxId.None.IsNone && VfxId.Of(Unknown).Guid == Unknown && !VfxId.Of(Unknown).IsNone, "VfxId.None and VfxId.Of");
         Check(VfxId.Game(Unknown.ToString()).Guid == Unknown, "VfxId.Game takes a GUID's text");
         Check(VfxHandle.None.IsNone && new VfxHandle(0x8000_0001).IsRemote && !new VfxHandle(1).IsRemote, "handles: none, remote, local");
+        // the definitions of the guided check 17-vfx-budget (Budget.cs), where kiln.vfx is (a game client, a simulated game)
+        if (st.Native) BudgetFixture.Define(Context.DataDirectory, Info);
 
         if (st.Simulated)
         {

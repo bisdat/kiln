@@ -149,6 +149,7 @@ bool fingerprint(uintptr_t, hooks::fp::Fingerprint*) { return false; }
 // The resolver's descriptor status (dev.29, sig_status / validate_typed): no descriptors here.
 uint64_t sig_revision() { return 1; }
 bool sig(std::string_view, SigInfo*) { return false; }
+bool sig_status(std::string_view, uintptr_t*, SigStatus*, std::string*) { return false; }
 }  // namespace sigdb
 namespace svc {
 Registrar::Registrar(Service* s) { g_service = s; }

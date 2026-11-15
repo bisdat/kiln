@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Kiln.Blocks' rows (docs/kiln/services/caps.md): blocks.weapon_moves and blocks.animated_held (BlockCapabilities, at the
-// first item block's compile) and blocks.affixes, blocks.affixes.effects (AffixRuntime, following the session). Kiln.Blocks
+// first item block's compile) and blocks.affixes, blocks.affixes.effects (AffixRuntime, following the session); kiln.vfx reports
+// blocks.vfx_registration with its table, and where that is missing or older Kiln.Vfx's VfxCaps does it (also from here). Kiln.Blocks
 // has no native table; its rows exist from its first use, so a manifest's features cannot require them. This set
 // reports them again after a registry reset.
 namespace Kiln;
@@ -21,5 +22,7 @@ internal static class BlocksRows
         BlockCapabilities.Ensure();
         KindCapabilities.Ensure();
         AffixRuntime.RefreshCapabilities();
+        // blocks.vfx_registration is kiln.vfx's row (Blocks.Define(name, VfxBlock, options)); without its table nobody reports it
+        VfxCaps.ReportBudgetRows();
     }
 }

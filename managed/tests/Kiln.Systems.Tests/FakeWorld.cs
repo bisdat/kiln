@@ -47,6 +47,20 @@ internal sealed unsafe class FakeWorld : IDisposable
     internal int IterateResult = SystemsNative.Ok;  // what game_slice_iterate answers (Unavailable: a build that cannot iterate)
     internal int ArchetypeResult = SystemsNative.Ok;  // what game_slice_archetype answers
     internal readonly HashSet<uint> UnknownComponents = new();  // game_archetype_has answers -1 for these
+    // kiln.world's directory read inside a step gave up after its bound (another thread held the directory's lock):
+    // game_program_list answers -1 and game_program_contract NOT_FOUND for an existing program
+    internal bool DirectoryBusy;
+    internal int ListCalls;
+    internal string? ReservationOverride;
+    internal int Binds;
+    private readonly byte* _budget = (byte*)NativeMemory.AllocZeroed(24);
+    // kiln.world's boot reservations (programs v2, what Systems.Define binds): (mod id, key) reserved at boot, the names of
+    // each slot kind (KILN_SLOT_*) the reserved program has, the bound callback, unbinds
+    internal readonly HashSet<(string Mod, string Key)> Reserved = new();
+    internal readonly Dictionary<int, string[]> ReservedSlots = new();
+    internal delegate* unmanaged[Cdecl]<void*, ulong*, uint, void*, void> Bound;
+    internal void* BoundUser;
+    internal int Unbinds, BindResult = SystemsNative.Ok;
     // game_program_contract of fuel_setup: the live descriptor's contract and its text (chapter 06a 9.7)
     internal const uint FuelContract = 0xC0FFEE01;
     internal const string FuelTail = "sys_read_opt=0000000000000000\nsys_write_opt=0000000000000000\nsys_write_parallel=0000000000000000\nflags=00000000\ninterval=1\n";
@@ -73,7 +87,7 @@ internal sealed unsafe class FakeWorld : IDisposable
         public bool IsTickThread => Thread.CurrentThread.ManagedThreadId == TickThread;
         public bool HasFeature(string name) => feature(name);
         public void Log(ulong owner, LogLevel level, string text) => Logs.Add($"[{level}] {text}");
-        public nint Service(string name, uint minVersion) => name == SystemsNative.Name ? table : 0;
+        public nint Service(string name, uint minVersion) => name == "kiln.world.budget" ? (nint)F._budget : name == SystemsNative.Name ? table : 0;
         public ulong OwnerCreate(string id) => 999;
     }
 
@@ -84,6 +98,8 @@ internal sealed unsafe class FakeWorld : IDisposable
     internal FakeWorld(Func<string, bool>? feature = null)
     {
         Current = this;
+        *(uint*)_budget = 24; *(uint*)(_budget + 4) = 1;
+        *(delegate* unmanaged[Cdecl]<NativeStr, NativeStr, byte*, uint, uint*, int>*)(_budget + 16) = &Reservation;
         TickThread = Thread.CurrentThread.ManagedThreadId;
         _table = (SystemsNative.Table*)NativeMemory.AllocZeroed((nuint)sizeof(SystemsNative.Table));
         _table->Header = new ServiceHeader { Size = (uint)sizeof(SystemsNative.Table), Version = 4 };
@@ -104,6 +120,11 @@ internal sealed unsafe class FakeWorld : IDisposable
         _table->GameSliceAttrValidate = &AttrValidate;
         _table->GameWorldSession = &WorldSession;
         _table->GameProgramContract = &Contract;
+        var ecs = (EcsWorldTable*)_table;  // the v2 members of the same table: boot reservations
+        ecs->Capabilities = &EcsCaps;
+        ecs->Bind = &EcsBind;
+        ecs->Unregister = &EcsUnregister;
+        ecs->Prefix.ProgramSlot = (void*)(delegate* unmanaged[Cdecl]<ulong, int, NativeStr, int>)&EcsSlot;
         for (var r = 0; r < 8; r++)
         {
             var f = Fuel + 16 * r;
@@ -198,7 +219,7 @@ internal sealed unsafe class FakeWorld : IDisposable
     {
         F.ContractCalls++;
         if (contract == null) return SystemsNative.InvalidArgument;
-        if (index != 0 || kind == 1) return SystemsNative.NotFound;
+        if (index != 0 || kind == 1 || F.DirectoryBusy) return SystemsNative.NotFound;
         if (F.ContractResult != SystemsNative.Ok) return F.ContractResult;
         *contract = F.ContractValue;
         var b = System.Text.Encoding.UTF8.GetBytes(F.ContractText);
@@ -214,6 +235,71 @@ internal sealed unsafe class FakeWorld : IDisposable
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static ulong WorldSession(uint kind) => F.Session;
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static uint EcsCaps() => 4;  // KILN_WORLD_CAP_BIND_PROGRAM
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int EcsBind(ulong owner, NativeStr mod, NativeStr key, delegate* unmanaged[Cdecl]<void*, ulong*, uint, void*, void> each,
+        void* user, ulong* handle)
+    {
+        F.Binds++;
+        *handle = 0;
+        if (F.BindResult != SystemsNative.Ok) return F.BindResult;
+        if (!F.Reserved.Contains((mod.ToString(), key.ToString()))) return SystemsNative.NotFound;
+        F.Bound = each;
+        F.BoundUser = user;
+        *handle = 77;
+        return SystemsNative.Ok;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int EcsUnregister(ulong handle)
+    {
+        F.Unbinds++;
+        F.Bound = null;
+        return SystemsNative.Ok;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int EcsSlot(ulong handle, int kind, NativeStr name)
+    {
+        if (handle != 77 || !F.ReservedSlots.TryGetValue(kind, out var names)) return -1;
+        var at = Array.IndexOf(names, name.ToString());
+        return at < 0 ? -1 : 1 + 10 * kind + at;
+    }
+
+    /// <summary>Runs the bound defined program for each of <see cref="EntityIds"/>, as kiln.world's program does.</summary>
+    internal void RunDefined()
+    {
+        ulong* iter = stackalloc ulong[64];
+        foreach (var e in EntityIds)
+            if (Bound != null) Bound((void*)0x6160, iter, e, BoundUser);
+    }
+
+    internal void SetReservationSize(uint size) => *(uint*)_budget = size;
+
+    internal static string Snapshot(bool barrels = false)
+    {
+        string[] lists = ["tpl", "tplOptional", "read", "readOptional", "write", "writeOptional", "singletonsRead",
+            "singletonsWrite", "otherTpl", "otherRead", "otherWrite", "with", "without", "anyOf", "eventsIn", "eventsOut"];
+        return string.Concat(lists.Select(n => n + "=" + (barrels ? n switch {
+            "tpl" => "FuelSetup", "readOptional" => "CurrentTransform", "write" => "Fuel", "without" => "DynamicShelter", _ => ""
+        } : n == "read" ? "Fuel" : "") + "\n")) + (barrels ? "flags=00000010\n" : "flags=00000000\n") + "interval=1\n";
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int Reservation(NativeStr mod, NativeStr key, byte* text, uint capacity, uint* size)
+    {
+        if (!F.Reserved.Contains((mod.ToString(), key.ToString()))) return SystemsNative.NotFound;
+        var body = F.ReservationOverride ?? Snapshot(key.ToString() == "Kiln_SystemsTests_Barrels");
+        // Preserve the existing slot-mismatch regression as a declaration mismatch.
+        if (F.ReservedSlots.TryGetValue(2, out var names) && names.Contains("Health")) body = body.Replace("write=Fuel", "write=Health");
+        var bytes = System.Text.Encoding.UTF8.GetBytes(body);
+        *size = (uint)bytes.Length;
+        if (text != null && capacity >= bytes.Length) bytes.CopyTo(new Span<byte>(text, bytes.Length));
+        return text != null && capacity < bytes.Length ? SystemsNative.BufferTooSmall : SystemsNative.Ok;
+    }
 
     internal void SetTableSize(uint size) => _table->Header.Size = size;
 
@@ -255,7 +341,8 @@ internal sealed unsafe class FakeWorld : IDisposable
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int List(uint kind, int index, int list, NativeStr* names, uint capacity)
     {
-        if (index is not (0 or 1)) return -1;
+        F.ListCalls++;
+        if (index is not (0 or 1) || F.DirectoryBusy) return -1;
         if (index == 1) return 0;
         NativeStr? one = list switch
         {

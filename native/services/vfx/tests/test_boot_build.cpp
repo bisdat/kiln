@@ -11,6 +11,7 @@
 #include <vector>
 #include "../cook/vfxcook.h"
 #include "../held.h"
+#include "../ledger.h"
 #include <type_traits>
 #include "services/kiln_assets.h"
 #define KV_I(...) ((void)0)
@@ -21,6 +22,7 @@ static const char* fingerprint = "ok";
 static void set_status(const char*, const std::string&, const kvb::CookResult*) {}
 static void refuse_required(bool, bool, const std::string&) { ++refusals; }
 void build_forget();
+namespace ledger = kvx::ledger;  // boot.cpp's code is in namespace kvx; here it is included at file scope
 #include "boot_build_impl.inc"
 static unsigned failures = 0, subscriptions = 0, checks = 0;
 static int fail_type = 0;

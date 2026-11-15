@@ -145,7 +145,7 @@ public static unsafe partial class Gameplay
             GameplayNative.Status s = default;
             s.Size = (uint)sizeof(GameplayNative.Status);
             if (t->Status(&s) != Ok) return null;
-            var full = s.Size >= (uint)sizeof(GameplayNative.Status);
+            var full = s.Size >= (uint)Marshal.OffsetOf<GameplayNative.Status>(nameof(GameplayNative.Status.BuildHookState));
             return new GameplayStatus(s.Intercept != 0, s.Emit != 0, s.CraftHook != 0, s.BuildHooks != 0,
                 s.TerraformHook != 0, s.SpawnHook != 0, s.Teleport != 0, s.World != 0, (int)s.Zones, (int)s.Subscribers,
                 s.Steps, s.EventsSeen, s.Dispatched, s.Canceled, s.Denied, s.HookRecords)
@@ -165,6 +165,9 @@ public static unsafe partial class Gameplay
     // ------------------------------------------------------------------------------------------------ zones ----
 
     /// <summary>Adds a protection zone, owned by the calling mod (removed when it unloads). Tick thread.</summary>
+    /// <exception cref="KilnUnavailableException">A build/break deny cannot be enforced yet. Names
+    /// <c>gameplay.build_hooks</c>; a request first made during a running world begins protection in the next world.
+    /// The zone is not stored and no deny bits are silently removed.</exception>
     [TickThreadOnly]
     [RequiresCapability("kiln.gameplay")]
     public static ZoneHandle Protect(ProtectionZone zone)
@@ -178,6 +181,7 @@ public static unsafe partial class Gameplay
             fixed (uint* pid = ids) return t->ZoneAdd(Services.CallerOwner, z, pid);
         });
         var id = ids[0];
+        CheckBuildProtection(rc, zone);
         if (rc != Ok) throw new ArgumentException($"Gameplay.Protect: the zone was refused (kiln error {rc})", nameof(zone));
         var owner = ModContext.CurrentMod;
         var h = new ZoneHandle(id, zone, owner);
@@ -224,8 +228,22 @@ public static unsafe partial class Gameplay
         Services.RequireTickThread("ZoneHandle.Update");
         if (!h.Active) throw new ObjectDisposedException(nameof(ZoneHandle));
         var rc = WithNative(zone, z => t->ZoneUpdate(h.Id, z));
+        CheckBuildProtection(rc, zone);
         if (rc != Ok) throw new ArgumentException($"ZoneHandle.Update: the zone was refused (kiln error {rc})", nameof(zone));
         h.Zone = zone;
+    }
+
+    private static void CheckBuildProtection(int rc, ProtectionZone zone)
+    {
+        if (rc != 3 || (zone.Deny & (GameplayActions.Build | GameplayActions.Break)) == 0) return;
+        var t = GameplayNative.T;
+        GameplayNative.Status status = default;
+        status.Size = (uint)sizeof(GameplayNative.Status);
+        var waiting = t != null && t->Status(&status) == Ok && status.Size >= (uint)sizeof(GameplayNative.Status) &&
+                      status.BuildHookState == 2;
+        throw ServiceCaps.Unavailable("gameplay.build_hooks", waiting
+            ? "build protection begins with the next world: this mod asked for it while a world was running"
+            : "build protection is unavailable: " + Capabilities.Get("gameplay.build_hooks").ReasonText);
     }
 
     internal static void RemoveZone(ZoneHandle h)
@@ -498,7 +516,7 @@ public static unsafe partial class Gameplay
         {
             if (_listening != 0) return true;
             ulong h;
-            var rc = t->Subscribe(0, GameplayNative.Mask(GameplayNative.Tick), &OnEvent, null, &h);
+            var rc = t->Subscribe(0, Interest() | GameplayNative.Mask(GameplayNative.Tick), &OnEvent, null, &h);
             if (rc == WrongThread)
             {
                 // First touched off the server-world thread (a hosting game's main thread, a file watcher): subscribe
@@ -539,6 +557,18 @@ public static unsafe partial class Gameplay
         }
     }
 
+    internal static string? PrepareBuildEvents()
+    {
+        var t = GameplayNative.T;
+        if (t == null) return "kiln.gameplay is unavailable";
+        var request = GameplayNative.RequestBuild(t);
+        if (request == null) return null; // Older service: its group was installed at startup.
+        if (request(Services.CallerOwner) == Ok) return null;
+        return Capabilities.Get("gameplay.build_hooks").ReasonText;
+    }
+
+    private static uint _buildNotice = uint.MaxValue;
+
     private static uint Interest()
     {
         uint m = 0;
@@ -548,7 +578,21 @@ public static unsafe partial class Gameplay
         if (Events.HasSubscribers<InteractionResultEvent>() || Offers.Wanted) m |= GameplayNative.Mask(GameplayNative.Interacted);
         if (Events.HasSubscribers<LootEvent>()) m |= GameplayNative.Mask(GameplayNative.Loot);
         if (Events.HasSubscribers<ItemPickupEvent>()) m |= GameplayNative.Mask(GameplayNative.Pickup);
-        if (Events.HasSubscribers<BuildEvent>()) m |= GameplayNative.Mask(GameplayNative.Build);
+        if (Events.HasSubscribers<BuildEvent>())
+        {
+            m |= GameplayNative.Mask(GameplayNative.Build);
+            var t = GameplayNative.T;
+            GameplayNative.Status status = default;
+            status.Size = (uint)sizeof(GameplayNative.Status);
+            if (t != null && t->Status(&status) == Ok && status.Size >= (uint)sizeof(GameplayNative.Status) &&
+                _buildNotice != status.BuildHookState)
+            {
+                _buildNotice = status.BuildHookState;
+                if (status.BuildHookState is 2 or 3)
+                    Backend.Current.Log(0, LogLevel.Warn, "Kiln.Gameplay: " +
+                        Marshal.PtrToStringUTF8((nint)status.BuildHookReason));
+            }
+        }
         if (Events.HasSubscribers<TeleportEvent>()) m |= GameplayNative.Mask(GameplayNative.Teleport);
         if (Events.HasSubscribers<TeleportedEvent>()) m |= GameplayNative.Mask(GameplayNative.Teleported);
         if (Events.HasSubscribers<NaturalSpawnEvent>()) m |= GameplayNative.Mask(GameplayNative.Spawn);

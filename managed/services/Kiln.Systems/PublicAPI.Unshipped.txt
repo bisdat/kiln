@@ -232,3 +232,80 @@ Kiln.ProgramWrap<T>.When(System.Func<Kiln.SliceInfo, bool>! filter) -> Kiln.Prog
 Kiln.ProgramWrap<T>.WhenArchetype(System.Collections.Generic.IEnumerable<string!>! has, System.Collections.Generic.IEnumerable<string!>? lacks = null) -> Kiln.ProgramWrap<T>!
 Kiln.ProgramWrap<T>.World.get -> Kiln.WorldKind
 static Kiln.Systems.Wrap<T>(Kiln.WrapOptions? options = null) -> Kiln.WrapResult<Kiln.ProgramWrap<T>!>!
+Kiln.IQuery<TSelf>
+Kiln.IQuery<TSelf>.Bind(Kiln.EcsProgramContext context) -> TSelf
+Kiln.ProgramOptions
+Kiln.ProgramOptions.<Clone>$() -> Kiln.ProgramOptions!
+Kiln.ProgramOptions.Barrier.get -> bool
+Kiln.ProgramOptions.Barrier.init -> void
+Kiln.ProgramOptions.Chunked.get -> bool
+Kiln.ProgramOptions.Chunked.init -> void
+Kiln.ProgramOptions.Equals(Kiln.ProgramOptions? other) -> bool
+Kiln.ProgramOptions.Exclusive.get -> bool
+Kiln.ProgramOptions.Exclusive.init -> void
+Kiln.ProgramOptions.HostOnly.get -> bool
+Kiln.ProgramOptions.HostOnly.init -> void
+Kiln.ProgramOptions.Init.get -> bool
+Kiln.ProgramOptions.Init.init -> void
+Kiln.ProgramOptions.Pinned.get -> bool
+Kiln.ProgramOptions.Pinned.init -> void
+Kiln.ProgramOptions.ProgramOptions() -> void
+Kiln.ProgramRegistration
+Kiln.ProgramRegistration.Dispose() -> void
+Kiln.ProgramRegistration.Key.get -> string!
+Kiln.ProgramRegistration.Ok.get -> bool
+Kiln.ProgramRegistration.Reason.get -> string?
+Kiln.QueryAttribute
+Kiln.QueryAttribute.AnyOf.get -> string![]!
+Kiln.QueryAttribute.AnyOf.set -> void
+Kiln.QueryAttribute.Barrier.get -> bool
+Kiln.QueryAttribute.Barrier.set -> void
+Kiln.QueryAttribute.Chunked.get -> bool
+Kiln.QueryAttribute.Chunked.set -> void
+Kiln.QueryAttribute.EventsIn.get -> string![]!
+Kiln.QueryAttribute.EventsIn.set -> void
+Kiln.QueryAttribute.EventsOut.get -> string![]!
+Kiln.QueryAttribute.EventsOut.set -> void
+Kiln.QueryAttribute.Exclusive.get -> bool
+Kiln.QueryAttribute.Exclusive.set -> void
+Kiln.QueryAttribute.HostOnly.get -> bool
+Kiln.QueryAttribute.HostOnly.set -> void
+Kiln.QueryAttribute.Init.get -> bool
+Kiln.QueryAttribute.Init.set -> void
+Kiln.QueryAttribute.Key.get -> string?
+Kiln.QueryAttribute.Key.set -> void
+Kiln.QueryAttribute.OtherRead.get -> string![]!
+Kiln.QueryAttribute.OtherRead.set -> void
+Kiln.QueryAttribute.OtherTemplate.get -> string![]!
+Kiln.QueryAttribute.OtherTemplate.set -> void
+Kiln.QueryAttribute.OtherWrite.get -> string![]!
+Kiln.QueryAttribute.OtherWrite.set -> void
+Kiln.QueryAttribute.Pinned.get -> bool
+Kiln.QueryAttribute.Pinned.set -> void
+Kiln.QueryAttribute.QueryAttribute() -> void
+Kiln.QueryAttribute.Read.get -> string![]!
+Kiln.QueryAttribute.Read.set -> void
+Kiln.QueryAttribute.ReadOptional.get -> string![]!
+Kiln.QueryAttribute.ReadOptional.set -> void
+Kiln.QueryAttribute.SingletonsRead.get -> string![]!
+Kiln.QueryAttribute.SingletonsRead.set -> void
+Kiln.QueryAttribute.SingletonsWrite.get -> string![]!
+Kiln.QueryAttribute.SingletonsWrite.set -> void
+Kiln.QueryAttribute.Template.get -> string![]!
+Kiln.QueryAttribute.Template.set -> void
+Kiln.QueryAttribute.TemplateOptional.get -> string![]!
+Kiln.QueryAttribute.TemplateOptional.set -> void
+Kiln.QueryAttribute.With.get -> string![]!
+Kiln.QueryAttribute.With.set -> void
+Kiln.QueryAttribute.Without.get -> string![]!
+Kiln.QueryAttribute.Without.set -> void
+Kiln.QueryAttribute.Write.get -> string![]!
+Kiln.QueryAttribute.Write.set -> void
+Kiln.QueryAttribute.WriteOptional.get -> string![]!
+Kiln.QueryAttribute.WriteOptional.set -> void
+override Kiln.ProgramOptions.Equals(object? obj) -> bool
+override Kiln.ProgramOptions.GetHashCode() -> int
+override Kiln.ProgramOptions.ToString() -> string!
+static Kiln.ProgramOptions.operator !=(Kiln.ProgramOptions? left, Kiln.ProgramOptions? right) -> bool
+static Kiln.ProgramOptions.operator ==(Kiln.ProgramOptions? left, Kiln.ProgramOptions? right) -> bool
+static Kiln.Systems.Define<T>(string! key, Kiln.ProgramOptions! options, Kiln.EntityHandler<T>! each) -> Kiln.ProgramRegistration!

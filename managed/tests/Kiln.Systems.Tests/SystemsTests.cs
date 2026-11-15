@@ -345,6 +345,91 @@ public sealed unsafe class SystemsTests
         Assert.Equal(0, seen);
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(3)]
+    [InlineData(7)]
+    public void A_directory_read_that_gave_up_suspends_then_resumes_the_same_view_stage(int failures)
+    {
+        using var w = new FakeWorld();
+        var mod = NewMod("busydir");
+        var first = InMod(mod, () => Systems.Wrap("fuel_setup").Wrap!);
+        WrapDisabledEvent? off = null;
+        first.Disabled += e => off = e;
+        var seen = 0;
+        InMod(mod, () => first.BeforeEach((ref EntityView e) => { seen++; _ = e.Has("Fuel"); }));
+        ProgramWrap.Poll(); // model the world's Pre publishing the native stage's Active state
+        w.DirectoryBusy = true;  // the first slice of the session: kiln.world's bounded read gave up
+        w.Call(w.Wraps[0]);
+        Assert.Equal(0, seen);
+        Assert.Equal(WrapState.Pending, first.State);
+        Assert.Contains(FakeWorld.Logs, l => l.Contains("suspended"));
+        Assert.Null(off);
+        lock (mod.PendingLock) Assert.Empty(mod.Pending);  // not the mod's fault: nothing for its fault policy
+        for (var n = 1; n < failures; n++)
+        {
+            w.StepNow++; w.Call(w.Wraps[0]);
+            Assert.Null(off);
+        }
+        var attempts = w.ListCalls;
+        w.Call(w.Wraps[0]);
+        Assert.Equal(attempts, w.ListCalls); // no second read in the same step
+        w.DirectoryBusy = false;
+        w.StepNow++;
+        w.Call(w.Wraps[0]);
+        Assert.Equal(w.EntityIds.Length, seen);
+        Assert.Equal(WrapState.Active, first.State);
+        Assert.Null(off);
+        // the failed read was not kept for the session: a new stage on the next slice sees the program's lists
+        var fuel = 0;
+        var second = InMod(mod, () => Systems.Wrap("fuel_setup").Wrap!);
+        InMod(mod, () => second.BeforeEach((ref EntityView e) => { if (e.Has("Fuel")) fuel++; }));
+        w.Call(w.Wraps[^1]);
+        Assert.Equal(w.EntityIds.Length, fuel);
+    }
+
+    [Fact]
+    public void Cached_directory_does_not_skip_worker_slices_while_retry_gate_is_busy()
+    {
+        using var w = new FakeWorld();
+        var wrap = Systems.Wrap("fuel_setup").Wrap!;
+        var seen = 0;
+        wrap.BeforeEach((ref EntityView e) => seen++);
+        w.Call(w.Wraps[0]); // warm the successful directory cache
+        var stage = Systems.Live.Keys.Single(s => s.Wrap == wrap);
+        var gate = typeof(ManagedStage).GetField("_directoryGate", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(stage)!;
+        using var held = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var worker = new Thread(() => { lock (gate) { held.Set(); release.Wait(); } });
+        worker.Start();
+        try
+        {
+            Assert.True(held.Wait(TimeSpan.FromSeconds(5)));
+            w.Call(w.Wraps[0]);
+            Assert.Equal(2 * w.EntityIds.Length, seen);
+        }
+        finally { release.Set(); worker.Join(); }
+    }
+
+    [Fact]
+    public void Directory_failure_exhausts_eight_step_attempts_without_mod_faults()
+    {
+        using var w = new FakeWorld();
+        var mod = NewMod("retry-dir");
+        var wrap = InMod(mod, () => Systems.Wrap("fuel_setup").Wrap!);
+        var disabled = new List<WrapDisabledEvent>(); wrap.Disabled += disabled.Add;
+        InMod(mod, () => wrap.BeforeEach((ref EntityView e) => { }));
+        w.DirectoryBusy = true;
+        for (var n = 0; n < 8; n++)
+        {
+            w.StepNow++; w.Call(w.Wraps[0]);
+            if (n < 7) Assert.Empty(disabled);
+        }
+        Assert.Single(disabled);
+        Assert.Contains("8", disabled[0].Reason);
+        lock (mod.PendingLock) Assert.Empty(mod.Pending);
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct FuelBlock
     {

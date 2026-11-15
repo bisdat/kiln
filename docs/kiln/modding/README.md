@@ -141,9 +141,10 @@ first). `mods/samples/build.sh` builds the loader samples (`SampleLib`, `SampleC
 | `BlobCatalog` | `Assets.OpenBlobCatalog`: `/blobs` counts the content blobs the game serves by where they come from, lists the ones mods registered, and writes the first entries as JSON |
 | `TransformScale` | `World.SetTransformScale`: `/tscale <entity> <x> <y> <z>` draws an entity larger or smaller on each axis (the drawn size only, not collision) |
 
-Templates: `kiln new --list` shows all 31 with their options. Block templates: `kiln-spell`, `kiln-item-blocks`,
+Templates: `kiln new --list` shows all 33 with their options. Block templates: `kiln-spell`, `kiln-item-blocks`,
 `kiln-ability-blocks`, `kiln-creature-blocks`, `kiln-world-blocks`, `kiln-npc`, `kiln-quest`, `kiln-body`, `kiln-vfx`,
 `kiln-cosmetic`, `kiln-building-material` and `kiln-screen-effect`. Code templates for one topic each: `kiln-events`,
-`kiln-saved-data`, `kiln-rules`, `kiln-network`, and for the advanced tier `kiln-hooks`, `kiln-shader` and `kiln-world-program`. The others: `kiln-mod`, `kiln-test`, `kiln-unit-test`,
+`kiln-saved-data`, `kiln-rules`, `kiln-network`, `kiln-system-wrap` (a typed wrap of one of the game's own programs), and for
+the advanced tier `kiln-hooks`, `kiln-shader` and `kiln-world-program`. The others: `kiln-mod`, `kiln-test`, `kiln-unit-test`,
 `kiln-datapack`, `kiln-items`, `kiln-ability`, `kiln-creature`, `kiln-talents`, `kiln-ui`, `kiln-model`, `kiln-sound`,
 `kiln-native` and `kiln-service` (a service inside the Kiln repository). See [mdk.md](mdk.md).

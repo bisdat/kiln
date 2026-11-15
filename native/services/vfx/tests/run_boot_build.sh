@@ -23,5 +23,5 @@ def between(a, b): return a + s.split(a, 1)[1].split(b, 1)[0]
 PY
 c++ -std=c++23 -O0 -g0 -Wall -Wextra -fsanitize=address,undefined -pthread \
  -I"$root/native/third_party" -I"$root/native/core/abi" -I"$out" \
- "$here/test_boot_build.cpp" "$here/../cook/contenthash.cpp" "$here/../cook/ids.cpp" -o "$out/test_boot_build"
+ "$here/test_boot_build.cpp" "$here/../cook/contenthash.cpp" "$here/../cook/ids.cpp" "$here/../ledger.cpp" -o "$out/test_boot_build"
 "$out/test_boot_build"

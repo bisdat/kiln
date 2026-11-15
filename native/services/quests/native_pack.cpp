@@ -464,6 +464,7 @@ void build_locked(const std::vector<qb::ModInput>* prepared = nullptr, const std
     qb::GameData game;
     game.read = &res_read;
     game.template_by_name = &template_by_name;
+    game.roster_max = &roster_max;  // 64, or 128 with the second unlock page (installed only when a roster needs it)
     qb::PackOut p;
     try {
         p = qb::compile_pack(mods, game);
@@ -486,6 +487,7 @@ void build_locked(const std::vector<qb::ModInput>* prepared = nullptr, const std
     g_manifest = p.manifest.dump();
     g_template_names.clear();
     if (!p.any) return;
+    if (!p.roster_boot_ids.empty() || !p.roster_kiln_ids.empty()) roster_built(p.roster_boot_ids, p.roster_kiln_ids);
     qb::Guid gk, gj, gn;
     qb::parse_guid(qb::kGuidKnowledge, &gk);
     qb::parse_guid(qb::kGuidJournal, &gj);

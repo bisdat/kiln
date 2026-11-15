@@ -2,7 +2,9 @@
 
 An ECS program runs inside the game's scheduler on a worker thread. Declare its access in `kiln.programs.json`, next
 to `kiln.mod.json`. The native world service reads this file before the server creates its scheduler. Bind the callback
-in your normal `OnLoad`. `Kiln.Sdk` copies the file and includes it in `KilnPack` and `KilnDeploy`.
+in your normal `OnLoad`. `Kiln.Sdk` copies the file and includes it in `KilnPack` and `KilnDeploy`. Since
+0.2.0-dev.29 the typed way is `Systems.Define` over a `[Query]` struct: the build writes its entry into
+`kiln.programs.json` for you ([../services/systems.md](../services/systems.md#programs-of-your-own-systemsdefine)).
 
 ```json
 {
@@ -79,7 +81,7 @@ restart the server, then reload code. Editing the file while the server runs doe
 
 ## Hooks around game systems
 
-`systems.wraps.client` is open since 0.2.0-dev.29: a native plugin can target the client world’s programs when symbols and world lifecycle support are available and no conflicting runtime disables wraps. There is no managed client-wrap API in this tree. Native callers must release and drain wraps before freeing callback memory; automatic owner retirement is unfinished. `06a-wraps.client` remains a catalog entry without an implemented guided check or real-game confirmation.
+`systems.wraps.client` is open since 0.2.0-dev.29. Managed callers select `WrapOptions.World = WorldKind.Client`; native plugins can select the client world too, when symbols and lifecycle support resolve and no conflicting runtime disables wraps. Native callers must release and drain before freeing callback memory. The implemented `06a-wraps.client` guided check counts callbacks and filtered admissions on workers; real-game confirmation is still pending.
 
 ```csharp
 hook = GameSystems.Hook("combat_experience_source",

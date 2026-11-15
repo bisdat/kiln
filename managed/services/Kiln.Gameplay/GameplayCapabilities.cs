@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Kiln.Gameplay in the capability registry (Kiln.Capabilities; docs/kiln/services/caps.md). Reported at the service's
-// start (the first service tick, GameplayStartup); kiln.gameplay decides its hooks when it starts, so every row is fixed
-// from then on.
+// start (the first service tick, GameplayStartup). The native session row gameplay.build_hooks changes at first use;
+// the sigdb row gameplay.build continues to describe resolved symbols/layouts.
 namespace Kiln;
 
 public static unsafe partial class Gameplay
