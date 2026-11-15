@@ -9,9 +9,9 @@
   "verified": true,
   "note": "runtime-verified through Steam (GE-Proton11-11), policy any, core + every service + kiln-emf + probe + ui-test + menubuttons: side client, sigdb 306/306 symbols, 434/434 constants (client.d composed), SimStep + WorldDestroy hooked, boot complete, 0 errors; main menu entries Kiln / ui-test / Mods (the Kiln sample screen opened); hosted a LOCAL world offline (saves: world loaded: slot 0x0002 (world1.ksd)): server world 60 steps/s on the GameServer thread, client and prediction worlds on the main thread, local player 1; ui-test all checks PASS (screens MainMenu/Loading/InGame/PauseMenu/Map/Crafting, menu entries chosen, crafting state), Kiln crafting tabs and subcategories shown, Insert overlay; tick cost as on ce6fdba6 (server step p50 2.5 ms, Kiln Pre 0.037 ms; client 1.2 ms); back to the menu (worlds stopping, shutdown save), clean quit (Shutdown 'Steam'). Not covered: joining a remote server, service write paths on the client. Added in dev.22 from static analysis only (resolved offline with sigdb_check.py, not yet seen running): ui.menu_page, ui.menu_page_sound, ui.error_popup (ui/PreGameCredits, ui/PreGameCreditsRet, ui/UiPlaySound and their constants). Levels (record 2, refreshed offline on 2026-11-11, no client run): lab = the names the boot above resolved, as its record listed them (199 named symbols, 434 constants, 106 features), each resolving to the same value today; every service loaded in that boot, but only ui-test ran, so lab here means loaded with Kiln's checks passing, not that the service test mods ran on the client. static = everything else, resolved offline only: the 186 @ probes (the boot's record did not list probes), the dev.22 ui names above, and every name declared since (the services audio, characters, emf-net, npcai, pacing, progression, quests, render, rules, skills, types and vfx, and new names of combat, creatures, gamedata, items, net, players, time and ui): 158 symbols, 210 constants and 70 features. sigdb now declares 543 symbols (441 defined, 102 captured), 644 constants (595 defined, 49 captured) and 176 features; all of them resolve offline on this exe.",
   "declared": {
-    "symbols": 688,
-    "constants": 772,
-    "features": 210
+    "symbols": 692,
+    "constants": 779,
+    "features": 211
   },
   "features": {
     "abilities.attributes": true,
@@ -140,6 +140,7 @@
     "quests.journal": true,
     "quests.knowledge": true,
     "quests.npc": true,
+    "quests.npc_pages": true,
     "render.camera": true,
     "repl.client": true,
     "repl.observe": true,
@@ -506,6 +507,9 @@
     "quests/KnowledgeApplyOp": "0x121b0e0",
     "quests/KnowledgeApplyQueue": "0x121b2a0",
     "quests/KnowledgeInputPush": "0x41be46",
+    "quests/NpcEvalUnlocks": "0xf0c510",
+    "quests/NpcFind": "0xe97c70",
+    "quests/NpcIsUnlocked": "0xea4cb0",
     "quests/NpcRegistryNpcs": "0xe97ce0",
     "quests/NpcRegistrySetUnlocks": "0xec4800",
     "quests/NpcRegistryVersion": "0xe97cd0",
@@ -1113,7 +1117,14 @@
     "quests/list.capacity": "0x10",
     "quests/list.count": "0x8",
     "quests/list.entry": "0x10",
+    "quests/npc.stride": "0x88",
     "quests/npcdialog.resource": "0x14",
+    "quests/npceval.error": "0x1",
+    "quests/npcfind.npcs": "0x20",
+    "quests/npcquery.invalid": "0x1",
+    "quests/npcquery.state": "0x98",
+    "quests/npcreg.map": "0x38",
+    "quests/npcreg.mask": "0xa0",
     "quests/npcreg.npcs": "0x20",
     "quests/npcreg.state": "0x98",
     "quests/npcreg.version": "0x90",
@@ -2377,6 +2388,29 @@
       },
       "features": {
         "caps.vfx.expansion_sites": "static"
+      }
+    },
+    "dev29-17c-roster-cap": {
+      "level": "static",
+      "date": "2026-11-15",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "@quests/NpcPages.fields": "static",
+        "quests/NpcEvalUnlocks": "static",
+        "quests/NpcFind": "static",
+        "quests/NpcIsUnlocked": "static"
+      },
+      "constants": {
+        "quests/npc.stride": "static",
+        "quests/npceval.error": "static",
+        "quests/npcfind.npcs": "static",
+        "quests/npcquery.invalid": "static",
+        "quests/npcquery.state": "static",
+        "quests/npcreg.map": "static",
+        "quests/npcreg.mask": "static"
+      },
+      "features": {
+        "quests.npc_pages": "static"
       }
     },
     "emf": {
