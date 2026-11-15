@@ -585,7 +585,8 @@ typedef struct KilnWorldApi {
     /* Kind-4 record: removes component `hash` from `entity` at the end of the step. */
     KilnResult(KILN_CALL* queue_remove)(KilnProgramCtx* ctx, KilnEntity entity, uint32_t hash);
     /* Marks the component behind a write slot changed (replication to clients, saving) before you write through it:
-     * write_record = &iter[program_slot(..., KILN_SLOT_WRITE, name)]. */
+     * write_record = &iter[program_slot(..., KILN_SLOT_WRITE, name)]. A no-op inside a client or prediction program
+     * (since 0.2.0-dev.29: nothing such a program writes is marked). */
     void(KILN_CALL* mark_written)(KilnProgramCtx* ctx, const uint64_t* write_record);
     /* Another entity's component through a declared other-read accessor: iter[slot] with slot from
      * program_slot(KILN_SLOT_OTHER_READ, name). NULL if the entity has none. Read only; valid during the update. */
@@ -622,7 +623,9 @@ typedef struct KilnWorldApi {
     KilnResult(KILN_CALL* status)(KilnWorldStatus* out);
     /* Appended in v1: tracked other-entity writes. The accessor MUST come from this program's OTHER_WRITE slot.
      * Calls the engine's WriteOther with the job tracker and write flag, so replication/save dirtiness is recorded
-     * before returning the mutable component. NULL: absent, undeclared, wrong callback, or unavailable build. */
+     * (the engine marks a server-world block) before returning the mutable component. NULL: absent, undeclared, wrong
+     * callback, unavailable build, or inside a client or prediction program (since 0.2.0-dev.29: see the client-world
+     * members below). */
     void*(KILN_CALL* write_other)(KilnProgramCtx* ctx, uint64_t accessor, KilnEntity entity, uint32_t* out_size);
     /* Disable the callback permanently; engine descriptors remain allocated. Tick thread (or before world setup).
      * After success no callback is in flight. Required before freeing callback/user memory or unloading code. */
@@ -846,20 +849,29 @@ typedef struct KilnWorldApi {
      * lifecycle, or the client world's tick), nothing is registered into a client world and these members answer
      * KILN_ERR_UNAVAILABLE for the client and prediction kinds.
      *
-     * A world stop (KILN_WORLD_STOPPING of the client world) closes every client-table program: no call starts, the
-     * running ones are waited for (2 s at most) and each registration goes back to PENDING for the next client world.
+     * A slice runs a client-table program only when it belongs to the registration that runs now: the side's session
+     * and the slice's own storage (the job's) are checked against it, so a job of an earlier client world that enters
+     * late is refused (and counted). A world stop (KILN_WORLD_STOPPING of the client world) closes every client-table
+     * program: no call starts, a slice already inside stops before its next entity (no more iteration, CurrentEntity or
+     * callback; the slice is finished on paper), and inside a call that runs then every helper refuses (iter_begin and
+     * iter_next, current_entity, command_buffer and the queue calls, read_other, program_events, program_emit); the
+     * running callbacks are waited for (2 s at most) and each registration goes back to PENDING for the next client world.
      * Bindings stay: a bound callback runs again in the next client world that accepts the program. The core does not
-     * wait for a client world's jobs before that event (it does for the server world): when a call is still running
-     * after the wait, its program is refused for good (that late call can no longer change its state) and a process
-     * latch is set: no client-world program registers again until the game restarts, and world.programs.client goes
-     * unavailable (reason faulted) saying why. The same latch follows a fault in the engine's RegisterProgram (or in
-     * Kiln's reads of the client world's maps and table around it) or a table that does not add up after it; what was
-     * registered before stays as it is (the engine's table is never undone).
+     * wait for a client world's jobs before that event (it does for the server world): when a callback is still running
+     * after the wait, a process latch is set: every client-table program is refused with the latch's reason (that late
+     * call can no longer change any state), no client-world program registers again until the game restarts, and
+     * world.programs.client goes unavailable (reason faulted) saying why. The same latch follows a fault in the engine's
+     * RegisterProgram (or in Kiln's reads of the client world's maps and table around it) or a table that does not add up
+     * after it; what the engine registered before stays in its table (it is never undone) but no longer runs: every side,
+     * also one registered earlier in that world, says REFUSED with the latch's reason.
      *
-     * Writes there are this player's local state. write_other answers NULL inside a client or prediction program (the
-     * game's other-entity write marks the change for the save and replication through the job's tracker); mark_written
-     * still calls the engine's MarkWritten if you ask, but only static evidence says a client job's tracker takes it:
-     * Kiln.Api's TryWrite does not call it there.
+     * Writes there are this player's local state; nothing a client or prediction program writes is marked for the save
+     * or replication. mark_written is a no-op inside such a program (MarkWritten runs the same two tests as the
+     * other-entity mark and nothing says it skips a client storage). write_other answers NULL there: per the notes the
+     * engine's WriteOther marks only a server-world block (storage+8 == 0), but the other-entity path of a client job (its
+     * tracker and write flag) has not been read in a client run, so a client program writes its own declared write
+     * slots only. The foreign views' foreign_write and foreign_attr_changed answer KILN_ERR_UNAVAILABLE when called
+     * from such a program for the same reasons (what AttrChanged marks is not decoded).
      *
      * Handles: register_program_world gives a program handle (as register_program: program_slot and program_info
      * take it; program_info answers for the server world). bind_program_world gives a binding handle for
@@ -881,7 +893,10 @@ typedef struct KilnWorldApi {
      * valid for the life of the process; "" when there is nothing to say). KILN_PROGRAM_PENDING with "waiting for a
      * client world" in the menu, "registered from the next client world" for a program accepted while one runs;
      * KILN_PROGRAM_REFUSED with the name that world lacks, a full table, ...; KILN_PROGRAM_FAULTED after a fault of its
-     * callback in that world. A new client world starts every program over (FAULTED stays until a new bind).
+     * callback in that world. A new client world starts every program over (FAULTED stays until a new bind). Handle 0
+     * with KILN_WORLD_CLIENT or KILN_WORLD_PREDICTION: the client table's own state: KILN_PROGRAM_REFUSED with the
+     * process latch's reason once latched (a bind that got KILN_ERR_UNAVAILABLE tells the latch from "the last binding's
+     * calls are still finishing" by it), else ACTIVE while a client world runs and PENDING without one.
      * KILN_ERR_NOT_FOUND: no such handle, or the program is not for that world; KILN_ERR_INVALID_ARGUMENT: no state
      * pointer or a bad kind. Any thread; takes a short registry lock to resolve the handle. */
     KilnResult(KILN_CALL* program_world_state)(KilnHandle program, uint32_t world_kind, int32_t* state, KilnStr* reason);

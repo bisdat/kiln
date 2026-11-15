@@ -121,6 +121,8 @@ bool map_find_u16(uintptr_t, uint32_t key, uint16_t* value) {
 // the engine's ReadOther / WriteOther over a fake store: entity -> component bytes, per accessor
 std::map<std::pair<uintptr_t, uint32_t>, std::vector<uint8_t>> g_fstore;
 int g_fwrites = 0;
+bool g_client_program = false;  // what programs.cpp's in_client_program answers (foreign.cpp refuses its writes then)
+bool in_client_program() { return g_client_program; }
 bool seh_read_other(Slice* out, void*, void* accessor, uint32_t entity, unsigned long*) {
     const auto at = g_fstore.find({reinterpret_cast<uintptr_t>(accessor), entity});
     *out = at == g_fstore.end() ? Slice{} : Slice{at->second.data(), at->second.size()};
@@ -1958,6 +1960,11 @@ void foreign_views() {
     const int writes = g_fwrites;
     auto* f = static_cast<uint8_t*>(foreign_write(&l, iter, kstr("Fuel"), 7, &size, &rc));
     check(f && rc == KILN_OK && size == 2 && g_fwrites == writes + 1, "foreign: write through other_write, marked by the tracker");
+    g_client_program = true;  // the same call from a Kiln client or prediction program's callback (package 14)
+    check(!foreign_write(&l, iter, kstr("Fuel"), 7, &size, &rc) && rc == KILN_ERR_UNAVAILABLE && g_fwrites == writes + 1 &&
+              foreign_attr_changed(&l, iter, f) == KILN_ERR_UNAVAILABLE,
+          "foreign: from a Kiln client program, foreign_write and foreign_attr_changed refuse (nothing saved or sent)");
+    g_client_program = false;
     check(!foreign_write(&l, iter, kstr("Health"), 7, &size, &rc) && rc == KILN_ERR_NOT_FOUND && g_fwrites == writes + 1,
           "foreign: a read-only component is not written");
     check(foreign_read(&l, iter, kstr("Fuel"), 7, &size, &rc) && rc == KILN_OK, "foreign: other_write is readable too");

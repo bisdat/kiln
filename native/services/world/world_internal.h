@@ -222,6 +222,7 @@ constexpr uint32_t kWorldBitServer = 1u << KILN_WORLD_SERVER, kWorldBitPredictio
 // world's tick and world events); reports the row. Before boot_programs_init (its reservations need to know).
 void programs_client_init(bool client_tick, bool world_events);
 bool programs_client_on();                                // world.programs.client is available
+bool in_client_program();  // a Kiln client or prediction program's call runs on this thread (0.2.0-dev.29)
 void programs_client_pre(const KilnTickInfo* tick);       // the client world's Pre (main thread)
 void programs_world_event(const KilnWorldEvent* event);   // a world starts or stops
 KilnResult reserve_program_world(const std::string& mod, const std::string& key, const KilnProgramDesc* desc, uint32_t worlds, uint32_t declared_worlds = 0);
