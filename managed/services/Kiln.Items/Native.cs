@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-// Mirror of native/core/abi/services/kiln_items.h (kiln.items v5; the v2 functions are in TableV2, the v3 ones in TableV3,
-// the v4 ones in TableV4, the v5 ones in TableV5). Blittable only; field order is the ABI (the native side static_asserts the same sizes and offsets).
+// Mirror of native/core/abi/services/kiln_items.h (kiln.items v6; the v2 functions are in TableV2, the v3 ones in TableV3,
+// the v4 ones in TableV4, the v5 ones in TableV5, the v6 ones in TableV6). Blittable only; field order is the ABI (the native side static_asserts the same sizes and offsets).
 using System.Runtime.InteropServices;
 
 namespace Kiln;
@@ -449,6 +449,128 @@ internal static unsafe class ItemsNative
         public delegate* unmanaged[Cdecl]<EquipStatus*, int> GetEquipStatus;
     }
 
+    // ---- v6 (0.2.0-dev.29): equipment sets (KilnSetSnapshotV1, KilnSetStatusV1; kiln_items.h "equipment sets") ----
+    public const uint SetRefusalNone = 0, SetRefusalNoPlayer = 1, SetRefusalNoIdentity = 2, SetRefusalShape = 3, SetRefusalBudget = 4;
+
+    /// <summary><c>KilnSetSnapshotV1</c>: the chapter's 88 bytes and the refusal tail, 256 bytes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SetSnapshot
+    {
+        public uint Size, Player;
+        public ulong Token, WorldEpoch, CapturedStep;
+        public fixed byte ProcessSession[16];
+        public DecisionsNative.EntityKey Identity;
+        public uint Refusal, Reserved;
+        public fixed byte Reason[160];
+    }
+
+    /// <summary><c>KilnSetStatusV1</c>, 208 bytes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SetStatus
+    {
+        public uint Size;
+        public byte Available, Broken;
+        public ushort R0;
+        public uint Snapshots, Pending;
+        public ulong Captured, Done, Refused, InvariantFailures;
+        public fixed byte Detail[160];
+    }
+
+    // KilnSetPlanV1.status, KilnSetStepV1.op
+    public const uint SetPlanPlanned = 0, SetPlanNoChange = 1, SetPlanStale = 4, SetPlanRefused = 5;
+    public const byte SetStepEquip = 1, SetStepUnequip = 2;
+    public const int SetMaxSteps = 128;
+
+    /// <summary><c>KilnSetStepV1</c>, 40 bytes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SetStep
+    {
+        public uint Index;
+        public byte Op, EquipmentSlot, Entry, Kind;
+        public uint ItemId, ItemEntity;
+        public ulong InstanceStamp, SourceSlot;
+        public uint Count, Reserved;
+    }
+
+    /// <summary><c>KilnSetPlanV1</c>, 5408 bytes (128 steps).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SetPlan
+    {
+        public uint Size, Status, Refusal, FailedEntry, StepCount, RequiredFreeSlots;
+        public ulong ValidThroughStep;
+        public fixed byte Reason[256];
+        public fixed byte Steps[SetMaxSteps * 40];
+    }
+
+    // KilnSetRequestV1, KilnSetSlotValueV1, KilnSetChangeV1, KilnSetResultV1
+    public const uint SetRequestDryRun = 1;
+    public const uint SetRequestLabFailStep = 0x100, SetRequestLabGuardBit = 0x200, SetRequestLabCommitAnyway = 0x400, SetRequestLabFakeMismatch = 0x800;
+    public const uint SetResultDryRun = 1, SetResultCommitted = 2, SetResultMayHaveMutated = 4;
+
+    /// <summary><c>KilnSetRequestV1</c>, 56 bytes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SetRequest
+    {
+        public uint Size, Player, Flags, Count;
+        public EquipDecisions.SetOp* Entries;
+        public ulong SnapshotToken;
+        public ulong OriginOwner;
+        public fixed byte ProcessSession[16];
+    }
+
+    /// <summary><c>KilnSetSlotValueV1</c>, 32 bytes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SetSlotValue
+    {
+        public uint ItemId, ItemEntity, Count, Reserved;
+        public ulong InstanceStamp, InventorySlot;
+    }
+
+    /// <summary><c>KilnSetChangeV1</c>, 72 bytes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SetChange
+    {
+        public uint Size, EquipmentSlot;
+        public SetSlotValue Before, After;
+    }
+
+    /// <summary><c>KilnSetResultV1</c>, 1760 bytes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SetResult
+    {
+        public uint Size, Status, GameError, FailedOperation;
+        public ulong Ticket, DecisionId, WorldEpoch, AppliedStep;
+        public uint Player, Flags, ChangeCount, Refusal;
+        public fixed byte Reason[256];
+        public fixed byte Changes[20 * 72];
+    }
+
+    /// <summary>kiln.decisions' <c>KilnSetDecisionRequestV1</c> (the kind-18 payload), 824 bytes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SetDecisionPayload
+    {
+        public ulong ItemsTicket, SnapshotToken;
+        public uint Count, Flags;
+        public fixed byte Entries[20 * 40];
+    }
+
+    /// <summary>The v6 table: v5 followed by the equipment-set functions. Read a member only when the header's size covers
+    /// it (<see cref="HasV6"/>).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableV6
+    {
+        public TableV5 V5;
+        public delegate* unmanaged[Cdecl]<ulong, uint, SetSnapshot*, int> SetCapture;
+        public delegate* unmanaged[Cdecl]<ulong, ulong, int> SetRelease;
+        public delegate* unmanaged[Cdecl]<SetStatus*, int> GetSetStatus;
+        public delegate* unmanaged[Cdecl]<ulong, ulong, EquipDecisions.SetOp*, uint, SetPlan*, int> SetPlanOf;
+        public delegate* unmanaged[Cdecl]<ulong, SetRequest*, delegate* unmanaged[Cdecl]<SetResult*, void*, void>, void*, ulong*, int> EquipSet;
+        public delegate* unmanaged[Cdecl]<ulong, int> SetCancel;
+    }
+
+    /// <summary>True when a table of <paramref name="size"/> bytes has the v6 member that ends at <paramref name="end"/>.</summary>
+    public static bool HasV6(uint size, int end) => size >= (uint)end;
+
     public static string Text(byte* p, int max)
     {
         var n = 0;
@@ -457,5 +579,5 @@ internal static unsafe class ItemsNative
     }
 
     // KilnResult
-    public const int Ok = 0, InvalidArgument = 1, NotFound = 2, Unavailable = 3, WrongThread = 4, BufferTooSmall = 5;
+    public const int Ok = 0, InvalidArgument = 1, NotFound = 2, Unavailable = 3, WrongThread = 4, BufferTooSmall = 5, InternalError = 7;
 }

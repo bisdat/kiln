@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: MIT
  * kiln.items v4 (v1 + water in containers: fuel, fuel_read, fuel_keep, fuel_keep_end; v3 + item moves that keep item state,
  * container names, inventory-transfer events and rules; v4 + item instances: a stamp per item entity, its location and
- * its save record's fields in one read; v5 + equip and unequip through the game's own functions): put items into and take them out of inventories (players'
+ * its save record's fields in one read; v5 + equip and unequip through the game's own functions; v6 + equipment sets: a
+ * player's equipment slots changed in one transaction): put items into and take them out of inventories (players'
  * backpacks, chests, villagers), gear with a level and rarity included; read an entity's inventory; the game's item
  * catalog.
  *
@@ -27,14 +28,15 @@
 #ifndef KILN_ITEMS_H
 #define KILN_ITEMS_H
 #include "../kiln_api.h"
+#include "kiln_decisions.h" /* v6: KilnEventEntityKey and KilnSetOpV1, shared with kiln.decisions' kind 18 */
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 #define KILN_ITEMS_SERVICE "kiln.items"
-#define KILN_ITEMS_VERSION 5u  /* v2 appends the fuel functions, v3 the move, name and transfer functions, v4 the item
-                                  instances (stamps, locations, records), v5 (0.2.0-dev.27) equip and unequip; check
-                                  header.size */
+#define KILN_ITEMS_VERSION 6u  /* v2 appends the fuel functions, v3 the move, name and transfer functions, v4 the item
+                                  instances (stamps, locations, records), v5 (0.2.0-dev.27) equip and unequip, v6
+                                  (0.2.0-dev.29) equipment sets; check header.size */
 
 typedef uint32_t KilnItemId;  /* 0 = none */
 typedef uint64_t KilnSlotId;  /* 0 = none / let the game choose */
@@ -675,6 +677,189 @@ typedef struct KilnItemsEquipStatus {
     char detail[160];         /* why it is off; NUL-terminated */
 } KilnItemsEquipStatus;
 
+/* ---------------------------------------------------------------------------------------------- equipment sets */
+
+/* since 0.2.0-dev.29 (v6; feature items.equip_sets; check header.size before calling a v6 member).
+ *
+ * A player's 20 physical equipment slots (the ones SlotSelection.equipment holds: keen::EquipmentSlot 0-16, 21-23)
+ * changed in ONE inventory transaction inside kiln_items_equip: every slot changes or none does. Chapter 10 of the
+ * dev.28 dossier is the contract; docs/kiln/services/items.md "Equipment sets" the guide.
+ *
+ * Snapshots. set_capture copies a canonical snapshot of the player's inventory tree, equipment selection and item
+ * entities (normalised bytes, compared byte for byte; never a revision counter or a hash) and stores it under a token:
+ * nonzero, only growing within the process, never handed out twice. At most 256 snapshots live in all and 16 per owner;
+ * a full store refuses (KILN_ERR_BUFFER_TOO_SMALL, refusal BUDGET), it never evicts another. A snapshot can be used
+ * through captured_step + 250; the server world's stop, a new world and a reset of the item stamps (the engine's id
+ * counter went down) forget every one. A snapshot belongs to the owner that captured it. */
+
+/* KilnSetSnapshotV1.refusal (and later results' refusal codes) */
+#define KILN_SET_REFUSAL_NONE 0u
+#define KILN_SET_REFUSAL_NO_PLAYER 1u   /* no player character with an initialised inventory and equipment */
+#define KILN_SET_REFUSAL_NO_IDENTITY 2u /* kiln.decisions has no identity for the player (KilnEventEntityKey) */
+#define KILN_SET_REFUSAL_SHAPE 3u       /* the inventory tree is beyond the bounds (64 setups, depth 3, 32 inventories), links
+                                           back into itself or names an entity that cannot be read */
+#define KILN_SET_REFUSAL_BUDGET 4u      /* 256 snapshots live, or 16 of this owner */
+#define KILN_SET_REFUSAL_STALE 5u       /* the snapshot is unknown, used, expired, another owner's or another world's, or from
+                                           before a reset of the item stamps */
+#define KILN_SET_REFUSAL_NOT_HERE 6u    /* a selected item or stack is not where the set says, or not the player's */
+#define KILN_SET_REFUSAL_SLOT_TYPE 7u   /* an item does not fit its equipment slot */
+#define KILN_SET_REFUSAL_NO_ROOM 8u     /* an unequip needs a free Generic slot and there is none */
+#define KILN_SET_REFUSAL_CYCLE 9u       /* items move between equipment slots in a cycle: refused until the rollback matrix
+                                           passes (UnsupportedCycle) */
+#define KILN_SET_REFUSAL_BACKPACK 10u   /* the backpack would change (its contents move with it): refused until the rollback
+                                           matrix passes */
+#define KILN_SET_REFUSAL_LOCKED 11u     /* an item is worn in a slot the set leaves as it is */
+#define KILN_SET_REFUSAL_MERGE 12u      /* a stack of the item type its slot already holds (the game could merge them) */
+#define KILN_SET_REFUSAL_TOO_MANY_STEPS 13u /* more than 128 steps */
+#define KILN_SET_REFUSAL_SWAPS 14u      /* more than one slot that holds an item gets another one, or a slot is emptied after
+                                           such a swap: the game's commit would point a slot at the item that came off
+                                           (UnsupportedSwaps; the rollback matrix, docs/kiln/services/items.md) */
+
+typedef struct KilnSetSnapshotV1 {
+    uint32_t size;               /* in: sizeof the caller's struct (at least the chapter's 88 bytes, up to `reason`) */
+    uint32_t player;
+    uint64_t token;              /* 0 when refused */
+    uint64_t world_epoch;        /* kiln.window_clock's epoch of the server world */
+    uint64_t captured_step;      /* the step it was taken in; usable through captured_step + 250 */
+    uint8_t process_session[16]; /* kiln.window_clock's process nonce */
+    KilnEventEntityKey identity; /* the player's identity (kiln.decisions resolve_entity) */
+    /* appended (written only when `size` covers them): why a capture was refused */
+    uint32_t refusal;            /* KILN_SET_REFUSAL_* */
+    uint32_t reserved;
+    char reason[160];            /* NUL-terminated; "" when captured */
+} KilnSetSnapshotV1;
+
+/* Planning (set_plan). The planner works on a snapshot (it does not take it): the game's equip and unequip calls in the
+ * order one transaction would run them, or a refusal before anything is touched. Advisory for a caller: equip_set plans
+ * again from its own snapshot and trusts no step a caller sends. Order: targets whose item is in a non-equipment slot,
+ * in numeric slot order (equip: a swap, the slot's old stack goes to the source slot); then targets to be emptied
+ * (unequip: into the first free slot of a top-level Generic link); a cycle (an item worn in one named slot and asked
+ * for in another) is refused (CYCLE). Each source is found again by its item entity after the steps before it. */
+
+/* KilnSetPlanV1.status */
+#define KILN_SET_PLAN_PLANNED 0u
+#define KILN_SET_PLAN_NO_CHANGE 1u /* every entry holds already (or no entries): no step */
+#define KILN_SET_PLAN_STALE 4u     /* the snapshot cannot be used (refusal STALE) */
+#define KILN_SET_PLAN_REFUSED 5u   /* refusal and failed_entry say why */
+
+#define KILN_SET_STEP_EQUIP 1u
+#define KILN_SET_STEP_UNEQUIP 2u
+
+typedef struct KilnSetStepV1 {
+    uint32_t index;
+    uint8_t op;             /* KILN_SET_STEP_* */
+    uint8_t equipment_slot; /* keen::EquipmentSlot */
+    uint8_t entry;          /* the request entry it serves; 0xFF: a temporary unequip that frees a slot for a cycle */
+    uint8_t kind;           /* what goes in: 0 nothing (an unequip), 1 an item entity, 2 a plain stack */
+    uint32_t item_id, item_entity;
+    uint64_t instance_stamp;
+    uint64_t source_slot;   /* an equip: where the stack is when the step runs (as planned) */
+    uint32_t count, reserved;
+} KilnSetStepV1;
+
+#define KILN_SET_MAX_STEPS 128u
+
+typedef struct KilnSetPlanV1 {
+    uint32_t size;                 /* in: sizeof(KilnSetPlanV1) */
+    uint32_t status;               /* KILN_SET_PLAN_* */
+    uint32_t refusal;              /* KILN_SET_REFUSAL_* */
+    uint32_t failed_entry;         /* the entry the refusal is about; UINT32_MAX for none */
+    uint32_t step_count;
+    uint32_t required_free_slots;  /* the most free Generic slots the steps use at one time */
+    uint64_t valid_through_step;   /* the snapshot's captured_step + 250 */
+    char reason[256];              /* NUL-terminated; "" when planned */
+    KilnSetStepV1 steps[KILN_SET_MAX_STEPS];
+} KilnSetPlanV1;
+
+/* Applying (equip_set). One request is one inventory transaction inside kiln_items_equip, with one decision: the
+ * service files a kiln.decisions kind-18 request (KilnSetDecisionRequestV1) in the Pre after the call, so mods see one
+ * PlayerEquippingEvent for the whole set (cancel: Canceled, nothing runs); without a decision consumer, a full queue, a
+ * timeout or a released capability the set goes on (kiln.decisions fails open). In the Pre of the step it runs in, the
+ * player's session and identity are checked again; inside the program the snapshot's bytes are compared before the
+ * transaction (a handler or the game that changed the inventory: StaleSnapshot), the plan is made again from it, every
+ * step is staged on one transaction, and the terminal state is checked against the request and the snapshot
+ * (chapter 10 §4.4). FIFO with the player's single equip requests; at most one set per player and step.
+ *
+ * Completion: `done` is called exactly once, on the tick thread in Pre (or when the server world stops), with a result
+ * and its changes that are valid only during the call. Never for a call that did not return KILN_OK. Owners: the
+ * snapshot must be the effective origin's: a call by owner 0 (Kiln's managed bridge) names the asking mod in
+ * origin_owner; any other caller may name 0 (itself) or itself, never another owner. cancel(ticket) drops the callback
+ * (v1 semantics), cancel_owner(owner) drops an owner's queued sets and their callbacks, set_cancel(ticket) ends a queued
+ * set Dropped and keeps its callback. A set that did not run within 250 steps ends Dropped. */
+
+#define KILN_SET_REQUEST_DRY_RUN 1u /* KilnSetRequestV1.flags: run and roll back, never commit */
+/* Lab only: accepted when <kiln data>/kiln.items/sets-lab existed when the server started, refused as bad flags
+ * otherwise (never on a player's server). Faults injected into a real run, for the rollback matrix of the lab test. */
+#define KILN_SET_REQUEST_LAB_FAIL_STEP 0x100u      /* the step in bits 16-23: its equip is called with an empty source */
+#define KILN_SET_REQUEST_LAB_GUARD_BIT 0x200u      /* the commit's own rollback bit is set: refused before the commit */
+#define KILN_SET_REQUEST_LAB_COMMIT_ANYWAY 0x400u  /* the bit set and committed anyway: the commit rolls back by itself */
+#define KILN_SET_REQUEST_LAB_FAKE_MISMATCH 0x800u  /* the result read as unmet after the commit: InvariantFailure */
+
+typedef struct KilnSetRequestV1 {
+    uint32_t size;                /* sizeof(KilnSetRequestV1) */
+    uint32_t player;
+    uint32_t flags;               /* KILN_SET_REQUEST_*; other bits are refused */
+    uint32_t count;               /* 0..20 entries; slots not named stay as they are */
+    const KilnSetOpV1* entries;   /* copied by equip_set */
+    uint64_t snapshot_token;      /* set_capture's token; taken (used up) by an accepted call */
+    KilnOwner origin_owner;       /* the snapshot's owner: see "Applying" */
+    uint8_t process_session[16];  /* must be this process's nonce (checked before the token is looked up) */
+} KilnSetRequestV1;
+
+typedef struct KilnSetSlotValueV1 {
+    uint32_t item_id, item_entity, count, reserved;
+    uint64_t instance_stamp;      /* the item entity's stamp, zero-extended; 0 for a plain stack or an empty slot */
+    uint64_t inventory_slot;      /* the slot that holds it (an equipment page's); 0 when empty */
+} KilnSetSlotValueV1;
+
+typedef struct KilnSetChangeV1 {
+    uint32_t size, equipment_slot; /* keen::EquipmentSlot */
+    KilnSetSlotValueV1 before, after;
+} KilnSetChangeV1;
+
+/* KilnSetResultV1.status */
+#define KILN_SET_DONE 0u
+#define KILN_SET_NO_CHANGE 1u
+#define KILN_SET_SIMULATED 2u
+#define KILN_SET_CANCELED 3u
+#define KILN_SET_STALE_SNAPSHOT 4u
+#define KILN_SET_REFUSED 5u
+#define KILN_SET_COMMIT_ROLLED_BACK 6u
+#define KILN_SET_DROPPED 7u
+#define KILN_SET_INVARIANT_FAILURE 8u
+#define KILN_SET_UNAVAILABLE 9u
+/* KilnSetResultV1.flags */
+#define KILN_SET_RESULT_DRY_RUN 1u
+#define KILN_SET_RESULT_COMMITTED 2u
+#define KILN_SET_RESULT_MAY_HAVE_MUTATED 4u
+
+typedef struct KilnSetResultV1 {
+    uint32_t size, status, game_error;
+    uint32_t failed_operation;    /* the step the game refused; UINT32_MAX if none */
+    uint64_t ticket, decision_id, world_epoch, applied_step; /* decision_id 0: no decision was filed */
+    uint32_t player, flags, change_count;
+    uint32_t refusal;             /* KILN_SET_REFUSAL_* of a refusal or a stale snapshot; 0 otherwise */
+    char reason[256];             /* NUL-terminated; "" for Done, NoChange, Simulated */
+    KilnSetChangeV1 changes[20];  /* the slots a commit changed (also after an invariant failure, when they could be read) */
+} KilnSetResultV1;
+
+typedef void(KILN_CALL* KilnSetDoneV1)(const KilnSetResultV1* result, void* user);
+
+typedef struct KilnSetStatusV1 {
+    uint32_t size;          /* in: sizeof(KilnSetStatusV1) */
+    uint8_t available;      /* 1: sets can run now (feature items.equip_sets, equip, item instances, kiln.decisions'
+                               kind 18, kiln.window_clock, this build's component layouts; not switched off) */
+    uint8_t broken;         /* 1: switched off until the server restarts (an invariant failure or a fault) */
+    uint16_t reserved;
+    uint32_t snapshots;     /* live snapshots */
+    uint32_t pending;       /* set requests queued or deciding */
+    uint64_t captured;      /* snapshots taken since the start */
+    uint64_t done;          /* sets committed */
+    uint64_t refused;       /* sets that ended with anything but Done, NoChange, Simulated */
+    uint64_t invariant_failures;
+    char detail[160];       /* why it is off; NUL-terminated */
+} KilnSetStatusV1;
+
 /* ---------------------------------------------------------------------------------------------- the table ---- */
 
 typedef struct KilnItemsApi {
@@ -814,6 +999,38 @@ typedef struct KilnItemsApi {
     KilnResult(KILN_CALL* equip)(KilnOwner owner, const KilnItemsEquipRequest* request, KilnItemsEquipDoneFn done,
                                  void* user, uint64_t* out_ticket);
     KilnResult(KILN_CALL* equip_status)(KilnItemsEquipStatus* out); /* any thread */
+
+    /* ---- v6, since 0.2.0-dev.29: equipment sets (check header.size; KILN_ERR_UNAVAILABLE without feature
+     * items.equip_sets) ---- */
+
+    /* Captures a snapshot of `player`'s inventory for `owner` (see "equipment sets"); out->size in. KILN_OK: out holds
+     * the token, epoch, step, nonce and identity. KILN_ERR_INVALID_ARGUMENT: player 0, out NULL or too small.
+     * KILN_ERR_UNAVAILABLE: sets are off (set_status says why). KILN_ERR_WRONG_THREAD: not the world thread in a
+     * world-safe phase (kiln.window_clock: Pre or Post). KILN_ERR_NOT_FOUND: refused for this player (out->refusal and
+     * out->reason when out->size covers them). KILN_ERR_BUFFER_TOO_SMALL: the snapshot budget is used up (refusal
+     * BUDGET; nothing was evicted). */
+    KilnResult(KILN_CALL* set_capture)(KilnOwner owner, uint32_t player, KilnSetSnapshotV1* out);
+    /* Releases a snapshot `owner` captured. KILN_ERR_NOT_FOUND: unknown, used up, expired or another owner's. Any
+     * thread. */
+    KilnResult(KILN_CALL* set_release_snapshot)(KilnOwner owner, uint64_t token);
+    /* The state of equipment sets. Any thread. */
+    KilnResult(KILN_CALL* set_status)(KilnSetStatusV1* out);
+    /* Plans `count` entries (KilnSetOpV1, kiln_decisions.h; omitted slots stay as they are) against the snapshot `token`
+     * of `owner` (see "Planning"; the snapshot is not taken). KILN_OK: *out has the plan or the refusal.
+     * KILN_ERR_INVALID_ARGUMENT: out NULL or too small, or malformed entries (more than 20, a slot that is no equipment
+     * slot or named twice, an item selected twice, an item without its entity, id or stamp, a stack without its item,
+     * slot or count, non-zero reserved fields). KILN_ERR_UNAVAILABLE: sets are off. Any thread. */
+    KilnResult(KILN_CALL* set_plan)(KilnOwner owner, uint64_t token, const KilnSetOpV1* entries, uint32_t count, KilnSetPlanV1* out);
+    /* Queues a set (see "Applying"). *ticket (optional) = its ticket, from the service's one ticket counter.
+     * KILN_ERR_INVALID_ARGUMENT: request NULL or too small, player 0, bad flags, malformed entries (as set_plan), an
+     * origin_owner the caller may not name, or a snapshot of another player. KILN_ERR_UNAVAILABLE: sets are off.
+     * KILN_ERR_NOT_FOUND: stale: another process's nonce, or a snapshot that is unknown, used, expired, another owner's,
+     * another world's or from before a stamp reset (no callback). KILN_ERR_BUFFER_TOO_SMALL: 256 sets are waiting (a
+     * refusal for now; the snapshot is not used). KILN_OK: `done` (it may be NULL) runs once later. Any thread. */
+    KilnResult(KILN_CALL* equip_set)(KilnOwner owner, const KilnSetRequestV1* request, KilnSetDoneV1 done, void* user, uint64_t* ticket);
+    /* Ends a queued set (not started) Dropped at the next Pre; its callback is kept and runs once. KILN_ERR_NOT_FOUND:
+     * no such set, or it already ran or is running. Never undoes a commit. Any thread. */
+    KilnResult(KILN_CALL* set_cancel)(uint64_t ticket);
 } KilnItemsApi;
 
 #ifdef __cplusplus

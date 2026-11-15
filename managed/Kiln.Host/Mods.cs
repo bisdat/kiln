@@ -12,6 +12,7 @@ namespace Kiln.Host;
 /// <summary>What the mod manager needs from its host (the native core, or a test fake).</summary>
 internal interface IHostServices
 {
+    nint Service(string name, uint minVersion) => 0;
     ulong OwnerCreate(string id);
     void OwnerRevoke(ulong owner);
     void Log(LogLevel level, string text);
@@ -64,7 +65,7 @@ internal sealed class ModManagerOptions
 /// <summary>One collectible context per loaded mod instance. Assemblies load from bytes, so the files on disk stay
 /// free to be replaced while the mod runs. Resolution order: Kiln.Api, Kiln's shared assemblies (kiln/host/Kiln.*),
 /// assemblies exported by the mod's dependencies (loaded in their contexts, so types are shared), the mod's folder.</summary>
-internal sealed class ModLoadContext(string id, string directory, Func<AssemblyName, Assembly?>? exports = null)
+internal sealed class ModLoadContext(string id, string directory, Func<AssemblyName, Assembly?>? exports = null, Action<Assembly>? loaded = null)
     : AssemblyLoadContext("kiln-mod:" + id, isCollectible: true)
 {
     private static readonly Assembly ApiAssembly = typeof(Kiln.Mod).Assembly;
@@ -83,9 +84,11 @@ internal sealed class ModLoadContext(string id, string directory, Func<AssemblyN
             if (Find(name) is { } existing) return existing;
             using var image = new MemoryStream(File.ReadAllBytes(path));
             var pdb = System.IO.Path.ChangeExtension(path, ".pdb");
-            if (!File.Exists(pdb)) return LoadFromStream(image);
-            using var symbols = new MemoryStream(File.ReadAllBytes(pdb));
-            return LoadFromStream(image, symbols);
+            Assembly assembly;
+            if (!File.Exists(pdb)) assembly = LoadFromStream(image);
+            else { using var symbols = new MemoryStream(File.ReadAllBytes(pdb)); assembly = LoadFromStream(image, symbols); }
+            loaded?.Invoke(assembly);
+            return assembly;
         }
     }
 
@@ -490,10 +493,17 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
             return false;
         }
         var dependencies = DependencyClosure(manifest);
-        var alc = new ModLoadContext(manifest.Id, directory, dependencies.Count > 0 ? name => ResolveExport(dependencies, name) : null);
         ulong owner = 0;
+        bool gameplayRequested = false;
+        var alc = new ModLoadContext(manifest.Id, directory, dependencies.Count > 0 ? name => ResolveExport(dependencies, name) : null,
+            loaded: assembly => {
+                if (!gameplayRequested && GameplayBuildDemand.ReferencesGameplay(assembly)) {
+                    gameplayRequested = true; GameplayBuildDemand.Request(_host, owner);
+                }
+            });
         try
         {
+            owner = _host.OwnerCreate("mod:" + manifest.Id);
             Kiln.Mod instance;
             if (!manifest.HasCode)
                 instance = new DataOnlyMod();  // no entryAssembly: a mod of data (content packs, assets), with nothing to run
@@ -507,7 +517,6 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
                 if (!type.IsSubclassOf(typeof(Kiln.Mod))) throw new InvalidDataException($"{type} does not derive from Kiln.Mod");
                 instance = (Kiln.Mod)Activator.CreateInstance(type)!;
             }
-            owner = _host.OwnerCreate("mod:" + manifest.Id);
             var context = HostAccess.CreateContext(Info(manifest, directory), owner, System.IO.Path.Combine(_dataDirectory, manifest.Id));
             HostAccess.Bind(instance, context);
             var mod = new LoadedMod

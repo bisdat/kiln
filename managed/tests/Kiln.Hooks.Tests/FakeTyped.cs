@@ -44,9 +44,14 @@ internal static unsafe class FakeTyped
         public Function? Original;
     }
 
+    // Every read of the installation clock is a second later: no test meets the per-tick limit unless it sets the clock.
+    static long _clock;
+
     public static void Reset()
     {
         InstallReady = 1;
+        TypedHooks.ResetInstallTurns();
+        TypedHooks.InstallClock = () => _clock += System.Diagnostics.Stopwatch.Frequency;
         ShippedSig = null;
         ValidationCalls = 0;
         ResolverResult = 0;

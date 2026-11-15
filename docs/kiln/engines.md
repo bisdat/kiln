@@ -417,3 +417,11 @@ loader ran later). That case is as before: verify in Steam, then move the files 
 
 Never run on Windows or against a real game folder; the moves are tested on Linux with an interruption at every step
 (`cargo test -p kiln-manage --features full restore_data`), the dialog with `launcher/tests/restore-data.spec.ts`.
+
+Kiln no longer changes the game's five building functions merely by starting `kiln.gameplay`: a selected managed mod which references `Kiln.Gameplay` (or ships a helper with that reference) requests them during the host's pre-world preflight,
+including when it only uses crafting. Native plugins request on first use and should request at startup if they
+will later add build/break protection. A first runtime request waits for the last world's stop; build/break zones
+are refused until installation, rather than accepted without protection. This lets ShroudForge inspect the unmodified `PlaceProp` entry
+when the profile contains no such mod and no native plugin requests the group. Once those hooks are installed, ShroudForge's entity spawning still cannot find
+its prop-spawn helper through that entry; a ShroudForge-side fix is in review. A mid-install failure can also leave
+pass-through jumps in some entries; see the gameplay service's refusal status and installed-target mask.

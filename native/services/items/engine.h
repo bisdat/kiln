@@ -118,6 +118,10 @@ struct Engine {
     uintptr_t add_component = 0;       // feature items.names (lab only: the rename handler's AddComponent)
     EquipFn equip_item = nullptr;      // feature items.equip (v5)
     EquipFn unequip_item = nullptr;
+    // feature items.equip_sets (v6): the commit's own rollback conditions, captured from InventoryCommit's first bytes
+    // (sigdb @items/CommitGuards): flags byte (bit 0x40 = roll back), the InventoryEmptyState accessor's slot, the touched
+    // inventories' count. A set refuses before the commit when either would make the commit roll back by itself.
+    int64_t tx_guard_flags = 0, tx_empty_state = 0, tx_touched_count = 0;
 
     int64_t world_storage = 0;      // world -> entity storage
     int64_t tx_size = 0;            // InventoryTx bytes (result flags + 8, rounded to 16)
@@ -148,6 +152,7 @@ struct Engine {
     bool names_ok = false;    // feature items.names: container names
     bool instances_ok = false;  // feature items.instances: stamps, locations, records (v4)
     bool equip_ok = false;      // feature items.equip: the game's equip / unequip resolved (v5; also needs kiln.world)
+    bool sets_ok = false;       // feature items.equip_sets: equip plus the commit's guards (v6; also needs kiln.decisions)
 };
 extern Engine E;
 // After resolve(): blank the game functions a feature that is off must never call. items.move off drops the slot transfer
@@ -312,5 +317,15 @@ struct MoveJob {
     KilnItemsMoveRequest r{};
 };
 bool run_move(const Access& a, const MoveJob& job, uint8_t* tx, KilnItemsMoveResult* res, unsigned long* code);
+
+// ---- equipment sets (v6, setexec.cpp) ----
+namespace sets {
+struct SetJob;
+struct SetOutcome;
+}  // namespace sets
+// Runs one set inside kiln_items_equip's update of `player` (the program's accessors in `a`, its transaction buffer
+// `tx`): the snapshot checked again, the plan, one transaction and its terminal state (setexec.h). Every game call is
+// guarded; a fault ends it with out->engine_fault set.
+void set_run(const Access& a, KilnEntity player, uint8_t* tx, const sets::SetJob& job, sets::SetOutcome* out);
 
 }  // namespace kitems

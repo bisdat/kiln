@@ -111,7 +111,7 @@ KilnResult KILN_CALL program_budget(uint32_t kind, KilnProgramBudgetReply* out) 
 }
 
 namespace {
-const KilnWorldBudgetApi kBudgetTable = {{sizeof(KilnWorldBudgetApi), KILN_WORLD_BUDGET_VERSION}, &program_budget};
+const KilnWorldBudgetApi kBudgetTable = {{sizeof(KilnWorldBudgetApi), KILN_WORLD_BUDGET_VERSION}, &program_budget, &program_reservation};
 }
 
 // After kiln.world's own table: publish kiln.world.budget and its row (world.program_budget). The row is there with the

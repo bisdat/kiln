@@ -1,0 +1,24 @@
+{
+  "format": 1,
+  "side": "server",
+  "comment": "kiln.items v6, equipment sets (dev.28 dossier chapter 10; package 10-equipment-sets, built in dev.29): the commit's own rollback conditions, captured from the first bytes of items/InventoryCommit. The commit rolls the whole transaction back by itself when the setup flags byte (tx+0xb0) has bit 0x40, or when the InventoryEmptyState accessor (tx+0xa0) is empty while the touched-inventories count (tx+0x7148) is not 0; a set refuses before calling the commit when either holds. The same bytes on server 26430253 (0x1af874) and client 26430625 (0x40fe44), so the client composes this file unchanged. A game update that changes these conditions stops the pattern from matching and turns items.equip_sets off. Every other symbol is the baseline's (items.json).",
+  "symbols": {
+    "@items/CommitGuards": {
+      "comment": "InventoryCommit: test byte [rcx+guard_flags],0x40; mov r13,rcx; jne rollback; cmp qword [rcx+empty_state],0; lea rbx,[rcx+touched_count] (then cmp qword [rbx],0; je go on; call rollback)",
+      "find": [
+        {
+          "scope": { "symbol": "items/InventoryCommit", "size": 96 },
+          "pattern": "F6 81 {items/tx.guard_flags:d32} 40 4C 8B E9 75 ?? 48 83 B9 {items/tx.empty_state:d32} 00 48 8D 99 {items/tx.touched_count:d32} 48 89 9D ?? ?? ?? ?? 75 ?? 48 83 3B 00 74 ?? E8 {items/InventoryRollback:rel32}"
+        }
+      ]
+    }
+  },
+  "constants": {},
+  "features": {
+    "items.equip_sets": {
+      "symbols": ["items/EquipItem", "items/UnequipItem", "@items/EquipAction.calls", "items/InventoryTxCtor", "items/InventoryTxInit",
+                  "items/InventoryCommit", "items/InventoryRollback", "items/InventoryFreeArrays", "@items/CommitGuards"],
+      "constants": ["items/tx.guard_flags", "items/tx.empty_state", "items/tx.touched_count", "items/tx.flags", "items/tx.touched"]
+    }
+  }
+}

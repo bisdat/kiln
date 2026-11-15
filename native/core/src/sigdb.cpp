@@ -663,6 +663,16 @@ public:
         }
         return true;
     }
+    bool sig_status(std::string_view name, uintptr_t* address, SigStatus* status, std::string* text) const {
+        auto it = sigs_.find(std::string(name));
+        if (it == sigs_.end()) return false;
+        *status = it->second.status;
+        *text = *status == SigStatus::Match ? std::string{} : it->second.note;
+        *address = 0;
+        auto s = symbols_.find(it->first);
+        if (s != symbols_.end() && s->second.ok) *address = static_cast<uintptr_t>(s->second.value);
+        return true;
+    }
     bool sig_at(uintptr_t a, SigInfo* out) const {
         for (auto& [n, d] : sigs_) {
             auto s = symbols_.find(n);
@@ -1304,6 +1314,15 @@ bool sig(std::string_view symbol, SigInfo* out) {
     std::lock_guard lock(g_frag_mutex);
     auto it = g_fragments.find(pfx);
     return it != g_fragments.end() && it->second->sig(symbol, out);
+}
+
+bool sig_status(std::string_view symbol, uintptr_t* address, SigStatus* status, std::string* text) {
+    if (g_core.sig_status(symbol, address, status, text)) return true;
+    const std::string pfx = prefix_of(symbol);
+    if (pfx.empty()) return false;
+    std::lock_guard lock(g_frag_mutex);
+    auto it = g_fragments.find(pfx);
+    return it != g_fragments.end() && it->second->sig_status(symbol, address, status, text);
 }
 
 bool sig_at(uintptr_t live_addr, SigInfo* out) {

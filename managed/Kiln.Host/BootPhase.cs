@@ -655,7 +655,12 @@ internal sealed partial class ModManager
     {
         why = "";
         if (!manifest.HasCode) return true;  // a data-only boot mod: its files only
-        var alc = new ModLoadContext(manifest.Id, directory);
+        bool gameplayRequested = false;
+        var alc = new ModLoadContext(manifest.Id, directory, loaded: assembly => {
+            if (!gameplayRequested && GameplayBuildDemand.ReferencesGameplay(assembly)) {
+                gameplayRequested = true; GameplayBuildDemand.Request(_host, owner);
+            }
+        });
         try
         {
             var assembly = alc.LoadFile(System.IO.Path.Combine(directory, manifest.EntryAssembly));
