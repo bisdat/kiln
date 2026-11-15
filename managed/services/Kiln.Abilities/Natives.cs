@@ -98,6 +98,9 @@ public unsafe ref struct NativeCall
         _sync = sync;
     }
 
+    internal AbilitiesNative.NativeCall* Record => _c;
+    internal ModContext? Owner => _owner;
+
     public uint Native => _c->Hash;
     public int ArgCount => (int)_c->Argc;
     public uint ImpactId => _c->ImpactId;

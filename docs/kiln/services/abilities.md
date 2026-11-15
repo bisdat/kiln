@@ -290,6 +290,25 @@ destroyed before the first run). Keys: a variable alias or debug name of the pro
   the world to the cooked program: Pending at load, Active once the world's programs are in, 1 call when it ran`, `PASS
   an attachment to a program registered after the readiness check: Pending at load, Off at readiness, Active once the
   program went in, 1 call when it ran`.
+- **The ECS bridge** (since 0.2.0-dev.29, capability `abilities.natives.ecs`, server only): inside a sync native's or an
+  `[ImpactNative]` method's call, `NativeContext` reads and writes other entities through impact_simulation's own
+  accessors, with its job's storage and tracker, so the save and replication see a write as the game's own:
+  `TryRead<T>(entity, out value)` for the 21 types of its other_read list and the 72 of other_write (`Actor`, `Faction`,
+  `Health`, `Mana`, `Stamina`, `Inventory`, `CurrentTransform`, ...), `TryWrite<T>(entity, in value)` for other_write;
+  an attribute (`Health`, `Mana`, ...) then runs the game's formulas (read it, change its values, write it back). Any
+  other type, an entity without it, or the bridge off: `false`, with no access. `Root` is the instance's
+  `ImpactHierarchy` root; `Post(action)` queues work to the tick thread as the native's mod. A change raises one
+  `ComponentWrittenEvent` per entity and component per step in the next Pre (first before, last after), `Writer`
+  `"<modid>/native:<name>"`. The first Kiln native call of each server world checks its iterator against kiln.world's
+  view of impact_simulation: kiln.log `impact_simulation's view (kiln.world, session N): ctx + tpl 1, read 6, write 1,
+  singletons 21, other_tpl 4, other 93, events 2/14 (...); impact::ImpactSystem at qword 34 (+0x110)`, then the job's
+  counts and the registry at that qword; a mismatch turns the bridge off for that world (the natives still run). The
+  calls' data expires when the call returns. Lab (`mods/tests/natives-gen-test`): `PASS the self-check of the first
+  native call`, `PASS TryWrite<Health> inside the native's call is seen by World.TryRead`, `PASS TryRead of a type
+  impact_simulation does not declare for other entities returns false with no access`, `PASS one ComponentWrittenEvent
+  per entity and component per step, on the tick thread`. That the write is in the save is not shown in the lab: the
+  Vukah it writes is not saved, and the lab's save has no saved entity with Health that the row finds (the row writes one,
+  and checks it after a restart, when there is one).
 - **Built-ins**: `kiln.Log(value)` (one kiln.log line) and `kiln.Signal(value, tag)` → `ImpactSignalEvent`
   (`Tag`, `Value`, `AsInt/AsFloat/AsEntity`, `Impact`, `Site`). Neither suspends.
 - **Programs**: ship them as kiln.assets resources (`assets/assets.json`, kind `resource`, type
@@ -410,8 +429,9 @@ appended in 0.2.0-dev.29 (check `header.size`): `native_register_sync` (a native
 faults, calls over budget, calls of a removed native, attachment callbacks entered and filters that skipped a call,
 calls a typed declaration refused, retirements finished late, watchdog reports, attachments by state), `native_attach` / `native_detach`
 (one callback per attachment, `KilnNativeFilter`, stages `KILN_NATIVE_BEFORE / INSTEAD / AFTER`),
-`native_declare_typed` (`KilnNativeArg`), `native_state` (`KILN_NATIVE_STATE_*`) and `native_attach_state`
-(`KILN_NATIVE_ATTACH_*`). `release_owner` must be called on the tick thread (else `KILN_ERR_WRONG_THREAD`): it closes
+`native_declare_typed` (`KilnNativeArg`), `native_state` (`KILN_NATIVE_STATE_*`), `native_attach_state`
+(`KILN_NATIVE_ATTACH_*`), `native_ecs_read` / `native_ecs_write` (the ECS bridge inside a call; state in
+`KilnNativeCounters.ecs_state`, `KILN_NATIVE_ECS_*`). `release_owner` must be called on the tick thread (else `KILN_ERR_WRONG_THREAD`): it closes
 the owner's natives and attachments to new calls first, waits at most 2 ms for calls inside, and finishes the rest in
 a later Pre (`owner N retired K step(s) late: its last native call left`). At the server world's stop it waits up to
 the same bound for calls inside (`the server world stops with no Kiln native call inside`).

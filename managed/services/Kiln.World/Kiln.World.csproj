@@ -19,6 +19,8 @@
     <InternalsVisibleTo Include="Kiln.Contract.Tests" />
     <!-- dev.28 06a: a program wrap's writes raise ComponentWrittenEvent (ComponentWrittenEvent.FromWrap) -->
     <InternalsVisibleTo Include="Kiln.Systems" />
+    <!-- NativeContext's writes of other entities raise the same ComponentWrittenEvent (06c S5) -->
+    <InternalsVisibleTo Include="Kiln.Abilities" />
     <InternalsVisibleTo Include="Kiln.Systems.Tests" />
   </ItemGroup>
 </Project>

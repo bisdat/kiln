@@ -415,6 +415,15 @@ static void gates() {
     }
 }
 
+// The ECS bridge's self-check (chapter 06c 9.1): counts first, then the registry qword at a real slot.
+static void ecs() {
+    CHECK(ecs_verdict(true, 34, 0x1000, 0x1000) == KILN_NATIVE_ECS_REASON_NONE);
+    CHECK(ecs_verdict(false, 34, 0x1000, 0x1000) == KILN_NATIVE_ECS_REASON_COUNTS);
+    CHECK(ecs_verdict(true, 34, 0x2000, 0x1000) == KILN_NATIVE_ECS_REASON_REGISTRY);
+    CHECK(ecs_verdict(true, -1, 0x1000, 0x1000) == KILN_NATIVE_ECS_REASON_REGISTRY);  // no impact::ImpactSystem in the view
+    CHECK(ecs_verdict(true, 34, 0, 0) == KILN_NATIVE_ECS_REASON_REGISTRY);            // no registry captured
+}
+
 static void watchdog() {
     InsideTable<1> owned;
     char mutable_name[] = "mod.Original";
@@ -441,6 +450,7 @@ static void watchdog() {
 int main() {
     names();
     gates();
+    ecs();
     watchdog();
     typed();
     natives_json();

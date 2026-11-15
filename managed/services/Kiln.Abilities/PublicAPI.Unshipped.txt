@@ -55,9 +55,13 @@ Kiln.NativeAttachmentState.Pending = 1 -> Kiln.NativeAttachmentState
 Kiln.NativeContext
 Kiln.NativeContext.ImpactId.get -> uint
 Kiln.NativeContext.NativeContext() -> void
+Kiln.NativeContext.Post(System.Action! action) -> void
 Kiln.NativeContext.Program.get -> uint
+Kiln.NativeContext.Root.get -> Kiln.EntityId
 Kiln.NativeContext.Self.get -> Kiln.EntityId
 Kiln.NativeContext.Site.get -> uint
+Kiln.NativeContext.TryRead<T>(Kiln.EntityId entity, out T value) -> bool
+Kiln.NativeContext.TryWrite<T>(Kiln.EntityId entity, in T value) -> bool
 Kiln.NativeParameter
 Kiln.NativeParameter.<Clone>$() -> Kiln.NativeParameter!
 Kiln.NativeParameter.Arg.get -> Kiln.NativeArg
@@ -110,8 +114,8 @@ Kiln.Optional<T>.Value.get -> T
 Kiln.RawAttribute
 Kiln.RawAttribute.RawAttribute() -> void
 [KILNX001]static Kiln.Abilities.Natives.LabCounters.get -> (ulong SyncCalls, ulong SyncFaults, ulong SyncSlow, ulong DeadCalls, uint Inflight, ulong AttachEntered, ulong AttachSkipped, ulong TypedRefused, ulong TypedUnconnected)?
-[KILNX001]static Kiln.Abilities.Natives.LabRetire.get -> (ulong Deferred, uint PendingCore, int PendingManaged, ulong Watchdog)?
 [KILNX001]static Kiln.Abilities.Natives.LabLockBypass.get -> ulong?
+[KILNX001]static Kiln.Abilities.Natives.LabRetire.get -> (ulong Deferred, uint PendingCore, int PendingManaged, ulong Watchdog)?
 override Kiln.AttachResult.Equals(object? obj) -> bool
 override Kiln.AttachResult.GetHashCode() -> int
 override Kiln.AttachResult.ToString() -> string!

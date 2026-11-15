@@ -86,6 +86,44 @@ public readonly ref struct NativeContext
 
     /// <summary>The ECALL's call-site id.</summary>
     public uint Site => _call.Site;
+
+    /// <summary>The instance's root entity (whose cast, hit or spawn it belongs to): the root of its
+    /// <c>ImpactHierarchy</c>, read through impact_simulation's own accessor (since 0.2.0-dev.29). None when
+    /// <c>abilities.natives.ecs</c> is off in this world or the instance has none.</summary>
+    public EntityId Root
+    {
+        get
+        {
+            Span<byte> h = stackalloc byte[8];
+            return NativeEcs.Read(_call, "ImpactHierarchy"u8, Self, h) ? new EntityId(System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(h[4..])) : EntityId.None;
+        }
+    }
+
+    /// <summary>Reads component <typeparamref name="T"/> of another entity (or the instance's own) through
+    /// impact_simulation's own accessors (its other_read and other_write lists, the job's storage), inside this call
+    /// (since 0.2.0-dev.29). False, with no access, for a type the program does not declare for other entities, an
+    /// entity without it, or <c>abilities.natives.ecs</c> off in this world.</summary>
+    [AnyThread]
+    public bool TryRead<T>(EntityId entity, out T value) where T : unmanaged, IGameComponent<T> => NativeEcs.TryRead(_call, entity, out value);
+
+    /// <summary>Writes component <typeparamref name="T"/> of another entity through impact_simulation's own other_write
+    /// accessor with the job's tracker, inside this call, so the save and replication see it as the game's own write;
+    /// an attribute (<c>Health</c>, <c>Mana</c>, ...: an <see cref="IGameAttribute{TSelf, TValue}"/>) then runs the
+    /// game's formulas (read it, change its values, write it back). A change raises one
+    /// <c>ComponentWrittenEvent</c> per entity and component per step on the tick thread, its <c>Writer</c>
+    /// <c>"&lt;modid&gt;/native:&lt;name&gt;"</c>. Since 0.2.0-dev.29. False, with no access, for a type not in the
+    /// program's other_write list, an entity without it, or <c>abilities.natives.ecs</c> off in this world.</summary>
+    [AnyThread]
+    public bool TryWrite<T>(EntityId entity, in T value) where T : unmanaged, IGameComponent<T> => NativeEcs.TryWrite(_call, entity, in value);
+
+    /// <summary>Runs <paramref name="action"/> on the tick thread before the next step's Pre handlers, as the native's
+    /// mod (its <c>Context.Scheduler.Post</c>); dropped when the mod unloads first. Since 0.2.0-dev.29.</summary>
+    [AnyThread]
+    public void Post(Action action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        if (_call.Owner is { } mod) mod.Scheduler.Post(action);
+    }
 }
 
 /// <summary>One parameter of an <see cref="ImpactNativeAttribute">[ImpactNative]</see> native (<see cref="NativeRef"/>):

@@ -346,4 +346,14 @@ private:
     std::unordered_map<KilnOwner, std::unique_ptr<OwnerGate>> map_;
 };
 
+// ------------------------------------------------------------------------------------------- the ECS bridge ----
+// since 0.2.0-dev.29 (chapter 06c 9.1): the first Kiln native call of each world checks the iterator it holds against
+// kiln.world's view of impact_simulation: the job's group counts are the view's (counts_ok), and the qword at
+// impact::ImpactSystem's computed slot is the native registry the RegisterNative hook captured. A reason, or NONE.
+inline uint32_t ecs_verdict(bool counts_ok, int32_t system_slot, uint64_t at_slot, uint64_t registry) {
+    if (!counts_ok) return KILN_NATIVE_ECS_REASON_COUNTS;
+    if (system_slot < 1 || !registry || at_slot != registry) return KILN_NATIVE_ECS_REASON_REGISTRY;
+    return KILN_NATIVE_ECS_REASON_NONE;
+}
+
 }  // namespace kab

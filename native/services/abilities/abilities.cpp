@@ -35,6 +35,10 @@
 #include "services/kiln_assets.h"
 #include "services/kiln_profile.h"
 #include "services/kiln_spawn.h"
+// kiln_world.h and kiln_abilities.h both name a struct KilnProgramInfo: kiln.world's is another name in this file
+#define KilnProgramInfo KilnWorldProgramInfo
+#include "services/kiln_world.h"
+#undef KilnProgramInfo
 #include "verify.h"
 
 using namespace kab;
@@ -47,7 +51,8 @@ static_assert(offsetof(KilnAbilitiesApi, sequence_play) == 232 && offsetof(KilnA
               offsetof(KilnAbilitiesApi, native_counters) == 248 && offsetof(KilnAbilitiesApi, native_attach) == 256 &&
               offsetof(KilnAbilitiesApi, native_detach) == 264 && offsetof(KilnAbilitiesApi, native_declare_typed) == 272 &&
               offsetof(KilnAbilitiesApi, native_state) == 280 && offsetof(KilnAbilitiesApi, native_attach_state) == 288 &&
-              sizeof(KilnAbilitiesApi) == 296 && sizeof(KilnNativeCounters) == 120 && sizeof(KilnNativeFilter) == 16 &&
+              offsetof(KilnAbilitiesApi, native_ecs_read) == 296 && offsetof(KilnAbilitiesApi, native_ecs_write) == 304 &&
+              sizeof(KilnAbilitiesApi) == 312 && sizeof(KilnNativeCounters) == 128 && sizeof(KilnNativeFilter) == 16 &&
               sizeof(KilnNativeArg) == 8);
 
 namespace {
@@ -636,7 +641,10 @@ void dispatch_sync(Slot& s, NativeResult* out, ArgSlice* args, NativeCtx* ctx) {
     if (out->error == kErrInternal) c_sync_faults.fetch_add(1, std::memory_order_relaxed);  // fn caught its own fault
 }
 
+void ecs_first(const NativeCtx* ctx);  // the ECS bridge (below)
+
 void dispatch_inner(int slot, NativeResult* out, ArgSlice* args, NativeCtx* ctx) {
+    ecs_first(ctx);  // once per world: one load and a compare after that
     Slot& s = g_slots[slot];
     switch (s.kind.load(std::memory_order_acquire)) {
         case SLOT_WRAPPED: dispatch_wrapped(s, out, args, ctx); return;
@@ -946,6 +954,146 @@ void lab_unpin() {
         logw("kiln.abilities: LAB (kiln/control/impact.unpin): the world's pin byte was %u and is cleared: CHUNKED programs, "
              "impact_simulation among them, can run on the game's workers in the parallel path", v);
     }
+}
+
+// ---- the ECS bridge (since 0.2.0-dev.29, chapter 06c 9.1): NativeContext reads and writes other entities ----
+// kiln.world's foreign view of impact_simulation (the wraps' view algorithm over its descriptor), made in the first Pre
+// that has the server world's directory, once per world session. A Kiln native's call holds that program's iterator
+// (NativeCtx+0x30): the first call of each view checks it (ecs_verdict); a mismatch turns the bridge off for that world
+// (native_ecs_read/write answer KILN_ERR_UNAVAILABLE; the natives themselves still run).
+const KilnWorldApi* g_world_api = nullptr;
+struct EcsView {
+    KilnForeignLayout l{};
+    int32_t system_slot = -1;
+};
+std::atomic<const EcsView*> g_ecs{nullptr};          // the live world's view (old ones are kept: one per world session)
+std::atomic<const EcsView*> g_ecs_checked{nullptr};  // the view the first call checked
+std::atomic<uint32_t> g_ecs_state{KILN_NATIVE_ECS_PENDING}, g_ecs_reason{KILN_NATIVE_ECS_REASON_NONE};
+uint64_t g_ecs_tried = UINT64_MAX;  // tick thread: the session a view was asked for
+constexpr const char* kImpactSimulation = "impact_simulation";
+
+bool world_foreign() {
+    return g_world_api && g_world_api->header.size >= offsetof(KilnWorldApi, foreign_attr_changed) + sizeof(void*);
+}
+
+void ecs_off(uint32_t reason) {
+    g_ecs_reason.store(reason);
+    g_ecs_state.store(KILN_NATIVE_ECS_OFF);
+}
+
+// Pre (tick thread): the view of this world session's impact_simulation.
+void ecs_pre() {
+    if (!world_foreign()) {
+        if (g_ecs_state.load() == KILN_NATIVE_ECS_PENDING && g_api->server_world()) ecs_off(KILN_NATIVE_ECS_REASON_NO_WORLD_API);
+        return;
+    }
+    const uint64_t session = g_world_api->game_world_session(KILN_WORLD_SERVER);
+    if (session == g_ecs_tried) return;
+    if (g_world_api->game_program_find(KILN_WORLD_SERVER, KilnStr{kImpactSimulation, std::strlen(kImpactSimulation)}) < 0) return;
+    g_ecs_tried = session;
+    auto* v = new EcsView{};
+    v->l.size = sizeof v->l;
+    const KilnResult rc = g_world_api->foreign_layout(KILN_WORLD_SERVER, KilnStr{kImpactSimulation, std::strlen(kImpactSimulation)}, &v->l);
+    if (rc != KILN_OK) {
+        logw("kiln.abilities: NativeContext's reads and writes of other entities are off in this world: kiln.world has no "
+             "view of impact_simulation (%s)", rc == KILN_ERR_UNAVAILABLE ? v->l.why : "not found");
+        delete v;
+        g_ecs.store(nullptr);
+        ecs_off(KILN_NATIVE_ECS_REASON_LAYOUT);
+        return;
+    }
+    const char* sys = "impact::ImpactSystem";
+    v->system_slot = g_world_api->foreign_slot(&v->l, KILN_GAME_LIST_SYS_WRITE, KilnStr{sys, std::strlen(sys)});
+    const char* attr = "impact::AttributeRegistry";
+    const int32_t attr_slot = g_world_api->foreign_slot(&v->l, KILN_GAME_LIST_SYS_READ, KilnStr{attr, std::strlen(attr)});
+    const uint32_t* c = v->l.counts;
+    logi("kiln.abilities: impact_simulation's view (kiln.world, session %llu): ctx + tpl %u, read %u, write %u, singletons "
+         "%u, other_tpl %u, other %u, events %u/%u (%u bytes); impact::ImpactSystem at qword %d (+0x%x), "
+         "impact::AttributeRegistry at qword %d",
+         static_cast<unsigned long long>(session), c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], v->l.iter_size,
+         v->system_slot, v->system_slot > 0 ? v->system_slot * 8 : 0, attr_slot);
+    g_ecs_state.store(KILN_NATIVE_ECS_PENDING);
+    g_ecs_reason.store(KILN_NATIVE_ECS_REASON_NONE);
+    g_ecs.store(v, std::memory_order_release);
+}
+
+// The first Kiln native call of each view (any thread inside impact_simulation): the self-check.
+void ecs_first(const NativeCtx* ctx) {
+    const EcsView* v = g_ecs.load(std::memory_order_acquire);
+    if (!v || g_ecs_checked.load(std::memory_order_acquire) == v || g_ecs_checked.exchange(v) == v) return;
+    const auto* iter = reinterpret_cast<const uint64_t*>(ctx ? ctx->iter_ctx : 0);
+    uint32_t job[8] = {};
+    const bool counts_ok = iter && g_world_api->foreign_check(&v->l, iter, job) == KILN_OK;
+    uint64_t at = 0;
+    if (iter && v->system_slot > 0) read_bytes(iter + v->system_slot, &at, 8);
+    // the registry Kiln's natives went into at the world's setup (one of those the RegisterNative hook captured)
+    const auto registry = static_cast<uint64_t>(g_native_registry.load(std::memory_order_relaxed));
+    const uint32_t reason = ecs_verdict(counts_ok, v->system_slot, at, registry);
+    logi("kiln.abilities: NativeContext self-check, first native call in this world: the job's group counts are %s the "
+         "view's (tpl %u, read %u, write %u, singletons %u, other_tpl %u, other %u, events %u/%u)",
+         counts_ok ? "" : "NOT", job[0], job[1], job[2], job[3], job[4], job[5], job[6], job[7]);
+    logi("kiln.abilities: NativeContext self-check: the iterator's qword %d (+0x%x) is 0x%llx, the captured native registry "
+         "0x%llx: %s", v->system_slot, v->system_slot > 0 ? v->system_slot * 8 : 0, static_cast<unsigned long long>(at),
+         static_cast<unsigned long long>(registry), at == registry && registry ? "the same" : "DIFFERENT");
+    if (reason == KILN_NATIVE_ECS_REASON_NONE) {
+        g_ecs_state.store(KILN_NATIVE_ECS_ON);
+        logi("kiln.abilities: NativeContext's reads and writes of other entities are on in this world (abilities.natives.ecs)");
+    } else {
+        ecs_off(reason);
+        logw("kiln.abilities: NativeContext's reads and writes of other entities are off in this world: %s",
+             reason == KILN_NATIVE_ECS_REASON_COUNTS ? "the job's group counts are not kiln.world's view"
+                                                     : "the iterator's impact::ImpactSystem qword is not the captured registry");
+    }
+}
+
+// The call's iterator and the view, when the bridge is on for this world.
+const EcsView* ecs_for(const KilnNativeCall* call, const uint64_t** iter) {
+    if (!call || g_ecs_state.load(std::memory_order_acquire) != KILN_NATIVE_ECS_ON) return nullptr;
+    const EcsView* v = g_ecs.load(std::memory_order_acquire);
+    const auto* ctx = static_cast<const NativeCtx*>(call->engine[2]);
+    if (!v || !ctx || !ctx->iter_ctx || g_ecs_checked.load(std::memory_order_acquire) != v) return nullptr;
+    *iter = reinterpret_cast<const uint64_t*>(ctx->iter_ctx);
+    return v;
+}
+
+KilnResult KILN_CALL t_native_ecs_read(const KilnNativeCall* call, KilnStr component, uint32_t entity, void* out, uint32_t size) {
+    if (!out || !size) return KILN_ERR_INVALID_ARGUMENT;
+    const uint64_t* iter = nullptr;
+    const EcsView* v = ecs_for(call, &iter);
+    if (!v) return KILN_ERR_UNAVAILABLE;
+    uint32_t have = 0;
+    KilnResult rc = KILN_OK;
+    const void* p = g_world_api->foreign_read(&v->l, iter, component, entity, &have, &rc);
+    if (rc != KILN_OK) return rc;
+    if (!p) return KILN_ERR_NOT_FOUND;
+    if (size > have) return KILN_ERR_INVALID_ARGUMENT;  // the whole component, or its first `size` bytes
+    return read_bytes(p, out, size) ? KILN_OK : KILN_ERR_INTERNAL;
+}
+
+KilnResult KILN_CALL t_native_ecs_write(KilnNativeCall* call, KilnStr component, uint32_t entity, const void* value,
+                                        uint32_t size, uint32_t flags, void* before, void* after) {
+    if (!value || !size) return KILN_ERR_INVALID_ARGUMENT;
+    const uint64_t* iter = nullptr;
+    const EcsView* v = ecs_for(call, &iter);
+    if (!v) return KILN_ERR_UNAVAILABLE;
+    // the size first, through a read: a write marks the component written before it can be refused
+    uint32_t have = 0;
+    KilnResult rc = KILN_OK;
+    const void* r = g_world_api->foreign_read(&v->l, iter, component, entity, &have, &rc);
+    if (rc != KILN_OK) return rc;
+    if (!r) return KILN_ERR_NOT_FOUND;
+    if (have != size) return KILN_ERR_INVALID_ARGUMENT;
+    void* p = g_world_api->foreign_write(&v->l, iter, component, entity, &have, &rc);
+    if (rc != KILN_OK) return rc;
+    if (!p || have != size) return KILN_ERR_NOT_FOUND;
+    if (before && !read_bytes(p, before, size)) return KILN_ERR_INTERNAL;
+    if (!write_bytes(p, value, size)) return KILN_ERR_INTERNAL;
+    if (flags & KILN_NATIVE_ECS_ATTRIBUTE) {
+        const KilnResult f = g_world_api->foreign_attr_changed(&v->l, iter, p);
+        if (f != KILN_OK && f != KILN_ERR_INVALID_ARGUMENT) return f;
+    }
+    if (after && !read_bytes(p, after, size)) return KILN_ERR_INTERNAL;
+    return KILN_OK;
 }
 
 // ---- the watchdog (review P1) ----
@@ -1608,6 +1756,7 @@ void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
     free_retired();
     lab_unpin();
     lab_lockhold();
+    ecs_pre();
     // review P1: a program registered after the readiness check (a mod's, at any time) gets its attachments checked
     if (g_programs_ready.load() && g_programs_added.exchange(false, std::memory_order_acq_rel))
         if (const uintptr_t preg = g_prog_registry.load()) check_attachments(preg);
@@ -1723,6 +1872,9 @@ void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
                  "they leave", n);
         else logi("kiln.abilities: the server world stops with no Kiln native call inside");
         holds_clear();
+        g_ecs.store(nullptr, std::memory_order_release);  // the next world gets a view of its own
+        g_ecs_state.store(KILN_NATIVE_ECS_PENDING);
+        g_ecs_reason.store(KILN_NATIVE_ECS_REASON_NONE);
         std::lock_guard lock(g_mu);
         g_cap_registry = 0;
         g_held.clear();
@@ -2388,6 +2540,8 @@ KilnResult KILN_CALL t_native_counters(KilnNativeCounters* out) {
     c.retire_deferred = c_retire_deferred.load();
     c.watchdog_reports = c_watchdog_reports.load();
     c.lock_bypass = c_lock_bypass.load();
+    c.ecs_state = g_ecs_state.load();
+    c.ecs_reason = g_ecs_reason.load();
     {
         std::lock_guard lock(g_mu);
         c.retire_pending = static_cast<uint32_t>(g_deferred_owners.size());
@@ -2727,6 +2881,8 @@ const KilnAbilitiesApi kTable = {
     &t_native_declare_typed,
     &t_native_state,
     &t_native_attach_state,
+    &t_native_ecs_read,
+    &t_native_ecs_write,
 };
 
 // ------------------------------------------------------------------------------------------- boot --------------
@@ -2837,6 +2993,7 @@ void load_mod_natives() {
 }
 
 void KILN_CALL on_ready(void*) {
+    g_world_api = static_cast<const KilnWorldApi*>(g_api->service(KilnStr{KILN_WORLD_SERVICE, sizeof KILN_WORLD_SERVICE - 1}, 4));
     g_spawn = static_cast<const KilnSpawnApi*>(g_api->service(KilnStr{KILN_SPAWN_SERVICE, sizeof KILN_SPAWN_SERVICE - 1}, 1));
     g_assets = static_cast<const KilnAssetsApi*>(g_api->service(KilnStr{KILN_ASSETS_SERVICE, sizeof KILN_ASSETS_SERVICE - 1}, 1));
     load_mod_natives();

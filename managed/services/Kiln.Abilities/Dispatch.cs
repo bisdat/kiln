@@ -169,6 +169,7 @@ internal static unsafe class AbilitiesDispatch
             DrainDetaches();
             FinishDeferred();
             CheckSetupRefusals();
+            NativeWrites.Flush();
         }
         catch (Exception e)
         {

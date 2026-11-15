@@ -68,6 +68,29 @@ public static class GenNatives
         throw new InvalidOperationException("natives-gen-test: Throws throws on purpose");
     }
 
+    // S5: the ECS bridge. Hurt(target): Health of target through impact_simulation's own accessors, -5 then -7 in one
+    // call (one ComponentWrittenEvent), the instance's Root, and a type the program does not declare (no access)
+    internal static int HurtCalls, HurtBefore = -1;
+    internal static bool HurtRead, HurtWrite1, HurtWrite2, UndeclaredRead = true;
+    internal static EntityId HurtRoot;
+    internal static int HurtThread;
+    [ImpactNative("Hurt")]
+    public static bool Hurt(in NativeContext ctx, EntityId target)
+    {
+        HurtCalls++;
+        HurtThread = Environment.CurrentManagedThreadId;
+        HurtRoot = ctx.Root;
+        UndeclaredRead = ctx.TryRead<Ecs.ScaleComponent>(target, out _);
+        HurtRead = ctx.TryRead<Ecs.Health>(target, out var h);
+        if (!HurtRead) return false;
+        HurtBefore = h.Values[0];
+        h.Values[0] = HurtBefore - 5;
+        HurtWrite1 = ctx.TryWrite(target, in h);
+        h.Values[0] = HurtBefore - 7;
+        HurtWrite2 = ctx.TryWrite(target, in h);
+        return true;
+    }
+
     [ImpactNative("Check")]
     public static bool Check(int s, float f, bool b, TimeSpan t, EntityId e, Vector3 v)
     {
@@ -229,6 +252,8 @@ public sealed class NativesGenTestMod : Mod
                 $"a generated method that throws: the call answers 0x11 (no signal after it), the TimeSpan it changed is kept ({tv} ns), " +
                 $"the exception is in kiln.log under the mod ({(logged ? "found" : "NOT found")}); instance flags {inst?.Flags}");
 
+            await TestEcs(P(18));
+
             // round trip: Round reads the initial values and writes new ones, Check reads them back
             uint[] push = [11, 0xFFFF0005, 11, 0xFFFF0004, 11, 0xFFFF0003, 11, 0xFFFF0002, 11, 0xFFFF0001, 11, 0xFFFF0000];
             var roundGuid = new Guid("06c0a5e0-0000-4000-8000-000000000003");
@@ -255,6 +280,86 @@ public sealed class NativesGenTestMod : Mod
             Log.Info($"natives-gen-test: INFO summary: {_pass} PASS, {_fail} FAIL");
         }
     }
+
+    // S5 rows: the self-check, TryRead/TryWrite<Health> of a Vukah seen by World.TryRead, an undeclared type, one event
+    // per entity and component per step on the tick thread with Writer "<modid>/native:<name>"; across a restart
+    // (data/ecs-restart: written by the first run, checked by the next) the written Health in the save.
+    private readonly List<ComponentWrittenEvent> _written = new();
+    [Subscribe] private void OnWritten(ComponentWrittenEvent e) => _written.Add(e);
+
+    private async Task TestEcs(WorldPosition p)
+    {
+        var row = Capabilities.Get("abilities.natives.ecs");
+        Check(row.State == CapabilityState.Available && LogHas("NativeContext's reads and writes of other entities are on in this world"),
+            $"the self-check of the first native call: abilities.natives.ecs {row.State} {row.ReasonText} (kiln.log: the view, the counts, the registry)");
+        var restartFile = Path.Combine(Context.DataDirectory, "ecs-restart");
+        if (File.Exists(restartFile))
+        {
+            // "<template> <x> <y> <z> <health>": the saved entity the previous run's native wrote, found again by template and place
+            var parts = File.ReadAllText(restartFile).Split(' ');
+            if (parts.Length != 5) { File.Delete(restartFile); parts = []; }
+        }
+        if (File.Exists(restartFile))
+        {
+            var parts = File.ReadAllText(restartFile).Split(' ');
+            var at = new WorldPosition(double.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture),
+                double.Parse(parts[2], System.Globalization.CultureInfo.InvariantCulture), double.Parse(parts[3], System.Globalization.CultureInfo.InvariantCulture));
+            var want = int.Parse(parts[4]);
+            var again = Spawn.FindByName(parts[0], at, 1.0, max: 4).FirstOrDefault(x => Spawn.Inspect(x)?.TemplateName == parts[0]);
+            var got = again.IsNone ? -1 : HealthOf(again);
+            Check(got == want, $"after a restart, the Health a native wrote through impact_simulation is in the save: {parts[0]} at {at} " +
+                $"{(again.IsNone ? "not found" : got.ToString())} (written {want})");
+            File.Delete(restartFile);
+        }
+        var vukah = await Spawn.Entity("Enemy_Vukah_Melee", p, 0, new SpawnOptions { Tag = "natives-gen-test" });  // not transient: saved
+        await Steps(10);
+        var start = HealthOf(vukah);
+        const uint hT = 0xFFFF0000;
+        var hurtGuid = new Guid("06c0a5e0-0000-4000-8000-000000000007");
+        Abilities.Programs.Register(Program(hurtGuid, [11, hT, 19, 0x06c0a571, Natives.Hurt.HashFor(Context.Info.Id), 27, 30],
+            [("Target::value", EntityIdType, 4, BitConverter.GetBytes(vukah.Value))]));
+        _written.Clear();
+        var calls0 = GenNatives.HurtCalls;
+        var e = await Abilities.RunProgram(hurtGuid, p with { X = p.X + 3 });
+        _spawned.Add(e);
+        await Steps(8);
+        var after = HealthOf(vukah);
+        Check(GenNatives.HurtCalls - calls0 == 1 && GenNatives.HurtRead && GenNatives.HurtWrite1 && GenNatives.HurtWrite2 &&
+              GenNatives.HurtBefore == start && after == start - 7,
+            $"TryWrite<Health> inside the native's call is seen by World.TryRead: {start} -> {after} (the call read {GenNatives.HurtBefore})");
+        Check(!GenNatives.UndeclaredRead, "TryRead of a type impact_simulation does not declare for other entities returns false with no access");
+        var mine = _written.Where(w => w.Entity == vukah && w.Component == "Health").ToList();
+        Check(mine.Count == 1 && mine[0].Writer == $"{Context.Info.Id}/native:{Context.Info.Id}.Hurt" && mine[0].Writers.Count == 1 &&
+              BitConverter.ToInt32(mine[0].Result.Before.Span[8..]) == start && BitConverter.ToInt32(mine[0].Result.After.Span[8..]) == start - 7,
+            $"one ComponentWrittenEvent per entity and component per step, on the tick thread: {mine.Count} event(s), writer " +
+            $"{mine.FirstOrDefault()?.Writer}, before {start}, after {start - 7}");
+        Info($"Root of the Hurt instance: {GenNatives.HurtRoot} (a program run by Abilities.RunProgram: its own entity or none)");
+        // a saved entity of the base with Health (the altar, a townsperson): written through a native for the next run
+        foreach (var name in new[] { "FlameAltar", "Townsfolk", "NPC_" })
+        {
+            var saved = Spawn.FindByName(name, max: 8).FirstOrDefault(x => HealthOf(x) > 7);
+            if (saved.IsNone || Spawn.Inspect(saved) is not { TemplateName: { } template } info) continue;
+            var before = HealthOf(saved);
+            var prog = new Guid("06c0a5e0-0000-4000-8000-000000000008");
+            Abilities.Programs.Register(Program(prog, [11, hT, 19, 0x06c0a581, Natives.Hurt.HashFor(Context.Info.Id), 27, 30],
+                [("Target::value", EntityIdType, 4, BitConverter.GetBytes(saved.Value))]));
+            _spawned.Add(await Abilities.RunProgram(prog, p with { Z = p.Z + 4 }));
+            await Steps(8);
+            var now = HealthOf(saved);
+            Info($"a saved {template} ({saved}) at {info.Position}: Health {before} -> {now} through the native; the next run reads it after the restart");
+            if (now == before - 7)
+            {
+                Directory.CreateDirectory(Context.DataDirectory);
+                var inv = System.Globalization.CultureInfo.InvariantCulture;
+                File.WriteAllText(restartFile, $"{template} {info.Position.X.ToString(inv)} {info.Position.Y.ToString(inv)} {info.Position.Z.ToString(inv)} {now}");
+            }
+            break;
+        }
+    }
+
+    private void Info(string what) => Log.Info($"natives-gen-test: INFO {what}");
+
+    private static int HealthOf(EntityId e) => World.TryRead<Ecs.Health>(e, "Health", out var h) ? h.Values[0] : -1;
 
     private bool LogHas(string text)
     {
