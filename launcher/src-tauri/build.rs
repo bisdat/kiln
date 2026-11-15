@@ -30,8 +30,20 @@ fn bake_channel() {
     let base = std::env::var("KILN_LAUNCHER_BASE_RELEASE").unwrap_or_default();
     if !base.is_empty() {
         let floor = semver::Version::parse(&base).expect("KILN_LAUNCHER_BASE_RELEASE must be a version");
-        let current = semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
-        assert!(floor.build.is_empty() && !floor.pre.as_str().contains("beta") && floor.cmp_precedence(&current).is_lt(), "base release must precede this beta");
+        // The version this build is made as: a release build passes it to Tauri as a config override
+        // (tools/launcher/build-linux.sh --version V, TAURI_CONFIG {"version": V}); the crate's own version is the
+        // tree's placeholder (0.2.0-dev), which sorts below every release.
+        println!("cargo:rerun-if-env-changed=TAURI_CONFIG");
+        let current = std::env::var("TAURI_CONFIG")
+            .ok()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .and_then(|c| c.get("version").and_then(|v| v.as_str()).map(str::to_owned))
+            .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_owned());
+        let current = semver::Version::parse(&current).unwrap_or_else(|e| panic!("this build's version {current:?} is not a version: {e}"));
+        assert!(
+            floor.build.is_empty() && !floor.pre.as_str().contains("beta") && floor.cmp_precedence(&current).is_lt(),
+            "KILN_LAUNCHER_BASE_RELEASE={base} must be a release that precedes this test build's version {current}"
+        );
     }
     println!("cargo:rustc-env=KILN_LAUNCHER_BUILD_BASE_RELEASE={base}");
     println!("cargo:rustc-env=KILN_LAUNCHER_BUILD_CHANNEL={channel}");
