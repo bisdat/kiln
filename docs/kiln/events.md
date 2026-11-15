@@ -67,6 +67,7 @@ Requested host change: call `ServiceTick.Run(tick)` at the start of `HostRuntime
 | `CommandExecutedEvent` | Kiln.Chat | after a command ran, failed to parse, failed or was canceled | - | - (`Result`, `ElapsedMs`) |
 | `PlayerJoinedEvent` / `PlayerLeftEvent` | Kiln.Players | start of the step after kiln.players saw it (same moment as `Players.Joined/Left`); players already in game when you subscribe raise nothing | - | - |
 | `TimeSetEvent` | Kiln.Time | right after `Time.Set` (any mod; `By` = mod id); not for in-game changes | - | - |
+| `HookRefusedEvent` | Kiln.Hooks | a typed hook was refused (`ModId`, `Symbol`, `Reason`: the function's code does not fit its descriptor on this build, or its symbol does not resolve); posted on the tick thread, queued for the next step when asked for on another thread, only while something subscribes | - | - |
 | `TimeSpeedChangedEvent` | Kiln.Time | right after `Time.SetSpeed` / `SetCycle` changed the held clock speed (`Before`, `After`, `By`); a change made inside its own dispatch waits for the next step | - | - |
 | `ImpactVariableChangedEvent` | Kiln.Abilities | right after `ImpactInstance.Write` (or `Set`) changed a live instance's variable; a change made inside its own dispatch waits for the next step and is dropped if the instance has ended by then | - | - |
 | `DayStartedEvent` / `NightStartedEvent` | Kiln.Time | the day/night phase flipped (also by a set or sleeping); sampled every 12 steps while someone listens | - | - |

@@ -221,6 +221,97 @@ state and never call into it again; do not wait and do not call game code. A cal
 already running on another thread is the service's own to guard. `unsubscribe_owner_retiring(handle)` may be called
 from inside the callback.
 
+## Typed hooks and calls: `detour_typed`, Kiln.Sigs (since 0.2.0-dev.29)
+A typed link hooks or calls a game function as a function: integer, pointer, float and double arguments in their
+Win64 positions (`rcx`/`xmm0` ... `r9`/`xmm3`, then the caller's stack), and the return in `rax`, `xmm0` or a hidden
+return buffer (`sret`). The shape comes from a descriptor in sigdb (`sig`, [../sigport.md](../sigport.md#descriptors-of-typed-hooks-sig-blocks)),
+which the core checks against the function's code when it loads: a descriptor that no longer fits turns
+`sig/<symbol>` off and refuses every typed hook of it, with a reason that names the argument. Capability rows:
+`hooks.typed` (the link kind) and one `sig/<symbol>` per described core symbol.
+
+**Native** (`kiln_hooks.h`, the "typed links" block): `detour_typed(owner, target, order, sig, fn, user, out)` with a
+`KilnTypedFn(KilnCallFrame*, void*)` handler that may change the frame's arguments, call `call_original_frame(frame)`
+once (the rest of the chain and the function; a second call does nothing), set the return fields, and return
+`KILN_TYPED_SKIP` (the function does not run) or `KILN_TYPED_CONTINUE` (when it did not call the original, the original
+runs after it). `call_with_frame(fn, frame, nstack)` is a direct call. A native mod that relies on a described
+signature checks `api->feature("sig/<symbol>")` first.
+
+**C#** (`KilnServices` `Hooks;Sigs`, advanced mods only): one generated class per descriptor,
+`Kiln.Sigs.<Area>.<Name>` (the area is the symbol's part before `/` in Pascal case; `Core` for a symbol without one).
+The core's ten are in Kiln.Sigs:
+
+| Class | Function | `Invoke` | What a caller of `Invoke` provides |
+|---|---|---|---|
+| `Kiln.Sigs.Items.GetItemVolume` | `OptS32 (const ItemInfo* item)` (sret) | any thread | an item from the static registry; null gives `{18, 1}` |
+| `Kiln.Sigs.Items.AttrFind` | `AttrRef (u32 attribute, ptr registry)` (sret) | tick thread | a live entity's attribute component; the pointer it returns lasts until the step ends |
+| `Kiln.Sigs.Items.AttrChanged` | `void (ptr component, ptr registry)` | hook only | |
+| `Kiln.Sigs.Time.SetTimeScale` | `void (Daytime*, f32 scale, s64 ecsNow)` | tick thread | the server world's Daytime and its now |
+| `Kiln.Sigs.Time.GetGameTime` | `s64 (Daytime*, s64 ecsNow)` | tick thread | the same |
+| `Kiln.Sigs.Abilities.RegisterNative` | `bool (ptr registry, u32 hash, ptr fn, ptr name, u8 argc)` | hook only | (world setup, before managed mods load: hook it from a native plugin) |
+| `Kiln.Sigs.World.ReadOther` | `ptr (ptr out, ptr storage, u16* accessor, u32 entity)` | hook only | |
+| `Kiln.Sigs.Core.GetComponent` | `void (ptr out, ptr world, u32 hash, u32 entity)` | tick thread | the live server world; the slice lasts until the step ends |
+| `Kiln.Sigs.Rules.QuatRotate` | `ptr (ptr out, ptr rotation, ptr vector)` | any thread | the caller's own values |
+| `Kiln.Sigs.Weather.SampleAt` | `WeatherSample (ptr weather, ptr at, s64 now)` (sret) | tick thread | the server's WeatherSystem |
+
+```csharp
+using Kiln.Sigs.Items;
+
+if (Capabilities.Is("hooks.typed") && Capabilities.Is(GetItemVolume.Capability))
+{
+    HookResult r = GetItemVolume.Detour((ref GetItemVolume.Call c) =>
+    {
+        c.CallOriginal();                                   // the game answers first
+        if (c.Item != 0 && c.Result.Has != 0) c.Result.Value *= 2;   // Result: a ref into the caller's buffer
+    });
+    if (!r.Ok) Log.Warn(r.Reason);                          // a game update changed the function
+    OptS32 v = GetItemVolume.Invoke(0);                     // a struct return comes back by value
+}
+```
+
+- **`Call`** (a `ref struct`, valid during the handler): one typed property per argument (a narrow integer is masked
+  to its type: the upper bytes of a `u8` on the stack are the caller's garbage), `Result` (a scalar: get and set; a
+  struct: a `ref`), `CallOriginal()`, `OriginalCalled`, `Skip()`. The result is zero when the first handler starts.
+  Without `CallOriginal` and `Skip`, the function runs after the handler with the arguments as it left them. `Skip`
+  ends the call with `Result` as the handler set it (fill an sret `Result` first); after `CallOriginal` it changes
+  nothing.
+- **`Detour(handler, priority)`** returns a `HookResult` (`Ok`, `Reason`, `Handle`): refused (`Ok` false, and a
+  `HookRefusedEvent` for whoever listens) when the descriptor does not fit the function on this build, its symbol does
+  not resolve, or no target slot is left. A null handler throws `ArgumentNullException`, a core without typed links
+  `KilnUnavailableException("hooks.typed")`, a mod that is not advanced `InvalidOperationException`. A link is
+  installed when the mod asks for it and removed with the handle or when the mod unloads; a re-install by the same mod
+  on the same function takes its old link slot again.
+- **`Invoke(...)`** calls the function through its hook chain, as the game's callers do. It never calls a function
+  whose row is off (`KilnUnavailableException` naming `sig/<symbol>`); a `tick` descriptor's `Invoke` throws off the
+  tick thread (also inside a hook handler on a worker). The caller owns every other precondition (the table above):
+  a fault inside the game's function is the game's.
+- **Faults**: a handler that throws is caught in Kiln's dispatcher (logged on the mod's log, three times per install):
+  when it had called the original, the caller gets the original's result (whatever the handler wrote since), else the
+  original runs with the arguments as the handler left them. A native handler that faults is disabled by the SEH guard
+  under the same rule. A fault while the original runs is the game's.
+- **Threads**: the handler runs on the thread that calls the function, game worker threads too; it runs as its mod
+  (gated calls work), and the mod's unload waits for handlers in flight (one second, then the unload goes on and the
+  mod's fragment stays until the last one returns).
+- **A mod's own descriptors**: a `sig` in an entry of the mod's fragment (`sigdb/server.json`, `sigdb/client.json`;
+  names `<modid>/...`) becomes a class `Kiln.Sigs.<ModId>.<Name>`, internal to the mod (Kiln.Sdk's generator; the root
+  namespace is `KilnSigsNamespace`). It may name a struct of its own fragment or one of Kiln.Sigs (`OptS32`,
+  `AttrRef`, `WeatherSample`). Load the fragment with `Symbols.LoadShipped()` before the first `Invoke`: its report
+  (kiln/logs/sigdb-&lt;modid&gt;.json) decides whether the descriptor fits; `"abi": "trust"` accepts a function whose code
+  the check cannot follow. The generator's warnings: KILN180 (a descriptor it cannot use), KILN181 (descriptors but no
+  Kiln.Hooks), KILN182 (an unreadable sigdb file).
+- **Cost per call** (lab, Wine, server f0d824be, 2026-11-14): a managed typed pass-through hook adds 47 ns to a call
+  of GetItemVolume (best of three rounds of 10^6 calls through `Invoke`: 158 ns without the hook, 205 ns with it).
+- **What it costs a player whose mods use none**: nothing is hooked and nothing runs per call. The core checks the
+  ten descriptors once when sigdb loads (a decode of up to 300 instructions each, from the exe file's bytes).
+- **What has run**: unit tests of both halves, and `mods/tests/hooks-typed-test` on a dedicated server (lab, Wine,
+  player-free): typed links from a native plugin at boot (RegisterNative, 113 calls, argc from the caller's stack equal
+  to the game's natives for all of them), managed hooks and direct calls of GetItemVolume and SetTimeScale, a managed
+  hook of AttrChanged on six worker threads with the lab parallel switch, a mod's own descriptor, and 20 hot reloads
+  with nothing leaked. The other seven classes are generated and compiled and their descriptors fit both exes, but
+  their hooks and calls have not run in a lab. The
+  native typed link once on the client exe (a research session). A typed hook of a managed mod in a real game client
+  has not run (guided check `06b-typed-hooks.client`), and no lab row had a player, so the effect of a changed
+  GetItemVolume on a real fuel transfer has not been seen.
+
 ## Threads
 
 - A handler runs on whatever thread the game calls the target on.

@@ -1,0 +1,10 @@
+{
+  "id": "hooks-typed-test",
+  "name": "typed hooks lab test",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "HooksTypedTest.dll",
+  "side": "server",
+  "advanced": true,
+  "description": "PASS/FAIL lines for typed hooks and calls (Kiln.Sigs, chapter 06b). The native part (native/build.sh, kiln-hooks-typed-test.dll in kiln/plugins) hooks RegisterNative and SetTimeScale at boot. A lab with kiln/control/systems.parallel and no player."
+}
