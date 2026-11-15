@@ -486,6 +486,7 @@ internal static partial class KilnApis
         "M:Kiln.Players.Diagnostics.ProbePosition(Kiln.EntityId)", // Players.Diagnostics.ProbePosition(EntityId): Services.RequireTickThread
         "M:Kiln.Players.Diagnostics.RawSlot(System.Int32)", // Players.Diagnostics.RawSlot(int): Services.RequireTickThread
         "M:Kiln.Players.Kick(Kiln.PlayerRef,System.String)", // Players.Kick(PlayerRef, string): Game.AssertTickThread
+        "M:Kiln.ProgramRegistration.Dispose", // ProgramRegistration.Dispose(): Services.RequireTickThread
         "M:Kiln.ProgramWrap.After(Kiln.SliceHandler,System.Nullable{System.Int32})", // ProgramWrap.After(SliceHandler, int?): via ProgramWrap.Add(WrapStage, SliceHandler?, Delegate?, int?)
         "M:Kiln.ProgramWrap.AfterEach(Kiln.EntityHandler,System.Nullable{System.Int32})", // ProgramWrap.AfterEach(EntityHandler, int?): via ProgramWrap.Add(WrapStage, SliceHandler?, Delegate?, int?)
         "M:Kiln.ProgramWrap.AfterEach(Kiln.EntityViewHandler,System.Nullable{System.Int32})", // ProgramWrap.AfterEach(EntityViewHandler, int?): via ProgramWrap.Add(WrapStage, SliceHandler?, Delegate?, int?)
@@ -630,6 +631,7 @@ internal static partial class KilnApis
         "M:Kiln.Spire.get_Unlocked", // Spire.Unlocked.get: via ProgressFact.Holds(EntityId)
         "M:Kiln.Survivor.RescuedFor(Kiln.Player)", // Survivor.RescuedFor(Player): via ProgressFact.Holds(EntityId)
         "M:Kiln.Survivor.get_Rescued", // Survivor.Rescued.get: via ProgressFact.Holds(EntityId)
+        "M:Kiln.Systems.Define``1(System.String,Kiln.ProgramOptions,Kiln.EntityHandler{``0})", // Systems.Define<T>(string, ProgramOptions, EntityHandler<T>): Services.RequireTickThread
         "M:Kiln.Systems.Wrap(System.String,Kiln.WrapOptions)", // Systems.Wrap(string, WrapOptions?): via Systems.Check(string, WrapOptions, string, out SystemsNative.Table*, out int)
         "M:Kiln.Systems.Wrap``1(Kiln.WrapOptions)", // Systems.Wrap<T>(WrapOptions?): via Systems.Check(string, WrapOptions, string, out SystemsNative.Table*, out int)
         "M:Kiln.Teleport.To(Kiln.EntityId,Kiln.WorldPosition,Kiln.TeleportOptions)", // Teleport.To(EntityId, WorldPosition, TeleportOptions?): via Teleport.Start(EntityId, WorldPosition, EntityId, TeleportOptions)

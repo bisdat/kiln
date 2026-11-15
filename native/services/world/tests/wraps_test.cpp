@@ -201,7 +201,7 @@ void fake_api() {
 void client_lifecycle_row() {
     KilnCapsApi caps{};
     caps.header = {sizeof caps, 1};
-    static uint32_t state, wraps_state = 99, typed_state = 99;
+    static uint32_t state, wraps_state = 99, typed_state = 99, define_state = 99;
     static std::string detail;
     caps.report = [](KilnOwner, KilnStr name, uint32_t value, uint32_t, KilnStr text) -> KilnResult {
         if (std::string_view(name.ptr, name.len) == "systems.wraps.client") {
@@ -210,6 +210,7 @@ void client_lifecycle_row() {
         }
         if (std::string_view(name.ptr, name.len) == "systems.wraps") wraps_state = value;
         if (std::string_view(name.ptr, name.len) == "systems.wraps.typed") typed_state = value;
+        if (std::string_view(name.ptr, name.len) == "systems.define") define_state = value;
         return KILN_OK;
     };
     static const KilnCapsApi* table;
@@ -238,6 +239,11 @@ void client_lifecycle_row() {
     wraps_pre(KILN_WORLD_CLIENT, 0);
     check(state == KILN_CAP_AVAILABLE, "client wrap row recovers when native SET leaves");
     check(typed_state == wraps_state, "the typed wrap row follows systems.wraps back");
+    wraps_define_row(false);
+    const uint32_t define_off = define_state;
+    wraps_define_row(true);
+    check(define_off == KILN_CAP_UNAVAILABLE && define_state == KILN_CAP_AVAILABLE,
+          "systems.define follows kiln.world's own programs (off when they did not hook, on when they did)");
     g_side = KILN_SIDE_SERVER;
     fake_api();
 }
@@ -267,6 +273,7 @@ void layout() {
     L.reg_templates = 0x20;
     L.storage_entities = 0x40;
     L.entity_layout = 0x18;
+    L.entity_id = 0x10;
     L.map = MapFields{0x08, 0x10, 0x28, 0x40, 0x54};
     F.write = true;
 }
@@ -1397,6 +1404,8 @@ void per_entity() {
     alignas(16) static uint8_t record[0x20]{};
     const auto lb = reinterpret_cast<uintptr_t>(layout_bits);
     std::memcpy(record + 0x18, &lb, 8);
+    const uint32_t id100 = 100;
+    std::memcpy(record + 0x10, &id100, 4);  // the record names its entity (CreateEntity writes it, both builds)
     static uint64_t bits[1] = {0};
     static uint32_t keys[8]{};
     static uint64_t values[8]{};
@@ -1458,6 +1467,8 @@ void per_entity() {
         alignas(16) static uint8_t record2[0x20]{};
         const auto lb2 = reinterpret_cast<uintptr_t>(layout2);
         std::memcpy(record2 + 0x18, &lb2, 8);
+        const uint32_t id101 = 101;
+        std::memcpy(record2 + 0x10, &id101, 4);
         const uint32_t at = entity_hash(101) & 7;
         keys[at] = 101;
         values[at] = reinterpret_cast<uintptr_t>(record2);
@@ -1485,6 +1496,110 @@ void per_entity() {
         run_slice(wentry(0), empty);
         check(g_seen4.archetype_rc == KILN_ERR_NOT_FOUND,
               "an empty slice remains a transient archetype miss");
+    }
+    {
+        // The game's own removal from the entity map (MapRemoveSlot: server 0x6848a0, client 0x9e8900, the same 74
+        // instructions; out/06a-program-wraps/client-static): a backward shift, no tombstone. Entries after the hole
+        // whose home slot allows it move back into it; only the last hole's bit is cleared, and its key and value stay
+        // behind as they were. Ported here line by line from the listing.
+        auto entity_hash = [](uint32_t k) {
+            uint32_t x = ((k >> 16) ^ k) * 0x45d9f3bu;
+            x = ((x >> 16) ^ x) * 0x45d9f3bu;
+            return (x >> 16) ^ x;
+        };
+        constexpr uint64_t cap = 8, mask = cap - 1;
+        static uint64_t mbits[1] = {0};
+        static uint32_t mkeys[cap]{};
+        static uint64_t mvalues[cap]{};
+        uint32_t mcount = 0;
+        auto occupied = [&](uint64_t s) { return ((mbits[s >> 6] >> (s & 63)) & 1) != 0; };
+        auto insert = [&](uint32_t id, uintptr_t rec) {  // the insert's slot probe: the key or the first empty slot
+            uint64_t s = entity_hash(id) & mask;
+            while (occupied(s) && mkeys[s] != id) s = (s + 1) & mask;
+            mbits[0] |= 1ull << s;
+            mkeys[s] = id;
+            mvalues[s] = rec;
+            ++mcount;
+            return s;
+        };
+        auto remove_slot = [&](uint64_t i) {
+            if (i >= cap || !mcount || !occupied(i)) return;
+            uint64_t hole = i, j = (i + 1) & mask;
+            while (occupied(j)) {
+                const uint64_t k = entity_hash(mkeys[j]) & mask;
+                const bool move = j > hole ? (k <= hole || k > j) : (j < i && k <= hole && k > j);
+                if (move) {
+                    mkeys[hole] = mkeys[j];
+                    mvalues[hole] = mvalues[j];
+                    hole = j;
+                }
+                j = (j + 1) & mask;
+            }
+            mbits[0] &= ~(1ull << hole);
+            --mcount;
+        };
+        // three entities whose ids hash to the last slot: their chain wraps around the end of the table (7, 0, 1)
+        uint32_t ids[3]{};
+        for (uint32_t id = 1000, n = 0; n < 3; ++id)
+            if ((entity_hash(id) & mask) == 7) ids[n++] = id;
+        alignas(16) static uint64_t lay[3][2] = {{1ull << 1, 0}, {1ull << 2, 0}, {1ull << 3, 0}};
+        alignas(16) static uint8_t recs[3][0x20]{};
+        uint64_t slots[3]{};
+        for (int n = 0; n < 3; ++n) {
+            const auto p = reinterpret_cast<uintptr_t>(lay[n]);
+            std::memcpy(recs[n] + 0x18, &p, 8);
+            std::memcpy(recs[n] + 0x10, &ids[n], 4);
+            slots[n] = insert(ids[n], reinterpret_cast<uintptr_t>(recs[n]));
+        }
+        alignas(16) static uint8_t st2[0x200]{};
+        st2[8] = KILN_WORLD_SERVER;
+        uint8_t* m2 = st2 + 0x40;
+        const auto pb = reinterpret_cast<uintptr_t>(mbits), pk = reinterpret_cast<uintptr_t>(mkeys),
+                   pv = reinterpret_cast<uintptr_t>(mvalues);
+        auto publish = [&] {
+            std::memcpy(m2 + 0x08, &pb, 8);
+            std::memcpy(m2 + 0x10, &cap, 8);
+            std::memcpy(m2 + 0x28, &pk, 8);
+            std::memcpy(m2 + 0x40, &pv, 8);
+            std::memcpy(m2 + 0x54, &mcount, 4);
+        };
+        publish();
+        uint8_t* s2 = st2;
+        auto archetype_of = [&](uint32_t first, KilnResult* rc) {
+            Job j(3);
+            j.ids[0] = first;
+            counts(j, 1, 1, 2);
+            std::memcpy(j.bytes, &s2, 8);
+            g_seen4 = Seen{};
+            run_slice(wentry(0), j);
+            *rc = g_seen4.archetype_rc;
+            return g_seen4.archetype;
+        };
+        KilnResult rc = KILN_OK;
+        check(slots[0] == 7 && slots[1] == 0 && slots[2] == 1 &&
+                  archetype_of(ids[2], &rc) == reinterpret_cast<uintptr_t>(lay[2]) && rc == KILN_OK,
+              "archetype: an entity at the end of a probe chain that wraps around the table is found");
+        remove_slot(slots[0]);  // the game destroys the chain's first entity
+        publish();
+        check(!occupied(1) && mkeys[1] == ids[2] && mvalues[1] == reinterpret_cast<uintptr_t>(recs[2]) &&
+                  mkeys[7] == ids[1] && mkeys[0] == ids[2] && mcount == 2,
+              "the game's removal shifts the chain back and leaves the last hole's stale key and record behind");
+        check(archetype_of(ids[2], &rc) == reinterpret_cast<uintptr_t>(lay[2]) && rc == KILN_OK &&
+                  archetype_of(ids[1], &rc) == reinterpret_cast<uintptr_t>(lay[1]) && rc == KILN_OK,
+              "archetype: after an earlier entity of its probe chain was removed, a later one is still found");
+        check(archetype_of(ids[0], &rc) == 0 && rc == KILN_ERR_UNAVAILABLE,
+              "archetype: a removed entity is a miss (its emptied slot stops the probe; a stale key there is not read)");
+        // a record the pool gave to another entity: the map's slot still names the id, the record names another one
+        const uint32_t other = ids[0] + 77777;
+        std::memcpy(recs[1] + 0x10, &other, 4);
+        check(archetype_of(ids[1], &rc) == 0 && rc == KILN_ERR_UNAVAILABLE,
+              "archetype: a record that names another entity is a miss, not that entity's archetype");
+        std::memcpy(recs[1] + 0x10, &ids[1], 4);
+        const int64_t saved = L.entity_id;
+        L.entity_id = -1;
+        check(archetype_of(ids[1], &rc) == 0 && rc == KILN_ERR_UNAVAILABLE,
+              "archetype: without the record's id offset the layout is not trusted");
+        L.entity_id = saved;
     }
     KilnGameSlice outside{};
     outside.size = sizeof outside;
@@ -1785,6 +1900,39 @@ void abi(const char* path) {
     check(prefix && fx.at("KilnWorldApi").at("size").get<size_t>() == offsetof(KilnWorldApi, game_program_find),
           "abi.json: v3 is a prefix of v4 and ends where v4's first member starts");
 }
+// A stage that reads kiln.world's directory (what the first typed bind on a worker does: game_program_list and
+// game_program_contract) while another thread holds the directory's lock: the read gives up after its bound instead of
+// waiting inside the game's step.
+std::atomic<int32_t> g_dir_read{-99};
+std::atomic<bool> g_dir_done{false};
+void KILN_CALL st_dir_read(KilnGameSlice*, void*) {
+    g_dir_read = game_program_list(KILN_WORLD_SERVER, idx("fuel_setup"), KILN_GAME_LIST_WRITE, nullptr, 0);
+    g_dir_done = true;
+}
+void directory_read_in_stage() {
+    const KilnHandle h = wrap(95, "fuel_setup", KILN_WRAP_BEFORE, 0, &st_dir_read, nullptr);
+    wpre();
+    Job job(2);
+    run_slice(wentry(0), job);
+    const int32_t unlocked = g_dir_read.load();
+    check(unlocked >= 0, "a directory read inside a stage: the program's write list when nobody holds the lock");
+    const uint64_t bypasses = game_programs_test_directory_bypasses();
+    g_dir_done = false;
+    g_dir_read = -99;
+    game_programs_test_hold_directory_lock(true);
+    std::thread worker([&] {
+        Job j(2);
+        run_slice(wentry(0), j);
+    });
+    bool done = false;
+    for (int i = 0; i < 500 && !(done = g_dir_done.load()); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    game_programs_test_hold_directory_lock(false);
+    worker.join();
+    check(done && g_dir_read.load() == -1 && game_programs_test_directory_bypasses() > bypasses,
+          "a directory read inside a stage gives up after its bound while the lock is held (no unbounded wait on a worker)");
+    game_program_unwrap(h);
+    wpre();
+}
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -1811,6 +1959,7 @@ int main(int argc, char** argv) {
     stopping_timeout();
     retirement_under_load();
     per_entity();
+    directory_read_in_stage();
     stress_steps();
     stress_overlap();
     if (argc > 1) abi(argv[1]);

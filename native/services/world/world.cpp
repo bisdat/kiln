@@ -125,6 +125,7 @@ bool resolve() {
     L.reg_templates = cst("world/registry.templates");
     L.storage_entities = cst("world/storage.entities");
     L.entity_layout = cst("world/entity.layout");
+    L.entity_id = cst("spawn/record.id");  // spawn's declaration (CreateEntity writes it at +0x10 on both builds)
     L.tp_applied = cst("world/teleport.applied");
     L.tp_find_ground = cst("world/teleport.find_ground");
     L.tp_target_entity = cst("world/teleport.target_entity");
@@ -378,6 +379,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     wraps_init();
     const bool hooked = programs_init();
     if (!hooked) F.programs = F.teleport = false;
+    wraps_define_row(F.programs);
     if (hooked) {
         // kiln.world's own program: no entity query, no access; pushes teleport records and proves the world runs.
         KilnProgramDesc d{};

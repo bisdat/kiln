@@ -35,6 +35,7 @@ const std::string* game_program_intern(std::string_view name);
 
 // ---- wraps.cpp ----
 void wraps_client_ready(bool tick, bool events);  // boot: enable only with lifecycle and both subscriptions
+void wraps_define_row(bool programs);              // boot: systems.define follows kiln.world's own programs
 void wraps_init();                                       // boot: the trampoline map, capability rows
 void wraps_pre(uint32_t kind, uintptr_t world);          // that world's thread, Pre, after its directory is current
 void wraps_world_event(const KilnWorldEvent* event);     // a world of a kind starts or stops
