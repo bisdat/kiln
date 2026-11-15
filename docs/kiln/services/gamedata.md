@@ -15,7 +15,8 @@ per language). Evidence and layouts: `docs/re/gamedata.md`; research:
 | C table | `native/core/abi/services/kiln_gamedata.h` (`kiln.gamedata` v1, published by kiln-content.dll) |
 | Native | `native/services/content/gamedata*.cpp` (in `kiln/services/kiln-content.dll`, sharing kiln.content's store) |
 | Managed | `managed/services/Kiln.Content/GameData.cs` (`Content.Templates`, `Arsenals`, `Sequences`, `Buffs`, `Perks`, `Skills`, `ItemData`, `item.Config(...)`, `Content.RegisterSection`) |
-| Test | `mods/tests/gamedata-test/` (PASS / FAIL lines) + `Observer/` (logs value changes) + `Clones/` (mod `gamedata-clones`: perk and buff clones; disable it for the placeholders) |
+| Capabilities | `kiln.gamedata` (the table), `gamedata.template_clones`, `gamedata.buff_lookup` (sigdb); since 0.2.0-dev.29 `gamedata.buff_budget`, `gamedata.buff_registration` (with the table) and `gamedata.expanded_buff_room` (the 4,096 room is reserved; a session row) |
+| Test | `mods/tests/gamedata-test/` (PASS / FAIL lines) + `Observer/` (logs value changes) + `Clones/` (mod `gamedata-clones`: perk and buff clones; disable it for the placeholders) + `Caps/` (mod `gamedata-caps`: 4,097 buff clones, the budget and result-bearing definitions); host: `native/services/content/tests/buffroom_test.cpp` |
 | Samples | `mods/samples/SpellTweaks/` (Fireball I and the double jump), `mods/samples/CreatureTweaks/` (every Vukah, an Elite Vukah clone), `mods/samples/NewItems/` (`content/frostbite.json`: a perk and a buff clone with texts, on Glacier) |
 
 ## Data packs
@@ -247,6 +248,33 @@ that needs its own permanent numbers and its own name is a **clone**.
   published at once, with a header of its own (about 100 KB at 4,096 clones): define many clones in a data pack or
   before the world loads. `status` JSON `clones.buffCopy` counts `headers`, `headerBytes`, `recordBytes` and
   `attaches`.
+- **Budget and answers** (since 0.2.0-dev.29; `Content.Buffs` only, any other registry throws `ArgumentException`):
+  - `Content.Buffs.GetBudget()` (any thread): a `CapacityQueryResult` for the room, process-wide: `Capacity` 4,096
+    (1,024 on the fallback, `Expanded` false), `GameUsed` 0 (the game's own buffs take no clone room), `KilnUsed` the
+    clones of loaded mods and of Kiln, `Reserved` the records nothing active uses (a mod that is gone, placeholders,
+    orphans, a record whose registration failed after it was taken). `Ok` is false with `Reason` `NotReady` until the
+    first world reserved the room. A change posts `CapacityChangedEvent` (`Quota` `gamedata.buff_budget`) at the next
+    step; it is measured every 25 steps while something listens, and after each `Define` below.
+  - `Content.Buffs.Define(clone, new DefinitionRegistrationOptions(timing))` (and the `JsonObject` overload; tick
+    thread): a `DefinitionRegistrationResult`. `RequireRegistered`: registered now (the record in Kiln's copy, the
+    world's BuffRegistry reading it, and the game's own getBuffType asked to find it where `gamedata.buff_lookup`
+    resolves; otherwise a warning says it was not checked), or refused with a `Code` and a `Reason` without taking
+    room: `NoWorld`, `NotReady` (game data or the world's BuffRegistry not loaded yet), `CapacityExceeded`,
+    `IdCollision` (the GUID's id is 0, a game buff's or another clone's), `NameTaken`, `UnknownBase`, `OwnerInactive`.
+    `AllowNextStart`: the same when it can register now; when only the moment is wrong it writes
+    `kiln/data/gamedata/pending/<mod>/<guid>.json` and answers `AcceptedNextStart` (no room taken; the definition is not
+    registered in this process); the next start defines it before the mods load ("stored for this start: defined"),
+    the world's load registers it ("... at this start: Registered") and the file goes. A known refusal (full, a taken
+    id or name) is never stored. A failure after the record was taken answers `Retained` with `SlotsConsumed` 1. The
+    same definition again answers the same, `SlotsConsumed` 1 once, and posts nothing; a change posts
+    `DefinitionRegistrationChangedEvent` at the next step. A malformed definition (also one with `"placeholder"`)
+    throws `ArgumentException` before anything changes.
+  - `Content.Buffs.GetRegistration(id)` (any thread): what became of a definition since, by its `RegistrationId`
+    (UUIDv5 of the mod, "buff", the GUID and the SHA-256 of the definition's text with sorted keys): `Registered`,
+    `Superseded` (a later definition of the GUID), `Retained` / `OwnerInactive` (the mod unloaded: its record stays,
+    reserved, until a loaded mod defines the GUID again), `NotFound` for an id this process does not know (receipts
+    live as long as the process; the ones stored for the next start come back with their file).
+  - Not posted: the events for a stored definition settled at the next start (its receipt answers it).
 - **Referencing them**:
   - an item's perk slot: code `Content.ItemData.Get(item).Set("perkReferences[2]", "Kiln_Sample_FrostbiteEdge")`
     (`perkIds[2]` follows: FNV-1a of the GUID); new items: kitbash `"perks": [null, null, "<perk clone GUID>"]`

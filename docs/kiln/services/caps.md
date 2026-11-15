@@ -311,3 +311,12 @@ The six `ui.values.*` / `ui.slots.inspect` rows below are client-only and requir
 | `net.admission` | service row, static | Kiln.Network, at its start | — | the admission controller decides joins in this process: a server role, kiln.net and `net.gate`. Services that register requirements (mandatory protocols, holds, vanilla conditions) check it; `wrong-side` on a client that only joins |
 | `net.disconnect` | sigdb feature (dedicated server), static | core (sigdb); Kiln.Network lowers it when kiln.net is missing | — | kiln.net can end a refused client the game's login failure cannot reach (not on the build, or it faulted) with the game's own session kick, which closes the connection about a second later ([network.md](../network.md#admission)). Off (a hosted world, or the symbol did not resolve): such a client stays connected but blocked, with no world data, until it leaves |
 | `items.tool_wear_debit` | sigdb feature | core (sigdb); kiln-items.dll lowers it (its guards, a hook fault: `faulted`) | — | `Items.SetToolWearPerDebit`, `ToolBlock.WearPerDebit`: a cost per game debit of an axe or pickaxe ([items.md](items.md#tool-wear-per-debit-since-020-dev28)); off on a build whose frames are not approved |
+
+## Rows added in dev.29
+Rows a dev.29 package adds, by service. None is held: a guided check records what a real game has not shown yet.
+
+| Row | Kind | Reported by | Held by | What it says |
+|---|---|---|---|---|
+| `gamedata.buff_budget` | service row, static | kiln.gamedata with its table (kiln-content.dll); Kiln.Content says `service-missing` / `service-older` without it | — | `Content.Buffs.GetBudget()` answers ([gamedata.md](gamedata.md)). Not off for a world that is not there: the budget answers `NotReady` then |
+| `gamedata.buff_registration` | service row, static | kiln.gamedata with its table; lowered (`faulted`) when no room at all could be reserved or the world's buff collection is not readable | — | `Content.Buffs.Define(clone, options)` and `GetRegistration` answer; guided check `17-buffs-client` for what a player sees |
+| `gamedata.expanded_buff_room` | service row, session | kiln.gamedata at the first world | — | pending until the first world loads; available when the room of 4,096 buff clones was reserved next to the game's collection; unavailable (`faulted`) with the text "… the room is 1024" on the fallback |

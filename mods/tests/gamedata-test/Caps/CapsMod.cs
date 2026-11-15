@@ -14,7 +14,12 @@ namespace GamedataCaps;
 /// data-pack document with CapsBuff_2000..4096 (one batch): 4,096 register, the 4,097th is refused "full (4096
 /// clones)". Then Caps_Collide, a GUID whose buff id is CapsBuff_0000's: refused, naming it. A hot reload of this mod
 /// (control "reload gamedata-caps") defines them all again: no new record, no new header. A restart: all of them again,
-/// in one header. PASS / FAIL lines "gamedata-caps: ...", then "gamedata-caps: done n PASS, m FAIL".
+/// in one header. S4 (result-bearing definitions): before the world, RequireRegistered is refused NoWorld and writes
+/// nothing, AllowNextStart stores CapsBuff_1999 for the next start (its receipt id goes into the marker); in the world
+/// the budget reads Capacity=4096 GameUsed=0, Define with RequireRegistered answers Registered with SlotsConsumed 1 and
+/// the same again changes nothing, a 4,097th is CapacityExceeded, an unknown receipt NotFound; the next start logs the
+/// stored definition Registered and its receipt says so. PASS / FAIL lines "gamedata-caps: ...", then
+/// "gamedata-caps: done n PASS, m FAIL".
 /// </summary>
 public sealed class CapsMod : Mod
 {
@@ -26,6 +31,9 @@ public sealed class CapsMod : Mod
 
     private int _pass, _fail;
     private bool _ran;
+    private int _capacityEvents, _registrationEvents;
+    private DefinitionRegistrationResult? _noWorld, _nextStart;
+    private Guid _storedReceipt;
 
     private static Guid GuidOf(int i)
     {
@@ -70,8 +78,22 @@ public sealed class CapsMod : Mod
     private void WriteMarker(string phase)
     {
         Directory.CreateDirectory(Context.DataDirectory);
-        File.WriteAllText(Marker(), $"{{\"phase\": \"{phase}\", \"pid\": {Environment.ProcessId}, \"start\": \"{ProcessStart()}\"}}");
+        File.WriteAllText(Marker(), $"{{\"phase\": \"{phase}\", \"pid\": {Environment.ProcessId}, \"start\": \"{ProcessStart()}\", " +
+                                    $"\"stored\": \"{_storedReceipt}\"}}");
     }
+
+    private Guid StoredReceipt()
+    {
+        if (!File.Exists(Marker())) return Guid.Empty;
+        using var doc = JsonDocument.Parse(File.ReadAllText(Marker()));
+        return doc.RootElement.TryGetProperty("stored", out var s) && Guid.TryParse(s.GetString(), out var g) ? g : Guid.Empty;
+    }
+
+    // kiln.gamedata's stored definitions: <kiln>/data/gamedata/pending/<mod> (this mod's data folder is <kiln>/data/<mod>)
+    private string Pending() => Path.Combine(Context.DataDirectory, "..", "gamedata", "pending", "gamedata-caps");
+
+    private static string Show(DefinitionRegistrationResult? r) =>
+        r is null ? "none" : $"Ok={r.Ok} State={r.State} Code={r.Code} SlotsConsumed={r.SlotsConsumed} Reason={r.Reason ?? "-"}";
 
     public override void OnLoad()
     {
@@ -84,6 +106,28 @@ public sealed class CapsMod : Mod
         if (ids.Count != Total || ids.Contains(0) || BuffId(First) != BuffId(Collide))
             Log.Info($"gamedata-caps: FAIL the fixture: {ids.Count} unique ids of {Total}, collide pair {BuffId(First):x8}/{BuffId(Collide):x8}");
         var phase = Phase();
+        _storedReceipt = phase == "restart" ? StoredReceipt() : Guid.Empty;
+        Events.On<CapacityChangedEvent>(e =>
+        {
+            if (e.Quota == "gamedata.buff_budget") _capacityEvents++;
+        });
+        Events.On<DefinitionRegistrationChangedEvent>(_ => _registrationEvents++);
+        if (phase == "fresh")
+        {
+            // no world yet: a definition that must register now is refused and stores nothing; one that may wait is stored
+            var pendingBefore = Directory.Exists(Pending()) ? Directory.GetFiles(Pending()).Length : 0;
+            _noWorld = Content.Buffs.Define(Clone(Before - 2), new DefinitionRegistrationOptions(DefinitionTiming.RequireRegistered));
+            var pendingMid = Directory.Exists(Pending()) ? Directory.GetFiles(Pending()).Length : 0;
+            _nextStart = Content.Buffs.Define(Clone(Before - 1), new DefinitionRegistrationOptions(DefinitionTiming.AllowNextStart));
+            var pendingAfter = Directory.Exists(Pending()) ? Directory.GetFiles(Pending()).Length : 0;
+            _storedReceipt = _nextStart.RegistrationId;
+            Log.Info($"gamedata-caps: before the world: RequireRegistered {Show(_noWorld)}; AllowNextStart {Show(_nextStart)}; files {pendingBefore} -> {pendingMid} -> {pendingAfter} in {Path.GetFullPath(Pending())}");
+            Check(!_noWorld.Ok && _noWorld.Code == DefinitionRefusalCode.NoWorld && _noWorld.SlotsConsumed == 0 && pendingMid == pendingBefore,
+                $"RequireRegistered with no world: {Show(_noWorld)}, no file written");
+            Check(_nextStart.Ok && _nextStart.State == DefinitionRegistrationState.AcceptedNextStart && _nextStart.SlotsConsumed == 0 &&
+                  pendingAfter == pendingBefore + 1,
+                $"AllowNextStart with no world: {Show(_nextStart)}, one file written");
+        }
         Log.Info($"gamedata-caps: OnLoad ({phase}): defining {Before} buff clones before the world");
         for (var i = 0; i < Before; i++) Content.Buffs.Define(Clone(i));
         Content.OnReady(_ =>
@@ -97,8 +141,8 @@ public sealed class CapsMod : Mod
             catch (Exception e)
             {
                 Check(false, $"aborted: {e}");
+                Log.Info($"gamedata-caps: done {_pass} PASS, {_fail} FAIL");
             }
-            Log.Info($"gamedata-caps: done {_pass} PASS, {_fail} FAIL");
         });
     }
 
@@ -116,6 +160,28 @@ public sealed class CapsMod : Mod
         var defs = Caps();
         var loaded = defs.Count(d => d.State == "registered");
         Log.Info($"gamedata-caps: after the world's load ({phase}): {loaded} registered, buffCopy {copy.ToJsonString()}");
+        var budget = Content.Buffs.GetBudget();
+        var b = budget.Budget;
+        Check(budget.Ok && b.Capacity == Room && b.GameUsed == 0 && b.KilnUsed == Before && b.Reserved == 0 && b.Expanded &&
+              b.Scope == CapacityScope.Process,
+            $"buff budget: Capacity={b.Capacity} GameUsed={b.GameUsed} KilnUsed={b.KilnUsed} Reserved={b.Reserved} Available={b.Available} " +
+            $"Expanded={b.Expanded} Readiness={b.Readiness} Revision={b.Revision}");
+        var reg = Content.Buffs.Define(Clone(1), new DefinitionRegistrationOptions());
+        var again = Content.Buffs.Define(Clone(1), new DefinitionRegistrationOptions());
+        var after1 = Content.Buffs.GetBudget().Budget;
+        Check(reg.Ok && reg.State == DefinitionRegistrationState.Registered && reg.SlotsConsumed == 1 && again.RegistrationId == reg.RegistrationId &&
+              again.SlotsConsumed == 1 && after1.KilnUsed == b.KilnUsed,
+            $"RequireRegistered in the world: {Show(reg)}; the same again: {Show(again)}; KilnUsed {b.KilnUsed} -> {after1.KilnUsed} (nothing charged twice)");
+        var receipt = Content.Buffs.GetRegistration(reg.RegistrationId);
+        var unknown = Content.Buffs.GetRegistration(Guid.NewGuid());
+        Check(receipt.Ok && receipt.State == DefinitionRegistrationState.Registered && !unknown.Ok && unknown.Code == DefinitionRefusalCode.NotFound,
+            $"receipts: its own {Show(receipt)}; an unknown one {Show(unknown)}");
+        if (phase == "restart" && _storedReceipt != Guid.Empty)
+        {
+            var stored = Content.Buffs.GetRegistration(_storedReceipt);
+            Check(stored.Ok && stored.State == DefinitionRegistrationState.Registered && stored.SlotsConsumed == 1,
+                $"the definition stored for this start (receipt {_storedReceipt}): {Show(stored)}");
+        }
         var room = Capabilities.Get("gamedata.expanded_buff_room");
         Check(N(copy, "room") == Room && copy["expanded"]?.GetValue<bool>() == true && room.State == CapabilityState.Available,
             $"buff room: room={N(copy, "room")} expanded={copy["expanded"]} gamedata.expanded_buff_room={room.State} ({room.ReasonText})");
@@ -144,6 +210,13 @@ public sealed class CapsMod : Mod
             $"buff headers: the running document published {newHeaders} (headers={N(after, "headers")} headerBytes={N(after, "headerBytes")} " +
             $"recordBytes={N(after, "recordBytes")} attaches={N(after, "attaches")} clones={N(after, "clones")})");
 
+        // the room is full now: a result-bearing definition says so and takes nothing, also when it may wait
+        var over = Content.Buffs.Define(new GameDataClone { Guid = Guid.Parse("4a7d1f3e-2b6c-4e8a-9d15-0c3f7b2e6a91"), Name = "Caps_Over", Base = Base },
+            new DefinitionRegistrationOptions(DefinitionTiming.AllowNextStart));
+        var full_ = Content.Buffs.GetBudget().Budget;
+        Check(!over.Ok && over.Code == DefinitionRefusalCode.CapacityExceeded && over.SlotsConsumed == 0 && full_.Available == 0,
+            $"full: {Show(over)}; budget KilnUsed={full_.KilnUsed} Reserved={full_.Reserved} Available={full_.Available}");
+
         // a GUID whose buff id is CapsBuff_0000's
         var collide = new GameDataClone { Guid = Collide, Name = "Caps_Collide", Base = Base };
         string? why;
@@ -169,5 +242,21 @@ public sealed class CapsMod : Mod
         if (phase == "reload")
             Check(loaded == Room && N(after, "clones") == usedBefore, $"reload: {loaded} still registered, no new record (clones={N(after, "clones")})");
         WriteMarker(phase);
+        _ = EventsLater();  // the events come at the next steps
+    }
+
+    private async Task EventsLater()
+    {
+        try
+        {
+            for (var i = 0; i < 60; i++) await Context.Scheduler.NextTick();
+            Check(_capacityEvents > 0 && _registrationEvents > 0,
+                $"events: {_capacityEvents} CapacityChangedEvent(s) of gamedata.buff_budget, {_registrationEvents} DefinitionRegistrationChangedEvent(s)");
+        }
+        catch (Exception e)
+        {
+            Check(false, $"events: {e.Message}");
+        }
+        Log.Info($"gamedata-caps: done {_pass} PASS, {_fail} FAIL");
     }
 }

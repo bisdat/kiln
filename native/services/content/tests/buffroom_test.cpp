@@ -16,6 +16,7 @@
 #include <set>
 #include <unordered_set>
 #include "../gamedata.h"
+#include "services/kiln_capacity_util.hpp"  // libstdc++'s fstream has its own __try: parsed before the macro below
 #undef __try
 #define __try if (true)
 #define __except(x) else if (false)
@@ -59,7 +60,13 @@ uint32_t fnv1a(const void* p, size_t n) {
     for (size_t i = 0; i < n; i++) h = (h ^ static_cast<const uint8_t*>(p)[i]) * 16777619u;
     return h;
 }
-std::string guid_text(const uint8_t*) { return "11111111-2222-4333-8444-555555555555"; }
+std::string guid_text(const uint8_t* g) {  // the game's byte order, as content.cpp writes it
+    char b[40];
+    std::snprintf(b, sizeof b, "%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x", static_cast<unsigned>(g[0] | g[1] << 8 | g[2] << 16 | uint32_t{g[3]} << 24),
+                  static_cast<unsigned>(g[4] | g[5] << 8), static_cast<unsigned>(g[6] | g[7] << 8), g[8], g[9], g[10], g[11], g[12], g[13], g[14],
+                  g[15]);
+    return b;
+}
 std::string owner_label(KilnOwner) { return "mod test"; }
 void logf(int, const char* fmt, ...) {
     char b[1024];
@@ -68,6 +75,7 @@ void logf(int, const char* fmt, ...) {
     std::vsnprintf(b, sizeof b, fmt, ap);
     va_end(ap);
     g_last_log = b;
+    if (std::getenv("BUFFROOM_LOG")) std::fprintf(stderr, "log: %s\n", b);
 }
 void* near_alloc(uintptr_t, size_t n) {
     if (n > g_alloc_limit || ++g_allocs > g_alloc_fail_after) return nullptr;
@@ -136,7 +144,14 @@ bool store_drop(KilnOwner, uintptr_t) { return false; }
 size_t store_flush(std::string*) { return 0; }
 void store_for_each(const std::function<void(uintptr_t, const Slot&)>&) {}
 void store_originals(uintptr_t, size_t, uint8_t*) {}
+std::string data_dir() {
+    const char* out = std::getenv("KILN_OUT");
+    return std::string(out ? out : ".") + "/content-tests/buffroom-data";
+}
+void set_owner_label(KilnOwner, const std::string&) {}
 namespace gd {
+bool g_test_ready = true;
+bool gd_ready() { return g_test_ready; }
 uint32_t g_after = 0;
 void after_changes() { ++g_after; }
 uint32_t apply_value(KilnOwner, uint64_t, uint32_t, const GEntry&, const std::string&, const gjson&, const std::string&,
@@ -454,12 +469,173 @@ void test_batches() {
     check(BM.header_bytes < (1u << 20), "two headers for 4,096 clones keep under 1 MiB (" + std::to_string(BM.header_bytes) + " bytes)");
 }
 
+KilnCapacityInfo budget() {
+    KilnCapacityInfo b{};
+    b.size = sizeof b;
+    buff_budget(&b);
+    return b;
+}
+
+struct Answer {
+    KilnResult rc;
+    KilnDefinitionReply r;
+    kc::gjson report;
+};
+Answer define(KilnOwner owner, const kc::gjson& def, uint32_t timing) {
+    Answer a{};
+    a.r.size = sizeof a.r;
+    std::string rep;
+    a.rc = define_buff_result(owner, def.dump(), timing, &a.r, &rep);
+    a.report = kc::gjson::parse(rep, nullptr, false);
+    return a;
+}
+Answer receipt(const uint8_t id[16]) {
+    Answer a{};
+    a.r.size = sizeof a.r;
+    std::string rep;
+    a.rc = buff_receipt(id, &a.r, &rep);
+    a.report = kc::gjson::parse(rep, nullptr, false);
+    return a;
+}
+kc::gjson with(kc::gjson d, const char* key, kc::gjson v) {
+    d[key] = std::move(v);
+    return d;
+}
+std::string why(const Answer& a) { return a.report.is_object() && a.report["reason"].is_string() ? a.report["reason"].get<std::string>() : ""; }
+
+// The result-bearing define (chapter 17 I1): registered now, the same again, refusals that take nothing, a definition
+// stored for the next start and replayed there, receipts that follow what became of a definition, the budget.
+void test_results() {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    fs::remove_all(kc::data_dir(), ec);
+    make_game();
+    g_defs.clear();
+    g_receipts.clear();
+    g_receipt_age.clear();
+    g_gone.clear();
+    g_budget = KilnCapacityInfo{};
+    make_world();
+    g_fake_api.owner_create = [](KilnStr) -> KilnOwner { return 77; };
+    char base[16];
+    std::snprintf(base, sizeof base, "0x%08x", 0x9e3779b9u);
+    auto def = [&](uint32_t i) { return kc::gjson{{"guid", guid_of(i)}, {"name", "Result_" + std::to_string(i)}, {"base", base}}; };
+
+    KilnCapacityInfo b = budget();
+    check(b.readiness == KILN_CAPACITY_NOT_READY && !b.capacity && (b.flags & KILN_CAPACITY_PROCESS), "before the first world the budget is NotReady");
+    kc::g_test_world = 0;
+    Answer a = define(5, def(1), KILN_DEFINE_REQUIRE_REGISTERED);
+    check(a.rc == KILN_OK && !a.r.ok && a.r.reason_code == KILN_DEFINE_NO_WORLD && a.r.slots_consumed == 0 && !why(a).empty(),
+          "RequireRegistered with no world: refused NoWorld, nothing taken: " + why(a));
+    check(!fs::exists(kc::data_dir() + "/gamedata/pending"), "and no file written");
+    check(g_defs.empty(), "and no definition kept");
+    a = define(5, def(2), KILN_DEFINE_ALLOW_NEXT_START);
+    check(a.rc == KILN_OK && a.r.ok && a.r.disposition == KILN_DEFINITION_ACCEPTED_NEXT_START && a.r.slots_consumed == 0,
+          "AllowNextStart with no world: accepted for the next start, no slot");
+    size_t files = 0;
+    for (auto it = fs::recursive_directory_iterator(kc::data_dir(), ec); !ec && it != fs::recursive_directory_iterator(); ++it)
+        files += it->is_regular_file();
+    check(files == 1, "one file written (" + std::to_string(files) + ")");
+    uint8_t stored[16];
+    std::memcpy(stored, a.r.registration_id, 16);
+    check(receipt(stored).r.disposition == KILN_DEFINITION_ACCEPTED_NEXT_START, "its receipt says so");
+
+    kc::g_test_world = 0x7000;
+    clones_world_ready(0x7000, KILN_WORLD_SERVER);
+    b = budget();
+    check(b.readiness == KILN_CAPACITY_VALID && b.capacity == 4096 && b.game_used == 0 && b.kiln_used == 0 && b.reserved == 0 &&
+              (b.flags & KILN_CAPACITY_EXPANDED),
+          "the world's load reserved the room: Capacity=4096 GameUsed=0 KilnUsed=0 before the first clone, Expanded");
+    const uint64_t rev0 = b.revision;
+    a = define(5, def(3), KILN_DEFINE_REQUIRE_REGISTERED);
+    check(a.rc == KILN_OK && a.r.ok && a.r.disposition == KILN_DEFINITION_REGISTERED && a.r.slots_consumed == 1 && a.r.reason_code == 0 &&
+              a.report["reason"].is_null(),
+          "RequireRegistered in a world: Registered, SlotsConsumed 1");
+    uint8_t first[16];
+    std::memcpy(first, a.r.registration_id, 16);
+    b = budget();
+    check(b.kiln_used == 1 && b.revision > rev0 && a.r.snapshot_revision == b.revision, "KilnUsed=1, the answer carries the budget's revision");
+    Answer again = define(5, def(3), KILN_DEFINE_REQUIRE_REGISTERED);
+    check(again.r.ok && again.r.slots_consumed == 1 && std::memcmp(again.r.registration_id, first, 16) == 0 && budget().kiln_used == 1 &&
+              budget().revision == b.revision,
+          "the same definition again: the same receipt, SlotsConsumed 1, nothing charged, the revision unchanged");
+    a = define(5, with(def(3), "fields", {{"defaultLifeTime", 9}}), KILN_DEFINE_REQUIRE_REGISTERED);
+    check(a.r.ok && std::memcmp(a.r.registration_id, first, 16) != 0 && budget().kiln_used == 1, "new content: a new receipt, the same record");
+    Answer old = receipt(first);
+    check(!old.r.ok && old.r.reason_code == KILN_DEFINE_SUPERSEDED, "the first receipt now says Superseded");
+    a = define(5, kc::gjson{{"guid", guid_of(4)}, {"name", "Result_3"}, {"base", base}}, KILN_DEFINE_ALLOW_NEXT_START);
+    check(!a.r.ok && a.r.reason_code == KILN_DEFINE_NAME_TAKEN && a.r.slots_consumed == 0, "a taken name: NameTaken, even with AllowNextStart");
+    a = define(5, kc::gjson{{"guid", guid_of(5)}, {"name", "Result_5"}, {"base", "no_such_buff"}}, KILN_DEFINE_REQUIRE_REGISTERED);
+    check(!a.r.ok && a.r.reason_code == KILN_DEFINE_UNKNOWN_BASE, "an unknown base: UnknownBase");
+    a = define(5, kc::gjson{{"guid", guid_of(6)}, {"name", 7}, {"base", base}}, KILN_DEFINE_REQUIRE_REGISTERED);
+    check(a.rc == KILN_ERR_INVALID_ARGUMENT && !why(a).empty(), "a malformed definition is a bad argument: " + why(a));
+    a = define(5, def(6), 9);
+    check(a.rc == KILN_ERR_INVALID_ARGUMENT, "a bad timing is a bad argument");
+    a = define(5, with(def(6), "placeholder", {{"mod", "x"}}), KILN_DEFINE_REQUIRE_REGISTERED);
+    check(a.rc == KILN_ERR_INVALID_ARGUMENT, "a placeholder is not a mod's definition");
+    uint8_t unknown[16] = {9, 9, 9};
+    a = receipt(unknown);
+    check(a.rc == KILN_OK && !a.r.ok && a.r.reason_code == KILN_DEFINE_NOT_FOUND, "an unknown receipt: NotFound");
+    uint8_t zero[16] = {};
+    check(receipt(zero).rc == KILN_ERR_INVALID_ARGUMENT, "the empty receipt id is a bad argument");
+
+    // the owner goes: its record stays, reserved; its receipt says OwnerInactive
+    uint8_t latest[16];
+    std::memcpy(latest, define(5, with(def(3), "fields", {{"defaultLifeTime", 9}}), KILN_DEFINE_REQUIRE_REGISTERED).r.registration_id, 16);
+    clones_owner_revoked(5);
+    b = budget();
+    a = receipt(latest);
+    check(b.kiln_used == 0 && b.reserved == 1 && !a.r.ok && a.r.disposition == KILN_DEFINITION_RETAINED && a.r.slots_consumed == 1 &&
+              a.r.reason_code == KILN_DEFINE_OWNER_INACTIVE,
+          "a revoked owner: KilnUsed 0, Reserved 1, its receipt Retained/OwnerInactive with its record");
+    a = define(5, def(7), KILN_DEFINE_REQUIRE_REGISTERED);
+    check(!a.r.ok && a.r.reason_code == KILN_DEFINE_OWNER_INACTIVE, "a revoked owner defines nothing");
+    a = define(6, with(def(3), "fields", {{"defaultLifeTime", 9}}), KILN_DEFINE_REQUIRE_REGISTERED);
+    check(a.r.ok && budget().kiln_used == 1 && budget().reserved == 0, "a loaded mod's definition of it takes the record back");
+
+    // full: CapacityExceeded before anything is taken, also for AllowNextStart
+    BM.used = BM.room;
+    a = define(6, def(8), KILN_DEFINE_ALLOW_NEXT_START);
+    check(!a.r.ok && a.r.reason_code == KILN_DEFINE_CAPACITY_EXCEEDED && a.r.slots_consumed == 0, "full: CapacityExceeded, also with AllowNextStart");
+    b = budget();
+    check(b.readiness == KILN_CAPACITY_ACCOUNTING_MISMATCH || b.readiness == KILN_CAPACITY_VALID, "the budget stays a valid reply");
+    std::string big(9000, 'x');
+    check(report_json(big, std::vector<std::string>(40, big)).size() < kReportMax, "a report never exceeds 4096 bytes");
+
+    // the next start: the stored definition is defined before mods, registers with the world's load, its file goes
+    make_game();
+    g_defs.clear();
+    {
+        std::lock_guard rl(g_rc_mu);
+        g_receipts.clear();
+        g_receipt_age.clear();
+    }
+    g_gone.clear();
+    g_budget = KilnCapacityInfo{};
+    make_world();
+    g_fake_api.owner_create = [](KilnStr) -> KilnOwner { return 77; };
+    kc::g_test_world = 0;
+    pending_replay();
+    check(g_defs.size() == 1 && g_defs[0].name == "Result_2" && g_defs[0].state != "registered", "the next start defines the stored clone before the world");
+    check(receipt(stored).r.disposition == KILN_DEFINITION_ACCEPTED_NEXT_START, "its receipt: still AcceptedNextStart before the world");
+    kc::g_test_world = 0x7000;
+    clones_world_ready(0x7000, KILN_WORLD_SERVER);
+    a = receipt(stored);
+    check(a.r.ok && a.r.disposition == KILN_DEFINITION_REGISTERED && a.r.slots_consumed == 1, "after the world's load: Registered");
+    files = 0;
+    for (auto it = fs::recursive_directory_iterator(kc::data_dir(), ec); !ec && it != fs::recursive_directory_iterator(); ++it)
+        files += it->is_regular_file();
+    check(files == 0, "and its file is gone (" + std::to_string(files) + " left)");
+    fs::remove_all(kc::data_dir(), ec);
+}
+
 int main() {
     try {
         test_room();
         test_sizes();
         test_slots_and_map();
         test_batches();
+        test_results();
     } catch (const std::exception& e) {
         std::printf("FAIL threw: %s\n", e.what());
         ++failures;
