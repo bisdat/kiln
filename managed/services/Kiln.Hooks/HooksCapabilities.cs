@@ -22,5 +22,14 @@ internal static unsafe class HooksCaps
     private static void ReportCapabilities()
     {
         if (HooksNative.T == null) ServiceCaps.Probe(Service, HooksNative.Version);
+        // hooks.typed is the core's sigdb feature; a kiln.hooks table without the typed members (no core, or one older
+        // than 0.2.0-dev.28) lowers it with the reason, so it never reads available where a typed link cannot be made
+        if (HooksNative.Typed == null)
+        {
+            var (reason, text) = HooksNative.T == null
+                ? ServiceCaps.Cause(CapabilityReason.ServiceMissing, "kiln.hooks is unavailable on this build", Service)
+                : (CapabilityReason.ServiceOlder, "this core's kiln.hooks has no typed links (older than 0.2.0-dev.28)");
+            ServiceCaps.Lower(Typed, reason, text);
+        }
     }
 }
