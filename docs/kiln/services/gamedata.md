@@ -243,7 +243,7 @@ that needs its own permanent numbers and its own name is a **clone**.
   added, and an old header is never freed (a game thread may still be reading it). So clones are published in
   batches: a world's load publishes one header for every clone defined before it, one data pack's `"add"` list one
   header for the whole list (also when the pack is applied while the world runs, and for the content sync's
-  definitions on a client). kiln.log "buff batch: 2096 clone(s) in the server world, one new header (4370 records); Kiln
+  definitions on a client, and the placeholders of a world's load). kiln.log "buff batch: 2096 clone(s) in the server world, one new header (4370 records); Kiln
   keeps 2 header(s), … bytes, and 804080 bytes of records". A clone defined from code while a world runs is
   published at once, with a header of its own (about 100 KB at 4,096 clones): define many clones in a data pack or
   before the world loads. `status` JSON `clones.buffCopy` counts `headers`, `headerBytes`, `recordBytes` and
@@ -296,7 +296,8 @@ that needs its own permanent numbers and its own name is a **clone**.
   recorded in the world's WorldData (Kiln's bundle `kiln.gamedata`, key `missing-gamedata`, written with every world
   save). At world load (before mods' `OnReady` and the save), a recorded clone that no loaded mod defines gets a
   placeholder: same GUID and id, the recorded base made inert (no program, no configs, no tooltip values, no VFX, no
-  follow-up), named `[Missing: <mod>:<name>]`. kiln.log "missing gamedata: 2 perk / buff clone(s) of mods that are not
+  follow-up), named `[Missing: <mod>:<name>]`; all of a world's placeholders are defined as one batch (one buff header
+  for them; since 0.2.0-dev.29), and each holds a record of the buff room, counted as reserved until its mod takes it back. kiln.log "missing gamedata: 2 perk / buff clone(s) of mods that are not
   loaded are kept as placeholders (saved references stay): buffs gamedata-clones:Kiln_Test_Frostbite (0x9887fff3), …".
   When the mod comes back its definition takes the GUID over ("… is back (pack gamedata-clones): it takes its GUID …
   back from the placeholder"; at the next start no placeholder is made).

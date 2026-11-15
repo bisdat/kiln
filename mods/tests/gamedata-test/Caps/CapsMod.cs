@@ -34,6 +34,7 @@ public sealed class CapsMod : Mod
     private int _capacityEvents, _registrationEvents;
     private DefinitionRegistrationResult? _noWorld, _nextStart;
     private Guid _storedReceipt;
+    private string _phase = "fresh";
 
     private static Guid GuidOf(int i)
     {
@@ -106,7 +107,8 @@ public sealed class CapsMod : Mod
         if (ids.Count != Total || ids.Contains(0) || BuffId(First) != BuffId(Collide))
             Log.Info($"gamedata-caps: FAIL the fixture: {ids.Count} unique ids of {Total}, collide pair {BuffId(First):x8}/{BuffId(Collide):x8}");
         var phase = Phase();
-        _storedReceipt = phase == "restart" ? StoredReceipt() : Guid.Empty;
+        _phase = phase;
+        _storedReceipt = phase != "fresh" ? StoredReceipt() : Guid.Empty;  // a reload keeps it for the restart
         Events.On<CapacityChangedEvent>(e =>
         {
             if (e.Quota == "gamedata.buff_budget") _capacityEvents++;
@@ -158,12 +160,16 @@ public sealed class CapsMod : Mod
     {
         var copy = BuffCopy();
         var defs = Caps();
-        var loaded = defs.Count(d => d.State == "registered");
-        Log.Info($"gamedata-caps: after the world's load ({phase}): {loaded} registered, buffCopy {copy.ToJsonString()}");
+        var loaded = defs.Count(d => d.State == "registered" && !d.IsPlaceholder);
+        var placeholders = defs.Count(d => d.State == "registered" && d.IsPlaceholder);
+        Log.Info($"gamedata-caps: after the world's load ({phase}): {loaded} registered, {placeholders} placeholder(s), buffCopy {copy.ToJsonString()}");
         var budget = Content.Buffs.GetBudget();
         var b = budget.Budget;
-        Check(budget.Ok && b.Capacity == Room && b.GameUsed == 0 && b.KilnUsed == Before && b.Reserved == 0 && b.Expanded &&
-              b.Scope == CapacityScope.Process,
+        // a reload: the clones of this mod's earlier load are kept and reserved until this load defines them again (its
+        // running document, below); the 2,000 of OnLoad are this load's already. A restart: the clones the save recorded
+        // that this load defines only later are placeholders until then, reserved too
+        Check(budget.Ok && b.Capacity == Room && b.GameUsed == 0 && b.Expanded && b.Scope == CapacityScope.Process &&
+              (phase == "fresh" ? b.KilnUsed == Before && b.Reserved == 0 : b.KilnUsed == Before && b.Reserved == Room - Before),
             $"buff budget: Capacity={b.Capacity} GameUsed={b.GameUsed} KilnUsed={b.KilnUsed} Reserved={b.Reserved} Available={b.Available} " +
             $"Expanded={b.Expanded} Readiness={b.Readiness} Revision={b.Revision}");
         var reg = Content.Buffs.Define(Clone(1), new DefinitionRegistrationOptions());
@@ -186,7 +192,7 @@ public sealed class CapsMod : Mod
         Check(N(copy, "room") == Room && copy["expanded"]?.GetValue<bool>() == true && room.State == CapabilityState.Available,
             $"buff room: room={N(copy, "room")} expanded={copy["expanded"]} gamedata.expanded_buff_room={room.State} ({room.ReasonText})");
         long headersBefore = N(copy, "headers"), usedBefore = N(copy, "clones");
-        if (phase != "reload")
+        if (phase == "fresh")
             Check(loaded == Before && headersBefore == 1 && N(copy, "attaches") == 1,
                 $"buff headers: the world's load registered {loaded} of {Before} with {headersBefore} header(s), {N(copy, "attaches")} registry swap(s)");
 
@@ -206,7 +212,9 @@ public sealed class CapsMod : Mod
             $"(pack: {report.Errors.Count} error(s), {sw.ElapsedMilliseconds} ms)");
         foreach (var e in report.Errors.Take(3)) Log.Info($"gamedata-caps: pack error: {e}");
         var newHeaders = N(after, "headers") - headersBefore;
-        Check(phase == "reload" ? newHeaders == 0 && N(after, "clones") == usedBefore : newHeaders == 1,
+        // fresh: one header for the document; a reload or a restart: the records are there (kept, or the placeholders the
+        // document takes over), so no new one
+        Check(phase == "fresh" ? newHeaders == 1 : newHeaders == 0 && N(after, "clones") == usedBefore,
             $"buff headers: the running document published {newHeaders} (headers={N(after, "headers")} headerBytes={N(after, "headerBytes")} " +
             $"recordBytes={N(after, "recordBytes")} attaches={N(after, "attaches")} clones={N(after, "clones")})");
 
@@ -238,7 +246,9 @@ public sealed class CapsMod : Mod
         var trip = ContentSync.CheckRoundTrip();
         Check(trip.Ok, $"content sync round trip with {Room} buff clones: {trip}");
         if (phase == "restart")
-            Check(loaded == Before && N(copy, "headers") == 1, $"restart: the world's load registered {loaded} again with {N(copy, "headers")} header");
+            Check(loaded == Before && placeholders == Room - Before && N(copy, "headers") == 2,
+                $"restart: the world's load registered {loaded} again and {placeholders} placeholders of the save's clones, with " +
+                $"{N(copy, "headers")} headers (one for the definitions, one for the placeholders)");
         if (phase == "reload")
             Check(loaded == Room && N(after, "clones") == usedBefore, $"reload: {loaded} still registered, no new record (clones={N(after, "clones")})");
         WriteMarker(phase);
@@ -250,8 +260,9 @@ public sealed class CapsMod : Mod
         try
         {
             for (var i = 0; i < 60; i++) await Context.Scheduler.NextTick();
-            Check(_capacityEvents > 0 && _registrationEvents > 0,
-                $"events: {_capacityEvents} CapacityChangedEvent(s) of gamedata.buff_budget, {_registrationEvents} DefinitionRegistrationChangedEvent(s)");
+            // a reload defines what this process has already: its receipts answer the same and post nothing
+            Check(_phase == "reload" ? _capacityEvents > 0 && _registrationEvents == 0 : _capacityEvents > 0 && _registrationEvents > 0,
+                $"events ({_phase}): {_capacityEvents} CapacityChangedEvent(s) of gamedata.buff_budget, {_registrationEvents} DefinitionRegistrationChangedEvent(s)");
         }
         catch (Exception e)
         {

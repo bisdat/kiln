@@ -260,15 +260,20 @@ void register_into(uintptr_t world) {
     KW_I("world 0x%llx: %u Kiln programs; the program table holds %u of %lld",
          static_cast<unsigned long long>(world), static_cast<unsigned>(g_programs.size()), *count_at,
          static_cast<long long>(L.programs_max));
-    // the slot ledger: who holds each of Kiln's slots (a mod's declaration by its mod id, a service's program by its name)
+    // the slot ledger: who holds Kiln's slots, in slot order (a service's or loader's program by its name, a mod's
+    // declarations by its mod id and how many)
     std::string ledger;
     uint32_t mods = 0, services = 0;
-    for (const Program* p : g_programs) {
+    for (size_t i = 0; i < g_programs.size(); ++i) {
+        const Program* p = g_programs[i];
         const bool mod = !p->reserved_mod.empty();
         (mod ? mods : services) += 1;
+        if (mod && i > 0 && g_programs[i - 1]->reserved_mod == p->reserved_mod) continue;
+        uint32_t n = 1;
+        while (mod && i + n < g_programs.size() && g_programs[i + n]->reserved_mod == p->reserved_mod) ++n;
         if (ledger.size() < 1500) {
             ledger += ledger.empty() ? "" : ", ";
-            ledger += mod ? p->reserved_mod + "/" + p->reserved_key : p->name;
+            ledger += mod ? p->reserved_mod + " x" + std::to_string(n) : p->name;
         }
     }
     KW_I("kiln.world program slots: %u of %d taken, %u by Kiln's services and loaders, %u by mods' declarations: %s",

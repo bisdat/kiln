@@ -43,7 +43,7 @@ read/write slots 42, other-template slots 9, other accessors 92, total event inp
 world service's 64 slots (32 before 0.2.0-dev.29) with Kiln's own services, and the game's remaining scheduler capacity
 (its table of 896, which kiln.world checks live before each registration); mods' declarations leave the last 8 slots to
 Kiln's services, and refusals appear in `kiln.log`. kiln.log "kiln.world program slots: 21 of 64 taken, … by Kiln's
-services and loaders, … by mods' declarations: kiln_world, …, writer/pulse" names who holds each slot.
+services and loaders, … by mods' declarations: kiln_world, …, writer x1" names who holds each slot.
 
 Access lists are `tpl`, `tplOptional`, `read`, `readOptional`, `write`, `writeOptional`, `singletonsRead`,
 `singletonsWrite`, `otherTpl`, `otherRead`, `otherWrite`, `with`, `without`, `anyOf`, `eventsIn`, `eventsOut`. Names

@@ -50,6 +50,7 @@
 #include "services/kiln_capacity.h"
 #include "services/kiln_capacity_util.hpp"
 #include "services/kiln_caps.h"
+#include "services/kiln_hooks.h"
 
 // kiln.content's loca texts (newcontent.cpp): `json` = "text" or {"en": "...", "de": "..."}. Linked weakly: without
 // it (an older newcontent.cpp) the stub below answers and clones keep the base's texts.
@@ -1630,6 +1631,24 @@ KilnCapacityInfo g_budget{};          // what buff_budget answers
 kiln::capacity::Revision g_rev;
 std::map<std::array<uint8_t, 16>, Receipt> g_receipts;
 std::set<KilnOwner> g_gone;           // owners kiln.content found revoked: their clones' records are reserved
+// Owners kiln.hooks says are retiring (a mod unloading or reloading), queued by its callback, which must not wait for
+// g_mu; taken into g_gone by the next publish_budget or clones_tick. A mod's clones have no layer of the mod's own owner
+// (their layers are the definitions owner's), so kiln.content's own probe of owners would never see it go.
+std::mutex g_retired_mu;
+std::vector<KilnOwner> g_retired;
+void KILN_CALL on_owner_retiring(KilnOwner retiring, void*) {
+    std::lock_guard lock(g_retired_mu);
+    if (g_retired.size() < 65536) g_retired.push_back(retiring);
+}
+bool take_retired() {  // g_mu held
+    std::vector<KilnOwner> r;
+    {
+        std::lock_guard lock(g_retired_mu);
+        r.swap(g_retired);
+    }
+    for (KilnOwner o : r) g_gone.insert(o);
+    return !r.empty();
+}
 
 // A clone record in active use: a loaded mod's (or Kiln's) definition with its record. Everything else that holds a
 // record (a placeholder, an orphan, a definition whose registration failed after it took one, a mod that is gone) is
@@ -1682,6 +1701,7 @@ void settle_receipt(const std::array<uint8_t, 16>& id, Receipt& r, const Def* d)
 // Publishes the budget and settles every receipt from what the copy holds now (g_mu held). The revision rises when a
 // count, the capacity, the readiness or a receipt changed.
 void publish_budget() {
+    take_retired();
     KilnCapacityInfo n{};
     n.size = sizeof n;
     uint64_t kiln = 0;
@@ -1861,6 +1881,13 @@ void clones_boot() {
         g_api->subscribe_world_tick(g_owner, KILN_WORLD_CLIENT, KILN_TICK_PRE, &on_client_pre, nullptr, &h);
     }
     report_buff_room();
+    // the owners whose clones' records become reserved when they go (see g_retired)
+    if (const auto* hooks = static_cast<const KilnHooksApi*>(g_api->service(KilnStr{KILN_HOOKS_SERVICE, sizeof(KILN_HOOKS_SERVICE) - 1}, 1));
+        hooks && hooks->header.size >= offsetof(KilnHooksApi, subscribe_owner_retiring) + sizeof(void*) && hooks->subscribe_owner_retiring) {
+        KilnHandle h = 0;
+        if (hooks->subscribe_owner_retiring(g_owner, &on_owner_retiring, nullptr, &h) != KILN_OK)
+            LOGW("gamedata: kiln.hooks refused the owner-retiring subscription: a gone mod's buff clones count as in use until kiln.content sees it go");
+    }
     pending_replay();  // buff definitions mods stored for this start: defined before any mod loads, registered with the world's load
     LOGI("gamedata: template clones %s; sequence, perk and buff clones on (the game's buff lookup %s)",
          g_templates ? "on" : "OFF (gamedata.template_clones not resolved)", g_get_buff ? "resolved for the self-check" : "not resolved");
@@ -1938,6 +1965,12 @@ void clones_tick(uint64_t step) {
             if (x.world == w) buff_world(w, &err);  // the registry reloaded its collection? point it back
         buffs_sync();
     }
+    bool retired = false;
+    {
+        std::lock_guard rl(g_retired_mu);
+        retired = !g_retired.empty();
+    }
+    if (retired) publish_budget();  // a mod went: its clones' records are reserved now
 }
 
 // A boot generation not published (chapter 08): owner's clones that no world registered are taken out; returns how many.

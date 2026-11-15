@@ -1149,13 +1149,16 @@ internal static unsafe class GameDataMissing
         {
             _world = world;
             _placed.Clear();
+            var byGuid = new Dictionary<Guid, GameDataDefinition>();
+            foreach (var d in defs) byGuid.TryAdd(d.Guid, d);
+            var todo = new List<(Guid Guid, SeenClone Seen)>();
             foreach (var (g, seen) in rec.Clones)
             {
                 if (!Guid.TryParse(g, out var guid)) continue;
-                var cur = defs.FirstOrDefault(d => d.Guid == guid);
-                if (cur != null && cur.State != "orphaned") continue;  // defined (or already a placeholder)
-                Place(guid, seen);
+                if (byGuid.TryGetValue(guid, out var cur) && cur.State != "orphaned") continue;  // defined (or already a placeholder)
+                todo.Add((guid, seen));
             }
+            PlaceAll(todo);
             if (_placed.Count > 0)
                 Log(LogLevel.Warn, $"{_placed.Count} perk / buff clone(s) of mods that are not loaded are kept as placeholders (saved references stay): {string.Join(", ", _placed)}");
             else if (rec.Clones.Count > 0)
@@ -1230,6 +1233,85 @@ internal static unsafe class GameDataMissing
         {
             return null;
         }
+    }
+
+    // Every placeholder of a world's load in one data-pack document: kiln.gamedata registers the list as one batch and
+    // publishes one buff collection header for it. A define each publishes a header per buff clone, and none of them can be
+    // freed (a lab: 2,096 placeholders, 2,097 headers, 167 MB of near memory). Without kiln.content's table: one by one.
+    private static void PlaceAll(List<(Guid Guid, SeenClone Seen)> todo)
+    {
+        if (todo.Count == 0) return;
+        var t = Content.T;
+        if (t == null)
+        {
+            foreach (var (g, seen) in todo) Place(g, seen);
+            return;
+        }
+        var lists = new Dictionary<string, JsonArray>();
+        foreach (var (g, seen) in todo)
+        {
+            var (section, ph, _) = Placeholder(g, seen);
+            var key = section == GameDataSection.Perks ? "perks" : "buffs";
+            if (!lists.TryGetValue(key, out var list)) lists[key] = list = new JsonArray();
+            list.Add(ph);
+        }
+        var doc = new JsonObject { ["format"] = 1 };
+        foreach (var (key, list) in lists) doc[key] = new JsonObject { ["add"] = list };
+        const int cap = 1 << 20;
+        var buf = (byte*)NativeMemory.Alloc(cap);
+        int rc;
+        string text;
+        try
+        {
+            nuint len = 0;
+            using (var j = new ContentNative.Utf8(doc.ToJsonString()))
+            using (var src = new ContentNative.Utf8("missing gamedata"))
+                rc = t->ApplyJson(_owner, j.Str, src.Str, buf, cap, &len);
+            text = System.Text.Encoding.UTF8.GetString(buf, (int)Math.Min(len, (nuint)(cap - 1)));
+        }
+        finally
+        {
+            NativeMemory.Free(buf);
+        }
+        if (rc != ContentNative.Ok && rc != ContentNative.InvalidArgument)
+        {
+            Log(LogLevel.Warn, $"placeholders as one document: {ContentNative.Message(rc)}; one by one");
+            foreach (var (g, seen) in todo) Place(g, seen);
+            return;
+        }
+        var errors = new List<string>();
+        try
+        {
+            if (JsonNode.Parse(text)?["errors"] is JsonArray es) errors.AddRange(es.Select(e => (string?)e ?? ""));
+        }
+        catch (JsonException)
+        {
+        }
+        foreach (var (g, seen) in todo)
+        {
+            var (section, _, label) = Placeholder(g, seen);
+            var prefix = $"{(section == GameDataSection.Perks ? "perks" : "buffs")}.add {seen.Name}: ";
+            var why = errors.FirstOrDefault(e => e.StartsWith(prefix, StringComparison.Ordinal));
+            if (why != null) Log(LogLevel.Warn, $"{seen.Section} {label} ({g}): no placeholder: {why[prefix.Length..]}");
+            else _placed.Add($"{seen.Section} {label} ({seen.Id})");
+        }
+    }
+
+    private static (GameDataSection Section, JsonObject Json, string Label) Placeholder(Guid guid, SeenClone seen)
+    {
+        var mod = seen.Mod ?? "?";
+        var label = $"{mod}:{seen.Name}";
+        var section = seen.Section == "perks" ? GameDataSection.Perks : GameDataSection.Buffs;
+        return (section, new JsonObject
+        {
+            ["guid"] = guid.ToString("D"),
+            ["name"] = seen.Name,
+            ["base"] = seen.Base,
+            ["displayName"] = $"[Missing: {label}]",
+            ["description"] = $"This {(section == GameDataSection.Perks ? "perk" : "effect")} ({seen.DisplayName ?? seen.Name}) comes from the mod \"{mod}\", " +
+                              "which is not installed. It does nothing until the mod is back.",
+            ["placeholder"] = new JsonObject { ["mod"] = mod, ["name"] = seen.Name, ["displayName"] = seen.DisplayName },
+        }, label);
     }
 
     private static void Place(Guid guid, SeenClone seen)

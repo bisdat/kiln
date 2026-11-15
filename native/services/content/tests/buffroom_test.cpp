@@ -593,9 +593,20 @@ void test_results() {
     a = define(6, with(def(3), "fields", {{"defaultLifeTime", 9}}), KILN_DEFINE_REQUIRE_REGISTERED);
     check(a.r.ok && budget().kiln_used == 1 && budget().reserved == 0, "a loaded mod's definition of it takes the record back");
 
+    // kiln.hooks says the owner is retiring (a mod unloads): its callback only queues; the next publication reserves the record
+    on_owner_retiring(6, nullptr);
+    check(budget().kiln_used == 1, "the retiring callback changes nothing by itself (it must not wait for the clone lock)");
+    {
+        std::lock_guard l(g_mu);
+        publish_budget();
+    }
+    check(budget().kiln_used == 0 && budget().reserved == 1, "the next publication: the retired owner's record is reserved");
+    check(define(7, with(def(3), "fields", {{"defaultLifeTime", 9}}), KILN_DEFINE_REQUIRE_REGISTERED).r.ok && budget().kiln_used == 1,
+          "the reloaded mod's definition takes it back");
+
     // full: CapacityExceeded before anything is taken, also for AllowNextStart
     BM.used = BM.room;
-    a = define(6, def(8), KILN_DEFINE_ALLOW_NEXT_START);
+    a = define(7, def(8), KILN_DEFINE_ALLOW_NEXT_START);
     check(!a.r.ok && a.r.reason_code == KILN_DEFINE_CAPACITY_EXCEEDED && a.r.slots_consumed == 0, "full: CapacityExceeded, also with AllowNextStart");
     b = budget();
     check(b.readiness == KILN_CAPACITY_ACCOUNTING_MISMATCH || b.readiness == KILN_CAPACITY_VALID, "the budget stays a valid reply");
