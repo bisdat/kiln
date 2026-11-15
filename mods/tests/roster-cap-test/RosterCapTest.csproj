@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The roster's second unlock page (package 17c, docs/kiln/services/npcs.md "The roster's size"): lab test mod. Its
+       quests/roster.json is written by gen_roster.py for each boot of lab.sh (64, 65, 128 and 129 entries). Prints
+       PASS/FAIL lines to kiln.log. Build into $KILN_OUT/mods/roster-cap-test. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <GenerateRuntimeConfigurationFiles>false</GenerateRuntimeConfigurationFiles>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <AssemblyName>RosterCapTest</AssemblyName>
+    <RootNamespace>RosterCapTest</RootNamespace>
+    <!-- Calls Kiln's lab members ([Experimental("KILNX001")]: the parallel switch). -->
+    <NoWarn>$(NoWarn);KILNX001</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../managed/Kiln.Api/Kiln.Api.csproj" Private="false" ExcludeAssets="runtime" />
+    <ProjectReference Include="../../../managed/Kiln.Testing/Kiln.Testing.csproj" Private="false" ExcludeAssets="runtime" />
+    <ProjectReference Include="../../../managed/services/Kiln.Quests/Kiln.Quests.csproj" Private="false" ExcludeAssets="runtime" />
+    <ProjectReference Include="../../../managed/services/Kiln.Spawn/Kiln.Spawn.csproj" Private="false" ExcludeAssets="runtime" />
+    <None Include="kiln.mod.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="quests/**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

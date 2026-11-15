@@ -40,6 +40,10 @@ Other KILN codes:
   KILN036 since 0.2.0-dev.29: a `[Query]` struct kiln.world cannot reserve, from the `KilnPrograms` step,
   [services/systems.md](../services/systems.md#programs-of-your-own-systemsdefine)).
 - **KILN190** to **KILN193**, **KILN198** are the game-id generator's notes (catalogs.md).
+- **KILN170** to **KILN174** are the `[ImpactNative]` generator's (Kiln.ImpactNatives, [impact.md](impact.md), since
+  0.2.0-dev.29): see [below](#kiln170). **KILN036** (error) and **KILN037** (warning) come from its build task, which
+  writes the generated typed entries into the output's `impact/natives.json`: KILN036 when the assembly, kiln.mod.json or
+  natives.json cannot be read or written, KILN037 when a hand-written entry of the same name is replaced.
 - **KILN180** to **KILN182** are the typed-hook generator's warnings (Kiln.Sigs, [../services/hooks.md](../services/hooks.md#typed-hooks-and-calls-detour_typed-kilnsigs-since-020-dev29)): a descriptor of the mod's sigdb fragment it cannot use (KILN180, with the reason: an unknown type, a struct return over 8 bytes without `sret`, more than 20 positions, two descriptions of one symbol that differ, two symbols with one class name), descriptors in a project without Kiln.Hooks (KILN181), a sigdb file that is not JSON (KILN182). A descriptor it reports is not generated.
 - **KL** codes are the data-file linter's (`kiln lint`).
 
@@ -720,3 +724,17 @@ nothing to act on.
 KILN121 knows `OnBoot`: `Mod.OnBoot` is marked `[RequiresCapability("mods.boot")]`, and an override has the rows of what
 it overrides, so `BootDefinitions.For(boot)` in `OnBoot` needs no check. `boot.GameData.Read` still asks for
 `mods.boot.game_data`, which is off where no snapshot of this game build was made.
+
+<a id="kiln170"></a><a id="kiln171"></a><a id="kiln172"></a><a id="kiln173"></a><a id="kiln174"></a>
+## KILN170 to KILN174: an `[ImpactNative]` method the generator cannot make
+**What.** Errors with the method's location: KILN170 for the method itself (not static, generic, async, private or in a
+private or generic type, or a name that is not `[A-Za-z0-9_]` of 1 to 60 characters), KILN171 for a parameter of a type
+no native takes (or a `NativeContext` by `ref`/`out`, or `[Raw]` on anything but `uint`), KILN172 for a return type other
+than `bool`, `byte` or `void`, KILN173 for one name on two methods. KILN174 (warning): the project has `[ImpactNative]`
+methods but no Kiln.Abilities with `ImpactNativeAccess` (0.2.0-dev.29 or newer, `Abilities` in `KilnServices`).
+
+**Why.** The generator writes the native's thunk, registration and typed declaration from the method's signature. A
+shape it cannot turn into the impact types of the call is not generated at all, so nothing half-works at run time.
+
+**Fix.** Make the method `static` and at least `internal`, use the types of [impact.md](impact.md) ("`[ImpactNative]`
+methods"), give other results back through `ref` or `out` parameters, and give each native its own name.

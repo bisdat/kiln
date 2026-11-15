@@ -47,9 +47,11 @@ def winpath(p):
 
 def env():
     e = dict(os.environ)
-    e.update(WINEPREFIX=PFX, WINEDEBUG="-all", WINEDLLOVERRIDES="mscoree=;mshtml=;dinput8=n,b")
+    e.update(WINEPREFIX=PFX, WINEDEBUG="-all", WINEDLLOVERRIDES="mscoree=;mshtml=;winedbg.exe=d;dinput8=n,b")
+    # No window on the desktop this runs from: no X display, and a Wayland display name that does not exist (an unset
+    # WAYLAND_DISPLAY means the session's own, wayland-0); winedbg.exe=d keeps a crash from opening the debugger.
     e.pop("DISPLAY", None)
-    e.pop("WAYLAND_DISPLAY", None)
+    e["WAYLAND_DISPLAY"] = "kiln-no-display"
     e.pop("KILN_DISABLE", None)
     e.pop("KILN_CORE", None)
     return e
@@ -991,6 +993,43 @@ def s_late_modes():
     return g
 
 
+def s_late_swap_realcore():
+    """Wine's builtin in place of a chained DLL of the same name: xinput9_1_0.dll (Ultimate ASI Loader's name) in
+    chain.ini [late], loaded by the core, and xinput1_3.dll, loaded by the proxy. Wine maps its own DLL and the module
+    still reports the asked path. With both names set to builtin (b), kiln.log and proxy.log must say so and give the
+    override; with n,b (that override) the files load and the plain "loaded at" lines stay. Whether Wine took its
+    builtin is read from the harness log (the test DLLs log their attach, Wine's do not), not from what Kiln looks at."""
+    last = None
+    for order, want_swap in (("b", True), ("n,b", False)):
+        g, lib, profile = realcore_game("late-swap-" + order.replace(",", ""))
+        g.dll("chain-b", "xinput9_1_0.dll")
+        g.dll("chain-c", "xinput1_3.dll")
+        json.dump(profile, open(os.path.join(g.kiln, "profile.json"), "w"))
+        g.write("kiln/chain.ini", "[chain]\n..\\xinput9_1_0.dll\n..\\xinput1_3.dll\n[late]\n..\\xinput9_1_0.dll\n")
+        g.run({"WINEDLLOVERRIDES": f"mscoree=;mshtml=;winedbg.exe=d;dinput8=n,b;xinput9_1_0={order};xinput1_3={order}"})
+        print(f"[late swap, xinput9_1_0={order} xinput1_3={order}] rc {g.rc}")
+        log = kiln_log(g)
+        late_swapped, proxy_swapped = not has(g.lines, "dll chain-b attach"), not has(g.lines, "dll chain-c attach")
+        check(g, late_swapped == want_swap and proxy_swapped == want_swap,
+              f"Wine's builtins in place: xinput9_1_0 {late_swapped}, xinput1_3 {proxy_swapped} (want {want_swap})")
+        tail = " but another file was loaded in its place: Wine's own {0}; on Wine or Proton a DLL override is needed: " \
+               "WINEDLLOVERRIDES=\"{0}=n,b\""
+        late_warn = [l for l in log if l.startswith("[W ") and "late: requested " in l and
+                     l.endswith("\\xinput9_1_0.dll" + tail.format("xinput9_1_0"))]
+        late_plain = [l for l in log if "late: " in l and "xinput9_1_0.dll loaded at" in l]
+        proxy_warn = [l for l in g.proxy_log if l.startswith("chain: chain.ini [chain]: requested ") and
+                      l.endswith("\\xinput1_3.dll" + tail.format("xinput1_3"))]
+        proxy_plain = [l for l in g.proxy_log if "xinput1_3.dll loaded at" in l]
+        check(g, (len(late_warn), len(late_plain)) == ((1, 0) if late_swapped else (0, 1)),
+              f"kiln.log: {len(late_warn)} late warning(s), {len(late_plain)} loaded line(s)")
+        check(g, (len(proxy_warn), len(proxy_plain)) == ((1, 0) if proxy_swapped else (0, 1)),
+              f"proxy.log: {len(proxy_warn)} warning(s), {len(proxy_plain)} loaded line(s)")
+        for line in late_warn + proxy_warn:
+            print("    " + line)
+        last = g
+    return last
+
+
 def s_late_realcore():
     """The real core loads the proxy's late entries after Kiln's native phases, with the same SEH guard and reports:
     state/native.json chain.late, a dllmain native mod finishing late, boot.json chain[] with the final status and
@@ -1514,7 +1553,7 @@ def s_xhl_name():
 
 SCENARIOS = {f.__name__[2:]: f for f in (s_chain, s_emf, s_engine_bounds, s_emf_limits, s_vanilla, s_nomods, s_profile, s_profile_rules, s_expired, s_future, s_invalid,
                                           s_server, s_undeletable, s_disabled, s_crash_reporter, s_corrupt, s_fixtures, s_semver,
-                                          s_realcore, s_late, s_late_modes, s_late_realcore, s_rules_realcore, s_late_native_realcore, s_late_policy_realcore,
+                                          s_realcore, s_late, s_late_modes, s_late_realcore, s_late_swap_realcore, s_rules_realcore, s_late_native_realcore, s_late_policy_realcore,
                                           s_late_requires_realcore, s_late_already_loaded_realcore, s_late_loader_and_entry, s_overlap_refused_realcore,
                                           s_late_oldproxy, s_entry_gate_held, s_addon_log, s_bootinfo_v2proxy, s_xhl_name)}
 

@@ -443,6 +443,7 @@ internal static partial class KilnApis
         "M:Kiln.NativeQuests.Holds(Kiln.NativeComputed,Kiln.QuestHolder)", // NativeQuests.Holds(NativeComputed, QuestHolder): Game.AssertTickThread
         "M:Kiln.NativeQuests.Resync(Kiln.QuestHolder,System.Boolean)", // NativeQuests.Resync(QuestHolder, bool): Game.AssertTickThread
         "M:Kiln.NativeQuests.Wanted(System.String,Kiln.QuestHolder)", // NativeQuests.Wanted(string, QuestHolder): Game.AssertTickThread
+        "M:Kiln.NativeRef.Register(Kiln.NativeSyncHandler)", // NativeRef.Register(NativeSyncHandler): via Abilities.Natives.RegisterSync(string, int, NativeSyncHandler)
         "M:Kiln.Nearby.Entities(Kiln.EntityId,System.Double,System.String)", // Nearby.Entities(EntityId, double, string): via Nearby.Validate(WorldPosition, double)
         "M:Kiln.Nearby.Entities(Kiln.WorldPosition,System.Double,System.String)", // Nearby.Entities(WorldPosition, double, string): via Nearby.Validate(WorldPosition, double)
         "M:Kiln.Nearby.Within(System.Collections.Generic.IEnumerable{Kiln.EntityId},Kiln.EntityId,System.Double)", // Nearby.Within(IEnumerable<EntityId>, EntityId, double): via Nearby.Validate(WorldPosition, double)

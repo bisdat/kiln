@@ -1,15 +1,30 @@
 #nullable enable
+Kiln.AbilitiesStatus.AttachmentsActive.get -> int
+Kiln.AbilitiesStatus.AttachmentsActive.init -> void
+Kiln.AbilitiesStatus.AttachmentsOff.get -> int
+Kiln.AbilitiesStatus.AttachmentsOff.init -> void
+Kiln.AbilitiesStatus.AttachmentsPending.get -> int
+Kiln.AbilitiesStatus.AttachmentsPending.init -> void
 Kiln.AttachResult
 Kiln.AttachResult.<Clone>$() -> Kiln.AttachResult!
-Kiln.AttachResult.AttachResult(bool Ok, string? Reason, System.IDisposable? Handle) -> void
-Kiln.AttachResult.Deconstruct(out bool Ok, out string? Reason, out System.IDisposable? Handle) -> void
+Kiln.AttachResult.AttachResult(bool Ok, string? Reason, Kiln.NativeAttachment? Handle) -> void
+Kiln.AttachResult.Deconstruct(out bool Ok, out string? Reason, out Kiln.NativeAttachment? Handle) -> void
 Kiln.AttachResult.Equals(Kiln.AttachResult? other) -> bool
-Kiln.AttachResult.Handle.get -> System.IDisposable?
+Kiln.AttachResult.Handle.get -> Kiln.NativeAttachment?
 Kiln.AttachResult.Handle.init -> void
 Kiln.AttachResult.Ok.get -> bool
 Kiln.AttachResult.Ok.init -> void
 Kiln.AttachResult.Reason.get -> string?
 Kiln.AttachResult.Reason.init -> void
+Kiln.ImpactNativeAccess
+Kiln.ImpactNativeAttribute
+Kiln.ImpactNativeAttribute.ImpactNativeAttribute(string! name) -> void
+Kiln.ImpactNativeAttribute.Name.get -> string!
+Kiln.ImpactNativeEntryAttribute
+Kiln.ImpactNativeEntryAttribute.Args.get -> string!
+Kiln.ImpactNativeEntryAttribute.ImpactNativeEntryAttribute(string! name, string! args) -> void
+Kiln.ImpactNativeEntryAttribute.Name.get -> string!
+Kiln.ImpactNativeKind.Sync = 4 -> Kiln.ImpactNativeKind
 Kiln.NativeArg
 Kiln.NativeArg.Deconstruct(out string! Type, out Kiln.NativeArgDirection Direction, out bool Optional, out bool Raw, out int Size) -> void
 Kiln.NativeArg.Direction.get -> Kiln.NativeArgDirection
@@ -29,6 +44,41 @@ Kiln.NativeArgDirection
 Kiln.NativeArgDirection.In = 0 -> Kiln.NativeArgDirection
 Kiln.NativeArgDirection.InOut = 2 -> Kiln.NativeArgDirection
 Kiln.NativeArgDirection.Out = 1 -> Kiln.NativeArgDirection
+Kiln.NativeAttachment
+Kiln.NativeAttachment.Dispose() -> void
+Kiln.NativeAttachment.State.get -> Kiln.NativeAttachmentState
+Kiln.NativeAttachmentState
+Kiln.NativeAttachmentState.Active = 2 -> Kiln.NativeAttachmentState
+Kiln.NativeAttachmentState.Gone = 0 -> Kiln.NativeAttachmentState
+Kiln.NativeAttachmentState.Off = 3 -> Kiln.NativeAttachmentState
+Kiln.NativeAttachmentState.Pending = 1 -> Kiln.NativeAttachmentState
+Kiln.NativeContext
+Kiln.NativeContext.ImpactId.get -> uint
+Kiln.NativeContext.NativeContext() -> void
+Kiln.NativeContext.Program.get -> uint
+Kiln.NativeContext.Self.get -> Kiln.EntityId
+Kiln.NativeContext.Site.get -> uint
+Kiln.NativeParameter
+Kiln.NativeParameter.<Clone>$() -> Kiln.NativeParameter!
+Kiln.NativeParameter.Arg.get -> Kiln.NativeArg
+Kiln.NativeParameter.Arg.init -> void
+Kiln.NativeParameter.Deconstruct(out string! Name, out Kiln.NativeArg Arg) -> void
+Kiln.NativeParameter.Equals(Kiln.NativeParameter? other) -> bool
+Kiln.NativeParameter.Name.get -> string!
+Kiln.NativeParameter.Name.init -> void
+Kiln.NativeParameter.NativeParameter(string! Name, Kiln.NativeArg Arg) -> void
+Kiln.NativeRef
+Kiln.NativeRef.FullName.get -> string?
+Kiln.NativeRef.HashFor(string! modId) -> uint
+Kiln.NativeRef.Name.get -> string!
+Kiln.NativeRef.NativeRef(string! name, Kiln.NativeParameter![]! parameters) -> void
+Kiln.NativeRef.Parameters.get -> System.Collections.Generic.IReadOnlyList<Kiln.NativeParameter!>!
+Kiln.NativeRef.Register(Kiln.NativeSyncHandler! thunk) -> Kiln.NativeResult!
+Kiln.NativeRef.Registration.get -> Kiln.NativeResult?
+Kiln.NativeRegistrationRefusedEvent
+Kiln.NativeRegistrationRefusedEvent.Hash.get -> uint
+Kiln.NativeRegistrationRefusedEvent.Name.get -> string!
+Kiln.NativeRegistrationRefusedEvent.Reason.get -> string!
 Kiln.NativeResult
 Kiln.NativeResult.<Clone>$() -> Kiln.NativeResult!
 Kiln.NativeResult.Deconstruct(out bool Ok, out string? Reason, out uint Hash) -> void
@@ -44,22 +94,52 @@ Kiln.NativeStage
 Kiln.NativeStage.After = 2 -> Kiln.NativeStage
 Kiln.NativeStage.Before = 0 -> Kiln.NativeStage
 Kiln.NativeStage.Instead = 1 -> Kiln.NativeStage
+Kiln.NativeState
+Kiln.NativeState.Dead = 4 -> Kiln.NativeState
+Kiln.NativeState.Live = 2 -> Kiln.NativeState
+Kiln.NativeState.None = 0 -> Kiln.NativeState
+Kiln.NativeState.Refused = 3 -> Kiln.NativeState
+Kiln.NativeState.Waiting = 1 -> Kiln.NativeState
 Kiln.NativeSyncHandler
+Kiln.Optional<T>
+Kiln.Optional<T>.GetValueOrDefault(T fallback = default(T)) -> T
+Kiln.Optional<T>.HasValue.get -> bool
+Kiln.Optional<T>.Optional() -> void
+Kiln.Optional<T>.Optional(T value) -> void
+Kiln.Optional<T>.Value.get -> T
+Kiln.RawAttribute
+Kiln.RawAttribute.RawAttribute() -> void
 [KILNX001]static Kiln.Abilities.Natives.LabCounters.get -> (ulong SyncCalls, ulong SyncFaults, ulong SyncSlow, ulong DeadCalls, uint Inflight, ulong AttachEntered, ulong AttachSkipped, ulong TypedRefused, ulong TypedUnconnected)?
+[KILNX001]static Kiln.Abilities.Natives.LabRetire.get -> (ulong Deferred, uint PendingCore, int PendingManaged, ulong Watchdog)?
 override Kiln.AttachResult.Equals(object? obj) -> bool
 override Kiln.AttachResult.GetHashCode() -> int
 override Kiln.AttachResult.ToString() -> string!
 override Kiln.NativeArg.GetHashCode() -> int
+override Kiln.NativeParameter.Equals(object? obj) -> bool
+override Kiln.NativeParameter.GetHashCode() -> int
+override Kiln.NativeParameter.ToString() -> string!
+override Kiln.NativeRef.ToString() -> string!
 override Kiln.NativeResult.Equals(object? obj) -> bool
 override Kiln.NativeResult.GetHashCode() -> int
 override Kiln.NativeResult.ToString() -> string!
+override Kiln.Optional<T>.ToString() -> string!
 static Kiln.Abilities.Natives.Attach(uint program, string! native, Kiln.NativeStage stage, Kiln.NativeWrapHandler! handler, uint site = 0, int priority = 0) -> Kiln.AttachResult!
 static Kiln.Abilities.Natives.DeclareTyped(string! fullName, params Kiln.NativeArg[]! args) -> void
 static Kiln.Abilities.Natives.RegisterSync(string! name, int argc, Kiln.NativeSyncHandler! handler) -> Kiln.NativeResult!
+static Kiln.Abilities.Natives.StateOf(uint hash) -> Kiln.NativeState
 static Kiln.AttachResult.operator !=(Kiln.AttachResult? left, Kiln.AttachResult? right) -> bool
 static Kiln.AttachResult.operator ==(Kiln.AttachResult? left, Kiln.AttachResult? right) -> bool
+static Kiln.ImpactNativeAccess.Connected(ref Kiln.NativeCall call, int i) -> bool
+static Kiln.ImpactNativeAccess.Context(ref Kiln.NativeCall call) -> Kiln.NativeContext
+static Kiln.ImpactNativeAccess.Provide(System.Action! register) -> void
+static Kiln.ImpactNativeAccess.RawValue(ref Kiln.NativeCall call, int i) -> uint
+static Kiln.ImpactNativeAccess.Ref<T>(ref Kiln.NativeCall call, int i, uint type) -> T
+static Kiln.ImpactNativeAccess.SetTime(ref Kiln.NativeCall call, int i, System.TimeSpan value) -> void
+static Kiln.ImpactNativeAccess.Time(ref Kiln.NativeCall call, int i) -> System.TimeSpan
 static Kiln.NativeArg.operator !=(Kiln.NativeArg left, Kiln.NativeArg right) -> bool
 static Kiln.NativeArg.operator ==(Kiln.NativeArg left, Kiln.NativeArg right) -> bool
+static Kiln.NativeParameter.operator !=(Kiln.NativeParameter? left, Kiln.NativeParameter? right) -> bool
+static Kiln.NativeParameter.operator ==(Kiln.NativeParameter? left, Kiln.NativeParameter? right) -> bool
 static Kiln.NativeResult.operator !=(Kiln.NativeResult? left, Kiln.NativeResult? right) -> bool
 static Kiln.NativeResult.operator ==(Kiln.NativeResult? left, Kiln.NativeResult? right) -> bool
 virtual Kiln.NativeSyncHandler.Invoke(ref Kiln.NativeCall call) -> byte

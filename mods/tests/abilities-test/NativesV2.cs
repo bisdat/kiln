@@ -33,6 +33,9 @@ public sealed partial class AbilitiesTestMod
                 Info($"natives v2: natives-helper loaded again: {await Kiln.Mods.LoadAsync("natives-helper")}");
             await NativesV2Pass(2, at);
             await TestTypedNatives(at(40, 60));  // once per process (the declarations stay): inside the window
+            await TestProbeThreads(at(48, 60));
+            await TestRetireWhileInside(at(52, 60), "unload");
+            await TestRetireWhileInside(at(52, 64), "reload");
             LabSystems.StopParallel();
         }
         else
@@ -40,7 +43,9 @@ public sealed partial class AbilitiesTestMod
             Info("natives v2: no kiln/control/systems.parallel: serial pass only");
             await TestTypedNatives(at(40, 60));
         }
+        await TestArgcRevive(at(44, 60));
         await TestRegistryFull();  // last: the natives it adds stay in this world's registry
+        await TestReviveAtFullRegistry();
     }
 
     private void RegisterNativesV2()

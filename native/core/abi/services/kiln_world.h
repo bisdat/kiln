@@ -737,9 +737,12 @@ typedef struct KilnWorldApi {
      * KILN_ERR_INVALID_ARGUMENT: not a write list or name; KILN_ERR_UNAVAILABLE: no tracker on this slot or build. */
     KilnResult(KILN_CALL* game_slice_mark)(KilnGameSlice* slice, const uint64_t* iter, int32_t list, int32_t i);
     /* Inside a stage: the slice's archetype key (all its entities share one archetype): the layout of its first
-     * entity's record. KILN_ERR_NOT_FOUND for an empty slice; KILN_ERR_UNAVAILABLE when a nonempty slice's
-     * entity record or layout cannot be read, or the record found names another entity (a reused record): the
-     * archetype filter must turn off with a reason. */
+     * entity's record, read from the entity map (no scheduler-stable archetype reaches a program's update). The read is
+     * coherent: the map's capacity and count and the record's id are checked before and after the layout read, so a grow,
+     * a concurrent insert/erase or a freed/reused record is detected. KILN_ERR_NOT_FOUND for an empty slice;
+     * KILN_ERR_UNAVAILABLE when a nonempty slice's record or layout cannot be read, the record names another entity, or the
+     * map changed under the read (the archetype filter must turn off with a reason). Safe on a server world (structural
+     * changes are deferred to the step's end); a client world's concurrent map mutation rides systems.wraps.client. */
     KilnResult(KILN_CALL* game_slice_archetype)(KilnGameSlice* slice, uintptr_t* out_layout);
     /* Whether archetype `layout` (game_slice_archetype) has component `component_hash`: 1 yes, 0 no, -1 not known
      * (no such component in that world, no world). Any thread, while the world lives. */

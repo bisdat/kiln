@@ -230,7 +230,85 @@ public enum NativeStage
 /// <param name="Ok">The handler is attached.</param>
 /// <param name="Reason">Why not; null when <paramref name="Ok"/>.</param>
 /// <param name="Handle">Dispose to detach (also when the mod unloads); null when not <paramref name="Ok"/>.</param>
-public sealed record AttachResult(bool Ok, string? Reason, IDisposable? Handle) : IKilnResult;
+public sealed record AttachResult(bool Ok, string? Reason, NativeAttachment? Handle) : IKilnResult;
+
+/// <summary>Where a Kiln native stands (<see cref="Abilities.Natives.StateOf"/>).</summary>
+public enum NativeState
+{
+    /// <summary>No Kiln native of this hash.</summary>
+    None = 0,
+    /// <summary>Registered with Kiln; no server world's registry yet (it goes in at the world's setup).</summary>
+    Waiting = 1,
+    /// <summary>In the server world's native registry: programs can call it.</summary>
+    Live = 2,
+    /// <summary>The world's registry had no room for it: programs that call it stop with Error. Its mod also gets a
+    /// <see cref="NativeRegistrationRefusedEvent"/>.</summary>
+    Refused = 3,
+    /// <summary>Taken off (its mod unloaded): its hash answers 0x1F.</summary>
+    Dead = 4,
+}
+
+/// <summary>Where an attachment stands (<see cref="NativeAttachment.State"/>).</summary>
+public enum NativeAttachmentState
+{
+    /// <summary>Detached, or its mod unloaded.</summary>
+    Gone = 0,
+    /// <summary>Its program and site are checked when the world's programs are in (also when its program is registered
+    /// later); until then it takes the calls that match.</summary>
+    Pending = 1,
+    /// <summary>Checked: its program calls the native there.</summary>
+    Active = 2,
+    /// <summary>Its program is not loaded, or does not call the native at that site: it takes no call (checked again
+    /// whenever a program is registered).</summary>
+    Off = 3,
+}
+
+/// <summary>A handler attached with <see cref="Abilities.Natives.Attach"/>: its <see cref="State"/>; Dispose to detach.</summary>
+public sealed unsafe class NativeAttachment : IDisposable
+{
+    private readonly AbilitiesDispatch.AttachEntry _entry;
+
+    internal NativeAttachment(AbilitiesDispatch.AttachEntry entry) => _entry = entry;
+
+    /// <summary>Where it stands now (any thread).</summary>
+    [AnyThread]
+    public NativeAttachmentState State
+    {
+        get
+        {
+            if (!_entry.Active) return NativeAttachmentState.Gone;
+            var t = AbilitiesNative.V2(nameof(AbilitiesNative.TableV2.NativeAttachStateFn));
+            if (t == null || _entry.Native == 0) return NativeAttachmentState.Active;  // an older core, or Natives.Wrap's legacy path
+            uint s = 0;
+            return t->NativeAttachStateFn(_entry.Native, &s) == AbilitiesNative.Ok ? (NativeAttachmentState)s : NativeAttachmentState.Gone;
+        }
+    }
+
+    /// <summary>Detaches it: from the next call on the handler is not called.</summary>
+    public void Dispose() => AbilitiesDispatch.Detach(_entry);
+}
+
+/// <summary>A synchronous native that <see cref="Abilities.Natives.RegisterSync"/> accepted before the server world existed,
+/// and that the world's native registry then had no room for (posted in the next tick; tick thread). Programs that call
+/// it stop with Error.</summary>
+public sealed class NativeRegistrationRefusedEvent : KilnEvent
+{
+    internal NativeRegistrationRefusedEvent(string name, uint hash, string reason)
+    {
+        Name = name;
+        Hash = hash;
+        Reason = reason;
+    }
+
+    /// <summary>"&lt;modid&gt;.&lt;Name&gt;".</summary>
+    public string Name { get; }
+
+    /// <summary>FNV-1a-32 of <see cref="Name"/>.</summary>
+    public uint Hash { get; }
+
+    /// <summary>Why.</summary>
+    public string Reason { get; }
+}
 
 /// <summary>A synchronous applyDamage call (job thread): change it before the game applies it, or cancel it.</summary>
 public unsafe ref struct DamageCall
@@ -357,8 +435,10 @@ public static unsafe partial class Abilities
         /// </summary>
         /// <remarks>The handler runs on the thread that runs the game's Impact programs (the server world's thread on a
         /// dedicated server; never the tick thread's Pre or Post), so it calls no tick-thread API and does not block:
-        /// queue other work with <c>Context.Scheduler.Post</c>. A handler over 0.2 ms is logged (the whole server step
-        /// waits for it). The native ends when the mod unloads: from then on programs that call it stop with Error 0x1F.
+        /// queue other work with <c>Context.Scheduler.Post</c>. It must not block: the whole server step waits for it (a
+        /// call over 0.2 ms is logged after it returns, for the first five of the process; one still inside after a second
+        /// is named while it is inside). The native ends when the mod unloads: it takes no new call from then on, and
+        /// programs that call it stop with Error 0x1F.
         /// A program can call it once it is registered; programs registered earlier wait for it.</remarks>
         /// <param name="name">Name, or the full "&lt;modid&gt;.&lt;Name&gt;" (the mod's own id); Name is
         /// [A-Za-z0-9_].</param>
@@ -407,11 +487,31 @@ public static unsafe partial class Abilities
                 throw new ArgumentException($"native {full}: {AbilitiesNative.Describe(rc)}", nameof(name));
             }
             entry.Hash = hash;
+            entry.Watched = StateOf(hash) == NativeState.Waiting;  // the world's setup may still refuse it (review P1)
             Names[hash] = full;
             AbilitiesDispatch.Watch(mod);
             mod.Log.Info($"abilities: sync native {full} (0x{hash:x8}, argc {argc}) registered");
             return new NativeResult(true, null, hash);
         }
+
+        /// <summary>Where the Kiln native <paramref name="hash"/> stands (any thread): one registered before the server
+        /// world existed waits for its registry, and the world's setup can still refuse it for room
+        /// (<see cref="NativeState.Refused"/>, and its mod gets a <see cref="NativeRegistrationRefusedEvent"/>).</summary>
+        [AnyThread]
+        public static NativeState StateOf(uint hash)
+        {
+            var t = AbilitiesNative.V2(nameof(AbilitiesNative.TableV2.NativeStateFn));
+            if (t == null) return NativeState.None;
+            uint s = 0;
+            return t->NativeStateFn(hash, &s) == AbilitiesNative.Ok ? (NativeState)s : NativeState.None;
+        }
+
+        /// <summary>Lab use: the review's retirement counters (retirements that found calls inside and finished later,
+        /// those waiting now in the core and in Kiln.Abilities, watchdog reports), or null without the table.</summary>
+        [System.Diagnostics.CodeAnalysis.Experimental("KILNX001")]
+        [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+        public static (ulong Deferred, uint PendingCore, int PendingManaged, ulong Watchdog)? LabRetire =>
+            AbilitiesNative.Counters() is { } c ? (c.RetireDeferred, c.RetirePending, AbilitiesDispatch.DeferredCount, c.WatchdogReports) : null;
 
         // natives_core.h valid_native_name: "<modid>.<Name>", Name [A-Za-z0-9_], 90 bytes at most
         internal static bool ValidName(string full)
@@ -485,11 +585,13 @@ public static unsafe partial class Abilities
 
         /// <summary>Declares Kiln native <paramref name="fullName"/> with the type of each argument (since 0.2.0-dev.29;
         /// what a <c>"sync": true</c> entry of a mod's impact/natives.json declares when Kiln starts), replacing an earlier
-        /// declaration. A program registered from then on that passes a variable of another type or size, a raw value
-        /// for a variable argument, or nothing for a required one is refused (<c>E_ARGTYPE</c>, an
-        /// <see cref="ArgumentException"/> from <see cref="Programs"/>' Register). Every call of the native, also by a
-        /// program registered earlier, is checked before its handler runs: a mismatch answers 0x2C, a required argument
-        /// not connected 0x18 (the instance stops with Error; the handler is not called). Any thread.</summary>
+        /// declaration. A program registered from then on is refused (<c>E_ARGTYPE</c>, an <see cref="ArgumentException"/>
+        /// from <see cref="Programs"/>' Register) when the values it pushes right before the ECALL with constant pushes
+        /// show a variable of another type or size, a raw value for a variable argument, or nothing for a required one;
+        /// values the program computes are not known when it registers. Every call of the native, also by a program
+        /// registered earlier and with computed values, is checked before its handler runs: a mismatch answers 0x2C, a
+        /// required argument not connected 0x18 (the instance stops with Error; the handler is not called). Any
+        /// thread.</summary>
         /// <param name="fullName">"&lt;modid&gt;.&lt;Name&gt;".</param>
         /// <param name="args">The arguments, argument 0 first (the last value the program pushes); at most 31.</param>
         /// <exception cref="ArgumentException">A bad name, more than 31 arguments, an empty type, a size outside

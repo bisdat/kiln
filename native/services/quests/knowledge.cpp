@@ -406,6 +406,30 @@ void emit(KilnKnowledgeEvent e) {  // caller holds g_mu
     g_ring[e.seq % kRing] = e;
     g_seq.store(e.seq);
 }
+}  // namespace
+
+void knowledge_reason(const std::string& text) {
+    std::lock_guard lock(g_mu);
+    if (g_reason.empty()) g_reason = text.substr(0, 159);
+}
+
+void emit_roster_change(uint32_t kind, uint32_t generation, uint32_t npc_id, uint8_t before, uint8_t after, uint16_t version,
+                        uint64_t revision, uint64_t step) {
+    KilnKnowledgeEvent e{};
+    e.kind = KILN_KNOW_EVENT_ROSTER;
+    e.target = kind;
+    e.npc = generation;
+    e.id = npc_id;
+    e.old_value = before;
+    e.new_value = after;
+    e.extra = version;
+    e.request = revision;
+    e.step = step ? step : 1;
+    std::lock_guard lock(g_mu);
+    emit(e);
+}
+
+namespace {
 
 // ------------------------------------------------------------------------------------------- requests ---------
 struct Req {
@@ -1284,6 +1308,7 @@ void KILN_CALL on_post(const KilnTickInfo* tick, void*) {
 }
 
 void KILN_CALL on_world(const KilnWorldEvent* e, void*) {
+    roster_world_event(e);  // both worlds: their roster snapshots and second pages end with them
     if (e->kind != KILN_WORLD_SERVER) return;
     if (e->event == KILN_WORLD_STOPPING) {
         KI("server world stopping: knowledge state dropped");
@@ -1588,9 +1613,12 @@ KilnResult KILN_CALL t_npc(uint32_t index, KilnKnowledgeNpc* out, char* buf, siz
     if (!n) return KILN_ERR_NOT_FOUND;
     KilnKnowledgeNpc v = n->npc;
     v.unlocked = 0xff;
-    uint64_t mask = 0;
+    uint64_t pages[2] = {};
+    uint32_t npages = 0, count = 0;
     uint16_t ver = 0;
-    if (g_npc_ok && index < 64 && npc_unlock_mask(&mask, &ver)) v.unlocked = (mask >> index) & 1;
+    // through the roster's pages (roster.cpp): an entry past the pages this registry has stays unknown (0xff)
+    if (g_npc_ok && npc_unlock_pages_server(pages, &npages, &ver, &count) && index < npages * 64u && index < count)
+        v.unlocked = (pages[index / 64] >> (index % 64)) & 1;
     const uint32_t size = out->size ? std::min<uint32_t>(out->size, sizeof v) : sizeof v;
     std::memcpy(out, &v, size);
     out->size = size;
@@ -1732,7 +1760,13 @@ const KilnKnowledgeApi kTable = {
     &t_catalog_count, &t_catalog_at, &t_journal_quest, &t_journal_step, &t_npc, &t_events, &t_last_seq, &t_held_ops,
     &t_decide, &t_listen, &t_settings, &t_configure, &t_allow, &t_native_manifest, &t_lab_record,
     &flame_status, &flame_set, &flame_result,
+    &roster_world, &roster_budget, &npc_unlock_at,  // since 0.2.0-dev.29
 };
+static_assert(sizeof(KilnKnowledgeApi) == 264 && offsetof(KilnKnowledgeApi, flame_result) == 232 &&
+                  offsetof(KilnKnowledgeApi, roster_world) == 240 && offsetof(KilnKnowledgeApi, roster_budget) == 248 &&
+                  offsetof(KilnKnowledgeApi, npc_unlock_at) == 256,
+              "kiln.knowledge appends roster_world, roster_budget, npc_unlock_at at 240 (0.2.0-dev.29)");
+static_assert(sizeof(KilnNpcUnlockReply) == 40 && offsetof(KilnNpcUnlockReply, revision) == 32, "KilnNpcUnlockReply layout");
 
 // ------------------------------------------------------------------------------------------- setup ------------
 bool cst(const char* name, int64_t* out) { return g_api->constant(kstr(name), out) == KILN_OK; }
@@ -1820,6 +1854,7 @@ void install_hooks() {
 }
 
 void KILN_CALL on_ready(void*) {
+    roster_ready();       // the npcs.* rows
     native_pack_boot();   // a boot profile: the mods' quest files are prepared with the boot generation (chapter 08)
     native_pack_ready();
     flame_ready();        // Flame mods: another loader's, not moved
@@ -1841,6 +1876,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     info->on_ready = &on_ready;
     if (!load_layout()) return KILN_ERR_UNAVAILABLE;
     install_hooks();
+    roster_main();        // before the build can ask for the roster's maximum
     native_pack_install();
     std::string dir = api_path(KILN_PATH_CONFIG);
     if (dir.empty()) {

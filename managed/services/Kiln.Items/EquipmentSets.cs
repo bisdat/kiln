@@ -186,9 +186,13 @@ public sealed class EquipmentSetChangedEvent : KilnEvent, IEntityEvent
 
 /// <summary>
 /// A set's transaction left the inventory neither as asked nor as before, or the game faulted inside it
-/// (<see cref="EquipmentSetStatus.InvariantFailure"/>): something may have changed, and equipment sets are off until
-/// the server restarts. Posted once, on the tick thread, with the set's result; the changes that could still be read
-/// come as an <see cref="EquipmentSetChangedEvent"/> as well. Capability <c>items.equip_sets</c>. Since 0.2.0-dev.29.
+/// (<see cref="EquipmentSetStatus.InvariantFailure"/>): something may have changed, and equipment sets and single equips
+/// are off until the server restarts (the capability row <c>items.equip_sets</c> keeps the reason, and kiln.log names
+/// the player and the step). After a fault nothing is rolled back or repaired: when
+/// <see cref="EquipmentSetResult.MayHaveMutated"/> is set, the player's inventory may be in an unknown state, and the
+/// result's reason says so. Posted once, on the tick thread, with the set's result. Not the opposite of
+/// <see cref="EquipmentSetChangedEvent"/>: when the changes that could still be read are known, that event is posted
+/// for the same ticket as well (both, in that order). Capability <c>items.equip_sets</c>. Since 0.2.0-dev.29.
 /// </summary>
 [ServerOnly, TickThreadOnly]
 public sealed class EquipmentSetFaultedEvent(EquipmentSetResult result) : KilnEvent, IEntityEvent
