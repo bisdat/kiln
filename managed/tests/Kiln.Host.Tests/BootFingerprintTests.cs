@@ -214,6 +214,27 @@ public sealed class BootFingerprintTests : ModsFixture
         Assert.Equal(direct, viaLink);
     }
 
+    [Fact]
+    public void A_link_in_the_mod_folders_parent_and_a_trailing_separator_do_not_change_the_fingerprint()
+    {
+        var real = Mod("library-parent/frost");
+        var parentLink = Path.Combine(ModsDir, "linked-parent");
+        Directory.CreateSymbolicLink(parentLink, Path.GetDirectoryName(real)!);
+        var via = Path.Combine(parentLink, "frost") + Path.DirectorySeparatorChar;
+        JsonObject Docs(string icon) => Envelope(("skills", "frost", "talent#1",
+            new JsonObject { ["iconFile"] = icon }.ToJsonString()));
+        Assert.Equal(BootFingerprint.Of("frost", real, Docs(Path.Combine(real, "icons", "token.png"))),
+            BootFingerprint.Of("frost", via, Docs(Path.Combine(real, "icons", "token.png"))));
+    }
+
+    [Fact]
+    public void Native_windows_and_Wine_drive_folders_count_the_same_icon()
+    {
+        (string, string, JsonNode?)[] Entry(string path) => [("content", "token#1", new JsonObject { ["icon"] = path })];
+        Assert.Equal(BootFingerprint.Hash(Entry(@"C:\Games\frost\icons\token.png"), [BootFingerprint.NormalizeRoot(@"c:\games\frost\")]),
+            BootFingerprint.Hash(Entry(@"Z:\home\player\mods\frost/icons/token.png"), [BootFingerprint.NormalizeRoot(@"Z:\home\player\mods\frost")]));
+    }
+
     [Theory]
     [InlineData(@"C:\Games\Enshrouded\kiln\mods\frost\icons\token.png", @"C:\Games\Enshrouded\kiln\mods\frost", "$mod/icons/token.png")]
     [InlineData(@"\\?\C:\Games\Enshrouded\kiln\mods\frost\icons\token.png", @"C:\Games\Enshrouded\kiln\mods\frost\", "$mod/icons/token.png")]

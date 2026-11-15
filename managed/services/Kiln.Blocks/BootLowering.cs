@@ -86,10 +86,13 @@ internal static class BootLowering
                 try
                 {
                     var block = (IBlock)JsonSerializer.Deserialize((string)s["json"]!, type, BlockJson.SharedOptions)!;
+                    var errorsBefore = mod.Errors.Count;
                     var (handle, low, _) = Lower(mod, key, block, type);
                     low.Commit();
                     mod.Handles[key] = handle;
                     if (low.Json["node"] is JsonObject node) sink.Skills(key, node);
+                    foreach (var error in mod.Errors.Skip(errorsBefore))
+                        issues.Add(new JsonObject { ["kind"] = kind, ["key"] = key, ["code"] = "IconRefused", ["reason"] = error });
                 }
                 catch (Exception e) when (e is BlockError or JsonException or ArgumentException or InvalidOperationException or NotSupportedException)
                 {

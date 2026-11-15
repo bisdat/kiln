@@ -58,12 +58,12 @@ internal static class BlockIcons
 
     private static void Refused(BlockContext ctx, string path, string file, string problem)
     {
-        // A boot definition's lowering refuses it on a scratch ledger: the mod's runtime activation defines the same block again
-        // (BootLowering.ActivateNow), which says why, into the mod's ledger, once.
-        if (Lowered._bootLowering) return;
+        // Retain a boot refusal on the scratch ledger for LowerOwner's issues, even if runtime activation never happens.
+        // Activation defines it again into the runtime ledger and logs the usual message once.
         var text = $"block {ctx.Block}, {path}: {file}: {problem}; the base icon stays";
         lock (ctx.Mod.Errors) ctx.Mod.Errors.Add(text);
         ctx.Mod.ReportDirty = true;
+        if (Lowered._bootLowering) return; // retained in the boot report even if runtime activation never happens
         BlocksBridge.Log(LogLevel.Error, $"blocks: {ctx.Mod.Id}: {text}");
     }
 

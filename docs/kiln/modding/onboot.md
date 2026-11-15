@@ -90,11 +90,12 @@ one is dropped, with a warning (`ShadowedByFile`) in kiln.log and `state/boot.js
 
 **Icons and other files.** A PNG icon of a boot definition is a file of your mod's folder with a relative path, as in
 `OnLoad`: an item's `Visual = new VisualBlock { Icon = "icons/token.png" }`, a status's or a game-tree talent's `Icon`
-(ship the file with the mod, and set `"clients": "mod"`). The boot generation names it by its full path in the mod's
-folder, as a definition made in `OnLoad` does, so the first start shows it. Since 0.2.0-dev.29: before, a boot-staged
+(ship the file with the mod, and set `"clients": "mod"`). The boot generation names an item's or a game-tree talent's
+file by its full, link-resolved path in the mod's folder, as a definition made in `OnLoad` does, so the first start shows it. Since 0.2.0-dev.29: before, a boot-staged
 item or talent kept its starter's icon (kiln.log: `cannot open ...\kiln\icons/token.png`). A status's icon is served when
 the game's content is ready, as for `OnLoad`. A missing file, or a path that leaves the folder (`..`, a link out of it),
-costs only the icon: the starter's stays, and kiln.log says why once, when the mod loads, with the line `OnLoad` would
+costs only the icon: the starter's stays. The refusal is retained in `state/boot.json`, even if the mod never loads;
+kiln.log says why once when the mod loads, with the line `OnLoad` would
 give (`blocks: <id>: block item token, visual.icon: ...; the base icon stays`); the SDK's bake warns with it (KILN030).
 At the join an icon counts by its place in the folder (`$mod/icons/token.png`), so a player whose game is in another
 folder matches the server. The other fields of the boot kinds name no file: a model is a GUID or `item:<name>`, a

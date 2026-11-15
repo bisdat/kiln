@@ -387,6 +387,80 @@ public sealed unsafe class ItemIconPathTests : IDisposable
     private static void Loaded(string dir) =>
         ModsBackend.Current = new FakeMods(new ModEntry(Boot, Boot, "1.0.0", dir, ModSide.Both, ModState.Loaded, null, [], 0, null));
 
+    [Theory]
+    [InlineData("icons/bad./token.png")]
+    [InlineData("icons/bad /token.png")]
+    [InlineData("/outside.png")]
+    public void Boot_and_runtime_refuse_the_same_nonportable_icon(string icon)
+    {
+        var block = new ItemBlock { Name = "Token", Visual = new VisualBlock { Icon = icon } };
+        var (dir, staged) = BootMod(d => Assert.True(d.Define("token", block).Ok));
+        Assert.Null(CommittedIcon(LowerBoot(dir, staged), "token"));
+        Loaded(dir);
+        var mod = NewMod(Boot);
+        Compiler.Define(mod, "token", block);
+        Assert.Null(IconSent($"{Boot}.token"));
+        Assert.Single(mod.Errors);
+    }
+
+    [Fact]
+    public void A_failed_lowering_restores_runtime_icon_diagnostics()
+    {
+        var (dir, staged) = BootMod(d => Assert.True(d.Define("token", new ItemBlock { Name = "Token", Stack = -1 }).Ok));
+        var request = new JsonObject { ["id"] = Boot, ["dir"] = dir, ["clients"] = "mod",
+            ["staged"] = new JsonArray(staged.Select(x => (JsonNode)new JsonObject
+                { ["kind"] = x.Kind, ["key"] = x.Key, ["json"] = x.Json }).ToArray()) };
+        Assert.False(JsonNode.Parse(BootLowering.LowerOwner(request.ToJsonString()))!["ok"]!.GetValue<bool>());
+        Assert.False(Lowered._bootLowering);
+        Assert.Null(Lowered._sinkOverride);
+        var mod = NewMod();
+        Compiler.Lower(mod, "missing", new ItemBlock { Name = "Missing", Visual = new VisualBlock { Icon = "icons/missing.png" } });
+        Assert.Single(mod.Errors);
+    }
+
+    [Fact]
+    public void A_boot_icon_refusal_is_retained_even_without_runtime_activation()
+    {
+        var (dir, staged) = BootMod(d => Assert.True(d.Define("token", new ItemBlock
+            { Name = "Token", Visual = new VisualBlock { Icon = "icons/missing.png" } }).Ok));
+        var issue = Assert.Single(LowerBoot(dir, staged)["issues"]!.AsArray());
+        Assert.Equal("IconRefused", (string?)issue!["code"]);
+        Assert.Contains("the base icon stays", (string?)issue["reason"]);
+        Assert.False(Lowered._bootLowering);
+    }
+
+    [Fact]
+    public void An_unknown_mod_folder_never_commits_a_relative_icon()
+    {
+        var block = new ItemBlock { Name = "Token", Visual = new VisualBlock { Icon = "icons/token.png" } };
+        var (_, staged) = BootMod(d => Assert.True(d.Define("token", block).Ok));
+        Assert.Null(CommittedIcon(LowerBoot("", staged), "token"));
+        var mod = NewMod(Boot);
+        Compiler.Define(mod, "token", block);
+        Assert.Null(IconSent($"{Boot}.token"));
+        Assert.Single(mod.Errors);
+    }
+
+    [Theory]
+    [InlineData("../../outside.png")]
+    [InlineData("icons/link.png")]
+    [InlineData("icons/missing.png")]
+    public void A_boot_talent_refuses_an_icon_outside_its_folder_or_missing(string icon)
+    {
+        var json = new JsonObject { ["name"] = "Talent", ["icon"] = icon,
+            ["modifies"] = new JsonObject { ["max-health"] = 10 },
+            ["game"] = new JsonObject { ["from"] = new JsonArray("0x8efcc472"), ["offset"] = new JsonArray(170, 0) } }.ToJsonString();
+        var (dir, staged) = BootMod(d => Assert.True(d.DefineJson("talents", "talent", json).Ok));
+        File.CreateSymbolicLink(Path.Combine(dir, "icons", "link.png"), Path.Combine(_root, "outside.png"));
+        var node = Assert.Single(LowerBoot(dir, staged)["docs"]!["skills"]!.AsArray())!["document"]!["nodes"]![0]!;
+        Assert.Null(node["iconFile"]);
+        Loaded(dir);
+        var mod = NewMod(Boot);
+        var low = Compiler.Lower(mod, "talent", BlockJson.Parse<TalentBlock>(json));
+        Assert.Null(low.Low.Json["node"]!["iconFile"]);
+        Assert.Single(mod.Errors);
+    }
+
     [Fact]
     public void A_boot_staged_items_png_icon_is_committed_as_the_file_a_run_time_define_names()
     {
@@ -429,7 +503,7 @@ public sealed unsafe class ItemIconPathTests : IDisposable
         Assert.Null(CommittedIcon(lowered, "up"));
         Assert.Null(CommittedIcon(lowered, "missing"));
         Assert.Null(CommittedIcon(lowered, "escape"));
-        Assert.Equal(3, mod.Errors.Count);   // the run-time define says why, once (the boot lowering's scratch ledger says nothing: its activation does)
+        Assert.Equal(3, mod.Errors.Count);   // the run-time define says why, once (the boot lowering retains an issue without logging; activation logs it)
     }
 
     [Fact]
