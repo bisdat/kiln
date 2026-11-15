@@ -479,3 +479,60 @@ fn an_update_placement_stopped_after_its_publish_is_finished() {
     assert!(place_leftovers(&w).is_empty());
     w.tidy_on_disk();
 }
+
+/// The order of what an update, a roll back and its placement make durable (the seam `crate::durable`, recorded):
+/// a kept-state record is written only after every settings folder it names (and the folder holding that name) was
+/// flushed; the record that drops a change's pending entry only after the profile's meta.json and its folder were
+/// flushed; the record that marks a restore done only after the restored files and their folders were flushed. A test
+/// cannot cut the power on Linux: this is what makes a power cut leave either the old or the new state.
+#[test]
+fn every_record_is_written_after_what_it_names_is_flushed() {
+    use crate::durable::Event;
+    let w = world("order");
+    let ((), events) = crate::durable::recording(|| {
+        w.drop_in(&w.g, "1.0.0");
+        w.write(&w.g, "1");
+        w.drop_in(&w.g, "2.0.0");
+        w.write(&w.g, "9");
+        w.rollback().unwrap();
+        crate::profile::refresh_active(&w.dirs, &w.g).unwrap();
+    });
+    assert_settings(&w, "1.0.0", OLD);
+    let state = state_path(&w.dirs);
+    let meta = w.dirs.profile(&w.pid(&w.g)).join("meta.json");
+    let flushed = |upto: usize, e: &Event| events[..upto].contains(e);
+    let journals: Vec<(usize, &Vec<PathBuf>, usize, usize)> = events.iter().enumerate()
+        .filter_map(|(i, e)| match e { Event::Journal { path, names, pending, restores } if *path == state => Some((i, names, *pending, *restores)), _ => None })
+        .collect();
+    assert!(journals.len() >= 4, "the update, the roll back and the restore write the state: {events:#?}");
+    let mut named = 0;
+    for (i, names, _, _) in &journals {
+        for n in names.iter() {
+            named += 1;
+            assert!(flushed(*i, &Event::Dir(n.clone())), "{} named before its folder was flushed", n.display());
+            assert!(flushed(*i, &Event::Dir(n.parent().unwrap().to_path_buf())), "{} named before its name was flushed", n.display());
+        }
+    }
+    assert!(named > 0, "the records name settings folders");
+    let mut commits = 0;
+    let mut cleared = 0;
+    for pair in journals.windows(2) {
+        let ((a, _, pending_a, restores_a), (b, _, pending_b, restores_b)) = (pair[0].clone(), pair[1].clone());
+        let between = &events[a..b];
+        if pending_a > 0 && pending_b == 0 {
+            commits += 1;
+            assert!(between.contains(&Event::File(meta.clone())) && between.contains(&Event::Dir(meta.parent().unwrap().to_path_buf())),
+                "a pending change dropped before its profile was flushed: {between:#?}");
+        }
+        if restores_b < restores_a {
+            cleared += 1;
+            for rel in [A, B] {
+                let f = w.g.path.join(rel);
+                assert!(between.contains(&Event::File(f.clone())) && between.contains(&Event::Dir(f.parent().unwrap().to_path_buf())),
+                    "a restore marked done before {rel} was flushed: {between:#?}");
+            }
+        }
+    }
+    assert!(commits >= 2, "the update and the roll back commit after their profile save ({commits})");
+    assert_eq!(cleared, 1, "the restore is marked done once");
+}

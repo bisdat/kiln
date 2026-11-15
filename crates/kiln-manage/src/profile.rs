@@ -832,7 +832,10 @@ pub fn save(dirs: &DataDirs, profile: &Profile) -> Result<Profile> {
     p.generation = next_generation(p.generation)?;
     p.created = stored.created;
     p.updated = now_rfc3339();
-    crate::util::write_json_atomic(&meta_path(dirs, &p.id), &p)?;
+    // durably (crate::durable): kept versions' records depend on the profile they follow
+    let mut text = serde_json::to_string_pretty(&p)?;
+    text.push('\n');
+    crate::durable::replace(&meta_path(dirs, &p.id), text.as_bytes())?;
     Ok(p)
 }
 

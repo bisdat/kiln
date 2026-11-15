@@ -726,7 +726,7 @@ fn save_publications(game: &Path, all: &[Publication]) -> Result<()> {
     std::fs::create_dir_all(parent).map_err(io_at(parent, "creating"))?;
     let mut text = serde_json::to_string_pretty(all)?;
     text.push('\n');
-    crate::util::write_atomic_durable_exclusive(&file, text.as_bytes())
+    crate::durable::journal(&file, text.as_bytes(), &[], 0, 0)
 }
 
 /// Records the publication `p` (replacing the last one at its path) before anything of it happens.

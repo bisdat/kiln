@@ -400,7 +400,15 @@ fn save(dirs: &DataDirs, st: &KeptState) -> Result<()> {
     }
     let mut text = serde_json::to_string_pretty(st)?;
     text.push('\n');
-    crate::util::write_atomic_durable_exclusive(&state_path(dirs), text.as_bytes())
+    // what it names (crate::durable: flushed before this record)
+    let mut names = Vec::new();
+    for m in st.mods.iter().chain(st.pending.iter().flat_map(|t| t.before.iter())) {
+        for s in m.kept.iter().map(|v| &v.settings).chain(m.restores.iter().map(|r| &r.settings)) {
+            if let Some(d) = &s.dir && let Ok(p) = copy_dir(dirs, m.kind, &m.id, d) && !names.contains(&p) { names.push(p); }
+        }
+    }
+    let restores = st.mods.iter().map(|m| m.restores.len()).sum();
+    crate::durable::journal(&state_path(dirs), text.as_bytes(), &names, st.pending.len(), restores)
 }
 
 fn entry_exists(dirs: &DataDirs, kind: ModKind, id: &str, version: &str, hash: &str) -> bool {
@@ -774,7 +782,8 @@ fn take_settings(dirs: &DataDirs, games: &[PathBuf], kind: ModKind, id: &str, v:
                     if let Some(why) = disk_refusal(dirs, version_size + out.size + size, out.files.len() as u64 + 2) { return Err(why); }
                     let game_rel = format!("{rel_copy}/{rel}");
                     let dst = stage.join(&game_rel);
-                    let written = crate::engine_mods::refuse_symlink_path(&parent, &dst).and_then(|()| crate::util::write_atomic_exclusive(&dst, &bytes));
+                    let written = crate::engine_mods::refuse_symlink_path(&parent, &dst).and_then(|()| crate::util::write_atomic_exclusive(&dst, &bytes))
+                        .and_then(|()| crate::durable::flush_file(&dst));
                     match written {
                         Ok(()) => { out.files.push(game_rel); out.size += size; crash_point(Step::SnapshotCopied); }
                         Err(e) => out.left_out.push(format!("{game_rel}: {}", e.message)),
@@ -800,14 +809,19 @@ fn take_settings(dirs: &DataDirs, games: &[PathBuf], kind: ModKind, id: &str, v:
         let _ = std::fs::remove_dir_all(&stage);
         return Ok(out);
     }
-    // whole: into its own folder at once (a stop before leaves the staged folder, which the next look deletes)
+    // whole: its folders flushed, then into its own folder at once, that name flushed too, and the folders above it
+    // (made now for a first copy): only then may the state name it (a stop before leaves the staged folder, or a
+    // folder nothing names, which the next look deletes)
     let to = parent.join(&name);
-    if let Err(e) = std::fs::rename(&stage, &to) {
+    let published = crate::durable::flush_tree(&stage)
+        .and_then(|()| crate::durable::rename_dir(&stage, &to))
+        .and_then(|()| crate::durable::flush_dir(&to))
+        .and_then(|()| parent.ancestors().skip(1).take(3).try_for_each(crate::durable::flush_dir));
+    if let Err(e) = published {
         let _ = std::fs::remove_dir_all(&stage);
-        return Err(format!("its settings could not be kept ({e})"));
+        let _ = std::fs::remove_dir_all(&to);
+        return Err(format!("its settings could not be kept ({})", e.message));
     }
-    #[cfg(unix)]
-    let _ = std::fs::File::open(&parent).and_then(|d| d.sync_all());
     crash_point(Step::SnapshotRenamed);
     out.dir = Some(name);
     Ok(out)
@@ -1142,7 +1156,13 @@ fn apply_restore(dirs: &DataDirs, game: &Path, kind: ModKind, id: &str, r: &Pend
             notes.push(format!("{tag}: {rel} was not put back: the mod's copy is somewhere else now"));
             continue;
         };
-        match put_back(game, &copy.path, &rel[c.len() + 1..], dir, &dir.join(rel)) {
+        // the file and the name it has in its folder are flushed before the state may say it is back
+        let to = copy.path.join(&rel[c.len() + 1..]);
+        let written = put_back(game, &copy.path, &rel[c.len() + 1..], dir, &dir.join(rel)).and_then(|w| {
+            if w { crate::durable::flush_file(&to)?; if let Some(p) = to.parent() { crate::durable::flush_dir(p)?; } }
+            Ok(w)
+        });
+        match written {
             Ok(true) => { back.push(rel.clone()); crash_point(Step::RestoreFile); }
             Ok(false) => {}
             Err(e) if matches!(e.code, ErrorCode::Refused | ErrorCode::InvalidArgument) => notes.push(format!("{tag}: {rel} was not put back: {}", e.message)),
