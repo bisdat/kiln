@@ -11,9 +11,15 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit.v3" Version="3.1.0" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <PackageReference Include="Microsoft.Build.Utilities.Core" Version="17.14.28" />
+    <PackageReference Include="Microsoft.Build.Framework" Version="17.14.28" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../services/Kiln.Blocks/Kiln.Blocks.csproj" />
+    <!-- [ImpactNative] methods of this project (NativesGeneratedTests): the generator runs as it does for a mod -->
+    <ProjectReference Include="../../Kiln.Analyzers/src/Kiln.ImpactNatives/Kiln.ImpactNatives.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <!-- the SDK's KilnImpactNatives task, run on this assembly's generated entries (NativesGeneratedTests) -->
+    <ProjectReference Include="../../Kiln.Sdk/Kiln.Sdk.csproj" />
     <!-- AffixTests: affixes are item data, so they run on Kiln.Saves' real instance store over its tests' fake game. -->
     <Compile Include="../Kiln.Saves.Tests/InstanceHarness.cs" Link="Saves/InstanceHarness.cs" />
     <Compile Include="../Kiln.Saves.Tests/FakeInstanceWorld.cs" Link="Saves/FakeInstanceWorld.cs" />
