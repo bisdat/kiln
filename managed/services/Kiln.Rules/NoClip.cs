@@ -254,6 +254,9 @@ public static class NoClip
     /// <summary>One line: whether it works here, whether the server allows it, and who has it.</summary>
     internal static string Status()
     {
+        // The local console also runs on joined clients. Their file is not the server's policy.
+        if (Client.IsRemote)
+            return "NoClip status belongs to the server you joined. Use /noclip status in server chat to check its rules.json and players.";
         // /noclip status is a first-class command even if no rule set was
         // ever applied; report the loaded policy, not uninitialized defaults.
         RulesRuntime.StartPolicy();
