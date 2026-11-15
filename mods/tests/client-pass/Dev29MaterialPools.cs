@@ -12,6 +12,15 @@ public sealed partial class ClientPassMod
         Tags=[Visual,TwoPlayers],Needs=ClientCheckNeeds.Any,Order=5500)]
     public async Task MaterialPools(CheckContext c)
     {
+        // First: were the fixture's pools admitted when this game loaded its mods (on a client: in the main menu)? A pool
+        // refused there is named with its reason, before anything else is looked at.
+        try {
+            using var status=JsonDocument.Parse(WorldTables.StatusJson());
+            var rows=status.RootElement.TryGetProperty("poolRegistrations",out var list)?list.EnumerateArray().Where(r=>r.GetProperty("mod").GetString()=="mp-fixture").ToArray():[];
+            var refused=rows.Where(r=>r.GetProperty("state").GetUInt32()!=(uint)DefinitionRegistrationState.Registered).Select(r=>$"{r.GetProperty("definition").GetString()}: {r.GetProperty("reason")}").ToArray();
+            c.Expect(rows.Length==4 && refused.Length==0,"the fixture's four pools were registered when the mods loaded",
+                refused.Length>0?"refused at load: "+string.Join("; ",refused):$"{rows.Length} registration(s) of mp-fixture's pools (expected 4)");
+        } catch(Exception e){c.Expect(false,"the fixture's four pools were registered when the mods loaded",e.Message);}
         c.Expect(c.Session!=ClientCheckSession.Server && c.Player!=EntityId.None,"a real hosting or joined player is present");
         c.Expect(Mods.Get("mp-fixture")?.IsLoaded==true,"the mp-fixture mod is loaded");
         c.Expect(Capabilities.Is("worldtables.material_pools"),"this executable resolves custom pool inputs",Capabilities.Why("worldtables.material_pools"));
@@ -22,9 +31,11 @@ public sealed partial class ClientPassMod
             var dir=Mods.Get("mp-fixture")?.Directory??throw new InvalidOperationException("mp-fixture is absent");
             using var proof=JsonDocument.Parse(File.ReadAllText(Path.Combine(dir,"lab-proof.json")));
             var p=proof.RootElement;var ran=p.GetProperty("passed").EnumerateArray().Select(v=>v.GetString()).ToHashSet(StringComparer.Ordinal);
-            string[] required=["served","restart","absent","back","late-material-room","handshake-order-before-stream","handshake-binding-before-stream","late","pending-inactive","replay","torn-refused","restored-main-hash","building-seed","building-retained","terrain-boundary"];
+            string[] required=["served","restart","absent","back","late-material-room","handshake-order-before-stream","handshake-binding-before-stream","late","pending-inactive","replay","torn-refused","stored-pool-dropped","stored-pool-gone","restored-main-hash","observer-cost","building-seed","building-retained","terrain-boundary"];
             c.Expect(p.GetProperty("format").GetInt32()==1 && p.GetProperty("complete").GetBoolean() && required.All(ran.Contains),"all coordinator lab cases passed, including refusals before streaming");
             c.Expect(p.GetProperty("hash").GetString()==WorldTables.Hash,"the lab proof is for this exact material/pool/binding profile",WorldTables.Hash);
+            var kiln=p.TryGetProperty("kiln",out var k)?k.GetString():null;
+            c.Expect(kiln==PoolProof.KilnBuild,"the lab proof is for this Kiln build",$"proof {kiln ?? "(none)"}, this game {PoolProof.KilnBuild}");
         } catch(Exception e){c.Expect(false,"the coordinator's complete lab-proof.json is installed in mp-fixture",e.Message);}
         c.Instruct("Use disposable characters and a disposable world. Do this on a hosting client AND a client joined to the coordinator's server (record each session). " +
             "Craft the three Pool blocks from rough stone (one rough-stone block makes ten); prepare Rough Wood and Mycelium blocks too. " +

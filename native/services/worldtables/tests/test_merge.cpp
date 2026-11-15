@@ -401,7 +401,7 @@ void pool_admission_test() {
     check("pool-admission.bind",shapes.size()==1 && shapes[0].pool==mf.pools[0].guid && errors.empty());
     auto bad=mf.pools; bad[0].entries.push_back({"ice",""});
     r=resolve_pools(bad,{ice},game);
-    check("pool-admission.duplicate-refused-and-partitioned",r.pools.empty() && r.grouped.count(ice.guid) && !r.errors.empty());
+    check("pool-admission.duplicate-refused-groups-nothing",r.pools.empty() && !r.grouped.count(ice.guid) && !r.errors.empty());
     shapes=mf.shapes; bind_shape_pools(&shapes,bad,r.pools,&errors);
     check("pool-admission.dependent-shape-refused",shapes.empty());
     bad=mf.pools; bad[0].roof=true; r=resolve_pools(bad,{ice},game);
@@ -421,7 +421,7 @@ void pool_admission_test() {
     ModFile invalid; invalid.mod="pools"; invalid.clients="mod";
     read_blocks(parse_relaxed(R"({"buildingMaterialPools":{"bad":{"name":"Bad","materials":[{"material":"ice","gameMaterial":"WoodRough"}]}}})"),&invalid);
     r=resolve_pools(invalid.pools,{ice},game);
-    check("pool-admission.invalid-entry-still-partitions",!invalid.errors.empty() && r.pools.empty() && r.grouped.count(ice.guid));
+    check("pool-admission.invalid-entry-groups-nothing",!invalid.errors.empty() && r.pools.empty() && !r.grouped.count(ice.guid));
 }
 
 // A pool's "gameMaterial" is the block item the build menu lists for that material, not its registry config's
@@ -476,7 +476,7 @@ void pool_game_catalog_test() {
     dup.pools[0].entries = {{"", "Alpha"}};
     r = resolve_pools(dup.pools, {}, game);
     check("pool-catalog.two-block-items-of-one-name-refused", r.pools.empty() && !r.arguments_invalid && r.errors.size() == 1 &&
-                                                                  r.errors[0].find("Alpha is placed by more than one block item") != std::string::npos,
+                                                                  r.errors[0].find("materials[0] (gameMaterial Alpha): the game has more than one block item for that material") != std::string::npos,
           r.errors.empty() ? "" : r.errors[0]);
 }
 
@@ -491,6 +491,121 @@ void stored_refusal_once_test() {
     const auto lines = merge_error_lines(errors, {text});
     check("stored-refusal.named-once", lines == std::vector<std::string>{errors[0]}, std::to_string(lines.size()) + " line(s)");
     check("stored-refusal.others-logged", merge_error_lines(errors, {}) == errors);
+}
+
+
+// ---- repair round after the independent read (dev.29) ----
+// Item 3: a pool takes materials out of the game's lists only when it is accepted, and only its own mod's or a
+// declared dependency's.
+void pool_grouping_test() {
+    ModFile mf; mf.mod="pools"; mf.clients="mod";
+    read_blocks(parse_relaxed(R"({"buildingMaterialPools":{"walls":{"name":"Walls","materials":[{"material":"ice"},{"gameMaterial":"WoodRough"}]}}})"),&mf);
+    auto ice=material("pools","ice"); std::map<std::string,PoolGameMaterial> game{{"WoodRough",{900,false}}};
+    auto bad=mf.pools; bad[0].entries.push_back({"ice",""});
+    auto r=resolve_pools(bad,{ice},game);
+    check("pool-group.refused-pool-groups-nothing",r.pools.empty() && r.grouped.empty());
+    auto foreign=material("other","ice"); bad=mf.pools; bad[0].entries={{"other:ice",""}};
+    r=resolve_pools(bad,{foreign},game);
+    check("pool-group.foreign-without-dependency-not-grouped",r.pools.empty() && !r.grouped.count(foreign.guid));
+    bad[0].dependencies.insert("other"); r=resolve_pools(bad,{foreign},game);
+    check("pool-group.dependency-accepted-groups",r.pools.size()==1 && r.grouped.count(foreign.guid));
+    bad[0].roof=true; r=resolve_pools(bad,{foreign},game);
+    check("pool-group.dependency-refused-groups-nothing",r.pools.empty() && r.grouped.empty());
+
+    r=resolve_pools(mf.pools,{ice},game);
+    refuse_custom_pools(&r,"unsupported reflected pool layout");
+    check("pool-group.unsupported-layout-groups-nothing",r.pools.empty() && r.grouped.empty() && r.errors.size()==1);
+
+    // Both mod members resolve, but the material namespace fits only one. Rejecting the pool must restore the
+    // ordinary selector fitting before its members are served, including any member shared with a surviving pool.
+    auto snow=material("pools","snow");
+    bad=mf.pools;bad[0].entries={{"ice",""},{"snow",""}};
+    r=resolve_pools(bad,{ice,snow},game);
+    auto allocation=allocate({ice,snow},{},{213},{});
+    check("pool-group.id-exhaustion-refuses-pool",retain_allocated_pools(&r,{ice,snow},allocation.placed,game) && r.pools.empty() && r.grouped.empty());
+    std::vector<Material> fallback{ice,snow}, held;std::vector<std::string> refused;
+    fit_pools(&fallback,{{kWallPool,63}},{},&held,&refused,r.grouped);
+    check("pool-group.id-exhaustion-refits-defaults",fallback.size()==1 && refused.size()==1);
+    auto shared=mf.pools[0];shared.block="shared";shared.guid=derive_guid("pools","materialpool","shared");shared.entries={{allocation.placed[0].m.block,""}};
+    r=resolve_pools({bad[0],shared},{ice,snow},game);
+    check("pool-group.id-exhaustion-keeps-shared-grouping",retain_allocated_pools(&r,{ice,snow},allocation.placed,game) && r.pools.size()==1 && r.grouped==std::set<Guid>{allocation.placed[0].m.guid});
+
+    // A grouped material can outgrow the shared cell namespace on a later start. A live declaration that no longer
+    // fits must still retain a world's cells, just as a selector-refused or absent material does.
+    auto remembered=allocation.placed[0].m.guid==ice.guid?snow:ice;
+    remembered.live=false;remembered.item=false;
+    allocation=allocate({ice,snow},{},{213},{},{remembered});
+    check("pool-group.id-exhaustion-preserves-world-material",allocation.placed.size()==1 && allocation.placed[0].m.guid==remembered.guid && !allocation.placed[0].m.live && !allocation.placed[0].m.item);
+}
+
+// Item 8: one cause, one sentence, the entry or reference named; every problem kept.
+void pool_messages_test() {
+    const auto has=[](const std::vector<std::string>& v,const std::string& text){return v.size()==1 && v[0].find(text)!=std::string::npos;};
+    ModFile mf; mf.mod="msg"; mf.clients="mod";
+    read_blocks(parse_relaxed(R"({"buildingMaterialPools":{"empty":{"name":"E","materials":[]}}})"),&mf);
+    auto r=resolve_pools(mf.pools,{},{});
+    check("pool-message.no-entries",has(r.errors,"refused: it has no entries; a pool lists 1 to 64 materials"),r.errors.empty()?"":r.errors[0]);
+    ojson many=ojson::array();for(int i=0;i<65;++i)many.push_back({{"gameMaterial","WoodRough"}});
+    mf=ModFile{};mf.mod="msg";mf.clients="mod";
+    read_blocks(ojson{{"buildingMaterialPools",{{"big",{{"name","B"},{"materials",many}}}}}},&mf);
+    r=resolve_pools(mf.pools,{},{{"WoodRough",{900,false}}});
+    check("pool-message.65-entries",has(r.errors,"refused: it has 65 entries; a pool lists 1 to 64 materials"),r.errors.empty()?"":r.errors[0]);
+    ojson six=ojson::array();for(int i=0;i<6;++i)six.push_back({{"gameMaterial","Nothing"+std::to_string(i)}});
+    mf=ModFile{};mf.mod="msg";mf.clients="mod";
+    read_blocks(ojson{{"buildingMaterialPools",{{"six",{{"name","S"},{"materials",six}}}}}},&mf);
+    r=resolve_pools(mf.pools,{},{});
+    size_t named=0;for(size_t at=0;!r.errors.empty() && (at=r.errors[0].find("materials[",at))!=std::string::npos;++at)++named;
+    check("pool-message.every-problem-kept",named==6 && has(r.errors,"materials[5] (gameMaterial Nothing5): the game has no building material of that name"),r.errors.empty()?"":r.errors[0]);
+    mf=ModFile{};mf.mod="msg";mf.clients="mod";
+    read_blocks(parse_relaxed(R"({"buildingMaterialPools":{"own":{"name":"O","materials":[{"material":"nothere"},{"material":"dirt"},{"material":"gone"}]}}})"),&mf);
+    auto dirt=material("msg","dirt");dirt.terrain=true;auto gone=material("msg","gone");gone.live=false;
+    r=resolve_pools(mf.pools,{dirt,gone},{});
+    check("pool-message.own-material-named",has(r.errors,"materials[0] (material nothere): it names no building material of this mod or of a declared dependency"),r.errors.empty()?"":r.errors[0]);
+    check("pool-message.terrain-named",has(r.errors,"materials[1] (material dirt): it is a terrain material; a pool lists building materials"));
+    check("pool-message.absent-named",has(r.errors,"materials[2] (material gone): the material is not live this session (its mod is absent, or the material was refused)"));
+    // a blueprint's materialPool: four causes, four sentences, the reference named
+    mf=ModFile{};mf.mod="msg";mf.clients="mod";
+    read_blocks(parse_relaxed(R"({"buildingMaterialPools":{"walls":{"name":"W","materials":[{"gameMaterial":"WoodRough"}]}}})"),&mf);
+    ModFile other;other.mod="other";other.clients="mod";
+    read_blocks(parse_relaxed(R"({"buildingMaterialPools":{"walls":{"name":"W","materials":[{"gameMaterial":"WoodRough"}]}}})"),&other);
+    std::vector<PoolDefinition> defs{mf.pools[0],other.pools[0]};
+    const auto bind=[&](const std::string& ref,bool roof,const std::vector<MaterialPool>& served){
+        Shape sh;sh.mod="msg";sh.block="s";sh.material_pool=ref;sh.roof=roof;std::vector<Shape> v{sh};std::vector<std::string> e;
+        bind_shape_pools(&v,defs,served,&e);return e;
+    };
+    const std::vector<MaterialPool> served{{mf.pools[0].guid,"msg:walls",false,{900}},{other.pools[0].guid,"other:walls",false,{900}}};
+    check("bind-message.unknown",has(bind("msg:nopool",false,served),"block blueprint s (mod msg): refused: its materialPool \"msg:nopool\" names no pool of this mod or of a declared dependency"));
+    check("bind-message.not-a-dependency",has(bind("other:walls",false,served),"its materialPool \"other:walls\" belongs to mod other, which mod msg does not declare as a dependency"));
+    check("bind-message.roof",has(bind("msg:walls",true,served),"its materialPool \"msg:walls\": the shape is a roof shape and the pool a wall pool; Roof must agree"));
+    check("bind-message.refused-pool",has(bind("msg:walls",false,{}),"its materialPool \"msg:walls\" was refused (its own line says why)"));
+}
+
+// Item 7: budgets from the game's own bytes.
+void budget_counts_test() {
+    const auto b=material_budget_counts(0,80,3,1);
+    check("budget.material-from-bytes",b.ready && b.capacity==128 && b.game==80 && b.kiln==3 && b.reserved==1);
+    const auto t=material_budget_counts(1,117,0,0);
+    check("budget.terrain-from-bytes",t.ready && t.capacity==127 && t.game==117);
+    check("budget.material-overflow-not-ready",!material_budget_counts(0,127,3,0).ready);
+    const auto p=pool_budget_counts(kWallPool,62,63);
+    check("budget.pool-from-bytes",p.ready && p.capacity==64 && p.game==62 && p.kiln==1 && p.reserved==0);
+    const auto n=pool_budget_counts("SomeNewPool",7,7);
+    check("budget.new-game-pool",n.ready && n.game==7 && n.kiln==0 && n.reserved==0);
+}
+
+// Item 1 and 12: the automatic prune, the note for a mod that is not loaded, an owner's liveness.
+void stored_files_test() {
+    check("prune.pool-not-defined-again-goes",stored_file_goes("@pool-x","late",true,{}));
+    check("prune.pool-defined-again-stays",!stored_file_goes("@pool-x","late",true,{"@pool/late"}));
+    check("prune.another-block-kind-does-not-keep-pool",stored_file_goes("@pool-x","late",true,{"late"}));
+    check("prune.kept-block-not-defined-goes",stored_file_goes("tough","tough",true,{}));
+    check("prune.mod-not-loaded-keeps-every-file",!stored_file_goes("@pool-x","late",false,{}) && !stored_file_goes("tough","tough",false,{}));
+    const auto kept=kept_file_text("pending/m/@pool-a.json");
+    check("kept.not-unsafe",kept.find("unsafe")==std::string::npos && kept.find("kept: its mod is not loaded in this profile")!=std::string::npos,kept);
+    PoolOwnerLease lease;lease.owner=7;lease.seen=true;lease.step=5;
+    check("lease.missed-pre-with-live-owner-stays",!pool_lease_gone(lease,6,[]{return KilnResult(KILN_OK);}));
+    check("lease.revoked-owner-gone",pool_lease_gone(lease,7,[]{return KilnResult(KILN_ERR_REVOKED);}));
+    check("lease.pre-this-step-stays",!pool_lease_gone(lease,5,[]{return KilnResult(KILN_ERR_REVOKED);}));
 }
 
 void pool_reflection_test() {
@@ -536,7 +651,6 @@ void custom_pool_hash_test() {
 }
 
 void pool_registration_test() {
-    check("pool-receipt.auto-prune-preserves-durable-pool",!pool_prune_allowed("@pool-a",false) && pool_prune_allowed("@pool-a",true) && pool_prune_allowed("legacy-block",false));
     auto digest=pool_sha256("abc");
     check("pool-receipt.sha256",pool_hex(digest.data(),digest.size())=="ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
     ModFile mf;mf.mod="p";mf.clients="mod";
@@ -569,6 +683,11 @@ void pool_registration_test() {
     check("pool-receipt.retained",retained.reply.disposition==KILN_DEFINITION_RETAINED && retained.reply.slots_consumed==2);
     auto registered=ledger.commit(ledger.prepare(def,KILN_DEFINE_REQUIRE_REGISTERED,true),persist);
     check("pool-receipt.served-slots",registered.reply.ok && registered.reply.slots_consumed==2 && registered.reply.disposition==KILN_DEFINITION_REGISTERED && writes==2);
+    std::map<Guid,std::string> pruned{{def.guid,def.mod}};
+    int restored_writes=0;const auto restore=[&](const PoolReceipt&){++restored_writes;return true;};
+    check("pool-receipt.restore-failure-keeps-retry",!restore_pruned_pool(pruned,registered,[](const PoolReceipt&){return false;}) && pruned.count(def.guid));
+    check("pool-receipt.restore-defined-again",restore_pruned_pool(pruned,registered,restore) && pruned.empty() && restored_writes==1);
+    check("pool-receipt.restore-idempotent",restore_pruned_pool(pruned,registered,restore) && restored_writes==1);
     check("pool-receipt.query",ledger.query(registered.id).reply.snapshot_revision==registered.reply.snapshot_revision);
     ledger.owner_inactive(def.guid);
     check("pool-receipt.owner-retained",ledger.query(registered.id).reply.disposition==KILN_DEFINITION_RETAINED && ledger.query(registered.id).reply.slots_consumed==2 && ledger.query(registered.id).reply.reason_code==KILN_DEFINE_OWNER_INACTIVE);
@@ -934,11 +1053,28 @@ int main(int argc, char** argv) {
             bool ok=merge_pools(game,C,allocated.placed,{pool},&merged,&why,grouped);
             check("game.custom-pool-64",ok && pool_size(merged,pool.name)==64 && pool_size(merged,kWallPool)==61,why);
             check("game.custom-pool-keeps-vanilla-payload",ok && merged.size()>game.size() && std::equal(game.begin()+8,game.end(),merged.begin()+8));
+            // Item 4: a build whose pool table fails one of the writer's checks (here row 1 takes row 0's pool id) refuses the
+            // pools by name and keeps every material: nothing grouped, the ordinary merge lists the mod's blocks.
+            Bytes broken=game;const size_t row0=size_t(rows.base-game.data());
+            std::memcpy(broken.data()+row0+C.pool_stride+C.pool_id,broken.data()+row0+C.pool_id,4);
+            check("game.custom-pool-check-trips",!check_custom_pools(broken,C,{pool}).empty(),check_custom_pools(broken,C,{pool}));
+            PoolResolution res;res.pools={pool};res.grouped=grouped;admit_custom_pools(broken,C,&res);
+            check("game.custom-pool-fallback-refuses-by-name",res.pools.empty() && res.grouped.empty() && res.errors.size()==1 &&
+                  res.errors[0].find("block buildingMaterialPool full (mod pool-host-test): refused:")==0 && res.errors[0].find("duplicate existing pool id")!=std::string::npos,
+                  res.errors.empty()?"":res.errors[0]);
+            Bytes vanilla;std::string vwhy;
+            check("game.custom-pool-fallback-ordinary-merge",merge_pools(broken,C,allocated.placed,{},&vanilla,&vwhy,res.grouped) && pool_size(vanilla,kWallPool)==64,vwhy);
+            PoolResolution fine;fine.pools={pool};fine.grouped=grouped;admit_custom_pools(game,C,&fine);
+            check("game.custom-pool-check-passes-on-the-game",fine.pools.size()==1 && fine.grouped.size()==3 && fine.errors.empty());
         }
     }
     custom_pools_test();
     pool_admission_test();
     pool_game_catalog_test();
+    pool_grouping_test();
+    pool_messages_test();
+    budget_counts_test();
+    stored_files_test();
     stored_refusal_once_test();
     pool_reflection_test();
     custom_pool_hash_test();

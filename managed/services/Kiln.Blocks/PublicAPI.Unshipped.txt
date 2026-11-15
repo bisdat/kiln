@@ -49,3 +49,4 @@ static Kiln.WorldTables.GetMaterialPoolRegistration(System.Guid registrationId) 
 static Kiln.WorldTables.GetPoolBudget(string! pool) -> Kiln.CapacityQueryResult!
 static Kiln.Blocks.Define(string! name, Kiln.VfxBlock! block, Kiln.DefinitionRegistrationOptions! options) -> Kiln.DefinitionRegistrationResult!
 static Kiln.Blocks.GetVfxRegistration(System.Guid registrationId) -> Kiln.DefinitionRegistrationResult!
+static Kiln.WorldTables.RemoveStoredMaterialPool(string! pool) -> bool

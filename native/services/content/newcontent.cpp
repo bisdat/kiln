@@ -51,10 +51,12 @@
 
 namespace kc {
 void set_kitbash_mod(const std::string* mod);  // refs.cpp
+void set_kitbash_item(const uint8_t* guid);    // refs.cpp
 
+// The definition being kitbashed: its mod (a model it declares) and its item's GUID (a material pool bound to it).
 struct KitbashModScope {
-    explicit KitbashModScope(const std::string* mod) { set_kitbash_mod(mod); }
-    ~KitbashModScope() { set_kitbash_mod(nullptr); }
+    KitbashModScope(const std::string* mod, const uint8_t* item) { set_kitbash_mod(mod); set_kitbash_item(item); }
+    ~KitbashModScope() { set_kitbash_mod(nullptr); set_kitbash_item(nullptr); }
     KitbashModScope(const KitbashModScope&) = delete;
     KitbashModScope& operator=(const KitbashModScope&) = delete;
 };
@@ -1140,7 +1142,7 @@ uintptr_t build_clone(Def& d, uintptr_t base, WorldState& ws, std::string* why) 
         };
         KitbashOut ko;
         {
-            const KitbashModScope mod(d.placeholder || d.orphan ? nullptr : &d.mod);  // a model this mod declares (a server that did not cook)
+            const KitbashModScope mod(d.placeholder || d.orphan ? nullptr : &d.mod, d.guid);  // a model this mod declares (a server that did not cook)
             for (auto& [key, val] : d.kitbash.items()) kitbash(L.item, key, val, find, all, &ko, reinterpret_cast<uintptr_t>(p));
         }
         for (const RefWrite& w : ko.writes) std::memcpy(p + w.f->offset, w.bytes, w.f->bytes);
@@ -2266,7 +2268,7 @@ void retry_kitbash(WorldState& ws) {
             };
             KitbashOut ko;
             {
-                const KitbashModScope mod(d.placeholder || d.orphan ? nullptr : &d.mod);
+                const KitbashModScope mod(d.placeholder || d.orphan ? nullptr : &d.mod, d.guid);
                 for (auto& [key, val] : d.kitbash.items()) kitbash(L.item, key, val, find, all, &ko, clone);
             }
             if (ko.problems.size() >= d.warnings.size()) continue;

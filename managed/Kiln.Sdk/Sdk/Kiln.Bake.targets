@@ -7,6 +7,7 @@
       quests/generated/<id>.json     quests, NPCs and dialogues of Quests.Define, DefineNpc and quest blocks (kiln.quests)
       skills/<id>.generated.json     game-tree nodes of GameTree.Define ("gameTree", kiln.skills)
       blocks/generated/<id>.json     VFX and materials of Blocks.Define (kiln.vfx)
+      blocks.tables.json            world-table blocks (only with KilnBakeWorldTables=true)
     A file of the project's own at one of these paths is left alone. A file the bake wrote goes when nothing of the code's is in
     it any more, when the mod does not load without the game (a build line says so), when the bake is turned off, and from
     the deployed folder on KilnDeploy. A node's icon outside the mod folder or an error the mod logs while it is baked is a
@@ -15,6 +16,7 @@
     Properties:
       KilnBake                 true | false (default true when KilnServices names Quests, Skills, Blocks or Vfx)
       KilnBakeSteps            server steps after the mod loaded (default 10: its OnLoad, the server's start, its first steps)
+      KilnBakeWorldTables      true | false (default false: preserve runtime-dependent C# table declarations)
       KilnBakeTimeoutSeconds   the whole bake's deadline (default 120)
   -->
   <PropertyGroup>
@@ -22,6 +24,8 @@
     <_KilnBakeAuto Condition="$(_KilnServiceList.Contains(';Quests;')) or $(_KilnServiceList.Contains(';Skills;')) or $(_KilnServiceList.Contains(';Blocks;')) or $(_KilnServiceList.Contains(';Vfx;'))">true</_KilnBakeAuto>
     <KilnBake Condition="'$(KilnBake)' == ''">$(_KilnBakeAuto)</KilnBake>
     <KilnBakeSteps Condition="'$(KilnBakeSteps)' == ''">10</KilnBakeSteps>
+    <KilnBakeWorldTables Condition="'$(KilnBakeWorldTables)' == ''">false</KilnBakeWorldTables>
+    <_KilnBakeWorldTablesArg Condition="'$(KilnBakeWorldTables)' == 'true'">--world-tables</_KilnBakeWorldTablesArg>
     <KilnBakeTimeoutSeconds Condition="'$(KilnBakeTimeoutSeconds)' == ''">120</KilnBakeTimeoutSeconds>
     <!-- an IDE's design-time build never runs the mod's code -->
     <_KilnBakeNow Condition="'$(KilnBake)' == 'true' and '$(DesignTimeBuild)' != 'true'">true</_KilnBakeNow>
@@ -60,7 +64,7 @@
   <!-- The settings a bake depends on, rewritten only when they change: a changed step count or timeout bakes again. -->
   <Target Name="_KilnBakeConfig">
     <WriteLinesToFile File="$(_KilnBakeConfig)" Overwrite="true" WriteOnlyWhenDifferent="true"
-                      Lines="steps=$(KilnBakeSteps);timeout=$(KilnBakeTimeoutSeconds);sdk=$(KilnSdkVersion);host=$(_KilnBakeHostDir)" />
+                      Lines="steps=$(KilnBakeSteps);worldtables=$(KilnBakeWorldTables);timeout=$(KilnBakeTimeoutSeconds);sdk=$(KilnSdkVersion);host=$(_KilnBakeHostDir)" />
     <ItemGroup>
       <FileWrites Include="$(_KilnBakeConfig)" />
     </ItemGroup>
@@ -91,7 +95,7 @@
           Inputs="$(TargetPath);$(OutDir)kiln.mod.json;$(_KilnBakeConfig);@(_KilnBakeInput);$(_KilnBakeHostDir)Kiln.Sdk.Bake.dll"
           Outputs="$(_KilnBakeStamp)">
     <Delete Files="$(_KilnBakeStamp)" />
-    <Exec Command="&quot;$(_KilnBakeDotnet)&quot; exec &quot;$(_KilnBakeHostDir)Kiln.Sdk.Bake.dll&quot; &quot;$(OutDir.TrimEnd('/').TrimEnd('\'))&quot; --steps $(KilnBakeSteps) --timeout $(KilnBakeTimeoutSeconds) --list &quot;$(_KilnBakeList)&quot;"
+    <Exec Command="&quot;$(_KilnBakeDotnet)&quot; exec &quot;$(_KilnBakeHostDir)Kiln.Sdk.Bake.dll&quot; &quot;$(OutDir.TrimEnd('/').TrimEnd('\'))&quot; --steps $(KilnBakeSteps) --timeout $(KilnBakeTimeoutSeconds) --list &quot;$(_KilnBakeList)&quot; $(_KilnBakeWorldTablesArg)"
           Timeout="$([MSBuild]::Add($([MSBuild]::Multiply($(KilnBakeTimeoutSeconds), 1000)), 30000))"
           ContinueOnError="true" StandardOutputImportance="high">
       <Output TaskParameter="ExitCode" PropertyName="_KilnBakeExit" />
@@ -103,15 +107,15 @@
            Text="KilnBake: the bake of $(KilnResolvedModId) failed or did not end (exit code $(_KilnBakeExit); the lines above say why). Set KilnBake=false to build without it (docs/kiln/modding/baked.md)" />
     <Touch Files="$(_KilnBakeStamp)" AlwaysCreate="true" />
     <ItemGroup>
-      <FileWrites Include="$(_KilnBakeStamp);$(_KilnBakeList);$(OutDir)quests/generated/$(KilnResolvedModId).json;$(OutDir)skills/$(KilnResolvedModId).generated.json;$(OutDir)blocks/generated/$(KilnResolvedModId).json" />
+      <FileWrites Include="$(_KilnBakeStamp);$(_KilnBakeList);$(OutDir)quests/generated/$(KilnResolvedModId).json;$(OutDir)skills/$(KilnResolvedModId).generated.json;$(OutDir)blocks/generated/$(KilnResolvedModId).json;$(OutDir)blocks.tables.json" />
     </ItemGroup>
   </Target>
 
   <!-- Turned off (KilnBake=false): what a bake left in the output folder goes, so it does not win at start over what the code
        defines now. By the files' marker, not the bookkeeping: an author's file at a path an earlier bake wrote stays, and
-       nothing is left when the bookkeeping is gone. Only when one of the three folders is there. -->
+       nothing is left when the bookkeeping is gone. Only when an output folder, world-table artifact or bookkeeping is there. -->
   <Target Name="_KilnBakeOff" AfterTargets="KilnManifest"
-          Condition="'$(KilnBake)' != 'true' and '$(DesignTimeBuild)' != 'true' and (Exists('$(OutDir)quests/generated') or Exists('$(OutDir)skills') or Exists('$(OutDir)blocks/generated') or Exists('$(_KilnBakeList)'))">
+          Condition="'$(KilnBake)' != 'true' and '$(DesignTimeBuild)' != 'true' and (Exists('$(OutDir)quests/generated') or Exists('$(OutDir)skills') or Exists('$(OutDir)blocks/generated') or Exists('$(OutDir)blocks.tables.json') or Exists('$(_KilnBakeList)'))">
     <KilnBakeClean Folder="$(OutDir)" ModId="$(KilnResolvedModId)" Reason="KilnBake is off" />
     <Delete Files="$(_KilnBakeList);$(_KilnBakeStamp)" />
   </Target>
@@ -124,6 +128,6 @@
       <_KilnBakeDeployMods Condition="'$(KilnModsDir)' == '' and '$(KilnServer)' != ''">$(KilnServer)/kiln/mods</_KilnBakeDeployMods>
     </PropertyGroup>
     <Delete Condition="'$(_KilnBakeDeployMods)' != '' and '$(KilnResolvedModId)' != ''"
-            Files="$(_KilnBakeDeployMods)/$(KilnResolvedModId)/quests/generated/$(KilnResolvedModId).json;$(_KilnBakeDeployMods)/$(KilnResolvedModId)/skills/$(KilnResolvedModId).generated.json;$(_KilnBakeDeployMods)/$(KilnResolvedModId)/blocks/generated/$(KilnResolvedModId).json" />
+            Files="$(_KilnBakeDeployMods)/$(KilnResolvedModId)/quests/generated/$(KilnResolvedModId).json;$(_KilnBakeDeployMods)/$(KilnResolvedModId)/skills/$(KilnResolvedModId).generated.json;$(_KilnBakeDeployMods)/$(KilnResolvedModId)/blocks/generated/$(KilnResolvedModId).json;$(_KilnBakeDeployMods)/$(KilnResolvedModId)/blocks.tables.json" />
   </Target>
 </Project>

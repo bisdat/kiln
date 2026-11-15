@@ -639,12 +639,25 @@ blocks/walls.json:3:5: warning KL331: this mod has 6 building materials: all mod
 Fix: keep a mod's materials few, or say on its page how many it takes.
 
 ### KL332 material-reference
-Warning (needs the catalog). A `materialTweaks` block's `material` that is not a game material: the block is refused at boot. Names come from the item that places the material
-(`StoneRough`, `WoodFancy`, `TerrainStone`); `Cell<id>` and the material's GUID work too.
+Warning (needs the catalog). A `materialTweaks` block's `material`, or a `buildingMaterialPools` entry's `gameMaterial`, that is not a game material: the block is refused at boot. Names come from the item that places the material
+(`StoneRough`, `WoodFancy`, `TerrainStone`). A tweak also accepts `Cell<id>` or the material's GUID; a pool's `gameMaterial`
+requires the building-material catalog name and cannot name terrain.
 ```text
 blocks/tweaks.json:2:27: warning KL332: "StoneRuogh" is not a game material the catalog knows; a block that names one is refused at boot; did you mean "StoneRough"?
 ```
 Fix: correct the name (quick fix when a close match exists), or use a `GameMaterials` constant.
+
+### KL334 material-pool
+Error. A `buildingMaterialPools` entry or a blueprint's `materialPool` that kiln.worldtables refuses at boot: an entry naming a building material this mod does not have,
+another mod's material without that mod in `dependencies`, a terrain material, the same material twice, a roof material in a wall pool or the other way round (a game
+material's roof is read from its name: the game's roof blocks are `Roof...`), and a blueprint whose `materialPool` names no pool of the mod, another mod's pool without the
+dependency, or a pool of the other roof kind. A pool also needs `"clients": "mod"` ([KL201](#kl201-clients-definitions)); its 1 to 64 entries are the schema's, and a
+`gameMaterial` the catalog does not know is [KL332](#kl332-material-reference).
+```text
+blocks/pools.json:5:24: error KL334: pool "walls", materials[1] (material ice): the material is mod frost's, which this mod does not declare in "dependencies"
+blocks/pools.json:9:21: error KL334: blueprint "wall" is a wall shape and materialPool "roofs" a roof pool; roof must agree
+```
+Fix: add the dependency, name the material or pool as its mod defines it, or make the roof flags agree.
 
 ### KL333 surface-texture
 A building surface's PNG (`surfaces`, or `surface` in `buildingMaterials` and `materialTweaks`), as each client's kiln.surfaces will cook it. Error: a size it refuses, not a power of

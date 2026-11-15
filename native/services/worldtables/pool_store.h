@@ -29,9 +29,7 @@ struct PoolBootStore {
         std::vector<PoolDefinition> out;
         for(const auto& f:files) {
             if(f.file.name.rfind("@pool-",0)!=0 || f.file.path.extension()!=".json")continue;
-            if(!loaded.count(f.file.mod)) {
-                kiln::capacity::pending_io::refused(f.file.path,"unsafe: owning mod is not loaded in this profile; left in place");continue;
-            }
+            if(!loaded.count(f.file.mod))continue;  // kept, not refused: the service notes it once (kept_file_text)
             std::string bytes,why;PoolDefinition definition;
             if(!read(base,f,&bytes))continue;
             if(!pool_envelope(parse_relaxed(bytes),f.file.mod,&definition,&why) || f.file.name!="@pool-"+definition.guid.text()+".json") {

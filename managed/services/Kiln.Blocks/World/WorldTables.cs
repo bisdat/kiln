@@ -157,18 +157,24 @@ internal static unsafe partial class WorldTablesNative
     private static readonly Dictionary<string,System.Text.Json.Nodes.JsonObject> Baked = new(StringComparer.Ordinal);
     internal static void ForgetBaked(string mod) => Baked.Remove(mod);
     internal static System.Text.Json.Nodes.JsonObject? BakedDocument(string mod) => Baked.TryGetValue(mod,out var doc)?(System.Text.Json.Nodes.JsonObject)doc.DeepClone():null;
+    // What define_json reports as a block's kind, by section; parts (strengths, surfaces) are kept and not reported.
+    private static readonly Dictionary<string,string> BakeKinds=new(StringComparer.Ordinal) {
+        ["buildingMaterials"]="buildingMaterial",["buildingMaterialPools"]="buildingMaterialPool",["blueprints"]="blueprint",
+        ["terrainMaterials"]="terrainMaterial",["materialTweaks"]="materialTweak",["craftingProps"]="craftingProp"};
+    private static readonly HashSet<string> NotSections=new(StringComparer.Ordinal) {"format","mod","dir","clients","comment"};
     private static string RecordBake(string document)
     {
         var doc=System.Text.Json.Nodes.JsonNode.Parse(document)!.AsObject();
         var mod=(string)doc["mod"]!;
         if(!Baked.TryGetValue(mod,out var into)) Baked[mod]=into=new() {["format"]=1};
         var blocks=new System.Text.Json.Nodes.JsonArray();
-        foreach(var section in new[]{"buildingMaterials","buildingMaterialPools","blueprints","terrainMaterials","materialTweaks"}) {
-            if(doc[section] is not System.Text.Json.Nodes.JsonObject definitions) continue;
+        // every section the document has: a section the bake did not know would otherwise be lost from blocks.tables.json
+        foreach(var (section,node) in doc) {
+            if(NotSections.Contains(section) || node is not System.Text.Json.Nodes.JsonObject definitions) continue;
             if(into[section] is not System.Text.Json.Nodes.JsonObject target) into[section]=target=new();
             foreach(var (key,value) in definitions) {
                 target[key]=value?.DeepClone();
-                blocks.Add(new System.Text.Json.Nodes.JsonObject {["name"]=key,["kind"]=section=="blueprints"?"blueprint":"buildingMaterialPool",["status"]="pending"});
+                if(BakeKinds.TryGetValue(section,out var kind)) blocks.Add(new System.Text.Json.Nodes.JsonObject {["name"]=key,["kind"]=kind,["status"]="pending"});
             }
         }
         return new System.Text.Json.Nodes.JsonObject {["blocks"]=blocks,["errors"]=new System.Text.Json.Nodes.JsonArray()}.ToJsonString();
@@ -262,20 +268,37 @@ internal static unsafe partial class WorldTablesNative
 
     private delegate int Reader(byte* buffer, nuint capacity, nuint* length);
 
+    // Any size: ask for the length first, then read; a text that grew in between is asked for again (a few times, as
+    // long as it keeps growing). Only a text that will not settle reads as "".
     private static string Read(Reader read)
     {
-        var buffer = new byte[16384];
-        for (var i = 0; i < 2; i++)
+        nuint want = 0;
+        int rc;
+        rc = read(null, 0, &want);
+        for (var i = 0; i < 8; i++)
         {
+            if (want > (64u << 20)) break;
+            var buffer = new byte[(int)want + 1];
             nuint n = 0;
-            int rc;
             fixed (byte* p = buffer) rc = read(p, (nuint)buffer.Length, &n);
-            if ((int)n < buffer.Length) return Encoding.UTF8.GetString(buffer, 0, (int)n);
-            buffer = new byte[(int)n + 1];
-            _ = rc;
+            if (n < (nuint)buffer.Length) return Encoding.UTF8.GetString(buffer, 0, (int)n);
+            want = n;
         }
+        _ = rc;
         return "";
     }
+
+    /// <summary>The service's own revision, rising with every change to its tables, registrations or budgets (the budgets'
+    /// <c>revision</c>): one call, no allocation. 0 when this table has no budgets.</summary>
+    internal static ulong Revision()
+    {
+        var t = T;
+        if (t == null || !WorldTablesNative.HasAppend(t->Size, 144) || t->MaterialBudget == null) return 0;
+        var info = new KilnCapacityInfo { Size = (uint)sizeof(KilnCapacityInfo) };
+        return t->MaterialBudget(0, &info) == Ok ? info.Revision : 0;
+    }
+    /// <summary>Both budget members are here (the observer reads them without counting as a mod's use).</summary>
+    internal static bool BudgetsReadable => T is var t && t != null && HasAppend(t->Size, 152) && t->MaterialBudget != null && t->PoolBudget != null;
 
     public static string StatusJson() => T == null ? "{\"state\":\"off\"}" : Read((b, c, n) => T->Status(b, c, n));
 

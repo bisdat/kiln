@@ -417,7 +417,7 @@ void read_blocks(const ojson& doc, ModFile* out) {
                 if(!j.contains("name")) bad("name is required");
                 if(!j.contains("materials") || !j["materials"].is_array()) bad("materials takes 1..64 entries");
                 else {
-                    if(j["materials"].empty() || j["materials"].size()>64) bad("materials takes 1..64 entries");
+                    // the count is resolve_pools' to name (an argument error with the count), not a parse error
                     for(const auto& e:j["materials"]) {
                         PoolEntry entry;
                         if(!e.is_object()) bad("entry takes exactly one of material/gameMaterial");
@@ -558,7 +558,28 @@ void read_shape(const std::string& name, const ojson& j, const ModFile& mf, Shap
 }
 
 // ---- ids ---------------------------------------------------------------------------------------------------------
-Allocation allocate(std::vector<Material> live, std::vector<Material> kept, const std::vector<int>& free_ids, const std::vector<int>& deprecated) {
+Allocation allocate(std::vector<Material> live, std::vector<Material> kept, const std::vector<int>& free_ids, const std::vector<int>& deprecated,
+                    const std::vector<Material>& remembered) {
+    if (!remembered.empty()) {
+        std::vector<std::string> retained;
+        for (;;) {
+            auto a = allocate(live, kept, free_ids, deprecated);
+            bool changed = false;
+            std::erase_if(live, [&](const Material& m) {
+                const auto old = std::find_if(remembered.begin(), remembered.end(), [&](const Material& k) { return !k.terrain && k.guid == m.guid; });
+                if (old == remembered.end() || std::any_of(a.placed.begin(), a.placed.end(), [&](const Placed& p) { return p.m.guid == m.guid; })) return false;
+                auto k = *old;k.live = false;k.item = false;
+                kept.push_back(std::move(k));
+                retained.push_back("block buildingMaterial " + m.block + " (mod " + m.mod + "): refused: no material id remains; a world has cells of it, so it is kept as an absent mod's material is");
+                changed = true;
+                return true;
+            });
+            if (!changed) {
+                a.refused.insert(a.refused.end(), retained.begin(), retained.end());
+                return a;
+            }
+        }
+    }
     Allocation a;
     auto by_guid = [](const Material& x, const Material& y) { return x.guid.text() < y.guid.text(); };
     std::sort(live.begin(), live.end(), by_guid);
@@ -1130,39 +1151,45 @@ PoolResolution resolve_pools(const std::vector<PoolDefinition>& definitions, con
     std::map<uint32_t,size_t> counts;for(const auto& d:definitions)++counts[item_id_of(d.guid)];
     for(const auto& d:definitions) {
         MaterialPool p{d.guid,d.mod+":"+d.block,d.roof,{}};
-        bool ok=d.valid && !d.guid.zero() && d.entries.size()>=1 && d.entries.size()<=64 && counts[item_id_of(d.guid)]==1;
+        bool ok=true;
+        std::vector<std::string> problems;  // every one, each a sentence naming its entry: an author fixes a file once
+        std::set<Guid> mine;                // what this pool takes out of the game's lists, if it is accepted
         std::map<uint32_t,size_t> members;  // item -> the entry that named it first
-        std::vector<std::string> problems;  // all of them, in entry order: an author fixes a file once
-        if(!ok) problems.push_back(counts[item_id_of(d.guid)]>1?"pool id collision":"invalid definition");
+        const auto fail=[&](std::string text){ok=false;problems.push_back(std::move(text));};
         const auto entry=[&](size_t i){
             const auto& e=d.entries[i];
             return "materials["+std::to_string(i)+"] ("+(e.material.empty()?"gameMaterial "+e.game_material:"material "+e.material)+")";
         };
         const auto argument=[&](const std::string& text){
-            ok=false; problems.push_back(text);
+            fail(text);
             if(!r.arguments_invalid) r.argument_reason="block buildingMaterialPool "+d.block+" (mod "+d.mod+"): "+text;
             r.arguments_invalid=true;
         };
-        for(size_t i=0;i<d.entries.size();++i) {
+        if(!d.valid) fail("its definition has errors (each named on its own line)");
+        if(d.guid.zero()) fail("it has no GUID");
+        if(d.entries.empty()) argument("it has no entries; a pool lists 1 to 64 materials");
+        else if(d.entries.size()>kPoolCapacity) argument("it has "+std::to_string(d.entries.size())+" entries; a pool lists 1 to 64 materials");
+        if(counts[item_id_of(d.guid)]>1) fail("its pool id is another pool's too (two keys or was values that derive one GUID)");
+        if(d.entries.size()<=kPoolCapacity) for(size_t i=0;i<d.entries.size();++i) {
             const auto& e=d.entries[i];
             uint32_t item=0; bool roof=false;
-            if(!e.material.empty()) {
+            if(!e.material.empty() && !e.game_material.empty()) fail(entry(i)+": it takes exactly one of material and gameMaterial");
+            else if(!e.material.empty()) {
                 const Material* found=nullptr;
-                for(const auto& m:materials) if(pool_ref(e.material,d.mod,m.mod,m.block,m.guid)) {
-                    // Partition even refused groups. Invalid definitions must not fill the vanilla selector.
-                    if(!m.terrain) r.grouped.insert(m.guid);
-                    found=&m; break;
-                }
-                if(!found || !found->live || found->terrain || !found->item || !found->item_id) { ok=false; problems.push_back("unknown material, absent mod or missing building item: "+e.material); }
-                else if(found->mod!=d.mod && !d.dependencies.count(found->mod)) { ok=false; problems.push_back("material requires enabled declared dependency: "+found->mod); }
-                else { item=found->item_id; roof=found->roof; }
+                for(const auto& m:materials) if(pool_ref(e.material,d.mod,m.mod,m.block,m.guid)) { found=&m; break; }
+                if(!found) fail(entry(i)+": it names no building material of this mod or of a declared dependency");
+                else if(found->terrain) fail(entry(i)+": it is a terrain material; a pool lists building materials");
+                else if(found->mod!=d.mod && !d.dependencies.count(found->mod)) fail(entry(i)+": the material belongs to mod "+found->mod+", which mod "+d.mod+" does not declare as a dependency");
+                else if(!found->live) fail(entry(i)+": the material is not live this session (its mod is absent, or the material was refused)");
+                else if(!found->item || !found->item_id) fail(entry(i)+": the material has no block item");
+                else { item=found->item_id; roof=found->roof; mine.insert(found->guid); }
             } else {
                 auto it=game.find(e.game_material);
-                if(it!=game.end() && it->second.ambiguous) { ok=false; problems.push_back("game building material "+e.game_material+" is placed by more than one block item"); }
-                else if(it==game.end() || !it->second.item) { ok=false; problems.push_back("unknown game building material or missing block item: "+e.game_material); }
+                if(it==game.end()) fail(entry(i)+": the game has no building material of that name");
+                else if(it->second.ambiguous) fail(entry(i)+": the game has more than one block item for that material");
+                else if(!it->second.item) fail(entry(i)+": the game's material has no block item");
                 else { item=it->second.item; roof=it->second.roof; }
             }
-            if(!e.material.empty() && !e.game_material.empty()) { ok=false; problems.push_back("entry takes exactly one material kind"); }
             if(item && roof!=d.roof) argument(entry(i)+(roof?" is a roof material and the pool is not a roof pool":" is not a roof material and the pool is a roof pool"));
             if(item) {
                 const auto [first,fresh]=members.emplace(item,i);
@@ -1170,12 +1197,15 @@ PoolResolution resolve_pools(const std::vector<PoolDefinition>& definitions, con
             }
             p.items.push_back(item);
         }
-        if(!ids.insert(item_id_of(d.guid)).second) { ok=false; problems.push_back("pool id collision"); }
-        if(ok) r.pools.push_back(std::move(p));
-        else {
+        ids.insert(item_id_of(d.guid));
+        if(ok) {
+            // Only an accepted pool takes materials out of the game's lists, and only its own mod's or a declared
+            // dependency's: a refused pool, or a reference without a dependency, leaves every material where it was.
+            r.grouped.insert(mine.begin(),mine.end());
+            r.pools.push_back(std::move(p));
+        } else {
             std::string why;
-            for(size_t i=0;i<problems.size() && i<4;++i) why+=(i?"; ":"")+problems[i];
-            if(problems.size()>4) why+="; and "+std::to_string(problems.size()-4)+" more";
+            for(size_t i=0;i<problems.size();++i) why+=(i?"; ":"")+problems[i];
             r.errors.push_back("block buildingMaterialPool "+d.block+" (mod "+d.mod+"): refused: "+why);
         }
     }
@@ -1188,9 +1218,13 @@ void bind_shape_pools(std::vector<Shape>* shapes, const std::vector<PoolDefiniti
         if(sh.material_pool.empty()) { accepted.push_back(std::move(sh)); continue; }
         const PoolDefinition* d=nullptr;
         for(const auto& candidate:definitions) if(pool_ref(sh.material_pool,sh.mod,candidate.mod,candidate.block,candidate.guid)) { d=&candidate; break; }
-        bool ok=d && d->roof==sh.roof && (d->mod==sh.mod || sh.dependencies.count(d->mod));
-        if(ok) ok=std::any_of(pools.begin(),pools.end(),[&](const auto& p){return p.guid==d->guid;});
-        if(!ok) { errors->push_back("block blueprint "+sh.block+" (mod "+sh.mod+"): refused: materialPool is unavailable, undeclared or has a roof disagreement"); continue; }
+        const std::string head="block blueprint "+sh.block+" (mod "+sh.mod+"): refused: its materialPool \""+sh.material_pool+"\"";
+        std::string why;
+        if(!d) why=head+" names no pool of this mod or of a declared dependency";
+        else if(d->mod!=sh.mod && !sh.dependencies.count(d->mod)) why=head+" belongs to mod "+d->mod+", which mod "+sh.mod+" does not declare as a dependency";
+        else if(d->roof!=sh.roof) why=head+(sh.roof?": the shape is a roof shape and the pool a wall pool; Roof must agree":": the shape is a wall shape and the pool a roof pool; Roof must agree");
+        else if(std::none_of(pools.begin(),pools.end(),[&](const auto& p){return p.guid==d->guid;})) why=head+" was refused (its own line says why)";
+        if(!why.empty()) { errors->push_back(why); continue; }
         sh.pool=d->guid;
         accepted.push_back(std::move(sh));
     }
@@ -1260,6 +1294,115 @@ bool merge_pools(const Bytes& game, const Layouts& L, const std::vector<Placed>&
     return true;
 }
 
+namespace {
+struct PoolRows { ArrayView rows; std::optional<uint32_t> wall, roof; };
+// The writer's checks of the game's pool table and of the accepted pools, before anything is written.
+std::string pool_rows(const Bytes& game, const Layouts& L, const std::vector<MaterialPool>& groups, PoolRows* out) {
+    // This is the measured row contract. Do not guess new fields on another executable.
+    if (L.pool_stride != 24 || L.pool_slot != 0 || L.pool_id != 4 || L.pool_materials != 8 || L.pool_name != 16)
+        return "custom material pools: reflected row layout is unavailable or unsupported";
+    ArrayView& rows = out->rows;
+    if (!array_at(game, L.pools, L.pool_stride, &rows)) return "custom material pools: registry does not read";
+    std::set<uint32_t> ids;
+    std::set<std::string> names;
+    uint64_t projected = uint64_t(game.size()) + 4;
+    for (uint32_t i = 0; i < rows.count; ++i) {
+        const size_t rec = size_t(rows.base - game.data()) + size_t(i) * L.pool_stride;
+        if (!ids.insert(rd<uint32_t>(game.data() + rec + L.pool_id)).second) return "custom material pools: duplicate existing pool id";
+        ArrayView items;
+        if (!array_at(game, uint32_t(rec + L.pool_materials), 4, &items) || items.count > kPoolCapacity)
+            return "custom material pools: existing pool is unreadable or exceeds 64 entries";
+        const int32_t rel = rd<int32_t>(game.data() + rec + L.pool_name);
+        const uint32_t len = rd<uint32_t>(game.data() + rec + L.pool_name + 4);
+        const int64_t at = int64_t(rec + L.pool_name) + rel;
+        if (!rel || at <= 0 || uint64_t(at) + len > game.size()) return "custom material pools: existing name is unreadable";
+        const std::string name(reinterpret_cast<const char*>(game.data() + at), len);
+        if (!names.insert(name).second) return "custom material pools: duplicate existing pool name";
+        if (name == kWallPool) out->wall = rd<uint32_t>(game.data() + rec + L.pool_slot);
+        if (name == kRoofPool) out->roof = rd<uint32_t>(game.data() + rec + L.pool_slot);
+        projected += 24 + 4 * uint64_t(kPoolCapacity) + 3;  // its row again, and room for every appended item
+    }
+    for (const auto& g : groups) {
+        if (g.guid.zero() || !ids.insert(item_id_of(g.guid)).second) return "custom material pools: null GUID or pool id collision";
+        const auto colon = g.name.find(':');
+        if (colon == std::string::npos || !valid_name(g.name.substr(0, colon)) || !valid_name(g.name.substr(colon + 1)) || !names.insert(g.name).second)
+            return "custom material pools: malformed or duplicate canonical name";
+        if (g.items.empty() || g.items.size() > kPoolCapacity) return "custom material pools: expected 1..64 entries";
+        std::set<uint32_t> unique(g.items.begin(), g.items.end());
+        if (unique.count(0) || unique.size() != g.items.size()) return "custom material pools: null or duplicate item id";
+        if (!(g.roof ? out->roof : out->wall)) return "custom material pools: wall/roof equipment slot unavailable";
+        projected += 24 + 3 + 4 * uint64_t(g.items.size()) + 3 + g.name.size() + 1;
+    }
+    if (projected > INT32_MAX) return "custom material pools: resource exceeds relative-offset range";
+    return "";
+}
+}  // namespace
+
+std::string check_custom_pools(const Bytes& game, const Layouts& L, const std::vector<MaterialPool>& groups) {
+    PoolRows rows;
+    return groups.empty() ? std::string() : pool_rows(game, L, groups, &rows);
+}
+void admit_custom_pools(const Bytes& game, const Layouts& L, PoolResolution* r) {
+    if (r->pools.empty()) return;
+    const std::string why = check_custom_pools(game, L, r->pools);
+    if (why.empty()) return;
+    refuse_custom_pools(r, "this game build's material pool table fails a check of the pool writer (" + why + ")");
+}
+void refuse_custom_pools(PoolResolution* r, const std::string& reason) {
+    for (const auto& p : r->pools) {
+        const auto colon = p.name.find(':');
+        r->errors.push_back("block buildingMaterialPool " + p.name.substr(colon + 1) + " (mod " + p.name.substr(0, colon) + "): refused: " +
+                            reason + "; materials use the ordinary selectors; shapes bound to this pool are refused");
+    }
+    r->pools.clear();
+    r->grouped.clear();
+}
+
+bool retain_allocated_pools(PoolResolution* r, const std::vector<Material>& materials, const std::vector<Placed>& placed,
+                            const std::map<std::string, PoolGameMaterial>& game) {
+    std::set<uint32_t> live_items;
+    for (const auto& p : placed) if (p.m.live && p.m.item) live_items.insert(p.m.item_id);
+    for (const auto& [name, m] : game) if (m.item) live_items.insert(m.item);
+    const auto before = r->pools.size();
+    std::erase_if(r->pools, [&](const auto& p) {
+        if (std::all_of(p.items.begin(), p.items.end(), [&](uint32_t i) { return live_items.count(i); })) return false;
+        const auto colon = p.name.find(':');
+        r->errors.push_back("block buildingMaterialPool " + p.name.substr(colon + 1) + " (mod " + p.name.substr(0, colon) + "): refused: a member did not receive a material id");
+        return true;
+    });
+    if (r->pools.size() == before) return false;
+    std::set<uint32_t> members;
+    for (const auto& p : r->pools) members.insert(p.items.begin(), p.items.end());
+    std::set<Guid> grouped;
+    for (const auto& m : materials)
+        if (r->grouped.count(m.guid) && members.count(m.item_id)) grouped.insert(m.guid);
+    r->grouped = std::move(grouped);
+    return true;
+}
+
+// Budgets from what the game's own bytes held before Kiln's merge: a game update that adds materials or pool
+// entries is counted as the game's, not as unknown room.
+BudgetCounts material_budget_counts(uint32_t category, uint32_t game_used, uint64_t live, uint64_t retained) {
+    BudgetCounts b;
+    b.capacity = category == 0 ? 128 : 127;
+    b.ready = uint64_t(game_used) + live + retained <= b.capacity;
+    if (b.ready) b.game = game_used, b.kiln = uint32_t(live), b.reserved = uint32_t(retained);
+    return b;
+}
+BudgetCounts pool_budget_counts(const std::string&, uint32_t original, uint32_t served) {
+    BudgetCounts b;
+    b.capacity = kPoolCapacity;
+    b.ready = served >= original && served <= kPoolCapacity;
+    if (b.ready) b.game = original, b.kiln = served - original;
+    return b;
+}
+bool stored_file_goes(const std::string& stem, const std::string& block, bool owner_loaded, const std::set<std::string>& defined) {
+    return owner_loaded && !defined.count(stem.rfind("@pool-",0)==0?"@pool/"+block:block);
+}
+std::string kept_file_text(const std::string& path) {
+    return "stored definition " + path + " kept: its mod is not loaded in this profile, so nothing of it is applied; it applies again when the mod is";
+}
+
 bool merge_pools(const Bytes& game, const Layouts& L, const std::vector<Placed>& placed,
                  const std::vector<MaterialPool>& groups, Bytes* out, std::string* why,
                  const std::set<Guid>& grouped) {
@@ -1273,42 +1416,13 @@ bool merge_pools(const Bytes& game, const Layouts& L, const std::vector<Placed>&
         return true;
     }
     const auto fail = [&](const std::string& text) { *why = text; return false; };
-    // This is the measured row contract. Do not guess new fields on another executable.
-    if (L.pool_stride != 24 || L.pool_slot != 0 || L.pool_id != 4 || L.pool_materials != 8 || L.pool_name != 16)
-        return fail("custom material pools: reflected row layout is unavailable or unsupported");
-    ArrayView rows;
-    if (!array_at(game, L.pools, L.pool_stride, &rows)) return fail("custom material pools: registry does not read");
-    std::set<uint32_t> ids;
-    std::set<std::string> names;
-    std::optional<uint32_t> wall_slot, roof_slot;
-    for (uint32_t i = 0; i < rows.count; ++i) {
-        const size_t rec = size_t(rows.base - game.data()) + size_t(i) * L.pool_stride;
-        if (!ids.insert(rd<uint32_t>(game.data() + rec + L.pool_id)).second)
-            return fail("custom material pools: duplicate existing pool id");
-        ArrayView items;
-        if (!array_at(game, uint32_t(rec + L.pool_materials), 4, &items) || items.count > kPoolCapacity)
-            return fail("custom material pools: existing pool is unreadable or exceeds 64 entries");
-        const int32_t rel = rd<int32_t>(game.data() + rec + L.pool_name);
-        const uint32_t len = rd<uint32_t>(game.data() + rec + L.pool_name + 4);
-        const int64_t at = int64_t(rec + L.pool_name) + rel;
-        if (!rel || at <= 0 || uint64_t(at) + len > game.size()) return fail("custom material pools: existing name is unreadable");
-        const std::string name(reinterpret_cast<const char*>(game.data() + at), len);
-        if (!names.insert(name).second) return fail("custom material pools: duplicate existing pool name");
-        if (name == kWallPool) wall_slot = rd<uint32_t>(game.data() + rec + L.pool_slot);
-        if (name == kRoofPool) roof_slot = rd<uint32_t>(game.data() + rec + L.pool_slot);
-    }
+    PoolRows table;
+    if (const std::string bad = pool_rows(game, L, groups, &table); !bad.empty()) return fail(bad);
+    const ArrayView& rows = table.rows;
+    const std::optional<uint32_t>& wall_slot = table.wall;
+    const std::optional<uint32_t>& roof_slot = table.roof;
     std::vector<MaterialPool> sorted = groups;
     std::sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b) { return a.guid.text() < b.guid.text(); });
-    for (const auto& g : sorted) {
-        if (g.guid.zero() || !ids.insert(item_id_of(g.guid)).second) return fail("custom material pools: null GUID or pool id collision");
-        const auto colon = g.name.find(':');
-        if (colon == std::string::npos || !valid_name(g.name.substr(0, colon)) || !valid_name(g.name.substr(colon+1)) || !names.insert(g.name).second)
-            return fail("custom material pools: malformed or duplicate canonical name");
-        if (g.items.empty() || g.items.size() > kPoolCapacity) return fail("custom material pools: expected 1..64 entries");
-        std::set<uint32_t> unique(g.items.begin(), g.items.end());
-        if (unique.count(0) || unique.size() != g.items.size()) return fail("custom material pools: null or duplicate item id");
-        if (!(g.roof ? roof_slot : wall_slot)) return fail("custom material pools: wall/roof equipment slot unavailable");
-    }
     if (!merge_pools(game, L, vanilla, &next, why)) return false;
     // Keep the original payload in place; clone the row array and rebase both inner pointers.
     // Bound all resource offsets, including backward references, before converting to int32.

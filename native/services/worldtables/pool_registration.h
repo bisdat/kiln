@@ -24,9 +24,21 @@ struct PoolReceipt {
             {"registration",key()},{"canonical",nlohmann::json::parse(definition.definition)}}.dump();
     }
 };
-inline bool pool_prune_allowed(const std::string& stem,bool explicit_request) {
-    // A durable next-start request is not an ephemeral OnLoad declaration. Only explicit pruning removes it.
-    return explicit_request || stem.rfind("@pool-",0)!=0;
+struct PoolOwnerLease {KilnOwner owner=0;uint64_t step=0;uint32_t misses=0;bool seen=false;};
+inline bool restore_pruned_pool(std::map<Guid,std::string>& pruned,const PoolReceipt& receipt,
+                               const std::function<bool(const PoolReceipt&)>& persist) {
+    if(receipt.reply.disposition==KILN_DEFINITION_REGISTERED && pruned.count(receipt.definition.guid)) {
+        if(!persist(receipt))return false;
+        pruned.erase(receipt.definition.guid);
+    }
+    return true;
+}
+// At a world's Post: whether the lease's owner is gone, so its registrations become Retained. A Pre this step settles it;
+// a missed Pre alone does not (a step the owner sat out, a subscription made after this step's Pre): the core's own
+// liveness (`alive`: post_world's answer for the owner, KILN_ERR_REVOKED once it is revoked) decides.
+inline bool pool_lease_gone(PoolOwnerLease& lease,uint64_t step,const std::function<KilnResult()>& alive) {
+    if(lease.seen && lease.step==step)return false;
+    return alive()==KILN_ERR_REVOKED;
 }
 inline size_t pool_define_report_size(const PoolReceipt& preview) {
     auto inactive=preview;inactive.reason="owner is no longer active";

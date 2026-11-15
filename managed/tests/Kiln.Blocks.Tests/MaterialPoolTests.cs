@@ -41,7 +41,8 @@ public sealed class MaterialPoolTests
             Assert.Contains("pool-test:ice",poolDocument!);
             var lowered=Compiler.Lower(mod,"cold_wall",new BlueprintBlock {Name="Cold Wall",Cells=[["##"]],MaterialPool="cold_walls"});
             Assert.Equal(h.Guid.ToString(),(string?)lowered.Low.Json["items"]![0]!["refs"]!["equipment.voxelBlueprintMaterialPool"]);
-            Assert.Throws<ArgumentException>(()=>Compiler.Lower(mod,"wrong_roof",new BlueprintBlock {Name="Wrong",Roof=true,Cells=[["#"]],MaterialPool="cold_walls"}));
+            var roof=Assert.Throws<ArgumentException>(()=>Compiler.Lower(mod,"wrong_roof",new BlueprintBlock {Name="Wrong",Roof=true,Cells=[["#"]],MaterialPool="cold_walls"}));
+            Assert.StartsWith("Blueprint wrong_roof is a roof shape and material pool pool-test:cold_walls a wall pool: Roof must agree.",roof.Message);
         } finally {WorldTablesNative.TestDefine=null;}
     }
     [Fact]
@@ -54,5 +55,30 @@ public sealed class MaterialPoolTests
             Assert.Equal(TableBlockStatus.Pending,h.Status);
             Assert.NotNull(WorldTablesNative.BakedDocument("offline-pools")!["buildingMaterialPools"]!["walls"]);
         } finally {WorldTablesNative.Baking=false; WorldTablesNative.ForgetBaked("offline-pools");}
+    }
+    // Item 10: what the SDK bake records of world-table blocks declared from C#. A C# material's strength (a StrengthBlock
+    // handle) is lowered into the material itself; a crafting prop, a strength and a surface section of a define_json
+    // document are kept as they are, and each block is reported with its own kind.
+    [Fact]
+    public void The_bake_keeps_every_world_table_section_with_its_own_kind()
+    {
+        WorldTablesNative.ForgetBaked("bake-kinds"); WorldTablesNative.Baking=true;
+        try {
+            var mod=new ModBlocks("bake-kinds",1) {ManifestClients="mod"};
+            var tough=Compiler.Define(mod,"tough",new StrengthBlock {Hardness=Hardness.Hard,Health=300});
+            Compiler.Define(mod,"frost",new BuildingMaterialBlock {Name="Frost",Strength="tough"});
+            var report=System.Text.Json.Nodes.JsonNode.Parse(WorldTablesNative.DefineJson("""{"format":1,"mod":"bake-kinds","craftingProps":{"anvil":{"name":"Anvil"}},"strengths":{"soft":{"hardness":"soft"}},"surfaces":{"glow":{"side":{"tint":"#ffffff"}}},"terrainMaterials":{"mud":{"name":"Mud"}}}""")!)!;
+            var baked=WorldTablesNative.BakedDocument("bake-kinds")!;
+            Assert.Equal("hard",(string?)baked["buildingMaterials"]!["frost"]!["strength"]!["hardness"]);
+            Assert.Equal(300,(int?)baked["buildingMaterials"]!["frost"]!["strength"]!["health"]);
+            Assert.NotNull(baked["craftingProps"]?["anvil"]);
+            Assert.NotNull(baked["strengths"]?["soft"]);
+            Assert.NotNull(baked["surfaces"]?["glow"]);
+            var kinds=report["blocks"]!.AsArray().ToDictionary(b=>(string)b!["name"]!,b=>(string)b!["kind"]!);
+            Assert.Equal("craftingProp",kinds["anvil"]);
+            Assert.Equal("terrainMaterial",kinds["mud"]);
+            Assert.False(kinds.ContainsKey("soft"));
+            _=tough;
+        } finally {WorldTablesNative.Baking=false; WorldTablesNative.ForgetBaked("bake-kinds");}
     }
 }

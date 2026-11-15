@@ -4,4 +4,4 @@ Copy this folder into the active mod profile on every participating client and s
 
 The pool uses two of its 64 entries, and Ice uses one of the shared 49 new building-material IDs (including six reusable deprecated slots). Custom pools do not increase those ID budgets. Code can query `WorldTables.GetMaterialBudget` / `GetPoolBudget` and use the explicit `Blocks.Define(..., DefinitionRegistrationOptions)` receipt overload for late definitions.
 
-This example was validated offline. Actual menu ingestion, order, preview, placement, cost, loot and world lifecycle have not run in a game; the coordinator's `client-pass/17-material-pools` check covers them. There is no preview switch.
+The lab fixture this sample follows (`mods/tests/material-pools-test`) passed its lab proof on a dedicated server. The build menu, preview, placement, cost, loot and world lifecycle have not run in a game client; `client-pass/17-material-pools` covers them. There is no preview switch.

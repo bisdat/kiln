@@ -128,9 +128,10 @@ internal static partial class Compiler
             WorldTablesNative.RequirePoolWriter();
             if(reference.Name is null) throw new ArgumentException("A shape takes a named material pool.",nameof(b));
             var h=ctx.Find(reference.Name,"materialPool") as TableBlockHandle<BuildingMaterialPoolBlock>
-                ?? throw new BlockError(ctx.Block,"materialPool","unknown material pool");
-            if(h.Block.Roof!=b.Roof) throw new ArgumentException("Shape and material pool disagree on Roof.",nameof(b));
-            if(h.Status==TableBlockStatus.Off && !WorldTablesNative.Baking) throw new BlockError(ctx.Block,"materialPool","the material pool is not registered");
+                ?? throw new BlockError(ctx.Block,"materialPool",$"no material pool \"{reference.Name}\" in this mod or a declared dependency (another mod's is \"<mod>:<key>\")");
+            if(h.Block.Roof!=b.Roof) throw new ArgumentException(
+                $"Blueprint {name} is a {(b.Roof?"roof":"wall")} shape and material pool {h.Mod}:{h.Name} a {(h.Block.Roof?"roof":"wall")} pool: Roof must agree.",nameof(b));
+            if(h.Status==TableBlockStatus.Off && !WorldTablesNative.Baking) throw new BlockError(ctx.Block,"materialPool",$"material pool {h.Mod}:{h.Name} is not registered (kiln.worldtables is off: its capability row says why)");
             // The item is created by Draft after native admission of its shape-table row.
             d.Refs["equipment.voxelBlueprintMaterialPool"]=h.Guid.ToString();
             descriptor["materialPool"]=h.Mod+":"+h.Name;

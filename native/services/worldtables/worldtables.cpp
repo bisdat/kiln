@@ -72,11 +72,13 @@ std::vector<Tweak> g_tweaks;
 std::vector<Material> g_live;
 std::vector<Material> g_kept_read;
 std::vector<std::string> g_errors;
+std::set<std::string> g_kept_noted;  // stored files of mods that are not loaded, noted once a process
+std::vector<std::string> g_kept;      // those notes, for status.json ("kept")
 std::set<std::string> g_logged_errors;  // of g_errors, what was logged when it happened (the pending store's refusals)
 std::map<std::string, std::string> g_boot_definitions;  // "<mod>/<kind>/<block>" -> the normal form the merge read
 std::set<std::string> g_from_code;                       // "<mod>/<block>": read from what code kept in an earlier run
 std::map<std::string, fs::path> g_pending_dirs;          // mod id -> its folder of blocks kept from code
-std::set<std::string> g_defined;                         // "<mod>/<block>": defined by code this session
+std::set<std::string> g_defined;                         // "<mod>/<block>" or "<mod>/@pool/<block>": defined by code this session
 // A boot generation's required participants that have world-table blocks (prepare): what the merge cannot apply of theirs is an
 // activation fault, which stops the start (kiln.boot activation_fault)
 std::set<std::string> g_boot_required;
@@ -101,10 +103,10 @@ bool g_pool_layout_ok=false;
 std::string g_pool_reason;
 uint32_t g_item_pool=UINT32_MAX;
 PoolRegistrations g_pool_registrations;
-struct PoolOwnerLease {KilnOwner owner=0;uint64_t step=0;uint32_t misses=0;bool seen=false;};
 // Stable nodes: revoked callbacks cannot reference freed user data. No engine/world addresses.
 std::map<KilnOwner,PoolOwnerLease> g_pool_owner_leases;
 std::map<Guid,KilnOwner> g_pool_owners;
+std::map<Guid,std::string> g_pool_pruned;  // pool envelopes this start's prune removed (definition -> mod)
 KilnHandle g_pool_owner_post=0;
 
 bool g_budget_cap=false,g_pool_cap=false,g_budgets_ready=false;
@@ -677,6 +679,7 @@ std::string status_text() {
     }
     o["tweaks"] = std::move(tweaks);
     o["errors"] = g_errors;
+    o["kept"] = g_kept;
     o["refused"] = g_refused;
     ojson shapes = ojson::array();
     for (const Shape& sh : g_shapes_in) {
@@ -871,65 +874,67 @@ void merge_locked() {
             g_pool_original_ids[std::to_string(i)]=id;
         }
     }
-    // Custom groups resolve before selector fitting, including references from refused groups.
+    // Only accepted custom groups affect selector fitting. Allocation may subsequently refuse a member, so repeat
+    // fitting from the original inputs after removing such a pool (the accepted set only shrinks).
+    PoolResolution resolution;
     if(!g_pool_defs.empty()) {
         read_pool_catalog(reg.game,info);
-        auto resolution=resolve_pools(g_pool_defs,g_live,g_game_pool_materials);
-        g_grouped=std::move(resolution.grouped);
-        g_custom_pools=std::move(resolution.pools);
-        std::erase_if(g_custom_pools,[&](const auto& p){
-            for(const auto& [name,id]:g_pool_original_ids)if(id==item_id_of(p.guid)){g_errors.push_back("block buildingMaterialPool "+p.name.substr(p.name.find(':')+1)+" (mod "+p.name.substr(0,p.name.find(':'))+"): refused: existing pool id collision");return true;}
-            return false;
-        });
-        g_errors.insert(g_errors.end(),resolution.errors.begin(),resolution.errors.end());
-        if(!g_pool_layout_ok) {
-            for(const auto& p:g_pool_defs) g_errors.push_back("block buildingMaterialPool "+p.block+" (mod "+p.mod+"): refused: "+g_pool_reason);
-            g_custom_pools.clear();
+        resolution=resolve_pools(g_pool_defs,g_live,g_game_pool_materials);
+        if(g_pool_layout_ok)admit_custom_pools(pools.game,L,&resolution);
+        else refuse_custom_pools(&resolution,g_pool_reason);
+    }
+    const auto all_live=g_live;
+    std::vector<Material> tlive,tkept;
+    Allocation a,ta;
+    for(;;) {
+        g_live=all_live;tlive.clear();tkept.clear();
+        g_grouped=resolution.grouped;
+        std::vector<Material> held;
+        std::vector<std::string> pool_refused;
+        {
+            std::set<Guid> remembered;
+            for (const Material& k : g_kept_read) remembered.insert(k.guid);
+            if(g_grouped.empty()) fit_pools(&g_live,g_pool_game,remembered,&held,&pool_refused);
+            else fit_pools(&g_live,g_pool_game,remembered,&held,&pool_refused,g_grouped);
         }
+        std::vector<Material> kept;
+        {
+            std::set<Guid> live;
+            for (const Material& m : g_live) live.insert(m.guid);
+            for (const Material& h : held) live.insert(h.guid);
+            for (const Material& k : g_kept_read)
+                if (!live.count(k.guid)) kept.push_back(k);
+            for (Material& h : held) kept.push_back(std::move(h));
+        }
+        // Terrain ids are a room of their own: a cell's low byte 1..127 against 128..255.
+        {
+            const auto split = [](std::vector<Material>* all, std::vector<Material>* terrain) {
+                std::vector<Material> rest;
+                for (Material& m : *all) (m.terrain ? *terrain : rest).push_back(std::move(m));
+                *all = std::move(rest);
+            };
+            split(&g_live, &tlive);
+            split(&kept, &tkept);
+            // a kept one keeps its config and look by name; a name this build lacks falls back to plain stone rather than losing the cells
+            std::vector<std::string> quiet;
+            for (Material& k : tkept)
+                if (!resolve_terrain(&k, "kept terrain material " + k.block, info, worlds[0].game, &quiet)) {
+                    k.like = kTerrainLike, k.look.clear(), k.strength.drops.reset();
+                    resolve_terrain(&k, k.block, info, worlds[0].game, &quiet);
+                }
+        }
+        a = allocate(g_live, kept, free_ids, deprecated,g_kept_read);
+        g_room = a.room;
+        g_refused = std::move(pool_refused);
+        g_refused.insert(g_refused.end(), a.refused.begin(), a.refused.end());
+        g_placed = std::move(a.placed);
+        ta = allocate_terrain(tlive, tkept, free_terrain_ids(worlds[0].game, L, info));
+        g_terrain_room = ta.room;
+        g_refused.insert(g_refused.end(), ta.refused.begin(), ta.refused.end());
+        if(!retain_allocated_pools(&resolution,all_live,g_placed,g_game_pool_materials))break;
     }
-    std::vector<Material> held;
-    std::vector<std::string> pool_refused;
-    {
-        std::set<Guid> remembered;
-        for (const Material& k : g_kept_read) remembered.insert(k.guid);
-        if(g_grouped.empty()) fit_pools(&g_live,g_pool_game,remembered,&held,&pool_refused);
-        else fit_pools(&g_live,g_pool_game,remembered,&held,&pool_refused,g_grouped);
-    }
-    std::vector<Material> kept;
-    {
-        std::set<Guid> live;
-        for (const Material& m : g_live) live.insert(m.guid);
-        for (const Material& h : held) live.insert(h.guid);
-        for (const Material& k : g_kept_read)
-            if (!live.count(k.guid)) kept.push_back(k);
-        for (Material& h : held) kept.push_back(std::move(h));
-    }
-    // Terrain ids are a room of their own: a cell's low byte 1..127 against 128..255.
-    std::vector<Material> tlive, tkept;
-    {
-        const auto split = [](std::vector<Material>* all, std::vector<Material>* terrain) {
-            std::vector<Material> rest;
-            for (Material& m : *all) (m.terrain ? *terrain : rest).push_back(std::move(m));
-            *all = std::move(rest);
-        };
-        split(&g_live, &tlive);
-        split(&kept, &tkept);
-        // a kept one keeps its config and look by name; a name this build lacks falls back to plain stone rather than losing the cells
-        std::vector<std::string> quiet;
-        for (Material& k : tkept)
-            if (!resolve_terrain(&k, "kept terrain material " + k.block, info, worlds[0].game, &quiet)) {
-                k.like = kTerrainLike, k.look.clear(), k.strength.drops.reset();
-                resolve_terrain(&k, k.block, info, worlds[0].game, &quiet);
-            }
-    }
-    Allocation a = allocate(g_live, kept, free_ids, deprecated);
-    g_room = a.room;
-    g_refused = std::move(pool_refused);
-    g_refused.insert(g_refused.end(), a.refused.begin(), a.refused.end());
-    g_placed = std::move(a.placed);
-    Allocation ta = allocate_terrain(tlive, tkept, free_terrain_ids(worlds[0].game, L, info));
-    g_terrain_room = ta.room;
-    g_refused.insert(g_refused.end(), ta.refused.begin(), ta.refused.end());
+    g_custom_pools=std::move(resolution.pools);
+    g_errors.insert(g_errors.end(),resolution.errors.begin(),resolution.errors.end());
     for (const std::string& r : g_refused) WT_E("worldtables: %s", r.c_str());
 
     // The new bytes. Anything that doesn't read leaves everything as the game has it.
@@ -937,17 +942,6 @@ void merge_locked() {
     if (!merge_registry(reg.game, L, g_tweaks, g_placed, &reg.merged, &changes, &why)) {
         go_off(why);
         return;
-    }
-    // Allocation can refuse a material after group resolution. Never serve a group referencing it.
-    if(!g_custom_pools.empty()) {
-        std::set<uint32_t> live_items;
-        for(const auto& p:g_placed) if(p.m.live && p.m.item) live_items.insert(p.m.item_id);
-        for(const auto& [name,m]:g_game_pool_materials) if(m.item) live_items.insert(m.item);
-        std::erase_if(g_custom_pools,[&](const auto& p){
-            bool missing=std::any_of(p.items.begin(),p.items.end(),[&](uint32_t i){return !live_items.count(i);});
-            if(missing) g_errors.push_back("block buildingMaterialPool "+p.name.substr(p.name.find(':')+1)+" (mod "+p.name.substr(0,p.name.find(':'))+"): refused: a member did not receive a material id");
-            return missing;
-        });
     }
     if(!g_pool_defs.empty() || g_has_pool_shapes)bind_shape_pools(&g_shapes,g_pool_defs,g_custom_pools,&g_refused);
     const bool pool_ok=(g_pool_defs.empty() && g_grouped.empty())
@@ -1241,26 +1235,32 @@ void record_world(const std::string& world) {
     else WT_W("worldtables: can't write the record of world %s: its materials won't be kept if their mods go", world.c_str());
 }
 
-// Blocks kept from code that the code didn't define this session go from the next start. By the time the world runs every mod's OnLoad has run; a
-// block a mod defines later is kept again when it's defined (define_json), so it never drops out for good.
-bool prune_mod_pending(const std::string& mod,const std::set<std::string>& keep_names,bool explicit_pools=true) {
+// Blocks kept from code that the code didn't define this session go from the next start, pool envelopes included: a
+// stored pool is its mod's standing request only as long as the mod still asks for it. By the time the world runs every
+// mod's OnLoad has run; a block or pool a mod defines later is kept again when it's defined (define_json, define_pool),
+// so it never drops out for good. Only mods read at this start (enabled in the profile) are pruned; a mod that is not
+// loaded keeps every file: the profile's business. `remove_pools`: an explicit removal of these pool keys only.
+bool prune_mod_pending(const std::string& mod,const std::set<std::string>& keep_names,const std::set<std::string>* remove_pools=nullptr,size_t* removed=nullptr) {
     kiln::capacity::PendingScan scan;
     const auto files=kiln::capacity::pending_files_bounded(pending_base(),data_dir()/L"pending",&scan);
     if(!scan.complete)return false;
     for(const auto& f:files) {
         if(f.mod!=mod || f.path.extension()!=L".json")continue;
         auto key=to_utf8(f.path.stem());Guid guid;
-        if(!pool_prune_allowed(key,explicit_pools))continue;
-        if(key.rfind("@pool-",0)==0) {
+        const bool pool=key.rfind("@pool-",0)==0;
+        if(remove_pools && !pool)continue;
+        if(pool) {
             PoolDefinition def;std::string why,bytes;
             if(!kiln::capacity::pending_io::read(pending_base(),f.path,&bytes,65536) || !pool_envelope(parse_relaxed(bytes),mod,&def,&why))continue;
             if(f.name!="@pool-"+def.guid.text()+".json")continue;
             key=def.block;guid=def.guid;
         }
-        if(keep_names.count(key))continue;
+        if(remove_pools ? !remove_pools->count(key) : !stored_file_goes(to_utf8(f.path.stem()),key,true,keep_names))continue;
         if(!kiln::capacity::pending_io::remove(pending_base(),f.path))return false;
-        if(!guid.zero())g_pool_registrations.remove_pending(guid);
-        WT_I("worldtables: %s: the code no longer defines %s: it's gone from the next start",mod.c_str(),key.c_str());
+        if(removed)++*removed;
+        if(!guid.zero()){g_pool_registrations.remove_pending(guid);g_pool_pruned[guid]=mod;}
+        if(remove_pools)WT_I("worldtables: %s: stored pool %s removed: it's gone from the next start",mod.c_str(),key.c_str());
+        else WT_I("worldtables: %s: the code no longer defines %s: it's gone from the next start",mod.c_str(),key.c_str());
     }
     return true;
 }
@@ -1269,7 +1269,7 @@ void prune_pending() {
     for(const auto& [mod,dir]:g_pending_dirs) {
         std::set<std::string> keep;
         for(const auto& name:g_defined)if(name.rfind(mod+"/",0)==0)keep.insert(name.substr(mod.size()+1));
-        if(!prune_mod_pending(mod,keep,false))WT_W("worldtables: %s: failed to prune pending definitions",mod.c_str());
+        if(!prune_mod_pending(mod,keep))WT_W("worldtables: %s: failed to prune pending definitions",mod.c_str());
     }
 }
 
@@ -1377,13 +1377,16 @@ void KILN_CALL pool_owner_pre(const KilnTickInfo* tick,void* user) {
     std::lock_guard lock(g_mu);auto& lease=*static_cast<PoolOwnerLease*>(user);
     lease.step=tick->step;lease.seen=true;lease.misses=0;
 }
+void KILN_CALL pool_owner_probe(void*) {}
 void KILN_CALL pool_owners_post(const KilnTickInfo* tick,void*) {
     if(!tick)return;
     std::lock_guard lock(g_mu);
-    for(auto& [owner,lease]:g_pool_owner_leases) {
-        if(lease.seen && lease.step==tick->step)continue;
-        if(!lease.seen && ++lease.misses<2)continue; // registration may occur after this tick's Pre
+    for(auto it=g_pool_owner_leases.begin();it!=g_pool_owner_leases.end();) {
+        const KilnOwner owner=it->first;
+        const auto alive=[&]{return g_api->post_world(owner,g_client?KILN_WORLD_CLIENT:KILN_WORLD_SERVER,&pool_owner_probe,nullptr);};
+        if(!pool_lease_gone(it->second,tick->step,alive)){++it;continue;}
         for(const auto& [definition,current]:g_pool_owners)if(current==owner)g_pool_registrations.owner_inactive(definition);
+        it=g_pool_owner_leases.erase(it);  // a revoked owner never comes back: no more probes
     }
 }
 bool track_pool_owner(const Guid& definition,KilnOwner owner) {
@@ -1549,7 +1552,11 @@ KilnResult KILN_CALL t_define(KilnStr json, char* report, size_t cap, size_t* ou
                 const bool identical=registered!=g_custom_pools.end() && boot!=g_boot_definitions.end() && boot->second==p.definition;
                 auto receipt=g_pool_registrations.commit(g_pool_registrations.prepare(p,KILN_DEFINE_ALLOW_NEXT_START,identical),persist_pool);
                 if(!receipt.reply.ok){errors.push_back("block buildingMaterialPool "+p.block+": "+receipt.reason);continue;}
-                g_defined.insert(mf.mod+"/"+p.block);
+                if(!restore_pruned_pool(g_pool_pruned,receipt,persist_pool)) {
+                    errors.push_back("block buildingMaterialPool "+p.block+": could not restore its stored definition for the next start");
+                    rc=KILN_ERR_INTERNAL;continue;
+                }
+                g_defined.insert(mf.mod+"/@pool/"+p.block);
                 blocks.push_back({{"name",p.block},{"kind","buildingMaterialPool"},{"guid",p.guid.text()},{"status",identical?"registered":"pending"}});
             }
             for (const Shape& sh : mf.shapes) {
@@ -1609,10 +1616,21 @@ KilnResult KILN_CALL t_prune(KilnStr mod,KilnStr names) {
     const std::string owner(mod.ptr,mod.len);
     if(!pool_identifier(owner) || owner.find(':')!=std::string::npos)return KILN_ERR_INVALID_ARGUMENT;
     const auto list=parse_relaxed(std::string(names.ptr,names.len));
+    if(list.is_object()) {
+        // {"removePools": ["key", ...]}: remove exactly these stored pool definitions of the mod (served rows stay this session)
+        const auto it=list.find("removePools");
+        if(list.size()!=1 || it==list.end() || !it->is_array())return KILN_ERR_INVALID_ARGUMENT;
+        std::set<std::string> pools;
+        for(const auto& name:*it){if(!name.is_string() || !pool_identifier(name.get<std::string>()) || name.get<std::string>().find(':')!=std::string::npos)return KILN_ERR_INVALID_ARGUMENT;pools.insert(name.get<std::string>());}
+        std::lock_guard lock(g_mu);size_t removed=0;
+        if(!prune_mod_pending(owner,{},&pools,&removed))return KILN_ERR_INTERNAL;
+        return removed?KILN_OK:KILN_ERR_NOT_FOUND;
+    }
     if(!list.is_array())return KILN_ERR_INVALID_ARGUMENT;
     std::set<std::string> keep;for(const auto& name:list) {
         if(!name.is_string())return KILN_ERR_INVALID_ARGUMENT;
         keep.insert(name.get<std::string>());
+        keep.insert("@pool/"+name.get<std::string>()); // the explicit legacy list names blocks of any kind
     }
     std::lock_guard lock(g_mu);
     return prune_mod_pending(owner,keep)?KILN_OK:KILN_ERR_INTERNAL;
@@ -1719,11 +1737,10 @@ KilnResult KILN_CALL t_material_budget(uint32_t category,KilnCapacityInfo* out) 
     if(!g_budgets_ready){kiln::capacity::not_ready(out,KILN_CAPACITY_NOT_READY,scope,g_pool_registrations.revision);return KILN_OK;}
     uint64_t live=0,retained=0;
     for(const auto& p:g_placed)if(p.m.terrain==(category==1))(p.m.live?live:retained)++;
-    // A changed baseline cannot be silently called vanilla or free other-loader room.
-    if(g_game_material_used[category]!=(category==0?79u:116u)) {
-        kiln::capacity::not_ready(out,KILN_CAPACITY_UNKNOWN_EXTERNAL,scope,g_pool_registrations.revision);return KILN_OK;
-    }
-    kiln::capacity::publish(out,category==0?128:127,g_game_material_used[category],live,retained,scope,g_pool_registrations.revision,false);
+    // The game's own use is what its bytes held before Kiln's merge (read at boot), not a constant of one build.
+    const auto b=material_budget_counts(category,g_game_material_used[category],live,retained);
+    if(!b.ready){kiln::capacity::not_ready(out,KILN_CAPACITY_ACCOUNTING_MISMATCH,scope,g_pool_registrations.revision);return KILN_OK;}
+    kiln::capacity::publish(out,b.capacity,b.game,b.kiln,b.reserved,scope,g_pool_registrations.revision,false);
     return KILN_OK;
 }
 KilnResult KILN_CALL t_pool_budget(KilnStr name,KilnCapacityInfo* out) {
@@ -1739,12 +1756,11 @@ KilnResult KILN_CALL t_pool_budget(KilnStr name,KilnCapacityInfo* out) {
     }
     const auto original=g_pool_game.find(pool),served=g_pool_served.find(pool);
     if(original==g_pool_game.end() || served==g_pool_served.end()){kiln::capacity::not_ready(out,KILN_CAPACITY_NOT_FOUND,scope,revision);return KILN_OK;}
-    static const std::map<std::string,uint32_t> vanilla{{kWallPool,61},{kRoofPool,14},{"TerrainMaterials",56},{"OvergrowthMaterials",5}};
-    const auto base=vanilla.find(pool);const uint32_t game=base==vanilla.end()?0:base->second;
-    if(original->second<game || served->second<original->second){kiln::capacity::not_ready(out,KILN_CAPACITY_ACCOUNTING_MISMATCH,scope,revision);return KILN_OK;}
-    kiln::capacity::publish(out,64,game,served->second-original->second,original->second-game,scope,revision,false);return KILN_OK;
+    // The game's own entries are what the pool listed before Kiln's merge (its bytes at boot), not a constant of one build.
+    const auto b=pool_budget_counts(pool,original->second,served->second);
+    if(!b.ready){kiln::capacity::not_ready(out,KILN_CAPACITY_ACCOUNTING_MISMATCH,scope,revision);return KILN_OK;}
+    kiln::capacity::publish(out,b.capacity,b.game,b.kiln,b.reserved,scope,revision,false);return KILN_OK;
 }
-void KILN_CALL pool_owner_probe(void*) {}
 KilnResult KILN_CALL t_define_pool(KilnOwner owner,KilnStr name,KilnStr json,uint32_t timing,KilnDefinitionReply* out,char* report,size_t cap,size_t* out_len) {
     if(!owner || !out || out->size<sizeof *out || !name.ptr || !json.ptr || !out_len || timing>1 || name.len>(16u<<20) || json.len>(16u<<20))return KILN_ERR_INVALID_ARGUMENT;
     const std::string key(name.ptr,name.len);if(!pool_identifier(key) || key.find(':')!=std::string::npos)return KILN_ERR_INVALID_ARGUMENT;
@@ -1779,7 +1795,12 @@ KilnResult KILN_CALL t_define_pool(KilnOwner owner,KilnStr name,KilnStr json,uin
         else if(owner_check!=KILN_OK){g_pool_cap=false;report_pool_caps(KILN_CAP_REASON_SYMBOL_MISSING,"owner liveness requires the core world tick");return KILN_ERR_UNAVAILABLE;}
         if(preview.reply.disposition==KILN_DEFINITION_REGISTERED && !track_pool_owner(definition.guid,owner))return KILN_ERR_UNAVAILABLE;
         auto committed=g_pool_registrations.commit(std::move(preview),persist_pool);
-        if(committed.reply.ok)g_defined.insert(definition.mod+"/"+definition.block);
+        // its stored envelope went at this start's prune: the mod asks for it again, so the next start has it again
+        if(!restore_pruned_pool(g_pool_pruned,committed,persist_pool)) {
+            WT_E("worldtables: %s: %s: could not restore its stored definition for the next start",definition.mod.c_str(),definition.block.c_str());
+            return KILN_ERR_INTERNAL;
+        }
+        if(committed.reply.ok)g_defined.insert(definition.mod+"/@pool/"+definition.block);
         const uint32_t size=out->size;*out=committed.reply;out->size=size;
         return give_text(committed.report(),report,cap,out_len);
     } catch(const nlohmann::json::exception&){return KILN_ERR_INVALID_ARGUMENT;}
@@ -1862,8 +1883,11 @@ void read_all(const kiln::boot::Input* boot) {
             enabled.insert(man.id);
         }
         g_pool_replayed=g_pending_boot.replay(pending_base(),enabled);
-        for(const auto& f:g_pending_boot.files)if(!enabled.count(f.file.mod))
-            kiln::capacity::pending_io::refused(f.file.path,"unsafe: owning mod is not loaded in this profile; left in place");
+        // a mod that is not loaded keeps its stored definitions: noted once per start, not refused (nothing is unsafe)
+        for(const auto& f:g_pending_boot.files)if(!enabled.count(f.file.mod) && g_kept_noted.insert(to_utf8(f.file.path)).second) {
+            const auto note=kept_file_text(to_utf8(f.file.path));
+            WT_I("worldtables: %s",note.c_str());g_kept.push_back(note);
+        }
         for (const std::string& dir : folders) {
             try {
                 read_mod(dir, pending, boot);

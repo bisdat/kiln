@@ -111,7 +111,10 @@ typedef struct KilnWorldTablesApi {
      * field and per block "status" and "id". KILN_ERR_INVALID_ARGUMENT: a block is wrong. */
     KilnResult(KILN_CALL* define_json)(KilnStr json, char* report, size_t capacity, size_t* out_len);
 
-    /* A mod's code ran: blocks kept from code for names other than these (a JSON array) are dropped from the next start. */
+    /* A mod's code ran: blocks kept from code for names other than these (a JSON array) are dropped from the next start,
+     * stored material pools included. Since 0.2.0-dev.29 the second argument may also be {"removePools": ["key", ...]}:
+     * exactly these stored pool definitions of the mod go (KILN_ERR_NOT_FOUND: none was stored); served rows stay this
+     * session. */
     KilnResult(KILN_CALL* prune_pending)(KilnStr mod, KilnStr defined_names_json);
 
     /* JSON: state, hash, ids, tweaks, what was refused and why. */

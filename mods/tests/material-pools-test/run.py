@@ -19,16 +19,33 @@ REPO=HERE.parents[2]
 PROOF=['capabilities','vanilla-rows-unchanged',*[kind+'-'+key for key in ('four','shared','full','roof') for kind in ('membership','binding','preview-data','budget')],
        'shared-material-one-id','no-65-served','vanilla-shape-binding','material-budgets','unknown-pool']
 SERVED=['served-registration','served-idempotent','65-refused-before-serving','duplicate-refused','roof-refused','unknown-base-refused']
-FINAL=['served','restart','absent','back','late-material-room','handshake-order-before-stream','handshake-binding-before-stream','late','pending-inactive','replay','torn-refused','restored-main-hash',
-       'building-seed','building-retained','terrain-boundary']
+FINAL=['served','restart','absent','back','late-material-room','handshake-order-before-stream','handshake-binding-before-stream','late','pending-inactive','replay','torn-refused',
+       'stored-pool-dropped','stored-pool-gone','restored-main-hash','observer-cost','building-seed','building-retained','terrain-boundary']
 
 def valid_result(mode,result,log,required):
     if result.get('mode')!=mode or result.get('failed')!=0 or not re.fullmatch('[0-9a-f]{16}',str(result.get('hash',''))):return False
     passes=result.get('passed',[])
     return all(n in passes and 'mp: PASS '+n in log for n in required) and 'mp: FAIL ' not in log and f"mp: DONE {mode} {len(passes)} passed 0 failed hash {result['hash']}" in log
 
-def rejected_before_stream(welcome,reject,data_frames):
-    return welcome is None and reject is not None and 'building' in reject[0].lower() and 'materials' in reject[0].lower() and data_frames==0
+def rejected_before_stream(welcome,reject,data_frames,names=None):
+    # names: what the refusal must say (the material pool that differs), when the peer sent its pools
+    return welcome is None and reject is not None and 'building' in reject[0].lower() and 'materials' in reject[0].lower() and data_frames==0 and (names is None or names in reject[0])
+
+def pool_digest(guid,roof,items,shapes):
+    """Kiln.Network's WorldTablesGate.PoolDigest: FNV-1a 64 over what a pool gives a player's menu."""
+    h=0xcbf29ce484222325
+    def add(text):
+        nonlocal h
+        for b in (text+'\n').encode():h=((h^b)*0x100000001b3)&0xffffffffffffffff
+    add(guid);add('roof' if roof else 'wall')
+    for i in items:add(str(i))
+    add('shapes')
+    for shape in sorted(shapes):add(shape)
+    return f'{h:016x}'
+
+def pools_property(status):
+    bound=[(b['pool'],b['item']) for b in status.get('shapeBindings',[])]
+    return ','.join(f"{p['name']}={pool_digest(p['guid'],p['roof'],p['items'],[i for (q,i) in bound if q==p['guid']])}" for p in status.get('customPools',[]))
 
 class Lab:
     def __init__(self,name,build,out,port,position,base_box):
@@ -74,7 +91,7 @@ class Lab:
         (dst/'kiln.mod.json').write_text(json.dumps(dict(id=name,name=name,version='1.0.0',apiVersion='0.2.0-dev.29',side='both',clients='mod')))
         (dst/'blocks/data.json').write_text(json.dumps(document))
     def run(self,name,mode,required,during=None):
-        (self.data/'mode').write_text(mode);(self.data/'result.json').unlink(missing_ok=True)
+        (self.data/'mode').write_text(mode);(self.data/'result.json').unlink(missing_ok=True);(self.data/'served.json').unlink(missing_ok=True)
         log=self.kiln/'logs/kiln.log';log.unlink(missing_ok=True)
         self.out.mkdir(parents=True,exist_ok=True)
         try:
@@ -94,7 +111,7 @@ class Lab:
             for source in ('result.json','served.json','cells.json'):
                 if (self.data/source).exists():shutil.copy(self.data/source,self.out/(name+'-'+source))
 
-def handshake(lab,status,old_hash=None):
+def handshake(lab,status,old_hash=None,old_pools=None,names=None):
     # Existing Kiln loopback protocol. Reject must precede WELCOME and ANY DATA/FRAG, including partial streams.
     sys.path.insert(0,str(REPO/'tools/nettest'))
     from nettest import Client,T_DATA,T_FRAG
@@ -102,19 +119,22 @@ def handshake(lab,status,old_hash=None):
     for p in sorted((lab.kiln/'mods').glob('*/kiln.mod.json')):
         j=json.loads(p.read_text());mods.append((j['id'],j['version'],2))
     ids=','.join(f"{m['id']}={uuid.UUID(m['guid']).hex}" for m in status['materials'] if m['state']=='live')
-    def one(table_hash):
+    def one(table_hash,pools):
         c=Client(lab.port,'material-pools-'+uuid.uuid4().hex[:8])
         try:
-            c.hello(mods,[],{'kiln.worldtables':table_hash,'kiln.worldtables.ids':ids})
+            props={'kiln.worldtables':table_hash,'kiln.worldtables.ids':ids}
+            if pools:props['kiln.worldtables.pools']=pools
+            c.hello(mods,[],props)
             c.wait(lambda:c.welcome is not None or c.reject is not None,10);c.pump(.5)
             return c.welcome,c.reject,int(T_DATA in c.frame_len)+int(T_FRAG in c.frame_len)
         finally:c.s.close()
-    welcome,reject,_=one(status['hash'])
+    welcome,reject,_=one(status['hash'],pools_property(status))
     if welcome is None or reject is not None or welcome['props'].get('kiln.worldtables')!=status['hash']:raise RuntimeError('matching profile was not welcomed with its actual table hash')
     if old_hash is not None:
         if old_hash==status['hash']:raise RuntimeError('changed pool/binding did not change the actual service hash')
-        w,r,frames=one(old_hash)
-        if not rejected_before_stream(w,r,frames):raise RuntimeError('mismatching profile was not refused before blocks streamed')
+        w,r,frames=one(old_hash,old_pools)
+        if not rejected_before_stream(w,r,frames,names):raise RuntimeError('mismatching profile was not refused before blocks streamed, naming '+str(names)+': '+str(r))
+        print('  refused: '+r[0],flush=True)
 
 
 def main():
@@ -140,13 +160,15 @@ def main():
         staged=lab.kiln/'data/worldtables/pending/material-pools-test/ungrouped.json'
         if 'ungrouped' not in json.loads(staged.read_text()).get('buildingMaterials',{}):raise RuntimeError('missing actual staged ungrouped material')
         staged.unlink()  # only this deliberately transient lab definition; keep the main profile unchanged
+        # A client of the first profile (its hash and per-pool digests) joins a changed one: refused before any stream, by pool name.
+        old_pools=pools_property(status)
         changed=json.loads(json.dumps(fixture));changed['buildingMaterialPools']['four']['materials'].reverse();lab.fixture(changed)
-        lab.run('order','status',['status-snapshot'],during=lambda s:handshake(lab,s,initial['hash']));done('handshake-order-before-stream')
+        lab.run('order','status',['status-snapshot'],during=lambda s:handshake(lab,s,initial['hash'],old_pools,'the material pool mp-fixture:four differs'));done('handshake-order-before-stream')
         changed=json.loads(json.dumps(fixture));changed['blueprints']['four_shape']['materialPool']='shared';lab.fixture(changed)
-        lab.run('binding','status',['status-snapshot'],during=lambda s:handshake(lab,s,initial['hash']));done('handshake-binding-before-stream')
+        lab.run('binding','status',['status-snapshot'],during=lambda s:handshake(lab,s,initial['hash'],old_pools,'the material pool mp-fixture:shared differs'));done('handshake-binding-before-stream')
         # No boot pool at all: exercises the production catalog's first-late-call path.
         lab.remove('mp-fixture');lab.authored_driver(False)
-        lab.run('late','late',['late-registry-closed','late-accepted-zero-slots','late-idempotent','late-not-live']);done('late')
+        late,_=lab.run('late','late',['late-registry-closed','late-accepted-zero-slots','late-idempotent','late-not-live','explicit-remove']);done('late')
         envelopes=list((lab.kiln/'data/worldtables/pending/material-pools-test').glob('@pool-*.json'))
         if len(envelopes)!=1:raise RuntimeError('expected ONE durable definition+receipt envelope')
         envelope=envelopes[0];valid=json.loads(envelope.read_text())
@@ -163,18 +185,32 @@ def main():
             lab.run('inactive','inactive',['inactive-request-unapplied','inactive-file-named'])
             if envelope.read_bytes()!=before:raise RuntimeError('inactive request changed or disappeared')
             lines=(lab.out/'inactive.log').read_text(errors='replace').splitlines()
-            named=[line for line in lines if envelope.name in line and 'owning mod is not loaded' in line]
+            service=[line for line in lines if '[service:kiln-worldtables.dll]' in line and envelope.name in line]  # the service's own lines, not a mod's echo
+            named=[line for line in service if 'its mod is not loaded' in line]
+            if any('unsafe' in line for line in service):raise RuntimeError('a disabled mod\'s stored pool was called unsafe')
             if len(named)!=1:raise RuntimeError('inactive file must be named exactly once')
             done('pending-inactive')
         finally:
             disabled.unlink(missing_ok=True);lab.data=original_data;lab.remove('mp-pending-observer')
         lab.run('replay','replay',['restart-receipt-registered','restart-owner-adopted-before-redefine','restart-same-receipt','restart-one-row']);done('replay')
         # Torn file: neither a row nor a Registered receipt may survive a new process.
+        valid_bytes=envelope.read_bytes()
         envelope.write_text('{"format":1,"canonical":');lab.run('torn','torn',['torn-envelope-refused']);done('torn-refused')
-        envelope.unlink();lab.fixture();lab.authored_driver(True)
+        # The stored pool is the mod's standing request only while the mod asks for it: loaded and no longer defining it, the
+        # row is served this session, the file goes, and the next start has no row and the hash it had without the pool.
+        envelope.write_bytes(valid_bytes)
+        lab.run('drop','drop',['drop-row-served-this-session','drop-world-ran'])
+        if envelope.exists():raise RuntimeError('the stored pool the mod no longer defines was not pruned: '+str(envelope))
+        done('stored-pool-dropped')
+        gone,_=lab.run('dropped','dropped',['dropped-row-gone'])
+        if gone['hash']!=late['hash']:raise RuntimeError(f"hash after the stored pool went is {gone['hash']}, not the profile's own {late['hash']}")
+        done('stored-pool-gone')
+        lab.fixture();lab.authored_driver(True)
         restored,_=lab.run('restored','restart',PROOF+['restart-materials-and-cells-live'])
         if restored['hash']!=initial['hash']:raise RuntimeError('restored main profile changed its original hash')
         done('restored-main-hash')
+        # What the pool observer costs a tick with the fixture's pools loaded (the driver measures and logs it).
+        lab.run('observer-cost','observer-cost',['observer-quiet-when-unchanged']);done('observer-cost')
         # Seed 49 building IDs through roofs (50 selector places) so the 49-ID limit is independent of selector room.
         # Then remove the mod: all 49 retained records have NO selectable block items. A further live ID is refused.
         boundary.content('mp-cap-building',{'format':1,'buildingMaterials':{f'm{i}':{'name':f'ID seed {i}','roof':True} for i in range(49)}})
@@ -184,7 +220,7 @@ def main():
         boundary.remove('mp-overflow');boundary.content('mp-cap-terrain',{'format':1,'terrainMaterials':{f'm{i}':{'name':f'Terrain ID {i}','like':'TerrainStone','placeable':False} for i in range(12)}})
         boundary.run('terrain','terrain-boundary',['terrain-11-plus-1','boundary-refusal-count','terrain-no-selector-work']);done('terrain-boundary')
         if passed!=FINAL:raise RuntimeError('not every required lab case ran')
-        proof={'format':1,'hash':initial['hash'],'passed':passed,'complete':True}
+        proof={'format':1,'hash':initial['hash'],'kiln':initial.get('kiln'),'passed':passed,'complete':True}
         a.out.mkdir(parents=True,exist_ok=True);(a.out/'lab-proof.json').write_text(json.dumps(proof,indent=2)+'\n')
         print('PASS mp-lab.ALL '+initial['hash'],flush=True);return 0
     finally:lab.stop();boundary.stop()
