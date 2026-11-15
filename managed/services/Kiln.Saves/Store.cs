@@ -34,6 +34,15 @@ internal sealed unsafe class WorldStore
     private uint _loadedRevision, _loadedUnix;
     private int _commits;
 
+    /// <summary>The pending manifest this process wrote last (its path) and what it says apart from its creation time
+    /// (<see cref="ManifestContent"/>). A staging whose manifest would say the same into the same file that is still
+    /// there writes nothing: the snapshot staging of a save whose data did not change since the save request one step
+    /// earlier (issue #39: on a hard drive each forced write could hold the server for seconds).</summary>
+    private (string Path, string Content)? _staged;
+
+    /// <summary>Files <see cref="WriteAtomic(string, byte[])"/> wrote in this process (tests count the writes of a save).</summary>
+    internal static long FilesWritten;
+
     internal readonly EntityTable Entities;
 
     /// <summary>Data that stays with one item (InstanceData): bundles "instances/&lt;mod&gt;" and
@@ -146,6 +155,7 @@ internal sealed unsafe class WorldStore
         Generation = 0;
         Match = DataMatch.None;
         _loadedRevision = _loadedUnix = 0;
+        _staged = null;
         _opened = false;
         _closed = true;
         WorldConfigs.Announce(null);
@@ -171,6 +181,7 @@ internal sealed unsafe class WorldStore
     {
         _loadedRevision = revision;
         _loadedUnix = unix;
+        _staged = null;
         DetachAll();
         var dir = Path.Combine(Root!, "manifests");
         var all = ListManifests(dir);
@@ -381,7 +392,8 @@ internal sealed unsafe class WorldStore
 
     /// <summary>Writes every bundle (new blobs only) and the pending manifest of generation <paramref name="gen"/>.
     /// Tick thread, right after the WorldSaving handlers (<paramref name="snapshot"/> false), and again at the snapshot
-    /// staging (<paramref name="snapshot"/> true).</summary>
+    /// staging (<paramref name="snapshot"/> true). A staging whose manifest is the one already in that file writes no
+    /// file (since 0.2.0-dev.29).</summary>
     public void Stage(uint gen, SaveReason reason, bool late, bool snapshot = false)
     {
         EnsureOpen();
@@ -426,11 +438,31 @@ internal sealed unsafe class WorldStore
         var list = new JsonObject();
         foreach (var (scope, (sha, size)) in entries) list[scope] = new JsonObject { ["sha256"] = sha, ["size"] = size };
         man["bundles"] = list;
-        WriteAtomic(PendingPath(gen), Encoding.UTF8.GetBytes(man.ToJsonString()));
+        var path = PendingPath(gen);
+        var content = ManifestContent(man);
+        // The same manifest is already in that file (the save request's staging, one simulation step before the snapshot
+        // staging, found nothing changed): writing it again would only change its creation time, which nothing reads.
+        // Blobs are content-addressed (Put writes only a blob that is not on disk). So a crash at any point finds the same
+        // files as after a rewrite: that manifest was forced to disk and renamed before this staging, as before.
+        var unchanged = _staged is { } last && last.Path == path && last.Content == content && File.Exists(path);
+        if (!unchanged)
+        {
+            WriteAtomic(path, Encoding.UTF8.GetBytes(man.ToJsonString()));
+            _staged = (path, content);
+        }
         Generation = gen;
         SavesRuntime.Log(late ? LogLevel.Warn : LogLevel.Debug,
-            $"Kiln.Saves: staged mod data generation {gen} ({Saves.Text(reason)}{(late ? ", late: after the world write" : "")}): " +
-            $"{entries.Count} bundles, {fresh} new blobs ({bytes} bytes) in {sw.Elapsed.TotalMilliseconds:F1} ms");
+            $"Kiln.Saves: staged mod data generation {gen} ({Saves.Text(reason)}{(late ? ", late: after the world write" : "")}" +
+            $"{(snapshot ? ", snapshot staging" : "")}): {entries.Count} bundles, {fresh} new blobs ({bytes} bytes)" +
+            $"{(unchanged ? ", manifest unchanged: nothing written" : "")} in {sw.Elapsed.TotalMilliseconds:F1} ms");
+    }
+
+    /// <summary>What a pending manifest says apart from its creation time.</summary>
+    private static string ManifestContent(JsonObject man)
+    {
+        var copy = (JsonObject)man.DeepClone();
+        copy.Remove("createdUnixMs");
+        return copy.ToJsonString();
     }
 
     private void Put(string scope, byte[] data, SortedDictionary<string, (string, int)> entries, ref int fresh, ref long bytes)
@@ -544,6 +576,7 @@ internal sealed unsafe class WorldStore
             fs.Flush(flushToDisk: true);
         }
         File.Move(tmp, path, overwrite: true);
+        Interlocked.Increment(ref FilesWritten);
     }
 
     internal readonly record struct Header(Guid Guid, uint Revision, uint Unix);
