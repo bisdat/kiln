@@ -500,6 +500,14 @@ internal sealed unsafe class ManagedStage
         else ProgramWrap.PostToTick(() => Wrap.OnDisabled(e));
     }
 
+    // Turned off for a reason that is not the mod's (the build cannot do what the stage asks): no count for its policy.
+    private void Off(string reason)
+    {
+        if (Interlocked.Exchange(ref _disabled, 1) != 0) return;
+        Unwrap();
+        RaiseDisabled(reason);
+    }
+
     private void Fail(Exception e)
     {
         Interlocked.Increment(ref ManagedFaults);
@@ -577,9 +585,10 @@ internal sealed unsafe class ManagedStage
         _ctx = View is null ? null : ViewContext.Begin(t, s, this);
         _slice = s;
         _eachError = null;
+        var rc = SystemsNative.Ok;
         try
         {
-            t->GameSliceIterate(s, &OnEntity, null);
+            rc = t->GameSliceIterate(s, &OnEntity, null);
         }
         finally
         {
@@ -594,6 +603,12 @@ internal sealed unsafe class ManagedStage
             _eachError = null;
             ExceptionDispatchInfo.Capture(e).Throw();
         }
+        // kiln.world could not iterate the slice (UNAVAILABLE: the iterator or the job's counts did not resolve on this
+        // build; BUFFER_TOO_SMALL: an iterator over 4096 bytes): the stage would see no entity, so it goes off and says why
+        if (rc != SystemsNative.Ok)
+            Off(rc == SystemsNative.BufferTooSmall
+                ? $"per-entity stages cannot run on {Wrap.Program}: its iterator is larger than kiln.world's 4096 bytes"
+                : $"per-entity stages cannot run on this build: kiln.world cannot iterate {Wrap.Program}'s slices (result {rc})");
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]

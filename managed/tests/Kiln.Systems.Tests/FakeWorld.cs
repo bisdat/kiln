@@ -38,6 +38,7 @@ internal sealed unsafe class FakeWorld : IDisposable
     internal int AttrCalls;
     internal bool NoRegistry;  // fuel_setup does not declare impact::AttributeRegistry
     internal ulong StepNow = 77;  // the step a fake slice says
+    internal int IterateResult = SystemsNative.Ok;  // what game_slice_iterate answers (Unavailable: a build that cannot iterate)
     private readonly SystemsNative.Table* _table;
     private readonly nint[] _names;
 
@@ -289,6 +290,7 @@ internal sealed unsafe class FakeWorld : IDisposable
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int Iterate(SystemsNative.Slice* s, delegate* unmanaged[Cdecl]<ulong*, uint, uint, void*, uint> each, void* user)
     {
+        if (F.IterateResult != SystemsNative.Ok) return F.IterateResult;
         ulong it = 0;
         for (uint r = 0; r < s->Count; r++)
         {

@@ -219,6 +219,28 @@ public sealed unsafe class SystemsTests
         Assert.True(w.Wraps[1].Gone);
     }
 
+    [Fact]
+    public void A_per_entity_stage_on_a_build_that_cannot_iterate_is_turned_off_with_the_reason_and_not_counted_for_the_mod()
+    {
+        using var w = new FakeWorld();
+        var mod = NewMod("noiter");
+        var wrap = InMod(mod, () => Systems.Wrap("fuel_setup").Wrap!);
+        var seen = 0;
+        WrapDisabledEvent? off = null;
+        wrap.Disabled += e => off = e;
+        InMod(mod, () => wrap.BeforeEach(_ => seen++));
+        w.IterateResult = SystemsNative.Unavailable;  // kiln.world cannot iterate this program's slices on this build
+        w.Call(w.Wraps[0]);
+        Assert.Equal(0, seen);
+        Assert.True(w.Wraps[0].Gone);
+        Assert.NotNull(off);
+        Assert.Contains("per-entity", off!.Reason);
+        Assert.Contains("this build", off.Reason);
+        lock (mod.PendingLock) Assert.Empty(mod.Pending);  // not a fault of the mod: nothing for its fault policy
+        w.Call(w.Wraps[0]);  // off: never called again
+        Assert.Equal(0, seen);
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct FuelBlock
     {
