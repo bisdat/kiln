@@ -32,9 +32,9 @@ internal sealed class AbilitiesFake : IKitFake
     public void AddCoverage(List<CoverageRow> rows) => rows.Add(new CoverageRow("Impact natives", CoverageKind.RecordingFake,
         [AbilitiesAbi.Service, AbilitiesAbi.NativesFeature, "abilities.natives.sync", "abilities.natives.attach", AbilitiesAbi.EcsRow],
         "Kiln.Abilities' own natives code on the kit's kiln.abilities: RegisterSync, an [ImpactNative] method's generated " +
-        "registration, DeclareTyped, Attach and Detach, StateOf, Natives.All. The fake server world takes the natives registered " +
-        "before it at the second step (Waiting, then Live, or Refused once 19 of them hold the registry's room for mods); a " +
-        "native taken off answers 0x1F. KilnHarness.ImpactNatives.Call runs one ECALL as the native's thunk does, on a thread " +
+        "registration, DeclareTyped, Attach and Detach, StateOf, Natives.All. As on a dedicated server, the world's native " +
+        "registry is there before the mods load (19 keys of it for mods' natives: the 20th is refused) and its programs come " +
+        "in at the second step; a native taken off answers 0x1F. KilnHarness.ImpactNatives.Call runs one ECALL as the native's thunk does, on a thread " +
         "of its own (no tick-thread API, as in the game): a typed declaration's check (0x2C another type or size, 0x18 a " +
         "required argument not connected), the handler's answer, 0x11 when it threw; for a game native the attachments whose " +
         "program and site match, Before by priority, then one Instead, then the game's native (what the test scripts with " +
@@ -67,7 +67,10 @@ internal sealed unsafe class AbilitiesModel
     // the game takes 128 native keys (half its registry's 256), 107 of them its own; kiln.Log and kiln.Signal take two
     public const int RegistryRoom = 128 - 107 - 2;
     public const int KilnSlots = 160 - 2;  // Kiln's native thunks, without the built-ins'
-    public const ulong WorldStep = 2;      // the mods load in the first step; the world's setup comes after them
+    // A dedicated server's order (lab kiln.log): the world's native registry is set up before the mods load (natives a
+    // mod registers in OnLoad are live at once), the world's programs come in at the second step (an attachment made in
+    // OnLoad that names a program is Pending until then).
+    public const ulong NativesStep = 1, ProgramsStep = 2;
 
     private sealed class Native
     {
@@ -109,7 +112,7 @@ internal sealed unsafe class AbilitiesModel
 
     private readonly object _lock = new();
     private KilnHarness? _harness;
-    private bool _worldIn, _ecsOn;
+    private bool _nativesIn, _programsIn, _ecsOn;
     private ulong _step, _attachSeq;
     private readonly List<Native> _natives = [];
     private readonly List<Attachment> _attachments = [];
@@ -155,7 +158,7 @@ internal sealed unsafe class AbilitiesModel
         {
             _natives.Clear();
             _attachments.Clear();
-            _worldIn = false;
+            _nativesIn = _programsIn = false;
         }
     }
 
@@ -164,7 +167,12 @@ internal sealed unsafe class AbilitiesModel
         lock (_lock)
         {
             _step = step;
-            if (!_worldIn && step >= WorldStep) WorldSetup();
+            if (!_nativesIn && step >= NativesStep) NativesSetup();
+            if (!_programsIn && step >= ProgramsStep)
+            {
+                _programsIn = true;
+                CheckAttachments();
+            }
         }
         AbilitiesTable.RunListener();  // kiln.abilities' Pre: Kiln.Abilities' listener
     }
@@ -188,7 +196,7 @@ internal sealed unsafe class AbilitiesModel
                 if (!list.Contains((hash, c.Site))) list.Add((hash, c.Site));
             }
             // kiln.assets and Programs.Register: the attachments are checked again in the Pre after a program went in
-            if (_worldIn) CheckAttachments();
+            if (_programsIn) CheckAttachments();
         }
     }
 
@@ -216,9 +224,9 @@ internal sealed unsafe class AbilitiesModel
 
     // ---- the world's setup ----
 
-    private void WorldSetup()
+    private void NativesSetup()
     {
-        _worldIn = true;
+        _nativesIn = true;
         foreach (var n in _natives)
         {
             if (n.State != AbilitiesAbi.StateWaiting) continue;
@@ -239,7 +247,6 @@ internal sealed unsafe class AbilitiesModel
                 a.Active = false;
                 Log(LogLevel.Warn, $"kiln.abilities: attachment {a.Id} stays off: 0x{a.Hash:x8} is not a native the game registered (or no free slot)");
             }
-        CheckAttachments();
     }
 
     private int KeysUsed() => _natives.Count(n => n.Keyed);
@@ -274,7 +281,7 @@ internal sealed unsafe class AbilitiesModel
             var size = s->Size;
             *s = default;
             s->Size = size;
-            s->Natives = (byte)(_worldIn ? 1 : 0);
+            s->Natives = (byte)(_nativesIn ? 1 : 0);
             s->VanillaNatives = (uint)_game.Count;
             s->NativeCapacity = 128;
             s->KilnNatives = (uint)_natives.Count(n => n.State != AbilitiesAbi.StateDead);
@@ -404,7 +411,7 @@ internal sealed unsafe class AbilitiesModel
             {
                 if (_natives.Count + _game.Keys.Count(h => _attachments.Exists(a => a.Hash == h)) >= KilnSlots)
                     return Refuse(AbilitiesAbi.RefusedNoSlot, "no free native slot (Kiln has 160)");
-                if (_worldIn && KeysUsed() >= RegistryRoom)
+                if (_nativesIn && KeysUsed() >= RegistryRoom)
                     return Refuse(AbilitiesAbi.RefusedRegistryFull, "native registry full (the game takes 128 natives, 107 of them its own)");
                 n = new Native { Hash = hash, Name = name };
                 _natives.Add(n);
@@ -416,7 +423,7 @@ internal sealed unsafe class AbilitiesModel
             if (_typed.TryGetValue(hash, out var typed)) n.Typed = typed;
             _declared.Remove(hash);
             // a revived native keeps its key; a new one takes one when the world is in, else at its setup
-            if (_worldIn) n.Keyed = true;
+            if (_nativesIn) n.Keyed = true;
             n.State = n.Keyed ? AbilitiesAbi.StateLive : AbilitiesAbi.StateWaiting;
         }
         Log(LogLevel.Info, $"kiln.abilities: sync native {name} (0x{hash:x8}, argc {argc}) registered");
@@ -486,7 +493,7 @@ internal sealed unsafe class AbilitiesModel
         Attachment a;
         lock (_lock)
         {
-            if (program != 0 && _worldIn)
+            if (program != 0 && _programsIn)
             {
                 var r = ProgramCalls(program, hash, site);
                 if (r < 0) return Refuse(AbilitiesAbi.RefusedProgramNotLoaded);
@@ -494,11 +501,11 @@ internal sealed unsafe class AbilitiesModel
             }
             if (stage == AbilitiesAbi.Instead && _attachments.Exists(x => x.Stage == AbilitiesAbi.Instead && x.Hash == hash && x.Program == program && x.Site == site))
                 return Refuse(AbilitiesAbi.RefusedSecondInstead);
-            if (_worldIn && !_game.ContainsKey(hash)) return Refuse(AbilitiesAbi.RefusedNotANative);
+            if (_nativesIn && !_game.ContainsKey(hash)) return Refuse(AbilitiesAbi.RefusedNotANative);
             a = new Attachment
             {
                 Id = ++_attachSeq, Owner = owner, Hash = hash, Program = program, Site = site, Stage = stage, Priority = priority,
-                Fn = fn, User = user, Checked = program == 0 || _worldIn,
+                Fn = fn, User = user, Checked = program == 0 || _programsIn,
             };
             a.Order = a.Id;
             _attachments.Add(a);
@@ -506,7 +513,7 @@ internal sealed unsafe class AbilitiesModel
         *handle = a.Id;
         var name = stage == AbilitiesAbi.Before ? "Before" : stage == AbilitiesAbi.Instead ? "Instead" : "After";
         Log(LogLevel.Info, $"kiln.abilities: attachment {a.Id}: native 0x{hash:x8}, {name}, program 0x{program:x8}, site 0x{site:x8}, priority {priority}" +
-                           (!_worldIn ? program != 0 ? " (checked when the world's programs are in)" : " (waits for the world's natives)" : ""));
+                           (!_nativesIn ? " (waits for the world's natives)" : program != 0 && !_programsIn ? " (checked when the world's programs are in)" : ""));
         return FakeTables.Ok;
     }
 
@@ -670,7 +677,7 @@ internal sealed unsafe class AbilitiesModel
                 game = _game.GetValueOrDefault(c->Hash);
                 set = [.. _attachments.Where(a => a.Hash == c->Hash)];
                 // the self-check of the first Kiln native call of the server world
-                if (_worldIn && !_ecsOn && (kiln is not null || set.Count > 0))
+                if (_programsIn && !_ecsOn && (kiln is not null || set.Count > 0))
                 {
                     _ecsOn = true;
                     Log(LogLevel.Info, "kiln.abilities: NativeContext's reads and writes of other entities are on in this world (abilities.natives.ecs)");

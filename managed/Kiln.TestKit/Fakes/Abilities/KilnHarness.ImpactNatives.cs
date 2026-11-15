@@ -20,9 +20,10 @@ public sealed partial class KilnHarness
 /// program would. Since 0.2.0-dev.29.
 /// </summary>
 /// <remarks>
-/// <para><b>Modelled.</b> The fake server world comes in at the second step (the mods load in the first): a native
-/// registered before it waits, then takes one of the 19 keys the registry leaves for mods (or is refused); one registered
-/// later is live at once. A call of a Kiln native runs its thunk's checks (a typed declaration: 0x2C for another type or
+/// <para><b>Modelled.</b> A dedicated server's order: the world's native registry is there before the mods load, so a
+/// native registered in OnLoad is live at once and takes one of the 19 keys the registry leaves for mods (the 20th is
+/// refused); the world's programs come in at the second step, so an attachment made in OnLoad that names a program is
+/// Pending until then. A call of a Kiln native runs its thunk's checks (a typed declaration: 0x2C for another type or
 /// size, 0x18 for a required argument not connected), then its handler, on a thread of its own while the tick thread
 /// waits (tick-thread API throws there, as in the game); a handler that threw answers 0x11, a native taken off (its mod
 /// unloaded) 0x1F. A call of a game native runs the attachments whose program and site match, in the service's order

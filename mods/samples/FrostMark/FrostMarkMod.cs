@@ -41,16 +41,16 @@ public sealed class FrostMarkMod : Mod
         {
             Log.Info($"frostmark: no sword here: {e.Message}");
         }
-        // an attachment to one call site of a vanilla program: the Fireball explosion's applyDamage, counted
-        // (in OnLoad the capability rows may not be reported yet: ask by trying, and catch what says it is off here)
-        try
+        // an attachment to the vanilla Fireball explosion's applyDamage, counted. The row is decided before OnLoad; made
+        // here, the attachment is Pending until the world's programs are in, then Active (or Off, with a log line).
+        if (Capabilities.Is("abilities.natives.attach"))
         {
             var a = Abilities.Natives.Attach(0x7a120ee8, "applyDamage", NativeStage.Before, (ref NativeCall c) => Interlocked.Increment(ref _fireballHits));
             Log.Info($"frostmark: a Before on the Fireball explosion's applyDamage: {(a.Ok ? "attached" : a.Reason)}");
         }
-        catch (KilnUnavailableException e)
+        else
         {
-            Log.Info($"frostmark: no attachments here: {e.Message}");
+            Log.Info($"frostmark: no attachments here: {Capabilities.Why("abilities.natives.attach")}");
         }
     }
 

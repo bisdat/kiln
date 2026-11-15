@@ -13,13 +13,21 @@ public sealed class ImpactNativesFakeTests
 {
     private sealed class NativesMod : Mod;
 
+    // what a mod's OnLoad reads of the natives' rows (decided before the mods load, as Kiln.Host starts Kiln.Abilities)
+    private sealed class AskingMod : Mod
+    {
+        public override void OnLoad() =>
+            Log.Info($"rows in OnLoad: sync {Capabilities.Is("abilities.natives.sync")}, attach {Capabilities.Is("abilities.natives.attach")}, " +
+                     $"ecs {Capabilities.Get("abilities.natives.ecs").State}");
+    }
+
     private const uint Explosion = 0x7a120ee8, DamageSite = 0x10, TransformSite = 0x20;
 
     private static (KilnHarness Kiln, ModHandle Mod) Start()
     {
         var kiln = new KilnHarness();
         var mod = kiln.Load<NativesMod>(new ModManifest("tk-natives"));
-        kiln.Step(1);  // the mods load; the fake server world comes in at the next step
+        kiln.Step(1);  // the world's native registry, then the mods' OnLoad; the world's programs come in at the next step
         return (kiln, mod);
     }
 
@@ -33,18 +41,18 @@ public sealed class ImpactNativesFakeTests
         }));
 
     [Fact]
-    public void A_sync_native_waits_for_the_world_then_answers_inside_the_call_off_the_tick_thread()
+    public void A_sync_native_registered_at_load_is_live_and_answers_inside_the_call_off_the_tick_thread()
     {
         var (kiln, mod) = Start();
         using var owned = kiln;
         var tick = new ConcurrentQueue<bool>();
         var r = Twice(kiln, mod, tick);
         Assert.True(r.Ok, r.Reason);
-        Assert.Equal(NativeState.Waiting, kiln.Run(() => Abilities.Natives.StateOf(r.Hash)));
+        // a dedicated server's world has its native registry before the mods load: live at once
+        Assert.Equal(NativeState.Live, kiln.Run(() => Abilities.Natives.StateOf(r.Hash)));
         // a row Kiln.Abilities reports itself: Kiln.Capabilities, as a mod reads it
         Assert.True(kiln.Run(() => Capabilities.Is("abilities.natives.sync")), kiln.Run(() => Capabilities.Why("abilities.natives.sync")));
         kiln.Step(1);
-        Assert.Equal(NativeState.Live, kiln.Run(() => Abilities.Natives.StateOf(r.Hash)));
         Assert.Contains(kiln.Run(() => Abilities.Natives.All), n => n.Name == "tk-natives.Twice" && n.Kind == ImpactNativeKind.Sync);
 
         var call = kiln.ImpactNatives.Call(new FakeImpactCall("tk-natives.Twice", FakeImpactArg.Int(21)));
@@ -92,17 +100,16 @@ public sealed class ImpactNativesFakeTests
     {
         var (kiln, mod) = Start();
         using var owned = kiln;
-        var hashes = kiln.As(mod, () => Enumerable.Range(0, 20)
-            .Select(i => Abilities.Natives.RegisterSync($"N{i}", 0, (ref NativeCall c) => 1).Hash).ToList());
+        var results = kiln.As(mod, () => Enumerable.Range(0, 20)
+            .Select(i => Abilities.Natives.RegisterSync($"N{i}", 0, (ref NativeCall c) => 1)).ToList());
+        Assert.Equal(19, results.Count(r => r.Ok));
+        Assert.False(results[19].Ok);
+        Assert.StartsWith("native registry full", results[19].Reason);
+        Assert.Equal(NativeState.None, kiln.Run(() => Abilities.Natives.StateOf(results[19].Hash)));
         kiln.Step(1);
-        var states = kiln.Run(() => hashes.Select(Abilities.Natives.StateOf).ToList());
-        Assert.Equal(19, states.Count(s => s == NativeState.Live));
-        Assert.Equal(NativeState.Refused, states[19]);
+        Assert.Equal(1, kiln.ImpactNatives.Call(new FakeImpactCall("tk-natives.N18")).Value);
         Assert.Equal(0x1F, kiln.ImpactNatives.Call(new FakeImpactCall("tk-natives.N19")).Error);
-        // once the world is in, one more is refused at once
-        var late = kiln.As(mod, () => Abilities.Natives.RegisterSync("Late", 0, (ref NativeCall c) => 1));
-        Assert.False(late.Ok);
-        Assert.StartsWith("native registry full", late.Reason);
+        Assert.False(kiln.As(mod, () => Abilities.Natives.RegisterSync("Late", 0, (ref NativeCall c) => 1)).Ok);
     }
 
     [Fact]
@@ -147,6 +154,15 @@ public sealed class ImpactNativesFakeTests
         var canceled = kiln.ImpactNatives.Call(new FakeImpactCall("applyDamage", FakeImpactArg.Float(3f)) { Program = Explosion, Site = DamageSite });
         Assert.Equal(["before 5", "before 1", "after"], order);
         Assert.Equal((0, 0, false), (canceled.Error, canceled.Value, canceled.OriginalCalled));
+    }
+
+    [Fact]
+    public void A_mods_OnLoad_reads_the_natives_rows_decided()
+    {
+        using var kiln = new KilnHarness();
+        kiln.Load<AskingMod>(new ModManifest("tk-asking"));
+        kiln.Step(1);
+        Assert.Equal(["rows in OnLoad: sync True, attach True, ecs Pending"], kiln.Lines("tk-asking", "rows in OnLoad"));
     }
 
     [Fact]
@@ -237,6 +253,8 @@ public sealed class ImpactNativesFakeTests
         kiln.ImpactNatives.AddProgram(Explosion, new FakeEcall("applyDamage", DamageSite));
         kiln.Step(3);  // the generated registration runs in a service tick under the mod; the world takes it
         Assert.NotEmpty(kiln.Lines("frostmark", "frostmark: no sword here"));  // no game resources offline: the sword is not defined
+        // the documented pattern: the row asked in OnLoad, the attachment made there, Pending until the programs, then Active
+        Assert.Equal(["frostmark: a Before on the Fireball explosion's applyDamage: attached"], kiln.Lines("frostmark", "frostmark: a Before"));
         Assert.Equal(NativeState.Live, kiln.Run(() => Abilities.Natives.StateOf(AbilitiesNativeHash("frostmark.OnHit"))));
 
         static EntityId Enemy(KilnHarness kiln, int current)

@@ -277,7 +277,10 @@ destroyed before the first run). Keys: a variable alias or debug name of the pro
   answered, the one Instead for that native, program and site; then, if still undecided, the game's native, once; then
   every After (lowest first; `CallOriginal()` does nothing there). The stages share one call record. Dispose the
   handle to detach (from that Pre on the handler gets no call); a mod's attachments end when it unloads. `Ok = false`:
-  program not loaded, site not found, a second Instead, no free Kiln slot. Attached before the world has loaded its
+  program not loaded, site not found, a second Instead, no free Kiln slot. The rows `abilities.natives.sync` and
+  `abilities.natives.attach` are decided before the mods' `OnLoad` (Kiln starts Kiln.Abilities right before it loads
+  them), so the pattern is the contract's: `if (Capabilities.Is("abilities.natives.attach")) Abilities.Natives.Attach(...)`
+  in `OnLoad` (mods/samples/FrostMark). Attached before the world has loaded its
   programs, the program and site are checked then (`State`: `Pending` until then); one that is not there is logged and
   stays off (`Off`). Attachments are checked again in the Pre after any program is registered (kiln.assets or
   `Programs.Register`), so one naming a mod's program that goes in later turns `Active` then (`attachment N on native
