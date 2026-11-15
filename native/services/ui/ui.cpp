@@ -142,6 +142,9 @@ bool imgui_create(HWND hwnd, float dpi) {
     io.IniFilename = g_ini_path.empty() ? nullptr : g_ini_path.c_str();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad | ImGuiConfigFlags_NoMouseCursorChange;
     io.MouseDrawCursor = false;
+    // By default ImGui opens a "conflicting ID" popup for programmers over the game when two items share an id, in Kiln's
+    // own pages or in a mod's window. Players cannot act on it: off (ImGui's advice for non-programmer builds).
+    io.ConfigDebugHighlightIdConflicts = false;
     if (!ImGui_ImplWin32_Init(hwnd)) {
         set_error("ImGui Win32 backend failed");
         ImGui::DestroyContext();
