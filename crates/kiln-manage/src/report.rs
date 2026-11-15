@@ -10,7 +10,7 @@
 //! - [`write_zip`] (feature `zip`) writes the zip.
 //!
 //! Layout of the zip: `summary.txt` (for a forum post), `report.json` (findings and failed sections), `game/<path>`
-//! (tails of kiln.log, proxy.log, eml.log, shroudlink_client.log, the newest crash report; `kiln/state/*.json`, `kiln/profile.json`,
+//! (tails of kiln.log, proxy.log, eml.log, tick-stats.jsonl, shroudlink_client.log, the newest crash report; `kiln/state/*.json`, `kiln/profile.json`,
 //! `kiln/chain.ini`, `kiln/kiln.json`, `kiln/.install.json`), `greeneye-mods/<id>/<game|library>/*.log|*.status` (tails of each Greeneye
 //! mod's own log and status files, with Greeneye Loader's logs under `game/`), `launcher/launcher.log` (tail), `listings/*.txt` (names,
 //! sizes and times of the game folder's top level, `kiln/` two levels deep, each engine's mods folder).
@@ -32,6 +32,8 @@ use std::time::SystemTime;
 pub const KILN_LOG_MAX: u64 = 1 << 20;
 /// Tail of proxy.log, eml.log, shroudlink_client.log, launcher.log.
 pub const SMALL_LOG_MAX: u64 = 192 * 1024;
+/// Tail of tick-stats.jsonl (one line a minute per world, about 0.4 KiB each: a hosted session's last 3 to 4 hours).
+pub const TICK_STATS_MAX: u64 = 256 * 1024;
 /// The newest crash report.
 pub const CRASH_MAX: u64 = 64 * 1024;
 /// One Greeneye log or status file (Greeneye Loader's loader.log, a Greeneye mod's own log in its folder).
@@ -1406,6 +1408,9 @@ pub fn build(input: &ReportInput) -> Report {
     }
     let proxy_log = cx.add_tail(crate::paths::game::PROXY_LOG, SMALL_LOG_MAX);
     cx.add_tail("kiln/logs/eml.log", SMALL_LOG_MAX);
+    // Kiln's per-minute step times of each world (core/src/tick.cpp; rewritten at every game start): whether a slow
+    // session was slow inside the steps, between them (saves), or in Kiln's own Pre / Post (GitHub issue 39)
+    cx.add_tail("kiln/logs/tick-stats.jsonl", TICK_STATS_MAX);
     // Native UI initialization and later player-menu visibility are separate addon paths; kiln.log alone cannot
     // distinguish them. Read only this bounded log, not the addon's key bindings or per-server mod settings.
     cx.add_tail("shroudlink_client.log", SMALL_LOG_MAX);

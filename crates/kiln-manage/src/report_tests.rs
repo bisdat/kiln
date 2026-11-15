@@ -270,6 +270,43 @@ fn addon_log_is_optional_bounded_and_redacted() {
         old.repeat(SMALL_LOG_MAX as usize / old.len() + 1) + last, "collection is read-only");
 }
 
+/// GitHub issue 39: a player's "slow motion" report could not be told apart from the save cycle because the zip had no
+/// tick-stats.jsonl (Kiln's per-minute step times, rewritten at every game start). It is in the zip now: the newest lines,
+/// whole, within [`TICK_STATS_MAX`].
+#[test]
+fn tick_stats_are_collected_newest_lines_whole_and_bounded() {
+    let f = Fx::healthy("tick-stats");
+    let absent = build(&f.input());
+    assert!(file(&absent, "game/kiln/logs/tick-stats.jsonl").is_none());
+    assert!(absent.errors.is_empty(), "{:?}", absent.errors);
+
+    let line = |t: &str, rate: f64| format!(
+        "{{\"time\":\"2026-11-15T{t}\",\"world\":\"server\",\"steps\":3580,\"rate\":{rate:.2},\"clock_rate\":59.67,\
+         \"step_ms\":{{\"p50\":4.120,\"p99\":9.870,\"max\":2310.500}},\"pre_ms\":{{\"p50\":0.0210,\"p99\":0.0900,\"max\":0.300}},\
+         \"post_ms\":{{\"p50\":0.0110,\"p99\":0.0500,\"max\":0.200}},\"interval_ms\":{{\"p50\":16.67,\"p99\":33.40,\"max\":2402.10}},\
+         \"subs\":{{\"pre\":12,\"post\":9}}}}\n");
+    let old = line("22:45:00", 59.67);
+    let last = line("00:33:00", 24.46);
+    let n = TICK_STATS_MAX as usize / old.len() + 50;
+    f.w("kiln/logs/tick-stats.jsonl", old.repeat(n) + &last);
+    let r = build(&f.input());
+    let t = file(&r, "game/kiln/logs/tick-stats.jsonl").expect("tick-stats.jsonl must be in the report");
+    assert!(t.len() as u64 <= TICK_STATS_MAX + 200, "{}", t.len());
+    let mut lines = t.lines();
+    assert!(lines.next().is_some_and(|l| l.starts_with("... (older lines left out")), "a cut file says so first");
+    let rest: Vec<&str> = lines.collect();
+    assert!(rest.len() > 100, "{}", rest.len());
+    for l in &rest {
+        serde_json::from_str::<serde_json::Value>(l).unwrap_or_else(|e| panic!("every line after the note is whole JSON ({e}): {l}"));
+    }
+    assert_eq!(rest.last().copied(), Some(last.trim_end()), "the newest line is kept");
+    assert_eq!(std::fs::read_to_string(f.game.join("kiln/logs/tick-stats.jsonl")).unwrap(), old.repeat(n) + &last, "collection is read-only");
+    // a short file whole, without the note
+    f.w("kiln/logs/tick-stats.jsonl", last.clone());
+    let r = build(&f.input());
+    assert_eq!(file(&r, "game/kiln/logs/tick-stats.jsonl"), Some(last.as_str()));
+}
+
 /// manage-import F9: the addon log sits in the game root, where no Kiln component writes; a link planted there (by a
 /// hand-extracted archive) must not put the file it points at into the report the player posts.
 #[cfg(unix)]
