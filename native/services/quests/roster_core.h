@@ -140,6 +140,7 @@ PageOutcome eval_pages(Result16* out, void* ctx, uint16_t* seen, const Span& spa
 // One thread's paged evaluations waiting for their SetUnlocks (the program calls Eval, then SetUnlocks with Eval's
 // page-0 payload and version, on one thread). A scoped stack, so a nested evaluation pairs with its own setter.
 struct Pending {
+    uint64_t epoch = 1;  // sidecar lifecycle at Eval entry; a stop invalidates pending work on every thread
     uintptr_t span_ptr = 0;
     uint64_t count = 0;
     uint32_t pages = 0;
@@ -227,10 +228,16 @@ public:
     static constexpr uint32_t kSlots = 8;  // a hosting client has two registries; a few spare for replaced ones
     enum class Bit { Unlocked, Locked, NoPage, Stale, Busy };
 
-    // After the game's SetUnlocks wrote (mask0, version) for `registry`: keep the pages with it. False when the lock
-    // was busy (nothing written; the old entry no longer matches the registry and is never used).
+    uint64_t epoch() const { return epoch_.load(std::memory_order_acquire); }
+
+    // After SetUnlocks: attach only work from the current lifecycle. The epoch check shares the stop lock,
+    // so an evaluator already in flight at stop cannot repopulate the cleared sidecar. Busy or old: skip.
     bool attach(uintptr_t registry, const Pending& p) {
         if (!lock_.try_for()) return false;
+        if (p.epoch != epoch()) {
+            lock_.unlock();
+            return false;
+        }
         Sidecar* s = find_or_claim(registry);
         s->registry = registry;
         s->span_ptr = p.span_ptr;
@@ -291,12 +298,14 @@ public:
     // Blocking: called on a world's thread or the destroying thread, never from a hook.
     void drop_world(uint32_t kind) {
         lock_blocking();
+        epoch_.fetch_add(1, std::memory_order_release);
         for (Sidecar& s : s_)
             if (s.kind == kind || s.kind == kKindUnknown) s = Sidecar{};
         lock_.unlock();
     }
     void drop_all() {
         lock_blocking();
+        epoch_.fetch_add(1, std::memory_order_release);
         for (Sidecar& s : s_) s = Sidecar{};
         lock_.unlock();
     }
@@ -328,6 +337,7 @@ private:
         return oldest;
     }
 
+    std::atomic<uint64_t> epoch_{1};
     mutable BoundedLock lock_;
     std::array<Sidecar, kSlots> s_{};
     uint64_t serial_ = 0;

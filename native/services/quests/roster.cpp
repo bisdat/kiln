@@ -120,6 +120,7 @@ Result16* hk_eval(Result16* out, void* ctx, uint16_t* seen, const Span* span) {
     Span s{};
     if (!span || !seen || !out || !copy_guarded(&s, span, sizeof s) || s.count <= kPage || s.count > kExpanded)
         return g_eval_hook.call<Result16*>(out, ctx, seen, span);  // the game's own call, unchanged
+    const uint64_t epoch = g_sidecars.epoch();
     const auto original = g_eval_hook.original<EvalFn>();
     const PageOutcome o = eval_pages(out, ctx, seen, s, static_cast<uint64_t>(R.stride), static_cast<uint8_t>(R.eval_error),
                                      [original](Result16* r, void* c, uint16_t* v, const Span* sp) { original(r, c, v, sp); });
@@ -127,6 +128,7 @@ Result16* hk_eval(Result16* out, void* ctx, uint16_t* seen, const Span* span) {
     note_thread(g_said_eval_off, "a paged evaluation ran");
     if (o.complete) {
         Pending p;
+        p.epoch = epoch;
         p.span_ptr = s.ptr;
         p.count = s.count;
         p.pages = o.pages;

@@ -246,6 +246,26 @@ void sidecars() {
     sc.drop_world(KILN_WORLD_CLIENT);
     CHECK(sc.bit(0xaaa, live, 64) == Sidecars::Bit::Unlocked);
     CHECK(sc.bit(0xbbb, live, 64) == Sidecars::Bit::NoPage && sc.bit(0xccc, live, 64) == Sidecars::Bit::NoPage);
+    // An evaluation can survive on a worker whose setter never arrived. A new world
+    // may reuse every address and the same version/page-0 value after stop.
+    {
+        Sidecars stopped;
+        Pending old = p;
+        old.epoch = stopped.epoch();
+        old.masks[1] = 0;
+        stopped.drop_world(KILN_WORLD_SERVER);
+        CHECK(!stopped.attach(0xaaa, old));
+        CHECK(stopped.bit(0xaaa, live, 64) == Sidecars::Bit::NoPage);
+        // A fresh evaluation in the next world can still attach.
+        Pending fresh = p;
+        fresh.epoch = stopped.epoch();
+        CHECK(stopped.attach(0xaaa, fresh));
+        CHECK(stopped.bit(0xaaa, live, 64) == Sidecars::Bit::Unlocked);
+        // A stop racing with an in-flight evaluator also rejects its later attach.
+        std::thread worker([&] { stopped.drop_world(KILN_WORLD_SERVER); });
+        worker.join();
+        CHECK(!stopped.attach(0xbbb, fresh));
+    }
     // a held lock: a hook does not wait for it (bounded, then the caller fails closed)
     {
         BoundedLock l;
