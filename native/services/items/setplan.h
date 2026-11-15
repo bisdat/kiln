@@ -206,6 +206,10 @@ inline SetPlan plan_set(const SetModel& m, const KilnSetOpV1* entries, uint32_t 
                               KILN_SLOT_INDEX(op.source_slot), s->count, op.expected_count);
         }
         w.token = token_of(*s);
+        // Different wire kinds can resolve to the same physical item (instance + whole stack).
+        for (uint32_t y = 0; y < kSelectionSlots; ++y)
+            if (y != static_cast<uint32_t>(x) && want[y].named && want[y].kind != 0 && want[y].token.same(w.token))
+                KSET_REFUSE(KILN_SET_REFUSAL_SHAPE, e, "the same inventory item is selected for more than one equipment slot");
         if (const uint8_t t = slot_type ? slot_type(s->item, ctx) : 0; t && t != slot_type_of(op.equipment_slot))
             KSET_REFUSE(KILN_SET_REFUSAL_SLOT_TYPE, e, "item 0x%08x does not fit equipment slot %u", s->item, op.equipment_slot);
         p.satisfied[x] = !st.eq[x].empty() && st.eq[x].same(w.token);

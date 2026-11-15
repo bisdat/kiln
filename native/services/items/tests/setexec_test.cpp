@@ -47,6 +47,7 @@ struct FakeGame final : SetEngine {
     bool faulted = false;
     int tx_opens = 0, commits = 0, rollbacks = 0, frees = 0, steps = 0;
     bool rollback_after_commit = false;
+    int corrupt_commit = 0;
 
     bool enter() {
         if (faulted) ++calls_after_fault;
@@ -142,6 +143,11 @@ struct FakeGame final : SetEngine {
         for (uint32_t x = 0; x < kSelectionSlots; ++x)
             if (pending_set[x]) live.equipment[x] = pending[x];
         if (commit_mismatch) live.equipment[selection_index(kRing0)] = 0;  // a slot the set left out changes
+        if (corrupt_commit == 1) at(slot(G1, 2)).item = at(slot(G1, 2)).count = at(slot(G1, 2)).pide = 0;
+        if (corrupt_commit == 2) at(slot(G2, 7)) = Stack{slot(G2, 7), RingA, 1, 5001};
+        if (corrupt_commit == 3) live.items[0].owner = 99;
+        if (corrupt_commit == 4) live.items[0].contained = slot(G2, 7);
+        if (corrupt_commit == 5) live.actionbar[0] = 999;
         open = false;
         return true;
     }
@@ -274,6 +280,16 @@ int main() {
         check(execute(y, swap, PlanOptions{}, nullptr, nullptr).status == SetStatus::Refused && y.tx_opens == 0, "a cycle, refused by default: no transaction");
         const SetOutcome os = execute(y, swap, cycles, nullptr, nullptr);
         check(os.status == SetStatus::Done && os.steps == 3 && os.changes.size() == 2 && rules(y), "a cycle when allowed: three steps, two deltas, Done");
+    }
+
+    // A correct equipment selection cannot hide loss/duplication or damaged instance membership elsewhere.
+    for (int corruption = 1; corruption <= 5; ++corruption) {
+        FakeGame g = world();
+        g.corrupt_commit = corruption;
+        const SetOutcome o = execute(g, job(g, {op(kRing0, 1, 5002, RingB)}), PlanOptions{}, nullptr, nullptr);
+        check(o.status == SetStatus::InvariantFailure && o.engine_fault && (o.flags & kResultMayHaveMutated) &&
+                  (o.flags & kResultCommitted) && g.commits == 1 && g.rollbacks == 0 && rules(g),
+              "correct equipment with corrupt inventory/identity/selection: fault, never repair a closed transaction");
     }
 
     // ---- no transaction ----
