@@ -111,7 +111,8 @@ public sealed partial class ClientPassMod
         }
         if (first != 0) new BootStage(2, pid, first, started).Write(stageFile);
         c.Instruct("Part 1 of 3. You got 5 Boot Token and the Boot Bolt spell. Open the inventory and look at them: names, icons and " +
-                   "tooltips. Cast the Boot Bolt at a creature as any spell: the hit gives it Boot Cold for 4 s. Open the skill tree: a new " +
+                   "tooltips. The Boot Token has an icon of its own, a round wooden token with a frost mark (since 0.2.0-dev.29; before, " +
+                   "it showed the icon of the game item it is made from). Cast the Boot Bolt at a creature as any spell: the hit gives it Boot Cold for 4 s. Open the skill tree: a new " +
                    "node \"Boot Cold Talent\" sits next to an existing node and is linked to it. Is all of it there, drawn and working, " +
                    "in this first start? Keep your observations for part 3, leave the world to the main menu, host it again (do not quit the game) and " +
                    "run this check again.");
