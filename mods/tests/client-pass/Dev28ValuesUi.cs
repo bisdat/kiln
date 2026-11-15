@@ -5,8 +5,8 @@ using static Kiln.Testing.ClientCheckTags;
 
 namespace ClientPass;
 
-// 05a-value-providers (chapter 05a): Ui.Values, values in the game's own UI. Every row is held on a game client until its
-// check passes (native/core/gates/dev28-05a-value-providers.json): ui.values.detail and ui.values.slot by 05a-c1,
+// 05a-value-providers (chapter 05a): Ui.Values, values in the game's own UI. Every row is on in every game since
+// 0.2.0-dev.29 but remains unconfirmed: ui.values.detail and ui.values.slot by 05a-c1,
 // ui.values.hud by 05a-c2, ui.values.held by 05a-c3, ui.values.tooltip_lines by 05a-c4-viewer, ui.slots.inspect by
 // 05a-c5. Each check registers its own providers (the research's payloads as product providers), removes them at its
 // end, and expects that the game actually called them: a check whose hook never ran cannot pass. Orders 2400-2499.

@@ -206,7 +206,7 @@ export function MainList({ game, mods, running }: { game: GameInstall; mods: Mod
       <div className="k-mods-bar">
         {many && (
           <>
-            <WellInput label="Filter" compact value={text} onChange={(e) => setText(e.target.value)} wellStyle={{ flex: "1 1 130px", maxWidth: 250 }}
+            <WellInput label="Filter" compact value={text} onChange={(e) => setText(e.target.value)} onClear={() => setText("")} wellStyle={{ flex: "1 1 130px", maxWidth: 250 }}
               note={text || kind ? `${shown.length}/${mods.rows.length}` : undefined} />
             {kinds.length > 1 && (
               <Select aria-label="Kind" className="k-mods-kind" value={kind} onChange={(v) => setKind(v as ModKind | "")}

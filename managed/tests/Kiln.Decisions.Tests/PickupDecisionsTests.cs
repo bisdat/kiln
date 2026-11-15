@@ -115,7 +115,7 @@ public sealed class PickupDecisionsTests : IDisposable
         kiln.Step(2);
         kiln.Decisions.Model.SupportedHookKinds = 1ul << (int)N.KindWalkover;
         KitBackend.Instance.Capabilities.Report(KitBackend.CapabilityOwner, PickupDecisions.Row, CapState.Unavailable, CapReason.Policy,
-            "game test pending: 07-events.decision-rollback", KitBackend.CapabilityOwner);
+            "held by the owner's gate list (a test of a row that is off)", KitBackend.CapabilityOwner);
         var off = Assert.Throws<KilnUnavailableException>(() => Events.On<ItemPickingUpEvent>(_ => { }));
         Assert.Equal("events.pickup", off.Capability);
         Exception? thrown = null;

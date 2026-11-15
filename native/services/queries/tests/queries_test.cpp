@@ -251,6 +251,17 @@ static void test_entities() {
     box.half[0] = box.half[1] = box.half[2] = 0;
     CHECK((origins_inside(all, box, 0) == std::vector<uint32_t>{7}));
     CHECK(valid_shape(s) && valid_shape(box));
+    // Finite public inputs must not turn an outside origin into a hit through inf <= inf.
+    Shape huge;
+    huge.center[0] = 1e200;
+    huge.radius = 1e199;
+    CHECK(origins_inside({{1, 0, 0, 0}}, huge, 0).empty());
+    huge.center[0] = 0;
+    huge.radius = 1e200;
+    CHECK((origins_inside({{1, 2e200, 0, 0}, {2, 1e200, 0, 0}}, huge, 0) == std::vector<uint32_t>{2}));
+    // Squaring tiny distances must not underflow into a zero-radius overlap either.
+    huge.radius = 0;
+    CHECK(origins_inside({{1, 1e-200, 0, 0}}, huge, 0).empty());
     s.radius = -1;
     CHECK(!valid_shape(s));
     s.radius = std::nan("");

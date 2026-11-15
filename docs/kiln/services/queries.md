@@ -136,7 +136,8 @@ immediately and defers its event to a later tick; retiring code receives no furt
 A route is geometry at one moment: the world may change before a creature has walked it, and `NpcControl.MoveTo` is
 a straight step, not a follower.
 
-On a game client `queries.path` and `queries.reachability` are held until the guided check `02-queries.path-hosted`.
+`queries.path` and `queries.reachability` are on for servers and worlds you host since 0.2.0-dev.29.
+Their behavior in a hosted game is unconfirmed; guided check `02-queries.path-hosted` remains to be played.
 
 In unit tests: `kiln.Queries.Paths = request => FakePathAnswer.NoPath;` (or `Route(...)`), `PathSteps`,
 `PathRequests`, `WithoutSpawnTime(entity)`. An anchor made with `kiln.Entities.Create` needs an 8-byte `SpawnTime`
@@ -156,8 +157,9 @@ No surface normal, no cell coordinate, no entity. The position lies a hair befor
 | `queries.ground`, `queries.line_of_sight` | built on the ray; off with it |
 | `queries.overlap_origins` | entity origins, from `kiln.world` |
 
-On a game client all four `queries.*` rows are held until the guided check `01-queries.voxel-ray-hosted` passes in
-the real game ([caps.md](caps.md#the-client-gate-dev28)); a dedicated server is not held.
+All four rows above are on for servers and worlds you host since 0.2.0-dev.29.
+Guided check `01-queries.voxel-ray-hosted` has not confirmed them in a real game; no preview setting is needed
+([caps.md](caps.md#the-client-gate-dev28)).
 
 ## Unit tests
 

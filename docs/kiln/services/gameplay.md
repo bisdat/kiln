@@ -201,7 +201,7 @@ Kiln.Gameplay follows [the API contract](../modding/contract.md). Server side on
 `ItemPickingUpEvent`: the game's walk-over pickup (an item it gives a player standing on it) is held at the entry of
 its range helper and posted in a later Pre; cancel it to keep the item on the ground for this sampled exposure, and
 `Decisions.ReevaluatePickup(drop, receiver)` to ask again. Interaction pickups stay `LootEvent`'s. Capability
-`events.pickup`, held until its game test. [decisions.md](decisions.md#walk-over-pickup).
+`events.pickup`, on since 0.2.0-dev.29 and not yet confirmed in a real game. [decisions.md](decisions.md#walk-over-pickup).
 
 Player build edits: `BuildEvent` still reports them after the fact, and `Gameplay.Protect` zones refuse them natively
 (also terraforming). A managed cancelable event for player pieces (`events.build.pieces`) is not in this build, and

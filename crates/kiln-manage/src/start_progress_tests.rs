@@ -158,6 +158,7 @@ impl Owner {
             plan: self.runtime.iter().map(|s| s.id.to_string()).collect(),
             steps,
             why: None,
+            world_ms: None,
         })
     }
 
@@ -438,6 +439,54 @@ fn silence_idle_failure_an_ended_game_and_a_runtime_without_progress_are_not_pro
     assert!(timeline(&Inputs { launcher: None, ..legacy }).is_none());
 }
 
+/// A Nexus report (2026-11-14, 28 mods, "hooked over" warnings): the launcher said "Kiln has said nothing for 5,183 s"
+/// while the player played. A client start whose main menu mark never came ends at the game's first world (the core:
+/// native/core/tests/progress_file_test.cpp); the window drops the silence once the game is in a world, and a step that
+/// never ends, with no world, is still said with its name.
+#[test]
+fn a_client_in_its_world_is_no_silent_start_and_a_stuck_step_is_named() {
+    let o = Owner::start();
+    // in content, the blocks being applied, at a time progress.json was last written
+    let t = o.boot_at() + o.runtime.iter().take_while(|s| s.id != "content").map(|s| s.dur).sum::<u64>() + 3_000;
+    let p = o.progress(t).unwrap();
+    assert_eq!((p.state.as_str(), p.steps.last().unwrap().id.as_str()), ("loading", "content"));
+    let l = o.launcher(t);
+    let at = |silent: u64| BASE + t as i64 + silent as i64;
+    let look = |p: &Progress, silent: u64| timeline(&Inputs { launcher: Some(&l), progress: Some(p), written: Some(at(0)),
+        process: Some(BASE + o.process_at() as i64), running: true, now: at(silent), ..Default::default() }).unwrap();
+    // a step that never ends, no world: the silence after a minute, with the step's name
+    let stuck = look(&p, QUIET_MS);
+    assert_eq!(stuck.phase, Phase::Quiet);
+    assert_eq!(stuck.steps[stuck.running.unwrap()].label, "Applying the mods' content");
+    // the game in a world (the core wrote worldMs then): playing; a step still at work goes on as progress, one that
+    // says nothing more is no silent start: over for the window, and never kept as a timed start
+    let mut world = p.clone();
+    world.world_ms = Some(world.at_ms);
+    assert_eq!(look(&world, QUIET_MS - 1).phase, Phase::Loading);
+    let playing = look(&world, 5_183_000);
+    assert_eq!((playing.phase, playing.steps[playing.running.unwrap()].id.as_str()), (Phase::Ready, "content"));
+    assert!(kept_from(&playing, &world, Some(KILN), FP, at(5_183_000), Some(&l)).is_none());
+    // a dedicated server's world with a stuck step is still news (kilnctl and the server pages show it)
+    let mut server = world.clone();
+    server.side = Some("server".into());
+    assert_eq!(look(&server, QUIET_MS).phase, Phase::Quiet);
+    // the core's own end at the first world: ready, kept like any start
+    let end = o.progress(o.end()).unwrap();
+    let mut by_world = end.clone();
+    by_world.world_ms = Some(end.at_ms);
+    let text = serde_json::to_string(&by_world).unwrap();
+    assert!(text.contains(&format!("\"worldMs\":{}", end.at_ms)), "{text}");
+    let read = parse_progress(&text).expect("worldMs is part of format 1");
+    assert_eq!(read.world_ms, Some(end.at_ms));
+    let l = o.launcher(o.end());
+    let tl = timeline(&Inputs { launcher: Some(&l), progress: Some(&read), written: Some(BASE + o.end() as i64), process: Some(BASE + o.process_at() as i64),
+        running: true, now: BASE + o.end() as i64 + 500_000, ..Default::default() }).unwrap();
+    assert_eq!(tl.phase, Phase::Ready);
+    assert!(kept_from(&tl, &read, Some(KILN), FP, BASE + o.end() as i64, Some(&l)).is_some());
+    // a file of an older runtime has no worldMs and reads as before
+    assert!(!serde_json::to_string(&end).unwrap().contains("worldMs"));
+}
+
 #[test]
 fn the_history_keeps_ten_starts_per_install_once_each_under_its_lock() {
     let root = std::env::temp_dir().join(format!("kiln-start-times-{}", std::process::id()));
@@ -565,7 +614,7 @@ fn the_bar_never_moves_back_between_two_looks() {
     let rec = KeptStart { kiln: "k".into(), runtime: None, fingerprint: "other".into(), finished: String::new(), started: "s".into(),
         steps: vec![KeptStep { id: "start".into(), ms: 10_000, total: None, parts: vec![] }, KeptStep { id: "content".into(), ms: 10_000, total: Some(1), parts: vec![] }] };
     let p = |state_steps: Vec<ProgressStep>, at: u64| Progress { format: 1, pid: 1, kiln: Some("k".into()), side: None, started: "2026-11-13T18:00:00.000Z".into(),
-        at_ms: at, state: "booting".into(), plan: vec!["start".into(), "content".into()], steps: state_steps, why: None };
+        at_ms: at, state: "booting".into(), plan: vec!["start".into(), "content".into()], steps: state_steps, why: None, world_ms: None };
     let st = |id: &str, ms: u64, took: Option<u64>, total: Option<u64>| ProgressStep { id: id.into(), label: id.into(), detail: None, done: total.map(|_| 1), total, ms, took_ms: took, parts: vec![] };
     let t0 = parse_ms("2026-11-13T18:00:00.000Z").unwrap();
     let look = |pr: &Progress, at: u64, steady: Option<&mut Steady>| {
@@ -764,7 +813,7 @@ fn an_ambiguous_receipt_gives_no_same_version_basis_and_never_a_jump() {
     l.asked = true;
     let before = timeline(&Inputs { launcher: Some(&l), now: BASE + 3_000, history: &h, kiln: Some("0.2.0-dev"), fingerprint: Some(FP), ..Default::default() }).unwrap();
     let p = Progress { format: 1, pid: 1, kiln: Some("0.2.0-dev.27+a".into()), side: None, started: fmt_ms(BASE + 6_100), at_ms: 500, state: "booting".into(),
-        plan: vec!["start".into()], steps: vec![ProgressStep { id: "start".into(), label: "x".into(), detail: None, done: None, total: None, ms: 0, took_ms: None, parts: vec![] }], why: None };
+        plan: vec!["start".into()], steps: vec![ProgressStep { id: "start".into(), label: "x".into(), detail: None, done: None, total: None, ms: 0, took_ms: None, parts: vec![] }], why: None, world_ms: None };
     let after = timeline(&Inputs { launcher: Some(&l), progress: Some(&p), written: Some(BASE + 6_600), process: Some(BASE + 6_000), running: true, now: BASE + 6_600,
         history: &h, kiln: Some("0.2.0-dev"), fingerprint: Some(FP), ..Default::default() }).unwrap();
     assert!(!before.estimate.same && !after.estimate.same, "no same-version basis before or after progress.json");
@@ -842,7 +891,7 @@ fn a_runtime_changed_during_the_steam_wait_drops_the_old_builds_basis() {
     let before = timeline(&Inputs { launcher: Some(&l), now: BASE + 3_000, history: h, kiln: Some(old), fingerprint: Some(FP), ..Default::default() }).unwrap();
     assert!(before.estimate.same, "before progress.json: the receipt's build, as at Play");
     let p = Progress { format: 1, pid: 1, kiln: Some(new.into()), side: None, started: fmt_ms(BASE + 6_100), at_ms: 500, state: "booting".into(),
-        plan: vec!["start".into()], steps: vec![ProgressStep { id: "start".into(), label: "x".into(), detail: None, done: None, total: None, ms: 0, took_ms: None, parts: vec![] }], why: None };
+        plan: vec!["start".into()], steps: vec![ProgressStep { id: "start".into(), label: "x".into(), detail: None, done: None, total: None, ms: 0, took_ms: None, parts: vec![] }], why: None, world_ms: None };
     let after = timeline(&Inputs { launcher: Some(&l), progress: Some(&p), written: Some(BASE + 6_600), process: Some(BASE + 6_000), running: true, now: BASE + 6_600,
         history: h, kiln: Some(old), fingerprint: Some(FP), ..Default::default() }).unwrap();
     assert_eq!(after.kiln.as_deref(), Some(new), "the runtime's own version");

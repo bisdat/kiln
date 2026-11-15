@@ -1523,11 +1523,12 @@ fn write_native_switches(config_dir: &Path, profile: &Profile) -> Result<()> {
 }
 
 /// chain.ini as the profile wants it: [profile], its late natives and the compat rules (compat::plan). Returns true
-/// when it wrote.
-fn write_chain_plan(dirs: &DataDirs, profile: &Profile, install: &GameInstall, file: &ProfileFile) -> Result<bool> {
+/// when it wrote, and what the rules decided about the load order (compat::Plan::order_notes: one sentence each, for
+/// the activation's notes and the launcher's log).
+fn write_chain_plan(dirs: &DataDirs, profile: &Profile, install: &GameInstall, file: &ProfileFile) -> Result<(bool, Vec<String>)> {
     let entries = crate::compat::dllmain_entries(dirs, profile, file)?;
     let plan = crate::compat::plan(dirs, profile, install, &entries);
-    crate::chain::write_profile_plan(&install.path, &plan.chain)
+    Ok((crate::chain::write_profile_plan(&install.path, &plan.chain)?, plan.order_notes()))
 }
 
 /// Prepares everything a profile file needs on the game side (path mode, copies, config dir, native.json) and
@@ -1615,7 +1616,7 @@ pub fn activate(dirs: &DataDirs, profile_id: &str, install: &GameInstall) -> Res
     let now = now_rfc3339();
     file.written = Some(now.clone());
     // chain.ini first: its [chain] lines (a compat rule may switch a chained loader off) decide which own loaders run
-    write_chain_plan(dirs, &profile, install, &file)?;
+    let (_, order_notes) = write_chain_plan(dirs, &profile, install, &file)?;
     // ShroudForge and SET read their mods from their own folder in the game; the other engines' own loaders too.
     let placed = crate::engine_mods::place(dirs, &profile, &install.path)?;
     // Greeneye and Flame mods run from the copies place() just made in <game>/greeneye/ and <game>/mods/
@@ -1636,7 +1637,8 @@ pub fn activate(dirs: &DataDirs, profile_id: &str, install: &GameInstall) -> Res
         activated: now,
         own_loaders: placed.own_loaders,
         kept_files: placed.kept_files,
-        warnings: skipped_native_loaders(dirs, &profile).into_iter().chain(copy_warnings).chain(placed.warnings).chain(placed.own_notes).collect(),
+        warnings: skipped_native_loaders(dirs, &profile).into_iter().chain(copy_warnings).chain(placed.warnings).chain(placed.own_notes)
+            .chain(order_notes).collect(),
         retained: placed.retained,
         safety_notes: placed.safety_notes,
     };
@@ -1682,14 +1684,16 @@ pub fn refresh_active(dirs: &DataDirs, install: &GameInstall) -> Result<Option<A
                 for n in placed.safety_notes { if !a.safety_notes.contains(&n) { a.safety_notes.push(n); } }
                 return Ok(Some(a));
             }
-            // the profile's late natives and the compat rules live in chain.ini only
-            write_chain_plan(dirs, &profile, install, &file)?;
-            if !(placed.retained.is_empty() && placed.kept_files.is_empty() && placed.warnings.is_empty())
+            // the profile's late natives and the compat rules live in chain.ini only; when the rules changed the load
+            // order (Kiln's shipped rules after an update, a mod added to the Library), the start says so
+            let (wrote, order_notes) = write_chain_plan(dirs, &profile, install, &file)?;
+            let order_notes = if wrote { order_notes } else { Vec::new() };
+            if !(placed.retained.is_empty() && placed.kept_files.is_empty() && placed.warnings.is_empty() && order_notes.is_empty())
                 && let Some(mut a) = active(dirs, install)?
             {
                 a.own_loaders = placed.own_loaders;
                 a.kept_files = placed.kept_files;
-                a.warnings = placed.warnings;
+                a.warnings = placed.warnings.into_iter().chain(order_notes).collect();
                 a.retained = placed.retained;
                 return Ok(Some(a));
             }

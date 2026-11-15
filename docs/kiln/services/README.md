@@ -1,5 +1,8 @@
 # Writing a Kiln service
 
+No capability ships held by the client gate in 0.2.0-dev.29. Open rows still depend on their services, signatures and side; the [guided checks](../client-pass.md) remain the record of real-game behavior not yet confirmed.
+
+
 A service is one capability (teleport, items, chat, ...) with three layers. Which services and features a build has
 available is generated from a boot's `capabilities.json`: [../status.generated.md](../status.generated.md). The template is `example`:
 

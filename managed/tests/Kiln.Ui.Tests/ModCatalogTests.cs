@@ -82,6 +82,20 @@ public sealed class ModCatalogTests : IDisposable
             rows);
     }
 
+    [Fact]
+    public void Inactive_shroudtopia_names_its_settings_and_reported_name()
+    {
+        Write("shroudtopia.json", new
+        {
+            updatedUnixMs = StartMs + 60_000,
+            mods = new[] { new { id = "library-id", name = "Reported Name.With Dot", status = "inactive", reason = "" } },
+        });
+        var row = Assert.Single(Read().Mods.Where(m => m.Engine == "shroudtopia"));
+        Assert.Equal(ModRunState.Disabled, row.State);
+        Assert.Equal("Switched off in Shroudtopia's settings.", row.Reason);
+        Assert.Equal("In shroudtopia/shroudtopia.json in the profile's config folder, set active to true in the mods entry named \"Reported Name.With Dot\" (the name in kiln.log's Registered mod line). Save the file; Shroudtopia reads it again while the game runs.", row.Help);
+    }
+
     // ---- the launcher's normalisation (EngineStatus.tsx; the cases of launcher/tests/engine-kinds.spec.ts) ----
 
     private static JsonElement J(string json) => JsonDocument.Parse(json).RootElement;

@@ -98,6 +98,7 @@ struct VoxelWorld {
     uint32_t tile[2] = {0, 0}, tiles[2] = {0, 0};
     bool ok = false;
 };
+void vox_world_closed();  // world teardown: invalidate pointers even when an ECS address is reused
 const VoxelWorld* vox();  // resolves (once per server world); nullptr when unavailable
 KilnResult vox_grid(KilnBuildGrid* out);
 // true when every streaming tile under the box is loaded; with `request`, touches the missing ones (loads them)
@@ -152,6 +153,7 @@ KilnResult transient_note_before(const int32_t wo[3], const uint32_t wd[3], cons
 KilnResult transient_kept_before(const int32_t wo[3], const uint32_t wd[3], const uint8_t* addressed);
 // That kept write's commit faulted: these block origins (dirty, not committed) get their journal records back.
 void transient_kept_failed(const std::vector<std::array<int32_t, 3>>& uncommitted);
+void transient_world_closed();  // unbind even without a server tick between hosted sessions
 void transient_pre(uint64_t step);  // Pre: bind to the world, put back an earlier session's cells, compact
 void transient_before_save();       // the game builds its save-region list: compact the journal
 // Commits one 8x8x8 block (cells x fastest) through the engine's store commit; false when the writer faulted.

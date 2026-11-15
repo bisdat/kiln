@@ -10,3 +10,12 @@ cxx=${CXX:-$(command -v clang++ || command -v g++)}
 "$cxx" -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-omit-frame-pointer ${KILN_TEST_DEFINES:-} \
     -o "$out/transient_journal_test" "$here/transient_journal_test.cpp" "$here/../transient_journal.cpp"
 "$out/transient_journal_test"
+# The region lifecycle regression runs through this existing build-service gate entry point too.
+"$cxx" -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-omit-frame-pointer ${KILN_TEST_DEFINES:-} \
+    -o "$out/regions_test" "$here/regions_test.cpp"
+"$out/regions_test"
+
+# Actual voxel cache with the engine resolution adapter replaced.
+"$cxx" -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-omit-frame-pointer \
+    -o "$out/voxel_lifecycle_test" "$here/voxel_lifecycle_test.cpp"
+"$out/voxel_lifecycle_test"

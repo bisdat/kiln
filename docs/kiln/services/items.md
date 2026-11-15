@@ -408,6 +408,7 @@ kiln-items.dll; capability `items.tool_wear_debit`.
 - **What stays the game's:** the skill roll that can save a debit, the clamp at 0 (a cost larger than what is left ends
   at 0), the break notice, save, reload and repair. The armor a hit debits and a torch's burn-down are never touched.
   Only the authoritative server world of the process is acted on (a dedicated server, or the host's own game).
+- **Hooks:** installed when a mod first sets a valid tool-wear rule, before the rule is published, rather than at startup; they remain installed until process exit even after all rules are removed. The host’s prediction and joined players still use the game’s own wear rate locally: this service does not reconcile their bars with the server, so early breaks, correction timing and repair display remain unconfirmed. Check `16b-g` currently covers the host only and does not require wearing the tool to zero.
 - **Rules:** the calling mod's. Setting it again replaces it (same `ToolWearRule`); across mods the latest set is in
   effect, and disposing it reveals the one before. A rule goes when its mod unloads. Rules last for the process: they
   are not saved (durability itself is the game's and is saved as usual). 256 tools can have had a rule in a process.
@@ -447,7 +448,7 @@ its rule spends 6 with its durability event, and the mod's rule is back after th
 the torch's burn-down (the only debit on worker threads) was not driven. The game's own armor: the armor items tried
 have no durability of their own, so an axe with a rule stood in as the armor a hit debits. Not run: save and reload,
 repair, a world change dropping queued changes (a host test proves it), a debit the skill saved, the world's durability
-setting off, the game client (held until check `16b-g`: the predicted bar in a hosted and a joined game).
+setting off, the game client (on since 0.2.0-dev.29; check `16b-g` still needs to confirm the predicted bar in a hosted and a joined game).
 
 ## C (native plugins and services)
 ```c

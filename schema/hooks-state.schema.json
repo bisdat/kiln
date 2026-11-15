@@ -146,13 +146,14 @@
       "required": ["id", "action", "applied", "message"],
       "properties": {
         "id": { "type": "string" },
-        "action": { "enum": ["warn", "late", "disable"] },
+        "action": { "enum": ["warn", "late", "disable", "before"], "description": "before (dev.29): the subject's chain entries load before the target's." },
         "applied": {
           "type": "boolean",
           "description": "warn: true (it was logged). late: the subject is already a chain.ini [late] entry in this session (false for EMF's own loader, which is never deferred, and for a DLL another loader started first). disable: the subject did not load (a hosted mod the core switched off before its DLL ran, or a chain entry that is off); false for a dllmain native mod whose DLL the proxy loaded before kiln-core started. false: nothing was changed this session; `note` says what to do (`apply it in the launcher`, activate the profile again)."
         },
         "message": { "type": "string", "description": "The rule's message." },
         "subject": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/matcher" }] },
+        "target": { "$ref": "#/$defs/matcher", "description": "before only (dev.29): the DLL that loads after the subject. applied: every chain entry of the subject loaded before every entry of the target this session (a late entry after all early ones, list order within a phase); false: `note` says which did not, or that the core found no chain entry for a side." },
         "source": { "enum": ["shipped", "user"], "description": "Which file the rule came from." },
         "note": { "type": "string", "description": "Why `applied` is false, or what was done." }
       },

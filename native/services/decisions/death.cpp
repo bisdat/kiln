@@ -3,8 +3,9 @@
 // skip to events/DeathNextEntity, the answer through kiln.combat's health setter, and the native guard seam of
 // 19d-pets. The rules are in death_core.h; this file gives them the game.
 //
-// Client gate: events.death is held until its guided check (native/core/gates/dev28-07-cancelable-events.json); the
-// hook is installed only when kiln_caps_held says the row is not held. A lab proves it with "preview" in kiln.json.
+// events.death is on since 0.2.0-dev.29 (nothing ships held) and not yet confirmed in a real game (guided check
+// 07-events.decision-rollback). The core's gate list has no entry for it; should the owner ever hold the row again,
+// kiln_caps_held keeps the hook out.
 //
 // Engine facts (chapter 07 §2, VERIFY.md §B): at the boundary EAX is the entity's current health (signed), RBX the
 // Health component, RSI the program context, [RSP+0x48] the Actor component of the declared slot. The program runs
@@ -144,11 +145,10 @@ void not_in(const char* why, uint32_t reason, int level) {
 void ready() {
     const KilnApi* api = host::api();
     uintptr_t boundary = 0, next = 0, current = 0, state = 0;
-    // The client gate: events.death waits for its guided check (07-events.decision-rollback). Asked before anything is
-    // installed; while held, feature() answers false too, so the symbols are asked one by one below.
+    // A hold the owner put on the row (none since 0.2.0-dev.29): asked before anything is installed.
     if (kiln_caps_held(host::caps(), ks("events.death")))
-        return not_in("events.death is held until its game test (07-events.decision-rollback); \"preview\" in kiln.json lifts it",
-                      KILN_CAP_REASON_POLICY, KILN_LOG_INFO);
+        return not_in("events.death is held by the core's gate list (\"preview\" in kiln.json lifts it)", KILN_CAP_REASON_POLICY,
+                      KILN_LOG_INFO);
     if (!api->feature(ks("events.death"))) return not_in("feature events.death did not resolve on this game build", KILN_CAP_REASON_SYMBOL_MISSING, KILN_LOG_WARN);
     if (api->symbol(ks("events/DeathBoundary"), &boundary) != KILN_OK || api->symbol(ks("events/DeathNextEntity"), &next) != KILN_OK ||
         api->symbol(ks("world/CurrentEntityId"), &current) != KILN_OK || api->symbol(ks("combat/ActorStateTest"), &state) != KILN_OK ||

@@ -146,6 +146,17 @@ def release_version(folder):
         return json.load(f)["version"]
 
 
+def built_from_commit(folder):
+    """The commit README.txt names ("Built ... from commit <sha>"), as github-draft.sh reads it; None for a test build
+    of a working tree (release.sh --worktree: "from the working tree at <sha> (a test build, not a release)")."""
+    try:
+        with open(os.path.join(folder, "README.txt"), encoding="utf-8") as f:
+            m = re.search(r"from commit ([0-9a-f]{7,40})", f.read())
+    except OSError:
+        return None
+    return m.group(1) if m else None
+
+
 def one(folder, pattern):
     hits = [os.path.join(folder, n) for n in sorted(os.listdir(folder)) if re.fullmatch(pattern, n)] if os.path.isdir(folder) else []
     if len(hits) != 1:
@@ -363,8 +374,10 @@ def run(argv=None):
     a = ap.parse_args(argv)
     try:
         check_api_url(a.api)
-        key = read_key(a.env)
         folder = os.path.abspath(a.folder)
+        if a.publish and not built_from_commit(folder):
+            raise Fail(f"{folder} was not built from a commit (a test build of a working tree?): never published")
+        key = read_key(a.env)
         version = release_version(folder)
         app_version = open(os.path.join(repo, "VERSION"), encoding="utf-8").read().strip()
         api = Api(a.api, key, app_version, dry=not a.publish)

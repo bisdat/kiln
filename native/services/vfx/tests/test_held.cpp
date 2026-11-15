@@ -8,6 +8,12 @@
 
 int main() {
     unsigned checks = 0;
+    // Release decision: clients keep ordinary files in on_ready, independent of the gate.
+    for (const bool held : {false, true}) {
+        assert(!kvx::boot_builds_in_prepare(KILN_SIDE_CLIENT, held));
+        assert(kvx::boot_builds_in_prepare(KILN_SIDE_SERVER, held) == !held);
+        checks += 2;
+    }
     const auto run = [&](bool held, const std::vector<kvx::BuildFailure>& failures, bool required, bool excluded, bool refuses) {
         const std::string json = std::string(R"({"owners":[{"id":"mod","owner":1,"required":)") +
             (required ? "true" : "false") + R"(}],"excluded":)" + (excluded ? R"(["mod"])" : "[]") + "}";
@@ -32,10 +38,11 @@ int main() {
     };
     // One valid file contributes no failure; the broken file must still refuse the required participant.
     const std::vector<kvx::BuildFailure> broken{{"mod", "vfx", "blocks/broken.json", "invalid emitter"}};
-    run(true, broken, true, false, true);
+    for (const bool held : {false, true})
+        run(!kvx::boot_builds_in_prepare(KILN_SIDE_CLIENT, held), broken, true, false, true);
     run(true, {}, true, false, false); // only valid files
     run(true, broken, false, false, false); // optional boot mod
-    run(false, broken, true, false, false); // not held
+    run(false, broken, true, false, false); // no on_ready failure collection
     run(true, broken, true, true, false); // excluded participant on retry
     run(true, {{"nonboot", "vfx", "blocks/broken.json", "invalid emitter"}}, true, false, false);
     run(true, {{"mod", "vfx", "blocks/material.json", "invalid texture"}}, true, false, true);
@@ -61,7 +68,8 @@ int main() {
         if (f.key != "blocks/broken.json") std::fprintf(stderr, "key=%s reason=%s\n", f.key.c_str(), f.reason.c_str());
         assert(f.key == "blocks/broken.json");
     }
-    run(true, failures, true, false, true);
+    for (const bool held : {false, true})
+        run(!kvx::boot_builds_in_prepare(KILN_SIDE_CLIENT, held), failures, true, false, true);
     run(true, failures, false, false, false);
     run(false, failures, true, false, false);
 #endif

@@ -24,6 +24,10 @@ first start copies `<game>/shroudtopia.json` there when it exists. The format is
 A mod's key in `mods` is the name it reports (`GetMetaData().name`). `active` switches it on and off while the game
 runs: the file is read again when it changes. A folder mod's `mod.json` block `"shroudtopia": {"default": {...}}` is
 written as `mods.<id>` the first time that id is seen.
+When an enabled Kiln profile mod registers without a `mods` entry under its reported name, Kiln adds
+`{"active": true}` there, including for DLL-only mods and folders without manifest defaults.
+Existing entries are never changed by this step: to enable a mod with `"active": false`, set that value to `true`
+in the profile config folder's `shroudtopia/shroudtopia.json` and save; the plugin reloads it while the game runs.
 
 `kiln/logs/kiln.log` shows `[shroudtopia] Registered mod: ...`, `Loading mod: ...`, `Activating: ...`, and each mod's
 own lines as `[shroudtopia:<mod name>] ...` (also in `kiln/logs/shroudtopia.log`). `kiln/state/shroudtopia.json`

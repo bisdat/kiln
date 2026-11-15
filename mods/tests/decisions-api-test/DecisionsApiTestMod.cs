@@ -2,7 +2,7 @@
 // Lab test of kiln.decisions and kiln.window_clock through Kiln.Api (07-cancelable-events, S3, S4): see kiln.mod.json.
 // Player-free: it reads an entity the world already has, files decisions no game action hangs on, and kills spawned
 // 1_Player templates to hold, refuse and allow their deaths (S4, events.death), and holds, refuses and allows walk-over
-// pickups of spawned drops on the research's range-only fixture (S5, events.pickup). The lab needs "preview" in kiln.json.
+// pickups of spawned drops on the research's range-only fixture (S5, events.pickup). Both rows are on since 0.2.0-dev.29.
 using Kiln;
 
 namespace DecisionsApiTest;
@@ -250,7 +250,7 @@ public sealed class DecisionsApiTestMod : Mod
         var subs = new List<IDisposable>();
         try
         {
-            Check(Capabilities.Is("events.death"), $"[{run}] events.death is on ({Capabilities.Why("events.death")}; the lab needs \"preview\" in kiln.json)");
+            Check(Capabilities.Is("events.death"), $"[{run}] events.death is on ({Capabilities.Why("events.death")})");
             if (!Capabilities.Is("events.death")) return;
             var at = new WorldPosition(3845, 835, 1480);
             for (var i = 0; i < 4; i++)

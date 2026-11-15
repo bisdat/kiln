@@ -51,7 +51,8 @@ void begin(const std::string& kiln, const std::string& side, double started_qpc_
         auto* w = new progress_file::Writer(
             progress_file::Model(std::move(who), std::move(plan)),
             [file](const std::string& text) { return write_file_atomic(file, text); }, &clock_ms, true,
-            [file] { KLOG_W("state: cannot write %s; the launcher shows less of this start (later writes are tried)", u8(file).c_str()); });
+            [file] { KLOG_W("state: cannot write %s; the launcher shows less of this start (later writes are tried)", u8(file).c_str()); },
+            [](const std::string& note) { KLOG_I("state: %s", note.c_str()); });
         g_writer.store(w, std::memory_order_release);
         w->first("start", 0);  // "start" began with the boot, not now
     } catch (...) {

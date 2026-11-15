@@ -8,9 +8,9 @@ namespace ClientPass;
 // 07-cancelable-events (0.2.0-dev.29): the guided checks of chapter 07. Orders 2900-2999 (lab port 28090).
 //
 // - 07-events.decision-rollback: a refused death, walk-over pickup and equip leave the player's own client in step with
-//   the server (no death screen, no ghost item, no ring shown as worn), and the allowed controls work. It opens the
-//   held rows events.death and events.pickup (native/core/gates/dev28-07-cancelable-events.json); events.equip is not
-//   held (it shares the verdict of PlayerClientActionEvent, which shipped in dev.26) but is checked here as well.
+//   the server (no death screen, no ghost item, no ring shown as worn), and the allowed controls work. It confirms
+//   events.death and events.pickup in a real game: both are on since 0.2.0-dev.29 without it (nothing ships held);
+//   events.equip shares the verdict of PlayerClientActionEvent (shipped in dev.26) and is checked here as well.
 // - 07-piece-rollback: player build pieces; blocked: events.build.pieces is not built in this release (its replay
 //   gate S0 and the adapter S9 wait for 06a's program wraps). The check says so and skips: it can never pass.
 // - 07-native-terraform: the existing native terraform policy of Gameplay.Protect (not a managed event): a refused dig,

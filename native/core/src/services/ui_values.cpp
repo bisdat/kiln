@@ -56,6 +56,7 @@ struct Registry {
 };
 Registry* g_reg = new Registry;  // never destroyed: a game thread may dispatch while the process ends
 std::atomic<uint32_t> g_count[kLists];
+std::atomic<bool> g_disabled[kLists];
 std::atomic<uint64_t> g_revision[kLists];
 std::atomic<uint64_t> g_reg_seen{0};
 
@@ -344,11 +345,15 @@ std::shared_ptr<const ProviderList> providers(uint32_t list) {
     return g_reg->snap[list] ? g_reg->snap[list] : empty_list();
 }
 
-bool any(uint32_t list) { return list < kLists && g_count[list].load(std::memory_order_acquire) != 0; }
+bool any(uint32_t list) {
+    return list < kLists && !g_disabled[list].load(std::memory_order_acquire) &&
+           g_count[list].load(std::memory_order_acquire) != 0;
+}
 uint64_t providers_revision(uint32_t list) { return g_revision[list].load(std::memory_order_acquire); }
 
 bool provider_live(const Provider& p) {
-    return p.live.load(std::memory_order_acquire) && env().owner_alive(p.owner);
+    return !g_disabled[p.list].load(std::memory_order_acquire) && p.live.load(std::memory_order_acquire) &&
+           env().owner_alive(p.owner);
 }
 
 void owner_retired(KilnOwner owner) {
@@ -411,7 +416,12 @@ void set_installer(uint32_t list, Installer fn) {
 
 bool ensure_installed(uint32_t list) {
     const char* row = row_of(list);
+    if (list >= kLists || g_disabled[list].load(std::memory_order_acquire)) return false;
     if (!row || !env().row_available || !env().row_available(row)) return false;
+    if (!env().layout_supported || !env().layout_supported()) {
+        disable_kind(list, "private UI layout is not measured for this client image");
+        return false;
+    }
     Installs& in = installs();
     std::lock_guard lk(in.mu);
     if (in.state[list] != 0) return in.state[list] > 0;
@@ -427,6 +437,18 @@ bool ensure_installed(uint32_t list) {
         changes_reset(KUI_RESET_CAPABILITY);
     }
     return ok;
+}
+
+void disable_kind(uint32_t list, const char* why) {
+    if (list >= kLists) return;
+    // HUD shares one capability row: a fault in any pair stops all three.
+    const uint32_t first = list >= KUI_HEALTH && list <= KUI_MANA ? uint32_t(KUI_HEALTH) : list;
+    const uint32_t last = first == KUI_HEALTH ? uint32_t(KUI_MANA) : first;
+    if (g_disabled[first].exchange(true, std::memory_order_acq_rel)) return;
+    for (uint32_t k = first; k <= last; ++k) g_disabled[k].store(true, std::memory_order_release);
+    logf(KILN_LOG_ERROR, "ui.values: %s disabled for this session: %s", row_of(first), why);
+    if (env().row_off) env().row_off(row_of(first), why);
+    changes_reset(KUI_RESET_CAPABILITY);
 }
 
 // ---- the value chain ----
@@ -542,6 +564,7 @@ void reset_for_tests() {  // host tests only: nothing dispatches while it runs
     delete g_reg;
     g_reg = new Registry;
     for (auto& c : g_count) c.store(0);
+    for (auto& d : g_disabled) d.store(false);
     for (auto& v : g_revision) v.store(0);
     g_reg_seen.store(0);
     {

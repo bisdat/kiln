@@ -42,8 +42,8 @@ bool load_bar(BarLayout* b) {
     const bool ok = sig_constant("ui/bar.fraction", &b->fraction) && sig_constant("ui/bar.current", &b->current) &&
                     sig_constant("ui/bar.max", &b->maximum);
     // the descriptor is at least 0x50 bytes (the detail one ends at +0x4f): every field must sit inside it
-    return ok && b->fraction >= 0 && b->fraction + 4 <= 0x50 && b->current >= 0 && b->current + 4 <= 0x50 &&
-           b->maximum >= 0 && b->maximum + 4 <= 0x50;
+    return ok && b->fraction >= 0 && b->fraction <= 0x50 - 4 && b->current >= 0 && b->current <= 0x50 - 4 &&
+           b->maximum >= 0 && b->maximum <= 0x50 - 4;
 }
 
 void load_charges(Charges* c) {
@@ -75,21 +75,22 @@ bool read_bar(uintptr_t bar, bool with_label, GameBar* g) {
            (!with_label || game_read(bar + g_bars.bar.label, &g->label));
 }
 
-std::atomic<bool> g_bar_write_failed{false};
-
-// Writes what the chain changed. Every edit was validated before; a field that did not change is not written.
-void commit(uintptr_t bar, uint32_t kind, const GameBar& g, const KilnUiBarValue& out) {
-    bool ok = true;
-    if (std::memcmp(&out.fraction, &g.fraction, sizeof out.fraction) != 0)
-        ok &= env().write(bar + g_bars.bar.fraction, &out.fraction, sizeof out.fraction);
-    if (out.current != g.current) ok &= env().write(bar + g_bars.bar.current, &out.current, sizeof out.current);
-    if (out.maximum != g.maximum) ok &= env().write(bar + g_bars.bar.maximum, &out.maximum, sizeof out.maximum);
+// Stop at the first failed guarded write; never publish a value the game did not accept.
+bool commit(uintptr_t bar, uint32_t kind, const GameBar& g, const KilnUiBarValue& out) {
+    auto write = [&](int64_t offset, const void* src, size_t n) {
+        if (env().write(bar + offset, src, n)) return true;
+        disable_kind(kind, "bar descriptor write fault");
+        return false;
+    };
+    if (std::memcmp(&out.fraction, &g.fraction, sizeof out.fraction) != 0 &&
+        !write(g_bars.bar.fraction, &out.fraction, sizeof out.fraction)) return false;
+    if (out.current != g.current && !write(g_bars.bar.current, &out.current, sizeof out.current)) return false;
+    if (out.maximum != g.maximum && !write(g_bars.bar.maximum, &out.maximum, sizeof out.maximum)) return false;
     if (kind == KUI_DETAIL && out.label_is_override) {
         text::GameText t{};
-        if (text::game_text(out.label_id, &t)) ok &= env().write(bar + g_bars.bar.label, &t, sizeof t);
+        if (text::game_text(out.label_id, &t) && !write(g_bars.bar.label, &t, sizeof t)) return false;
     }
-    if (!ok && !g_bar_write_failed.exchange(true))
-        logf(KILN_LOG_ERROR, "ui.values: writing a %s bar descriptor failed", kind == KUI_DETAIL ? "detail" : "slot");
+    return true;
 }
 
 void stamp_now(KilnUiItemView* v, ChainStamp* st) {
@@ -111,7 +112,10 @@ void stamp_now(KilnUiItemView* v, ChainStamp* st) {
 void run_bar(uint32_t kind, uintptr_t bar, uintptr_t view_addr, uint32_t base_flags) {
     uint8_t raw[kViewBytes];
     GameBar g;
-    if (!env().read(raw, view_addr, sizeof raw) || !read_bar(bar, kind == KUI_DETAIL, &g)) return;
+    if (!env().read(raw, view_addr, sizeof raw) || !read_bar(bar, kind == KUI_DETAIL, &g)) {
+        disable_kind(kind, "bar descriptor or item view read fault");
+        return;
+    }
     KilnUiItemView v{};
     v.size = sizeof v;
     fill_view(raw, g_bars.view, base_flags, &v);
@@ -126,14 +130,17 @@ void run_bar(uint32_t kind, uintptr_t bar, uintptr_t view_addr, uint32_t base_fl
     in.current = g.current;
     in.maximum = g.maximum;
     const KilnUiBarValue out = run_chain(kind, v, in, st);
-    commit(bar, kind, g, out);
+    if (!commit(bar, kind, g, out)) return;
     publish_value(kind, v, out);
 }
 
 void KILN_CALL on_detail(KilnRegisters* r, void*) {
     if (!any(KUI_DETAIL)) return;
     uintptr_t record = 0;
-    if (!game_read(r->rdi + g_bars.detail_view, &record)) return;
+    if (!game_read(r->rdi + g_bars.detail_view, &record)) {
+        disable_kind(KUI_DETAIL, "detail record read fault");
+        return;
+    }
     run_bar(KUI_DETAIL, r->rcx, record, KUI_DETAIL_COPY);
 }
 
@@ -205,7 +212,7 @@ bool load_view_layout(ViewLayout* v) {
     int64_t stride = 0;
     if (!sig_constant("ui/view.stride", &stride) || stride != static_cast<int64_t>(kViewBytes)) return false;
     for (const Field& f : fields)
-        if (!sig_constant(f.name, f.at) || *f.at < 0 || *f.at + f.width > static_cast<int64_t>(kViewBytes))
+        if (!sig_constant(f.name, f.at) || *f.at < 0 || *f.at > static_cast<int64_t>(kViewBytes) - f.width)
             return false;
     return true;
 }

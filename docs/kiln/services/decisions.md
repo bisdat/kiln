@@ -4,11 +4,13 @@ A mod can refuse three things the game is about to do, and is told how each one 
 
 | Event | Library | What it holds | Cancel does | Capability |
 |---|---|---|---|---|
-| `EntityDyingEvent` | Kiln.Combat | an entity whose health reached 0, before the game's death program marks it dead | keeps it alive at `SurvivalHealth` (1 by default, clamped to its maximum) | `events.death` (held until its game test) |
-| `ItemPickingUpEvent` | Kiln.Gameplay | a walk-over pickup (an item the game gives a player standing on it; not an interaction pickup, which is `LootEvent`) | the item stays on the ground, the receiver gets nothing, later attempts are refused without asking until the exposure changes | `events.pickup` (held until its game test) |
+| `EntityDyingEvent` | Kiln.Combat | an entity whose health reached 0, before the game's death program marks it dead | keeps it alive at `SurvivalHealth` (1 by default, clamped to its maximum) | `events.death` (on since 0.2.0-dev.29; not yet confirmed in a real game: `07-events.decision-rollback`) |
+| `ItemPickingUpEvent` | Kiln.Gameplay | a walk-over pickup (an item the game gives a player standing on it; not an interaction pickup, which is `LootEvent`) | the item stays on the ground, the receiver gets nothing, later attempts are refused without asking until the exposure changes | `events.pickup` (on since 0.2.0-dev.29; not yet confirmed in a real game: `07-events.decision-rollback`) |
 | `PlayerEquippingEvent` | Kiln.Items | a player's equipment input (`changeEquipmentAction`: one slot; `swapEquipmentSetAction`: a collection swap) | the game skips the input as it skips an old one; nothing in the inventory changes | `events.equip` |
 
-Every decision ends in exactly one `DecisionCompletedEvent` (Kiln.Api) with the same `DecisionId` as its event.
+Every decision ends in one `DecisionCompletedEvent` (Kiln.Api) with the same `DecisionId` as its event, as long as
+its outcome reaches the dispatcher: the service keeps at most 8192 unread outcomes, and one that finds that outbox full
+is lost and counted (`outcome gap` in kiln.log) instead of posted. While the outbox is full no death or pickup is held.
 
 ```csharp
 Events.On<EntityDyingEvent>(e => { e.SurvivalHealth = 1; e.Cancel(); }, EventFilter.ForEntity(player));
@@ -89,7 +91,8 @@ and `AppliedHealth`.
 - `CollectionEquipmentChange`: the game's collection swap into the active equipment or the vanity, with the collection's
   `Contents` as read in Pre. This is the game's per-slot program, not an atomic set: on allow the game checks the
   inventory again and equips slot by slot.
-- `SetEquipmentChange` is a Kiln set request (`Items.EquipSet`, from 10-equipment-sets): one decision for the whole set.
+- `SetEquipmentChange` is the shape of a Kiln set request (kind 18, which kiln.items files through `enqueue_native`):
+  one decision for the whole set. This release declares its records only; no set operation of Kiln files one yet.
 - Only these inputs wait the step; a player's other client actions do not, while only a typed listener holds.
 - Not covered: equipment the game changes by itself (autoequip when an item is made or picked up, its set swap program
   called from elsewhere).
@@ -99,10 +102,10 @@ and `AppliedHealth`.
 | Row | Off when |
 |---|---|
 | `kiln.decisions`, `kiln.window_clock` | the service is not loaded, or the core has no `tick.wait_jobs` (no step window without the world's jobs done) |
-| `events.death` | held until `07-events.decision-rollback`; also off when its symbols do not resolve on the game build, or its hook could not go in |
-| `events.pickup` | held until `07-events.decision-rollback`; as `events.death` otherwise |
+| `events.death` | its symbols do not resolve on the game build, or its hook could not go in; on since 0.2.0-dev.29 and not yet confirmed in a real game (`07-events.decision-rollback`) |
+| `events.pickup` | as `events.death` (also not yet confirmed in a real game: `07-events.decision-rollback`) |
 | `events.equip` | kiln.playerstate cannot hold an equipment input alone (an older kiln-players.dll, no hold point on the build), or kiln.decisions is not here |
-| `decisions.native_guards` | the death hook is not in (held, unresolved, faulted) |
+| `decisions.native_guards` | the death hook is not in (unresolved, faulted) |
 | `events.build.pieces` | always in 0.2.0-dev.29: player build pieces are not cancelable yet |
 | `events.build.terraform` | always: managed terraform cancel is not part of V1 (`Gameplay.Protect`'s native policy still applies) |
 | `events.component_net`, `events.component_writes.exact` | always in 0.2.0-dev.29: named component watches are not built yet; an every-store feed is not promised |
@@ -138,7 +141,6 @@ player session), is not held in that step.
   the dispatcher, the three producers, the one-verdict rule of equipment inputs.
 - Host tests: `native/services/decisions/tests/run.sh` (wire layout, broker, death and pickup rules),
   `native/services/players/tests/run.sh` (the selective hold), `native/core/tests/test-window-clock.sh`.
-- Lab: `mods/tests/decisions-api-test` (needs `"preview": true` in the lab's kiln.json), plain and with
-  `kiln/control/systems.parallel`.
-- Guided checks (`mods/tests/client-pass/Dev28Events.cs`): `07-events.decision-rollback` (opens `events.death` and
-  `events.pickup`), `07-piece-rollback` (skipped: not built), `07-native-terraform`.
+- Lab: `mods/tests/decisions-api-test`, plain and with `kiln/control/systems.parallel`.
+- Guided checks (`mods/tests/client-pass/Dev28Events.cs`): `07-events.decision-rollback` (confirms `events.death`
+  and `events.pickup` in a real game; they are on without it since 0.2.0-dev.29), `07-piece-rollback` (skipped: not built), `07-native-terraform`.

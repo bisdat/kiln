@@ -143,8 +143,7 @@ public static partial class Ui
     /// <summary>Values in the game's own UI: replace what the game draws for an item's detail number and bar, a slot's
     /// bar, the held item's indicator and the local player's HUD pairs. Picture only: the server keeps the real values,
     /// a player without the mod and every vanilla client see the game unchanged. Each kind has its capability row
-    /// (<c>ui.values.detail</c>, <c>.slot</c>, <c>.held</c>, <c>.hud</c>), off on a server and until its client check
-    /// passed. Bad arguments throw <see cref="ArgumentException"/>; a capability that is off throws
+    /// (<c>ui.values.detail</c>, <c>.slot</c>, <c>.held</c>, <c>.hud</c>), off on a server and when its signatures or hooks are unavailable. Bad arguments throw <see cref="ArgumentException"/>; a capability that is off throws
     /// <see cref="KilnUnavailableException"/> naming it; a refused registration comes back with Ok false.</summary>
     [ClientOnly]
     public static partial class Values

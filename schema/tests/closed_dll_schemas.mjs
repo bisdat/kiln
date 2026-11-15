@@ -34,6 +34,7 @@ const matcherOnly = ajv.compile({ $ref: "compat-rules.schema.json#/$defs/matcher
 
 const must = (validate, doc, what) => assert(validate(doc), `${what}: ${JSON.stringify(validate.errors)}`);
 must(rulesFile, read("../examples/compat-rules.json"), "examples/compat-rules.json");
+must(rulesFile, read("../../native/core/compat-rules.json"), "native/core/compat-rules.json (Kiln's shipped rules)");
 must(hooksFile, read("../examples/hooks-state.json"), "examples/hooks-state.json");
 for (const dir of ["hooks-state", "compat-rules"]) {  // every file of the two fixture folders except cases.json
   for (const name of readdirSync(new URL(`../fixtures/${dir}/`, here)).filter((n) => n.endsWith(".json") && n !== "cases.json")) {

@@ -350,7 +350,7 @@ void KILN_CALL on_ready(void*) {
     logf(KILN_LOG_INFO, "decisions: on (requests %u, outcomes %u, metadata rows %u; players %s)", KILN_DECISIONS_MAX_ACTIVE,
          KILN_DECISIONS_MAX_OUTCOMES, KILN_DECISIONS_MAX_METADATA, g_players ? "from kiln.players" : "unknown: no kiln.players");
     // Producers. The death hook decides decisions.native_guards (19d-pets' guard needs the hook) and, when the hook
-    // could not go in although events.death is not held and resolved, lowers events.death with the reason.
+    // could not go in although events.death resolved, lowers events.death with the reason.
     death_producer::ready();
     pickup_producer::ready();
     if (g_caps) {
@@ -363,7 +363,7 @@ void KILN_CALL on_ready(void*) {
                 g_caps->report(g_owner, ks("events.death"), KILN_CAP_UNAVAILABLE, death_producer::why_not_reason(), ks(death_producer::why_not()));
         }
         // The same for events.pickup: a feature that resolved but whose hook could not go in reads unavailable with why
-        // (held and unresolved rows already say so themselves).
+        // (unresolved rows already say so themselves).
         if (!pickup_producer::installed() &&
             (pickup_producer::why_not_reason() == KILN_CAP_REASON_FAULTED || pickup_producer::why_not_reason() == KILN_CAP_REASON_SERVICE_MISSING))
             g_caps->report(g_owner, ks("events.pickup"), KILN_CAP_UNAVAILABLE, pickup_producer::why_not_reason(), ks(pickup_producer::why_not()));

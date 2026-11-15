@@ -10,6 +10,7 @@
 #                                   plus every folder with a kiln.mod.json under $KILN_OUT/mods)
 #   <server>/kiln/plugins/          native plugins (--samples: kiln-native-hello)
 #   <server>/kiln/kiln.json         created if missing (--policy sets it; --cooked sets "cooked", below)
+#   <server>/kiln/compat-rules.json Kiln's shipped compat rules (native/core/compat-rules.json), replaced every deploy
 # The server must be stopped first; this script does not restart it.
 #   tools/deploy-server.sh <server dir> [--policy any|verified-only] [--cooked local|warn|any] [--samples] [--loader-samples] [--no-build]
 # --cooked local|warn|any: what kiln.assets does with a mod's cooked file (assets/cooked) no cook of this server made (a
@@ -115,6 +116,7 @@ if [[ -s $ewb/enshwick.dll && -s $ewb/LICENSE ]]; then
   install -m 644 "$ewb/LICENSE" "$k/plugins/enshwick/LICENSE.txt"
 fi
 
+install -m 644 "$repo/native/core/compat-rules.json" "$k/compat-rules.json"  # Kiln's shipped compat rules, as the bundle's core
 install -m 644 "$repo/sigdb/symbols/server.json" "$k/sigdb/server.json"
 rm -rf "$k/sigdb/server.d" && mkdir -p "$k/sigdb/server.d"
 cp "$repo"/sigdb/symbols/server.d/*.json "$k/sigdb/server.d/" 2>/dev/null || true

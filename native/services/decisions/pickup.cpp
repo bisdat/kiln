@@ -4,8 +4,9 @@
 // drops and receivers, and ReevaluatePickup. The rules are in pickup_core.h; this file gives them the game. The
 // interaction helper (events/PickupToInventory) is not touched: interaction loot is LootEvent's.
 //
-// Client gate: events.pickup is held until its guided check (native/core/gates/dev28-07-cancelable-events.json); the
-// hook is installed only when kiln_caps_held says the row is not held. A lab proves it with "preview" in kiln.json.
+// events.pickup is on since 0.2.0-dev.29 (nothing ships held) and not yet confirmed in a real game (guided check
+// 07-events.decision-rollback). The core's gate list has no entry for it; should the owner ever hold the row again,
+// kiln_caps_held keeps the hook out.
 //
 // Engine facts (chapter 07 §2): Result8* pickup(Result8* out, ProgramContext* ctx, const PickupSlice* source,
 // const Accessors* other, const Singletons*, const EventSenders*, uint32 receiver, uint8 feedback); out, ctx, source
@@ -143,9 +144,9 @@ void not_in(const char* why, uint32_t reason, int level) {
 void ready() {
     const KilnApi* api = host::api();
     uintptr_t helper = 0, current = 0;
-    if (kiln_caps_held(host::caps(), ks("events.pickup")))
-        return not_in("events.pickup is held until its game test (07-events.decision-rollback); \"preview\" in kiln.json lifts it",
-                      KILN_CAP_REASON_POLICY, KILN_LOG_INFO);
+    if (kiln_caps_held(host::caps(), ks("events.pickup")))  // a hold the owner put on the row (none since 0.2.0-dev.29)
+        return not_in("events.pickup is held by the core's gate list (\"preview\" in kiln.json lifts it)", KILN_CAP_REASON_POLICY,
+                      KILN_LOG_INFO);
     if (!api->feature(ks("events.pickup"))) return not_in("feature events.pickup did not resolve on this game build", KILN_CAP_REASON_SYMBOL_MISSING, KILN_LOG_WARN);
     if (api->symbol(ks("events/PickupInRange"), &helper) != KILN_OK || api->symbol(ks("world/CurrentEntityId"), &current) != KILN_OK || !helper ||
         !current)

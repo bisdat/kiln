@@ -309,5 +309,5 @@ cancel it to keep the entity alive at `SurvivalHealth` (1 by default, clamped to
 `Combat.SetHealth`'s own setter and told once to `CombatChangedEvent` with origin `kiln.decisions`). The decision ends in
 one `DecisionCompletedEvent`: `Prevented`, `Allowed` (the game lets it die), `AlreadyAlive` (a heal in a handler wins,
 nothing is written), or `NoPositiveRange`, `WriteRefused`, `SourceChanged`, `StaleEntity`, `TimeoutReleased`. Only
-deaths from health; not damage cancellation (refuse the hit in `EntityHurtEvent`). Capability `events.death`, held
-until its game test. [decisions.md](decisions.md).
+deaths from health; not damage cancellation (refuse the hit in `EntityHurtEvent`). Capability `events.death`, on
+since 0.2.0-dev.29 and not yet confirmed in a real game. [decisions.md](decisions.md).

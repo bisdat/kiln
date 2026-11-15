@@ -424,6 +424,34 @@ internal static unsafe class BootPhase
             }
             BootGeneration.Record(gen, reports, committed);
             BootGeneration.ReadState = CurrentReport;
+            PublishFingerprints(gen);
+        }
+
+        // What each side-both boot mod committed, for the join (BootFingerprint.cs, Kiln.Network's BootGate): its envelope documents and
+        // its blocks files' resource patches. A mod left out has none; one that cannot be hashed is not compared.
+        private void PublishFingerprints(ulong gen)
+        {
+            var fingerprints = new Dictionary<string, string?>(StringComparer.Ordinal);
+            foreach (var (id, a) in _authors)
+            {
+                if (a.Manifest.Side != ManifestSide.Both) continue;  // a client-only or server-only mod is not compared at the join
+                if (a.State != BootModState.Committed)
+                {
+                    fingerprints[id] = null;
+                    continue;
+                }
+                try
+                {
+                    var fp = BootFingerprint.Of(id, a.Directory, _collectors);
+                    fingerprints[id] = fp;
+                    log(LogLevel.Info, $"boot: {id}: boot content {fp[..16]} (the join compares it with the other side's)");
+                }
+                catch (Exception e)
+                {
+                    log(LogLevel.Warn, $"boot: {id}: its boot content has no fingerprint ({e.GetType().Name}: {e.Message}); it is not compared at the join");
+                }
+            }
+            BootFingerprint.Publish(gen, fingerprints);
         }
 
         private BootModReport CurrentReport(BootModReport report)

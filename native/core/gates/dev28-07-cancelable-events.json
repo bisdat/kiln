@@ -1,4 +1,0 @@
-{ "gates": [
-    { "name": "events.death", "checks": ["07-events.decision-rollback"] },
-    { "name": "events.pickup", "checks": ["07-events.decision-rollback"] }
-] }
