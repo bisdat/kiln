@@ -92,6 +92,62 @@ public unsafe ref struct EntityView
         return new Attribute32(p, size, _slice, _iter, list, index, component);
     }
 
+    /// <summary>The program whose slice this entity is of.</summary>
+    public readonly string Program => _ctx.Program;
+
+    // ---- by descriptor position: Kiln.Game's generated program views (Ecs.Programs.*) ----
+
+    // A typed view of `program` with `contract` binds this entity: the slice must be of that program, and its live
+    // descriptor (this world session's) must have the view's contract, so the view's positions name the right slots.
+    internal readonly EntityView Expect(string program, uint contract)
+    {
+        if (!string.Equals(_ctx.Program, program, StringComparison.Ordinal))
+            throw new InvalidOperationException($"a view of {program} cannot bind an entity of a {_ctx.Program} slice");
+        var live = _ctx.Lists.Contract;
+        if (live != contract)
+            throw new InvalidOperationException(live is null
+                ? $"{program}: kiln.world cannot read its descriptor's contract on this build; typed views are off"
+                : $"{program}: the live descriptor's contract is 0x{live:X8}, the view's 0x{contract:X8} (made for another game build)");
+        return this;
+    }
+
+    internal readonly bool HasAt(int list, int index)
+    {
+        var t = SystemsNative.T;
+        uint size = 0;
+        byte writable = 0;
+        return t != null && t->GameSliceSlot(_slice, _iter, list, index, &size, &writable) != null;
+    }
+
+    internal readonly ref readonly T ReadAt<T>(int list, int index, string component) where T : unmanaged =>
+        ref Unsafe.AsRef<T>(Slot(list, index, component, false, sizeof(T), out _));
+
+    internal readonly ref T WriteAt<T>(int list, int index, string component) where T : unmanaged =>
+        ref Unsafe.AsRef<T>(Slot(list, index, component, true, sizeof(T), out _));
+
+    internal readonly Attribute32 AttributeAt(int list, int index, string component)
+    {
+        var t = SystemsNative.T;
+        var rc = t == null ? SystemsNative.Unavailable : t->GameSliceAttrValidate(_slice, _iter, list, index);
+        if (rc == SystemsNative.InvalidArgument)
+            throw new ArgumentException($"{component} is not an attribute or its block is malformed", nameof(component));
+        if (rc != SystemsNative.Ok) throw new InvalidOperationException($"{component}: attribute validation unavailable ({rc})");
+        var p = Slot(list, index, component, true, 8, out var size);
+        return new Attribute32(p, size, _slice, _iter, list, index, component);
+    }
+
+    // An attribute's values to read: validated as AttributeAt does, but not marked (a capture, a test before a write).
+    internal readonly ReadOnlySpan<int> AttributeReadAt(int list, int index, string component)
+    {
+        var t = SystemsNative.T;
+        var rc = t == null ? SystemsNative.Unavailable : t->GameSliceAttrValidate(_slice, _iter, list, index);
+        if (rc == SystemsNative.InvalidArgument)
+            throw new ArgumentException($"{component} is not an attribute or its block is malformed", nameof(component));
+        if (rc != SystemsNative.Ok) throw new InvalidOperationException($"{component}: attribute validation unavailable ({rc})");
+        var p = Slot(list, index, component, false, 8, out var size);
+        return new Attribute32(p, size, _slice, _iter, list, index, component).Values;
+    }
+
     private readonly byte* Need(string component, bool write, int want, out int list, out int index, out int size)
     {
         ArgumentException.ThrowIfNullOrEmpty(component);
@@ -103,6 +159,15 @@ public unsafe ref struct EntityView
                 : $"{_ctx.Program} does not list {component} (its lists: {_ctx.Lists.Describe(false)})");
         list = at >> 16;
         index = at & 0xFFFF;
+        return Slot(list, index, component, write, want, out size);
+    }
+
+    private readonly byte* Slot(int list, int index, string component, bool write, int want, out int size)
+    {
+        var t = SystemsNative.T;
+        if (t == null) throw new InvalidOperationException($"{_ctx.Program}: kiln.world is not here");
+        if (write && list is not (SystemsNative.ListWrite or SystemsNative.ListWriteOpt))
+            throw new InvalidOperationException($"{_ctx.Program}: {component} is not one of its write slots");
         uint reflected = 0;
         byte writable = 0;
         var p = (byte*)t->GameSliceSlot(_slice, _iter, list, index, &reflected, &writable);
@@ -209,9 +274,15 @@ internal sealed unsafe class ProgramLists
 
     private readonly string[][] _names = new string[SystemsNative.Lists][];
     private readonly ConcurrentDictionary<string, int> _read = new(), _write = new();
+    private readonly WorldKind _world;
+    private readonly int _index;
+    private uint _contract;
+    private int _contractState;  // 0 not asked, 1 _contract holds the live one, 2 kiln.world could not say
 
     private ProgramLists(SystemsNative.Table* t, WorldKind world, int index)
     {
+        _world = world;
+        _index = index;
         var buffer = stackalloc NativeStr[64];
         for (var list = 0; list < SystemsNative.Lists; list++)
         {
@@ -232,6 +303,25 @@ internal sealed unsafe class ProgramLists
 
     /// <summary>Tests: forget every program.</summary>
     internal static void Reset() => Cache.Clear();
+
+    /// <summary>The live descriptor's contract in this world session (kiln.world's game_program_contract, asked once), or
+    /// null when kiln.world cannot say.</summary>
+    internal uint? Contract
+    {
+        get
+        {
+            var state = Volatile.Read(ref _contractState);
+            if (state == 0)
+            {
+                var t = SystemsNative.T;
+                uint c = 0;
+                state = t != null && t->GameProgramContract((uint)_world, _index, &c, null, 0, null) == SystemsNative.Ok ? 1 : 2;
+                _contract = c;
+                Volatile.Write(ref _contractState, state);
+            }
+            return state == 1 ? _contract : null;
+        }
+    }
 
     // (list << 16) | position, or -1
     internal int Find(string component, bool write)

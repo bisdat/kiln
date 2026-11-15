@@ -366,6 +366,10 @@ uint32_t external_runner() {
     return v;
 }
 
+// systems.wraps.typed (Kiln.Systems' Systems.Wrap<T>) follows systems.wraps: a typed wrap is an untyped one whose view
+// Kiln checked against the live descriptor's contract (game_program_contract), which needs nothing more of the build.
+constexpr const char* kTypedText = "typed program views: each wrap checks the view's contract against the live descriptor";
+
 void report_row(const char* name, uint32_t state, uint32_t reason, const char* text) {
     if (g_wrap_caps && g_wrap_caps->report)
         g_wrap_caps->report(g_owner, KilnStr{name, std::strlen(name)}, state, reason, KilnStr{text, std::strlen(text)});
@@ -704,11 +708,15 @@ void wraps_init() {
                             hooks->subscribe_owner_retiring(g_owner, &on_owner_retiring, nullptr, &retiring) == KILN_OK;
     if (!g_retiring_subscribed)
         KW_W("wraps: kiln.hooks has no owner cleanup here; a revoked owner's wraps are found once a second");
-    if (g_ok)
+    if (g_ok) {
         report_row("systems.wraps", KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, "Before, After and Replace on the game's programs");
-    else
+        report_row("systems.wraps.typed", KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, kTypedText);
+    } else {
         report_row("systems.wraps", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING,
                "the program table or job layout did not resolve on this build (world.programs)");
+        report_row("systems.wraps.typed", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING,
+               "the program table or job layout did not resolve on this build (world.programs)");
+    }
     const bool client = g_api->size >= offsetof(KilnApi, session) + sizeof(void*) && g_api->side() == KILN_SIDE_CLIENT;
     if (!client)
         report_row("systems.wraps.client", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_WRONG_SIDE, "a client world runs only in the game client");
@@ -842,6 +850,7 @@ void wraps_pre(uint32_t kind, uintptr_t) {
     }
     if (row.set) {
         report_row("systems.wraps", row.state, row.reason, row.text);
+        report_row("systems.wraps.typed", row.state, row.reason, row.state == KILN_CAP_AVAILABLE ? kTypedText : row.text);
         if (g_client_ready) report_row("systems.wraps.client", row.state, row.reason, row.text);
     }
 }

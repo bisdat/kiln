@@ -15,10 +15,11 @@ dump, and the layout table that Kiln.Game embeds. Kiln.Game.csproj runs it at bu
     python3 tools/typegen/typegen.py generate --dump sigdb/types/server/<sha>.json --out <dir> [--root Ecs]
                                               [--legacy-obsolete | --no-legacy]
 
-Programs mode: descriptors of the game's ECS programs from a program catalog (read from the exe, so never in the
-tree, and nothing generated from one is committed):
+Programs mode: typed views of the game's ECS programs (Kiln.Ecs.Programs.*, for Kiln.Systems' Systems.Wrap<T>) from
+the program catalog of the dump's exe (sigdb/programs/<side>/<sha>.json, tools/typegen/catalog.py; 'auto' finds it,
+and writes a file with no views when none is committed):
 
-    python3 tools/typegen/typegen.py programs --catalog <catalog.json> --dump <dump> --out <dir> [--root Ecs]
+    python3 tools/typegen/typegen.py programs --catalog <catalog.json|auto> --dump <dump> --out <dir> [--root Ecs]
 """
 import json
 import os
@@ -840,16 +841,18 @@ def generate(argv):
 
 
 # ---------------------------------------------------------------------------------------------------------------------
-# programs: descriptors of the game's ECS programs from a program catalog (never committed: it is read from the exe)
+# programs: typed views of the game's ECS programs, from the program catalog of the dump's exe
+# (sigdb/programs/<side>/<exe_sha256>.json, tools/typegen/catalog.py; docs/kiln/typegen.md §4.5)
 # ---------------------------------------------------------------------------------------------------------------------
 
-# A program descriptor's access lists by their offset in the descriptor (the catalog's keys).
-PROGRAM_LISTS = {0x18: "tpl", 0x28: "tpl_opt", 0x38: "read", 0x48: "read_opt", 0x58: "write", 0x68: "write_opt",
-                 0x78: "add", 0x88: "remove", 0x98: "sys_read", 0xB0: "sys_write", 0xD0: "other_tpl",
-                 0xE0: "other_read", 0xF0: "other_write", 0x100: "other_write_unser", 0x110: "with", 0x120: "without",
-                 0x130: "any_of", 0x140: "all_write", 0x150: "all_read", 0x160: "events_in", 0x170: "events_out"}
-SYSTEM_LISTS = {"sys_read", "sys_write"}     # names of systems or resources, not component types
-EVENT_LISTS = {"events_in", "events_out"}
+# The lists a view has properties for: (catalog list, kiln.world's KILN_GAME_LIST_* id, writable, optional).
+VIEW_LISTS = [("tpl", 0, False, False), ("tpl_opt", 1, False, True), ("read", 2, False, False),
+              ("read_opt", 3, False, True), ("write", 4, True, False), ("write_opt", 5, True, True)]
+# A descriptor with one of these has no slot view in kiln.world (chapter 06a 9.3): no typed view.
+NO_VIEW_LISTS = ("other_write_unser", "all_read", "all_write")
+# The view's own members: a component property of one of these names gets "Component" after it.
+VIEW_MEMBERS = {"Name", "Contract", "Lists", "Entity", "View", "Row", "Step", "Bind", "Equals", "GetHashCode",
+                "ToString", "GetType"}
 
 
 def program_ident(name):
@@ -860,104 +863,154 @@ def program_ident(name):
     return cs
 
 
+def _catalog_module():
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import catalog  # noqa: E402  (tools/typegen/catalog.py: the schema and the §9.7 contract)
+    return catalog
+
+
+def find_catalog(dump):
+    """The committed catalog of the dump's exe, or None."""
+    root = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+    p = os.path.join(root, "sigdb", "programs", str(dump.get("side")), f"{dump.get('exe_sha256')}.json")
+    return p if os.path.isfile(p) else None
+
+
 def programs(argv):
     import argparse
-    ap = argparse.ArgumentParser(prog="typegen.py programs", description="ECS program descriptors from a catalog.")
-    ap.add_argument("--catalog", required=True, help="a program catalog (JSON list of {name, lists})")
+    ap = argparse.ArgumentParser(prog="typegen.py programs", description="Typed views of the game's ECS programs.")
+    ap.add_argument("--catalog", required=True,
+                    help="a program catalog (sigdb/programs/<side>/<sha>.json), or 'auto': the catalog of the dump's exe "
+                         "if one is committed, else a file with no views")
     ap.add_argument("--dump", required=True, help="the schema-2 dump the components come from")
     ap.add_argument("--out", required=True, help="the directory to write into")
     ap.add_argument("--root", default="Ecs", help="the root class of the generated types (default Ecs)")
     a = ap.parse_args(argv)
     try:
         m = Model(load_dump(a.dump), a.root)
-        text, n = programs_text(m, a.catalog)
+        path = find_catalog(m.d) if a.catalog == "auto" else a.catalog
+        text, n, skipped = programs_text(m, path)
     except GenError as e:
         print(f"typegen: error: {e}", file=sys.stderr)
         return 1
     os.makedirs(a.out, exist_ok=True)
     with open(os.path.join(a.out, "Kiln.Game.Programs.g.cs"), "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
-    print(f"typegen: {os.path.basename(a.catalog)}: {n} program descriptors")
+    if path is None:
+        print(f"typegen: no program catalog for {m.d['side']} {m.d['exe_sha256'][:12]}: no program views")
+    else:
+        print(f"typegen: {os.path.basename(path)}: {n} program views ({skipped} programs without one: "
+              f"{', '.join(NO_VIEW_LISTS)})")
     return 0
 
 
-def programs_text(m, path):
+def load_catalog(path, dump):
+    cat = _catalog_module()
     try:
         with open(path, "rb") as f:
-            cat = json.loads(f.read().decode("utf-8"))
+            doc = json.loads(f.read().decode("utf-8"))
     except (OSError, ValueError) as e:
         raise GenError(f"{path}: not a readable JSON catalog: {e}")
     where = os.path.basename(path)
-    if not isinstance(cat, list):
-        raise GenError(f"{where}: a catalog is a list of programs")
-    out, idents = [], {}
-    for i, p in enumerate(cat):
-        at = f"{where}: [{i}]"
-        if not isinstance(p, dict) or set(p) - {"name", "lists"} or "name" not in p:
-            raise GenError(f"{at}: a program is {{name, lists}}")
-        name = p["name"]
-        if not isinstance(name, str) or not re.match(r"^[A-Za-z0-9_]{1,64}$", name):
-            raise GenError(f"{at}.name: {name!r} is not a program name")
-        cs = program_ident(name)
-        lists = p.get("lists", {})
-        props = {"".join(w[:1].upper() + w[1:] for w in PROGRAM_LISTS[int(k, 16)].split("_"))
-                 for k in (lists if isinstance(lists, dict) else {}) if re.match(r"^0x[0-9A-Fa-f]+$", str(k))
-                 and int(k, 16) in PROGRAM_LISTS}
-        if cs in props | {"Name", "Contract", "Programs", m.root}:
-            cs = "Program" + cs  # a nested class cannot have the name of one of its members
-        if cs in idents:
-            raise GenError(f"name collision: programs {idents[cs]} and {name} would both be {cs}")
-        idents[cs] = name
-        if not isinstance(lists, dict):
-            raise GenError(f"{at}.lists: not an object")
-        got = {}
-        for key, names in lists.items():
-            try:
-                off = int(key, 16)
-            except (TypeError, ValueError):
-                off = None
-            if off not in PROGRAM_LISTS:
-                raise GenError(f"{at}.lists[{key!r}]: not a known access list offset")
-            lst = PROGRAM_LISTS[off]
-            if not isinstance(names, list) or not all(isinstance(x, str) and IDENT.match(x) for x in names):
-                raise GenError(f"{at}.lists[{key!r}]: a list of names")
-            refs = []
-            for x in names:
-                if lst in SYSTEM_LISTS:
-                    refs.append(x)
-                    continue
-                qn = "keen::ecs::" + x
-                pool, what = (m.events, "event") if lst in EVENT_LISTS else (m.components, "component")
-                if qn not in pool:
-                    raise GenError(f"{at} ({name}).{lst}: {x} is not among the {what}s of {os.path.basename(m.d['_path'])}")
-                refs.append(qn)
-            got[off] = (lst, refs)
-        ordered = [got[o] for o in sorted(got)]
-        contract = f"program {name}\n" + "".join(f"{lst} {','.join(sorted(refs))}\n" for lst, refs in ordered if refs)
-        body = [f"    /// <summary>The game's ECS program <c>{name}</c>.</summary>",
-                f"    public static class {cs}",
-                "    {",
-                f'        public static readonly string Name = "{name}";',
-                "        /// <summary>FNV-1a-64 of the program's contract text (docs/kiln/typegen.md §4.5).</summary>",
-                f"        public static readonly ulong Contract = 0x{fnv1a64(contract):016X}ul;"]
-        for lst, refs in ordered:
-            prop = "".join(w[:1].upper() + w[1:] for w in lst.split("_"))
-            if lst in SYSTEM_LISTS:
-                items = ", ".join(f'"{x}"' for x in refs)
-                body.append(f"        public static readonly string[] {prop} = [{items}];")
-            else:
-                items = ", ".join(f"typeof({m.cs_name(q)})" for q in refs)
-                body.append(f"        public static readonly global::System.Type[] {prop} = [{items}];")
-        body.append("    }")
-        out.append("".join("    " + line + "\n" if line else "\n" for line in body))
+    errs = cat.check_doc(doc, where)
+    if errs:
+        raise GenError("; ".join(errs[:5]))
+    if doc["exe_sha256"] != dump.get("exe_sha256") or doc["side"] != dump.get("side"):
+        raise GenError(f"{where} is the catalog of {doc['side']} {doc['exe_sha256'][:12]}, the dump is of "
+                       f"{dump.get('side')} {str(dump.get('exe_sha256'))[:12]}: views need both from one exe")
+    return doc, cat
+
+
+def lists_text(cat, p):
+    """The contract text without its empty lists: what a view's Lists says (Kiln.Systems fills the empty ones in)."""
+    full = cat.contract_text(p)
+    return "".join(line + "\n" for line in full.split("\n") if line and not line.endswith("="))
+
+
+def programs_text(m, path):
+    r = m.root
     head = (f"{MARKER}\n// SPDX-License-Identifier: MIT\n"
-            f"// <auto-generated> by tools/typegen/typegen.py programs from {where} and "
-            f"{os.path.basename(m.d['_path'])}. Do not edit by hand.\n#nullable enable\n"
-            f"#pragma warning disable RS0016 // generated from a catalog: outside the public API record\n\n"
-            f"namespace Kiln;\n\npublic static partial class {m.root}\n{{\n"
-            f"    /// <summary>The game's ECS programs and what each reads and writes.</summary>\n"
+            f"// <auto-generated> by tools/typegen/typegen.py programs from "
+            f"{os.path.basename(path) if path else 'no catalog'} and {os.path.basename(m.d['_path'])}. Do not edit by hand.\n"
+            f"#nullable enable\n"
+            f"#pragma warning disable RS0016 // generated from the program catalog: outside the public API record\n\n"
+            f"namespace Kiln;\n\npublic static partial class {r}\n{{\n"
+            f"    /// <summary>Typed views of the game's ECS programs, one per program of the program catalog (chapter 06a "
+            f"9.3): the components each program's descriptor lists, through the program's own slots, for "
+            f"<see cref=\"global::Kiln.Systems.Wrap{{T}}(global::Kiln.WrapOptions?)\"/>. A program whose descriptor uses "
+            f"{', '.join(NO_VIEW_LISTS)} has none.</summary>\n"
             f"    public static class Programs\n    {{\n")
-    return head + "\n".join(out) + "    }\n}\n", len(cat)
+    if path is None:
+        return head + "    }\n}\n", 0, 0
+    doc, cat = load_catalog(path, m.d)
+    out, idents, skipped = [], {}, 0
+    for p in doc["programs"]:
+        name, lists = p["name"], p["lists"]
+        if any(k in lists for k in NO_VIEW_LISTS):
+            skipped += 1
+            continue
+        cs = program_ident(name)
+        if cs in idents:
+            raise GenError(f"name collision: programs {idents[cs]} and {name} would both be {r}.Programs.{cs}")
+        idents[cs] = name
+        props, used, missing = [], set(VIEW_MEMBERS) | {cs}, []
+        for lst, lid, writable, optional in VIEW_LISTS:
+            for i, comp in enumerate(lists.get(lst, [])):
+                qn = "keen::ecs::" + comp
+                if qn not in m.components:
+                    missing.append(comp)
+                    continue
+                t = m.by[qn]
+                prop = m.names[qn]
+                if prop in used:
+                    prop += "Component"
+                if prop in used or ("Has" + prop) in used:
+                    raise GenError(f"program {name}: two members would be {cs}.{prop}")
+                used.add(prop)
+                ctype = f"global::Kiln.{r}.{m.names[qn]}"
+                note = f"{lst} <c>{esc(comp)}</c>"
+                if optional:
+                    used.add("Has" + prop)
+                    props.append(f"            /// <summary>The entity has {note}.</summary>\n"
+                                 f"            public readonly bool Has{prop} => _e.HasAt({lid}, {i});\n")
+                if writable and m.attribute_value(t) == "int":
+                    if prop + "Values" in used:
+                        raise GenError(f"program {name}: two members would be {cs}.{prop}Values")
+                    used.add(prop + "Values")
+                    props.append(f"            /// <summary>{note}: an attribute (marked when used).</summary>\n"
+                                 f"            public readonly global::Kiln.Attribute32 {prop} => _e.AttributeAt({lid}, {i}, \"{comp}\");\n"
+                                 f"            /// <summary>{note}: its values to read (not marked).</summary>\n"
+                                 f"            public readonly global::System.ReadOnlySpan<int> {prop}Values => _e.AttributeReadAt({lid}, {i}, \"{comp}\");\n")
+                elif writable:
+                    props.append(f"            /// <summary>{note} (marked when used).</summary>\n"
+                                 f"            public readonly ref {ctype} {prop} => ref _e.WriteAt<{ctype}>({lid}, {i}, \"{comp}\");\n")
+                else:
+                    props.append(f"            /// <summary>{note}.</summary>\n"
+                                 f"            public readonly ref readonly {ctype} {prop} => ref _e.ReadAt<{ctype}>({lid}, {i}, \"{comp}\");\n")
+        miss = f" Untyped (no layout in the dump): {', '.join(esc(x) for x in missing)}." if missing else ""
+        text = lists_text(cat, p).replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+        contract = int(p["contract"], 16)
+        out.append(
+            f"        /// <summary>Program <c>{esc(name)}</c>.{miss}</summary>\n"
+            f"        public ref struct {cs} : global::Kiln.IGameProgram<{cs}>\n"
+            f"        {{\n"
+            f"            private readonly global::Kiln.EntityView _e;\n"
+            f"            private {cs}(global::Kiln.EntityView e) => _e = e;\n"
+            f"            /// <inheritdoc/>\n"
+            f"            public static string Name => \"{name}\";\n"
+            f"            /// <inheritdoc/>\n"
+            f"            public static uint Contract => 0x{contract:08X}u;\n"
+            f"            /// <inheritdoc/>\n"
+            f"            public static string Lists => \"{text}\";\n"
+            f"            static {cs} global::Kiln.IGameProgram<{cs}>.Bind(global::Kiln.EntityView entity) => "
+            f"new(entity.Expect(\"{name}\", 0x{contract:08X}u));\n"
+            f"            /// <summary>The entity.</summary>\n"
+            f"            public readonly global::Kiln.EntityId Entity => _e.Entity;\n"
+            f"            /// <summary>The untyped view (by name; singletons).</summary>\n"
+            f"            public readonly global::Kiln.EntityView View => _e;\n"
+            + "".join(props) +
+            f"        }}\n")
+    return head + "\n".join(out) + "    }\n}\n", len(out), skipped
 
 
 def main():

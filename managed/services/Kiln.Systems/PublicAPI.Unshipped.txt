@@ -203,3 +203,32 @@ virtual Kiln.SliceHandler.Invoke(ref Kiln.Slice slice) -> void
 ~override Kiln.SliceInfo.ToString() -> string
 ~static Kiln.WrapResult<TWrap>.operator !=(Kiln.WrapResult<TWrap>? left, Kiln.WrapResult<TWrap>? right) -> bool
 ~static Kiln.WrapResult<TWrap>.operator ==(Kiln.WrapResult<TWrap>? left, Kiln.WrapResult<TWrap>? right) -> bool
+Kiln.Apply<T, TSnap>
+virtual Kiln.Apply<T, TSnap>.Invoke(ref T entity, in TSnap before) -> void
+Kiln.Capture<T, TSnap>
+virtual Kiln.Capture<T, TSnap>.Invoke(in T entity) -> TSnap
+Kiln.EntityHandler<T>
+virtual Kiln.EntityHandler<T>.Invoke(ref T entity) -> void
+Kiln.EntityView.Program.get -> string!
+Kiln.IGameProgram<TSelf>
+Kiln.IGameProgram<TSelf>.Bind(Kiln.EntityView entity) -> TSelf
+Kiln.IGameProgram<TSelf>.Contract.get -> uint
+Kiln.IGameProgram<TSelf>.Lists.get -> string!
+Kiln.IGameProgram<TSelf>.Name.get -> string!
+Kiln.ProgramWrap<T>
+Kiln.ProgramWrap<T>.After(Kiln.SliceHandler! handler, int? priority = null) -> Kiln.ProgramWrap<T>!
+Kiln.ProgramWrap<T>.AfterEach(Kiln.EntityHandler<T>! handler, int? priority = null) -> Kiln.ProgramWrap<T>!
+Kiln.ProgramWrap<T>.AroundEach<TSnap>(Kiln.Capture<T, TSnap>! capture, Kiln.Apply<T, TSnap>! apply, int? priority = null) -> Kiln.ProgramWrap<T>!
+Kiln.ProgramWrap<T>.Before(Kiln.SliceHandler! handler, int? priority = null) -> Kiln.ProgramWrap<T>!
+Kiln.ProgramWrap<T>.BeforeEach(Kiln.EntityHandler<T>! handler, int? priority = null) -> Kiln.ProgramWrap<T>!
+Kiln.ProgramWrap<T>.Disabled -> System.Action<Kiln.WrapDisabledEvent!>?
+Kiln.ProgramWrap<T>.Dispose() -> void
+Kiln.ProgramWrap<T>.Program.get -> string!
+Kiln.ProgramWrap<T>.Replace(Kiln.SliceHandler! handler) -> Kiln.WrapResult<Kiln.ProgramWrap<T>!>!
+Kiln.ProgramWrap<T>.State.get -> Kiln.WrapState
+Kiln.ProgramWrap<T>.Stats.get -> Kiln.WrapStats!
+Kiln.ProgramWrap<T>.Untyped.get -> Kiln.ProgramWrap!
+Kiln.ProgramWrap<T>.When(System.Func<Kiln.SliceInfo, bool>! filter) -> Kiln.ProgramWrap<T>!
+Kiln.ProgramWrap<T>.WhenArchetype(System.Collections.Generic.IEnumerable<string!>! has, System.Collections.Generic.IEnumerable<string!>? lacks = null) -> Kiln.ProgramWrap<T>!
+Kiln.ProgramWrap<T>.World.get -> Kiln.WorldKind
+static Kiln.Systems.Wrap<T>(Kiln.WrapOptions? options = null) -> Kiln.WrapResult<Kiln.ProgramWrap<T>!>!

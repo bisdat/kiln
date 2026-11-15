@@ -201,13 +201,15 @@ void fake_api() {
 void client_lifecycle_row() {
     KilnCapsApi caps{};
     caps.header = {sizeof caps, 1};
-    static uint32_t state;
+    static uint32_t state, wraps_state = 99, typed_state = 99;
     static std::string detail;
     caps.report = [](KilnOwner, KilnStr name, uint32_t value, uint32_t, KilnStr text) -> KilnResult {
         if (std::string_view(name.ptr, name.len) == "systems.wraps.client") {
             state = value;
             detail.assign(text.ptr, text.len);
         }
+        if (std::string_view(name.ptr, name.len) == "systems.wraps") wraps_state = value;
+        if (std::string_view(name.ptr, name.len) == "systems.wraps.typed") typed_state = value;
         return KILN_OK;
     };
     static const KilnCapsApi* table;
@@ -227,12 +229,15 @@ void client_lifecycle_row() {
     check(state == KILN_CAP_UNAVAILABLE, "world event subscription failure keeps wraps off");
     wraps_client_ready(true, true);
     check(state == KILN_CAP_AVAILABLE, "native client wraps available with lifecycle and both subscriptions");
+    check(typed_state == wraps_state && wraps_state != 99, "systems.wraps.typed is reported with systems.wraps");
     g_fake_external.store(1);
     wraps_pre(KILN_WORLD_CLIENT, 0);
     check(state == KILN_CAP_UNAVAILABLE, "native SET lowers the client wrap row too");
+    check(typed_state == KILN_CAP_UNAVAILABLE && wraps_state == KILN_CAP_UNAVAILABLE, "native SET lowers the typed wrap row too");
     g_fake_external.store(0);
     wraps_pre(KILN_WORLD_CLIENT, 0);
     check(state == KILN_CAP_AVAILABLE, "client wrap row recovers when native SET leaves");
+    check(typed_state == wraps_state, "the typed wrap row follows systems.wraps back");
     g_side = KILN_SIDE_SERVER;
     fake_api();
 }
@@ -1323,6 +1328,64 @@ void per_entity() {
               sv(names[1]) == "DynamicFuelSetup" && game_program_list(KILN_WORLD_SERVER, 0, KILN_GAME_LIST_READ, names, 4) == 0 &&
               game_program_list(KILN_WORLD_SERVER, 0, 16, names, 4) == -1 && game_program_list(KILN_WORLD_SERVER, 99, 0, names, 4) == -1,
           "program list: the descriptor's names in descriptor order");
+    {
+        // the contract (chapter 06a 9.7): every one of the 21 lists (also the five the slot view leaves out), the masks,
+        // flags and interval, as tools/typegen/catalog.py writes it
+        auto text_of = [](const std::string& lists) {
+            const char* order[] = {"tpl", "tpl_opt", "read", "read_opt", "write", "write_opt", "add", "remove", "sys_read",
+                                   "sys_write", "other_tpl", "other_read", "other_write", "other_write_unser", "with",
+                                   "without", "any_of", "all_write", "all_read", "events_in", "events_out"};
+            std::string t;
+            for (const char* l : order) {
+                t += l;
+                t += '=';
+                const std::string key = std::string("\n") + l + "=";
+                const auto at = ("\n" + lists).find(key);
+                if (at != std::string::npos) {
+                    const auto from = at + key.size() - 1;
+                    t += lists.substr(from, lists.find('\n', from) - from);
+                }
+                t += '\n';
+            }
+            return t;
+        };
+        auto fnv = [](const std::string& s) {
+            uint32_t h = 0x811C9DC5u;
+            for (unsigned char c : s) h = (h ^ c) * 0x01000193u;
+            return h;
+        };
+        g_wdesc[0].interval = 1;
+        g_wdesc[0].sys_write_parallel = 1;
+        const std::string want0 = text_of("tpl=FuelSetup\nread_opt=CurrentTransform\nwrite=Fuel,DynamicFuelSetup\n") +
+                                  "sys_read_opt=0000000000000000\nsys_write_opt=0000000000000000\n"
+                                  "sys_write_parallel=0000000000000001\nflags=00000000\ninterval=1\n";
+        uint32_t c = 0, size = 0;
+        char text[1024];
+        const KilnResult rc = game_program_contract(KILN_WORLD_SERVER, 0, &c, text, sizeof text, &size);
+        check(rc == KILN_OK && want0 == text && size == want0.size() && c == fnv(want0),
+              "contract: the descriptor's text and its FNV-1a-32, as the program catalog writes them");
+        const std::string want4 = text_of("other_write_unser=Health\n") +
+                                  "sys_read_opt=0000000000000000\nsys_write_opt=0000000000000000\n"
+                                  "sys_write_parallel=0000000000000000\nflags=00000000\ninterval=0\n";
+        uint32_t c4 = 0;
+        check(game_program_contract(KILN_WORLD_SERVER, 4, &c4, text, sizeof text, nullptr) == KILN_OK && want4 == text &&
+                  c4 == fnv(want4),
+              "contract: other_write_unser (a list the slot view does not model) is in it too");
+        char small[8];
+        uint32_t c2 = 0, size2 = 0;
+        check(game_program_contract(KILN_WORLD_SERVER, 0, &c2, small, sizeof small, &size2) == KILN_OK && c2 == c &&
+                  size2 == want0.size() && std::string(small) == want0.substr(0, 7),
+              "contract: a short buffer gets the text cut and NUL-terminated, the size and hash of the whole");
+        g_wdesc[0].flags = 0x400;
+        uint32_t c3 = 0;
+        check(game_program_contract(KILN_WORLD_SERVER, 0, &c3, nullptr, 0, nullptr) == KILN_OK && c3 != c,
+              "contract: a flag change changes it (a flag moves a program between threads)");
+        g_wdesc[0].flags = 0;
+        check(game_program_contract(KILN_WORLD_SERVER, 0, nullptr, nullptr, 0, nullptr) == KILN_ERR_INVALID_ARGUMENT &&
+                  game_program_contract(KILN_WORLD_SERVER, 99, &c2, nullptr, 0, nullptr) == KILN_ERR_NOT_FOUND &&
+                  game_program_contract(KILN_WORLD_PREDICTION, 0, &c2, nullptr, 0, nullptr) == KILN_ERR_NOT_FOUND,
+              "contract: no out pointer, no such index, no directory of that kind");
+    }
     KilnGameProgramInfo pi{};
     pi.size = sizeof pi;
     game_program_info(KILN_WORLD_SERVER, 4, &pi);
@@ -1659,6 +1722,7 @@ void abi(const char* path) {
         F(KilnWorldApi, wrap_original); F(KilnWorldApi, in_program); F(KilnWorldApi, game_program_list);
         F(KilnWorldApi, game_slice_iterate); F(KilnWorldApi, game_slice_slot); F(KilnWorldApi, game_slice_mark);
         F(KilnWorldApi, game_slice_archetype); F(KilnWorldApi, game_archetype_has); F(KilnWorldApi, game_slice_attr_changed); F(KilnWorldApi, game_slice_attr_validate); F(KilnWorldApi, game_world_session);
+        F(KilnWorldApi, game_program_contract);
     }
     {
         auto& l = list("KilnGameSlice", sizeof(KilnGameSlice));

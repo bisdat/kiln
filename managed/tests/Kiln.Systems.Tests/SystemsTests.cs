@@ -663,6 +663,7 @@ public sealed unsafe class SystemsTests
     [Theory]
     [InlineData(424u)]
     [InlineData(432u)]
+    [InlineData(440u)]
     public void Older_native_tails_are_refused_before_calling_new_members(uint size)
     {
         using var w = new FakeWorld();
@@ -752,6 +753,7 @@ public sealed unsafe class SystemsTests
         Assert.Equal(v4["game_world_session"], (int)Marshal.OffsetOf(t, "GameWorldSession"));
         Assert.Equal(v4["game_slice_attr_validate"], (int)Marshal.OffsetOf(t, "GameSliceAttrValidate"));
         Assert.Equal(v4["game_slice_attr_changed"], (int)Marshal.OffsetOf(t, "GameSliceAttrChanged"));
+        Assert.Equal(v4["game_program_contract"], (int)Marshal.OffsetOf(t, "GameProgramContract"));
         Assert.Equal((int)abi["KilnWorldApiV4"]!["size"]!, Marshal.SizeOf(t));
     }
 }

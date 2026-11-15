@@ -26,6 +26,7 @@
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <mutex>
 #include <string>
@@ -139,6 +140,55 @@ Census census(bool reset) {
 }
 
 // ---- S1: the directory ----
+// The committed program catalog of this exe (sigdb/programs/server/<sha>.json; the lab's deploy copies it to
+// kiln/data/systems-test-catalog.json): every program's live contract (game_program_contract, chapter 06a 9.7) must be
+// the catalog's, which is what Kiln.Game's typed views carry. A missing file is a FAIL.
+std::string data_file(const char* leaf) {
+    char dir[1024];
+    size_t len = 0;
+    if (g_api->path(KILN_PATH_DATA, dir, sizeof dir - 1, &len) != KILN_OK) return {};
+    return std::string(dir, len) + "\\" + leaf;
+}
+FILE* open_utf8(const std::string& path, const wchar_t* mode);
+void catalog_row() {
+    std::string text;
+    if (FILE* f = open_utf8(data_file("systems-test-catalog.json"), L"rb")) {
+        char buf[65536];
+        for (size_t n; (n = std::fread(buf, 1, sizeof buf, f)) > 0;) text.append(buf, n);
+        std::fclose(f);
+    }
+    if (W->header.size < offsetof(KilnWorldApi, game_program_contract) + sizeof(void*)) {
+        row(false, "contract: kiln.world has no game_program_contract (table %u bytes)", W->header.size);
+        return;
+    }
+    int programs = 0, found = 0, equal = 0;
+    std::string first_bad;
+    for (size_t at = text.find("\"name\": \""); at != std::string::npos; at = text.find("\"name\": \"", at + 1)) {
+        const size_t from = at + 9, to = text.find('"', from);
+        const size_t c = text.find("\"contract\": \"0x", to);
+        if (to == std::string::npos || c == std::string::npos) break;
+        const std::string name = text.substr(from, to - from);
+        const uint32_t want = static_cast<uint32_t>(std::strtoul(text.substr(c + 15, 8).c_str(), nullptr, 16));
+        ++programs;
+        const int32_t i = W->game_program_find(KILN_WORLD_SERVER, KilnStr{name.data(), name.size()});
+        if (i < 0) {
+            if (first_bad.empty()) first_bad = name + " not found";
+            continue;
+        }
+        ++found;
+        uint32_t live = 0;
+        if (W->game_program_contract(KILN_WORLD_SERVER, i, &live, nullptr, 0, nullptr) == KILN_OK && live == want) ++equal;
+        else if (first_bad.empty()) {
+            char b[160];
+            std::snprintf(b, sizeof b, "%s: live 0x%08x, catalog 0x%08x", name.c_str(), live, want);
+            first_bad = b;
+        }
+    }
+    row(programs == 817 && found == programs && equal == programs,
+        "contract: %d of %d programs of the committed catalog have its contract live (%d found; first difference: %s)", equal,
+        programs, found, first_bad.empty() ? "none" : first_bad.c_str());
+}
+
 void find_rows() {
     const auto s = status();
     int round_trip = 0, bad = 0, game = 0, no_update = 0, rva_bad = 0;
@@ -171,6 +221,7 @@ void find_rows() {
             W->game_program_find(KILN_WORLD_PREDICTION, ks("fuel_setup")) == -1 &&
             W->game_program_find(KILN_WORLD_CLIENT, ks("fuel_setup")) == -1,
         "find: unknown names and the world kinds a dedicated server has no table for answer -1");
+    catalog_row();
 }
 
 void hook_programs() {
@@ -197,11 +248,16 @@ struct {
 
 // The managed part (and its peer) wait for this file before they use wraps: the native rows count every wrap there is.
 FILE* open_utf8(const std::string& path, const wchar_t* mode);
+uint32_t g_mark_entity();
 void announce_done() {
     char dir[1024];
     size_t len = 0;
     if (g_api->path(KILN_PATH_CONTROL, dir, sizeof dir - 1, &len) != KILN_OK) return;
-    if (FILE* f = open_utf8(std::string(dir, len) + "\\systems-native.done", L"w")) std::fclose(f);
+    // the managed part leaves the mark row's entity alone (its Fuel must reach the save as written)
+    if (FILE* f = open_utf8(std::string(dir, len) + "\\systems-native.done", L"w")) {
+        std::fprintf(f, "mark %u\n", g_mark_entity());
+        std::fclose(f);
+    }
 }
 
 // ---- S2: wraps ----
@@ -414,6 +470,7 @@ struct {
     std::unordered_map<uint32_t, int32_t> seen;
     uint64_t first_step = 0;
 } g_mark;
+uint32_t g_mark_entity() { return g_mark.entity.load(); }
 uint32_t KILN_CALL each_mark(uint64_t* iter, uint32_t, KilnEntity e, void* user) {
     auto* s = static_cast<KilnGameSlice*>(user);
     uint32_t size = 0;

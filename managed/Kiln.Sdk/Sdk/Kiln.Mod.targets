@@ -93,8 +93,10 @@
     <_KilnService Include="$([MSBuild]::Unescape($(KilnServices.Replace(',', ';'))))" Exclude="Testing" />
     <!-- Game is not under managed/services in the repository (managed/Kiln.Game); in the package it is kiln/lib like the rest -->
     <_KilnRepoService Include="@(_KilnService)" Exclude="Game" />
-    <!-- Kiln.Game compiles against Kiln.World: a direct, compile-only reference, so the transitive one is not copied -->
+    <!-- Kiln.Game compiles against Kiln.World and Kiln.Systems (its typed program views): direct, compile-only
+         references, so the transitive ones are not copied -->
     <_KilnRepoService Include="World" Condition="'$(_KilnWantsGame)' == 'true' and !$(_KilnServiceList.Contains(';World;'))" />
+    <_KilnRepoService Include="Systems" Condition="'$(_KilnWantsGame)' == 'true' and !$(_KilnServiceList.Contains(';Systems;'))" />
   </ItemGroup>
 
   <!-- Kiln.Api and the services come from kiln/host at run time: compile against them, never ship them. -->

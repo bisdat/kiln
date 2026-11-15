@@ -752,6 +752,19 @@ typedef struct KilnWorldApi {
     /* Since dev.29: monotonically changing lifecycle generation for this world kind, advanced at STARTED/STOPPING.
      * Any thread, lock-free; key per-world caches with it before reading their entries. Check header.size. */
     uint64_t(KILN_CALL* game_world_session)(uint32_t world_kind);
+    /* Since dev.29: the contract of program `index`'s descriptor in that world's directory (chapter 06a 9.7; the
+     * program catalog sigdb/programs/ and Kiln.Game's typed program views carry the same): FNV-1a-32 of its contract
+     * text, which is, for each of the descriptor's 21 lists in descriptor order (tpl, tpl_opt, read, read_opt, write,
+     * write_opt, add, remove, sys_read, sys_write, other_tpl, other_read, other_write, other_write_unser, with,
+     * without, any_of, all_write, all_read, events_in, events_out), "<list>=" + its names as stored joined by "," +
+     * "\n", then "sys_read_opt=%016x\n", "sys_write_opt=%016x\n", "sys_write_parallel=%016x\n", "flags=%08x\n" and
+     * "interval=%u\n". *out_contract = the hash. `text` (NULL for none) gets the text, NUL-terminated, cut to fit
+     * `capacity`; *out_size (optional) = the whole text's length without the NUL. KILN_ERR_INVALID_ARGUMENT:
+     * out_contract is NULL; KILN_ERR_NOT_FOUND: no such index or no directory of that kind now; KILN_ERR_UNAVAILABLE:
+     * the descriptor cannot be read. Any thread, also inside a stage (it reads the descriptor; no game call). Check
+     * header.size. */
+    KilnResult(KILN_CALL* game_program_contract)(uint32_t world_kind, int32_t index, uint32_t* out_contract, char* text,
+                                                 uint32_t capacity, uint32_t* out_size);
 } KilnWorldApi;
 
 enum {

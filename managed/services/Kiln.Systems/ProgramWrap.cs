@@ -135,6 +135,23 @@ public sealed unsafe class ProgramWrap : IDisposable
     public ProgramWrap AfterEach(EntityViewHandler handler, int? priority = null) =>
         Add(WrapStage.After, null, handler ?? throw new ArgumentNullException(nameof(handler)), priority);
 
+    // AroundEach (ProgramWrap<T>): a Before that captures and an After that applies, at one priority, off together.
+    internal void Around(IAround around, int? priority)
+    {
+        Services.RequireTickThread("ProgramWrap.AroundEach");
+        var before = Make(WrapStage.Before, null, around.CaptureView, priority, around);
+        var after = Make(WrapStage.After, null, around.ApplyView, priority, around);
+        before.Partner = after;
+        after.Partner = before;
+        if (before.State == WrapState.Refused) before.RaiseDisabled(before.Detail ?? "refused");
+        if (after.State == WrapState.Refused) after.RaiseDisabled(after.Detail ?? "refused");
+        if (before.State == WrapState.Refused || after.State == WrapState.Refused)
+        {
+            before.Unwrap();
+            after.Unwrap();
+        }
+    }
+
     /// <summary>Instead of the game's update; call <see cref="Slice.RunOriginal"/> to run it. One per program.</summary>
     /// <returns><c>Ok = false</c> when another mod replaces the program (named in the reason).</returns>
     [TickThreadOnly]
@@ -242,13 +259,13 @@ public sealed unsafe class ProgramWrap : IDisposable
         return this;
     }
 
-    private ManagedStage Make(WrapStage kind, SliceHandler? slice, Delegate? each, int? priority)
+    private ManagedStage Make(WrapStage kind, SliceHandler? slice, Delegate? each, int? priority, IAround? around = null)
     {
         lock (_lock)
             if (_disposed) throw new ObjectDisposedException(nameof(ProgramWrap));
         if (Mod is { Alive: false }) throw new InvalidOperationException("the mod is unloading");
         var off = Systems.WhyOff(World);
-        var stage = new ManagedStage(this, kind, slice, each, priority ?? _options.Priority);
+        var stage = new ManagedStage(this, kind, slice, each, priority ?? _options.Priority) { Around = around };
         if (off.Refuse is { } refuse)
         {
             stage.Refuse(refuse);
@@ -402,6 +419,8 @@ internal sealed unsafe class ManagedStage
     internal volatile bool Removing;
     internal string? Detail;
     internal long ManagedFaults;
+    internal IAround? Around;           // the stage is one half of an AroundEach
+    internal ManagedStage? Partner;     // its other half: they go off together
     private GCHandle _self;
     private volatile int _disabled;   // 1: an exception turned it off here
     private volatile bool _raised;
@@ -544,6 +563,7 @@ internal sealed unsafe class ManagedStage
         if (Interlocked.Exchange(ref _disabled, 1) != 0) return;
         Unwrap();
         RaiseDisabled(reason);
+        Partner?.Off($"the other half of its AroundEach went off: {reason}");
     }
 
     private void Fail(Exception e)
@@ -552,6 +572,7 @@ internal sealed unsafe class ManagedStage
         if (Interlocked.Exchange(ref _disabled, 1) != 0) return;
         Unwrap();  // the stage is off from now on; kiln.world takes it out in the next step
         RaiseDisabled($"it threw {e.GetType().Name}: {e.Message}");
+        Partner?.Off($"the other half of its AroundEach threw {e.GetType().Name}");
         // the host's mod policy counts it (5 in 60 s disable the mod): rethrown as scheduled work of the mod
         var info = ExceptionDispatchInfo.Capture(e);
         if (Wrap.Mod is { } mod) mod.Scheduler.Post(() => info.Throw());
@@ -616,6 +637,8 @@ internal sealed unsafe class ManagedStage
     {
         var t = SystemsNative.T;
         if (t == null) return;
+        var around = Around;
+        if (around is not null && !around.Begin(Kind, s)) return;  // an After whose Before kept nothing of this slice
         var outerEach = _each;
         var outerView = _view;
         var outerCtx = _ctx;
@@ -633,6 +656,7 @@ internal sealed unsafe class ManagedStage
         finally
         {
             _ctx?.End();  // the last entity's writes, even when a handler threw
+            around?.End(Kind, _eachError is null && rc == SystemsNative.Ok);
             _each = outerEach;
             _view = outerView;
             _ctx = outerCtx;
