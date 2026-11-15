@@ -100,6 +100,10 @@ public sealed class CheckMod : Mod
         DuringBody = null;
     }
 
+    [ClientCheck("t.required-fail", "A required failed assertion", Tags = ["required-expectations"])]
+    public async Task RequiredFail(CheckContext c) { c.Expect(false,"required proof"); await c.Verdict(); }
+    [ClientCheck("t.required-pass", "Required assertions hold", Tags = ["required-expectations"])]
+    public async Task RequiredPass(CheckContext c) { c.Expect(true,"required proof"); await c.Verdict(); }
     [ClientCheck("t.pass", "Passes on its assertions", Area = "Basics", Since = "0.2.0-test", Order = 1)]
     public async Task Pass(CheckContext c)
     {

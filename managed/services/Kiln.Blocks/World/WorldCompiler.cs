@@ -160,7 +160,7 @@ internal static class WorldJson
 {
     public static readonly (string Section, Func<ModBlocks, string, JsonElement, BlockHandle> Make)[] Kinds =
     [
-        ("materialTweaks", BlockJson.Make<MaterialTweakBlock>), ("buildingMaterials", BlockJson.Make<BuildingMaterialBlock>), ("strengths", BlockJson.Make<StrengthBlock>),
+        ("buildingMaterialPools", BlockJson.Make<BuildingMaterialPoolBlock>), ("materialTweaks", BlockJson.Make<MaterialTweakBlock>), ("buildingMaterials", BlockJson.Make<BuildingMaterialBlock>), ("strengths", BlockJson.Make<StrengthBlock>),
         ("surfaces", BlockJson.Make<SurfaceBlock>), .. TerrainJson.Kinds,
     ];
 }

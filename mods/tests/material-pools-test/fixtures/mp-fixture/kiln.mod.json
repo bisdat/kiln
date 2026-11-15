@@ -1,0 +1,8 @@
+{
+  "id": "mp-fixture",
+  "name": "Material pool fixtures",
+  "version": "1.0.0",
+  "apiVersion": "0.2.0-dev.29",
+  "side": "both",
+  "clients": "mod"
+}

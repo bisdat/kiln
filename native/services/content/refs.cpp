@@ -159,7 +159,30 @@ bool asset_served(const std::string& ref_type, const uint8_t g[16]) {
 // A building material a mod made: its GUID is in kiln.worldtables' merged tables, and has no resource of its own.
 bool world_material(const uint8_t g[16]) {
     const auto* t = static_cast<const KilnWorldTablesApi*>(g_api->service(KilnStr{KILN_WORLDTABLES_SERVICE, std::strlen(KILN_WORLDTABLES_SERVICE)}, KILN_WORLDTABLES_VERSION));
-    return t && t->header.size >= sizeof(KilnWorldTablesApi) && t->material_id(g) >= 0;
+    return t && t->header.size >= offsetof(KilnWorldTablesApi,material_id)+sizeof(t->material_id) && t->material_id && t->material_id(g)>=0;
+}
+
+// Pool GUIDs identify rows in one registry, not standalone resources. Authorize only a committed
+// row from worldtables' process snapshot; a refused/deferred declaration cannot authorize an item ref.
+bool world_pool(const uint8_t g[16]) {
+    const auto* t=static_cast<const KilnWorldTablesApi*>(g_api->service(KilnStr{KILN_WORLDTABLES_SERVICE,std::strlen(KILN_WORLDTABLES_SERVICE)},KILN_WORLDTABLES_VERSION));
+    if(!t || t->header.size<offsetof(KilnWorldTablesApi,status_json)+sizeof(t->status_json) || !t->status_json)return false;
+    std::vector<char> buffer(4096);
+    for(int attempt=0;attempt<4;++attempt) {
+        size_t length=0;const auto rc=t->status_json(buffer.data(),buffer.size(),&length);
+        if(rc==KILN_ERR_BUFFER_TOO_SMALL && length<(16u<<20)){buffer.resize(length+1);continue;}
+        if(rc!=KILN_OK || length>=buffer.size())return false;
+        try {
+            const auto doc=json::parse(buffer.data(),buffer.data()+length);
+            if(!doc.is_object() || (doc.value("state","")!="merged" && doc.value("state","")!="untouched") || !doc.contains("customPools") || !doc["customPools"].is_array())return false;
+            for(const auto& row:doc["customPools"]) {
+                uint8_t candidate[16];
+                if(row.is_object() && row.contains("guid") && row["guid"].is_string() && guid_parse(row["guid"].get<std::string>(),candidate) && std::memcmp(g,candidate,16)==0)return true;
+            }
+        } catch(const json::exception&) {return false;}
+        return false;
+    }
+    return false;
 }
 
 std::string type_short(const std::string& t) {
@@ -334,6 +357,7 @@ bool resolve(const Schema& s, const Field& f, const std::string& spec, const Ite
     static const bool server = GetModuleHandleA("enshrouded_server.exe") != nullptr;
     if (server && f.type_name == "keen::ObjectReference<keen::Model>" && declared_by_own_mod(out)) return true;
     if (f.path == "equipment.voxelData.placeVoxelMaterial" && world_material(out)) return true;
+    if (f.path=="equipment.voxelBlueprintMaterialPool" && f.type_name=="keen::ObjectReference<keen::VoxelBlueprintMaterialPool>" && world_pool(out))return true;
     *why = f.path + ": " + spec + " is not a " + type_short(f.type_name) + " the game has loaded (no loaded item uses it" +
            (f.type_name == "keen::ecs::TemplateReference" ? ", it is not a loaded template" : "") +
            ", and no mod serves it through kiln.assets)";

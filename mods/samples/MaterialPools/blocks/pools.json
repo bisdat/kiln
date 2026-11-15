@@ -1,0 +1,56 @@
+{
+  "format": 1,
+  "buildingMaterials": {
+    "ice": {
+      "name": "Pool Ice Block",
+      "strength": {
+        "drops": "block",
+        "itemsPerBlocks": 1
+      },
+      "surface": {
+        "side": {
+          "tint": "#80dfff"
+        },
+        "top": {
+          "tint": "#80dfff"
+        },
+        "bottom": {
+          "tint": "#80dfff"
+        }
+      },
+      "recipe": {
+        "needs": {
+          "Block_T1_Stone_Rough_CRAFTING": 1
+        },
+        "makes": 10
+      }
+    }
+  },
+  "buildingMaterialPools": {
+    "walls": {
+      "name": "Ice and Wood",
+      "materials": [
+        {
+          "material": "ice"
+        },
+        {
+          "gameMaterial": "WoodRough"
+        }
+      ]
+    }
+  },
+  "blueprints": {
+    "wall": {
+      "name": "Ice and Wood Wall",
+      "cells": [
+        [
+          "##"
+        ],
+        [
+          "#."
+        ]
+      ],
+      "materialPool": "walls"
+    }
+  }
+}
