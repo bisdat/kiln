@@ -114,10 +114,18 @@ pub fn add(profile: &str, mods: &[String], disabled: bool) -> Result<i32> {
         list.retain(|x| x.id != m.id);
         list.push(m);
     }
-    let p = kiln_manage::profile::save(&dirs, &p).km()?;
+    // another version of a mod already in the profile: the one it replaced is kept for a roll back (kiln_manage::kept),
+    // one transaction with the save
+    let kept = kiln_manage::kept::prepare_saved(&dirs, &before, &p);
+    let p = match kiln_manage::profile::save(&dirs, &p).km() {
+        Ok(p) => p,
+        Err(e) => {
+            kept.abort();
+            return Err(e);
+        }
+    };
     println!("profile {} saved (generation {}, fingerprint {})", p.id, p.generation, kiln_manage::profile::fingerprint(&p));
-    // another version of a mod already in the profile: the one it replaced is kept for a roll back (kiln_manage::kept)
-    for line in kiln_manage::kept::follow_saved(&dirs, &before, &p) {
+    for line in kept.commit() {
         println!("  {line}");
     }
     Ok(0)

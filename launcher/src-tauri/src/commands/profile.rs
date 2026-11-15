@@ -33,14 +33,18 @@ pub async fn profile_create(name: String, copy_from: Option<String>) -> Result<P
 pub async fn profile_save(app: AppHandle, profile: Profile) -> Result<Profile, Error> {
     let (saved, applied) = blocking(move || {
         let d = dirs()?;
-        let before = profile::get(&d, &profile.id).ok();
-        let saved = profile::save(&d, &profile)?;
         // another version of a mod ("Use <version>"): the one it replaced is kept for a roll back (kiln_manage::kept),
-        // read before the re-apply below places the new one
-        if let Some(before) = &before {
-            for line in kiln_manage::kept::follow_saved(&d, before, &saved) {
-                crate::commands::app::launcher_log("library", &line);
+        // its settings read before the re-apply below places the new one; one transaction with the save
+        let kept = profile::get(&d, &profile.id).ok().map(|before| kiln_manage::kept::prepare_saved(&d, &before, &profile));
+        let saved = match profile::save(&d, &profile) {
+            Ok(saved) => saved,
+            Err(e) => {
+                if let Some(k) = kept { k.abort(); }
+                return Err(e);
             }
+        };
+        for line in kept.map(|k| k.commit()).unwrap_or_default() {
+            crate::commands::app::launcher_log("library", &line);
         }
         Ok((saved.clone(), reapply_where_active(&d, &saved.id)))
     })

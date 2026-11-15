@@ -1,8 +1,8 @@
 //! Kept versions (0.2.0-dev.29): when an update replaces a mod's Library entry in a profile (a dropped archive, a Nexus
-//! Mods install, the Undo of a roll back), the entry it replaced is kept for a roll back, together with a copy of the
-//! settings files the mod's game-folder copies held at that moment. How many per mod: `keepVersions` in the launcher's
-//! `settings.json` (default [`KEEP_DEFAULT`], at most [`KEEP_MAX`]; 0 keeps none, as before dev.29). A version is not
-//! kept when the Library's disk would then have less free than the data folder check asks for
+//! Mods install, "Use <version>", the Undo of a roll back), the entry it replaced is kept for a roll back, together with
+//! a copy of the settings files the mod's game-folder copies held at that moment. How many per mod: `keepVersions` in
+//! the launcher's `settings.json` (default [`KEEP_DEFAULT`], at most [`KEEP_MAX`]; 0 keeps none, as before dev.29). A
+//! version is not kept when the Library's disk would then have less free than the data folder check asks for
 //! ([`crate::data_folder::needed_bytes`]); the update's result says so.
 //!
 //! A roll back ([`rollback`]) puts a kept entry back into the profile in place of the mod's current one. It is an
@@ -11,18 +11,33 @@
 //! game folder: the next placement of the profile (`profile::activate` / `refresh_active`, what a profile's re-apply
 //! and Play run) places the version as always, carrying the newer version's settings over, and then puts the kept
 //! settings back into the copy ([`restore_after_place`]), so the player gets the settings they had, not the new ones.
+//! A restore belongs to the profile that rolled back and to the game folder its settings came from: another profile,
+//! or the same profile in another game, never takes or applies it.
 //!
-//! On disk (docs/kiln/launcher/contracts.md section 3): `<library>/kiln-kept.json` ([`KeptState`]: which entries are
-//! kept, per mod, and a settings restore waiting for its placement) and `<library>/kiln-kept/<kind>/<id>/<version>+<hash8>/`
-//! (the settings copy, each file at its path relative to the game folder). A kept entry is an ordinary Library entry
-//! otherwise: a launcher before dev.29 lists it as another version of the mod and its Clean up may remove it; an entry
-//! that is gone is forgotten here. Kept entries are listed after the others ([`crate::library::list`]), so nothing
-//! picks one by default; Clean up ([`crate::library::unused`]) leaves them.
+//! On disk (docs/kiln/launcher/contracts.md section 3): `<library>/kiln-kept.json` ([`KeptState`]) and
+//! `<library>/kiln-kept/<kind>/<id>/<version>+<hash8>.<12 hex>/` (one settings copy, each file at its path relative to
+//! the game folder; a new copy always gets a new folder). A kept entry is an ordinary Library entry otherwise: a
+//! launcher before dev.29 lists it as another version of the mod and its Clean up may remove it; an entry that is gone
+//! is forgotten here. Kept entries are listed after the others ([`crate::library::list`]), so nothing picks one by
+//! default; Clean up ([`crate::library::unused`]) leaves them.
+//!
+//! **A change is one transaction, the profile save its commit point** (the pattern of `engine_mods::copy_in`: stage,
+//! rename into place, then the record, and what a stop leaves is found and finished or undone). [`prepare`] runs
+//! before the profile is saved, under the state's lock, held until [`Prepared::commit`] or [`Prepared::abort`]: a new
+//! settings copy is staged in `.stage-<hex>` beside its place and renamed to its own new folder (a staged folder never
+//! has a final name), then the new state is written in one durable write together with a record of the change
+//! (`pending`: the profile, each mod's versions before and after, and each touched mod's state before). The caller
+//! saves the profile; commit drops the record, abort puts the touched mods back. A stop at any point leaves either the
+//! old state or the record, and the next look at the state under its lock ([`reconcile`], before any restore) finishes
+//! it: when the profile still lists every change's version before, the change is undone, else it stands. It also drops
+//! a kept entry whose settings copy is gone (with a note), a kept entry the profile that left it uses again (changed
+//! without Kiln following it), and deletes every staged leftover and every settings folder the state does not name.
+//! Nothing outside `<library>/kiln-kept/` and the state file is touched by it.
 
 use crate::library::LibraryRef;
 use crate::manifest::ModKind;
 use crate::paths::DataDirs;
-use crate::profile::ProfileMod;
+use crate::profile::{Profile, ProfileMod};
 use crate::quick::ProfileChange;
 use crate::{Error, ErrorCode, Result};
 use serde::{Deserialize, Serialize};
@@ -38,6 +53,8 @@ pub const STATE_FILE: &str = "kiln-kept.json";
 /// `<library>/kiln-kept/`: the settings copies.
 pub const SETTINGS_DIR: &str = "kiln-kept";
 const LOCK_FILE: &str = "kiln-kept.lock";
+/// A settings copy being made: `<library>/kiln-kept/<kind>/<id>/.stage-<12 hex>/`.
+const STAGE: &str = ".stage-";
 /// The largest settings file kept, and the most kept per version: what is larger stays out (the result says so).
 const MAX_FILE: u64 = 16 * 1024 * 1024;
 const MAX_TOTAL: u64 = 64 * 1024 * 1024;
@@ -54,16 +71,18 @@ impl VersionRef {
     fn of(m: &ProfileMod) -> VersionRef {
         VersionRef { version: m.version.clone(), hash: m.hash.clone() }
     }
-    fn is(&self, version: &str, hash: &str) -> bool {
-        self.version == version && self.hash == hash
-    }
 }
 
 /// The settings kept with a version: the files of its game-folder copies that were not as Kiln placed them (settings
-/// and the other files the mod or the player wrote there; never code or a manifest), and ShroudForge setting values.
+/// files and logs the mod or the player wrote there; never code or a manifest: [`not_settings`]), and ShroudForge
+/// setting values.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KeptSettings {
+    /// The folder of the copy under `<library>/kiln-kept/<kind>/<id>/` (`<version>+<hash8>.<12 hex>`); none when no
+    /// file was copied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dir: Option<String>,
     /// Each file's path relative to the game folder ('/' separated), as in the settings copy.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<String>,
@@ -74,7 +93,7 @@ pub struct KeptSettings {
     /// folder): put back with ShroudForge's own setter, so its switch and the rest of the file stay as placed.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub values: BTreeMap<String, serde_json::Map<String, serde_json::Value>>,
-    /// The game folder they were read in.
+    /// The game folder they were read in: a restore of them applies there only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub game: Option<String>,
     /// What was left out (too large, unreadable), one sentence each.
@@ -99,17 +118,21 @@ pub struct KeptVersion {
     /// The version that took its place then.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replaced_by: Option<VersionRef>,
+    /// The profile whose change left it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
     #[serde(default)]
     pub settings: KeptSettings,
 }
 
-/// Settings waiting for the next placement of a version a roll back put into a profile ([`restore_after_place`]).
+/// Settings waiting for the next placement of a version a roll back put into a profile ([`restore_after_place`]), in
+/// the game folder they came from (`settings.game`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PendingRestore {
     pub version: String,
     pub hash: String,
-    /// The profile that rolled back.
+    /// The profile that rolled back: only its placement takes or applies them.
     pub profile: String,
     pub settings: KeptSettings,
 }
@@ -123,8 +146,37 @@ pub struct KeptMod {
     /// Newest kept first.
     #[serde(default)]
     pub kept: Vec<KeptVersion>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub restore: Option<PendingRestore>,
+    /// At most one per profile.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub restores: Vec<PendingRestore>,
+}
+
+impl KeptMod {
+    fn empty(kind: ModKind, id: &str) -> KeptMod {
+        KeptMod { kind, id: id.to_string(), kept: Vec::new(), restores: Vec::new() }
+    }
+}
+
+/// One profile entry the change in [`KeptTxn`] replaces.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TxnChange {
+    pub kind: ModKind,
+    pub id: String,
+    pub from: VersionRef,
+    pub to: VersionRef,
+}
+
+/// A change written with the state before its profile was saved ([`prepare`]): what [`reconcile`] finishes or undoes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeptTxn {
+    pub id: String,
+    pub profile: String,
+    pub started: String,
+    pub changes: Vec<TxnChange>,
+    /// The state each touched mod had before (an empty one: it had none).
+    pub before: Vec<KeptMod>,
 }
 
 /// `<library>/kiln-kept.json`.
@@ -134,11 +186,14 @@ pub struct KeptState {
     pub format: u32,
     #[serde(default)]
     pub mods: Vec<KeptMod>,
+    /// A change whose profile save was not confirmed yet.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending: Vec<KeptTxn>,
 }
 
 impl Default for KeptState {
     fn default() -> Self {
-        KeptState { format: 1, mods: Vec::new() }
+        KeptState { format: 1, mods: Vec::new(), pending: Vec::new() }
     }
 }
 
@@ -183,6 +238,46 @@ pub struct RollbackReport {
     #[serde(default)]
     pub notices: Vec<String>,
 }
+
+// ------------------------------------------------------------------------------------------------ test hooks
+
+/// Where a test stops a change as a crash would (a panic: nothing is taken back, the locks are let go).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(crate) enum Step {
+    /// A settings copy has its first file in its staging folder.
+    SnapshotCopied,
+    /// A settings copy is in its final folder, the state does not name it yet.
+    SnapshotRenamed,
+    /// The state with the change's record is written; the profile is not saved yet.
+    IndexWritten,
+    /// The profile is saved; the change's record is not dropped yet.
+    BeforeCommit,
+    /// A restore wrote its first file into the game folder.
+    RestoreFile,
+}
+
+#[cfg(test)]
+pub(crate) mod hooks {
+    std::thread_local! {
+        /// The change on this thread stops at this step.
+        pub static STOP_AT: std::cell::Cell<Option<super::Step>> = const { std::cell::Cell::new(None) };
+        /// The n-th write of the state file from now on this thread fails (0: none).
+        pub static FAIL_SAVE: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    }
+}
+
+#[cfg(test)]
+fn crash_point(step: Step) {
+    if hooks::STOP_AT.with(|s| s.get()) == Some(step) {
+        hooks::STOP_AT.with(|s| s.set(None));
+        panic!("injected crash at {step:?}");
+    }
+}
+
+#[cfg(not(test))]
+#[inline]
+fn crash_point(_: Step) {}
 
 // ------------------------------------------------------------------------------------------------ settings and disk
 
@@ -231,6 +326,10 @@ fn mib(bytes: u64) -> String {
     format!("{:.0} MiB", bytes as f64 / (1024.0 * 1024.0))
 }
 
+fn hex12() -> String {
+    crate::util::random_bytes::<6>().map(|b| crate::hash::hex(&b)).unwrap_or_else(|_| format!("{:012x}", std::process::id()))
+}
+
 // ------------------------------------------------------------------------------------------------ the state file
 
 fn state_path(dirs: &DataDirs) -> PathBuf {
@@ -253,58 +352,154 @@ fn load(dirs: &DataDirs) -> Option<KeptState> {
         Ok(None) => Some(KeptState::default()),
         Ok(Some(v)) if v.get("format").and_then(serde_json::Value::as_u64) == Some(1) => Some(serde_json::from_value(v).unwrap_or_default()),
         Ok(Some(_)) => None,
-        // unreadable: started again (what it named are ordinary Library entries)
+        // unreadable: started again (what it named are ordinary Library entries; their copies are swept)
         Err(_) => Some(KeptState::default()),
     }
 }
 
+/// One durable write: a stop leaves the old file or the new one, never a part ([`crate::util::write_atomic_durable`]).
 fn save(dirs: &DataDirs, st: &KeptState) -> Result<()> {
-    crate::util::write_json_atomic(&state_path(dirs), st)
-}
-
-/// The state with the entries that are gone from the Library (removed by hand, by a launcher before dev.29, taken
-/// over) left out, and their settings copies deleted. `changed`: something was left out.
-fn pruned(dirs: &DataDirs, mut st: KeptState) -> (KeptState, bool) {
-    let mut changed = false;
-    for m in &mut st.mods {
-        let (kind, id) = (m.kind, m.id.clone());
-        let there = |version: &str, hash: &str| entry_exists(dirs, kind, &id, version, hash);
-        let before = m.kept.len();
-        let mut gone = Vec::new();
-        m.kept.retain(|v| { let keep = there(&v.version, &v.hash); if !keep { gone.push((v.version.clone(), v.hash.clone())); } keep });
-        changed |= m.kept.len() != before;
-        if m.restore.as_ref().is_some_and(|r| !there(&r.version, &r.hash)) {
-            let r = m.restore.take().expect("checked");
-            gone.push((r.version, r.hash));
-            changed = true;
-        }
-        for (version, hash) in gone {
-            drop_settings(dirs, kind, &id, &version, &hash);
-        }
+    #[cfg(test)]
+    if hooks::FAIL_SAVE.with(|f| { let n = f.get(); if n > 0 { f.set(n - 1); } n == 1 }) {
+        return Err(Error::new(ErrorCode::Io, "injected state write failure"));
     }
-    let before = st.mods.len();
-    st.mods.retain(|m| !m.kept.is_empty() || m.restore.is_some());
-    changed |= st.mods.len() != before;
-    (st, changed)
+    let mut text = serde_json::to_string_pretty(st)?;
+    text.push('\n');
+    crate::util::write_atomic_durable(&state_path(dirs), text.as_bytes())
 }
 
 fn entry_exists(dirs: &DataDirs, kind: ModKind, id: &str, version: &str, hash: &str) -> bool {
     crate::library::record(dirs, &LibraryRef { kind, id: id.into(), version: version.into(), hash: hash.into() }).is_ok()
 }
 
-/// Changes the state under its lock, with the gone entries pruned first; saved when `f` says so (or the prune
-/// changed something). Nothing happens with a state of a newer format.
-fn update<T>(dirs: &DataDirs, f: impl FnOnce(&mut KeptState) -> (bool, T)) -> Result<Option<T>> {
+fn lists(p: &Profile, kind: ModKind, id: &str, version: &str, hash: &str) -> bool {
+    p.mods.list(kind).iter().any(|m| m.id == id && m.version == version && m.hash == hash)
+}
+
+fn tidy(st: &mut KeptState) {
+    st.mods.retain(|m| !m.kept.is_empty() || !m.restores.is_empty());
+}
+
+fn put_mod(st: &mut KeptState, m: KeptMod) {
+    st.mods.retain(|x| !(x.kind == m.kind && x.id == m.id));
+    st.mods.push(m);
+}
+
+/// Brings the state to what holds (see the module's doc): a change's record finished or undone by its profile, entries
+/// gone from the Library or without their settings copy dropped, a kept entry the profile that left it uses again
+/// dropped. Reads the Library and the profiles, writes nothing. -> whether it changed anything.
+pub(crate) fn reconcile(dirs: &DataDirs, st: &mut KeptState, notes: &mut Vec<String>) -> bool {
+    let mut changed = false;
+    let mut profiles: BTreeMap<String, Option<Profile>> = BTreeMap::new();
+    let mut profile = |id: &str| profiles.entry(id.to_string()).or_insert_with(|| crate::profile::get(dirs, id).ok()).clone();
+    // 1. a change whose commit was not confirmed: undone while its profile still lists every version it replaced
+    for t in std::mem::take(&mut st.pending) {
+        changed = true;
+        let p = profile(&t.profile);
+        let undone = !t.changes.is_empty()
+            && p.as_ref().is_some_and(|p| t.changes.iter().all(|c| lists(p, c.kind, &c.id, &c.from.version, &c.from.hash)));
+        if undone {
+            for b in t.before { put_mod(st, b); }
+        }
+    }
+    for m in &mut st.mods {
+        let (kind, id) = (m.kind, m.id.clone());
+        let label = |version: &str| format!("{} {id} {version}", kind.as_str());
+        // 2. gone from the Library (removed by hand, by an older launcher, taken over)
+        let before = (m.kept.len(), m.restores.len());
+        m.kept.retain(|v| entry_exists(dirs, kind, &id, &v.version, &v.hash));
+        m.restores.retain(|r| entry_exists(dirs, kind, &id, &r.version, &r.hash));
+        // 3. without its settings copy
+        m.kept.retain(|v| {
+            let there = copy_there(dirs, kind, &id, &v.settings);
+            if !there { notes.push(format!("{}: its kept settings ({}) are gone, so it is no longer kept for a roll back", label(&v.version), dir_label(&v.settings))); }
+            there
+        });
+        m.restores.retain(|r| {
+            let there = copy_there(dirs, kind, &id, &r.settings);
+            if !there { notes.push(format!("{}: the settings a roll back was to put back ({}) are gone; it keeps the settings it has", label(&r.version), dir_label(&r.settings))); }
+            there
+        });
+        // 4. used again by the profile that left it, without Kiln following the change (an older launcher's "Use")
+        m.kept.retain(|v| {
+            let used = v.profile.as_deref().and_then(&mut profile).is_some_and(|p| lists(&p, kind, &id, &v.version, &v.hash));
+            if used { notes.push(format!("{}: its profile uses it again, so it is no longer kept for a roll back", label(&v.version))); }
+            !used
+        });
+        changed |= (m.kept.len(), m.restores.len()) != before;
+    }
+    let n = st.mods.len();
+    tidy(st);
+    changed | (st.mods.len() != n)
+}
+
+fn dir_label(s: &KeptSettings) -> String {
+    s.dir.clone().unwrap_or_else(|| "its folder".into())
+}
+
+/// Does the settings copy `s` names exist (as a folder, with every file it lists)? True when it names none.
+fn copy_there(dirs: &DataDirs, kind: ModKind, id: &str, s: &KeptSettings) -> bool {
+    if s.files.is_empty() { return true; }
+    let Some(dir) = s.dir.as_deref() else { return false };
+    let Ok(path) = copy_dir(dirs, kind, id, dir) else { return false };
+    path.is_dir() && s.files.iter().all(|f| crate::bundle::safe_rel_path(f).is_ok() && path.join(f).is_file())
+}
+
+/// Deletes what is in `<library>/kiln-kept/` and no state names: staged copies a stop left, copies the state no longer
+/// names. Never through a link: a linked folder there is left as it is.
+fn sweep(dirs: &DataDirs, st: &KeptState) {
+    let root = dirs.library().join(SETTINGS_DIR);
+    if crate::engine_mods::refuse_symlink_path(&dirs.root, &root).is_err() || !root.is_dir() { return; }
+    let mut named: std::collections::BTreeSet<(String, String, String)> = Default::default();
+    let mods = st.mods.iter().chain(st.pending.iter().flat_map(|t| t.before.iter()));
+    for m in mods {
+        for s in m.kept.iter().map(|v| &v.settings).chain(m.restores.iter().map(|r| &r.settings)) {
+            if let Some(d) = &s.dir { named.insert((m.kind.as_str().to_string(), m.id.clone(), d.clone())); }
+        }
+    }
+    let real_dir = |p: &Path| std::fs::symlink_metadata(p).is_ok_and(|m| m.is_dir() && !crate::quick::import_is_link(&m));
+    for k in std::fs::read_dir(&root).into_iter().flatten().flatten() {
+        let kp = k.path();
+        if !real_dir(&kp) { continue; }
+        let kind = k.file_name().to_string_lossy().into_owned();
+        for i in std::fs::read_dir(&kp).into_iter().flatten().flatten() {
+            let ip = i.path();
+            if !real_dir(&ip) { continue; }
+            let id = i.file_name().to_string_lossy().into_owned();
+            for c in std::fs::read_dir(&ip).into_iter().flatten().flatten() {
+                let name = c.file_name().to_string_lossy().into_owned();
+                if named.contains(&(kind.clone(), id.clone(), name)) { continue; }
+                let cp = c.path();
+                if real_dir(&cp) { let _ = std::fs::remove_dir_all(&cp); }
+            }
+            let _ = std::fs::remove_dir(&ip);
+        }
+        let _ = std::fs::remove_dir(&kp);
+    }
+}
+
+/// Changes the state under its lock, reconciled first ([`reconcile`]); saved when it changed, then what it no longer
+/// names is swept. Nothing happens with a state of a newer format. -> `f`'s answer and the notes of the reconcile.
+fn update<T>(dirs: &DataDirs, f: impl FnOnce(&mut KeptState, &mut Vec<String>) -> T) -> Result<Option<(T, Vec<String>)>> {
     let _lock = lock(dirs)?;
-    let Some(st) = load(dirs) else { return Ok(None) };
-    let (mut st, pruned) = pruned(dirs, st);
+    let Some(mut st) = load(dirs) else { return Ok(None) };
+    let mut notes = Vec::new();
+    let fixed = reconcile(dirs, &mut st, &mut notes);
     let before = st.clone();
-    let (write, out) = f(&mut st);
-    st.mods.retain(|m| !m.kept.is_empty() || m.restore.is_some());
-    if (write && st != before) || pruned {
+    let out = f(&mut st, &mut notes);
+    tidy(&mut st);
+    if fixed || st != before {
         save(dirs, &st)?;
     }
-    Ok(Some(out))
+    sweep(dirs, &st);
+    Ok(Some((out, notes)))
+}
+
+/// The state as it holds, for reading (reconciled in memory; nothing written).
+fn view(dirs: &DataDirs) -> Option<KeptState> {
+    let mut st = load(dirs)?;
+    reconcile(dirs, &mut st, &mut Vec::new());
+    Some(st)
 }
 
 /// Nothing is kept anywhere yet: the calls that only read or tidy the state do nothing (no lock file, no Library
@@ -317,14 +512,15 @@ fn mod_of<'a>(st: &'a mut KeptState, kind: ModKind, id: &str) -> &'a mut KeptMod
     if let Some(i) = st.mods.iter().position(|m| m.kind == kind && m.id == id) {
         return &mut st.mods[i];
     }
-    st.mods.push(KeptMod { kind, id: id.to_string(), kept: Vec::new(), restore: None });
+    st.mods.push(KeptMod::empty(kind, id));
     st.mods.last_mut().expect("pushed")
 }
 
 /// The kept versions of every mod, read only (`library::list`): by `<kind>/<id>/<hash>`.
 pub(crate) fn info(dirs: &DataDirs) -> std::collections::HashMap<String, KeptInfo> {
     let mut out = std::collections::HashMap::new();
-    let Some(st) = load(dirs) else { return out };
+    if nothing_kept(dirs) { return out; }
+    let Some(st) = view(dirs) else { return out };
     for m in st.mods {
         for v in m.kept {
             out.insert(info_key(m.kind, &m.id, &v.hash), KeptInfo {
@@ -339,10 +535,16 @@ pub(crate) fn info_key(kind: ModKind, id: &str, hash: &str) -> String {
     format!("{}/{id}/{hash}", kind.as_str())
 }
 
-/// The kept versions of one mod, newest kept first (entries gone from the Library left out).
+/// The kept versions of one mod, newest kept first.
 pub fn kept_versions(dirs: &DataDirs, kind: ModKind, id: &str) -> Vec<KeptVersion> {
-    let Some(st) = load(dirs) else { return Vec::new() };
-    pruned(dirs, st).0.mods.into_iter().find(|m| m.kind == kind && m.id == id).map(|m| m.kept).unwrap_or_default()
+    if nothing_kept(dirs) { return Vec::new(); }
+    view(dirs).and_then(|st| st.mods.into_iter().find(|m| m.kind == kind && m.id == id)).map(|m| m.kept).unwrap_or_default()
+}
+
+/// The settings restores waiting for one mod (one per profile).
+pub fn pending_restores(dirs: &DataDirs, kind: ModKind, id: &str) -> Vec<PendingRestore> {
+    if nothing_kept(dirs) { return Vec::new(); }
+    view(dirs).and_then(|st| st.mods.into_iter().find(|m| m.kind == kind && m.id == id)).map(|m| m.restores).unwrap_or_default()
 }
 
 /// Is this Library entry a kept version?
@@ -350,64 +552,56 @@ pub fn is_kept(dirs: &DataDirs, r: &LibraryRef) -> bool {
     kept_versions(dirs, r.kind, &r.id).iter().any(|v| v.version == r.version && v.hash == r.hash)
 }
 
+/// Finishes or undoes what a stop left (the launcher's start and every change run it too). -> sentences for the player.
+pub fn recover(dirs: &DataDirs) -> Vec<String> {
+    if nothing_kept(dirs) { return Vec::new(); }
+    match update(dirs, |_, _| ()) {
+        Ok(Some((_, notes))) => notes,
+        Ok(None) => Vec::new(),
+        Err(e) => vec![format!("Kiln could not tidy its kept versions: {}", e.message)],
+    }
+}
+
 /// A Library entry was removed: it is no longer kept, and its settings copy goes.
 pub(crate) fn forget(dirs: &DataDirs, r: &LibraryRef) {
     if nothing_kept(dirs) { return; }
-    let _ = update(dirs, |st| {
-        let Some(m) = st.mods.iter_mut().find(|m| m.kind == r.kind && m.id == r.id) else { return (false, ()) };
-        let before = m.kept.len();
-        m.kept.retain(|v| !(v.version == r.version && v.hash == r.hash));
-        let restore = m.restore.as_ref().is_some_and(|x| x.version == r.version && x.hash == r.hash);
-        if restore { m.restore = None; }
-        let changed = restore || m.kept.len() != before;
-        if changed { drop_settings(dirs, r.kind, &r.id, &r.version, &r.hash); }
-        (changed, ())
+    let _ = update(dirs, |st, _| {
+        if let Some(m) = st.mods.iter_mut().find(|m| m.kind == r.kind && m.id == r.id) {
+            m.kept.retain(|v| !(v.version == r.version && v.hash == r.hash));
+            m.restores.retain(|x| !(x.version == r.version && x.hash == r.hash));
+        }
     });
 }
 
-/// Settings > "Previous versions to keep" changed: every mod keeps at most that many now (the newest kept); the
-/// others stay in the Library as ordinary versions (Clean up removes them), their settings copies deleted.
+/// Settings > "Earlier versions to keep" changed: every mod keeps at most that many now (the newest kept); the others
+/// stay in the Library as ordinary versions (Clean up removes them), their settings copies deleted.
 pub fn apply_count(dirs: &DataDirs) -> Result<()> {
     if nothing_kept(dirs) { return Ok(()); }
     let keep = keep_count(dirs) as usize;
-    update(dirs, |st| {
-        let mut changed = false;
-        for m in &mut st.mods {
-            while m.kept.len() > keep {
-                let v = m.kept.pop().expect("longer than keep");
-                if !m.restore.as_ref().is_some_and(|r| r.version == v.version && r.hash == v.hash) {
-                    drop_settings(dirs, m.kind, &m.id, &v.version, &v.hash);
-                }
-                changed = true;
-            }
-        }
-        (changed, ())
-    })?;
+    update(dirs, |st, _| for m in &mut st.mods { m.kept.truncate(keep); })?;
     Ok(())
 }
 
 // ------------------------------------------------------------------------------------------------ settings copies
 
-/// `<library>/kiln-kept/<kind>/<id>/<version>+<hash8>`.
-fn settings_dir(dirs: &DataDirs, kind: ModKind, id: &str, version: &str, hash: &str) -> Result<PathBuf> {
-    let entry = dirs.library_entry(kind, id, version, hash)?;
-    let name = entry.file_name().ok_or_else(|| Error::invalid("library entry without a name"))?;
-    if !crate::manifest::is_mod_id(id) || version.contains(['/', '\\', ':']) || version.starts_with('.') {
-        return Err(Error::invalid(format!("invalid kept version {id} {version}")));
+/// `<library>/kiln-kept/<kind>/<id>`, refused through a link anywhere below the data folder.
+fn mod_dir(dirs: &DataDirs, kind: ModKind, id: &str) -> Result<PathBuf> {
+    if !crate::manifest::is_mod_id(id) {
+        return Err(Error::invalid(format!("invalid kept mod id {id:?}")));
     }
-    let path = dirs.library().join(SETTINGS_DIR).join(kind.as_str()).join(id).join(name);
+    let path = dirs.library().join(SETTINGS_DIR).join(kind.as_str()).join(id);
     crate::engine_mods::refuse_symlink_path(&dirs.root, &path)?;
     Ok(path)
 }
 
-fn drop_settings(dirs: &DataDirs, kind: ModKind, id: &str, version: &str, hash: &str) {
-    if let Ok(d) = settings_dir(dirs, kind, id, version, hash) {
-        let _ = std::fs::remove_dir_all(&d);
-        // the mod's and the kind's folders go when they are empty
-        for up in d.ancestors().skip(1).take(2) {
-            if std::fs::remove_dir(up).is_err() { break; }
-        }
+/// One settings copy's folder (a name the state gives: one component, no dot first).
+fn copy_dir(dirs: &DataDirs, kind: ModKind, id: &str, dir: &str) -> Result<PathBuf> {
+    if dir.is_empty() || dir.starts_with('.') || dir.contains(['/', '\\', ':']) {
+        return Err(Error::invalid(format!("invalid kept settings folder {dir:?}")));
     }
+    let path = mod_dir(dirs, kind, id)?.join(dir);
+    crate::engine_mods::refuse_symlink_path(&dirs.root, &path)?;
+    Ok(path)
 }
 
 /// One of Kiln's game-folder copies (`<game>/kiln/state/library-placements.json`, written by `engine_mods::place`):
@@ -430,14 +624,25 @@ fn copies_of(game: &Path, kind: ModKind, id: &str, version: &str, hash: &str) ->
     placed_copies(game).into_iter()
         .filter(|c| c.marker.kind == kind && c.marker.id == id && c.marker.version == version && c.marker.hash == hash && c.path.is_dir())
         .filter_map(|c| {
-            let rel = c.path.strip_prefix(game).ok()?.to_str()?.replace('\\', "/");
-            (!rel.is_empty() && crate::bundle::safe_rel_path(&rel).is_ok()).then_some((c, rel))
+            let rel = game_rel(game, &c.path)?;
+            Some((c, rel))
         })
         .collect()
 }
 
-/// Only known settings extensions and logs are eligible, excluding engine manifests and markers.
-/// Unknown extensions may contain executable scripts and are never restored as settings.
+/// `copy` relative to `game`, '/' separated (None: not below it, or not a safe relative path).
+fn game_rel(game: &Path, copy: &Path) -> Option<String> {
+    let rel = copy.strip_prefix(game).ok()?.to_str()?.replace('\\', "/");
+    (!rel.is_empty() && crate::bundle::safe_rel_path(&rel).is_ok()).then_some(rel)
+}
+
+/// What a settings copy never holds and a restore never writes: anything but a settings file or a log (`txt`, `ini`,
+/// `cfg`, `json`, `toml`, `yaml`, `yml`, `log`: the extensions `engine_mods::is_game_settings_file` calls settings, and
+/// logs, in which mods keep data too: The Worst Map Mod's `unlock_map_markers.log`, Creative Mode's `logs/`), Lua and
+/// everything under `src/`, the manifests at the top of a copy (`mod.json`, `kiln.mod.json`, `native.json`,
+/// `flame.json`, `pack.toml`, `init.lua`, `extended.mod.json`, `native-plugin.ini`, `shroudtopia.json`: the Library's
+/// files, which placement treats as code), Kiln's marker and temporary files. Unknown extensions (scripts, DLLs, data
+/// of unknown kind) are never restored: they stay as the newer version left them.
 fn not_settings(rel: &str) -> bool {
     let low = rel.to_ascii_lowercase();
     let ext = low.rsplit_once('.').map(|(_, x)| x).unwrap_or("");
@@ -465,71 +670,90 @@ fn walk(dir: &Path, prefix: &str, out: &mut Vec<String>) -> Result<()> {
     Ok(())
 }
 
-/// Copies the settings of `version` from its game-folder copies in the first of `games` that has one into `into`
-/// (emptied first): each file not as Kiln placed it (changed or added since) that is no code, at its path relative to
-/// the game folder, and a ShroudForge package's setting values.
-fn take_settings(dirs: &DataDirs, games: &[PathBuf], kind: ModKind, id: &str, v: &VersionRef, into: &Path) -> std::result::Result<KeptSettings, String> {
+/// Copies the settings of version `v` from its game-folder copies in the first of `games` that has one: each file not
+/// as Kiln placed it (changed or added since) that is a settings file ([`not_settings`]), at its path relative to the
+/// game folder, and a ShroudForge package's setting values. The files go into a staging folder beside their place,
+/// which is renamed to its own new folder (`<version>+<hash8>.<12 hex>`) once whole. Err(why) when the disk check
+/// refuses (nothing stays on disk then).
+fn take_settings(dirs: &DataDirs, games: &[PathBuf], kind: ModKind, id: &str, v: &VersionRef) -> std::result::Result<KeptSettings, String> {
     let version_size = crate::library::record(dirs, &LibraryRef { kind, id: id.into(), version: v.version.clone(), hash: v.hash.clone() })
         .map(|r| r.size).unwrap_or(0);
     if let Some(why) = disk_refusal(dirs, version_size, 1) { return Err(why); }
+    let parent = mod_dir(dirs, kind, id).map_err(|e| e.message)?;
+    let tag = hex12();
+    let stage = parent.join(format!("{STAGE}{tag}"));
+    let h8 = crate::hash::hash8(&v.hash).unwrap_or("00000000");
+    let name = format!("{}+{h8}.{tag}", v.version);
     let mut out = KeptSettings::default();
-    let _ = std::fs::remove_dir_all(into);
-    for game in games {
-        let copies = copies_of(game, kind, id, &v.version, &v.hash);
-        if copies.is_empty() { continue; }
-        out.game = Some(game.display().to_string());
-        for (copy, rel_copy) in copies {
-            let mut files = Vec::new();
-            if let Err(e) = crate::engine_mods::refuse_symlink_path(game, &copy.path).and_then(|()| walk(&copy.path, "", &mut files)) {
-                out.left_out.push(format!("{rel_copy}: {}", e.message));
-                continue;
-            }
-            files.sort();
-            for rel in files.iter().filter(|r| !not_settings(r)) {
-                let src = copy.path.join(rel);
-                if crate::bundle::safe_rel_path(rel).is_err()
-                    || crate::engine_mods::refuse_symlink_path(game, &src).is_err() { continue; }
-                let Ok(meta) = std::fs::metadata(&src) else { continue };
-                if meta.len() > MAX_FILE || out.size.saturating_add(meta.len()) > MAX_TOTAL {
-                    out.left_out.push(format!("{rel_copy}/{rel}: too large to keep ({})", mib(meta.len())));
+    let copied = (|| -> std::result::Result<(), String> {
+        for game in games {
+            let copies = copies_of(game, kind, id, &v.version, &v.hash);
+            if copies.is_empty() { continue; }
+            out.game = Some(game.display().to_string());
+            for (copy, rel_copy) in copies {
+                let mut files = Vec::new();
+                if let Err(e) = crate::engine_mods::refuse_symlink_path(game, &copy.path).and_then(|()| walk(&copy.path, "", &mut files)) {
+                    out.left_out.push(format!("{rel_copy}: {}", e.message));
                     continue;
                 }
-                let Ok((sha, size)) = crate::hash::sha256_file(&src) else {
-                    out.left_out.push(format!("{rel_copy}/{rel}: not readable"));
-                    continue;
-                };
-                if copy.files.get(rel) == Some(&sha) { continue; } // as Kiln placed it
-                if size > MAX_FILE || out.size + size > MAX_TOTAL {
-                    out.left_out.push(format!("{rel_copy}/{rel}: too large to keep ({})", mib(size)));
-                    continue;
+                files.sort();
+                for rel in files.iter().filter(|r| !not_settings(r)) {
+                    let src = copy.path.join(rel);
+                    if crate::bundle::safe_rel_path(rel).is_err() || crate::engine_mods::refuse_symlink_path(game, &src).is_err() { continue; }
+                    let Ok(meta) = std::fs::metadata(&src) else { continue };
+                    if meta.len() > MAX_FILE || out.size.saturating_add(meta.len()) > MAX_TOTAL {
+                        out.left_out.push(format!("{rel_copy}/{rel}: too large to keep ({})", mib(meta.len())));
+                        continue;
+                    }
+                    let Ok(bytes) = read_bounded(&src) else {
+                        out.left_out.push(format!("{rel_copy}/{rel}: not readable"));
+                        continue;
+                    };
+                    if copy.files.get(rel) == Some(&crate::hash::sha256_hex(&bytes)) { continue; } // as Kiln placed it
+                    let size = bytes.len() as u64;
+                    if out.size + size > MAX_TOTAL {
+                        out.left_out.push(format!("{rel_copy}/{rel}: too large to keep ({})", mib(size)));
+                        continue;
+                    }
+                    if let Some(why) = disk_refusal(dirs, version_size + out.size + size, out.files.len() as u64 + 2) { return Err(why); }
+                    let game_rel = format!("{rel_copy}/{rel}");
+                    let dst = stage.join(&game_rel);
+                    let written = crate::engine_mods::refuse_symlink_path(&parent, &dst).and_then(|()| crate::util::write_atomic_exclusive(&dst, &bytes));
+                    match written {
+                        Ok(()) => { out.files.push(game_rel); out.size += size; crash_point(Step::SnapshotCopied); }
+                        Err(e) => out.left_out.push(format!("{game_rel}: {}", e.message)),
+                    }
                 }
-                let game_rel = format!("{rel_copy}/{rel}");
-                let dst = into.join(&game_rel);
-                if let Some(why) = disk_refusal(dirs, version_size + out.size + size, out.files.len() as u64 + 2) {
-                    return Err(why);
-                }
-                let copied = (|| -> Result<u64> {
-                    crate::engine_mods::refuse_symlink_path(into, &dst)?;
-                    let bytes = read_bounded(&src)?;
-                    if out.size + bytes.len() as u64 > MAX_TOTAL { return Err(Error::invalid("settings copy too large")); }
-                    crate::util::write_atomic_exclusive(&dst, &bytes)?;
-                    Ok(bytes.len() as u64)
-                })();
-                match copied {
-                    Ok(bytes) => { out.files.push(game_rel); out.size += bytes; }
-                    Err(e) => out.left_out.push(format!("{game_rel}: {e}")),
+                // ShroudForge keeps its setting values in extended.mod.json (an EML package ShroudForge runs too)
+                if matches!(kind, ModKind::ShroudForge | ModKind::Eml) && copy.path.join("extended.mod.json").is_file()
+                    && let Ok(m) = crate::shroudforge::read_mod(&copy.path)
+                    && !m.settings.is_empty()
+                {
+                    out.values.insert(rel_copy.clone(), m.settings.iter().map(|s| (s.key.clone(), s.value.clone())).collect());
                 }
             }
-            // ShroudForge keeps its setting values in extended.mod.json (an EML package ShroudForge runs too)
-            if matches!(kind, ModKind::ShroudForge | ModKind::Eml) && copy.path.join("extended.mod.json").is_file()
-                && let Ok(m) = crate::shroudforge::read_mod(&copy.path)
-                && !m.settings.is_empty()
-            {
-                out.values.insert(rel_copy.clone(), m.settings.iter().map(|s| (s.key.clone(), s.value.clone())).collect());
-            }
+            break;
         }
-        break;
+        Ok(())
+    })();
+    if let Err(why) = copied {
+        let _ = std::fs::remove_dir_all(&stage);
+        return Err(why);
     }
+    if out.files.is_empty() {
+        let _ = std::fs::remove_dir_all(&stage);
+        return Ok(out);
+    }
+    // whole: into its own folder at once (a stop before leaves the staged folder, which the next look deletes)
+    let to = parent.join(&name);
+    if let Err(e) = std::fs::rename(&stage, &to) {
+        let _ = std::fs::remove_dir_all(&stage);
+        return Err(format!("its settings could not be kept ({e})"));
+    }
+    #[cfg(unix)]
+    let _ = std::fs::File::open(&parent).and_then(|d| d.sync_all());
+    crash_point(Step::SnapshotRenamed);
+    out.dir = Some(name);
     Ok(out)
 }
 
@@ -547,7 +771,7 @@ fn active_games(dirs: &DataDirs, profile_id: &str, extra: Option<&Path>) -> Vec<
     out
 }
 
-// ------------------------------------------------------------------------------------------------ following changes
+// ------------------------------------------------------------------------------------------------ the transaction
 
 /// The name a mod is shown with.
 fn shown(dirs: &DataDirs, kind: ModKind, m: &ProfileMod) -> String {
@@ -555,45 +779,125 @@ fn shown(dirs: &DataDirs, kind: ModKind, m: &ProfileMod) -> String {
         .ok().and_then(|r| r.name).filter(|n| !n.trim().is_empty()).unwrap_or_else(|| m.id.clone())
 }
 
-/// What follows a profile change that replaced mod entries by other versions of the same mods (`changes`: kind, the
-/// entry before, the entry now), in `profile_id`: per change, the version left becomes a kept one (with its settings
-/// as its game-folder copies hold them now, in the games where the profile is active; `game`: one more game to look
-/// in), unless `keepVersions` is 0 or the disk check refuses; a kept version that came back leaves the kept ones, and
-/// its settings wait for its next placement ([`restore_after_place`]); each mod keeps at most `keepVersions`.
-/// Never fails the change it follows: what could not be done is in the sentences returned.
-pub(crate) fn follow(dirs: &DataDirs, profile_id: &str, game: Option<&Path>, changes: &[(ModKind, ProfileMod, ProfileMod)]) -> Vec<String> {
-    let changes: Vec<_> = changes.iter().filter(|(_, a, b)| a.id == b.id && (a.version != b.version || a.hash != b.hash)).collect();
-    if changes.is_empty() && nothing_kept(dirs) { return Vec::new(); }
-    let saved = crate::profile::get(dirs, profile_id).ok();
-    let games = active_games(dirs, profile_id, game);
-    let keep = keep_count(dirs) as usize;
-    let mut notices = Vec::new();
-    let done = update(dirs, |st| {
-        for (kind, from, to) in &changes {
-            follow_one(dirs, st, profile_id, &games, keep, *kind, from, to, &mut notices);
+/// A change of profile entries between versions, prepared before its profile is saved ([`prepare`]). It holds the
+/// state's lock until [`Prepared::commit`] (the profile was saved) or [`Prepared::abort`] (it was not). Dropped without
+/// either (a stop), the change's record stays, and the next look at the state finishes or undoes it.
+pub struct Prepared {
+    lock: Option<crate::util::LockedFile>,
+    dirs: DataDirs,
+    txn: Option<String>,
+    notices: Vec<String>,
+    /// Why the kept versions could not follow the change (its lock, the state file): an update goes on without
+    /// keeping; a roll back does not go on (its version would get the newer version's settings).
+    failed: Option<String>,
+}
+
+impl Prepared {
+    fn none(dirs: &DataDirs, notices: Vec<String>) -> Prepared {
+        Prepared { lock: None, dirs: dirs.clone(), txn: None, notices, failed: None }
+    }
+
+    fn failed(dirs: &DataDirs, why: String) -> Prepared {
+        Prepared { failed: Some(why.clone()), ..Prepared::none(dirs, vec![format!("Kiln could not keep the earlier versions for a roll back: {why}")]) }
+    }
+
+    /// Why the kept versions could not follow the change, when they could not.
+    pub fn failure(&self) -> Option<&str> {
+        self.failed.as_deref()
+    }
+
+    /// The profile was saved: the change stands. -> sentences for the player (a version not kept, and why).
+    pub fn commit(mut self) -> Vec<String> {
+        if self.txn.is_some() { crash_point(Step::BeforeCommit); }
+        if let Some(id) = self.txn.take()
+            && let Err(e) = self.finish(&id, false)
+        {
+            // the record stays; the next look at the state finishes the change (the profile lists it)
+            self.notices.push(format!("Kiln finishes keeping the earlier versions at its next start: {}", e.message));
         }
-        // A removal can be saved and undone before any placement. Cancel its restore at the save,
-        // rather than letting a later, unrelated add of the same version consume it.
-        if let Some(saved) = &saved {
-            for m in &mut st.mods {
-                let stale = m.restore.as_ref().is_some_and(|r| r.profile == profile_id
-                    && !saved.mods.list(m.kind).iter().any(|e| e.id == m.id && e.version == r.version && e.hash == r.hash));
-                if stale {
-                    let r = m.restore.take().expect("checked");
-                    if !m.kept.iter().any(|v| v.version == r.version && v.hash == r.hash) {
-                        drop_settings(dirs, m.kind, &m.id, &r.version, &r.hash);
-                    }
-                }
+        self.lock = None;
+        std::mem::take(&mut self.notices)
+    }
+
+    /// The profile was not saved: the kept versions go back to what they were.
+    pub fn abort(mut self) {
+        if let Some(id) = self.txn.take() {
+            let _ = self.finish(&id, true);
+        }
+        self.lock = None;
+    }
+
+    fn finish(&self, id: &str, undo: bool) -> Result<()> {
+        let Some(mut st) = load(&self.dirs) else { return Ok(()) };
+        if let Some(i) = st.pending.iter().position(|t| t.id == id) {
+            let t = st.pending.remove(i);
+            if undo {
+                for b in t.before { put_mod(&mut st, b); }
             }
         }
-        (true, ())
-    });
-    match done {
-        Ok(Some(())) => {}
-        Ok(None) => notices.push("Kiln did not keep the earlier versions: their list (library/kiln-kept.json) is of a newer Kiln.".into()),
-        Err(e) => notices.push(format!("Kiln could not keep the earlier versions for a roll back: {}", e.message)),
+        tidy(&mut st);
+        save(&self.dirs, &st)?;
+        sweep(&self.dirs, &st);
+        Ok(())
     }
-    notices
+}
+
+/// Prepares the change of `profile` (as it is about to be saved) that replaced entries by other versions of the same
+/// mods (`changes`: kind, the entry before, the entry after; others are left out): per change the version left becomes
+/// a kept one, with its settings as its game-folder copies hold them now (in the games where the profile is active;
+/// `game`: one more), unless `keepVersions` is 0 or the disk check refuses; a kept version that comes back leaves the
+/// kept ones and its settings wait for its next placement in this profile; each mod keeps at most `keepVersions`; this
+/// profile's restores its new content no longer asks for are cancelled. Never fails the change it prepares: what
+/// could not be done is in the sentences of [`Prepared::commit`].
+pub(crate) fn prepare(dirs: &DataDirs, profile: &Profile, game: Option<&Path>, changes: &[(ModKind, ProfileMod, ProfileMod)]) -> Prepared {
+    let changes: Vec<_> = changes.iter().filter(|(_, a, b)| a.id == b.id && (a.version != b.version || a.hash != b.hash)).cloned().collect();
+    if changes.is_empty() && nothing_kept(dirs) { return Prepared::none(dirs, Vec::new()); }
+    let lock = match lock(dirs) {
+        Ok(l) => l,
+        Err(e) => return Prepared::failed(dirs, e.message),
+    };
+    let Some(mut st) = load(dirs) else {
+        return Prepared::failed(dirs, "its list of them (library/kiln-kept.json) is of a newer Kiln".into());
+    };
+    let mut notices = Vec::new();
+    let fixed = reconcile(dirs, &mut st, &mut notices);
+    let original = st.clone();
+    let games = active_games(dirs, &profile.id, game);
+    let keep = keep_count(dirs) as usize;
+    // the mods this change touches, as they are now (what an undo puts back)
+    let stale = |m: &KeptMod| m.restores.iter().any(|r| r.profile == profile.id && !lists(profile, m.kind, &m.id, &r.version, &r.hash));
+    let mut touched: Vec<(ModKind, String)> = changes.iter().map(|(k, f, _)| (*k, f.id.clone())).collect();
+    touched.extend(st.mods.iter().filter(|m| stale(m)).map(|m| (m.kind, m.id.clone())));
+    touched.sort();
+    touched.dedup();
+    let before: Vec<KeptMod> = touched.iter()
+        .map(|(k, id)| st.mods.iter().find(|m| m.kind == *k && m.id == *id).cloned().unwrap_or_else(|| KeptMod::empty(*k, id))).collect();
+    for (kind, from, to) in &changes {
+        follow_one(dirs, &mut st, &profile.id, &games, keep, *kind, from, to, &mut notices);
+    }
+    // a removal of the mod (or another version picked by hand) cancels this profile's restore it no longer asks for
+    for m in &mut st.mods {
+        let (kind, id) = (m.kind, m.id.clone());
+        m.restores.retain(|r| r.profile != profile.id || lists(profile, kind, &id, &r.version, &r.hash));
+    }
+    tidy(&mut st);
+    if st == original {
+        if fixed && save(dirs, &st).is_ok() { sweep(dirs, &st); }
+        return Prepared::none(dirs, notices);
+    }
+    let id = hex12();
+    st.pending.push(KeptTxn {
+        id: id.clone(), profile: profile.id.clone(), started: crate::util::now_rfc3339(),
+        changes: changes.iter().map(|(kind, a, b)| TxnChange { kind: *kind, id: a.id.clone(), from: VersionRef::of(a), to: VersionRef::of(b) }).collect(),
+        before,
+    });
+    if let Err(e) = save(dirs, &st) {
+        // nothing names the copies this change made: they go, and the state stays as it was
+        sweep(dirs, &original);
+        return Prepared::failed(dirs, e.message);
+    }
+    crash_point(Step::IndexWritten);
+    Prepared { lock: Some(lock), dirs: dirs.clone(), txn: Some(id), notices, failed: None }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -602,76 +906,61 @@ fn follow_one(dirs: &DataDirs, st: &mut KeptState, profile_id: &str, games: &[Pa
     let name = shown(dirs, kind, from);
     let (from_v, to_v) = (VersionRef::of(from), VersionRef::of(to));
     let m = mod_of(st, kind, &from.id);
-    // a roll back to `from` that was never placed: the settings waiting for it are still the ones it has
-    let waiting = m.restore.take();
+    // this profile's roll back to `from` that was never placed: the settings waiting for it are still the ones it has
     let mut from_settings = None;
-    if let Some(r) = waiting {
-        if r.version == from.version && r.hash == from.hash {
-            from_settings = Some(r.settings);
-        } else if !m.kept.iter().any(|v| v.version == r.version && v.hash == r.hash) && !to_v.is(&r.version, &r.hash) {
-            // another version's, left behind by a change Kiln did not follow: no longer wanted
-            drop_settings(dirs, kind, &from.id, &r.version, &r.hash);
-        }
+    if let Some(i) = m.restores.iter().position(|r| r.version == from.version && r.hash == from.hash) {
+        from_settings = Some(m.restores.remove(i).settings);
     }
-    // a kept version comes back: its settings go back at its next placement
+    // a kept version comes back: its settings wait for its next placement in this profile (one restore per profile)
     if let Some(i) = m.kept.iter().position(|v| v.version == to.version && v.hash == to.hash) {
         let v = m.kept.remove(i);
-        if v.settings.is_empty() {
-            drop_settings(dirs, kind, &from.id, &v.version, &v.hash);
-        } else {
-            m.restore = Some(PendingRestore { version: v.version, hash: v.hash, profile: profile_id.to_string(), settings: v.settings });
+        m.restores.clear();
+        if !v.settings.is_empty() {
+            m.restores.push(PendingRestore { version: v.version, hash: v.hash, profile: profile_id.to_string(), settings: v.settings });
         }
     }
     // the version left is kept
-    let Ok(dir) = settings_dir(dirs, kind, &from.id, &from.version, &from.hash) else { return };
-    if keep == 0 {
-        if !m.kept.iter().any(|v| v.version == from.version && v.hash == from.hash) {
-            drop_settings(dirs, kind, &from.id, &from.version, &from.hash);
-        }
-    } else if entry_exists(dirs, kind, &from.id, &from.version, &from.hash) {
-        let settings = from_settings.map(Ok).unwrap_or_else(|| take_settings(dirs, games, kind, &from.id, &from_v, &dir));
+    if keep > 0 && entry_exists(dirs, kind, &from.id, &from.version, &from.hash) {
+        let settings = from_settings.map(Ok).unwrap_or_else(|| take_settings(dirs, games, kind, &from.id, &from_v));
         let size = crate::library::record(dirs, &LibraryRef { kind, id: from.id.clone(), version: from.version.clone(), hash: from.hash.clone() })
             .map(|r| r.size).unwrap_or(0);
-        let settings = settings.and_then(|settings| match disk_refusal(dirs, size + settings.size, settings.files.len() as u64 + 1) {
+        let settings = settings.and_then(|s| match disk_refusal(dirs, size + s.size, s.files.len() as u64 + 1) {
             Some(why) => Err(why),
-            None => Ok(settings),
+            None => Ok(s),
         });
         match settings {
             Err(why) => {
-                drop_settings(dirs, kind, &from.id, &from.version, &from.hash);
                 m.kept.retain(|v| !(v.version == from.version && v.hash == from.hash));
                 notices.push(format!("{name} {} was not kept for a roll back: {why}. It stays in your Library as an earlier version.", from.version));
             }
-            Ok(settings) => {
-                for left in &settings.left_out {
+            Ok(s) => {
+                for left in &s.left_out {
                     notices.push(format!("{name} {}: kept without {left}", from.version));
                 }
                 m.kept.retain(|v| !(v.version == from.version && v.hash == from.hash));
                 m.kept.insert(0, KeptVersion {
-                    version: from.version.clone(), hash: from.hash.clone(), kept: crate::util::now_rfc3339(), replaced_by: Some(to_v.clone()), settings,
+                    version: from.version.clone(), hash: from.hash.clone(), kept: crate::util::now_rfc3339(), replaced_by: Some(to_v),
+                    profile: Some(profile_id.to_string()), settings: s,
                 });
             }
         }
     }
-    while m.kept.len() > keep {
-        let v = m.kept.pop().expect("longer than keep");
-        drop_settings(dirs, kind, &from.id, &v.version, &v.hash);
-    }
+    m.kept.truncate(keep);
 }
 
-/// [`follow`] for the changes of an add or its Undo ([`ProfileChange`]: `before` -> `after`, or back with `undo`).
-pub(crate) fn follow_profile_changes(dirs: &DataDirs, profile_id: &str, game: Option<&Path>, changes: &[ProfileChange], undo: bool) -> Vec<String> {
+/// [`prepare`] for the changes of an add or its Undo ([`ProfileChange`]: `before` -> `after`, or back with `undo`).
+pub(crate) fn prepare_changes(dirs: &DataDirs, profile: &Profile, game: Option<&Path>, changes: &[ProfileChange], undo: bool) -> Prepared {
     let list: Vec<(ModKind, ProfileMod, ProfileMod)> = changes.iter()
         .filter_map(|c| c.before.clone().map(|b| if undo { (c.kind, c.after.clone(), b) } else { (c.kind, b, c.after.clone()) }))
         .collect();
-    follow(dirs, profile_id, game, &list)
+    prepare(dirs, profile, game, &list)
 }
 
-/// A profile saved as a whole (the launcher's `profile_save`: "Use <version>" in a mod's menu, the Deck; `kilnctl profile
-/// add`): every entry that is another version of the same mod than in `before` follows as at an update ([`follow`]).
-/// -> sentences for the player (a version not kept, and why).
-pub fn follow_saved(dirs: &DataDirs, before: &crate::profile::Profile, after: &crate::profile::Profile) -> Vec<String> {
-    if before.id != after.id { return Vec::new(); }
+/// [`prepare`] for a profile saved as a whole (the launcher's `profile_save`: "Use <version>" in a mod's menu, the Deck;
+/// `kilnctl profile add`): every entry that is another version of the same mod than in `before`. Call it before the
+/// save, then commit or abort.
+pub fn prepare_saved(dirs: &DataDirs, before: &Profile, after: &Profile) -> Prepared {
+    if before.id != after.id { return Prepared::none(dirs, Vec::new()); }
     let mut changes = Vec::new();
     for kind in ModKind::ALL {
         for m in after.mods.list(kind) {
@@ -680,7 +969,12 @@ pub fn follow_saved(dirs: &DataDirs, before: &crate::profile::Profile, after: &c
             }
         }
     }
-    follow(dirs, &after.id, None, &changes)
+    prepare(dirs, after, None, &changes)
+}
+
+/// [`prepare_saved`] and its commit for a profile already saved (the settings are read as they are now).
+pub fn follow_saved(dirs: &DataDirs, before: &Profile, after: &Profile) -> Vec<String> {
+    prepare_saved(dirs, before, after).commit()
 }
 
 // ------------------------------------------------------------------------------------------------ roll back
@@ -709,10 +1003,20 @@ pub fn rollback(dirs: &DataDirs, game: Option<&crate::game::GameInstall>, profil
     let after = ProfileMod { id: id.to_string(), version: pick.version.clone(), hash: pick.hash.clone(), enabled: before.enabled };
     let settings = pick.settings.files.clone();
     p.mods.list_mut(kind)[i] = after.clone();
-    let saved = crate::profile::save(dirs, &p)?;
-    let notices = follow(dirs, &saved.id, game.map(|g| g.path.as_path()), &[(kind, before.clone(), after.clone())]);
+    let prepared = prepare(dirs, &p, game.map(|g| g.path.as_path()), &[(kind, before.clone(), after.clone())]);
+    // without its record the rolled back version would get the newer version's settings: nothing changes then
+    if let Some(why) = prepared.failure() {
+        return Err(Error::new(ErrorCode::Io, format!("{name} was not rolled back: Kiln could not write its kept versions ({why}). Nothing was changed.")));
+    }
+    let saved = match crate::profile::save(dirs, &p) {
+        Ok(s) => s,
+        Err(e) => {
+            prepared.abort();
+            return Err(e);
+        }
+    };
+    let mut notices = prepared.commit();
     let is_kept = keep_count(dirs) > 0 && kept_versions(dirs, kind, id).iter().any(|v| v.version == before.version && v.hash == before.hash);
-    let mut notices = notices;
     if keep_count(dirs) == 0 {
         notices.push(format!("{name} {} is not kept (Settings keeps no earlier versions): it stays in your Library as an earlier version.", before.version));
     }
@@ -726,76 +1030,83 @@ pub fn rollback(dirs: &DataDirs, game: Option<&crate::game::GameInstall>, profil
 
 // ------------------------------------------------------------------------------------------------ restore
 
-/// After `engine_mods::place` placed `profile` in `game`: the settings a roll back kept go back into the copies of the
-/// version it put into the profile (each file written over the one the placement carried over from the newer version;
-/// ShroudForge values through ShroudForge's setter), once. A restore for a version the profile no longer lists is
-/// dropped; one whose copy is not there yet (the mod is switched off) waits. -> one sentence per mod restored, and one
-/// per file or value that could not be put back.
-pub fn restore_after_place(dirs: &DataDirs, profile: &crate::profile::Profile, game: &Path) -> Vec<String> {
-    let mut notes = Vec::new();
-    if nothing_kept(dirs) { return notes; }
-    let done = update(dirs, |st| {
-        let mut changed = false;
+/// After `engine_mods::place` placed `profile` in `game`: the settings a roll back of this profile kept, in this game,
+/// go back into the copies of the version it put into the profile (each file written over the one the placement carried
+/// over from the newer version; ShroudForge values through ShroudForge's setter). The restore stays recorded until every
+/// file is back (a file that cannot be written now is tried again at the next placement; one Kiln must never write, a
+/// link, is left out with a note), so a stop half-way is finished by the next placement. A restore of this profile for
+/// a version it no longer lists is dropped; one whose copy is not there (the mod is switched off) waits; other profiles'
+/// and other games' restores are left alone. -> one sentence per mod restored, and one per file not put back.
+pub fn restore_after_place(dirs: &DataDirs, profile: &Profile, game: &Path) -> Vec<String> {
+    if nothing_kept(dirs) { return Vec::new(); }
+    let done = update(dirs, |st, notes| {
         for m in &mut st.mods {
-            let Some(r) = m.restore.clone().filter(|r| r.profile == profile.id) else { continue };
-            let entry = profile.mods.list(m.kind).iter().find(|e| e.id == m.id);
-            let wanted = entry.is_some_and(|e| e.version == r.version && e.hash == r.hash);
-            if !wanted {
-                m.restore = None;
-                if !m.kept.iter().any(|v| v.version == r.version && v.hash == r.hash) {
-                    drop_settings(dirs, m.kind, &m.id, &r.version, &r.hash);
-                }
-                changed = true;
-                continue;
+            let (kind, id) = (m.kind, m.id.clone());
+            let mut waiting = Vec::new();
+            for r in std::mem::take(&mut m.restores) {
+                if r.profile != profile.id { waiting.push(r); continue; }
+                if !lists(profile, kind, &id, &r.version, &r.hash) { continue; } // the profile moved on: dropped
+                let copies = copies_of(game, kind, &id, &r.version, &r.hash);
+                if copies.is_empty() { waiting.push(r); continue; }
+                if !apply_restore(dirs, game, kind, &id, &r, &copies, notes) { waiting.push(r); }
             }
-            let copies = copies_of(game, m.kind, &m.id, &r.version, &r.hash);
-            if copies.is_empty() { continue; }
-            let Ok(dir) = settings_dir(dirs, m.kind, &m.id, &r.version, &r.hash) else { continue };
-            let tag = format!("{}:{}", m.kind.as_str(), m.id);
-            let mut back = Vec::new();
-            for rel in &r.settings.files {
-                if crate::bundle::safe_rel_path(rel).is_err() { continue; }
-                let Some((copy, c)) = copies.iter().find(|(_, c)| rel.starts_with(&format!("{c}/"))) else {
-                    notes.push(format!("{tag}: {rel} was not put back: the mod's copy is somewhere else now"));
-                    continue;
-                };
-                match put_back(game, &copy.path, &rel[c.len() + 1..], &dir, &dir.join(rel)) {
-                    Ok(true) => back.push(rel.clone()),
-                    Ok(false) => {}
-                    Err(e) => notes.push(format!("{tag}: {rel} was not put back: {}", e.message)),
-                }
-            }
-            for (rel_copy, values) in &r.settings.values {
-                let Some((copy, _)) = copies.iter().find(|(_, c)| c == rel_copy) else { continue };
-                let file = copy.path.join("extended.mod.json");
-                if let Err(e) = crate::engine_mods::refuse_symlink_path(game, &file)
-                    .and_then(|()| crate::engine_mods::refuse_symlink_path(game, &crate::util::with_suffix(&file, ".tmp"))) {
-                    notes.push(format!("{tag}: its settings were not put back: {}", e.message));
-                    continue;
-                }
-                let Ok(now) = crate::shroudforge::read_mod(&copy.path) else { continue };
-                for (key, value) in values {
-                    if now.settings.iter().any(|s| s.key == *key && s.value != *value) {
-                        match crate::shroudforge::set_setting(&copy.path, key, value) {
-                            Ok(_) => back.push(format!("{rel_copy} setting {key}")),
-                            Err(e) => notes.push(format!("{tag}: its setting {key} was not put back to {value}: {}", e.message)),
-                        }
-                    }
-                }
-            }
-            if !back.is_empty() {
-                notes.push(format!("{tag}: version {} has the settings it had before the update again ({})", r.version, back.join(", ")));
-            }
-            m.restore = None;
-            drop_settings(dirs, m.kind, &m.id, &r.version, &r.hash);
-            changed = true;
+            m.restores = waiting;
         }
-        (changed, ())
     });
-    if let Err(e) = done {
-        notes.push(format!("Kiln could not put back the settings of a rolled back mod: {}", e.message));
+    match done {
+        Ok(Some((_, notes))) => notes,
+        Ok(None) => Vec::new(),
+        Err(e) => vec![format!("Kiln could not put back the settings of a rolled back mod: {} (it tries again at the next start)", e.message)],
     }
-    notes
+}
+
+/// Puts one restore's files and values back. -> true when it is done (false: try again at the next placement).
+fn apply_restore(dirs: &DataDirs, game: &Path, kind: ModKind, id: &str, r: &PendingRestore, copies: &[(PlacedCopy, String)], notes: &mut Vec<String>) -> bool {
+    let tag = format!("{}:{id}", kind.as_str());
+    let dir = match r.settings.dir.as_deref().map(|d| copy_dir(dirs, kind, id, d)) {
+        Some(Ok(d)) => Some(d),
+        Some(Err(e)) => { notes.push(format!("{tag}: its settings were not put back: {}", e.message)); return true; }
+        None => None,
+    };
+    let mut again = false;
+    let mut back = Vec::new();
+    for rel in &r.settings.files {
+        let Some(dir) = &dir else { break };
+        if crate::bundle::safe_rel_path(rel).is_err() { continue; }
+        let Some((copy, c)) = copies.iter().find(|(_, c)| rel.starts_with(&format!("{c}/"))) else {
+            notes.push(format!("{tag}: {rel} was not put back: the mod's copy is somewhere else now"));
+            continue;
+        };
+        match put_back(game, &copy.path, &rel[c.len() + 1..], dir, &dir.join(rel)) {
+            Ok(true) => { back.push(rel.clone()); crash_point(Step::RestoreFile); }
+            Ok(false) => {}
+            Err(e) if matches!(e.code, ErrorCode::Refused | ErrorCode::InvalidArgument) => notes.push(format!("{tag}: {rel} was not put back: {}", e.message)),
+            Err(e) => { again = true; notes.push(format!("{tag}: {rel} was not put back yet ({}): Kiln tries again at the next start", e.message)); }
+        }
+    }
+    for (rel_copy, values) in &r.settings.values {
+        let Some((copy, _)) = copies.iter().find(|(_, c)| c == rel_copy) else { continue };
+        let file = copy.path.join("extended.mod.json");
+        if let Err(e) = crate::engine_mods::refuse_symlink_path(game, &file)
+            .and_then(|()| crate::engine_mods::refuse_symlink_path(game, &crate::util::with_suffix(&file, ".tmp"))) {
+            notes.push(format!("{tag}: its settings were not put back: {}", e.message));
+            continue;
+        }
+        let Ok(now) = crate::shroudforge::read_mod(&copy.path) else { continue };
+        for (key, value) in values {
+            if now.settings.iter().any(|s| s.key == *key && s.value != *value) {
+                match crate::shroudforge::set_setting(&copy.path, key, value) {
+                    Ok(_) => back.push(format!("{rel_copy} setting {key}")),
+                    Err(e) if e.code == ErrorCode::InvalidArgument => notes.push(format!("{tag}: its setting {key} was not put back to {value}: {}", e.message)),
+                    Err(e) => { again = true; notes.push(format!("{tag}: its setting {key} was not put back yet ({})", e.message)); }
+                }
+            }
+        }
+    }
+    if !back.is_empty() {
+        notes.push(format!("{tag}: version {} has the settings it had before the update again ({})", r.version, back.join(", ")));
+    }
+    !again
 }
 
 /// Writes the kept file `from` as `rel` in the copy `copy` (in `game`) unless it holds those bytes already. Never a
@@ -835,6 +1146,10 @@ fn read_bounded(path: &Path) -> Result<Vec<u8>> {
 }
 
 #[cfg(test)]
+#[path = "kept_tests.rs"]
+mod crash_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -846,6 +1161,22 @@ mod tests {
         }
         for rel in ["config.txt", "config.ini", "settings.json", "minimap_config.ini", "logs/run.log", "data/mod.json"] {
             assert!(!not_settings(rel), "{rel}");
+        }
+    }
+
+    /// What the mods Kiln's tests and the engines' pages know write into their folders is kept; what placement calls
+    /// code is not. Where this rule and `engine_mods::is_game_settings_file` differ, on purpose: logs (`.log`) are kept
+    /// (mods keep data in them), and the other engines' manifests at the top of a copy are not (the Library's files).
+    #[test]
+    fn what_real_mods_write_is_kept_and_their_code_is_not() {
+        // Auto Loot Plus (EML part and Lite), XHL mods, The Worst Map Mod (Greeneye), SET, Creative Mode (Flame)
+        for rel in ["config.txt", "quest_items.txt", "config.ini", "minimap_config.ini", "looted_chests.ini", "unlock_map_markers.log",
+                    "settings.json", "logs/creative.log", "logs/flame.log", "notice.txt", "sigs/1730000000-1234.json"] {
+            assert!(!not_settings(rel), "{rel}");
+        }
+        for rel in ["native-plugin.ini", "XHL-Auto-Loot.dll", "src/autosmash_program.lua", "mod.json", "flame.json", "creative.dll",
+                    "kiln.mod.json", "native.json", "pack.toml", "shroudtopia.json", "cache.dat", "save.bin"] {
+            assert!(not_settings(rel), "{rel}");
         }
     }
 
@@ -863,11 +1194,10 @@ mod tests {
         std::fs::create_dir_all(game.join("kiln/state")).unwrap();
         crate::util::write_json_atomic(&game.join("kiln/state/library-placements.json"),
             &serde_json::json!([{"path": copy, "marker": marker, "files": {}}])).unwrap();
-        let into = dirs.library().join(SETTINGS_DIR).join("greeneye/map/1.0.0+00000000");
         let saved = with_free_space_for_tests(Some(0), || take_settings(&dirs, &[game], ModKind::Greeneye, "map",
-            &VersionRef { version: "1.0.0".into(), hash }, &into));
+            &VersionRef { version: "1.0.0".into(), hash }));
         assert!(saved.is_err(), "a refused snapshot must not first write files to a full disk");
-        assert!(!into.exists());
+        assert!(!dirs.library().join(SETTINGS_DIR).join("greeneye/map").read_dir().is_ok_and(|mut d| d.next().is_some()));
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -915,6 +1245,7 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    /// The sweep never deletes through a linked folder below `kiln-kept/` (a mod's folder that is a link elsewhere).
     #[cfg(unix)]
     #[test]
     fn review_forget_does_not_delete_through_kept_ancestor_link() {
@@ -922,14 +1253,17 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         let dirs = DataDirs::at(root.join("data"));
         let outside = root.join("outside");
-        let victim = outside.join("1.0.0+00000000");
+        let victim = outside.join("1.0.0+00000000.0123456789ab");
         std::fs::create_dir_all(&victim).unwrap();
         std::fs::write(victim.join("precious"), b"save").unwrap();
         let parent = dirs.library().join(SETTINGS_DIR).join("greeneye");
         std::fs::create_dir_all(&parent).unwrap();
         std::os::unix::fs::symlink(&outside, parent.join("map")).unwrap();
-        drop_settings(&dirs, ModKind::Greeneye, "map", "1.0.0", &format!("kdh1:{}", "0".repeat(64)));
+        std::fs::write(state_path(&dirs), br#"{"format": 1, "mods": []}"#).unwrap();
+        forget(&dirs, &LibraryRef { kind: ModKind::Greeneye, id: "map".into(), version: "1.0.0".into(), hash: format!("kdh1:{}", "0".repeat(64)) });
+        assert_eq!(recover(&dirs), Vec::<String>::new());
         assert!(victim.join("precious").is_file());
+        assert!(copy_dir(&dirs, ModKind::Greeneye, "map", "1.0.0+00000000.0123456789ab").is_err(), "refused through the link");
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -954,7 +1288,8 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schema");
         let example: KeptState = serde_json::from_slice(&std::fs::read(root.join("examples/kiln-kept.json")).unwrap()).unwrap();
         assert_eq!((example.mods.len(), example.mods[0].kept[0].settings.files.len()), (2, 2));
-        assert_eq!(example.mods[1].restore.as_ref().unwrap().settings.values["mods/sfpack"]["speed"], 7);
+        assert_eq!(example.mods[1].restores[0].settings.values["mods/sfpack"]["speed"], 7);
+        assert_eq!(example.pending.len(), 1);
         let schema: serde_json::Value = serde_json::from_slice(&std::fs::read(root.join("kiln-kept.schema.json")).unwrap()).unwrap();
         let keys = |v: &serde_json::Value| -> Vec<String> {
             let mut k: Vec<String> = v["properties"].as_object().unwrap().keys().cloned().collect();
@@ -966,19 +1301,24 @@ mod tests {
             k.sort();
             k
         };
-        let settings = KeptSettings { files: vec!["a/b.ini".into()], size: 1, values: [("a".to_string(), serde_json::Map::new())].into_iter().collect(),
-            game: Some("g".into()), left_out: vec!["x".into()] };
+        let settings = KeptSettings { dir: Some("1.0.0+00000000.0123456789ab".into()), files: vec!["a/b.ini".into()], size: 1,
+            values: [("a".to_string(), serde_json::Map::new())].into_iter().collect(), game: Some("g".into()), left_out: vec!["x".into()] };
         let v = VersionRef { version: "1.0.0".into(), hash: "kdh1:00".into() };
-        let st = KeptState { format: 1, mods: vec![KeptMod { kind: ModKind::Greeneye, id: "m".into(),
-            kept: vec![KeptVersion { version: "1.0.0".into(), hash: "kdh1:00".into(), kept: "t".into(), replaced_by: Some(v.clone()), settings: settings.clone() }],
-            restore: Some(PendingRestore { version: "1.0.0".into(), hash: "kdh1:00".into(), profile: "p".into(), settings }) }] };
+        let m = KeptMod { kind: ModKind::Greeneye, id: "m".into(),
+            kept: vec![KeptVersion { version: "1.0.0".into(), hash: "kdh1:00".into(), kept: "t".into(), replaced_by: Some(v.clone()),
+                profile: Some("p".into()), settings: settings.clone() }],
+            restores: vec![PendingRestore { version: "1.0.0".into(), hash: "kdh1:00".into(), profile: "p".into(), settings }] };
+        let st = KeptState { format: 1, mods: vec![m.clone()], pending: vec![KeptTxn { id: "0123456789ab".into(), profile: "p".into(), started: "t".into(),
+            changes: vec![TxnChange { kind: ModKind::Greeneye, id: "m".into(), from: v.clone(), to: v.clone() }], before: vec![m] }] };
         let json = serde_json::to_value(&st).unwrap();
         assert_eq!(keys(&schema), written(&json));
         assert_eq!(keys(&schema["$defs"]["mod"]), written(&json["mods"][0]));
         assert_eq!(keys(&schema["$defs"]["version"]), written(&json["mods"][0]["kept"][0]));
         assert_eq!(keys(&schema["$defs"]["versionRef"]), written(&json["mods"][0]["kept"][0]["replacedBy"]));
-        assert_eq!(keys(&schema["$defs"]["restore"]), written(&json["mods"][0]["restore"]));
-        assert_eq!(keys(&schema["$defs"]["settings"]), written(&json["mods"][0]["restore"]["settings"]));
+        assert_eq!(keys(&schema["$defs"]["restore"]), written(&json["mods"][0]["restores"][0]));
+        assert_eq!(keys(&schema["$defs"]["settings"]), written(&json["mods"][0]["restores"][0]["settings"]));
+        assert_eq!(keys(&schema["$defs"]["txn"]), written(&json["pending"][0]));
+        assert_eq!(keys(&schema["$defs"]["txnChange"]), written(&json["pending"][0]["changes"][0]));
     }
 
     #[test]
@@ -989,7 +1329,7 @@ mod tests {
         std::fs::create_dir_all(dirs.library()).unwrap();
         std::fs::write(state_path(&dirs), r#"{"format": 2, "mods": "later"}"#).unwrap();
         assert!(load(&dirs).is_none());
-        assert_eq!(update(&dirs, |_| (true, ())).unwrap(), None);
+        assert!(update(&dirs, |_, _| ()).unwrap().is_none());
         assert_eq!(std::fs::read_to_string(state_path(&dirs)).unwrap(), r#"{"format": 2, "mods": "later"}"#);
         let _ = std::fs::remove_dir_all(root);
     }

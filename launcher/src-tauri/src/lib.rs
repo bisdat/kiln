@@ -245,6 +245,10 @@ fn after_folder(app: &tauri::AppHandle) {
     // the installed runtime's and the bundles' sha256s from the last run (a start does not hash 1.5 GB again)
     if let Ok(d) = state::dirs() {
         kiln_manage::filecache::persist_at(&state::file_hashes(&d));
+        // kept versions (kiln_manage::kept): a change a stop left half done is finished or undone before anything uses them
+        for line in kiln_manage::kept::recover(&d) {
+            commands::app::launcher_log("library", &line);
+        }
     }
     watch::start(app.clone());
     let shipped = app.clone();

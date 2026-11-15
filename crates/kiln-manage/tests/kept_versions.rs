@@ -335,6 +335,8 @@ fn a_kept_entry_removed_by_hand_is_forgotten() {
     assert_eq!(w.versions(ModKind::Greeneye, "worstmap"), [("2.0.0".into(), false)]);
     let e = kept::rollback(&w.dirs, Some(&w.g), &w.pid(), ModKind::Greeneye, "worstmap", None).unwrap_err();
     assert_eq!(e.code, ErrorCode::NotFound, "{e:?}");
+    // the next start (or change) tidies under the state's lock: the settings copy of the entry that is gone goes
+    kept::recover(&w.dirs);
     assert!(!w.dirs.library().join(kept::SETTINGS_DIR).join("greeneye/worstmap").exists(), "its settings copy is gone");
     // the launcher's Remove of a kept version
     w.drop_mod(&greeneye(&w.root, "3.0.0"));
