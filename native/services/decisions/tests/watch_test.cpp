@@ -2,6 +2,7 @@
 // Host test of kiln.component_changes' core (watch_core.h, chapter 07 §4.6) on a fake world: budgets and refusals,
 // link expansion, baselines and compares, tokens and the origin rule, the two-frame queue and its batches, world stop,
 // another life of an id, players, owners that go away. tests/run.sh builds it with ASan/UBSan.
+#include <atomic>
 #include <cstdio>
 #include <map>
 #include <set>
@@ -26,7 +27,9 @@ struct World : Ports {
     uint64_t serial = 0;
     std::map<std::pair<uint32_t, uint64_t>, uint64_t> serials;  // (entity, life) -> life serial
 
+    uint64_t reads = 0, keys = 0;  // how often the service read the world (cost tests)
     bool read(uint32_t e, uint32_t c, uint8_t* out, uint32_t* size) override {
+        ++reads;
         auto it = comps.find({e, c});
         if (it == comps.end() || gone.count(e)) return *size = 0, false;
         *size = static_cast<uint32_t>(it->second.size());
@@ -41,6 +44,7 @@ struct World : Ports {
         return true;
     }
     bool key(uint32_t e, KilnEventEntityKey* out, bool* exists) override {
+        ++keys;
         *out = KilnEventEntityKey{};
         *exists = !gone.count(e) && (spawn.count(e) || comps.lower_bound({e, 0}) != comps.end());
         auto it = spawn.find(e);
@@ -920,6 +924,118 @@ static void test_split() {
     (void)b;
 }
 
+// The review's overlap case: a change in Pre, then a second watch on the same pair, then a change in Sim: two records of
+// one pair in one step (the old watch's interval ends at the split; the new one's starts there). Documented, not merged.
+static void test_split_same_step() {
+    Run r;
+    r.w.entity(2000);
+    r.w.put(2000, KILN_WATCH_HEALTH, bytes40(1));
+    const uint64_t a = r.watch({2000}, 1);
+    r.tick();
+    r.w.set_byte(2000, 1, 0, 2);  // Pre
+    const uint64_t b = r.watch({2000}, 1);
+    r.tick([&] { r.w.set_byte(2000, 1, 0, 3); });  // Sim
+    const auto ch = r.drain();
+    CHECK(ch.size() == 2);
+    if (ch.size() == 2) {
+        CHECK(ch[0].step == r.step && ch[1].step == r.step);
+        CHECK(ch[0].watch_count == 1 && ch[0].watches[0] == a && ch[0].before[0] == 1 && ch[0].after[0] == 2);
+        CHECK(ch[1].watch_count == 2 && ch[1].before[0] == 2 && ch[1].after[0] == 3);
+        CHECK(ch[1].since_step == r.step && ch[0].since_step == r.step - 1);  // the intervals: they meet at the split
+    }
+    (void)b;
+}
+
+// window_end reads every pair once (an absent one too), and asks each root's identity once, not once per component.
+static void test_end_reads_once() {
+    Run r;
+    r.w.entity(2000);
+    r.w.put(2000, KILN_WATCH_HEALTH, bytes40(1));
+    r.w.put(2000, KILN_WATCH_STAMINA, bytes40(1));  // Mana absent
+    r.watch({2000}, bit(KILN_WATCH_HEALTH) | bit(KILN_WATCH_STAMINA) | bit(KILN_WATCH_MANA));
+    r.tick();
+    r.tick();
+    r.w.reads = r.w.keys = 0;
+    r.tick();  // steady: begin reads nothing, end reads the three pairs
+    CHECK(r.w.reads == 3);
+    CHECK(r.w.keys == 2);  // begin's root check and end's, one each
+}
+
+// The writers' filter (watched()): every watched pair's entity and component, from the first window on; nothing once
+// nothing is watched; another entity is mostly 0 (a hash: it may say yes); and a pair watched across a rebuild never
+// reads 0 from another thread while the filter is rewritten.
+static void test_writer_filter() {
+    Run r;
+    r.w.entity(2000);
+    r.w.put(2000, KILN_WATCH_HEALTH, bytes40(1));
+    CHECK(r.c.watched(2000) == 0);
+    const uint64_t a = r.watch({2000}, bit(KILN_WATCH_HEALTH));
+    r.tick();
+    CHECK((r.c.watched(2000) & bit(KILN_WATCH_HEALTH)) != 0);
+    // linked: an inventory and an item entity in it
+    r.w.entity(3000);
+    r.w.link(3000, {{3100, 2}});
+    r.w.stacks(3100, {{{7, 1, 3200}}});
+    r.w.put(3200, KILN_WATCH_FUEL, bytes40(5));
+    const uint64_t b = r.watch({3000}, bit(KILN_WATCH_INVENTORY) | bit(KILN_WATCH_FUEL), KILN_WATCH_EXPAND_INVENTORY);
+    r.tick();
+    CHECK((r.c.watched(3100) & bit(KILN_WATCH_INVENTORY)) != 0);
+    CHECK((r.c.watched(3200) & bit(KILN_WATCH_FUEL)) != 0);
+    // many pairs: no false negative, few false positives
+    Run m;
+    std::vector<uint64_t> ids;
+    for (uint32_t w = 0; w < 32; ++w) {
+        std::vector<uint32_t> roots;
+        for (uint32_t k = 0; k < 125; ++k) {
+            const uint32_t e = 5000 + w * 125 + k;
+            m.w.entity(e);
+            m.w.put(e, KILN_WATCH_HEALTH, bytes40(1));
+            roots.push_back(e);
+        }
+        ids.push_back(m.watch(roots, bit(KILN_WATCH_HEALTH)));
+    }
+    m.tick();
+    uint32_t missing = 0, wrong_component = 0, positives = 0;
+    for (uint32_t e = 5000; e < 5000 + 32 * 125; ++e) {
+        missing += (m.c.watched(e) & bit(KILN_WATCH_HEALTH)) ? 0u : 1u;
+    }
+    for (uint32_t e = 100000; e < 100000 + 65536; ++e) {
+        const uint32_t v = m.c.watched(e);
+        positives += v ? 1u : 0u;
+        wrong_component += (v & ~bit(KILN_WATCH_HEALTH)) ? 1u : 0u;
+    }
+    CHECK(missing == 0);
+    CHECK(wrong_component == 0);
+    CHECK(positives < 65536 / 10);  // 4000 entities in 65536 slots
+    std::printf("writer filter: 4000 watched entities, %u of 65536 unwatched ids answered yes\n", positives);
+    // a rebuild (another watch made and ended) while a writer thread asks for a pair watched all along
+    std::atomic<bool> done{false};
+    std::atomic<uint32_t> zeros{0};
+    std::thread reader([&] {
+        while (!done.load())
+            if ((m.c.watched(5000) & bit(KILN_WATCH_HEALTH)) == 0) zeros.fetch_add(1);
+    });
+    for (int i = 0; i < 200; ++i) {
+        m.w.entity(90000 + i);
+        m.w.put(90000 + i, KILN_WATCH_HEALTH, bytes40(1));
+        m.c.remove(m.mod, ids.back());
+        ids.back() = m.watch({90000u + i}, bit(KILN_WATCH_HEALTH));
+        m.tick();
+    }
+    done.store(true);
+    reader.join();
+    CHECK(zeros.load() == 0);
+    // nothing watched: 0
+    r.c.remove(r.mod, a);
+    r.c.remove(r.mod, b);
+    CHECK(r.c.watched(2000) == 0 && r.c.watched(3100) == 0);
+    r.watch({2000}, bit(KILN_WATCH_HEALTH));
+    r.tick();
+    CHECK(r.c.watched(2000) != 0);
+    r.c.world_stopped("test");
+    CHECK(r.c.watched(2000) == 0);
+}
+
 static void test_typed() {
     Run r;
     r.w.entity(2000);
@@ -999,6 +1115,9 @@ int main() {
     test_links();
     test_dynamic_budget();
     test_split();
+    test_split_same_step();
+    test_end_reads_once();
+    test_writer_filter();
     test_steady();
     test_typed();
     test_stop();

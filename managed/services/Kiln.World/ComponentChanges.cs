@@ -666,16 +666,31 @@ public static unsafe class ComponentChanges
     /// a watch needs only then.</summary>
     internal static bool Watching => Volatile.Read(ref _watchCount) > 0;
 
+    /// <summary>The watched component index (1..6) of a game component name when a managed watch exists and the
+    /// service's filter may watch it on <paramref name="entity"/> now, else 0: a managed writer keeps the bytes before a
+    /// write only then. Any thread, lock free, no allocation.</summary>
+    internal static uint WatchedIndex(uint entity, string component)
+    {
+        if (!Watching) return 0;
+        var index = ComponentChangesNative.IndexOf(component);
+        var t = (ComponentChangesNative.Table*)Volatile.Read(ref _table);
+        if (index == 0 || t == null) return 0;
+        if (t->Header.Size < ComponentChangesNative.WatchedEnd || t->Watched == null) return index;  // no filter: every one
+        return (t->Watched(entity) & (1u << (int)(index - 1))) != 0 ? index : 0;
+    }
+
     /// <summary>A program wrap's stage changed a component through an entity view (Kiln.Systems): the whole component
     /// before and after, the wrap's mod. Any thread (slice threads, workers too); cheap when nothing is watched.</summary>
-    internal static void NoteWrapWrite(uint entity, string component, ReadOnlySpan<byte> before, ReadOnlySpan<byte> after, string modId)
+    internal static void NoteWrapWrite(uint entity, string component, ReadOnlySpan<byte> before, ReadOnlySpan<byte> after, string modId) =>
+        NoteWrapWrite(entity, ComponentChangesNative.IndexOf(component), before, after, modId);
+
+    internal static void NoteWrapWrite(uint entity, uint index, ReadOnlySpan<byte> before, ReadOnlySpan<byte> after, string modId)
     {
         if (!Watching) return;
         var t = (ComponentChangesNative.Table*)Volatile.Read(ref _table);
         var owner = _owner;
         if (t == null || owner == 0 || before.Length != after.Length || before.Length is 0 or > 256 || string.IsNullOrEmpty(modId)) return;
-        var index = ComponentChangesNative.IndexOf(component);
-        if (index == 0) return;
+        if (index is 0 or > 6) return;
         Span<byte> id = stackalloc byte[128];
         var n = Encoding.UTF8.GetByteCount(modId);
         if (n > 127) return;  // the service would call it Unknown
@@ -757,13 +772,15 @@ internal static unsafe class ComponentChangesNative
     public const uint ChangeV1Size = 1768;  // the S1 prefix; the service writes 1808 (the appended fields)
     public static readonly uint V1Size = (uint)(sizeof(ServiceHeader) + 13 * sizeof(nint));
     public static readonly uint CountersEnd = (uint)(sizeof(ServiceHeader) + 16 * sizeof(nint));
+    public static readonly uint WatchedEnd = (uint)(sizeof(ServiceHeader) + 17 * sizeof(nint));
     public static readonly string[] Names = ["", "Health", "Stamina", "Mana", "Fuel", "Inventory", "SlotSelection"];
 
     public static uint IndexOf(string component)
     {
-        var name = component.StartsWith("keen::ecs::", StringComparison.Ordinal) ? component["keen::ecs::".Length..] : component;
+        var name = component.AsSpan();
+        if (name.StartsWith("keen::ecs::", StringComparison.Ordinal)) name = name["keen::ecs::".Length..];
         for (uint i = 1; i < Names.Length; i++)
-            if (Names[i] == name) return i;
+            if (name.SequenceEqual(Names[i])) return i;
         return 0;
     }
 
@@ -853,5 +870,6 @@ internal static unsafe class ComponentChangesNative
         public delegate* unmanaged[Cdecl]<uint> WindowWanted;
         public delegate* unmanaged[Cdecl]<uint, void> WindowFaulted;
         public delegate* unmanaged[Cdecl]<Counters*, int> CountersFn;
+        public delegate* unmanaged[Cdecl]<uint, uint> Watched;
     }
 }

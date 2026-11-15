@@ -224,7 +224,8 @@ const KilnComponentChangesApiV1* g_changes = nullptr;
 struct NotedWrite {
     uint32_t index, entity, hash, size = 0;
     uint8_t before[KILN_WATCH_MAX_BYTES];
-    NotedWrite(uint32_t idx, uint32_t e, uint32_t h) : index(kiln_component_watching(g_changes) ? idx : 0), entity(e), hash(h) {
+    // copies only when the service may watch this entity's component (its lock-free filter)
+    NotedWrite(uint32_t idx, uint32_t e, uint32_t h) : index(idx && kiln_component_watched(g_changes, e, idx) ? idx : 0), entity(e), hash(h) {
         uint64_t n = 0;
         const void* p = index ? component(world(), hash, entity, &n) : nullptr;
         if (p && n >= 1 && n <= KILN_WATCH_MAX_BYTES && copy_bytes(before, p, n)) size = static_cast<uint32_t>(n);

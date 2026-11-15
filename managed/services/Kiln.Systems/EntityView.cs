@@ -378,6 +378,8 @@ internal sealed unsafe class ViewContext
         public int List, Index, Size, At;
         public byte* Ptr;
         public string Component;
+        public bool Kept;      // its bytes before are in _before
+        public uint WatchIndex;  // 07 S7: a component a watch may cover on this entity (kiln_component_changes.h index), 0 none
     }
 
     private Rec[] _recs = new Rec[8];
@@ -385,7 +387,7 @@ internal sealed unsafe class ViewContext
     private byte[] _before = new byte[256];
     private int _used;
     private uint _entity;
-    private bool _track;
+    private bool _track, _events, _watching;
     private ulong _step;
     private ManagedStage? _stage;
 
@@ -402,7 +404,10 @@ internal sealed unsafe class ViewContext
         ctx._step = s->Step;
         // the change events: server worlds only (a client world's are chapter 14's), and only while someone listens
         // the bytes before are kept for ComponentWrittenEvent and, since 07 S7, for a component watch (its Kiln origin)
-        ctx._track = stage.Wrap.World == WorldKind.Server && (Events.HasSubscribers<ComponentWrittenEvent>() || ComponentChanges.Watching);
+        // (07 S7 since the review: only a component the service's filter may watch on that entity is kept for a watch)
+        ctx._events = stage.Wrap.World == WorldKind.Server && Events.HasSubscribers<ComponentWrittenEvent>();
+        ctx._watching = stage.Wrap.World == WorldKind.Server && ComponentChanges.Watching;
+        ctx._track = ctx._events || ctx._watching;
         ctx._count = 0;
         ctx._used = 0;
         ctx._entity = 0;
@@ -434,13 +439,15 @@ internal sealed unsafe class ViewContext
             throw new InvalidOperationException($"{Program}: {component} could not be marked for save and replication (result {rc})");
         if (_count == _recs.Length) Array.Resize(ref _recs, _count * 2);
         var at = _used;
-        if (_track)
+        var watchIndex = _watching ? ComponentChanges.WatchedIndex(entity, component) : 0u;
+        var keep = _events || watchIndex != 0;
+        if (keep)
         {
             if (_used + size > _before.Length) Array.Resize(ref _before, Math.Max(_before.Length * 2, _used + size));
             new ReadOnlySpan<byte>(p, size).CopyTo(_before.AsSpan(_used));
             _used += size;
         }
-        _recs[_count++] = new Rec { List = list, Index = index, Size = size, At = at, Ptr = p, Component = component };
+        _recs[_count++] = new Rec { List = list, Index = index, Size = size, At = at, Ptr = p, Component = component, Kept = keep, WatchIndex = watchIndex };
     }
 
     // The stage is done with the entity: its changed components go to the tick thread.
@@ -450,12 +457,14 @@ internal sealed unsafe class ViewContext
             for (var i = 0; i < _count; i++)
             {
                 ref var r = ref _recs[i];
+                if (!r.Kept) continue;
                 var now = new ReadOnlySpan<byte>(r.Ptr, r.Size);
                 var before = _before.AsSpan(r.At, r.Size);
                 if (now.SequenceEqual(before)) continue;
-                WrapWrites.Add(new WrapWrites.Write(_step, _entity, ComponentName(r.Component), before.ToArray(), now.ToArray(),
-                    stage.Wrap.Writer, stage.Wrap.ModId));
-                ComponentChanges.NoteWrapWrite(_entity, ComponentName(r.Component), before, now, stage.Wrap.ModId);  // 07 S7
+                if (_events)
+                    WrapWrites.Add(new WrapWrites.Write(_step, _entity, ComponentName(r.Component), before.ToArray(), now.ToArray(),
+                        stage.Wrap.Writer, stage.Wrap.ModId));
+                if (r.WatchIndex != 0) ComponentChanges.NoteWrapWrite(_entity, r.WatchIndex, before, now, stage.Wrap.ModId);  // 07 S7
             }
         _count = 0;
         _used = 0;

@@ -9,6 +9,7 @@
 #include <windows.h>
 
 #include <atomic>
+#include <new>
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -1172,11 +1173,39 @@ bool run_move(const Access& a, const MoveJob& job, uint8_t* tx, KilnItemsMoveRes
     }
 }
 
-// ---- kiln.component_changes (07 S7): engine.h WatchNote ----
+// ---- kiln.component_changes (07 S7): engine.h WatchNote, NoteLease ----
 namespace {
 std::atomic<const KilnComponentChangesApiV1*> g_note_table{nullptr};
 std::atomic<KilnOwner> g_note_owner{0};
 const Acc kNoteAcc[7] = {A_COUNT, A_COUNT, A_COUNT, A_COUNT, A_FUEL, A_INVENTORY, A_SLOTSEL};  // by component index
+constexpr int kNotePool = 2;  // the program's thread and one nested job at most; more get a note of their own
+std::atomic<WatchNote*> g_note_pool[kNotePool] = {};
+std::atomic<bool> g_note_busy[kNotePool] = {};
+std::atomic<uint64_t> g_note_extra{0};
+
+WatchNote* note_lend(int* slot) {
+    for (int i = 0; i < kNotePool; ++i) {
+        bool free = false;
+        if (!g_note_busy[i].compare_exchange_strong(free, true, std::memory_order_acquire)) continue;
+        WatchNote* n = g_note_pool[i].load(std::memory_order_relaxed);
+        if (!n) {
+            n = new (std::nothrow) WatchNote;
+            if (!n) {
+                g_note_busy[i].store(false, std::memory_order_release);
+                return nullptr;
+            }
+            g_note_pool[i].store(n, std::memory_order_relaxed);
+        }
+        *slot = i;
+        n->count = 0;
+        return n;
+    }
+    *slot = -1;
+    g_note_extra.fetch_add(1, std::memory_order_relaxed);
+    WatchNote* n = new (std::nothrow) WatchNote;
+    if (n) n->count = 0;
+    return n;
+}
 
 bool note_read(const Access& a, uint32_t index, KilnEntity e, uint8_t* out, uint32_t* size) {
     const Acc which = kNoteAcc[index];
@@ -1188,8 +1217,13 @@ bool note_read(const Access& a, uint32_t index, KilnEntity e, uint8_t* out, uint
     *size = static_cast<uint32_t>(ps.size);
     return true;
 }
+}  // namespace
 
-void note_add(const Access& a, uint32_t index, KilnEntity e, WatchNote* note) {
+// One entity's component: copied only when the service may watch it (its filter), into a note lent at the first one.
+void note_add(const Access& a, uint32_t index, KilnEntity e, NoteLease* lease) {
+    if (!e || !kiln_component_watched(g_note_table.load(std::memory_order_acquire), e, index)) return;
+    if (!lease->note_ && !(lease->note_ = note_lend(&lease->slot_))) return;
+    WatchNote* note = lease->note_;
     if (note->count >= WatchNote::kMax) return;
     for (uint32_t i = 0; i < note->count; ++i)
         if (note->items[i].entity == e && note->items[i].index == index) return;
@@ -1199,34 +1233,35 @@ void note_add(const Access& a, uint32_t index, KilnEntity e, WatchNote* note) {
     if (note_read(a, index, e, it.bytes, &it.size)) ++note->count;
 }
 
-void note_begin_impl(const Access& a, const KilnEntity* holders, uint32_t n, WatchNote* note) {
+namespace {
+void note_begin_impl(const Access& a, const KilnEntity* holders, uint32_t n, NoteLease* lease) {
     for (uint32_t h = 0; h < n; ++h) {
         const KilnEntity holder = holders[h];
         if (!holder) continue;
-        note_add(a, KILN_WATCH_SLOT_SELECTION, holder, note);
-        note_add(a, KILN_WATCH_FUEL, holder, note);
+        note_add(a, KILN_WATCH_SLOT_SELECTION, holder, lease);
+        note_add(a, KILN_WATCH_FUEL, holder, lease);
         const uint8_t* setup = a.acc[A_SETUP] ? setup_via_access(&a, holder) : nullptr;
         if (!setup) continue;
         Tree t{};
         walk(setup, &setup_via_access, &a, &t, 0, -1);
         for (uint32_t i = 0; i < t.n; ++i) {
-            note_add(a, KILN_WATCH_INVENTORY, t.ids[i], note);
+            note_add(a, KILN_WATCH_INVENTORY, t.ids[i], lease);
             const auto* inv = a.acc[A_INVENTORY] ? static_cast<const uint8_t*>(other(a, A_INVENTORY, t.ids[i])) : nullptr;
             if (!inv) continue;
             for (uint32_t k = 0; k < 8; ++k) {
                 const KilnEntity pide = rd<uint32_t>(inv + 12 * k, 8);
-                if (pide && pide != 0xFFFFFFFFu) note_add(a, KILN_WATCH_FUEL, pide, note);
+                if (pide && pide != 0xFFFFFFFFu) note_add(a, KILN_WATCH_FUEL, pide, lease);
             }
         }
     }
 }
 
-bool note_begin_guarded(const Access& a, const KilnEntity* holders, uint32_t n, WatchNote* note) {
+bool note_begin_guarded(const Access& a, const KilnEntity* holders, uint32_t n, NoteLease* lease, WatchNote** note) {
     __try {
-        note_begin_impl(a, holders, n, note);
+        note_begin_impl(a, holders, n, lease);
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
-        note->count = 0;
+        if (*note) (*note)->count = 0;
         return false;
     }
 }
@@ -1254,14 +1289,27 @@ void note_setup(const KilnComponentChangesApiV1* table, KilnOwner owner) {
 
 bool note_wanted() { return kiln_component_watching(g_note_table.load(std::memory_order_acquire)); }
 
-void note_begin(const Access& a, const KilnEntity* holders, uint32_t n, WatchNote* note) {
-    note->count = 0;
-    note_begin_guarded(a, holders, n, note);
+void note_pool_stats(uint32_t* pooled, uint64_t* extra) {
+    uint32_t n = 0;
+    for (const auto& p : g_note_pool) n += p.load(std::memory_order_relaxed) ? 1u : 0u;
+    *pooled = n;
+    *extra = g_note_extra.load(std::memory_order_relaxed);
 }
 
-void note_end(const Access& a, const WatchNote& note) {
+void NoteLease::begin(const Access& a, const KilnEntity* holders, uint32_t n) {
+    if (note_) note_->count = 0;
+    note_begin_guarded(a, holders, n, this, &note_);
+}
+
+void NoteLease::end(const Access& a) {
     const auto* t = g_note_table.load(std::memory_order_acquire);
-    if (note.count && t) note_end_guarded(a, note, t, g_note_owner.load(std::memory_order_relaxed));
+    if (note_ && note_->count && t) note_end_guarded(a, *note_, t, g_note_owner.load(std::memory_order_relaxed));
+}
+
+NoteLease::~NoteLease() {
+    if (!note_) return;
+    if (slot_ >= 0) g_note_busy[slot_].store(false, std::memory_order_release);
+    else delete note_;
 }
 
 }  // namespace kitems

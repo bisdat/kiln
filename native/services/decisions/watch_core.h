@@ -10,6 +10,7 @@
 #pragma once
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -194,6 +195,15 @@ public:
     uint32_t window_wanted() const {
         if (!on() || stopped()) return 0;
         return any() ? 1u : 0u;
+    }
+
+    // Lock-free, any thread (a writer asks it before it copies a component): the components (mask, bit(index)) that may
+    // be watched on `entity` in this interval. A filter of the pairs (65536 slots by a hash of the id): it can name a
+    // component that is not watched, never miss one that is. 0: copy nothing, tell nothing.
+    uint32_t watched(uint32_t entity) const {
+        if (!on() || stopped() || !any()) return 0;
+        const uint32_t s = slot_of(entity);
+        return static_cast<uint32_t>(filter_[s >> 3].load(std::memory_order_acquire) >> ((s & 7u) * 8u)) & KILN_WATCH_COMPONENTS_ALL;
     }
 
     // ---- watches (world thread, world-safe phase) ----
@@ -590,77 +600,89 @@ public:
             return true;
         });
         present_ = present;
+        rebuilt();
     }
 
     void window_end(uint64_t epoch, uint64_t step) {
         std::lock_guard lock(m_);
         if (!on() || stopped() || epoch != epoch_) return;
-        // Components absent at the last compare can appear during Sim. Enforce the
-        // present-pair budget before emitting their first change, not one window later.
-        uint32_t present_upper = 0;
-        uint8_t probe[KILN_WATCH_MAX_BYTES];
-        for (const auto& [id, pr] : pairs_) {
+        // One read of every pair: what differs from its baseline is kept (a reused scratch, nothing is changed yet), and
+        // how many pairs are present now. Nothing is emitted before the identity and budget checks below.
+        diffs_.clear();
+        uint32_t live = 0;
+        uint8_t now[KILN_WATCH_MAX_BYTES];
+        for (auto& [id, pr] : pairs_) {
             uint32_t size = 0;
-            if (pr.present || (p_->read(pr.key.entity, pr.component, probe, &size) && size >= 1 && size <= KILN_WATCH_MAX_BYTES))
-                ++present_upper;
+            const bool present = p_->read(pr.key.entity, pr.component, now, &size) && size >= 1 && size <= KILN_WATCH_MAX_BYTES;
+            pr.live = present;
+            live += present ? 1u : 0u;
+            if (present == pr.present && (!present || (size == pr.size && std::memcmp(now, pr.base.data(), size) == 0))) continue;
+            Diff& d = diffs_.emplace_back();  // the vector keeps its capacity from step to step
+            d.pr = &pr;
+            d.present = present;
+            d.size = present ? size : 0;
+            if (present) std::memcpy(d.now.data(), now, size);
         }
-        if (present_upper > KILN_WATCH_MAX_PAIRS) {
-            // Account for components that disappeared too, so an exchange at the bound fits.
-            std::unordered_set<uint64_t> live;
-            for (const auto& [id, pr] : pairs_) {
-                uint32_t size = 0;
-                if (p_->read(pr.key.entity, pr.component, probe, &size) && size >= 1 && size <= KILN_WATCH_MAX_BYTES) live.insert(id);
+        // A root can be destroyed and its id reused inside Sim, after window_begin checked it: the replacement's bytes
+        // are never labelled with the old life. Each root entity once (root_lives_, kept with the pairs). An absent root
+        // still reports its components disappearing; a live root of another life (or of none) suspends its watches.
+        for (const RootLife& r : root_lives_) {
+            KilnEventEntityKey key{};
+            bool exists = false;
+            const bool known = p_->key(r.entity, &key, &exists);
+            if (!exists || (known && same_life(key, r.key))) continue;
+            for (uint32_t c = KILN_WATCH_HEALTH; c <= KILN_WATCH_SLOT_SELECTION; ++c) {
+                const auto at = pairs_.find(pair_id(r.entity, c));
+                if (at == pairs_.end()) continue;
+                for (uint64_t wid : at->second.watches)
+                    if (Watch* w = find(wid); w && w->status == KILN_WATCH_READY)
+                        suspend(*w, KILN_WATCH_SUSPENDED_METADATA, "entity " + std::to_string(r.entity) +
+                                " is another entity now (or has no identity)");
             }
+        }
+        // Components absent at the last compare can appear during Sim: past 4096 present pairs, the watches that bring
+        // them over are suspended (in the order they were made, a shared pair counted once) before anything is emitted.
+        // A component that disappeared frees its place in the same step, so an exchange at the bound fits.
+        if (live > KILN_WATCH_MAX_PAIRS) {
             std::unordered_set<uint64_t> accepted;
             for (Watch& w : watches_) {
                 if (w.status != KILN_WATCH_READY) continue;
                 std::vector<uint64_t> added;
                 for (const auto& [id, pr] : pairs_)
-                    if (live.count(id) && !accepted.count(id) &&
-                        std::find(pr.watches.begin(), pr.watches.end(), w.id) != pr.watches.end()) added.push_back(id);
+                    if (pr.live && !accepted.count(id) && std::find(pr.watches.begin(), pr.watches.end(), w.id) != pr.watches.end())
+                        added.push_back(id);
                 if (accepted.size() + added.size() > KILN_WATCH_MAX_PAIRS)
-                    suspend(w, KILN_WATCH_SUSPENDED_BUDGET, "it would take the watched pairs past 4096");
+                    suspend(w, KILN_WATCH_SUSPENDED_BUDGET,
+                            "it would take the watched pairs past 4096 (" + std::to_string(accepted.size() + added.size()) + ")");
                 else accepted.insert(added.begin(), added.end());
             }
         }
-        // A root can be destroyed and its id reused inside Sim, after window_begin checked it.
-        // Never label the replacement's bytes with the old life. An absent root can still
-        // report its component disappearing; a live root without matching identity cannot.
-        for (const auto& [id, pr] : pairs_) {
-            if (pr.key.life_serial & kLinkedSerialBit) continue;
-            KilnEventEntityKey key{};
-            bool exists = false;
-            const bool known = p_->key(pr.key.entity, &key, &exists);
-            if (!exists || (known && same_life(key, pr.key))) continue;
-            for (uint64_t wid : pr.watches)
-                if (Watch* w = find(wid); w && w->status == KILN_WATCH_READY)
-                    suspend(*w, KILN_WATCH_SUSPENDED_METADATA, "entity " + std::to_string(pr.key.entity) +
-                            " is another entity now (or has no identity)");
-        }
         auto inactive = [&](uint64_t wid) { const Watch* w = find(wid); return !w || w->status != KILN_WATCH_READY; };
-        for (auto& [id, pr] : pairs_)
+        uint32_t present = 0;
+        for (auto& [id, pr] : pairs_) {
             std::erase_if(pr.watches, inactive);
+            if (pr.live && !pr.watches.empty()) ++present;
+        }
+        present_ = present;
         for (Change& c : pending_) std::erase_if(c.watches, inactive);
         std::erase_if(pending_, [](const Change& c) { return c.watches.empty(); });
         const bool lost = lost_.exchange(false);
         std::vector<Change> frame = std::move(pending_);
         pending_.clear();
-        uint8_t now[KILN_WATCH_MAX_BYTES];
+        for (Diff& d : diffs_) {
+            Pair& pr = *d.pr;
+            int32_t cur = 0, max = 0;
+            const bool typed = d.present && typed_of(pr, &cur, &max);
+            if (!pr.watches.empty()) frame.push_back(make_change(pr, d.present, d.now.data(), d.size, step, lost || pr.lost, typed, cur, max));
+            pr.present = d.present;
+            pr.size = d.size;
+            if (d.present) std::memcpy(pr.base.data(), d.now.data(), d.size);
+            pr.typed_ok = typed;
+            pr.cur = cur;
+            pr.max = max;
+        }
+        diffs_.clear();
         for (auto& [id, pr] : pairs_) {
-            uint32_t size = 0;
-            const bool present = p_->read(pr.key.entity, pr.component, now, &size) && size >= 1 && size <= KILN_WATCH_MAX_BYTES;
-            const bool changed = present != pr.present || (present && (size != pr.size || std::memcmp(now, pr.base.data(), size) != 0));
-            if (changed) {
-                int32_t cur = 0, max = 0;
-                const bool typed = present && typed_of(pr, &cur, &max);
-                if (!pr.watches.empty()) frame.push_back(make_change(pr, present, now, size, step, lost || pr.lost, typed, cur, max));
-                pr.present = present;
-                pr.size = present ? size : 0;
-                if (present) std::memcpy(pr.base.data(), now, size);
-                pr.typed_ok = typed;
-                pr.cur = cur;
-                pr.max = max;
-            }
             pr.since = step;
             pr.tokens.clear();
             pr.truncated = pr.lost = false;
@@ -700,6 +722,7 @@ public:
         pairs_.clear();
         linked_.clear();
         pending_.clear();
+        rebuilt();
         replan_ = true;
         c_.frames_dropped += frames_.size();
         frames_.clear();
@@ -718,6 +741,7 @@ public:
         stop_reason_ = why;
         while (!watches_.empty()) end_watch(watches_.front(), why);
         pairs_.clear();
+        rebuilt();
         frames_.clear();
         pending_.clear();
         batch_.clear();
@@ -799,6 +823,7 @@ private:
         KilnEventEntityKey key{};
         uint32_t component = 0;
         bool present = false, typed_ok = false, carried = false, truncated = false, lost = false;
+        bool live = false;  // window_end's scratch: present at its read
         uint32_t size = 0;
         int32_t cur = 0, max = 0;
         uint64_t since = 0;
@@ -806,6 +831,18 @@ private:
         std::vector<uint64_t> watches, prev_watches;
         std::vector<uint32_t> roots, prev_roots;
         std::vector<Token> tokens;
+    };
+    // window_end's scratch: a pair whose bytes or presence differ from its baseline, and what they are now.
+    struct Diff {
+        Pair* pr = nullptr;
+        bool present = false;
+        uint32_t size = 0;
+        std::array<uint8_t, KILN_WATCH_MAX_BYTES> now;
+    };
+    // A root entity of the pairs (not a linked one) and the life its pairs were planned for: window_end asks each once.
+    struct RootLife {
+        uint32_t entity = 0;
+        KilnEventEntityKey key{};
     };
     struct Want {
         KilnEventEntityKey key{};
@@ -904,6 +941,29 @@ private:
             linked_.clear();
             pending_.clear();
             present_ = 0;
+            rebuilt();
+        }
+    }
+    static uint32_t slot_of(uint32_t entity) { return (entity * 0x9E3779B1u) >> 16; }
+    // pairs_ was rebuilt (or cleared): the root lives window_end checks and the writers' filter follow it. The filter
+    // word by word: the new bits are set before the old ones are cleared, so a pair watched before and after never
+    // reads as unwatched, from any thread.
+    void rebuilt() {
+        root_lives_.clear();
+        filter_next_.fill(0);
+        for (const auto& [id, pr] : pairs_) {
+            const uint32_t s = slot_of(pr.key.entity);
+            filter_next_[s >> 3] |= static_cast<uint64_t>(bit(pr.component)) << ((s & 7u) * 8u);
+            if (!(pr.key.life_serial & kLinkedSerialBit)) root_lives_.push_back(RootLife{pr.key.entity, pr.key});
+        }
+        std::sort(root_lives_.begin(), root_lives_.end(), [](const RootLife& a, const RootLife& b) { return a.entity < b.entity; });
+        root_lives_.erase(std::unique(root_lives_.begin(), root_lives_.end(), [](const RootLife& a, const RootLife& b) { return a.entity == b.entity; }),
+                          root_lives_.end());
+        for (size_t i = 0; i < filter_next_.size(); ++i) {
+            const uint64_t want = filter_next_[i];
+            if (filter_[i].load(std::memory_order_relaxed) == want) continue;
+            filter_[i].fetch_or(want, std::memory_order_release);
+            filter_[i].store(want, std::memory_order_release);
         }
     }
     uint32_t release_locked(KilnOwner owner, const char* why) {
@@ -1229,6 +1289,11 @@ private:
     size_t tokens_in_interval_ = 0;
     bool replan_ = true;              // the watch set changed since the last refresh
     std::vector<uint32_t> leaves_;    // observe()'s scratch (no allocation per step once grown)
+    std::vector<Diff> diffs_;         // window_end's scratch
+    std::vector<RootLife> root_lives_;  // the distinct root entities of pairs_, rebuilt with it
+    static constexpr uint32_t kFilterSlots = 1u << 16;            // watched(): 8 slots of 8 bits per word, 64 KB
+    std::array<std::atomic<uint64_t>, kFilterSlots / 8> filter_{};
+    std::array<uint64_t, kFilterSlots / 8> filter_next_{};
     std::string stop_reason_;
     Counters c_;
     std::vector<uint64_t> begin_ns_, end_ns_;

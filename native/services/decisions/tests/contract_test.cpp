@@ -77,12 +77,13 @@ int main() {
     CHECK(sizeof(KilnComponentChangesCountersV1) == 184);
     CHECK(offsetof(KilnComponentChangesCountersV1, world_epoch) == 32);
     CHECK(offsetof(KilnComponentChangesCountersV1, begin_ns_p50) == 128);
-    CHECK(sizeof(KilnComponentChangesApiV1) == 8 + 16 * sizeof(void*));
+    CHECK(sizeof(KilnComponentChangesApiV1) == 8 + 17 * sizeof(void*));
     CHECK(offsetof(KilnComponentChangesApiV1, record_write) == 8 + 10 * sizeof(void*));
     CHECK(offsetof(KilnComponentChangesApiV1, window_end) == 8 + 12 * sizeof(void*));
     CHECK(offsetof(KilnComponentChangesApiV1, window_wanted) == 8 + 13 * sizeof(void*));  // appended
     CHECK(offsetof(KilnComponentChangesApiV1, window_faulted) == 8 + 14 * sizeof(void*));
     CHECK(offsetof(KilnComponentChangesApiV1, counters) == 8 + 15 * sizeof(void*));
+    CHECK(offsetof(KilnComponentChangesApiV1, watched) == 8 + 16 * sizeof(void*));  // appended with the writers' filter
     CHECK(kiln_component_index("Health", 6) == KILN_WATCH_HEALTH && kiln_component_index("SlotSelection", 13) == KILN_WATCH_SLOT_SELECTION);
     CHECK(kiln_component_index("Healt", 5) == 0 && kiln_component_index("Oxygen", 6) == 0);
     // two drops with the same SpawnTime are different keys

@@ -72,8 +72,9 @@ struct EngineStore final : WriteStore {
     ProgramCtx* ctx = nullptr;
     const uint64_t* iter = nullptr;
     void* storage = nullptr;
-    // the whole component right before a write of a watched component (kiln.component_changes)
-    uint8_t before[KILN_WATCH_MAX_BYTES] = {};
+    // the whole component right before a write of a watched component (kiln.component_changes); read only when
+    // before_size says it holds a copy, so it is not cleared per store
+    uint8_t before[KILN_WATCH_MAX_BYTES];
     uint32_t before_size = 0;
 
     uint64_t accessor(const WriteType& type) const {
@@ -112,9 +113,12 @@ struct EngineStore final : WriteStore {
         *data = const_cast<uint8_t*>(static_cast<const uint8_t*>(s.ptr));
         *size = static_cast<uint32_t>(s.size);
         before_size = 0;
-        if (kiln_component_watching(g_changes.load(std::memory_order_acquire)) && s.size <= KILN_WATCH_MAX_BYTES &&
-            watched_index(type.name) && seh_copy(before, s.ptr, s.size))
-            before_size = static_cast<uint32_t>(s.size);
+        // a copy only when this entity's component may be watched (the service's filter: an unwatched entity costs
+        // two lock-free reads)
+        if (const auto* t = g_changes.load(std::memory_order_acquire); kiln_component_watching(t) && s.size <= KILN_WATCH_MAX_BYTES) {
+            const uint32_t index = watched_index(type.name);
+            if (index && kiln_component_watched(t, entity, index) && seh_copy(before, s.ptr, s.size)) before_size = static_cast<uint32_t>(s.size);
+        }
         return true;
     }
     bool formulas(uint8_t* component, const WriteType&) override {
@@ -152,9 +156,13 @@ struct EngineStore final : WriteStore {
 // A tracked write that changed a watched component: kiln.component_changes gets the whole component before (from the
 // mark, right before the write) and after, the mod's id and the ticket (any thread: this program may run on a worker).
 void tell_changes(const WriteJob& job, const WriteType& type, EngineStore& store) {
+    if (store.before_size == 0) return;  // nothing copied: this entity's component is not watched
     const auto* t = g_changes.load(std::memory_order_acquire);
     const uint32_t index = watched_index(type.name);
-    if (!t || !index || store.before_size == 0) return;
+    if (!t || !index) {
+        store.before_size = 0;
+        return;
+    }
     const uint8_t* now = nullptr;
     uint32_t size = 0;
     uint8_t after[KILN_WATCH_MAX_BYTES];

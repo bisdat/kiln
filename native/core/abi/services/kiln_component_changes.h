@@ -173,10 +173,15 @@ typedef struct KilnComponentChangesApiV1 {
   * writer may ask it (kiln_component_watching) before it copies a component for record_write.
   * window_faulted: core only: a window call faulted; the core makes no further one. The service stops: every watch is
   * Disposed, record_write returns at once, the rows are lowered.
-  * counters: any thread. */
+  * counters: any thread.
+  * watched: any thread, lock-free: the components (mask, bit i - 1 for index i) that may be watched on `entity` in this
+  * interval. A filter: it may name a component that is not watched, never leaves out one that is (a pair a Ready watch
+  * covers from its baseline on). 0: a writer copies nothing and tells nothing for that entity. kiln_component_watched
+  * asks it. */
  uint32_t(KILN_CALL *window_wanted)(void);
  void(KILN_CALL *window_faulted)(uint32_t code);
  KilnResult(KILN_CALL *counters)(KilnComponentChangesCountersV1* out);
+ uint32_t(KILN_CALL *watched)(uint32_t entity);
 } KilnComponentChangesApiV1;
 
 #ifdef __cplusplus
@@ -185,7 +190,7 @@ static_assert(sizeof(KilnComponentChangeV1) <= 2048, "KilnComponentChangeV1 fits
 static_assert(sizeof(KilnComponentChangeV1) == 1808, "KilnComponentChangeV1 is 1808 bytes");
 static_assert(offsetof(KilnComponentChangeV1, world_kind) == 1768, "the appended part starts after source_mod");
 static_assert(sizeof(KilnKnownWriteV1) == 112, "KilnKnownWriteV1 is 112 bytes");
-static_assert(sizeof(KilnComponentChangesApiV1) == 8 + 16 * sizeof(void*), "13 members, then 3 appended");
+static_assert(sizeof(KilnComponentChangesApiV1) == 8 + 17 * sizeof(void*), "13 members, then 4 appended");
 static_assert(sizeof(KilnComponentChangesCountersV1) == 184, "KilnComponentChangesCountersV1 is 184 bytes");
 
 /* A native writer's call (C++): after a successful write of a watched component, with the whole component's bytes
@@ -213,6 +218,14 @@ static inline void kiln_component_write(const KilnComponentChangesApiV1* t, Kiln
 static inline bool kiln_component_watching(const KilnComponentChangesApiV1* t) {
     return t && t->header.size >= offsetof(KilnComponentChangesApiV1, window_wanted) + sizeof(void*) && t->window_wanted &&
            t->window_wanted() != 0;
+}
+/* Whether `component` (1..6) of `entity` may be watched now (lock-free, any thread): a writer asks it before it copies
+ * the component for kiln_component_write, so an entity nothing watches costs it no copy. A table without `watched`
+ * answers as kiln_component_watching does. */
+static inline bool kiln_component_watched(const KilnComponentChangesApiV1* t, uint32_t entity, uint32_t component) {
+    if (!kiln_component_watching(t) || component < 1 || component > 6) return false;
+    if (t->header.size < offsetof(KilnComponentChangesApiV1, watched) + sizeof(void*) || !t->watched) return true;
+    return (t->watched(entity) & (1u << (component - 1))) != 0;
 }
 /* The table a writer keeps (call at on_ready; null when kiln-decisions.dll is not loaded). */
 static inline const KilnComponentChangesApiV1* kiln_component_changes_find(const KilnApi* api) {

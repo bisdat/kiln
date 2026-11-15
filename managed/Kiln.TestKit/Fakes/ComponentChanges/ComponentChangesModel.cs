@@ -390,6 +390,20 @@ internal sealed unsafe class ComponentChangesModel
         }
     }
 
+    /// <summary>The service's writers' filter (kiln_component_changes.h <c>watched</c>): the components watched on the
+    /// entity now (the kit answers exactly, the service by a hash that may name more).</summary>
+    public uint Watched(uint entity)
+    {
+        lock (_lock)
+        {
+            if (_watches.Count == 0) return 0;
+            var mask = 0u;
+            foreach (var pr in _pairs.Values)
+                if (pr.Key.Entity == entity && pr.Watches.Count > 0) mask |= 1u << (int)(pr.Component - 1);
+            return mask;
+        }
+    }
+
     public int RecordWrite(ulong owner, N.KnownWrite* w)
     {
         if (w == null) return FakeTables.InvalidArgument;

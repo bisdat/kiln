@@ -322,9 +322,11 @@ bool run_move(const Access& a, const MoveJob& job, uint8_t* tx, KilnItemsMoveRes
 // ---- kiln.component_changes (since 0.2.0-dev.29, chapter 07 S7) ----
 // A job of this service may change Inventory (give, take, recipes, moves, equipment, sets), Fuel (water) and
 // SlotSelection of the entities it names and of their inventory trees. While anything is watched
-// (kiln_component_watching), note_begin copies them through the program's own accessors before the job and note_end
-// compares them after it; each one that changed is told to kiln.component_changes as kiln.items' write. Guarded (a fault
-// copies or tells nothing). An accessor the program does not have is skipped.
+// (kiln_component_watching), NoteLease::begin walks those trees (link ids only, no copy) and asks the service's filter
+// (kiln_component_watched) for each entity and component; only those it may watch are copied, into a note lent from a
+// small pool (no allocation once the pool has its notes; none at all when nothing the job touches is watched).
+// NoteLease::end compares them after the job; each one that changed is told to kiln.component_changes as kiln.items'
+// write. Guarded (a fault copies or tells nothing). An accessor the program does not have is skipped.
 struct WatchNote {
     struct Item {
         KilnEntity entity;
@@ -339,8 +341,27 @@ struct WatchNote {
 void note_setup(const KilnComponentChangesApiV1* table, KilnOwner owner);
 // Whether a job should be noted now (anything watched). Any thread, lock-free.
 bool note_wanted();
-void note_begin(const Access& a, const KilnEntity* holders, uint32_t n, WatchNote* note);
-void note_end(const Access& a, const WatchNote& note);
+class NoteLease {
+public:
+    NoteLease() = default;
+    NoteLease(const NoteLease&) = delete;
+    NoteLease& operator=(const NoteLease&) = delete;
+    ~NoteLease();
+    // Before the job: the watched components of the holders' trees (none copied when none is watched).
+    void begin(const Access& a, const KilnEntity* holders, uint32_t n);
+    // After the job: what changed is told.
+    void end(const Access& a);
+    explicit operator bool() const { return note_ != nullptr && note_->count != 0; }
+    // test and lab: how many components begin copied
+    uint32_t copied() const { return note_ ? note_->count : 0; }
+
+private:
+    friend void note_add(const Access& a, uint32_t index, KilnEntity e, NoteLease* lease);
+    WatchNote* note_ = nullptr;
+    int slot_ = -1;  // the pool's slot, -1 for a note of its own (the pool was busy)
+};
+// The pool's notes made so far and the notes made outside it (lab counters).
+void note_pool_stats(uint32_t* pooled, uint64_t* extra);
 
 // ---- equipment sets (v6, setexec.cpp) ----
 namespace sets {

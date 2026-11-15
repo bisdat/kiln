@@ -312,6 +312,7 @@ void KILN_CALL c_window_end(uint64_t epoch, uint64_t step) {
     if (g_core.any() && ++g_windows_with_pairs % 1500 == 0) log_stats();  // about once a minute while something is watched
 }
 uint32_t KILN_CALL c_window_wanted() { return g_core.window_wanted(); }
+uint32_t KILN_CALL c_watched(uint32_t entity) { return g_core.watched(entity); }
 void KILN_CALL c_window_faulted(uint32_t code) {
     char why[96];
     std::snprintf(why, sizeof why, "a window call of kiln.component_changes faulted (0x%08x)", code);
@@ -361,6 +362,7 @@ const KilnComponentChangesApiV1 kTable = {
     SAFE(c_window_wanted),   // appended (0.2.0-dev.29)
     SAFE(c_window_faulted),  // appended
     SAFE(c_counters),        // appended
+    SAFE(c_watched),         // appended
 };
 
 void KILN_CALL on_world(const KilnWorldEvent* e, void*) {

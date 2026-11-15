@@ -144,9 +144,11 @@ public sealed unsafe class ComponentChangesTests : IDisposable
         Assert.Equal(112, sizeof(N.KnownWrite));
         Assert.Equal(96, (int)Marshal.OffsetOf<N.KnownWrite>(nameof(N.KnownWrite.SourceMod)));
         Assert.Equal(184, sizeof(N.Counters));
-        Assert.Equal(8 + 16 * 8, sizeof(N.Table));
+        Assert.Equal(8 + 17 * 8, sizeof(N.Table));
         Assert.Equal(8 + 10 * 8, (int)Marshal.OffsetOf<N.Table>(nameof(N.Table.RecordWrite)));
         Assert.Equal(8 + 15 * 8, (int)Marshal.OffsetOf<N.Table>(nameof(N.Table.CountersFn)));
+        Assert.Equal(8 + 16 * 8, (int)Marshal.OffsetOf<N.Table>(nameof(N.Table.Watched)));
+        Assert.Equal((uint)sizeof(N.Table), N.WatchedEnd);
         Assert.Contains("kiln.component_changes", ServiceNames.All);
     }
 
@@ -304,6 +306,27 @@ public sealed unsafe class ComponentChangesTests : IDisposable
         Assert.Equal((100, 80, 120, 120), (a.Before, a.After, a.MaximumBefore, a.MaximumAfter));
         Assert.Same(Assert.Single(_changes), a.Change);
         Assert.True(a.Involves(e));
+    }
+
+    [Fact]
+    public void A_managed_writer_keeps_the_bytes_only_of_a_component_the_service_may_watch_on_that_entity()
+    {
+        // the review (07 S7): a wrap's write of an entity nothing watches must not copy it, even while a watch exists
+        using var kiln = Started();
+        var e = With(kiln, ("Health", Bytes(1)), ("Stamina", Bytes(2)));
+        var other = With(kiln, ("Health", Bytes(3)));
+        Assert.Equal(0u, ComponentChanges.WatchedIndex(e.Value, "Health"));  // nothing watched
+        var r = Watch(kiln, new(ComponentWatchScope.Entities, [e], ObservedComponents.Health));
+        Assert.NotNull(r.Watch);
+        kiln.Step();
+        Assert.Equal(1u, ComponentChanges.WatchedIndex(e.Value, "Health"));
+        Assert.Equal(1u, ComponentChanges.WatchedIndex(e.Value, "keen::ecs::Health"));
+        Assert.Equal(0u, ComponentChanges.WatchedIndex(e.Value, "Stamina"));  // not a watched component of it
+        Assert.Equal(0u, ComponentChanges.WatchedIndex(other.Value, "Health"));  // an entity nothing watches
+        Assert.Equal(0u, ComponentChanges.WatchedIndex(e.Value, "Oxygen"));
+        kiln.Call(() => r.Watch!.Dispose());
+        kiln.Step();
+        Assert.Equal(0u, ComponentChanges.WatchedIndex(e.Value, "Health"));
     }
 
     [Fact]

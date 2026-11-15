@@ -33,6 +33,7 @@ internal sealed unsafe class ComponentChangesFake : IKitFake
             t->AckEvents = &AckEvents;
             t->RecordWrite = &RecordWrite;
             t->CountersFn = &Counters;
+            t->Watched = &Watched;
             _table = t;  // window_begin, window_end, window_wanted, window_faulted: the core's, none here
         }
         KitBackend.Instance.RegisterTable(N.Service, (nint)_table);
@@ -140,6 +141,12 @@ internal sealed unsafe class ComponentChangesFake : IKitFake
         {
             return FakeTables.Internal;
         }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static uint Watched(uint entity)
+    {
+        try { return Model?.Watched(entity) ?? 0; } catch { return 0; }
     }
 
     /// <summary>The kit's tracked write (World.Write, World.Update ...) changed a component of the running harness.</summary>
