@@ -920,3 +920,143 @@ internal static unsafe class DecisionBroker
         Array.Clear(Pushed);
     }
 }
+
+/// <summary>The seam between Kiln.Players' intake of held client actions and the typed equipment decisions of
+/// Kiln.Items (chapter 07 §4.4; the two libraries do not reference each other). Kiln.Players' Pre pump is the one reader
+/// of kiln.playerstate's held actions: for an action the typed side decides it files one decision (kind 16 or 17) and
+/// posts the generic <c>PlayerClientActionEvent</c> first, then pumps the broker, whose dispatch hands the request to
+/// Kiln.Items' producer, which posts <c>PlayerEquippingEvent</c> with the generic vote as its prior and records the
+/// typed vote here; Kiln.Players then answers the game once: canceled when the generic OR the typed handlers canceled.
+/// Everything here runs on the tick thread in Pre.</summary>
+internal static class ClientActionDecisions
+{
+    /// <summary>One held client action while its decision is open.</summary>
+    internal sealed class Held
+    {
+        public uint Entity, Index, Version;
+        public string Name = "";
+        public byte[] Payload = [];
+        public EventEntityKey Player;
+        public bool GenericCanceled;
+        public string? GenericCanceledBy;
+        /// <summary>Set by the typed producer when it posted its event: what the typed handlers left.</summary>
+        public bool? TypedCanceled;
+        /// <summary>The typed side's description of the action, made in <see cref="ITyped.Payload"/> (its event's
+        /// change record).</summary>
+        public object? Context;
+    }
+
+    /// <summary>What Kiln.Items gives the intake (registered by its typed producer).</summary>
+    internal interface ITyped
+    {
+        /// <summary>True while a typed handler listens and its capability is on.</summary>
+        bool On { get; }
+
+        /// <summary>The decision kind for a client action of this name (16, 17), or 0 when the typed side does not decide it.</summary>
+        uint KindOf(string actionName);
+
+        /// <summary>The players to hold the typed actions for: every player, or these ids (a filter's entities that are
+        /// not players are covered by "every player": the typed event's own filter then picks).</summary>
+        DecisionInterest Interest();
+
+        /// <summary>The kind's request payload for <paramref name="held"/> (read in this Pre), or null when the action is
+        /// not one the typed side can describe (then only the generic vote counts).</summary>
+        byte[]? Payload(Held held);
+    }
+
+    /// <summary>What Kiln.Players gives the typed side (registered at its start).</summary>
+    internal interface IIntake
+    {
+        /// <summary>Starts the intake's Pre pump (a typed handler alone must hold the actions too).</summary>
+        void Start();
+
+        /// <summary>Null when kiln.playerstate can hold client actions selectively here (client_action_interest),
+        /// else why not.</summary>
+        string? WhyNotSelective();
+    }
+
+    private static readonly Dictionary<DecisionId, Held> Open = [];
+    private static volatile ITyped? _typed;
+    private static volatile IIntake? _intake;
+
+    public static ITyped? Typed => _typed;
+    public static IIntake? Intake => _intake;
+
+    /// <summary>The typed side registers (its first subscription); the intake's pump starts if Kiln.Players is up.</summary>
+    public static void SetTyped(ITyped? typed)
+    {
+        _typed = typed;
+        if (typed is not null) _intake?.Start();
+    }
+
+    /// <summary>Kiln.Players registers at its start (the first service tick, which can come after a mod's OnLoad
+    /// subscribed): the pump starts if the typed side is already there.</summary>
+    public static void SetIntake(IIntake? intake)
+    {
+        _intake = intake;
+        if (intake is not null && _typed is not null) intake.Start();
+    }
+
+    /// <summary>The intake opened a decision for <paramref name="held"/>.</summary>
+    public static void Opened(DecisionId id, Held held) => Open[id] = held;
+
+    /// <summary>The intake, for one held action: files its typed decision (kind 16 or 17) when the typed side decides
+    /// actions of this name, and returns the held record to fill with the generic vote and pass to
+    /// <see cref="Finish"/>; null when the typed side does not decide it or the service took nothing (then only the
+    /// generic vote counts, as without the typed side). Tick thread, Pre.</summary>
+    public static Held? Begin(ITyped? typed, uint entity, uint index, uint version, string name, byte[] payload, out DecisionId id)
+    {
+        id = default;
+        var kind = typed?.KindOf(name) ?? 0;
+        if (typed is null || kind == 0) return null;
+        var held = new Held { Entity = entity, Index = index, Version = version, Name = name, Payload = payload };
+        held.Player = DecisionBroker.ResolveEntity(new EntityId(entity), out var key, out _) == DecisionsNative.Ok
+            ? key
+            : new EventEntityKey(entity, false, 0, 0, 0, 0);
+        if (typed.Payload(held) is not { } request) return null;
+        if (DecisionBroker.Enqueue(kind, held.Player, held.Player, request, 0, out var rc) is not { } made || rc != DecisionsNative.Ok) return null;
+        id = made;
+        return held;
+    }
+
+    /// <summary>The intake, after the generic votes of a batch of held actions: opens their decisions, lets the broker
+    /// dispatch them in this Pre (kinds 16 and 17 are due in the Pre they are filed in: the typed events are posted
+    /// now), closes them and returns each action's final verdict, true for cancel: the generic OR the typed vote. Every
+    /// action of <paramref name="begun"/> is in the result once, also when the dispatch threw. Tick thread, Pre.</summary>
+    public static List<(Held Held, bool Cancel)> Finish(ulong step, IReadOnlyList<(DecisionId Id, Held Held)> begun)
+    {
+        foreach (var (id, held) in begun) Open[id] = held;
+        var verdicts = new List<(Held, bool)>(begun.Count);
+        try
+        {
+            DecisionBroker.Pump(step);
+        }
+        finally
+        {
+            foreach (var (id, held) in begun)
+            {
+                Open.Remove(id);
+                verdicts.Add((held, held.GenericCanceled || held.TypedCanceled == true));
+            }
+        }
+        return verdicts;
+    }
+
+    /// <summary>The typed producer's view of an open decision; null for one the intake did not open (a lab's, an old
+    /// one).</summary>
+    public static Held? Of(DecisionId id) => Open.GetValueOrDefault(id);
+
+    /// <summary>The intake's end of a decision: it is answered to the game now.</summary>
+    public static Held? Close(DecisionId id) => Open.Remove(id, out var held) ? held : null;
+
+    /// <summary>How many decisions are open (tests).</summary>
+    internal static int OpenCount => Open.Count;
+
+    /// <summary>Test hook.</summary>
+    internal static void ResetForTests()
+    {
+        Open.Clear();
+        _typed = null;
+        _intake = null;
+    }
+}

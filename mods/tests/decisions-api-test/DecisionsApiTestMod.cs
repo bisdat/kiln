@@ -208,6 +208,22 @@ public sealed class DecisionsApiTestMod : Mod
                     await Wait(2);
                 }
             }
+            // S6: the typed equipment verdict, plain and parallel forced (the hold point runs before the game's programs)
+            await EquipSuite("plain");
+            if (Kiln.Testing.LabSystems.Enabled)
+            {
+                Kiln.Testing.LabSystems.ForceParallel(2400);
+                await Wait(2);
+                try
+                {
+                    await EquipSuite("parallel");
+                }
+                finally
+                {
+                    Kiln.Testing.LabSystems.StopParallel();
+                    await Wait(2);
+                }
+            }
             Check(_ends.Values.All(l => l.Count == 1), $"no decision completed twice over the whole run ({_ends.Count} decisions)");
         }
         catch (Exception e)
@@ -562,6 +578,204 @@ public sealed class DecisionsApiTestMod : Mod
             foreach (var sub in subs) sub.Dispose();
             foreach (var e in made)
                 if (Spawn.Exists(e)) Spawn.Destroy(e);
+            await Wait(3);
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------ equipment ----
+    // A spawned 1_Player (watched by kiln.playerstate) gets two rings and arrows; the lab writes the game's own inputs into
+    // its PlayerInput in Pre, as a client's would arrive (playerstate-test's way): changeEquipmentAction at
+    // PlayerInput.fromClient +0x1c0 {slot u64, version u32, equipment slot u8, type u8}, actionbarSelectionAction at +0x60
+    // {version u32, index u8}. EQUIP-OR-VETO, EQUIP-STACK, an unequip, and the counter: an unrelated client action is
+    // not held while only a typed listener holds equipment inputs.
+
+    private const uint RingLight = 0x79442800, RingShock = 0x4623bcb0;
+    private const int ChangeAction = 0x08 + 0x1c0, BarAction = 0x08 + 0x60;
+    private nuint _world;
+
+    private static unsafe nuint ComponentOf(nuint world, string comp, EntityId e)
+    {
+        ulong* r = stackalloc ulong[6];
+        for (var i = 0; i < 6; i++) r[i] = 0;
+        ((delegate* unmanaged<ulong*, nuint, uint, uint, ulong*>)Symbols.Get("GetComponent"))(r, world, World.ComponentHash(comp), e.Value);
+        return (nuint)r[0];
+    }
+
+    private unsafe uint SendChange(EntityId e, SlotId slot, byte gameSlot, byte type)
+    {
+        var pi = ComponentOf(_world, "PlayerInput", e);
+        var v = *(uint*)(pi + ChangeAction + 8) + 1;
+        *(ulong*)(pi + ChangeAction) = slot.Value;
+        *(byte*)(pi + ChangeAction + 0xc) = gameSlot;
+        *(byte*)(pi + ChangeAction + 0xd) = type;
+        *(uint*)(pi + ChangeAction + 8) = v;
+        return v;
+    }
+
+    private unsafe void SendBar(EntityId e, byte index)
+    {
+        var pi = ComponentOf(_world, "PlayerInput", e);
+        *(byte*)(pi + BarAction + 4) = index;
+        *(uint*)(pi + BarAction) = *(uint*)(pi + BarAction) + 1;
+    }
+
+    private static uint ConsumedChange(EntityId e) => World.ReadBytes(e, "ServerConsumedPlayerInput") is { Length: >= 0x7c } b ? BitConverter.ToUInt32(b, 0x78) : 0;
+
+    private static uint Ring1(EntityId e) => PlayerStates.EquipmentOf(e)?[PlayerEquipSlot.Ring1].Id ?? 0;
+
+    private async Task EquipSuite(string run)
+    {
+        var made = new List<EntityId>();
+        var subs = new List<IDisposable>();
+        try
+        {
+            Check(Capabilities.Is("events.equip"), $"[{run}] events.equip is on ({Capabilities.Why("events.equip")})");
+            if (!Capabilities.Is("events.equip")) return;
+            if (_world == 0)
+            {
+                var hook = Hooks.Detour("GetComponent", c => { if (_world == 0) _world = (nuint)c[1]; return c.CallOriginal(); });
+                for (var n = 0; n < 200 && _world == 0; n++) await Wait(1);
+                hook.Remove();
+            }
+            if (_world == 0)
+            {
+                Check(false, $"[{run}] no world pointer for the input writes");
+                return;
+            }
+            var kinds = GameTypes.Available ? GameTypes.Find("keen::ecs::ChangeEquipment")?.EnumValues : null;
+            Log.Info($"decisions-api-test: keen::ecs::ChangeEquipment = {(kinds is null ? "unknown" : string.Join(", ", kinds.Select(k => $"{k.Name} {k.Value}")))}");
+            var unequip = (byte)(kinds?.Where(k => k.Name.Contains("nequip", StringComparison.OrdinalIgnoreCase)).Select(k => (long?)k.Value).FirstOrDefault() ?? 1);
+            var p = await Spawn.Entity("1_Player", new WorldPosition(3845, 835, 1476), options: new SpawnOptions { Tag = "decisions-api-test", Flags = SpawnFlags.Transient });
+            made.Add(p);
+            PlayerStates.Diagnostics.Watch(p);
+            for (var n = 0; n < 200 && Items.Read(p) is not { Initialized: true }; n++) await Wait(1);
+            await Items.Give(p, new ItemId(RingLight), 1);
+            await Items.Give(p, new ItemId(RingShock), 1);
+            // a player's arrows (not an enemy projectile's ammunition, which the game does not put in the arrow slot)
+            var arrowInfo = Items.All.Where(i => i.Category == ItemCategory.Ammunition && i.Name.Contains("Arrow", StringComparison.OrdinalIgnoreCase) &&
+                                                 !i.Name.Contains("Enemy", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(i => i.Name.Length).FirstOrDefault();
+            if (arrowInfo is not null) await Items.Give(p, arrowInfo.Id, 20);
+            await Wait(12);
+            var start = PlayerStates.EquipmentOf(p);
+            Log.Info($"decisions-api-test: [{run}] equipment at the start: ring0 0x{start?[PlayerEquipSlot.Ring0].Id:x8}, ring1 0x{start?[PlayerEquipSlot.Ring1].Id:x8}, arrow 0x{start?[PlayerEquipSlot.Arrow].Id:x8}; arrows {arrowInfo?.Name ?? "none"}");
+
+            var generic = new List<PlayerClientActionEvent>();
+            var typed = new List<PlayerEquippingEvent>();
+            var genericCancel = false;
+            Func<PlayerEquippingEvent, bool?> typedVote = _ => null;  // null: leave it, true: cancel, false: un-cancel
+            subs.Add(Events.On<PlayerClientActionEvent>(e =>
+            {
+                if (e.Player.Entity != p || e.Name != "changeEquipmentAction") return;
+                generic.Add(e);
+                if (genericCancel) e.Cancel();
+            }));
+            subs.Add(Events.On<PlayerEquippingEvent>(e =>
+            {
+                typed.Add(e);
+                if (typedVote(e) is { } v) e.Canceled = v;
+            }, EventFilter.ForEntity(p), receiveCanceled: true));
+            await Wait(2);
+
+            // the ring that is not in Ring1: a run of the input changes Ring1
+            SlotId RingSlot(uint other) => Items.Read(p)?.Slots.FirstOrDefault(s => s.Item.Value == other)?.Slot ?? default;
+            async Task<(PlayerClientActionEvent? G, PlayerEquippingEvent? T, DecisionResult? End, uint Version, uint Before, uint After)> Attempt()
+            {
+                generic.Clear();
+                typed.Clear();
+                var before = Ring1(p);
+                var other = before == RingLight ? RingShock : RingLight;
+                var v = SendChange(p, RingSlot(other), 11, 0);  // keen::EquipmentSlot.Ring1, equip
+                await Wait(6);
+                var t = typed.LastOrDefault();
+                return (generic.LastOrDefault(), t, t is null ? null : EndOf(x => x.Id == t.Id), v, before, Ring1(p));
+            }
+
+            // EQUIP-OR-VETO: the generic phase vetoes, a typed handler un-cancels: one native cancel
+            genericCancel = true;
+            typedVote = _ => false;
+            var a = await Attempt();
+            Check(a.G is { CanCancel: true } && a.T is { PriorCanceled: true, Canceled: false } && a.G.DecisionId == a.T.Id && a.T.Id.Request != 0 &&
+                  a.End is { Status: DecisionTerminal.Prevented } && a.After == a.Before && ConsumedChange(p) == a.Version,
+                $"[{run}] EQUIP-OR-VETO generic veto, typed un-cancel: generic id {a.G?.DecisionId.Request}, typed id {a.T?.Id.Request} prior {a.T?.PriorCanceled} by {a.T?.PriorCanceledBy}, " +
+                $"outcome {a.End?.Status}, ring1 0x{a.Before:x8}->0x{a.After:x8}, consumed {ConsumedChange(p)} of v{a.Version}");
+            // the reverse: the generic phase lets it be, the typed handler vetoes
+            genericCancel = false;
+            typedVote = _ => true;
+            var b = await Attempt();
+            Check(b.G is not null && b.T is { PriorCanceled: false, Canceled: true } && b.G.DecisionId == b.T.Id && b.End is { Status: DecisionTerminal.Prevented } &&
+                  b.After == b.Before && ConsumedChange(p) == b.Version,
+                $"[{run}] EQUIP-OR-VETO typed veto: outcome {b.End?.Status}, change {b.T?.Change}, ring1 0x{b.Before:x8}->0x{b.After:x8}, consumed {ConsumedChange(p)} of v{b.Version}");
+            // the control: nobody vetoes, the game runs it (one step late)
+            typedVote = _ => null;
+            var c = await Attempt();
+            Check(c.T is { Canceled: false, Change: SingleEquipmentChange { Operation: EquipmentChangeKind.Equip, Slot: EquipmentSlot.Ring1, Selection: InstanceEquipment } } &&
+                  c.End is { Status: DecisionTerminal.Allowed } && c.After != c.Before && c.After != 0,
+                $"[{run}] EQUIP-OR-VETO allowed control: outcome {c.End?.Status}, change {c.T?.Change}, ring1 0x{c.Before:x8}->0x{c.After:x8}");
+
+            // an unequip names what is in the slot now; refused, the ring stays
+            typed.Clear();
+            typedVote = _ => true;
+            var worn = Ring1(p);
+            SendChange(p, default, 11, unequip);
+            await Wait(6);
+            var u = typed.LastOrDefault();
+            Check(u is { Change: SingleEquipmentChange { Operation: EquipmentChangeKind.Unequip, Slot: EquipmentSlot.Ring1, Selection: InstanceEquipment ui } } && ui.Item.Item.Value == worn &&
+                  EndOf(x => x.Id == u.Id) is { Status: DecisionTerminal.Prevented } && Ring1(p) == worn,
+                $"[{run}] an unequip names the worn ring and is refused: change {u?.Change}, worn 0x{worn:x8}, ring1 now 0x{Ring1(p):x8}");
+
+            // EQUIP-STACK: arrows are a plain stack: item, source slot and count, no instance as identity
+            if (arrowInfo is null) Check(false, $"[{run}] EQUIP-STACK: this build has no arrow item to equip");
+            else
+            {
+                typed.Clear();
+                typedVote = _ => null;
+                var stack = Items.Read(p)?.Slots.FirstOrDefault(s => s.Item == arrowInfo.Id && !s.IsEquipped) ?? Items.Read(p)?.Slots.FirstOrDefault(s => s.Item == arrowInfo.Id);
+                if (stack is not null)
+                {
+                    SendChange(p, stack.Slot, 14, 0);  // keen::EquipmentSlot.Arrow
+                    await Wait(6);
+                }
+                var st = typed.LastOrDefault();
+                Check(stack is not null && st is { Change: SingleEquipmentChange { Slot: EquipmentSlot.Arrow, Selection: StackEquipment se } } && se.Item == arrowInfo.Id &&
+                      se.Source == stack.Slot && se.ExpectedCount == stack.Count && EndOf(x => x.Id == st.Id) is { Status: DecisionTerminal.Allowed } &&
+                      PlayerStates.EquipmentOf(p)?[PlayerEquipSlot.Arrow].Id == arrowInfo.Id.Value,
+                    $"[{run}] EQUIP-STACK: change {st?.Change}, stack {stack?.Slot} x{stack?.Count}, outcome {(st is null ? "none" : EndOf(x => x.Id == st.Id)?.Status.ToString())}, arrow slot 0x{PlayerStates.EquipmentOf(p)?[PlayerEquipSlot.Arrow].Id:x8}");
+            }
+
+            // the counter: with only the typed listener holding, an action bar input runs in the step it arrives in;
+            // with a generic listener (the legacy hold of every action) it runs one step later
+            foreach (var sub in subs) sub.Dispose();
+            subs.Clear();
+            subs.Add(Events.On<PlayerEquippingEvent>(_ => { }, EventFilter.ForEntity(p)));
+            await Wait(3);
+            var bar0 = PlayerStates.EquipmentOf(p)?.HotbarIndex ?? -1;
+            SendBar(p, (byte)(bar0 == 1 ? 2 : 1));
+            await Wait(1);
+            var typedOnly = PlayerStates.EquipmentOf(p)?.HotbarIndex ?? -1;
+            subs.Add(Events.On<PlayerClientActionEvent>(_ => { }));
+            await Wait(3);
+            var bar1 = PlayerStates.EquipmentOf(p)?.HotbarIndex ?? -1;
+            SendBar(p, (byte)(bar1 == 1 ? 2 : 1));
+            await Wait(1);
+            var heldOneStep = PlayerStates.EquipmentOf(p)?.HotbarIndex ?? -1;
+            await Wait(2);
+            var heldLater = PlayerStates.EquipmentOf(p)?.HotbarIndex ?? -1;
+            Check(typedOnly != bar0 && heldOneStep == bar1 && heldLater != bar1,
+                $"[{run}] no unrelated hold: an action bar input with only a typed equipment listener ran at once ({bar0}->{typedOnly} after 1 step); with a generic listener it waited a step ({bar1}->{heldOneStep} after 1, {heldLater} after 3)");
+        }
+        catch (Exception e)
+        {
+            Check(false, $"[{run}] the equipment suite threw: {e}");
+        }
+        finally
+        {
+            foreach (var sub in subs) sub.Dispose();
+            foreach (var e in made)
+            {
+                PlayerStates.Diagnostics.Watch(e, false);
+                if (Spawn.Exists(e)) Spawn.Destroy(e);
+            }
             await Wait(3);
         }
     }

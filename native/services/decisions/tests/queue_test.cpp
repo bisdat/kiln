@@ -397,6 +397,98 @@ static void test_metadata() {
     CHECK(m.table()->find(2000)->key.life_serial > before);
 }
 
+// enqueue_native (kind 18, kiln.items' equipment sets): the sink hears of every end exactly once, outside the lock,
+// and the outcome still reaches the consumer like any other.
+struct SinkLog {
+    Broker* b = nullptr;
+    std::vector<KilnDecisionOutcomeV1> seen;
+    std::vector<uint32_t> status_inside;  // status_of from inside the sink: no deadlock, already terminal
+};
+static void KILN_CALL sink_fn(const KilnDecisionOutcomeV1* o, void* user) {
+    auto* log = static_cast<SinkLog*>(user);
+    log->seen.push_back(*o);
+    log->status_inside.push_back(log->b->status_of(o->request_id));
+}
+
+static void test_native_sinks() {
+    Broker b;
+    SinkLog log;
+    log.b = &b;
+    uint64_t id = 9;
+    const auto set = request(KILN_DECISION_EQUIP_SET, 1);
+    CHECK(b.file_native(set, 1, 10, &sink_fn, &log, &id) == KILN_ERR_UNAVAILABLE && id == 0);  // no consumer: fail open
+    CHECK(b.drain_sinks() == 0 && log.seen.empty());
+    CHECK(b.attach(5) == KILN_OK);
+    CHECK(b.file_native(set, 1, 10, nullptr, &log, &id) == KILN_ERR_INVALID_ARGUMENT);  // a sink is required
+    // answered: allow, then cancel; each told once, after the answer, with its id and status
+    uint64_t a1 = 0, a2 = 0;
+    CHECK(b.file_native(set, 1, 10, &sink_fn, &log, &a1) == KILN_OK && a1 != 0);
+    CHECK(b.file_native(set, 1, 10, &sink_fn, &log, &a2) == KILN_OK && a2 > a1);
+    CHECK(b.drain_sinks() == 0);  // pending: nothing to tell
+    KilnDecisionReceiptV1 rc{};
+    CHECK(b.answer(answer_for(set, a1, 1, true), &rc, 11) == KILN_OK && rc.accepted == 1);
+    CHECK(b.answer(answer_for(set, a2, 1, false), &rc, 11) == KILN_OK && rc.terminal_status == KILN_DECISION_PREVENTED);
+    CHECK(log.seen.empty());  // never from inside the broker's call
+    CHECK(b.drain_sinks() == 2 && log.seen.size() == 2);
+    CHECK(log.seen[0].request_id == a1 && log.seen[0].status == KILN_DECISION_ALLOWED && log.seen[0].kind == KILN_DECISION_EQUIP_SET);
+    CHECK(log.seen[1].request_id == a2 && log.seen[1].status == KILN_DECISION_PREVENTED);
+    CHECK(log.status_inside[0] == KILN_DECISION_ALLOWED && log.status_inside[1] == KILN_DECISION_PREVENTED);
+    CHECK(b.answer(answer_for(set, a1, 1, false), &rc, 12) == KILN_OK && rc.accepted == 0);  // a repeat answer
+    CHECK(b.drain_sinks() == 0 && log.seen.size() == 2);                                  // tells nothing again
+    // the consumer still gets both outcomes (DecisionCompletedEvent)
+    auto out = outcomes(b, 12);
+    CHECK(out.count(a1) && out.count(a2) && out[a1].status == KILN_DECISION_ALLOWED);
+    // a timeout (window_begin of capture + 3), a detach, the world's end
+    uint64_t t = 0;
+    CHECK(b.file_native(set, 1, 20, &sink_fn, &log, &t) == KILN_OK);
+    b.window_begin(1, 22);
+    CHECK(b.drain_sinks() == 0);  // capture + 2: still answerable
+    b.window_begin(1, 23);
+    CHECK(b.drain_sinks() == 1 && log.seen.back().request_id == t && log.seen.back().status == KILN_DECISION_TIMEOUT_RELEASED);
+    uint64_t w = 0;
+    CHECK(b.file_native(set, 1, 30, &sink_fn, &log, &w) == KILN_OK);
+    b.world_ended(31);
+    CHECK(b.drain_sinks() == 1 && log.seen.back().request_id == w && log.seen.back().status == KILN_DECISION_WORLD_ENDED);
+    uint64_t d = 0;
+    CHECK(b.file_native(set, 2, 40, &sink_fn, &log, &d) == KILN_OK);
+    CHECK(b.detach(5, 41) == KILN_OK);
+    CHECK(b.drain_sinks() == 1 && log.seen.back().request_id == d && log.seen.back().status == KILN_DECISION_CAPABILITY_RELEASED);
+    // a request filed without a sink is never told to one
+    CHECK(b.attach(5) == KILN_OK);
+    uint64_t plain = 0;
+    CHECK(b.file(set, 2, 50, &plain) == KILN_OK);
+    CHECK(b.answer(answer_for(set, plain, 2, true), &rc, 50) == KILN_OK && b.drain_sinks() == 0);
+    // a full queue: QUEUE_DROPPED to the sink (the service drains before enqueue_native returns), once
+    outcomes(b, 51);
+    std::vector<uint64_t> held;
+    for (uint32_t i = 0; i < KILN_DECISIONS_MAX_ACTIVE; ++i) {
+        uint64_t x = 0;
+        if (b.file(request(KILN_DECISION_DEATH, 2000 + i), 2, 52, &x) == KILN_OK) held.push_back(x);
+    }
+    CHECK(held.size() == KILN_DECISIONS_MAX_ACTIVE);
+    const size_t before = log.seen.size();
+    uint64_t q = 0;
+    CHECK(b.file_native(set, 2, 52, &sink_fn, &log, &q) == KILN_ERR_BUFFER_TOO_SMALL && q != 0);
+    CHECK(b.drain_sinks() == 1 && log.seen.size() == before + 1 && log.seen.back().request_id == q &&
+          log.seen.back().status == KILN_DECISION_QUEUE_DROPPED);
+    CHECK(b.drain_sinks() == 0);
+    // an outbox nobody reads still tells the sink (the consumer's record is the one that is lost, and counted)
+    b.world_ended(53);  // 4096 outcomes
+    b.drain_sinks();
+    CHECK(b.attach(5) == KILN_OK);
+    for (uint32_t i = 0; i < KILN_DECISIONS_MAX_OUTCOMES; ++i) {
+        uint64_t x = 0;
+        b.file(request(KILN_DECISION_DEATH, 9000), 3, 60, &x);
+        b.complete(x, KILN_DECISION_STALE_ENTITY, "gone", 60);
+    }
+    CHECK(b.saturated());
+    uint64_t late = 0;
+    CHECK(b.file_native(set, 3, 61, &sink_fn, &log, &late) == KILN_OK);
+    CHECK(b.answer(answer_for(set, late, 3, true), &rc, 61) == KILN_OK);
+    CHECK(b.drain_sinks() == 1 && log.seen.back().request_id == late && log.seen.back().status == KILN_DECISION_ALLOWED);
+    CHECK(b.counters().outcome_gap > 0);
+}
+
 int main() {
     test_validation_and_consumer();
     test_batches();
@@ -405,6 +497,7 @@ int main() {
     test_world_and_consumer_turnover();
     test_limits();
     test_metadata();
+    test_native_sinks();
     std::printf("queue_test: %d PASS, %d FAIL\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

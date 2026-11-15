@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "kiln_api.h"
+#include "client_leases.h"
 #include "kiln_playerstate.h"
 #include "playerstate.h"
 #include "kiln_hook.hpp"
@@ -1161,14 +1162,14 @@ struct Passed {
 kiln::RawHook g_deliver_hook;
 std::vector<Held> g_held;            // the server world's thread only, like everything below
 std::vector<Passed> g_passed;        // released versions: one a program leaves pending for a while is not held again
-std::vector<KilnEntity> g_hold_for;  // from hold(), in Pre
-uint32_t g_hold_age = 0;
+// Who holds what: client_action_hold's wildcard lease and client_action_interest's selective ones (client_leases.h).
+kiln::playerstate::ClientLeases g_leases{kHoldStale};
 
 bool holdable(const ClientAction& a) {
     return g_hold_ok && a.consumed >= 0 && a.version >= a.offset && a.bytes >= a.version - a.offset + 4 && a.bytes <= kHeldBytes;
 }
 
-bool holds_for(KilnEntity e) { return std::find(g_hold_for.begin(), g_hold_for.end(), e) != g_hold_for.end(); }
+bool holds_for(KilnEntity e, uint32_t index) { return g_leases.covers(e, index); }
 
 bool passed(KilnEntity e, uint32_t index, uint32_t version) {
     for (const Passed& p : g_passed)
@@ -1238,7 +1239,7 @@ void hold_new(uintptr_t world, KilnEntity e, std::vector<Held>& keep) {
     if (!pi || !sc) return;
     for (uint32_t i = 0; i < g_client_actions.size(); ++i) {
         const ClientAction& a = g_client_actions[i];
-        if (!holdable(a) || held(e, i, keep)) continue;
+        if (!holdable(a) || !holds_for(e, i) || held(e, i, keep)) continue;
         Held h;
         __try {
             uint32_t v = 0, c = 0;
@@ -1259,23 +1260,21 @@ void hold_new(uintptr_t world, KilnEntity e, std::vector<Held>& keep) {
 }
 
 void hold_check(uintptr_t storage) {
-    if ((g_held.empty() && g_hold_for.empty()) || g_storage < 0) return;
+    if ((g_held.empty() && g_leases.empty()) || g_storage < 0) return;
     const uintptr_t world = storage - static_cast<uintptr_t>(g_storage);
     if (world != g_api->world(KILN_WORLD_SERVER) || !g_api->on_world_thread(KILN_WORLD_SERVER)) return;
-    if (++g_hold_age > kHoldStale && !g_hold_for.empty()) {
-        PSW("client actions: no listener renewed the hold for %u steps; held actions run and holding stops", kHoldStale);
-        g_hold_for.clear();
-    }
-    const bool holding = !g_hold_for.empty();
+    if (g_leases.age() > 0)
+        PSW("client actions: a listener did not renew its hold for %u steps; what it held runs, and holding for it stops", kHoldStale);
+    const bool holding = !g_leases.empty();
     std::vector<Held> keep;
     keep.reserve(g_held.size());
     for (const Held& h : g_held) {
         // not offered to the listener yet (a step without Pre): it stays hidden
-        if (h.decision == D_WAIT && !h.listed && holding && holds_for(h.entity)) keep.push_back(h);
-        else resolve(world, h, holding, keep);
+        if (h.decision == D_WAIT && !h.listed && holding && holds_for(h.entity, h.index)) keep.push_back(h);
+        else resolve(world, h, holding && holds_for(h.entity, h.index), keep);
     }
     if (holding)
-        for (const KilnEntity e : g_hold_for) hold_new(world, e, keep);
+        for (const KilnEntity e : g_leases.entities()) hold_new(world, e, keep);
     g_held.swap(keep);
 }
 
@@ -1295,13 +1294,28 @@ KilnResult KILN_CALL t_client_action_hold(const KilnEntity* entities, uint32_t c
     if (!g_api->on_world_thread(KILN_WORLD_SERVER)) return KILN_ERR_WRONG_THREAD;
     if (count && !entities) return KILN_ERR_INVALID_ARGUMENT;
     try {
-        g_hold_for.assign(entities, entities + count);
-        std::erase_if(g_passed, [](const Passed& p) { return !holds_for(p.entity); });
+        g_leases.set_wildcard(entities, count);
+        std::erase_if(g_passed, [](const Passed& p) { return !g_leases.covers_entity(p.entity); });
     } catch (...) {
-        g_hold_for.clear();
+        g_leases.set_wildcard(nullptr, 0);
         return KILN_ERR_INTERNAL;
     }
-    g_hold_age = 0;
+    return KILN_OK;
+}
+
+// since 0.2.0-dev.29: one owner's selective lease (kiln_playerstate.h)
+KilnResult KILN_CALL t_client_action_interest(KilnOwner owner, const KilnEntity* entities, uint32_t entity_count, const uint32_t* actions,
+                                              uint32_t action_count) {
+    ensure();
+    if (!g_hold_ok) return KILN_ERR_UNAVAILABLE;
+    if (!g_api->on_world_thread(KILN_WORLD_SERVER)) return KILN_ERR_WRONG_THREAD;
+    try {
+        if (!g_leases.set(owner, entities, entity_count, actions, action_count)) return KILN_ERR_INVALID_ARGUMENT;
+        std::erase_if(g_passed, [](const Passed& p) { return !g_leases.covers_entity(p.entity); });
+    } catch (...) {
+        g_leases.set(owner, nullptr, 0, nullptr, 0);
+        return KILN_ERR_INTERNAL;
+    }
     return KILN_OK;
 }
 
@@ -1444,7 +1458,8 @@ const KilnPlayerStateApi kTable = {
     &t_client_action_hold,
     &t_client_action_held,
     &t_client_action_decide,
-    &t_aim,  // since 0.2.0-dev.27
+    &t_aim,                     // since 0.2.0-dev.27
+    &t_client_action_interest,  // since 0.2.0-dev.29
 };
 
 template <class Fn>

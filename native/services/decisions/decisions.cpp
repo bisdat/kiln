@@ -124,6 +124,7 @@ KilnResult KILN_CALL d_detach(KilnOwner dispatcher) {
     KilnWindowStateV1 s{};
     if (!world_safe(&s)) return KILN_ERR_WRONG_THREAD;
     const KilnResult rc = g_broker->detach(dispatcher, s.step);
+    g_broker->drain_sinks();
     if (rc == KILN_OK) {
         std::lock_guard lock(g_interest_mutex);
         for (auto& i : g_interest) i = Interest{};
@@ -206,7 +207,9 @@ KilnResult KILN_CALL d_answer(KilnOwner d, const KilnDecisionAnswerV1* answer, K
     if (!answer) return KILN_ERR_INVALID_ARGUMENT;
     KilnWindowStateV1 s{};
     if (KilnResult rc = consumer(d, &s); rc != KILN_OK) return rc;
-    return g_broker->answer(*answer, receipt, s.step);
+    const KilnResult rc = g_broker->answer(*answer, receipt, s.step);
+    g_broker->drain_sinks();
+    return rc;
 }
 KilnResult KILN_CALL d_begin_outcomes(KilnOwner d, uint64_t* batch, uint32_t* records) {
     if (!batch || !records) return KILN_ERR_INVALID_ARGUMENT;
@@ -224,6 +227,19 @@ KilnResult KILN_CALL d_ack_outcomes(KilnOwner d, uint64_t batch) {
     KilnWindowStateV1 s{};
     if (KilnResult rc = consumer(d, &s); rc != KILN_OK) return rc;
     return g_broker->ack_outcomes(batch, s.step);
+}
+
+// since 0.2.0-dev.29: a native Pre adapter's request (kind 18) and its sink
+KilnResult KILN_CALL d_enqueue_native(KilnOwner producer, const KilnDecisionRequestV1* request, KilnDecisionSinkFn sink, void* user,
+                                      uint64_t* request_id) {
+    if (request_id) *request_id = 0;
+    if (!g_on.load()) return KILN_ERR_UNAVAILABLE;
+    if (!request || !request_id || !sink || producer == 0 || request->kind != KILN_DECISION_EQUIP_SET) return KILN_ERR_INVALID_ARGUMENT;
+    KilnWindowStateV1 s{};
+    if (!world_safe(&s)) return KILN_ERR_WRONG_THREAD;
+    const KilnResult rc = g_broker->file_native(*request, s.world_epoch, s.step, sink, user, request_id);
+    g_broker->drain_sinks();  // a QUEUE_DROPPED outcome is told before the call returns
+    return rc;
 }
 
 KilnResult KILN_CALL d_reevaluate_pickup(uint32_t drop, uint32_t receiver, uint32_t* exposures_reset) {
@@ -261,12 +277,14 @@ void KILN_CALL d_window_begin(uint64_t epoch, uint64_t step) {
     g_broker->window_begin(epoch, step);
     death_producer::window_begin(epoch, step);
     pickup_producer::window_begin(epoch, step);
+    g_broker->drain_sinks();
 }
 
 void KILN_CALL d_window_end(uint64_t epoch, uint64_t step) {
     if (!g_on.load(std::memory_order_relaxed)) return;
     pickup_producer::window_end(epoch, step);
     g_broker->window_end(epoch, step);
+    g_broker->drain_sinks();
 }
 
 KilnResult KILN_CALL d_set_death_guard(KilnOwner owner, KilnDeathGuardFn guard) { return death_producer::set_guard(owner, guard); }
@@ -290,6 +308,7 @@ const KilnDecisionsApiV1 kTable = {
     &d_window_begin,
     &d_window_end,
     &d_set_death_guard,
+    &d_enqueue_native,  // since 0.2.0-dev.29
 };
 
 void KILN_CALL on_world(const KilnWorldEvent* e, void*) {
@@ -297,6 +316,7 @@ void KILN_CALL on_world(const KilnWorldEvent* e, void*) {
     KilnWindowStateV1 s{};
     g_clock->get(&s);
     g_broker->world_ended(s.step);
+    g_broker->drain_sinks();
     g_metadata.clear();
     death_producer::world_stopped();
     pickup_producer::world_stopped();

@@ -5,7 +5,9 @@
 // One mutex guards everything. Producers call file() (hooks, any thread) or enqueue_prepared() (Pre adapters); the
 // consumer's calls come from the world thread in a world-safe phase (decisions.cpp checks that, not this file).
 // Nothing here calls out while the mutex is held except the finisher of a kind (a producer's own code that applies
-// an answer, e.g. the health write of a canceled death), which runs on the consumer's thread in Pre.
+// an answer, e.g. the health write of a canceled death), which runs on the consumer's thread in Pre. The sinks of
+// requests a native Pre adapter filed (file_native, kind 18) are collected under the mutex and called by
+// drain_sinks() after it is released.
 #pragma once
 #include <algorithm>
 #include <array>
@@ -49,6 +51,8 @@ struct Finish {
     char reason[192] = {};
 };
 using Finisher = uint32_t (*)(Finish& f, void* user);
+// The end of a request filed with file_native (kiln_decisions.h, enqueue_native).
+using Sink = void (*)(const KilnDecisionOutcomeV1* outcome, void* user);
 
 class Broker {
 public:
@@ -104,11 +108,41 @@ public:
     // KILN_ERR_BUFFER_TOO_SMALL is returned: the caller lets the action happen. No consumer: KILN_ERR_UNAVAILABLE.
     KilnResult file(const KilnDecisionRequestV1& in, uint64_t epoch, uint64_t step, uint64_t* id) {
         if (id) *id = 0;
-        const uint32_t want = payload_size(in.kind);
-        if (in.size != sizeof(KilnDecisionRequestV1) || in.version != 1 || want == 0 || in.payload_bytes != want ||
-            in.subject.entity == 0)
-            return KILN_ERR_INVALID_ARGUMENT;
+        if (!well_formed(in)) return KILN_ERR_INVALID_ARGUMENT;
         std::lock_guard lock(m_);
+        return file_locked(in, epoch, step, id);
+    }
+
+    // A native Pre adapter's request (enqueue_native): file() and, once it ends, one call of `sink` with its outcome
+    // record, from drain_sinks(). Queue full: the QUEUE_DROPPED outcome goes to the sink as well.
+    KilnResult file_native(const KilnDecisionRequestV1& in, uint64_t epoch, uint64_t step, Sink sink, void* user, uint64_t* id) {
+        if (id) *id = 0;
+        if (!sink || !well_formed(in)) return KILN_ERR_INVALID_ARGUMENT;
+        std::lock_guard lock(m_);
+        if (!attached_) return KILN_ERR_UNAVAILABLE;
+        sinks_[next_id_ + 1] = {sink, user};  // the id file_locked gives it, set first so a QUEUE_DROPPED outcome reaches it too
+        return file_locked(in, epoch, step, id);  // attached: KILN_OK or KILN_ERR_BUFFER_TOO_SMALL
+    }
+
+    // Calls the sinks of the requests that ended since the last drain, outside the lock, in the order they ended.
+    // World thread (the caller of the call that ended them). Returns how many were called.
+    uint32_t drain_sinks() {
+        std::vector<PendingSink> calls;
+        {
+            std::lock_guard lock(m_);
+            calls.swap(pending_sinks_);
+        }
+        for (const PendingSink& c : calls) c.sink(&c.outcome, c.user);
+        return static_cast<uint32_t>(calls.size());
+    }
+
+private:
+    static bool well_formed(const KilnDecisionRequestV1& in) {
+        const uint32_t want = payload_size(in.kind);
+        return in.size == sizeof(KilnDecisionRequestV1) && in.version == 1 && want != 0 && in.payload_bytes == want && in.subject.entity != 0;
+    }
+
+    KilnResult file_locked(const KilnDecisionRequestV1& in, uint64_t epoch, uint64_t step, uint64_t* id) {
         if (!attached_) return KILN_ERR_UNAVAILABLE;
         const uint64_t rid = ++next_id_;
         if (id) *id = rid;
@@ -134,6 +168,7 @@ public:
         return KILN_OK;
     }
 
+public:
     // ---- request batches ----
     KilnResult begin_requests(uint64_t* batch, uint32_t* records) {
         std::lock_guard lock(m_);
@@ -291,6 +326,37 @@ private:
         Finisher fn = nullptr;
         void* user = nullptr;
     };
+    struct SinkSlot {
+        Sink sink = nullptr;
+        void* user = nullptr;
+    };
+    struct PendingSink {
+        Sink sink;
+        void* user;
+        KilnDecisionOutcomeV1 outcome;
+    };
+
+    static KilnDecisionOutcomeV1 outcome_of(const KilnDecisionRequestV1& r, uint64_t rid, uint64_t epoch, uint32_t status, const char* reason,
+                                            uint64_t step, const Finish* f) {
+        KilnDecisionOutcomeV1 o{};
+        o.size = sizeof o;
+        o.version = 1;
+        o.kind = r.kind;
+        o.status = status;
+        o.request_id = rid;
+        o.world_epoch = epoch;
+        o.step = step;
+        o.subject = r.subject;
+        o.actor = r.actor;
+        if (f && f->answer) o.requested_health = f->answer->survival_health;
+        if (f && f->health_known) {
+            o.flags |= KILN_DECISION_OUTCOME_HEALTH_KNOWN;
+            o.health_before = f->health_before;
+            o.applied_health = f->applied_health;
+        }
+        if (reason) std::snprintf(o.reason, sizeof o.reason, "%s", reason);
+        return o;
+    }
 
     template <typename T>
     static KilnResult read(const Batch<T>& b, uint64_t batch, T* out, uint32_t capacity, uint32_t stride, uint32_t* required) {
@@ -334,29 +400,18 @@ private:
             terminal_order_.pop_front();
         }
         if (status == KILN_DECISION_TIMEOUT_RELEASED) ++counters_.timeouts;
+        const KilnDecisionOutcomeV1 o = outcome_of(r, r.request_id, r.world_epoch, status, reason, step, f);
+        // a native adapter's request: its sink hears of the end even when the outbox is full
+        if (auto sink = sinks_.find(r.request_id); sink != sinks_.end()) {
+            pending_sinks_.push_back({sink->second.sink, sink->second.user, o});
+            sinks_.erase(sink);
+        }
         if (outbox_.size() >= KILN_DECISIONS_MAX_OUTCOMES) {
             // Nobody reads: the record is lost and said to be lost. Never an unreported loss.
             ++counters_.outcome_gap;
             gap_this_step_ = true;
             return;
         }
-        KilnDecisionOutcomeV1 o{};
-        o.size = sizeof o;
-        o.version = 1;
-        o.kind = r.kind;
-        o.status = status;
-        o.request_id = r.request_id;
-        o.world_epoch = r.world_epoch;
-        o.step = step;
-        o.subject = r.subject;
-        o.actor = r.actor;
-        if (f && f->answer) o.requested_health = f->answer->survival_health;
-        if (f && f->health_known) {
-            o.flags |= KILN_DECISION_OUTCOME_HEALTH_KNOWN;
-            o.health_before = f->health_before;
-            o.applied_health = f->applied_health;
-        }
-        if (reason) std::snprintf(o.reason, sizeof o.reason, "%s", reason);
         outbox_.push_back(o);
         ++counters_.outcomes;
     }
@@ -408,6 +463,8 @@ private:
     std::deque<uint64_t> terminal_order_;
     std::vector<std::pair<uint64_t, uint32_t>> expired_;
     std::array<FinisherSlot, 64> finishers_{};
+    std::unordered_map<uint64_t, SinkSlot> sinks_;
+    std::vector<PendingSink> pending_sinks_;
     Counters counters_;
     bool gap_this_step_ = false;
 };

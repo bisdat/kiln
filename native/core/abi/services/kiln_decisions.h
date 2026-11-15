@@ -36,9 +36,12 @@
  * Answers are idempotent: answering an id that is already terminal returns its terminal status in the receipt and
  * does nothing else. detach releases every pending hold (CAPABILITY_RELEASED). World stop ends them (WORLD_ENDED).
  *
- * Threads. attach, detach, interest, enqueue_prepared, the batch calls, answer, resolve_entity, reevaluate_pickup:
- * the world thread in a world-safe phase (kiln_window_clock.h), KILN_ERR_WRONG_THREAD otherwise. supported_kinds:
- * any thread. window_begin and window_end are called by the core only. set_death_guard (since 0.2.0-dev.28): any thread.
+ * Threads. attach, detach, interest, enqueue_prepared, the batch calls, answer, resolve_entity, reevaluate_pickup,
+ * enqueue_native: the world thread in a world-safe phase (kiln_window_clock.h), KILN_ERR_WRONG_THREAD otherwise.
+ * supported_kinds, set_death_guard: any thread. window_begin and window_end are called by the core only.
+ *
+ * The service is new in 0.2.0-dev.29 (built for dev.28, which shipped without it). set_death_guard and enqueue_native
+ * were appended after window_end while it was being built; readers still check header.size for them.
  */
 #pragma once
 #include <stddef.h>
@@ -161,10 +164,13 @@ typedef struct KilnDecisionOutcomeV1 {
     char reason[192];
 } KilnDecisionOutcomeV1;
 
-/* The native death guard (since 0.2.0-dev.28, set_death_guard below). */
+/* The native death guard (set_death_guard below). */
 #define KILN_DEATH_GUARD_PASS 0u
 #define KILN_DEATH_GUARD_SKIP 1u
 typedef uint32_t(KILN_CALL* KilnDeathGuardFn)(uint64_t world_epoch, uint32_t entity, int32_t health);
+
+/* The end of a request a native Pre adapter filed (enqueue_native below). */
+typedef void(KILN_CALL* KilnDecisionSinkFn)(const KilnDecisionOutcomeV1* outcome, void* user);
 
 typedef struct KilnDecisionsApiV1 {
     KilnServiceHeader header;
@@ -203,7 +209,7 @@ typedef struct KilnDecisionsApiV1 {
     void(KILN_CALL* window_begin)(uint64_t world_epoch, uint64_t step);
     void(KILN_CALL* window_end)(uint64_t world_epoch, uint64_t step);
 
-    /* ======== since 0.2.0-dev.28: the native guard seam (19d-pets). Check header.size covers it before calling. ========
+    /* ======== appended: the native guard seam (19d-pets). Check header.size covers it before calling. ========
      * set_death_guard: `guard` is asked at the death boundary for every entity whose health is 0 or less, BEFORE the
      * producer looks at any interest (so it runs also while no mod listens for a death), on the thread the game's death
      * program runs on: the world thread or a worker, inside the simulation. It returns KILN_DEATH_GUARD_PASS (0: not
@@ -215,6 +221,22 @@ typedef struct KilnDecisionsApiV1 {
      * is set. KILN_ERR_UNAVAILABLE as well while the death hook is not installed (capability decisions.native_guards
      * says why). Any thread. */
     KilnResult(KILN_CALL* set_death_guard)(KilnOwner owner, KilnDeathGuardFn guard);
+
+    /* ======== appended: the verdict route of native Pre adapters (kind 18, kiln.items' equipment sets).
+     * Check header.size covers it before calling. ========
+     * enqueue_native: a native service's Pre adapter files a request that no hook holds (kind 18 only in v1; other
+     * kinds KILN_ERR_INVALID_ARGUMENT) and learns its end: the service assigns id, epoch and deadline as for
+     * enqueue_prepared (capture + 2), the managed dispatcher decides it like any other (its DecisionCompletedEvent
+     * included), and `sink` is called exactly once with the request's outcome record, whatever ended it: the answer
+     * (allow ALLOWED, cancel PREVENTED), a timeout, the dispatcher's detach, the world's end, a full queue
+     * (QUEUE_DROPPED, then before enqueue_native returns). The sink runs on the world thread, right after the call that
+     * ended the request (the answer in Pre, window_begin, window_end, the world's stop) and outside the service's lock:
+     * it copies what it needs, calls no managed code and files nothing from inside. `producer` is the caller's owner
+     * (diagnostics). World thread, world-safe phase (KILN_ERR_WRONG_THREAD otherwise); KILN_ERR_UNAVAILABLE without
+     * an attached dispatcher: the caller lets the action run (fail open). KILN_ERR_BUFFER_TOO_SMALL: the queue is
+     * full; the sink has been told QUEUE_DROPPED under *request_id. */
+    KilnResult(KILN_CALL* enqueue_native)(KilnOwner producer, const KilnDecisionRequestV1* request, KilnDecisionSinkFn sink, void* user,
+                                          uint64_t* request_id);
 } KilnDecisionsApiV1;
 
 #ifdef __cplusplus

@@ -23,5 +23,7 @@
     <ProjectReference Include="../../services/Kiln.Combat/Kiln.Combat.csproj" />
     <!-- Kiln.Gameplay's producer of cancelable walk-over pickups (PickupDecisionsTests) -->
     <ProjectReference Include="../../services/Kiln.Gameplay/Kiln.Gameplay.csproj" />
+    <!-- Kiln.Items' typed equipment verdict (EquipDecisionsTests) on the kit's kiln.items -->
+    <ProjectReference Include="../../services/Kiln.Items/Kiln.Items.csproj" />
   </ItemGroup>
 </Project>
