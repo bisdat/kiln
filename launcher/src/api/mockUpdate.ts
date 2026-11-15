@@ -108,7 +108,7 @@ export function updateMockHandlers(emit: Emit, distribution: Distribution = "dir
     calls: () => [...calls],
     beta: (n: number, version = "0.2.0-dev.43") => put({
       current: version, buildChannel: "beta", beta: n,
-      beforeBeta: { taken: now(), from: "0.2.0-dev.42", by: `${version}+beta.1`, files: ["settings.json", "update.json", "profiles/default/meta.json"] },
+      beforeBeta: { taken: now(), from: "0.2.0-dev.42", by: `${version}+beta.1`, files: ["profiles/default/meta.json", "settings.json"] },
     }),
     channelOffer: (channel: UpdateChannel, version: string | null) => { channelOffers[channel] = version; },
     switches: () => [...switchCalls],

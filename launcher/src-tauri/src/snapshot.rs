@@ -2,9 +2,10 @@
 //! reads differently, copied before its first start writes anything, so that a switch back to the release can put them
 //! back (`update_switch` with `restore`; docs/kiln/launcher/releasing.md, "Going back from the beta").
 //!
-//! - **What:** `settings.json`, `update.json`, each profile's `profiles/<pid>/meta.json` (its mods, their switches and
-//!   order) and the Library's `library/kiln-kept.json` (the versions kept for a roll back). Never the mods themselves (the
-//!   Library's folders and their records), the profiles' mod settings (`config/`, `data/`), game folders or saves.
+//! - **What:** `settings.json`, each profile's `profiles/<pid>/meta.json` (its mods, their switches and order) and the
+//!   Library's `library/kiln-kept.json` (the versions kept for a roll back). Never the mods themselves (the Library's
+//!   folders and their records), the profiles' mod settings (`config/`, `data/`), game folders or saves, nor
+//!   `update.json` (the self-update's own record: the switch back writes it for the release's "Updated to").
 //! - **Where:** `<data>/snapshots/before-beta/`: the files at their paths relative to the data folder, and `snapshot.json`
 //!   ([`Info`]: when, the build that wrote the folder last, the test build that took it, the files).
 //! - **When:** at the start of a test build ([`at_start`], before anything else of the start writes in the data
@@ -62,7 +63,7 @@ fn io(p: &Path, what: &str) -> impl FnOnce(std::io::Error) -> Error {
 
 /// The files a copy takes from `root` (those that are there), relative and '/' separated, sorted.
 pub fn candidates(root: &Path) -> Vec<String> {
-    let mut out: Vec<String> = ["settings.json", "update.json", "library/kiln-kept.json"]
+    let mut out: Vec<String> = ["settings.json", "library/kiln-kept.json"]
         .iter()
         .filter(|r| root.join(r).is_file())
         .map(|r| r.to_string())
@@ -150,21 +151,34 @@ pub fn left_beta(root: &Path, to_version: &str, channel: &str) -> Result<(), Err
     write_last(root, &LastBuild { format: 1, version: to_version.into(), channel: channel.into(), beta: None })
 }
 
-/// Puts the copy back: each of its files to its place (atomically). Returns the files put back.
-pub fn restore(root: &Path) -> Result<Vec<String>, Error> {
+/// Puts the copy back: each of its files to its place (atomically). Returns the files put back. `channel`: the channel
+/// the switch goes to. The copy was taken at the test build's first start, after the release build saved the player's
+/// choice of the beta (`updateChannel: "beta"`): a restored settings.json that says "beta" says `channel` instead, or
+/// the release would offer the test build again at its first check. Any other value (none, "dev", "stable") stays.
+pub fn restore(root: &Path, channel: Option<&str>) -> Result<Vec<String>, Error> {
     let info = info(root).ok_or_else(|| Error::not_found("There is no copy from before the beta."))?;
     let dir = root.join(DIR);
     let mut done = Vec::new();
     for rel in &info.files {
         // only the kinds of file a copy takes, never a path out of the data folder
-        let ok = rel == "settings.json" || rel == "update.json" || rel == "library/kiln-kept.json"
+        let ok = rel == "settings.json" || rel == "library/kiln-kept.json"
             || (rel.starts_with("profiles/") && rel.ends_with("/meta.json") && rel.split('/').count() == 3
                 && rel.split('/').all(|p| !p.is_empty() && p != "." && p != ".."));
         if !ok {
             continue;
         }
         let from = dir.join(rel);
-        let bytes = std::fs::read(&from).map_err(io(&from, "reading"))?;
+        let mut bytes = std::fs::read(&from).map_err(io(&from, "reading"))?;
+        if rel == "settings.json"
+            && let Some(ch) = channel
+            && let Ok(mut v) = serde_json::from_slice::<serde_json::Value>(&bytes)
+            && v.get("updateChannel").and_then(|c| c.as_str()) == Some("beta")
+            && ch != "beta"
+        {
+            v["updateChannel"] = ch.into();
+            bytes = serde_json::to_vec_pretty(&v).map_err(|e| Error::new(ErrorCode::Internal, e.to_string()))?;
+            bytes.push(b'\n');
+        }
         let to: PathBuf = root.join(rel);
         if let Some(p) = to.parent() {
             std::fs::create_dir_all(p).map_err(io(p, "creating"))?;

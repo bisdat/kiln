@@ -122,7 +122,7 @@ fn a_release_data_folder_round_trips_through_a_test_build() {
 
     // the first start of a test build: the copy, before anything is written
     let info = at_start(root, "0.2.0-dev.29", "beta", Some(3)).unwrap().expect("a copy");
-    assert_eq!(info.files, ["profiles/ember-run/meta.json", "settings.json", "update.json"]);
+    assert_eq!(info.files, ["profiles/ember-run/meta.json", "settings.json"], "update.json is the self-update's own record");
     assert_eq!((info.from.as_str(), info.by.as_str()), ("", "0.2.0-dev.29+beta.3"), "a launcher before dev.29 records no build");
     assert_eq!(super::info(root), Some(info.clone()));
     assert_eq!(read_last(root).unwrap().beta, Some(3));
@@ -155,10 +155,10 @@ fn a_release_data_folder_round_trips_through_a_test_build() {
     assert_eq!(super::info(root).unwrap().by, "0.2.0-dev.29+beta.3");
 
     // the switch back with the restore: the release's files byte for byte; what the beta added stays
-    let restored = restore(root).unwrap();
+    let restored = restore(root, Some("dev")).unwrap();
     assert_eq!(restored, info.files);
     assert_eq!(read(root, "settings.json"), DEV28_SETTINGS);
-    assert_eq!(read(root, "update.json"), DEV28_UPDATE);
+    assert!(read(root, "update.json").contains("\"to\":\"0.2.0-dev.28\""), "the switch's record for the release's Updated to stays");
     assert_eq!(read(root, "profiles/ember-run/meta.json"), DEV28_PROFILE);
     assert!(kiln_manage::profile::list(&dirs).unwrap().iter().any(|p| p.name == "Made in the beta"), "a profile made in the beta stays");
     assert!(root.join("library/kiln/beta-only/2.0.0+ffff0000/kiln.mod.json").is_file(), "a mod added in the beta stays in the Library");
@@ -197,7 +197,7 @@ fn release_builds_and_empty_folders_take_no_copy() {
     assert_eq!(at_start(root, "0.2.0-dev.29", "dev", None).unwrap(), None);
     assert_eq!(super::info(root), None);
     assert_eq!(read_last(root).unwrap().channel, "dev");
-    assert_eq!(restore(root).unwrap_err().code, ErrorCode::NotFound);
+    assert_eq!(restore(root, Some("dev")).unwrap_err().code, ErrorCode::NotFound);
 }
 
 #[test]
@@ -212,7 +212,26 @@ fn a_restore_writes_only_inside_the_data_folder() {
     put(&root.join(DIR), "../outside.json", "x");
     kiln_manage::util::write_json_atomic(&root.join(DIR).join(INFO), &bad).unwrap();
     put(root, "settings.json", "{}\n");
-    assert_eq!(restore(root).unwrap(), ["settings.json"]);
+    assert_eq!(restore(root, Some("dev")).unwrap(), ["settings.json"]);
     assert_eq!(read(root, "settings.json"), DEV28_SETTINGS);
     assert!(!t.0.join("outside.json").exists());
+}
+
+#[test]
+fn a_restored_choice_of_the_beta_says_the_release() {
+    // the release build saved the player's choice of the beta before the test build's first start took the copy
+    let t = tmp("channel");
+    let root = &t.0;
+    dev28_folder(root);
+    put(root, "settings.json", "{\"savesKeep\": 7, \"updateChannel\": \"beta\", \"modUpdatesDaily\": true}\n");
+    at_start(root, "0.2.0-dev.29", "beta", Some(1)).unwrap().unwrap();
+    put(root, "settings.json", "{\"savesKeep\": 3, \"updateChannel\": \"dev\"}\n");
+    restore(root, Some("dev")).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&read(root, "settings.json")).unwrap();
+    assert_eq!(v, serde_json::json!({"savesKeep": 7, "updateChannel": "dev", "modUpdatesDaily": true}));
+    // stable, or no channel given: as asked, or as it was
+    restore(root, Some("stable")).unwrap();
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&read(root, "settings.json")).unwrap()["updateChannel"], "stable");
+    restore(root, None).unwrap();
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&read(root, "settings.json")).unwrap()["updateChannel"], "beta");
 }

@@ -1190,7 +1190,7 @@ export interface BeforeBeta {
   from: string;
   /** The test build that took it. */
   by: string;
-  /** Files in it (settings.json, update.json, each profile's meta.json, the Library's kiln-kept.json). */
+  /** Files in it (settings.json, each profile's meta.json, the Library's kiln-kept.json). */
   files: string[];
 }
 /** Guard the command boundary as well as the UI: even a stale callback or a directly mounted hook cannot invoke

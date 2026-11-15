@@ -279,7 +279,7 @@ fn before_switch_restart(ready: &Ready) {
     let _writing = crate::state::writing();
     let Ok(d) = crate::state::dirs() else { return };
     if restore {
-        match crate::snapshot::restore(&d.root) {
+        match crate::snapshot::restore(&d.root, Some(target.as_str())) {
             Ok(files) => log(&format!("put back the copy from before the beta: {}", files.join(", "))),
             Err(e) => log(&format!("could not put back the copy from before the beta: {}", e.message)),
         }

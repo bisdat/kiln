@@ -207,7 +207,7 @@ test builds that do change a format).
 | File | Written by | What the release (dev.28) does with what the test build wrote | In the copy |
 |---|---|---|---|
 | `<data>/settings.json` | launcher | reads it: unknown keys are ignored (`keepVersions`), `updateChannel: "beta"` reads as no choice (it follows its own channel, dev); its next save drops `keepVersions` (a test build then uses the default, 1) | yes |
-| `<data>/update.json` | self-update | reads it (format 1): `updated` names the switch (`from` a build id with `+beta.<n>`), so its start says "Updated to <version>" | yes |
+| `<data>/update.json` | self-update | reads it (format 1): `updated` names the switch (`from` a build id with `+beta.<n>`), so its start says "Updated to <version>" | no (the switch writes it for the release) |
 | `<data>/profiles/<pid>/meta.json` | profiles | reads it: format 1, the same struct since dev.28 (a test build writes it durably, same shape); a mod version taken in the beta is an ordinary Library version | yes |
 | `<data>/profiles/<pid>/config/`, `data/` | the mods (their settings) | the mods' own files; left as they are | no |
 | Library entries `library/<kind>/<id>/<version>+<hash8>/` and their records | library | reads them (unchanged format); a version kept for a roll back is one more version there, and its Clean up may remove it (a test build then forgets it) | no (mods stay) |
