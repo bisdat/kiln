@@ -438,14 +438,28 @@ registering in the client world's Pre is too late: `apply_armor` faulted on a he
   the ones a mod serves) and checks it when it turns the answers on: `new content: 55 of the game's 4268 keen::ItemInfo resources are not
   in this registry; they stay NULL as in the game (self-check with 0x...: ok)`.
   `Kiln_Unknown_Item` is in no definition list and not in the content sync; it does appear in `Content.Items` of a joined client.
+- **The lookup hook, on first need** (dev.29, GitHub issue 39): those answers need a hook on the game's ItemRegistryFind, one of its
+  hottest functions (478 call sites, job threads) and one that other loaders' mods hook too (Quick Deposit). Kiln defines
+  `Kiln_Unknown_Item` at boot but hooks the lookup only when a client world's item registry finishes loading (the loading screen, where the
+  install's short stop of the other threads is not seen), and only if this game joined someone else's server (no server world in the
+  process) or mods here define items. A single-player or hosted world without item mods never has the hook; its unknown ids stay NULL, as
+  without Kiln. Once in, the hook stays until the game closes. It is installed the way dev.28 installed it at boot (the plain installer:
+  the checked one refuses on PCs where Kiln cannot open every thread). kiln.log, once per client world:
+  `new content: client world: the game's item lookup is hooked now (this game joined a server, which may send items of mods this game does
+  not have: they show as [Unknown item])`, `... is hooked now (mods here define 3 item(s): one this world's registry does not have yet
+  shows as [Unknown item])`, `... is not hooked (this game hosts its world and no mod defines items, so no unknown item id can reach it)`
+  or `... is hooked (since an earlier world of this game)`. An item a mod defines while a client world without the hook runs:
+  `new content: client world: an item was defined while this world runs and the game's item lookup is not hooked: its [Unknown item]
+  placeholder starts with the next world`. The boot line says `unknown item ids answered by a placeholder when needed`.
 - **Definitions made later** cannot be there earlier: data packs' `add` lists and `OnReady` handlers run when kiln.content's registries are ready
   (hosted: long before the client world; a first joined world: ~300 ms after its first step; later worlds keep them from the first). In that
   window such an item answers "[Unknown item]", then its definition takes over.
 - **Perks and buffs** keep their later registration (hosted: the client world's step 11 mod 25; joined: registries ready, ~300 ms after the first
   step). Every game lookup of both tests for a miss (docs/re/content.md section 9), so a Kiln perk on an item is skipped until then. Skill trees are
   served as the game's resource to each new world before it steps (`skills: the new world's skill tree loaded`).
-- Switches, in `<kiln>/data/content/`: `no-early-registration`, `no-unknown-items` turn the parts off; `early-test` runs the same path on a server
-  world and answers unknown ids there too (lab check only).
+- Switches, in `<kiln>/data/content/`: `no-early-registration`, `no-unknown-items` turn the parts off (`no-unknown-items`: no placeholder
+  and never a hook on the lookup); `early-test` runs the same path on a server world, hooks the lookup at boot as before dev.29 and
+  answers unknown ids there too (lab check only).
 
 ### Client side (the mod is `side: both`)
 The client needs the definitions to show and craft new content: install the same mod on the server and the clients.

@@ -18,7 +18,8 @@
 // Client worlds get the definitions when their item registry finishes loading (hook on ItemRegistryUpdate, loading
 // screen), before any step: the prediction world steps first and reads the client world's registry (docs/re/content.md
 // section 9). Ids this game has no definition for are answered in the client world by a placeholder ("[Unknown item]",
-// hook on ItemRegistryFind): dozens of the game's call sites use the lookup's result unchecked.
+// hook on ItemRegistryFind): dozens of the game's call sites use the lookup's result unchecked. That hook goes in only
+// when it is needed: a client world's registry loads while this game joined a server, or while mods define items.
 // Lifecycle: definitions are queued until the registries load (world load, before the save is read: saved stacks of
 // the item survive restarts) and inserted again into every new world. A definition whose owner goes away (mod
 // unload) stays in the registries until the process ends (Forge's missing mappings: stacks are never deleted);
@@ -758,6 +759,8 @@ struct WorldState {
     bool early = false;          // bound while the game set the world up; session = the one its first step will start
     uint64_t bound_ms = 0;       // when (GetTickCount64)
     uint64_t registered_ms = 0;  // when every definition was first in (0: not yet)
+    bool find_decided = false;   // the client world's line on the item lookup hook is out (itemfind_hooked)
+    bool find_late_said = false; // ... and the one for an item defined while this world runs
 };
 WorldState g_ws[KILN_WORLD_KINDS];
 std::mutex g_ui_mu;  // the recipe-UI hook reads the client / server state from the UI thread
@@ -3317,10 +3320,11 @@ void KILN_CALL on_client_pre(const KilnTickInfo* t, void*) {
 // loading, on the loading screen, whatever world came before it in this process. Each world has its own registry; the
 // binding comes from the game's own RegisterSingleton call, so a world at a reused address starts clean.
 kiln::RawHook g_regsingleton_hook, g_itemupdate_hook, g_itemfind_hook;
-// The continuations, called directly (a plain function pointer): ItemRegistryFind is hot and runs on job threads.
-using ItemFindFn = uintptr_t(__fastcall*)(uint32_t, uintptr_t);
+// The continuations, called directly (a plain function pointer). ItemRegistryFind's handler calls through its hook
+// object instead (g_itemfind_hook.call): that hook goes in while the game runs, and install() publishes the continuation
+// before the detour is reachable, while a global assigned after install() returns would still be null for a job thread
+// that enters at once.
 using FourArgFn = uintptr_t(__fastcall*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t);
-ItemFindFn g_itemfind_orig = nullptr;
 FourArgFn g_itemupdate_orig = nullptr, g_regsingleton_orig = nullptr;
 int64_t g_kind_off = -1;                  // world + world.storage + storage.kind
 std::atomic<uintptr_t> g_early_world{0};  // the world being set up or running, of kind g_early_kind
@@ -3341,6 +3345,7 @@ std::atomic<uintptr_t> g_unknown_reg{0};   // the registry whose misses are answ
 std::atomic<uintptr_t> g_unknown_tmpl{0};  // the clone copied per id
 uint32_t g_unknown_id = 0;                 // Kiln_Unknown_Item's own id
 uintptr_t g_itemfind_fn = 0;
+bool g_itemfind_tried = false;             // the hook was installed (or refused) once: it stays until the process ends
 constexpr uint32_t kUnknownProbe = 0x4B494C4E;  // the self-check's id ("KILN"), asked once per world
 
 // The game's data holds more keen::ItemInfo resources than its registry lists (test and deprecated items: Armor_Tint_TEST
@@ -3412,7 +3417,8 @@ uintptr_t unknown_make(uint32_t id) {
 }
 
 uintptr_t __fastcall hk_itemfind(uint32_t id, uintptr_t reg) {
-    const uintptr_t r = g_itemfind_orig(id, reg);
+    // the hook object's continuation, published before the detour is reachable (a job thread may enter while install() runs)
+    const uintptr_t r = g_itemfind_hook.call<uintptr_t>(id, reg);
     if (r || !id || reg != g_unknown_reg.load(std::memory_order_relaxed)) return r;
     if (const UnknownMap* m = g_unknown.load(std::memory_order_acquire))
         if (auto it = m->find(id); it != m->end()) return it->second;
@@ -3420,11 +3426,76 @@ uintptr_t __fastcall hk_itemfind(uint32_t id, uintptr_t reg) {
     return unknown_make(id);
 }
 
+// ---- the item lookup hook, on first need (GitHub issue 39) ----
+// ItemRegistryFind is among the game's hottest functions (478 call sites, job threads), and other loaders' mods hook it
+// too (Quick Deposit). Only an id that the client world's registry lacks needs Kiln there, and only two things bring one:
+// this game joined someone else's server (no server world here: the server may send items of mods this game does not
+// have, and its definitions arrive after the first steps), or mods here define items (one defined while the world runs
+// can reach the client world before its registry has it). So the hook goes in when a client world's item registry
+// finishes loading, on the loading screen where the install's short stop of the other threads is not seen, and only
+// when one of the two holds; a host without item mods never hooks it. Once in, it stays until the process ends.
+// Installed as dev.28 installed it at boot (RawHook::install): the checked installer refuses on PCs where Kiln cannot
+// open every thread, and a refusal here would cost the placeholder on a join.
+size_t mod_items() {
+    std::lock_guard lock(store_mutex());
+    size_t n = 0;
+    for (const DefPtr& d : g_defs) n += d->kind == KILN_CONTENT_ITEMS && !d->internal;
+    return n;
+}
+
+// The client world's registry is complete (unknown_enable): whether the lookup is hooked for it, installing it on first
+// need. One kiln.log line per world says which and why.
+bool itemfind_hooked(WorldState& ws) {
+    const char* w = wname(g_early_kind);
+    if (ws.find_decided) {
+        if (!g_itemfind_hook && !ws.find_late_said && mod_items()) {
+            ws.find_late_said = true;
+            LOGI("new content: %s world: an item was defined while this world runs and the game's item lookup is not hooked: "
+                 "its [Unknown item] placeholder starts with the next world", w);
+        }
+        return static_cast<bool>(g_itemfind_hook);
+    }
+    ws.find_decided = true;
+    if (g_itemfind_hook) {
+        LOGI("new content: %s world: the game's item lookup is hooked (%s)", w,
+             g_early_test ? "at boot: <kiln>/data/content/early-test" : "since an earlier world of this game");
+        return true;
+    }
+    if (g_itemfind_tried) {
+        LOGI("new content: %s world: the game's item lookup is not hooked (the hook was refused earlier); an unknown item id stays NULL", w);
+        return false;
+    }
+    KilnSessionInfo si{};
+    si.size = sizeof si;
+    g_api->session(&si);
+    const bool hosts = si.worlds[KILN_WORLD_SERVER] != 0;
+    const size_t items = mod_items();
+    if (hosts && !items) {
+        LOGI("new content: %s world: the game's item lookup is not hooked (this game hosts its world and no mod defines items, so "
+             "no unknown item id can reach it)", w);
+        return false;
+    }
+    g_itemfind_tried = true;
+    if (!g_itemfind_hook.install(g_api, g_owner, g_itemfind_fn, reinterpret_cast<void*>(&hk_itemfind), "content/ItemRegistryFind")) {
+        LOGW("new content: %s world: the game's item lookup could not be hooked (%s); an unknown item id stays NULL", w,
+             g_itemfind_hook.error() ? g_itemfind_hook.error() : "?");
+        return false;
+    }
+    if (!hosts)
+        LOGI("new content: %s world: the game's item lookup is hooked now (this game joined a server, which may send items of "
+             "mods this game does not have: they show as [Unknown item])", w);
+    else
+        LOGI("new content: %s world: the game's item lookup is hooked now (mods here define %zu item(s): one this world's "
+             "registry does not have yet shows as [Unknown item])", w, items);
+    return true;
+}
+
 // The registry is complete here: every item of the game's registry is in it, so a miss is an item outside it.
 void unknown_enable(WorldState& ws) {
-    if (!g_itemfind_hook || !g_unknown_id || g_unknown_reg.load() == ws.ireg) return;
+    if (!g_unknown_id || !g_itemfind_fn) return;  // no placeholder: no-unknown-items, no symbol, or the template was refused
     const auto it = ws.items.find(g_unknown_id);
     if (it == ws.items.end()) return;
+    if (!itemfind_hooked(ws) || g_unknown_reg.load() == ws.ireg) return;
     std::string why;
     const bool listed = build_game_items(&why);  // before the first answer in this registry
     if (g_unknown_tmpl.exchange(it->second) != it->second) {  // the base item moved: copies of the old clone go out of use
@@ -3450,7 +3521,7 @@ void unknown_enable(WorldState& ws) {
     size_t outside = 0;
     uint32_t sample = 0;
     for (uint32_t id : game)
-        if (!g_itemfind_orig(id, ws.ireg) && (++outside, !sample || id < sample)) sample = id;
+        if (!g_itemfind_hook.call<uintptr_t>(id, ws.ireg) && (++outside, !sample || id < sample)) sample = id;
     if (!outside)
         LOGI("new content: all %zu keen::ItemInfo resources of the game are in this registry", game.size());
     else if (const uintptr_t r = find(sample, ws.ireg); !r)
@@ -4314,11 +4385,12 @@ void early_boot() {
         if (g_regsingleton_hook) g_regsingleton_orig = g_regsingleton_hook.original<FourArgFn>();
         if (g_itemupdate_hook) g_itemupdate_orig = g_itemupdate_hook.original<FourArgFn>();
     }
+    // The item lookup is hooked on first need (itemfind_hooked), not here; the lab's early-test file hooks it at boot.
     bool unknown = !file("no-unknown-items") && sym("content/ItemRegistryFind", &g_itemfind_fn);
-    if (unknown) {
+    if (unknown && g_early_test) {
+        g_itemfind_tried = true;
         unknown = g_itemfind_hook.install(g_api, g_owner, g_itemfind_fn, reinterpret_cast<void*>(&hk_itemfind),
                                           "content/ItemRegistryFind");
-        if (unknown) g_itemfind_orig = g_itemfind_hook.original<ItemFindFn>();
     }
     if (unknown) {
         // what a lookup of an unknown id answers. A sword: its record is complete for every reader (hand, armour slot, UI);
@@ -4343,7 +4415,10 @@ void early_boot() {
         }
     }
     LOGI("new content: client worlds: registration at registry load %s, unknown item ids %s", early ? "on" : "OFF (at the first Pre)",
-         unknown ? "answered by a placeholder" : "NOT answered (a miss stays NULL)");
+         !unknown         ? "NOT answered (a miss stays NULL)"
+         : g_itemfind_hook ? "answered by a placeholder (the game's item lookup is hooked at boot: early-test)"
+                           : "answered by a placeholder when needed (the game's item lookup is hooked when a client world's item "
+                             "registry loads, and only if this game joined a server or mods define items)");
 }
 
 void nc_boot() {
