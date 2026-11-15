@@ -424,6 +424,7 @@ void gd_world_ready(uintptr_t world, uint32_t kind) {
         return;
     }
     clones_world_ready(world, kind);
+    boot_late_check();  // a required boot mod's clone the world refused stops the start
     configs_build();
     g_ready.store(true);
     g_gen.fetch_add(1);

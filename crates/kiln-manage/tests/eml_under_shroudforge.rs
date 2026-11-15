@@ -500,6 +500,12 @@ fn the_launcher_says_when_shroudforge_has_an_eml_mod_off_and_never_writes_a_play
     assert!(ext_of(&hand).is_none() && engine_mods::marker(&hand).is_none(), "a player's folder is never written to");
     let note = rep.own_notes.iter().find(|n| n.starts_with("eml:aldrich-bare-body")).expect("a note for the player's folder");
     assert!(note.contains("ShroudForge has it switched off") && !note.contains("the game uses your own folder"), "{note}");
+    // the words promised to a player on Nexus (14 Nov 2026): what happened and the two ways out, nothing about
+    // ShroudForge's files (it read as "Kiln wants a ShroudForge file from an EML mod")
+    assert!(note.starts_with("eml:aldrich-bare-body: You put this mod into ShroudForge's folder yourself, and ShroudForge has it switched \
+        off. Switch it on in Kiln's in-game menu (Mods > ShroudForge), or remove the folder and press Play: the mod is in your profile, so \
+        Kiln then places its own copy, switched on."), "{note}");
+    assert!(note.contains(&hand.display().to_string()) && !note.contains("extended.mod.json"), "{note}");
     // a copy whose switch is off (turned off in the game, or a write that failed) is not said to run
     shroudforge::set_enabled(&s.game.join("mods/more-gliders"), false).unwrap();
     let view = own_loaders::ProfileView::of_profile(&p);
@@ -568,4 +574,153 @@ fn a_settings_metadata_edit_in_kilns_eml_copy_survives_an_update_and_stopping_th
         let (retained, removed) = stop(&s, &mut p, how);
         assert!(retained.contains(&copy) && edited(&copy), "{how:?}: the player's edit is gone: retained {retained:?}, removed {removed:?}");
     }
+}
+
+/// Auto Loot Plus `version` as its author ships it (a dinput8.dll beside `mods/auto-loot-plus`, no extended.mod.json),
+/// in the Library: its EML part.
+fn alp_at(s: &Setup, version: &str) -> LibraryRef {
+    let d = s.t.0.join(format!("pkg/AutoLootPlus {version}"));
+    put(&d, "dinput8.dll", &build_test_dll(&["DirectInput8Create"], b"auto-loot-plus.log\0dinput8-chain.ini\0[Chain]\0mods\\auto-loot-plus\\config.txt"));
+    put(&d, "mods/auto-loot-plus/mod.json", format!(r#"{{"id":"auto-loot-plus","name":"Auto Loot Plus","version":"{version}","capabilities":["patch"]}}"#).as_bytes());
+    put(&d, "mods/auto-loot-plus/src/mod.lua", format!("-- {version}").as_bytes());
+    put(&d, "mods/auto-loot-plus/config.txt", b"radius=15");
+    let r = library::import(&s.dirs, &[d], &mut NoProgress).unwrap();
+    r.imported.iter().chain(&r.existing).find(|x| x.kind == ModKind::Eml).cloned().expect("the EML part")
+}
+
+/// ShroudForge's config as ShroudForge leaves it after a start: `paths.mods` as it writes it, from a canonical path.
+fn sf_config(game: &Path, mods: &str) {
+    put(game, "shroudforge/config/modloader-config.json", serde_json::json!({ "paths": { "mods": mods } }).to_string().as_bytes());
+}
+
+/// The file Kiln writes into its EML copy when the copy has none (ShroudForge's own `ensure_eml_extension`), switched on.
+fn kilns_switch() -> serde_json::Value {
+    serde_json::json!({"$schema": "https://bonsaibauer.github.io/shroudforge/schemas/extended.mod.schema.json",
+        "schemaVersion": 1, "enabled": true, "targets": ["client", "server"], "launcher": "EML", "settings": {}})
+}
+
+/// Nexus report (2026-11-14, Windows, dev.28): Auto Loot Plus and Endless Chests carry a dinput8.dll, so Kiln copies their
+/// EML part to `<game>\mods\<folder>`; ShroudForge, which Kiln hosts for the profile's ShroudForge mods, writes its
+/// `paths.mods` as `\\?\C:\…\mods` at every start, Kiln compared that with `C:\…\mods`, and the copies never got
+/// ShroudForge's switch. The comparison itself is Windows' (winpath::windows_below, tested on every system). Here the
+/// same spellings as a Linux launcher meets them under Proton (the Z: drive, the verbatim prefix, another case): the
+/// copy gets the switch with each, and the folder ShroudForge reads is `mods` in the launcher's note.
+#[test]
+fn a_game_folder_copy_gets_shroudforges_switch_however_shroudforge_spells_its_folder() {
+    let z = |dir: &Path| format!("Z:{}", dir.display().to_string().replace('/', "\\"));
+    let spellings: [(&str, fn(&str) -> String); 4] = [
+        ("relative", |_| "mods".into()),
+        ("z", |game_z| format!(r"{game_z}\mods")),
+        ("verbatim", |game_z| format!(r"\\?\{game_z}\mods")),
+        ("case", |game_z| format!(r"\\?\{}\MODS", game_z.to_uppercase())),
+    ];
+    for (tag, spell) in spellings {
+        let s = setup(&format!("spell-{tag}"));
+        // ShroudForge names its folder from a canonical path, so the folder is there
+        std::fs::create_dir_all(s.game.join("mods")).unwrap();
+        sf_config(&s.game, &spell(&z(&s.game)));
+        assert_eq!(shroudforge::mods_dir(&s.game), s.game.join("mods"), "{tag}");
+        let alp = alp_at(&s, "1.1.8");
+        let p = s.profile(vec![pm(&alp, true)]);
+        let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+        let copy = s.game.join("mods/auto-loot-plus");
+        assert!(rep.placed.contains(&"eml:auto-loot-plus".to_string()) && rep.warnings.is_empty() && rep.retained.is_empty(), "{tag}: {rep:?}");
+        let ext: serde_json::Value = serde_json::from_str(&ext_of(&copy).unwrap_or_else(|| panic!("{tag}: no switch in Kiln's copy"))).unwrap();
+        assert_eq!(ext, kilns_switch(), "{tag}");
+        let note = rep.own_loaders.iter().find(|n| n.loader.kind == ModKind::Eml).expect("ShroudForge runs the EML mods");
+        assert!(note.loader.folder == "mods" && note.copied == ["auto-loot-plus"] && note.off.is_empty() && note.own.is_empty(), "{tag}: {note:?}");
+    }
+}
+
+/// The workaround posted on Nexus for 0.2.0-dev.28 (the game closed, this file put by hand into each copy).
+const HAND_SWITCH: &str = r#"{"schemaVersion":1,"enabled":true,"launcher":"EML"}"#;
+
+/// The EML entries of a report list (the profile's ShroudForge mod is placed beside them).
+fn eml(list: &[String]) -> Vec<&str> {
+    list.iter().map(String::as_str).filter(|t| t.starts_with("eml:")).collect()
+}
+
+/// Every file named extended.mod.json under `dir`.
+fn ext_files_under(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let p = e.path();
+        if p.is_dir() { out.extend(ext_files_under(&p)); } else if p.file_name().is_some_and(|n| n == "extended.mod.json") { out.push(p); }
+    }
+    out
+}
+
+/// A copy dev.28 left without ShroudForge's switch, with the switch the player then made by hand: the fixed build takes it
+/// for the switch Kiln writes itself (it says the same). No error and nothing doubled; Kiln keeps managing the switch;
+/// the file is never the player's setting: an update replaces the copy as usual and puts Kiln's own switch in, and
+/// stopping the mod keeps nothing of it.
+#[test]
+fn a_switch_made_by_hand_in_kilns_copy_is_taken_as_kilns_own() {
+    let s = setup("hand-switch");
+    let alp = alp_at(&s, "1.1.8");
+    // dev.28 on Windows: Kiln's copy without the switch (here: placed while the profile had no ShroudForge mod)
+    let mut p = s.profile(vec![pm(&alp, true)]);
+    p.mods.shroudforge.clear();
+    engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+    let copy = s.game.join("mods/auto-loot-plus");
+    assert!(ext_of(&copy).is_none());
+    put(&copy, "extended.mod.json", HAND_SWITCH.as_bytes());
+    std::fs::write(copy.join("config.txt"), b"radius=42").unwrap(); // the DLL's own setting
+    // the fixed build, ShroudForge hosted again: kept, on, nothing to say
+    p.mods.shroudforge = vec![pm(&s.sf, true)];
+    let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+    assert!(eml(&rep.kept) == ["eml:auto-loot-plus"] && eml(&rep.placed).is_empty() && rep.switched.is_empty(), "{rep:?}");
+    assert!(rep.changed.is_empty() && rep.retained.is_empty() && rep.warnings.is_empty() && rep.own.is_empty() && rep.kept_files.is_empty(), "{rep:?}");
+    assert_eq!(ext_of(&copy).as_deref(), Some(HAND_SWITCH), "it already says what Kiln's file says");
+    let note = rep.own_loaders.iter().find(|n| n.loader.kind == ModKind::Eml).unwrap();
+    assert!(note.copied == ["auto-loot-plus"] && note.off.is_empty() && note.own.is_empty() && note.own_off.is_empty(), "{note:?}");
+    // Kiln manages that switch: off in the game, on again at the next Play (the profile is the switch)
+    shroudforge::set_enabled(&copy, false).unwrap();
+    let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+    assert!(eml(&rep.switched) == ["eml:auto-loot-plus"] && rep.retained.is_empty() && rep.kept_files.is_empty(), "{rep:?}");
+    assert!(shroudforge::read_mod(&copy).unwrap().enabled);
+    // the next version replaces the copy as usual: the DLL's setting goes over, the switch is Kiln's own file
+    p.mods.eml = vec![pm(&alp_at(&s, "1.1.9"), true)];
+    let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+    assert!(eml(&rep.placed) == ["eml:auto-loot-plus"] && rep.retained.is_empty() && rep.changed.is_empty(), "{rep:?}");
+    assert_eq!(std::fs::read(copy.join("src/mod.lua")).unwrap(), b"-- 1.1.9");
+    assert_eq!(std::fs::read(copy.join("config.txt")).unwrap(), b"radius=42");
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&ext_of(&copy).unwrap()).unwrap(), kilns_switch());
+    assert!(!rep.kept_files.iter().any(|k| k.contains("extended.mod.json")), "{rep:?}");
+    // stopping the mod: the copy goes, the DLL's setting waits for it, nothing of the switch is kept
+    p.mods.eml[0].enabled = false;
+    let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+    assert!(eml(&rep.removed) == ["eml:auto-loot-plus"] && !copy.exists() && rep.retained.is_empty(), "{rep:?}");
+    assert!(!rep.kept_files.iter().any(|k| k.contains("extended.mod.json")), "{rep:?}");
+    assert_eq!(ext_files_under(&s.game.join("kiln")), Vec::<PathBuf>::new());
+}
+
+/// The same file when the next Play is also the mod's update: not carried to the new version as a setting of the
+/// player's (it would stand in for Kiln's switch, and for a file the new version ships).
+#[test]
+fn a_switch_made_by_hand_is_not_carried_into_the_next_version() {
+    let s = setup("hand-switch-update");
+    let mut p = s.profile(vec![pm(&alp_at(&s, "1.1.8"), true)]);
+    p.mods.shroudforge.clear();
+    engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+    let copy = s.game.join("mods/auto-loot-plus");
+    put(&copy, "extended.mod.json", HAND_SWITCH.as_bytes());
+    p.mods.shroudforge = vec![pm(&s.sf, true)];
+    p.mods.eml = vec![pm(&alp_at(&s, "1.1.9"), true)];
+    let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+    assert!(eml(&rep.placed) == ["eml:auto-loot-plus"] && rep.retained.is_empty() && rep.warnings.is_empty(), "{rep:?}");
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&ext_of(&copy).unwrap()).unwrap(), kilns_switch());
+    assert!(!rep.kept_files.iter().any(|k| k.contains("extended.mod.json")), "{rep:?}");
+    // and a hand-made file with something of the player's in it (a target they chose) stays the player's, as before
+    let s = setup("hand-switch-targets");
+    let mut p = s.profile(vec![pm(&alp_at(&s, "1.1.8"), true)]);
+    p.mods.shroudforge.clear();
+    engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+    let copy = s.game.join("mods/auto-loot-plus");
+    let theirs = r#"{"schemaVersion":1,"enabled":true,"launcher":"EML","targets":["client"]}"#;
+    put(&copy, "extended.mod.json", theirs.as_bytes());
+    p.mods.shroudforge = vec![pm(&s.sf, true)];
+    p.mods.eml = vec![pm(&alp_at(&s, "1.1.9"), true)];
+    engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+    assert_eq!(ext_of(&copy).as_deref(), Some(theirs));
 }

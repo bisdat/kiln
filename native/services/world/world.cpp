@@ -342,6 +342,16 @@ const KilnWorldApi kTable = {
     &game_wraps_release,
     &game_slice_run_original,
     &wrap_original,
+    &in_program,
+    &game_program_list,
+    &game_slice_iterate,
+    &game_slice_slot,
+    &game_slice_mark,
+    &game_slice_archetype,
+    &game_archetype_has,
+    &game_slice_attr_changed,
+    &game_slice_attr_validate,
+    &game_world_session,
 };
 
 void KILN_CALL on_client_pre(const KilnTickInfo* tick, void*) { game_programs_pre(KILN_WORLD_CLIENT, tick); }
@@ -356,7 +366,10 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     g_api = api;
     g_owner = owner;
     if (info->size >= offsetof(KilnPluginInfo, on_ready) + sizeof(info->on_ready))
-        info->on_ready = [](void*) { boot_programs_init(); };
+        info->on_ready = [](void*) {
+            boot_programs_init();
+            in_program_resolve(program_types());
+        };
     info->id = KilnStr{KILN_WORLD_SERVICE, sizeof(KILN_WORLD_SERVICE) - 1};
     info->version = KilnStr{"4", 1};
     resolve();
@@ -380,9 +393,11 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     // The game's own programs: the client world's directory (a game client) and every world's start and stop.
     if (api->size >= offsetof(KilnApi, session) + sizeof(void*)) {
         KilnHandle h = 0;
+        bool client_tick = false;
         if (api->side() == KILN_SIDE_CLIENT)
-            api->subscribe_world_tick(owner, KILN_WORLD_CLIENT, KILN_TICK_PRE, &on_client_pre, nullptr, &h);
-        api->subscribe_world(owner, &on_world_event, nullptr, &h);
+            client_tick = api->subscribe_world_tick(owner, KILN_WORLD_CLIENT, KILN_TICK_PRE, &on_client_pre, nullptr, &h) == KILN_OK;
+        const bool events = api->subscribe_world(owner, &on_world_event, nullptr, &h) == KILN_OK;
+        wraps_client_ready(client_tick, events);
     }
     game_programs_init();
     KW_I("kiln.world: programs %s, entities %s, find %s, names %s (singletons %s, events %s), queue %s, "

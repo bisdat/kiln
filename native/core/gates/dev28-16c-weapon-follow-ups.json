@@ -1,3 +1,0 @@
-{ "gates": [
-    { "name": "blocks.move_followups", "checks": ["16c-b", "16c-d"] }
-] }

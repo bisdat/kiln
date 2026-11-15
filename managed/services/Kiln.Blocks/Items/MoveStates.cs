@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// What a move's `animation` names, and the one seam to the player graph's states. A GUID or a `0x` id is resolved offline (an id becomes 16 bytes with that
+// What a move's `animation` names, and the one seam to the player graph's states. A GUID or a `0x` id is parsed offline (an id becomes 16 bytes with that
 // FNV-1a, BlockIds.WithFnv: the engine only ever hashes the reference). A name is a state of this mod or of the game's graph, which only the player-anim
 // lookup knows, and it knows it when content is ready: until it is wired (PlayerStateSeam.Lookup), a name is reported then as not available in this build.
 namespace Kiln;
@@ -15,7 +15,7 @@ internal sealed record GameStateAnswer(string Machine, string Name, PlayerStateK
 /// <summary>A state a mod defines: its GUID (<c>BlockIds.Derive(mod, "state", name)</c>), kind and status, and why when it is not live.</summary>
 internal sealed record ModStateAnswer(Guid Guid, PlayerStateKind Kind, PlayerStateStatus Status, string Reason);
 
-/// <summary>The two questions the player-anim lookup answers, by content ready, on both sides, from any thread.</summary>
+/// <summary>The name and entry-id questions the player-anim lookup answers, by content ready, on both sides, from any thread.</summary>
 internal interface IPlayerStateLookup
 {
     /// <summary>Why the lookup cannot answer here (no service, the capability off, the graph off or not up yet); null when it can.</summary>
@@ -24,6 +24,8 @@ internal interface IPlayerStateLookup
     IReadOnlyList<GameStateAnswer> FindGameStates(string name);
     /// <summary>Null: mod <paramref name="mod"/> defines no state <paramref name="name"/>.</summary>
     ModStateAnswer? Find(string mod, string name);
+    IReadOnlyList<AnimationReferenceAnswer> FindById(Guid guid) => FindGameStates($"0x{BlockIds.Fnv(guid):x8}")
+        .Select(s => new AnimationReferenceAnswer((PlayerAnimStateKind)s.Kind, true, "")).ToList();
 }
 
 /// <summary>Where the lookup plugs in: <see cref="PlayerAnimLookup"/> over <c>Kiln.PlayerAnim</c>. Tests set it; null: no lookup at all.</summary>
@@ -44,7 +46,7 @@ internal sealed record AnimationRef(string Written, Guid? Guid, string? Name)
 
 internal static class MoveStates
 {
-    /// <summary>What a written name is, offline. A GUID and <c>0x</c> + 8 hex digits are a game state the graph is not asked about; anything else waits for the lookup.</summary>
+    /// <summary>What a written name is, offline. A GUID or <c>0x</c> id is parsed here; existence and kind are checked against the receiving graph at content ready.</summary>
     public static AnimationRef? Parse(BlockContext ctx, string? written, string path)
     {
         if (written == null) return null;
@@ -70,11 +72,29 @@ internal static class MoveStates
     public static (Guid Guid, PlayerStateKind? Kind)? Resolve(string mod, AnimationRef a, IPlayerStateLookup? lookup, out string? problem)
     {
         problem = null;
-        if (a.Guid is { } known) return (known, a.Kind);
+        if (a.Guid is { } known)
+        {
+            if (lookup == null) { problem = $"animation {a.Written}: receiving graph lookup is unavailable"; return null; }
+            try
+            {
+                if (lookup.NotAnswering is { } why) { problem = $"animation {a.Written}: {why}"; return null; }
+                var states = lookup.FindById(known);
+                var live = states.Where(s => s.Live).ToList();
+                if (live.Count == 0)
+                {
+                    problem = $"animation {a.Written}: state is not live in the receiving graph" + (states.Count > 0 ? $": {states[0].Reason}" : " (no such entry id)");
+                    return null;
+                }
+                if (live.Select(s => s.Kind).Distinct().Count() != 1)
+                { problem = $"animation {a.Written}: entry id is ambiguous between full-body and overlay states"; return null; }
+                return (known, (PlayerStateKind)live[0].Kind);
+            }
+            catch (PlayerStatesNotAnswering e) { problem = $"animation {a.Written}: {e.Message}"; return null; }
+        }
         var name = a.Name!;
         if (lookup == null)
         {
-            problem = $"\"{name}\" cannot be looked up: player states are not available in this build. Name a game state by its GUID or 0x id (the catalog's graphs section) until then; the motion keeps its own";
+            problem = $"\"{name}\" cannot be looked up: player states are not available in this build.; the motion keeps its own";
             return null;
         }
         try { return Resolve(mod, name, lookup, out problem); }
@@ -86,7 +106,7 @@ internal static class MoveStates
     }
 
     private static string NotAnswering(string name, string why) =>
-        $"\"{name}\" cannot be looked up: player states are not available here ({why}). The motion keeps its own; a game state by its GUID or 0x id needs no lookup";
+        $"\"{name}\" cannot be looked up: player states are not available here ({why}). The motion keeps its own; raw references also require this lookup";
 
     private static (Guid Guid, PlayerStateKind? Kind)? Resolve(string mod, string name, IPlayerStateLookup lookup, out string? problem)
     {

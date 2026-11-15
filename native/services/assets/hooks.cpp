@@ -626,10 +626,8 @@ GameIndex game_index_keys(std::vector<HashK>* out, size_t max_keys, uint64_t* to
         *why = "the content hooks are off";
         return GameIndex::unsupported;
     }
-    if (!g_game_map.load()) {
-        GameBlob unused;
-        (void)game_blob_find(HashK{}, &unused);  // fetches the index as a blob read would
-    }
+    // Any-thread catalog queries only observe the index published by the game's content hook.
+    // Do not run game_blob_find's lazy accessor on the caller's thread while loading may still own the reader.
     const void* m = g_game_map.load();
     if (!m) {
         *why = "the game has not opened its content index yet";
@@ -645,6 +643,12 @@ GameIndex game_index_keys(std::vector<HashK>* out, size_t max_keys, uint64_t* to
     if (v.nk > max_keys) {
         *why = "the content index lists " + std::to_string(v.nk) + " blobs";
         return GameIndex::too_many;
+    }
+    // view_map only requires a power-of-two bucket count. A moved/corrupt header must not turn an any-thread
+    // catalog query into an allocation of gigabytes before its guarded reads can refuse the map.
+    if (uint64_t(v.nb) * 8 > (uint64_t(64) << 20)) {
+        *why = "the content index bucket array exceeds 64 MiB";
+        return GameIndex::unsupported;
     }
     // copies (the game's memory is read under a guard only), then the layout check on the copies
     std::vector<uint8_t> buckets(static_cast<size_t>(v.nb) * 8);

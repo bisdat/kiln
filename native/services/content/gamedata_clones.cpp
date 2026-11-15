@@ -76,6 +76,8 @@ struct Def {
     std::vector<std::string> warnings;
     uintptr_t data = 0;       // the clone's live bytes (kiln.assets' copy; buffs: its record in Kiln's collection)
     std::set<uintptr_t> worlds;
+    struct Registration { std::string reason; unsigned attempts = 0; bool permanent = false; };
+    std::map<uintptr_t, Registration> sequence_failures;
     bool orphan = false;
     bool placeholder = false; // made inert (Kiln.Content's missing-content record)
     bool rebuild = false;     // a placeholder taken over by its mod: build the record again from the base
@@ -126,7 +128,7 @@ bool valid_name(const std::string& n) {
 const char* wname(uintptr_t world) { return world == g_api->world(KILN_WORLD_CLIENT) ? "client" : "server"; }
 
 std::string mod_of_label(const std::string& label) {
-    for (const char* p : {"mod ", "pack "})
+    for (const char* p : {"mod ", "pack ", "boot:"})  // "boot:<mod>": the process owner of a boot generation's definitions
         if (label.rfind(p, 0) == 0) return label.substr(std::strlen(p));
     return {};
 }
@@ -428,12 +430,20 @@ uintptr_t seq_map_of(uintptr_t world, std::string* err) {
 
 bool ensure_seq(Def& d, uintptr_t world) {
     if (d.worlds.count(world)) return true;
+    auto& outcome = d.sequence_failures[world];
+    if (outcome.permanent) return false;
     std::string err;
     const uintptr_t map = seq_map_of(world, &err);
     if (!map || !map_put(map, fnv1a(d.guid, 16), d.data, "sequence registry", &err)) {
-        d.state = "error", d.problem = err;
+        if (outcome.reason != err) LOGW("gamedata: sequence %s in %s world: %s", d.name.c_str(), wname(world), err.c_str());
+        outcome.reason = err;
+        // A full map cannot grow here; a missing reflected type cannot appear in this session.
+        // Discovery/read failures can recover while a world's registries load. Bound those retries too.
+        outcome.permanent = err == "the sequence registry is full" || err.find("not in the reflection") != std::string::npos || ++outcome.attempts >= 20;
+        d.state = "error", d.problem = std::string(wname(world)) + " world: " + err;
         return false;
     }
+    d.sequence_failures.erase(world);
     d.worlds.insert(world);
     LOGI("gamedata: sequence %s (%s, clone of %s) registered in the %s world's sequence registry", d.name.c_str(),
          guid_text(d.guid).c_str(), d.base.c_str(), wname(world));
@@ -1348,6 +1358,22 @@ void batch_finish(uintptr_t world) {
     g_batch_buffs.clear();
 }
 
+// Called under the clone lock. The server and hosted client consume the same item resource.
+gjson sequence_registrations(const Def& d) {
+    gjson worlds = gjson::object();
+    for (uint32_t kind : {KILN_WORLD_SERVER, KILN_WORLD_CLIENT}) {
+        const uintptr_t w = g_api->world(kind);
+        if (!w) continue;
+        const char* name = kind == KILN_WORLD_SERVER ? "server" : "client";
+        if (d.worlds.count(w)) worlds[name] = {{"state", "registered"}};
+        else if (auto f = d.sequence_failures.find(w); f != d.sequence_failures.end())
+            worlds[name] = {{"state", "failed"}, {"reason", f->second.reason}, {"retryable", !f->second.permanent}};
+        else if (!d.data && d.state == "error") worlds[name] = {{"state", "failed"}, {"reason", d.problem}, {"retryable", false}};
+        else worlds[name] = {{"state", "pending"}};
+    }
+    return worlds;
+}
+
 // One definition as definitions() lists it (store_mutex and g_mu held).
 gjson listing(const Def& d) {
     char id[16];
@@ -1355,9 +1381,21 @@ gjson listing(const Def& d) {
     gjson x = {{"section", section_name(d.section)}, {"guid", guid_text(d.guid)}, {"id", id}, {"name", d.name}, {"base", d.base},
                {"owner", owner_label(d.owner)}, {"mod", d.mod}, {"source", d.source}, {"state", d.orphan ? "orphaned" : d.state},
                {"placeholder", d.placeholder}, {"worlds", d.worlds.size()}, {"version", d.version}, {"definition", d.body}};
+    if (d.section == KILN_GD_SEQUENCES) {
+        auto worlds = sequence_registrations(d);
+        bool failed = false;
+        std::string why;
+        for (auto it = worlds.begin(); it != worlds.end(); ++it) {
+            if (it.value()["state"] == "failed") { failed = true; why = it.key() + " world: " + it.value().value("reason", "registration failed"); }
+        }
+        x["registrations"] = std::move(worlds);
+        if (!d.orphan) {
+            if (failed) { x["state"] = "error"; x["error"] = why; }
+        }
+    }
     if (d.data) x["address"] = d.data;
     if (!d.texts.empty()) x["texts"] = d.texts;
-    if (!d.problem.empty()) x["error"] = d.problem;
+    if (!d.problem.empty() && !x.contains("error")) x["error"] = d.problem;
     if (!d.warnings.empty()) x["warnings"] = d.warnings;
     return x;
 }
@@ -1422,6 +1460,16 @@ bool buff_guid(uint32_t id, uint8_t out[16]) {
 }
 
 namespace {
+bool attach_sequence(Def& d, uintptr_t world) {
+    if (!ensure_seq(d, world)) return false;
+    for (uint32_t kind : {KILN_WORLD_SERVER, KILN_WORLD_CLIENT}) {
+        auto w = g_api->world(kind);
+        if (w && !d.worlds.count(w)) return false;
+    }
+    d.state = "registered";
+    d.problem.clear();
+    return true;
+}
 // A client that hosts: the server world is kiln.content's, but the client world of the same process creates the
 // replicated entities and needs the clones too (templates: its own init registers clones served before it starts;
 // this covers clones defined later; perks: its own PerkRegistry; buffs: its own BuffRegistry pointer). On the client
@@ -1432,7 +1480,11 @@ void KILN_CALL on_client_pre(const KilnTickInfo* tick, void*) {
     if (!cw || !g_api->world(KILN_WORLD_SERVER)) return;
     std::lock_guard l1(store_mutex());
     std::lock_guard lock(g_mu);
-    for (Def& d : g_defs)
+    for (Def& d : g_defs) {
+        if (d.section == KILN_GD_SEQUENCES && d.data) {
+            attach_sequence(d, cw);
+            continue;
+        }
         if (d.state == "registered" && d.data && !d.worlds.count(cw)) {
             std::string err;
             if (d.section == KILN_GD_TEMPLATES) ensure_info(d, cw, d.base);
@@ -1446,6 +1498,7 @@ void KILN_CALL on_client_pre(const KilnTickInfo* tick, void*) {
             if (d.state == "error") LOGW("gamedata: %s %s in the client world: %s", section_name(d.section), d.name.c_str(), d.problem.c_str());
             d.state = "registered";
         }
+    }
 }
 }  // namespace
 
@@ -1496,6 +1549,8 @@ void clones_world_reset() {
     g_defs_layered.clear();  // the store forgets every layer with the world
     for (Def& d : g_defs) {
         if (d.state == "registered" || d.state == "waiting") d.state = "pending";  // the next world registers them again
+        if (d.section == KILN_GD_SEQUENCES && d.data) { d.state = "pending"; d.problem.clear(); }
+        d.sequence_failures.clear();
         d.worlds.clear();  // a new world may get the same address
         d.probed.clear();
     }
@@ -1512,6 +1567,10 @@ void clones_tick(uint64_t step) {
     std::lock_guard lock(g_mu);
     for (Def& d : g_defs)
         if (d.state == "waiting") register_def(d, w);
+        else if (d.section == KILN_GD_SEQUENCES && d.data && !d.worlds.count(w)) {
+            // Complete entries/field installation too when the initial active-world attachment failed.
+            register_sequence(d, w);
+        }
     if (BM.ok && BM.header) {
         std::string err;
         for (BuffWorld& x : BM.worlds)
@@ -1677,6 +1736,7 @@ std::string clones_json() {
         };
         const size_t worlds = d.worlds.size(), nw = d.warnings.size();
         add(&d.version, sizeof d.version), add(&d.orphan, 1), add(&d.placeholder, 1), add(&worlds, sizeof worlds), add(&d.data, sizeof d.data);
+        if (d.section == KILN_GD_SEQUENCES) add_s(sequence_registrations(d).dump());
         add_s(d.state), add_s(d.problem), add_s(owner_label(d.owner)), add_s(d.mod), add_s(d.source);
         add(&nw, sizeof nw);
         for (const std::string& w : d.warnings) add_s(w);
@@ -1705,7 +1765,7 @@ gjson clones_export(uint32_t section) {
     std::lock_guard lock(g_mu);
     gjson a = gjson::array();
     for (const Def& d : g_defs)
-        if (d.section == section && d.state == "registered") a.push_back(d.body);
+        if (d.section == section && (d.state == "registered" || (section == KILN_GD_SEQUENCES && d.data))) a.push_back(d.body);
     return a;
 }
 
@@ -1756,5 +1816,13 @@ bool gd_template_defined(const uint8_t guid[16]) {
 }
 
 uint64_t gd_template_generation() { return gd::g_template_gen.load(std::memory_order_relaxed); }
+
+void gd::clones_boot_failed(std::vector<BootFailed>* out) {
+    std::lock_guard lock(gd::g_mu);
+    for (const gd::Def& d : gd::g_defs)
+        if (d.state == "error" && !d.orphan && owner_label(d.owner).rfind("boot:", 0) == 0)
+            out->push_back({d.mod, d.name, std::string(gd::section_name(d.section)) + " clone " + d.name + " (" + guid_text(d.guid) +
+                                               ") was not registered when a world loaded: " + d.problem});
+}
 
 }  // namespace kc

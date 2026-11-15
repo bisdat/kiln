@@ -47,6 +47,11 @@ struct LateRow {
 };
 std::vector<LateRow> late_rows();
 
+// The id of the dllmain native mod one of whose DLLs is chain entry `index` (kiln::boot_info().chain, a chain.ini
+// [profile] entry), matched as when the proxy's results are read; empty for none. For the compat report (dev.29 `before`
+// rules); reads no more than the mods' paths. Valid after discover().
+std::string dllmain_mod_of(size_t index);
+
 // A dllmain native mod whose DLL the proxy loaded before kiln-core started (chain.ini [profile], not deferred). Switching
 // such a mod off in the profile (a compat rule, native.json, a profile entry) cannot stop it any more. Valid after discover().
 bool loaded_by_proxy(const std::string& mod_id);

@@ -30,13 +30,14 @@ var result = await Terrain.Apply(mound);            // one batch a tick
 if (!result.Ok) Log.Warn($"mound: {result.State}, {result.Reason}");
 ```
 
-Call it from mod code on the tick thread, on the server side (a dedicated server, or the world a player hosts once
-its game test has passed). `Apply` waits for the world to run, so a mod may call it from `OnLoad`. The sample
+Call it from mod code on the tick thread, on the server side (a dedicated server, or the world a player hosts; both are on since
+0.2.0-dev.29, with hosted behavior still unconfirmed). `Apply` waits for the world to run, so a mod may call it from `OnLoad`. The sample
 `mods/samples/OreVein` does both shapes: a heightfield from C# and a voxel volume from `vein.json`.
 
 ## What it cannot do
-- **Take ground away again.** `Forget` and removing the mod leave the cells. A plan that should be reversible keeps
-  what it replaced itself (`Build.Read` before, `Build.Write` after), or uses `Transient`.
+- **Take ground away again.** `Forget` and removing the mod do not undo the cells; indefinite retention through vanilla saves outside bases has not been established. A plan that should be reversible keeps
+  what it replaced itself (`Build.Read` before, `Build.Write` after), or uses `Transient` (gone after the next restart,
+  see below).
 - **A mod's own materials.** A palette names the game's materials only (1 to 116, 128 to 212). Materials a mod adds
   with Kiln.Blocks get their cell number per world (117 to 127 for terrain, 213 and up for building blocks) and a
   player without the mod has no look for them, so an overlay refuses those numbers with `ArgumentException`. Such
@@ -45,6 +46,9 @@ its game test has passed). `Apply` waits for the world to run, so a mod may call
   ledger"). Two mods that are both loaded never write one block; a mod added later can write over the ground of a
   mod that was removed.
 - **Know about edits before its first apply.** A fresh plan writes over whatever is in its region (outside bases).
+- **Recognise a lost ledger when Kiln's witness is lost too.** A plan whose ledger record was lost is refused by Kiln's
+  witness, a second file outside the world's Kiln data; when all of `kiln/data` is lost, the plan is a first install
+  again (see "When the ledger is gone").
 - **Large landscapes.** A region is at most 128 m across and 1,048,576 cells; every block it touches is saved in
   full (1 KiB before packing) and sent to every player near it like any edit. Baked terrain (replacing the shipped
   tiles before the world loads) is not built: `terrain.baked` is off.
@@ -86,8 +90,11 @@ public sealed record TerrainPatch(string Id, int Version, CellBox Region, Terrai
     `Replace`: below the height the column becomes matter, above it air, up to the region's top.
     `AddOnTop`: only cells that hold less matter than the patch wants are written; nothing is dug.
   - A signed-distance source is not declared in this version.
-- `Persistence`: `Kept` (saved with the world, recorded in the ledger) or `Transient` (not saved, not recorded,
-  gone at the next restart: for ground that is meant to reset; it may be applied again whenever the mod asks).
+- `Persistence`: `Kept` (saved with the world, recorded in the ledger) or `Transient` (no ledger record and no
+  save region of its own; it may be applied again whenever the mod asks). A transient overlay is gone after the next
+  restart: where the game's save writes its cells anyway (inside a player base, or in a 32-cell chunk another, kept
+  edit keeps), kiln.build puts back what was there before at the next start (`BuildFlags.Transient` in
+  [build.md](build.md)). A cell someone changed since keeps that change.
 
 The same shape in JSON (`TerrainPatch.FromJson`, `ToJson`); a byte array is base64:
 
@@ -114,6 +121,9 @@ An unknown `kind`, an unknown property or a wrong length is an `ArgumentExceptio
 | Cells per tick (`TerrainApplyOptions.CellsPerTick`) | default 32,768; 512 to 262,144 | one batch a tick; a full default batch took 42 ms on a lab server with no player (one measurement, 2026-11-13) |
 | Batch | a box of whole 8-cell blocks, at most `CellsPerTick` cells, edge 8, 16, 32 or 64 | a saved edit is an 8x8x8 block |
 
+- **Moving a world without Kiln data applies overlays again.** Copying only the world save to another PC (including Steam cloud transfer) loses both ledger and witness in `kiln/data`; Kiln treats the plan as a first install and can put back terrain a player dug away. Keep the world's Kiln data with its save.
+- **No shared write budget.** Each concurrent `Apply` has its own `CellsPerTick` allowance; the default is not a total per-world limit. Multiple mods or applies add their work together, and `Inspect` can traverse many batches synchronously. One 32,768-cell write took 42 ms on an idle lab server; there is no demonstrated host frame-time bound.
+
 Batches run in a fixed order (z, then y, then x), one per tick. The same patch gives the same batches and the same
 cells on every machine (`AddOnTop` depends on the ground it finds).
 
@@ -124,10 +134,13 @@ cells on every machine (`AddOnTop` depends on the ground it finds).
 public static Task<TerrainResult> Apply(TerrainPatch patch, TerrainApplyOptions? options = null);
 ```
 
-It waits for the world to run, then for each batch: asks for the tiles, reads the cells, writes through
-`Build.WriteAsync`, reads back, records the batch in the ledger and raises `Terrain.Changed`. It is **not atomic**:
+It waits for the world to run, then for each batch: asks for the tiles, reads the cells, records the intended
+fingerprints, loads and writes through `Kiln.Build`'s guarded write (`Build.WriteIfUnchanged`: the cells it writes must
+still be what the batch read, compared after the `BuildEditingEvent` handlers and right before the commit), checks
+readback availability and raises `Terrain.Changed`. It is **not atomic**:
 a patch is spread over ticks, and a cancel or a failure leaves the batches already written in the world. The result
-says how many.
+says how many. A world stop or change ends the apply; a mod reload releases its running reservation so an explicit
+apply from the new instance can resume the stored record.
 
 `TerrainResult(bool Ok, string? Reason, TerrainState State, string Plan, int Version, long ChangedCells,
 int Batches, IReadOnlyList<TerrainConflict> Conflicts)`:
@@ -157,33 +170,81 @@ the cell values, first 8 bytes). A block is on the world's 8-cell grid. A patch 
 number is not 0 (a heightfield: every cell of the region; added on top: the cells below the height); a block with
 no addressed cell is not the plan's. The fingerprint covers all of the block's cells inside the region, so an edit
 next to a vein, in the same block and inside the region, also counts as "changed": the rule errs on the side of
-the player. The record and the cells reach the disk with the same world save, as `Build.PlaceOnce`'s do.
+the player. Fingerprints for an attempted write are recorded before calling Build, using the intended result;
+post-write callbacks cannot become part of the plan's recorded result. WorldData normally stages the ledger with the
+world save, as `Build.PlaceOnce` does. An older sidecar generation is refused. A missing ledger is detected by Kiln's
+witness of the plans (see "When the ledger is gone"): keep backups of the world and of `kiln/data`.
 
 | Situation | What happens |
 |---|---|
-| No record | every block is written; "before" and "after" are recorded |
+| No record, and Kiln's witness has no entry for the plan (this world never had it) | a first install: every block is written, also where the ground already holds the plan's result; "before" and "after" are recorded |
+| No record, but the witness has the plan from an earlier world file (the ledger was lost) | `Refused`: "ownership lost: …"; nothing is written or recorded (see "When the ledger is gone") |
+| No record, and `Forget` left a tombstone for this id | a first install over whatever is there; the tombstone is used up |
 | Same id, same version, same content, state `applied` | `AlreadyApplied` |
 | Same id and version, other content | `Refused`: "content changed without a new version" |
 | Lower version than recorded | `Refused`: a downgrade is never applied |
 | Higher version | per block of the old record: the cells still equal its "after" → the block is this plan's and is written; anything else → the block is listed as `PlayerEdit` and left alone, and the plan gives up that block (later versions do not touch it either). Blocks the old version did not address are written as new. The record moves to the new version; the result is `Conflict` when any block was left |
-| Record not complete (canceled, stopped, or a save fell between batches before a crash) | resumed: a block that equals "after" is done, one that equals "before" is written, anything else is a conflict |
+| Record not complete (canceled, stopped, or a save fell between batches before a crash) | resumed: an attempted block that equals "after" is done; any other value is a conflict, including "before" (a player may have restored the original ground). Blocks never attempted may still be written |
+| Corrupt or oversized ledger, or an older sidecar generation | refused without replacing stored data; `Applied` returns an empty list and `Forget` returns false, with a warning in the log |
 | A block is addressed by a kept plan of **another mod** known in this session (applied, or being applied) | `Refused`, naming that mod and plan; nothing is written |
 | The same plan is being applied already | `Refused` |
 | A block lies in a player base and `InBases` is off | that block is listed as `BaseZone` and left alone |
+| A block's cells change while its batch is being written (another mod's `BuildEditingEvent` handler edits them, or anything between the batch's read and its commit) | kiln.build's guard refuses the write; the batch is then written block by block, and a block whose written cells changed is not written at all: listed as `PlayerEdit` and given up. The batch's other blocks are written. The guard compares the cells the batch writes; a changed cell it does not write (added on top: a cell already full) stays as it is, and the block's recorded "after" then no longer matches, so a later version leaves it alone |
 
 `TerrainConflict(TerrainConflictKind Kind, CellBox Block, string? Owner)`; kinds `PlayerEdit`, `OtherPlan`,
 `BaseZone`.
 
 Rules that follow from the engine:
 - **Removing a plan does not restore the ground.** `Terrain.Forget(id)` drops the record (the plan no longer owns
-  its blocks, and an `Apply` of the same id starts fresh over whatever is there); the cells stay. Nothing can delete
-  a saved block, so the terrain under an overlay never comes back by itself.
-- **A mod that is gone keeps its ground.** Its cells stay in the world. Its ledger is in its own world data, which
+  its blocks), takes the plan out of Kiln's witness and leaves a tombstone in the ledger (the id and when), so the next
+  `Apply` of that id is a first install over whatever is there, of any version, and not taken for a lost ledger; that
+  apply uses the tombstone up. A ledger keeps 64 tombstones per mod and world (past that the oldest goes). The cells
+  stay. Nothing can delete
+  a saved block through this API; this does not guarantee indefinite retention through vanilla saves outside bases.
+- **Removing a mod does not undo its ground.** Later vanilla retention outside bases remains unconfirmed. Its ledger is in its own world data, which
   no other mod can read: another mod's plan over the same blocks is refused only while the owning mod is loaded and
   has used `Kiln.Terrain` in this session. (A ledger shared by all mods needs a world bundle of Kiln's own in
   Kiln.Saves: about half a day, not in this version.)
-- A fresh plan does not know whether a player dug there before it: it writes. Only upgrades are guarded.
-- `Terrain.Applied` lists the calling mod's records in this world.
+- A fresh plan does not know whether a player dug there before it: it writes. Guarded are upgrades (by the
+  fingerprints), resumes and edits made while a batch is being written.
+- `Terrain.Applied` lists the calling mod's records in this world. `Forget` returns false while that plan is being
+  applied, so it cannot discard the receipts of a running write.
+
+### When the ledger is gone
+
+The ledger is in the world's Kiln data (`kiln/data/worlds/<world id>/`), next to the world save, not in it. If that data
+is lost or cannot be read, or the mod's ledger key is gone, while the world save keeps the ground, a kept plan has no
+record again, and its next `Apply` would be a first install that writes over everything changed there since.
+
+So Kiln keeps a **witness** in a second place: `kiln/data/kiln.terrain/<world id>/<mod id>.json` lists the kept plans
+the mod has a ledger record of in that world, each with the world file's revision when the record was made ("since").
+`Apply` writes it before a new plan's first cell, and fills in any plan its ledger has that the witness lacks;
+if that write fails, Apply refuses before changing cells (fix the storage error and retry); a new
+world, which has no id before its first save, gets it once that save is written. The witness is not in the world's
+Kiln data folder, so it outlives the loss of that folder or of the ledger key. A record goes into the Kiln data of
+every save after it was made, so for a kept plan with no record:
+
+- **The witness has the plan, from a world file older than this one:** the world had the record and lost it. `Apply`
+  returns `Refused` ("ownership lost: this world had plan 'x' (recorded at world revision n; the world file is at
+  revision m now), but …"), writes nothing, records nothing and raises no event; `Inspect` reports `Would = Refused`
+  with the same reason. It holds whatever the ground looks like now, also where every block was changed since.
+- **The witness does not have the plan:** this world never had it. A first install, also over ground that already
+  holds the plan's result (a player built the same thing, or the ground is that material anyway).
+- **The witness has the plan, but not from an older world file:** the record never reached a save (the server
+  stopped first), or an older world file was put back. A first install; the entry is made new.
+- **The witness cannot be read:** `Refused` ("ownership unknown: …") for plans with no record, as whether the world had
+  them cannot be told; the file is never replaced. Plans with a record work as before.
+
+What it cannot see: when all of `kiln/data` is lost (the world's Kiln data and the witness), or the world save is
+moved to another server without it, a plan with no record is a first install again. (kiln.build's kept chunks live
+there too, so after the next restart only the ground inside player bases still shows such a plan.) An older world file
+put back and played on past the witness's revision while the mod was not installed is taken for a lost ledger.
+
+What an operator can do: restore the world's Kiln data from a backup that matches the world save
+(`Saves.RestoreOnNextStart`, or a `kilnctl backup` archive); the ledger is back and the plan behaves as recorded. If the
+world truly never had the plan, remove the plan's entry from the witness file named in the reason. Adopting the
+ground as it stands (recording its cells as the plan's) is not available in this version, and `Terrain.Forget` does
+not help: with no record there is nothing to forget.
 
 ### Inspect
 
@@ -202,14 +263,16 @@ A dry run: validates, loads the tiles, and reports `Box`, `Cells` (addressed), `
 `Terrain.Changed` (`Action<TerrainChangedEvent>`): once per committed batch, on the tick thread, after the write and
 the ledger update. `TerrainChangedEvent(string Mod, string Plan, int Version, CellBox Box, long CellsChanged,
 int Batch, int BatchCount, bool Last)`. A refusal, a conflict-only batch and an `AlreadyApplied` raise nothing.
-Every batch also raises kiln.build's own `BuildEditingEvent` and `BuildEditEvent` (origin `terrain`); a handler that
-cancels the first stops the patch as `Partial`. Terraforming is not part of the cancelable gameplay events.
+Every batch also raises kiln.build's own `BuildEditingEvent` and `BuildEditEvent` (label `terrain <plan> v<version>`,
+origin the mod that applies the patch); a handler that cancels the first stops the patch as `Partial`. A handler that
+changes cells the batch writes is not written over (the ledger row above); the batch is then written block by block,
+so each of its blocks raises the two events once more. Terraforming is not part of the cancelable gameplay events.
 
 ### Capability rows
 
 | Row | On when |
 |---|---|
 | `kiln.terrain` | the library is loaded |
-| `terrain.overlays` | kiln.build reads, writes and keeps, and kiln.saves is on; server side. On a client that hosts a world it is held until the game test `19f-overlay-client` |
+| `terrain.overlays` | kiln.build reads, writes and keeps, and kiln.saves is on; server side. On a client that hosts a world it is on since 0.2.0-dev.29; game test `19f-overlay-client` remains unconfirmed |
 | `terrain.baked` | off (baked regions are not built) |
 | `terrain.biomes` | off |

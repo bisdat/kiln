@@ -563,7 +563,8 @@ internal static unsafe class UiEngine
             _remapping = null;
             if (k.Vk == 0x1B) return true;  // Escape cancels
             // a key, or (since 0.2.0-dev.27) the middle or a side button or a wheel notch; never the left or right click
-            var chord = new KeyChord(k.Vk, mods);
+            // a punctuation key is saved by its place (Backquote is the key left of 1 on any layout: key_names.h)
+            var chord = new KeyChord(KeyNames.PressCode(k.Vk, k.Scan), mods);
             if (KeyBindings.Rebind(id, chord) || id != KeyBindings.MenuId)
                 Hud.Toast($"{id}: {chord}", ToastKind.Success, 2.5);
             else
@@ -589,7 +590,7 @@ internal static unsafe class UiEngine
         if ((wheel || MouseKeys.IsButton(k.Vk)) && k.Captured != 0 && down) return false;
         foreach (var b in KeyBindings.All)
         {
-            if (!b.Enabled || b.Disposed || b.Key.IsNone || b.Key.VirtualKey != k.Vk) continue;
+            if (!b.Enabled || b.Disposed || b.Key.IsNone || !KeyNames.Matches(b.Key.VirtualKey, k.Vk, k.Scan)) continue;
             if (!down)
             {
                 if (!b.IsDown) continue;
@@ -624,7 +625,7 @@ internal static unsafe class UiEngine
     internal static bool TypesText(uint vk, KeyMods mods)
     {
         if ((mods & (KeyMods.Ctrl | KeyMods.Alt)) != 0) return false;
-        return vk is 0x20 or >= 0x30 and <= 0x39 or >= 0x41 and <= 0x5A or >= 0x60 and <= 0x6F or >= 0xBA and <= 0xC0 or >= 0xDB and <= 0xDF or 0xE2;
+        return vk is 0x20 or >= 0x30 and <= 0x39 or >= 0x41 and <= 0x5A or >= 0x60 and <= 0x6F or >= 0xBA and <= 0xC2 or >= 0xDB and <= 0xDF or 0xE2;
     }
 
     /// <summary>The player is playing, not in one of the game's own screens. The game's text fields (chat, a rename, the main
@@ -784,14 +785,16 @@ internal static unsafe class UiEngine
         var peers = Network.Peers;
         if (peers.Count > 0 && ui.CollapsingHeader($"Clients ({peers.Count})", true))
         {
-            if (ui.BeginTable("kiln.peers", "Player", "State", "Kiln", "Mods", "RTT"))
+            if (ui.BeginTable("kiln.peers", "Player", "State", "Kiln", "Mods", "RTT", "Frames in/out"))
             {
                 foreach (var p in peers)
                     ui.Row(p.Name, p.State.ToString(), p.KilnVersion ?? "-", p.Mods.Count.ToString(),
-                        p.RoundTrip is { } r ? $"{r.TotalMilliseconds:F0} ms" : "-");
+                        p.RoundTrip is { } r ? $"{r.TotalMilliseconds:F0} ms" : "-", $"{p.FramesIn}/{p.FramesOut}");
                 ui.EndTable();
             }
         }
+        if (st.ServerRole && ui.CollapsingHeader("Admission"))
+            foreach (var line in NetAdmission.StatusLines()) ui.Text(line);
         if (Network.Channels.Count > 0 && ui.CollapsingHeader($"Channels ({Network.Channels.Count})"))
             foreach (var ch in Network.Channels)
                 ui.Text($"{ch.Name} v{ch.Version}{(ch.Required ? " (required)" : "")}: in {ch.MessagesIn}, out {ch.MessagesOut}");

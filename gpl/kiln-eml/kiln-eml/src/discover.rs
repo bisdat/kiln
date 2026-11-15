@@ -180,7 +180,7 @@ pub fn aside_entries(profile_json: &str, kiln_dir: &Utf8Path, roots: &[Utf8PathB
         // `<root>/<id>`, or the entry's own path when the launcher placed it in that folder under the name a native
         // DLL looks for (`mods/XHL-Auto-Loot` for the Library id `xhl-auto-loot`)
         let own_path = paths.get(i).map(|c| c.path.clone())
-            .filter(|p| p.parent().is_some_and(|parent| roots.iter().any(|r| relative_under(parent, r).is_some_and(|rel| rel.as_str().is_empty()))));
+            .filter(|p| p.parent().is_some_and(|parent| roots.iter().any(|r| is_root(parent, r))));
         let copy = roots.iter().map(|r| r.join(&id)).chain(own_path).find(|d| kiln_copy_of(d).is_some_and(|m| m == id));
         let wanted = paths.get(i).and_then(|c| classify(&c.path).ok()).map(|m| m.id).unwrap_or_else(|| id.clone());
         let manual = if copy.is_none() {
@@ -203,9 +203,17 @@ pub fn aside_entries(profile_json: &str, kiln_dir: &Utf8Path, roots: &[Utf8PathB
                 Some(Err(Off::Refused(why))) => ("off-in-shroudforge", format!("{who} runs this start, but ShroudForge does not run the \
                     {what} at {c}: {why}. Nothing applies it this start, and no switch changes that: a version of the mod whose file \
                     ShroudForge reads does, or a start without ShroudForge mods in the profile (Kiln then runs it itself)")),
-                Some(Err(Off::Switch(why))) => ("off-in-shroudforge", format!("{who} runs this start, but ShroudForge has your own \
-                    folder {c} switched off: {why}. Nothing applies it this start. Kiln never writes into your own folder: switch it on in \
-                    Kiln's menu (Mods, ShroudForge) or in ShroudForge's own Modloader, then start the game again")),
+                // the player's own folder: the words promised to a player on Nexus (2026-11-14), not ShroudForge's file
+                // (that read as "Kiln wants a ShroudForge file from an EML mod"); a server has no in-game menu
+                Some(Err(Off::Switch(_))) => ("off-in-shroudforge", format!("{who} runs this start. You put this mod into \
+                    ShroudForge's folder yourself, and ShroudForge has it switched off. {} Your folder: {c}",
+                    if shroudforge == Some(true) {
+                        "A server has no in-game menu: remove the folder and activate the profile again, and Kiln places its own \
+                        copy, switched on."
+                    } else {
+                        "Switch it on in Kiln's in-game menu (Mods > ShroudForge), or remove the folder and press Play in the Kiln \
+                        launcher: the mod is in your profile, so Kiln then places its own copy, switched on."
+                    })),
             }
         } else {
             ("not-loaded", format!("{who} runs this start and reads only {folder}; this mod is in Kiln's Library, so it does \
@@ -214,6 +222,38 @@ pub fn aside_entries(profile_json: &str, kiln_dir: &Utf8Path, roots: &[Utf8PathB
         Entry { id: Some(id), version: None, name: None, source: "profile".into(),
             path: own.map(|c| c.to_string()).unwrap_or(path), state: state.into(), reason: Some(reason), capabilities: Vec::new() }
     }).collect()
+}
+
+/// Is `dir` the loader's folder `root`, as the game's process names folders? On Windows (the game, also under Wine)
+/// by Windows' rules ([`windows_same_folder`]), elsewhere (kiln-eml-run on Linux) part by part.
+fn is_root(dir: &Utf8Path, root: &Utf8Path) -> bool {
+    if cfg!(windows) { windows_same_folder(dir.as_str(), root.as_str()) } else { relative_under(dir, root).is_some_and(|rest| rest.as_str().is_empty()) }
+}
+
+/// Two spellings of one folder, told apart as Windows tells them: not by the verbatim prefix, the separator, an empty
+/// or `.` part, or case. ShroudForge writes its `paths.mods` from a canonical path, `\\?\C:\…\mods` on Windows
+/// (`//?/C:/…/mods` once plugin.rs `loader_roots` turned its `\` into `/`), while the launcher names its game-folder copies
+/// from the game folder, `C:\…\mods\<folder>` (a player's Nexus report, 2026-11-14: kiln-eml took Kiln's copy there for
+/// a folder of the player's). Strings in, so a test checks it on any system.
+fn windows_same_folder(a: &str, b: &str) -> bool {
+    fn key(p: &str) -> (usize, Vec<String>) {
+        let mut p = p.replace('/', "\\");
+        // `\\?\C:\x` names `C:\x`, `\\?\UNC\host\share` names `\\host\share`; other verbatim paths have no other name
+        // Literal trailing dots/spaces need the extended namespace; an ordinary Win32 path
+        // would trim them. Keep that namespace in the key instead of aliasing another folder.
+        let literal = p.split('\\').any(|name| name.ends_with('.') || name.ends_with(' '));
+        if let Some(rest) = p.strip_prefix(r"\\?\UNC\").filter(|_| !literal) {
+            p = format!(r"\\{rest}");
+        } else if let Some(rest) = p.strip_prefix(r"\\?\").filter(|r| !literal && r.as_bytes().get(1) == Some(&b':')) {
+            p = rest.to_owned();
+        }
+        let rooted = p.bytes().take_while(|&c| c == b'\\').count().min(2)
+            + usize::from(p.as_bytes().get(1) == Some(&b':') && p.as_bytes().get(2) == Some(&b'\\')) * 3;
+        // Windows' ordinal case-blind comparison: one upper-case character for each
+        let fold = |s: &str| s.chars().map(|c| { let mut u = c.to_uppercase(); if u.len() == 1 { u.next().unwrap_or(c) } else { c } }).collect::<String>();
+        (rooted, p.split('\\').filter(|s| !s.is_empty() && *s != ".").map(fold).collect())
+    }
+    key(a) == key(b)
 }
 
 /// Why ShroudForge does not run a package ([`shroudforge_switch`]).
@@ -578,6 +618,28 @@ pub fn resolve(candidates: &[Candidate]) -> (Vec<Utf8PathBuf>, Vec<Entry>) {
 mod tests {
     use super::*;
 
+    /// ShroudForge's `paths.mods` on Windows after its first start, as loader_roots reads it (`//?/C:/…/mods`), and the
+    /// folder of the launcher's game-folder copy (`C:\…\mods`): one folder.
+    #[test]
+    fn windows_folders_compare_without_the_verbatim_prefix_or_case() {
+        let mods = r"C:\Program Files (x86)\Steam\steamapps\common\Enshrouded\mods";
+        assert!(windows_same_folder(&format!(r"\\?\{mods}").replace('\\', "/"), mods), "the verbatim prefix");
+        assert!(windows_same_folder(&format!(r"\\?\{mods}"), &mods.replace('\\', "/")));
+        assert!(windows_same_folder(&mods.to_uppercase(), &format!("{mods}\\")), "case, a trailing separator");
+        assert!(windows_same_folder(r"D:\Spiele\Ä", r"d:\spiele\ä\."), "non-ASCII case");
+        assert!(windows_same_folder(r"\\?\UNC\nas\share\mods", r"\\NAS\share\mods"), "a network folder");
+        assert!(!windows_same_folder(mods, &format!("{mods}-other")), "a sibling");
+        assert!(!windows_same_folder(r"\\?\Volume{1}\mods", r"Volume{1}\mods"), "a volume path has no other spelling");
+        assert!(!windows_same_folder(r"\mods", "mods"), "rooted is not relative");
+    }
+
+    #[test]
+    fn windows_verbatim_literal_names_are_not_plain_names() {
+        assert!(!windows_same_folder(r"\\?\C:\Game.\mods", r"C:\Game.\mods"));
+        assert!(!windows_same_folder(r"\\?\UNC\nas\share\Game \mods", r"\\nas\share\Game \mods"));
+        assert!(!windows_same_folder("C:", r"C:\"));
+    }
+
     fn tmp(name: &str) -> Utf8PathBuf {
         let d = Utf8PathBuf::from_path_buf(std::env::temp_dir()).unwrap().join(format!("kiln-eml-test-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
@@ -792,12 +854,19 @@ mod tests {
         }
         assert!(state("bare").1.contains("no extended.mod.json") && state("bare").1.contains("Kiln launcher"), "{}", state("bare").1);
         assert!(state("off").1.contains("enabled: true"), "{}", state("off").1);
-        assert!(state("hand").1.contains("never writes into your own folder") && state("hand").1.contains("Mods, ShroudForge"), "{}", state("hand").1);
+        // the player's own folder: the words promised to a player on Nexus (14 Nov 2026), nothing about ShroudForge's files
+        assert!(state("hand").1.contains("You put this mod into ShroudForge's folder yourself, and ShroudForge has it switched off. Switch \
+            it on in Kiln's in-game menu (Mods > ShroudForge), or remove the folder and press Play in the Kiln launcher: the mod is in your \
+            profile, so Kiln then places its own copy, switched on."), "{}", state("hand").1);
+        assert!(!state("hand").1.contains("extended.mod.json") && state("hand").1.contains("Hand Made"), "{}", state("hand").1);
         assert_eq!((state("lib").0, state("dis").0), ("not-loaded", "disabled"));
         // a dedicated server: the client-only package runs on the client only
         let server = states(Some(true));
         let on_server = |id: &str| server.iter().find(|x| x.0 == id).map(|x| x.1.clone()).unwrap();
         assert_eq!((on_server("on"), on_server("client"), on_server("bare")), ("own-loader".into(), "other-side".into(), "off-in-shroudforge".into()));
+        let hand_on_server = server.iter().find(|x| x.0 == "hand").map(|x| x.2.clone()).unwrap();
+        assert!(hand_on_server.contains("You put this mod into ShroudForge's folder yourself, and ShroudForge has it switched off. A server \
+            has no in-game menu: remove the folder and activate the profile again, and Kiln places its own copy, switched on."), "{hand_on_server}");
         // EML's own loader has no switch: it runs every package of its folder
         let eml = aside_entries(j, &d.join("kiln"), &[d.join("mods")], "EML's own loader", None);
         assert!(eml.iter().filter(|e| e.id.as_deref() != Some("lib") && e.id.as_deref() != Some("dis")).all(|e| e.state == "own-loader"), "{eml:?}");

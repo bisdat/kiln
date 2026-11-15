@@ -780,7 +780,7 @@ pub mod win {
 
 /// Held while this launcher runs: a second process for a link sees it is taken and hands the link over.
 pub struct Instance {
-    _file: std::fs::File,
+    _file: crate::util::LockedFile,
 }
 
 /// Makes a private state directory, refusing symbolic links and directories owned by another account.
@@ -895,7 +895,7 @@ fn lock_state_inner(root: &Path, name: &str) -> Result<Instance> {
     if name.contains(['/', '\\']) || name == "." || name == ".." { return Err(Error::invalid("invalid lock name")); }
     let f = open_lock(root, name)?;
     f.lock()?;
-    Ok(Instance { _file: f })
+    Ok(Instance { _file: crate::util::LockedFile(f) })
 }
 
 /// Takes the process-lifetime lock; only its owner may consume the inbox.
@@ -903,7 +903,7 @@ pub fn acquire_instance(root: &Path) -> Result<Option<Instance>> {
         crate::nexus::require_enabled()?;
     let f = open_lock(root, "instance.lock")?;
     match f.try_lock() {
-        Ok(()) => Ok(Some(Instance { _file: f })),
+        Ok(()) => Ok(Some(Instance { _file: crate::util::LockedFile(f) })),
         Err(std::fs::TryLockError::WouldBlock) => Ok(None),
         Err(std::fs::TryLockError::Error(e)) => Err(Error::from(e)),
     }

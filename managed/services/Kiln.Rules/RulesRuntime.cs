@@ -29,6 +29,8 @@ internal static unsafe class RulesRuntime
         public NoClipTrack? Clip;     // made when the player's rules first carry NoClip
         public bool ClipGrace;        // the landing grace running now was started by a NoClip move back
         public uint Handle;           // the player's connection (Player.Handle): another one with this entity id is another player
+        public string? ReturnKey;     // NoClipReturns' key of this player (their character), once known
+        public bool ReturnChecked;    // this session was looked up in the book of players who left in NoClip
     }
 
     private static readonly object Gate = new();
@@ -169,6 +171,7 @@ internal static unsafe class RulesRuntime
         foreach (var r in theirs) r.Dispose();
         Creative.Forget();
         Kiln.NoClip.Forget();
+        ReturnStore.WorldClosing();  // the book of a memory-kept world goes with it (the world's data keeps its own)
         RulesNet.SetLocal(RulesNativePart.Default);
         Log(LogLevel.Info, $"world closing: {theirs.Count} player rule set(s) ended");
     }
@@ -187,7 +190,19 @@ internal static unsafe class RulesRuntime
         {
             PlayerState? st;
             lock (Gate) PlayersByEntity.TryGetValue(e, out st);
-            if (st != null) Leave(st);
+            if (st == null) return;
+            // as Kiln, as when Resolve sees a player go: what Kiln holds for the player in other services (a landing
+            // grace's invulnerability) is Kiln's to release, whichever mod's call led here
+            var outer = ModContext.CurrentMod;
+            ModContext.CurrentMod = null;
+            try
+            {
+                Leave(st);
+            }
+            finally
+            {
+                ModContext.CurrentMod = outer;
+            }
         }
     }
 
@@ -273,8 +288,10 @@ internal static unsafe class RulesRuntime
             anyArea = SetsList.Any(s => s.Scope.IsArea);
             areaFlight = SetsList.Any(s => s.Active && s.Rules.CharacterFlight == CharacterFlightMode.BuildingArea);
         }
-        if (!anySets) return;
+        var returning = ReturnsWaiting();
+        if (!anySets && !returning) return;
         if (_dirty || areaFlight || (anyArea && _step % ResolveEverySteps == 0) || _step % (ResolveEverySteps * 4) == 0) Resolve();
+        if (returning) CheckReturns();
         List<PlayerState> live;
         lock (Gate) live = PlayersByEntity.Values.ToList();
         ModContext.CurrentMod = null;
@@ -591,6 +608,7 @@ internal static unsafe class RulesRuntime
             Resolve();
         }
         if (r.Released || r.Held) PushNative(s);  // collision is back, or off again, from the next step
+        if ((clip.On || clip.Restoring) && clip.LastFree is { } free) NoteReturn(s, free);
         FlushNoClipEnded(s);
     }
 
@@ -631,7 +649,184 @@ internal static unsafe class RulesRuntime
                 s.GroundedChecks = 0;
                 s.ClipGrace = true;
             }
+            // seen ending in the world (in open space, or put back there): nothing to restore at a later join
+            if (s.ReturnKey is { } key && Returns.Forget(key)) Log(LogLevel.Info, $"player {s.Entity}: NoClip's return entry dropped ({reason})");
             Kiln.NoClip.Ended(s.Entity, reason, restoredTo);
+        }
+    }
+
+    // ---- NoClip across a leave (NoClipReturns.cs): the last free position of every player in NoClip is kept in the
+    // world's data by their character; a player who left (or whose world closed) in NoClip and comes back inside
+    // something is held without collision and moved there, as a switch-off inside something is.
+
+    private const string ReturnBookKey = "noclip-returns";
+
+    private static readonly NoClipReturnStore ReturnStore = new(
+        () => Capabilities.Is("kiln.saves"),      // no world data here: memory for the server's lifetime
+        () => Saves.WorldDataReady,               // a hosted world before its load: decide nothing
+        () => Saves.WorldId,
+        () => RunAsData(() => WorldData.Get<NoClipReturnBook>(ReturnBookKey)));
+    private static readonly NoClipReturns Returns = new(ReturnStore);
+    private static ModContext? _dataOwner;
+
+    // The book is Kiln.Rules' own data in the world's sidecar, whichever mod's call led here.
+    private static ModContext DataOwner => _dataOwner ??= HostAccess.CreateContext(
+        new ModInfo("kiln-rules", "Kiln rules", "1.0.0", Path.Combine(KilnDir(), "host")), 0, Path.Combine(KilnDir(), "data", "kiln-rules"));
+
+    private static string KilnDir()
+    {
+        var host = Path.GetDirectoryName(typeof(RulesRuntime).Assembly.Location) ?? ".";
+        return Path.GetDirectoryName(host) ?? host;
+    }
+
+    private static T RunAsData<T>(Func<T> f)
+    {
+        var outer = ModContext.CurrentMod;
+        ModContext.CurrentMod = DataOwner;
+        try
+        {
+            return f();
+        }
+        finally
+        {
+            ModContext.CurrentMod = outer;
+        }
+    }
+
+    private static bool ReturnsWaiting()
+    {
+        try
+        {
+            return Returns.Any;
+        }
+        catch (Exception e)
+        {
+            Log(LogLevel.Warn, $"NoClip's return book: {e.Message}");
+            return false;
+        }
+    }
+
+    // A player's key, or null with `wait` when their character is not known yet (a player still joining).
+    private static string? ReturnKeyOf(EntityId e, out bool wait)
+    {
+        wait = false;
+        bool simulated;
+        lock (Gate) simulated = Characters.Contains(e);
+        if (simulated) return NoClipReturns.KeyOf(default, 0, e);
+        CharacterKey character = default;
+        ulong steam = 0;
+        try
+        {
+            if (Capabilities.Is("kiln.saves")) character = CharacterData.KeyOf(e);
+        }
+        catch (Exception)
+        {
+            // no character store: the Steam id below
+        }
+        try
+        {
+            steam = Players.Available ? Players.Find(e)?.SteamId ?? 0 : 0;
+        }
+        catch (Exception)
+        {
+        }
+        if (character.IsNone && Capabilities.Is("kiln.saves"))
+        {
+            wait = true;  // the character comes with the join: the key must be the one the book was written with
+            return null;
+        }
+        return NoClipReturns.KeyOf(character, steam, EntityId.None);
+    }
+
+    private static void NoteReturn(PlayerState s, WorldPosition free)
+    {
+        try
+        {
+            s.ReturnKey ??= ReturnKeyOf(s.Entity, out _);
+            if (s.ReturnKey is not { } key) return;
+            var name = Players.Available ? Players.Find(s.Entity)?.Name ?? "" : "";
+            Returns.Note(key, free, name, DateTime.UtcNow);
+        }
+        catch (Exception e)
+        {
+            Log(LogLevel.Warn, $"player {s.Entity}: NoClip's return entry: {e.Message}");
+        }
+    }
+
+    // Every player in the world now who has not been looked up this session: one who left in NoClip and is back.
+    private static void CheckReturns()
+    {
+        var here = new List<(EntityId Entity, uint Handle)>();
+        try
+        {
+            if (Players.Available)
+                foreach (var p in Players.All)
+                    if (p.InGame) here.Add((p.Entity, p.Handle));
+        }
+        catch (Exception)
+        {
+            // no kiln.players
+        }
+        lock (Gate)
+            foreach (var c in Characters)
+                here.Add((c, 0));
+        foreach (var (e, handle) in here)
+        {
+            PlayerState? s;
+            lock (Gate) PlayersByEntity.TryGetValue(e, out s);
+            if (s is { ReturnChecked: true }) continue;
+            if (s is { Clip: { On: true } or { Restoring: true } })
+            {
+                s.ReturnChecked = true;  // in NoClip in this session already: its entry is its live one
+                continue;
+            }
+            try
+            {
+                var wait = false;
+                var key = s?.ReturnKey ?? ReturnKeyOf(e, out wait);
+                if (key is null)
+                {
+                    if (!wait && s is not null) s.ReturnChecked = true;
+                    continue;
+                }
+                if (Returns.Of(key) is not { } entry)
+                {
+                    if (s is not null)
+                    {
+                        s.ReturnKey = key;
+                        s.ReturnChecked = true;
+                    }
+                    continue;
+                }
+                if (s is null)
+                    lock (Gate)
+                        if (!PlayersByEntity.TryGetValue(e, out s))
+                            PlayersByEntity[e] = s = new PlayerState(e) { Handle = handle };
+                s.ReturnKey = key;
+                s.Clip ??= new NoClipTrack(new TrackWorld(e));
+                switch (s.Clip.Rejoined(entry.Position))
+                {
+                    case NoClipRejoin.Waiting:
+                        break;  // the cells at the character are not loaded yet
+                    case NoClipRejoin.Free:
+                        s.ReturnChecked = true;
+                        Returns.Forget(key);
+                        Log(LogLevel.Info, $"player {e}: left in NoClip and came back in open space; nothing to restore");
+                        Kiln.NoClip.Ended(e, NoClipEnd.Left, null);
+                        break;
+                    case NoClipRejoin.Held:
+                        s.ReturnChecked = true;
+                        Log(LogLevel.Info, $"player {e}: left in NoClip and came back inside something; collision waits while the character " +
+                                           $"is moved to its last free position {entry.Position} (NoClip's return entry of {entry.At:u})");
+                        PushNative(s);
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                if (s is not null) s.ReturnChecked = true;
+                Log(LogLevel.Warn, $"player {e}: NoClip's return: {ex.Message}");
+            }
         }
     }
 

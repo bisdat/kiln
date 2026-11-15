@@ -112,6 +112,11 @@ public override void OnLoad()
 ```
 - Everything a mod registers is owned by it and reverted when it unloads (`Assets.RemoveIcon/RemoveResource/RemoveBlob`
   do it sooner). Calls may be made from any thread; game lookups are thread-safe reads.
+- Since 0.2.0-dev.28 a native owner the core revokes (a plugin whose `kiln_plugin_main` failed, say) loses its resources,
+  blobs and icons without anyone calling `revert_owner`: from the revocation on its registrations are refused
+  (`KILN_ERR_REVOKED`), and what it had registered is taken off moments later, by kiln.assets' next call or its own
+  cleanup thread (until then the game may still be served its bytes, for a few milliseconds). A `revert_owner` before
+  or after does nothing more.
 - `Assets.Reflect(key)` and `ReflectedResources` read any resource by field path, find resources by a field's value, and change a
   field claim-backed and reversible: [typed-fields.md](../modding/typed-fields.md#any-resource). `ListBlobs` lists what this
   mod supplied through `Assets`; blobs from `assets.json` and the game's own are not listed: the
@@ -164,8 +169,9 @@ byte[]? bytes = Assets.ReadBlob(hash);                     // the bytes the game
 - **JSON.** `JsonSerializer.Serialize(info)` / `(entry)` writes the shape of
   [`schema/blob-catalog.schema.json`](../../../schema/blob-catalog.schema.json) (uint64 fields as decimal strings).
 - **Capability** `assets.blob_catalog` (Kiln.Assets' row): kiln.assets' table has the catalog and its content hooks are
-  on. In a game client it is held by the client gate until check `13-assets.catalog-client` passes; on a server it is
-  open (lab-proven).
+  on. It is open on servers and in every game since 0.2.0-dev.29 (lab-proven on a server).
+  Check `13-assets.catalog-client` still has not confirmed it in a real game client.
+- **Cost and lifecycle limits.** Opening a catalog synchronously copies and sorts metadata and can block its caller; prefer a worker thread for opening. Snapshot budgets exclude temporary merge and sorting memory. The native index pointer is kept for the process; its validity across hosted leave/join/reload remains unconfirmed, even though each completed snapshot owns its copies.
 - Registrations made through `AddBlob` and `OverrideBlob` are tagged `Managed` (a kiln.assets older than 0.2.0-dev.28
   records them as native). Which bytes are served did not change.
 

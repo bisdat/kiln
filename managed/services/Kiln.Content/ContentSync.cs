@@ -737,8 +737,20 @@ public static unsafe class ContentSync
                                (localDefs > 0 ? $" ({localDefs} defined by this game's own mods)" : ""));
         server.Remove("@definitions");
         var reset = SyncSettings.Current.MatchServer ? AddResets(server, MachineLocal()) : 0;
-        var merged = server.ToJsonString();
-        var (applied, errors, rc) = ApplyJson(merged, "server sync");
+        // Load sequences and their effective rules first. No item may select them until this client's registry/graph accepts them.
+        var nonSlots = server.DeepClone().AsObject();
+        nonSlots.Remove("itemdata");
+        var (applied, errors, rc) = ApplyJson(nonSlots.ToJsonString(), "server sync");
+        SyncedMoves.Filter(server, Content.GameDataDefinitions(), Content.SequenceRegistrationReader(), SyncedMoves.ReadStates,
+            AnimationGraphReferences.Find, text => Log(LogLevel.Warn, text));
+        if (server["itemdata"] is { } slots)
+        {
+            var slotDocument = new JsonObject { ["format"] = 1, ["itemdata"] = slots.DeepClone() };
+            var (slotApplied, slotErrors, slotRc) = ApplyJson(slotDocument.ToJsonString(), "server sync");
+            applied += slotApplied;
+            errors.AddRange(slotErrors);
+            if (rc == ContentNative.Ok) rc = slotRc;
+        }
         errors.InsertRange(0, defErrors);
         errors.InsertRange(0, programErrors);
         _appliedState = stateId;

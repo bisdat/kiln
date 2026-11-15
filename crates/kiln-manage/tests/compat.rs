@@ -267,3 +267,93 @@ fn play_once_applies_the_once_profiles_chain_rules() {
     profile::activate(&dirs, &a.id, &inst).unwrap();
     assert!(!game.join("kiln/chain/once.ini").exists());
 }
+
+/// Auto Loot Plus's package as its author ships it: its dinput8.dll (it also reads dinput8-chain.ini) next to
+/// mods/auto-loot-plus, the folder it reads its settings from.
+fn alp_package(root: &Path, name: &str, dll: &str) -> PathBuf {
+    let d = root.join("pkg").join(name);
+    put(&d, dll, &build_test_dll(&["DirectInput8Create"], format!("auto-loot-plus.log\0dinput8-chain.ini\0{name}").as_bytes()));
+    put(&d, "mods/auto-loot-plus/mod.json", br#"{"id":"auto-loot-plus","name":"Auto Loot Plus","version":"1.1.8","capabilities":["patch"]}"#);
+    put(&d, "mods/auto-loot-plus/src/mod.lua", b"return {}");
+    put(&d, "mods/auto-loot-plus/config.txt", b"radius=15");
+    d
+}
+
+/// dev.29, a player's report: Auto Loot Plus as the Library imports it and Ultimate ASI Loader chained where the
+/// installer left it (`..\xinput9_1_0.dll`), with Kiln's shipped rules. Activation loads UAL late and ALP early even
+/// with ALP's own late switch on, says so in the activation's notes, and the profile page shows both switches as the
+/// rule's. How each is recognised: UAL by its export (any file name); ALP by its Library id, which comes from its
+/// package's mods/auto-loot-plus folder under any proxy name of its DLL, but from the DLL's own name when that is no
+/// proxy name (then the rule does not fire and the switches decide, as before).
+#[test]
+fn the_shipped_order_rule_on_an_imported_auto_loot_plus() {
+    let t = Tmp(std::env::temp_dir().join(format!("km-compat-alp-{}", std::process::id())));
+    let _ = std::fs::remove_dir_all(&t.0);
+    std::fs::create_dir_all(&t.0).unwrap();
+    let dirs = DataDirs::at(t.0.join("data"));
+    let game = t.0.join("game");
+    put(&game, "enshrouded.exe", b"MZ");
+    put(&game, "xinput9_1_0.dll", &build_test_dll(&["DirectInput8Create", "IsUltimateASILoader"], b"Ultimate ASI Loader"));
+    put(&game, "kiln/chain.ini", b"[chain]\r\n..\\xinput9_1_0.dll\r\n");
+    put(&game, "kiln/compat-rules.json", &std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../native/core/compat-rules.json")).unwrap());
+    let shipped = "Ultimate ASI Loader loads after Kiln so that Auto Loot Plus can hook the game first; Auto Loot Plus's F8 menu needs that.";
+    let inst = GameInstall {
+        id: "g-alp".into(), kind: GameKind::Client, path: game.clone(), exe: "enshrouded.exe".into(),
+        app_id: kiln_manage::CLIENT_APP_ID, library: None, platform: Platform::Proton, prefix: None, build_id: None,
+        exe_sha256: None, steam_flavor: None, path_mode: PathMode::Copy, source: "manual".into(),
+    };
+    let native = |r: &library::ImportReport| r.imported.iter().find(|x| x.kind == ModKind::Native).cloned().unwrap_or_else(|| panic!("{r:?}"));
+    let pm = |l: &LibraryRef| ProfileMod { id: l.id.clone(), version: l.version.clone(), hash: l.hash.clone(), enabled: true };
+
+    let r = library::import(&dirs, &[alp_package(&t.0, "AutoLootPlus 1.1.8", "dinput8.dll")], &mut NoProgress).unwrap();
+    let alp = native(&r);
+    assert_eq!(alp.id, "auto-loot-plus", "the id the shipped rule names");
+    let mut p = profile::create(&dirs, "Looting", None).unwrap();
+    p.mods.native = vec![pm(&alp)];
+    p.late = vec!["auto-loot-plus".into()]; // ALP's own switch on, as in the report
+    let p = profile::save(&dirs, &p).unwrap();
+    let a = profile::activate(&dirs, &p.id, &inst).unwrap();
+    assert!(a.warnings.iter().any(|w| w == shipped), "the activation's notes say why: {:?}", a.warnings);
+    let text = chain::read_raw(&game).unwrap();
+    let c = chain::parse(text.as_bytes());
+    assert_eq!(c.late.iter().map(|e| e.path.as_str()).collect::<Vec<_>>(), ["..\\xinput9_1_0.dll"], "UAL late, ALP early: {text}");
+    assert!(c.profile.len() == 1 && c.profile[0].path.ends_with("dinput8.dll"), "{text}");
+    assert!(text.contains("; kiln rule auto-loot-plus-before-ultimate-asi-loader\r\n..\\xinput9_1_0.dll"), "{text}");
+
+    let p = profile::get(&dirs, &p.id).unwrap();
+    let v = compat::view(&dirs, &p, &inst).unwrap();
+    assert!(v.active && v.current && v.error.is_none() && v.rule_errors.is_empty(), "{v:?}");
+    let rule = Some("rule:auto-loot-plus-before-ultimate-asi-loader".to_string());
+    let ual = v.entries.iter().find(|e| e.entry.file == "xinput9_1_0.dll").unwrap();
+    assert_eq!((ual.late, &ual.late_by, &ual.early_by, ual.entry.engine.as_deref()), (true, &rule, &None, Some("ultimate-asi-loader")));
+    let alp_row = v.entries.iter().find(|e| e.entry.file == "dinput8.dll").unwrap();
+    assert_eq!((alp_row.late, &alp_row.late_by, &alp_row.early_by), (false, &None, &rule), "the profile's switch waits for the rule");
+    let r = v.rules.iter().find(|r| r.id == "auto-loot-plus-before-ultimate-asi-loader").unwrap();
+    assert!(r.fired && r.applied && r.warning.is_none() && r.action == RuleAction::Before && r.message == shipped, "{r:?}");
+    // a refresh with nothing changed writes nothing and says nothing more
+    assert!(profile::refresh_active(&dirs, &inst).unwrap().is_none());
+
+    // the same package with its DLL renamed to a name that is no proxy name: another id, the rule does not fire
+    let r = library::import(&dirs, &[alp_package(&t.0, "AutoLootPlus renamed", "AutoLootPlus.dll")], &mut NoProgress).unwrap();
+    let renamed = native(&r);
+    assert_eq!(renamed.id, "autolootplus");
+    let mut p2 = profile::create(&dirs, "Renamed", None).unwrap();
+    p2.mods.native = vec![pm(&renamed)];
+    p2.late = vec!["autolootplus".into()];
+    let p2 = profile::save(&dirs, &p2).unwrap();
+    let a = profile::activate(&dirs, &p2.id, &inst).unwrap();
+    assert!(!a.warnings.iter().any(|w| w == shipped), "{:?}", a.warnings);
+    let c = chain::read(&game).unwrap();
+    assert!(c.late.len() == 1 && c.late[0].path.ends_with("AutoLootPlus.dll"), "its own switch decides: {c:?}");
+}
+
+/// Kiln's shipped rules (native/core/compat-rules.json, installed as <game>/kiln/compat-rules.json by the runtime's
+/// core component): every rule reads, and each has an id and a message a player can read.
+#[test]
+fn the_shipped_rules_read() {
+    let bytes = std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../native/core/compat-rules.json")).unwrap();
+    let (rules, errors) = compat::parse_rules(&bytes, RuleSource::Kiln);
+    assert!(errors.is_empty(), "{errors:?}");
+    assert!(rules.iter().any(|r| r.rule.id == "auto-loot-plus-before-ultimate-asi-loader" && r.rule.action == RuleAction::Before));
+    assert!(rules.iter().all(|r| !r.rule.message.trim().is_empty()), "{rules:?}");
+}

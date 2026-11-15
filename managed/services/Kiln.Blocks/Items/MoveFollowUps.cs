@@ -72,14 +72,14 @@ public enum MoveApplicationState
     PendingContent,
     /// <summary>The weapon's slots play the moves of <see cref="MoveApplicationResult.AppliedGeneration"/>.</summary>
     Applied,
-    /// <summary>The last attempt was refused whole. The slots play what they played before it.</summary>
+    /// <summary>The last attempt was refused. Reason says whether the previous generation remains or the mod's layers were revoked.</summary>
     Refused,
     /// <summary>The mod unloaded: the slots are the class's again.</summary>
     Removed,
 }
 
 /// <summary>What <see cref="Blocks.MovesStatus"/> answers: a snapshot that never changes. A weapon with follow-ups applies all its moves, slots
-/// and routes at once (a generation) or none of them: an attempt that is refused leaves the last applied generation playing.</summary>
+/// and routes as a generation. A verified rollback preserves the previous generation; an unverifiable rollback revokes the mod's layers.</summary>
 public sealed record MoveApplicationResult : IKilnResult
 {
     /// <summary>True only when <see cref="State"/> is <see cref="MoveApplicationState.Applied"/>.</summary>
@@ -94,7 +94,7 @@ public sealed record MoveApplicationResult : IKilnResult
     public ulong AppliedGeneration { get; init; }
     /// <summary>The content generation (<c>Content.Status().Generation</c>) the last attempt read the game's data in.</summary>
     public ulong ContentGeneration { get; init; }
-    /// <summary>The sequences the applied generation plays, by <c>slot/link</c> (<c>"primary/1"</c>, <c>"block/1"</c>). Empty while none is applied.
+    /// <summary>The sequences the applied generation plays, by <c>slot/link</c> (<c>"primary/1"</c>, <c>"block/1"</c>). When no generation can be verified, keys <c>slot/index</c> instead report the slots that could be read.
     /// For looking at; the GUIDs change when the moves or the game's data do.</summary>
     public IReadOnlyDictionary<string, Guid> LiveClones { get; init; } = System.Collections.Frozen.FrozenDictionary<string, Guid>.Empty;
 }

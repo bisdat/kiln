@@ -2,7 +2,7 @@
 // Cross-check of kiln lint's schema validator: validates files with ajv (draft 2020-12) against schema/*.schema.json
 // and prints one JSON line per file: {"file", "schema", "valid", "errors": [instancePath...]}.
 //   node crates/kiln-manage/tests/lint/ajv-check.mjs <schema dir> <launcher node_modules> <schema file> <json file>...
-// Used by tests/lint.rs (ajv_agrees) when node and launcher/node_modules exist.
+// Used by tests/lint.rs (ajv_agrees): with launcher/node_modules, else with ajv installed for the test (ajv_modules).
 import { createRequire } from "node:module";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";

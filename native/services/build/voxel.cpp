@@ -8,11 +8,13 @@
 //    cuts the box into 8x8x8 blocks and commits each through the store commit (build/StoreCommit): the same sink the
 //    game's building and terraforming kernels use, which tracks changes per peer (replication) and for the save.
 // Everything here runs on the tick thread (no world job runs in Pre/Post).
+#ifndef KILN_VOXEL_HOST_TEST
 #include <windows.h>
 
 #include <algorithm>
 
 #include "internal.h"
+#endif
 
 namespace kb {
 namespace {
@@ -20,6 +22,7 @@ namespace {
 VoxelWorld g_vox;
 uintptr_t g_failed_world = 0;  // a world whose voxel interface did not check out (logged once)
 
+#ifndef KILN_VOXEL_HOST_TEST
 double now_ms() {
     LARGE_INTEGER f, c;
     QueryPerformanceFrequency(&f);
@@ -91,8 +94,10 @@ bool resolve(uintptr_t w, VoxelWorld* v) {
     return true;
 }
 
+#endif
 }  // namespace
 
+#ifndef KILN_VOXEL_HOST_TEST
 bool box_ok(const int32_t origin[3], const uint32_t dims[3], uint64_t* count) {
     if (!origin || !dims) return false;
     uint64_t n = 1;
@@ -105,6 +110,12 @@ bool box_ok(const int32_t origin[3], const uint32_t dims[3], uint64_t* count) {
     }
     if (count) *count = n;
     return true;
+}
+
+#endif
+void vox_world_closed() {
+    g_vox = VoxelWorld{};
+    g_failed_world = 0;
 }
 
 const VoxelWorld* vox() {
@@ -132,6 +143,7 @@ const VoxelWorld* vox() {
     return &g_vox;
 }
 
+#ifndef KILN_VOXEL_HOST_TEST
 KilnResult vox_grid(KilnBuildGrid* out) {
     if (!out || out->size < sizeof(KilnBuildGrid)) return KILN_ERR_INVALID_ARGUMENT;
     if (!tick_thread()) return KILN_ERR_WRONG_THREAD;
@@ -240,6 +252,9 @@ KilnResult vox_write(const KilnBuildWrite* w, KilnBuildResult* result, uint32_t 
     };
     uint64_t n = 0;
     if (!box_ok(w->origin, w->dims, &n)) return done(KILN_ERR_INVALID_ARGUMENT);
+    // a transient edit is put back at the next start from what it read: it must have read the real cells
+    const bool transient = (w->flags & KILN_BUILD_F_TRANSIENT) != 0;
+    if (transient && (w->flags & KILN_BUILD_F_UNLOADED)) return done(KILN_ERR_INVALID_ARGUMENT);
     if (!tick_thread()) return done(KILN_ERR_WRONG_THREAD);
     if (!F.write) return done(KILN_ERR_UNAVAILABLE);
     const VoxelWorld* v = vox();
@@ -267,12 +282,14 @@ KilnResult vox_write(const KilnBuildWrite* w, KilnBuildResult* result, uint32_t 
     // which blocks change: bit per block
     const uint32_t bx = wd[0] / kBlock, by = wd[1] / kBlock, bz = wd[2] / kBlock;
     std::vector<uint8_t> dirty(static_cast<size_t>(bx) * by * bz, 0);
+    std::vector<uint8_t> addressed(wn, 0);  // the cells this write sets (the transient journal's input)
     for (uint32_t z = 0; z < w->dims[2]; ++z)
         for (uint32_t y = 0; y < w->dims[1]; ++y) {
             const size_t src = (static_cast<size_t>(z) * w->dims[1] + y) * w->dims[0];
             const size_t dst = ((static_cast<size_t>(z) + oz) * wd[1] + y + oy) * wd[0] + ox;
             for (uint32_t x = 0; x < w->dims[0]; ++x) {
                 if (w->mask && !w->mask[src + x]) continue;
+                addressed[dst + x] = 1;
                 const KilnVoxel nv = w->cells[src + x];
                 if (cur[dst + x] == nv) continue;
                 cur[dst + x] = nv;
@@ -284,6 +301,14 @@ KilnResult vox_write(const KilnBuildWrite* w, KilnBuildResult* result, uint32_t 
     r.cells_changed = changed;
     if (!changed) {
         r.flags |= KILN_BUILD_R_VERIFIED;
+        // nothing to commit, but the cells were asked for: a kept write takes them out of the transient journal, a
+        // transient one makes them this session's (an earlier session's copy is not put back over them)
+        if (!(w->flags & KILN_BUILD_F_DRY_RUN)) {
+            if (!transient) {
+                if (KilnResult rc = transient_kept_before(wo, wd, addressed.data()); rc != KILN_OK) return done(rc);
+            } else if (KilnResult rc = transient_note_before(wo, wd, old.data(), cur.data(), addressed.data()); rc != KILN_OK)
+                return done(rc);
+        }
         return done(KILN_OK);
     }
     // policy, on the box actually changed (metres)
@@ -310,11 +335,20 @@ KilnResult vox_write(const KilnBuildWrite* w, KilnBuildResult* result, uint32_t 
         r.flags |= KILN_BUILD_R_DRY_RUN;
         return done(KILN_OK);
     }
+    if (transient) {
+        // on disk BEFORE the commit, or no commit: no save can hold a transient cell the journal does not have. A cell
+        // the commit then does not write still holds its old value and is not put back.
+        if (KilnResult rc = transient_note_before(wo, wd, old.data(), cur.data(), addressed.data()); rc != KILN_OK)
+            return done(rc);
+    } else {
+        // a kept write takes journaled cells out of the transient journal, on disk BEFORE it commits, or no commit: a
+        // kept edit of the very value a transient write left must never be put back by the next start
+        if (KilnResult rc = transient_kept_before(wo, wd, addressed.data()); rc != KILN_OK) return done(rc);
+    }
 
     // commit the changed blocks only (unchanged blocks would turn generated terrain into stored edits)
     const double t0 = now_ms();
     std::vector<KilnVoxel> blk(kBlock * kBlock * kBlock);
-    const uint32_t bdims[3] = {kBlock, kBlock, kBlock};
     uint32_t blocks = 0;
     for (uint32_t gz = 0; gz < bz; ++gz)
         for (uint32_t gy = 0; gy < by; ++gy)
@@ -329,14 +363,23 @@ KilnResult vox_write(const KilnBuildWrite* w, KilnBuildResult* result, uint32_t 
                 const int32_t borg[3] = {wo[0] + static_cast<int32_t>(gx * kBlock),
                                          wo[1] + static_cast<int32_t>(gy * kBlock),
                                          wo[2] + static_cast<int32_t>(gz * kBlock)};
-                CellSpan span{blk.data(), blk.size()};
-                unsigned long code = 0;
-                if (!seh_write(fn.write, v->voxels, &span, bdims, borg, &code)) {
-                    KB_E("voxel write faulted (0x%08lx) at block %d,%d,%d after %u block(s); voxel writes are off",
-                         code, borg[0], borg[1], borg[2], blocks);
-                    F.write = false;
-                    set_detail("voxel writer faulted (0x%08lx)", code);
+                if (!vox_commit_block(*v, borg, blk.data())) {
+                    KB_E("voxel write faulted at block %d,%d,%d after %u block(s); voxel writes are off", borg[0],
+                         borg[1], borg[2], blocks);
                     r.blocks_written = blocks;
+                    if (!transient) {
+                        // the blocks not committed still hold their transient cells: their records come back
+                        std::vector<std::array<int32_t, 3>> rest;
+                        size_t seen = 0;
+                        for (uint32_t z2 = 0; z2 < bz; ++z2)
+                            for (uint32_t y2 = 0; y2 < by; ++y2)
+                                for (uint32_t x2 = 0; x2 < bx; ++x2)
+                                    if (dirty[(static_cast<size_t>(z2) * by + y2) * bx + x2] && seen++ >= blocks)
+                                        rest.push_back({wo[0] + static_cast<int32_t>(x2 * kBlock),
+                                                        wo[1] + static_cast<int32_t>(y2 * kBlock),
+                                                        wo[2] + static_cast<int32_t>(z2 * kBlock)});
+                        transient_kept_failed(rest);
+                    }
                     return done(KILN_ERR_INTERNAL);
                 }
                 ++blocks;
@@ -344,7 +387,7 @@ KilnResult vox_write(const KilnBuildWrite* w, KilnBuildResult* result, uint32_t 
     r.milliseconds = now_ms() - t0;
     r.blocks_written = blocks;
     r.flags |= KILN_BUILD_R_CHANGED;
-    if (!(w->flags & KILN_BUILD_F_TRANSIENT)) {
+    if (!transient) {
         regions_keep(wo, wd);
         r.flags |= KILN_BUILD_R_KEPT;
     }
@@ -359,4 +402,15 @@ KilnResult vox_write(const KilnBuildWrite* w, KilnBuildResult* result, uint32_t 
     return done(KILN_OK);
 }
 
+bool vox_commit_block(const VoxelWorld& v, const int32_t borg[3], KilnVoxel* cells) {
+    static const uint32_t bdims[3] = {kBlock, kBlock, kBlock};
+    CellSpan span{cells, static_cast<uint64_t>(kBlock) * kBlock * kBlock};
+    unsigned long code = 0;
+    if (seh_write(fn.write, v.voxels, &span, bdims, borg, &code)) return true;
+    F.write = false;
+    set_detail("voxel writer faulted (0x%08lx)", code);
+    return false;
+}
+
+#endif
 }  // namespace kb

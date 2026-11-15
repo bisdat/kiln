@@ -1,5 +1,5 @@
 /* This file is EMF's public C API header, copied unchanged (below the line) from EMF (Enshrouded Modding Framework)
- * 0.6.8, sdk/include/emf/emf_api.h, for kiln-emf.dll (native/plugins/emf), which builds an EmfApi v40 table on Kiln's
+ * 0.6.11, sdk/include/emf/emf_api.h, for kiln-emf.dll (native/plugins/emf), which builds an EmfApi v42 table on Kiln's
  * services so unmodified EMF mods load on Kiln. Also in licenses/EMF-LICENSE.txt.
  *
  * MIT License
@@ -24,7 +24,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  * ------------------------------------------------------------------------------------------------------------------ */
-/* EMF (Enshrouded Modding Framework) C API, version 40 (see EMF_API_VERSION).
+/* EMF (Enshrouded Modding Framework) C API, version 42 (see EMF_API_VERSION).
  *
  * A mod is a DLL in <game>/emf/mods/ that exports:
  *     extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api);
@@ -52,7 +52,7 @@
 extern "C" {
 #endif
 
-#define EMF_API_VERSION 40
+#define EMF_API_VERSION 42
 
 /* World kinds (the byte at the entity storage + 8: world+0xE15DC8 on build 1273043, world+0xE179C8 on 1283531). */
 #define EMF_WORLD_SERVER 0
@@ -793,6 +793,10 @@ typedef struct EmfPathResult {
     uint8_t pad[3];
     uint32_t count;   /* points (at most 512) */
     float length;     /* metres from `from` along the points */
+    /* API v42 (0.6.11; read it only when `size` covers it): per point, the door entity the path goes through there (a
+       point with move 5), else 0; `count` entries. NULL when no point is a door (or the game gave no usable list).
+       Valid during the callback only. */
+    const uint32_t* doors;
 } EmfPathResult;
 typedef void (*EmfPathCallback)(EmfWorld* world, uint32_t id, const EmfPathResult* result, const EmfPathPoint* points,
                                 void* user);
@@ -803,8 +807,11 @@ typedef void (*EmfPathCallback)(EmfWorld* world, uint32_t id, const EmfPathResul
  * Nothing is saved. */
 #define EMF_MOVE_ALLIES 0x1u   /* the creature may be a player's ally (a tamed beast, faction PlayerAlly) */
 #define EMF_MOVE_PEACEFUL 0x2u /* its fights against players are cleared on the way */
+#define EMF_MOVE_PEACEFUL_ALL 0x4u /* API v41 (0.6.10): every fight is cleared on the way (animals, monsters,
+                                      players' beasts too): it only walks. A v40 core refuses it (unknown flags) */
 #define EMF_MOVE_ARRIVED 0u    /* EmfMoveCallback status: at the last point */
-#define EMF_MOVE_STUCK 1u      /* no metre of progress for 15 s while not fighting (a wall, no path, the game gave up) */
+#define EMF_MOVE_STUCK 1u      /* no metre of progress for 15 s (or stuck_seconds) while not fighting (a wall, no path,
+                                  the game gave up) */
 #define EMF_MOVE_TIMEOUT 2u    /* its seconds ran out */
 #define EMF_MOVE_GONE 3u       /* the creature died or went (or became a player's ally without EMF_MOVE_ALLIES) */
 #define EMF_MOVE_CANCELLED 4u  /* enemy_move_cancel, a new move or enemy order on it, the world closing (world NULL) */
@@ -820,6 +827,9 @@ typedef struct EmfMoveOrder {
                                     about 3 m short); 0 = 2; 0.5..50 */
     float seconds;               /* 0 = no time limit (it still ends stuck); at most 3600 */
     char why[96];                /* refused: why (NUL-terminated) */
+    float stuck_seconds;         /* API v41 (0.6.10; read when size covers it, a v40 core ignores it): no metre closer
+                                    for this long while not fighting ends it stuck; 0 = 15; 2..120 */
+    uint32_t pad2;
 } EmfMoveOrder;
 typedef void (*EmfMoveCallback)(EmfWorld* world, uint32_t id, uint32_t status, void* user);
 

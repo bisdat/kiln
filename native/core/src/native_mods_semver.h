@@ -71,6 +71,20 @@ inline bool to_int(std::string_view s, int* out) {
     return true;
 }
 
+// A numeric pre-release identifier: ASCII digits only, of any length.
+inline bool numeric(std::string_view s) { return !s.empty() && all_digits(s); }
+
+// Two numeric identifiers by value, whatever their length: without leading zeros the shorter is the lower, and two of
+// one length compare digit by digit (the parser refuses leading zeros; a value built in code with them still compares
+// by its value).
+inline int compare_numeric(std::string_view a, std::string_view b) {
+    while (!a.empty() && a.front() == '0') a.remove_prefix(1);
+    while (!b.empty() && b.front() == '0') b.remove_prefix(1);
+    if (a.size() != b.size()) return a.size() < b.size() ? -1 : 1;
+    const int c = a.compare(b);
+    return c < 0 ? -1 : c > 0 ? 1 : 0;
+}
+
 }  // namespace detail
 
 // 1, 1.2, 1.2.3, 1.x, 1.2.* with optional -pre and +build; count = numeric parts before the first wildcard.
@@ -141,10 +155,14 @@ inline int compare(const Version& a, const Version& b) {
     if (c == 0) c = cmp(a.patch, b.patch);
     if (c != 0) return c;
     if (a.pre.empty() || b.pre.empty()) return cmp(static_cast<long long>(b.pre.size()), static_cast<long long>(a.pre.size()));
+    // semver.org 11.4: numeric identifiers by value (any length, no int to overflow), below every alphanumeric one;
+    // alphanumeric ones in ASCII order
     for (size_t i = 0; i < a.pre.size() && i < b.pre.size(); ++i) {
-        int ai = 0, bi = 0;
-        const bool an = detail::to_int(a.pre[i], &ai), bn = detail::to_int(b.pre[i], &bi);
-        c = an && bn ? cmp(ai, bi) : an ? -1 : bn ? 1 : (a.pre[i] < b.pre[i] ? -1 : a.pre[i] > b.pre[i] ? 1 : 0);
+        const bool an = detail::numeric(a.pre[i]), bn = detail::numeric(b.pre[i]);
+        c = an && bn ? detail::compare_numeric(a.pre[i], b.pre[i])
+            : an     ? -1
+            : bn     ? 1
+                     : (a.pre[i] < b.pre[i] ? -1 : a.pre[i] > b.pre[i] ? 1 : 0);
         if (c != 0) return c;
     }
     return cmp(static_cast<long long>(a.pre.size()), static_cast<long long>(b.pre.size()));

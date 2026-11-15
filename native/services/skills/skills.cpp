@@ -191,6 +191,13 @@ Built g_last;                       // the last build's numbers
 uint8_t g_key_guid[16] = {};
 bool g_have_key = false, g_served = false, g_dirty = true;
 uint64_t g_builds = 0, g_worlds = 0;
+// A boot generation's required participants (prepare): their nodes the first tree build leaves out stop the start (kiln.boot
+// activation_fault), reported from hk_tree_load with no lock held.
+kiln::boot::LateFaults g_late;
+struct LateFault {
+    std::string mod, key, why;
+};
+std::vector<LateFault> g_late_pending;  // g_mu
 struct LiveTree {
     uintptr_t tree;
     uint32_t kind;  // KILN_WORLD_*, 99 = not known
@@ -301,14 +308,24 @@ int load_nodes(KilnOwner owner, const std::string& owner_id, const std::string& 
     return n;
 }
 
-void load_file(KilnOwner owner, const std::string& owner_id, const fs::path& file, const fs::path& base) {
+// `boot`: a boot generation's prepare. A required participant (kiln_boot_collector.hpp, entry_error) is refused for a file that
+// cannot be read or is not JSON and for a node that is refused; another mod's are logged and skipped as they always were.
+void load_file(KilnOwner owner, const std::string& owner_id, const fs::path& file, const fs::path& base,
+               const kiln::boot::Input* boot = nullptr) {
+    const std::string key = "skills/" + narrow(file.filename().wstring());
+    const auto strict = [&](const std::string& why) { kiln::boot::entry_error(boot, owner_id, "skills", key, "kiln.skills: " + key + ": " + why); };
     std::ifstream f(file, std::ios::binary);
-    if (!f) return;
+    if (!f) {
+        SW("%s cannot be read (skipped)", narrow(file.wstring()).c_str());
+        strict("cannot be read");
+        return;
+    }
     std::string s((std::istreambuf_iterator<char>(f)), {});
     json j = json::parse(s, nullptr, false, true);
     const std::string src = narrow(file.wstring());
     if (j.is_discarded() || !j.is_object()) {
         SW("%s is not a JSON object (skipped)", src.c_str());
+        strict("not a JSON object");
         return;
     }
     if (!j.contains("gameTree")) return;  // Kiln trees only (Kiln.Skills reads those)
@@ -316,11 +333,17 @@ void load_file(KilnOwner owner, const std::string& owner_id, const fs::path& fil
     const json nodes = gt.is_object() && gt.contains("nodes") ? gt["nodes"] : gt.is_array() ? gt : json::array();
     if (!nodes.is_array()) {
         SW("%s: \"gameTree\" must be {\"nodes\": [...]}", src.c_str());
+        strict("\"gameTree\" must be {\"nodes\": [...]}");
         return;
     }
     std::lock_guard lock(g_mu);
-    const int n = load_nodes(owner, owner_id, src, nodes, base, nullptr);
+    json report = json::array();
+    const int n = load_nodes(owner, owner_id, src, nodes, base, boot ? &report : nullptr);
     SI("%s: %d game-tree node(s) defined (mod %s)", src.c_str(), n, owner_id.c_str());
+    for (size_t i = 0; i < report.size(); ++i)
+        if (report[i].value("state", std::string()) == "error")
+            strict("gameTree.nodes[" + std::to_string(i) + "]" + (report[i].contains("guid") && report[i]["guid"].is_string() ? " (" + report[i]["guid"].get<std::string>() + ")" : std::string()) +
+                   ": " + report[i].value("error", std::string("refused")));
 }
 
 // The game-tree definitions of the load order: the mods' skills/*.json, then (a boot generation, chapter 08) what their OnBoot staged,
@@ -346,7 +369,7 @@ void load_boot_definitions(const kiln::boot::Input* boot = nullptr, std::vector<
         KilnOwner o = g_api->owner_create(kstr("skills:" + (id.empty() ? dir : id)));
         if (made) made->push_back(o);
         g_mod_owner[id.empty() ? dir : id] = o;
-        for (auto& f : files) load_file(o, id, f, d);
+        for (auto& f : files) load_file(o, id, f, d, boot);
     };
     const KilnProfileApi* prof = static_cast<const KilnProfileApi*>(g_api->service(KilnStr{"kiln.profile", 12}, 1));
     bool scan_dropins = true;
@@ -372,23 +395,29 @@ void load_boot_definitions(const kiln::boot::Input* boot = nullptr, std::vector<
     if (boot)
         for (const std::string& mod : mod_ids) {
             for (const auto& b : boot->docs("skills", mod)) {
-                if (!b.document.is_object() || !b.document.contains("nodes") || !b.document["nodes"].is_array()) {
-                    SW("mod %s: boot document %s is not {\"nodes\": [...]} (skipped)", mod.c_str(), b.key.c_str());
-                    continue;
-                }
+                if (!b.document.is_object() || !b.document.contains("nodes") || !b.document["nodes"].is_array())
+                    throw kiln::boot::Refusal(mod, "skills", b.key, "kiln.skills: a boot document is not {\"nodes\": [...]}");
                 std::lock_guard lock(g_mu);
                 KilnOwner o = g_mod_owner.count(mod) ? g_mod_owner[mod] : g_api->owner_create(kstr("skills:" + mod));
                 if (!g_mod_owner.count(mod) && made) made->push_back(o);
                 g_mod_owner[mod] = o;
                 int n = 0;
+                size_t at = 0;
                 for (const json& e : b.document["nodes"]) {
+                    const std::string where = "nodes[" + std::to_string(at++) + "]";
                     uint8_t g[16];
-                    if (!e.is_object() || !e.contains("guid") || !e["guid"].is_string() || !guid_parse(e["guid"].get<std::string>(), g))
+                    if (!e.is_object() || !e.contains("guid") || !e["guid"].is_string() || !guid_parse(e["guid"].get<std::string>(), g)) {
+                        SW("boot definition %s of mod %s: %s has no GUID (skipped)", b.key.c_str(), mod.c_str(), where.c_str());
+                        kiln::boot::entry_error(boot, mod, "skills", b.key, "kiln.skills: " + where + ": no \"guid\"");
                         continue;
+                    }
                     bool have = false;
                     for (auto& d : g_defs) have |= std::memcmp(d->node.guid, g, 16) == 0;
                     if (have) continue;  // its data file defines it: the file wins
-                    n += load_nodes(o, mod, "boot:" + mod + "/" + b.key, json::array({e}), fs::path(widen(api_path(KILN_PATH_KILN))), nullptr);
+                    json report = json::array();
+                    n += load_nodes(o, mod, "boot:" + mod + "/" + b.key, json::array({e}), fs::path(widen(api_path(KILN_PATH_KILN))), &report);
+                    if (!report.empty() && report[0].value("state", std::string()) == "error")
+                        kiln::boot::entry_error(boot, mod, "skills", b.key, "kiln.skills: " + where + ": " + report[0].value("error", std::string("refused")));
                 }
                 if (n) SI("%d game-tree node(s) of mod %s from its boot definitions", n, mod.c_str());
             }
@@ -468,6 +497,16 @@ void rebuild_locked(const char* why) {
     for (auto& d : g_defs)
         if (d->state == kError) SW("node %s (%s, %s) is not in the tree: %s", d->node.name.c_str(), guid_str(d->node.guid).c_str(),
                                    d->source.c_str(), d->error.c_str());
+    const auto late = [] {  // a required boot mod's own node (not Kiln's cache of its code) that is not in the tree
+        for (auto& d : g_defs)
+            if (d->state == kError && d->source.rfind("cache:", 0) != 0 && g_late.take(d->owner_id))
+                g_late_pending.push_back({d->owner_id, d->node.name, "node " + d->node.name + " (" + guid_str(d->node.guid) + ", " +
+                                                                         d->source + ") is not in the tree: " + d->error});
+    };
+    struct Late {
+        decltype(late)& f;
+        ~Late() { f(); }  // after the resource is served or refused below
+    } late_at_end{late};
     KilnAssetKey key{};
     std::memcpy(key.guid, g_key_guid, 16);
     key.type = 0xe4b6994fu;  // keen::SkillTreeResource
@@ -511,6 +550,24 @@ uint32_t kind_of_tree(uintptr_t tree) {
 
 kiln::RawHook g_load_hook, g_login_hook;
 
+// The whole tree is the game's (g_mu held): every required boot mod with a node of its own is reported.
+void late_whole(const std::string& why) {
+    for (auto& d : g_defs)
+        if (d->source.rfind("cache:", 0) != 0 && g_late.take(d->owner_id)) g_late_pending.push_back({d->owner_id, "", why});
+}
+
+// No lock held: what the tree build left out of a required boot mod stops the start (the call does not return then).
+void report_late() {
+    std::vector<LateFault> faults;
+    {
+        std::lock_guard lock(g_mu);
+        faults.swap(g_late_pending);
+    }
+    for (const LateFault& f : faults)
+        kiln::boot::activation_fault(g_api, g_owner, f.mod, "skills", f.key,
+                                     "kiln.skills, while a world loaded its skill tree (the stop comes at world load): " + f.why);
+}
+
 // Runs before the game's loader when the tree's data is 0. Never throws.
 void before_load(void* T) {
     try {
@@ -537,6 +594,7 @@ void before_load(void* T) {
             if (r != KILN_OK) {
                 g_vanilla.clear();
                 SW("the game's SkillTreeResource %s did not read (%d): the tree stays the game's", guid_str(guid).c_str(), r);
+                late_whole("the game's skill tree resource did not read (" + std::to_string(r) + "): no Kiln node is in the tree");
                 return;
             }
             const json s = summary(g_vanilla.data(), g_vanilla.size());
@@ -561,6 +619,11 @@ void before_load(void* T) {
         ++g_worlds;
     } catch (...) {
         SW("building the skill tree failed (exception): the tree stays the game's");
+        try {
+            std::lock_guard lock(g_mu);
+            late_whole("building the skill tree failed: no Kiln node is in the tree");
+        } catch (...) {
+        }
     }
 }
 
@@ -602,6 +665,7 @@ void hk_tree_load(void* T) {
     uint64_t data = 1;
     if (T && g_load_on.load(std::memory_order_relaxed) && rd(reinterpret_cast<uintptr_t>(T) + L.data, &data) && data == 0) {
         before_load(T);
+        report_late();  // before the game reads the tree
         g_load_hook.call<void>(T);
         after_load(T);
         return;
@@ -1335,6 +1399,7 @@ void KILN_CALL destroy_boot(const void* p) {
         std::erase_if(g_mod_owner, [&](const auto& kv) { return mine.count(kv.second) != 0; });
         g_code_json.clear();
         g_dirty = true;
+        g_late.reset();
     }
     for (const KilnOwner o : plan->owners)
         if (A) A->revert_owner(o);  // the nodes' icons
@@ -1345,7 +1410,16 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
     const kiln::boot::Input input = kiln::boot::parse(in);
     if (!input.ok) return kiln::boot::refuse(out, issue, "", "", "", "kiln.skills: the boot envelope is not JSON");
     auto* plan = new BootPlan;
-    load_boot_definitions(&input, &plan->owners);
+    {
+        std::lock_guard lock(g_mu);
+        g_late.reset(input.required);
+    }
+    try {
+        load_boot_definitions(&input, &plan->owners);
+    } catch (const kiln::boot::Refusal& r) {
+        destroy_boot(plan);  // what was read before the refusal goes with it
+        return kiln::boot::refuse(out, issue, r.mod, r.kind, r.key, r.what());
+    }
     size_t n;
     {
         std::lock_guard lock(g_mu);

@@ -124,7 +124,12 @@ pub async fn launch_play(app: AppHandle, game_id: String, request: LaunchRequest
         };
         match &r {
             // the start's mod set, as the launch record has it
-            Ok(_) => {
+            Ok(res) => {
+                // the active profile written again before the start (profile::refresh_active): what it kept and noted
+                if let Some(a) = &res.activation {
+                    crate::commands::app::launcher_log("profile", &format!("{} written again before the start ({})", a.profile_id, g.path.display()));
+                    crate::commands::profile::log_notes(a);
+                }
                 let fp = kiln_manage::launch::last_launch(&dirs, &g).ok().flatten().map(|l| l.fingerprint);
                 track(&id, |t| t.fingerprint = fp.or(t.fingerprint.take()));
             }

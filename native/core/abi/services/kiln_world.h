@@ -370,6 +370,17 @@ enum {
     KILN_GAME_PROGRAM_GAME = 0x01u,      /* the game's own program (its descriptor is in the game's image); clear: a
                                             program Kiln or another mod registered */
     KILN_GAME_PROGRAM_NO_UPDATE = 0x02u, /* it has no update in this world (a client program in a server world) */
+    KILN_GAME_PROGRAM_NO_VIEW = 0x04u,   /* its descriptor uses other_write_unser, all_read or all_write: wraps and
+                                            game_slice_iterate work, game_slice_slot / _mark do not (chapter 06a 9.3) */
+};
+
+/* A program descriptor's access lists (game_program_list, game_slice_slot, game_slice_mark), in descriptor order. */
+enum {
+    KILN_GAME_LIST_TPL = 0, KILN_GAME_LIST_TPL_OPT = 1, KILN_GAME_LIST_READ = 2, KILN_GAME_LIST_READ_OPT = 3,
+    KILN_GAME_LIST_WRITE = 4, KILN_GAME_LIST_WRITE_OPT = 5, KILN_GAME_LIST_SYS_READ = 6, KILN_GAME_LIST_SYS_WRITE = 7,
+    KILN_GAME_LIST_OTHER_TPL = 8, KILN_GAME_LIST_OTHER_READ = 9, KILN_GAME_LIST_OTHER_WRITE = 10,
+    KILN_GAME_LIST_WITH = 11, KILN_GAME_LIST_WITHOUT = 12, KILN_GAME_LIST_ANY_OF = 13, KILN_GAME_LIST_EVENTS_IN = 14,
+    KILN_GAME_LIST_EVENTS_OUT = 15, KILN_GAME_LISTS = 16,
 };
 
 typedef struct KilnGameProgramInfo {
@@ -485,6 +496,10 @@ typedef struct KilnGameSlice {
 
 /* A stage; runs under kiln.world's structured-exception guard. */
 typedef void(KILN_CALL* KilnWrapStageFn)(KilnGameSlice* slice, void* user);
+
+/* game_slice_iterate's callback: one entity of the slice (row from 0; iter = the engine's iterator, positioned on it).
+ * Return 0 to go on, anything else to stop. */
+typedef uint32_t(KILN_CALL* KilnSliceEntityFn)(uint64_t* iter, uint32_t row, KilnEntity entity, void* user);
 
 typedef struct KilnGameWrapInfo {
     uint32_t size;          /* set to sizeof(KilnGameWrapInfo) before calling */
@@ -657,7 +672,9 @@ typedef struct KilnWorldApi {
      * set is left alone. Any thread outside a program update; it takes effect in the next Pre. */
     KilnResult(KILN_CALL* lab_parallel)(uint32_t on, uint32_t steps);
     /* Wraps program `index` of the live world of `world_kind` (SERVER or CLIENT) with a `stage` (KILN_WRAP_*) that
-     * calls fn(slice, user). *out = its handle. It is PENDING until the target world's next Pre, where kiln.world
+     * calls fn(slice, user). Lifetime: call game_wraps_release and wait for it before freeing anything a stage uses.
+     * Owner retirement closes admission but does not wait for an already-running stage. Poll release until
+     * out_pending is zero, outside every stage. *out = its handle. It is PENDING until the target world's next Pre, where kiln.world
      * applies it (or refuses it: game_wrap_info says why); later worlds of that kind get it again by program name.
      * Any thread outside a stage or program update. A second Replace of a program is not an error: *out is a handle
      * that is REFUSED at once (reason KILN_WRAP_REPLACE_TAKEN, detail names the owner and wrap that replace it).
@@ -686,6 +703,55 @@ typedef struct KilnWorldApi {
      * program runner gets it at slice+0x10), or 0 when the entry holds no kiln.world trampoline. Any thread; lock-free.
      * For code that names programs by their update pointer. */
     uint64_t(KILN_CALL* wrap_original)(uintptr_t entry);
+
+    /* ---- appended since 0.2.0-dev.28 (version stays 4). Check header.size ---- */
+    /* 1 when the calling thread is inside a Kiln world program's update (register_program, bind_program), inside a
+     * wrap stage on a game program's slice (game_program_wrap), or inside a kiln.types system_hook callback (kiln.types'
+     * in_system_callback; 0 for that part with a kiln.types that lacks it), else 0. The world is in the middle of its
+     * step there (maybe on a worker): a service whose calls must not run mid-step refuses them with
+     * KILN_ERR_WRONG_THREAD when this answers 1. Any thread; lock-free, no game call. */
+    uint32_t(KILN_CALL* in_program)(void);
+
+    /* ---- per entity inside a stage (since 0.2.0-dev.29, still v4: check header.size) ----
+     * The names of list `list` (KILN_GAME_LIST_*) of program `index`'s descriptor in that world's directory, in
+     * descriptor order: returns how many (-1: no such program or list) and copies up to `capacity` into `names`
+     * (valid for the life of the process). Any thread. */
+    int32_t(KILN_CALL* game_program_list)(uint32_t world_kind, int32_t index, int32_t list, KilnStr* names,
+                                          uint32_t capacity);
+    /* Inside a stage: runs the program's own iterator over the slice and calls each(iter, row, entity, user) per
+     * entity (the update's own view of it; the iterator buffer is kiln.world's, sized from the job's counts). The
+     * slice's iteration state is as it was afterwards (a Before leaves the update to start from the first entity).
+     * KILN_ERR_WRONG_THREAD: not inside this slice's stage; KILN_ERR_BUFFER_TOO_SMALL: an iterator over 4096 bytes. */
+    KilnResult(KILN_CALL* game_slice_iterate)(KilnGameSlice* slice, KilnSliceEntityFn each, void* user);
+    /* Inside game_slice_iterate's callback: what the iterator holds for name `i` of descriptor list `list` for the
+     * current entity: a component (TPL, READ, WRITE: NULL when an optional one is absent), a singleton, an other-entity
+     * accessor or an event queue. *size = the component's reflected size (0 when not known), *writable = 1 for the
+     * WRITE lists. NULL when the slot is not known: a NO_VIEW program, a name past the list, a view that disagreed
+     * with the engine's counts on the first slice (kiln.log says so once). */
+    void*(KILN_CALL* game_slice_slot)(KilnGameSlice* slice, const uint64_t* iter, int32_t list, int32_t i,
+                                      uint32_t* size, uint8_t* writable);
+    /* Inside game_slice_iterate's callback, before writing through a WRITE / WRITE_OPT slot: marks the current entity's
+     * component changed for the save and replication (the engine's MarkWritten), once per entity and component.
+     * KILN_ERR_INVALID_ARGUMENT: not a write list or name; KILN_ERR_UNAVAILABLE: no tracker on this slot or build. */
+    KilnResult(KILN_CALL* game_slice_mark)(KilnGameSlice* slice, const uint64_t* iter, int32_t list, int32_t i);
+    /* Inside a stage: the slice's archetype key (all its entities share one archetype): the layout of its first
+     * entity's record. KILN_ERR_NOT_FOUND for an empty slice or an entity the map does not hold. */
+    KilnResult(KILN_CALL* game_slice_archetype)(KilnGameSlice* slice, uintptr_t* out_layout);
+    /* Whether archetype `layout` (game_slice_archetype) has component `component_hash`: 1 yes, 0 no, -1 not known
+     * (no such component in that world, no world). Any thread, while the world lives. */
+    int32_t(KILN_CALL* game_archetype_has)(uint32_t world_kind, uintptr_t layout, uint32_t component_hash);
+    /* Inside game_slice_iterate's callback, after writing an attribute component (Fuel, Health, ...) through WRITE /
+     * WRITE_OPT slot `i` of `list`: runs the game's attribute formulas on it (AttrChanged: maxima, clamps, derived
+     * values), with the program's own impact::AttributeRegistry singleton. KILN_ERR_INVALID_ARGUMENT: not a write
+     * slot, not an attribute block with values, or the program does not declare impact::AttributeRegistry;
+     * KILN_ERR_UNAVAILABLE: not on this build; KILN_ERR_INTERNAL: the formulas faulted. */
+    KilnResult(KILN_CALL* game_slice_attr_changed)(KilnGameSlice* slice, const uint64_t* iter, int32_t list, int32_t i);
+    /* Since dev.29: inside iteration, validates reflected AttributeComponent ancestry and the block's bounds.
+     * No formula or write. INVALID_ARGUMENT for a non-attribute or malformed block. Check header.size. */
+    KilnResult(KILN_CALL* game_slice_attr_validate)(KilnGameSlice* slice, const uint64_t* iter, int32_t list, int32_t i);
+    /* Since dev.29: monotonically changing lifecycle generation for this world kind, advanced at STARTED/STOPPING.
+     * Any thread, lock-free; key per-world caches with it before reading their entries. Check header.size. */
+    uint64_t(KILN_CALL* game_world_session)(uint32_t world_kind);
 } KilnWorldApi;
 
 enum {

@@ -62,6 +62,12 @@ internal interface ICapabilityRegistry
 
     /// <summary>The row <paramref name="name"/> would show without <paramref name="owner"/>'s report.</summary>
     CapRow GetWithout(string owner, string name);
+
+    /// <summary><paramref name="owner"/>'s own report of <paramref name="name"/>, if it made one.</summary>
+    bool TryGetReport(string owner, string name, out CapRow row);
+
+    /// <summary>Whether <paramref name="owner"/> holds any report now.</summary>
+    bool HasReports(string owner);
 }
 
 /// <summary>In-memory rows, one report per (owner, name); the row shown is the worst report: unavailable beats pending
@@ -129,6 +135,25 @@ internal sealed class OfflineCapabilities : ICapabilityRegistry
     {
         lock (_lock)
             return _reports.TryGetValue(name, out var list) && Row(name, list.Where(r => r.Owner != owner).ToList()) is { } row ? row : Missing(name);
+    }
+
+    public bool TryGetReport(string owner, string name, out CapRow row)
+    {
+        lock (_lock)
+        {
+            if (_reports.TryGetValue(name, out var list) && list.FirstOrDefault(r => r.Owner == owner) is { } e)
+            {
+                row = new CapRow(name, e.State, e.Reason, e.Text, e.Source) { SessionDependent = _session.Contains(name) };
+                return true;
+            }
+        }
+        row = default;
+        return false;
+    }
+
+    public bool HasReports(string owner)
+    {
+        lock (_lock) return _reports.Values.Any(list => list.Exists(r => r.Owner == owner));
     }
 
     private void Change(string name, Action<List<Entry>> edit)

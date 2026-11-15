@@ -43,6 +43,10 @@ internal sealed record CatalogMod
     /// enshwick, shroudlink, ember.</summary>
     public required string Engine { get; init; }
     public required string Id { get; init; }
+    /// <summary>What tells this row apart from its engine's other rows where <see cref="Id"/> repeats (every proxy DLL
+    /// mod is a dinput8.dll): its path. Null: the id. The mod manager makes its ImGui ids and its selection from it
+    /// (<see cref="ModManagerLogic.KeyOf"/>); a player never sees it.</summary>
+    public string? Key { get; init; }
     public required string Name { get; init; }
     public string Version { get; init; } = "";
     public ModRunState State { get; init; }
@@ -256,7 +260,7 @@ internal static class ModCatalog
         if (w.Contains("fail") || w.Contains("error") || w.Contains("refus") || w.Contains("reject") || w.Contains("fault") ||
             w is "missing" or "conflict" or "unsupported" or "not-loaded") return ModRunState.Failed;
         if (w is "disabled" or "off" or "inactive" or "policy" or "off-in-shroudforge") return ModRunState.Disabled;
-        if (w.Contains("pending") || w.Contains("waiting") || w is "candidate" or "registered" or "starting" or "deferred")
+        if (w.Contains("pending") || w.Contains("waiting") || w is "candidate" or "registered" or "starting" or "deferred" or "activating")
             return ModRunState.Waiting;
         if (w is "loaded" or "active" or "running" or "started" or "ok" or "done" or "hosted" or "script" or "copy" or "refresh" or
             "keep" or "run" or "already-loaded" or "own-loader") return ModRunState.Loaded;
@@ -431,8 +435,20 @@ internal static class ModCatalog
     }
 
     /// <summary>A folder path as compared between a profile entry and an engine's row: one separator, no trailing one
-    /// (the plugin writes the path it resolved, `Z:/home/...`; the profile has `Z:\home\...`). Callers compare without regard to case.</summary>
-    internal static string NormPath(string p) => p.Replace('\\', '/').TrimEnd('/');
+    /// (the plugin writes the path it resolved, `Z:/home/...`; the profile has `Z:\home\...`), and no verbatim prefix
+    /// (ShroudForge writes its mods folder from a canonical path on Windows, `\\?\C:\...\mods`, Kiln's game folder has
+    /// none): `\\?\C:\x` is `C:\x`, `\\?\UNC\server\share` is `\\server\share`. Callers compare without regard to case,
+    /// as Windows does (<see cref="SamePath"/>): the game runs on Windows or under Wine or Proton, with Windows paths.</summary>
+    internal static string NormPath(string p)
+    {
+        var s = p.Replace('\\', '/');
+        if (s.StartsWith("//?/UNC/", StringComparison.OrdinalIgnoreCase)) s = "//" + s[8..];
+        else if (s.StartsWith("//?/", StringComparison.Ordinal)) s = s[4..];
+        return s.TrimEnd('/');
+    }
+
+    /// <summary>Whether two paths name one folder as Windows compares them (<see cref="NormPath"/>, case ignored).</summary>
+    internal static bool SamePath(string a, string b) => string.Equals(NormPath(a), NormPath(b), StringComparison.OrdinalIgnoreCase);
 
     private static bool DirExists(string? p)
     {
@@ -511,8 +527,7 @@ internal static class ModCatalog
         /// when it is placed there (XHL companions, EML mods a DLL reads there), Kiln's copy for Enshwick's loader.</summary>
         private string? KeptInGameMods(string kind, ProfileEntry e, string id)
         {
-            var mods = NormPath(Path.Combine(Src.GameDir, "mods"));
-            if (ParentOf(e.Path) is { } parent && string.Equals(NormPath(parent), mods, StringComparison.OrdinalIgnoreCase))
+            if (ParentOf(e.Path) is { } parent && SamePath(parent, Path.Combine(Src.GameDir, "mods")))
                 return DirExists(e.Path) ? e.Path : null;
             if (kind != "enshwick") return null;
             string copy;
@@ -622,6 +637,7 @@ internal static class ModCatalog
             });
             all.AddRange(mods);
         }
+        UniqueKeys(all);
         string? profileLine = profile.Mode switch
         {
             "no-mods" => "Play once without mods: no mod loads this start.",
@@ -639,6 +655,30 @@ internal static class ModCatalog
     }
 
     private static long _version;
+
+    /// <summary>Gives each row its own <see cref="ModManagerLogic.KeyOf"/>: the mod manager's ImGui ids and its selection
+    /// are made from it, and two rows with one ImGui id raise ImGui's "conflicting ID" popup and cannot be chosen apart.
+    /// KeyOf includes folder and source, so distinguishable rows retain their keys when the list changes. Only repeated
+    /// reports of the same identity need "#2", "#3"; reserve real keys first so a generated suffix cannot displace one.</summary>
+    internal static void UniqueKeys(List<CatalogMod> mods)
+    {
+        var reserved = new HashSet<string>(mods.Select(ModManagerLogic.KeyOf), StringComparer.Ordinal);
+        var seen = new HashSet<string>(StringComparer.Ordinal);  // ImGui hashes ids as they are spelled
+        for (var i = 0; i < mods.Count; i++)
+        {
+            var m = mods[i];
+            if (seen.Add(ModManagerLogic.KeyOf(m))) continue;
+            var key = m.Key ?? m.Id;
+            for (var n = 2; ; n++)
+            {
+                var next = m with { Key = $"{key}#{n}" };
+                var nextKey = ModManagerLogic.KeyOf(next);
+                if (reserved.Contains(nextKey) || !seen.Add(nextKey)) continue;
+                mods[i] = next;
+                break;
+            }
+        }
+    }
 
     /// <summary>A client's <c>side: "server"</c> Kiln mod before the player's own world starts (the launcher says the same:
     /// kiln_manage::profile::WITH_WORLD).</summary>
@@ -749,7 +789,8 @@ internal static class ModCatalog
                 var state = StateOf(word);
                 b.Add(new CatalogMod
                 {
-                    Engine = "plugin", Id = id, Name = id, Version = Str(p, "version") ?? "", State = state, Word = word,
+                    // a plugin that failed before it named itself is named by its file, which another folder may also hold
+                    Engine = "plugin", Id = id, Key = path, Name = id, Version = Str(p, "version") ?? "", State = state, Word = word,
                     Reason = Str(p, "error"), Folder = path, Source = "plugins",
                     Help = state == ModRunState.Failed ? "Update or remove the plugin in the Kiln launcher, then start the game again." : null,
                 });
@@ -784,7 +825,8 @@ internal static class ModCatalog
             var name = LeafName(path);
             b.Add(new CatalogMod
             {
-                Engine = "chain", Id = name, Name = name, State = state, Word = word, Reason = reason, Folder = path,
+                // keyed by the path: every proxy DLL mod (Spawn the World, Auto Loot Plus) is a dinput8.dll
+                Engine = "chain", Id = name, Key = path, Name = name, State = state, Word = word, Reason = reason, Folder = path,
                 Source = Str(c, "source") ?? "chain", Missing = word == "missing",
                 Help = state == ModRunState.Failed ? "Check the DLL in chain.ini (or the Kiln launcher), then start the game again." : null,
             });
@@ -840,6 +882,17 @@ internal static class ModCatalog
                     help = $"{EngineName(kind)}'s own loader runs the {EngineName(kind)} mods this start and reads only its own folder. Activate the profile again in the Kiln launcher (it copies the mod there), then start the game again.";
                 else if (line.State == "off-in-shroudforge")
                     help = OffInShroudForgeHelp;
+                else if (kind == "shroudtopia" && !aside && line.State == "inactive")
+                {
+                    reason = "Switched off in Shroudtopia's settings.";
+                    help = $"In shroudtopia/shroudtopia.json in the profile's config folder, set active to true in the mods entry named \"{line.Name ?? line.Id}\" (the name in kiln.log's Registered mod line). Save the file; Shroudtopia reads it again while the game runs.";
+                }
+                // kiln-shroudtopia: the setting is on and Activate is called, but the mod's own flag stays off
+                else if (kind == "shroudtopia" && !aside && line.State == "activating")
+                {
+                    reason = string.IsNullOrEmpty(reason) ? "Switched on, but the mod does not report itself active." : char.ToUpperInvariant(reason[0]) + reason[1..] + ".";
+                    help = $"Kiln runs Shroudtopia mods through Shroudtopia 0.1.1's mod interface and keeps calling this mod's Activate. A mod made for another game version, or built against another Shroudtopia, can stay like this without doing anything. kiln/logs/kiln.log has its own lines as [shroudtopia:{line.Name ?? line.Id}]; the mod's author can tell whether it supports this game version.";
+                }
                 else if (state == ModRunState.Failed)
                     help = $"Read the reason above. Update the mod in the Kiln launcher, then start the game again. kiln/logs/kiln.log has the {EngineName(kind)} lines.";
                 var (mname, mversion) = line.Name is null ? Manifest(line.Folder) : (line.Name, null);
@@ -1001,9 +1054,9 @@ internal static class ModCatalog
                 Engine = "shroudforge", Id = sid ?? name, Name = sname ?? name, Version = sversion ?? "",
                 Folder = sub, Source = "folder", State = on ? state : ModRunState.Disabled, Word = on ? runs ? "unconfirmed" : mode ?? "" : "disabled",
                 // an EML package without ShroudForge's file was never switched on there: say so, it is not a choice the
-                // player made
-                Reason = on ? why : SfFacts(sub) is null ? "An EML mod in ShroudForge's mods folder. ShroudForge keeps it off until its switch is turned on."
-                    : "Switched off in ShroudForge's settings.", Help = on ? help : null,
+                // player made; the player's own folder says the promised words, a copy Kiln's launcher placed does not
+                Reason = on ? why : SfFacts(sub) is not null ? "Switched off in ShroudForge's settings." : KilnsEml(sub) ? NoSwitchFile : HandEmlOff,
+                Help = on ? help : null,
             });
         }
         // kiln-eml reported its handoff before ShroudForge prepared. A later failure supersedes that prediction.
@@ -1050,8 +1103,31 @@ internal static class ModCatalog
     /// <summary>The word of an EML row whose package ShroudForge has switched off (kiln-eml's state too).</summary>
     internal const string OffInShroudForge = "off-in-shroudforge";
 
+    /// <summary>An EML mod the player put into ShroudForge's mods folder by hand, which ShroudForge keeps switched off (a
+    /// legacy EML package has no extended.mod.json until its switch is first turned on). The words promised to a player on
+    /// Nexus (2026-11-14): what happened, nothing about ShroudForge's files (that read as "Kiln wants a ShroudForge file
+    /// from an EML mod"). kiln-manage (the launcher) and kiln-eml (kiln.log) say the same.</summary>
+    internal const string HandEmlOff = "You put this mod into ShroudForge's folder yourself, and ShroudForge has it switched off.";
+
+    /// <summary>What helps <see cref="HandEmlOff"/> on its own row in Mods &gt; ShroudForge (the switch is drawn below it).</summary>
+    internal const string HandEmlOffHelp = "Switch it on below, or remove the folder and add the mod with Add mods in the Kiln launcher.";
+
+    /// <summary>What helps <see cref="HandEmlOff"/> on the EML row of a profile mod whose folder is the player's.</summary>
+    internal const string HandEmlOffProfileHelp =
+        "Switch it on in Mods > ShroudForge (its own row there), or remove the folder and press Play in the Kiln launcher: the mod is in " +
+        "your profile, so Kiln then places its own copy, switched on.";
+
     internal const string OffInShroudForgeHelp =
         "ShroudForge runs it only once its switch is on: the reason above says where to switch it on. Then start the game again.";
+
+    /// <summary>A package in ShroudForge's folder that has no extended.mod.json and is not the player's own folder (a
+    /// copy Kiln's launcher placed there, <see cref="KilnsEml"/>): <see cref="HandEmlOff"/> would tell the player they
+    /// put it there.</summary>
+    internal const string NoSwitchFile =
+        "ShroudForge has not switched it on: it has no extended.mod.json, the file that holds ShroudForge's switch, so ShroudForge does not run it.";
+
+    /// <summary>The folder is a copy of an EML mod Kiln's launcher placed (its marker says eml), not the player's own.</summary>
+    private static bool KilnsEml(string folder) => string.Equals(PlacedKind(folder), "eml", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>An EML row while ShroudForge runs the EML mods: a package in ShroudForge's mods folder runs only while its
     /// extended.mod.json says enabled: true, on the sides its targets name (ShroudForgePackages.Read reads both as
@@ -1060,7 +1136,7 @@ internal static class ModCatalog
     private static CatalogMod EmlUnderSf(CatalogMod m, string sfMods, SfAssetState? assets, string side)
     {
         if (m.Folder is not { } folder || m.Word is not ("own-loader" or OffInShroudForge or "other-side") ||
-            ParentOf(folder) is not { } parent || !string.Equals(NormPath(parent), NormPath(sfMods), StringComparison.OrdinalIgnoreCase)) return m;
+            ParentOf(folder) is not { } parent || !SamePath(parent, sfMods)) return m;
         SfPackage p;
         try { p = ShroudForgePackages.Read(folder); }
         catch (Exception e)
@@ -1077,13 +1153,14 @@ internal static class ModCatalog
             return m with
             {
                 State = ModRunState.Disabled, Word = OffInShroudForge,
-                Reason = (p.Extended
+                // Kiln's copy: the launcher switches it on; the player's own folder: the promised words
+                Reason = !kilns ? HandEmlOff : (p.Extended
                     ? "In ShroudForge's mods folder, but its extended.mod.json (the file that holds ShroudForge's switch) says enabled: false"
                     : "In ShroudForge's mods folder, but it has no extended.mod.json, the file that holds ShroudForge's switch, and ShroudForge keeps a package off until its switch is on") +
                     ", so nothing applies it this start.",
                 Help = kilns
                     ? "Press Play in the Kiln launcher (or activate the profile again): Kiln switches it on in ShroudForge's settings. Then start the game again."
-                    : "Kiln never writes into your own folder: switch it on in the ShroudForge group of this page (its own row) or in ShroudForge's own Modloader, then start the game again.",
+                    : HandEmlOffProfileHelp,
             };
         if (side.Length > 0 && p.Targets.Count > 0 && !(side == "server" ? p.Targets.Contains("server") : p.Targets.Contains("client") || !p.Targets.Contains("server")))
             return m with { State = ModRunState.NotLoaded, Word = "other side", Reason = $"ShroudForge runs it on the {string.Join(" and ", p.Targets)} only.", Help = null };
@@ -1228,12 +1305,19 @@ internal static class ModCatalog
         try { p = ShroudForgePackages.Read(folder); }
         catch (Exception) { return m with { State = m.State == ModRunState.Disabled ? m.State : ModRunState.Waiting, Word = "unconfirmed", Reason = "Its package settings cannot be read; ShroudForge's per-mod activation is not confirmed." }; }
         var repair = ShroudForgeUi.RepairNote(p);
+        // a legacy EML package the player put into ShroudForge's folder: the promised words (the switch below writes the
+        // file); a copy Kiln's launcher placed there is not theirs, and says what is missing
+        if (!p.Enabled && !p.Extended && m.Source == "folder" && !KilnsEml(folder))
+            return m with
+            {
+                State = ModRunState.Disabled, Word = "disabled", Reason = HandEmlOff,
+                Help = HandEmlOffHelp + " " + (p.SwitchLive ? "ShroudForge starts it while you play." : "It applies at the next game start."),
+            };
         if (!p.Enabled && !p.Extended)
             return m with
             {
                 // a legacy EML package: ShroudForge's own Modloader writes the file at the first change of its switch
-                State = ModRunState.Disabled, Word = "disabled",
-                Reason = "ShroudForge has not switched it on: it has no extended.mod.json, the file that holds ShroudForge's switch, so ShroudForge does not run it.",
+                State = ModRunState.Disabled, Word = "disabled", Reason = NoSwitchFile,
                 Help = "Switch it on below: Kiln writes the extended.mod.json ShroudForge's own Modloader writes. " +
                        (p.SwitchLive ? "ShroudForge starts it while you play." : "It applies at the next game start."),
             };

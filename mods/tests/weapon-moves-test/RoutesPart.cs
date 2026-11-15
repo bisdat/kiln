@@ -8,6 +8,10 @@
 //   route-applied-after-slot-switch        after the retry: the slots play the generation's clones, every window of the block leads where the routes
 //                                          say (each conditional row), the light chain links up, the game's own sequences are untouched;
 //   route-replay-no-event                  the same plan again raises no event;
+//   route-reload-replay-holds              a content reload writes the applied generation again in a content transaction: no event, the slots stay;
+//   route-reload-write-taken-back          a reload whose replayed document is refused after it was applied (the lab switch): the transaction takes
+//                                          it back, the status says Refused with the reason and keeps generation 2, the slots and links still route;
+//   route-reload-recovers                  the next ready pass finds the same plan playing: Applied again, generation 2;
 //   route-unload-restores                  unloading the fixture reports Removed with the generation it had; the sword's slots are its class's
 //                                          again (or the item went with the mod) and the game's sequences are as they were.
 // Needs "preview": ["blocks.move_followups"] in the lab's kiln.json while the client gate holds the row; skipped with a line otherwise.
@@ -107,6 +111,33 @@ public sealed partial class WeaponMovesTestMod
         await Steps(80);
         Check(_routeEvents.Count == n && Slots(Content.ItemData.Get(itemName)!).All(r => r.Sequence == (want.TryGetValue(r.Index, out var g) ? g : r.Orig)),
             $"route-replay-no-event: the same plan again raised {_routeEvents.Count - n} event(s) and the slots stayed");
+
+        // a content reload: the applied generation is written again in a transaction of its own and read back
+        bool Routed() => Slots(Content.ItemData.Get(itemName)!).All(r => r.Sequence == (want.TryGetValue(r.Index, out var g) ? g : r.Orig))
+            && Openings(Content.Sequences.Get(block.ToString())!).Where(o => o.Trigger == "Parried" && o.Orig != Guid.Empty).All(o => o.FollowUp == parry);
+        var gen0 = Content.Status()?.Generation ?? 0;
+        Content.ReloadPacks();
+        for (var i = 0; i < 400 && (Content.Status()?.Generation ?? 0) == gen0; i++) await Context.Scheduler.NextTick();
+        await Steps(80);
+        // (MovesStatus answers only the weapon's own mod: the status is the last event's)
+        Check((Content.Status()?.Generation ?? 0) != gen0 && _routeEvents.Count == n && Routed() && _routeEvents[^1].After is { State: MoveApplicationState.Applied, AppliedGeneration: 2 },
+            $"route-reload-replay-holds: content generation {gen0} -> {Content.Status()?.Generation}, {_routeEvents.Count - n} event(s), still routed {Routed()}: {Show(_routeEvents[^1].After)}");
+        // a reload whose replayed document is refused after kiln.content applied it: the transaction takes it back
+        Blocks.LabFailMoveWrites(1);
+        gen0 = Content.Status()?.Generation ?? 0;
+        Content.ReloadPacks();
+        await RouteEvents(n + 1, 600);
+        var refused = _routeEvents.Count > n ? _routeEvents[n].After : null;
+        Info($"routes: after the failed replay: {(refused == null ? "no event" : Show(refused))}");
+        Check(refused is { State: MoveApplicationState.Refused, AppliedGeneration: 2, Ok: false } && refused.Reason.Contains("refused by the test switch", StringComparison.Ordinal)
+                && refused.Reason.Contains("still plays", StringComparison.Ordinal) && refused.LiveClones.Count == applied.LiveClones.Count && Routed(),
+            $"route-reload-write-taken-back: {(refused == null ? "no event" : Show(refused))}; still routed {Routed()}");
+        await RouteEvents(n + 2, 600);
+        var back = _routeEvents.Count > n + 1 ? _routeEvents[n + 1].After : null;
+        Check(back is { State: MoveApplicationState.Applied, AppliedGeneration: 2, Ok: true } && Routed(),
+            $"route-reload-recovers: {(back == null ? "no event" : Show(back))}; still routed {Routed()}");
+        Blocks.LabFailMoveWrites(0);
+        n = _routeEvents.Count;
 
         // unloading the fixture: Removed with the generation it had; the game's own sequences as they were; the item, if the game still has it, on its class's slots
         var done = await Mods.UnloadAsync(Fixture);

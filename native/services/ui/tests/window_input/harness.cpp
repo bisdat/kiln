@@ -33,6 +33,7 @@
 #include <thread>
 #include <vector>
 
+#include "key_names.h"
 #include "ui.h"
 #include "raw_input_source.h"
 
@@ -1169,6 +1170,32 @@ void mouse_key_names() {
     }
 }
 
+// GitHub issue 33: the key left of 1 on a UK layout (scan 0x29, VK_OEM_8) reaches Kiln's key handling with its scan
+// code from raw input and from the window's key message alike, so a "Backquote" binding (key_names.h) can find its place;
+// key_name names VK_OEM_8.
+void layout_scan_codes() {
+    kui::g_kiln_keys.clear();
+    send(WM_INPUT, RIM_INPUT, raw_key(0x29, RI_KEY_MAKE, VK_OEM_8));
+    send(WM_INPUT, RIM_INPUT, raw_key(0x29, RI_KEY_BREAK, VK_OEM_8));
+    check(kui::g_kiln_keys.size() == 2 && kui::g_kiln_keys[0].rfind("vk=223 scan=29 ", 0) == 0,
+          "raw input: the UK backquote key arrives as VK_OEM_8 with scan code 0x29 (%s)",
+          kui::g_kiln_keys.empty() ? "nothing" : kui::g_kiln_keys[0].c_str());
+    const RAWINPUTDEVICE remove{1, 6, RIDEV_REMOVE, nullptr};
+    check(RegisterRawInputDevices(&remove, 1, sizeof remove), "raw keyboard unregistered (key messages only)");
+    kui::g_kiln_keys.clear();
+    send(WM_KEYDOWN, VK_OEM_8, key_l(0x29, false, false));
+    send(WM_KEYUP, VK_OEM_8, key_l(0x29, false, true));
+    check(kui::g_kiln_keys.size() == 2 && kui::g_kiln_keys[0].rfind("vk=223 scan=29 ", 0) == 0,
+          "key message: the UK backquote key arrives as VK_OEM_8 with scan code 0x29 (%s)",
+          kui::g_kiln_keys.empty() ? "nothing" : kui::g_kiln_keys[0].c_str());
+    const RAWINPUTDEVICE add{1, 6, 0, nullptr};
+    check(RegisterRawInputDevices(&add, 1, sizeof add), "raw keyboard registered again");
+    char b[32];
+    kui::key_name(VK_OEM_8, b, sizeof b);
+    check(std::strcmp(b, "Oem8") == 0 && kui::keys::matches(0xC0, VK_OEM_8, 0x29) && !kui::keys::matches(0xC0, VK_OEM_3, 0x28),
+          "key_name(VK_OEM_8) = Oem8 (%s), and Backquote is the key at 0x29, not UK's ' key", b);
+}
+
 }  // namespace
 
 int main() {
@@ -1216,6 +1243,7 @@ int main() {
     recursive_unsubscribe();
     delivery_mutation();
     raw_boundaries();
+    layout_scan_codes();
 
     const RAWINPUTDEVICE mouse{1, 2, 0, nullptr};  // the game registers raw mouse input too
     check(RegisterRawInputDevices(&mouse, 1, sizeof mouse), "raw mouse registered");

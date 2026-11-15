@@ -4,7 +4,7 @@
     <RootNamespace>Kiln</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <NoWarn>$(NoWarn);CS1591;KILNX028</NoWarn>  <!-- defines KILNX028 (17b's groundwork): its own helpers use those types -->
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Kiln.Host" />
@@ -29,6 +29,7 @@
     <InternalsVisibleTo Include="Kiln.Combat" />
     <InternalsVisibleTo Include="Kiln.Gameplay" />
     <InternalsVisibleTo Include="Kiln.Saves" />
+    <InternalsVisibleTo Include="Kiln.Saves.Tests" />
     <InternalsVisibleTo Include="Kiln.Data" />
     <InternalsVisibleTo Include="Kiln.Content" />
     <InternalsVisibleTo Include="Kiln.Hooks" />
@@ -51,6 +52,9 @@
     <InternalsVisibleTo Include="Kiln.Rules" />
     <InternalsVisibleTo Include="Kiln.PlayerAnim" />
     <InternalsVisibleTo Include="Kiln.Blocks" />
+    <!-- dev.28 06a: Kiln.Systems (program wraps) and its tests -->
+    <InternalsVisibleTo Include="Kiln.Systems" />
+    <InternalsVisibleTo Include="Kiln.Systems.Tests" />
     <!-- dev.28: the libraries its packages add, and their unit test projects. Reserved here once, so that no two
          packages edit this list. A line whose assembly did not ship is removed at the wave's end. -->
     <InternalsVisibleTo Include="Kiln.Queries" />

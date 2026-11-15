@@ -44,6 +44,10 @@ public sealed class HarnessCapabilities
     /// (only <see cref="Game.HasFeature"/> and the resolver's check change; nothing behind the feature is faked) and for a
     /// faked service; switching on a Kiln service (<c>kiln.*</c>) the kit has no fake for throws, since a mod would then
     /// find it on and fail inside it.
+    /// <para>A row Kiln's own service code composes from others (<c>queries.ground</c>, <c>queries.reachability</c>) can
+    /// be switched off too: <c>Kiln.Capabilities</c> and the service's members read it off at once. On cannot lift such a
+    /// row while the service reports it off (the worse of the two is shown, as in the game). After every switch the
+    /// services' composed rows are decided again, so a row built on the one switched follows it at once.</para>
     /// </summary>
     /// <exception cref="InvalidOperationException">On for an unfaked service, or for a row another report holds off.</exception>
     public void Override(string name, bool available, string? reasonText = null)

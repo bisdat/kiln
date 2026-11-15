@@ -34,6 +34,7 @@ std::string module_name(uintptr_t address);  // the file name of the module that
 const std::string* game_program_intern(std::string_view name);
 
 // ---- wraps.cpp ----
+void wraps_client_ready(bool tick, bool events);  // boot: enable only with lifecycle and both subscriptions
 void wraps_init();                                       // boot: the trampoline map, capability rows
 void wraps_pre(uint32_t kind, uintptr_t world);          // that world's thread, Pre, after its directory is current
 void wraps_world_event(const KilnWorldEvent* event);     // a world of a kind starts or stops
@@ -49,7 +50,20 @@ KilnResult KILN_CALL game_program_unwrap(KilnHandle wrap);
 KilnResult KILN_CALL game_wrap_info(KilnHandle wrap, KilnGameWrapInfo* out);
 KilnResult KILN_CALL game_wraps_release(KilnOwner owner, uint32_t* out_pending);
 KilnResult KILN_CALL game_slice_run_original(KilnGameSlice* slice);
+uint64_t KILN_CALL game_world_session(uint32_t kind);
 uint64_t KILN_CALL wrap_original(uintptr_t entry);
+uint32_t KILN_CALL in_program();  // the table's in_program: a Kiln program's update, a wrap stage or a kiln.types
+                                  // system_hook callback on this thread
+void in_program_resolve(const KilnTypesApi* types);  // on_ready: kiln.types' in_system_callback (null: that part is 0)
+KilnResult KILN_CALL game_slice_iterate(KilnGameSlice* slice, KilnSliceEntityFn each, void* user);
+void* KILN_CALL game_slice_slot(KilnGameSlice* slice, const uint64_t* iter, int32_t list, int32_t i, uint32_t* size,
+                                uint8_t* writable);
+KilnResult KILN_CALL game_slice_mark(KilnGameSlice* slice, const uint64_t* iter, int32_t list, int32_t i);
+KilnResult KILN_CALL game_slice_archetype(KilnGameSlice* slice, uintptr_t* out_layout);
+int32_t KILN_CALL game_archetype_has(uint32_t world_kind, uintptr_t layout, uint32_t component_hash);
+KilnResult KILN_CALL game_slice_attr_validate(KilnGameSlice* slice, const uint64_t* iter, int32_t list, int32_t i);
+KilnResult KILN_CALL game_slice_attr_changed(KilnGameSlice* slice, const uint64_t* iter, int32_t list, int32_t i);
+int32_t KILN_CALL game_program_list(uint32_t world_kind, int32_t index, int32_t list, KilnStr* names, uint32_t capacity);
 
 // ---- seh.cpp ----
 bool seh_wrap_stage(KilnWrapStageFn fn, KilnGameSlice* slice, void* user, unsigned long* code);

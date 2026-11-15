@@ -57,12 +57,34 @@ public sealed partial class KilnHarness
         }
     }
 
-    /// <summary>The harness ends, before the players and the world go.</summary>
-    private void EndRecordingFakes()
+    /// <summary>Fakes a test adds to this harness's end (Kiln.TestKit.Tests: an End that throws), ended after the kit's
+    /// own in the same order, the later ones first. Not for mods: the kit finds its real fakes itself.</summary>
+    internal List<IKitFake> ExtraFakesForTests { get; } = [];
+
+    /// <summary>The harness ends, before the players and the world go. Every fake is ended, also when an earlier one's
+    /// End throws: what was thrown is added to <paramref name="failures"/>, and the harness throws it once it is clean.</summary>
+    private void EndRecordingFakes(List<Exception> failures)
     {
-        var fakes = KitFakes.All;
-        for (var i = fakes.Count - 1; i >= 0; i--) fakes[i].End(this);  // the later ones first
-        SpawnFake.Ended();
-        ItemsFake?.Ended();
+        IReadOnlyList<IKitFake> fakes = [.. KitFakes.All, .. ExtraFakesForTests];
+        for (var i = fakes.Count - 1; i >= 0; i--)  // the later ones first
+        {
+            var fake = fakes[i];
+            Ending(failures, () => fake.End(this));
+        }
+        Ending(failures, SpawnFake.Ended);
+        Ending(failures, () => ItemsFake?.Ended());
+    }
+
+    /// <summary>One part of the fakes' end: an exception is kept, so the parts after it still run.</summary>
+    private static void Ending(List<Exception> failures, Action end)
+    {
+        try
+        {
+            end();
+        }
+        catch (Exception e)
+        {
+            failures.Add(e);
+        }
     }
 }
