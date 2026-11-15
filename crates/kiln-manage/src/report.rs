@@ -32,8 +32,9 @@ use std::time::SystemTime;
 pub const KILN_LOG_MAX: u64 = 1 << 20;
 /// Tail of proxy.log, eml.log, shroudlink_client.log, launcher.log.
 pub const SMALL_LOG_MAX: u64 = 192 * 1024;
-/// Tail of tick-stats.jsonl (one line a minute per world, about 0.4 KiB each: a hosted session's last 3 to 4 hours).
-pub const TICK_STATS_MAX: u64 = 256 * 1024;
+/// Tail of tick-stats.jsonl (one line a minute per world, about 2 KiB each since 0.2.0-dev.29: about 3 hours of a hosted
+/// session with three worlds, 8 of a dedicated server).
+pub const TICK_STATS_MAX: u64 = 1024 * 1024;
 /// The newest crash report.
 pub const CRASH_MAX: u64 = 64 * 1024;
 /// One Greeneye log or status file (Greeneye Loader's loader.log, a Greeneye mod's own log in its folder).

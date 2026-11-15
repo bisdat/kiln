@@ -73,7 +73,10 @@ per step. Per step:
 - **Post** (only while someone subscribed): `WaitWorldJobs(world)`, then Post subscribers. The server's SimStep
   returns with grid and range-query jobs still running; touching entities before the wait races them (EMF notes).
 
-Kiln writes `kiln/logs/tick-stats.jsonl` every 60 s: step time, Kiln's own Pre/Post time, interval, subscribers.
+Kiln writes `kiln/logs/tick-stats.jsonl` every 60 s: step time, Kiln's own Pre/Post time, interval, subscribers. Since
+0.2.0-dev.29 each line also carries `post_parts` (the game's job wait, the window services' end and each Post
+subscriber by owner), `pre_parts` (the eight slowest Pre subscribers) and `worst` (the window's slowest step taken
+apart); a support report keeps the last 1 MiB of the file.
 
 ## C ABI (`native/core/abi/kiln_api.h`, ABI 1)
 One append-only table: log, build info, features, paths, owners, tick subscribe/post, game-log mirror, and an unstable
