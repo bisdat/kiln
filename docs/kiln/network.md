@@ -61,7 +61,9 @@ ch.SendTo(player, msg); ch.SendTo(peer, msg); ch.SendToAll(msg, except: peer); c
    - a loaded server mod with side `both` (not listed in `optionalMods`) that the client lacks or has in a version
      that fails `versionMatch`;
    - a required server channel the client lacks, or has in another version;
-   - a different protocol.
+   - a different protocol;
+   - since 0.2.0-dev.29, a server boot mod with side `both` that the client has in the same version, whose boot content
+     differs ([Boot content at the join](#boot-content-at-the-join)): another mod for this client, like a version difference.
 
    *Extra* means a client mod with side `both` that the server does not have.
 3. Policy (`modSync`):
@@ -81,6 +83,50 @@ ch.SendTo(player, msg); ch.SendTo(peer, msg); ch.SendToAll(msg, except: peer); c
    share (same name and version). When channels open or close later, the server sends a **CHANNELS** update and the
    client re-sends HELLO.
 5. Vanilla clients: see "Clients without Kiln" below.
+
+## Boot content at the join
+Since 0.2.0-dev.29. `Mod.OnBoot` runs once per process, before the connection ([modding/onboot.md](modding/onboot.md)).
+A setting it reads, such as the value of a resource patch ([modding/resource-patches.md](modding/resource-patches.md)),
+gives each process its own game data, and config sync ([sync.md](sync.md)) comes too late to change it. Same mod, same
+version, other settings: the server's values decide, while the player's game shows and predicts its own (More Flame
+Altars on a server set to 8 altars, a player set to 4). So each side fingerprints what its boot generation committed,
+and the server compares.
+
+- **The fingerprint** of a boot mod with side `both`: SHA-256 over every document its boot generation committed for it
+  (what its `OnBoot` staged, as lowered) and the `resourcePatches` of its `blocks/*.json`, made once when the generation
+  is published. kiln.log: `boot: more-flame-altars: boot content 3f9a0c4be1d27756 (the join compares it with the other
+  side's)`. It counts values, so these do not change it: the order of keys and files, spacing, line endings, how a
+  number is written (`1500`, `1500.0`), the mod's folder inside a path (an icon). Not in it: the mod's other files (its
+  version stands for them) and the roles it ran for. A mod that is not a boot mod, one with side `client` or `server`,
+  and a process without a boot generation have none.
+- **On the wire:** the handshake property `kiln.boot` in HELLO and WELCOME, `<id>=<first 16 hex digits>` per mod, or
+  `<id>=out` for a boot mod left out of this process's generation (its `OnBoot` failed, a dependency was out, a collector
+  refused it, its content faulted later), comma-separated in id order. At most 2048 bytes: a mod that does not fit is not
+  sent and not compared (kiln.log says so once). A process without a boot generation sends no such property, so its
+  frames are what they were. A peer of 0.2.0-dev.28 or older neither sends nor reads it: it keeps a property it does not
+  know in `NetPeer.Properties` and decodes the frames unchanged. The mod list stays `[id, version, side]`; an older
+  decoder reads each entry by that layout, so a field there would break it, and properties are what it skips.
+- **The decision** (server, in the hello's mod check, step 2 above): a mod both have in the same version, where both
+  sent a fingerprint and they differ, is *missing* with the detail `<id> <version> (boot content differs: its settings or
+  files differ from the server's; use the server's settings and restart the game)`. `modSync` then handles it exactly as
+  a version difference of that mod:
+
+  | `modSync` | Outcome |
+  |---|---|
+  | `refuse` | REJECT. The player's game shows: "The boot content of More Flame Altars on your game differs from this server's: its settings (or its files) differ. Use this server's settings of More Flame Altars and restart the game." The server logs `refusing <player> (...): more-flame-altars 1.0.0 (boot content differs: ...)` |
+  | `warn`, or not set | joins; the WELCOME warning (the Kiln menu's Network page, the client's kiln.log) is "boot content of More Flame Altars (more-flame-altars 1.0.0) differs from the server's: its settings or files differ on this game. Use the server's settings of More Flame Altars and restart the game"; the server's `joined` line lists it |
+  | `off` | no check |
+
+  `NetClientHandshakeEvent.Missing` has the detail, so a handler can decide otherwise.
+- **Not compared:** a side that sends no fingerprint for the mod (an older Kiln, not a boot mod there, `out`), a mod in
+  `optionalMods`, a mod with side `client` or `server`, and another version that `versionMatch` accepts (the version
+  rule alone decides: the operator lets other versions in, whose boot content may differ for that reason).
+- **Left out on one side, committed on the other:** the side that left it out has not loaded the mod
+  (`RestartRequiredBoot`), so the rules above decide (missing on the client, or extra on it). The server's line for the
+  join says it, for example `(boot: more-flame-altars is left out of the client's boot generation and committed here)`.
+- **What the player does:** take the server's settings of the mod (its file in `kiln/config`, from the server's
+  operator or modpack) and restart the game. The boot content is made at the start, so a config sync or a reload of the
+  mod cannot change it.
 
 ## Clients without Kiln
 A vanilla client crashes on the first entity of a template it doesn't have, about 2 s into its loading screen, so a

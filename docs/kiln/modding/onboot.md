@@ -105,6 +105,17 @@ the running mod see the same values. Writes, `Reload`, a `Changed` handler and `
 ("… is not available in OnBoot (it runs before the game's first tick); call it in OnLoad"). Details and an example:
 [config.md](../config.md#in-modonboot).
 
+**Settings and the join** (since 0.2.0-dev.29). Each process makes its boot content from its own settings, once, and
+nothing syncs it later: a server and a player with other settings of your mod have other game data. So the join
+compares it. For each boot mod with side `both`, both sides fingerprint what their generation committed (the staged
+definitions as lowered, and the mod's resource patches, also those of its `blocks/*.json`), and the server treats a
+difference like a version difference of the mod: refused under `modSync: refuse`, a warning otherwise, with a message
+that tells the player to use the server's settings and restart ([../network.md](../network.md#boot-content-at-the-join)).
+Read in `OnBoot` only settings a server and its players share (balance values the server sets for everyone), and say on
+your mod's page that players take the server's. A setting that may differ per player belongs in `OnLoad`. Stage the same
+content for every role as well: content that depends on `boot.Roles` differs between a player's game and a dedicated
+server, and the join counts that as a difference.
+
 ## When a mod fails
 - **`OnBoot` throws**, or a staged definition does not compile: the mod is out. None of its definitions and none of its
   files are in the generation, and every mod that requires it is out too. The server starts without them.
