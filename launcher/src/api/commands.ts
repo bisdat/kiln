@@ -759,7 +759,11 @@ export interface NativeJson {
     init?: { export?: string; result?: number | null; fault?: string | null; ms?: number } | null;
   }[];
 }
+export interface StoppedStart {
+  kind: "roster" | "boot-mod"; reason: string; mods: string[]; names: string[]; advice: string; utc: string; exitCode: number; pid: number;
+}
 export interface BootState {
+  stoppedStart?: StoppedStart | null;
   boot: BootJson | null;
   mods: ModsJson | null;
   native: NativeJson | null;

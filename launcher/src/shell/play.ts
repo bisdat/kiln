@@ -5,6 +5,14 @@
 import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
+import { stopKey } from "./stoppedStart";
+
+const useStops = create(persist<{ notices: Record<string, api.StoppedStart>; dismissed: Record<string, string> }>(() => ({ notices: {}, dismissed: {} }), { name: "kiln-stopped-starts" }));
+function clearStop(id: string) {
+  const s = useStops.getState().notices[id];
+  useStops.setState((m) => ({ notices: Object.fromEntries(Object.entries(m.notices).filter(([g]) => g !== id)), dismissed: s ? { ...m.dismissed, [id]: stopKey(s) } : m.dismissed }));
+}
 import * as api from "../api/commands";
 import type { GameInstall, LaunchMode, StartTimeline } from "../api/commands";
 import { invalidateGame, useActiveProfile, useGame, useGameStatus, useLaunchState, useProfiles, useRuntimeChanges, useStartTimeline } from "../api/hooks";
@@ -56,6 +64,8 @@ export interface PlayControl {
   timeline: StartTimeline | null;
   /** The last timeline whatever its phase (idle, failed, ended, legacy: said as what they are). */
   lastTimeline: StartTimeline | null;
+  stoppedStart: api.StoppedStart | null;
+  dismissStop: () => void;
   profileName: string | null;
   play: (mode: LaunchMode, profileId?: string) => void;
 }
@@ -70,6 +80,14 @@ export function usePlayControl(): PlayControl {
   const changingRuntime = useRuntimeChanges((m) => !!game && m.last[game.id]?.state === "running");
   const memo = useLaunchMemo();
   const id = game?.id ?? "";
+  const stops = useStops();
+  const evidence = launchState.data?.stoppedStart;
+  useEffect(() => {
+    if (evidence && stops.dismissed[id] !== stopKey(evidence)
+      && (!stops.notices[id] || stopKey(stops.notices[id]) !== stopKey(evidence)))
+      useStops.setState((m) => ({ notices: { ...m.notices, [id]: evidence } }));
+  }, [id, evidence, stops.dismissed, stops.notices]);
+  const stoppedStart = stops.notices[id] ?? null;
   const s = status.data;
   const running = !!s?.running;
   const at = memo.at[id];
@@ -94,10 +112,10 @@ export function usePlayControl(): PlayControl {
   // the states that are not a start going well win over the timeline, as before it: Steam updating, vanilla, No Kiln
   // (the proxy did not load: play-once still there, or no boot and no word from Kiln a minute in)
   const exception = !!s?.steamUpdating || (running && (state.view.phase === "vanilla" || kilnMissing));
-  const progress = !exception && showsProgress(tl) ? tl : null;
+  const progress = !stoppedStart && !exception && showsProgress(tl) ? tl : null;
   const running_ = !!progress && running;
   const quiet = !exception && running && tl?.phase === "quiet" ? tl : null;
-  const view: GameStateView = exception ? state.view
+  const view: GameStateView = stoppedStart ? { phase: running ? "running" : "stopped", label: "Kiln stopped the start", tone: "warn", pulse: false, detail: stoppedStart.reason } : exception ? state.view
     : running_ ? { phase: "starting", label: "Starting", tone: "ember", pulse: true, detail: progress!.running != null ? progress!.steps[progress!.running].label : "Waiting for Kiln" }
     : quiet ? { phase: "running", label: "No word from Kiln", tone: "warn", pulse: true, detail: quietText(quiet) }
     : tl?.phase === "idle" && running && state.view.label !== "Safe idle" ? { phase: "running", label: "Safe idle", tone: "warn", pulse: true, detail: tl.why ?? "Kiln hooked nothing" }
@@ -112,6 +130,8 @@ export function usePlayControl(): PlayControl {
     // closure's game id may be another game's by the time the request ends (another one selected meanwhile)
     mutationFn: async ({ gameId, req }: { gameId: string; req: api.LaunchRequest }) => {
       // the start is timed from here: its own steps (cook, profile, Steam), then what the game's Kiln says
+      clearStop(gameId);
+      qc.setQueryData(["launch_state", gameId], (old: api.BootState | undefined) => old ? { ...old, stoppedStart: null } : old);
       await api.launchBegin(gameId, req.mode).catch(() => {});
       void qc.invalidateQueries({ queryKey: ["launch_progress", gameId] });
       if (await switchBackFirst(gameId, req)) invalidateGame(qc, gameId);
@@ -159,7 +179,7 @@ export function usePlayControl(): PlayControl {
     }
   }, [id, running, process, sameRun, pending, launching, memo.at]);
   const since = runStarted(s, now, memo.since[id]);
-  const starting = exception ? state.starting && !s?.steamUpdating
+  const starting = stoppedStart ? false : exception ? state.starting && !s?.steamUpdating
     : (state.starting && !(spoke && !progress)) || running_ || (!running && !s?.steamUpdating && (launching > 0 || (!!progress && pending) || (at !== undefined && now - at < 120_000)));
   const activeProfile = profiles.data?.find((p) => p.id === active.data?.profileId) ?? null;
   return {
@@ -175,6 +195,8 @@ export function usePlayControl(): PlayControl {
     kilnMissing,
     timeline: progress,
     lastTimeline: tl,
+    stoppedStart,
+    dismissStop: () => clearStop(id),
     profileName: activeProfile?.name ?? null,
     play: (mode, profileId) => launch.mutate({ gameId: id, req: { mode, profileId: profileId ?? null } }),
   };

@@ -290,6 +290,7 @@ start or inside a boot generation's prepare (a game client whose resources were 
    seconds (the files and the line are on disk before it opens, so a player who ends the game meanwhile still has
    them),
 5. the process ends with exit code 0x4B02 (`KILN_KNOW_ROSTER_EXIT_CODE`, 19202; a Linux parent under Wine sees 2).
+The launcher's Play page and Deck Home say ‘Kiln stopped the start’, name the mods, show the advice, and offer Review these mods to open the filtered mods list.
 
 This covers a dedicated server, a player who hosts and a player who joins (the client stops at its own start).
 **Never restart on it**: the next start stops the same way. The release's systemd unit has
