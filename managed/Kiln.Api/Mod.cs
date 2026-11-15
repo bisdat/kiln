@@ -193,6 +193,7 @@ public sealed class ModContext
     internal event Func<string?>? UnloadStarting;
 
     private int _unloadStarted;
+    internal bool Unloading => Volatile.Read(ref _unloadStarted) != 0;
     private Func<string?>[] _unloadSteps = [];
 
     /// <summary>Begins the unload (once per context): runs the <see cref="UnloadStarting"/> steps. Null when nothing is

@@ -478,7 +478,19 @@ internal sealed unsafe class ViewContext
 /// <see cref="ComponentWrittenEvent"/> on the tick thread (first "before", last "after", every writer once).</summary>
 internal static class WrapWrites
 {
-    internal sealed record Write(ulong Step, uint Entity, string Component, byte[] Before, byte[] After, string Writer, string ModId);
+    internal sealed record Write(ulong Step, uint Entity, string Component, byte[] Before, byte[] After, string Writer, string ModId)
+    {
+        internal ulong Session { get; } = CurrentSession;
+    }
+
+    private static unsafe ulong CurrentSession
+    {
+        get
+        {
+            var t = SystemsNative.T;
+            return t == null ? 0 : t->GameWorldSession((uint)WorldKind.Server);
+        }
+    }
 
     private const int Most = 262144;
     private static readonly ConcurrentQueue<Write> Queue = new();
@@ -505,6 +517,7 @@ internal static class WrapWrites
         while (Queue.TryDequeue(out var w))
         {
             Interlocked.Decrement(ref _count);
+            if (w.Session != CurrentSession) continue;
             if (!groups.TryGetValue((w.Step, w.Entity, w.Component), out var g))
             {
                 g = new Group(w);
