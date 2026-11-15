@@ -77,7 +77,7 @@ pub fn baked_channel() -> Option<Channel> {
 
 /// This test build's beta number (build.rs: `KILN_LAUNCHER_BETA`, set only with the beta channel), else None.
 pub fn baked_beta() -> Option<u32> {
-    env!("KILN_LAUNCHER_BUILD_BETA").parse().ok().filter(|n| *n > 0)
+    crate::distribution::beta()
 }
 
 /// The id of the build at `version` with `beta`: `0.2.0-dev.29+beta.3` for test build 3, else the version as it is.

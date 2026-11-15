@@ -166,3 +166,26 @@ test("Nexus build: Settings says where test builds are, with no channel and no s
   await expect(page.getByTestId("beta-mark")).toHaveCount(0);
 });
 
+const game = (page: Page, fn: string, ...args: unknown[]) =>
+  page.evaluate(([f, a]) => (window as unknown as { __kilnMock: Record<string, (...x: unknown[]) => unknown> }).__kilnMock[f as string](...(a as unknown[])), [fn, args] as const);
+
+test("back on the release, the Play page says the game's Kiln is the beta's and Play puts the launcher's in first", async ({ page }) => {
+  await open(page, "/");
+  await game(page, "setSwitchBack", "0.2.1-dev+20261115.b3e7a11", "0.2.0-dev+20261104.0f1ffa6");
+  const notice = page.getByTestId("channel-notice");
+  await expect(notice).toContainText("This game has Kiln 0.2.1-dev (20261115) from a test build; Play puts this launcher's Kiln 0.2.0-dev (20261104) in first.");
+  await expect(page.getByRole("button", { name: "from the beta" })).toBeVisible();
+  await shot(page, "beta-play-switch-back");
+  await page.getByRole("button", { name: /^Play / }).first().click();
+  await expect.poll(() => game(page, "installs")).toEqual(["0.2.0-dev+20261104.0f1ffa6"]);
+  await expect(notice).toHaveCount(0);
+});
+
+test("a test build of the launcher with the release's Kiln in the game says so on Play", async ({ page }) => {
+  await open(page, "/");
+  await mock(page, "beta", 2);
+  await game(page, "setUpgradeAvailable", "0.2.0-dev+20261104.0f1ffa6");
+  await expect(page.getByTestId("channel-notice")).toContainText("This launcher is a test build; this game still has the release's Kiln.");
+  // a vanilla start installs nothing
+  expect(await game(page, "installs")).toEqual([]);
+});

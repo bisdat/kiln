@@ -771,6 +771,8 @@ const crashes: CrashReport[] = [{ name: "2026-11-03T22-10-04Z-night-sky.txt", cr
 // ---------------------------------------------------------------- settings, servers
 
 const assets = { root: "/home/player/.local/share/kiln", editor: { present: true, bytes: 0 }, admin: { map: false, catalog: false, bytes: 0 } };
+/** runtime_install's versions (tests: `__kilnMock.installs()`). */
+const runtimeInstalls: string[] = [];
 let settings: LauncherSettings = { steamRoots: [], defaultGameId: FRESH ? null : "client-steam", allowHttpModpacks: false, savesKeep: 10, updateCheck: true, animatedFire: true,
   addToActiveProfile: true, modFolderNotes: true, keepVersions: 1 };
 // how the (Linux) launcher draws its window; `?render=software` as after the fallback
@@ -873,6 +875,7 @@ const handlers: Record<string, Handler> = {
     }
     const fail = failNextInstall;
     failNextInstall = null;
+    runtimeInstalls.push(b.version);
     return startTask("runtime_install", `Install Kiln ${b.kiln}`, ["Staging", "Verifying hashes", "Classifying dinput8.dll", "Backing up", "Placing files", "Writing receipt"], () => {
       const st = runtime[gameId];
       if (fail) reject("io", fail);
@@ -1763,4 +1766,12 @@ if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown 
     const values = setPath(f.values, path, value);
     Object.assign(f, { values, text: JSON.stringify(values, null, 2) + "\n", modified: now() });
   },
-  setUpgradeAvailable: (version: string | null, gameId = "client-steam") => { if (runtime[gameId]) runtime[gameId] = { ...runtime[gameId], upgradeAvailable: version }; emitGame(gameId, "status"); } };
+  setUpgradeAvailable: (version: string | null, gameId = "client-steam") => { if (runtime[gameId]) runtime[gameId] = { ...runtime[gameId], upgradeAvailable: version }; emitGame(gameId, "status"); },
+  /** (dev.29) The game's Kiln came with a test build and the launcher ships the older `to` (InstallState.switchBack);
+   *  null clears it. An install (runtime_install) clears it too, as the backend's next status does. */
+  setSwitchBack: (from: string | null, to: string | null, gameId = "client-steam") => {
+    if (runtime[gameId]) runtime[gameId] = { ...runtime[gameId], switchBack: from && to ? { from, to } : null };
+    emitGame(gameId, "status");
+  },
+  /** The runtime versions runtime_install put in, in order. */
+  installs: () => [...runtimeInstalls] };

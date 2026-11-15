@@ -139,8 +139,10 @@ function JustUpdated({ s, onClose }: { s: UpdateStatus; onClose: () => void }) {
   const u = s.justUpdated!;
   const rt = gs.data?.runtime;
   const running = !!gs.data?.running;
-  // the launcher ships a runtime: after an update it is in the launcher, not yet in the game
-  const next = rt?.installed ? rt.upgradeAvailable : null;
+  // the launcher ships a runtime: after an update it is in the launcher, not yet in the game; after a switch back from a
+  // test build it is older than the game's, which came with the test build (InstallState.switchBack)
+  const back = rt?.installed ? rt.switchBack ?? null : null;
+  const next = rt?.installed ? rt.upgradeAvailable ?? back?.to ?? null : null;
   const ack = () => { api.updateAck().catch(() => {}); onClose(); };
   const updateGame = async () => {
     if (!game || !next) return;
@@ -159,6 +161,7 @@ function JustUpdated({ s, onClose }: { s: UpdateStatus; onClose: () => void }) {
   };
   return (
     <Card title={`Updated to ${buildLabel(u.to)}`} onDismiss={ack}>
+      {back && !rt?.upgradeAvailable && <span className="k-hint" data-testid="switch-back-runtime">This game has Kiln {back.from} from the test build; this installs Kiln {back.to}.</span>}
       {next && (
         <div className="k-upd-actions">
           <Button variant="ghost" onClick={onClose}>Later</Button>

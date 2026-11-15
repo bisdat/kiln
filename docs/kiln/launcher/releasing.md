@@ -181,6 +181,16 @@ Direct builds only (the Nexus Mods build has none, above).
 - **After an update:** `<data>/update.json` remembers it, and the next start shows "Updated to <version>". The
   launcher ships a runtime: when it is newer than the game's, "Update game" installs it into the game (the parts the
   game has), held with "Close the game first" while the game runs. Updating the launcher while the game runs is fine.
+- **The game's Kiln after a switch back (0.2.0-dev.29):** a newer Kiln in the game than the launcher's own is left as it
+  is and offers nothing (as before), with one exception: a test build of the launcher writes `kiln-launcher <version>
+  beta <n>` as the receipt's installer, and when such a game meets a launcher that is no test build and ships an older
+  Kiln, `InstallState.switchBack` names both (`kiln_manage::install::switch_back`). The Play page says "This game has
+  Kiln <x> from a test build; Play puts this launcher's Kiln <y> in first", "Updated to" offers Update game, and the
+  next Play (not a vanilla start) installs it first through the ordinary install: the same receipt and backups, the same
+  refusals (the game running, Steam updating, a folder that is not Kiln's). When that fails, the start goes on with the
+  Kiln the game has and says why. A test build itself keeps whatever the game has and offers its own newer Kiln as an
+  update. The first switch back of all goes to 0.2.0-dev.28, which has none of this: its Play keeps the beta's Kiln in
+  the game until the player installs another on Runtime (Kiln of dev.29 reads its own files; that is the case to test).
 
 ### Manifest (`latest.json`)
 Tauri's static format, plus fields the updater ignores:

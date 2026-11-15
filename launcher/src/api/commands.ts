@@ -290,6 +290,10 @@ export interface InstallState {
   /** Parts absent from the receipt that a reinstall adds: defaults not turned off, plus required dependencies.
    *  Absent from older backends. */
   missingParts?: string[];
+  /** (dev.29) The game's Kiln came with a test build of the launcher (its receipt's installer says beta) and this
+   *  launcher ships an older one: after a switch back to the release, the next Play installs `to` (the launcher's own)
+   *  in place of `from`. Absent from older backends and from kilnctl. */
+  switchBack?: { from: string; to: string } | null;
 }
 
 // profiles
