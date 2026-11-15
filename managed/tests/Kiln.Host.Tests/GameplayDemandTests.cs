@@ -91,7 +91,7 @@ public sealed unsafe class GameplayDemandTests : ModsFixture
     }
 
     [Theory]
-    [InlineData(typeof(Creatures),8u)] [InlineData(typeof(Rules),5u)] [InlineData(typeof(Quests),7u)] [InlineData(typeof(BootDefinitions),15u)]
+    [InlineData(typeof(Creatures),8u)] [InlineData(typeof(Rules),0u)] [InlineData(typeof(Quests),7u)] [InlineData(typeof(BootDefinitions),15u)]
     public void Shared_facade_references_count_their_indirect_gameplay_consumers(Type facade,uint expected)
     {
         var a=System.Reflection.Emit.AssemblyBuilder.DefineDynamicAssembly(new System.Reflection.AssemblyName("FacadeProbe"+Guid.NewGuid().ToString("N")),System.Reflection.Emit.AssemblyBuilderAccess.RunAndCollect);

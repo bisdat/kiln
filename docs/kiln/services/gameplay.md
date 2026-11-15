@@ -242,8 +242,9 @@ prefix physically installed but inert; the existing mask names those targets, an
 `kiln.gameplay` installs none of its game detours merely by starting. The host's existing admitted-mod pre-world
 reference pass now requests all groups for a mod referencing `Kiln.Gameplay`, including shipped helper references
 and crafting-only use. References to the consuming facades also pre-arm their dependencies: `Kiln.Creatures`
-requests natural-spawn hooks for variants, `Kiln.Rules` requests build/terraform for its monitor, and `Kiln.Quests`
-requests craft/build/terraform for objectives. `Kiln.Blocks` references and admitted packs with a `blocks/` folder
+requests natural-spawn hooks for variants, and `Kiln.Quests` requests craft/build/terraform for objectives.
+`Kiln.Rules` requests nothing before the world: it follows building events only while an applied rule set keeps builds
+outside bases, and asks then (at a safe Pre when a world runs). `Kiln.Blocks` references and admitted packs with a `blocks/` folder
 pre-arm build/craft/terraform/spawn for declarative NPC variants and objectives, including data-only packs.
 Admitted `quests/` folders also pre-arm craft/build/terraform (mask 7). Unreadable/malformed or over-budget metadata
 conservatively requests every group; a valid native PE without managed metadata is skipped. These rules inspect

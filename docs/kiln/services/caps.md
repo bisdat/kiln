@@ -377,8 +377,9 @@ Native `request_hooks(owner, mask)` is appended after `request_build`; build now
 reference preflight requests all groups, conservatively including crafting-only and shipped-helper references.
 See [gameplay](gameplay.md#craft-terraform-natural-spawn-and-entity-hook-demand) for consumers and pending-call behavior.
 
-Pre-world reference demand includes the indirect consumers: `Kiln.Creatures` -> spawn hooks; `Kiln.Rules` -> build
-and terraform hooks; `Kiln.Quests` -> craft, build and terraform hooks. Direct `Kiln.Gameplay` references request
+Pre-world reference demand includes the indirect consumers: `Kiln.Creatures` -> spawn hooks; `Kiln.Quests` -> craft,
+build and terraform hooks (`Kiln.Rules` -> none: it asks for build and terraform when a rule set keeping builds outside
+bases is applied). Direct `Kiln.Gameplay` references request
 all groups. `Kiln.Blocks` and admitted `blocks/` data packs request build/craft/terraform/spawn. The host requests only additional group bits as helper assemblies load; its 136-byte table fallback
 continues calling request_build when needed, while the older service owns the other startup hooks.
 

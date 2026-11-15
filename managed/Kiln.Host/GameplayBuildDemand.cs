@@ -15,7 +15,8 @@ internal static class GameplayBuildDemand
     private static uint GroupsForReference(string? name) => name switch {
         "Kiln.Gameplay" => 31u,
         "Kiln.Creatures" => 8u, // CreatureVariants natural-spawn events/replacements
-        "Kiln.Rules" => 5u, // RulesRuntime's BuildEvent
+        // Kiln.Rules: none. Its BuildEvent (KeepBuildsOutsideBases) is followed only while an applied rule set keeps
+        // builds, and asks at that moment (a safe Pre while a world runs); most rules mods never touch building.
         "Kiln.Quests" => 7u, // craft/build objectives
         "Kiln.Blocks" => 15u, // NPC variants and declarative craft/build objectives
         _ => 0u,
