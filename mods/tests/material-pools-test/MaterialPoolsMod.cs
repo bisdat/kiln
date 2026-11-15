@@ -40,7 +40,11 @@ public sealed class MaterialPoolsMod:Mod
                 case "inactive":
                     var inactiveId=Guid.Parse(File.ReadAllText(Path.Combine(Context.DataDirectory,"receipt.txt")));
                     Check("inactive-request-unapplied",WorldTables.GetMaterialPoolRegistration(inactiveId).Code==DefinitionRefusalCode.NotFound && WorldTables.GetPoolBudget("material-pools-test:late").Budget.Readiness==CapacityReadiness.NotFound);
-                    using(var inactive=JsonDocument.Parse(WorldTables.StatusJson()))Check("inactive-file-named",inactive.RootElement.GetProperty("errors").EnumerateArray().Any(e=>e.GetString()!.Contains("material-pools-test",StringComparison.Ordinal) && e.GetString()!.Contains("owning mod is not loaded",StringComparison.Ordinal)));
+                    using(var inactive=JsonDocument.Parse(WorldTables.StatusJson())) {
+                        var kept=inactive.RootElement.GetProperty("kept").EnumerateArray().Select(e=>e.GetString()!).Where(e=>e.Contains("material-pools-test",StringComparison.Ordinal)).ToArray();
+                        var unsafeLines=inactive.RootElement.GetProperty("errors").EnumerateArray().Count(e=>e.GetString()!.Contains("material-pools-test",StringComparison.Ordinal));
+                        Check("inactive-file-named",kept.Length==1 && kept[0].Contains("kept: its mod is not loaded",StringComparison.Ordinal) && unsafeLines==0,$"kept {string.Join(" | ",kept)}; error lines naming it {unsafeLines}");
+                    }
                     break;
                 case "torn":
                     var oldId=Guid.Parse(File.ReadAllText(Path.Combine(Context.DataDirectory,"receipt.txt")));
@@ -50,11 +54,14 @@ public sealed class MaterialPoolsMod:Mod
                 case "building-retained":Boundary(WorldMaterialCategory.Building,0,49,1);await Cells(write:false,absent:true);break;
                 case "terrain-boundary":Boundary(WorldMaterialCategory.Terrain,11,0,1);break;
                 case "status":Check("status-snapshot",true);break;
+                case "observer-cost":await ObserverCost();break;
+                case "drop":await Drop();break;
+                case "dropped":Dropped();break;
                 default:throw new InvalidOperationException("unknown test mode "+Mode);
             }
         } catch(Exception e){Check("completed-without-exception",false,e.Message);}
         var status=WorldTables.StatusJson();File.WriteAllText(Path.Combine(Context.DataDirectory,"served.json"),status);
-        var result=new {mode=Mode,hash=WorldTables.Hash,passed=_passed,failed=_failed};
+        var result=new {mode=Mode,hash=WorldTables.Hash,passed=_passed,failed=_failed,kiln=Game.KilnVersion};
         var path=Path.Combine(Context.DataDirectory,"result.json");File.WriteAllText(path+".tmp",JsonSerializer.Serialize(result));File.Move(path+".tmp",path,true);
         Context.Log.Info($"mp: DONE {Mode} {_passed.Count} passed {_failed} failed hash {WorldTables.Hash}");
     }
@@ -86,6 +93,11 @@ public sealed class MaterialPoolsMod:Mod
         var again=Blocks.Define("late",pool,new DefinitionRegistrationOptions(DefinitionTiming.AllowNextStart));
         Check("late-idempotent",again.RegistrationId==accepted.RegistrationId && again.SnapshotRevision==accepted.SnapshotRevision);
         Check("late-not-live",WorldTables.GetPoolBudget("material-pools-test:late").Budget.Readiness==CapacityReadiness.NotFound);
+        // an explicit removal: a second stored pool, removed by name; its receipt says so and only "late" stays stored
+        var extra=Blocks.Define("late-extra",pool with {Name="Late Extra Pool"},new DefinitionRegistrationOptions(DefinitionTiming.AllowNextStart));
+        var removed=extra.Ok && WorldTables.RemoveStoredMaterialPool("material-pools-test:late-extra");
+        var after=WorldTables.GetMaterialPoolRegistration(extra.RegistrationId);
+        Check("explicit-remove",removed && after.Code==DefinitionRefusalCode.Removed && !WorldTables.RemoveStoredMaterialPool("material-pools-test:late-extra"),$"stored {extra.State}, removed {removed}, receipt {after.State}/{after.Code}");
         if(!accepted.Ok)throw new InvalidOperationException("cannot checkpoint a refused deferred request");
         File.WriteAllText(Path.Combine(Context.DataDirectory,"receipt.txt"),accepted.RegistrationId.ToString());
     }
@@ -103,6 +115,45 @@ public sealed class MaterialPoolsMod:Mod
         Check("restart-same-receipt",same.Ok && same.RegistrationId==id && same.SlotsConsumed==2);
         var actual=PoolProof.ReadPools(PoolProof.Resource("keen::VoxelBlueprintMaterialPoolRegistryResource"));
         Check("restart-one-row",actual.Count(r=>r.Name=="material-pools-test:late")==1 && actual.Single(r=>r.Name=="material-pools-test:late").Items.Length==2);
+    }
+    // What the pool observer costs a server with pools, per tick: its own Poll (reached by reflection, as the tick calls
+    // it) timed and its allocations counted over 1000 calls, and the tick thread's allocations per tick over 300 ticks.
+    private async Task ObserverCost()
+    {
+        for(var i=0;i<24*300 && !(Spawn.Available && Spawn.WorldRunning);++i)await Context.Scheduler.NextTick();
+        for(var i=0;i<24*5;++i)await Context.Scheduler.NextTick();
+        var events=typeof(WorldTables).Assembly.GetType("Kiln.WorldTablesEvents",true)!;
+        var poll=(Action)Delegate.CreateDelegate(typeof(Action),events.GetMethod("Poll",System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.NonPublic)!);
+        poll();
+        const int calls=1000,ticks=300;
+        var a0=GC.GetAllocatedBytesForCurrentThread();var watch=System.Diagnostics.Stopwatch.StartNew();
+        for(var i=0;i<calls;++i)poll();
+        watch.Stop();var perCall=(GC.GetAllocatedBytesForCurrentThread()-a0)/calls;
+        var t0=GC.GetAllocatedBytesForCurrentThread();
+        for(var i=0;i<ticks;++i)await Context.Scheduler.NextTick();
+        var perTick=(GC.GetAllocatedBytesForCurrentThread()-t0)/ticks;
+        var text=$"Poll {perCall} bytes and {watch.Elapsed.TotalMicroseconds/calls:0.0} us a call over {calls} calls; tick thread {perTick} bytes a tick over {ticks} ticks";
+        Context.Log.Info("mp: COST "+text);
+        Check("observer-quiet-when-unchanged",perCall<=32,text);
+    }
+    // The driver loads and no longer defines "late": its stored row is served this session (boot rows don't change), and
+    // once the world runs the prune takes the stored file (the runner checks it is gone).
+    private async Task Drop()
+    {
+        var rows=PoolProof.ReadPools(PoolProof.Resource("keen::VoxelBlueprintMaterialPoolRegistryResource"));
+        Check("drop-row-served-this-session",rows.Count(r=>r.Name=="material-pools-test:late")==1,string.Join(", ",rows.Select(r=>r.Name)));
+        for(var i=0;i<24*300 && !(Spawn.Available && Spawn.WorldRunning);++i)await Context.Scheduler.NextTick();
+        for(var i=0;i<24*5;++i)await Context.Scheduler.NextTick();  // the prune runs at the first world tick after the save is up
+        Check("drop-world-ran",Spawn.WorldRunning);
+    }
+    // The next start: no row, no receipt, the hash of the profile without the pool.
+    private void Dropped()
+    {
+        var rows=PoolProof.ReadPools(PoolProof.Resource("keen::VoxelBlueprintMaterialPoolRegistryResource"));
+        var id=Guid.Parse(File.ReadAllText(Path.Combine(Context.DataDirectory,"receipt.txt")));
+        var receipt=WorldTables.GetMaterialPoolRegistration(id);
+        Check("dropped-row-gone",rows.All(r=>r.Name!="material-pools-test:late") && receipt.Code==DefinitionRefusalCode.NotFound && WorldTables.GetPoolBudget("material-pools-test:late").Budget.Readiness==CapacityReadiness.NotFound,
+            $"rows {string.Join(", ",rows.Select(r=>r.Name))}; receipt {receipt.State}/{receipt.Code}");
     }
     private sealed record CellWitness(Guid Guid,int[] Box);
     private async Task Cells(bool write,bool absent,string mod=PoolProof.Fixture)

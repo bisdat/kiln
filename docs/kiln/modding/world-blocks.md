@@ -364,7 +364,7 @@ A `BuildingMaterialPoolBlock` groups 1..64 distinct building-material block item
 }
 ```
 
-Only the opted-in shape uses that group. Existing walls still have room for three extra items, roofs 50, terrain eight. Mod materials mentioned by any custom group are not automatically appended to vanilla pools, even when the group is refused. Invalid groups refuse dependent shapes; they do not redirect them to a vanilla pool. A material may remain registered for scripted Build. Game materials remain in their original pool, and one mod material shared across groups uses one material ID.
+Only the opted-in shape uses that group. Existing walls still have room for three extra items, roofs 50, terrain eight. An accepted pool's own mod materials (and a declared dependency's) are not appended to the game's lists as well; a refused pool leaves every material in them. Invalid groups refuse dependent shapes; they do not redirect them to a vanilla pool. A material may remain registered for scripted Build. Game materials remain in their original pool, and one mod material shared across groups uses one material ID.
 
 Pool GUIDs use `BlockIds.Derive(mod, "materialpool", Was ?? key)`. Use Was to preserve identity on a rename. Entries retain declared order; a `gameMaterial` entry is the block item the game's build menu lists for that material. Duplicate resolved item IDs, roof mismatch, malformed entries and 65 entries are rejected before serving; the error names the entries (`materials[1] (gameMaterial WoodRough) and materials[2] (gameMaterial WoodRough) are the same building item ...`). Missing mods, dependencies, game names or block items are named refusals. Terrain selector groups are not supported.
 

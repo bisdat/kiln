@@ -78,5 +78,7 @@ public class WorldTablesGateTests
         Assert.NotEqual(one, WorldTablesGate.PoolDigest(g, false, [2u, 1u], []));
         Assert.NotEqual(one, WorldTablesGate.PoolDigest(g, true, [1u, 2u], []));
         Assert.NotEqual(one, WorldTablesGate.PoolDigest(g, false, [1u, 2u], ["41a460a5-d463-5c2d-bf26-1a072d6e84b1"]));
+        // the lab runner (mods/tests/material-pools-test/run.py) computes the same digest for an old client's pools
+        Assert.Equal("1eb0229c3b458816", WorldTablesGate.PoolDigest(g, false, [1u, 2u], ["41a460a5-d463-5c2d-bf26-1a072d6e84b1"]));
     }
 }
