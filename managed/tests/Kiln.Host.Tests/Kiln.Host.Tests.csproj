@@ -12,6 +12,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../Kiln.Host/Kiln.Host.csproj" />
+    <ProjectReference Include="../../services/Kiln.Rules/Kiln.Rules.csproj" />
     <!-- Shared service assemblies live next to Kiln.Host (kiln/host on a server): Hello uses Kiln.Example. -->
     <ProjectReference Include="../../services/Kiln.Example/Kiln.Example.csproj" />
     <!-- Kiln.Game (the real one, newest server dump) next to Kiln.Host, as in kiln/host: GameTypesTests checks layout stamps against it. -->

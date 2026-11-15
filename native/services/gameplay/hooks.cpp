@@ -16,12 +16,14 @@
 #include "internal.h"
 #include "services/kiln_caps.h"
 #include "kiln_hook.hpp"
+#include "demand_hooks.h"
 #include "services/kiln_spawn.h"
 
 namespace kg {
 namespace {
 
-kiln::RawHook h_craft, h_block, h_prop, h_dis, h_dis2, h_pick, h_terra, h_spawn;
+kiln::RawHook h_block, h_prop, h_dis, h_dis2, h_pick;
+FrameLink h_craft{KILN_GAMEPLAY_HOOK_CRAFT}, h_terra{KILN_GAMEPLAY_HOOK_TERRAFORM}, h_spawn{KILN_GAMEPLAY_HOOK_SPAWN};
 const KilnSpawnApi* g_spawn = nullptr;
 
 struct Record {
@@ -191,7 +193,7 @@ uint8_t* __fastcall hk_terraform(uint8_t* out, void** args, int64_t* ctx) {
         return out;
     }
     uint8_t* res = h_terra.call<uint8_t*>(out, args, ctx);
-    if (want_build()) {
+    if (has_subscribers(KILN_GAMEPLAY_BUILD)) {
         Record r = make(KILN_GAMEPLAY_BUILD, KILN_GAMEPLAY_BUILD_TERRAFORM, t.player);
         r.id2 = t.type;
         r.result = res && res[0] == 0 ? 1 : 0;
@@ -327,6 +329,8 @@ void hooks_set_spawn_service(const void* p) { g_spawn = static_cast<const KilnSp
 KilnResult hooks_spawn_replace(KilnOwner owner, const uint8_t* from, const uint8_t* to, float chance) {
     if (!F.spawn) return KILN_ERR_UNAVAILABLE;
     if (!from || !to || !(chance >= 0.f && chance <= 1.f)) return KILN_ERR_INVALID_ARGUMENT;
+    if (chance>0 && !hooks_request(KILN_GAMEPLAY_HOOK_SPAWN,owner))
+        return KILN_ERR_UNAVAILABLE;
     std::lock_guard lock(g_replace_mu);
     std::erase_if(g_replace, [&](const Replace& r) {
         return r.owner == owner && !std::memcmp(r.from, from, 16) && !std::memcmp(r.to, to, 16);
@@ -349,7 +353,7 @@ uint32_t hooks_spawn_replace_clear(KilnOwner owner) {
 }
 
 namespace {
-std::recursive_mutex g_build_mu;
+std::recursive_mutex& g_build_mu=hooks_publication();
 uint32_t g_build_state = 0, g_build_mask = 0; // idle, installed, waiting, refused
 KilnOwner g_build_requester = 0;
 bool g_build_requested = false, g_build_lifecycle = false;
@@ -429,7 +433,7 @@ bool build_request(KilnOwner owner) {
             KilnSessionInfo session{}; session.size = sizeof session;
             const bool observed = g_build_lifecycle && g_api->session && g_api->session(&session) == KILN_OK && session.lifecycle;
             g_build_state = observed ? 2 : 3;
-            g_build_reason = "build hooks wait for the world to stop: asked while a world ran; build events begin with the next world";
+            g_build_reason = "build hooks wait for the world to stop: asked while a world ran; building-piece events begin with the next world";
             if (!observed) g_build_reason = "refused: cannot observe world stop; build events unavailable in this process";
             KG_W("kiln.gameplay: %s (owner %llu)", g_build_reason.c_str(), static_cast<unsigned long long>(owner));
             build_publish();
@@ -443,9 +447,12 @@ bool hooks_install() {
     { std::lock_guard lock(g_build_mu);
       if (!F.build) { g_build_state=3; g_build_reason="refused: gameplay.build symbols/layouts did not resolve"; }
       build_publish(); }
-    if (F.craft) F.craft = hook(h_craft, fn.craft, reinterpret_cast<void*>(&hk_craft), "CraftRecipe");
-    if (F.terraform) F.terraform = hook(h_terra, fn.terraform, reinterpret_cast<void*>(&hk_terraform), "TerraformImpact");
-    if (F.spawn) F.spawn = hook(h_spawn, fn.queue_spawn, reinterpret_cast<void*>(&hk_spawn), "QueueSpawn");
+    hook_register(KILN_GAMEPLAY_HOOK_CRAFT,&h_craft,F.craft ? fn.craft : 0,"gameplay/CraftRecipe",&FrameLink::dispatch<&hk_craft>,
+                  {KILN_SIG_PTR,KILN_SIG_PTR},KILN_SIG_S32);
+    hook_register(KILN_GAMEPLAY_HOOK_TERRAFORM,&h_terra,F.terraform ? fn.terraform : 0,"gameplay/TerraformImpact",&FrameLink::dispatch<&hk_terraform>,
+                  {KILN_SIG_PTR,KILN_SIG_PTR,KILN_SIG_PTR},KILN_SIG_PTR);
+    hook_register(KILN_GAMEPLAY_HOOK_SPAWN,&h_spawn,F.spawn ? fn.queue_spawn : 0,"gameplay/QueueSpawn",&FrameLink::dispatch<&hk_spawn>,
+                  {KILN_SIG_PTR,KILN_SIG_PTR,KILN_SIG_PTR,KILN_SIG_U32,KILN_SIG_PTR,KILN_SIG_PTR},KILN_SIG_PTR);
     return F.craft || F.build || F.terraform || F.spawn;
 }
 
@@ -459,7 +466,7 @@ void hooks_post() {
     if (recs.empty()) return;
     S.hook_records += recs.size();
     for (auto& r : recs) {
-        if (r.kind == KILN_GAMEPLAY_BUILD && !build_installed()) continue;
+        if (r.kind == KILN_GAMEPLAY_BUILD && r.op != KILN_GAMEPLAY_BUILD_TERRAFORM && !build_installed()) continue;
         KilnGameplayEvent ev;
         std::memset(&ev, 0, sizeof ev);
         ev.size = sizeof ev;

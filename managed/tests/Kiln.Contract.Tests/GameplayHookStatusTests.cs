@@ -95,4 +95,76 @@ public sealed unsafe class GameplayHookStatusTests : FakeTableTest
         Assert.True(s.EntityHooks);
         Assert.True(s.Discard);
     }
+    private static uint _groups;
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int RequestGroups(ulong owner,uint groups) { _groups=groups; return _requestResult; }
+    [Theory]
+    [InlineData(2u)] [InlineData(4u)] [InlineData(8u)] [InlineData(16u)]
+    public void Every_group_uses_the_appended_request_and_returns_refusal(uint groups)
+    {
+        var t=(GameplayNative.Table*)NativeMemory.AllocZeroed(144); t->Header=new ServiceHeader { Size=144,Version=1 };
+        ((nint*)((byte*)t+136))[0]=(nint)(delegate* unmanaged[Cdecl]<ulong,uint,int>)&RequestGroups;
+        Serve("kiln.gameplay",t,typeof(GameplayNative),"_table"); Swap(typeof(Gameplay),"_listening",1);
+        _groups=0; _requestResult=0; Assert.Null(Gameplay.PrepareHookEvents(groups)); Assert.Equal(groups,_groups);
+        _requestResult=3; Assert.NotNull(Gameplay.PrepareHookEvents(groups));
+        t->Header.Size=136; _groups=0; Assert.Null(Gameplay.PrepareHookEvents(groups)); Assert.Equal(0u,_groups);
+    }
+    [Fact]
+    public void Gameplay_group_ABI_is_append_only()
+    {
+        Assert.Equal(96,sizeof(GameplayNative.Table));
+        Assert.Equal(128,sizeof(GameplayNative.Table)+4*sizeof(nint)); // request_build
+        Assert.Equal(136,sizeof(GameplayNative.Table)+5*sizeof(nint)); // request_hooks
+        Assert.Equal(648,Marshal.OffsetOf<GameplayNative.Status>(nameof(GameplayNative.Status.HookGroups)).ToInt32());
+        Assert.Equal(2728,sizeof(GameplayNative.Status));
+    }
+
+    [Fact]
+    public void Entity_watcher_itself_requests_the_entity_group()
+    {
+        var t=(GameplayNative.Table*)NativeMemory.AllocZeroed(144); t->Header=new ServiceHeader { Size=144,Version=1 };
+        ((nint*)((byte*)t+136))[0]=(nint)(delegate* unmanaged[Cdecl]<ulong,uint,int>)&RequestGroups;
+        Serve("kiln.gameplay",t,typeof(GameplayNative),"_table"); Swap(typeof(Gameplay),"_listening",1);
+        _groups=0; _requestResult=0; using var watch=Gameplay.WatchEntities(EntityCategories.Default); Assert.Equal(16u,_groups);
+    }
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int Subscribe(ulong owner,uint mask,delegate* unmanaged[Cdecl]<GameplayNative.Event*,void*,uint> fn,void* user,ulong* handle) { *handle=1; return 0; }
+    [Theory]
+    [InlineData("ItemCraftedEvent",2u,0,0)] [InlineData("NaturalSpawnEvent",8u,2,0)]
+    [InlineData("EntityJoinLevelEvent",16u,3,0)] [InlineData("EntityLeaveLevelEvent",16u,3,0)]
+    [InlineData("ItemCraftedEvent",2u,0,3)] [InlineData("NaturalSpawnEvent",8u,2,3)]
+    [InlineData("EntityJoinLevelEvent",16u,3,3)] [InlineData("EntityLeaveLevelEvent",16u,3,3)]
+    public void A_new_direct_event_subscription_requests_before_the_next_tick(string type,uint group,int row,int result)
+    {
+        _groups=0; _requestResult=0;
+        var t=(GameplayNative.Table*)NativeMemory.AllocZeroed(144); t->Header=new ServiceHeader { Size=144,Version=1 };
+        t->Subscribe=&Subscribe; t->Status=&Status;
+        ((nint*)((byte*)t+136))[0]=(nint)(delegate* unmanaged[Cdecl]<ulong,uint,int>)&RequestGroups;
+        var kiln=new IsolatedKiln(["Kiln.Gameplay"]); kiln.Serve("kiln.gameplay",(nint)t); kiln.Step();
+        var capState=Enum.Parse(kiln.Type("Kiln.CapabilityState"),"Pending");
+        var capReason=Enum.Parse(kiln.Type("Kiln.CapabilityReason"),"Session");
+        kiln.Type("Kiln.ServiceCaps").GetMethod("Report",System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.Static)!
+            .Invoke(null,[Gameplay.HookRows[row],capState,capReason,"waiting"]);
+        kiln.Subscribe(kiln.Services["Kiln.Gameplay"].GetType("Kiln.CraftEvent")!); // listener already active
+        _groups=0; _requestResult=result;
+        if(result==0) kiln.Subscribe(kiln.Services["Kiln.Gameplay"].GetType("Kiln."+type)!);
+        else {
+            var exception=Assert.Throws<System.Reflection.TargetInvocationException>(()=>kiln.Subscribe(kiln.Services["Kiln.Gameplay"].GetType("Kiln."+type)!));
+            Assert.Equal("KilnUnavailableException",exception.InnerException!.GetType().Name);
+            Assert.Contains(Gameplay.HookRows[row],exception.InnerException.Message);
+        }
+        Assert.Equal(group,_groups);
+    }
+
+    [Fact]
+    public void Build_events_prepare_terraform_as_well_as_building_pieces()
+    {
+        var t=(GameplayNative.Table*)NativeMemory.AllocZeroed(144); t->Header=new ServiceHeader { Size=144,Version=1 };
+        *(nint*)((byte*)t+128)=(nint)(delegate* unmanaged[Cdecl]<ulong,int>)&Request;
+        *(nint*)((byte*)t+136)=(nint)(delegate* unmanaged[Cdecl]<ulong,uint,int>)&RequestGroups;
+        Serve("kiln.gameplay",t,typeof(GameplayNative),"_table"); Swap(typeof(Gameplay),"_listening",1);
+        _groups=0; _requests=0; _requestResult=0;
+        Assert.Null(Gameplay.PrepareBuildEvents()); Assert.Equal(4u,_groups); Assert.Equal(1,_requests);
+    }
+
 }
