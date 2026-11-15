@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-// Typed hooks and calls (dev.28, chapter 06b §9): the runtime the generated classes (Kiln.Sigs.<Area>.<Name>, and a
-// mod's own from its sigdb fragment) are built on. The native half is kiln.hooks' typed link kind (kiln_hooks.h,
+// Typed hooks and calls (since 0.2.0-dev.29, chapter 06b §9): the runtime the generated classes (Kiln.Sigs.<Area>.<Name>,
+// and a mod's own from its sigdb fragment) are built on. The native half is kiln.hooks' typed link kind (kiln_hooks.h,
 // "typed links"): a hooked call reaches a handler as one KilnCallFrame (rcx rdx r8 r9, xmm0-3, the caller's stack
 // arguments, rax and xmm0 for the result). A mod never uses these types directly: the generator emits a class per
 // descriptor whose Call, Detour and Invoke wrap them with the descriptor's names, types and masks.
@@ -74,42 +74,52 @@ public enum SigInvoke
 public readonly record struct SigArg(string Name, SigKind Kind, uint Size);
 
 /// <summary>A typed descriptor as the generated class carries it: the declared parameters (never the hidden return
-/// buffer), the return, <c>sret</c> and <c>invoke</c>. Validated when it is made: a malformed one throws
-/// <see cref="ArgumentException"/>.</summary>
+/// buffer), the return, <c>sret</c> and <c>invoke</c>. Validated when it is made, by the rules kiln.hooks applies
+/// (detour_typed refuses the same shapes as malformed).</summary>
 [EditorBrowsable(EditorBrowsableState.Never)]
 public sealed class SigDescriptor
 {
     /// <summary>A descriptor of <paramref name="symbol"/>.</summary>
-    /// <exception cref="ArgumentException">More than 20 positions, a return kind that is not a return, an argument
-    /// kind that is not an argument, sret without a struct return, or an empty symbol.</exception>
+    /// <exception cref="ArgumentException">An empty symbol; a return kind that is no return (<see cref="SigKind.ByVal"/>);
+    /// an argument kind that is no argument (<see cref="SigKind.Void"/>, <see cref="SigKind.Struct"/>) or a by-value
+    /// struct without its size; sret without a sized struct return, or a struct return other than 1/2/4/8 bytes without
+    /// sret; more than 20 positions.</exception>
     public SigDescriptor(string symbol, SigKind ret, uint retSize, bool sret, SigInvoke invoke, params SigArg[] args)
     {
         if (string.IsNullOrEmpty(symbol)) throw new ArgumentException("a descriptor needs its symbol", nameof(symbol));
         ArgumentNullException.ThrowIfNull(args);
+        if (ret is SigKind.ByVal || (uint)ret > (uint)SigKind.Struct)
+            throw new ArgumentException($"{symbol}: {ret} is not a return kind", nameof(ret));
+        if (sret && (ret != SigKind.Struct || retSize == 0))
+            throw new ArgumentException($"{symbol}: sret needs a struct return with its size", nameof(sret));
+        if (!sret && ret == SigKind.Struct && retSize is not (1 or 2 or 4 or 8))
+            throw new ArgumentException($"{symbol}: a struct return of {retSize} bytes goes through a hidden buffer: it needs sret", nameof(sret));
+        if (invoke is not (SigInvoke.None or SigInvoke.Tick or SigInvoke.Any))
+            throw new ArgumentException($"{symbol}: {(int)invoke} is not an invoke kind", nameof(invoke));
+        foreach (var a in args)
+            if (a.Kind is SigKind.Void or SigKind.Struct || (uint)a.Kind > (uint)SigKind.Struct || (a.Kind == SigKind.ByVal && a.Size == 0))
+                throw new ArgumentException($"{symbol}: argument '{a.Name}' has kind {a.Kind}", nameof(args));
         Symbol = symbol;
         Ret = ret;
         RetSize = retSize;
         Sret = sret;
         Invoke = invoke;
-        Args = args;
-        if (ret is SigKind.ByVal || (uint)ret > (uint)SigKind.Struct)
-            throw new ArgumentException($"{symbol}: {ret} is not a return kind", nameof(ret));
-        if (sret != (ret == SigKind.Struct && retSize is not (1 or 2 or 4 or 8)) && !(sret && ret == SigKind.Struct))
-            throw new ArgumentException($"{symbol}: a struct return of {retSize} bytes needs sret, a scalar return never has it", nameof(sret));
-        if (sret && (ret != SigKind.Struct || retSize == 0))
-            throw new ArgumentException($"{symbol}: sret needs a struct return with its size", nameof(sret));
-        foreach (var a in args)
-            if (a.Kind is SigKind.Void or SigKind.Struct || (uint)a.Kind > (uint)SigKind.Struct || (a.Kind == SigKind.ByVal && a.Size == 0))
-                throw new ArgumentException($"{symbol}: argument '{a.Name}' has kind {a.Kind}", nameof(args));
+        Args = (SigArg[])args.Clone();
         if (Positions > HooksNative.MaxPositions)
             throw new ArgumentException($"{symbol}: {Positions} positions, a typed link forwards at most {HooksNative.MaxPositions}", nameof(args));
     }
 
+    /// <summary>The sigdb symbol.</summary>
     public string Symbol { get; }
+    /// <summary>The return kind.</summary>
     public SigKind Ret { get; }
+    /// <summary>The return's size in bytes (a struct's; 0 for void).</summary>
     public uint RetSize { get; }
+    /// <summary>The function returns a struct through a hidden first pointer.</summary>
     public bool Sret { get; }
+    /// <summary>Whether a direct call is offered.</summary>
     public SigInvoke Invoke { get; }
+    /// <summary>The declared parameters, in order.</summary>
     public IReadOnlyList<SigArg> Args { get; }
 
     /// <summary>Call positions: the declared parameters plus the hidden buffer.</summary>
@@ -166,10 +176,15 @@ public readonly unsafe ref struct SigCall
 
     /// <summary>The 8-byte integer slot of position <paramref name="p"/> (upper bytes of a narrow type are garbage).</summary>
     public ulong Int(int p) => *IntAt(p);
+    /// <summary>Writes the 8-byte integer slot of position <paramref name="p"/>.</summary>
     public void SetInt(int p, ulong value) => *IntAt(p) = value;
+    /// <summary>A float position (the low 4 bytes of its xmm register or stack slot).</summary>
     public float F32(int p) => *(float*)FloatAt(p);
+    /// <summary>Writes a float position.</summary>
     public void SetF32(int p, float value) => *(float*)FloatAt(p) = value;
+    /// <summary>A double position.</summary>
     public double F64(int p) => *(double*)FloatAt(p);
+    /// <summary>Writes a double position.</summary>
     public void SetF64(int p, double value) => *(double*)FloatAt(p) = value;
 
     /// <summary>The address of position <paramref name="p"/>'s integer slot (a by-value struct of 1/2/4/8 bytes lives in it).</summary>
@@ -177,27 +192,37 @@ public readonly unsafe ref struct SigCall
 
     /// <summary>The integer / pointer return (rax).</summary>
     public ulong RetInt => _f->Rax;
+    /// <summary>Sets rax.</summary>
     public void SetRetInt(ulong value) => _f->Rax = value;
+    /// <summary>The float return (the low 4 bytes of xmm0).</summary>
     public float RetF32 => *(float*)_f->Xmm0R;
+    /// <summary>Sets the float return.</summary>
     public void SetRetF32(float value) => *(float*)_f->Xmm0R = value;
+    /// <summary>The double return.</summary>
     public double RetF64 => *(double*)_f->Xmm0R;
+    /// <summary>Sets the double return.</summary>
     public void SetRetF64(double value) => *(double*)_f->Xmm0R = value;
 
     /// <summary>The address of rax (a struct of 1/2/4/8 bytes returned by value lives in it).</summary>
     public void* RetAddress => &_f->Rax;
 
     /// <summary>The caller's return buffer (sret: position 0), valid during the call.</summary>
+    /// <exception cref="InvalidOperationException">The descriptor has no sret.</exception>
     public void* ReturnBuffer => _sig.Sret ? (void*)_f->Gpr[0] : throw new InvalidOperationException($"{_sig.Symbol} returns no struct through a buffer");
 
     /// <summary>Runs the rest of the hook chain and the game's function once, with the arguments as they are now, and
     /// stores its result. A second call does nothing (the stored result stays).</summary>
+    /// <exception cref="InvalidOperationException">kiln.hooks refused it (the call is not a handler's call in
+    /// flight); the original has not run then.</exception>
     public void CallOriginal()
     {
         if (_st->Called != 0) return;
-        _st->Called = 1;
         var t = HooksNative.Typed;
         if (t == null || t->CallOriginalFrame(_f) != HooksNative.Ok)
-            throw new InvalidOperationException($"{_sig.Symbol}: CallOriginal outside its handler");
+            throw new InvalidOperationException($"{_sig.Symbol}: kiln.hooks refused CallOriginal (the call is no longer in flight)");
+        // Latched only once the native call ran: a refused call leaves OriginalCalled false, so the fault rule runs the
+        // original instead of handing the caller a result nobody computed.
+        _st->Called = 1;
         _st->Rax = _f->Rax;
         Unsafe.CopyBlockUnaligned(_st->Xmm0, _f->Xmm0R, 16);
         if (_sig.Sret && _sig.RetSize <= SigState.SnapshotMax && _f->Gpr[0] != 0)
@@ -220,26 +245,32 @@ public unsafe struct SigFrame
     internal HooksNative.CallFrame Frame;
     internal fixed ulong StackArgs[16];
 
+    /// <summary>Sets integer position <paramref name="p"/>.</summary>
     public void SetInt(int p, ulong value)
     {
         if ((uint)p < 4) Frame.Gpr[p] = value;
         else StackArgs[Stack(p)] = value;
     }
 
+    /// <summary>Sets float position <paramref name="p"/>.</summary>
     public void SetF32(int p, float value)
     {
         if ((uint)p < 4) fixed (byte* x = Frame.Xmm) *(float*)(x + 16 * p) = value;
         else StackArgs[Stack(p)] = BitConverter.SingleToUInt32Bits(value);
     }
 
+    /// <summary>Sets double position <paramref name="p"/>.</summary>
     public void SetF64(int p, double value)
     {
         if ((uint)p < 4) fixed (byte* x = Frame.Xmm) *(double*)(x + 16 * p) = value;
         else StackArgs[Stack(p)] = BitConverter.DoubleToUInt64Bits(value);
     }
 
+    /// <summary>rax after the call.</summary>
     public readonly ulong RetInt => Frame.Rax;
+    /// <summary>The low 4 bytes of xmm0 after the call.</summary>
     public readonly float RetF32 { get { fixed (byte* x = Frame.Xmm0R) return *(float*)x; } }
+    /// <summary>The low 8 bytes of xmm0 after the call.</summary>
     public readonly double RetF64 { get { fixed (byte* x = Frame.Xmm0R) return *(double*)x; } }
 
     private static int Stack(int p) =>
@@ -255,6 +286,9 @@ public static unsafe class TypedHooks
     // "sig/<symbol>"; a mod's own fragment has none, so its descriptors' statuses come from the fragment's report
     // (Symbols.LoadShipped reads it).
     internal static Func<string, bool> SigRowOn = DefaultSigRowOn;
+
+    // The tick guard of a "tick" Invoke (seam: unit tests run on no tick thread of a game).
+    internal static Action<string> RequireTick = Services.RequireTickThread;
 
     internal static bool DefaultSigRowOn(string symbol)
     {
@@ -335,6 +369,7 @@ public static unsafe class TypedHooks
                 order.Size = (uint)sizeof(HooksNative.OrderRaw);
                 order.Priority = priority;
                 order.Label = new NativeStr { Ptr = l, Len = (nuint)label.Length };
+                // kiln.hooks copies the label and reads the descriptor during the call only: the pins end here
                 return t->DetourTyped(owner, address, &order, &raw, &Dispatch, (void*)(nint)cookie, native);
             }
         }
@@ -357,9 +392,9 @@ public static unsafe class TypedHooks
                 else Events.Enqueue(ev);
             }
         }
-        catch (InvalidOperationException)
+        catch (Exception)
         {
-            // a full queue or no tick bus here: the result and the log line still say it
+            // a full queue, no tick bus here, a subscriber's own fault: the result and the log line still say it
         }
         return new HookResult(false, reason, null);
     }
@@ -379,8 +414,9 @@ public static unsafe class TypedHooks
         if (sig.Invoke == SigInvoke.None) throw new InvalidOperationException($"{api}: the descriptor offers no direct call (invoke: none)");
         var t = HooksNative.RequireTyped(api);
         HooksGate.RequireAdvanced(api, "Calling game functions directly is powerful and build-specific");
-        if (sig.Invoke == SigInvoke.Tick) Services.RequireTickThread(api);
+        if (sig.Invoke == SigInvoke.Tick) RequireTick(api);
         var row = HooksCaps.Sig(sig.Symbol);
+        // never a call into a function whose code does not fit the descriptor (§9.4): its row is off then
         if (!SigRowOn(sig.Symbol)) throw ServiceCaps.Unavailable(row, $"{api}: the function does not fit its descriptor on this game build, or its symbol does not resolve");
         nuint address = 0;
         if (HooksNative.WithUtf8(sig.Symbol, s => { nuint a; var r = t->V1.Symbol(s, &a); address = a; return r; }) != HooksNative.Ok || address == 0)
@@ -390,11 +426,15 @@ public static unsafe class TypedHooks
             f->Frame.Stack = f->StackArgs;
             f->Frame.Rax = 0;
             var rc = t->CallWithFrame(address, &f->Frame, (uint)sig.StackCount);
+            f->Frame.Stack = null;  // pointed into the pinned frame: never kept
             if (rc != HooksNative.Ok) throw new InvalidOperationException($"{api}: kiln.hooks refused the call: {HooksNative.Describe(rc)}");
         }
     }
 
     // ---- the dispatcher of every managed typed link (default load context: a stable function pointer) ----
+    // Guarded whole: a managed exception never unwinds into the game's frames. Fail open: a removed registration, a
+    // retired mod or a handler that throws lets the game's function run once and the caller get its result (the native
+    // state machine runs the original when the handler neither called it nor skipped).
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static nuint Dispatch(HooksNative.CallFrame* frame, void* user)
     {
@@ -430,9 +470,8 @@ public static unsafe class TypedHooks
         }
         catch (Exception e)
         {
-            // A managed handler never throws into native code. As the native fault rule: when the original ran, the
-            // caller gets what it returned (whatever the handler wrote since); else it runs with the arguments as the
-            // handler left them (Continue).
+            // As the native fault rule: when the original ran, the caller gets what it returned (whatever the handler
+            // wrote since); else it runs with the arguments as the handler left them (Continue).
             Hooks.ReportFault(reg, "typed hook", e);
             if (st.Called != 0)
             {

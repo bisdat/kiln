@@ -95,6 +95,7 @@ public static unsafe class Symbols
         if (rc != HooksNative.Ok)
             throw new InvalidOperationException($"Symbols.LoadShipped: {HooksNative.Describe(rc)} (see kiln.log)");
         HooksGate.Track(mod).SymbolsLoaded = true;
+        ReadFragmentSigs(mod);
         var r = new SigSummary((int)s.Symbols, (int)s.SymbolsOk, (int)s.Constants, (int)s.ConstantsOk,
             (int)s.Features, (int)s.FeaturesOk);
         mod.Log.Info($"hooks: loaded shipped symbols ({r.SymbolsOk}/{r.Symbols} symbols, {r.ConstantsOk}/{r.Constants} constants)");
@@ -103,9 +104,61 @@ public static unsafe class Symbols
 
     internal static void UnloadShipped(ModContext mod)
     {
+        FragmentSigs.TryRemove(mod.Info.Id, out _);
         var t = HooksNative.T;
         if (t == null) return;
         HooksNative.WithUtf8(mod.Info.Id, s => t->UnloadSymbols(s));
+    }
+
+    // ---- typed descriptors of a mod's fragment (dev.29) ----
+    // A core descriptor's status is a kiln.caps row ("sig/<symbol>"); a fragment's descriptors have none. kiln.hooks
+    // writes the fragment's resolution, descriptors included ("sigs": {"<modid>/name": {"status": "match", ...}}), to
+    // kiln/logs/sigdb-<modid>.json while load_symbols runs; it is read once right after, and dropped with the fragment.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, IReadOnlyDictionary<string, bool>> FragmentSigs =
+        new(StringComparer.Ordinal);
+
+    /// <summary>The report kiln.hooks writes for a fragment (seam: unit tests point it elsewhere).</summary>
+    internal static Func<string, string> FragmentReport = id => Path.Combine(KilnPaths.Root, "logs", $"sigdb-{id}.json");
+
+    private static void ReadFragmentSigs(ModContext mod)
+    {
+        IReadOnlyDictionary<string, bool> sigs;
+        try
+        {
+            sigs = ParseFragmentSigs(File.ReadAllText(FragmentReport(mod.Info.Id)));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
+        {
+            // no report: every descriptor of the fragment stays off (Invoke throws naming its row)
+            mod.Log.Warn($"hooks: the report of the shipped symbols was not readable ({e.Message}); typed calls of the fragment's descriptors are off");
+            sigs = new Dictionary<string, bool>();
+        }
+        FragmentSigs[mod.Info.Id] = sigs;
+        foreach (var (name, ok) in sigs)
+            if (!ok) mod.Log.Warn($"hooks: {name}: the descriptor does not fit the function's code on this game build (kiln.log says why); typed hooks and calls of it are off");
+    }
+
+    /// <summary>The descriptors of a fragment's report: name to "its status is match".</summary>
+    internal static IReadOnlyDictionary<string, bool> ParseFragmentSigs(string json)
+    {
+        var result = new Dictionary<string, bool>(StringComparer.Ordinal);
+        using var doc = JsonDocument.Parse(json);
+        if (doc.RootElement.ValueKind != JsonValueKind.Object ||
+            !doc.RootElement.TryGetProperty("sigs", out var sigs) || sigs.ValueKind != JsonValueKind.Object)
+            return result;
+        foreach (var p in sigs.EnumerateObject())
+            result[p.Name] = p.Value.ValueKind == JsonValueKind.Object && p.Value.TryGetProperty("status", out var st) &&
+                             st.ValueKind == JsonValueKind.String && st.GetString() == "match";
+        return result;
+    }
+
+    /// <summary>True when <paramref name="symbol"/> is a descriptor of a loaded mod fragment whose code fit it at load
+    /// (its "&lt;modid&gt;/" prefix names the fragment).</summary>
+    internal static bool FragmentSigMatches(string symbol)
+    {
+        var slash = symbol.IndexOf('/');
+        if (slash <= 0) return false;
+        return FragmentSigs.TryGetValue(symbol[..slash], out var sigs) && sigs.TryGetValue(symbol, out var ok) && ok;
     }
 }
 
