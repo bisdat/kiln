@@ -447,6 +447,12 @@ void KILN_CALL on_compat_menu(uint64_t,void*) {
     g_compat_ui->unsubscribe(g_compat_menu);
     g_compat_menu=0;
 }
+// A group refused for unchecked threads during play goes in at the next no-world moment: a client's menu frame.
+KilnHandle g_no_world=0;
+void KILN_CALL on_no_world_frame(uint64_t,void*) {
+    if(g_compat_ui->in_menu && !g_compat_ui->in_menu()) return;  // a world steps: not now
+    hooks_poll_no_world();
+}
 void KILN_CALL on_ready(void*) {
     g_compat_ui=static_cast<const KilnUiTickApi*>(g_api->service(kstr(KILN_UI_TICK_SERVICE),1));
     if(g_compat_ui && g_compat_ui->header.size>=sizeof(KilnUiTickApi) && g_compat_ui->subscribe && g_compat_ui->unsubscribe)
@@ -466,6 +472,14 @@ void KILN_CALL on_ready(void*) {
 }
 
 }  // namespace
+
+bool hooks_watch_no_world(bool on) {
+    if(!g_compat_ui || g_compat_ui->header.size<sizeof(KilnUiTickApi) || !g_compat_ui->subscribe || !g_compat_ui->unsubscribe)
+        return false;  // no UI tick (a dedicated server): nothing to wait for in this process
+    if(on && !g_no_world && g_compat_ui->subscribe(g_owner,&on_no_world_frame,nullptr,&g_no_world)!=KILN_OK) g_no_world=0;
+    if(!on && g_no_world) { g_compat_ui->unsubscribe(g_no_world); g_no_world=0; }
+    return !on || g_no_world!=0;
+}
 }  // namespace kg
 
 extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api, KilnOwner owner, KilnPluginInfo* info) {

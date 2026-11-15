@@ -57,10 +57,11 @@ int main() {
     CHECK((late::subscribed & (1u<<KILN_GAMEPLAY_ENTITY_LEFT))==0);
     send("left"); CHECK((late::subscribed & (1u<<KILN_GAMEPLAY_ENTITY_LEFT))!=0);
     const auto prior=demands; send("left"); CHECK(demands==prior);
-    snapshot.hook_groups[3].state=3; snapshot.hook_groups[3].installed_targets=1;
-    std::snprintf(snapshot.hook_groups[3].reason,512,"refused: thread check refused on three attempts");
-    late::pre(nullptr,nullptr); CHECK(has("PASS entities refused after 3 attempts:"));
-    CHECK(has("nothing written past target 1"));
+    // three refusals for unchecked threads during play: the group waits for the next no-world moment
+    snapshot.hook_groups[3].state=2; snapshot.hook_groups[3].installed_targets=1;
+    std::snprintf(snapshot.hook_groups[3].reason,512,"waiting for the next no-world moment (the next server start): spawn/DestroyEntity thread check refused on three attempts during play");
+    late::pre(nullptr,nullptr); CHECK(has("PASS entities waits for the next no-world moment after 3 attempts:"));
+    CHECK(has("nothing written past target 1")); CHECK(!has("refused after 3 attempts"));
     send("unsubscribe"); CHECK(snapshot.entity_categories==0);
     std::filesystem::remove_all(root);
     std::printf("gameplay late fixture: %u checks, %u failures\n",checks,failed); return failed ? 1 : 0;

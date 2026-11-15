@@ -214,7 +214,11 @@ managed terraform cancel (`events.build.terraform`) is not part of V1.
 fields distinguish resolved/unused, installed, waiting for checked safe Pre, and refused with a reason and mask.
 BuildHooks remains true only for a complete group. PlaceBlueprint, PlaceProp, DismantleBlock, DismantleBlock2 and
 PickUpProp now use the same checked typed installation as the other groups. No raw/world-stop installer remains.
-A resolved target whose checked installation is refused stays refused; there is no unchecked fallback.
+A checked installation refused for threads Kiln could not check (not opened, not stopped, or inside the bytes to
+replace) falls back to the unchecked install when no world runs in the process (at start, in a client's menu, after a
+stop), as dev.28 installed these hooks at start: `kiln.gameplay: <group> hooks: <target> installed unchecked: no world
+running (...)`; kiln.hooks' warning just above it counts the threads. Any other refusal (the code does not fit its
+descriptor, the bytes changed) stays a refusal, with or without a world.
 
 A native BUILD subscription (also tick-returned interest), managed BuildEvent interest including base-event
 handlers, a Build/Break zone, or `request_build(owner)` requests the five. Known managed demand is prepared before
@@ -223,7 +227,8 @@ No-world demand installs immediately. First demand during a world queues checked
 operations before completion are not observed or replayed. With only these five pending, installation needs three
 Pres at the shared two-target budget. The remaining groups are ahead of build in the queue: simultaneous demand
 for all ten targets completes in five successful Pres. Thread-check refusals can extend that; each target gets at
-most three attempts on distinct Pres, then the group refuses. If every target needs two retries then succeeds,
+most three attempts on distinct Pres; after the third the group waits for the next no-world moment (see below) instead
+of refusing. If every target needs two retries then succeeds,
 all-group demand takes at most eighteen eligible Pres. Time spent with no eligible safe Pre is not bounded.
 
 Zones with Build/Break denies refuse add/update with UNAVAILABLE while waiting or refused; the old zone stays
@@ -268,8 +273,14 @@ continuations, calling thread and Post dispatch order. Explicit owner edges reta
 SET/ShroudForge and NPC lifetime observers, after creatures, build and rules; EMF's higher priority and rules'
 existing before-gameplay edge remain effective. Each Pre attempts at most two targets across the groups;
 a simultaneous first request for all five needs five successful Pre passes (ten targets). An unchecked-thread refusal retries on later
-safe Pre passes, at most three attempts per target, then refuses once with a reason. A signature refusal is final.
-No unchecked fallback is used. Old cores lacking checked typed installation are explicitly refused.
+safe Pre passes, at most three attempts per target. After the third the group is not refused: no unchecked write is
+made while a world runs (an unchecked thread may run inside the bytes), so the group stays pending with
+`waiting for the next no-world moment (the next menu|the next server start)` and the warning
+`kiln.gameplay: <group> hooks wait for the next no-world moment ...`; a game client tries again at its next menu frame
+(the UI tick), unchecked if it must, and logs `kiln.gameplay: <group> hooks installed with no world running, after
+waiting since the refusal during play`. A dedicated server has no such moment until its next start, where the demand
+comes again before the world. While it waits its zones are refused and its subscriptions accepted, as for any wait.
+A signature refusal is final. Old cores lacking checked typed installation are explicitly refused.
 
 The cost of a write during play is logged at info, one line per target:
 `kiln.gameplay: <target> went in during play: the installer call took <ms> ms on the world's thread (write <k> in this Pre)`.

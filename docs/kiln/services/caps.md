@@ -368,9 +368,10 @@ installed, or unavailable with the refusal reason. Session rows must not be mani
 The existing static API aliases `gameplay.entity_events` and `gameplay.spawn_replace` remain available while their
 group resolves and lower on permanent refusal; they do not become pending and block admission of old manifests.
 All five groups install on pre-world demand or checked safe Pre, sharing at most two target attempts per tick
-and three attempts on thread-check refusal. Build's five targets are behind the other five: three Pres alone,
-five Pres for simultaneous all-group demand without retries. Refused partial groups stay inert. No world-stop/raw
-fallback remains. No announcement from a demand-aware Host triggers legacy all-group installation: at the first
+and three attempts on thread-check refusal; after the third the row stays pending ("waiting for the next no-world
+moment") and the group installs when no world runs (a client's menu; a server's next start). With no world running, a
+thread-check refusal installs unchecked at once. Build's five targets are behind the other five: three Pres alone,
+five Pres for simultaneous all-group demand without retries. Refused partial groups stay inert. No announcement from a demand-aware Host triggers legacy all-group installation: at the first
 client menu UI tick with no world, or in one batch at the first eligible world-start Pre; retries are paced. A legacy status probe before any announcement also requests all groups;
 modern announced-host status probes preserve idle groups.
 Native `request_hooks(owner, mask)` is appended after `request_build`; build now uses the same checked path. Mask 0 announces the new Host before scanning. Managed

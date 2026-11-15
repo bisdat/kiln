@@ -16,6 +16,9 @@ struct Entry {
 struct Group {
     std::vector<Entry> entries;
     std::atomic<bool> installed{false}; uint32_t state=0, retries=0, next=0, reason_code=KILN_CAP_REASON_NONE; KilnOwner owner=0;
+    // deferred: refused three times for unchecked threads while a world ran; tried again at the next no-world moment.
+    // was_deferred: that happened (for the line when it finally goes in).
+    bool deferred=false, was_deferred=false;
     std::string reason="resolved, not installed: no mod asked";
 };
 Group groups[5];
@@ -52,6 +55,7 @@ void advance(int i, const KilnHooksApi* h, unsigned& budget) {
     // While a world runs, each checked write stops the game's other threads (kiln.hooks logs that time at debug and
     // warns above 50 ms): the whole call is timed here and logged at info, so a late install's cost is in kiln.log.
     const bool late=h->typed_install_ready()==1;
+    if(!late) g.deferred=false;  // a no-world moment: a group that waited since a refusal during play is tried now
     while(g.next<g.entries.size() && budget) {
         auto& e=g.entries[g.next];
         if(!e.target) { refuse(i,std::string(e.label)+" did not resolve"); return; }
@@ -78,17 +82,46 @@ void advance(int i, const KilnHooksApi* h, unsigned& budget) {
         if(rc!=KILN_OK) {
             char text[512]{}; size_t n=0;
             if(!inject && h->typed_refusal) h->typed_refusal(text,sizeof text,&n);
+            if(rc==KILN_HOOKS_ERR_UNCHECKED && !late) {
+                // No world runs in the process (start, a menu, after a stop): no game job runs and nobody plays, the moment
+                // dev.28 wrote every one of these hooks unchecked. Only a refusal for threads that could not be checked
+                // falls back; any other refusal (the code does not fit its descriptor, the bytes changed) stays one.
+                const auto plain=h->detour_typed ? h->detour_typed(g_owner,e.target,&order,&sig,e.handler,e.link,&e.handle)
+                                                 : static_cast<KilnResult>(KILN_ERR_UNAVAILABLE);
+                if(plain!=KILN_OK) {
+                    refuse(i,std::string(e.label)+" (error "+std::to_string(plain)+"): the checked install was refused for threads "
+                           "it could not check, and the unchecked install with no world running failed too; see kiln.log"); return;
+                }
+                KG_W("kiln.gameplay: %s hooks: %s installed unchecked: no world running (%s)",names[i],e.label,
+                     inject ? "the checked install refused by gameplay.unchecked" :
+                              "the checked install found threads it could not check; kiln.hooks' warning above counts them");
+                ++g.next; g.retries=0;
+                continue;
+            }
             if(rc==KILN_HOOKS_ERR_UNCHECKED && ++g.retries<3) {
                 g.reason=std::string("waiting: ")+e.label+" thread check refused; retry at next safe Pre"; publish(i); return;
             }
-            refuse(i,std::string(e.label)+" (error "+std::to_string(rc)+"): "+
-                (rc==KILN_HOOKS_ERR_UNCHECKED ? "thread check refused on three attempts; see kiln.log" : text)); return;
+            if(rc==KILN_HOOKS_ERR_UNCHECKED) {
+                // Three refusals while a world runs. No unchecked write during play (a thread that could not be checked may
+                // run inside the bytes): the group waits for the next moment no world runs and goes in then.
+                g.retries=0; g.deferred=g.was_deferred=true;
+                const char* when=hooks_watch_no_world(true) ? "the next menu" : "the next server start";
+                g.reason=std::string("waiting for the next no-world moment (")+when+"): "+e.label+
+                    " thread check refused on three attempts during play; installed pass-through targets "+std::to_string(g.next);
+                publish(i);
+                KG_W("kiln.gameplay: %s hooks wait for the next no-world moment (%s): %s thread check refused on three attempts "
+                     "during play; see kiln.log",names[i],when,e.label);
+                return;
+            }
+            refuse(i,std::string(e.label)+" (error "+std::to_string(rc)+"): "+text); return;
         }
         ++g.next; g.retries=0;
     }
     if(g.next==g.entries.size()) {
         g.state=1; g.reason="installed"; g.installed.store(true,std::memory_order_release); publish(i);
         KG_I("kiln.gameplay: %s hooks installed on first use by %llu",names[i],static_cast<unsigned long long>(g.owner));
+        if(g.was_deferred) KG_I("kiln.gameplay: %s hooks installed with no world running, after waiting since the refusal during play",names[i]);
+        g.was_deferred=false;
     }
 }
 }
@@ -114,6 +147,9 @@ bool hooks_request(uint32_t mask,KilnOwner owner) {
             if(!h) refuse(i,"kiln.hooks has no checked typed installer");
             else if(h->typed_install_ready()==2) { unsigned budget=6; advance(i,h,budget); }
             else KG_I("kiln.gameplay: %s hooks waiting for safe Pre (owner %llu); events and rules begin after installation",names[i],static_cast<unsigned long long>(owner));
+        } else if(g.state==2 && g.deferred) {
+            const auto* h=installer();
+            if(h && h->typed_install_ready()==2) { unsigned budget=16; advance(i,h,budget); }
         }
         ok=(g.state!=3) && ok;
     }
@@ -128,7 +164,8 @@ void legacy_result() {
         else KG_W("no demand-aware host: requested all gameplay hooks; some refused (see group rows)"); }
 }
 void hooks_poll() {
-    const auto* h=installer(); if(!h || !h->typed_install_ready()) return;
+    const auto* h=installer(); if(!h) return;
+    const uint32_t ready=h->typed_install_ready(); if(!ready) return;
     std::lock_guard lock(hooks_publication());
     pre_writes=0;
     if(legacy_skip_same_pre) { legacy_skip_same_pre=false; return; }
@@ -136,7 +173,17 @@ void hooks_poll() {
     // all ordinary late demand (and those retries) shares the two-target budget.
     unsigned budget=legacy_batch_pending ? 10 : 2;
     legacy_batch_pending=false;
-    for(int i=0;i<5 && budget;++i) if(groups[i].state==2) advance(i,h,budget);
+    for(int i=0;i<5 && budget;++i) if(groups[i].state==2 && (!groups[i].deferred || ready==2)) advance(i,h,budget);
+    legacy_result();
+}
+void hooks_poll_no_world() {
+    const auto* h=installer(); if(!h || h->typed_install_ready()!=2) return;
+    std::lock_guard lock(hooks_publication());
+    unsigned budget=16;
+    for(int i=0;i<5;++i) if(groups[i].state==2 && groups[i].deferred) advance(i,h,budget);
+    bool waiting=false;
+    for(auto& g:groups) waiting |= g.state==2 && g.deferred;
+    if(!waiting) hooks_watch_no_world(false);
     legacy_result();
 }
 void hooks_init_control() {

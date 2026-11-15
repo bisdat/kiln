@@ -7,6 +7,7 @@
 namespace kg {
 const KilnApi* g_api; KilnOwner g_owner=1; Layout L; Fns fn; Features F; EventIds H; Stats S; uint64_t g_step;
 void logf(int,const char*,...) {}
+bool hooks_watch_no_world(bool) { return false; }  // gameplay.cpp's UI-tick watch: none here (a server)
 bool has_subscribers(uint32_t) { return true; }
 bool entity_position(KilnEntity,KilnVec3*) { return false; }
 bool seh_call(void(*f)(void*),void*,unsigned long*) { return false; }
@@ -68,7 +69,8 @@ int main(int argc,char** argv) {
     for(int i=0;i<(retry_failure ? 4 : 3);++i) kg::hooks_poll();
     if(mode=="precheck") { CHECK(installs==0); CHECK(!kg::build_installed()); CHECK(kg::build_state()==3); }
     else if(fail_at) {
-        CHECK(installs==(retry_failure ? 5 : 3)); CHECK(!kg::build_installed()); CHECK(kg::build_state()==3); CHECK(kg::build_mask()==3);
+        // a thread-check refusal during play waits for the next no-world moment; any other refusal is final
+        CHECK(installs==(retry_failure ? 5 : 3)); CHECK(!kg::build_installed()); CHECK(kg::build_state()==(retry_failure ? 2u : 3u)); CHECK(kg::build_mask()==3);
         KilnCallFrame invalid{}; CHECK(links[0].fn(&invalid,links[0].user)==KILN_TYPED_CONTINUE);
         CHECK(calls==0); CHECK(kg::g_recs.empty());
         if(retry_failure) CHECK(kg::build_reason().find("three attempts")!=std::string::npos);

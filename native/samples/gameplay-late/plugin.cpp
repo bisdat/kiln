@@ -185,6 +185,11 @@ void KILN_CALL pre(const KilnTickInfo* tick,void*) {
         p.waiting |= g.state==2;
         if(g.state==1) { p.done=true;
             log("gameplay-late: %s %s waiting then installed after %llu Pre(s)",p.waiting ? "PASS" : "FAIL",names[i],static_cast<unsigned long long>(pres-p.began)); }
+        else if(g.state==2 && std::string(g.reason).find("next no-world moment")!=std::string::npos) { p.done=true;
+            // refused for unchecked threads three times during play: it waits (a server: the next start) instead of refusing
+            const bool three=std::string(g.reason).find("three attempts")!=std::string::npos;
+            log("gameplay-late: %s %s waits for the next no-world moment after %s: %s; nothing written past target %u",three ? "PASS" : "FAIL",
+                names[i],three ? "3 attempts" : "an unexpected refusal",g.reason,g.installed_targets); }
         else if(g.state==3) { p.done=true;
             const bool three=std::string(g.reason).find("three attempts")!=std::string::npos;
             log("gameplay-late: %s %s refused after %s: %s; nothing written past target %u",three ? "PASS" : "FAIL",names[i],three ? "3 attempts" : "unexpected failure",g.reason,g.installed_targets); }

@@ -174,19 +174,34 @@ Terraform may install too because BUILD interest requests it. Require three dist
 
 `kiln.gameplay: LAB build target 2 unchecked attempt <1|2|3> (nothing written)`.
 
-Then require exactly one refusal row/log and:
+Refused for threads it could not check three times while the world runs, the group is not refused for the process:
+it waits for the next moment no world runs (a client's menu; on a dedicated server, which has none, the next server
+start). Require exactly one line
 
-`gameplay-late: PASS build refused after 3 attempts: <reason>; nothing written past target 2`.
+`kiln.gameplay: build hooks wait for the next no-world moment (the next server start): gameplay/DismantleBlock thread check refused on three attempts during play; see kiln.log`
 
-Check build state 3, BuildHooks false, mask 3, no gameplay entries for the final three targets in the hook map, no
-build payloads/denies from the first two links, and no fourth attempt after further ticks. The fixture's PASS reads
-status/reason; **the hook map and real operations are required to prove physical writes/pass-through behavior**.
-`send zone build ...` must now answer UNAVAILABLE and store nothing. `send unsubscribe` still succeeds.
+and the fixture's
+
+`gameplay-late: PASS build waits for the next no-world moment after 3 attempts: <reason>; nothing written past target 2`.
+
+Check build state 2 (pending, not refused), BuildHooks false, mask 3, no gameplay entries for the final three targets
+in the hook map, no build payloads/denies from the first two links, and no fourth attempt after further ticks. The
+fixture's PASS reads status/reason; **the hook map and real operations are required to prove physical
+writes/pass-through behavior**. `send zone build ...` must answer UNAVAILABLE while it waits and store nothing.
+`send unsubscribe` still succeeds. A refusal for another reason (the code does not fit its descriptor) stays a
+refusal: `gameplay-late: ... refused after ...`.
+
+The same forced refusal **before any world** (the marker files written before the start, and a mod in the profile
+that makes Kiln ask for the group before the world, e.g. gameplay-test) shows the fallback instead: with no world
+running a refusal for unchecked threads installs the target unchecked, as dev.28 installed these hooks at start:
+
+`kiln.gameplay: LAB build target 2 unchecked attempt 1 (nothing written)`, then
+`kiln.gameplay: build hooks: gameplay/DismantleBlock installed unchecked: no world running (the checked install refused by gameplay.unchecked)`.
 
 Repeat in a fresh process with `force-unchecked craft 0`, `terraform 0` (demand via `zone terraform ...`), `spawn 0`
-(demand via `replace FROM TO` to check a pending rule becomes inert), and `entities 1` (first lifecycle link remains
-inert; demand with `joined`, then `left`). `send replace-clear` must remove the inert pending rule normally. A single-entry group's installed count
-is 0; entities' partial count is 1. Every attempt uses the same production retry/refusal state machine.
+(demand via `replace FROM TO`: the pending rule stays registered while the group waits), and `entities 1` (the first
+lifecycle link stays inert; demand with `joined`, then `left`). `send replace-clear` removes the pending rule normally.
+A single-entry group's installed count is 0; entities' partial count is 1.
 
 With `gameplay.unchecked` present **without** gameplay.lab at service load, require the explicit IGNORED warning
 and ordinary successful installation; the switch must not force refusal. Delete both service control files and the
