@@ -26,8 +26,7 @@ namespace Kiln;
 /// <para>Only deaths from health are held (not a script that kills an actor directly). The entities held are the ones
 /// handlers ask for: a handler with <see cref="EventFilter.ForEntity(EntityId)"/> holds those entities only; a handler
 /// without a filter (also one for a base class such as <see cref="KilnEvent"/>) holds every death in the world.</para>
-/// <para>Capability <c>events.death</c>: held until its guided client check (<c>07-events.decision-rollback</c>) has
-/// passed; while it is off, <c>Events.On&lt;EntityDyingEvent&gt;</c> throws <see cref="KilnUnavailableException"/>
+/// <para>Capability <c>events.death</c>: while it is off, <c>Events.On&lt;EntityDyingEvent&gt;</c> throws <see cref="KilnUnavailableException"/>
 /// naming it. Since 0.2.0-dev.29.</para>
 /// </remarks>
 [ServerOnly, TickThreadOnly]
@@ -81,7 +80,7 @@ public sealed class EntityDyingEvent : CancelableEvent, IEntityEvent
 /// listeners once.</summary>
 internal sealed class DeathDecisions : DecisionProducer
 {
-    /// <summary>The capability row of a cancelable death (a sigdb feature, held by the client gate).</summary>
+    /// <summary>The capability row of a cancelable death (a sigdb feature, lowered if its hook is unavailable).</summary>
     public const string Row = "events.death";
 
     internal static readonly DeathDecisions Instance = new();

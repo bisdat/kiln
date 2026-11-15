@@ -163,6 +163,11 @@ private:
         r.capture_step = step;
         r.deadline_step = one_pre(in.kind) ? step : step + 2;
         active_[rid] = slot;
+        // Deadlines/answers free slots even when no request batch is read. Keep
+        // their obsolete delivery ids from growing without bound; preserve the
+        // arrival order of every request that is still active.
+        if (arrivals_.size() >= KILN_DECISIONS_MAX_ACTIVE)
+            std::erase_if(arrivals_, [&](uint64_t pending) { return !active_.count(pending); });
         arrivals_.push_back(rid);
         ++counters_.filed;
         return KILN_OK;
@@ -303,6 +308,11 @@ public:
     uint32_t active_count() const {
         std::lock_guard lock(m_);
         return static_cast<uint32_t>(active_.size());
+    }
+    // Delivery ids waiting for begin_requests (including retired ids awaiting compaction).
+    size_t undelivered_count() const {
+        std::lock_guard lock(m_);
+        return arrivals_.size();
     }
     // True while outcomes were lost because nobody read them: producers stop holding until the consumer catches up.
     bool saturated() const {

@@ -109,8 +109,7 @@ public static class Decisions
     /// exposure whose decision is still open is left alone. Tick thread, Pre or Post.</summary>
     /// <returns><c>Ok</c> with the count of exposures reopened; <c>Ok = false</c>, reason <c>NoActiveExposure</c>,
     /// when there was none.</returns>
-    /// <exception cref="KilnUnavailableException"><c>events.pickup</c> is off (held until its game test, or not on this
-    /// game build).</exception>
+    /// <exception cref="KilnUnavailableException"><c>events.pickup</c> is unavailable on this game build.</exception>
     [ServerOnly, TickThreadOnly, RequiresCapability(PickupRow)]
     public static PickupReevaluationResult ReevaluatePickup(EntityId drop, EntityId receiver)
     {

@@ -7,8 +7,7 @@
 //   /noring           equipping a ring is refused for you (again to turn it off)
 //
 // Each player's choice applies to that player only: the handlers filter on the players who asked, so nothing is held
-// for anyone else. events.death and events.pickup are held until their game test: a server needs "preview": true in
-// kiln/kiln.json for /survive and /nopickup.
+// for anyone else. /survive and /nopickup require events.death and events.pickup respectively.
 using Kiln;
 
 namespace DecisionsSample;

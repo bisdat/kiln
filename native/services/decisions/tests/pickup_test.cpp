@@ -261,7 +261,29 @@ static void test_fail_open() {
     CHECK(x.visit(v, b) == pickup::Visit::Pass && x.stats.released.load() == 1);
 }
 
+static void test_reset_after_answer_before_next_visit() {
+    World w;
+    Broker b;
+    pickup::Exposures x;
+    b.attach(9);
+    w.drops[3000] = {2022, 0x2b0cf1d5, 3};
+    w.rows[3000] = row_of(3000, 50);
+    w.rows[2022] = row_of(2022, 51);
+    Visitor v{w, 3000};
+    CHECK(x.visit(v, b) == pickup::Visit::Refuse);
+    auto r = drain(b, 11).at(0);
+    CHECK(x.reopen(3000, 2022, b) == 0); // genuinely pending: cannot reset
+    answer(b, r, false, 11);
+    // A completion handler resets immediately in Pre, before the range helper
+    // visits again. The completed veto must already count as suppression.
+    CHECK(x.reopen(3000, 2022, b) == 1);
+    CHECK(x.visit(v, b) == pickup::Visit::Refuse && b.counters().filed == 2);
+    auto again = drain(b, 11);
+    CHECK(again.size() == 1 && again[0].exposure_epoch > r.exposure_epoch);
+}
+
 int main() {
+    test_reset_after_answer_before_next_visit();
     test_request_and_states();
     test_keys_never_cross();
     test_samples_close_exposures();

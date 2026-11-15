@@ -27,8 +27,7 @@ namespace Kiln;
 /// grant); a partial grant changes the drop's amount, and the rest is a new exposure and a new decision.</para>
 /// <para>Which pickups are held: those whose receiver or item a handler's filter names
 /// (<see cref="EventFilter.ForEntity(EntityId)"/>); a handler without a filter holds every walk-over pickup.</para>
-/// <para>Capability <c>events.pickup</c>: held until its guided client check (<c>07-events.decision-rollback</c>) has
-/// passed; while it is off, <c>Events.On&lt;ItemPickingUpEvent&gt;</c> throws <see cref="KilnUnavailableException"/>
+/// <para>Capability <c>events.pickup</c>: while it is off, <c>Events.On&lt;ItemPickingUpEvent&gt;</c> throws <see cref="KilnUnavailableException"/>
 /// naming it. Since 0.2.0-dev.29.</para>
 /// </remarks>
 [ServerOnly, TickThreadOnly]
@@ -87,7 +86,7 @@ public sealed class ItemPickingUpEvent : CancelableEvent, IEntityEvent
 /// <summary>Kind 2 of kiln.decisions for the managed dispatcher: a request becomes an <see cref="ItemPickingUpEvent"/>.</summary>
 internal sealed class PickupDecisions : DecisionProducer
 {
-    /// <summary>The capability row of a cancelable walk-over pickup (a sigdb feature, held by the client gate).</summary>
+    /// <summary>The capability row of a cancelable walk-over pickup (a sigdb feature, lowered if its hook is unavailable).</summary>
     public const string Row = "events.pickup";
 
     internal static readonly PickupDecisions Instance = new();

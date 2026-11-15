@@ -489,7 +489,30 @@ static void test_native_sinks() {
     CHECK(b.counters().outcome_gap > 0);
 }
 
+static void test_unread_arrivals_bounded() {
+    Broker b;
+    b.attach(5);
+    bool bounded = true;
+    // A live adapter keeps filing while the consumer does not drain requests. Slots
+    // are freed by deadlines; unread delivery ids must not accumulate forever.
+    for (uint32_t i = 0; i < 3 * KILN_DECISIONS_MAX_ACTIVE; ++i) {
+        uint64_t id = 0;
+        b.file(request(KILN_DECISION_EQUIP_SET, 9000), 1, 4ull * i, &id);
+        b.window_begin(1, 4ull * i + 3);
+        bounded = bounded && b.undelivered_count() <= KILN_DECISIONS_MAX_ACTIVE;
+    }
+    CHECK(bounded);
+    uint64_t live = 0, batch = 0;
+    uint32_t count = 0, required = 0;
+    CHECK(b.file(request(KILN_DECISION_EQUIP_SET, 9001), 1, 100000, &live) == KILN_OK);
+    b.begin_requests(&batch, &count);
+    CHECK(count == 1);
+    KilnDecisionRequestV1 copy{};
+    CHECK(b.read_requests(batch, &copy, 1, sizeof copy, &required) == KILN_OK && copy.request_id == live);
+}
+
 int main() {
+    test_unread_arrivals_bounded();
     test_validation_and_consumer();
     test_batches();
     test_answers_and_statuses();

@@ -186,6 +186,20 @@ public:
         return n;
     }
 
+    // World-safe reset: consult the broker even before the next helper visit.
+    uint32_t reopen(uint32_t drop, uint32_t receiver, Broker& broker) {
+        {
+            std::lock_guard lock(m_);
+            for (auto& [d, x] : map_) {
+                if ((drop && d != drop) || (receiver && x.receiver != receiver) || x.state != State::Pending) continue;
+                const uint32_t status = broker.status_of(x.request_id);
+                if (status == 0) continue;
+                x.state = status == KILN_DECISION_PREVENTED ? State::Suppressed : State::Released;
+            }
+        }
+        return reopen(drop, receiver);
+    }
+
     void clear() {
         std::lock_guard lock(m_);
         map_.clear();

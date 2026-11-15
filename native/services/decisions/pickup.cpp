@@ -228,7 +228,7 @@ void world_stopped() {
 KilnResult reevaluate(uint32_t drop, uint32_t receiver, uint32_t* reset) {
     if (reset) *reset = 0;
     if (!g_armed.load()) return KILN_ERR_UNAVAILABLE;
-    const uint32_t n = g_exposures.reopen(drop, receiver);
+    const uint32_t n = g_exposures.reopen(drop, receiver, host::broker());
     if (reset) *reset = n;
     return KILN_OK;
 }
