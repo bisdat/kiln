@@ -58,22 +58,10 @@ Kiln.TestKit.FakeImpactResult.Error.get -> byte
 Kiln.TestKit.FakeImpactResult.Handlers.get -> int
 Kiln.TestKit.FakeImpactResult.OriginalCalled.get -> bool
 Kiln.TestKit.FakeImpactResult.Value.get -> byte
-Kiln.TestKit.HarnessDecisions
-Kiln.TestKit.HarnessDecisions.Active.get -> int
-Kiln.TestKit.HarnessDecisions.Outcomes.get -> System.Collections.Generic.IReadOnlyList<Kiln.DecisionResult!>!
-Kiln.TestKit.HarnessDecisions.RestartWorld() -> void
-Kiln.TestKit.HarnessImpactNatives
-Kiln.TestKit.HarnessImpactNatives.AddProgram(uint program, params Kiln.TestKit.FakeEcall[]! calls) -> void
-Kiln.TestKit.HarnessImpactNatives.Call(Kiln.TestKit.FakeImpactCall! call) -> Kiln.TestKit.FakeImpactResult!
-Kiln.TestKit.HarnessImpactNatives.Calls.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeImpactCallRecord!>!
-Kiln.TestKit.HarnessImpactNatives.OtherRead.get -> System.Collections.Generic.ISet<string!>!
-Kiln.TestKit.HarnessImpactNatives.OtherWrite.get -> System.Collections.Generic.ISet<string!>!
-Kiln.TestKit.HarnessImpactNatives.SetGameNative(string! native, Kiln.TestKit.FakeGameNativeHandler? handler = null) -> void
-Kiln.TestKit.KilnHarness.Decisions.get -> Kiln.TestKit.HarnessDecisions!
 Kiln.TestKit.FakeProgramLists
+Kiln.TestKit.FakeProgramLists.<Clone>$() -> Kiln.TestKit.FakeProgramLists!
 Kiln.TestKit.FakeProgramLists.AnyOf.get -> System.Collections.Generic.IReadOnlyList<string!>!
 Kiln.TestKit.FakeProgramLists.AnyOf.init -> void
-Kiln.TestKit.FakeProgramLists.<Clone>$() -> Kiln.TestKit.FakeProgramLists!
 Kiln.TestKit.FakeProgramLists.Equals(Kiln.TestKit.FakeProgramLists? other) -> bool
 Kiln.TestKit.FakeProgramLists.EventsIn.get -> System.Collections.Generic.IReadOnlyList<string!>!
 Kiln.TestKit.FakeProgramLists.EventsIn.init -> void
@@ -117,8 +105,8 @@ Kiln.TestKit.FakeProgramMark.Deconstruct(out string! Program, out Kiln.EntityId 
 Kiln.TestKit.FakeProgramMark.Entity.get -> Kiln.EntityId
 Kiln.TestKit.FakeProgramMark.Entity.init -> void
 Kiln.TestKit.FakeProgramMark.Equals(Kiln.TestKit.FakeProgramMark other) -> bool
-Kiln.TestKit.FakeProgramMark.FakeProgramMark(string! Program, Kiln.EntityId Entity, string! Component, ulong Step) -> void
 Kiln.TestKit.FakeProgramMark.FakeProgramMark() -> void
+Kiln.TestKit.FakeProgramMark.FakeProgramMark(string! Program, Kiln.EntityId Entity, string! Component, ulong Step) -> void
 Kiln.TestKit.FakeProgramMark.Program.get -> string!
 Kiln.TestKit.FakeProgramMark.Program.init -> void
 Kiln.TestKit.FakeProgramMark.Step.get -> ulong
@@ -134,12 +122,31 @@ Kiln.TestKit.FakeProgramSlice.Program.get -> string!
 Kiln.TestKit.FakeProgramSlice.Program.init -> void
 Kiln.TestKit.FakeProgramSlice.Step.get -> ulong
 Kiln.TestKit.FakeProgramSlice.Step.init -> void
+Kiln.TestKit.HarnessComponentChanges
+Kiln.TestKit.HarnessComponentChanges.PresentPairs.get -> int
+Kiln.TestKit.HarnessComponentChanges.QueueOverflows.get -> ulong
+Kiln.TestKit.HarnessComponentChanges.QueuedFrames.get -> int
+Kiln.TestKit.HarnessComponentChanges.SetAttribute(Kiln.EntityId entity, Kiln.ObservedAttribute attribute, int current, int maximum) -> void
+Kiln.TestKit.HarnessComponentChanges.Watches.get -> int
+Kiln.TestKit.HarnessDecisions
+Kiln.TestKit.HarnessDecisions.Active.get -> int
+Kiln.TestKit.HarnessDecisions.Outcomes.get -> System.Collections.Generic.IReadOnlyList<Kiln.DecisionResult!>!
+Kiln.TestKit.HarnessDecisions.RestartWorld() -> void
+Kiln.TestKit.HarnessImpactNatives
+Kiln.TestKit.HarnessImpactNatives.AddProgram(uint program, params Kiln.TestKit.FakeEcall[]! calls) -> void
+Kiln.TestKit.HarnessImpactNatives.Call(Kiln.TestKit.FakeImpactCall! call) -> Kiln.TestKit.FakeImpactResult!
+Kiln.TestKit.HarnessImpactNatives.Calls.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeImpactCallRecord!>!
+Kiln.TestKit.HarnessImpactNatives.OtherRead.get -> System.Collections.Generic.ISet<string!>!
+Kiln.TestKit.HarnessImpactNatives.OtherWrite.get -> System.Collections.Generic.ISet<string!>!
+Kiln.TestKit.HarnessImpactNatives.SetGameNative(string! native, Kiln.TestKit.FakeGameNativeHandler? handler = null) -> void
 Kiln.TestKit.HarnessPrograms
 Kiln.TestKit.HarnessPrograms.Add(string! name, Kiln.TestKit.FakeProgramLists! lists, System.Action<Kiln.TestKit.FakeProgramSlice!>? update = null) -> void
 Kiln.TestKit.HarnessPrograms.Add<T>(System.Action<Kiln.TestKit.FakeProgramSlice!>? update = null) -> void
 Kiln.TestKit.HarnessPrograms.Marks.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeProgramMark>!
 Kiln.TestKit.HarnessPrograms.Names.get -> System.Collections.Generic.IReadOnlyList<string!>!
 Kiln.TestKit.HarnessPrograms.Updates(string! program) -> int
+Kiln.TestKit.KilnHarness.ComponentChanges.get -> Kiln.TestKit.HarnessComponentChanges!
+Kiln.TestKit.KilnHarness.Decisions.get -> Kiln.TestKit.HarnessDecisions!
 Kiln.TestKit.KilnHarness.ImpactNatives.get -> Kiln.TestKit.HarnessImpactNatives!
 Kiln.TestKit.KilnHarness.Programs.get -> Kiln.TestKit.HarnessPrograms!
 ~override Kiln.TestKit.FakeEcall.Equals(object obj) -> bool
@@ -179,11 +186,3 @@ static Kiln.TestKit.FakeProgramMark.operator ==(Kiln.TestKit.FakeProgramMark lef
 static Kiln.TestKit.FakeProgramSlice.operator !=(Kiln.TestKit.FakeProgramSlice? left, Kiln.TestKit.FakeProgramSlice? right) -> bool
 static Kiln.TestKit.FakeProgramSlice.operator ==(Kiln.TestKit.FakeProgramSlice? left, Kiln.TestKit.FakeProgramSlice? right) -> bool
 virtual Kiln.TestKit.FakeGameNativeHandler.Invoke(Kiln.TestKit.FakeGameNativeCall call) -> byte
-||||||| 5dc0a49b
-Kiln.TestKit.HarnessComponentChanges
-Kiln.TestKit.HarnessComponentChanges.PresentPairs.get -> int
-Kiln.TestKit.HarnessComponentChanges.QueueOverflows.get -> ulong
-Kiln.TestKit.HarnessComponentChanges.QueuedFrames.get -> int
-Kiln.TestKit.HarnessComponentChanges.SetAttribute(Kiln.EntityId entity, Kiln.ObservedAttribute attribute, int current, int maximum) -> void
-Kiln.TestKit.HarnessComponentChanges.Watches.get -> int
-Kiln.TestKit.KilnHarness.ComponentChanges.get -> Kiln.TestKit.HarnessComponentChanges!
