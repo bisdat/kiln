@@ -30,8 +30,11 @@
 #include "cook/vfxcook.h"
 #include "core.h"
 #include "generated.h"
+#include "pending.h"
+#include "pending_cleanup.h"
 #include "kiln_boot_collector.hpp"
 #include "ledger.h"
+#include "resource_read.h"
 #include "services/kiln_assets.h"
 #include "services/kiln_capacity_util.hpp"
 #include "services/kiln_caps.h"
@@ -322,10 +325,52 @@ void add_limited(const fs::path& mod, const std::wstring& root, const fs::path& 
     }
 }
 
+// Pending replay uses the cooker's existing final-handle containment/reparse checks, with its own quota.
+void add_pending(const fs::path& root, kvb::ModInput* m, kvx_pending::Budget& budget) {
+    const auto reject = [&](const fs::path& path, const std::string& why) {
+        static std::mutex mu;
+        static std::set<fs::path> warned;
+        bool say = false;
+        { std::lock_guard lk(mu); if (warned.size() < kvx_pending::kEntries) say = warned.insert(path).second; }
+        if (say) KV_W("vfx: %s: pending/%s: not read: %s", m->id.c_str(), to_utf8(path.lexically_relative(root)).c_str(), why.c_str());
+    };
+    if (!ledger::valid_mod(m->id)) { reject(root, "invalid mod id"); return; }
+    const fs::path folder = root / to_path(m->id);
+    std::error_code ec;
+    const auto folder_status = fs::symlink_status(folder,ec);
+    if (ec == std::errc::no_such_file_or_directory || folder_status.type() == fs::file_type::not_found) return;
+    if (ec || fs::is_symlink(folder_status)) { reject(folder,"linked or uninspectable pending folder"); return; }
+    const DWORD attrs = GetFileAttributesW(root.c_str());
+    if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & FILE_ATTRIBUTE_REPARSE_POINT) || reparse_on_the_way(root, folder)) {
+        reject(folder,"link, reparse point or uninspectable pending folder"); return;
+    }
+    OwnedHandle rh(open_for_read(root,true));
+    const std::wstring final = rh.ok() ? final_path(rh.h) : std::wstring();
+    if(final.empty()){reject(root,"pending root cannot be opened");return;}
+    auto files = kvx_pending::read(root,folder,budget,[&](const fs::path& path,size_t max,std::string* text,std::string* why) {
+        OwnedHandle fh(CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,
+                                  FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,nullptr));
+        BY_HANDLE_FILE_INFORMATION info{};
+        LARGE_INTEGER size{};
+        if(!fh.ok() || !GetFileInformationByHandle(fh.h,&info) || (info.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT|FILE_ATTRIBUTE_DIRECTORY)) ||
+           GetFileType(fh.h)!=FILE_TYPE_DISK || !kvx_generated::path_inside(final,final_path(fh.h)) || reparse_on_the_way(root,path)) {
+            *why="link, reparse point, non-file or path outside pending root";return false;
+        }
+        if(!GetFileSizeEx(fh.h,&size) || size.QuadPart<0 || uint64_t(size.QuadPart)>max){*why="file exceeds pending file/total byte bound, or size is unreadable";return false;}
+        text->resize(static_cast<size_t>(size.QuadPart));DWORD got=0,more=0;char extra;
+        if(!ReadFile(fh.h,text->data(),static_cast<DWORD>(text->size()),&got,nullptr) || got!=text->size() ||
+           !ReadFile(fh.h,&extra,1,&more,nullptr) || more || !kvx_generated::depth_ok(*text,64)) {
+            *why="file changed, could not be read completely, or exceeds JSON depth 64";return false;
+        }
+        return true;
+    },reject);
+    for(auto& [name,text]:files) m->documents.emplace_back("pending/"+name,std::move(text));
+}
+
 // One mod's folder -> its input. false: nothing to do here.
 // `boot`: a boot generation's prepare (chapter 08): a mod it excludes is left out; the mod's OnBoot documents (a blocks file's form) come after
 // its data files and baked blocks and before what Kiln kept from code at an earlier start.
-bool read_mod(const std::string& dir, const fs::path& pending_root, kvb::ModInput* m, const kiln::boot::Input* boot = nullptr, std::vector<BuildFailure>* failures = nullptr) {
+bool read_mod(const std::string& dir, const fs::path& pending_root, kvb::ModInput* m, const kiln::boot::Input* boot = nullptr, std::vector<BuildFailure>* failures = nullptr, kvx_pending::Budget* pending_budget = nullptr) {
     const fs::path d = to_path(dir);
     std::error_code ec;
     const fs::path manifest = d / L"kiln.mod.json";
@@ -344,15 +389,6 @@ bool read_mod(const std::string& dir, const fs::path& pending_root, kvb::ModInpu
         KV_I("vfx: %s is out of the boot generation: its VFX and materials are not built", m->id.c_str());
         return false;
     }
-    // Kiln's own data (what it kept from code at an earlier start): read as before
-    auto add_folder = [&](const fs::path& folder, const char* prefix) {
-        std::vector<fs::path> files;
-        std::error_code e2;
-        for (auto it = fs::directory_iterator(folder, e2); !e2 && it != fs::directory_iterator(); it.increment(e2))
-            if (it->path().extension() == L".json") files.push_back(it->path());
-        std::sort(files.begin(), files.end());
-        for (const fs::path& f : files) m->documents.emplace_back(std::string(prefix) + "/" + to_utf8(f.filename()), read_text(f));
-    };
     // the mod's own folder: its data files, then what Kiln.Sdk baked from its code (before what Kiln kept from code at an
     // earlier start, so a block of the same name in both is the mod's: the cook keeps the first), each with limits
     std::wstring root;
@@ -383,7 +419,8 @@ bool read_mod(const std::string& dir, const fs::path& pending_root, kvb::ModInpu
                 throw kiln::boot::Refusal(m->id, "vfx", b.key, "kiln.vfx: a boot document is not a blocks file (a JSON object)");
             m->documents.emplace_back("boot/" + b.key, b.document.dump());
         }
-    add_folder(pending_root / to_path(m->id), "pending");
+    kvx_pending::Budget local;
+    add_pending(pending_root,m,pending_budget ? *pending_budget : local);
     return !m->documents.empty();
 }
 
@@ -746,9 +783,10 @@ std::pair<std::string, std::string> required_vfx_content(const KilnApi* api, con
     if (!g_api) g_api = api;
     if (boot.required.empty()) return {};
     const fs::path pending = to_path(api_path(KILN_PATH_DATA)) / L"vfx" / L"pending";
+    kvx_pending::Budget pending_budget;
     for (const std::string& dir : mod_folders()) {
         kvb::ModInput m;
-        if (!read_mod(dir, pending, &m, &boot) || !boot.strict(m.id)) continue;
+        if (!read_mod(dir, pending, &m, &boot, nullptr, &pending_budget) || !boot.strict(m.id)) continue;
         for (const auto& [file, text] : m.documents) {
             if (file.rfind("pending/", 0) == 0) continue;  // Kiln's own cache of its code
             const ojson doc = kvb::parse_relaxed(text);
@@ -871,9 +909,10 @@ void build_on_ready(const KilnApi* api, KilnOwner self, const kiln::boot::Input*
             // them; the collector's prepare refuses the ones of a required participant (held.h).
             if (failures) {
                 const fs::path pending = to_path(api_path(KILN_PATH_DATA)) / L"vfx" / L"pending";
+                kvx_pending::Budget pending_budget;
                 for (const auto& dir : mod_folders()) {
                     kvb::ModInput m;
-                    if (!read_mod(dir, pending, &m)) continue;
+                    if (!read_mod(dir, pending, &m, nullptr, nullptr, &pending_budget)) continue;
                     for (const auto& [file, text] : m.documents) {
                         if (file.rfind("pending/", 0) == 0) continue;  // Kiln's own cache of its code
                         const ojson doc = kvb::parse_relaxed(text);
@@ -966,9 +1005,11 @@ void build_on_ready(const KilnApi* api, KilnOwner self, const kiln::boot::Input*
         const std::vector<std::string> skip = skip_list();
         const fs::path pending = to_path(api_path(KILN_PATH_DATA)) / L"vfx" / L"pending";
         std::vector<kvb::ModInput> mods;
+        kvx_pending::Budget pending_budget;
+        pending_budget.skipped = skip;
         for (const std::string& dir : mod_folders()) {
             kvb::ModInput m;
-            if (!read_mod(dir, pending, &m, boot, failures)) continue;
+            if (!read_mod(dir, pending, &m, boot, failures, &pending_budget)) continue;
             if (std::find(skip.begin(), skip.end(), m.id) != skip.end()) {
                 KV_I("vfx: %s: skipped by kiln/config/vfx.json", m.id.c_str());
                 continue;
@@ -1220,6 +1261,7 @@ void check_own_data() {
     std::vector<kvb::Guid> foreign;
     std::vector<uint8_t> buf;
     for (const auto& [g, b] : vfx) {
+        if (b.served_size > kMaxVerifiedResourceBytes) continue;
         buf.assign(b.served_size, 0);
         const bool read = game->read_resource(nullptr, g.b, buf.data(), buf.size());
         if (read && bytes_hash(buf.data(), buf.size()) == b.served) {
@@ -1301,6 +1343,10 @@ void observe_registry(void* fxc) {
             if (in_map < 0) { ledger::observe({}); return; }  // not ready after all
             uint8_t v = ledger::kMissing;
             if (in_map == 1) {
+                if (b.served_size > kMaxVerifiedResourceBytes) {
+                    out.emplace_back(id_of(g), ledger::kUnchecked);
+                    continue;
+                }
                 buf.assign(b.served_size, 0);
                 v = !game->read_resource(fxc, g.b, buf.data(), buf.size()) ? ledger::kUnchecked
                     : bytes_hash(buf.data(), buf.size()) == b.served             ? ledger::kOwn
@@ -1469,7 +1515,7 @@ KilnResult build_define_json(KilnOwner owner, KilnStr json, char* report, size_t
             result = kvb::report_json(r);
             if (!r.errors.empty() || !r.refused_mods.empty()) rc = KILN_ERR_INVALID_ARGUMENT;
             const fs::path pending = to_path(api_path(KILN_PATH_DATA)) / L"vfx" / L"pending" / to_path(m.id);
-            std::lock_guard lk(g_mu);
+            std::unique_lock lk(g_mu);
             // a definition kept for the next start: written whole or not at all (kiln_capacity_util.hpp write_atomic); a receipt whose
             // stored definition the file held is superseded by another content (ledger::kept)
             const auto keep = [&](const char* section, const std::string& name, const std::string& file, uint64_t definition) {
@@ -1477,7 +1523,18 @@ KilnResult build_define_json(KilnOwner owner, KilnStr json, char* report, size_t
                 one["format"] = 1;
                 one[section] = ojson::object();
                 one[section][name] = doc[section][name];
-                if (!kiln::capacity::write_atomic(pending / to_path(file), one.dump(1))) {
+                // The observer also takes g_mu. Storage must not hold it, even on the legacy path.
+                const fs::path path = pending / to_path(file);
+                const std::string bytes = one.dump(1);
+                if (bytes.size() > kvx_pending::kFileBytes) {
+                    KV_W("vfx: %s:%s: can't keep it for the next start: exceeds 65536-byte pending file bound",m.id.c_str(),name.c_str());
+                    return;
+                }
+                lk.unlock();
+                std::unique_lock storage(kvx::pending_io_mutex());
+                const bool wrote = kiln::capacity::write_atomic(path, bytes);
+                lk.lock();
+                if (!wrote) {
                     KV_W("vfx: %s:%s: can't keep it for the next start", m.id.c_str(), name.c_str());
                     return;
                 }

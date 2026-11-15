@@ -3,6 +3,9 @@
 // from what the start built and what the update thread read of the game's table, the answers of define_vfx_result for
 // each timing, the receipts, and the pending files. No game, no Windows: the ledger never calls the game. tests/run.sh.
 #include <cstdio>
+#include <future>
+#include <condition_variable>
+#include <stdexcept>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -433,6 +436,13 @@ static void test_storage(const fs::path& base) {
     check(a.r.ok && nlohmann::json::parse(read_file(base / "pending" / "fxmod" / "spark.json"), nullptr, false).is_object() &&
               !fs::exists(base / "pending" / "fxmod" / "spark.json.tmp"),
           "a crash's temporary file: the new file is whole and the temporary one gone");
+    auto oversized = request("fxmod", "large", 9910, 1, KILN_DEFINE_ALLOW_NEXT_START);
+    oversized.block = "{\"padding\":\"" + std::string(65536,'x') + "\"}";
+    oversized.canonical = oversized.block;
+    const auto before = files_in(base);
+    auto huge = define(oversized);
+    check(!huge.r.ok && huge.r.reason_code == KILN_DEFINE_STORAGE_FAILURE && files_in(base) == before,
+          "a definition larger than the replay file bound is never acknowledged or stored");
 }
 
 static void test_review_regressions(const fs::path& base) {
@@ -466,6 +476,69 @@ static void test_review_regressions(const fs::path& base) {
           "an invalid huge game count cannot wrap admission into acceptance");
 }
 
+#ifdef KILN_VFX_LEDGER_TEST
+struct WriteGate {
+    std::mutex mu;
+    std::condition_variable cv;
+    bool entered = false, open = false;
+    void arrive() { std::unique_lock lk(mu); entered = true; cv.notify_all(); cv.wait(lk, [&]{return open;}); }
+    void wait() { std::unique_lock lk(mu); cv.wait(lk, [&]{return entered;}); }
+    void unblock() { std::lock_guard lk(mu); open = true; cv.notify_all(); }
+};
+static void test_transactions(const fs::path& base) {
+    using namespace std::chrono_literals;
+    auto ready = [](auto& f) { return f.wait_for(300ms) == std::future_status::ready; };
+    for (int mode = 0; mode < 5; ++mode) {
+        fresh_root(base);
+        auto b = boot_of("writer", 0, 1576);
+        ledger::boot(b); ledger::observe(seen_of(b, 1576));
+        WriteGate gate;
+        ledger::set_writer_for_tests([&](const fs::path& path, std::string_view text) {
+            gate.arrive();
+            if (mode == 2) return false;
+            if (mode == 3) throw std::runtime_error("injected write exception");
+            return kiln::capacity::write_atomic(path, text);
+        });
+        auto writing = std::async(std::launch::async, [&]{ return define(request("writer", "first", 9900, 1, 1)); });
+        gate.wait();
+        if (mode == 0) {
+            auto sample = std::async(std::launch::async, [&]{ledger::observe(seen_of(b, 1576));});
+            auto read = std::async(std::launch::async, []{return budget();});
+            const bool sampled = ready(sample), read_done = ready(read);
+            check(sampled && read_done, "a stalled write does not block observation or budget copies");
+            if (read_done) { auto n=read.get(); check(n.reserved == 1 && n.capacity-n.game_used-n.reserved == 0, "in-flight slot is visible as Reserved"); }
+            auto stop = std::async(std::launch::async, []{ledger::observe({});});
+            const bool stopped = ready(stop);
+            check(stopped, "world-stop publication does not wait on storage");
+            gate.unblock(); sample.get(); if (!read_done) read.get(); stop.get();
+        } else if (mode == 1) {
+            auto other = std::async(std::launch::async, [&]{return define(request("other", "last", 9901, 1, 1));});
+            const bool refused = ready(other);
+            check(refused, "another caller sees the last place reserved without waiting for storage");
+            auto unload = std::async(std::launch::async, []{ledger::release("writer");});
+            const bool unloaded = ready(unload);
+            check(unloaded, "unload does not wait for an in-flight write");
+            gate.unblock(); unload.get();
+            auto r=other.get(); check(!r.r.ok && r.r.reason_code == KILN_DEFINE_CAPACITY_EXCEEDED, "two racing callers cannot both take the last place");
+        } else if (mode == 4) {
+            auto sampling = std::async(std::launch::async,[&]{ledger::observe(seen_of(b,1576,1));});
+            check(ready(sampling),"a new external resource can be sampled while storage is stalled");
+            gate.unblock(); sampling.get();
+        } else gate.unblock();
+        bool threw = false; Answer result{};
+        try { result=writing.get(); } catch (...) { threw=true; }
+        if (mode == 1) check(!threw && !result.r.ok && result.r.reason_code == KILN_DEFINE_OWNER_INACTIVE && files_in(base) == 0,
+                             "unload cancels the reservation and cannot acknowledge or leave its pending definition");
+        if (mode == 2 || mode == 3) check(!threw && !result.r.ok && result.r.reason_code == KILN_DEFINE_STORAGE_FAILURE && budget().reserved == 0,
+                             "failed/throwing write releases its reservation and returns StorageFailure");
+        if (mode == 4) check(!threw && !result.r.ok && result.r.reason_code == KILN_DEFINE_CAPACITY_EXCEEDED &&
+                             budget().readiness == KILN_CAPACITY_VALID && files_in(base) == 0,
+                             "commit rechecks changed capacity and releases the reservation without acknowledging a file");
+        ledger::set_writer_for_tests({});
+    }
+}
+#endif
+
 static void test_report() {
     std::printf("-- reports\n");
     const std::string r = ledger::report_json(std::string(9000, 'x'), std::vector<std::string>(40, std::string(300, 'w')));
@@ -490,6 +563,9 @@ int main(int argc, char** argv) {
     test_stored(base);
     test_storage(base);
     test_review_regressions(base);
+#ifdef KILN_VFX_LEDGER_TEST
+    test_transactions(base);
+#endif
     test_report();
     std::error_code ec;
     fs::remove_all(base, ec);

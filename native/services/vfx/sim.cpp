@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "game.h"
+#include "resource_read.h"
 
 namespace kvx {
 
@@ -39,6 +40,10 @@ public:
         }
         make_resource(res_[0], 10, -1.f, -1.f, false);
         make_resource(res_[1], 0, 2.f, 1.5f, true);
+        for (int i=0; i<kSimKnown; ++i) {
+            const uintptr_t ptr = reinterpret_cast<uintptr_t>(res_[i]);
+            std::memcpy(records_[i] + 0x10, &ptr, sizeof ptr);
+        }
     }
 
     bool can_play() const override { return true; }
@@ -55,26 +60,24 @@ public:
         return v;
     }
     int is_registered(void*, const uint8_t guid[16]) override { return map_find(map(nullptr), guid); }
-    bool vfx_lengths(void*, const uint8_t guid[16], VfxLengths* out) override {
-        const MapView v = map(nullptr);
-        const int64_t slot = map_slot(v, guid);
-        if (slot < 0) return false;
-        read_lengths(res_[v.values[slot]], ResLayout{}, out);
-        return true;
+    bool vfx_lengths(void* fxc, const uint8_t guid[16], VfxLengths* out) override {
+        uint8_t bytes[kResourceBytes];
+        if (!read_resource(fxc,guid,bytes,sizeof bytes)) return false;
+        read_lengths(bytes,ResLayout{},out); return true;
     }
-    bool vfx_params(void*, const uint8_t guid[16], VfxParamLayout* out) override {
-        const MapView v = map(nullptr);
-        const int64_t slot = map_slot(v, guid);
-        if (slot < 0) return false;
-        read_params(res_[v.values[slot]], ResLayout{}, out);
-        return true;
+    bool vfx_params(void* fxc, const uint8_t guid[16], VfxParamLayout* out) override {
+        uint8_t bytes[kResourceBytes];
+        if (!read_resource(fxc,guid,bytes,sizeof bytes)) return false;
+        read_params(bytes,ResLayout{},out); return true;
     }
     bool read_resource(void*, const uint8_t guid[16], void* out, size_t n) override {
-        const MapView v = map(nullptr);
-        const int64_t slot = map_slot(v, guid);
-        if (slot < 0 || n > kResourceBytes) return false;
-        std::memcpy(out, res_[v.values[slot]], n);
-        return true;
+        if (n > kResourceBytes) return false;
+        return resource_copy(map(nullptr), guid, out, n, 0xc0, 0x10,
+            [&](ResourceTable* t) {
+                t->records = reinterpret_cast<uintptr_t>(records_); t->capacity = table_capacity_;
+                if (shrink_table_) { table_capacity_ = 1; shrink_table_ = false; }
+                return t->capacity <= kSimKnown;
+            }, [](uintptr_t p, void* dst, size_t bytes) { std::memcpy(dst, reinterpret_cast<void*>(p), bytes); return true; });
     }
 
     uint32_t play_at(const Frame& f, const uint8_t guid[16], const WorldTransform&, const FxParams& p, const FxTiming& d) override {
@@ -150,6 +153,9 @@ public:
     const char* registry_missing() const override { return nullptr; }
     const char* bytes_missing() const override { return nullptr; }
 
+    void set_table(uint64_t capacity, bool shrink) { table_capacity_ = capacity; shrink_table_ = shrink; }
+    uint64_t table_capacity_ = kSimKnown;
+    bool shrink_table_ = false;
     void tick() { ++updates_; }
     uint64_t updates_ = 0;
     uint64_t last_param_hash = 0, last_param_type = 0, last_param_instance = 0, last_param_size = 0, params_applied = 0, preloads = 0;
@@ -220,6 +226,7 @@ private:
     std::vector<uint64_t> bits_, keys_;
     std::vector<uint32_t> values_;
     uint8_t res_[kSimKnown][kResourceBytes];
+    uint8_t records_[kSimKnown][0xc0]{};
     uint64_t count_ = 0;
     uint64_t goes_at_ = 0;
     std::map<uint32_t, SimFx> fx_;
@@ -234,6 +241,7 @@ SimGame* sim() {
 }  // namespace
 
 Game* sim_game() { return sim(); }
+void sim_resource_table(uint64_t capacity, bool shrink) { sim()->set_table(capacity, shrink); }
 
 void sim_known_guid(int n, uint8_t out[16]) {
     // Guid 5f5f5f5f-0000-4000-8000-00000000000<n + 1> in .NET's and the game's byte order

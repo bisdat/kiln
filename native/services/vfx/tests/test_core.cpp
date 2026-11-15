@@ -609,6 +609,26 @@ int main(int argc, char** argv) {
     check(core_status_json(nullptr, 0, &n) == KILN_ERR_BUFFER_TOO_SMALL && n > 0, "status_json: says what it needs");
     check(core_status_json(json, sizeof json, &n) == KILN_OK && std::strstr(json, "\"sim\":true") != nullptr, "status_json");
 
+    {
+        uint8_t bytes[16];
+        std::memset(bytes, 0xab, sizeof bytes);
+        sim_resource_table(1);
+        check(!sim_game()->read_resource(nullptr, known2, bytes, sizeof bytes) && bytes[0] == 0xab,
+              "resource walk refuses an index at table capacity before copying");
+        sim_resource_table(2, true);
+        check(!sim_game()->read_resource(nullptr, known2, bytes, sizeof bytes) && bytes[0] == 0xab,
+              "resource walk refuses a table which shrinks between descriptor reads");
+        sim_resource_table(kSimKnown);
+        const MapView view = sim_game()->map(nullptr);
+        const auto slot = map_slot(view, known2);
+        const uint32_t prior = view.values[slot];
+        const_cast<uint32_t*>(view.values)[slot] = UINT32_MAX;
+        check(!sim_game()->read_resource(nullptr, known2, bytes, sizeof bytes) && bytes[0] == 0xab,
+              "resource walk refuses a corrupt slot value without touching the record array");
+        const_cast<uint32_t*>(view.values)[slot] = prior;
+        check(!sim_game()->read_resource(nullptr, known2, bytes, (1u << 20)+1) && bytes[0] == 0xab,
+              "resource walk refuses an oversized served size before copying");
+    }
     // ---- preload ----
     check(core_preload(known) == KILN_OK && core_preload(known) == KILN_OK && core_preload(zero) == KILN_ERR_INVALID_ARGUMENT, "preload: queued, twice is no harm, empty refused");
     ticks(1);

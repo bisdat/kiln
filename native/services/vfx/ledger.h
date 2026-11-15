@@ -10,6 +10,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#ifdef KILN_VFX_LEDGER_TEST
+#include <functional>
+#endif
 #include <string>
 #include <string_view>
 #include <utility>
@@ -83,6 +86,9 @@ struct Request {
 };
 
 // ---- the process (vfx.cpp, boot.cpp) ----
+#ifdef KILN_VFX_LEDGER_TEST
+void set_writer_for_tests(std::function<bool(const std::filesystem::path&, std::string_view)> writer);
+#endif
 void reset();  // a new process (the host test)
 void set_pending_root(const std::filesystem::path& root);  // <data>/vfx/pending
 // The capability rows: vfx.budget (the count limit can be read on this build) and blocks.vfx_registration (also Kiln's

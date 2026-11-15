@@ -13,6 +13,8 @@
 // table holds it with Kiln's bytes; anything else is refused now, or (AllowNextStart) written to the pending folder for the
 // next start through kiln::capacity::write_atomic.
 #include "ledger.h"
+#include "pending.h"
+#include "pending_cleanup.h"
 
 #include <algorithm>
 #include <cctype>
@@ -45,7 +47,17 @@ struct Receipt {
     uint64_t age = 0;  // insertion order, for forgetting old refusals
 };
 
-std::mutex g_mu;  // everything below
+#ifdef KILN_VFX_LEDGER_TEST
+std::function<bool(const fs::path&, std::string_view)> g_writer;
+#endif
+struct Pending {
+    Id id, guid;
+    std::string mod, name;
+    bool cancelled = false;
+};
+std::map<uint64_t, Pending> g_pending;
+uint64_t g_transaction = 0;
+std::mutex g_mu;  // everything below; never held during storage I/O
 fs::path g_root;
 bool g_budget_on = false, g_registration_on = false;
 Boot g_boot;
@@ -70,6 +82,22 @@ uint8_t verdict_of(const Id& guid) {
     return it == g_verdict.end() ? static_cast<uint8_t>(kUnchecked) : it->second;
 }
 
+// Accepted next-start GUIDs and other in-flight transactions compete for the same admission room.
+uint64_t waiting_for(const Request& q, uint64_t exclude = 0) {
+    std::set<Id> later;
+    for (const auto& [id, x] : g_receipts)
+        if (x.accepted && x.guid != q.guid && !built_of(x.guid) && (x.mod != q.mod || x.name != q.name)) later.insert(x.guid);
+    for (const auto& [token, p] : g_pending)
+        if (token != exclude && !p.cancelled && p.guid != q.guid && !built_of(p.guid)) later.insert(p.guid);
+    return later.size();
+}
+bool fits_now(const Request& q, uint64_t exclude) {
+    if (built_of(q.guid)) return true;
+    const uint64_t cap = g_seen ? g_last.limit : g_boot.admission;
+    const uint64_t taken = g_seen ? g_last.count : uint64_t{g_boot.game_vfx} + g_boot.built.size();
+    return taken < cap && waiting_for(q,exclude) < cap - taken;
+}
+
 // The budget as it is now (revision not set).
 KilnCapacityInfo compute() {
     KilnCapacityInfo n{};
@@ -86,6 +114,10 @@ KilnCapacityInfo compute() {
     uint64_t members = 0, active = 0, retired = 0;
     for (const BuiltVfx& b : g_boot.built) {
         const uint8_t v = verdict_of(b.guid);
+        if (v == kUnchecked) {
+            kiln::capacity::not_ready(&n, KILN_CAPACITY_ACCOUNTING_MISMATCH, scope, 0);
+            return n;
+        }
         if (v == kMissing) continue;
         ++members;
         if (v == kOwn) (g_retired.count(b.mod) ? retired : active) += 1;
@@ -97,7 +129,10 @@ KilnCapacityInfo compute() {
     }
     const uint64_t foreign = g_last.count - game - members;  // other loaders' resources
     // in the table and not Kiln's in use: a retired mod's, other bytes under a Kiln GUID, bytes not compared; and foreign
-    const uint64_t reserved = members - active + foreign;
+    std::set<Id> writing;
+    for (const auto& [token, p] : g_pending)
+        if (!p.cancelled && !built_of(p.guid)) writing.insert(p.guid);
+    const uint64_t reserved = members - active + foreign + writing.size();
     kiln::capacity::publish(&n, g_last.limit, game, active, reserved, scope, 0, false);
     return n;
 }
@@ -165,7 +200,8 @@ void forget_old_refusals() {
     while (g_receipts.size() > kReceiptsMax) {
         auto oldest = g_receipts.end();
         for (auto it = g_receipts.begin(); it != g_receipts.end(); ++it)
-            if (it->second.disposition == KILN_DEFINITION_REFUSED && (oldest == g_receipts.end() || it->second.age < oldest->second.age)) oldest = it;
+            if (it->second.disposition == KILN_DEFINITION_REFUSED &&
+                std::none_of(g_pending.begin(), g_pending.end(), [&](const auto& p){return p.second.id == it->first;}) && (oldest == g_receipts.end() || it->second.age < oldest->second.age)) oldest = it;
         if (oldest == g_receipts.end()) return;
         for (auto f = g_file.begin(); f != g_file.end();)
             f = f->second == oldest->first ? g_file.erase(f) : std::next(f);
@@ -203,10 +239,17 @@ Receipt& receipt_of(const Id& id) {
 }  // namespace
 
 // ---- the process ----
+#ifdef KILN_VFX_LEDGER_TEST
+void set_writer_for_tests(std::function<bool(const fs::path&, std::string_view)> writer) {
+    std::lock_guard lk(g_mu);
+    g_writer = std::move(writer);
+}
+#endif
 
 void reset() {
     std::lock_guard lk(g_mu);
     g_root.clear();
+    g_pending.clear();
     g_budget_on = g_registration_on = false;
     g_boot = {};
     g_by_guid.clear();
@@ -293,6 +336,7 @@ bool observed() {
 uint32_t release(const std::string& mod) {
     std::lock_guard lk(g_mu);
     g_retired.insert(mod);
+    for (auto& [token, p] : g_pending) if (p.mod == mod) p.cancelled = true;
     uint32_t n = 0;
     for (const BuiltVfx& b : g_boot.built) n += b.mod == mod;
     publish();
@@ -338,12 +382,20 @@ KilnResult define(const Request& q, KilnDefinitionReply* out, std::string* repor
         return bad("timing " + std::to_string(q.timing) + " is not REQUIRE_REGISTERED (0) or ALLOW_NEXT_START (1)");
     if (!valid_mod(q.mod)) return bad("\"" + q.mod + "\" is not a mod id (letters, digits, '-', '_', '.'; at most 64)");
     if (!valid_name(q.name)) return bad("\"" + q.name + "\" is not a block name (letters, digits, '-', '_', '.'; at most 128)");
-    std::lock_guard lk(g_mu);
+    std::unique_lock lk(g_mu);
     if (!g_registration_on) {
         *report = report_json("blocks.vfx_registration is off in this process (Capabilities.Why says why)", {});
         return KILN_ERR_UNAVAILABLE;
     }
     const Id id = registration_id(q.mod, q.guid, q.canonical);
+    for (const auto& [token, p] : g_pending) {
+        if (p.id == id || (p.mod == q.mod && p.name == q.name) || p.guid == q.guid) {
+            kiln::capacity::reply_init(out, KILN_DEFINITION_VFX, id.data(), q.guid.data());
+            kiln::capacity::reply_refused(out, KILN_DEFINE_NOT_READY, g_pub.revision);
+            *report = report_json("a definition of this name or GUID is being stored; retry after it finishes", q.warnings);
+            return KILN_OK;
+        }
+    }
     const bool pending_collision = std::any_of(g_receipts.begin(), g_receipts.end(), [&](const auto& entry) {
         const Receipt& other = entry.second;
         return other.accepted && other.guid == q.guid && (other.mod != q.mod || other.name != q.name);
@@ -373,13 +425,56 @@ KilnResult define(const Request& q, KilnDefinitionReply* out, std::string* repor
         }
         const fs::path path = g_root / fs::path(std::u8string(q.mod.begin(), q.mod.end())) /
                               fs::path(std::u8string(q.name.begin(), q.name.end())).concat(u8".json");
-        if (!kiln::capacity::write_atomic(path, pending_text(id, q.name, q.block))) {
-            const std::u8string where = path.u8string();
-            refuse(KILN_DEFINE_STORAGE_FAILURE, "could not write " + std::string(where.begin(), where.end()));
+        const std::string bytes = pending_text(id, q.name, q.block);
+        if (bytes.size() > kvx_pending::kFileBytes) {
+            refuse(KILN_DEFINE_STORAGE_FAILURE, "the pending definition exceeds the replay file bound of 65536 bytes");
             return;
         }
-        file_holds(q.mod, q.name, &id);
-        r.accepted = true;
+#ifdef KILN_VFX_LEDGER_TEST
+        const auto writer = g_writer;
+#endif
+        const uint64_t token = ++g_transaction;
+        g_pending.emplace(token, Pending{id, q.guid, q.mod, q.name});
+        bool wrote = false;
+        try {
+            r.code = KILN_DEFINE_NOT_READY;
+            r.why = "the definition is being stored";
+            publish();
+            lk.unlock();
+            std::unique_lock storage(kvx::pending_io_mutex());
+#ifdef KILN_VFX_LEDGER_TEST
+            wrote = writer ? writer(path, bytes) : kiln::capacity::write_atomic(path, bytes);
+#else
+            wrote = kiln::capacity::write_atomic(path, bytes);
+#endif
+            lk.lock();
+            const bool cancelled = g_pending.at(token).cancelled;
+            const bool capacity_lost = !fits_now(q,token);
+            bool cleaned = true;
+            if ((cancelled || capacity_lost) && wrote) {
+                // Keep the path reserved until cleanup finishes so another writer cannot lose its file.
+                lk.unlock();
+                cleaned = kvx::discard_pending(path,bytes);
+                lk.lock();
+                file_holds(q.mod, q.name, nullptr);
+            }
+            g_pending.erase(token);
+            if (cancelled) {
+                refuse(KILN_DEFINE_OWNER_INACTIVE, "the mod unloaded while its definition was being stored");
+            } else if (!wrote) {
+                refuse(KILN_DEFINE_STORAGE_FAILURE, "could not write the pending VFX definition");
+            } else if (capacity_lost) {
+                refuse(KILN_DEFINE_CAPACITY_EXCEEDED, "the sampled table no longer has room for the definition after storage completed");
+            } else {
+                file_holds(q.mod, q.name, &id);
+                r.accepted = true;
+            }
+            if (!cleaned) why += "; cleanup of the unacknowledged pending file could not be confirmed";
+        } catch (...) {
+            if (!lk.owns_lock()) lk.lock();
+            g_pending.erase(token);
+            refuse(KILN_DEFINE_STORAGE_FAILURE, "storing the pending VFX definition threw an exception");
+        }
     };
     if (!q.owner_live) {
         refuse(KILN_DEFINE_OWNER_INACTIVE, "the mod's owner is no longer active");
@@ -413,10 +508,7 @@ KilnResult define(const Request& q, KilnDefinitionReply* out, std::string* repor
                 // a new GUID takes a slot at the next start: what the table holds now, the new ones accepted in this process, and it
                 cap = g_seen ? g_last.limit : g_boot.admission;
                 taken = g_seen ? g_last.count : uint64_t{g_boot.game_vfx} + g_boot.built.size();
-                std::set<Id> later;
-                for (const auto& [rid, x] : g_receipts)
-                    if (x.accepted && x.guid != q.guid && !built_of(x.guid) && (x.mod != q.mod || x.name != q.name)) later.insert(x.guid);
-                waiting = later.size();
+                waiting = waiting_for(q);
                 over = taken >= cap || waiting >= cap - taken;
             }
             if (over)
