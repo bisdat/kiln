@@ -57,6 +57,10 @@ struct SetPlan {
     uint32_t required_free = 0;  // the most free Generic slots the steps use at one time
     char reason[256] = "";
     std::vector<PlanStep> steps;
+    // per step (the swap check): the item entity an equip took off its slot (0: the slot was empty; 0xFFFFFFFF: a plain
+    // stack came off), whether the step's slot held something before it
+    std::vector<uint32_t> swap_out;
+    std::vector<bool> target_held;
     // per entry, filled for the executor's checks after the commit
     bool satisfied[kSelectionSlots] = {};
 };
@@ -129,6 +133,8 @@ inline SetPlan plan_set(const SetModel& m, const KilnSetOpV1* entries, uint32_t 
         p.refusal = (code);                                            \
         p.failed_entry = (entry);                                      \
         p.steps.clear();                                               \
+        p.swap_out.clear();                                            \
+        p.target_held.clear();                                         \
         std::snprintf(p.reason, sizeof p.reason, __VA_ARGS__);         \
         return p;                                                      \
     } while (0)
@@ -251,6 +257,8 @@ inline SetPlan plan_set(const SetModel& m, const KilnSetOpV1* entries, uint32_t 
         s.count = t->count;
         s.source = from;
         p.steps.push_back(s);
+        p.swap_out.push_back(st.eq[x].empty() ? 0u : (st.eq[x].pide ? st.eq[x].pide : 0xFFFFFFFFu));
+        p.target_held.push_back(!st.eq[x].empty());
         const Token in = *t;
         *t = st.eq[x];
         st.eq[x] = in;
@@ -267,6 +275,8 @@ inline SetPlan plan_set(const SetModel& m, const KilnSetOpV1* entries, uint32_t 
         s.pide = st.eq[x].pide;
         s.count = st.eq[x].count;
         p.steps.push_back(s);
+        p.swap_out.push_back(0);
+        p.target_held.push_back(true);
         *st.at(into) = st.eq[x];
         st.eq[x] = Token{};
         filled_after_empty[x] = true;
@@ -275,9 +285,10 @@ inline SetPlan plan_set(const SetModel& m, const KilnSetOpV1* entries, uint32_t 
     while (left > 0) {
         if (p.steps.size() >= kMaxSteps) KSET_REFUSE(KILN_SET_REFUSAL_TOO_MANY_STEPS, UINT32_MAX, "the set needs more than %u steps", kMaxSteps);
         bool progress = false;
-        // A: equips from a non-equipment slot, in slot order
+        // A: items from a non-equipment slot into equipment slots that are empty now, in slot order (a plain stack waits
+        // for D: the game equips arrows and the like where they lie, so they go last)
         for (uint32_t x = 0; x < kSelectionSlots; ++x) {
-            if (!open[x] || want[x].kind == 0) continue;
+            if (!open[x] || want[x].kind != 1 || !st.eq[x].empty()) continue;
             int y = -1;
             const uint64_t at = st.find(want[x].token, &y);
             if (y >= 0 || !at) continue;
@@ -296,6 +307,27 @@ inline SetPlan plan_set(const SetModel& m, const KilnSetOpV1* entries, uint32_t 
             open[x] = false, --left, progress = true;
         }
         if (progress) continue;
+        // A2: items into equipment slots that hold another item (the game swaps them), in slot order; the swap check
+        // after the plan refuses an order the game's commit does not keep
+        for (uint32_t x = 0; x < kSelectionSlots && !progress; ++x) {
+            if (!open[x] || want[x].kind != 1) continue;
+            int y = -1;
+            const uint64_t at = st.find(want[x].token, &y);
+            if (y >= 0 || !at) continue;
+            equip(x, at, want[x].kind, want[x].entry, want[x].stamp);
+            open[x] = false, --left, progress = true;
+        }
+        if (progress) continue;
+        // D: plain stacks (arrows, spells, bait), last
+        for (uint32_t x = 0; x < kSelectionSlots && !progress; ++x) {
+            if (!open[x] || want[x].kind != 2) continue;
+            int y = -1;
+            const uint64_t at = st.find(want[x].token, &y);
+            if (y >= 0 || !at) continue;
+            equip(x, at, want[x].kind, want[x].entry, want[x].stamp);
+            open[x] = false, --left, progress = true;
+        }
+        if (progress) continue;
         // C: a cycle: an item worn in one named slot and asked for in another
         for (uint32_t x = 0; x < kSelectionSlots && !progress; ++x) {
             if (!open[x]) continue;
@@ -311,6 +343,23 @@ inline SetPlan plan_set(const SetModel& m, const KilnSetOpV1* entries, uint32_t 
             progress = true;
         }
         if (!progress) KSET_REFUSE(KILN_SET_REFUSAL_NOT_HERE, UINT32_MAX, "the set cannot be planned");
+    }
+    // The swap check (the rollback matrix of 2026-11-15, server 26430253): an equip into a slot that held an item with its
+    // own entity is kept by the game's commit only when no later step moves a stack other than the one it took off (a
+    // swap, then another equip or a removal, left the swapped slot pointing at the item that came off). Plain stacks are
+    // equipped where they lie and do not count.
+    for (size_t i = 0; i < p.steps.size(); ++i) {
+        const PlanStep& sw = p.steps[i];
+        if (sw.op != OpKind::Equip || sw.kind != 1 || !p.swap_out[i]) continue;
+        for (size_t j = i + 1; j < p.steps.size(); ++j) {
+            const PlanStep& later = p.steps[j];
+            if (later.kind == 2) continue;
+            const bool only_that_item = later.op == OpKind::Equip && later.pide == p.swap_out[i] && !p.target_held[j];
+            if (!only_that_item)
+                KSET_REFUSE(KILN_SET_REFUSAL_SWAPS, sw.entry,
+                            "more than one slot that holds an item gets another one (or a slot is emptied after a swap): the game's commit "
+                            "would point a slot at the item that came off; apply it as two sets (Kiln refuses it before mutation)");
+        }
     }
     p.status = SetPlan::Planned;
     p.required_free = free_at_start - low;

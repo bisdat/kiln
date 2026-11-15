@@ -20,6 +20,14 @@ public sealed unsafe class SetDecisionsTests
     private static ItemInstanceRef Ref(uint entity, uint item, uint stamp) =>
         new(new EntityRef(new EntityId(entity), IdentitySources.Stamp(EntitySourceOrder.Items, stamp)), new ItemId(item));
 
+    // kiln.playerstate's intake as Kiln.Players offers it where the table holds selectively (the kit has no
+    // kiln.playerstate): events.equip's producer asks it before a PlayerEquippingEvent subscription is taken
+    private sealed class SelectiveIntake : ClientActionDecisions.IIntake
+    {
+        public void Start() { }
+        public string? WhyNotSelective() => null;
+    }
+
     private static EquipmentSetEntry[] OneRing() => [new(EquipmentSlot.Ring0, new InstanceEquipment(Ref(5002, 0x4623bcb0, 1002)))];
 
     private static byte[] Payload(ulong ticket, ulong token, bool dry, params EquipDecisions.SetOp[] ops)
@@ -42,6 +50,7 @@ public sealed unsafe class SetDecisionsTests
             using var kiln = new KilnHarness();
             kiln.Step(2);
             var player = kiln.Entities.Create(new WorldPosition(1, 2, 3));
+            ClientActionDecisions.SetIntake(new SelectiveIntake());
             Items.EnsureSetDecisions();
             var seen = new List<PlayerEquippingEvent>();
             var cancel = true;
@@ -84,7 +93,8 @@ public sealed unsafe class SetDecisionsTests
         finally
         {
             Items.ResetSetsForTests();
-            FakeTables.Features([]);
+            ClientActionDecisions.ResetForTests();
+            FakeTables.Features([EquipDecisions.Row]);
         }
     }
 }

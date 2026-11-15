@@ -385,6 +385,7 @@ public sealed unsafe class EquipmentSetTests
     [InlineData(4u, "SnapshotBudgetExceeded: no free slot")]
     [InlineData(5u, "StaleSnapshot: no free slot")]
     [InlineData(10u, "UnsupportedBackpack: no free slot")]
+    [InlineData(14u, "UnsupportedSwaps: no free slot")]
     [InlineData(99u, "Refused: no free slot")]
     public void ARefusalStartsWithItsCode(uint code, string text) => Assert.Equal(text, Items.ReasonOf(code, "no free slot"));
 

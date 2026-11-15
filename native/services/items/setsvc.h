@@ -40,12 +40,13 @@ uint8_t sets_slot_type(uint32_t item, void*);
 bool sets_peek_model(uint64_t token, KilnOwner owner, uint64_t epoch, uint64_t now, sets::SnapStore::Find* f, sets::SetModel* model,
                      sets::SnapPrefix* prefix, uint64_t* captured_step);
 
-// The planner's options (setplan.h): cycles and backpack changes stay refused until the rollback matrix passed (a lab
-// turns them on with kiln/data/kiln.items/sets-cycles and sets-backpack, read at start).
+// The planner's options (setplan.h): cycles are on since the rollback matrix passed them (a lab turns them off with
+// kiln/data/kiln.items/sets-no-cycles); backpack changes stay refused until their matrix runs (sets-backpack: lab only).
 sets::PlanOptions sets_plan_options();
 // The lab switches, read once at start (kiln/data/kiln.items/sets-lab: fault injection on set requests).
 void sets_lab_init();
 bool sets_lab();
+bool sets_lab_matrix();  // kiln/data/kiln.items/sets-matrix: a state mismatch does not switch sets off (lab matrix only)
 // A plan as the ABI has it (KilnSetPlanV1's status, refusal, steps).
 void sets_fill_plan(const sets::SetPlan& p, uint64_t valid_through, KilnSetPlanV1* out);
 

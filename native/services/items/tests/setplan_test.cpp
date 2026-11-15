@@ -194,6 +194,31 @@ int main() {
               "the steps run in numeric slot order whatever the request's order");
     }
 
+    // ---- the swap rule (the lab's rollback matrix: a swap must not be followed by a step that moves another stack) ----
+    {
+        Model x = base();
+        x.put(slot(EQ, 1), RingB, 1, 5006);
+        x.wear(kRing1, slot(EQ, 1));
+        x.put(slot(EQ, 5), Hat, 1, 5007);
+        x.wear(kHead, slot(EQ, 5));
+        // two slots that hold items both get others: refused before mutation
+        SetPlan p = plan(x, {inst(kRing0, 5002, RingB), inst(kRing1, 5004, RingC)});
+        check(refused(p, KILN_SET_REFUSAL_SWAPS), "two swaps: refused before mutation (UnsupportedSwaps)");
+        // a swap and an equip into an empty slot: the empty slot first, the swap last
+        Model y = base();
+        p = plan(y, {inst(kRing0, 5002, RingB), inst(kRing1, 5004, RingC)});
+        check(p.status == SetPlan::Planned && p.steps.size() == 2 && step(p, 0, OpKind::Equip, kRing1, slot(G2, 0)) && step(p, 1, OpKind::Equip, kRing0, slot(G1, 2)),
+              "a swap and an equip into an empty slot: the empty slot first, the swap last");
+        // a swap and a removal: the removal first, the swap last
+        p = plan(x, {inst(kHead, 5003, Hat), empty(kRing1)});
+        check(p.status == SetPlan::Planned && p.steps.size() == 2 && step(p, 0, OpKind::Unequip, kRing1) && step(p, 1, OpKind::Equip, kHead, slot(G1, 3)),
+              "a swap and a removal: the removal first, the swap last");
+        // a swap and a stack: the stack (equipped where it lies) after it is fine
+        p = plan(y, {inst(kRing0, 5002, RingB), stack(kArrow, Bolts, slot(G1, 5), 30)});
+        check(p.status == SetPlan::Planned && p.steps.size() == 2 && step(p, 0, OpKind::Equip, kRing0, slot(G1, 2)) && p.steps[1].game_slot == kArrow,
+              "a swap and a stack: the stack last, allowed");
+    }
+
     // ---- cycles ----
     {
         Model x = base();

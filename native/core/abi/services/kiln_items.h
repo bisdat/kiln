@@ -711,6 +711,9 @@ typedef struct KilnItemsEquipStatus {
 #define KILN_SET_REFUSAL_LOCKED 11u     /* an item is worn in a slot the set leaves as it is */
 #define KILN_SET_REFUSAL_MERGE 12u      /* a stack of the item type its slot already holds (the game could merge them) */
 #define KILN_SET_REFUSAL_TOO_MANY_STEPS 13u /* more than 128 steps */
+#define KILN_SET_REFUSAL_SWAPS 14u      /* more than one slot that holds an item gets another one, or a slot is emptied after
+                                           such a swap: the game's commit would point a slot at the item that came off
+                                           (UnsupportedSwaps; the rollback matrix, docs/kiln/services/items.md) */
 
 typedef struct KilnSetSnapshotV1 {
     uint32_t size;               /* in: sizeof the caller's struct (at least the chapter's 88 bytes, up to `reason`) */

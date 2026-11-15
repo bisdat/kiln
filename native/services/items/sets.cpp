@@ -414,7 +414,7 @@ const char* find_text(SnapStore::Find f) {
 }  // namespace
 
 namespace {
-bool g_lab = false;
+bool g_lab = false, g_matrix = false;
 PlanOptions g_plan_options;
 }  // namespace
 
@@ -425,14 +425,18 @@ void sets_lab_init() {
     std::error_code ec;
     const std::filesystem::path dir = std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(buf), len)) / "kiln.items";
     g_lab = std::filesystem::exists(dir / "sets-lab", ec);
-    g_plan_options.cycles = std::filesystem::exists(dir / "sets-cycles", ec);
+    g_matrix = g_lab && std::filesystem::exists(dir / "sets-matrix", ec);
+    // cycles (two worn items exchanged through a free slot) passed the rollback matrix (2026-11-15): on unless a lab turns
+    // them off to see the refusal
+    g_plan_options.cycles = !std::filesystem::exists(dir / "sets-no-cycles", ec);
     g_plan_options.backpack = std::filesystem::exists(dir / "sets-backpack", ec);
-    if (g_lab || g_plan_options.cycles || g_plan_options.backpack)
-        LOGW("equipment sets: lab switches%s%s%s (kiln/data/kiln.items): never on a player's server", g_lab ? " sets-lab (fault injection)" : "",
-             g_plan_options.cycles ? " sets-cycles" : "", g_plan_options.backpack ? " sets-backpack" : "");
+    if (g_lab || !g_plan_options.cycles || g_plan_options.backpack)
+        LOGW("equipment sets: lab switches%s%s%s%s (kiln/data/kiln.items): never on a player's server", g_lab ? " sets-lab (fault injection)" : "",
+             g_matrix ? " sets-matrix" : "", !g_plan_options.cycles ? " sets-no-cycles" : "", g_plan_options.backpack ? " sets-backpack" : "");
 }
 
 bool sets_lab() { return g_lab; }
+bool sets_lab_matrix() { return g_matrix; }
 
 PlanOptions sets_plan_options() { return g_plan_options; }
 

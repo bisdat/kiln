@@ -400,7 +400,8 @@ public static unsafe partial class Items
     {
         PendingSet? p;
         lock (SetGate) SetsInFlight.Remove(key, out p);
-        if (result.Status == EquipmentSetStatus.InvariantFailure) SetsFaulted(result.Reason);
+        // kiln.items switches sets off with an invariant failure (its status says so; a lab matrix keeps them on)
+        if (result.Status == EquipmentSetStatus.InvariantFailure && NativeSetsBroken()) SetsFaulted(result.Reason);
         try
         {
             // native-owned facts: posted also when the asking mod unloaded; on the thread that stops the world they come at
@@ -467,6 +468,13 @@ public static unsafe partial class Items
         {
             ModContext.CurrentMod = outer;
         }
+    }
+
+    // True unless kiln.items says sets are still on (its lab matrix keeps them on after a mismatch); no table: true.
+    private static bool NativeSetsBroken()
+    {
+        var t = V6;
+        return t == null || SetStatusOf(t) is not { Broken: false };
     }
 
     // An invariant failure (or a lost result): kiln.items switched sets off; the row follows now, not in 25 steps.
@@ -667,6 +675,7 @@ public static unsafe partial class Items
             11 => "OmittedSlotWouldChange",
             12 => "StackMerge",
             13 => "TooManySteps",
+            14 => "UnsupportedSwaps",
             _ => "Refused",
         };
         return text.Length > 0 ? $"{name}: {text}" : name;

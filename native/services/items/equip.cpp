@@ -479,9 +479,13 @@ void run_set(const Access& a, uint64_t* it, KilnEntity player, SetRequest&& set,
     } else {
         set_run(a, player, g_tx, set.job, &f.out);
     }
-    if (f.out.engine_fault) {
-        // the game faulted inside the set's reads or transaction: sets go off, and equip too (the same functions and the
-        // same transaction buffer; a transaction that faulted is not repaired or reused safely)
+    if (f.out.engine_fault && !f.out.seh && sets_lab_matrix()) {
+        // lab only (kiln/data/kiln.items/sets-matrix): a mismatch is reported but sets stay on, so one boot maps every form
+        LOGW("equipment set ticket %llu: lab matrix: a state mismatch is reported, sets stay on (never on a player's server)",
+             static_cast<unsigned long long>(set.ticket));
+    } else if (f.out.engine_fault) {
+        // the game faulted inside the set's reads or transaction, or the state after it is neither asked nor as before:
+        // sets go off, and equip too (the same functions and the same transaction buffer; nothing is repaired)
         sets_break(f.out.reason);
         broken("an equipment set's transaction faulted or failed its check (see kiln.log)");
     }
@@ -677,6 +681,13 @@ void deliver_sets(std::vector<SetFinished>& done) {
                   static_cast<unsigned long long>(r.ticket), (r.flags & KILN_SET_RESULT_DRY_RUN) ? " (dry run)" : "", r.player, f.req.job.count,
                   f.req.job.count == 1 ? "y" : "ies", r.status, f.out.steps, r.change_count, static_cast<unsigned long long>(r.decision_id),
                   r.game_error, where, r.reason[0] ? ": " : "", r.reason);
+        for (uint32_t i = 0; i < r.change_count; ++i) {
+            const KilnSetChangeV1& c = r.changes[i];
+            items_log(KILN_LOG_INFO, "  equipment set ticket %llu: slot %u: 0x%08x#%u x%u in %u:%u -> 0x%08x#%u x%u in %u:%u",
+                      static_cast<unsigned long long>(r.ticket), c.equipment_slot, c.before.item_id, c.before.item_entity, c.before.count,
+                      KILN_SLOT_INVENTORY(c.before.inventory_slot), KILN_SLOT_INDEX(c.before.inventory_slot), c.after.item_id, c.after.item_entity,
+                      c.after.count, KILN_SLOT_INVENTORY(c.after.inventory_slot), KILN_SLOT_INDEX(c.after.inventory_slot));
+        }
         unsigned long code = 0;
         if (f.req.done && !guarded_set_done(f.req.done, &r, f.req.user, &code))
             LOGE("an equipment set callback (submitter %llu) faulted (0x%08lx); ignored", static_cast<unsigned long long>(f.req.submitter), code);

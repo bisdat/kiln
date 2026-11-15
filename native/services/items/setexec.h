@@ -56,6 +56,7 @@ struct SetOutcome {
     uint32_t flags = 0;                      // kResult*
     uint32_t refusal = KILN_SET_REFUSAL_NONE;
     bool engine_fault = false;               // equipment sets go off until the server restarts
+    bool seh = false;                        // the game faulted (a structured exception), not a state mismatch
     uint32_t steps = 0;                      // steps staged
     char reason[256] = "";
     std::vector<SlotChange> changes;
@@ -140,7 +141,11 @@ inline bool desired(const SetModel& before, const SetModel& after, const KilnSet
             case 1: ok = v.pide == e[i].item_entity && v.item == e[i].item_id && v.stamp == static_cast<uint32_t>(e[i].instance_stamp); break;
             case 2: ok = v.item == e[i].item_id && v.count == e[i].expected_count; break;
         }
-        if (!ok) return std::snprintf(why, cap, "equipment slot %u does not hold what the set asked", e[i].equipment_slot), false;
+        if (!ok)
+            return std::snprintf(why, cap, "equipment slot %u holds item 0x%08x entity %u x%u in %u:%u, not what the set asked (item 0x%08x entity %u)",
+                                 e[i].equipment_slot, v.item, v.pide, v.count, KILN_SLOT_INVENTORY(v.slot), KILN_SLOT_INDEX(v.slot), e[i].item_id,
+                                 e[i].item_entity),
+                   false;
     }
     for (uint32_t x = 0; x < kSelectionSlots; ++x)
         if (!named[x] && !(value_at(before, x) == value_at(after, x)))
@@ -160,6 +165,7 @@ inline SetOutcome execute(SetEngine& g, const SetJob& job, const PlanOptions& op
     auto fault = [&](const char* where, bool tx_open, bool commit_called) {
         o.status = SetStatus::InvariantFailure;
         o.engine_fault = true;
+        o.seh = true;
         if (tx_open) o.flags |= kResultMayHaveMutated;
         (void)commit_called;
         o.changes.clear();
@@ -175,6 +181,7 @@ inline SetOutcome execute(SetEngine& g, const SetJob& job, const PlanOptions& op
     if (!g.read(&now, &st)) {
         o.status = SetStatus::Unavailable;
         o.engine_fault = true;
+        o.seh = true;
         std::snprintf(o.reason, sizeof o.reason, "reading the player's inventory inside the program faulted: nothing was changed; equipment sets are off until the server restarts");
         return o;
     }
