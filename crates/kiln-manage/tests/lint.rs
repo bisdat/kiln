@@ -507,14 +507,15 @@ fn sound_schema_matches_the_recipe_reader() {
     }
 }
 
-/// Every mod in the repository passes the schemas (the resolver samples are broken on purpose).
+/// Every mod in the repository passes the schemas (the resolver samples and the content-stop lab's cs-broken are
+/// broken on purpose).
 #[test]
 fn repository_mods_pass_the_schemas() {
     let r = run(&[repo().join("mods")], &opts());
     let bad: Vec<String> = r
         .diagnostics
         .iter()
-        .filter(|d| d.severity == Severity::Error && (d.code.starts_with("KL0") || d.code.starts_with("KL1")) && !d.file.contains("sample-bad-manifest"))
+        .filter(|d| d.severity == Severity::Error && (d.code.starts_with("KL0") || d.code.starts_with("KL1")) && !d.file.contains("sample-bad-manifest") && !d.file.contains("content-stop-test/mods/cs-broken"))
         .map(|d| format!("{}:{}: {} {}", d.file, d.line, d.code, d.message))
         .collect();
     assert!(r.checked.len() > 60, "{}", r.checked.len());
