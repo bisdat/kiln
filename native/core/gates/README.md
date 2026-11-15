@@ -1,8 +1,9 @@
 # The client gate's list
 
 **0.2.0-dev.29 ships with this list empty.** The owner decided on 2026-11-14 that nothing ships held: every capability
-0.2.0-dev.28 held (20 rows: world queries and paths, terrain overlays, tool wear, values in the game's UI, the client
-asset catalog, boot VFX, program wraps and replication watching on a client, weapon follow-ups, transform scale) is on
+0.2.0-dev.28 held (22 rows: world queries and paths, terrain overlays, tool wear, values in the game's UI, the client
+asset catalog, a mod's OnBoot, resource patches and boot VFX on a client, program wraps and replication watching on a
+client, weapon follow-ups, transform scale) is on
 for every player, and the guided checks stay as the list of what a real game has not confirmed yet
 (`tools/client-checks/plan.py`, the release notes' "On, not yet confirmed in a real game"). The mechanism below stays
 for a capability the owner decides to hold; a held default is the owner's decision at each release, asked as its own

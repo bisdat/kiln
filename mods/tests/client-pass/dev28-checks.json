@@ -478,7 +478,8 @@
    "packages": [
     "06b-typed-hooks"
    ],
-   "state": "open"
+   "state": "open",
+   "deferred": "optional diagnostic that opens nothing: it needs a mod that links rules/TerrainDamage with a pass-through typed hook, and the check pack has no such fixture; 06b-typed-hooks.client covers a typed hook running in a real game"
   },
   {
    "id": "06c-impact-thread",
