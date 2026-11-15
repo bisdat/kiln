@@ -154,7 +154,9 @@ public static unsafe class EcsPrograms
             try
             {
                 ModContext.CurrentMod = binding.Mod;
-                binding.Callback(new EcsProgramContext(binding, context, iterator, entity));
+                SliceGuard.Depth++;
+                try { binding.Callback(new EcsProgramContext(binding, context, iterator, entity)); }
+                finally { SliceGuard.Depth--; }
             }
             catch (Exception error)
             {

@@ -32,6 +32,73 @@ public sealed class SystemsFakeTests
     }
 
     [Fact]
+    public unsafe void Reservation_service_has_the_extended_shape_and_explicit_offline_results()
+    {
+        using var kiln = new KilnHarness();
+        Assert.Equal(24, sizeof(WorldBudgetTable.Table));
+        Assert.Equal(24, sizeof(Systems.ReservationTable));
+        Assert.Equal(16, (int)Marshal.OffsetOf<WorldBudgetTable.Table>(nameof(WorldBudgetTable.Table.ProgramReservation)));
+        Assert.Equal(16, (int)Marshal.OffsetOf<Systems.ReservationTable>(nameof(Systems.ReservationTable.ProgramReservation)));
+        var t = (WorldBudgetTable.Table*)KitBackend.Instance.Service("kiln.world.budget", 1);
+        Assert.True(t != null && *(uint*)t == 24);
+        uint size = 123;
+        Assert.Equal(FakeTables.Unavailable, t->ProgramReservation(default, default, null, 0, &size));
+        Assert.Equal(0u, size);
+        Assert.False(kiln.Capabilities.Is("systems.define"));
+    }
+
+    [Fact]
+    public void Original_time_is_excluded_and_a_fast_stage_resets_the_overrun_streak()
+    {
+        using var kiln = new KilnHarness();
+        var mod = kiln.Load<WrapMod>(new ModManifest("original-budget")); kiln.Step(1);
+        long clock = 0;
+        KitFakes.State<SystemsState>(kiln).Timestamp = () => clock;
+        var slow = System.Diagnostics.Stopwatch.Frequency / 500;
+        kiln.Programs.Add("fuel_setup", FuelLists, _ => clock += slow); Containers(kiln);
+        var calls = 0;
+        var wrap = kiln.As(mod, () => Systems.Wrap("fuel_setup").Wrap!);
+        kiln.As(mod, () => wrap.Replace((ref Slice s) => { calls++; s.RunOriginal(); if (calls != 10) clock += slow; }));
+        kiln.Step(19);
+        Assert.Equal(19, calls);
+        Assert.Equal(18, kiln.Run(() => wrap.Stats).Overruns);
+        kiln.Step(3);
+        Assert.Equal(20, calls); // tenth consecutive overrun since the fast tenth call
+    }
+
+    [Fact]
+    public void Ten_consecutive_budget_overruns_disable_only_that_stage()
+    {
+        using var kiln = new KilnHarness();
+        var mod = kiln.Load<WrapMod>(new ModManifest("budget-kit")); kiln.Step(1);
+        kiln.Programs.Add("fuel_setup", FuelLists); Containers(kiln);
+        var calls = 0;
+        long clock = 0;
+        KitFakes.State<SystemsState>(kiln).Timestamp = () => clock;
+        var disabled = new List<WrapDisabledEvent>();
+        var wrap = kiln.As(mod, () => Systems.Wrap("fuel_setup").Wrap!.Before((ref Slice s) => { calls++; clock += System.Diagnostics.Stopwatch.Frequency / 500; }));
+        wrap.Disabled += disabled.Add;
+        kiln.Step(12);
+        Assert.Equal(10, calls);
+        Assert.Equal(10, kiln.Run(() => wrap.Stats).Overruns);
+        Assert.Single(disabled); Assert.Contains("budget", disabled[0].Reason);
+        Assert.Equal(ModState.Loaded, mod.State);
+    }
+
+    [Fact]
+    public void Faulting_stages_disable_and_charge_the_real_mod_policy()
+    {
+        using var kiln = new KilnHarness(new KilnHarnessOptions { ThrowOnModFault = false });
+        var mod = kiln.Load<WrapMod>(new ModManifest("fault-kit")); kiln.Step(1);
+        kiln.Programs.Add("fuel_setup", FuelLists); Containers(kiln);
+        for (var n = 0; n < 5; n++)
+            kiln.As(mod, () => Systems.Wrap("fuel_setup").Wrap!.Before((ref Slice s) => throw new InvalidOperationException("stage fault")));
+        kiln.Step(3);
+        Assert.Equal(ModState.Disabled, mod.State);
+        Assert.Contains("5 faults", mod.Error);
+    }
+
+    [Fact]
     public void The_table_is_kiln_world_v4_and_the_wrap_rows_are_faked()
     {
         using var kiln = new KilnHarness();
