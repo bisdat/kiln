@@ -4,7 +4,12 @@
 // world's only base (3024, ~903, 1548): the walls it writes are transient, outside bases, checked for success before a ray
 // counts, and taken away again.
 // Rays are spread over steps: the service admits 64 per step for everyone.
+// kiln.programs.json declares ray_probe, an entity program whose update asks for a ray while a window is armed: refused
+// from inside the program (InsideProgram), also on a game worker with the lab parallel switch (kiln/control/systems.parallel),
+// and from a GameSystems.Hook callback on a game system.
+using System.Collections.Concurrent;
 using Kiln;
+using Kiln.Testing;
 
 namespace QueriesTest;
 
@@ -14,7 +19,12 @@ public sealed class QueriesTestMod : Mod
     private const int PerStep = 50, Wanted = 1000;
     private int _pass, _fail;
 
-    public override void OnLoad() => _ = Run();
+    public override void OnLoad()
+    {
+        try { _probeBinding = EcsPrograms.Bind("ray_probe", RayProbe); }
+        catch (Exception e) { _bindError = e.Message; }
+        _ = Run();
+    }
 
     private void Check(bool ok, string name, string detail)
     {
@@ -40,11 +50,13 @@ public sealed class QueriesTestMod : Mod
             var ground = await Ground();
             if (ground is not { } y) return;
             await Air(y);
+            await InsideProgram(y);
             await Wall(y, Voxel.Of(1), "queries.ray.wall.terrain");
             await Wall(y, Voxel.Of(0x81), "queries.ray.wall.building");
             await Arguments(y);
             await Budget(y);
             await Overlap(y);
+            await Paths(y);
         }
         catch (Exception e)
         {
@@ -143,26 +155,32 @@ public sealed class QueriesTestMod : Mod
         var box = new CellBox(corner.X, corner.Y, corner.Z, 2, 12, 6);
         var before = Build.Read(box);
         var options = new BuildOptions { Flags = BuildFlags.Transient, Journal = false };
-        var write = Build.Write(box, Enumerable.Repeat(voxel, (int)box.Count).ToArray(), options);
-        if (!(write.Changed && write.Verified))
+        try
         {
-            Check(false, name, $"the wall was not written (changed={write.Changed} verified={write.Verified} cells={write.CellsChanged}): no ray counts");
-            return;
+            var write = Build.Write(box, Enumerable.Repeat(voxel, (int)box.Count).ToArray(), options);
+            if (!(write.Changed && write.Verified))
+            {
+                Check(false, name, $"the wall was not written (changed={write.Changed} verified={write.Verified} cells={write.CellsChanged}): no ray counts");
+                return;
+            }
+            // the ray's cache sees the write some steps later: wait for the first hit
+            await One(() => Queries.RaycastVoxels(a, b), x => x.Hit != null);
+            var r = await Many(() => Queries.RaycastVoxels(a, b), Wanted);
+            var wallX = Build.CornerOf(corner).X;
+            var hitX = r.Last?.Position.X ?? double.NaN;
+            Check(r.Ok == Wanted && r.Hits == Wanted && Math.Abs(hitX - wallX) < 0.05 && r.Last!.Voxel == voxel.Raw, name,
+                $"n={Wanted} ok={r.Ok} hits={r.Hits} refused={r.Refused} reason={r.Reason} hitX={hitX:F4} wallX={wallX:F4} dist={r.Last?.Distance:F4} mat={r.Last?.Material:x8} voxel={r.Last?.Voxel:x4} write={write.CellsChanged}");
+            // from the other side the wall's far face is the first surface
+            var back = await One(() => Queries.RaycastVoxels(b, a));
+            Check(back is { Ok: true, Hit: not null } && back.Hit.Position.X > hitX + 0.5, name + ".reverse", $"ok={back.Ok} reason={back.Reason} hitX={back.Hit?.Position.X:F4} (the wall's far face)");
         }
-        // the ray's cache sees the write some steps later: wait for the first hit
-        await One(() => Queries.RaycastVoxels(a, b), x => x.Hit != null);
-        var r = await Many(() => Queries.RaycastVoxels(a, b), Wanted);
-        var wallX = Build.CornerOf(corner).X;
-        var hitX = r.Last?.Position.X ?? double.NaN;
-        Check(r.Ok == Wanted && r.Hits == Wanted && Math.Abs(hitX - wallX) < 0.05 && r.Last!.Voxel == voxel.Raw, name,
-            $"n={Wanted} ok={r.Ok} hits={r.Hits} refused={r.Refused} reason={r.Reason} hitX={hitX:F4} wallX={wallX:F4} dist={r.Last?.Distance:F4} mat={r.Last?.Material:x8} voxel={r.Last?.Voxel:x4} write={write.CellsChanged}");
-        // from the other side the wall's far face is the first surface
-        var back = await One(() => Queries.RaycastVoxels(b, a));
-        Check(back is { Ok: true, Hit: not null } && back.Hit.Position.X > hitX + 0.5, name + ".reverse", $"ok={back.Ok} reason={back.Reason} hitX={back.Hit?.Position.X:F4} (the wall's far face)");
-        // the wall goes, and the same ray is clear again
-        var undo = Build.Write(box, before, options);
-        var clear = await One(() => Queries.RaycastVoxels(a, b), x => x.Hit == null) is { Ok: true, Hit: null };
-        Check(undo.Verified && clear, name + ".removed", $"restored={undo.CellsChanged} cells verified={undo.Verified} clear={clear}");
+        finally
+        {
+            // Restore even after a partial write, failed verification, or an exception in a ray.
+            var undo = Build.Write(box, before, options);
+            var clear = await One(() => Queries.RaycastVoxels(a, b), x => x.Hit == null) is { Ok: true, Hit: null };
+            Check(undo.Verified && clear, name + ".removed", $"restored={undo.CellsChanged} cells verified={undo.Verified} clear={clear}");
+        }
     }
 
     private async Task Arguments(double ground)
@@ -250,5 +268,238 @@ public sealed class QueriesTestMod : Mod
         var gone = Queries.VoxelLineOfSight(one, two);
         Check(!gone.Ok && gone.Reason == "EntityGone" && !gone.Visible, "queries.sight.entity-gone", $"ok={gone.Ok} reason={gone.Reason}");
         Spawn.Destroy(one);
+    }
+
+    // ---- paths (02): the game's own path search, with a pickup as the anchor and no player --------------------------------
+
+    private async Task<QueryPathResult> Ended(Task<QueryPathResult> task, int steps = 24 * 15)
+    {
+        for (var i = 0; i < steps && !task.IsCompleted; i++) await Next();
+        return task.IsCompleted ? task.Result : new QueryPathResult(false, "TestGaveUp", 0, 0, QueryPathStatus.Pending, null, false, [], 0, 0);
+    }
+
+    private static string Show(QueryPathResult r) =>
+        $"status={r.Status} ok={r.Ok} reason={r.Reason} game={r.GameResult} reaches={r.ReachesTarget} points={r.Points.Count} length={r.Length:F2} steps={r.Steps}";
+
+    private async Task Paths(double ground)
+    {
+        Info($"rows: queries.path={Capabilities.Is("queries.path")} queries.reachability={Capabilities.Is("queries.reachability")}");
+        if (!Capabilities.Is("queries.path")) { Check(false, "queries.path.rows", Capabilities.Why("queries.path")); return; }
+        var from = new WorldPosition(X, ground + 0.5, Z);
+        var anchor = await Spawn.Entity("Base_LootPickup_Generic_Gravity", from);
+        for (var i = 0; i < 24; i++) await Next();
+        if (!World.TryGetPosition(anchor, out var at)) { Check(false, "queries.path.short", "the anchor pickup has no position"); return; }
+        var to = new WorldPosition(at.X + 3, at.Y, at.Z);
+
+        // a short walk: found, with points, the states in order, the event of the end before the task
+        var states = new List<string>();
+        var endSeenBeforeTask = false;
+        QueryPathTicket? ticket = null;
+        using (Events.On<PathQueryChangedEvent>(e =>
+               {
+                   if (ticket == null || e.Request != ticket.Request) return;
+                   states.Add($"{e.Before}->{e.After}");
+                   if (e.TerminalStatus != null) endSeenBeforeTask = !ticket.Completion.IsCompleted;
+               }))
+        {
+            ticket = Queries.RequestPath(new QueryPathRequest(anchor, at, to));
+            var r = await Ended(ticket.Completion);
+            Check(ticket.Ok && r.Status == QueryPathStatus.Found && r.ReachesTarget && r.Points.Count >= 2 && r.Points.All(p => p.Move == QueryPathMove.Walk) && r.GameResult == 1,
+                "queries.path.short", $"{Show(r)} first={r.Points.FirstOrDefault()?.Position} last={r.Points.LastOrDefault()?.Position}");
+            Check(string.Join(",", states) == "Created->Queued,Queued->Searching,Searching->Completed" && endSeenBeforeTask, "queries.path.states",
+                $"{string.Join(",", states)}; the end's event came before the task: {endSeenBeforeTask}");
+            // the points are a copy: the game's query is destroyed by now, and they still read the same some steps later
+            var copy = r.Points.Select(p => p.Position).ToList();
+            for (var i = 0; i < 24; i++) await Next();
+            Check(copy.SequenceEqual(r.Points.Select(p => p.Position)) && copy.All(p => double.IsFinite(p.X) && double.IsFinite(p.Y) && double.IsFinite(p.Z)), "queries.path.copy-after-destroy",
+                $"{copy.Count} points unchanged 24 steps after the result");
+        }
+
+        // numbers that are no request, and what is refused as a ticket
+        var threw = 0;
+        void Throws(Action call) { try { call(); } catch (ArgumentException) { threw++; } }
+        Throws(() => Queries.RequestPath(new QueryPathRequest(anchor, at, new WorldPosition(at.X + 200.5, at.Y, at.Z))));
+        Throws(() => Queries.RequestPath(new QueryPathRequest(default, at, to)));
+        Throws(() => Queries.RequestPath(new QueryPathRequest(anchor, at, to) { MaxIterations = 0 }));
+        Check(threw == 3, "queries.path.arguments", $"{threw} of 3 bad requests threw ArgumentException");
+        var far = Queries.RequestPath(new QueryPathRequest(anchor, new WorldPosition(-1e6, at.Y, at.Z), new WorldPosition(-1e6 + 3, at.Y, at.Z)));
+        Check(!far.Ok && far.Completion.IsCompleted && far.Completion.Result.Status == QueryPathStatus.OutOfGrid && far.Request == 0, "queries.path.out-of-grid",
+            $"ok={far.Ok} reason={far.Reason} status={far.Completion.Result.Status}");
+
+        // a target the search cannot stand on (30 m up in the air): never "found", and an empty answer is not success
+        var air = await Ended(Queries.FindPath(new QueryPathRequest(anchor, at, new WorldPosition(at.X + 3, at.Y + 30, at.Z))));
+        Check(!air.ReachesTarget && air.Status != QueryPathStatus.Found && air.Status != QueryPathStatus.Pending && (air.Ok || air.Points.Count == 0), "queries.path.empty-not-success", Show(air));
+        var reachAir = Queries.CanReach(new QueryPathRequest(anchor, at, new WorldPosition(at.X + 3, at.Y + 30, at.Z)));
+        for (var i = 0; i < 24 * 15 && !reachAir.IsCompleted; i++) await Next();
+        var reachGround = Queries.CanReach(new QueryPathRequest(anchor, at, to));
+        for (var i = 0; i < 24 * 15 && !reachGround.IsCompleted; i++) await Next();
+        Check(reachGround.IsCompleted && reachGround.Result is { Ok: true, Reachable: true } && reachAir.IsCompleted && !reachAir.Result.Reachable, "queries.path.can-reach",
+            $"ground: ok={reachGround.Result.Ok} reachable={reachGround.Result.Reachable}; air: ok={reachAir.Result.Ok} reachable={reachAir.Result.Reachable} reason={reachAir.Result.Reason} status={reachAir.Result.Status}");
+
+        // the closest-node fallback ends somewhere: partial or found, never a refusal by itself
+        var fallback = await Ended(Queries.FindPath(new QueryPathRequest(anchor, at, new WorldPosition(at.X + 3, at.Y + 30, at.Z)) { ClosestFallback = true }));
+        Info($"closest fallback to a point in the air: {Show(fallback)}");
+
+        // an iteration limit of 1 on a longer walk
+        var limited = await Ended(Queries.FindPath(new QueryPathRequest(anchor, at, new WorldPosition(at.X + 9, at.Y, at.Z + 6)) { MaxIterations = 1 }));
+        Check(limited.Status is QueryPathStatus.IterationLimit or QueryPathStatus.Found or QueryPathStatus.Partial, "queries.path.iteration-limit", Show(limited));
+
+        // cancel: one end, as Cancelled; a second cancel finds nothing
+        var cancelled = Queries.RequestPath(new QueryPathRequest(anchor, at, new WorldPosition(at.X + 9, at.Y, at.Z + 6)));
+        var c1 = Queries.CancelPath(cancelled.Request);
+        var c2 = Queries.CancelPath(cancelled.Request);
+        var cr = await Ended(cancelled.Completion);
+        Check(c1.Ok && !c2.Ok && c2.Reason == "UnknownRequest" && cr.Status == QueryPathStatus.Cancelled, "queries.path.cancel-once", $"first={c1.Ok} second={c2.Ok}/{c2.Reason} end={cr.Status}");
+
+        // eight at once are admitted, the ninth is refused QueueFull; all eight end, and the slots come back
+        var many = Enumerable.Range(0, 9).Select(i => Queries.RequestPath(new QueryPathRequest(anchor, at, new WorldPosition(at.X + 2 + i * 0.5, at.Y, at.Z)))).ToList();
+        var admitted = many.Count(t => t.Ok);
+        var ninth = many[8];
+        var ends = new List<QueryPathResult>();
+        foreach (var t in many.Take(8)) ends.Add(await Ended(t.Completion));
+        var again = Queries.RequestPath(new QueryPathRequest(anchor, at, to));
+        var againEnd = await Ended(again.Completion);
+        Check(admitted == 8 && !ninth.Ok && ninth.Reason == "QueueFull" && ends.All(e => e.Status != QueryPathStatus.Pending) && again.Ok && againEnd.Status == QueryPathStatus.Found, "queries.path.queue-full",
+            $"{admitted} of 9 admitted, the ninth: {ninth.Reason}; ends: {string.Join(",", ends.Select(e => e.Status))}; after them: {againEnd.Status}");
+
+        // the anchor goes while a request waits
+        var doomed = await Spawn.Entity("Base_LootPickup_Generic_Gravity", from);
+        for (var i = 0; i < 12; i++) await Next();
+        var orphan = Queries.RequestPath(new QueryPathRequest(doomed, at, new WorldPosition(at.X + 9, at.Y, at.Z + 6)));
+        Spawn.Destroy(doomed);
+        var gone = await Ended(orphan.Completion);
+        Check(orphan.Ok && gone.Status is QueryPathStatus.OwnerGone or QueryPathStatus.Found or QueryPathStatus.Partial, "queries.path.owner-gone", Show(gone));
+
+        // everything this test asked for has ended and left nothing open: a fresh batch of eight is admitted
+        for (var i = 0; i < 24; i++) await Next();
+        var fresh = Enumerable.Range(0, 8).Select(_ => Queries.RequestPath(new QueryPathRequest(anchor, at, to))).ToList();
+        var freshEnds = new List<QueryPathResult>();
+        foreach (var t in fresh) freshEnds.Add(await Ended(t.Completion));
+        Check(fresh.All(t => t.Ok) && freshEnds.All(e => e.Status == QueryPathStatus.Found), "queries.path.cleanup-baseline", $"8 of 8 admitted and found after the earlier requests: {fresh.Count(t => t.Ok)}/{freshEnds.Count(e => e.Status == QueryPathStatus.Found)}");
+        Spawn.Destroy(anchor);
+    }
+
+    // ---- from inside a world program (kiln.world's in_program, since 0.2.0-dev.28) ----
+    // ray_probe's update runs per entity, per slice; while a window is armed it asks for a ray (at most 4 times on each
+    // thread, so the slices of every thread are seen) and once for a path, and records what came back and on which
+    // thread. An exception must not leave the callback (it would disable the program).
+    private IDisposable? _probeBinding;
+    private string? _bindError;
+    private int _probeArmed, _probeWindow, _probePath, _tickThread;
+    [ThreadStatic] private static int t_probeWindow, t_probeCalls;
+    private WorldPosition _probeA, _probeB;
+    private readonly ConcurrentQueue<(int Thread, bool Tick, string Outcome)> _probe = new();
+
+    private void RayProbe(EcsProgramContext context)
+    {
+        if (Volatile.Read(ref _probeArmed) == 0) return;
+        var window = Volatile.Read(ref _probeWindow);
+        if (t_probeWindow != window) (t_probeWindow, t_probeCalls) = (window, 0);
+        if (++t_probeCalls > 4) return;
+        var thread = Environment.CurrentManagedThreadId;
+        var tick = thread == Volatile.Read(ref _tickThread);
+        var entity = context.Entity;
+        _probe.Enqueue((thread, tick, Outcome(() =>
+        {
+            var r = Queries.RaycastVoxels(_probeA, _probeB);
+            return $"answered ok={r.Ok} hit={r.Hit != null} reason={r.Reason}";
+        })));
+        if (Interlocked.Exchange(ref _probePath, 0) == 1)
+            _probe.Enqueue((thread, tick, "path " + Outcome(() =>
+            {
+                var t = Queries.RequestPath(new QueryPathRequest(entity, _probeA, _probeB));
+                return $"answered ok={t.Ok} reason={t.Reason}";
+            })));
+    }
+
+    private static string Outcome(Func<string> call)
+    {
+        try { return call(); }
+        catch (Exception e) { return $"{e.GetType().Name}: {e.Message}"; }
+    }
+
+    // Arms the probe until it has `want` answers from `threads` threads (at most 5 s), then waits two steps for an update
+    // that had started.
+    private async Task<List<(int Thread, bool Tick, string Outcome)>> ProbeWindow(bool path, int want, int threads)
+    {
+        while (_probe.TryDequeue(out _)) { }
+        Interlocked.Increment(ref _probeWindow);
+        Volatile.Write(ref _probePath, path ? 1 : 0);
+        Volatile.Write(ref _probeArmed, 1);
+        for (var i = 0; i < 24 * 5 && !(_probe.Count >= want && _probe.Select(p => p.Thread).Distinct().Count() >= threads); i++) await Next();
+        Volatile.Write(ref _probeArmed, 0);
+        await Next();
+        await Next();
+        return [.. _probe];
+    }
+
+    private async Task InsideProgram(double ground)
+    {
+        await Next();
+        _tickThread = Environment.CurrentManagedThreadId;
+        _probeA = new WorldPosition(X, ground + 20, Z);
+        _probeB = new WorldPosition(X + 10, ground + 20, Z);
+        if (_probeBinding == null) { Check(false, "queries.ray.inside-program", $"ray_probe is not bound: {_bindError}"); return; }
+        const string inside = "inside a world program";
+
+        // serial (no player): the program runs on the world's thread, which is the tick thread; kiln.queries refuses there
+        var path = Capabilities.Is("queries.path");
+        var serial = await ProbeWindow(path, 4, 1);
+        var rays = serial.Where(p => !p.Outcome.StartsWith("path ")).ToList();
+        var fromTick = await One(() => Queries.RaycastVoxels(_probeA, _probeB));
+        Check(rays.Count > 0 && rays.All(p => p.Tick && p.Outcome.Contains(inside)) && fromTick is { Ok: true, Hit: null }, "queries.ray.inside-program",
+            $"program updates={rays.Count} on the tick thread={rays.Count(p => p.Tick)} refused={rays.Count(p => p.Outcome.Contains(inside))}; " +
+            $"the same ray from a tick handler: ok={fromTick.Ok} hit={fromTick.Hit != null} reason={fromTick.Reason}; first: {rays.FirstOrDefault().Outcome}");
+        if (path)
+        {
+            var request = serial.FirstOrDefault(x => x.Outcome.StartsWith("path "));
+            Check(request.Outcome != null && request.Outcome.Contains(inside), "queries.path.inside-program", request.Outcome ?? "the program made no path request");
+        }
+        else Info("queries.path is off here: the path request from inside a program is not run");
+
+        // a game system hook's callback (GameSystems.Hook, kiln.types) on the world's thread: refused the same way. Several
+        // systems are hooked, since which ones run depends on what the world holds; the first callback that runs answers.
+        var hookSeen = new ConcurrentQueue<(string System, bool Tick, string Outcome)>();
+        var hookArmed = 1;
+        var hooks = new List<IDisposable>();
+        void FromHook(string system)
+        {
+            if (Interlocked.Exchange(ref hookArmed, 0) == 0) return;
+            hookSeen.Enqueue((system, Environment.CurrentManagedThreadId == _tickThread, Outcome(() =>
+            {
+                var r = Queries.RaycastVoxels(_probeA, _probeB);
+                return $"answered ok={r.Ok} hit={r.Hit != null} reason={r.Reason}";
+            })));
+        }
+        try
+        {
+            foreach (var system in new[] { "impact_prepare", "move_colliders", "despawn_link", "is_actor_in_shape", "environment_sensor", "network_level_attribute", "fuel_setup" })
+            {
+                try { hooks.Add(GameSystems.Hook(system, before: () => FromHook(system))); }
+                catch (Exception e) { Info($"no hook on {system}: {e.Message}"); }
+            }
+            for (var i = 0; i < 24 * 5 && hookSeen.IsEmpty; i++) await Next();
+        }
+        finally
+        {
+            foreach (var x in hooks) x.Dispose();
+        }
+        var seen = hookSeen.TryPeek(out var h) ? h : default;
+        Check(seen.Tick && seen.Outcome != null && seen.Outcome.Contains(inside), "queries.ray.inside-system-hook",
+            $"{hooks.Count} systems hooked; {seen.System ?? "none"}'s before callback on the tick thread={seen.Tick}: {seen.Outcome ?? "none ran in 5 s"}");
+
+        // parallel: the lab switch puts entity programs on the game's workers; the refusal holds there too
+        if (!LabSystems.Enabled) { Info("the lab parallel switch is off (no kiln/control/systems.parallel at start): queries.ray.inside-program.worker is not run"); return; }
+        var forced = LabSystems.ForceParallel(600);
+        for (var i = 0; i < 8; i++) await Next();
+        var parallel = await ProbeWindow(false, 12, 3);
+        var mask = LabSystems.PlayersMask;
+        LabSystems.StopParallel();
+        var workers = parallel.Where(p => !p.Tick).ToList();
+        Check(forced && workers.Count > 0 && parallel.All(p => !p.Outcome.Contains("answered")) &&
+              workers.All(p => p.Outcome.Contains("must be called on the tick thread")), "queries.ray.inside-program.worker",
+            $"forced={forced} mask=0x{mask:x4} program updates={parallel.Count} on {parallel.Select(p => p.Thread).Distinct().Count()} threads, " +
+            $"{workers.Count} off the tick thread; answered={parallel.Count(p => p.Outcome.Contains("answered"))}; first off the tick thread: {workers.FirstOrDefault().Outcome}");
+        for (var i = 0; i < 4; i++) await Next();
     }
 }

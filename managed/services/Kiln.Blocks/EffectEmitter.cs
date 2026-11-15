@@ -57,13 +57,29 @@ internal sealed partial class EffectEmitter
     public void AtPoint(IReadOnlyList<EffectRef> effects, int origin, int position, string path)
     {
         _originPosition = position;
-        for (var i = 0; i < effects.Count; i++) One(_ctx.Effect(effects[i], $"{path}[{i}]"), null, origin, $"{path}[{i}]");
+        for (var i = 0; i < effects.Count; i++) Counted(effects[i], null, origin, $"{path}[{i}]");
     }
 
     /// <summary>Runs effects on a target.</summary>
     public void OnTarget(IReadOnlyList<EffectRef> effects, int target, string path)
     {
-        for (var i = 0; i < effects.Count; i++) One(_ctx.Effect(effects[i], $"{path}[{i}]"), target, null, $"{path}[{i}]");
+        for (var i = 0; i < effects.Count; i++) Counted(effects[i], target, null, $"{path}[{i}]");
+    }
+
+    /// <summary>One effect, counted against the budget of a kind's plan when one is lowered (Kinds/KindBudget.cs): a named effect is
+    /// emitted again wherever it is used, so its work is counted as it happens.</summary>
+    private void Counted(EffectRef r, int? target, int? origin, string path)
+    {
+        var e = _ctx.Effect(r, path);
+        if (KindBudget.Current is not { } budget)
+        {
+            One(e, target, origin, path);
+            return;
+        }
+        var named = r.Name != null;
+        budget.Enter(_ctx.Block, path, named, _b.Size);
+        try { One(e, target, origin, path); }
+        finally { budget.Leave(named); }
     }
 
     /// <summary>Releases the queries (the host's shutdown code).</summary>

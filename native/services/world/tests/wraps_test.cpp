@@ -2,7 +2,8 @@
 // kiln.world v4 without the game: the program directory of a fake world table (names, game and mod programs, client
 // programs with no update), the players mask and the lab parallel switch, the wraps over a fake program runner (stage
 // order, one Replace, index repair after faults, in-flight balance, the prediction forward, foreign swaps, world stop,
-// budgets, owners, two stress rows on 8 threads), and the v4 ABI layout (tests/abi.json).
+// budgets, owners, two stress rows on 8 threads), in_program on the threads inside and outside, and the v4 ABI layout
+// (tests/abi.json).
 #include "../game_programs.cpp"
 #include "../wraps.cpp"
 #include <barrier>
@@ -138,6 +139,46 @@ void fake_api() {
     g_fake.service = [](KilnStr, uint32_t) -> const void* { return nullptr; };
     g_fake.path = [](int32_t, char*, size_t, size_t*) -> KilnResult { return KILN_ERR_UNAVAILABLE; };
     g_api = &g_fake;
+}
+
+// A client without the destroy hook cannot retire wraps when its world disappears.
+void client_lifecycle_row() {
+    KilnCapsApi caps{};
+    caps.header = {sizeof caps, 1};
+    static uint32_t state;
+    static std::string detail;
+    caps.report = [](KilnOwner, KilnStr name, uint32_t value, uint32_t, KilnStr text) -> KilnResult {
+        if (std::string_view(name.ptr, name.len) == "systems.wraps.client") {
+            state = value;
+            detail.assign(text.ptr, text.len);
+        }
+        return KILN_OK;
+    };
+    static const KilnCapsApi* table;
+    table = &caps;
+    g_fake.service = [](KilnStr, uint32_t) -> const void* { return table; };
+    g_fake.feature = [](KilnStr name) { return std::string_view(name.ptr, name.len) != "world.lifecycle"; };
+    g_side = KILN_SIDE_CLIENT;
+    wraps_init();
+    check(state == KILN_CAP_UNAVAILABLE && detail.find("world.lifecycle") != std::string::npos,
+          "client wraps refuse a build without world-stop notifications");
+    wraps_client_ready(true, true);
+    check(state == KILN_CAP_UNAVAILABLE, "subscriptions cannot enable wraps without lifecycle");
+    g_fake.feature = [](KilnStr) { return true; };
+    wraps_client_ready(false, true);
+    check(state == KILN_CAP_UNAVAILABLE, "client tick subscription failure keeps wraps off");
+    wraps_client_ready(true, false);
+    check(state == KILN_CAP_UNAVAILABLE, "world event subscription failure keeps wraps off");
+    wraps_client_ready(true, true);
+    check(state == KILN_CAP_AVAILABLE, "native client wraps available with lifecycle and both subscriptions");
+    g_fake_external.store(1);
+    wraps_pre(KILN_WORLD_CLIENT, 0);
+    check(state == KILN_CAP_UNAVAILABLE, "native SET lowers the client wrap row too");
+    g_fake_external.store(0);
+    wraps_pre(KILN_WORLD_CLIENT, 0);
+    check(state == KILN_CAP_AVAILABLE, "client wrap row recovers when native SET leaves");
+    g_side = KILN_SIDE_SERVER;
+    fake_api();
 }
 
 void layout() {
@@ -663,6 +704,79 @@ void wraps_basics() {
     wpre();
 }
 
+// ---- in_program (appended in 0.2.0-dev.28): a Kiln program's update or a wrap stage on this thread ----
+std::atomic<uint32_t> g_ip_calls{0}, g_ip_inside{0}, g_ip_other{0};
+void KILN_CALL st_in_program(KilnGameSlice*, void*) {
+    g_ip_calls.fetch_add(1);
+    if (in_program() == 1) g_ip_inside.fetch_add(1);
+    uint32_t other = 9;
+    std::thread([&] { other = in_program(); }).join();  // another thread while this one is inside the stage
+    if (other == 0) g_ip_other.fetch_add(1);
+}
+void KILN_CALL st_in_program_fault(KilnGameSlice*, void*) {
+    if (in_program() == 1) g_ip_inside.fetch_add(1);
+    throw 1;
+}
+
+void in_program_rows() {
+    check(in_program() == 0, "in_program: 0 outside any program update or stage");
+    // A Kiln program's update: programs.cpp's dispatch sets t_in_program around it (programs.cpp is not compiled here).
+    t_in_program = true;
+    uint32_t other = 9;
+    std::thread([&] { other = in_program(); }).join();
+    check(in_program() == 1 && other == 0, "in_program: 1 inside a Kiln program's update, 0 on another thread meanwhile");
+    t_in_program = false;
+    check(in_program() == 0, "in_program: 0 again after the update");
+
+    const int32_t i = idx("impact_prepare");
+    const KilnHandle b = wrap(90, "impact_prepare", KILN_WRAP_BEFORE, 0, &st_in_program, nullptr);
+    const KilnHandle a = wrap(90, "impact_prepare", KILN_WRAP_AFTER, 0, &st_in_program, nullptr);
+    wpre();
+    Job job(10);
+    run_slice(wentry(i), job);
+    check(winfo(b).state == KILN_WRAP_ACTIVE && g_ip_calls.load() == 2 && g_ip_inside.load() == 2 && g_ip_other.load() == 2 &&
+              in_program() == 0,
+          "in_program: 1 inside a Before and an After stage, 0 on another thread meanwhile, 0 after the slice");
+    uint32_t after = 9;
+    std::thread worker([&] {
+        Job wjob(10);
+        run_slice(wentry(i), wjob);
+        after = in_program();
+    });
+    worker.join();
+    check(g_ip_calls.load() == 4 && g_ip_inside.load() == 4 && g_ip_other.load() == 4 && after == 0 && in_program() == 0,
+          "in_program: 1 inside the stages of a slice on a worker thread, 0 there after the slice");
+    game_program_unwrap(b);
+    game_program_unwrap(a);
+    const KilnHandle f = wrap(90, "impact_prepare", KILN_WRAP_BEFORE, 0, &st_in_program_fault, nullptr);
+    wpre();
+    run_slice(wentry(i), job);
+    check(winfo(f).faults == 1 && g_ip_inside.load() == 5 && in_program() == 0, "in_program: 0 after a stage that faulted");
+    game_program_unwrap(f);
+    wpre();
+
+    // kiln.types' in_system_callback (0.2.0-dev.28), resolved in on_ready: a system_hook callback counts as inside too
+    static uint32_t types_says = 0;
+    KilnTypesApi types{};
+    types.header = {sizeof(KilnTypesApi), KILN_TYPES_VERSION};
+    types.in_system_callback = [] { return types_says; };
+    types_says = 1;
+    in_program_resolve(&types);
+    check(in_program() == 1, "in_program: 1 while kiln.types says a system_hook callback runs on this thread");
+    types_says = 0;
+    check(in_program() == 0, "in_program: 0 when kiln.types says none runs");
+    types_says = 1;
+    types.header.size = offsetof(KilnTypesApi, in_system_callback);  // an older kiln.types: the slot is not its
+    in_program_resolve(&types);
+    check(in_program() == 0, "in_program: a kiln.types table too small for in_system_callback is not asked");
+    types.header.size = sizeof(KilnTypesApi);
+    types.in_system_callback = nullptr;
+    in_program_resolve(&types);
+    const uint32_t no_member = in_program();
+    in_program_resolve(nullptr);
+    check(no_member == 0 && in_program() == 0, "in_program: no member, or no kiln.types: that part answers 0");
+}
+
 void wraps_foreign() {
     // Another tool's pointer in the entry before kiln.world: refused, never stacked on.
     const uintptr_t e5 = wentry(5);
@@ -1003,7 +1117,7 @@ void abi(const char* path) {
         F(KilnWorldApi, game_program_find); F(KilnWorldApi, game_program_info); F(KilnWorldApi, game_programs_status);
         F(KilnWorldApi, lab_parallel); F(KilnWorldApi, game_program_wrap); F(KilnWorldApi, game_program_unwrap);
         F(KilnWorldApi, game_wrap_info); F(KilnWorldApi, game_wraps_release); F(KilnWorldApi, game_slice_run_original);
-        F(KilnWorldApi, wrap_original);
+        F(KilnWorldApi, wrap_original); F(KilnWorldApi, in_program);
     }
     {
         auto& l = list("KilnGameSlice", sizeof(KilnGameSlice));
@@ -1057,9 +1171,11 @@ void abi(const char* path) {
 int main(int argc, char** argv) {
     fake_api();
     layout();
+    client_lifecycle_row();
     directory();
     lab_switch();
     wraps_basics();
+    in_program_rows();
     wraps_foreign();
     wraps_worlds();
     wraps_native_set();

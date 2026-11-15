@@ -62,6 +62,19 @@ public sealed class TablesTests
         Assert.DoesNotContain(KilnApis.CapabilityGuards, g => g.StartsWith(property + "=", StringComparison.Ordinal));
 
     [Fact]
+    public void Boot_members()
+    {
+        // KILN035: Config.Register has its own boot path (reads without writing); writes and Changed throw in OnBoot
+        const string register = "M:Kiln.Config.Register``1(Kiln.ConfigKind,System.String)";
+        Assert.Contains(register, KilnApis.BootWorks);
+        Assert.Contains(register, KilnApis.TickThread);  // still KILN101 outside boot code
+        Assert.DoesNotContain(register, KilnApis.BootRefused);
+        Assert.Contains("M:Kiln.ConfigFile.add_Changed(System.Action{Kiln.ConfigChangedEvent})", KilnApis.BootRefused);
+        Assert.Contains("M:Kiln.ConfigFile.Set(System.String,System.Object)", KilnApis.BootRefused);  // via TrySet
+        Assert.DoesNotContain("M:Kiln.Config.RegisterWorld``1(System.String)", KilnApis.BootWorks);
+    }
+
+    [Fact]
     public void Services_are_the_managed_service_folders()
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../.."));

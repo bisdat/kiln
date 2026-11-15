@@ -62,7 +62,11 @@ Kiln owns only `dinput8.dll`.
 The proxy reads `dinput8-chain.ini` `[Chain]` and `[EMF]` (the DLLs EMF 0.5's installer renamed) in file order. A
 comment may follow a name after a space or tab (`mymod.dll ; my mod`, also `#`), and a name may stand in double quotes,
 as EMF's shared spec for the file says (`docs/modding/dinput8-chain.md` in matenm/emf-enshrouded); Kiln's own
-`kiln\chain.ini` keeps its stricter rules ([contracts](launcher/contracts.md) 5.3). Both sections
+`kiln\chain.ini` keeps its stricter rules ([contracts](launcher/contracts.md) 5.3).
+A line of `[Chain]`, `[EMF]` or before any section that names something other than a `.dll` is skipped and named in
+`kiln\logs\proxy.log`; a `key = value` line whose value is no `.dll` is another tool's setting and is ignored without a
+line, as other tools' sections are.
+Both sections
 use EMF's rules: relative paths inside the game folder only (including the final target of directory links), at most
 256 entries across both sections, dedupe by canonical path. Files above 256 KiB are ignored. One overflow entry is
 reported as refused; further entries are discarded. EMF's loader is accepted by its exports even without its marker,
@@ -109,6 +113,50 @@ What `[late]` cannot do:
   overlap report suggests a compat rule for it, not `[late]`.
 - **A disabled mod.** A native mod's DLL in `[late]` loads only when the mod does (see
   [native-mods.md](native-mods.md#switches-and-policy)).
+
+### DLLs that must hook the game's imports first
+
+Some DLL mods change the game's import table in their `DllMain`, and only where a slot still holds the real system
+function. Two of them in one chain then depend on their order: Auto Loot Plus redirects the game's `GetProcAddress`
+import (its F8 menu) but skips a slot someone redirected already, and Ultimate ASI Loader redirects that import when it
+loads and puts it back only when the game first calls it, after Kiln's entry gate. The order is the phases': the proxy
+loads `[chain]`, then `dinput8-chain.ini`, then `[profile]`, and the late phase loads its DLLs in the same list order
+after all of them. A `[profile]` DLL (Auto Loot Plus from the Library) therefore loads before a `[chain]` one (Ultimate
+ASI Loader, where the installer put it) only when the `[chain]` one is late and the `[profile]` one is not. A compat rule
+with the action `before` says which DLL must come first, and the launcher writes that into chain.ini whatever the two
+switches say; Kiln ships the rule for this pair. The proxy's own order is not changed for this: reordering lines inside
+a phase would be new behaviour in the DLL every player's game loads first, and the phases already express it. Details,
+matching and limits: [engines/README.md](engines/README.md#closed-source-dll-mods).
+
+## Linux: Wine, Proton and other launchers
+
+Wine has its own `dinput8.dll` and `xinput9_1_0.dll`. For a DLL of the same name in the game folder, Wine decides by
+the file name, not by the path, which one runs: the DLL overrides, else its built-in default. Setting a name to
+"native, builtin" (`n,b`) makes the game folder's file win.
+
+### Starting the game from Bottles, Lutris or plain Wine
+Kiln is `dinput8.dll` in the game folder. A start that does not go through Steam with Proton needs `dinput8` set to
+native, builtin: `WINEDLLOVERRIDES="dinput8=n,b"`, or `dinput8` as "native, builtin" in the runner's DLL overrides
+(`winecfg`, Libraries tab). Without it the game starts without Kiln, and `kiln/logs/proxy.log` is not written.
+- Proton 10 and 11 build their `dinput8` with Wine's "prefer native" flag, so Steam starts need no launch option
+  there (tested with GE-Proton11-11, [client.md](client.md); Valve's builds read from their source). Proton 9 and
+  upstream Wine do not have that flag (read from their source). The override does no harm where it is not needed.
+- Untested: Bottles' and Lutris' own runners. Keep the override.
+
+### Ultimate ASI Loader next to Kiln on Wine
+Kiln chains Ultimate ASI Loader as `xinput9_1_0.dll` in the game folder ([Installer](#installer)). Kiln loads it by
+its full path, but Wine still applies its rules for the name `xinput9_1_0`. Set it to native, builtin as well:
+`WINEDLLOVERRIDES="dinput8,xinput9_1_0=n,b"` (Steam: `WINEDLLOVERRIDES="dinput8,xinput9_1_0=n,b" %command%`).
+- Tested (2026-11-14, dedicated server lab under GE-Proton11-11, Kiln 0.2.0-dev.28's proxy, a test DLL of ours named
+  `xinput9_1_0.dll`, not Ultimate ASI Loader itself): without the override, a DLL without version information did not
+  run. Wine loaded its own `xinput9_1_0` instead, and `proxy.log` still said `loaded at ...`, so the log does not
+  show it. With `xinput9_1_0=n,b` it ran.
+- Tested on the same lab: a DLL whose version information names a company other than Microsoft ran without the
+  override. GE-Proton11-11 has the rule from Wine 11.6 that prefers such DLLs. Ultimate ASI Loader's current source
+  names ThirteenAG as its company, so it should load there without the override (untested with the real loader).
+- Read from the source, untested: Valve's Proton has neither the flag nor the rule for `xinput9_1_0`, so it needs the
+  override. Upstream Wine has the rule since 11.6, and since 11.7 it also prefers a DLL without version information.
+- Untested: the game client, Bottles' and Lutris' runners. The override is the safe setting everywhere.
 
 ## Library kinds
 

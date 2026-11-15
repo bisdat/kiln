@@ -30,6 +30,7 @@
 
 #include "backends/imgui_impl_win32.h"
 #include "imgui.h"
+#include "key_names.h"
 #include "mouse_press.h"
 #include "safetyhook.hpp"
 #include "ui.h"
@@ -1033,34 +1034,11 @@ uint32_t input_take_pressed(uint32_t* mods) {
     return vk;
 }
 
-void key_name(uint32_t vk, char* out, size_t cap) {
-    if (!out || cap == 0) return;
-    out[0] = 0;
-    static const struct {
-        uint32_t vk;
-        const char* name;
-    } names[] = {{VK_INSERT, "Insert"}, {VK_DELETE, "Delete"}, {VK_HOME, "Home"}, {VK_END, "End"}, {VK_PRIOR, "PageUp"},
-                 {VK_NEXT, "PageDown"}, {VK_LEFT, "Left"}, {VK_RIGHT, "Right"}, {VK_UP, "Up"}, {VK_DOWN, "Down"},
-                 {VK_RETURN, "Enter"}, {VK_ESCAPE, "Escape"}, {VK_TAB, "Tab"}, {VK_BACK, "Backspace"}, {VK_SPACE, "Space"},
-                 {VK_PAUSE, "Pause"}, {VK_SCROLL, "ScrollLock"}, {VK_CAPITAL, "CapsLock"}, {VK_NUMLOCK, "NumLock"},
-                 {VK_OEM_3, "Backquote"}, {VK_OEM_MINUS, "Minus"}, {VK_OEM_PLUS, "Equals"}, {VK_OEM_4, "LeftBracket"},
-                 {VK_OEM_6, "RightBracket"}, {VK_OEM_5, "Backslash"}, {VK_OEM_1, "Semicolon"}, {VK_OEM_7, "Quote"},
-                 {VK_OEM_COMMA, "Comma"}, {VK_OEM_PERIOD, "Period"}, {VK_OEM_2, "Slash"}, {VK_MULTIPLY, "NumpadMultiply"},
-                 {VK_ADD, "NumpadAdd"}, {VK_SUBTRACT, "NumpadSubtract"}, {VK_DECIMAL, "NumpadDecimal"},
-                 {VK_DIVIDE, "NumpadDivide"}, {VK_LSHIFT, "LeftShift"}, {VK_RSHIFT, "RightShift"},
-                 {VK_LCONTROL, "LeftCtrl"}, {VK_RCONTROL, "RightCtrl"}, {VK_LMENU, "LeftAlt"}, {VK_RMENU, "RightAlt"},
-                 {VK_SHIFT, "Shift"}, {VK_CONTROL, "Ctrl"}, {VK_MENU, "Alt"}, {VK_XBUTTON1, "Mouse4"}, {VK_XBUTTON2, "Mouse5"},
-                 {VK_MBUTTON, "MouseMiddle"}, {KILN_UI_VK_WHEEL_UP, "WheelUp"}, {KILN_UI_VK_WHEEL_DOWN, "WheelDown"},
-                 {KILN_UI_VK_WHEEL_LEFT, "WheelLeft"}, {KILN_UI_VK_WHEEL_RIGHT, "WheelRight"}};
-    for (const auto& n : names)
-        if (n.vk == vk) {
-            std::snprintf(out, cap, "%s", n.name);
-            return;
-        }
-    if (vk >= VK_F1 && vk <= VK_F24) std::snprintf(out, cap, "F%u", vk - VK_F1 + 1);
-    else if ((vk >= '0' && vk <= '9') || (vk >= 'A' && vk <= 'Z')) std::snprintf(out, cap, "%c", static_cast<char>(vk));
-    else if (vk >= VK_NUMPAD0 && vk <= VK_NUMPAD9) std::snprintf(out, cap, "Numpad%u", vk - VK_NUMPAD0);
-    else std::snprintf(out, cap, "Key%u", vk);
-}
+// The names are key_names.h's (the same table as Kiln.Ui's KeyNames: keybinds.json and the Keys page use them).
+static_assert(VK_OEM_3 == 0xC0 && VK_OEM_8 == 0xDF && VK_OEM_102 == 0xE2 && VK_OEM_CLEAR == 0xFE && VK_F24 == 0x87 &&
+                  VK_NUMPAD0 == 0x60 && VK_LSHIFT == 0xA0 && VK_SNAPSHOT == 0x2C && KILN_UI_VK_WHEEL_UP == 0x100 &&
+                  KILN_UI_VK_WHEEL_RIGHT == 0x103,
+              "key_names.h's codes are Windows' and kiln_ui.h's");
+void key_name(uint32_t vk, char* out, size_t cap) { keys::name(vk, out, cap); }
 
 }  // namespace kui

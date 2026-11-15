@@ -550,9 +550,15 @@ test("a state push from the Emberwatch Lua mod (empty lists as {}) does not brea
   }
 });
 
+// What a server page shows after a lazily loaded module (the server's layout, a server page, the admin pages): on a
+// loaded PC, Vite's dev server can take longer than the default 5 s to serve one, so these waits are for the page's own
+// element, capped by this instead.
+const LOAD = { timeout: 30_000 };
+
 test("one grouped list per server: Run, World, Data, Files", async ({ page }) => {
   await open(page, "/servers/lab/admin/players");
   const list = page.getByRole("navigation", { name: "Server" });
+  await expect(list).toBeVisible(LOAD);
   for (const g of ["Run", "World", "Data", "Files"]) await expect(list.getByRole("group", { name: g })).toBeVisible();
   await expect(list.getByRole("link")).toHaveCount(21);
   await expect(list.getByRole("link", { name: "Players" })).toHaveAttribute("aria-current", "page");
@@ -562,10 +568,11 @@ test("one grouped list per server: Run, World, Data, Files", async ({ page }) =>
   // server pages and admin pages share the list
   await list.getByRole("link", { name: "Backups", exact: true }).click();
   await expect(page).toHaveURL(/#\/servers\/lab\/backups$/);
-  // the merged pages: the old admin routes land on them
+  // the merged pages: the old admin routes land on them (the router redirects them; the admin pages' bundle is not
+  // waited for), then the page loads
   await open(page, "/servers/lab/admin/console");
   await expect(page).toHaveURL(/#\/servers\/lab\/overview$/);
-  await expect(page.getByRole("log", { name: "Server console" })).toBeVisible();
+  await expect(page.getByRole("log", { name: "Server console" })).toBeVisible(LOAD);
   await open(page, "/servers/lab/admin/mods");
   await expect(page).toHaveURL(/#\/servers\/lab\/mods$/);
   // the list fits 800 high without scrolling

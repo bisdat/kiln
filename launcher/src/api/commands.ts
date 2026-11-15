@@ -128,6 +128,8 @@ export interface LauncherSettings {
    *  notices about kept folders, kept files and notes on mods, except the first one about a folder that may still run
    *  although its mod is off (shell/notices.ts). */
   modFolderNotes?: boolean;
+  /** "Check for mod updates once a day" (default off; api/updates.ts). */
+  modUpdatesDaily?: boolean;
 }
 export type TaskState = "queued" | "running" | "done" | "failed" | "canceled";
 export interface Task<R = unknown> {
@@ -1343,6 +1345,9 @@ export interface ChainViewEntry {
   lateBy: string | null;
   /** "rule:<id>" when a compat rule switches it off. */
   offBy: string | null;
+  /** dev.29: "rule:<id>" when a `before` rule keeps it loading first (in the proxy) whatever its late switch says; the
+   *  switch is the rule's while the rule applies (`late` is false). Absent from an older backend. */
+  earlyBy?: string | null;
   /** EMF's loader: it starts EMF itself, which Kiln's EMF support has to see when it starts, so Kiln always loads it
    *  first and the late switch is not offered. */
   loader: boolean;
@@ -1350,7 +1355,8 @@ export interface ChainViewEntry {
    *  so it is never switched late; one already late (an older Kiln allowed it) can be switched back. */
   gated?: boolean;
 }
-export type RuleAction = "warn" | "late" | "disable";
+/** before (dev.29): the rule's subject loads before its target (the target late, the subject early). */
+export type RuleAction = "warn" | "late" | "disable" | "before";
 export interface CompatRuleResult {
   id: string;
   source: "kiln" | "user";
@@ -1358,8 +1364,14 @@ export interface CompatRuleResult {
   message: string;
   fired: boolean;
   applied: boolean;
+  /** The chain entries it moves late or switches off (before: the ones that load after). */
   targets: string[];
+  /** before: the chain entries it keeps loading first. */
+  early?: string[];
   note?: string;
+  /** before: both sides are there but the order cannot be made (a DLL that never loads late, a cycle, another rule):
+   *  nothing was moved. Shown as a warning. */
+  warning?: string;
 }
 export type OverlapKind = "foreign-before" | "foreign-over" | "refused" | "other";
 export interface ChainOverlap {
@@ -1469,6 +1481,23 @@ export interface CookRun {
   mods: ModCook[];
   /** The active profile written again before the cook (it changed since its activation): its notices, as Play's. */
   activation?: Activation | null;
+  /** Play's cook only: the game data Mod.OnBoot reads, made or found after the cook (kiln_manage::boot_snapshot). */
+  bootSnapshot?: BootSnapshot;
+}
+/** What making the boot game-data snapshot came to: made | reused | skipped (no mod needs it) | refused | failed |
+ *  unavailable. */
+export interface BootSnapshot {
+  status: "made" | "reused" | "skipped" | "refused" | "failed" | "unavailable";
+  key?: string;
+  path?: string;
+  counts?: Record<string, number>;
+  /** Kinds the game's archive could not give: every OnBoot read of them finds nothing. */
+  emptyKinds: string[];
+  skipped?: number;
+  archive?: string;
+  bytes?: number;
+  seconds?: number;
+  reason?: string;
 }
 /** The mods of the game's profile with something to cook, each with whether it needs a cook now. Reads only. */
 export const cookPlan = (gameId: GameId) => call<CookJob[]>("cook_plan", { gameId });
@@ -1477,6 +1506,10 @@ export const cookPlan = (gameId: GameId) => call<CookJob[]>("cook_plan", { gameI
  *  Cancel stops the tool that runs. Refuses while the game runs ("Cook again" also right after a start). A mod's
  *  failed cook is in the result, never the task's error. */
 export const cookRun = (gameId: GameId, modId: string | null = null) => call<TaskId>("cook_run", { gameId, modId });
+/** Play once with another profile: a task (result BootSnapshot) that makes the boot game-data snapshot when an enabled
+ *  mod of that single start asks for the boot phase, as Play's cook_run does after the cook (`skipped` otherwise). Cooks
+ *  nothing. Refuses while the game runs; a producer that fails is in the result, never the task's error. */
+export const bootSnapshotRun = (gameId: GameId, profileId: ProfileId) => call<TaskId>("boot_snapshot_run", { gameId, profileId });
 
 // library.rs
 export const libraryList = (kind: ModKind | null = null) => call<LibraryEntry[]>("library_list", { kind });
@@ -1846,11 +1879,12 @@ export const COMMANDS = [
   "engine_settings_get", "engine_settings_set", "engine_status", "engine_own_folders", "engine_adopt_folder", "eml_backup", "eml_restore",
   "chain_view", "chain_set_late",
   "found_scan", "found_add",
-  "cook_plan", "cook_run",
+  "cook_plan", "cook_run", "boot_snapshot_run",
   "report_save", "report_summary",
   "data_folder_get", "data_folder_size", "data_folder_check", "data_folder_move", "data_folder_use", "data_folder_reset",
   "data_folder_notice_ack", "data_folder_restart",
   "app_started", "app_render_set",
+  "updates_check",
 ] as const;
 export type CommandName = (typeof COMMANDS)[number];
 
@@ -1870,6 +1904,8 @@ export interface KilnEvents {
   "kiln://gamepad": GamepadEvent;
   /** An Enshrouded Mod Manager Download (nxm://) link arrived: `count` wait in nexus_links (api/nexus.ts). */
   "kiln://nxm": { count: number };
+  /** The result of a mod update check (updates_check; api/updates.ts). */
+  "kiln://mod-updates": import("./updates").CheckReport;
   /** A profile was written again without profile_activate and its notices wait: take them with activation_notices. */
   "kiln://activation": { gameId: GameId };
 }

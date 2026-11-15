@@ -41,6 +41,10 @@ export const SERVER_NAV: { group: string; items: ServerNavItem[] }[] = [
 ];
 
 /** The list entry for a path inside a server ("/servers/lab/admin/items" → Items). */
+/** Old admin routes (`/servers/:id/admin/<from>`) merged into the server's own pages (`/servers/:id/<to>`). App.tsx
+ *  redirects them in the router itself: an old link never waits for the admin pages' bundle to load. */
+export const ADMIN_MERGED: [from: string, to: string][] = [["configs", "configs"], ["mods", "mods"], ["console", "overview"]];
+
 export function serverNavFor(rest: string): ServerNavItem | null {
   const all = SERVER_NAV.flatMap((g) => g.items);
   return all.find((i) => rest === i.to || rest.startsWith(i.to + "/")) ?? null;

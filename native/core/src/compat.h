@@ -7,6 +7,8 @@
 //    profile (apply_early); `late` and `disable` of chain entries belong to the launcher (it writes chain.ini) and are
 //    reported as not applied. A `disable` of a dllmain native mod the proxy loaded already is not applied either (its DLL
 //    runs); a `late` of EMF's loader, or of a DLL another loader started first, is not applied (it cannot be deferred).
+//    A `before` (dev.29: the launcher loads the target late and keeps the subject early) is reported as applied when the
+//    rows show that order.
 #pragma once
 #include <set>
 #include <string>
@@ -36,6 +38,11 @@ struct ChainRow {
     bool loader = false;
     // A dinput8-chain.ini entry while EMF's loader is chained: that loader starts the DLL itself, before [late] can.
     bool started_by_loader = false;
+    // dev.29, for `before` rules: the engine word of the loaded DLL when its exports name one the core knows
+    // ("ultimate-asi-loader": IsUltimateASILoader, as the launcher's engines table), else empty; and for a [profile] entry
+    // the dllmain native mod whose DLL it is ("kiln:<id>"), else empty.
+    std::string engine;
+    std::string mod;
     bool on() const { return status == "loaded" || status == "duplicate" || status == "late"; }
 };
 
@@ -73,7 +80,8 @@ struct RuleContext {
     std::set<std::string> rule_off;                          // "<engine>:<id>" a rule switched off (still part of this start)
     std::set<std::string> proxy_loaded;                      // ids of the `disable` rules whose mod's DLL the proxy loaded already
 };
-// Pure: nothing of the process is read.
+// Pure: nothing of the process is read. A `before` rule (dev.29) is judged on the rows' order: the proxy's rows load in
+// list order, a row the late phase loaded after every early one; applied when each subject row loaded before each target row.
 Outcome outcome_of(const Rule& rule, const std::vector<ChainRow>& rows, const Facts& facts, const RuleContext& ctx);
 
 // Boot, in order (boot.cpp): init() after the profile is read (rule files, hook-map extension); apply_early() before the

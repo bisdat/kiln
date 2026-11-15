@@ -25,6 +25,7 @@ internal sealed class EntityTable
 
     private readonly Dictionary<uint, Rec> _live = new();
     private readonly List<Rec> _unresolved = [];
+    private readonly List<Rec> _serviceClaims = [];  // matched records with a Kiln service's values, for the next pump
     private DateTime _matchUntil = DateTime.MinValue, _nextMatch = DateTime.MinValue, _nextCheck = DateTime.MinValue;
     private bool _missCounted;
     private int _matched, _dropped;
@@ -51,6 +52,7 @@ internal sealed class EntityTable
     {
         _live.Clear();
         _unresolved.Clear();
+        _serviceClaims.Clear();
         _missCounted = false;
     }
 
@@ -248,6 +250,25 @@ internal sealed class EntityTable
         }
         _live[e.Value] = u;
         _matched++;
+        if (u.ByMod.Keys.Any(ServiceEntityData.IsScope)) _serviceClaims.Add(u);
+    }
+
+    /// <summary>Records matched since the last pump that carry a Kiln service's values (scope <c>kiln:&lt;service&gt;</c>)
+    /// are handed to that service (Kiln.World sets a saved transform scale again). Tick thread, service context.</summary>
+    public void HandOverServiceValues()
+    {
+        if (_serviceClaims.Count == 0) return;
+        var claims = _serviceClaims.ToList();
+        _serviceClaims.Clear();
+        foreach (var r in claims)
+        {
+            if (!_live.TryGetValue(r.Entity, out var live) || !ReferenceEquals(live, r)) continue;
+            foreach (var (scope, keys) in r.ByMod.Where(p => ServiceEntityData.IsScope(p.Key)).ToList())
+            {
+                var values = keys.Where(p => p.Value.Json is not null).ToDictionary(p => p.Key, p => p.Value.Json!, StringComparer.Ordinal);
+                if (values.Count > 0) ServiceEntityData.RaiseLoaded(scope, new EntityId(r.Entity), values);
+            }
+        }
     }
 
     private static double RadiusFor(Guid? template)

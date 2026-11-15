@@ -1609,6 +1609,110 @@
       "dropped": 2,
       "problems": 1,
       "lastProblem": "more than 512 rules: the last 2 are ignored"
+    },
+    {
+      "name": "before: the subject loads before the target; both are needed, and a target belongs to before only",
+      "input": {
+        "format": 1,
+        "rules": [
+          {
+            "id": "b1",
+            "when": [
+              {
+                "mod": "native:auto-loot-plus"
+              },
+              {
+                "engine": "ultimate-asi-loader"
+              }
+            ],
+            "action": "before",
+            "subject": {
+              "mod": "native:auto-loot-plus"
+            },
+            "target": {
+              "engine": "ultimate-asi-loader"
+            },
+            "message": "UAL loads after Kiln so that ALP hooks first."
+          },
+          {
+            "id": "b2",
+            "action": "before",
+            "subject": {
+              "module": "first.dll"
+            },
+            "target": {
+              "module": "second*.dll"
+            }
+          },
+          {
+            "id": "b3",
+            "action": "before",
+            "subject": {
+              "mod": "native:auto-loot-plus"
+            }
+          },
+          {
+            "id": "b4",
+            "action": "before",
+            "target": {
+              "engine": "ultimate-asi-loader"
+            }
+          },
+          {
+            "id": "b5",
+            "action": "late",
+            "subject": {
+              "module": "a.dll"
+            },
+            "target": {
+              "engine": "ultimate-asi-loader"
+            }
+          },
+          {
+            "id": "b6",
+            "action": "before",
+            "subject": {
+              "mod": "native:auto-loot-plus"
+            },
+            "target": null
+          },
+          {
+            "id": "b7",
+            "action": "before",
+            "subject": {
+              "mod": "native:auto-loot-plus"
+            },
+            "target": {
+              "module": ""
+            }
+          },
+          {
+            "id": "b8",
+            "action": "warn",
+            "target": {
+              "engine": "ultimate-asi-loader"
+            },
+            "message": "m"
+          },
+          {
+            "id": "b9",
+            "action": "before",
+            "subject": {
+              "mod": "native:auto-loot-plus"
+            },
+            "target": {
+              "module": "a.dll",
+              "engine": "emf"
+            }
+          }
+        ]
+      },
+      "ok": true,
+      "rules": [
+        "b1",
+        "b2"
+      ],
+      "dropped": 7
     }
   ],
   "merge": [
@@ -2109,6 +2213,97 @@
         "modules": [],
         "engines": [],
         "mods": [],
+        "symbols": []
+      },
+      "fires": []
+    },
+    {
+      "name": "before fires on its when, like every rule",
+      "rules": [
+        {
+          "id": "b",
+          "when": [
+            {
+              "mod": "native:auto-loot-plus"
+            },
+            {
+              "engine": "ultimate-asi-loader"
+            }
+          ],
+          "action": "before",
+          "subject": {
+            "mod": "native:auto-loot-plus"
+          },
+          "target": {
+            "engine": "ultimate-asi-loader"
+          },
+          "message": "m"
+        },
+        {
+          "id": "b-always",
+          "action": "before",
+          "subject": {
+            "module": "first.dll"
+          },
+          "target": {
+            "module": "second.dll"
+          },
+          "message": "m"
+        }
+      ],
+      "facts": {
+        "modules": [
+          "xinput9_1_0.dll",
+          "dinput8.dll"
+        ],
+        "engines": [
+          "kiln",
+          "ultimate-asi-loader"
+        ],
+        "mods": [
+          "kiln:auto-loot-plus",
+          "eml:auto-loot-plus"
+        ],
+        "symbols": []
+      },
+      "fires": [
+        "b",
+        "b-always"
+      ]
+    },
+    {
+      "name": "before without its other side present does not fire",
+      "rules": [
+        {
+          "id": "b",
+          "when": [
+            {
+              "mod": "native:auto-loot-plus"
+            },
+            {
+              "engine": "ultimate-asi-loader"
+            }
+          ],
+          "action": "before",
+          "subject": {
+            "mod": "native:auto-loot-plus"
+          },
+          "target": {
+            "engine": "ultimate-asi-loader"
+          },
+          "message": "m"
+        }
+      ],
+      "facts": {
+        "modules": [
+          "dinput8.dll"
+        ],
+        "engines": [
+          "kiln"
+        ],
+        "mods": [
+          "kiln:auto-loot-plus"
+        ],
         "symbols": []
       },
       "fires": []

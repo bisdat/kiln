@@ -96,6 +96,9 @@ internal static class ConfigScreens
             if (f.ServerValues.Count > 0)
                 ui.Text(Color.Cyan, $"{f.ServerValues.Count} entr{(f.ServerValues.Count == 1 ? "y holds" : "ies hold")} the server's value while connected (read-only).");
             if (f.LastError is { } err) ui.Text(Color.Red, "file: " + err);
+            // the last write failed, whoever wrote (this page's Apply, the mod's Set or Save): the file is behind until a
+            // write succeeds, which clears it
+            if (f.LastWriteError is { } writeErr) ui.Text(Color.Red, "not saved: " + writeErr);
             foreach (var w in f.Warnings.Take(3)) ui.Text(Color.Yellow, w);
             string? section = null;
             IReadOnlyList<ConfigEntry> entries;

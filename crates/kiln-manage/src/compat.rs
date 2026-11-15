@@ -2,11 +2,12 @@
 //! (`<game>/kiln/state/hooks.json`) and its overlaps, and what a profile's activation writes into chain.ini
 //! ([profile], [late], rule switches). Formats: docs/kiln/engines/README.md "Closed DLLs"; schemas
 //! `schema/compat-rules.schema.json` and `schema/hooks-state.schema.json` (kiln-core writes hooks.json and evaluates
-//! the same rules at boot; the launcher applies `late` and `disable` on chain entries when it writes chain.ini).
+//! the same rules at boot; the launcher applies `late`, `disable` and `before` on chain entries when it writes chain.ini).
 //!
 //! - [`parse_rules`] / [`load_rules`]: `<game>/kiln/compat-rules.json` (shipped with Kiln) then
 //!   `<configDir>/compat-rules.json` (the player's; a rule with the id of a shipped one replaces it).
-//! - [`evaluate`]: which rules fire for a set of [`Facts`] and which chain entries they move or switch off.
+//! - [`evaluate`]: which rules fire for a set of [`Facts`] and which chain entries they move or switch off; a `before`
+//!   rule (dev.29) loads its target late and keeps its subject early, or warns when that order cannot be made.
 //! - [`read_hooks`] / [`overlaps`]: the last session's hooks.json and its overlaps (derived from the targets when the
 //!   core wrote none).
 //! - [`plan`]: the chain.ini lines of a profile; [`view`]: the same plus overlaps mapped to chain entries and Library
@@ -81,6 +82,11 @@ pub enum RuleAction {
     Late,
     /// Switch the subject off: its chain entries (launcher) or the engine mod (kiln-core skips it).
     Disable,
+    /// dev.29: the subject's chain entries load before the target's. The launcher keeps the subject early (in the proxy)
+    /// and loads the target late (chain.ini [late]), whatever the late switches say: the proxy loads [chain] before
+    /// [profile] and its late phase keeps that order, so the phases are what can order a [profile] DLL first. For a DLL
+    /// that has to patch the game's imports before another one redirects them (Auto Loot Plus, Ultimate ASI Loader).
+    Before,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -91,9 +97,12 @@ pub struct Rule {
     #[serde(default)]
     pub when: Vec<Matcher>,
     pub action: RuleAction,
-    /// What `late` / `disable` act on (`warn` may leave it out).
+    /// What `late` / `disable` act on (`warn` may leave it out); `before`: the DLL that loads first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subject: Option<Matcher>,
+    /// `before` only: the DLL that loads after the subject (late).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<Matcher>,
     #[serde(default)]
     pub message: String,
 }
@@ -138,9 +147,9 @@ pub fn parse_rules(bytes: &[u8], source: RuleSource) -> (Vec<SourcedRule>, Vec<S
             break;
         }
         // a matcher is an object: `"subject": null` is not one (serde would read it as no subject)
-        if r.get("subject").is_some_and(|s| s.is_null()) {
+        if let Some(key) = ["subject", "target"].into_iter().find(|k| r.get(k).is_some_and(|s| s.is_null())) {
             let id = r.get("id").and_then(|x| x.as_str()).map(|s| format!(" ({s})")).unwrap_or_default();
-            errors.push(format!("rule {}{id}: \"subject\" must be a matcher", i + 1));
+            errors.push(format!("rule {}{id}: \"{key}\" must be a matcher", i + 1));
             continue;
         }
         let rule: Rule = match serde_json::from_value(r.clone()) {
@@ -174,10 +183,16 @@ fn check_rule(r: &Rule) -> std::result::Result<(), String> {
     if r.action != RuleAction::Warn && r.subject.is_none() {
         return Err(format!("action {:?} needs a \"subject\"", r.action).to_lowercase());
     }
+    if r.action == RuleAction::Before && r.target.is_none() {
+        return Err("action before needs a \"target\"".into());
+    }
+    if r.action != RuleAction::Before && r.target.is_some() {
+        return Err("a \"target\" belongs to action before only".into());
+    }
     if r.when.len() > MAX_WHEN {
         return Err(format!("more than {MAX_WHEN} conditions in \"when\""));
     }
-    for m in r.when.iter().chain(&r.subject) {
+    for m in r.when.iter().chain(&r.subject).chain(&r.target) {
         let text = match m {
             Matcher::Module(s) | Matcher::Engine(s) | Matcher::Mod(s) | Matcher::Symbol(s) => s,
         };
@@ -377,16 +392,40 @@ pub struct RuleResult {
     /// The launcher applies it: it fired and its subject names chain entries (`late` / `disable`), or it is a `warn`
     /// that fired.
     pub applied: bool,
-    /// The chain entries it moves or switches off.
+    /// The chain entries it moves or switches off (`before`: the ones it loads late).
     pub targets: Vec<String>,
+    /// `before`: the chain entries it keeps early (they load before `targets`, also when a late switch says otherwise).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub early: Vec<String>,
     /// Why a fired rule is not applied by the launcher (e.g. kiln-core skips an engine mod itself).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// `before`: both sides are there but the order cannot be made (the later DLL never loads late, a cycle, another
+    /// rule loads the earlier one late): nothing was moved. The launcher shows it as a warning and logs it at activation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
+}
+
+impl RuleResult {
+    /// What an applied `before` rule does, in a player's words: its message, else a sentence from the file names.
+    pub fn order_sentence(&self) -> String {
+        if !self.message.trim().is_empty() {
+            return self.message.trim().to_string();
+        }
+        let names = |v: &[String]| v.iter().map(|p| file_name(p).to_string()).collect::<Vec<_>>().join(", ");
+        format!("{} loads after Kiln and ShroudForge so that {} loads first (compat rule {}).", names(&self.targets), names(&self.early), self.id)
+    }
 }
 
 /// Every rule against the facts and the chain entries, in file order.
 pub fn evaluate(rules: &[SourcedRule], facts: &Facts, entries: &[PlanEntry]) -> Vec<RuleResult> {
-    rules
+    evaluate_with(rules, facts, entries, &|_| false)
+}
+
+/// [`evaluate`], with `never_late`: chain entries Kiln never loads late besides EMF's loader (shroudlink's client addon,
+/// [`is_gated_addon`], needs the DLL's exports). A `before` rule whose later DLL is one of those cannot be met.
+pub fn evaluate_with(rules: &[SourcedRule], facts: &Facts, entries: &[PlanEntry], never_late: &dyn Fn(&PlanEntry) -> bool) -> Vec<RuleResult> {
+    let mut results: Vec<RuleResult> = rules
         .iter()
         .map(|sr| {
             let r = &sr.rule;
@@ -399,13 +438,16 @@ pub fn evaluate(rules: &[SourcedRule], facts: &Facts, entries: &[PlanEntry]) -> 
                 fired,
                 applied: false,
                 targets: Vec::new(),
+                early: Vec::new(),
                 note: None,
+                warning: None,
             };
             if !fired {
                 return res;
             }
             match (r.action, &r.subject) {
                 (RuleAction::Warn, _) => res.applied = true,
+                (RuleAction::Before, Some(subject)) => before(&mut res, subject, r.target.as_ref(), facts, entries, never_late),
                 (_, Some(subject)) => {
                     let matched: Vec<&PlanEntry> = entries.iter().filter(|e| e.matches(subject)).collect();
                     let late = r.action == RuleAction::Late;
@@ -430,22 +472,124 @@ pub fn evaluate(rules: &[SourcedRule], facts: &Facts, entries: &[PlanEntry]) -> 
             }
             res
         })
-        .collect()
+        .collect();
+    order_conflicts(&mut results);
+    results
+}
+
+/// One `before` rule that fired: the entries of each side, or why there is nothing to order.
+fn before(res: &mut RuleResult, subject: &Matcher, target: Option<&Matcher>, facts: &Facts, entries: &[PlanEntry], never_late: &dyn Fn(&PlanEntry) -> bool) {
+    let Some(target) = target else {
+        res.note = Some("no target".into());
+        return;
+    };
+    let side = |m: &Matcher| entries.iter().filter(|e| e.matches(m) && !e.is_kiln_own()).collect::<Vec<&PlanEntry>>();
+    let (first, last) = (side(subject), side(target));
+    let files = |v: &[&PlanEntry]| v.iter().map(|e| e.file.clone()).collect::<Vec<_>>().join(", ");
+    let what = |m: &Matcher| match m {
+        Matcher::Module(s) => s.clone(),
+        Matcher::Engine(w) => crate::engines::ENGINES.iter().find(|i| i.word.eq_ignore_ascii_case(w)).map_or(w.clone(), |i| i.name.to_string()),
+        Matcher::Mod(s) => s.split_once(':').map_or(s.as_str(), |(_, id)| id).to_string(),
+        Matcher::Symbol(s) => s.clone(),
+    };
+    if first.is_empty() || last.is_empty() {
+        let (empty, m) = if first.is_empty() { ("subject", subject) } else { ("target", target) };
+        if !first.is_empty() && facts.holds(target) {
+            // there, but loaded by Windows or another loader before Kiln's chain: nothing Kiln loads can come first
+            res.warning = Some(format!("{} is not in Kiln's chain (it starts before Kiln, next to the game or from another loader), \
+                so {} cannot load before it. Nothing was moved.", what(target), files(&first)));
+        } else {
+            res.note = Some(match m {
+                Matcher::Symbol(_) => "a symbol names no DLL to order".into(),
+                _ => format!("no chain entry matches the {empty}"),
+            });
+        }
+        return;
+    }
+    let cannot = if let Some(e) = first.iter().find(|e| last.contains(e)) {
+        Some(format!("{} matches both sides of the rule, so it cannot load before itself.", e.file))
+    } else if let Some(e) = last.iter().find(|e| e.is_emf_loader()) {
+        Some(format!("{} is EMF's loader: it starts EMF itself, so it always loads first and {} cannot load before it.", e.file, files(&first)))
+    } else {
+        last.iter().find(|e| never_late(e)).map(|e| format!("{} is shroudlink's client addon: Kiln's start waits for it, so it always loads \
+            first and {} cannot load before it.", e.file, files(&first)))
+    };
+    if let Some(why) = cannot {
+        res.warning = Some(format!("{why} Nothing was moved."));
+        return;
+    }
+    res.targets = last.iter().map(|e| e.path.clone()).collect();
+    res.early = first.iter().map(|e| e.path.clone()).collect();
+    res.applied = true;
+}
+
+/// `before` rules among the others: an entry it keeps early that another applied rule loads late (a `late` rule, or a
+/// `before` rule whose target it is: a cycle) means that order cannot be made, and an entry a `disable` rule switches off
+/// is not loaded at all. A `before` rule left with nothing to order, or in such a clash, moves nothing; the clash is its
+/// warning. Judged on the rules as evaluated, all at once (the `late` rule stays applied).
+fn order_conflicts(results: &mut [RuleResult]) {
+    let eq = |a: &String, b: &String| a.eq_ignore_ascii_case(b);
+    let off: Vec<(String, String)> = results.iter().filter(|r| r.applied && r.action == RuleAction::Disable)
+        .flat_map(|r| r.targets.iter().map(|t| (r.id.clone(), t.clone()))).collect();
+    // Disabled sides must be removed before they can contribute phase conflicts.
+    for r in results.iter_mut().filter(|r| r.applied && r.action == RuleAction::Before) {
+        let by = |p: &String| off.iter().find(|(_, t)| eq(t, p)).map(|(id, _)| id.clone());
+        let gone: Vec<(String, String)> = r.early.iter().chain(&r.targets).filter_map(|p| by(p).map(|id| (id, p.clone()))).collect();
+        r.early.retain(|p| by(p).is_none());
+        r.targets.retain(|p| by(p).is_none());
+        if r.early.is_empty() || r.targets.is_empty() {
+            r.applied = false;
+            r.early.clear();
+            r.targets.clear();
+            r.note = gone.first().map(|(id, p)| format!("{} is switched off by rule {id}: nothing to order", file_name(p)));
+        }
+    }
+    let moved: Vec<(usize, String)> = results.iter().enumerate().filter(|(_, r)| r.applied && matches!(r.action, RuleAction::Late | RuleAction::Before))
+        .flat_map(|(i, r)| r.targets.iter().map(move |t| (i, t.clone()))).collect();
+    let mut clash: Vec<(usize, String)> = Vec::new();
+    for (i, r) in results.iter().enumerate().filter(|(_, r)| r.applied && r.action == RuleAction::Before) {
+        for p in &r.early {
+            if let Some((j, _)) = moved.iter().find(|(j, t)| *j != i && eq(t, p)) {
+                let other = &results[*j];
+                let why = format!("rule {} loads {} late, so it cannot load before {}.", other.id, file_name(p),
+                    r.targets.iter().map(|t| file_name(t)).collect::<Vec<_>>().join(", "));
+                clash.push((i, why.clone()));
+                if other.action == RuleAction::Before {
+                    clash.push((*j, format!("rule {} keeps {} loading first, and this rule loads it late: the two rules ask for opposite orders.", r.id, file_name(p))));
+                }
+            }
+        }
+    }
+    for (i, why) in clash {
+        let r = &mut results[i];
+        if r.applied {
+            r.applied = false;
+            r.targets.clear();
+            r.early.clear();
+            r.warning = Some(format!("{why} Nothing was moved."));
+        }
+    }
+
 }
 
 /// The chain.ini lines for a profile's [profile] entries (`profile_late`: their paths that the profile loads late),
 /// with the rule results applied: `disable` drops [profile] entries and switches [chain] lines off, `late` adds
-/// [late] lines (`disable` wins over `late`).
+/// [late] lines (`disable` wins over `late`). `before` loads its targets late and keeps its early entries early, over
+/// the profile's own late switch and the player's [late] line ([`ProfilePlan::rule_early`]).
 pub fn apply(entries: &[PlanEntry], profile_late: &[String], results: &[RuleResult]) -> ProfilePlan {
     let fired = |a: RuleAction| results.iter().filter(move |r| r.applied && r.action == a);
-    let off = |p: &str| fired(RuleAction::Disable).find(|r| r.targets.iter().any(|t| t.eq_ignore_ascii_case(p)));
+    let names = |v: &[String], p: &str| v.iter().any(|t| t.eq_ignore_ascii_case(p));
+    let off = |p: &str| fired(RuleAction::Disable).find(|r| names(&r.targets, p));
+    let first = |p: &str| fired(RuleAction::Before).find(|r| names(&r.early, p));
+    let after = |p: &str| fired(RuleAction::Before).find(|r| names(&r.targets, p));
     let mut plan = ProfilePlan::default();
     for e in entries {
         let disabled = off(&e.path);
         match (e.section, disabled) {
             (Section::Profile, None) => {
                 plan.profile.push(e.path.clone());
-                if profile_late.iter().any(|p| p.eq_ignore_ascii_case(&e.path)) {
+                // a `before` rule decides this entry's phase: the profile's switch waits until the rule is gone
+                if names(profile_late, &e.path) && first(&e.path).is_none() && after(&e.path).is_none() {
                     plan.profile_late.push(e.path.clone());
                 }
             }
@@ -453,14 +597,38 @@ pub fn apply(entries: &[PlanEntry], profile_late: &[String], results: &[RuleResu
             (Section::Chain, Some(r)) => plan.rule_off.push((r.id.clone(), e.path.clone())),
             (Section::Chain, None) => {}
         }
-        if disabled.is_none()
-            && let Some(r) = fired(RuleAction::Late).find(|r| r.targets.iter().any(|t| t.eq_ignore_ascii_case(&e.path)))
-            && !plan.profile_late.iter().any(|p| p.eq_ignore_ascii_case(&e.path))
+        if disabled.is_some() {
+            continue;
+        }
+        if let Some(r) = first(&e.path) {
+            plan.rule_early.push((r.id.clone(), e.path.clone()));
+        } else if let Some(r) = after(&e.path).or_else(|| fired(RuleAction::Late).find(|r| names(&r.targets, &e.path)))
+            && !names(&plan.profile_late, &e.path)
         {
             plan.rule_late.push((r.id.clone(), e.path.clone()));
         }
     }
     plan
+}
+
+impl Plan {
+    /// What the rules decided about the load order, one sentence each, for the activation's notes and the launcher's
+    /// log: an applied `before` rule's sentence ([`RuleResult::order_sentence`], the same the profile page shows), and
+    /// the warning of one that could not be met.
+    pub fn order_notes(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for r in self.rules.iter().filter(|r| r.action == RuleAction::Before && r.fired) {
+            let line = match (&r.warning, r.applied) {
+                (Some(w), _) => format!("Load order not changed by compat rule {}: {w}", r.id),
+                (None, true) => r.order_sentence(),
+                (None, false) => continue,
+            };
+            if !out.contains(&line) {
+                out.push(line);
+            }
+        }
+        out
+    }
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -717,7 +885,15 @@ fn entry_host_path(install: &GameInstall, path: &str) -> Option<PathBuf> {
 
 fn engine_word_of(path: &Path) -> Option<String> {
     let class = crate::pe::classify_proxy(path).ok()?;
-    crate::engines::Engine::of_proxy(class.kind).map(|e| crate::engines::info(e).word.to_string())
+    let engine = crate::engines::Engine::of_proxy(class.kind)?;
+    // Ordering changes when a DLL runs. A text reference to UAL (e.g. a client
+    // looking up its identity) is not its identity export, which the core checks.
+    if engine == crate::engines::Engine::UltimateAsiLoader
+        && !crate::pe::exports(path).ok()?.iter().any(|e| e == "IsUltimateASILoader")
+    {
+        return None;
+    }
+    Some(crate::engines::info(engine).word.to_string())
 }
 
 /// The engine word of a mod kind (Kiln's own kinds are "kiln").
@@ -798,7 +974,11 @@ pub fn plan(dirs: &DataDirs, profile: &Profile, install: &GameInstall, profile_d
     for slot in crate::engines::scan_proxies(&install.path) {
         facts.add_module(&slot.name);
         if let Some(e) = crate::engines::Engine::of_proxy(slot.class.kind) {
-            facts.add_engine(crate::engines::info(e).word);
+            if e != crate::engines::Engine::UltimateAsiLoader
+                || engine_word_of(&install.path.join(&slot.name)).is_some()
+            {
+                facts.add_engine(crate::engines::info(e).word);
+            }
         }
     }
     for k in ModKind::ALL {
@@ -832,7 +1012,8 @@ pub fn plan(dirs: &DataDirs, profile: &Profile, install: &GameInstall, profile_d
         (install.path.join(SHIPPED_RULES), RuleSource::Kiln),
         (dirs.profile(&profile.id).join("config").join(RULES_FILE), RuleSource::User),
     ]);
-    let results = evaluate(&rules, &facts, &entries);
+    // shroudlink's client addon never loads late either (its exports say it is): a `before` rule cannot move it
+    let results = evaluate_with(&rules, &facts, &entries, &|e| is_gated_addon(install, e));
     let late_paths: Vec<String> = profile_dlls.iter().filter(|(id, _)| profile.late.contains(id)).map(|(_, p)| p.clone()).collect();
     let chain = apply(&entries, &late_paths, &results);
     Plan { entries, facts, rules: results, rule_errors, chain, chain_text: text, ini, hooks, chain_error }
@@ -878,6 +1059,10 @@ pub struct ChainViewEntry {
     pub late_by: Option<String>,
     /// A rule switches it off ("rule:<id>").
     pub off_by: Option<String>,
+    /// dev.29: a `before` rule keeps it early ("rule:<id>"): it loads in the proxy whatever its late switch says, so the
+    /// switch is the rule's while the rule applies (`late` is false).
+    #[serde(default)]
+    pub early_by: Option<String>,
     /// EMF's loader: it starts EMF itself and always loads first (no late switch).
     #[serde(default)]
     pub loader: bool,
@@ -988,6 +1173,11 @@ fn overlap_view(o: Overlap, entries: &[ChainViewEntry], lib: &[crate::library::L
             let by = e.off_by.as_deref().unwrap_or_default();
             ("none", format!("{name} is switched off by {} for this profile, so it does not load here. This overlap is from an earlier start.", by.replacen("rule:", "rule ", 1)))
         }
+        // a `before` rule keeps it loading first: moving it late would break what that rule orders
+        (OverlapKind::ForeignBefore | OverlapKind::Refused, Some(e)) if e.early_by.is_some() => {
+            let by = e.early_by.as_deref().unwrap_or_default();
+            ("none", format!("{name} loads first by {}: another DLL has to load after it, so it is not moved late. Switch it or the other mod off if they clash.", by.replacen("rule:", "compat rule ", 1)))
+        }
         (OverlapKind::ForeignBefore | OverlapKind::Refused, Some(_)) if loader => {
             ("none", format!("{name} is EMF's loader: it starts EMF itself, so it always loads first. Switch it or the other mod off, or add a compat rule."))
         }
@@ -1051,7 +1241,11 @@ pub fn view(dirs: &DataDirs, profile: &Profile, install: &GameInstall) -> Result
                 removed.then(|| p.rules.iter().find(|r| r.applied && r.action == RuleAction::Disable && r.targets.iter().any(eq)))
                     .flatten().map(|r| format!("rule:{}", r.id))
             });
-            let late_by = if p.chain.profile_late.iter().any(eq) {
+            let early_by = p.chain.rule_early.iter().find(|(_, d)| eq(d)).map(|(id, _)| format!("rule:{id}"));
+            let late_by = if early_by.is_some() {
+                // the player's [late] line for it is switched off by the rule (written at the next activation)
+                None
+            } else if p.chain.profile_late.iter().any(eq) {
                 Some("profile".to_string())
             } else if let Some((id, _)) = p.chain.rule_late.iter().find(|(_, d)| eq(d)) {
                 Some(format!("rule:{id}"))
@@ -1066,8 +1260,8 @@ pub fn view(dirs: &DataDirs, profile: &Profile, install: &GameInstall) -> Result
             };
             // the proxy loads EMF's loader at its place whatever chain.ini [late] says
             let loader = e.is_emf_loader();
-            ChainViewEntry { entry: e.clone(), late: !loader && late_by.is_some() && off_by.is_none(), late_by: if loader { None } else { late_by }, off_by, loader,
-                gated: is_gated_addon(install, e) }
+            ChainViewEntry { entry: e.clone(), late: !loader && late_by.is_some() && off_by.is_none(), late_by: if loader { None } else { late_by }, off_by,
+                early_by, loader, gated: is_gated_addon(install, e) }
         })
         .collect();
     let lib = crate::library::list(dirs, None).unwrap_or_default();
@@ -1387,7 +1581,7 @@ mod tests {
         let err = set_entry_late(&install, &mut p, &loader, true).unwrap_err();
         assert!(err.message.contains("EMF's loader"), "{}", err.message);
         // the overlap hint for it: no one-click fix
-        let v = |e: PlanEntry| ChainViewEntry { loader: e.is_emf_loader(), entry: e, late: false, late_by: None, off_by: None, gated: false };
+        let v = |e: PlanEntry| ChainViewEntry { loader: e.is_emf_loader(), entry: e, late: false, late_by: None, off_by: None, early_by: None, gated: false };
         let overlap = Overlap {
             symbol: "S".into(), rva: "0x1".into(), kind: OverlapKind::ForeignBefore, owners: vec!["kiln.chat".into()], hook: None,
             foreign: Some(ForeignDest { module: "emf-dinput8.dll".into(), offset: "0x1".into(), ..Default::default() }),
@@ -1400,7 +1594,7 @@ mod tests {
     #[test]
     fn two_entries_with_one_file_name_get_no_one_click_fix() {
         let v = |path: &str, section, mod_id: Option<&str>| ChainViewEntry {
-            entry: entry(path, section, None, mod_id), late: false, late_by: None, off_by: None, loader: false, gated: false,
+            entry: entry(path, section, None, mod_id), late: false, late_by: None, off_by: None, early_by: None, loader: false, gated: false,
         };
         let overlap = Overlap {
             symbol: "S".into(), rva: "0x1".into(), kind: OverlapKind::ForeignBefore, owners: vec!["kiln.chat".into()], hook: None,
@@ -1414,7 +1608,7 @@ mod tests {
     }
 
     fn view_entry(path: &str, section: Section, off_by: Option<&str>, late: bool) -> ChainViewEntry {
-        ChainViewEntry { entry: entry(path, section, None, None), late, late_by: late.then(|| "player".to_string()), off_by: off_by.map(Into::into), loader: false, gated: false }
+        ChainViewEntry { entry: entry(path, section, None, None), late, late_by: late.then(|| "player".to_string()), off_by: off_by.map(Into::into), early_by: None, loader: false, gated: false }
     }
 
     /// An entry a compat rule switches off does not load in this profile: the hint says so, and never "loads late already".
@@ -1467,7 +1661,7 @@ mod tests {
         }
         // the same addon chained from a profile (a native mod at its game-side path), also renamed before import
         let game_side = format!("Z:{}", chain.join("shroudlink-client.dll").display()).replace('/', "\\");
-        let native = [ChainViewEntry { entry: entry(&game_side, Section::Profile, None, Some("shroudlink-client")), late: false, late_by: None, off_by: None, loader: false, gated: true }];
+        let native = [ChainViewEntry { entry: entry(&game_side, Section::Profile, None, Some("shroudlink-client")), late: false, late_by: None, off_by: None, early_by: None, loader: false, gated: true }];
         assert_eq!(overlap_view(overlap("shroudlink-client.dll"), &native, &[], &gated).fix, "none");
         for f in ["hook-dinput8.dll", "other-dinput8.dll"] {
             let other = [view_entry(&format!("chain\\{f}"), Section::Chain, None, false)];
@@ -1603,5 +1797,328 @@ mod tests {
         assert_eq!(by("xhl.dll"), (true, Some("rule:other-profile".to_string())));
         assert_eq!(by("mine.dll"), (true, Some("player".to_string())));
         drop(t);
+    }
+
+    // ---- dev.29: a DLL that must load before another (action `before`) ----
+    //
+    // A player's report: Auto Loot Plus (a Library native, chain.ini [profile]) patches the game's GetProcAddress import
+    // in its DllMain, but only while the slot still holds kernel32's own function. Ultimate ASI Loader (chained by the
+    // installer as `..\xinput9_1_0.dll`) redirects that import when it loads and puts it back only at the game's first
+    // call, after Kiln's entry gate. So ALP must load first. The proxy loads [chain] before [profile] and the late phase
+    // keeps that order: only "UAL late, ALP early" orders them, and the shipped rule writes exactly that.
+
+    const UAL: &str = "..\\xinput9_1_0.dll";
+    const ALP: &str = "Z:\\lib\\native\\auto-loot-plus\\0.0.0+5a9a5282\\dinput8.dll";
+    const ALP_RULE: &str = "auto-loot-plus-before-ultimate-asi-loader";
+
+    fn shipped_rules() -> Vec<u8> {
+        std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../native/core/compat-rules.json")).unwrap()
+    }
+
+    /// A game with Ultimate ASI Loader where the installer leaves it (recognised by its export, whatever the file is
+    /// called), chain.ini as dev.28 left it (`ual_late`: the player's game-wide switch; `alp_late`: the profile's switch
+    /// as dev.28 wrote it into [late]) and Kiln's shipped rules.
+    fn alp_game(tag: &str, ual: bool, alp: bool, ual_late: bool, alp_late: bool) -> (Scratch, DataDirs, GameInstall) {
+        let (t, dirs, install) = scratch_install(tag);
+        let mut text = String::from("[chain]\r\n");
+        if ual {
+            std::fs::write(install.path.join("xinput9_1_0.dll"), crate::pe::build_test_dll(&["DirectInput8Create", "IsUltimateASILoader"], b"")).unwrap();
+            text.push_str(&format!("{UAL}\r\n"));
+        }
+        if alp {
+            text.push_str(&format!("[profile]\r\n{ALP}\r\n"));
+        }
+        if ual_late || alp_late {
+            text.push_str("[late]\r\n");
+        }
+        if ual_late {
+            text.push_str(&format!("{UAL}\r\n"));
+        }
+        if alp_late {
+            text.push_str(&format!("{ALP}\r\n"));
+        }
+        std::fs::write(install.path.join("kiln/chain.ini"), text).unwrap();
+        std::fs::write(install.path.join(SHIPPED_RULES), shipped_rules()).unwrap();
+        (t, dirs, install)
+    }
+
+    fn alp_profile(dirs: &DataDirs, alp: bool, alp_late: bool) -> Profile {
+        let mut p = crate::profile::create(dirs, if alp { "Loot" } else { "Plain" }, None).unwrap();
+        if alp {
+            p.mods.native.push(crate::profile::ProfileMod { id: "auto-loot-plus".into(), version: "0.0.0".into(), hash: "sha256:5a9a5282".into(), enabled: true });
+        }
+        if alp_late {
+            p.late.push("auto-loot-plus".into());
+        }
+        p
+    }
+
+    fn alp_dlls(alp: bool) -> Vec<(String, String)> {
+        if alp { vec![("auto-loot-plus".to_string(), ALP.to_string())] } else { Vec::new() }
+    }
+
+    /// The plan of the profile written into chain.ini (what an activation does), and the file afterwards.
+    fn activate_plan(dirs: &DataDirs, p: &Profile, install: &GameInstall, alp: bool) -> (Plan, String) {
+        let pl = plan(dirs, p, install, &alp_dlls(alp));
+        chain::write_profile_plan(&install.path, &pl.chain).unwrap();
+        (pl, chain::read_raw(&install.path).unwrap())
+    }
+
+    fn paths(v: &[chain::ChainEntry]) -> Vec<&str> {
+        v.iter().map(|e| e.path.as_str()).collect()
+    }
+
+    #[test]
+    fn the_shipped_rule_loads_ual_late_and_alp_early_whatever_the_two_switches_say() {
+        for (ual_late, alp_late) in [(false, false), (false, true), (true, false), (true, true)] {
+            let (t, dirs, install) = alp_game(&format!("alp-{ual_late}-{alp_late}"), true, true, ual_late, alp_late);
+            let p = alp_profile(&dirs, true, alp_late);
+            let (pl, text) = activate_plan(&dirs, &p, &install, true);
+            let ctx = format!("UAL's switch {ual_late}, ALP's switch {alp_late}:\n{text}\n{:?}", pl.rule_errors);
+            assert!(pl.rule_errors.is_empty(), "{ctx}");
+            assert_eq!(pl.entries.iter().find(|e| e.path == UAL).and_then(|e| e.engine.as_deref()), Some("ultimate-asi-loader"), "{ctx}");
+            let ini = chain::parse(text.as_bytes());
+            assert_eq!(paths(&ini.chain), [UAL], "{ctx}");
+            assert_eq!(paths(&ini.profile), [ALP], "{ctx}");
+            assert_eq!(paths(&ini.late), [UAL], "UAL late, ALP not: {ctx}");
+            // the rule's mark on UAL's line, unless the player's own line said it already (that line stays the player's)
+            let want: Vec<(String, String)> = if ual_late { Vec::new() } else { vec![(ALP_RULE.into(), UAL.into())] };
+            assert_eq!(chain::rule_late_entries(&text), want, "{ctx}");
+            // the plan is what the file says now: the next activation writes nothing
+            let again = plan(&dirs, &p, &install, &alp_dlls(true));
+            assert!(chain::plan_is_current(&text, &again.chain), "{ctx}");
+            assert!(!chain::write_profile_plan(&install.path, &again.chain).unwrap(), "{ctx}");
+            drop(t);
+        }
+    }
+
+    #[test]
+    fn an_inactive_shipped_rule_has_the_same_chain_bytes_as_no_rule_file() {
+        for (ual, alp) in [(false, false), (true, false), (false, true)] {
+            let (_t, dirs, install) = alp_game(&format!("inactive-{ual}-{alp}"), ual, alp, ual, alp);
+            let p = alp_profile(&dirs, alp, alp);
+            let start = chain::read_raw(&install.path).unwrap();
+            let (pl, with) = activate_plan(&dirs, &p, &install, alp);
+            assert!(pl.order_notes().is_empty());
+            assert!(pl.rule_errors.is_empty());
+            for _ in 0..3 {
+                let again = plan(&dirs, &p, &install, &alp_dlls(alp));
+                assert!(chain::plan_is_current(&with, &again.chain));
+                assert!(!chain::write_profile_plan(&install.path, &again.chain).unwrap());
+            }
+            std::fs::remove_file(install.path.join(SHIPPED_RULES)).unwrap();
+            std::fs::write(install.path.join("kiln/chain.ini"), start).unwrap();
+            let (_, without) = activate_plan(&dirs, &p, &install, alp);
+            assert_eq!(with, without);
+        }
+    }
+
+    #[test]
+    fn a_text_reference_to_ual_does_not_move_another_dll_late() {
+        let (_t, dirs, install) = alp_game("ual-text-only", true, true, false, false);
+        std::fs::write(install.path.join("xinput9_1_0.dll"),
+            crate::pe::build_test_dll(&["DirectInput8Create"], b"looks up IsUltimateASILoader")).unwrap();
+        let p = alp_profile(&dirs, true, false);
+        let (pl, text) = activate_plan(&dirs, &p, &install, true);
+        assert!(pl.chain.rule_late.is_empty(), "{text}");
+        assert!(pl.order_notes().is_empty());
+    }
+
+    #[test]
+    fn only_ual_or_only_alp_changes_nothing() {
+        // UAL without ALP: the rule does not fire, UAL loads where the player put it
+        for ual_late in [false, true] {
+            let (t, dirs, install) = alp_game(&format!("ual-only-{ual_late}"), true, false, ual_late, false);
+            let (pl, text) = activate_plan(&dirs, &alp_profile(&dirs, false, false), &install, false);
+            assert!(pl.rule_errors.is_empty() && pl.rules.iter().all(|r| !r.fired), "{pl:?}");
+            assert_eq!(paths(&chain::parse(text.as_bytes()).late), if ual_late { vec![UAL] } else { vec![] }, "{text}");
+            assert!(!text.contains("kiln rule"), "{text}");
+            drop(t);
+        }
+        // ALP without UAL: its own switch counts
+        for alp_late in [false, true] {
+            let (t, dirs, install) = alp_game(&format!("alp-only-{alp_late}"), false, true, false, alp_late);
+            let (pl, text) = activate_plan(&dirs, &alp_profile(&dirs, true, alp_late), &install, true);
+            assert!(pl.rule_errors.is_empty() && pl.rules.iter().all(|r| !r.fired), "{pl:?}");
+            assert_eq!(paths(&chain::parse(text.as_bytes()).late), if alp_late { vec![ALP] } else { vec![] }, "{text}");
+            assert!(!text.contains("kiln rule"), "{text}");
+            drop(t);
+        }
+    }
+
+    /// Without the shipped rule (an older runtime's game folder), or with the player's own rule of that id switching it
+    /// off (the documented way: the same id and a `when` that never holds), the switches decide as before dev.29.
+    #[test]
+    fn without_the_rule_the_switches_decide_as_before() {
+        for case in ["no shipped file", "switched off by the player"] {
+            let (t, dirs, install) = alp_game(&format!("alp-norule-{}", case.len()), true, true, false, true);
+            let p = alp_profile(&dirs, true, true);
+            if case == "no shipped file" {
+                std::fs::remove_file(install.path.join(SHIPPED_RULES)).unwrap();
+            } else {
+                let cfg = dirs.profile(&p.id).join("config");
+                std::fs::create_dir_all(&cfg).unwrap();
+                std::fs::write(cfg.join(RULES_FILE), format!(r#"{{"format":1,"rules":[{{"id":"{ALP_RULE}","when":[{{"module":"never-there.dll"}}],"action":"warn"}}]}}"#)).unwrap();
+            }
+            let (pl, text) = activate_plan(&dirs, &p, &install, true);
+            assert!(pl.rule_errors.is_empty(), "{case}: {:?}", pl.rule_errors);
+            assert_eq!(paths(&chain::parse(text.as_bytes()).late), [ALP], "{case}: ALP's own switch, UAL early: {text}");
+            assert!(!text.contains("kiln rule"), "{case}: {text}");
+            drop(t);
+        }
+    }
+
+    /// Switching profiles: a profile without ALP takes the rule's [late] line away again (as every rule line), and the
+    /// profile with ALP puts it back; ALP's own switch comes back with the rule gone.
+    #[test]
+    fn switching_profiles_cleans_up_the_rules_lines() {
+        let (t, dirs, install) = alp_game("alp-switch", true, true, false, true);
+        let with = alp_profile(&dirs, true, true);
+        let (_, text) = activate_plan(&dirs, &with, &install, true);
+        assert_eq!(chain::rule_late_entries(&text), [(ALP_RULE.to_string(), UAL.to_string())], "{text}");
+        let without = alp_profile(&dirs, false, false);
+        let (_, text) = activate_plan(&dirs, &without, &install, false);
+        let ini = chain::parse(text.as_bytes());
+        assert!(ini.late.is_empty() && ini.profile.is_empty() && !text.contains("kiln rule"), "{text}");
+        let (_, text) = activate_plan(&dirs, &with, &install, true);
+        assert_eq!(paths(&chain::parse(text.as_bytes()).late), [UAL], "{text}");
+        // the shipped rule gone (an older runtime): ALP's own late switch is back
+        std::fs::remove_file(install.path.join(SHIPPED_RULES)).unwrap();
+        let (_, text) = activate_plan(&dirs, &with, &install, true);
+        assert_eq!(paths(&chain::parse(text.as_bytes()).late), [ALP], "{text}");
+        drop(t);
+    }
+
+    fn before_rules(json: &str) -> Vec<SourcedRule> {
+        let (rules, e) = parse_rules(format!(r#"{{ "format": 1, "rules": [{json}] }}"#).as_bytes(), RuleSource::User);
+        assert!(e.is_empty(), "{e:?}");
+        rules
+    }
+
+    /// An order that cannot be made moves nothing and says why: the later DLL is EMF's loader or shroudlink's addon
+    /// (never late), it is not in Kiln's chain at all, the rule names one DLL on both sides, or two rules ask opposite
+    /// orders, or a `late` rule loads the earlier DLL late.
+    #[test]
+    fn an_order_that_cannot_be_made_moves_nothing_and_warns() {
+        let first = entry("Z:\\lib\\first\\first.dll", Section::Profile, None, Some("first"));
+        let emf = entry("chain\\emf-dinput8.dll", Section::Chain, Some("emf"), None);
+        let addon = entry("chain\\shroudlink-dinput8-2.dll", Section::Chain, None, None);
+        let other = entry("chain\\other.dll", Section::Chain, None, None);
+        let entries = vec![emf.clone(), addon.clone(), other.clone(), first.clone()];
+        let addon_path = addon.path.clone();
+        let gated = move |e: &PlanEntry| e.path == addon_path;
+        let check = |rules: &str, facts: &Facts, want: &[(&str, &str)]| {
+            let res = evaluate_with(&before_rules(rules), facts, &entries, &gated);
+            for (id, text) in want {
+                let r = res.iter().find(|r| r.id == *id).unwrap();
+                assert!(!r.applied && r.targets.is_empty() && r.early.is_empty(), "{id}: {r:?}");
+                assert!(r.warning.as_deref().is_some_and(|w| w.contains(text) && w.ends_with("Nothing was moved.")), "{id}: {r:?}");
+            }
+            let plan = apply(&entries, std::slice::from_ref(&first.path), &res);
+            (res, plan)
+        };
+        let none = Facts::default();
+        for (rules, want) in [
+            (r#"{"id":"b-emf","action":"before","subject":{"mod":"native:first"},"target":{"engine":"emf"}}"#, "EMF's loader"),
+            (r#"{"id":"b-addon","action":"before","subject":{"mod":"native:first"},"target":{"module":"shroudlink-dinput8-2.dll"}}"#, "shroudlink's client addon"),
+            (r#"{"id":"b-self","action":"before","subject":{"module":"*.dll"},"target":{"module":"other.dll"}}"#, "both sides"),
+        ] {
+            let (_, plan) = check(rules, &none, &[(rules.split('"').nth(3).unwrap(), want)]);
+            assert_eq!((plan.rule_late.len(), plan.rule_early.len()), (0, 0), "{rules}: {plan:?}");
+            assert_eq!(plan.profile_late, std::slice::from_ref(&first.path), "{rules}: the profile's own switch stays");
+        }
+        // the later DLL starts before Kiln's chain (next to the game, another loader): present, but not an entry
+        let ual = Facts { engines: vec!["ultimate-asi-loader".into()], ..Default::default() };
+        let (_, plan) = check(r#"{"id":"b-out","action":"before","subject":{"mod":"native:first"},"target":{"engine":"ultimate-asi-loader"}}"#, &ual,
+            &[("b-out", "is not in Kiln's chain")]);
+        assert!(plan.rule_late.is_empty() && plan.rule_early.is_empty());
+        // absent (no facts): only a note, no warning
+        let res = evaluate_with(&before_rules(r#"{"id":"b-none","action":"before","subject":{"mod":"native:first"},"target":{"module":"gone.dll"}}"#), &none, &entries, &gated);
+        assert!(!res[0].applied && res[0].warning.is_none() && res[0].note.as_deref() == Some("no chain entry matches the target"), "{:?}", res[0]);
+        // two rules asking opposite orders: neither moves anything
+        let (_, plan) = check(r#"{"id":"ab","action":"before","subject":{"mod":"native:first"},"target":{"module":"other.dll"}},
+            {"id":"ba","action":"before","subject":{"module":"other.dll"},"target":{"mod":"native:first"}}"#, &none,
+            &[("ab", "late"), ("ba", "late")]);
+        assert!(plan.rule_late.is_empty() && plan.rule_early.is_empty(), "{plan:?}");
+        // a `late` rule on the earlier DLL: the late rule stays, the order is not made
+        let (res, plan) = check(r#"{"id":"late-first","action":"late","subject":{"mod":"native:first"}},
+            {"id":"b","action":"before","subject":{"mod":"native:first"},"target":{"module":"other.dll"}}"#, &none,
+            &[("b", "rule late-first loads first.dll late")]);
+        assert!(res[0].applied, "{res:?}");
+        assert!(plan.rule_early.is_empty() && !plan.rule_late.iter().any(|(_, p)| p == "chain\\other.dll"), "{plan:?}");
+        // a side switched off by a `disable` rule: nothing to order, no warning
+        let res = evaluate_with(&before_rules(r#"{"id":"off","action":"disable","subject":{"module":"other.dll"}},
+            {"id":"b","action":"before","subject":{"mod":"native:first"},"target":{"module":"other.dll"}}"#), &none, &entries, &gated);
+        assert!(!res[1].applied && res[1].warning.is_none() && res[1].note.as_deref().is_some_and(|n| n.contains("switched off by rule off")), "{res:?}");
+    }
+
+    #[test]
+    fn a_disabled_order_side_does_not_block_an_independent_order() {
+        let entries = vec![
+            entry("chain\\a.dll", Section::Chain, None, None),
+            entry("chain\\b.dll", Section::Chain, None, None),
+            entry("chain\\c.dll", Section::Chain, None, None),
+        ];
+        let rules = before_rules(r#"
+            {"id":"off-a","action":"disable","subject":{"module":"a.dll"}},
+            {"id":"ab","action":"before","subject":{"module":"a.dll"},"target":{"module":"b.dll"}},
+            {"id":"bc","action":"before","subject":{"module":"b.dll"},"target":{"module":"c.dll"}}
+        "#);
+        let res = evaluate(&rules, &Facts::default(), &entries);
+        assert!(!res[1].applied && res[1].warning.is_none(), "{res:?}");
+        assert!(res[2].applied, "{res:?}");
+        let plan = apply(&entries, &[], &res);
+        assert_eq!(plan.rule_early, [("bc".into(), "chain\\b.dll".into())]);
+        assert_eq!(plan.rule_late, [("bc".into(), "chain\\c.dll".into())]);
+    }
+
+    /// The same order with the earlier DLL in [chain] and late by the player's own line: the line is switched off by the
+    /// rule (`; kiln rule <id> off:`) while it applies and comes back without it. An order already right (both early,
+    /// the earlier one first) is still pinned: the later DLL loads late.
+    #[test]
+    fn a_chain_entry_kept_early_has_the_players_late_line_switched_off_while_the_rule_applies() {
+        let (t, dirs, install) = scratch_install("keep-early");
+        for f in ["first.dll", "second.dll"] {
+            std::fs::create_dir_all(install.path.join("kiln/chain")).unwrap();
+            std::fs::write(install.path.join("kiln/chain").join(f), crate::pe::build_test_dll(&[], f.as_bytes())).unwrap();
+        }
+        let start = "[chain]\r\nchain\\first.dll\r\nchain\\second.dll\r\n[late]\r\n; mine\r\nchain\\first.dll\r\n";
+        std::fs::write(install.path.join("kiln/chain.ini"), start).unwrap();
+        let p = crate::profile::create(&dirs, "Keep", None).unwrap();
+        let cfg = dirs.profile(&p.id).join("config");
+        std::fs::create_dir_all(&cfg).unwrap();
+        let rule = r#"{"format":1,"rules":[{"id":"first-first","action":"before","subject":{"module":"first.dll"},"target":{"module":"second.dll"},"message":"second.dll loads after Kiln so that first.dll hooks first."}]}"#;
+        std::fs::write(cfg.join(RULES_FILE), rule).unwrap();
+        let pl = plan(&dirs, &p, &install, &[]);
+        assert_eq!(pl.chain.rule_early, [("first-first".to_string(), "chain\\first.dll".to_string())]);
+        assert_eq!(pl.order_notes(), ["second.dll loads after Kiln so that first.dll hooks first."]);
+        chain::write_profile_plan(&install.path, &pl.chain).unwrap();
+        let text = chain::read_raw(&install.path).unwrap();
+        assert_eq!(paths(&chain::parse(text.as_bytes()).late), ["chain\\second.dll"], "{text}");
+        assert!(text.contains("; kiln rule first-first off: chain\\first.dll\r\n") && text.contains("; mine\r\n"), "{text}");
+        assert!(chain::plan_is_current(&text, &plan(&dirs, &p, &install, &[]).chain), "{text}");
+        let v = view(&dirs, &p, &install).unwrap();
+        let by = |f: &str| v.entries.iter().find(|e| e.entry.file == f).map(|e| (e.late, e.late_by.clone(), e.early_by.clone())).unwrap();
+        assert_eq!(by("first.dll"), (false, None, Some("rule:first-first".to_string())));
+        assert_eq!(by("second.dll"), (true, Some("rule:first-first".to_string()), None));
+        // the rule gone: the player's line is back, the rule's line goes
+        std::fs::remove_file(cfg.join(RULES_FILE)).unwrap();
+        let pl = plan(&dirs, &p, &install, &[]);
+        assert!(pl.order_notes().is_empty());
+        chain::write_profile_plan(&install.path, &pl.chain).unwrap();
+        let text = chain::read_raw(&install.path).unwrap();
+        assert_eq!(paths(&chain::parse(text.as_bytes()).late), ["chain\\first.dll"], "{text}");
+        assert!(!text.contains("kiln rule") && text.contains("; mine\r\n"), "{text}");
+        drop(t);
+    }
+
+    #[test]
+    fn an_order_sentence_without_a_message_names_the_files() {
+        let r = RuleResult {
+            id: "mine".into(), source: RuleSource::User, action: RuleAction::Before, message: " ".into(), fired: true, applied: true,
+            targets: vec!["..\\xinput9_1_0.dll".into()], early: vec![ALP.into()], note: None, warning: None,
+        };
+        assert_eq!(r.order_sentence(), "xinput9_1_0.dll loads after Kiln and ShroudForge so that dinput8.dll loads first (compat rule mine).");
+        assert_eq!(RuleResult { message: "Said.".into(), ..r }.order_sentence(), "Said.");
     }
 }

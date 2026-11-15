@@ -34,6 +34,7 @@ std::string module_name(uintptr_t address);  // the file name of the module that
 const std::string* game_program_intern(std::string_view name);
 
 // ---- wraps.cpp ----
+void wraps_client_ready(bool tick, bool events);  // boot: enable only with lifecycle and both subscriptions
 void wraps_init();                                       // boot: the trampoline map, capability rows
 void wraps_pre(uint32_t kind, uintptr_t world);          // that world's thread, Pre, after its directory is current
 void wraps_world_event(const KilnWorldEvent* event);     // a world of a kind starts or stops
@@ -50,6 +51,9 @@ KilnResult KILN_CALL game_wrap_info(KilnHandle wrap, KilnGameWrapInfo* out);
 KilnResult KILN_CALL game_wraps_release(KilnOwner owner, uint32_t* out_pending);
 KilnResult KILN_CALL game_slice_run_original(KilnGameSlice* slice);
 uint64_t KILN_CALL wrap_original(uintptr_t entry);
+uint32_t KILN_CALL in_program();  // the table's in_program: a Kiln program's update, a wrap stage or a kiln.types
+                                  // system_hook callback on this thread
+void in_program_resolve(const KilnTypesApi* types);  // on_ready: kiln.types' in_system_callback (null: that part is 0)
 
 // ---- seh.cpp ----
 bool seh_wrap_stage(KilnWrapStageFn fn, KilnGameSlice* slice, void* user, unsigned long* code);

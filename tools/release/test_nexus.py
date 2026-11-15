@@ -298,7 +298,7 @@ class NexusTests(unittest.TestCase):
         d = os.path.join(self.tmp, f"kiln-{version}")
         files = {
             "updates/github/latest.json": json.dumps({"version": version}).encode(),
-            "README.txt": b"Kiln readme: the launcher updates itself\n",
+            "README.txt": b"Kiln readme: built 2026-11-14 from commit 0123abc; the launcher updates itself\n",
             "RELEASE-NOTES.md": f"# Kiln {version}\n\n- Self-update.\n- Fixes.\n".encode(),
             # the direct build (updates itself): never for Nexus
             f"linux/kiln-launcher_{version}_amd64.AppImage": launcher_fixture("direct", 5000),

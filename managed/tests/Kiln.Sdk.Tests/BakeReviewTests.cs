@@ -112,7 +112,8 @@ public sealed unsafe class BakeReviewTests
 
     [Theory]
     [InlineData("Throws", "this mod's OnLoad throws")]
-    [InlineData("NeedsTheGame", "kiln.assets is unavailable")]
+    // the bake's harness has the kit's kiln.assets (content blobs only): the icon call fails on the row that is off
+    [InlineData("NeedsTheGame", "assets.ui_icons is not available")]
     public void AModThatDoesNotLoadLeavesNothingOfAnEarlierBake(string type, string why)
     {
         var dir = FixtureMod(type, "gone-test");
@@ -335,21 +336,7 @@ public sealed class BakeTargetsTests
                 """);
         }
 
-        public (int Code, string Output) MsBuild(params string[] args)
-        {
-            var psi = new ProcessStartInfo("dotnet") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
-            psi.ArgumentList.Add("msbuild");
-            psi.ArgumentList.Add(Path.Combine(Dir, "stub.proj"));
-            psi.ArgumentList.Add("-nologo");
-            psi.ArgumentList.Add("-v:m");
-            foreach (var a in args) psi.ArgumentList.Add(a);
-            foreach (var k in psi.Environment.Keys.Where(k => k.StartsWith("MSBuild", StringComparison.OrdinalIgnoreCase)).ToList()) psi.Environment.Remove(k);
-            using var p = Process.Start(psi)!;
-            var o = p.StandardOutput.ReadToEndAsync();
-            var e = p.StandardError.ReadToEndAsync();
-            p.WaitForExit(120_000);
-            return (p.ExitCode, o.Result + e.Result);
-        }
+        public (int Code, string Output) MsBuild(params string[] args) => StubMsBuild.Run(Path.Combine(Dir, "stub.proj"), args);
 
         public void Dispose() => Directory.Delete(Dir, true);
     }

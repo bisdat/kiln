@@ -719,6 +719,18 @@ static void test_v40(KilnApi &api) {
     mo.size = sizeof mo;
     CHECK(t.enemy_move(w, &mo, [](EmfWorld *, uint32_t, uint32_t, void *) { ++v40_callbacks; }, nullptr) == 0 &&
           std::string(mo.why) == "not available on Kiln yet");
+    // v41 (EMF 0.6.10): a mod built with 0.6.11's header sends 136 bytes with stuck_seconds and EMF_MOVE_PEACEFUL_ALL;
+    // one built with 0.6.8's sends 128. Both get the same refusal with its reason, and no callback.
+    CHECK(sizeof mo == 136);
+    mo = {};
+    mo.size = sizeof mo;
+    mo.flags = EMF_MOVE_PEACEFUL | EMF_MOVE_PEACEFUL_ALL;
+    mo.stuck_seconds = 30;
+    CHECK(t.enemy_move(w, &mo, [](EmfWorld *, uint32_t, uint32_t, void *) { ++v40_callbacks; }, nullptr) == 0 &&
+          std::string(mo.why) == "not available on Kiln yet");
+    mo = {};
+    mo.size = 128;
+    CHECK(t.enemy_move(w, &mo, nullptr, nullptr) == 0 && std::string(mo.why) == "not available on Kiln yet");
     const int counted = unsupported_calls - before;
     CHECK(counted >= 42);  // every function that is not carried reported itself at least once
     rb = {};

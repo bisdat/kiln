@@ -41,6 +41,7 @@ struct Bench {
     std::vector<std::string> written;
     int fail_next = 0;  // this many writes fail
     int fails_told = 0;
+    std::vector<std::string> notes;  // what kiln.log is told
     Writer w;
     explicit Bench(std::vector<std::string> plan = kClientPlan, const char* side = "client")
         : w(Model(who(side), std::move(plan)),
@@ -52,7 +53,7 @@ struct Bench {
                 written.push_back(t);
                 return true;
             },
-            [this] { return now; }, false, [this] { ++fails_told; }) {}
+            [this] { return now; }, false, [this] { ++fails_told; }, [this](const std::string& n) { notes.push_back(n); }) {}
     json last() const { return json::parse(written.back()); }
     void at(uint64_t t) {
         now = t;
@@ -371,6 +372,84 @@ int main() {
         nb.w.mark(Mark::world_started);
         nb.at(10);
         CHECK(nb.last()["state"] == "ready");
+    }
+    // ---- a client whose main menu mark never comes (another mod's hook over kiln-ui's menu detection; a Nexus report,
+    // 2026-11-14: "Kiln has said nothing for 5,183 s" while the player played): the first world ends the start ----
+    {
+        Bench b;
+        walk_boot(b);
+        b.w.step("mods");
+        b.w.loading();
+        b.w.step("content");
+        b.w.step("game", "The game is loading its main menu");
+        const uint64_t game_at = b.now;
+        b.at(b.now + 5);
+        CHECK(b.last()["state"] == "loading" && !b.last().contains("worldMs"));
+        b.now = game_at + 95000;  // the menu drew, its mark did not come; the player chose a world
+        CHECK(b.w.mark(Mark::world_started) == Result::ok);
+        b.at(b.now);
+        auto d = b.last();
+        CHECK(d["state"] == "ready" && d["worldMs"] == d["atMs"] && d["steps"].back()["id"] == "game" && d["steps"].back()["tookMs"] == 95000);
+        // kiln.log names the mark that never came
+        CHECK(b.notes.size() == 1 && b.notes[0].find("the main menu's mark had not come") != std::string::npos);
+        CHECK(b.w.mark(Mark::menu) == Result::over && b.w.mark(Mark::world_started) == Result::over);
+    }
+    {
+        // the world while a step of Kiln's has not ended (content stuck): written at once with worldMs, not ready, and
+        // kiln.log says where the start stands; the step ending later still ends the start (the world is remembered)
+        Bench b;
+        walk_boot(b);
+        b.w.step("mods");
+        b.w.loading();
+        b.w.step("content", {}, "block", 3, 198);
+        b.at(b.now + 1);
+        const size_t n = b.written.size();
+        b.now += 30000;
+        const uint64_t world_at = b.now;
+        b.w.mark(Mark::world_started);
+        b.at(b.now);
+        CHECK(b.written.size() == n + 1);
+        auto d = b.last();
+        CHECK(d["state"] == "loading" && d["worldMs"] == d["atMs"] && d["steps"].back()["id"] == "content" && !d["steps"].back().contains("tookMs"));
+        CHECK(b.notes.size() == 1 && b.notes[0].find("step content (Applying the mods' content)") != std::string::npos);
+        b.w.mark(Mark::world_started);  // a second world kind (the client world after the hosted server world): nothing new
+        b.at(b.now + 1);
+        CHECK(b.written.size() == n + 1 && b.notes.size() == 1);
+        b.now = world_at + 2000;
+        b.w.step("content", {}, {}, 198, 198);
+        b.w.step("game");
+        b.at(b.now);
+        CHECK(b.last()["state"] == "ready" && b.last()["worldMs"] == world_at && b.last()["atMs"] == world_at + 2000);
+        CHECK(b.notes.size() == 2 && b.notes[1].find("first world") != std::string::npos);
+    }
+    {
+        // the usual start: the menu's mark ends it; a world later changes nothing and says nothing
+        Bench b;
+        walk_boot(b);
+        b.w.step("mods");
+        b.w.loading();
+        b.w.step("content");
+        b.w.step("game");
+        b.w.mark(Mark::menu);
+        b.at(b.now + 1);
+        CHECK(b.last()["state"] == "ready" && !b.last().contains("worldMs"));
+        CHECK(b.w.mark(Mark::world_started) == Result::over && b.notes.empty());
+    }
+    {
+        // a server with .NET: its first world is written (worldMs) but is not its signal, and kiln.log hears nothing
+        Bench b(kClientPlan, "server");
+        walk_boot(b);
+        b.w.step("mods");
+        b.w.loading();
+        b.w.step("content");
+        b.w.step("game");
+        b.at(b.now);
+        b.w.mark(Mark::world_started);
+        b.at(b.now + 1);
+        CHECK(b.last()["state"] == "loading" && b.last().contains("worldMs") && b.notes.empty());
+        b.w.mark(Mark::server_started);
+        b.at(b.now + 2);
+        CHECK(b.last()["state"] == "ready" && b.notes.empty());
     }
     // ---- a plan with steps the start does not have (kiln.json's side section switched .NET off after the plan): the core's
     // skip_to takes them out, and the start ends in ready rather than loading for ever ----

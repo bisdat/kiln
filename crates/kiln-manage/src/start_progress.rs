@@ -1,7 +1,8 @@
 //! What a start is doing, from Play to the main menu, and how long it still takes (the contract of 0.2.0-dev.27,
 //! `docs/kiln/launcher/app.md` "What a start is doing").
 //!
-//! One timeline for the whole start: the launcher's own steps (`cook`, `profile`, `steam`, timed here by the launcher:
+//! One timeline for the whole start: the launcher's own steps (`cook`, `boot-snapshot`, `profile`, `steam`, timed here by
+//! the launcher:
 //! [`LauncherStart`]), then the steps the game's runtime reports in `<game>/kiln/state/progress.json` ([`Progress`],
 //! written by kiln-core; judged current exactly as boot.json is: [`crate::launch::state_file_is_current`]), ending at
 //! state `ready`. The time left comes from this PC's own earlier starts ([`StartTimes`], `<data>/state/start-times.json`:
@@ -47,8 +48,16 @@ pub const STEAM_FORGET_MS: u64 = 30 * 60_000;
 /// A running step that has taken this many times its usual time is "taking longer than usual" (as a fraction: 3/2).
 pub const SLOW: (u64, u64) = (3, 2);
 
-/// The launcher's own steps, in order.
-pub const LAUNCHER_STEPS: [&str; 3] = ["cook", "profile", "steam"];
+/// The launcher's own steps, in order. `boot-snapshot` is in a start's plan only once it begins (the boot game-data tool
+/// builds a snapshot: [`LauncherStart::boot_snapshot_line`]); a start that needs none, or finds it made, never shows it.
+pub const LAUNCHER_STEPS: [&str; 4] = ["cook", "boot-snapshot", "profile", "steam"];
+/// What the boot game-data step usually takes when this PC has no start with it yet: the snapshot's known cost (32 to
+/// 62 s measured, client and server alike; docs/kiln/modding/boot-snapshot.md).
+pub const BOOT_SNAPSHOT_USUAL_MS: u64 = 60_000;
+/// The line the boot snapshot tool prints when it begins to build a snapshot (tools/bootsnap/bootsnap.py, without its
+/// `boot-snapshot: ` prefix): from it on, the start shows the `boot-snapshot` step. Its progress lines
+/// (`<kind> <done>/<total>`) also begin it (a tool from before the line).
+pub const BOOT_SNAPSHOT_MAKING: &str = "making the game data snapshot";
 /// The runtime's step ids (contract section 1), in order.
 pub const RUNTIME_STEPS: [&str; 11] =
     ["start", "native-early", "early-plugins", "signatures", "services", "plugins", "native", "dotnet", "mods", "content", "game"];
@@ -57,6 +66,7 @@ pub const RUNTIME_STEPS: [&str; 11] =
 pub fn default_label(id: &str) -> &'static str {
     match id {
         "cook" => "Cooking mods",
+        "boot-snapshot" => "Making the game data for OnBoot mods (once per game update)",
         "profile" => "Checking the profile",
         "steam" => "Starting the game through Steam",
         "start" => "Reading Kiln's settings and the profile",
@@ -131,6 +141,10 @@ pub struct Progress {
     pub steps: Vec<ProgressStep>,
     #[serde(default)]
     pub why: Option<String>,
+    /// Milliseconds since `started` when the game's first world began (since 0.2.0-dev.29; None: not yet, or an older
+    /// runtime). A client's start ends there too when its main menu's mark never came.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub world_ms: Option<u64>,
 }
 
 impl Progress {
@@ -154,6 +168,7 @@ impl Progress {
     /// Every time within [`MAX_MS`], every count within [`MAX_COUNT`].
     pub fn in_bounds(&self) -> bool {
         in_bounds_ms(self.at_ms)
+            && self.world_ms.is_none_or(in_bounds_ms)
             && self.steps.iter().all(|s| {
                 in_bounds_ms(s.ms)
                     && s.took_ms.is_none_or(in_bounds_ms)
@@ -441,6 +456,10 @@ pub struct LauncherStart {
     pub seen: bool,
     /// This start is kept in the history.
     pub kept: bool,
+    /// The boot game-data tool runs for this start ([`LauncherStart::boot_snapshot_check`]): its check before a build,
+    /// or the build. No step may run meanwhile (a snapshot found current shows none), and the start is not stalled.
+    #[serde(default)]
+    pub checking: bool,
 }
 
 /// A cook job as the start knows it: `<id>@<identity>` and the mod's name.
@@ -451,7 +470,7 @@ pub fn cook_key(id: &str, identity: &str) -> String {
 impl LauncherStart {
     /// Play was pressed at `now`. `cook`: the keys of the mods due for a cook (None: a start that does not cook).
     pub fn new(now: i64, cook: Option<Vec<String>>, kiln: Option<String>, fingerprint: Option<String>) -> Self {
-        let mut s = LauncherStart { began: now, plan: Vec::new(), steps: Vec::new(), kiln, fingerprint, asked: false, seen: false, kept: false };
+        let mut s = LauncherStart { began: now, plan: Vec::new(), steps: Vec::new(), kiln, fingerprint, asked: false, seen: false, kept: false, checking: false };
         if let Some(keys) = cook {
             s.plan.push("cook".into());
             s.begin("cook", now);
@@ -473,7 +492,7 @@ impl LauncherStart {
     /// When the last of its steps ended, if none runs and Steam was not asked yet (the launcher waits for the next
     /// step: launch_play after the cook); milliseconds since the start began.
     pub fn waiting_since(&self) -> Option<u64> {
-        if self.asked || self.running().is_some() {
+        if self.asked || self.checking || self.running().is_some() {
             return None;
         }
         self.steps.last().map(|s| s.ms.saturating_add(s.took_ms.unwrap_or(0)))
@@ -563,6 +582,59 @@ impl LauncherStart {
             s.took_ms = Some(at.saturating_sub(s.ms));
         }
     }
+
+    /// The boot game-data tool starts for this start (it checks for a snapshot of this game build, then builds one if
+    /// there is none): until [`LauncherStart::boot_snapshot_done`], the time after the cook is the tool's, not a stall.
+    pub fn boot_snapshot_check(&mut self) {
+        self.checking = true;
+    }
+
+    /// A line of the boot game-data tool at `now` (without its `boot-snapshot: ` prefix). The `boot-snapshot` step
+    /// begins at the line that says the tool builds a snapshot ([`BOOT_SNAPSHOT_MAKING`], or its first progress count),
+    /// right after the cook in the plan; before it ("needed by", "checking") nothing shows, so a snapshot that is
+    /// there and reused, or one no mod needs, never gives the step. Once it runs, each line is its detail.
+    pub fn boot_snapshot_line(&mut self, now: i64, line: &str) {
+        let line = line.trim();
+        let begun = self.steps.iter().any(|s| s.id == "boot-snapshot");
+        if !begun {
+            if !is_snapshot_build_line(line) || self.asked {
+                return;
+            }
+            if !self.plan.iter().any(|p| p == "boot-snapshot") {
+                let at = self.plan.iter().position(|p| p != "cook").unwrap_or(self.plan.len());
+                self.plan.insert(at, "boot-snapshot".into());
+            }
+            self.begin("boot-snapshot", now);
+        }
+        if let Some(s) = self.steps.last_mut().filter(|s| s.id == "boot-snapshot" && s.took_ms.is_none())
+            && !line.starts_with(BOOT_SNAPSHOT_MAKING)
+        {
+            s.detail = Some(line.chars().take(160).collect());
+        }
+    }
+
+    /// The boot game-data tool ended at `now` (made, reused, failed or stopped): its step ends, when it began.
+    pub fn boot_snapshot_done(&mut self, now: i64) {
+        self.checking = false;
+        let at = self.rel(now);
+        if let Some(s) = self.steps.last_mut().filter(|s| s.id == "boot-snapshot" && s.took_ms.is_none()) {
+            s.detail = None;
+            s.took_ms = Some(at.saturating_sub(s.ms));
+        }
+    }
+}
+
+/// The tool's line that it builds a snapshot: [`BOOT_SNAPSHOT_MAKING`], or a progress count (`templates 120/5000`).
+pub fn is_snapshot_build_line(line: &str) -> bool {
+    let line = line.trim();
+    if line.starts_with(BOOT_SNAPSHOT_MAKING) {
+        return true;
+    }
+    let mut w = line.split(' ');
+    let (Some(kind), Some(count), None) = (w.next(), w.next(), w.next()) else { return false };
+    let Some((d, t)) = count.split_once('/') else { return false };
+    !kind.is_empty() && kind.chars().all(|c| c.is_ascii_lowercase()) && !d.is_empty() && !t.is_empty()
+        && d.chars().all(|c| c.is_ascii_digit()) && t.chars().all(|c| c.is_ascii_digit())
 }
 
 /// The running piece of the cook (the last part with ms 0) ends at `at`.
@@ -670,7 +742,9 @@ pub fn usual(history: &[KeptStart], id: &str, total: Option<u64>, keys: &[String
             _ => s.ms,
         }).collect();
     if any.is_empty() {
-        return None;
+        // the boot game-data step runs once per game update: no earlier start with it is the usual case, and its cost
+        // is known (no start counted for it: `starts` 0)
+        return (id == "boot-snapshot").then_some(Usual { ms: BOOT_SNAPSHOT_USUAL_MS, starts: 0, same: false });
     }
     Some(Usual { starts: any.len() as u32, ms: median(any)?, same: false })
 }
@@ -799,7 +873,8 @@ pub enum Phase {
     Booting,
     /// Kiln's boot is complete, the game goes on loading.
     Loading,
-    /// The main menu can be used.
+    /// The main menu can be used. Also a client in its world whose start has said nothing for [`QUIET_MS`]: the game is
+    /// in use, so a step of Kiln's that never ended is not shown as a silent start (kiln.log names where it stood).
     Ready,
     /// Safe idle: the game runs without mods (`why`).
     Idle,
@@ -1006,13 +1081,19 @@ pub fn timeline(i: &Inputs) -> Option<Timeline> {
     let running = out.iter().position(|s| s.state == StepState::Running);
     let quiet_ms = p.and(i.written).map(|w| i.now.saturating_sub(w).max(0) as u64);
     let in_early = running.is_some_and(|r| out[r].id == "early-plugins");
+    let quiet = quiet_ms.is_some_and(|q| q >= if in_early { QUIET_EARLY_MS } else { QUIET_MS });
+    // a client in its world (progress.json's worldMs, written when the world began): the player is playing. A start that
+    // still says something (mods that load at the first world) goes on; one that has said nothing since is over for the
+    // window rather than "quiet" for the whole session (a Nexus report, 2026-11-14: 5,183 s)
+    let in_world = p.is_some_and(|p| p.side.as_deref() == Some("client") && p.world_ms.is_some());
     let phase = match p {
         Some(p) => match p.state.as_str() {
             "ready" => Phase::Ready,
             "idle" => Phase::Idle,
             "failed" => Phase::Failed,
             _ if !i.running => Phase::Ended,
-            _ if quiet_ms.is_some_and(|q| q >= if in_early { QUIET_EARLY_MS } else { QUIET_MS }) => Phase::Quiet,
+            _ if quiet && in_world => Phase::Ready,
+            _ if quiet => Phase::Quiet,
             "loading" => Phase::Loading,
             _ => Phase::Booting,
         },
@@ -1039,7 +1120,8 @@ pub fn timeline(i: &Inputs) -> Option<Timeline> {
 /// The kept form of a start that reached `ready` (None: it did not). It is stored under the timeline's version identity
 /// (progress.json's `kiln`), with the install receipt's version beside it (`receipt`, [`version_identity`]).
 pub fn kept_from(t: &Timeline, progress: &Progress, receipt: Option<&str>, fingerprint: &str, finished: i64, launcher: Option<&LauncherStart>) -> Option<KeptStart> {
-    if t.phase != Phase::Ready {
+    // (a client in its world with a step that never ended is over for the window, but its times are no start's times)
+    if t.phase != Phase::Ready || progress.state != "ready" {
         return None;
     }
     // stored under the runtime's own string (the lookup may have gone by the receipt's identity)

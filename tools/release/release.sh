@@ -5,7 +5,10 @@
 #                                    [--skip-windows] [--no-checks] [--force] [--host-build] [--no-nexus]
 # VERSION: X.Y.Z (stable) or X.Y.Z-dev.N (dev) for this tree's VERSION (tools/release/version.sh prints one).
 # --commit: what to build (default HEAD); exported with `git archive`, so uncommitted work never gets in.
-# --worktree: test runs only: export the working tree (tracked and untracked, not ignored) instead of a commit.
+# --worktree: test runs only: export the working tree (tracked and untracked, not ignored) instead of a commit. It needs
+#   an explicit --out that is not a release folder (~/Kiln-release/kiln-*, ~/Kiln-release; e.g. ~/Kiln-release/trial/
+#   kiln-VERSION), else it is refused before anything is done; its README.txt says "a test build", the Nexus dry run
+#   is skipped, and github-draft.sh, publish.sh and nexus.py --publish refuse such a folder (not built from a commit).
 # --out: the release folder (default ~/Kiln-release/kiln-VERSION). --work: build dir (default <repo>/.out/release-work;
 #   a fixed path, so later runs reuse the compiler caches). --notes: release notes (Markdown); default: the commit
 #   subjects since the previous v* tag.
@@ -51,6 +54,8 @@
 # KILN_API_BASELINE: the last release's Kiln.Api .nupkg (or it unzipped) for pack.sh's API compat gate; unset: a loud
 #   warning, at the start and in the closing text, and the release goes on.
 # Builds run one at a time (they share Cargo's build directory); KILN_RELEASE_NICE=1 runs them at the lowest priority.
+# NuGet: the builds restore into a private package cache, $work/nuget-packages (KILN_RELEASE_NUGET_PACKAGES), never
+#   ~/.nuget/packages: a trial run of a version leaves no kiln.* packages of it behind for later local builds.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
@@ -76,6 +81,22 @@ while (($#)); do
   esac
 done
 [[ -n $version ]] || { echo "usage: $0 VERSION [options] (tools/release/version.sh dev|stable prints one)" >&2; exit 2; }
+# --worktree only in a run that is plainly a test: an explicit --out that is not a release folder (~/Kiln-release/kiln-*,
+# the default --out, or ~/Kiln-release itself), checked before anything else is done. A real run passed it once
+# (0.2.0-dev.28) and its README.txt said "a test build".
+if ((worktree)); then
+  releases=$(realpath -m "$HOME/Kiln-release")
+  if [[ -z $out ]]; then
+    echo "release: --worktree is for test runs only and needs --out DIR, not a release folder (e.g. --out $releases/trial/kiln-$version): a test build of the working tree, never published. A release builds a commit: drop --worktree" >&2
+    exit 2
+  fi
+  # Keep the spelling too: a release folder may itself be a symlink to storage elsewhere.
+  for candidate in "$(realpath -ms -- "$out")" "$(realpath -m -- "$out")"; do
+    case $candidate in
+      "$HOME/Kiln-release"|"$HOME/Kiln-release"/kiln-*|"$releases"|"$releases"/kiln-*) echo "release: --worktree is for test runs only: --out $out is a release folder ($releases/kiln-*); give a test folder (e.g. $releases/trial/kiln-$version), or drop --worktree for a release" >&2; exit 2 ;;
+    esac
+  done
+fi
 "$here/version.sh" check "$version"
 case $version in *-*) channel=dev ;; *) channel=stable ;; esac
 out=$(realpath -m "${out:-$HOME/Kiln-release/kiln-$version}")
@@ -209,6 +230,14 @@ export KILN_OUT=$work/out CARGO_TARGET_DIR=$work/cargo
 # the SDK packages carry the release's version (managed/Kiln.Sdk/pack.sh), and kiln (the CLI) is built knowing it
 export KILN_SDK_VERSION=$version
 rm -rf "$KILN_OUT" && mkdir -p "$KILN_OUT"
+# A private NuGet package cache for every build of the release: pack.sh's Kiln.TestKit restores this version's Kiln.Api
+# from its local feed, and NuGet keeps a package by id and version for good, so in ~/.nuget/packages a trial run would
+# shadow the published packages of the same version in every later local build. Third-party packages stay for the next
+# run; this version's kiln.* packages in it go first (a trial's packages of the same version are not this build's).
+# KILN_RELEASE_NUGET_PACKAGES: another folder.
+export NUGET_PACKAGES=${KILN_RELEASE_NUGET_PACKAGES:-$work/nuget-packages}
+mkdir -p "$NUGET_PACKAGES" && rm -rf -- "$NUGET_PACKAGES"/kiln.*/"${version,,}"
+note "NuGet package cache: $NUGET_PACKAGES (private: ~/.nuget/packages gets none of this release's kiln.* $version packages)"
 # no build paths in the binaries: the home folder and the export become neutral prefixes; KILN_RELEASE_BUILD drops
 # the "tree this was built from" defaults of kilnctl and kiln
 unset RUSTFLAGS
@@ -451,7 +480,7 @@ step "VS Code extension"
 vsix=$(ls -t "$KILN_OUT"/vscode/kiln-vscode-*.vsix | head -1)
 step "sample mods"
 rm -rf "$work/samples" && mkdir -p "$work/samples"
-skipped_samples=()
+skipped_samples=() not_mods=()
 # a sample on Kiln.Sdk packs itself (KilnPack); an older one builds its output folder (a deployable mod folder), which
 # is zipped the way KilnPack does: <id>-<version>.zip holding <id>/, without the shared Kiln.* assemblies, *.deps.json
 # and cooked game files
@@ -459,6 +488,7 @@ pack_folder() { # project
   local proj=$1 o=$work/samples-build/$(basename "$1" .csproj)
   rm -rf "$o"
   low dotnet build "$proj" -c Release --artifacts-path "$KILN_OUT/dotnet" -v q -nologo -o "$o" >>"$log" 2>&1 || return 1
+  [ -f "$o/kiln.mod.json" ] || return 2   # a library or test project of a sample (SampleLib.Api): no mod to zip
   python3 - "$o" "$work/samples" <<'PY'
 import json, os, re, sys, zipfile
 o, dest = sys.argv[1:]
@@ -480,10 +510,13 @@ for proj in "$src"/mods/samples/*/*.csproj; do
     low dotnet build "$proj" -c Release --artifacts-path "$KILN_OUT/dotnet" -v q -nologo -t:KilnPack \
       -p:KilnPackageOutputPath="$work/samples/" >>"$log" 2>&1 || skipped_samples+=("$name")
   else
-    pack_folder "$proj" || skipped_samples+=("$name")
+    rc=0; pack_folder "$proj" || rc=$?
+    ((rc == 2)) && not_mods+=("$name")
+    ((rc == 1)) && skipped_samples+=("$name")
   fi
 done
 note "sample mods: $(ls "$work"/samples/*.zip 2>/dev/null | wc -l) zips"
+((${#not_mods[@]})) && note "sample projects that are no mod (no kiln.mod.json, not zipped): ${not_mods[*]}"
 ((${#skipped_samples[@]})) && note "samples that did not build (left out): ${skipped_samples[*]}"
 
 # ---------------------------------------------------------------- 7. the folder
@@ -659,12 +692,24 @@ else
   fi
 fi
 
-# Nexus Mods: what would go up (GET calls only); the upload itself is publish.sh --nexus or nexus.py --publish
-if ((nexus)) && [[ -f $HOME/.config/kiln-release/nexus.env ]]; then
+# Nexus Mods: what would go up (GET calls only); the upload itself is publish.sh --nexus or nexus.py --publish. Never
+# for a test build of the working tree (nothing of it goes up)
+if ((nexus)) && ((!worktree)) && [[ -f $HOME/.config/kiln-release/nexus.env ]]; then
   step "Nexus Mods (dry run)"
   python3 -I "$here/nexus.py" "$out" --work "$work/nexus" | tee -a "$log" || note "the Nexus dry run failed (the release is fine)"
 fi
 
+# the closing text: what to do next, never a publish step for a test build of the working tree
+if ((worktree)); then
+  closing="Test build $version of the working tree is in $out (log: $log). It is never published: github-draft.sh,
+publish.sh and nexus.py --publish refuse it. A release builds a commit: tools/release/release.sh $version (no --worktree)."
+else
+  closing="Release $version is in $out (log: $log). Nothing is published.
+Next (by hand, see docs/kiln/launcher/releasing.md):
+  tools/release/github-draft.sh $out        a DRAFT GitHub release with the files (needs the commit pushed)
+  tools/release/publish.sh $out             publish: the GitHub release, the dev channel pointer, frostdev.io
+  python3 -I tools/release/nexus.py $out    Nexus Mods (dry run; --publish uploads): the nexus/ build, no self-update"
+fi
 step "done"
 du -sh "$out" | tee -a "$log"
 # sdk/api/ and sdk/feed/ (many files each) as one row each in this local build listing only
@@ -672,11 +717,7 @@ du -sh "$out" | tee -a "$log"
   for d in sdk/api sdk/feed; do [[ -d $d ]] && printf '%10s  %s/ (%s files)\n' "$(du -sh "$d" | cut -f1)" "$d" "$(find "$d" -type f | wc -l)"; done; true) | tee -a "$log"
 cat <<EOF | tee -a "$log"
 
-Release $version is in $out (log: $log). Nothing is published.
-Next (by hand, see docs/kiln/launcher/releasing.md):
-  tools/release/github-draft.sh $out        a DRAFT GitHub release with the files (needs the commit pushed)
-  tools/release/publish.sh $out             publish: the GitHub release, the dev channel pointer, frostdev.io
-  python3 -I tools/release/nexus.py $out    Nexus Mods (dry run; --publish uploads): the nexus/ build, no self-update
+$closing
 EOF
 if ((!api_compat)); then
   note "WARNING: the SDK was NOT compared with the last release (KILN_API_BASELINE was not set): see the warning at the start."

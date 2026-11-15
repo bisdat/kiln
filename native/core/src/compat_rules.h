@@ -21,9 +21,14 @@ std::string matcher_text(const Matcher& m);        // `module xhl*.dll`, for log
 struct Rule {
     std::string id;
     std::vector<Matcher> when;     // empty: the rule always fires
-    std::string action;            // warn | late | disable
-    bool has_subject = false;      // required for late and disable
+    std::string action;            // warn | late | disable | before (dev.29)
+    bool has_subject = false;      // required for late, disable and before
     Matcher subject;
+    // before (dev.29) only, required there: the DLL that loads after the subject. The launcher orders the two in chain.ini
+    // (the target late, the subject early); the core reports whether the order held. A core before dev.29 drops the rule
+    // ("unknown key \"target\"") and keeps the others.
+    bool has_target = false;
+    Matcher target;
     std::string message;
     std::string source;            // shipped | user
 };

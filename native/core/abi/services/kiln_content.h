@@ -299,6 +299,22 @@ typedef struct KilnContentApi {
      * server. Returns KILN_ERR_UNAVAILABLE when the UI texture hook is off; in that case callers must keep the
      * original texture until the new one is SERVED. Any thread. */
     KilnResult(KILN_CALL* icon_alias)(const uint8_t from[16], const uint8_t to[16]);
+
+    /* ---- appended to v4 since 0.2.0-dev.28 (check header.size): content transactions ---- */
+
+    /* txn_begin sets every layer of `owner` aside (its fields, list headers and the ids that follow a reference), so
+     * that what the owner applies next (apply_json, set, reset) can be taken back whole. One open transaction per
+     * owner; at most 64 open. KILN_ERR_INVALID_ARGUMENT: owner 0 or one is open for it already (or 64 are open).
+     * txn_end commit (rollback 0): keeps what was written and forgets the snapshot. Rollback (1): puts the owner's
+     * layers back exactly as they were at txn_begin (layers written since come off, layers taken off come back in their
+     * order), writes them, then reads every touched field back from memory. When a field does not read back, every
+     * layer of the owner is taken off (as revert_owner) and the result is KILN_ERR_REVOKED. report (optional): JSON
+     * {"outcome": "committed" | "restored" | "revoked" | "cancelled", "fields": n, "error"?: text}. KILN_ERR_NOT_FOUND:
+     * no such transaction ("cancelled": the owner's layers were taken off meanwhile, by revert_owner, the owner going
+     * away or the world's reset; nothing is put back). A data-pack document's "add" lists, drop rules, options and
+     * other services' sections are not covered: apply only field rules inside a transaction. Tick thread. */
+    KilnResult(KILN_CALL* txn_begin)(KilnOwner owner, uint64_t* out_txn);
+    KilnResult(KILN_CALL* txn_end)(uint64_t txn, uint32_t rollback, char* report, size_t cap, size_t* out_len);
 } KilnContentApi;
 
 #ifdef __cplusplus

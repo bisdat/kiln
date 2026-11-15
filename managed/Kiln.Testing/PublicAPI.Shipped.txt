@@ -14,6 +14,7 @@ Kiln.Testing.CheckContext.OnEnd(System.Action! cleanup) -> void
 Kiln.Testing.CheckContext.OnEnd(System.Func<System.Threading.Tasks.Task!>! cleanup) -> void
 Kiln.Testing.CheckContext.Player.get -> Kiln.EntityId
 Kiln.Testing.CheckContext.Session.get -> Kiln.Testing.ClientCheckSession
+Kiln.Testing.CheckContext.Skip(string! reason) -> System.Threading.Tasks.Task<Kiln.Testing.ClientCheckVerdict>!
 Kiln.Testing.CheckContext.Ticks(int count = 1) -> System.Threading.Tasks.Task!
 Kiln.Testing.CheckContext.Title.get -> string!
 Kiln.Testing.CheckContext.Until(System.Func<bool>! condition, System.TimeSpan timeout, string! what) -> System.Threading.Tasks.Task<bool>!
@@ -109,6 +110,14 @@ Kiln.Testing.TestResult.Stack.get -> string?
 Kiln.Testing.TestResult.Stack.init -> void
 Kiln.Testing.TestResult.TestResult(string! Name, Kiln.Testing.TestOutcome Outcome, double Ms, string? Message, string? Stack) -> void
 Kiln.Testing.Tests
+[KILNX001]Kiln.Testing.LabSystems
+[KILNX001]const Kiln.Testing.LabSystems.MaxSteps = 3000 -> int
+[KILNX001]static Kiln.Testing.LabSystems.Enabled.get -> bool
+[KILNX001]static Kiln.Testing.LabSystems.ForceParallel(int steps) -> bool
+[KILNX001]static Kiln.Testing.LabSystems.Forced.get -> bool
+[KILNX001]static Kiln.Testing.LabSystems.PlayersMask.get -> ushort?
+[KILNX001]static Kiln.Testing.LabSystems.StepsLeft.get -> int
+[KILNX001]static Kiln.Testing.LabSystems.StopParallel() -> bool
 const Kiln.Testing.ClientCheckTags.Audio = "audio" -> string!
 const Kiln.Testing.ClientCheckTags.Cheats = "cheats" -> string!
 const Kiln.Testing.ClientCheckTags.GuardProof = "guard-proof" -> string!
