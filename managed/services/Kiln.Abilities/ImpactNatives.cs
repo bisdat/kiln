@@ -216,7 +216,8 @@ internal static class GeneratedNatives
 {
     private sealed class Pending(Action register)
     {
-        public readonly Action Register = register;
+        // cleared when the code's load context unloads first: a queued registration never keeps an unloaded mod alive
+        public volatile Action? Register = register;
         public int Ticks;
     }
 
@@ -228,7 +229,10 @@ internal static class GeneratedNatives
 
     internal static void Provide(Action register)
     {
-        Queue.Enqueue(new Pending(register));
+        var p = new Pending(register);
+        if (System.Runtime.Loader.AssemblyLoadContext.GetLoadContext(register.Method.Module.Assembly) is { IsCollectible: true } alc)
+            alc.Unloading += _ => p.Register = null;
+        Queue.Enqueue(p);
         if (Interlocked.Exchange(ref _hooked, 1) == 0) ServiceTick.Add("kiln.abilities [ImpactNative]", static (in TickInfo _) => Drain());
     }
 
@@ -238,15 +242,16 @@ internal static class GeneratedNatives
         var done = 0;
         for (var n = Queue.Count; n > 0 && Queue.TryDequeue(out var p); n--)
         {
-            var mod = ModContext.OwnerOf(p.Register);
+            if (p.Register is not { } register) continue;  // its load context unloaded
+            var mod = ModContext.OwnerOf(register);
             if (mod is null)
             {
                 if (++p.Ticks < MaxWait) Queue.Enqueue(p);
-                else ModLog.Warn($"abilities: generated [ImpactNative] natives of {p.Register.Method.Module.Assembly.GetName().Name} were not registered: no mod owns that assembly");
+                else ModLog.Warn($"abilities: generated [ImpactNative] natives of {register.Method.Module.Assembly.GetName().Name} were not registered: no mod owns that assembly");
                 continue;
             }
             if (!mod.Alive) continue;
-            Run(mod, p.Register);
+            Run(mod, register);
             done++;
         }
         return done;
