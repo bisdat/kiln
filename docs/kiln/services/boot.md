@@ -53,6 +53,7 @@ reads at most 16 MiB.
 Seven collectors, prepared in this order: `assets` (kiln.assets), `worldtables` (kiln.worldtables), `content`
 (kiln.content), `skills` (kiln.skills), `knowledge` (kiln.quests), `vfx` (kiln.vfx), `patches` (kiln.content, resource
 patches). A new collector id needs a core change: the list is closed.
+The patches collector refuses mods with resource patches in a start where the game's resource service was already up before the boot generation (an optional mod is left out; a required mod stops the start).
 
 **Bind.** `kiln::boot::collect(api, owner, "<id>", prepare, user)` registers and says `true` only in a boot process.
 Then the service keeps its definitions back in `on_ready`. `false`: the old `on_ready` path, untouched.

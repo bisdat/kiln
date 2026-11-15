@@ -12,6 +12,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 export KILN_OUT
 out=$KILN_OUT/content-tests
 mkdir -p "$out"
+bash "$here/bootpatch_test.sh"
 bash "$here/refs_test.sh"
 echo "== txn-test (host)"
 bash "$here/txn_test.sh"
