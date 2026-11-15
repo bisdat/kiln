@@ -237,13 +237,14 @@ Events.On<AttributeValueChangedEvent>(e => Log.Info($"{e.Attribute}: {e.Before} 
   before that baseline is outside the watch's interval by design. kiln.items still walks the inventory
   tree of the holder it changes (link ids only) to ask that filter for each entity in it. Every player of a server pays
   for the watches of every mod on it: the budgets bound the pairs, not the time, and not the time handlers take. Lab
-  (`component-watch-test`, dedicated server, no player, build 26430253, 2026-11-15, three runs on a shared, loaded
-  machine; the last 1024 steps of each): 32 watches holding 4096 present pairs (4240 in all): window_begin p50
-  0.33-0.39 ms, p99 0.46-1.73 ms, max 0.58-4.3 ms; window_end p50 0.68-1.08 ms, p99 1.2-4.1 ms, max 2.5-5.5 ms.
-  8 watches on 1221 entities, 3860 pairs, none present: begin p50 0.53-0.66 ms, p99 0.80-2.6 ms; end p50
-  0.62-0.98 ms, p99 1.1-3.2 ms (an absent pair costs a read like a present one, and every root is asked its identity
-  twice a step). A kiln.items give or take job's note, p50 (p99): no watch 0.1 µs (0.7); a watch on another entity
-  0.3-0.5 µs (2.3-3.4), nothing copied; a watch on the holder 0.9-1.2 µs (6.0-6.7), nine or ten components copied a job.
+  (`component-watch-test`, dedicated server, no player, build 26430253, 2026-11-15, four runs on a shared machine under
+  heavy load, so the tails are the machine's as much as the service's; the last 1024 steps of each): 32 watches holding
+  4096 present pairs (4240 in all): window_begin p50 0.33-0.41 ms, p99 0.46-2.5 ms, max 0.58-12.4 ms; window_end p50
+  0.68-1.24 ms, p99 1.2-5.5 ms, max 2.5-12.6 ms. 8 watches on 1221 entities, 3860 pairs, none present: begin p50
+  0.53-0.71 ms, p99 0.80-5.2 ms; end p50 0.62-1.07 ms, p99 1.1-5.5 ms (an absent pair costs a read like a present one,
+  and every root is asked its identity twice a step). A kiln.items give or take job's note, p50 (p99): no watch 0.1 µs
+  (0.7-0.9); a watch on another entity 0.3-0.5 µs (2.3-3.4), nothing copied; a watch on the holder 0.9-1.2 µs
+  (6.0-6.7), nine or ten components copied a job.
 
 The capability is `events.component_net`; `Watch` and `Resume` throw `KilnUnavailableException` naming it while it is
 off, and so does `Events.On` for the three events. The test kit fakes the service rule for rule
