@@ -18,6 +18,8 @@
     <InternalsVisibleTo Include="Kiln.Blocks.Tests" />
     <!-- the change events of its writes, on a fake kiln.abilities table -->
     <InternalsVisibleTo Include="Kiln.Contract.Tests" />
+    <!-- the host's unload order: a mod's native admission closes before its OnUnload (NativeAdmissionOrderTests) -->
+    <InternalsVisibleTo Include="Kiln.Host.Tests" />
     <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />
     <ProjectReference Include="../Kiln.Spawn/Kiln.Spawn.csproj" Private="false" />
     <ProjectReference Include="../Kiln.World/Kiln.World.csproj" Private="false" />

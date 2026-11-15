@@ -184,6 +184,26 @@ public sealed class ModContext
         return System.Runtime.Loader.AssemblyLoadContext.GetLoadContext(assembly) is { } alc && ByLoadContext.TryGetValue(alc, out var mod) ? mod : null;
     }
 
+    /// <summary>Runs when the mod's unload begins, before its OnUnload (and before <see cref="Retiring"/>): services
+    /// that call into the mod's code from other threads stop letting new calls in here and wait a bounded time for the
+    /// calls inside, so OnUnload does not run beside one (kiln.abilities' sync natives and attachments). Once per
+    /// context; a throwing subscriber is logged and does not stop the unload or the other subscribers. Tick thread.</summary>
+    internal event Action? UnloadStarting;
+
+    private int _unloadStarted;
+
+    /// <summary>The host calls this before OnUnload (Retire calls it too, for an unload without OnUnload: a mod
+    /// disabled after faults, a harness that gave up its tick thread).</summary>
+    internal void BeginUnload()
+    {
+        if (Interlocked.Exchange(ref _unloadStarted, 1) != 0) return;
+        if (UnloadStarting is { } starting)
+            foreach (Action step in starting.GetInvocationList())
+                try { step(); }
+                catch (Exception e) { Log.Warn($"a service's step at the start of this mod's unload threw: {e.GetType().Name}: {e.Message}"); }
+        UnloadStarting = null;
+    }
+
     /// <summary>Runs when the mod unloads, after OnUnload: services drop per-mod state (pending requests,
     /// callbacks) here so the mod's load context can be collected.</summary>
     internal event Action? Retiring;
@@ -193,6 +213,7 @@ public sealed class ModContext
 
     internal void Retire()
     {
+        BeginUnload();  // no-op when the host already began the unload before OnUnload
         lock (LiveGate)
         {
             if (!Alive) return;

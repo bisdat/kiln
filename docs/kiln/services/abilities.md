@@ -241,9 +241,10 @@ destroyed before the first run). Keys: a variable alias or debug name of the pro
   call over 0.2 ms is logged after it returns, for the first five such calls of the process (a handler's first call
   often is, while .NET compiles it); a handler still inside after a second is named by a watchdog thread while it is
   inside (`the handler of native <name> (owner <n>) has been inside for 1.0 s`), once per call. An exception answers
-  0x11 (that instance stops with Error). When the mod unloads, its natives and attachments take no new call from then
-  on, and what a call already inside uses stays until it leaves (a retirement that finds a call inside waits 2 ms, then
-  is finished in a later Pre and logged); on a server the unload runs in Pre or Post, when no `impact_simulation` slice
+  0x11 (that instance stops with Error). When the mod unloads, its natives and attachments take no new call from the
+  start of the unload, before its `OnUnload` runs, and the unload waits up to 2 ms for a call inside to leave (one that
+  outlasts that is logged: `…'s OnUnload runs with N call(s) still inside its native handlers`); what a call inside uses
+  stays until it leaves (the retirement is then finished in a later Pre and logged); on a server the unload runs in Pre or Post, when no `impact_simulation` slice
   runs. From then on its hash answers 0x1F. A game-state limit is `Ok = false`
   (registry full, Kiln's native slots used up, the name taken or a vanilla native's), a bad name or argc
   `ArgumentException`, the capability off `KilnUnavailableException`. Registered before the server world exists (a

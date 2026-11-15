@@ -36,7 +36,19 @@ internal static unsafe class AbilitiesDispatch
     {
         lock (Gate)
             if (!WatchedMods.Add(mod)) return;
-        mod.Retiring += () => Retire(mod);
+        mod.UnloadStarting += () => CloseAdmission(mod);  // before its OnUnload
+        mod.Retiring += () => Retire(mod);                // after it
+    }
+
+    // The start of the mod's unload, before its OnUnload: no new call enters its sync natives or attachments, and the
+    // unload waits the bounded RetireWaitMs for the calls inside. One still inside then is said here; its retirement
+    // is deferred in Retire as before.
+    private static void CloseAdmission(ModContext mod)
+    {
+        var gate = GateOf(mod);
+        Interlocked.Exchange(ref gate.Closed, 1);
+        if (!WaitQuiet(gate))
+            mod.Log.Warn($"abilities: {gate.Id}'s OnUnload runs with {Volatile.Read(ref gate.Inflight)} call(s) still inside its native handlers: they take no new call");
     }
 
     private static void Retire(ModContext mod)
@@ -62,9 +74,8 @@ internal static unsafe class AbilitiesDispatch
     // handler runs; the mod's retirement closes the gate first, then waits a bounded 2 ms for the calls inside. One still
     // inside after that (a handler that blocks, or a retirement from inside a handler on this thread) is reported and
     // kept: its entry objects stay reachable from the running call, and the retirement finishes in a later tick, when
-    // the gate is quiet. What Kiln.Abilities cannot hold back is the host's own order: the mod's OnUnload has run
-    // before Retiring, so a handler still inside then sees a mod that disposed its own state (on a server that cannot
-    // happen from Pre or Post: no impact_simulation slice runs there).
+    // the gate is quiet. The gate closes at the start of the mod's unload (ModContext.UnloadStarting), before its
+    // OnUnload, with the same bounded wait: OnUnload runs with no call inside unless one outlasts the bound.
 
     internal sealed class ModGate
     {
@@ -78,7 +89,7 @@ internal static unsafe class AbilitiesDispatch
     private static readonly List<(ModGate Gate, ulong Since)> Deferred = new();
     [ThreadStatic] private static int _inside;  // dispatch depth on this thread
 
-    internal const int RetireWaitMs = 2;
+    internal static int RetireWaitMs = 2;  // the bound; tests raise it so a busy machine cannot decide their outcome
 
     internal static ModGate GateOf(ModContext? mod) => mod is null ? NoMod : Gates.GetValue(mod, m => new ModGate { Id = m.Info.Id });
 

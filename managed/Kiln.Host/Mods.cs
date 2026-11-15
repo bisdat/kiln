@@ -629,6 +629,8 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
     [MethodImpl(MethodImplOptions.NoInlining)]
     private WeakReference UnloadOne(LoadedMod mod, ModState state, string? reason)
     {
+        // services close what calls into the mod from other threads first (its natives), so OnUnload runs alone
+        mod.ModContext.BeginUnload();
         if (mod.Loaded && !mod.Disabled) Invoke(mod, static m => m.Instance.OnUnload(), "OnUnload");
         mod.ModContext.Retire();
         foreach (var other in _mods)
