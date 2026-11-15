@@ -16,6 +16,10 @@
 //  WATCH-GROWTH        at 4096 present pairs a watched chest gets an item entity: that watch is suspended (budget) before
 //                      the step's compare and reports nothing of that step
 //  WATCH-COST-ABSENT   the window calls with mostly absent pairs (entities with SpawnTime, components they lack)
+//  WATCH-FROZEN        (release mode) a batch frozen and not read (the lab hold): a watch disposed and an owner unloaded
+//                      while their records wait in it are taken out of it, the survivor's record arrives once, the batch
+//                      is acknowledged; a batch emptied that way gives its frame back, so a new watch's next two frames
+//                      queue without an overflow; at the end a frozen batch waits for the server's stop
 using Kiln;
 
 namespace ComponentWatchTest;
@@ -381,6 +385,144 @@ public sealed partial class ComponentWatchTestMod
             $"ready {watches.Count(w => w.State == ComponentWatchState.Ready)} of {watches.Count}");
         var resumed = ComponentChanges.Resume(offender);
         Check(!resumed.Ok && (resumed.Reason ?? "").Contains("4096"), $"WATCH-GROWTH: Resume stays suspended while it does not fit: {resumed.Reason}");
+    }
+
+    // ---- WATCH-FROZEN (release mode) ----
+    private async Task Frozen(string run, bool load)
+    {
+        if (load) await Mods.LoadAsync(Helper);
+        var h = await HelperReady(_lastNonce);
+        if (h is not { } helper)
+        {
+            Check(false, $"[{run}] WATCH-FROZEN: the helper never said it was ready");
+            return;
+        }
+        await Wait(5);
+        var made = await SpawnPlayers(3, new WorldPosition(3885, 835, run == "plain" ? 1480 : 1500));
+        await Wait(30);
+        if (made.Count < 3)
+        {
+            Check(false, $"[{run}] WATCH-FROZEN: {made.Count} stand-in(s)");
+            return;
+        }
+        var (a, b, d) = (made[0], made[1], made[2]);
+        var wa = ComponentChanges.Watch(new(ComponentWatchScope.Entities, [a], ObservedComponents.Health)).Watch;
+        var wb = ComponentChanges.Watch(new(ComponentWatchScope.Entities, [b], ObservedComponents.Health)).Watch;
+        var wd = ComponentChanges.Watch(new(ComponentWatchScope.Entities, [d], ObservedComponents.Health)).Watch;
+        ComponentWatch? we = null;
+        try
+        {
+            if (wa is null || wb is null || wd is null)
+            {
+                Check(false, $"[{run}] WATCH-FROZEN: the watches were not made");
+                return;
+            }
+            await Wait(4);
+
+            // 1. a disposed watch and an unloaded owner leave a frozen batch; the survivor's record arrives once
+            _changes.Clear();
+            var overflows = Counter("overflows");
+            var helperEvents = EventsOf(helper.Nonce);
+            if (!ComponentChanges.LabHoldDelivery(10))
+            {
+                Log.Info($"{Id}: WATCH-FROZEN: not run, no kiln/control/watches.lab");
+                return;
+            }
+            Combat.SetHealth(a, Hp(a) - 1);
+            Combat.SetHealth(b, Hp(b) - 1);
+            Combat.SetHealth(helper.Root, Hp(helper.Root) - 1);
+            await Wait(2);
+            var batch = Counter("lab_frozen_batch");
+            var frozen = Counter("lab_frozen_records");
+            var frozenLine = Counters();
+            wb.Dispose();
+            var unloaded = await Mods.UnloadAsync(Helper);
+            await Wait(1);
+            var left = Counter("lab_frozen_records");
+            var leftQueued = Counter("queued_records");
+            var leftLine = Counters();
+            ComponentChanges.LabHoldDelivery(0);
+            await Wait(3);
+            var ofA = _changes.Where(c => c.Entity == a).ToArray();
+            var ofB = _changes.Where(c => c.Entity == b).ToArray();
+            var helperMore = EventsOf(helper.Nonce) - helperEvents;
+            Check(frozen == 3 && left == 1 && leftQueued == 1 && ofA.Length == 1 && ofA[0].WatchIds.SequenceEqual([wa.Id]) && ofB.Length == 0 &&
+                  helperMore == 0 && unloaded.Ok && Counter("queued_frames") == 0 && Counter("queued_records") == 0 && Counter("overflows") == overflows,
+                $"[{run}] WATCH-FROZEN purge: batch {batch} frozen with {frozen} record(s) (A {a.Value}, B {b.Value}, {Helper}'s root {helper.Root.Value}); " +
+                $"B's watch disposed and {Helper} unloaded ({unloaded.Ok}, {unloaded.Message}) while it waited: {left} record(s) left in it " +
+                $"(queued_records {leftQueued}); after the hold: A's change delivered {ofA.Length} time(s), B's {ofB.Length}, {Helper}'s handler " +
+                $"{helperMore} more line(s); acknowledged: queued_frames {Counter("queued_frames")} queued_records {Counter("queued_records")} " +
+                $"overflows_delta={Counter("overflows") - overflows}; {string.Join(" ", ofA.Select(Rec))}; frozen: {frozenLine}; after the ends: {leftLine}");
+
+            // 2. a frozen batch emptied by its watch's end gives its frame back: a new watch's next two frames queue, no overflow
+            _changes.Clear();
+            overflows = Counter("overflows");
+            ComponentChanges.LabHoldDelivery(10);
+            Combat.SetHealth(d, Hp(d) - 1);
+            await Wait(2);
+            var batch2 = Counter("lab_frozen_batch");
+            var frozen2 = Counter("lab_frozen_records");
+            var framesFrozen = Counter("queued_frames");
+            wd.Dispose();
+            await Wait(1);
+            var framesAfter = Counter("queued_frames");
+            var recordsAfter = Counter("lab_frozen_records");
+            we = ComponentChanges.Watch(new(ComponentWatchScope.Entities, [b], ObservedComponents.Health)).Watch;
+            await Wait(1);  // its baseline
+            Combat.SetHealth(b, Hp(b) - 1);
+            await Wait(1);
+            Combat.SetHealth(b, Hp(b) - 1);
+            await Wait(1);
+            var framesQueued = Counter("queued_frames");
+            var overflowed = Counter("overflows") - overflows;
+            var state = we?.State;
+            var queuedLine = Counters();
+            ComponentChanges.LabHoldDelivery(0);
+            await Wait(5);
+            var ofNew = _changes.Where(c => c.Entity == b && we is not null && c.WatchIds.Contains(we.Id)).ToArray();
+            Check(frozen2 == 1 && framesFrozen == 1 && recordsAfter == 0 && framesAfter == 0 && framesQueued == 2 && overflowed == 0 &&
+                  state == ComponentWatchState.Ready && ofNew.Length == 2 && _changes.All(c => c.Entity != d) && Counter("queued_frames") == 0,
+                $"[{run}] WATCH-FROZEN frame back: batch {batch2} frozen with {frozen2} record(s) of D {d.Value} (queued_frames {framesFrozen}); D's watch " +
+                $"disposed: {recordsAfter} record(s) left, queued_frames {framesAfter} (the frame given back, the id still to be acknowledged); a new watch " +
+                $"on B, two changes in two held steps: queued_frames {framesQueued}, overflows_delta={overflowed}, the watch {state}; after the hold: " +
+                $"{ofNew.Length} change(s) delivered to it, D's {_changes.Count(c => c.Entity == d)}; {string.Join(" ", ofNew.Select(Rec))}; while held: {queuedLine}");
+        }
+        finally
+        {
+            wa?.Dispose();
+            wb?.Dispose();
+            wd?.Dispose();
+            we?.Dispose();
+            await Wait(2);
+        }
+        if (run == "plain")
+        {
+            _lastNonce = helper.Nonce;
+            await Mods.LoadAsync(Helper);  // the parallel run starts from a fresh load
+        }
+    }
+
+    // At the end of the release run: a batch frozen with a record waits for the server's stop (the hold is armed again
+    // until this mod unloads). The stop's log says what happened to it.
+    private async Task FrozenAtStop()
+    {
+        var made = await SpawnPlayers(1, new WorldPosition(3885, 835, 1520));
+        await Wait(30);
+        if (made.Count == 0) return;
+        var w = ComponentChanges.Watch(new(ComponentWatchScope.Entities, [made[0]], ObservedComponents.Health)).Watch;
+        if (w is null) return;
+        await Wait(4);
+        if (!ComponentChanges.LabHoldDelivery(10)) return;
+        Combat.SetHealth(made[0], Hp(made[0]) - 1);
+        await Wait(2);
+        Log.Info($"{Id}: STOP-FROZEN: batch {Counter("lab_frozen_batch")} frozen with {Counter("lab_frozen_records")} record(s) of watch {w.Id} " +
+                 $"waits for the server's stop (not disposed; the hold is armed again until this mod unloads): {Counters()}");
+        File.WriteAllText(Path.Combine(Context.DataDirectory, "stop-frozen.txt"), $"{Counter("lab_frozen_batch")}\n");
+        while (!_unloading)
+        {
+            await Wait(8);
+            if (!_unloading) ComponentChanges.LabHoldDelivery(10);
+        }
     }
 
     // ---- WATCH-COST-ABSENT ----
