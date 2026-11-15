@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Issue #39: on a hard drive every forced write of the save cycle held the server for up to 4 s. A staging whose manifest is
-// the one already in its file writes nothing, and the save request's manifest of a generation with the previous one's
-// bundles is not forced to disk. The player's case: 5 bundles, nothing changed, two stagings per autosave (the save
-// request's, then the snapshot staging at the next Post): one manifest written and not forced, no file inside Post, and a
-// crash at any point still finds the generation that matches the world file.
+// the one already in its file writes nothing, and a generation with the previous one's bundles writes its pending manifest
+// and its confirmation without forcing them to disk. The player's case: 5 bundles, nothing changed, two stagings per
+// autosave (the save request's, then the snapshot staging at the next Post): no forced write, no file inside Post, and a
+// crash at any point still finds the generation that matches the world file (a power loss: one with the same bundles).
 using System.Reflection;
 using Xunit;
 using static Kiln.InstanceHarness;
@@ -38,7 +38,7 @@ public sealed class StageWriteTests : IDisposable
             [new SavesNative.Event { Kind = kind, Seq = seq, Revision = revision, SaveSeq = saveSeq, WorldUnix = unix, Reason = (uint)SaveReason.Autosave }]);
 
     [Fact]
-    public void AnAutosaveWithNothingChangedWritesOneManifestNotForcedToDiskAndNoFileInsidePost()
+    public void AnAutosaveWithNothingChangedForcesNoWriteAndWritesNoFileInsidePost()
     {
         FiveBundles(1);
         var (writes, forced) = (Writes, Forced);
@@ -57,7 +57,7 @@ public sealed class StageWriteTests : IDisposable
             Assert.Equal(bytes, File.ReadAllBytes(Pending(gen)));
             Assert.Equal(5, _h.Scopes(gen).Count(s => s.StartsWith("world/mod-", StringComparison.Ordinal)));
             Dispatch(SavesNative.EvWritten, seq + 2, gen, saveSeq: seq, unix: 1000 + gen);
-            Assert.Equal((2L, 1L), (Writes - writes, Forced - forced));        // the confirmation after the world write is forced
+            Assert.Equal((2L, 0L), (Writes - writes, Forced - forced));        // the confirmation after the world write, not forced
             Assert.False(File.Exists(Pending(gen)));
         }
         (writes, forced) = (Writes, Forced);
@@ -94,6 +94,7 @@ public sealed class StageWriteTests : IDisposable
         Store.Stage(2, SaveReason.Autosave, late: false);
         Assert.Equal(1L, Forced - forced);
         Store.Commit(2, 1002, SaveReason.Autosave);
+        Assert.Equal(2L, Forced - forced);                                     // and so is its confirmation
         forced = Forced;
         Store.Stage(3, SaveReason.Autosave, late: false);                      // the next one has generation 2 to rely on
         Assert.Equal(0L, Forced - forced);
@@ -115,6 +116,23 @@ public sealed class StageWriteTests : IDisposable
         File.Delete(Pending(2));                                               // or the rename was lost: the same result
         Assert.Equal(DataMatch.Older, _h.Restart(2, new FakeInstanceWorld(), unix: 9999));
         Assert.Equal(3, Value(0));
+    }
+
+    [Fact]
+    public void APowerLossAfterUnforcedConfirmationsFallsBackToTheNewestForcedGenerationWhichPruningKeeps()
+    {
+        FiveBundles(5);
+        _h.Save(1);                                                            // forced: the base of what follows
+        for (uint gen = 2; gen <= 41; gen++) _h.Save(gen);                     // unchanged: nothing forced; pruned at 11, 21, 31, 41
+        var manifests = Path.Combine(_h.Root, "manifests");
+        Assert.True(File.Exists(Path.Combine(manifests, "0000000001-1001.json")));   // kept beyond the newest 30
+        Assert.False(File.Exists(Path.Combine(manifests, "0000000005-1005.json")));  // an unforced one beyond them is not
+        foreach (var f in Directory.EnumerateFiles(manifests).Where(f => !f.EndsWith("0000000001-1001.json", StringComparison.Ordinal)))
+            File.WriteAllBytes(f, new byte[32]);                               // the system wrote none of the unforced ones
+        Assert.Equal(DataMatch.Older, _h.Restart(41, new FakeInstanceWorld()));
+        Assert.Equal(1u, Store.Generation);
+        Assert.Equal(5, Value(0));
+        Assert.Equal(9, Value(4));
     }
 
     [Fact]

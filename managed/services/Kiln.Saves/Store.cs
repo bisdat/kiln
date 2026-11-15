@@ -16,11 +16,12 @@ namespace Kiln;
 /// revision (written when the game accepts the save, before its snapshot). <c>manifests/&lt;revision&gt;-&lt;world
 /// file time&gt;.json</c>: the same generation, confirmed after the world file was written. Every file is written to a
 /// temp name, forced to disk and renamed, so a crash leaves the old or the new file, never a torn one. One exception
-/// (since 0.2.0-dev.29, issue #39): the pending manifest of a generation whose bundles are those of the previous one,
-/// confirmed and on disk, with no new blob, is renamed into place without being forced to disk. A game crash or kill -9
-/// cannot tell the difference (the system still writes the file); a power loss or a system crash before the system wrote
-/// it can leave that one file missing or torn, and loading then skips it (an unusable manifest is logged) and takes the
-/// previous generation, whose bundles are the same: what a lost rename could already give.</para>
+/// (since 0.2.0-dev.29, issue #39): a generation whose bundles are those of the previous one, confirmed by this process
+/// and on disk, with no new blob, renames its pending manifest and its confirmation into place without forcing them to
+/// disk. A game crash or kill -9 cannot tell the difference (the system still writes the files); a power loss or a system
+/// crash before the system wrote them can leave them missing or torn, and loading then skips them (an unusable manifest is
+/// logged) and takes an older generation with the same bundles, at worst the newest one forced to disk, which pruning
+/// keeps: what a lost rename could already give.</para>
 /// <para>Loading picks the manifest of the world file on disk (its header revision + time), so restoring an older world
 /// file (from the game's backup folder or a Kiln backup) brings back the mod data that belongs to it. Manifests are
 /// kept for the newest 30 generations and for every world file in the save folder and its <c>backup/</c>.</para>
@@ -46,9 +47,13 @@ internal sealed unsafe class WorldStore
     private (string Path, string Content)? _staged;
 
     /// <summary>The generation this process confirmed last: its revision, world file time and bundles
-    /// (<see cref="BundlesKey"/>). The save request's staging of the next generation with the same bundles and no new blob
-    /// renames its manifest into place without forcing it to disk (the class remarks say what a crash then finds).</summary>
+    /// (<see cref="BundlesKey"/>). The next generation with the same bundles and no new blob renames its pending manifest
+    /// and its confirmation into place without forcing them to disk (the class remarks say what a crash then finds).</summary>
     private (uint Revision, uint Unix, string Bundles)? _confirmed;
+
+    /// <summary>The newest confirmation this process forced to disk. Every generation confirmed after it without forcing has
+    /// its bundles, so pruning keeps it: after a power loss it is the generation loading can always fall back to.</summary>
+    private (uint Revision, uint Unix)? _forced;
 
     /// <summary>Files <see cref="WriteAtomic(string, byte[])"/> wrote in this process, and of them the ones forced to disk
     /// (tests count the writes and the forced writes of a save).</summary>
@@ -168,6 +173,7 @@ internal sealed unsafe class WorldStore
         _loadedRevision = _loadedUnix = 0;
         _staged = null;
         _confirmed = null;
+        _forced = null;
         _opened = false;
         _closed = true;
         WorldConfigs.Announce(null);
@@ -195,6 +201,7 @@ internal sealed unsafe class WorldStore
         _loadedUnix = unix;
         _staged = null;
         _confirmed = null;
+        _forced = null;
         DetachAll();
         var dir = Path.Combine(Root!, "manifests");
         var all = ListManifests(dir);
@@ -572,15 +579,22 @@ internal sealed unsafe class WorldStore
         if (!File.Exists(pending)) Stage(rev, reason, late: true);  // the save began before Kiln.Saves was started
         if (!File.Exists(pending)) return;
         var disk = new DiskTime();
+        var same = false;
         try
         {
             var man = JsonNode.Parse(File.ReadAllBytes(pending))!.AsObject();
             man["state"] = "committed";
             man["worldUnix"] = unix;
             man["committedUnixMs"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            WriteAtomic(CommittedPath(rev, unix), Encoding.UTF8.GetBytes(man.ToJsonString()), ref disk);  // always forced
+            // The bundles of the generation confirmed before it (still on disk), so no new blob: not forced to disk, as
+            // its pending manifest was not (the class remarks). The first confirmation of a session and every change force.
+            var bundles = BundlesKey(man["bundles"] as JsonObject);
+            same = _forced != null && _confirmed is { } c && c.Revision == rev - 1 && c.Bundles == bundles &&
+                   File.Exists(CommittedPath(c.Revision, c.Unix));
+            WriteAtomic(CommittedPath(rev, unix), Encoding.UTF8.GetBytes(man.ToJsonString()), ref disk, force: !same);
             File.Delete(pending);
-            _confirmed = (rev, unix, BundlesKey(man["bundles"] as JsonObject));
+            _confirmed = (rev, unix, bundles);
+            if (!same) _forced = (rev, unix);
         }
         catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException)
         {
@@ -600,7 +614,8 @@ internal sealed unsafe class WorldStore
             pruneMs = p.Elapsed.TotalMilliseconds;
         }
         var ms = sw.Elapsed.TotalMilliseconds;
-        SavesRuntime.Log(TimingLevel(ms), $"Kiln.Saves: confirmed mod data generation {rev} ({Saves.Text(reason)}) in {ms:F1} ms " +
+        SavesRuntime.Log(TimingLevel(ms), $"Kiln.Saves: confirmed mod data generation {rev} ({Saves.Text(reason)})" +
+                                          $"{(same ? $", bundles as in generation {rev - 1}: not forced to disk" : "")} in {ms:F1} ms " +
                                           $"({disk.Text}{(pruneMs >= 0 ? $"; pruning {pruneMs:F1} ms" : "")})");
     }
 
@@ -693,6 +708,7 @@ internal sealed unsafe class WorldStore
             var all = ListManifests(dir);
             var keep = new HashSet<string>(StringComparer.Ordinal);
             foreach (var m in all.Where(m => !m.Pending).OrderByDescending(m => m.Revision).Take(KeepGenerations)) keep.Add(m.Path);
+            if (_forced is { } fb) keep.Add(CommittedPath(fb.Revision, fb.Unix));  // what the unforced generations after it fall back to
             var wanted = new HashSet<(uint, uint)>();
             if (Saves.SaveDirectory is { } sd && Directory.Exists(sd))
             {
