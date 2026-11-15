@@ -713,6 +713,8 @@ internal static partial class KilnApis
         "M:Kiln.Symbols.Hole(System.String,System.UIntPtr,System.String)", // Symbols.Hole(string, nuint, string): HooksGate.RequireAdvanced
         "M:Kiln.Symbols.LoadShipped", // Symbols.LoadShipped(): HooksGate.RequireAdvanced
         "M:Kiln.Symbols.TryGet(System.String,System.UIntPtr@)", // Symbols.TryGet(string, out nuint): HooksGate.RequireAdvanced
+        "M:Kiln.TypedHooks.Detour(Kiln.SigDescriptor,Kiln.SigHandler,System.Int32)", // TypedHooks.Detour(SigDescriptor, SigHandler, int): HooksGate.RequireAdvanced
+        "M:Kiln.TypedHooks.Invoke(Kiln.SigDescriptor,Kiln.SigFrame@)", // TypedHooks.Invoke(SigDescriptor, ref SigFrame): HooksGate.RequireAdvanced
     };
 
     /// <summary>Documentation ids of public Task-returning members whose task is always already complete (they
@@ -826,6 +828,7 @@ internal static partial class KilnApis
         "Rules",
         "Saves",
         "Settings",
+        "Sigs",
         "Skills",
         "Spawn",
         "Terrain",
