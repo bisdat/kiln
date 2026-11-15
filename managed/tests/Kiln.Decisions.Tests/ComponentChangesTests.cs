@@ -394,6 +394,32 @@ public sealed unsafe class ComponentChangesTests : IDisposable
     }
 
     [Fact]
+    public void A_watch_that_ends_while_its_records_wait_in_a_frozen_batch_is_taken_out_of_it()
+    {
+        using var kiln = Started();
+        File.WriteAllText(Path.Combine(kiln.ControlDirectory, "watches.lab"), "");
+        var a = With(kiln, ("Health", Bytes(1)));
+        var b = With(kiln, ("Health", Bytes(1)));
+        var wa = Watch(kiln, new(ComponentWatchScope.Entities, [a], ObservedComponents.Health)).Watch!;
+        var wb = Watch(kiln, new(ComponentWatchScope.Entities, [b], ObservedComponents.Health)).Watch!;
+        kiln.Step(2);
+        kiln.Call(() => ComponentChanges.LabHoldDelivery(10));
+        kiln.Entities.SetBytes(a, "Health", Bytes(2));
+        kiln.Entities.SetBytes(b, "Health", Bytes(2));
+        kiln.Step(2);
+        Assert.Contains("lab_frozen_records=2 ", ComponentChanges.LabCounters());  // both records frozen, unread
+        kiln.Call(() => wb.Dispose());
+        kiln.Step();
+        Assert.Contains("lab_frozen_records=1 ", ComponentChanges.LabCounters());  // the ended watch's record is gone
+        kiln.Call(() => ComponentChanges.LabHoldDelivery(0));
+        kiln.Step(2);
+        var only = Assert.Single(_changes);
+        Assert.Equal(a, only.Entity);
+        Assert.Equal([wa.Id], only.WatchIds);
+        Assert.Contains("queued_frames=0 queued_records=0", ComponentChanges.LabCounters());  // the batch was acknowledged
+    }
+
+    [Fact]
     public void A_root_that_goes_is_suspended_whole_and_says_why()
     {
         using var kiln = Started();

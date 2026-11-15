@@ -591,7 +591,15 @@ public static unsafe class ComponentChanges
         Poll(t);
         if (_labHold > 0)
         {
-            _labHold--;  // LabHoldDelivery: the changes stay queued in the service
+            // LabHoldDelivery: what has arrived is frozen into a batch that is neither read nor acknowledged yet
+            _labHold--;
+            ulong frozen = 0;
+            uint records = 0;
+            if (t->BeginEvents(_owner, &frozen, &records) == ComponentChangesNative.Ok)
+            {
+                _labFrozenBatch = frozen;
+                _labFrozenRecords = records;
+            }
             return;
         }
         Deliver(t);
@@ -722,11 +730,16 @@ public static unsafe class ComponentChanges
     // ------------------------------------------------------------------------------------------------ lab and tests ----
 
     private static int _labHold;
+    private static ulong _labFrozenBatch;
+    private static uint _labFrozenRecords;
 
-    /// <summary>Lab only (mods/tests/component-watch-test, WATCH-QUEUE): the next <paramref name="steps"/> Pre steps read
-    /// no change from the service (the watch states still are), so its two-frame queue fills and overflows as when a
-    /// consumer falls behind: every ready watch in the process is suspended. Only when <c>kiln/control/watches.lab</c>
-    /// exists; false otherwise or off the tick thread. Not for mods.</summary>
+    /// <summary>Lab only (mods/tests/component-watch-test, WATCH-QUEUE and WATCH-FROZEN): in the next
+    /// <paramref name="steps"/> Pre steps the changes that arrived are frozen into a batch that is neither read nor
+    /// acknowledged (the watch states still are polled), so the two-frame queue fills and overflows as when a consumer
+    /// falls behind (every ready watch in the process is suspended), and a watch can end while its records wait in a
+    /// frozen batch. 0 lets go at the next Pre. Only when <c>kiln/control/watches.lab</c> exists; false otherwise or off
+    /// the tick thread; every accepted call warns in kiln.log. <see cref="LabCounters"/> names the frozen batch. Not for
+    /// mods.</summary>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="steps"/> is not 0..10.</exception>
     [Experimental("KILNX001", UrlFormat = "https://github.com/frostdev-ops/kiln/blob/main/docs/kiln/modding/analyzers.md#kilnx001")]
     [EditorBrowsable(EditorBrowsableState.Never)]
@@ -750,7 +763,7 @@ public static unsafe class ComponentChanges
     public static string? LabCounters()
     {
         if (ReadCounters() is not { } c) return null;
-        return $"state={c.State} watches={c.Watches} pairs={c.Pairs} present={c.PresentPairs} queued_frames={c.QueuedFrames} " +
+        return $"lab_frozen_batch={_labFrozenBatch} lab_frozen_records={_labFrozenRecords} state={c.State} watches={c.Watches} pairs={c.Pairs} present={c.PresentPairs} queued_frames={c.QueuedFrames} " +
                $"queued_records={c.QueuedRecords} windows={c.Windows} changes={c.Changes} overflows={c.QueueOverflows} " +
                $"frames_dropped={c.FramesDropped} tokens={c.TokensRecorded} tokens_unwatched={c.TokensUnwatched} " +
                $"tokens_refused={c.TokensRefused} tokens_lost={c.TokensLost} tokens_truncated={c.TokensTruncated} " +
@@ -773,6 +786,8 @@ public static unsafe class ComponentChanges
     internal static void Reset()
     {
         _labHold = 0;
+        _labFrozenBatch = 0;
+        _labFrozenRecords = 0;
         lock (Gate)
         {
             _table = 0;

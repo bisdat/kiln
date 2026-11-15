@@ -215,8 +215,10 @@ Events.On<AttributeValueChangedEvent>(e => Log.Info($"{e.Attribute}: {e.Before} 
   with `LastCompleteStep`; one whose root is gone or is another entity now is suspended the same way
   (`SuspendedMetadata`). Either raises `ComponentWatchStateChangedEvent` in the next Pre. `ComponentChanges.Resume` starts it again from scratch (the same
   lives, the budgets again; no change from while it was suspended is reported).
-- **The queue.** At most two steps' changes wait for the managed consumer (which reads every Pre). A third step's
-  are not queued: every ready watch is suspended (`SuspendedBudget`, "the change queue is full") and the service
+- **The queue.** At most two steps' changes wait for the managed consumer (which reads every Pre); a step's frame holds
+  every record of that step's compare, with interval splits and presence exchanges (4096 present pairs are not a limit
+  on its records). A watch that ends is taken out of what waits, even of a batch the consumer has begun to read. A
+  third step's are not queued: every ready watch is suspended (`SuspendedBudget`, "the change queue is full") and the service
   counts it; nothing is silently missing from a watch that says it is ready.
 - **Ends.** `Dispose` (any thread), the mod's unload (its owner) and the server world's stop end a watch
   (`Disposed`); what was not read of a world that stopped is dropped (its entity ids would mean another world's
@@ -228,7 +230,11 @@ Events.On<AttributeValueChangedEvent>(e => Log.Info($"{e.Attribute}: {e.Before} 
   the roots and links and, when they changed, plans the pairs again (new pairs read once more, a pair a new watch joins
   compared once more for the split); the exceptional recount when pairs appear past 4096 walks the watches again. A
   Kiln writer copies the bytes before its write only for an entity whose component the service may watch (a lock-free
-  filter of the watched pairs: an unrelated watch costs a writer one more load); kiln.items still walks the inventory
+  filter of the watched pairs: an unrelated watch costs a writer one more load). The filter is 65,536 slots by a hash of
+  the entity id, one component mask per slot; collisions only add yeses, so an entity nothing watches can still pay a
+  copy through a collision (the host test: 4,853 yeses among 65,536 unwatched ids with 4,000 watched entities). A new
+  or resumed watch, and a link that enters a watched tree, are in the filter before their first baseline; a write
+  before that baseline is outside the watch's interval by design. kiln.items still walks the inventory
   tree of the holder it changes (link ids only) to ask that filter for each entity in it. Every player of a server pays
   for the watches of every mod on it: the budgets bound the pairs, not the time, and not the time handlers take. Lab
   (`component-watch-test`, dedicated server, no player, build 26430253, 2026-11-15, three runs on a shared, loaded
@@ -300,14 +306,21 @@ player session), is not held in that step.
   The appended `is_stopped` reads shutdown without taking a broker lock. The table is 184 bytes; check `header.size`
   covers each optional member. An older native table lacks this last member: managed recovery then uses the faulted
   service row. Older managed layers can use the original prefix but cannot locally recover poisoned-lock completions.
-- `kiln.component_changes` v1 (`kiln_component_changes.h`, the second table of `kiln-decisions.dll`, 136 bytes): one
-  consumer (`attach`), `watch` / `resume` / `status` / `remove` / `release_owner`, the change batches (`begin_events`,
-  `read_events` with a stride of at least the 1808-byte record, `ack_events`), and `record_write` for native writers:
+- `kiln.component_changes` v1 (`kiln_component_changes.h`, the second table of `kiln-decisions.dll`, 144 bytes with
+  `watched` appended): one consumer (`attach`), `watch` / `resume` / `status` / `remove` / `release_owner`, the change
+  batches (`begin_events`, `read_events` with a stride of at least the 1808-byte record, `ack_events`), and
+  `record_write`. A batch is frozen at `begin_events`, but a watch that ends (disposed, its owner
+  unloaded) is taken out of it too, so it can shrink before it is read: a native consumer uses the count `read_events`
+  returns in `required`, never the one `begin_events` gave; the batch's id stays valid until `ack_events`, also when
+  nothing is left in it (and an emptied batch no longer holds one of the queue's two frames). A frame is the records
+  of one `window_end`, including interval splits and presence exchanges: the 4096 present pairs are not a limit on
+  the records of a frame. For native writers `record_write`:
   after a write of a watched component, the whole component before and after, the source's name; any thread, copied
   during the call, a bounded lock (never waits for ever: a write it cannot take is counted as lost, and the step's
   records say so: Mixed where other writes were reported, Unknown where none was). `kiln_component_write` and `kiln_component_watching` in the header are the one-line form a writer
   uses. `window_begin`, `window_end`, `window_wanted` and `window_faulted` are the core's; `counters` (appended) gives
-  what the service did, with its window calls' p50 and p99.
+  what the service did, with its window calls' p50 and p99; `watched(entity)` (appended) is the writers' filter, asked
+  through `kiln_component_watched` before a writer copies a component.
 - `kiln.window_clock` v1 (`kiln_window_clock.h`): the step's phase (Pre 1, Preparing 2, Sim 3, AfterJobs 4, Post 5,
   Stopping 6), the world epoch and the process session. World reads are legal on the world thread in phases 1, 2, 4
   and 5 only.

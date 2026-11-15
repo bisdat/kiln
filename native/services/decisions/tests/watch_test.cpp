@@ -687,6 +687,34 @@ static void test_world_stop() {
 
 // A watch that ends takes its undelivered records with it: a later watch (the same mod loaded again) is never told of a
 // change from before it existed, for a watch that is gone.
+// A batch the consumer froze and did not acknowledge when the world stops: dropped with the world (its id is not
+// readable or ackable after), and nothing of it reaches the next world's watch.
+static void test_world_stop_frozen() {
+    Run r;
+    r.w.entity(2000);
+    r.w.put(2000, KILN_WATCH_HEALTH, bytes40(1));
+    r.watch({2000}, 1);
+    r.tick();
+    r.tick([&] { r.w.set_byte(2000, 1, 0, 2); });
+    uint64_t batch = 0;
+    uint32_t n = 0;
+    CHECK(r.c.begin_events(r.host, &batch, &n) == KILN_OK && batch != 0 && n == 1);  // frozen, neither read nor acked
+    const auto gone = r.c.world_stopped("the server world stopped");
+    CHECK(gone.frames == 1 && gone.records == 1);
+    std::vector<KilnComponentChangeV1> buf(1);
+    uint32_t req = 0;
+    CHECK(r.c.read_events(r.host, batch, buf.data(), 1, sizeof(KilnComponentChangeV1), &req) == KILN_ERR_NOT_FOUND);
+    CHECK(r.c.ack_events(r.host, batch) == KILN_ERR_NOT_FOUND);
+    r.epoch = 2;
+    r.w.sess = 8;
+    const uint64_t next = r.watch({2000}, 1);
+    r.tick();
+    r.tick([&] { r.w.set_byte(2000, 1, 0, 3); });
+    const auto ch = r.drain();
+    CHECK(ch.size() == 1 && ch[0].watch_count == 1 && ch[0].watches[0] == next && ch[0].before[0] == 2 && ch[0].after[0] == 3 &&
+          ch[0].world_epoch == 2);
+}
+
 static void test_ended_watch_records() {
     Run r;
     r.w.entity(2000);
@@ -1212,6 +1240,7 @@ int main() {
     test_world_stop();
     test_owners();
     test_ended_watch_records();
+    test_world_stop_frozen();
     test_players();
     test_links();
     test_dynamic_budget();
