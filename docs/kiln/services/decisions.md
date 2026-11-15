@@ -122,6 +122,16 @@ and `AppliedHealth`.
 While a row is off, `Events.On<T>` for its event throws `KilnUnavailableException` naming it, and nothing is
 subscribed. A handler for a base class is never refused. Check `Capabilities.Is` first.
 
+## When something faults
+
+A fault in one of kiln.decisions' step-window calls (the core then never calls it again) or inside one of its hooks
+shuts the whole service down for the process, at once: both hooks pass every death and pickup to the game, every open
+decision ends `CapabilityReleased` (its `DecisionCompletedEvent` still comes), and `events.death`, `events.pickup`,
+`events.equip`, `decisions.native_guards` and `kiln.decisions` read unavailable (`faulted`) with the reason; kiln.log
+has one line. Nothing is held across the fault: the hold deadlines advanced at the window calls that stopped. A new
+subscription to the events is refused by name; equipment inputs go on with the generic `PlayerClientActionEvent` vote
+alone.
+
 ## Limits
 
 4096 open decisions and 8192 kept outcomes; a full queue fails open (`QueueDropped`). 8192 rows of identity per step:

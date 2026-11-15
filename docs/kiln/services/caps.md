@@ -318,7 +318,7 @@ names the guided check a real game has not passed yet for a row that is on.
 
 | Row | Kind | Reported by | Unconfirmed | What it says |
 |---|---|---|---|---|
-| `kiln.decisions` | service | core; kiln-decisions.dll lowers it (`service-missing`) without `tick.wait_jobs`, kiln.window_clock or kiln.world | - | the decision broker is here ([decisions.md](decisions.md)) |
+| `kiln.decisions` | service | core; kiln-decisions.dll lowers it (`service-missing`) without `tick.wait_jobs`, kiln.window_clock or kiln.world, and (`faulted`) with `events.death`, `events.pickup`, `events.equip` and `decisions.native_guards` when one of its window calls or hooks faulted (the service shuts down for the process) | - | the decision broker is here ([decisions.md](decisions.md)) |
 | `kiln.window_clock` | service (in-core) | core | - | the step's phase, world epoch and process session ([decisions.md](decisions.md)) |
 | `events.death` | sigdb feature, static | core (sigdb); kiln.decisions lowers it (`faulted`, `service-missing`, `symbol-missing`) when its hook could not go in at the first subscription, kiln.combat is missing or the world layout constants are unknown | `07-events.decision-rollback` | `EntityDyingEvent`: a death from health can be refused (on since 0.2.0-dev.29, not yet confirmed in a real game) |
 | `events.pickup` | sigdb feature, static | core (sigdb); kiln.decisions lowers it (`faulted`, `symbol-missing`) when its hook could not go in at the first subscription or the world layout constants are unknown | `07-events.decision-rollback` | `ItemPickingUpEvent`, `Decisions.ReevaluatePickup`: a walk-over pickup can be refused (on since 0.2.0-dev.29, not yet confirmed in a real game) |

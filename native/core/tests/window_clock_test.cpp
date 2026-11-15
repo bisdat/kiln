@@ -35,6 +35,9 @@ uint32_t g_want = 1;
 int g_asked = 0;
 uint32_t KILN_CALL dec_wanted() { return ++g_asked, g_want; }
 
+std::vector<uint32_t> g_told;
+void KILN_CALL dec_faulted(uint32_t code) { g_told.push_back(code); }
+
 bool g_fault_dec_begin = false;
 bool faulting_caller(wc::WindowFn fn, uint64_t e, uint64_t s) {
     if (fn == &dec_begin && g_fault_dec_begin) return false;
@@ -168,6 +171,23 @@ int main() {
     check(g_log.empty(), "no begin this step: no end");
     // a table without window_wanted (older, shorter): wanted every step, as before
     check(both.decisions_wanted == nullptr && lazy_both.decisions_wanted == &dec_wanted, "window_wanted read only when the table has it");
+
+    // a faulting decisions window call: the service is told once (window_faulted) and gets no end call in that step
+    KilnDecisionsApiV1 told = dec;
+    told.window_faulted = &dec_faulted;
+    const wc::Windows told_w = wc::Windows::from(&told, &chg);
+    g_log.clear();
+    g_fault_dec_begin = true;
+    g_core.pre(19, 90);
+    const uint32_t mask = g_core.begin(true, told_w, &faulting_caller);
+    check(mask == 1 && (g_core.begun() & 1) == 0, "a faulted begin is not begun");
+    check(wc::tell_faulted(mask, 0, told_w, 0xC0000005u) == 1 && g_told == std::vector<uint32_t>({0xC0000005u}), "the service is told with the code");
+    check(wc::tell_faulted(mask, 1, told_w, 0xC0000005u) == 0 && g_told.size() == 1, "told once");
+    check(wc::tell_faulted(2, 0, told_w, 1) == 0 && g_told.size() == 1, "a fault of component_changes does not tell decisions");
+    check(wc::tell_faulted(1, 0, both, 1) == 0, "a table without window_faulted is not told");
+    g_core.end(told_w);
+    check(g_log == std::vector<std::string>({"chg.begin@2:2/19", "chg.end@4:2/19"}), "no end call for the faulted service in that step");
+    g_fault_dec_begin = false;
 
     std::printf("window_clock_test: %d PASS, %d FAIL\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

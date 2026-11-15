@@ -31,6 +31,12 @@ inline bool ask_plain(WantedFn fn, uint32_t* out) {
     *out = fn();
     return true;
 }
+// How window_faulted is called (the core guards it like a window call).
+using Teller = bool (*)(FaultedFn fn, uint32_t code);
+inline bool tell_plain(FaultedFn fn, uint32_t code) {
+    fn(code);
+    return true;
+}
 
 // The two window services, in the order of window_begin. A table without the member (an older, shorter table) or a
 // service that faulted in a window call is left out. kiln.decisions may say a step does not need it (window_wanted):
@@ -60,6 +66,15 @@ struct Windows {
         return w;
     }
 };
+
+// A fault mask of begin()/end() names kiln.decisions: tell it (window_faulted, when its table has the member) before
+// the core leaves it out, so that it stops holding and ends what it holds instead of waiting for window calls that will
+// not come. `already` is the mask of services told before (each is told once). Returns the services told now.
+inline uint32_t tell_faulted(uint32_t mask, uint32_t already, const Windows& w, uint32_t code, Teller tell = &tell_plain) {
+    if (!(mask & 1) || (already & 1) || !w.decisions_faulted) return 0;
+    tell(w.decisions_faulted, code);
+    return 1;
+}
 
 class Core {
 public:

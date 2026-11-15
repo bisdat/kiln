@@ -26,6 +26,7 @@
 #include "services/kiln_players.h"
 #include "services/kiln_window_clock.h"
 #include "services/kiln_world.h"
+#include "shutdown.h"
 #include "world_gate.h"
 
 namespace kiln::decisions {
@@ -43,6 +44,7 @@ uint32_t g_spawn_time_hash = 0;
 Broker* g_broker = nullptr;  // made in kiln_plugin_main, never freed (4096 request slots: too big for a static)
 Metadata g_metadata;
 WorldGate g_gate;  // set in on_ready from the core constants world.storage and storage.kind
+Shutdown g_shutdown;  // a fault (a window call, a hook) stops every producer together (shutdown.h)
 
 // The consumer's interest per kind: all entities, or a list.
 struct Interest {
@@ -73,6 +75,31 @@ void logf(int level, const char* fmt, ...) {
 
 KilnStr ks(const char* s) { return KilnStr{s, std::strlen(s)}; }
 
+void lower_row(const char* row, uint32_t reason, const char* why, void*);
+
+// A pending shutdown (shutdown.h) is carried out on the world thread, once: open requests end CAPABILITY_RELEASED, the
+// holds and exposures go, the rows are lowered, one line in kiln.log. Nothing of the world is read.
+void finish_shutdown(uint64_t step) {
+    if (!g_shutdown.pending()) return;
+    struct Holds {
+        bool try_clear() { return death_producer::try_clear(); }
+    };
+    struct Exposures {
+        bool try_clear() { return pickup_producer::try_clear(); }
+    };
+    Shutdown::Finished f;
+    if (!g_shutdown.finish(*g_broker, Holds{}, Exposures{}, step, &lower_row, nullptr, &f)) return;
+    g_interest_kinds.store(0);
+    for (auto& i : g_interest_state) i.store(0);
+    g_hook_kinds.store(0);
+    if (f.released) g_broker->drain_sinks();
+    logf(KILN_LOG_ERROR,
+         "decisions: shut down for this process: %s. Deaths and walk-over pickups pass to the game from now on; %s; events.death, "
+         "events.pickup, events.equip, decisions.native_guards and kiln.decisions are off",
+         g_shutdown.why(),
+         f.released ? "every open decision ended CapabilityReleased" : "the open decisions could not be ended (a lock was left held) and are not told");
+}
+
 // The clock state when the caller is on the world thread in a world-safe phase.
 bool world_safe(KilnWindowStateV1* out) {
     KilnWindowStateV1 s{};
@@ -81,6 +108,21 @@ bool world_safe(KilnWindowStateV1* out) {
     if (out) *out = s;
     return true;
 }
+
+// A table entry's check: world_safe, and the first such call after a hook's fault carries the shutdown out (never from
+// inside a broker call: host::resolve, which finishers call under the broker's lock, uses world_safe alone).
+bool entry_safe(KilnWindowStateV1* out) {
+    KilnWindowStateV1 s{};
+    if (!world_safe(&s)) return false;
+    finish_shutdown(s.step);
+    if (out) *out = s;
+    return true;
+}
+
+// Calls that start or hold something: refused once the service shut down.
+bool holding() { return g_shutdown.holding(); }
+// Calls into the broker: refused when the shutdown found its lock held.
+bool broker_ok() { return g_shutdown.broker_ok(); }
 
 // ---- metadata sampler: the only world reads of this service ----
 bool sample(uint32_t entity, Sample* out, void*) {
@@ -113,20 +155,22 @@ bool sample(uint32_t entity, Sample* out, void*) {
 
 // ---- table ----
 uint64_t KILN_CALL d_supported_kinds() {
-    if (!g_on.load(std::memory_order_relaxed)) return 0;
+    if (!g_on.load(std::memory_order_relaxed) || !holding()) return 0;
     return kPreparedKinds | g_hook_kinds.load(std::memory_order_relaxed);
 }
 
 KilnResult KILN_CALL d_attach(KilnOwner dispatcher) {
     if (!g_on.load()) return KILN_ERR_UNAVAILABLE;
-    if (!world_safe(nullptr)) return KILN_ERR_WRONG_THREAD;
+    if (!entry_safe(nullptr)) return KILN_ERR_WRONG_THREAD;
+    if (!broker_ok()) return KILN_ERR_UNAVAILABLE;
     return g_broker->attach(dispatcher);
 }
 
 KilnResult KILN_CALL d_detach(KilnOwner dispatcher) {
     if (!g_on.load()) return KILN_ERR_UNAVAILABLE;
     KilnWindowStateV1 s{};
-    if (!world_safe(&s)) return KILN_ERR_WRONG_THREAD;
+    if (!entry_safe(&s)) return KILN_ERR_WRONG_THREAD;
+    if (!broker_ok()) return KILN_ERR_UNAVAILABLE;
     const KilnResult rc = g_broker->detach(dispatcher, s.step);
     g_broker->drain_sinks();
     if (rc == KILN_OK) {
@@ -149,7 +193,8 @@ KilnResult KILN_CALL d_resolve_entity(uint32_t entity, KilnEventEntityKey* key, 
     if (!g_on.load()) return KILN_ERR_UNAVAILABLE;
     if (!key || entity == 0) return KILN_ERR_INVALID_ARGUMENT;
     KilnWindowStateV1 s{};
-    if (!world_safe(&s)) return KILN_ERR_WRONG_THREAD;  // also the world thread inside the sim step (phase 3)
+    if (!entry_safe(&s)) return KILN_ERR_WRONG_THREAD;  // also the world thread inside the sim step (phase 3)
+    if (!holding()) return KILN_ERR_UNAVAILABLE;
     Row row;
     bool miss = false;
     if (!g_metadata.resolve(s.world_epoch, s.step, entity, &row, &miss)) {
@@ -167,8 +212,8 @@ KilnResult KILN_CALL d_interest(KilnOwner dispatcher, const KilnDecisionInterest
     if (!in || in->size < sizeof(KilnDecisionInterestV1) || in->kind >= 64 || payload_size(in->kind) == 0 ||
         in->entity_count > KILN_DECISIONS_MAX_INTEREST || (in->entity_count && !in->entities))
         return KILN_ERR_INVALID_ARGUMENT;
-    if (!world_safe(nullptr)) return KILN_ERR_WRONG_THREAD;
-    if (!g_broker->is_consumer(dispatcher)) return KILN_ERR_UNAVAILABLE;
+    if (!entry_safe(nullptr)) return KILN_ERR_WRONG_THREAD;
+    if (!holding() || !g_broker->is_consumer(dispatcher)) return KILN_ERR_UNAVAILABLE;
     Interest next;
     next.all = in->all_entities != 0;
     next.ids.assign(in->entities, in->entities + in->entity_count);
@@ -190,15 +235,17 @@ KilnResult KILN_CALL d_enqueue_prepared(KilnOwner dispatcher, const KilnDecision
     if (!request || !request_id) return KILN_ERR_INVALID_ARGUMENT;
     if (request->kind >= 64 || !(kPreparedKinds & (1ull << request->kind))) return KILN_ERR_INVALID_ARGUMENT;  // hooks file 1, 2, 32
     KilnWindowStateV1 s{};
-    if (!world_safe(&s)) return KILN_ERR_WRONG_THREAD;
-    if (!g_broker->is_consumer(dispatcher)) return KILN_ERR_UNAVAILABLE;
+    if (!entry_safe(&s)) return KILN_ERR_WRONG_THREAD;
+    if (!holding() || !g_broker->is_consumer(dispatcher)) return KILN_ERR_UNAVAILABLE;
     return g_broker->file(*request, s.world_epoch, s.step, request_id);
 }
 
 // The consumer's batch calls: world thread, world-safe phase, the attached owner.
+// After a shutdown these still work while the broker is sound: the consumer reads the CapabilityReleased outcomes.
 KilnResult consumer(KilnOwner dispatcher, KilnWindowStateV1* s) {
     if (!g_on.load()) return KILN_ERR_UNAVAILABLE;
-    if (!world_safe(s)) return KILN_ERR_WRONG_THREAD;
+    if (!entry_safe(s)) return KILN_ERR_WRONG_THREAD;
+    if (!broker_ok()) return KILN_ERR_UNAVAILABLE;
     return g_broker->is_consumer(dispatcher) ? KILN_OK : KILN_ERR_UNAVAILABLE;
 }
 
@@ -252,7 +299,8 @@ KilnResult KILN_CALL d_enqueue_native(KilnOwner producer, const KilnDecisionRequ
     if (!g_on.load()) return KILN_ERR_UNAVAILABLE;
     if (!request || !request_id || !sink || producer == 0 || request->kind != KILN_DECISION_EQUIP_SET) return KILN_ERR_INVALID_ARGUMENT;
     KilnWindowStateV1 s{};
-    if (!world_safe(&s)) return KILN_ERR_WRONG_THREAD;
+    if (!entry_safe(&s)) return KILN_ERR_WRONG_THREAD;
+    if (!holding()) return KILN_ERR_UNAVAILABLE;  // fail open: the caller lets the action run
     const KilnResult rc = g_broker->file_native(*request, s.world_epoch, s.step, sink, user, request_id);
     g_broker->drain_sinks();  // a QUEUE_DROPPED outcome is told before the call returns
     return rc;
@@ -261,13 +309,16 @@ KilnResult KILN_CALL d_enqueue_native(KilnOwner producer, const KilnDecisionRequ
 KilnResult KILN_CALL d_reevaluate_pickup(uint32_t drop, uint32_t receiver, uint32_t* exposures_reset) {
     if (exposures_reset) *exposures_reset = 0;
     if (!g_on.load() || !pickup_producer::usable()) return KILN_ERR_UNAVAILABLE;
-    if (!world_safe(nullptr)) return KILN_ERR_WRONG_THREAD;
+    if (!entry_safe(nullptr)) return KILN_ERR_WRONG_THREAD;
+    if (!holding()) return KILN_ERR_UNAVAILABLE;
     return pickup_producer::reevaluate(drop, receiver, exposures_reset);
 }
 
 // ---- step windows (core only) ----
 void KILN_CALL d_window_begin(uint64_t epoch, uint64_t step) {
     if (!g_on.load(std::memory_order_relaxed)) return;
+    finish_shutdown(step);  // a hook faulted since the last window
+    if (!holding()) return;
     g_epoch.store(epoch);
     g_step.store(step);
     g_world_thread.store(GetCurrentThreadId());
@@ -298,13 +349,15 @@ void KILN_CALL d_window_begin(uint64_t epoch, uint64_t step) {
 
 void KILN_CALL d_window_end(uint64_t epoch, uint64_t step) {
     if (!g_on.load(std::memory_order_relaxed)) return;
+    finish_shutdown(step);
+    if (!holding()) return;
     pickup_producer::window_end(epoch, step);
     g_broker->window_end(epoch, step);
     g_broker->drain_sinks();
 }
 
 KilnResult KILN_CALL d_set_death_guard(KilnOwner owner, KilnDeathGuardFn guard) {
-    if (!g_on.load()) return KILN_ERR_UNAVAILABLE;
+    if (!g_on.load() || (guard && !holding())) return KILN_ERR_UNAVAILABLE;
     return death_producer::set_guard(owner, guard);
 }
 
@@ -317,6 +370,10 @@ KilnResult KILN_CALL d_prepare_kind(uint32_t kind, char* reason, uint32_t reason
     if (kind == 0 || kind >= 64 || payload_size(kind) == 0) return KILN_ERR_INVALID_ARGUMENT;
     if (!g_on.load()) {
         say("kiln.decisions is off (see its capability row)");
+        return KILN_ERR_UNAVAILABLE;
+    }
+    if (!holding()) {
+        say(std::string("kiln.decisions shut down after a fault: ") + g_shutdown.why());
         return KILN_ERR_UNAVAILABLE;
     }
     if (kPreparedKinds & (1ull << kind)) return KILN_OK;
@@ -337,9 +394,21 @@ KilnResult KILN_CALL d_prepare_kind(uint32_t kind, char* reason, uint32_t reason
 // since 0.2.0-dev.29, core only: whether this step needs the window calls (and the wait for the world's jobs)
 uint32_t KILN_CALL d_window_wanted() {
     if (!g_on.load(std::memory_order_relaxed)) return 0;
+    if (g_shutdown.pending()) return 1;  // a hook faulted: the next window carries the shutdown out
+    if (!holding()) return 0;
     if (g_interest_kinds.load(std::memory_order_relaxed) != 0) return 1;  // a listener: metadata, deadlines, samples
     if (death_producer::busy() || pickup_producer::busy()) return 1;      // a hold or an exposure to follow; a guard
     return g_broker->active_count() != 0 ? 1u : 0u;                       // an open request's deadline
+}
+
+// since 0.2.0-dev.29, core only: a window call of this service faulted; the core calls no window of it again
+void KILN_CALL d_window_faulted(uint32_t code) {
+    char why[96];
+    std::snprintf(why, sizeof why, "a window call of kiln.decisions faulted (0x%08x)", code);
+    g_shutdown.stop(why);
+    KilnWindowStateV1 s{};
+    g_clock->get(&s);
+    finish_shutdown(s.step);
 }
 
 const KilnDecisionsApiV1 kTable = {
@@ -364,13 +433,15 @@ const KilnDecisionsApiV1 kTable = {
     &d_enqueue_native,  // since 0.2.0-dev.29
     &d_prepare_kind,    // since 0.2.0-dev.29
     &d_window_wanted,   // since 0.2.0-dev.29
-    nullptr,            // window_faulted: since 0.2.0-dev.29
+    &d_window_faulted,  // since 0.2.0-dev.29
 };
 
 void KILN_CALL on_world(const KilnWorldEvent* e, void*) {
     if (e->kind != KILN_WORLD_SERVER || e->event != KILN_WORLD_STOPPING) return;
     KilnWindowStateV1 s{};
     g_clock->get(&s);
+    finish_shutdown(s.step);
+    if (!holding()) return;  // shut down: nothing is held, and a lock a fault left held is not touched again
     g_broker->world_ended(s.step);
     g_broker->drain_sinks();
     g_metadata.clear();
@@ -381,6 +452,10 @@ void KILN_CALL on_world(const KilnWorldEvent* e, void*) {
          static_cast<unsigned long long>(c.filed), static_cast<unsigned long long>(c.queue_dropped),
          static_cast<unsigned long long>(c.timeouts), static_cast<unsigned long long>(c.outcome_gap),
          static_cast<unsigned long long>(c.metadata_misses));
+}
+
+void lower_row(const char* row, uint32_t reason, const char* why, void*) {
+    if (g_caps) g_caps->report(g_owner, ks(row), KILN_CAP_UNAVAILABLE, reason, ks(why));
 }
 
 void off(const char* why) {
@@ -468,11 +543,11 @@ bool interested(uint32_t kind, uint32_t entity) {
     const auto& ids = g_interest[kind].ids;
     return std::binary_search(ids.begin(), ids.end(), entity);
 }
-bool holding() { return !g_budget_exceeded.load(std::memory_order_relaxed) && !g_broker->saturated(); }
+bool holding() { return g_shutdown.holding() && !g_budget_exceeded.load(std::memory_order_relaxed) && !g_broker->saturated(); }
 std::shared_ptr<const Table> table() { return g_metadata.table(); }
 bool resolve(uint32_t entity, Row* out) {
     KilnWindowStateV1 s{};
-    if (!world_safe(&s)) return false;
+    if (!world_safe(&s) || !g_shutdown.holding()) return false;
     bool miss = false;
     if (g_metadata.resolve(s.world_epoch, s.step, entity, out, &miss)) return true;
     if (miss) g_broker->count_metadata_miss();
@@ -484,7 +559,12 @@ void hook_kind(uint32_t kind) {
 void hook_kind_off(uint32_t kind) {
     if (kind < 64) g_hook_kinds.fetch_and(~(1ull << kind));
 }
-bool holding_allowed() { return true; }
+bool holding_allowed() { return g_shutdown.holding(); }
+void hook_faulted(const char* what, unsigned long code) {
+    char why[128];
+    std::snprintf(why, sizeof why, "%s faulted (0x%08lx)", what, code);
+    g_shutdown.stop(why);  // both hooks pass from now on; the world thread finishes it
+}
 void lower(const char* row, uint32_t reason, const char* why) {
     if (g_caps) g_caps->report(g_owner, ks(row), KILN_CAP_UNAVAILABLE, reason, ks(why));
 }

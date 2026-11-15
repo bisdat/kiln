@@ -11,7 +11,13 @@
 #include "queue.h"
 #include "services/kiln_caps.h"
 #include "services/kiln_decisions.h"
+#include "services/kiln_hooks.h"
 #include "services/kiln_world.h"
+
+namespace kiln::decisions::seh {
+// shutdown's guard around a hook body (seh.cpp): false when it faulted or threw, with the exception code.
+bool call(void (*body)(KilnRegisters& r), KilnRegisters& r, unsigned long* code);
+}  // namespace kiln::decisions::seh
 
 namespace kiln::decisions::host {
 
@@ -50,6 +56,9 @@ void hook_kind(uint32_t kind);
 void hook_kind_off(uint32_t kind);
 // The service holds at all (not shut down after a fault). Any thread, lock free: the hooks ask it first.
 bool holding_allowed();
+// A hook's body faulted (`what` names the hook): the service stops holding now and shuts down at its next world-thread
+// call (shutdown.h). Any thread.
+void hook_faulted(const char* what, unsigned long code);
 // Lowers a capability row (unavailable, `reason`, `why`). Any thread.
 void lower(const char* row, uint32_t reason, const char* why);
 void logf(int level, const char* fmt, ...);
@@ -68,6 +77,8 @@ bool installed();
 bool usable();  // ready or armed
 // Something to keep the windows for: a hold, or a native guard (it asks the window's epoch).
 bool busy();
+// The shutdown: forgets every hold unless a fault left the lock held (false then).
+bool try_clear();
 // window_begin, before the metadata is rebuilt: the entities the death producer needs rows for (every entity with
 // Health while a listener takes all deaths). World thread, no world job live.
 void discover(std::vector<uint32_t>& wanted);
@@ -92,6 +103,7 @@ bool arm();
 bool installed();
 bool usable();  // ready or armed
 bool busy();    // an exposure is sampled
+bool try_clear();  // the shutdown: forgets every exposure unless a fault left the lock held (false then)
 // The words and reason for events.pickup when the producer cannot hold (empty / KILN_CAP_REASON_NONE when it can).
 std::string why_not();
 uint32_t why_not_reason();

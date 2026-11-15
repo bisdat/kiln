@@ -106,10 +106,15 @@ struct HookPorts {
     }
 };
 
+void death_body(KilnRegisters& r) {
+    HookPorts p{r};
+    if (g_holds.visit(p, host::broker()) == death::Visit::Skip) r.rip = g_next;  // the only register it changes, last
+}
+
 void death_mid(KilnRegisters& r) {
     if (static_cast<int32_t>(static_cast<uint32_t>(r.rax)) > 0) return;  // every living entity: one compare
-    HookPorts p{r};
-    if (g_holds.visit(p, host::broker()) == death::Visit::Skip) r.rip = g_next;
+    unsigned long code = 0;
+    if (!seh::call(&death_body, r, &code)) host::hook_faulted("the death hook", code);  // the game goes on: Pass
 }
 
 // ---- the answer (Pre, tick thread, inside the broker's answer) ----
@@ -208,6 +213,7 @@ bool usable() { return g_arm.usable(); }
 std::string why_not() { return g_arm.why(); }
 uint32_t why_not_reason() { return g_arm.reason(); }
 bool busy() { return g_holds.size() != 0 || g_guard.load(std::memory_order_relaxed) != nullptr; }
+bool try_clear() { return g_holds.try_clear(); }
 
 void discover(std::vector<uint32_t>& wanted) {
     if (!g_arm.armed() || host::interest_state(KILN_DECISION_DEATH) != 2) return;
@@ -238,7 +244,7 @@ void window_begin(uint64_t epoch, uint64_t step) {
 }
 
 void world_stopped() {
-    g_holds.clear();
+    if (!g_holds.try_clear()) return;  // a fault left its lock held (the service is shut down): nothing more here
     const auto& s = g_holds.stats;
     if (g_arm.armed())
         host::logf(KILN_LOG_INFO, "decisions: deaths this world: filed %llu (%llu on a worker thread), held visits %llu, released %llu, guarded %llu, metadata misses %llu, dropped %llu, other worlds' visits passed %llu",

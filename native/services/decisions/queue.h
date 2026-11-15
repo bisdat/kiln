@@ -289,6 +289,20 @@ public:
         std::lock_guard lock(m_);
         expire(epoch, step, [](const KilnDecisionRequestV1& r, uint64_t s) { return one_pre(r.kind) && s >= r.deadline_step; });
     }
+    // The service shut down after a fault (shutdown.h): every open request ends `status` (fail open), as at a detach,
+    // but only if the lock is free: a fault can leave it held (an SEH unwind runs no destructor). False: it was not,
+    // and nothing was done; the caller then never calls this broker again.
+    bool try_release_all(uint32_t status, const char* reason, uint64_t step) {
+        std::unique_lock lock(m_, std::try_to_lock);
+        if (!lock.owns_lock()) return false;
+        release_all(status, reason, step);
+        arrivals_.clear();
+        req_batch_ = Batch<KilnDecisionRequestV1>{};
+        return true;
+    }
+    // Tests: the lock, held by the caller (a fault that left it held).
+    std::unique_lock<std::mutex> lock_for_tests() { return std::unique_lock(m_); }
+
     // The world stopped: nothing is held any more.
     void world_ended(uint64_t step) {
         std::lock_guard lock(m_);

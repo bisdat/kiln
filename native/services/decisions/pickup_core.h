@@ -212,6 +212,13 @@ public:
         std::lock_guard lock(m_);
         map_.clear();
     }
+    // The shutdown after a fault: clears unless a fault left the lock held (false then).
+    bool try_clear() {
+        std::unique_lock lock(m_, std::try_to_lock);
+        if (!lock.owns_lock()) return false;
+        map_.clear();
+        return true;
+    }
     size_t size() const {
         std::lock_guard lock(m_);
         return map_.size();

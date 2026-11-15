@@ -92,7 +92,7 @@ struct HookPorts {
     }
 };
 
-void pickup_mid(KilnRegisters& r) {
+void pickup_body(KilnRegisters& r) {
     HookPorts p{r};
     const uint64_t filed = g_exposures.stats.filed.load(std::memory_order_relaxed);
     if (g_exposures.visit(p, host::broker()) != pickup::Visit::Refuse) return;
@@ -112,6 +112,12 @@ void pickup_mid(KilnRegisters& r) {
             host::logf(KILN_LOG_INFO, "decisions: walk-over pickup of drop %u by %u held (step %llu, thread %lu, %s)", p.entity(), p.receiver(),
                        static_cast<unsigned long long>(host::step()), tid, worker ? "a worker thread" : "the world thread");
     }
+}
+
+void pickup_mid(KilnRegisters& r) {
+    unsigned long code = 0;
+    // A fault before the refusal's last three writes leaves the registers as they were: the helper runs (Pass).
+    if (!seh::call(&pickup_body, r, &code)) host::hook_faulted("the walk-over pickup hook", code);
 }
 
 // The window samples: the drop's DynamicIsPlayerInRange and PickupItem, read where no world job is live.
@@ -198,6 +204,7 @@ bool usable() { return g_arm.usable(); }
 std::string why_not() { return g_arm.why(); }
 uint32_t why_not_reason() { return g_arm.reason(); }
 bool busy() { return g_exposures.size() != 0; }
+bool try_clear() { return g_exposures.try_clear(); }
 
 void discover(std::vector<uint32_t>& wanted) {
     if (!g_arm.armed() || host::interest_state(KILN_DECISION_WALKOVER) == 0) return;
@@ -241,7 +248,7 @@ void window_end(uint64_t epoch, uint64_t step) {
 }
 
 void world_stopped() {
-    g_exposures.clear();
+    if (!g_exposures.try_clear()) return;  // a fault left its lock held (the service is shut down): nothing more here
     const auto& s = g_exposures.stats;
     if (g_arm.armed())
         host::logf(KILN_LOG_INFO,

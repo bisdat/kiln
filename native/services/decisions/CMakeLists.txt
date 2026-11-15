@@ -1,1 +1,1 @@
-kiln_service(decisions decisions.cpp death.cpp pickup.cpp)
+kiln_service(decisions decisions.cpp death.cpp pickup.cpp seh.cpp)

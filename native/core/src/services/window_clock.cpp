@@ -29,6 +29,7 @@ uint64_t g_reg_version = ~0ull;
 bool g_fresh = true;
 // A window service that faulted in a window call gets no further one in this process (1 decisions, 2 changes).
 uint32_t g_faulted = 0;
+unsigned long g_fault_code = 0;  // the last window call's exception code (world thread)
 std::atomic<bool> g_any{false};
 
 struct Call {
@@ -44,6 +45,7 @@ bool call_guarded(WindowFn fn, uint64_t epoch, uint64_t step) {
     unsigned long code = 0;
     if (guard::task(&run_call, &c, &code)) return true;
     KLOG_E("window clock: a window call faulted (0x%08lx)", code);
+    g_fault_code = code;
     return false;
 }
 
@@ -64,13 +66,32 @@ bool ask_guarded(WantedFn fn, uint32_t* out) {
         return true;
     }
     KLOG_E("window clock: kiln.decisions' window_wanted faulted (0x%08lx)", code);
+    g_fault_code = code;
     *out = 0;
+    return false;
+}
+
+struct Tell {
+    FaultedFn fn;
+    uint32_t code;
+};
+void KILN_CALL run_tell(void* user) {
+    const auto* t = static_cast<const Tell*>(user);
+    t->fn(t->code);
+}
+bool tell_guarded(FaultedFn fn, uint32_t code) {
+    Tell t{fn, code};
+    unsigned long c = 0;
+    if (guard::task(&run_tell, &t, &c)) return true;
+    KLOG_E("window clock: kiln.decisions' window_faulted faulted as well (0x%08lx)", c);
     return false;
 }
 
 void note_faults(uint32_t mask) {
     if (!mask) return;
     if ((mask & 1) && !(g_faulted & 1)) KLOG_E("window clock: kiln.decisions faulted in a window call; it gets no further one");
+    // before it is left out: kiln.decisions stops holding and ends what it holds (its deadlines moved at these calls)
+    tell_faulted(mask, g_faulted, g_tables, static_cast<uint32_t>(g_fault_code), &tell_guarded);
     if ((mask & 2) && !(g_faulted & 2))
         KLOG_E("window clock: kiln.component_changes faulted in a window call; it gets no further one");
     g_faulted |= mask;
