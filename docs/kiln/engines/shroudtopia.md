@@ -40,6 +40,15 @@ settings when they changed and, while `active`, looks for new mod DLLs (a DLL dr
 picked up), calls `Load` once for each mod that supports this side (`hasClientSupport` / `hasServerSupport`), then
 `Activate` / `Update` / `Deactivate` by the mod's `active` setting.
 
+Shroudtopia's loader never writes a mod's own `active` field: it calls `Activate` whenever the setting is on and that
+field is off, so a mod that does not set the field in `Activate` is activated again on every update. Kiln does the
+same. It logs `Activating: <name>` once and one warning that says so, and `kiln/state/shroudtopia.json` and Kiln's
+in-game mod list show such a mod as `activating` (switched on, not reporting itself active) with that reason, not as
+switched off. A mod can stay like this when its activation fails on this game version; the warning also says when the
+mod's `targetShroudtopiaVersion` is not upstream Shroudtopia's 0.0.x, 0.1.x or 1.0 (Kiln provides 0.1.1's interface,
+unchanged since 0.0.3): a mod made for another build of Shroudtopia, such as the Shroudweave fork's 0.2.x, may need
+something Kiln does not provide yet.
+
 Differences, all on the safe side:
 - A DLL is loaded only when its export table (read from the file) has `CreateModInstance`. Shroudtopia 1.0 loads any
   DLL in a `mods/<name>/` folder, which in a shared `mods/` folder also runs other loaders' DLLs (Flame, EML packages);

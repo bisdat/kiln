@@ -260,7 +260,7 @@ internal static class ModCatalog
         if (w.Contains("fail") || w.Contains("error") || w.Contains("refus") || w.Contains("reject") || w.Contains("fault") ||
             w is "missing" or "conflict" or "unsupported" or "not-loaded") return ModRunState.Failed;
         if (w is "disabled" or "off" or "inactive" or "policy" or "off-in-shroudforge") return ModRunState.Disabled;
-        if (w.Contains("pending") || w.Contains("waiting") || w is "candidate" or "registered" or "starting" or "deferred")
+        if (w.Contains("pending") || w.Contains("waiting") || w is "candidate" or "registered" or "starting" or "deferred" or "activating")
             return ModRunState.Waiting;
         if (w is "loaded" or "active" or "running" or "started" or "ok" or "done" or "hosted" or "script" or "copy" or "refresh" or
             "keep" or "run" or "already-loaded" or "own-loader") return ModRunState.Loaded;
@@ -886,6 +886,12 @@ internal static class ModCatalog
                 {
                     reason = "Switched off in Shroudtopia's settings.";
                     help = $"In shroudtopia/shroudtopia.json in the profile's config folder, set active to true in the mods entry named \"{line.Name ?? line.Id}\" (the name in kiln.log's Registered mod line). Save the file; Shroudtopia reads it again while the game runs.";
+                }
+                // kiln-shroudtopia: the setting is on and Activate is called, but the mod's own flag stays off
+                else if (kind == "shroudtopia" && !aside && line.State == "activating")
+                {
+                    reason = string.IsNullOrEmpty(reason) ? "Switched on, but the mod does not report itself active." : char.ToUpperInvariant(reason[0]) + reason[1..] + ".";
+                    help = $"Kiln runs Shroudtopia mods through Shroudtopia 0.1.1's mod interface and keeps calling this mod's Activate. A mod made for another game version, or built against another Shroudtopia, can stay like this without doing anything. kiln/logs/kiln.log has its own lines as [shroudtopia:{line.Name ?? line.Id}]; the mod's author can tell whether it supports this game version.";
                 }
                 else if (state == ModRunState.Failed)
                     help = $"Read the reason above. Update the mod in the Kiln launcher, then start the game again. kiln/logs/kiln.log has the {EngineName(kind)} lines.";
