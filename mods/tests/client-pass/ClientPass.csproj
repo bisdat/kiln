@@ -41,6 +41,8 @@
     <!-- 06a-wraps.waterworks: the typed program view Ecs.Programs.FuelSetup and Ecs.Get -->
     <ProjectReference Include="../../../managed/Kiln.Game/Kiln.Game.csproj" Private="false" ExcludeAssets="runtime" />
     <None Include="kiln.mod.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- 06a-define.hosted's boot reservation (ClientPassFuelQuery, Dev28ProgramWraps.cs) -->
+    <None Include="kiln.programs.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="rows.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

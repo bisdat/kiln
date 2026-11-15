@@ -648,6 +648,21 @@ internal sealed unsafe class ManagedStage
         _ctx = View is null ? null : ViewContext.Begin(t, s, this);
         _slice = s;
         _eachError = null;
+        // A view needs the program's lists and contract from kiln.world's directory, read here on the slice's thread with
+        // a bound (kiln.world gives up after 2 ms rather than wait inside the game's step). No answer: the stage cannot see
+        // what it would write, so it goes off and says why; the failed read is not kept for the session.
+        if (_ctx is { } c && (!c.Lists.Complete || (c.Lists.Contract is null && c.Lists.ContractUnread)))
+        {
+            c.End();
+            around?.End(Kind, false);
+            _each = outerEach;
+            _view = outerView;
+            _ctx = outerCtx;
+            _slice = outerSlice;
+            Off($"per-entity views on {Wrap.Program} are off: kiln.world's program directory could not be read inside the " +
+                "game's step (its lock was held past its bound, or the world was going away)");
+            return;
+        }
         var rc = SystemsNative.Ok;
         try
         {

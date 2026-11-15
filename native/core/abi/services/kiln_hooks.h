@@ -212,6 +212,9 @@ typedef struct KilnSig {
 /* detour_typed's refusals (KilnResult values of this service; the generic codes keep their meaning). */
 #define KILN_HOOKS_ERR_SIG_MISMATCH 100 /* the function's code does not fit the descriptor */
 #define KILN_HOOKS_ERR_SIG_UNKNOWN 101  /* the function's code could not be followed far enough to say */
+/* detour_typed_checked's refusal (since 0.2.0-dev.29): a thread could not be checked, or stood inside the bytes the
+ * first detour on the target replaces; nothing was written. A later attempt may succeed. */
+#define KILN_HOOKS_ERR_UNCHECKED 102
 
 #define KILN_TYPED_CONTINUE ((uintptr_t)0)
 #define KILN_TYPED_SKIP ((uintptr_t)1)
@@ -364,17 +367,42 @@ typedef struct KilnHooksApi {
     KilnResult(KILN_CALL* subscribe_owner_retiring)(KilnOwner observer_owner, KilnOwnerRetiringFn fn, void* user,
                                                     KilnHandle* out);
     KilnResult(KILN_CALL* unsubscribe_owner_retiring)(KilnHandle handle);
-    /* Optional checked mid installation: refuses before writing when any thread
-     * cannot be checked, or is paused inside the bytes to replace. No unsafe fallback.
-     * Existing targets need no physical patch. Check header.size. */
+
+    /* ======== checked mid installation (since 0.2.0-dev.29, package 07): check header.size covers it ========
+     * Refuses before writing when any thread cannot be checked, or is paused inside the bytes to replace. No unsafe
+     * fallback. Existing targets need no physical patch. */
     KilnResult(KILN_CALL* mid2_checked)(KilnOwner owner, uintptr_t target, const KilnHookOrder* order,
         KilnMidFn fn, void* user, KilnHandle* out, uint32_t* unchecked);
+
+    /* ======== typed safety extension (since 0.2.0-dev.29): check header.size covers each member before reading it ========
+     * validate_typed checks THIS compiled descriptor against the resolver descriptor and original image bytes.
+     * sig_status queries the current resolver (never a report); revision changes at fragment replacement/unload.
+     * typed_install_ready permits installation with no live world OR on the current authoritative/joined-client Pre
+     * thread. */
+    KilnResult(KILN_CALL* validate_typed)(KilnStr symbol, uintptr_t expected_address, uint64_t expected_revision,
+                                          const KilnSig* sig);
+    KilnResult(KILN_CALL* sig_status)(KilnStr symbol, uintptr_t* address, uint64_t* revision);
+    uint32_t(KILN_CALL* typed_install_ready)(void);
+
+    /* ======== checked typed installation (since 0.2.0-dev.29): check header.size covers it before calling ========
+     * detour_typed_checked: detour_typed with mid2_checked's patch policy. The descriptor is checked first, exactly as
+     * detour_typed does (the same refusals); then, when the target has no detour yet, the first detour is written only
+     * when every other thread of the process could be stopped and checked and none stands inside the bytes it
+     * replaces. Otherwise nothing is written (no fallback to an unchecked patch) and the result is
+     * KILN_HOOKS_ERR_UNCHECKED: a later attempt may succeed (kiln.log names the threads). A target that already has a
+     * detour needs no patch: the link joins its chain as with detour_typed. Same arguments as detour_typed. */
+    KilnResult(KILN_CALL* detour_typed_checked)(KilnOwner owner, uintptr_t target, const KilnHookOrder* order,
+                                                const KilnSig* sig, KilnTypedFn fn, void* user, KilnHandle* out);
 } KilnHooksApi;
 
 #ifdef __cplusplus
 }
-static_assert(sizeof(KilnHooksApi) == 264, "KilnHooksApi is 264 bytes");
 static_assert(offsetof(KilnHooksApi, mid2_checked) == 256, "checked installation is appended at 256");
+static_assert(offsetof(KilnHooksApi, validate_typed) == 264, "validate_typed is appended at 264");
+static_assert(offsetof(KilnHooksApi, sig_status) == 272, "sig_status is appended at 272");
+static_assert(offsetof(KilnHooksApi, typed_install_ready) == 280, "typed_install_ready is appended at 280");
+static_assert(offsetof(KilnHooksApi, detour_typed_checked) == 288, "detour_typed_checked is appended at 288");
+static_assert(sizeof(KilnHooksApi) == 296, "KilnHooksApi is 296 bytes");
 #endif
 
 #endif /* KILN_HOOKS_H */

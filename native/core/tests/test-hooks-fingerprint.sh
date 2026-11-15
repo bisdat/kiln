@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# Host tests of the ABI fingerprint pass and the `sig` descriptor (services/hooks_fingerprint.cpp), with ASan/UBSan.
+# Host tests of the ABI fingerprint pass and the `sig` descriptor (services/hooks_fingerprint.cpp), with ASan/UBSan,
+# and the vector file the Python twin is tested against too (tools/sigport/tests/fingerprint-vectors.json).
 # The pass is decoded with the vendored Zydis, built here for the host:
 #   native/core/tests/test-hooks-fingerprint.sh
 # Build output: $KILN_OUT/core-tests (KILN_OUT default native/build).
@@ -17,4 +18,4 @@ defs=(-DZYDIS_STATIC_BUILD -DZYCORE_STATIC_BUILD)
     -I"$here/../abi" -I"$here/../src" -I"$here/../../third_party" -I"$zy" \
     -o "$out/hooks_fingerprint_test" "$here/hooks_fingerprint_test.cpp" "$here/../src/services/hooks_fingerprint.cpp" \
     "$out/zydis-host.o"
-"$out/hooks_fingerprint_test"
+"$out/hooks_fingerprint_test" "$here/../../../tools/sigport/tests/fingerprint-vectors.json"

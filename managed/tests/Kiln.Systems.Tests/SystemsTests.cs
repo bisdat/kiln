@@ -345,6 +345,31 @@ public sealed unsafe class SystemsTests
         Assert.Equal(0, seen);
     }
 
+    [Fact]
+    public void A_directory_read_that_gave_up_inside_the_step_turns_the_view_stage_off_and_is_not_kept_for_the_session()
+    {
+        using var w = new FakeWorld();
+        var mod = NewMod("busydir");
+        var first = InMod(mod, () => Systems.Wrap("fuel_setup").Wrap!);
+        WrapDisabledEvent? off = null;
+        first.Disabled += e => off = e;
+        var seen = 0;
+        InMod(mod, () => first.BeforeEach((ref EntityView e) => { seen++; _ = e.Has("Fuel"); }));
+        w.DirectoryBusy = true;  // the first slice of the session: kiln.world's bounded read gave up
+        w.Call(w.Wraps[0]);
+        Assert.Equal(0, seen);
+        Assert.NotNull(off);
+        Assert.Contains("directory", off!.Reason);
+        lock (mod.PendingLock) Assert.Empty(mod.Pending);  // not the mod's fault: nothing for its fault policy
+        w.DirectoryBusy = false;
+        // the failed read was not kept for the session: a new stage on the next slice sees the program's lists
+        var fuel = 0;
+        var second = InMod(mod, () => Systems.Wrap("fuel_setup").Wrap!);
+        InMod(mod, () => second.BeforeEach((ref EntityView e) => { if (e.Has("Fuel")) fuel++; }));
+        w.Call(w.Wraps[^1]);
+        Assert.Equal(w.EntityIds.Length, fuel);
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct FuelBlock
     {

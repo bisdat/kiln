@@ -21,6 +21,12 @@ Holes are re-derived by locating the same instruction in the new site and readin
 immediate or branch target). Layout constants come out of a resolve of the patched definitions on the new exe; each
 is reported with its captures (votes) and with corroborating sites: other matched functions that use the old value in
 the same operand, read through the instruction alignment.
+Descriptors of typed links (`sig` in a symbol's entry, or a "sigs" section; docs/kiln/sigport.md) are carried as they
+are: the port edits patterns only. Each described symbol's ABI fingerprint is taken on both exes (abifp.py, the core's
+pass in Python) and the descriptor is checked against the new code as the core will check it at load; a function that
+now reads other argument positions, or a descriptor the core would refuse, is listed in the report as
+"sig needs review: <symbol>: was [...], is [...]" (kilnctl copies the list into NEXT.txt). A review does not make the
+port incomplete: the symbol resolves, only its typed hooks and calls stay off (sig/<symbol>) until the descriptor is fixed.
 Exit status: 0 every symbol and constant that resolved on the old exe is ported with confidence >= --min-confidence;
 1 some are missing or below it (see the report); 2 bad input.
 """
@@ -1004,6 +1010,9 @@ def main(argv=None):
         syms, consts, feats = Resolver(new.image, copy.deepcopy(doc_new)).run()
     old_check = Resolver(old.image, copy.deepcopy(doc_new)).run()
     rsyms, rconsts = build_report(P, syms, consts, feats, a.min_confidence)
+    rsigs, sig_review = review_sigs(a.defs, a.old, a.new, rsyms)
+    for line in sig_review:
+        log(line)
     # files: complete patched tree + diff
     new_texts = edits_for(tree, P.strats, a.min_confidence, fixed_changes)
     tdir = out / "tree"
@@ -1062,6 +1071,8 @@ def main(argv=None):
         "still_resolves_on_old": sum(1 for n, r in old_check[0].items() if r.get("ok") and not n.startswith("@")),
         "tree_check_mismatches": mism,
         "delta_families": delta_families(rconsts),
+        "sigs": {"described": len(rsigs), "need_review": len(sig_review)},
+        "sig_review": sig_review,
         "matcher": P.M.stats(),
         "complete": not (low or lost or clow or clost),
     }
@@ -1071,7 +1082,7 @@ def main(argv=None):
               "new": {"exe": str(Path(a.new).resolve()), "sha256": new.sha},
               "options": {"min_confidence": a.min_confidence, "no_exact": a.no_exact, "no_generalize": a.no_generalize,
                           "regenerate_all": a.regenerate_all},
-              "summary": summary, "symbols": rsyms, "constants": rconsts,
+              "summary": summary, "symbols": rsyms, "constants": rconsts, "sigs": rsigs,
               "features": {k: bool(v) for k, v in sorted(feats.items())}}
     (out / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     (out / "report.txt").write_text(render_text(report))
@@ -1113,6 +1124,58 @@ def main(argv=None):
     return 0 if summary["complete"] else 1
 
 
+def descriptors(defs):
+    """Every `sig` descriptor of the definitions as the core sees them (the main file and its .d files): symbol -> sig,
+    and the structs they may name."""
+    from sides import merged  # noqa: E402
+    doc = merged(defs)
+    out = dict(doc.get("sigs", {}))
+    for name, entry in doc.get("symbols", {}).items():
+        if isinstance(entry, dict) and "sig" in entry:
+            out[name] = entry["sig"]
+    return out, doc.get("structs", {})
+
+
+def review_sigs(defs, old_exe, new_exe, rsyms):
+    """Per described symbol: its fingerprint on both exes and the core's verdict on the new code; and the lines that
+    need a human ("sig needs review: ...")."""
+    descs, structs = descriptors(defs)
+    if not descs:
+        return {}, []
+    import abifp  # noqa: E402 (capstone; only a tree with descriptors needs it)
+    codes = {"old": abifp.ExeCode(old_exe), "new": abifp.ExeCode(new_exe)}
+    out, review = {}, []
+    for name, sig in sorted(descs.items()):
+        r = rsyms.get(name, {})
+        fps = {}
+        for k in ("old", "new"):
+            if r.get(f"ok_{k}") and r.get(k):
+                fps[k] = codes[k].compute(int(r[k], 16))
+        row = {k: abifp.to_dict(f) for k, f in fps.items()}
+        if not r.get("ok_old"):
+            row.update(verdict=None, text="the symbol does not resolve on the old exe")
+            out[name] = row
+            continue
+        if "new" not in fps:
+            row.update(verdict=None, text="the symbol did not port")
+            review.append(f"sig needs review: {name}: was {abifp.reads_text(row['old'])}, the symbol did not port")
+            out[name] = row
+            continue
+        try:
+            verdict, text = abifp.check_sig(abifp.parse_sig(sig, structs), fps["new"])
+        except ValueError as e:
+            verdict, text = "bad", f"the descriptor is malformed: {e}"
+        row.update(verdict=verdict, text=text)
+        out[name] = row
+        a, b = row["old"], row["new"]
+        changed = any(a[k] != b[k] for k in ("result", "reads", "passes", "indirect", "stack", "ret"))
+        if changed or verdict != "match":
+            review.append(f"sig needs review: {name}: was {abifp.reads_text(a)}, is {abifp.reads_text(b)}"
+                          + (f"; return was {a['ret']}, is {b['ret']}" if a["ret"] != b["ret"] else "")
+                          + ("" if verdict == "match" else f" ({verdict}: {text})"))
+    return out, review
+
+
 def delta_families(consts):
     """Constants that moved, grouped by how far: a struct that grew shows up as one family (+0x1c00 world fields)."""
     fam = {}
@@ -1137,6 +1200,10 @@ def render_text(r):
         L.append(f"fixed     {s['fixed_constants_changed']}")
     for d, names in s.get("delta_families", {}).items():
         L.append(f"moved     {d}: {len(names)} constant(s): {', '.join(names[:8])}{' ...' if len(names) > 8 else ''}")
+    if s.get("sigs", {}).get("described"):
+        L.append(f"sigs      {s['sigs']['described']} descriptor(s) checked on the new code; {s['sigs']['need_review']} need review")
+        for line in s.get("sig_review", []):
+            L.append(f"          {line}")
     neither = sorted(n for n, x in list(r["symbols"].items()) + list(r["constants"].items())
                      if not x["ok_old"] and not x["ok_new"])
     if neither:

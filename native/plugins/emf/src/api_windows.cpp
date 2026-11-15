@@ -9,6 +9,8 @@
 //    (kiln.ui v2's is_item_clicked); a kiln.ui without it reports none.
 //  - Differences: EMF's console look and its debug-bridge commands are not reproduced (the widgets are plain ImGui
 //    widgets).
+//  - Windows keep Kiln's movable, appearing-only placement. With UI size constraints they follow content height
+//    up to 85% of the frame; older UI tables keep appearing-only sizing.
 //  - window_open is refused while a wheel is open (api_wheel.cpp), as EMF documents.
 //  - Pictures: PNG files (or a folder of PNG frames) decoded by kiln.ui's image_load; EMF's limits (512 x 512, 64
 //    frames, 128 pictures, 64 MB) and path rules (the mod's folder, absolute, "portrait:<key>").
@@ -148,11 +150,17 @@ void KILN_CALL on_frame(const KilnUiFrame* fr, void*) {
     if (win.place == EMF_UI_PLACE_LEFT) x = fr->width * 0.08f;
     if (win.place == EMF_UI_PLACE_RIGHT) x = fr->width * 0.58f;
     S.ui->set_next_window_pos(x, fr->height * 0.15f, KILN_UI_COND_APPEARING, 0, 0);
-    S.ui->set_next_window_size(width, 0, KILN_UI_COND_APPEARING);
+    // Keep Kiln's movable, appearing-only placement; newer overlays follow late-arriving content.
+    const bool constraints = S.ui->header.size >= offsetof(KilnUiApi, set_next_window_size_constraints) +
+                                                    sizeof(S.ui->set_next_window_size_constraints) &&
+                             S.ui->set_next_window_size_constraints;
+    if (constraints) S.ui->set_next_window_size_constraints(width, 0, width, fr->height * 0.85f);
+    else S.ui->set_next_window_size(width, 0, KILN_UI_COND_APPEARING);
     bool open = true;
     const bool right_clicks = ui_has_item_clicked();  // kiln.ui v2
     const std::string title = (win.title.empty() ? win.id : win.title) + "###emf." + win.id;
-    if (S.ui->begin(kstr(title), &open, KILN_UI_WINDOW_NO_COLLAPSE)) {
+    if (S.ui->begin(kstr(title), &open, KILN_UI_WINDOW_NO_COLLAPSE |
+                                              (constraints ? KILN_UI_WINDOW_ALWAYS_AUTO_RESIZE : 0))) {
         for (size_t i = 0; i < win.widgets.size(); ++i) {
             const v26::WindowWidget& wd = win.widgets[i];
             if (i && (wd.flags & EMF_UI_SAME_LINE)) S.ui->same_line(0, -1);

@@ -234,8 +234,40 @@ or a name that only a `rel32` hole captures). Structs they name are declared onc
 ```
 
 Without `--fptool` it only says whether each described symbol resolves. To write a new descriptor, leave `abi` out,
-run the check, and copy `reads`, `stack` and `ret` from the line it prints. `port.py` does not carry `sig` blocks to
-a new build yet.
+run the check, and copy `reads`, `stack` and `ret` from the line it prints.
+
+### Descriptors across a port
+`port.py` carries every descriptor as it is (it edits patterns only, so a `sig` in a symbol's entry and a file's
+`"sigs"` and `"structs"` sections reach the patched tree unchanged) and checks each one on the new build: it takes the
+described function's fingerprint on both exes with `tools/sigport/abifp.py` (the core's pass in Python, on capstone)
+and judges the descriptor against the new code as the core will at load. A function whose fingerprint changed, or a
+descriptor the core would refuse there, is listed in `report.txt` and in `report.json` (`summary.sig_review`), and
+kilnctl copies the lines into `NEXT.txt`:
+
+```
+sigs      10 descriptor(s) checked on the new code; 1 need review
+          sig needs review: time/SetTimeScale: was [rcx, xmm1, r8], is [rcx, xmm1, r8, stack+0x28] (mismatch: the function
+          reads [rcx, xmm1, r8, stack+0x28], the descriptor's fingerprint says [rcx, xmm1, r8] (the function changed: review the descriptor))
+```
+
+A review does not make the port incomplete: the symbol resolves. When the core refuses the descriptor on the new build
+(a mismatch, as above), that function's typed hooks and calls stay off (the core turns `sig/<symbol>` off) until a
+human fixes the descriptor (its `args` and `abi`; `sigdb_check.py --fptool` prints the new `abi`). A review of changed
+code whose descriptor still fits turns nothing off: review it before relying on the function's typed hooks. `report.json` has each descriptor's fingerprints and verdict under
+`"sigs"`.
+
+`abifp.py <exe> <rva>...` prints fingerprints the way `kiln-fptool` does. The two passes are kept equal by a shared
+vector file, `tools/sigport/tests/fingerprint-vectors.json` (written by `make_vectors.py` from the core's own answers):
+snippets of our own assembly for every rule of the pass and for every instruction capstone and Zydis were found to
+read differently (the twin follows Zydis: `vzeroupper` keeps the xmm arguments; `test` only reads, its memory
+operand too; a store's memory destination is not read; `cdq`/`cqo` read rax and write rdx; string instructions move
+rsi/rdi by family, rcx with a rep prefix; and a few more, listed in `abifp.py`), descriptor cases with the core's
+verdict and text, and the ten described functions of server f0d824be and client 5d9ef2f1 by RVA (never their bytes).
+`native/core/tests/test-hooks-fingerprint.sh` checks the file against the core's pass; `python3 -m unittest discover
+-s tools/sigport/tests` checks it against the twin (with `SIGPORT_SERVER`/`SIGPORT_CLIENT` naming the exes, also the
+exe rows, and with `KILN_FPTOOL` the core's pass on them). Measured when the twin was written (2026-11-14): every
+function entry of both exes' exception tables, 26,200 on the server and 39,406 on the client, gives the same
+fingerprint in both passes.
 
 ## Benchmarks (`bench.py`)
 | Run | Symbols P / R | Constants P / R |

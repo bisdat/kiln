@@ -32,8 +32,9 @@ public sealed class TablesTests
     {
         // The services with an advanced gate: Kiln.Hooks (HooksGate), Kiln.Abilities (AbilitiesGate), Kiln.Creatures
         // (CreaturesGate). A new type here means a new gated entry point: check that it is meant to be advanced.
+        // TypedHooks (dev.29): the runtime of typed hooks and calls under the generated Kiln.Sigs classes.
         Assert.All(KilnApis.Advanced, id => Assert.Matches(
-            @"^M:Kiln\.(Hooks|Symbols|Memory|Constants|OriginalCode|Keep|Abilities\.Programs|NativeCall|Is|Act|Arsenals)\.", id));
+            @"^M:Kiln\.(Hooks|TypedHooks|Symbols|Memory|Constants|OriginalCode|Keep|Abilities\.Programs|NativeCall|Is|Act|Arsenals)\.", id));
     }
 
     [Theory]

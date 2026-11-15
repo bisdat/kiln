@@ -39,12 +39,15 @@
                       Lines="&lt;Project&gt;;  &lt;!-- Written when this Kiln.Sdk was packed: its version, and the Kiln.Api version it restores. --&gt;;  &lt;PropertyGroup&gt;;    &lt;KilnSdkVersion&gt;$(KilnSdkVersion)&lt;/KilnSdkVersion&gt;;    &lt;KilnModApiVersion&gt;$(KilnModApiVersion)&lt;/KilnModApiVersion&gt;;  &lt;/PropertyGroup&gt;;&lt;/Project&gt;" />
   </Target>
   <!-- Roslyn components (pack.sh builds them into KilnAnalyzersStage): Kiln.Analyzers + Kiln.Analyzers.CodeFixes
-       (KILN1xx, wired by Sdk/Kiln.Analyzers.targets) and Kiln.GameIds (Sdk/Kiln.GameIds.targets), under
+       (KILN1xx, wired by Sdk/Kiln.Analyzers.targets), Kiln.GameIds (Sdk/Kiln.GameIds.targets) and Kiln.Sigs.Generator
+       (Sdk/Kiln.Sigs.targets), under
        analyzers/dotnet/cs/. -->
   <ItemGroup Condition="'$(KilnAnalyzersStage)' != ''">
     <None Include="$(KilnAnalyzersStage)/Kiln.Analyzers.dll" Pack="true" PackagePath="analyzers/dotnet/cs/" Visible="false" />
     <None Include="$(KilnAnalyzersStage)/Kiln.Analyzers.CodeFixes.dll" Pack="true" PackagePath="analyzers/dotnet/cs/" Visible="false" />
     <None Include="$(KilnAnalyzersStage)/Kiln.GameIds.dll" Condition="Exists('$(KilnAnalyzersStage)/Kiln.GameIds.dll')"
+          Pack="true" PackagePath="analyzers/dotnet/cs/" Visible="false" />
+    <None Include="$(KilnAnalyzersStage)/Kiln.Sigs.Generator.dll" Condition="Exists('$(KilnAnalyzersStage)/Kiln.Sigs.Generator.dll')"
           Pack="true" PackagePath="analyzers/dotnet/cs/" Visible="false" />
   </ItemGroup>
   <!-- The bake (bake/ in the package; pack.sh builds it into KilnBakeStage): Kiln.Sdk.Bake, Kiln.Host, Kiln.TestKit and their

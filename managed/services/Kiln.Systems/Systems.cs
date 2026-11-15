@@ -86,7 +86,7 @@ public delegate void EntityHandler(EntityId entity);
 /// the game's worker threads (always in the client world, in the server world once a player is in it): no tick-thread
 /// API inside them (they throw), per-slice state only, shared state through atomics, <see cref="Slice.Post"/> for work
 /// on the tick thread. One Replace per program. Refused while native SET is loaded.</summary>
-public static unsafe class Systems
+public static unsafe partial class Systems
 {
     /// <summary>The program <paramref name="program"/> of that world's table, or null (not in that world, no world yet).</summary>
     /// <exception cref="ArgumentException"><paramref name="program"/> is null or empty.</exception>

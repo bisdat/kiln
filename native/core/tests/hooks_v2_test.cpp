@@ -122,6 +122,8 @@ KilnResult add_owner_retiring(KilnOwner, OwnerRetiringFn, void*, KilnHandle*) { 
 KilnResult remove_owner_retiring(KilnHandle) { return KILN_ERR_NOT_FOUND; }
 }  // namespace reg
 namespace tick {
+bool typed_install_pre() { return false; }
+KilnResult session(KilnSessionInfo* out) { *out = {}; out->size = sizeof *out; return KILN_OK; }
 KilnResult subscribe_world(KilnOwner, KilnWorldEventFn, void*, KilnHandle*) { return KILN_ERR_UNAVAILABLE; }
 }  // namespace tick
 namespace sigdb {
@@ -149,6 +151,8 @@ std::string symbol_name_at(uintptr_t) {
     return {};
 }
 std::vector<LiveDiff> live_differs() { return g_live_diffs; }
+uint64_t sig_revision() { return 1; }
+bool sig(std::string_view, SigInfo*) { return false; }
 bool sig_at(uintptr_t, SigInfo*) { return false; }
 bool fingerprint(uintptr_t, hooks::fp::Fingerprint*) { return false; }
 }  // namespace sigdb

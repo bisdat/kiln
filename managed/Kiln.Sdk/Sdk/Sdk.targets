@@ -7,6 +7,8 @@
        game-id constants generator (Kiln.GameIds) that reads the local game-data catalog. -->
   <Import Project="$(MSBuildThisFileDirectory)Kiln.Analyzers.targets" Condition="Exists('$(MSBuildThisFileDirectory)Kiln.Analyzers.targets')" />
   <Import Project="$(MSBuildThisFileDirectory)Kiln.GameIds.targets" Condition="Exists('$(MSBuildThisFileDirectory)Kiln.GameIds.targets')" />
+  <!-- Typed hooks and calls of the mod's own game functions, from the descriptors of its sigdb fragment (docs/kiln/services/hooks.md). -->
+  <Import Project="$(MSBuildThisFileDirectory)Kiln.Sigs.targets" Condition="Exists('$(MSBuildThisFileDirectory)Kiln.Sigs.targets')" />
   <!-- The layout stamp (kiln.gametypes.json) of a mod that compiles against Kiln.Game (docs/kiln/typegen.md). -->
   <Import Project="$(MSBuildThisFileDirectory)Kiln.GameTypes.targets" Condition="Exists('$(MSBuildThisFileDirectory)Kiln.GameTypes.targets')" />
 </Project>

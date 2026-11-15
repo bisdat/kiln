@@ -5,7 +5,9 @@
  * regions with flags, cursor and item queries, sized selectables, focus, layered drawing, colour/spacing pushes and
  * key queries; v4 appends the main-menu page (the Kiln menu inside the game's own menu) and a font choice; v5 appends
  * the game window's own input records for native plugins (subscribe_window_input); v6 appends the mods' entries in the
- * game's menus; v7 appends subscribe_key_ex, key callbacks that also get mouse presses (the last slot of the table).
+ * game's menus; v7 appends subscribe_key_ex, key callbacks that also get mouse presses.
+ *
+ * The size-guarded tail after v7 appends set_next_window_size_constraints.
  *
  * How (docs/re/client-render.md):
  *  - The game loads vulkan-1.dll at run time and presents with vkQueuePresentKHR on queue family 0 (no static Vulkan
@@ -24,7 +26,7 @@
  *    The drawing functions below work only there (elsewhere they do nothing and return false).
  *  - Key callbacks run on the window thread (the game's main thread) while the message is being handled.
  *  - Window-input callbacks (v5) run on the window thread too, inside the window procedure.
- *  - status, set_*, key_name: any thread.
+ *  - status, demand/capture/menu setters, key_name: any thread. Window drawing setters: frame callbacks only.
  * Native subscribers must unsubscribe before they unload. */
 #ifndef KILN_UI_H
 #define KILN_UI_H
@@ -840,6 +842,11 @@ typedef struct KilnUiApi {
      * mouse presses described at KILN_UI_VK_WHEEL_UP. Other bits: KILN_ERR_INVALID_ARGUMENT. Remove it with
      * unsubscribe. */
     KilnResult(KILN_CALL* subscribe_key_ex)(KilnOwner owner, KilnUiKeyFn fn, void* user, uint32_t flags, KilnHandle* out);
+    /* Additive size-guarded tail: inside a frame callback, constrain the next window in screen pixels.
+     * With ALWAYS_AUTO_RESIZE, equal min/max width fixes width while height follows content up to max_h.
+     * No-op outside drawing frames (including KILN_UI_OVERLAY=0). Check header.size through this member
+     * and its non-null pointer before calling; older tables do not contain it. */
+    void(KILN_CALL* set_next_window_size_constraints)(float min_w, float min_h, float max_w, float max_h);
 } KilnUiApi;
 
 /* ====================================================================================================================

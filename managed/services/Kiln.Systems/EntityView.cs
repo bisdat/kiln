@@ -284,28 +284,35 @@ internal sealed unsafe class ProgramLists
         _world = world;
         _index = index;
         var buffer = stackalloc NativeStr[64];
+        var complete = t != null;
         for (var list = 0; list < SystemsNative.Lists; list++)
         {
             var n = t == null ? 0 : t->GameProgramList((uint)world, index, list, buffer, 64);
+            if (n < 0) complete = false;
             var names = new string[Math.Clamp(n, 0, 64)];
             for (var i = 0; i < names.Length; i++) names[i] = buffer[i].ToString();
             _names[list] = names;
         }
+        Complete = complete;
     }
+
+    /// <summary>False when kiln.world could not answer for one of the lists (no directory at this moment: a read inside
+    /// the game's step that gave up after its bound, a world going away). Never kept in the session's cache.</summary>
+    internal bool Complete { get; }
 
     internal static ProgramLists Of(SystemsNative.Table* t, WorldKind world, string program, int index)
     {
         var session = t == null ? 0 : t->GameWorldSession((uint)world);
         if (Cache.TryGetValue((world, session, program), out var lists)) return lists;
         lists = new ProgramLists(t, world, index);
-        return Cache.GetOrAdd((world, session, program), lists);
+        return lists.Complete ? Cache.GetOrAdd((world, session, program), lists) : lists;
     }
 
     /// <summary>Tests: forget every program.</summary>
     internal static void Reset() => Cache.Clear();
 
-    /// <summary>The live descriptor's contract in this world session (kiln.world's game_program_contract, asked once), or
-    /// null when kiln.world cannot say.</summary>
+    /// <summary>The live descriptor's contract in this world session (kiln.world's game_program_contract, asked until it
+    /// answers), or null when kiln.world cannot say (<see cref="ContractUnread"/>: not now, asked again next time).</summary>
     internal uint? Contract
     {
         get
@@ -315,13 +322,18 @@ internal sealed unsafe class ProgramLists
             {
                 var t = SystemsNative.T;
                 uint c = 0;
-                state = SystemsNative.HasContract(t) && t->GameProgramContract((uint)_world, _index, &c, null, 0, null) == SystemsNative.Ok ? 1 : 2;
+                var rc = SystemsNative.HasContract(t) ? t->GameProgramContract((uint)_world, _index, &c, null, 0, null) : SystemsNative.Unavailable;
+                if (rc == SystemsNative.NotFound) return null;  // no directory at this moment: not an answer for the session
                 _contract = c;
+                state = rc == SystemsNative.Ok ? 1 : 2;
                 Volatile.Write(ref _contractState, state);
             }
             return state == 1 ? _contract : null;
         }
     }
+
+    /// <summary>True when the last <see cref="Contract"/> read had no answer (no directory at that moment).</summary>
+    internal bool ContractUnread => Volatile.Read(ref _contractState) == 0;
 
     // (list << 16) | position, or -1
     internal int Find(string component, bool write)

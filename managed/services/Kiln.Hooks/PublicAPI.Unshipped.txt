@@ -1,1 +1,109 @@
 #nullable enable
+Kiln.HookRefusedEvent
+Kiln.HookRefusedEvent.ModId.get -> string!
+Kiln.HookRefusedEvent.Reason.get -> string!
+Kiln.HookRefusedEvent.Symbol.get -> string!
+Kiln.HookResult
+Kiln.HookResult.<Clone>$() -> Kiln.HookResult!
+Kiln.HookResult.Deconstruct(out bool Ok, out string? Reason, out Kiln.HookHandle? Handle) -> void
+Kiln.HookResult.Equals(Kiln.HookResult? other) -> bool
+Kiln.HookResult.Handle.get -> Kiln.HookHandle?
+Kiln.HookResult.Handle.init -> void
+Kiln.HookResult.HookResult(bool Ok, string? Reason, Kiln.HookHandle? Handle) -> void
+Kiln.HookResult.Ok.get -> bool
+Kiln.HookResult.Ok.init -> void
+Kiln.HookResult.Reason.get -> string?
+Kiln.HookResult.Reason.init -> void
+Kiln.SigArg
+Kiln.SigArg.Deconstruct(out string! Name, out Kiln.SigKind Kind, out uint Size) -> void
+Kiln.SigArg.Equals(Kiln.SigArg other) -> bool
+Kiln.SigArg.Kind.get -> Kiln.SigKind
+Kiln.SigArg.Kind.init -> void
+Kiln.SigArg.Name.get -> string!
+Kiln.SigArg.Name.init -> void
+Kiln.SigArg.SigArg() -> void
+Kiln.SigArg.SigArg(string! Name, Kiln.SigKind Kind, uint Size) -> void
+Kiln.SigArg.Size.get -> uint
+Kiln.SigArg.Size.init -> void
+Kiln.SigCall
+Kiln.SigCall.CallOriginal() -> void
+Kiln.SigCall.F32(int p) -> float
+Kiln.SigCall.F64(int p) -> double
+Kiln.SigCall.Int(int p) -> ulong
+Kiln.SigCall.OriginalCalled.get -> bool
+Kiln.SigCall.RetAddress.get -> void*
+Kiln.SigCall.RetF32.get -> float
+Kiln.SigCall.RetF64.get -> double
+Kiln.SigCall.RetInt.get -> ulong
+Kiln.SigCall.ReturnBuffer.get -> void*
+Kiln.SigCall.SetF32(int p, float value) -> void
+Kiln.SigCall.SetF64(int p, double value) -> void
+Kiln.SigCall.SetInt(int p, ulong value) -> void
+Kiln.SigCall.SetRetF32(float value) -> void
+Kiln.SigCall.SetRetF64(double value) -> void
+Kiln.SigCall.SetRetInt(ulong value) -> void
+Kiln.SigCall.SigCall() -> void
+Kiln.SigCall.Skip() -> void
+Kiln.SigCall.SlotAddress(int p) -> void*
+Kiln.SigDescriptor
+Kiln.SigDescriptor.Args.get -> System.Collections.Generic.IReadOnlyList<Kiln.SigArg>!
+Kiln.SigDescriptor.Invoke.get -> Kiln.SigInvoke
+Kiln.SigDescriptor.Positions.get -> int
+Kiln.SigDescriptor.Ret.get -> Kiln.SigKind
+Kiln.SigDescriptor.RetSize.get -> uint
+Kiln.SigDescriptor.SigDescriptor(string! symbol, Kiln.SigKind ret, uint retSize, bool sret, Kiln.SigInvoke invoke, params Kiln.SigArg[]! args) -> void
+Kiln.SigDescriptor.Sret.get -> bool
+Kiln.SigDescriptor.StackCount.get -> int
+Kiln.SigDescriptor.Symbol.get -> string!
+Kiln.SigFrame
+Kiln.SigFrame.RetF32.get -> float
+Kiln.SigFrame.RetF64.get -> double
+Kiln.SigFrame.RetInt.get -> ulong
+Kiln.SigFrame.SetF32(int p, float value) -> void
+Kiln.SigFrame.SetF64(int p, double value) -> void
+Kiln.SigFrame.SetInt(int p, ulong value) -> void
+Kiln.SigFrame.SigFrame() -> void
+Kiln.SigHandler
+Kiln.SigInvoke
+Kiln.SigInvoke.Any = 2 -> Kiln.SigInvoke
+Kiln.SigInvoke.None = 0 -> Kiln.SigInvoke
+Kiln.SigInvoke.Tick = 1 -> Kiln.SigInvoke
+Kiln.SigKind
+Kiln.SigKind.Bool = 11 -> Kiln.SigKind
+Kiln.SigKind.ByVal = 13 -> Kiln.SigKind
+Kiln.SigKind.F32 = 9 -> Kiln.SigKind
+Kiln.SigKind.F64 = 10 -> Kiln.SigKind
+Kiln.SigKind.Ptr = 12 -> Kiln.SigKind
+Kiln.SigKind.S16 = 3 -> Kiln.SigKind
+Kiln.SigKind.S32 = 5 -> Kiln.SigKind
+Kiln.SigKind.S64 = 7 -> Kiln.SigKind
+Kiln.SigKind.S8 = 1 -> Kiln.SigKind
+Kiln.SigKind.Struct = 14 -> Kiln.SigKind
+Kiln.SigKind.U16 = 4 -> Kiln.SigKind
+Kiln.SigKind.U32 = 6 -> Kiln.SigKind
+Kiln.SigKind.U64 = 8 -> Kiln.SigKind
+Kiln.SigKind.U8 = 2 -> Kiln.SigKind
+Kiln.SigKind.Void = 0 -> Kiln.SigKind
+Kiln.TypedHooks
+override Kiln.HookRefusedEvent.ToString() -> string!
+override Kiln.HookResult.Equals(object? obj) -> bool
+override Kiln.HookResult.GetHashCode() -> int
+override Kiln.HookResult.ToString() -> string!
+~override Kiln.SigArg.Equals(object obj) -> bool
+override Kiln.SigArg.GetHashCode() -> int
+~override Kiln.SigArg.ToString() -> string
+static Kiln.HookResult.operator !=(Kiln.HookResult? left, Kiln.HookResult? right) -> bool
+static Kiln.HookResult.operator ==(Kiln.HookResult? left, Kiln.HookResult? right) -> bool
+static Kiln.SigArg.operator !=(Kiln.SigArg left, Kiln.SigArg right) -> bool
+static Kiln.SigArg.operator ==(Kiln.SigArg left, Kiln.SigArg right) -> bool
+static Kiln.TypedHooks.Detour(Kiln.SigDescriptor! sig, Kiln.SigHandler! handler, int priority = 0) -> Kiln.HookResult!
+static Kiln.TypedHooks.Invoke(Kiln.SigDescriptor! sig, ref Kiln.SigFrame frame) -> void
+virtual Kiln.SigHandler.Invoke(Kiln.SigCall call) -> void
+Kiln.HookRegistrationState
+Kiln.HookRegistrationState.Pending = 0 -> Kiln.HookRegistrationState
+Kiln.HookRegistrationState.Installed = 1 -> Kiln.HookRegistrationState
+Kiln.HookRegistrationState.Refused = 2 -> Kiln.HookRegistrationState
+Kiln.HookRegistrationState.Removed = 3 -> Kiln.HookRegistrationState
+Kiln.HookHandle.State.get -> Kiln.HookRegistrationState
+Kiln.HookHandle.Reason.get -> string?
+Kiln.HookResult.Pending.get -> bool

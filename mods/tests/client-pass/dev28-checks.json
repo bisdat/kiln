@@ -490,6 +490,16 @@
    "state": "settled"
   },
   {
+   "id": "06c-natives.joined",
+   "title": "Same-step natives and an attachment with a player in the world",
+   "chapter": "06c",
+   "packages": [
+    "06c-impact-natives"
+   ],
+   "state": "open",
+   "added": "06c-impact-natives"
+  },
+  {
    "id": "06c-impact-damage",
    "title": "Synchronous perk damage on a weapon",
    "chapter": "06c",
@@ -1533,6 +1543,16 @@
    "added": "06a-program-wraps"
   },
   {
+   "id": "06a-define.hosted",
+   "title": "A program of a mod's own (Systems.Define) on a hosted world's workers",
+   "chapter": "06a",
+   "packages": [
+    "06a-program-wraps"
+   ],
+   "state": "open",
+   "added": "06a-program-wraps (dev.29 S8)"
+  },
+  {
    "id": "00-sigdb.in-place-patches",
    "title": "Kiln's functions are found next to a loader that patched the game first",
    "chapter": "00",
@@ -1591,6 +1611,16 @@
    ],
    "state": "open",
    "added": "fix round 00-integration.noclip (GitHub issue 25, 14 Nov)"
+  },
+  {
+   "id": "06b-typed-hooks.client",
+   "title": "Typed hooks: a mod's typed hook runs in the game",
+   "chapter": "06b",
+   "packages": [
+    "06b-typed-hooks"
+   ],
+   "state": "open",
+   "added": "06b-typed-hooks"
   }
  ]
 }

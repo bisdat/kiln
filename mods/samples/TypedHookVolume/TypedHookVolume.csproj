@@ -1,0 +1,17 @@
+<Project>
+  <!-- Sample: a typed hook (docs/kiln/services/hooks.md "Typed hooks"). Kiln.Sigs.Items.GetItemVolume is the game's
+       function that says how much an item holds (a watering can's water: the cap of a fuel transfer); the hook lets the
+       game answer, then doubles what it said. Advanced mods only. -->
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.props" />
+  <PropertyGroup>
+    <KilnModId>typed-hook-volume</KilnModId>
+    <KilnModName>Typed hook: twice the volume (sample)</KilnModName>
+    <Version>0.1.0</Version>
+    <Description>Doubles the volume the game gives every item (a watering can holds twice the water), through a typed hook of GetItemVolume.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <KilnServices>Hooks;Sigs</KilnServices>
+    <KilnAdvanced>true</KilnAdvanced>
+    <KilnSide>server</KilnSide>
+  </PropertyGroup>
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.targets" />
+</Project>
