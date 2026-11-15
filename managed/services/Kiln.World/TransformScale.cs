@@ -69,12 +69,6 @@ public sealed record EntityScaleResult(EntityId Entity, Scale3? Before, Scale3 R
     /// off); null when nothing was set (<see cref="Ok"/> false). Matching uses template and position, not a durable
     /// game entity identity. Unloading the mod does not restore an already written scale in the running world;
     /// restore <see cref="Before"/> explicitly before unloading. Since 0.2.0-dev.28.</summary>
-||||||| 1224a4ff
-    /// <summary>Whether the entity has this scale again after a save and restart. The game's save does not keep a
-    /// transform scale, so Kiln keeps it beside the save (kiln.saves' entity attachments) and sets it again, in the
-    /// setting mod's name, when the loaded entity is matched. True: kept (or the game's own scale, which the game brings
-    /// back itself); false: this session only (an entity the save does not keep, such as most enemies, or kiln.saves is
-    /// off); null when nothing was set (<see cref="Ok"/> false). Since 0.2.0-dev.28.</summary>
     public bool? Persisted { get; init; }
 }
 
@@ -136,8 +130,6 @@ public static unsafe partial class World
     /// <exception cref="KilnUnavailableException"><c>world.transform_scale</c> is off (this build's transform has no scale of
     /// an accepted shape or kiln.types is not running), or <c>world.tracked_writes</c> is off. Writes require a server
     /// world, including a hosted world's server; a joined client cannot submit a server write.</exception>
-||||||| 1224a4ff
-    /// an accepted shape, kiln.types is not running, or this is a game client), or <c>world.tracked_writes</c> is off.</exception>
     /// <exception cref="InvalidOperationException">Not on the tick thread, or inside a world program's update.</exception>
     [ServerOnly]
     [TickThreadOnly]

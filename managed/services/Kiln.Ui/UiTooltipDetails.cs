@@ -3,8 +3,6 @@
 // the game draws the item's detail view, shown in a separate, explicitly opened window with its own wrapping and
 // scrolling. Nothing is drawn into the game's tooltip (the game's own layout neither wraps nor makes room for added
 // lines). Capability ui.values.tooltip_lines, open since dev.29; acceptance check 05a-c4-viewer remains unplayed.
-||||||| 1224a4ff
-// lines). Capability ui.values.tooltip_lines, held until check 05a-c4-viewer.
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;

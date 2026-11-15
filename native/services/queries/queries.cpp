@@ -347,9 +347,6 @@ void KILN_CALL on_ready(void*) {
     if (g_world && g_world->component_hash) g_transform_hash = g_world->component_hash(KQ_STR("CurrentTransform"));
     if (!g_world || !g_transform_hash) logf(KILN_LOG_WARN, "queries: kiln.world is not here: entities() is unavailable");
     // Origins have no sigdb feature of their own: honor any capability policy on their row directly.
-||||||| 1224a4ff
-    // A game client's server world waits for its game test (native/core/gates/dev28-01-world-queries.json). The ray is held
-    // through its feature; the entity question has no feature of its own, so its row is asked here.
     if (kiln_caps_held(g_caps, KQ_STR("queries.overlap_origins"))) {
         g_transform_hash = 0;
         logf(KILN_LOG_INFO, "queries: entities() is disabled by capability policy (queries.overlap_origins)");

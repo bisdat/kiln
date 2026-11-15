@@ -28,9 +28,6 @@ public static unsafe partial class Assets
         /// <summary>Kiln.Assets' own row (0.2.0-dev.28): the content blob catalog (<see cref="Assets.OpenBlobCatalog"/>):
         /// kiln.assets' table has it and the content hooks are on. Client acceptance is check
         /// <c>13-assets.catalog-client</c>; the row is open on both sides in dev.29.</summary>
-||||||| 1224a4ff
-        /// kiln.assets' table has it and the content hooks are on. Held in a game client by the wave's client gate until
-        /// check <c>13-assets.catalog-client</c> passes.</summary>
         public const string Catalog = "assets.blob_catalog";
     }
 

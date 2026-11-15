@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 // kiln.ui.values: the inventory slots the game drew in each completed UI frame (chapter 05a §2 "Slot geometry and
 // hover", §5.3; capability ui.slots.inspect; geometry verification remains check 05a-c5).
-||||||| 1224a4ff
-// hover", §5.3; capability ui.slots.inspect, held until check 05a-c5).
 //
 //   raw link on ui/GameUiFrame at priority +100   outside kiln.ui's own link (0): begins this thread's frame collector,
 //                                                 calls the rest of the chain once (kiln.ui publishes its screen in

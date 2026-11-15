@@ -23,9 +23,6 @@ internal static unsafe class UiCaps
     ];
 
     /// <summary>kiln.ui.values' sigdb features (in-core, client only): Ui.Values' rows.</summary>
-||||||| 1224a4ff
-    /// <summary>kiln.ui.values' sigdb features (in-core, client only; each held by the client gate until its check
-    /// passed): Ui.Values' rows.</summary>
     public static readonly string[] ValueFeatures =
     [
         "ui.values.detail", "ui.values.slot", "ui.values.held", "ui.values.hud", "ui.values.tooltip_lines",
