@@ -216,7 +216,7 @@ internal static class MoveRoutes
         {
             Hash = hash,
             Item = plan.Item,
-            Clones = plan.Moves.Select(m => new JsonObject { ["guid"] = guids[m].ToString(), ["name"] = Clone(m), ["base"] = bases[m][0].Sequence.ToString(), ["fields"] = new JsonObject() }).ToList(),
+            Clones = plan.Moves.Select(m => new JsonObject { ["guid"] = guids[m].ToString(), ["name"] = Clone(m), ["base"] = bases[m][0].Sequence.ToString(), ["fields"] = new JsonObject(), ["routeGeneration"] = true }).ToList(),
             SequenceRules = sequences,
             SlotRules = slotRules,
             SlotGuids = slotGuids,

@@ -114,12 +114,12 @@ public sealed class CastMovesTests : IDisposable
     [Fact]
     public void A_cast_with_a_full_body_state_and_an_overlay_takes_the_full_body_one_and_an_overlay_cast_its_overlay()
     {
-        var w = MovePlanner.Cast(Mod, "spell s", "cast.animation", "c", [Fixed], [Id(7)], null, e => e.Type == "SpawnEntityEvent", null);
+        var w = MovePlanner.Cast(Mod, "spell s", "cast.animation", "c", [Fixed], [Id(7)], null, e => e.Type == "SpawnEntityEvent", new Overlays());
         Assert.Empty(w.Problems);
         Assert.Equal(7u, BlockIds.Fnv(Guid.Parse((string)w.Rules[0].Rules["events[SetAnimationEvent#0].animationName"]!)));
-        w = MovePlanner.Cast(Mod, "wand s", "primary.moves", "c", [Overlay], [Id(8)], null, e => e.Type == "SpawnEntityEvent", null);
+        w = MovePlanner.Cast(Mod, "wand s", "primary.moves", "c", [Overlay], [Id(8)], null, e => e.Type == "SpawnEntityEvent", new Overlays());
         Assert.Equal(8u, BlockIds.Fnv(Guid.Parse((string)w.Rules[0].Rules["events[SetAnimationOverlayEvent#0].overlayName"]!)));
-        w = MovePlanner.Cast(Mod, "wand s", "primary.moves", "c", [Neither], [Id(8)], null, e => e.Type == "SpawnEntityEvent", null);
+        w = MovePlanner.Cast(Mod, "wand s", "primary.moves", "c", [Neither], [Id(8)], null, e => e.Type == "SpawnEntityEvent", new Overlays());
         Assert.Contains("no SetAnimationEvent and no SetAnimationOverlayEvent", Assert.Single(w.Problems));
     }
 
@@ -135,7 +135,12 @@ public sealed class CastMovesTests : IDisposable
 
     private sealed class Overlays : IPlayerStateLookup
     {
-        public IReadOnlyList<GameStateAnswer> FindGameStates(string name) => [];
+        public IReadOnlyList<GameStateAnswer> FindGameStates(string name) => name switch
+        {
+            "0x00000007" => [new("SM", "Body", PlayerStateKind.State, [7])],
+            "0x00000008" => [new("SM", "Overlay", PlayerStateKind.Overlay, [8])],
+            _ => [],
+        };
         public ModStateAnswer? Find(string mod, string name) => new(BlockIds.Derive(mod, "state", name), PlayerStateKind.Overlay, PlayerStateStatus.Live, "");
     }
 

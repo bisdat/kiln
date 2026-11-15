@@ -180,7 +180,11 @@ public sealed class MoveFollowUpTests : IDisposable
         // as the game: once a slot was switched it names the clone that plays there
         public IReadOnlyList<SlotRow>? Slots(string item) => SlotRows?.Select((r, i) => SlotsNow.TryGetValue(i, out var g) ? r with { Sequence = g } : r).ToList();
         public Func<string, IReadOnlyList<SubSequence>?> Reader() => key => Game.TryGetValue(key, out var s) ? s : null;
-        public IPlayerStateLookup? Lookup => null;
+        public IPlayerStateLookup? StateLookup;
+        public IPlayerStateLookup? Lookup => StateLookup;
+        public Func<Guid, IReadOnlyDictionary<string, (string State, string? Error)>>? WorldResults;
+        public IReadOnlyDictionary<string, (string State, string? Error)> Worlds(Guid guid) => WorldResults?.Invoke(guid)
+            ?? new Dictionary<string, (string, string?)> { ["server"] = Defined.TryGetValue(guid, out var s) ? s : ("pending", null) };
         public IReadOnlyDictionary<Guid, (string State, string? Error)> Clones() => Defined;
 
         public void Define(JsonObject d, ulong owner)
@@ -255,6 +259,122 @@ public sealed class MoveFollowUpTests : IDisposable
     }
 
     private static MoveApplicationResult Status(string name = "warden") => MoveApplications.Status(Mod, name)!;
+
+    [Fact]
+    public void Hosted_publication_waits_for_the_client_registry()
+    {
+        _game.WorldResults = _ => new Dictionary<string, (string, string?)> { ["server"] = ("registered", null), ["client"] = ("pending", null) };
+        Start(Warden());
+        _game.Pending.Dequeue()(_ => { }); // stage
+        _game.Pending.Dequeue()(_ => { }); // attempt publication
+        Assert.Empty(_game.SlotsNow);
+        Assert.False(Status().Ok);
+        Assert.NotEmpty(_game.Pending);
+        _game.WorldResults = _ => new Dictionary<string, (string, string?)> { ["server"] = ("registered", null), ["client"] = ("registered", null) };
+        _game.Pump();
+        Assert.True(Status().Ok);
+    }
+
+    [Fact]
+    public void A_failed_client_registry_refuses_without_revoking_other_mod_content()
+    {
+        _game.WorldResults = _ => new Dictionary<string, (string, string?)> { ["server"] = ("registered", null), ["client"] = ("failed", "sequence registry is full") };
+        Start(Warden());
+        _game.Pump();
+        Assert.Equal(MoveApplicationState.Refused, Status().State);
+        Assert.Contains("client", Status().Reason);
+        Assert.Contains("full", Status().Reason);
+        Assert.Empty(_game.SlotsNow);
+        Assert.Equal(0, _game.Revokes);
+    }
+
+    [Fact]
+    public void Pending_registration_has_a_bounded_wait()
+    {
+        _game.WorldResults = _ => new Dictionary<string, (string, string?)> { ["client"] = ("pending", null) };
+        Start(Warden());
+        _game.Pump();
+        Assert.Equal(MoveApplicationState.Refused, Status().State);
+        Assert.Contains("timed out", Status().Reason);
+        Assert.Empty(_game.SlotsNow);
+    }
+
+    [Theory]
+    [InlineData("pending")]
+    [InlineData("failed")]
+    public void Replay_does_not_select_slots_before_every_world_registered(string state)
+    {
+        var (mod, _) = Start(Warden());
+        _game.Pump();
+        _game.WorldResults = _ => new Dictionary<string, (string, string?)> { ["client"] = (state, "client unavailable") };
+        MoveApplications.Ready(mod, _ => { });
+        Assert.Empty(_game.SlotsNow);
+        Assert.False(Status().Ok);
+        Assert.Equal(0, _game.Revokes);
+        _game.WorldResults = _ => new Dictionary<string, (string, string?)> { ["client"] = ("registered", null) };
+        if (state == "pending") { _game.Pump(); Assert.True(Status().Ok); }
+    }
+
+    [Fact]
+    public void Removal_during_readiness_suspension_is_not_republished_as_pending()
+    {
+        var (mod, _) = Start(Warden()); _game.Pump();
+        _game.WorldResults = _ => new Dictionary<string, (string, string?)> { ["client"] = ("pending", null) };
+        _game.AfterCommit = () => { _game.AfterCommit = null; MoveApplications.Forget(Mod); };
+        MoveApplications.Ready(mod, _ => { });
+        Assert.Equal(MoveApplicationState.Removed, Status().State);
+    }
+
+    [Fact]
+    public void A_failed_slot_suspension_reports_the_slots_it_could_not_remove()
+    {
+        var (mod, _) = Start(Warden()); _game.Pump();
+        _game.WorldResults = _ => new Dictionary<string, (string, string?)> { ["client"] = ("failed", "registry full") };
+        _game.ApplyError = doc => doc["itemdata"] != null ? "reset busy" : null;
+        MoveApplications.Ready(mod, _ => { });
+        Assert.Equal(MoveApplicationState.Refused, Status().State);
+        Assert.Contains("could not suspend", Status().Reason);
+        Assert.Contains("reset busy", Status().Reason);
+        Assert.NotEmpty(Status().LiveClones);
+        Assert.Equal(0, _game.Revokes);
+    }
+
+    private sealed class RawStates(uint id, PlayerStateKind kind, bool present = true) : IPlayerStateLookup
+    {
+        public IReadOnlyList<GameStateAnswer> FindGameStates(string name) => present && name == $"0x{id:x8}"
+            ? [new("SM", "raw", kind, [id])] : [];
+        public ModStateAnswer? Find(string mod, string name) => null;
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("unavailable")]
+    [InlineData("overlay")]
+    public void Raw_route_states_must_exist_and_match_the_motion_kind(string fault)
+    {
+        const uint id = 0x12345678;
+        _game.StateLookup = fault == "unavailable" ? null : new RawStates(id, fault == "overlay" ? PlayerStateKind.Overlay : PlayerStateKind.State, fault != "missing");
+        var b = Warden();
+        b = b with { Moves = b.Moves! with { Primary = [new MoveBlock { Like = "Light1", Animation = $"0x{id:x8}" }] } };
+        Start(b);
+        _game.Pump();
+        Assert.Equal(MoveApplicationState.Refused, Status().State);
+        Assert.Contains("animation", Status().Reason);
+        Assert.Empty(_game.SlotsNow);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Raw_guid_and_id_routes_keep_authoring_when_the_graph_accepts_them(bool guid)
+    {
+        const uint id = 0x12345678;
+        _game.StateLookup = new RawStates(id, PlayerStateKind.State);
+        var b = Warden();
+        b = b with { Moves = b.Moves! with { Primary = [new MoveBlock { Like = "Light1", Animation = guid ? BlockIds.WithFnv(id).ToString() : $"0x{id:x8}" }] } };
+        Start(b); _game.Pump();
+        Assert.True(Status().Ok, Status().Reason);
+    }
 
     // ---- the shape ----
 

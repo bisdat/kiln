@@ -270,6 +270,22 @@ public static unsafe partial class Content
         return list;
     }
 
+    // Per-world sequence registration is an additive field of definitions JSON; no ABI slot is required.
+    internal static Func<Guid, IReadOnlyDictionary<string, (string State, string? Error)>> SequenceRegistrationReader()
+    {
+        var t = GD;
+        if (t == null || t->Header.Size < (uint)sizeof(GameDataNative.Table))
+            return _ => new Dictionary<string, (string, string?)> { ["local"] = ("failed", "registration outcomes unavailable") };
+        var snapshot = new Dictionary<Guid, IReadOnlyDictionary<string, (string, string?)>>();
+        var (rc, text) = GameDataNative.Json((b, c, l) => t->Definitions((byte*)b, c, (nuint*)l));
+        if (rc == ContentNative.Ok && JsonNode.Parse(text) is JsonArray all)
+            foreach (var node in all.OfType<JsonObject>())
+                if (Guid.TryParse((string?)node["guid"], out var g) && node["registrations"] is JsonObject worlds)
+                    snapshot[g] = worlds.ToDictionary(p => p.Key, p => ((string?)p.Value?["state"] ?? "pending", (string?)p.Value?["reason"]));
+        return guid => snapshot.TryGetValue(guid, out var result) ? result
+            : new Dictionary<string, (string, string?)> { ["local"] = ("pending", "sequence registration not reported") };
+    }
+
     /// <summary>The config vocabulary (config ids, their aliases from the game's Impact programs, C++-read costs).</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.gamedata")]
