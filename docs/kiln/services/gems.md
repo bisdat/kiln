@@ -164,21 +164,25 @@ void OnSocket(GemSocketChangedEvent e) => Log.Info(e.ToString());   // "1's 0x..
 
 `GemTriggeredEvent` maps a native event's impact to a gem through the root player's `Equipped` gems, read once per
 player and step: the impact itself, or an impact the gem spawned (its `ImpactHierarchy` parent chain, up to three
-steps up). Subscribing turns on kiln.abilities' native events as `ImpactNativeEvent` does. It is observe only: to change
-what a gem does, use a data pack, `Abilities.Natives.Wrap` / `Abilities.OnDamage` filtered on the gem's program id, or
-`ImpactStartingEvent`. A gem reacts only to hits and states: a block or a special attack of the weapon has no gem
-signal of its own.
+steps up). The gems are read when the event is posted, one Pre after the call: a native of a gem impact that ended
+in between (the hotbar switched away on that step) is posted as `ImpactNativeEvent` only. Subscribing turns on
+kiln.abilities' native events as `ImpactNativeEvent` does. It is observe only: to change what a gem does, use a data
+pack, `Abilities.Natives.Wrap` / `Abilities.OnDamage` filtered on the gem's program id, or `ImpactStartingEvent`. A gem
+reacts only to hits and states: a block or a special attack of the weapon has no gem signal of its own.
 
 `GemSocketChangedEvent` comes from reading players' items in turns (two players a step, about every `players / 2`
 steps for each), only while someone subscribes. It does not say which forge or what it cost (the forge's own events are
 in "Forge actions"), comes a few steps late, and misses a change undone between two reads. What counts:
 - `Socketed`: the socket got a gem (empty before, or another gem: `Before` is the old one);
-- `Unsocketed`: the socket is empty and a gem of that kind came back to the player's inventory;
+- `Unsocketed`: the socket is empty and a gem of that kind came back to the player's inventory or went into another of
+  their sockets (Kiln counts the gems of each kind that came back; each return is one `Unsocketed`, the rest `Removed`);
 - `LevelChanged`: the same gem at another level (the forge's Upgrade);
 - `Removed`: the gem is gone: it left the socket without coming back (the forge's Recycle), or the carrier was
   destroyed with it.
 A carrier that leaves the player with its gem (into a chest, to another player) and an item first seen with a gem
-(picked up, crafted) are not changes.
+(picked up, crafted) are not changes, nor is anything about a player first seen (joined, back after leaving, in a new
+world): their changes count from their next read. Without a server world (a game client's menu, a joined session)
+nothing is read or posted.
 
 Without the `Gems` events, `ImpactStartedEvent` / `ImpactEndedEvent` (a gem impact starts on equip and on a hotbar
 switch, ends when the item leaves the slot) and `ImpactNativeEvent` filtered on the gem program's id
@@ -197,15 +201,18 @@ switch, ends when the item leaves the slot) and `ImpactNativeEvent` filtered on 
 ## Capability rows
 | Row | Kind | What it says |
 |---|---|---|
-| `gems.read` | managed, session (Kiln.Abilities, at its start and about once a second) | the read API and `GemSocketChangedEvent`: needs kiln.items (`service-missing`) with item instances (`items.instances`, its reason when off; pending while it waits for a server world), kiln.types and the game's reflection of `Equipment.equipmentImpacts[].weaponGemImpactEntityId` (`symbol-missing` on a build without it) and kiln.world. Without kiln.gamedata it is available with the note that the catalog has no programs or configs |
+| `gems.read` | managed, session (Kiln.Abilities, at its start and about once a second) | the read API and `GemSocketChangedEvent`: needs kiln.items (`service-missing`) with item instances (`items.instances`, its reason when off), kiln.types and the game's reflection of `Equipment.equipmentImpacts[].weaponGemImpactEntityId` (`symbol-missing` on a build without it) and kiln.world. Without kiln.gamedata it is available with the note that the catalog has no programs or configs. It does not wait for a server world: without one (the main menu, a joined client) it still reads available, `Socket` throws `KilnUnavailableException` (`gems.read`), `Equipped` lists no gem and no `GemSocketChangedEvent` is posted |
 | `gems.triggers` | managed, session (with `gems.read`) | `GemTriggeredEvent` (and G2's gems with their own effects): needs `gems.read`, kiln.abilities and its native events (`abilities.natives`) |
 
 ## What is checked
 - Unit tests with a fake game (`GemsBaseTests`): the catalog and its cache, kiln.gamedata's JSON (programs, configs by
   alias and id, an alias two ids share), the Equipment layout against the reflection dump of server 26430253, `Equipped`
-  and `Socket`, the impact to gem map (parent chain, one read per player and step), `GemTriggeredEvent`'s target, the
+  and `Socket`, the impact to gem map (parent chain, one read per player and step, one walk per impact and step, a
+  failed read of any kind costing only that player's events of the step), `GemTriggeredEvent`'s target, the
   native-event interest, the socket diff (socketed, unsocketed, upgraded, swapped, recycled, destroyed, moved away,
-  first sight), the poll's turns and the two rows.
+  moved to another socket, one gem back for two emptied sockets, first sight), the poll's turns (players looked for
+  every 50 steps also when there are none, gems told by their category without kiln.gamedata, a player who could not
+  be read or a new world seen afresh, no server world) and the two rows.
 - Lab (`mods/tests/gems-test`, Wine dedicated server 26430253, a spawned player-template entity, 2026-11-16: 34 PASS,
   0 FAIL): both rows available; the catalog from the live game data (28 gems, programs, configs with ids, kinds,
   values, scale factors, aliases); a dagger given with `Gear.GemSlot` and a Gem of Puncturing at level 5, the gem

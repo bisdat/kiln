@@ -66,7 +66,8 @@ public enum GemSocketChange
     /// <summary>The socket got a gem (empty before, or another gem: a swap).</summary>
     Socketed = 1,
 
-    /// <summary>The socket is empty and the gem is back in the owner's inventory.</summary>
+    /// <summary>The socket is empty and the gem is back in the owner's inventory, or in another of their sockets (Kiln
+    /// counts the gems of that kind that came back: each return is one Unsocketed).</summary>
     Unsocketed = 2,
 
     /// <summary>The same gem at another level (the forge's Upgrade, or a mod).</summary>
@@ -81,8 +82,9 @@ public enum GemSocketChange
 /// happened (the Gem Forge, a mod, a command). Kiln reads players' items in turns (about 2 players a step, each
 /// player every <c>players / 2</c> steps), so the event comes a few steps late, says nothing about forges or costs, and a
 /// change undone between two reads is not seen. A carrier that leaves the player with its gem (into a chest, to another
-/// player) is not a change; an item first seen with a gem (picked up, crafted) is not either. Observe only; built only
-/// while someone subscribes. Server (and a hosting client).</summary>
+/// player) is not a change; an item first seen with a gem (picked up, crafted) is not either, nor is anything about a
+/// player first seen (joined, back after leaving, in a new world): their changes count from their next read. Observe
+/// only; built only while someone subscribes. Server (and a hosting client); nothing is posted without a server world.</summary>
 [ServerOnly]
 public sealed class GemSocketChangedEvent : KilnEvent, IEntityEvent
 {

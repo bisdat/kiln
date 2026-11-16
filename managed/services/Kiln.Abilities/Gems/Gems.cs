@@ -36,8 +36,8 @@ public static partial class Gems
 
     /// <summary>The gems whose effects run for a player now, one per equipment impact slot with a socketed gem (the
     /// held item, shield, armour, rings, ammo, spell), in slot order: the game's <c>Equipment.equipmentImpacts</c> where
-    /// it spawned a gem impact. Empty for an entity with no equipment. Server (and a game client that hosts the world):
-    /// a joined client has no gem impacts. Tick thread.</summary>
+    /// it spawned a gem impact. Empty for an entity with no equipment, and with no server world (a joined client, the
+    /// menu). Server (and a game client that hosts the world). Tick thread.</summary>
     /// <exception cref="KilnUnavailableException"><c>gems.read</c>: item instances or the game's reflection of
     /// Equipment are not here.</exception>
     [TickThreadOnly]
@@ -52,7 +52,8 @@ public static partial class Gems
 
     /// <summary>The gem in an item's socket, or null when it has no socket, the socket is empty, or the item is gone.
     /// Server (and a hosting client). Tick thread.</summary>
-    /// <exception cref="KilnUnavailableException"><c>gems.read</c>: item instances are not here.</exception>
+    /// <exception cref="KilnUnavailableException"><c>gems.read</c>: item instances are not here, or no server world
+    /// runs (a joined client, the menu).</exception>
     [TickThreadOnly]
     [RequiresCapability(GemsCaps.Read)]
     public static SocketedGem? Socket(ItemInstanceRef carrier)
@@ -89,6 +90,9 @@ internal static class GemReads
         _readAt = long.MinValue / 4;
         _keyCheckedAt = long.MinValue / 4;
         _for = null;
+        _gemIds = [];
+        _gemIdsOf = null;
+        _gemIdsCount = -1;
     }
 
     /// <summary>How long a catalog is used without asking for its key again (a poll asks for every item it reads).</summary>
@@ -128,7 +132,28 @@ internal static class GemReads
         return _byId.GetValueOrDefault(gem.Value);
     }
 
-    internal static bool IsGem(IGemWorld world, ItemId item) => !item.IsNone && Get(world, item) is not null;
+    private static HashSet<uint> _gemIds = [];
+    private static IReadOnlyList<ItemInfo>? _gemIdsOf;
+    private static int _gemIdsCount = -1;
+
+    /// <summary>The ids of the gem items (category WeaponGem, not a blueprint: the catalog's own rule) from the item
+    /// catalog alone, kept while kiln.items keeps its list. What the socket poll asks for every item it reads: it needs
+    /// no program or config, so it never builds the catalog (kiln.gamedata's JSON for every gem, the config vocabulary)
+    /// and a game-data failure cannot stop it (review).</summary>
+    internal static IReadOnlySet<uint> GemIds(IGemWorld world)
+    {
+        var items = world.Items();
+        if (ReferenceEquals(items, _gemIdsOf) && items.Count == _gemIdsCount) return _gemIds;
+        var set = new HashSet<uint>();
+        foreach (var item in items)
+            if (item.Category == ItemCategory.WeaponGem && !item.IsBlueprint) set.Add(item.Id.Value);
+        _gemIds = set;
+        _gemIdsOf = items;
+        _gemIdsCount = items.Count;
+        return set;
+    }
+
+    internal static bool IsGem(IGemWorld world, ItemId item) => !item.IsNone && GemIds(world).Contains(item.Value);
 
     internal static IReadOnlyList<EquippedGem> Equipped(IGemWorld world, EntityId player)
     {

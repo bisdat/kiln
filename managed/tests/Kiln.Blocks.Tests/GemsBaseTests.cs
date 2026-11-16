@@ -26,18 +26,24 @@ public sealed class GemsBaseTests : IDisposable
         public Dictionary<uint, List<GemItemRead>> Holders = new();       // by player
         public List<EntityId> PlayerList = [];
         public Dictionary<uint, uint> Parents = new();
+        public bool DataThrows;                                           // kiln.gamedata fails (review)
+        public Exception? ImpactsThrow;                                   // the Equipment read fails (review)
+        public int PlayerReads, ParentReads;                              // World.Find passes, ImpactHierarchy reads (review)
+        public bool NoWorld;                                              // World.Find with no server world (review)
 
         public IReadOnlyList<ItemInfo> Items() => Catalog;
         public long CatalogKey() => Key;
         public GemData? Data(ItemInfo item)
         {
             DataReads++;
+            if (DataThrows) throw new InvalidOperationException("GameDataEntry.GetJson: the native read failed");
             return Gamedata.GetValueOrDefault(item.Id.Value);
         }
         public IReadOnlySet<uint> ModItems() => Mods;
         public IReadOnlyList<GemImpactRow>? Impacts(EntityId holder)
         {
             ImpactReads++;
+            if (ImpactsThrow is { } e) throw e;
             return Equipment.GetValueOrDefault(holder.Value);
         }
         public IReadOnlyList<GemItemRead?> ReadEntities(IReadOnlyList<uint> pides) =>
@@ -45,8 +51,17 @@ public sealed class GemsBaseTests : IDisposable
         public GemItemRead? Read(ItemInstanceRef item) =>
             Entities.TryGetValue(item.Entity.Id.Value, out var r) && r.Item == item ? r : null;
         public IReadOnlyList<GemItemRead>? ReadHolder(EntityId holder) => Holders.GetValueOrDefault(holder.Value);
-        public IReadOnlyList<EntityId> Players() => PlayerList;
-        public EntityId ParentImpact(EntityId impact) => new(Parents.GetValueOrDefault(impact.Value));
+        public IReadOnlyList<EntityId> Players()
+        {
+            PlayerReads++;
+            if (NoWorld) throw new InvalidOperationException("World.Find(SlotSelection): unavailable");
+            return PlayerList;
+        }
+        public EntityId ParentImpact(EntityId impact)
+        {
+            ParentReads++;
+            return new(Parents.GetValueOrDefault(impact.Value));
+        }
     }
 
     static readonly ItemId Bleeding = new(0x11110001), Necro = new(0x11110002), ModGem = new(0x22220001), Sword = new(0x33330001),
@@ -69,6 +84,7 @@ public sealed class GemsBaseTests : IDisposable
         GemReads.KeyCheckMs = 0;
         GemReads.Forget();
         GemWatch.Reset();
+        GemTriggers.Reset();
         _w.Catalog.AddRange([
             Info(Bleeding, "T1_Gem_GemOfBleeding", ItemCategory.WeaponGem, ItemRarity.Uncommon),
             Info(Necro, "T5_Gem_GemOfNecromancy", ItemCategory.WeaponGem, ItemRarity.Epic),
@@ -88,6 +104,7 @@ public sealed class GemsBaseTests : IDisposable
         GemReads.KeyCheckMs = _keyCheck;
         GemReads.Forget();
         GemWatch.Reset();
+        GemTriggers.Reset();
     }
 
     // ---- catalog ----
@@ -170,7 +187,17 @@ public sealed class GemsBaseTests : IDisposable
         Assert.Equal(2.6, c[0x5e34f09b].ScaleFactor!.Value, 5);
         Assert.Equal((6.0, 0.5), (c[0x3ff81f2b].Value, c[0x3ff81f2b].ScaleFactor!.Value));
         Assert.Empty(GemJson.Configs(null, JsonNode.Parse("""{"value":[{"$type":"FloatImpactConfig","value":1}]}"""), _ => null));  // no id: left out
-        Assert.Equal(1, GemJson.Configs(JsonNode.Parse("""[{"$type":"FloatImpactConfig","configId":7,"value":1}]"""), null, _ => null).Count);  // a bare list
+        Assert.Single(GemJson.Configs(JsonNode.Parse("""[{"$type":"FloatImpactConfig","configId":7,"value":1}]"""), null, _ => null));  // a bare list
+    }
+
+    [Fact]
+    public void TwoConfigsOfOneAliasAreKeptApartByTheirIds()
+    {
+        // GetJson("impactValues") keys configs by alias, where two ids of one alias are one entry; the raw lists are read
+        // so that each id keeps its own config (review: the guide says this is tested)
+        var c = GemJson.Configs(JsonNode.Parse("""[{"$type":"FloatImpactConfig","configId":7,"value":1},{"$type":"FloatImpactConfig","configId":8,"value":2}]"""),
+            null, _ => "Shared");
+        Assert.Equal(("Shared", 1.0, "Shared", 2.0), (c[7].Alias, c[7].Value, c[8].Alias, c[8].Value));
     }
 
     [Fact]
@@ -308,6 +335,46 @@ public sealed class GemsBaseTests : IDisposable
     }
 
     [Fact]
+    public void AFailedGemLookupOfAnyKindNeverThrowsIntoTheListenersBatch()
+    {
+        // review: Deliver caught three exception types; any other one went up into AbilitiesDispatch.Deliver's loop, and
+        // the listener dropped the rest of its batch (impact starts and ends, other natives, signals, managed calls)
+        Equip(1, new GemImpactRow(0, 2001, Sword, new EntityId(5001), new EntityId(3001)));
+        _w.Entities[2001] = Item(2001, Sword, Bleeding, 12);
+        GemReads.World = _w;
+        var seen = new List<GemTriggeredEvent>();
+        using var sub = Events.On<GemTriggeredEvent>(seen.Add);
+        _w.ImpactsThrow = new NotSupportedException("a read this build cannot do");
+        GemTriggers.Deliver(Damage(5001, 1, 9000, 30), 30);
+        GemTriggers.Deliver(Damage(5001, 1, 9000, 30), 30);
+        Assert.Equal(1, _w.ImpactReads);  // one failed read per player and step, not one per native
+        Assert.Empty(seen);
+        _w.ImpactsThrow = null;
+        GemTriggers.Deliver(Damage(5001, 1, 9000, 31), 31);  // the next step reads again
+        Assert.Single(seen);
+    }
+
+    [Fact]
+    public void AnImpactsGemIsLookedUpOncePerStep()
+    {
+        // review: every native of a gem wearer's other impacts (the weapon's swings, perks, buffs) walked the parent
+        // chain again (one kiln.world read per hop); one walk per impact and step
+        Equip(1, new GemImpactRow(0, 2001, Sword, new EntityId(5001), new EntityId(3001)));
+        _w.Entities[2001] = Item(2001, Sword, Bleeding, 12);
+        _w.Parents[6100] = 6101;
+        _w.Parents[6101] = 6102;  // the weapon's own impacts: no gem above
+        _w.Parents[6200] = 5001;  // spawned by the gem impact
+        for (var i = 0; i < 5; i++)
+        {
+            Assert.Null(GemTriggers.Find(_w, new ImpactRef(1, 2, new EntityId(6100), new EntityId(1)), 40));
+            Assert.Equal(new EntityId(5001), GemTriggers.Find(_w, new ImpactRef(1, 2, new EntityId(6200), new EntityId(1)), 40)!.Impact);
+        }
+        Assert.Equal(3 + 1, _w.ParentReads);
+        GemTriggers.Find(_w, new ImpactRef(1, 2, new EntityId(6100), new EntityId(1)), 41);
+        Assert.Equal(3 + 1 + 3, _w.ParentReads);  // a new step reads again
+    }
+
+    [Fact]
     public void ASubscriberOfGemTriggeredTurnsOnTheNativeEvents()
     {
         var interest = typeof(AbilitiesDispatch).GetMethod("Interest", BindingFlags.Static | BindingFlags.NonPublic)!;
@@ -352,6 +419,27 @@ public sealed class GemsBaseTests : IDisposable
     }
 
     [Fact]
+    public void AGemMovedToAnotherSocketIsUnsocketedAndEachReturnCountsOnce()
+    {
+        // review: Unsocketed was "more loose gems of that kind than before". A gem moved from one weapon to another between
+        // two reads leaves that count as it was (Removed, though the gem still exists), and two emptied sockets of one
+        // kind with one gem back were both Unsocketed (one gem was recycled)
+        var moved = GemWatch.Diff(
+            Snap(IsGem, Item(2001, Sword, Bleeding, 5), Item(2002, Sword)),
+            Snap(IsGem, Item(2001, Sword), Item(2002, Sword, Bleeding, 5)), _w.Read);
+        Assert.Equal([GemSocketChange.Unsocketed, GemSocketChange.Socketed], moved.Select(d => d.Change));
+        var oneBack = GemWatch.Diff(
+            Snap(IsGem, Item(2001, Sword, Bleeding, 5), Item(2002, Sword, Bleeding, 7)),
+            Snap(IsGem, Item(2001, Sword), Item(2002, Sword), Item(3001, Bleeding, level: 7)), _w.Read);
+        Assert.Equal(1, oneBack.Count(d => d.Change == GemSocketChange.Unsocketed));
+        Assert.Equal(1, oneBack.Count(d => d.Change == GemSocketChange.Removed));
+        var swapped = GemWatch.Diff(  // a swap brings its old gem back: that return is the swap's, not 2002's
+            Snap(IsGem, Item(2001, Sword, Bleeding, 5), Item(2002, Sword, Bleeding, 3), Item(3002, Necro, level: 1)),
+            Snap(IsGem, Item(2001, Sword, Necro, 1), Item(2002, Sword), Item(3001, Bleeding, level: 5)), _w.Read);
+        Assert.Equal([GemSocketChange.Socketed, GemSocketChange.Removed], swapped.Select(d => d.Change));
+    }
+
+    [Fact]
     public void ThePollReadsTwoPlayersAStepAndReportsFromTheSecondReadOn()
     {
         _w.PlayerList.AddRange([new EntityId(1), new EntityId(2), new EntityId(3)]);
@@ -363,8 +451,89 @@ public sealed class GemsBaseTests : IDisposable
         var found = GemWatch.Step(_w, 3, post: false);     // players 2, 3
         Assert.Equal([(new EntityId(2), GemSocketChange.Socketed), (new EntityId(3), GemSocketChange.Socketed)],
             found.Select(f => (f.Owner, f.Diff.Change)));
-        _w.Holders.Remove(1);                               // not initialized now: skipped, its snapshot kept
+        _w.Holders.Remove(1);                               // not readable now (gone, not initialized): skipped
         Assert.Empty(GemWatch.Step(_w, 4, post: false));
+    }
+
+    [Fact]
+    public void ThePollTellsGemsByTheirCategoryAndNeverReadsGameData()
+    {
+        // review: the poll asked Gems.Get for every item it read, which rebuilt the whole catalog (kiln.gamedata's JSON
+        // for every gem, the 34 KB config vocabulary, kiln.content's definitions) every 2 s on the tick thread, and an
+        // exception there that was not KilnUnavailableException stopped the poll
+        _w.DataThrows = true;
+        _w.PlayerList.Add(new EntityId(1));
+        _w.Holders[1] = [Item(2001, Sword, Bleeding, 5)];
+        Assert.Empty(GemWatch.Step(_w, 1, post: false));
+        _w.Holders[1] = [Item(2001, Sword), Item(3001, Bleeding, level: 5)];
+        var d = Assert.Single(GemWatch.Step(_w, 2, post: false));
+        Assert.Equal(GemSocketChange.Unsocketed, d.Diff.Change);  // the loose Bleeding is still known as a gem
+        Assert.Equal(0, _w.DataReads);
+        Assert.True(GemReads.IsGem(_w, Bleeding) && GemReads.IsGem(_w, ModGem) && !GemReads.IsGem(_w, Sword) &&
+                    !GemReads.IsGem(_w, new ItemId(0x44440001)) && !GemReads.IsGem(_w, ItemId.None));  // not the blueprint
+    }
+
+    [Fact]
+    public void APlayerWhoseItemsCannotBeReadIsSeenAfreshWhenTheyCanAgain()
+    {
+        // review: the snapshot was kept while a player's items could not be read (logged out); a player who came back
+        // under the same entity id, or another one who got it, was compared with it, and each socketed gem of the old
+        // items (gone with the old player entity) was reported Removed
+        _w.PlayerList.Add(new EntityId(1));
+        _w.Holders[1] = [Item(2001, Sword, Bleeding, 5)];
+        Assert.Empty(GemWatch.Step(_w, 1, post: false));
+        _w.Holders.Remove(1);                                // logged out: no inventory
+        Assert.Empty(GemWatch.Step(_w, 2, post: false));
+        _w.Holders[1] = [Item(2101, Sword, Bleeding, 5)];   // back: new item entities, 2001 is gone
+        Assert.Empty(GemWatch.Step(_w, 3, post: false));
+        _w.Holders[1] = [Item(2101, Sword)];
+        Assert.Equal(GemSocketChange.Removed, Assert.Single(GemWatch.Step(_w, 4, post: false)).Diff.Change);  // still watched
+    }
+
+    [Fact]
+    public void ANewWorldStartsFromFirstSight()
+    {
+        // review: a hosting game's next world starts its steps again from 1; the old world's snapshots were kept for a
+        // player id that is there again (the host's), and the new world's item entities were compared with the old ones
+        _w.PlayerList.Add(new EntityId(1));
+        _w.Holders[1] = [Item(2001, Sword, Bleeding, 5)];
+        GemWatch.Step(_w, 500, post: false);
+        _w.Holders[1] = [Item(2101, Sword, Bleeding, 5)];  // the new world: other item entities, 2001 is not there
+        Assert.Empty(GemWatch.Step(_w, 1, post: false));
+        _w.Holders[1] = [Item(2101, Sword)];
+        Assert.Single(GemWatch.Step(_w, 2, post: false));  // watched from there on
+    }
+
+    [Fact]
+    public void WithNoServerWorldThePollWaitsQuietly()
+    {
+        // review: a game client runs the service tick in its menu and on a joined session, with no server world, where
+        // World.Find throws InvalidOperationException; the poll let it out every step (kiln.log: the tick's error with
+        // its stack, 5 times, then every 1000th)
+        _w.NoWorld = true;
+        for (ulong s = 1; s <= 60; s++) Assert.Empty(GemWatch.Step(_w, s, post: false));
+        Assert.Equal(2, _w.PlayerReads);  // steps 1, 51
+        _w.NoWorld = false;
+        _w.PlayerList.Add(new EntityId(1));
+        _w.Holders[1] = [Item(2001, Sword)];
+        GemWatch.Step(_w, 1, post: false);  // a hosted world: its steps start again
+        _w.Holders[1] = [Item(2001, Sword, Bleeding, 1)];
+        Assert.Single(GemWatch.Step(_w, 2, post: false));
+    }
+
+    [Fact]
+    public void WithNoPlayerThePollLooksForPlayersOnlyAtItsTurn()
+    {
+        // review: an empty player list was looked for again every step: World.Find is one pass over the entity map, 60
+        // times a second on a server nobody plays on while a mod subscribes
+        for (ulong s = 1; s <= 120; s++) GemWatch.Step(_w, s, post: false);
+        Assert.Equal(3, _w.PlayerReads);  // steps 1, 51, 101
+        _w.PlayerList.Add(new EntityId(1));
+        _w.Holders[1] = [Item(2001, Sword)];
+        for (ulong s = 121; s <= 151; s++) GemWatch.Step(_w, s, post: false);
+        Assert.Equal(4, _w.PlayerReads);  // found at the next turn (151)
+        GemWatch.Step(_w, 5, post: false);  // a new world's steps start again from 1: look again at once
+        Assert.Equal(5, _w.PlayerReads);
     }
 
     [Fact]
