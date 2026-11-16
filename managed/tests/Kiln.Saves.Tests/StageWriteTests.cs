@@ -247,7 +247,7 @@ public sealed class StageWriteTests : IDisposable
             Assert.Contains("5 bundles, 5 new blobs", staged.Text);
             // no stage barrier here (no native table): the tick thread wrote its files itself, as before, and says so
             Assert.Matches(@" in \d+\.\d ms \(tick thread \d+\.\d ms, all of it \(this kiln\.saves does not hold the world write, so the tick " +
-                           @"thread writes the files itself, as before 0\.2\.0-dev\.30; \d+\.\d ms waiting for the writer\); files \d+\.\d ms: 6 files " +
+                           @"thread writes the files itself, as before 0\.2\.0-dev\.29\.3; \d+\.\d ms waiting for the writer\); files \d+\.\d ms: 6 files " +
                            @"written: \d+\.\d ms creating, \d+\.\d ms writing, " +
                            @"\d+\.\d ms forcing to disk, \d+\.\d ms closing, \d+\.\d ms renaming; 5 checked in \d+\.\d ms; 7 folders made in \d+\.\d ms; \d+\.\d ms hashing and JSON; " +
                            @"\d+\.\d ms else\)$", staged.Text);
