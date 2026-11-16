@@ -17,7 +17,7 @@ unset DISPLAY; export WAYLAND_DISPLAY=kiln-no-display
 mkdir -p "$WINEPREFIX"
 [[ -f $WINEPREFIX/system.reg ]] || wine wineboot -i >/dev/null 2>&1
 fail=0
-for run in "items-wear-test.exe" "items-toolwear-test.exe" "items-toolwear-table-test.exe" "items-results-test.exe" "items-equip-test.exe" "items-setsnap-test.exe" "items-setplan-test.exe" "items-setexec-test.exe" "items-setorder-test.exe" "items-instances-test.exe" "items-pide-test.exe" "items-move-test.exe" "items-move-test.exe chain-before" "items-move-test.exe chain-after" "items-move-test.exe partial-install" "items-move-test.exe links" "items-move-test.exe review" "items-move-test.exe move-off" "items-move-test.exe stamps"; do
+for run in "items-wear-test.exe" "items-toolwear-test.exe" "items-toolwear-table-test.exe" "items-results-test.exe" "items-equip-test.exe" "items-setsnap-test.exe" "items-setplan-test.exe" "items-setexec-test.exe" "items-setorder-test.exe" "items-instances-test.exe" "items-pide-test.exe" "items-move-test.exe" "items-move-test.exe chain-before" "items-move-test.exe chain-after" "items-move-test.exe partial-install" "items-move-test.exe links" "items-move-test.exe review" "items-move-test.exe move-off" "items-move-test.exe stamps" "items-move-test.exe replace"; do
   echo "== $run"
   # shellcheck disable=SC2086
   wine "$bin/"$run || fail=1

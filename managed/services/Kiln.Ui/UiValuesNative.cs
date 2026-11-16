@@ -206,6 +206,26 @@ internal static unsafe class UiValuesNative
         public delegate* unmanaged[Cdecl]<ulong, delegate* unmanaged[Cdecl]<GemForgeFrame*, GemForgeCandidate*, uint, void*, void>, void*, Registration*, int> SubscribeGemForge;
     }
 
+    // ---- appended (gem wave): gems.sockets' gemforge_sockets(owner, category_mask) ----
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SocketsTable
+    {
+        public GemForgeTable Base;
+        public delegate* unmanaged[Cdecl]<ulong, uint, int> GemForgeSockets;
+    }
+
+    /// <summary>The table with gemforge_sockets, or null (a server, an older native service).</summary>
+    public static SocketsTable* SocketsT
+    {
+        get
+        {
+            var t = T;
+            if (t == null || t->Header.Size < sizeof(SocketsTable)) return null;
+            var s = (SocketsTable*)t;
+            return s->GemForgeSockets != null ? s : null;
+        }
+    }
+
     public static GemForgeTable* GemForgeT
     {
         get

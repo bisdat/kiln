@@ -73,7 +73,11 @@ static_assert(offsetof(KilnItemsApi, equip) == 224 && offsetof(KilnItemsApi, equ
 // v6 (0.2.0-dev.29) appends the equipment sets after equip_status; a v5 reader's table ends at 240.
 static_assert(offsetof(KilnItemsApi, set_capture) == 240 && offsetof(KilnItemsApi, set_release_snapshot) == 248 &&
               offsetof(KilnItemsApi, set_status) == 256 && offsetof(KilnItemsApi, set_plan) == 264 &&
-              offsetof(KilnItemsApi, equip_set) == 272 && offsetof(KilnItemsApi, set_cancel) == 280 && sizeof(KilnItemsApi) == 288);
+              offsetof(KilnItemsApi, equip_set) == 272 && offsetof(KilnItemsApi, set_cancel) == 280);
+// v7 (0.2.0-dev.30, the gem wave) appends socket_roll after set_cancel; a v6 reader's table ends at 288.
+static_assert(offsetof(KilnItemsApi, socket_roll) == 288 && sizeof(KilnItemsApi) == 296);
+static_assert(sizeof(KilnItemsRequestEx) == 56 && offsetof(KilnItemsRequestEx, dye) == 40 &&
+              offsetof(KilnItemsRequestEx, durability) == 44 && sizeof(KilnItemsSocketRoll) == 24);
 static_assert(sizeof(KilnSetRequestV1) == 56 && offsetof(KilnSetRequestV1, entries) == 16 && offsetof(KilnSetRequestV1, process_session) == 40);
 static_assert(sizeof(KilnSetSlotValueV1) == 32 && sizeof(KilnSetChangeV1) == 72);
 static_assert(sizeof(KilnSetResultV1) == 1760 && offsetof(KilnSetResultV1, ticket) == 16 && offsetof(KilnSetResultV1, player) == 48 &&
@@ -1149,11 +1153,22 @@ KilnResult submit(bool take, KilnOwner owner, const KilnItemsRequest* r, KilnIte
     const uint32_t allowed = take ? (KILN_ITEMS_EXACT_SLOT | KILN_ITEMS_DRY_RUN)
                                   : (KILN_ITEMS_LEVEL | KILN_ITEMS_RARITY | KILN_ITEMS_ALL_OR_NOTHING |
                                      KILN_ITEMS_NOTIFY | KILN_ITEMS_NO_MERGE | KILN_ITEMS_DRY_RUN | KILN_ITEMS_RECIPE |
-                                     KILN_ITEMS_UNLOCK | KILN_ITEMS_GEM_SLOT);
+                                     KILN_ITEMS_UNLOCK | KILN_ITEMS_GEM_SLOT | KILN_ITEMS_GEM_SLOT_ANY |
+                                     KILN_ITEMS_REPLACE | KILN_ITEMS_DYE | KILN_ITEMS_DURABILITY);
     if (r->flags & ~allowed) return KILN_ERR_INVALID_ARGUMENT;
     // gear options at creation (pide.cpp): not with a recipe; `unlock` only with UNLOCK (1..5, 255 = all)
     if (!pide_request_valid(r->flags, r->unlock)) return KILN_ERR_INVALID_ARGUMENT;
+    // v7: DYE and DURABILITY read the Ex request; REPLACE names the one item entity it re-creates
+    const bool ex = (r->flags & (KILN_ITEMS_DYE | KILN_ITEMS_DURABILITY)) != 0;
+    const auto* rx = reinterpret_cast<const KilnItemsRequestEx*>(r);
+    if (ex && (r->size < sizeof(KilnItemsRequestEx) || rx->reserved[0] || rx->reserved[1])) return KILN_ERR_INVALID_ARGUMENT;
+    if ((r->flags & KILN_ITEMS_DURABILITY) && !(rx->durability >= 0.0f && rx->durability <= 1.0f)) return KILN_ERR_INVALID_ARGUMENT;
+    if ((r->flags & KILN_ITEMS_REPLACE) &&
+        (r->count != 1 || !r->slot || !r->pide || (r->flags & (KILN_ITEMS_RECIPE | KILN_ITEMS_NO_MERGE))))
+        return KILN_ERR_INVALID_ARGUMENT;
     if ((r->flags & (KILN_ITEMS_UNLOCK | KILN_ITEMS_GEM_SLOT)) && !pide_available()) return KILN_ERR_UNAVAILABLE;
+    if ((r->flags & (KILN_ITEMS_GEM_SLOT_ANY | KILN_ITEMS_DYE | KILN_ITEMS_DURABILITY)) && !pide_sockets_available())
+        return KILN_ERR_UNAVAILABLE;
     if ((r->flags & KILN_ITEMS_RECIPE) && ((r->flags & (KILN_ITEMS_LEVEL | KILN_ITEMS_RARITY)) || r->slot))
         return KILN_ERR_INVALID_ARGUMENT;
     if ((r->flags & KILN_ITEMS_RARITY) && r->rarity > 4) return KILN_ERR_INVALID_ARGUMENT;
@@ -1170,6 +1185,10 @@ KilnResult submit(bool take, KilnOwner owner, const KilnItemsRequest* r, KilnIte
     q.job.take = take;
     q.job.r = *r;
     q.job.r.size = sizeof(KilnItemsRequest);
+    if (ex) {
+        q.job.dye = rx->dye;
+        q.job.durability = rx->durability;
+    }
     q.submitted = g_step.load();
     {
         std::lock_guard lock(g_mu);
@@ -1394,6 +1413,7 @@ void KILN_CALL t_cancel_owner(KilnOwner owner) {
     }
     equip_cancel_owner(owner);
     sets_cancel_owner(owner);  // v6: the owner's snapshots
+    pide_socket_roll(owner, nullptr);  // v7: the owner's socket rolls
     // Draining a running transfer callback must not hold the request mutex: that callback may queue a request.
     xfer_end_owner(owner);
 }
@@ -1614,6 +1634,9 @@ KilnResult KILN_CALL t_equip_set(KilnOwner owner, const KilnSetRequestV1* r, Kil
 }
 KilnResult KILN_CALL t_set_cancel(uint64_t ticket) { return equip_set_cancel(ticket); }
 
+// ---- v7: gem sockets (pide.cpp) ----
+KilnResult KILN_CALL t_socket_roll(KilnOwner owner, const KilnItemsSocketRoll* roll) { return pide_socket_roll(owner, roll); }
+
 const KilnItemsApi kTable = {
     {sizeof(KilnItemsApi), KILN_ITEMS_VERSION},
     &t_give, &t_take, &t_cancel, &t_cancel_owner, &t_read, &t_find,
@@ -1624,6 +1647,7 @@ const KilnItemsApi kTable = {
     &t_read_instances, &t_read_holder, &t_instances_status,
     &t_equip, &t_equip_status,
     &t_set_capture, &t_set_release, &t_set_status, &t_set_plan, &t_equip_set, &t_set_cancel,
+    &t_socket_roll,
 };
 
 // ============================================================================================= self-test =======
@@ -1964,6 +1988,8 @@ void resolve() {
                    cst("items/world.program_count", &E.program_count);
     const bool pide = E.tx_ok && pide_install(g_api, g_owner);
     LOGI("gear options at creation (KILN_ITEMS_UNLOCK, KILN_ITEMS_GEM_SLOT): %s", pide ? "on" : "OFF (items.pide_options)");
+    LOGI("gem sockets on any gear (GEM_SLOT_ANY, DYE, DURABILITY, gemSlotOverride, socket_roll): %s",
+         pide_sockets_available() ? "on" : "OFF (gems.sockets)");
     // v3 (docs/re/items.md sections 13 and 14)
     {
         const bool qs = sym("items/QuickStack", &E.quick_stack) && sym("items/MoveAll", &E.move_all);

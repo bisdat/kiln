@@ -18,7 +18,9 @@ internal static unsafe class ItemsAbi
     // KilnItemsRequest.flags
     public const uint Level = 0x01, Rarity = 0x02, ExactSlot = 0x04, AllOrNothing = 0x08, Notify = 0x10, NoMerge = 0x20,
         DryRun = 0x40, Recipe = 0x80, Unlock = 0x100, GemSlot = 0x200;
-    public const uint KnownFlags = 0x3FF;
+    // v7 (the gem wave): sockets on any gear and the re-creation of gear; the kit models none of them (Unavailable)
+    public const uint GemSlotAny = 0x400, Replace = 0x800, Dye = 0x1000, Durability = 0x2000;
+    public const uint KnownFlags = 0x3FFF;
     public const int ProgramNone = 0, ProgramPending = 1, ProgramActive = 2, ProgramRunning = 3, ProgramBroken = 4;
 
     // KilnItemsResult.status
@@ -649,12 +651,17 @@ internal sealed unsafe class ItemsFake
         if (request.Entity == 0 || request.Item == 0 || request.Count is 0 or > 100000) return FakeTables.InvalidArgument;
         var allowed = take ? ItemsAbi.ExactSlot | ItemsAbi.DryRun
             : ItemsAbi.Level | ItemsAbi.Rarity | ItemsAbi.AllOrNothing | ItemsAbi.Notify | ItemsAbi.NoMerge | ItemsAbi.DryRun | ItemsAbi.Recipe |
-              ItemsAbi.Unlock | ItemsAbi.GemSlot;
+              ItemsAbi.Unlock | ItemsAbi.GemSlot | ItemsAbi.GemSlotAny | ItemsAbi.Replace | ItemsAbi.Dye | ItemsAbi.Durability;
+        const uint gearOptions = ItemsAbi.Unlock | ItemsAbi.GemSlot | ItemsAbi.GemSlotAny | ItemsAbi.Dye | ItemsAbi.Durability;
         if ((request.Flags & ~allowed) != 0) return FakeTables.InvalidArgument;
-        if ((request.Flags & (ItemsAbi.Unlock | ItemsAbi.GemSlot)) != 0 && (request.Flags & ItemsAbi.Recipe) != 0) return FakeTables.InvalidArgument;
+        if ((request.Flags & gearOptions) != 0 && (request.Flags & ItemsAbi.Recipe) != 0) return FakeTables.InvalidArgument;
+        if ((request.Flags & ItemsAbi.GemSlotAny) != 0 && (request.Flags & ItemsAbi.GemSlot) == 0) return FakeTables.InvalidArgument;
         if ((request.Flags & ItemsAbi.Unlock) != 0 ? request.Unlock is not (>= 1 and <= 5 or 255) : request.Unlock != 0) return FakeTables.InvalidArgument;
-        // upgrades and gem slots need feature items.pide_options, which the kit does not model
-        if ((request.Flags & (ItemsAbi.Unlock | ItemsAbi.GemSlot)) != 0) return FakeTables.Unavailable;
+        if ((request.Flags & ItemsAbi.Replace) != 0 &&
+            (request.Count != 1 || request.Slot == 0 || request.Pide == 0 || (request.Flags & (ItemsAbi.Recipe | ItemsAbi.NoMerge)) != 0))
+            return FakeTables.InvalidArgument;
+        // upgrades, gem slots (items.pide_options / gems.sockets) and the re-creation of gear are not modelled by the kit
+        if ((request.Flags & (gearOptions | ItemsAbi.Replace)) != 0) return FakeTables.Unavailable;
         if ((request.Flags & ItemsAbi.Recipe) != 0 && ((request.Flags & (ItemsAbi.Level | ItemsAbi.Rarity)) != 0 || request.Slot != 0)) return FakeTables.InvalidArgument;
         if ((request.Flags & ItemsAbi.Rarity) != 0 && request.Rarity > 4) return FakeTables.InvalidArgument;
         if ((request.Flags & ItemsAbi.Level) != 0 && request.Level is 0 or > 255) return FakeTables.InvalidArgument;

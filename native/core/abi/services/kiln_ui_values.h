@@ -10,7 +10,8 @@
  * off by itself; the gate list is empty in 0.2.0-dev.29, real-game checks remain unconfirmed): ui.values.detail (KUI_DETAIL), ui.values.slot
  * (KUI_SLOT), ui.values.held (KUI_HELD), ui.values.hud (KUI_HEALTH, KUI_STAMINA, KUI_MANA), ui.values.tooltip_lines
  * (tooltip_lines, open/close_tooltip_details), ui.slots.inspect (copy_slots, subscribe_slots), ui.gemforge.inspect
- * (copy_gemforge_candidates, subscribe_gemforge_candidates). A kind's game hooks are
+ * (copy_gemforge_candidates, subscribe_gemforge_candidates), gems.sockets (gemforge_sockets; the row also carries
+ * kiln.items' socket options, and on a server it is kiln.items' alone). A kind's game hooks are
  * installed when the first provider of that kind registers and its row is available; one kind failing leaves the
  * others working, and the game's own value is drawn whenever no provider changes it. These seven rows never exist on a
  * dedicated server. They require the measured client build; after a game update they are off until Kiln is updated.
@@ -296,6 +297,19 @@ typedef struct KilnUiValuesApi {
         KilnUiGemForgeFrame*, KilnUiGemForgeCandidate*, uint32_t capacity, uint32_t* required);
     /* UI thread, after each completed frame, including unavailable frames; borrowed only for the callback. */
     KilnResult(KILN_CALL* subscribe_gemforge_candidates)(KilnOwner, KilnUiGemForgeFn, void* user, KilnUiRegistration*);
+    /* ---- appended (gem wave): gems.sockets, client only. Check header.size before accessing this slot. ----
+     * Sockets on other gear in the Gem Forge: widens the WEAPONS list and the GEMS list's carrier rows (gear holding
+     * a gem) from Weapons to every category whose bit (1 << ItemCategory) is set in any owner's mask. Both lists still
+     * require the item's own socket flag (a carrier also a gem in it), so only gear that has a socket shows up, and
+     * only from the backpack and action bars (worn gear is not listed: unequip it first). Bits 0..13 only (never
+     * WeaponGem 15); Weapons is always included. The effective mask is the OR over owners; 0 removes this owner's mask,
+     * and so does unloading. The two hooks are installed at the first nonzero extra bit and do nothing while no owner
+     * sets one: without a mod the game's code runs as vanilla. Picture only: the server decides every socket action.
+     * The GEMS snapshot (copy_gemforge_candidates) then also lists carriers of the widened categories; their
+     * weapon_carrier field holds that gear. KILN_ERR_INVALID_ARGUMENT: owner 0 or a bit outside 0..13;
+     * KILN_ERR_UNAVAILABLE: a server, gems.sockets off, or its hooks could not be installed (a removal with 0 always
+     * succeeds on the client); KILN_ERR_REVOKED. Any thread. */
+    KilnResult(KILN_CALL* gemforge_sockets)(KilnOwner owner, uint32_t category_mask);
 } KilnUiValuesApi;
 
 #ifdef __cplusplus

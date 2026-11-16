@@ -67,6 +67,18 @@ internal static class AbilitiesCaps
         ReportNatives();
         try
         {
+            // gems.sockets (sigdb, both sides): served by kiln.items v7 on a server, by kiln.ui.values on a client
+            if (!ItemSockets.HasV7 && !GemForgeSockets.TableHere)
+                ServiceCaps.Lower(Gems.SocketsCapability, CapabilityReason.ServiceMissing,
+                    "neither kiln.items with gem sockets (v7) nor kiln.ui.values with gemforge_sockets is here");
+        }
+        catch (Exception e) when (e is ArgumentException or InvalidOperationException or TypeInitializationException
+                                      or FileNotFoundException or FileLoadException)
+        {
+            ModLog.Warn($"kiln.abilities: {Gems.SocketsCapability} was not lowered: {e.Message}");
+        }
+        try
+        {
             var (state, reason, text) = DecideList(PlayerStates.Status is { } st ? st.Reflection : null, Row("kiln.playerstate"), Row("players.reflection"));
             ServiceCaps.Report(BuffList, state, reason, text);
         }

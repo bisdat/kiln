@@ -56,9 +56,27 @@ public sealed unsafe class UiValuesFakeTests
         Assert.Equal(32, sizeof(UiValuesAbi.BarValue));
         Assert.Equal(56, sizeof(UiValuesAbi.ProviderContext));
         Assert.Equal(288, sizeof(UiValuesAbi.LineWriter));
-        Assert.Equal(88, sizeof(UiValuesAbi.Table));
+        Assert.Equal(112, sizeof(UiValuesAbi.Table));  // v1 + the Gem Forge slots + gemforge_sockets (append-only)
         Assert.True(T != null);
         Assert.Contains(Coverage.All, r => r.Capabilities.Contains("kiln.ui.values") && r.Kind == CoverageKind.RecordingFake);
+    }
+
+    [Fact]
+    public void GemForgeSocketsRecordsEachOwnersMask()
+    {
+        using var kiln = new KilnHarness();
+        kiln.Boot();
+        kiln.Run(() =>
+        {
+            Assert.Equal(1, T->GemForgeSockets(0, 2));       // owner 0
+            Assert.Equal(1, T->GemForgeSockets(77, 1u << 15)); // WeaponGem is never a carrier category
+            Assert.Equal(0, T->GemForgeSockets(77, 2));
+            Assert.Equal(0, T->GemForgeSockets(78, 0x100));
+            Assert.Equal(new Dictionary<ulong, uint> { [77] = 2, [78] = 0x100 }, UiValuesFake.State!.SocketMasks);
+            Assert.Equal(0, T->GemForgeSockets(77, 0));
+            Assert.Equal(new Dictionary<ulong, uint> { [78] = 0x100 }, UiValuesFake.State!.SocketMasks);
+            Assert.Equal(3, T->CopyGemForge(77, 0, 0, null, null, 0, null));  // the Gem Forge is not drawn offline
+        });
     }
 
     [Fact]

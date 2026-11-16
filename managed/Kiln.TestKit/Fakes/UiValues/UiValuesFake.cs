@@ -103,7 +103,15 @@ internal static unsafe class UiValuesAbi
         public delegate* unmanaged[Cdecl]<ulong, int> CloseTooltipDetails;
         public delegate* unmanaged[Cdecl]<ulong, uint, void*, int> TooltipDetails;
         public delegate* unmanaged[Cdecl]<ulong, void*, int> RefreshTooltipDetails;
+        // ---- appended: ui.gemforge.inspect (not modelled: unavailable) and gems.sockets' gemforge_sockets ----
+        public delegate* unmanaged[Cdecl]<ulong, ulong, ulong, void*, void*, uint, uint*, int> CopyGemForge;
+        public delegate* unmanaged[Cdecl]<ulong, void*, void*, Registration*, int> SubscribeGemForge;
+        public delegate* unmanaged[Cdecl]<ulong, uint, int> GemForgeSockets;
     }
+
+    public const string GemForgeRow = "ui.gemforge.inspect";
+    public const string SocketsRow = "gems.sockets";
+    public const uint SocketCategories = 0x3fff;  // gemforge_sockets accepts ItemCategory bits 0..13
 }
 
 internal sealed class UiValuesFakeState
@@ -114,6 +122,8 @@ internal sealed class UiValuesFakeState
     public readonly List<Reg> Regs = [];
     public readonly Dictionary<ulong, string> Texts = [];
     public readonly List<FakeUiDecision> Decisions = [];
+    /// <summary>gemforge_sockets' masks by owner (0 removes): what the client's Gem Forge lists would be widened to.</summary>
+    public readonly Dictionary<ulong, uint> SocketMasks = [];
     public ulong NextHandle = 1;
 }
 
@@ -140,6 +150,9 @@ internal sealed unsafe class UiValuesFake : IKitFake
             t->CloseTooltipDetails = &Close;
             t->TooltipDetails = &NoDetailsWhich;
             t->RefreshTooltipDetails = &NoDetails;
+            t->CopyGemForge = &CopySlots;
+            t->SubscribeGemForge = &NoRegistration;
+            t->GemForgeSockets = &GemForgeSockets;
             var ops = (UiValuesAbi.TextOps*)NativeMemory.AllocZeroed((nuint)sizeof(UiValuesAbi.TextOps));
             ops->Size = (uint)sizeof(UiValuesAbi.TextOps);
             ops->Version = 1;
@@ -151,6 +164,7 @@ internal sealed unsafe class UiValuesFake : IKitFake
         KitBackend.Instance.RegisterTable(UiValuesAbi.Service, (nint)_table);
         FakeTables.Features(UiValuesAbi.Rows);
         FakeTables.Offline(UiValuesAbi.SlotsRow, "no game UI draws slots offline");
+        FakeTables.Offline(UiValuesAbi.GemForgeRow, "no game UI draws the Gem Forge offline");
     }
 
     public void Start(KilnHarness harness) { }
@@ -223,6 +237,22 @@ internal sealed unsafe class UiValuesFake : IKitFake
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int CopySlots(ulong o, ulong s, ulong f, void* frame, void* slots, uint capacity, uint* required) => FakeTables.Unavailable;
+
+    // gems.sockets: records the owner's mask (the forge lists are not drawn offline). A switched-off row answers as the
+    // native service does; a removal (0) always succeeds.
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int GemForgeSockets(ulong owner, uint mask)
+    {
+        if (owner == 0 || (mask & ~UiValuesAbi.SocketCategories) != 0) return FakeTables.InvalidArgument;
+        if (FakeTables.Active(UiValuesAbi.Service) is null || State is not { } st) return FakeTables.Unavailable;
+        if (mask != 0 && FakeTables.Off(UiValuesAbi.SocketsRow)) return FakeTables.Unavailable;
+        lock (st.Lock)
+        {
+            if (mask == 0) st.SocketMasks.Remove(owner);
+            else st.SocketMasks[owner] = mask;
+        }
+        return FakeTables.Ok;
+    }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int NoRegistration(ulong o, void* fn, void* user, UiValuesAbi.Registration* r) => FakeTables.Unavailable;

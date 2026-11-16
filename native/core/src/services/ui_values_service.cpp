@@ -288,7 +288,7 @@ bool init() {
     // Each feature resolves on its own; the rows (and the client gate) decide at registration time.
     static const char* const kFeatures[] = {"ui.values.detail", "ui.values.slot",          "ui.values.held",
                                             "ui.values.hud",    "ui.values.tooltip_lines", "ui.slots.inspect",
-                                            "ui.gemforge.inspect"};
+                                            "ui.gemforge.inspect", "gems.sockets"};
     if (!env().layout_supported())
         for (uint32_t k = 0; k < kLists; ++k)
             if (row_of(k)) disable_kind(k, "private UI layout is not measured for this client image");

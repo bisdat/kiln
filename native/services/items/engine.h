@@ -203,6 +203,8 @@ struct Access {
 struct Job {
     bool take = false;
     KilnItemsRequest r{};
+    uint32_t dye = 0;          // v7 KILN_ITEMS_DYE (from KilnItemsRequestEx)
+    float durability = 1.0f;   // v7 KILN_ITEMS_DURABILITY
 };
 
 // A Fuel request (set / add / fill) or one keep-full entry, as the program sees it.

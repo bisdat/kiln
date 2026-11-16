@@ -34,9 +34,10 @@ extern "C" {
 #endif
 
 #define KILN_ITEMS_SERVICE "kiln.items"
-#define KILN_ITEMS_VERSION 6u  /* v2 appends the fuel functions, v3 the move, name and transfer functions, v4 the item
+#define KILN_ITEMS_VERSION 7u  /* v2 appends the fuel functions, v3 the move, name and transfer functions, v4 the item
                                   instances (stamps, locations, records), v5 (0.2.0-dev.27) equip and unequip, v6
-                                  (0.2.0-dev.29) equipment sets; check header.size */
+                                  (0.2.0-dev.29) equipment sets, v7 (0.2.0-dev.30, the gem wave) gem sockets on any gear:
+                                  KILN_ITEMS_GEM_SLOT_ANY, REPLACE, DYE, DURABILITY and socket_roll; check header.size */
 
 typedef uint32_t KilnItemId;  /* 0 = none */
 typedef uint64_t KilnSlotId;  /* 0 = none / let the game choose */
@@ -69,6 +70,19 @@ enum {
     KILN_ITEMS_UNLOCK = 0x0100u,         /* give gear with `unlock` of its upgrades (perks) unlocked, as the workbench's
                                             upgrade does it (each one raises the level by 1); 255 = all of them */
     KILN_ITEMS_GEM_SLOT = 0x0200u,       /* give weapons with an empty gem slot when the game's own roll gave none */
+    /* since 0.2.0-dev.30 (v7, the gem wave; feature items.pide_options, like the two above) */
+    KILN_ITEMS_GEM_SLOT_ANY = 0x0400u,   /* with GEM_SLOT: any gear gets the empty gem slot (rings, armour, shields,
+                                            tools...), not only weapons. Gems, dyes and customization items never do */
+    KILN_ITEMS_REPLACE = 0x0800u,        /* give: in the same transaction first take the item entity `pide` out of
+                                            `slot` (it must hold `item` and that entity), then create the new item,
+                                            preferably in that slot: both or neither (Gems.AddSocket re-creates gear this
+                                            way). `count` 1, a gear item, `slot` and `pide` required; not with RECIPE.
+                                            KILN_ITEMS_REFUSED, nothing changed: the item is worn or held (a player's
+                                            equipment slot or item in hand, or ItemState IsEquipped), has a gem slot
+                                            (its gem would be destroyed with it), or has no readable ItemState */
+    KILN_ITEMS_DYE = 0x1000u,            /* give gear dyed with KilnItemsRequestEx.dye (needs the Ex request) */
+    KILN_ITEMS_DURABILITY = 0x2000u,     /* give gear at KilnItemsRequestEx.durability (0..1 of its max; needs the Ex
+                                            request), as the game's DurabilityPercentageInit sets it */
 };
 
 typedef struct KilnItemsRequest {
@@ -85,6 +99,14 @@ typedef struct KilnItemsRequest {
     KilnSlotId slot;     /* give: the slot to fill first (0 = the game's choice); take: the slot to take from first
                             (0 = the game's order: a player's held action-bar slot, then everything) */
 } KilnItemsRequest;
+
+/* v7: a give with KILN_ITEMS_DYE or KILN_ITEMS_DURABILITY passes this, base.size = sizeof(KilnItemsRequestEx). */
+typedef struct KilnItemsRequestEx {
+    KilnItemsRequest base;
+    KilnItemId dye;      /* KILN_ITEMS_DYE: the dye item (ColorPaletteItem.paletteItemId); 0 = undyed */
+    float durability;    /* KILN_ITEMS_DURABILITY: 0..1 of the item's max durability (0 = broken) */
+    uint32_t reserved[2];/* 0 */
+} KilnItemsRequestEx;
 
 /* KilnItemsResult.status */
 enum {
@@ -860,6 +882,29 @@ typedef struct KilnSetStatusV1 {
     char detail[160];       /* why it is off; NUL-terminated */
 } KilnSetStatusV1;
 
+/* ---------------------------------------------------------------------------------------------- gem sockets -- */
+
+/* v7 (the gem wave; feature items.pide_options). The game gives a new weapon an empty gem slot (WeaponGemSlot) by a
+ * chance per rarity or when its ItemInfo sets gemSlotOverride; every other kind of gear never gets one, although the
+ * rest of the gem system does not care: equipment_impacts runs the gem of the item in any of its 11 impact slots, and
+ * the save keeps a socket on any item (docs/kiln/services/gems-sockets.md). kiln.items' createPide hook widens this:
+ *  - KILN_ITEMS_GEM_SLOT_ANY on a give (above);
+ *  - gemSlotOverride is honoured on every gear item, not only weapons (no game item outside the weapons sets it: a
+ *    data pack sets the item field "gemSlotOverride": true on its own ring);
+ *  - socket_roll: new gear of a kind rolls an empty gem slot with a chance whenever the game creates it (loot, crafting,
+ *    a give). The chance of a kind is the highest any owner asked for. Weapons keep the game's own roll.
+ * Nothing changes for an item that already has a gem slot. */
+
+/* kinds (KilnItemsSocketRoll's fields): by ItemInfo category and equipment slot type */
+typedef struct KilnItemsSocketRoll {
+    uint32_t size;  /* sizeof(KilnItemsSocketRoll) */
+    float rings;    /* 0..1: category Equipment, slot type Armour_Ring (37) */
+    float armour;   /* Equipment, Armour_Head .. Armour_Feet (13-17) */
+    float shields;  /* Equipment, Shield (18) */
+    float other;    /* any other gear (tools, backpacks, gliders...) except weapons, gems, dyes and customization */
+    uint32_t reserved; /* 0 */
+} KilnItemsSocketRoll;
+
 /* ---------------------------------------------------------------------------------------------- the table ---- */
 
 typedef struct KilnItemsApi {
@@ -1031,6 +1076,15 @@ typedef struct KilnItemsApi {
     /* Ends a queued set (not started) Dropped at the next Pre; its callback is kept and runs once. KILN_ERR_NOT_FOUND:
      * no such set, or it already ran or is running. Never undoes a commit. Any thread. */
     KilnResult(KILN_CALL* set_cancel)(uint64_t ticket);
+
+    /* ---- v7, since 0.2.0-dev.30: gem sockets (check header.size; KILN_ERR_UNAVAILABLE without feature
+     * items.pide_options) ---- */
+
+    /* Sets `owner`'s socket rolls (see "gem sockets"); NULL or every chance 0 ends them. KILN_ERR_UNAVAILABLE (checked
+     * first, for any non-NULL roll, even an invalid one: a probe that changes nothing): feature gems.sockets is off.
+     * KILN_ERR_INVALID_ARGUMENT: a chance outside 0..1 (or not a number), size too small, reserved not 0.
+     * cancel_owner(owner) ends them too. Any thread; the next item the game creates uses them. */
+    KilnResult(KILN_CALL* socket_roll)(KilnOwner owner, const KilnItemsSocketRoll* roll);
 } KilnItemsApi;
 
 #ifdef __cplusplus
