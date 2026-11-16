@@ -137,3 +137,14 @@ fn native_first_pass_rule_is_validated_without_changing_chain_entries() {
     let mut bad=good.clone();bad["rules"][0]["action"]=serde_json::json!("warn");bad["rules"][0].as_object_mut().unwrap().remove("target");
     assert!(parse_rules(bad.to_string().as_bytes(),RuleSource::Kiln).0.is_empty());
 }
+
+#[test]
+fn shipped_auto_doors_wait_uses_a_distinctive_package_file() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../native/core/compat-rules.json");
+    let (rules, errors) = parse_rules(&std::fs::read(path).unwrap(), RuleSource::Kiln);
+    assert!(errors.is_empty(), "{errors:?}");
+    let rule = &rules.iter().find(|r| r.rule.id == "auto-doors-after-shroudtopia-first-pass").unwrap().rule;
+    assert_eq!(rule.subject, Some(Matcher::Module("AutoDoors/bin/ad_core.dll".into())));
+    assert_eq!(rule.target, Some(Matcher::Mod("shroudtopia:item-skill-text".into())));
+    assert_eq!(rule.max_wait_ms, Some(30000));
+}

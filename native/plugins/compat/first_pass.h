@@ -21,10 +21,20 @@ public:
     }
     bool open(bool create) {
         if (data_) return true;
-        const auto name = L"Local\\Kiln.Shroudtopia.FirstPass." + std::to_wstring(GetCurrentProcessId());
+        FILETIME created{}, exited{}, kernel{}, user{};
+        if (!GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user)) return false;
+        const uint64_t identity = (static_cast<uint64_t>(created.dwHighDateTime) << 32) | created.dwLowDateTime;
+        const auto name = L"Local\\Kiln.Shroudtopia.FirstPass." + std::to_wstring(GetCurrentProcessId()) + L"." +
+                          std::to_wstring(identity);
         mapping_ = create ? CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, sizeof(Data), name.c_str())
                           : OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, name.c_str());
         if (!mapping_) return false;
+        // Never trust an object retained by another process or created before this core.
+        if (create && GetLastError() == ERROR_ALREADY_EXISTS) {
+            CloseHandle(mapping_);
+            mapping_ = nullptr;
+            return false;
+        }
         data_ = static_cast<Data*>(MapViewOfFile(mapping_, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(Data)));
         if (!data_) { CloseHandle(mapping_); mapping_ = nullptr; }
         return data_ != nullptr;

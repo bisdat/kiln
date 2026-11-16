@@ -22,7 +22,7 @@
       ],
       "action": "defer",
       "subject": {
-        "mod": "native:auto-doors-1.1.0-298-1.1.0-2026-11-04t19-12z-axkrtkhdp"
+        "module": "AutoDoors/bin/ad_core.dll"
       },
       "target": {
         "mod": "shroudtopia:item-skill-text"

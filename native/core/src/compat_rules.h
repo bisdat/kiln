@@ -24,7 +24,7 @@ struct Rule {
     std::vector<Matcher> when;     // empty: the rule always fires
     std::string action;            // warn | late | disable | before | defer
     bool has_subject = false;      // required for late, disable, before and defer
-    Matcher subject;
+    Matcher subject;               // defer also sees exact package-relative companion paths
     // before (dev.29): the DLL that loads after the subject. The launcher orders the two in chain.ini
     // (the target late, the subject early); the core reports whether the order held. A core before dev.29 drops the rule
     // ("unknown key \"target\"") and keeps the others.

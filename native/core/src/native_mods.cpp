@@ -75,6 +75,7 @@ struct Mod {
     St state = St::Pending;
     std::optional<compat::Rule> wait_rule;
     bool phase_reached = false;
+    bool loading = false;
     std::string reason;
     std::vector<std::string> notes;
     int load_index = -1;
@@ -737,6 +738,10 @@ void write_state() {
 // ---- loading ----
 
 void load_mod(Mod& m, uint32_t phase) {
+    std::unique_lock lock(g_mutex);
+    if (m.state != St::Pending || m.loading) return;
+    m.loading = true;
+    struct Finish { Mod& m; ~Finish() { m.loading = false; } } finish{m};
     for (const auto& r : m.needs) {
         const Mod* p = any_by_id(r);
         if (!p || p->state != St::Loaded) {
@@ -768,7 +773,9 @@ void load_mod(Mod& m, uint32_t phase) {
         const bool again = g_loaded_paths.count(canon) != 0;
         const double t0 = now_ms();
         DWORD error = 0;
+        lock.unlock();  // Foreign code may need the game thread, which also reads native state.
         HMODULE h = guarded_load(path.c_str(), &error);
+        lock.lock();
         d.ms = now_ms() - t0;
         if (!h) {
             d.status = "failed";
@@ -804,8 +811,14 @@ void load_mod(Mod& m, uint32_t phase) {
         c.hooks_enabled = hooks_enabled() ? 1u : 0u;
         c.play_once = boot_info().play_once;
         const double ti = now_ms();
+        int result = 0;
+        unsigned long fault = 0;
+        lock.unlock();
+        const bool ok = guarded_init(fn, &c, &result, &fault);
+        lock.lock();
         m.init_called = true;
-        const bool ok = guarded_init(fn, &c, &m.init_result, &m.init_fault);
+        m.init_result = result;
+        m.init_fault = fault;
         m.init_ms = now_ms() - ti;
         if (!ok) {
             m.init_faulted = true;
@@ -840,19 +853,23 @@ void load_mod(Mod& m, uint32_t phase) {
 }
 
 void run_phase(uint32_t phase) {
-    std::lock_guard lock(g_mutex);
+    std::unique_lock lock(g_mutex);
     g_last_phase = kPhases[phase];
     int n = 0;
     for (Mod* m : g_order[phase]) {
-        if (m->state != St::Pending) continue;
+        if (m->state != St::Pending || m->loading) continue;
         m->phase_reached = true;
         if (m->wait_rule) continue;
+        lock.unlock();
         load_mod(*m, phase);
+        lock.lock();
         ++n;
     }
     if (n) KLOG_I("native: phase %s: %d mod(s) handled", kPhases[phase], n);
     write_state();
-    if (g_defer_ready) start_deferred();
+    const bool ready = g_defer_ready;
+    lock.unlock();
+    if (ready) start_deferred();
 }
 
 const char* const kChainSources[] = {"chain", "profile", "emf"};
@@ -950,7 +967,22 @@ void discover(bool verified) {
 bool ordered_after(const Mod& m, const Mod& d) {
     if (d.phase > m.phase) return false;
     const auto has = [](const auto& ids, const auto& id) { return std::find(ids.begin(), ids.end(), id) != ids.end(); };
-    return has(m.needs, d.id) || has(m.after, d.id) || has(d.before, m.id);
+    return has(m.needs, d.id) || (d.phase == m.phase && (has(m.after, d.id) || has(d.before, m.id)));
+}
+
+// Exact package-relative companion paths only. Do not scan folders or follow a path outside this package.
+bool package_module(const Mod& m, const compat::Matcher& subject) {
+    if (subject.kind != compat::Matcher::Kind::Module || subject.value.find_first_of("*?\\:") != std::string::npos) return false;
+    const fs::path relative = to_wide(subject.value);
+    if (!relative.has_parent_path() || relative.has_root_path()) return false;
+    for (const auto& part : relative) if (part == L"..") return false;
+    std::error_code ec;
+    const fs::path file = fs::path(to_wide(m.folder)) / relative;
+    if (!fs::is_regular_file(file, ec)) return false;
+    const auto within = fs::relative(file, fs::path(to_wide(m.folder)), ec);
+    if (ec || within.empty() || within.has_root_path()) return false;
+    for (const auto& part : within) if (part == L"..") return false;
+    return true;
 }
 
 // The same load_mod path as each normal phase. Waiting and deferred loads run off the game thread.
@@ -958,10 +990,10 @@ DWORD WINAPI deferred_main(void*) {
     for (;;) {
         bool waiting = false, changed = false;
         {
-            std::lock_guard lock(g_mutex);
+            std::unique_lock lock(g_mutex);
             for (uint32_t phase = KILN_NATIVE_PHASE_EARLY; phase <= KILN_NATIVE_PHASE_WORLD; ++phase) {
                 for (Mod* m : g_order[phase]) {
-                    if (m->state != St::Pending || !m->phase_reached || !m->wait_rule) continue;
+                    if (m->state != St::Pending || m->loading || !m->phase_reached || !m->wait_rule) continue;
                     const auto decision = g_first_pass.decision(m->wait_rule->max_wait_ms);
                     if (decision == first_pass::Decision::Wait || std::any_of(g_mods.begin(), g_mods.end(), [&](const Mod& d) {
                         return d.state == St::Pending && d.wait_rule && ordered_after(*m, d);
@@ -976,7 +1008,9 @@ DWORD WINAPI deferred_main(void*) {
                     if (decision == first_pass::Decision::Timeout)
                         KLOG_W("native %s: Shroudtopia's first pass did not finish within %u ms; starting anyway", m->id.c_str(),
                                m->wait_rule->max_wait_ms);
+                    lock.unlock();
                     load_mod(*m, phase);
+                    lock.lock();
                     if (m->state == St::Loaded)
                         KLOG_I("native %s started %s, %llu ms", m->id.c_str(),
                                decision == first_pass::Decision::Complete ? "after Shroudtopia's first pass" :
@@ -1013,6 +1047,8 @@ void run_early() {
             compat::Facts own;
             own.mods.push_back("native:" + m.id);
             for (const auto& d : m.dlls) own.modules.push_back(u8(fs::path(to_wide(d.file)).filename()));
+            for (const auto& rule : rules)
+                if (package_module(m, rule.subject)) own.modules.push_back(rule.subject.value);
             const auto* rule = compat::native_defer_rule(rules, facts, own, host);
             if (!rule) continue;
             if (!channel && !(channel = g_first_pass.open(true))) {
@@ -1039,13 +1075,22 @@ void run_early() {
                 }
             }
         } while (changed);
+        // The native ABI keeps init on its phase thread. A connected successor may have init too.
+        if (std::any_of(g_mods.begin(), g_mods.end(), [](const Mod& m) { return m.wait_rule && !m.init.empty(); })) {
+            KLOG_W("native: cannot wait for Shroudtopia without moving a native init off its phase thread; using normal phases");
+            for (Mod& m : g_mods) {
+                if (!m.wait_rule) continue;
+                m.wait_rule.reset();
+                m.notes.pop_back();
+            }
+        }
     }
     run_phase(KILN_NATIVE_PHASE_EARLY);
     start_deferred();  // watch the host as soon as it starts, even if another plugin callback blocks
 }
 
 void start_deferred() {
-    std::lock_guard lock(g_mutex);
+    std::unique_lock lock(g_mutex);
     if (g_defer_worker) return;
     bool any = false;
     for (const Mod& m : g_mods) any |= m.state == St::Pending && m.phase_reached && m.wait_rule.has_value();
@@ -1055,13 +1100,16 @@ void start_deferred() {
     if (worker) { CloseHandle(worker); return; }
     KLOG_W("native: cannot start the Shroudtopia wait worker; starting the waiting natives now");
     g_first_pass.bypass();
+    lock.unlock();
     deferred_main(nullptr);
 }
 
 void plugins_ready() {
-    std::lock_guard lock(g_mutex);
-    g_defer_ready = true;
-    g_first_pass.absent();  // every on_ready returned; an absent/failed/idle host cannot start a pass
+    {
+        std::lock_guard lock(g_mutex);
+        g_defer_ready = true;
+        g_first_pass.absent();  // every on_ready returned; an absent/failed/idle host cannot start a pass
+    }
     start_deferred();
 }
 
@@ -1188,8 +1236,10 @@ std::vector<LateRow> late_rows() {
 }
 
 void run_boot() {
-    std::lock_guard lock(g_mutex);
-    g_hooks = hooks_enabled();
+    {
+        std::lock_guard lock(g_mutex);
+        g_hooks = hooks_enabled();
+    }
     run_phase(KILN_NATIVE_PHASE_BOOT);
 }
 

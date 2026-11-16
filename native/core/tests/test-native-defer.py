@@ -22,10 +22,18 @@ using DWORD=uint32_t;using LONG=int32_t;using LONG64=int64_t;using HANDLE=void*;
 constexpr unsigned PAGE_READWRITE=4,FILE_MAP_ALL_ACCESS=0xf001f;
 struct Page {alignas(8) unsigned char bytes[16]{};};
 inline std::map<std::wstring,Page> pages;
-inline uint64_t fake_tick=100;inline DWORD fake_pid=42;
+inline uint64_t fake_tick=100,fake_created=1234;inline DWORD fake_pid=42,last_error=0;
+inline bool times_fail=false;
+struct FILETIME {DWORD dwLowDateTime=0,dwHighDateTime=0;};
+constexpr DWORD ERROR_ALREADY_EXISTS=183;
+inline HANDLE GetCurrentProcess(){return reinterpret_cast<HANDLE>(1);}
+inline int GetProcessTimes(HANDLE,FILETIME* created,FILETIME*,FILETIME*,FILETIME*){
+ created->dwLowDateTime=DWORD(fake_created);created->dwHighDateTime=DWORD(fake_created>>32);return !times_fail;
+}
+inline DWORD GetLastError(){return last_error;}
 inline DWORD GetCurrentProcessId(){return fake_pid;}
 inline uint64_t GetTickCount64(){return fake_tick;}
-inline HANDLE CreateFileMappingW(HANDLE,void*,unsigned,unsigned,unsigned,const wchar_t* name){return &pages[name];}
+inline HANDLE CreateFileMappingW(HANDLE,void*,unsigned,unsigned,unsigned,const wchar_t* name){last_error=pages.count(name)?ERROR_ALREADY_EXISTS:0;return &pages[name];}
 inline HANDLE OpenFileMappingW(unsigned,int,const wchar_t* name){auto it=pages.find(name);return it==pages.end()?nullptr:&it->second;}
 inline void* MapViewOfFile(HANDLE h,unsigned,unsigned,unsigned,size_t){return static_cast<Page*>(h)->bytes;}
 inline void UnmapViewOfFile(void*){}
@@ -68,8 +76,18 @@ int main(int, char** argv){
  host.stop();check(core.decision(30000)==Decision::Cancel,"shutdown cancels pending startup");
  fake_pid=43;Channel other;check(other.open(true) && other.state()==State::Expected,"process ids isolate channels");
  other.absent();check(other.decision(30000)==Decision::Bypass,"absent host does not wait");
+ fake_pid=42;++fake_created;Channel reused,reused_host;
+ check(reused.open(true) && reused_host.open(false) && reused.state()==State::Expected,"reused pid cannot inherit an earlier process's stopped or completed pass");
+ reused_host.begin();check(reused.state()==State::Running && core.state()==State::Stopped,"reused pid has a distinct channel");
+ Channel collision;check(!collision.open(true),"core refuses an already-existing channel instead of trusting its contents");
+ ++fake_pid;times_fail=true;Channel no_identity;check(!no_identity.open(true),"missing process identity fails open without creating a wait");times_fail=false;
  std::ifstream shipped_file(argv[2]);std::stringstream shipped_text;shipped_text<<shipped_file.rdbuf();
  auto shipped=parse_rules(shipped_text.str(),"shipped");check(shipped.ok && shipped.dropped==0 && shipped.rules.size()==2,"all shipped rules parse");
+ Facts package_start;package_start.mods={"shroudtopia:item-skill-text"};Facts package_own;
+ package_own.mods={"native:auto-doors-new-version"};package_own.modules={"powrprof.dll","AutoDoors/bin/ad_core.dll"};
+ check(native_defer_rule(shipped.rules,package_start,package_own,true)!=nullptr,"shipped rule identifies Auto Doors by its own files rather than its archive name");
+ package_own.modules={"powrprof.dll"};
+ check(!native_defer_rule(shipped.rules,package_start,package_own,true),"shipped rule never matches an unrelated powrprof provider");
  const std::string rule=R"({"format":1,"rules":[{"id":"doors","action":"defer","when":[{"mod":"shroudtopia:item-skill-text"}],"subject":{"mod":"native:auto-doors-1.1.0-298-1.1.0-2026-11-04t19-12z-axkrtkhdp"},"target":{"mod":"shroudtopia:item-skill-text"},"max_wait_ms":30000}]})";
  auto p=parse_rules(rule,"test");
  check(p.ok && p.rules.size()==1 && !p.dropped,"accept bounded first-pass deferral rule");

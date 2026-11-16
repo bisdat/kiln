@@ -24,6 +24,7 @@ pre=r'''
 #include <fstream>
 #include <algorithm>
 #include <cwctype>
+#include <thread>
 #include "compat_rules.h"
 #include "first_pass_policy.h"
 namespace first_pass=kiln::first_pass;
@@ -34,7 +35,7 @@ using DWORD=unsigned;using HANDLE=void*;
 constexpr unsigned KILN_NATIVE_PHASE_DLLMAIN=0,KILN_NATIVE_PHASE_EARLY=1,KILN_NATIVE_PHASE_WORLD=3,KILN_PROFILE_KIND_PLUGIN=2;
 enum class St {Pending,Loaded,Failed,Skipped};
 struct Dll {std::string file;};
-struct Mod {std::string id;unsigned phase=1;std::vector<std::string> needs,after,before,notes;std::vector<Dll> dlls;St state=St::Pending;bool phase_reached=false;std::optional<kiln::compat::Rule> wait_rule;bool fail=false;};
+struct Mod {std::string id,folder,init;unsigned phase=1;std::vector<std::string> needs,after,before,notes;std::vector<Dll> dlls;St state=St::Pending;bool phase_reached=false,loading=false;std::optional<kiln::compat::Rule> wait_rule;bool fail=false;};
 std::recursive_mutex g_mutex;
 std::vector<Mod*> g_order[4];std::vector<Mod> g_mods;
 bool g_defer_worker=false,g_defer_ready=false,thread_failure=false,g_verified=true,external=false,channel_failure=false;
@@ -57,13 +58,16 @@ namespace kiln::compat {
 Facts test_facts;std::vector<Rule> test_rules;
 std::vector<Rule> native_wait_rules(Facts* f){*f=test_facts;return test_rules;}
 const Rule* native_defer_rule(const std::vector<Rule>& rules,const Facts& f,const Facts& own,bool host){
- if(!host || f.mods.empty() || own.mods!=std::vector<std::string>{"native:doors"} || rules.empty())return nullptr;
+ if(!host || f.mods.empty() || rules.empty())return nullptr;
+ if(rules[0].subject.kind==Matcher::Kind::Module){
+  if(std::find(own.modules.begin(),own.modules.end(),rules[0].subject.value)==own.modules.end())return nullptr;
+ }else if(own.mods!=std::vector<std::string>{"native:doors"})return nullptr;
  return &rules[0];
 }
 }
 const char* kPhases[]={"dllmain","early","boot","world"};const char* g_last_phase=nullptr;
 uint64_t clock_ms=100;std::vector<std::string> loads,logs;unsigned writes=0,sleeps=0;
-std::function<void()> on_sleep;DWORD (*thread_fn)(void*)=nullptr;
+std::function<void()> on_sleep,on_load;DWORD (*thread_fn)(void*)=nullptr;
 void log_line(const char* f,...) {logs.push_back(f);}
 uint64_t GetTickCount64(){return clock_ms;}
 void Sleep(unsigned n){++sleeps;clock_ms+=n;if(on_sleep)on_sleep();}
@@ -79,7 +83,7 @@ struct Channel {
 }g_first_pass;
 void write_state(){++writes;}
 void fail(Mod& m,St state,const std::string&){m.state=state;}
-void load_mod(Mod& m,unsigned){loads.push_back(m.id);m.state=m.fail?St::Failed:St::Loaded;
+void load_mod(Mod& m,unsigned){if(on_load)on_load();loads.push_back(m.id);m.state=m.fail?St::Failed:St::Loaded;
  for(const auto& need:m.needs)for(const auto& d:g_mods)if(d.id==need && d.state!=St::Loaded)m.state=St::Failed;}
 void start_deferred();
 void plugins_ready();
@@ -92,7 +96,8 @@ int checks=0,failures=0;
 void check(bool b,const char* s){++checks;if(!b){++failures;std::cerr<<"FAIL "<<s<<"\n";}}
 void setup(){
  g_mods.clear();g_mods.resize(3);for(auto& o:g_order)o.clear();loads.clear();logs.clear();g_defer_worker=g_defer_ready=false;thread_failure=external=channel_failure=false;g_verified=true;cfg={};compat::test_facts.mods={"shroudtopia:item-skill-text"};compat::test_rules={compat::Rule{}};compat::test_rules[0].target.value="shroudtopia:item-skill-text";compat::test_rules[0].max_wait_ms=100;profile::test_state={};std::ofstream(test_paths.plugins/"kiln-shroudtopia.dll")<<"stub";thread_fn=nullptr;sleeps=writes=0;clock_ms=100;on_sleep={};
- g_first_pass.status=first_pass::State::Expected;g_first_pass.start=100;
+ compat::test_rules[0].subject.kind=compat::Matcher::Kind::Mod;
+ on_load={};g_first_pass.status=first_pass::State::Expected;g_first_pass.start=100;
  g_mods[0].id="doors";g_mods[0].wait_rule=kiln::compat::Rule{};g_mods[0].wait_rule->max_wait_ms=100;
  g_mods[1].id="ordinary";g_mods[2].id="boot";g_mods[2].phase=2;
  g_order[1]={&g_mods[0],&g_mods[1]};g_order[2]={&g_mods[2]};
@@ -142,6 +147,9 @@ int main(int,char** argv){
  }
  setup();for(auto& m:g_mods)m.wait_rule.reset();run_early();
  check(g_mods[0].wait_rule && g_mods[0].state==St::Pending && g_mods[1].state==St::Loaded && thread_fn,"real early runner plans wait and launches worker before on_ready");
+ setup();for(auto& m:g_mods)m.wait_rule.reset();g_mods[0].id="unmatched";g_mods[1].needs={"unmatched"};run_early();
+ check(loads==std::vector<std::string>({"unmatched","ordinary"}) && !thread_fn && !g_mods[1].wait_rule,
+       "an active rule with no matching native preserves early starts and dependencies without a worker");
  for(int edge=0;edge<3;++edge){
   setup();for(auto& m:g_mods)m.wait_rule.reset();
   if(edge==0)g_mods[1].needs={"doors"};if(edge==1)g_mods[1].after={"doors"};if(edge==2)g_mods[0].before={"ordinary"};
@@ -153,6 +161,44 @@ int main(int,char** argv){
  setup();run_phase(1);g_first_pass.status=first_pass::State::Stopped;start_deferred();
  on_sleep=[] {g_first_pass.status=first_pass::State::Done;};deferred_main(nullptr);
  check(g_mods[0].state==St::Skipped && loads==std::vector<std::string>{"ordinary"},"host shutdown cancels deferred startup");
+ // after/before order only within a phase; requires also orders across phases.
+ for(int edge=0;edge<2;++edge){
+  setup();for(auto& m:g_mods)m.wait_rule.reset();
+  if(edge==0)g_mods[2].after={"doors"};else g_mods[0].before={"boot"};
+  run_early();run_phase(2);
+  check(!g_mods[2].wait_rule && g_mods[2].state==St::Loaded,"ignored cross-phase hints do not make a boot native inherit a wait");
+ }
+ for(int successor=0;successor<2;++successor){
+  setup();for(auto& m:g_mods)m.wait_rule.reset();
+  if(successor){g_mods[1].needs={"doors"};g_mods[1].init="kiln_native_init";}
+  else g_mods[0].init="kiln_native_init";
+  run_early();check(!g_mods[0].wait_rule && g_mods[0].state==St::Loaded && !g_mods[1].wait_rule && !thread_fn,
+                   "a wait that would move a native init off its documented phase thread is bypassed");
+ }
+ // A deferred DLL can wait for game progress. State readers must remain available during its foreign calls.
+ setup();run_phase(1);g_first_pass.status=first_pass::State::Done;
+ bool available=false;on_load=[&]{std::thread reader([&]{available=g_mutex.try_lock();if(available)g_mutex.unlock();});reader.join();};
+ deferred_main(nullptr);check(available,"deferred load does not hold the native state mutex across foreign code");
+ setup();run_phase(1);g_first_pass.status=first_pass::State::Running;thread_failure=true;available=false;
+ on_load=[&]{std::thread reader([&]{available=g_mutex.try_lock();if(available)g_mutex.unlock();});reader.join();};
+ plugins_ready();check(available && sleeps==0,"worker creation fallback also releases every outer state lock");
+ // The importer lists only powrprof.dll; ad_core is a package companion, never another DLL to start.
+ const auto package=test_paths.game/"auto-doors";
+ fs::create_directories(package/"AutoDoors/bin");std::ofstream(package/"AutoDoors/bin/ad_core.dll")<<"stub";
+ for(int mode=0;mode<4;++mode){
+  setup();for(auto& m:g_mods)m.wait_rule.reset();
+  g_mods[0].id="auto-doors-new-version";g_mods[0].folder=package.string();g_mods[0].dlls={{"powrprof.dll"}};
+  compat::test_rules[0].subject={compat::Matcher::Kind::Module,"AutoDoors/bin/ad_core.dll"};
+  if(mode==1)g_mods[0].folder=(test_paths.game/"other-package").string();
+  if(mode==2)compat::test_rules[0].subject.value="../auto-doors/AutoDoors/bin/ad_core.dll";
+  if(mode==3){
+   fs::create_directories(test_paths.game/"linked-package");
+   fs::remove(test_paths.game/"linked-package/AutoDoors");
+   fs::create_directory_symlink(package/"AutoDoors",test_paths.game/"linked-package/AutoDoors");
+   g_mods[0].folder=(test_paths.game/"linked-package").string();
+  }
+  run_early();check(g_mods[0].wait_rule.has_value()==(mode==0),"exact package companion matches new ids without traversing or matching another package");
+ }
  setup();run_phase(1);simulate_boot(true);check(g_first_pass.status==first_pass::State::Running,"boot only finalizes the wait after plugin callbacks");
  setup();run_phase(1);simulate_boot(false);deferred_main(nullptr);check(sleeps==0 && g_mods[0].state==St::Loaded,"safe-idle boot releases an expected host");
  std::cout<<checks-failures<<"/"<<checks<<" checks passed\n";return failures?1:0;
