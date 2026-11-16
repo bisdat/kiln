@@ -68,9 +68,83 @@ export interface DetailsData {
 export const useImportDetails = create<{ open: DetailsData | null }>(() => ({ open: null }));
 export const showImportDetails = (d: DetailsData) => useImportDetails.setState({ open: d });
 
-/** The toast action that opens the details; only when there is something to read. */
+// ---- the last adds, to read again after their toast is gone (inbox 42: the toast went before it was read) ----
+
+/** One add as "Last adds" lists it: its details and when it finished. */
+export interface RecentAdd extends DetailsData {
+  /** ISO time. */
+  when: string;
+}
+
+const RECENT_KEY = "kiln.recentAdds";
+const RECENT_MAX = 10;
+
+function loadRecent(): RecentAdd[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]") as RecentAdd[];
+    return Array.isArray(v) ? v.filter((x) => x && typeof x.when === "string" && x.summary).slice(0, RECENT_MAX) : [];
+  } catch { return []; }
+}
+
+/** The last adds of this launcher, newest first, kept across restarts (localStorage). */
+export const useRecentAdds = create<{ adds: RecentAdd[] }>(() => ({ adds: loadRecent() }));
+
+/** Keeps `d` as the newest of the last adds. */
+export function rememberAdd(d: DetailsData) {
+  const adds = [{ ...d, when: new Date().toISOString() }, ...useRecentAdds.getState().adds].slice(0, RECENT_MAX);
+  useRecentAdds.setState({ adds });
+  try { localStorage.setItem(RECENT_KEY, JSON.stringify(adds)); } catch { /* full or unavailable: kept for this window only */ }
+}
+
+/** The toast action that opens the details; only when there is something to read. The add is kept for "Last adds"
+ *  either way: every add's toast is made through here. */
 export function detailsAction(d: DetailsData): { label: string; onClick: () => void }[] {
+  rememberAdd(d);
   return d.summary.left.length || d.summary.notes.length ? [{ label: "Details", onClick: () => showImportDetails(d) }] : [];
+}
+
+/** Toast options for an add's toast: one with something left out or not needed stays until the player closes it (a toast
+ *  with actions went after 8 s, before its reasons were read: inbox 42). */
+export function staysIfDetails(d: DetailsData): { ms?: number } {
+  return d.summary.left.length || d.summary.notes.length ? { ms: 0 } : {};
+}
+
+/** "Last adds" for the main list's bar: what the last adds took, left out and did not need, with each one's details.
+ *  Nothing while there were none. */
+export function RecentAddsButton() {
+  const adds = useRecentAdds((s) => s.adds);
+  const [open, setOpen] = useState(false);
+  if (!adds.length) return null;
+  const when = (iso: string) => {
+    const t = new Date(iso);
+    return Number.isNaN(t.getTime()) ? iso : t.toLocaleString();
+  };
+  return (
+    <>
+      <button type="button" className="k-link" onClick={() => setOpen(true)} title="What your last adds took, and what they left out and why">
+        Last adds
+      </button>
+      <Modal open={open} onClose={() => setOpen(false)} title="Last adds" width={640} footer={<Button onClick={() => setOpen(false)}>Done</Button>}>
+        <div className="k-stack">
+          <p className="k-hint">The last {RECENT_MAX} times you added mods, newest first. Kiln's launcher.log has the same lines.</p>
+          {adds.map((a, i) => (
+            <div key={a.when + i} className="k-list-item" style={{ flexWrap: "wrap", alignItems: "baseline", rowGap: 2 }}>
+              <span className="k-muted">{when(a.when)}</span>
+              <span style={{ flex: 1, minWidth: 0 }} className="k-ellipsis">
+                {a.summary.taken.length ? `${a.heading}: ${a.summary.taken.join(", ")}` : a.heading}
+              </span>
+              {(a.summary.left.length > 0 || a.summary.notes.length > 0) && (
+                <span className="k-hint">
+                  {[a.summary.left.length ? `${a.summary.left.length} left out` : "", a.summary.notes.length ? `${a.summary.notes.length} not needed` : ""].filter(Boolean).join(", ")}
+                </span>
+              )}
+              <Button variant="ghost" onClick={() => { setOpen(false); showImportDetails(a); }}>Details</Button>
+            </div>
+          ))}
+        </div>
+      </Modal>
+    </>
+  );
 }
 
 /** The details of an import: what was taken, what was left out and why, what was not needed. Mounted once in the shell. */

@@ -513,7 +513,7 @@ export type DetectKind = "kiln" | "native" | "plugin" | "emf" | "modpack" | "run
 /** kiln_manage::engines::Engine */
 export type EngineId = "kiln" | "emf" | "shroudforge" | "eml" | "set" | "enshwick" | "greeneye" | "shroudtopia" | "flame"
   | "shroudlink" | "ember" | "mod-loader-proxy" | "ultimate-asi-loader" | "aldrich" | "live-map" | "shared-xp" | "reshade"
-  | "chain-loader";
+  | "chain-loader" | "native-folders";
 export interface Detected {
   kind: DetectKind;
   path: string;

@@ -13,7 +13,7 @@ import type { Activation, AddReport, GameInstall, GameStatus, ImportReport, Laun
 import { invalidateGame, qk, useActiveProfile, useGame, useGameStatus, useProfiles, useSettings } from "../api/hooks";
 import { Banner, Button, KeyValue, Modal, Skeleton, Toggle, errorText, runTask, toast } from "../ui";
 import { useInstallPrompt } from "./firstRun";
-import { detailsAction, leftOutLine, names as nameList, summarize, usePickProfile } from "./importResult";
+import { detailsAction, leftOutLine, names as nameList, staysIfDetails, summarize, usePickProfile } from "./importResult";
 import { notifyActivation, notifyAdd } from "./notices";
 
 /** "Night Owl", "Night Owl and Dawn Lamp", "3 mods". */
@@ -73,9 +73,10 @@ export function useAddMods(): (paths: string[], target?: GameInstall) => Promise
       const r = await runTask<ImportReport>(() => api.libraryImport(files), { quiet: true });
       refresh(null);
       const sum = summarize(r);
-      const more = detailsAction({ heading: "Added, switched off", summary: sum });
-      if (sum.taken.length) toast.ok(`Added ${nameList(sum.taken)}, switched off`, leftOutLine(sum) ?? "Switch it on in the list on Play.", { actions: [{ label: "Show", onClick: () => nav("/") }, ...more] });
-      else toast.info("Nothing to import", leftOutLine(sum), { actions: more });
+      const d = { heading: "Added, switched off", summary: sum };
+      const more = detailsAction(d);
+      if (sum.taken.length) toast.ok(`Added ${nameList(sum.taken)}, switched off`, leftOutLine(sum) ?? "Switch it on in the list on Play.", { actions: [{ label: "Show", onClick: () => nav("/") }, ...more], ...staysIfDetails(d) });
+      else toast.info("Nothing to import", leftOutLine(sum), { actions: more, ...staysIfDetails(d) });
     } catch (e) { toast.error(e, "Import failed"); }
     return null;
   };
@@ -133,17 +134,21 @@ export function useAddMods(): (paths: string[], target?: GameInstall) => Promise
         r.running ? "Applies at the next start." : "",
         leftOutLine(sum) ?? "",
       ].filter(Boolean).join(" ");
-      toast.ok(`Added ${names(r.added)}`, more || "On at the next Play.", { actions: [{ label: "Undo", onClick: () => void undo(r, game.id) }, ...detailsAction(detail("Added and switched on"))] });
+      const d = detail("Added and switched on");
+      toast.ok(`Added ${names(r.added)}`, more || "On at the next Play.", { actions: [{ label: "Undo", onClick: () => void undo(r, game.id) }, ...detailsAction(d)], ...staysIfDetails(d) });
     } else if (r.already.length) {
-      toast.info(`${names(r.already)} ${r.already.length === 1 ? "is" : "are"} on already`, leftOutLine(sum), { actions: detailsAction(detail("Already on")) });
+      const d = detail("Already on");
+      toast.info(`${names(r.already)} ${r.already.length === 1 ? "is" : "are"} on already`, leftOutLine(sum), { actions: detailsAction(d), ...staysIfDetails(d) });
     } else if (r.libraryOnly && found.length) {
       // no profile is active in this game and none is remembered: the mod waits in the Library, and the player can pick a profile
       const label = nameList(sum.taken);
       toast.info(`Added ${label}, switched off`, "No profile is loaded in this game, so nothing is switched on.", {
         actions: [{ label: "Add to a profile", onClick: () => usePickProfile.setState({ pending: { game, entries: found, label, onAdded: pickedAdd } }) }, ...detailsAction(detail("Added, switched off"))],
+        ...staysIfDetails(detail("Added, switched off")),
       });
     } else if (!r.modpacks.length) {
-      toast.info("Nothing to add", leftOutLine(sum), { actions: detailsAction(detail("Nothing was added")) });
+      const d = detail("Nothing was added");
+      toast.info("Nothing to add", leftOutLine(sum), { actions: detailsAction(d), ...staysIfDetails(d) });
     }
     return r;
   };

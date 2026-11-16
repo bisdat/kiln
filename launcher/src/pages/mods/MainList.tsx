@@ -15,6 +15,7 @@ import { qk, useNexusEnabled } from "../../api/hooks";
 import { KIND_NAME, KIND_SHORT, KIND_TONE, SETTINGS_KINDS } from "../../api/kinds";
 import { EngineSettingsModal } from "../../components/EngineSettings";
 import { FolderNotesButton } from "../../components/FolderNotes";
+import { RecentAddsButton } from "../../shell/importResult";
 import { ConfigEditor } from "../../components/ConfigEditor";
 import { cookAgain } from "../../shell/cook";
 import { useAddMods } from "../../shell/drop";
@@ -274,6 +275,7 @@ export function MainList({ game, mods, running }: { game: GameInstall; mods: Mod
         {mods.rows.length > 0 && <button type="button" className="k-link" disabled={checking} title="Looks for newer versions of your mods. A notice and a link: nothing is downloaded or installed."
           onClick={() => { setChecking(true); void checkNow(qc).finally(() => setChecking(false)); }}>{checking ? "Checking…" : "Check for updates"}</button>}
         <FolderNotesButton gameId={game.id} />
+        <RecentAddsButton />
         <Link className="k-link" to="/mods/order">Load order</Link>
         <Link className="k-link" to="/mods/engines">Engines</Link>
         {nexus && <Link className="k-link" to="/catalog">Catalog</Link>}
