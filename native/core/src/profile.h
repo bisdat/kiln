@@ -6,7 +6,8 @@
 //   <game>/kiln/profile.json     -> ACTIVE
 //   none                         -> LEGACY: the drop-in folders (kiln/mods, kiln/native, kiln/plugins, emf/mods)
 // A file that exists but cannot be read or validated -> INVALID: no mods, the reason in kiln.log, boot.json and
-// json(). Entries whose folder (or plugin DLL) is missing are left out of the lists and listed in missing.
+// json(). Entries whose folder (or plugin DLL) is missing are left out of the lists and listed in missing; those of mods
+// that are off are left out without a word (the launcher removes a switched-off mod's game-folder copy).
 // Never changes after boot; every string stays valid for the life of the process.
 #pragma once
 #include <string>

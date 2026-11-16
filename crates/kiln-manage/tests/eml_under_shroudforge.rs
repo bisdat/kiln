@@ -877,3 +877,98 @@ fn patch_only_eml_and_disabled_runtime_eml_keep_standalone_loader_behavior() {
     assert!(file.mods.shroudforge.is_empty());
     assert!(ext_of(&s.game.join("mods/more-gliders")).is_none());
 }
+
+/// An EML package that is an XHL-Core plugin too (the XHL family, here XHL-Area-Harvest 2.1.0 as its author ships it:
+/// mod.json and Lua beside the plugin DLL, XHL-Core's native-plugin.ini and config.txt), with ShroudForge's file `ext`
+/// shipped. Its Library record names the game folder XHL-Core reads it from: `<game>/mods/XHL-Area-Harvest`.
+fn xhl_hybrid(s: &Setup, ext: &str) -> LibraryRef {
+    let d = s.t.0.join("pkg/XHL-Area-Harvest");
+    put(&d, "mod.json", br#"{"id":"xhl-area-harvest","name":"XHL-Planting Assistant","version":"2.1.0","capabilities":["export"]}"#);
+    put(&d, "src/mod.lua", b"return {}");
+    put(&d, "XHL-Area-Harvest.dll", &build_test_dll(&["XhlPluginEntry"], b"XHL plugin"));
+    put(&d, "native-plugin.ini", b"[Plugin]\r\nEnabled=1\r\nDll=XHL-Area-Harvest.dll\r\n\r\n[Planting]\r\nMode=Row\r\nSquareSize=5\r\n");
+    put(&d, "config.txt", b"# XHL Planting Assistant 2.1.0\nenabled=true\n");
+    put(&d, "extended.mod.json", ext.as_bytes());
+    import(&s.dirs, &d, ModKind::Eml, "xhl-area-harvest")
+}
+
+/// inbox 21 (b): an EML package that is an XHL-Core plugin too, holding ShroudForge values the player set (ShroudForge's
+/// menu), was kept when the profile stopped it and only switched off in ShroudForge's file. XHL-Core does not read that
+/// switch: it loads every plugin folder in mods that has a native-plugin.ini, so the switched-off mod kept running. The
+/// folder now goes as any XHL plugin's does, the values wait with its other settings and come back with the mod.
+#[test]
+fn an_xhl_plugin_eml_package_holding_shroudforge_values_goes_when_it_stops_and_its_values_come_back() {
+    for gone in [false, true] {
+        let s = setup(&format!("xhl-sf-values-{gone}"));
+        let harvest = xhl_hybrid(&s, SHIPPED);
+        let mut p = s.profile(vec![pm(&harvest, true)]);
+        let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+        let copy = s.game.join("mods/XHL-Area-Harvest");
+        assert!(eml(&rep.placed) == ["eml:xhl-area-harvest"] && shroudforge::read_mod(&copy).unwrap().enabled, "{rep:?}");
+        // in the game: a value set in ShroudForge's menu, and the plugin's own setting
+        shroudforge::set_setting(&copy, "radius", &serde_json::json!(9)).unwrap();
+        put(&copy, "config.txt", b"enabled=false\n");
+        if gone { p.mods.eml.clear() } else { p.mods.eml[0].enabled = false }
+        let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+        assert!(!copy.exists(), "gone {gone}: XHL-Core still loads the plugin from {}: {rep:?}", copy.display());
+        assert!(eml(&rep.removed) == ["eml:xhl-area-harvest"] && rep.retained.is_empty() && rep.changed.is_empty(), "gone {gone}: {rep:?}");
+        assert!(rep.kept_files.iter().any(|k| k.starts_with("eml:xhl-area-harvest") && k.contains("extended.mod.json")), "gone {gone}: {rep:?}");
+        // back in the profile: the player's values come back with it, switched on in ShroudForge's file
+        p.mods.eml = vec![pm(&harvest, true)];
+        let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+        assert!(eml(&rep.placed) == ["eml:xhl-area-harvest"] && rep.retained.is_empty() && rep.warnings.is_empty(), "gone {gone}: {rep:?}");
+        let m = shroudforge::read_mod(&copy).unwrap();
+        assert_eq!((m.enabled, &m.settings[0].value), (true, &serde_json::json!(9)), "gone {gone}");
+        assert_eq!(std::fs::read(copy.join("config.txt")).unwrap(), b"enabled=false\n", "gone {gone}");
+        assert!(!s.game.join("kiln/state/placed-settings/eml/xhl-area-harvest").exists(), "gone {gone}: what went back leaves the stash");
+        // they are still the player's: stopping it again sets them aside again, nothing is lost
+        p.mods.eml[0].enabled = false;
+        let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+        assert!(!copy.exists() && rep.retained.is_empty(), "gone {gone}: {rep:?}");
+        p.mods.eml[0].enabled = true;
+        engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+        assert_eq!(shroudforge::read_mod(&copy).unwrap().settings[0].value, serde_json::json!(9), "gone {gone}");
+    }
+}
+
+/// A ShroudForge package that is an XHL-Core plugin too (Building Tools for ShroudForge: BuildingTools.dll with XHL-Core's
+/// native-plugin.ini). Switched off in the profile it is switched off in ShroudForge's file and its folder stays, as for
+/// every ShroudForge mod; but where the game has XHL-Core, XHL-Core loads it from there whatever that switch says. The
+/// result says so (a folder that may still run while its mod is off, which the launcher raises even with its notes about
+/// mod folders off). Without XHL-Core it is a plain switch.
+#[test]
+fn a_switched_off_shroudforge_copy_xhl_core_loads_is_named() {
+    for xhl in [true, false] {
+        let s = setup(&format!("sf-xhl-{xhl}"));
+        let d = s.t.0.join("src/building-tools");
+        put(&d, "mod.json", br#"{"id":"building-tools","name":"Building Tools","version":"0.33.2","capabilities":[]}"#);
+        put(&d, "extended.mod.json", br#"{"schemaVersion":1,"enabled":true,"targets":["client","server"]}"#);
+        put(&d, "BuildingTools.dll", &build_test_dll(&["XhlPluginEntry"], b"plugin"));
+        put(&d, "native-plugin.ini", b"[Plugin]\nEnabled=1\nDll=BuildingTools.dll\n");
+        let tools = import(&s.dirs, &d, ModKind::ShroudForge, "building-tools");
+        if xhl {
+            // XHL-Core as the game's dinput8.dll (installed by its author's instructions)
+            put(&s.game, "dinput8.dll", &build_test_dll(&["DirectInput8Create"], b"XHL-Native-Plugin-Host.log\0dinput8-chain.ini\0native-plugin.ini"));
+            assert!(engine_mods::xhl_host(&s.game).available);
+        }
+        let mut p = s.profile(vec![]);
+        p.mods.shroudforge.push(pm(&tools, true));
+        engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+        let copy = s.game.join("mods/building-tools");
+        assert!(shroudforge::read_mod(&copy).unwrap().enabled);
+        for gone in [false, true] {
+            if gone { p.mods.shroudforge.retain(|m| m.id != "building-tools") } else { p.mods.shroudforge[1].enabled = false }
+            let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+            assert!(!shroudforge::read_mod(&copy).unwrap().enabled, "xhl {xhl}, gone {gone}: {rep:?}");
+            let kept = rep.retained.iter().find(|r| r.path == copy);
+            if xhl {
+                let kept = kept.unwrap_or_else(|| panic!("gone {gone}: XHL-Core loads {} but nothing says so: {rep:?}", copy.display()));
+                assert!(kept.may_run && kept.off && kept.reason.contains("XHL-Core"), "gone {gone}: {kept:?}");
+            } else {
+                assert!(kept.is_none() && rep.retained.is_empty(), "gone {gone}: {rep:?}");
+            }
+            p.mods.shroudforge = vec![pm(&s.sf, true), pm(&tools, true)];
+            engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+        }
+    }
+}
