@@ -293,6 +293,48 @@ public sealed class MouseBindingTests : IDisposable
     // ---- presses (UiEngine.Key, the window thread) ----
 
     [Fact]
+    public void Keyboard_repeats_do_not_toggle_a_mod_window_or_add_presses()
+    {
+        var open = false;
+        var released = 0;
+        var b = Register("t.keyboard.repeat", "F8", () => open = !open);
+        b.OnRelease = () => released++;
+        Assert.True(Send(0x77));
+        Assert.True(open);
+        for (var i = 0; i < 10; i++)
+            Assert.True(UiEngine.Key(new UiNative.Key { Size = 20, Vk = 0x77, Down = 1, Repeat = 1, Captured = 1 }));
+        Assert.True(open);
+        Assert.True(b.IsDown);
+        Assert.Equal(1, b.TakePresses());
+        Assert.False(Send(0x77, down: false));
+        Assert.False(b.IsDown);
+        Assert.Equal(1, released);
+        Assert.True(Send(0x77));
+        Assert.False(open);
+        Assert.Equal(1, b.TakePresses());
+        Send(0x77, down: false);
+    }
+
+    [Fact]
+    public void A_text_field_does_not_swallow_the_release_of_a_held_binding()
+    {
+        var released = 0;
+        var b = Register("t.keyboard.text.release", "F8");
+        b.OnRelease = () => released++;
+        Assert.True(Send(0x77));
+        Assert.True(b.IsDown);
+        var up = new UiNative.Key { Size = 20, Vk = 0x77, TextInput = 1, Captured = 1 };
+        Assert.False(UiEngine.Key(up));
+        Assert.False(b.IsDown);
+        Assert.Equal(1, released);
+        Assert.False(UiEngine.Key(up));
+        Assert.Equal(1, released);
+        Assert.False(UiEngine.Key(up with { Down = 1 }));
+        Assert.Equal(1, b.TakePresses());
+        Assert.False(b.IsDown);
+    }
+
+    [Fact]
     public void A_wheel_binding_fires_once_per_notch_and_keeps_the_notch_from_the_game()
     {
         var n = 0;

@@ -573,7 +573,8 @@ internal static unsafe class UiEngine
                     ToastKind.Warning, 4);
             return true;
         }
-        if (k.TextInput != 0) return false;
+        // A text field blocks presses, but a hold that started before it still needs its release.
+        if (k.TextInput != 0 && down) return false;
         // Escape closes the top Kiln screen (the game does not see it: Kiln has the keyboard while a screen is open)
         if (k.Vk == 0x1B && down && k.Repeat == 0 && !Ui.MenuOpen)
         {

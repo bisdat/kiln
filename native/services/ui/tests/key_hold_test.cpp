@@ -62,6 +62,23 @@ int main() {
         check(m.down(J, kRaw, 700).repeat, "the rule's known miss: a down 690 ms after a release Kiln never saw is a repeat");
     }
     {
+        kui::hold::Keys k;
+        k.down(F8, kRaw, 10);
+        k.focus_back([](uint32_t vk) { return vk == F8; });
+        check(!k.down(F8, kRaw, 1700).repeat,
+              "the rule's other limit: a long hold across a focus loss can press again after the window expires");
+        check(k.down(F8, Prev::down, 10000).repeat, "a key message's previous-state bit still marks a long hold's repeat");
+    }
+    {
+        kui::hold::Keys k;
+        k.down(J, kRaw, 100);
+        check(!k.down(F8, kRaw, 110).repeat, "each key has its own repeat window");
+        check(k.down(J, kRaw, 1599).repeat, "a down just inside the window repeats and restarts it");
+        check(!k.down(J, kRaw, 3099).repeat, "a down exactly one window later is a press");
+        k.up(J, 3100);
+        check(!k.down(J, kRaw, 3101).repeat, "even a 1 ms release makes the next down a press");
+    }
+    {
         kui::hold::Keys k;  // the focus's return changes no press
         k.down(J, kRaw, 10);
         k.focus_back([](uint32_t vk) { return vk == 'J'; });

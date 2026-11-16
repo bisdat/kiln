@@ -32,6 +32,9 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/mouse_pr
 # one key press counts once, also across a focus loss (key_hold.h, GitHub issue 39): plain logic
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/key_hold_test.cpp" -o "$out/key_hold_test"
 "$out/key_hold_test"
+# Repeat-window configuration on the render thread alongside key events on the window thread.
+g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=thread "$here/key_hold_thread_test.cpp" -o "$out/key_hold_thread_test"
+"$out/key_hold_thread_test"
 # key names and which key a binding means on any layout (key_names.h, GitHub issue 33): plain logic
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/key_names_test.cpp" -o "$out/key_names_test"
 "$out/key_names_test"

@@ -44,17 +44,18 @@ struct Down {
     uint32_t since_release_ms = kNone; // since its last release Kiln saw, kNone: none since that press
 };
 
-// Window thread, except held() (any thread). `now_ms`: the clock when the event is handled (GetTickCount64).
+// Window thread, except held() and the window setting (any thread). input_attach sets the window from the render
+// thread. `now_ms`: the clock when the event is handled (GetTickCount64).
 class Keys {
 public:
-    void set_window(uint32_t ms) { window_ = ms; }
-    uint32_t window() const { return window_; }
+    void set_window(uint32_t ms) { window_.store(ms, std::memory_order_relaxed); }
+    uint32_t window() const { return window_.load(std::memory_order_relaxed); }
 
     Down down(uint32_t vk, Prev prev, uint64_t now_ms) {
         Down d;
         if (!valid(vk)) return d;
         const uint64_t now = now_ms ? now_ms : 1;
-        d.repeat = prev == Prev::down || (open_[vk] && now - last_down_[vk] < window_);
+        d.repeat = prev == Prev::down || (open_[vk] && now - last_down_[vk] < window());
         open_[vk] = true;
         last_down_[vk] = now;
         held_[vk].store(true, std::memory_order_relaxed);
@@ -84,7 +85,7 @@ private:
     static uint32_t span(uint64_t now, uint64_t then) {
         return now <= then ? 0u : now - then >= kNone ? kNone - 1 : static_cast<uint32_t>(now - then);
     }
-    uint32_t window_ = kRepeatWindowMs;
+    std::atomic<uint32_t> window_{kRepeatWindowMs};
     std::atomic<bool> held_[256] = {};  // "is it down now" (held())
     bool open_[256] = {};               // a down without its release yet
     uint64_t last_down_[256] = {}, pressed_at_[256] = {}, released_at_[256] = {};
