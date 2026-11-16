@@ -346,8 +346,8 @@ pub fn loader_reason(engine: Engine, file: &str) -> String {
         ),
         Engine::ReShade => format!("{file} is ReShade, which runs on its own next to Kiln: Kiln doesn't manage it, copy it into the Enshrouded folder yourself"),
         // its download is a dinput8.dll: copied into the game folder by hand it would replace Kiln's proxy
-        Engine::UltimateAsiLoader => format!("{file} is Ultimate ASI Loader: add it to the Library, and Kiln places it next to the game as \
-            {} while it is on (never copy it into the game folder as dinput8.dll: that is Kiln's)", crate::game_files::UAL_FILE),
+        Engine::UltimateAsiLoader => format!("{file} is Ultimate ASI Loader: add it to the Library and Kiln puts it next to the game as {} \
+            (never as dinput8.dll, that is Kiln's)", crate::game_files::UAL_FILE),
         Engine::Aldrich => format!("{file} is {n}, which runs on its own from the Enshrouded folder: Kiln doesn't manage it, copy its files there yourself"),
         _ => format!("{file} is {n}, {}: Kiln doesn't manage it, copy it into the Enshrouded folder yourself", info(engine).what),
     }
