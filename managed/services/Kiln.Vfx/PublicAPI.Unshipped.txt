@@ -1,2 +1,1 @@
 #nullable enable
-static Kiln.Vfx.ResourceBudget.get -> Kiln.CapacityQueryResult!

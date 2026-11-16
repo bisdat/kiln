@@ -6,6 +6,12 @@ Kiln.Abilities.Programs
 Kiln.AbilitiesStatus
 Kiln.AbilitiesStatus.<Clone>$() -> Kiln.AbilitiesStatus!
 Kiln.AbilitiesStatus.AbilitiesStatus(bool Natives, bool Programs, bool Instances, bool Attributes, int VanillaNatives, int NativeCapacity, int KilnNatives, int ProgramsTotal, int ProgramsKiln, int HeldNow, uint Interest, ulong InstancesCreated, ulong InstancesHeld, ulong OverridesApplied, ulong OverridesMismatched, ulong Runs, ulong NativeCalls, ulong NativeCallsObserved, ulong Signals, ulong ManagedCalls, ulong ManagedSuspends, ulong EventsDelivered, ulong EventsDropped, ulong WrapCalls, ulong ProgramsRefused, ulong Step) -> void
+Kiln.AbilitiesStatus.AttachmentsActive.get -> int
+Kiln.AbilitiesStatus.AttachmentsActive.init -> void
+Kiln.AbilitiesStatus.AttachmentsOff.get -> int
+Kiln.AbilitiesStatus.AttachmentsOff.init -> void
+Kiln.AbilitiesStatus.AttachmentsPending.get -> int
+Kiln.AbilitiesStatus.AttachmentsPending.init -> void
 Kiln.AbilitiesStatus.Attributes.get -> bool
 Kiln.AbilitiesStatus.Attributes.init -> void
 Kiln.AbilitiesStatus.Deconstruct(out bool Natives, out bool Programs, out bool Instances, out bool Attributes, out int VanillaNatives, out int NativeCapacity, out int KilnNatives, out int ProgramsTotal, out int ProgramsKiln, out int HeldNow, out uint Interest, out ulong InstancesCreated, out ulong InstancesHeld, out ulong OverridesApplied, out ulong OverridesMismatched, out ulong Runs, out ulong NativeCalls, out ulong NativeCallsObserved, out ulong Signals, out ulong ManagedCalls, out ulong ManagedSuspends, out ulong EventsDelivered, out ulong EventsDropped, out ulong WrapCalls, out ulong ProgramsRefused, out ulong Step) -> void
@@ -138,6 +144,17 @@ Kiln.AbilityTargeting
 Kiln.AbilityTargeting.Forward = 1 -> Kiln.AbilityTargeting
 Kiln.AbilityTargeting.NearestEnemy = 2 -> Kiln.AbilityTargeting
 Kiln.AbilityTargeting.Self = 0 -> Kiln.AbilityTargeting
+Kiln.AttachResult
+Kiln.AttachResult.<Clone>$() -> Kiln.AttachResult!
+Kiln.AttachResult.AttachResult(bool Ok, string? Reason, Kiln.NativeAttachment? Handle) -> void
+Kiln.AttachResult.Deconstruct(out bool Ok, out string? Reason, out Kiln.NativeAttachment? Handle) -> void
+Kiln.AttachResult.Equals(Kiln.AttachResult? other) -> bool
+Kiln.AttachResult.Handle.get -> Kiln.NativeAttachment?
+Kiln.AttachResult.Handle.init -> void
+Kiln.AttachResult.Ok.get -> bool
+Kiln.AttachResult.Ok.init -> void
+Kiln.AttachResult.Reason.get -> string?
+Kiln.AttachResult.Reason.init -> void
 Kiln.BuffRemoveResult
 Kiln.BuffRemoveResult.<Clone>$() -> Kiln.BuffRemoveResult!
 Kiln.BuffRemoveResult.Buff.get -> uint
@@ -263,6 +280,14 @@ Kiln.ImpactInstance.SetFloat(string! key, float value) -> bool
 Kiln.ImpactInstance.SetInt(string! key, int value) -> bool
 Kiln.ImpactInstance.Variables.get -> System.Collections.Generic.IReadOnlyList<Kiln.ImpactVariable!>!
 Kiln.ImpactInstance.Write(Kiln.ImpactVariable! v, System.ReadOnlySpan<byte> bytes) -> bool
+Kiln.ImpactNativeAccess
+Kiln.ImpactNativeAttribute
+Kiln.ImpactNativeAttribute.ImpactNativeAttribute(string! name) -> void
+Kiln.ImpactNativeAttribute.Name.get -> string!
+Kiln.ImpactNativeEntryAttribute
+Kiln.ImpactNativeEntryAttribute.Args.get -> string!
+Kiln.ImpactNativeEntryAttribute.ImpactNativeEntryAttribute(string! name, string! args) -> void
+Kiln.ImpactNativeEntryAttribute.Name.get -> string!
 Kiln.ImpactNativeEvent
 Kiln.ImpactNativeEvent.ArgBytes(int i) -> System.ReadOnlySpan<byte>
 Kiln.ImpactNativeEvent.ArgCount.get -> int
@@ -294,6 +319,7 @@ Kiln.ImpactNativeInfo.Name.init -> void
 Kiln.ImpactNativeKind
 Kiln.ImpactNativeKind.Builtin = 2 -> Kiln.ImpactNativeKind
 Kiln.ImpactNativeKind.Managed = 3 -> Kiln.ImpactNativeKind
+Kiln.ImpactNativeKind.Sync = 4 -> Kiln.ImpactNativeKind
 Kiln.ImpactNativeKind.Vanilla = 0 -> Kiln.ImpactNativeKind
 Kiln.ImpactNativeKind.Wrapped = 1 -> Kiln.ImpactNativeKind
 Kiln.ImpactOptions
@@ -418,6 +444,33 @@ Kiln.ImpactVariableChangedEvent.Origin.get -> string!
 Kiln.ImpactVariableChangedEvent.ProgramId.get -> uint
 Kiln.ImpactVariableChangedEvent.Self.get -> Kiln.EntityId
 Kiln.ImpactVariableChangedEvent.Variable.get -> string!
+Kiln.NativeArg
+Kiln.NativeArg.Deconstruct(out string! Type, out Kiln.NativeArgDirection Direction, out bool Optional, out bool Raw, out int Size) -> void
+Kiln.NativeArg.Direction.get -> Kiln.NativeArgDirection
+Kiln.NativeArg.Direction.init -> void
+Kiln.NativeArg.Equals(Kiln.NativeArg other) -> bool
+Kiln.NativeArg.NativeArg() -> void
+Kiln.NativeArg.NativeArg(string! Type, Kiln.NativeArgDirection Direction = Kiln.NativeArgDirection.In, bool Optional = false, bool Raw = false, int Size = 0) -> void
+Kiln.NativeArg.Optional.get -> bool
+Kiln.NativeArg.Optional.init -> void
+Kiln.NativeArg.Raw.get -> bool
+Kiln.NativeArg.Raw.init -> void
+Kiln.NativeArg.Size.get -> int
+Kiln.NativeArg.Size.init -> void
+Kiln.NativeArg.Type.get -> string!
+Kiln.NativeArg.Type.init -> void
+Kiln.NativeArgDirection
+Kiln.NativeArgDirection.In = 0 -> Kiln.NativeArgDirection
+Kiln.NativeArgDirection.InOut = 2 -> Kiln.NativeArgDirection
+Kiln.NativeArgDirection.Out = 1 -> Kiln.NativeArgDirection
+Kiln.NativeAttachment
+Kiln.NativeAttachment.Dispose() -> void
+Kiln.NativeAttachment.State.get -> Kiln.NativeAttachmentState
+Kiln.NativeAttachmentState
+Kiln.NativeAttachmentState.Active = 2 -> Kiln.NativeAttachmentState
+Kiln.NativeAttachmentState.Gone = 0 -> Kiln.NativeAttachmentState
+Kiln.NativeAttachmentState.Off = 3 -> Kiln.NativeAttachmentState
+Kiln.NativeAttachmentState.Pending = 1 -> Kiln.NativeAttachmentState
 Kiln.NativeCall
 Kiln.NativeCall.ArgCount.get -> int
 Kiln.NativeCall.Bytes(int i) -> System.Span<byte>
@@ -440,6 +493,16 @@ Kiln.NativeCall.SetFloat(int i, float v) -> bool
 Kiln.NativeCall.SetU32(int i, uint v) -> bool
 Kiln.NativeCall.Site.get -> uint
 Kiln.NativeCall.VariableType(int i) -> uint
+Kiln.NativeContext
+Kiln.NativeContext.ImpactId.get -> uint
+Kiln.NativeContext.NativeContext() -> void
+Kiln.NativeContext.Post(System.Action! action) -> void
+Kiln.NativeContext.Program.get -> uint
+Kiln.NativeContext.Root.get -> Kiln.EntityId
+Kiln.NativeContext.Self.get -> Kiln.EntityId
+Kiln.NativeContext.Site.get -> uint
+Kiln.NativeContext.TryRead<T>(Kiln.EntityId entity, out T value) -> bool
+Kiln.NativeContext.TryWrite<T>(Kiln.EntityId entity, in T value) -> bool
 Kiln.NativeHandler
 Kiln.NativeInvocation
 Kiln.NativeInvocation.ArgCount.get -> int
@@ -459,7 +522,58 @@ Kiln.NativeInvocation.SetFloat(int i, float value) -> bool
 Kiln.NativeInvocation.SetInt(int i, int value) -> bool
 Kiln.NativeInvocation.Site.get -> uint
 Kiln.NativeInvocation.Variable(int i) -> Kiln.ImpactVariable?
+Kiln.NativeParameter
+Kiln.NativeParameter.<Clone>$() -> Kiln.NativeParameter!
+Kiln.NativeParameter.Arg.get -> Kiln.NativeArg
+Kiln.NativeParameter.Arg.init -> void
+Kiln.NativeParameter.Deconstruct(out string! Name, out Kiln.NativeArg Arg) -> void
+Kiln.NativeParameter.Equals(Kiln.NativeParameter? other) -> bool
+Kiln.NativeParameter.Name.get -> string!
+Kiln.NativeParameter.Name.init -> void
+Kiln.NativeParameter.NativeParameter(string! Name, Kiln.NativeArg Arg) -> void
+Kiln.NativeRef
+Kiln.NativeRef.FullName.get -> string?
+Kiln.NativeRef.HashFor(string! modId) -> uint
+Kiln.NativeRef.Name.get -> string!
+Kiln.NativeRef.NativeRef(string! name, Kiln.NativeParameter![]! parameters) -> void
+Kiln.NativeRef.Parameters.get -> System.Collections.Generic.IReadOnlyList<Kiln.NativeParameter!>!
+Kiln.NativeRef.Register(Kiln.NativeSyncHandler! thunk) -> Kiln.NativeResult!
+Kiln.NativeRef.Registration.get -> Kiln.NativeResult?
+Kiln.NativeRegistrationRefusedEvent
+Kiln.NativeRegistrationRefusedEvent.Hash.get -> uint
+Kiln.NativeRegistrationRefusedEvent.Name.get -> string!
+Kiln.NativeRegistrationRefusedEvent.Reason.get -> string!
+Kiln.NativeResult
+Kiln.NativeResult.<Clone>$() -> Kiln.NativeResult!
+Kiln.NativeResult.Deconstruct(out bool Ok, out string? Reason, out uint Hash) -> void
+Kiln.NativeResult.Equals(Kiln.NativeResult? other) -> bool
+Kiln.NativeResult.Hash.get -> uint
+Kiln.NativeResult.Hash.init -> void
+Kiln.NativeResult.NativeResult(bool Ok, string? Reason, uint Hash) -> void
+Kiln.NativeResult.Ok.get -> bool
+Kiln.NativeResult.Ok.init -> void
+Kiln.NativeResult.Reason.get -> string?
+Kiln.NativeResult.Reason.init -> void
+Kiln.NativeStage
+Kiln.NativeStage.After = 2 -> Kiln.NativeStage
+Kiln.NativeStage.Before = 0 -> Kiln.NativeStage
+Kiln.NativeStage.Instead = 1 -> Kiln.NativeStage
+Kiln.NativeState
+Kiln.NativeState.Dead = 4 -> Kiln.NativeState
+Kiln.NativeState.Live = 2 -> Kiln.NativeState
+Kiln.NativeState.None = 0 -> Kiln.NativeState
+Kiln.NativeState.Refused = 3 -> Kiln.NativeState
+Kiln.NativeState.Waiting = 1 -> Kiln.NativeState
+Kiln.NativeSyncHandler
 Kiln.NativeWrapHandler
+Kiln.Optional<T>
+Kiln.Optional<T>.GetValueOrDefault(T fallback = default(T)) -> T
+Kiln.Optional<T>.HasValue.get -> bool
+Kiln.Optional<T>.Optional() -> void
+Kiln.Optional<T>.Optional(T value) -> void
+Kiln.Optional<T>.Value.get -> T
+Kiln.RawAttribute
+Kiln.RawAttribute.RawAttribute() -> void
 Kiln.SequenceEndedEvent
 Kiln.SequenceEndedEvent.Actor.get -> Kiln.EntityId
 Kiln.SequenceEndedEvent.Duration.get -> System.TimeSpan
@@ -477,6 +591,9 @@ Kiln.SequenceStartedEvent.Actor.get -> Kiln.EntityId
 Kiln.SequenceStartedEvent.CallIndex.get -> int
 Kiln.SequenceStartedEvent.Sequence.get -> uint
 Kiln.SequenceStartedEvent.TriggerTime.get -> long
+[KILNX001]static Kiln.Abilities.Natives.LabCounters.get -> (ulong SyncCalls, ulong SyncFaults, ulong SyncSlow, ulong DeadCalls, uint Inflight, ulong AttachEntered, ulong AttachSkipped, ulong TypedRefused, ulong TypedUnconnected)?
+[KILNX001]static Kiln.Abilities.Natives.LabLockBypass.get -> ulong?
+[KILNX001]static Kiln.Abilities.Natives.LabRetire.get -> (ulong Deferred, uint PendingCore, int PendingManaged, ulong Watchdog)?
 const Kiln.ImpactConfigIds.AttackCategory = 606890942 -> uint
 const Kiln.ImpactConfigIds.AttackMod = 2236524794 -> uint
 const Kiln.ImpactConfigIds.BuffType = 1524311620 -> uint
@@ -502,6 +619,9 @@ override Kiln.AbilitiesStatus.GetHashCode() -> int
 override Kiln.AbilitiesStatus.ToString() -> string!
 override Kiln.AbilityCost.GetHashCode() -> int
 override Kiln.AbilityCost.ToString() -> string!
+override Kiln.AttachResult.Equals(object? obj) -> bool
+override Kiln.AttachResult.GetHashCode() -> int
+override Kiln.AttachResult.ToString() -> string!
 override Kiln.BuffRemoveResult.Equals(object? obj) -> bool
 override Kiln.BuffRemoveResult.GetHashCode() -> int
 override Kiln.BuffRemoveResult.ToString() -> string!
@@ -525,6 +645,15 @@ override Kiln.ImpactVariable.Equals(object? obj) -> bool
 override Kiln.ImpactVariable.GetHashCode() -> int
 override Kiln.ImpactVariable.ToString() -> string!
 override Kiln.ImpactVariableChangedEvent.ToString() -> string!
+override Kiln.NativeArg.GetHashCode() -> int
+override Kiln.NativeParameter.Equals(object? obj) -> bool
+override Kiln.NativeParameter.GetHashCode() -> int
+override Kiln.NativeParameter.ToString() -> string!
+override Kiln.NativeRef.ToString() -> string!
+override Kiln.NativeResult.Equals(object? obj) -> bool
+override Kiln.NativeResult.GetHashCode() -> int
+override Kiln.NativeResult.ToString() -> string!
+override Kiln.Optional<T>.ToString() -> string!
 override Kiln.SequenceOptions.Equals(object? obj) -> bool
 override Kiln.SequenceOptions.GetHashCode() -> int
 override Kiln.SequenceOptions.ToString() -> string!
@@ -542,10 +671,14 @@ static Kiln.Abilities.HoldPrograms(params uint[]! programIds) -> System.IDisposa
 static Kiln.Abilities.IdOf(System.Guid guid) -> uint
 static Kiln.Abilities.Instance(uint impactId) -> Kiln.ImpactInstance?
 static Kiln.Abilities.Natives.All.get -> System.Collections.Generic.IReadOnlyList<Kiln.ImpactNativeInfo!>!
+static Kiln.Abilities.Natives.Attach(uint program, string! native, Kiln.NativeStage stage, Kiln.NativeWrapHandler! handler, uint site = 0, int priority = 0) -> Kiln.AttachResult!
 static Kiln.Abilities.Natives.Declare(string! fullName, int argc) -> void
+static Kiln.Abilities.Natives.DeclareTyped(string! fullName, params Kiln.NativeArg[]! args) -> void
 static Kiln.Abilities.Natives.NameOf(uint hash) -> string!
 static Kiln.Abilities.Natives.Observe(string! nameOrHash) -> void
 static Kiln.Abilities.Natives.Register(string! name, int argc, Kiln.NativeHandler! handler) -> uint
+static Kiln.Abilities.Natives.RegisterSync(string! name, int argc, Kiln.NativeSyncHandler! handler) -> Kiln.NativeResult!
+static Kiln.Abilities.Natives.StateOf(uint hash) -> Kiln.NativeState
 static Kiln.Abilities.Natives.Wrap(string! nameOrHash, Kiln.NativeWrapHandler! handler, int priority = 0) -> System.IDisposable!
 static Kiln.Abilities.OnDamage(Kiln.DamageHandler! handler, int priority = 0) -> System.IDisposable!
 static Kiln.Abilities.PlaySequence(Kiln.EntityId actor, System.Guid sequence, Kiln.SequenceOptions! options) -> bool
@@ -576,6 +709,8 @@ static Kiln.AbilityCost.OfStamina(int n) -> Kiln.AbilityCost
 static Kiln.AbilityCost.operator !=(Kiln.AbilityCost left, Kiln.AbilityCost right) -> bool
 static Kiln.AbilityCost.operator +(Kiln.AbilityCost a, Kiln.AbilityCost b) -> Kiln.AbilityCost
 static Kiln.AbilityCost.operator ==(Kiln.AbilityCost left, Kiln.AbilityCost right) -> bool
+static Kiln.AttachResult.operator !=(Kiln.AttachResult? left, Kiln.AttachResult? right) -> bool
+static Kiln.AttachResult.operator ==(Kiln.AttachResult? left, Kiln.AttachResult? right) -> bool
 static Kiln.BuffRemoveResult.operator !=(Kiln.BuffRemoveResult? left, Kiln.BuffRemoveResult? right) -> bool
 static Kiln.BuffRemoveResult.operator ==(Kiln.BuffRemoveResult? left, Kiln.BuffRemoveResult? right) -> bool
 static Kiln.CastResult.Refused(string! reason, System.TimeSpan cooldown = default(System.TimeSpan)) -> Kiln.CastResult!
@@ -588,6 +723,13 @@ static Kiln.DamageSetup.operator ==(Kiln.DamageSetup left, Kiln.DamageSetup righ
 static Kiln.EntityBuff.operator !=(Kiln.EntityBuff? left, Kiln.EntityBuff? right) -> bool
 static Kiln.EntityBuff.operator ==(Kiln.EntityBuff? left, Kiln.EntityBuff? right) -> bool
 static Kiln.ImpactConfigIds.Parse(string! key) -> uint
+static Kiln.ImpactNativeAccess.Connected(ref Kiln.NativeCall call, int i) -> bool
+static Kiln.ImpactNativeAccess.Context(ref Kiln.NativeCall call) -> Kiln.NativeContext
+static Kiln.ImpactNativeAccess.Provide(System.Action! register) -> void
+static Kiln.ImpactNativeAccess.RawValue(ref Kiln.NativeCall call, int i) -> uint
+static Kiln.ImpactNativeAccess.Ref<T>(ref Kiln.NativeCall call, int i, uint type) -> T
+static Kiln.ImpactNativeAccess.SetTime(ref Kiln.NativeCall call, int i, System.TimeSpan value) -> void
+static Kiln.ImpactNativeAccess.Time(ref Kiln.NativeCall call, int i) -> System.TimeSpan
 static Kiln.ImpactNativeInfo.operator !=(Kiln.ImpactNativeInfo? left, Kiln.ImpactNativeInfo? right) -> bool
 static Kiln.ImpactNativeInfo.operator ==(Kiln.ImpactNativeInfo? left, Kiln.ImpactNativeInfo? right) -> bool
 static Kiln.ImpactProgramInfo.operator !=(Kiln.ImpactProgramInfo? left, Kiln.ImpactProgramInfo? right) -> bool
@@ -596,6 +738,12 @@ static Kiln.ImpactRef.operator !=(Kiln.ImpactRef left, Kiln.ImpactRef right) -> 
 static Kiln.ImpactRef.operator ==(Kiln.ImpactRef left, Kiln.ImpactRef right) -> bool
 static Kiln.ImpactVariable.operator !=(Kiln.ImpactVariable? left, Kiln.ImpactVariable? right) -> bool
 static Kiln.ImpactVariable.operator ==(Kiln.ImpactVariable? left, Kiln.ImpactVariable? right) -> bool
+static Kiln.NativeArg.operator !=(Kiln.NativeArg left, Kiln.NativeArg right) -> bool
+static Kiln.NativeArg.operator ==(Kiln.NativeArg left, Kiln.NativeArg right) -> bool
+static Kiln.NativeParameter.operator !=(Kiln.NativeParameter? left, Kiln.NativeParameter? right) -> bool
+static Kiln.NativeParameter.operator ==(Kiln.NativeParameter? left, Kiln.NativeParameter? right) -> bool
+static Kiln.NativeResult.operator !=(Kiln.NativeResult? left, Kiln.NativeResult? right) -> bool
+static Kiln.NativeResult.operator ==(Kiln.NativeResult? left, Kiln.NativeResult? right) -> bool
 static Kiln.SequenceOptions.operator !=(Kiln.SequenceOptions? left, Kiln.SequenceOptions? right) -> bool
 static Kiln.SequenceOptions.operator ==(Kiln.SequenceOptions? left, Kiln.SequenceOptions? right) -> bool
 static readonly Kiln.Abilities.GenericImpactTemplate -> System.Guid
@@ -604,8 +752,11 @@ static readonly Kiln.SequenceOptions.Default -> Kiln.SequenceOptions!
 static readonly Kiln.SequenceOptions.Queue -> Kiln.SequenceOptions!
 virtual Kiln.DamageHandler.Invoke(ref Kiln.DamageCall call) -> void
 virtual Kiln.NativeHandler.Invoke(Kiln.NativeInvocation! call) -> byte
+virtual Kiln.NativeSyncHandler.Invoke(ref Kiln.NativeCall call) -> byte
 virtual Kiln.NativeWrapHandler.Invoke(ref Kiln.NativeCall call) -> void
 ~override Kiln.AbilityCost.Equals(object obj) -> bool
 ~override Kiln.DamageSetup.Equals(object obj) -> bool
 ~override Kiln.DamageSetup.ToString() -> string
 ~override Kiln.ImpactRef.Equals(object obj) -> bool
+~override Kiln.NativeArg.Equals(object obj) -> bool
+~override Kiln.NativeArg.ToString() -> string

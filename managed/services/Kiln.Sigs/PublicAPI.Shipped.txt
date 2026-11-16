@@ -1,1 +1,215 @@
 #nullable enable
+Kiln.Sigs.Abilities.RegisterNative
+Kiln.Sigs.Abilities.RegisterNative.Call
+Kiln.Sigs.Abilities.RegisterNative.Call.Argc.get -> byte
+Kiln.Sigs.Abilities.RegisterNative.Call.Argc.set -> void
+Kiln.Sigs.Abilities.RegisterNative.Call.Call() -> void
+Kiln.Sigs.Abilities.RegisterNative.Call.CallOriginal() -> void
+Kiln.Sigs.Abilities.RegisterNative.Call.Fn.get -> nint
+Kiln.Sigs.Abilities.RegisterNative.Call.Fn.set -> void
+Kiln.Sigs.Abilities.RegisterNative.Call.Hash.get -> uint
+Kiln.Sigs.Abilities.RegisterNative.Call.Hash.set -> void
+Kiln.Sigs.Abilities.RegisterNative.Call.Name.get -> nint
+Kiln.Sigs.Abilities.RegisterNative.Call.Name.set -> void
+Kiln.Sigs.Abilities.RegisterNative.Call.OriginalCalled.get -> bool
+Kiln.Sigs.Abilities.RegisterNative.Call.Registry.get -> nint
+Kiln.Sigs.Abilities.RegisterNative.Call.Registry.set -> void
+Kiln.Sigs.Abilities.RegisterNative.Call.Result.get -> bool
+Kiln.Sigs.Abilities.RegisterNative.Call.Result.set -> void
+Kiln.Sigs.Abilities.RegisterNative.Call.Skip() -> void
+Kiln.Sigs.Abilities.RegisterNative.Handler
+Kiln.Sigs.AttrRef
+Kiln.Sigs.AttrRef.Attr -> nint
+Kiln.Sigs.AttrRef.AttrRef() -> void
+Kiln.Sigs.AttrRef.Error -> byte
+Kiln.Sigs.AttrRef.Reserved -> uint
+Kiln.Sigs.Core.GetComponent
+Kiln.Sigs.Core.GetComponent.Call
+Kiln.Sigs.Core.GetComponent.Call.Call() -> void
+Kiln.Sigs.Core.GetComponent.Call.CallOriginal() -> void
+Kiln.Sigs.Core.GetComponent.Call.ComponentHash.get -> uint
+Kiln.Sigs.Core.GetComponent.Call.ComponentHash.set -> void
+Kiln.Sigs.Core.GetComponent.Call.Entity.get -> uint
+Kiln.Sigs.Core.GetComponent.Call.Entity.set -> void
+Kiln.Sigs.Core.GetComponent.Call.OriginalCalled.get -> bool
+Kiln.Sigs.Core.GetComponent.Call.Output.get -> nint
+Kiln.Sigs.Core.GetComponent.Call.Output.set -> void
+Kiln.Sigs.Core.GetComponent.Call.Skip() -> void
+Kiln.Sigs.Core.GetComponent.Call.World.get -> nint
+Kiln.Sigs.Core.GetComponent.Call.World.set -> void
+Kiln.Sigs.Core.GetComponent.Handler
+Kiln.Sigs.Items.AttrChanged
+Kiln.Sigs.Items.AttrChanged.Call
+Kiln.Sigs.Items.AttrChanged.Call.Call() -> void
+Kiln.Sigs.Items.AttrChanged.Call.CallOriginal() -> void
+Kiln.Sigs.Items.AttrChanged.Call.Component.get -> nint
+Kiln.Sigs.Items.AttrChanged.Call.Component.set -> void
+Kiln.Sigs.Items.AttrChanged.Call.OriginalCalled.get -> bool
+Kiln.Sigs.Items.AttrChanged.Call.Registry.get -> nint
+Kiln.Sigs.Items.AttrChanged.Call.Registry.set -> void
+Kiln.Sigs.Items.AttrChanged.Call.Skip() -> void
+Kiln.Sigs.Items.AttrChanged.Handler
+Kiln.Sigs.Items.AttrFind
+Kiln.Sigs.Items.AttrFind.Call
+Kiln.Sigs.Items.AttrFind.Call.Attribute.get -> uint
+Kiln.Sigs.Items.AttrFind.Call.Attribute.set -> void
+Kiln.Sigs.Items.AttrFind.Call.Call() -> void
+Kiln.Sigs.Items.AttrFind.Call.CallOriginal() -> void
+Kiln.Sigs.Items.AttrFind.Call.OriginalCalled.get -> bool
+Kiln.Sigs.Items.AttrFind.Call.Registry.get -> nint
+Kiln.Sigs.Items.AttrFind.Call.Registry.set -> void
+Kiln.Sigs.Items.AttrFind.Call.Result.get -> Kiln.Sigs.AttrRef
+Kiln.Sigs.Items.AttrFind.Call.Skip() -> void
+Kiln.Sigs.Items.AttrFind.Handler
+Kiln.Sigs.Items.GetItemVolume
+Kiln.Sigs.Items.GetItemVolume.Call
+Kiln.Sigs.Items.GetItemVolume.Call.Call() -> void
+Kiln.Sigs.Items.GetItemVolume.Call.CallOriginal() -> void
+Kiln.Sigs.Items.GetItemVolume.Call.Item.get -> nint
+Kiln.Sigs.Items.GetItemVolume.Call.Item.set -> void
+Kiln.Sigs.Items.GetItemVolume.Call.OriginalCalled.get -> bool
+Kiln.Sigs.Items.GetItemVolume.Call.Result.get -> Kiln.Sigs.OptS32
+Kiln.Sigs.Items.GetItemVolume.Call.Skip() -> void
+Kiln.Sigs.Items.GetItemVolume.Handler
+Kiln.Sigs.OptS32
+Kiln.Sigs.OptS32.Has -> byte
+Kiln.Sigs.OptS32.OptS32() -> void
+Kiln.Sigs.OptS32.Value -> int
+Kiln.Sigs.Rules.QuatRotate
+Kiln.Sigs.Rules.QuatRotate.Call
+Kiln.Sigs.Rules.QuatRotate.Call.Call() -> void
+Kiln.Sigs.Rules.QuatRotate.Call.CallOriginal() -> void
+Kiln.Sigs.Rules.QuatRotate.Call.OriginalCalled.get -> bool
+Kiln.Sigs.Rules.QuatRotate.Call.Output.get -> nint
+Kiln.Sigs.Rules.QuatRotate.Call.Output.set -> void
+Kiln.Sigs.Rules.QuatRotate.Call.Result.get -> nint
+Kiln.Sigs.Rules.QuatRotate.Call.Result.set -> void
+Kiln.Sigs.Rules.QuatRotate.Call.Rotation.get -> nint
+Kiln.Sigs.Rules.QuatRotate.Call.Rotation.set -> void
+Kiln.Sigs.Rules.QuatRotate.Call.Skip() -> void
+Kiln.Sigs.Rules.QuatRotate.Call.Vector.get -> nint
+Kiln.Sigs.Rules.QuatRotate.Call.Vector.set -> void
+Kiln.Sigs.Rules.QuatRotate.Handler
+Kiln.Sigs.Time.GetGameTime
+Kiln.Sigs.Time.GetGameTime.Call
+Kiln.Sigs.Time.GetGameTime.Call.Call() -> void
+Kiln.Sigs.Time.GetGameTime.Call.CallOriginal() -> void
+Kiln.Sigs.Time.GetGameTime.Call.Daytime.get -> nint
+Kiln.Sigs.Time.GetGameTime.Call.Daytime.set -> void
+Kiln.Sigs.Time.GetGameTime.Call.EcsNow.get -> long
+Kiln.Sigs.Time.GetGameTime.Call.EcsNow.set -> void
+Kiln.Sigs.Time.GetGameTime.Call.OriginalCalled.get -> bool
+Kiln.Sigs.Time.GetGameTime.Call.Result.get -> long
+Kiln.Sigs.Time.GetGameTime.Call.Result.set -> void
+Kiln.Sigs.Time.GetGameTime.Call.Skip() -> void
+Kiln.Sigs.Time.GetGameTime.Handler
+Kiln.Sigs.Time.SetTimeScale
+Kiln.Sigs.Time.SetTimeScale.Call
+Kiln.Sigs.Time.SetTimeScale.Call.Call() -> void
+Kiln.Sigs.Time.SetTimeScale.Call.CallOriginal() -> void
+Kiln.Sigs.Time.SetTimeScale.Call.Daytime.get -> nint
+Kiln.Sigs.Time.SetTimeScale.Call.Daytime.set -> void
+Kiln.Sigs.Time.SetTimeScale.Call.EcsNow.get -> long
+Kiln.Sigs.Time.SetTimeScale.Call.EcsNow.set -> void
+Kiln.Sigs.Time.SetTimeScale.Call.OriginalCalled.get -> bool
+Kiln.Sigs.Time.SetTimeScale.Call.Scale.get -> float
+Kiln.Sigs.Time.SetTimeScale.Call.Scale.set -> void
+Kiln.Sigs.Time.SetTimeScale.Call.Skip() -> void
+Kiln.Sigs.Time.SetTimeScale.Handler
+Kiln.Sigs.Weather.SampleAt
+Kiln.Sigs.Weather.SampleAt.Call
+Kiln.Sigs.Weather.SampleAt.Call.At.get -> nint
+Kiln.Sigs.Weather.SampleAt.Call.At.set -> void
+Kiln.Sigs.Weather.SampleAt.Call.Call() -> void
+Kiln.Sigs.Weather.SampleAt.Call.CallOriginal() -> void
+Kiln.Sigs.Weather.SampleAt.Call.Now.get -> long
+Kiln.Sigs.Weather.SampleAt.Call.Now.set -> void
+Kiln.Sigs.Weather.SampleAt.Call.OriginalCalled.get -> bool
+Kiln.Sigs.Weather.SampleAt.Call.Result.get -> Kiln.Sigs.WeatherSample
+Kiln.Sigs.Weather.SampleAt.Call.Skip() -> void
+Kiln.Sigs.Weather.SampleAt.Call.Weather.get -> nint
+Kiln.Sigs.Weather.SampleAt.Call.Weather.set -> void
+Kiln.Sigs.Weather.SampleAt.Handler
+Kiln.Sigs.WeatherSample
+Kiln.Sigs.WeatherSample.F0 -> float
+Kiln.Sigs.WeatherSample.F1 -> float
+Kiln.Sigs.WeatherSample.F2 -> float
+Kiln.Sigs.WeatherSample.F3 -> float
+Kiln.Sigs.WeatherSample.WeatherSample() -> void
+Kiln.Sigs.World.ReadOther
+Kiln.Sigs.World.ReadOther.Call
+Kiln.Sigs.World.ReadOther.Call.Accessor.get -> ushort*
+Kiln.Sigs.World.ReadOther.Call.Accessor.set -> void
+Kiln.Sigs.World.ReadOther.Call.Call() -> void
+Kiln.Sigs.World.ReadOther.Call.CallOriginal() -> void
+Kiln.Sigs.World.ReadOther.Call.Entity.get -> uint
+Kiln.Sigs.World.ReadOther.Call.Entity.set -> void
+Kiln.Sigs.World.ReadOther.Call.OriginalCalled.get -> bool
+Kiln.Sigs.World.ReadOther.Call.Output.get -> nint
+Kiln.Sigs.World.ReadOther.Call.Output.set -> void
+Kiln.Sigs.World.ReadOther.Call.Result.get -> nint
+Kiln.Sigs.World.ReadOther.Call.Result.set -> void
+Kiln.Sigs.World.ReadOther.Call.Skip() -> void
+Kiln.Sigs.World.ReadOther.Call.Storage.get -> nint
+Kiln.Sigs.World.ReadOther.Call.Storage.set -> void
+Kiln.Sigs.World.ReadOther.Handler
+const Kiln.Sigs.Abilities.RegisterNative.Capability = "sig/abilities/RegisterNative" -> string!
+const Kiln.Sigs.Abilities.RegisterNative.Symbol = "abilities/RegisterNative" -> string!
+const Kiln.Sigs.AttrRef.SizeOf = 16 -> int
+const Kiln.Sigs.Core.GetComponent.Capability = "sig/GetComponent" -> string!
+const Kiln.Sigs.Core.GetComponent.Symbol = "GetComponent" -> string!
+const Kiln.Sigs.Items.AttrChanged.Capability = "sig/items/AttrChanged" -> string!
+const Kiln.Sigs.Items.AttrChanged.Symbol = "items/AttrChanged" -> string!
+const Kiln.Sigs.Items.AttrFind.Capability = "sig/items/AttrFind" -> string!
+const Kiln.Sigs.Items.AttrFind.Symbol = "items/AttrFind" -> string!
+const Kiln.Sigs.Items.GetItemVolume.Capability = "sig/items/GetItemVolume" -> string!
+const Kiln.Sigs.Items.GetItemVolume.Symbol = "items/GetItemVolume" -> string!
+const Kiln.Sigs.OptS32.SizeOf = 8 -> int
+const Kiln.Sigs.Rules.QuatRotate.Capability = "sig/rules/QuatRotate" -> string!
+const Kiln.Sigs.Rules.QuatRotate.Symbol = "rules/QuatRotate" -> string!
+const Kiln.Sigs.Time.GetGameTime.Capability = "sig/time/GetGameTime" -> string!
+const Kiln.Sigs.Time.GetGameTime.Symbol = "time/GetGameTime" -> string!
+const Kiln.Sigs.Time.SetTimeScale.Capability = "sig/time/SetTimeScale" -> string!
+const Kiln.Sigs.Time.SetTimeScale.Symbol = "time/SetTimeScale" -> string!
+const Kiln.Sigs.Weather.SampleAt.Capability = "sig/weather/SampleAt" -> string!
+const Kiln.Sigs.Weather.SampleAt.Symbol = "weather/SampleAt" -> string!
+const Kiln.Sigs.WeatherSample.SizeOf = 16 -> int
+const Kiln.Sigs.World.ReadOther.Capability = "sig/world/ReadOther" -> string!
+const Kiln.Sigs.World.ReadOther.Symbol = "world/ReadOther" -> string!
+static Kiln.Sigs.Abilities.RegisterNative.Detour(Kiln.Sigs.Abilities.RegisterNative.Handler! handler, int priority = 0) -> Kiln.HookResult!
+static Kiln.Sigs.Core.GetComponent.Detour(Kiln.Sigs.Core.GetComponent.Handler! handler, int priority = 0) -> Kiln.HookResult!
+static Kiln.Sigs.Core.GetComponent.Invoke(nint output, nint world, uint componentHash, uint entity) -> void
+static Kiln.Sigs.Items.AttrChanged.Detour(Kiln.Sigs.Items.AttrChanged.Handler! handler, int priority = 0) -> Kiln.HookResult!
+static Kiln.Sigs.Items.AttrFind.Detour(Kiln.Sigs.Items.AttrFind.Handler! handler, int priority = 0) -> Kiln.HookResult!
+static Kiln.Sigs.Items.AttrFind.Invoke(uint attribute, nint registry) -> Kiln.Sigs.AttrRef
+static Kiln.Sigs.Items.GetItemVolume.Detour(Kiln.Sigs.Items.GetItemVolume.Handler! handler, int priority = 0) -> Kiln.HookResult!
+static Kiln.Sigs.Items.GetItemVolume.Invoke(nint item) -> Kiln.Sigs.OptS32
+static Kiln.Sigs.Rules.QuatRotate.Detour(Kiln.Sigs.Rules.QuatRotate.Handler! handler, int priority = 0) -> Kiln.HookResult!
+static Kiln.Sigs.Rules.QuatRotate.Invoke(nint output, nint rotation, nint vector) -> nint
+static Kiln.Sigs.Time.GetGameTime.Detour(Kiln.Sigs.Time.GetGameTime.Handler! handler, int priority = 0) -> Kiln.HookResult!
+static Kiln.Sigs.Time.GetGameTime.Invoke(nint daytime, long ecsNow) -> long
+static Kiln.Sigs.Time.SetTimeScale.Detour(Kiln.Sigs.Time.SetTimeScale.Handler! handler, int priority = 0) -> Kiln.HookResult!
+static Kiln.Sigs.Time.SetTimeScale.Invoke(nint daytime, float scale, long ecsNow) -> void
+static Kiln.Sigs.Weather.SampleAt.Detour(Kiln.Sigs.Weather.SampleAt.Handler! handler, int priority = 0) -> Kiln.HookResult!
+static Kiln.Sigs.Weather.SampleAt.Invoke(nint weather, nint at, long now) -> Kiln.Sigs.WeatherSample
+static Kiln.Sigs.World.ReadOther.Detour(Kiln.Sigs.World.ReadOther.Handler! handler, int priority = 0) -> Kiln.HookResult!
+static readonly Kiln.Sigs.Abilities.RegisterNative.Descriptor -> Kiln.SigDescriptor!
+static readonly Kiln.Sigs.Core.GetComponent.Descriptor -> Kiln.SigDescriptor!
+static readonly Kiln.Sigs.Items.AttrChanged.Descriptor -> Kiln.SigDescriptor!
+static readonly Kiln.Sigs.Items.AttrFind.Descriptor -> Kiln.SigDescriptor!
+static readonly Kiln.Sigs.Items.GetItemVolume.Descriptor -> Kiln.SigDescriptor!
+static readonly Kiln.Sigs.Rules.QuatRotate.Descriptor -> Kiln.SigDescriptor!
+static readonly Kiln.Sigs.Time.GetGameTime.Descriptor -> Kiln.SigDescriptor!
+static readonly Kiln.Sigs.Time.SetTimeScale.Descriptor -> Kiln.SigDescriptor!
+static readonly Kiln.Sigs.Weather.SampleAt.Descriptor -> Kiln.SigDescriptor!
+static readonly Kiln.Sigs.World.ReadOther.Descriptor -> Kiln.SigDescriptor!
+virtual Kiln.Sigs.Abilities.RegisterNative.Handler.Invoke(ref Kiln.Sigs.Abilities.RegisterNative.Call call) -> void
+virtual Kiln.Sigs.Core.GetComponent.Handler.Invoke(ref Kiln.Sigs.Core.GetComponent.Call call) -> void
+virtual Kiln.Sigs.Items.AttrChanged.Handler.Invoke(ref Kiln.Sigs.Items.AttrChanged.Call call) -> void
+virtual Kiln.Sigs.Items.AttrFind.Handler.Invoke(ref Kiln.Sigs.Items.AttrFind.Call call) -> void
+virtual Kiln.Sigs.Items.GetItemVolume.Handler.Invoke(ref Kiln.Sigs.Items.GetItemVolume.Call call) -> void
+virtual Kiln.Sigs.Rules.QuatRotate.Handler.Invoke(ref Kiln.Sigs.Rules.QuatRotate.Call call) -> void
+virtual Kiln.Sigs.Time.GetGameTime.Handler.Invoke(ref Kiln.Sigs.Time.GetGameTime.Call call) -> void
+virtual Kiln.Sigs.Time.SetTimeScale.Handler.Invoke(ref Kiln.Sigs.Time.SetTimeScale.Call call) -> void
+virtual Kiln.Sigs.Weather.SampleAt.Handler.Invoke(ref Kiln.Sigs.Weather.SampleAt.Call call) -> void
+virtual Kiln.Sigs.World.ReadOther.Handler.Invoke(ref Kiln.Sigs.World.ReadOther.Call call) -> void

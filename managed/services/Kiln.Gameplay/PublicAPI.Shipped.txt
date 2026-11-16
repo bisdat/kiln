@@ -206,6 +206,18 @@ Kiln.ItemCraftedEvent.Station.get -> Kiln.EntityId
 Kiln.ItemCraftedEvent.StationPosition.get -> Kiln.WorldPosition?
 Kiln.ItemCraftedEvent.Succeeded.get -> bool
 Kiln.ItemCraftedEvent.WorkshopId.get -> uint
+Kiln.ItemPickingUpEvent
+Kiln.ItemPickingUpEvent.Amount.get -> int
+Kiln.ItemPickingUpEvent.ExposureEpoch.get -> ulong
+Kiln.ItemPickingUpEvent.GroundEntity.get -> Kiln.EntityId
+Kiln.ItemPickingUpEvent.GroundKey.get -> Kiln.EventEntityKey
+Kiln.ItemPickingUpEvent.Id.get -> Kiln.DecisionId
+Kiln.ItemPickingUpEvent.Involves(Kiln.EntityId entity) -> bool
+Kiln.ItemPickingUpEvent.Item.get -> Kiln.ItemId
+Kiln.ItemPickingUpEvent.ItemPickingUpEvent(Kiln.DecisionId id, Kiln.EventEntityKey receiver, Kiln.EventEntityKey ground, Kiln.ItemId item, int amount, Kiln.WorldPosition? position, ulong exposureEpoch) -> void
+Kiln.ItemPickingUpEvent.Position.get -> Kiln.WorldPosition?
+Kiln.ItemPickingUpEvent.Receiver.get -> Kiln.EntityId
+Kiln.ItemPickingUpEvent.ReceiverKey.get -> Kiln.EventEntityKey
 Kiln.ItemPickupEvent
 Kiln.ItemPickupEvent.Count.get -> int
 Kiln.ItemPickupEvent.HiddenInUi.get -> bool

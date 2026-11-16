@@ -1,5 +1,1 @@
 #nullable enable
-Kiln.GameDataRegistry.Define(Kiln.GameDataClone! clone, Kiln.DefinitionRegistrationOptions! options) -> Kiln.DefinitionRegistrationResult!
-Kiln.GameDataRegistry.Define(System.Text.Json.Nodes.JsonObject! definition, Kiln.DefinitionRegistrationOptions! options) -> Kiln.DefinitionRegistrationResult!
-Kiln.GameDataRegistry.GetBudget() -> Kiln.CapacityQueryResult!
-Kiln.GameDataRegistry.GetRegistration(System.Guid registrationId) -> Kiln.DefinitionRegistrationResult!

@@ -324,6 +324,7 @@ static Kiln.Vfx.PlayAt(Kiln.VfxId vfx, Kiln.WorldPosition at, System.Numerics.Qu
 static Kiln.Vfx.PlayFor(Kiln.EntityId player, Kiln.VfxId vfx, Kiln.WorldPosition at, Kiln.VfxParams? parameters = null, System.TimeSpan? lifetime = null) -> Kiln.VfxHandle
 static Kiln.Vfx.PlayOn(Kiln.VfxId vfx, Kiln.EntityId entity, Kiln.Slot slot = Kiln.Slot.Root, Kiln.Offset offset = default(Kiln.Offset), Kiln.VfxParams? parameters = null, System.TimeSpan? lifetime = null, float radius = 0) -> Kiln.VfxHandle
 static Kiln.Vfx.Preload(Kiln.VfxId vfx) -> void
+static Kiln.Vfx.ResourceBudget.get -> Kiln.CapacityQueryResult!
 static Kiln.Vfx.Set(Kiln.VfxHandle h, string! parameter, Kiln.Color value) -> void
 static Kiln.Vfx.Set(Kiln.VfxHandle h, string! parameter, System.Numerics.Vector3 value) -> void
 static Kiln.Vfx.Set(Kiln.VfxHandle h, string! parameter, float value) -> void

@@ -447,13 +447,17 @@ Kiln.GameDataItemExtensions
 Kiln.GameDataRegistry
 Kiln.GameDataRegistry.Count.get -> int
 Kiln.GameDataRegistry.Define(Kiln.GameDataClone! clone) -> Kiln.GameDataDefinition!
+Kiln.GameDataRegistry.Define(Kiln.GameDataClone! clone, Kiln.DefinitionRegistrationOptions! options) -> Kiln.DefinitionRegistrationResult!
 Kiln.GameDataRegistry.Define(System.Text.Json.Nodes.JsonObject! definition) -> Kiln.GameDataDefinition!
+Kiln.GameDataRegistry.Define(System.Text.Json.Nodes.JsonObject! definition, Kiln.DefinitionRegistrationOptions! options) -> Kiln.DefinitionRegistrationResult!
 Kiln.GameDataRegistry.Definitions() -> System.Collections.Generic.IReadOnlyList<Kiln.GameDataDefinition!>!
 Kiln.GameDataRegistry.Dump(string? key = null, string? path = null) -> string!
 Kiln.GameDataRegistry.Get(System.Guid guid) -> Kiln.GameDataEntry?
 Kiln.GameDataRegistry.Get(string! key) -> Kiln.GameDataEntry?
 Kiln.GameDataRegistry.Get(uint id) -> Kiln.GameDataEntry?
+Kiln.GameDataRegistry.GetBudget() -> Kiln.CapacityQueryResult!
 Kiln.GameDataRegistry.GetEnumerator() -> System.Collections.Generic.IEnumerator<Kiln.GameDataEntry!>!
+Kiln.GameDataRegistry.GetRegistration(System.Guid registrationId) -> Kiln.DefinitionRegistrationResult!
 Kiln.GameDataRegistry.IsClone(System.Guid guid) -> bool
 Kiln.GameDataRegistry.Section.get -> Kiln.GameDataSection
 Kiln.GameDataRegistry.this[int index].get -> Kiln.GameDataEntry!
