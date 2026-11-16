@@ -14,7 +14,10 @@ bool image_button(const char*, KilnHandle, float, float) { return false; }
 static_assert(offsetof(KilnUiApi, set_next_window_size_constraints) == offsetof(KilnUiApi, subscribe_key_ex) + sizeof(void*));
 static_assert(offsetof(KilnUiApi, subscribe_key_ex) == 880);
 static_assert(offsetof(KilnUiApi, set_next_window_size_constraints) == 888);
-static_assert(sizeof(KilnUiApi) == offsetof(KilnUiApi, set_next_window_size_constraints) + sizeof(void*));
+// menu_footer (0.2.0-dev.29.11) is appended after it; the constraints keep their offset
+static_assert(offsetof(KilnUiApi, menu_footer) == offsetof(KilnUiApi, set_next_window_size_constraints) + sizeof(void*));
+static_assert(offsetof(KilnUiApi, menu_footer) == 896);
+static_assert(sizeof(KilnUiApi) == offsetof(KilnUiApi, menu_footer) + sizeof(void*));
 int main() {
     // Drawing off: no frame/context, just as KILN_UI_OVERLAY=0. Must not enter ImGui.
     kui_draw::t_set_next_window_size_constraints(300, 0, 300, 918);

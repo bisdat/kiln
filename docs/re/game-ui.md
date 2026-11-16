@@ -326,6 +326,83 @@ entries. A hook on Credits answers only calls returning to `ui/PreGameCreditsRet
 14. Kill Kiln.Ui's drawing (a build without the managed host): the page leaves by itself after about a second and MODS
     then opens the stand-alone menu (`no host drew it for a while`).
 
+## 5c. The main menu's footer (client 26430625, static analysis only)
+Asked for 2026-11-16: Kiln's own line on the main menu ("Kiln &lt;version&gt; - &lt;N&gt; Mods Loaded" with Kiln's mark),
+taking the place of XHL-Core's. Nothing here has been seen running. RVAs of 5d9ef2f1. Symbols: `ui.json` feature
+`ui.menu_footer`. Kiln's use: `native/services/ui/menu_footer.cpp`, `code_clone.h`. Work files (helpers, the XHL-Core
+signature map): `/mnt/Dongus/kiln-wave/dev29/out/menufooter/`.
+
+**The game's footer.** `MainMenuFooter 0xc189e0` (`void(void)`, 0x3f5 bytes, unwind info version 1, no handler) has one
+caller: the main menu page's draw (`call` at `0xc2cb5e`, in a chunk of `0xc2a400`, right before the page's frame closes).
+It opens a window named "LegalLine" (`0xa3f530(&win, {"LegalLine", 9}, 1, layer 0x22, 0, 0)` at `0xc18a2b`), a stack
+(`0xa3cbd0`, `0xa49b10`) with padding = max(safe-area insets, 10 units) and spacing {0, 5}, a flexible spacer {0, 1} (the
+lines sit at the bottom), then two lines:
+- the build number (only when `*(*(UiApp)+0xd0)` holds a state): loca tag `cfg+0x6be0` formatted with "%s %u" and the
+  build number, `NativeTextLine 0xb1da10(rbp+0x10, &text, cfg+0x10f2c, 0)` at **`0xc18c14`** (`ui/MainMenuFooterBuildLine`),
+  then the object's node aligned 0x301 (`UiNodeAlign 0x11ced70`), byte `+0x3d` = 1, the colours at `+0xb0` and `+0xb8`
+  to alpha 0x7f, flags u16 `+0x90` |= 0x48, `+0x92` = 0, byte `+0xd4` |= 1, the size float `+0x7c` = `cfg+0x10b98`, and
+  `NativeTextDraw 0xb25160(object)` at `0xc18caf`;
+- the legal line (loca tag `cfg+0x6b80`), the same way (`0xc18d05` … `0xc18da9`);
+- the stack's end `0xa40080`, the window's end `0xa3fa90`. **[dis]**
+
+No base relocation touches the function; its 32 relative fields are 31 to the outside (20 calls) and one jump inside
+(`je 0xc18cbb`, no state: no build number). **[dis]** (`tests/code_clone_test.cpp` reads it from the installed exe.)
+
+**XHL-Core 2.1.0** (`dinput8.dll`, sha256 `9eba3c3d…`, MIT; Ghidra decompile in `kiln-wave/xhl/re/core/all.c`) draws its
+main-menu entry here. A background thread (`FUN_180045510`) scans the game's exe **file** (mapped from disk; the live
+image only when the file cannot be mapped) until it finds its sites, then rewrites four `E8 rel32` calls in the live code
+to near stubs (`FUN_180030160`, mutex `Local\XHL.CodePatch.<pid>`, every thread suspended, each site's live byte must be
+`E8`, its old target becomes the hook's "original"). It never scans again once they are in. Its LegalLine scanner
+(`FUN_18005b370`) finds the "LegalLine" `lea`, the window call (`0xc18a2b`), the "%s %u" `lea` and the
+`NativeTextLine` / `NativeTextDraw` calls after it and the `movss xmm0, [rcx+0x10b98]` size read:
+- `0xc18c14` (the build number's `NativeTextLine`) → `FUN_1800596a0`: when its status text is not empty, it opens a
+  frame "XhlStartupStatus" (FNV-1a id), builds its own text with the game's `NativeTextLine` (the build line's style
+  and mode), aligns it 0x101, sets `+0x3d`, flags `|= 0x4a`, the size `cfg+0x10b98 × 1.1`, colour `0xff80ff60` (green)
+  when all is well or `0xff3030ff` (red) for a problem, draws it with `NativeTextDraw`, makes it clickable while its
+  input mode is on (a click opens its diagnostics), then calls the game's `NativeTextLine`. So its line sits right above
+  the build number. The text: "All mods loaded" (35 languages, `PTR_s_All_mods_loaded_1800be0f8[lang × 27]`) once its
+  startup check finished with no issue, else the issue ("XHL: Game updated … Click to view", "Mod conflict detected.
+  Click to view", …), else nothing.
+- `0xc18a2b` (the LegalLine window) → `FUN_180059bf0`: the window's input argument forced on while its status line is
+  interactive.
+- two calls in the main menu's entry code (found through "pregameMainMenuWindow", "mainMenuEntries",
+  "PreGameStateStorageWindow", "doButton()", "Settings", "MainMenu") → `FUN_180059560`, `FUN_180059640`: keyboard and
+  gamepad reach of the status line (its activation opens XHL's menu).
+**[xhl]** (decompile; not run)
+
+**What Kiln does** (feature `ui.menu_footer`): at start kiln.ui copies `MainMenuFooter` from the exe file into memory
+near the image (`code_clone.h`: same layout, outside references rewritten, the copy checked against the original before
+use, the original's unwind information registered for it) with its call at `0xc18c14` sent through Kiln's thunk, and
+hooks the function's entry to run the copy (XHL-Core scans the exe file, not the live code, and at install checks only
+that its own call sites are still calls). The thunk builds and draws Kiln's line
+exactly as the game builds its build-number line (the same style, mode, fields; text with 7 no-break spaces in front of
+it for the mark), reads its rectangle (`UiNodeRect`, the last layout's) and then calls the game's `NativeTextLine` for
+the build number. Kiln never writes to the function's body, so XHL-Core's scan and its call patches go in as before in
+either order; the copy simply does not reach them, so its line (and its window-input patch, which only served that line)
+is not drawn, and its two main-menu patches find no status line to reach. At the first use kiln.ui compares the live
+function with the file's: a patched call is logged (module and offset); any other change (or base-relocated bytes) leaves
+the footer to the game's function. The game font's metrics for the mark's gap: Harmonique Display Regular, 1000 units per
+em, ascent 980, descent 220, space and no-break space 191 (fontTools over font 0 of the UiFontResource) **[data]**.
+
+### Client checklist (needs the real game)
+Without XHL-Core:
+1. Main menu: Kiln's mark and "Kiln 0.2.0-dev.29.11 - N Mods Loaded" right above the build number, in the footer's
+   font, size and colour, aligned like the two game lines; N is what the Mods page counts as Loaded. kiln.log:
+   `ui: the main menu's footer: Kiln's line goes above the build number`, `... says "Kiln ..."`, `... Kiln's line at ...,
+   its mark at ...`.
+2. The mark sits in the gap before "Kiln" (not over the text, not far from it), its height about the text's; check at
+   1920x1080, 2560x1440, 3440x1440 and a UI scale change.
+3. Settings, Credits, PLAY and back, the Kiln page (MODS) and back, a world and Return to Main Menu: the line and its
+   mark are there only on the main menu page, and come back with it.
+4. Kiln settings → `mainMenuFooter` off: the line and the mark go at once, the game's footer is as before; on again:
+   they come back.
+With XHL-Core 2.1.0 (as a chain DLL):
+5. The same line in the same place; XHL-Core's green "All mods loaded" is not shown at any moment. kiln.log names
+   XHL-Core: `a module patched the game's footer call at +0x234 to <XHL-Core's file>+0x596a0` (its detour, found through
+   its stub; the file is dinput8.dll or its chain name).
+6. XHL-Core's Insert menu, its plugins and its other features work as before, in the main menu and in a world.
+7. `mainMenuFooter` off: XHL-Core's green line is back above the build number.
+
 ## 6. Other strings worth knowing
 "[GameUi] … opened" log lines exist for every menu (Backpack, Map, Journal, Skill Tree, Settings, Social, NPC dialog,
 …): the game logs screen changes itself, at level 3. Window ids: `titleScreenWindow`, `pregameMainMenuWindow`,

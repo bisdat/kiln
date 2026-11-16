@@ -7,7 +7,7 @@ target_include_directories(kiln-imgui PUBLIC ${KILN_IMGUI} ${KILN_IMGUI}/vulkan-
 target_compile_definitions(kiln-imgui PUBLIC IMGUI_IMPL_VULKAN_NO_PROTOTYPES VK_NO_PROTOTYPES IMGUI_IMPL_WIN32_DISABLE_GAMEPAD)
 target_compile_options(kiln-imgui PRIVATE -w)
 
-kiln_service(ui ui.cpp overlay_guard.cpp vk.cpp input.cpp keys.cpp game.cpp menu_page.cpp menu_scroll.cpp style.cpp render.cpp wheel.cpp)
+kiln_service(ui ui.cpp overlay_guard.cpp vk.cpp input.cpp keys.cpp game.cpp menu_page.cpp menu_scroll.cpp menu_footer.cpp style.cpp render.cpp wheel.cpp)
 target_link_libraries(kiln-ui PRIVATE kiln-imgui user32 imm32 dwmapi gdi32)
 
 # Opt-in build target, never packaged: real third-party addon against Kiln's production input and startup gate.
@@ -34,3 +34,8 @@ target_compile_definitions(ui-load-hook-nested PRIVATE FIXTURE_NESTED)
 add_library(ui-addon-inert SHARED EXCLUDE_FROM_ALL tests/addon_harness/fixture.cpp)
 add_library(ui-addon-forwarded SHARED EXCLUDE_FROM_ALL tests/addon_harness/fixture.cpp)
 target_compile_definitions(ui-addon-forwarded PRIVATE FORWARDED_SHUTDOWN)
+# Opt-in build target, never packaged: code_copy_win.h (the main menu's footer copy) on a function of its own exe under
+# plain Wine (tests/test-code-copy-wine.sh).
+add_executable(ui-code-copy-test EXCLUDE_FROM_ALL tests/code_copy_wine/harness.cpp)
+target_include_directories(ui-code-copy-test PRIVATE .)
+target_link_libraries(ui-code-copy-test PRIVATE kiln-safetyhook)

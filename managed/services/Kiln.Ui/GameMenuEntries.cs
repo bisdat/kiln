@@ -31,6 +31,10 @@ internal sealed class MenuSettings
              "such as Quit, off the screen), Always, or Never. Kiln's own Mods entry is always there, and every mod's " +
              "entry is also on Kiln's Mods page under \"Menu entries\".")]
     public ModMenuEntries ModEntries { get; set; } = ModMenuEntries.Auto;
+
+    [Comment("Kiln's line in the main menu's footer, above the game's build number: Kiln's mark, \"Kiln <version> - <N> " +
+             "Mods Loaded\". It takes the place of XHL-Core's \"All mods loaded\" line. Off: the game's footer as it was.")]
+    public bool MainMenuFooter { get; set; } = true;
 }
 
 /// <summary>One mod's entry in a game menu, as the Mods page lists it.</summary>
@@ -56,6 +60,10 @@ internal static unsafe class GameMenuEntries
     /// <summary>The setting in use (Auto until the config is registered).</summary>
     internal static ModMenuEntries Mode => _config?.Value.ModEntries ?? ModMenuEntries.Auto;
 
+    /// <summary>Kiln's line in the main menu's footer is shown (the setting <c>mainMenuFooter</c>; on until the config is
+    /// registered).</summary>
+    internal static bool FooterShown => _config?.Value.MainMenuFooter ?? true;
+
     /// <summary>KILN_UI_SCROLL_*: whether the pause menu scrolls in this game (0 when kiln.ui cannot say).</summary>
     internal static uint ScrollStatus()
     {
@@ -79,6 +87,7 @@ internal static unsafe class GameMenuEntries
         // kiln.ui draws every entry until told otherwise (an older Kiln.Ui has no list to reach hidden ones); this one
         // lists them, so the default (Few) applies from now, and the saved setting once the config is registered
         Apply();
+        MainMenuFooter.Start();
         if (StartNotice(ScrollStatus()) is { } notice)
         {
             try { Hud.Toast(notice, ToastKind.Warning, 10); }
@@ -122,6 +131,7 @@ internal static unsafe class GameMenuEntries
     {
         var t = UiNative.T6;
         if (t != null && t->MenuShown != null) t->MenuShown(NativeMode(Mode));
+        MainMenuFooter.Push();  // the footer line's setting may have changed too
     }
 
     /// <summary>Every mod's entry in the game's menus, in drawing order (empty without kiln.ui v6). Any thread.</summary>

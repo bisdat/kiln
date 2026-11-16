@@ -91,6 +91,36 @@ e.Visible = false;       // hide for now; e.Text = "…" relabels; e.Dispose() r
   menu (which does not scroll) can still lose its last entries on a small screen; the guided client check
   `MenuRowsLeaveQuitOnScreen` asks how many entries fit before Quit leaves the screen.
 
+### Kiln's line in the main menu's footer (since 0.2.0-dev.29.11)
+At the bottom of the main menu the game draws its footer: the build number and the legal line. Kiln adds its own line
+right above the build number: Kiln's mark, then **Kiln &lt;version&gt; - &lt;N&gt; Mods Loaded** ("1 Mod Loaded").
+- **The text** is drawn by the game itself (its footer's font, size, colour, alignment and safe-area padding: kiln.ui
+  builds the line exactly as the game builds its build-number line). The mark is a picture, which the game's text cannot
+  hold: the overlay draws it in the gap at the start of the line, sized to the line, at the place the game laid the line
+  out. Without the overlay (`KILN_UI_OVERLAY=0`, the overlay's crash guard) the line has no gap and no mark.
+- **The version** is the release version of the runtime (`0.2.0-dev.29.11`), without the `+<date>.<commit>` build
+  suffix; a local build shows the version it was built with.
+- **N** counts every mod that loaded this start, of every engine Kiln runs, as Kiln's Mods page counts them (its rows
+  whose state is Loaded): Kiln mods, native DLL mods, native plugins that are not Kiln's own, chain DLLs, and the mods of
+  EMF, EML, XHL, ShroudForge, SET, Greeneye, Flame, Shroudtopia, Enshwick, shroudlink and Ember. Kiln's own services
+  and plugins are not mods; a mod switched off, waiting, failed or not loaded does not count. Kiln.Ui reads the list
+  again every 2 seconds while the title or the main menu shows, so a mod that an engine starts late is counted too.
+- **XHL-Core.** XHL-Core 2.1.0 draws its own line at this place ("All mods loaded", or a red line about a problem).
+  **Kiln's line takes its place**: while Kiln's line shows, XHL-Core's is not drawn. Nothing else of XHL-Core changes
+  (its plugins, its Insert menu, its other hooks); it installs as it always did, whether it starts before Kiln or after.
+  How: Kiln runs its own copy of the game's footer function, made from the exe file at start, so the line XHL-Core
+  patches into the game's footer code is not reached (docs/re/game-ui.md "The main menu's footer"). kiln.log names
+  the module that patched the footer (`ui: the main menu's footer: a module patched the game's footer call at ...`).
+- **The setting** `mainMenuFooter` (on by default; Kiln's config `kiln/config/menus-client.json`, on the Mods page under
+  **Kiln settings**) hides it: the game's footer is then drawn as it always was, with XHL-Core's line where XHL-Core is
+  installed.
+- **Fail safe.** On a game build where the footer's code does not match (feature `ui.menu_footer` off), when the copy
+  cannot be made or checked, when another module changed the footer's code in a way other than a patched call, before
+  Kiln.Ui has counted the mods, or after a fault in Kiln's line, the game's own footer function runs (with XHL-Core's
+  line where it is installed). Each of these is one kiln.log line (`ui: the main menu's footer ...`).
+- Native: `KilnUiApi.menu_footer(mods, flags)` ([services/ui.md](services/ui.md)); Kiln.Ui calls it, a native mod need
+  not.
+
 ### Which screen is open
 ```csharp
 var s = Ui.Screens.Current;           // GameScreen: Kind, State (keen::UiState), Hud (keen::HudScreenType), Crafting, Language

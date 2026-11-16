@@ -406,6 +406,7 @@ void after_frame(uintptr_t sys10) {
     ++g_frame_no;
     g_frames.store(g_frame_no, std::memory_order_relaxed);
     page_after_frame(sys10, g_frame_no);
+    footer_after_frame(sys10);  // the canvas for the mark next to Kiln's line in the main menu's footer (menu_footer.cpp)
     scroll_after_frame(g_frame_no);  // the scrolling pause menu's crash guard (menu_scroll.cpp)
     g_ui_thread = GetCurrentThreadId();
     Raw raw{};
@@ -572,6 +573,7 @@ bool game_install() {
         L.crafting = static_cast<bool>(g_craft_hook);
     }
     add_builtin_entries();
+    footer_install();  // Kiln's line in the main menu's footer (menu_footer.cpp): its own log line
     logf(KILN_LOG_INFO, "ui: game UI hooked: screens on, main menu %s, pause menu %s, crafting %s, language %s, main-menu page %s",
          L.main_menu ? "on" : "off", L.system_menu ? "on" : "off", L.crafting ? "on" : "off", L.language ? "on" : "off",
          page ? "on" : "off");
@@ -587,6 +589,7 @@ void game_ready() {
 }
 
 bool game_screens_on() { return L.screens; }
+uint64_t game_frames() { return g_frames.load(std::memory_order_relaxed); }
 bool game_menu_on(uint32_t menu) { return menu == KILN_UI_MENU_MAIN ? L.main_menu : menu == KILN_UI_MENU_PAUSE ? L.system_menu : false; }
 
 bool game_in_menu() {
