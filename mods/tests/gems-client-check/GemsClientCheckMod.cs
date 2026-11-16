@@ -70,9 +70,11 @@ public sealed class GemsClientCheckMod : Mod
     private async Task Run(CommandContext c)
     {
         var who = c.Source.Player;
+        // from kiln/control/console (no player): the world's only player, a hosting client's own character
+        if (who.IsNone && Players.All is [var only]) who = only.Entity;
         if (who.IsNone)
         {
-            c.Reply("run it as a player");
+            c.Reply("run it as a player (or from the console with exactly one player in the world)");
             return;
         }
         void Out(string s)
