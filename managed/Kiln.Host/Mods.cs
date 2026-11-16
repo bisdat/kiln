@@ -260,7 +260,7 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
             if (!f.Enabled)
             {
                 disabled.Add(f.Id);
-                SetRecord(c, ModState.Skipped, "disabled in profile");
+                SetRecord(c, ModState.Skipped, "disabled in profile");  // Kiln.Network's NetAdvertise.DisabledInProfile: keep in step
                 _host.Log(LogLevel.Info, $"mod {f.Id}{(f.Version is null ? "" : " " + f.Version)} skipped: disabled in profile");
                 continue;
             }

@@ -227,8 +227,7 @@ internal static partial class NetAdvertise
         var statedMod = new List<string>();
         foreach (var m in mods)
         {
-            if (string.IsNullOrEmpty(m.Directory) || m.State == ModState.Failed) continue;
-            if (File.Exists(Path.Combine(m.Directory, ".disabled"))) continue;
+            if (!Counts(m.State, m.Error, m.Directory)) continue;
             var declared = DeclaredClients(Path.Combine(m.Directory, "kiln.mod.json"));
             if (declared is "kiln" or "mod") kilnClient.Add(m.Id);
             if (declared == "mod" && m.Side == ModSide.Both) statedMod.Add(m.Id);
@@ -288,6 +287,18 @@ internal static partial class NetAdvertise
             NetEngine.Log(LogLevel.Info, $"advertising {list.Count} mod(s) players need: " +
                                           (list.Count == 0 ? "none" : string.Join(", ", list.Take(12).Select(r => $"{r.Id} {r.Version} {r.Hash[..13]}"))));
     }
+
+    /// <summary>Kiln.Host's reason for a mod whose profile entry is off (Mods.cs, "disabled in profile").</summary>
+    internal const string DisabledInProfile = "disabled in profile";
+
+    /// <summary>Whether a mod of the host's list counts for what players need: not a failed one, and not one switched off
+    /// (a <c>.disabled</c> file, or its profile entry off: Skipped "disabled in profile"; until 0.2.0-dev.29.11 such a mod
+    /// was still advertised, and a game hosting its world refused its own player, who had it off too). A mod skipped for
+    /// its side (a client mod on a server) still counts: players need it.</summary>
+    internal static bool Counts(ModState state, string? error, string? directory) =>
+        !string.IsNullOrEmpty(directory) && state != ModState.Failed
+        && !(state == ModState.Skipped && error is { } e && e.StartsWith(DisabledInProfile, StringComparison.Ordinal))
+        && !File.Exists(Path.Combine(directory, ".disabled"));
 
     /// <summary>The <c>clients</c> a manifest states itself, without a default; null when it says nothing.</summary>
     internal static string? DeclaredClients(string manifest)
