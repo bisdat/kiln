@@ -391,4 +391,68 @@ inline std::vector<DiffRun> diff_runs(const uint8_t* a, const uint8_t* b, size_t
     return runs;
 }
 
+// One place where the live code differs from the file's, for the patch map (hooks.json "codePatches"). A redirected
+// `call rel32` is a row of its own: `rva` is its E8, `called_rva` the function it called in the file (an RVA of the
+// image) and `now` where it goes now; any other difference is a run of bytes, closer than `merge` joined.
+struct PatchRow {
+    uint32_t rva = 0, len = 0;
+    bool call = false;
+    uint32_t called_rva = 0;
+    uintptr_t now = 0;
+};
+
+// Every live-vs-file difference of .text as rows, in address order. A closed mod that checks a call against the exe
+// file's bytes before it patches it (XHL-Core plugins: "could not prepare CALL 11 of 24 (invalid or changed since
+// capture)", inbox 39) fails when another module redirected that very call first; the row names the call, so a report
+// says who did. At most `limit` rows are returned; `total` (when given) counts them all.
+inline std::vector<PatchRow> patch_rows(const uint8_t* file, const uint8_t* live, size_t size, uint32_t text_rva,
+                                        uintptr_t live_text, uintptr_t image_base, size_t image_size, size_t limit,
+                                        size_t* total, bool (*call_lands)(uintptr_t) = nullptr, size_t merge = 16) {
+    std::vector<PatchRow> rows;
+    size_t count = 0;
+    // the start of a redirected call whose operand holds the difference at `at`, or `size`
+    auto call_at = [&](size_t at) -> size_t {
+        for (size_t back = 1; back <= 4 && back <= at; ++back)
+            if (redirected_call_at(file, live, size, at - back, live_text, image_base, image_size, call_lands)) return at - back;
+        return size;
+    };
+    auto emit = [&](const PatchRow& r) {
+        ++count;
+        if (rows.size() < limit) rows.push_back(r);
+    };
+    constexpr size_t kBlock = 256;
+    size_t i = 0;
+    while (i < size) {
+        if (i % kBlock == 0 && size - i >= kBlock && std::memcmp(file + i, live + i, kBlock) == 0) {
+            i += kBlock;
+            continue;
+        }
+        if (file[i] == live[i]) {
+            ++i;
+            continue;
+        }
+        if (const size_t c = call_at(i); c != size) {
+            int32_t was, now;
+            std::memcpy(&was, file + c + 1, 4);
+            std::memcpy(&now, live + c + 1, 4);
+            const uintptr_t next = live_text + c + 5;
+            emit({text_rva + static_cast<uint32_t>(c), 5, true,
+                  static_cast<uint32_t>(next + static_cast<intptr_t>(was) - image_base), next + static_cast<intptr_t>(now)});
+            i = c + 5;
+            continue;
+        }
+        // a run: this difference and the next ones closer than `merge`, up to a redirected call (a row of its own)
+        size_t end = i + 1;
+        for (size_t j = i + 1; j < size && j - end <= merge; ++j) {
+            if (file[j] == live[j]) continue;
+            if (call_at(j) != size) break;
+            end = j + 1;
+        }
+        emit({text_rva + static_cast<uint32_t>(i), static_cast<uint32_t>(end - i), false, 0, 0});
+        i = end;
+    }
+    if (total) *total = count;
+    return rows;
+}
+
 }  // namespace kiln::pe

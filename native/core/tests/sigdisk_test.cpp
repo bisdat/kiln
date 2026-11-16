@@ -444,10 +444,58 @@ static void padded_hooks() {
     CHECK(!hooked(21), "21 NOPs behind a jump are more than any hook writes: the last one is an in-place patch");
 }
 
+// The patch map (hooks.json "codePatches", inbox 39): every live/file difference as a row, a redirected call as its own
+// row with the function it called in the file, so a report says which module rewrote the CALL a closed mod needed.
+static void patch_map() {
+    constexpr size_t kSize = 0x400;
+    std::vector<uint8_t> file(kSize, 0x90), live;
+    const uintptr_t image = 0x140000000, text_rva = 0x1000, text = image + text_rva, image_size = 0x2000;
+    // a call at 0x40 to 0x200 in the file (inside .text), redirected live to a thunk outside the image
+    file[0x40] = 0xE8;
+    put<int32_t>(file, 0x41, static_cast<int32_t>(0x200 - 0x45));
+    live = file;
+    put<int32_t>(live, 0x41, static_cast<int32_t>(0x7000000));  // text + 0x45 + 0x7000000: far outside the image
+    // a 5-byte jmp hook at 0x100, one byte changed in place at 0x180, two differences 10 bytes apart at 0x300 / 0x30a
+    live[0x100] = 0xE9;
+    put<int32_t>(live, 0x101, 0x1234);
+    live[0x180] = 0xCC;
+    live[0x300] = 0xCC;
+    live[0x30a] = 0xCC;
+    // a difference at 0x3a0 right before a redirected call at 0x3a4: two rows, the run stops before the call
+    live[0x3a0] = 0xCC;
+    file[0x3a4] = 0xE8;
+    put<int32_t>(file, 0x3a5, static_cast<int32_t>(0x10 - 0x3a9));
+    live[0x3a4] = 0xE8;
+    put<int32_t>(live, 0x3a5, static_cast<int32_t>(0x7000000));
+
+    size_t total = 0;
+    const auto rows = pe::patch_rows(file.data(), live.data(), kSize, text_rva, text, image, image_size, 64, &total);
+    CHECK(total == 6 && rows.size() == 6, "patch map: 6 rows (got %zu of %zu)", rows.size(), total);
+    if (rows.size() == 6) {
+        CHECK(rows[0].call && rows[0].rva == 0x1040 && rows[0].len == 5 && rows[0].called_rva == 0x1200 &&
+                  rows[0].now == text + 0x45 + 0x7000000,
+              "patch map: the redirected call is its own row, with the function it called in the file (rva 0x%x, called "
+              "0x%x)", rows[0].rva, rows[0].called_rva);
+        CHECK(!rows[1].call && rows[1].rva == 0x1100 && rows[1].len == 5, "patch map: the jmp hook is a 5-byte run");
+        CHECK(!rows[2].call && rows[2].rva == 0x1180 && rows[2].len == 1, "patch map: an in-place byte is a run of its own");
+        CHECK(!rows[3].call && rows[3].rva == 0x1300 && rows[3].len == 0xb, "patch map: differences 10 bytes apart join");
+        CHECK(!rows[4].call && rows[4].rva == 0x13a0 && rows[4].len == 1 && rows[5].call && rows[5].rva == 0x13a4 &&
+                  rows[5].called_rva == 0x1010,
+              "patch map: a run stops before a redirected call, which keeps its own row");
+    }
+    size_t capped_total = 0;
+    const auto capped = pe::patch_rows(file.data(), live.data(), kSize, text_rva, text, image, image_size, 2, &capped_total);
+    CHECK(capped.size() == 2 && capped_total == 6, "patch map: the row limit keeps the total (%zu of %zu)", capped.size(),
+          capped_total);
+    CHECK(pe::patch_rows(file.data(), file.data(), kSize, text_rva, text, image, image_size, 64, &total).empty() && total == 0,
+          "patch map: unpatched code has no rows");
+}
+
 int main(int argc, char** argv) {
     synthetic();
     padded_hooks();
     hostile_pe();
+    patch_map();
     std::filesystem::path sigdb_dir = std::filesystem::path(__FILE__).parent_path() / "../../../sigdb/symbols";
     for (int i = 1; i + 1 < argc; i += 2) {
         const std::string opt = argv[i];

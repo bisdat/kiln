@@ -1480,11 +1480,32 @@ internal static class ModCatalog
     internal const string XhlPrerequisite = "Requires XHL-Core: only that separately installed host loads it. Import XHL-Core in the Kiln launcher " +
                                             "as a Native mod and turn it on, or install it as its author says, then start the game again.";
 
+    /// <summary>The XHL row's reason when XHL-Core started with the game: plain, no warning (inbox 39).</summary>
+    private const string XhlCoreRuns = "XHL-Core started with the game, and it loads this plugin itself, not Kiln. Whether the plugin " +
+                                       "started is in XHL-Core's own log, XHL-Native-Plugin-Host.log next to XHL-Core.";
+    internal const string XhlCoreStarted = "Placed in the game's mods folder for XHL-Core. " + XhlCoreRuns;
+
+    /// <summary>XHL-Core's DLL as Kiln chain-loads it (kiln-manage engine_mods XHL_CORE_DLL) and its Library id.</summary>
+    private const string XhlCoreDll = "xhl-core.dll", XhlCoreId = "xhl-core";
+
+    /// <summary>XHL-Core started this time: the native mod Kiln imported it as (its id, or its DLL renamed for the chain)
+    /// loaded, or a chain DLL of that name did. A hand-installed XHL-Core under another name is not recognised here.</summary>
+    private static bool XhlCoreLoaded(Builder b)
+    {
+        bool Is(string? s, string name) => s is not null && s.Equals(name, StringComparison.OrdinalIgnoreCase);
+        if (b.Mods.TryGetValue("native", out var native) &&
+            native.Any(m => m.State == ModRunState.Loaded && (Is(m.Id, XhlCoreId) || Is(LeafName(m.Folder ?? ""), XhlCoreId))))
+            return true;
+        return b.Mods.TryGetValue("chain", out var chain) &&
+               chain.Any(m => m.State == ModRunState.Loaded && (Is(m.Name, XhlCoreDll) || Is(LeafName(m.Folder ?? ""), XhlCoreDll)));
+    }
+
     private static void Xhl(Builder b)
     {
         var start = b.Mods.TryGetValue("xhl", out var before) ? before.Count : 0;
-        b.ProfileRest("xhl", _ => false, "Placed in the game's mods folder for XHL-Core. Kiln does not load it, and Kiln cannot tell whether XHL-Core runs it.",
-            ModRunState.NotLoaded, XhlPrerequisite);
+        var core = XhlCoreLoaded(b);
+        b.ProfileRest("xhl", _ => false, core ? XhlCoreStarted : "Placed in the game's mods folder for XHL-Core. Kiln does not load it, and Kiln cannot tell whether XHL-Core runs it.",
+            ModRunState.NotLoaded, core ? null : XhlPrerequisite);
         if (b.Mods.TryGetValue("xhl", out var placed))
             for (var i = start; i < placed.Count; i++)
                 if (placed[i].Word == "not reported") placed[i] = placed[i] with { Word = "placed" };
@@ -1501,12 +1522,15 @@ internal static class ModCatalog
             b.Add(new CatalogMod
             {
                 Engine = "xhl", Id = name, Name = name, Folder = sub, Source = "folder", State = ModRunState.NotLoaded, Word = "found",
-                Reason = "An XHL-Core plugin in the game's mods folder. Kiln does not load it, and Kiln cannot tell whether XHL-Core runs it.",
-                Help = XhlPrerequisite,
+                Reason = "An XHL-Core plugin in the game's mods folder. " +
+                         (core ? XhlCoreRuns : "Kiln does not load it, and Kiln cannot tell whether XHL-Core runs it."),
+                Help = core ? null : XhlPrerequisite,
             });
         }
         if (b.Mods.ContainsKey("xhl") || b.Profile.Of("xhl").Count > 0)
-            b.Engine("xhl", null, EngineHealth.Idle, "XHL: placed for XHL-Core, a separate host. Kiln never loads these plugin DLLs and does not check here whether XHL-Core is installed.", true);
+            b.Engine("xhl", null, EngineHealth.Idle, core
+                ? "XHL: placed for XHL-Core, a separate host. XHL-Core started with the game and loads these plugins; Kiln never loads them itself."
+                : "XHL: placed for XHL-Core, a separate host. Kiln never loads these plugin DLLs and does not check here whether XHL-Core is installed.", true);
     }
 
     private static IEnumerable<string> SubDirs(string dir)

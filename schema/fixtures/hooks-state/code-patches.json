@@ -1,0 +1,27 @@
+{
+  "format": 1,
+  "kiln": "0.2.0-dev.30",
+  "phase": "world",
+  "worldChecked": true,
+  "generated": "2026-11-16T16:53:42Z",
+  "targets": [
+    {
+      "rva": "0xbd0f90",
+      "symbol": "ui/GameUiFrame",
+      "label": "ui/GameUiFrame",
+      "links": [{ "owner": "service:kiln-ui.dll", "kind": "raw", "priority": 0, "label": "ui/GameUiFrame" }],
+      "foreignBefore": null,
+      "foreignOver": null
+    }
+  ],
+  "foreign": [],
+  "codePatches": {
+    "available": true,
+    "total": 3,
+    "rows": [
+      { "rva": "0xbd0f90", "size": 14, "by": "jmp to kiln-core.dll+0x1a2b0", "symbol": "ui/GameUiFrame" },
+      { "rva": "0xbd111d", "size": 5, "by": "call redirected to example.dll+0x9260", "called": "0xda2100" },
+      { "rva": "0xd331ee", "size": 6, "by": "bytes changed in place" }
+    ]
+  }
+}

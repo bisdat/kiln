@@ -738,6 +738,65 @@ public sealed class ModCatalogTests : IDisposable
         Assert.Equal(ModCatalog.EngineOrder.ToList().IndexOf("eml") + 1, ModCatalog.EngineOrder.ToList().IndexOf("xhl"));
     }
 
+    /// <summary>XHL-Core started with the game (Kiln's native loader or the chain loaded it): an XHL companion's page says
+    /// so in plain words and carries no "Requires XHL-Core" warning (inbox 39, PepegaJedi's XHL Remote Chest, chest.png).
+    /// Kiln still cannot tell whether XHL-Core ran the plugin, so the row stays Not loaded. A failed XHL-Core keeps the
+    /// warning.</summary>
+    [Fact]
+    public void Xhl_companions_say_xhl_core_started_when_it_did()
+    {
+        var chest = Dir("mods", "XHL-Remote-Chest");
+        File.WriteAllText(Path.Combine(chest, "native-plugin.ini"), "[Plugin]\nDll=XHL-Remote-Chest.dll\n");
+        File.WriteAllText(Path.Combine(chest, "XHL-Remote-Chest.dll"), "MZ");
+        var hand = Dir("mods", "Hand-XHL");
+        File.WriteAllText(Path.Combine(hand, "native-plugin.ini"), "[Plugin]\nDll=Hand-XHL.dll\n");
+        var core = Dir("kiln", "chain", "xhl-core");
+        object Core(string state) => new
+        {
+            format = 1, pid = Pid,
+            mods = new[] { new { id = "xhl-core", version = "0.0.0", state, folder = core, source = "profile", phase = "dllmain",
+                                 dlls = new[] { new { file = "xhl-core.dll", status = state, error = 0 } } } },
+        };
+        void Setup(object native)
+        {
+            Profile(new()
+            {
+                ["native"] = [new { id = "xhl-core", version = "0.0.0", path = core }],
+                ["xhl"] = [new { id = "xhl-remote-chest", version = "0.0.0", path = chest }],
+            });
+            Write("native.json", native);
+        }
+
+        Setup(Core("loaded"));
+        var s = Read();
+        foreach (var m in new[] { Mod(s, "xhl", "xhl-remote-chest"), Mod(s, "xhl", "Hand-XHL") })
+        {
+            Assert.Equal(ModRunState.NotLoaded, m.State);
+            Assert.Null(m.Help);
+            Assert.DoesNotContain("Requires XHL-Core", m.Reason);
+            Assert.Contains("XHL-Core started with the game", m.Reason);
+            Assert.Contains("XHL-Native-Plugin-Host.log", m.Reason);
+        }
+        Assert.Contains("XHL-Core started with the game", s.Engines.Single(e => e.Kind == "xhl").Note);
+
+        // only the chain names it (an XHL-Core chain-loaded from kiln/chain, no native report): the same
+        Setup(new { format = 1, pid = Pid, mods = Array.Empty<object>() });
+        var file = Path.Combine(Kiln, "profile.json");
+        Write("boot.json", new
+        {
+            format = 1, pid = Pid, side = "client", profile = new { mode = "active", id = "p", name = "Test", file, missing = Array.Empty<object>() },
+            plugins = Array.Empty<object>(),
+            chain = new[] { new { path = Path.Combine(core, "xhl-core.dll"), source = "profile", status = "loaded", error = (string?)null } },
+        });
+        Assert.Null(Mod(Read(), "xhl", "xhl-remote-chest").Help);
+
+        // XHL-Core failed to load: the warning stays
+        Setup(Core("failed"));
+        var failed = Mod(Read(), "xhl", "xhl-remote-chest");
+        Assert.Contains("Requires XHL-Core", failed.Help);
+        Assert.DoesNotContain("XHL-Core started with the game", failed.Reason);
+    }
+
     // a profile with a switched-on runtime package and one switched off in ShroudForge, hosted by Kiln
     private string TwoShroudForgeMods()
     {

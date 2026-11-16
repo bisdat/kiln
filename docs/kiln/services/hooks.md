@@ -212,6 +212,14 @@ returns the same text; `buf` may be null to ask for the length. Offsets and RVAs
   hook and a Kiln-hosted link meet: `foreign-before`, `foreign-over`, ShroudForge's `refused`), `rules` (the compat rules
   that fired) and `ruleFiles`; what they mean and how to fix an overlap:
   [../engines/README.md](../engines/README.md#closed-source-dll-mods). Schema: `schema/hooks-state.schema.json`.
+- `codePatches` (since 0.2.0-dev.30, sigdb's `code_patch_map`): every place the live code differs from the exe file's
+  when the map is written, Kiln's own hooks included: `{available, total, rows: [{rva, size, by, called?,
+  calledSymbol?, symbol?}]}` (at most 1,024 rows; `total` counts them all). `by` says who changed it: `call redirected
+  to <module>+<offset>` for a `call rel32` another module points at its own code (`called` is the function it called
+  in the file), `jmp to <module>+<offset>` for a hook, `bytes changed in place` otherwise. Some closed mods compare the
+  game's code with the exe file before they patch it and refuse a call someone else redirected first (XHL-Core
+  plugins: "could not prepare CALL 11 of 24 (invalid or changed since capture)"); this list names who did.
+  `available: false` with a `reason` when Kiln has no file view of the code.
 
 ## Owner cleanup: `subscribe_owner_retiring` (dev.28)
 A native service that keeps state for other owners (leases, queued work, callbacks into a mod) asks to be told when
