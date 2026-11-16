@@ -143,8 +143,16 @@ bool game_vfx_keys(uintptr_t S, std::vector<Key>* out) {
     }
     return true;
 }
-bool game_blob_find(const HashK&, GameBlob*) { return false; }
-std::string game_container_path(uint16_t) { return {}; }
+// The game's own blobs: the content map knows these (offset, container) and the containers are kiln_test_fs files.
+std::map<std::tuple<uint32_t, uint32_t, uint32_t, uint32_t>, GameBlob> g_fake_game_blobs;
+std::vector<std::string> g_fake_containers;
+bool game_blob_find(const HashK& h, GameBlob* out) {
+    const auto it = g_fake_game_blobs.find({h.size, h.h0, h.h1, h.h2});
+    if (it == g_fake_game_blobs.end()) return false;
+    *out = it->second;
+    return true;
+}
+std::string game_container_path(uint16_t i) { return i < g_fake_containers.size() ? g_fake_containers[i] : std::string(); }
 void flush_pending_textures() {}
 Rgba resize(const Rgba& s, uint32_t, uint32_t) { return s; }
 }  // namespace ka
@@ -795,6 +803,56 @@ const char* kGraphKeyText = "21319e83-5087-4fff-8795-22997843649e:keen::anim_gra
 constexpr uint32_t kGraphHandle = 100, kOtherGraphHandle = 101, kItemHandle = 102, kIconHandle = 103;
 }  // namespace
 
+// kiln.ui reads the game's UI font through blob_read, the first time a Kiln page in the game's look opens (the mod
+// manager): two blobs of about 85 KB, each in one of the game's ~1 GB enshrouded_NNN.dat containers. blob_read read the
+// whole container into memory to copy one blob out: about 2 GB from a hard disk, 24.6 s in a player's log between the
+// page opening and "the game's UI font loaded" (GitHub #39, Nexus 179900169: the game fell out of borderless fullscreen
+// on the first open). The made-up container is 64 MiB; the blob is 85 000 bytes near its end.
+void game_blob_range() {
+    using kiln_test_fs::bytes_read;
+    constexpr uint64_t kContainer = 64ull << 20, kOffset = (40ull << 20) + 123;
+    constexpr uint32_t kSize = 85000;
+    kiln_test_fs::files.push_back({L"C:\\Game\\enshrouded_000.dat", kContainer});
+    kiln_test_fs::files.push_back({L"C:\\Game\\enshrouded_001.dat", kOffset + 10});  // shorter than the blob's end
+    g_fake_containers = {"C:\\Game\\enshrouded_000.dat", "C:\\Game\\enshrouded_001.dat", "C:\\Game\\enshrouded_002.dat"};
+    const KilnContentHash font{kSize, 0xF0F0F0F0u, 0x12345678u, 0x9ABCDEF0u};
+    const KilnContentHash cut{kSize, 0x0BADF00Du, 1, 2}, gone{kSize, 0xDEADBEEFu, 3, 4};
+    g_fake_game_blobs[{font.size, font.hash0, font.hash1, font.hash2}] = GameBlob{kOffset, 0};
+    g_fake_game_blobs[{cut.size, cut.hash0, cut.hash1, cut.hash2}] = GameBlob{kOffset, 1};
+    g_fake_game_blobs[{gone.size, gone.hash0, gone.hash1, gone.hash2}] = GameBlob{kOffset, 2};  // no such file
+
+    std::vector<uint8_t> buf(kSize);
+    size_t n = 0;
+    bytes_read = 0;
+    const auto t0 = std::chrono::steady_clock::now();
+    const KilnResult r = op_blob_read(&font, buf.data(), buf.size(), &n);
+    const auto ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    bool same = r == KILN_OK && n == kSize;
+    for (uint32_t i = 0; same && i < kSize; ++i) same = buf[i] == kiln_test_fs::byte_at(kOffset + i);
+    check(same, "a game blob's bytes are the container's at its offset (result " + std::to_string(r) + ", " + std::to_string(n) + " bytes)");
+    const uint64_t read_once = bytes_read;
+    check(read_once == kSize, "a game blob reads its own " + std::to_string(kSize) + " bytes of a " + std::to_string(kContainer) +
+                                  "-byte container, not the container (" + std::to_string(read_once) + " bytes read, " +
+                                  std::to_string(static_cast<int>(ms)) + " ms here; a whole container of the game is ~1 GB, "
+                                  "about 10 s from a hard disk at 100 MB/s)");
+
+    // the size query (no buffer) answers the size and reads nothing
+    bytes_read = 0;
+    n = 0;
+    const KilnResult query = op_blob_read(&font, nullptr, 0, &n);
+    check(query == KILN_ERR_BUFFER_TOO_SMALL && n == kSize && bytes_read == 0,
+          "a size query answers the blob's size and reads nothing (" + std::to_string(bytes_read) + " bytes read)");
+    // as before: a blob past its container's end is not found, a container that cannot be opened is an internal error
+    bytes_read = 0;
+    const KilnResult past = op_blob_read(&cut, buf.data(), buf.size(), &n);
+    check(past == KILN_ERR_NOT_FOUND && bytes_read == 0,
+          "a blob past its container's end is not found, and nothing is read for it (" + std::to_string(bytes_read) + " bytes read)");
+    check(op_blob_read(&gone, buf.data(), buf.size(), &n) == KILN_ERR_INTERNAL, "a container that cannot be opened: internal error");
+    bool closed = true;
+    for (const auto& o : kiln_test_fs::opens) closed = closed && o.closed;
+    check(closed, "every container opened is closed again");
+}
+
 int main() {
     KilnApi api{};
     api.log = log_line;
@@ -992,6 +1050,10 @@ int main() {
     g_game[spare] = {104, "GAME-SPARE"};
     owner_revoked_without_revert(40, spare, 104, "GAME-SPARE", key("88888888-9999-aaaa-bbbb-cccccccccccc", KILN_ASSET_TYPE_UI_TEXTURE));
     settle();
+
+    // 14. The game's own blob is read from its container alone (GitHub #39, 0.2.0-dev.30).
+    std::puts("-- 14: a game blob reads its own bytes, not its container");
+    game_blob_range();
 
     std::printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

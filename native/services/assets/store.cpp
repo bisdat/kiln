@@ -962,19 +962,23 @@ KilnResult op_blob_read(const KilnContentHash* hash, void* buffer, size_t cap, s
                     }
         }
     }
-    // the game's own blob: find it in the content map and read the container (from memory if it is Kiln's)
+    // the game's own blob: find it in the content map and read its bytes from the container. Only those bytes: a container
+    // (enshrouded_NNN.dat) is about 1 GB, and reading all of it for kiln.ui's 85 KB font took 24.6 s on a player's hard
+    // disk, with the game falling out of borderless fullscreen meanwhile (GitHub #39). A size query reads nothing.
     GameBlob gb;
     if (!game_blob_find(h, &gb)) return KILN_ERR_NOT_FOUND;
     const std::string path = game_container_path(gb.container);
     if (path.empty()) return KILN_ERR_NOT_FOUND;
-    std::vector<uint8_t> buf;
+    const std::wstring wpath = widen(path);
     std::string why;
-    if (!read_file(widen(path), &buf, &why)) return KILN_ERR_INTERNAL;
-    if (gb.offset + h.size > buf.size()) return KILN_ERR_NOT_FOUND;
+    const bool fits = cap >= h.size && (buffer || h.size == 0);
+    switch (read_file_range(wpath, gb.offset, h.size, fits ? buffer : nullptr, &why)) {
+        case RangeRead::ok: break;
+        case RangeRead::short_file: return KILN_ERR_NOT_FOUND;
+        case RangeRead::failed: return KILN_ERR_INTERNAL;
+    }
     if (out_len) *out_len = h.size;
-    if (cap < h.size) return KILN_ERR_BUFFER_TOO_SMALL;
-    std::memcpy(buffer, buf.data() + gb.offset, h.size);
-    return KILN_OK;
+    return fits ? KILN_OK : KILN_ERR_BUFFER_TOO_SMALL;
 }
 
 // ---- icons ------------------------------------------------------------------------------------------------------

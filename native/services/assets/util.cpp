@@ -5,6 +5,7 @@
 
 #include <bcrypt.h>
 
+#include <algorithm>
 #include <cstdarg>
 #include <cstdio>
 
@@ -180,6 +181,37 @@ bool read_file(const std::wstring& path, std::vector<uint8_t>* out, std::string*
     CloseHandle(h);
     if (!ok) *why = "read failed: " + narrow(path);
     return ok;
+}
+
+RangeRead read_file_range(const std::wstring& path, uint64_t offset, size_t size, void* out, std::string* why) {
+    HANDLE h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) {
+        *why = "cannot open " + narrow(path);
+        return RangeRead::failed;
+    }
+    RangeRead r = RangeRead::ok;
+    LARGE_INTEGER sz{};
+    if (!GetFileSizeEx(h, &sz) || sz.QuadPart < 0) {
+        *why = "cannot size " + narrow(path);
+        r = RangeRead::failed;
+    } else if (offset > static_cast<uint64_t>(sz.QuadPart) || size > static_cast<uint64_t>(sz.QuadPart) - offset) {
+        r = RangeRead::short_file;
+    } else if (out && size) {
+        LARGE_INTEGER at{};
+        at.QuadPart = static_cast<int64_t>(offset);
+        auto* p = static_cast<uint8_t*>(out);
+        size_t done = 0;
+        if (!SetFilePointerEx(h, at, nullptr, FILE_BEGIN)) r = RangeRead::failed;
+        while (r == RangeRead::ok && done < size) {
+            const DWORD want = static_cast<DWORD>(std::min<size_t>(size - done, 1u << 30));
+            DWORD got = 0;
+            if (!ReadFile(h, p + done, want, &got, nullptr) || got == 0) r = RangeRead::failed;
+            done += got;
+        }
+        if (r == RangeRead::failed) *why = "read failed: " + narrow(path);
+    }
+    CloseHandle(h);
+    return r;
 }
 
 }  // namespace ka

@@ -344,5 +344,9 @@ std::string api_path(int kind);
 std::wstring widen(const std::string& s);
 std::string narrow(const std::wstring& s);
 bool read_file(const std::wstring& path, std::vector<uint8_t>* out, std::string* why);
+// `size` bytes of a file at `offset`, and no other: a game container is about 1 GB (read_file would read all of it).
+// `out` null: only whether the file holds the range. short_file: the file ends before offset + size.
+enum class RangeRead { ok, short_file, failed };
+RangeRead read_file_range(const std::wstring& path, uint64_t offset, size_t size, void* out, std::string* why);
 
 }  // namespace ka
