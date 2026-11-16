@@ -8,13 +8,15 @@
 // before the plugin starts; RESULT instances=<n> then says how often that module's CreateModInstance ran in all.
 // --native <dll>: a native mod that hooks before the plugin starts (inbox 26c, Auto Doors): loads it and calls its
 // st_native_start, which entry-hooks st_text_target; RESULT native_hook says what the entry holds then.
-// --original-code <mod id>: kiln-core's private kiln.internal.original-code table, with one compat rule (original-code)
-// that names shroudtopia:<mod id>; RESULT original_used says where the shim first answered with the file's bytes.
+// --original-code <mod id>[,<mod id>...]: kiln-core's private kiln.internal.original-code table (v2: rule, used, read),
+// with one compat rule (original-code) naming shroudtopia:<mod id> for each; RESULT original_used says where the shim
+// first answered with the file's bytes.
 // It serves a minimal KilnApi (log, paths, side, build info, kiln.profile from kiln/profile.json, a kiln.hooks v2 stand-in
 // that places raw_detour links with safetyhook, register_service / service), loads the plugin, runs kiln_plugin_main and on_ready, waits, then calls the test targets below and prints
 // RESULT lines that run.py checks together with kiln/logs/kiln.log and kiln/state/*.json.
 #include <windows.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
@@ -222,10 +224,16 @@ KilnResult KILN_CALL f_subscribe_world(KilnOwner, KilnWorldEventFn, void*, KilnH
 KilnResult KILN_CALL f_session(KilnSessionInfo*) { return KILN_ERR_UNAVAILABLE; }
 
 // ---- kiln.internal.original-code stand-in (kiln-core: compat.cpp, from compat-rules.json and the profile) ----
-std::string g_original_mod;  // --original-code: the one Shroudtopia mod id a rule names
+std::string g_original_mod;  // --original-code: the Shroudtopia mod ids a rule names, comma-separated
 const std::string kOriginalRule = "test-original-code";
 KilnStr KILN_CALL f_original_rule(KilnStr mod) {
-    return !g_original_mod.empty() && sv(mod) == "shroudtopia:" + g_original_mod ? ks(kOriginalRule) : KilnStr{};
+    const std::string want = sv(mod);
+    for (size_t at = 0; at <= g_original_mod.size();) {
+        const size_t comma = std::min(g_original_mod.find(',', at), g_original_mod.size());
+        if (comma > at && want == "shroudtopia:" + g_original_mod.substr(at, comma - at)) return ks(kOriginalRule);
+        at = comma + 1;
+    }
+    return KilnStr{};
 }
 uint32_t exe_rva(const void* p) {
     return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(p) - reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr)));
@@ -236,7 +244,65 @@ void KILN_CALL f_original_used(uint32_t rva) {
                   rva == exe_rva(reinterpret_cast<const void*>(&st_text_target)) ? "yes" : "no");
     line(buf);
 }
-const kiln::compat::OriginalCodeApi kOriginalCode{{sizeof(kiln::compat::OriginalCodeApi), 1}, &f_original_rule, &f_original_used};
+// The exe file's bytes at a loaded address, relocated for where the exe is loaded (kiln-core: sigdb::file_bytes, bounded).
+bool KILN_CALL f_original_read(uintptr_t address, uint8_t* out, size_t size) {
+    static std::vector<uint8_t> file = [] {
+        std::vector<uint8_t> f;
+        wchar_t path[MAX_PATH]{};
+        if (!GetModuleFileNameW(nullptr, path, MAX_PATH)) return f;
+        if (FILE* fp = _wfopen(path, L"rb")) {
+            uint8_t buf[65536];
+            for (size_t n; (n = std::fread(buf, 1, sizeof buf, fp)) > 0;) f.insert(f.end(), buf, buf + n);
+            std::fclose(fp);
+        }
+        return f;
+    }();
+    if (!out || !size || size > 4096 + 34 || file.size() < 0x400) return false;
+    const auto base = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+    if (address < base) return false;
+    const uint64_t rva = address - base;
+    uint32_t pe = 0;
+    std::memcpy(&pe, file.data() + 0x3C, 4);
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(file.data() + pe);
+    const auto* sec = IMAGE_FIRST_SECTION(nt);
+    auto to_file = [&](uint64_t r) -> int64_t {
+        for (unsigned i = 0; i < nt->FileHeader.NumberOfSections; ++i)
+            if (r >= sec[i].VirtualAddress && r < uint64_t(sec[i].VirtualAddress) + sec[i].SizeOfRawData)
+                return int64_t(sec[i].PointerToRawData + (r - sec[i].VirtualAddress));
+        return -1;
+    };
+    const int64_t at = to_file(rva), last = to_file(rva + size - 1);
+    if (at < 0 || last != at + int64_t(size) - 1 || size_t(last) >= file.size()) return false;
+    std::memcpy(out, file.data() + at, size);
+    // Base relocations (DIR64) that touch the range, as the loader applied them.
+    const uint64_t delta = base - nt->OptionalHeader.ImageBase;
+    const auto& dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC];
+    for (uint32_t pos = 0; delta && pos + 8 <= dir.Size;) {
+        const int64_t block = to_file(dir.VirtualAddress + pos);
+        if (block < 0) break;
+        uint32_t page = 0, bytes = 0;
+        std::memcpy(&page, file.data() + block, 4);
+        std::memcpy(&bytes, file.data() + block + 4, 4);
+        if (bytes < 8) break;
+        for (uint32_t k = 8; k + 2 <= bytes; k += 2) {
+            uint16_t e = 0;
+            std::memcpy(&e, file.data() + block + k, 2);
+            const uint64_t r = page + (e & 0xFFF);
+            if ((e >> 12) != IMAGE_REL_BASED_DIR64 || r + 8 <= rva || r >= rva + size) continue;
+            const int64_t f = to_file(r);
+            if (f < 0) continue;
+            uint64_t v = 0;
+            std::memcpy(&v, file.data() + f, 8);
+            v += delta;
+            for (unsigned b = 0; b < 8; ++b)
+                if (r + b >= rva && r + b < rva + size) out[r + b - rva] = reinterpret_cast<const uint8_t*>(&v)[b];
+        }
+        pos += bytes;
+    }
+    return true;
+}
+const kiln::compat::OriginalCodeApi kOriginalCode{{sizeof(kiln::compat::OriginalCodeApi), kiln::compat::kOriginalCodeVersion},
+                                                  &f_original_rule, &f_original_used, &f_original_read};
 
 // What st_text_target's entry holds: "E9 -> outside the exe" for a native's entry hook.
 std::string entry_text() {

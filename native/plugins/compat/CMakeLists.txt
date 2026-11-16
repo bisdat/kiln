@@ -49,7 +49,7 @@ compat_test_dll(fakeshroud dummy.cpp FAKE_SHROUD)
 # The original-code scenario (inbox 26c): st_native.dll entry-hooks compathost's st_text_target first (as Auto Doors);
 # istext_named.dll / istext_other.dll are Shroudtopia mods shaped like Item Skill Descriptions (memcmp from vcruntime140,
 # an inline hook of their own), the first named by the scenario's compat rule. Their hook library is safetyhook, built
-# here with the DLL CRT (kiln-safetyhook uses the static one).
+# here with the DLL CRT (kiln-safetyhook uses the static one). istext_exec.dll: see below.
 compat_test_dll(st_native st_native.cpp)
 target_link_libraries(compat-st_native PRIVATE kiln-safetyhook)
 add_library(compat-safetyhook-md STATIC "${CMAKE_SOURCE_DIR}/third_party/safetyhook/safetyhook.cpp"
@@ -61,9 +61,15 @@ set_target_properties(compat-safetyhook-md PROPERTIES MSVC_RUNTIME_LIBRARY "Mult
 compat_test_dll(istext_named istext_test.cpp)
 compat_test_dll(istext_other istext_test.cpp IST_OTHER)
 foreach(t istext_named istext_other)
+    target_link_libraries(compat-${t} PRIVATE compat-safetyhook-md)
+endforeach()
+# istext_exec.dll: the import table on an executable page (.rdata merged into .text), a thread running code there while
+# kiln-shroudtopia rewrites the memcmp slot (review of 09a2332b, finding 1).
+compat_test_dll(istext_exec istext_exec_test.cpp)
+target_link_options(compat-istext_exec PRIVATE /MERGE:.rdata=.text)
+foreach(t istext_named istext_other istext_exec)
     target_include_directories(compat-${t} PRIVATE "${CMAKE_SOURCE_DIR}/plugins/shroudtopia/include")
     target_compile_definitions(compat-${t} PRIVATE _ITERATOR_DEBUG_LEVEL=0)
-    target_link_libraries(compat-${t} PRIVATE compat-safetyhook-md)
     set_target_properties(compat-${t} PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
 endforeach()
 add_dependencies(compathost kiln-greeneye kiln-flame kiln-shroudtopia)

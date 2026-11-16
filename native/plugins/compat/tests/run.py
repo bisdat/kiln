@@ -12,6 +12,7 @@ kiln/profile.json), runs it once and checks kiln/logs/kiln.log, the host's RESUL
 Wine prefix: $KILN_OUT/compat/pfx (created on first use). Exit code 0 = every scenario passed.
 """
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -956,31 +957,45 @@ def shroudtopia_original_code():
     Doors' MinHook does). The named mod, shaped like Item Skill Descriptions (32 bytes at the entry through vcruntime140's
     memcmp, then its own inline hook), sees the original bytes and hooks on top: the call runs the mod's detour, then the
     native's, then the function. A mod the rule does not name keeps the CRT's memcmp, sees the live bytes and does not
-    hook. An ordinary memcmp of the mod's own buffers answers as before."""
+    hook. Only the compare of the hooked entry with the signature in the mod's own image gets the file's answer: the same
+    bytes on the stack, an ordinary memcmp of the mod's own buffers, and the entry after the mod's own hook answer as the
+    CRT does (review of 09a2332b). A third named mod has its import table on an executable page (.rdata merged into
+    .text) and a thread running code on that page while the slot is rewritten: the page keeps its execute bit, so the
+    thread runs on (review finding 1; dropping execute for the write stops it with an access violation)."""
     g = Game("shroudtopia-original-code")
     g.put("kiln/config/shroudtopia/shroudtopia.json",
           {"active": True, "bootDelay": 0, "updateDelay": 50,
-           "mods": {"Kiln Original Code Mod": {"active": True}, "Kiln Live Code Mod": {"active": True}}})
-    for mod_id, dll in (("istext", "istext_named.dll"), ("istext-other", "istext_other.dll")):
+           "mods": {"Kiln Original Code Mod": {"active": True}, "Kiln Live Code Mod": {"active": True},
+                    "Kiln Exec Import Mod": {"active": True}}})
+    mods = (("istext", "istext_named.dll"), ("istext-other", "istext_other.dll"), ("istext-exec", "istext_exec.dll"))
+    for mod_id, dll in mods:
         g.put(f"library/{mod_id}/mod.json", {"id": mod_id})
         g.dll(dll, f"library/{mod_id}/{mod_id}.dll")
     g.dll("st_native.dll", "st_native.dll")
-    g.profile({"shroudtopia": [{"id": m, "path": winpath(g.p("library", m))} for m in ("istext", "istext-other")]})
-    g.run(g.plugin("kiln-shroudtopia.dll"), 1500, "--native", "st_native.dll", "--original-code", "istext")
+    g.profile({"shroudtopia": [{"id": m, "path": winpath(g.p("library", m))} for m, _ in mods]})
+    g.run(g.plugin("kiln-shroudtopia.dll"), 1500, "--native", "st_native.dll", "--original-code", "istext,istext-exec")
     g.has("[host] RESULT native_hook=ok entry=E9 outside_image=yes")
     g.has("shroudtopia: istext sees the game's original code when it checks a hooked function (compat rule test-original-code)")
     g.lacks("shroudtopia: istext-other sees")
     named = "[shroudtopia:Kiln Original Code Mod] original-code: "
-    g.has(named + "memcmp import -> kiln-shroudtopia.dll; entry matches; plain memcmp below")
+    g.has(named + "memcmp import -> kiln-shroudtopia.dll; entry matches; a stack copy differs; plain memcmp below")
     g.has(named + "hooked st_text_target")
+    g.has(named + "after its own hook the entry differs")
     g.has("[host] RESULT original_used=")
     g.expect(g.result("original_used") is not None and "at_target=yes" in g.log, "the shim answered at st_text_target's rva")
     other = [l for l in g.log.splitlines() if "[shroudtopia:Kiln Live Code Mod] original-code: memcmp import -> " in l]
-    g.expect(len(other) == 1 and "kiln-shroudtopia" not in other[0] and "entry differs; plain memcmp below" in other[0],
+    g.expect(len(other) == 1 and "kiln-shroudtopia" not in other[0] and "entry differs; a stack copy differs; plain memcmp below" in other[0],
              f"the unnamed mod keeps the CRT's memcmp and sees the live bytes: {other}")
     g.has("[shroudtopia:Kiln Live Code Mod] original-code: the entry was changed by another mod; not hooking it")
     g.expect(g.result("st_text") == "257", f"st_text_target still returns a + 0x100 through both detours ({g.result('st_text')})")
     g.has(" trace=MNO entry=E9 outside_image=yes")
+    g.has("shroudtopia: istext-exec sees the game's original code when it checks a hooked function")
+    exe = [l for l in g.log.splitlines() if "[shroudtopia:Kiln Exec Import Mod] exec-import: " in l]
+    prot = re.search(r"page protection (0x[0-9a-f]+) at load, (0x[0-9a-f]+) now", exe[0]) if exe else None
+    g.expect(len(exe) == 1 and "thread code on the import slot's page yes" in exe[0] and "thread stopped after " in exe[0]
+             and "memcmp import -> kiln-shroudtopia.dll; entry matches" in exe[0] and prot is not None
+             and prot[1] == prot[2] and int(prot[1], 16) & 0xF0,
+             f"an import slot on an executable page is rewritten while code on that page runs; the page keeps execute: {exe}")
     return g
 
 
