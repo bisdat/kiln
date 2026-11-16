@@ -2,6 +2,10 @@
 # Builds a complete Kiln release folder from a clean export of one commit, checks it, and stops: publishing is a
 # separate, manual step (tools/release/github-draft.sh, tools/release/publish.sh; docs/kiln/launcher/releasing.md).
 #   tools/release/release.sh VERSION [--beta N] [--commit REV] [--out DIR] [--work DIR] [--notes FILE] [--worktree]
+#                            [--launcher-only]
+# --launcher-only: a quick fix that ships only the launchers, the runtime, kilnctl and the server pack: no SDK
+#   packages, kiln CLI, VS Code extension, sample mods, modding site or NuGet feed (mod authors keep the previous
+#   release's SDK). The release checks need the SDK, so it implies --no-checks; the API record is not promoted.
 #                                    [--skip-windows] [--no-checks] [--force] [--host-build] [--no-nexus]
 # VERSION: X.Y.Z (stable) or X.Y.Z-dev.N (dev) for this tree's VERSION (tools/release/version.sh prints one).
 # --beta N (or --channel beta --beta N): test build N of VERSION for the beta channel (docs/kiln/launcher/releasing.md,
@@ -71,7 +75,7 @@ repo=$(cd "$here/../.." && pwd)
 lib=$here/lib
 source "$here/linux-build/paths.sh"
 
-version="" commit=HEAD out="" work="" notes="" worktree=0 skip_windows=0 checks=1 force=0 host_build=0 nexus=1 beta="" want_channel=""
+version="" commit=HEAD out="" work="" notes="" worktree=0 skip_windows=0 checks=1 force=0 host_build=0 nexus=1 beta="" want_channel="" launcher_only=0
 while (($#)); do
   case $1 in
     --commit) commit=$2; shift 2 ;;
@@ -81,6 +85,7 @@ while (($#)); do
     --worktree) worktree=1; shift ;;
     --skip-windows) skip_windows=1; shift ;;
     --no-checks) checks=0; shift ;;
+    --launcher-only) launcher_only=1; checks=0; shift ;;
     --force) force=1; shift ;;
     --host-build) host_build=1; shift ;;
     --no-nexus) nexus=0; shift ;;
@@ -519,6 +524,11 @@ if ((nexus_build && !skip_windows)); then
 fi
 
 # ---------------------------------------------------------------- 6. SDK, VS Code, samples
+sdk_version="" vsix=""
+skipped_samples=() not_mods=()
+if ((launcher_only)); then
+  note "--launcher-only: no SDK packages, VS Code extension, sample mods, modding site or feed (mod authors keep the previous release's SDK)"
+else
 step "SDK packages"
 quiet low "$src/managed/Kiln.Sdk/pack.sh"
 sdk_version=$KILN_SDK_VERSION
@@ -563,14 +573,17 @@ for proj in "$src"/mods/samples/*/*.csproj; do
     ((rc == 1)) && skipped_samples+=("$sample")
   fi
 done
-[[ $name == "$version" || $name == "$version-beta.$beta" ]] || die "the release's name changed to '$name' during the build (a step overwrote it)"
 note "sample mods: $(ls "$work"/samples/*.zip 2>/dev/null | wc -l) zips"
 ((${#not_mods[@]})) && note "sample projects that are no mod (no kiln.mod.json, not zipped): ${not_mods[*]}"
 ((${#skipped_samples[@]})) && note "samples that did not build (left out): ${skipped_samples[*]}"
+:
+fi
+[[ $name == "$version" || $name == "$version-beta.$beta" ]] || die "the release's name changed to '$name' during the build (a step overwrote it)"
 
 # ---------------------------------------------------------------- 7. the folder
 step "assemble $out"
-mkdir -p "$out"/{linux,windows,runtime,sdk,samples,updates,source}
+mkdir -p "$out"/{linux,windows,runtime,updates,source}
+((launcher_only)) || mkdir -p "$out"/{sdk,samples}
 # a test build's launcher files carry its name (kiln-launcher_0.2.0-dev.29-beta.3_amd64.AppImage): a tester sees which
 A=kiln-launcher_${name}_amd64.AppImage D=kiln-launcher_${name}_amd64.deb R=kiln-launcher-${name}.x86_64.rpm S=kiln-launcher_${name}_x64-setup.exe
 cp "$appimage" "$out/linux/$A" && chmod 755 "$out/linux/$A"
@@ -585,11 +598,12 @@ python3 "$lib/serverpack.py" build "$out/runtime/kiln-runtime-$version.zip" --ou
 # kilnctl's systemd user units (docs/kiln/kilnctl.md "systemd"), next to kilnctl
 install -m 644 "$src"/runner/systemd/*.service "$src"/runner/systemd/*.timer "$out/runtime/"
 install -m 755 "$lin_target/release/kilnctl" "$out/runtime/kilnctl"
-install -m 755 "$lin_target/release/kiln" "$out/sdk/kiln"
 if ((!skip_windows)); then
   install -m 644 "$CARGO_TARGET_DIR/$win/release/kilnctl.exe" "$out/runtime/kilnctl.exe"
-  install -m 644 "$CARGO_TARGET_DIR/$win/release/kiln.exe" "$out/sdk/kiln.exe"
 fi
+if ((!launcher_only)); then
+install -m 755 "$lin_target/release/kiln" "$out/sdk/kiln"
+((skip_windows)) || install -m 644 "$CARGO_TARGET_DIR/$win/release/kiln.exe" "$out/sdk/kiln.exe"
 for f in "$KILN_OUT"/nuget/*."$sdk_version".nupkg; do cp "$f" "$out/sdk/"; done
 cp "$vsix" "$out/sdk/"
 # the modding site (guide + API reference, DocFX) in sdk/api/, when the export has its build script
@@ -605,6 +619,7 @@ fi
 feed_url=${KILN_FEED_URL:-https://frostdev.io/kiln/downloads/$name/sdk/feed/}
 python3 -I "$lib/feed.py" build --out "$out/sdk/feed" --base-url "$feed_url" "$out/sdk" | tee -a "$log"
 cp "$work"/samples/*.zip "$out/samples/" 2>/dev/null || true
+fi
 cp "$src/LICENSE" "$src/CREDITS.md" "$notices" "$out/"
 cp "$work/source/"*.tar.gz "$out/source/"
 # the Nexus Mods build (nexus.py uploads these; never GitHub or frostdev.io); none for a test build
@@ -706,6 +721,18 @@ if ((nexus_build)); then
 fi
 unset R_NEXUS_SUMS
 fill "$here/templates/README.txt" "$out/README.txt.tmp"
+if ((launcher_only)); then  # no sdk/ or samples/ in this release: the README says so instead of listing them
+  python3 - "$out/README.txt.tmp" <<'PY'
+import re, sys
+p = sys.argv[1]
+t = open(p, encoding="utf-8").read()
+t2 = re.sub(r"Mod authors:\n(?:  sdk/.*\n|  samples/.*\n)+",
+            "Mod authors:\n  This quick fix ships the launcher and the runtime only: keep the SDK of the release before it\n", t)
+t2 = re.sub(r"\n  Use the SDK from a folder:.*\n.*dotnet new kiln-mod.*\n", "\n", t2)
+assert t2 != t, "README: no Mod authors block to replace"
+open(p, "w", encoding="utf-8").write(t2)
+PY
+fi
 # the file list: the downloads, not nexus/ (its own README) or sdk/api/ and sdk/feed/ (built, not published by default)
 python3 - "$out" <<'PY'
 import os, sys

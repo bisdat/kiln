@@ -70,7 +70,8 @@ if ((${#units[@]})); then
 fi
 put "$dir/runtime/kilnctl" "kilnctl-$name-linux-x86_64"
 [[ -f $dir/runtime/kilnctl.exe ]] && put "$dir/runtime/kilnctl.exe" "kilnctl-$name-windows-x86_64.exe"
-if [[ -z $beta ]]; then
+# a launcher-only quick fix (release.sh --launcher-only) has no sdk/ or samples/: the previous release's SDK stays
+if [[ -z $beta && -d $dir/sdk ]]; then
   put "$dir/sdk/kiln" "kiln-$version-linux-x86_64"
   [[ -f $dir/sdk/kiln.exe ]] && put "$dir/sdk/kiln.exe" "kiln-$version-windows-x86_64.exe"
   for f in "$dir"/sdk/*.nupkg "$dir"/sdk/*.vsix; do put "$f" "$(basename "$f")"; done
