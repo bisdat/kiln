@@ -256,6 +256,10 @@ struct OtherDiffs {
     std::vector<uint32_t> first;
 };
 
+struct DiffRun {
+    uint32_t rva, len;
+};
+
 // Sorts the differences into hooks and the rest. A hook is a familiar inline jump to outside the image (plus the
 // hooker's instruction-padding NOPs) or a redirected call (above). ShroudForge's native runtime sends the main menu's
 // two Settings calls to a relay next to the image this way, before Kiln's scan (players' reports of 10 and 13 Nov
@@ -263,7 +267,10 @@ struct OtherDiffs {
 // four map marker patches, a player's report of 14 Nov 2026).
 inline OtherDiffs other_differences(const uint8_t* file, const uint8_t* live, size_t size,
                                     uintptr_t live_text, uintptr_t image_base, size_t image_size,
-                                    bool (*call_lands)(uintptr_t) = nullptr, size_t keep = 8, bool first_only = false) {
+                                    bool (*call_lands)(uintptr_t) = nullptr, size_t keep = 8, bool first_only = false,
+                                    bool (*read_pointer)(uintptr_t, uintptr_t*) = nullptr,
+                                    std::vector<DiffRun>* uncovered = nullptr) {
+    if (uncovered) uncovered->clear();
     auto outside = [&](uintptr_t a) { return a < image_base || a - image_base >= image_size; };
     OtherDiffs out;
     size_t last = 0;
@@ -291,6 +298,11 @@ inline OtherDiffs other_differences(const uint8_t* file, const uint8_t* live, si
                        p[2] == 0 && p[3] == 0 && p[4] == 0 && p[5] == 0) {
                 width = 14;
                 std::memcpy(&target, p + 6, 8);
+            } else if (read_pointer && left >= 6 && p[0] == 0xFF && p[1] == 0x25) {
+                // A hook may keep its destination in a separate pointer slot. The caller must read it safely.
+                int32_t d;
+                std::memcpy(&d, p + 2, 4);
+                if (read_pointer(live_text + start + 6 + static_cast<intptr_t>(d), &target)) width = 6;
             } else if (left >= 12 && p[0] == 0x48 && p[1] == 0xB8 && p[10] == 0xFF && p[11] == 0xE0) {
                 width = 12;
                 std::memcpy(&target, p + 2, 8);
@@ -304,6 +316,18 @@ inline OtherDiffs other_differences(const uint8_t* file, const uint8_t* live, si
         }
         if (covered) continue;
         ++out.bytes;
+        if (uncovered) {
+            // A heavily changed image should use the live fallback before spending time classifying every byte.
+            if (out.bytes > size / 100) return out;
+            // Exact offsets in this buffer, unlike the diagnostic runs below. Bound storage; an incomplete list
+            // has fewer recorded bytes than out.bytes and must not be applied. Default callers collect no list.
+            if (!uncovered->empty() && uint64_t{uncovered->back().rva} + uncovered->back().len == i)
+                ++uncovered->back().len;
+            else if (uncovered->size() < 4096)
+                uncovered->push_back({static_cast<uint32_t>(i), 1});
+            else
+                return out;
+        }
         if (!any || i - last > 16) {
             ++out.sites;
             if (out.first.size() < keep) out.first.push_back(static_cast<uint32_t>(i));
@@ -328,9 +352,6 @@ inline bool only_hook_differences(const uint8_t* file, const uint8_t* live, size
 }
 
 // Live-vs-file differences in .text: [rva, rva + len) runs, sorted. Who patched the code (hooks) shows up here.
-struct DiffRun {
-    uint32_t rva, len;
-};
 // Compares two equally long byte ranges (the file's relocated .text and the live .text). Runs closer than `merge`
 // bytes are joined; at most `max_runs` are recorded but every differing byte is counted.
 inline std::vector<DiffRun> diff_runs(const uint8_t* a, const uint8_t* b, size_t size, uint32_t base_rva,

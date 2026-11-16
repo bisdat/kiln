@@ -267,7 +267,8 @@ bool ReadOriginalCode(std::vector<uint8_t>& out, std::string& why)
     if (!TextSection(text, textSize)) return why = "no loaded code section", false;
     const code::Identity id{reinterpret_cast<uintptr_t>(base), nt->FileHeader.TimeDateStamp,
         nt->OptionalHeader.SizeOfImage, static_cast<uint32_t>(text - base), textSize};
-    return code::OriginalText(view.bytes, static_cast<size_t>(size.QuadPart), id, out, why);
+    return code::OriginalText(view.bytes, static_cast<size_t>(size.QuadPart), id, text, out, why,
+        [](uintptr_t at, uintptr_t* target) { return Copy(target, reinterpret_cast<const void*>(at), sizeof(*target)); });
 }
 
 #include "find_code.h"

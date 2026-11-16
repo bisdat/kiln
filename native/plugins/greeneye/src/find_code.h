@@ -42,7 +42,14 @@ uint8_t* Find(const char* pattern, void* module)
         if (!TextSection(g_text, g_textSize)) return;
         // Other engines have already patched the game by on_ready. A short signature may be entirely gone;
         // looking behind its jump cannot recover it. Match the same exe's relocated file bytes instead.
-        g_codeFromFile = ReadOriginalCode(g_canonical, g_codeNote);
+        try {
+            g_codeFromFile = ReadOriginalCode(g_canonical, g_codeNote);
+        } catch (...) {
+            // /EHa also catches mapped-file I/O faults and unwinds ReadOriginalCode's handles. Find is called
+            // outside SafeStart too (the startup diagnostic and reload safe point), so guard acquisition here.
+            g_codeFromFile = false;
+            g_codeNote = "cannot read the exe code";
+        }
         if (!g_codeFromFile) {
             g_canonical.resize(g_textSize);
             Read(g_text, g_canonical.data(), g_textSize);
