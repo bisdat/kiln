@@ -517,11 +517,8 @@ pub fn aside_entry(e: &Entry, game: &Path, core: &str) -> (&'static str, String)
         return ("own-loader", format!("runs under shroudlink's own core (the profile entry is in {}, where it reads)", plugins::DIR));
     }
     let file = core.rsplit(['\\', '/']).next().unwrap_or_default();
-    let fix = if file.eq_ignore_ascii_case("shroudlink_core.dll") {
-        format!("shroudlink's client addon loaded that core from {core} (its singleplayer mode): remove that file to let Kiln \
-                 run this mod; the addon stays and keeps its MODS tab")
-    } else if !file.is_empty() {
-        format!("Remove shroudlink's own core ({core}) to let Kiln run it")
+    let fix = if !file.is_empty() {
+        format!("Remove shroudlink's own core ({core}) to let Kiln run it; the client addon stays and keeps its MODS tab")
     } else {
         "Remove shroudlink's own core (steam_api64.dll, crashhandler64.dll or dinput8.dll in the game folder, or \
          shroudlink_core.dll, which shroudlink's client addon loads) to let Kiln run it".to_string()
@@ -598,6 +595,7 @@ fn write_state() {
         "plan": st.plan_note,
         "steppedAside": !st.stepped_aside.is_empty(),
         "steppedAsideReason": st.stepped_aside,
+        "corePath": st.core,
         "started": st.started,
         "claimedElsewhere": st.claimed_elsewhere,
         "features": on,
@@ -955,8 +953,11 @@ mod tests {
         // the hint names that file and keeps the addon
         let (status, reason) = aside_entry(&library, game, "S:\\steamapps\\common\\Enshrouded\\shroudlink_core.dll");
         assert_eq!(status, "not-loaded");
-        assert!(reason.contains("from S:\\steamapps\\common\\Enshrouded\\shroudlink_core.dll") && reason.contains("MODS tab"), "{reason}");
+        assert!(reason.contains("S:\\steamapps\\common\\Enshrouded\\shroudlink_core.dll") && reason.contains("MODS tab"), "{reason}");
         assert!(!reason.contains("dinput8.dll"), "the addon is not the core: {reason}");
+        let (_, reason) = aside_entry(&library, game, "C:\\g\\kiln\\chain\\shroudlink_core.dll");
+        assert!(reason.contains("C:\\g\\kiln\\chain\\shroudlink_core.dll"), "{reason}");
+        assert!(!reason.contains("client addon loaded"), "a chained core need not come from the addon: {reason}");
     }
 
     /// The loader over Kiln's roots, with shroudlink's own example mod (hello_mod.dll next to the test binary's

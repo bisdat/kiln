@@ -442,11 +442,35 @@ fn engine_stood_aside_and_loader_in_folder() {
 fn shroudlink_aside_for_a_core_its_addon_loaded_names_the_core() {
     let f = Fx::healthy("sl-core");
     f.w("kiln/state/shroudlink.json", br#"{"format":1,"plugin":"kiln-shroudlink","steppedAside":true,
+        "corePath":"S:\\steamapps\\common\\Enshrouded\\shroudlink_core.dll",
         "steppedAsideReason":"shroudlink's own core runs in this process (S:\\steamapps\\common\\Enshrouded\\shroudlink_core.dll); its mods in shroudlink_mods/ load there",
         "mods":[{"id":"expeditions","status":"not-loaded","reason":"..."}]}"#);
     let r = build(&f.input());
     let o = finding(&r, "own-loader");
-    assert!(o.text.contains("Remove shroudlink_core.dll") && o.text.contains("MODS tab"), "{}", o.text);
+    assert!(o.text.contains(r"S:\steamapps\common\Enshrouded\shroudlink_core.dll") && o.text.contains("MODS tab"), "{}", o.text);
+}
+
+#[test]
+fn shroudlink_aside_names_a_chained_core_instead_of_the_game_root() {
+    let f = Fx::healthy("sl-chain-core");
+    f.w("kiln/state/shroudlink.json", br#"{"format":1,"steppedAside":true,
+        "corePath":"S:\\Enshrouded\\kiln\\chain\\shroudlink_core.dll",
+        "steppedAsideReason":"own core S:\\Enshrouded\\kiln\\chain\\shroudlink_core.dll",
+        "mods":[]}"#);
+    let r = build(&f.input());
+    let o = finding(&r, "own-loader");
+    assert!(o.text.contains(r"S:\Enshrouded\kiln\chain\shroudlink_core.dll"), "{}", o.text);
+    assert!(!o.text.contains("Remove shroudlink_core.dll from the game folder") && !o.text.contains("client addon loaded"), "{}", o.text);
+}
+
+#[test]
+fn shroudlink_aside_without_a_core_path_does_not_guess_from_the_reason() {
+    let f = Fx::healthy("sl-unknown-core");
+    f.w("kiln/state/shroudlink.json", br#"{"format":1,"steppedAside":true,
+        "steppedAsideReason":"another core claimed first; could be shroudlink_core.dll", "mods":[]}"#);
+    let r = build(&f.input());
+    let o = finding(&r, "own-loader");
+    assert!(!o.text.contains("Remove shroudlink_core.dll from the game folder") && !o.text.contains("client addon loaded"), "{}", o.text);
 }
 
 /// A player's report of 13 Nov 2026 (Steam Deck): Kiln hosted ShroudForge, kiln-eml stood aside for it as designed, and

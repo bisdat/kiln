@@ -40,7 +40,7 @@ The step-aside hint (dev.30, marked `kiln:`):
 
 | File | Change |
 |---|---|
-| `server/src/kiln.rs` | `aside_entry` takes the core file `real_core_in_process` found and names it in the `not-loaded` reason: for `shroudlink_core.dll` (the client addon's singleplayer core in the game folder) remove that file, the addon stays; for another file remove that file; with none known (another core claimed the process) the list of names, `shroudlink_core.dll` included. Host test `standing_aside_reports_profile_entries_truthfully`. |
+| `server/src/kiln.rs` | `aside_entry` names the core file `real_core_in_process` found in the `not-loaded` reason, and `shroudlink.json` carries that path in `corePath`. Advice names that file, including a core under `kiln/chain/`, and keeps the client addon for its MODS tab. With none known (another core claimed the process), the reason lists possible names. Host test `standing_aside_reports_profile_entries_truthfully`. |
 
 The enclosing workspace enables `Win32_Storage_FileSystem` and `Win32_Security` for those checked handles.
 `../build.sh --test` also includes the common crate's tests. `../src/guard.c` and `../tests/nearby/` are Kiln's own

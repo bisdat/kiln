@@ -311,3 +311,241 @@ fn a_shroudlink_core_in_the_game_folder_is_named_when_the_addon_comes_from_the_l
     let a = profile::activate(&dirs, &p.id, &install).unwrap();
     assert!(a.own_loaders.iter().all(|n| n.loader.kind != ModKind::Shroudlink), "{:#?}", a.own_loaders);
 }
+
+// Review regressions exercise import, activation and launch without starting a game.
+#[test]
+fn receipt_staging_links_never_change_an_unrelated_file() {
+    for hard in [false, true] {
+        let t = tmp(if hard { "receipt-hard" } else { "receipt-sym" });
+        let dirs = DataDirs::at(t.0.join("data"));
+        let install = game(&t.0);
+        let (pkg, _) = autoloot_package(&t.0);
+        let r = import_one(&dirs, &pkg, ModKind::Native);
+        let p = profile_with(&dirs, "loot", vec![pm(&r, true)]);
+        put(&t.0, "unrelated", b"keep this file");
+        let link = install.path.join("kiln/state/game-files.json.tmp");
+        std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+        if hard { std::fs::hard_link(t.0.join("unrelated"), &link).unwrap(); }
+        else { std::os::unix::fs::symlink(t.0.join("unrelated"), &link).unwrap(); }
+        profile::activate(&dirs, &p.id, &install).unwrap();
+        assert_eq!(read(&t.0.join("unrelated")), b"keep this file");
+    }
+}
+
+#[test]
+fn activation_refuses_legacy_staging_before_placing_a_loader() {
+    let t = tmp("activation-stage");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let install = game(&t.0);
+    let old = profile_with(&dirs, "old", vec![]);
+    profile::activate(&dirs, &old.id, &install).unwrap();
+    let before = read(&install.path.join("kiln/profile.json"));
+    let (pkg, _) = autoloot_package(&t.0);
+    let r = import_one(&dirs, &pkg, ModKind::Native);
+    let p = profile_with(&dirs, "new", vec![pm(&r, true)]);
+    std::fs::create_dir(install.path.join("kiln/profile.json.tmp")).unwrap();
+    assert!(profile::activate(&dirs, &p.id, &install).is_err());
+    assert_eq!(read(&install.path.join("kiln/profile.json")), before);
+    assert!(!install.path.join("powrprof.dll").exists());
+    assert!(!install.path.join("plugins").exists());
+}
+
+#[test]
+fn a_later_activation_failure_restores_the_placed_packages() {
+    let t = tmp("activation-rollback");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let install = game(&t.0);
+    let (pkg, loader) = autoloot_package(&t.0);
+    let r = import_one(&dirs, &pkg, ModKind::Native);
+    let old = profile_with(&dirs, "old", vec![pm(&r, true)]);
+    profile::activate(&dirs, &old.id, &install).unwrap();
+    let before = read(&install.path.join("kiln/profile.json"));
+    let new = profile_with(&dirs, "new", vec![]);
+    // chain.ini is written after game-folder placement. Make that write fail.
+    std::fs::remove_file(install.path.join("kiln/chain.ini")).unwrap();
+    std::fs::create_dir(install.path.join("kiln/chain.ini")).unwrap();
+    assert!(profile::activate(&dirs, &new.id, &install).is_err());
+    assert_eq!(read(&install.path.join("kiln/profile.json")), before);
+    assert_eq!(read(&install.path.join("powrprof.dll")), loader);
+    assert!(install.path.join("plugins/AutolootCoop.dll").is_file());
+}
+
+#[test]
+fn activation_failure_after_chaining_ual_restores_the_chain_and_removes_new_files() {
+    let t = tmp("activation-ual-rollback");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let install = game(&t.0);
+    let old = profile_with(&dirs, "old", vec![]);
+    profile::activate(&dirs, &old.id, &install).unwrap();
+    let before_profile = read(&install.path.join("kiln/profile.json"));
+    let before_chain = read(&install.path.join("kiln/chain.ini"));
+    let pkg = t.0.join("SmartWorkshop");
+    put(&pkg, "dinput8.dll", &ual());
+    put(&pkg, "Scripts/SmartWorkshop.asi", &asi(b"plugin"));
+    let r = import_one(&dirs, &pkg, ModKind::Native);
+    let p = profile_with(&dirs, "new", vec![pm(&r, true)]);
+    // Engine placement reads this after game-files placement and the chain write.
+    put(&install.path, "kiln/state/library-placements.json", b"broken receipt");
+    assert!(profile::activate(&dirs, &p.id, &install).is_err());
+    assert_eq!(read(&install.path.join("kiln/profile.json")), before_profile);
+    assert_eq!(read(&install.path.join("kiln/chain.ini")), before_chain);
+    assert!(!install.path.join("xinput9_1_0.dll").exists());
+    assert!(!install.path.join("Scripts").exists());
+    assert!(!install.path.join("kiln/state/game-files.json").exists());
+}
+
+#[test]
+fn vanilla_and_no_mods_refuse_a_placed_loader_before_opening_steam() {
+    use kiln_manage::launch::{self, LaunchMode, LaunchRequest};
+    let t = tmp("launch-refusal");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let install = game(&t.0);
+    let (pkg, _) = autoloot_package(&t.0);
+    let r = import_one(&dirs, &pkg, ModKind::Native);
+    let mut p = profile_with(&dirs, "loot", vec![pm(&r, true)]);
+    profile::activate(&dirs, &p.id, &install).unwrap();
+    let opened = std::cell::Cell::new(false);
+    let opener = |_: &str| { opened.set(true); Ok(()) };
+    for mode in [LaunchMode::Vanilla, LaunchMode::NoMods] {
+        let request = LaunchRequest { mode, profile_id: None, skip_backup: true };
+        let e = launch::play_with(&dirs, &install, &request, Some(&[]), &opener).unwrap_err();
+        assert!(e.message.contains("powrprof.dll") && e.message.contains("activate"), "{e:?}");
+        assert!(!opened.get());
+        assert!(!install.path.join("kiln/play-once.ini").exists());
+    }
+    // An edited loader is still a loader. Turning it off cannot silently enable vanilla.
+    put(&install.path, "powrprof.dll", b"changed loader");
+    set_native(&dirs, &mut p, false);
+    profile::activate(&dirs, &p.id, &install).unwrap();
+    let request = LaunchRequest { mode: LaunchMode::Vanilla, profile_id: None, skip_backup: true };
+    assert!(launch::play_with(&dirs, &install, &request, Some(&[]), &opener).is_err());
+    assert!(!opened.get());
+    // Receipts that cannot be read must not silently allow a start without mods.
+    put(&install.path, "kiln/state/game-files.json", b"broken receipt");
+    assert!(launch::play_with(&dirs, &install, &request, Some(&[]), &opener).is_err());
+    assert!(!opened.get());
+}
+
+#[test]
+fn play_once_compares_placements_to_an_unapplied_profile_edit() {
+    let t = tmp("once-placement");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let install = game(&t.0);
+    let (pkg, _) = autoloot_package(&t.0);
+    let r = import_one(&dirs, &pkg, ModKind::Native);
+    let mut p = profile_with(&dirs, "loot", vec![pm(&r, true)]);
+    profile::activate(&dirs, &p.id, &install).unwrap();
+    profile::write_once(&dirs, &p.id, &install).unwrap();
+    set_native(&dirs, &mut p, false);
+    let e = profile::write_once(&dirs, &p.id, &install).unwrap_err();
+    assert!(e.message.contains("activate"), "{e:?}");
+    assert!(install.path.join("powrprof.dll").is_file());
+}
+
+#[test]
+fn native_phase_and_dependency_folders_do_not_turn_a_mod_into_a_loader() {
+    for (name, phase, description, folder) in [
+        ("world", "world", "Generated by Kiln from package", "plugins"),
+        ("author", "early", "An author's native mod", "plugins"),
+        ("deps", "early", "Generated by Kiln from package", "deps"),
+    ] {
+        let t = tmp(name);
+        put(&t.0, "native.json", serde_json::to_vec(&serde_json::json!({
+            "id":"m", "version":"1.0.0", "dlls":["powrprof.dll"], "phase":phase, "description":description
+        })).unwrap().as_slice());
+        put(&t.0, "powrprof.dll", &build_test_dll(&[], b"ordinary mod"));
+        put(&t.0, &format!("{folder}/helper.dll"), &build_test_dll(&[], b"helper"));
+        assert!(kiln_manage::game_files::plan(&t.0).is_none(), "{name}");
+    }
+}
+
+#[test]
+fn ultimate_asi_loader_requires_the_export_not_a_text_marker() {
+    let t = tmp("ual-marker");
+    put(&t.0, "native.json", br#"{"id":"m","version":"1.0.0","dlls":["dinput8.dll"]}"#);
+    put(&t.0, "dinput8.dll", &build_test_dll(&["DirectInput8Create"], b"mentions IsUltimateASILoader only"));
+    assert!(kiln_manage::game_files::plan(&t.0).is_none());
+}
+
+#[test]
+fn a_manifestless_dual_build_package_keeps_its_native_dll() {
+    let t = tmp("dual-build");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let install = game(&t.0);
+    let pkg = t.0.join("DualBuild");
+    put(&pkg, "m.dll", &build_test_dll(&[], b"native build"));
+    put(&pkg, "m.asi", &asi(b"optional ASI build"));
+    let r = import_one(&dirs, &pkg, ModKind::Native);
+    let folder = library::path_of(&dirs, &r).unwrap();
+    let n = kiln_manage::manifest::read_native(&folder).unwrap();
+    assert_eq!(n.dlls, ["m.dll"]);
+    assert!(n.asi.is_empty());
+    let p = profile_with(&dirs, "dual", vec![pm(&r, true)]);
+    profile::activate(&dirs, &p.id, &install).unwrap();
+    assert!(native_listed(&install.path, &r.id));
+    assert!(!install.path.join("scripts").exists());
+}
+
+#[test]
+fn synthetic_ual_obeys_the_shipped_auto_loot_plus_ordering_rule() {
+    let t = tmp("ual-order");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let install = game(&t.0);
+    let pkg = t.0.join("AutoLootPlus");
+    put(&pkg, "native.json", br#"{"id":"auto-loot-plus","version":"1.0.0","dlls":["alp.dll"],"phase":"dllmain"}"#);
+    put(&pkg, "alp.dll", &build_test_dll(&[], b"ALP"));
+    let alp = import_one(&dirs, &pkg, ModKind::Native);
+    let pkg = t.0.join("ual");
+    put(&pkg, "dinput8.dll", &ual());
+    let ual = import_one(&dirs, &pkg, ModKind::Native);
+    put(&install.path, "kiln/compat-rules.json", &read(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../native/core/compat-rules.json")));
+    let p = profile_with(&dirs, "order", vec![pm(&alp, true), pm(&ual, true)]);
+    profile::activate(&dirs, &p.id, &install).unwrap();
+    let ini = kiln_manage::chain::read(&install.path).unwrap();
+    assert!(ini.late.iter().any(|e| e.path == kiln_manage::game_files::UAL_CHAIN_LINE), "{ini:?}");
+    let view = kiln_manage::compat::view(&dirs, &p, &install).unwrap();
+    assert!(view.rules.iter().any(|r| r.id == "auto-loot-plus-before-ultimate-asi-loader" && r.applied), "{view:?}");
+}
+
+#[test]
+fn a_conflicting_update_keeps_all_files_of_the_earlier_version() {
+    let t = tmp("update-conflict");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let install = game(&t.0);
+    let (pkg, loader) = autoloot_package(&t.0);
+    let old = import_one(&dirs, &pkg, ModKind::Native);
+    let mut p = profile_with(&dirs, "loot", vec![pm(&old, true)]);
+    profile::activate(&dirs, &p.id, &install).unwrap();
+    let old_plugin = read(&install.path.join("plugins/AutolootCoop.dll"));
+    std::fs::remove_file(pkg.join("plugins/AutolootCoop.dll")).unwrap();
+    put(&pkg, "plugins/NewLoot.dll", &build_test_dll(&[], b"new plugin"));
+    put(&pkg, "powrprof.dll", &build_test_dll(&[], b"new loader plugins\\"));
+    let new = import_one(&dirs, &pkg, ModKind::Native);
+    p.mods.native = vec![pm(&new, true)];
+    let p = profile::save(&dirs, &p).unwrap();
+    put(&install.path, "plugins/NewLoot.dll", b"player's file");
+    let a = profile::activate(&dirs, &p.id, &install).unwrap();
+    assert_eq!(read(&install.path.join("powrprof.dll")), loader);
+    assert_eq!(read(&install.path.join("plugins/AutolootCoop.dll")), old_plugin);
+    assert_eq!(read(&install.path.join("plugins/NewLoot.dll")), b"player's file");
+    assert!(a.warnings.iter().any(|w| w.contains("NewLoot.dll")), "{a:?}");
+    assert!(profile::write_once(&dirs, &p.id, &install).is_err(), "the blocked replacement is not the placed version");
+}
+
+#[test]
+fn aliased_asi_destinations_are_refused_before_placement() {
+    for nested in ["scripts/a.asi", "Scripts/A.ASI"] {
+        let t = tmp(if nested.starts_with('S') { "alias-case" } else { "alias-map" });
+        let dirs = DataDirs::at(t.0.join("data"));
+        let install = game(&t.0);
+        put(&install.path, "xinput9_1_0.dll", &ual());
+        let pkg = t.0.join("Aliased");
+        put(&pkg, "a.asi", &asi(b"root"));
+        put(&pkg, nested, &asi(b"nested"));
+        let r = import_one(&dirs, &pkg, ModKind::Native);
+        let p = profile_with(&dirs, "alias", vec![pm(&r, true)]);
+        let a = profile::activate(&dirs, &p.id, &install).unwrap();
+        assert!(!install.path.join("scripts").exists() && !install.path.join("Scripts").exists(), "{a:?}");
+        assert!(a.warnings.iter().any(|w| w.contains("both")), "{a:?}");
+    }
+}

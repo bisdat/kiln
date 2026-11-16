@@ -961,7 +961,14 @@ pub fn plan(dirs: &DataDirs, profile: &Profile, install: &GameInstall, profile_d
     };
     let ini = chain::parse(text.as_bytes());
     let mut entries: Vec<PlanEntry> = chain_paths(&ini, &text).into_iter().map(|p| chain_entry(install, p)).collect();
-    entries.extend(profile_dlls.iter().map(|(id, p)| profile_entry(id, p)));
+    entries.extend(profile_dlls.iter().map(|(id, p)| {
+        let mut entry = profile_entry(id, p);
+        // The synthetic game-folder UAL entry must be selectable by engine ordering rules too.
+        if p.eq_ignore_ascii_case(crate::game_files::UAL_CHAIN_LINE) {
+            entry.engine = entry_host_path(install, p).and_then(|h| engine_word_of(&h));
+        }
+        entry
+    }));
 
     let mut facts = Facts::default();
     facts.add_engine("kiln");

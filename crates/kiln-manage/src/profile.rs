@@ -1662,26 +1662,51 @@ pub fn activate(dirs: &DataDirs, profile_id: &str, install: &GameInstall) -> Res
     file.generation = generation; // grows with every write of the file
     let now = now_rfc3339();
     file.written = Some(now.clone());
-    // native mods that run from the game folder itself (game_files): before chain.ini, which names the Ultimate ASI
-    // Loader placed for them
-    let game_files = crate::game_files::place(dirs, &profile, &install.path)?;
-    // chain.ini first: its [chain] lines (a compat rule may switch a chained loader off) decide which own loaders run
-    let (_, order_notes) = write_chain_plan(dirs, &profile, install, &file)?;
-    // ShroudForge and SET read their mods from their own folder in the game; the other engines' own loaders too.
-    let mut placed = crate::engine_mods::place(dirs, &profile, &install.path)?;
-    // a version a roll back put into the profile: the settings it had before the update go back into its copy
-    placed.kept_files.extend(crate::kept::restore_after_place(dirs, &profile, &install.path));
-    // Greeneye and Flame mods run from the copies place() just made in <game>/greeneye/ and <game>/mods/
-    // (engine_mods::game_path_of)
-    file.mods = render(dirs, &profile, install, mode)?.mods;
     let pj = install.path.join(crate::paths::game::PROFILE);
-    // Preserve the legacy writer's conflict check: a directory in its staging slot may belong to another
-    // launcher/recovery. The durable writer uses exclusive random temps and never truncates that path.
+    // Refuse the known staging conflict before changing any game-folder packages.
     let legacy_stage = crate::util::with_suffix(&pj, ".tmp");
     if std::fs::symlink_metadata(&legacy_stage).is_ok_and(|m| m.is_dir()) {
         return Err(Error::new(ErrorCode::Io, format!("{}: legacy profile staging path is a directory", legacy_stage.display())));
     }
-    crate::durable::json(&pj, &file, &[])?;
+    let previous = crate::game_files::placed(&install.path)?;
+    let chain_path = install.path.join(crate::paths::game::CHAIN);
+    let old_chain = if chain_path.is_file() { Some(std::fs::read(&chain_path).map_err(io_at(&chain_path, "reading"))?) } else { None };
+    let mut chain_written = false;
+    let changes: Result<_> = (|| {
+        // native mods that run from the game folder itself (game_files): before chain.ini, which names the Ultimate ASI
+        // Loader placed for them
+        let game_files = crate::game_files::place(dirs, &profile, &install.path)?;
+        // chain.ini first: its [chain] lines (a compat rule may switch a chained loader off) decide which own loaders run
+        let (_, order_notes) = write_chain_plan(dirs, &profile, install, &file)?;
+        chain_written = true;
+        // ShroudForge and SET read their mods from their own folder in the game; the other engines' own loaders too.
+        let mut placed = crate::engine_mods::place(dirs, &profile, &install.path)?;
+        // a version a roll back put into the profile: the settings it had before the update go back into its copy
+        placed.kept_files.extend(crate::kept::restore_after_place(dirs, &profile, &install.path));
+        // Greeneye and Flame mods run from the copies place() just made in <game>/greeneye/ and <game>/mods/
+        // (engine_mods::game_path_of)
+        file.mods = render(dirs, &profile, install, mode)?.mods;
+        crate::durable::json(&pj, &file, &[])?;
+        Ok((game_files, order_notes, placed))
+    })();
+    let (game_files, order_notes, placed) = match changes {
+        Ok(done) => done,
+        Err(mut error) => {
+            // profile.json still names the old activation. Restore the packages that were actually placed,
+            // including when the saved profile has since been edited or placement stopped halfway through.
+            if let Err(e) = crate::game_files::place_mods(dirs, &previous, &install.path) {
+                error.message.push_str(&format!("; could not restore the earlier game-folder files: {}", e.message));
+            }
+            if chain_written {
+                let restored = match old_chain {
+                    Some(bytes) => crate::durable::replace(&chain_path, &bytes),
+                    None => remove_if_there(&chain_path),
+                };
+                if let Err(e) = restored { error.message.push_str(&format!("; could not restore chain.ini: {}", e.message)); }
+            }
+            return Err(error);
+        }
+    };
     crate::kept::crash_point(crate::kept::Step::GameProfileWritten);
     remove_if_there(&install.path.join(crate::paths::game::CHAIN_ONCE))?;
     remove_if_there(&install.path.join(crate::paths::game::PROFILE_ONCE))?;
@@ -1825,16 +1850,8 @@ pub fn write_once(dirs: &DataDirs, profile_id: &str, install: &GameInstall) -> R
                 copies there; activate this profile to change them before playing (play-once keeps the active selection)"));
         }
     }
-    // Native mods placed in the game folder itself (game_files: a plugin loader such as powrprof.dll, Ultimate ASI Loader and
-    // .asi plugins) are fixed there too: the active profile's (profile.json does not list them, kiln-core does not load them)
-    let in_folder = |p: &Profile| {
-        let mut v: Vec<(String, String, String)> = p.mods.native.iter().filter(|m| m.enabled && crate::game_files::runs_from_game_folder(dirs, m))
-            .map(|m| (m.id.clone(), m.version.clone(), m.hash.clone())).collect();
-        v.sort_unstable();
-        v
-    };
-    let active_profile = active.as_ref().filter(|f| file_is_here(dirs, install, f)).and_then(|f| get(dirs, &f.id).ok());
-    if in_folder(&profile) != active_profile.as_ref().map(in_folder).unwrap_or_default() {
+    // Compare with verified placements, since the active profile may have unapplied edits.
+    if crate::game_files::would_change(dirs, &profile.mods.native, &install.path)? {
         return Err(Error::new(ErrorCode::Unsupported, "Mods placed in the game folder itself (a plugin loader such as powrprof.dll, \
             Ultimate ASI Loader and .asi plugins) are fixed there; activate this profile to change them before playing (play-once \
             keeps the active selection)"));
