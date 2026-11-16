@@ -242,10 +242,26 @@ public static unsafe class ContentSync
     internal static TimeSpan ContentAdmissionDeadline => NetAdmission.MaxDeadline;
     private static IDisposable? _contentAdmission;
     private static readonly Dictionary<uint, AdmissionHold> ContentHolds = new();
+    /// <summary>The decider lives only while added buffs need the join check: any decider puts the gate in "hold all"
+    /// (every Kiln client held until Kiln.Network lets it in), which a server without added buffs has no need for.</summary>
     private static void EnsureContentAdmission()
     {
-        if (!ServerRole || _contentAdmission != null ||
-            ((NetNative.ReadStatus()?.Roles ?? 0) & NetNative.RoleServer) == 0) return;
+        if (!ServerRole || ((NetNative.ReadStatus()?.Roles ?? 0) & NetNative.RoleServer) == 0) return;
+        bool required;
+        try
+        {
+            required = RequiresBuffAdmission();
+        }
+        catch (Exception)
+        {
+            required = true;  // cannot tell: keep the check, as before
+        }
+        if (!required)
+        {
+            if (_contentAdmission != null && Game.IsTickThread) DropContentAdmission();
+            return;
+        }
+        if (_contentAdmission != null) return;
         _contentAdmission = NetAdmission.OnJoin("kiln.content", peer =>
         {
             if (!peer.HasChannel(ChannelName) || !RequiresBuffAdmission()) return null;
@@ -262,11 +278,17 @@ public static unsafe class ContentSync
     internal static bool ServerRole => !Kiln.Client.IsClient || Kiln.Client.IsHosting;
 
     /// <summary>Drops everything the server side holds (the state, which peer has which parts). Under no lock.</summary>
-    private static void ResetServer(string why)
+    /// <summary>The join decider and its holds go (tick thread).</summary>
+    private static void DropContentAdmission()
     {
         _contentAdmission?.Dispose(); _contentAdmission = null;
         foreach (var hold in ContentHolds.Values) hold.End();
         ContentHolds.Clear();
+    }
+
+    private static void ResetServer(string why)
+    {
+        DropContentAdmission();
 
         int peers;
         lock (Sent)
