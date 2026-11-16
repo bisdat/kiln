@@ -91,23 +91,36 @@ data (objects are serialized when the mod unloads and read into the new instance
   confirmations. The order on disk is the one the tick thread kept: kiln.saves holds the game's world write (on the
   game's Save2Thread, not the server's step) until the writer has that generation's pending manifest on disk
   (`stage_progress`, below), so the world file of revision *R* normally never reaches the disk before generation *R*'s
-  manifest. A staging whose write fails is tried 3 times in about 0.75 s while the world write waits.
+  manifest. A staging whose write fails is tried 3 times (0.25 s and 0.5 s between the tries) while the world write
+  waits.
 - **Where that order does not hold.** The world write's wait is bounded and logged: 30 s, and once the shutdown begins
-  (the game's shutdown log line, the shutdown's save request, the world's stop) every wait ends 6 s after that at the
-  latest, because the game gives its last save 10 s in all. A wait that runs out lets the world write go and warns, and
-  then does not wait again until the writer has caught up. So the world file of *R* can reach the disk without *R*'s
-  manifest when the writer needs longer than that wait, when a staging still cannot be written after its tries (then the
-  confirmation writes it again, late), or after an earlier wait ran out and the writer has not caught up. A crash in such
-  a window loads generation *R-1* for world file *R* (`DataMatch.Older`), where the tick thread's own writes would have
-  held the server's step for as long as the disk needed instead.
-- **Reads wait for the writer.** A world load or reload and `Saves.Backup` read the folder only once the writer has
-  written everything it was handed, and while it writes nothing, with no time limit (logged after 10 s, and every 10 s
-  after that), so neither can take an older generation, or miss one, while a confirmation is still being written. A
-  backup whose generation's confirmation could not be written carries the pending manifest of that generation, which a
-  restore loads as `Staged`. A world close and the shutdown save's confirmation wait for the writer at most 10 s
-  (logged): a process that ends with writes still queued, after that wait or in a crash, leaves what an end at that
-  point left before: no torn file, a staging that was written before its world write, and a confirmation not written
-  yet loads that generation as `Staged`, with the same data.
+  every wait ends 6 s after that at the latest, also one already running, because the game gives its last save 10 s in
+  all. The shutdown counts from the first of: the game's log line "Trigger gameflow shutdown" (from the time the game
+  logged it, which the core records; a line that reaches kiln.saves late applies at once when its 6 s have passed), a
+  save request recognised as the shutdown's (`saves.reasons`), the world's stop. A wait that runs out lets the world
+  write go and warns, and then does not wait again until the writer has caught up. So the world file of *R* can reach
+  the disk without *R*'s manifest when the writer needs longer than that wait, when a staging still cannot be written
+  after its 3 tries (0.25 s and 0.5 s between them, plus the tries' own file time; its confirmation writes it again,
+  late), or after an earlier wait ran out and the writer has not caught up. A crash in such a window loads the newest
+  usable older generation for world file *R* (`DataMatch.Older`), or none when there is none, where the tick thread's
+  own writes would have held the server's step for as long as the disk needed instead.
+- **Reads wait for the writer, bounded.** A world load or reload and `Saves.Backup` read the folder only once the
+  writer has written everything it was handed, and while it writes nothing; they wait for that at most 10 s, so a disk
+  that never answers cannot hold the server for good. A load that cannot read then is **deferred**: the world's mod
+  data is unavailable as a hosted world's is before its load (`Saves.WorldDataReady` false, the data stores empty, what
+  is written to them goes, instance data throws `KilnUnavailableException`), nothing is staged or confirmed over it (that
+  save's world file gets no generation of its own; loading it later takes the newest one on disk, the data this world
+  had), and it is read at the first pump (about once a second) after the writer is done; `WorldLoadedEvent` waits for
+  that. A backup that cannot read then fails, as does a backup of a generation whose newest staging could not be written
+  or that has no usable manifest on disk (one that reads and whose blobs are all there): a backup always carries its
+  world file's mod data, from its confirmation or, when that could not be written, its pending manifest (a restore loads
+  it as `Staged`). A staged restore replaces the manifests already in the world's sidecar folder (atomically) and keeps
+  only blobs already there with the same size (they are content-addressed), so another timeline's pending manifest of the
+  same revision cannot survive it. A world close and the shutdown save's confirmation wait for the writer at most 10 s
+  (logged). A process that ends with writes still queued, after that wait or in a crash, leaves what an end at that point
+  left before: no torn file (except the unforced files of an unchanged generation after a power loss, below), and a
+  confirmation not written yet loads that generation as `Staged` with the same data when its staging was written, else
+  the newest usable older generation, or none.
 - **Back-pressure.** A staging that comes while an earlier one of the same generation still waits for the writer (the
   save request's staging, then the snapshot staging one step later) replaces it; stagings of different generations are
   never merged. Pruning stops between two files when a staging waits, and runs again (with the save folder, so it still
@@ -526,7 +539,7 @@ says what goes to players' games (games served, updates, values and bytes sent, 
 | `Saves.Available`, `Status` (`SaveStatus`: state, last save, revision, autosave interval, counters, data generation) | any thread |
 | `Saves.WorldId`, `WorldFile`, `SaveDirectory`, `DataDirectory`, `BackupDirectory` | the world's GUID text (from the world file header) and paths |
 | `await Saves.Request()` → `SaveResult` | the game's own save now (the one its timer makes); completes when a save that started after the call is written. Refused while the world does not run; dropped after 60 s |
-| `await Saves.Backup(name)` → `BackupInfo` | saves now, then copies the world file + its mod-data generation to `kiln/backups/<UTC stamp>-<name>/` (`backup.json` with sha256 per file) on the tick thread right after the write, before the game can start another save (it first waits until Kiln.Saves' writer has written that generation's files, with no time limit; without its confirmation it carries its pending manifest) |
+| `await Saves.Backup(name)` → `BackupInfo` | saves now, then copies the world file + its mod-data generation to `kiln/backups/<UTC stamp>-<name>/` (`backup.json` with sha256 per file) on the tick thread right after the write, before the game can start another save. It first waits, at most 10 s, until Kiln.Saves' writer has written that generation's files; without its confirmation it carries its pending manifest. It fails (the task faults) when the writer is not done by then, or when the generation has no usable manifest on disk |
 | `Saves.Backups` | `BackupInfo` list |
 | `Saves.RestoreOnNextStart(name)` / `CancelRestore()` / `PendingRestore` | stages `kiln/backups/restore.json`; at the next server start kiln.saves checks the backup's world file header, copies the files it replaces to `kiln/backups/_before-restore-<stamp>/`, puts the world file and its sidecar generation in place before the game opens its save, and writes `restore.result-<stamp>.json` |
 
@@ -556,7 +569,8 @@ prunes adds `; pruning N ms: ...` with the same items. Without the stage barrier
 it (...)` and `files N ms` instead of `writer`: the tick thread wrote them. kiln.saves logs, from the Save2Thread, how
 long a world write waited for the writer (`saves: the world write of revision R waited N ms for Kiln.Saves' writer`,
 at Info over 250 ms), warns when it went ahead without it, and says when it saw the shutdown begin (`saves: shutdown
-begins (...)`). A load or a backup that waits more than 10 s for the writer says so every 10 s.
+begins (...)`, with how long before the line reached it the game logged it). A load or a backup that cannot read the
+folder within 10 s says so (`the writer still has N write(s) to do`); a deferred load says when it was read after all.
 
 ## Storage
 
@@ -603,6 +617,9 @@ saves->request(KILN_SAVE_REASON_REQUEST);                       /* any thread; a
 KilnSaveEvent ev; uint64_t seq = 0;
 while (saves->next_event(seq, &ev) == KILN_OK) { seq = ev.seq; /* SAVING / WRITTEN / FAILED / LOADED */ }
 ```
+The core's `kiln.log` service (`services/kiln_log.h`, since 0.2.0-dev.30) tells a log subscriber, inside its callback,
+when the game logged the line being delivered; kiln.saves times the shutdown from it.
+
 The pump (`set_pump`) is taken by Kiln.Saves; native plugins poll `next_event` (a ring of 256). So is `stage_progress`
 (appended in 0.2.0-dev.30, `KILN_SAVES_CAN_STAGE_BARRIER` in `status.features`): the pump reports each staging it hands
 its writer, the writer each one it has on disk, and the world write waits for them (see "Off the tick thread").
@@ -614,7 +631,8 @@ its writer, the writer each one it has on disk, and the world write waits for th
   the world write (since 0.2.0-dev.30 the world write waits for the writer to have it on disk); a crash between the two
   leaves revision R on disk and loads generation R. A staging that takes longer than that wait (30 s; 6 s once the
   shutdown begins), one that cannot be written after its tries, or a save while the barrier is off after such a wait
-  opens a window, logged as a warning, in which a crash loads generation R-1 for world file R. After a power loss or a system crash, the world file of
+  opens a window, logged as a warning, in which a crash loads the newest usable older generation for world file R, or
+  none. After a power loss or a system crash, the world file of
   an unchanged save can load an older generation with the same bundles (`DataMatch.Older`) when the system had not yet
   written that save's manifests (see "How consistency works").
 - Moving creatures may be matched to the wrong entity of the same template if two stand within 16 m of the saved spot.
