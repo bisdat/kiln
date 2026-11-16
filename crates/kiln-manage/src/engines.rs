@@ -345,6 +345,9 @@ pub fn loader_reason(engine: Engine, file: &str) -> String {
             "{file} is {n}, a stand-alone server mod: Kiln doesn't manage it, copy it into the server folder yourself"
         ),
         Engine::ReShade => format!("{file} is ReShade, which runs on its own next to Kiln: Kiln doesn't manage it, copy it into the Enshrouded folder yourself"),
+        // its download is a dinput8.dll: copied into the game folder by hand it would replace Kiln's proxy
+        Engine::UltimateAsiLoader => format!("{file} is Ultimate ASI Loader: add it to the Library, and Kiln places it next to the game as \
+            {} while it is on (never copy it into the game folder as dinput8.dll: that is Kiln's)", crate::game_files::UAL_FILE),
         Engine::Aldrich => format!("{file} is {n}, which runs on its own from the Enshrouded folder: Kiln doesn't manage it, copy its files there yourself"),
         _ => format!("{file} is {n}, {}: Kiln doesn't manage it, copy it into the Enshrouded folder yourself", info(engine).what),
     }
@@ -783,7 +786,7 @@ pub fn detect_file(path: &Path) -> Option<Detected> {
     }
     if ext == "asi" {
         return d(DetectKind::Asi, Some(Engine::UltimateAsiLoader), format!(
-            "{file} is an .asi plugin for Ultimate ASI Loader. Kiln can't load .asi plugins yet; support is coming"
+            "{file} is an .asi plugin for Ultimate ASI Loader: {}", crate::game_files::ASI_REASON
         ));
     }
     None
@@ -842,6 +845,8 @@ fn registry() -> &'static RwLock<HashMap<DetectKind, Loader>> {
 /// Every engine mod kind (EML ... Ember): `engine_mods::import_engine_mod` (content-addressed copy).
 fn builtin_loaders(m: &mut HashMap<DetectKind, Loader>) {
     crate::engine_mods::builtin_loaders(m);
+    // Ultimate ASI Loader and .asi plugins: a native mod Kiln places in the game folder (game_files)
+    m.insert(DetectKind::Asi, Loader { name: "ultimate-asi-loader", import: crate::game_files::import_asi });
 }
 
 /// Registers (or replaces) the loader of a Library kind at run time. Returns the previous one.
@@ -943,10 +948,12 @@ mod tests {
                              (DetectKind::Shroudlink, "kiln-shroudlink"), (DetectKind::Ember, "kiln-ember")] {
             assert_eq!(loader_for(kind).map(|l| l.name), Some(name));
         }
-        assert!(loader_for(DetectKind::Asi).is_none());
-        assert!(register_loader(DetectKind::Asi, Loader { name: "test", import: noop }).is_none());
-        assert_eq!(loader_for(DetectKind::Asi).map(|l| l.name), Some("test"));
-        registry().write().unwrap().remove(&DetectKind::Asi);
+        // .asi packages: a native mod placed in the game folder (game_files)
+        assert_eq!(loader_for(DetectKind::Asi).map(|l| l.name), Some("ultimate-asi-loader"));
+        assert!(loader_for(DetectKind::Data).is_none());
+        assert!(register_loader(DetectKind::Data, Loader { name: "test", import: noop }).is_none());
+        assert_eq!(loader_for(DetectKind::Data).map(|l| l.name), Some("test"));
+        registry().write().unwrap().remove(&DetectKind::Data);
     }
 
     #[test]

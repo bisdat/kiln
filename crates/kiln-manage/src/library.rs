@@ -279,6 +279,12 @@ fn detect_dll(path: &Path) -> Detected {
     // dinput8-chain.ini, so nothing loads twice.
     let mut chains = false;
     if let Some(e) = crate::engines::detect_dll(path, &bytes, &exports) {
+        // Ultimate ASI Loader on its own (its download is a dinput8.dll): a native mod Kiln places next to the game as
+        // xinput9_1_0.dll (game_files), one Library entry whatever the file is called
+        if e.engine == Some(crate::engines::Engine::UltimateAsiLoader) {
+            return Detected { kind: DetectKind::Asi, id: Some(crate::game_files::UAL_ID.into()), version: Some("0.0.0".into()),
+                name: Some("Ultimate ASI Loader".into()), reason: crate::game_files::ASI_REASON.into(), ..e };
+        }
         if !(e.kind == DetectKind::Proxy && e.engine == Some(crate::engines::Engine::ChainLoader)) {
             return Detected { id: Some(stem_id.clone()), version: Some("0.0.0".into()), ..e };
         }
@@ -637,6 +643,11 @@ fn detect_folder_at(dir: &Path, depth: usize, top_name: Option<&str>) -> Detecte
     if let Some((v, _)) = emf_manifest(dir) {
         let s = |k: &str| v.get(k).and_then(|x| x.as_str()).map(str::to_string);
         return mk(DetectKind::Emf, s("id"), s("version"), s("name"), format!("an EMF mod (mod.json, EMF API {})", v["emf"]));
+    }
+    // Ultimate ASI Loader and/or .asi plugins (in the folder or a folder of it, as Smart Workshop's Scripts/): one
+    // package, a native mod placed in the game folder (game_files)
+    if !has_mod_manifest(dir) && let Some(d) = crate::game_files::detect_asi_package(dir, depth, top_name) {
+        return d;
     }
     if let Some(d) = crate::engines::detect_folder(dir) {
         return d;
