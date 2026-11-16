@@ -11,9 +11,9 @@
 //   - the game's procedure and Kiln's own key handling get exactly what they get without a subscriber, also while Kiln
 //     captures input (menu open, the wheel) and for a key a Kiln binding consumes, and those records still arrive;
 //   - one focus loss (WM_ACTIVATEAPP 0 and WM_KILLFOCUS) gives one record;
-//   - a key held through a focus loss stays held (its next down, raw record or key message, is a repeat), one let go
-//     while the game had no focus is a new press again (key_hold.h; GetAsyncKeyState is the test's), and input queued
-//     before the window settles its keys goes by its order: a queued press counts, a queued old repeat does not;
+//   - one press counts once whatever the focus does (key_hold.h): a press's own key message or a repeat after a focus
+//     loss is no second press, a press queued before the focus's return counts, an older queued repeat does not, a key
+//     let go while away is not held once the focus is back (GetAsyncKeyState is the test's);
 //   - unsubscribe stops delivery, waits for a call in flight on the window thread, works from inside the callback;
 //     a faulting subscriber is removed and the others go on;
 //   - the middle and side buttons and the wheel as key presses (mouse_press.h, since 0.2.0-dev.27): a raw record and
@@ -444,70 +444,95 @@ size_t new_presses(uint32_t vk) {
     return n;
 }
 
-// Posted, then delivered by the message loop below: each message carries the time it was posted (GetMessageTime), as
-// input that waits in the queue while the window's thread is busy. The focus messages are sent: Windows delivers them
-// ahead of the queued input.
+// Posted, then delivered by the message loop below, one at a time (pump_one) or all (pump): as input that waits in the
+// queue while the window's thread is busy. The focus messages are sent: Windows delivers them ahead of the queued input.
 void post(UINT m, WPARAM w, LPARAM l) { PostMessageW(g_win, m, w, l); }
-void pump() {
+bool pump_one() {
     MSG msg;
-    while (PeekMessageW(&msg, g_win, 0, 0, PM_REMOVE)) DispatchMessageW(&msg);
+    if (!PeekMessageW(&msg, g_win, 0, 0, PM_REMOVE)) return false;
+    DispatchMessageW(&msg);
+    return true;
+}
+void pump() {
+    while (pump_one()) {
+    }
 }
 LPARAM repeat_l(UINT scan) { return key_l(scan, false, false) | (1ll << 30); }  // a down whose key was down before
+// Kiln's last line for vk says this ("repeat=1"...).
+bool last_of(uint32_t vk, const char* want) {
+    char key[24];
+    std::snprintf(key, sizeof key, "vk=%u ", vk);
+    for (auto it = kui::g_kiln_keys.rbegin(); it != kui::g_kiln_keys.rend(); ++it)
+        if (it->rfind(key, 0) == 0) return it->find(want) != std::string::npos;
+    return false;
+}
+void raw_registered(bool on) {
+    const RAWINPUTDEVICE d{1, 6, static_cast<DWORD>(on ? 0 : RIDEV_REMOVE), nullptr};
+    check(RegisterRawInputDevices(&d, 1, sizeof d), on ? "raw keyboard registered again" : "raw keyboard unregistered");
+}
+// input.cpp's repeat window, from the same system setting (key_hold.h window_for_delay; key_hold_test checks it)
+uint32_t g_window = 1500;
+uint32_t window_for_delay(UINT setting) { return std::max<uint32_t>(1500, (std::min<UINT>(setting, 3) + 1) * 250 + 750); }
 
-// A held key across a focus loss (GitHub #39, Nexus 179900169: one press of F8 opened Kiln Auto Loot's window and shut
-// it 40 ms later). Kiln's held keys stay held while the game has no focus; when it comes back, each key's physical state
-// is laid on it with its first event stamped later.
+// One press counts once, whatever the focus does (GitHub #39, Nexus 179900169: one press of F8 opened Kiln Auto Loot's
+// window and shut it 40 ms later). key_hold.h: a down is a repeat when no release came since the key's last down,
+// handled within the repeat window; the focus's return only says which keys are still held.
 void held_focus_lost() {
-    check(g_async_patched, "this exe's GetAsyncKeyState import answers from the test (the held state is settled with it)");
-    send(WM_INPUT, RIM_INPUT, raw_key(0x24, RI_KEY_BREAK, 'J'));
+    UINT delay = 1;
+    SystemParametersInfoW(SPI_GETKEYBOARDDELAY, 0, &delay, 0);
+    g_window = window_for_delay(delay);
+    check(g_async_patched, "this exe's GetAsyncKeyState import answers from the test (input_key_held at the focus's return)");
+    kui::g_kiln_keys.clear();
     g_physical['J'] = true;
     send(WM_INPUT, RIM_INPUT, raw_key(0x24, RI_KEY_MAKE, 'J'));
+    check(new_presses('J') == 1, "J goes down: a press");
     send(WM_KILLFOCUS, 0, 0);
     uint32_t mods = 0;
     check(kui::input_take_pressed(&mods) == 0, "focus loss discards a pending bind-capture press");
     g_physical['J'] = false;  // let go while the game had no focus: the release went to another window
     send(WM_SETFOCUS, 0, 0);
     check(!kui::input_key_held('J'), "a key let go while the game had no focus is not held once the focus is back");
+    Sleep(g_window + 150);
     g_physical['J'] = true;
-    Sleep(30);
     post(WM_INPUT, RIM_INPUT, raw_key(0x24, RI_KEY_MAKE, 'J'));
-    pump();
-    check(kui::g_kiln_keys.back().find("repeat=0") != std::string::npos,
-          "first key after refocus is not mistaken for a repeat: %s", kui::g_kiln_keys.back().c_str());
+    pump_one();
+    check(new_presses('J') == 2 && last_of('J', "repeat=0"), "pressed again past the repeat window: a press (%zu)", new_presses('J'));
 
-    // held all through a focus loss: the next down is its repeat, not a second press
+    // held all through a focus loss: its next down is a repeat
     send(WM_ACTIVATEAPP, FALSE, 0);
     check(kui::input_key_held('J'), "a key still down as the game loses the focus stays held");
     send(WM_ACTIVATEAPP, TRUE, 0);
+    check(kui::input_key_held('J'), "and still held when the focus is back with it down");
     Sleep(30);
     post(WM_INPUT, RIM_INPUT, raw_key(0x24, RI_KEY_MAKE, 'J'));
-    pump();
-    check(kui::g_kiln_keys.back().find("repeat=1") != std::string::npos,
-          "a key held through a focus loss: its next raw record is a repeat, not a second press: %s", kui::g_kiln_keys.back().c_str());
+    pump_one();
+    check(new_presses('J') == 2 && last_of('J', "repeat=1"), "held through a focus loss: its next raw record is a repeat (%zu)",
+          new_presses('J'));
     g_physical['J'] = false;
     post(WM_INPUT, RIM_INPUT, raw_key(0x24, RI_KEY_BREAK, 'J'));
-    pump();
+    pump_one();
     check(!kui::input_key_held('J'), "its release ends it");
 
-    // one press, its raw record, a focus loss before its key message, and raw keyboard input gone for the window (key
-    // messages take over): the press counts once
+    // 18b: one press, its raw record, a focus loss, raw keyboard input gone for the window (key messages take over),
+    // then the press's own key message 40 ms later: one press
     kui::g_kiln_keys.clear();
     g_physical[VK_F8] = true;
     send(WM_INPUT, RIM_INPUT, raw_key(0x42, RI_KEY_MAKE, VK_F8));
+    check(new_presses(VK_F8) == 1, "F8's raw record: a press");
+    Sleep(40);
     send(WM_KILLFOCUS, 0, 0);
-    const RAWINPUTDEVICE remove{1, 6, RIDEV_REMOVE, nullptr};
-    check(RegisterRawInputDevices(&remove, 1, sizeof remove), "raw keyboard unregistered");
+    raw_registered(false);
     send(WM_KEYDOWN, VK_F8, key_l(0x42, false, false));  // the same press's message: the key was up before it
-    check(new_presses(VK_F8) == 1, "one press of F8, its raw record, a focus loss, then its key message: one press (%zu)%s",
+    check(new_presses(VK_F8) == 1 && last_of(VK_F8, "repeat=1"),
+          "one press of F8, its raw record, a focus loss, then its key message 40 ms later: one press (%zu)%s",
           new_presses(VK_F8), join(kui::g_kiln_keys).c_str());
     send(WM_SETFOCUS, 0, 0);
-    send(WM_KEYDOWN, VK_F8, repeat_l(0x42));  // its repeat
+    send(WM_KEYDOWN, VK_F8, repeat_l(0x42));
     check(new_presses(VK_F8) == 1, "and its repeat after the focus is back is no second press (%zu)", new_presses(VK_F8));
     g_physical[VK_F8] = false;
     send(WM_KEYUP, VK_F8, key_l(0x42, false, true));
 
-    // key messages only: a down whose previous-state bit says the key was down already is a repeat, also of a key whose
-    // first down Kiln never saw (it went down while another window had the focus)
+    // key messages only: the previous-state bit marks a repeat, also of a key whose first down Kiln never saw
     kui::g_kiln_keys.clear();
     send(WM_KEYDOWN, 'L', repeat_l(0x26));
     check(new_presses('L') == 0, "a key message with the previous-state bit set is a repeat (%s)", join(kui::g_kiln_keys).c_str());
@@ -515,15 +540,14 @@ void held_focus_lost() {
     send(WM_KEYDOWN, 'L', key_l(0x26, false, false));
     check(new_presses('L') == 1, "after its release the next down is a press (%zu)", new_presses('L'));
     send(WM_KEYUP, 'L', key_l(0x26, false, true));
-    const RAWINPUTDEVICE add{1, 6, 0, nullptr};
-    check(RegisterRawInputDevices(&add, 1, sizeof add), "raw keyboard registered again");
+    raw_registered(true);
     std::memset(g_physical, 0, sizeof g_physical);
     send(WM_KILLFOCUS, 0, 0);
     send(WM_SETFOCUS, 0, 0);
 }
 
-// Input queued while the window's thread had not run yet, around the focus's return: GetAsyncKeyState already counts
-// it when the window settles its keys, so the queued events go by their order: neither a swallowed nor an invented press.
+// Input queued while the window's thread had not run yet, around the focus's return: neither a swallowed nor an invented
+// press (the first review of dev29/uiinput: a GetAsyncKeyState snapshot at the return did both).
 void queued_focus_return() {
     std::memset(g_physical, 0, sizeof g_physical);
     // A: F7 pressed after the focus came back, before the window's thread got to it: the press counts
@@ -534,45 +558,48 @@ void queued_focus_return() {
     g_physical[VK_F7] = true;
     Sleep(30);
     send(WM_SETFOCUS, 0, 0);
-    pump();
-    check(new_presses(VK_F7) == 1, "A: a press queued before the window settled its keys counts (%zu)%s", new_presses(VK_F7),
-          join(kui::g_kiln_keys).c_str());
+    pump_one();
+    check(new_presses(VK_F7) == 1, "A: a raw press queued before the focus's return was handled counts (%zu)%s",
+          new_presses(VK_F7), join(kui::g_kiln_keys).c_str());
+    pump_one();
+    check(new_presses(VK_F7) == 1, "A: its key message is no second press (%zu)", new_presses(VK_F7));
     Sleep(30);
     post(WM_INPUT, RIM_INPUT, raw_key(0x41, RI_KEY_MAKE, VK_F7));
     post(WM_KEYDOWN, VK_F7, repeat_l(0x41));
+    pump_one();
+    check(new_presses(VK_F7) == 1 && last_of(VK_F7, "repeat=1"), "A: its repeat after that is a repeat (%zu)", new_presses(VK_F7));
     pump();
-    check(new_presses(VK_F7) == 1 && kui::g_kiln_keys.back().find("repeat=1") != std::string::npos,
-          "A: its repeat after that is a repeat (%zu)%s", new_presses(VK_F7), join(kui::g_kiln_keys).c_str());
     g_physical[VK_F7] = false;
     post(WM_INPUT, RIM_INPUT, raw_key(0x41, RI_KEY_BREAK, VK_F7));
     post(WM_KEYUP, VK_F7, key_l(0x41, false, true));
     pump();
+    check(!kui::input_key_held(VK_F7), "A: released, not held");
 
-    // A with key messages only (no raw keyboard input): the queued key message's press counts
-    const RAWINPUTDEVICE remove{1, 6, RIDEV_REMOVE, nullptr};
-    check(RegisterRawInputDevices(&remove, 1, sizeof remove), "raw keyboard unregistered");
+    // A with key messages only (no raw keyboard input)
+    raw_registered(false);
     kui::g_kiln_keys.clear();
     send(WM_KILLFOCUS, 0, 0);
     post(WM_KEYDOWN, VK_F6, key_l(0x40, false, false));
     g_physical[VK_F6] = true;
     Sleep(30);
     send(WM_SETFOCUS, 0, 0);
-    pump();
-    check(new_presses(VK_F6) == 1, "A, key messages only: a press queued before the window settled its keys counts (%zu)%s",
+    pump_one();
+    check(new_presses(VK_F6) == 1, "A, key messages only: a press queued before the focus's return was handled counts (%zu)%s",
           new_presses(VK_F6), join(kui::g_kiln_keys).c_str());
     g_physical[VK_F6] = false;
     post(WM_KEYUP, VK_F6, key_l(0x40, false, true));
     pump();
-    const RAWINPUTDEVICE add{1, 6, 0, nullptr};
-    check(RegisterRawInputDevices(&add, 1, sizeof add), "raw keyboard registered again");
+    check(!kui::input_key_held(VK_F6), "A, key messages only: released, not held");
+    raw_registered(true);
 
-    // B: J held through the focus's return; its repeat and its release queued before the window settled its keys (it
-    // sees J up): the old repeat is no new press
+    // B: J held through the focus's return; its repeat and its release queued before the return was handled (which sees
+    // J up): the old repeat is no new press, then its release, then a new press counts
     kui::g_kiln_keys.clear();
     g_physical['J'] = true;
     post(WM_INPUT, RIM_INPUT, raw_key(0x24, RI_KEY_MAKE, 'J'));
     post(WM_KEYDOWN, 'J', key_l(0x24, false, false));
     pump();
+    check(new_presses('J') == 1, "B: J goes down: a press");
     send(WM_KILLFOCUS, 0, 0);
     post(WM_INPUT, RIM_INPUT, raw_key(0x24, RI_KEY_MAKE, 'J'));
     post(WM_KEYDOWN, 'J', repeat_l(0x24));
@@ -581,32 +608,161 @@ void queued_focus_return() {
     g_physical['J'] = false;
     Sleep(30);
     send(WM_SETFOCUS, 0, 0);
+    pump_one();
+    check(new_presses('J') == 1 && last_of('J', "repeat=1"), "B: the queued older raw repeat is a repeat (%zu)%s", new_presses('J'),
+          join(kui::g_kiln_keys).c_str());
+    pump_one();
+    check(new_presses('J') == 1, "B: its key message too (%zu)", new_presses('J'));
+    pump_one();
+    check(!kui::input_key_held('J'), "B: the queued release ends the hold");
     pump();
-    check(new_presses('J') == 1 && !kui::input_key_held('J'),
-          "B: a held key's repeat and release queued before the window settled its keys: no second press (%zu)%s",
-          new_presses('J'), join(kui::g_kiln_keys).c_str());
     Sleep(30);
     g_physical['J'] = true;
     post(WM_INPUT, RIM_INPUT, raw_key(0x24, RI_KEY_MAKE, 'J'));
-    post(WM_KEYDOWN, 'J', key_l(0x24, false, false));
-    pump();
-    check(new_presses('J') == 2, "B: the next press after that counts (%zu)", new_presses('J'));
-
-    // J held at the loss, let go while away, pressed again before the window's thread ran: the raw record alone looks
-    // like a repeat; its key message says J was up before it, so the press counts
-    kui::g_kiln_keys.clear();
-    send(WM_KILLFOCUS, 0, 0);
-    post(WM_INPUT, RIM_INPUT, raw_key(0x24, RI_KEY_MAKE, 'J'));
-    post(WM_KEYDOWN, 'J', key_l(0x24, false, false));
-    Sleep(30);
-    send(WM_SETFOCUS, 0, 0);
-    pump();
-    check(new_presses('J') == 1, "a key let go while away and pressed again before the window settled: one press (%zu)%s",
-          new_presses('J'), join(kui::g_kiln_keys).c_str());
+    pump_one();
+    check(new_presses('J') == 2 && last_of('J', "repeat=0"), "B: the next press after that counts (%zu)", new_presses('J'));
     g_physical['J'] = false;
     post(WM_INPUT, RIM_INPUT, raw_key(0x24, RI_KEY_BREAK, 'J'));
-    post(WM_KEYUP, 'J', key_l(0x24, false, true));
     pump();
+    std::memset(g_physical, 0, sizeof g_physical);
+    send(WM_KILLFOCUS, 0, 0);
+    send(WM_SETFOCUS, 0, 0);
+}
+
+// The second review of dev29/uiinput: message times at the same tick as the return and stale ones of sent messages, a
+// raw repeat handled ahead of the press's first key message, a raw record whose key message never came; plus fast taps,
+// a long hold and the rule's two known misses (printed as NOTE, not checked).
+void press_rule_cases() {
+    std::memset(g_physical, 0, sizeof g_physical);
+    // 1a: a press in the same tick as the focus's return, then its repeat: one press
+    kui::g_kiln_keys.clear();
+    send(WM_KILLFOCUS, 0, 0);
+    send(WM_SETFOCUS, 0, 0);
+    g_physical['K'] = true;
+    post(WM_INPUT, RIM_INPUT, raw_key(0x25, RI_KEY_MAKE, 'K'));  // posted at once: the return's tick
+    pump_one();
+    check(new_presses('K') == 1, "a press at the focus's return's tick: a press (%zu)", new_presses('K'));
+    Sleep(30);
+    post(WM_INPUT, RIM_INPUT, raw_key(0x25, RI_KEY_MAKE, 'K'));
+    pump_one();
+    check(new_presses('K') == 1 && last_of('K', "repeat=1"), "its repeat 30 ms later is a repeat (%zu)", new_presses('K'));
+    send(WM_INPUT, RIM_INPUT, raw_key(0x25, RI_KEY_MAKE, 'K'));  // sent: the message time is the last queued one's
+    check(new_presses('K') == 1 && last_of('K', "repeat=1"), "a sent repeat (a stale message time) is a repeat (%zu)", new_presses('K'));
+    // 1b: the focus back with K down, then K's release: not held, and a later focus loss does not make it held again
+    send(WM_KILLFOCUS, 0, 0);
+    send(WM_SETFOCUS, 0, 0);
+    check(kui::input_key_held('K'), "the focus back with K down: K held");
+    g_physical['K'] = false;
+    send(WM_INPUT, RIM_INPUT, raw_key(0x25, RI_KEY_BREAK, 'K'));
+    check(!kui::input_key_held('K'), "K's release: not held");
+    send(WM_KILLFOCUS, 0, 0);
+    check(!kui::input_key_held('K'), "a focus loss after it: still not held");
+    send(WM_SETFOCUS, 0, 0);
+    check(!kui::input_key_held('K'), "and the focus back: still not held");
+    g_physical['K'] = true;
+    send(WM_INPUT, RIM_INPUT, raw_key(0x25, RI_KEY_MAKE, 'K'));
+    check(new_presses('K') == 2, "K's next down after its release: a press (%zu)", new_presses('K'));
+    g_physical['K'] = false;
+    send(WM_INPUT, RIM_INPUT, raw_key(0x25, RI_KEY_BREAK, 'K'));
+
+    // 2: a raw repeat handled ahead of the press's first key message, raw keyboard input gone before that message
+    kui::g_kiln_keys.clear();
+    post(WM_INPUT, RIM_INPUT, raw_key(0x32, RI_KEY_MAKE, 'M'));
+    post(WM_INPUT, RIM_INPUT, raw_key(0x32, RI_KEY_MAKE, 'M'));
+    post(WM_KEYDOWN, 'M', key_l(0x32, false, false));
+    post(WM_KEYDOWN, 'M', repeat_l(0x32));
+    pump_one();
+    check(new_presses('M') == 1, "M's raw record: a press (%zu)", new_presses('M'));
+    pump_one();
+    check(new_presses('M') == 1 && last_of('M', "repeat=1"), "M's raw repeat queued ahead of the key messages: a repeat (%zu)",
+          new_presses('M'));
+    raw_registered(false);
+    pump_one();
+    check(new_presses('M') == 1 && last_of('M', "repeat=1"),
+          "the press's first key message after it (previous state up, key messages now): no second press (%zu)%s",
+          new_presses('M'), join(kui::g_kiln_keys).c_str());
+    pump_one();
+    check(new_presses('M') == 1, "the repeat's key message: no press either (%zu)", new_presses('M'));
+    send(WM_KEYUP, 'M', key_l(0x32, false, true));
+    raw_registered(true);
+    // the same with the review's times: raw down, a raw repeat 250 ms later, then the first key message
+    kui::g_kiln_keys.clear();
+    send(WM_INPUT, RIM_INPUT, raw_key(0x32, RI_KEY_MAKE, 'M'));
+    Sleep(250);
+    send(WM_INPUT, RIM_INPUT, raw_key(0x32, RI_KEY_MAKE, 'M'));
+    raw_registered(false);
+    send(WM_KEYDOWN, 'M', key_l(0x32, false, false));
+    check(new_presses('M') == 1, "raw down, raw repeat 250 ms later, then the first key message: one press (%zu)%s",
+          new_presses('M'), join(kui::g_kiln_keys).c_str());
+    send(WM_KEYUP, 'M', key_l(0x32, false, true));
+    raw_registered(true);
+
+    // 3: a raw record whose key message never came, a focus loss, the release elsewhere, the focus back with raw
+    // keyboard input gone, then a new key message past the repeat window: a press
+    kui::g_kiln_keys.clear();
+    g_physical['O'] = true;
+    send(WM_INPUT, RIM_INPUT, raw_key(0x18, RI_KEY_MAKE, 'O'));
+    check(new_presses('O') == 1, "O's raw record (no key message follows): a press");
+    send(WM_KILLFOCUS, 0, 0);
+    g_physical['O'] = false;
+    send(WM_SETFOCUS, 0, 0);
+    check(!kui::input_key_held('O'), "O let go while away: not held once the focus is back");
+    raw_registered(false);
+    Sleep(g_window + 150);
+    g_physical['O'] = true;
+    send(WM_KEYDOWN, 'O', key_l(0x18, false, false));
+    check(new_presses('O') == 2, "a new key message for O past the repeat window: a press (%zu)%s", new_presses('O'),
+          join(kui::g_kiln_keys).c_str());
+    g_physical['O'] = false;
+    send(WM_KEYUP, 'O', key_l(0x18, false, true));
+    check(!kui::input_key_held('O'), "its release: not held");
+    // the known miss: the same, 100 ms after the raw record
+    kui::g_kiln_keys.clear();
+    send(WM_KEYDOWN, 'P', key_l(0x19, false, false));
+    send(WM_KILLFOCUS, 0, 0);
+    send(WM_SETFOCUS, 0, 0);
+    Sleep(100);
+    send(WM_KEYDOWN, 'P', key_l(0x19, false, false));
+    std::printf("NOTE known miss: a key let go while away (release not seen) and pressed again 100 ms later counts %s\n",
+                new_presses('P') == 2 ? "a press" : "a repeat");
+    send(WM_KEYUP, 'P', key_l(0x19, false, true));
+    raw_registered(true);
+
+    // fast taps with their releases seen: two presses
+    kui::g_kiln_keys.clear();
+    send(WM_INPUT, RIM_INPUT, raw_key(0x10, RI_KEY_MAKE, 'Q'));
+    send(WM_INPUT, RIM_INPUT, raw_key(0x10, RI_KEY_BREAK, 'Q'));
+    check(new_presses('Q') == 1 && !kui::input_key_held('Q'), "a tap of Q: one press, released (%zu)", new_presses('Q'));
+    Sleep(40);
+    send(WM_INPUT, RIM_INPUT, raw_key(0x10, RI_KEY_MAKE, 'Q'));
+    check(new_presses('Q') == 2, "a second tap 40 ms later: a second press (%zu)", new_presses('Q'));
+    send(WM_INPUT, RIM_INPUT, raw_key(0x10, RI_KEY_BREAK, 'Q'));
+
+    // a long hold: the first repeat after a 600 ms repeat delay, then fast repeats: one press
+    kui::g_kiln_keys.clear();
+    send(WM_INPUT, RIM_INPUT, raw_key(0x13, RI_KEY_MAKE, 'R'));
+    Sleep(600);
+    send(WM_INPUT, RIM_INPUT, raw_key(0x13, RI_KEY_MAKE, 'R'));
+    check(new_presses('R') == 1 && last_of('R', "repeat=1"), "a hold: the first repeat 600 ms later is a repeat (%zu)", new_presses('R'));
+    Sleep(40);
+    send(WM_INPUT, RIM_INPUT, raw_key(0x13, RI_KEY_MAKE, 'R'));
+    check(new_presses('R') == 1, "and the next 40 ms later (%zu)", new_presses('R'));
+    send(WM_INPUT, RIM_INPUT, raw_key(0x13, RI_KEY_BREAK, 'R'));
+    check(!kui::input_key_held('R'), "released, not held");
+
+    // the other known miss: a key held through a focus loss longer than the repeat window
+    kui::g_kiln_keys.clear();
+    g_physical['T'] = true;
+    send(WM_INPUT, RIM_INPUT, raw_key(0x14, RI_KEY_MAKE, 'T'));
+    send(WM_KILLFOCUS, 0, 0);
+    Sleep(g_window + 150);
+    send(WM_SETFOCUS, 0, 0);
+    post(WM_INPUT, RIM_INPUT, raw_key(0x14, RI_KEY_MAKE, 'T'));
+    pump_one();
+    std::printf("NOTE known miss: a key held through a focus loss longer than the %u ms window: its next repeat counts %s\n",
+                g_window, new_presses('T') == 2 ? "a press" : "a repeat");
+    g_physical['T'] = false;
+    send(WM_INPUT, RIM_INPUT, raw_key(0x14, RI_KEY_BREAK, 'T'));
     std::memset(g_physical, 0, sizeof g_physical);
     send(WM_KILLFOCUS, 0, 0);
     send(WM_SETFOCUS, 0, 0);
@@ -1413,6 +1569,7 @@ int main() {
     raw_unregistered();
     held_focus_lost();
     queued_focus_return();
+    press_rule_cases();
     nested_unsubscribe();
     recursive_unsubscribe();
     delivery_mutation();

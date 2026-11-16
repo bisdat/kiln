@@ -167,20 +167,19 @@ void say_repress(uint32_t vk, const hold::Down& d, bool raw) {
          raw ? "raw input" : "key message");
 }
 
-// One key transition: menu key + subscribers. true = keep it from the game. Whether a down is a repeat: key_hold.h (a
-// key message's previous-state bit, else Kiln's held state, which a focus loss leaves held and the focus's return
-// settles by the events' message times). A mouse button (mouse_press.h) never repeats (a press while it is down means
-// its release was lost) and is not a key for take_pressed_key.
+// One key transition: menu key + subscribers. true = keep it from the game. Whether a down is a repeat: key_hold.h (no
+// release since the key's last down, handled within the repeat window; or a key message's previous-state bit). A focus
+// change does not touch it. A mouse button (mouse_press.h) never repeats (a press while it is down means its release was
+// lost) and is not a key for take_pressed_key.
 bool on_key(uint32_t vk, uint32_t scan, bool down, bool from_mouse = false, hold::Prev prev = hold::Prev::unknown) {
     if (vk == 0 || vk > 255) return false;
-    const auto t = static_cast<uint32_t>(GetMessageTime());
     bool repeat = false;
     if (down) {
-        const hold::Down d = g_keys.down(vk, from_mouse ? hold::Prev::unknown : prev, now_ms(), t);
+        const hold::Down d = g_keys.down(vk, from_mouse ? hold::Prev::unknown : prev, now_ms());
         repeat = !from_mouse && d.repeat;
         if (!repeat && !from_mouse) say_repress(vk, d, prev == hold::Prev::unknown);
     } else {
-        g_keys.up(vk, now_ms(), t);
+        g_keys.up(vk, now_ms());
     }
     KilnUiKey k{};
     k.size = sizeof(k);
@@ -323,24 +322,28 @@ bool message_mouse_presses(UINT m, WPARAM w, bool over_panel) {
     }
 }
 
-// The window lost the keyboard. Held keys stay held (key_hold.h): a key still down must not press again with its next
-// down; their releases may go to the window that has the keyboard now, so keys_back settles them. Consumption, a
-// pending bind-capture press and the mouse's twins and notches are forgotten, without inventing key messages for
-// either subscribers or the game (the v5 focus record lets subscribers reset their own state).
+// The window lost the keyboard. What counts as a key press is not touched (key_hold.h): a press's own key message or a
+// held key's repeat after the loss must not count again. Consumption, a pending bind-capture press and the mouse's twins
+// and notches are forgotten, without inventing key messages for either subscribers or the game (the v5 focus record
+// lets subscribers reset their own state).
 void forget_keys() {
-    g_keys.focus_lost();
     for (uint32_t vk = 0; vk < 256; ++vk) g_consumed[vk] = false;
     g_pressed_vk.store(0, std::memory_order_relaxed);
     g_twins.clear();
     g_notches.clear();
 }
 
-// The keyboard is back: each key's physical state now, laid on it with its first event stamped later (key_hold.h); the
-// events queued before now go by the held state in their order. One let go while the game had no focus presses anew;
-// one held all through is still held.
+// The keyboard is back: a key let go while the game had no focus is no longer held (input_key_held). Presses are not
+// touched (key_hold.h).
 void keys_back() {
-    g_keys.focus_back([](uint32_t vk) { return (GetAsyncKeyState(static_cast<int>(vk)) & 0x8000) != 0; },
-                      static_cast<uint32_t>(GetTickCount()));
+    g_keys.focus_back([](uint32_t vk) { return (GetAsyncKeyState(static_cast<int>(vk)) & 0x8000) != 0; });
+}
+
+// The repeat window follows the system's key repeat delay (key_hold.h).
+void set_repeat_window() {
+    UINT delay = 1;
+    if (!SystemParametersInfoW(SPI_GETKEYBOARDDELAY, 0, &delay, 0)) delay = 1;
+    g_keys.set_window(hold::window_for_delay(delay));
 }
 
 // A Kiln panel next to a game screen (set_hover_capture) has the mouse over it: its clicks and wheel are Kiln's.
@@ -585,17 +588,9 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
             const uint32_t vk = static_cast<uint32_t>(w) & 0xFF;
             bool consumed = false;
             if (g_raw_keyboard_seen && !raw_input::registered_for(6, h)) g_raw_keyboard_seen = false;
-            const hold::Prev prev = hold::prev_of_lparam(l);
-            const uint32_t scan = (static_cast<uint32_t>(l) >> 16) & 0x1FF;
-            if (g_keys.twin(vk, static_cast<uint32_t>(GetMessageTime()))) {
-                // the message of a raw record already counted: no second event, unless the record was counted a repeat
-                // and this says the key was up before it (Kiln had missed its release): then the press was real
-                consumed = g_keys.missed_press(vk, prev) ? on_key(vk, scan, true, false, hold::Prev::up) : g_consumed[vk];
-            } else if (!g_raw_keyboard_seen) {
-                consumed = on_key(vk, scan, true, false, prev);
-            } else {
-                consumed = g_consumed[vk];
-            }
+            if (!g_raw_keyboard_seen)
+                consumed = on_key(vk, (static_cast<uint32_t>(l) >> 16) & 0x1FF, true, false, hold::prev_of_lparam(l));
+            else consumed = g_consumed[vk];
             enqueue(h, m, w, l);
             if (cap || consumed) {
                 if (m == WM_SYSKEYDOWN && vk == VK_F4) break;  // Alt+F4 still closes the game
@@ -609,7 +604,6 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
             const uint32_t vk = static_cast<uint32_t>(w) & 0xFF;
             if (g_raw_keyboard_seen && !raw_input::registered_for(6, h)) g_raw_keyboard_seen = false;
             if (!g_raw_keyboard_seen) on_key(vk, (static_cast<uint32_t>(l) >> 16) & 0x1FF, false);
-            g_keys.message_up(vk);
             enqueue(h, m, w, l);
             break;  // releases always reach the game
         }
@@ -899,7 +893,9 @@ void input_attach(HWND hwnd) {
     const WNDPROC above_before = g_chain.hwnd == hwnd ? g_chain.above : nullptr;
     switch (chain::attach(g_chain, hwnd, &wndproc, games_procedure)) {
         case chain::Result::Subclassed:
-            logf(KILN_LOG_INFO, "ui: game window %p subclassed", reinterpret_cast<void*>(hwnd));
+            set_repeat_window();
+            logf(KILN_LOG_INFO, "ui: game window %p subclassed (a key's down within %u ms of its last, without a release, "
+                 "is a repeat)", reinterpret_cast<void*>(hwnd), g_keys.window());
             g_attached = hwnd;
             break;
         case chain::Result::Again:

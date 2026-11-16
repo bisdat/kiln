@@ -1,21 +1,22 @@
 // SPDX-License-Identifier: MIT
-// kiln.ui: which keys are held, so that one press counts once (input.cpp; tests/key_hold_test.cpp).
+// kiln.ui: when a key's down is a new press, so that one press counts once (input.cpp; tests/key_hold_test.cpp).
 //
-// A key's down while it is held is a repeat. Windows sends a held key's repeats as more downs. Up to dev.29 a focus loss
-// (WM_KILLFOCUS, WM_ACTIVATEAPP 0) forgot every held key, so the next down of a key still held, its own key message
-// after its raw record or a repeat, counted as a second press: one press of a window's key opened the window and shut
-// it again 40 ms later (Nexus 179900169). Held keys now stay held through a focus loss. The rules, by what an event says:
-//  - A key message (WM_KEYDOWN) says the key's previous state (lParam bit 30), as Windows saw it when the key went down,
-//    in order: that is the answer. The key message of a raw record already counted (its twin, same message time) is no
-//    second event.
-//  - A raw record says nothing about before. Its answer is Kiln's held state, which a focus loss leaves uncertain: a
-//    key's release can go to another window while the game has no focus. So when the focus comes back, each key's
-//    physical state (GetAsyncKeyState) is noted with the time, and laid on the key only with its first event stamped
-//    after that time. Events stamped before it were queued while the window's thread had not run yet: GetAsyncKeyState
-//    already counts them, so they go by the held state, in their order (a press queued before is a press; an older
-//    queued repeat and its release stay a repeat and a release).
-//  - A raw record counted a repeat whose key message then says the key was up before it: Kiln had missed the key's
-//    release (let go while away, pressed again before the window's thread ran); the press is real and counts then.
+// Up to dev.29 a key's down was a repeat while Kiln's own "down" state said so, and a focus loss (WM_KILLFOCUS,
+// WM_ACTIVATEAPP 0) cleared that state: the press's own key message after its raw record then counted as a second press,
+// and one F8 opened a window and shut it again 40 ms later (Nexus 179900169). The rule now, per key:
+//  - a down is a repeat when no release of the key came since its last down and that down was handled less than the
+//    repeat window ago (the clock when the window's thread handled it, not the message's time); every down, repeats
+//    too, restarts the window. A key message whose previous-state bit (lParam bit 30) says the key was down is a repeat.
+//  - a focus change does not touch this. Message times and GetAsyncKeyState see the queue in another order than the
+//    window's thread handles it (a press queued before the focus came back, an older repeat queued behind it): they
+//    would swallow a press or make one up.
+// The window is longer than the system's key repeat delay (up to 1 s on Windows), so a held key's repeats never count.
+// What this gets wrong, rarely: a key held through a focus loss longer than the window counts one press at its next
+// repeat; a key let go while the game had no focus (its release went to another window) and pressed again within the
+// window counts that press as a repeat.
+//
+// held() is the other question, "is it down now" (the radial wheel's hold key): the same events, and a key let go while
+// the game had no focus is not held once the focus is back (focus_back). That does not change what counts as a press.
 #pragma once
 #include <atomic>
 #include <cstdint>
@@ -28,111 +29,65 @@ enum class Prev { unknown, up, down };
 inline Prev prev_of_lparam(int64_t lparam) { return (lparam >> 30) & 1 ? Prev::down : Prev::up; }
 
 constexpr uint32_t kNone = UINT32_MAX;
-// A raw record's key message carries the same message time (a few repeats' records may be queued ahead of their
-// messages, so it may trail a little), and comes before the key's release.
-constexpr uint32_t kTwinMs = 250;
+constexpr uint32_t kRepeatWindowMs = 1500;
+
+// The repeat window for the system's key repeat delay (SPI_GETKEYBOARDDELAY: 0..3, 250 ms each step from 250 ms):
+// the delay and 750 ms, at least kRepeatWindowMs.
+inline uint32_t window_for_delay(uint32_t setting) {
+    const uint32_t delay = (setting > 3 ? 3 : setting) * 250 + 250;
+    return delay + 750 > kRepeatWindowMs ? delay + 750 : kRepeatWindowMs;
+}
 
 struct Down {
-    bool repeat = false;               // the key was held: not a new press
+    bool repeat = false;               // not a new press
     uint32_t since_press_ms = kNone;   // since the key's last press (a new one only), kNone: none yet
     uint32_t since_release_ms = kNone; // since its last release Kiln saw, kNone: none since that press
 };
 
-// Window thread, except held() (any thread). `t`: the event's message time (GetMessageTime; it wraps), `now_ms`: a clock
-// for the log's spans only.
+// Window thread, except held() (any thread). `now_ms`: the clock when the event is handled (GetTickCount64).
 class Keys {
 public:
-    Down down(uint32_t vk, Prev prev, uint64_t now_ms, uint32_t t) {
+    void set_window(uint32_t ms) { window_ = ms; }
+    uint32_t window() const { return window_; }
+
+    Down down(uint32_t vk, Prev prev, uint64_t now_ms) {
         Down d;
         if (!valid(vk)) return d;
-        settle_if_newer(vk, t);
-        const bool raw = prev == Prev::unknown;
-        d.repeat = raw ? held_[vk].load(std::memory_order_relaxed) : prev == Prev::down;
+        const uint64_t now = now_ms ? now_ms : 1;
+        d.repeat = prev == Prev::down || (open_[vk] && now - last_down_[vk] < window_);
+        open_[vk] = true;
+        last_down_[vk] = now;
         held_[vk].store(true, std::memory_order_relaxed);
-        if (raw) {
-            if (pairs_[vk] < 8) ++pairs_[vk];
-            raw_at_[vk] = t;
-            missed_[vk] = d.repeat;  // its key message may show the key was up before: then the press is real
-        } else {
-            missed_[vk] = false;
-        }
         if (d.repeat) return d;
-        if (pressed_at_[vk]) d.since_press_ms = span(now_ms, pressed_at_[vk]);
-        if (released_at_[vk] && released_at_[vk] >= pressed_at_[vk]) d.since_release_ms = span(now_ms, released_at_[vk]);
-        pressed_at_[vk] = now_ms ? now_ms : 1;
+        if (pressed_at_[vk]) d.since_press_ms = span(now, pressed_at_[vk]);
+        if (released_at_[vk] && released_at_[vk] >= pressed_at_[vk]) d.since_release_ms = span(now, released_at_[vk]);
+        pressed_at_[vk] = now;
         return d;
     }
-    void up(uint32_t vk, uint64_t now_ms, uint32_t t) {
+    void up(uint32_t vk, uint64_t now_ms) {
         if (!valid(vk)) return;
-        settle_if_newer(vk, t);
+        open_[vk] = false;
         held_[vk].store(false, std::memory_order_relaxed);
-        missed_[vk] = false;
-        pairs_[vk] = 0;  // a raw record's key message comes before the key's release: none waits past it
         released_at_[vk] = now_ms ? now_ms : 1;
     }
-    // A key message's release: the messages of the key's raw records are all through.
-    void message_up(uint32_t vk) {
-        if (valid(vk)) pairs_[vk] = 0;
-    }
-    // A key message's down: true when it is the message of a raw record already counted (not a new event).
-    bool twin(uint32_t vk, uint32_t t) {
-        if (!valid(vk) || !pairs_[vk] || static_cast<uint32_t>(t - raw_at_[vk] + kTwinMs) > 2 * kTwinMs) return false;
-        --pairs_[vk];
-        return true;
-    }
-    // The twin's previous state says the key was up before it while its raw record counted a repeat: the press was real
-    // (Kiln had missed a release). Once.
-    bool missed_press(uint32_t vk, Prev prev) {
-        if (!valid(vk) || prev != Prev::up || !missed_[vk]) return false;
-        missed_[vk] = false;
-        return true;
-    }
-    bool held(uint32_t vk) const {
-        if (!valid(vk)) return false;
-        return pend_[vk].load(std::memory_order_acquire) ? pend_down_[vk].load(std::memory_order_relaxed)
-                                                         : held_[vk].load(std::memory_order_relaxed);
-    }
-    // The window lost the keyboard: held keys stay held (their releases may go to the window that has it now). A settle
-    // no event took yet is the newest knowledge: it applies now.
-    void focus_lost() {
-        for (uint32_t vk = 1; vk < 256; ++vk) apply(vk);
-        away_ = true;
-    }
-    // The keyboard is back (WM_SETFOCUS, WM_ACTIVATEAPP 1; also the first focus) at `now_tick` (the message clock): each
-    // key's physical state now, laid on it with its first event stamped after now_tick (settle_if_newer).
+    bool held(uint32_t vk) const { return valid(vk) && held_[vk].load(std::memory_order_relaxed); }
+    // The keyboard is back (WM_SETFOCUS, WM_ACTIVATEAPP 1): a key held that is up now was let go while the game had no
+    // focus, so it is not held. For held() only; what counts as a press does not change.
     template <class IsDown>
-    void focus_back(IsDown&& is_down, uint32_t now_tick) {
-        settle_at_ = now_tick;
-        for (uint32_t vk = 1; vk < 256; ++vk) {
-            pend_down_[vk].store(is_down(vk), std::memory_order_relaxed);
-            pend_[vk].store(true, std::memory_order_release);
-        }
-        away_ = false;
+    void focus_back(IsDown&& is_down) {
+        for (uint32_t vk = 1; vk < 256; ++vk)
+            if (held_[vk].load(std::memory_order_relaxed) && !is_down(vk)) held_[vk].store(false, std::memory_order_relaxed);
     }
-    // A focus loss that no focus came back after yet.
-    bool away() const { return away_; }
 
 private:
     static bool valid(uint32_t vk) { return vk > 0 && vk < 256; }
     static uint32_t span(uint64_t now, uint64_t then) {
         return now <= then ? 0u : now - then >= kNone ? kNone - 1 : static_cast<uint32_t>(now - then);
     }
-    void apply(uint32_t vk) {
-        if (!pend_[vk].load(std::memory_order_relaxed)) return;
-        held_[vk].store(pend_down_[vk].load(std::memory_order_relaxed), std::memory_order_relaxed);
-        pend_[vk].store(false, std::memory_order_release);
-    }
-    void settle_if_newer(uint32_t vk, uint32_t t) {
-        if (pend_[vk].load(std::memory_order_relaxed) && static_cast<int32_t>(t - settle_at_) > 0) apply(vk);
-    }
-    std::atomic<bool> held_[256] = {};
-    std::atomic<bool> pend_[256] = {}, pend_down_[256] = {};  // the state noted at the focus's return, not laid on yet
-    uint32_t settle_at_ = 0;
-    uint64_t pressed_at_[256] = {}, released_at_[256] = {};
-    uint32_t raw_at_[256] = {};
-    uint8_t pairs_[256] = {};  // raw downs whose key message has not come yet
-    bool missed_[256] = {};    // the last raw down counted a repeat
-    bool away_ = false;
+    uint32_t window_ = kRepeatWindowMs;
+    std::atomic<bool> held_[256] = {};  // "is it down now" (held())
+    bool open_[256] = {};               // a down without its release yet
+    uint64_t last_down_[256] = {}, pressed_at_[256] = {}, released_at_[256] = {};
 };
 
 }  // namespace kui::hold
