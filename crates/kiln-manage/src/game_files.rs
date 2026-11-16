@@ -400,6 +400,12 @@ fn side_file(path: &Path, tag: &str, what: &str) -> PathBuf {
     path.with_file_name(format!(".{name}.{tag}.kiln-{what}"))
 }
 
+/// Finds a journal side file even when its parent or destination was renamed only by case.
+fn side_at(game: &Path, rel: &str, tag: &str, what: &str) -> PathBuf {
+    let path = side_file(Path::new(rel), tag, what);
+    host(game, &spelled(game, &path.to_string_lossy().replace('\\', "/")))
+}
+
 /// Writes `bytes` into a new file next to `path` (created exclusively, flushed).
 fn stage(path: &Path, tag: &str, bytes: &[u8]) -> Result<PathBuf> {
     use std::io::Write;
@@ -410,7 +416,50 @@ fn stage(path: &Path, tag: &str, bytes: &[u8]) -> Result<PathBuf> {
     let written = f.write_all(bytes).and_then(|_| f.sync_all()).map_err(io_at(&staged, "writing"));
     drop(f);
     written.inspect_err(|_| { let _ = std::fs::remove_file(&staged); })?;
+    // Keep the file's identity until its receipt commits. Equal bytes alone cannot prove that we published it.
+    let proof = side_file(path, tag, "owned");
+    std::fs::hard_link(&staged, &proof).map_err(io_at(&proof, "recording file ownership"))
+        .inspect_err(|_| { let _ = std::fs::remove_file(&staged); })?;
+    crate::durable::flush_dir(dir)?;
     Ok(staged)
+}
+
+/// Both names still refer to the same physical file, rather than two files with equal content.
+fn same_file(a: &Path, b: &Path) -> Result<bool> {
+    let identity = |path: &Path| -> Result<(u64, u64)> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let m = std::fs::metadata(path).map_err(io_at(path, "inspecting file identity"))?;
+            Ok((m.dev(), m.ino()))
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::io::AsRawHandle;
+            use windows_sys::Win32::Storage::FileSystem::{BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle};
+            let f = std::fs::File::open(path).map_err(io_at(path, "opening"))?;
+            let mut info = std::mem::MaybeUninit::<BY_HANDLE_FILE_INFORMATION>::uninit();
+            // SAFETY: the handle is open and info points to a writable struct of the required size.
+            if unsafe { GetFileInformationByHandle(f.as_raw_handle(), info.as_mut_ptr()) } == 0 {
+                return Err(io_at(path, "inspecting file identity")(std::io::Error::last_os_error()));
+            }
+            // SAFETY: the successful call initialized info.
+            let info = unsafe { info.assume_init() };
+            Ok((u64::from(info.dwVolumeSerialNumber), u64::from(info.nFileIndexHigh) << 32 | u64::from(info.nFileIndexLow)))
+        }
+        #[cfg(not(any(unix, windows)))]
+        Err(Error::new(ErrorCode::Unsupported, format!("{}: file identity is unavailable", path.display())))
+    };
+    Ok(identity(a)? == identity(b)?)
+}
+
+fn remove_proof(game: &Path, rel: &str, tag: &str) -> Result<()> {
+    let proof = side_at(game, rel, tag, "owned");
+    crate::engine_mods::refuse_symlink_path(game, &proof)?;
+    match std::fs::remove_file(&proof) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(io_at(&proof, "removing")(e)),
+        _ => Ok(()),
+    }
 }
 
 /// Moves `from` to `to` only while there is no file at `to`: false (and `from` stays) when one is there.
@@ -542,21 +591,23 @@ fn new_tag() -> Result<String> {
 // ---- recovery ----
 
 /// Settles what a stop left between an intent and its commit, from what is on disk: a file moved aside goes back where
-/// it was when nothing is there now, a staged file goes, and each file of the intent is Kiln's when it holds the bytes
-/// Kiln had there before or meant to write (else it is not Kiln's). Then the intent ends. Nothing is written over.
+/// it was when nothing is there now, a staged file goes, and a new file is Kiln's only when its identity link proves
+/// publication. Earlier owned bytes still count too. Then the intent ends. Nothing is written over.
 fn recover(game: &Path, rc: &mut Receipts, rep: &mut GameFilesReport) -> Result<()> {
     if rc.pending.is_empty() { return Ok(()); }
+    let mut proofs = Vec::new();
     for intent in std::mem::take(&mut rc.pending) {
         let mut files: Vec<(String, Option<String>)> = Vec::new();
         for op in &intent.ops {
             crate::bundle::safe_rel_path(&op.rel)?;
-            let dst = host(game, &op.rel);
+            let rel = spelled(game, &op.rel);
+            let dst = host(game, &rel);
             crate::engine_mods::refuse_symlink_path(game, &dst)?;
-            let staged = side_file(&dst, &intent.tag, "new");
+            let staged = side_at(game, &op.rel, &intent.tag, "new");
             if std::fs::symlink_metadata(&staged).is_ok_and(|m| m.is_file()) {
                 std::fs::remove_file(&staged).map_err(io_at(&staged, "removing"))?;
             }
-            let parked = side_file(&dst, &intent.tag, "old");
+            let parked = side_at(game, &op.rel, &intent.tag, "old");
             if std::fs::symlink_metadata(&parked).is_ok_and(|m| m.is_file()) {
                 if std::fs::symlink_metadata(&dst).is_err() {
                     publish_new(&parked, &dst)?;
@@ -567,8 +618,12 @@ fn recover(game: &Path, rc: &mut Receipts, rep: &mut GameFilesReport) -> Result<
                 }
             }
             let have = sha_of(&dst)?;
-            let kilns = have.is_some() && (have == op.after || have == op.before);
-            files.push((op.rel.clone(), if kilns { have } else { None }));
+            let proof = side_at(game, &op.rel, &intent.tag, "owned");
+            crate::engine_mods::refuse_symlink_path(game, &proof)?;
+            let published = have.is_some() && have == op.after && proof.is_file() && same_file(&dst, &proof)?;
+            let kilns = have.is_some() && (have == op.before || published);
+            files.push((rel, if kilns { have } else { None }));
+            proofs.push((op.rel.clone(), intent.tag.clone()));
         }
         match &intent.owner {
             Owner::Ual { from } => {
@@ -588,7 +643,9 @@ fn recover(game: &Path, rc: &mut Receipts, rep: &mut GameFilesReport) -> Result<
         rep.notes.push(format!("{}: a change Kiln began earlier was interrupted; Kiln settled it from the files in the game folder",
             match &intent.owner { Owner::Mod { id, .. } => tag(id), Owner::Ual { .. } => format!("Ultimate ASI Loader ({UAL_FILE})") }));
     }
-    save_receipts(game, rc)
+    save_receipts(game, rc)?;
+    for (rel, tag) in proofs { remove_proof(game, &rel, &tag)?; }
+    Ok(())
 }
 
 // ---- working out what changes ----
@@ -640,13 +697,14 @@ fn removals(game: &Path, id: &str, files: &BTreeMap<String, String>, keep_rels: 
     for (rel, sha) in files {
         if keep_rels.iter().any(|k| k.eq_ignore_ascii_case(rel)) { continue; }
         crate::bundle::safe_rel_path(rel)?;
-        let path = host(game, rel);
+        let actual = spelled(game, rel);
+        let path = host(game, &actual);
         crate::engine_mods::refuse_symlink_path(game, &path)?;
         match sha_of(&path)? {
             None => {}
-            Some(have) if have == *sha => ops.push(Op { rel: rel.clone(), before: Some(have), after: None }),
+            Some(have) if have == *sha => ops.push(Op { rel: actual.clone(), before: Some(have), after: None }),
             Some(_) if is_code(rel) => {
-                keep.insert(rel.clone(), sha.clone());
+                keep.insert(actual, sha.clone());
                 pf.retained.push(RetainedPlacement { path, may_run: true, off, reason: format!(
                     "{}: changed since Kiln placed it in the game folder; Kiln neither replaces nor removes it", tag(id)) });
             }
@@ -679,6 +737,9 @@ enum Ual {
 fn preflight(dirs: &DataDirs, mods: &[ProfileMod], game: &Path, rc: &Receipts) -> Result<Preflight> {
     let mut pf = Preflight { jobs: Vec::new(), notes: Vec::new(), retained: Vec::new(), released: Vec::new(), kept: Vec::new(), drop_ual: false };
     let wanted = wanted_of(dirs, mods);
+    let (mapped, _) = one_place_each(wanted.iter().flat_map(|(_, _, p)| p.files.iter().map(|(_, r)| (r.clone(), r.clone()))).collect());
+    let mapped: BTreeMap<String, String> = mapped.into_iter().collect();
+    let mut reserved: BTreeMap<String, String> = BTreeMap::new();
 
     // Ultimate ASI Loader for the .asi packages
     let need_ual = wanted.iter().any(|(_, _, p)| p.shape == Shape::Asi && p.problem.is_none());
@@ -755,7 +816,16 @@ fn preflight(dirs: &DataDirs, mods: &[ProfileMod], game: &Path, rc: &Receipts) -
         let (mut blocked, mut theirs, mut same) = (None, Vec::new(), Vec::new());
         let mut targets = Vec::new();
         for (src, rel) in &p.files {
-            let rel = spelled(game, rel);
+            let rel = spelled(game, &mapped[rel]);
+            if let Some(other) = reserved.get(&rel.to_ascii_lowercase()) {
+                blocked = Some(format!("{rel} is also needed by {other}"));
+                break;
+            }
+            if let Some(other) = rc.mods.iter().find(|x| x.id != m.id && wanted.iter().any(|(m, _, _)| m.id == x.id)
+                && x.files.keys().any(|r| r.eq_ignore_ascii_case(&rel))) {
+                blocked = Some(format!("{rel} still belongs to {}", tag(&other.id)));
+                break;
+            }
             let dst = host(game, &rel);
             if let Err(e) = crate::bundle::safe_rel_path(&rel).and_then(|_| crate::engine_mods::refuse_symlink_path(game, &dst)) {
                 blocked = Some(format!("{rel}: {}", e.message));
@@ -767,6 +837,12 @@ fn preflight(dirs: &DataDirs, mods: &[ProfileMod], game: &Path, rc: &Receipts) -
             targets.push(rel.clone());
             match sha_of(&dst)? {
                 None => { ops.push(Op { rel: rel.clone(), before: None, after: Some(sha) }); bytes.insert(rel, b); }
+                // A departing package's unchanged copy is removed first, then republished for this package.
+                Some(have) if rc.mods.iter().any(|x| x.id != m.id && !wanted.iter().any(|(m, _, _)| m.id == x.id)
+                    && x.files.iter().any(|(r, s)| r.eq_ignore_ascii_case(&rel) && s == &have)) => {
+                    ops.push(Op { rel: rel.clone(), before: None, after: Some(sha) });
+                    bytes.insert(rel, b);
+                }
                 Some(have) if owned_now(&rel, &have) && have == sha => { keep.insert(rel, sha); }
                 Some(have) if owned_now(&rel, &have) => {
                     ops.push(Op { rel: rel.clone(), before: Some(have), after: Some(sha) });
@@ -790,6 +866,7 @@ fn preflight(dirs: &DataDirs, mods: &[ProfileMod], game: &Path, rc: &Receipts) -
             held.push(m.id.clone());
             continue;
         }
+        for rel in &targets { reserved.insert(rel.to_ascii_lowercase(), t.clone()); }
         // its earlier version's files it does not place again
         if let Some(x) = prev {
             for rel in x.files.keys().filter(|r| targets.iter().any(|t| t.eq_ignore_ascii_case(r))) {
@@ -893,6 +970,7 @@ fn run(game: &Path, rc: &mut Receipts, job: Job, rep: &mut GameFilesReport) -> R
         }
     }
     save_receipts(game, rc)?;
+    for op in &intent.ops { remove_proof(game, &op.rel, &intent.tag)?; }
     if let Some(d) = done.filter(|_| ok) { rep.notes.push(d); }
     Ok(ok)
 }
@@ -985,9 +1063,10 @@ pub(crate) fn loaders_in_game(game: &Path) -> Result<Vec<(String, String)>> {
     for x in rc.mods.iter().filter(|x| x.shape == Shape::Loader) {
         let Some(file) = x.loader.clone().or_else(|| x.files.keys().find(|r| !r.contains('/') && ext(r) == "dll").cloned()) else { continue };
         crate::bundle::safe_rel_path(&file)?;
+        let file = spelled(game, &file);
         let path = host(game, &file);
         crate::engine_mods::refuse_symlink_path(game, &path)?;
-        if x.files.contains_key(&file) && sha_of(&path)?.is_some() { loaders.push((tag(&x.id), file)); }
+        if sha_of(&path)?.is_some() { loaders.push((tag(&x.id), file)); }
     }
     Ok(loaders)
 }
@@ -1361,5 +1440,40 @@ mod tests {
         assert!(rc.mods[0].files.is_empty());
         unplace(&g).unwrap();
         assert_eq!(std::fs::read(g.join("replace.dll")).unwrap(), b"player's file");
+    }
+
+    #[test]
+    fn recovery_never_claims_identical_files_it_did_not_publish() {
+        for stop in [0, 1] {
+            let (g, _gone) = entry(&format!("recovery-identical-{stop}"), NATIVE, &[]);
+            let bytes = b"same bytes";
+            let job = Job { intent: Intent { tag: "identical".into(), owner: test_owner(), ops: vec![
+                Op { rel: "new.dll".into(), before: None, after: Some(crate::hash::sha256_hex(bytes)) },
+            ] }, bytes: BTreeMap::from([("new.dll".into(), bytes.to_vec())]), keep: BTreeMap::new(), done: None, removal: false };
+            STOP_AFTER.with(|s| s.set(Some(stop)));
+            assert!(run(&g, &mut Receipts::default(), job, &mut GameFilesReport::default()).is_err());
+            STOP_AFTER.with(|s| s.set(None));
+            // A separate file, even after Kiln's publication: an in-place edit would also edit its identity link.
+            put(&g, "player-copy", bytes);
+            std::fs::rename(g.join("player-copy"), g.join("new.dll")).unwrap();
+            unplace(&g).unwrap();
+            assert_eq!(std::fs::read(g.join("new.dll")).unwrap(), bytes, "identical content does not prove publication");
+            assert!(!side_file(&g.join("new.dll"), "identical", "owned").exists());
+        }
+    }
+
+    #[test]
+    fn recovery_finds_case_renamed_publications_and_their_identity_links() {
+        let (g, _gone) = entry("recovery-case", NATIVE, &[]);
+        let job = Job { intent: Intent { tag: "case".into(), owner: test_owner(), ops: vec![
+            Op { rel: "plugins/new.dll".into(), before: None, after: Some(crate::hash::sha256_hex(b"new")) },
+        ] }, bytes: BTreeMap::from([("plugins/new.dll".into(), b"new".to_vec())]), keep: BTreeMap::new(), done: None, removal: false };
+        STOP_AFTER.with(|s| s.set(Some(1)));
+        assert!(run(&g, &mut Receipts::default(), job, &mut GameFilesReport::default()).is_err());
+        STOP_AFTER.with(|s| s.set(None));
+        std::fs::rename(g.join("plugins/new.dll"), g.join("plugins/NEW.DLL")).unwrap();
+        std::fs::rename(g.join("plugins"), g.join("PLUGINS")).unwrap();
+        unplace(&g).unwrap();
+        assert!(!g.join("PLUGINS").exists(), "both the published file and its identity link must be found and removed");
     }
 }

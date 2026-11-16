@@ -505,6 +505,155 @@ fn synthetic_ual_obeys_the_shipped_auto_loot_plus_ordering_rule() {
     assert!(ini.late.iter().any(|e| e.path == kiln_manage::game_files::UAL_CHAIN_LINE), "{ini:?}");
     let view = kiln_manage::compat::view(&dirs, &p, &install).unwrap();
     assert!(view.rules.iter().any(|r| r.id == "auto-loot-plus-before-ultimate-asi-loader" && r.applied), "{view:?}");
+    let info = kiln_manage::game::launch_options_info(&install, &[]).unwrap();
+    assert!(info.chained_override_missing, "a late UAL still needs its Proton override: {info:?}");
+    assert!(info.advice.unwrap().contains("xinput9_1_0"));
+}
+
+#[test]
+fn case_renamed_placements_still_block_vanilla_and_are_removed() {
+    use kiln_manage::launch::{self, LaunchMode, LaunchRequest};
+    for deactivate in [false, true] {
+        let t = tmp(if deactivate { "case-deactivate" } else { "case-disable" });
+        let dirs = DataDirs::at(t.0.join("data"));
+        let install = game(&t.0);
+        let (pkg, _) = autoloot_package(&t.0);
+        let r = import_one(&dirs, &pkg, ModKind::Native);
+        let mut p = profile_with(&dirs, "loot", vec![pm(&r, true)]);
+        profile::activate(&dirs, &p.id, &install).unwrap();
+        std::fs::rename(install.path.join("powrprof.dll"), install.path.join("POWRPROF.DLL")).unwrap();
+        std::fs::rename(install.path.join("plugins"), install.path.join("PLUGINS")).unwrap();
+        let opened = std::cell::Cell::new(false);
+        let request = LaunchRequest { mode: LaunchMode::Vanilla, profile_id: None, skip_backup: true };
+        assert!(launch::play_with(&dirs, &install, &request, Some(&[]), &|_| { opened.set(true); Ok(()) }).is_err());
+        assert!(!opened.get(), "Proton can still load the case-renamed loader");
+        if deactivate { profile::deactivate_report(&dirs, &install).unwrap(); }
+        else {
+            set_native(&dirs, &mut p, false);
+            profile::activate(&dirs, &p.id, &install).unwrap();
+        }
+        assert!(!install.path.join("POWRPROF.DLL").exists());
+        assert!(!install.path.join("PLUGINS").exists());
+    }
+}
+
+#[test]
+fn conflicting_packages_are_never_partly_placed() {
+    let t = tmp("package-conflict");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let install = game(&t.0);
+    let (pkg, _) = autoloot_package(&t.0);
+    let first = import_one(&dirs, &pkg, ModKind::Native);
+    let other = t.0.join("OtherLoot");
+    put(&other, "powrprof.dll", &build_test_dll(&[], b"other loader plugins\\"));
+    put(&other, "plugins/Other.dll", &build_test_dll(&[], b"other plugin"));
+    let second = import_one(&dirs, &other, ModKind::Native);
+    let p = profile_with(&dirs, "both", vec![pm(&first, true), pm(&second, true)]);
+    let a = profile::activate(&dirs, &p.id, &install).unwrap();
+    assert!(install.path.join("plugins/AutolootCoop.dll").is_file());
+    assert!(!install.path.join("plugins/Other.dll").exists(), "a blocked loader must not leave its plugins behind: {a:?}");
+    assert!(a.warnings.iter().any(|w| w.contains("powrprof.dll") && w.contains("not placed")), "{a:?}");
+}
+
+#[test]
+fn cleanup_finds_case_renamed_files_and_folders() {
+    let t = tmp("case-cleanup");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let install = game(&t.0);
+    let (pkg, _) = autoloot_package(&t.0);
+    let r = import_one(&dirs, &pkg, ModKind::Native);
+    let p = profile_with(&dirs, "loot", vec![pm(&r, true)]);
+    profile::activate(&dirs, &p.id, &install).unwrap();
+    std::fs::rename(install.path.join("powrprof.dll"), install.path.join("POWRPROF.DLL")).unwrap();
+    std::fs::rename(install.path.join("plugins"), install.path.join("PLUGINS")).unwrap();
+    kiln_manage::game_files::unplace(&install.path).unwrap();
+    assert!(!install.path.join("POWRPROF.DLL").exists());
+    assert!(!install.path.join("PLUGINS").exists());
+}
+
+#[test]
+fn a_reused_hand_installed_loader_cannot_bypass_the_vanilla_guard() {
+    use kiln_manage::launch::{self, LaunchMode, LaunchRequest};
+    let t = tmp("borrowed-loader");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let install = game(&t.0);
+    let (pkg, loader) = autoloot_package(&t.0);
+    put(&install.path, "powrprof.dll", &loader);
+    let r = import_one(&dirs, &pkg, ModKind::Native);
+    let p = profile_with(&dirs, "loot", vec![pm(&r, true)]);
+    profile::activate(&dirs, &p.id, &install).unwrap();
+    for mode in [LaunchMode::Vanilla, LaunchMode::NoMods] {
+        let opened = std::cell::Cell::new(false);
+        let request = LaunchRequest { mode, profile_id: None, skip_backup: true };
+        assert!(launch::play_with(&dirs, &install, &request, Some(&[]), &|_| { opened.set(true); Ok(()) }).is_err());
+        assert!(!opened.get());
+    }
+    profile::deactivate_report(&dirs, &install).unwrap();
+    assert_eq!(read(&install.path.join("powrprof.dll")), loader, "the borrowed loader stays the player's");
+}
+
+#[test]
+fn asi_packages_share_one_folder_spelling_before_it_exists() {
+    let t = tmp("asi-folders");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let install = game(&t.0);
+    put(&install.path, "xinput9_1_0.dll", &ual());
+    let one = t.0.join("One");
+    let two = t.0.join("Two");
+    put(&one, "Scripts/a.asi", &asi(b"a"));
+    put(&two, "scripts/b.asi", &asi(b"b"));
+    let first = import_one(&dirs, &one, ModKind::Native);
+    let second = import_one(&dirs, &two, ModKind::Native);
+    let p = profile_with(&dirs, "both", vec![pm(&first, true), pm(&second, true)]);
+    profile::activate(&dirs, &p.id, &install).unwrap();
+    assert!(install.path.join("Scripts/a.asi").is_file());
+    assert!(install.path.join("Scripts/b.asi").is_file());
+    assert!(!install.path.join("scripts").exists());
+}
+
+#[test]
+fn an_identical_loader_transfers_between_packages_without_disappearing() {
+    let t = tmp("loader-transfer");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let install = game(&t.0);
+    let (pkg, loader) = autoloot_package(&t.0);
+    let first = import_one(&dirs, &pkg, ModKind::Native);
+    let other = t.0.join("OtherLoot");
+    put(&other, "powrprof.dll", &loader);
+    put(&other, "plugins/Other.dll", &build_test_dll(&[], b"other plugin"));
+    let second = import_one(&dirs, &other, ModKind::Native);
+    let mut p = profile_with(&dirs, "loot", vec![pm(&first, true)]);
+    profile::activate(&dirs, &p.id, &install).unwrap();
+    p.mods.native = vec![pm(&second, true)];
+    let p = profile::save(&dirs, &p).unwrap();
+    profile::activate(&dirs, &p.id, &install).unwrap();
+    assert_eq!(read(&install.path.join("powrprof.dll")), loader);
+    assert!(install.path.join("plugins/Other.dll").is_file());
+    assert!(!install.path.join("plugins/AutolootCoop.dll").exists());
+    profile::deactivate_report(&dirs, &install).unwrap();
+    assert!(!install.path.join("powrprof.dll").exists());
+}
+
+#[test]
+fn a_new_package_cannot_borrow_an_enabled_packages_owned_loader() {
+    let t = tmp("enabled-owner");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let install = game(&t.0);
+    let (pkg, loader) = autoloot_package(&t.0);
+    let first = import_one(&dirs, &pkg, ModKind::Native);
+    let other = t.0.join("OtherLoot");
+    put(&other, "powrprof.dll", &loader);
+    put(&other, "plugins/Other.dll", &build_test_dll(&[], b"other plugin"));
+    let second = import_one(&dirs, &other, ModKind::Native);
+    let mut p = profile_with(&dirs, "loot", vec![pm(&first, true)]);
+    profile::activate(&dirs, &p.id, &install).unwrap();
+    // Put the new package first, so planning order cannot turn an owned file into a borrowed one.
+    p.mods.native = vec![pm(&second, true), pm(&first, true)];
+    let p = profile::save(&dirs, &p).unwrap();
+    profile::activate(&dirs, &p.id, &install).unwrap();
+    assert!(!install.path.join("plugins/Other.dll").exists());
+    assert!(install.path.join("plugins/AutolootCoop.dll").is_file());
+    assert_eq!(read(&install.path.join("powrprof.dll")), loader);
 }
 
 #[test]
