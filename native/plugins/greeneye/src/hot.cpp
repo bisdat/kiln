@@ -135,6 +135,7 @@ thread_local Generation* g_staging = nullptr;                // the generation s
 thread_local bool g_stagingFailed = false;
 Generation* g_committing = nullptr;             // started; its new hook sites wait to be written
 unsigned g_commitTries = 0;
+std::string g_unopenedNote;                     // WriteStaged: threads it could not open, for Commit to log
 constexpr unsigned kCommitTries = 100;          // safe points to wait for them, then the reload fails
 std::map<std::string, void*> g_keep;
 std::atomic<bool> g_initialized{false}, g_starting{true}, g_stopping{false};
@@ -706,19 +707,35 @@ Patch WriteStaged(Mod& mod, size_t& count, std::string& why)
         why = "could not list the threads (error " + std::to_string(GetLastError()) + ")";
         return Patch::Busy;
     }
+    // What kept the write back, for `why` (inbox 43: one generic sentence hid which condition it was). Filled before and
+    // while the threads are stopped with plain stores only; the sentence is built after they run again.
+    struct Blocker {
+        DWORD thread = 0, error = 0;
+        uintptr_t rip = 0, hook = 0;
+        unsigned count = 0;
+    } unopened, unstopped, unread, inside;
     const DWORD process = GetCurrentProcessId(), self = GetCurrentThreadId();
     THREADENTRY32 entry{sizeof(entry)};
     bool listed = true;
+    DWORD listError = 0;
     BOOL more = Thread32First(snapshot, &entry);
-    if (!more) listed = false;
+    if (!more) listed = false, listError = GetLastError();
     for (; more; more = Thread32Next(snapshot, &entry)) {
         if (entry.th32OwnerProcessID != process || entry.th32ThreadID == self) continue;
         HANDLE h = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_LIMITED_INFORMATION,
                               FALSE, entry.th32ThreadID);
-        if (h) threads.push_back({h, false});
-        else if (GetLastError() != ERROR_INVALID_PARAMETER) listed = false;
+        if (h) {
+            threads.push_back({h, false});
+            continue;
+        }
+        // A thread that ended since the snapshot answers ERROR_INVALID_PARAMETER. One that cannot be opened at all
+        // (security software's threads with a restrictive DACL: nothing in the process can stop them) does not hold
+        // the write back, as in Greeneye Loader itself; it is named in the log (g_unopenedNote).
+        const DWORD error = GetLastError();
+        if (error == ERROR_INVALID_PARAMETER) continue;
+        if (!unopened.count++) unopened.thread = entry.th32ThreadID, unopened.error = error;
     }
-    if (GetLastError() != ERROR_NO_MORE_FILES) listed = false;
+    if (listed && GetLastError() != ERROR_NO_MORE_FILES) listed = false, listError = GetLastError();
     CloseHandle(snapshot);
 
     bool clear = listed, written = true;
@@ -728,19 +745,24 @@ Patch WriteStaged(Mod& mod, size_t& count, std::string& why)
         if (!t.suspended) {
             // Only a thread that has ended may refuse; anything else could be running.
             DWORD code = 0;
-            if (!GetExitCodeThread(t.handle, &code) || code == STILL_ACTIVE)
+            if (!GetExitCodeThread(t.handle, &code) || code == STILL_ACTIVE) {
                 clear = false;
+                if (!unstopped.count++) unstopped.thread = GetThreadId(t.handle), unstopped.error = GetLastError();
+            }
             continue;
         }
         CONTEXT context{};
         context.ContextFlags = CONTEXT_CONTROL; // also waits until the thread has stopped
         if (!GetThreadContext(t.handle, &context)) {
             clear = false;
+            if (!unread.count++) unread.thread = GetThreadId(t.handle), unread.error = GetLastError();
             continue;
         }
         for (const Range& r : ranges)
-            if (context.Rip >= r.lo && context.Rip < r.hi)
+            if (context.Rip >= r.lo && context.Rip < r.hi) {
                 clear = false;
+                if (!inside.count++) inside.thread = GetThreadId(t.handle), inside.rip = context.Rip, inside.hook = r.lo;
+            }
     }
     bool unchanged = true;
     if (clear) {
@@ -765,8 +787,26 @@ Patch WriteStaged(Mod& mod, size_t& count, std::string& why)
     }
 
     if (!clear) {
-        why = "a thread was where a new hook goes";
+        char line[200];
+        if (inside.count)
+            sprintf_s(line, "thread %lu was at %p, inside the new hook at %p (%u such)", inside.thread,
+                      reinterpret_cast<void*>(inside.rip), reinterpret_cast<void*>(inside.hook), inside.count);
+        else if (unstopped.count)
+            sprintf_s(line, "thread %lu could not be stopped (error %lu; %u such)", unstopped.thread, unstopped.error,
+                      unstopped.count);
+        else if (unread.count)
+            sprintf_s(line, "thread %lu was stopped but its position could not be read (error %lu; %u such)", unread.thread,
+                      unread.error, unread.count);
+        else
+            sprintf_s(line, "the process's threads could not be listed (error %lu)", listError);
+        why = std::string("a thread was where a new hook goes, or could not be checked: ") + line;
         return Patch::Busy;
+    }
+    if (unopened.count) {
+        char line[200];
+        sprintf_s(line, "%u thread(s) of the process could not be opened to stop them (thread %lu, error %lu); the hooks "
+                        "were written with those running, as Greeneye Loader does", unopened.count, unopened.thread, unopened.error);
+        g_unopenedNote = line;
     }
     if (!unchanged) {
         why = "the code changed while stopping threads for its new hooks";
@@ -830,11 +870,18 @@ void Commit(Generation* g, std::string& outcome)
     }
     g_committing = nullptr;
     g_commitTries = 0;
+    // a first start has no generation to fall back to: it did not start (inbox 43 read "generation 0 stays active")
+    const bool reload = g->mod->active.load() != nullptr;
     if (patch == Patch::Busy)
-        why = "could not write its new hooks: " + why + " at " + std::to_string(kCommitTries) + " safe points";
+        why = std::string(reload ? "could not write its new hooks: " : "could not write its hooks: ") + why + " (" +
+              std::to_string(kCommitTries) + (reload ? " safe points)" : " tries)");
     if (patch != Patch::Written) {
-        Decline(g, why, true, outcome);
+        Decline(g, why, reload, outcome);
         return;
+    }
+    if (!g_unopenedNote.empty()) {
+        Log("%s: %s", g->mod->info.name.c_str(), g_unopenedNote.c_str());
+        g_unopenedNote.clear();
     }
     Swap(g);
     outcome = "active generation " + std::to_string(g->number) + " (" + std::to_string(GetTickCount64() - g->begin) + " ms";
