@@ -128,6 +128,23 @@ bool safe_path(const std::filesystem::path& p, const std::filesystem::path& root
     return !ec && inside_root(resolved, resolved_root);
 }
 
+// The game folder is the player's layout, not mod content: a Steam library reached through a junction or a link is
+// common, so the folder itself may be a link (links are judged below it, by safe_path's roots). It must be an absolute,
+// existing folder that resolves. Inbox 45 (Windows 11, a Steam library under "C:\Games\# Steam"): safe_path(game, game)
+// refused it, ShroudForge's plugin stopped with "invalid game path" and the launcher's Engines page showed it, with
+// no ShroudForge mod in use. Empty when the folder is fine, else why not.
+std::string game_dir_problem(const std::filesystem::path& p) {
+    if (p.empty()) return "Kiln gave no game folder";
+    if (!p.is_absolute()) return "the game folder is not an absolute path";
+    const DWORD a = GetFileAttributesW(p.c_str());
+    if (a == INVALID_FILE_ATTRIBUTES) return "the game folder cannot be read (error " + std::to_string(GetLastError()) + ")";
+    if (!(a & FILE_ATTRIBUTE_DIRECTORY)) return "the game path is not a folder";
+    std::error_code ec;
+    const auto resolved = std::filesystem::canonical(p, ec);
+    if (ec || resolved.empty()) return "the game folder does not resolve (" + ec.message() + ")";
+    return {};
+}
+
 HMODULE load_runtime_dll(const std::filesystem::path& p) {
     if (!safe_path(p, p.parent_path())) return nullptr;
     HMODULE h = LoadLibraryExW(p.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
@@ -690,7 +707,7 @@ void KILN_CALL on_ready(void*) {
     }
     g_game = api_path(KILN_PATH_GAME);
     g_state = api_path(KILN_PATH_STATE);
-    if (g_game.empty() || !safe_path(g_game, g_game)) return finish("failed", "invalid game path");
+    if (const std::string why = game_dir_problem(g_game); !why.empty()) return finish("failed", "invalid game path: " + why);
     g_server = !(g_api->size >= offsetof(KilnApi, side) + sizeof(void*) && g_api->side() == KILN_SIDE_CLIENT);
     set_status("format", 1);
     set_status("side", g_server ? "server" : "client");
