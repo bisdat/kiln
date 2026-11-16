@@ -27,6 +27,14 @@ cxx=${CXX:-$(command -v clang++ || command -v g++)}
 "$cxx" -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-omit-frame-pointer \
     -o "$out/new_world_test" "$here/../../saves/tests/new_world_test.cpp"
 "$out/new_world_test"
+# kiln.saves' stage barrier: the game's world write waits (bounded) for Kiln.Saves' background writer.
+"$cxx" -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-omit-frame-pointer -pthread \
+    -o "$out/stage_barrier_test" "$here/../../saves/tests/stage_barrier_test.cpp"
+"$out/stage_barrier_test"
+# kiln.saves' staged restore: only content-addressed blobs are kept by size; manifests are always replaced.
+"$cxx" -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-omit-frame-pointer \
+    -o "$out/restore_policy_test" "$here/../../saves/tests/restore_policy_test.cpp"
+"$out/restore_policy_test"
 
 "$cxx" -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-omit-frame-pointer \
     -o "$out/terrain_budget_test" "$here/terrain_budget_test.cpp"

@@ -12,9 +12,11 @@
  *     SAVING handlers. No later restage occurs while Save2 writes. Shutdown without another sim keeps the initial stage.
  *  3. The Save2Thread writes <saveDirectory>/world<N>.ksd (+ its backup/ copy); Kiln reports KILN_SAVE_EVENT_WRITTEN
  *     (or _FAILED) at the start of the next step. The world file's header revision is then the event's revision.
+ *     Before that write the Save2Thread waits (bounded) until the pump's background writer has the stagings it was
+ *     handed on disk (stage_progress, since 0.2.0-dev.30).
  *
  * Threads
- *  - status, request, next_event, path: any thread.
+ *  - status, request, next_event, path, stage_progress: any thread.
  *  - The pump (set_pump) runs on the tick thread: synchronously inside the game's save request for SAVING (after
  *    Kiln waited for the world's jobs, so game state may be read like in Post), else at the start of a step (Pre) when
  *    events are queued. SNAPSHOT runs in Post after world jobs finish. A faulting pump is removed (logged).
@@ -86,6 +88,8 @@ enum {
 
 /* Appended v1: SNAPSHOT reaches the pump after world jobs and before the pending ECS snapshot. */
 #define KILN_SAVES_CAN_SNAPSHOT_STAGE (1u << 5)
+/* Appended v1 (0.2.0-dev.30): stage_progress is in the table and the world write waits for it (the write hook is on). */
+#define KILN_SAVES_CAN_STAGE_BARRIER (1u << 6)
 
 /* KilnSavesStatus.features */
 enum {
@@ -152,6 +156,19 @@ typedef struct KilnSavesApi {
     KilnResult(KILN_CALL* path)(int32_t kind, char* buffer, size_t capacity, size_t* out_len);
     /* Also call the pump every `steps` server-world steps in Pre, with kind 0 (0 = only for events). Any thread. */
     KilnResult(KILN_CALL* set_pump_interval)(uint32_t steps);
+    /* Appended v1 (0.2.0-dev.30; check header.size, and KILN_SAVES_CAN_STAGE_BARRIER in status.features). The pump writes
+     * a save's files on a background writer, off the tick thread. issued != 0: the pump handed its writer staging number
+     * `issued` (numbers grow by one per staging; tick thread, before the pump returns). done != 0: the writer has every
+     * staging up to `done` on disk, written or failed (its own thread). 0 leaves a number as it is. Before the game's
+     * Save2Thread writes a world file, kiln.saves waits until done reaches what was issued by then, so the world file of
+     * revision R never reaches the disk before generation R's pending manifest (the order the tick thread kept when it
+     * wrote that manifest itself). The wait is bounded and logged: 6 s, because the game gives its last save 10 s in all
+     * and the shutdown does not always reach kiln.saves in time; once the shutdown begins (the game's shutdown log line,
+     * the shutdown's save request, the world's stop) every wait, also one already running, ends 6 s after the shutdown
+     * began at the latest. A wait that runs out lets the world write go and
+     * does not wait again until the writer has caught up. Numbers are serial (compared by difference; skip 0 when they
+     * wrap). Any thread. */
+    KilnResult(KILN_CALL* stage_progress)(uint64_t issued, uint64_t done);
 } KilnSavesApi;
 
 #ifdef __cplusplus

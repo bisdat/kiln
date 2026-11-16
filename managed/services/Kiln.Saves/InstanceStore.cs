@@ -1336,12 +1336,15 @@ internal sealed partial class InstanceStore
 
     /// <summary>The loaded generation and how it matched the world file (the trust of PLAN D6 rule 1 comes from it, for
     /// the whole session). Caps are applied to what was loaded.</summary>
-    public void OnLoaded(uint generation, DataMatch match)
+    /// <param name="generation">The loaded generation (0: none).</param>
+    /// <param name="match">How it matched the world file.</param>
+    /// <param name="newerOnDisk">The store's folder holds a manifest of a newer revision (committed or pending), from the
+    /// load's own listing of the folder.</param>
+    public void OnLoaded(uint generation, DataMatch match, bool newerOnDisk)
     {
         _loadedGeneration = generation;
         _loadedMatch = match;
-        _playerGenerationTrusted = match is DataMatch.Exact or DataMatch.Staged &&
-            _owner.Root is { } root && !WorldStore.ListManifests(Path.Combine(root, "manifests")).Any(m => m.Revision > generation);
+        _playerGenerationTrusted = match is DataMatch.Exact or DataMatch.Staged && _owner.Root is not null && !newerOnDisk;
         foreach (var h in _holders) ApplyCap(h, null);
     }
 

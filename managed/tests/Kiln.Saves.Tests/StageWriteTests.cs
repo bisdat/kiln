@@ -45,6 +45,7 @@ public sealed class StageWriteTests : IDisposable
         Dispatch(SavesNative.EvSaving, 101, 1);
         Dispatch(SavesNative.EvSnapshot, 102, 1, saveSeq: 101);
         Dispatch(SavesNative.EvWritten, 103, 1, saveSeq: 101, unix: 1001);   // generation 1: new data, every file forced
+        Written();
         Assert.Equal((7L, 7L), (Writes - writes, Forced - forced));            // 5 blobs, the pending and the confirmed manifest
         for (uint gen = 2, seq = 200; gen <= 4; gen++, seq += 10)
         {
@@ -57,6 +58,7 @@ public sealed class StageWriteTests : IDisposable
             Assert.Equal(bytes, File.ReadAllBytes(Pending(gen)));
             Assert.Equal(5, _h.Scopes(gen).Count(s => s.StartsWith("world/mod-", StringComparison.Ordinal)));
             Dispatch(SavesNative.EvWritten, seq + 2, gen, saveSeq: seq, unix: 1000 + gen);
+            Written();
             Assert.Equal((2L, 0L), (Writes - writes, Forced - forced));        // the confirmation after the world write, not forced
             Assert.False(File.Exists(Pending(gen)));
         }
@@ -66,6 +68,7 @@ public sealed class StageWriteTests : IDisposable
         Assert.Equal((2L, 2L), (Writes - writes, Forced - forced));            // its new blob and its manifest
         Dispatch(SavesNative.EvSnapshot, 301, 5, saveSeq: 300);
         Dispatch(SavesNative.EvWritten, 302, 5, saveSeq: 300, unix: 1005);
+        Written();
         Assert.Equal((3L, 3L), (Writes - writes, Forced - forced));
         Assert.Empty(Directory.EnumerateFiles(_h.Root, "*.tmp-*", SearchOption.AllDirectories));
     }
@@ -94,6 +97,7 @@ public sealed class StageWriteTests : IDisposable
         Store.Stage(2, SaveReason.Autosave, late: false);
         Assert.Equal(1L, Forced - forced);
         Store.Commit(2, 1002, SaveReason.Autosave);
+        Written();
         Assert.Equal(2L, Forced - forced);                                     // and so is its confirmation
         forced = Forced;
         Store.Stage(3, SaveReason.Autosave, late: false);                      // the next one has generation 2 to rely on
@@ -205,8 +209,27 @@ public sealed class StageWriteTests : IDisposable
         Assert.Equal(LogLevel.Info, WorldStore.TimingLevel(250.1));
     }
 
+    // "writer 12.3 ms: <items>" and "pruning 4.5 ms: <items>": every number of the items, the "else" included, adds up to
+    // that part's time (to the rounding of each item), so a line from a slow disk says where all of its time went.
+    private static readonly System.Text.RegularExpressions.Regex Part = new(@"(writer|files|pruning) (\d+\.\d) ms(?: \([^)]*\))?: (.*?)(?=; pruning |\)$)");
+
+    private static double Ms(string text) => double.Parse(text, System.Globalization.CultureInfo.InvariantCulture);
+
+    private static void ItemsAddUp(string line)
+    {
+        var parts = Part.Matches(line);
+        Assert.True(parts.Count >= 1, line);
+        foreach (System.Text.RegularExpressions.Match m in parts)
+        {
+            var items = System.Text.RegularExpressions.Regex.Matches(m.Groups[3].Value, @"(\d+\.\d) ms").Select(x => Ms(x.Groups[1].Value)).ToList();
+            Assert.True(items.Count >= 2, line);
+            var whole = Ms(m.Groups[2].Value);
+            Assert.True(Math.Abs(items.Sum() - whole) <= 0.05 * items.Count + 0.1, $"{m.Groups[1].Value}: items {items.Sum():F2} ms of {whole} ms in: {line}");
+        }
+    }
+
     [Fact]
-    public void ASlowStagingOrCommitLogsAtInfoWithItsForcedWritesTimedApart()
+    public void ASlowStagingOrCommitLogsAtInfoWithEveryPartTimedAndTheTickThreadApart()
     {
         var backend = Backend.Current;
         var slow = WorldStore.SlowMs;
@@ -218,31 +241,60 @@ public sealed class StageWriteTests : IDisposable
             FiveBundles(1);
             Store.Stage(1, SaveReason.Autosave, late: false);
             Store.Commit(1, 1001, SaveReason.Autosave);
+            Written();
             var staged = log.Single("Kiln.Saves: staged mod data generation 1 ");
             Assert.Equal(LogLevel.Debug, staged.Level);
             Assert.Contains("5 bundles, 5 new blobs", staged.Text);
-            Assert.Matches(@" in \d+\.\d ms \(6 files written: \d+\.\d ms forcing to disk, \d+\.\d ms renaming\)$", staged.Text);
+            // no stage barrier here (no native table): the tick thread wrote its files itself, as before, and says so
+            Assert.Matches(@" in \d+\.\d ms \(tick thread \d+\.\d ms, all of it \(this kiln\.saves does not hold the world write, so the tick " +
+                           @"thread writes the files itself, as before 0\.2\.0-dev\.30; \d+\.\d ms waiting for the writer\); files \d+\.\d ms: 6 files " +
+                           @"written: \d+\.\d ms creating, \d+\.\d ms writing, " +
+                           @"\d+\.\d ms forcing to disk, \d+\.\d ms closing, \d+\.\d ms renaming; 5 checked in \d+\.\d ms; 7 folders made in \d+\.\d ms; \d+\.\d ms hashing and JSON; " +
+                           @"\d+\.\d ms else\)$", staged.Text);
+            ItemsAddUp(staged.Text);
             var confirmed = log.Single("Kiln.Saves: confirmed mod data generation 1 ");
             Assert.Equal(LogLevel.Debug, confirmed.Level);
-            Assert.Matches(@"^Kiln\.Saves: confirmed mod data generation 1 \(autosave\) in \d+\.\d ms \(1 file written: \d+\.\d ms forcing to disk, \d+\.\d ms renaming; pruning \d+\.\d ms\)$", confirmed.Text);
+            Assert.Matches(@"^Kiln\.Saves: confirmed mod data generation 1 \(autosave\) in \d+\.\d ms \(tick thread \d+\.\d ms, all of it \([^)]*\); " +
+                           @"files \d+\.\d ms: 1 file written: \d+\.\d ms creating, \d+\.\d ms writing, \d+\.\d ms forcing to disk, \d+\.\d ms closing, " +
+                           @"\d+\.\d ms renaming; 1 deleted in \d+\.\d ms; \d+\.\d ms hashing and JSON; \d+\.\d ms else; pruning \d+\.\d ms: no file written; " +
+                           @"1 read in \d+\.\d ms; 3 folders listed in \d+\.\d ms; \d+\.\d ms hashing and JSON; \d+\.\d ms else\)$", confirmed.Text);
+            ItemsAddUp(confirmed.Text);
 
             WorldStore.SlowMs = 0;                                               // every staging and commit is slow now
             Store.GetBundleRaw("world/mod-0", "mod-0").Keys["state"].Json = "{\"v\":7}";
             Store.Stage(2, SaveReason.Autosave, late: false);
             Store.Stage(2, SaveReason.Autosave, late: false, snapshot: true);
             Store.Commit(2, 1002, SaveReason.Autosave);
+            Written();
             staged = log.Single("Kiln.Saves: staged mod data generation 2 (autosave)");
             Assert.Equal(LogLevel.Info, staged.Level);
             Assert.Contains("5 bundles, 1 new blobs", staged.Text);
-            Assert.Contains("(2 files written: ", staged.Text);
+            Assert.Contains("; files ", staged.Text);
+            Assert.Contains(": 2 files written: ", staged.Text);
+            ItemsAddUp(staged.Text);
             var snapshot = log.Single("Kiln.Saves: staged mod data generation 2 (autosave, snapshot staging)");
             Assert.Equal(LogLevel.Info, snapshot.Level);
             Assert.Contains("manifest unchanged: nothing written", snapshot.Text);
-            Assert.EndsWith("(no file written)", snapshot.Text);
+            Assert.Matches(@"files \d+\.\d ms: no file written; 6 checked in \d+\.\d ms; \d+\.\d ms hashing and JSON; \d+\.\d ms else\)$", snapshot.Text);
+            ItemsAddUp(snapshot.Text);
             confirmed = log.Single("Kiln.Saves: confirmed mod data generation 2 ");
             Assert.Equal(LogLevel.Info, confirmed.Level);
-            Assert.Contains("(1 file written: ", confirmed.Text);
+            Assert.Contains(": 1 file written: ", confirmed.Text);
             Assert.DoesNotContain("pruning", confirmed.Text);                    // the store prunes at commits 1, 11, 21, ...
+            ItemsAddUp(confirmed.Text);
+
+            // The player's 4620.6 ms line: a generation with the bundles of the one before, not forced to disk. Now it says
+            // what each part took: the tick thread's, the queue's, and every file operation on the writer.
+            Store.Stage(3, SaveReason.Autosave, late: false);
+            Store.Stage(3, SaveReason.Autosave, late: false, snapshot: true);
+            Store.Commit(3, 1003, SaveReason.Autosave);
+            Written();
+            confirmed = log.Single("Kiln.Saves: confirmed mod data generation 3 ");
+            Assert.Matches(@"^Kiln\.Saves: confirmed mod data generation 3 \(autosave\), bundles as in generation 2: not forced to disk in \d+\.\d ms " +
+                           @"\(tick thread \d+\.\d ms, all of it \([^)]*\); files \d+\.\d ms: 1 file written \(1 not forced to disk\): \d+\.\d ms creating, " +
+                           @"\d+\.\d ms writing, 0\.0 ms forcing to disk, \d+\.\d ms closing, \d+\.\d ms renaming; 1 checked in \d+\.\d ms; 1 deleted in " +
+                           @"\d+\.\d ms; \d+\.\d ms hashing and JSON; \d+\.\d ms else\)$", confirmed.Text);
+            ItemsAddUp(confirmed.Text);
         }
         finally
         {

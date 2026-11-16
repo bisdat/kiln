@@ -136,6 +136,10 @@ internal static unsafe class SavesRuntime
 
     private static bool _shutdownAnnounced;
     private static ulong _savingSeq, _snapshotSeq;
+
+    /// <summary>The game's load was reported while the world's mod data could not be read yet (a deferred load): its
+    /// WorldLoadedEvent goes when the data is read (the pump), so a mod never takes "no data" for the world's data.</summary>
+    private static (uint Revision, bool NewWorld)? _loadedEventDeferred;
     private static uint _savingRevision;
 
     /// <summary>Tick thread, after the mods' own ServerStopping handlers and before they unload. The game's shutdown
@@ -175,6 +179,7 @@ internal static unsafe class SavesRuntime
             return;
         }
         var closed = Store.WorldId;
+        _loadedEventDeferred = null;
         Store.CloseWorld();
         _loadedEventSeen = false;
         NewWorldSession = false;
@@ -217,6 +222,7 @@ internal static unsafe class SavesRuntime
         _worldFile = null;
         _savingSeq = _snapshotSeq = 0;
         _savingRevision = 0;
+        _loadedEventDeferred = null;
         lock (Gate)
         {
             Requests.Clear();
@@ -233,6 +239,7 @@ internal static unsafe class SavesRuntime
         get
         {
             if (!Ensure()) return true;
+            if (Store.LoadDeferred) return false;  // not read yet: the writer is still busy with the world's folder
             var st = SavesNative.ReadStatus();
             var hosted = _labHosted || (st is { } h && (h.Features & SavesNative.ClientHosted) != 0);
             // a lab's hosted close without the native status (the offline tests) waits for its load as a hosted game does
@@ -348,6 +355,7 @@ internal static unsafe class SavesRuntime
         try
         {
             DrainEvents();
+            if (Store.LoadDeferred && Store.RetryLoad()) LoadedAfterAll();
             Store.Entities.Tick();
             Store.Entities.HandOverServiceValues();
             Store.Instances.Tick();
@@ -448,7 +456,8 @@ internal static unsafe class SavesRuntime
                 NewWorldSession = newWorld;
                 Store.OnWorldLoaded(id, ev.Revision, ev.WorldUnix, newWorld);
                 InstanceCapabilities.Refresh();
-                if (Events.HasSubscribers<WorldLoadedEvent>())
+                if (Store.LoadDeferred) _loadedEventDeferred = (ev.Revision, newWorld);
+                else if (Events.HasSubscribers<WorldLoadedEvent>())
                     Events.Post(new WorldLoadedEvent(Store.WorldId ?? id, ev.Revision, newWorld, WorldFile, Store.Match));
                 break;
             }
@@ -456,6 +465,16 @@ internal static unsafe class SavesRuntime
     }
 
     internal static bool WorldLoaded => _loadedEventSeen;
+
+    /// <summary>A deferred load was read now: the capabilities follow, and the game's load is told to mods if it came meanwhile.</summary>
+    private static void LoadedAfterAll()
+    {
+        InstanceCapabilities.Refresh();
+        if (_loadedEventDeferred is not { } e) return;
+        _loadedEventDeferred = null;
+        if (Events.HasSubscribers<WorldLoadedEvent>())
+            Events.Post(new WorldLoadedEvent(Store.WorldId, e.Revision, e.NewWorld, WorldFile, Store.Match));
+    }
 
     private static void CompleteRequests(in SavesNative.Event ev, bool success, string? error)
     {
