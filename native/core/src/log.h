@@ -24,6 +24,9 @@ void writef(int level, const char* source, const char* fmt, ...);
 // copies the line into the queue (it runs under the game's log lock, on any thread), and the writer thread hands it
 // to subscribers (registry).
 bool install_game_listener(uintptr_t add_log_listener);
+// In a log subscriber's callback (the writer thread): when the game logged the line being handed over, as
+// std::chrono::steady_clock nanoseconds since its epoch; 0 elsewhere (kiln.log service, abi/services/kiln_log.h).
+int64_t current_line_time();
 uint64_t game_lines_seen();
 uint64_t game_lines_dropped();
 

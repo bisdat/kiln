@@ -2,6 +2,7 @@
 #include "log.h"
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdio>
 #include <deque>
@@ -18,6 +19,7 @@ namespace {
 struct Entry {
     bool game = false;
     int level = KILN_LOG_INFO;
+    int64_t logged_ns = 0;  // game lines: when the game logged it (steady_clock), for kiln.log's line_time()
     SYSTEMTIME time{};
     std::string source;
     std::string text;
@@ -50,7 +52,13 @@ void write_entry(const Entry& e) {
                  e.text.data());
 }
 
+thread_local int64_t t_line_ns = 0;  // the line being handed to subscribers on this (the writer) thread
+
 void dispatch_game_line(const Entry& e, std::vector<std::shared_ptr<reg::LogSub>>& subs, uint64_t& version) {
+    t_line_ns = e.logged_ns;
+    struct Reset {
+        ~Reset() { t_line_ns = 0; }
+    } reset;
     const uint64_t v = reg::version();
     if (v != version) {
         subs = reg::log_subs();
@@ -135,6 +143,7 @@ void __cdecl game_listener(uint8_t level, uint8_t /*flags*/, const GameStr* line
     while (n && (line->ptr[n - 1] == '\n' || line->ptr[n - 1] == '\r')) --n;
     Entry e;
     e.game = true;
+    e.logged_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
     e.level = map_game_level(level);
     e.text.assign(line->ptr, n);
     enqueue(std::move(e));
@@ -154,6 +163,8 @@ void start() {
 }
 
 void set_level(int level) { g_level.store(level); }
+
+int64_t current_line_time() { return t_line_ns; }
 
 void write(int level, std::string_view source, std::string_view text) {
     if (level > g_level.load(std::memory_order_relaxed)) return;
