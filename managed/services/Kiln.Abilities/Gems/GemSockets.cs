@@ -54,18 +54,36 @@ public enum GemSocketStatus
     Refused = 6,
     /// <summary>Sockets on other gear do not work here (see the reason); nothing changed.</summary>
     Unavailable = 7,
+    /// <summary>The item was re-created (<see cref="GemSocketResult.After"/> is the new item, the old one is gone), but read
+    /// back it lacks what <see cref="GemSocketResult.Missing"/> lists: its socket, or what a re-creation keeps (level,
+    /// unlocked upgrades, rarity, dye, durability). kiln.items' creation hook could not apply it (for example a game build
+    /// whose item layout Kiln does not know); the item is as the game made it.</summary>
+    Incomplete = 8,
 }
 
 /// <summary>The outcome of <see cref="Gems.AddSocket"/>.</summary>
 /// <param name="Status">What happened.</param>
 /// <param name="Before">The item asked for.</param>
-/// <param name="After">With <see cref="GemSocketStatus.Done"/>: the new item (a new item entity in the same slot; the old
-/// one is gone). Otherwise <paramref name="Before"/>.</param>
+/// <param name="After">With <see cref="GemSocketStatus.Done"/> or <see cref="GemSocketStatus.Incomplete"/>: the new item (a
+/// new item entity in the same slot; the old one is gone). Otherwise <paramref name="Before"/>.</param>
 /// <param name="Reason">Why, in words, for anything but Done; "" for Done.</param>
 public sealed record GemSocketResult(GemSocketStatus Status, ItemInstanceRef Before, ItemInstanceRef After, string Reason)
 {
+    /// <summary>True when the new item has its socket and everything a re-creation keeps (read back).</summary>
     public bool Succeeded => Status == GemSocketStatus.Done;
-    public override string ToString() => Succeeded ? $"Done: {Before} -> {After}" : $"{Status}: {Reason}";
+
+    /// <summary>With <see cref="GemSocketStatus.Incomplete"/>: what the new item lacks, one entry each (<c>"a socket"</c>,
+    /// <c>"level 34 (it has 30)"</c>, <c>"4 unlocked upgrades (it has 0)"</c>, <c>"rarity Epic (it has Common)"</c>,
+    /// <c>"dye ..."</c>, <c>"durability 50% (it has 100%)"</c>, or that it could not be read back). Empty otherwise.</summary>
+    public IReadOnlyList<string> Missing { get; init; } = [];
+
+    /// <summary>For a log line.</summary>
+    public override string ToString() => Status switch
+    {
+        GemSocketStatus.Done => $"Done: {Before} -> {After}",
+        GemSocketStatus.Incomplete => $"Incomplete: {Before} -> {After}, missing {string.Join(", ", Missing)}",
+        _ => $"{Status}: {Reason}",
+    };
 }
 
 /// <summary>One gem <see cref="Gems.ReturnSocketedGems"/> took out of a non-weapon socket (or could not).</summary>
@@ -137,7 +155,10 @@ public static partial class Gems
     /// <see cref="GemSocketResult.After"/>), water in a can. The item must sit in an inventory (a backpack, an action bar,
     /// a chest), not worn nor held in the hand; kiln.items checks that again on the step it runs (put on or taken in hand
     /// meanwhile: <see cref="GemSocketStatus.Refused"/>, nothing changed). Weapons are accepted always; other gear needs its
-    /// kind allowed (<see cref="AllowSockets"/>). Completes on the tick thread one or two steps later.
+    /// kind allowed (<see cref="AllowSockets"/>). Kiln reads the new item back: <see cref="GemSocketStatus.Done"/> only when
+    /// it has its socket and kept everything above that the game lets Kiln read; otherwise
+    /// <see cref="GemSocketStatus.Incomplete"/> with <see cref="GemSocketResult.Missing"/> (the item is re-created either
+    /// way). Completes on the tick thread two or three steps later.
     /// </summary>
     [ServerOnly]
     [TickThreadOnly]
@@ -155,8 +176,81 @@ public static partial class Gems
         if (decision is { } refused) return Done(refused.Status, item, refused.Reason);
         var rarity = ItemSockets.RarityAt(g.Holder, g.Slot, item.Entity.Id);
         var rx = ItemSockets.RecreateRequest(g.Holder, g, rarity, socket: true);
-        return ItemSockets.Recreate(g.Holder, item.Entity.Id, rx).ContinueWith(t => ResultOf(item, t.Result),
+        var done = new TaskCompletionSource<GemSocketResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        ItemSockets.Recreate(g.Holder, item.Entity.Id, rx).ContinueWith(t =>
+            {
+                var r = t.IsCompletedSuccessfully
+                    ? ResultOf(item, t.Result)
+                    : new GemSocketResult(GemSocketStatus.Unavailable, item, item, t.Exception?.GetBaseException().Message ?? "canceled");
+                if (r.Status != GemSocketStatus.Done) done.TrySetResult(r);
+                else OnNextTick(() => done.TrySetResult(ReadBack(r, g, rarity)));  // the read needs the tick thread
+            },
             CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        return done.Task;
+    }
+
+    // The re-created item as kiln.items reads it now, checked against what it was (tick thread).
+    private static GemSocketResult ReadBack(GemSocketResult done, ItemSockets.GearState before, ItemRarity? rarityBefore)
+    {
+        try
+        {
+            var after = ItemSockets.Read(done.After);
+            var rarity = after.Found ? ItemSockets.RarityAt(after.Holder, after.Slot, done.After.Entity.Id) : null;
+            return CheckRecreated(done, before, rarityBefore, after, rarity, null);
+        }
+        catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException)
+        {
+            return CheckRecreated(done, before, rarityBefore, null, null, e.Message);
+        }
+    }
+
+    // Runs once on the tick thread at the next service tick.
+    private static void OnNextTick(Action run)
+    {
+        var ran = 0;
+        IDisposable? tick = null;
+        tick = ServiceTick.Add("kiln.abilities gem socket check", (in TickInfo _) =>
+        {
+            if (Interlocked.Exchange(ref ran, 1) != 0) return;
+            tick?.Dispose();
+            run();
+        });
+        if (Volatile.Read(ref ran) != 0) tick.Dispose();  // it ran before the handle was set
+    }
+
+    /// <summary>A re-creation kiln.items reported Done, checked against the new item read back (<paramref name="after"/>;
+    /// null with <paramref name="readError"/> when it could not be read): Done when it has a socket and kept the level,
+    /// unlocked upgrades, rarity, dye and durability (each compared only where both reads have it), else Incomplete with
+    /// what is missing. Anything but Done is passed through. Pure.</summary>
+    internal static GemSocketResult CheckRecreated(GemSocketResult done, ItemSockets.GearState before, ItemRarity? rarityBefore,
+        ItemSockets.GearState? after, ItemRarity? rarityAfter, string? readError)
+    {
+        if (done.Status != GemSocketStatus.Done) return done;
+        var missing = new List<string>();
+        if (after is not { Found: true } a)
+            missing.Add($"the new item could not be read back ({readError ?? "it is gone, or its ref names another item"})");
+        else
+        {
+            if (!a.HasSocket) missing.Add("a socket");
+            if (before.Level > 0 && a.Level != before.Level) missing.Add($"level {before.Level} (it has {a.Level})");
+            if (a.PerksUnlocked < before.PerksUnlocked)
+                missing.Add($"{before.PerksUnlocked} unlocked upgrade{(before.PerksUnlocked == 1 ? "" : "s")} (it has {a.PerksUnlocked})");
+            if (rarityBefore is { } rb && rarityAfter is { } ra && ra != rb) missing.Add($"rarity {rb} (it has {ra})");
+            if (!before.Dye.IsNone && a.Dye != before.Dye) missing.Add($"dye {before.Dye} (it has {(a.Dye.IsNone ? "none" : a.Dye)})");
+            if (before is { HasDurability: true, DurabilityMax: > 0 } && a is { HasDurability: true, DurabilityMax: > 0 })
+            {
+                var was = (double)before.Durability / before.DurabilityMax;
+                var now = (double)a.Durability / a.DurabilityMax;
+                if (Math.Abs(was - now) > 0.01 + 1.0 / a.DurabilityMax)
+                    missing.Add($"durability {Math.Round(was * 100)}% (it has {Math.Round(now * 100)}%)");
+            }
+        }
+        return missing.Count == 0
+            ? done
+            : new GemSocketResult(GemSocketStatus.Incomplete, done.Before, done.After, $"the new item lacks: {string.Join(", ", missing)}")
+            {
+                Missing = missing,
+            };
     }
 
     /// <summary>
@@ -164,8 +258,11 @@ public static partial class Gems
     /// included) and puts it into the owner's inventory, free of charge. The vanilla forge cannot unsocket a ring or an
     /// armour piece, so a server that stops using a socket mod (or a player who wants the gems back) runs this first:
     /// sockets on other gear stay in the save and keep working without Kiln, but without Kiln nobody can get those gems
-    /// out. It uses the forge actions' unsocket (<c>Gems.Unsocket</c>, capability <c>gems.craft</c>); one entry per gem,
-    /// in inventory order. Completes on the tick thread.
+    /// out. It runs the game's own Remove move without a forge (the forge actions' service, kiln.gemcraft's forgeless
+    /// return, capability <c>gems.craft</c>; each return is also a <see cref="GemCraftedEvent"/> with no forge); one entry
+    /// per gem, in inventory order, <see cref="GemReturned.Returned"/> false with the reason for a gem that did not come back
+    /// (no free backpack slot, <c>gems.craft</c> off). The owner must be a player character. Weapons are left alone. Await
+    /// it from mod code (the task itself completes on a worker thread).
     /// </summary>
     [ServerOnly]
     [TickThreadOnly]

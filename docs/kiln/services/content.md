@@ -655,8 +655,19 @@ world file on disk (also after `kill -9`, Kiln.Saves' generations).
   `content_status`, see the requested change), `NewContent.Placeholders()`, `info()` `placeholders`, and
   `definitions()` (`"placeholder": true`, `mod`). A placeholder's references to its mod's own templates and models stay
   unresolved while the mod is away: one Info line per item, `new content: placeholder item-blocks.ember-bench: 1
-  reference(s) to its mod's resources stay unresolved while the mod is not loaded (the base's values stay):
-  equipment.placedEntity`. The same unresolved reference on an item of a loaded mod is a warning.
+  reference(s) to its mod's resources stay unresolved while the mod is not loaded (the base's values stay; a program:
+  none): equipment.placedEntity`. The same unresolved reference on an item of a loaded mod is a warning.
+- **A program it cannot resolve is none** (since 0.2.0-dev.29.11): an `equipment.program` (any `ImpactProgramReference`
+  or `ObjectReference<keen::ImpactProgram>`) that nothing serves now is not kept as the base's program, so a missing
+  mod's gem with a program of its own (a `Gems.Register` trigger gem, a gem with a cooked program) does nothing when
+  socketed instead of acting as its base gem; the game runs nothing for a gem without a program (it logs "Gem has no
+  valid Impcat Program assigned" in its own log every step while such a gem sits in an impact slot). kiln.log: `new
+  content: placeholder Gem_mymod_frostbite: 1 program reference(s) nothing serves now: it runs no program (not its
+  base's)`. A program that still resolves (a game program, a trigger program another loaded mod's gem serves) is kept.
+  Kiln's own gem trigger programs resolve too: Kiln.Abilities serves the one a placeholder names when no registered gem
+  does (kiln.log `gems: placeholders of a removed mod's gems name the trigger program on_kill (...): Kiln serves it, so
+  they run it and do nothing`), and the reference retry (~2 s) points the placeholder at it ([gems-new.md](gems-new.md),
+  "Unload").
 - **The mod comes back**: at the next start its definition is there before the placeholders are made (none is
   made). Loaded while the world runs (`load <mod>`), its definition takes the GUID over: `state` `restored`, kiln.log
   `Kiln_PH_Sword ... is back (mod placeholder-items): it takes its id 0x3f56132f back from the placeholder`.

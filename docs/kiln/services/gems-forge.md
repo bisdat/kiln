@@ -1,10 +1,9 @@
 # Gems: forge actions
 
-The "Forge actions" part of the Gems API (`Kiln.Abilities`, `namespace Kiln`): socket, unsocket, upgrade and recycle a gem
-from code, and the events of the players' own forge actions. It belongs in `gems.md` (the Gems guide) as its section
-"Forge actions"; it is a file of its own while the gem wave's packages are built side by side.
+Part of the Gems guide ([gems.md](gems.md), section "Forge actions"): socket, unsocket, upgrade and recycle a gem from
+code, and the events of the players' own forge actions (`Kiln.Abilities`, `namespace Kiln`).
 
-Capability: **`gems.craft`** (dedicated server, and a game client while it hosts). Since 0.2.0-dev.30.
+Capability: **`gems.craft`** (dedicated server, and a game client while it hosts). Since 0.2.0-dev.29.11.
 
 ## What it does
 A Shroud Forge has four actions. Kiln runs the game's own action for each, the one a player's click at the forge runs,
@@ -18,7 +17,8 @@ with all the game's checks and its costs:
 | `Gems.Recycle(player, gemOrCarrier, forge)` | Recycle: the gem is destroyed | the player gets the forge's essence, by the gem's level |
 
 - **player**: the player character the action runs for. It pays, and gets an unsocketed gem or the essence.
-- **carrier**: the item with the socket (a weapon, or anything another mod gave a socket).
+- **carrier**: the item with the socket: a weapon, or a ring, armour piece, shield or other gear a mod gave a socket
+  ([gems-sockets.md](gems-sockets.md)).
 - **gem / gemOrCarrier**: a loose gem, or (Upgrade, Recycle) the carrier whose socket holds it.
 - **forge**: a placed Shroud Forge. The game prices every action with a forge: its tier sets the cost, the maximum level
   and the essence. Kiln needs one even for a free action. You get a forge's entity from `GemCraftingEvent.Forge`, or from
@@ -105,14 +105,16 @@ Events.On<GemCraftedEvent>(e =>
   (`ByCode`), including the forgeless unsocket of `Gems.ReturnSocketedGems` (`Unsocket`, `ByCode`, `Forge` none, nothing
   paid). `Paid` and `Received` are counted from the player's inventory before and after. A refused or canceled action
   posts nothing.
-- Gems that change any other way (a mod moving items, a socket written directly) are not seen here; G1's
-  `GemSocketChangedEvent` sees every change of a socket by polling.
+- Gems that change any other way (a mod moving items, a socket written directly) are not seen here;
+  `GemSocketChangedEvent` sees every change of a socket by polling, a few steps later (gems.md, "Which event for what":
+  each forge action that changes a socket shows up in both).
 
 ## Limits
 - Server side only. On a game client that joined someone else's world, `gems.craft` is off.
 - The forge screen of the player's game shows Kiln's actions only as the inventory updates (no animation for code
   actions on the player's screen; the forge itself plays its action sequence, as for a player's click).
-- Gems on rings and armour: the game's action accepts any carrier with a socket (gem wave G4 adds those sockets).
+- Gems on rings and armour: the game's action accepts any carrier with a socket ([gems-sockets.md](gems-sockets.md) adds
+  those sockets). Lab: a ring in the backpack socketed and upgraded by code, and a socket into a worn ring.
 - A game update that changes the forge's handler turns `gems.craft` off until Kiln is updated (`Capabilities.Why("gems.craft")`).
 
 ## For native code

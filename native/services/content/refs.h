@@ -32,9 +32,16 @@ struct KitbashOut {
     std::vector<RefWrite> writes;
     std::vector<BlobWrite> blobs;
     std::vector<std::string> problems;  // ops that were skipped (unknown item, wrong type, GUID not loaded, ...)
+    std::vector<const Field*> unresolved;  // reference fields whose last value did not resolve (the base's value stays)
     bool icon = false;                  // "icon": the UI icon texture is looked up under icon_guid
     uint8_t icon_guid[16] = {};
 };
+
+// A placeholder ("[Missing: mod:item]", newcontent.cpp) is inert: an Impact program reference it cannot resolve (a
+// program its mod served, such as a Kiln gem trigger program, and nothing serves now) names no program instead of
+// keeping the base's, so a missing mod's gem does nothing rather than act as its base gem (gem wave). Other unresolved
+// references keep the base's value. Adds a "none" write for each such field of `out`; returns how many.
+size_t placeholder_clear_programs(KitbashOut* out);
 
 // The keys an item definition / rule may use for references: model visual icon perks weaponType impact program
 // animation collectionModel refs, or the path of any reference field ("equipment.visualEntity").

@@ -368,6 +368,15 @@ internal static partial class KilnApis
         "M:Kiln.Gameplay.Recipe(System.UInt32)", // Gameplay.Recipe(uint): Services.RequireTickThread
         "M:Kiln.Gameplay.WatchTeleports(Kiln.EntityId,System.Boolean)", // Gameplay.WatchTeleports(EntityId, bool): Services.RequireTickThread
         "M:Kiln.Gameplay.WorkshopRecipes(System.UInt32)", // Gameplay.WorkshopRecipes(uint): Services.RequireTickThread
+        "M:Kiln.GemTriggeredEvent.get_Info", // GemTriggeredEvent.Info.get: via Gems.Get(ItemId)
+        "M:Kiln.Gems.Equipped(Kiln.EntityId)", // Gems.Equipped(EntityId): Services.RequireTickThread
+        "M:Kiln.Gems.Get(Kiln.ItemId)", // Gems.Get(ItemId): Services.RequireTickThread
+        "M:Kiln.Gems.Recycle(Kiln.EntityId,Kiln.ItemInstanceRef,Kiln.EntityId,Kiln.GemCraftOptions)", // Gems.Recycle(EntityId, ItemInstanceRef, EntityId, GemCraftOptions?): via GemCrafting.Check(string, EntityId, EntityId)
+        "M:Kiln.Gems.Socket(Kiln.EntityId,Kiln.ItemInstanceRef,Kiln.ItemInstanceRef,Kiln.EntityId,Kiln.GemCraftOptions)", // Gems.Socket(EntityId, ItemInstanceRef, ItemInstanceRef, EntityId, GemCraftOptions?): via GemCrafting.Check(string, EntityId, EntityId)
+        "M:Kiln.Gems.Socket(Kiln.ItemInstanceRef)", // Gems.Socket(ItemInstanceRef): Services.RequireTickThread
+        "M:Kiln.Gems.Unsocket(Kiln.EntityId,Kiln.ItemInstanceRef,Kiln.EntityId,Kiln.GemCraftOptions)", // Gems.Unsocket(EntityId, ItemInstanceRef, EntityId, GemCraftOptions?): via GemCrafting.Check(string, EntityId, EntityId)
+        "M:Kiln.Gems.Upgrade(Kiln.EntityId,Kiln.ItemInstanceRef,Kiln.EntityId,Kiln.GemCraftOptions)", // Gems.Upgrade(EntityId, ItemInstanceRef, EntityId, GemCraftOptions?): via GemCrafting.Check(string, EntityId, EntityId)
+        "M:Kiln.Gems.get_Catalog", // Gems.Catalog.get: Services.RequireTickThread
         "M:Kiln.InstanceData.All``1(Kiln.InstanceKey{``0})", // InstanceData.All<T>(InstanceKey<T>): via InstanceData.Use<T>(string, InstanceKey<T>)
         "M:Kiln.InstanceData.Claim``1(Kiln.ParkedInstance{``0},Kiln.ItemInstanceRef)", // InstanceData.Claim<T>(ParkedInstance<T>, ItemInstanceRef): via InstanceData.Resolve<T>(ParkedInstance<T>, string)
         "M:Kiln.InstanceData.Discard``1(Kiln.ParkedInstance{``0})", // InstanceData.Discard<T>(ParkedInstance<T>): via InstanceData.Use(string, InstanceKeyInfo)

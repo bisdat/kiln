@@ -237,6 +237,8 @@ Kiln.GemSocketResult.<Clone>$() -> Kiln.GemSocketResult!
 Kiln.GemSocketResult.Deconstruct(out Kiln.GemSocketStatus Status, out Kiln.ItemInstanceRef Before, out Kiln.ItemInstanceRef After, out string! Reason) -> void
 Kiln.GemSocketResult.Equals(Kiln.GemSocketResult? other) -> bool
 Kiln.GemSocketResult.GemSocketResult(Kiln.GemSocketStatus Status, Kiln.ItemInstanceRef Before, Kiln.ItemInstanceRef After, string! Reason) -> void
+Kiln.GemSocketResult.Missing.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.GemSocketResult.Missing.init -> void
 Kiln.GemSocketResult.Reason.get -> string!
 Kiln.GemSocketResult.Reason.init -> void
 Kiln.GemSocketResult.Status.get -> Kiln.GemSocketStatus
@@ -261,6 +263,7 @@ Kiln.GemSocketStatus
 Kiln.GemSocketStatus.AlreadyHasSocket = 1 -> Kiln.GemSocketStatus
 Kiln.GemSocketStatus.Done = 0 -> Kiln.GemSocketStatus
 Kiln.GemSocketStatus.Equipped = 3 -> Kiln.GemSocketStatus
+Kiln.GemSocketStatus.Incomplete = 8 -> Kiln.GemSocketStatus
 Kiln.GemSocketStatus.KindNotAllowed = 2 -> Kiln.GemSocketStatus
 Kiln.GemSocketStatus.NotFound = 4 -> Kiln.GemSocketStatus
 Kiln.GemSocketStatus.NotGear = 5 -> Kiln.GemSocketStatus

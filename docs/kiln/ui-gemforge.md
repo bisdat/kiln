@@ -20,7 +20,9 @@ service or appended native table throws `KilnUnavailableException`. A closed or 
 `Ok = false`, a reason, and no snapshot. An empty returned list is a successful snapshot with zero candidates.
 
 **Which gems are listed.** The GEMS grid lists the gems in your backpack and action bars, then the weapons there that
-hold a gem (shown with the gem), in every forge mode. Gems in chests and in worn items are not listed. (The game's
+hold a gem (shown with the gem), in every forge mode; on a Kiln client where a mod allowed sockets on other gear
+(`Gems.AllowSockets`), also the rings, armour pieces and shields there that hold a gem, as carrier rows like a weapon
+([services/gems-sockets.md](services/gems-sockets.md)). Gems in chests and in worn items are not listed. (The game's
 list builder has one caller, and it always asks for socketed weapons too: there is no mode that hides them. A Recycle
 removes a row for good; an Insert keeps the count, the loose gem becomes its weapon's row.) More on gems:
 [services/gems.md](services/gems.md).

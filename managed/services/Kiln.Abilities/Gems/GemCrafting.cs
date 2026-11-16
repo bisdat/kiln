@@ -85,7 +85,7 @@ public enum GemCraftStatus
 /// <param name="Status">The outcome.</param>
 /// <param name="Action">The action.</param>
 /// <param name="Player">The player it ran for.</param>
-/// <param name="Forge">The forge.</param>
+/// <param name="Forge">The forge; none for <see cref="Gems.ReturnSocketedGems"/>' forgeless return.</param>
 /// <param name="Carrier">The item with the socket; none for a loose gem.</param>
 /// <param name="Gem">The gem.</param>
 /// <param name="LevelBefore">The gem's level before.</param>
@@ -182,10 +182,11 @@ public sealed class GemCraftingEvent : CancelableEvent, IEntityEvent
     public override string ToString() => $"gem crafting: player {Player} {Action} carrier {Carrier} gem {Gem} at forge {Forge} for {Cost}";
 }
 
-/// <summary>A forge action happened: a player's own (after the game committed it) or one of <see cref="Gems"/>' calls.
-/// Posted on the tick thread in Pre, one step after the step it ran in. Not cancelable. Only actions that changed
-/// something: a refused or canceled one posts nothing. Capability <c>gems.craft</c>. Gems moved any other way (a mod's
-/// own item moves) are not seen here.</summary>
+/// <summary>A forge action happened: a player's own (after the game committed it) or one of <see cref="Gems"/>' calls,
+/// <see cref="Gems.ReturnSocketedGems"/> included (Unsocket, no forge). Posted on the tick thread in Pre, one step after
+/// the step it ran in. Not cancelable. Only actions that changed something: a refused or canceled one posts nothing.
+/// Capability <c>gems.craft</c>. Gems moved any other way (a mod's own item moves) are not seen here;
+/// <see cref="GemSocketChangedEvent"/> sees every socket change, these included, a few steps later.</summary>
 [ServerOnly]
 public sealed class GemCraftedEvent : KilnEvent, IEntityEvent
 {
@@ -206,7 +207,7 @@ public sealed class GemCraftedEvent : KilnEvent, IEntityEvent
     /// <summary>The player.</summary>
     public EntityId Player => Result.Player;
 
-    /// <summary>The forge.</summary>
+    /// <summary>The forge; none for <see cref="Gems.ReturnSocketedGems"/>' forgeless return.</summary>
     public EntityId Forge => Result.Forge;
 
     /// <summary>The action.</summary>

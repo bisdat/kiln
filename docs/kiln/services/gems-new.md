@@ -1,6 +1,6 @@
 # New gems
 
-<!-- gem wave G2: the "New gems" section of docs/kiln/services/gems.md (work-00 merges it there). -->
+Part of the Gems guide ([gems.md](gems.md), section "New gems"). Since 0.2.0-dev.29.11.
 
 A mod can add gems of its own. A new gem is an item: a copy of one of the game's gems with its own GUID, name, texts,
 icon, rarity and level range. Its effect is one of three things:
@@ -11,8 +11,10 @@ icon, rarity and level range. Its effect is one of three things:
 3. **a C# handler**: Kiln gives the gem one of its trigger programs, and the program calls your code when the trigger
    happens (a hit, a critical hit, a kill, a backstab, a hit taken, or every few seconds).
 
-The forge treats a new gem like a game gem: it lists it in its GEMS grid, sockets it, upgrades it and recycles it. The
-game runs its program when the weapon that holds it is in hand, exactly as for its own gems.
+The forge treats a new gem like a game gem: it lists it in its GEMS grid, sockets it, upgrades it and recycles it (and so
+do `Gems.Socket`, `Upgrade` and `Recycle` from code: [gems-forge.md](gems-forge.md)). The game runs its program when the
+item that holds it is in an impact slot (the weapon in hand; a worn ring or armour piece with sockets on other gear:
+[gems-sockets.md](gems-sockets.md)), exactly as for its own gems.
 
 Samples: `mods/samples/GemSample` (data only) and `mods/samples/GemEffects` (C# effects).
 
@@ -98,11 +100,22 @@ with kiln.content's new items or (for a trigger) kiln.assets and its resources m
 
 **Unload.** When the mod unloads (or the handle is disposed) its handlers stop. The items stay registered until the
 server restarts, as every kiln.content item does, so gems in sockets and bags stay valid; a gem whose handler is gone
-does nothing. After a restart without the mod the gems become kiln.content's `[Missing: ...]` placeholders. A
-placeholder keeps the references kiln.content can still resolve; a trigger program that no loaded mod serves is not
-one of them, so such a placeholder gets its base's program back: socketed, it acts as its base gem (a Frostbite from
-the Gem of Bleeding bleeds) until it is taken out. With another mod's gem of the same trigger loaded, the program is
-served and the placeholder does nothing.
+does nothing. After a restart without the mod the gems become kiln.content's `[Missing: ...]` placeholders, which keep
+saved gems (and the sockets holding them) valid and **do nothing** (before 0.2.0-dev.29.11 they ran their base gem's
+program):
+- a trigger gem's placeholder runs its Kiln trigger program, which calls no handler (no registered gem is that item):
+  Kiln.Abilities serves the trigger program a placeholder names when no registered gem serves it, and kiln.content's
+  reference retry (about 2 s after the world's content is ready, before the save is read) points the placeholder at it;
+- a placeholder's program reference that nothing serves (a program the mod cooked and served itself; a trigger program
+  where kiln.assets cannot serve) is none, not its base's: the game runs nothing for a gem without a program, and logs
+  "Gem has no valid Impcat Program assigned" in its own log every step while that gem sits in an impact slot (take the
+  gem out: a weapon's at the forge, other gear's with `Gems.ReturnSocketedGems`);
+- a gem whose program is a game program (`Program` set to another gem's, or the base's) keeps it as a placeholder, with
+  the base's numbers (the mod's config layer is gone).
+
+Lab (`mods/tests/gems-integration-test`): a removed mod's backstab gem's placeholder ran no program before Kiln served
+the trigger program (16 of the game's error lines in about a second of wearing it in a ring), and runs the backstab
+trigger program with Kiln's copy; socketed in a worn ring it does nothing.
 
 ### Triggers
 
@@ -121,6 +134,10 @@ program again) does not run the handler early, and a second weapon with its own 
 `enemiesOnly` (default true) keeps only hits whose other side is an enemy faction, the mask the game's own gems use
 (creatures; not players, props or buildings). Hits made by a skill's or a gem's own damage do not count, as in the game's
 gems, so one gem does not set off another.
+
+A handler runs for the gem in whichever impact slot its carrier is (`ctx.Slot`: `Held`, a ring, an armour piece...).
+A trigger gem posts no `GemTriggeredEvent`: its program sends `kiln.Signal`, not a damage, buff or spawn native
+(gems.md, "Which event for what").
 
 ### The context (`GemTriggerContext`)
 

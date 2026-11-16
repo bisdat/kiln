@@ -1,15 +1,30 @@
 # Gems
 
-Enshrouded's gems for mods: what a gem is in the game, how to change one with a data pack, and the `Gems` API in
-C# (the catalog, the gems a player's equipment runs, sockets, gem events). Research and evidence:
+Enshrouded's gems for mods, in one guide: what a gem is in the game, how to change one with a data pack, the `Gems`
+API in C# (the catalog, the gems a player's equipment runs, sockets, gem events), new gems with their own effects, the
+Shroud Forge's actions from code, and sockets on rings, armour and shields. Three parts have a page of their own for the
+details; this page says what each part is and how they fit together. Research and evidence:
 `/mnt/Dongus/kiln-wave/dev29/out/gem-system/DOSSIER.md` (the gem system dossier, 2026-11-16).
+
+| Part | Where | API | Row |
+|---|---|---|---|
+| How gems work, the game's gems, data packs | this page | kiln.gamedata's `items` section | — |
+| Reading gems | this page, "Reading gems from C#" | `Gems.Catalog`, `Get`, `Equipped(player)`, `Socket(item)` | `gems.read` |
+| Gem events | this page, "Events" | `GemTriggeredEvent`, `GemSocketChangedEvent` | `gems.triggers`, `gems.read` |
+| New gems | this page, "New gems"; [gems-new.md](gems-new.md) | `Gems.Register`, `GemDefinition`, `GemTrigger`, `GemTriggerContext` | `gems.triggers` |
+| Forge actions | this page, "Forge actions"; [gems-forge.md](gems-forge.md) | `Gems.Socket(player, ...)`, `Unsocket`, `Upgrade`, `Recycle`, `GemCraftingEvent`, `GemCraftedEvent` | `gems.craft` |
+| Sockets on other gear | this page, "Sockets on other gear"; [gems-sockets.md](gems-sockets.md) | `Gems.AllowSockets`, `Gear.GemSlot`, `Gems.AddSocket`, `Gems.ReturnSocketedGems` | `gems.sockets` |
 
 | Layer | Path |
 |---|---|
-| Managed | `managed/services/Kiln.Abilities/Gems/` → `kiln/host/Kiln.Abilities.dll` (static class `Kiln.Gems` + events) |
-| Reads | kiln.items (item catalog, item instances), kiln.gamedata (a gem's `equipment.program` and `impactValues`), kiln.world + kiln.types (`Equipment.equipmentImpacts`), kiln.abilities (native events) |
-| Rows | `gems.read`, `gems.triggers` ([caps.md](caps.md)) |
-| Tests | `managed/tests/Kiln.Blocks.Tests/GemsBaseTests.cs` (fakes); lab: see "What is checked" |
+| Managed | `managed/services/Kiln.Abilities/Gems/` → `kiln/host/Kiln.Abilities.dll` (static class `Kiln.Gems`, its types and events); Kiln.Items (`Gear.GemSlot` on other gear); Kiln.Ui (the forge lists on clients) |
+| Native | kiln-items.dll: `kiln.gemcraft` (the forge actions, `kiln_gemcraft.h`) and `kiln.items` v7 (sockets on other gear, the re-creating give, socket rolls); kiln.ui.values `gemforge_sockets` (client); kiln.content (an item's program served through kiln.assets; placeholders) |
+| Reads | kiln.items (item catalog, item instances), kiln.gamedata (a gem's `equipment.program` and `impactValues`), kiln.world + kiln.types (`Equipment.equipmentImpacts`), kiln.abilities (native events, `kiln.Signal`) |
+| Signatures | `sigdb/symbols/{server,client}.d/gems-forge.json`, `gems-sockets.json` |
+| Rows | `gems.read`, `gems.triggers`, `gems.craft`, `gems.sockets` ([caps.md](caps.md)); see "Capability rows" below |
+| Tests | see "What is checked" |
+
+Since 0.2.0-dev.29.11 (mod API 0.2.5), every part of this page.
 
 ## How a gem works
 A gem is an item of its own (category `WeaponGem`), with its own item entity and a **level** from 1 to 105. It is not
@@ -17,11 +32,12 @@ a perk and not a buff: its ItemInfo names an **Impact program** (`equipment.prog
 program reads (`impactValues`: damage, buff types, durations, chances). Scaled configs grow with the gem's own level
 (function `WeaponPowerCreep`, source `Self`, a `scaleFactor` per config).
 
-A weapon with a socket keeps the gem in its `WeaponGemSlot` (the gem item, its level, its entity). Every step, the
-game's `equipment_impacts` looks at the player's 11 impact slots (the held item, the shield, five armour pieces, two
+An item with a socket keeps the gem in its `WeaponGemSlot` (the gem item, its level, its entity). In the game only
+weapons get one; with "Sockets on other gear" below, rings, armour, shields and other gear can have one too. Every step,
+the game's `equipment_impacts` looks at the player's 11 impact slots (the held item, the shield, five armour pieces, two
 rings, ammo, the spell) and, for an item with a gem in its socket, spawns one **gem impact**: an entity that runs the
 gem's program with the gem's configs and level. That impact lives while the item stays in its slot and the gem stays in
-the socket.
+the socket. A gem whose item names no program runs nothing (the game logs "Gem has no valid Impcat Program assigned").
 
 Most gem programs loop over the **wearer's** hit events each step and react to a condition: a critical hit, a killing
 blow, a backstab, a blocked hit, several hits in a row, sprinting, being hit. They then apply a buff, deal damage or
@@ -33,7 +49,7 @@ gem item (ItemInfo, category WeaponGem, its own item entity with a Level 1..105)
   ├─ equipment.program → an Impact program (27 programs for the 29 gems: the three Necromancy gems share one)
   ├─ impactValues      → the program's configs, scaled by the gem's level
   └─ uiValues          → the tooltip rows
-weapon item entity ── WeaponGemSlot { gem item, level, gem entity }
+carrier item entity ── WeaponGemSlot { gem item, level, gem entity }   (a weapon; any gear with sockets on other gear)
 equipment_impacts (server, every player, every step)
   for each of the 11 impact slots: the item's own impact, its unlocked perks, its socketed gem
     gem → a gem impact { the gem's program, configs copied from the gem's ItemInfo, the gem's level }
@@ -42,6 +58,7 @@ equipment_impacts (server, every player, every step)
 **The Shroud Forge** sockets (Slot), unsockets (Unslot), upgrades (+1 level for Archaic Essence, up to the forge's
 `maxGemLevel`: 10 at the Grassland forge with Archaic Essence I, up to 50 at the Ancient Lands one) and recycles (the gem
 is destroyed for essence). A gem above every forge's cap (a level 55 gem from loot) can be socketed but not upgraded.
+Mods run the same four actions from code ("Forge actions" below).
 
 ## The game's gems
 The config ids are what a data pack writes (`impactValues.0x...`); the name after an id is the program's own variable
@@ -138,6 +155,9 @@ if (Gems.Socket(Items.Held(player)) is { } s)                      // the gem in
 | `Gems.Equipped(player)` | the gems whose effects run now, one `EquippedGem` per impact slot with a gem impact: slot (`GemImpactSlot`: `Held`, `Shield`, `Head`..`Feet`, `Ring1`, `Ring2`, `Ammo`, `Spell`), the socket (`SocketedGem`: carrier, gem, level) and the gem impact's entity | server (and a hosting client): a joined client has no gem impacts |
 | `Gems.Socket(item)` | the gem in an item's socket (`SocketedGem`), null when it has none | server (and a hosting client) |
 
+`Gems.Socket(item)` with one argument reads; `Gems.Socket(player, carrier, gem, forge)` is the forge's Insert ("Forge
+actions" below).
+
 `Equipped` reads `Equipment.equipmentImpacts[slot]` (`weaponGemImpactEntityId`) through kiln.world, at the layout the
 game's reflection gives on the running build. A slot is listed when the game spawned the gem's impact, which is when the
 effect runs: a socketed weapon in the backpack is not listed, the held one is. The carrier comes from item instances
@@ -149,6 +169,8 @@ effect runs: a socketed weapon in the backpack is not listed, the held one is. T
 |---|---|---|
 | `GemTriggeredEvent` | a gem did something: its impact ran `applyDamage`, `applyBuff`, `spawnEntity` (or a native passed to `Abilities.Natives.Observe`). Posted right after the matching `ImpactNativeEvent`, one Pre after the call | `Player`, `Gem` (`EquippedGem`), `Native` (the `ImpactDamageEvent` / `ImpactBuffEvent` / `ImpactSpawnEvent`), `Target` (the damage's or buff's target, the spawned entity), `Step`, `Info` |
 | `GemSocketChangedEvent` | a socket of one of a player's items changed, however it happened | `Owner`, `Carrier`, `Before`, `After` (`SocketedGem?`), `Change` (`Socketed`, `Unsocketed`, `LevelChanged`, `Removed`), `Step` |
+| `GemCraftingEvent` | a player is about to use a forge (cancelable); "Forge actions" | `Player`, `Forge`, `Action`, `Carrier`, `Gem`, `GemLevel`, `Cost`, `Yield` |
+| `GemCraftedEvent` | a forge action happened: a player's, a `Gems` call, `Gems.ReturnSocketedGems`; "Forge actions" | `Result` (`GemCraftResult`), `ByCode`, `Paid`, `Received`, `LevelBefore`, `LevelAfter` |
 
 ```csharp
 [Subscribe]
@@ -171,8 +193,8 @@ pack, `Abilities.Natives.Wrap` / `Abilities.OnDamage` filtered on the gem's prog
 reacts only to hits and states: a block or a special attack of the weapon has no gem signal of its own.
 
 `GemSocketChangedEvent` comes from reading players' items in turns (two players a step, about every `players / 2`
-steps for each), only while someone subscribes. It does not say which forge or what it cost (the forge's own events are
-in "Forge actions"), comes a few steps late, and misses a change undone between two reads. What counts:
+steps for each), only while someone subscribes. It does not say which forge or what it cost (`GemCraftedEvent` does),
+comes a few steps late, and misses a change undone between two reads. What counts:
 - `Socketed`: the socket got a gem (empty before, or another gem: `Before` is the old one);
 - `Unsocketed`: the socket is empty and a gem of that kind came back to the player's inventory or went into another of
   their sockets (Kiln counts the gems of each kind that came back; each return is one `Unsocketed`, the rest `Removed`);
@@ -188,23 +210,171 @@ Without the `Gems` events, `ImpactStartedEvent` / `ImpactEndedEvent` (a gem impa
 switch, ends when the item leaves the slot) and `ImpactNativeEvent` filtered on the gem program's id
 (`Abilities.IdOf(Gems.Get(gem)!.Program)`) still work ([abilities.md](abilities.md)).
 
+### Which event for what
+One change can show up in more than one event; they never disagree, they see it from different places:
+
+| What happened | `GemCraftedEvent` | `GemSocketChangedEvent` (polled, a few steps later) |
+|---|---|---|
+| Insert (a player's, or `Gems.Socket`) | `Socket`, one step after | `Socketed` |
+| Remove (a player's, `Gems.Unsocket`, or `Gems.ReturnSocketedGems`: `Forge` none, nothing paid) | `Unsocket` | `Unsocketed` |
+| Upgrade of a socketed gem | `Upgrade`, `LevelBefore` / `LevelAfter` | `LevelChanged` |
+| Upgrade of a loose gem | `Upgrade` | nothing (no socket changed) |
+| Recycle of a socketed gem | `Recycle`, `LevelAfter` 0, `Received` | `Removed` |
+| Recycle of a loose gem | `Recycle` | nothing |
+| A mod writes a socket, moves items, destroys a carrier | nothing | `Socketed` / `Unsocketed` / `LevelChanged` / `Removed` |
+| `Gems.AddSocket` (a new item entity with an empty socket) | nothing | nothing (an item first seen is no change) |
+
+Two forge actions that fall between two reads of a player come out of the poll as one change (an Insert and an Upgrade:
+one `Socketed` with the new level). A player's action that a `GemCraftingEvent` handler canceled changes nothing and
+posts neither.
+
+`GemTriggeredEvent` is about effects, not sockets: a gem impact's `applyDamage`, `applyBuff`, `spawnEntity`. A new gem
+with a C# handler (`Gems.Register` with a `Trigger`) does its work in the handler; its trigger program sends
+`kiln.Signal` and calls none of those natives, so it posts no `GemTriggeredEvent` (lab-checked). What the handler itself
+does (`Abilities.ApplyBuff`, `Combat.Damage`) is not the gem impact's either.
+
 ## New gems
-(gem wave G2: `Gems.Register`, new gems with their own effects.)
+Full reference: [gems-new.md](gems-new.md). A new gem is an item: a kiln.content clone of a game gem with its own GUID,
+name, texts, icon, rarity and level range. The forge lists, sockets, upgrades and recycles it like a game gem. Its effect
+is one of three:
+
+1. the base gem's program with the gem's own numbers (a data pack alone can do this: `"items": {"add": [...]}`);
+2. another loaded Impact program (another gem's, a perk's, one a mod cooked with `tools/impact` and serves through
+   kiln.assets) with the gem's own numbers;
+3. a **C# handler**: `Gems.Register` gives the gem one of Kiln's six trigger programs (`GemTrigger.OnHit`,
+   `OnHit(crit: true)`, `OnKill`, `OnBackstab`, `OnHitTaken`, `Passive(interval)`), and the handler runs on the server's
+   tick thread, as the registering mod, one step after the hit, with a `GemTriggerContext` (wearer, target, gem, level,
+   carrier, impact slot, damage, crit / kill / backstab / blocked).
+
+```csharp
+public override void OnLoad()                        // every side that has the mod: clients need the item to show it
+{
+    var gem = Gems.Register(new GemDefinition
+    {
+        Id = "mymod:reaper", BaseOn = "T1_Gem_GemOfBleeding", DisplayName = "Gem of the Reaper",
+        Trigger = GemTrigger.OnKill(),
+        OnTrigger = ctx => Log.Info($"{ctx.Player} killed {ctx.Target} with a level {ctx.Level} gem in {ctx.Slot}"),
+    });
+    if (!gem.Ok) Log.Warn(gem.Reason!);
+}
+```
+
+A handler runs for the gem in any impact slot (a ring's gem with "Sockets on other gear": `ctx.Slot` `Ring1` / `Ring2`,
+`ctx.Carrier` the ring). When the mod unloads its handlers stop and the items stay until the server restarts. **A
+removed mod's gem does nothing**: after a restart without the mod its gems are kiln.content's `[Missing: ...]`
+placeholders. A trigger gem's placeholder runs its trigger program (Kiln serves it when no registered gem does), which
+calls no handler; a program nothing serves (one the mod cooked itself) is none, so the game runs nothing for that gem.
+It does not act as its base gem ([gems-new.md](gems-new.md), "Unload").
 
 ## Forge actions
-(gem wave G3: socket, unsocket, upgrade and recycle from code with the game's costs; `GemCraftingEvent`,
-`GemCraftedEvent`.)
+Full reference: [gems-forge.md](gems-forge.md). A Shroud Forge's four actions from code, run as the game's own action (its
+checks and its costs, paid by the player in the forge's material), and the events of the players' own forge actions.
+
+| Call | The game's action |
+|---|---|
+| `Gems.Socket(player, carrier, gem, forge, options?)` | Insert: the gem into the carrier's empty socket |
+| `Gems.Unsocket(player, carrier, forge, options?)` | Remove: the gem back into the player's backpack |
+| `Gems.Upgrade(player, gemOrCarrier, forge, options?)` | Upgrade: +1 level, up to the gem's own cap and the forge's maximum |
+| `Gems.Recycle(player, gemOrCarrier, forge, options?)` | Recycle: the gem destroyed for the forge's essence |
+
+Each returns a `Task<GemCraftResult>` (`Ok`, `Status`, `Reason`, `LevelBefore` / `LevelAfter`, `Paid`, `Received`); a
+refusal is a result, not an exception. `GemCraftOptions { Holder, Cost }`: a chest the player may use, `GemCost.Free` or
+another price. A carrier is any item with a socket: a weapon, or a ring, armour piece or shield with "Sockets on other
+gear" (lab: a ring by code, socketed and upgraded at a spawned forge). `GemCraftingEvent` (cancelable) comes before a
+player's own action, `GemCraftedEvent` after any action that happened ("Which event for what" above).
 
 ## Sockets on other gear
-(gem wave G4: sockets on rings, armour and shields.)
+Full reference: [gems-sockets.md](gems-sockets.md). The game runs the gem of the item in any of the 11 impact slots, and
+its save keeps a socket on any item; only the creation of a socket, the forge's lists and the vanilla forge's Remove are
+weapons-only. Nothing changes until a mod asks:
+
+- `Gems.AllowSockets(GemSocketKinds.Rings | GemSocketKinds.Armour, rollChance)` (both sides, while the mod is loaded):
+  on the server `Gear.GemSlot` and `AddSocket` work on these kinds and new items of them roll an empty socket with that
+  chance; on a Kiln client the forge's WEAPONS list and GEMS rows also show such gear that has a socket (not worn: take
+  it off first).
+- `Gear.GemSlot` on a give (Kiln.Items), or `"gemSlotOverride": true` on an item of a data pack: a new item with an empty
+  socket.
+- `Gems.AddSocket(item)`: an existing item re-created with a socket in the same slot (one transaction), keeping level,
+  rarity, unlocked upgrades, dye and durability. Kiln reads the new item back: `Done`, or `Incomplete` with
+  `GemSocketResult.Missing` naming what the new item lacks (the item is re-created either way).
+- `Gems.ReturnSocketedGems(player)`: the uninstall path. Every gem in the player's non-weapon gear (worn included) back
+  into their inventory, free, without a forge (`gems.craft`'s forgeless return). Run it before a server drops a mod that
+  put gems into other gear: the vanilla forge cannot take them out again.
+
+Balance is the mod's: a gem reacts to every hit of its wearer, and up to 11 gems can run at once.
+
+## The parts together
+A ring mod that adds its own gem, from the first ring to the uninstall (the server side; the lab test
+`mods/tests/gems-integration-test` runs these steps):
+
+```csharp
+public override void OnLoad()
+{
+    Gems.AllowSockets(GemSocketKinds.Rings);                       // both sides: server sockets, client forge lists
+    _reaper = Gems.Register(new GemDefinition { Id = "ringmod:reaper", BaseOn = "T1_Gem_GemOfBleeding",
+        Trigger = GemTrigger.OnKill(), OnTrigger = ctx => Reward(ctx.Player, ctx.Level) });
+}
+
+async Task Craft(EntityId player, EntityId forge)
+{
+    var give = await Items.Give(player, ringId, 1, new Gear(20) { GemSlot = true });   // a ring with an empty socket
+    var ring = Items.Read(player)!.Slots.First(s => s.ItemEntity == give.Changes[0].ItemEntity);
+    var gem = Items.Read(player)!.Slots.First(s => s.Item == _reaper.Item);
+    var r = await Gems.Socket(player, ring.Ref, gem.Ref, forge);  // the forge's price; GemCraftedEvent follows
+    // worn, the ring runs the gem: Gems.Equipped(player) lists it in Ring1 or Ring2, a kill calls Reward
+}
+
+async Task Uninstall(EntityId player) =>
+    Log.Info(string.Join(", ", await Gems.ReturnSocketedGems(player)));   // every gem out of rings and armour
+```
+
+| Member | Thread | Side |
+|---|---|---|
+| `Gems.Catalog`, `Get` | tick | server, a client with a world |
+| `Gems.Equipped`, `Socket(item)` | tick | server (and a hosting client) |
+| `Gems.Register` | tick (`OnLoad`) | every side that has the mod; handlers run on the server |
+| `Gems.Socket(player, ...)`, `Unsocket`, `Upgrade`, `Recycle` | tick | server (and a hosting client) |
+| `Gems.AllowSockets` | tick (`OnLoad`) | both: server part and client part |
+| `Gems.SocketKinds` | any | both |
+| `Gems.AddSocket`, `Gems.ReturnSocketedGems` | tick | server (and a hosting client) |
+| the five events | posted on the tick thread | server (and a hosting client) |
+
+The tasks complete on the tick thread or, for `ReturnSocketedGems`, on a worker thread; an `await` in mod code always
+continues on the tick thread (the mod's `SynchronizationContext`).
 
 ## Capability rows
 | Row | Kind | What it says |
 |---|---|---|
 | `gems.read` | managed, session (Kiln.Abilities, at its start and about once a second) | the read API and `GemSocketChangedEvent`: needs kiln.items (`service-missing`) with item instances (`items.instances`, its reason when off), kiln.types and the game's reflection of `Equipment.equipmentImpacts[].weaponGemImpactEntityId` (`symbol-missing` on a build without it) and kiln.world. Without kiln.gamedata it is available with the note that the catalog has no programs or configs. It does not wait for a server world: without one (the main menu, a joined client) it still reads available, `Socket` throws `KilnUnavailableException` (`gems.read`), `Equipped` lists no gem and no `GemSocketChangedEvent` is posted |
-| `gems.triggers` | managed, session (with `gems.read`) | `GemTriggeredEvent` (and G2's gems with their own effects): needs `gems.read`, kiln.abilities and its native events (`abilities.natives`) |
+| `gems.triggers` | managed, session (with `gems.read`) | `GemTriggeredEvent` and `Gems.Register`'s handlers: needs `gems.read`, kiln.abilities and its native events (`abilities.natives`). `Gems.Register` also needs kiln.content's new items and, for a trigger, kiln.assets: it checks those itself and throws `KilnUnavailableException` naming `gems.triggers` (the row can read available without them) |
+| `gems.craft` | sigdb feature (`server.d/gems-forge.json`; a hosting client composes it) | the forge actions and `GemCraftingEvent` / `GemCraftedEvent`, and `Gems.ReturnSocketedGems`' forgeless return. kiln-items.dll lowers it when the gem handler's layout does not check out (`symbol-missing`), without a usable kiln.world (`service-missing`), or after a fault (`faulted`, until restart); Kiln.Abilities lowers it where kiln.gemcraft is not here. Off on a client that joined another world |
+| `gems.sockets` | sigdb feature, one per side (`server.d/gems-sockets.json`: the createPide hook; `client.d/gems-sockets.json`: the forge lists) | server: `Gems.AllowSockets`' server part, `Gear.GemSlot` on other gear, `AddSocket`, rolls, `gemSlotOverride` on any gear; client: the widened forge lists. Kiln.Abilities lowers it when neither kiln.items v7 nor kiln.ui.values' `gemforge_sockets` is here |
 
 ## What is checked
+Each part's page lists its own tests and labs ([gems-new.md](gems-new.md#tests), [gems-forge.md](gems-forge.md),
+[gems-sockets.md](gems-sockets.md#tests)). Together:
+- `managed/tests/Kiln.Blocks.Tests/GemsIntegrationTests.cs`: `Equipped` over all 11 impact slots, `GemTriggeredEvent`
+  from each slot, a registered trigger gem's handler from each slot with that slot's carrier and level (G2's dispatch on
+  G1's own `Equipped`), a placeholder gem running another mod's trigger program calls nothing, and which trigger
+  programs Kiln serves for placeholders (`GemPlaceholderProgramsTests`).
+- `native/services/content/tests/refs_test.cpp` (`placeholder_programs`): a placeholder's program reference nothing
+  serves is none; one that resolves is kept; other unresolved references keep the base's value.
+- `managed/tests/Kiln.Contract.Tests/GemSocketsTests.cs`: `AddSocket`'s read-back (`Done`, `Incomplete` and what is
+  missing).
+- Lab `mods/tests/gems-integration-test` (Wine dedicated server 26430253, a spawned 1_Player stand-in and a spawned
+  Grassland forge, 2026-11-16). First start 27 PASS, 0 FAIL: the four rows on; `AllowSockets(Rings)`; `AddSocket` read
+  back `Done`, nothing missing; a `Gems.Register` kill gem socketed into a ring with `Gems.Socket` at the forge (50
+  essence paid, one `GemCraftedEvent`), upgraded 7 to 8 (91 essence), `GemSocketChangedEvent` `Socketed` then
+  `LevelChanged`; the ring worn: `Gems.Equipped` lists it in `Ring1`; a killing blow of the wearer runs the gem's handler
+  once with slot `Ring1`, the ring as carrier, level 8, and no `GemTriggeredEvent` for that gem; `ReturnSocketedGems`
+  takes the gem out of the worn ring (the same gem entity at level 8, nothing paid, `GemCraftedEvent` `Unsocket` with no
+  forge, `GemSocketChangedEvent` `Unsocketed`). Second start without registering the mod's backstab gem: its placeholder
+  runs the backstab trigger program Kiln serves (not its base's Gem of Bleeding program), socketed into a ring and worn it
+  runs and calls nothing, `ReturnSocketedGems` takes it back, the kill gem in the same worn ring runs (16 PASS, 0 FAIL; no
+  "no valid Impcat Program" line in the game's log). Without Kiln's copy of the trigger program the placeholder had no
+  program and spawned no gem impact (15 PASS, 0 FAIL; the game logged its error line about every step while it was worn).
+
+The read API and events:
 - Unit tests with a fake game (`GemsBaseTests`): the catalog and its cache, kiln.gamedata's JSON (programs, configs by
   alias and id, an alias two ids share), the Equipment layout against the reflection dump of server 26430253, `Equipped`
   and `Socket`, the impact to gem map (parent chain, one read per player and step, one walk per impact and step, a
@@ -222,6 +392,47 @@ switch, ends when the item leaves the slot) and `ImpactNativeEvent` filtered on 
   (`Socketed`, `LevelChanged` while the probe's three field writes landed, `Removed` when the socket was emptied with
   the gem still loose), and a data-pack style change of `0x5e34f09b` (`mul 2`): the running impact kept 5, the catalog
   showed 6 within 2 s, and after switching the hotbar away and back a new gem impact ran with 8.
-- Not yet checked in a real game: a player's own socketed weapon through the forge (the order of `GemSocketChangedEvent`
-  after a forge action), the tooltip numbers on a Kiln client after a data-pack change, an impact the gem spawned
-  (the parent chain) for each gem.
+
+## Real-client checks
+What only a real game client shows, in the order of one play session. Setup: a server and a Kiln client built from the
+same tree; on both, GemSample, GemEffects and a mod with side `both` that calls
+`Gems.AllowSockets(GemSocketKinds.Rings | GemSocketKinds.Armour)` in `OnLoad` and logs `GemCraftingEvent`,
+`GemCraftedEvent`, `GemSocketChangedEvent` and `GemTriggeredEvent` (it may cancel a Recycle on request); a ring with a
+socket and one without in the backpack.
+
+1. Boot: `gems.read`, `gems.triggers`, `gems.craft` (server), `gems.sockets` available; client kiln.log `ui.values:
+   features resolved: ... gems.sockets ...`, `gems.sockets hooks installed`, `Gem Forge lists widened to category mask 0x6`.
+2. The new gems (Deep Cuts, Frostbite, Renewal): names, PNG icons, rarities, descriptions, German texts with the game in
+   German; a new gem's tooltip shows its level. `/gemeffects 10` gives both GemEffects gems at level 10.
+3. The forge's GEMS grid lists the new gems. Insert the Gem of Frostbite into a weapon by hand while the mod listens to
+   `GemCraftingEvent`: the action goes through about a step later; one `GemCraftingEvent` (with the cost), then
+   `GemCraftedEvent` (not by code, the cost paid) and later `GemSocketChangedEvent` `Socketed`. Upgrade it: the level
+   rises (`LevelChanged`).
+4. Frostbite in hand: a critical hit on an enemy slows it (snail icon). Renewal: a kill heals 10 at level 10. Deep Cuts:
+   a critical cutting hit bleeds 9 s.
+5. Cancel a Recycle (the mod cancels it): nothing paid, the gem stays; the forge screen shows it as it is at the next
+   inventory update.
+6. A code action (`Gems.Upgrade` from a command) while the forge screen is open: its lists refresh; the forge plays its
+   action.
+7. WEAPONS lists the socketed ring from the backpack or an action bar, not the ring without a socket, not a worn ring.
+   Insert a gem into the ring: the price is paid, the gem leaves the backpack.
+8. GEMS shows the ring as a carrier row with the gem's icon and level; `Ui.Values.GemForgeCandidates()` stays Ok with that
+   row. Upgrade and Recycle the ring's gem there, Remove it, Insert again: each as for a weapon.
+9. Tooltip of the socketed ring (with a gem, with an empty socket) in the backpack and worn: the socket row shows as on a
+   weapon; the delete confirmation warns about the gem.
+10. Wear the ring with a Gem of Bleeding: crits bleed with any weapon; the server's `Gems.Equipped` lists `Ring1` or
+    `Ring2`. With the Frostbite in the ring instead: the crit slow works with the ring as the carrier.
+11. `GemTriggeredEvent` for a spawning gem (Fracturing, Necromancy): the event comes with the spawned entity (the
+    impact's parent chain).
+12. A data-pack change of a gem's number on a Kiln client: the tooltip shows the new number after a hotbar switch.
+13. `Gems.Catalog` on the client (a world loaded) lists the gems with programs and configs.
+14. Quit to the menu and join again: the ring still holds its gem.
+15. `Gems.ReturnSocketedGems` from a command with the ring worn: the gem is back in the backpack (the client's inventory
+    shows it), `GemCraftedEvent` (`Unsocket`, by code, no forge).
+16. Unload the socket mod (or `AllowSockets(None)` on the client): the next forge open shows vanilla lists.
+17. A client without Kiln on the same server: the ring's gem works when worn, its forge lists are vanilla, the tooltip
+    shows the socket; a new gem from a `clients: mod` mod shows "[Invalid Item Stack]".
+18. Remove GemEffects from the server and the client, restart both: the socketed Frostbite shows as
+    `[Missing: gemeffects:...]`; in hand it does nothing (no slow, and no bleed of its base Gem of Bleeding).
+19. A hosting client (the player's own world): steps 3, 5 and 15 there (the hosted copy of `gems.craft`'s signatures was
+    only checked offline).

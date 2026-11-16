@@ -28,11 +28,10 @@ available is generated from a boot's `capabilities.json`: [../status.generated.m
 | [content.md](content.md) | kiln.content: registries and data packs |
 | [creatures.md](creatures.md) | kiln.creatures: one creature's values, variants, AI events, commands and arsenal rules |
 | [gamedata.md](gamedata.md) | kiln.gamedata: spells, abilities, creatures and their attacks as data |
-| [gems.md](gems.md) | Gems: how a gem works, changing one with a data pack, the `Gems` read API and gem events |
+| [gems.md](gems.md) | Gems: how a gem works, changing one with a data pack, the `Gems` read API and gem events; with [gems-new.md](gems-new.md) (new gems, `Gems.Register`), [gems-forge.md](gems-forge.md) (forge actions from code) and [gems-sockets.md](gems-sockets.md) (sockets on rings, armour, shields) |
 | [gameplay.md](gameplay.md) | kiln.gameplay: player/world interaction events and protection zones |
 | [hooks.md](hooks.md) | kiln.hooks v2: one registry for every hook |
 | [items.md](items.md) | kiln.items: items in inventories |
-| [gems-forge.md](gems-forge.md) | kiln.gemcraft (gem wave): a Shroud Forge's socket, unsocket, upgrade and recycle from code (`Gems.Socket`, ...) and players' forge actions (`GemCraftingEvent`, `GemCraftedEvent`) |
 | [knowledge.md](knowledge.md) | kiln.knowledge: the game's knowledge, the vanilla journal, dialogue events, the client veto |
 | [npcs.md](npcs.md) | Friendly NPCs and quests in the game's own UI |
 | [pacing.md](pacing.md) | kiln.pacing: where the game waits, and its task pools |

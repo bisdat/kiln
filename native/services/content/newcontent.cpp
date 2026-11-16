@@ -1145,6 +1145,11 @@ uintptr_t build_clone(Def& d, uintptr_t base, WorldState& ws, std::string* why) 
             const KitbashModScope mod(d.placeholder || d.orphan ? nullptr : &d.mod, d.guid);  // a model this mod declares (a server that did not cook)
             for (auto& [key, val] : d.kitbash.items()) kitbash(L.item, key, val, find, all, &ko, reinterpret_cast<uintptr_t>(p));
         }
+        // inert: a program only its gone mod served (a gem's trigger program) is none, not the base's (gem wave)
+        if (d.placeholder)
+            if (const size_t n = placeholder_clear_programs(&ko))
+                LOGI("new content: placeholder %s: %zu program reference(s) nothing serves now: it runs no program (not its base's)",
+                     d.name.c_str(), n);
         for (const RefWrite& w : ko.writes) std::memcpy(p + w.f->offset, w.bytes, w.f->bytes);
         for (const BlobWrite& b : ko.blobs)
             if (!b.data) set_blob(p, b.offset, nullptr, 0);
@@ -1159,11 +1164,12 @@ uintptr_t build_clone(Def& d, uintptr_t base, WorldState& ws, std::string* why) 
                                       [](const std::string& w) { return w.find("the game has loaded") != std::string::npos; });
         if (d.placeholder && !ko.problems.empty()) {
             // A placeholder keeps a missing mod's saved stacks: its references name that mod's own resources, which nothing
-            // serves while it isn't loaded. Expected, so one line at Info (the missing-content summary says which mods).
+            // serves while it isn't loaded. Expected, so one line at Info (the missing-content summary says which mods). The
+            // base's values stay, but for a program reference: none (placeholder_clear_programs above).
             std::string fields;
             for (const std::string& w : ko.problems) fields += (fields.empty() ? "" : ", ") + w.substr(0, w.find(": "));
             LOGI("new content: placeholder %s: %zu reference(s) to its mod's resources stay unresolved while the mod is not loaded "
-                 "(the base's values stay): %s", d.name.c_str(), ko.problems.size(), fields.c_str());
+                 "(the base's values stay; a program: none): %s", d.name.c_str(), ko.problems.size(), fields.c_str());
         } else {
             for (const std::string& w : ko.problems)
                 LOGW("new content: item %s: %s (skipped; the base's value stays)", d.name.c_str(), w.c_str());
@@ -2272,6 +2278,7 @@ void retry_kitbash(WorldState& ws) {
                 for (auto& [key, val] : d.kitbash.items()) kitbash(L.item, key, val, find, all, &ko, clone);
             }
             if (ko.problems.size() >= d.warnings.size()) continue;
+            if (d.placeholder) placeholder_clear_programs(&ko);  // still unresolved: still none (build_item)
             for (const RefWrite& w : ko.writes) std::memcpy(p + w.f->offset, w.bytes, w.f->bytes);
             for (const BlobWrite& b : ko.blobs)
                 if (const int64_t rel = static_cast<int64_t>(b.data) - static_cast<int64_t>(clone + b.offset);

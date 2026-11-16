@@ -225,12 +225,80 @@ void served_impact_programs() {
     test_assets = nullptr;
 }
 
+// Gem wave integration: a removed mod's trigger gem. Its "[Missing: ...]" placeholder keeps the recorded references;
+// its equipment.program names a Kiln trigger program (or a program its mod cooked) that nothing serves once the mod is
+// gone. Kept as the base's value, the placeholder ran the base gem's program (a Frostbite acted as a Gem of Bleeding).
+// A placeholder names no program instead (the game's gem spawner runs nothing for a gem without a program), while every
+// other unresolved reference keeps the base's value as before, and a program that does resolve is kept.
+void placeholder_programs() {
+    using namespace kc;
+    static KilnAssetsApi a{};
+    a.header.size = sizeof a;
+    a.resource_read = [](const KilnAssetKey* k, void*, size_t, size_t* n) -> KilnResult {
+        *n = 64;
+        return k->type == 0xd4922d88u && k->guid[0] == 0x6e && k->guid[15] == 0x02 ? KILN_ERR_BUFFER_TOO_SMALL : KILN_ERR_NOT_FOUND;
+    };
+    test_assets = &a;
+    Schema s;
+    Pools p;
+    Field prog;
+    prog.path = "equipment.program", prog.type_name = "keen::ImpactProgramReference", prog.bytes = 16, prog.ref = true;
+    Field anim;
+    anim.path = "equipment.equipmentEntityModelSetup.animation", anim.type_name = "keen::ObjectReference<keen::JointAnimation>",
+    anim.bytes = 16, anim.ref = true;
+    const ItemFind none = [](const std::string&) -> uintptr_t { return 0; };
+    const std::string gone = "6b696c6e-6765-6d73-8000-000000000003";    // on_kill: no mod serves it now
+    const std::string served = "6b696c6e-6765-6d73-8000-000000000002";  // on_crit: another mod's gem serves it
+    const auto write_of = [](const KitbashOut& o, const Field* f) -> const RefWrite* {
+        for (const RefWrite& w : o.writes)
+            if (w.f == f) return &w;
+        return nullptr;
+    };
+    const uint8_t zero[16] = {};
+
+    KitbashOut ko;
+    one_ref(s, prog, json(gone), none, p, &ko);
+    one_ref(s, anim, json("61111111-2222-4333-8444-555555555555"), none, p, &ko);
+    check(ko.problems.size() == 2 && !write_of(ko, &prog) && !write_of(ko, &anim), "unresolved references are problems, not writes");
+    check(placeholder_clear_programs(&ko) == 1, "a placeholder clears its one unresolved program reference");
+    const RefWrite* w = write_of(ko, &prog);
+    check(w && std::memcmp(w->bytes, zero, 16) == 0, "the placeholder's program is none, not the base's");
+    check(!write_of(ko, &anim), "another unresolved reference keeps the base's value");
+    check(placeholder_clear_programs(&ko) == 1 && ko.writes.size() == 1, "clearing twice writes the field once");
+
+    KitbashOut ok;
+    one_ref(s, prog, json(served), none, p, &ok);
+    check(ok.problems.empty() && placeholder_clear_programs(&ok) == 0, "a program another mod serves resolves: nothing cleared");
+    w = write_of(ok, &prog);
+    uint8_t want[16];
+    guid_parse(served, want);
+    check(w && std::memcmp(w->bytes, want, 16) == 0, "the placeholder runs that program (a trigger with no handler does nothing)");
+
+    KitbashOut last;  // "program" then "refs" on one field: the later value wins, as for the writes
+    one_ref(s, prog, json(gone), none, p, &last);
+    one_ref(s, prog, json(served), none, p, &last);
+    check(placeholder_clear_programs(&last) == 0, "a program reference resolved by a later key is not cleared");
+    KitbashOut late;
+    one_ref(s, prog, json(served), none, p, &late);
+    one_ref(s, prog, json(gone), none, p, &late);
+    check(placeholder_clear_programs(&late) == 1 && write_of(late, &prog) && std::memcmp(write_of(late, &prog)->bytes, zero, 16) == 0,
+          "a later unresolved program reference is cleared over an earlier resolved one");
+
+    Field oref = prog;
+    oref.type_name = "keen::ObjectReference<keen::ImpactProgram>";
+    KitbashOut obj;
+    one_ref(s, oref, json(gone), none, p, &obj);
+    check(placeholder_clear_programs(&obj) == 1, "an ObjectReference<keen::ImpactProgram> is a program reference too");
+    test_assets = nullptr;
+}
+
 int main(int argc, char** argv) {
     try {
         table_references();
     pool_references_need_their_binding();
         malformed_entries();
         served_impact_programs();
+        placeholder_programs();
         if (argc != 2) throw std::runtime_error("provide a new fixture directory");
         own_mod_models(argv[1]);
         std::printf("refs-test: %d checks passed, 0 failed\n", checks);

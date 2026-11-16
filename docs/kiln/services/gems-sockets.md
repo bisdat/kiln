@@ -1,7 +1,7 @@
 # Sockets on other gear (rings, armour, shields)
 
-Part of the Gems guide (`docs/kiln/services/gems.md`; this page is its "Sockets on other gear" section until the two are
-merged). Capability row `gems.sockets`.
+Part of the Gems guide ([gems.md](gems.md), section "Sockets on other gear"). Capability row `gems.sockets`. Since
+0.2.0-dev.29.11.
 
 In the game only weapons get a gem socket, and only weapons show up in the Shroud Forge. Everything else about gems does
 not care what holds them: the game runs the gem of the item in **any** of a player's 11 equipment impact slots (held item,
@@ -31,6 +31,7 @@ await Items.Give(player, ringId, 1, new Gear(20, ItemRarity.Epic) { GemSlot = tr
 
 // an existing ring without one (from a backpack, an action bar or a chest; not worn)
 var r = await Gems.AddSocket(ringRef);   // r.After is the new item; r.Before is gone
+if (r.Status == GemSocketStatus.Incomplete) Log.Warn($"re-created, but it lacks {string.Join(", ", r.Missing)}");
 
 // before a server stops using sockets on other gear: every gem back into the owner's inventory
 var back = await Gems.ReturnSocketedGems(player);
@@ -62,7 +63,14 @@ var back = await Gems.ReturnSocketedGems(player);
   Refusals: `AlreadyHasSocket`, `KindNotAllowed` (with the call that allows it), `Equipped` (worn or held in the hand:
   unequip it first), `NotFound`, `NotGear` (gems, dyes and customization items never hold a gem), `Refused` (the game
   said no, or the item changed before the step it ran: moved, put on, taken in hand; kiln.items checks worn, held and
-  socketed again on that step), `Unavailable`.
+  socketed again on that step), `Unavailable`. Nothing changed for any of them.
+  **Read back.** kiln.items' Done says the transaction ran; the socket and the unlocked upgrades come from its createPide
+  hook, which leaves an item as the game made it when it cannot apply them (a full override list, an item layout this
+  game build does not have, a fault). So Kiln reads the new item back on the next step: `Done` only when it has its
+  socket and kept its level, unlocked upgrades, rarity, dye and durability (each compared where both reads have it; a
+  durability the game does not let Kiln read is not compared); otherwise `Incomplete`, `After` the new item (the old one
+  is gone either way), and `GemSocketResult.Missing` one entry per thing it lacks (`"a socket"`, `"level 34 (it has
+  30)"`, `"4 unlocked upgrades (it has 0)"`, ...). The task completes on the tick thread two or three steps after the call.
 - `Gems.ReturnSocketedGems(owner)` (server, tick thread): the uninstall path below.
 
 ## For data packs
@@ -115,9 +123,11 @@ A socket on a ring stays in the save and keeps working in a game without Kiln (t
 vanilla forge only lists weapons, so without Kiln **nobody can take that gem out again**. Before a server drops a mod that
 puts gems into other gear, run `Gems.ReturnSocketedGems(player)` for each player (or let the mod do it from a command):
 every gem in a non-weapon socket of that player's inventories (worn items included) goes into the player's inventory,
-free of charge; the result lists each gem with `Returned` and a reason when it did not fit. It runs the forge actions'
-unsocket (`Gems.Unsocket`, capability `gems.craft`), so it needs a Kiln with the forge actions; without them every entry
-says so. Items in chests: move them into the player's inventory first.
+free of charge, without a forge; the result lists each gem with `Returned` and a reason when it did not come back (no
+free backpack slot, `gems.craft` off). It runs the game's own Remove move through the forge actions' service
+(kiln.gemcraft `KILN_GEM_RETURN`, capability `gems.craft`): each return that happened is also a `GemCraftedEvent`
+(`Unsocket`, `ByCode`, `Forge` none, nothing paid). Weapons are left alone (the vanilla forge handles them). The owner must
+be a player character; items in chests: move them into the player's inventory first.
 
 ## Balance
 
@@ -159,7 +169,8 @@ arguments, so an invalid roll is a probe that changes nothing). The forge lists:
 
 - Native host tests: `native/services/items/tests/run.sh` (pide_test: kinds, GEM_SLOT_ANY, gemSlotOverride, rolls,
   extras, the full list; move_test `replace`: the re-creating give, its refusals and rollback).
-- Managed: `Kiln.Items.Tests/ItemSocketsTests.cs`, `Kiln.Contract.Tests/GemSocketsTests.cs`.
+- Managed: `Kiln.Items.Tests/ItemSocketsTests.cs`, `Kiln.Contract.Tests/GemSocketsTests.cs` (with AddSocket's read-back:
+  Done, Incomplete and what is missing), `Kiln.Ui.Tests/GemForgeSocketsTests.cs`.
 - Lab: `mods/tests/gems-sockets-test` (a spawned 1_Player stand-in; run the lab twice for the save check, on a world
   that has a container in its save: a spawned loot chest is not saved). Lab 2026-11-16 (server 26430253, Wine lab
   `gems-g4`, a copy of the dev26-playtest save): first start 19 PASS 0 FAIL (Gear.GemSlot on a ring, AddSocket keeps
@@ -169,11 +180,15 @@ arguments, so an invalid roll is a probe that changes nothing). The forge lists:
   save and restart 3 PASS 0 FAIL (the ring in the container still holds the gem; the gem's entity has its level 7).
   Not shown in the lab: durability carried over (the lab's reads of `Durability` on the items came back empty; the
   `DurabilityPercentageInit` entry is host-tested only).
+- Lab with the other packages: `mods/tests/gems-integration-test` (gems.md, "What is checked"): a ring socketed and
+  upgraded by `Gems.Socket` / `Upgrade` at a forge, worn, a registered gem's handler on a kill with the ring as carrier,
+  `ReturnSocketedGems` from the worn ring, `AddSocket` read back.
 - What only a real client shows: the checklist in "Client checks" below.
 
 ## Client checks
 
-For work-00 with the owner (a Kiln client built from this tree, a server-and-client mod calling
+The whole gem system's checks in the order of one play session: [gems.md](gems.md), "Real-client checks". In detail, for
+sockets on other gear (a Kiln client built from this tree, a server-and-client mod calling
 `Gems.AllowSockets(GemSocketKinds.Rings | GemSocketKinds.Armour)`, a ring with a socket and one without):
 
 1. kiln.log at boot: `ui.values: features resolved: ... gems.sockets ...`; `gems.sockets` available in the capabilities.

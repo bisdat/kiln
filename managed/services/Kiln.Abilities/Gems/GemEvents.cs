@@ -48,7 +48,9 @@ public sealed class GemTriggeredEvent : KilnEvent, IEntityEvent
     /// <summary>The step the native ran in.</summary>
     public ulong Step => Native.Step;
 
-    /// <summary>The gem's definition (<see cref="Gems.Get"/>; null when the catalog does not know it).</summary>
+    /// <summary>The gem's definition (<see cref="Gems.Get"/>; null when the catalog does not know it). Tick thread, as
+    /// <see cref="Gems.Get"/>.</summary>
+    [TickThreadOnly]
     public GemInfo? Info => Gems.Get(Gem.Socket.Gem);
 
     /// <summary>Whether the event is about <paramref name="entity"/> (the player or the target).</summary>

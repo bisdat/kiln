@@ -75,6 +75,88 @@ public sealed class GemSocketsTests
         Assert.Equal(GemSocketStatus.Unavailable, Gems.ResultOf(before, ItemsResult.Fail(ItemsStatus.Dropped, default, default, 1, "x")).Status);
     }
 
+    // Gem wave integration: kiln.items' Done for a re-creation says the transaction ran, not that the createPide hook
+    // gave the new item its socket and its unlocked upgrades (a full override list, an unknown ItemInfo layout, a fault:
+    // the item is then created as the game made it). AddSocket reads the new item back: Done only when nothing is missing.
+    private static readonly ItemInstanceRef OldRing = new(new EntityRef(new EntityId(5000), 7), new ItemId(18908173));
+    private static readonly ItemInstanceRef NewRing = new(new EntityRef(new EntityId(5100), 9), new ItemId(18908173));
+    private static readonly GemSocketResult Recreated = new(GemSocketStatus.Done, OldRing, NewRing, "");
+
+    private static ItemSockets.GearState Read(bool socket = true, int level = 34, int unlocked = 4, uint dye = 0, bool durability = true,
+        int current = 600, int max = 1200, bool found = true) =>
+        new(found, true, false, new ItemId(18908173), new EntityId(2), new SlotId(0x3_0000_1234), socket, ItemId.None, 0, level, durability,
+            current, max, dye == 0 ? ItemId.None : new ItemId(dye), 4, unlocked);
+
+    [Fact]
+    public void ARecreatedItemWithEverythingKeptIsDone()
+    {
+        var before = Read(socket: false, dye: 0x77);
+        var r = Gems.CheckRecreated(Recreated, before, ItemRarity.Epic, Read(dye: 0x77), ItemRarity.Epic, null);
+        Assert.Equal((GemSocketStatus.Done, OldRing, NewRing, ""), (r.Status, r.Before, r.After, r.Reason));
+        Assert.Empty(r.Missing);
+        Assert.True(r.Succeeded);
+    }
+
+    [Fact]
+    public void ARecreatedItemWithoutItsSocketIsIncompleteAndSaysSo()
+    {
+        var r = Gems.CheckRecreated(Recreated, Read(socket: false), ItemRarity.Epic, Read(socket: false), ItemRarity.Epic, null);
+        Assert.Equal(GemSocketStatus.Incomplete, r.Status);
+        Assert.False(r.Succeeded);
+        Assert.Equal(NewRing, r.After);  // the old item is gone either way: After is the item there now
+        Assert.Equal(["a socket"], r.Missing);
+        Assert.Contains("a socket", r.Reason);
+        Assert.Contains("Incomplete", r.ToString());
+    }
+
+    [Fact]
+    public void LostUpgradesLevelRarityDyeAndDurabilityAreEachNamed()
+    {
+        var before = Read(socket: false, level: 34, unlocked: 4, dye: 0x77, current: 600, max: 1200);
+        var after = Read(level: 30, unlocked: 0, dye: 0, current: 1200, max: 1200);
+        var r = Gems.CheckRecreated(Recreated, before, ItemRarity.Epic, after, ItemRarity.Common, null);
+        Assert.Equal(GemSocketStatus.Incomplete, r.Status);
+        Assert.Equal(5, r.Missing.Count);
+        Assert.Contains(r.Missing, m => m.StartsWith("level 34", StringComparison.Ordinal) && m.Contains("30"));
+        Assert.Contains(r.Missing, m => m.StartsWith("4 unlocked upgrade", StringComparison.Ordinal) && m.Contains('0'));
+        Assert.Contains(r.Missing, m => m.StartsWith("rarity Epic", StringComparison.Ordinal) && m.Contains("Common"));
+        Assert.Contains(r.Missing, m => m.StartsWith("dye", StringComparison.Ordinal));
+        Assert.Contains(r.Missing, m => m.StartsWith("durability 50%", StringComparison.Ordinal) && m.Contains("100%"));
+    }
+
+    [Fact]
+    public void WhatCannotBeReadBackIsNotCountedAsMissing()
+    {
+        // no Level component, no rarity in the slot, durability unreadable on the new item (the lab's reads came back
+        // empty): nothing to compare, nothing claimed
+        var before = Read(socket: false, level: 0, unlocked: 0, durability: true);
+        var after = Read(level: 0, unlocked: 0, durability: false, current: 0, max: 0);
+        var r = Gems.CheckRecreated(Recreated, before, null, after, ItemRarity.Rare, null);
+        Assert.Equal(GemSocketStatus.Done, r.Status);
+        Assert.Empty(r.Missing);
+        // a durability within a point of the fraction is kept
+        Assert.Empty(Gems.CheckRecreated(Recreated, Read(socket: false, current: 600, max: 1200), null, Read(current: 601, max: 1200), null, null).Missing);
+    }
+
+    [Fact]
+    public void ANewItemThatCannotBeReadBackIsIncomplete()
+    {
+        var r = Gems.CheckRecreated(Recreated, Read(socket: false), null, null, null, "item instances are off");
+        Assert.Equal(GemSocketStatus.Incomplete, r.Status);
+        Assert.Equal(NewRing, r.After);
+        Assert.Contains("item instances are off", Assert.Single(r.Missing));
+        var gone = Gems.CheckRecreated(Recreated, Read(socket: false), null, Read(found: false), null, null);
+        Assert.Equal(GemSocketStatus.Incomplete, gone.Status);
+        Assert.Single(gone.Missing);
+    }
+
+    [Fact]
+    public void ARefusalIsPassedThroughUnchecked()
+    {
+        var refused = new GemSocketResult(GemSocketStatus.Refused, OldRing, OldRing, "the game said no");
+        Assert.Same(refused, Gems.CheckRecreated(refused, Read(socket: false), null, null, null, null));
+    }
+
     [Fact]
     public void TheForgeListsWidenToTheCategoriesOfTheKinds()
     {

@@ -21,6 +21,7 @@
 // Evidence and the consumers of each field: docs/re/content.md section 8.
 #include <windows.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -451,8 +452,12 @@ void one_ref(const Schema& s, const Field& f, const json& v, const ItemFind& fin
     }
     uint8_t g[16];
     std::string why;
+    // the field's last value decides, as for the writes ("program" and a "refs" entry on one field)
+    auto& un = out->unresolved;
+    un.erase(std::remove(un.begin(), un.end(), &f), un.end());
     if (!resolve(s, f, v.is_null() ? std::string("none") : v.get<std::string>(), find, p, g, nullptr, nullptr, &why)) {
         out->problems.push_back(why);
+        un.push_back(&f);
         return;
     }
     put(out, &f, g);
@@ -665,6 +670,18 @@ void kitbash(const Schema& s, const std::string& key, const json& value, const I
         return;
     }
     one_ref(s, *f, value, find, p, out);
+}
+
+size_t placeholder_clear_programs(KitbashOut* out) {
+    static const uint8_t none[16] = {};
+    size_t n = 0;
+    for (const Field* f : out->unresolved)
+        if (f && f->bytes == 16 &&
+            (f->type_name == "keen::ImpactProgramReference" || f->type_name == "keen::ObjectReference<keen::ImpactProgram>")) {
+            put(out, f, none);
+            ++n;
+        }
+    return n;
 }
 
 void refs_reset() {
