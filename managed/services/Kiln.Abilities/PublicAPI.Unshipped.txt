@@ -1,1 +1,100 @@
 #nullable enable
+Kiln.EquippedGem
+Kiln.EquippedGem.<Clone>$() -> Kiln.EquippedGem!
+Kiln.EquippedGem.Deconstruct(out Kiln.EntityId Player, out Kiln.GemImpactSlot Slot, out Kiln.SocketedGem Socket, out Kiln.EntityId Impact) -> void
+Kiln.EquippedGem.Equals(Kiln.EquippedGem? other) -> bool
+Kiln.EquippedGem.EquippedGem(Kiln.EntityId Player, Kiln.GemImpactSlot Slot, Kiln.SocketedGem Socket, Kiln.EntityId Impact) -> void
+Kiln.EquippedGem.Impact.get -> Kiln.EntityId
+Kiln.EquippedGem.Impact.init -> void
+Kiln.EquippedGem.Player.get -> Kiln.EntityId
+Kiln.EquippedGem.Player.init -> void
+Kiln.EquippedGem.Slot.get -> Kiln.GemImpactSlot
+Kiln.EquippedGem.Slot.init -> void
+Kiln.EquippedGem.Socket.get -> Kiln.SocketedGem
+Kiln.EquippedGem.Socket.init -> void
+Kiln.GemConfigValue
+Kiln.GemConfigValue.Alias.get -> string?
+Kiln.GemConfigValue.Alias.init -> void
+Kiln.GemConfigValue.<Clone>$() -> Kiln.GemConfigValue!
+Kiln.GemConfigValue.Deconstruct(out uint Id, out string? Alias, out string! Kind, out double Value, out double? ScaleFactor) -> void
+Kiln.GemConfigValue.Equals(Kiln.GemConfigValue? other) -> bool
+Kiln.GemConfigValue.GemConfigValue(uint Id, string? Alias, string! Kind, double Value, double? ScaleFactor) -> void
+Kiln.GemConfigValue.Id.get -> uint
+Kiln.GemConfigValue.Id.init -> void
+Kiln.GemConfigValue.Kind.get -> string!
+Kiln.GemConfigValue.Kind.init -> void
+Kiln.GemConfigValue.ScaleFactor.get -> double?
+Kiln.GemConfigValue.ScaleFactor.init -> void
+Kiln.GemConfigValue.Value.get -> double
+Kiln.GemConfigValue.Value.init -> void
+Kiln.GemImpactSlot
+Kiln.GemImpactSlot.Ammo = 9 -> Kiln.GemImpactSlot
+Kiln.GemImpactSlot.Chest = 3 -> Kiln.GemImpactSlot
+Kiln.GemImpactSlot.Feet = 6 -> Kiln.GemImpactSlot
+Kiln.GemImpactSlot.Hands = 4 -> Kiln.GemImpactSlot
+Kiln.GemImpactSlot.Head = 2 -> Kiln.GemImpactSlot
+Kiln.GemImpactSlot.Held = 0 -> Kiln.GemImpactSlot
+Kiln.GemImpactSlot.Legs = 5 -> Kiln.GemImpactSlot
+Kiln.GemImpactSlot.Ring1 = 7 -> Kiln.GemImpactSlot
+Kiln.GemImpactSlot.Ring2 = 8 -> Kiln.GemImpactSlot
+Kiln.GemImpactSlot.Shield = 1 -> Kiln.GemImpactSlot
+Kiln.GemImpactSlot.Spell = 10 -> Kiln.GemImpactSlot
+Kiln.GemInfo
+Kiln.GemInfo.<Clone>$() -> Kiln.GemInfo!
+Kiln.GemInfo.Configs.get -> System.Collections.Generic.IReadOnlyDictionary<uint, Kiln.GemConfigValue!>!
+Kiln.GemInfo.Configs.init -> void
+Kiln.GemInfo.Deconstruct(out Kiln.ItemId Item, out string! Name, out string? DisplayName, out Kiln.ItemRarity Rarity, out int LevelMin, out int LevelMax, out System.Guid Program, out System.Collections.Generic.IReadOnlyDictionary<uint, Kiln.GemConfigValue!>! Configs, out bool FromMod) -> void
+Kiln.GemInfo.DisplayName.get -> string?
+Kiln.GemInfo.DisplayName.init -> void
+Kiln.GemInfo.Equals(Kiln.GemInfo? other) -> bool
+Kiln.GemInfo.FromMod.get -> bool
+Kiln.GemInfo.FromMod.init -> void
+Kiln.GemInfo.GemInfo(Kiln.ItemId Item, string! Name, string? DisplayName, Kiln.ItemRarity Rarity, int LevelMin, int LevelMax, System.Guid Program, System.Collections.Generic.IReadOnlyDictionary<uint, Kiln.GemConfigValue!>! Configs, bool FromMod) -> void
+Kiln.GemInfo.Item.get -> Kiln.ItemId
+Kiln.GemInfo.Item.init -> void
+Kiln.GemInfo.LevelMax.get -> int
+Kiln.GemInfo.LevelMax.init -> void
+Kiln.GemInfo.LevelMin.get -> int
+Kiln.GemInfo.LevelMin.init -> void
+Kiln.GemInfo.Name.get -> string!
+Kiln.GemInfo.Name.init -> void
+Kiln.GemInfo.Program.get -> System.Guid
+Kiln.GemInfo.Program.init -> void
+Kiln.GemInfo.Rarity.get -> Kiln.ItemRarity
+Kiln.GemInfo.Rarity.init -> void
+Kiln.Gems
+Kiln.SocketedGem
+Kiln.SocketedGem.Carrier.get -> Kiln.ItemInstanceRef
+Kiln.SocketedGem.Carrier.init -> void
+Kiln.SocketedGem.Deconstruct(out Kiln.ItemInstanceRef Carrier, out Kiln.ItemId Gem, out int Level) -> void
+Kiln.SocketedGem.Equals(Kiln.SocketedGem other) -> bool
+Kiln.SocketedGem.Gem.get -> Kiln.ItemId
+Kiln.SocketedGem.Gem.init -> void
+Kiln.SocketedGem.Level.get -> int
+Kiln.SocketedGem.Level.init -> void
+Kiln.SocketedGem.SocketedGem(Kiln.ItemInstanceRef Carrier, Kiln.ItemId Gem, int Level) -> void
+Kiln.SocketedGem.SocketedGem() -> void
+override Kiln.EquippedGem.Equals(object? obj) -> bool
+override Kiln.EquippedGem.GetHashCode() -> int
+override Kiln.EquippedGem.ToString() -> string!
+override Kiln.GemConfigValue.Equals(object? obj) -> bool
+override Kiln.GemConfigValue.GetHashCode() -> int
+override Kiln.GemConfigValue.ToString() -> string!
+override Kiln.GemInfo.Equals(object? obj) -> bool
+override Kiln.GemInfo.GetHashCode() -> int
+override Kiln.GemInfo.ToString() -> string!
+~override Kiln.SocketedGem.Equals(object obj) -> bool
+override Kiln.SocketedGem.GetHashCode() -> int
+~override Kiln.SocketedGem.ToString() -> string
+static Kiln.EquippedGem.operator !=(Kiln.EquippedGem? left, Kiln.EquippedGem? right) -> bool
+static Kiln.EquippedGem.operator ==(Kiln.EquippedGem? left, Kiln.EquippedGem? right) -> bool
+static Kiln.GemConfigValue.operator !=(Kiln.GemConfigValue? left, Kiln.GemConfigValue? right) -> bool
+static Kiln.GemConfigValue.operator ==(Kiln.GemConfigValue? left, Kiln.GemConfigValue? right) -> bool
+static Kiln.GemInfo.operator !=(Kiln.GemInfo? left, Kiln.GemInfo? right) -> bool
+static Kiln.GemInfo.operator ==(Kiln.GemInfo? left, Kiln.GemInfo? right) -> bool
+static Kiln.Gems.Catalog.get -> System.Collections.Generic.IReadOnlyList<Kiln.GemInfo!>!
+static Kiln.Gems.Equipped(Kiln.EntityId player) -> System.Collections.Generic.IReadOnlyList<Kiln.EquippedGem!>!
+static Kiln.Gems.Get(Kiln.ItemId gem) -> Kiln.GemInfo?
+static Kiln.Gems.Socket(Kiln.ItemInstanceRef carrier) -> Kiln.SocketedGem?
+static Kiln.SocketedGem.operator !=(Kiln.SocketedGem left, Kiln.SocketedGem right) -> bool
+static Kiln.SocketedGem.operator ==(Kiln.SocketedGem left, Kiln.SocketedGem right) -> bool

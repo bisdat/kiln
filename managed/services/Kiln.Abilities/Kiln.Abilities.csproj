@@ -22,6 +22,8 @@
     <InternalsVisibleTo Include="Kiln.Host.Tests" />
     <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />
     <ProjectReference Include="../Kiln.Spawn/Kiln.Spawn.csproj" Private="false" />
+    <!-- gems: item catalog, item instances and sockets (Gems/) -->
+    <ProjectReference Include="../Kiln.Items/Kiln.Items.csproj" Private="false" />
     <ProjectReference Include="../Kiln.World/Kiln.World.csproj" Private="false" />
     <ProjectReference Include="../Kiln.Combat/Kiln.Combat.csproj" Private="false" />
     <ProjectReference Include="../Kiln.Network/Kiln.Network.csproj" Private="false" />
