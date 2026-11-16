@@ -173,6 +173,64 @@ static void test_windows() {
     CHECK(widget_takes_clicks(EMF_UI_IMAGE) && !widget_takes_clicks(EMF_UI_TEXT));
 }
 
+// The kiln.log line for a window (support reports): clickable widgets with their keys and texts, then texts; bounded.
+static void test_window_log() {
+    CHECK(log_text("Hunter\n(4 m)\t", 64) == "Hunter (4 m)");
+    CHECK(log_text(std::string(100, 'a'), 10) == std::string(10, 'a') + "...");
+    // never cut inside a UTF-8 sequence: "\xC3\xA9" is one character
+    CHECK(log_text("ab\xC3\xA9", 3) == "ab...");
+    WindowRequest r;
+    r.id = "expeditions";
+    r.title = "Expeditions";
+    WindowWidget h;
+    h.type = EMF_UI_HEADING;
+    h.text = "Survivors";
+    WindowWidget row;
+    row.type = EMF_UI_ROW;
+    row.key = "pick.7";
+    row.text = "Hunter (4 m)";
+    row.flags = EMF_UI_SELECTED;
+    WindowWidget send;
+    send.type = EMF_UI_BUTTON;
+    send.key = "send";
+    send.text = "Send";
+    send.flags = EMF_UI_DISABLED;
+    WindowWidget nokey;  // a button without a key sends nothing: not clickable
+    nokey.type = EMF_UI_BUTTON;
+    nokey.text = "Inert";
+    WindowWidget pic;
+    pic.type = EMF_UI_IMAGE;
+    pic.key = "portrait";
+    WindowWidget bar;
+    bar.type = EMF_UI_BAR;
+    bar.text = "50%";
+    r.widgets = {h, row, send, nokey, pic, bar};
+    const std::string s = window_log_summary(r);
+    CHECK(s == "\"Expeditions\", 6 widgets, events on the server world; clickable: pick.7 \"Hunter (4 m)\" (selected), "
+               "send \"Send\" (off), portrait (picture); text: \"Survivors\", \"Inert\"");
+    // nothing clickable, the client world
+    r.world_kind = EMF_WORLD_CLIENT;
+    r.widgets = {h};
+    CHECK(window_log_summary(r) == "\"Expeditions\", 1 widgets, events on the client world; clickable: none; text: \"Survivors\"");
+    // caps: rows, texts and the whole line
+    r.widgets.clear();
+    for (int i = 0; i < 40; ++i) {
+        WindowWidget x;
+        x.type = EMF_UI_ROW;
+        x.key = "r" + std::to_string(i);
+        x.text = std::string(200, 'x');
+        r.widgets.push_back(x);
+        WindowWidget t;
+        t.text = "t" + std::to_string(i);
+        r.widgets.push_back(t);
+    }
+    const std::string big = window_log_summary(r);
+    CHECK(big.size() <= kLogLineLen);
+    CHECK(big.find("r15 ") != std::string::npos && big.find("r16 ") == std::string::npos);
+    CHECK(big.find("+24 more") != std::string::npos);
+    CHECK(big.find("\"t5\"") != std::string::npos && big.find("\"t6\"") == std::string::npos && big.find("+34 more") != std::string::npos);
+}
+
 static void test_images() {
     CHECK(portrait_key_ok("wolf") && portrait_key_ok("wolf_2.v1"));
     CHECK(!portrait_key_ok("") && !portrait_key_ok("..") && !portrait_key_ok("a..b") && !portrait_key_ok("x/y"));
@@ -548,6 +606,7 @@ int main() {
     test_note_rows();
     test_level();
     test_windows();
+    test_window_log();
     test_images();
     test_components();
     test_offers();

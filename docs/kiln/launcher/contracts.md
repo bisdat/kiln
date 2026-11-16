@@ -660,6 +660,7 @@ case ignored. Table and markers: `engines::ENGINES` ([engines.md](../engines.md)
 | `ultimateasiloader` | export or text `IsUltimateASILoader` | chained as `..\xinput9_1_0.dll` next to the game (refused when that name is taken) | load |
 | `aldrich`, `livemap`, `sharedxp`, `reshade` | `aldrich` / `livemap.ini` / `xpshare.ini` / `reshade` | chain | load |
 | `chainloader` | `dinput8-chain.ini` | chain | load |
+| `nativefolders` | `native-loader.log` (CharosDX's loader of `mods\<mod>\native\*.dll`) | chain | load |
 | `unknown` | any other 64-bit PE DLL | chain | load |
 | `notdll` / `none` | not a 64-bit PE DLL / no file | refuse / nothing to do | refuse (`not-dll`) |
 

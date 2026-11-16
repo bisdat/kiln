@@ -223,7 +223,7 @@ export interface BundlePart {
 export type ProxyKind = "none" | "kiln" | "shroudforge" | "emf" | "unknown" | "notdll"
   // other engines' loaders and tools under a proxy name (kiln_manage::engines)
   | "eml" | "set" | "enshwick" | "greeneye" | "shroudtopia" | "flame" | "shroudlink" | "ember" | "modloaderproxy"
-  | "ultimateasiloader" | "aldrich" | "livemap" | "sharedxp" | "reshade" | "chainloader";
+  | "ultimateasiloader" | "aldrich" | "livemap" | "sharedxp" | "reshade" | "chainloader" | "nativefolders";
 export interface ProxyClass {
   kind: ProxyKind;
   version: string | null;

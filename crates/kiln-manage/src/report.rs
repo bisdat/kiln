@@ -1137,8 +1137,15 @@ pub fn build(input: &ReportInput) -> Report {
                 };
                 for (id, v, on) in rows {
                     n += 1;
-                    off += usize::from(!on);
-                    let _ = writeln!(pr, "  {:<12} {:<32} {:<16} {}", kind.as_str(), id, v.as_deref().unwrap_or("-"), if on { "on" } else { "off" });
+                    // an EML mod the player has on that activation could not apply (emlRuntimeBlocked) is written
+                    // enabled: false; it is the player's "on", not applied (inbox 38)
+                    let blocked = (kind == ModKind::Eml && !on).then(|| p.eml_runtime_blocked.get(&id)).flatten();
+                    off += usize::from(!on && blocked.is_none());
+                    let state = match blocked {
+                        Some(why) => format!("on, not applied: {why}"),
+                        None => (if on { "on" } else { "off" }).to_string(),
+                    };
+                    let _ = writeln!(pr, "  {:<12} {:<32} {:<16} {state}", kind.as_str(), id, v.as_deref().unwrap_or("-"));
                 }
             }
             if n == 0 {

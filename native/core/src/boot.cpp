@@ -534,6 +534,7 @@ void boot() {
     load_config();
     profile::load();
     compat::init();  // compat-rules.json (shipped, then the player's); adds overlaps and rules to state/hooks.json
+    hooks::add_map_extension(&sigdb::code_patch_map);  // state/hooks.json "codePatches": who changed which code (inbox 39)
     if (profile::state().mode == KILN_PROFILE_INVALID)
         f.errors.push_back("profile " + profile::state().file + " is invalid (" + profile::state().error + "): no mods loaded");
     if (!init_image()) {

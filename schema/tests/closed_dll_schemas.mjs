@@ -52,6 +52,8 @@ for (const [what, mutate] of [
   ["bad rule action", (d) => { d.rules[0].action = "explode"; }],
   ["rva without 0x", (d) => { d.targets[0].rva = "9151f0"; }],
   ["unknown link kind", (d) => { d.targets[0].links[0].kind = "weird"; }],
+  ["code patch row without by", (d) => { d.codePatches = { available: true, total: 1, rows: [{ rva: "0xbd111d", size: 5 }] }; }],
+  ["code patches without available", (d) => { d.codePatches = { total: 0, rows: [] }; }],
 ]) {
   const d = structuredClone(good);
   mutate(d);

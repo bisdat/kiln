@@ -219,6 +219,50 @@ std::vector<std::string> describe_window(const WindowRequest& w) {
     return out;
 }
 
+std::string log_text(std::string_view s, size_t max) {
+    std::string out;
+    out.reserve(std::min(s.size(), max));
+    for (char c : s) out += static_cast<unsigned char>(c) < 0x20 || c == 0x7F ? ' ' : c;
+    const size_t first = out.find_first_not_of(' ');
+    if (first == std::string::npos) return {};
+    out.erase(0, first);
+    out.erase(out.find_last_not_of(' ') + 1);
+    if (out.size() <= max) return out;
+    size_t n = max;
+    while (n > 0 && (static_cast<unsigned char>(out[n]) & 0xC0) == 0x80) --n;  // never inside a UTF-8 sequence
+    out.resize(n);
+    return out + "...";
+}
+
+std::string window_log_summary(const WindowRequest& w) {
+    std::string clickable, texts;
+    size_t n_click = 0, n_text = 0;
+    for (const WindowWidget& x : w.widgets) {
+        const std::string t = log_text(x.text, kLogTextLen);
+        if (widget_takes_clicks(x.type) && !x.key.empty()) {
+            if (n_click++ >= kLogClickables) continue;
+            if (!clickable.empty()) clickable += ", ";
+            clickable += log_text(x.key, kMaxWidgetKeyLen);
+            if (!t.empty()) clickable += " \"" + t + "\"";
+            else if (x.type == EMF_UI_IMAGE) clickable += " (picture)";
+            if (x.flags & EMF_UI_DISABLED) clickable += " (off)";
+            if (x.flags & EMF_UI_SELECTED) clickable += " (selected)";
+        } else if (!t.empty() && x.type != EMF_UI_BAR) {  // bars: progress text that changes all the time
+            if (n_text++ >= kLogTexts) continue;
+            if (!texts.empty()) texts += ", ";
+            texts += "\"" + t + "\"";
+        }
+    }
+    if (n_click > kLogClickables) clickable += ", +" + std::to_string(n_click - kLogClickables) + " more";
+    if (n_text > kLogTexts) texts += ", +" + std::to_string(n_text - kLogTexts) + " more";
+    std::string s = "\"" + log_text(w.title, kMaxWindowTitleLen) + "\", " + std::to_string(w.widgets.size()) +
+                    " widgets, events on the " + (w.world_kind == EMF_WORLD_CLIENT ? "client" : "server") +
+                    " world; clickable: " + (clickable.empty() ? "none" : clickable);
+    if (!texts.empty()) s += "; text: " + texts;
+    if (s.size() > kLogLineLen) s = log_text(s, kLogLineLen - 3);
+    return s;
+}
+
 // ============================================================================================= v10 wheel =======
 bool valid_hold_key(uint32_t vk) {
     // VK_LBUTTON..VK_XBUTTON2 = 0x01..0x06, VK_LSHIFT..VK_RMENU = 0xA0..0xA5

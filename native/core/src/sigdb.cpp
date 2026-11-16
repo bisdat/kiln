@@ -1283,6 +1283,47 @@ bool hole_value_at(const Pattern& p, uintptr_t live_match, std::string_view name
 
 bool code_from_disk() { return code().disk; }
 
+void code_patch_map(void* json, const char*) {
+    if (!json) return;
+    auto& doc = *static_cast<nlohmann::ordered_json*>(json);
+    constexpr size_t kRows = 1024;  // Kiln's own hooks, other loaders' (Greeneye: 100+) and patches fit; the total says more
+    code();  // the file view is made once
+    const Code& c = g_code;
+    const ImageInfo& img = image();
+    nlohmann::ordered_json out = nlohmann::ordered_json::object();
+    if (!c.file_text || !img.text || c.file_size != img.text_size) {
+        out["available"] = false;
+        out["reason"] = c.note.empty() ? "no file view of the exe's code" : c.note;
+        doc["codePatches"] = std::move(out);
+        return;
+    }
+    const uintptr_t live = reinterpret_cast<uintptr_t>(img.text);
+    size_t total = 0;
+    const auto rows = pe::patch_rows(c.file_text, img.text, c.file_size, c.text_rva, live, img.base, img.size, kRows,
+                                     &total, call_lands);
+    nlohmann::ordered_json list = nlohmann::ordered_json::array();
+    for (const pe::PatchRow& r : rows) {
+        nlohmann::ordered_json row;
+        const uintptr_t at = img.base + r.rva;
+        row["rva"] = hex(int64_t{r.rva});
+        row["size"] = r.len;
+        if (r.call) {
+            const std::string by = patched_by(at);  // follows the call's new target to a module
+            row["by"] = by.rfind("jmp to ", 0) == 0 ? "call redirected to " + by.substr(7) : "call redirected (" + by + ")";
+            row["called"] = hex(int64_t{r.called_rva});
+            if (const std::string s = symbol_name_at(img.base + r.called_rva); !s.empty()) row["calledSymbol"] = s;
+        } else {
+            row["by"] = patched_by(at);
+        }
+        if (const std::string s = symbol_name_at(at); !s.empty()) row["symbol"] = s;
+        list.push_back(std::move(row));
+    }
+    out["available"] = true;
+    out["total"] = total;
+    out["rows"] = std::move(list);
+    doc["codePatches"] = std::move(out);
+}
+
 // ---- kiln.hooks v2 accessors ----
 bool file_bytes(uintptr_t live_addr, uint8_t* out, size_t n) {
     const pe::CodeView& cv = code();

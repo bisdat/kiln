@@ -23,7 +23,31 @@
     "foreign": { "type": "array", "items": { "$ref": "#/$defs/foreignSymbol" }, "description": "Every sigdb symbol whose live code differed from the exe file's before Kiln hooked anything (someone else patched it), Kiln-hooked or not." },
     "overlaps": { "type": "array", "items": { "$ref": "#/$defs/overlap" }, "description": "Closed-DLL report. Absent in a core without it (dev.20)." },
     "rules": { "type": "array", "items": { "$ref": "#/$defs/ruleResult" }, "description": "The compat rules that fired this session. Absent in a core without it." },
-    "ruleFiles": { "type": "array", "items": { "$ref": "#/$defs/ruleFile" }, "description": "The rule files that exist (shipped defaults, then the player's); a missing file is not listed." }
+    "ruleFiles": { "type": "array", "items": { "$ref": "#/$defs/ruleFile" }, "description": "The rule files that exist (shipped defaults, then the player's); a missing file is not listed." },
+    "codePatches": {
+      "type": "object",
+      "description": "Every place the live code differs from the exe file's when the map is written, Kiln's own hooks included (sigdb code_patch_map, since 0.2.0-dev.30). Absent in an older core.",
+      "required": ["available"],
+      "properties": {
+        "available": { "type": "boolean", "description": "False when Kiln has no file view of the code (then `reason`)." },
+        "reason": { "type": "string" },
+        "total": { "type": "integer", "minimum": 0, "description": "All places, also those past the row limit." },
+        "rows": {
+          "type": "array", "maxItems": 1024,
+          "items": {
+            "type": "object", "required": ["rva", "size", "by"],
+            "properties": {
+              "rva": { "type": "string", "description": "RVA of the place; a redirected call: its E8." },
+              "size": { "type": "integer", "minimum": 1 },
+              "by": { "type": "string", "description": "`call redirected to <module>+<offset>`, `jmp to <module>+<offset>` or `bytes changed in place`." },
+              "called": { "type": "string", "description": "A redirected call: RVA of the function it called in the file." },
+              "calledSymbol": { "type": "string" },
+              "symbol": { "type": "string", "description": "The sigdb symbol at the place, when there is one." }
+            }
+          }
+        }
+      }
+    }
   },
   "additionalProperties": true,
   "$defs": {

@@ -30,6 +30,7 @@ this order; the first match wins. Texts match as ASCII or UTF-16LE, case ignored
 | `sharedxp` | `xpshare.ini` |
 | `reshade` | `reshade` |
 | `chainloader` | `dinput8-chain.ini` (XHL-Core, Auto Loot Plus and similar) |
+| `nativefolders` | `native-loader.log` (CharosDX's loader of `mods\<mod>\native\*.dll`: Sparkworks Enhanced, Cross-Base Storage, Craft From Stations) |
 | `unknown` / `notdll` / `none` | any other 64-bit DLL / not a 64-bit DLL / no file |
 
 The markers start from EMF's `known_tools.txt` (MIT). A marker that turns out wrong for a release is a one-line fix in
@@ -270,6 +271,17 @@ engines' mods") and 5.8.
   with a folder of plugin DLLs beside it (`powrprof.dll` + `plugins\`), see [Files in the game folder](#files-in-the-game-folder).
   For any other DLL mod that reads its files from the game folder, Kiln still has no kind. A lone DLL under a proxy name
   gets a few characters of its hash in its id, so two different `winmm.dll` files never share an entry.
+- **Mods for CharosDX's loader** (Sparkworks Enhanced, Cross-Base Storage, Craft From Stations; since 0.2.0-dev.29.10).
+  The package is a `dinput8.dll` that loads every `<game>\mods\<mod>\native\*.dll` from its DllMain and calls nothing
+  in them (source: github.com/CharosDX/sparkworks-enhanced, `src/dinput8_proxy.c`), plus `mods/<mod>/mod.json` (names
+  the mod; EML runs nothing there) and `mods/<mod>/native/<mod>.dll`. The loader is left out with a note; each such
+  `mods/<mod>` folder (a mod.json, no Lua, a `native` folder whose DLLs no other engine claims) becomes one native mod
+  with a generated native.json: its DLLs in the loader's order (by name, case ignored), phase `early` (on the main
+  thread before any game code and before Kiln hooks anything, as the loader's DllMain did), side `both` (the loader ran
+  wherever it was put; the DLL decides what it does in `enshrouded_server.exe`). The mod.json id is the Library id when
+  it is a Kiln id, else its slug. These DLLs keep their settings and logs beside their own DLL (`GetModuleFileNameA` of
+  their module): `config.ini` and `debug.log` are written into the Library entry, which counts as the mod's output, not
+  an edit (`library::own_output`).
 - **Archives.** `.7z` is read in-process (`sevenz-rust2`, pure Rust, no password support, decoder memory capped at 256
   MiB). `.rar` needs a tool that is already on the PC (`unrar`, `7zz`/`7z`, `bsdtar`, Windows' `tar.exe`), found by
   absolute path, started with an empty private working folder, stopped when its output passes the import limits, and its

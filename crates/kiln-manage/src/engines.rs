@@ -69,6 +69,7 @@ pub enum Engine {
     #[serde(rename = "reshade")]
     ReShade,
     ChainLoader,
+    NativeFolders,
 }
 
 /// What Kiln knows about one engine.
@@ -136,6 +137,12 @@ pub const ENGINES: &[EngineInfo] = &[
         exports: &[], texts: &["reshade"], what: "a graphics post-processing tool" },
     EngineInfo { engine: Engine::ChainLoader, word: "chain-loader", name: "a dinput8-chain.ini chain loader", proxies: &["dinput8.dll"],
         exports: &[], texts: &["dinput8-chain.ini"], what: "a DLL chain loader (XHL-Core, Auto Loot Plus and others)" },
+    // CharosDX's loader (github.com/CharosDX/sparkworks-enhanced src/dinput8_proxy.c, MIT; the same file ships with
+    // Cross-Base Storage and Craft From Stations): in DllMain it LoadLibrary's every <game>\mods\<mod>\native\*.dll and
+    // logs to native-loader.log there. Kiln imports those mod folders as native mods (library::native_folder_dlls).
+    EngineInfo { engine: Engine::NativeFolders, word: "native-folders", name: "CharosDX's DLL mod loader",
+        proxies: &["dinput8.dll"], exports: &[], texts: &["native-loader.log"],
+        what: "a DLL mod loader (Sparkworks Enhanced, Cross-Base Storage, Craft From Stations)" },
 ];
 
 const KILN_INFO: EngineInfo = EngineInfo { engine: Engine::Kiln, word: "kiln", name: "Kiln", proxies: &["dinput8.dll"],
@@ -172,6 +179,7 @@ impl Engine {
             Engine::SharedXp => ProxyKind::SharedXp,
             Engine::ReShade => ProxyKind::ReShade,
             Engine::ChainLoader => ProxyKind::ChainLoader,
+            Engine::NativeFolders => ProxyKind::NativeFolders,
         }
     }
 
@@ -317,7 +325,7 @@ pub fn own_loader_in(dir: &Path) -> Option<(Engine, String)> {
 
 /// Loaders of DLL mods that Kiln does itself (it chains DLLs and reads `dinput8-chain.ini`).
 fn is_chain_loader(engine: Engine) -> bool {
-    matches!(engine, Engine::ChainLoader | Engine::ModLoaderProxy)
+    matches!(engine, Engine::ChainLoader | Engine::ModLoaderProxy | Engine::NativeFolders)
 }
 
 /// A loader in a package that is only worth a line of information: the player has nothing to do.
@@ -352,6 +360,7 @@ pub fn loader_reason(engine: Engine, file: &str) -> String {
         Engine::Ember => "Ember's own loader is in this package: not needed, and Kiln can't run Ember mods yet".to_string(),
         e if kiln_runs(e) => format!("{short}'s own loader is in this package: not needed, Kiln runs {short} mods"),
         Engine::ChainLoader | Engine::ModLoaderProxy => format!("{file} is {n}: not needed, Kiln loads DLL mods itself"),
+        Engine::NativeFolders => format!("{file} is {n}: not needed, Kiln loads the DLLs in each mods\\<mod>\\native folder itself"),
         Engine::LiveMap | Engine::SharedXp => format!(
             "{file} is {n}, a stand-alone server mod: Kiln doesn't manage it, copy it into the server folder yourself"
         ),
@@ -454,7 +463,7 @@ pub fn detect_dll(path: &Path, bytes: &[u8], exports: &[String]) -> Option<Detec
     let class = crate::pe::classify_bytes(bytes);
     let engine = Engine::of_proxy(class.kind).filter(|e| *e != Engine::Kiln)?; // Kiln's own proxy: library's rule
     // a plain DLL that merely mentions "dinput8-chain.ini" or "reshade" keeps Kiln's own rules unless it is one by name
-    if matches!(engine, Engine::ChainLoader | Engine::ReShade | Engine::Aldrich) && !is_proxy_name(&file) {
+    if matches!(engine, Engine::ChainLoader | Engine::ReShade | Engine::Aldrich | Engine::NativeFolders) && !is_proxy_name(&file) {
         return None;
     }
     // shroudlink's client addon is a DLL mod (Kiln chains it), not a loader Kiln replaces
@@ -480,7 +489,8 @@ pub fn engine_kind(engine: Engine) -> DetectKind {
         Engine::Ember => DetectKind::Ember,
         Engine::UltimateAsiLoader => DetectKind::Asi,
         Engine::ReShade => DetectKind::Reshade,
-        Engine::ModLoaderProxy | Engine::Aldrich | Engine::LiveMap | Engine::SharedXp | Engine::ChainLoader => DetectKind::Proxy,
+        Engine::ModLoaderProxy | Engine::Aldrich | Engine::LiveMap | Engine::SharedXp | Engine::ChainLoader
+            | Engine::NativeFolders => DetectKind::Proxy,
     }
 }
 
