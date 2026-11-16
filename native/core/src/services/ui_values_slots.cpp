@@ -22,9 +22,12 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -34,6 +37,17 @@ namespace kiln::uivalues {
 namespace {
 
 constexpr uint32_t kSlotsBudget = 4096;
+// Opt-in research-only capture of UI model entries already traversed by read_holders.
+// No native game writes, no additional hooks, no changes to the public Kiln ABI.
+constexpr size_t kProbeMaxRows = 512;
+constexpr size_t kProbePrintedRows = 144;
+bool model_probe_enabled() {
+    static const bool enabled = [] {
+        const char* value = std::getenv("KILN_GEMFORGE_UI_MODEL_PROBE");
+        return value && value[0] == '1' && value[1] == '\0';
+    }();
+    return enabled;
+}
 constexpr size_t kSlotResultBytes = 0x20;
 constexpr size_t kRecordMin = offsetof(KilnUiVisibleSlot, holder);  // the chapter's record (88 bytes)
 
@@ -63,7 +77,12 @@ thread_local SlotCollector* t_slot = nullptr;
 struct PageInfo {
     uint32_t holder = 0, ordinal = 0;
 };
+struct ModelProbeRow {
+    uint32_t holder = 0, page = 0, index = 0, item = 0, count = 0;
+};
 struct FrameCollector {
+    std::vector<ModelProbeRow>* model_rows = nullptr;
+    uint32_t model_rows_total = 0;
     std::vector<KilnUiVisibleSlot>* slots = nullptr;  // reused buffer of the UI thread
     bool overflow = false;
     bool holders_read = false;
@@ -95,7 +114,7 @@ bool rect_ok(const float* r) {
 }
 
 // The pages of the frame's play data: holder and ordinal of each page entity.
-bool read_holders(std::unordered_map<uint32_t, PageInfo>& pages) {
+bool read_holders(std::unordered_map<uint32_t, PageInfo>& pages, FrameCollector& frame) {
     const SlotsLayout& L = g_sl;
     if (!L.holders) return false;
     uintptr_t app = 0, data = 0, state = 0, play = 0, models = 0;
@@ -119,6 +138,18 @@ bool read_holders(std::unordered_map<uint32_t, PageInfo>& pages) {
             if (!env().read(view, views + i * kViewBytes, kViewBytes)) return false;
             uint32_t page;
             std::memcpy(&page, view + L.view.page, 4);
+            if (frame.model_rows) {
+                uint32_t item = 0, quantity = 0;
+                std::memcpy(&item, view + L.view.item, sizeof item);
+                std::memcpy(&quantity, view + L.view.count, sizeof quantity);
+                if (item && quantity) {
+                    ++frame.model_rows_total;
+                    if (frame.model_rows->size() < kProbeMaxRows)
+                        frame.model_rows->push_back(ModelProbeRow{
+                            owner, page, view[L.view.index], item, quantity
+                        });
+                }
+            }
             if (owner && page && pages.try_emplace(page, PageInfo{owner, ordinal}).second) ++ordinal;
         }
     }
@@ -162,7 +193,7 @@ void record(FrameCollector& f, const SlotCollector& c, uintptr_t out) {
         s.view_flags = v.flags;
         if (!f.holders_read) {
             f.holders_read = true;
-            f.holders_valid = read_holders(*f.pages);  // UiApp exists only while the frame runs
+            f.holders_valid = read_holders(*f.pages, f);  // UiApp exists only while the frame runs
             if (!f.holders_valid) f.pages->clear();  // never publish a partial holder map
         }
         const auto it = f.pages->find(page);
@@ -192,6 +223,59 @@ void KILN_CALL on_geometry(KilnRegisters* r, void*) {
     c->inner_seen = game_read(r->rax, &c->inner);
 }
 
+void log_forge_models(const FrameCollector& f, const KilnUiSlotsFrame& snapshot) {
+    if (!model_probe_enabled()) return;
+    // kiln.ui has published the completed screen at this point. Its client
+    // entity IDs are not authoritative server inventory or item identities.
+    static thread_local bool previously_forge = false;
+    static thread_local uint32_t reports_for_open = 0;
+    static thread_local uint64_t last_report_ms = 0;
+    const bool forge = snapshot.screen.available && snapshot.screen.hud_screen == 45;
+    if (!forge) {
+        previously_forge = false;
+        reports_for_open = 0;
+        last_report_ms = 0;
+        return;
+    }
+    if (!previously_forge) {
+        reports_for_open = 0;
+        last_report_ms = 0;
+    }
+    previously_forge = true;
+    if (reports_for_open >= 4 ||
+        (reports_for_open && snapshot.capture_ms >= last_report_ms &&
+         snapshot.capture_ms - last_report_ms < 6000))
+        return;
+    ++reports_for_open;
+    last_report_ms = snapshot.capture_ms;
+    const size_t captured = f.model_rows ? f.model_rows->size() : 0;
+    logf(KILN_LOG_INFO,
+         "gemforge-ui-model-probe: frame=%llu session=%llu readable=%d "
+         "model-items=%u captured=%zu drawn-slots=%zu report=%u/4",
+         static_cast<unsigned long long>(snapshot.frame),
+         static_cast<unsigned long long>(snapshot.session),
+         static_cast<int>(f.holders_read && f.holders_valid),
+         f.model_rows_total, captured, f.slots ? f.slots->size() : 0,
+         reports_for_open);
+    if (!f.holders_valid || !f.model_rows) return;
+    const size_t limit = std::min<size_t>(captured, kProbePrintedRows);
+    for (size_t i = 0; i < limit; i += 12) {
+        std::string line;
+        for (size_t j = i; j < std::min<size_t>(i + 12, limit); ++j) {
+            const auto& v = (*f.model_rows)[j];
+            char part[96] = {};
+            std::snprintf(part, sizeof part, "%s%u:%u:%u=0x%08x*%u",
+                          line.empty() ? "" : " ", v.holder, v.page, v.index, v.item, v.count);
+            line += part;
+        }
+        logf(KILN_LOG_INFO, "gemforge-ui-model-probe: rows %zu..%zu %s",
+             i, std::min<size_t>(i + 12, limit) - 1, line.c_str());
+    }
+    if (f.model_rows_total > limit)
+        logf(KILN_LOG_INFO, "gemforge-ui-model-probe: %u additional model entries not printed",
+             f.model_rows_total - static_cast<uint32_t>(limit));
+}
+
 void publish(FrameCollector& f, uintptr_t sys10) {
     auto frame = std::make_shared<Frame>();
     KilnUiSlotsFrame& m = frame->meta;
@@ -206,6 +290,7 @@ void publish(FrameCollector& f, uintptr_t sys10) {
         m.frame = screen.frame;
     }
     m.capture_ms = env().tick_ms ? env().tick_ms() : 0;
+    log_forge_models(f, m);
     const uintptr_t sys = sys10 - static_cast<uintptr_t>(g_sl.frame_arg);
     float vp[4] = {};
     if (sys10 && game_read(sys + g_sl.canvas_w, &m.canvas_width) && game_read(sys + g_sl.canvas_h, &m.canvas_height) &&
@@ -269,6 +354,7 @@ void publish(FrameCollector& f, uintptr_t sys10) {
 void hk_frame(void* sys10, void* p2) {
     thread_local std::vector<KilnUiVisibleSlot>* t_buffer = nullptr;  // never freed: no TLS destructor in kiln-core
     thread_local std::unordered_map<uint32_t, PageInfo>* t_pages = nullptr;
+    thread_local std::vector<ModelProbeRow>* t_model_rows = nullptr;
     if (!t_buffer) {
         t_buffer = new std::vector<KilnUiVisibleSlot>;
         t_buffer->reserve(256);
@@ -281,9 +367,17 @@ void hk_frame(void* sys10, void* p2) {
     }
     t_buffer->clear();
     t_pages->clear();
+    if (model_probe_enabled()) {
+        if (!t_model_rows) {
+            t_model_rows = new std::vector<ModelProbeRow>;  // UI thread, process lifetime
+            t_model_rows->reserve(kProbeMaxRows);
+        }
+        t_model_rows->clear();
+    }
     FrameCollector f;
     f.slots = t_buffer;
     f.pages = t_pages;
+    f.model_rows = t_model_rows;
     t_frame = &f;
     g_frame_next(sys10, p2);
     t_frame = nullptr;
