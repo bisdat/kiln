@@ -83,6 +83,53 @@ Kiln.GameUiState.None = 0 -> Kiln.GameUiState
 Kiln.GameUiState.Play = 7 -> Kiln.GameUiState
 Kiln.GameUiState.PreGame = 2 -> Kiln.GameUiState
 Kiln.GameUiState.Preload = 1 -> Kiln.GameUiState
+Kiln.GemForgeCandidate
+Kiln.GemForgeCandidate.<Clone>$() -> Kiln.GemForgeCandidate!
+Kiln.GemForgeCandidate.Deconstruct(out uint Index, out Kiln.UiItemView SourceRow, out Kiln.UiItemView DisplayedGem, out Kiln.UiItemView? WeaponCarrier) -> void
+Kiln.GemForgeCandidate.DisplayedGem.get -> Kiln.UiItemView
+Kiln.GemForgeCandidate.DisplayedGem.init -> void
+Kiln.GemForgeCandidate.Equals(Kiln.GemForgeCandidate? other) -> bool
+Kiln.GemForgeCandidate.GemForgeCandidate(uint Index, Kiln.UiItemView SourceRow, Kiln.UiItemView DisplayedGem, Kiln.UiItemView? WeaponCarrier) -> void
+Kiln.GemForgeCandidate.Index.get -> uint
+Kiln.GemForgeCandidate.Index.init -> void
+Kiln.GemForgeCandidate.SourceRow.get -> Kiln.UiItemView
+Kiln.GemForgeCandidate.SourceRow.init -> void
+Kiln.GemForgeCandidate.WeaponCarrier.get -> Kiln.UiItemView?
+Kiln.GemForgeCandidate.WeaponCarrier.init -> void
+Kiln.GemForgeCandidatesResult
+Kiln.GemForgeCandidatesResult.<Clone>$() -> Kiln.GemForgeCandidatesResult!
+Kiln.GemForgeCandidatesResult.Deconstruct(out bool Ok, out string? Reason, out Kiln.GemForgeCandidatesSnapshot? Snapshot) -> void
+Kiln.GemForgeCandidatesResult.Equals(Kiln.GemForgeCandidatesResult? other) -> bool
+Kiln.GemForgeCandidatesResult.GemForgeCandidatesResult(bool Ok, string? Reason, Kiln.GemForgeCandidatesSnapshot? Snapshot) -> void
+Kiln.GemForgeCandidatesResult.Ok.get -> bool
+Kiln.GemForgeCandidatesResult.Ok.init -> void
+Kiln.GemForgeCandidatesResult.Reason.get -> string?
+Kiln.GemForgeCandidatesResult.Reason.init -> void
+Kiln.GemForgeCandidatesResult.Snapshot.get -> Kiln.GemForgeCandidatesSnapshot?
+Kiln.GemForgeCandidatesResult.Snapshot.init -> void
+Kiln.GemForgeCandidatesSnapshot
+Kiln.GemForgeCandidatesSnapshot.<Clone>$() -> Kiln.GemForgeCandidatesSnapshot!
+Kiln.GemForgeCandidatesSnapshot.Candidates.get -> System.Collections.Generic.IReadOnlyList<Kiln.GemForgeCandidate!>!
+Kiln.GemForgeCandidatesSnapshot.Candidates.init -> void
+Kiln.GemForgeCandidatesSnapshot.CaptureMs.get -> ulong
+Kiln.GemForgeCandidatesSnapshot.CaptureMs.init -> void
+Kiln.GemForgeCandidatesSnapshot.Deconstruct(out ulong Session, out ulong Frame, out ulong CaptureMs, out ulong Generation, out Kiln.EntityId LocalPlayer, out byte Mode, out Kiln.SlotId? SelectedRow, out Kiln.UiItemView? SelectedWeapon, out System.Collections.Generic.IReadOnlyList<Kiln.GemForgeCandidate!>! Candidates) -> void
+Kiln.GemForgeCandidatesSnapshot.Equals(Kiln.GemForgeCandidatesSnapshot? other) -> bool
+Kiln.GemForgeCandidatesSnapshot.Frame.get -> ulong
+Kiln.GemForgeCandidatesSnapshot.Frame.init -> void
+Kiln.GemForgeCandidatesSnapshot.GemForgeCandidatesSnapshot(ulong Session, ulong Frame, ulong CaptureMs, ulong Generation, Kiln.EntityId LocalPlayer, byte Mode, Kiln.SlotId? SelectedRow, Kiln.UiItemView? SelectedWeapon, System.Collections.Generic.IReadOnlyList<Kiln.GemForgeCandidate!>! Candidates) -> void
+Kiln.GemForgeCandidatesSnapshot.Generation.get -> ulong
+Kiln.GemForgeCandidatesSnapshot.Generation.init -> void
+Kiln.GemForgeCandidatesSnapshot.LocalPlayer.get -> Kiln.EntityId
+Kiln.GemForgeCandidatesSnapshot.LocalPlayer.init -> void
+Kiln.GemForgeCandidatesSnapshot.Mode.get -> byte
+Kiln.GemForgeCandidatesSnapshot.Mode.init -> void
+Kiln.GemForgeCandidatesSnapshot.SelectedRow.get -> Kiln.SlotId?
+Kiln.GemForgeCandidatesSnapshot.SelectedRow.init -> void
+Kiln.GemForgeCandidatesSnapshot.SelectedWeapon.get -> Kiln.UiItemView?
+Kiln.GemForgeCandidatesSnapshot.SelectedWeapon.init -> void
+Kiln.GemForgeCandidatesSnapshot.Session.get -> ulong
+Kiln.GemForgeCandidatesSnapshot.Session.init -> void
 Kiln.Hud
 Kiln.HudAnchor
 Kiln.HudAnchor.BottomCenter = 7 -> Kiln.HudAnchor
@@ -1038,6 +1085,7 @@ Kiln.WorldDraw.Ready.get -> bool
 Kiln.WorldDraw.ToScreen(Kiln.WorldPosition p, out System.Numerics.Vector2 screen) -> bool
 Kiln.WorldDraw.ToScreenClamped(Kiln.WorldPosition p, float margin, out System.Numerics.Vector2 screen, out float angle) -> bool
 const Kiln.Ui.Values.DetailCapability = "ui.values.detail" -> string!
+const Kiln.Ui.Values.GemForgeCandidatesCapability = "ui.gemforge.inspect" -> string!
 const Kiln.Ui.Values.HeldCapability = "ui.values.held" -> string!
 const Kiln.Ui.Values.HudCapability = "ui.values.hud" -> string!
 const Kiln.Ui.Values.SlotCapability = "ui.values.slot" -> string!
@@ -1055,6 +1103,15 @@ override Kiln.CraftingPanelOptions.GetHashCode() -> int
 override Kiln.CraftingPanelOptions.ToString() -> string!
 override Kiln.CraftingScreen.GetHashCode() -> int
 override Kiln.GameScreen.GetHashCode() -> int
+override Kiln.GemForgeCandidate.Equals(object? obj) -> bool
+override Kiln.GemForgeCandidate.GetHashCode() -> int
+override Kiln.GemForgeCandidate.ToString() -> string!
+override Kiln.GemForgeCandidatesResult.Equals(object? obj) -> bool
+override Kiln.GemForgeCandidatesResult.GetHashCode() -> int
+override Kiln.GemForgeCandidatesResult.ToString() -> string!
+override Kiln.GemForgeCandidatesSnapshot.Equals(object? obj) -> bool
+override Kiln.GemForgeCandidatesSnapshot.GetHashCode() -> int
+override Kiln.GemForgeCandidatesSnapshot.ToString() -> string!
 override Kiln.KeyBinding.ToString() -> string!
 override Kiln.KeyChord.GetHashCode() -> int
 override Kiln.KeyChord.ToString() -> string!
@@ -1118,6 +1175,12 @@ static Kiln.GameLanguage.Current.get -> string!
 static Kiln.GameLanguage.KeyOf(uint languageId) -> string!
 static Kiln.GameScreen.operator !=(Kiln.GameScreen left, Kiln.GameScreen right) -> bool
 static Kiln.GameScreen.operator ==(Kiln.GameScreen left, Kiln.GameScreen right) -> bool
+static Kiln.GemForgeCandidate.operator !=(Kiln.GemForgeCandidate? left, Kiln.GemForgeCandidate? right) -> bool
+static Kiln.GemForgeCandidate.operator ==(Kiln.GemForgeCandidate? left, Kiln.GemForgeCandidate? right) -> bool
+static Kiln.GemForgeCandidatesResult.operator !=(Kiln.GemForgeCandidatesResult? left, Kiln.GemForgeCandidatesResult? right) -> bool
+static Kiln.GemForgeCandidatesResult.operator ==(Kiln.GemForgeCandidatesResult? left, Kiln.GemForgeCandidatesResult? right) -> bool
+static Kiln.GemForgeCandidatesSnapshot.operator !=(Kiln.GemForgeCandidatesSnapshot? left, Kiln.GemForgeCandidatesSnapshot? right) -> bool
+static Kiln.GemForgeCandidatesSnapshot.operator ==(Kiln.GemForgeCandidatesSnapshot? left, Kiln.GemForgeCandidatesSnapshot? right) -> bool
 static Kiln.Hud.Remove(Kiln.HudLine! line) -> void
 static Kiln.Hud.Remove(string! id) -> void
 static Kiln.Hud.Show(string! id, System.Func<string!>! text, Kiln.HudAnchor anchor = Kiln.HudAnchor.TopLeft, Kiln.Color? color = null) -> Kiln.HudLine!
@@ -1179,12 +1242,14 @@ static Kiln.Ui.Screens.Current.get -> Kiln.GameScreen
 static Kiln.Ui.Screens.UiTick -> System.Action<Kiln.GameScreen>?
 static Kiln.Ui.Status.get -> Kiln.UiStatus
 static Kiln.Ui.Values.CloseTooltipDetails() -> void
+static Kiln.Ui.Values.GemForgeCandidates() -> Kiln.GemForgeCandidatesResult!
 static Kiln.Ui.Values.HeldBar(Kiln.UiBarProvider! provider) -> Kiln.UiValueRegistration!
 static Kiln.Ui.Values.Hud(Kiln.HudValue vital, Kiln.UiBarProvider! provider) -> Kiln.UiValueRegistration!
 static Kiln.Ui.Values.ItemBar(Kiln.ItemId item, Kiln.UiBarProvider! provider) -> Kiln.UiValueRegistration!
 static Kiln.Ui.Values.OpenTooltipDetails() -> Kiln.UiTooltipOpenResult!
 static Kiln.Ui.Values.SlotBar(Kiln.ItemId item, Kiln.UiBarProvider! provider) -> Kiln.UiValueRegistration!
 static Kiln.Ui.Values.Slots() -> Kiln.VisibleSlotsResult!
+static Kiln.Ui.Values.SubscribeGemForgeCandidates(System.Action<Kiln.GemForgeCandidatesResult!>! onFrame) -> Kiln.UiValueRegistration!
 static Kiln.Ui.Values.SubscribeSlots(System.Action<Kiln.VisibleSlotsResult!>! onFrame) -> Kiln.UiValueRegistration!
 static Kiln.Ui.Values.TooltipLines(Kiln.ItemId item, Kiln.UiTooltipProvider! provider) -> Kiln.UiValueRegistration!
 static Kiln.Ui.Window(string! title, System.Action<Kiln.UiDraw!>! draw, Kiln.UiWindowOptions? options = null) -> Kiln.UiWindow!
