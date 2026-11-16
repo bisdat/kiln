@@ -18,7 +18,7 @@ Forge equivalents: `LevelEvent.Save` → `WorldSavingEvent`, `LevelEvent.Load` �
 | Event | When | Thread | Cancel | Fields |
 |---|---|---|---|---|
 | `WorldSavingEvent` | the game accepted a world save (autosave every 30 s, a player left, `Saves.Request`, `Saves.Backup`); before the game snapshots the world. For the shutdown save: right after `ServerStoppingEvent`, before mods unload | tick thread; normally inside the game's save request after Kiln waited for the world's jobs (= Post rules), `BeforeSnapshot` true | no | `Reason`, `Revision` (the world file's revision once written), `WorldId`, `WorldFile`, `BeforeSnapshot`, `Step` |
-| `WorldSavedEvent` | the world file is complete (or the write failed / a Kiln request timed out) | tick thread, Pre of the next step | no | `Reason`, `Success`, `Revision`, `Duration`, `Result`, `TimedOut`, `WorldId`, `WorldFile` |
+| `WorldSavedEvent` | the world file is complete (or the write failed / a Kiln request timed out); since 0.2.0-dev.30 Kiln.Saves' confirmation of that generation may still be being written off the tick thread | tick thread, Pre of the next step | no | `Reason`, `Success`, `Revision`, `Duration`, `Result`, `TimedOut`, `WorldId`, `WorldFile` |
 | `WorldLoadedEvent` | the server finished loading the world save | tick thread, Pre | no | `WorldId`, `Revision`, `NewWorld`, `Data` (`DataMatch`), `WorldFile` |
 | `InstanceDataChangedEvent` | `Set` or a successful `Remove` (in-place edits of a `Get` live object are not intercepted; use `Set` to announce them) | tick thread, server only | no | `Item`, `Mod`, `Key`, `Removed` (false: set; true: removed) |
 | `InstanceDataRestoredEvent` | a saved record found its item after a load or a join, or a mod or admin claimed it onto an item (one per key) | tick thread | no | `Item`, `Mod`, `Key`, `Match` (`Exact`, `Moved`, `Claimed` since dev.27), `Detail` |
@@ -85,6 +85,23 @@ data (objects are serialized when the mod unloads and read into the new instance
 - Loading picks the generation of the world file on disk (revision + file time); a crash or `kill -9` at any moment
   gives the old or the new generation, matching the world file, never a mix: every file is written to a temp name,
   forced to disk and renamed, and bundles are content-addressed (`blobs/ab/<sha256>.json`, checked on load).
+- **Off the tick thread (since 0.2.0-dev.30, issue #39).** The tick thread only serializes the mod data, in memory, at
+  both stagings; every file operation of a save (new blobs, the pending manifest, the confirmation and the pending
+  manifest's delete, pruning's reads and deletes) runs on Kiln.Saves' own writer thread, in order: stagings first, then
+  confirmations. The order on disk is the one the tick thread kept: kiln.saves holds the game's world write (on the
+  game's Save2Thread, not the server's step) until the writer has that generation's pending manifest on disk
+  (`stage_progress`, below), so the world file of revision *R* never reaches the disk before generation *R*'s manifest.
+  That wait is bounded (30 s, 6 s for the shutdown save, which the game gives 10 s in all) and logged; one that runs out
+  lets the world write go, warns that a crash before the writer finishes loads the older generation, and does not wait
+  again until the writer has caught up. A staging that comes while an earlier one of the same generation still waits for
+  the writer (the save request's staging, then the snapshot staging one step later) replaces it; stagings of different
+  generations are never merged. Pruning stops between two files when a staging waits, and runs again after the next
+  confirmation. A world load or reload, a world close, the shutdown save's confirmation and `Saves.Backup` wait for the
+  writer (at most 10 s, logged), so nothing reads the folder or leaves the world while its files are still being written.
+  A process that ends with writes still queued leaves what an end at that point left before: no torn file, and a
+  confirmation not written yet loads that generation as `Staged`, with the same data. Without the barrier (a kiln.saves
+  older than the managed Kiln.Saves, or a build whose world write is not hooked) the tick thread writes the files itself,
+  as before.
 - An unchanged generation is not forced to disk (since 0.2.0-dev.29): a generation whose bundles are those of the
   previous generation, which this process confirmed and which is still on disk, with no new blob (the usual autosave
   when no mod data changed; on a hard drive each forced write held the game for up to seconds) writes its pending
@@ -494,13 +511,36 @@ says what goes to players' games (games served, updates, values and bytes sent, 
 | `Saves.Available`, `Status` (`SaveStatus`: state, last save, revision, autosave interval, counters, data generation) | any thread |
 | `Saves.WorldId`, `WorldFile`, `SaveDirectory`, `DataDirectory`, `BackupDirectory` | the world's GUID text (from the world file header) and paths |
 | `await Saves.Request()` → `SaveResult` | the game's own save now (the one its timer makes); completes when a save that started after the call is written. Refused while the world does not run; dropped after 60 s |
-| `await Saves.Backup(name)` → `BackupInfo` | saves now, then copies the world file + its mod-data generation to `kiln/backups/<UTC stamp>-<name>/` (`backup.json` with sha256 per file) on the tick thread right after the write, before the game can start another save |
+| `await Saves.Backup(name)` → `BackupInfo` | saves now, then copies the world file + its mod-data generation to `kiln/backups/<UTC stamp>-<name>/` (`backup.json` with sha256 per file) on the tick thread right after the write, before the game can start another save (it first waits for Kiln.Saves' writer to confirm that generation, at most 10 s) |
 | `Saves.Backups` | `BackupInfo` list |
 | `Saves.RestoreOnNextStart(name)` / `CancelRestore()` / `PendingRestore` | stages `kiln/backups/restore.json`; at the next server start kiln.saves checks the backup's world file header, copies the files it replaces to `kiln/backups/_before-restore-<stamp>/`, puts the world file and its sidecar generation in place before the game opens its save, and writes `restore.result-<stamp>.json` |
 
 `kilnctl backup <name>` archives the save folder and then `kiln/data` (sidecars of kiln.saves and kiln.spawn, mods'
 data folders) in that order, so the archive always holds the mod data of the world file in it. Restore with the server
 stopped: `tar -xzf <backup> -C <dir>`.
+
+### What kiln.log says about a save
+
+A staging and a confirmation each log one line, at Debug, or at Info when it took over 250 ms (Warn for a late
+staging). Since 0.2.0-dev.30 the line says which thread spent what, and itemises every file operation, so the parts
+add up to the whole:
+
+```
+Kiln.Saves: confirmed mod data generation 1777 (autosave), bundles as in generation 1776: not forced to disk in 4620.9 ms
+  (tick thread 0.3 ms; 0.1 ms queued; writer 4620.5 ms: 1 file written (1 not forced to disk): 0.3 ms creating, 0.1 ms
+  writing, 0.0 ms forcing to disk, 4210.0 ms closing, 0.4 ms renaming; 1 checked in 0.1 ms; 1 deleted in 409.4 ms;
+  0.1 ms hashing and JSON; 0.1 ms else)
+```
+
+(numbers made up; one line in the log). `tick thread` is what the server's step spent (serializing the mod data at a
+staging; handing the job over at a confirmation), `queued` the time the job waited behind other writes, `writer` the
+writer thread's file work, item by item: creating, writing (to the system), forcing to disk, closing and renaming each
+file written, then checks for existing files, reads (a pending manifest, a world file header), deletes, folder
+listings and folders made, the CPU part (hashing and JSON), and `else`, what none of them covers. A confirmation that
+prunes adds `; pruning N ms: ...` with the same items. Without the stage barrier the line says `tick thread N ms, all of
+it (...)` and `files N ms` instead of `writer`: the tick thread wrote them. kiln.saves logs, from the Save2Thread, how
+long a world write waited for the writer (`saves: the world write of revision R waited N ms for Kiln.Saves' writer`,
+at Info over 250 ms), and warns when it went ahead without it.
 
 ## Storage
 
@@ -547,13 +587,17 @@ saves->request(KILN_SAVE_REASON_REQUEST);                       /* any thread; a
 KilnSaveEvent ev; uint64_t seq = 0;
 while (saves->next_event(seq, &ev) == KILN_OK) { seq = ev.seq; /* SAVING / WRITTEN / FAILED / LOADED */ }
 ```
-The pump (`set_pump`) is taken by Kiln.Saves; native plugins poll `next_event` (a ring of 256).
+The pump (`set_pump`) is taken by Kiln.Saves; native plugins poll `next_event` (a ring of 256). So is `stage_progress`
+(appended in 0.2.0-dev.30, `KILN_SAVES_CAN_STAGE_BARRIER` in `status.features`): the pump reports each staging it hands
+its writer, the writer each one it has on disk, and the world write waits for them (see "Off the tick thread").
 
 ## Limits
 - One world per server (the dedicated server's `saveDirectory/world0.ksd`). A brand-new world has no id until its
   first save; data written before that is kept in memory and written with the first save.
-- The kill -9 window: none for the generation choice. A generation is staged before the world write; a crash between
-  the two leaves revision R on disk and loads generation R. After a power loss or a system crash, the world file of
+- The kill -9 window: none for the generation choice. A generation is staged before the world write (since
+  0.2.0-dev.30 the world write waits for the writer to have it on disk); a crash between the two leaves revision R on
+  disk and loads generation R. Only a staging that takes longer than the world write's wait (30 s; 6 s at shutdown, both
+  logged) opens a window in which a crash loads generation R-1 for world file R. After a power loss or a system crash, the world file of
   an unchanged save can load an older generation with the same bundles (`DataMatch.Older`) when the system had not yet
   written that save's manifests (see "How consistency works").
 - Moving creatures may be matched to the wrong entity of the same template if two stand within 16 m of the saved spot.
