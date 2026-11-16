@@ -522,6 +522,28 @@ fn reasons_are_one_sentence_a_player_can_read() {
 }
 
 #[test]
+fn a_loader_named_like_kilns_own_dll_is_never_to_be_copied_into_the_game() {
+    // 0.2.0-dev.29 said "copy it into the Enshrouded folder yourself" for Ultimate ASI Loader's dinput8.dll: that
+    // replaces Kiln's own loader (HadToRegister, 2026-11-16)
+    use kiln_manage::engines::{loader_is_note, loader_reason, Engine};
+    for e in [Engine::UltimateAsiLoader, Engine::Aldrich, Engine::ReShade, Engine::LiveMap, Engine::SharedXp] {
+        for file in ["dinput8.dll", "DINPUT8.DLL"] {
+            let r = loader_reason(e, file);
+            assert!(!r.contains("yourself") && !r.contains("copy it into") && !r.contains("copy its files"), "{e:?} {file}: {r}");
+            assert!(r.contains("don't copy it over Kiln's own dinput8.dll") && r.contains("dinput8-chain.ini"), "{e:?} {file}: {r}");
+            assert!(!r.ends_with('.') && !r.contains(". ") && r.len() < 160, "{e:?} {file}: {r}");
+        }
+    }
+    assert!(loader_reason(Engine::UltimateAsiLoader, "dinput8.dll").contains("xinput9_1_0.dll"));
+    // other names keep their advice; loaders Kiln runs itself and Kiln's own file keep theirs
+    assert!(loader_reason(Engine::ReShade, "dxgi.dll").contains("copy it into the Enshrouded folder yourself"));
+    for e in [Engine::Emf, Engine::Kiln, Engine::ChainLoader] {
+        assert!(!loader_reason(e, "dinput8.dll").contains("don't copy it over"), "{e:?}");
+        assert!(e == Engine::Kiln || loader_is_note(e));
+    }
+}
+
+#[test]
 fn a_folder_of_docs_and_screenshots_does_not_add_noise() {
     let t = tmp("noise");
     let d = t.0.join("pkg");
