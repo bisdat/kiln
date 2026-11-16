@@ -7,6 +7,7 @@
 #include <mutex>
 #include <tuple>
 #include <unordered_map>
+#include <vector>
 #include "ui_values_internal.h"
 
 namespace kiln::uivalues {
@@ -55,6 +56,18 @@ bool gem_on() {
 void gem_clear_locked(GemRing& r) {
     if (r.latest || r.previous) ++r.generation;
     r.latest.reset(); r.previous.reset();
+}
+// Why a drawn GEMS grid published no snapshot, once per cause and process: an open forge with no list must be
+// explainable from kiln.log (the real client showed a silent refusal on 2026-11-16).
+void gem_note(const char* why) {
+    static std::mutex mu;
+    static std::vector<const char*> said;
+    {
+        std::lock_guard lk(mu);
+        if (std::find(said.begin(), said.end(), why) != said.end() || said.size() >= 32) return;
+        said.push_back(why);
+    }
+    logf(KILN_LOG_INFO, "ui.values: a Gem Forge frame is unavailable: %s (said once)", why);
 }
 void gem_fail(const char* why) {
     g_gem_failed.store(true, std::memory_order_release);
@@ -166,16 +179,18 @@ void gem_capture_before(GemCapture& cap, uintptr_t state, uintptr_t header, GemR
                         GemSelection& selection, GemContext& context, GemArray& array) {
     if (cap.seen) { gem_fail("more than one GEMS grid in a frame"); return; }
     cap.seen = true;
-    if (!env().client || !env().client(&cap.client) || !cap.client.local_player) return;
+    if (!env().client || !env().client(&cap.client) || !cap.client.local_player) { gem_note("no client world or local player"); return; }
     KilnUiScreen before{};
-    if (!env().screen || !env().screen(&before)) return;
+    if (!env().screen || !env().screen(&before)) { gem_note("no screen state"); return; }
     cap.before_frame = before.frame;
     const int in_forge = gem_context(rd, cap.client, context);
-    if (!in_forge) return;
+    if (!in_forge) { gem_note("the GEMS grid drew outside the Play state's forge screen"); return; }
     const GemRows rows = in_forge < 0 || !gem_selection(rd, state, selection) || !gem_array(rd, header, array)
         ? kRowsBroken : gem_rows(rd, context, array, cap.frame);
     if (rows == kRowsBroken) { gem_fail("Gem Forge list, selection or local model is unreadable or invalid"); return; }
-    if (rows == kRowsNoCatalog) { cap.frame.rows.clear(); return; } // this frame stays unavailable; the next may copy
+    if (rows == kRowsNoCatalog) { // this frame stays unavailable; the next may copy
+        gem_note("Kiln's item catalog could not be asked about a row"); cap.frame.rows.clear(); return;
+    }
     auto& m = cap.frame.meta;
     cap.selection = selection;
     m.size = sizeof m; m.ok = 1; m.count = static_cast<uint32_t>(array.count);
@@ -188,6 +203,7 @@ void gem_capture_before(GemCapture& cap, uintptr_t state, uintptr_t header, GemR
         uint8_t cat = 0;
         const int known = gem_lookup(m.selected_weapon.item, cat);
         if (known < 0) {
+            gem_note("Kiln's item catalog could not be asked about the selected weapon");
             m = {}; cap.frame.rows.clear(); // no catalog: this frame stays unavailable
         } else if ((known && cat != 2) || !m.selected_weapon.client_entity) {
             gem_fail("Gem Forge selected weapon is incoherent"); m.ok = 0;
@@ -209,15 +225,18 @@ void hk_gem_grid(void* state, void* header, void* rect, void* actions, float low
             !gem_array(rd, reinterpret_cast<uintptr_t>(header), after_array)) {
             gem_fail("Gem Forge context became unreadable");
         } else if (!(after == before)) {
+            gem_note("the selection or mode changed during the GEMS grid");
             cap->frame.meta.ok = 0; cap->frame.meta.reason = KUI_STALE_FRAME;
         } else if (!(after_array == array)) {
             gem_fail("Gem Forge input array changed during its grid call");
         } else if (!env().client(&now) || now.session != cap->client.session || now.local_player != cap->client.local_player) {
+            gem_note("the session or local player changed during the GEMS grid");
             cap->frame.meta.ok = 0; cap->frame.meta.reason = KUI_STALE_FRAME;
         } else {
             const int valid = gem_context(rd, now, after_context);
             if (valid < 0) gem_fail("Gem Forge local model became unreadable");
             if (valid != 1 || context.play != after_context.play || context.model != after_context.model) {
+                gem_note("the forge's play state or local model changed during the GEMS grid");
                 cap->frame.meta.ok = 0; cap->frame.meta.reason = KUI_STALE_FRAME;
             }
         }
@@ -232,6 +251,7 @@ void KILN_CALL on_gem_end(KilnRegisters* r, void*) {
     if (!gem_selection(rd, r->rdi, after)) {
         gem_fail("Gem Forge final selection became unreadable");
     } else if (!(after == cap->selection)) {
+        gem_note("the selection or mode changed after the GEMS grid, before the menu ended");
         cap->frame.meta.ok = 0; cap->frame.meta.reason = KUI_STALE_FRAME;
     } else {
         cap->menu_checked = true;
@@ -268,6 +288,14 @@ void gem_publish(GemCapture& cap) {
     m.size = sizeof m;
     m.session = now.session; m.frame = screen.frame;
     m.capture_ms = env().tick_ms ? env().tick_ms() : 0;
+    if (!valid && cap.seen && m.ok) { // a coherent capture that publication refused: say which check
+        gem_note(!gem_on() ? "the feature went off during the frame" :
+                 !cap.menu_checked ? "the menu's end check did not run after the GEMS grid" :
+                 !have_screen || !gem_screen(screen) ? "the screen was no longer the forge at publication" :
+                 !have_client || now.session != cap.client.session || now.local_player != cap.client.local_player ?
+                     "the session or local player changed before publication" :
+                 "the UI frame counter did not advance by one");
+    }
     if (!valid) {
         const uint32_t reason = m.reason ? m.reason : uint32_t(KUI_NO_FRAME);
         m = {}; m.size = sizeof m; m.reason = reason; m.session = now.session; m.frame = screen.frame;
