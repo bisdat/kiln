@@ -73,7 +73,9 @@ public sealed class GemTrigger
     public static GemTrigger OnHitTaken(bool enemiesOnly = true) => new(GemTriggerKind.HitTaken, enemiesOnly, TimeSpan.Zero);
 
     /// <summary>Every <paramref name="interval"/> while the gem is worn (at least <see cref="PassiveStep"/>, at most one
-    /// hour; it runs on the program's 250 ms steps, so a multiple of 250 ms is exact).</summary>
+    /// hour; it runs on the program's 250 ms steps, so a multiple of 250 ms is exact). The first run comes about 250 ms
+    /// after the gem is worn. The clock belongs to the gem in its carrier: a hotbar switch away and back (the game starts
+    /// the gem's program again) does not run it early.</summary>
     /// <exception cref="ArgumentOutOfRangeException">The interval is below 250 ms or above one hour.</exception>
     public static GemTrigger Passive(TimeSpan interval)
     {
@@ -96,7 +98,7 @@ public sealed class GemTrigger
 /// <see cref="OnTrigger"/>).</summary>
 public sealed class GemDefinition
 {
-    /// <summary><c>"&lt;modid&gt;:&lt;name&gt;"</c>, unique among the registered gems.</summary>
+    /// <summary><c>"&lt;modid&gt;:&lt;name&gt;"</c> with the registering mod's id, unique among the registered gems.</summary>
     public required string Id { get; init; }
 
     /// <summary>The gem item's fixed GUID (saves keep its id, FNV-1a of the GUID: never change it once released).
@@ -149,8 +151,9 @@ public sealed class GemDefinition
     /// <summary>A Kiln trigger program for the effect: the gem calls <see cref="OnTrigger"/>.</summary>
     public GemTrigger? Trigger { get; init; }
 
-    /// <summary>The C# effect, on the server's tick thread, the Pre after the game's step that had the hit. Server
-    /// side: on a client it is never called.</summary>
+    /// <summary>The C# effect, on the server's tick thread, the Pre after the game's step that had the hit, as the gem's
+    /// mod (its SynchronizationContext too: an <c>await</c> comes back to the tick thread). It runs where the server world
+    /// runs (a dedicated server, or the hosting player's game); a joined client never calls it.</summary>
     public Action<GemTriggerContext>? OnTrigger { get; init; }
 }
 
@@ -172,7 +175,8 @@ public sealed class GemTriggerContext
     /// attacker's root; none for <see cref="GemTriggerKind.Passive"/>.</summary>
     public EntityId Target { get; internal init; }
 
-    /// <summary>The entity the hit struck (a part of <see cref="Target"/>, or the target itself).</summary>
+    /// <summary>The entity the hit struck (a part of <see cref="Target"/>, or the target itself); for
+    /// <see cref="GemTriggerKind.HitTaken"/> the wearer's own part (or the wearer).</summary>
     public EntityId TargetPart { get; internal init; }
 
     /// <summary>The gem item.</summary>
@@ -274,11 +278,12 @@ public static partial class Gems
     /// every side that has the mod (a client needs the item to show it); the handler runs on the server. Removed when
     /// the mod unloads (the item stays until the server restarts). docs/kiln/services/gems-new.md.</summary>
     /// <returns><see cref="GemHandle.Ok"/> false with a reason when the id, GUID or name is registered already.</returns>
-    /// <exception cref="ArgumentException">The definition is wrong (id, base, levels, a program and a trigger at once, a
-    /// trigger without a handler, configs with a trigger, a name kiln.content refuses).</exception>
+    /// <exception cref="ArgumentException">The definition is wrong (id, an id under another mod's id, base, levels, a
+    /// program and a trigger at once, a trigger without a handler, configs with a trigger, a name kiln.content refuses).</exception>
     /// <exception cref="InvalidOperationException">Not called from mod code.</exception>
     /// <exception cref="KilnUnavailableException"><c>gems.triggers</c>: kiln.content's new items or (for a trigger)
-    /// kiln.assets are not here.</exception>
+    /// kiln.assets (its resources) are not here. The <c>gems.triggers</c> row does not cover these two: check for this
+    /// exception too.</exception>
     [TickThreadOnly]
     [RequiresCapability(GemRegistry.Row)]
     public static GemHandle Register(GemDefinition definition) => GemRegistry.Add(definition);
@@ -311,7 +316,8 @@ internal interface IGemBackend
     void ServeProgram(ModContext mod, Guid guid, byte[] blob);
     void DefineItem(ItemDefinition item);
     void ApplyConfigs(ModContext mod, string documentJson, Func<bool> stillWanted);
-    EquippedGem? FindEquipped(EntityId player, EntityId impact);
+    /// <summary>The wearer's equipped gems now (G1's <see cref="Gems.Equipped"/>); the registry reads them once per step.</summary>
+    IReadOnlyList<EquippedGem> Equipped(EntityId player);
     long NowMs { get; }
     IDisposable SubscribeSignals(Action<ImpactSignalEvent> handler);
 }
@@ -367,10 +373,16 @@ internal static class GemRegistry
     private static readonly Dictionary<string, Entry> ByName = new(StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<(ModContext, GemTriggerKind)> Served = new();
     private static readonly HashSet<ModContext> Watched = new(ReferenceEqualityComparer.Instance);
-    private static readonly Dictionary<uint, long> PassiveLast = new();
+    // a passive gem's clock: the worn gem (wearer, gem item, carrier entity), not its impact entity, which the game spawns
+    // again on every hotbar switch to the carrier (review); each with its own interval, which its clean-up follows (review)
+    private static readonly Dictionary<(uint Player, uint Gem, uint Carrier), (long Last, long IntervalMs)> PassiveLast = new();
+    // the wearers' equipped gems of one step: all of a step's signals come in one Pre (review: one read per wearer and step)
+    private static readonly Dictionary<uint, IReadOnlyList<EquippedGem>?> WornThisStep = new();
+    private static ulong _wornStep = ulong.MaxValue;
     private static IDisposable? _signals;
     private static long _lastPrune;
     private static int _lookupWarned;
+    private static int _lookupFaults;
 
     internal static IGemBackend Backend = new LiveGemBackend();
 
@@ -384,6 +396,10 @@ internal static class GemRegistry
         ArgumentNullException.ThrowIfNull(d);
         var mod = ModContext.CurrentMod ?? throw new InvalidOperationException("Gems.Register must be called from mod code (OnLoad or a Kiln callback)");
         Validate(d);
+        // review: the id's mod part is the caller's: another mod could otherwise take the id, and the GUID made from it
+        // (the item id saved gems keep), before the mod that owns it loads
+        if (!string.Equals(d.Id[..d.Id.IndexOf(':')], mod.Info.Id, StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException($"gem id '{d.Id}' must start with the registering mod's id: \"{mod.Info.Id}:<name>\"", nameof(d));
         var guid = d.Guid ?? GuidOf(d.Id);
         var name = d.Name ?? NameOf(d.Id);
         if (!NameShape.IsMatch(name)) throw new ArgumentException($"gem {d.Id}: debug name '{name}' is not A-Z a-z 0-9 _ - . (at most 96)", nameof(d));
@@ -410,6 +426,12 @@ internal static class GemRegistry
                 try
                 {
                     Backend.ServeProgram(mod, p.Guid, Blob(p));
+                }
+                catch (KilnUnavailableException x) when (x.Capability != Row)
+                {
+                    // review: kiln.assets is here but refuses resources (its hooks are off): the documented refusal names gems.triggers
+                    lock (Lock) Served.Remove((mod, trigger.Kind));
+                    throw new KilnUnavailableException(Row, $"a gem with a Kiln trigger needs kiln.assets to serve its program: {x.Message}", x);
                 }
                 catch
                 {
@@ -602,13 +624,72 @@ internal static class GemRegistry
             off = _signals;
             _signals = null;
             PassiveLast.Clear();
+            WornThisStep.Clear();
+            _wornStep = ulong.MaxValue;
         }
         off.Dispose();
     }
 
     internal static bool Listening { get { lock (Lock) return _signals is not null; } }
 
-    internal static void OnSignal(ImpactSignalEvent ev) => Dispatch(ev.Impact.ProgramId, ev.Tag, ev.Impact.Self, ev.Value, ev.Step);
+    // Kiln's own ImpactSignalEvent handler. Nothing may throw from here into the event bus (review): the bus counts a
+    // throw as a fault of this subscription and removes it after five, and every gem's handler would then stay silent
+    // (Listening still true, so no registration subscribes again).
+    internal static void OnSignal(ImpactSignalEvent ev)
+    {
+        try
+        {
+            Dispatch(ev.Impact.ProgramId, ev.Tag, ev.Impact.Self, ev.Value, ev.Step);
+        }
+        catch (Exception x)
+        {
+            LookupFault(x);
+        }
+    }
+
+    private static void LookupFault(Exception x)
+    {
+        var n = Interlocked.Increment(ref _lookupFaults);
+        if (n <= 3) ModLog.Error($"gems: a gem trigger could not be dispatched ({n} of 3 logged): {x}");
+    }
+
+    // The wearer's gem whose impact sent the signal: one read of the wearer's equipped gems per step; a read that fails
+    // counts as no gem for the rest of the step and never throws.
+    private static EquippedGem? Worn(EntityId player, EntityId impact, ulong step)
+    {
+        IReadOnlyList<EquippedGem>? gems;
+        lock (Lock)
+        {
+            if (step != _wornStep)
+            {
+                _wornStep = step;
+                WornThisStep.Clear();
+            }
+            WornThisStep.TryGetValue(player.Value, out gems);
+            if (gems is null && WornThisStep.ContainsKey(player.Value)) return null;  // failed in this step already
+        }
+        if (gems is null)
+        {
+            try
+            {
+                gems = Backend.Equipped(player);
+            }
+            catch (Exception x) when (x is NotImplementedException or KilnUnavailableException or InvalidOperationException)
+            {
+                if (Interlocked.Exchange(ref _lookupWarned, 1) == 0)
+                    ModLog.Warn($"gems: a gem trigger came, but the wearer's gems cannot be read here ({x.Message}): gem handlers do not run");
+            }
+            catch (Exception x)
+            {
+                LookupFault(x);
+            }
+            lock (Lock) WornThisStep[player.Value] = gems;
+            if (gems is null) return null;
+        }
+        foreach (var g in gems)
+            if (g.Impact == impact) return g;
+        return null;
+    }
 
     /// <summary>One signal of a trigger program: find the gem, filter, call its handler. Returns the number of handlers
     /// called (0 or 1). Tick thread.</summary>
@@ -632,23 +713,13 @@ internal static class GemRegistry
             player = new EntityId(p.Kind == GemTriggerKind.HitTaken ? h.Target : h.Attacker);
         }
         if (player.IsNone) return 0;
-        EquippedGem? worn;
-        try
-        {
-            worn = Backend.FindEquipped(player, impact);
-        }
-        catch (Exception x) when (x is NotImplementedException or KilnUnavailableException or InvalidOperationException)
-        {
-            if (Interlocked.Exchange(ref _lookupWarned, 1) == 0)
-                ModLog.Warn($"gems: a gem trigger came, but the wearer's gems cannot be read here ({x.Message}): gem handlers do not run");
-            return 0;
-        }
-        if (worn is null) return 0;
+        if (Worn(player, impact, step) is not { } worn) return 0;
         Entry? e;
         lock (Lock) ByItem.TryGetValue(worn.Socket.Gem.Value, out e);
         if (e?.Def.Trigger is not { } trigger || trigger.Kind != p.Kind || e.Def.OnTrigger is not { } handler) return 0;
         if (trigger.EnemiesOnly && p.Kind != GemTriggerKind.Passive && !hit.Enemy) return 0;
-        if (p.Kind == GemTriggerKind.Passive && !PassiveDue(impact.Value, trigger.Interval)) return 0;
+        if (p.Kind == GemTriggerKind.Passive && !PassiveDue((player.Value, worn.Socket.Gem.Value, worn.Socket.Carrier.Entity.Id.Value), trigger.Interval))
+            return 0;
         var ctx = new GemTriggerContext
         {
             Definition = e.Def,
@@ -677,8 +748,12 @@ internal static class GemRegistry
             OtherIsEnemy = hit.Enemy,
             Step = step,
         };
+        // as the mod, as an event handler runs (Events.Post): its CurrentMod, and its SynchronizationContext, so an async
+        // handler's await comes back to the tick thread through the mod's scheduler, which drops it when the mod unloads (review)
         var outer = ModContext.CurrentMod;
+        var outerSync = SynchronizationContext.Current;
         ModContext.CurrentMod = e.Mod;
+        SynchronizationContext.SetSynchronizationContext(e.Mod.Scheduler.SynchronizationContext);
         try
         {
             handler(ctx);
@@ -691,32 +766,38 @@ internal static class GemRegistry
         finally
         {
             ModContext.CurrentMod = outer;
+            SynchronizationContext.SetSynchronizationContext(outerSync);
         }
         return 1;
     }
 
     // The passive program signals every 250 ms per gem impact; the handler runs at the gem's interval (half a step of slack).
-    private static bool PassiveDue(uint impact, TimeSpan interval)
+    // The clock is the worn gem's: a new impact of the same gem in the same carrier (a hotbar switch) keeps it (review). A
+    // clock is dropped once a minute has passed beyond its own interval: its next signal runs the handler either way (review:
+    // the caller's interval dropped a long gem's clock after a minute).
+    private static bool PassiveDue((uint Player, uint Gem, uint Carrier) gem, TimeSpan interval)
     {
         var now = Backend.NowMs;
+        var every = (long)interval.TotalMilliseconds;
         lock (Lock)
         {
             if (now - _lastPrune > 30_000)
             {
                 _lastPrune = now;
-                foreach (var k in PassiveLast.Where(kv => now - kv.Value > 60_000 + (long)interval.TotalMilliseconds).Select(kv => kv.Key).ToArray())
+                foreach (var k in PassiveLast.Where(kv => now - kv.Value.Last > 60_000 + kv.Value.IntervalMs).Select(kv => kv.Key).ToArray())
                     PassiveLast.Remove(k);
             }
-            if (PassiveLast.TryGetValue(impact, out var last) && now - last < (long)interval.TotalMilliseconds - 125) return false;
-            PassiveLast[impact] = now;
+            if (PassiveLast.TryGetValue(gem, out var clock) && now - clock.Last < every - 125) return false;
+            PassiveLast[gem] = (now, every);
             return true;
         }
     }
 
     // ---------------------------------------------------------------------------------------------- the row -------
 
-    /// <summary>The <c>gems.triggers</c> row from what <see cref="Gems.Register"/> needs (G1's GemTriggeredEvent adds
-    /// its own needs when the packages merge). Pure.</summary>
+    /// <summary>What <see cref="Gems.Register"/> needs, as a row. Since the merge with G1 the <c>gems.triggers</c> row is
+    /// G1's alone (GemsCaps: <c>gems.read</c>, kiln.abilities, <c>abilities.natives</c>) and <see cref="ReportRow"/> is not
+    /// called; Register checks kiln.content and kiln.assets itself and throws with its own reason. Pure.</summary>
     internal static (CapabilityState State, CapabilityReason Reason, string Text) DecideRow(string? contentMissing, string? assetsMissing,
         bool abilities)
     {
@@ -751,9 +832,12 @@ internal static class GemRegistry
             Served.Clear();
             Watched.Clear();
             PassiveLast.Clear();
+            WornThisStep.Clear();
+            _wornStep = ulong.MaxValue;
             _signals?.Dispose();
             _signals = null;
             _lookupWarned = 0;
+            _lookupFaults = 0;
             _lastPrune = 0;
         }
     }
@@ -790,12 +874,7 @@ internal sealed class LiveGemBackend : IGemBackend
             foreach (var e in r.Errors) mod.Log.Warn($"gems: config: {e}");
         });
 
-    public EquippedGem? FindEquipped(EntityId player, EntityId impact)
-    {
-        foreach (var g in Gems.Equipped(player))
-            if (g.Impact == impact) return g;
-        return null;
-    }
+    public IReadOnlyList<EquippedGem> Equipped(EntityId player) => Gems.Equipped(player);
 
     public long NowMs => Environment.TickCount64;
 

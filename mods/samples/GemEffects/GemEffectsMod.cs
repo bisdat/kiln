@@ -34,6 +34,22 @@ public sealed class GemEffectsMod : Mod
             Log.Warn($"new gems are not available here: {Capabilities.Why("gems.triggers")}");
             return;
         }
+        try
+        {
+            RegisterGems();
+        }
+        catch (KilnUnavailableException e)  // the row does not cover kiln.content's new items or kiln.assets: Register says it
+        {
+            Log.Warn($"new gems are not available here: {e.Message}");
+            return;
+        }
+        if (Abilities.IdOf(FrostSlow) != 0x5f5d2f5c) Log.Error("gemeffects: the frost slow reference does not hash to 0x5f5d2f5c");
+        _give = Commands.Register("gemeffects", c => _ = Give(c), CommandPermission.Admin, usage: "[level]",
+            description: "the Gem of Frostbite and the Gem of Renewal into your backpack");
+    }
+
+    private void RegisterGems()
+    {
         _frostbite = Gems.Register(new GemDefinition
         {
             Id = "gemeffects:frostbite",
@@ -64,9 +80,6 @@ public sealed class GemEffectsMod : Mod
         });
         foreach (var h in new[] { _frostbite, _renewal })
             if (!h.Ok) Log.Warn($"gemeffects: {h}");
-        if (Abilities.IdOf(FrostSlow) != 0x5f5d2f5c) Log.Error("gemeffects: the frost slow reference does not hash to 0x5f5d2f5c");
-        _give = Commands.Register("gemeffects", c => _ = Give(c), CommandPermission.Admin, usage: "[level]",
-            description: "the Gem of Frostbite and the Gem of Renewal into your backpack");
     }
 
     public override void OnUnload()

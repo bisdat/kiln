@@ -25,6 +25,8 @@ public sealed class GemsCustomTestMod : Mod
 
     private int _pass, _fail, _handlerCalls;
     private readonly List<GemTriggerContext> _calls = new();
+    private readonly List<bool> _modSync = new();       // the handler ran with its mod's SynchronizationContext (review)
+    private readonly List<bool> _afterAwait = new();    // an await in the handler came back on the tick thread (review)
     private readonly List<EntityId> _spawned = new();
     private readonly List<ImpactSignalEvent> _signals = new();
     private readonly List<GemHandle> _gems = new();
@@ -59,7 +61,14 @@ public sealed class GemsCustomTestMod : Mod
             _gems.Add(Gems.Register(new GemDefinition
             {
                 Id = $"gems-custom-test:{name}", BaseOn = "T1_Gem_GemOfBleeding", DisplayName = $"Test gem ({name})",
-                Trigger = trigger, OnTrigger = ctx => { _handlerCalls++; _calls.Add(ctx); Info($"handler {ctx.Definition.Id}: {ctx.Trigger} by {ctx.Player.Value} on {ctx.Target.Value}, level {ctx.Level}"); },
+                Trigger = trigger, OnTrigger = ctx =>
+                {
+                    _handlerCalls++;
+                    _calls.Add(ctx);
+                    _modSync.Add(ReferenceEquals(SynchronizationContext.Current, Context.Scheduler.SynchronizationContext));
+                    _ = AfterAwait();
+                    Info($"handler {ctx.Definition.Id}: {ctx.Trigger} by {ctx.Player.Value} on {ctx.Target.Value}, level {ctx.Level}");
+                },
             }));
         _data = Gems.Register(new GemDefinition
         {
@@ -75,6 +84,12 @@ public sealed class GemsCustomTestMod : Mod
             if (Programs.Any(p => p.Tag == e.Tag)) _signals.Add(e);
         });
         _ = Run();
+    }
+
+    private async Task AfterAwait()
+    {
+        await Task.Yield();
+        _afterAwait.Add(Game.IsTickThread);
     }
 
     private async Task Steps(int n)
@@ -321,6 +336,8 @@ public sealed class GemsCustomTestMod : Mod
         var program = held is null ? null : Abilities.Programs.Info(Abilities.Programs.IdOf(Programs.First(p => p.Kind == GemTriggerKind.Kill).Guid));
         Info($"on_kill program in the registry: {program is not null}");
         _calls.Clear();
+        _modSync.Clear();
+        _afterAwait.Clear();
         var vukah = await Enemy();
         await Hit(wearer, vukah, sword, 5);
         Check(_calls.Count == 0, $"a hit that does not kill calls no kill handler ({_calls.Count})");
@@ -330,6 +347,9 @@ public sealed class GemsCustomTestMod : Mod
         Check(_calls.Count == 1 && c!.Definition.Id == killGem.Definition.Id && c.Player == wearer && c.Target == vukah && c.KillingBlow
               && c.Level == gem.Level && c.Carrier == dagger.Ref && c.Slot == GemImpactSlot.Held && c.Impact == held!.Impact && c.Damage > 0,
             $"the socketed gem's C# handler ran on the kill: {_calls.Count} call(s); {(c is null ? "" : $"player {c.Player.Value}, target {c.Target.Value}, level {c.Level}, carrier {c.Carrier}, slot {c.Slot}, damage {c.Damage}")}");
+        await Steps(4);
+        Check(_modSync.Count == 1 && _modSync[0], $"the handler ran with its mod's SynchronizationContext: {string.Join(",", _modSync)}");
+        Check(_afterAwait.Count == 1 && _afterAwait[0], $"an await in the handler came back on the tick thread: {string.Join(",", _afterAwait)}");
         await World.WriteField(dagger.ItemEntity, "WeaponGemSlot", "weaponGem.data.pide.id", 0u);
         await World.WriteField(dagger.ItemEntity, "WeaponGemSlot", "weaponGem.data.count", 0u);
         await World.WriteField(dagger.ItemEntity, "WeaponGemSlot", "weaponGem.id.value", 0u);

@@ -19,19 +19,29 @@ public sealed class GemRegistryTests : IDisposable
         public readonly List<(ModContext Mod, string Json, Func<bool> Wanted)> Configs = new();
         public readonly Dictionary<(uint Player, uint Impact), EquippedGem> Worn = new();
         public Exception? LookupThrows;
+        public Exception? ServeThrows;
+        public int EquipmentReads;  // reads of a wearer's equipped gems (G1's Gems.Equipped: kiln.world + kiln.items)
         public long NowMs { get; set; }
         public int Subscriptions, Unsubscriptions;
         public Action<ImpactSignalEvent>? Handler;
 
-        public void ServeProgram(ModContext mod, Guid guid, byte[] blob) => Served.Add((mod, guid, blob));
+        public void ServeProgram(ModContext mod, Guid guid, byte[] blob)
+        {
+            if (ServeThrows is { } x) throw x;
+            Served.Add((mod, guid, blob));
+        }
+
         public void DefineItem(ItemDefinition item) => Items.Add(item);
         public void ApplyConfigs(ModContext mod, string documentJson, Func<bool> stillWanted) => Configs.Add((mod, documentJson, stillWanted));
 
-        public EquippedGem? FindEquipped(EntityId player, EntityId impact)
+        // the wearer's equipped gems, as Gems.Equipped lists them
+        public IReadOnlyList<EquippedGem> Equipped(EntityId player)
         {
+            EquipmentReads++;
             if (LookupThrows is { } x) throw x;
-            return Worn.TryGetValue((player.Value, impact.Value), out var g) ? g : null;
+            return Worn.Where(kv => kv.Key.Player == player.Value).Select(kv => kv.Value).ToList();
         }
+
 
         public IDisposable SubscribeSignals(Action<ImpactSignalEvent> handler)
         {
@@ -120,9 +130,9 @@ public sealed class GemRegistryTests : IDisposable
         return b;
     }
 
-    private void Wear(uint player, uint impact, GemHandle gem, int level = 7, GemImpactSlot slot = GemImpactSlot.Held) =>
+    private void Wear(uint player, uint impact, GemHandle gem, int level = 7, GemImpactSlot slot = GemImpactSlot.Held, uint carrier = 0) =>
         _game.Worn[(player, impact)] = new EquippedGem(new EntityId(player), slot,
-            new SocketedGem(new ItemInstanceRef(default, new ItemId(0xabcd)), gem.Item, level), new EntityId(impact));
+            new SocketedGem(new ItemInstanceRef(new EntityRef(new EntityId(carrier), 0), new ItemId(0xabcd)), gem.Item, level), new EntityId(impact));
 
     private static int Signal(GemTriggerKind kind, uint impact, byte[] value, ulong step = 5)
     {
@@ -239,7 +249,7 @@ public sealed class GemRegistryTests : IDisposable
         var b = Mod("bmod");
         Assert.True(As(a, Frost(_ => { }, id: "amod:x")).Ok);
 
-        var sameId = As(b, Frost(_ => { }, id: "amod:x"));
+        var sameId = As(a, Frost(_ => { }, id: "amod:x"));  // the same mod twice (another mod cannot use amod's ids)
         Assert.False(sameId.Ok);
         Assert.Contains("registered already (by amod)", sameId.Reason);
 
@@ -407,8 +417,8 @@ public sealed class GemRegistryTests : IDisposable
         Assert.Equal(0, Signal(GemTriggerKind.Kill, 900, new byte[12]));                         // a short payload
         _game.Worn[(11, 902)] = new EquippedGem(new EntityId(11), GemImpactSlot.Held,
             new SocketedGem(default, new ItemId(0x1111), 3), new EntityId(902));
-        Assert.Equal(0, Signal(GemTriggerKind.Kill, 902, v));                                    // a gem nobody registered
-        Assert.Equal(1, Signal(GemTriggerKind.Kill, 900, v));
+        Assert.Equal(0, Signal(GemTriggerKind.Kill, 902, v, step: 6));                           // a gem nobody registered
+        Assert.Equal(1, Signal(GemTriggerKind.Kill, 900, v, step: 6));
         Assert.Equal(1, calls);
     }
 
@@ -465,10 +475,11 @@ public sealed class GemRegistryTests : IDisposable
         var h = As(mod, Frost(_ => calls++, GemTrigger.OnKill(), "m:k"));
         Wear(11, 900, h);
         _game.LookupThrows = new NotImplementedException("gem wave G1");
-        Assert.Equal(0, Signal(GemTriggerKind.Kill, 900, Hit(11, 44, kill: true)));
-        Assert.Equal(0, Signal(GemTriggerKind.Kill, 900, Hit(11, 44, kill: true)));
+        Assert.Equal(0, Signal(GemTriggerKind.Kill, 900, Hit(11, 44, kill: true), step: 5));
+        Assert.Equal(0, Signal(GemTriggerKind.Kill, 900, Hit(11, 44, kill: true), step: 6));
         _game.LookupThrows = null;
-        Assert.Equal(1, Signal(GemTriggerKind.Kill, 900, Hit(11, 44, kill: true)));
+        Assert.Equal(0, Signal(GemTriggerKind.Kill, 900, Hit(11, 44, kill: true), step: 6));  // that step's read failed
+        Assert.Equal(1, Signal(GemTriggerKind.Kill, 900, Hit(11, 44, kill: true), step: 7));
         Assert.Equal(1, calls);
     }
 
@@ -509,6 +520,152 @@ public sealed class GemRegistryTests : IDisposable
         As(m, new GemDefinition { Id = "m:data", BaseOn = "x" });
         Assert.False(GemRegistry.Listening);
         Assert.Equal(0, _game.Subscriptions);
+    }
+
+    // --------------------------------------------------------------------------------------------- review (G2)
+
+    // review: the id's mod part is the registering mod's: another mod cannot take an id, and with it the GUID made from
+    // it (saved gems keep their item id), before the mod that owns it loads
+    [Fact]
+    public void A_mod_cannot_register_a_gem_under_another_mods_id()
+    {
+        var a = Mod("amod");
+        var b = Mod("bmod");
+        var e = Assert.Throws<ArgumentException>(() => As(b, Frost(_ => { }, id: "amod:frostbite")));
+        Assert.Contains("bmod:", e.Message);
+        Assert.Empty(_game.Items);
+        Assert.Empty(_game.Served);
+        Assert.True(As(a, Frost(_ => { }, id: "amod:frostbite")).Ok);
+        Assert.Equal(GemRegistry.GuidOf("amod:frostbite"), Assert.Single(_game.Items).Guid);
+    }
+
+    // review: a lookup failure of any kind stays inside the dispatch; one that reached the event bus would count as a
+    // fault of Kiln's own ImpactSignalEvent subscription, which the bus removes after five, silencing every gem for good
+    [Fact]
+    public void A_failing_equipment_read_never_throws_into_the_event_bus()
+    {
+        var mod = Mod("m");
+        var calls = 0;
+        var h = As(mod, Frost(_ => calls++, GemTrigger.OnKill(), "m:k"));
+        Wear(11, 900, h);
+        var p = GemRegistry.ProgramOf(GemTriggerKind.Kill);
+        ImpactSignalEvent Ev(ulong step) => new(new ImpactRef(3, p.Id, new EntityId(900), new EntityId(11)), p.Tag, 0, 0x32940bec, Hit(11, 44, kill: true), step);
+
+        _game.LookupThrows = new IndexOutOfRangeException("a torn equipment read");
+        for (var i = 0; i < 6; i++) Assert.Null(Record.Exception(() => _game.Handler!(Ev((ulong)(10 + i)))));
+        _game.LookupThrows = new NullReferenceException();
+        Assert.Null(Record.Exception(() => _game.Handler!(Ev(20))));
+        Assert.Equal(0, calls);
+        _game.LookupThrows = null;
+        _game.Handler!(Ev(21));
+        Assert.Equal(1, calls);
+    }
+
+    // review: the handler runs as its mod also for await: the mod's SynchronizationContext brings an async handler's
+    // continuation back to the tick thread through the mod's scheduler (dropped when it unloads), as for event handlers
+    [Fact]
+    public void The_handler_runs_with_its_mods_synchronization_context()
+    {
+        var mod = Mod("m");
+        SynchronizationContext? seen = null;
+        var h = As(mod, Frost(_ => seen = SynchronizationContext.Current, GemTrigger.OnKill(), "m:k"));
+        Wear(11, 900, h);
+        var outer = new SynchronizationContext();
+        var before = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(outer);
+        try
+        {
+            Assert.Equal(1, Signal(GemTriggerKind.Kill, 900, Hit(11, 44, kill: true)));
+            Assert.Same(outer, SynchronizationContext.Current);
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(before);
+        }
+        Assert.Same(mod.Scheduler.SynchronizationContext, seen);
+    }
+
+    // review: the passive clock is the worn gem's (wearer, gem, carrier), not its impact entity's: switching the hotbar
+    // away and back spawns a new gem impact, and must not run a 30 s handler again at once
+    [Fact]
+    public void A_passive_gem_keeps_its_clock_when_its_impact_is_spawned_again()
+    {
+        var mod = Mod("m");
+        var at = new List<long>();
+        var h = As(mod, Frost(_ => at.Add(_game.NowMs), GemTrigger.Passive(TimeSpan.FromSeconds(30)), "m:aura"));
+        var root = BitConverter.GetBytes(11u);
+        Wear(11, 900, h, carrier: 5000);
+        _game.NowMs = 10_000;
+        Assert.Equal(1, Signal(GemTriggerKind.Passive, 900, root, (ulong)_game.NowMs));
+        // hotbar away and back: the game destroys the gem's impact and spawns a new one for the same gem in the same weapon
+        for (uint impact = 901; impact < 921; impact++)
+        {
+            _game.Worn.Clear();
+            Wear(11, impact, h, carrier: 5000);
+            _game.NowMs += 500;
+            Signal(GemTriggerKind.Passive, impact, root, (ulong)_game.NowMs);
+        }
+        Assert.Equal(new long[] { 10_000 }, at);
+        _game.NowMs = 40_000;
+        Assert.Equal(1, Signal(GemTriggerKind.Passive, 920, root, (ulong)_game.NowMs));
+        Assert.Equal(new long[] { 10_000, 40_000 }, at);
+        // another weapon with its own gem of that kind has its own clock
+        Wear(11, 950, h, carrier: 6000);
+        Assert.Equal(1, Signal(GemTriggerKind.Passive, 950, root, (ulong)_game.NowMs + 1));
+    }
+
+    // review: a short-interval gem's clean-up of old clocks must not drop a long-interval gem's clock (it ran again
+    // about a minute later instead of an hour later)
+    [Fact]
+    public void A_short_passive_gem_does_not_cut_a_long_ones_interval()
+    {
+        var mod = Mod("m");
+        int hourly = 0, often = 0;
+        var hour = As(mod, Frost(_ => hourly++, GemTrigger.Passive(TimeSpan.FromHours(1)), "m:hourly"));
+        var second = As(mod, Frost(_ => often++, GemTrigger.Passive(TimeSpan.FromSeconds(1)), "m:often"));
+        Wear(11, 900, hour, carrier: 5000);
+        Wear(11, 901, second, carrier: 5001);
+        var root = BitConverter.GetBytes(11u);
+        for (_game.NowMs = 10_000; _game.NowMs <= 100_000; _game.NowMs += 250)
+        {
+            Signal(GemTriggerKind.Passive, 901, root, (ulong)_game.NowMs);
+            Signal(GemTriggerKind.Passive, 900, root, (ulong)_game.NowMs);
+        }
+        Assert.Equal(1, hourly);
+        Assert.Equal(91, often);
+    }
+
+    // review: one read of a wearer's equipped gems per step (as G1's GemTriggeredEvent does): an area hit on ten enemies
+    // sends ten signals in one step, each a kiln.world and a kiln.items read otherwise
+    [Fact]
+    public void The_wearers_gems_are_read_once_per_step()
+    {
+        var mod = Mod("m");
+        var calls = 0;
+        var h = As(mod, Frost(_ => calls++, GemTrigger.OnHit(), "m:hit"));
+        Wear(11, 900, h);
+        for (uint target = 40; target < 50; target++) Signal(GemTriggerKind.Hit, 900, Hit(11, target), step: 7);
+        Assert.Equal(10, calls);
+        Assert.Equal(1, _game.EquipmentReads);
+        Signal(GemTriggerKind.Hit, 900, Hit(11, 44), step: 8);
+        Assert.Equal(2, _game.EquipmentReads);
+        Assert.Equal(11, calls);
+    }
+
+    // review: kiln.assets refusing the trigger program (its resources off) is the documented "gems.triggers" refusal
+    [Fact]
+    public void A_refused_trigger_program_throws_KilnUnavailable_naming_gems_triggers()
+    {
+        var m = Mod("m");
+        _game.ServeThrows = new KilnUnavailableException("assets.resources", "the resource hooks are off");
+        var e = Assert.Throws<KilnUnavailableException>(() => As(m, Frost(_ => { }, id: "m:trig")));
+        Assert.Equal("gems.triggers", e.Capability);
+        Assert.Contains("the resource hooks are off", e.Message);
+        Assert.Empty(_game.Items);
+        Assert.Empty(GemRegistry.Definitions);
+        _game.ServeThrows = null;
+        Assert.True(As(m, Frost(_ => { }, id: "m:trig")).Ok);  // served on the next try (nothing was kept as served)
+        Assert.Single(_game.Served);
     }
 
     // ------------------------------------------------------------------------------------------------- the row

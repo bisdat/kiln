@@ -73,7 +73,7 @@ public override void OnLoad()          // on every side that has the mod: a clie
 
 | Field | Meaning |
 |---|---|
-| `Id` | `"<modid>:<name>"`, unique |
+| `Id` | `"<modid>:<name>"` with your mod's id (another mod's id is refused), unique |
 | `Guid` | the item's GUID, fixed forever. Null: one made from `Id` (the same on every start and every side) |
 | `Name` | the item's debug name. Null: `Gem_<modid>_<name>` |
 | `BaseOn` | the gem to copy: a debug name (`T1_Gem_GemOfBleeding`), a `0x` id or a GUID |
@@ -90,13 +90,19 @@ from code).
 
 `Gems.Register` returns a `GemHandle`: `Ok`, `Reason` (refused when the id, GUID or debug name is taken: "gem
 gemeffects:frostbite is registered already (by gemeffects)"), `Item`, `Guid`, `Name`, `Dispose()`. A wrong definition
-throws `ArgumentException` (a bad id, levels outside 1..105, a program and a trigger at once, a trigger without a
-handler, configs with a trigger); a call outside mod code throws `InvalidOperationException`; with kiln.content's new
-items or (for a trigger) kiln.assets missing it throws `KilnUnavailableException` naming `gems.triggers`. Tick thread.
+throws `ArgumentException` (a bad id, an id under another mod's id, levels outside 1..105, a program and a trigger at
+once, a trigger without a handler, configs with a trigger); a call outside mod code throws `InvalidOperationException`;
+with kiln.content's new items or (for a trigger) kiln.assets and its resources missing it throws
+`KilnUnavailableException` naming `gems.triggers` with the reason. The `gems.triggers` row does not cover those two
+(see "Capability"), so catch that exception as well, as GemEffects does. Tick thread.
 
 **Unload.** When the mod unloads (or the handle is disposed) its handlers stop. The items stay registered until the
 server restarts, as every kiln.content item does, so gems in sockets and bags stay valid; a gem whose handler is gone
-does nothing. After a restart without the mod the gems become kiln.content's `[Missing: ...]` placeholders.
+does nothing. After a restart without the mod the gems become kiln.content's `[Missing: ...]` placeholders. A
+placeholder keeps the references kiln.content can still resolve; a trigger program that no loaded mod serves is not
+one of them, so such a placeholder gets its base's program back: socketed, it acts as its base gem (a Frostbite from
+the Gem of Bleeding bleeds) until it is taken out. With another mod's gem of the same trigger loaded, the program is
+served and the placeholder does nothing.
 
 ### Triggers
 
@@ -107,7 +113,10 @@ does nothing. After a restart without the mod the gems become kiln.content's `[M
 | `GemTrigger.OnKill()` | each killing blow | the one killed |
 | `GemTrigger.OnBackstab()` | each backstab | the one hit |
 | `GemTrigger.OnHitTaken()` | each hit the wearer takes | the attacker |
-| `GemTrigger.Passive(interval)` | every `interval` (250 ms to 1 hour) while the gem is worn | none |
+| `GemTrigger.Passive(interval)` | every `interval` (250 ms to 1 hour) while the gem is worn: the first run about 250 ms after it is worn | none |
+
+A passive gem's clock belongs to the gem in its carrier: a hotbar switch away and back (the game starts the gem's
+program again) does not run the handler early, and a second weapon with its own gem of that kind has its own clock.
 
 `enemiesOnly` (default true) keeps only hits whose other side is an enemy faction, the mask the game's own gems use
 (creatures; not players, props or buildings). Hits made by a skill's or a gem's own damage do not count, as in the game's
@@ -115,14 +124,16 @@ gems, so one gem does not set off another.
 
 ### The context (`GemTriggerContext`)
 
-`Player` (the wearer), `Target`, `TargetPart` (the entity the hit struck), `Gem` (the gem item), `Level` (the gem's
+`Player` (the wearer), `Target`, `TargetPart` (the entity the hit struck; for `OnHitTaken` the wearer's own part), `Gem` (the gem item), `Level` (the gem's
 level: scale your effect with it), `Carrier` (the socketed item), `Slot` (its equipment slot), `Impact` (the gem's
 running program), `Damage` (health the hit took; `HealthChange` is the raw value, negative for damage), `Position`,
 `Weapon`, `Source`, `Crit`, `KillingBlow`, `Backstab`, `Blocked`, `OtherIsEnemy`, `Trigger`, `Definition`, `Step`.
 
-The handler runs on the server's tick thread with your mod as the caller, so every tick-thread API works
+The handler runs on the server's tick thread with your mod as the caller (its `SynchronizationContext` too, so an
+`await` in an async handler comes back to the tick thread, as in an event handler), so every tick-thread API works
 (`Abilities.ApplyBuff`, `Abilities.Attributes.Add`, `Combat`, `Spawn`, ...). An exception is logged in your mod's log
-(three times) and the next trigger runs again. On a client the handler is never called.
+(three times) and the next trigger runs again. The handler runs where the server world runs (a dedicated server, or the
+hosting player's game); a joined client never calls it.
 
 ### How it works
 
@@ -134,7 +145,9 @@ The handler runs on the server's tick thread with your mod as the caller, so eve
   hits and keeps its wearer's. For each one it sends the hit with `kiln.Signal` (48 bytes: attacker, target, part,
   health change, position, weapon, source, crit, kill, backstab, blocked, enemy).
 - Kiln.Abilities receives the signal in the next Pre, finds the gem through the wearer's equipped gems
-  (`Gems.Equipped`: the gem item, its level, its carrier, matched by the program's entity), and calls the gem's handler.
+  (`Gems.Equipped`, read once per wearer and step: the gem item, its level, its carrier, matched by the program's
+  entity), and calls the gem's handler. A signal whose gem impact is gone by then (the weapon was put away in that
+  step) calls nothing.
 - The program keeps an `impact.DamageSetup` as its first such variable: the game writes the gem's item power into a
   program's first DamageSetup (docs/re/abilities.md, "Facts for programs Kiln generates"), and this one takes it.
 
@@ -145,6 +158,9 @@ The handler runs on the server's tick thread with your mod as the caller, so eve
 - **Damage you deal can set the gem off again.** Damage from the handler (`Combat.Damage`, an impact rooted at the
   player) is a hit of the wearer. Skip it with `ctx.Weapon` / `ctx.Source`, or keep a cooldown.
 - A passive gem's interval rounds to the program's 250 ms steps.
+- **Tooltip rows.** A new gem shows its base's number rows (`uiValues`), which describe the base's effect, not your
+  handler's. Choose a base whose rows fit, or replace them with a data-pack rule on the gem's debug name
+  (gamedata.md, "Lists of rows"); the description is yours either way.
 - Several gems on one player each run their own handler for the same hit (as duplicates of a game gem do).
 - Clients: install the mod on the players' games (`side: both`, `clients: mod`) so they show the gem (name, icon,
   tooltip). A vanilla client shows "[Invalid Item Stack]" for a new gem; the effects are the server's and work for every
@@ -152,15 +168,20 @@ The handler runs on the server's tick thread with your mod as the caller, so eve
 
 ## Capability
 
-`gems.triggers` (managed, static, with G1's `GemTriggeredEvent`): what `Gems.Register` needs: kiln.abilities, kiln.content
-with new items (`content.new`, table v3) and kiln.assets (for a trigger program). A data gem from a pack needs only
-kiln.content. The handlers also need `Gems.Equipped` (`gems.read`) on the server.
+`gems.triggers` (managed, session; Kiln.Abilities with `gems.read`, caps.md) says what `GemTriggeredEvent` and the
+handlers need: `gems.read` (the handlers find the gem through `Gems.Equipped`), kiln.abilities and its native events
+(`abilities.natives`). `Gems.Register` needs that row and, checked by Register itself, kiln.content with new items
+(`content.new`, table v3) and, for a trigger program, kiln.assets serving resources (`assets.resources`): without them
+it throws `KilnUnavailableException` naming `gems.triggers` with the reason, while the row can still read available.
+A data gem from a pack needs only kiln.content.
 
 ## Tests
 
 - `managed/tests/Kiln.Blocks.Tests/GemRegistryTests.cs`: registration (the clone, the program served once per mod and
-  trigger, refusals, the definition errors, the capability), dispatch of the programs' signals (context, filters,
-  passive intervals, a throwing handler, unload) on a fake game side.
+  trigger, refusals, the definition errors, ids under another mod's id, a refused trigger program, the capability),
+  dispatch of the programs' signals (context, filters, passive intervals and their clock across a new gem impact and
+  next to a shorter gem, a throwing handler, a failing equipment read that stays out of the event bus, the mod's
+  SynchronizationContext, one equipment read per wearer and step, unload) on a fake game side.
 - `tools/impact/tests/test_gem_programs.py`: each program assembles to the embedded `.bin`, lints, keeps the DamageSetup
   placeholder first, and lays out its payload as the C# side reads it.
 - Lab (`mods/tests/gems-custom-test`, Wine dedicated server 26430253): the programs registered from kiln.assets, the gems
