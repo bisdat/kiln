@@ -8,6 +8,7 @@ GemFixture* gem_fixture = nullptr;
 // while the mod is not loaded, like the Kiln Equipment wand the real client showed); -1 has no catalog.
 int gem_catalog_mode = 1;
 uint8_t gem_weapon_category = 2;
+std::set<uint32_t> gem_unknown, gem_no_catalog; // per item: not in the catalog / the lookup fails
 struct GemFixture {
     std::vector<uint8_t> play = std::vector<uint8_t>(0x3100), models = std::vector<uint8_t>(0x8f70 * 2);
     std::vector<uint8_t> rows = std::vector<uint8_t>(0x48 * 2), sockets = std::vector<uint8_t>(0x48);
@@ -57,10 +58,10 @@ struct GemFixture {
         header = {addr(rows.data()), 2, 2, 0};
         fake::screen.hud_screen = 45; fake::screen.available = 1;
         env().gemforge_abi = +[] { return true; };
-        gem_catalog_mode = 1; gem_weapon_category = 2;
+        gem_catalog_mode = 1; gem_weapon_category = 2; gem_unknown.clear(); gem_no_catalog.clear();
         env().item_category = +[](uint32_t item, uint8_t* cat) {
-            if (gem_catalog_mode < 0) return -1;
-            if (gem_catalog_mode == 0 || (item != 220 && item != 110 && item != 111)) return 0;
+            if (gem_catalog_mode < 0 || gem_no_catalog.count(item)) return -1;
+            if (gem_catalog_mode == 0 || gem_unknown.count(item) || (item != 220 && item != 110 && item != 111)) return 0;
             *cat = item == 220 ? gem_weapon_category : 15;
             return 1;
         };
@@ -199,6 +200,32 @@ void gemforge_tests() {
         f.header.count = 0; gem_catalog_mode = -1; f.frame(nullptr, nullptr);
         CHECK(f.read(m, rows, 2) == KILN_OK && !m.ok && fake::rows_off.empty(),
               "gemforge: a selected weapon the missing catalog cannot check makes the frame unavailable");
+    }
+    for (int mixed = 0; mixed < 2; ++mixed) {
+        // A known weapon holding a gem the catalog does not know, and an unknown weapon holding a known gem.
+        GemFixture f; KilnUiGemForgeFrame m{}; KilnUiGemForgeCandidate rows[2]{};
+        f.read(m); f.arm(); gem_unknown = {mixed ? 220u : 111u};
+        f.frame(nullptr, nullptr);
+        CHECK(f.read(m, rows, 2) == KILN_OK && m.ok && m.count == 2 && rows[0].has_weapon_carrier &&
+              rows[0].weapon_carrier.item == 220 && rows[0].displayed_gem.item == 111 && !rows[1].has_weapon_carrier &&
+              fake::rows_off.empty(), "gemforge: mixed known and unknown carrier rows (%d) are copied", mixed);
+    }
+    {
+        // The catalog fails on the second row after the first was appended: subscribers see no rows, the feature stays.
+        GemFixture f;
+        struct Seen { int calls = 0; uint32_t ok = 0, count = 0; } seen;
+        auto reg = reg_record();
+        const auto callback = +[](const KilnUiGemForgeFrame* m, const KilnUiGemForgeCandidate*, uint32_t count, void* user) {
+            auto& s = *static_cast<Seen*>(user); ++s.calls; s.ok = m->ok; s.count = count;
+        };
+        CHECK(T()->subscribe_gemforge_candidates(f.owner, callback, &seen, &reg) == KILN_OK && reg.ok,
+              "gemforge: catalog-failure subscription");
+        f.arm(); gem_no_catalog = {110};
+        f.frame(nullptr, nullptr);
+        CHECK(seen.calls == 1 && !seen.ok && !seen.count && fake::rows_off.empty(),
+              "gemforge: a catalog failure after the first row publishes no rows and keeps the feature");
+        gem_no_catalog.clear(); f.frame(nullptr, nullptr);
+        CHECK(seen.calls == 2 && seen.ok && seen.count == 2, "gemforge: the feature recovers on the next frame");
     }
     for (int gate = 0; gate < 5; ++gate) {
         GemFixture f; KilnUiGemForgeFrame m{};
