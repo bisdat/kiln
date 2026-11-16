@@ -121,4 +121,44 @@ private:
     bool capped_ = false;
     clock::time_point cap_{};
 };
+
+// The shutdown's signals and the next world's start, against one StageBarrier (saves.cpp). A signal's deadline counts from
+// when the shutdown began, kShutdownWait later; for the game's shutdown line that is when the game logged it, and a line
+// logged before the current world started is an earlier world's (delivered late): ignored. The check and the cap are one
+// step against world_started (review 3): a line checked just before the next world started and capped just after would
+// put the old world's deadline, long past, on every save of the new one. Lock order: this, then the barrier's.
+class ShutdownCap {
+public:
+    using clock = StageBarrier::clock;
+    enum class Seen { Ignored, First, Again };
+
+    explicit ShutdownCap(StageBarrier& barrier) : barrier_(barrier) {}
+
+    // The shutdown began at `at`. `logged`: `at` is when the game logged its shutdown line (its world is checked).
+    Seen begins(clock::time_point at, bool logged) {
+        std::lock_guard lk(mu_);
+        if (logged && at < started_) return Seen::Ignored;
+        if (between) between(between_user);
+        barrier_.cap(at + kShutdownWait);
+        return seen_ ? Seen::Again : (seen_ = true, Seen::First);
+    }
+
+    // The next world started at `now`: its saves wait with their own limit again; a line logged before now is the old one's.
+    void world_started(clock::time_point now) {
+        std::lock_guard lk(mu_);
+        started_ = now;
+        seen_ = false;
+        barrier_.uncap();
+    }
+
+    // Tests only: runs inside begins(), after a line's check and before its cap.
+    void (*between)(void*) = nullptr;
+    void* between_user = nullptr;
+
+private:
+    std::mutex mu_;
+    StageBarrier& barrier_;
+    clock::time_point started_{};
+    bool seen_ = false;
+};
 }  // namespace ksaves

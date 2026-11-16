@@ -281,33 +281,27 @@ ksaves::StageBarrier g_stage;
 using ksaves::kShutdownWait;
 using ksaves::kWorldWriteWait;
 constexpr std::string_view kShutdownLine = "Trigger gameflow shutdown";  // the game, ~100 ms before its shutdown save
-std::atomic<bool> g_shutdown_capped{false};
 const KilnLogApi* g_log_time = nullptr;  // kiln.log (in the core): when a delivered game line was logged
-std::atomic<int64_t> g_world_started_ns{0};  // the server world's start (steady_clock ns): older lines are an earlier world's
+// The shutdown's signals and the server world's start (lines logged before it are an earlier world's), against g_stage.
+ksaves::ShutdownCap g_shutdown{g_stage};
 
 using SteadyClock = ksaves::StageBarrier::clock;
-int64_t steady_ns(SteadyClock::time_point t) {
-    return std::chrono::duration_cast<std::chrono::nanoseconds>(t.time_since_epoch()).count();
-}
 
-// `at`: when the shutdown began (for the log line: when the game logged it, which can be well before its delivery). The
-// deadline counts from then; one already past applies at once.
-void shutdown_begins(const char* why, SteadyClock::time_point at = SteadyClock::now()) {
-    g_stage.cap(at + kShutdownWait);
-    if (!g_shutdown_capped.exchange(true)) {
-        const auto late = std::chrono::duration_cast<std::chrono::milliseconds>(SteadyClock::now() - at).count();
-        logf(KILN_LOG_INFO, "saves: shutdown begins (%s, %lld ms ago): a world write waits for Kiln.Saves' writer until %lld ms "
-             "after that at the latest", why, static_cast<long long>(late), static_cast<long long>(kShutdownWait.count()));
-    }
+// `at`: when the shutdown began (for the log line, `logged`: when the game logged it, which can be well before its
+// delivery). The deadline counts from then; one already past applies at once.
+void shutdown_begins(const char* why, SteadyClock::time_point at = SteadyClock::now(), bool logged = false) {
+    if (g_shutdown.begins(at, logged) != ksaves::ShutdownCap::Seen::First) return;
+    const auto late = std::chrono::duration_cast<std::chrono::milliseconds>(SteadyClock::now() - at).count();
+    logf(KILN_LOG_INFO, "saves: shutdown begins (%s, %lld ms ago): a world write waits for Kiln.Saves' writer until %lld ms "
+         "after that at the latest", why, static_cast<long long>(late), static_cast<long long>(kShutdownWait.count()));
 }
 
 void KILN_CALL on_game_log(int32_t, KilnStr text, void*) {  // Kiln's log thread: delivered in batches, possibly late
     if (std::string_view(text.ptr, text.len).find(kShutdownLine) == std::string_view::npos) return;
     const int64_t logged = g_log_time ? g_log_time->line_time() : 0;  // review 2: when the game said it, not when it arrived
-    if (logged && logged < g_world_started_ns.load()) return;          // an earlier world's line, delivered after this one began
+    if (!logged) return shutdown_begins("the game's shutdown line");  // no capture time: from its delivery
     shutdown_begins("the game's shutdown line",
-                    logged ? SteadyClock::time_point(std::chrono::duration_cast<SteadyClock::duration>(std::chrono::nanoseconds(logged)))
-                           : SteadyClock::now());
+                    SteadyClock::time_point(std::chrono::duration_cast<SteadyClock::duration>(std::chrono::nanoseconds(logged))), true);
 }
 
 std::atomic<uintptr_t> g_inst{0};
@@ -855,9 +849,7 @@ void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
     } else if (ev->event == KILN_WORLD_STARTED) {
         if (ev->session > 1 && !g_closed) drop_world("a new server world started");
         g_closed = false;
-        g_world_started_ns.store(steady_ns(SteadyClock::now()));
-        g_stage.uncap();  // a game client hosts the next world: its saves wait with their own limit again
-        g_shutdown_capped.store(false);
+        g_shutdown.world_started(SteadyClock::now());  // a game client hosts the next world: its saves wait with their own limit again
     }
 }
 

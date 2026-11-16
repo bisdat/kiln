@@ -132,6 +132,44 @@ int main() {
               "no world write waits longer than the shutdown's wait, and that leaves the world write room in the game's 10 s");
     }
 
+    // The shutdown's line and the next world's start (ShutdownCap, saves.cpp's on_game_log and on_world).
+    {
+        using clock = std::chrono::steady_clock;
+        ksaves::StageBarrier g;
+        ksaves::ShutdownCap sc(g);
+        const auto old_start = clock::now() - 30s;
+        sc.world_started(old_start);
+        check(sc.begins(old_start - 1s, true) == ksaves::ShutdownCap::Seen::Ignored,
+              "a shutdown line logged before the world started is an earlier world's: ignored");
+        // Review 3: the old world's line passes its check (logged after the old world started), its callback pauses there,
+        // the next world starts and lifts the cap, then the callback goes on. It must not put the old world's deadline,
+        // long past, on the new world's saves (each would go at once, and the barrier would switch itself off).
+        struct Ctx {
+            ksaves::ShutdownCap* sc;
+            std::thread next;
+        } ctx{&sc, {}};
+        sc.between_user = &ctx;
+        sc.between = [](void* u) {
+            auto* c = static_cast<Ctx*>(u);
+            c->next = std::thread([c] { c->sc->world_started(std::chrono::steady_clock::now()); });  // the next world starts
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));                              // ... meanwhile
+        };
+        sc.begins(old_start + 5s, true);
+        sc.between = nullptr;
+        ctx.next.join();
+        g.issued(1);
+        std::thread wr([&] {
+            std::this_thread::sleep_for(200ms);
+            g.done(1);
+        });
+        const auto c = g.wait(ksaves::kWorldWriteWait);
+        wr.join();
+        check(c.caught && !c.capped && c.ms >= 190,
+              "an earlier world's shutdown line checked just before the next world started does not cap the next world's saves");
+        check(sc.begins(clock::now(), true) == ksaves::ShutdownCap::Seen::First,
+              "the next world's own shutdown is seen (and logged) as its first");
+    }
+
     // Numbers wrap after 2^64 stagings (the managed side skips 0): still ordered. Serial numbers only move forward by less
     // than 2^63, so the counters walk there in quarter steps (review 2: a jump from 0 to near the end reads as backwards).
     {
