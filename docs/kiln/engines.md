@@ -480,8 +480,10 @@ refusal status and installed-target mask.
 
 Some packages only work from the game folder itself (dev.30, `crates/kiln-manage/src/game_files.rs`). The Library
 keeps them as native mods, and activation places their files there instead of having kiln-core load them: the
-profile's `kiln/profile.json` does not list them, the launcher's native plan says "placed in the game folder at
-activation". Kiln tells them by their files, so an entry an older launcher imported counts as well:
+profile's `kiln/profile.json` does not list them, the launcher's native plan has them on with the reason "placed in
+the game folder at activation" (the mod list says "Runs from the game folder", the load order lists them under "From
+the game folder"; a package with two files that would be one on Windows is off, "not placed in the game folder"). Kiln
+tells them by their files, so an entry an older launcher imported counts as well:
 
 - **A plugin loader the game loads itself.** The native mod's one DLL sits at the top of its folder under a proxy name
   other than Kiln's `dinput8.dll`, the game's `steam_api64.dll` and `xinput9_1_0.dll` (`powrprof.dll`, `winmm.dll`,

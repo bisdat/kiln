@@ -15,7 +15,7 @@
 use kiln_manage::engine_mods;
 use kiln_manage::game::{GameInstall, GameKind, PathMode, Platform};
 use kiln_manage::library::{self, LibraryRef};
-use kiln_manage::manifest::ModKind;
+use kiln_manage::manifest::{ModKind, RunSide};
 use kiln_manage::paths::DataDirs;
 use kiln_manage::pe::build_test_dll;
 use kiln_manage::profile::{self, ProfileMod};
@@ -139,6 +139,34 @@ fn a_powrprof_plugin_loader_package_runs_from_the_game_folder() {
     let cleanup = profile::deactivate_report(&dirs, &install).unwrap();
     assert!(!g.join("powrprof.dll").exists() && !g.join("plugins/AutolootCoop.dll").exists(), "{cleanup:#?}");
     assert_eq!(read(&g.join("AutolootCoop.ini")), b"[Autoloot]\nEnabled=1\nRange=30\n", "the player's settings stay");
+}
+
+/// The launcher's native plan (profile::resolve_preview; its mod list and load order, dev28 inbox x-01 task 37, GitHub
+/// #41): the package runs, from the game folder, so its entry is on and its reason only says how. One that Kiln cannot
+/// place (two of its files would be one file on Windows: activation places none of them) does not run, and says why.
+#[test]
+fn the_preview_shows_a_game_folder_package_as_running_and_one_kiln_cannot_place_as_not() {
+    let t = tmp("preview");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let (pkg, _) = autoloot_package(&t.0);
+    let r = import_one(&dirs, &pkg, ModKind::Native);
+    let p = profile_with(&dirs, "loot", vec![pm(&r, true)]);
+    let pre = profile::resolve_preview(&dirs, &p, RunSide::Client).unwrap();
+    let n = pre.native.iter().find(|n| n.id == r.id).unwrap_or_else(|| panic!("{pre:#?}"));
+    assert!(n.enabled, "it runs: {n:#?}");
+    let how = n.reason.as_deref().unwrap_or_default();
+    assert!(how.contains("game folder") && how.contains("powrprof.dll"), "{how}");
+
+    let dirs = DataDirs::at(t.0.join("data-clash"));
+    let (pkg, _) = autoloot_package(&t.0.join("clash"));
+    put(&pkg, "plugins/autolootcoop.dll", &build_test_dll(&[], b"AutolootCoop again"));
+    let r = import_one(&dirs, &pkg, ModKind::Native);
+    let p = profile_with(&dirs, "loot", vec![pm(&r, true)]);
+    let pre = profile::resolve_preview(&dirs, &p, RunSide::Client).unwrap();
+    let n = pre.native.iter().find(|n| n.id == r.id).unwrap_or_else(|| panic!("{pre:#?}"));
+    assert!(!n.enabled, "Kiln places none of its files, so it does not run: {n:#?}");
+    let why = n.reason.as_deref().unwrap_or_default();
+    assert!(why.contains("not placed in the game folder") && why.contains("would both be"), "{why}");
 }
 
 #[test]

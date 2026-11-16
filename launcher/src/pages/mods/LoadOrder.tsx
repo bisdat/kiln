@@ -11,7 +11,7 @@ import * as api from "../../api/commands";
 import type { ModKind, NativePhase, ResolvePreview, RunSide } from "../../api/commands";
 import { qk, useActiveProfile, useGame } from "../../api/hooks";
 import { KIND_NAME, KIND_PLUGIN, KIND_SHORT, KIND_TONE, MOD_KINDS, NOT_RUNNING_KINDS } from "../../api/kinds";
-import type { ModRow } from "../../shell/mods";
+import { fromGameFolder, type ModRow } from "../../shell/mods";
 import { useMods } from "../../shell/useMods";
 import { Badge, Button, FlameToggle, Menu, Segmented, Skeleton, errorText } from "../../ui";
 import { ProfileAside, useActivation, useOpenSettings } from "../profiles/ProfileLayout";
@@ -32,7 +32,10 @@ export function steps(rows: ModRow[], preview: ResolvePreview | null, side: RunS
   const world = (preview?.withWorld ?? []).map((id) => on.find((r) => r.kind === "kiln" && r.id === id)).filter((r): r is ModRow => !!r);
   const engines = MOD_KINDS.filter((k) => k !== "kiln" && k !== "native").map((kind) => ({ kind, rows: on.filter((r) => r.kind === kind && !r.wontRun && !NOT_RUNNING_KINDS.includes(kind)) }))
     .filter((g) => g.rows.length);
-  const placed = new Set([...nat("dllmain"), ...nat("early"), ...nat("boot"), ...nat("world"), ...kiln, ...world, ...engines.flatMap((g) => g.rows)]);
+  // packages Kiln places in the game folder, which the game loads itself (no Kiln phase)
+  const kilnPlaced = (preview?.native ?? []).filter(fromGameFolder)
+    .map((n) => on.find((r) => r.kind === "native" && r.id === n.id)).filter((r): r is ModRow => !!r);
+  const placed = new Set([...nat("dllmain"), ...nat("early"), ...nat("boot"), ...nat("world"), ...kiln, ...world, ...engines.flatMap((g) => g.rows), ...kilnPlaced]);
   const notLoading = on.filter((r) => !placed.has(r) && (!!preview || (r.kind !== "kiln" && r.kind !== "native")));
   const numbered = (list: ModRow[]) => list.map((row, i) => ({ row, num: i + 1 }));
   const s: Step[] = [
@@ -43,8 +46,8 @@ export function steps(rows: ModRow[], preview: ResolvePreview | null, side: RunS
     { id: "menu", title: side === "client" ? "At the main menu" : "When the server world starts", hint: "Kiln mods, in the order Kiln resolves from what each needs and comes after.", rows: numbered(kiln) },
     { id: "world", title: side === "client" ? "With your world" : "At the first world", hint: side === "client" ? "When you play alone or friends join you: Kiln mods for the server side, and native mods of the world phase." : "Native mods of the world phase.",
       rows: [...world.map((row) => ({ row })), ...numbered(nat("world"))] },
-    { id: "folder", title: "From the game folder", hint: "Mods put there by hand, which load by their kind's rules; Kiln did not place them.",
-      rows: rows.filter((r) => r.found?.state === "loads").map((row) => ({ row, note: "Game folder" })) },
+    { id: "folder", title: "From the game folder", hint: "The game, or the mod's own loader, loads these: packages Kiln places there when it activates the profile, and mods put there by hand.",
+      rows: [...kilnPlaced.map((row) => ({ row, note: "Placed by Kiln" })), ...rows.filter((r) => r.found?.state === "loads").map((row) => ({ row, note: "Game folder" }))] },
   ];
   return { steps: s.filter((x) => x.rows.length || x.groups?.length), notLoading, off: rows.filter((r) => !r.on && !r.found) };
 }

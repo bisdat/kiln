@@ -239,7 +239,8 @@ pub fn runs_from_game_folder(dirs: &DataDirs, m: &ProfileMod) -> bool {
     plan_of(dirs, m).is_some()
 }
 
-/// One sentence for the launcher's native plan (profile::resolve_preview) about such an entry.
+/// One sentence for the launcher's native plan (profile::resolve_preview) about such an entry: how it runs (the
+/// launcher shows it as running, from the game folder).
 pub fn preview_reason(plan: &GamePlan) -> String {
     match plan.shape {
         Shape::Loader => format!("placed in the game folder at activation: the game loads {} itself, not Kiln",

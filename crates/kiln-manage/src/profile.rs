@@ -518,7 +518,10 @@ pub struct NativePlanEntry {
     pub id: String,
     pub version: String,
     pub phase: crate::manifest::NativePhase,
+    /// It runs. With a `reason`, it runs from the game folder: Kiln places the package there at activation and the
+    /// game (or the package's own loader) loads it, not Kiln (game_files), and the reason says how.
     pub enabled: bool,
+    /// Off: why it does not load. On: how it runs from the game folder. None: Kiln loads it, in its phase.
     pub reason: Option<String>,
 }
 
@@ -1040,8 +1043,13 @@ pub fn resolve_preview_for(dirs: &DataDirs, profile: &Profile, side: RunSide, ho
             continue;
         }
         if let Some(plan) = crate::game_files::plan(&folder) {
-            native.push(NativePlanEntry { id: m.id.clone(), version: m.version.clone(), phase, enabled: true,
-                reason: Some(crate::game_files::preview_reason(&plan)) });
+            // the game loads it from the game folder, not Kiln: on, its reason says how; unless activation places none
+            // of its files (game_files::activate)
+            let (enabled, reason) = match &plan.problem {
+                Some(problem) => (false, format!("not placed in the game folder: {problem}")),
+                None => (true, crate::game_files::preview_reason(&plan)),
+            };
+            native.push(NativePlanEntry { id: m.id.clone(), version: m.version.clone(), phase, enabled, reason: Some(reason) });
             continue;
         }
         if let Some((engine, file)) = crate::engines::own_loader_in(&folder) {

@@ -4,7 +4,7 @@ import { stopIds } from "./stoppedStart";
 // folder that the launcher did not place (kiln_manage::found). A row is on when its mod is in the loaded profile and
 // enabled; a game-folder row has no switch (only its state and fix). One short note per row, only when there is
 // something to say. Pure: shell/useMods.ts reads the queries and the edits.
-import type { BootState, FoundMod, LibraryEntry, LibraryRef, LibraryVersion, ModKind, Profile, ProfileMod, ResolvePreview, RetainedPlacement } from "../api/commands";
+import type { BootState, FoundMod, LibraryEntry, LibraryRef, LibraryVersion, ModKind, NativePlanEntry, Profile, ProfileMod, ResolvePreview, RetainedPlacement } from "../api/commands";
 import { MOD_KINDS, NOT_RUNNING_KINDS } from "../api/kinds";
 
 export type NoteTone = "info" | "warn" | "err" | "idle";
@@ -70,6 +70,19 @@ function needs(reason: string): string | null {
   return m ? `Needs ${m[1]}${m[2] ? ` ${m[2]}` : ""}` : null;
 }
 
+/** A native entry of the preview that runs from the game folder: Kiln places its package there at activation and the
+ *  game loads it itself (a powrprof.dll plugin loader, .asi plugins), not Kiln. It is on, and its reason says how
+ *  (kiln_manage::profile::NativePlanEntry); an entry that is off has the reason it does not load. */
+export function fromGameFolder(n: NativePlanEntry): boolean {
+  return n.enabled && !!n.reason;
+}
+
+/** "placed in the game folder at activation: …" → "Placed in the game folder at activation: ….". */
+function asSentence(s: string): string {
+  const t = s.trim();
+  return t ? `${t[0].toUpperCase()}${t.slice(1)}${/[.!?]$/.test(t) ? "" : "."}` : t;
+}
+
 /** The start before this one wrote mods.json and native.json: their failures, by id, when they belong to boot.json's run. */
 function lastStartFailures(st: BootState | null): Map<string, string> {
   const out = new Map<string, string>();
@@ -129,8 +142,9 @@ export function buildRows(x: ModInputs): ModRow[] {
           row.note = { text: n ?? "Will not run", tone: "warn", title: r.reason };
         }
       } else if (kind === "native") {
-        const why = native.get(id)?.reason;
-        if (why) { row.wontRun = why; row.note = { text: "Will not run", tone: "warn", title: why }; }
+        const n = native.get(id);
+        if (n?.reason && fromGameFolder(n)) row.note = { text: "Runs from the game folder", tone: "info", title: asSentence(n.reason) };
+        else if (n?.reason) { row.wontRun = n.reason; row.note = { text: "Will not run", tone: "warn", title: n.reason }; }
       }
       if (fail) row.note = { text: "Failed at the last start", tone: "err", title: fail };
     } else {

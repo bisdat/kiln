@@ -415,7 +415,9 @@ export interface NativePlanEntry {
   id: string;
   version: string;
   phase: NativePhase;
+  /** It runs. With a `reason`, it runs from the game folder: Kiln places the package there and the game loads it. */
   enabled: boolean;
+  /** Off: why it does not load. On: how it runs from the game folder. Null: Kiln loads it, in its phase. */
   reason: string | null;
 }
 export interface ResolvePreview {
