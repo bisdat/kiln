@@ -58,6 +58,7 @@
 #include <greeneye/jumppatch.h>
 
 #include "greeneye_internal.h"
+#include "original_code.h"
 
 using kgreeneye::Log;
 using kgreeneye::Narrow;
@@ -220,11 +221,6 @@ void Read(const void* p, void* out, size_t n)
     ReleaseSRWLockShared(&g_slotsLock);
 }
 
-uint8_t* g_text = nullptr;
-size_t g_textSize = 0;
-std::once_flag g_canonicalOnce;
-std::vector<uint8_t> g_canonical; // .text as it was before our hooks (made on first find)
-
 bool TextSection(uint8_t*& start, size_t& size)
 {
     auto base = reinterpret_cast<uint8_t*>(GetModuleHandleW(nullptr));
@@ -240,63 +236,41 @@ bool TextSection(uint8_t*& start, size_t& size)
     return false;
 }
 
-std::vector<int> ParsePattern(const char* pattern)
+bool ReadOriginalCode(std::vector<uint8_t>& out, std::string& why)
 {
-    std::vector<int> bytes;
-    if (!pattern) return bytes;
-    auto hex = [](unsigned char c) -> int {
-        if (c >= '0' && c <= '9') return c - '0';
-        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-        return -1;
-    };
-    for (const char* p = pattern; *p;) {
-        if (std::isspace(static_cast<unsigned char>(*p))) { ++p; continue; }
-        if (*p == '?') {
-            bytes.push_back(-1);
-            p += p[1] == '?' ? 2 : 1;
-        } else {
-            const int a = hex(static_cast<unsigned char>(p[0]));
-            if (!p[1]) return {};
-            const int b = hex(static_cast<unsigned char>(p[1]));
-            if (a < 0 || b < 0) return {};
-            bytes.push_back((a << 4) | b);
-            p += 2;
+    std::wstring path(32768, L'\0');
+    DWORD n = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
+    if (!n || n >= path.size()) return why = "cannot find the exe file", false;
+    path.resize(n);
+    struct FileView {
+        HANDLE file = INVALID_HANDLE_VALUE, mapping = nullptr;
+        const uint8_t* bytes = nullptr;
+        ~FileView() {
+            if (bytes) UnmapViewOfFile(bytes);
+            if (mapping) CloseHandle(mapping);
+            if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
         }
-    }
-    return bytes;
+    } view;
+    view.file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr,
+                            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (view.file == INVALID_HANDLE_VALUE) return why = "cannot open the exe file", false;
+    LARGE_INTEGER size{};
+    if (!GetFileSizeEx(view.file, &size) || size.QuadPart <= 0 || size.QuadPart > 1024ll * 1024 * 1024)
+        return why = "invalid exe file size", false;
+    view.mapping = CreateFileMappingW(view.file, nullptr, PAGE_READONLY, 0, 0, nullptr);
+    if (view.mapping) view.bytes = static_cast<const uint8_t*>(MapViewOfFile(view.mapping, FILE_MAP_READ, 0, 0, 0));
+    if (!view.bytes) return why = "cannot map the exe file", false;
+    auto* base = reinterpret_cast<uint8_t*>(GetModuleHandleW(nullptr));
+    auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(base + reinterpret_cast<IMAGE_DOS_HEADER*>(base)->e_lfanew);
+    uint8_t* text = nullptr;
+    size_t textSize = 0;
+    if (!TextSection(text, textSize)) return why = "no loaded code section", false;
+    const code::Identity id{reinterpret_cast<uintptr_t>(base), nt->FileHeader.TimeDateStamp,
+        nt->OptionalHeader.SizeOfImage, static_cast<uint32_t>(text - base), textSize};
+    return code::OriginalText(view.bytes, static_cast<size_t>(size.QuadPart), id, out, why);
 }
 
-uint8_t* Find(const char* pattern, void* module)
-{
-    if (module && module != GetModuleHandleW(nullptr))
-        return nullptr; // only the exe's code
-    std::call_once(g_canonicalOnce, [] {
-        if (!TextSection(g_text, g_textSize)) return;
-        g_canonical.resize(g_textSize);
-        Read(g_text, g_canonical.data(), g_textSize);
-    });
-    std::vector<int> pat = ParsePattern(pattern);
-    const uint8_t* text = g_canonical.data();
-    const size_t size = g_canonical.size(), n = pat.size();
-    if (!n || n > size || pat[0] < 0) return nullptr;
-    const uint8_t first = static_cast<uint8_t>(pat[0]);
-    const uint8_t* found = nullptr;
-    for (size_t offset = 0; offset <= size - n;) {
-        const auto* p = static_cast<const uint8_t*>(memchr(text + offset, first, size - n - offset + 1));
-        if (!p) break;
-        offset = static_cast<size_t>(p - text) + 1;
-        size_t k = 1;
-        while (k < n && (pat[k] < 0 || p[k] == pat[k])) ++k;
-        if (k == n) {
-            if (found) return nullptr;
-            found = p;
-        }
-    }
-    if (!found)
-        found = jumppatch::FindBehindHook(g_canonical.data(), size, pat.data(), n);
-    return found ? g_text + (found - text) : nullptr;
-}
+#include "find_code.h"
 
 // --- hooks ------------------------------------------------------------------------------------
 
@@ -1107,6 +1081,20 @@ std::string StartMod(const ModInfo& info, bool* started)
     std::string outcome;
     Activate(g, outcome);
     bool ok = mod.active.load() == g;
+    if (g_side == kGreeneyeClient && info.id == "quick-deposit") {
+        auto state = [&](const char* pattern) {
+            uint8_t* target = Find(pattern, nullptr);
+            if (!target) return "missing";
+            for (const auto& s : g_slots)
+                if (s->owner == &mod && s->target == target && !s->staged) return "hooked";
+            return "not hooked";
+        };
+        const char* loop = state("40 53 55 56 57 41 54 41 55 41 56 41 57 48 81 EC 98 00 00 00 48 8D 81 ?? 4F 03 00");
+        const char* dispatch = state("4C 8B DC 55 56 57 49 8D AB 18 FF FF FF");
+        Log("Quick Deposit startup: active=%s; UiCommandLoop=%s; UiDispatch=%s; code=%s%s; %s",
+            ok ? "yes" : "no", loop, dispatch, g_codeFromFile ? "exe file" : "live: ",
+            g_codeFromFile ? "" : g_codeNote.c_str(), outcome.c_str());
+    }
     if (started)
         *started = ok;
     if (g_hotReload)
