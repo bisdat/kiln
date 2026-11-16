@@ -328,7 +328,7 @@ public sealed class WriterOrderTests : IDisposable
     [Theory]
     [InlineData(false, true)]   // a build whose world write is not hooked: nothing would hold the world write
     [InlineData(true, false)]   // a kiln.saves older than 0.2.0-dev.30: no stage_progress in its table
-    public void WithoutTheStageBarrierAStagingWaitsForItsFilesOnTheTickThreadAsBefore(bool barrier, bool appended)
+    public void WithoutTheStageBarrierTheTickThreadWritesItsFilesItselfAsBefore(bool barrier, bool appended)
     {
         using var native = new FakeSavesTable(barrier, appended);
         FiveBundles(1);
