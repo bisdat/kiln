@@ -126,6 +126,10 @@ A service name that starts with `kiln.internal.` is Kiln-internal:
   their own row unavailable with that reason;
 - Kiln-internal tables get no public capability row and do not appear in `capabilities.json`.
 
+One table is the core's own and is named for one consumer: `kiln.internal.tasks.host`, the managed host's task lease
+table ([tasks.md](tasks.md)). Nobody may publish that name, and only the `KilnApi` the core hands to the managed host
+resolves it.
+
 This is a reach rule, not a sandbox: it keeps tables that hand out game addresses or Kiln's own lock primitives away from
 plugins and from stale or foreign service DLLs. It is no defence against arbitrary native code already in the process,
 which can read memory anyway.

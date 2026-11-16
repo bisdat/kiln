@@ -8,6 +8,7 @@
 #include <chrono>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #include "tasks_model.h"
@@ -1027,6 +1028,265 @@ KILN_TASKS_TEST(submit_is_transactional) {
         Work w;
         check(m.dequeue(Slot::Normal, &w) && w.task == ok, "and that task is the only work");
     }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Managed leases (kiln.internal.tasks.host): the outcome comes from finish(), inside the running segment, once.
+SubmitArgs lease_args(const char* name) {
+    SubmitArgs a = named(name);
+    a.lease = true;
+    return a;
+}
+
+// Runs one segment of `task`: `inside` runs while it is "running" (as the host's dispatcher would).
+template <class F>
+bool run_segment(Model& m, KilnHandle task, bool* suspended, F inside) {
+    Work w;
+    if (!m.dequeue(Slot::Normal, &w) || w.task != task || (w.kind != Work::Kind::Body && w.kind != Work::Kind::Continuation))
+        return false;
+    *suspended = inside();
+    m.segment_ended(w, *suspended, Outcome::Completed);  // what the pool passes for an ordinary return
+    return true;
+}
+
+State done_state(Model& m, KilnHandle task) {
+    Work w;
+    while (m.dequeue(Slot::Normal, &w)) {
+        if (w.kind == Work::Kind::Done && w.task == task) {
+            const State s = w.final_state;
+            m.done_returned(w);
+            return s;
+        }
+        if (w.kind == Work::Kind::Done) m.done_returned(w);
+        else m.segment_ended(w, false, Outcome::Completed);
+    }
+    return State::None;
+}
+
+KILN_TASKS_TEST(lease_outcome_from_finish) {
+    for (const auto& [outcome, cancel, want] :
+         {std::tuple{Outcome::Completed, false, State::Completed}, std::tuple{Outcome::Completed, true, State::Completed},
+          std::tuple{Outcome::Faulted, false, State::Faulted},
+          std::tuple{Outcome::OwnTokenCancelled, true, State::Cancelled},
+          std::tuple{Outcome::OwnTokenCancelled, false, State::Faulted}}) {
+        Model m;
+        m.open_owner(1, "a");
+        const KilnHandle h = submit_ok(m, 1, lease_args("lease"), "a lease");
+        bool suspended = true;
+        check(run_segment(m, h, &suspended, [&] {
+            uint64_t reg = 0;
+            check(m.arm(h, &reg) == KILN_OK, "the first segment arms");
+            return true;
+        }) && suspended, "the first segment suspended");
+        if (cancel) {
+            State st;
+            m.cancel(1, h, &st);
+        }
+        uint64_t reg = 0;
+        (void)reg;
+        // resume the armed registration (the first one is 1)
+        check(m.resume(h, 1) == KILN_OK, "resumed");
+        check(run_segment(m, h, &suspended, [&] {
+            check(m.cancel_requested(h) == cancel, "the lease's cancellation state is visible to its segment");
+            check(m.finish(h, outcome) == KILN_OK, "finish inside the running segment");
+            check(m.finish(h, outcome) == KILN_ERR_INTERNAL, "a second finish is INTERNAL");
+            return false;
+        }), "the continuation ran");
+        check(done_state(m, h) == want, "the published state follows finish's outcome with the usual precedence");
+    }
+    {
+        Model m;
+        m.open_owner(1, "a");
+        const KilnHandle h = submit_ok(m, 1, lease_args("no end"), "a lease");
+        check(m.finish(h, Outcome::Completed) == KILN_ERR_INTERNAL, "finish outside a running segment: INTERNAL");
+        bool suspended = false;
+        Work w;
+        check(m.dequeue(Slot::Normal, &w) && w.task == h, "its segment runs");
+        check(m.segment_ended(w, false, Outcome::Completed) == KILN_ERR_INTERNAL,
+              "a lease segment that returns neither armed nor finished: INTERNAL");
+        (void)suspended;
+        check(done_state(m, h) == State::Faulted, "...and the lease is Faulted (its done still delivered)");
+    }
+    {
+        Model m;
+        m.open_owner(1, "a");
+        const KilnHandle h = submit_ok(m, 1, named("native"), "a native task");
+        Work w;
+        m.dequeue(Slot::Normal, &w);
+        check(m.finish(h, Outcome::Completed) == KILN_ERR_INTERNAL, "finish is for leases only");
+        m.segment_ended(w, false, Outcome::Completed);
+    }
+}
+
+KILN_TASKS_TEST(lease_resume_after_step) {
+    Model m;
+    m.open_owner(1, "a");
+    m.edge(3, 10);
+    const KilnHandle h = submit_ok(m, 1, lease_args("waits a step"), "a lease");
+    bool suspended = false;
+    // armed and resume_after inside the running segment: parked until the segment returns
+    run_segment(m, h, &suspended, [&] {
+        uint64_t reg = 0;
+        m.arm(h, &reg);
+        check(m.resume_after(h, reg, 3, 10) == KILN_OK, "resume_after inside the arming segment");
+        return true;
+    });
+    Work w;
+    check(!m.dequeue(Slot::Normal, &w) && m.counts().waiting == 1, "it waits for a later edge, not runnable now");
+    m.edge(3, 11);
+    check(run_segment(m, h, &suspended, [&] {
+        check(!m.cancel_requested(h), "a normal wake: not cancelled");
+        uint64_t reg = 0;
+        m.arm(h, &reg);
+        m.resume_after(h, reg, 3, 11);
+        return true;
+    }), "the next edge of its session resumes it");
+    m.end_session(3);
+    check(run_segment(m, h, &suspended, [&] {
+        check(m.cancel_requested(h), "its session ended: resumed with the cancellation set");
+        m.finish(h, Outcome::OwnTokenCancelled);
+        return false;
+    }), "the session's end resumes it at once (never carried over)");
+    check(done_state(m, h) == State::Cancelled, "and it ends Cancelled");
+    // a waiting continuation is released (cancelled) by a cancel, a seal and a retire
+    for (int how = 0; how < 3; ++how) {
+        Model n;
+        n.open_owner(1, "a");
+        n.edge(1, 1);
+        const KilnHandle l = submit_ok(n, 1, lease_args("waiting"), "a lease");
+        Work x;
+        n.dequeue(Slot::Normal, &x);
+        uint64_t reg = 0;
+        n.arm(l, &reg);
+        n.segment_ended(x, true, Outcome::Completed);
+        n.resume_after(l, reg, 1, 1);
+        check(n.counts().waiting == 1, "a suspended lease waits for its edge");
+        State st;
+        uint32_t left = 0;
+        if (how == 0) n.cancel(1, l, &st);
+        else if (how == 1) n.seal(1, &left);
+        else n.retire(1, &left);
+        check(n.counts().waiting == 0 && n.dequeue(Slot::Normal, &x) && x.task == l && x.kind == Work::Kind::Continuation &&
+                  x.cancel_requested(),
+              std::string("its continuation is released with the cancellation set by a ") +
+                  (how == 0 ? "cancel" : how == 1 ? "seal" : "retire"));
+        n.finish(l, Outcome::OwnTokenCancelled);
+        n.segment_ended(x, false, Outcome::Completed);
+    }
+}
+
+KILN_TASKS_TEST(lease_hops_hold_quiescence) {
+    Model m;
+    m.open_owner(1, "a");
+    const KilnHandle h = submit_ok(m, 1, lease_args("hops"), "a lease");
+    Work w;
+    m.dequeue(Slot::Normal, &w);
+    check(m.hop_begin(h) == KILN_OK, "a hop is pending");
+    m.finish(h, Outcome::Completed);
+    m.segment_ended(w, false, Outcome::Completed);
+    Work d;
+    check(!m.dequeue(Slot::Normal, &d), "finished, but its done is held back while a hop is pending");
+    uint32_t left = 0;
+    m.outstanding(1, &left);
+    check(left == 1, "not quiescent while a hop is pending");
+    check(m.hop_end(h) == KILN_OK && m.dequeue(Slot::Normal, &d) && d.kind == Work::Kind::Done && d.task == h,
+          "the last hop's end releases the done");
+    m.done_returned(d);
+    m.outstanding(1, &left);
+    check(left == 0 && m.hop_end(h) == KILN_ERR_INTERNAL && m.hop_begin(h) == KILN_ERR_INTERNAL,
+          "quiescent; no hop on a quiescent lease");
+}
+
+// a done held back by a pending hop is never lost when its record would leave the owner's
+// table (a seal or a retire before the lease ends, or a release after it ended): the last hop_end still queues it.
+KILN_TASKS_TEST(held_done_survives_seal_retire_release) {
+    for (int how = 0; how < 3; ++how) {
+        const std::string t = how == 0 ? "seal then finish: " : how == 1 ? "retire then finish: " : "finish then release: ";
+        Model m;
+        m.open_owner(1, "a");
+        const KilnHandle h = submit_ok(m, 1, lease_args("held"), "a lease");
+        Work w;
+        m.dequeue(Slot::Normal, &w);
+        check(m.hop_begin(h) == KILN_OK, t + "a hop is pending");
+        uint32_t left = 0;
+        if (how == 0) m.seal(1, &left);
+        if (how == 1) m.retire(1, &left);
+        m.finish(h, Outcome::Completed);
+        m.segment_ended(w, false, Outcome::Completed);
+        if (how == 2) check(m.release(1, h) == KILN_ERR_UNAVAILABLE, t + "a lease whose done is held is not released");
+        check(m.hop_end(h) == KILN_OK, t + "the last hop_end finds the record");
+        Work d;
+        check(m.dequeue(Slot::Normal, &d) && d.kind == Work::Kind::Done && d.task == h, t + "and queues its done");
+        m.done_returned(d);
+        check(m.counts().outstanding == 0, t + "quiescent");
+        if (how == 2) check(m.release(1, h) == KILN_OK, t + "then it is released");
+    }
+}
+
+// at its session's end, a continuation released by that session's edge but not yet started,
+// and a segment running from it, see their cancellation.
+KILN_TASKS_TEST(session_end_cancels_released_continuations) {
+    Model m;
+    m.open_owner(1, "a");
+    m.edge(2, 5);
+    const KilnHandle a = submit_ok(m, 1, lease_args("ready"), "lease a");
+    const KilnHandle b = submit_ok(m, 1, lease_args("running"), "lease b");
+    Work wa, wb;
+    m.dequeue(Slot::Normal, &wa);
+    m.dequeue(Slot::Normal, &wb);
+    uint64_t ra = 0, rb = 0;
+    m.arm(a, &ra);
+    m.arm(b, &rb);
+    m.segment_ended(wa, true, Outcome::Completed);
+    m.segment_ended(wb, true, Outcome::Completed);
+    m.resume_after(a, ra, 2, 5);
+    m.resume_after(b, rb, 2, 5);
+    m.edge(2, 6);  // both continuations are released by session 2's edge
+    Work rb_run;
+    check(m.dequeue(Slot::Normal, &rb_run) && rb_run.task == a, "a continuation starts (a)");
+    check(!rb_run.cancel_requested(), "...not cancelled yet");
+    m.end_session(2);  // b's continuation is ready, not started; a's segment runs
+    check(rb_run.cancel_requested(), "the running segment resumed by the ended session is signalled");
+    Work wb2;
+    check(m.dequeue(Slot::Normal, &wb2) && wb2.task == b && wb2.cancel_requested(),
+          "the released, not yet started continuation runs with its cancellation set");
+    m.finish(a, Outcome::OwnTokenCancelled);
+    m.segment_ended(rb_run, false, Outcome::Completed);
+    m.finish(b, Outcome::OwnTokenCancelled);
+    m.segment_ended(wb2, false, Outcome::Completed);
+}
+
+// a segment that finished cannot arm a resumption.
+KILN_TASKS_TEST(arm_after_finish_refused) {
+    Model m;
+    m.open_owner(1, "a");
+    const KilnHandle h = submit_ok(m, 1, lease_args("ends"), "a lease");
+    Work w;
+    m.dequeue(Slot::Normal, &w);
+    check(m.finish(h, Outcome::Completed) == KILN_OK, "finished");
+    uint64_t reg = 0;
+    check(m.arm(h, &reg) == KILN_ERR_INTERNAL, "arm after finish in the same segment is INTERNAL");
+    m.segment_ended(w, false, Outcome::Completed);
+}
+
+// resume_after inside the arming segment, with its session's newer edge already seen: the continuation is runnable,
+// but only once the arming segment returned (segments of one lease never overlap).
+KILN_TASKS_TEST(resume_after_never_overlaps) {
+    Model m;
+    m.open_owner(1, "a");
+    m.edge(1, 9);
+    const KilnHandle h = submit_ok(m, 1, lease_args("no overlap"), "a lease");
+    Work w;
+    m.dequeue(Slot::Normal, &w);
+    uint64_t reg = 0;
+    m.arm(h, &reg);
+    check(m.resume_after(h, reg, 1, 3) == KILN_OK, "resume_after with an edge older than the session's last");
+    Work x;
+    check(!m.dequeue(Slot::Normal, &x), "nothing of it is runnable while the arming segment still runs");
+    m.segment_ended(w, true, Outcome::Completed);
+    check(m.dequeue(Slot::Normal, &x) && x.task == h && x.kind == Work::Kind::Continuation, "runnable once it returned");
+    m.finish(h, Outcome::Completed);
+    m.segment_ended(x, false, Outcome::Completed);
 }
 }  // namespace
 

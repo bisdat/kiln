@@ -71,6 +71,7 @@ struct SubmitArgs {
     std::string_view name;
     Priority priority = Priority::Normal;
     bool long_running = false;
+    bool lease = false;       // a managed logical task (kiln.internal.tasks.host): its outcome comes from finish()
     bool after_step = false;  // runnable only after a Post edge of `session` newer than `edge`
     uint64_t session = 0;     // AFTER_STEP: the live server session at acceptance (never 0: ARGUMENT)
     uint64_t edge = 0;        // AFTER_STEP: that session's last Post edge the caller observed at acceptance
@@ -147,6 +148,22 @@ public:
     // Queue that resumption (after the arming segment returned, so segments never overlap). Allowed after seal,
     // quarantine and retire (finalization). INTERNAL: unknown, not armed or wrong registration (a duplicate).
     KilnResult resume(KilnHandle task, uint64_t registration);
+    // A resumption at a later Post edge of the live server `session` (captured `edge`), as AFTER_STEP: parked while
+    // the arming segment still runs (segments never overlap); when that session ends (or the task is cancelled,
+    // sealed or retired) it is queued at once with its cancellation set, never carried into another session.
+    // INTERNAL: as resume.
+    KilnResult resume_after(KilnHandle task, uint64_t registration, uint64_t session, uint64_t edge);
+    // A lease's logical end, exactly once, from inside its running segment (not armed): the segment's return then
+    // publishes this outcome with the usual precedence. INTERNAL: not a running lease segment, armed, or a second call.
+    KilnResult finish(KilnHandle task, Outcome outcome);
+    // A lease's cancellation state (cancel, drain, revoke, exit or its session's end asked); false for an unknown one.
+    bool cancel_requested(KilnHandle task) const;
+    // A tick hop of a lease is pending / ended: the lease is not quiescent (its done is held back) while one is.
+    // INTERNAL: not an outstanding lease (hop_begin) or no hop pending (hop_end).
+    // An outstanding lease's owner and payload user (the core's per-lease context); false otherwise.
+    bool lease_of(KilnHandle task, KilnOwner* owner, uintptr_t* user) const;
+    KilnResult hop_begin(KilnHandle task);
+    KilnResult hop_end(KilnHandle task);
 
     // ---- Post edges and sessions ----
     // A Post edge of the live server `session`: AFTER_STEP tasks captured in THAT session before `edge` become ready;
@@ -197,6 +214,8 @@ private:
     void drop_terminal(Owner& o);
     void leave_ring_if_done(Owner& o);
     void cancel_waiting_before(uint64_t session);  // AFTER_STEP tasks captured in a session older than `session`
+    void release_continuation(Owner& o, const std::shared_ptr<Record>& r);
+    void place_after(Owner& o, const std::shared_ptr<Record>& r, uint64_t session, uint64_t edge);
     std::shared_ptr<Record> find_lease(KilnHandle task) const;
     void note_ready(std::ptrdiff_t delta);
     void hook(Point p) const;

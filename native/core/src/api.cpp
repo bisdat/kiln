@@ -30,6 +30,7 @@
 #include "services/kiln_caps.h"
 #include "services/kiln_hooks.h"
 #include "services/service.h"
+#include "tasks_host.h"
 
 // kiln.caps, the capability registry (services/caps.cpp)
 namespace kiln::caps {
@@ -55,6 +56,7 @@ bool flush();  // a last write of capabilities.json when something is dirty; wai
 namespace kiln::tasks_svc {
 void exit_begins();  // services/tasks.cpp: any exit: kiln.tasks refuses new tasks (one atomic store, no lock)
 void exiting();      // a normal exit: kiln.tasks seals every owner too (no wait)
+const void* host_table();  // kiln.internal.tasks.host v1 (tasks_host.h); nullptr while kiln.tasks is not running
 }  // namespace kiln::tasks_svc
 
 namespace kiln {
@@ -240,6 +242,11 @@ const void* KILN_CALL api_service_services(KilnStr name, uint32_t min_version) {
 // kiln/services DLL.
 KilnResult register_published(KilnOwner owner, KilnStr name, const void* table, bool services) {
     if (!table || !name.ptr || name.len == 0) return KILN_ERR_INVALID_ARGUMENT;
+    // The managed host's lease table is the core's own: nobody publishes that name, not even a Kiln service.
+    if (sv(name) == KILN_TASKS_HOST_SERVICE) {
+        KLOG_W("service %s: reserved for the core, refused for %s", KILN_TASKS_HOST_SERVICE, reg::owner_name(owner).c_str());
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
     const auto* h = static_cast<const KilnServiceHeader*>(table);
     if (h->size < sizeof(KilnServiceHeader)) return KILN_ERR_INVALID_ARGUMENT;
     {
@@ -267,6 +274,20 @@ KilnResult KILN_CALL api_register_service(KilnOwner owner, KilnStr name, const v
 }
 KilnResult KILN_CALL api_register_service_services(KilnOwner owner, KilnStr name, const void* table) {
     return register_published(owner, name, table, true);
+}
+
+// The managed host's KilnApi (api_for_managed_host, tasks_host.h): the plugins' lookup, plus exactly the core's own
+// kiln.internal.tasks.host table (never a published one: nobody may publish that name); every other internal name
+// stays unresolved, and registration is the plugins' (the host publishes no internal table either).
+const void* KILN_CALL api_service_managed_host(KilnStr name, uint32_t min_version) {
+    if (sv(name) == KILN_TASKS_HOST_SERVICE)
+        return min_version <= KILN_TASKS_HOST_VERSION ? tasks_svc::host_table() : nullptr;
+    return lookup_service(name, min_version, false);
+}
+KilnApi managed_host_api_from(const KilnApi& plugins) {
+    KilnApi host = plugins;
+    host.service = &api_service_managed_host;
+    return host;
 }
 
 // The services' KilnApi: the plugins' one with the lookup and the registration that also take Kiln-internal tables.
@@ -345,10 +366,17 @@ const KilnApi g_api = {
 };
 
 const KilnApi g_service_api = services_api_from(g_api);
+const KilnApi g_managed_host_api = managed_host_api_from(g_api);
 
 }  // namespace
 
 const KilnApi* api() { return &g_api; }
+const KilnApi* api_for_managed_host() { return &g_managed_host_api; }
+// This core's build identity for the managed host (KilnTasksHostApi.build_stamp): "" without build metadata.
+const char* core_build_stamp() {
+    static const std::string stamp = build_stamp();
+    return stamp.c_str();
+}
 
 void set_runtime_state(bool verified, bool hooks_enabled) {
     g_verified = verified;

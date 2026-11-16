@@ -23,10 +23,11 @@ namespace progress_state {
 void mark(uint32_t) {}  // progress.json's writer is not part of this probe
 }  // namespace progress_state
 namespace tasks_svc {
-// kiln.tasks (services/tasks.cpp) is not part of this probe: no sessions or edges to deliver
+// kiln.tasks (services/tasks.cpp) is not part of this probe: no sessions, edges or tick hops to deliver
 void session_started(uint32_t) {}
 void post_edge(uint32_t, uint64_t) {}
 void session_stopping(uint32_t) {}
+void tick_hops() {}
 }  // namespace tasks_svc
 namespace window_clock {
 // kiln.window_clock (package 07) is not part of this probe: no window service, so nothing to begin or end

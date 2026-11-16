@@ -28,6 +28,7 @@ namespace kiln::tasks_svc {  // services/tasks.cpp: the live server session and 
 void session_started(uint32_t session);
 void post_edge(uint32_t session, uint64_t step);
 void session_stopping(uint32_t session);
+void tick_hops();  // the managed host's queued tick hops, bounded, on the server world's tick before its Pre
 }  // namespace kiln::tasks_svc
 
 namespace kiln::tick {
@@ -400,6 +401,7 @@ uintptr_t server_step(uintptr_t storage, uintptr_t ticked, uintptr_t r8, uintptr
             g_last = info;
         }
         window_clock::pre(info.step);
+        tasks_svc::tick_hops();  // kiln.tasks: the managed host's tick hops (budgeted), before the Pre subscribers
         run(g_pre, g_slots.pre, info, now_ms());
         // After the last Pre subscriber: the window services sample the world (kiln_window_clock.h, phase 2), then Sim.
         window_clock::begin();

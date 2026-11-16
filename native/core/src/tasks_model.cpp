@@ -43,6 +43,16 @@ struct Record {
     bool resume_pending = false;   // resumed while that segment still ran: queued when it returns
     uint64_t registration = 0;     // the armed registration
     uint64_t registrations = 0;    // issued so far
+    // managed leases
+    bool lease = false;
+    bool finished = false;              // finish() ran in the current segment
+    Outcome lease_outcome = Outcome::Completed;
+    Work::Kind wait_kind = Work::Kind::Body;  // what `waiting` releases: the body (AFTER_STEP) or a continuation
+    bool after_pending = false;         // resume_after while the arming segment still ran: placed when it returns
+    uint64_t after_session = 0, after_edge = 0;
+    uint32_t hops = 0;                  // tick hops pending: the done is held back while any is
+    bool done_held = false;             // terminal with hops pending: its done is queued by the last hop_end
+    uint64_t released_session = 0;      // its continuation was released by this session's edge (until it ends)
     bool in_table = true;
     bool done_returned = false;
 };
@@ -173,15 +183,19 @@ void Model::enqueue(Owner& o, const std::shared_ptr<Record>& r, Work::Kind kind)
 }
 
 void Model::drop_from_table(Owner& o, Record& r) {
-    if (!r.in_table) return;
+    if (!r.in_table || r.done_held) return;  // a held done keeps its record findable: the last hop_end queues it
     r.in_table = false;  // before the erase: the table may hold the last reference to a quiescent record
     o.records.erase(sequence_of(r.handle));
 }
 
 void Model::publish_terminal(Owner& o, const std::shared_ptr<Record>& r, State state) {
     r->state = state;  // exactly once: only Queued/Running records reach here
-    o.finals.push_back(r);
-    note_ready(+1);
+    if (r->hops) {
+        r->done_held = true;  // queued by the last hop_end: a lease is not quiescent while a hop is pending
+    } else {
+        o.finals.push_back(r);
+        note_ready(+1);
+    }
     if (o.sealed || o.retired) drop_from_table(o, *r);  // a sealed owner's terminal records release themselves
 }
 
@@ -201,6 +215,20 @@ void Model::cancel_queued(Owner& o, const std::shared_ptr<Record>& r) {
     publish_terminal(o, r, State::Cancelled);  // its done is still delivered, on a worker, never inline
 }
 
+// A lease's continuation waiting for a Post edge (or parked behind its running segment) is released now with its
+// cancellation set: cancel, seal, retire and its session's end never leave a lease unable to finish.
+void Model::release_continuation(Owner& o, const std::shared_ptr<Record>& r) {
+    if (r->after_pending) {
+        r->after_pending = false;
+        r->resume_pending = true;  // queued when the running segment returns
+        return;
+    }
+    if (!r->waiting || r->wait_kind != Work::Kind::Continuation) return;
+    o.waiting.erase(std::remove(o.waiting.begin(), o.waiting.end(), r), o.waiting.end());
+    r->waiting = false;
+    enqueue(o, r, Work::Kind::Continuation);
+}
+
 void Model::cancel_all_queued(Owner& o) {
     std::vector<std::shared_ptr<Record>> queued;
     for (const auto& [seq, r] : o.records)
@@ -210,8 +238,13 @@ void Model::cancel_all_queued(Owner& o) {
 }
 
 void Model::signal_running(Owner& o) {
+    std::vector<std::shared_ptr<Record>> running;
     for (const auto& [seq, r] : o.records)
-        if (r->state == State::Running) r->cancel.store(true, std::memory_order_release);
+        if (r->state == State::Running) running.push_back(r);
+    for (const auto& r : running) {
+        r->cancel.store(true, std::memory_order_release);
+        release_continuation(o, r);
+    }
 }
 
 void Model::drop_terminal(Owner& o) {
@@ -347,6 +380,7 @@ KilnResult Model::submit(KilnOwner owner, const SubmitArgs& args, KilnHandle* ta
     r->slot = args.long_running ? Slot::LongRunning : Slot::Normal;
     r->session = args.session;
     r->edge = args.edge;
+    r->lease = args.lease;
     r->payload = args.payload;
     hook(Point::SubmitBeforePublish);
     Lock lock(*this);
@@ -396,8 +430,12 @@ KilnResult Model::cancel(KilnOwner owner, KilnHandle task, State* state) {
     bool foreign = false, released = false;
     const auto r = find_record(*o, task, &foreign, &released);
     if (!r) return KILN_ERR_NOT_FOUND;
-    if (r->state == State::Queued) cancel_queued(*o, r);
-    else if (r->state == State::Running) r->cancel.store(true, std::memory_order_release);
+    if (r->state == State::Queued) {
+        cancel_queued(*o, r);
+    } else if (r->state == State::Running) {
+        r->cancel.store(true, std::memory_order_release);
+        release_continuation(*o, r);
+    }
     if (state) *state = r->state;
     return KILN_OK;
 }
@@ -423,7 +461,7 @@ KilnResult Model::release(KilnOwner owner, KilnHandle task) {
     const auto r = find_record(*o, task, &foreign, &released);
     if (released) return KILN_OK;
     if (!r) return KILN_ERR_NOT_FOUND;
-    if (!terminal(r->state)) return KILN_ERR_UNAVAILABLE;
+    if (!terminal(r->state) || r->done_held) return KILN_ERR_UNAVAILABLE;  // held: its done is still to come
     drop_from_table(*o, *r);
     return KILN_OK;
 }
@@ -434,7 +472,8 @@ KilnResult Model::arm(KilnHandle task, uint64_t* registration) {
     if (!registration) return KILN_ERR_INVALID_ARGUMENT;
     Lock lock(*this);
     const auto r = find_lease(task);
-    if (!r || r->state != State::Running || !r->segment_running || r->armed || r->resume_pending)
+    if (!r || r->state != State::Running || !r->segment_running || r->armed || r->resume_pending || r->after_pending ||
+        r->finished)
         return KILN_ERR_INTERNAL;
     r->armed = true;
     r->registration = ++r->registrations;
@@ -453,14 +492,106 @@ KilnResult Model::resume(KilnHandle task, uint64_t registration) {
     return KILN_OK;
 }
 
+// Places an armed lease's after-step continuation (its segment has returned): queued at once when its session is
+// over or already had a newer edge (the former with the cancellation set), else waiting for its session's next edge.
+void Model::place_after(Owner& o, const std::shared_ptr<Record>& r, uint64_t session, uint64_t edge) {
+    if (session <= ended_ || session < session_) {
+        r->cancel.store(true, std::memory_order_release);
+        enqueue(o, r, Work::Kind::Continuation);
+    } else if ((session == session_ && edge < last_edge_) || r->cancel.load(std::memory_order_acquire)) {
+        r->released_session = session;
+        enqueue(o, r, Work::Kind::Continuation);
+    } else {
+        o.waiting.push_back(r);
+        r->waiting = true;
+        r->wait_kind = Work::Kind::Continuation;
+        r->session = session;
+        r->edge = edge;
+    }
+}
+
+KilnResult Model::resume_after(KilnHandle task, uint64_t registration, uint64_t session, uint64_t edge) {
+    Lock lock(*this);
+    const auto r = find_lease(task);
+    if (!r || !r->armed || r->registration != registration || !session) return KILN_ERR_INTERNAL;
+    r->armed = false;
+    r->registration = 0;
+    if (r->segment_running) {  // segments of one task never overlap: placed when the arming segment returns
+        r->after_pending = true;
+        r->after_session = session;
+        r->after_edge = edge;
+    } else {
+        place_after(*r->home, r, session, edge);
+    }
+    return KILN_OK;
+}
+
+KilnResult Model::finish(KilnHandle task, Outcome outcome) {
+    Lock lock(*this);
+    const auto r = find_lease(task);
+    if (!r || !r->lease || !r->segment_running || r->finished || r->armed || r->resume_pending || r->after_pending)
+        return KILN_ERR_INTERNAL;
+    r->finished = true;
+    r->lease_outcome = outcome;
+    return KILN_OK;
+}
+
+bool Model::cancel_requested(KilnHandle task) const {
+    Lock lock(*this);
+    const auto r = find_lease(task);
+    return r && r->cancel.load(std::memory_order_acquire);
+}
+
+bool Model::lease_of(KilnHandle task, KilnOwner* owner, uintptr_t* user) const {
+    Lock lock(*this);
+    const auto r = find_lease(task);
+    if (!r || !r->lease || r->done_returned) return false;
+    *owner = r->owner;
+    *user = r->payload.user;
+    return true;
+}
+
+KilnResult Model::hop_begin(KilnHandle task) {
+    Lock lock(*this);
+    const auto r = find_lease(task);
+    // a hop of a lease whose done is already queued could not hold it back: refused
+    if (!r || !r->lease || r->done_returned || (terminal(r->state) && !r->done_held)) return KILN_ERR_INTERNAL;
+    ++r->hops;
+    return KILN_OK;
+}
+
+KilnResult Model::hop_end(KilnHandle task) {
+    Lock lock(*this);
+    const auto r = find_lease(task);
+    if (!r || !r->hops) return KILN_ERR_INTERNAL;
+    if (--r->hops == 0 && r->done_held) {
+        Owner& o = *r->home;
+        o.finals.push_back(r);  // the delivery keeps the record alive from here
+        note_ready(+1);
+        r->done_held = false;
+        if (o.sealed || o.retired) drop_from_table(o, *r);  // as publish_terminal would have
+    }
+    return KILN_OK;
+}
+
 // ---- Post edge ----
 
 void Model::cancel_waiting_before(uint64_t session) {
     for (const auto& o : ring_) {
+        // a continuation an ended session's edge released (ready, or its segment running) sees its cancellation too
+        for (const auto& [seq, r] : o->records)
+            if (r->released_session && r->released_session < session) r->cancel.store(true, std::memory_order_release);
         std::vector<std::shared_ptr<Record>> over;
         for (const auto& r : o->waiting)
             if (r->session < session) over.push_back(r);
-        for (const auto& r : over) cancel_queued(*o, r);  // Cancelled, its done queued (never inline)
+        for (const auto& r : over) {
+            if (r->wait_kind == Work::Kind::Continuation) {  // a lease: resumed with its cancellation set
+                r->cancel.store(true, std::memory_order_release);
+                release_continuation(*o, r);
+            } else {
+                cancel_queued(*o, r);  // Cancelled, its done queued (never inline)
+            }
+        }
     }
 }
 
@@ -490,7 +621,8 @@ void Model::edge(uint64_t session, uint64_t edge) {
         for (const auto& r : o->waiting) {
             if (r->session == session && r->edge < edge) {
                 r->waiting = false;
-                enqueue(*o, r, Work::Kind::Body);
+                if (r->wait_kind == Work::Kind::Continuation) r->released_session = session;
+                enqueue(*o, r, r->wait_kind);
             } else {
                 still.push_back(r);
             }
@@ -563,26 +695,42 @@ KilnResult Model::segment_ended(const Work& work, bool suspended, Outcome outcom
     Owner& o = *r->home;
     if (!r->segment_running) return KILN_ERR_INTERNAL;
     r->segment_running = false;
+    r->released_session = 0;  // the segment its session's edge released is over
     if (work.slot == Slot::Normal) --o.running_normal;
     else {
         --o.running_long;
         --long_running_;
     }
     --running_;
-    if (suspended) {
+    if (suspended && !r->finished) {
         if (r->resume_pending) {
             r->resume_pending = false;
             enqueue(o, r, Work::Kind::Continuation);
+            return KILN_OK;
+        }
+        if (r->after_pending) {
+            r->after_pending = false;
+            place_after(o, r, r->after_session, r->after_edge);
             return KILN_OK;
         }
         if (r->armed) return KILN_OK;  // waits for its resumption
         publish_terminal(o, r, State::Faulted);  // suspended without a resumption: never lose its done
         return KILN_ERR_INTERNAL;
     }
-    const bool consistent = !r->armed && !r->resume_pending;
-    r->armed = r->resume_pending = false;
-    const State final = outcome == Outcome::Completed ? State::Completed
-                        : outcome == Outcome::Faulted ? State::Faulted
+    // A lease's outcome is its finish()'s; one that returned neither armed nor finished (a host bug) is Faulted. A
+    // structured fault (outcome Faulted from the pool) is Faulted either way.
+    bool consistent = !r->armed && !r->resume_pending && !r->after_pending && !suspended;
+    Outcome effective = outcome;
+    if (r->lease && outcome != Outcome::Faulted) {
+        if (r->finished) effective = r->lease_outcome;
+        else {
+            effective = Outcome::Faulted;
+            consistent = false;
+        }
+    }
+    r->armed = r->resume_pending = r->after_pending = false;
+    const State final = effective == Outcome::Completed ? State::Completed
+                        : effective == Outcome::Faulted ? State::Faulted
                         : r->cancel.load(std::memory_order_acquire) ? State::Cancelled
                                                                     : State::Faulted;
     publish_terminal(o, r, final);

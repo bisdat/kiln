@@ -107,6 +107,18 @@ waiting on it is cancelled, with its `done` delivered as `CANCELLED`; it never w
 authoritative server world (the main menu, a client joined to a remote server) `submit` refuses `UNAVAILABLE` +
 `NO_SERVER_WORLD`.
 
+## Managed tasks
+
+The managed host runs managed tasks on the same pool, through its Kiln-internal lease table
+(`kiln.internal.tasks.host`, `native/core/src/tasks_host.h`; a managed API for mods on top of it is not part of this
+version): one pool, one set of limits and one unload rule for native and managed tasks. A managed task counts once
+against its owner's 1024 records; between its awaits it holds no worker, and its continuations are never refused by the
+cap or a drain, so a cancelled task can always finish. Its hops back to the tick run on the server world's tick before
+the Pre subscribers, in order per mod and mods in turn, at most 64 hops and 2 ms per mod and 4 ms in all per server
+step; the rest wait for the next step, never dropped. In this version hops land only on a server world's tick (a
+dedicated server, or a hosting client's server world): with no live server world (the main menu, a client joined to a
+remote server) a hop is refused at once, and the hops still pending when that world stops complete as cancelled.
+
 ## Exit
 
 Once the process's exit begins, queued tasks may never start and a `done` is not guaranteed: only the exit cleanup

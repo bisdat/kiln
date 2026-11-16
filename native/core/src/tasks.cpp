@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
+#include <cstring>
 #include <deque>
 #include <mutex>
 #include <thread>
@@ -41,6 +42,7 @@ struct Meta {
     uint64_t running_since = 0;  // when its current body started (valid while `running`)
     bool running = false;
     bool reported_running = false, reported_queued = false;  // the watchdog says each once
+    bool lease = false;  // a managed lease (snapshot)
 };
 
 struct Worker {
@@ -514,6 +516,7 @@ KilnResult Pool::submit(KilnOwner owner, const SubmitArgs& in, TaskBodyFn body, 
     auto m = std::make_shared<Meta>();
     m->owner = owner;
     m->name = std::string(in.name);
+    m->lease = in.lease;
     std::unordered_map<KilnHandle, std::shared_ptr<Meta>> spare;  // the metadata map's node, allocated here
     spare.emplace(0, m);
     auto node = spare.extract(spare.begin());
@@ -670,6 +673,8 @@ bool Pool::Core::can_run_locked(Slot slot) const {
     // a LongRunning task's done runs on a normal worker
     return maintenance_started && healthy[0] > 0 && (slot == Slot::Normal || healthy[1] > 0);
 }
+uint64_t Pool::now_ns() const { return core_->platform.now_ns(); }
+void Pool::guarded(GuardedFn fn, void* context, FaultInfo* info) { core_->platform.guarded_call(fn, context, info); }
 int Pool::health() const { return core_->health.load(std::memory_order_acquire); }
 uint64_t Pool::start_failures() const {
     std::lock_guard lock(core_->mutex);
@@ -733,6 +738,11 @@ KilnResult Service::open(KilnOwner owner) {
 
 KilnResult Service::submit(KilnOwner owner, const KilnTaskInfo* info, KilnTaskBodyFn body, KilnTaskDoneFn done,
                            void* user, KilnHandle* task, uint32_t* refusal) {
+    return submit_as(owner, info, body, done, user, false, task, refusal);
+}
+
+KilnResult Service::submit_as(KilnOwner owner, const KilnTaskInfo* info, KilnTaskBodyFn body, KilnTaskDoneFn done,
+                              void* user, bool lease, KilnHandle* task, uint32_t* refusal) {
     // every required pointer and field before any side effect
     if (!owner || !info || !body || !done || !task || info->size < sizeof(KilnTaskInfo) ||
         (info->flags & ~uint32_t{KILN_TASK_LONG_RUNNING | KILN_TASK_AFTER_STEP}) || info->priority > 2 ||
@@ -746,6 +756,7 @@ KilnResult Service::submit(KilnOwner owner, const KilnTaskInfo* info, KilnTaskBo
     args.name = std::string_view(info->name.ptr, info->name.len);
     args.priority = static_cast<Priority>(info->priority);
     args.long_running = (info->flags & KILN_TASK_LONG_RUNNING) != 0;
+    args.lease = lease;
     if (info->flags & KILN_TASK_AFTER_STEP) {
         const Snapshot snap = snapshot();  // one consistent (session, edge, live)
         if (!snap.live) return refuse(task, refusal, KILN_ERR_UNAVAILABLE, Refusal::NoServerWorld);
@@ -818,8 +829,26 @@ uint64_t Service::refused_edges() const {
 }
 
 void Service::session_started(uint32_t session) {
-    std::lock_guard lock(mutex_);
-    snap_ = {session, 0, true};
+    {
+        std::lock_guard lock(mutex_);
+        snap_ = {session, 0, true};
+    }
+    // A world that stopped without a destroy event left its hops queued: taken in the same step that opens the new
+    // session, and dispatched cancelled (as at a STOPPING), never carried into the new world.
+    std::vector<Hop> old;
+    {
+        std::lock_guard lock(lease_mutex_);
+        for (auto& [owner, q] : hops_)
+            for (const Hop& h : q) old.push_back(h);
+        hops_.clear();
+        hop_turn_ = 0;
+        hops_open_ = true;
+    }
+    const KilnHostDispatchFn dispatch = dispatcher();
+    for (const Hop& h : old) {
+        if (dispatch) dispatch_hop(dispatch, h.lease, h.host_state, 1);
+        else pool_.hop_end(h.lease);
+    }
 }
 
 bool Service::post_edge(uint32_t session, uint64_t step) {
@@ -841,6 +870,7 @@ void Service::session_stopping(uint32_t session) {
         if (session == snap_.session) snap_.live = false;
     }
     pool_.end_session(session);
+    dispatch_hops_cancelled();  // on the server world's thread, before its STOPPING is dispatched
 }
 
 void Service::owner_retiring(KilnOwner owner) {
@@ -855,6 +885,250 @@ void KILN_CALL Service::owner_retiring_observer(KilnOwner retiring, void* servic
 }
 
 void Service::refuse_new() { exiting_.store(true, std::memory_order_release); }
+
+// ---- kiln.internal.tasks.host v1: leases ----
+
+KilnResult Pool::resume_after(KilnHandle task, uint64_t registration, uint64_t session, uint64_t edge) {
+    const KilnResult r = core_->model.resume_after(task, registration, session, edge);
+    core_->wake_all();
+    return r;
+}
+KilnResult Pool::finish(KilnHandle task, Outcome outcome) { return core_->model.finish(task, outcome); }
+bool Pool::cancel_requested(KilnHandle task) const { return core_->model.cancel_requested(task); }
+bool Pool::lease_of(KilnHandle task, KilnOwner* owner, uintptr_t* user) const { return core_->model.lease_of(task, owner, user); }
+KilnResult Pool::hop_begin(KilnHandle task) { return core_->model.hop_begin(task); }
+KilnResult Pool::hop_end(KilnHandle task) {
+    const KilnResult r = core_->model.hop_end(task);
+    core_->wake_all();  // the last hop may have released the lease's done
+    return r;
+}
+
+KilnResult Pool::snapshot_leases(KilnLeaseSnapshot* rows, uint32_t capacity, uint32_t* count) const {
+    if (!count || (capacity && !rows)) return KILN_ERR_INVALID_ARGUMENT;
+    Core& c = *core_;
+    std::lock_guard lock(c.mutex);
+    const uint64_t now = c.platform.now_ns();
+    uint32_t n = 0;
+    for (const auto& [task, m] : c.meta) {
+        if (!m->lease || c.model.diag_state(task) != State::Running) continue;
+        if (n < capacity) {
+            KilnLeaseSnapshot& row = rows[n];
+            row = KilnLeaseSnapshot{};
+            row.size = sizeof(KilnLeaseSnapshot);
+            row.state = KILN_TASK_RUNNING;
+            row.owner = m->owner;
+            row.lease = task;
+            row.running_ns = m->running ? now - m->running_since : 0;  // 0 while suspended
+            const std::size_t len = std::min(m->name.size(), sizeof(row.name) - 1);
+            std::memcpy(row.name, m->name.data(), len);
+            row.name[len] = 0;
+        }
+        ++n;
+    }
+    *count = n;
+    return n > capacity ? KILN_ERR_BUFFER_TOO_SMALL : KILN_OK;
+}
+
+namespace {
+// A lease's core-owned trampolines: the pool runs these (never a managed thunk), the segment one calls the host's one
+// dispatcher. The context is the core's, freed by the done trampoline, which every accepted lease gets exactly once
+// (except at process exit, where nothing is guaranteed).
+struct LeaseCtx {
+    Service* service;
+    void* host_state;
+};
+void KILN_CALL lease_segment(const KilnTaskRun* run, void* user) {
+    const auto* ctx = static_cast<const LeaseCtx*>(user);
+    if (const KilnHostDispatchFn dispatch = ctx->service->dispatcher())
+        dispatch(run->task, KILN_LEASE_SEGMENT, run->cancelled(run), ctx->host_state);
+}
+void KILN_CALL lease_done(KilnHandle, uint32_t, void* user) { delete static_cast<LeaseCtx*>(user); }
+// The host's state of an outstanding lease, from the core context its record carries (alive until its done ran).
+void* lease_host_state(uintptr_t user) { return user ? reinterpret_cast<const LeaseCtx*>(user)->host_state : nullptr; }
+}  // namespace
+
+KilnResult Service::host_bind(KilnHostDispatchFn dispatch) {
+    if (!dispatch) return KILN_ERR_INVALID_ARGUMENT;
+    KilnHostDispatchFn none = nullptr;
+    if (dispatch_.compare_exchange_strong(none, dispatch, std::memory_order_acq_rel)) return KILN_OK;
+    return none == dispatch ? KILN_OK : KILN_ERR_INVALID_ARGUMENT;  // once per process
+}
+
+KilnResult Service::host_admit(KilnOwner owner, const KilnTaskInfo* info, void* host_state, KilnLease* lease,
+                               uint32_t* refusal) {
+    if (!dispatcher()) {
+        if (lease) *lease = 0;
+        if (refusal) *refusal = KILN_TASK_REFUSAL_CAPABILITY;
+        return KILN_ERR_UNAVAILABLE;
+    }
+    auto* ctx = new LeaseCtx{this, host_state};
+    const KilnResult r = submit_as(owner, info, &lease_segment, &lease_done, ctx, true, lease, refusal);
+    if (r != KILN_OK) delete ctx;  // a refused admission transfers nothing
+    return r;
+}
+
+KilnResult Service::host_arm(KilnLease lease, uint64_t* registration) { return pool_.arm(lease, registration); }
+KilnResult Service::host_resume(KilnLease lease, uint64_t registration) { return pool_.resume(lease, registration); }
+
+KilnResult Service::host_resume_after_step(KilnLease lease, uint64_t registration, uint32_t* refusal) {
+    const Snapshot snap = snapshot();
+    if (!snap.live) {
+        if (refusal) *refusal = KILN_TASK_REFUSAL_NO_SERVER_WORLD;
+        return KILN_ERR_UNAVAILABLE;
+    }
+    return pool_.resume_after(lease, registration, snap.session, snap.edge);
+}
+
+KilnResult Service::host_finish(KilnLease lease, uint32_t outcome) {
+    if (outcome > 2) return KILN_ERR_INVALID_ARGUMENT;
+    return pool_.finish(lease, static_cast<Outcome>(outcome));  // 0 Completed, 1 Faulted, 2 OwnTokenCancelled
+}
+
+uint32_t Service::host_is_cancelled(KilnLease lease) { return pool_.cancel_requested(lease) ? 1 : 0; }
+
+KilnResult Service::host_seal_owner(KilnOwner owner, uint32_t* outstanding) { return drain_owner(owner, 0, outstanding); }
+
+// ---- tick hops ----
+
+KilnResult Service::host_tick_hop(KilnLease lease) {
+    {
+        std::lock_guard lock(lease_mutex_);
+        if (!hops_open_) return KILN_ERR_UNAVAILABLE;  // a pure client or the menu: no server tick will come
+    }
+    KilnOwner owner = 0;
+    uintptr_t user = 0;
+    if (!pool_.lease_of(lease, &owner, &user)) return KILN_ERR_INTERNAL;
+    if (const KilnResult r = pool_.hop_begin(lease); r != KILN_OK) return r;  // holds the lease's quiescence
+    void* const host_state = lease_host_state(user);
+    if (hook_) hook_(Point::HopBeforePush);
+    try {
+        std::unique_lock lock(lease_mutex_);
+        if (!hops_open_) {  // its session's STOPPING came between: refused, never carried into the next world
+            lock.unlock();
+            pool_.hop_end(lease);
+            return KILN_ERR_UNAVAILABLE;
+        }
+        auto it = std::find_if(hops_.begin(), hops_.end(), [&](const auto& q) { return q.first == owner; });
+        if (it == hops_.end()) {
+            hops_.emplace_back(owner, std::deque<Hop>{});
+            it = std::prev(hops_.end());
+        }
+        it->second.push_back({lease, host_state});
+    } catch (...) {
+        pool_.hop_end(lease);  // never queued: nothing holds the lease
+        throw;
+    }
+    return KILN_OK;
+}
+
+std::size_t Service::pending_tick_hops() const {
+    std::lock_guard lock(lease_mutex_);
+    std::size_t n = 0;
+    for (const auto& [owner, q] : hops_) n += q.size();
+    return n;
+}
+
+std::size_t Service::run_tick_hops() {
+    const KilnHostDispatchFn dispatch = dispatcher();
+    if (!dispatch) return 0;
+    const uint64_t step_start = pool_.now_ns();
+    std::size_t ran = 0, owners = 0;
+    {
+        std::lock_guard lock(lease_mutex_);
+        owners = hops_.size();
+    }
+    // one turn per owner a step, starting where the last step stopped; each turn FIFO, bounded, checked between hops
+    for (std::size_t turn = 0; turn < owners; ++turn) {
+        if (pool_.now_ns() - step_start >= kHopStepNs) break;
+        KilnOwner owner = 0;
+        {
+            std::lock_guard lock(lease_mutex_);
+            if (hops_.empty()) break;
+            hop_turn_ %= hops_.size();
+            owner = hops_[hop_turn_].first;
+            hop_turn_ = (hop_turn_ + 1) % hops_.size();
+        }
+        const uint64_t owner_start = pool_.now_ns();
+        for (std::size_t n = 0; n < kHopsPerOwner; ++n) {
+            const uint64_t now = pool_.now_ns();
+            if (now - owner_start >= kHopOwnerNs || now - step_start >= kHopStepNs) break;
+            Hop hop{};
+            {
+                std::lock_guard lock(lease_mutex_);
+                const auto it = std::find_if(hops_.begin(), hops_.end(), [&](const auto& q) { return q.first == owner; });
+                if (it == hops_.end() || it->second.empty()) break;
+                hop = it->second.front();
+                it->second.pop_front();
+            }
+            dispatch_hop(dispatch, hop.lease, hop.host_state, pool_.cancel_requested(hop.lease) ? 1 : 0);
+            ++ran;
+        }
+    }
+    {
+        std::lock_guard lock(lease_mutex_);  // owners without pending hops leave the rotation
+        const KilnOwner next = hops_.empty() ? 0 : hops_[hop_turn_ % hops_.size()].first;
+        hops_.erase(std::remove_if(hops_.begin(), hops_.end(), [](const auto& q) { return q.second.empty(); }), hops_.end());
+        hop_turn_ = 0;
+        for (std::size_t i = 0; i < hops_.size(); ++i)
+            if (hops_[i].first == next) hop_turn_ = i;
+    }
+    return ran;
+}
+
+void Service::dispatch_hops_cancelled() {
+    const KilnHostDispatchFn dispatch = dispatcher();
+    std::vector<Hop> all;
+    {
+        std::lock_guard lock(lease_mutex_);  // closed and taken in one step: nothing queued after this runs later
+        hops_open_ = false;
+        for (auto& [owner, q] : hops_)
+            for (const Hop& h : q) all.push_back(h);
+        hops_.clear();
+        hop_turn_ = 0;
+    }
+    for (const Hop& h : all) {  // the session ends: every pending hop completes cancelled, none carries over
+        if (dispatch) dispatch_hop(dispatch, h.lease, h.host_state, 1);
+        else pool_.hop_end(h.lease);
+    }
+}
+
+namespace {
+// A hop's call into the host's dispatcher, inside the platform's fault boundary (no destructor across it).
+struct HopCall {
+    GuardedHeader header;  // header.callback = the dispatcher
+    KilnHostDispatchFn dispatch;
+    KilnLease lease;
+    uint32_t cancelled;
+    void* host_state;
+};
+void invoke_hop(void* context) {
+    auto* call = static_cast<HopCall*>(context);
+    call->dispatch(call->lease, KILN_LEASE_TICK_HOP, call->cancelled, call->host_state);
+}
+}  // namespace
+
+// One hop, contained: a structured fault in the host's dispatcher ends that hop all the same, cancels its lease and
+// quarantines its owner (as a faulting segment would), is reported once, and the next hop runs.
+void Service::dispatch_hop(KilnHostDispatchFn dispatch, KilnLease lease, void* host_state, uint32_t cancelled) {
+    HopCall call{{reinterpret_cast<uintptr_t>(dispatch)}, dispatch, lease, cancelled, host_state};
+    FaultInfo fault{};
+    pool_.guarded(&invoke_hop, &call, &fault);
+    if (fault.faulted) {
+        KilnOwner owner = 0;
+        uintptr_t user = 0;
+        if (pool_.lease_of(lease, &owner, &user)) {
+            pool_.quarantine(owner);
+            State state = State::None;
+            pool_.cancel(owner, lease, &state);  // the lease sees its cancellation; a waiting continuation is released
+        }
+        env_.hop_faulted(owner, lease, fault.code);
+    }
+    pool_.hop_end(lease);
+}
+
+KilnResult Service::host_snapshot(KilnLeaseSnapshot* rows, uint32_t capacity, uint32_t* count) {
+    return pool_.snapshot_leases(rows, capacity, count);
+}
 
 void Service::exiting() {
     exiting_.store(true, std::memory_order_release);

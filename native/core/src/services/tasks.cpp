@@ -17,10 +17,14 @@
 #include "../tick.h"
 #include "service.h"
 #include "services/kiln_tasks.h"
+#include "../tasks_host.h"
 
 namespace kiln::caps {
 void tasks_pool_source(int (*state)());  // services/caps.cpp: tasks.pool follows it
 }  // namespace kiln::caps
+namespace kiln {
+const char* core_build_stamp();  // api.cpp: this core's build identity ("" without build metadata)
+}  // namespace kiln
 
 namespace kiln::tasks_svc {
 namespace {
@@ -34,6 +38,11 @@ public:
     }
     bool owner_alive(KilnOwner owner) override { return reg::owner_alive(owner); }
     std::string owner_name(KilnOwner owner) override { return reg::owner_name(owner); }
+    void hop_faulted(KilnOwner owner, KilnLease lease, uint32_t code) override {
+        KLOG_E("kiln.tasks: the managed host's tick hop of %s (task 0x%llx) faulted (0x%08x); the task is cancelled and "
+               "its owner's tasks are quarantined",
+               reg::owner_name(owner).c_str(), static_cast<unsigned long long>(lease), code);
+    }
 };
 
 tasks::Pool* g_pool = nullptr;  // immortal (see above); set once by init() before g_service
@@ -131,6 +140,70 @@ void log_note(const tasks::PoolNote& n, void*) {
         KLOG_I("kiln.tasks: a %s task worker runs again (%zu queued task(s) resume)", kind, n.queued);
 }
 
+// ---- kiln.internal.tasks.host v1 (tasks_host.h): the managed host's leases; resolved only through
+// api_for_managed_host() (api.cpp). Every member forwards to the binding; nothing throws across it.
+template <class F>
+KilnResult with_service(F f) {
+    tasks::Service* service = g_service.load(std::memory_order_acquire);
+    if (!service) return KILN_ERR_UNAVAILABLE;
+    try {
+        return f(*service);
+    } catch (...) {
+        return KILN_ERR_INTERNAL;
+    }
+}
+const char* KILN_CALL h_build_stamp() { return core_build_stamp(); }
+KilnResult KILN_CALL h_bind(KilnHostDispatchFn dispatch) {
+    return with_service([&](tasks::Service& s) { return s.host_bind(dispatch); });
+}
+KilnResult KILN_CALL h_admit(KilnOwner owner, const KilnTaskInfo* info, void* host_state, KilnLease* lease,
+                             uint32_t* refusal) {
+    const KilnResult r = with_service([&](tasks::Service& s) { return s.host_admit(owner, info, host_state, lease, refusal); });
+    if (r == KILN_ERR_UNAVAILABLE && !g_service.load(std::memory_order_acquire)) {
+        if (lease) *lease = 0;
+        if (refusal) *refusal = KILN_TASK_REFUSAL_CAPABILITY;
+    }
+    return r;
+}
+KilnResult KILN_CALL h_arm(KilnLease lease, uint64_t* registration) {
+    return with_service([&](tasks::Service& s) { return s.host_arm(lease, registration); });
+}
+KilnResult KILN_CALL h_resume(KilnLease lease, uint64_t registration) {
+    return with_service([&](tasks::Service& s) { return s.host_resume(lease, registration); });
+}
+KilnResult KILN_CALL h_resume_after_step(KilnLease lease, uint64_t registration, uint32_t* refusal) {
+    return with_service([&](tasks::Service& s) { return s.host_resume_after_step(lease, registration, refusal); });
+}
+KilnResult KILN_CALL h_tick_hop(KilnLease lease) {
+    return with_service([&](tasks::Service& s) { return s.host_tick_hop(lease); });
+}
+KilnResult KILN_CALL h_finish(KilnLease lease, uint32_t outcome) {
+    return with_service([&](tasks::Service& s) { return s.host_finish(lease, outcome); });
+}
+uint32_t KILN_CALL h_is_cancelled(KilnLease lease) {
+    tasks::Service* service = g_service.load(std::memory_order_acquire);
+    return service ? service->host_is_cancelled(lease) : 1;
+}
+KilnResult KILN_CALL h_seal_owner(KilnOwner owner, uint32_t* outstanding) {
+    return with_service([&](tasks::Service& s) { return s.host_seal_owner(owner, outstanding); });
+}
+KilnResult KILN_CALL h_snapshot(KilnLeaseSnapshot* rows, uint32_t capacity, uint32_t* count) {
+    return with_service([&](tasks::Service& s) { return s.host_snapshot(rows, capacity, count); });
+}
+
+const KilnTasksHostApi kHostTable = {{sizeof(KilnTasksHostApi), KILN_TASKS_HOST_VERSION},
+                                     &h_build_stamp,
+                                     &h_bind,
+                                     &h_admit,
+                                     &h_arm,
+                                     &h_resume,
+                                     &h_resume_after_step,
+                                     &h_tick_hop,
+                                     &h_finish,
+                                     &h_is_cancelled,
+                                     &h_seal_owner,
+                                     &h_snapshot};
+
 // tasks.pool's source (caps.cpp reads it lock-free at every registry call): -1 no pool, 0 no worker, 1 available.
 int pool_state() {
     const tasks::Service* service = g_service.load(std::memory_order_acquire);
@@ -197,6 +270,17 @@ void post_edge(uint32_t session, uint64_t step) {
 
 void session_stopping(uint32_t session) {
     if (tasks::Service* service = g_service.load(std::memory_order_acquire)) service->session_stopping(session);
+}
+
+const void* host_table() { return g_service.load(std::memory_order_acquire) ? &kHostTable : nullptr; }
+
+void tick_hops() {
+    if (tasks::Service* service = g_service.load(std::memory_order_acquire)) {
+        try {
+            service->run_tick_hops();
+        } catch (...) {  // nothing leaves the tick hook
+        }
+    }
 }
 
 void exit_begins() {  // lock-free: also on a crash's exit

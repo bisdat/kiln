@@ -19,6 +19,9 @@
 // running slot: other owners keep running, the watchdog names it, and shutdown detaches its worker within the bound.
 #pragma once
 #include <atomic>
+#include <vector>
+#include <unordered_map>
+#include <deque>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -28,6 +31,7 @@
 
 #include "kiln_api.h"
 #include "services/kiln_tasks.h"
+#include "tasks_host.h"
 #include "tasks_model.h"
 #include "tasks_platform.h"
 
@@ -102,6 +106,14 @@ public:
     // ---- managed leases (the managed host's tasks) ----
     KilnResult arm(KilnHandle task, uint64_t* registration);
     KilnResult resume(KilnHandle task, uint64_t registration);
+    KilnResult resume_after(KilnHandle task, uint64_t registration, uint64_t session, uint64_t edge);
+    KilnResult finish(KilnHandle task, Outcome outcome);
+    bool cancel_requested(KilnHandle task) const;
+    KilnResult hop_begin(KilnHandle task);
+    KilnResult hop_end(KilnHandle task);
+    bool lease_of(KilnHandle task, KilnOwner* owner, uintptr_t* user) const;
+    // A bounded copy of the running/suspended leases (at most `capacity` rows); BUFFER_TOO_SMALL: *count = needed.
+    KilnResult snapshot_leases(KilnLeaseSnapshot* rows, uint32_t capacity, uint32_t* count) const;
     void edge(uint64_t session, uint64_t edge);
     void end_session(uint64_t session);
 
@@ -125,6 +137,9 @@ public:
     // tasks.pool capability row reads it). start_failures() counts worker starts that failed (each retried later).
     bool can_run(Slot slot) const;
     int health() const;  // lock-free: 1 while normal work can run (can_run(Normal)), else 0
+    uint64_t now_ns() const;  // the platform clock (the tick hops' budget clock; a test's fake one in tests)
+    // Runs fn(context) inside the platform's fault boundary (the tick hops' dispatcher calls).
+    void guarded(GuardedFn fn, void* context, FaultInfo* info);
     uint64_t start_failures() const;
     enum class Point : uint32_t {
         MetaPrepared,        // inside submit, everything allocated, before publication (a test may throw here)
@@ -151,6 +166,8 @@ public:
     virtual bool on_tick_or_world_thread() = 0;
     virtual bool owner_alive(KilnOwner owner) = 0;
     virtual std::string owner_name(KilnOwner owner) = 0;
+    // The host's dispatcher faulted on a tick hop of `lease` (structured fault `code`): the binding contained it.
+    virtual void hop_faulted(KilnOwner owner, KilnLease lease, uint32_t code) { (void)owner, (void)lease, (void)code; }
 };
 
 class Service {
@@ -190,12 +207,39 @@ public:
     Snapshot snapshot() const;
     uint64_t refused_edges() const;
 
+    // ---- kiln.internal.tasks.host v1 (tasks_host.h): the managed host's leases on the same pool ----
+    KilnResult host_bind(KilnHostDispatchFn dispatch);
+    KilnResult host_admit(KilnOwner owner, const KilnTaskInfo* info, void* host_state, KilnLease* lease,
+                          uint32_t* refusal);
+    KilnResult host_arm(KilnLease lease, uint64_t* registration);
+    KilnResult host_resume(KilnLease lease, uint64_t registration);
+    KilnResult host_resume_after_step(KilnLease lease, uint64_t registration, uint32_t* refusal);
+    KilnResult host_finish(KilnLease lease, uint32_t outcome);
+    uint32_t host_is_cancelled(KilnLease lease);
+    KilnResult host_seal_owner(KilnOwner owner, uint32_t* outstanding);
+    KilnResult host_snapshot(KilnLeaseSnapshot* rows, uint32_t capacity, uint32_t* count);
+    KilnHostDispatchFn dispatcher() const { return dispatch_.load(std::memory_order_acquire); }
+    // A bounded tick hop for the lease: dispatched as KILN_LEASE_TICK_HOP on the live server world's tick, before its
+    // Pre subscribers (run_tick_hops). UNAVAILABLE with no live server world (never waits for one); INTERNAL for a
+    // lease that is unknown or already quiescent. Allowed after a seal; a retiring lease's hop runs with cancelled=1.
+    KilnResult host_tick_hop(KilnLease lease);
+    // The server world's Pre (tick.cpp), before its subscribers: the queued hops, FIFO per owner, owners round-robin
+    // (the turn moves on from step to step); per owner at most 64 hops and 2 ms, all owners at most 4 ms, checked
+    // between callbacks; the rest wait for the next step, never dropped. Returns the hops dispatched.
+    std::size_t run_tick_hops();
+    std::size_t pending_tick_hops() const;
+
+    static constexpr std::size_t kHopsPerOwner = 64;
+    static constexpr uint64_t kHopOwnerNs = 2ull * 1000 * 1000, kHopStepNs = 4ull * 1000 * 1000;
+
     // Test seams (outside every lock): submit passed its owner_alive check / AFTER_STEP captured its snapshot.
-    enum class Point : uint32_t { AfterAliveCheck, AfterCapture };
+    enum class Point : uint32_t { AfterAliveCheck, AfterCapture, HopBeforePush };
     void set_test_hook(std::function<void(Point)> hook);
 
 private:
     KilnResult open(KilnOwner owner);
+    KilnResult submit_as(KilnOwner owner, const KilnTaskInfo* info, KilnTaskBodyFn body, KilnTaskDoneFn done, void* user,
+                         bool lease, KilnHandle* task, uint32_t* refusal);
 
     Pool& pool_;
     ServiceEnv& env_;
@@ -203,6 +247,19 @@ private:
     Snapshot snap_;
     uint64_t refused_edges_ = 0;
     std::atomic<bool> exiting_{false};
+    std::atomic<KilnHostDispatchFn> dispatch_{nullptr};  // the managed host's one dispatcher (host_bind)
+    // Pending tick hops (the lease and the host's state for it), per owner.
+    struct Hop {
+        KilnLease lease;
+        void* host_state;
+    };
+    mutable std::mutex lease_mutex_;
+    std::vector<std::pair<KilnOwner, std::deque<Hop>>> hops_;  // per owner, in the order owners first queued
+    std::size_t hop_turn_ = 0;                                // the owner whose turn comes first next step
+    bool hops_open_ = false;  // a live server session takes hops (under lease_mutex_; its STOPPING closes it)
+    void dispatch_hop(KilnHostDispatchFn dispatch, KilnLease lease, void* host_state, uint32_t cancelled);
+    void dispatch_hops_cancelled();                            // a session's STOPPING: every pending hop, cancelled
+
     std::function<void(Point)> hook_;
 };
 

@@ -92,6 +92,9 @@ public:
 // Immortal: never destroyed at static destruction, so a worker detached at shutdown that is still running at process
 // exit never calls into a destroyed platform (the pool Core it co-owns refers to this object).
 Platform& default_platform() {
+    // Keep this a heap object that is never deleted (not a function-local static, no delete): a worker detached at
+    // shutdown may still call into it. The host tests define their own default_platform(), so nothing here goes red
+    // if this is reverted; tasks_pool_test's stuck_worker_survives_pool shows the call.
     static auto* platform = new WindowsPlatform;
     return *platform;
 }

@@ -48,6 +48,10 @@ int main(int argc, char** argv) {
     check(!step.empty() && post != npos && edge != npos && post < edge && original != npos && original < edge,
           "server_step: the Post edge (the session, KilnTickInfo.step) follows the step and Kiln's Post");
     check(step.find("tasks_svc::post_edge", edge + 1) == npos, "server_step: one edge per step");
+    const size_t hops = step.find("tasks_svc::tick_hops();");
+    const size_t pre = step.find("run(g_pre, g_slots.pre, info, now_ms());");
+    check(hops != npos && pre != npos && hops < pre && hops < original,
+          "server_step: the managed host's tick hops run before the Pre subscribers");
 
     const std::string destroy = body_of(src, "void __fastcall hk_world_destroy(uintptr_t world) {");
     const size_t stopping = destroy.find("if (kind == KILN_WORLD_SERVER) tasks_svc::session_stopping(session);");

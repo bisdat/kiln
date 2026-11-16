@@ -14,8 +14,12 @@ public sealed class CoverageTests
         var headers = Path.Combine(repo, "native");
         Assert.True(Directory.Exists(headers), headers);
         var define = new Regex(@"^#define\s+KILN_\w+_SERVICE\s+""(kiln\.[^""]+)""", RegexOptions.Multiline);
-        var names = Directory.GetFiles(headers, "*.h", SearchOption.AllDirectories).SelectMany(f => define.Matches(File.ReadAllText(f)).Select(m => m.Groups[1].Value))
+        var all = Directory.GetFiles(headers, "*.h", SearchOption.AllDirectories).SelectMany(f => define.Matches(File.ReadAllText(f)).Select(m => m.Groups[1].Value))
             .Distinct().Order(StringComparer.Ordinal).ToList();
+        // Kiln-internal tables ("kiln.internal.*") are build-stamped and never reachable by mods: the kit must not know
+        // them. At least one is seen and skipped, so this filter cannot silently hide a renamed public table.
+        Assert.Contains(all, n => n.StartsWith("kiln.internal.", StringComparison.Ordinal));
+        var names = all.Where(n => !n.StartsWith("kiln.internal.", StringComparison.Ordinal)).ToList();
         Assert.Equal(names, ServiceNames.All.Order(StringComparer.Ordinal));
     }
 

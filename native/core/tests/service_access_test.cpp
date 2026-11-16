@@ -48,12 +48,19 @@ namespace compat {
 const OriginalCodeApi original{{sizeof(OriginalCodeApi), kOriginalCodeVersion}, nullptr, nullptr, nullptr};
 const OriginalCodeApi* original_code_table() { return &original; }  // stands for the core's compat.cpp table
 }  // namespace compat
+namespace tasks_svc {
+const KilnServiceHeader host{sizeof(KilnServiceHeader), 1};  // stands for the core's kiln.internal.tasks.host table
+bool running = true;
+const void* host_table() { return running ? &host : nullptr; }
+}  // namespace tasks_svc
 namespace caps {
 const void* table() { return nullptr; }
 int published = 0;
 void service_published(KilnOwner, std::string_view, uint32_t) { ++published; }
 }  // namespace caps
 }  // namespace kiln
+#define KILN_TASKS_HOST_SERVICE "kiln.internal.tasks.host"  // tasks_host.h
+#define KILN_TASKS_HOST_VERSION 1u
 #define KLOG_I(...) (void)0
 #define KLOG_W(...) (last_log = "warn")
 #define KLOG_E(...) (last_log = "error")
@@ -64,8 +71,37 @@ namespace {
 }  // namespace
 }  // namespace kiln
 
+// The managed host's view (api_for_managed_host): exactly the core's own kiln.internal.tasks.host on top of the
+// plugins' lookup; no other view resolves it and nobody publishes that name.
+void managed_host_view() {
+    using namespace kiln;
+    const KilnStr host{KILN_TASKS_HOST_SERVICE, std::strlen(KILN_TASKS_HOST_SERVICE)};
+    const KilnStr other{"kiln.internal.example", 21};
+    const KilnServiceHeader spoof{sizeof(KilnServiceHeader), 1};
+    check(api_service_managed_host(host, 1) == &tasks_svc::host, "the host view resolves the core's lease table");
+    check(api_service_managed_host(host, 2) == nullptr, "...not for a later version");
+    check(api_service(host, 1) == nullptr, "the plugins' view never resolves it");
+    check(api_service_services(host, 1) == nullptr, "the services' view never resolves it");
+    check(api_register_service_services(1, host, &spoof) == KILN_ERR_INVALID_ARGUMENT &&
+              api_register_service(2, host, &spoof) == KILN_ERR_INVALID_ARGUMENT,
+          "nobody publishes that name, not even a Kiln service owner");
+    check(api_service_managed_host(host, 1) == &tasks_svc::host && api_service_services(host, 1) == nullptr,
+          "and the views still say the same after the attempts");
+    check(api_service_managed_host(other, 1) == nullptr, "the host view resolves no other internal table");
+    const KilnStr open{"kiln.example", 12};
+    check(api_service_managed_host(open, 1) == api_service(open, 1), "public names resolve as for plugins");
+    const KilnApi plugins{};
+    const KilnApi view = managed_host_api_from(plugins);
+    check(view.service == &api_service_managed_host && view.register_service == plugins.register_service,
+          "the host's KilnApi is the plugins' one with the host lookup only (it publishes like a plugin)");
+    tasks_svc::running = false;
+    check(api_service_managed_host(host, 1) == nullptr, "while kiln.tasks is not running: nothing (the host reports it)");
+    tasks_svc::running = true;
+}
+
 int main() {
     using namespace kiln;
+    managed_host_view();
     const KilnServiceHeader table{sizeof(KilnServiceHeader), 1};
     const KilnStr internal{"kiln.internal.example", 21}, open{"kiln.example", 12};
     // owner 1 = a service loaded from kiln/services, owner 2 = a plugin, owner 3 = a plugin-made owner
