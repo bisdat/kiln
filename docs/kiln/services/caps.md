@@ -388,3 +388,12 @@ continues calling request_build when needed, while the older service owns the ot
 Admitted `quests/` packs request craft/build/terraform (mask 7). Unreadable or over-budget metadata requests all
 groups; reflected/path-loaded use outside the inspected closure requests at the first API call. The Host caches
 metadata across mods within a bounded pass and logs its assemblies-read count and elapsed milliseconds.
+
+## Rows added by the gem wave
+Managed rows of Kiln.Abilities' gem API ([gems.md](gems.md)), reported at its start (the first service tick), at the
+first use of `Gems` or a gem event, and about once a second.
+
+| Row | Kind | Reported by | What it says |
+|---|---|---|---|
+| `gems.read` | managed, session | Kiln.Abilities | `Gems.Catalog`, `Get`, `Equipped`, `Socket` and `GemSocketChangedEvent`: needs kiln.items (`service-missing`) with item instances (`items.instances`, with its reason when off; `pending` while that waits for a server world), kiln.types and the game's reflection of `Equipment.equipmentImpacts[].weaponGemImpactEntityId` (`symbol-missing` on a build without it), and kiln.world. Available with the note "without kiln.gamedata: Gems.Catalog has no programs or configs" when kiln.gamedata is missing. A member that needs another service's row throws `KilnUnavailableException` naming `gems.read`, the other row in its text |
+| `gems.triggers` | managed, session | Kiln.Abilities, with `gems.read` | `GemTriggeredEvent` (and the gem wave's gems with their own effects): needs `gems.read` (its state), kiln.abilities (`service-missing`) and its native events (`abilities.natives`, its reason when off) |

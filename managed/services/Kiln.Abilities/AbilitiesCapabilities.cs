@@ -237,5 +237,9 @@ internal static class AbilitiesCaps
 /// are there before a mod asks for them, not from Kiln.Abilities' first use.</summary>
 internal static class AbilitiesStartup
 {
-    static AbilitiesStartup() => AbilitiesCaps.Ensure();
+    static AbilitiesStartup()
+    {
+        AbilitiesCaps.Ensure();
+        GemsCaps.Ensure();  // gem wave G1: gems.read, gems.triggers
+    }
 }

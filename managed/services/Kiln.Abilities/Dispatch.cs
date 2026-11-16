@@ -145,7 +145,7 @@ internal static unsafe class AbilitiesDispatch
         if (Events.HasSubscribers<ImpactStartedEvent>()) m |= AbilitiesNative.Bit(AbilitiesNative.EvImpactStarted);
         if (Events.HasSubscribers<ImpactStartingEvent>()) m |= AbilitiesNative.InterestHold;
         if (Events.HasSubscribers<ImpactEndedEvent>()) m |= AbilitiesNative.Bit(AbilitiesNative.EvImpactEnded);
-        if (Events.HasSubscribers<ImpactNativeEvent>()) m |= AbilitiesNative.Bit(AbilitiesNative.EvNative);
+        if (Events.HasSubscribers<ImpactNativeEvent>() || Events.HasSubscribers<GemTriggeredEvent>()) m |= AbilitiesNative.Bit(AbilitiesNative.EvNative);
         if (Events.HasSubscribers<ImpactSignalEvent>()) m |= AbilitiesNative.Bit(AbilitiesNative.EvSignal);
         if (!Abilities.Natives.ManagedNatives.IsEmpty) m |= AbilitiesNative.Bit(AbilitiesNative.EvManagedCall);
         return m;
@@ -214,15 +214,19 @@ internal static unsafe class AbilitiesDispatch
                     if (Events.HasSubscribers<ImpactEndedEvent>()) Events.Post(new ImpactEndedEvent(impact, ev.Step));
                     break;
                 case AbilitiesNative.EvNative:
-                    if (!Events.HasSubscribers<ImpactNativeEvent>()) break;
+                    var wantNative = Events.HasSubscribers<ImpactNativeEvent>();
+                    var wantGem = Events.HasSubscribers<GemTriggeredEvent>();  // gem wave G1: the same call, as the gem's
+                    if (!wantNative && !wantGem) break;
                     var snap = Snapshot(ref ev, impact);
-                    Events.Post<ImpactNativeEvent>(ev.NativeHash switch
+                    ImpactNativeEvent native = ev.NativeHash switch
                     {
                         0xb04d0e7a => new ImpactDamageEvent(snap),
                         0x91f30b26 => new ImpactBuffEvent(snap),
                         0x61b11b03 => new ImpactSpawnEvent(snap),
                         _ => new ImpactNativeEvent(snap),
-                    });
+                    };
+                    if (wantNative) Events.Post(native);
+                    if (wantGem) GemTriggers.Deliver(native, ev.Step);
                     break;
                 case AbilitiesNative.EvSignal:
                     if (!Events.HasSubscribers<ImpactSignalEvent>()) break;

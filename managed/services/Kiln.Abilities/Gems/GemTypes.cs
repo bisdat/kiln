@@ -12,7 +12,12 @@ public sealed record GemInfo(ItemId Item, string Name, string? DisplayName, Item
 /// <summary>One config of a gem's impact program. <see cref="Id"/> is the config's id as kiln.gamedata writes it
 /// (<c>impactValues.0x5e34f09b</c>); <see cref="Kind"/> the config type (for example <c>ScaledSint32</c>, <c>BuffType</c>);
 /// <see cref="Value"/> its base value and <see cref="ScaleFactor"/> the level scaling of a scaled config.</summary>
-public sealed record GemConfigValue(uint Id, string? Alias, string Kind, double Value, double? ScaleFactor);
+public sealed record GemConfigValue(uint Id, string? Alias, string Kind, double Value, double? ScaleFactor)
+{
+    /// <summary>The value as kiln.gamedata writes it when it is not a number: a GUID (a buff, a template), an enum name
+    /// (<c>Big</c>), <c>none</c>; then <see cref="Value"/> is 0. Null for a number.</summary>
+    public string? Text { get; init; }
+}
 
 /// <summary>A gem in a socket: the carrier item, the gem item and its level.</summary>
 public readonly record struct SocketedGem(ItemInstanceRef Carrier, ItemId Gem, int Level);

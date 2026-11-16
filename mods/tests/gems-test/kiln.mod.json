@@ -1,0 +1,11 @@
+{
+  "id": "gems-test",
+  "name": "gem read API lab test",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "GemsTest.dll",
+  "side": "server",
+  "advanced": true,
+  "writes": ["WeaponGemSlot"],
+  "description": "PASS/FAIL lines: Gems.Catalog from the live game data, a socketed gem on a spawned player (the socket written for the probe), Gems.Equipped / Socket, GemTriggeredEvent on a pierce hit, GemSocketChangedEvent, and a data-pack change of the gem taking effect after a hotbar switch. Player-free."
+}

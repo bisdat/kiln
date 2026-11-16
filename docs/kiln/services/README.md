@@ -28,6 +28,7 @@ available is generated from a boot's `capabilities.json`: [../status.generated.m
 | [content.md](content.md) | kiln.content: registries and data packs |
 | [creatures.md](creatures.md) | kiln.creatures: one creature's values, variants, AI events, commands and arsenal rules |
 | [gamedata.md](gamedata.md) | kiln.gamedata: spells, abilities, creatures and their attacks as data |
+| [gems.md](gems.md) | Gems: how a gem works, changing one with a data pack, the `Gems` read API and gem events |
 | [gameplay.md](gameplay.md) | kiln.gameplay: player/world interaction events and protection zones |
 | [hooks.md](hooks.md) | kiln.hooks v2: one registry for every hook |
 | [items.md](items.md) | kiln.items: items in inventories |

@@ -98,3 +98,28 @@ static Kiln.Gems.Get(Kiln.ItemId gem) -> Kiln.GemInfo?
 static Kiln.Gems.Socket(Kiln.ItemInstanceRef carrier) -> Kiln.SocketedGem?
 static Kiln.SocketedGem.operator !=(Kiln.SocketedGem left, Kiln.SocketedGem right) -> bool
 static Kiln.SocketedGem.operator ==(Kiln.SocketedGem left, Kiln.SocketedGem right) -> bool
+Kiln.GemConfigValue.Text.get -> string?
+Kiln.GemConfigValue.Text.init -> void
+Kiln.GemSocketChange
+Kiln.GemSocketChangedEvent
+Kiln.GemSocketChangedEvent.After.get -> Kiln.SocketedGem?
+Kiln.GemSocketChangedEvent.Before.get -> Kiln.SocketedGem?
+Kiln.GemSocketChangedEvent.Carrier.get -> Kiln.ItemInstanceRef
+Kiln.GemSocketChangedEvent.Change.get -> Kiln.GemSocketChange
+Kiln.GemSocketChangedEvent.Involves(Kiln.EntityId entity) -> bool
+Kiln.GemSocketChangedEvent.Owner.get -> Kiln.EntityId
+Kiln.GemSocketChangedEvent.Step.get -> ulong
+Kiln.GemSocketChange.LevelChanged = 3 -> Kiln.GemSocketChange
+Kiln.GemSocketChange.Removed = 4 -> Kiln.GemSocketChange
+Kiln.GemSocketChange.Socketed = 1 -> Kiln.GemSocketChange
+Kiln.GemSocketChange.Unsocketed = 2 -> Kiln.GemSocketChange
+Kiln.GemTriggeredEvent
+Kiln.GemTriggeredEvent.Gem.get -> Kiln.EquippedGem!
+Kiln.GemTriggeredEvent.Info.get -> Kiln.GemInfo?
+Kiln.GemTriggeredEvent.Involves(Kiln.EntityId entity) -> bool
+Kiln.GemTriggeredEvent.Native.get -> Kiln.ImpactNativeEvent!
+Kiln.GemTriggeredEvent.Player.get -> Kiln.EntityId
+Kiln.GemTriggeredEvent.Step.get -> ulong
+Kiln.GemTriggeredEvent.Target.get -> Kiln.EntityId
+override Kiln.GemSocketChangedEvent.ToString() -> string!
+override Kiln.GemTriggeredEvent.ToString() -> string!
