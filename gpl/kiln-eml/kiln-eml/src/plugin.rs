@@ -510,7 +510,7 @@ fn run_now() {
         skip_cache: false,
     };
     if let Some(p) = profile() {
-        discover::apply_runtime_blocks(&unsafe { (p.json)().to_string() }, &kiln, &mut entries, &runner::runtime_unavailable(&cfg));
+        discover::apply_runtime_blocks(&unsafe { (p.json)().to_string() }, &kiln, &mut entries, &runner::runtime_skip_reason(&cfg));
     }
     tracing::debug!(candidates = candidates.len(), run = mods.len(), dropins, profile_note, "kiln-eml discovery");
     let out = runner::run(&cfg, mods, entries);

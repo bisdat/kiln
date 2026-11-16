@@ -203,7 +203,7 @@ pub fn find(game_dir: &Path, profile: Option<&ProfileView>) -> Vec<OwnLoader> {
     // file (ShroudForge then puts the game data back). The launcher must reach the same answer: it places the profile's
     // EML mods for the loader that runs them (`sf_paths::adapter_hosts_dropins`).
     let hosts = std::env::var("KILN_SHROUDFORGE").as_deref() == Ok("1") || profile.is_some_and(|p| p.enabled(ModKind::ShroudForge).next().is_some() || !p.eml_runtime.is_empty() || (p.dropins_shroudforge && crate::sf_paths::adapter_hosts_dropins(game_dir)));
-    if hosts && runtime && game_dir.join(plugin).is_file() && std::env::var("KILN_SHROUDFORGE").as_deref() != Ok("0") {
+    if hosts && runtime && game_dir.join(plugin).is_file() && !shroudforge_env_off() {
         out.push(OwnLoader { kind: ModKind::Eml, engine: Engine::ShroudForge, file: plugin.into(), via: Via::HostedShroudForge, folder: sf_folder(game_dir),
             delivery: Delivery::Placed });
     }
@@ -222,6 +222,19 @@ pub fn of_kind(loaders: &[OwnLoader], kind: ModKind) -> Option<&OwnLoader> {
 pub fn shroudforge_runs_eml(loaders: &[OwnLoader]) -> bool {
     loaders.iter().any(|o| o.kind == ModKind::Eml && o.engine == Engine::ShroudForge)
 }
+
+/// `KILN_SHROUDFORGE=0` in the environment switches Kiln's ShroudForge off (only the exact value 0, as kiln-shroudforge
+/// reads it; 1 makes Kiln host it, anything else is as if unset).
+pub(crate) fn shroudforge_env_off() -> bool {
+    std::env::var("KILN_SHROUDFORGE").as_deref() == Ok("0")
+}
+
+/// What an EML mod that needs ShroudForge's runtime says while that variable switches ShroudForge off. Players set it
+/// to 0 thinking it means "default" (inbox 36), and a variable set with setx reaches only programs started after it:
+/// Steam starts the game, and the launcher writes the profile.
+pub(crate) const RUNTIME_ENV_OFF_NOTE: &str = "needs ShroudForge's runtime, which the KILN_SHROUDFORGE=0 environment \
+     variable switches off; its data was not applied, so the game is as without the mod. Remove that variable (do not set \
+     it to 0), restart Steam and the Kiln launcher, and start the game again";
 
 /// A standalone EML loader makes kiln-eml finish before hosted ShroudForge can reserve the startup writer.
 /// Its runtime packages must not be delegated or placed for that loader, which bypasses kiln-eml's whole-package

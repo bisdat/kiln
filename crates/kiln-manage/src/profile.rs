@@ -1215,9 +1215,9 @@ pub fn render(dirs: &DataDirs, profile: &Profile, install: &GameInstall, mode: P
                 m.enabled = false;
             } else {
                 m.enabled = false;
-                let why = if std::env::var("KILN_SHROUDFORGE").as_deref() == Ok("0") { "KILN_SHROUDFORGE=0" }
-                    else { "the ShroudForge component is missing or unavailable" };
-                eml_runtime_blocked.insert(id.clone(), format!("needs ShroudForge's runtime, which is not running: {why}; its data was not applied, so the game is as without the mod. Install/enable ShroudForge and activate again"));
+                let note = if crate::own_loaders::shroudforge_env_off() { crate::own_loaders::RUNTIME_ENV_OFF_NOTE.to_owned() }
+                    else { "needs ShroudForge's runtime, which is not running: the ShroudForge component is missing or unavailable; its data was not applied, so the game is as without the mod. Install/enable ShroudForge and activate again".to_owned() };
+                eml_runtime_blocked.insert(id.clone(), note);
             }
         }
     }

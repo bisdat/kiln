@@ -972,3 +972,36 @@ fn a_switched_off_shroudforge_copy_xhl_core_loads_is_named() {
         }
     }
 }
+
+#[test]
+fn runtime_eml_environment_note() {
+    const CHILD: &str = "KILN_TEST_SFOFF_NOTE_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        for value in ["0", "1", "other", ""] {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "runtime_eml_environment_note", "--nocapture"])
+                .env(CHILD, "1").env("KILN_SHROUDFORGE", value).output().unwrap();
+            assert!(output.status.success(), "value={value:?}: {}{}",
+                String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        }
+        return;
+    }
+    let s = setup("runtime-env-note");
+    let p = runtime_eml(&s, "runtime");
+    let rendered = profile::render(&s.dirs, &p, &runtime_install(&s.game), kiln_manage::game::PathMode::Native).unwrap();
+    let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+    if std::env::var("KILN_SHROUDFORGE").unwrap() == "0" {
+        let note = &rendered.eml_runtime_blocked["quiver"];
+        for text in ["KILN_SHROUDFORGE=0 environment variable switches off", "Remove that variable (do not set it to 0)",
+                     "restart Steam and the Kiln launcher", "start the game again"] {
+            assert!(note.contains(text), "{note}");
+        }
+        assert!(!note.contains("Install"), "{note}");
+        assert!(rep.warnings.iter().any(|w| w == &format!("eml:quiver: {note}")), "{rep:?}");
+        assert!(!rendered.mods.eml[0].enabled);
+        assert!(!s.game.join("mods/quiver").exists());
+    } else {
+        assert!(rendered.eml_runtime_blocked.is_empty());
+        assert!(rep.warnings.is_empty(), "{rep:?}");
+    }
+}

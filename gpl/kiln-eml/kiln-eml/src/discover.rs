@@ -1080,15 +1080,15 @@ mod tests {
 
 }
 
-/// The launcher deliberately disabled these entries because their required engine is unavailable.
-pub fn apply_runtime_blocks(json: &str, kiln: &Utf8Path, entries: &mut [Entry], unavailable: &str) {
+/// The launcher deliberately disabled these entries because their required engine is unavailable. `fallback`: the
+/// reason for an entry the launcher delegated to ShroudForge without a note of its own (runner::runtime_skip_reason).
+pub fn apply_runtime_blocks(json: &str, kiln: &Utf8Path, entries: &mut [Entry], fallback: &str) {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else { return };
     let blocked = v.get("emlRuntimeBlocked").and_then(|v| v.as_object());
     for ((id, _), candidate) in profile_ids(json).into_iter().zip(profile_candidates(json, kiln)) {
         if candidate.enabled { continue; }
         let delegated = v.get("emlRuntime").and_then(|v| v.as_array()).is_some_and(|a| a.iter().any(|v| v.as_str() == Some(id.as_str())));
-        let fallback = format!("needs ShroudForge's runtime, which is not running: {unavailable}; its data was not applied, so the game is as without the mod");
-        if let Some(reason) = blocked.and_then(|b| b.get(&id)).and_then(|v| v.as_str()).or_else(|| delegated.then_some(fallback.as_str())) {
+        if let Some(reason) = blocked.and_then(|b| b.get(&id)).and_then(|v| v.as_str()).or_else(|| delegated.then_some(fallback)) {
             for e in entries.iter_mut().filter(|e| e.source == "profile" && e.path == candidate.path.as_str()) {
                 e.id = Some(id.clone());
                 e.state = "skipped".into();
@@ -1131,7 +1131,7 @@ mod runtime_delegation_tests {
         assert!(!candidates[0].enabled);
         let (mods, mut fallback) = resolve(&candidates);
         assert!(mods.is_empty());
-        apply_runtime_blocks(&json, &root, &mut fallback, "adapter failed before reservation");
+        apply_runtime_blocks(&json, &root, &mut fallback, &crate::runner::skip_reason(None, || "adapter failed before reservation".into()));
         assert_eq!(fallback[0].state, "skipped");
         assert!(fallback[0].reason.as_deref().unwrap().contains("adapter failed before reservation"));
         let rows = aside_entries(&json, &root, &[root.clone()], "ShroudForge (hosted by Kiln)", Some(false));

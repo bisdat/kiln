@@ -2371,7 +2371,11 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
                 kind, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() })?;
             if kind == ModKind::Eml && crate::own_loaders::eml_needs_runtime(&src)
                 && !crate::own_loaders::shroudforge_runs_eml(loaders) {
-                rep.warnings.push(format!("{}: needs ShroudForge's runtime, which is not available; its data was not applied, so the game is as without the mod. Install the ShroudForge component and activate again", tag(&m.id)));
+                if crate::own_loaders::shroudforge_env_off() {
+                    rep.warnings.push(format!("{}: {}", tag(&m.id), crate::own_loaders::RUNTIME_ENV_OFF_NOTE));
+                } else {
+                    rep.warnings.push(format!("{}: needs ShroudForge's runtime, which is not available; its data was not applied, so the game is as without the mod. Install the ShroudForge component and activate again", tag(&m.id)));
+                }
                 continue;
             }
             if kind != ModKind::Native && root.is_none() && game_folder_of(dirs, kind, m).is_none() { continue; }

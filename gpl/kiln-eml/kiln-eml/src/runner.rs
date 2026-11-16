@@ -329,10 +329,24 @@ fn files_differ(a: &Utf8Path, b: &Utf8Path, progress: &Progress) -> bool {
     compare().unwrap_or(true)
 }
 
-pub(crate) fn runtime_unavailable(cfg: &RunConfig) -> String {
-    if std::env::var("KILN_SHROUDFORGE").as_deref() == Ok("0") {
-        return "KILN_SHROUDFORGE=0; remove that override and start again".into();
+/// Why an EML package that needs ShroudForge's runtime is skipped when no ShroudForge reserved this start.
+pub(crate) fn runtime_skip_reason(cfg: &RunConfig) -> String {
+    skip_reason(std::env::var("KILN_SHROUDFORGE").ok().as_deref(), || runtime_unavailable(cfg))
+}
+
+/// `env`: the KILN_SHROUDFORGE variable (only the exact value 0 switches ShroudForge off). Players set it to 0 thinking it
+/// means "default" (inbox 36); a variable set with setx reaches only programs started after it. The launcher's note for
+/// the same case (kiln-manage own_loaders::RUNTIME_ENV_OFF_NOTE) says the same.
+pub(crate) fn skip_reason(env: Option<&str>, unavailable: impl FnOnce() -> String) -> String {
+    if env == Some("0") {
+        return "needs ShroudForge's runtime, which the KILN_SHROUDFORGE=0 environment variable switches off; its data was \
+                not applied, so the game is as without the mod. Remove that variable (do not set it to 0), restart Steam and \
+                the Kiln launcher, and start the game again".into();
     }
+    format!("needs ShroudForge's runtime, which is not running: {}; its data was not applied, so the game is as without the mod", unavailable())
+}
+
+pub(crate) fn runtime_unavailable(cfg: &RunConfig) -> String {
     let state = cfg.game_dir.join("kiln/state/shroudforge.json");
     if let Ok(bytes) = std::fs::read(state) {
         if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes) {
@@ -382,12 +396,12 @@ pub fn run(cfg: &RunConfig, mut mods: Vec<Utf8PathBuf>, entries: Vec<Entry>) -> 
         o
     };
     // Reaching this runner means no ShroudForge writer reserved the run. Never run just the data half.
-    let why = runtime_unavailable(cfg);
+    let why = runtime_skip_reason(cfg);
     mods.retain(|path| {
         let needs = crate::discover::classify(path).is_ok_and(|m| m.capabilities.iter()
             .any(|c| matches!(c, Capability::Runtime | Capability::RuntimeRegisterDll)));
         if needs {
-            let reason = format!("needs ShroudForge's runtime, which is not running: {why}; its data was not applied, so the game is as without the mod");
+            let reason = why.clone();
             tracing::warn!(%path, %reason, "EML package skipped whole");
             set_state(&mut out.mods, path, "skipped", Some(reason));
         }
@@ -1028,3 +1042,25 @@ mod tests {
 #[cfg(test)]
 #[path = "runner_ownership_tests.rs"]
 mod ownership_tests;
+
+#[cfg(test)]
+mod skip_reason_tests {
+    use super::skip_reason;
+
+    #[test]
+    fn the_environment_switch_says_how_to_undo_it() {
+        // inbox 36: a player set KILN_SHROUDFORGE=0 thinking 0 means "default"
+        let note = skip_reason(Some("0"), || unreachable!("the variable is the reason"));
+        for text in ["KILN_SHROUDFORGE=0 environment variable switches off", "Remove that variable (do not set it to 0)",
+                     "restart Steam and the Kiln launcher", "start the game again", "the game is as without the mod"] {
+            assert!(note.contains(text), "{note}");
+        }
+        assert!(!note.contains("override") && !note.to_lowercase().contains("install"), "{note}");
+        // unset, 1 and anything else do not switch ShroudForge off: the other reason stays
+        for env in [None, Some("1"), Some(""), Some("other")] {
+            let note = skip_reason(env, || "ShroudForge did not reserve this start".into());
+            assert!(note.starts_with("needs ShroudForge's runtime, which is not running: ShroudForge did not reserve this start;"),
+                    "{env:?}: {note}");
+        }
+    }
+}
