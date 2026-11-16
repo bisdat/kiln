@@ -40,7 +40,7 @@
 
 // The managed mirror (managed/services/Kiln.Saves/Native.cs) relies on these sizes.
 static_assert(sizeof(KilnSaveEvent) == 88 && sizeof(KilnSavesStatus) == 128);
-static_assert(sizeof(KilnSavesApi) == 64, "kiln.saves v1 with stage_progress (0.2.0-dev.30): Native.cs TableV2");
+static_assert(sizeof(KilnSavesApi) == 64, "kiln.saves v1 with stage_progress (0.2.0-dev.29.3): Native.cs TableV2");
 
 namespace {
 

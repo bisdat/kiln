@@ -25,7 +25,7 @@ namespace Kiln;
 /// <para>Loading picks the manifest of the world file on disk (its header revision + time), so restoring an older world
 /// file (from the game's backup folder or a Kiln backup) brings back the mod data that belongs to it. Manifests are
 /// kept for the newest 30 generations and for every world file in the save folder and its <c>backup/</c>.</para>
-/// <para>Who writes (since 0.2.0-dev.30, issue #39): the tick thread only serializes the bundles (in memory); every file
+/// <para>Who writes (since 0.2.0-dev.29.3, issue #39): the tick thread only serializes the bundles (in memory); every file
 /// operation of a save (blobs, manifests, the pending manifest's delete, pruning) runs on <see cref="SaveWriter"/>'s
 /// thread, in order, and kiln.saves holds the game's world write until the writer has the generation's pending manifest
 /// on disk (bounded: <c>docs/kiln/services/saves.md</c> says where the order does not hold). A world load and a backup
@@ -491,7 +491,7 @@ internal sealed unsafe class WorldStore
     // ---- staging / commit ----
 
     /// <summary>Captures generation <paramref name="gen"/>: every bundle serialized, in memory, and hands it to the
-    /// <see cref="Writer"/>, which writes its new blobs and its pending manifest off this thread (since 0.2.0-dev.30;
+    /// <see cref="Writer"/>, which writes its new blobs and its pending manifest off this thread (since 0.2.0-dev.29.3;
     /// before, the tick thread wrote them here). Tick thread, right after the WorldSaving handlers (<paramref name="snapshot"/>
     /// false), and again at the snapshot staging (<paramref name="snapshot"/> true). The game's world write waits until
     /// the writer has it on disk (kiln.saves' stage barrier); without the barrier this thread writes it, as before.</summary>

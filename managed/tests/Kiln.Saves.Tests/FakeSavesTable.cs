@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// A stand-in for kiln.saves' native table (kiln_saves.h), with the entry appended in 0.2.0-dev.30: stage_progress, the
+// A stand-in for kiln.saves' native table (kiln_saves.h), with the entry appended in 0.2.0-dev.29.3: stage_progress, the
 // barrier that holds the game's world write until Kiln.Saves' writer has the generation's pending manifest on disk.
 // It records what the writer reports; WaitLikeTheWorldWrite does what kiln.saves does on the game's Save2Thread before
 // it writes the world file (saves.cpp hk_write, stage_barrier.h).
@@ -23,7 +23,7 @@ internal sealed unsafe class FakeSavesTable : IDisposable
         public delegate* unmanaged[Cdecl]<ulong, delegate* unmanaged[Cdecl]<uint, void*, void>, void*, ulong*, int> SetPump;
         public delegate* unmanaged[Cdecl]<int, byte*, nuint, nuint*, int> Path;
         public delegate* unmanaged[Cdecl]<uint, int> SetPumpInterval;
-        public delegate* unmanaged[Cdecl]<ulong, ulong, int> StageProgress;  // appended (0.2.0-dev.30)
+        public delegate* unmanaged[Cdecl]<ulong, ulong, int> StageProgress;  // appended (0.2.0-dev.29.3)
     }
 
     private static readonly FieldInfo TableField = typeof(SavesNative).GetField("_table", BindingFlags.Static | BindingFlags.NonPublic)!;
@@ -44,7 +44,7 @@ internal sealed unsafe class FakeSavesTable : IDisposable
     public static long ProgressCalls => Interlocked.Read(ref _progressCalls);
 
     /// <param name="barrier">The build has the stage barrier (the world write hook is on): KILN_SAVES_CAN_STAGE_BARRIER.</param>
-    /// <param name="appended">The table has the stage_progress entry (a kiln.saves of 0.2.0-dev.30 or later).</param>
+    /// <param name="appended">The table has the stage_progress entry (a kiln.saves of 0.2.0-dev.29.3 or later).</param>
     public FakeSavesTable(bool barrier = true, bool appended = true)
     {
         _oldTable = TableField.GetValue(null);

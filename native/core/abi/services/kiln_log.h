@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MIT
- * kiln.log v1 (in-core service, since 0.2.0-dev.30): when a game log line was logged.
+ * kiln.log v1 (in-core service, since 0.2.0-dev.29.3): when a game log line was logged.
  *
  * KilnApi.subscribe_log hands the game's log lines to subscribers on Kiln's log thread, in batches: a line can reach a
  * subscriber well after the game logged it, when the log thread was busy writing kiln.log (on a hard drive, seconds).

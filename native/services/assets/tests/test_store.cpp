@@ -1051,7 +1051,7 @@ int main() {
     owner_revoked_without_revert(40, spare, 104, "GAME-SPARE", key("88888888-9999-aaaa-bbbb-cccccccccccc", KILN_ASSET_TYPE_UI_TEXTURE));
     settle();
 
-    // 14. The game's own blob is read from its container alone (GitHub #39, 0.2.0-dev.30).
+    // 14. The game's own blob is read from its container alone (inbox 18e, 0.2.0-dev.29.2).
     std::puts("-- 14: a game blob reads its own bytes, not its container");
     game_blob_range();
 

@@ -9,7 +9,7 @@ using static Kiln.SaveWriter;
 namespace Kiln;
 
 /// <summary>
-/// What Kiln.Saves' writer jobs do to the sidecar folder (since 0.2.0-dev.30): a staging's new blobs and pending
+/// What Kiln.Saves' writer jobs do to the sidecar folder (since 0.2.0-dev.29.3): a staging's new blobs and pending
 /// manifest, a confirmation (and the pending manifest's delete), pruning. One job at a time, on whatever thread
 /// <see cref="SaveWriter"/> runs it on; it keeps what one world session needs to know between jobs (the generation it
 /// confirmed last, the newest confirmation forced to disk, the stagings waiting for their confirmation).

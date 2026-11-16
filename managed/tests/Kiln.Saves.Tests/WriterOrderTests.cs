@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Kiln.Saves' background writer (0.2.0-dev.30, issue #39) keeps every guarantee the tick thread's own writes gave:
+// Kiln.Saves' background writer (0.2.0-dev.29.3, issue #39) keeps every guarantee the tick thread's own writes gave:
 // a world file never reaches the disk before its generation's pending manifest (kiln.saves' stage barrier), the pending
 // manifest comes before its confirmation, a crash at any point of the writer leaves what a crash left before, and a
 // reload, a world close or the shutdown save waits for what is still being written. A "crash" here is the writer frozen
@@ -328,7 +328,7 @@ public sealed class WriterOrderTests : IDisposable
 
     [Theory]
     [InlineData(false, true)]   // a build whose world write is not hooked: nothing would hold the world write
-    [InlineData(true, false)]   // a kiln.saves older than 0.2.0-dev.30: no stage_progress in its table
+    [InlineData(true, false)]   // a kiln.saves older than 0.2.0-dev.29.3: no stage_progress in its table
     public void WithoutTheStageBarrierTheTickThreadWritesItsFilesItselfAsBefore(bool barrier, bool appended)
     {
         using var native = new FakeSavesTable(barrier, appended);

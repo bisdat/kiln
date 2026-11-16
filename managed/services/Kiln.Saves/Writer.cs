@@ -8,7 +8,7 @@ using System.Text.Json.Nodes;
 namespace Kiln;
 
 /// <summary>
-/// Kiln.Saves' background writer (since 0.2.0-dev.30, issue #39): every file of a save (blobs, the pending manifest, the
+/// Kiln.Saves' background writer (since 0.2.0-dev.29.3, issue #39): every file of a save (blobs, the pending manifest, the
 /// confirmation, the pending manifest's delete, pruning's reads and deletes) is written here, on its own thread, so the
 /// world's tick never waits for a disk. The tick thread only captures the mod data (serialized bundles, in memory) and
 /// hands it over.
@@ -30,7 +30,7 @@ namespace Kiln;
 /// (<c>stage_progress(0, done)</c>); kiln.saves holds the game's world write on its Save2Thread until done reaches what was
 /// issued (native/services/saves/stage_barrier.h; bounded and logged there). Without that barrier (an older kiln.saves, a
 /// build without the world write's hook, the test kit's fake) nothing would hold the world write, so the tick thread runs
-/// each job itself, in turn with the writer, as before 0.2.0-dev.30.</para>
+/// each job itself, in turn with the writer, as before 0.2.0-dev.29.3.</para>
 /// <para><b>Back-pressure.</b> A staging that comes while an earlier staging of the same generation is still waiting
 /// replaces it (the save request's staging and the snapshot staging one step later): only the newest is written, and
 /// the world write waits for that one. Stagings of different generations are never merged: every world file needs its
@@ -75,7 +75,7 @@ internal sealed unsafe class SaveWriter
         public long Queued;
         public double TickMs;
         /// <summary>Run on the calling (tick) thread: kiln.saves has no stage barrier here, so the tick thread writes its
-        /// files itself, as before 0.2.0-dev.30.</summary>
+        /// files itself, as before 0.2.0-dev.29.3.</summary>
         public bool Inline;
 
         /// <summary>A log line's account of the threads, up to the file part's label ("writer": its own thread; "files": the
@@ -85,7 +85,7 @@ internal sealed unsafe class SaveWriter
             var total = TickMs + queued + work;
             return Inline
                 ? ($"tick thread {total:F1} ms, all of it (this kiln.saves does not hold the world write, so the tick thread writes " +
-                   $"the files itself, as before 0.2.0-dev.30; {queued:F1} ms waiting for the writer); files", total)
+                   $"the files itself, as before 0.2.0-dev.29.3; {queued:F1} ms waiting for the writer); files", total)
                 : ($"tick thread {TickMs:F1} ms; {queued:F1} ms queued; writer", total);
         }
     }

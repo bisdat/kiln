@@ -7,7 +7,7 @@
 #include <mutex>
 
 namespace ksaves {
-// Kiln.Saves writes a save's files on a background writer, off the world's tick (since 0.2.0-dev.30, issue #39). The tick
+// Kiln.Saves writes a save's files on a background writer, off the world's tick (since 0.2.0-dev.29.3, issue #39). The tick
 // thread used to write a generation's pending manifest before the game's snapshot, so a world file could never reach the
 // disk before the manifest that names its mod data. This keeps that order where it costs the tick nothing: the pump
 // reports each staging it hands its writer (issued, numbers grow), the writer reports the newest one it has on disk
