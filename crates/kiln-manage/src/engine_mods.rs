@@ -1248,13 +1248,15 @@ pub(crate) struct Carry<'a> {
 pub(crate) struct Carried {
     back: Vec<String>,
     aside: Vec<String>,
+    /// Of `aside`: XHL-Core inis held back because they name a DLL the new copy does not have.
+    held: Vec<String>,
 }
 
 /// Copies the player's files of `c` over a staged new copy of `kind`/`id` (staged under `game`). A file the new copy
 /// ships under the same name stays the library's (unless it is a settings file): the player's goes to [`kept_dir`]. So
 /// does XHL-Core's ini naming a DLL the new copy does not have, whether it ships an ini or not ([`hold_back_plugin_ini`]).
 pub(crate) fn carry_in(game: &Path, kind: ModKind, id: &str, c: &Carry, staged: &Path) -> Result<Carried> {
-    let (mut back, mut aside) = (Vec::new(), Vec::new());
+    let (mut back, mut aside, mut held) = (Vec::new(), Vec::new(), Vec::new());
     for rel in file_entries(&c.entries) {
         let to = staged.join(rel);
         // the library's own file, or a library file where a folder of the path would be, keeps that path
@@ -1262,6 +1264,7 @@ pub(crate) fn carry_in(game: &Path, kind: ModKind, id: &str, c: &Carry, staged: 
         let dangling = rel.eq_ignore_ascii_case(XHL_PLUGIN_INI) && std::fs::read(c.from.join(rel)).ok().and_then(|b| xhl_ini_dll(&b))
             .is_some_and(|dll| !has_file_any_case(staged, &dll));
         if blocked || to.is_dir() || dangling || (to.is_file() && !is_settings_file(kind, rel)) {
+            if dangling { held.push(rel.clone()); }
             aside.push(rel.clone());
         } else {
             back.push(rel.clone());
@@ -1272,7 +1275,7 @@ pub(crate) fn carry_in(game: &Path, kind: ModKind, id: &str, c: &Carry, staged: 
     if !aside.is_empty() && !c.from_kept {
         keep_entries_durably(game, c.from, &kept_dir(game, kind, id), &aside.iter().collect::<Vec<_>>())?;
     }
-    Ok(Carried { back, aside })
+    Ok(Carried { back, aside, held })
 }
 
 /// After the new copy `dst` is in place: the files that went back leave the kept folder, each only while the kept
@@ -1296,9 +1299,14 @@ pub(crate) fn carried(game: &Path, kind: ModKind, id: &str, c: &Carry, done: &Ca
         said.push(format!("put back {} the mod wrote earlier ({}) from {KEPT_MOD_FILES}/{kind}/{id}", files(done.back.len()),
             some_names(&done.back)));
     }
-    if !done.aside.is_empty() {
+    let shipped: Vec<String> = done.aside.iter().filter(|f| !done.held.contains(f)).cloned().collect();
+    if !shipped.is_empty() {
         said.push(format!("kept {} the mod wrote ({}) in {KEPT_MOD_FILES}/{kind}/{id}: this version ships its own file of that name",
-            files(done.aside.len()), some_names(&done.aside)));
+            files(shipped.len()), some_names(&shipped)));
+    }
+    if !done.held.is_empty() {
+        said.push(format!("kept {} ({}) in {KEPT_MOD_FILES}/{kind}/{id}: it names a DLL this version does not have, so it stays \
+            out of this version", files(done.held.len()), some_names(&done.held)));
     }
     Ok((!said.is_empty()).then(|| format!("{kind}:{id}: {}", said.join("; "))))
 }

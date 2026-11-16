@@ -2246,6 +2246,8 @@ fn a_held_back_plugin_ini_stays_out_of_a_version_that_ships_none() {
     assert!(!copy.join("native-plugin.ini").exists(), "the player's ini names a DLL this version does not have: {a:?}");
     assert_eq!(std::fs::read(d.g.path.join("kiln/kept-mod-files/eml/xhl-auto-loot/native-plugin.ini")).unwrap(), mine);
     assert!(a.warnings.iter().any(|w| w.contains("names XHL-Auto-Loot.dll") && w.contains("kiln/kept-mod-files/eml/xhl-auto-loot")), "{a:?}");
+    // the kept-files sentence gives the real reason (a DLL this version lacks), not "ships its own file"
+    assert!(!a.kept_files.iter().any(|s| s.contains("native-plugin.ini") && s.contains("ships its own file")), "{a:?}");
 }
 
 /// Codex review 4: Play with an unchanged profile only reconciles the mod folders (profile::refresh_active). The safety
