@@ -230,6 +230,20 @@ public sealed class GemPlaceholderProgramsTests
 {
     static readonly HashSet<GemTriggerKind> None = [];
 
+    // Real-client check 2026-11-16 (a game hosting its world): the placeholders are made when the save is read, after
+    // ContentReadyEvent, so serving only at that event missed them and the game logged 2091 "no valid Impcat" lines.
+    [Fact]
+    public void Placeholders_that_appear_after_content_ready_are_served_when_their_number_changes()
+    {
+        var last = -1;
+        Assert.False(GemPlaceholders.CountChanged(0, ref last), "none yet: nothing to serve");
+        Assert.False(GemPlaceholders.CountChanged(0, ref last));
+        Assert.True(GemPlaceholders.CountChanged(3, ref last), "the save was read: 3 placeholders");
+        Assert.False(GemPlaceholders.CountChanged(3, ref last), "unchanged: not served again");
+        Assert.True(GemPlaceholders.CountChanged(4, ref last), "another world with one more");
+        Assert.False(GemPlaceholders.CountChanged(0, ref last), "the world left");
+    }
+
     [Fact]
     public void A_placeholder_naming_a_trigger_program_nothing_serves_gets_it_from_Kiln()
     {

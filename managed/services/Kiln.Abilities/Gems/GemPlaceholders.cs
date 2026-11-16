@@ -29,7 +29,21 @@ internal static class GemPlaceholders
             .ToList();
     }
 
-    private static IDisposable? _sub;
+    private static IDisposable? _sub, _tick;
+    private static int _lastCount = -1;
+
+    /// <summary>Every <see cref="CheckEverySteps"/> service ticks: the number of placeholders changed (and is above 0).
+    /// Placeholders of a removed mod's gems are made when the save is read, after <see cref="ContentReadyEvent"/> (a
+    /// game hosting its world, real-client check 2026-11-16: content ready 16:24:43, placeholders 16:24:54), so the
+    /// content event alone missed them. Pure.</summary>
+    internal static bool CountChanged(int count, ref int last)
+    {
+        if (count == last) return false;
+        last = count;
+        return count > 0;
+    }
+
+    internal const int CheckEverySteps = 120;
 
     /// <summary>Kiln.Abilities' start: after each content load (<see cref="ContentReadyEvent"/>: kiln.content made the
     /// placeholders just before), serve what placeholders need. Kiln's own subscription. Never throws.</summary>
@@ -41,7 +55,19 @@ internal static class GemPlaceholders
             if (!NewContent.Available || !Assets.Available) return;  // no placeholders here, or nothing to serve with
             var outer = ModContext.CurrentMod;
             ModContext.CurrentMod = null;  // Kiln's own subscription, not the mod whose call started Kiln.Abilities
-            try { _sub = Events.On<ContentReadyEvent>(_ => Serve()); }
+            try
+            {
+                _sub = Events.On<ContentReadyEvent>(_ => Serve());
+                // placeholders made later, when the save is read: looked for every 2 s, served when their number changed
+                _tick = ServiceTick.Add("kiln.abilities gem placeholders", static (in TickInfo t) =>
+                {
+                    if (t.Step % CheckEverySteps != 0) return;
+                    int count;
+                    try { count = NewContent.Placeholders().Count; }
+                    catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException) { return; }
+                    if (CountChanged(count, ref _lastCount)) Serve();
+                });
+            }
             finally { ModContext.CurrentMod = outer; }
         }
         catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException or ArgumentException
