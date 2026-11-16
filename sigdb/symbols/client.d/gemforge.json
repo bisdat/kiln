@@ -1,0 +1,237 @@
+{
+  "format": 1,
+  "side": "client",
+  "comment": "Read-only GEMS snapshot. Measured client 26430625 SHA-256 5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77 only. All patterns unique; scoped call edges, screen 45 switch and Win64 ABI are checked. No chest extension.",
+  "symbols": {
+    "ui/GemForgeMenu": {
+      "find": [
+        {
+          "pattern": "40 55 53 56 41 56 41 57 48 8D AC 24 50 EE FF FF B8 B0 12 00 00 E8 ?? ?? ?? ?? 48 2B E0 4C 8B 0D {ui/UiApp:rel32} 33 F6 0F 29 BC 24 70 12 00 00 4D 8B B1 {ui/ui.data:d32}"
+        }
+      ]
+    },
+    "ui/GemForgeLists": {
+      "find": [
+        {
+          "pattern": "48 89 5C 24 10 55 57 41 56 48 8D AC 24 00 69 FF FF B8 00 98 00 00 E8 ?? ?? ?? ?? 48 2B E0 48 8B 05 {ui/UiApp:rel32} 45 33 F6 48 8B FA 48 8B D9"
+        }
+      ]
+    },
+    "ui/GemForgeCandidates": {
+      "find": [
+        {
+          "pattern": "48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 20 55 48 8D AC 24 10 B8 FF FF B8 F0 48 00 00 E8 ?? ?? ?? ?? 48 2B E0 48 8B 05 {ui/UiApp:rel32} 33 F6 44 0F B6 CA 48 8B F9"
+        }
+      ]
+    },
+    "ui/GemForgeGrid": {
+      "find": [
+        {
+          "pattern": "4C 89 4C 24 20 4C 89 44 24 18 48 89 54 24 10 55 57 41 54 41 55 41 57 48 8D AC 24 A0 FB FF FF 48 81 EC 60 05 00 00 4C 8B 15 {ui/UiApp:rel32} 48 8B F9 44 0F B6 AD B8 04 00 00 33 C9 4C 8B E2 49 8B 82 {ui/ui.data:d32}"
+        }
+      ]
+    },
+    "ui/GemForgeSourceRet": {
+      "find": [
+        {
+          "pattern": "48 89 85 B0 4E 00 00 4C 89 B5 B8 4E 00 00 48 C7 85 C0 4E 00 00 00 01 00 00 E8 {ui/GemForgeCandidates:rel32} 48 89 B5 98 06 00 00",
+          "scope": {
+            "symbol": "ui/GemForgeLists",
+            "size": 1536
+          },
+          "offset": 30
+        }
+      ]
+    },
+    "ui/GemForgeSlotRet": {
+      "find": [
+        {
+          "pattern": "4C 8B 85 A8 04 00 00 48 8D 95 F0 00 00 00 45 33 C9 48 8D 4D E0 E8 {ui/ItemSlot:rel32}",
+          "scope": {
+            "symbol": "ui/GemForgeGrid",
+            "size": 2816
+          },
+          "offset": 26
+        }
+      ]
+    },
+    "ui/GemForgeScreenCall": {
+      "find": [
+        {
+          "pattern": "E8 {ui/GemForgeMenu:rel32} EB 05 E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8D 8D 20 02 00 00",
+          "scope": {
+            "symbol": "ui/PlayStateUi",
+            "size": 4096
+          }
+        }
+      ]
+    },
+    "ui/GemForgeListsCall": {
+      "find": [
+        {
+          "pattern": "48 8D 95 98 0C 00 00 48 8B CF E8 {ui/GemForgeLists:rel32} 48 8D 8D E0 04 00 00",
+          "scope": {
+            "symbol": "ui/GemForgeMenu",
+            "size": 8192
+          },
+          "offset": 10
+        }
+      ]
+    },
+    "ui/GemForgeGemsCall": {
+      "find": [
+        {
+          "pattern": "44 88 74 24 28 4C 8D 44 24 38 4C 8B CF F3 0F 11 74 24 20 48 8D 95 B0 4E 00 00 48 8B CB E8 {ui/GemForgeGrid:rel32}",
+          "scope": {
+            "symbol": "ui/GemForgeLists",
+            "size": 1536
+          },
+          "offset": 29
+        }
+      ]
+    },
+    "ui/GemForgeWeaponsCall": {
+      "find": [
+        {
+          "pattern": "88 44 24 28 4C 8D 44 24 38 4C 8B CF F3 0F 11 7C 24 20 48 8B CB E8 {ui/GemForgeGrid:rel32}",
+          "scope": {
+            "symbol": "ui/GemForgeLists",
+            "size": 1536
+          },
+          "offset": 21
+        }
+      ]
+    },
+    "ui/GemForgeSwitch": {
+      "find": [
+        {
+          "pattern": "0F B6 97 {ui/play.hud_screen:d32} 8D 42 EA 83 F8 17 77 59 4C 8D 05 ?? ?? ?? ?? 48 98 41 0F B6 84 00 {ui/gemforge.switchMap:d32} 41 8B 8C 80 {ui/gemforge.switchTargets:d32} 49 03 C8 FF E1",
+          "scope": {
+            "symbol": "ui/PlayStateUi",
+            "size": 4096
+          }
+        }
+      ]
+    },
+    "ui/GemForgeLowerBoundary": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "ui/GemForgeGrid",
+            "size": 2816
+          },
+          "pattern": "F3 0F 10 95 B0 04 00 00 0F 10 00 0F 28 C8 0F C6 C8 55 0F C6 C0 FF"
+        }
+      ]
+    },
+    "@ui/gemforge.socketFields": {
+      "find": [
+        {
+          "pattern": "4D 8B 8F {ui/gemforge.socketCount:d32} 4C 8B C6 4D 85 C9 74 20 49 8B 97 {ui/gemforge.sockets:d32}",
+          "scope": {
+            "symbol": "ui/GemForgeGrid",
+            "size": 2816
+          }
+        }
+      ]
+    },
+    "@ui/gemforge.modelFields": {
+      "find": [
+        {
+          "pattern": "8B 43 {ui/play.localEntity:d8} 48 8B 93 {ui/play.modelsCount:d32} 48 8B CE 48 85 D2 0F 84 ?? ?? ?? ?? 48 8B 9B {ui/play.models:d32} 39 03 74 14 48 FF C1 48 81 C3 {ui/model.stride:d32}",
+          "scope": {
+            "symbol": "ui/GemForgeCandidates",
+            "size": 768
+          }
+        }
+      ]
+    }
+  },
+  "constants": {
+    "ui/gemforge.sockets": {
+      "min_votes": 1
+    },
+    "ui/gemforge.socketCount": {
+      "min_votes": 1
+    },
+    "ui/gemforge.switchMap": {
+      "min_votes": 1
+    },
+    "ui/gemforge.switchTargets": {
+      "min_votes": 1
+    },
+    "ui/gemforge.mode": {
+      "value": 0
+    },
+    "ui/gemforge.selected": {
+      "value": 16
+    },
+    "ui/gemforge.weapon": {
+      "value": 24
+    },
+    "ui/gemforge.arrayData": {
+      "value": 0
+    },
+    "ui/gemforge.arrayCount": {
+      "value": 8
+    },
+    "ui/gemforge.arrayCapacity": {
+      "value": 16
+    }
+  },
+  "features": {
+    "ui.gemforge.inspect": {
+      "symbols": [
+        "ui/GameUiFrame",
+        "ui/PlayStateUi",
+        "ui/UiApp",
+        "ui/ItemSlot",
+        "ui/GemForgeMenu",
+        "ui/GemForgeLists",
+        "ui/GemForgeCandidates",
+        "ui/GemForgeGrid",
+        "ui/GemForgeSourceRet",
+        "ui/GemForgeSlotRet",
+        "ui/GemForgeScreenCall",
+        "ui/GemForgeListsCall",
+        "ui/GemForgeGemsCall",
+        "ui/GemForgeWeaponsCall",
+        "ui/GemForgeSwitch",
+        "ui/GemForgeLowerBoundary"
+      ],
+      "constants": [
+        "ui/gemforge.sockets",
+        "ui/gemforge.socketCount",
+        "ui/gemforge.switchMap",
+        "ui/gemforge.switchTargets",
+        "ui/gemforge.mode",
+        "ui/gemforge.selected",
+        "ui/gemforge.weapon",
+        "ui/gemforge.arrayData",
+        "ui/gemforge.arrayCount",
+        "ui/gemforge.arrayCapacity",
+        "ui/ui.data",
+        "ui/state.play",
+        "ui/state.ui_state",
+        "ui/play.hud_screen",
+        "ui/play.localEntity",
+        "ui/play.models",
+        "ui/play.modelsCount",
+        "ui/model.owner",
+        "ui/model.stride",
+        "ui/view.stride",
+        "ui/view.inventoryPage",
+        "ui/view.slotIndex",
+        "ui/view.item",
+        "ui/view.count",
+        "ui/view.pide",
+        "ui/view.durability",
+        "ui/view.durabilityMax",
+        "ui/view.fuel",
+        "ui/view.fuelMax",
+        "ui/view.level",
+        "ui/view.rarity"
+      ]
+    }
+  }
+}

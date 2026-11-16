@@ -22,6 +22,7 @@
 #include "service.h"
 #include "services/kiln_caps.h"
 #include "services/kiln_client.h"
+#include "services/kiln_items.h"
 #include "services/kiln_ui.h"
 #include "ui_values_internal.h"
 
@@ -145,6 +146,19 @@ bool call_slots(KilnUiSlotsFn fn, const KilnUiSlotsFrame* f, const KilnUiVisible
     }
 }
 
+bool call_gemforge(KilnUiGemForgeFn fn, const KilnUiGemForgeFrame* f, const KilnUiGemForgeCandidate* rows,
+                  uint32_t n, void* user) {
+    crash::Capture cap{};
+    unsigned long code = 0;
+    __try {
+        fn(f, rows, n, user);
+        return true;
+    } __except (crash::filter(GetExceptionInformation(), &cap, &code)) {
+        crash::report(cap, "kiln.ui.values Gem Forge subscriber", reinterpret_cast<const void*>(fn));
+        return false;
+    }
+}
+
 // kiln.ui's UI tick (after every game UI frame, on the UI thread) drives change publication.
 void (*g_frame_fn)(uint64_t, void*) = nullptr;
 void* g_frame_user = nullptr;
@@ -160,6 +174,52 @@ bool subscribe_frames(void (*fn)(uint64_t, void*), void* user) {
     g_frame_user = user;
     KilnHandle h = 0;
     return ui->subscribe_ui_tick(g_owner, &on_ui_tick, nullptr, &h) == KILN_OK;
+}
+
+bool gemforge_contract() {
+    uintptr_t grid = 0, lower = 0;
+    hooks::fp::Fingerprint fp;
+    // The standard pass stops at 300 instructions here. Its exact measured prefix is a guard, not a full type proof.
+    // The scoped LowerBoundary signature separately proves the fifth (float) stack argument beyond that prefix.
+    if (!sigdb::symbol("ui/GemForgeGrid", &grid) || !sigdb::symbol("ui/GemForgeLowerBoundary", &lower) ||
+        !sigdb::fingerprint(grid, &fp) || !fp.ok || fp.thunk || fp.reads != 0x0f || fp.passes != 0xd0 ||
+        fp.indirect || fp.stack != 2 || fp.stack_blind || fp.tail || fp.rets != hooks::fp::kRetRax ||
+        fp.insns != 300 || !fp.truncated) return false;
+    uint8_t file_entry[64]{}, live_entry[64]{};
+    // Start with an untouched grid entry. A pre-existing foreign detour is refused for this first implementation.
+    if (!sigdb::file_bytes(grid, file_entry, sizeof file_entry) ||
+        !guard::copy(live_entry, grid, sizeof live_entry) || std::memcmp(file_entry, live_entry, sizeof file_entry))
+        return false;
+    // Read the original file code, never a live detour. Captured table offsets must dispatch screen 45 to the menu.
+    int64_t map = 0, targets = 0;
+    uintptr_t screen_call = 0;
+    uint8_t index = 0;
+    uint32_t target = 0;
+    if (!sigdb::constant("ui/gemforge.switchMap", &map) || map < 0 ||
+        !sigdb::constant("ui/gemforge.switchTargets", &targets) || targets < 0 ||
+        static_cast<uint64_t>(map) + 24 > image().size || static_cast<uint64_t>(targets) + 20 > image().size ||
+        !sigdb::symbol("ui/GemForgeScreenCall", &screen_call) ||
+        !sigdb::file_bytes(image().base + map + (45 - 22), &index, 1) || index != 4 ||
+        !sigdb::file_bytes(image().base + targets + index * 4, reinterpret_cast<uint8_t*>(&target), 4) ||
+        image().base + target != screen_call) return false;
+    struct Edge { const char* site; const char* callee; uint32_t back; };
+    const Edge edges[] = {
+        {"ui/GemForgeScreenCall", "ui/GemForgeMenu", 0},
+        {"ui/GemForgeListsCall", "ui/GemForgeLists", 0},
+        {"ui/GemForgeGemsCall", "ui/GemForgeGrid", 0},
+        {"ui/GemForgeWeaponsCall", "ui/GemForgeGrid", 0},
+        {"ui/GemForgeSourceRet", "ui/GemForgeCandidates", 5},
+        {"ui/GemForgeSlotRet", "ui/ItemSlot", 5}};
+    for (const auto& e : edges) {
+        uintptr_t site = 0, callee = 0;
+        uint8_t bytes[5]{};
+        int32_t relative = 0;
+        if (!sigdb::symbol(e.site, &site) || site < e.back || !sigdb::symbol(e.callee, &callee) ||
+            !sigdb::file_bytes(site - e.back, bytes, sizeof bytes) || bytes[0] != 0xe8) return false;
+        std::memcpy(&relative, bytes + 1, 4);
+        if (static_cast<int64_t>(site - e.back + 5) + relative != static_cast<int64_t>(callee)) return false;
+    }
+    return true;
 }
 
 void wire() {
@@ -191,6 +251,18 @@ void wire() {
     e.call_changed = &call_changed;
     e.call_slots = &call_slots;
     e.call_lines = &call_lines;
+    e.call_gemforge = &call_gemforge;
+    e.gemforge_abi = &gemforge_contract;
+    e.item_category = [](uint32_t id, uint8_t* category) {
+        const auto* items = static_cast<const KilnItemsApi*>(svc::find(KILN_ITEMS_SERVICE, 1));
+        if (!items || items->header.size < offsetof(KilnItemsApi, item_info) + sizeof(void*) || !items->item_info)
+            return false;
+        KilnItemInfo info{};
+        info.size = sizeof info;
+        if (items->item_info(id, &info) != KILN_OK) return false;
+        *category = info.category;
+        return true;
+    };
     e.subscribe_frames = &subscribe_frames;
     e.log = [](int level, const char* text) { kiln::log::write(level, "kiln", text); };
 }
@@ -206,10 +278,11 @@ bool init() {
         return false;
     // Each feature resolves on its own; the rows (and the client gate) decide at registration time.
     static const char* const kFeatures[] = {"ui.values.detail", "ui.values.slot",          "ui.values.held",
-                                            "ui.values.hud",    "ui.values.tooltip_lines", "ui.slots.inspect"};
+                                            "ui.values.hud",    "ui.values.tooltip_lines", "ui.slots.inspect",
+                                            "ui.gemforge.inspect"};
     if (!env().layout_supported())
-        for (uint32_t k = 0; k < kListChanges; ++k)
-            disable_kind(k, "private UI layout is not measured for this client image");
+        for (uint32_t k = 0; k < kLists; ++k)
+            if (row_of(k)) disable_kind(k, "private UI layout is not measured for this client image");
     std::string on, off;
     for (const char* f : kFeatures) {
         std::string& to = sigdb::feature(f) ? on : off;

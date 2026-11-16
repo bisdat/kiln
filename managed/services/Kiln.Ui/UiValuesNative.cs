@@ -123,6 +123,22 @@ internal static unsafe class UiValuesNative
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    public struct GemForgeCandidate
+    {
+        public uint Size, Index, HasWeaponCarrier, Reserved;
+        public ItemView SourceRow, DisplayedGem, WeaponCarrier;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GemForgeFrame
+    {
+        public uint Size, Ok, Reason, Count, LocalPlayer, Mode;
+        public uint Role, HasSelectedRow, HasSelectedWeapon, SelectedPage, SelectedIndex, Reserved;
+        public ItemView SelectedWeapon;
+        public ulong Session, Frame, CaptureMs, Generation;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     public struct Line
     {
         public uint Size, Flags;
@@ -179,6 +195,26 @@ internal static unsafe class UiValuesNative
         // ---- appended in the first release (the table's header.size covers them) ----
         public delegate* unmanaged[Cdecl]<ulong, uint, TooltipDetails*, int> GetTooltipDetails;
         public delegate* unmanaged[Cdecl]<ulong, TooltipOpen*, int> RefreshTooltipDetails;
+    }
+
+    // Keep Table's 88-byte prefix: existing value APIs also work with an older native service.
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GemForgeTable
+    {
+        public Table Base;
+        public delegate* unmanaged[Cdecl]<ulong, ulong, ulong, GemForgeFrame*, GemForgeCandidate*, uint, uint*, int> CopyGemForge;
+        public delegate* unmanaged[Cdecl]<ulong, delegate* unmanaged[Cdecl]<GemForgeFrame*, GemForgeCandidate*, uint, void*, void>, void*, Registration*, int> SubscribeGemForge;
+    }
+
+    public static GemForgeTable* GemForgeT
+    {
+        get
+        {
+            var t = T;
+            if (t == null || t->Header.Size < sizeof(GemForgeTable)) return null;
+            var g = (GemForgeTable*)t;
+            return g->CopyGemForge != null && g->SubscribeGemForge != null ? g : null;
+        }
     }
 
     private static Table* _table;

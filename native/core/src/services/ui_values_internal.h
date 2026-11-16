@@ -7,6 +7,7 @@
 //   ui_values_update.cpp   the player-UI update: HUD pairs, the held item, the pre-provider stage (below)
 //   ui_values_changes.cpp  change publication: identities, the 4096-entry cache, Added/Updated/Removed/Evicted/Reset
 //   ui_values_slots.cpp    the drawn slots of each completed UI frame (copy_slots, subscribe_slots)
+//   ui_values_gemforge.cpp the copied GEMS candidate list and selection context
 //   ui_values_lines.cpp    tooltip lines collected at the item detail view, the details window's snapshots
 //   ui_values_service.cpp  the production environment (owners, kiln.caps, sigdb, kiln.hooks, kiln.client, kiln.ui),
 //                          the SEH guards and the service's registration with the core
@@ -42,7 +43,7 @@ inline constexpr double kNewStringsPerSecond = 64;  // per mod
 inline constexpr double kNewStringsBurst = 128;
 
 // Registration lists: the value kinds (KilnUiValueKind), then these.
-enum : uint32_t { kListLines = kValueKinds, kListSlots, kListChanges, kLists };
+enum : uint32_t { kListLines = kValueKinds, kListSlots, kListChanges, kListGemForge, kLists };
 
 // The capability row of a list ("ui.values.hud" for the three HUD kinds).
 const char* row_of(uint32_t list);
@@ -83,6 +84,10 @@ struct Env {
     // fn(frame) on the UI thread after every completed game UI frame (kiln.ui's subscribe_ui_tick); false = none
     bool (*subscribe_frames)(void (*fn)(uint64_t frame, void* user), void* user) = nullptr;
     void (*log)(int level, const char* text) = nullptr;
+    bool (*gemforge_abi)() = nullptr;  // sigdb's measured Win64 fingerprint
+    bool (*item_category)(uint32_t item, uint8_t* category) = nullptr;  // immutable Kiln item catalog
+    bool (*call_gemforge)(KilnUiGemForgeFn, const KilnUiGemForgeFrame*, const KilnUiGemForgeCandidate*, uint32_t,
+                         void* user) = nullptr;
 };
 Env& env();
 void logf(int level, const char* fmt, ...);
@@ -152,6 +157,9 @@ void lines_reset_for_tests();
 KilnResult slots_copy(KilnOwner owner, uint64_t expected_session, uint64_t expected_frame, KilnUiSlotsFrame* frame,
                       KilnUiVisibleSlot* slots, uint32_t capacity, uint32_t* required);
 void slots_reset_for_tests();
+KilnResult gemforge_copy(KilnOwner, uint64_t, uint64_t, KilnUiGemForgeFrame*, KilnUiGemForgeCandidate*, uint32_t,
+                        uint32_t*);
+void gemforge_reset_for_tests();
 
 // ---- change publication (ui_values_changes.cpp) ----
 bool changes_wanted();  // a change subscriber exists: the chains stage their results

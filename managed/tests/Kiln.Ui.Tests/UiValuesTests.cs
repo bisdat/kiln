@@ -42,7 +42,7 @@ internal static unsafe class FakeUiValues
     public static void Install()
     {
         Free();
-        Table = (UiValuesNative.Table*)NativeMemory.AllocZeroed((nuint)sizeof(UiValuesNative.Table));
+        Table = (UiValuesNative.Table*)NativeMemory.AllocZeroed((nuint)(sizeof(UiValuesNative.Table) + 16));
         Table->Header = new ServiceHeader { Size = (uint)sizeof(UiValuesNative.Table), Version = 1 };
         Table->Subscribe = &Subscribe;
         Table->Unsubscribe = &Unsubscribe;
@@ -287,7 +287,7 @@ public sealed unsafe class UiValuesTests : IDisposable
     private readonly IKilnBackend _previous;
     private readonly FakeUiValues.Backend _backend;
     private static readonly string[] AllRows =
-        ["ui.values.detail", "ui.values.slot", "ui.values.held", "ui.values.hud", "ui.values.tooltip_lines", "ui.slots.inspect"];
+        ["ui.values.detail", "ui.values.slot", "ui.values.held", "ui.values.hud", "ui.values.tooltip_lines", "ui.slots.inspect", "ui.gemforge.inspect"];
 
     public UiValuesTests()
     {
@@ -319,9 +319,156 @@ public sealed unsafe class UiValuesTests : IDisposable
         FakeUiValues.Free();
     }
 
+    private static UiValuesNative.GemForgeFrame GemMeta;
+    private static UiValuesNative.GemForgeCandidate[] GemRows = [];
+    private static nint GemFn, GemUser;
+    private static int GemCopies;
+    private static readonly List<(ulong Session, ulong Frame)> GemPins = [];
+
+    private static void PrimeGemForge(int count = 2)
+    {
+        var t = (UiValuesNative.GemForgeTable*)FakeUiValues.Table;
+        t->Base.Header.Size = (uint)sizeof(UiValuesNative.GemForgeTable);
+        t->CopyGemForge = &CopyGemForge;
+        t->SubscribeGemForge = &SubscribeGemForge;
+        GemMeta = new() { Size = 200, Ok = 1, Count = (uint)count, LocalPlayer = 77, Mode = 3,
+            HasSelectedRow = 1, SelectedPage = 42, SelectedIndex = 2,
+            Session = 5, Frame = 7, Generation = 9, CaptureMs = 10_000 };
+        GemRows = Enumerable.Range(0, count).Select(i => new UiValuesNative.GemForgeCandidate
+        {
+            Size = 376, Index = (uint)i, HasWeaponCarrier = i == 0 ? 1u : 0u,
+            SourceRow = new() { Size = 120, Item = 220, InventoryPage = 42, SlotIndex = 2 },
+            DisplayedGem = new() { Size = 120, Item = 110, InventoryPage = 700, SlotIndex = 0 },
+            WeaponCarrier = new() { Size = 120, Item = 220, ClientEntity = 700 },
+        }).ToArray();
+        GemCopies = 0; GemPins.Clear(); GemFn = GemUser = 0;
+        UiGemForgeBridge.Now = () => 10_000;
+        UiGemForgeBridge.ResetForTests();
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int CopyGemForge(ulong owner, ulong session, ulong frame, UiValuesNative.GemForgeFrame* m,
+        UiValuesNative.GemForgeCandidate* rows, uint capacity, uint* required)
+    {
+        GemCopies++; GemPins.Add((session, frame)); *m = GemMeta; *required = GemMeta.Count;
+        if (capacity < GemMeta.Count) return UiValuesNative.BufferTooSmall;
+        for (var i = 0; i < GemMeta.Count; i++) rows[i] = GemRows[i];
+        return UiValuesNative.Ok;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int SubscribeGemForge(ulong owner,
+        delegate* unmanaged[Cdecl]<UiValuesNative.GemForgeFrame*, UiValuesNative.GemForgeCandidate*, uint, void*, void> fn,
+        void* user, UiValuesNative.Registration* r)
+    {
+        GemFn = (nint)fn; GemUser = (nint)user; r->Ok = 1; r->Handle = FakeUiValues.NextHandle++;
+        FakeUiValues.AfterRegistration?.Invoke();
+        return UiValuesNative.Ok;
+    }
+
+    [Fact]
+    public void GemForge_reads_immutable_typed_rows_and_pins_a_resized_copy()
+    {
+        PrimeGemForge(70);
+        var result = Ui.Values.GemForgeCandidates();
+        Assert.True(result.Ok); var snapshot = result.Snapshot!;
+        Assert.Equal(70, snapshot.Candidates.Count); Assert.Equal(2, GemCopies);
+        Assert.Equal((5ul, 7ul), GemPins[1]);
+        Assert.Equal(9ul, snapshot.Generation); Assert.Equal((byte)3, snapshot.Mode);
+        Assert.Equal(SlotId.Of(new EntityId(42), 2), snapshot.SelectedRow);
+        Assert.Equal(new ItemId(220), snapshot.Candidates[0].SourceRow.Item);
+        Assert.Equal(new EntityId(700), snapshot.Candidates[0].DisplayedGem.InventoryPage);
+        Assert.Equal(new EntityId(700), snapshot.Candidates[0].WeaponCarrier!.Value.ClientEntity);
+        Assert.Null(snapshot.Candidates[1].WeaponCarrier);
+        Assert.Throws<NotSupportedException>(() => ((IList<GemForgeCandidate>)snapshot.Candidates).Clear());
+        GemRows[0].DisplayedGem.Item = 999;
+        Assert.Equal(new ItemId(110), snapshot.Candidates[0].DisplayedGem.Item);
+    }
+
+    [Fact]
+    public void GemForge_enforces_capability_and_size_guard_without_breaking_old_values()
+    {
+        PrimeGemForge();
+        Backend.Current = new FakeUiValues.Backend(["ui.slots.inspect"]);
+        Assert.Equal("ui.gemforge.inspect", Assert.Throws<KilnUnavailableException>(() => Ui.Values.GemForgeCandidates()).Capability);
+        Assert.Throws<KilnUnavailableException>(() => Ui.Values.SubscribeGemForgeCandidates(_ => { }));
+        Assert.Equal(0, GemCopies);
+        Backend.Current = _backend;
+        FakeUiValues.Table->Header.Size = 88;
+        Assert.NotEqual(0, (nint)UiValuesNative.T);
+        FakeUiValues.SlotsMeta = new() { Size = 120, Ok = 0 };
+        Assert.False(Ui.Values.Slots().Ok);
+        Assert.Throws<KilnUnavailableException>(() => Ui.Values.GemForgeCandidates());
+        Assert.Equal(0, GemCopies);
+    }
+
+    [Fact]
+    public void GemForge_invalidations_and_age_never_expose_old_rows()
+    {
+        PrimeGemForge();
+        GemMeta.Ok = 0; GemMeta.Count = 0; GemMeta.Reason = UiValuesNative.ReasonStaleFrame;
+        Assert.False(Ui.Values.GemForgeCandidates().Ok);
+        Assert.Null(Ui.Values.GemForgeCandidates().Snapshot);
+        GemMeta.Ok = 1; GemMeta.Count = 2; GemMeta.CaptureMs = 8999;
+        Assert.False(Ui.Values.GemForgeCandidates().Ok);
+        GemMeta.CaptureMs = 10001;
+        Assert.False(Ui.Values.GemForgeCandidates().Ok);
+        GemMeta.CaptureMs = 10000; GemMeta.Count = 4097;
+        Assert.False(Ui.Values.GemForgeCandidates().Ok);
+    }
+
+    [Fact]
+    public void GemForge_subscription_delivers_unavailable_and_disposes_with_owner()
+    {
+        PrimeGemForge(); var got = new List<GemForgeCandidatesResult>();
+        var reg = Ui.Values.SubscribeGemForgeCandidates(got.Add);
+        var fn = (delegate* unmanaged[Cdecl]<UiValuesNative.GemForgeFrame*, UiValuesNative.GemForgeCandidate*, uint, void*, void>)GemFn;
+        var meta = GemMeta;
+        fixed (UiValuesNative.GemForgeCandidate* rows = GemRows) fn(&meta, rows, 2, (void*)GemUser);
+        Assert.True(Assert.Single(got).Ok);
+        meta.Ok = 0; meta.Count = 0;
+        fn(&meta, null, 0, (void*)GemUser);
+        Assert.False(got[1].Ok); Assert.Null(got[1].Snapshot);
+        reg.Dispose(); reg.Dispose();
+        fn(&meta, null, 0, (void*)GemUser);
+        Assert.Equal(2, got.Count); Assert.Contains(reg.Handle, FakeUiValues.Unsubscribed);
+        Assert.Throws<ArgumentNullException>(() => Ui.Values.SubscribeGemForgeCandidates(null!));
+    }
+
+    [Fact]
+    public void GemForge_rejects_a_short_selected_weapon_record()
+    {
+        PrimeGemForge(); GemMeta.HasSelectedWeapon = 1;
+        Assert.False(Ui.Values.GemForgeCandidates().Ok);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void GemForge_owner_retirement_removes_callback_even_during_registration(bool race)
+    {
+        PrimeGemForge();
+        var mod = HostAccess.CreateContext(new ModInfo("gemforge-unload", "Unload", "1.0.0", Path.GetTempPath()),
+            73, Path.GetTempPath());
+        if (race) FakeUiValues.AfterRegistration = mod.Retire;
+        var previous = HostAccess.Current; HostAccess.Current = mod;
+        var calls = 0;
+        UiValueRegistration reg;
+        try { reg = Ui.Values.SubscribeGemForgeCandidates(_ => calls++); }
+        finally { HostAccess.Current = previous; FakeUiValues.AfterRegistration = null; }
+        mod.Retire();
+        var fn = (delegate* unmanaged[Cdecl]<UiValuesNative.GemForgeFrame*, UiValuesNative.GemForgeCandidate*, uint, void*, void>)GemFn;
+        var meta = GemMeta;
+        fixed (UiValuesNative.GemForgeCandidate* rows = GemRows) fn(&meta, rows, 2, (void*)GemUser);
+        Assert.Equal(0, calls); Assert.Contains(reg.Handle, FakeUiValues.Unsubscribed);
+    }
+
     [Fact]
     public void The_native_records_have_the_C_layout()
     {
+        Assert.Equal(104, sizeof(UiValuesNative.GemForgeTable));
+        Assert.Equal(200, sizeof(UiValuesNative.GemForgeFrame));
+        Assert.Equal(376, sizeof(UiValuesNative.GemForgeCandidate));
         Assert.Equal(120, sizeof(UiValuesNative.ItemView));
         Assert.Equal(32, sizeof(UiValuesNative.BarValue));
         Assert.Equal(32, sizeof(UiValuesNative.BarEdit));

@@ -179,6 +179,7 @@ see the game unchanged. Native: in-core `kiln.ui.values` (`native/core/abi/servi
 | `Hud(HudValue, provider)` | health / stamina / mana pair | the vital's units | numbers, Max above 0 | `ui.values.hud` (`05a-c2`) |
 | `TooltipLines(item, provider)`, `OpenTooltipDetails()`, `CloseTooltipDetails()` | lines in Kiln's Item details window | – | up to 16 lines per detail view | `ui.values.tooltip_lines` (`05a-c4-viewer`) |
 | `Slots()`, `SubscribeSlots(onFrame)` | (reads) the slots of the last completed UI frame | – | – | `ui.slots.inspect` (`05a-c5`) |
+| `GemForgeCandidates()`, `SubscribeGemForgeCandidates(onFrame)` | (reads) the returned GEMS list, including socketed gems; [API and lifetimes](ui-gemforge.md) | – | – | `ui.gemforge.inspect` |
 
 `item` is an `ItemId`, `default` for every item. Every row is off on a server and on a build where its game code did not
 resolve. They are on in every game since 0.2.0-dev.29, subject to their dependencies, but none has been confirmed

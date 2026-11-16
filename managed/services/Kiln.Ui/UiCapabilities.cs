@@ -2,7 +2,7 @@
 // Kiln.Ui in the capability registry (Kiln.Capabilities; docs/kiln/services/caps.md). Kiln.Ui's windows never throw for a
 // missing capability (their calls draw nothing and return null or false), so they have no row of their own: kiln.ui,
 // kiln.render and the client's sigdb features answer. Ui.Values (dev.28) throws by the error rule and answers with
-// kiln.ui.values' six sigdb features, lowered here when its table is missing. Reported at the service's start (the first service tick) and at its first use.
+// kiln.ui.values' seven sigdb features, lowered here when its table is missing. Reported at the service's start (the first service tick) and at its first use.
 // The tables are published also when single hooks failed (kiln.ui and kiln.render install them at their start, before
 // they publish): the features those hooks carry are lowered then.
 namespace Kiln;
@@ -26,7 +26,7 @@ internal static unsafe class UiCaps
     public static readonly string[] ValueFeatures =
     [
         "ui.values.detail", "ui.values.slot", "ui.values.held", "ui.values.hud", "ui.values.tooltip_lines",
-        "ui.slots.inspect",
+        "ui.slots.inspect", "ui.gemforge.inspect",
     ];
 
     internal static readonly ServiceCapRows Rows = new(Service, Report);
@@ -40,6 +40,9 @@ internal static unsafe class UiCaps
                 ServiceCaps.LowerOff(name, CapabilityReason.Faulted,
                     "kiln.ui could not hook the game's UI frame (see kiln.log): no game-UI integration");
         if (UiValuesNative.T == null) ServiceCaps.LowerFeatures(UiValuesNative.Service, ValueFeatures);
+        else if (UiValuesNative.GemForgeT == null)
+            ServiceCaps.LowerOff("ui.gemforge.inspect", CapabilityReason.ServiceOlder,
+                "kiln.ui.values has no Gem Forge snapshot table");
         // Collected lines have one production consumer: the overlay's Item details window.
         ServiceCaps.LowerFeatures(Service, "ui.values.tooltip_lines");
         if (!RenderNative.Available) ServiceCaps.LowerFeatures(Render, "render.camera");

@@ -6,12 +6,13 @@
  * state. A player without the mod, and every vanilla client, sees the game unchanged. Chapter 05a of the dev.28
  * dossier is the design; docs/kiln/ui.md the author's page.
  *
- * Capabilities (kiln.caps rows; sigdb features of sigdb/symbols/client.d/dev28-05a-value-providers.json, each on or
+ * Capabilities (kiln.caps rows; sigdb features in sigdb/symbols/client.d, each on or
  * off by itself; the gate list is empty in 0.2.0-dev.29, real-game checks remain unconfirmed): ui.values.detail (KUI_DETAIL), ui.values.slot
  * (KUI_SLOT), ui.values.held (KUI_HELD), ui.values.hud (KUI_HEALTH, KUI_STAMINA, KUI_MANA), ui.values.tooltip_lines
- * (tooltip_lines, open/close_tooltip_details), ui.slots.inspect (copy_slots, subscribe_slots). A kind's game hooks are
+ * (tooltip_lines, open/close_tooltip_details), ui.slots.inspect (copy_slots, subscribe_slots), ui.gemforge.inspect
+ * (copy_gemforge_candidates, subscribe_gemforge_candidates). A kind's game hooks are
  * installed when the first provider of that kind registers and its row is available; one kind failing leaves the
- * others working, and the game's own value is drawn whenever no provider changes it. These six rows never exist on a
+ * others working, and the game's own value is drawn whenever no provider changes it. These seven rows never exist on a
  * dedicated server. They require the measured client build; after a game update they are off until Kiln is updated.
  * A slot snapshot read also installs inspection hooks; those hooks and collection remain after consumers leave.
  *
@@ -234,6 +235,22 @@ typedef struct KilnUiValueChange {
 } KilnUiValueChange;
 typedef void(KILN_CALL* KilnUiValueChangedFn)(const KilnUiValueChange*, void* user);
 
+/* The GEMS list returned by the local player's forge selector. Values only; never server authority.
+ * source_row is the selection key's view. A socketed row carries a weapon but displays its socket's gem. */
+typedef struct KilnUiGemForgeCandidate {
+    uint32_t size, index, has_weapon_carrier, reserved;
+    KilnUiItemView source_row, displayed_gem, weapon_carrier;
+} KilnUiGemForgeCandidate;
+typedef struct KilnUiGemForgeFrame {
+    uint32_t size, ok, reason, count, local_player, mode;
+    uint32_t role; /* 0 = GEMS; the WEAPONS grid is never captured */
+    uint32_t has_selected_row, has_selected_weapon, selected_page, selected_index, reserved;
+    KilnUiItemView selected_weapon;
+    uint64_t session, frame, capture_ms, generation;
+} KilnUiGemForgeFrame;
+typedef void(KILN_CALL* KilnUiGemForgeFn)(const KilnUiGemForgeFrame*, const KilnUiGemForgeCandidate*, uint32_t,
+                                         void* user);
+
 typedef struct KilnUiValuesApi {
     KilnServiceHeader header; /* { sizeof(KilnUiValuesApi), KILN_UI_VALUES_VERSION }; append-only */
     /* A value provider of `kind` (KilnUiValueKind) for one item id or 0. Any thread. */
@@ -269,6 +286,16 @@ typedef struct KilnUiValuesApi {
      * same presentation identity (else ok 0, KUI_STALE_FRAME). Any thread. */
     KilnResult(KILN_CALL* tooltip_details)(KilnOwner, uint32_t which, KilnUiTooltipDetails*);
     KilnResult(KILN_CALL* refresh_tooltip_details)(KilnOwner, KilnUiTooltipOpen*);
+    /* ---- appended: ui.gemforge.inspect. Check header.size before accessing these slots. ----
+     * Same two-frame retry convention as copy_slots. Records must be sized; at most 4096, never a partial list.
+     * A screen, selection, mode, session or generation change invalidates old retries. No GEMS draw means no list.
+     * KUI_NO_FRAME: closed/not drawn; KUI_STALE_FRAME: changed or expired. Reads older than 1000 ms are refused.
+     * An unreadable/incoherent game list disables only this feature for the process, with a kiln.caps reason.
+     * Selection is the context at grid entry, not an action or an eligibility/permission claim. Any thread. */
+    KilnResult(KILN_CALL* copy_gemforge_candidates)(KilnOwner, uint64_t expected_session, uint64_t expected_frame,
+        KilnUiGemForgeFrame*, KilnUiGemForgeCandidate*, uint32_t capacity, uint32_t* required);
+    /* UI thread, after each completed frame, including unavailable frames; borrowed only for the callback. */
+    KilnResult(KILN_CALL* subscribe_gemforge_candidates)(KilnOwner, KilnUiGemForgeFn, void* user, KilnUiRegistration*);
 } KilnUiValuesApi;
 
 #ifdef __cplusplus

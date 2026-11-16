@@ -33,9 +33,9 @@ constexpr KilnHandle kHandleMask = (1ull << 48) - 1;
 // The capability row of each list (change subscriptions follow the value rows: none of their own).
 const char* const kRows[kLists] = {"ui.values.detail",        "ui.values.slot",   "ui.values.held",
                                    "ui.values.hud",           "ui.values.hud",    "ui.values.hud",
-                                   "ui.values.tooltip_lines", "ui.slots.inspect", nullptr};
+                                   "ui.values.tooltip_lines", "ui.slots.inspect", nullptr, "ui.gemforge.inspect"};
 const char* const kListNames[kLists] = {"detail", "slot",  "held",  "health", "stamina",
-                                        "mana",   "lines", "slots", "changes"};
+                                        "mana",   "lines", "slots", "changes", "gemforge"};
 
 // Edit masks per value kind (chapter 05a §5.1).
 constexpr uint32_t kMask[kValueKinds] = {
@@ -214,6 +214,22 @@ KilnResult KILN_CALL t_refresh_tooltip_details(KilnOwner owner, KilnUiTooltipOpe
     return guarded("refresh_tooltip_details", [&] { return tooltip_refresh(owner, out); });
 }
 
+KilnResult KILN_CALL t_copy_gemforge(KilnOwner owner, uint64_t session, uint64_t frame, KilnUiGemForgeFrame* out,
+    KilnUiGemForgeCandidate* rows, uint32_t capacity, uint32_t* required) {
+    if (!owner || !out || out->size < sizeof(*out) || !required || (capacity && !rows) || capacity > 4096 ||
+        (capacity && rows[0].size < sizeof(*rows))) return KILN_ERR_INVALID_ARGUMENT;
+    return guarded("copy_gemforge_candidates", [&] { return gemforge_copy(owner, session, frame, out, rows, capacity, required); });
+}
+
+KilnResult KILN_CALL t_subscribe_gemforge(KilnOwner owner, KilnUiGemForgeFn fn, void* user, KilnUiRegistration* out) {
+    if (!out || out->size < sizeof(*out)) return KILN_ERR_INVALID_ARGUMENT;
+    clear_registration(out);
+    if (!owner || !fn) return KILN_ERR_INVALID_ARGUMENT;
+    return guarded("subscribe_gemforge_candidates", [&] {
+        return register_in(owner, kListGemForge, 0, reinterpret_cast<void*>(fn), user, out);
+    });
+}
+
 const KilnUiValuesApi kTable = {
     {sizeof(KilnUiValuesApi), KILN_UI_VALUES_VERSION},
     &t_subscribe,
@@ -226,6 +242,8 @@ const KilnUiValuesApi kTable = {
     &t_close_tooltip_details,
     &t_tooltip_details,
     &t_refresh_tooltip_details,
+    &t_copy_gemforge,
+    &t_subscribe_gemforge,
 };
 
 // ---- text ops for providers ----
@@ -574,6 +592,7 @@ void reset_for_tests() {  // host tests only: nothing dispatches while it runs
     text::reset_for_tests();
     changes_reset_for_tests();
     slots_reset_for_tests();
+    gemforge_reset_for_tests();
     lines_reset_for_tests();
 }
 
