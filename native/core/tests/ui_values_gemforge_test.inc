@@ -4,6 +4,10 @@ using GemGrid = void (*)(void*, void*, void*, void*, float, uint8_t);
 struct GemHeader { uintptr_t data; uint64_t count, capacity; uintptr_t grow; };
 struct GemFixture;
 GemFixture* gem_fixture = nullptr;
+// The fake item catalog: 1 knows 110, 111 (gems) and 220 (gem_weapon_category); 0 knows none of them (a mod's items
+// while the mod is not loaded, like the Kiln Equipment wand the real client showed); -1 has no catalog.
+int gem_catalog_mode = 1;
+uint8_t gem_weapon_category = 2;
 struct GemFixture {
     std::vector<uint8_t> play = std::vector<uint8_t>(0x3100), models = std::vector<uint8_t>(0x8f70 * 2);
     std::vector<uint8_t> rows = std::vector<uint8_t>(0x48 * 2), sockets = std::vector<uint8_t>(0x48);
@@ -53,8 +57,12 @@ struct GemFixture {
         header = {addr(rows.data()), 2, 2, 0};
         fake::screen.hud_screen = 45; fake::screen.available = 1;
         env().gemforge_abi = +[] { return true; };
+        gem_catalog_mode = 1; gem_weapon_category = 2;
         env().item_category = +[](uint32_t item, uint8_t* cat) {
-            *cat = item == 220 ? 2 : 15; return item == 220 || item == 110 || item == 111;
+            if (gem_catalog_mode < 0) return -1;
+            if (gem_catalog_mode == 0 || (item != 220 && item != 110 && item != 111)) return 0;
+            *cat = item == 220 ? gem_weapon_category : 15;
+            return 1;
         };
         env().call_gemforge = +[](KilnUiGemForgeFn fn, const KilnUiGemForgeFrame* f,
             const KilnUiGemForgeCandidate* r, uint32_t n, void* user) {
@@ -102,6 +110,11 @@ struct GemFixture {
         return T()->copy_gemforge_candidates(owner, session, frame_id, &f, r, cap, &required);
     }
 };
+// Only the loose gem in the GEMS list; the selection still names the weapon view (item 220).
+void header_only_selected(GemFixture& f) {
+    std::memcpy(f.rows.data(), f.rows.data() + 0x48, 0x48);
+    f.header.count = 1;
+}
 void gemforge_tests() {
     static_assert(offsetof(KilnUiValuesApi, copy_gemforge_candidates) == 88);
     static_assert(sizeof(KilnUiGemForgeCandidate) == 376);
@@ -142,7 +155,7 @@ void gemforge_tests() {
         fake::screen.hud_screen = 45; f.frame(nullptr, nullptr); ++fake::client.session;
         CHECK(f.read(m, rows, 2) == KILN_OK && !m.ok, "gemforge: world change invalidates retained frames");
     }
-    for (int bad = 0; bad < 7; ++bad) {
+    for (int bad = 0; bad < 10; ++bad) {
         GemFixture f; KilnUiGemForgeFrame m{}; f.read(m); f.arm();
         if (bad == 0) f.header.count = 4097;
         if (bad == 1) f.header.capacity = 1;
@@ -151,9 +164,41 @@ void gemforge_tests() {
         if (bad == 4) put(f.models.data(), 0x8f70 + 0x6b48, uint64_t{4097});
         if (bad == 5) put(f.sockets.data(), 0, uint32_t{701});
         if (bad == 6) f.selector[0] = 5;
+        if (bad == 7) gem_weapon_category = 4;  // a known item of a category the GEMS producer never lists
+        if (bad == 8) put(f.models.data(), 0x8f70 + 0x6b48, uint64_t{0}); // a known weapon without its gem
+        if (bad == 9) { header_only_selected(f); gem_weapon_category = 4; } // a known non-weapon as the selected weapon
         f.frame(nullptr, nullptr);
         CHECK(f.read(m) == KILN_ERR_UNAVAILABLE && fake::rows_off == std::vector<std::string>{"ui.gemforge.inspect"} &&
               f.original_calls == 1 && !fake::writes, "gemforge: invariant %d disables only this feature", bad);
+    }
+    {
+        // The real client (2026-11-16): a weapon from a mod that is not loaded, selected in the forge, is not in Kiln's
+        // item catalog. The feature disabled itself ("selected weapon is incoherent"); it must classify such rows the
+        // way the game's producer did and keep the selected weapon.
+        GemFixture f; KilnUiGemForgeFrame m{}; KilnUiGemForgeCandidate rows[2]{};
+        f.read(m); f.arm(); gem_catalog_mode = 0;
+        f.frame(nullptr, nullptr);
+        CHECK(f.read(m, rows, 2) == KILN_OK && m.ok && m.count == 2 && fake::rows_off.empty(),
+              "gemforge: items outside Kiln's catalog keep the feature on");
+        CHECK(rows[0].has_weapon_carrier && rows[0].weapon_carrier.item == 220 && rows[0].displayed_gem.item == 111 &&
+              !rows[1].has_weapon_carrier && rows[1].displayed_gem.item == 110 && m.has_selected_weapon &&
+              m.selected_weapon.item == 220,
+              "gemforge: an unknown row with a socket gem is a carrier, one without is a loose gem; the selected weapon stays");
+        f.header.count = 0; f.frame(nullptr, nullptr);
+        CHECK(f.read(m, rows, 2) == KILN_OK && m.ok && m.count == 0 && m.has_selected_weapon && m.selected_weapon.item == 220 &&
+              fake::rows_off.empty(), "gemforge: no gems and an unknown weapon selected (the real client's forge) is a snapshot");
+    }
+    {
+        GemFixture f; KilnUiGemForgeFrame m{}; KilnUiGemForgeCandidate rows[2]{};
+        f.read(m); f.arm(); gem_catalog_mode = -1;
+        f.frame(nullptr, nullptr);
+        CHECK(f.read(m, rows, 2) == KILN_OK && !m.ok && fake::rows_off.empty(),
+              "gemforge: no item catalog yet makes the frame unavailable, not the feature");
+        gem_catalog_mode = 1; f.frame(nullptr, nullptr);
+        CHECK(f.read(m, rows, 2) == KILN_OK && m.ok && m.count == 2, "gemforge: the next frame copies once the catalog is there");
+        f.header.count = 0; gem_catalog_mode = -1; f.frame(nullptr, nullptr);
+        CHECK(f.read(m, rows, 2) == KILN_OK && !m.ok && fake::rows_off.empty(),
+              "gemforge: a selected weapon the missing catalog cannot check makes the frame unavailable");
     }
     for (int gate = 0; gate < 5; ++gate) {
         GemFixture f; KilnUiGemForgeFrame m{};

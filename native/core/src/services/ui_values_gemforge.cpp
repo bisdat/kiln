@@ -112,42 +112,55 @@ KilnUiItemView gem_view(const GemRawView& raw) {
     v.units_per_charge = 1; // gems and their carriers have no water-charge conversion
     return v;
 }
-bool gem_category(uint32_t id, uint8_t expected) {
-    uint8_t cat = 0;
-    return id && env().item_category && env().item_category(id, &cat) && cat == expected;
+// Kiln's catalog entry for an item: 1 known (cat set), 0 not in the catalog, -1 no catalog. An item outside the
+// catalog is normal: a mod's item while its mod is not loaded stays in a save as a placeholder (inbox: a Kiln
+// Equipment wand selected in the forge disabled the feature on the real client).
+int gem_lookup(uint32_t id, uint8_t& cat) {
+    return id && env().item_category ? env().item_category(id, &cat) : -1;
 }
-bool gem_rows(GemReader& rd, const GemContext& c, const GemArray& a, GemFrame& frame) {
+enum GemRows { kRowsBroken = -1, kRowsNoCatalog = 0, kRowsOk = 1 };
+// The producer lists only loose WeaponGem (15) items and Weapons (2) that hold a gem (docs/re: 0xd27cb0). A row the
+// catalog does not know is classified like the game did: a weapon when the model has a socket gem for its pide,
+// otherwise a loose gem. A known item of another category, or a known weapon without its gem, breaks the contract.
+GemRows gem_rows(GemReader& rd, const GemContext& c, const GemArray& a, GemFrame& frame) {
     uintptr_t sockets = 0; uint64_t count = 0;
     if (!rd.get(c.model, 0x6b40, sockets) || !rd.get(c.model, 0x6b48, count) || count > kGemMax ||
         !GemReader::range(sockets, count, kViewBytes) || !rd.charge(static_cast<size_t>(a.count) * sizeof(KilnUiGemForgeCandidate)))
-        return false;
+        return kRowsBroken;
     std::unordered_map<uint32_t, KilnUiItemView> gems;
     for (uint64_t i = 0; i < count; ++i) {
         GemRawView raw{};
-        if (!rd.get(sockets, static_cast<size_t>(i) * kViewBytes, raw)) return false;
+        if (!rd.get(sockets, static_cast<size_t>(i) * kViewBytes, raw)) return kRowsBroken;
         auto v = gem_view(raw);
-        if (!v.inventory_page || v.slot_index || !gems.emplace(v.inventory_page, v).second) return false;
+        if (!v.inventory_page || v.slot_index || !gems.emplace(v.inventory_page, v).second) return kRowsBroken;
     }
     frame.rows.reserve(static_cast<size_t>(a.count));
     for (uint32_t i = 0; i < a.count; ++i) {
         GemRawView raw{};
-        if (!rd.get(a.data, static_cast<size_t>(i) * kViewBytes, raw)) return false;
+        if (!rd.get(a.data, static_cast<size_t>(i) * kViewBytes, raw)) return kRowsBroken;
         KilnUiGemForgeCandidate row{}; row.size = sizeof row; row.index = i;
         row.source_row = gem_view(raw);
         const auto& v = row.source_row;
-        if (!v.inventory_page || v.slot_index >= 8 || !v.item || !v.count) return false;
-        if (gem_category(v.item, 15)) {
+        if (!v.inventory_page || v.slot_index >= 8 || !v.item || !v.count) return kRowsBroken;
+        uint8_t cat = 0;
+        const int known = gem_lookup(v.item, cat);
+        if (known < 0) return kRowsNoCatalog;
+        if (known && cat != 15 && cat != 2) return kRowsBroken;
+        const auto it = v.client_entity ? gems.find(v.client_entity) : gems.end();
+        const bool loose = known ? cat == 15 : it == gems.end();
+        if (loose) {
             row.displayed_gem = v;
         } else {
-            if (!gem_category(v.item, 2) || !v.client_entity) return false;
-            auto it = gems.find(v.client_entity);
-            if (it == gems.end() || it->second.count != 1 || !it->second.client_entity ||
-                !gem_category(it->second.item, 15)) return false;
+            if (!v.client_entity || it == gems.end() || it->second.count != 1 || !it->second.client_entity) return kRowsBroken;
+            uint8_t gem_cat = 0;
+            const int gem_known = gem_lookup(it->second.item, gem_cat);
+            if (gem_known < 0) return kRowsNoCatalog;
+            if (gem_known && gem_cat != 15) return kRowsBroken;
             row.has_weapon_carrier = 1; row.weapon_carrier = v; row.displayed_gem = it->second;
         }
         frame.rows.push_back(row);
     }
-    return true;
+    return kRowsOk;
 }
 void gem_capture_before(GemCapture& cap, uintptr_t state, uintptr_t header, GemReader& rd,
                         GemSelection& selection, GemContext& context, GemArray& array) {
@@ -159,10 +172,10 @@ void gem_capture_before(GemCapture& cap, uintptr_t state, uintptr_t header, GemR
     cap.before_frame = before.frame;
     const int in_forge = gem_context(rd, cap.client, context);
     if (!in_forge) return;
-    if (in_forge < 0 || !gem_selection(rd, state, selection) || !gem_array(rd, header, array) ||
-        !gem_rows(rd, context, array, cap.frame)) {
-        gem_fail("Gem Forge list, selection or local model is unreadable or invalid"); return;
-    }
+    const GemRows rows = in_forge < 0 || !gem_selection(rd, state, selection) || !gem_array(rd, header, array)
+        ? kRowsBroken : gem_rows(rd, context, array, cap.frame);
+    if (rows == kRowsBroken) { gem_fail("Gem Forge list, selection or local model is unreadable or invalid"); return; }
+    if (rows == kRowsNoCatalog) { cap.frame.rows.clear(); return; } // this frame stays unavailable; the next may copy
     auto& m = cap.frame.meta;
     cap.selection = selection;
     m.size = sizeof m; m.ok = 1; m.count = static_cast<uint32_t>(array.count);
@@ -171,8 +184,14 @@ void gem_capture_before(GemCapture& cap, uintptr_t state, uintptr_t header, GemR
     m.selected_page = selection.page; m.selected_index = selection.slot;
     m.selected_weapon = gem_view(selection.weapon);
     m.has_selected_weapon = m.selected_weapon.item != 0;
-    if (m.has_selected_weapon && (!gem_category(m.selected_weapon.item, 2) || !m.selected_weapon.client_entity)) {
-        gem_fail("Gem Forge selected weapon is incoherent"); m.ok = 0;
+    if (m.has_selected_weapon) {
+        uint8_t cat = 0;
+        const int known = gem_lookup(m.selected_weapon.item, cat);
+        if (known < 0) {
+            m = {}; cap.frame.rows.clear(); // no catalog: this frame stays unavailable
+        } else if ((known && cat != 2) || !m.selected_weapon.client_entity) {
+            gem_fail("Gem Forge selected weapon is incoherent"); m.ok = 0;
+        }
     }
 }
 void hk_gem_grid(void* state, void* header, void* rect, void* actions, float lower, uint8_t weapons) {

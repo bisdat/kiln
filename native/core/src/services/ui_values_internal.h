@@ -85,7 +85,9 @@ struct Env {
     bool (*subscribe_frames)(void (*fn)(uint64_t frame, void* user), void* user) = nullptr;
     void (*log)(int level, const char* text) = nullptr;
     bool (*gemforge_abi)() = nullptr;  // sigdb's measured Win64 fingerprint
-    bool (*item_category)(uint32_t item, uint8_t* category) = nullptr;  // immutable Kiln item catalog
+    // Kiln's immutable item catalog: 1 known (category set), 0 not in it (a mod's item while its mod is not loaded,
+    // a placeholder), -1 no catalog.
+    int (*item_category)(uint32_t item, uint8_t* category) = nullptr;
     bool (*call_gemforge)(KilnUiGemForgeFn, const KilnUiGemForgeFrame*, const KilnUiGemForgeCandidate*, uint32_t,
                          void* user) = nullptr;
 };

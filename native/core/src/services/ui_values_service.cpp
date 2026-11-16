@@ -260,12 +260,14 @@ void wire() {
     e.item_category = [](uint32_t id, uint8_t* category) {
         const auto* items = static_cast<const KilnItemsApi*>(svc::find(KILN_ITEMS_SERVICE, 1));
         if (!items || items->header.size < offsetof(KilnItemsApi, item_info) + sizeof(void*) || !items->item_info)
-            return false;
+            return -1;
         KilnItemInfo info{};
         info.size = sizeof info;
-        if (items->item_info(id, &info) != KILN_OK) return false;
+        const KilnResult rc = items->item_info(id, &info);
+        if (rc == KILN_ERR_NOT_FOUND) return 0;
+        if (rc != KILN_OK) return -1;
         *category = info.category;
-        return true;
+        return 1;
     };
     e.subscribe_frames = &subscribe_frames;
     e.log = [](int level, const char* text) { kiln::log::write(level, "kiln", text); };
