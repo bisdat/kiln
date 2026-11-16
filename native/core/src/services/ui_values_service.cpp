@@ -258,7 +258,10 @@ void wire() {
     e.call_gemforge = &call_gemforge;
     e.gemforge_abi = &gemforge_contract;
     e.item_category = [](uint32_t id, uint8_t* category) {
-        const auto* items = static_cast<const KilnItemsApi*>(svc::find(KILN_ITEMS_SERVICE, 1));
+        // kiln.items is published by kiln-items.dll, not an in-core service: svc::find never sees it (the real client
+        // refused every Gem Forge frame that needed the catalog until this asked the published list).
+        const auto* items = static_cast<const KilnItemsApi*>(
+            api()->service(KilnStr{KILN_ITEMS_SERVICE, sizeof(KILN_ITEMS_SERVICE) - 1}, 1));
         if (!items || items->header.size < offsetof(KilnItemsApi, item_info) + sizeof(void*) || !items->item_info)
             return -1;
         KilnItemInfo info{};
