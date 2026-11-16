@@ -6,6 +6,10 @@
 //                  [--at <ms> --copy <src> <dst>]
 // --load-create: a fake loader of another engine (issue 23): loads a Shroudtopia mod DLL and calls its CreateModInstance
 // before the plugin starts; RESULT instances=<n> then says how often that module's CreateModInstance ran in all.
+// --native <dll>: a native mod that hooks before the plugin starts (inbox 26c, Auto Doors): loads it and calls its
+// st_native_start, which entry-hooks st_text_target; RESULT native_hook says what the entry holds then.
+// --original-code <mod id>: kiln-core's private kiln.internal.original-code table, with one compat rule (original-code)
+// that names shroudtopia:<mod id>; RESULT original_used says where the shim first answered with the file's bytes.
 // It serves a minimal KilnApi (log, paths, side, build info, kiln.profile from kiln/profile.json, a kiln.hooks v2 stand-in
 // that places raw_detour links with safetyhook, register_service / service), loads the plugin, runs kiln_plugin_main and on_ready, waits, then calls the test targets below and prints
 // RESULT lines that run.py checks together with kiln/logs/kiln.log and kiln/state/*.json.
@@ -25,6 +29,7 @@
 #include "services/kiln_profile.h"
 #include "../../flame/include/kiln_flame.h"
 #include "../compat.h"
+#include "../original_code_service.h"
 #include "safetyhook.hpp"
 
 // ---- test targets in the exe's .text (Greeneye's find only scans the exe) ----
@@ -64,6 +69,57 @@ extern "C" int gt_caller(int a, int b);
 static safetyhook::InlineHook g_prehook;
 static int prehook_target(int a, int b) { return g_prehook.call<int>(a, b) + 7; }
 extern "C" __declspec(dllexport) int gt_prehook_delta() { return g_prehook ? 7 : 0; }
+
+// ---- the original-code scenario (inbox 26c): Item Skill Descriptions compares 32 bytes at a game function's entry ----
+// st_text_target(a) traces 'O' and returns a + 0x100. Like the game's function it has unwind data (.pdata), so
+// RtlLookupFunctionEntry finds its entry; its first 5 bytes are whole instructions (push rbx; sub rsp, 32), which an E9
+// entry hook replaces exactly; its body is longer than the 32 bytes compared. st_text_expected: its first 32 bytes as
+// the exe starts, before any hook (what the real mod carries as constants). st_trace: the order the detours ran in.
+asm(R"(
+    .intel_syntax noprefix
+    .text
+    .globl st_text_target
+    .def st_text_target
+    .scl 2
+    .type 32
+    .endef
+    .p2align 4
+st_text_target:
+    .seh_proc st_text_target
+    push rbx
+    .seh_pushreg rbx
+    sub rsp, 32
+    .seh_stackalloc 32
+    .seh_endprologue
+    mov ebx, ecx
+    mov ecx, 0x4F
+    call st_trace
+    lea eax, [rbx + 0x100]
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    add rsp, 32
+    pop rbx
+    ret
+    .seh_endproc
+    .att_syntax
+)");
+extern "C" int st_text_target(int a);
+#pragma comment(linker, "/EXPORT:st_text_target")
+extern "C" __declspec(dllexport) uint8_t st_text_expected[32] = {};
+static std::mutex g_trace_mu;
+static std::string g_trace;
+extern "C" __declspec(dllexport) void st_trace(char c) {
+    std::lock_guard lock(g_trace_mu);
+    g_trace += c;
+}
 
 namespace {
 
@@ -164,6 +220,41 @@ KilnResult KILN_CALL f_subscribe_world_tick(KilnOwner, uint32_t, int32_t, KilnTi
 KilnResult KILN_CALL f_post_world(KilnOwner, uint32_t, KilnTaskFn, void*) { return KILN_OK; }
 KilnResult KILN_CALL f_subscribe_world(KilnOwner, KilnWorldEventFn, void*, KilnHandle* out) { if (out) *out = 1; return KILN_OK; }
 KilnResult KILN_CALL f_session(KilnSessionInfo*) { return KILN_ERR_UNAVAILABLE; }
+
+// ---- kiln.internal.original-code stand-in (kiln-core: compat.cpp, from compat-rules.json and the profile) ----
+std::string g_original_mod;  // --original-code: the one Shroudtopia mod id a rule names
+const std::string kOriginalRule = "test-original-code";
+KilnStr KILN_CALL f_original_rule(KilnStr mod) {
+    return !g_original_mod.empty() && sv(mod) == "shroudtopia:" + g_original_mod ? ks(kOriginalRule) : KilnStr{};
+}
+uint32_t exe_rva(const void* p) {
+    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(p) - reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr)));
+}
+void KILN_CALL f_original_used(uint32_t rva) {
+    char buf[96];
+    std::snprintf(buf, sizeof buf, "[host] RESULT original_used=0x%X at_target=%s", rva,
+                  rva == exe_rva(reinterpret_cast<const void*>(&st_text_target)) ? "yes" : "no");
+    line(buf);
+}
+const kiln::compat::OriginalCodeApi kOriginalCode{{sizeof(kiln::compat::OriginalCodeApi), 1}, &f_original_rule, &f_original_used};
+
+// What st_text_target's entry holds: "E9 -> outside the exe" for a native's entry hook.
+std::string entry_text() {
+    const auto* p = reinterpret_cast<const uint8_t*>(&st_text_target);
+    const auto* base = reinterpret_cast<const uint8_t*>(GetModuleHandleW(nullptr));
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + reinterpret_cast<const IMAGE_DOS_HEADER*>(base)->e_lfanew);
+    char buf[64];
+    if (p[0] != 0xE9) {
+        std::snprintf(buf, sizeof buf, "%02X", p[0]);
+        return buf;
+    }
+    int32_t d;
+    std::memcpy(&d, p + 1, 4);
+    const auto* to = p + 5 + d;
+    const bool outside = to < base || to >= base + nt->OptionalHeader.SizeOfImage;
+    std::snprintf(buf, sizeof buf, "E9 outside_image=%s", outside ? "yes" : "no");
+    return buf;
+}
 
 // ---- kiln.hooks v2 stand-in: raw_detour over safetyhook (the real registry has its own tests: native/core/tests) ----
 // Like the registry it accepts only targets inside the exe image (the others get KILN_ERR_INVALID_ARGUMENT), writes the
@@ -388,6 +479,8 @@ int wmain(int argc, wchar_t** argv) {
     std::wstring copy_src, copy_dst;
     HANDLE claim = nullptr;
     HMODULE created = nullptr;  // --load-create
+    bool st_scenario = false;   // --native / --original-code
+    std::memcpy(st_text_expected, reinterpret_cast<const void*>(&st_text_target), sizeof st_text_expected);
     for (int i = 3; i < argc; ++i) {
         if (!wcscmp(argv[i], L"--claim-greeneye")) {
             wchar_t name[96];
@@ -408,6 +501,15 @@ int wmain(int argc, wchar_t** argv) {
             using CreateFn = void* (*)();
             auto create = created ? reinterpret_cast<CreateFn>(GetProcAddress(created, "CreateModInstance")) : nullptr;
             line("[host] fake loader: " + u8(argv[i]) + (create && create() ? " loaded, instance created" : " FAILED"));
+        } else if (!wcscmp(argv[i], L"--native") && i + 1 < argc) {
+            HMODULE native = LoadLibraryW((g_game + L"\\" + argv[++i]).c_str());
+            auto start = native ? reinterpret_cast<bool (*)()>(GetProcAddress(native, "st_native_start")) : nullptr;
+            const bool started = start && start();
+            line(std::string("[host] RESULT native_hook=") + (started ? "ok" : "FAILED") + " entry=" + entry_text());
+            st_scenario = true;
+        } else if (!wcscmp(argv[i], L"--original-code") && i + 1 < argc) {
+            g_original_mod = u8(argv[++i]);
+            st_scenario = true;
         } else if (!wcscmp(argv[i], L"--free-at") && i + 1 < argc) {
             free_ms = _wtoi(argv[++i]);
         } else if (!wcscmp(argv[i], L"--load-at") && i + 2 < argc) {
@@ -431,6 +533,7 @@ int wmain(int argc, wchar_t** argv) {
     }
     g_services[KILN_PROFILE_SERVICE] = &kProfile;
     g_services[KILN_HOOKS_SERVICE] = &kHooks;
+    if (!g_original_mod.empty()) g_services[kiln::compat::kOriginalCodeService] = &kOriginalCode;
     line(std::string("[host] side ") + (g_side == KILN_SIDE_SERVER ? "server" : "client") + ", profile mode " +
          std::to_string(g_profile_mode));
     shared_checks();
@@ -481,6 +584,11 @@ int wmain(int argc, wchar_t** argv) {
     // ---- checks ----
     line("[host] RESULT gt_target=" + std::to_string(gt_target(2, 3) - 0x5A17C0DE));
     line("[host] RESULT gt_caller=" + std::to_string(gt_caller(2, 3)));
+    if (st_scenario) {
+        const int value = st_text_target(1);
+        std::lock_guard lock(g_trace_mu);
+        line("[host] RESULT st_text=" + std::to_string(value) + " trace=" + g_trace + " entry=" + entry_text());
+    }
     using FindFn = uint8_t* (*)(const char*);
     using ReadFn = void (*)(const void*, void*, size_t);
     if (auto find = reinterpret_cast<FindFn>(GetProcAddress(h, "kiln_greeneye_test_find"))) {

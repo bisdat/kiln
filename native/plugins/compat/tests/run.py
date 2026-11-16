@@ -950,6 +950,40 @@ def shroudtopia_copy_preloaded_by_other_loader():
     return g
 
 
+def shroudtopia_original_code():
+    """Inbox 26c: a compat rule (original-code) names one Shroudtopia mod, and kiln-shroudtopia points that DLL's memcmp
+    import at its shim before the first Load. A native hooked st_text_target's entry first (an E9 to a relay, as Auto
+    Doors' MinHook does). The named mod, shaped like Item Skill Descriptions (32 bytes at the entry through vcruntime140's
+    memcmp, then its own inline hook), sees the original bytes and hooks on top: the call runs the mod's detour, then the
+    native's, then the function. A mod the rule does not name keeps the CRT's memcmp, sees the live bytes and does not
+    hook. An ordinary memcmp of the mod's own buffers answers as before."""
+    g = Game("shroudtopia-original-code")
+    g.put("kiln/config/shroudtopia/shroudtopia.json",
+          {"active": True, "bootDelay": 0, "updateDelay": 50,
+           "mods": {"Kiln Original Code Mod": {"active": True}, "Kiln Live Code Mod": {"active": True}}})
+    for mod_id, dll in (("istext", "istext_named.dll"), ("istext-other", "istext_other.dll")):
+        g.put(f"library/{mod_id}/mod.json", {"id": mod_id})
+        g.dll(dll, f"library/{mod_id}/{mod_id}.dll")
+    g.dll("st_native.dll", "st_native.dll")
+    g.profile({"shroudtopia": [{"id": m, "path": winpath(g.p("library", m))} for m in ("istext", "istext-other")]})
+    g.run(g.plugin("kiln-shroudtopia.dll"), 1500, "--native", "st_native.dll", "--original-code", "istext")
+    g.has("[host] RESULT native_hook=ok entry=E9 outside_image=yes")
+    g.has("shroudtopia: istext sees the game's original code when it checks a hooked function (compat rule test-original-code)")
+    g.lacks("shroudtopia: istext-other sees")
+    named = "[shroudtopia:Kiln Original Code Mod] original-code: "
+    g.has(named + "memcmp import -> kiln-shroudtopia.dll; entry matches; plain memcmp below")
+    g.has(named + "hooked st_text_target")
+    g.has("[host] RESULT original_used=")
+    g.expect(g.result("original_used") is not None and "at_target=yes" in g.log, "the shim answered at st_text_target's rva")
+    other = [l for l in g.log.splitlines() if "[shroudtopia:Kiln Live Code Mod] original-code: memcmp import -> " in l]
+    g.expect(len(other) == 1 and "kiln-shroudtopia" not in other[0] and "entry differs; plain memcmp below" in other[0],
+             f"the unnamed mod keeps the CRT's memcmp and sees the live bytes: {other}")
+    g.has("[shroudtopia:Kiln Live Code Mod] original-code: the entry was changed by another mod; not hooking it")
+    g.expect(g.result("st_text") == "257", f"st_text_target still returns a + 0x100 through both detours ({g.result('st_text')})")
+    g.has(" trace=MNO entry=E9 outside_image=yes")
+    return g
+
+
 # ---------------------------------------------------------------------------------------------------- own loaders ---
 # The launcher copies a profile's mods into the own loader's folder (<folder>/<library id>/) with a .kiln-library.json
 # marker. While the adapter steps aside, each profile entry says whether it runs there (own-loader) or not at all
@@ -1232,7 +1266,7 @@ SCENARIOS = {f.__name__.replace("_", "-"): f for f in [
     greeneye_manifest_bounds, shroudtopia_loader_named_mod, greeneye_default_dll_profile,
     greeneye_aside_profile, greeneye_aside_player_copy, flame_aside_profile, shroudtopia_aside_profile, emf_aside_profile, copy_dedupe,
     wine_builtin_not_a_loader, dropins_rule, kiln_files_not_a_loader, shroudtopia_preloaded_by_other_loader,
-    shroudtopia_copy_preloaded_by_other_loader]}
+    shroudtopia_copy_preloaded_by_other_loader, shroudtopia_original_code]}
 
 
 def main():
