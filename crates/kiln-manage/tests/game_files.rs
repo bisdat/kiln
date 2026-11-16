@@ -1,15 +1,18 @@
-//! Packages whose files must be in the game folder (docs/kiln/engines.md "Files in the game folder"), from two player
-//! reports (dev28 inbox x-01, tasks 22 and 25):
+//! Packages whose files must be in the game folder (docs/kiln/engines.md "Files in the game folder"), from three player
+//! reports (dev28 inbox x-01, tasks 22, 25 and 26):
 //!
 //! - a plugin loader under a proxy name the game loads itself (`powrprof.dll` + `plugins\AutolootCoop.dll` + its ini,
 //!   Nexus 266): Kiln places the package in the game folder at activation and removes what it placed when the mod is
 //!   off, and leaves a game-folder `powrprof.dll` it did not place alone;
 //! - Ultimate ASI Loader with `.asi` plugins (Smart Workshop, Nexus 361): UAL goes next to the game as
 //!   `xinput9_1_0.dll` (or Kiln's chained one is reused), chained from `kiln/chain.ini`, and the plugins where UAL looks;
+//! - shroudlink's singleplayer package (Nexus 278): its client addon loads `shroudlink_core.dll` from the game folder,
+//!   so a core left there makes kiln-shroudlink step aside; the launcher names that file.
 //!
 //! The mods' own files are not available: the packages here are made of test DLLs with the file layout the reports show.
 #![cfg(unix)]
 
+use kiln_manage::engine_mods;
 use kiln_manage::game::{GameInstall, GameKind, PathMode, Platform};
 use kiln_manage::library::{self, LibraryRef};
 use kiln_manage::manifest::ModKind;
@@ -265,4 +268,46 @@ fn a_lone_asi_file_and_a_lone_ultimate_asi_loader_are_library_mods() {
     import_one(&dirs, &t.0.join("drop/SmartWorkshop.asi"), ModKind::Native);
     // UAL's own download is a dinput8.dll: never "copy it into the Enshrouded folder" (it would replace Kiln's proxy)
     import_one(&dirs, &t.0.join("ual/dinput8.dll"), ModKind::Native);
+}
+
+// ---- 26: shroudlink's singleplayer package ----
+
+fn shroudlink_core() -> Vec<u8> {
+    build_test_dll(&["CrashHandlerFactory", "DirectInput8Create"], b"shroudlink server 0.8.0 chestsort_server_")
+}
+
+#[test]
+fn a_shroudlink_core_in_the_game_folder_is_named_when_the_addon_comes_from_the_library() {
+    let t = tmp("sl");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let install = game(&t.0);
+    let g = &install.path;
+    // an older hand installation of the singleplayer package left its core next to the game (Spirimtin's report)
+    put(g, "shroudlink_core.dll", &shroudlink_core());
+    let pkg = t.0.join("Singleplayer - addon core and mods 278 0.8.1 2026-11-15T20-27Z QVky0pgrn");
+    put(&pkg, "dinput8.dll", &build_test_dll(&["DirectInput8Create", "shroudlink_shutdown"], b"shroudlink client addon"));
+    put(&pkg, "shroudlink_core.dll", &shroudlink_core());
+    put(&pkg, "shroudlink_mods/assistants.dll", &build_test_dll(&["shroudlink_mod_v2"], b""));
+    let r = library::import(&dirs, &[pkg], &mut NoProgress).unwrap();
+    let addon = r.imported.iter().find(|m| m.kind == ModKind::Native).cloned().expect("the addon is a native mod");
+    let assistants = r.imported.iter().find(|m| m.kind == ModKind::Shroudlink).cloned().expect("assistants");
+    let mut p = profile::create(&dirs, "sp", None).unwrap();
+    p.mods.native = vec![pm(&addon, true)];
+    p.mods.shroudlink = vec![pm(&assistants, true)];
+    let p = profile::save(&dirs, &p).unwrap();
+    let a = profile::activate(&dirs, &p.id, &install).unwrap();
+    let note = a.own_loaders.iter().find(|n| n.loader.kind == ModKind::Shroudlink)
+        .unwrap_or_else(|| panic!("the addon starts the core in the game folder: {:#?}", a.own_loaders));
+    assert_eq!(note.loader.file, "shroudlink_core.dll");
+    assert_eq!(note.not_copied, ["assistants"]);
+    assert!(note.text.contains("Remove shroudlink_core.dll") && note.text.contains("MODS tab"), "{}", note.text);
+    assert!(!note.text.contains("Wine"), "the addon loads it by path, no DLL override is involved: {}", note.text);
+    let st = engine_mods::status(g);
+    let row = st.iter().find(|s| s.kind == ModKind::Shroudlink).unwrap();
+    assert_eq!(row.own_loader.as_ref().map(|l| l.loader.file.as_str()), Some("shroudlink_core.dll"));
+
+    // without that file the addon only draws the MODS tab: kiln-shroudlink runs the mods, nothing to say
+    std::fs::remove_file(g.join("shroudlink_core.dll")).unwrap();
+    let a = profile::activate(&dirs, &p.id, &install).unwrap();
+    assert!(a.own_loaders.iter().all(|n| n.loader.kind != ModKind::Shroudlink), "{:#?}", a.own_loaders);
 }

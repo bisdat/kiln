@@ -1328,6 +1328,16 @@ pub fn build(input: &ReportInput) -> Report {
                     plural(off.len(), "EML mod of the profile", "EML mods of the profile"), if off.len() == 1 { "this one is" } else { "these are" },
                     off.join(", "), e.plugin));
             }
+        } else if stood_aside(st) && e.kind == ModKind::Shroudlink
+            && jstr(st.get("steppedAsideReason")).is_some_and(|r| r.to_ascii_lowercase().contains(crate::engines::SHROUDLINK_CORE))
+        {
+            // shroudlink's client addon loaded the core a hand installation left next to the game (its singleplayer mode,
+            // a player report of 16 Nov 2026): that file goes, not the addon, which draws the MODS tab
+            cx.find("own-loader", Level::Problem, format!(
+                "{} stood aside at the last start: shroudlink's client addon loaded shroudlink's own core from the game folder ({}, its \
+                 singleplayer mode). That core runs only the mods in shroudlink_mods, so the shroudlink mods in the profile did not load. \
+                 Remove {} from the game folder: Kiln then runs them, and the addon keeps its MODS tab.",
+                e.plugin, crate::engines::SHROUDLINK_CORE, crate::engines::SHROUDLINK_CORE));
         } else if stood_aside(st) {
             let n = kind_name(e.kind);
             cx.find("own-loader", Level::Problem, format!(

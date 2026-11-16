@@ -526,6 +526,14 @@ Shroudlink packages run in Kiln's `kiln-shroudlink` server core. The in-game MOD
 Shroudlink's separate client addon. Import the addon from the Shroudlink download into the Library as a native mod and
 switch it on in the client profile.
 
+The addon loads Shroudlink's own core when `shroudlink_core.dll` is next to the game (its singleplayer mode; the
+Library leaves the core of the singleplayer package out, kiln-shroudlink is that core). A core left there by an earlier
+hand installation then runs, kiln-shroudlink steps aside, and that core reads only `shroudlink_mods\*.dll`: the
+profile's Shroudlink mods do not load ("no mods on this server"). Since dev.30 the Engines view and the activation name
+that file ("Remove shroudlink_core.dll from the game folder: Kiln then runs them, and the addon keeps its MODS tab"),
+also when the addon comes from the Library through `chain.ini` `[profile]`; kiln-shroudlink's own hint in `kiln.log`
+and `kiln/state/shroudlink.json` names the core file it found, and so does a support report.
+
 On desktop and Steam Deck, the mods list explains when a client profile enables Shroudlink mods without loading the
 addon: the mods still run, but the tab needs the addon. If an addon is in the Library, **Switch addon on** enables it
 in that profile. Otherwise the notice names the Shroudlink download. Support reports include an informational finding

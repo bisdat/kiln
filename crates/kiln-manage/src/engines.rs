@@ -376,6 +376,21 @@ pub fn is_shroudlink_addon(file: &str, bytes: &[u8], exports: &[String]) -> bool
         && names("shroudlink") && !names("steam_api64_o.dll")
 }
 
+/// The file name shroudlink's client addon loads its core from, in the game folder (its singleplayer mode).
+pub const SHROUDLINK_CORE: &str = "shroudlink_core.dll";
+
+/// shroudlink's own server core as the client addon loads it (`shroudlink_core.dll` next to the game), by the rule
+/// kiln-shroudlink steps aside by (native/plugins/shroudlink/upstream/server/src/kiln.rs `is_core_image`): that file
+/// name, or the core's export pair `CrashHandlerFactory` + `DirectInput8Create`, together with the core's own texts.
+pub fn shroudlink_core_at(path: &Path) -> bool {
+    let Ok(bytes) = std::fs::read(path) else { return false };
+    let Ok(pe) = crate::pe::parse(&bytes) else { return false };
+    let has = |e: &str| pe.exports.iter().any(|x| x == e);
+    let named = path.file_name().is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(SHROUDLINK_CORE));
+    crate::pe::is_pe64_dll(&bytes) && (named || (has("CrashHandlerFactory") && has("DirectInput8Create")))
+        && [b"shroudlink server ".as_slice(), b"chestsort_server_".as_slice()].iter().all(|s| crate::pe::contains(&bytes, s).is_some())
+}
+
 /// [`is_shroudlink_addon`] for a file on disk (false when it cannot be read).
 pub fn shroudlink_addon_at(path: &Path) -> bool {
     let Ok(bytes) = std::fs::read(path) else { return false };
