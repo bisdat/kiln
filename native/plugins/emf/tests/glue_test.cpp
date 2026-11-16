@@ -36,7 +36,17 @@ static Mod *active_mod = &mod;
 Mod *caller_mod(const void *) { return active_mod; }
 Mod *mod_of_address(const void *) { return active_mod; }
 void logf(int, const char *, ...) {}
-void mod_logf(const Mod *, int, const char *, ...) {}
+std::vector<std::string> mod_lines;  // every mod_logf line, for the window log checks
+void mod_logf(const Mod *, int, const char *fmt, ...) {
+    char buf[4096];
+    va_list ap;
+    va_start(ap, fmt);
+    std::vsnprintf(buf, sizeof buf, fmt, ap);
+    va_end(ap);
+    mod_lines.emplace_back(buf);
+    if (std::getenv("KEMF_TEST_VERBOSE"))
+        std::printf("  log %s\n", buf);
+}
 // A fake portrait worker: `drawing_key` is being drawn until the test finishes it and runs the registered callback.
 std::string drawing_key;
 void (*when_drawn)() = nullptr;
@@ -266,6 +276,115 @@ static void test_window_sizing(KilnUiApi &ui) {
     CHECK(table.window_close(d.id));
     windows_after_step(reinterpret_cast<EmfWorld *>(worlds[0]), EMF_WORLD_SERVER);
     closed = saved_closed; close_frame = saved_close;
+}
+// kiln.log lines about mod windows (support reports): the open, real changes only (bounded), each click delivered and
+// the close.
+static std::string row_hit;  // the row label the fake selectable reports clicked
+static size_t lines_with(const std::string &needle, size_t from = 0) {
+    size_t n = 0;
+    for (size_t i = from; i < mod_lines.size(); ++i)
+        n += mod_lines[i].find(needle) != std::string::npos;
+    return n;
+}
+static void test_window_log(KilnUiApi &ui) {
+    ui.selectable = [](KilnStr s, bool) { return !row_hit.empty() && std::string(s.ptr, s.len) == row_hit; };
+    ui.separator_text = [](KilnStr) {};
+    auto *server = reinterpret_cast<EmfWorld *>(worlds[0]);
+    const bool saved_close = close_frame, saved_button = button_clicked;
+    close_frame = false;
+    button_clicked = false;
+    const int saved_clicks = clicks, saved_closed = closed;
+    const size_t start = mod_lines.size();
+    EmfUiWidget w[3]{};
+    w[0].type = EMF_UI_HEADING;
+    w[0].text = "Survivors";
+    w[1].type = EMF_UI_ROW;
+    w[1].key = "pick.7";
+    w[1].text = "Hunter (4 m)";
+    w[2].type = EMF_UI_BUTTON;
+    w[2].key = "send";
+    w[2].text = "Send";
+    auto d = window_def();
+    d.title = "Expeditions";
+    d.widgets = w;
+    d.count = 3;
+    CHECK(table.window_open(&d));
+    CHECK(mod_lines.size() == start + 1);
+    CHECK(lines_with("window test.win opened: \"Expeditions\", 3 widgets, events on the server world; clickable: "
+                     "pick.7 \"Hunter (4 m)\", send \"Send\"; text: \"Survivors\"", start) == 1);
+    // the same content again (a mod refreshing every tick): no line
+    for (int i = 0; i < 50; ++i)
+        CHECK(table.window_update(&d));
+    KilnUiFrame fr{};
+    fr.dpi_scale = 1;
+    for (int i = 0; i < 5; ++i)
+        frame_fn(&fr, nullptr);
+    CHECK(mod_lines.size() == start + 1);
+    // a real change: one line
+    w[1].text = "Hunter (2 m)";
+    CHECK(table.window_update(&d));
+    CHECK(table.window_update(&d));
+    CHECK(mod_lines.size() == start + 2 && lines_with("window test.win changed: ", start) == 1 &&
+          lines_with("pick.7 \"Hunter (2 m)\"", start) == 1);
+    // a click on the row and on the button: one line each when the mod gets it (after the world's step)
+    row_hit = "Hunter (2 m)";
+    frame_fn(&fr, nullptr);
+    row_hit.clear();
+    button_clicked = true;
+    frame_fn(&fr, nullptr);
+    button_clicked = false;
+    CHECK(lines_with(": click on", start) == 0);  // not delivered yet
+    windows_after_step(server, EMF_WORLD_SERVER);
+    CHECK(clicks == saved_clicks + 2);
+    CHECK(lines_with("window test.win: click on pick.7 \"Hunter (2 m)\" delivered", start) == 1);
+    CHECK(lines_with("window test.win: click on send \"Send\" delivered", start) == 1);
+    // a mod changing its window every tick: bounded, then one line saying so
+    const size_t before = mod_lines.size();
+    for (int i = 0; i < 200; ++i) {
+        const std::string t = "Hunter (" + std::to_string(i) + " m)";
+        w[1].text = t.c_str();
+        CHECK(table.window_update(&d));
+    }
+    const size_t spent = mod_lines.size() - before;
+    CHECK(spent >= 10 && spent <= 40);
+    CHECK(lines_with("further changes of this window are not logged", before) == 1);
+    // closed by the player (its X): one line
+    close_frame = true;
+    frame_fn(&fr, nullptr);
+    windows_after_step(server, EMF_WORLD_SERVER);
+    CHECK(closed == saved_closed + 1);
+    CHECK(lines_with("window test.win closed by the player", start) == 1);
+    // reopened: the change budget starts again
+    close_frame = false;
+    w[1].text = "Hunter (1 m)";
+    CHECK(table.window_open(&d));
+    CHECK(lines_with("window test.win opened: ", start) == 2);
+    w[1].text = "Hunter (0 m)";
+    CHECK(table.window_update(&d));
+    CHECK(mod_lines.back().find("window test.win changed: ") == 0);
+    CHECK(table.window_close(d.id));
+    windows_after_step(server, EMF_WORLD_SERVER);
+    CHECK(lines_with("window test.win closed by the mod", start) == 1);
+    // a mod opening and closing every tick: bounded per mod, then one line saying so
+    const size_t cycle = mod_lines.size();
+    for (int i = 0; i < 2000; ++i) {
+        CHECK(table.window_open(&d));
+        CHECK(table.window_close(d.id));
+        windows_after_step(server, EMF_WORLD_SERVER);
+    }
+    CHECK(mod_lines.size() - cycle <= 400);
+    CHECK(lines_with("further window lines of this mod are not logged", cycle) == 1);
+    windows_world_started(EMF_WORLD_SERVER);  // the next session logs again
+    CHECK(table.window_open(&d));
+    CHECK(mod_lines.back().find("window test.win opened: ") == 0);
+    CHECK(table.window_close(d.id));
+    windows_after_step(server, EMF_WORLD_SERVER);
+    clicks = saved_clicks;
+    closed = saved_closed;
+    close_frame = saved_close;
+    button_clicked = saved_button;
+    ui.selectable = nullptr;
+    ui.separator_text = nullptr;
 }
 static std::vector<KilnProgressionRequest> submitted;
 static bool curve_available = true;
@@ -1126,6 +1245,7 @@ int main(int argc, char **argv) {
     test_components(world);
     test_level(prog);
     test_window_sizing(ui);
+    test_window_log(ui);
     auto d = window_def();
     CHECK(table.window_open(&d));
     active_mod = &other_mod;

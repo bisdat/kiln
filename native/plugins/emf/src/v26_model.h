@@ -187,6 +187,17 @@ bool widget_takes_clicks(uint32_t type);
 bool valid_window_id(std::string_view id);
 std::vector<std::string> describe_window(const WindowRequest& w);
 
+// kiln.log lines about mod windows, for support reports (api_windows.cpp logs the open, real changes and clicks).
+constexpr size_t kLogClickables = 16;  // clickable widgets named in one line
+constexpr size_t kLogTexts = 6;        // text widgets named in one line
+constexpr size_t kLogTextLen = 64;     // bytes of one widget's text
+constexpr size_t kLogLineLen = 1600;   // bytes of the whole summary
+// `s` on one line (control characters as spaces, trimmed), cut to `max` bytes (never inside a UTF-8 sequence) + "...".
+std::string log_text(std::string_view s, size_t max);
+// One bounded line: the title, the widget count, the world, the clickable widgets (key "text" (off/selected)) and the
+// other texts. Equal for equal content, so a caller can log real changes only.
+std::string window_log_summary(const WindowRequest& w);
+
 // ---------------------------------------------------------------------------------------------- v10 wheel ------
 // The radial wheel (wheel_open). The drawing and the pick / cancel rules are kiln.ui's (native/services/ui/wheel_math.h);
 // this is EMF's definition as kiln-emf copies and checks it.
