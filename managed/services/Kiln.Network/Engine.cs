@@ -91,6 +91,7 @@ internal static class NetEngine
             Log(LogLevel.Warn, $"no service tick: {e.Message}");
         }
         TryHookClientTick();
+        TryHookUiFrame();  // the HELLO goes out while the client world does not step yet (held at the join)
         NetAdmission.Start();  // the gate holds until the first server tick knows the mod list (VanillaGate.GateMode)
         var s = NetNative.ReadStatus();
         Log(LogLevel.Info, $"Kiln.Network {Wire.Protocol} on kiln.net: roles {(s?.Roles ?? 0)}, channel {s?.Channel}, max frame {s?.MaxFrame}, " +
@@ -820,6 +821,42 @@ internal static class NetEngine
     // Client role
 
     private static void ClientTick(in TickInfo tick) => ClientTimers();
+
+    /// <summary>The game's UI frame on a client (kiln.ui.tick, the game's main thread, as the client world's step and the
+    /// frame delivery): the handshake timers while the link is still connecting. A client world does not step while it
+    /// loads, nor while a server in "hold all" holds it, and that hold waits for this HELLO (0.2.0-dev.29 sent it from the
+    /// world's step only: every join of a Kiln-run world timed out). Only once the mods are loaded: a HELLO lists them.</summary>
+    internal static void ClientUiFrame()
+    {
+        if (_link is not { State: NetPeerState.Connecting } || !Lifecycle.ModsLoaded) return;
+        var prev = ModContext.CurrentMod;
+        ModContext.CurrentMod = null;  // Kiln's own work, not a mod's
+        try
+        {
+            ClientTimers();
+        }
+        finally
+        {
+            ModContext.CurrentMod = prev;
+        }
+    }
+
+    private static bool _uiFrameHooked;
+
+    private static void TryHookUiFrame()
+    {
+        if (_uiFrameHooked) return;
+        try
+        {
+            if (!Kiln.Client.Available || !Kiln.Client.IsClient) return;
+            _uiFrameHooked = NetNative.SubscribeUiFrame();
+            if (!_uiFrameHooked) Log(LogLevel.Info, "no kiln.ui.tick: the Kiln handshake waits for the client world's step");
+        }
+        catch (Exception)
+        {
+            // Kiln.Client absent (old host): the client role runs its timers on frames only
+        }
+    }
 
     private static void ClientTimers()
     {
